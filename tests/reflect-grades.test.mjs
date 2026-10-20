@@ -105,7 +105,7 @@ test('no grades.jsonl: an empty block and the flag, never an error; a torn line 
   const torn = grades(h)
   assert.ok(torn.flags.includes('1 line(s) of grades.jsonl did not parse: skipped'), JSON.stringify(torn.flags))
   assert.deepEqual([torn.grades.log.lines, torn.grades.log.torn, torn.grades.log.tasks], [1, 1, 1])
-  assert.equal(one(torn, 'a').outcome, 'pending')
+  assert.deepEqual([torn.grades.pending.total, torn.grades.episodes], [1, []], 'a pending episode is a count alone')
 })
 
 // ---- outcomes --------------------------------------------------------------------------------------------------------
@@ -126,6 +126,7 @@ test('Ready then merged with no act is hands-off; an act before the grade does n
   const out = grades(h)
   assert.deepEqual(['a', 'b', 'c'].map((s) => [one(out, s).outcome, one(out, s).dispatchedBy, one(out, s).end.kind, one(out, s).end.by]),
     [['hands-off', 'record', 'landed', 'record'], ['hands-off', 'record', 'landed', 'record'], ['bounced', 'record', 'landed', 'record']])
+  assert.deepEqual(one(out, 'c').rollouts, ['r1'], 'rollouts: the record whose lines fall in the span')
   assert.deepEqual(one(out, 'b').acts, [], 'the answer before the grade is not the episode\'s')
   assert.deepEqual(one(out, 'c').acts.map((a) => [a.kind, a.counted]), [['answer', true]])
   const ready = out.grades.window.byGrade.Ready
@@ -161,8 +162,9 @@ test('regraded after a dispatch with no act is regraded, in the rate; never disp
   note(h, 'e')
   note(h, 'f')
   const out = grades(h)
-  assert.deepEqual(eps(out, 'e').map((e) => e.outcome), ['regraded', 'pending'])
-  assert.deepEqual(eps(out, 'f').map((e) => [e.outcome, e.dispatchedBy]), [['undispatched', null], ['pending', null]])
+  // episodes[] lists the rated ones alone: undispatched and pending are counts (every pass regrades every open task).
+  assert.deepEqual(eps(out, 'e').map((e) => [e.outcome, e.rollouts]), [['regraded', ['r4']]])
+  assert.deepEqual(eps(out, 'f'), [])
   const ready = out.grades.window.byGrade.Ready
   assert.deepEqual([ready.regraded, ready.undispatched, ready.handsOff, ready.rate], [1, 1, 0, 0])
   assert.deepEqual(out.grades.pending, { total: 2, byGrade: { Ready: 2, 'One call': 0, Grill: 0, Orient: 0 } })
@@ -233,9 +235,9 @@ test('done with no record line: by hand when the link is unchanged, hands-off by
   note(h, 'bh', { status: 'done', rollout: 'old-rollout', completed: '2026-09-05' })
   note(h, 'sr', { status: 'done', rollout: 'Serial-Rollout-2026-09-04', completed: '2026-09-05' })
   const out = grades(h)
-  assert.deepEqual([one(out, 'bh').outcome, one(out, 'bh').dispatchedBy], ['by hand', null])
-  assert.deepEqual([one(out, 'sr').outcome, one(out, 'sr').dispatchedBy, one(out, 'sr').endLink],
-    ['hands-off', 'link', 'serial-rollout-2026-09-04'])
+  assert.deepEqual(eps(out, 'bh'), [], 'by hand is a count alone')
+  assert.deepEqual([one(out, 'sr').outcome, one(out, 'sr').dispatchedBy, one(out, 'sr').endLink, one(out, 'sr').rollouts],
+    ['hands-off', 'link', 'serial-rollout-2026-09-04', ['serial-rollout-2026-09-04']])
   const ready = out.grades.window.byGrade.Ready
   assert.deepEqual([ready.byHand, ready.handsOff, ready.rate], [1, 1, 1])
 })
@@ -257,14 +259,48 @@ test('window against all: an instant in or out of the window, and a date-only co
   assert.equal(out.grades.all.byGrade.Ready.episodes, 4)
 })
 
+test('a close after until is still open: an instant after it, or a date-only completed: or merged: after until\'s Melbourne date', (t) => {
+  const h = setup(t)
+  emitAll(h, ['dc', 'dm', 'di', 'du'].map((s) => grade(h, s, W(3, '00:00'), { linked: 'a' })))
+  note(h, 'dc', { status: 'done', rollout: 'b', completed: '2026-09-11' }) // the day after until's date (2026-09-10)
+  note(h, 'dm', { status: 'done', rollout: 'b', merged: '2026-09-11' })
+  note(h, 'di', { status: 'done', rollout: 'b', merged: '2026-09-10T00:30+10:00' }) // 30 minutes after until
+  note(h, 'du', { status: 'dropped', rollout: 'b', completed: '2026-09-10' }) // until's own date: closed, the next window's
+  const out = grades(h)
+  assert.deepEqual(out.grades.pending, { total: 3, byGrade: { Ready: 3, 'One call': 0, Grill: 0, Orient: 0 } })
+  assert.deepEqual(out.grades.episodes, [], 'none closed in the window')
+  const all = out.grades.all.byGrade.Ready
+  assert.deepEqual([all.episodes, all.handsOff, all.dropped], [1, 0, 1], 'only the close on until\'s own date counts, in all')
+  // The next reading, whose window holds those dates, reads them closed.
+  const next = grades(h, { since: UNTIL, until: '2026-09-17T00:00+10:00' })
+  assert.deepEqual(next.grades.episodes.map((e) => [e.task, e.outcome, e.end.date]).sort(),
+    [['dc', 'hands-off', '2026-09-11'], ['di', 'hands-off', null], ['dm', 'hands-off', '2026-09-11'], ['du', 'dropped', '2026-09-10']])
+  assert.equal(next.grades.pending.total, 0)
+})
+
+test('the regrade boundary is half-open: a record line at the next grade\'s ts is the next episode\'s', (t) => {
+  const h = setup(t)
+  emitAll(h, [
+    grade(h, 'hb', W(3, '00:00')), ...run('r12', 'hb', W(3, '01:00'), W(3, '02:00')),
+    line('r12')(W(4, '00:00'), 'answer-recorded', 'hb', { answerKind: 'decision' }),
+    grade(h, 'hb', W(4, '00:00'), { grade: 'One call', decisions: 1 }),
+    ...run('r13', 'hb', W(4, '01:00'), W(4, '02:00'), W(4, '03:00')),
+  ].sort((x, y) => Date.parse(x[0]) - Date.parse(y[0])))
+  note(h, 'hb', { status: 'done' })
+  const [first, second] = eps(grades(h), 'hb')
+  assert.deepEqual([first.grade, first.outcome, first.acts, first.end.at, first.rollouts],
+    ['Ready', 'regraded', [], '2026-09-04T00:00:00.000Z', ['r12']])
+  assert.deepEqual([second.grade, second.outcome, second.acts.map((a) => [a.kind, a.at]), second.rollouts],
+    ['One call', 'bounced', [['answer', '2026-09-04T00:00:00.000Z']], ['r12', 'r13']])
+})
+
 test('open is pending, outside the rate; a missing note is unknown, in all only and flagged; a dateless close is flagged', (t) => {
   const h = setup(t)
   emitAll(h, [grade(h, 'op', W(3, '00:00')), grade(h, 'gone', W(3, '00:00')), grade(h, 'nd', W(3, '00:00'), { linked: 'x' })])
   note(h, 'op', { status: 'in_progress' })
   note(h, 'nd', { status: 'done', rollout: 'y' })
   const out = grades(h)
-  assert.equal(one(out, 'op').outcome, 'pending')
-  assert.equal(eps(out, 'gone').length, 0, 'an unknown episode is not the window\'s')
+  assert.deepEqual(out.grades.episodes, [], 'pending, unknown and a dateless close are no episode of the window')
   assert.ok(out.flags.includes('[[gone]]: no task note: its latest grade (Ready) reads unknown'), JSON.stringify(out.flags))
   assert.ok(out.flags.some((f) => /^\[\[nd\]\] \(Ready, g-[^)]+\): closed landed with no merged: or completed: date: counted in all only$/.test(f)),
     JSON.stringify(out.flags))

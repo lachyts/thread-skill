@@ -719,9 +719,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   reading joins each grade to what followed until the task's next grade or
   its close, and reports each grade's hands-off share (of the work it sent
   that landed hands-off, bounced back to Lachy, was regraded or dropped;
-  work done by hand or never dispatched is set aside). A miss is traced to
-  the grading rules and never tuned as a knob. _Avoid_: grade history,
-  calibration log.
+  work done by hand or never dispatched is reported beside the rate). A
+  miss is traced to the grading rules and never tuned as a knob. _Avoid_:
+  grade history, calibration log.
 - **Quality** — the other headline: how few Escapes a rollout's landed work
   produces. _Avoid_: correctness, polish.
 - **Escape** — landed work that later needs a fix it should not have needed:

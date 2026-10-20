@@ -27,8 +27,8 @@ same inputs. No subprocess, no network, no bytecode (sys.dont_write_bytecode is 
 when done; 1 when `log` cannot write a line (run_record's warning above it; orient-all § 8 reports it as a caveat); 2
 on a usage error or a refusal (one `estate-dispatch:` stderr line, nothing written): an unknown verb or flag, a scan,
 rank or plan that is not JSON or whose `schema` is not 1, a negative budget, a bad --status or --wrote, an existing
-slice file, every record refusal and a grade line run_record refuses; 3 when the vault, PyYAML or a sibling script is
-missing.
+slice file, every record refusal and a grade line whose field run_record refuses (a task whose name is no slug is
+skipped, never refused); 3 when the vault, PyYAML or a sibling script is missing.
 
 What it reuses. Loaded by path inside main(), so importing this file runs nothing (the contract tests read its
 constants that way): estate-rank.py (ER: Ranker's index, the gradeable rule; slug_key; DECISION_MINUTES and
@@ -146,18 +146,22 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]...: the sessions to start,
 
 log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md **Grade log**), orient-all
   § 2 step 7, never on a dry run. One run_record `grade` line per rank tasks[] entry, Orient included, in rank order:
-  task its slug, project its home, grade, agentGrade, shape and size; decisions the count of its decisions[] and low
-  those whose confidence is low; held true when its blockedBy[] is non-empty; gates its gates[]; raised the `why` of
-  each raised[] step, when there is one; rank when it is not null; linked the scan row's `rollout`, through run_record's
-  normalise_slug, when it is a slug and not a reserved name. The pass shares one minted id, g-<UTC
-  YYYYMMDDTHHMMSSZ>-<6 hex>, and one ts, and its digest is the first 12 hex of sha1 over the rank file's realpath, the
-  rank's `today` and the sorted (slug, grade, agentGrade, shape, size) tuples: orient-all's $S is a fresh mktemp per
-  pass, so two passes never share a digest, and a rerun of one pass keeps it. Every line passes run_record's check
-  before any is written. A (digest, task) already in grades.jsonl is skipped: with every task there it prints `exists
-  <pass> (<n> grade(s))`; with some, it writes the rest under that pass's id and ts, printing `completed <pass>: <k>
-  more`, so a pass whose write stopped part-way is completed by a rerun; else `logged <n> grade(s), pass <id>`.
-  --dry-run prints each line (`would log grade <task>: <fields>`) and that outcome after `dry run, nothing written: `,
-  and writes nothing. A torn grades.jsonl line is skipped, and a log that cannot be read counts as empty.
+  task its slug (run_record's normalise_slug), project its home, grade, agentGrade, shape and size; decisions the
+  count of its decisions[] and low those whose confidence is low; held true when its blockedBy[] is non-empty; gates
+  its gates[]; raised the `why` of each raised[] step, when there is one; rank when it is not null; linked the scan
+  row's `rollout`, through run_record's normalise_slug, when it is a slug and not a reserved name. The pass shares one
+  minted id, g-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>, and one ts, and its digest is the first 12 hex of sha1 over the rank
+  file's realpath, the rank's `today` and the sorted (slug, grade, agentGrade, shape, size) tuples: orient-all's $S is
+  a fresh mktemp per pass, so two passes never share a digest, and a rerun of one pass keeps it. A task whose slug
+  normalise_slug refuses (estate-scan's slug is the raw file stem, so a vault note named with spaces or capitals) is
+  skipped: one `estate-dispatch: skipped <slug>: <why>` stderr line each, and the rest are still logged. Every other
+  line passes run_record's check before any is written. A (digest, task) already in grades.jsonl is skipped: with
+  every task there it prints `exists <pass> (<n> grade(s))`; with some, it writes the rest under that pass's id and
+  ts, printing `completed <pass>: <k> more`, so a pass whose write stopped part-way is completed by a rerun; else
+  `logged <n> grade(s), pass <id>`. Any of the three ends `; <k> skipped (not a slug): <slug>, ...` when a task was
+  skipped (orient-all § 8 reports it as a caveat). --dry-run prints each line (`would log grade <task>: <fields>`) and
+  that outcome after `dry run, nothing written: `, and writes nothing. A torn grades.jsonl line is skipped, and a log
+  that cannot be read counts as empty.
 
 record --task SLUG|PATH --question Q --answer A --recommended R [--fork F] [--today D]: one answer into its task. Q, A,
   R and F have every whitespace run (newlines included) folded to one space, and Q loses a leading link to its own
@@ -1332,22 +1336,30 @@ def cmd_log(args):
     ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (now.microsecond // 1000)
     if have:  # complete the pass already begun: its id and ts
         pass_id, ts = sorted(have.values(), key=lambda x: (str(x[1]), str(x[0])))[0]
-    lines = []
+    lines, skipped, kept = [], [], 0
     for t in tasks:
+        try:  # a vault note named with spaces or capitals has no slug the Run record can key: skipped, never a refusal
+            task = RRec.normalise_slug(t["slug"], "task")
+        except RRec.Refused as e:
+            skipped.append(t["slug"])
+            sys.stderr.write("estate-dispatch: skipped %s: %s\n" % (t["slug"], e))
+            continue
+        kept += 1
         fields = grade_fields(RRec, t, rows.get(t["slug"].lower()), pass_id, digest)
         try:
-            RRec.check(None, "grade", t["slug"], fields, ts=ts)
-            task = RRec.normalise_slug(t["slug"], "task")
+            RRec.check(None, "grade", task, fields, ts=ts)
         except RRec.Refused as e:
             fail(2, "the run record refused the grade line for %s: %s; nothing written" % (t["slug"], e))
         if task not in have:
             lines.append((task, fields))
     if have and not lines:
-        outcome = "exists %s (%d grade(s))" % (pass_id, len(tasks))
+        outcome = "exists %s (%d grade(s))" % (pass_id, kept)
     elif have:
         outcome = "completed %s: %d more" % (pass_id, len(lines))
     else:
         outcome = "logged %d grade(s), pass %s" % (len(lines), pass_id)
+    if skipped:
+        outcome += "; %d skipped (not a slug): %s" % (len(skipped), ", ".join(skipped))
     if args.dry_run:
         for task, fields in lines:
             print("would log grade %s: %s" % (task, json.dumps(fields, ensure_ascii=False, sort_keys=True)))

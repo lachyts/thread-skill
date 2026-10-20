@@ -127,7 +127,10 @@ decisionTask, grades (grades.py's block: log, window, all, pending, episodes), c
 summary line.
 
 watch. One `watch` line per (Reflection, Watch), naming every rollout where the reading saw it. id is run_record's
-watch_id(rule, shape); the line stores the stripped rule and shape. A rollout outside the span is exit 2. A repeat call
+watch_id(rule, shape); the line stores the stripped rule and shape. A rollout must be one the span read (its
+rollouts[]) or one an in-window grade episode lists (grades.episodes[].rollouts, grade_rollouts(): a grade miss's
+rollout, read this week or not, as a serial chain dispatched by link or a regraded task's earlier run); any other is
+exit 2. A grade trace whose episodes list no rollout is reported, never a Watch (SKILL.md § 11). A repeat call
 for an id this Reflection already holds compares its rollouts with that Reflection's latest line for the id: the same
 set prints `exists <id>` and writes nothing (whatever --count); a strict superset writes ONE extending line naming the
 union and prints `extended <id>: +<new>`; any other set is exit 2, naming both sets and their union to re-run with.
@@ -145,7 +148,8 @@ of them closes the Watch's cycle, so a declined pattern returns only when two la
 an id with no open Watch (unknown, or closed by another line: `Watch <id> was closed by Reflection <rid> (<via>)`), or
 a plain raise of a one-rollout Watch. A repeat whose cycle that same reflection and via closed prints `exists <id>`.
 
-bug. The key is watch_id(rule, shape); the rollouts must be in the span; --slug is one to five kebab words, none
+bug. The key is watch_id(rule, shape); the rollouts must be ones the span read (a grade episode's alone is refused: a
+grade miss is a Watch or a rule, never a bug); --slug is one to five kebab words, none
 starting reflect or call. Dedupe first: an open task directly under Work/Tasks (status not Landed; a note with no
 frontmatter is skipped and flagged) carrying `bug_key: <key>`. If its `## Notes` holds `Found by Reflection <this
 id>` the line records filed: true (a re-run after a failed line write); otherwise it prints `exists <slug>` and the
@@ -1235,7 +1239,7 @@ class Span:
         """grades.py's block over every record: its flags prefixed `grades: `, its gaps in cannotShow. Never stops the
         span: a fault in the join is a flag and an empty block."""
         try:
-            out, flags, cannot = GR.accuracy(self.grade_log, records, self.vault.find, date_in, since, until)
+            out, flags, cannot = GR.accuracy(self.grade_log, records, self.vault.find, date_in, mdate, since, until)
         except Stop:
             raise
         except Exception as e:
@@ -1328,8 +1332,17 @@ class Span:
 
 # ---- the writers -------------------------------------------------------------------------------------------------
 
-def norm_rollouts(values, span):
-    allowed = span_rollouts(span)
+def grade_rollouts(span):
+    """The rollouts an in-window grade episode lists (grades.py's episodes[].rollouts): where a grade miss ran, read in
+    the span or not, so `watch` can name it."""
+    grades = span.get("grades") if isinstance(span.get("grades"), dict) else {}
+    eps = grades.get("episodes") if isinstance(grades.get("episodes"), list) else []
+    return {r for e in eps if isinstance(e, dict) and e.get("inWindow") is True
+            for r in (e.get("rollouts") if isinstance(e.get("rollouts"), list) else []) if isinstance(r, str)}
+
+
+def norm_rollouts(values, span, graded=False):
+    allowed = span_rollouts(span) | (grade_rollouts(span) if graded else set())
     out = []
     for v in values:
         try:
@@ -1346,7 +1359,7 @@ def norm_rollouts(values, span):
 def cmd_watch(a):
     span = read_span(a.span)
     rid = span["reflection"]
-    rollouts = norm_rollouts(a.rollout, span)
+    rollouts = norm_rollouts(a.rollout, span, graded=True)
     rule, shape = a.rule.strip(), a.shape.strip()
     wid = RR.watch_id(rule, shape)
     lines = read_reflections()

@@ -65,7 +65,9 @@ still serves as a baseline, its missing keys read as no baseline.
 grades.jsonl holds the Grade log (p25-4, ADR 0041; CONTEXT.md **Grade log**): one `grade` line per graded task per
 estate pass, every line of a pass sharing its `pass` id, its `digest` and its ts. skills/_shared/scripts/estate-dispatch.py
 `log` is its one writer (orient-all § 2 step 7, never on a dry run) and skills/reflect/scripts/grades.py its one reader
-(the weekly reading's grade accuracy, joined to outcomes at read time). A grade line carries no rollout, and a task.
+(the weekly reading's grade accuracy, joined to outcomes at read time). A grade line carries no rollout, and a task:
+a graded task whose name normalise_slug refuses (a vault note named with spaces or capitals) has no line, `log` skips
+it and reports it.
 
 reflections.jsonl holds the weekly reading's lines (skills/reflect/scripts/reflect.py is its only writer, and tune.py
 reads it for the agreement and to refuse a closed Reflection): a `watch` line per (Reflection, Watch), a `watch-raised`
@@ -202,14 +204,15 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      filed only on a bug). No rollout, no task; lands in reflections.jsonl.
   grade           T  pass, digest, project, grade, agentGrade, shape, size, decisions, low, held, gates; raised?, rank?,
                      linked? (p25-4, ADR 0041: one line per task an estate pass grades, from estate-rank.py's tasks[]
-                     row; pass a g- id and digest 12 lowercase hex, both shared by the pass's lines; project the task's
-                     home; grade and agentGrade each one of Ready | One call | Grill | Orient, the ranker's grade after
-                     the raise and the agent's own; shape parallel | serial | session; size S | M | L; decisions and low
-                     integers >= 0, the decision count and those of low confidence, low <= decisions; held a boolean, the
-                     task held by a dependency; gates a list of distinct gate kinds, spend | credential | irreversible,
-                     possibly empty; raised a non-empty list of distinct raise whys, decisions | confidence; rank an
-                     integer >= 1, absent for Orient; linked the scan row's rollout slug at grade time, never a reserved
-                     name). No rollout; lands in grades.jsonl.
+                     row, whose name is a slug (`log` skips and reports any other); pass a g- id and digest 12 lowercase
+                     hex, both shared by the pass's lines; project the task's home; grade and agentGrade each one of
+                     Ready | One call | Grill | Orient, the ranker's grade after the raise and the agent's own; shape
+                     parallel | serial | session; size S | M | L; decisions and low integers >= 0, the decision count
+                     and those of low confidence, low <= decisions; held a boolean, the task held by a dependency; gates
+                     a list of distinct gate kinds, spend | credential | irreversible, possibly empty; raised a
+                     non-empty list of distinct raise whys, decisions | confidence; rank an integer >= 1, absent for
+                     Orient; linked the scan row's rollout slug at grade time, never a reserved name). No rollout; lands
+                     in grades.jsonl.
   reflection         id, since, until, rollouts, escapesOnly, counts, quiet; decisionTask?, cadence?, repairsOnly?
                      (p21-7: the Reflection's one closing line; since and until UTC Z stamps; rollouts, escapesOnly
                      and repairsOnly lists of slugs: the rollouts read, those not read that hold an in-window

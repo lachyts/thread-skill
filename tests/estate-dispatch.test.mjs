@@ -1004,7 +1004,7 @@ test('D15. acceptance: sessions starts written notes, live rollouts only on the 
 })
 
 // ---- D16. log: the Grade log (p25-4) ----------------------------------------------------------------------------------
-test('D16. log: one grade line per graded task, Orient included, under one pass; reruns, a half pass, a dry run and refusals', () => {
+test('D16. log: one grade line per graded task, Orient included, under one pass; reruns, a half pass, a dry run, a name that is no slug (skipped) and refusals', () => {
   const rk = ranked()
   const sc = scanned()
   const evOf = (name) => path.join(S, 'grade-ev', name)
@@ -1081,6 +1081,29 @@ test('D16. log: one grade line per graded task, Orient included, under one pass;
   assert.deepEqual([by2['crown-a'].grade, by2['crown-a'].gates, by2['crown-a'].raised, by2['crown-a'].decisions, by2['crown-a'].low,
     by2['crown-a'].linked], ['Grill', ['spend', 'credential'], ['decisions', 'confidence'], 1, 1, 'crown-rollout-2026-10-20'])
   assert.deepEqual(['linked' in by2['crown-b'], 'linked' in by2['act-a']], [false, false])
+  // A task whose name is no slug (estate-scan's slug is the raw file stem, so a vault note named with spaces or capitals)
+  // is skipped and named, never a refusal: the rest are logged, and the outcome line counts it for orient-all § 8.
+  const VAULT_NAME = 'Autorun next command after handoff'
+  const rk3 = structuredClone(rk)
+  rk3.tasks.splice(1, 0, { ...structuredClone(rk.tasks[0]), slug: VAULT_NAME })
+  const EV5 = evOf('vault-name')
+  const rank3 = keep('rank-vault-name.json', JSON.stringify(rk3))
+  const named = log(rank3, SCAN_FILE, EV5)
+  assert.equal(named.status, 0, named.stderr)
+  assert.equal(named.stderr, `estate-dispatch: skipped ${VAULT_NAME}: task '${VAULT_NAME}' is not a slug ([a-z0-9][a-z0-9._-]*)\n`)
+  const kept5 = linesOf(EV5)
+  assert.match(named.stdout, new RegExp(`^logged ${rk.tasks.length} grade\\(s\\), pass ${PASS.source}; 1 skipped \\(not a slug\\): ${VAULT_NAME}\\n$`))
+  assert.deepEqual(kept5.map((l) => l.task), rk.tasks.map((t) => t.slug.toLowerCase()), 'every other task logged, in rank order')
+  const named2 = log(rank3, SCAN_FILE, EV5)
+  assert.equal(named2.status, 0, named2.stderr)
+  assert.equal(named2.stdout, `exists ${kept5[0].pass} (${rk.tasks.length} grade(s)); 1 skipped (not a slug): ${VAULT_NAME}\n`)
+  assert.equal(linesOf(EV5).length, rk.tasks.length, 'the rerun writes nothing')
+  // A refused field still refuses the whole pass, a skipped name beside it or not.
+  const rk4 = structuredClone(rk3)
+  rk4.tasks[0].grade = 'Maybe'
+  const EV6 = evOf('vault-name-refused')
+  refusal(log(keep('rank-vault-name-bad.json', JSON.stringify(rk4)), SCAN_FILE, EV6), /refused the grade line/)
+  assert.ok(!fs.existsSync(EV6), 'nothing written')
   // --dry-run prints the lines and writes nothing.
   const EV3 = evOf('dry')
   const dry = log(RANK_FILE, SCAN_FILE, EV3, ['--dry-run'])

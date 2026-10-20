@@ -22,8 +22,8 @@ What it reuses, loaded by path and never copied: run_record.py (RR: GRADE_LOG, L
 score.py (SCORE: read_lines, human_act, ACT_KINDS, ACT_NAMES, MERGE_HOLD_DETAIL, to_ms, fmt, HOUR, intersect, total and
 Score.pair, run over each record for its Slots, lane holdings and merge holds: pair reads no args); reconcile-project.py
 (RP: LANDED, and Rec's status and scalar, vault-grammar.md § Statuses: done and merged land a task, dropped drops it);
-estate-rank.py (ER: GRADES and SIZE_MINUTES; it imports only the stdlib at load). The window's date rule is reflect.py's
-date_in, passed in, so each rule stays stated once.
+estate-rank.py (ER: GRADES and SIZE_MINUTES; it imports only the stdlib at load). The window's date rules are
+reflect.py's date_in and mdate (an instant's Melbourne date), passed in, so each rule stays stated once.
 
 The log. A line that does not parse, or has no valid ts, is torn: skipped and counted, as is a `grade` line with no
 string task or a grade outside GRADES. Two lines with one (pass, task) count once, the first kept. Grade lines after
@@ -32,15 +32,20 @@ string task or a grade outside GRADES. Two lines with one (pass, task) count onc
 Episodes. For a task T with grade lines g1 .. gk in time order, episode i runs from gi's ts to its end, the first of:
 (a) a `merged` Run-record line for T at or after gi's ts, and before g(i+1)'s when there is one: `landed`, at that line;
 (b) for an earlier episode (i < k): `regraded`, at g(i+1)'s ts; (c) for the latest episode, T's note as it stands: a
-status of done or merged is `landed`, at its `merged:` stamp, else on its `completed:` date; dropped is `dropped`, on its
-`completed:` date; any other status is `open`; no note (or one with no frontmatter) is `unknown`. A note's close stamped
-after --until is still open. An episode's span is [gi's ts, its end] ([gi, g(i+1)) for a regrade); an open episode, or
-one closed only by a date, reads up to --until.
+status of done or merged is `landed`, at its `merged:` stamp, else on its `completed:` date; dropped is `dropped`, on
+its `completed:` date; any other status is `open`; no note (or one with no frontmatter) is `unknown`. A note's close
+after --until is still open, since no act after until is read: an instant after it, or a date-only stamp after until's
+Melbourne date (mdate, the zone date_in reads; a close on until's date is closed, and the next reading's window holds
+it). An episode's span is [gi's ts, its end] ([gi, g(i+1)) for a regrade, so a record line at g(i+1)'s ts is the next
+episode's); an open episode, or one closed only by a date, reads up to --until.
 
 Dispatched. An episode is dispatched when a Run-record line names T in its span (dispatchedBy `record`), or when its
 end-state link is not null and differs from gi's `linked` (dispatchedBy `link`). The end-state link is g(i+1)'s `linked`
 for a regrade, and the first link of the note's `rollout:` now (run_record's normalise_slug) for a note's landed or
-dropped end. The link is the only trace a serial chain leaves of a task that drew no act.
+dropped end. The link is the only trace a serial chain leaves of a task that drew no act. rollouts lists, sorted, the
+distinct records (each <slug>.jsonl's slug) whose lines name T in the span, plus the end-state link when dispatchedBy is
+`link`: the rollouts a Watch on the episode's trace names (reflect.py `watch` takes a rollout an in-window episode
+lists, read in the span or not). An undispatched episode lists none.
 
 Acts. score.py's human_act over T's lines in the span, from every record (answer, signOff, retry, raceDecided), and each
 merge hold Score.pair pairs for T that opens in the span (mergeHold): ADR 0037's acts. A signOff in an episode whose
@@ -74,11 +79,14 @@ handsOff, dispatched}, byGrade and byAgentGrade ({grade: {episodes, handsOff, bo
 undispatched, unknown, rate, byKind {answer, signOff, retry, mergeHold, raceDecided}, foreseenSignOffs, notCounted
 {standingApproval, automaticHandBack}, setAsides, mergeHoldOnly}} for every grade in GRADES' order), bySize ({size:
 {timed, untimed, slotHours {median, mean}, laneHours {median, mean}, estimateHours}})}, pending {total, byGrade},
-episodes[] (the window's closed episodes, then every pending one, each {task, pass, grade, agentGrade, raised[], gates[],
-size, shape, start, end {kind, at, date, by}, outcome, dispatchedBy, linked, endLink, acts[] {kind, at, detail, counted},
-notCounted, setAsides, slotHours, laneHours, inWindow})}. Flags: `no grade log` (no grades.jsonl: an empty block, never
-an error), an unreadable log (named in cannotShow too), torn lines, a task with no note, and a closed episode with no
-date. cannotShow names what this reading cannot see (skills/reflect/SKILL.md § What the record cannot show).
+episodes[] (the window's rated episodes alone, hands-off, bounced, regraded or dropped, the ones skills/reflect/SKILL.md
+§ 11 traces, by start then task; `by hand`, `undispatched`, `unknown` and `pending` are counts alone, in byGrade and
+pending, since every estate pass regrades every open task and one episode each per pass would swell span.json; each
+{task, pass, grade, agentGrade, raised[], gates[], size, shape, start, end {kind, at, date, by}, outcome, dispatchedBy,
+linked, endLink, rollouts[], acts[] {kind, at, detail, counted}, notCounted, setAsides, slotHours, laneHours,
+inWindow})}. Flags: `no grade log` (no grades.jsonl: an empty block, never an error), an unreadable log (named in
+cannotShow too), torn lines, a task with no note, and a closed episode with no date. cannotShow names what this reading
+cannot see (skills/reflect/SKILL.md § What the record cannot show).
 
 Exit codes (the CLI): 0 printed; 1 the events directory cannot be listed; 2 a usage error or a bad TS; 3 no tz data.
 """
@@ -187,7 +195,8 @@ def load(events_dir):
 # ---- the records -------------------------------------------------------------------------------------------------
 
 class Index:
-    """Each wanted task's Run-record lines, Slots, lane holdings and merge holds, from every record up to until."""
+    """Each wanted task's Run-record lines [(ms, kind, line, record slug)], Slots, lane holdings and merge holds, from
+    every record up to until."""
 
     def __init__(self, records, wanted, until):
         self.lines, self.slots, self.lanes, self.holds = {}, {}, {}, {}
@@ -196,7 +205,7 @@ class Index:
             for t, _n, d in lines:
                 task = d.get("task")
                 if t <= until and task in wanted:
-                    self.lines.setdefault(task, []).append((t, d.get("kind"), d))
+                    self.lines.setdefault(task, []).append((t, d.get("kind"), d, slug))
             if not any(d.get("task") in wanted for _t, _n, d in lines):
                 continue
             sc = SCORE.Score(None)
@@ -252,11 +261,12 @@ def read_note(find, task):
 
 # ---- one episode -------------------------------------------------------------------------------------------------
 
-def episode(task, start, g, nxt, note, idx, since, until, date_in):
-    """One grade line's episode: its end, dispatch, acts and outcome (the module docstring's rules)."""
+def episode(task, start, g, nxt, note, idx, since, until, date_in, until_day):
+    """One grade line's episode: its end, dispatch, acts and outcome (the module docstring's rules). until_day is
+    until's Melbourne date (reflect.py's mdate), past which a date-only close is still open."""
     nxt_ms = nxt[0] if nxt is not None else None
     lines = idx.lines.get(task) or []
-    merged = [t for t, kind, _d in lines if kind == "merged" and t >= start and (nxt_ms is None or t < nxt_ms)]
+    merged = [t for t, kind, _d, _r in lines if kind == "merged" and t >= start and (nxt_ms is None or t < nxt_ms)]
     end = {"kind": None, "at": None, "date": None, "by": None}
     end_ms, end_link, half_open = None, None, False
     if merged:
@@ -275,8 +285,8 @@ def episode(task, start, g, nxt, note, idx, since, until, date_in):
             ms, day = when(note.scalar("merged")) if st in LANDS else (None, None)
             if ms is None and day is None:
                 ms, day = when(note.scalar("completed"))
-            if ms is not None and ms > until:
-                end["kind"] = "open"  # closed after the reading's end: still open at until
+            if (ms is not None and ms > until) or (ms is None and day is not None and day > until_day):
+                end["kind"] = "open"  # closed after the reading's end (an instant, or a later date): still open at until
             else:
                 end_ms, end["date"] = ms, day
                 end["kind"] = "landed" if st in LANDS else "dropped"
@@ -294,9 +304,12 @@ def episode(task, start, g, nxt, note, idx, since, until, date_in):
     span_lines = [x for x in lines if inside(x[0])]
     linked = g.get("linked")
     dispatched = "record" if span_lines else "link" if end_link is not None and end_link != linked else None
+    rollouts = {r for _t, _k, _d, r in span_lines}
+    if dispatched == "link":
+        rollouts.add(end_link)
     gates = g.get("gates") or []
     acts, not_counted = [], {k: 0 for k in NOT_COUNTED}
-    for t, k, d in span_lines:
+    for t, k, d, _r in span_lines:
         if k == "gate-signed" and d.get("standing") is True:
             not_counted["standingApproval"] += 1
         elif k == "auto-retry" or (k == "handed-back" and d.get("via") == "descope"):
@@ -337,9 +350,9 @@ def episode(task, start, g, nxt, note, idx, since, until, date_in):
     return {"task": task, "pass": g.get("pass"), "grade": g.get("grade"), "agentGrade": g.get("agentGrade"),
             "raised": list(g.get("raised") or []), "gates": list(gates), "size": g.get("size"), "shape": g.get("shape"),
             "start": SCORE.fmt(start), "end": end, "outcome": outcome, "dispatchedBy": dispatched, "linked": linked,
-            "endLink": end_link,
+            "endLink": end_link, "rollouts": sorted(rollouts),
             "acts": [{"kind": k, "at": SCORE.fmt(t), "detail": det, "counted": c} for t, k, det, c in acts],
-            "notCounted": not_counted, "setAsides": sum(1 for _t, k, _d in span_lines if k == "set-aside"),
+            "notCounted": not_counted, "setAsides": sum(1 for _t, k, _d, _r in span_lines if k == "set-aside"),
             "slotHours": slot_h, "laneHours": lane_h, "inWindow": in_window}
 
 
@@ -393,8 +406,9 @@ def block(log, episodes=()):
     eps = list(episodes)
     closed = [e for e in eps if e["outcome"] != "pending"]
     pending = [e for e in eps if e["outcome"] == "pending"]
-    shown = sorted((e for e in closed if e["inWindow"]), key=lambda e: (e["start"], e["task"])) + \
-        sorted(pending, key=lambda e: (e["start"], e["task"]))
+    # Only the window's rated episodes, the ones the reading traces: every pass regrades every open task, so an
+    # undispatched or pending episode per graded task per pass would swell span.json; those are counts alone.
+    shown = sorted((e for e in closed if e["inWindow"] and e["outcome"] in RATED), key=lambda e: (e["start"], e["task"]))
     return {"log": {"path": log.path, "exists": log.exists, "lines": len(log.lines),
                     "passes": len({d.get("pass") for _t, _n, d in log.lines}), "tasks": len(log.by_task),
                     "torn": log.torn},
@@ -403,9 +417,10 @@ def block(log, episodes=()):
             "episodes": shown}
 
 
-def accuracy(log, records, find, date_in, since, until):
+def accuracy(log, records, find, date_in, day_of, since, until):
     """(block, flags, cannotShow): every graded task's episodes, joined to the records and notes, read over [since,
-    until]. records is span's {slug: [(ms, n, line)]}, find reflect's Vault.find and date_in reflect's date_in."""
+    until]. records is span's {slug: [(ms, n, line)]}, find reflect's Vault.find, date_in reflect's date_in and day_of
+    reflect's mdate (an instant's Melbourne date)."""
     flags, cannot = [], []
     if log.error is not None:
         flags.append("grades.jsonl cannot be read (%s): no grade accuracy" % log.error)
@@ -418,13 +433,14 @@ def accuracy(log, records, find, date_in, since, until):
         flags.append("%d line(s) of grades.jsonl did not parse: skipped" % log.torn)
     wanted = {task for task, gl in log.by_task.items() if any(t <= until for t, _n, _d in gl)}
     idx = Index(records, wanted, until)
+    until_day = day_of(until)
     eps = []
     for task in sorted(wanted):
         gl = [x for x in log.by_task[task] if x[0] <= until]
         note, why = read_note(find, task)
         for i, (t, _n, g) in enumerate(gl):
             nxt = gl[i + 1] if i + 1 < len(gl) else None
-            e = episode(task, t, g, nxt, note, idx, since, until, date_in)
+            e = episode(task, t, g, nxt, note, idx, since, until, date_in, until_day)
             if e["outcome"] == "unknown":
                 flags.append("[[%s]]: %s: its latest grade (%s) reads unknown" % (task, why, e["grade"]))
             elif e["outcome"] != "pending" and e["end"]["at"] is None and e["end"]["date"] is None:
@@ -453,7 +469,7 @@ def main(argv):
         ev = REF.events_dir()
         span = REF.Span(argparse.Namespace(tasks_dir=a.tasks_dir, out=os.devnull))
         records = span.records(ev)
-        out, flags, cannot = accuracy(load(ev), records, span.vault.find, REF.date_in, since, until)
+        out, flags, cannot = accuracy(load(ev), records, span.vault.find, REF.date_in, REF.mdate, since, until)
     except REF.Stop as e:
         sys.stderr.write("grades: %s\n" % e)
         return e.code

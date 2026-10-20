@@ -346,8 +346,10 @@ recording Lachy's no (step 15's decision task, § Deciding the decision task) is
 **Grade accuracy.** Read `span.json`'s `grades`: the Grade log (p25-4, ADR 0041) joined to what followed each grade,
 scored over its own episode, which runs to the task's next grade or its close. Read the Ready headline
 (`window.readyHandsOff`) first, then each grade's `rate` in `window` and in `all`, with its counts: `handsOff`,
-`bounced`, `regraded` and `dropped` make the rate, and `byHand`, `undispatched`, `unknown` and `pending` sit beside it.
-Trace each miss to `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`, the grading rules:
+`bounced`, `regraded` and `dropped` make the rate, and `byHand`, `undispatched`, `unknown` and `pending` sit beside it,
+as counts alone. `episodes` lists the window's rated episodes (hands-off, bounced, regraded or dropped), each with its
+acts and its `rollouts`: the rollouts whose Run-record lines fall in its span, and its `endLink` when it was dispatched
+by link. Trace each miss to `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`, the grading rules:
 
 - A `bounced` or `regraded` episode, by its acts: an `answer` to readiness-grade.md § The grade (a decision the grader
   missed), an unforeseen `signOff` (one on a grade that named no `gates`) to readiness-grade.md § Size, deadlines and
@@ -360,13 +362,16 @@ Trace each miss to `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`, th
 - A `mergeHoldOnly` bounce is read as the merge hold it is: a `--gated` run's hold cannot be told from an ask.
 
 Each becomes a sighting (step 12) or, once it recurs, a rule proposal (step 15), never a knob: the grading constants are
-no operator setting. An `ask` item's `grade` says what grade its task carried when it asked.
+no operator setting. A grade trace's Watch names its episodes' `rollouts` (a `bySize` one, those of that size's timed
+episodes), which `watch` takes whether or not the span read them: a serial chain dispatched by link, or a regraded or
+dropped task whose rollout had no line this week. A trace whose episodes list no rollout (a `bySize` readout seen only
+in `all`) is reported, never made a Watch. An `ask` item's `grade` says what grade its task carried when it asked.
 
 ### 12. Sightings
 
 After the whole reading, make ONE `reflect.py watch` call per Watch, naming every rollout where you saw it. Reuse an
 open Watch's rule and shape verbatim, a declined one's included. On exit 2, re-run naming the union the refusal
-prints.
+prints. A rollout is one the span read or one an in-window grade episode lists (step 11); any other is exit 2.
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py watch --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --rollout <slug> [--rollout <slug> ...] --rule "<rule>" --shape "<shape>" --count <n>

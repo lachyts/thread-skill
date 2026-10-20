@@ -131,8 +131,10 @@ decision tasks. `skills/reflect/scripts/reflect-due.py` tells the daily sweep
 when the weekly reading is due: 7 days after the last one, 14 after three quiet
 Reflections in a row (ADR 0037 d4, d6). The Grade log (`grades.jsonl` beside the
 Run record, ADR 0041) has one writer, `estate-dispatch.py log`, which keeps each
-estate pass's grades, and one reader, `skills/reflect/scripts/grades.py`, which
-the weekly reading loads to join each grade to what followed it.
+estate pass's grades (a task whose note name is no slug, with spaces or
+capitals, is skipped and reported in its outcome line, and the rest are still
+logged), and one reader, `skills/reflect/scripts/grades.py`, which the weekly
+reading loads to join each grade to what followed it.
 
 ## Design
 
