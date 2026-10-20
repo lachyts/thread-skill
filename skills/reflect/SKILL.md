@@ -313,7 +313,9 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   (the Hands-off rate counts landed tasks only).
 - A `set-aside` is traced by its stage and `reasonClass` to the rule that stopped it: execute § 3.5 (the plan
   gate), execute § 3.7 (gated inputs, ADR 0034), execute § 4.5 (the queue, ADR 0030) or execute § 6.5 (Needs
-  you), and by its `movedBy` to what moved it on.
+  you), and by its `movedBy` to what moved it on. `integration-conflict` traces to execute § 4.5 step 3
+  (Integration's merge of the latest main, ADR 0030 decision 3), and `integration-red` to the integrate call's
+  verifier.
 - A `retry` is execute § 4.5's automatic retry (ADR 0033): trace why the first attempt failed a block an agent
   could fix.
 - A `descope` is repair § 2–§ 5's descope and its hand-back (ADR 0035): trace why the task's scope could not land

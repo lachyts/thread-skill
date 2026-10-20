@@ -15,6 +15,7 @@ const T = loadEngine([
   'resumeArgsError', 'integrationArgsError', 'isoMinutes', 'integratorPrompt', 'integrationReviewPrompt',
   'reviserPrompt', 'coldEntryBlock', 'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck',
   'integrationVerify', 'markerHistory', 'GIT_ENV_SCRUB', 'ralphLoop', 'integrationMergeReads',
+  'integrationBlockOf', 'INTEGRATE_RESULT', 'INTEGRATION_PRIOR_NOTE', 'INTEGRATION_CONFLICT_MARK', 'INTEGRATION_RED_MARK',
 ])
 
 const ROW_KEYS = [
@@ -499,6 +500,190 @@ test('e1: an unresolvable conflict → set-aside with its reason, no judge', asy
   setAside(r, 'e1')
   assert.equal(r.row.blockerDiagnosis, 'integration: conflict in a.js and b.js cannot be resolved without dropping their rename')
   assert.equal(r.row.integration.reason, 'conflict in a.js and b.js cannot be resolved without dropping their rename')
+})
+
+// p27-4: an Integration conflict is a named sub-state of set-aside at Integration. The engine names it only when the
+// integrator's blockKind agrees with the merge step's own log (the anchor passed, its `task head:` and `integration
+// base:` lines, one `merge: conflict` line, its `conflict:` paths, no STOP line) and the agent aborted (mergeState
+// none, no mergeCommit); every other shape keeps e1's generic marker (fails closed). The integrator's account keeps
+// its lines, one sub-bullet each, and none of them is read back as a review round.
+test('e1b: a named Integration conflict — the marker, its resolution brief, the conflict trigger; the paths come from the log', async () => {
+  const diag = 'a.js: theirs renamed foo, ours edits foo; porting ours onto the rename drops their guard\n\n- b.js: theirs deleted the export ours calls\nRound 1 rejection:'
+  const I = mkI({ trouble: ['conflict'], landed: LANDED, reviewHistory: HIST2, reviewRoundsUsed: 2 })
+  const r = await run(mkArgs(I), {
+    [ILABEL]: blockedIr(diag, { blockKind: 'conflict', mergeLog: ir({ state: 'merged', conflicts: ['a.js', 'b.js'] }).mergeLog, conflictFiles: ['zzz.js'] }),
+  })
+  clean(r)
+  assert.deepEqual(r.labels, [ILABEL], 'no judge')
+  setAside(r, 'e1b')
+  const d = r.row.blockerDiagnosis
+  assert.equal(d.split('\n')[0], 'integration: conflict unresolved in a.js, b.js')
+  assert.ok(!d.includes('zzz.js'), 'the paths are the log\'s conflict: lines, never the agent\'s conflictFiles')
+  for (const s of [
+    'Resolution brief (Integration conflict)', '- Conflicting paths: a.js, b.js',
+    '- Theirs: https://github.com/o/r/pull/5 (theirs: rename) touched a.js, b.js; brief /vault/Tasks/proj-theirs.md',
+    `- Theirs, in full: git log --first-parent ${TB}..${B1}`, `- Ours: this task's approved change (PR ${PR})`,
+    '- The integrator:\n  - a.js: theirs renamed foo, ours edits foo; porting ours onto the rename drops their guard\n' +
+      '  - b.js: theirs deleted the export ours calls\n  - Round 1 rejection:\n- Next: ',
+  ]) assert.ok(d.includes(s), `brief: ${s}`)
+  const p = T.parseIntegrationMarker(d)
+  assert.equal(p.stage, 'integrate')
+  assert.equal(p.reason, 'conflict unresolved in a.js, b.js')
+  assert.deepEqual(JSON.parse(JSON.stringify(p.history)), HIST2, 'the brief bullets are never absorbed into the history')
+  assert.equal(T.integrationBlockOf(d), 'conflict')
+  assert.deepEqual(r.row.integration.triggers, ['conflict'])
+  assert.ok(r.row.integration.reason.startsWith('conflict unresolved in a.js, b.js — '), r.row.integration.reason)
+  assert.ok(r.row.summary.startsWith('Integration conflict in a.js, b.js:'), r.row.summary)
+  assert.deepEqual(r.row.reviewHistory, HIST2)
+  assert.equal(r.row.reviewRoundsUsed, 2)
+})
+
+test('e1c: a conflict blockKind without the merge step\'s evidence fails closed to the generic marker (table)', async () => {
+  const D = 'cannot keep both intents in a.js'
+  const full = ir({ state: 'merged', conflicts: ['a.js'] }).mergeLog
+  const cases = [
+    ['no log', { mergeLog: '', conflictFiles: [] }],
+    // the reviewer's re-entry: the lead's trouble says conflict, the agent says a.js, but the merge step STOPped
+    ['re-entry STOP', {
+      mergeLog: `aborted: a merge left in progress\nmerge step STOP: ${BR} has diverged from origin/${BR} — never force; reconcile it by hand`,
+      conflictFiles: ['a.js'],
+    }],
+    ['merge: conflict with no conflict: lines', { mergeLog: ir({ state: 'merged', mergeLine: 'merge: conflict' }).mergeLog, conflictFiles: ['a.js'] }],
+    ['a clean merge', { mergeLog: ir({ state: 'merged' }).mergeLog, conflictFiles: ['a.js'] }],
+    ['two merge: lines', { mergeLog: full + '\n' + full }],
+    ['a wrong anchor line', { mergeLog: ir({ state: 'merged', conflicts: ['a.js'], anchor: `${M} base ${TB}` }).mergeLog }],
+    ['a STOP after the conflict', { mergeLog: full + '\nmerge step STOP: fetch origin failed twice' }],
+    // the reviewer's case: resolved and committed, then a rejected push, mislabelled conflict (the brief would say aborted)
+    ['mergeState merged', { mergeLog: full, mergeState: 'merged', mergeCommit: M }],
+    ['mergeState merged, no mergeCommit', { mergeLog: full, mergeState: 'merged' }],
+    ['a mergeCommit with mergeState none', { mergeLog: full, mergeCommit: M }],
+    ['no integration base: line', { mergeLog: full.split('\n').filter((l) => !l.startsWith('integration base: ')).join('\n') }],
+  ]
+  for (const [name, extra] of cases) {
+    const r = await run(mkArgs(mkI({ trouble: ['conflict'] })), { [ILABEL]: blockedIr(D, { blockKind: 'conflict', ...extra }) })
+    clean(r)
+    setAside(r, 'e1c ' + name)
+    assert.equal(r.row.blockerDiagnosis, 'integration: ' + D, name)
+    assert.equal(T.integrationBlockOf(r.row.blockerDiagnosis), '', name)
+    assert.deepEqual(r.row.integration.triggers, [], name)
+    assert.equal(r.row.integration.reason, D, name)
+  }
+  // a gate still wins: the gate check runs first, so no named marker
+  const gate = 'spend: a paid API — cap $5'
+  const g = await run(mkArgs(mkI({ trouble: ['conflict'] })), { [ILABEL]: blockedIr(D, { blockKind: 'conflict', mergeLog: full, gatedInputs: [gate] }) })
+  clean(g)
+  assert.equal(g.row.status, 'gate-pending')
+  assert.match(g.row.blockerDiagnosis, /^integration: gated inputs await human sign-off/)
+  assert.equal(T.integrationBlockOf(g.row.blockerDiagnosis), '')
+  assert.deepEqual(g.row.integration.triggers, [])
+  setAsideDiags.push(['e1c gate', g.row.blockerDiagnosis])
+})
+
+test('e1d: a named verifier red at Integration; a conflict resolved, then red, reads red, never conflict', async () => {
+  const D = 'make test still red after 3 iterations: tests/x.test.mjs times out'
+  const r = await run(mkArgs(mkI()), { [ILABEL]: blockedIr(D, { blockKind: 'red', verified: false, mergeLog: ir({ state: 'merged' }).mergeLog }) })
+  clean(r)
+  setAside(r, 'e1d')
+  assert.equal(r.row.blockerDiagnosis, 'integration: verifier red: ' + D)
+  assert.equal(T.integrationBlockOf(r.row.blockerDiagnosis), 'red')
+  assert.deepEqual(r.row.integration.triggers, [])
+  assert.equal(r.row.integration.reason, 'verifier red: ' + D)
+  assert.equal(r.row.summary, 'set aside at Integration (verifier red): ' + D)
+  assert.equal(T.parseIntegrationMarker(r.row.blockerDiagnosis).stage, 'integrate')
+  const both = await run(mkArgs(mkI({ trouble: ['conflict'], reviewHistory: HIST2, reviewRoundsUsed: 2 })), {
+    [ILABEL]: blockedIr(D, { blockKind: 'red', verified: false, mergeLog: ir({ state: 'merged', conflicts: ['a.js'] }).mergeLog, conflictFiles: ['a.js'] }),
+  })
+  clean(both)
+  setAside(both, 'e1d resolved-then-red')
+  assert.equal(both.row.blockerDiagnosis.split('\n')[0], 'integration: verifier red: ' + D)
+  assert.equal(T.integrationBlockOf(both.row.blockerDiagnosis), 'red')
+  assert.deepEqual(JSON.parse(JSON.stringify(T.parseIntegrationMarker(both.row.blockerDiagnosis).history)), HIST2)
+  assert.deepEqual(both.row.integration.triggers, [], 'a red set-aside keeps triggers [] even after a resolved conflict')
+})
+
+test('e1e: a red blockKind without a required verify the log shows fails closed (table); red trouble or a moved head requires one', async () => {
+  const D = 'still red'
+  const drop = (log, prefix) => log.split('\n').filter((l) => !l.startsWith(prefix)).join('\n')
+  const up = ir().mergeLog // merge: up-to-date, task head = the anchor
+  const cases = [
+    ['verified true', mkI(), { verified: true, mergeLog: ir({ state: 'merged' }).mergeLog }],
+    // the reviewer's case: a STOP line and no merge: line
+    ['a STOP, no merge: line', mkI(), { mergeLog: `anchor: ${H0} base ${TB}\nmerge step STOP: fetch origin failed twice` }],
+    ['no log', mkI(), { mergeLog: '' }],
+    ['no verify was required', mkI(), { mergeLog: up }],
+    ['a wrong anchor line', mkI(), { mergeLog: ir({ state: 'merged', anchor: `${M} base ${TB}` }).mergeLog }],
+    // the reviewer's probe: up to date, no red trouble, and no task head: line to compare with the anchor
+    ['no task head: line', mkI(), { mergeLog: drop(up, 'task head: ') }],
+    ['no integration base: line', mkI(), { mergeLog: drop(ir({ state: 'merged' }).mergeLog, 'integration base: ') }],
+  ]
+  for (const [name, I, extra] of cases) {
+    const r = await run(mkArgs(I), { [ILABEL]: blockedIr(D, { blockKind: 'red', verified: false, ...extra }) })
+    clean(r)
+    setAside(r, 'e1e ' + name)
+    assert.equal(r.row.blockerDiagnosis, 'integration: ' + D, name)
+    assert.equal(T.integrationBlockOf(r.row.blockerDiagnosis), '', name)
+    assert.equal(r.row.summary, 'set aside at Integration: ' + D, name)
+  }
+  // controls: the same up-to-date log with red in the lead's trouble, or with a moved task head, required a verify
+  const ctl = [
+    ['red trouble', mkI({ trouble: ['red'] }), up],
+    ['a moved task head', mkI(), ir({ taskHead: RH }).mergeLog],
+  ]
+  for (const [name, I, mergeLog] of ctl) {
+    const r = await run(mkArgs(I), { [ILABEL]: blockedIr(D, { blockKind: 'red', verified: false, mergeLog }) })
+    clean(r)
+    setAside(r, 'e1e control ' + name)
+    assert.equal(r.row.blockerDiagnosis, 'integration: verifier red: ' + D, name)
+  }
+})
+
+test('e1f: a generic reason that would read as a named marker is escaped `integration: set aside: `', async () => {
+  for (const [D, body] of [['verifier red: x', 'verifier red: x'], ['Conflict Unresolved in a.js', 'Conflict Unresolved in a.js'],
+    ['integration: verifier red: y', 'verifier red: y']]) {
+    const r = await run(mkArgs(mkI()), { [ILABEL]: blockedIr(D) })
+    clean(r)
+    setAside(r, 'e1f ' + D)
+    assert.equal(r.row.blockerDiagnosis, 'integration: set aside: ' + body, D)
+    assert.equal(T.integrationBlockOf(r.row.blockerDiagnosis), '', D)
+    assert.equal(T.parseIntegrationMarker(r.row.blockerDiagnosis).stage, 'integrate', D)
+  }
+  assert.equal(T.integrationBlockOf('  \n INTEGRATION: Verifier Red: x'), 'red', 'the reader lowercases the first non-blank line')
+  assert.equal(T.integrationBlockOf('integration:conflict unresolved in a.js'), '', 'odd spacing reads generic')
+})
+
+test('e1g: the first line, the row reason and the summary show three paths and a count; the brief keeps every path', async () => {
+  const five = ['a.js', 'b.js', 'c.js', 'd.js', 'e.js']
+  const I = mkI({ trouble: ['conflict'], landed: [{ ...LANDED[0], files: ['e.js', 'z.js'] }] })
+  const r = await run(mkArgs(I), { [ILABEL]: blockedIr('x', { blockKind: 'conflict', mergeLog: ir({ state: 'merged', conflicts: five }).mergeLog }) })
+  clean(r)
+  setAside(r, 'e1g')
+  const d = r.row.blockerDiagnosis
+  assert.equal(d.split('\n')[0], 'integration: conflict unresolved in a.js, b.js, c.js and 2 more')
+  assert.ok(d.includes('- Conflicting paths: a.js, b.js, c.js, d.js, e.js'))
+  assert.ok(d.includes('(theirs: rename) touched e.js;'), 'the Theirs intersection reads every path')
+  assert.ok(r.row.integration.reason.startsWith('conflict unresolved in a.js, b.js, c.js and 2 more — '), r.row.integration.reason)
+  assert.ok(r.row.summary.startsWith('Integration conflict in a.js, b.js, c.js and 2 more:'), r.row.summary)
+  const three = await run(mkArgs(mkI()), { [ILABEL]: blockedIr('x', { blockKind: 'conflict', mergeLog: ir({ state: 'merged', conflicts: five.slice(0, 3) }).mergeLog }) })
+  clean(three)
+  setAside(three, 'e1g three')
+  assert.equal(three.row.blockerDiagnosis.split('\n')[0], 'integration: conflict unresolved in a.js, b.js, c.js')
+  assert.ok(!three.row.blockerDiagnosis.includes('- Theirs: '), 'no landed PR intersects: no per-PR Theirs bullet')
+  assert.ok(three.row.blockerDiagnosis.includes(`- Theirs, in full: git log --first-parent ${TB}..${B1}`))
+})
+
+test('e1h: blockKind is an optional enum on INTEGRATE_RESULT; the integrator prompt names each kind and the prior note the conflict marker', () => {
+  assert.deepEqual([...T.INTEGRATE_RESULT.properties.blockKind.enum], ['conflict', 'red', 'stop'])
+  assert.ok(!T.INTEGRATE_RESULT.required.includes('blockKind'), 'old-shape results still validate')
+  assert.equal(T.INTEGRATION_CONFLICT_MARK, 'integration: conflict unresolved in ')
+  assert.equal(T.INTEGRATION_RED_MARK, 'integration: verifier red: ')
+  const I = mkI({ trouble: ['conflict'] })
+  const p = T.integratorPrompt(mkTask(), mkArgs(I), I)
+  for (const s of ['blockKind "conflict", mergeState "none", mergeCommit ""', 'blockKind "red"', 'blockKind "stop"', 'keeping BOTH intents', 'merge --abort', 'VERBATIM into mergeLog']) {
+    assert.ok(p.includes(s), `integrator prompt: ${s}`)
+  }
+  assert.ok(T.INTEGRATION_PRIOR_NOTE.includes('`integration: conflict unresolved in …` is an Integration conflict'))
+  assert.ok(T.INTEGRATION_PRIOR_NOTE.includes('The task brief and the review history below are\nthe contract'))
+  assert.ok(p.includes(T.INTEGRATION_PRIOR_NOTE))
 })
 
 test('e2: a dead integrator → a transient set-aside (one in-run retry)', async () => {
