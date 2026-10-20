@@ -40,6 +40,8 @@ function checkRunRecord(md) {
   need('bind-run after every launch', /`bind-run --tasks <slug> --run-id <runId> --call task\|revise\|integrate` right after every Workflow launch/.test(p))
   need('bind-run integrate resume', p.includes('`--call integrate --resumed-from <old>`'))
   need('journal dir source', p.includes('CLAUDE_CODE_SESSION_ID') && p.includes('--journal-dir <abs>'))
+  need('journal dir is workflows/, never the Transcript dir', p.includes("`--journal-dir <abs>`: the session's `workflows/` dir, "
+    + "never the Workflow tool's printed Transcript dir (`<session>/subagents/workflows/<runId>`), which `bind-run` refuses"))
   need('restart routing first', /\*Restart routing\* is resolved first/.test(p) && p.includes('`--start resume`') && p.includes('`--start revise`'))
   need('step 1.2 revise', /step 1\.2's seeded revise passes `--start revise`/.test(p))
   need('merge hold start', p.includes('`hold --tasks <slug> --hold merge --state start` on entering a *Merge hold*') && p.includes('exit 7'))
@@ -105,6 +107,7 @@ test("run_record.py's reader rules carry the pairing rules", () => {
 const controls = [
   ['best-effort', (t) => t.replace('and never route on its exit', 'and route on its exit')],
   ['bind-run integrate resume', (t) => t.replace('`--call integrate --resumed-from <old>`', '`--call resume`')],
+  ['journal dir is workflows/, never the Transcript dir', (t) => t.replace("the session's `workflows/` dir, never the Workflow tool's printed Transcript dir", "the Workflow tool's printed Transcript dir")],
   ['merge hold end before launch and set-aside', (t) => t.replace("before each release's `merge-task.sh` launch and before a decline's set-aside row", "after each release's `merge-task.sh` launch")],
   ['record-pause', (t) => t.replace('`record-pause --rollout <rollout-note>` right after hard-pause step 1', '`record-pause --rollout <rollout-note>` when convenient')],
   ['hard pause step 1 points to record-pause', (t) => t.replace('Then run `reconcile-rollout.py record-pause --rollout <rollout-note> || true` (§4.5 *Run record*).', '')],
