@@ -1493,8 +1493,9 @@ function chainTask(h, rollout, slug, extra = []) {
 }
 
 // chain-a: c2 set aside (blocked) and picked up by Leg 2 with no act; c4 set aside at a gate and signed in the record;
-// Leg 1 halts holding c3, the halt is cleared, repair records a restart, Leg 2 takes c3 over; c1's smoke fails and its
-// fix names c1 in fixes:, an Escape captured in the window.
+// Leg 1 halts holding c3, the halt is cleared, repair restarts Leg 2 (repair § 7 (e)'s two lines: step 2's pending,
+// step 3's started), Leg 2 takes c3 over; c1's smoke fails and its fix names c1 in fixes:, an Escape captured in the
+// window.
 const CHAIN_A = [
   `- ${CAT('10:00')} Leg 1 began: leg-1 session s1 in cc-demo from /work`,
   `- ${CAT('10:05')} Leg 1 claimed [[c1]]`, `- ${CAT('10:20')} Leg 1 done [[c1]] (verify pass)`,
@@ -1502,6 +1503,7 @@ const CHAIN_A = [
   `- ${CAT('10:31')} Leg 1 claimed [[c4]]`, `- ${CAT('10:33')} Leg 1 set aside [[c4]] (gate-pending): a spend gate`,
   `- ${CAT('10:34')} Leg 1 claimed [[c3]]`, `- ${CAT('10:40')} Leg 1 closed: halted: a revert conflict`,
   `- ${CAT('10:45')} halt cleared: resolved by hand`,
+  `- ${CAT('10:49')} restart: Leg 2 pending (session r1)`,
   `- ${CAT('10:50')} restart: Leg 2 started s2`,
   `- ${CAT('11:00')} Leg 2 began: leg-2 session s2 in cc-demo from /work`,
   `- ${CAT('11:01')} Leg 2 took [[c3]] (inherited from Leg 1)`, `- ${CAT('11:20')} Leg 2 done [[c3]] (verify pass)`,
@@ -1536,6 +1538,7 @@ test('span scores a serial chain through serial-score.py (no fold, settings or s
   assert.ok(c.flags.some((f) => f.startsWith('a serial chain (ADR 0040): scored by serial-score.py')), c.flags.join('\n'))
   assert.ok(!c.flags.some((f) => /fold-journals|score\.py exited|rollout-settings|Project root/.test(f)), c.flags.join('\n'))
   assert.equal(c.chain, sc.chain)
+  assert.equal(sc.handsOff.notCounted.restarts, 1, 'serial-score folds repair § 7\'s two lines into one restart, as span does')
   assert.deepEqual([c.headline.handsOffRate, c.headline.quality, c.headline.reviewChurn], [0.6, 0.8, null],
     'c4 signed and c3 behind a cleared halt: 3 of 5 hands-off; one Escape (c1) of five')
   assert.equal(c.headline.throughput, sc.headline.throughput)
@@ -1568,7 +1571,8 @@ test('span reads a chain\'s friction from leg.py status: set-asides, a halt clea
   assert.match(cleared.detail, /^Leg 1's halt cleared: resolved by hand$/)
   assert.equal(cleared.halted, 'a revert conflict', 'the halted Leg\'s own close reason, where the trace starts')
   assert.equal(by('ask').find((x) => x.act === 'signOff').halted, undefined, 'a record ask carries no halted')
-  assert.deepEqual(by('restart').map((x) => [x.leg, x.how, x.started, x.at]), [[2, 'started', 's2', CZ('10:50')]])
+  assert.deepEqual(by('restart').map((x) => [x.leg, x.how, x.started, x.manual, x.session, x.began, x.at]),
+    [[2, 'started', 's2', null, 'r1', CZ('11:00'), CZ('10:49')]], 'one restart for its pending and started lines, at the pending one')
   assert.deepEqual(by('escape').map((x) => [x.task, x.source, x.at, x.inWindow]), [['c1', 'fixes', '2026-10-12', true]])
 })
 
@@ -1608,4 +1612,69 @@ test('a chain set-aside\'s act counts through the minute of the Leg-log pick-up 
   const asides = Object.fromEntries(c.friction.filter((x) => x.kind === 'set-aside').map((x) => [x.task, x]))
   assert.deepEqual([asides.g1.movedBy, asides.g1.mover], ['gate-signed (standing)', null])
   assert.deepEqual([asides.g2.movedBy, asides.g2.mover], ['unrecorded', { kind: 'claimed', at: CZ('10:13'), leg: 1 }])
+})
+
+test('a chain\'s restarts fold per restart: a lone pending reads pending, a --replace re-mark is a second restart, serial-score counts them alike', (t) => {
+  // repair § 7 (e) writes step 2's `pending` line, then step 3's `started` or step 4's `manual`: one restart. A pending
+  // with nothing after it is a restart marked and never started; a `--replace` re-mark (after a pending, or after an
+  // answered restart whose Session died before `begin`) is a restart of its own. Only the restart standing when the Leg
+  // began carries `began`.
+  const h = setup(t)
+  chainTask(h, 'chain-d', 'd1')
+  serialNote(h, 'chain-d', ['d1'], [
+    `- ${CAT('10:00')} Leg 1 began: leg-1 session s1 in cc-demo from /work`,
+    `- ${CAT('10:01')} Leg 1 claimed [[d1]]`, `- ${CAT('10:05')} Leg 1 done [[d1]] (verify pass)`,
+    `- ${CAT('10:06')} Leg 1 closed: stopped: out of time`,
+    `- ${CAT('10:10')} restart: Leg 2 pending (session r9)`,
+  ])
+  for (const s of ['e1', 'e2']) chainTask(h, 'chain-e', s)
+  serialNote(h, 'chain-e', ['e1', 'e2'], [
+    `- ${CAT('10:00')} Leg 1 began: leg-1 session s1 in cc-demo from /work`,
+    `- ${CAT('10:01')} Leg 1 claimed [[e1]]`, `- ${CAT('10:05')} Leg 1 done [[e1]] (verify pass)`,
+    `- ${CAT('10:06')} Leg 1 closed: stopped: out of time`,
+    `- ${CAT('10:10')} restart: Leg 2 pending (session r1)`, `- ${CAT('10:11')} restart: Leg 2 started s2`,
+    `- ${CAT('10:30')} restart: Leg 2 pending (session r2)`,
+    `- ${CAT('10:35')} restart: Leg 2 pending (session r3)`, `- ${CAT('10:36')} restart: Leg 2 manual (no host tool)`,
+    `- ${CAT('10:40')} Leg 2 began: leg-2 session s4 in cc-demo from /work`,
+    `- ${CAT('10:41')} Leg 2 claimed [[e2]]`, `- ${CAT('10:50')} Leg 2 done [[e2]] (verify pass)`,
+  ])
+  const s = span(h, [], { since: KSINCE, until: KUNTIL })
+  const restarts = (slug) => entryOf(s, slug).friction.filter((x) => x.kind === 'restart')
+    .map((x) => [x.leg, x.how, x.started, x.manual, x.session, x.began, x.at])
+  const counted = (slug) => JSON.parse(fs.readFileSync(entryOf(s, slug).score, 'utf8')).handsOff.notCounted.restarts
+  assert.deepEqual(restarts('chain-d'), [[2, 'pending', null, null, 'r9', null, CZ('10:10')]],
+    'a lone pending is one restart, marked and never started')
+  assert.equal(counted('chain-d'), 1)
+  assert.deepEqual(restarts('chain-e'), [
+    [2, 'started', 's2', null, 'r1', null, CZ('10:10')],
+    [2, 'pending', null, null, 'r2', null, CZ('10:30')],
+    [2, 'manual', null, 'no host tool', 'r3', CZ('10:40'), CZ('10:35')],
+  ], 'each re-mark is a restart of its own; only the last one started the Leg')
+  assert.equal(counted('chain-e'), 3, 'serial-score counts the folded restarts, never the six lines')
+})
+
+test('a chain restart is read as the Leg log stood at until, and its pending line decides its window', (t) => {
+  // chain-a's restart: pending at 10:49, started at 10:50, Leg 2 began at 11:00.
+  const h = setup(t)
+  chainA(h)
+  const at = (until, since = KSINCE) => entryOf(span(h, [], { since, until }), 'chain-a').friction
+    .filter((x) => x.kind === 'restart').map((x) => [x.how, x.started, x.began, x.at])
+  assert.deepEqual(at(CAT('10:49')), [['pending', null, null, CZ('10:49')]], 'a reading before step 3 sees it pending')
+  assert.deepEqual(at(KUNTIL, CAT('10:50')), [], 'its started line is in the window, its pending line is not: last week\'s')
+})
+
+test('a chain read through an early record line keeps leg.py status\'s chain state when serial-score.py exits non-zero', (t) => {
+  // The record has a line in the window, the Leg log only after until: serial-score.py's --until is before Leg 1 began
+  // (exit 2), so there is no score, and chain falls back to the status read the friction uses.
+  const h = setup(t)
+  chainTask(h, 'chain-g', 'g1')
+  emitAll(h, 'chain-g', [[CZ('10:55'), 'answer-recorded', 'g1', { answerKind: 'decision', form: 'hand-back' }]])
+  serialNote(h, 'chain-g', ['g1'], [`- 2026-10-16T09:00+11:00 Leg 1 began: leg-1 session s1 in cc-demo from /work`,
+    `- 2026-10-16T09:05+11:00 Leg 1 claimed [[g1]]`])
+  const g = entryOf(span(h, [], { since: KSINCE, until: KUNTIL }), 'chain-g')
+  assert.equal(g.shape, 'serial')
+  assert.equal(g.score, null, 'no score')
+  assert.ok(g.flags.some((f) => /^serial-score\.py exited 2: /.test(f)), g.flags.join('\n'))
+  assert.equal(g.chain, 'live', 'the leg.py status read\'s chain state')
+  assert.deepEqual(g.friction.filter((x) => x.kind === 'ask').map((x) => [x.act, x.task]), [['answer', 'g1']])
 })

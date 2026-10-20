@@ -335,7 +335,12 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   *Gates, before any write*, else *Done or set aside*) or to `skills/execute/legs.md` § Preflight (an MCP namespace
   that did not answer), and by its `movedBy` to what moved it on: a record act, or `unrecorded` when a later Leg
   picked it up (`mover`) with none, read as a parallel unrecorded set-aside is (below). A `restart` is repair § 7
-  starting a Leg that no hand-over started: trace why the last Leg did not hand over. An `escape` is a fix task naming
+  starting a Leg that no hand-over started, one item per restart, not per line: its step 2 `pending` line and the
+  step 3 `started` or step 4 `manual` line after it read as one, at the `pending` line's stamp, and its `how` is the
+  latest line's (a `--replace` re-mark is a second restart). Trace why the last Leg did not hand over. A `how:
+  pending` with `began` null is different: step 2 ran with no step 3 or 4 after it, so trace why the start never
+  happened (its `session` is the repair that marked it), not the hand-over; with `began` set the Leg did start, by a
+  route that wrote no line. An `escape` is a fix task naming
   a chain task in `fixes:` (`skills/execute/legs.md` § Fix tasks), traced to the smoke Verify or review that should
   have caught it, only when its `inWindow` is true.
 

@@ -207,6 +207,8 @@ const KINDS8 = 'of eight kinds (`ask`, `set-aside`, `retry`, `descope`, `repair`
 // 11 reads its friction by the chain's rules.
 const SERIAL_S10 = ['scores it through `serial-score.py`', 'never with fold-journals, the settings or score.py', 'never makes it a knob candidate']
 const SERIAL_S11 = 'read by the chain\'s rules (`skills/execute/legs.md`, ADR 0040), never as a queue\'s'
+// A restart reads once per restart, never once per `restart:` line, and a pending one is traced to the start, not the hand-over.
+const SERIAL_RESTART = ['one item per restart, not per line', 'so trace why the start never happened']
 const GRILLS = ['orient § 5', `${RESHUFFLE} § R2`, `${RESHUFFLE} § R3`, '`${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` § How a fork comes back', 'orient § 7', 'schedule § 3.5', 'schedule § 3.6']
 const CANNOT = ['writes no dated `repair:` line', 'a set-aside whose `movedBy` is `unrecorded`', '/fresh-review churn names no rollout',
   'An escapes-only rollout\'s breaches are not counted', 'is read in the week its record has lines but leaves no baseline',
@@ -244,7 +246,7 @@ function weeklyFails(files) {
   const s11 = collapse(sectionOf(s, /^### 11\. /))
   const s10 = collapse(sectionOf(s, /^### 10\. /))
   if (!s11.includes(KINDS8) || !HUMAN_FIX.every((n) => s11.includes(n)) || !s11.includes(SERIAL_S11) ||
-    !SERIAL_S10.every((n) => s10.includes(n))) out.push('w5')
+    !SERIAL_S10.every((n) => s10.includes(n)) || !SERIAL_RESTART.every((n) => s11.includes(n))) out.push('w5')
   const s15 = collapse(sectionOf(s, /^### 15\. /))
   if (!s15.includes('a decision task only with a rule proposal or a held trade')) out.push('w6')
   const o2 = collapse(sectionOf(files.orient, /^### 2\. Audit/))
@@ -586,6 +588,7 @@ test('control: step 10 scoring a serial chain the parallel way, or making it a k
   weekly('skill:serial-knob', cut('skill', 'never makes it a knob candidate', 'may make it a knob candidate'), 'w5')
   weekly('skill:serial-11', cut('skill', 'never as a queue\'s', 'as a queue\'s'), 'w5')
   weekly('skill:restart', cut('skill', '`churn`, and a serial chain\'s `restart`)', '`churn`)'), 'w5')
+  weekly('skill:restart-fold', cut('skill', 'one item per restart, not per line', 'one item per line'), 'w5')
 })
 
 test('control: step 11 tracing the standing approval as his ask, without the sign-off bullet, or not reading ## Approved gates, fails weekly (w5)', () => {
