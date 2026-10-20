@@ -1468,3 +1468,119 @@ test('the Verify week: one watch line per Watch, a rule line and the decision ta
   ok(h2, watchArgs(sp, ['week-a']))
   assert.equal(ok(h2, ['decide', '--span', sp, '--tasks-dir', h2.tasks]).stdout, 'no rule proposal or held trade: no decision task\n')
 })
+
+// ---- span over a serial chain (p27-2, ADR 0040) -------------------------------------------------------------------
+// A `shape: serial` note is scored through serial-score.py (no fold, no settings, no score.py), never a knob
+// candidate, and its friction comes from leg.py status beside the record's acts; a parallel rollout in the same window
+// is read as before (the control). The Leg log is written in leg.py's line forms, its stamps in Melbourne's +11:00.
+
+const CAT = (hm) => `2026-10-12T${hm}+11:00`
+const CZ = (hm) => new Date(CAT(hm)).toISOString()
+
+// A serial note and its task notes under h.tasks: its Queue (one row per slug) and its Leg log.
+function serialNote(h, slug, rows, log, { archived = false } = {}) {
+  const queue = rows.map((s, i) => `| ${i + 1} | [[${s}\\|${s}]] | \`cc-demo\` from \`/work\` | \`ext:x\` |`)
+  const p = path.join(archived ? path.join(h.tasks, 'Archive', 'Rollouts') : h.tasks, `${slug}.md`)
+  fs.writeFileSync(p, ['---', 'tags:', '  - task', '  - rollout', 'status: open', 'priority: high', 'projects:', '  - "[[Demo]]"',
+    'captured: 2026-10-12', 'protocol_version: 5', 'shape: serial', 'surfaces:', '  - "ext:x"', '---', '', '## Notes', '',
+    'Serial-rollout plan.', '', '## Queue', '', '| # | Task | Launch | Surfaces |', '|---|---|---|---|', ...queue, '',
+    '## Post-rollout', '', 'Rollout-specific items go here:', '', '## Leg log', '', ...log, ''].join('\n'))
+  return p
+}
+function chainTask(h, rollout, slug, extra = []) {
+  fs.writeFileSync(path.join(h.tasks, `${slug}.md`), ['---', 'tags: [task]', 'status: done', 'captured: 2026-10-12', 'projects:',
+    '  - "[[Demo]]"', `rollout: "[[${rollout}]]"`, ...extra, '---', '', '## Notes', '', `Do ${slug}.`, ''].join('\n'))
+}
+
+// chain-a: c2 set aside (blocked) and picked up by Leg 2 with no act; c4 set aside at a gate and signed in the record;
+// Leg 1 halts holding c3, the halt is cleared, repair records a restart, Leg 2 takes c3 over; c1's smoke fails and its
+// fix names c1 in fixes:, an Escape captured in the window.
+const CHAIN_A = [
+  `- ${CAT('10:00')} Leg 1 began: leg-1 session s1 in cc-demo from /work`,
+  `- ${CAT('10:05')} Leg 1 claimed [[c1]]`, `- ${CAT('10:20')} Leg 1 done [[c1]] (verify pass)`,
+  `- ${CAT('10:21')} Leg 1 claimed [[c2]]`, `- ${CAT('10:30')} Leg 1 set aside [[c2]] (blocked): needs a hand`,
+  `- ${CAT('10:31')} Leg 1 claimed [[c4]]`, `- ${CAT('10:33')} Leg 1 set aside [[c4]] (gate-pending): a spend gate`,
+  `- ${CAT('10:34')} Leg 1 claimed [[c3]]`, `- ${CAT('10:40')} Leg 1 closed: halted: a revert conflict`,
+  `- ${CAT('10:45')} halt cleared: resolved by hand`,
+  `- ${CAT('10:50')} restart: Leg 2 started s2`,
+  `- ${CAT('11:00')} Leg 2 began: leg-2 session s2 in cc-demo from /work`,
+  `- ${CAT('11:01')} Leg 2 took [[c3]] (inherited from Leg 1)`, `- ${CAT('11:20')} Leg 2 done [[c3]] (verify pass)`,
+  `- ${CAT('11:21')} Leg 2 claimed [[c2]]`, `- ${CAT('11:40')} Leg 2 done [[c2]] (verify pass)`,
+  `- ${CAT('11:41')} Leg 2 claimed [[c4]]`, `- ${CAT('11:50')} Leg 2 done [[c4]] (verify pass)`,
+  `- ${CAT('11:51')} Leg 2 smoke: [[c1]] fail: a.txt is wrong`,
+  `- ${CAT('11:52')} Leg 2 filed [[c1-fix]] (verifies [[c1]]; cause own)`,
+  `- ${CAT('11:53')} Leg 2 claimed [[c1-fix]]`, `- ${CAT('11:59')} Leg 2 done [[c1-fix]] (verify pass)`,
+]
+function chainA(h) {
+  const rows = ['c1', 'c2', 'c4', 'c3', 'c1-fix']
+  for (const s of rows) chainTask(h, 'chain-a', s, s === 'c1-fix' ? ['verifies: "[[c1]]"', 'fixes: "[[c1]]"'] : [])
+  emitAll(h, 'chain-a', [[CZ('10:55'), 'gate-signed', 'c4', { standing: false, gates: 1 }]])
+  return serialNote(h, 'chain-a', rows, CHAIN_A)
+}
+
+test('span scores a serial chain through serial-score.py (no fold, settings or score.py) and a parallel rollout as before', (t) => {
+  const h = setup(t)
+  fs.writeFileSync(path.join(h.home, 'rollouts.toml'), '[defaults]\nparallel_ceiling = 3\n') // span's --config
+  emitAll(h, 'week-p', saturated('p', 10, 3))
+  rolloutNote(h, 'week-p')
+  chainA(h)
+  const s = span(h, ['--fold'], { since: KSINCE, until: KUNTIL })
+  assert.deepEqual(s.rollouts.map((r) => [r.rollout, r.mode, r.shape]), [['chain-a', 'read', 'serial'], ['week-p', 'read', 'parallel']])
+  const c = entryOf(s, 'chain-a')
+  const sc = JSON.parse(fs.readFileSync(c.score, 'utf8'))
+  assert.equal(sc.shape, 'serial', 'serial-score.py wrote the score')
+  assert.ok(!('guardrails' in sc) && !('load' in sc), 'no score.py output for the chain')
+  assert.equal(c.settingsFile, undefined, 'no settings resolve')
+  assert.ok(!fs.existsSync(path.join(h.out, 'chain-a.settings.json')))
+  assert.deepEqual([c.root, c.repo, c.binding, c.proposals, c.breached], [null, null, null, [], []])
+  assert.ok(c.flags.some((f) => f.startsWith('a serial chain (ADR 0040): scored by serial-score.py')), c.flags.join('\n'))
+  assert.ok(!c.flags.some((f) => /fold-journals|score\.py exited|rollout-settings|Project root/.test(f)), c.flags.join('\n'))
+  assert.equal(c.chain, sc.chain)
+  assert.deepEqual([c.headline.handsOffRate, c.headline.quality, c.headline.reviewChurn], [0.6, 0.8, null],
+    'c4 signed and c3 behind a cleared halt: 3 of 5 hands-off; one Escape (c1) of five')
+  assert.equal(c.headline.throughput, sc.headline.throughput)
+  // the parallel control: settings, score.py, and a knob candidate
+  const p = entryOf(s, 'week-p')
+  assert.ok(p.settingsFile && fs.existsSync(p.settingsFile))
+  const psc = JSON.parse(fs.readFileSync(p.score, 'utf8'))
+  assert.ok('guardrails' in psc && psc.shape !== 'serial', 'score.py scored the parallel rollout')
+  assert.ok(p.proposals.length > 0 && p.proposals.every((q) => typeof q.knob_key === 'string'))
+  const named = [...s.knobs.land, ...s.knobs.held, ...s.knobs.revert].map((k) => k.rollout)
+  assert.ok(named.includes('week-p'), JSON.stringify(s.knobs))
+  assert.ok(!named.includes('chain-a'), 'a serial chain is never a knob candidate')
+})
+
+test('span reads a chain\'s friction from leg.py status: set-asides, a halt clear as an ask, a restart, its fixes: Escape', (t) => {
+  const h = setup(t)
+  chainA(h)
+  const c = entryOf(span(h, [], { since: KSINCE, until: KUNTIL }), 'chain-a')
+  const by = (k) => c.friction.filter((x) => x.kind === k)
+  const asides = Object.fromEntries(by('set-aside').map((x) => [x.task, x]))
+  assert.deepEqual(Object.keys(asides).sort(), ['c2', 'c4'])
+  assert.deepEqual([asides.c2.at, asides.c2.leg, asides.c2.stage, asides.c2.status, asides.c2.movedBy, asides.c2.mover],
+    [CZ('10:30'), 1, 'block', 'blocked', 'unrecorded', { kind: 'claimed', at: CZ('11:21'), leg: 2 }])
+  assert.deepEqual(asides.c2.explainedIn, [], 'its note holds no ## Needs you or ## Integration log')
+  assert.equal(asides.c2.taskNote, path.join(h.tasks, 'c2.md'))
+  assert.deepEqual([asides.c4.stage, asides.c4.movedBy, asides.c4.mover], ['gate', 'gate-signed', null])
+  const asks = by('ask').map((x) => [x.act, x.task, x.at])
+  assert.deepEqual(asks.sort(), [['haltCleared', 'c3', CZ('10:45')], ['signOff', 'c4', CZ('10:55')]].sort())
+  assert.match(by('ask').find((x) => x.act === 'haltCleared').detail, /^Leg 1's halt cleared: resolved by hand$/)
+  assert.deepEqual(by('restart').map((x) => [x.leg, x.how, x.started, x.at]), [[2, 'started', 's2', CZ('10:50')]])
+  assert.deepEqual(by('escape').map((x) => [x.task, x.source, x.at, x.inWindow]), [['c1', 'fixes', '2026-10-12', true]])
+})
+
+test('span reads a hands-off chain with no Run record through its Leg log; one whose log is outside the window is not read', (t) => {
+  const h = setup(t)
+  chainTask(h, 'chain-b', 'b1')
+  serialNote(h, 'chain-b', ['b1'], [`- ${CAT('09:00')} Leg 1 began: leg-1 session s1 in cc-demo from /work`,
+    `- ${CAT('09:05')} Leg 1 claimed [[b1]]`, `- ${CAT('09:30')} Leg 1 done [[b1]] (verify pass)`], { archived: true })
+  chainTask(h, 'chain-old', 'o1')
+  serialNote(h, 'chain-old', ['o1'], [`- 2026-09-01T09:00+10:00 Leg 1 began: leg-1 session s1 in cc-demo from /work`,
+    `- 2026-09-01T09:05+10:00 Leg 1 claimed [[o1]]`, `- 2026-09-01T09:30+10:00 Leg 1 done [[o1]] (verify pass)`])
+  const s = span(h, [], { since: KSINCE, until: KUNTIL })
+  assert.deepEqual(s.rollouts.map((r) => [r.rollout, r.mode, r.shape]), [['chain-b', 'read', 'serial']])
+  const b = entryOf(s, 'chain-b')
+  assert.equal(b.note, path.join(h.tasks, 'Archive', 'Rollouts', 'chain-b.md'))
+  assert.deepEqual([b.headline.handsOffRate, b.friction], [1, []])
+  assert.equal(JSON.parse(fs.readFileSync(b.score, 'utf8')).merges.count, 1)
+})

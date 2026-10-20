@@ -202,13 +202,18 @@ const HUMAN_FIX = ['For each `set-aside` item whose `movedBy` is `unrecorded`, r
   'is Lachy\'s sign-off with no `gate-signed` line: trace it as a sign-off `ask`',
   'A Human fix (ADR 0035) in `## Needs you`, `## Integration log` or the rollout note\'s `## Notes` is traced like a mid-run ask',
   'When none of them says what moved it, name it as unexplained']
-const KINDS7 = 'of seven kinds (`ask`, `set-aside`, `retry`, `descope`, `repair`, `escape`, `churn`)'
+const KINDS8 = 'of eight kinds (`ask`, `set-aside`, `retry`, `descope`, `repair`, `escape`, `churn`, and a serial chain\'s `restart`)'
+// A serial chain in the weekly span (p27-2, ADR 0040): step 10 scores it through serial-score.py, never a knob, and step
+// 11 reads its friction by the chain's rules.
+const SERIAL_S10 = ['scores it through `serial-score.py`', 'never with fold-journals, the settings or score.py', 'never makes it a knob candidate']
+const SERIAL_S11 = 'read by the chain\'s rules (`skills/execute/legs.md`, ADR 0040), never as a queue\'s'
 const GRILLS = ['orient § 5', `${RESHUFFLE} § R2`, `${RESHUFFLE} § R3`, '`${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` § How a fork comes back', 'orient § 7', 'schedule § 3.5', 'schedule § 3.6']
 const CANNOT = ['writes no dated `repair:` line', 'a set-aside whose `movedBy` is `unrecorded`', '/fresh-review churn names no rollout',
   'An escapes-only rollout\'s breaches are not counted', 'is read in the week its record has lines but leaves no baseline',
   'A single-rollout Watch is offered only beside a rule proposal', 'A declined Watch seen again in one rollout is neither new nor offered',
   'a gate signed on the note with no `gate-signed` line', 'a decision task dropped unanswered decides nothing',
-  'A no holds for that (knob id, `from`) whatever later rollouts show', 'A held trade on a partial window is held `partial window`']
+  'A no holds for that (knob id, `from`) whatever later rollouts show', 'A held trade on a partial window is held `partial window`',
+  'A serial chain\'s Escapes come from `fixes:` alone and are read only in a week span reads the chain']
 // A held trade's route (p22-7, w16): step 14 names it, step 15 lists it once, § Deciding answers it.
 const TRADE_S14 = 'step 15\'s `decide` puts it in the decision task'
 const TRADE_S15 = 'A held trade is listed once per (knob id, `from`)'
@@ -237,7 +242,9 @@ function weeklyFails(files) {
   const fenced = fencedLines(s)
   if (fenced.filter((l) => /reflect\.py/.test(l)).some((l) => !l.startsWith(PY)) || fenced.some((l) => /reflections\.jsonl/.test(l))) out.push('w4')
   const s11 = collapse(sectionOf(s, /^### 11\. /))
-  if (!s11.includes(KINDS7) || !HUMAN_FIX.every((n) => s11.includes(n))) out.push('w5')
+  const s10 = collapse(sectionOf(s, /^### 10\. /))
+  if (!s11.includes(KINDS8) || !HUMAN_FIX.every((n) => s11.includes(n)) || !s11.includes(SERIAL_S11) ||
+    !SERIAL_S10.every((n) => s10.includes(n))) out.push('w5')
   const s15 = collapse(sectionOf(s, /^### 15\. /))
   if (!s15.includes('a decision task only with a rule proposal or a held trade')) out.push('w6')
   const o2 = collapse(sectionOf(files.orient, /^### 2\. Audit/))
@@ -574,6 +581,13 @@ test('control: step 11 without the Human-fix paragraph, or without a friction ki
   weekly('skill:repair', swap('skill', '`descope`, `repair`,\n`escape`', '`descope`,\n`escape`'), 'w5')
 })
 
+test('control: step 10 scoring a serial chain the parallel way, or making it a knob, or step 11 reading it as a queue, fails weekly (w5)', () => {
+  weekly('skill:serial-score', cut('skill', 'scores it through `serial-score.py`', 'scores it through score.py'), 'w5')
+  weekly('skill:serial-knob', cut('skill', 'never makes it a knob candidate', 'may make it a knob candidate'), 'w5')
+  weekly('skill:serial-11', cut('skill', 'never as a queue\'s', 'as a queue\'s'), 'w5')
+  weekly('skill:restart', cut('skill', '`churn`, and a serial chain\'s `restart`)', '`churn`)'), 'w5')
+})
+
 test('control: step 11 tracing the standing approval as his ask, without the sign-off bullet, or not reading ## Approved gates, fails weekly (w5)', () => {
   weekly('skill:standing', cut('skill', 'report it as what moved the task, never trace it as his ask', 'trace it as his ask'), 'w5')
   weekly('skill:signoff', dropItem('skill', '- An `## Approved gates: sign-off` entry'), 'w5')
@@ -596,6 +610,7 @@ test('control: a weekly cannot-show line dropped fails weekly (w8)', () => {
   weekly('skill:holds', cut('skill', 'A no holds for that (knob id, `from`) whatever later rollouts show', 'A no holds'), 'w8')
   weekly('skill:gate', cut('skill', ', nor does a gate signed on the note with no `gate-signed` line', ''), 'w8')
   weekly('skill:partial', cut('skill', 'A held trade on a partial window is held `partial window`', 'A held trade on a partial window waits'), 'w8')
+  weekly('skill:serial', dropItem('skill', '- A serial chain\'s Escapes come from `fixes:` alone'), 'w8')
 })
 
 test('control: the ask bullet without orient § 5, or with a short R2 citation, fails weekly (w9)', () => {

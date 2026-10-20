@@ -287,14 +287,17 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py span --fold --ou
 It folds each read rollout's journals and scores it, reads its friction and close line, sweeps the Escapes over
 every record (ADR 0037 d4) and the dated `repair:` lines over every record's rollout note, joins the Grade log to what
 followed each grade (`skills/reflect/scripts/grades.py`, loaded by span, whose header holds the join's rules), and lists
-the open Watches and the knob candidates; its header holds every rule. Add `--since <TS>` and `--until <TS>` only on Lachy's word: by
+the open Watches and the knob candidates; its header holds every rule. A serial chain (`shape: serial`, ADR 0040) is
+read when its Run record or its Leg log has a line in the window (a hands-off chain records nothing): span
+scores it through `serial-score.py`, as § 1 does, never with fold-journals, the settings or score.py, and never makes
+it a knob candidate (its entry's `shape` is `serial`, with the chain state in `chain`). Add `--since <TS>` and `--until <TS>` only on Lachy's word: by
 default it starts where the last Reflection ended. Read the whole `span.json`. Exit 1 or 2 stops the reading: quote
 its stderr line. Never re-run it after a write (step 12 on): a new span is a new Reflection, with a new id.
 
 ### 11. The reading
 
-For each rollout, read its `friction` items, of seven kinds (`ask`, `set-aside`, `retry`, `descope`, `repair`,
-`escape`, `churn`), and trace each to the skill rule or ADR that produced it:
+For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`, `retry`, `descope`, `repair`,
+`escape`, `churn`, and a serial chain's `restart`), and trace each to the skill rule or ADR that produced it:
 
 - An `ask` (a Recorded answer, a sign-off, a retry hand-back, a merge hold, a RACE decision, a git-env hold) is a
   mid-run ask. A mid-run ask is traced to the grill that should have asked it before the run: orient § 5
@@ -322,6 +325,15 @@ For each rollout, read its `friction` items, of seven kinds (`ask`, `set-aside`,
 - An `escape` is traced to the review that should have caught it (execute § 5, ADR 0037 d7), and only when its
   `inWindow` is true: an Escape counts in the week it surfaced, against the rollout that landed the work.
 - A `churn` item is a review round that only answered the last round's fix (execute § 5): trace what the fix broke.
+- A serial chain's (`shape: serial`) items come from its record's acts and its Leg log (`leg.py status`), read by the
+  chain's rules (`skills/execute/legs.md`, ADR 0040), never as a queue's: it has no Slots, lane, retry, descope, churn
+  or breach. A `haltCleared` ask is Lachy clearing a Leg's halt (legs.md § The task loop, a `--revert` that stands, and
+  § Begin): trace what halted the Leg. A `set-aside` (its `leg`, its leg.py `status`) is traced to legs.md § The task
+  loop (a gate under *Gates, before any write*, else *Done or set aside*), and by its `movedBy` to
+  what moved it on: a record act, or `unrecorded` when a later Leg picked it up (`mover`) with none, read as a
+  parallel unrecorded set-aside is (below). A `restart` is repair § 7 starting a Leg that no hand-over started: trace
+  why the last Leg did not hand over. An `escape` is a fix task naming a chain task in `fixes:` (legs.md § Fix tasks),
+  traced to the smoke Verify or review that should have caught it, only when its `inWindow` is true.
 
 For each `set-aside` item whose `movedBy` is `unrecorded`, read what its `explainedIn` names: its `taskNote`'s
 `## Needs you` and `## Integration log`, a gate set-aside's `## Approved gates`, and the rollout note's `## Notes`
@@ -531,6 +543,8 @@ or `exists`). An item left open keeps the task open.
   and traces none of it.
 - The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
   `cannotShow`), and dates an undated fixer by its mtime.
+- A serial chain's Escapes come from `fixes:` alone and are read only in a week span reads the chain (a line in its
+  Run record or its Leg log in the window): the Escapes sweep reads `merged` lines, which a chain never records.
 - An escapes-only rollout's breaches are not counted, nor a repairs-only one's: a Guardrail breach counts in the week
   its run ends.
 - A closed rollout with no close line (a dropped one, one archived unscored, or a close that was not scored) is read
