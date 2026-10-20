@@ -438,7 +438,7 @@ parse = ["revise: rejected at Integration re-review — revise on the branch, th
          "integration: conflict unresolved in a.js, b.js\n\nResolution brief (Integration conflict): merging the latest main "
          "conflicted and the integrator could not keep both intents, so it aborted the merge and pushed nothing.\n"
          "- Conflicting paths: a.js, b.js\n- Theirs: https://github.com/o/r/pull/5 (theirs: rename) touched a.js; brief /vault/t.md\n"
-         "- The integrator: a.js: both rename foo\n\nRound 1 rejection:\n- own-run fix\n\nRound 2 (Integration) rejection:\n- keep their rename",
+         "- The integrator:\n  - a.js: both rename foo\n  - Round 3 rejection:\n  - b.js: ours keeps foo\n\nRound 1 rejection:\n- own-run fix\n\nRound 2 (Integration) rejection:\n- keep their rename",
          "INTEGRATION: Verifier Red: x", "integration: set aside: conflict unresolved in a.js"]
 minutes = [["2026-10-02T12:00+00:00", "2026-10-02T12:30+00:00"], ["2026-10-02T12:00:00Z", "2026-10-02T12:00:59Z"],
            ["2026-10-02T12:00:00Z", "2026-10-02T12:01:29.9Z"], ["2026-10-02T12:00:30Z", "2026-10-02T12:01:00Z"],

@@ -491,7 +491,7 @@ test('x16: an Integration conflict reads back by name — status, inputs (marker
     for (const k of ['Resolution brief (Integration conflict)', '- Conflicting paths: a.js, b.js',
       '- Theirs: https://github.com/o/r/pull/5 (theirs: rename) touched a.js, b.js; brief /vault/Tasks/proj-theirs.md',
       `- Theirs, in full: git log --first-parent ${sha('b')}..${sha('c')}`,
-      '- The integrator: a.js: theirs renamed foo, ours edits foo; porting ours drops their guard b.js: theirs deleted the export ours calls']) {
+      '- The integrator:\n  - a.js: theirs renamed foo, ours edits foo; porting ours drops their guard\n  - b.js: theirs deleted the export ours calls\n- Next: ']) {
       assert.ok(s.blockerSummary.includes(k), `the brief is kept: ${k}`)
     }
     assert.ok(!s.blockerSummary.includes('missing fixture'), 'the latest run is the engine marker, not the agent text')

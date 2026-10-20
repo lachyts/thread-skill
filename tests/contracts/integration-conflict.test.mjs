@@ -6,8 +6,11 @@
 //   lane**'s _Avoid_ no longer bans the gloss outright (it is the whole step's, never the lane's alone); an
 //   **Integration conflict** entry names the marker, status's `integrationBlock` and the reasonClass;
 // - execute § 4.5 uses the gloss once;
-// - status § 2 documents `integrationBlock`, and its example renders an `Integration conflict →` line;
-// - run_record.py's and reconcile-rollout.py's docstrings list both new reasonClasses.
+// - status § 2 documents `integrationBlock`, and its example renders an `Integration conflict →` line; its Needs you
+//   item names the block in its `<where>` (`at Integration (Integration conflict)`, `at Integration (verifier red)`);
+// - run_record.py's and reconcile-rollout.py's docstrings list both new reasonClasses;
+// - execute/subagent-prompt-template.md's diagnosis routing names the two forms of `integration: `, written only when
+//   the integrator's blockKind agrees with the merge step's log, and the `integration: set aside: ` escape.
 //
 // One pure function, check(files), over { key: text }: the real files and the controls run through it, and each
 // control mutates one real entry in memory and must fail with exactly its rule. Reads files only.
@@ -21,6 +24,7 @@ const FILES = {
   status: 'skills/status/SKILL.md',
   runRecord: 'skills/_shared/scripts/run_record.py',
   reconcile: 'skills/execute/scripts/reconcile-rollout.py',
+  template: 'skills/execute/subagent-prompt-template.md',
 }
 const real = Object.fromEntries(Object.entries(FILES).map(([k, p]) => [k, read(p)]))
 
@@ -72,9 +76,14 @@ function check(f) {
     '`red` (a verifier red at Integration, `integration: verifier red: …`)', 'the key is absent otherwise'])) fails.push('status-key')
   if (!has(s4, '`Integration conflict → …` in place of `at Integration → …` for `conflict`') ||
     !example.some((l) => /^\s+\[\[[^\]]+\]\]\s+Integration conflict → .* · integration: conflict unresolved in /.test(l))) fails.push('status-render')
+  if (!all(s4, ['`[[<slug>]] set aside <where> <humanFix.label>', 'a task with an `integrationBlock` names it',
+    '`at Integration (Integration conflict)` for `conflict`', '`at Integration (verifier red)` for `red`'])) fails.push('status-needs-you')
   if (!all(docstring(f.runRecord), ['integration-conflict | integration-red | integration-set-aside', 'an unresolved Integration conflict'])) fails.push('run-record')
   if (!all(docstring(f.reconcile), ['integration-conflict (an Integration conflict', 'integration-red (`integration: verifier red: …`)',
     'carries `integrationBlock`'])) fails.push('reconcile')
+  if (!all(f.template, ['Two diagnosis prefixes route a set-aside task', "only when the integrator's `blockKind` agrees with the merge step's own log",
+    'an Integration conflict (`integration: conflict unresolved in …`, then its resolution brief)', 'a verifier red (`integration: verifier red: …`)',
+    'any other reason that would read as one is written `integration: set aside: …`'])) fails.push('template-routing')
   return fails
 }
 
@@ -115,6 +124,17 @@ test('control: status § 2 without integrationBlock fails status-key; the exampl
   only('status', 'Integration conflict → the lead\'s automatic retry · integration: conflict unresolved in a.js',
     'at Integration → the lead\'s automatic retry · integration: conflict in a.js cannot be resolved', ['status-render'])
   only('status', '`Integration conflict → …` in place of `at Integration → …` for `conflict`', '`at Integration → …`', ['status-render'])
+})
+
+test('control: a Needs you item whose <where> does not name the Integration block fails status-needs-you', () => {
+  only('status', '`at Integration (Integration conflict)` for `conflict`', '`at Integration` for `conflict`', ['status-needs-you'])
+  only('status', '`at Integration (verifier red)` for `red`', '`at Integration` for `red`', ['status-needs-you'])
+})
+
+test('control: the template\'s routing without the named forms or the escape fails template-routing', () => {
+  only('template', 'an Integration conflict (`integration: conflict unresolved in …`, then its resolution brief)', 'an Integration conflict', ['template-routing'])
+  only('template', 'any other reason that would read as one is written `integration: set aside: …`', 'nothing else is escaped', ['template-routing'])
+  only('template', "only when the integrator's `blockKind` agrees with the merge step's own log", 'whenever the integrator says so', ['template-routing'])
 })
 
 test('control: run_record.py or reconcile-rollout.py without the new reasonClasses fails its rule', () => {

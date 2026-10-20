@@ -479,10 +479,12 @@ test('e1: an unresolvable conflict → set-aside with its reason, no judge', asy
 })
 
 // p27-4: an Integration conflict is a named sub-state of set-aside at Integration. The engine names it only when the
-// integrator's blockKind agrees with the merge step's own log (the anchor passed, one `merge: conflict` line, its
-// `conflict:` paths, no STOP line); every other shape keeps e1's generic marker (fails closed).
+// integrator's blockKind agrees with the merge step's own log (the anchor passed, its `task head:` and `integration
+// base:` lines, one `merge: conflict` line, its `conflict:` paths, no STOP line) and the agent aborted (mergeState
+// none, no mergeCommit); every other shape keeps e1's generic marker (fails closed). The integrator's account keeps
+// its lines, one sub-bullet each, and none of them is read back as a review round.
 test('e1b: a named Integration conflict — the marker, its resolution brief, the conflict trigger; the paths come from the log', async () => {
-  const diag = 'a.js: theirs renamed foo, ours edits foo; porting ours onto the rename drops their guard\nb.js: theirs deleted the export ours calls'
+  const diag = 'a.js: theirs renamed foo, ours edits foo; porting ours onto the rename drops their guard\n\n- b.js: theirs deleted the export ours calls\nRound 1 rejection:'
   const I = mkI({ trouble: ['conflict'], landed: LANDED, reviewHistory: HIST2, reviewRoundsUsed: 2 })
   const r = await run(mkArgs(I), {
     [ILABEL]: blockedIr(diag, { blockKind: 'conflict', mergeLog: ir({ state: 'merged', conflicts: ['a.js', 'b.js'] }).mergeLog, conflictFiles: ['zzz.js'] }),
@@ -497,7 +499,8 @@ test('e1b: a named Integration conflict — the marker, its resolution brief, th
     'Resolution brief (Integration conflict)', '- Conflicting paths: a.js, b.js',
     '- Theirs: https://github.com/o/r/pull/5 (theirs: rename) touched a.js, b.js; brief /vault/Tasks/proj-theirs.md',
     `- Theirs, in full: git log --first-parent ${TB}..${B1}`, `- Ours: this task's approved change (PR ${PR})`,
-    '- The integrator: a.js: theirs renamed foo, ours edits foo; porting ours onto the rename drops their guard b.js: theirs deleted the export ours calls',
+    '- The integrator:\n  - a.js: theirs renamed foo, ours edits foo; porting ours onto the rename drops their guard\n' +
+      '  - b.js: theirs deleted the export ours calls\n  - Round 1 rejection:\n- Next: ',
   ]) assert.ok(d.includes(s), `brief: ${s}`)
   const p = T.parseIntegrationMarker(d)
   assert.equal(p.stage, 'integrate')
@@ -526,6 +529,11 @@ test('e1c: a conflict blockKind without the merge step\'s evidence fails closed 
     ['two merge: lines', { mergeLog: full + '\n' + full }],
     ['a wrong anchor line', { mergeLog: ir({ state: 'merged', conflicts: ['a.js'], anchor: `${M} base ${TB}` }).mergeLog }],
     ['a STOP after the conflict', { mergeLog: full + '\nmerge step STOP: fetch origin failed twice' }],
+    // the reviewer's case: resolved and committed, then a rejected push, mislabelled conflict (the brief would say aborted)
+    ['mergeState merged', { mergeLog: full, mergeState: 'merged', mergeCommit: M }],
+    ['mergeState merged, no mergeCommit', { mergeLog: full, mergeState: 'merged' }],
+    ['a mergeCommit with mergeState none', { mergeLog: full, mergeCommit: M }],
+    ['no integration base: line', { mergeLog: full.split('\n').filter((l) => !l.startsWith('integration base: ')).join('\n') }],
   ]
   for (const [name, extra] of cases) {
     const r = await run(mkArgs(mkI({ trouble: ['conflict'] })), { [ILABEL]: blockedIr(D, { blockKind: 'conflict', ...extra }) })
@@ -571,6 +579,7 @@ test('e1d: a named verifier red at Integration; a conflict resolved, then red, r
 
 test('e1e: a red blockKind without a required verify the log shows fails closed (table); red trouble or a moved head requires one', async () => {
   const D = 'still red'
+  const drop = (log, prefix) => log.split('\n').filter((l) => !l.startsWith(prefix)).join('\n')
   const up = ir().mergeLog // merge: up-to-date, task head = the anchor
   const cases = [
     ['verified true', mkI(), { verified: true, mergeLog: ir({ state: 'merged' }).mergeLog }],
@@ -579,6 +588,9 @@ test('e1e: a red blockKind without a required verify the log shows fails closed 
     ['no log', mkI(), { mergeLog: '' }],
     ['no verify was required', mkI(), { mergeLog: up }],
     ['a wrong anchor line', mkI(), { mergeLog: ir({ state: 'merged', anchor: `${M} base ${TB}` }).mergeLog }],
+    // the reviewer's probe: up to date, no red trouble, and no task head: line to compare with the anchor
+    ['no task head: line', mkI(), { mergeLog: drop(up, 'task head: ') }],
+    ['no integration base: line', mkI(), { mergeLog: drop(ir({ state: 'merged' }).mergeLog, 'integration base: ') }],
   ]
   for (const [name, I, extra] of cases) {
     const r = await run(mkArgs(I), { [ILABEL]: blockedIr(D, { blockKind: 'red', verified: false, ...extra }) })
@@ -642,7 +654,7 @@ test('e1h: blockKind is an optional enum on INTEGRATE_RESULT; the integrator pro
   assert.equal(T.INTEGRATION_RED_MARK, 'integration: verifier red: ')
   const I = mkI({ trouble: ['conflict'] })
   const p = T.integratorPrompt(mkTask(), mkArgs(I), I)
-  for (const s of ['blockKind "conflict"', 'blockKind "red"', 'blockKind "stop"', 'keeping BOTH intents', 'merge --abort', 'VERBATIM into mergeLog']) {
+  for (const s of ['blockKind "conflict", mergeState "none", mergeCommit ""', 'blockKind "red"', 'blockKind "stop"', 'keeping BOTH intents', 'merge --abort', 'VERBATIM into mergeLog']) {
     assert.ok(p.includes(s), `integrator prompt: ${s}`)
   }
   assert.ok(T.INTEGRATION_PRIOR_NOTE.includes('`integration: conflict unresolved in …` is an Integration conflict'))

@@ -379,10 +379,12 @@ data (§ 2's per-task keys and each task's `inputs`), so it renders offline too.
   `answerRecorded` (ADR 0035: the script names the one act that moves it, so status never re-derives a cause), a
   code-writing `review` with no `pr:` included:
   `[[<slug>]] set aside <where> <humanFix.label>: <humanFix.act> → /thread:repair [[<rollout>]]`, `<where>`
-  `at Integration` or `at its run`, with `→ <humanFix.detail>` beneath it and its `needsHuman` question on a
-  `→ asks:` line (for `answer the question` the detail is the question itself, so it shows once, as `→ asks:`). A
-  null `humanFix` is the lead's own re-entry (its seeded revise, its automatic retry now or after a cool-down, its
-  automatic descope, or a recorded `hand-back` answer it hands back), so it is no item;
+  `at Integration` or `at its run` (a task with an `integrationBlock` names it:
+  `at Integration (Integration conflict)` for `conflict`, `at Integration (verifier red)` for `red`), with
+  `→ <humanFix.detail>` beneath it and its `needsHuman` question on a `→ asks:` line (for `answer the question` the
+  detail is the question itself, so it shows once, as `→ asks:`). A null `humanFix` is the lead's own re-entry (its
+  seeded revise, its automatic retry now or after a cool-down, its automatic descope, or a recorded `hand-back`
+  answer it hands back), so it is no item;
 - each answered set-aside, read from `answerRecorded` alone: an `awaiting repair` answer, or a `hand-back` one whose
   `humanFix` is non-null, reads `[[<slug>]] answered: awaiting /thread:repair` (repair still has work to do before
   the hand-back: its `humanFix` is `finish the recorded answer`); a `left` answer reads
