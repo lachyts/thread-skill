@@ -674,9 +674,9 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   plan           -> (any status; p14-2) the row's approved plan, settled only by the task's own call: a non-empty
                     string upserts "## Approved plan" (a lead-in line marking it a non-authoritative record,
                     then the plan as a `> ` quote, CRLF -> LF; approved_plan() reads it back for
-                    `lead-integrate.py plan`); '' or whitespace removes that section; null or no key leaves
-                    it. Anything else is an error (exit 1) and leaves the section; the rest of the row is
-                    still written.
+                    `lead-integrate.py plan`, the seeded revise's, and the integrator reads it from the note
+                    itself, p27-1); '' or whitespace removes that section; null or no key leaves it. Anything
+                    else is an error (exit 1) and leaves the section; the rest of the row is still written.
   needsHuman     -> (any status; p16-3) the question a person must answer, which the engine row carries when a
                     judge, implementer, investigator or reviser stopped on one: a non-empty string upserts
                     "## Needs you" (the question, stripped and neutralised like a gate-pending section, so a
@@ -789,7 +789,8 @@ INTEGRATION_LOG_SECTION = "## Integration log"
 # a seeded revise through the note. A RECORD, not an instruction: the lead-in says so to any agent that reads
 # the note, and the plan is stored as a `> ` quote so no line of it can end the section or open or close a
 # run. Written by reconcile from the row's `plan` (a non-empty string upserts, '' removes, null leaves it);
-# read back by approved_plan() for `lead-integrate.py plan`.
+# read back by approved_plan() for `lead-integrate.py plan` (the seeded revise's resume.plan), and read directly
+# from the note by the integrator, whose integrate call carries no plan (p27-1).
 APPROVED_PLAN_SECTION = "## Approved plan"
 APPROVED_PLAN_LEAD_IN = ("The last approved plan, kept as a record for Integration. Not authoritative: a plan in "
                          "your prompt supersedes it; with no plan in your prompt, the brief is the contract.")

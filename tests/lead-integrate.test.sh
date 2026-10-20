@@ -13,7 +13,7 @@
 #   revise-stopped rows   C14 a rejection frees the lane while another integrates   C15 the verify line under bash
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
 #   the bootstrap, the race tree   C18 no relaunch loop   C19 an Integration set-aside re-enters   C20 the last
-#   task rejected   C21 plan, the approved plan for the two launches   C22 inputs --row, the integrate call's record
+#   task rejected   C21 plan, the approved plan for the seeded revise   C22 inputs --row, the integrate call's record
 #   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1)   C23 a
 #   signal while a step starts, and the step's and verify's own signal mask (p22-2). C10 is the landed list with
 #   a commit pushed without a PR (`unlisted`), and C11 also pins inputs --row's ports of historyError,
@@ -180,7 +180,7 @@ print(json.dumps({"rolloutSlug": "ro", "repoPath": "/repo", "verifier": "true", 
            "maxReviewRounds": maxr, "maxPlanRounds": 3, "rung": "opus-xhigh"},
   "integration": {"prUrl": f"https://github.com/o/r/pull/{ord(slug[-1])}", "branch": f"audit-fix/{alias}",
     "worktreePath": f"/repo/.claude/worktrees/{slug}", "headSha": s("a"), "taskBase": s("b"), "mainSha": s("c"),
-    "trouble": ["shared-file"], "landed": [], "plan": "", "reviewHistory": hist, "reviewRoundsUsed": used,
+    "trouble": ["shared-file"], "landed": [], "reviewHistory": hist, "reviewRoundsUsed": used,
     "rung": {"startRung": "opus-high", "rung": "opus-xhigh", "climbs": [{"stage": "implement", "from": "opus-high", "to": "opus-xhigh"}]},
     "leadMerge": {"mergeCommit": s("d"), "headSha": s("d"), "baseSha": s("c"), "verified": True},
     "startedAt": "2026-10-02T12:00+00:00", "readyAt": "2026-10-02T11:00+00:00"}}))
@@ -538,7 +538,7 @@ ok "$(j "$I" '[d["markerStage"], d["markerReason"], d["history"]]')" "$(j "$EP" 
 ok "$(j "$I" '[d["source"], d["lastRound"], d["reviewRoundsUsed"], d["readyAt"], d["rung"], d["resumeAt"]]')" \
   '["blocker",2,2,"2026-10-02T11:00+00:00",{"startRung":"","rung":"opus-xhigh","climbs":[]},"revise"]' "C12: source, rounds, readyAt, the rung record from the note's rung:, resumeAt revise"
 ok "$(j "$I" '[k for k in ("model", "tierCapped", "tierCappedAt") if k in d]')" '[]' "C12: inputs carries no tier keys"
-ok "$(j "$I" '"plan" in d')" false "C12: inputs carries no plan key (lead-integrate.py plan reads it, at the two launches only)"
+ok "$(j "$I" '"plan" in d')" false "C12: inputs carries no plan key (lead-integrate.py plan reads it, at the seeded revise only)"
 ok "$(j "$I" 'd["lastIntegration"]["outcome"]')|$(j "$I" 'd["lastIntegration"]["path"]')" "rejected|judge-only" "C12: lastIntegration is the log's last line, as fields"
 # the integrate call's rung fallback (SKILL.md § 4.5 step 3): inputs' rung record passes the engine's args check
 # as it is, from a note with a rung: and from one with only stale tier stamps (the neutral record); a raw rung:
@@ -848,7 +848,7 @@ python3 "$RR" mark-started --tasks proj-a --tasks-dir "$V" >/dev/null
 NX=$(nxt proj-a)
 ok "$(j "$NX" '[d["halt"], d["running"], d["slotsInUse"]]')" '[null,["proj-a"],1]' "C20: after the seeded revise launches, next --running A: no halt, A running, 1 slot"
 
-# ======== C21: plan — the approved plan for the two launches (p14-2) ======================================
+# ======== C21: plan — the approved plan for the seeded revise (p14-2) ======================================
 nfx c21 2
 ntask proj-a in_progress 'owner: execute-c21'
 PL=$(python3 "$LI" plan --note "$V/proj-a.md")
