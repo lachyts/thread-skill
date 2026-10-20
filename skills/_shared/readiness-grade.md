@@ -5,7 +5,8 @@ gives each of its open tasks a **Readiness grade**, and `estate-rank.py` ranks t
 slate**: candidate runs with their **Review load**, the decision rounds, the projects that need their own orient, and
 the **Unpark offer** for each parked project with ready work. Scripts scan, the model decides: the grade is the
 model's half, and everything after it is the script's. This file is the grading agents' brief and the ranking's prose
-contract; the script's docstring holds its output schema. The lead that runs both is `orient-all` (p25-3).
+contract; the script's docstring holds its output schema. The lead that runs both is `orient-all`
+(`${CLAUDE_PLUGIN_ROOT}/skills/orient-all/SKILL.md`).
 
 **Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
@@ -86,10 +87,13 @@ Every decision, in every grade, carries:
 - `recommendation`: always given, and always one of the options; when unsure, the best guess, with `confidence: low`.
 - `confidence`: `high`, `medium` or `low`.
 - `why`: the evidence for the recommendation (a file and line, an ADR, a thread line).
+- `fork`: optional. When the decision answers an open fork (§ The grade), the fork worded exactly as its orient end
+  line words it, so the answer is recorded as that fork's ruling too.
 
 The ranker checks each one and puts the recommendation first among the options, in the option's own spelling, so the
-lead always has labels to ask with. p25-3 asks the One calls through AskUserQuestion with the first option marked as
-recommended, and the Grills in conversation, in the same shape.
+lead always has labels to ask with. orient-all asks the One calls through AskUserQuestion with the first option marked
+as recommended, and the Grills in conversation, in the same shape. orient-all asks a label over 40 characters behind a
+short numbered label, its full text in the option's description: keep labels short.
 
 ## The raise
 
@@ -139,7 +143,8 @@ One object per project, holding every gradeable task of the project once:
           "options": ["<label>", "<label>"],
           "recommendation": "<one of the options>",
           "confidence": "high | medium | low",
-          "why": "<the evidence>"
+          "why": "<the evidence>",
+          "fork": "<optional: the open fork it answers, as its orient end line words it>"
         }
       ],
       "deadline": {"date": "YYYY-MM-DD", "why": "<the event>"},
@@ -151,8 +156,8 @@ One object per project, holding every gradeable task of the project once:
 }
 ```
 
-Leave `repo` off a task that is not parallel, and `deadline` off when there is none; `decisions` is `[]` for a Ready
-task. Grades are read case-insensitively, with `-` and `_` as spaces (`one-call` is One call), and always written
+Leave `repo` off a task that is not parallel, `deadline` off when there is none, and `fork` off a decision that
+answers no open fork; `decisions` is `[]` for a Ready task. Grades are read case-insensitively, with `-` and `_` as spaces (`one-call` is One call), and always written
 back in the canonical spelling.
 
 ## Dependencies
@@ -263,12 +268,14 @@ script's failure: `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md` rule 4's
 
 A parked project (standing `parked`) with at least one home task graded Ready after the raise and not held gets one
 row in `unpark[]`: its ready count and tasks, and the offer CONTEXT.md **Unpark offer** words. Unpark it (it becomes
-`status: queued`), snooze it, or kill it (done and archived). The unpark and kill writes are the lead's (p25-3). The
-snooze record has one writer:
+`status: queued`), snooze it, or kill it (done and archived). The snooze record has one writer, and the unpark and
+kill writes are its siblings, so orient-all makes all three through this script:
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py snooze <project> --ready <n>
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py snooze <project> --clear
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py unpark <project>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py kill <project>
 ```
 
 `--ready` writes two keys on the project note, beside its `status: parked`: `snoozed_until`, today plus `SNOOZE_DAYS`
@@ -276,11 +283,17 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py snooze <proj
 refuses (exit 2, nothing written) anything but a live project the scan would read as parked, and any frontmatter it
 cannot edit cleanly.
 
-`--clear` removes both keys. **The unpark and kill writes run it first**, before they change the status: a snooze
-outlives the parking it was given for, so a project unparked, then parked again before its `snoozed_until`, would
-otherwise come back still snoozed and hide its Unpark offer. It takes any live project, parked or not, and a note
-with neither key is left untouched (`no snooze on <note>`, exit 0); it refuses (exit 2, nothing written) a dead
-project and any frontmatter it cannot cut cleanly.
+`--clear` removes both keys. **The unpark and kill writes clear both keys in the same save as their status write**:
+a snooze outlives the parking it was given for, so a project unparked, then parked again before its `snoozed_until`,
+would otherwise come back still snoozed and hide its Unpark offer. `--clear` takes any live project, parked or not
+(a project unparked by hand), and a note with neither key is left untouched (`no snooze on <note>`, exit 0); it
+refuses (exit 2, nothing written) a dead project and any frontmatter it cannot cut cleanly.
+
+`unpark` sets `status: queued`; `kill` is Mark done (`done: true` and `completed:` today, any `crowned:` stamp
+dropped), so the nightly sweep archives the note. Both refuse (exit 2, nothing written) anything but a live project
+the scan would read as parked, and any frontmatter they cannot edit cleanly; `kill` also refuses an umbrella (a
+folder note) with a live sub-project, since archiving a done folder note moves its whole folder. An unparked
+project's Ready, unheld work starts in this same pass; its One calls, Grills and Orient tasks wait for the next.
 
 The record is read only on a parked project, and cleared whenever the project leaves parked through the offer. A
 project unparked by hand keeps its keys, and if it is parked again, the old snooze hides the offer for at most what is

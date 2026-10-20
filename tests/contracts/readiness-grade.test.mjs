@@ -1,14 +1,15 @@
 // The Readiness grade's prose contract (p25-2; ADR 0041): skills/_shared/readiness-grade.md is the grading agents'
 // brief and the ranking's prose, skills/_shared/scripts/estate-rank.py does the deterministic half, and CONTEXT.md
 // words the terms. Eight rules pin them to each other:
-//   c1  the doc's twelve `##` headings, in order (p25-3's SKILL.md and this test cite them).
+//   c1  the doc's twelve `##` headings, in order (orient-all's SKILL.md and this test cite them).
 //   c2  the grade names agree three ways: the doc's § The grade bullets, the script's GRADES and the bold names in
 //       CONTEXT.md **Readiness grade**.
 //   c3  § The ranking's `| Constant | Value |` table equals the script's constants, name for name and value for value
 //       (p25-4's grade log and the weekly Reflection tune them in one place).
-//   c4  § The Unpark offer names both SNOOZE_KEYS and SNOOZE_DAYS, and the writer's `snooze <project> --clear`
-//       that the unpark and kill writes run first (a re-parked project must not come back snoozed), which the
-//       script's own parser accepts; GATE_KINDS equals the keys of gated_inputs.py's sweep (one gate vocabulary).
+//   c4  § The Unpark offer names both SNOOZE_KEYS and SNOOZE_DAYS, the writer's `snooze <project> --clear` and its
+//       sibling `unpark <project>` and `kill <project>` writes, which clear both keys in the same save as their status
+//       write (a re-parked project must not come back snoozed), each accepted by the script's own parser; GATE_KINDS
+//       equals the keys of gated_inputs.py's sweep (one gate vocabulary).
 //   c5  § The ranking states the six-step key in order, crowned meaning standing crowned "never the `crowned:` date",
 //       and ADR 0041 § Build rulings names the order and the doc.
 //   c6  § Shape cites execution-fit.md read with every decision answered; § The raise states both steps; § Each decision
@@ -53,10 +54,13 @@ er, gi = load("thread_estate_rank", sys.argv[1]), load("thread_gated_inputs", sy
 out = {n: getattr(er, n) for n in json.loads(sys.argv[3])}
 out["HOLD_WHYS"] = er.HOLD_WHYS
 out["sweepKeys"] = list(gi.sweep(""))
-try:
-    out["clears"] = er.parse(["snooze", "p", "--clear"]).clear is True
-except SystemExit:
-    out["clears"] = False
+for key, argv, want in (("clears", ["snooze", "p", "--clear"], "snooze"), ("unparks", ["unpark", "p"], "unpark"),
+                        ("kills", ["kill", "p"], "kill")):
+    try:
+        a = er.parse(argv)
+        out[key] = a.verb == want and (key != "clears" or a.clear is True)
+    except SystemExit:
+        out[key] = False
 print(json.dumps(out))
 `
 function constants() {
@@ -119,8 +123,11 @@ function check(files, consts) {
   // c4: the snooze record and the gate vocabulary.
   const unpark = sec(doc, 'The Unpark offer')
   need('c4', '§ The Unpark offer', unpark, [...(consts.SNOOZE_KEYS ?? []).map((k) => `\`${k}\``), '`SNOOZE_DAYS`'])
-  need('c4', '§ The Unpark offer', C(unpark), ['estate-rank.py snooze <project> --clear', 'The unpark and kill writes run it first'])
+  need('c4', '§ The Unpark offer', C(unpark), ['estate-rank.py snooze <project> --clear', 'estate-rank.py unpark <project>',
+    'estate-rank.py kill <project>', 'The unpark and kill writes clear both keys in the same save as their status write'])
   if (consts.clears !== true) flag('c4', 'estate-rank.py snooze does not accept --clear')
+  if (consts.unparks !== true) flag('c4', 'estate-rank.py has no unpark verb')
+  if (consts.kills !== true) flag('c4', 'estate-rank.py has no kill verb')
   if (JSON.stringify(consts.GATE_KINDS) !== JSON.stringify(consts.sweepKeys)) {
     flag('c4', `GATE_KINDS ${JSON.stringify(consts.GATE_KINDS)} ≠ gated_inputs sweep keys ${JSON.stringify(consts.sweepKeys)}`)
   }
@@ -194,10 +201,13 @@ test('control c3: a table value that drifts from the script fails c3 alone', () 
   only(swap(FILES, DOC, '`{"S": 30, "M": 120, "L": 480}`', '`{"S": 60, "M": 120, "L": 480}`'), CONSTS, ['c3'], 'c3')
 })
 
-test('control c4: a snooze key the doc no longer names, the clear step gone, or a gate kind the sweep lacks, fails c4 alone', () => {
+test('control c4: a snooze key the doc no longer names, the clear step gone, a writer gone, or a gate kind the sweep lacks, fails c4 alone', () => {
   only(swapAll(FILES, DOC, '`snoozed_ready`', '`snoozed_count`'), CONSTS, ['c4'], 'c4 doc')
-  only(swap(FILES, DOC, 'The unpark and kill writes run it first', 'The unpark and kill writes may run it'), CONSTS, ['c4'], 'c4 clear doc')
+  only(swap(FILES, DOC, 'clear both keys in the same save as their status write', 'may clear both keys'), CONSTS, ['c4'], 'c4 clear doc')
+  only(swap(FILES, DOC, 'estate-rank.py kill <project>', 'estate-rank.py kill'), CONSTS, ['c4'], 'c4 kill doc')
   only(FILES, { ...CONSTS, clears: false }, ['c4'], 'c4 clear script')
+  only(FILES, { ...CONSTS, unparks: false }, ['c4'], 'c4 unpark script')
+  only(FILES, { ...CONSTS, kills: false }, ['c4'], 'c4 kill script')
   only(FILES, { ...CONSTS, sweepKeys: ['spend', 'credential'] }, ['c4'], 'c4 sweep')
 })
 

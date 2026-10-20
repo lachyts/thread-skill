@@ -4,7 +4,8 @@
 // a fake HOME and the grades files the per-project grading agents would return, written by hand here. The scan is
 // the real one (`estate-scan.py --vault V --today 2026-10-20 --deadline 0`, which starts no subprocess), run once and
 // shared, so the ranker is pinned to the scan's actual schema; the cases that need a blocker mutate that JSON in
-// memory into S/scan-*.json. Every rank run passes --today 2026-10-20; the snooze cases write only copies of V.
+// memory into S/scan-*.json. Every rank run passes --today 2026-10-20; the snooze, unpark and kill cases (R1-R4: the
+// Unpark offer's writes, p25-3) write only copies of V.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -767,7 +768,7 @@ test('16. dependencies: what holds a task, why, and which group of its run it si
 })
 
 // ---- 17. Snooze --clear -----------------------------------------------------------------------------------------------
-test('17. snooze --clear: the unpark and kill writes remove the record, so a project parked again is offered again', () => {
+test('17. snooze --clear: clearing the record means a project parked again is offered again', () => {
   const VC = copyVault('v-clear')
   const note = path.join(VC, 'Work', 'Projects', 'ParkOffer.md')
   const before = fs.readFileSync(note, 'utf8')
@@ -781,7 +782,7 @@ test('17. snooze --clear: the unpark and kill writes remove the record, so a pro
   unparked()
   parkedAgain()
   assert.equal(offerOf(VC).offer, false, 'a stale snooze outlives the parking it was given for')
-  // The lead's unpark write: --clear first, then the status. Parked again, the project is offered again.
+  // A hand unpark with --clear (unpark itself makes the same removal in its own save, R1). Parked again, it is offered.
   const c = py(['snooze', 'ParkOffer', '--clear', '--vault', VC])
   assert.equal(c.status, 0, c.stderr)
   assert.equal(c.stdout, 'cleared the snooze on Work/Projects/ParkOffer.md\n')
@@ -809,4 +810,97 @@ test('17. snooze --clear: the unpark and kill writes remove the record, so a pro
   assert.equal(py(['snooze', 'ParkDateOnly', '--clear', '--vault', VC]).status, 0)
   assert.ok(!fs.readFileSync(dateOnly, 'utf8').includes('snoozed_'))
   assert.deepEqual(snap(V), BEFORE, 'only the copy was written')
+})
+
+// ---- R1-R5. The Unpark offer's other writes: unpark and kill (p25-3), and a decision's fork -------------------------
+const projectNote = (vault, name) => path.join(vault, 'Work', 'Projects', `${name}.md`)
+const rescan = (vault) => {
+  const r = spawnSync('python3', [SCAN, '--vault', vault, '--today', TODAY, '--deadline', '0'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(r.status, 0, r.stderr)
+  return JSON.parse(r.stdout)
+}
+
+test('R1. unpark: one save sets status queued and clears the snooze; the project leaves the parked set', () => {
+  const VU = copyVault('v-unpark')
+  const note = projectNote(VU, 'ParkSnoozed')
+  const before = fs.readFileSync(note, 'utf8')
+  const ino = fs.statSync(note).ino
+  const r = py(['unpark', 'ParkSnoozed', '--vault', VU])
+  assert.deepEqual([r.status, r.stdout, r.stderr], [0, 'unparked Work/Projects/ParkSnoozed.md (status: queued)\n', ''])
+  assert.equal(fs.readFileSync(note, 'utf8'),
+    before.replace('status: parked\nsnoozed_until: 2026-10-25\nsnoozed_ready: 2', 'status: "queued"'))
+  assert.equal(fs.statSync(note).ino, ino, 'written in place')
+  const p = rescan(VU).projects.find((x) => x.name === 'ParkSnoozed')
+  assert.deepEqual([p.standing, p.parked], ['queued', false])
+  // A parked project with no snooze: only the status line changes.
+  const plain = projectNote(VU, 'ParkOffer')
+  const b2 = fs.readFileSync(plain, 'utf8')
+  assert.equal(py(['unpark', 'ParkOffer', '--vault', VU]).status, 0)
+  assert.equal(fs.readFileSync(plain, 'utf8'), b2.replace('status: parked', 'status: "queued"'))
+  assert.deepEqual(snap(V), BEFORE, 'only the copy was written')
+})
+
+test('R2. kill: Mark done in one save (done, completed, no crowned stamp, no snooze); the project leaves the scan', () => {
+  const VK = copyVault('v-kill')
+  write(projectNote(VK, 'ParkCrowned'), fm('tags:\n  - project\nstatus: parked\ncrowned: 2026-09-01\nsnoozed_until: 2026-10-25\nsnoozed_ready: 1\ncolour: blue'))
+  const note = projectNote(VK, 'ParkCrowned')
+  const r = py(['kill', 'ParkCrowned', '--vault', VK, '--today', TODAY])
+  assert.deepEqual([r.status, r.stdout, r.stderr], [0, `killed Work/Projects/ParkCrowned.md (done: true, completed ${TODAY})\n`, ''])
+  assert.equal(fs.readFileSync(note, 'utf8'),
+    fm(`tags:\n  - project\nstatus: parked\ncolour: blue\ndone: true\ncompleted: "${TODAY}"`))
+  const offer = projectNote(VK, 'ParkOffer')
+  const before = fs.readFileSync(offer, 'utf8')
+  assert.equal(py(['kill', 'ParkOffer', '--vault', VK, '--today', TODAY]).status, 0)
+  assert.equal(fs.readFileSync(offer, 'utf8'), before.replace('status: parked\n---', `status: parked\ndone: true\ncompleted: "${TODAY}"\n---`))
+  const names = rescan(VK).projects.map((x) => x.name)
+  for (const n of ['ParkOffer', 'ParkCrowned']) assert.ok(!names.includes(n), `${n} is done: out of the scan`)
+  // An umbrella whose only sub-project is done, or archived, is killed like any other.
+  write(path.join(VK, 'Work', 'Projects', 'Umb2', 'Umb2.md'), fm('tags:\n  - project\nstatus: parked'))
+  write(path.join(VK, 'Work', 'Projects', 'Umb2', 'Old.md'), fm('tags:\n  - project\nstatus: active\ndone: true'))
+  write(path.join(VK, 'Work', 'Projects', 'Umb2', 'Archive', 'Gone.md'), fm('tags:\n  - project\nstatus: active'))
+  assert.equal(py(['kill', 'Umb2', '--vault', VK, '--today', TODAY]).status, 0)
+  assert.deepEqual(snap(V), BEFORE, 'only the copy was written')
+})
+
+test('R3. unpark and kill refuse anything but a parked live project, an umbrella with a live sub-project, and a key held twice', () => {
+  const VR = copyVault('v-unpark-refuse')
+  write(path.join(VR, 'Work', 'Projects', 'Umb', 'Umb.md'), fm('tags:\n  - project\nstatus: parked'))
+  write(path.join(VR, 'Work', 'Projects', 'Umb', 'Sub.md'), fm('tags:\n  - project\nstatus: active'))
+  write(projectNote(VR, 'ParkTwice'), fm('tags:\n  - project\nstatus: parked\nstatus: parked\ndone: false\ndone: false'))
+  const held = bytes(VR)
+  for (const verb of ['unpark', 'kill']) {
+    const cases = [
+      ['Act', /Work\/Projects\/Act\.md is not parked \(standing: active\)/],
+      ['DoneProj', /done/],
+      ['Area', /area note/],
+      ['Nope', /no note/],
+      ['ParkTwice', /more than once/],
+    ]
+    for (const [name, re] of cases) refusal(py([verb, name, '--vault', VR, ...(verb === 'kill' ? ['--today', TODAY] : [])]), re)
+  }
+  refusal(py(['kill', 'Umb', '--vault', VR, '--today', TODAY]), /umbrella with 1 live sub-project \(Work\/Projects\/Umb\/Sub\.md\)/)
+  refusal(py(['unpark', 'ParkOffer', '--today', TODAY, '--vault', VR]), /unrecognized arguments: --today/)
+  refusal(py(['kill', 'ParkOffer', '--ready', '1', '--vault', VR]))
+  assert.deepEqual(bytes(VR), held, 'nothing written')
+})
+
+test('R4. unpark and kill agree with the scan on what is parked', () => {
+  const s = scanned()
+  for (const [i, p] of s.projects.entries()) {
+    for (const verb of ['unpark', 'kill']) {
+      const d = copyVault(path.join(`parity-${verb}`, String(i)))
+      const r = py([verb, p.name, '--vault', d, ...(verb === 'kill' ? ['--today', TODAY] : [])])
+      assert.equal(r.status === 0, p.standing === 'parked', `${verb} ${p.name} (${p.standing}): exit ${r.status} ${r.stderr}`)
+    }
+  }
+})
+
+test('R5. a decision fork passes through the ranker when given, and nothing changes when it is not', () => {
+  assert.ok(!main().stdout.includes('"fork"'), 'no fork key without one in the grades')
+  const forked = (fork) => gradesFile(`fork-${fork === '' ? 'empty' : 'set'}`, { project: 'Lab', tasks: [G('lab-01', 'One call', 'serial',
+    { decisions: [{ ...D('Keep v3 or v4?', 'v4', ['v4', 'v3']), fork }] })] })
+  const t = row(ok(rank([forked('Keep v3 or v4')])), 'lab-01')
+  assert.deepEqual(t.decisions[0], { question: 'Keep v3 or v4?', recommendation: 'v4', options: ['v4', 'v3'], confidence: 'high',
+    why: 'fixture: src/x.py:12', fork: 'Keep v3 or v4' })
+  assert.ok(!('fork' in row(ok(rank([forked('')])), 'lab-01').decisions[0]), 'an empty fork is left out')
 })

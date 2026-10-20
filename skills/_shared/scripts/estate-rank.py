@@ -12,14 +12,19 @@ yields the Unpark offers. It spawns nothing and asks nothing. python >= 3.9 with
         [--grades FILE]... [--today YYYY-MM-DD] [--vault PATH] [--compact]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py snooze <project> (--ready N | --clear)
         [--today YYYY-MM-DD] [--vault PATH]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py unpark <project> [--vault PATH]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py kill <project> [--today YYYY-MM-DD]
+        [--vault PATH]
 
-Defaults: rank takes today and the vault from the scan JSON's `today` and `vault`; snooze takes the local date and
-~/repos/obsidian. `rank` writes nothing: it reads the scan, the grades files and, for each parked project, its note's
-snooze keys. `snooze` writes two frontmatter keys on one project note, or with --clear removes them. No subprocess,
-no network, no bytecode (sys.dont_write_bytecode is set before any sibling loads). Exit 0 when done (every per-task
-problem is inside the JSON); 2 on a usage error or a refusal (one `estate-rank:` stderr line, nothing written): a scan
-that is not JSON or whose `schema` is not 1, a grades file that is not JSON or not an object or array, an unknown verb
-or flag, and every snooze refusal; 3 when the vault, PyYAML or a sibling script is missing.
+Defaults: rank takes today and the vault from the scan JSON's `today` and `vault`; snooze, unpark and kill take the
+local date and ~/repos/obsidian. `rank` writes nothing: it reads the scan, the grades files and, for each parked
+project, its note's snooze keys. `snooze` writes two frontmatter keys on one project note, or with --clear removes
+them; `unpark` and `kill` are the Unpark offer's other two writes (readiness-grade.md § The Unpark offer), each one
+save of one project note. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before any sibling
+loads). Exit 0 when done (every per-task problem is inside the JSON); 2 on a usage error or a refusal (one
+`estate-rank:` stderr line, nothing written): a scan that is not JSON or whose `schema` is not 1, a grades file that
+is not JSON or not an object or array, an unknown verb or flag, and every snooze, unpark and kill refusal; 3 when the
+vault, PyYAML or a sibling script is missing.
 
 What it reuses. Loaded by path inside main(), so importing this file runs nothing (the contract test reads its
 constants that way): resolve-target.py (RT: dead_why), and through it next-action.py (RT.NA: Vault, resolve_project,
@@ -45,10 +50,11 @@ Validation. Invalid (listed with every error, never ranked): a grade outside GRA
 `_` as spaces) or a shape outside SHAPES; `decisions` that is not a list; a One call or Grill with no decision; a
 decision that is not an object, or has no non-empty `question` or `recommendation`, or whose `options` is missing, not
 a list, or not OPTIONS_MIN to OPTIONS_MAX distinct non-empty strings, or does not hold the recommendation (compared
-stripped and case-insensitively). Warned and kept: a missing or unknown `size` reads as M; a missing or unknown
-decision `confidence` as low; a malformed `deadline`, or one before today (an event already past cannot be met; the
-scan's overdue `due:` still counts), is dropped; a gate kind outside GATE_KINDS is dropped; a non-boolean `eyeCheck`
-reads as false; a `repo` on a task that is not parallel is ignored.
+stripped and case-insensitively). A decision's optional `fork` (the open fork it answers, worded as its orient end
+line words it) is passed through when it is a non-empty string, and left out otherwise. Warned and kept: a missing or
+unknown `size` reads as M; a missing or unknown decision `confidence` as low; a malformed `deadline`, or one before
+today (an event already past cannot be met; the scan's overdue `due:` still counts), is dropped; a gate kind outside
+GATE_KINDS is dropped; a non-boolean `eyeCheck` reads as false; a `repo` on a task that is not parallel is ignored.
 
 The raise (readiness-grade.md § The raise): the decision count implies a grade (0 Ready, 1 One call, 2+ Grill) and the
 task takes the higher of that and the agent's grade (`why: "decisions"`); then any `low` decision raises it one step
@@ -76,8 +82,8 @@ Output, one JSON object (schema 1; --compact for one line):
           offers, warnings},
   tasks[]     {slug, note, title, home, projects[], standing, grade, agentGrade, raised[] {from, to, why}, shape, repo,
                root, size, agentMinutes, decisions[] {question, recommendation, options[] (the recommendation first),
-               confidence, why}, decisionMinutes, review {pr, signOff, eyeCheck, minutes}, attentionMinutes, leverage,
-               deadline {date, source: due|grader, why} | null, dueSoon, gates[], eyeCheck, why, dependsOn[],
+               confidence, why, fork?}, decisionMinutes, review {pr, signOff, eyeCheck, minutes}, attentionMinutes,
+               leverage, deadline {date, source: due|grader, why} | null, dueSoon, gates[], eyeCheck, why, dependsOn[],
                blockedBy[] {slug, why}, rank, run}: ranked in rank order, then Orient;
   runs[]      {id (<home>/<shape>/<root or ->), project, note, shape, root, rolloutRoot, why (repo unknown | no repo
                declared | null), parked, ready[], waiting[], blocked[] (slugs in rank order), agentMinutes,
@@ -101,11 +107,24 @@ live project (RT.dead_why) whose ES.standing_of(status) is parked, with N an int
 "<today + SNOOZE_DAYS>"` and `snoozed_ready: N` through next-action's one-key edit, re-parses (the frontmatter must be
 the old one plus the two keys), writes the note in place once and prints `snoozed <note> until <date> (ready <N>)`.
 
-snooze <project> --clear: the unpark and kill writes' first step (readiness-grade.md § The Unpark offer), so a project
-parked again later starts with no snooze. Any live project, parked or not; refused when dead or when its frontmatter
-does not parse. It removes every SNOOZE_KEYS entry (a key given twice included), re-parses (the frontmatter must be the
-old one minus those keys, else refused), writes the note in place once and prints `cleared the snooze on <note>`; a
-note with neither key is left untouched, `no snooze on <note>`, exit 0.
+snooze <project> --clear: removes the record, so a project parked again later starts with no snooze; unpark and kill
+make the same removal, through the same `cleared`, in the save that writes their status. Any live project, parked or
+not; refused when dead or when its frontmatter does not parse. It removes every SNOOZE_KEYS entry (a key given twice
+included), re-parses (the frontmatter must be the old one minus those keys, else refused), writes the note in place
+once and prints `cleared the snooze on <note>`; a note with neither key is left untouched, `no snooze on <note>`, exit
+0.
+
+unpark <project>: refused unless the project is live and its ES.standing_of(status) is parked. One save: every
+SNOOZE_KEYS entry removed (`cleared`) and `status: "queued"` set through next-action's one-key edit, re-parsed (the
+frontmatter must be the old one minus the snooze keys, with status queued, else refused); prints `unparked <note>
+(status: queued)`.
+
+kill <project>: the Unpark offer's kill is Mark done (the vault's _System/Scripts/mark-project-done.js): the same
+checks as unpark, and an umbrella refused as that script refuses it (a folder note, `<dir>/<dir>.md` below
+Work/Projects, beside a live project note anywhere under its folder outside Archive/: the sweep archives a done
+folder note's whole folder). One save: every SNOOZE_KEYS entry and `crowned` removed, `done: true` and `completed:
+"<today>"` set, re-parsed the same way; prints `killed <note> (done: true, completed <today>)`. The nightly sweep
+archives it; its open tasks are left unhomed, which the question names.
 """
 import argparse
 import datetime
@@ -143,6 +162,7 @@ CONFIDENCE = ("high", "medium", "low")
 # Every `blockedBy` why, each named in readiness-grade.md § Dependencies.
 HOLD_WHYS = ("One call", "Grill", "Orient", "ungraded", "invalid", "hold", "unhomed", "parked", "held", "cycle")
 UNPARK_OPTIONS = ("unpark", "snooze", "kill")
+KILL_KEYS = ("crowned",)  # mark-project-done.js drops a crowned: stamp with the done write
 ROUNDS = (("one-call", "One call"), ("grill", "Grill"))
 GRADE_RANK = {g: i for i, g in enumerate(GRADES)}
 
@@ -406,9 +426,13 @@ class Ranker:
         if level not in CONFIDENCE:
             warns.append("%s %s: confidence %s is not high, medium or low; read as low" % (slug, at, shown(conf)))
             level = "low"
-        return {"question": question, "recommendation": labels[pick],
-                "options": [labels[pick]] + labels[:pick] + labels[pick + 1:],
-                "confidence": level, "why": text(d.get("why"))}, []
+        out = {"question": question, "recommendation": labels[pick],
+               "options": [labels[pick]] + labels[:pick] + labels[pick + 1:],
+               "confidence": level, "why": text(d.get("why"))}
+        fork = text(d.get("fork"))
+        if fork is not None:
+            out["fork"] = fork
+        return out, []
 
     def validate(self, slug, e):
         """(record, errors, warnings): a normalised grade, or the errors that make it invalid."""
@@ -771,19 +795,20 @@ class Ranker:
 
 # ---- snooze --------------------------------------------------------------------------------------------------------
 
-def cleared(NA, note):
-    """The note's text with every SNOOZE_KEYS entry removed, or None when it carries neither. Raises NA.Refused.
+def cleared(NA, note, keys=SNOOZE_KEYS):
+    """The note's text with every `keys` entry removed (the snooze keys by default), or None when it carries none.
+    Raises NA.Refused.
 
     next-action's one-key edit only sets a key, so the removal lives here, located the way it locates one (the key and
     value nodes' marks from yaml.compose) and checked the way it checks one: the re-parsed frontmatter must be the old
-    one minus the snooze keys, so a layout the line cut would damage (a flow mapping) is refused, never written."""
+    one minus those keys, so a layout the line cut would damage (a flow mapping) is refused, never written."""
     body = note.body()
     if NA.ODD_BREAKS.search(body):
         raise NA.Refused("%s: frontmatter has line breaks other than \\n" % note.path)
     root = NA.yaml.compose(body, Loader=NA.LOADER)
     first, lines, spans = note.span[0], list(note.lines), []
     for k, v in (root.value if root is not None else []):
-        if isinstance(k, NA.yaml.ScalarNode) and k.value in SNOOZE_KEYS:
+        if isinstance(k, NA.yaml.ScalarNode) and k.value in keys:
             start = first + k.start_mark.line
             end = first + v.end_mark.line + (1 if v.end_mark.column else 0)
             while end - 1 > start and lines[end - 1].strip() == "":  # keep blank lines after the value
@@ -794,12 +819,14 @@ def cleared(NA, note):
     for start, end in sorted(spans, reverse=True):
         del lines[start:end]
     check = NA.Note(note.path, "".join(lines))
-    if check.fm != {k: v for k, v in note.fm.items() if k not in SNOOZE_KEYS}:
+    if check.fm != {k: v for k, v in note.fm.items() if k not in keys}:
         raise NA.Refused("%s: clearing the snooze would change other frontmatter; left alone" % note.path)
     return check.text
 
 
-def snooze(RT, ES, args):
+def project_note(RT, args, dead_tail):
+    """(vault, rel, shown rel, note) for a live project named by args.project; refused (exit 2) when it is unknown,
+    not a project, dead (`dead_tail` ends the line) or its frontmatter does not parse."""
     NA = RT.NA
     vroot = os.path.expanduser(args.vault)
     if not os.path.isdir(vroot):
@@ -815,10 +842,16 @@ def snooze(RT, ES, args):
     note = vault.note(rel)
     dead = RT.dead_why(rel, note)
     if dead:
-        fail(2, "%s is %s; %s" % (shown_rel, dead, "only a live project's snooze is cleared" if args.clear
-                                  else "only a parked project is snoozed"))
+        fail(2, "%s is %s; %s" % (shown_rel, dead, dead_tail))
     if note.fm is None:
         fail(2, "%s: %s" % (shown_rel, note.error))
+    return vault, rel, shown_rel, note
+
+
+def snooze(RT, ES, args):
+    NA = RT.NA
+    _, rel, shown_rel, note = project_note(RT, args, "only a live project's snooze is cleared" if args.clear
+                                           else "only a parked project is snoozed")
     if args.clear:  # any live project: the unpark and kill writes clear the record whatever the order of their writes
         try:
             out = cleared(NA, note)
@@ -853,6 +886,83 @@ def snooze(RT, ES, args):
     sys.stdout.write("snoozed %s until %s (ready %d)\n" % (shown_rel, until, args.ready))
 
 
+def parked_or_refuse(NA, ES, shown_rel, note, verb):
+    standing = ES.standing_of(NA.status_of(note))
+    if standing != "parked":
+        fail(2, "%s is not parked (standing: %s); only a parked project is %s" % (shown_rel, standing, verb))
+
+
+def live_sub_projects(RT, vault, rel):
+    """mark-project-done.js's umbrella guard: when the note is a folder note (`<dir>/<dir>.md` below Work/Projects),
+    every other project-tagged note under that folder, outside Archive/, that is not done (`done: true` or "true", or
+    status done), as vault-relative paths; [] for any other note."""
+    NA = RT.NA
+    folder = os.path.dirname(rel)
+    if folder == NA.PROJECTS_DIR or os.path.basename(folder) != os.path.basename(rel)[:-3]:
+        return []
+    out = []
+    for d, dirs, files in os.walk(os.path.join(vault.root, folder)):
+        dirs[:] = sorted(x for x in dirs if x != "Archive")
+        for f in sorted(files):
+            other = os.path.relpath(os.path.join(d, f), vault.root)
+            if not f.lower().endswith(".md") or other == rel:
+                continue
+            n = vault.note(other)
+            if n.fm is None or "project" not in NA.tags_of(n):
+                continue
+            if RT.done_flag(n) or NA.status_of(n) == "done":
+                continue
+            out.append(other.replace(os.sep, "/"))
+    return out
+
+
+def status_write(NA, note, removed, sets):
+    """One save's text: `removed` keys cut (`cleared`), then each (key, value) in `sets` set by next-action's one-key
+    edit, re-parsed against the old frontmatter. Refused (exit 2) on any layout the edits would damage."""
+    try:
+        base = cleared(NA, note, removed)
+        cur = NA.Note(note.path, base) if base is not None else note
+        for key, value in sets:
+            cur = NA.Note(note.path, cur.edited(key, value))
+    except NA.Refused as e:
+        fail(2, str(e))
+    want = {k: v for k, v in note.fm.items() if k not in removed}
+    want.update(sets)
+    if cur.fm != want:
+        fail(2, "%s: the write would change other frontmatter; left alone" % note.path)
+    return cur.text
+
+
+def unpark(RT, ES, args):
+    NA = RT.NA
+    _, rel, shown_rel, note = project_note(RT, args, "only a parked project is unparked")
+    parked_or_refuse(NA, ES, shown_rel, note, "unparked")
+    out = status_write(NA, note, SNOOZE_KEYS, [("status", "queued")])
+    try:
+        note.save(out)
+    except OSError as e:
+        fail(2, "cannot write %s: %s" % (shown_rel, e))
+    sys.stdout.write("unparked %s (status: queued)\n" % shown_rel)
+
+
+def kill(RT, ES, args):
+    NA = RT.NA
+    vault, rel, shown_rel, note = project_note(RT, args, "only a parked project is killed")
+    parked_or_refuse(NA, ES, shown_rel, note, "killed")
+    subs = live_sub_projects(RT, vault, rel)
+    if subs:
+        fail(2, "%s is an umbrella with %d live sub-project%s (%s); finish or move those first: archiving a done "
+             "folder note moves its whole folder"
+             % (shown_rel, len(subs), "" if len(subs) == 1 else "s", ", ".join(subs)))
+    today = args.today.isoformat()
+    out = status_write(NA, note, SNOOZE_KEYS + KILL_KEYS, [("done", True), ("completed", today)])
+    try:
+        note.save(out)
+    except OSError as e:
+        fail(2, "cannot write %s: %s" % (shown_rel, e))
+    sys.stdout.write("killed %s (done: true, completed %s)\n" % (shown_rel, today))
+
+
 # ---- main ----------------------------------------------------------------------------------------------------------
 
 def parse(argv):
@@ -872,26 +982,33 @@ def parse(argv):
     mode.add_argument("--clear", action="store_true")
     s.add_argument("--today")
     s.add_argument("--vault", default=VAULT_DEFAULT)
+    u = sub.add_parser("unpark", allow_abbrev=False)
+    u.add_argument("project")
+    u.add_argument("--vault", default=VAULT_DEFAULT)
+    u.set_defaults(today=None)
+    k = sub.add_parser("kill", allow_abbrev=False)
+    k.add_argument("project")
+    k.add_argument("--today")
+    k.add_argument("--vault", default=VAULT_DEFAULT)
     args = p.parse_args(argv)
     if not args.verb:
-        fail(2, "a verb is required: rank | snooze")
+        fail(2, "a verb is required: rank | snooze | unpark | kill")
     if args.today is not None:
         args.today = parse_date(args.today, "--today")
-    if args.verb == "snooze":
-        if args.ready is not None:
-            if not re.fullmatch(r"\d+", args.ready.strip()):
-                fail(2, "--ready must be a count, an integer 0 or more: %r" % args.ready)
-            args.ready = int(args.ready.strip())
-        if args.today is None:
-            args.today = datetime.date.today()
+    if args.verb == "snooze" and args.ready is not None:
+        if not re.fullmatch(r"\d+", args.ready.strip()):
+            fail(2, "--ready must be a count, an integer 0 or more: %r" % args.ready)
+        args.ready = int(args.ready.strip())
+    if args.verb in ("snooze", "unpark", "kill") and args.today is None:
+        args.today = datetime.date.today()
     return args
 
 
 def main(argv):
     args = parse(argv)
-    if args.verb == "snooze":
+    if args.verb in WRITERS:
         RT, ES = load_siblings()
-        snooze(RT, ES, args)
+        WRITERS[args.verb](RT, ES, args)
         return 0
     scan = read_scan(args.scan)
     grade_files = [(path, read_grades(path)) for path in args.grades]
@@ -908,6 +1025,8 @@ def main(argv):
     sys.stdout.flush()
     return 0
 
+
+WRITERS = {"snooze": snooze, "unpark": unpark, "kill": kill}
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

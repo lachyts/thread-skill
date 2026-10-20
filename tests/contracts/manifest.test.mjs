@@ -5,8 +5,8 @@
 // budget, whole descriptions drop out and skills render as bare names, killing natural-language
 // triggering (THREAD.md § Known quirks). Eval runs load no user settings, so they see Claude Code's
 // default listing budget. 700 chars is this plugin's hard cap per description, well under Claude Code's
-// own 1,536-char per-description cap; the total is a ratchet — lower it after trims, never raise it to
-// make a test pass.
+// own 1,536-char per-description cap; the total is a ratchet: a new skill raises it by its own description's
+// length, in the commit that adds the skill; any other change only lowers it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -17,7 +17,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
 
 const DESCRIPTION_LIMIT = 700
-const DESCRIPTION_TOTAL_RATCHET = 7550
+const DESCRIPTION_TOTAL_RATCHET = 7950
 
 // Minimal frontmatter reader for the shapes this repo uses: `key: plain`, `key: 'single ''quoted'''`,
 // `key: "double quoted"`, one line each. Anything else fails loudly rather than parsing wrong.

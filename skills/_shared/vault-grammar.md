@@ -58,7 +58,9 @@ no stamp; `started:` and `started_unattended:` are other keys.
   once the note is runnable, and replaces the stamp in place with its own record,
   `started_unattended: <stamp>`, which thread-skill never writes or clears. And `/thread:status`
   (§ 1's **Start stamp**), which reports a stamped note nothing has started as waiting for the Stage
-  (its § 4 action 13).
+  (its § 4 action 13). And `/thread:orient-all`'s `estate-dispatch.py plan`, through
+  reconcile-rollout's `_start_unattended`, loaded: a stamped note it neither starts nor relays (the
+  Stage starts it).
 - **Clearers**: `reconcile-rollout.py next`, on every call off `--dry-run` that exits 0 (the lead's,
   execute § 4.5 step 1), which removes every top-level `start:` line reading `unattended` and reports
   `startCleared`, so a running rollout clears it; a refused `next` (exit 1) writes nothing, so the stamp
@@ -91,8 +93,14 @@ no stamp; `started:` and `started_unattended:` are other keys.
   frontmatter.
 - `skills/_shared/scripts/estate-scan.py` (the estate scan): Landed and Active through `DEAD_STATUSES`,
   `OPEN_STATUSES` and `status_of`, loaded from the next-action script rather than copied; Review through its pinned
-  literal `REVIEW_STATUSES`; § In flight, for each open task's `inFlight`; and § Phase and task filenames'
+  literal `REVIEW_STATUSES`; § In flight, for each open task's `inFlight`, through its module-level `first_link`,
+  `link_live` and `in_flight`, the rule's one statement in code; and § Phase and task filenames'
   membership for each phase's `openTasks`: the open tasks named with the phase note's literal prefix
   `<slug>-p<N>-`, never by a task's `phase:` key, with reconcile-project.py's `PHASE_N` loaded rather than copied.
+- `skills/_shared/scripts/estate-dispatch.py` `record` (the estate pass's decision write): Active through
+  next-action's `OPEN_STATUSES` and `status_of`, and § In flight through estate-scan's `in_flight` and `link_live`,
+  all loaded rather than copied. It writes only into an Active task that is not in flight. Its `plan` reads whether
+  a dependency outside the scan has landed through reconcile-rollout's `_dep_status` and `_fold_unit`, loaded, so it
+  holds a member exactly as long as a rollout row would wait on that dependency.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
   scripts' key and sort helpers against the examples under § Phase and task filenames.
