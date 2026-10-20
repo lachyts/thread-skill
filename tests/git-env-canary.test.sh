@@ -771,7 +771,8 @@ scen w1
 mkt A open
 arm A task; ok "$rc|$(recf A task state)|$(grep -c git-env "$RO")" "2|<none>|0" "w1: arm a task window on a note that is not running → 2, no record, no log line"
 has "$err" "[[A]] is not running" "w1: … stderr names the note"
-has "$err" "mark-started" "w1: … and the stamp to run"
+has "$err" "stamp status: in_progress (execute § 4) first" "w1: … and the § 4 stamp to run"
+ok "$(printf '%s\n' "$err" | grep -c 'mark-started')" 0 "w1: … and never mark-started (its own arm runs this refusal, p26-3)"
 scen w2
 mkt A review 'pr: https://github.com/o/r/pull/1'
 for k in integrate verify race-verify; do
@@ -820,6 +821,145 @@ mkt A in_progress; mkt B open
 arm A; code
 arm B task; ok "$rc|$(trips A)|$(recf A task state)|$(recf B task state)" '2|0|"armed"|<none>' "w6: A armed, the ref moves, arm B (not running) → 2, A's window untouched"
 call; ok "$rc|$(trips A)" "3|1" "w6: … the next check-all trips A"
+
+# ── m: mark-started arms the task window (p26-3) ─────────────────────────────────────────────────────────────
+# The 2026-10-19 incident: a seeded revise launched with `mark-started --start revise` and no `arm --kind task`, so
+# its return's check met the first window's `checked` tombstone and tripped `record not armed`, a false halt.
+# reconcile-rollout.py mark-started now arms the task window itself (--arm-repo/--arm-default), required while the
+# rollout's Project root names an existing directory, after its own refusals and before any write: a failed arm
+# writes nothing for that note. Each call keeps its own Run record dir ($S/events), as rr does.
+# ms <slugs> [flags...] -> $rc, $out, $err; msa <slugs> [flags...] adds --arm-repo $R --arm-default master.
+ms() { local t=$1; shift; HOME="$EH" THREAD_EVENTS_DIR="$S/events" python3 "$RR" mark-started --tasks "$t" --rollout "$RO" --tasks-dir "$V" "$@" > "$S/out" 2> "$S/err"; rc=$?; out=$(cat "$S/out"); err=$(cat "$S/err"); }
+msa() { local t=$1; shift; ms "$t" --arm-repo "$R" --arm-default master "$@"; }
+slots() { if [ -f "$S/events/ro.jsonl" ]; then grep -c 'slot-taken' "$S/events/ro.jsonl"; else echo 0; fi; }
+started() { grep -c '^started: ' "$V/$1.md"; }
+scen m1
+mkt A in_progress
+arm A; chk A; ok "$rc|$(recf A task state)" '0|"checked"' "m1: the first task window armed and checked → a checked tombstone"
+msa A --start revise
+ok "$rc" 0 "m1: a seeded revise's mark-started --start revise --arm-repo/--arm-default on the tombstone → 0"
+ok "$(recf A task state)|$(recf A task closed)|$(recf A task ref)|$(started A)" "\"armed\"|false|\"$(cur)\"|1" "m1: … the task window armed at refs/heads/master, started: stamped"
+ok "$(printf '%s\n' "$out" | head -n 1 | cut -c1-16)" "armed [[A]] task" "m1: … the canary's armed line passes through, before the started= line"
+chk A; ok "$rc|$(trips A)" "0|0" "m1: the revise returns: check A → 0, no record not armed"
+scen m1b
+mkt A in_progress
+a0=$(cksum < "$V/A.md"); ro0=$(cksum < "$RO")
+ms A
+ok "$rc" 2 "m1b: mark-started with no --arm-repo/--arm-default on a rollout whose Project root exists → 2"
+has "$err" "--arm-repo <repoPath> --arm-default <B>" "m1b: … stderr names both flags"
+has "$err" "Git-env canary" "m1b: … and points at execute § 4.5 *Git-env canary*"
+ok "$(cksum < "$V/A.md")|$(cksum < "$RO")|$(recf A task state)|$(slots)" "$a0|$ro0|<none>|0" "m1b: … A.md and the rollout note byte-identical, no record, no slot-taken"
+# m2: the arm's owner refusal (the § 4 stamp skipped) writes nothing: no started:, the marker kept, no slot-taken.
+scen m2
+mkt A open 'gates_signed: 2026-10-20T09:00+00:00'
+a0=$(cksum < "$V/A.md")
+msa A
+ok "$rc" 2 "m2: mark-started with the flags on a note not stamped in_progress → 2 (the arm refused)"
+has "$err" "[[A]] is not running" "m2: … the canary's refusal passes through"
+has "$err" "stamp status: in_progress (execute § 4) first" "m2: … naming the § 4 stamp"
+ok "$(printf '%s\n' "$err" | grep -c 'run reconcile-rollout.py mark-started')" 0 "m2: … never 'run mark-started first' out of mark-started itself"
+has "$err" "ERROR: A: the task window's arm exited 2; nothing written" "m2: … and mark-started's own line"
+ok "$(cksum < "$V/A.md")|$(recf A task state)|$(slots)" "$a0|<none>|0" "m2: … A.md byte-identical (gates_signed: kept, no started:), no record, no slot-taken"
+# m3: under a git-env hold the arm exits 3 and mark-started writes nothing.
+scen m3
+mkt A in_progress; mkt B in_progress
+arm A; code; call; ok "$rc|$(trips A)" "3|1" "m3: A armed, a code commit, check-all → 3 (the hold)"
+b0=$(cksum < "$V/B.md")
+msa B
+ok "$rc|$(cksum < "$V/B.md")|$(recf B task state)" "3|$b0|<none>" "m3: under the hold, mark-started B with the flags → 3, B.md unchanged, no B record"
+has "$err" "ERROR: B: the task window's arm exited 3; nothing written" "m3: … naming the arm's exit"
+# m4: R bare at the arm is the canary's own trip.
+scen m4
+mkt A in_progress
+g -C "$R" config --local core.bare true
+a0=$(cksum < "$V/A.md")
+msa A
+ok "$rc|$(cksum < "$V/A.md")|$(recf A task state)" "3|$a0|<none>" "m4: R bare at mark-started's arm → 3, A.md unchanged, no record"
+has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "task: core.bare true at arm" "m4: … the canary's core.bare true at arm trip line"
+# m5: a resume's own arm after mark-started's compares the window once, then re-baselines it.
+scen m5
+mkt A in_progress
+msa A; r1=$rc; arm A; r2=$rc; chk A
+ok "$r1|$r2|$rc|$(trips A)" "0|0|0|0" "m5: mark-started's arm, a resume's own arm, then check → 0, 0, 0, no trip"
+scen m5b
+mkt A in_progress
+msa A; r1=$rc; code; arm A
+ok "$r1|$rc|$(trips A)" "0|3|1" "m5b: mark-started's arm, a code commit, then the resume's own arm → 3, one trip line"
+# m6: --dry-run never runs the canary; the flag requirement still applies.
+scen m6
+mkt A in_progress
+a0=$(cksum < "$V/A.md")
+msa A --dry-run
+ok "$rc|$(cksum < "$V/A.md")|$(recf A task state)" "0|$a0|<none>" "m6: --dry-run with the flags → 0, A.md unchanged, no record"
+has "$out" "A: would arm the task window (dry-run)" "m6: … it says it would arm"
+ms A --dry-run; ok "$rc|$(cksum < "$V/A.md")" "2|$a0" "m6: --dry-run with no flags on a Project-root rollout → 2 (it previews the refusal)"
+# m7: the flags go together, and need a rollout note to arm against.
+scen m7
+mkt A in_progress
+a0=$(cksum < "$V/A.md")
+ms A --arm-repo "$R"; ok "$rc|$(cksum < "$V/A.md")|$(recf A task state)" "2|$a0|<none>" "m7: --arm-repo without --arm-default → 2, nothing written"
+has "$err" "--arm-default" "m7: … a usage error naming the pair"
+ms A --arm-default master; ok "$rc|$(cksum < "$V/A.md")|$(recf A task state)" "2|$a0|<none>" "m7: --arm-default without --arm-repo → 2, nothing written"
+printf -- '---\ntags: [task]\nstatus: in_progress\n---\n\nbody\n' > "$V/H.md"; h0=$(cksum < "$V/H.md")
+msa H; ok "$rc|$(cksum < "$V/H.md")|$(recf H task state)" "2|$h0|<none>" "m7: a note with no rollout: and the flags → 2, nothing written"
+has "$err" "no rollout note to arm against" "m7: … naming why"
+# m8: no Project root line, or a root that does not exist: mark-started behaves as it did (no flags, no arm).
+scen m8
+mkro -
+mkt A in_progress
+ms A; ok "$rc|$(started A)|$(recf A task state)" "0|1|<none>" "m8: a rollout with no Project root: line, no flags → 0, started: stamped, no record"
+mkro "$S/gone"
+mkt B in_progress
+ms B; ok "$rc|$(started B)|$(recf B task state)" "0|1|<none>" "m8: a Project root naming a missing directory, no flags → 0, started: stamped, no record"
+# m8 fail-closed: a Project root mark-started cannot stat, or a rollout note that exists but cannot be read (the note
+# at mode 000, or the note under a mode-000 parent), may need the arm, so with no flags it refuses: exit 2, A.md
+# byte-identical, no record, no slot-taken. Python 3.14's Path.is_dir()/is_file() return False on EACCES, so these
+# legs fail against a check built on them under python3.14. The modes are restored before the asserts. Skipped as
+# root (a mode-000 dir can still be entered).
+mslocked() {  # mslocked <name> <path to chmod 000> <restore mode>: ms A on a fresh in_progress A, then the asserts
+  a0=$(cksum < "$V/A.md")
+  chmod 000 "$2"; ms A; chmod "$3" "$2"
+  ok "$rc|$(cksum < "$V/A.md")|$(recf A task state)|$(slots)" "2|$a0|<none>|0" "m8 fail-closed ($1), no flags → 2, A.md byte-identical, no record, no slot-taken"
+  has "$err" "--arm-repo <repoPath> --arm-default <B>" "m8 fail-closed ($1): … stderr names both flags"
+}
+if (mkdir -p "$TMP/m8-probe/d" && chmod 000 "$TMP/m8-probe" && ! [ -e "$TMP/m8-probe/d" ]); then
+  chmod 755 "$TMP/m8-probe"
+  scen m8-root
+  mkdir -p "$S/locked/repo"; mkro "$S/locked/repo"
+  mkt A in_progress
+  mslocked "a Project root under a mode-000 parent" "$S/locked" 755
+  has "$err" "Project root $S/locked/repo cannot be stat'ed" "m8 fail-closed (root): … naming the root it cannot stat"
+  scen m8-note
+  mkt A in_progress
+  mslocked "the rollout note at mode 000" "$RO" 644
+  has "$err" "the rollout note $RO cannot be read" "m8 fail-closed (note): … naming the note"
+  scen m8-note-dir
+  mkdir -p "$S/lockro"; mv "$RO" "$S/lockro/ro.md"; RO="$S/lockro/ro.md"
+  mkt A in_progress
+  mslocked "the rollout note under a mode-000 parent" "$S/lockro" 755
+  has "$err" "the rollout note $RO cannot be read" "m8 fail-closed (note dir): … naming the note"
+else
+  chmod 755 "$TMP/m8-probe" 2>/dev/null
+  echo "SKIP - m8 fail-closed legs (a mode-000 dir can still be entered here)"
+fi
+# m9: the canary binds --repo to the Project root.
+scen m9
+mkt A in_progress
+a0=$(cksum < "$V/A.md")
+ms A --arm-repo "$C2" --arm-default master
+ok "$rc|$(cksum < "$V/A.md")|$(recf A task state)" "2|$a0|<none>" "m9: --arm-repo naming another clone → 2 (the canary's binding), nothing written"
+has "$err" "is not this rollout's repo" "m9: … the canary names the rollout's repo"
+# m10: each slug arms on its own; one refused arm leaves the others armed and stamped.
+scen m10
+mkt A in_progress; mkt B open
+b0=$(cksum < "$V/B.md")
+msa A,B
+ok "$rc|$(recf A task state)|$(started A)|$(recf B task state)|$(cksum < "$V/B.md")" "2|\"armed\"|1|<none>|$b0" "m10: --tasks A,B, A running and B open → 2; A armed and stamped, B untouched"
+# m11: a finished note is refused before the arm.
+scen m11
+mkt A done
+a0=$(cksum < "$V/A.md")
+msa A; ok "$rc|$(cksum < "$V/A.md")|$(recf A task state)" "1|$a0|<none>" "m11: a done note with the flags → 1 (refused before the arm), no record"
 
 # ── o: end to end ────────────────────────────────────────────────────────────────────────────────────────────
 for variant in ref bare; do

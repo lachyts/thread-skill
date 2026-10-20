@@ -15,6 +15,7 @@
 # Usage: bash reconcile-rollout-record.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
+unset $(git rev-parse --local-env-vars 2>/dev/null)   # the Project roots are git checkouts (p26-3)
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
@@ -27,6 +28,7 @@ export HOME="$TMP/home"; mkdir -p "$HOME"
 unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR
 EV="$TMP/events"
 export THREAD_EVENTS_DIR="$EV"   # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_GIT_ENV_DIR="$TMP/git-env"  # mark-started's canary arm (p26-3) keeps its records in temp
 # J is a session's workflows/ dir; bind-run accepts it while a call is in flight because the session holds that
 # run's transcript dir, subagents/workflows/<runId>/, which the Workflow tool creates at launch (p27-3).
 V="$TMP/vault"; SESS="$TMP/sess"; J="$SESS/workflows"
@@ -606,9 +608,10 @@ ok "$(nh nh5 '{"status":"blocked","needsHuman":"'"$Q"'","blockerDiagnosis":"the 
 echo "== 25. human acts (p21-2): record-answer, approve-gates and hand-back record their own act (rollout ha)"
 # Each verb that carries a decision of Lachy's records it (the Hands-off rate's events); hand-back classifies its own
 # via. ha stamps every cap and auto_retries 0 (the Human-fix path), and a standing approval of US$50; its Project root
-# is a real dir, so the verbs that read it (inputs, the resolver) see one.
+# is a real dir, so the verbs that read it (inputs, the resolver) see one; a git checkout, so mark-started arms
+# the task window against it (p26-3).
 mkro ha "parallel_ceiling: 4" "max_review_rounds: 4" "max_iterations: 3" "max_plan_rounds: 3" "auto_retries: 0" "spend_approval_usd: 50"
-mkdir -p "$TMP/ha-root"
+mkdir -p "$TMP/ha-root"; git -c init.defaultBranch=master init -q "$TMP/ha-root"
 python3 - "$V/ha.md" "$TMP/no-repo" "$TMP/ha-root" <<'PY2'
 import sys
 p, a, b = sys.argv[1:]
@@ -769,7 +772,8 @@ noteline ha "- 2026-10-05 repair: [[ar2]] RACE decided: re-run it"
 ok "$(arr "$NOW")" 0 "decided, auto-retry retries it"
 ok "$(since ha "$M")" "race-decided:ar2 auto-retry:ar2" "race-decided, then auto-retry (no handed-back)"
 ok "$(since ha "$M" '[d.get("mark"), d.get("by")]' | cut -d' ' -f1)" '["RACE","auto-retry"]' "mark RACE, by auto-retry"
-rrs mark-started --tasks ar2 --tasks-dir "$V" --now 2026-10-05T10:05:00Z >/dev/null
+ok "$(rrs mark-started --tasks ar2 --tasks-dir "$V" --now 2026-10-05T10:05:00Z --arm-repo "$TMP/ha-root" --arm-default master >/dev/null; echo $?)" 0 \
+  "mark-started ar2 arms its task window against the Project root (p26-3)"
 row "$(trow ar2 '{"status":"plan-blocked","blockerDiagnosis":"Round 1: the plan still names no rollback test"}')" 2026-10-05T10:10:00Z >/dev/null
 M=$(cnt ha)
 ok "$(arr 2026-10-05T10:20:00Z)" 0 "its next block (new feedback) is retried again"

@@ -242,7 +242,7 @@ function checkRoomStop({ skill, status, handoff, repair, context }) {
   if (!it(6).includes("counts among the live task-call slugs in every `--running`, the heartbeat's included") ||
     !it(6).includes("a soft pause's drain waits for it") || !bulletOf(skill, 9, 'The resumes.').includes('`pause_requested` or not') ||
     !s13.includes('resumes each room-stopped task call and seeded revise (§ Room stop), `pause_requested` or not') ||
-    !s13.includes('`mark-started --tasks <slug> --rollout <rollout-note> --start resume`') ||
+    !s13.includes('`mark-started --tasks <slug> --rollout <rollout-note> --start resume --arm-repo <repoPath> --arm-default <B>`') ||
     !cold.includes('A room-stopped task call this session holds the handle of counts as a live task call here and in every `--running` until step 1.3 resumes it') ||
     !soft.includes('A room-stopped call (§ Room stop) is in-flight work: it counts as running in `--running`, and the drain resumes it')) fails.push('resume-live')
 

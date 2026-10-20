@@ -13,8 +13,10 @@
 #   A16 an answered block (ADR 0035: `inputs`' answerRecorded) is never retried
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own (rollout-settings.py reads ~/.config/thread/rollouts.toml), each
-# scenario's Project root is a temp dir, and this suite reads the Run record, so it keeps its own
-# THREAD_EVENTS_DIR per scenario and ignores THREAD_TEST_EVENTS_DIR. Temp notes only; no vault, no network.
+# scenario's Project root is a temp git checkout (mark-started arms the task window against it, p26-3, with the
+# canary's records in a temp THREAD_GIT_ENV_DIR outside the scenario dir, so `snap` never sees them), and this
+# suite reads the Run record, so it keeps its own THREAD_EVENTS_DIR per scenario and ignores
+# THREAD_TEST_EVENTS_DIR. Temp notes only; no vault, no network.
 # Usage: bash reconcile-rollout-auto-retry.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -52,8 +54,8 @@ FC='Round 1: the plan names no test for the rollback'
 
 D=""
 scen() {
-  D="$TMP/$1"; mkdir -p "$D/root"; echo "== $1"
-  export THREAD_EVENTS_DIR="$D/events"
+  D="$TMP/$1"; mkdir -p "$D/root"; git -c init.defaultBranch=master init -q "$D/root"; echo "== $1"
+  export THREAD_EVENTS_DIR="$D/events" THREAD_GIT_ENV_DIR="$TMP/git-env/$1"
   rm -rf "$HOME/.config"
 }
 # mkro [frontmatter lines...] — the rollout note: Project root $D/root, a queue, an empty ## Notes section
@@ -100,7 +102,12 @@ rec() { python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "${2:-2026
 lead() { printf '%s' "$3" | python3 "$LI" set-aside --note "$D/$1.md" --kind "$2" | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "${4:-2026-10-03T08:00:00Z}" >/dev/null; }
 inp() { python3 "$LI" inputs --note "$D/$1.md" --now "${INOW:-$NOW}" "${@:2}"; }
 ar() { out=$(python3 "$SCRIPT" auto-retry --tasks "$1" --rollout "$D/$RO.md" --tasks-dir "$D" --now "${ANOW:-$NOW}" "${@:2}" 2>&1); rc=$?; }
-ms() { python3 "$SCRIPT" mark-started --tasks "$1" --tasks-dir "$D" --now "${2:-$NOW}" >/dev/null 2>&1; }
+# ms <slug> [now]: the lead's mark-started, which arms the task window (p26-3); a refusal fails loudly.
+ms() {
+  local o
+  o=$(python3 "$SCRIPT" mark-started --tasks "$1" --tasks-dir "$D" --now "${2:-$NOW}" --arm-repo "$D/root" --arm-default master 2>&1) \
+    || { echo "FAIL - mark-started $1 exited $?: $o"; fail=1; }
+}
 nxt() { python3 "$SCRIPT" next --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" --running "$1" --dry-run 2>/dev/null; }
 j() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); v=eval(sys.argv[1]); print(v if isinstance(v, str) else json.dumps(v, separators=(",", ":"), sort_keys=True))' "$2"; }
 snap() { (cd "$D" && find . -path ./events -prune -o -type f -print | LC_ALL=C sort | while read -r f; do printf '%s\n' "$f"; cat "$f"; done) | shasum | cut -c1-40; }
@@ -570,11 +577,11 @@ lead "$A" own "workflow call failed: no result row"
 ok "$(j "$(INOW=2026-10-03T08:14:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"], d["autoRetryAfter"]]')" '[false,"infra","2026-10-03T08:15+00:00"]' \
   "A10: a non-quota dead call → infra, cooling"
 ANOW=2026-10-03T08:15:00Z ar "$A"; ok "$rc" 0 "A10 dead: retry 1, after its cool-down"
-ms "$A" 2026-10-03T08:16:00Z; setfm "$A" status in_progress; lead "$A" own "workflow call failed: no result row" 2026-10-03T08:30:00Z
+setfm "$A" status in_progress; ms "$A" 2026-10-03T08:16:00Z; lead "$A" own "workflow call failed: no result row" 2026-10-03T08:30:00Z
 ok "$(j "$(INOW=2026-10-03T09:14:00Z inp "$A")" 'd["autoRetryAfter"]')" "2026-10-03T09:15+00:00" "A10 dead: the identical dead call cools 60 minutes"
 ok "$(j "$(INOW=2026-10-03T09:15:00Z inp "$A")" 'd["autoRetry"]')" true "A10 dead: then it is still retryable"
 ANOW=2026-10-03T09:15:00Z ar "$A"; ok "$rc" 0 "A10 dead: retry 2"
-ms "$A" 2026-10-03T09:16:00Z; setfm "$A" status in_progress; lead "$A" own "workflow call failed: no result row" 2026-10-03T09:30:00Z
+setfm "$A" status in_progress; ms "$A" 2026-10-03T09:16:00Z; lead "$A" own "workflow call failed: no result row" 2026-10-03T09:30:00Z
 ok "$(j "$(INOW=2026-10-03T12:00:00Z inp "$A")" 'd["autoRetryWhy"]')" "budget: 2/2 used" "A10 dead: the third stops on the budget"
 scen a10-legacy
 mkro; mkt "$A" open; mkt "$B" open
@@ -607,7 +614,7 @@ ok "$rc|$(fm "$A" quota_retries_used)|$(fm "$A" auto_retries_used)|$(fm "$A" aut
 has "$out" "$A: auto-retry quota 1/5 (implement; feedback " "A11: stdout counts the quota retry"
 has "$(sec "$RO" '## Notes')" "auto-retry: [[$A]] quota 1/5 (implement; feedback " "A11: the Notes line counts the quota retry"
 ok "$(lastev auto-retry '[d["retryClass"], d["used"], d["quotaRetries"], d["budget"]]')" '["quota",0,1,2]' "A11: the event: quota, used 0, quotaRetries 1"
-ms "$A" 2026-10-03T10:31:00Z; setfm "$A" status in_progress
+setfm "$A" status in_progress; ms "$A" 2026-10-03T10:31:00Z
 lead "$A" own "$QT" 2026-10-03T10:40:00Z
 I=$(INOW=2026-10-03T11:00:00Z inp "$A")
 ok "$(j "$I" '[d["autoRetry"], d["autoRetryAfter"]]')" '[false,"2026-10-03T11:30+00:00"]' "A11: an identical re-block → after = auto_retry_at + 60"
