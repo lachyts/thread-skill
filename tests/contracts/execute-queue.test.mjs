@@ -1,5 +1,6 @@
 // Execute's lead runs the queue (ADR 0030 decisions 2 to 5, p12-9): the § 4.5 loop and its neighbours in
-// skills/execute/SKILL.md, the Stop hook it drives and the heartbeat prompt that backs it up. The scripts the prose
+// skills/execute/SKILL.md (the rollout clone's § 2.7 refresh and cited paths, § 2.8 launch gate and completion twin
+// refresh among them, ADR 0042), the Stop hook it drives and the heartbeat prompt that backs it up. The scripts the prose
 // calls are executed elsewhere (tests/lead-integrate.test.sh, skills/execute/tests/reconcile-rollout-lead.test.sh,
 // skills/execute/tests/rollout-stop-driver.test.sh); this pins the prose an LLM lead follows.
 //
@@ -415,12 +416,13 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   if (!hooksJson.includes('${CLAUDE_PLUGIN_ROOT}/hooks/rollout-stop-driver.py') || hooksJson.includes('wave-stop-driver') ||
     !exists('hooks/rollout-stop-driver.py') || exists('hooks/wave-stop-driver.py')) fails.push('driver')
 
-  // verify-timeout (p14-2, L3): the rollout key's default and its use. § 3's table row (default 1800, not passed to
-  // the engine, read by `reconcile-rollout.py verify-timeout`); § 3's once-per-entry check, before anything the
-  // entry writes, with its write-nothing halt; the verify line and the RACE re-verify bound by it, with no literal
-  // 1800 left; the harness bound (2400000 at the default) on the verify paragraph and § 8's timeout guardrail;
-  // every entry description runs the check before its first write (§ 4.5's entry paragraph, Cold resume, both
-  // Reinstates); § 7 lists the halt.
+  // verify-timeout (p14-2, L3; p23-4): the rollout key's default and its use. § 3's table row (default 1800, not
+  // passed to the engine, read by `reconcile-rollout.py verify-timeout`); § 3's once-per-entry check, before anything
+  // the entry writes, with its write-nothing halt and its four JSON keys; the verify line and the RACE re-verify bound
+  // by it, with no literal 1800 left; the harness bound, now the harness maximum 7200000 (p23-4: the verify-slot wait,
+  // the verifier and the margin fit inside it; no `(+ 600) × 1000` or 2400000 left), on the verify paragraph and § 8's
+  // timeout guardrail; every entry description runs the check before its first write (§ 4.5's entry paragraph, Cold
+  // resume, both Reinstates); § 7 lists the halt.
   const s3raw = section(skill, S3) ?? ''
   const vtRow = s3raw.split('\n').find((l) => l.startsWith('| `verify_timeout` |')) ?? ''
   const vtP = collapse(s3raw.split('\n\n').find((x) => x.startsWith('**Validate `verify_timeout` once per loop entry, before anything the entry writes.**')) ?? '')
@@ -437,12 +439,52 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !vtP.includes('the lead writes nothing') || !vtP.includes('reason="invalid verify_timeout on [[rollout]]"') ||
     !vline.includes('--timeout <verify_timeout>') || !raceLine.includes('--timeout <verify_timeout>') ||
     !raceLine.includes('`timeout: <harnessTimeoutMs>`') || /--timeout 1800\b/.test(skill) ||
-    !verifyP.includes('(<verify_timeout> + 600) × 1000') || !verifyP.includes('`timeout: 2400000` at the default') ||
-    !timeoutGuard.includes('`timeout: <harnessTimeoutMs>` (their own `--timeout <verify_timeout>` bounds the verifier; `timeout: 2400000` at the default)') ||
+    !verifyP.includes("(7200000, the harness maximum, from this entry's § 3 `verify_timeout` check") || /\b2400000\b/.test(skill) ||
+    /\+ 600\) × 1000/.test(skill) ||
+    !vtP.includes('Exit 0 prints `{"verifyTimeout": <verify_timeout>, "harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlots": <verify_slots>}`') ||
+    !timeoutGuard.includes('`timeout: <harnessTimeoutMs>` (7200000; their own `--slot-wait <slot_wait>` bounds the verify-slot wait and `--timeout <verify_timeout>` the verifier)') ||
     !recheck.includes("Every entry then runs § 3's `verify_timeout` check once, before anything it writes") ||
     !before(coldVT, VT, 'reconcile-rollout.py resume') || !before(reinstateVT, VT, 'clear-pause') || !before(pzReinstate, VT, 'clear-pause') ||
     !S(skill, S7).includes('`reconcile-rollout.py verify-timeout` exits 1 at an entry (`reason="invalid verify_timeout on [[rollout]]"`')) {
     fails.push('verify-timeout')
+  }
+
+  // verify-slots (p23-4): the machine's verify slots. The verify line and the RACE re-verify each take one
+  // (`--slots <verify_slots> --slot-wait <slot_wait>`); `noslot` is no verdict: step 3 re-arms and re-runs with M
+  // unpushed and the RACE re-runs with the lane held, and a third in a row halts (step 3 after `undo`); the verify
+  // paragraph says the wait never counts against the deadline and the guard ends a SIGKILLed verify's verifier; § 3
+  // has the machine-wide `verify_slots` row and verify-timeout's exit-3 halt with its "does not clear" remedy; § 4
+  // passes `verifySlot` (and a resume never adds it); the *Verify slots* paragraph names both Integration waiters (the
+  // lead's `lead-integrate.py verify` and the integrate call's `run --priority`), the guard and `status`; § 7 lists
+  // the three halts.
+  {
+    const SLOTS = '--slots <verify_slots> --slot-wait <slot_wait>'
+    const vsRow = s3raw.split('\n').find((l) => l.startsWith('| `verify_slots` |')) ?? ''
+    const exit3 = collapse(s3raw.split('\n\n').find((x) => x.startsWith('**Exit 3 (the rollout settings refused).**')) ?? '')
+    const vsP = labelled(skill, 'Verify slots')
+    const s4 = S(skill, S4)
+    const s7 = S(skill, S7)
+    if (!vline.includes(` ${SLOTS} --bootstrap`) || !raceLine.includes(` ${SLOTS} --bootstrap`) ||
+      !verifyP.includes('its `--timeout` deadline starts only once it holds one, so the wait never counts against `verify_timeout`') ||
+      !verifyP.includes('only a SIGKILL leaves no rc, which reads as red; its guard still ends the verifier') ||
+      !verifyP.includes('Any rc but 0 is red, except `noslot` (exit 75: no verify slot within `<slot_wait>`, the verifier never ran), which is no verdict') ||
+      !st3.includes('`noslot` (exit 75: no verify slot came within `<slot_wait>`; the verifier never ran, so this is no verdict, never red): M stays unpushed and the lane held. After the canary `check`, re-arm (`--kind verify`) and re-run *The background verify command*.') ||
+      !st3.includes('A third consecutive `noslot` on this verify: `undo`, then halt with `reason="no verify slot for [[slug]] in 3 tries"`') ||
+      !raceLine.includes('`noslot` (no verify slot came within `<slot_wait>`: the verifier never ran, no verdict) → re-run the re-verify with the lane held') ||
+      !raceLine.includes('a third consecutive `noslot` halts with `reason="RACE: no verify slot for the re-verify of [[slug]]"`') ||
+      !vsRow.startsWith('| `verify_slots` | `2` | machine-wide; `[defaults]` only') || !vsRow.includes('never stamped on a rollout note') ||
+      !vsRow.includes('read by `verify-timeout`') || !vsRow.includes('becomes `--slots`') || !vsRow.includes('`args.verifySlot.slots`') ||
+      !exit3.includes('reason="rollout settings refused"') || !exit3.includes('The lead writes nothing') ||
+      !exit3.includes('Stamping a key on the rollout note does not clear a `verify-timeout` exit 3: `verify_slots` is never stamped and the whole file is validated, so only fixing `~/.config/thread/rollouts.toml` at the line its stderr names') ||
+      !s4.includes('"verifySlot": { "script": "<abs ${CLAUDE_PLUGIN_ROOT}>/skills/execute/scripts/verify-slot.py", "slots": 2 }') ||
+      !s4.includes('adding `defaultBranch` or `verifySlot` to a run that started without it changes prompt bytes') ||
+      !vsP.includes("The lead's `lead-integrate.py verify` (the Integration verify and the RACE re-verify) and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode) register as Integration waiters") ||
+      !vsP.includes('before the verify slot frees') || !vsP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status --slots <verify_slots>`') ||
+      !s7.includes('`reason="RACE: no verify slot for the re-verify of [[slug]]"`') || !s7.includes('`reason="no verify slot for [[slug]] in 3 tries"`') ||
+      !s7.includes('`reconcile-rollout.py verify-timeout` exits 3 at an entry (§ 3: `reason="rollout settings refused"`') ||
+      !s7.includes('stamping a key does not clear it')) {
+      fails.push('verify-slots')
+    }
   }
 
   // approved-plan (p14-2, L2): the approved plan reaches the seeded revise (step 1.2) and the integrate call (step 3)
@@ -594,6 +636,30 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     fails.push('lane-order')
   }
 
+  // clone-root (ADR 0042, p26-2): § 2.7 refreshes the rollout clone before the pushed-base check and passes the
+  // not-yet-merged tasks' cited paths (`reconcile-rollout.py cited`), with the clone-rooted sentence; § 2.8 gates the
+  // launch directory; step 5 refreshes the in-place twin between the `status: done` stamp and the Completion log; and
+  // Scope names the twin refresh.
+  const s27c = S(skill, /^### 2\.7\. /)
+  const s28c = S(skill, /^### 2\.8\. /)
+  const s5raw = stepRaw(skill, 5)
+  const stampAt = s5raw.indexOf('   - Stamp `status: done` + `completed: <date>` on the rollout frontmatter.')
+  const ripAt = s5raw.indexOf('self-rollout-check.sh --refresh-in-place <Project root>')
+  const logAt = s5raw.indexOf('   - Append a `## Completion log`')
+  if (!s27c.includes('reconcile-rollout.py cited --rollout <rollout-note>') ||
+    // A failed `cited` call fails closed: with no cited paths no peer blocks, so passing none would fail open.
+    !s27c.includes('A non-zero exit there fails closed: the pushed-base check never runs, and the entry takes the write-nothing halt below with `reason="pushed-base check failed"`') ||
+    !s27c.includes('or `reconcile-rollout.py cited` exiting non-zero before it: the same write-nothing halt with `reason="pushed-base check failed"`') ||
+    /passes none/.test(s27c) ||
+    !before(s27c, 'self-rollout-check.sh --refresh <Project root>', 'Then run the pushed-base check') ||
+    !s27c.includes('In a clone-rooted rollout (every rollout scheduled after P26, and every self-rollout), a commit in any other clone of the set') ||
+    !s27c.includes('In an in-place-rooted rollout, one in another clone of the set is still named first') ||
+    !s28c.includes('--launch-check') || !s28c.includes('reason="launched outside the Project root"') ||
+    // Repair's hand-off enters the loop past § 2.7, so it runs § 2.8 itself (repair § 4), never exempt from it.
+    /repair hand-off/.test(s28c) ||
+    !s28c.includes("Repair's hand-off (`/thread:repair` § 4) enters the loop past § 2.7, so it runs this snippet itself before it hands off, and on exit 3 stops at its diagnosis with no hand-off") ||
+    stampAt < 0 || ripAt < stampAt || logAt < ripAt || !S(skill, /^## Scope/).includes('--refresh-in-place')) fails.push('clone-root')
+
   // s5 (the dead-run resume keeps its shape for its consumers) is part of lost-call's routing: § 5 names *Lost call*.
   if (!s5.includes('(§ 4.5 *Lost call*)') || !before(s5, '(§ 4.5 *Lost call*)', 'resumeFromRunId: <runId>')) fails.push('lost-call')
   return [...new Set(fails)]
@@ -608,7 +674,8 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
-  'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer']
+  'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
+  'verify-slots', 'clone-root']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -620,6 +687,18 @@ const only = (mut, rule, label) => {
   assert.deepEqual(checkExecute({ ...real, ...mut }), [rule], label)
 }
 const sk = (from, to) => ({ skill: edit(real.skill, from, to) })
+
+test('control: § 2.7 without the cited paths, or step 5 without the twin refresh, fails clone-root', () => {
+  only(sk('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py cited --rollout <rollout-note>`', '`nothing`'),
+    'clone-root', 'no cited paths')
+  only(sk('   - Refresh the in-place checkout once: `bash ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh --refresh-in-place <Project root>`',
+    '   - Leave the in-place checkout alone'), 'clone-root', 'no twin refresh')
+  only(sk('reason="launched outside the Project root"`.', 'reason="elsewhere"`.'), 'clone-root', 'no launch gate reason')
+  only(sk('`resumeFromRunId` resume or Stage re-send. Repair\'s hand-off (`/thread:repair` § 4) enters the loop past\n§ 2.7, so it runs this snippet itself before it hands off, and on exit 3 stops at its diagnosis with no hand-off,\ntelling Lachy to run `/thread:execute` from the Project root.',
+    '`resumeFromRunId` resume, repair hand-off or Stage re-send.'), 'clone-root', "§ 2.8 exempting repair's hand-off")
+  only(sk('A non-zero exit there fails closed: the pushed-base check never runs, and the\nentry takes the write-nothing halt below with `reason="pushed-base check failed"`, its stderr printed verbatim.\nRunning it with no cited paths instead would let no peer block, so a commit a task needs would pass silently.',
+    'A non-zero exit there passes none and is a `WARN:` for the report.'), 'clone-root', 'a failed cited call fails open')
+})
 
 test('control: protocol 3 proceeding fails protocol-5', () => {
   only(sk('- `protocol_version: 5` → proceed.', '- `protocol_version: 3` → proceed.'), 'protocol-5', 'protocol 3')
@@ -866,7 +945,42 @@ test('control: a verify_timeout default of 3600 fails verify-timeout', () => {
 })
 
 test('control: a RACE re-verify back on --timeout 1800 fails verify-timeout', () => {
-  only(sk('race-<slug> --timeout <verify_timeout> --bootstrap', 'race-<slug> --timeout 1800 --bootstrap'), 'verify-timeout', 'race 1800')
+  only(sk('race-<slug> --timeout <verify_timeout> --slots', 'race-<slug> --timeout 1800 --slots'), 'verify-timeout', 'race 1800')
+})
+
+test('control: a verify paragraph back on (<verify_timeout> + 600) × 1000 fails verify-timeout', () => {
+  only(sk("(7200000, the harness maximum, from this entry's § 3 `verify_timeout` check:", "((<verify_timeout> + 600) × 1000, from this entry's § 3 `verify_timeout` check:"),
+    'verify-timeout', 'old harness bound')
+})
+
+test('control: a verify-timeout JSON without slotWait fails verify-timeout', () => {
+  only(sk('"harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlots": <verify_slots>}`:', '"harnessTimeoutMs": <harnessTimeoutMs>}`:'),
+    'verify-timeout', 'two keys')
+})
+
+// verify-slots (p23-4)
+test('control: the verify line without --slots fails verify-slots', () => {
+  only(sk('"<repoPath>/.claude/integration/<slug>" --timeout <verify_timeout> --slots <verify_slots> --slot-wait <slot_wait>', '"<repoPath>/.claude/integration/<slug>" --timeout <verify_timeout>'),
+    'verify-slots', 'no --slots')
+})
+
+test('control: a noslot read as green fails verify-slots', () => {
+  only(sk('so this is no verdict, never red): M stays unpushed and the lane held. After the canary `check`, re-arm (`--kind verify`) and re-run *The background verify command*.',
+    'read it as green): push as on rc 0.'), 'verify-slots', 'noslot green')
+})
+
+test('control: step 3 without the third-noslot halt fails verify-slots', () => {
+  only(sk(' A third consecutive `noslot` on this verify: `undo`, then halt with `reason="no verify slot for [[slug]] in 3 tries"` (a verify slot held that long is a hung holder: `verify-slot.py status` names it).', ''),
+    'verify-slots', 'no third-noslot halt')
+})
+
+test('control: § 3 without the "does not clear" remedy fails verify-slots', () => {
+  only(sk(' Stamping a key on the rollout note does not clear a `verify-timeout` exit 3: `verify_slots` is never stamped and the whole file is validated, so only fixing `~/.config/thread/rollouts.toml` at the line its stderr names (or a python >= 3.11 when it names tomllib) does.', ''),
+    'verify-slots', 'no remedy')
+})
+
+test('control: a priority sentence without the integrator fails verify-slots', () => {
+  only(sk(" and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode)", ''), 'verify-slots', 'no integrator')
 })
 
 test('control: a verify_timeout check read as each task starts fails verify-timeout', () => {
@@ -1051,7 +1165,7 @@ test("control: no Don't on a hand-written key fails recorded-answer", () => {
   only(sk(', and never write, supersede or spend a `## Repair input` key by hand', ''), 'recorded-answer', 'keys by hand')
 })
 
-test('the rules are all named (33) and each has a control', () => {
-  assert.equal(RULES.length, 33)
+test('the rules are all named (35) and each has a control', () => {
+  assert.equal(RULES.length, 35)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

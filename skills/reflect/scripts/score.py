@@ -13,8 +13,8 @@ the vault's task notes, as unfinished-rollout.py's and reconcile-rollout.py's do
 `~` read against the scored env's HOME). Both only feed the Escapes, below; without them those sources read unread.
 
 Reads: the rollout's record `<events dir>/<slug>.jsonl` (run_record.py's directory chain), every other
-`<slug>.jsonl` there for load (reviews.jsonl and tunings.jsonl are never read as rollouts, though reviews.jsonl is
-read for its /fresh-review rounds, Review churn below; only lines from the
+`<slug>.jsonl` there for load (the reserved files, run_record's RESERVED, are never read as rollouts, though
+reviews.jsonl is read for its /fresh-review rounds, Review churn below; only lines from the
 scored record's host count, and only where a record's live span overlaps this run's running time, not the window, so
 a Reflection run long after the rollout never counts a later rollout; the live span runs to its last line or, while a
 Slot it took is open, to --until, flagged, so a busy rollout whose long calls write nothing still counts), tunings.jsonl for the baseline, earlier
@@ -23,7 +23,7 @@ max_iterations, max_plan_rounds, captured) through reconcile-rollout.py's Note, 
 the Project root: each key's resolved value now (a proposal's `from`), the Guardrail bounds, and `path`, whose
 mtime feeds the cause labels. For the Escapes, escapes.py (beside this script, loaded here) also reads, read-only and
 never fetched: every note under --tasks-dir (Archive included) for `fixes:` and `merged_into:`, and the --repo
-clone's commit messages, `docs/reviews/` and `git blame`. Its docstring is the one copy of those rules.
+clone's commit messages, `docs/reviews/` and `git blame`, or its in-place checkout's when fresher (ADR 0042). Its docstring is the one copy of those rules.
 
 Times. --since and --until take Z or an offset (run_record's `_stamp` rule; a naive stamp is refused) and
 everything printed is UTC `Z`. --since defaults to the record's first slot-taken, else its first line;
@@ -193,7 +193,7 @@ Its flags are prefixed `escapes: `; one that will not load leaves every source u
 
 Output: one JSON object (stdout, or --out F): rollout, repo, host, window{since, until, activeStart, activeEnd,
 partial}, runningTime{hours, excluded[{kind, start, end, hours, why}], excludedHours{kind: hours}}, merges, escapes
-(escapes.py's block: count, landed, quality, partial, bySource, reviewDocs, tasks, sources, ref, excluded),
+(escapes.py's block: count, landed, quality, partial, bySource, reviewDocs, reviewTrees, tasks, sources, ref, excluded),
 throughput, handsOff{rate, landed, handsOff, tasks[{task, acts[{kind, at, detail}]}], byKind{answer, signOff,
 retry, mergeHold, raceDecided}, notCounted{standingApproval, automaticHandBack, raceReverified}, baseline}, slots,
 lane, guardrails{throughput{value, runningHours, tasks, allowanceHours, bound, baseline, breached}, tokensPerMerge,

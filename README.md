@@ -6,9 +6,13 @@ Claude Code plugin, twelve skills, two lanes. The **continuity verbs** solve
 **rollout verbs** run large multi-PR changes as a queue of tasks on a
 convergence engine, each integrated with the latest main before it merges. One
 rule connects them: the **execution-fit test** (`skills/_shared/execution-fit.md`)
-decides which lane owns a cluster — hard, never as a preference. Rollout-shaped
-work (one repo, PR-per-task, machine-verifiable in-run) rolls out; everything
-else runs as scoped sessions.
+decides which lane owns a cluster — hard, never as a preference. Parallel-shaped
+work (one repo, PR-per-task, machine-verifiable in-run, no external publish, no
+tool the lead lacks) rolls out as a parallel rollout; serial-shaped work an agent
+can still finish unattended (vault notes, several repos, no machine check in the
+run, an external publish, a tool or profile the lead lacks) as a serial rollout
+(ADR 0040); work that needs Lachy present or waits on a date runs as scoped
+sessions.
 
 > Until v2.0.0 the rollout verbs shipped as the separate `wave` plugin
 > (`lachyts/wave-skill`, now archived). The namespace is `/thread:*`
@@ -29,10 +33,11 @@ else runs as scoped sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules rollout-shaped phases itself, steers the rest (parallel-safe batches it dispatches as native child agents of its own session, ADR 0023, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules parallel-shaped phases itself, steers the rest (a serial rollout for serial-shaped work, ADR 0040, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient-all` | where is my attention best placed? | The estate pass (ADR 0041): orient across every project at once. Scans the vault, grades and ranks all open work by agent work per minute of Lachy's attention, asks the sign-offs, One calls, Unpark offers and Grills that fit his stated time budget, writes each answer into its task, schedules the runs that are ready (forked `/thread:schedule` calls, batched so no two can name one note), then starts every execute, Leg 1, repair and child orient as a visible Chorus session, or prints paste-ready prompts off the Stage. Never reshapes a project; `--dry-run` writes nothing. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
-| `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
+| `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop or a Chorus Session also create a fresh visible task seeded with it (a sidebar task in Codex Desktop); elsewhere label it a manual handoff. |
 | `/thread:close` | done | Persist to THREAD.md + auto-commit; end-of-thread ritual; lands its close-out and its own branch (ADR 0028): the own branch is reviewed by `/fresh-review` before its merge is queued. |
 
 Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspaces/_shared/docs/adr/0008-next-action-slot.md`): each writes the task's `next_action:` and points the `next_task:` of every project note the task links (area notes skipped) at it, most recent winning — close only when the thread has a concrete next task. `orient` reads that slot first and fills it only when blank. Both go through `skills/_shared/scripts/next-action.py` (`skills/_shared/task-writer.md` § 4b).
@@ -41,21 +46,20 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 
 | Member | Role | What it does |
 |---|---|---|
-| `/thread:schedule` | planner | Orders the backlog into a queue (dependencies recorded in frontmatter, Solo for sweeping changes, affine same-file clusters folded into one unit) and refuses a second unfinished rollout on a repo (`--regenerate` supersedes it, carrying its unlanded tasks); writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 5`). No minimum size — shape decides, not count. |
-| `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). |
-| `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. |
-| `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. |
-| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; by hand only the ones Lachy picks are applied, by the tune script, which records each by-hand Reflection in `tunings.jsonl`. The weekly reading (`--weekly`, ADR 0037 d3–d5) reads every rollout since the last one, traces the friction to its rules, keeps Watches in `reflections.jsonl`, files bugs and lands a knob three Reflections agree on, never a rule: a rule proposal waits in one decision task for Lachy. |
+| `/thread:schedule` | planner | Orders the backlog into a queue (dependencies recorded in frontmatter, Solo for sweeping changes, affine same-file clusters folded into one unit) and refuses a second unfinished parallel rollout on a repo (`--regenerate` supersedes it, carrying its unlanded tasks); writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 5`). An all-serial set gets one `shape: serial` note per chain, refused while a live chain shares a surface. No minimum size — shape decides, not count. |
+| `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg. |
+| `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. A serial chain reads as its Legs, its chain state and any stall (`leg.py status`). |
+| `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. A stalled serial chain gets its set-asides answered or deferred with their dependants, and its next Leg started as a new Session. |
+| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; by hand only the ones Lachy picks are applied, by the tune script, which records each by-hand Reflection in `tunings.jsonl`. The weekly reading (`--weekly`, ADR 0037 d3–d5) reads every rollout since the last one, traces the friction to its rules, keeps Watches in `reflections.jsonl`, files bugs and lands a knob three Reflections agree on, never a rule: a rule proposal, or a held trade (a knob that trades one headline against the other), waits in one decision task for Lachy. A serial chain is scored from its Leg log (`serial-score.py`) into one close line at its Complete. |
 
 ## Runtime support
 
-Orient's audit, reshuffle, steering and task-note debrief are portable. Its
-batches run as native child agents of the calling session, through the shared
-native-workflow exchange (ADR 0023): no terminal multiplexer and no launch
-profile is required, the calling session must stay open to collect them, and a
-batch that needs a tool or account the session lacks is reported blocked, never
-substituted. The rollout executor still requires its canonical Workflow runtime;
-shared source and skill discovery do not provide that runtime.
+Orient's audit, reshuffle and steering are portable, and orient spawns no child
+agents (ADR 0040 retired the ADR 0023 batches). The rollout executor still
+requires its canonical Workflow runtime; shared source and skill discovery do not
+provide that runtime. The estate pass (`/thread:orient-all`) grades through read-only agents and schedules through
+forked subagents, and starts its sessions as visible Chorus sessions on the Stage; anywhere else it ends with
+paste-ready prompts.
 
 ## The convergence engine
 
@@ -78,6 +82,17 @@ installing a version that knows the key, because an older `rollout-settings.py`
 refuses it, and every rollout's settings with it. `skills/_shared/scripts/gated_inputs.py`
 holds the exposure reading it applies and schedule's gated-input sweep.
 
+A needs-you push that does not reach you (any "not sent" but you at the
+terminal, such as Remote Control inactive or notifications turned off, a
+push-tool error, or no push tool at all, as in Codex) falls back to ntfy once
+`~/.config/thread/rollouts.toml` sets `[notify] ntfy_topic = "<topic>"`.
+`rollout-settings.py` prints only whether a topic is set, never the topic.
+Unset, there is no fallback, and an undelivered push is logged `push failed:`
+in the rollout note's `## Needs-you log` and retried once at the next loop
+entry. Install a release that knows the table before writing it: an older
+`rollout-settings.py` refuses the table, and every rollout's settings with it.
+`skills/execute/scripts/ntfy-push.py` sends the item (execute § 6.5, ADR 0038).
+
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through
 `skills/execute/scripts/merge-task.sh` — gated on *required* status checks,
@@ -86,6 +101,12 @@ writes all per-task vault frontmatter transitions deterministically and drives
 per-task resume; `skills/execute/scripts/lead-integrate.py` is the lead's side
 of Integration (the clean-path merge and its bounded verify, the trouble-path
 inputs and the lead's own set-aside rows).
+`skills/execute/scripts/verify-slot.py` holds the machine's verify slots (p23-4):
+at most `verify_slots` verifier suites run at once across every rollout on the
+machine (the lead's Integration and RACE verifies, and every agent's
+engine-rendered verifier), a further one waits, and each runs under a guard
+that ends a killed holder's suite before its verify slot frees;
+`verify-slot.py status` shows who holds each verify slot and who waits.
 `skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
 watches the shared checkout's default branch and bareness around every launch
 and halts the queue on a change that is not a close-out (execute § 4.5).
@@ -108,11 +129,16 @@ half of a Reflection at each rollout's close (fold, settings, score,
 script half and is the only writer of `reflections.jsonl` and of the bug and
 decision tasks. `skills/reflect/scripts/reflect-due.py` tells the daily sweep
 when the weekly reading is due: 7 days after the last one, 14 after three quiet
-Reflections in a row (ADR 0037 d4, d6).
+Reflections in a row (ADR 0037 d4, d6). The Grade log (`grades.jsonl` beside the
+Run record, ADR 0041) has one writer, `estate-dispatch.py log`, which keeps each
+estate pass's grades (a task whose note name is no slug, with spaces or
+capitals, is skipped and reported in its outcome line, and the rest are still
+logged), and one reader, `skills/reflect/scripts/grades.py`, which the weekly
+reading loads to join each grade to what followed it.
 
 ## Design
 
-- `CONTEXT.md` — the domain glossary (lane, rollout-shaped, Task floor, Router,
+- `CONTEXT.md` — the domain glossary (lane, parallel-shaped, Task floor, Router,
   rollout, cursor, conductor, drift, tier, …).
 - `skills/_shared/execution-fit.md` — the canonical lane rule.
 - `skills/_shared/task-writer.md` — the single spec for writing + routing the
@@ -159,7 +185,12 @@ Reflections in a row (ADR 0037 d4, d6).
   `0035` — one human fix per refusal (amends 0033). `0036` — orient resolves
   its target before it reads, then reshuffles without asking (amends 0026 and
   0027). `0037` — Reflections run on their own and tune for hands-off quality
-  (amends 0032).
+  (amends 0032). `0038` — a Cap is a promise: a spend gate is one line, its split
+  in sub-bullets, and an undelivered push falls back to ntfy (amends 0034).
+  `0039` — a code project's thread lives in its repo; one live THREAD.md per
+  project; the placement check (amends 0017). `0040` — a rollout is parallel or
+  serial: a three-way execution-fit test, and orient's child-agent batches
+  retire (amends 0023).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
@@ -200,10 +231,22 @@ Reflections in a row (ADR 0037 d4, d6).
   execute reads the note first, so an edit to the file reaches the next
   scheduled (or `--regenerate`d) rollout, not one already written. A task's
   own frontmatter still overrides `max_iterations`, `max_review_rounds` and
-  `max_plan_rounds`.
-- **Schedule picks the rollout root (#108).** When the Project root is the
-  live directory-source plugin checkout, schedule uses the separate
-  `<repoPath>-rollout` clone, or refuses with the fix.
+  `max_plan_rounds`. `verify_slots` (built-in 2) is machine-wide: set it under
+  `[defaults]` only (a `[repo."owner/name"]` table that sets it is refused); it
+  is never stamped, and execute's `verify-timeout` reads it, validating the
+  whole file, at each loop entry. So install first: write a new key only once
+  the installed plugin knows it, because a refused file now halts every
+  rollout on the machine at its next entry, stamped or not. Stamping a key on
+  the rollout note does not clear that halt; only fixing the file at the line
+  its stderr names does.
+- **Every parallel rollout runs from its rollout clone (#108, ADR 0042).**
+  Schedule § 0 resolves every repo to `<toplevel>-rollout`, a second full
+  clone beside its toplevel, and makes it on the first rollout after Lachy's
+  yes (`self-rollout-check.sh --ensure`), so peer sessions committing in the
+  in-place checkout never trip a rollout's windows. The lead launches in the
+  clone (execute § 2.8), merge-task fast-forwards the in-place checkout after
+  each merge, and a clone's THREAD.md copy is never a thread. A rollout
+  scheduled before then keeps its root; `--regenerate` re-roots it.
 
 ## Install
 
@@ -234,8 +277,10 @@ make test            # = bash tests/run.sh — the one entrypoint, and the self-
 make evals           # behaviour evals: real model calls, a human step, never part of make test
 ```
 
-`tests/run.sh` runs everything hermetically (temp `HOME` and global git config, no bytecode, and a
-final check that the run wrote nothing into the tree):
+`tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
+pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third
+of the cores' worth of background suites at once (at least 2; 4 on 12 cores), largest first, and node
+at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 4):
 
 - **Syntax** — `bash -n` on every shell script, `ast.parse` on every Python script, and a real parse
   of every `*.workflow.js` (`tests/lib/check-workflow-parse.sh`: the body wrapped the way the Workflow
@@ -256,9 +301,11 @@ final check that the run wrote nothing into the tree):
   script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), orient's
   target resolution before it reads and its one learned `repos:` write (`orient-target.test.mjs`),
   orient's declared check, its gate and digest-bound advance (`orient-declared-check.test.mjs`),
-  orient's one launch model and its double-dispatch guard (`orient-launch-model.test.mjs`), and
+  orient's launch-model history (`orient-launch-model.test.mjs`), the three-way execution-fit test and
+  orient's retired batches (`execution-fit-shapes.test.mjs`, ADR 0040), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
-  (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
+  (`handoff-one-writer.test.mjs`), `next`'s archive-this-session move and its session/thread menu wording
+  (`next-archive-session.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
 - **Reflection** — `tests/reflect-score.test.mjs` (`score.py` on synthetic records: running time and its
   exclusions, the Hands-off rate and its acts, Throughput's bound, the Slot-bound and lane-bound fixtures, each
@@ -273,6 +320,9 @@ final check that the run wrote nothing into the tree):
   the bug and decision tasks never written over, Lachy's recorded no, the close and the rung),
   `tests/reflect-due.test.mjs` (`reflect-due.py` on fixture records: due at day 7 and not day 6, three quiet
   Reflections to the 14-day cadence and a non-quiet one back to 7, and the cadence `close` writes),
+  `tests/reflect-grades.test.mjs` (`grades.py` on fixture grade lines, records and notes: each grade's episode to the
+  next grade or the close, dispatch by record or by link, foreseen sign-offs, every outcome and the hands-off rate's
+  denominator, window against all, and Slot hours per size),
   `tests/contracts/reflect.test.mjs` (the verb's wiring, every close scoring its rollout, its
   SKILL's order and triggers, and the retired name staying gone) and `tests/contracts/escapes-fixes-key.test.mjs` (every
   writer of a fix of landed work adds `fixes:`, and the Reflection presents Quality).
@@ -283,6 +333,45 @@ final check that the run wrote nothing into the tree):
   names, aliases and `area:`/`repos:` shapes and a fake HOME with umbrella repos — each rung and outcome,
   the clear winner and the close call, a shared directory, `--learn`'s one-line append and every refusal
   that writes nothing.
+- **Placement check** — `tests/thread-placement.test.mjs`: `thread-placement.py` against a fixture vault and a fake
+  HOME of repos, linked worktrees, a submodule, a clone, origins and seat subfolders — each kind and its owners, the
+  folder-to-note attribution (declared entry, exact name, repo name; never an ancestor or a fuzzy hit), one finding
+  per thread identity, `home`, the scopes, parity with open's lookup, and read-only runs;
+  `tests/contracts/thread-placement-wiring.test.mjs` pins its callers in open, close, handoff, orient and the docs.
+- **Estate scan** — `tests/estate-scan.test.mjs`: `estate-scan.py` against fixture vaults, fixture repos and a fake
+  ssh remote — done and parked projects, open tasks homed under every live project and the unhomed with their
+  reasons, each dispatch blocker (self-rollout, GitHub origin, landing register, unpushed default branch, unfinished
+  rollout, verifier), the verifier's section reading (a `## Verifier`, `### Tests` or `## Testing` heading, an
+  `@AGENTS.md` import, a `Tests:` line) and a live rollout's `verifier:` (given only to the repo whose toplevel its
+  Project root is, never to a parent repo), phase members by filename prefix, content already on origin, live
+  rollouts' status with pending sign-offs, BatchMode, `--offline`, the group-killing timeout and absolute deadline
+  (and SIGTERM), an unreadable Tasks note, the env scrub when its probe fails, read-only runs, byte-equal reruns and
+  parity with `pushed-base.sh` on copies of the fixtures.
+- **Estate rank** — `tests/estate-rank.test.mjs`: `estate-rank.py` over the real scan of a fixture vault and
+  hand-written grades files — every graded task's grade, shape and recommended answers, validation that lists every
+  error and never guesses (a grader deadline already past dropped), the raise, the ranking key (a due-soon task above a
+  higher-leverage undated one, crowned meaning `status: crowned` only, parked last), exact leverage, candidate runs
+  with their Review load, shared roots and verbatim blockers, the decision rounds, `orient[]` (parked projects left
+  out), dependency holds (each why, transitive holds, cycles), the Unpark offers and the snooze writer's round trip,
+  its `--clear` and refusals and parity with the scan's standing, the `unpark` and `kill` writes (one save each, the
+  snooze cleared with the status, an umbrella with a live sub-project refused, parity with the scan's parked set), a
+  decision's `fork` passed through, usage exits, byte-equal reruns and read-only runs;
+  `tests/contracts/readiness-grade.test.mjs` pins `skills/_shared/readiness-grade.md` to the script's constants and
+  its `--clear`, its hold reasons, gated_inputs.py's gate kinds, the thread homes, CONTEXT.md's terms and ADR 0041's
+  ruling.
+- **Estate dispatch** — `tests/estate-dispatch.test.mjs`: `estate-dispatch.py` over the real scan and rank of a
+  fixture vault, with injected rollout summaries — `slices` (one file per home, never overwriting), `rounds` (the
+  sign-offs asked only under no pause or the sign-off pause, their gates raw and as `approve-gates` signs them, the
+  cut to the budget, held decisions skipped, AskUserQuestion payloads with short labels and unique texts), `plan`
+  (decided, unheld members only, each with every dependency it needs scheduled and every why read against the final
+  schedule, blockers, shared roots and parked runs waiting, batches that keep names that may meet apart, each live
+  rollout's holds and the signed reinstate), `sessions` (written notes, the status allow-list
+  behind the holds, orients last), `record` (the answer folded to one line into `## Decisions (asked ahead
+  <date>)`, the fork's ruling, every refusal byte-identical) and `log` (one grade line per graded task under one pass,
+  a rerun `exists`, a half-written pass completed, refusals that write nothing), usage exits, byte-equal reruns and
+  read-only runs;
+  `tests/contracts/orient-all.test.mjs` pins `skills/orient-all/SKILL.md` to the script, to schedule's answered
+  questions and to status § 4's numbered actions.
 - **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos
   with a fixture check — undeclared, whole untruncated output and its digest, the advance on a matching digest
   and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal, even one that

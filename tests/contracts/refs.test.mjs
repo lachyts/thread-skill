@@ -39,9 +39,14 @@ const EXTERNAL = [
   ['obsidian-schema.md', 'Task'],
   ['claude-base-instructions.md', 'Claude memory management'],
   ['triage-batching-protocol.md', '6'],
-  ['CLAUDE.md', 'Launch profiles'],
   ['~/.agents/skills/method/SKILL.md', 'Which ledger a row goes to'],
   ['~/repos/workspaces/_shared/CONTEXT.md', 'Next action'],
+  // execute legs.md § Review (p24-3), hand-verified 2026-10-20 against fresh-review's headings: "### Session range —
+  // the session's commits, narrowed to its paths", "## Step 2 — Check for pile-ups, …", "## Step 4 — Annotate in the
+  // main thread".
+  ['~/.agents/skills/fresh-review/SKILL.md', 'Session range'],
+  ['~/.agents/skills/fresh-review/SKILL.md', 'Step 2'],
+  ['~/.agents/skills/fresh-review/SKILL.md', 'Step 4'],
 ]
 
 // Citations the checker flags that are really broken but live in a file another task owns. Each entry:

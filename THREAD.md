@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-18
+last_touched: 2026-10-20
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -10,11 +10,43 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-10-20: P24 and P25 have landed, and P26 is one task short. `[[thread-skill-rollout-2026-10-19]]` (archived, § Completion log): 10/10 merged (#183–#192) in 20h 46m from the clone. Phases 24 and 25 closed; P26 stays open on [[thread-skill-p26-3-mark-started-arms-the-task-window]].**
+- **Landed:**
+  - p24-1 three-way fit test (#183).
+  - p26-1 arm and prepare refuse without an owner (#184).
+  - p25-1 estate scan (#185).
+  - p24-2 schedule writes serial rollouts (#186).
+  - p24-3 execute runs Legs (#187).
+  - p26-2 every rollout runs from its clone (#188).
+  - p25-2 grading and ranking (#189).
+  - p24-4 status, repair and reflect read serial rollouts (#190).
+  - p25-3 decision round and dispatch, `/thread:orient-all` (#191).
+  - p25-4 grade calibration (#192).
+- **Run shape:**
+  - p24-2 and p26-2 plan-blocked once each (3 rounds), then landed on auto-retry 1/2.
+  - Five integrations were the lead's clean merge.
+  - Three were verify plus a shared-file judge (p25-1, p24-2, p24-4).
+  - Two were conflict integrators (p26-2 on land.sh, execute/SKILL.md and tests/land.test.sh; p25-3 on schedule/SKILL.md).
+  - One Chorus room stop (main's week line, 03:26–04:07): both calls stopped at a boundary and resumed on fauxmuse with nothing lost.
+- **One needs-you item, about 6h:** the integrate calls for p26-2, p24-4 and p25-3 had to carry 40–71k-character plans verbatim, too large for the lead to pass. Lachy ruled `plan: ""` for those three, and all of them integrated clean. Follow-up: [[thread-skill-integrate-args-plan-too-large]].
+- **Not live yet:** the installed plugin is still 4.0.0. One release now follows P24–P26 ([[thread-skill-release-after-p24-p25]]), once p26-3 lands or is carried. Scored `t-20261020T034106Z-4f1b50`.
+
+**2026-10-19: P23 and the P19 tail have landed. `[[thread-skill-rollout-2026-10-18]]` (archived, § Completion log): 7/7 merged (#171–#177) in 25h 9m from the clone; phases 19 and 23 closed.**
+- **Landed:** p23-1 one-line spend gate + plan-judge pricing (#171), p19-5 description trim + 700 hard cap (#172; post-trim evals 0.986 vs 0.978, US$40.52), p23-5 a code project's thread lives in its repo + `thread-placement.py` + ADR 0039 (#173), p23-4 machine-wide verify slots + `tests/run.sh` cap (#174), p23-6 Start when ready (#175), p23-3 ntfy fallback for undelivered needs-you pushes (#176), p23-7 PR #88's still-true corrections + the reflect-close-score deadline-regex flake fix (#177; #88 closed, superseded).
+- **Run shape:** p23-4 and p23-5 plan-blocked once each (3 rounds), auto-retried 1/2, then landed. Integration: two lead merges (p23-1, p23-7), four integrator calls (p19-5 red on load timeout; p23-4 and p23-3 conflicts; p23-5 red flake + shared files), one judge-only shared-file review (p23-6). No RACE, no git-env trip, no needs-you item, no gate reached Lachy.
+- **Interruptions survived:** three Chorus room stops (claude-2 5-hour, animately week, claude-2 week) and three usage-limit cuts (claude-2 monthly spend, main 5-hour twice); every stopped or cut call was resumed by `resumeFromRunId` with its original args, never reconciled.
+- **Not live yet:** the installed plugin is still 4.0.0 and the primary checkout is 36 behind origin. [[thread-skill-release-4-1-0]] carries the release decision and the install-first `[notify] ntfy_topic` / `verify_slots` settings. Scored `t-20261019T005958Z-d79bbe`.
+
 **2026-10-18: ADR 0038 merged; P22's rollout is closed out and `[[thread-skill-rollout-2026-10-18]]` (P23 + carried p19-5) is executing from the clone.**
 - **`[[thread-skill-rollout-2026-10-17]]`**: 10/11 merged (p19-10 at 10:50 after Lachy signed its US$20 gate in the morning). It stalled overnight because the fail-closed pricer read the planners' prose (`each`, bare numbers, bare `plus`) and an undelivered push was logged as pushed. Superseded at 14:15 (Lachy: carry p19-5 forward), scored `t-20261018T055357Z-907caf`, archived to `Work/Tasks/Archive/Rollouts/`.
 - **ADR 0038 "a Cap is a promise"** (grill-with-docs, three clean-room review rounds, PR #168 `0b1c2a7`): one-line `spend: <what> — cap N USD` gates with the split in sub-bullets, pricer unchanged, plan judge prices via `exposure -`, one bounce for a never-priceable gate, ntfy fallback (`[notify] ntfy_topic` in `rollouts.toml`) only on Remote Control inactive/error. Built by `[[thread-skill-p23-rollouts-run-through-the-evening]]` (p23-1, 3, 4, 5, 6, 7; p23-2 folded into p23-1).
 - **Forks ruled:** PR #88 → trimmed landing (p23-7); 5c5a `.thread/` and the thread-rollout-redesign worktree archived under `~/Archive/thread-skill/` (+ branch `archive/thread-rollout-redesign`, `14676a3`); p21-5/p21-9 done. [[ntfy-noise-audit]] filed.
 - **Execute** handed off (`docs/handoffs/2026-10-18-execute-p23-rollout.md`, landing PR #169) to the Chorus Session "Thread Skill: execute the P23 rollout", which consumed it.
+**2026-10-17 (evening): the P22 rollout ran 9/11 and closed awaiting sign-off.** `[[thread-skill-rollout-2026-10-17]]` (paused `paused_for: sign-off`, § Completion log): merged #157 to #165 in 7h 16m from the clone, phase 22 closed. Left: [[thread-skill-p19-10-eval-close-consumed-fixture]] is gate-pending on a spend gate (cap US$20, up to 6 eval invocations at `--max-cost-usd 4` each) that the standing approval refused (it cannot price the per-invocation "each"), and p19-5 waits on it.
+- **Landed:** p22-1 C17 load-tolerant (#157), p22-2 run-step signal window (#158), p22-3 close/carry vault grammar (#159), p22-7 weekly Reflection gaps (#160), reflect-cites the loops contract (#161), p22-4 close/handoff end on Chorus words (#162), p22-5 next offers Archive this session (#163), p22-6 ADR status sweep (#164), p19-11 handoff manual dry-run eval record (#165, spend signed under the standing approval, US$12).
+- **Run shape:** p22-4 plan-blocked once, auto-retried on opus-xhigh. reflect-cites' first merge hit a red required ubuntu check (`tests/pinned-tree.test.sh` bash 13, a flake: master and the other PRs were green), was set aside and auto-retried, and merged on its second CI. Five integrate calls (conflicts on vault-grammar.md, next/SKILL.md, ADR 0037; one shared-file judge-only; one branch-moved). No RACE, no git-env trip.
+- **p22-4 changed execute's ceremonies:** `/thread:close` now runs last, after the vault commit, with close's banner and the ROLLOUT-STATUS line in one message. This run's sign-off form followed the new order.
+- **The installed plugin is still 4.0.0** and the primary checkout is behind origin (P22 not live).
 
 **2026-10-17: 4.0.0 is installed; the P22 rollout is scheduled and a successor session in the clone is executing it.** `[[thread-skill-rollout-2026-10-17]]`: 11 tasks, p22-1..p22-7, [[thread-skill-reflect-cites-the-reflection-loops-contract]], p19-10, p19-11, then p19-5 last. Project root `~/repos/tools/thread-skill-rollout`, verifier `make test`, built-in settings, standing approval 50 USD (`file:defaults`).
 - **Scheduled** via `/thread:orient Thread Skill --steer` (no reshape; drift empty). § 0 passed once landing PR #154 merged (`1b9275c`); before that the pushed-base check refused on the primary's unlanded handoff commit.
@@ -743,13 +775,20 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **An integrate call's `plan` must go in verbatim, and plans run to 60k+ characters (2026-10-19; hit again 2026-10-20).** On 2026-10-20 a 74k-character args object for p26-2 could not be sent: the attempt was cut off part-way. Lachy ruled `plan: ""` for p26-2, p24-4 and p25-3 (the rollout's `## Notes`). The judge-only path never renders `I.plan`; the conflict integrator worked from the brief and review history and resolved both conflicts. Tracked by [[thread-skill-integrate-args-plan-too-large]]; until it lands, ask Lachy before passing `""` again. The Workflow tool takes args only inline (no file path), so the lead copies the `lead-integrate.py plan` output into the call. Check fidelity after launch: the integrator's prompt embeds the plan indented two spaces, so de-indent from `Planned on:` and compare with the plan file. A shared-file judge-only call carries no plan.
+- **Usage-limit cuts read as `transient infrastructure failure` rows (2026-10-19).** A call cut by a session, 5-hour or monthly limit returns `blocked` with that diagnosis and the CLI's `You've hit your … limit` in `<failures>`: never reconcile it; resume the same runId with its original args after the reset.
+- **The 1800 s Integration verify times out under concurrent suites (2026-10-19).** At load ~157 (four agents' `make test` plus the lead's) p19-5's lead verify hit rc 124 with zero failures. #174's `tests/run.sh` cap (4 suites) fixed it for later verifies; the machine-wide verify slots go live only after a plugin update.
+- **`parallel_ceiling` is live:** `reconcile-rollout.py next` re-reads it from the rollout note on every call, so editing the note changes a running rollout at the lead's next loop entry, which can lag the edit (Chorus: edited 09:43+11:00, first `running=5` at 10:29+11:00). No event records the change: it shows only in the `settings` stamped on the next `slot-taken` / `idle-slots`, and the Reflection flags `ceiling changed mid-window` (split with `--since`/`--until`).
+- **Integrations ≠ merges:** a rejection or a re-Integration after `main` moves runs the lane again (Chorus: 40 for 38), so lane capacity in merges is lane capacity in Integrations over that ratio.
+- **Lead transcript timestamps are UTC**, task-note stamps are local with an offset, and Melbourne moved +10 → +11 at 02:00 on 2026-10-04: subtract only after normalising.
+- **The Codex worktrees' private evidence is archived (2026-10-18).** `docs/implementation/2026-09-23-codex-routing-evidence.json` (on branch `codex/codex-routing-capability-check`, never on master) names a `privateEvidenceRoot` under `~/.codex/worktrees/5c5a/`, which is removed: that evidence root now lives at `~/Archive/thread-skill/2026-09-23-codex-routing-evidence.tgz`. The thread-rollout-redesign worktree is removed too: its commits are on branch `archive/thread-rollout-redesign` (`14676a3`) and its uncommitted `.thread/` evidence is in `~/Archive/thread-skill/2026-09-23-thread-rollout-redesign-evidence.tgz`. Any `~/.codex/worktrees/thread-rollout-redesign/...` or `.../5c5a/...` path (the 2026-09-22 thread 2 closeout link, the redesign's `2026-09-23-claude-routing-evidence.json`) is dead: read the file from the archive branch or the tarball.
 - **Pushed-base reads sibling clones (2026-10-17).** A handoff commit queued on the primary checkout (`~/repos/tools/thread-skill`) makes schedule § 0 refuse for the clone until its landing PR merges (~5 min CI). Wait it out; never open a second PR. Execute's launch re-runs the same check.
 - **An integrate call carries the task's approved plan verbatim in its args (2026-10-16).** The plans here ran 32–38k chars, so the lead re-emits ~40k of JSON through the Workflow tool call (execute § 4.5 step 3: "never retyped"). It worked, but it is the lead hand-copying a large blob; a plan path the engine reads would be safer. Same for a seeded revise's `plan`.
 - **A merge-task exit 1 on a known flake (2026-10-16).** When the red required check is a test the PR does not touch and the other OS is green, the lead reran the one failed job (`gh run rerun <id> --failed`) and re-ran `merge-task.sh` on the same integrated pair rather than set the task aside. Recorded in the P21 Completion log as a lead judgement call.
 - **`native_workflow.mjs init DIR SCRIPT ARGS CONFIG` takes ARGS and CONFIG as file paths**, not inline JSON: an inline jobs object fails `ENAMETOOLONG`. Write both to files beside the prompt (orient § 8 dispatch, 2026-10-15).
 - **`claude plugin eval` defaults (2026-10-15).** The LLM judge is Haiku unless `--judge-model` is passed. The CLI keeps a repeated option's last value, so `make evals` puts its defaults before `$(EVAL_ARGS)` and its locks (`--ablation none --model opus --judge-model opus --no-publish`) after it (PR #152). `--case` takes one glob per run: a second `--case` silently replaces the first. A `--max-cost-usd` breach skips the remaining cases and exits non-zero.
 - **A live E2E needs a hub and children (2026-10-13).** The harness resets a `cd` outside the launch dir, so the CWD-bound verbs run in a child session launched in the fixture: in Chorus, `create_thread` (and `spawn_task`) take a `cwd`, so the hub raises a card that opens there. A card-started session never reports back to its raiser; the hub watched the checklist file with a background `until` loop (fix filed for Chorus).
-- **Worktrees under the live checkout can reach the plugin cache.** The `./` directory source copies ignored files; before `claude plugin update`, remove every `.claude/worktrees/*` (the stray `run-record` one belongs to open PR #88) or `make release-check`'s stray check fails and the cache copy must be deleted by hand. Bit again at 3.1.0 (2026-10-15) by this session's own release and withdraw worktrees: remove them from `~/.claude/plugins/cache/thread/thread/<v>/.claude/worktrees/`.
+- **Worktrees under the live checkout can reach the plugin cache.** The `./` directory source copies ignored files; before `claude plugin update`, remove every `.claude/worktrees/*` (the stray `run-record` one, PR #88's, was removed 2026-10-13; #88 closed 2026-10-19, superseded by #177) or `make release-check`'s stray check fails and the cache copy must be deleted by hand. Bit again at 3.1.0 (2026-10-15) by this session's own release and withdraw worktrees: remove them from `~/.claude/plugins/cache/thread/thread/<v>/.claude/worktrees/`.
 - **`make evals` grades routing on skill descriptions only.** A body-only change (#108) needs no eval re-run; a description change does. The lifecycle judges record no rationale: re-run a miss with transcripts before reading it.
 - **A Workflow task-notification's output file is one JSON object** (`summary`, `logs`, `result`, `agents`): pipe `json.load(f)['result']` into `reconcile-rollout.py reconcile --result -`; the file has no `<result>` tag to cut.
 - **land.sh's close-out paths are `THREAD.md` and `docs/handoffs/` only** (`closeout_shaped`): a consumed `docs/reviews/` doc can't be deleted by a close-out landing, though fresh-review expects its docs deleted at close ([[thread-skill-land-takes-review-doc-deletions]]).
@@ -991,17 +1030,23 @@ scheduled 2026-07-15.
 - **`bind-run` records `journalDir` as `<session>/workflows`**, while the transcripts live under `<session>/subagents/workflows/<runId>/`. `fold-journals` still found every call (19 folded, 0 warnings, 2026-10-09).
 - **Schedule does not run the self-rollout gate:** a rollout scheduled from the primary checkout gets it as Project root, and execute § 2.6 refuses it at launch. Re-point the note at `~/repos/tools/thread-skill-rollout` and fast-forward that clone ([[thread-skill-schedule-runs-the-self-rollout-gate]]).
 
+- **A landing PR that falls BEHIND master never auto-merges:** the ruleset requires an up-to-date branch, and GitHub does not update it. On 2026-10-17 #156 sat green but BEHIND after #155 merged; `gh api -X PUT repos/<o>/<r>/pulls/<n>/update-branch -f expected_head_sha=<sha>` unblocked it (the installed `gh` has no `pr update-branch`). Pushed-base waits on every queued close/… PR, not just the newest.
+- **A Workflow run's args are recorded in `<session>/workflows/<runId>.json`** once it completes: compare them with the built args file to prove a hand-pasted integrate call was verbatim (all five on 2026-10-17 matched).
+
 ## Resume instructions
 
-**Now (from 2026-10-18):** `[[thread-skill-rollout-2026-10-18]]` is executing in a successor session launched in the clone (it consumed `docs/handoffs/2026-10-18-execute-p23-rollout.md`).
-1. Check it with `/thread:status [[thread-skill-rollout-2026-10-18]]`; if stuck, `/thread:repair` from a session launched in `~/repos/tools/thread-skill-rollout`.
-2. Once p23-1 and p23-3 merge: Lachy sets `[notify] ntfy_topic` in `~/.config/thread/rollouts.toml`.
-3. When it completes: decide on a 4.1.0 release (`claude plugin update thread@thread`, `make release-check`, release PR with p19-5's comparison record), once no rollout holds the primary checkout (six other rollouts held it on 2026-10-18).
-4. Next weekly Reflection is due 2026-10-24.
+**Now (from 2026-10-20):** no rollout is running on this repo. P24 and P25 are closed; P26 waits on p26-3.
+1. [[thread-skill-p26-3-mark-started-arms-the-task-window]] (filed by p26-1): finish P26, or carry it into the release.
+2. [[thread-skill-release-after-p24-p25]]: one release with one paid eval run, then `claude plugin update thread@thread` once no rollout runs on the primary checkout (ADR 0031). Until it is installed, the lead runs the 4.0.0 engine, so none of P22–P26 is live.
+3. Follow-ups: [[thread-skill-integrate-args-plan-too-large]], [[thread-skill-weekly-reading-reads-serial-chains]], [[workspaces-sweep-integrates-origin-before-push]].
+4. `/thread:reflect [[thread-skill-rollout-2026-10-19]]` is on offer; the next weekly Reflection is due 2026-10-24.
 
 ## Session log
 
+- 2026-10-20: executed `[[thread-skill-rollout-2026-10-19]]` from the clone: 10/10 merged (#183–#192) in 20h 46m through one room stop. Phases 24 and 25 closed, P26 left on p26-3; the integrate-args plan-size limit was filed after Lachy ruled `plan: ""` for three integrations.
+- 2026-10-19: executed `[[thread-skill-rollout-2026-10-18]]` from the clone: 7/7 merged (#171–#177) in 25h 9m through three room stops and three usage-limit cuts; phases 19 and 23 closed; 4.1.0 release decision filed as [[thread-skill-release-4-1-0]].
 - 2026-10-18: signed p19-10 (US$20) so it landed; grilled the overnight spend-gate stall into ADR 0038 (#168); superseded and archived the 10-17 rollout; scheduled P23 + carried p19-5 as `[[thread-skill-rollout-2026-10-18]]` and handed execute to a clone session (#169); archived the 5c5a and redesign evidence.
+- 2026-10-17 (evening): executed the P22 rollout from the clone: 9/11 merged (#157–#165) in 7h 16m, phase 22 closed; p19-10 spend gate refused by the standing approval (unpriceable "each"), so the run closed in the sign-off form with p19-10 and p19-5 waiting; landing PR #156 needed an update-branch.
 - 2026-10-17: Steer-only orient scheduled `[[thread-skill-rollout-2026-10-17]]` (11 tasks: P22, reflect-cites, the P19 eval tail), respecced p19-5 for 4.0.0 (close/handoff/reflect, in-task `--runs 3` comparison), waited out landing PR #154 for pushed-base, handed execute to a clone session (#155).
 - 2026-10-16: P21 rollout executed unattended from the clone: 7/7 merged (#144–#150) in 8h 47m; 3 auto-retries, 1 standing approval, 2 integrator conflict merges, 1 macOS CI flake rerun; rollout archived, first-live-Reflection task filed; installed plugin still pre-P21.
 - 2026-10-15: #139 fixed and merged; P21 scheduled (+p21-9 split) and executing overnight from the clone; p15-7 landed in agents-config #1 by an orient child (review pending).

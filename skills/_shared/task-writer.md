@@ -381,9 +381,11 @@ keeps the line.
   the task.
 - No thread + work is **thread-worthy** (8+ substantive turns, deferred
   decisions, artefacts) → create one from the canonical template
-  `~/.agents/skills/thread/THREAD-template.md` (project-side
-  `~/Projects/<Area>/<Project>/THREAD.md`, or `_shared/threads/<slug>.md`),
-  then link it. A thread created here takes the route's state, not
+  `~/.agents/skills/thread/THREAD-template.md` at the location
+  `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` § Creating a new thread gives
+  (a code project's `<repo>/THREAD.md`, project-side
+  `~/Projects/<Area>/<Project>/THREAD.md` for a project with no code repo, or
+  `_shared/threads/<slug>.md`), then link it. A thread created here takes the route's state, not
   `active` — the creation row and then the route's row of
   `handoff-lifecycle.md` § Thread state, in this one step.
 - No thread + one-off work → **don't create one.** The task carries everything.

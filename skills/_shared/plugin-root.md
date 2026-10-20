@@ -21,10 +21,10 @@ Whenever the command comes from a plugin file you read rather than the skill tha
 
 - a router or caller following a sibling's SKILL.md: `next` → stash, defer, handoff or close; `open save` →
   close; close → open's Repo-thread lookup; orient → schedule, execute, handoff or open; repair → execute's
-  queue loop;
+  queue loop; orient-all → schedule (its forks), status, execute, repair or orient;
 - a `_shared` spec or a skill's reference file: `task-writer.md` (stash, defer, handoff, close),
   `execution-fit.md` (schedule, execute, orient), `handoff-lifecycle.md`, `process-scan.md`,
-  `orient/reshuffle.md`;
+  `readiness-grade.md` (orient-all), `orient/reshuffle.md`;
 - a SKILL.md read from source with `sed` (after a mid-session pull or release, when the rendered body is
   stale).
 

@@ -10,9 +10,14 @@
 // path or noun of it in skills/**, hooks/**, evals/**, README.md or the manifests, but for ADR 0032's title in the
 // README's ADR list (history). The weekly reading (p21-7, ADR 0037 d3-d5) runs span -> watch -> bug -> tune.py
 // --revert -> --auto -> knobs -> decide -> close after the by-hand steps, reflect.py the only writer of
-// reflections.jsonl; its trace list names the grills a mid-run ask is traced to, in full form; it reads a Human fix
-// from the task note; Lachy's no is recorded; and the decision task stays out of schedule § 1, the reshuffle's R1
-// and orient's batches, listed by orient § 2 (the `weekly` rule).
+// reflections.jsonl; its trace list names the grills a mid-run ask is traced to, in full form; it reads what moved an
+// unrecorded set-aside from what its `explainedIn` names, the standing approval reported and a sign-off traced (p22-7);
+// Lachy's no is recorded; a held trade reaches the decision task, once per (knob id, from), and a yes that cannot
+// apply is answered `moot` (p22-7, w16); step 15 names `{}` for a week with no recurring Watch (p22-7, w15); step 11
+// reads the Grade log's `grades` block against readiness-grade.md and never as a knob, step 17 reports the grade
+// accuracy, and § What the record cannot show names the constants with no measure (p25-4, w17); and the decision task
+// stays out of schedule § 1, the reshuffle's R1 and orient § 7's serial rollout, listed by orient § 2 (the `weekly`
+// rule).
 //
 // One pure function, check(files), over { name: text } plus `tree` (the paths under skills/) and `rest` ({ relPath:
 // text } of every other file the retired-name scan reads): the real files and the controls run through it, and each
@@ -170,21 +175,54 @@ const RETIRED = [new RegExp(`thread:${OLD}\\b`), new RegExp(`skills/${OLD}\\b`),
 const NOUN = new RegExp(`\\b${OLD}s?\\b`, 'i')
 const ADR_TITLE = new RegExp(`\\btune by ${Old}\\b`) // ADR 0032's title in the README's ADR list: history
 const KEPT = ['skills/reflect/SKILL.md', 'skills/reflect/scripts/score.py', 'skills/reflect/scripts/tune.py']
+// The reflection loops' shared contract (Chorus p77-3, ADR 0095 d6): the SKILL cites the estate copy, as Chorus's
+// /reflect does, and keeps the contract's words for a Reflection, a Watch, a Tuning, a quiet reading and the cadence,
+// mapped to Thread's engine; § What the record cannot show names the two places the engine departs from it (GAPS).
+const AVOID = `Never *review* (code review's word) or *${OLD}*.` // the contract's banned words: the noun's one SKILL use
+const LOOPS = ['The loops share one contract: `~/.agents/knowledge/reflection-loops.md`',
+  '**Reflection**: a reading of a span after the fact that traces what cost Lachy to the rule that produced it', AVOID,
+  '**Watch**: a pattern seen once, carried to the next reading',
+  'A knob that lands is its own `applied` entry on tune.py\'s one `tuning` line',
+  'in the weekly reading each Tuning is its own `proposal` line in `reflections.jsonl`',
+  '**A quiet reading** has no new Watch, no rule proposal, no bug and no Guardrail breach',
+  'a knob proposal step 14 holds while it gathers agreement (`held <key>: agreement <n> of 3`)',
+  '**The cadence** is weekly, fortnightly after three quiet readings in a row',
+  'derived from the `quiet` flags, never kept as a written value']
+const GAPS = ['A knob\'s revert does not by itself make a reading not quiet', 'A `tunings.jsonl` line can carry several Tunings',
+  'Only the weekly reading\'s `proposal` lines in `reflections.jsonl` give one line per knob']
 
 // ---- the weekly reading (p21-7) --------------------------------------------------------------------------------
 
 const PY = 'python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py '
 const RESHUFFLE = '`${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md`'
-const HUMAN_FIX = 'For each `set-aside` item whose `movedBy` is `unrecorded`, open its `taskNote` and read its `## Needs you` and `## Integration log`; trace the Human fix you find there (ADR 0035) like a mid-run ask; when neither says what moved it, name it as unexplained.'
+// Step 11's unrecorded set-aside (p22-7): what to read, the standing approval reported (never his ask), a sign-off
+// traced, a Human fix traced like an ask, and the unexplained rest.
+const HUMAN_FIX = ['For each `set-aside` item whose `movedBy` is `unrecorded`, read what its `explainedIn` names: its `taskNote`\'s `## Needs you` and `## Integration log`, a gate set-aside\'s `## Approved gates`, and the rollout note\'s `## Notes` lines that name the task',
+  'is a gate the Standing approval signed (ADR 0034), not Lachy: report it as what moved the task, never trace it as his ask',
+  'is Lachy\'s sign-off with no `gate-signed` line: trace it as a sign-off `ask`',
+  'A Human fix (ADR 0035) in `## Needs you`, `## Integration log` or the rollout note\'s `## Notes` is traced like a mid-run ask',
+  'When none of them says what moved it, name it as unexplained']
 const KINDS7 = 'of seven kinds (`ask`, `set-aside`, `retry`, `descope`, `repair`, `escape`, `churn`)'
 const GRILLS = ['orient § 5', `${RESHUFFLE} § R2`, `${RESHUFFLE} § R3`, '`${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` § How a fork comes back', 'orient § 7', 'schedule § 3.5', 'schedule § 3.6']
 const CANNOT = ['writes no dated `repair:` line', 'a set-aside whose `movedBy` is `unrecorded`', '/fresh-review churn names no rollout',
   'An escapes-only rollout\'s breaches are not counted', 'is read in the week its record has lines but leaves no baseline',
-  'A single-rollout Watch is offered only beside a rule proposal', 'A declined Watch seen again in one rollout is neither new nor offered']
+  'A single-rollout Watch is offered only beside a rule proposal', 'A declined Watch seen again in one rollout is neither new nor offered',
+  'a gate signed on the note with no `gate-signed` line', 'a decision task dropped unanswered decides nothing',
+  'A no holds for that (knob id, `from`) whatever later rollouts show', 'A held trade on a partial window is held `partial window`']
+// A held trade's route (p22-7, w16): step 14 names it, step 15 lists it once, § Deciding answers it.
+const TRADE_S14 = 'step 15\'s `decide` puts it in the decision task'
+const TRADE_S15 = 'A held trade is listed once per (knob id, `from`)'
+const TRADE_DEC = ['**A yes to a trade**', 'step 7\'s `--pick` applies it', '**A yes that cannot apply**', 'The item is answered, moot',
+  'A moot trade is not decided', 'Its `- trade` line is the record']
+// Step 11's grade accuracy (p25-4, w17): the block, its headline and the grading rules it traces to, never a knob.
+const GRADE_S11 = ['Read `span.json`\'s `grades`', '`window.readyHandsOff`', '`${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`',
+  'never a knob: the grading constants are no operator setting']
+const GRADE_S17 = 'the grade accuracy (the Ready headline'
+const GRADE_CANNOT = ['`DECISION_MINUTES`', '`REVIEW_MINUTES`']
 const WEEKLY_ORDER = [/reflect\.py span /, /reflect\.py watch /, /reflect\.py bug /, /tune\.py\b.*--revert /, /tune\.py\b.*--auto /,
   /reflect\.py knobs /, /reflect\.py decide /, /reflect\.py close /]
 
-// The weekly clauses that fail (w1..w14), [] when all hold.
+// The weekly clauses that fail (w1..w17; w15 and w16 are p22-7's, w17 p25-4's), [] when all hold.
 function weeklyFails(files) {
   const s = files.skill
   const out = []
@@ -199,12 +237,13 @@ function weeklyFails(files) {
   const fenced = fencedLines(s)
   if (fenced.filter((l) => /reflect\.py/.test(l)).some((l) => !l.startsWith(PY)) || fenced.some((l) => /reflections\.jsonl/.test(l))) out.push('w4')
   const s11 = collapse(sectionOf(s, /^### 11\. /))
-  if (!s11.includes(KINDS7) || !s11.includes(HUMAN_FIX)) out.push('w5')
-  if (!collapse(sectionOf(s, /^### 15\. /)).includes('a decision task only with a rule proposal')) out.push('w6')
+  if (!s11.includes(KINDS7) || !HUMAN_FIX.every((n) => s11.includes(n))) out.push('w5')
+  const s15 = collapse(sectionOf(s, /^### 15\. /))
+  if (!s15.includes('a decision task only with a rule proposal or a held trade')) out.push('w6')
   const o2 = collapse(sectionOf(files.orient, /^### 2\. Audit/))
-  const o7 = collapse(sectionOf(files.orient, /^### 7\. Batch/))
+  const o7 = collapse(sectionOf(files.orient, /^### 7\. /))
   if (!o2.includes('**Decisions waiting**: an open task tagged `decisions`') || !o2.includes('`/thread:reflect --decide`') ||
-    !o7.includes('The weekly Reflection\'s decision task (tagged `decisions`') || !o7.includes('is conversation-gated and never batched')) out.push('w7')
+    !o7.includes('The weekly Reflection\'s decision task (tagged `decisions`') || !o7.includes('is conversation-gated and never goes into a serial rollout')) out.push('w7')
   const cannot = collapse(sectionOf(s, /^## What the record cannot show$/))
   if (!CANNOT.every((c) => cannot.includes(c))) out.push('w8')
   if (!GRILLS.every((g) => s11.includes(g))) out.push('w9')
@@ -221,6 +260,12 @@ function weeklyFails(files) {
   const dec = collapse(sectionOf(s, /^## Deciding the decision task$/))
   if (!/reflect\.py raised .*--declined/.test(dec) || !dec.includes('the same with `--declined`') || !dec.includes('closes the Watch\'s cycle') ||
     !dec.includes('only once every item it lists has had a yes or a no')) out.push('w14')
+  if (!s15.includes('with no recurring Watch, write `{}`')) out.push('w15')
+  const decFenced = fencedLines(sectionOf(s, /^## Deciding the decision task$/))
+  if (!collapse(sectionOf(s, /^### 14\. /)).includes(TRADE_S14) || !s15.includes(TRADE_S15) || !TRADE_DEC.every((n) => dec.includes(n)) ||
+    !decFenced.some((l) => l.startsWith(`${PY}moot --task`))) out.push('w16')
+  if (!GRADE_S11.every((n) => s11.includes(n)) || !collapse(sectionOf(s, /^### 17\. /)).includes(GRADE_S17) ||
+    !GRADE_CANNOT.every((n) => cannot.includes(n))) out.push('w17')
   return out
 }
 
@@ -290,6 +335,8 @@ function check(files, notes = []) {
   const triggers = to < 0 ? '' : desc.slice(from, to + '/thread:reflect'.length)
   if (fm.name !== 'reflect' || !triggers.includes('"reflect on [[rollout]]"') || !triggers.includes('"how did the rollout run"') ||
     triggers.includes('Companion') || !desc.includes('Not for Chorus\'s Companion record')) fails.push('triggers')
+  const cannot = collapse(sectionOf(s, /^## What the record cannot show$/))
+  if (!LOOPS.every((w) => collapse(s).includes(w)) || !GAPS.every((g) => cannot.includes(g))) fails.push('loops')
   const wk = weeklyFails(files)
   if (wk.length) { fails.push('weekly'); notes.push(`weekly: ${wk.join(', ')}`) }
   // the old skill directory holds no tracked content (a leftover byte-code cache or .DS_Store aside)
@@ -297,6 +344,7 @@ function check(files, notes = []) {
   // the retired name, in any form, over the product files
   const scan = { ...Object.fromEntries(SCANNED.map((k) => [NAMED[k], files[k]])), ...files.rest }
   let titles = 0
+  let avoids = 0
   let retired = false
   for (const [rel, text] of Object.entries(scan)) {
     if (skipped(rel) || text.includes('\0')) continue
@@ -305,6 +353,8 @@ function check(files, notes = []) {
       const noun = NOUN.test(l)
       if (!verb && !noun) return
       if (!verb && rel === 'README.md' && ADR_TITLE.test(l) && ++titles <= 1) return
+      // the contract's "Never *review* or *<noun>*", once, in the SKILL: the noun named as the word to avoid
+      if (!verb && rel === NAMED.skill && l.includes(AVOID) && !NOUN.test(l.replace(AVOID, '')) && ++avoids <= 1) return
       retired = true
       notes.push(`retired: ${rel}:${i + 1} ${l.trim().slice(0, 120)}`)
     })
@@ -427,6 +477,24 @@ test('control: a trigger dropped, or a Companion trigger added, fails triggers',
   only('skill:companion', swap('skill', '"how did the rollout run", ', '"how did the rollout run", "how did the Companion do", '), ['triggers'])
 })
 
+test('control: the contract uncited, or a contract word drifted, fails loops', () => {
+  only('skill', swap('skill', '`~/.agents/knowledge/reflection-loops.md`', '`docs/reflection-loops.md`'), ['loops'])
+  only('skill:reflection', swap('skill', 'traces what cost Lachy to the rule that produced it', 'scores what it read'), ['loops'])
+  only('skill:avoid', swap('skill', ` or *${OLD}*.`, '.'), ['loops'])
+  only('skill:tuning', swap('skill', 'entry on tune.py\'s one `tuning` line', 'line in `tunings.jsonl`'), ['loops'])
+  only('skill:quiet', swap('skill', 'no bug and no Guardrail breach', 'no bug'), ['loops'])
+  only('skill:held', swap('skill', 'a knob proposal step 14\n  holds while it gathers agreement', 'a knob card that only\n  gathers agreement'), ['loops'])
+  only('skill:cadence', swap('skill', 'never kept as a written value', 'kept on the closing line'), ['loops'])
+  only('skill:gap', swap('skill', '- A `tunings.jsonl` line can carry several Tunings:', '- A `tunings.jsonl` line:'), ['loops'])
+})
+
+test('control: the contract\'s banned noun outside its one clause fails retired', () => {
+  const line = real.skill.split('\n').find((l) => l.includes(AVOID))
+  assert.ok(line, 'control setup: no line carries the banned-words clause')
+  only('skill:twice', swap('skill', line, `${line}\n${line}`), ['retired'])
+  only('skill:same-line', swap('skill', AVOID, `${AVOID} No ${OLD} either.`), ['retired'])
+})
+
 test('control: the old scratch path or the old noun in the SKILL fails retired', () => {
   only('skill:retired', swap('skill', '`/tmp/thread-reflect-<rollout-slug>/`', `\`/tmp/thread-${OLD}-<rollout-slug>/\``), ['retired'])
   only('skill:noun', swap('skill', 'stops the Reflection', `stops the ${Old}`), ['retired'])
@@ -465,6 +533,18 @@ const weekly = (name, mut, clause) => {
   assert.ok(weeklyFails({ ...real, [key]: mut }).includes(clause), `${name}: ${clause}`)
 }
 const REVERT_LINE = real.skill.split('\n').find((l) => /tune\.py --scores \S+ --revert /.test(l))
+// `needle` replaced by `to` in real[key], matched across any line wrap (a control's swap of a reflowed phrase).
+const loose = (needle) => new RegExp(needle.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'))
+const cut = (key, needle, to = '') => {
+  assert.ok(loose(needle).test(real[key]), `control setup: ${needle.slice(0, 60)} not in ${key}`)
+  return real[key].replace(loose(needle), to)
+}
+// real[key] without the column-0 `- ` item that starts with `head`.
+const dropItem = (key, head) => {
+  const it = item(real[key], head)
+  assert.ok(it, `control setup: no item ${head.slice(0, 60)} in ${key}`)
+  return real[key].replace(`${it}\n`, '')
+}
 
 test('control: --revert before --scores, or a fenced tunings.jsonl in the weekly steps, fails writer', () => {
   assert.ok(REVERT_LINE, 'control setup: no revert line')
@@ -494,17 +574,28 @@ test('control: step 11 without the Human-fix paragraph, or without a friction ki
   weekly('skill:repair', swap('skill', '`descope`, `repair`,\n`escape`', '`descope`,\n`escape`'), 'w5')
 })
 
-test('control: step 15 writing a decision task without a rule proposal fails weekly (w6)', () => {
+test('control: step 11 tracing the standing approval as his ask, without the sign-off bullet, or not reading ## Approved gates, fails weekly (w5)', () => {
+  weekly('skill:standing', cut('skill', 'report it as what moved the task, never trace it as his ask', 'trace it as his ask'), 'w5')
+  weekly('skill:signoff', dropItem('skill', '- An `## Approved gates: sign-off` entry'), 'w5')
+  weekly('skill:gates', cut('skill', 'a gate set-aside\'s `## Approved gates`, and', 'and'), 'w5')
+})
+
+test('control: step 15 writing a decision task without a rule proposal, or not for a held trade, fails weekly (w6)', () => {
   weekly('skill', swap('skill', 'It writes a decision task only with a rule proposal', 'It writes a decision task'), 'w6')
+  weekly('skill:trade', cut('skill', 'only with a rule proposal or a held trade', 'only with a rule proposal'), 'w6')
 })
 
 test('control: orient § 2 without its decisions bullet, or § 7 without its exclusion, fails weekly (w7)', () => {
   weekly('orient', swap('orient', '- **Decisions waiting**: an open task tagged `decisions`', '- **Decisions**: a task'), 'w7')
-  weekly('orient:batch', swap('orient', 'is conversation-gated and never batched', 'may be batched'), 'w7')
+  weekly('orient:serial', swap('orient', 'is conversation-gated and never goes into a serial rollout', 'may go into a serial rollout'), 'w7')
 })
 
 test('control: a weekly cannot-show line dropped fails weekly (w8)', () => {
   weekly('skill', swap('skill', '- A declined Watch seen again in one rollout is neither new nor offered', '- A declined Watch'), 'w8')
+  weekly('skill:dropped', dropItem('skill', '- Lachy\'s no to a held trade'), 'w8')
+  weekly('skill:holds', cut('skill', 'A no holds for that (knob id, `from`) whatever later rollouts show', 'A no holds'), 'w8')
+  weekly('skill:gate', cut('skill', ', nor does a gate signed on the note with no `gate-signed` line', ''), 'w8')
+  weekly('skill:partial', cut('skill', 'A held trade on a partial window is held `partial window`', 'A held trade on a partial window waits'), 'w8')
 })
 
 test('control: the ask bullet without orient § 5, or with a short R2 citation, fails weekly (w9)', () => {
@@ -534,6 +625,24 @@ test('control: the reshuffle\'s R1 without its decision-task tier, or a Loose it
   assert.ok(tier, 'control setup: no tier')
   weekly('reshuffle', real.reshuffle.replace(`${tier}\n`, ''), 'w13')
   weekly('reshuffle:loose', swap('reshuffle', 'but not `thread` or `decisions`', 'but not `thread`'), 'w13')
+})
+
+test('control: step 15 without the empty decisions file fails weekly (w15)', () => {
+  weekly('skill', cut('skill', 'with no recurring Watch, write `{}`', 'with no recurring Watch, write nothing'), 'w15')
+})
+
+test('control: a held trade unnamed in step 14, not listed once in step 15, or unanswered in § Deciding, fails weekly (w16)', () => {
+  weekly('skill:s14', cut('skill', TRADE_S14, 'it waits'), 'w16')
+  weekly('skill:s15', cut('skill', TRADE_S15, 'A held trade is listed'), 'w16')
+  for (const n of TRADE_DEC) weekly(`skill:${n}`, cut('skill', n, 'x'), 'w16')
+  weekly('skill:fence', swap('skill', `${PY}moot --task`, `${PY}moot-trade --task`), 'w16')
+})
+
+test('control: step 11 tracing grade accuracy as a knob or with no grades block, step 17 without it, or the constants\' cannot-show line gone, fails weekly (w17)', () => {
+  weekly('skill', cut('skill', 'never a knob: the grading constants are no operator setting', 'or a knob'), 'w17')
+  weekly('skill:block', cut('skill', 'Read `span.json`\'s `grades`', 'Read the grades'), 'w17')
+  weekly('skill:s17', cut('skill', `${GRADE_S17}, each grade's rate in \`window\` and \`all\`, the \`bySize\` readout and each grade trace),`, ''), 'w17')
+  weekly('skill:cannot', cut('skill', '(`DECISION_MINUTES`, `REVIEW_MINUTES`)', ''), 'w17')
 })
 
 test('control: § Deciding the decision task without --declined, its cycle close or its done rule, fails weekly (w14)', () => {

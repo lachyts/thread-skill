@@ -5,6 +5,9 @@ Status: accepted, shipped in 3.0.0 (amends the rollout defaults that schedule st
 execute and reconcile assume, the rollout template's `## Resource budget`, and execute's "don't
 raise `parallel_ceiling` blindly" rule; grilled with Lachy 2026-10-04 in `/thread:orient Thread
 Skill`, from his question "why three tasks at once, why not ten?")
+*(Amended by ADR 0037, 2026-10-15: the Retro is now the Reflection (`/thread:reflect`), scored on two headlines,
+Hands-off rate and Quality, with Throughput a Guardrail; decision 5's gate is decided: a bug is filed, a knob lands
+once three Reflections agree, a rule never lands unasked.)*
 
 ## Context
 
@@ -16,8 +19,8 @@ The corrected reading of chorus-rollout-2026-10-03:
 - **Before 16:16+10:00 on 3 Oct**, one task ran at a time, around a soft-pause cut-over.
 - **From 16:16+10:00 on 3 Oct to 09:23+11:00 on 4 Oct** (16 h 07 min, across the DST change),
   every status line reads `running=3`. The run made 38 merges, about 2.4 an hour.
-- **The Integration lane** handled 51 Integrations for those merges, about 45% busy. At 1.34
-  Integrations per merge, the lane caps merges near 5.3 an hour.
+- **The Integration lane** handled 40 Integrations for those merges (392 min), about 41% busy.
+  At 1.05 Integrations per merge, the lane caps merges near 5.8 an hour.
 - **Another rollout overlapped it:** thread-skill-rollout-2026-10-03 ran on the same machine and
   account.
 
@@ -77,6 +80,6 @@ Considered:
   table, `reconcile-rollout.py`'s absent-value default, the template's `## Resource budget`
   paragraph and the schedule tests. The machine is an M2 Max with 12 cores, so the Workflow
   per-call agent cap is 10, not "~14 on the M3".
-- **Concurrent Workflow calls.** The spike tested only 3 calls at once. Every ceiling of 3 or
-  more, plus an integrate call, already runs past that, and the Chorus run at 5 can hold 6. The
-  first Retro, on a record backfilled from that run, is where the question gets answered.
+- **Concurrent Workflow calls.** The spike tested 3 calls at once; the Chorus run's journals show
+  4 in flight for about 5 hours at ceiling 3, and the run at 5 can hold 6. The first Retro, on a
+  record backfilled from that run, measures past 4.

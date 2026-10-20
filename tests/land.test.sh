@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # skills/_shared/scripts/land.sh — the shared landing route (ADR 0028, queue and finish) — close's
-# `# thread:land` snippet and handoff's `# thread:handoff-land` snippet (cases 1–41), and its own-branch mode
-# with close's `# thread:land-own` snippet (cases 42–70). Fixture repos talk to bare "servers" under $tmp/srv
+# `# thread:land` snippet and handoff's `# thread:handoff-land` snippet (cases 1–41), its own-branch mode
+# with close's `# thread:land-own` snippet (cases 42–70; 71–73b are close-out cases), and its read-only route mode,
+# `--route` (case 74, leg.py's Complete; case 75, its parity with a landing, which self-rollout-check.sh
+# --refresh-in-place's diverged remedy reads). Fixture repos talk to bare "servers" under $tmp/srv
 # through a fake ssh that maps git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
@@ -1575,6 +1577,87 @@ git -C "$W" rm -q docs/reviews/sub/n.md; git -C "$W" commit -qm "🔧 chore(revi
 land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 73b nested deletion" 1 "stuck: local commits not from a close-out: 🔧 chore(review): nested delete"
 }  # end shard_8
+
+# ==== Route mode (--route, read-only; leg.py's Complete) ====================================================
+shard_9() {
+echo "== 74. --route: the class S1-S3 reach, and nothing more"
+# rstate: everything --route must leave alone (HEAD, the index, every ref, the tree's status)
+rstate() { { git -C "$1" rev-parse -q --verify HEAD; git -C "$1" symbolic-ref -q HEAD; git -C "$1" ls-files -s;
+             git -C "$1" for-each-ref; git -C "$1" status --porcelain; } 2>/dev/null | shasum | cut -c1-40; }
+# route <label> <rc> <stdout> [net] — run --route on $W; nogh/nossh unless net, and the state unchanged
+route() {
+  local label=$1 want_rc=$2 want=$3 before; before=$(rstate "$W")
+  land -- --route -- "$W"; res "case 74 $label" "$want_rc" "$want"
+  nogh "case 74 $label"; [ "${4:-}" = net ] || nossh "case 74 $label"
+  ok "$(rstate "$W")" "$before" "case 74 $label: HEAD, index and refs byte-identical"
+}
+ghreset; mkrepo c74; edit
+route "GitHub origin, origin/HEAD set, on master" 0 "landable master"
+ok "$(git -C "$W" log -1 --format=%s)" "base" "case 74: nothing committed (THREAD.md stays dirty)"
+git -C "$W" symbolic-ref --delete refs/remotes/origin/HEAD
+route "origin/HEAD unset" 0 "landable master" net
+ok "$(cnt "$(sshlog)" git-upload-pack)" 1 "case 74 origin/HEAD unset: one ls-remote, nothing else"
+ghreset; sw "$HOME/repos/obsidian"; W="$HOME/repos/obsidian"
+route "swept" 0 "not landed: swept by the daily sweep"
+ghreset; mkrepo c74r; printf -- '- o/c74r — frozen for the audit\n' > "$LANDING_REGISTER"
+route "register-listed" 0 "not landed: listed o/c74r: frozen for the audit"
+: > "$LANDING_REGISTER"
+ghreset; mkrepo c74p "$SRV/o/c74p.git"
+route "a path origin" 0 "not landed: no GitHub origin"
+ghreset; mkrepo c74f; git -C "$W" checkout -qb feat/x
+route "on feat/x" 0 "not landed: on feat/x, not master"
+ghreset; mkrepo c74d; git -C "$W" checkout -q --detach
+route "detached HEAD" 1 "stuck: detached HEAD"
+mkdir -p "$tmp/w/plain74"; W="$tmp/w/plain74"
+route "not a repo" 1 "stuck: not a git work tree:…"
+ghreset; mkrepo c74u; edit
+for a in "--route -- $W $W/THREAD.md" "--route $W $W/THREAD.md" "--route --commit-only $W" "--route --commit-only"; do
+  land -- $a; ok "$rc|$out" "2|" "case 74 usage: land.sh $a → exit 2, stdout empty"
+done
+}  # end shard_9
+
+# ==== --route parity: route mode reads the very class a landing reaches (self-rollout-check.sh --refresh-in-place) ====
+shard_10() {
+echo "== 75. --route parity: the class a plain landing reaches, local only, no network"
+# route75 <repo> → $out, $err, $rc (logs reset); parity <label> <repo> <want> <rc>: --route's line, then a plain
+# call's outcome on the same repo: the same `not landed: <reason>` for a deferred class, the same stuck register line
+# for a pending one, and for `landable <d>` a result past S2 (neither of those).
+route75() { : > "$LOG_SSH"; : > "$LOG_GH"; out=$($LAND_SHELL "$LAND" --route -- "$1" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err"); }
+parity() {
+  local label=$1 repo=$2 want=$3 want_rc=$4
+  route75 "$repo"
+  ok "$out|$rc" "$want|$want_rc" "$label: --route prints [$want], exit $want_rc"
+  ok "$(lines "$out")" 1 "$label: exactly one stdout line"
+  nossh "$label --route"; nogh "$label --route"; tmpempty "$label --route"
+  land GH_PROT=false -- "$repo" "$repo/THREAD.md"
+  case $want in
+    "not landed: "*) ok "$out" "$want" "$label: parity: a plain call is not landed for the same reason" ;;
+    "stuck: "*) case $out in "$want"*) ok y y "$label: parity: a plain call is stuck on the register" ;; *) ok "$out" "$want…" "$label: parity" ;; esac ;;
+    "landable "*) case $out in "not landed: "*|"stuck: landing register"*) ok "$out" "past S2" "$label: parity: a plain call goes on past S2" ;; *) ok y y "$label: parity: a plain call goes on past S2 ($out)" ;; esac ;;
+  esac
+}
+for e in repos/workspaces repos/obsidian .claude .agents Projects Projects/Life/audio-archive \
+         Projects/Life/grandma-shirleys-book Projects/Narcissus/narcissus-echo repos/concepts/cc; do
+  sw "$HOME/$e"; git -C "$HOME/$e" add THREAD.md; git -C "$HOME/$e" commit -qm t
+  parity "case 75 ~/$e" "$HOME/$e" "not landed: swept by the daily sweep" 0
+done
+ghreset; mkrepo c75r; printf -- '- o/c75r — shared team repo\n' > "$LANDING_REGISTER"; edit
+parity "case 75 registered" "$W" "not landed: listed o/c75r: shared team repo" 0
+: > "$LANDING_REGISTER"
+ghreset; mkrepo c75g https://gitlab.com/o/c75g.git; edit
+parity "case 75 gitlab" "$W" "not landed: no GitHub origin" 0
+ghreset; mkrepo c75l; edit
+parity "case 75 landable" "$W" "landable master" 0
+ghreset; mkrepo c75d; edit; rm -f "$LANDING_REGISTER"; ln -s "$tmp/nowhere.md" "$LANDING_REGISTER"
+route75 "$W"; ok "$rc" 1 "case 75 dangling register: --route exits 1"
+case $out in "stuck: landing register: landing-register: "*) ok y y "case 75 dangling register: stuck: landing register: …" ;; *) ok "$out" "stuck: landing register: landing-register: …" "case 75 dangling register" ;; esac
+parity "case 75 dangling register" "$W" "${out}" 1
+rm -f "$LANDING_REGISTER"; : > "$LANDING_REGISTER"
+route75 "$W/src"; ok "$out" "landable master" "case 75: a path inside the repo resolves to its toplevel"
+out=$($LAND_SHELL "$LAND" --route 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "case 75: no argument → usage exit 2, stdout empty"
+out=$($LAND_SHELL "$LAND" --route "" 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "case 75: an empty argument → usage exit 2"
+out=$($LAND_SHELL "$LAND" --route a b 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "case 75: an extra argument → usage exit 2"
+}  # end shard_10
 
 # ---- run this child's shard -------------------------------------------------------------------------------
 declare -F "shard_$shard" >/dev/null || { echo "FAIL - no shard_$shard"; exit 1; }

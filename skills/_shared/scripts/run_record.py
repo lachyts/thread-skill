@@ -13,7 +13,8 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
     check(rollout, kind, task=None, fields=None, *, ts=None) -> None   (raises Refused exactly where emit would
                                            refuse, and writes nothing: reflect.py checks a whole pass first)
     events_dir(env=None) -> str            record_path(rollout, env=None) -> str
-    normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, REFLECTIONS, RESERVED
+    normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG,
+                                           RESERVED
     verdict_digest(verdict, feedback) -> str    verdict_key(line) -> tuple   (review-verdict's identity, p21-3:
                                            the writer, reconcile-rollout.py, and the reader, score.py, share them)
     watch_id(rule, shape) -> str           knob_key(repo, key, rule, direction) -> str   (the weekly reading's
@@ -34,9 +35,9 @@ here creates the link, and on a machine without it the first emit's os.makedirs 
 there. THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the resolved directory, so any writer can confirm it lands in
 the same place.
 
-Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning to tunings.jsonl, and the
-weekly reading's kinds (watch, watch-raised, proposal, reflection) to reflections.jsonl. All three names are RESERVED:
-refused as a rollout slug and as a carried `from`.
+Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning to tunings.jsonl, the
+weekly reading's kinds (watch, watch-raised, proposal, reflection) to reflections.jsonl, and the Grade log's kind (grade)
+to grades.jsonl. All four names are RESERVED: refused as a rollout slug and as a carried `from`.
 
 tunings.jsonl holds one line per by-hand Reflection, plus one `close` line per rollout, at its completion ceremony or
 its supersede, plus one `auto` line per knob the weekly reading lands or reverts (skills/reflect/scripts/tune.py is
@@ -55,6 +56,18 @@ still serves as a baseline, its missing keys read as no baseline.
   `auto`. A close line's `applied` is [], so it never moves a key and never counts toward `agreeing` or `agreed`.
   `agreeing` stays score.py's count (earlier applied Tunings with the same rule and direction); `agreed` is the
   weekly agreement (the Agreement rule below), carried on each entry of an auto landing.
+- Serial (p24-4, ADR 0040): a serial rollout's close line (close-score.py's serial path, through
+  skills/reflect/scripts/serial-score.py and `tune.py --record-only --close completion`) carries `shape: serial` and
+  `repo: null`, since a chain has no one repo: its parallel-only scores (tokensPerMerge, setAsideRate, conflictRate,
+  quotaStalls) and reviewChurn are null. It is a close line only (applied [], no binding, voids, auto, reflection or
+  reverts), never a baseline (score.py's load_tunings reads only a string repo) and never a move of a key.
+
+grades.jsonl holds the Grade log (p25-4, ADR 0041; CONTEXT.md **Grade log**): one `grade` line per graded task per
+estate pass, every line of a pass sharing its `pass` id, its `digest` and its ts. skills/_shared/scripts/estate-dispatch.py
+`log` is its one writer (orient-all § 2 step 7, never on a dry run) and skills/reflect/scripts/grades.py its one reader
+(the weekly reading's grade accuracy, joined to outcomes at read time). A grade line carries no rollout, and a task:
+a graded task whose name normalise_slug refuses (a vault note named with spaces or capitals) has no line, `log` skips
+it and reports it.
 
 reflections.jsonl holds the weekly reading's lines (skills/reflect/scripts/reflect.py is its only writer, and tune.py
 reads it for the agreement and to refuse a closed Reflection): a `watch` line per (Reflection, Watch), a `watch-raised`
@@ -84,8 +97,8 @@ with its newline. The common keys come first, in this order:
              Any other ISO timestamp field a caller adds must be UTC `Z` too; call-journal's
              startTime is the one epoch field (the journal's own epoch-ms integer, verbatim).
     host     the hostname up to its first dot
-    rollout  the rollout slug (null only for review-round and the four reflections.jsonl kinds; a tuning's is a
-             provenance stamp)
+    rollout  the rollout slug (null only for review-round, grade and the four reflections.jsonl kinds; a tuning's is
+             a provenance stamp)
     task     the task slug, or null
     kind     one of the kinds below
 
@@ -160,13 +173,16 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      that wrote it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
                      Reflection's line); auto? (true only: `tune.py --auto` or `--revert`, the weekly reading's own
                      landing); reflection? (the weekly reading's r- id, present exactly when auto is); reverts? (the
-                     t- id of the auto line a revert undoes: auto, with one applied entry). A rollout is required
-                     and a task is refused;
-                     lands in tunings.jsonl, `v` 2. window: since and until UTC `Z` stamps, activeStart and
+                     t- id of the auto line a revert undoes: auto, with one applied entry); shape? (serial only: a
+                     serial rollout's close line, p24-4). A rollout is required and a task is refused;
+                     lands in tunings.jsonl, `v` 2. repo: a non-empty string (owner/name), or null on a `shape:
+                     serial` line and only there. window: since and until UTC `Z` stamps, activeStart and
                      activeEnd a UTC `Z` stamp or null, partial a boolean, no other key. scores: exactly the ten
-                     keys, each a finite number or null, with merges and quotaStalls integers >= 0 and
-                     handsOffRate in [0, 1] (quality is null when nothing landed or no Escape source was read,
-                     p21-4; reviewChurn when no review round was recorded, p21-3). applied: key
+                     keys, each a finite number or null, with merges an integer >= 0, quotaStalls an integer >= 0
+                     (null only on a serial line) and handsOffRate in [0, 1] (quality is null when nothing landed
+                     or no Escape source was read, p21-4; reviewChurn when no review round was recorded, p21-3). A
+                     serial line has applied [] and a close, and no binding, voids, auto, reflection or reverts.
+                     applied: key
                      one of parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds; from, to
                      and ranAt integers >= 1 with from != to; rule a string of at most 64 characters;
                      evidence one of at most 300; agreeing an integer >= 0; agreed (an integer >= 1, on every
@@ -186,6 +202,17 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      and vaultTask, a bug rule, shape, vaultTask and filed, each id watch_id(rule, shape); auto is true
                      only, on a landed knob or a filed bug; held only on an unlanded knob; landed only on a knob and
                      filed only on a bug). No rollout, no task; lands in reflections.jsonl.
+  grade           T  pass, digest, project, grade, agentGrade, shape, size, decisions, low, held, gates; raised?, rank?,
+                     linked? (p25-4, ADR 0041: one line per task an estate pass grades, from estate-rank.py's tasks[]
+                     row, whose name is a slug (`log` skips and reports any other); pass a g- id and digest 12 lowercase
+                     hex, both shared by the pass's lines; project the task's home; grade and agentGrade each one of
+                     Ready | One call | Grill | Orient, the ranker's grade after the raise and the agent's own; shape
+                     parallel | serial | session; size S | M | L; decisions and low integers >= 0, the decision count
+                     and those of low confidence, low <= decisions; held a boolean, the task held by a dependency; gates
+                     a list of distinct gate kinds, spend | credential | irreversible, possibly empty; raised a
+                     non-empty list of distinct raise whys, decisions | confidence; rank an integer >= 1, absent for
+                     Orient; linked the scan row's rollout slug at grade time, never a reserved name). No rollout; lands
+                     in grades.jsonl.
   reflection         id, since, until, rollouts, escapesOnly, counts, quiet; decisionTask?, cadence?, repairsOnly?
                      (p21-7: the Reflection's one closing line; since and until UTC Z stamps; rollouts, escapesOnly
                      and repairsOnly lists of slugs: the rollouts read, those not read that hold an in-window
@@ -293,8 +320,8 @@ sync filesystems). Any failure to write (a short write, an OSError, anything une
 `run_record: warning: cannot write <path>: <err>` and writes nothing more; the CLI still exits 0.
 
 Exit codes: 0 written, skipped as a duplicate fold, or a warned write failure; 2 refused (an unknown kind,
-a missing or out-of-enum field, a task-scoped kind with no task, a tuning with one, a reserved rollout or
-`from`, --json not a JSON object, a common-key
+a missing or out-of-enum field, a task-scoped kind with no task, a tuning with one, a grade with a rollout, a reserved
+rollout or `from`, --json not a JSON object, a common-key
 collision, NaN, a bad slug, a naive or malformed --ts, a line over 16 KiB, a review-verdict whose original +
 regression exceed its findings), with one line starting `run_record: ` on
 stderr and nothing written; `dir` exits 1 when the directory cannot be resolved.
@@ -326,8 +353,9 @@ COMMON = ("v", "ts", "host", "rollout", "task", "kind")
 REVIEWS = "reviews"
 TUNINGS = "tunings"
 REFLECTIONS = "reflections"
+GRADE_LOG = "grades"
 # record files that are no rollout's: refused as a rollout slug or a carried `from`
-RESERVED = (REVIEWS, TUNINGS, REFLECTIONS)
+RESERVED = (REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG)
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 # One accepted --ts shape on every python (fromisoformat widened in 3.11): date, time, fraction, offset.
 STAMP_RE = re.compile(r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d)(?::(\d\d)(?:[.,](\d+))?)?"
@@ -436,6 +464,8 @@ def _scores(v):
     if not isinstance(v, dict) or set(v) != set(SCORE_KEYS):
         return "an object with exactly the keys %s" % ", ".join(SCORE_KEYS)
     for k in SCORE_KEYS:
+        if k == "quotaStalls" and v[k] is None:
+            continue  # null only on a serial line: _check_tuning holds that rule
         if k in ("merges", "quotaStalls"):
             if _int(0)(v[k]):
                 return "an object with %s an integer >= 0" % k
@@ -527,6 +557,11 @@ def _true(v):
     return None if v is True else "true (omit it otherwise)"
 
 
+def _repo(v):
+    """A tuning's repo: an owner/name, or null (a serial line's only: _check_tuning holds that rule)."""
+    return None if v is None or (isinstance(v, str) and v) else "a non-empty string, or null on a serial line"
+
+
 def _short(n):
     def check(v):
         return None if isinstance(v, str) and v.strip() and len(v) <= n else "a non-empty string of at most %d characters" % n
@@ -565,6 +600,39 @@ def _cadence(v):
 
 def _direction(v):
     return None if isinstance(v, int) and not isinstance(v, bool) and v in (1, -1) else "1 or -1"
+
+
+# ---- the Grade log's kind (skills/_shared/scripts/estate-dispatch.py log; p25-4, ADR 0041) -------------------------
+# estate-rank.py's GRADES, SHAPES, SIZE_MINUTES keys and GATE_KINDS, copied (this module stays at python 3.8 and loads
+# no sibling); tests/contracts/readiness-grade.test.mjs c9 pins the two copies together.
+
+GRADE_NAMES = ("Ready", "One call", "Grill", "Orient")
+GRADE_SHAPES = ("parallel", "serial", "session")
+GRADE_SIZES = ("S", "M", "L")
+GRADE_GATES = ("spend", "credential", "irreversible")
+RAISE_WHYS = ("decisions", "confidence")   # estate-rank.py's raised[] whys
+GRADE_PASS_RE = re.compile(r"g-[A-Za-z0-9._-]+\Z")
+GRADE_DIGEST_RE = re.compile(r"[0-9a-f]{12}\Z")
+
+
+def _distinct_of(values, empty):
+    def check(v):
+        ok = isinstance(v, list) and (empty or v) and all(isinstance(x, str) and x in values for x in v) \
+            and len(set(v)) == len(v)
+        return None if ok else "a list of distinct %s from %s" % ("values" if empty else "values, at least one",
+                                                                   ", ".join(values))
+    return check
+
+
+def _match(regex, what):
+    def check(v):
+        return None if isinstance(v, str) and regex.match(v) else what
+    return check
+
+
+def _slug(v):
+    ok = isinstance(v, str) and SLUG_RE.fullmatch(v) and v not in RESERVED
+    return None if ok else "a slug ([a-z0-9][a-z0-9._-]*), not reserved"
 
 
 HOLDS = ("merge", "git-env", "race")
@@ -610,9 +678,9 @@ KINDS = {
     "gate-signed": (True, {"standing": _bool, "gates": _int(1)}, {}),
     "handed-back": (True, {"via": _enum("answer", "descope", "retry"), "arm": _enum("run", "integration")}, {}),
     "race-decided": (True, {"mark": _enum("RACE", "UNVERIFIED"), "by": _enum("resume", "hand-back", "auto-retry")}, {}),
-    "tuning": (False, {"id": _str, "repo": _str, "window": _window, "scores": _scores, "applied": _applied},
+    "tuning": (False, {"id": _str, "repo": _repo, "window": _window, "scores": _scores, "applied": _applied},
                {"binding": _enum(*BINDINGS), "voids": _str, "close": _enum(*CLOSES), "auto": _true,
-                "reflection": _rid, "reverts": _tid}),
+                "reflection": _rid, "reverts": _tid, "shape": _enum("serial")}),
     "watch": (False, {"id": _str, "rule": _short(RULE_MAX), "shape": _short(RULE_MAX),
                       "rollouts": _slugs(1, MAX_ROLLOUTS), "count": _int(1), "reflection": _rid}, {}),
     "watch-raised": (False, {"id": _str, "reflection": _rid, "via": _enum(*VIAS)}, {}),
@@ -622,6 +690,12 @@ KINDS = {
                   "direction": _direction, "from": _int(1), "to": _int(1), "ranAt": _int(1), "landed": _bool,
                   "auto": _true, "tuning": _tid, "reverts": _tid, "held": _short(300), "vaultTask": _str,
                   "filed": _bool, "fixes": _str}),
+    "grade": (True, {"pass": _match(GRADE_PASS_RE, "a g- id (an estate pass's)"),
+                     "digest": _match(GRADE_DIGEST_RE, "12 lowercase hex"), "project": _str,
+                     "grade": _enum(*GRADE_NAMES), "agentGrade": _enum(*GRADE_NAMES), "shape": _enum(*GRADE_SHAPES),
+                     "size": _enum(*GRADE_SIZES), "decisions": _int(0), "low": _int(0), "held": _bool,
+                     "gates": _distinct_of(GRADE_GATES, True)},
+              {"raised": _distinct_of(RAISE_WHYS, False), "rank": _int(1), "linked": _slug}),
     "reflection": (False, {"id": _rid, "since": _stampz, "until": _stampz, "rollouts": _slugs(0, 4096),
                            "escapesOnly": _slugs(0, 4096), "counts": _counts, "quiet": _bool},
                    {"decisionTask": _str, "cadence": _cadence, "repairsOnly": _slugs(1, 4096)}),
@@ -747,11 +821,28 @@ def _check_fields(kind, fields):
             raise Refused("watch: id %r is not watch_id(rule, shape) %r" % (fields["id"], watch_id(fields["rule"], fields["shape"])))
     elif kind == "proposal":
         _check_proposal(fields)
+    elif kind == "grade" and fields["low"] > fields["decisions"]:
+        raise Refused("grade: low (%d) exceeds decisions (%d)" % (fields["low"], fields["decisions"]))
 
 
 def _check_tuning(f):
-    """The auto rules (the Files' Auto bullet): auto <=> reflection; reverts => auto with one entry; agreed only on an
+    """The serial rule (the Files' Serial bullet): repo is a string unless `shape: serial`, and then null; a serial line
+    is a close line with applied [] and no binding, voids, auto, reflection or reverts; quotaStalls is null only there.
+    Then the auto rules (the Files' Auto bullet): auto <=> reflection; reverts => auto with one entry; agreed only on an
     auto line without reverts, and on every entry of a non-void auto landing; never auto and close on one line."""
+    if f.get("shape") == "serial":
+        if f["repo"] is not None:
+            raise Refused("tuning: a serial line's repo is null (a chain has no one repo)")
+        if f["applied"] or "close" not in f:
+            raise Refused("tuning: a serial line is a close line: applied [] and a close")
+        extra = [k for k in ("binding", "voids", "auto", "reflection", "reverts") if k in f]
+        if extra:
+            raise Refused("tuning: a serial line carries no %s" % ", ".join(extra))
+    else:
+        if f["repo"] is None:
+            raise Refused("tuning: repo must be a non-empty string (null only on a serial line)")
+        if f["scores"]["quotaStalls"] is None:
+            raise Refused("tuning: scores must be an object with quotaStalls an integer >= 0 (null only on a serial line)")
     auto = f.get("auto") is True
     if auto != ("reflection" in f):
         raise Refused("tuning: auto and reflection go together (the weekly reading's landing carries both)")
@@ -926,6 +1017,9 @@ def _prepare(rollout, kind, task, fields, ts):
     elif kind in REFLECTION_KINDS:
         if rollout is not None or task is not None:
             raise Refused("%s has no rollout or task (it lands in %s.jsonl)" % (kind, REFLECTIONS))
+    elif kind == "grade":
+        if rollout is not None:
+            raise Refused("grade has no rollout (it lands in %s.jsonl)" % GRADE_LOG)
     else:
         if rollout is None:
             raise Refused("%s: a rollout is required" % kind)
@@ -957,7 +1051,8 @@ def _prepare(rollout, kind, task, fields, ts):
     stamp, host = _stamp(ts), _host()
     out = []
     for r in targets:
-        name = REFLECTIONS if kind in REFLECTION_KINDS else REVIEWS if r is None else TUNINGS if kind == "tuning" else r
+        name = REFLECTIONS if kind in REFLECTION_KINDS else GRADE_LOG if kind == "grade" else REVIEWS if r is None \
+            else TUNINGS if kind == "tuning" else r
         out.append((name, _line(stamp, host, r, task, kind, fields)))
     return out
 

@@ -1,8 +1,12 @@
 # 0034 — a gate never holds an unattended rollout
 
 Date: 2026-10-13
-Status: accepted, implemented by p18-2 (amends ADR 0008, where a gated input always paused the rollout until
-sign-off; from the 2026-10-13 orient grill of `thread-skill-p18-2-a-gate-never-holds-the-rollout`)
+Status: accepted, shipped in 3.1.0 (implemented by p18-2, #121; amends ADR 0008, where a gated input always
+paused the rollout until sign-off; from the 2026-10-13 orient grill of
+`thread-skill-p18-2-a-gate-never-holds-the-rollout`)
+*(Amended by ADR 0038, 2026-10-18: a spend Gated input is one line, `spend: <what> — cap N USD`, with the split
+in sub-bullets; the planner is taught it and the plan judge enforces it; the pricer is unchanged; an undelivered
+needs-you push falls back to ntfy.)*
 
 ## Context
 

@@ -81,6 +81,15 @@ test('process-scan rung 2 narrows a multi-match silently', () => {
   ])
 })
 
+test('process-scan reads a rollout clone as its in-place twin at every rung (ADR 0042)', () => {
+  const res = slice(readIf(SCAN), /^## Project directory resolution/, /^## (?!Project directory resolution)/)
+  assertHas(res, `${SCAN} § Project directory resolution`, ['A CWD inside a rollout clone', '--in-place', 'reads as that twin directory at every rung',
+    "a lead's ledger lands in the twin, never in the clone"])
+  assertHas(slice(res, /^1\. /, /^2\. /), `${SCAN} rung 1`, ['`~/Projects/<Area>/<P>-rollout` reads as `<P>`'])
+  assertHas(slice(res, /^2\. /, /^3\. /), `${SCAN} rung 2`, ['a rollout clone read as its in-place twin'])
+  assertHas(slice(res, /^3\. /, /^Nothing else resolves/), `${SCAN} rung 3`, ["the twin's, never `<basename>-rollout`"])
+})
+
 test('every exit route carries the rule and the offer channel', () => {
   const close = readIf(CLOSE)
   // (a) close's follow-up task row obeys Lean capture.

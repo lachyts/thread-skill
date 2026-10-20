@@ -9,7 +9,9 @@ never force-pushes.
 Subcommands:
 
   prepare --repo R --slug S --default D --note N [--tasks-dir T]
-      Decide how one approved task integrates. In order: fetch origin with --prune (retried once; failing
+      Decide how one approved task integrates. Refuses (exit 1, nothing fetched or merged) a note with no
+      `integrating:`: every route into execute § 4.5 step 3 runs mark-integrating first, so a skipped stamp
+      stops here (p26-1). In order: fetch origin with --prune (retried once; failing
       twice is exit 8); H = origin/<branch> (absent: route `set-aside`, reason `origin/<branch> does not
       exist — the PR branch is gone`); the anchor A = the engine's ANCHOR_RECIPE (pinned copy) with
       WT=<repo> (a `stale-ref X` is deleted with `update-ref -d <ref> X`, guarded by X, and the recipe
@@ -34,13 +36,25 @@ Subcommands:
       comes first, then `<n> commit(s) in <TB>..<B> name no PR …` naming each unlisted commit).
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
+         [--slots N --slot-wait W]
       Run the env bootstrap, then the verifier, each `bash -c` in its own session (process group) in T,
       appending to O.log, under one deadline of S seconds. The exit code goes to O.rc, written LAST (tmp +
       rename); O.rc and O.log are removed first, so a missing O.rc means the run did not finish (red). A
       failed bootstrap gives its rc and `env_bootstrap failed; verifier not run`. At the deadline the group
       gets SIGTERM, 10 s, then SIGKILL: rc 124. TERM/INT/HUP to verify itself kill the group the same way:
-      rc 128+n. --detach-at adds T as a detached worktree of R at SHA (refusing an existing path) and
-      removes it (`worktree remove --force`) whatever the verdict: the RACE re-verify.
+      rc 128+n. They are held while a step starts, so one landing before its group is recorded still kills it,
+      and each step starts with the caller's signal mask. --detach-at adds T as a detached worktree of R at SHA
+      (refusing an existing path) and removes it (`worktree remove --force`) whatever the verdict: the RACE
+      re-verify.
+      --slots N --slot-wait W (given together or not at all; one alone is exit 2 with no rc file) first waits,
+      up to W seconds, for one of the machine's N verify slots (verify-slot.py, p23-4), as an Integration waiter
+      (the priority: agents' runs wait while it does), logging `verify: waiting for one of N verify slots (…)`
+      and then `== verify slot k of N after Ns`. Only then does the S-second deadline start: the slot wait never
+      counts against it. Each step then runs under verify-slot.py's guard, which shares the slot's lock and ends
+      the step's group when verify dies by any means, before the slot frees: so even a SIGKILL of verify, which
+      leaves no rc (red), still ends the step. No slot within W: O.rc reads `noslot`, the log says `verify: no
+      verify slot within Ws (held: …); verifier not run`, the exit is 75 and the race tree is still removed. An
+      unusable slots dir logs a WARN and runs the steps unslotted, still under the guard.
 
   push --repo R --slug S --head M
       A plain push of the task tree's M to origin/<branch> (never forced); the ls-remote read-back must
@@ -123,8 +137,8 @@ Subcommands:
   stamp
       Now, in reconcile's `_stamp` form (the integrate call's startedAt, log-integration's --started).
 
-Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo), 2 usage or
-environment, 8 retryable (prepare's fetch failed twice). Stdlib only; `Note` and `_stamp` come from
+Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo, prepare without
+integrating:), 2 usage or environment, 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
 (`git rev-parse --local-env-vars`) scrubbed. The engine copies (ANCHOR_RECIPE, the branch and tree names,
 the merge message, integrationMarker, parseIntegrationMarker, stageDiagnosis's escape, and inputs --row's
@@ -148,6 +162,10 @@ sys.dont_write_bytecode = True
 _spec = importlib.util.spec_from_file_location("reconcile_rollout", Path(__file__).resolve().parent / "reconcile-rollout.py")
 rr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rr)
+# The machine-wide verify slots and their guard (p23-4): `verify --slots N --slot-wait W`.
+_vs_spec = importlib.util.spec_from_file_location("verify_slot", Path(__file__).resolve().parent / "verify-slot.py")
+VS = importlib.util.module_from_spec(_vs_spec)
+_vs_spec.loader.exec_module(VS)
 
 # ---- engine copies (task.workflow.js; pinned by tests/lead-integrate.test.sh) --------------------------
 
@@ -304,7 +322,7 @@ def rung_record_error(g):
 # ---- plumbing ------------------------------------------------------------------------------------------
 
 class Refused(Exception):
-    """Exit 1: the verb refused (push, undo)."""
+    """Exit 1: the verb refused (push, undo, prepare)."""
 
 
 class EnvError(Exception):
@@ -503,6 +521,11 @@ def cmd_prepare(args):
     if not out_of(git(repo, "rev-parse", "--git-dir")):
         raise EnvError(f"{repo} is not a git repo")
     _path, note = _load_note(args.note)
+    # The lane's stamp (p26-1): step 3 runs mark-integrating before prepare on every route into it, so a note with
+    # no `integrating:` is a skipped stamp. Refuse before the fetch, the anchor, any ref deletion, stash or merge.
+    if not rr._scalar(note.get("integrating")):
+        raise Refused(f"[[{args.slug}]] carries no integrating: — run reconcile-rollout.py mark-integrating --tasks "
+                      f"{args.slug} first (execute § 4.5 step 3); nothing fetched or merged")
     tasks_dir = Path(os.path.expanduser(args.tasks_dir)) if args.tasks_dir else _path.parent
     br, tree = branch_of(args.slug), worktree_dir(str(repo), args.slug)
     out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
@@ -589,6 +612,7 @@ def cmd_prepare(args):
 # ---- verify --------------------------------------------------------------------------------------------
 
 KILL_GRACE = 10
+SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 TIMED_OUT = object()
 
 
@@ -630,10 +654,19 @@ def _kill_group(proc):
         pass
 
 
-def _run_step(cmd, tree, log, deadline):
-    proc = subprocess.Popen(["bash", "-c", cmd], cwd=tree, stdin=subprocess.DEVNULL, stdout=log,
-                            stderr=subprocess.STDOUT, start_new_session=True, env=ENV)
-    _live["proc"] = proc
+def _run_step(cmd, tree, log, deadline, guard=False, slot=None):
+    if guard:
+        return _run_guarded(cmd, tree, log, deadline, slot)
+    # The new group lives in its own session, so a signal that lands before `_live` holds it would leave it running
+    # with no limit: hold SIGNALS until it does. The step itself starts with the caller's mask, not the held one.
+    mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+    try:
+        proc = subprocess.Popen(["bash", "-c", cmd], cwd=tree, stdin=subprocess.DEVNULL, stdout=log,
+                                stderr=subprocess.STDOUT, start_new_session=True, env=ENV,
+                                preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_SETMASK, mask))
+        _live["proc"] = proc
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
     try:
         return proc.wait(timeout=max(0.0, deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
@@ -642,6 +675,34 @@ def _run_step(cmd, tree, log, deadline):
     finally:
         if proc.poll() is not None:
             _live["proc"] = None
+
+
+def _run_guarded(cmd, tree, log, deadline, slot):
+    """A slotted step: `bash -c cmd` under verify-slot.py's guard, which shares the slot's lock and ends the step's
+    group if verify dies by any means. Guarded holds SIGNALS across its spawn and records itself in `_live` inside
+    that window (on_spawn), as the unslotted step does. A deadline stops it through the guard: TIMED_OUT."""
+    g = VS.Guarded(["bash", "-c", cmd], hold=slot, on_spawn=lambda x: _live.__setitem__("proc", x), cwd=tree,
+                   stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=ENV)
+    try:
+        if slot is not None:
+            VS.write_holder(slot, {"pid": os.getpid(), "guard": g.pid, "group": g.group, "cwd": tree,
+                                   "since": rr._stamp(datetime.now()), "kind": "verify"})
+        got = g.wait(timeout=max(0.0, deadline - time.monotonic()))
+        if got is None:
+            g.stop()
+            return TIMED_OUT
+        return got
+    finally:
+        if g.done():
+            _live["proc"] = None
+
+
+def _stop_live(live):
+    """The signal path's kill of the live step: through its guard when slotted, else its process group."""
+    if isinstance(live, VS.Guarded):
+        live.stop()
+    else:
+        _kill_group(live)
 
 
 def _write_rc(rc_path, rc):
@@ -658,6 +719,13 @@ def cmd_verify(args):
         p.unlink(missing_ok=True)
     if args.timeout <= 0:
         raise EnvError("--timeout must be a positive number of seconds")
+    slotted = args.slots is not None
+    if slotted != (args.slot_wait is not None):
+        raise EnvError("--slots and --slot-wait go together (both, or neither)")
+    if slotted and args.slots < 1:
+        raise EnvError("--slots must be an integer >= 1")
+    if slotted and args.slot_wait < 0:
+        raise EnvError("--slot-wait must be a number of seconds >= 0")
     tree = Path(os.path.expanduser(args.tree))
     added = False
     if args.detach_at:
@@ -671,30 +739,49 @@ def cmd_verify(args):
         added = True
     elif not tree.is_dir():
         raise EnvError(f"no tree at {tree}")
-    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    for s in SIGNALS:
         signal.signal(s, _on_signal)
     rc = None
+    slot = None
     try:
-        deadline = time.monotonic() + args.timeout
         with open(log_path, "ab", buffering=0) as log:
             note = lambda msg: log.write((msg + "\n").encode())  # noqa: E731
-            steps = ([("env_bootstrap", args.bootstrap)] if args.bootstrap else []) + [("verifier", args.verifier)]
-            for name, cmd in steps:
-                note(f"== {name}: {cmd}")
-                got = _run_step(cmd, str(tree), log, deadline)
-                if got is TIMED_OUT:
-                    note(f"verify: timed out after {args.timeout:g}s during the {name}; killed its process group (rc 124)")
-                    rc = 124
-                    break
-                note(f"== {name} rc {got}")
-                if name == "env_bootstrap" and got != 0:
-                    note("env_bootstrap failed; verifier not run")
+            if slotted:
+                # The Integration priority (p23-4): wait for a verify slot BEFORE the deadline starts, so the wait
+                # never counts against --timeout. An unusable slots dir fails open: unslotted, still guarded.
+                try:
+                    slot = VS.acquire(args.slots, max_wait=args.slot_wait, priority=True, kind="verify",
+                                      on_wait=lambda m: note(f"verify: {m}"))
+                except VS.SlotDirError as e:
+                    note(f"verify: WARN {e}; running unslotted")
+                else:
+                    if slot is None:
+                        held = VS.held_by(args.slots) or "none read held"
+                        note(f"verify: no verify slot within {args.slot_wait:g}s (held: {held}); verifier not run")
+                        rc = "noslot"
+                    else:
+                        note(f"== verify slot {slot.index + 1} of {args.slots} after {slot.waited:.0f}s")
+                        VS.write_holder(slot, {"pid": os.getpid(), "guard": None, "group": None, "cwd": str(tree),
+                                               "since": rr._stamp(datetime.now()), "kind": "verify"})
+            if rc is None:
+                deadline = time.monotonic() + args.timeout
+                steps = ([("env_bootstrap", args.bootstrap)] if args.bootstrap else []) + [("verifier", args.verifier)]
+                for name, cmd in steps:
+                    note(f"== {name}: {cmd}")
+                    got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot)
+                    if got is TIMED_OUT:
+                        note(f"verify: timed out after {args.timeout:g}s during the {name}; killed its process group (rc 124)")
+                        rc = 124
+                        break
+                    note(f"== {name} rc {got}")
+                    if name == "env_bootstrap" and got != 0:
+                        note("env_bootstrap failed; verifier not run")
+                        rc = got
+                        break
                     rc = got
-                    break
-                rc = got
     except _Signalled as s:
         if _live["proc"] is not None:
-            _kill_group(_live["proc"])
+            _stop_live(_live["proc"])
         rc = 128 + s.signum
         try:
             with open(log_path, "ab") as log:
@@ -702,14 +789,18 @@ def cmd_verify(args):
         except OSError:
             pass
     finally:
-        for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        for s in SIGNALS:
             signal.signal(s, signal.SIG_IGN)
+        if slot is not None:
+            slot.release()  # a close, never LOCK_UN (verify-slot.py's contract)
         if added:
             git(os.path.expanduser(args.repo), "worktree", "remove", "--force", str(tree))
             git(os.path.expanduser(args.repo), "worktree", "prune")
         if rc is not None:
             _write_rc(rc_path, rc)
     print(f"verify: rc={rc} (log {log_path})")
+    if rc == "noslot":
+        return 75
     return rc if isinstance(rc, int) and 0 <= rc <= 255 else 1
 
 
@@ -1346,6 +1437,10 @@ def main(argv=None):
     vf.add_argument("--verifier", required=True)
     vf.add_argument("--repo", default=None)
     vf.add_argument("--detach-at", default=None, type=_sha)
+    vf.add_argument("--slots", default=None, type=int, help="the machine's verify slots (rollouts.toml verify_slots); "
+                    "with --slot-wait, wait for one first (verify-slot.py, p23-4)")
+    vf.add_argument("--slot-wait", default=None, type=float, help="seconds to wait for a verify slot (verify-timeout's "
+                    "slotWait); none in time is rc `noslot`, exit 75")
 
     pu = sub.add_parser("push", help="a plain push of the tree's merge commit; the read-back must equal it")
     pu.add_argument("--repo", required=True)

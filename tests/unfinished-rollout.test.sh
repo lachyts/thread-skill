@@ -17,6 +17,10 @@
 #           refused by `next`, reported by `status` and the check, until a completed supersede closes it.
 #   I8      § 0's interrupted finish after step 6's carry already ran still prints the prior's `order` lines (p17-2)
 #   R1-R4   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031)
+#   S1-S13  shapes (ADR 0040, p24-2): the parallel check skips serial notes and refuses a run on a place a live serial
+#           chain writes, before any supersede (S2c), never a clone root beside an in-place chain (S13, ADR 0042); the serial check (`--shape serial --surface <token>...`) refuses a
+#           chain over a live chain's surface or an unfinished parallel rollout's Project root, supersedes nothing,
+#           and names whose note it is in each remedy; tokens compare literally (realpath and the vault mapping only)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them) and a stub gh.
@@ -461,6 +465,182 @@ chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "refuse ro-q|3" "C27 control: once it has run it is an ordinary running rollout"
 hasnt "$err" "is incomplete" "C27 control: … never judged incomplete"
 
+# ── S1-S12: shapes (ADR 0040) ─────────────────────────────────────────────────────────────────────────
+# mkser <path under $T> [frontmatter lines...] — a serial rollout note (`shape: serial`, no Project root) at status
+# $ST (default open); its surfaces: come among the frontmatter lines
+mkser() {
+  local f="$T/$1"; shift
+  mkdir -p "$(dirname "$f")"
+  { printf -- '---\ntags: [task, rollout]\nstatus: %s\nprotocol_version: 5\nshape: serial\n' "${ST:-open}"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n## Notes\n\nA chain.\n'; } > "$f"
+}
+chs() { chk --shape serial "$@"; }   # chs [args...] — the serial check
+OTHER='projects: ["[[Other]]"]'
+
+scen s1
+mkrepo "$S/other" https://github.com/demo/other.git
+mkser ser.md "$DEMO" 'surfaces:' "  - \"repo:$S/other\""
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "none|0" "S1: a serial note on another checkout is not this parallel check's"
+hasnt "$err" "no Project root line" "S1: … and never WARNs for its missing Project root"
+
+for c in "eq /repo" "up " "in /repo/sub"; do
+  set -- $c; scen "s2-$1"; v="$S${2:-}"
+  mkser ser.md "$DEMO" "surfaces: [\"repo:$v\"]"
+  chk --repo "$R" --project Demo --regenerate
+  ok "$out|$rc" "refuse ser|3" "S2: a serial note whose repo: is \$S${2:-} (equal to, containing or inside --repo) refuses"
+  has "$err" "[[ser]] (Demo; never started) is a serial chain that writes repo:$v and owns that place (ADR 0040)" "S2: … with the owns-it line"
+done
+
+scen s2b
+mkser ser.md "$DEMO"
+chk --repo "$R" --project Demo
+ok "$out|$rc" "refuse ser|3" "S2b: a serial note with no surfaces: reads as any and refuses"
+has "$err" "WARN: ser: no surfaces: read as any" "S2b: … with the read-as-any WARN"
+mkser ser.md "$DEMO" 'surfaces: ["bogus:x"]'
+chk --repo "$R" --project Demo
+ok "$out|$rc" "refuse ser|3" "S2b: a serial note with a malformed token refuses"
+has "$err" "WARN: ser: surfaces: bogus:x is not a surface token" "S2b: … naming the token"
+has "$err" ": read as any" "S2b: … read as any"
+
+scen s2c
+mkro ro-p.md "$R" "$DEMO"
+mkser ser.md "$DEMO" "surfaces: [\"repo:$R\"]"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse ser|3" "S2c: this project's eligible parallel note plus an overlapping serial chain, --regenerate: refuse the chain"
+hasnt "$out" "supersede" "S2c: … never supersede"
+rm "$T/ser.md"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "supersede ro-p|0" "S2c control: without the chain the same run supersedes"
+
+scen s3
+mkro ro-p.md "$R" "$DEMO" "$PAUSED" 'shape: parallel'
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "supersede ro-p|0" "S3: an explicit shape: parallel reads like no key"
+mkro ro-p.md "$R" "$DEMO" "$PAUSED" 'shape: "Parallel"  # ADR 0040'
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc|$err" "supersede ro-p|0|" "S3: … quoted, capitalised and commented, with no WARN"
+
+scen s4
+mkser theirs.md "$OTHER" 'surfaces: ["ext:cms"]'
+chs --surface ext:CMS --project Demo
+ok "$out|$rc" "refuse theirs|3" "S4: a serial check against another project's overlapping chain refuses"
+has "$err" "[[theirs]] (Other; never started) is a live serial chain whose surface ext:cms overlaps this chain's ext:CMS" "S4: … naming the pair"
+chs --surface ext:dns --project Demo
+ok "$out|$rc" "none|0" "S4: a disjoint chain prints none"
+chs --surface vault:Work/A --surface ext:dns --project Demo
+ok "$out|$rc" "none|0" "S4: a chain with no repo: token is checked on its other tokens"
+
+scen s5
+mkser c.md "$DEMO" 'surfaces: ["ext:cms"]'; mkt t1.md c done; mkt t2.md c done
+ST=done mkser d.md "$DEMO" 'surfaces: ["ext:cms"]'
+ST=dropped mkser dr.md "$DEMO" 'surfaces: ["ext:cms"]'
+mkser Archive/ar.md "$DEMO" 'surfaces: ["ext:cms"]'
+chs --surface ext:cms --project Demo
+ok "$out|$rc" "none|0" "S5: complete, done, dropped and archived chains are not live"
+has "$err" "WARN: c: every task merged but its completion ceremony never ran" "S5: … the complete one with the ceremony WARN"
+
+for c in "eq /repo" "up " "in /repo/sub"; do
+  set -- $c; scen "s6-$1"; v="$S${2:-}"
+  mkro ro-x.md "$R" "$OTHER"
+  chs --surface "repo:$v" --project Demo
+  ok "$out|$rc" "refuse ro-x|3" "S6: a serial check against a parallel rollout whose root meets repo:\$S${2:-} refuses"
+  has "$err" "[[ro-x]] (Other; never started) is an unfinished parallel rollout whose Project root $R (repo:$R) overlaps this chain's repo:$v" "S6: … naming the pair"
+done
+chs --surface any --project Demo
+ok "$out|$rc" "refuse ro-x|3" "S6: any refuses too"
+chs --surface "repo:$S/elsewhere" --project Demo
+ok "$out|$rc" "none|0" "S6 control: a disjoint repo: prints none"
+mkro ro-n.md - "$OTHER"
+chs --surface "repo:$S/elsewhere" --project Demo
+has "$err" "WARN: ro-n: no Project root line: not counted" "S6: a parallel note with no Project root WARNs and is not counted"
+
+scen s7
+mkrepo "$S/other" https://github.com/demo/other.git
+mkro ro-p.md "$S/other" "$DEMO" "$PAUSED"
+chs --surface ext:x --project Demo --regenerate
+ok "$out|$rc" "none|0" "S7: a serial run with --regenerate never supersedes"
+has "$err" "WARN: a serial run supersedes nothing (ADR 0040, p24-2): --regenerate ignored" "S7: … and says so"
+uerr() {  # uerr <label> <check args...>
+  local label="$1"; shift
+  python3 "$CHECK" check --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?
+  ok "$rc|$(cat "$S.out")|$(wc -l < "$S.err" | tr -d ' ')" "2||1" "S7: $label exits 2, no stdout, one stderr line"
+  has "$(cat "$S.err")" "unfinished-rollout:" "S7: $label names the script"
+}
+uerr "--surface with parallel" --repo "$R" --project Demo --surface ext:x
+uerr "serial without --surface" --shape serial --project Demo
+uerr "serial with --repo" --shape serial --repo "$R" --surface ext:x --project Demo
+for bad in repo:relative "repo:~/x" bogus:x; do uerr "a malformed --surface $bad" --shape serial --surface "$bad" --project Demo; done
+uerr "parallel without --repo" --project Demo
+uerr "an unknown --shape" --shape diagonal --repo "$R" --project Demo
+
+scen s8
+mkro ro-p.md "$R" "$DEMO" "$PAUSED" 'shape: diagonal'
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "supersede ro-p|0" "S8: an unknown shape reads as parallel"
+has "$err" "WARN: ro-p: unknown shape diagonal: read as parallel" "S8: … with a WARN"
+
+scen s9
+mkser mine.md "$DEMO" 'surfaces: ["ext:cms"]'
+mkser theirs.md "$OTHER" 'surfaces: ["ext:cms"]'
+mkser inc.md "$DEMO" 'incomplete: true' 'surfaces: ["ext:inc"]'
+mkser ran.md "$DEMO" 'surfaces: ["ext:ran"]'; mkt r1.md ran in_progress 'owner: leg-1'
+chs --surface ext:cms --project Demo
+ok "$out|$rc" "refuse mine,theirs|3" "S9: two overlapping chains refuse both"
+has "$err" "[[mine]] (Demo; never started)" "S9: this project's never-started chain, with its project"
+has "$err" "run it (\`/thread:execute [[mine]]\` from its first row's launch) or stamp [[mine]] \`status: dropped\` to free its tasks (step 1 then takes them again), then re-run" "S9: … gets the run-or-drop remedy"
+has "$err" "[[theirs]] (Other; never started)" "S9: another project's never-started chain, with its project"
+has "$err" "stamp [[theirs]] \`status: dropped\`" "S9: … gets the drop remedy too"
+chs --surface ext:inc --project Demo
+has "$err" "inc is incomplete: it carries incomplete: true" "S9: an incomplete chain gets its incomplete line"
+has "$err" "stamp [[inc]] \`status: dropped\`" "S9: … plus the drop remedy"
+chs --surface ext:ran --project Demo
+has "$err" "[[ran]] (Demo; has run: " "S9: a chain whose task carries owner: has run"
+has "$err" "wait for it to finish, or /thread:status then /thread:repair" "S9: … and gets wait-or-status-repair"
+hasnt "$err" "status: dropped" "S9: … never the drop remedy"
+mkser legged.md "$DEMO" 'surfaces: ["ext:legged"]'; printf '\n## Leg log\n\n- 2026-10-20T10:00+00:00 Leg 1 began: leg-1 session s in cc-x from /x\n' >> "$T/legged.md"
+chs --surface ext:legged --project Demo
+has "$err" "[[legged]] (Demo; has run: " "S9: a chain with a ## Leg log and no owners has run"
+hasnt "$err" "status: dropped" "S9: … so it never gets the drop remedy"
+
+scen s10
+mkser q.md "$DEMO" 'surfaces:' '  - "vault:Work/A, B/x"'
+chs --surface "vault:Work/A, B" --project Demo
+ok "$out|$rc" "refuse q|3" "S10: a --surface with a comma arrives whole and overlaps"
+chs --surface "vault:Work/A" --project Demo
+ok "$out|$rc" "none|0" "S10 control: vault:Work/A does not meet vault:Work/A, B/x"
+
+scen s11
+mkdir -p "$S/plugin/skills/_shared/scripts" "$S/plugin/skills/execute/scripts"
+cp "$CHECK" "$S/plugin/skills/_shared/scripts/"; cp "$RR" "$S/plugin/skills/execute/scripts/"
+python3 "$S/plugin/skills/_shared/scripts/unfinished-rollout.py" check --tasks-dir "$T" --repo "$R" --project Demo > "$S.out" 2> "$S.err"; rc=$?
+ok "$rc|$(cat "$S.out")" "2|" "S11: serial-chains.py unloadable exits 2 with no stdout"
+has "$(cat "$S.err")" "unfinished-rollout: cannot load" "S11: … says so"
+has "$(cat "$S.err")" "serial-chains.py" "S11: … naming serial-chains.py"
+
+scen s12
+mkdir -p "$S/vault/Work/Code"
+mkro ro-v.md "$S/vault/Work/Code" "$OTHER"
+chs --surface vault:Work --project Demo
+ok "$out|$rc" "refuse ro-v|3" "S12: a parallel rollout rooted in the vault meets a vault: token (the vault mapping)"
+chs --surface vault:Other --project Demo
+ok "$out|$rc" "none|0" "S12 control: a disjoint vault: token passes"
+
+# S13 (ADR 0042, an invariant pin: surface tokens compare `repo:<realpath>` literally, so this held at c096776): a
+# rollout clone beside its in-place checkout. A clone root never overlaps an in-place serial chain, so the two coexist
+# as peers; a chain that claims repo:<clone>, or a pre-P26 root in place, still refuses.
+scen s13
+mkrepo "$S/repo-rollout" https://github.com/demo/repo.git
+mkser ser.md "$DEMO" "surfaces: [\"repo:$R\"]"
+chk --repo "$S/repo-rollout" --project Demo
+ok "$out|$rc" "none|0" "S13: --repo <clone> against an in-place serial chain → none: the two coexist"
+chk --repo "$R" --project Demo
+ok "$out|$rc" "refuse ser|3" "S13: --repo <in-place> against the same chain → refuse (a pre-P26 root)"
+mkser ser.md "$DEMO" "surfaces: [\"repo:$S/repo-rollout\"]"
+chk --repo "$S/repo-rollout" --project Demo
+ok "$out|$rc" "refuse ser|3" "S13: --repo <clone> against a chain that claims repo:<clone> → refuse"
+
 # ── K1-K4: carry ──────────────────────────────────────────────────────────────────────────────────────
 scen k
 mkro $P.md "$R" "$DEMO" "$PAUSED"
@@ -687,7 +867,12 @@ CH=""
 # sit only inside the names), the bare-slug p33-1 / p30-1 line (its one cue word sits inside a bare slug),
 # p30-2b after p30-1 (p30-2b is no short id: p30-2 runs on into a letter), the HTML comment (its `-->` is no
 # arrow), "Kept apart in review" (no cue) and the fenced line. The carried demo-p30-10-sweep keeps every
-# p30-1 from resolving to it: p30-10 is never p30-1.
+# p30-1 from resolving to it: p30-10 is never p30-1. A fractional phase's short id resolves (vault-grammar.md:
+# `p<PHASE_N>-<M>`), matched literally: the carried demo-p305-1-trap would make p3.5-1 ambiguous (no line) if
+# the `.` matched any character. Each malformed id sits beside one that resolves, so a matcher that let it
+# name a task would print a line: p3.50-2 after p3.5-1 gives none (p3.50 is not p3.5, so p3.50-2 never names
+# demo-p3.5-2-wire), nor does p3.5-2 after p3.5.1-1 (p3.5.1 is no phase number, so p3.5.1-1 never names the
+# carried demo-p3.5.1-1-deep).
 scen k7
 BODY='**The lead'"'"'s rules for this run:**
 - Dependencies: p30-2 after p30-1; p35-3 after p37-4; p37-4 after p36-2, p36-6; p39-2 after p39-1.
@@ -698,6 +883,9 @@ BODY='**The lead'"'"'s rules for this run:**
 - demo-p30-2-restart after demo-p30-1-ledger
 - demo-p33-1-then-the-rest and demo-p30-1-ledger share one card.
 - p30-2b after p30-1.
+- p3.5-2 after p3.5-1.
+- p3.50-2 after p3.5-1.
+- p3.5-2 after p3.5.1-1.
 <!-- p30-1 p30-2 -->
 - Kept apart in review: [[demo-p30-1-ledger]], [[demo-p36-2-ritual]]
 
@@ -706,7 +894,9 @@ p36-6 after p35-3
 ```' mkro $P.md "$R" "$DEMO" "$PAUSED"
 for t in demo-p30-1-ledger demo-p30-2-restart demo-p30-10-sweep demo-p35-3-voice demo-p36-2-ritual demo-p36-6-raycast \
   demo-p38-5-column demo-p38-6-column-reads demo-p32-4-turn-opened-after-a-restart demo-p33-1-then-the-rest demo-p40-1-probe \
-  side-p40-1-probe demo-p40-2-fix demo-p41-3-conductor; do mkt $t.md $P open; done
+  side-p40-1-probe demo-p40-2-fix demo-p41-3-conductor demo-p3.5-1-probe demo-p3.5-2-wire demo-p305-1-trap \
+  demo-p3.5.1-1-deep; do
+  mkt $t.md $P open; done
 mkt demo-p39-1-sessions.md $P in_progress 'owner: execute-old'
 mkt demo-p39-2-asides.md $P in_progress 'owner: execute-old'
 mkt demo-p37-4-settings.md $P done
@@ -715,7 +905,8 @@ ORDER="order demo-p30-2-restart,demo-p30-1-ledger: Dependencies: p30-2 after p30
 order demo-p36-2-ritual,demo-p36-6-raycast: p37-4 after p36-2, p36-6
 order demo-p38-5-column,demo-p38-6-column-reads: [[demo-p38-5-column]] → [[demo-p38-6-column-reads]]
 order demo-p41-3-conductor,demo-p40-2-fix: p41-3 needs p40-2's measured answers.
-order demo-p30-2-restart,demo-p30-1-ledger: demo-p30-2-restart after demo-p30-1-ledger"
+order demo-p30-2-restart,demo-p30-1-ledger: demo-p30-2-restart after demo-p30-1-ledger
+order demo-p3.5-2-wire,demo-p3.5-1-probe: p3.5-2 after p3.5-1."
 before=$(sums)
 carry --from "$T/$P.md" --dry-run
 ok "$rc" 0 "K7: the preview exits 0"
@@ -727,10 +918,13 @@ hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p33-1" "K7: … nor from 
 hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p39" "K7: … nor from a clause whose tasks have all started"
 hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p30-10" "K7: … a p30-1 never names demo-p30-10-sweep"
 hasnt "$(printf '%s\n' "$out" | grep '^order ')" "p30-2b" "K7: … nor does p30-2b name demo-p30-2-restart"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p305" "K7: … a fractional p3.5-1 is matched literally, never demo-p305-1-trap"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "p3.50" "K7: … p3.50-2 never names demo-p3.5-2-wire (p3.50 is not p3.5)"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "p3.5.1" "K7: … nor p3.5.1-1 demo-p3.5.1-1-deep (p3.5.1 is no phase number)"
 hasnt "$(printf '%s\n' "$out" | grep '^order ')" "<!--" "K7: … and an HTML comment's --> is no arrow"
 ok "$(sums)" "$before" "K7: … and the preview writes nothing"
 carry --from "$T/$P.md" --to "$T/$N.md"
-ok "$rc|$(printf '%s\n' "$out" | tail -1)" "0|[written: 16]" "K7: carry exits 0, every carried note written"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)" "0|[written: 20]" "K7: carry exits 0, every carried note written"
 ok "$(printf '%s\n' "$out" | grep '^order ')" "$ORDER" "K7: … printing the same order lines"
 # A re-run while P is still open (the window § 0's interrupted finish meets: step 6's carry ran, the run died
 # before step 7.5) reads P's prose against the tasks already on N, so it prints the same lines.

@@ -9,6 +9,7 @@ cd "$(dirname "$0")/.."
 unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR, GIT_CONFIG_PARAMETERS, …)
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+export THREAD_VERIFY_SLOTS_DIR="$tmp/verify-slots"   # the wrapped verifier's verify slots (p23-4): a temp pool
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master "$@"; }
 
 # ---- shells: bash always; zsh mandatory on macOS, else run when installed and SKIP visibly --------------
@@ -78,6 +79,23 @@ for sh in "${shells[@]}"; do
   got=$(cd "$tmp/repo" && env GIT_DIR="$tmp/decoy/.git" $sh -c "$cmd" 2>/dev/null)
   ok "$got" "$want" "$n: the rendered verifier runs against the checkout, not an inherited GIT_DIR"
   got=$(cd "$tmp/repo" && env GIT_DIR="$tmp/decoy/.git" GIT_WORK_TREE="$tmp/decoy" $sh -c "$cmd" 2>/dev/null)
+  ok "$got" "$want" "$n: … nor an inherited GIT_DIR + GIT_WORK_TREE"
+done
+
+# ---- p23-4: the wrapped verifier (args.verifySlot), executed under an inherited GIT_DIR ------------------------
+VSP="$(pwd -P)/skills/execute/scripts/verify-slot.py"
+wcmd=$(node --input-type=module -e "
+  import { loadEngine } from './tests/lib/engine.mjs'
+  const T = loadEngine(['ralphLoop'])
+  const l = T.ralphLoop('git rev-parse --absolute-git-dir', 1, undefined, { script: process.argv[1], slots: 1 }).split('\n').find((x) => x.startsWith('- Verifier: '))
+  process.stdout.write(l.slice('- Verifier: '.length))
+" "$VSP")
+has "$wcmd" "unset \$(git rev-parse --local-env-vars 2>/dev/null); python3 '$VSP' run --slots 1 -- bash -c 'git rev-parse --absolute-git-dir'" "the wrapped verifier starts with the scrub"
+for sh in "${shells[@]}"; do
+  n=$(basename "${sh%% *}")
+  got=$(cd "$tmp/repo" && env GIT_DIR="$tmp/decoy/.git" $sh -c "$wcmd" 2>/dev/null)
+  ok "$got" "$want" "$n: the wrapped verifier runs against the checkout, not an inherited GIT_DIR"
+  got=$(cd "$tmp/repo" && env GIT_DIR="$tmp/decoy/.git" GIT_WORK_TREE="$tmp/decoy" $sh -c "$wcmd" 2>/dev/null)
   ok "$got" "$want" "$n: … nor an inherited GIT_DIR + GIT_WORK_TREE"
 done
 

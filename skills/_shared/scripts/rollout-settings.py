@@ -16,6 +16,8 @@ of the file format:
     auto_retries = 2             # execute's automatic retries of a set-aside task (p16-4, ADR 0033); 0 disables
     spend_approval_usd = 50      # the standing approval (ADR 0034): a spend gate whose total exposure is at most
                                  # this many US dollars passes without a person; 0 (the built-in) is off
+    verify_slots = 2             # machine-wide (p23-4): at most this many verifier suites run at once across every
+                                 # rollout on this machine (execute's verify-slot.py); [defaults] only
 
     [guardrails]                 # the Reflection's bounds, machine-wide only
     tokens_per_merge_pct = 25    # tokens per merge may rise at most +25%
@@ -27,39 +29,58 @@ of the file format:
                                  # whose Slot or lane holding overlaps the scored window, so an overnight run still
                                  # lands by morning
 
+    [notify]                     # machine-wide only (ADR 0038 d3)
+    ntfy_topic = "thread-needs-you"  # the ntfy topic execute's needs-you push falls back to; unset = no fallback
+
     [repo."lachyts/thread-skill"] # one repo, keyed by its GitHub origin's owner/name
     parallel_ceiling = 5
 
-The only top-level keys are `defaults`, `guardrails` and `repo`. A repo table holds only the six rollout
-keys (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries` and `spend_approval_usd`). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
+The only top-level keys are `defaults`, `guardrails`, `notify` and `repo`. A repo table holds every rollout key but
+`verify_slots` (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries`, `spend_approval_usd` and
+`verify_slots`; MACHINE_ONLY: `verify_slots`, which is machine-wide and refused under a `[repo."o/r"]` label). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
+
+`[notify]` holds only `ntfy_topic` (NOTIFY_KEYS), machine-wide like `[guardrails]`: in `[defaults]` or a repo table it
+is an unknown key. Two scripts read it, both through the importable resolve(), in process: execute's
+skills/execute/scripts/ntfy-push.py publishes to the topic (§ 6.5 *The ntfy fallback*), and reflect's tune.py refuses
+an edit whose result resolves another `[notify]` (a Tuning never touches the table). The CLI prints only whether a
+topic is set (see Output), never the topic: on ntfy.sh a topic is its own read and publish credential. Install a
+release that knows the table before writing it: an older rollout-settings.py refuses an unknown top-level table, and
+every rollout's settings with it.
 
 Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/name` by land.sh's slug rule
 (`[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+`, a name that is not all dots), never ending `.git`. It is
 matched, ignoring case, against `land.sh --origin-slug <--repo>`: the clone's local `git remote get-url
 origin` (no network) in any of the three GitHub URL forms, with a trailing `/` and `.git` stripped. So a
-self-rollout's separate clone resolves the same as its primary checkout. Two repo keys equal ignoring case
+rollout clone (ADR 0042) resolves the same as its in-place checkout. Two repo keys equal ignoring case
 are refused as a duplicate. land.sh is run only when the file holds at least one repo table and `--repo`
 was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole on expiry).
 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
-`file:guardrails` or `built-in`. Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
-max_plan_rounds 3, auto_retries 2, spend_approval_usd 0; guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
+`file:guardrails` or `built-in`; `ntfy_topic`'s are `file:notify` or `built-in` (resolve()'s value null: no topic). Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
+max_plan_rounds 3, auto_retries 2, spend_approval_usd 0, verify_slots 2; guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
 a heuristic: Lachy's rollouts.toml sets the real bound). `auto_retries` is no Tuning key:
 schedule does not stamp it and a Reflection never proposes it; execute's `lead-integrate.py inputs` and
 `reconcile-rollout.py auto-retry` resolve it themselves (p16-4). Nor is `spend_approval_usd` (ADR 0034): schedule
 shows it but never stamps it on a rollout, and `reconcile-rollout.py approve-gates --standing` resolves it itself (task
 `spend_approval_usd:`, then rollout, then this file, then the built-in 0, which is off: the approval lives in this
-file, never in the skills, so a fresh install approves nothing). Write the key only once the installed plugin knows
-it: an older rollout-settings.py refuses an unknown key, and every rollout's settings with it.
+file, never in the skills, so a fresh install approves nothing). Nor is `verify_slots` (p23-4): machine-wide, so
+`[defaults]` only; never stamped on a rollout; execute's `reconcile-rollout.py verify-timeout` reads it at each loop
+entry through resolve(repo=None), which validates the whole file. Write a key only once the installed plugin knows
+it: an older rollout-settings.py refuses an unknown key, and every rollout's settings with it; and a refused file
+now halts every rollout on this machine at its next entry (execute's `verify-timeout`), stamped or not.
 
 Validation (ADR 0016: anything unknown or wrong is refused, never dropped):
 - an unknown top-level key or table key, `defaults` or `guardrails` that is not a table, a `repo` that is
   not a table, a value under `repo` that is not a table (named by its key: `[repo."o/r"] must be a table`);
-- a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys, 0 for `auto_retries` and
-  `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
+- a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys and `verify_slots`, 0 for
+  `auto_retries` and `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
+- a MACHINE_ONLY key (`verify_slots`) in a `[repo."o/r"]` table;
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
+- a `notify` that is not a table, an unknown key under it, or an `ntfy_topic` that is not an ntfy topic (a string of
+  1 to 64 of A-Z, a-z, 0-9, `-` and `_`, TOPIC_RE: an empty string, a URL, a boolean or a number is refused). A refused
+  topic string is described, never echoed, so a near-miss topic never lands in a transcript;
 - a bad or case-duplicate repo key.
 No file (nothing at the path, a missing directory on the way, a plain file as a step on the way) gives the
 built-ins, and so does an empty or comment-only file. The file is read by ladder.py's read_toml(), so a
@@ -74,8 +95,13 @@ Output. Exit 0 and one JSON line on stdout:
     {"path": "<expanded path>", "file": true|false, "repo": "<owner/name>"|null,
      "settings": {"parallel_ceiling": {"value": 4, "source": "built-in"}, "max_review_rounds": {...},
                   "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...},
-                  "spend_approval_usd": {...}},
-     "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...}}
+                  "spend_approval_usd": {...}, "verify_slots": {...}},
+     "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...},
+     "notify": {"ntfy_topic": {"set": true|false, "source": "file:notify"|"built-in"}}}
+
+`notify` is redacted (redacted()): `set` says whether a topic resolved, and the topic itself is never printed, since
+schedule, execute, status and repair run this CLI in a transcript and the Reflection keeps its JSON in a scratch file.
+resolve() returns the same object with `"value": "<topic>"|null` in place of `set`, for the in-process readers above.
 
 `repo` is the origin's owner/name as land.sh printed it (case kept), or null when no repo table could apply:
 no `--repo`, no file, no repo table, or no GitHub origin (no repo, no origin, another host: land.sh exit 4).
@@ -86,10 +112,11 @@ and this python has none. On failure stdout is empty and stderr carries one line
 `rollout-settings: <path>:<line>: <reason>`, `rollout-settings: <path>: <reason>` when no line applies, or
 `rollout-settings: --repo <p>: <reason>`.
 
-Importable: resolve(repo=None, path=None), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
-run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries` and
-`spend_approval_usd`: every key a `settings` object holds), MINIMUM, GUARDRAIL_KEYS, ORIGIN_TIMEOUT, default_path(), SettingsError(reason,
-line=None, code=2, subject=None).
+Importable: resolve(repo=None, path=None), redacted(out) (resolve()'s object as the CLI prints it), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
+run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`,
+`spend_approval_usd` and `verify_slots`: every key a `settings` object holds), MACHINE_ONLY, MINIMUM, GUARDRAIL_KEYS,
+NOTIFY_KEYS, NOTIFY_BUILT_IN, TOPIC_RE, ORIGIN_TIMEOUT, default_path(), SettingsError(reason, line=None, code=2,
+subject=None).
 """
 import argparse
 import importlib.util
@@ -106,22 +133,31 @@ LAND_SH = os.path.join(HERE, "land.sh")
 
 # The four Tuning keys (a Reflection proposes them; run_record.py's TUNING_KEYS is pinned to this tuple).
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
-# Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget and
-# the standing approval's limit in US dollars (ADR 0034; neither is Reflection-tunable).
-SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd")
+# Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget,
+# the standing approval's limit in US dollars (ADR 0034) and the machine's verify slots (p23-4); none of the three is
+# Reflection-tunable.
+SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots")
+# Machine-wide keys: valid under [defaults] only, refused in a [repo."o/r"] table (a verify slot is shared by every
+# rollout on the machine, whatever its repo).
+MACHINE_ONLY = ("verify_slots",)
 BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2,
-            "spend_approval_usd": 0}
+            "spend_approval_usd": 0, "verify_slots": 2}
 # The least valid value of each rollout key: a Tuning key is >= 1; `auto_retries: 0` disables automatic retries;
 # `spend_approval_usd: 0` turns the standing approval off.
 MINIMUM = {"parallel_ceiling": 1, "max_review_rounds": 1, "max_iterations": 1, "max_plan_rounds": 1, "auto_retries": 0,
-           "spend_approval_usd": 0}
+           "spend_approval_usd": 0, "verify_slots": 1}
 # review_churn_pct (p21-3, ADR 0037 d1): Review churn's absolute bound, a non-negative number like the rates.
 # hours_per_task (p21-2): the Throughput Guardrail's absolute bound, skills/reflect/scripts/score.py's built-in too.
 GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rate_points", "quota_stalls",
                   "review_churn_pct", "hours_per_task")
 GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "conflict_rate_points": 10,
                        "quota_stalls": 0, "review_churn_pct": 40, "hours_per_task": 1.5}
-TABLES = ("defaults", "guardrails", "repo")
+# [notify] (ADR 0038 d3): machine-wide, read in process by execute's ntfy-push.py and reflect's tune.py; no topic (None)
+# means no ntfy fallback. The CLI prints only whether it is set (redacted()).
+NOTIFY_KEYS = ("ntfy_topic",)
+NOTIFY_BUILT_IN = {"ntfy_topic": None}
+TOPIC_RE = re.compile(r"[-_A-Za-z0-9]{1,64}\Z")  # ntfy's own topic rule
+TABLES = ("defaults", "guardrails", "notify", "repo")
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.
@@ -292,8 +328,20 @@ def _describe(value):
     return "a date or time"
 
 
+def _topic_problem(value):
+    """What a refused ntfy_topic is, never the string itself (a near-miss topic stays out of every transcript)."""
+    if not isinstance(value, str):
+        return _describe(value)
+    if not value:
+        return "an empty string"
+    if len(value) > 64:
+        return "a string of %d characters" % len(value)
+    return "a string holding another character"
+
+
 def _validate(text, doc, path):
-    """{"defaults": {...}, "guardrails": {...}, "repo": {slug: {...}}} from a parsed file, or SettingsError."""
+    """{"defaults": {...}, "guardrails": {...}, "notify": {...}, "repo": {slug: {...}}} from a parsed file, or
+    SettingsError."""
     idx = _Lines(text)
 
     def refuse(reason, at):
@@ -301,7 +349,7 @@ def _validate(text, doc, path):
 
     for key in doc:
         if key not in TABLES:
-            refuse("unknown top-level key %s (rollouts.toml holds only [defaults], [guardrails] and "
+            refuse("unknown top-level key %s (rollouts.toml holds only [defaults], [guardrails], [notify] and "
                    "[repo.\"owner/name\"] tables)" % json.dumps(key), (key,))
 
     def rollout_table(table, label, at):
@@ -309,11 +357,13 @@ def _validate(text, doc, path):
             if key not in SETTING_KEYS:
                 refuse("%s: unknown key %s (a rollout table holds %s)" % (label, json.dumps(key), ", ".join(SETTING_KEYS)),
                        at + (key,))
+            if key in MACHINE_ONLY and at[0] == "repo":
+                refuse("%s %s is machine-wide: set it under [defaults]" % (label, key), at + (key,))
             if isinstance(value, bool) or not isinstance(value, int) or value < MINIMUM[key]:
                 refuse("%s %s must be an integer >= %d, got %s" % (label, key, MINIMUM[key], _describe(value)), at + (key,))
         return dict(table)
 
-    out = {"defaults": {}, "guardrails": {}, "repo": {}}
+    out = {"defaults": {}, "guardrails": {}, "notify": {}, "repo": {}}
     defaults = doc.get("defaults", {})
     if not isinstance(defaults, dict):
         refuse("defaults must be a table ([defaults]), got %s" % _describe(defaults), ("defaults",))
@@ -337,6 +387,18 @@ def _validate(text, doc, path):
               or (isinstance(value, float) and not math.isfinite(value))):
             refuse("[guardrails] %s must be a non-negative number, got %s" % (key, _describe(value)), at)
     out["guardrails"] = dict(guardrails)
+
+    notify = doc.get("notify", {})
+    if not isinstance(notify, dict):
+        refuse("notify must be a table ([notify]), got %s" % _describe(notify), ("notify",))
+    for key, value in notify.items():
+        at = ("notify", key)
+        if key not in NOTIFY_KEYS:
+            refuse("[notify]: unknown key %s ([notify] holds %s)" % (json.dumps(key), ", ".join(NOTIFY_KEYS)), at)
+        if not isinstance(value, str) or not TOPIC_RE.match(value):
+            refuse("[notify] ntfy_topic must be an ntfy topic (1 to 64 of A-Z, a-z, 0-9, - and _), got %s"
+                   % _topic_problem(value), at)
+    out["notify"] = dict(notify)
 
     repos = doc.get("repo", {})
     if not isinstance(repos, dict):
@@ -420,7 +482,8 @@ def resolve(repo=None, path=None):
         read = ladder.read_toml(path)
     except ladder.LadderError as e:
         raise SettingsError(e.reason, line=e.line, code=e.code, subject=path)
-    tables = _validate(read[0], read[1], path) if read is not None else {"defaults": {}, "guardrails": {}, "repo": {}}
+    tables = (_validate(read[0], read[1], path) if read is not None
+              else {"defaults": {}, "guardrails": {}, "notify": {}, "repo": {}})
 
     slug, overrides = None, {}
     if repo is not None and tables["repo"]:
@@ -442,7 +505,22 @@ def resolve(repo=None, path=None):
             guardrails[key] = {"value": tables["guardrails"][key], "source": "file:guardrails"}
         else:
             guardrails[key] = {"value": GUARDRAILS_BUILT_IN[key], "source": "built-in"}
-    return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails}
+    notify = {}
+    for key in NOTIFY_KEYS:
+        if key in tables["notify"]:
+            notify[key] = {"value": tables["notify"][key], "source": "file:notify"}
+        else:
+            notify[key] = {"value": NOTIFY_BUILT_IN[key], "source": "built-in"}
+    return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails,
+            "notify": notify}
+
+
+def redacted(out):
+    """resolve()'s object as the CLI prints it: each [notify] value replaced by whether it is set, so the topic (a read
+    and publish credential on ntfy.sh) never reaches stdout or a transcript. The rest is resolve()'s, unchanged."""
+    view = dict(out)
+    view["notify"] = {key: {"set": v["value"] is not None, "source": v["source"]} for key, v in out["notify"].items()}
+    return view
 
 
 class _Parser(argparse.ArgumentParser):
@@ -461,7 +539,7 @@ def main(argv):
     except SettingsError as e:
         sys.stderr.write("rollout-settings: %s\n" % e)
         return e.code
-    sys.stdout.write(json.dumps(out) + "\n")
+    sys.stdout.write(json.dumps(redacted(out)) + "\n")
     return 0
 
 

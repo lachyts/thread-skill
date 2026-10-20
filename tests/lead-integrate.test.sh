@@ -14,9 +14,18 @@
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
 #   the bootstrap, the race tree   C18 no relaunch loop   C19 an Integration set-aside re-enters   C20 the last
 #   task rejected   C21 plan, the approved plan for the two launches   C22 inputs --row, the integrate call's record
-#   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1). C10 is the landed list with a commit pushed without a PR (`unlisted`), and
-#   C11 also pins inputs --row's ports of historyError, rungRecordError and PR_URL.
-# Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0.
+#   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1)   C23 a
+#   signal while a step starts, and the step's and verify's own signal mask (p22-2). C10 is the landed list with
+#   a commit pushed without a PR (`unlisted`), and C11 also pins inputs --row's ports of historyError,
+#   rungRecordError and PR_URL. The verify slots (p23-4, verify-slot.py): C24 the slot wait is excluded from the
+#   deadline   C25 no slot within --slot-wait → rc `noslot`, exit 75, the verifier never ran, the race tree removed
+#   C26 TERM during the wait   C27 a lone --slots or --slot-wait   C28 a SIGKILL of verify: its guard ends the
+#   step and frees the slot, no rc   C17s C17's deadline and TERM arms slotted   C23s C23's TRAP and LATE arms
+#   slotted (the LATE signal lands while the guard starts). C29 prepare refuses a note with no integrating: (exit 1,
+#   nothing fetched, deleted, stashed or merged)   C29b the 2026-10-19 slip: merge-task's exit 3 after an integrate
+#   call's integrated row, re-run with no mark-integrating (p26-1).
+# Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0; the verify slots in a temp pool
+# (tests/lib/merge-task-env.sh exports THREAD_VERIFY_SLOTS_DIR).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -27,6 +36,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 
 tmp=$(cd "$(mktemp -d)" && pwd -P); trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
 . tests/lib/merge-task-env.sh
+export THREAD_VERIFY_SLOT_POLL=0.1
 lacks() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
 
 LI="$root/skills/execute/scripts/lead-integrate.py"
@@ -47,7 +57,8 @@ else echo "SKIP - zsh arm: zsh not installed on this $(uname) runner"; fi
 # ---- fixtures -------------------------------------------------------------------------------------------
 # fx <name>: a fresh scenario. Origin (MT_SRV) holds master (base.txt, a.txt) and the task branch $BR (one
 # commit: a.txt line 1 and t.txt — H0, the approved head); p is a pusher clone; R the project checkout; WT the
-# task tree as the engine's setup leaves it; V the vault: ro.md and $SLUG.md (review, pr: #5, ready:).
+# task tree as the engine's setup leaves it; V the vault: ro.md and $SLUG.md (review, pr: #5, ready:, and the
+# integrating: step 3's mark-integrating stamps before every prepare, p26-1).
 fx() {
   echo "== $1"
   F="$tmp/$1"; mkdir -p "$F"
@@ -68,7 +79,7 @@ fx() {
   g -C "$R" worktree add -q "$WT" -b "$BR" "origin/$BR" >/dev/null 2>&1
   V="$F/vault"; mkdir -p "$V"
   printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 2\n---\n\nProject root: `%s`\n\n## Queue\n\n- [[%s]]\n' "$R" "$SLUG" > "$V/ro.md"
-  printf -- '---\ntags: [task]\nstatus: review\nscope: cross-cutting\nrollout: "[[ro]]"\npr: %s\nready: 2026-10-02T11:00+00:00\nreview_rounds_used: 1\n---\n\n## Notes\n\nt5\n' "$PR" > "$V/$SLUG.md"
+  printf -- '---\ntags: [task]\nstatus: review\nscope: cross-cutting\nrollout: "[[ro]]"\npr: %s\nready: 2026-10-02T11:00+00:00\nintegrating: 2026-10-02T11:30+00:00\nreview_rounds_used: 1\n---\n\n## Notes\n\nt5\n' "$PR" > "$V/$SLUG.md"
 }
 # main <file> <content> [subject]: a commit on origin's master from p; B is the new tip.
 main() {
@@ -135,10 +146,11 @@ else:
     esc = lambda s: s.replace("'", "'\\''")
 if not boot:
     line = re.sub(r""" --bootstrap (['"])<env_bootstrap>\1""", "", line)
-# <verify_timeout> is § 3's per-entry value (p14-2); left literal, the shell would read `<verify_timeout>` as a
-# redirection.
+# <verify_timeout>, <verify_slots> and <slot_wait> are § 3's per-entry values (p14-2, p23-4); left literal, the shell
+# would read them as redirections.
 line = (line.replace("<tree>", tree).replace("<repoPath>", repo).replace("<slug>", slug)
         .replace("<verify_timeout>", os.environ.get("VERIFY_TIMEOUT", "1800"))
+        .replace("<verify_slots>", os.environ.get("VERIFY_SLOTS", "2")).replace("<slot_wait>", os.environ.get("SLOT_WAIT", "60"))
         .replace("<env_bootstrap>", esc(boot)).replace("<verifier>", esc(verifier)))
 print(line)
 PY
@@ -610,6 +622,7 @@ g -C "$WT" fetch -q origin
 g -C "$WT" merge -q --no-ff --no-commit origin/side >/dev/null 2>&1
 printf 'dead integrator edit\n' >> "$WT/base.txt"
 onbranch merge --no-ff --no-edit -m "a dead integrator's pushed merge" origin/side
+python3 "$RR" mark-integrating --tasks "$SLUG" --tasks-dir "$V" >/dev/null   # step 1.4 → step 3: the stamp before prepare
 prep
 ok "$(j "$J" 'd["abortedMerge"]')|$(git -C "$WT" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && echo left || echo none)" "true|none" "C13b: prepare aborts the merge left in progress"
 ok "$(j "$J" 'd["stashed"]')" "integration leftovers $M" "C13b: … stashes the tracked edit"
@@ -726,20 +739,33 @@ fx c17
 # fraction: a rollout runs this suite in several worktrees at once, and a machine-wide pgrep on a bare duration
 # counted their sleepers as this run's survivors (2026-10-15, p20-2: "expected [0] got [4]").
 u=$(printf %07d $$)
-t0=$(date +%s)
-python3 "$LI" verify --tree "$WT" --out "$F/out/v" --timeout 2 --verifier "sleep 3171.$u & sleep 3172.$u; wait" >/dev/null
-el=$(( $(date +%s) - t0 ))
+# Structural, not a stopwatch (p22-1): a rollout at ceiling 4 loads the host to ~150, and the old "within 15 s"
+# bound went red there on correct code. The sleepers sleep 3171 s+, so only verify's kill can end them, and a
+# verify that waited for them could not return before they did: the bounds below (300 s for verify to return or
+# its children to start, 60 s for a killed child to vanish) are generous, never tight, and still fail a verify
+# that waits for its children, or one that leaves a child alive.
+# within <s> <cmd…>: poll <cmd> every 0.1 s until it succeeds (0) or <s> s of wall clock pass (1).
+within() { local end=$((SECONDS + $1)); shift; until "$@" 2>/dev/null; do [ "$SECONDS" -ge "$end" ] && return 1; sleep 0.1; done; }
+gone() { ! kill -0 "$1"; }
+sleepers() { pgrep -f "$1" | wc -l | tr -d ' '; }
+nosleeper() { [ "$(sleepers "$1")" = 0 ]; }
+python3 "$LI" verify --tree "$WT" --out "$F/out/v" --timeout 2 --verifier "sleep 3171.$u & sleep 3172.$u; wait" >/dev/null &
+vp=$!
+if within 300 gone "$vp"; then st=returned; else st="still running after 300 s"; kill -TERM "$vp"; fi; wait "$vp"
 ok "$(cat "$F/out/v.rc")" 124 "C17: the deadline → rc 124"
-ok "$([ "$el" -lt 15 ] && echo fast || echo "slow ${el}s")" fast "C17: … within 15 s"
-ok "$(pgrep -f "sleep 317[12]\.$u" | wc -l | tr -d ' ')" 0 "C17: no verifier child survives"
+ok "$st" returned "C17: … verify returns at its deadline, not when its verifier's children would"
+within 60 nosleeper "sleep 317[12]\.$u"
+ok "$(sleepers "sleep 317[12]\.$u")" 0 "C17: no verifier child survives"
 has "$(cat "$F/out/v.log")" "timed out after 2s" "C17: the log names the timeout"
 python3 "$LI" verify --tree "$WT" --out "$F/out/t" --timeout 600 --verifier "sleep 3173.$u & sleep 3174.$u; wait" >/dev/null &
 vp=$!
-n=0; until grep -q '== verifier:' "$F/out/t.log" 2>/dev/null && [ "$(pgrep -f "sleep 317[34]\.$u\$" | wc -l | tr -d ' ')" -ge 1 ]; do n=$((n+1)); [ "$n" -gt 100 ] && break; sleep 0.1; done
+started() { grep -q '== verifier:' "$F/out/t.log" && [ "$(sleepers "sleep 317[34]\.$u\$")" -ge 1 ]; }
+within 300 started && st=started || st="not started after 300 s"
+ok "$st" started "C17: the verifier's children run before the TERM"
 kill -TERM "$vp"; wait "$vp"
 ok "$(cat "$F/out/t.rc")" 143 "C17: TERM to verify → rc 143"
-n=0; while [ "$(pgrep -f "sleep 317[34]\.$u" | wc -l | tr -d ' ')" -gt 0 ] && [ "$n" -lt 30 ]; do n=$((n+1)); sleep 0.1; done
-ok "$(pgrep -f "sleep 317[34]\.$u" | wc -l | tr -d ' ')" 0 "C17: … and its children are gone"
+within 60 nosleeper "sleep 317[34]\.$u"
+ok "$(sleepers "sleep 317[34]\.$u")" 0 "C17: … and its children are gone"
 main from-main.txt "dep" "theirs: dep (#7)"
 prep; M=$(j "$J" 'd["mergeCommit"]')
 python3 "$LI" verify --tree "$WT" --out "$F/out/b" --timeout 60 --bootstrap 'test -f from-main.txt && touch .boot-ok' --verifier 'test -f .boot-ok && echo verified' >/dev/null
@@ -976,6 +1002,256 @@ PAR=$(node --input-type=module -e "
   ]))
 " "$(p1args proj-a 3)" "$RECS" "$F")
 ok "$PAR" '[20,[],[],true]' "C22: all 20 proj-a records pass integrationArgsError; each refused row's raw fields fail it; the bad rung fails rungRecordError"
+
+# ======== C23: a signal while a step starts; the step's and verify's own signal mask (p22-2) ================
+# _run_step holds TERM/INT/HUP from just before Popen until _live records the new group (a signal in that window
+# used to leave the verifier's own session running with no limit), restores the caller's mask in the child
+# (preexec_fn) and in verify. Every check is structural (a pid, a file the trap writes, the mask), never a stopwatch:
+# like C17's, the only bounds (300 s for a step to start, 60 s for a killed sleeper to vanish) are generous and only
+# slow a real failure, never fail a correct one on a loaded host.
+fx c23
+u=$(printf %07d $$)
+T="$F/steptree"; mkdir -p "$T"
+# reaped <pid>: C17's within/gone on the sleeper the step recorded. A survivor sleeps ~53 min, so it is then
+# SIGKILLed by that recorded pid (plain TERM would not do: the regression the trap check below catches leaves TERM
+# blocked in the step), and the suite never leaks it.
+reaped() {
+  [ -n "$1" ] || { echo "no pid"; return; }
+  if within 60 gone "$1"; then echo gone; else kill -KILL "$1" 2>/dev/null; echo survived; fi
+}
+# LATE: run lead-integrate's main with a Popen that, once the verifier's `bash -c` has started and written its
+# sleeper's pid (waited for up to 300 s, as C17 waits), sends SIGTERM to this process before Popen returns: the
+# Popen-to-_live window. The deadline lies past that wait, so only the SIGTERM can end the step.
+LATE='
+import importlib.util, os, signal, subprocess, sys, time
+spec = importlib.util.spec_from_file_location("lead_integrate", sys.argv[1])
+li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+class Late(subprocess.Popen):
+    def __init__(self, args, *a, **k):
+        super().__init__(args, *a, **k)
+        if list(args[:2]) == ["bash", "-c"]:
+            pid = os.path.join(k.get("cwd") or ".", "pid")
+            end = time.monotonic() + 300
+            while time.monotonic() < end:
+                try:
+                    if open(pid).read().strip():
+                        break
+                except OSError:
+                    pass
+                time.sleep(0.05)
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(0.5)
+subprocess.Popen = Late
+sys.exit(li.main(sys.argv[2:]))
+'
+python3 -B -c "$LATE" "$LI" verify --tree "$T" --out "$F/out/late" --timeout 600 --verifier "sleep 3181.$u & echo \$! > pid; wait" >/dev/null
+ok "$(cat "$F/out/late.rc" 2>/dev/null)" 143 "C23: SIGTERM between Popen and _live → rc 143"
+has "$(cat "$F/out/late.log" 2>/dev/null)" "stopped by signal 15" "C23: … the log names the signal"
+ok "$(reaped "$(cat "$T/pid" 2>/dev/null)")" gone "C23: … and the step's group is killed (its sleeper is gone)"
+# TRAP: verify in the background, its deadline never reached; once the step has set its TERM trap and started its
+# sleeper (tpid written), verify gets SIGTERM and _kill_group SIGTERMs the group. The trap runs only if the step
+# started with TERM unblocked.
+python3 "$LI" verify --tree "$T" --out "$F/out/trap" --timeout 600 \
+  --verifier "trap 'echo term > got; exit 0' TERM; sleep 3182.$u & echo \$! > tpid; wait" >/dev/null &
+vp=$!
+trapset() { [ -s "$T/tpid" ]; }
+within 300 trapset && st=started || st="not started after 300 s"
+ok "$st" started "C23: the step has set its TERM trap and started its sleeper before the TERM"
+kill -TERM "$vp"; wait "$vp"
+ok "$(cat "$F/out/trap.rc" 2>/dev/null)" 143 "C23: TERM to verify mid-step → rc 143"
+ok "$(cat "$T/got" 2>/dev/null)" term "C23: the step starts with TERM unblocked (its trap runs on the group's SIGTERM)"
+ok "$(reaped "$(cat "$T/tpid" 2>/dev/null)")" gone "C23: … and its sleeper is gone"
+# MASK: one _run_step, then verify's own mask: TERM/INT/HUP no longer held, and whatever the caller had blocked
+# before (its own SIGUSR1, or SIGTERM itself) still held: SIG_SETMASK to the old mask, not an UNBLOCK of SIGNALS.
+MASK='
+import importlib.util, signal, sys, time
+spec = importlib.util.spec_from_file_location("lead_integrate", sys.argv[1])
+li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+signal.pthread_sigmask(signal.SIG_BLOCK, {"usr1": [signal.SIGUSR1], "term": [signal.SIGTERM]}.get(sys.argv[4], []))
+rc = li._run_step("true", sys.argv[2], open(sys.argv[3], "ab", buffering=0), time.monotonic() + 600)
+held = set(signal.pthread_sigmask(signal.SIG_BLOCK, []))
+print(f"{rc}|{sorted(int(s) for s in held & {signal.SIGTERM, signal.SIGINT, signal.SIGHUP})}|{signal.SIGUSR1 in held}")
+'
+ok "$(python3 -B -c "$MASK" "$LI" "$T" "$F/out/mask.log" none)" "0|[]|False" "C23: after a step, verify holds none of TERM/INT/HUP"
+ok "$(python3 -B -c "$MASK" "$LI" "$T" "$F/out/mask.log" usr1)" "0|[]|True" "C23: … and a caller's own blocked SIGUSR1 stays blocked (the old mask is restored, not cleared)"
+ok "$(python3 -B -c "$MASK" "$LI" "$T" "$F/out/mask.log" term)" "0|[15]|False" "C23: … and a caller's own blocked SIGTERM stays blocked (SIG_SETMASK to the old mask, not SIG_UNBLOCK of TERM/INT/HUP)"
+
+# ======== C24–C28, C17s, C23s: the verify slots (p23-4) ====================================================
+# verify --slots N --slot-wait S waits for one of the machine's N verify slots (here a temp pool, merge-task-env.sh)
+# as an Integration waiter, BEFORE its --timeout deadline starts, and runs each step under verify-slot.py's guard.
+# Structural, never a stopwatch (p22-1): holders hold until a .go file appears, every wait is a generous `within`
+# poll, and every background pid is recorded and stopped only by that pid.
+fx c24
+u=$(printf %07d $$)
+VSL="$root/skills/execute/scripts/verify-slot.py"
+T="$F/slottree"; mkdir -p "$T"
+vpids=()
+# vhold <name>: hold the pool's only slot (run --slots 1) until <name>.go; the wrapper's pid in <name>.w.
+vhold() {
+  python3 "$VSL" run --slots 1 -- sh -c "echo \$\$ > '$F/$1.pid'; until [ -e '$F/$1.go' ]; do sleep 0.1; done" > /dev/null 2>&1 &
+  echo $! > "$F/$1.w"; vpids+=($!)
+  within 300 test -s "$F/$1.pid" || echo "FAIL - $1: the holder did not start within 300 s"
+}
+vstate() { python3 "$VSL" status --slots 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["slots"][0]["state"])'; }
+vfree() { [ "$(vstate)" = free ]; }
+vwaiters() { ls "$THREAD_VERIFY_SLOTS_DIR" 2>/dev/null | grep -c '^waiter-.*\.wait$'; }
+haswaiter() { [ "$(vwaiters)" -ge 1 ]; }
+# alive <pid>: kill -0 succeeds AND ps shows a state that is not Z (an unreaped zombie runs nothing).
+alive() { local s; kill -0 "$1" 2>/dev/null && s=$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ') && [ -n "$s" ] && [ "${s#Z}" = "$s" ]; }
+vgone() { ! alive "$1"; }
+# C24: the slot wait is excluded from the deadline. The only slot is held; verify --timeout 10 waits behind it. Only
+# once at least 12 s have passed since verify started (a lower bound on time, never an upper one) is the slot freed:
+# had the wait counted, the 10 s deadline would already be gone and the rc would deterministically be 124.
+vhold h24
+t0=$SECONDS
+python3 "$LI" verify --tree "$T" --out "$F/out/c24" --timeout 10 --slots 1 --slot-wait 600 --verifier true > /dev/null 2>&1 &
+vp=$!; vpids+=($vp)
+within 300 grep -q 'waiting for one of 1' "$F/out/c24.log" && st=waiting || st="no waiting line in 300 s"
+ok "$st" waiting "C24: verify --slots 1 waits behind the held slot (its waiting line in the log)"
+until [ $((SECONDS - t0)) -ge 12 ]; do sleep 0.2; done
+touch "$F/h24.go"
+within 300 test -s "$F/out/c24.rc"; wait "$vp"
+ok "$(cat "$F/out/c24.rc" 2>/dev/null)" 0 "C24: green after a wait longer than --timeout: the wait never counts against the deadline"
+has "$(cat "$F/out/c24.log")" "== verify slot 1 of 1 after" "C24: … the log names the slot it got"
+wait "$(cat "$F/h24.w")"
+# C25: no slot within --slot-wait → `noslot`, exit 75, the verifier never ran; the race tree is still removed.
+vhold h25
+python3 "$LI" verify --tree "$T" --out "$F/out/c25" --timeout 60 --slots 1 --slot-wait 1 --verifier 'touch .verifier-ran' > /dev/null 2>&1
+rc=$?
+ok "$rc|$(cat "$F/out/c25.rc" 2>/dev/null)" "75|noslot" "C25: no verify slot within --slot-wait → exit 75, rc file noslot"
+has "$(cat "$F/out/c25.log")" "no verify slot within 1s" "C25: … the log says so"
+lacks "$(cat "$F/out/c25.log")" "== verifier:" "C25: … the verifier never started"
+ok "$([ -e "$T/.verifier-ran" ] && echo ran || echo never)" never "C25: … and never ran"
+main c25.txt "c25" "theirs: c25 (#8)"
+prep; M25=$(j "$J" 'd["mergeCommit"]')
+RT="$R/.claude/worktrees/race-$SLUG"
+python3 "$LI" verify --repo "$R" --detach-at "$M25" --tree "$RT" --out "$F/out/c25r" --timeout 60 --slots 1 --slot-wait 1 --verifier true > /dev/null 2>&1
+ok "$?|$(cat "$F/out/c25r.rc" 2>/dev/null)|$([ -e "$RT" ] && echo left || echo removed)" "75|noslot|removed" "C25: --detach-at with no slot → noslot, the race tree removed"
+lacks "$(git -C "$R" worktree list)" "race-$SLUG" "C25: … and unregistered"
+# C26: TERM while waiting for a slot → 143, the verifier never ran, no waiter file left.
+python3 "$LI" verify --tree "$T" --out "$F/out/c26" --timeout 60 --slots 1 --slot-wait 600 --verifier 'touch .c26-ran' > /dev/null 2>&1 &
+vp=$!; vpids+=($vp)
+within 300 haswaiter && st=waiting || st="no waiter file in 300 s"
+ok "$st" waiting "C26: the waiting verify registers as an Integration waiter"
+kill -TERM "$vp"; wait "$vp"
+ok "$(cat "$F/out/c26.rc" 2>/dev/null)|$([ -e "$T/.c26-ran" ] && echo ran || echo never)|$(vwaiters)" "143|never|0" "C26: TERM during the wait → rc 143, the verifier never ran, no waiter file left"
+touch "$F/h25.go"; wait "$(cat "$F/h25.w")"
+# C27: --slots and --slot-wait go together.
+python3 "$LI" verify --tree "$T" --out "$F/out/c27a" --timeout 60 --slots 1 --verifier true > /dev/null 2>&1
+ok "$?|$([ -e "$F/out/c27a.rc" ] && echo rc || echo none)" "2|none" "C27: a lone --slots → exit 2, no rc file"
+python3 "$LI" verify --tree "$T" --out "$F/out/c27b" --timeout 60 --slot-wait 60 --verifier true > /dev/null 2>&1
+ok "$?|$([ -e "$F/out/c27b.rc" ] && echo rc || echo none)" "2|none" "C27: a lone --slot-wait → exit 2, no rc file"
+# C28: a SIGKILL of verify while its step runs: the guard ends the step and frees the slot; no rc (red).
+rm -f "$T/vpid"
+python3 "$LI" verify --tree "$T" --out "$F/out/c28" --timeout 600 --slots 1 --slot-wait 600 --verifier "echo \$\$ > vpid; exec sleep 3193.$u" > /dev/null 2>&1 &
+vp=$!; vpids+=($vp)
+within 300 test -s "$T/vpid" && st=started || st="not started in 300 s"
+ok "$st" started "C28: the slotted verifier runs"
+kill -KILL "$vp"; wait "$vp" 2>/dev/null
+within 60 vgone "$(cat "$T/vpid")" && st=gone || st="alive after 60 s"
+ok "$st" gone "C28: SIGKILL of verify → its guard still ends the step"
+within 60 vfree && st=free || st="held after 60 s"
+ok "$st" free "C28: … and the verify slot frees"
+ok "$([ -e "$F/out/c28.rc" ] && echo rc || echo none)" none "C28: … and no rc is written (red)"
+# C17s: C17's deadline and TERM arms, slotted.
+python3 "$LI" verify --tree "$T" --out "$F/out/c17s" --timeout 2 --slots 1 --slot-wait 600 --verifier "sleep 3175.$u & sleep 3176.$u; wait" > /dev/null &
+vp=$!; vpids+=($vp)
+if within 300 gone "$vp"; then st=returned; else st="still running after 300 s"; kill -TERM "$vp"; fi; wait "$vp"
+ok "$(cat "$F/out/c17s.rc" 2>/dev/null)|$st" "124|returned" "C17s: slotted, the deadline → rc 124, and verify returns at it"
+within 60 nosleeper "sleep 317[56]\.$u"
+ok "$(sleepers "sleep 317[56]\.$u")" 0 "C17s: … no verifier child survives"
+python3 "$LI" verify --tree "$T" --out "$F/out/c17t" --timeout 600 --slots 1 --slot-wait 600 --verifier "sleep 3177.$u & sleep 3178.$u; wait" > /dev/null &
+vp=$!; vpids+=($vp)
+started17() { grep -q '== verifier:' "$F/out/c17t.log" && [ "$(sleepers "sleep 317[78]\.$u\$")" -ge 1 ]; }
+within 300 started17 && st=started || st="not started after 300 s"
+ok "$st" started "C17s: the slotted verifier's children run before the TERM"
+kill -TERM "$vp"; wait "$vp"
+ok "$(cat "$F/out/c17t.rc" 2>/dev/null)" 143 "C17s: TERM to a slotted verify → rc 143"
+within 60 nosleeper "sleep 317[78]\.$u"
+ok "$(sleepers "sleep 317[78]\.$u")" 0 "C17s: … and its children are gone"
+within 60 vfree && st=free || st="held after 60 s"
+ok "$st" free "C17s: … and the verify slot is free"
+# C23s: C23's TRAP arm slotted (the step starts with TERM unblocked through the guard), and its LATE arm with the
+# SIGTERM landing while the GUARD starts (Popen matched on the guard's argv): rc 143, the step's group killed.
+T2="$F/steptree23"; mkdir -p "$T2"
+python3 "$LI" verify --tree "$T2" --out "$F/out/trap-s" --timeout 600 --slots 1 --slot-wait 600 \
+  --verifier "trap 'echo term > got; exit 0' TERM; sleep 3183.$u & echo \$! > tpid; wait" > /dev/null &
+vp=$!; vpids+=($vp)
+within 300 test -s "$T2/tpid" && st=started || st="not started after 300 s"
+ok "$st" started "C23s: the slotted step has set its TERM trap and started its sleeper"
+kill -TERM "$vp"; wait "$vp"
+ok "$(cat "$F/out/trap-s.rc" 2>/dev/null)" 143 "C23s: TERM to a slotted verify mid-step → rc 143"
+ok "$(cat "$T2/got" 2>/dev/null)" term "C23s: the guarded step starts with TERM unblocked (its trap runs on the group's SIGTERM)"
+ok "$(reaped "$(cat "$T2/tpid" 2>/dev/null)")" gone "C23s: … and its sleeper is gone"
+rm -f "$T2/pid"
+LATE_S='
+import importlib.util, os, signal, subprocess, sys, time
+spec = importlib.util.spec_from_file_location("lead_integrate", sys.argv[1])
+li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+class Late(subprocess.Popen):
+    def __init__(self, args, *a, **k):
+        super().__init__(args, *a, **k)
+        if len(args) > 2 and args[2] == "_guard":
+            pid = os.path.join(k.get("cwd") or ".", "pid")
+            end = time.monotonic() + 300
+            while time.monotonic() < end:
+                try:
+                    if open(pid).read().strip():
+                        break
+                except OSError:
+                    pass
+                time.sleep(0.05)
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(0.5)
+subprocess.Popen = Late
+sys.exit(li.main(sys.argv[2:]))
+'
+python3 -B -c "$LATE_S" "$LI" verify --tree "$T2" --out "$F/out/late-s" --timeout 600 --slots 1 --slot-wait 600 --verifier "sleep 3184.$u & echo \$! > pid; wait" > /dev/null
+ok "$(cat "$F/out/late-s.rc" 2>/dev/null)" 143 "C23s: SIGTERM while the guard starts → rc 143"
+ok "$(reaped "$(cat "$T2/pid" 2>/dev/null)")" gone "C23s: … and the step's group is killed through the guard (its sleeper is gone)"
+within 60 vfree && st=free || st="held after 60 s"
+ok "$st" free "C23s: … and the verify slot is free"
+for p in "${vpids[@]}"; do kill -0 "$p" 2>/dev/null && kill -TERM "$p"; done
+
+# ======== C29: prepare refuses a note with no integrating: (p26-1) ===========================================
+# Every route into step 3's prepare passes mark-integrating first; a skipped stamp stops here, before anything
+# is fetched, deleted, stashed or merged, and the lead's fix is the stamp, then prepare again.
+noint() { sed -i.bak '/^integrating:/d' "$V/$SLUG.md"; }
+fx c29
+noint
+X=$(git -C "$R" commit-tree "$(git -C "$R" rev-parse "$TB^{tree}")" -m dangling)
+git -C "$R" update-ref "refs/integration-anchor/$BR" "$X"
+printf 'leftover\n' >> "$WT/t.txt"
+O0=$(git -C "$R" rev-parse refs/remotes/origin/master)
+main m.txt "theirs"
+prep
+ok "$prc|$J" "1|" "C29: no integrating: → prepare exits 1 and prints no JSON"
+has "$(cat "$F/prep.err")" "carries no integrating:" "C29: … stderr names the missing stamp"
+has "$(cat "$F/prep.err")" "mark-integrating" "C29: … and the verb to run"
+ok "$(git -C "$R" rev-parse -q --verify "refs/integration-anchor/$BR" || echo gone)" "$X" "C29: … the stale anchor ref is not deleted"
+ok "$(git -C "$WT" stash list)|$(git -C "$WT" diff --name-only)" "|t.txt" "C29: … nothing stashed, the leftover still in the tree"
+ok "$(git -C "$R" rev-parse refs/remotes/origin/master)" "$O0" "C29: … and nothing fetched (origin/master unchanged after main moved)"
+python3 "$RR" mark-integrating --tasks "$SLUG" --tasks-dir "$V" >/dev/null
+prep
+ok "$prc|$(j "$J" 'd["route"]')" "0|verify" "C29: mark-integrating, then prepare again → 0, route verify"
+# C29b: the incident's sequence. An integrate call's integrated row (reconcile removed integrating:), then
+# merge-task's exit 3 (main moved): step 3 again from its start, so a prepare with no mark-integrating refuses.
+fx c29b
+main a.txt "$(printf 'a1\na2\na3\na4\nA5 theirs')" "theirs: a5 (#6)"; B0=$B
+onbranch merge --no-ff --no-edit -m "Merge origin/master into $BR (Integration)" origin/master
+M1=$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")
+g -C "$WT" pull -q --ff-only origin "$BR" 2>/dev/null
+addlog "$V/$SLUG.md" "2026-10-02T11:30+00:00 integrated path=integrator pr=5 anchor=$H0 head=$M1 base=$B0 wait=5 duration=3 triggers=shared-file"
+noint
+main m.txt "theirs" "theirs: m (#8)"
+prep
+ok "$prc" 1 "C29b: base moved after an integrated row, prepare with no mark-integrating → 1"
+python3 "$RR" mark-integrating --tasks "$SLUG" --tasks-dir "$V" >/dev/null
+prep
+ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')" "0|ii|verify" "C29b: mark-integrating, then prepare → 0, case (ii), route verify"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"

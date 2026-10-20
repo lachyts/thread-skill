@@ -55,6 +55,11 @@ proposal carries are Lachy's to weigh before he picks: tune.py reads none of the
 caution is as pickable as any other. With `repo: null` in the scores (no GitHub origin) it writes nothing, prints
 `tune: not recorded: ...` on stderr and exits 0 (checked first, --close or not).
 
+A serial score (`shape: serial`, skills/reflect/scripts/serial-score.py's, p24-4) is recorded only as a close line:
+--record-only --close (else exit 2, nothing written), its line stamped `shape: serial` with `repo: null` (a chain has
+no one repo, so the null-repo rule above never applies to it, and the line is never a baseline). --pick, --auto and
+--revert refuse a serial score (exit 2, nothing written): it carries no proposals.
+
 --close completion|supersede (with --record-only only; else exit 2, nothing written) stamps the line's `close`: the
 close that wrote it (run_record.py's Close rule). One close line per rollout, checked after the null-repo check and
 before any write, --dry-run included: close_line() reads tunings.jsonl, skips a line that does not parse and every
@@ -80,7 +85,7 @@ inserts the key after the table's last key; with no table it appends `[repo."<sc
 under [defaults] still gets a repo entry: Tunings are per repo). No file, or a comment-only one, is created
 or appended to; a missing parent directory is created, and removed again when a failure leaves it empty. The
 result goes to a temp file in the same directory and must resolve with each picked key at its `to` from
-`file:repo`, every other key and Guardrail unchanged.
+`file:repo`, every other key and Guardrail unchanged, and `[notify]` (ADR 0038 d3, machine-wide) unchanged too.
 
 Write order: (1) every check above; (2) ONE `tuning` line carrying every pick, through
 run_record.emit(strict=True), its returned bool checked: one os.write, so tunings.jsonl gains the whole set
@@ -168,10 +173,15 @@ def read_scores(src):
     return doc
 
 
+def is_serial(scores):
+    return scores.get("shape") == "serial"
+
+
 def line_fields(scores, applied, tid, voids=None, close=None, auto=None):
-    """A tuning line's fields. `auto` is the weekly reading's stamp ({auto, reflection[, reverts]}), never with close."""
+    """A tuning line's fields. `auto` is the weekly reading's stamp ({auto, reflection[, reverts]}), never with close.
+    A serial score's line carries `shape: serial` (run_record.py's Serial rule)."""
     w = scores["window"]
-    fields = {"id": tid, "repo": scores["repo"],
+    fields = {"id": tid, "repo": scores.get("repo"),
               "window": {k: w[k] for k in ("since", "until", "activeStart", "activeEnd", "partial") if k in w},
               "scores": {k: scores["headline"].get(k) for k in RR.SCORE_KEYS}, "applied": applied}
     binding = (scores.get("binding") or {}).get("constraint") if isinstance(scores.get("binding"), dict) else None
@@ -183,6 +193,8 @@ def line_fields(scores, applied, tid, voids=None, close=None, auto=None):
         fields["close"] = close
     if auto:
         fields.update(auto)
+    if is_serial(scores):
+        fields["shape"] = "serial"
     return fields
 
 
@@ -487,7 +499,11 @@ def _unlink(path):
 # ---- the verbs ---------------------------------------------------------------------------------------------
 
 def record_only(scores, dry_run, close=None):
-    if scores.get("repo") is None:
+    serial = is_serial(scores)
+    if serial and not close:
+        raise Stop("a serial score is recorded only as its close line (--close completion): with no repo it is no "
+                   "baseline for a by-hand Reflection", 2)
+    if not serial and scores.get("repo") is None:
         say("not recorded: the scores carry no repo (no GitHub origin), so no baseline is kept")
         return 0
     if close:
@@ -509,8 +525,9 @@ def record_only(scores, dry_run, close=None):
     if not emit(scores, fields):
         say("nothing recorded: the Reflection's line could not be written (see run_record above)")
         return 1
-    print("recorded %s in %s: no Tuning applied (a baseline for the next Reflection on %s)"
-          % (tid, tunings_path(), scores["repo"]))
+    print("recorded %s in %s: no Tuning applied (%s)"
+          % (tid, tunings_path(), "a serial chain's close line: never a baseline" if serial
+             else "a baseline for the next Reflection on %s" % scores["repo"]))
     return 0
 
 
@@ -610,6 +627,8 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
                 raise Stop("the edit resolves %s to %s, not %s: nothing written" % (k, after["settings"][k], want), 2)
         if after["guardrails"] != before["guardrails"]:
             raise Stop("the edit changes the Guardrails: nothing written", 2)
+        if after["notify"] != before["notify"]:  # machine-wide (ADR 0038 d3): a Tuning never drops the ntfy topic
+            raise Stop("the edit changes [notify]: nothing written", 2)
         tid = new_id()
         fields = line_fields(scores, applied, tid, auto=auto)
         if dry_run:
@@ -760,6 +779,8 @@ def main(argv):
         return 2
     try:
         scores = read_scores(a.scores)
+        if is_serial(scores) and not a.record_only:
+            raise Stop("a serial score proposes no Tuning: --pick, --auto and --revert take a parallel score only", 2)
         if a.record_only:
             return record_only(scores, a.dry_run, a.close)
         if a.auto:

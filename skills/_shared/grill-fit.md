@@ -1,7 +1,8 @@
 # The grill-fit check — route every fork before a prompt leaves
 
-Run it while composing a prompt another session will execute cold: today orient § 8's batch prompts
-and handoff § Build the handoff prompt. It is a checklist step inside composition, not a new phase.
+Run it while composing a prompt another session will execute cold: today
+handoff § Build the handoff prompt (orient's batch prompts retired with ADR 0040). It is a
+checklist step inside composition, not a new phase.
 
 1. **List the forks**, not the mechanics: scope choices, strategy trade-offs, "which approach"
    moments, anything matching grill-me's trigger signals (vague intent, an unscoped feature decision).
@@ -10,9 +11,7 @@ and handoff § Build the handoff prompt. It is a checklist step inside compositi
    prompt. The fork returns to Lachy via grill-me: the session reports the fork and its evidence,
    never resolves it downstream and never spawns a task for it.
 3. **No forks → no grill language at all**: no gate lines and no "decide X from Y" lines. Don't
-   manufacture ceremony. Orient's stop at an unforeseen Lachy-owned fork and its fork end-line form
-   are not grill language: they are standing end-of-run mechanics every orient batch prompt
-   carries, forks or none (orient § 8 End-of-run updates).
+   manufacture ceremony.
 
 **Example.** The Smart Slider silent-stall diagnosis needed this gate, and got it only by hand:
 
@@ -22,12 +21,10 @@ and handoff § Build the handoff prompt. It is a checklist step inside compositi
 
 **How a fork comes back.**
 
-- **Orient batch:** the child stops that task at the fork, leaves it open and ends it with one end
-  line naming every fork, `partial: fork for Lachy: <fork>; evidence: <…>` and so on (orient § 8
-  End-of-run updates). The lead lists them in the batch's close-out line as decisions for Lachy, so
-  does `--debrief` (orient § 10), and orient § 7 keeps the task out of batches until he rules. The
-  next reshuffle's grill puts each fork to him (orient § 5) and writes his ruling into the task
-  note as an `orient ruling:` line, which decides it.
+- **A retired orient batch's fork:** its end line, `partial: fork for Lachy: <fork>; evidence: <…>`,
+  one end line naming every fork, stays open until the next reshuffle's grill puts each fork to
+  Lachy (orient § 5) and writes his ruling into the task note as an `orient ruling:` line, which
+  decides it. Orient § 3 lists it, and § 7 keeps the task out of a serial rollout until he rules.
 - **Handoff:** the consumer is interactive, so it stops at the fork and asks.
 
 **What it is not.** Not the conversation-gated exclusion (orient § 7), which keeps out a task that

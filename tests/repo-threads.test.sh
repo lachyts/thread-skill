@@ -2,11 +2,13 @@
 # Repo threads (thread-skill-p2-7). Section A extracts open's § Repo-thread lookup snippet by its marker and
 # runs it against runtime-generated fixtures under bash and under `zsh -f` when zsh is installed (the Bash
 # tool is zsh): first-hit tier order (_shared, then ~/Projects, then repo threads), the basename slug of a
-# THREAD.md with no front matter, the CWD tiebreak, and every exclusion (obsidian, workspaces, depth > 3,
-# `*/.claude/*`), the ~/Projects walk's prunes (`_archive`, `.claude`, `node_modules`, depth > 5), and a CWD
-# repo outside the hits leaving every hit in place. Two mutation checks prove the worktree exclusion is
-# load-bearing twice over: the `.claude` rule alone excludes a depth-3 fixture, and dropping the depth limit
-# still leaves the worktree copy out; a third proves an `_archive` copy would otherwise hide a repo thread. It also
+# THREAD.md with no front matter, a match by directory name as well as by slug (ADR 0039 d4), the CWD
+# tiebreak, and every exclusion (obsidian, workspaces, depth > 4, `*/.claude/*`, `*/_archive/*`), the
+# ~/Projects walk's prunes (`_archive`, `.claude`, `node_modules`, depth > 5), and a CWD repo outside the hits
+# leaving every hit in place. Two mutation checks prove the worktree exclusion is load-bearing twice over: the
+# `.claude` rule alone excludes a depth-3 fixture, and dropping the depth limit still leaves the worktree copy
+# out; a third proves an `_archive` copy would otherwise hide a repo thread, and a fourth that the repo tier's
+# own `_archive` test keeps an archived repo thread out. It also
 # runs open's `list` step 2 find (p19-9), which must walk ~/Projects with the same prunes and depth bound. Section B greps the prose that wires the lookup into open, close, handoff-lifecycle.md,
 # CONTEXT.md and ADR 0017.
 # Hermetic: every path lives under mktemp, HOME is a temp dir per case, GIT_CEILING_DIRECTORIES stops git
@@ -45,12 +47,14 @@ ok "$paired" 0 "the lookup marker pair is closed and in order"
 nopen=$(grep -c '^# thread:repo-thread-lookup' "$OPEN"); nclose=$(grep -c '^# end thread:repo-thread-lookup' "$OPEN")
 ok "$nopen" 1 "exactly one opening lookup marker"
 ok "$nclose" 1 "exactly one closing lookup marker"
-ok "$(occ "$tmp/lk.sh" '-maxdepth 3')" 1 "the snippet limits find to depth 3, once"
+ok "$(occ "$tmp/lk.sh" '-maxdepth 4')" 1 "the snippet limits find to depth 4, once"
 ok "$(occ "$tmp/lk.sh" "-not -path '*/.claude/*'")" 1 "the snippet excludes */.claude/*, once"
+ok "$(occ "$tmp/lk.sh" "-not -path '*/_archive/*'")" 1 "the repo tier excludes */_archive/*, once"
 ok "$(occ "$tmp/lk.sh" '-name _archive -o ')" 1 "the ~/Projects walk prunes _archive, once"
+ok "$(occ "$tmp/lk.sh" '[ "$d" = "$slug" ]')" 1 "a repo thread also matches by its directory name, once"
 ok "$(occ "$tmp/lk.sh" '-maxdepth 5')" 1 "the ~/Projects walk is bounded at depth 5, once"
 runA=1
-if [ "$paired" != 0 ] || [ "$nopen" != 1 ] || [ "$nclose" != 1 ] || ! grep -q -- '-maxdepth 3' "$tmp/lk.sh"; then
+if [ "$paired" != 0 ] || [ "$nopen" != 1 ] || [ "$nclose" != 1 ] || ! grep -q -- '-maxdepth 4' "$tmp/lk.sh"; then
   echo "FAIL - the # thread:repo-thread-lookup … # end pair is not exactly once, in order, in $OPEN; Section A skipped"
   fail=1; runA=0
 fi
@@ -66,6 +70,9 @@ if [ "$runA" = 1 ]; then
   fx "$R/obsidian/N/THREAD.md"                       '---\nslug: foo\n---\n'
   fx "$R/workspaces/seat/THREAD.md"                  '---\nslug: foo\n---\n'
   fx "$R/a/b/c/THREAD.md"                            '---\nslug: foo\n---\n# depth 4\n'
+  fx "$R/a/b/c/d/THREAD.md"                          '---\nslug: foo\n---\n# depth 5\n'
+  fx "$R/tools/mcp/m/THREAD.md"                      '# depth 4, no front matter\n'
+  fx "$R/tools/_archive/old/THREAD.md"               '---\nslug: foo\n---\n# an archived repo thread\n'
   fx "$R/tools/foo-rollout/THREAD.md"                '---\nslug: foo\n---\n# rollout clone\n'
   mkdir -p "$R/tools/foo-rollout/sub"
   fx "$R/tools/bar/THREAD.md"                        '# Bar\nslug: foo\n'
@@ -111,8 +118,9 @@ if [ "$runA" = 1 ]; then
     L="[$sh]"
     # 1 (acc)
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" foo
-    ok "$(rel "$h1")" "repos/tools/foo-rollout/THREAD.md
-repos/tools/foo/THREAD.md" "$L slug=foo lists foo-rollout and foo only, C-sorted (no worktree, .claude, obsidian, workspaces or depth-4 copy)"
+    ok "$(rel "$h1")" "repos/a/b/c/THREAD.md
+repos/tools/foo-rollout/THREAD.md
+repos/tools/foo/THREAD.md" "$L slug=foo lists a/b/c (depth 4), foo-rollout and foo only, C-sorted (no worktree, .claude, obsidian, workspaces, _archive or depth-5 copy)"
     ok "$err" "" "$L slug=foo from a non-repo CWD: empty stderr (the tiebreak's rev-parse is silent)"
     ok "$rc" 0 "$L slug=foo exits 0"
     # 2 (acc)
@@ -130,12 +138,14 @@ repos/tools/foo/THREAD.md" "$L slug=foo lists foo-rollout and foo only, C-sorted
     ok "$err" "" "$L the CWD tiebreak writes nothing to stderr"
     # 5b: a CWD repo that is not among the hits leaves every hit in place
     lk "$tmp/lk.sh" "$sh" "$R/tools/bar" "$h1" foo
-    ok "$(rel "$h1")" "repos/tools/foo-rollout/THREAD.md
-repos/tools/foo/THREAD.md" "$L CWD in tools/bar, slug=foo: the tiebreak keeps both foo hits"
+    ok "$(rel "$h1")" "repos/a/b/c/THREAD.md
+repos/tools/foo-rollout/THREAD.md
+repos/tools/foo/THREAD.md" "$L CWD in tools/bar, slug=foo: the tiebreak keeps every foo hit"
     ok "$err" "" "$L CWD in a non-matching repo: empty stderr"
     # 5c: an _archive, .claude, node_modules or depth-6 copy under ~/Projects never beats a repo thread
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h4" foo
-    ok "$(rel "$h4")" "repos/tools/foo-rollout/THREAD.md
+    ok "$(rel "$h4")" "repos/a/b/c/THREAD.md
+repos/tools/foo-rollout/THREAD.md
 repos/tools/foo/THREAD.md" "$L pruned ~/Projects copies do not hide the repo threads"
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h4" deep
     ok "$(rel "$h4")" "Projects/A/P/S/T/THREAD.md" "$L a nested project THREAD.md at depth 5 is still found"
@@ -146,11 +156,15 @@ repos/tools/foo/THREAD.md" "$L pruned ~/Projects copies do not hide the repo thr
     # 6
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" baz
     ok "$(rel "$h1")" "repos/tools/baz/THREAD.md" "$L a CRLF, quoted slug: matches"
-    # 7
+    # 7: a repo thread matches by its effective slug or by its directory name (ADR 0039 d4)
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" renamed
-    ok "$out" "" "$L a front-matter slug beats the directory name (slug=renamed finds nothing)"
+    ok "$(rel "$h1")" "repos/tools/renamed/THREAD.md" "$L slug=renamed finds tools/renamed by its directory name"
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" other
-    ok "$(rel "$h1")" "repos/tools/renamed/THREAD.md" "$L slug=other finds tools/renamed"
+    ok "$(rel "$h1")" "repos/tools/renamed/THREAD.md" "$L slug=other still finds tools/renamed by its front-matter slug"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" 'qux (codex)'
+    ok "$(rel "$h1")" "repos/tools/qux (codex)/THREAD.md" "$L slug='qux (codex)' finds the spaced clone by its directory name"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" m
+    ok "$(rel "$h1")" "repos/tools/mcp/m/THREAD.md" "$L a depth-4 repo thread with no front matter matches its directory name"
     # 8
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" nope
     ok "$out|$rc" "|0" "$L an unknown slug prints nothing, rc 0"
@@ -160,12 +174,14 @@ repos/tools/foo/THREAD.md" "$L pruned ~/Projects copies do not hide the repo thr
     ok "$out|$rc|$err" "|0|" "$L no ~/repos or ~/Projects, slug=foo: nothing, rc 0, empty stderr"
     # 9
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" ""
-    ok "$(rel "$h1")" "repos/tools/bar/THREAD.md
+    ok "$(rel "$h1")" "repos/a/b/c/THREAD.md
+repos/tools/bar/THREAD.md
 repos/tools/baz/THREAD.md
 repos/tools/foo-rollout/THREAD.md
 repos/tools/foo/THREAD.md
+repos/tools/mcp/m/THREAD.md
 repos/tools/qux (codex)/THREAD.md
-repos/tools/renamed/THREAD.md" "$L an empty slug lists exactly the six repo threads (no .claude or worktree copy, spaced path whole)"
+repos/tools/renamed/THREAD.md" "$L an empty slug lists exactly the eight repo threads (no .claude, worktree, _archive or depth-5 copy, spaced path whole)"
     ok "$err|$rc" "|0" "$L an empty slug: empty stderr, rc 0"
     # 10: rung-3 membership, under a symlinked HOME
     lk "$tmp/lk.sh" "$sh" "$hl/repos/tools/foo" "$hl" ""
@@ -184,22 +200,96 @@ repos/tools/renamed/THREAD.md" "$L an empty slug lists exactly the six repo thre
   ok "$(diff "$tmp/lk.sh" "$tmp/m1.sh" | grep -c '^[<>]')" 2 "M1: exactly one line differs"
   lk "$tmp/m1.sh" bash "$tmp/plain" "$h1" ""
   ok "$(inl "$R/x/.claude/THREAD.md")" y "M1: without the .claude rule the depth-3 x/.claude/THREAD.md is listed"
-  # 12: mutation M2 — without the depth limit, depth 4 appears but the worktree copy stays out.
-  sed 's#-maxdepth 3 ##' "$tmp/lk.sh" > "$tmp/m2.sh"
+  # 12: mutation M2 — without the depth limit, depth 5 appears but the worktree copy stays out.
+  sed 's#-maxdepth 4 ##' "$tmp/lk.sh" > "$tmp/m2.sh"
   ok "$(cmp -s "$tmp/lk.sh" "$tmp/m2.sh" && echo same || echo changed)" changed "M2: the mutation changed the snippet"
-  ok "$(occ "$tmp/m2.sh" '-maxdepth 3')" 0 "M2: exactly the repo-tier depth token was removed"
+  ok "$(occ "$tmp/m2.sh" '-maxdepth 4')" 0 "M2: exactly the repo-tier depth token was removed"
   ok "$(diff "$tmp/lk.sh" "$tmp/m2.sh" | grep -c '^[<>]')" 2 "M2: exactly one line differs"
   lk "$tmp/m2.sh" bash "$tmp/plain" "$h1" ""
-  ok "$(inl "$R/a/b/c/THREAD.md")" y "M2: without the depth limit the depth-4 fixture is listed (the fixture is sensitive)"
+  ok "$(inl "$R/a/b/c/d/THREAD.md")" y "M2: without the depth limit the depth-5 fixture is listed (the fixture is sensitive)"
   ok "$(inl "$R/tools/foo/.claude/worktrees/w/THREAD.md")" n "M2: the worktree copy stays excluded by the .claude rule alone"
   ok "$(inl "$R/x/.claude/THREAD.md")" n "M2: x/.claude/THREAD.md stays excluded"
 
   # 13: mutation M3 — without the _archive prune, the archived project copy wins the ~/Projects tier.
   sed 's#-name _archive -o ##' "$tmp/lk.sh" > "$tmp/m3.sh"
-  ok "$(occ "$tmp/m3.sh" '_archive')" 0 "M3: exactly the _archive token was removed"
+  ok "$(occ "$tmp/m3.sh" '-name _archive -o ')" 0 "M3: exactly the ~/Projects _archive prune was removed"
+  ok "$(occ "$tmp/m3.sh" "-not -path '*/_archive/*'")" 1 "M3: the repo tier's _archive test stays"
   ok "$(diff "$tmp/lk.sh" "$tmp/m3.sh" | grep -c '^[<>]')" 2 "M3: exactly one line differs"
   lk "$tmp/m3.sh" bash "$tmp/plain" "$h4" foo
   ok "$(rel "$h4")" "Projects/A/_archive/Old/THREAD.md" "M3: without the prune the _archive copy hides the repo threads (the fixture is sensitive)"
+
+  # 14: mutation M4 — without the repo tier's _archive test, an archived repo thread is listed.
+  sed "s#-not -path '\*/_archive/\*' ##" "$tmp/lk.sh" > "$tmp/m4.sh"
+  ok "$(occ "$tmp/m4.sh" "-not -path '*/_archive/*'")" 0 "M4: exactly the repo tier's _archive test was removed"
+  ok "$(occ "$tmp/m4.sh" '-name _archive -o ')" 1 "M4: the ~/Projects _archive prune stays"
+  ok "$(diff "$tmp/lk.sh" "$tmp/m4.sh" | grep -c '^[<>]')" 2 "M4: exactly one line differs"
+  lk "$tmp/m4.sh" bash "$tmp/plain" "$h1" ""
+  ok "$(inl "$R/tools/_archive/old/THREAD.md")" y "M4: without the test tools/_archive/old/THREAD.md is listed (the fixture is sensitive)"
+
+  # 15: rollout clones (ADR 0042): a clone's THREAD.md copy is never a thread, and a session in a clone resolves its
+  # in-place twin's. h1's foo-rollout (no origin) stays listed above: only a same-origin pair is a rollout clone.
+  h5="$tmp/h5"; R5="$h5/repos"
+  fx "$R5/tools/sam/THREAD.md"                   '---\nslug: sam\n---\n# Sam\n'
+  fx "$R5/tools/sam-rollout/THREAD.md"           '---\nslug: sam\n---\n# the clone copy\n'
+  mkdir -p "$R5/tools/sam-rollout/sub"
+  fx "$R5/workspaces-rollout/seat/THREAD.md"     '---\nslug: seat\n---\n'
+  fx "$h5/Projects/N/nest/THREAD.md"             '---\nslug: nest\n---\n'
+  fx "$h5/Projects/N/nest-rollout/THREAD.md"     '---\nslug: nest\n---\n# the nested clone copy\n'
+  fx "$h5/Projects/A/one/THREAD.md"              '---\nslug: twin\n---\n'
+  fx "$h5/Projects/B/two/THREAD.md"              '---\nslug: twin\n---\n'
+  G init -q "$R5/tools/sam"; G -C "$R5/tools/sam" remote add origin git@github.com:Own/Sam.git
+  G init -q "$R5/tools/sam-rollout"; G -C "$R5/tools/sam-rollout" remote add origin https://github.com/own/sam.git
+  G init -q "$R5/workspaces-rollout"; G -C "$R5/workspaces-rollout" remote add origin https://github.com/o/ws.git
+  G init -q "$h5/Projects/N/nest"; G -C "$h5/Projects/N/nest" remote add origin git@github.com:o/nest.git
+  G init -q "$h5/Projects/N/nest-rollout"; G -C "$h5/Projects/N/nest-rollout" remote add origin https://github.com/o/nest.git
+  for sh in "${shells[@]}"; do
+    L="[$sh]"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h5" sam
+    ok "$(rel "$h5")" "repos/tools/sam/THREAD.md" "$L slug=sam from outside: only sam, never the clone's copy (ssh vs https, mixed case)"
+    lk "$tmp/lk.sh" "$sh" "$R5/tools/sam-rollout/sub" "$h5" sam
+    ok "$(rel "$h5")" "repos/tools/sam/THREAD.md" "$L slug=sam from inside the clone: the in-place twin's thread"
+    ok "$err" "" "$L … with empty stderr"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h5" ""
+    ok "$(rel "$h5")" "repos/tools/sam/THREAD.md" "$L the repo-thread list: no clone copy, no workspaces-rollout seat"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h5" nest
+    ok "$(rel "$h5")" "Projects/N/nest/THREAD.md" "$L slug=nest: a nested ~/Projects clone's copy is never a thread"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h5" twin
+    ok "$(rel "$h5")" "Projects/A/one/THREAD.md
+Projects/B/two/THREAD.md" "$L control: two same-slug project folders both print"
+  done
+  # 16: mutation M5 — without the workspaces-rollout path test, its seat (no in-place twin here) is listed.
+  sed 's# -not -path "$r/workspaces-rollout/\*"##' "$tmp/lk.sh" > "$tmp/m5.sh"
+  ok "$(occ "$tmp/m5.sh" '-not -path "$r/workspaces-rollout/*"')" 0 "M5: exactly the workspaces-rollout path test was removed"
+  ok "$(diff "$tmp/lk.sh" "$tmp/m5.sh" | grep -c '^[<>]')" 2 "M5: exactly one line differs"
+  lk "$tmp/m5.sh" bash "$tmp/plain" "$h5" ""
+  ok "$(inl "$R5/workspaces-rollout/seat/THREAD.md")" y "M5: without it the workspaces-rollout seat is listed (the fixture is sensitive)"
+
+  # 17: rc parity with self-rollout-check.sh --in-place, under bash and zsh -f, and no plugin-root path in the snippet
+  ok "$(grep -c 'CLAUDE_PLUGIN_ROOT' "$tmp/lk.sh")" 0 "the snippet holds no plugin-root path"
+  awk '/^ghs\(\) \{/{on=1} on; /^rc\(\) \{/{r=1} r && /^\}$/{exit}' "$tmp/lk.sh" > "$tmp/rc.sh"
+  ok "$(grep -c '^rc() {' "$tmp/rc.sh")|$(grep -c '^ghs() {' "$tmp/rc.sh")" "1|1" "rc and ghs are extracted from the snippet"
+  printf '. "%s"\nc="$1"; if rc; then echo 0; else echo 1; fi\n' "$tmp/rc.sh" > "$tmp/rcrun.sh"
+  pz="$tmp/parity"; mkdir -p "$pz"
+  pair() {  # pair <name> <twin origin|-> <clone origin|->: a twin <name> and a clone <name>-rollout
+    G init -q "$pz/$1"; G init -q "$pz/$1-rollout"
+    [ "$2" = - ] || G -C "$pz/$1" remote add origin "$2"
+    [ "$3" = - ] || G -C "$pz/$1-rollout" remote add origin "$3"
+  }
+  pair a git@github.com:Own/A.git https://github.com/own/a.git
+  pair b https://github.com/o/b.git https://github.com/x/b.git
+  pair c https://gitlab.com/o/c.git https://gitlab.com/o/c.git
+  pair d - -
+  pair e ssh://git@github.com/o/e.git https://github.com/o/e.git/
+  G init -q "$pz/f"; G -C "$pz/f" remote add origin https://github.com/o/f.git; G -C "$pz/f" commit -q --allow-empty -m i
+  G -C "$pz/f" worktree add -q --detach "$pz/f-rollout"
+  G init -q "$pz/g-rollout"; G -C "$pz/g-rollout" remote add origin https://github.com/o/g.git; mkdir -p "$pz/g"
+  for d in a-rollout a b-rollout c-rollout d-rollout e-rollout f-rollout g-rollout; do
+    want=$(HOME="$h5" bash "$root/skills/execute/scripts/self-rollout-check.sh" --in-place "$pz/$d" >/dev/null 2>&1; echo $?)
+    for sh in "${shells[@]}"; do
+      got=$(cd "$tmp/plain" && GIT_CEILING_DIRECTORIES="$tmp" $sh "$tmp/rcrun.sh" "$pz/$d" 2>/dev/null)
+      ok "$got" "$want" "[$sh] rc parity with --in-place: $d → $want"
+    done
+  done
 fi
 
 # open's list step 2 and the lookup's ~/Projects walk prune the same directories (p19-9)
@@ -227,7 +317,7 @@ ident=$(sec "$CLOSE" '^## Identify the active thread' '^## ')
 r2=$(first "$ident" '2. '); r3=$(first "$ident" '3. ')
 has "$r3" "$QOPEN" "close rung 3 cites open § Repo-thread lookup by plugin path"
 has "$r3" '.claude/worktrees' "close rung 3 names the .claude/worktrees exclusion"
-has "$r3" 'deeper than 3' "close rung 3 credits the depth exclusion"
+has "$r3" 'deeper than 4' "close rung 3 credits the depth exclusion"
 has "$r2" "$QOPEN" "close rung 2 cites open § Repo-thread lookup by plugin path"
 has "$r2" 'never rung 3' "close rung 2 never falls to rung 3"
 slugin=$(first "$(cat "$CLOSE")" '- `slug` ')

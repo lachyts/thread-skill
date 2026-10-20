@@ -31,9 +31,11 @@ test('phases number from N_max + 1, never from phase 0, and ordinals are never r
 })
 
 test('in flight is defined once, in the vault grammar, with TaskNotes spelling', () => {
-  assertHas(collapse(section(grammar, /^## In flight$/) ?? ''), 'vault-grammar.md § In flight',
-    ['`status: in-progress`', '`in_progress`', '`review`', '`dispatched:`', '**Live rollout**'])
-  assertHas(S(2), 'orient § 2', ['_shared/vault-grammar.md` § In flight', /never re-batch it/, /never reshuffle it/])
+  const inFlight = collapse(section(grammar, /^## In flight$/) ?? '')
+  assertHas(inFlight, 'vault-grammar.md § In flight', ['`status: in-progress`', '`in_progress`', '`review`', '**Live rollout**'])
+  // ADR 0040 retired orient's batches: a `dispatched:` stamp no longer puts a task in flight.
+  assert.doesNotMatch(inFlight, /`dispatched:`/, 'vault-grammar.md § In flight still reads the retired stamp')
+  assertHas(S(2), 'orient § 2', ['_shared/vault-grammar.md` § In flight', /never route it again/, /never reshuffle it/])
   assert.doesNotMatch(S(2), /`dispatched:` stamp/, 'orient § 2 restates the in-flight definition')
   assertHas(R(1), 'R1', [/vault grammar's definition/, /never change/, /AMBIGUOUS/, /`thread`-tagged/,
     /contains `task` but not `thread`/, '`-p<N>-`'])
@@ -101,8 +103,8 @@ test('orient reshuffles by default; --steer and --look opt out, and Look only wr
   const forms = section(orient, /^## Invocation forms/) ?? ''
   assertHas(forms, 'orient § Invocation forms', [/--steer\s+# /, /--look\s+# /])
   assert.doesNotMatch(forms, /Reshuffle \/ Steer only \/ Look only/, 'the invocation forms still offer the three-way question')
-  // § 1 strips the opt-outs before the resolver sees the argument, as it does `--debrief`.
-  assertHas(S(1), 'orient § 1', [/orient's own flags \(`--debrief`, `--steer`, `--look`/])
+  // § 1 strips the opt-outs before the resolver sees the argument; `--debrief` stops before it (§ 10, ADR 0040).
+  assertHas(S(1), 'orient § 1', [/orient's own flags \(`--steer`, `--look`/])
 })
 
 // The three-way question is gone from every surface Lachy or the model reads; only the flag wording stays.
@@ -117,7 +119,7 @@ test('no surface still offers Reshuffle / Steer only / Look only as a question',
   }
 })
 
-test('orient schedules only rollout-shaped members and never runs another rollout', () => {
+test('orient schedules only parallel-shaped members and never runs another rollout', () => {
   assertHas(S(6), 'orient § 6', ['--tasks', '--regenerate', /At most one unfinished rollout per repo/,
     'unfinished-rollout check', /scoped target routes only the tasks its own reshuffle wrote/,
     /schedule nothing and touch nothing/, 'repair', /Uncommitted grill docs/])
@@ -155,6 +157,34 @@ test('control: --regenerate only in a later sentence fails scheduleCall', () => 
   assert.equal(scheduleCall(s6.replace('`--tasks <members>`', '`--regenerate --tasks <members>`')), true)
 })
 
-test('the execute offer has three answers and never homes a commit on the target default branch', () => {
-  assertHas(S(9), 'orient § 9', ['**Fresh session**', '**Here**', '**Not yet**', /default-branch/])
+// The Start when ready answer of § 9 (p23-6), collapsed: from its bold label to the next answer or the end of the
+// list; null when absent.
+const startWhenReady = (s9) => s9.match(/- \*\*Start when ready\*\*(.*?)(?= - \*\*|Execute's own runtime gate|$)/)?.[1] ?? null
+
+test('the execute offer has four answers and never homes a commit on the target default branch', () => {
+  assertHas(S(9), 'orient § 9', ['**Fresh session**', '**Here**', '**Not yet**', '**Start when ready**',
+    /`start: unattended`/, /default-branch/])
+})
+
+test('the execute offer starts the lead in the Project root, the rollout clone (ADR 0042), and § 2 skips clone threads', () => {
+  const s9 = S(9)
+  assertHas(s9, 'orient § 9', ['Project root', '**Rollout launch.**', '--launch-check', 'start in the Project root, then `/thread:execute [[<rollout>]]`',
+    'handoff-home.sh reads a rollout clone as its in-place twin'])
+  assert.ok(!s9.includes('start in the target repo'), 'orient § 9 no longer says start in the target repo')
+  assert.ok(!s9.includes('launched in the target repo'), 'orient § 9 Here no longer keys on the target repo')
+  const threads = collapse(slice(section(orient, /^### 2\./) ?? '', /^- \*\*Threads\*\*/, /^- /) ?? '')
+  assertHas(threads, 'orient § 2 Threads', ['--in-place', "read its in-place twin's file instead", 'never a thread'])
+})
+
+test('Start when ready stamps the note and runs neither execute nor handoff', () => {
+  const answer = startWhenReady(S(9))
+  assertHas(answer, 'orient § 9 Start when ready', [/stamp `start: unattended`/, /nothing runs/, /no handoff/,
+    /Chorus Stage/, /`\/thread:execute \[\[<rollout>\]\]`/])
+  for (const run of ['execute/SKILL.md', 'handoff/SKILL.md']) {
+    assert.ok(!answer.includes(run), `the Start when ready answer runs ${run}`)
+  }
+  // control: an answer that runs execute fails the check
+  const ran = S(9).replace('then end: nothing runs here', 'then run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`; nothing runs here')
+  assert.notEqual(ran, S(9), 'control is vacuous: the answer text moved')
+  assert.ok(startWhenReady(ran).includes('execute/SKILL.md'), 'control: the mutated answer names execute')
 })

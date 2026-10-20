@@ -412,6 +412,78 @@ has "$err" "WARN" "20. … the registry warning passes through"
 has "$err" "in $P is 1 commit(s) ahead" "20. … the --also member is still checked"
 rm -f "$reg"
 
+# ======== clone-rooted (ADR 0042): a peer blocks only on a scoping cited path ===============================
+# The root is a rollout clone x-rollout beside its in-place twin x, both clones of git@github.com:o/cr.git served
+# by the fake ssh (land.sh --origin-slug reads `remote get-url`, which an insteadOf would rewrite away).
+mkdir -p "$tmp/bin" "$tmp/srv/o" "$tmp/cr"
+cp "$root/tests/fixtures/land/fake-ssh.sh" "$tmp/bin/fake-ssh"; chmod +x "$tmp/bin/fake-ssh"
+SSHX="GIT_SSH_COMMAND=$tmp/bin/fake-ssh GIT_SSH_VARIANT=ssh SRV=$tmp/srv LOG_SSH=$tmp/ssh.log"
+g init -q --bare -b master "$tmp/srv/o/cr.git"
+g clone -q "$tmp/srv/o/cr.git" "$tmp/crseed" 2>/dev/null
+mkdir -p "$tmp/crseed/docs/adr" "$tmp/crseed/_shared/scripts" "$tmp/crseed/docs/reviews"
+echo y > "$tmp/crseed/docs/adr/0026-y.md"; echo a > "$tmp/crseed/_shared/scripts/claude-account.sh"
+echo r > "$tmp/crseed/docs/reviews/old.md"; echo t > "$tmp/crseed/THREAD.md"
+g -C "$tmp/crseed" add -A && g -C "$tmp/crseed" commit -q -m base && g -C "$tmp/crseed" push -q origin master
+crclone() { rm -rf "$1"; env $SSHX git clone -q git@github.com:o/cr.git "$1" 2>/dev/null; }
+CR="$tmp/cr/x-rollout"; IP="$tmp/cr/x"
+crfresh() { crclone "$CR"; crclone "$IP"; }
+crrun() { XENV="$SSHX" run "$@"; }
+
+# cr1: the in-place member (via --also) ahead, no cited paths → 0 and a note naming its commits
+crfresh; commit "$IP" "fix claude-account" _shared/scripts/claude-account.sh
+crrun "$CR" "$IP"
+ok "$rc|$out" "0|pushed" "cr1. clone-rooted, the in-place member ahead, no cited paths → 0"
+has "$err" "note: local master in $IP is 1 commit(s) ahead of origin/master (" "cr1. … a note naming the member"
+has "$err" "fix claude-account): $IP is a peer of the clone-rooted Project root $CR, and none of them touches a path a not-yet-merged task cites: not a blocker (ADR 0042)" "cr1. … naming the commit and why it does not block"
+# cr2: a touched cited path → 3
+crrun "$CR" "$IP" _shared/scripts/claude-account.sh
+ok "$rc|${out:-<empty>}" "3|<empty>" "cr2. a cited path the peer's commits touch → 3"
+has "$err" "local master in $IP is 1 commit(s) ahead of origin/master: rollout worktrees branch from origin/master" "cr2. … the block report names the peer"
+# cr3: an untouched cited path → 0
+crrun "$CR" "$IP" docs/adr/0026-y.md
+ok "$rc|$out" "0|pushed" "cr3. a cited path the peer's commits leave alone → 0"
+has "$err" "is a peer of the clone-rooted Project root" "cr3. … with the peer note"
+# cr4: the in-place member found only through the registry → 0 plus a note
+write_reg "$IP"
+crrun "$CR" ""
+ok "$rc|$out" "0|pushed" "cr4. the peer from the registry only → 0"
+has "$err" "note: local master in $IP is 1 commit(s) ahead" "cr4. … with the note"
+crrun "$CR" "" _shared/scripts/claude-account.sh
+ok "$rc" 3 "cr4. … and a touched cited path still blocks it → 3"
+rm -f "$reg"
+# cr5: a touched glob → 3
+commit "$IP" "add adr 0042" docs/adr/0042-x.md
+crrun "$CR" "$IP" 'docs/adr/0042-*.md'
+ok "$rc" 3 "cr5. a cited glob the peer's commits touch → 3"
+# cr6: a <y>-rollout root with no twin is not clone-rooted → today's rule, 3
+crclone "$tmp/cr/y-rollout"
+crrun "$tmp/cr/y-rollout" "$IP"
+ok "$rc" 3 "cr6. a *-rollout root with no in-place twin → the strict rule, 3"
+# cr7: the incident: the commits touch claude-account.sh and a review doc; the task cites the member's toplevel
+crfresh; commit "$IP" "fix claude-account" _shared/scripts/claude-account.sh; commit "$IP" "review doc" docs/reviews/r.md
+crrun "$CR" "$IP" "$IP" "~/nowhere/x.md"
+ok "$rc|$out" "0|pushed" "cr7. the 2026-10-19 incident, the cited path the member's toplevel → 0"
+has "$err" "note: cited directory $IP does not scope $IP's ahead commits" "cr7. … the cited directory is noted, never scoping"
+has "$err" "is 2 commit(s) ahead of origin/master (" "cr7. … and the peer note"
+crrun "$CR" "$IP" docs
+ok "$rc" 0 "cr7. … a cited existing directory inside the member never scopes it either → 0"
+has "$err" "cited directory docs does not scope $IP's ahead commits" "cr7. … noted"
+# cr8: a cited file → 3, absolute or relative
+crrun "$CR" "$IP" "$IP/_shared/scripts/claude-account.sh"
+ok "$rc" 3 "cr8. a cited file (absolute, in the member) the commits touch → 3"
+crrun "$CR" "$IP" docs/reviews/r.md
+ok "$rc" 3 "cr8. … and relative → 3"
+# controls: an in-place-rooted run keeps today's rule; the clone itself ahead still blocks
+crrun "$IP" "$CR"
+ok "$rc" 3 "control: an in-place-rooted run (the root ahead) → 3"
+crfresh; commit "$CR" "a commit in the clone" a.md
+crrun "$CR" "$IP"
+ok "$rc" 3 "control: the clone itself ahead → 3, whatever is cited"
+has "$err" "local master in $CR is 1 commit(s) ahead" "control: … naming the clone"
+crfresh; commit "$IP" "peer thread" THREAD.md
+crrun "$CR" "$IP"
+has "$err" "touching only THREAD.md: not a blocker" "control: a THREAD.md-only peer keeps its own note"
+
 # ======== warn: cited paths ==============================================================================
 # 21. an uncommitted cited ADR, by name and by glob; staged-only too
 fresh

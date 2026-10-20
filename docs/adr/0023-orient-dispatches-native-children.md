@@ -1,7 +1,9 @@
 # 0023 — orient dispatches native children of its own session
 
 Date: 2026-10-14
-Status: accepted (supersedes ADR 0010; amends ADR 0003)
+Status: accepted, shipped in 3.1.0 by p19-3, #124 (supersedes ADR 0010; amends ADR 0003)
+*(Amended by ADR 0040, 2026-10-19: orient's child-agent batches retire; serial-shaped work runs as a
+serial rollout, and orient spawns no children.)*
 
 ## Context
 

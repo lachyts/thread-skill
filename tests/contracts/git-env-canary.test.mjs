@@ -35,12 +35,13 @@ const consts = (() => {
 })()
 const [LOG, TRIP, ACK] = consts
 
-// § 3c item 5 as it stood before p14-6: repair's § 3e carries the git-env reading, § 3c is never edited for it.
+// § 3c item 5 as it stood before p14-6, plus p23-4's `noslot` reading: repair's § 3e carries the git-env reading, § 3c
+// is never edited for it.
 const C3_ITEM5 = "5. for a RACE only, the lead's re-verify verdict, so Lachy decides with it on screen: the owner session's halt\n" +
   "   reason (`RACE: origin/<default> fails the verifier`), and the verdict file\n" +
-  "   `<repoPath>/.claude/integration/race-<slug>.rc` (`0` green; any other rc red, `124` a timeout; absent: it\n" +
-  "   never finished, which reads as red) with the tail of `race-<slug>.log` beside it. An UNVERIFIED task was\n" +
-  '   never re-verified: say so.'
+  "   `<repoPath>/.claude/integration/race-<slug>.rc` (`0` green; any other rc red, `124` a timeout; `noslot`\n" +
+  "   never ran (no verify slot came in time); absent: it never finished, which reads as red) with the tail of\n" +
+  '   `race-<slug>.log` beside it. An UNVERIFIED task was never re-verified: say so.'
 // Heartbeat clause (4), byte for byte: the merge-result rule reaches it through "act on it as §4.5 would".
 const HB4 = '(4) If a background Integration command this session launched (the verifier, merge-task.sh, a backoff) has not ' +
   'reported: when its result file exists (`<out>.rc`, or `.claude/merge-task.status`), act on it as §4.5 would; otherwise do nothing more.'
@@ -257,6 +258,20 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !s27.includes("land.sh's `closeout_shaped`; stricter than its S9, so no merge and no empty commit") ||
     !s27.includes('a close-out committed on the local default branch mid-rollout must not halt an unattended run. The git-env canary (§ 4.5) honours this')) fails.push('owner-closeout')
 
+  // owner-refusal (p26-1): `arm` refuses a window whose owner does not hold, and an integrate, verify or RACE
+  // window's owner is the Integration lane (`_holds_lane`), so a skipped stamp stops at the arm, never as a
+  // `record not armed` trip; step 3 routes prepare's exit 1 (no `integrating:`) to mark-integrating; and step 4's
+  // exit-3 row spells step 3 out from its start, the stamp included.
+  const ownerB = bullet(canRaw, 'The owner rule.')
+  const exit1 = st3.includes('**exit 1**') ? st3.slice(st3.indexOf('**exit 1**'), st3.indexOf('**exit 2**')) : ''
+  const row3 = rows['3'] ?? ''
+  if (!ownerB.includes('`arm` refuses a window whose owner does not hold') ||
+    !(ownerB.includes('`_holds_lane`') || ownerB.includes('current `integrated` Integration-log line')) ||
+    !exit1.includes('mark-integrating') || !exit1.includes('`prepare` again, once') ||
+    !before(row3, '§ 2.5', 'check-all') || !before(row3, 'check-all', 'mark-integrating') || !before(row3, 'mark-integrating', 'prepare') ||
+    !ctxWindow.includes('the Integration lane') || !ctxWindow.includes('`arm` refuses a window whose owner does not hold') ||
+    !adr.includes('*(Amended 2026-10-19 by thread-skill-p26-1:')) fails.push('owner-refusal')
+
   // status: § 2 reads gitEnvHold, § 3 flags it (offline too), § 4's headline and action 7 route it to repair.
   if (!status2.includes('plus `gitEnvHold`') || !gflag.includes('it holds offline too') ||
     !status4.includes('`GIT-ENV HOLD: [[a]], [[b]]`') ||
@@ -300,7 +315,7 @@ test('the git-env canary holds at every site, consumer and record', () => {
 
 const RULES = ['marker-tie', 'arm-sites', 'check-sites', 'check-all-sites', 'integrate-check', 'prepare-cases', 'step11-halt',
   'lane-free', 'race-gitenv', 'race-followon', 'drop-guard', 'merge-result', 'exit-rule', 'owner-closeout', 'status', 'schedule',
-  'repair', 'adr', 'context-readme']
+  'repair', 'adr', 'context-readme', 'owner-refusal']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -369,7 +384,7 @@ test('control: each RACE site or in-flight definition without its git-env halt f
 
 test('control: the follow-on reading moved into § 3c fails race-followon', () => {
   const s = 'For this slug only, absent means the re-verify\n  never ran, or was skipped or stopped by the git-env halt, not a red result; `0` means it ran green but the\n  lead never acted on it.'
-  const moved = edit(edit(real.repair, s, ''), '   never re-verified: say so.\n', `   never re-verified: say so. ${s.replace(/\n {2}/g, ' ')}\n`)
+  const moved = edit(edit(real.repair, s, ''), 'was never re-verified: say so.\n', `was never re-verified: say so. ${s.replace(/\n {2}/g, ' ')}\n`)
   CONTROLLED.add('race-followon')
   assert.deepEqual(check({ ...real, repair: moved }), ['race-followon'], 'moved into § 3c')
 })
@@ -412,6 +427,15 @@ test('control: a repair hand-off not held behind the git-env hold fails repair',
 
 test('control: an ADR bullet without the upgrade gap fails adr', () => {
   only('adr', 'and the upgrade path:', 'and', 'adr', 'upgrade')
+})
+
+test('control: an exit-3 row without mark-integrating, no step-3 exit-1 route or an integrating:-only owner rule fails owner-refusal', () => {
+  const row3 = real.execute.split('\n').find((l) => l.startsWith('   | 3 | '))
+  only('execute', row3, row3.replace('`mark-integrating`, ', ''), 'owner-refusal', 'exit-3 row')
+  const exit1 = real.execute.split('\n').find((l) => l.startsWith('   - **exit 1**'))
+  only('execute', exit1 + '\n', '', 'owner-refusal', 'step-3 exit 1')
+  const owner = real.execute.split('\n').find((l) => l.startsWith('- **The owner rule.**'))
+  only('execute', owner, "- **The owner rule.** A window can only be open while its vault owner holds: a task call's note reads `in_progress`; an integrate call's, a verify's or a RACE re-verify's note carries `integrating:`. Once the owner no longer holds, any canary verb compares the window once and closes it, so a hard pause's TaskStop'd calls, a crash between `arm` and launch and a dead call's window all end.", 'owner-refusal', 'owner rule reverted')
 })
 
 test('control: no README line fails context-readme', () => {

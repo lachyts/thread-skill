@@ -1,6 +1,6 @@
 ---
 name: schedule
-description: 'Use when planning a parallel rollout of Obsidian tasks under a single project — produces a thin rollout note (data only) that `/thread:execute` runs as a queue on the Workflow engine. Reads tasks from ~/repos/obsidian/Work/Tasks/, orders the queue (dependencies recorded in frontmatter, Solo proposed for sweeping changes), auto-merges affine same-file task clusters (same change, artificially split) into one dispatch unit, refuses a second unfinished rollout on a repo (--regenerate supersedes this project''s paused or unstarted one, carrying its unlanded tasks), and writes an always-dated <project-slug>-rollout-<YYYY-MM-DD>.md with `protocol_version: 5` + config defaults. Scope: Obsidian only.'
+description: 'Use when planning a rollout (parallel or serial) of Obsidian tasks under a single project — produces a thin rollout note (data only) that `/thread:execute` runs as a queue. Reads tasks from ~/repos/obsidian/Work/Tasks/, orders the queue (dependencies in frontmatter, Solo for sweeping changes), folds affine same-file task clusters into one dispatch unit, refuses a second unfinished parallel rollout on a repo (--regenerate supersedes this project''s paused or unstarted one, carrying its unlanded tasks), writes one `shape: serial` note per serial chain, and always dates <project-slug>-rollout-<YYYY-MM-DD>.md, with `protocol_version: 5`. Scope: Obsidian, plus § 0''s rollout-clone setup.'
 ---
 
 # /thread:schedule — turn a backlog of Obsidian tasks into a rollout note
@@ -13,7 +13,7 @@ This skill is the **planner**. The rollout note it produces is a data artefact �
 
 ## Scope
 
-**Obsidian only**, plus § 0's self-rollout, remote, landing-register and pushed-base probes of the target repo; the self-rollout probe reads the plugin marketplace registry, and on a match makes read-only `git rev-parse` and `git remote get-url` calls in the sibling `<repoPath>-rollout`; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; § 3.6 runs `gated_inputs.py sweep` (it reads task notes only); step 7.5 (and § 0's `file` finish) runs `close-score.py` on the prior (ADR 0037 d4), which reads the prior note, the Run record, `reviews.jsonl` and `tunings.jsonl` under the events directory, `rollouts.toml` through `rollout-settings.py`, every note under `Work/Tasks/` (Archive included) for `fixes:`/`merged_into:`, and the Project root's git, read-only and never fetched (land.sh's `git remote get-url origin`, escapes.py's read-only rev-parse/symbolic-ref/log/show/rev-list/merge-base/cat-file/diff-tree/blame reads, and `git remote get-url origin` in each clone `reviews.jsonl` names), and writes only fold-journals' `call-journal` lines to the prior's Run record and tune.py's one `tunings.jsonl` line, both under the events directory, outside the vault and the repo (its scratch dir is removed on exit); and step 7.5 moves a superseded rollout note with a plain `mv`. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
+**Obsidian only**, plus § 0's rollout-clone setup (ADR 0042) and its remote, landing-register, self-rollout and pushed-base probes of the target repo; the self-rollout probe's `--resolve` makes read-only `git rev-parse`, `git check-ignore` and `git remote get-url` calls in the repo and its rollout clone `<toplevel>-rollout` and reads the plugin marketplace registry; its `--ensure` writes only that clone, after Lachy's yes when it is new: an empty-directory probe with `git check-ignore` (removed again when the parent work tree would track it) when it would sit inside another work tree, one `git clone` of the repo's origin into it, and on every run a `git fetch` of its default branch and, with that branch checked out, a `git merge --ff-only --no-autostash`; a clone it made stays when a later step stops; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; § 3.6 runs `gated_inputs.py sweep` (it reads task notes only); step 7.5 (and § 0's `file` finish) runs `close-score.py` on the prior (ADR 0037 d4), which reads the prior note, the Run record, `reviews.jsonl` and `tunings.jsonl` under the events directory, `rollouts.toml` through `rollout-settings.py`, every note under `Work/Tasks/` (Archive included) for `fixes:`/`merged_into:`, and the Project root's git (or its in-place checkout's when fresher, ADR 0042), read-only and never fetched (land.sh's `git remote get-url origin`, escapes.py's read-only rev-parse/symbolic-ref/log/show/rev-list/merge-base/cat-file/diff-tree/blame reads, and `git remote get-url origin` in each clone `reviews.jsonl` names), and writes only fold-journals' `call-journal` lines to the prior's Run record and tune.py's one `tunings.jsonl` line, both under the events directory, outside the vault and the repo (its scratch dir is removed on exit); and step 7.5 moves a superseded rollout note with a plain `mv`; § Serial path's `serial-chains.py` (S2) reads task notes, project notes under `Work/Projects/`, `launch-folders.json` and the plugin's `.claude-plugin/plugin.json`, with a read-only `git rev-parse --show-toplevel` and `git remote get-url origin` per path it claims, its S3 check reads notes only, and its S4 runs `rollout-settings.py` as step 2.8 does. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
 
 ## Invocation forms
 
@@ -31,41 +31,93 @@ The argument resolves to a project-note slug (the thing the task's `projects:` f
 ### 0. Execution-fit gate
 
 Run the execution-fit test (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` — the
-canonical definition). Rollouts are for **rollout-shaped** work: tasks that converge on ONE
-code repo, land as a PR each, and verify machine-checkably inside the run (tests / build /
-greps). Before computing anything, scan the candidate set for misfits — tasks whose core action
-is an external publish (CMS / live site / DNS / config console), whose ordering constraint is a
-measurement window or calendar date rather than file overlap, or whose verification only
-arrives days later (impact measures). If misfits dominate, **stop and route the set to the
-session lane** (`defer` for `scheduled:`-date dispatch, `open` via the task's `## Launch`
-block) instead of forcing a rollout: the engine's parallelism is forbidden by isolation
-windows, every externally-publishing task pauses at the human gate (ADR 0008; execute § 3.7), and
-the queue cannot see a window or calendar constraint. A mixed set is fine if
-the rollout-shaped subset can roll out while the misfits stay unstamped — name them in the gate.
+canonical definition, three-way since ADR 0040). This run writes a **parallel rollout** for
+**parallel-shaped** work, or, for an all-serial set, serial rollouts (§ Serial path). Parallel-shaped
+work is tasks that converge on ONE code repo, land as a PR each, and verify machine-checkably inside
+the run (tests / build / greps), with no external publish and no tool or launch profile the lead
+lacks. Before computing anything, scan the candidate set for misfits of two kinds. **Session-lane misfits**: tasks that are conversation-gated, whose ordering constraint
+is a measurement window or calendar date rather than file overlap, or whose verification only
+arrives days later (impact measures). **Serial-shaped members**: tasks with no PR per task (vault
+notes, several repos) or no machine check inside the run, whose core action is an external
+publish (CMS / live site / DNS / config console), or that need an external tool or launch profile
+the lead lacks. In a mixed set each is named in the gate as serial-shaped and left unstamped; a
+serial-shaped member is never routed to the session lane, save ruling (c)'s plugin-repo work (the fit
+doc's **Rulings**). Orient § 6 applies ruling (c) before it calls schedule, and schedule's serial path
+enforces it (`serial-chains.py`).
 
-After the misfit scan, resolve the target repo, the project root the rollout note will carry, and check
-the dispatch blockers against it. Read the project note's `Local:` line; if there is none, ask the user
-for the path. First run the self-rollout check in
-`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at it; never copy the
-snippet here) on that path, with `<mode>` set to `--resolve`: a rollout never runs against the plugin's
-live checkout. On exit 0 its one stdout line is the resolved path: every check below runs against it,
-and step 6 writes it as `{{REPO_PATH}}`. When it is the separate clone, say so in one line naming both
-paths. Only the Project root moves: `<localPath>` below and step 6's Thread line keep the `Local:` path,
-where the thread lives. Exit 3 (a live checkout with no usable clone), exit 2 or any other
-non-zero exit is a stop, below. Then run the remote check from the same § Dispatch blockers against the
-resolved path (a pointer, never a copy), followed by its `gh repo view` confirmation. Then run the
-landing register check from the same § Dispatch blockers against the same resolved path (again a
-pointer, never a copy): a rollout never pushes to or merges into a repo on the landing register
-(ADR 0028 § Decision). Then run the pushed-base check from the same § Dispatch blockers (a pointer,
-never a copy) with the resolved path, `<localPath>` set to the project note's `Local:` path (empty if
-the user gave the path), and no cited paths: rollout worktrees branch from `origin/<default>`, so a
-local default branch ahead of it (in this clone or a known sibling clone) hides those commits from
-the agents. Last, run the unfinished-rollout check against the same resolved path, passing
-`--regenerate` exactly when this run has it:
-`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --repo <resolved path> (--project <target> | --tasks <this run's --tasks list>) [--regenerate]`.
-A repo holds at most one unfinished rollout (one directly in `Work/Tasks/`, neither `done` nor
-`dropped`, with a task not yet merged). A rollout awaiting sign-off (`paused_for: sign-off`, execute § 4.5
-step 5's form: only gates wait on Lachy) is unfinished too: the refusal names its waiting tasks and the
+When no member is parallel-shaped and any is serial-shaped, this run takes **## Serial path** below
+and skips the rest of § 0: no `Local:` read, no probe, no fetch. Any session-lane misfit is named as
+such and left unstamped there (S1).
+
+If session-lane misfits dominate, **stop and route the set to the session lane** (`defer` for
+`scheduled:`-date dispatch, `open` via the task's `## Launch` block), its serial-shaped members
+excepted, instead of forcing a rollout: the engine's parallelism is forbidden by isolation
+windows, and the queue cannot see a window or calendar constraint. A mixed set is fine if the
+parallel-shaped subset can roll out while the misfits stay unstamped — name each misfit in the gate
+with its outcome (serial-shaped or session lane), and end the gate with the serial-shaped members'
+follow-up line, `/thread:schedule --tasks <serial members>`, which takes them down the serial path once
+this run is done. A run writes one shape.
+
+**Under orient-all.** A fork of `/thread:orient-all` runs this skill with `--tasks` and asks nothing: the
+decision round there authorised the member set. Each question below takes orient-all § 6's answer, and step 6
+names the note with the slug its prompt gives. It routes nothing: § 0's session-lane routing and the follow-up
+`/thread:schedule --tasks <serial members>` line are returned to orient-all, never run. Step 8 (or S7) reports
+them.
+
+After the misfit scan, resolve the target repo and the Project root the rollout note will carry, and
+check the dispatch blockers. Every parallel rollout runs from its **rollout clone** (ADR 0042): a second
+full clone of the repository beside its toplevel, `<toplevel>-rollout`, never nested inside it, so a
+peer session's commit in the in-place checkout never moves the tree a rollout integrates in. In order:
+
+1. Read the project note's `Local:` line; if there is none, ask the user for the path.
+2. Run the remote check in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers
+   against the `Local:` path (a pointer, never a copy), followed by its `gh repo view` confirmation. Then
+   run the landing register check from the same § Dispatch blockers against the same path (again a
+   pointer, never a copy): a rollout never pushes to or merges into a repo on the landing register
+   (ADR 0028 § Decision). All three key on the GitHub origin, which a usable clone shares, so they answer
+   the same for the toplevel as for its clone, and a repo they refuse is never cloned.
+3. Then run the self-rollout check from the same § Dispatch blockers (point at it; never copy the
+   snippet here) on the `Local:` path, with `<mode>` set to `--resolve`: read-only, it names the Project
+   root, the clone, keeping a sub-path `Local:` as the same sub-path of the clone.
+4. Act on its exit. **Exit 4** (no clone yet; its stdout line is the would-be root, its stderr the origin
+   URL): ask one AskUserQuestion, "Create the rollout clone `<C>`, a full `git clone` of `<origin URL>`?";
+   when its stderr has a `nested in <P>` line, the question adds "<P> must ignore it: the clone step checks
+   that first and creates nothing if <P> would track it". Yes → run the same snippet with `<mode>` set to
+   `--ensure`, with the Bash tool's `timeout: 600000`; No → stop before step 1, with nothing written.
+   **Exit 0** (the clone exists) → run the snippet with `<mode>` set to `--ensure` directly, even when its
+   stderr has a `note:` that the clone has no `<sub>` yet: `--resolve` never fetches, so a stale clone is no
+   stop, and `--ensure` refuses only when the clone still lacks it after its fast-forward. `--ensure`
+   makes the clone when it is missing (an empty-directory ignore probe first when it would sit inside
+   another work tree, then one `git clone`), re-checks it, fast-forwards it (`git fetch` and a
+   `merge --ff-only` of its default branch) and notes the gitignored local state the in-place checkout
+   has and the clone lacks; nothing is copied. Its one stdout line is the resolved path: every check
+   below runs against it, and step 6 writes it as `{{REPO_PATH}}`. Say in one line that the rollout runs
+   from the clone, naming both paths, and carry its `note:` and `WARN:` lines to step 8's "Pre-flight —
+   rollout clone". Only the Project root moves: `<localPath>` below and step 6's Thread line keep the
+   `Local:` path, where the thread lives. Exit 3 (no usable clone: outside git, a linked worktree,
+   `~/Projects` itself, an unusable clone, a parent that would track it, or, from `--ensure` alone, a
+   sub-path the clone still lacks after its fast-forward), exit 5 (no GitHub origin), exit 2 or any other
+   non-zero exit of either mode is a stop, below.
+5. Then run the pushed-base check from the same § Dispatch blockers (a pointer, never a copy) with the
+   resolved path, `<localPath>` set to the project note's `Local:` path (empty if the user gave the
+   path), and no cited paths: rollout worktrees branch from `origin/<default>`, so a local default branch
+   ahead of it hides those commits from the agents. The clone's own ahead commits block; another clone of
+   the set (the in-place checkout) blocks only on a path a task cites, which the re-run after step 2
+   passes.
+6. Last, run the unfinished-rollout check against the same resolved path, passing `--regenerate` exactly
+   when this run has it:
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --shape parallel --repo <resolved path> (--project <target> | --tasks <this run's --tasks list>) [--regenerate]`.
+
+Pushed-base and unfinished-rollout run after `--ensure` because both need the real root: the
+unfinished-rollout check compares `repo:<realpath>` literally (and exits 2 on a missing path), and a
+toplevel standing in for it would hold the rollout to the in-place checkout's own commits. A repo holds
+at most one unfinished parallel rollout (one directly in `Work/Tasks/`, neither `done` nor `dropped`,
+with a task not yet merged), and none on a place a live serial chain writes: the check refuses a
+parallel run whose root overlaps a surface of an unfinished serial chain, since that chain owns it,
+and a supersede never crosses shapes. A clone root never overlaps a chain on the in-place checkout, so the
+two coexist as peers (ADR 0042, intended); the refusal still fires for a chain that claims
+`repo:<clone>`, and for a rollout rooted in place before ADR 0042.
+A rollout awaiting sign-off (`paused_for: sign-off`, execute § 4.5 step 5's form: only gates wait on Lachy) is unfinished too: the refusal names its waiting tasks and the
 sign-off path (sign off, then `/thread:execute`, or `/thread:repair` to defer them), and `--regenerate` on
 this project's rollout carries them forward still gate-pending. The check prints exactly one stdout line:
 
@@ -102,15 +154,17 @@ this project's rollout carries them forward still gate-pending. The check prints
 - `refuse …` (exit 3) or exit 2 → a failure, below.
 - `WARN:` lines (stderr, on any exit) → carry them to step 8's pre-flight.
 
-On any failure **stop before step 1**: no task stamped, no rollout note, no heartbeat, with one
-exception: a `file` move or an `interrupted` finish that § 0 made before a later refusal stays,
-since it completes a supersede an earlier run confirmed. Print the snippet's remedy line verbatim
-(or gh's error); for a listed repo that is the `listed <owner/name>: <reason>` line with its remedy,
-since unlisting is Lachy's call, for the self-rollout check it is the whole stderr (it names the
-fix), for the pushed-base check's exit 3 it is the whole stderr (the
+On any failure **stop before step 1**: no task stamped, no rollout note, no heartbeat, with two
+exceptions: a `file` move or an `interrupted` finish that § 0 made before a later refusal stays,
+since it completes a supersede an earlier run confirmed; and a rollout clone `--ensure` made stays.
+Any § 0 stop after that clone was made, a cancel at step 1, or any stop before step 6 prints
+`rollout clone <C> was created by this run and stays: the next /thread:schedule reuses it`. Print the
+snippet's remedy line verbatim (or gh's error); for a listed repo that is the `listed <owner/name>: <reason>` line with its remedy,
+since unlisting is Lachy's call, for the self-rollout check's `--resolve` or `--ensure` it is the whole
+stderr (it names the fix), for the pushed-base check's exit 3 it is the whole stderr (the
 ahead commits and the land-by-PR or wait-for-the-landing-PR remedy), and for the unfinished-rollout
 check's refusal or exit 2 it is the whole stderr (each unfinished rollout with its remedy). The
-cluster is still rollout-shaped; don't re-route it to the session lane.
+cluster is still parallel-shaped; don't re-route it to the session lane or a serial rollout.
 
 **Supersede prep.** Only once every § 0 check has passed and the unfinished-rollout check printed
 `supersede <prior>` (directly, or on the re-run after an `interrupted` finish), run
@@ -122,8 +176,20 @@ before this run writes anything, print its `HOLD:` lines and point at `/thread:r
 which records Lachy's decision (step 6's carry would refuse the prior anyway). Any other non-zero exit
 (a gh failure) is no stop: carry its `ERROR:` lines into step 1's confirm and go on. A task it could
 not resolve carries at its recorded status, and execute's resume asks GitHub again.
+When `<prior>` carries `start: unattended` (*Start when ready*, `_shared/vault-grammar.md` § Rollout
+start stamp), remove that line before step 1 too, after `resume` (whose exit 3 stops the run first,
+the line untouched), and keep the exact line and its place: the Chorus Stage must never start a lead
+on a note this run supersedes, which would make step 6's carry refuse a running prior. Step 1's
+confirm names the clear: `cleared [[<prior>]]'s start when ready: a cancel puts it back`.
+**Put back.** A run that stops before step 6 writes its note (a cancel at step 1's confirm, or any
+stop from step 1 to step 5) puts that exact line back at its place in `<prior>`'s frontmatter, just
+below `status:` when that place is gone, and prints `restored [[<prior>]]'s start when ready: this run
+stopped before writing its note`. Once step 6 has written the note, the line is never put back: the
+prior's unlanded tasks are on their way to it, and a stop before step 7.5's close-out is the next
+`--regenerate`'s `interrupted` finish. The prior's other stamps, `superseded_by:` and the move stay
+step 7.5's. Report the clear in step 8 as `cleared [[<prior>]]'s start when ready: superseded here`.
 
-There is no minimum size: shape decides, not count. A rollout-shaped cluster of one still rolls
+There is no minimum size: shape decides, not count. A parallel-shaped cluster of one still rolls
 out — the plan gate, verifier retry, master review, and auto-merge are the point. For N ≤ 2,
 note that the ceremony is thin and proceed.
 
@@ -142,11 +208,11 @@ Walk `~/repos/obsidian/Work/Tasks/*.md`. Filter:
 
 On `supersede <prior>` (§ 0), first run the git-env canary's `check-all` on the prior (execute § 4.5 *Git-env canary*): `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py check-all --rollout ~/repos/obsidian/Work/Tasks/<prior>.md`. It compares the prior's windows left open (a hard pause's TaskStop'd calls) before its tasks move. A non-zero exit stops the run before this run writes a rollout note or a task stamp: print its stderr verbatim (exit 3 → `/thread:repair [[<prior>]]`, which shows the evidence and records Lachy's ack). This preview may append a trip line to the prior rollout note's `## Git-env log` before you confirm anything. That write is intended: it records evidence that a window changed. The decision to accept it stays with `/thread:repair`. Then preview the carry: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py carry --from ~/repos/obsidian/Work/Tasks/<prior>.md --dry-run`. It writes nothing and prints one line per task linked to the prior rollout. Its `carry <slug> <state>` lines join the candidate set (deduplicated, whatever their status: a carried `review`, `in_progress` or set-aside task keeps its place in the queue). Its `keep <slug> <state>` lines (merged, folded, or another status such as `dropped` or `parked`) stay with the prior rollout. After a carried task's line it prints `restamp <slug> rung=<name|kept|-> drop=<keys|->` when carry will map that task's legacy stamps (ADR 0029): `rung=<name>` is the ladder's top rung it writes (a `model: fable`, or an `effort: xhigh` or `max`), `kept` its own `rung:` staying, `-` none; `drop=` the legacy keys it removes. § 4.7 reads these lines and never lowers the rung they name. After the carry and keep lines it prints `order <slug-a>,<slug-b>[,…]: <clause>` for each clause of the prior note's own prose (its lead's rules, its queue rationale; never fenced code) that names two or more carried tasks, at least one `queued`, beside an ordering word ("after", "needs", "→" and the like). An order kept only in that prose never reached `depends-on:`, so the carry alone drops it: step 3 reads each `order` line's clause.
 
-**Re-root guard.** When the prior's `Project root` differs from § 0's resolved path (both `~/` expanded and compared by real path: § 0's swap to the separate clone, or a changed `Local:` line) and any task on a `carry` line has started (its note carries `started:`, whatever its state), stop before this run writes a rollout note or a task stamp, and never re-root those tasks silently: their worktrees, branches and PRs were made under the prior root, and no step moves them. Print each such task, both roots and the remedy: defer those tasks through `/thread:repair [[<prior>]]` (`/thread:repair` § 5's clean defer), then run `--regenerate` again. A carry with no started task takes the new root.
+**Re-root guard.** When the prior's `Project root` differs from § 0's resolved path (both `~/` expanded and compared by real path: § 0's rollout clone, or a changed `Local:` line) and any task on a `carry` line has started (its note carries `started:`, whatever its state), stop before this run writes a rollout note or a task stamp, and never re-root those tasks silently: their worktrees, branches and PRs were made under the prior root, and no step moves them. Print each such task, both roots and the remedy: defer those tasks through `/thread:repair [[<prior>]]` (`/thread:repair` § 5's clean defer), then run `--regenerate` again. A carry with no started task takes the new root.
 
 A non-zero preview exit stops the run before this run writes a rollout note or a task stamp: print its stderr verbatim. Exit 2 is a refusal, for one of two causes: an undecided RACE or UNVERIFIED on the prior (`/thread:repair [[<prior>]]` records Lachy's decision), or a refused ladder file when a carried task needs the top rung (`ERROR: carry: ladder file refused: <path>:<line>: <reason>`). The refused ladder's remedy is Lachy's edit to `~/.config/thread/ladder.toml` at the line named, then `--regenerate` again.
 
-Report the count and let the user confirm before proceeding. The confirm lists the candidates, each skipped task with its rollout, each skipped decision task and, on a supersede, both the carried and the kept lists (the carried list with its `restamp` lines and any `WARN: carry:` line for a value carry left in place), the `order` lines (this preview's and, after an `interrupted` finish, § 0's carry's) with step 3's proposals from them, any `ERROR:` lines from § 0's `resume`, the check's `WARN: <prior> is incomplete` line when it printed one, and, after an `interrupted` finish, § 0's pinned report.
+Report the count and let the user confirm before proceeding. The confirm lists the candidates, each skipped task with its rollout, each skipped decision task and, on a supersede, both the carried and the kept lists (the carried list with its `restamp` lines and any `WARN: carry:` line for a value carry left in place), the `order` lines (this preview's and, after an `interrupted` finish, § 0's carry's) with step 3's proposals from them, any `ERROR:` lines from § 0's `resume`, § 0's `cleared [[<prior>]]'s start when ready` line when the Supersede prep removed one, the check's `WARN: <prior> is incomplete` line when it printed one, and, after an `interrupted` finish, § 0's pinned report.
 
 ### 2. Extract file scope per task — best effort
 
@@ -168,8 +234,12 @@ cited paths: the detected file-sets plus every repo path the task bodies name (`
 as a git glob, `CONTEXT.md`, any `~/…` path as written; do not pre-filter them), never THREAD.md.
 Its `pushed-base: WARN:` lines name local copies the agents won't see (an uncommitted change, a
 commit only on the checked-out branch, an untracked file); carry them to step 8's pre-flight. Show
-its notes here. An exit 3 or 2 stops exactly as in § 0; nothing has been written yet, except
-`resume`'s done flips (§ 0's Supersede prep) and a § 0 `file` or `interrupted` finish.
+its notes here. With the rollout clone as the root (ADR 0042), this re-run is where a commit in another
+clone of the set, the in-place checkout among them, blocks: only when it touches one of these cited
+paths, and never through a cited existing directory (a repo root a body names notes, never scopes);
+any other ahead commit there is a note. An exit 3 or 2 stops exactly as in § 0; nothing has been
+written yet, except `resume`'s done flips (§ 0's Supersede prep), a § 0 `file` or `interrupted` finish,
+and a rollout clone § 0 made.
 
 ### 2.5. Detect the project's verifier
 
@@ -212,11 +282,12 @@ The rollout's four numeric defaults (`parallel_ceiling`, `max_review_rounds`, `m
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py --repo <§ 0's resolved repo path>
 ```
 
-It prints one JSON line: each key's `value` and its `source`, `file:repo` (the file's `[repo."owner/name"]` table for this repo's GitHub origin, read from the local `git remote`, so a self-rollout's separate clone resolves the same as its primary checkout), `file:defaults` (its `[defaults]` table) or `built-in` (4 / 4 / 3 / 3 when the file sets none, or there is no file). The script's header is the one copy of the file format.
+It prints one JSON line: each key's `value` and its `source`, `file:repo` (the file's `[repo."owner/name"]` table for this repo's GitHub origin, read from the local `git remote`, so a rollout clone resolves the same as its in-place checkout), `file:defaults` (its `[defaults]` table) or `built-in` (4 / 4 / 3 / 3 when the file sets none, or there is no file). The script's header is the one copy of the file format.
 
 - **A non-zero exit stops the run before this run writes a rollout note or a task stamp**: print its stderr line verbatim (`rollout-settings: <path>:<line>: <reason>`, or `rollout-settings: --repo <p>: <reason>`) with the remedy "edit `~/.config/thread/rollouts.toml` at the named line, then re-run". Exit 3 adds "needs python ≥ 3.11" (a present file needs tomllib). A bad value is refused loudly, never dropped (ADR 0016).
 - **On success**, name each value and its source in the confirm batch (e.g. `parallel_ceiling 5 (file:repo), max_review_rounds 4 (built-in), …`) and store them for step 6's four settings substitutions.
 - **`spend_approval_usd`** resolves here too (ADR 0034: the standing approval's limit in US dollars; built-in `0`, which is off). Name it beside the four (`standing approval 50 USD (file:defaults)`, or `standing approval off (built-in 0)`) for § 3.6's ask-ahead question. It is never stamped on the rollout: execute's `approve-gates --standing` resolves it itself at run time.
+- **`verify_slots`** resolves here too (machine-wide, `[defaults]` only, built-in 2): name it in the confirm batch; it is never stamped on the rollout, and execute's `verify-timeout` reads it at each entry.
 
 ### 3. Extract dependencies
 
@@ -367,7 +438,7 @@ Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`.
 - `{{MAX_REVIEW_ROUNDS}}` — `max_review_rounds` as step 2.8 resolved it
 - `{{MAX_PLAN_ROUNDS}}` — `max_plan_rounds` as step 2.8 resolved it (the template's trailing comment on that line stays)
 - `{{PARALLEL_CEILING}}` — `parallel_ceiling` as step 2.8 resolved it
-- `{{REPO_PATH}}` — the repo path § 0 resolved and checked (the self-rollout check's `--resolve` output: the project note's `Local:` line or the path the user gave, or its separate clone)
+- `{{REPO_PATH}}` — the Project root § 0 resolved and checked: `--ensure`'s output, the rollout clone of the project note's `Local:` line or of the path the user gave (ADR 0042), with that path's sub-path kept
 - `{{THREAD_LINE}}` — the whole line `` Thread: `<path to the thread file>` ``, naming the project's THREAD.md or its shared thread file when one exists (e.g. `` Thread: `~/repos/tools/chorus/THREAD.md` ``); otherwise delete the line entirely — no blank placeholder line
 - `{{QUEUE_TABLE}}` — the rendered `## Queue` table, header row `| # | Task | Scope | Mode |` included, one row per task in schedule order (step 5): `| <n> | [[<full-slug>\|<alias>]] | <scope> | <mode> |`. Mode is `solo` (a confirmed Solo task), `sequential-merged (one agent/PR)` (a merged unit from step 4.5: one agent does the folded sub-tasks in sequence), `carried (<queue state>)` (a task carried from the superseded rollout, with its state from step 1's preview) or `—`. The row is the task's rank (`reconcile-rollout.py next` reads a task's first wikilink on a table row or list item), so nothing above the table lists a task.
 - `{{QUEUE_RATIONALE}}` — short prose explaining the order (dependencies, Solo placement, ties)
@@ -403,7 +474,7 @@ The ask-ahead section is exactly:
 ## Decisions (asked ahead <YYYY-MM-DD>)
 
 - Spend: Lachy approved up to <N> USD total exposure for this task at /thread:schedule (summed across Logins, a recurring cap counted per month).
-- Planner: word each spend gate as one priceable total, its period and count (in the cap's own unit) inside the cap clause, e.g. `spend: <what> — cap 50 USD per Login per month across 3 Logins`; the cap is the task's whole ceiling, so price per-item spend into the total (never "every push" or "each image"); keep other counts, `per`/`each` words, bare numbers and words that widen the cap (`plus` tax, fees or overage, `soft`, `to start`) out of the bullet (detail goes in the plan's other sections). A cap the standing approval cannot price is asked mid-run.
+- Planner: word each spend gate as one line whose Cap is one priceable total, its period and count (in the cap's own unit) inside the cap clause, e.g. `spend: <what> — cap 50 USD per Login per month across 3 Logins`; the Cap is the task's whole ceiling, so price per-item spend into the total (never "every push" or "each image"); put how it splits (run counts, per-call limits, iterations) in sub-bullets nested under the gate, which the Cap must hold, and keep other counts, `per`/`each` words, bare numbers and words that widen the cap (`plus` tax, fees or overage, `soft`, `to start`) off the gate's own line (ADR 0038). A cap the standing approval cannot price is asked mid-run.
 ```
 
 The `## Decisions` prefix makes it a recorded decision (descope asks before touching it) and keeps it out of the brief; the planner reads the note in full, so its Planner line shapes the gate the standing approval prices.
@@ -437,15 +508,20 @@ Queue for {{PROJECT_NAME}} written to [[{{ROLLOUT_SLUG}}]] — N tasks (K carrie
 filed [[<P>]] into Archive/Rollouts/                     # one line per § 0 `file` finish
 finished the interrupted supersede of [[<P>]]; [[<N>]] was incomplete and is superseded here   # per `interrupted` finish
 scored [[<P>]]: <close-score's line>                     # per close-score.py run (step 7.5, § 0's `file` finish)
+cleared [[<P>]]'s start when ready: superseded here      # when § 0's Supersede prep removed its start: unattended
 Verifier: <detected command>
 Settings: parallel_ceiling <n> (<source>), max_review_rounds <n> (<source>), max_iterations <n> (<source>), max_plan_rounds <n> (<source>); standing approval <t> USD (<source>), or off (built-in 0)
 
-Open in Obsidian to review. To execute:
+Project root: {{REPO_PATH}}                              # the rollout clone (ADR 0042)
+Open in Obsidian to review. To execute, start a session in the Project root, then:
   execute [[{{ROLLOUT_SLUG}}]]                # continuous: the queue runs and merges to the end
   execute [[{{ROLLOUT_SLUG}}]] --gated        # pause for a human before each merge
+  start when ready                            # stamp start: unattended; the Chorus Stage starts the lead once the note is runnable
 
 The thread:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads this note and runs the three-layer convergence engine (plan-gate → Ralph retry → master review) via the Workflow tool.
 ```
+
+**Start when ready.** When Lachy answers a standalone run's summary with it, stamp `start: unattended` as a top-level frontmatter line just below `status:` on the note this run wrote (`_shared/vault-grammar.md` § Rollout start stamp) and stop: nothing runs. Under orient § 6, schedule writes nothing here, because orient § 9's offer asks it. Under orient-all, schedule writes nothing here either. The stamp is never written before step 7's last write; the vault grammar's reader would wait on `incomplete:` anyway.
 
 **Pre-flight — gated tasks.** If the user kept any of step 3.5's human/release-gated tasks (a quote-only match is none), list them above the summary so the user clears them before executing (an unaddressed gate makes the agent refuse mid-run):
 
@@ -468,6 +544,19 @@ Clear each by adding at the top of its ## Notes (keep the sentence for each shap
   Skip the resume prompt's "mark the capture done" step, because the engine owns this note's `status`.
 Drop each of these whole, as for a gated task (its ## Launch repo is another repository, so it is a § 0 misfit):
   - [[task-t]] — ## Launch repo ~/repos/workspaces, another origin
+```
+
+**Pre-flight — rollout clone.** List the `note:` and `WARN:` lines § 0's `--ensure` printed verbatim
+above the summary: the gitignored local state the in-place checkout has and the clone lacks (nothing is
+copied; copy an item by hand when the lead needs it), a clone it could not fast-forward, and a launch
+marker with no `.mcp.json` beside it, which the Chorus Stage refuses to start a Session in. Name the
+clone when § 0 made it this run. A lead runs at the Project root, or at an ancestor of it within its
+toplevel (execute § 2.8): a lead started by hand in a never-opened clone sees the workspace trust dialog
+once; the Stage's unattended start does not.
+
+```
+⚠️ Pre-flight — rollout clone (~/repos/<repo>-rollout; made by this run):
+  self-rollout-check: note: ~/repos/<repo>-rollout lacks .claude/settings.local.json, which ~/repos/<repo> has: …
 ```
 
 **Pre-flight — local copies agents won't see.** If step 2's pushed-base re-run printed any WARN
@@ -510,21 +599,101 @@ Expected to gate (each set aside for your sign-off if its plan declares a gate n
 swept, dismissed: [[task-u]] token (an LLM token count: "~31.5k tokens")
 ```
 
+## Serial path
+
+An all-serial set (§ 0: no member parallel-shaped, at least one serial-shaped) runs here instead of steps 1–8, and
+writes one **serial rollout** note per chain (ADR 0040): `shape: serial`, the chain's tasks in order, each row with
+the launch its Leg opens in, and the chain's surfaces. Chains whose surfaces are disjoint run side by side; a chain
+that writes a repo checkout owns that checkout. A member claims its launch folder, each path its `## Launch` names
+(its launch commands' `--add-dir` and `cd` paths among them, fenced or not), each `Local:` path of its first
+project and each surface added for it, or exactly what it declares in `surfaces:`, and every claimed path inside a
+git checkout widens to that checkout's toplevel. It never claims its launch profile's other Working roots (a
+workspace launcher's `add_dirs`), another project's `Local:`, a project's `repos:`, nor a repo or external system
+it writes but names nowhere: those are outside schedule's sight, which is why the default's WARN says to declare
+`surfaces:` for them (`serial-chains.py`'s header is the one statement of the surface grammar). Nor does it claim a
+`## Launch` path that is `/` or the home directory (a bare `cd ~` or `--add-dir ~`), which would contain every
+repo: a WARN names it.
+
+**S1. Discover.** Step 1's filters and skip rules pick the members (or take the `--tasks` set): a task already
+linked to a live rollout of either shape is skipped and named, and so is a decision task. Session-lane misfits are
+named as such and left unstamped. A standalone run confirms the member list in S4's batch; under orient § 7
+or orient-all § 6 nothing is asked.
+
+**S2. Plan.** Run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/serial-chains.py plan --tasks <serial members> [--surface <slug>=<raw>]… [--dep <slug>=<slug>]…`.
+It prints one JSON line: `chains` (each with its `tasks` in order, its `surfaces`, its `members` with each one's
+`surfaces`, `source`, `added` and `launch`, and its `externalDeps`), `sessionLane` and `warns`. Pass a path the
+agent reads in a member's body (outside `## Launch`) as `--surface <slug>=<path>` only for a member with no
+declared `surfaces:`: a declaration is the member's whole claim. Exit 3 (an unknown, null or missing launch
+folder, a missing launch-folders file an alias needs, a dependency cycle, a malformed declared token) or exit 2
+stops the run before anything is written: print its stderr verbatim. Name each `sessionLane` member, with its
+`why`, as ruling (c)'s session lane (no serial self-rollouts, the fit doc's **Rulings**) and leave it unstamped.
+Carry the `warns` to the confirm and to S7.
+
+**S3. Live chains.** For every chain, run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --shape serial --surface <token>… (--project <target> | --tasks <the chain's members>)`,
+one `--surface` per token of the chain's `surfaces`, passed verbatim from S2's JSON (and `--regenerate` when this
+run has it, which only WARNs: a serial run supersedes nothing). Every chain is checked, even after one is refused.
+`none` → go on. Any refusal (`refuse …`, exit 3) or exit 2 stops the whole run before anything is written, and
+every refusal's stderr goes in one report: each line names the live chain or unfinished parallel rollout, its
+project and state, the overlapping pair and its remedy (a never-started chain's is `status: dropped`, which frees
+its tasks for a later run). Tokens compare literally (`repo:<realpath>`), so a chain on a repo's in-place checkout
+never overlaps a parallel rollout rooted in its rollout clone: the two coexist as peers (ADR 0042, intended), while a
+chain that claims `repo:<clone>`, or a parallel rollout rooted in place before ADR 0042, still refuses. Carry `WARN:`
+lines to S7.
+
+**S4. Gates and confirm.** § 3's dependency extraction, § 3.5's gate sweep and § 3.6's gated-input sweep run over
+the members. § 3.6's `<t>` comes from
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py`, with `--repo <path>` exactly when the
+chain holds one `repo:` token that is a directory, else with no `--repo`; a non-zero exit stops the run as step
+2.8's does. A standalone run's confirm batch lists S1's members; each chain (its order, each row's launch, each
+member's surfaces with its source and its added tokens); the session-lane members; the WARNs; and the questions
+(§ 3's dependencies, § 3.5's gates, § 3.6's ask-ahead). A confirmed dependency (passed as
+`--dep <dependant>=<dependency>`), or a surface Lachy adds for any member (passed as `--surface`, which always
+unions in, declared or not), re-runs S2 and S3. Under orient § 7 or orient-all § 6 nothing is asked: the kept gates and § 3.6's hits
+are listed in S7. Steps 2, 2.5–2.8, 4, 4.5, 4.7 and Solo are skipped on this path, and `plan_approval:`, `scope:`,
+`rung:` and `solo:` are never proposed.
+
+**S5. Write.** One note per chain, from `${CLAUDE_PLUGIN_ROOT}/skills/schedule/serial-rollout-template.md`. Naming
+follows step 6: the first chain takes the next free `<slug>-rollout-<YYYY-MM-DD>` name and each further chain the
+next ordinal (`-2`, `-3`, …), never **Overwrite**. The shared placeholders (`{{PROJECT_NAME}}`, `{{DATE}}`,
+`{{THREAD_LINE}}`, `{{QUEUE_RATIONALE}}`, `{{POST_ROLLOUT_ITEMS}}`) are substituted as step 6's bullets say, and
+the template's own as below. Keep the template's `incomplete: true`: S6 removes it.
+- `{{SURFACES}}` — the chain's `surfaces` from S2, one `  - "<token>"` line each (quoted, two-space indent), under the template's `surfaces:` key: the places this chain owns while it is unfinished.
+- `{{CHAIN_TABLE}}` — the rendered `## Queue` table, header row `| # | Task | Launch | Surfaces |` included, one row per task in S2's order: `| <n> | [[<full-slug>\|<short-alias>]] | <launch> | <tokens> |` (the Task cell's `<short-alias>` is step 6's display alias, never the launch alias), where `<launch>` is the row's launch alias and folder, each in backticks, joined by `from` (`` `cc-ops` from `<folder>` ``), and `<tokens>` its member's surfaces, each in backticks. A launch change between two rows is a Leg boundary: a Leg works only rows of the launch it opened in. No wikilink appears outside the Task cell, since a row's first wikilink is its rank.
+- `{{SURFACE_SOURCES}}` — one line per member, `- <slug>: <tokens> (<source>[; added: <tokens>])`, from S2's `members`.
+
+**S6. Stamp.** Each member of each note written gets `rollout: "[[<its note>]]"`, step 7's clear (its second
+bullet), its confirmed `depends-on:` entries and, on a standalone run, § 3.6's ask-ahead writes (step 7's
+`spend_approval_usd:`, `## Decisions (asked ahead <date>)` and `## Approved gates` bullets). Nothing else is
+stamped: no `scope:`, `plan_approval:`, `rung:` or `solo:`, and never a derived or added `surfaces:`. Then remove
+the note's `incomplete: true` line, as its last write, once every member is stamped.
+
+**S7. Summary.** Per note: its name, its chain order with each row's launch, and its surfaces. Then the
+session-lane members, the WARNs and the gated pre-flight (§ 3.5's kept gates, § 3.6's ask-ahead and dismissals, as
+step 8 lists them). Then one line: "Leg 1 opens in row 1's launch and runs `/thread:execute [[<note>]]`;
+no execute offer, no `start: unattended` (the Stage's unattended start needs a Project root); until it finishes or
+is dropped (`status: dropped`) it holds its surfaces, so a parallel run on a checkout it claims, or another chain
+over them, is refused".
+
 ## Execution lives in `/thread:execute`
 
 This skill does not execute anything. The rollout note it produces is read by the sibling **`/thread:execute`** skill (`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`), which resolves per-task config and calls the **Workflow** tool with `task.workflow.js` — the convergence engine (plan-gate → Ralph retry → master review). The engine is not duplicated into individual rollout notes; improvements to the script reach every rollout immediately.
 
 ## Don'ts
 
-- Don't refuse small rollouts — shape decides, not count (`skills/_shared/execution-fit.md`). A one-task rollout-shaped rollout is valid; note the ceremony is thin and proceed.
+- Don't refuse small rollouts — shape decides, not count (`skills/_shared/execution-fit.md`). A one-task parallel rollout is valid; note the ceremony is thin and proceed.
 - Don't auto-merge dependency cycles silently — if A depends on B and B depends on A, surface and ask. (This is about *dependency* cycles — distinct from the affinity-cluster consolidation in step 4.5, which is a sanctioned auto-merge of same-*change* tasks.)
 - Never overwrite or reuse an existing rollout note: step 6's naming prompt offers only Advance or Cancel.
-- Never remove `incomplete: true` from a rollout note except as step 7's last write on the note this run wrote: a stamp on any other note (§ 0's on an interrupted supersede's note, or one a stopped run left) ends only when a supersede closes that note out.
+- Never remove `incomplete: true` from a rollout note except as step 7's (or § Serial path S6's) last write on the note this run wrote: a stamp on any other parallel note (§ 0's on an interrupted supersede's note, or one a stopped run left) ends only when a supersede closes that note out, and one on a serial note, which a supersede never takes, ends only by `status: dropped`.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).
 - Don't fill in `touches:` on tasks where you regex-detected files — that promotes a guess into authoritative metadata. Only the user does that. The **one** exception is the combined note authored in step 4.5: when every member has its own `touches:`, its `touches:` is their union, so it's a derivation, not a fresh guess. (Separately, the `## File-sets` block in the **rollout note** — step 6 — records the best-effort file-sets, but that's rollout-note data the executor reads, never task frontmatter, so it doesn't touch this rule.)
-- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's probes (listed under Scope), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table), and `close-score.py` (step 7.5, § 0's `file` finish), whose git calls are read-only and whose only writes are its events-directory lines (both listed under Scope).
-- Never write a second unfinished rollout on a repo, and never supersede one that § 0 did not print as `supersede`.
+- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's probes (listed under Scope) and its rollout-clone setup (the `git clone`, the empty-directory probe, and the fetch plus `--ff-only` merge of the clone, listed there too), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table), `close-score.py` (step 7.5, § 0's `file` finish), whose git calls are read-only and whose only writes are its events-directory lines (both listed under Scope), and § Serial path's `serial-chains.py`, whose `git rev-parse --show-toplevel` and `git remote get-url origin` calls are read-only (listed under Scope).
+- Never write a second unfinished parallel rollout on a repo, or a serial chain over a live chain's surface, and never supersede one that § 0 did not print as `supersede`.
+- Never supersede across shapes: a serial run supersedes nothing, and a parallel run never takes a serial note.
+- Never stamp a derived or added `surfaces:` on a task: a task's `surfaces:` is its own declaration.
 - Never move a rollout note except by step 7.5's move (which § 0 also runs for `file` and `interrupted`).
+- Never write `start: unattended` except at the execute offer (orient § 9, step 8's **Start when ready.**) on the note just written, or as § 0's **Put back**: the exact line the Supersede prep removed, restored to the prior when the run stops before step 6 writes its note. The prep otherwise only removes it; never on a serial note.
 
 ## Verification
 
@@ -540,6 +709,12 @@ End-to-end test against an existing backlog (e.g. GifLab):
 8. Prints summary pointing the user toward `/thread:execute`
 
 Then from a fresh session: paste `execute [[giflab-rollout-<YYYY-MM-DD>]]` (the dated note just written) — the `/thread:execute` skill should pick it up, gate on `protocol_version: 5`, resolve per-task config, and call the Workflow tool with `task.workflow.js` to run the three-layer convergence engine per task (visible live via `/workflows`).
+
+### Serial regression (§ Serial path)
+
+- Two serial-shaped tasks that declare disjoint `surfaces:` give two notes, `<slug>-rollout-<date>` and `-2`, each `shape: serial` with one chain, and no task stamped with a `surfaces:`.
+- Two tasks in one checkout give one note with one chain; when their aliases differ, its `## Queue` rows carry two launches, a Leg boundary between them.
+- A chain whose surface overlaps a live serial note's is refused at S3 with that note's remedy, and nothing is written.
 
 ### Merge regression (step 4.5)
 

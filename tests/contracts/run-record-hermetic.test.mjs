@@ -14,7 +14,8 @@
 // `process.env.THREAD_TEST_EVENTS_DIR || <tmp>`), so `THREAD_TEST_EVENTS_DIR=<a file>/events make test` runs every
 // such suite against an unwritable record. p15-5's tune.py writes the record too (tunings.jsonl), so it joins the
 // names, and so does p21-6's close-score.py, which folds into the record and writes tunings.jsonl through tune.py, and
-// p21-7's reflect.py, which writes reflections.jsonl (and folds through `span --fold`).
+// p21-7's reflect.py, which writes reflections.jsonl (and folds through `span --fold`), and p25-4's estate-dispatch.py,
+// whose `log` writes grades.jsonl.
 // Pure matchers, so the real tree and the controls run through the same code. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -23,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 import { read, walk } from '../lib/contract-text.mjs'
 
 const SELF = `tests/contracts/${path.basename(fileURLToPath(import.meta.url))}`
-const NAMES = '(?:reconcile-rollout\\.py|merge-task\\.sh|lead-integrate\\.py|git-env-canary\\.py|tune\\.py|close-score\\.py|reflect\\.py)'
+const NAMES = '(?:reconcile-rollout\\.py|merge-task\\.sh|lead-integrate\\.py|git-env-canary\\.py|tune\\.py|close-score\\.py|reflect\\.py|estate-dispatch\\.py)'
 
 // ---- shell ---------------------------------------------------------------------------------------------------
 
@@ -69,7 +70,7 @@ test('every shell suite that invokes an engine script points THREAD_EVENTS_DIR a
 test('every node test that spawns an engine script passes THREAD_EVENTS_DIR in its env', () => {
   const spawning = nodeFiles().filter((f) => nodeSpawns(read(f)))
   for (const f of ['tests/integration-marker-roundtrip.test.mjs', 'tests/contracts/status-repair-queue.test.mjs', 'tests/ladder.test.mjs',
-    'tests/reflect-tune.test.mjs', 'tests/reflect-close-score.test.mjs', 'tests/reflect-weekly.test.mjs']) {
+    'tests/reflect-tune.test.mjs', 'tests/reflect-close-score.test.mjs', 'tests/reflect-weekly.test.mjs', 'tests/estate-dispatch.test.mjs']) {
     assert.ok(spawning.includes(f), `${f} is seen as spawning an engine script`)
   }
   const bad = spawning.filter((f) => !nodeHermetic(read(f)))
@@ -92,6 +93,7 @@ test('control: the shell matchers', () => {
   assert.ok(shellInvokes('python3 -B skills/reflect/scripts/tune.py --record-only\n'), 'the tune script writes the record')
   assert.ok(shellInvokes('python3 -B skills/reflect/scripts/close-score.py --rollout x.md\n'), 'the close score writes the record')
   assert.ok(shellInvokes('python3 -B skills/reflect/scripts/reflect.py close --span s.json\n'), 'the weekly reading writes the record')
+  assert.ok(shellInvokes('python3 -B skills/_shared/scripts/estate-dispatch.py log --rank r.json --scan s.json\n'), 'the estate pass writes the Grade log')
   assert.ok(!shellHermetic('THREAD_EVENTS_DIR="$TMP/events"\n'), 'an unexported assignment does not reach the child')
   assert.ok(!shellHermetic('# export THREAD_EVENTS_DIR=x\n'))
 })
