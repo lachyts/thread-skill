@@ -3,8 +3,9 @@
 
 python >= 3.8, stdlib only. A serial rollout runs as Legs (skills/execute/legs.md), not Slots and an Integration lane,
 so score.py's running time, load and binding do not apply: this script scores the chain from its Leg log instead, in
-the shape tune.py records. Two callers: close-score.py's serial path (legs.md § Complete step 3, the serial
-template's scoring step), and skills/reflect/SKILL.md § 1's serial reading:
+the shape tune.py records. Its callers: close-score.py's serial path (legs.md § Complete step 3, the serial
+template's scoring step), skills/reflect/SKILL.md § 1's serial reading, and reflect.py span (the weekly reading),
+which also loads leg_status() and fold_restarts():
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/serial-score.py --rollout <rollout note.md> \\
         [--tasks-dir <dir>] [--until TS] [--out F]
@@ -41,8 +42,23 @@ Hands-off rate (ADR 0037 d1's headline, read for a chain): a landed task has an 
 - a `halt cleared:` line (leg.py status's haltCleared) cleared the halt of the Leg holding that task: a task some Leg
   took from a halted Leg (its `took` entry's `from`).
 rate = (landed - the tasks with an act) / landed, to 4 places; null with nothing landed. `byKind` counts acts.
-`notCounted` counts what the chain did that is no act on a task: takeOvers, manualHandOvers, restarts (every
-`restart:` line), stops (a Leg closed `stopped:`) and standingApproval (gate-signed standing=true lines).
+`notCounted` counts what the chain did that is no act on a task: takeOvers, manualHandOvers, restarts (below: one per
+restart, at or before --until, never one per `restart:` line), stops (a Leg closed `stopped:`) and standingApproval
+(gate-signed standing=true lines).
+
+Restarts (fold_restarts(), reflect.py span's restart items too). repair § 7 (e) writes two `restart:` lines for one
+restart: step 2's `pending (session <sid>)`, then step 3's `started <id>` or step 4's `manual (<why>)`, each its own
+line. Read in write order (leg.py status's `restarts`), skipping a line stamped after --until: a `pending` line opens a
+restart of its Leg; a `started` or `manual` line answers that Leg's open restart, when its latest line is `pending` and
+the line is stamped no later than the minute that Leg's `began` line is, and is then the same restart; any other line
+opens one of its own. So a `pending` after a `pending`, or after an answered restart, is a second restart (a
+`--replace` re-mark: the restart before it never started its Leg, or its Session died before `begin`). A restart's
+`at` is its first line's stamp, the one that decides which window it falls in; `how`, `started` and `manual` are its
+latest line's, so `how` is `pending` only when step 2 ran with no step 3 or 4 line after it. `session` is the `pending`
+line's (the repair that marked it, null for a lone `started` or `manual` line), and `began` the Leg's `began` stamp on
+its Leg's last restart (the one standing when it began), at or after `at` and at or before --until, else null: a
+`pending` restart whose Leg began did start, by a route that wrote no line (`leg.py restarted` writes nothing once the
+Leg began, its `began: true`), or by hand. An earlier restart of that Leg keeps `began` null: the later one started it.
 
 Quality: escapes.score(landed, tasks_dir, None, None, env), with no --repo, so it reads `fixes:` only: reverts and
 reviews are unread, and it is always partial (escapes.py's flags, prefixed `escapes: `). A fix task's `verifies:` is
@@ -164,6 +180,37 @@ def leg_status(note, tasks_dir, env):
 
 def ms(stamp):
     return SCORE.to_ms(stamp)
+
+
+def fold_restarts(st, until, to_ms=ms):
+    """The chain's restarts as the Leg log stood at `until` (ms), one per restart repair § 7 made, never one per
+    `restart:` line (the header's Restarts rule, its one copy). `to_ms` turns a raw stamp into ms, or None to skip
+    it. Each is {leg, how, started, manual, session, at, began}, `at` and `began` in ms."""
+    began = {}
+    for g in st.get("legs") or []:
+        t = to_ms(g["began"]) if g.get("began") else None
+        if t is not None and t <= until:
+            began[g.get("n")] = t
+    out, waiting = [], {}  # waiting: Leg -> its restart whose latest line is `pending`, still open to an answer
+    for r in st.get("restarts") or []:
+        t = to_ms(r.get("at"))
+        if t is None or t > until:
+            continue
+        leg, how = r.get("leg"), r.get("how")
+        cur = waiting.pop(leg, None)
+        if how != "pending" and cur is not None and (began.get(leg) is None or t <= began[leg]):
+            cur.update(how=how, started=r.get("started"), manual=r.get("manual"))  # step 3 or 4 answering step 2
+            continue
+        item = {"leg": leg, "how": how, "started": r.get("started"), "manual": r.get("manual"),
+                "session": r.get("session"), "at": t, "began": None}
+        out.append(item)
+        if how == "pending":
+            waiting[leg] = item
+    last = {item["leg"]: item for item in out}  # a Leg's last restart: the one standing when it began
+    for leg, item in last.items():
+        b = began.get(leg)
+        item["began"] = b if b is not None and b >= item["at"] else None
+    return out
 
 
 class Score:
@@ -293,7 +340,7 @@ class Score:
                 "byKind": by,
                 "notCounted": {"takeOvers": sum(1 for g in legs if g.get("tookOver")),
                                "manualHandOvers": sum(1 for g in legs if (g.get("handover") or "").startswith("manual")),
-                               "restarts": len(self.st.get("restarts") or []),
+                               "restarts": len(fold_restarts(self.st, self.until)),
                                "stops": sum(1 for g in legs if g.get("outcome") == "stopped"),
                                "standingApproval": standing}}
 
