@@ -144,7 +144,10 @@ rounds. A Grill task is decided only when every one of its decisions is answered
       returns them. In a mixed set it schedules the parallel subset, leaves each misfit unstamped and returns each
       with its outcome and the follow-up line, unrun. Each is a **fit disagreement**, and § 8 lists it.
    3. schedule § 0's target repo: the entry's `root`. The `Local:` line is read as usual when it names that repo;
-      otherwise the root is "the path the user gave", and `<localPath>` is empty.
+      otherwise the root is "the path the user gave", and `<localPath>` is empty. § 0's clone question (exit 4): a
+      rollout clone is made only on Lachy's yes (ADR 0042), which no fork holds, so the fork takes the No, stopping
+      before step 1 with nothing written, and its stop line names the would-be clone and
+      `/thread:schedule <entry.args>`, which asks it. Exit 0 runs `--ensure` as written.
    4. Step 2.5's verifier: as detected. A section-only CLAUDE.md is read for its one command; with none, stop before
       writing.
    5. Step 2.6's baseline: `none`, and the summary says "not captured".

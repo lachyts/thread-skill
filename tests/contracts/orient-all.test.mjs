@@ -17,8 +17,9 @@
 //       loads them).
 //   o5  § 4's Unpark and sign-off writes: estate-rank.py unpark, snooze --ready and kill, and approve-gates --tasks.
 //   o6  § 6 runs `plan`, forks `/thread:schedule <entry.args>` with the projectSlug line, one batch at a time, and
-//       answers schedule's questions in exactly 15 items; schedule's **Under orient-all.** paragraph cites orient-all § 6
-//       and routes nothing, S1 and S4 name orient-all, and nothing pairs orient-all with --regenerate.
+//       answers schedule's questions in exactly 15 items, § 0's clone question (ADR 0042) with the No, since no fork
+//       holds Lachy's yes; schedule's **Under orient-all.** paragraph cites orient-all § 6 and routes nothing, S1 and S4
+//       name orient-all, and nothing pairs orient-all with --regenerate.
 //   o7  § 7 runs `sessions` with --wrote and --status and starts exactly items[]; its table's numbers; the Session
 //       tools in order, state from the list only, identity-only reads; orient and repair candidates by the item's
 //       exact `title` alone (sessions cuts it); row 8 needs plan.reinstate[] and canExecute; create_thread, the
@@ -178,7 +179,8 @@ function check(files, consts) {
   const answers = slice(s6raw, /^3\. \*\*Schedule's questions, answered\.\*\*/, /^4\. /) ?? ''
   const items = answers.split('\n').filter((l) => /^ {3}\d+\. /.test(l)).map((l) => Number(l.trim().split('.')[0]))
   if (JSON.stringify(items) !== JSON.stringify(Array.from({ length: 15 }, (_, i) => i + 1))) flag('o6', `the answers are numbered ${JSON.stringify(items)}`)
-  need('o6', "§ 6's answers", C(answers), ['routes nothing', '`none`', 'Advance', 'kebab', '`projectSlug`', '`plan_approval: required`'])
+  need('o6', "§ 6's answers", C(answers), ['routes nothing', '`none`', 'Advance', 'kebab', '`projectSlug`', '`plan_approval: required`',
+    "§ 0's clone question (exit 4)", 'the fork takes the No'])
   const schedule = files[SCHEDULE] ?? ''
   const under = C(schedule.split(/\n\s*\n/).find((p) => p.startsWith('**Under orient-all.**')) ?? '')
   need('o6', "schedule's **Under orient-all.**", under, ['orient-all § 6', 'routes nothing', 'the slug its prompt gives'])
@@ -294,8 +296,9 @@ test('control o5: the kill write gone fails o5 alone', () => {
   only(swap(FILES, SKILL, 'estate-rank.py kill <note>', 'by hand'), CONSTS, ['o5'], 'kill')
 })
 
-test('control o6: a sixteenth answer, or schedule routing for orient-all, fails o6 alone', () => {
+test('control o6: a sixteenth answer, a fork that makes the clone, or schedule routing for orient-all, fails o6 alone', () => {
   only(swap(FILES, SKILL, '   15. Serial S1 and S4', '   15. Nothing else.\n   16. Serial S1 and S4'), CONSTS, ['o6'], 'count')
+  only(swap(FILES, SKILL, 'the fork takes the No', 'the fork takes the Yes'), CONSTS, ['o6'], 'clone')
   only(swap(FILES, SCHEDULE, 'It routes nothing: § 0\'s session-lane routing', 'It routes the misfits: § 0\'s session-lane routing'),
     CONSTS, ['o6'], 'schedule')
 })
