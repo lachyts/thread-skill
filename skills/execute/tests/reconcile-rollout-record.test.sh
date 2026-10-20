@@ -20,6 +20,7 @@ unset $(git rev-parse --local-env-vars 2>/dev/null)   # the Project roots are gi
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 LI="$HERE/../scripts/lead-integrate.py"
+. "$HERE/../../../tests/lib/rollout-fixtures.sh"   # away_file
 TMP="$(mktemp -d)"
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
@@ -602,6 +603,11 @@ printf '\n## Race log\n\n- 2026-10-05T10:00+00:00 [[rc]] RACE: unverified\n' >> 
 ok "$(idle i7 --running "")" '"hold-race"' "hold-race"
 mkro i8 "parallel_ceiling: 2"; mkt d1 i8 done
 ok "$(idle i8 --running "")" "-" "none at halt complete"
+# p28-1: a fresh not-Away file at Trickle 1 and i9's own live task leave slotLimit 0, whatever else $V runs, so x2 is
+# held on the Trickle while a Slot of the ceiling stays free.
+mkro i9 "parallel_ceiling: 2"; mkt x1 i9 in_progress; mkt x2 i9 open
+away_file "$TMP/i9-home" "$NOW" false 2099-01-01T00:00:00Z 1
+ok "$(HOME="$TMP/i9-home" idle i9)" '"hold-trickle"' "hold-trickle"
 
 echo "== 21b. a stop on a question (p16-3) -> reasonClass needs-human, never plan-rejected or review-rounds"
 # The Reflection raises a round cap on 2+ review-rounds or plan-rejected set-asides, which can never answer a question.

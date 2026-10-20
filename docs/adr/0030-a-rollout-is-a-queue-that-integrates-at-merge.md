@@ -14,6 +14,9 @@ block is agent-fixable, up to `auto_retries` times, before a hand-back is needed
 hold.)*
 *(Amended 2026-10-20 by thread-skill-p26-3: a task call's window is armed by reconcile-rollout.py mark-started itself,
 required while the Project root exists, before any write.)*
+*(Amended 2026-10-21 by thread-skill-p28-1: decision 1's "only dependencies and a solo task hold a task back" gains, by
+day, the Trickle: while Lachy is not Away, `next` starts nothing past a machine-wide count of running Rollout tasks
+(Chorus ADR 0104; skills/execute/away.md).)*
 
 ## Context
 

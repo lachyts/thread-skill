@@ -293,7 +293,7 @@ It prints one JSON line: each key's `value` and its `source`, `file:repo` (the f
 
 Look for:
 
-- `blocked-by:` or `depends-on:` in frontmatter (list of task slugs or wikilinks) — the only thing that holds a task back in the queue
+- `blocked-by:` or `depends-on:` in frontmatter (list of task slugs or wikilinks) — the only one of these that holds a task back in the queue
 - `[[other-task]]` wikilinks in the body that match tasks in the discovered set — soft order hints for step 5's tiebreak, never recorded
 - Body phrases like "gated on", "after X lands", "depends on" — surface them in the confirm batch (step 5) when the dependant is in the `queued` state (step 5 says why); a confirmed one is written into the dependant's frontmatter `depends-on:` at step 7, so the queue holds it back
 - On a supersede, step 1's `order` lines (and, after an `interrupted` finish, § 0's): each is an order the prior rollout kept only in prose. Read each `order` line's clause: when it states that a `queued` carried task waits on another candidate, surface that `depends-on:` in the confirm batch (step 5). Skip one the dependant already records, and a clause that orders no two candidates (such as a kept task's own order: "p37-4 after p36-2, p36-6" with p37-4 landed). A confirmed one is written at step 7
@@ -411,7 +411,7 @@ Present the offers in the confirm batch, beside step 5's Solo and dependency pro
 
 ### 5. Order the queue
 
-The rollout is a queue (ADR 0030 decision 1): tasks run in parallel up to `parallel_ceiling`, each from the `main` of its start, and only a dependency or a Solo task holds one back. Schedule decides the order, written as the `## Queue` table's rows (step 6): a task's row is its schedule rank.
+The rollout is a queue (ADR 0030 decision 1): tasks run in parallel up to `parallel_ceiling`, each from the `main` of its start, and only a dependency, a Solo task or, by day, the Trickle (Chorus ADR 0104; execute `away.md`) holds one back. Schedule decides the order, written as the `## Queue` table's rows (step 6): a task's row is its schedule rank.
 
 Solo and dependency proposals apply only to tasks in the `queued` state, and the confirm batch offers them for no other task. Step 7 writes nothing to a carried task that has started (running, awaiting or in Integration, or set aside), so a confirmed `solo: true` or `depends-on:` on one would be silently dropped, and a started task can't be held back anyway. Such a task keeps its place in the order (1. below) all the same.
 

@@ -93,6 +93,18 @@ entry. Install a release that knows the table before writing it: an older
 `rollout-settings.py` refuses the table, and every rollout's settings with it.
 `skills/execute/scripts/ntfy-push.py` sends the item (execute § 6.5, ADR 0038).
 
+By day the whole Mac runs at most a few rollout tasks at once, the Trickle
+(Chorus ADR 0104): `reconcile-rollout.py next` counts the tasks every open
+rollout is running and starts nothing past it while you are not Away. Away,
+each rollout runs to its own `parallel_ceiling`. Chorus says which by writing
+`~/.config/thread/away.json` (`skills/execute/away.md` specifies it). With no
+file, every rollout on the Mac runs at a combined Trickle of 2, nights
+included. To run a night to each ceiling without a writer, write the file by
+hand (`skills/execute/away.md` § Without a writer shows how); a hand-written
+file goes stale 24 h after its `written_at` (or at its `until`), and from then
+on each lead prints a `WARN: ~/.config/thread/away.json stale: …` line and the
+Mac is back at 2.
+
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through
 `skills/execute/scripts/merge-task.sh` — gated on *required* status checks,

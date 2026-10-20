@@ -117,6 +117,12 @@ process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 // status reads the operator's ladder file (its `ladder` key and each task's rungDrift): HOME is an empty dir here,
 // so it reads the built-in ladder and the operator's file never reaches the assertions.
 const STATUS_ENV = { ...ENV, HOME: path.join(tmp, 'status-home') }
+// next reads the Away state file under HOME (p28-1, execute away.md): nextOf runs in a HOME of its own whose fresh Away
+// file gives each rollout its own ceiling at NOW, never the Trickle, whatever the scratch HOME holds.
+const NEXT_ENV = { ...ENV, HOME: path.join(tmp, 'next-home') }
+fs.mkdirSync(path.join(NEXT_ENV.HOME, '.config', 'thread'), { recursive: true })
+fs.writeFileSync(path.join(NEXT_ENV.HOME, '.config', 'thread', 'away.json'),
+  JSON.stringify({ away: true, until: '2099-01-01T00:00:00Z', morning: '09:00', trickle: 2, written_at: '2026-10-02T12:00:00Z' }))
 
 function writeTask(dir, slug, fm, body = '') {
   fs.writeFileSync(path.join(dir, `${slug}.md`), ['---', 'tags: [task]', ...fm, '---', '', '## Notes', '', `body ${slug}`, ''].join('\n') + body)
@@ -133,7 +139,7 @@ const fmKey = (text, key) => (fmOf(text).match(new RegExp(`^${key}: (.*)$`, 'm')
 const copyDir = (from, to) => { fs.cpSync(from, to, { recursive: true }); return to }
 const reconcileIn = (d, result, now = NOW) => must(RECONCILE, ['reconcile', '--result', '-', '--tasks-dir', d, '--now', now], JSON.stringify(result))
 const statusOf = (d, R) => JSON.parse(must(RECONCILE, ['status', '--rollout', path.join(d, `${R}.md`), '--tasks-dir', d, '--now', NOW], undefined, STATUS_ENV))
-const nextOf = (d, R) => JSON.parse(must(RECONCILE, ['next', '--rollout', path.join(d, `${R}.md`), '--tasks-dir', d, '--running', '', '--dry-run', '--now', NOW]))
+const nextOf = (d, R) => JSON.parse(must(RECONCILE, ['next', '--rollout', path.join(d, `${R}.md`), '--tasks-dir', d, '--running', '', '--dry-run', '--now', NOW], undefined, NEXT_ENV))
 const inputsOf = (d, slug) => JSON.parse(must(LEAD, ['inputs', '--note', path.join(d, `${slug}.md`), '--max-review-rounds', '4', '--repo', '/repo']))
 const handBack = (d, slugs, now = '2026-10-02T13:00:00Z') => py(RECONCILE, ['hand-back', '--tasks', slugs, '--tasks-dir', d, '--now', now])
 

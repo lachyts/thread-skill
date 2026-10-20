@@ -10,6 +10,7 @@ export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
+. "$HERE/../../../tests/lib/rollout-fixtures.sh"   # away_file
 TMP="$(cd "$(mktemp -d)" && pwd -P)"   # physical: the stub gh logs the cwd gh ran in (macOS /var -> /private/var)
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
@@ -69,7 +70,9 @@ PY
 fm() { grep -m1 "^$2:" "$D/$1.md" || echo "<none>"; }   # fm <slug> <key> — the frontmatter line
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
-EH="$TMP/settings-home"; mkdir -p "$EH"
+# The dir holds one fresh Away file (p28-1, execute away.md), so each rollout runs to its own ceiling, never the Trickle
+# (reconcile-rollout-trickle.test.sh pins that): Away from the day's start, it never lapses at any --now used here.
+EH="$TMP/settings-home"; mkdir -p "$EH"; away_file "$EH" 2026-10-02T00:00:00Z
 nxt() { HOME="$EH" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
 # status reads the operator's ladder file (its `ladder` key, each task's rungDrift): HOME is pinned to an empty
 # dir (the built-in ladder) unless $SH names another, so the operator's file never reaches the assertions.
@@ -170,7 +173,10 @@ ok "$(q "$J" '[d["ceiling"], d["ceilingCause"]]')" '[null,"stamp"]' "status: an 
 # ── an absent parallel_ceiling resolves from the operator's rollouts.toml (p15-4) ─────────────────
 # Each scenario's HOME is its own $D/home, so the resolver reads only the file the scenario writes there.
 rs_toml() { mkdir -p "$D/home/.config/thread"; printf '%s\n' "$@" > "$D/home/.config/thread/rollouts.toml"; }
-rnxt() { HOME="$D/home" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
+# rnxt writes the scenario's fresh Away file first, as $EH holds one (an away.json beside rollouts.toml never reaches the
+# resolver).
+rnxt() { away_file "$D/home" 2026-10-02T00:00:00Z
+  HOME="$D/home" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
 rst() { HOME="$D/home" python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW"; }
 reroot() {  # reroot <path|-> — point the rollout's Project root line elsewhere, or drop it ("-")
   python3 - "$D/ro.md" "$D/repo" "$1" <<'PY'

@@ -10,6 +10,7 @@ unset $(git rev-parse --local-env-vars 2>/dev/null)   # the Project roots are gi
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
+. "$HERE/../../../tests/lib/rollout-fixtures.sh"   # away_file
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
@@ -41,7 +42,8 @@ body() { awk 'n>=2{print} /^---$/{n++}' "$D/$1.md"; }
 rec() { python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "${2:-$NOW}" <<<"$1" >/dev/null; }
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
-EH="$TMP/settings-home"; mkdir -p "$EH"
+# Its one fresh Away file (p28-1, execute away.md) runs each rollout to its own ceiling, never the Trickle.
+EH="$TMP/settings-home"; mkdir -p "$EH"; away_file "$EH" 2026-10-02T00:00:00Z
 nxt() { HOME="$EH" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" --running "" 2>/dev/null; }
 q() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(eval(sys.argv[1]), separators=(",", ":"), sort_keys=True))' "$2"; }
 hb() { out=$(python3 "$SCRIPT" hand-back --tasks "$1" --tasks-dir "$D" --now "${2:-2026-10-03T09:00:00Z}" 2>&1); rc=$?; }

@@ -446,14 +446,21 @@ through time, from attention to merged PRs. Terms only — no implementation.
   **Wave-shaped** is now **Parallel-shaped**. _Avoid_: round, phase, stage.
 - **Queue** — how a parallel rollout runs: tasks in parallel, each from the `main` of
   its start, up to the parallel ceiling, held back only by dependencies or a
-  **Solo** task, never a shared file (ADR 0030). _Avoid_: batch (the
-  session lane's).
+  **Solo** task and, by day, the **Trickle**, never a shared file (ADR 0030).
+  _Avoid_: batch (the session lane's).
 - **Slot** — one task's own run (a start, a restart or a seeded revise) in a
   Queue, held from its launch until its result is reconciled. Integration
   holds none. _Avoid_: worker, agent (a slot's run holds many agents).
 - **Parallel ceiling** — the most Slots a Queue holds at once, set per
   rollout. Not the retired model-tier **Ceiling** (see **Top rung**).
   _Avoid_: bare "ceiling", concurrency, max agents.
+- **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
+  across the whole Mac at once, whatever the number of Rollouts: 2, unless
+  Chorus sets another (Chorus ADR 0104 d2). _Avoid_: global ceiling, throttle.
+- **Away** — Lachy has told Chorus he is away from the Mac (the Evening, an
+  Away block, the Lunch restart; Chorus ADR 0104 d1); then each Rollout runs
+  to its own **Parallel ceiling** (Chorus ADR 0104 d3). Never a reading of
+  whether he is at the Mac. _Avoid_: idle, night mode.
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
   (ADR 0030). Queued with its dependencies met, it holds every task whose row
