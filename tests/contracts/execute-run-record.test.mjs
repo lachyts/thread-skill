@@ -52,13 +52,14 @@ function checkRunRecord(md) {
   need('record-pause', p.includes('`record-pause --rollout <rollout-note>` right after hard-pause step 1'))
   need('next never knows a merge hold', /`next` never knows a merge hold/.test(p))
   // Steps 1.2 and 1.3 agree with the paragraph: the seeded revise passes --start revise, and a restart resolves
-  // Restart routing before its mark-started, which passes the --start that routing chose.
+  // Restart routing before its mark-started, which passes the --start that routing chose (both arm the task window
+  // through --arm-repo/--arm-default, p26-3).
   const step12 = loopStep(md, '2. **')  // sub-step 2: the Standing approval (ADR 0034), then the seeded revises
-  need('step 1.2 passes --start revise', step12.includes('`mark-started --tasks <slug> --rollout <rollout-note> --start revise`'))
+  need('step 1.2 passes --start revise', step12.includes('`mark-started --tasks <slug> --rollout <rollout-note> --start revise --arm-repo <repoPath> --arm-default <B>`'))
   const step13 = loopStep(md, '3. For each slug in `restart`')
   need('step 1.3 routes before mark-started',
     before(step13, 'resolve *Restart routing*', 'mark-started --tasks <slug>')
-    && /mark-started --tasks <slug> --rollout <rollout-note>` with the `--start` that routing chose/.test(step13)
+    && /mark-started --tasks <slug> --rollout <rollout-note> --arm-repo <repoPath> --arm-default <B>` with the `--start` that routing chose/.test(step13)
     && step13.includes('`--start resume` for a *Lost call* or § 3.7 signed-gate resume')
     && step13.includes('`--start revise` for a seeded revise'))
   const pause = collapse(section(md, /^## Pausing \+ reinstating a rollout/) ?? '')
@@ -109,7 +110,7 @@ const controls = [
   ['record-pause', (t) => t.replace('`record-pause --rollout <rollout-note>` right after hard-pause step 1', '`record-pause --rollout <rollout-note>` when convenient')],
   ['hard pause step 1 points to record-pause', (t) => t.replace('Then run `reconcile-rollout.py record-pause --rollout <rollout-note> || true` (§4.5 *Run record*).', '')],
   ['next never knows a merge hold', (t) => t.replace('`next` never knows a merge hold', '`next` records the merge hold')],
-  ['step 1.2 passes --start revise', (t) => t.replace('`mark-started --tasks <slug> --rollout <rollout-note> --start revise` (*Run record*)', '`mark-started --tasks <slug> --rollout <rollout-note>`')],
+  ['step 1.2 passes --start revise', (t) => t.replace('`mark-started --tasks <slug> --rollout <rollout-note> --start revise --arm-repo <repoPath> --arm-default <B>` (*Run record*', '`mark-started --tasks <slug> --rollout <rollout-note> --arm-repo <repoPath> --arm-default <B>` (*Run record*')],
   ['step 1.3 routes before mark-started', (t) => t.replace('for a restart resolve *Restart routing* (it writes nothing), stamp', 'stamp')],
 ]
 for (const [rule, mutate] of controls) {
