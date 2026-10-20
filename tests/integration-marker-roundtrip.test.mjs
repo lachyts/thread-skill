@@ -85,11 +85,12 @@ function vault(agentParagraph) {
 // p15-4): HOME is an empty dir of this suite's own, so the operator's file never reaches the assertions.
 const SETTINGS_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'p126-settings-home-'))
 after(() => fs.rmSync(SETTINGS_HOME, { recursive: true, force: true }))
-const py = (args) => execFileSync('python3', [RECONCILE, ...args], { encoding: 'utf8', env: { ...PY_ENV, HOME: SETTINGS_HOME } })
-function reconcile(d, result, now = NOW) {
+// `env` (p27-4): x18 and x19 read the Run record, so they pass their own THREAD_EVENTS_DIR.
+const py = (args, env = PY_ENV) => execFileSync('python3', [RECONCILE, ...args], { encoding: 'utf8', env: { ...env, HOME: SETTINGS_HOME } })
+function reconcile(d, result, now = NOW, env = PY_ENV) {
   const f = path.join(d, 'result.json')
   fs.writeFileSync(f, JSON.stringify(result))
-  py(['reconcile', '--result', f, '--tasks-dir', d, '--now', now])
+  py(['reconcile', '--result', f, '--tasks-dir', d, '--now', now], env)
   fs.rmSync(f)
 }
 function status(d) {
@@ -131,6 +132,7 @@ test('x2: an Integration set-aside reconciled on top reads back as setAsideAt in
     assert.equal(s.setAsideAt, 'integration')
     assert.ok(s.blockerSummary.startsWith('integration: conflict in a.js cannot be resolved'))
     assert.equal(T.parseIntegrationMarker(s.blockerSummary).stage, 'integrate')
+    assert.equal('integrationBlock' in s, false, 'a generic Integration set-aside names no block (p27-4)')
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
 
@@ -490,4 +492,141 @@ test('x15: only a later own call settles the plan — no-outcome rows keep it, a
     assert.ok(r.calls[0].prompt.includes("No such section: the task's last own call"))
     assert.ok(!r.calls[0].prompt.includes('(no plan:'))
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+// ---- an Integration conflict and a verifier red at Integration, by name (p27-4) ----
+// The engine builds both rows itself (integrate.test.mjs e1b / e1d pin the engine side); the real reconcile writes
+// them, and the real status, lead-integrate.py inputs and the Run record read them back by name.
+const LANDED = [{ prUrl: 'https://github.com/o/r/pull/5', title: 'theirs: rename', files: ['a.js', 'b.js'], taskPath: '/vault/Tasks/proj-theirs.md' }]
+const CONFLICT_LOG = [`anchor: ${sha('a')} base ${sha('b')}`, `task head: ${sha('a')}`, `integration base: ${sha('c')}`,
+  'task file: a.js', 'task file: b.js', 'merge: conflict', 'conflict: a.js', 'conflict: b.js'].join('\n')
+const CONFLICT_DIAG = 'a.js: theirs renamed foo, ours edits foo; porting ours drops their guard\nb.js: theirs deleted the export ours calls'
+const MARK = 'integration: conflict unresolved in a.js, b.js'
+// An unresolvable conflict, aborted: blockKind conflict and the merge step's verbatim log (the evidence).
+const conflictAside = () => row({ ...base, mode: 'integrate', task: mkTask(), integration: mkI({ landed: LANDED, reviewHistory: HIST2, reviewRoundsUsed: 2 }) }, {
+  [`integrate:${SLUG}`]: {
+    ...merged, blocked: true, blockKind: 'conflict', verified: false, mergeState: 'none', mergeCommit: '', headSha: sha('a'), pushedSha: '',
+    mergeLog: CONFLICT_LOG, conflictFiles: ['a.js', 'b.js'], blockerDiagnosis: CONFLICT_DIAG,
+  },
+})
+// A conflict resolved, then the verifier still red at the loop's end: red, never conflict.
+const redAside = () => row({ ...base, mode: 'integrate', task: mkTask(), integration: mkI() }, {
+  [`integrate:${SLUG}`]: { ...merged, blocked: true, blockKind: 'red', verified: false, blockerDiagnosis: 'make test still red after 3 iterations' },
+})
+const leadIn = (args) => JSON.parse(execFileSync('python3', [LEAD_INTEGRATE, ...args], { encoding: 'utf8', env: { ...PY_ENV, HOME: SETTINGS_HOME } }))
+const NOTE_REASON = [
+  'import importlib.util, json, sys', 'from pathlib import Path',
+  'spec = importlib.util.spec_from_file_location("reconcile_rollout", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+  'print(json.dumps(m._note_reason(m.Note(Path(sys.argv[2])))))',
+].join('\n')
+const stampTask = (d, line) => {
+  const p = path.join(d, `${SLUG}.md`)
+  fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('---\ntags: [task]\n', `---\ntags: [task]\n${line}\n`))
+}
+
+test('x16: an Integration conflict reads back by name — status, inputs (markerReason, history, resumeAt) and _note_reason', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault(AGENT)
+  stampTask(d, `pr: ${PR}`) // the approved PR, as a lane holder's note carries it (no pr: is repair's own class)
+  try {
+    const res = await conflictAside()
+    assert.equal(res.tasks[0].blockerDiagnosis.split('\n')[0], MARK)
+    reconcile(d, res)
+    const s = status(d)
+    assert.equal(s.queueState, 'set-aside')
+    assert.equal(s.setAsideAt, 'integration')
+    assert.equal(s.integrationBlock, 'conflict')
+    assert.equal(s.blockerSummary.split('\n')[0], MARK)
+    for (const k of ['Resolution brief (Integration conflict)', '- Conflicting paths: a.js, b.js',
+      '- Theirs: https://github.com/o/r/pull/5 (theirs: rename) touched a.js, b.js; brief /vault/Tasks/proj-theirs.md',
+      `- Theirs, in full: git log --first-parent ${sha('b')}..${sha('c')}`,
+      '- The integrator:\n  - a.js: theirs renamed foo, ours edits foo; porting ours drops their guard\n  - b.js: theirs deleted the export ours calls\n- Next: ']) {
+      assert.ok(s.blockerSummary.includes(k), `the brief is kept: ${k}`)
+    }
+    assert.ok(!s.blockerSummary.includes('missing fixture'), 'the latest run is the engine marker, not the agent text')
+    // the cold read a re-entering lead makes (execute § 4.5 step 1.2, repair § 3b)
+    const note = path.join(d, `${SLUG}.md`)
+    const inputs = leadIn(['inputs', '--note', note])
+    assert.equal(inputs.resumeAt, 'integration')
+    assert.equal(inputs.markerStage, 'integrate')
+    assert.equal(inputs.markerReason, 'conflict unresolved in a.js, b.js')
+    assert.deepEqual(inputs.history, HIST2, 'round 2 keeps its Integration stage; no brief bullet leaks into the history')
+    assert.equal(inputs.lastRound, 2)
+    const kr = JSON.parse(execFileSync('python3', ['-c', NOTE_REASON, RECONCILE, note], { encoding: 'utf8', env: PY_ENV }))
+    assert.deepEqual(kr, ['integration', 'conflict unresolved in a.js, b.js'])
+    // humanFix for this block: fresh, it is the lead's automatic retry (status's example line); with the budget off
+    // it is Lachy's, and the reason repair quotes beside humanFix is markerReason (the first line), the brief beneath.
+    assert.equal(inputs.autoRetry, true, JSON.stringify([inputs.autoRetryWhy, inputs.autoRetryError]))
+    assert.equal(inputs.humanFix, null)
+    stampTask(d, 'auto_retries: 0')
+    const off = leadIn(['inputs', '--note', note])
+    assert.equal(off.autoRetry, false)
+    assert.equal(off.humanFix && off.humanFix.act, 'hand back or defer', JSON.stringify(off.humanFix))
+    assert.equal(off.markerReason, 'conflict unresolved in a.js, b.js')
+    assert.equal(status(d).integrationBlock, 'conflict')
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+test('x17: a verifier red at Integration reads back by name, distinct from a conflict', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault(AGENT)
+  try {
+    reconcile(d, await redAside())
+    const s = status(d)
+    assert.equal(s.setAsideAt, 'integration')
+    assert.equal(s.integrationBlock, 'red')
+    assert.ok(s.blockerSummary.split('\n')[0].startsWith('integration: verifier red: '), s.blockerSummary)
+    const inputs = leadIn(['inputs', '--note', path.join(d, `${SLUG}.md`)])
+    assert.ok(inputs.markerReason.startsWith('verifier red: '), inputs.markerReason)
+    assert.equal(inputs.resumeAt, 'integration')
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+// A lane holder (`review`, a PR, `ready:`), marked integrating, then the engine-built row reconciled, under its own
+// events dir: this test reads the record, so it ignores THREAD_TEST_EVENTS_DIR (the record suite's rule). Returns
+// the kinds after lane-taken, lane-freed and set-aside.
+async function recordOf(result) {
+  const ev = fs.mkdtempSync(path.join(os.tmpdir(), 'imr-record-'))
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'p274-record-'))
+  const env = { ...PY_ENV, THREAD_EVENTS_DIR: ev }
+  try {
+    fs.writeFileSync(path.join(d, `${ROLLOUT}.md`), '---\ntags: [task, rollout]\nstatus: in_progress\nprotocol_version: 5\n---\n\n## Notes\n')
+    fs.writeFileSync(path.join(d, `${SLUG}.md`), '---\ntags: [task]\nstatus: review\nscope: cross-cutting\n' +
+      `pr: ${PR}\nready: 2026-10-02T13:00+00:00\nrollout: "[[${ROLLOUT}]]"\n---\n\n## Notes\n\nbody\n`)
+    py(['mark-integrating', '--tasks', SLUG, '--tasks-dir', d, '--now', NOW], env)
+    reconcile(d, await result(), NOW, env)
+    const evs = fs.readFileSync(path.join(ev, `${ROLLOUT}.jsonl`), 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l))
+    const after = evs.slice(evs.findIndex((e) => e.kind === 'lane-taken') + 1)
+    const pick = (e, ks) => Object.fromEntries(ks.filter((k) => k in e).map((k) => [k, e[k]]))
+    return {
+      kinds: after.map((e) => e.kind),
+      laneFreed: pick(after.find((e) => e.kind === 'lane-freed') || {}, ['release', 'path', 'triggers', 'conflict']),
+      setAside: pick(after.find((e) => e.kind === 'set-aside') || {}, ['stage', 'reasonClass', 'setAsideAt']),
+      laneTaken: evs.some((e) => e.kind === 'lane-taken'),
+    }
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true })
+    fs.rmSync(ev, { recursive: true, force: true })
+  }
+}
+
+test('x18: the Run record names an Integration conflict — lane-freed conflict true, set-aside integration-conflict', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const r = await recordOf(conflictAside)
+  assert.ok(r.laneTaken, 'mark-integrating took the lane')
+  assert.deepEqual(r.kinds, ['lane-freed', 'set-aside'])
+  assert.deepEqual(r.laneFreed, { release: 'set-aside', path: 'integrator', triggers: ['conflict'], conflict: true })
+  assert.deepEqual(r.setAside, { stage: 'integrate', reasonClass: 'integration-conflict', setAsideAt: 'integration' })
+})
+
+test('x19: a verifier red at Integration is integration-red with conflict false; a generic set-aside stays integration-set-aside', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const red = await recordOf(redAside)
+  assert.deepEqual(red.kinds, ['lane-freed', 'set-aside'])
+  assert.deepEqual(red.laneFreed, { release: 'set-aside', path: 'integrator', triggers: [], conflict: false })
+  assert.deepEqual(red.setAside, { stage: 'integrate', reasonClass: 'integration-red', setAsideAt: 'integration' })
+  const generic = await recordOf(setAside)
+  assert.deepEqual(generic.kinds, ['lane-freed', 'set-aside'])
+  assert.deepEqual(generic.laneFreed, { release: 'set-aside', path: 'integrator', triggers: [], conflict: false })
+  assert.deepEqual(generic.setAside, { stage: 'integrate', reasonClass: 'integration-set-aside', setAsideAt: 'integration' })
 })

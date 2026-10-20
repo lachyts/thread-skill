@@ -350,6 +350,32 @@ ok "$(since ro "$M" '[d.get("release"), d.get("path"), d.get("triggers"), d.get(
   '["set-aside",null,null,null]' "a dead integrate call's lane-freed leaves the earlier Integration's fields out"
 ok "$(since ro "$((M+1))" '[d["stage"], d["reasonClass"]]')" '["integrate","call-failed"]' "set-aside stage integrate, reasonClass call-failed"
 
+echo "== 12c. an Integration conflict and a verifier red at Integration are named in the Run record (rollout ic)"
+# p27-4: an integrate row's set-aside reasonClass is read off its diagnosis's first line (integration_block): the
+# conflict marker -> integration-conflict, the red marker -> integration-red, anything else (the escape included)
+# -> integration-set-aside. A named conflict's row carries triggers ["conflict"], so lane-freed reads conflict true.
+# Side rollout ic, one lane holder at a time, so ro's legs and leg 24's checker over ro are untouched.
+mkro ic "parallel_ceiling: 2"
+ic() {  # ic <slug> <triggers json> <diag>: a lane holder on ic set aside by an integrate row; prints lane-freed's
+        # [release, path, triggers, conflict] and the set-aside's [stage, reasonClass, setAsideAt]
+  mkt "$1" ic review "pr: $PR/40" "ready: 2026-10-05T09:00+00:00"
+  rrs mark-integrating --tasks "$1" --tasks-dir "$V" --now "$NOW" >/dev/null
+  local m; m=$(cnt ic)
+  row "$(irow "$1" blocked set-aside integrator "$2" 2026-10-05T10:40:00Z "$3")" >/dev/null
+  since ic "$m" '[d["release"], d["path"], d["triggers"], d["conflict"]] if d["kind"] == "lane-freed" else [d["stage"], d["reasonClass"], d["setAsideAt"]] if d["kind"] == "set-aside" else d["kind"]'
+}
+BRIEF=$'integration: conflict unresolved in a.js, b.js\n\nResolution brief (Integration conflict): merging the latest main conflicted and the integrator could not keep both intents, so it aborted the merge and pushed nothing.\n- Conflicting paths: a.js, b.js\n\nRound 1 rejection:\n- own-run fix'
+ok "$(ic ic1 '["conflict"]' "$BRIEF")" '["set-aside","integrator",["conflict"],true] ["integrate","integration-conflict","integration"]' \
+  "an Integration conflict: lane-freed conflict true, set-aside integration-conflict"
+ok "$(ic ic2 '[]' 'integration: verifier red: make test still red after 3 iterations')" \
+  '["set-aside","integrator",[],false] ["integrate","integration-red","integration"]' "a verifier red at Integration: integration-red"
+ok "$(ic ic3 '[]' 'integration: something')" '["set-aside","integrator",[],false] ["integrate","integration-set-aside","integration"]' \
+  "control: any other Integration set-aside stays integration-set-aside"
+ok "$(ic ic4 '[]' 'integration: set aside: verifier red: x')" '["set-aside","integrator",[],false] ["integrate","integration-set-aside","integration"]' \
+  "the escaped generic reason stays integration-set-aside"
+ok "$(ic ic5 '[]' 'INTEGRATION: Conflict Unresolved in a.js')" '["set-aside","integrator",[],false] ["integrate","integration-conflict","integration"]' \
+  "the first line is read lowercased"
+
 echo "== 13. a hand-back restart and a signed gate"
 rrs hand-back --tasks b --tasks-dir "$V" --now "$NOW" >/dev/null
 ok "$(fm b handed_back)" "handed_back: 2026-10-05T10:00+00:00" "hand-back stamps handed_back:"
@@ -910,6 +936,7 @@ ok "$(check ro)" "paired" "ro: every lane-taken, slot-taken and hold-started is 
 ok "$(check cr)" "pause open" "cr: the carried Slot is closed; only the superseded rollout's pause stays open"
 ok "$(check pz)" "paired" "pz: the hard pause freed h's Slot and i's lane"
 ok "$(check nh)" "paired" "nh: each question stop freed its Slot"
+ok "$(check ic)" "paired" "ic: each named Integration set-aside freed its lane"
 
 echo
 [ "$fail" -eq 0 ] && echo "reconcile-rollout-record: all pass" || echo "reconcile-rollout-record: FAILURES"

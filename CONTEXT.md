@@ -467,16 +467,32 @@ through time, from attention to merged PRs. Terms only — no implementation.
   is below it, whatever their `priority:`. _Avoid_: barrier, exclusive.
 - **Integration** — the serial step between a task's approval and its merge:
   the latest `main` merged in, the verifier re-run and, when needed, a short
-  re-review (ADR 0030). _Avoid_: update-branch (GitHub's merge-in, which
-  re-verifies nothing without CI), rebase.
+  re-review (ADR 0030). In plain English, a **merge queue** (GitHub's merge
+  queue, bors, the 'not rocket science' rule): one approved change at a time,
+  re-verified on the latest `main` before it merges; run by the lead, never
+  GitHub's own merge queue, which merge-task refuses. _Avoid_: update-branch
+  (GitHub's merge-in, which re-verifies nothing without CI), rebase.
 - **Integration lane** — the one-at-a-time Integration step itself, held by one
   approved task at a time until it is released (a merge, a set-aside, a
   rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
-  to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue.
+  to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue
+  (Integration's gloss: the whole step, never the lane alone).
 - **Integration queue** — the approved tasks waiting for the Integration lane,
   in `next`'s order: a task a queued task depends on, directly or through a
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
   order. _Avoid_: the lane (that is the step, not the line).
+- **Integration conflict** — Integration's merge of the latest `main`
+  conflicted and the integrator could not keep both intents, so it aborted
+  the merge and pushed nothing (Vibe Kanban's 'rebase conflicts'). The note is
+  set aside at Integration under the marker
+  `integration: conflict unresolved in <paths>`, with a resolution brief for
+  the next integrator beneath it (the paths, theirs, ours, the integrator's
+  account); status reads it as `integrationBlock: conflict` and the Run record
+  as reasonClass `integration-conflict`. Distinct from a verifier red at
+  Integration (`integration: verifier red: …`, `integration-red`); it
+  re-enters at Integration like any set-aside there (p27-4). _Avoid_: rebase
+  conflict, merge failure; a conflict Integration resolved is only a
+  re-review trigger.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier suite
   runs in, shared by every rollout on the machine (p23-4,
   `scripts/verify-slot.py`): the lead's Integration and RACE verifies and every

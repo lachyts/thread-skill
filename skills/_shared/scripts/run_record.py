@@ -116,12 +116,16 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
                      not checked as an enum; reconcile-rollout.py's table writes quota | call-failed |
                      merge-task | declined | prepare | revise-stopped | transient | gate | needs-human |
-                     plan-rejected | review-rounds | approved-without-pr | integration-set-aside | blocked,
-                     where needs-human, p16-3, is a stop on a question for a person, never a plan or
-                     review round run out); setAsideAt? (run | integration | gate)
+                     plan-rejected | review-rounds | approved-without-pr | integration-conflict |
+                     integration-red | integration-set-aside | blocked, where needs-human, p16-3, is a stop on a
+                     question for a person, never a plan or review round run out, and integration-conflict and
+                     integration-red, p27-4, are an integrate set-aside opening the engine's named markers: an
+                     Integration conflict, `integration: conflict unresolved in …`, and a verifier red at
+                     Integration, `integration: verifier red: …`); setAsideAt? (run | integration | gate)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt); path?; triggers? (list of str);
-                     conflict? (bool)
+                     conflict? (bool: `conflict` in triggers — a conflict Integration resolved, or, p27-4, an
+                     unresolved Integration conflict that set the task aside)
   merged          T  pr?; readOnly? (bool)
   paused             mode (soft | hard | sign-off: reconcile-rollout.py await-sign-off, the queue left only gates for
                      Lachy and closed, ADR 0034)

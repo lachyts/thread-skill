@@ -219,6 +219,10 @@ export const meta = {
 // blocked with REVISE_MARKER (review-blocked when no review round is left): launch the seeded revise
 // (task.resume, it holds a slot — ADR 0030 decision 3), then re-integrate on the same anchor. `set-aside` ⇒
 // blocked with `integration: <reason>` (gate-pending for a gate): re-enter at Integration on the same anchor.
+// Two set-asides are named (p27-4), only when the integrator's blockKind agrees with the merge step's log: an
+// Integration conflict (`integration: conflict unresolved in <paths>`, then a resolution brief; its integration
+// .triggers is ['conflict']) and a verifier red (`integration: verifier red: <why>`). Any other reason that would
+// read as one is written `integration: set aside: <reason>`. Both re-enter at Integration like any set-aside there.
 // Stage markers (ADR 0030 decision 4: a set-aside task resumes at the stage it stopped, and nothing already
 // approved is redone). For a blocked task the FIRST line of the latest `## Blocker diagnosis` run decides —
 // REVISE_MARKER ⇒ a seeded revise (reconcile-rollout.py reports it `setAsideAt: run`, the task's own lane), any other
@@ -2191,7 +2195,20 @@ function taskResult(t, r, st) {
 //   reports it `setAsideAt: run` (the task's own lane).
 // - anything else is the task's own run. A task-mode diagnosis that would parse as either marker is
 //   written as OWN_RUN_PREFIX + itself (stageDiagnosis).
+// Two named set-asides at Integration (p27-4) open INTEGRATION_PREFIX too, so they re-enter exactly like any other:
+// - INTEGRATION_CONFLICT_MARK: an Integration conflict — Integration's merge of the latest main conflicted and the
+//   integrator could not keep both intents (conflictMarker: the first line names the paths, a resolution brief follows).
+// - INTEGRATION_RED_MARK: the integrate call's verifier was still red when its loop ended.
+// The engine writes one only when the integrator's blockKind agrees with the merge step's own log
+// (integrationBlockEvidence); a generic reason that would read as either is written INTEGRATION_PREFIX +
+// INTEGRATION_SET_ASIDE_ESCAPE + itself (integrationMarker). integrationBlockOf reads the first line back, and
+// reconcile-rollout.py's integration_block is its port (status's integrationBlock, the Run record's reasonClass).
+// Both marks are built from INTEGRATION_PREFIX, never written as literals: the prefix keeps its one producer.
 const INTEGRATION_PREFIX = 'integration: '
+const INTEGRATION_CONFLICT_MARK = INTEGRATION_PREFIX + 'conflict unresolved in '
+const INTEGRATION_RED_MARK = INTEGRATION_PREFIX + 'verifier red: '
+const INTEGRATION_SET_ASIDE_ESCAPE = 'set aside: '
+const CONFLICT_PATHS_SHOWN = 3 // an Integration conflict's first line, row reason and summary name this many paths
 const REVISE_MARKER = 'revise: rejected at Integration re-review — revise on the branch, then re-integrate'
 const OWN_RUN_PREFIX = 'own run: '
 const INTEGRATION_TROUBLE = ['conflict', 'red', 'shared-file']
@@ -2221,6 +2238,7 @@ const INTEGRATE_RESULT = {
   properties: {
     blocked: { type: 'boolean', description: 'true on a merge-step STOP, an unresolvable conflict, a red verifier at the ceiling, a rejected push or an unsafe tree' },
     blockerDiagnosis: { type: 'string', description: 'one paragraph when blocked (a merge-step STOP line verbatim), else empty string' },
+    blockKind: { type: 'string', enum: ['conflict', 'red', 'stop'], description: 'when blocked: conflict (an unresolvable merge: conflict, aborted), red (the verifier still red when the loop ends), stop (any other stop); omit when not blocked' },
     verified: { type: 'boolean', description: 'true ONLY if the full verifier reached the accepted green state in THIS call' },
     mergeLog: { type: 'string', description: 'the merge step stdout, verbatim' },
     mergeState: { type: 'string', enum: ['up-to-date', 'already-merged', 'merged', 'none'], description: 'the merge line: up-to-date, already-merged, merged (also after a resolved conflict), or none when blocked before a merge line' },
@@ -2275,13 +2293,67 @@ function markerHistory(history) {
 }
 
 // kind: 'rejected' → REVISE_MARKER + history; 'revise-stopped' → REVISE_MARKER, a `revise stopped:` line,
-// history; 'set-aside' → INTEGRATION_PREFIX + the reason on one line (+ history when non-empty).
+// history; 'red' → INTEGRATION_RED_MARK + the reason on one line (+ history); 'set-aside' → INTEGRATION_PREFIX +
+// the reason on one line (+ history when non-empty), escaped with INTEGRATION_SET_ASIDE_ESCAPE when it would
+// otherwise read as a named marker (integrationBlockOf), as stageDiagnosis escapes an own run with `own run: `.
+// lead-integrate.py's integration_marker is the byte-equal port of 'set-aside' (tests/lead-integrate.test.sh C11).
 function integrationMarker(kind, reason, history) {
   const h = markerHistory(history)
   const tail = h ? '\n\n' + h : ''
   if (kind === 'rejected') return REVISE_MARKER + tail
   if (kind === 'revise-stopped') return REVISE_MARKER + '\nrevise stopped: ' + flattenLine(reason) + tail
-  return INTEGRATION_PREFIX + flattenLine(String(reason || '').replace(/^\s*integration:\s*/i, '')) + tail
+  const body = flattenLine(String(reason || '').replace(/^\s*integration:\s*/i, ''))
+  if (kind === 'red') return INTEGRATION_RED_MARK + body + tail
+  return INTEGRATION_PREFIX + (integrationBlockOf(INTEGRATION_PREFIX + body) ? INTEGRATION_SET_ASIDE_ESCAPE : '') + body + tail
+}
+
+// Which named set-aside at Integration a run's text opens (pure): 'conflict' (INTEGRATION_CONFLICT_MARK), 'red'
+// (INTEGRATION_RED_MARK) or ''. The first non-blank line decides, trimmed and lowercased, as parseIntegrationMarker
+// decides the stage. reconcile-rollout.py's integration_block is the port (C11 pins the two byte-equal).
+function integrationBlockOf(text) {
+  const line = String(text == null ? '' : text).split('\n').find((l) => l.trim())
+  const low = line === undefined ? '' : line.trim().toLowerCase()
+  if (low.startsWith(INTEGRATION_CONFLICT_MARK)) return 'conflict'
+  if (low.startsWith(INTEGRATION_RED_MARK)) return 'red'
+  return ''
+}
+
+// An Integration conflict's paths for one line: flattened, blanks dropped, the first CONFLICT_PATHS_SHOWN joined
+// with ', ', then ` and N more` past them. The brief's `- Conflicting paths:` bullet keeps every path.
+function pathList(files) {
+  const ps = (files || []).map(flattenLine).filter((f) => f)
+  const shown = ps.slice(0, CONFLICT_PATHS_SHOWN).join(', ')
+  return ps.length > CONFLICT_PATHS_SHOWN ? `${shown} and ${ps.length - CONFLICT_PATHS_SHOWN} more` : shown
+}
+
+// An Integration conflict's diagnosis: INTEGRATION_CONFLICT_MARK + the paths, a blank line, then the resolution brief
+// the next integrator starts from (the paths, theirs, ours, this integrator's account, what comes next), then the
+// review history. The account keeps the integrator's lines (the prompt asks for one per path): each non-blank line,
+// a leading list marker dropped, is its own indented sub-bullet under `- The integrator:`. No `Round N` line precedes
+// the brief's bullets, and a sub-bullet trims to `- …`, never a `Round N:` header, so parseIntegrationMarker and
+// lead-integrate.py's port drop them (their `cur` is null): the history parses back unchanged. `base` is the merge
+// step's `integration base:` sha (integrationBlockEvidence names a conflict only when the log has that line).
+function conflictMarker(files, diagnosis, I, base) {
+  const ps = (files || []).map(flattenLine).filter((f) => f)
+  const hit = new Set(ps)
+  const theirs = I.landed
+    .map((p) => [p, p.files.filter((f) => hit.has(f))])
+    .filter(([, touched]) => touched.length)
+    .map(([p, touched]) => `- Theirs: ${p.prUrl} (${flattenLine(p.title)}) touched ${touched.join(', ')}; brief ${p.taskPath || '(none)'}`)
+  const account = String(diagnosis == null ? '' : diagnosis).split('\n')
+    .map((l) => l.trim().replace(/^[-*+]\s+/, '').trim()).filter((l) => l)
+  const h = markerHistory(I.reviewHistory)
+  return [
+    INTEGRATION_CONFLICT_MARK + pathList(ps),
+    '',
+    'Resolution brief (Integration conflict): merging the latest main conflicted and the integrator could not keep both intents, so it aborted the merge and pushed nothing.',
+    `- Conflicting paths: ${ps.join(', ')}`,
+    ...theirs,
+    `- Theirs, in full: git log --first-parent ${I.taskBase}..${base} (PRs that landed after the lead's read and commits pushed without a PR are only here)`,
+    `- Ours: this task's approved change (PR ${I.prUrl})`,
+    ...(account.length ? ['- The integrator:', ...account.map((l) => '  - ' + l)] : ['- The integrator: no account given']),
+    "- Next: the next Integration merges the latest main again and resolves these paths keeping both intents; intents that truly exclude each other are Lachy's call (/thread:repair)",
+  ].join('\n') + (h ? '\n\n' + h : '')
 }
 
 // The reference parser for one run's text (p12-8's latest_run_text / status's blockerSummary). The first
@@ -2643,17 +2715,18 @@ function integrationVerify(task, a) {
 
 const INTEGRATION_PRIOR_NOTE = `The task note may carry "## Blocker diagnosis" runs from an earlier Integration or revise (a latest run
 starting \`integration:\` or \`revise:\`): read them as context. The task brief and the review history below are
-the contract. Write NOTHING to the task note in this call — the engine records your result.`
+the contract. Write NOTHING to the task note in this call — the engine records your result.
+A latest run opening \`${INTEGRATION_CONFLICT_MARK}…\` is an Integration conflict: its resolution brief (the paths, theirs, ours, the earlier integrator's account) is where you start.`
 
 // The integrator's preflights. The scope check diffs against the INTEGRATION base, never the task's base:
 // once origin/<default> is merged in, everything it brought sits in the task-base range.
 const INTEGRATION_PREFLIGHTS = `
 Before you push, run these preflight checks:
-- Worktree safety: \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` prints the task tree, NOT the project's main checkout.
-- Scope: \`${GIT_ENV_SCRUB} git diff --stat <integration base>...HEAD\` (the sha on the merge step's \`integration base:\` line) lists only the task's own files plus your resolution and fixes. A file outside that set: STOP and return blocked.
+- Worktree safety: \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` prints the task tree, NOT the project's main checkout. Any other tree: STOP and return blocked with blockKind "stop".
+- Scope: \`${GIT_ENV_SCRUB} git diff --stat <integration base>...HEAD\` (the sha on the merge step's \`integration base:\` line) lists only the task's own files plus your resolution and fixes. A file outside that set: STOP and return blocked with blockKind "stop".
 - Sibling-site blindness: when a resolution or fix changes a code shape, grep the file AND the codebase for the same shape and fix every sibling the landed PRs or this task touched.
 - Dead code: a helper you add has a PRODUCTION caller, not just tests.
-- No force: push plainly. A rejected push is a STOP (return blocked) — never force-push, never rewrite the branch.`.trim()
+- No force: push plainly. A rejected push is a STOP (return blocked with blockKind "stop") — never force-push, never rewrite the branch.`.trim()
 
 function landedBlock(a, task, I) {
   const wt = worktreeDir(a.repoPath, task.slug)
@@ -2717,28 +2790,33 @@ summary), fetches, fast-forwards ${I.branch} to its origin copy (never past a di
 anchor ${I.headSha} (recorded once as refs/integration-anchor/${I.branch}) and prints \`anchor:\`, \`task head:\`,
 \`integration base:\`, \`task file:\` and \`main file:\` lines and exactly one \`merge:\` line. Copy its stdout
 VERBATIM into mergeLog. On a \`merge step STOP: <why>\` line: change nothing, and return blocked=true with that
-line verbatim as blockerDiagnosis and mergeState "none".
+line verbatim as blockerDiagnosis, mergeState "none" and blockKind "stop".
 
 Step 2 — resolve. On \`merge: conflict\`: resolve every \`conflict:\` path keeping BOTH intents — what the
 landed PRs did (theirs) and what this task did (ours); never drop a side to make the merge go through. Then
 stage the paths and complete the merge with \`${GIT_ENV_SCRUB} git -C "${wt}" commit --no-edit\`. A conflict you
 cannot resolve without dropping an intent: \`${GIT_ENV_SCRUB} git -C "${wt}" merge --abort\`, push nothing, and
-return blocked=true naming the files.
+return blocked=true with blockKind "conflict", mergeState "none", mergeCommit "", conflictFiles the \`conflict:\` paths, and as
+blockerDiagnosis one line per path: what theirs did there, what ours did, why both cannot be kept, and what would
+resolve it. The engine records it as an Integration conflict (\`${INTEGRATION_CONFLICT_MARK}<paths>\` and a
+resolution brief), so the next Integration starts from your account.
 
 Step 3 — verify. Required unless ALL of these hold: the merge step printed \`merge: up-to-date\`, the lead's
 trouble has no \`red\`, \`task head:\` equals the anchor ${I.headSha}, and you committed nothing. When required:
 ${integrationVerify(task, a)}
+A verifier still red when the loop ends: return blocked=true with blockKind "red" (the engine records
+\`${INTEGRATION_RED_MARK}<why>\`).
 
 ${INTEGRATION_PREFLIGHTS}
 
 Step 4 — push and read back. Push plainly with \`${GIT_ENV_SCRUB} git -C "${wt}" push origin "${I.branch}"\`, then
 read \`${GIT_ENV_SCRUB} git -C "${wt}" ls-remote origin "refs/heads/${I.branch}"\`: its sha is pushedSha, and
-\`${GIT_ENV_SCRUB} git -C "${wt}" rev-parse HEAD\` is headSha. A rejected push is a STOP: return blocked.
+\`${GIT_ENV_SCRUB} git -C "${wt}" rev-parse HEAD\` is headSha. A rejected push is a STOP: return blocked with blockKind "stop".
 
 ${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}
 
 Rules: never edit the PR (title, body, labels, comments), never merge it, never write the task note. Return
-blocked, blockerDiagnosis, verified (true only if the verifier went green in THIS call), mergeLog, mergeState,
+blocked, blockKind (only when blocked: "conflict", "red" or "stop"), blockerDiagnosis, verified (true only if the verifier went green in THIS call), mergeLog, mergeState,
 mergeCommit (after a conflict: your resolution commit), taskHead, baseSha, headSha, pushedSha, conflictFiles
 (the \`conflict:\` paths), fixCommits (your non-merge commits after the merge), summary, and as your LAST action
 run \`date -u +%Y-%m-%dT%H:%M:%SZ\` and return its output as finishedAt.`
@@ -2833,14 +2911,46 @@ function parseMergeLog(text) {
   }
 }
 
-// Checks the integrator's result (pure). null when it is usable, else { reason, gates? } — a set-aside.
+// Which named set-aside a BLOCKED integrator result is (pure, p27-4), failing closed: the agent's blockKind names it
+// only when the verbatim merge log shows the merge step ran to its merge line — the passed anchor, the `task head:`
+// and `integration base:` lines the step always prints right after it (each non-empty), exactly one `merge:` line
+// and no `merge step STOP:` line — and agrees:
+// - conflict: blockKind 'conflict', that line is `merge: conflict` and it lists `conflict:` paths, and the agent
+//   aborted: mergeState 'none' and no mergeCommit (a conflict resolved and committed, then a rejected push, is never
+//   an Integration conflict). The paths (and the brief's base) come from the log only, never from r.conflictFiles.
+// - red: blockKind 'red', verified not true, and the log shows a verify was required (Step 3's rule: the merge line
+//   is not `merge: up-to-date`, the lead's trouble has red, or the log's task head is not the anchor).
+// Anything else is { block: '' }: today's generic set-aside.
+function integrationBlockEvidence(I, r) {
+  const text = String(r.mergeLog == null ? '' : r.mergeLog)
+  const lines = text.split('\n').map((l) => l.replace(/\s+$/, ''))
+  const log = parseMergeLog(text)
+  const stopped = lines.some((l) => l.startsWith('merge step STOP:'))
+  const ran = !stopped && log.anchor === `${I.headSha} base ${I.taskBase}` && !!log.taskHead && !!log.base &&
+    log.merge.length === 1
+  if (!ran) return { block: '' }
+  if (r.blockKind === 'conflict' && log.merge[0] === 'merge: conflict' && log.conflicts.length &&
+    r.mergeState === 'none' && !r.mergeCommit) {
+    return { block: 'conflict', files: log.conflicts, base: log.base }
+  }
+  if (r.blockKind === 'red' && r.verified !== true &&
+    (log.merge[0] !== 'merge: up-to-date' || I.trouble.includes('red') || log.taskHead !== I.headSha)) return { block: 'red' }
+  return { block: '' }
+}
+
+// Checks the integrator's result (pure). null when it is usable, else { reason, gates?, block?, files?, base? } — a
+// set-aside; block (integrationBlockEvidence) names an Integration conflict or a verifier red, and a gate wins.
 // A verify is required unless the base is unmoved, nothing is red, the branch has not moved and nothing
 // was committed: then (the race case) the result integrates with no verifier run.
 function integrationCheck(I, r, approved) {
   if (!r || r.__dead) return { reason: TRANSIENT_DIAGNOSIS }
   const gates = unapprovedGates(r.gatedInputs, approved)
   if (gates.length) return { reason: gateDiagnosis(gates), gates }
-  if (r.blocked) return { reason: r.blockerDiagnosis || 'the integrator returned blocked with no diagnosis' }
+  if (r.blocked) {
+    const reason = r.blockerDiagnosis || 'the integrator returned blocked with no diagnosis'
+    const ev = integrationBlockEvidence(I, r)
+    return ev.block ? { reason, ...ev } : { reason }
+  }
   const log = parseMergeLog(r.mergeLog)
   if (log.anchor === null) return { reason: 'the merge log has no `anchor:` line — the merge step did not run as rendered' }
   if (log.anchor !== `${I.headSha} base ${I.taskBase}`) return { reason: `the merge log's anchor line (${log.anchor}) is not the passed anchor ${I.headSha} base ${I.taskBase}` }
@@ -2923,7 +3033,15 @@ async function integrate(task, a, trace) {
     const r = await runAgent(integratorPrompt(task, a, I), opts(ilabel, INTEGRATE_RESULT, 'integrator'))
     finished(ri, r)
     const bad = integrationCheck(I, r, task.approvedGates)
-    if (bad) return { outcome: 'set-aside', reason: bad.reason, gates: bad.gates || [] }
+    // A named Integration conflict carries triggers ['conflict'] (the Run record's lane-freed reads conflict: true);
+    // integration.baseSha stays '' for every integrator set-aside (the only kind this branch returns), so their
+    // Integration log's base=- is unchanged.
+    if (bad) {
+      return {
+        outcome: 'set-aside', reason: bad.reason, gates: bad.gates || [], block: bad.block || '', files: bad.files || [],
+        briefBase: bad.base || '', ...(bad.block === 'conflict' ? { triggers: ['conflict'] } : {}),
+      }
+    }
     j = { mergeCommit: r.mergeState === 'up-to-date' ? '' : r.mergeCommit, headSha: r.headSha, baseSha: r.baseSha, triggers: integrationTriggers(I, r), path: trace.path }
     if (!j.triggers.length) return { outcome: 'integrated', ...j, reReviewed: false }
   }
@@ -2942,6 +3060,11 @@ async function integrate(task, a, trace) {
 // Every status is one of reconcile's five: integrated → review; rejected → blocked with the revise
 // marker (review-blocked when no review round is left); set-aside → blocked with `integration: <reason>`
 // (gate-pending for a gate). A rejected task's note therefore never reads as approved.
+// Two set-asides are named (p27-4; o.block, from integrationBlockEvidence): an Integration conflict gets
+// conflictMarker (`integration: conflict unresolved in <paths>` and its resolution brief) and triggers
+// ['conflict'], a verifier red gets `integration: verifier red: <why>`; their row reason and summary say so, and
+// any other set-aside keeps the generic marker (escaped `integration: set aside: ` when it would read as either).
+// No new row or payload keys.
 function integrationResult(task, out, a, trace) {
   const I = a.integration
   const o = out || { outcome: 'set-aside', reason: INTEGRATION_THREW }
@@ -2961,10 +3084,17 @@ function integrationResult(task, out, a, trace) {
   } else if (o.outcome === 'set-aside') {
     gatedInputs = o.gates || []
     status = gatedInputs.length ? 'gate-pending' : 'blocked'
-    blockerDiagnosis = integrationMarker('set-aside', o.reason, I.reviewHistory)
+    blockerDiagnosis = o.block === 'conflict' ? conflictMarker(o.files, o.reason, I, o.briefBase)
+      : o.block === 'red' ? integrationMarker('red', o.reason, I.reviewHistory)
+        : integrationMarker('set-aside', o.reason, I.reviewHistory)
   }
   const head = o.headSha || ''
   const g = integrationRung(I.rung)
+  const why = flattenLine(o.reason)
+  const asideReason = o.block === 'conflict' ? `conflict unresolved in ${pathList(o.files)} — ${why}`
+    : o.block === 'red' ? `verifier red: ${why}` : why
+  const asideSummary = o.block === 'conflict' ? `Integration conflict in ${pathList(o.files)}: ${why}`
+    : o.block === 'red' ? `set aside at Integration (verifier red): ${why}` : `set aside at Integration: ${why}`
   return {
     slug: task.slug,
     scope: task.scope,
@@ -2983,7 +3113,7 @@ function integrationResult(task, out, a, trace) {
     gatedInputs,
     summary: o.outcome === 'integrated'
       ? `integrated ${head} onto ${o.baseSha} (${trace.path}${o.reReviewed ? ', re-reviewed' : ', no re-review'})`
-      : o.outcome === 'rejected' ? `Integration re-review rejected ${head}` : `set aside at Integration: ${flattenLine(o.reason)}`,
+      : o.outcome === 'rejected' ? `Integration re-review rejected ${head}` : asideSummary,
     startRung: g.startRung,
     rung: g.rung,
     climbs: g.climbs,
@@ -3003,7 +3133,7 @@ function integrationResult(task, out, a, trace) {
       triggers: o.triggers || [],
       reReviewed: !!o.reReviewed,
       feedback: o.feedback || [],
-      reason: o.outcome === 'set-aside' ? flattenLine(o.reason) : '',
+      reason: o.outcome === 'set-aside' ? asideReason : '',
       agents: trace.agents,
       metrics: integrationMetrics(I, trace.agents),
     },
