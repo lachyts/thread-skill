@@ -244,12 +244,28 @@ PY
 J=$(nx ro-b)
 ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"]]')" '[{"ro-a":2},[]]' "T10: once decided it counts again"
 
-# ── T11: restarts fit the Trickle ──────────────────────────────────────────────────────────────────────────────
+# ── T11: a restart waits on the ceiling alone; this rollout's stalled rows count toward its starts ─────────────
+# A restart takes back a task every other lead already counts (its note stays in_progress), so only the ceiling bounds
+# it (execute away.md § The Trickle); a new start counts every in_progress row of this rollout, live or stalled.
 scen t11-restart
 mkro ro-r 4; mkt r1 ro-r in_progress 'owner: gone'; mkt r2 ro-r in_progress 'owner: gone'; mkt r3 ro-r in_progress 'owner: gone'
+mkt r4 ro-r open
 J=$(nx ro-r --running "")
-ok "$(q "$J" '[d["restart"], d["start"], d["halt"]]')" '[["r1","r2"],[],null]' "T11: only two of three stalled tasks restart"
-ok "$(q "$J" "$holds")" '{"r3":"trickle: 2/2 tasks running on this Mac"}' "T11: the third is held on the Trickle"
+ok "$(q "$J" '[d["restart"], d["start"], d["halt"], d["slotsInUse"], d["slotLimit"]]')" '[["r1","r2","r3"],[],null,3,2]' \
+  "T11: all three stalled tasks restart past a Trickle of 2, within the ceiling of 4"
+ok "$(q "$J" "$holds")" '{"r4":"trickle: 3/2 tasks running on this Mac"}' "T11: the queued r4 is held on the Trickle"
+scen t11b-restart-ceiling
+mkro ro-r 2; mkt r1 ro-r in_progress 'owner: gone'; mkt r2 ro-r in_progress 'owner: gone'; mkt r3 ro-r in_progress 'owner: gone'
+J=$(nx ro-r --running "")
+ok "$(q "$J" '[d["restart"], d["start"], d["halt"]]')" '[["r1","r2"],[],null]' "T11b: the ceiling of 2 still bounds the restarts"
+ok "$(q "$J" "$holds")" '{"r3":"ceiling: 2/2 slots in use"}' "T11b: the third stalled task is held on the ceiling, never the Trickle"
+ok "$(q "$J" 'd["trickle"]["running"]')" '3' "T11b: trickle.running counts the held stalled note too, as every other lead does"
+scen t11c-stalled-counts
+mkro ro-r 4; mkt r1 ro-r in_progress 'owner: gone'; mkt r2 ro-r open; mkt r3 ro-r open
+J=$(nx ro-r --running "")
+ok "$(q "$J" '[d["restart"], d["start"], d["slotsInUse"], d["slotLimit"], d["trickle"]["running"]]')" '[["r1"],["r2"],1,2,2]' \
+  "T11c: the stalled r1 restarts and counts: one start fills the Trickle of 2"
+ok "$(q "$J" "$holds")" '{"r3":"trickle: 2/2 tasks running on this Mac"}' "T11c: r3 is held on the Trickle"
 
 # ── T12: a head Solo while the Trickle is full ─────────────────────────────────────────────────────────────────
 scen t12-solo
@@ -328,6 +344,35 @@ J=$(nx ro-d --running "" --dry-run)
 ok "$(q "$J" "$holds")" '{"d2":"depends on [[d1]] (gate-pending)"}' "T17b: only the dependency holds d2"
 ok "$(q "$J" '[d["halt"], [w["slug"] for w in d["awaitingSignOff"]]]')" '["awaiting-sign-off",["d1","d2"]]' \
   "T17b: the gate still halts awaiting-sign-off with the Trickle full"
+
+# ── T19: two respawned leads both restart their stalled tasks (round-1 review, a deadlock regression) ─────────────
+# A Login switch or a usage-limit respawn ends every background call, so each lead's Cold resume runs `next --running ""`
+# over its own stalled notes, which every other lead counts. Neither may wait on the other's: both restart, and only
+# the queued rows wait on the Trickle.
+scen t19-respawn
+mkro ro-a 3; mkt a1 ro-a in_progress 'owner: lead-a'; mkt a2 ro-a in_progress 'owner: lead-a'; mkt a3 ro-a open
+mkro ro-b 3; mkt b1 ro-b in_progress 'owner: lead-b'; mkt b2 ro-b in_progress 'owner: lead-b'; mkt b3 ro-b open
+for ro in a b; do
+  J=$(nx ro-$ro --running "")
+  ok "$(q "$J" '[d["restart"], d["start"], d["halt"], d["slotsInUse"], d["slotLimit"]]')" "[[\"${ro}1\",\"${ro}2\"],[],null,2,0]" \
+    "T19: ro-$ro restarts both its stalled tasks, with slotLimit 0"
+  ok "$(q "$J" "$holds")" "{\"${ro}3\":\"trickle: 4/2 tasks running on this Mac\"}" "T19: ro-$ro holds only its queued row on the Trickle"
+done
+# Once both run again, a landing frees no room past the Trickle: ro-a still counts ro-b's two.
+J=$(nx ro-a --running "a1,a2")
+ok "$(q "$J" '[d["restart"], d["start"], d["running"], d["halt"]]')" '[[],[],["a1","a2"],null]' "T19: with both live, ro-a starts nothing more"
+
+# ── T20: a blocked row with the Trickle full reads stuck; the lead's halt guard waits on it ───────────────────────
+# `next` cannot tell a seeded revise (lead-integrate.py inputs' autoRevise) from any other block, so ro-c's only row,
+# c1 blocked at its run, reads `stuck` with slotLimit 0 and no hold. These are the values execute § 4.5 step 1.5's
+# Trickle clause reads to end the turn `waiting` (reason="trickle: 2/2 tasks running on this Mac") instead of halting.
+scen t20-blocked-revise
+mkro ro-a 3; mkt a1 ro-a in_progress 'owner: lead-a'; mkt a2 ro-a in_progress 'owner: lead-a'
+mkro ro-c 3; mkt c1 ro-c blocked 'owner: lead-c'
+J=$(nx ro-c --running "" --dry-run)
+ok "$(q "$J" '[d["halt"], d["slotsInUse"], d["slotLimit"], d["ceiling"], d["hold"], [e["slug"] for e in d["setAside"]]]')" \
+  '["stuck",0,0,3,[],["c1"]]' "T20: stuck, slotsInUse 0, slotLimit 0 below the ceiling 3, no hold, c1 set aside"
+ok "$(q "$J" '[d["trickle"]["running"], d["trickle"]["limit"]]')" '[2,2]' "T20: trickle.running and trickle.limit give the wait's reason"
 
 # ── T18: a refused call reads no file and prints no WARN ───────────────────────────────────────────────────────
 scen t18-refused

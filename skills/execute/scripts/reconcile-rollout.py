@@ -55,8 +55,9 @@ Subcommands:
               "depends on [[<unit>]]"}], and is [] for any other verdict.
               The Trickle (Chorus ADR 0104; Trickle and Away, below): `slotLimit` (an int) and `trickle` ({away,
               file, why, limit, until, morning, elsewhere, running}) follow `slotsInUse`; every other key, `ceiling`
-              included, is unchanged. Not Away, starts and restarts stop at the Trickle less the tasks running in
-              every other open Rollout on the Mac; a row held there reads `trickle: <running>/<N> tasks running on
+              included, is unchanged. Not Away, a start stops at the Trickle less the tasks running in every
+              other open Rollout on the Mac and less this rollout's own in_progress tasks, live or stalled; a
+              restart stops at the ceiling only. A row held there reads `trickle: <running>/<N> tasks running on
               this Mac`, and while one is, `halt` stays null. A stale or unreadable state file prints one `WARN:
               ~/.config/thread/away.json …` line on stderr, --dry-run included.
 
@@ -566,8 +567,8 @@ question is no round run out, so it must not reach plan-rejected or review-round
 a round cap on); then by status: plan-rejected, review-rounds, approved-without-pr (review with no PR),
 integration-set-aside (an integrate row's set-aside), else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
-paused or pauseRequested -> pause-drain; any `trickle:` hold (a queued or a stalled row) -> hold-trickle; the
-first held queued row's reason: `depends on` -> dependency,
+paused or pauseRequested -> pause-drain; any `trickle:` hold (only ever a queued row: a stalled row waits on the
+ceiling alone) -> hold-trickle; the first held queued row's reason: `depends on` -> dependency,
 solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
 row -> awaiting-hand-back (a known mislabel when every one is a blocked row step 1.2 relaunches as a seeded
 revise: its slot-taken start=revise splits the span seconds later; also while step 1.2's automatic retry waits out
@@ -634,8 +635,10 @@ more than 5 minutes ahead) reads not Away at DEFAULT_TRICKLE, the file's own `tr
 print the AWAY_WARN line. Fresh, `away` and `trickle` are the file's. The count elsewhere (_elsewhere_running) is one
 walk of --tasks-dir, _scan's index: each other rollout note directly in it, tagged `rollout`, not done or dropped,
 parallel, with no `paused:` stamp and started (never_started), counts its `status: in_progress` notes less the ones
-its own undecided RACE or UNVERIFIED holds. Serial rollouts, review and integrating notes never count. `next` never
-writes the file.
+its own undecided RACE or UNVERIFIED holds. Serial rollouts, review and integrating notes never count. This rollout's
+own use is counted the same way, every in_progress row of its own, live or stalled, so a new start fits only while
+elsewhere + its own in_progress + this call's starts < the Trickle; a restart waits on the ceiling alone (no state leaves
+two respawned leads each waiting on the other's stalled notes). `next` never writes the file.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
@@ -2605,10 +2608,12 @@ def cmd_next(args) -> int:
     /thread:repair`) and `halt` is "git-env", ahead of every other verdict. The Trickle (Chorus ADR 0104; execute
     away.md): once the refusals pass, the Away state file is read (_away_state; a stale or unreadable one prints one
     AWAY_WARN line on stderr) and every other started parallel Rollout's running tasks are counted (_elsewhere_running).
-    Away, `slotLimit` is the ceiling; not Away, it is min(ceiling, max(0, Trickle - the count elsewhere)). Restarts,
-    starts and the head Solo's lone start all stop at `slotLimit`; a running call is never stopped, so `slotsInUse` may
-    exceed it. A row held for want of a Slot reads `ceiling: …` once this rollout fills its ceiling, else `trickle: <N
-    running on the Mac>/<Trickle> tasks running on this Mac`, and a `trickle:` hold never lets the rollout halt."""
+    Away, `slotLimit` is the ceiling; not Away, it is min(ceiling, max(0, Trickle - the count elsewhere)). Starts and the
+    head Solo's lone start stop at `slotLimit`, counting every in_progress row of this rollout, live or stalled, as the
+    count elsewhere does; a restart stops at the ceiling only, since every other lead already counts the task it takes
+    back. A running call is never stopped, so `slotsInUse` may exceed `slotLimit`. A row held for want of a Slot reads
+    `ceiling: …` once this rollout fills its ceiling, else `trickle: <trickle.running>/<Trickle> tasks running on this
+    Mac`, and a `trickle:` hold never lets the rollout halt."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -2683,6 +2688,9 @@ def cmd_next(args) -> int:
     # slot_held: rows held for want of a Slot, at the ceiling or (not Away) the Trickle; their reason is set below.
     start, restart, holds, slot_held = [], [], [], []
     used = len(live)
+    # mine: this rollout's own use of the Trickle before this call's starts, every in_progress row, live or stalled, as
+    # every other lead counts it (_elsewhere_running). A new start fits only while mine + starts < slot_limit.
+    mine = len(in_progress)
 
     if paused or pause_requested:
         # A soft pause drains (ADR 0030 decision 5): nothing new starts or restarts; once nothing runs,
@@ -2698,8 +2706,11 @@ def cmd_next(args) -> int:
         reason = "paused" if paused else "pause requested: draining"
         holds += [(r, reason) for r in stalled + queued]
     else:
+        # A restart takes back a task every other lead already counts (its note stays in_progress), so only the
+        # ceiling bounds it, never the Trickle: bounding it there would let two respawned leads each wait on the other's
+        # stalled notes with nothing running (execute away.md § The Trickle).
         for r in sorted(stalled, key=lambda r: (-r["weight"], r["rank"])):
-            if used < slot_limit:
+            if used < ceiling:
                 restart.append(r)
                 used += 1
             else:
@@ -2728,7 +2739,7 @@ def cmd_next(args) -> int:
                         if above else solo_head)
                 if best["solo"]:
                     remaining.remove(best)
-                    if not started and not start and used + len(start) < slot_limit:
+                    if not started and not start and mine + len(start) < slot_limit:
                         start.append(best)
                     elif not started and not start:
                         slot_held.append(best)  # nothing of this rollout runs: only the Trickle holds it
@@ -2737,7 +2748,7 @@ def cmd_next(args) -> int:
                                             f"to merge or be set aside"))
                     holds += [(r, f"behind solo [[{best['slug']}]]") for r in remaining]
                     break
-                if used + len(start) >= slot_limit:
+                if mine + len(start) >= slot_limit:  # the ceiling binds through it: used <= mine, slot_limit <= ceiling
                     # A freed slot goes to a row above the head Solo task, or to that task, never to a row below
                     # it: those wait behind it, as status's Queued row says, and only the rest wait on a Slot.
                     for r in remaining:
@@ -2750,10 +2761,11 @@ def cmd_next(args) -> int:
                 remaining.remove(best)
                 in_flight.update(best["files"])
     in_use = used + len(start)
-    # Whichever binds first names the reason: the ceiling once this rollout fills it, else the Trickle (no quotes, so
-    # it can ride a ROLLOUT-STATUS reason=).
+    # Whichever binds first names the reason: the ceiling once this rollout fills it, else the Trickle, counted as
+    # `trickle.running` is (no quotes, so it can ride a ROLLOUT-STATUS reason=). A stalled row is only ever held at the
+    # ceiling, which it fills first.
     slot_why = (f"ceiling: {in_use}/{ceiling} slots in use" if in_use >= ceiling else
-                f"{TRICKLE_PREFIX} {running_elsewhere + in_use}/{away['limit']} tasks running on this Mac")
+                f"{TRICKLE_PREFIX} {running_elsewhere + mine + len(start)}/{away['limit']} tasks running on this Mac")
     holds += [(r, slot_why) for r in slot_held]
     if not args.dry_run:
         start_cleared = _clear_start(rollout_note)
@@ -2807,7 +2819,8 @@ def cmd_next(args) -> int:
         "slotLimit": slot_limit,
         "trickle": {"away": away["away"], "file": away["file"], "why": away["why"], "limit": away["limit"],
                     "until": away["until"], "morning": away["morning"], "elsewhere": elsewhere,
-                    "running": running_elsewhere + used + len(start)},
+                    # The Trickle's count of the Mac after this call: the count elsewhere plus this rollout's own use.
+                    "running": running_elsewhere + mine + len(start)},
         "start": slugs(start),
         "restart": slugs(restart),
         "hold": [{"slug": r["slug"], "reason": why} for r, why in sorted(holds, key=lambda h: _rank(h[0]))],
@@ -4193,8 +4206,8 @@ def _review_verdict_events(args, rollout, slug, task, prior):
 
 
 def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside, trickle_held) -> str:
-    """The idle-slots reason (the module docstring's table, first match). `trickle_held`: this call holds a row (queued
-    or stalled) on `trickle:`."""
+    """The idle-slots reason (the module docstring's table, first match). `trickle_held`: this call holds a queued row
+    on `trickle:` (a stalled row waits only on the ceiling)."""
     if git_env:
         return "hold-git-env"
     if paused or pause_requested:
