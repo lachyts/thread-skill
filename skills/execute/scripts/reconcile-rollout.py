@@ -63,6 +63,23 @@ Subcommands:
               `<slug>: descope restart (descoped <stamp>; descope_armed: cleared) ...`, so a block after that
               restart reads as a second block and descope asks. It also removes hand-back's `handed_back:`
               marker (p15-2). `--start start|restart|revise|resume` names the start for the Run record (below).
+              It arms the task window itself (p26-3, execute § 4.5 *Git-env canary*): `--arm-repo <repoPath>
+              --arm-default <B>`, which go together (one without the other is a usage error, exit 2, before any note
+              is read), are required while the task's rollout note (resolved as slot-taken resolves it: a --rollout
+              whose stem is the note's `rollout:`, else <tasks-dir>/<rollout>.md) has a `Project root:` line naming a
+              directory that exists (or that cannot be stat'ed), or exists but cannot be read (both fail-closed);
+              missing there, the note is refused with exit 2 and nothing written, its ERROR line naming both flags.
+              With no `Project root:` line, a root that does not exist or no rollout note, it behaves as before; the
+              flags given with no rollout note to arm against are exit 2, nothing written. Per slug, in order: a note
+              not found or unparseable, a finished status (exit 1, nothing armed), then the arm, then the writes and
+              slot-taken. The arm is a subprocess, `git-env-canary.py arm --rollout <that note> --tasks-dir <dir>
+              --repo <R> --default <B> --slug <slug> --kind task`, its stdout and stderr inherited (its `armed`,
+              refusal and HOLD lines pass through); a non-zero arm (an OSError or a signal counts as 2) writes nothing
+              for that note: no `started:`, no `integrating:` removal, no marker consumed, no slot-taken, and an
+              `ERROR: <slug>: the task window's arm exited <rc>; nothing written` line. Exit 3 when any arm exited 3
+              (a trip or a hold); else 2 (an arm failure or refusal, a missing or unpaired flag, the flags with no
+              rollout note); else 1 (a refused note); else 0. --dry-run never runs the canary: it prints `<slug>:
+              would arm the task window (dry-run)`, and the flag requirement still applies.
 
   mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
               (the first wins): the durable signal /thread:status reads.
@@ -733,6 +750,7 @@ import json
 import math
 import os
 import re
+import stat
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -2141,10 +2159,15 @@ def _print_progress(args, now):
     if not getattr(args, "rollout", None):
         return
     path = Path(os.path.expanduser(args.rollout))
-    if not path.exists():
-        print(f"WARN: rollout note not found at {path} — no progress line", file=sys.stderr)
+    try:
+        if not _is_kind(path, stat.S_ISREG):
+            print(f"WARN: rollout note not found at {path} — no progress line", file=sys.stderr)
+            return
+        line = _progress_for(path, Path(os.path.expanduser(args.tasks_dir)), now)
+    except (OSError, ValueError) as e:  # an unreadable note costs the line, never the verb's own exit (p26-3)
+        print(f"WARN: cannot read rollout note {path}: {e} — no progress line", file=sys.stderr)
         return
-    print(_progress_for(path, Path(os.path.expanduser(args.tasks_dir)), now))
+    print(line)
 
 
 # ---- reconcile --------------------------------------------------------------
@@ -2730,19 +2753,98 @@ def _flag(args, note) -> str:
     return " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
 
 
+GIT_ENV_CANARY_PY = Path(__file__).resolve().parent / "git-env-canary.py"
+
+
+def _is_kind(path, kind) -> bool:
+    """kind(st_mode) (stat.S_ISDIR, stat.S_ISREG) for path, False when it is missing; any other OSError raises, so
+    the caller can fail closed. os.stat, never Path.is_dir()/is_file(): from Python 3.14 those return False on any
+    OSError, EACCES included, so a path that cannot be stat'ed would read as missing (p26-3)."""
+    try:
+        return kind(os.stat(path).st_mode)
+    except (FileNotFoundError, NotADirectoryError, ValueError):  # ValueError: an embedded NUL, a path none can hold
+        return False
+
+
+def _arm_task_window(args, slug, rollout_path) -> int:
+    """mark-started's arm (p26-3): `git-env-canary.py arm --kind task` as a subprocess, so the canary keeps its own
+    lock, git-env scrub and exit codes; its stdout and stderr pass through. An OSError or a signal counts as 2."""
+    cmd = [sys.executable, str(GIT_ENV_CANARY_PY), "arm", "--rollout", str(rollout_path),
+           "--tasks-dir", str(Path(os.path.expanduser(args.tasks_dir))), "--repo", args.arm_repo,
+           "--default", args.arm_default, "--slug", slug, "--kind", "task"]
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        rc = subprocess.run(cmd, stdin=subprocess.DEVNULL).returncode
+    except OSError as e:
+        print(f"git-env-canary: cannot run {GIT_ENV_CANARY_PY}: {e}", file=sys.stderr)
+        return 2
+    return 2 if rc < 0 else rc
+
+
+def _arm_gate(args, slug, rollout, cache):
+    """mark-started's arm decision for one note (p26-3): (rollout note path to arm against, or None to arm nothing;
+    the refusal, or None). The flags are required while the rollout note's Project root names an existing directory,
+    or while the note exists but cannot be read (fail-closed); given, they need a rollout note to arm against."""
+    flags = args.arm_repo is not None
+    if not rollout:
+        return None, (f"{slug}: --arm-repo/--arm-default given, but the note has no rollout: — no rollout note to arm "
+                      "against; nothing written") if flags else None
+    path, rollout_note, _why, unreadable = _rollout_note_read(args, rollout, cache)
+    if rollout_note is None and not unreadable:
+        return None, (f"{slug}: --arm-repo/--arm-default given, but there is no rollout note at {path} — no rollout "
+                      "note to arm against; nothing written") if flags else None
+    if flags:
+        return path, None
+    if unreadable:
+        return None, (f"{slug}: the rollout note {path} cannot be read, so mark-started cannot tell whether it must "
+                      "arm the task window: pass --arm-repo <repoPath> --arm-default <B> (execute § 4.5 *Git-env "
+                      "canary*, p26-3); nothing written")
+    root = _project_root(rollout_note)
+    try:
+        required, said = root is not None and _is_kind(root, stat.S_ISDIR), "exists"
+    except OSError as e:  # a root that cannot be stat'ed may exist: fail closed
+        required, said = True, f"cannot be stat'ed ({e.strerror or e}) and may exist"
+    if required:
+        return None, (f"{slug}: the rollout's Project root {root} {said}, so mark-started arms the task window: pass "
+                      "--arm-repo <repoPath> --arm-default <B> (execute § 4.5 *Git-env canary*, p26-3); nothing "
+                      "written")
+    return None, None
+
+
 def cmd_mark_started(args) -> int:
     """Stamp `started:` as a task starts (first start wins: a restart keeps the first clock) and
     remove `integrating:`. Consumes approve-gates' `gates_signed:` marker (p12-14): the restart that
     directly follows a sign-off says so, once, and no later restart does. Refuses a done, merged or
-    dropped note. Records slot-taken (p15-2), its start read before the markers are removed."""
+    dropped note. Arms the task window first (p26-3, _arm_gate): a failed arm writes nothing for that
+    note. Records slot-taken (p15-2), its start read before the markers are removed."""
+    if (args.arm_repo is None) != (args.arm_default is None):
+        print("ERROR: mark-started: --arm-repo <repoPath> and --arm-default <B> go together (p26-3); nothing written",
+              file=sys.stderr)
+        return 2
     now = _now(args)
     rollouts = {}
+    worst = 0  # 3 an arm's trip or hold, 2 an arm failure or a flag refusal (D5)
     for slug, _path, note in _each_note(args):
         status = _status(note)
         if status in FINISHED_STATUSES:
             args._errors.append(f"{slug}: status is {status!r} — refusing to mark started")
             continue
         rollout, start = _note_rollout(note), _start_kind(note, args.start)  # read before the writes
+        arm_path, refusal = _arm_gate(args, slug, rollout, rollouts)
+        if refusal:
+            args._errors.append(refusal)
+            worst = max(worst, 2)
+            continue
+        if arm_path is not None:
+            if args.dry_run:
+                print(f"{slug}: would arm the task window (dry-run)")
+            else:
+                arc = _arm_task_window(args, slug, arm_path)
+                if arc != 0:
+                    args._errors.append(f"{slug}: the task window's arm exited {arc}; nothing written")
+                    worst = max(worst, 3 if arc == 3 else 2)
+                    continue
         existing = _scalar(note.get("started"))
         if not existing:
             note.set("started", _stamp(now))
@@ -2762,7 +2864,7 @@ def cmd_mark_started(args) -> int:
                   "restart asks Lachy")
         sys.stdout.flush()
         _record_slot_taken(args, slug, note, rollout, start, rollouts)
-    return _finish(args, now)
+    return max(worst, _finish(args, now))  # 3 > 2 > 1 (a refused note) > 0
 
 
 def cmd_mark_integrating(args) -> int:
@@ -3683,6 +3785,21 @@ def _rollout_note_path(args, rollout) -> Path:
     return Path(os.path.expanduser(args.tasks_dir)) / f"{rollout}.md"
 
 
+def _rollout_note_read(args, rollout, cache):
+    """(path, Note or None, why, unreadable) for the rollout note a task's `rollout:` names (_rollout_note_path),
+    read once per verb run: mark-started's arm decision and its slot-taken share it. unreadable: the note may
+    exist but could not be read (the arm decision fails closed on it)."""
+    key = rollout.lower()
+    if key not in cache:
+        path = _rollout_note_path(args, rollout)
+        try:
+            cache[key] = (path, Note(path), None, False) if _is_kind(path, stat.S_ISREG) else \
+                (path, None, f"no rollout note at {path}", False)
+        except (OSError, ValueError) as e:
+            cache[key] = (path, None, f"cannot read {path}: {e}", True)
+    return cache[key]
+
+
 def _record_slot_taken(args, slug, note, rollout, start, cache):
     """mark-started's slot-taken. With no `rollout:`, no rollout note or no resolvable ceiling, one warning and
     nothing recorded (a Slot with no ceiling cannot be read against it)."""
@@ -3693,14 +3810,7 @@ def _record_slot_taken(args, slug, note, rollout, start, cache):
         return
     if not rollout:
         return warn("the note has no rollout:")
-    key = rollout.lower()
-    if key not in cache:
-        path = _rollout_note_path(args, rollout)
-        try:
-            cache[key] = (Note(path), None) if path.is_file() else (None, f"no rollout note at {path}")
-        except (OSError, ValueError) as e:
-            cache[key] = (None, f"cannot read {path}: {e}")
-    rollout_note, why = cache[key]
+    _path, rollout_note, why, _unreadable = _rollout_note_read(args, rollout, cache)
     if rollout_note is None:
         return warn(why)
     settings, err = _slot_settings(note, rollout_note)
@@ -6028,6 +6138,11 @@ def main() -> int:
             m.add_argument("--start", choices=START_CHOICES, default=None,
                            help="the start the Run record names (resume: a Lost-call or signed-gate resume; revise: "
                                 "a seeded revise); default derived from the note's markers and started:")
+            m.add_argument("--arm-repo", dest="arm_repo", default=None,
+                           help="p26-3: arm the task window first (git-env-canary.py arm --kind task) against this "
+                                "repoPath; with --arm-default, required while the rollout's Project root exists")
+            m.add_argument("--arm-default", dest="arm_default", default=None,
+                           help="p26-3: the arm's default branch <B> (the call's defaultBranch, else main)")
         m.set_defaults(func=func)
 
     hb = sub.add_parser("hand-back", help="a set-aside task re-enters at its stage: Integration -> review, its run -> in_progress; "

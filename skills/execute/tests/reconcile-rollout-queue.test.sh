@@ -21,7 +21,8 @@ has() { case "$1" in *"$2"*) echo "ok   - $3";; *) echo "FAIL - $3: [$2] not in 
 hasnt() { case "$1" in *"$2"*) echo "FAIL - $3: unexpected [$2] in [$1]"; fail=1;; *) echo "ok   - $3";; esac; }
 
 D=""
-scen() { D="$TMP/$1"; mkdir -p "$D/repo"; echo "== $1"; }
+# scen <name>: every scenario's rollout is ro, so mark-started's canary arm (p26-3) keeps its records per scenario, in temp.
+scen() { D="$TMP/$1"; mkdir -p "$D/repo"; echo "== $1"; export THREAD_GIT_ENV_DIR="$TMP/git-env/$1"; }
 # mkro <body> [frontmatter lines...] — the rollout note $D/ro.md; <body> is its schedule order and blocks.
 mkro() {
   local body="$1"; shift
@@ -201,10 +202,10 @@ scen settings-progress
 mkro "$five"; rs_toml '[defaults]' 'parallel_ceiling = 2' '[repo."o/r"]' 'parallel_ceiling = 1'
 git init -q "$D/repo"; git -C "$D/repo" remote add origin https://github.com/o/r
 for s in a b; do mkt $s done 'started: 2026-10-02T10:00+00:00' 'merged: 2026-10-02T11:00+00:00'; done
-mkt c open; mkt d open; mkt e open
-out=$(HOME="$D/home" python3 "$SCRIPT" mark-started --tasks c --tasks-dir "$D" --now "$NOW" --rollout "$D/ro.md"); rc=$?
+mkt c in_progress; mkt d open; mkt e open
+out=$(HOME="$D/home" python3 "$SCRIPT" mark-started --tasks c --tasks-dir "$D" --now "$NOW" --rollout "$D/ro.md" --arm-repo "$D/repo" --arm-default master); rc=$?
 ok "$rc" 0 "settings: mark-started --rollout exits 0"
-has "$out" "progress: 2/5 merged, 3 queued" "settings: … and prints its progress line"
+has "$out" "progress: 2/5 merged, 1 running, 2 queued" "settings: … and prints its progress line"
 has "$out" "~3h remaining (rough)" "settings: mark-started's ~remaining uses the repo table's ceiling 1"
 # Control: the same notes, read through status's progress line (the same _progress_line), move with the ceiling:
 # the repo table's 1 again, then [defaults]' 2 with the repo table gone, then the built-in 4 with no file.
@@ -494,12 +495,13 @@ ok "$(q "$J" '[d["timeline"]["tasks"], d["timeline"]["avgTaskMinutes"], d["timel
 
 # ── stamps ───────────────────────────────────────────────────────────────────────────────────────
 scen stamps
+git -c init.defaultBranch=master init -q "$D/repo"   # the Project root mark-started arms against (p26-3)
 mkro $'- [[a]]\n- [[b]]\n- [[c]]\n- [[g]]'
 mkt a in_progress 'integrating: 2026-10-01T09:00+00:00'
 mkt b done
 mkt c review 'pr: https://github.com/o/r/pull/3' 'ready: 2026-10-02T12:00+00:00'
-mkt g open
-out=$(HOME="$EH" python3 "$SCRIPT" mark-started --tasks a,b,g --tasks-dir "$D" --now "$NOW" --rollout "$D/ro.md" 2>"$D/err"); rc=$?
+mkt g in_progress
+out=$(HOME="$EH" python3 "$SCRIPT" mark-started --tasks a,b,g --tasks-dir "$D" --now "$NOW" --rollout "$D/ro.md" --arm-repo "$D/repo" --arm-default master 2>"$D/err"); rc=$?
 ok "$rc" 1 "mark-started: refusing a done note exits 1"
 has "$(cat "$D/err")" "b:" "mark-started: the refusal names the note"
 ok "$(fm a started)" "started: 2026-10-02T14:05+00:00" "mark-started: exact stamp"
@@ -509,7 +511,8 @@ ok "$(fm g started)" "started: 2026-10-02T14:05+00:00" "mark-started: still proc
 ok "$(fm b started)" "<none>" "mark-started: the done note is untouched"
 ok "$(fm a integrating)" "<none>" "mark-started: removes integrating:"
 has "$out" "progress: 1/4 merged" "mark-started --rollout prints the progress line"
-HOME="$EH" python3 "$SCRIPT" mark-started --tasks a --tasks-dir "$D" --now 2026-10-02T16:00:00Z >/dev/null
+HOME="$EH" python3 "$SCRIPT" mark-started --tasks a --tasks-dir "$D" --now 2026-10-02T16:00:00Z --arm-repo "$D/repo" --arm-default master >/dev/null; rc=$?
+ok "$rc" 0 "mark-started: a restart (arming again) exits 0"
 ok "$(fm a started)" "started: 2026-10-02T14:05+00:00" "mark-started: the first start wins"
 python3 "$SCRIPT" mark-integrating --tasks c --tasks-dir "$D" --now 2026-10-02T15:10:00Z >/dev/null; rc=$?
 ok "$rc" 0 "mark-integrating: a review note with a PR"

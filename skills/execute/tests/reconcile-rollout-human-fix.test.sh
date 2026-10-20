@@ -15,7 +15,9 @@
 #   X  the races between the lead's Recorded answer, repair and the other verbs
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own (rollout-settings.py reads ~/.config/thread/rollouts.toml), each scenario's
-# Project root is a temp dir, and the Run record lands in each scenario's own dir. Temp notes only; no vault, no network.
+# Project root is a temp git checkout (mark-started arms the task window against it, p26-3, with the canary's records
+# in a temp THREAD_GIT_ENV_DIR outside the scenario dir), and the Run record lands in each scenario's own dir. Temp
+# notes only; no vault, no network.
 # Usage: bash reconcile-rollout-human-fix.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -50,7 +52,7 @@ FB='Round 1: the plan still misses the rollback path'
 Q='Which migration tool: alembic or yoyo?'
 
 D=""
-scen() { D="$TMP/$1"; mkdir -p "$D/root"; echo "== $1"; export THREAD_EVENTS_DIR="$D/events"; rm -rf "$HOME/.config"; }
+scen() { D="$TMP/$1"; mkdir -p "$D/root"; git -c init.defaultBranch=master init -q "$D/root"; echo "== $1"; export THREAD_EVENTS_DIR="$D/events" THREAD_GIT_ENV_DIR="$TMP/git-env/$1"; rm -rf "$HOME/.config"; }
 mkro() {
   { printf -- '---\ntags: [task, rollout]\nstatus: in_progress\nprotocol_version: 5\nparallel_ceiling: 3\nprojects:\n  - "[[Proj]]"\n'
     for l in "$@"; do printf '%s\n' "$l"; done
@@ -94,7 +96,12 @@ inp() { python3 "$LI" inputs --note "$D/$1.md" --now "${INOW:-$NOW}" "${@:2}"; }
 ar() { out=$(python3 "$SCRIPT" auto-retry --tasks "$1" --rollout "$D/$RO.md" --tasks-dir "$D" --now "${ANOW:-$NOW}" "${@:2}" 2>&1); rc=$?; }
 ra() { out=$(python3 "$SCRIPT" record-answer --tasks "$1" --rollout "$D/$RO.md" --tasks-dir "$D" --now "${RNOW:-$NOW}" "${@:2}" 2>&1); rc=$?; }
 hb() { out=$(python3 "$SCRIPT" hand-back --tasks "$1" --tasks-dir "$D" --now "${HNOW:-$NOW}" "${@:2}" 2>&1); rc=$?; }
-ms() { python3 "$SCRIPT" mark-started --tasks "$1" --tasks-dir "$D" --now "${2:-$NOW}" >/dev/null 2>&1; }
+# ms <slug> [now]: the lead's mark-started, which arms the task window (p26-3); a refusal fails loudly.
+ms() {
+  local o
+  o=$(python3 "$SCRIPT" mark-started --tasks "$1" --tasks-dir "$D" --now "${2:-$NOW}" --arm-repo "$D/root" --arm-default master 2>&1) \
+    || { echo "FAIL - mark-started $1 exited $?: $o"; fail=1; }
+}
 j() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); v=eval(sys.argv[1]); print(v if isinstance(v, str) else json.dumps(v, separators=(",", ":"), sort_keys=True))' "$2"; }
 # hf <inputs json>: [act, handBack, raise] of humanFix, or null
 hf() { j "$1" '[d["humanFix"]["act"], d["humanFix"]["handBack"], d["humanFix"]["raise"]] if d["humanFix"] else None'; }

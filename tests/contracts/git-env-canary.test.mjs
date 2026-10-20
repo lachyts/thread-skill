@@ -21,6 +21,7 @@ const real = {
   readme: read('README.md'),
   adr: read('docs/adr/0030-a-rollout-is-a-queue-that-integrates-at-merge.md'),
   canary: read('skills/execute/scripts/git-env-canary.py'),
+  reconcile: read('skills/execute/scripts/reconcile-rollout.py'),
 }
 
 // The three markers, from the one source.
@@ -45,6 +46,11 @@ const C3_ITEM5 = "5. for a RACE only, the lead's re-verify verdict, so Lachy dec
 // Heartbeat clause (4), byte for byte: the merge-result rule reaches it through "act on it as §4.5 would".
 const HB4 = '(4) If a background Integration command this session launched (the verifier, merge-task.sh, a backoff) has not ' +
   'reported: when its result file exists (`<out>.rc`, or `.claude/merge-task.status`), act on it as §4.5 would; otherwise do nothing more.'
+
+// mark-started's arm (p26-3): the three call sites that open a task window, flags included.
+const MS12 = '`mark-started --tasks <slug> --rollout <rollout-note> --start revise --arm-repo <repoPath> --arm-default <B>`'
+const MS13 = '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py mark-started --tasks <slug> --rollout <rollout-note> --arm-repo <repoPath> --arm-default <B>` with the `--start` that routing chose'
+const MSRS = '`mark-started --tasks <slug> --rollout <rollout-note> --start resume --arm-repo <repoPath> --arm-default <B>`'
 
 const before = (hay, a, b) => hay.indexOf(a) >= 0 && hay.indexOf(b) >= 0 && hay.indexOf(a) < hay.indexOf(b)
 const S45 = /^### 4\.5\. /
@@ -86,7 +92,7 @@ function subSteps(text) {
 }
 const snippet = (text, name) => (text.match(new RegExp(`^# thread:${name}[^\\n]*\\n([\\s\\S]*?)\\n# end thread:${name}`, 'm')) ?? [])[1] ?? ''
 
-function check({ execute, status, repair, schedule, context, readme, adr, canary }) {
+function check({ execute, status, repair, schedule, context, readme, adr, canary, reconcile }) {
   const fails = []
   const can = labelled(execute, 'Git-env canary.')
   const canRaw = labelledRaw(execute, 'Git-env canary.')
@@ -137,13 +143,17 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !d3.includes(LOG) || !['ack --rollout', '--slugs', '--ref', 'restore --rollout', '--drop-local'].every((k) => d3.includes(k)) ||
     !sch1.includes(LOG) || [LOG, TRIP, ACK].some((k) => canary.includes(k))) fails.push('marker-tie')
 
-  // arm-sites: an arm beside each launch (next to its shasum), in order where it matters.
+  // arm-sites: an arm beside each launch (next to its shasum), in order where it matters. A fresh task call's arm is
+  // its mark-started's (p26-3): step 1.2's seeded revise, step 1.3's start and restart and its room-stop resume each
+  // pass --arm-repo/--arm-default, before the shasum; a resume's own arm still follows it.
   const sub12 = subs.find((x) => x.includes('**Seeded revises')) ?? ''  // sub-step 2 opens with the Standing approval (ADR 0034)
   const sub13 = subs.find((x) => x.includes('`restart`, then each in `start`')) ?? ''
   const resume37 = s37.slice(s37.indexOf('**Signed-gate resume.**'))
   const s5resume = s5.slice(s5.indexOf('If a call dies'))
-  if (!before(sub12, '`shasum -a 256 <scriptPath>` (recorded', 'the canary arm') || !before(sub12, 'the canary arm', 'then the Workflow call') ||
-    !before(sub13, 'record it with the returned runId', 'the canary arm') ||
+  const armB = bullet(canRaw, 'Arm sites')
+  if (!before(sub12, MS12, '`shasum -a 256 <scriptPath>` (recorded') || !before(sub12, '`shasum -a 256 <scriptPath>` (recorded', 'then the Workflow call') ||
+    !before(sub13, MS13, 'record it with the returned runId') || !before(sub13, 'record it with the returned runId', 'its own canary arm') ||
+    !sub13.includes(MSRS) || !armB.includes('`mark-started`') ||
     !before(resume37, '`shasum -a 256 <scriptPath>` again', 'the canary arm') || !before(resume37, 'the canary arm', 'resumeFromRunId') ||
     !before(lost, "§ 4's git-env check", 'the canary arm') || !before(lost, 'the canary arm', '`resumeFromRunId` with the same') ||
     !before(s5resume, "§ 4's git-env check", 'the canary arm') || !before(s5resume, 'the canary arm', 'resume once') ||
@@ -301,6 +311,16 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     "`restore`'s drop guard.", '`--drop-local`', 'a forged `refs/remotes/origin/<default>`', 'close-out-path contents are not inspected',
     'the upgrade path', 'Considered:', 'wrapping the verifier', 'prompt-only'].every((k) => adrB.includes(k))) fails.push('adr')
 
+  // mark-started-arm (p26-3): the bullet that says when mark-started arms and what a failed arm leaves, the Window
+  // term, the ADR amendment and the script's own docstring.
+  const msArm = bullet(canRaw, "mark-started's arm (p26-3).")
+  const rrDoc = reconcile.slice(0, reconcile.indexOf('\nimport argparse'))
+  if (!msArm.includes('requires `--arm-repo <repoPath> --arm-default <B>`') || !msArm.includes('`Project root:` line names a directory that exists') ||
+    !msArm.includes('before any write') || !msArm.includes('no `slot-taken`') || !msArm.includes('`--dry-run` arms nothing') ||
+    !msArm.includes('re-baselines') || !msArm.includes("*Lost call* and § 5's resume") ||
+    !ctxWindow.includes('armed by `mark-started` itself') || !adr.includes('*(Amended 2026-10-20 by thread-skill-p26-3:') ||
+    !rrDoc.includes('--arm-repo') || !rrDoc.includes('--arm-default')) fails.push('mark-started-arm')
+
   // context-readme: the four terms and the script's README line.
   if (!['- **Git-env canary** —', '- **Window** —', '- **Git-env hold** —', '- **Git-env ack** —'].every((k) => context.includes(k)) ||
     !collapse(readme).includes("`skills/execute/scripts/git-env-canary.py` is the lead's git-env canary")) fails.push('context-readme')
@@ -315,7 +335,7 @@ test('the git-env canary holds at every site, consumer and record', () => {
 
 const RULES = ['marker-tie', 'arm-sites', 'check-sites', 'check-all-sites', 'integrate-check', 'prepare-cases', 'step11-halt',
   'lane-free', 'race-gitenv', 'race-followon', 'drop-guard', 'merge-result', 'exit-rule', 'owner-closeout', 'status', 'schedule',
-  'repair', 'adr', 'context-readme', 'owner-refusal']
+  'repair', 'adr', 'context-readme', 'owner-refusal', 'mark-started-arm']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -332,7 +352,9 @@ test('control: status without the log section, or a literal marker in the canary
 })
 
 test('control: each arm site without its arm fails arm-sites', () => {
-  only('execute', ', the canary arm (*Git-env canary*, `--kind task`; a non-zero exit halts and launches nothing), `python3', ', `python3', 'arm-sites', 'step 1.2')
+  only('execute', '--start revise --arm-repo <repoPath> --arm-default <B>` (*Run record*', '--start revise` (*Run record*', 'arm-sites', 'step 1.2')
+  only('execute', '--rollout <rollout-note> --arm-repo <repoPath> --arm-default <B>` with the `--start` that routing chose', '--rollout <rollout-note>` with the `--start` that routing chose', 'arm-sites', 'step 1.3')
+  only('execute', 'then `mark-started --tasks <slug> --rollout <rollout-note> --start resume --arm-repo <repoPath> --arm-default <B>`, then', 'then `mark-started --tasks <slug> --rollout <rollout-note> --start resume`, then', 'arm-sites', 'room-stop resume')
   only('execute', ', then the canary arm (§ 4.5 *Git-env canary*, `--kind task`; a non-zero exit halts and resumes nothing), then:', ', then:', 'arm-sites', '§ 3.7')
   only('execute', ' then the canary arm (§ 4.5 *Git-env canary*: `--kind task`, or `integrate` for an integrate call; a non-zero exit halts and resumes nothing), then resume once', ' then resume once', 'arm-sites', '§ 5')
   only('execute', 'then the canary arm (*Git-env canary*: `--kind race-verify`;', 'then (', 'arm-sites', 'RACE')
@@ -436,6 +458,13 @@ test('control: an exit-3 row without mark-integrating, no step-3 exit-1 route or
   only('execute', exit1 + '\n', '', 'owner-refusal', 'step-3 exit 1')
   const owner = real.execute.split('\n').find((l) => l.startsWith('- **The owner rule.**'))
   only('execute', owner, "- **The owner rule.** A window can only be open while its vault owner holds: a task call's note reads `in_progress`; an integrate call's, a verify's or a RACE re-verify's note carries `integrating:`. Once the owner no longer holds, any canary verb compares the window once and closes it, so a hard pause's TaskStop'd calls, a crash between `arm` and launch and a dead call's window all end.", 'owner-refusal', 'owner rule reverted')
+})
+
+test("control: mark-started's arm bullet without 'before any write', or the Window term without mark-started, fails mark-started-arm", () => {
+  const b = real.execute.split('\n').find((l) => l.startsWith("- **mark-started's arm (p26-3).**"))
+  assert.ok(b && b.includes('before any write'), 'control setup: the bullet')
+  only('execute', b, b.replace('before any write', 'after its writes'), 'mark-started-arm', 'bullet')
+  only('context', 'armed by `mark-started` itself', 'armed before its launch', 'mark-started-arm', 'Window term')
 })
 
 test('control: no README line fails context-readme', () => {
