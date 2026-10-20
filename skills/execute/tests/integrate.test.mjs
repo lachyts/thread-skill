@@ -259,6 +259,22 @@ test('b4b: the step-back reviser and the integrator agree — the plan is refere
   assert.ok(integrator.includes('The approved plan, for reference only'))
 })
 
+// p27-1: the integrate args carry no plan; a stray one (an old lead habit, a hand-built Lost-call relaunch) is
+// tolerated and ignored, never rendered: refusing it would read as a Lost call.
+test('p27-1: a stray integration.plan is ignored and never rendered', async () => {
+  const I = mkI({ plan: 'STRAY ' + 'y'.repeat(61000) })
+  assert.equal(T.integrationArgsError(mkArgs(I)), '')
+  const r = await run(mkArgs(I), { [ILABEL]: ir({ state: 'merged', conflicts: ['a.js'] }), [JLABEL(2)]: jv() })
+  clean(r)
+  assert.deepEqual(r.labels, [ILABEL, JLABEL(2)])
+  for (const label of [ILABEL, JLABEL(2)]) {
+    const p = promptOf(r, label)
+    assert.ok(p.length > 0, `${label}: dispatched`)
+    assert.ok(!p.includes('STRAY') && !p.includes('y'.repeat(100)), `${label}: the stray plan is never rendered`)
+  }
+  assert.equal(r.row.plan, null)
+})
+
 test('b5: an already-merged M integrates with that M', async () => {
   const r = await run(mkArgs(mkI()), {
     [ILABEL]: ir({ state: 'already-merged', taskHead: M, merge: M, head: M, verified: true }), [JLABEL(2)]: jv(),

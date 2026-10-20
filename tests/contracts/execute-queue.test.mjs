@@ -487,20 +487,22 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     }
   }
 
-  // approved-plan (p14-2, L2): the approved plan reaches the seeded revise (step 1.2) and the integrate call (step 3)
-  // from `lead-integrate.py plan`, read at those two launches only (Restart routing's revise reuses step 1.2's) and
-  // passed verbatim; no empty-plan literal is left; § 6 lists the row's `plan` (then p21-3's `reviewVerdicts`, the row's
-  // last key) and reconcile's three outcomes.
+  // approved-plan (p14-2, L2; p27-1): the seeded revise (step 1.2) takes the approved plan from `lead-integrate.py
+  // plan`, read at that launch only (Restart routing's revise reuses step 1.2's) and passed verbatim. The integrate
+  // call (step 3) carries no `plan`: its integrator reads the note's `## Approved plan` itself (p27-1), so § 4.5 names
+  // `lead-integrate.py plan` once. No empty-plan literal is left; § 6 lists the row's `plan` (then p21-3's
+  // `reviewVerdicts`, the row's last key), reconcile's three outcomes and who reads the section back.
   const planHits = (section(skill, S45) ?? '').split('lead-integrate.py plan').length - 1
   const s6 = S(skill, S6)
   const VERBATIM = 'passed verbatim as the same JSON string, never retyped, summarised or truncated'
   if (!s2sub || !s2sub.text.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py plan --note <task note>`, then the Workflow call') ||
     !s2sub.text.includes('plan: <plan.plan>}') || !s2sub.text.includes(VERBATIM) ||
-    !st3.includes('trouble, landed, plan, reviewHistory') ||
-    !st3.includes("`plan` is `lead-integrate.py plan --note <task note>`'s `plan`, read at this launch (after the approving row is reconciled) and " + VERBATIM) ||
-    planHits !== 2 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
+    !st3.includes('trouble, landed, reviewHistory') || st3.includes('landed, plan') ||
+    !st3.includes("It carries no `plan` (p27-1): the integrator reads the task note's `## Approved plan` itself") ||
+    planHits !== 1 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
     !s6.includes('gatedInputs, plan, reviewVerdicts }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
-    !s6.includes('`""` removes that section') || !s6.includes('`null` or absent leaves it')) {
+    !s6.includes('`""` removes that section') || !s6.includes('`null` or absent leaves it') ||
+    !s6.includes("`lead-integrate.py plan` reads it back for §4.5 step 1.2's seeded revise")) {
     fails.push('approved-plan')
   }
 
@@ -1015,17 +1017,30 @@ test("control: step 1.2 back on plan: '' fails approved-plan", () => {
   only(sk('plan: <plan.plan>}', "plan: ''}"), 'approved-plan', "plan ''")
 })
 
-test('control: step 3 back on plan: "" fails approved-plan', () => {
-  only(sk('trouble, landed, plan, reviewHistory', 'trouble, landed, plan: "", reviewHistory'), 'approved-plan', 'plan ""')
+test('control: step 3 passing plan again fails approved-plan', () => {
+  only(sk('trouble, landed, reviewHistory', 'trouble, landed, plan, reviewHistory'), 'approved-plan', 'step 3 plan')
 })
 
-test('control: step 3 without "verbatim" fails approved-plan', () => {
-  only(sk('read at this launch (after the approving row is reconciled) and passed verbatim as the same JSON string, never retyped, summarised or truncated;',
-    'read at this launch (after the approving row is reconciled);'), 'approved-plan', 'no verbatim')
+test('control: step 1.2 without verbatim fails approved-plan', () => {
+  only(sk("where `plan.plan` is the `plan` output's `plan`, passed verbatim as the same JSON string, never retyped, summarised or truncated.",
+    "where `plan.plan` is the `plan` output's `plan`."), 'approved-plan', 'no verbatim')
 })
 
-test('control: a third lead-integrate.py plan read in Restart routing fails approved-plan', () => {
-  only(sk("- else the task's own call.", "- else `lead-integrate.py plan --note <task note>`, then the task's own call."), 'approved-plan', 'third read')
+test('control: step 3 without the note pointer fails approved-plan', () => {
+  only(sk("the integrator reads the task note's `## Approved plan` itself", 'the integrator works from the brief alone'), 'approved-plan', 'no note pointer')
+})
+
+test('control: step 3 re-reading lead-integrate.py plan fails approved-plan', () => {
+  only(sk('The lead copies no plan into the call.', 'The lead runs `lead-integrate.py plan --note <task note>` and copies no plan into the call.'),
+    'approved-plan', 'step 3 read')
+})
+
+test('control: a second lead-integrate.py plan read in Restart routing fails approved-plan', () => {
+  only(sk("- else the task's own call.", "- else `lead-integrate.py plan --note <task note>`, then the task's own call."), 'approved-plan', 'second read')
+})
+
+test('control: § 6 back on steps 1.2 and 3 fails approved-plan', () => {
+  only(sk("for §4.5 step 1.2's seeded revise", 'for §4.5 steps 1.2 and 3'), 'approved-plan', '§ 6 steps 1.2 and 3')
 })
 
 test("control: § 6 without the '' removal fails approved-plan", () => {
