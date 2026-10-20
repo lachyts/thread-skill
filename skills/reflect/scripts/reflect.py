@@ -79,7 +79,8 @@ parallel with no note). For each:
             picked it up by until.
             explainedIn and cannotShow as a parallel unrecorded set-aside's.
   ask       a `halt cleared:` line, act haltCleared (serial-score.py's act: a halt is Lachy's to clear), its task the
-            first one a later Leg took from the halted Leg (null when none), detail `Leg <K>'s halt cleared: <reason>`.
+            first one a later Leg took from the halted Leg (null when none), detail `Leg <K>'s halt cleared: <reason>`,
+            and halted: the reason the halted Leg's `closed: halted: <reason>` line gives (null when none).
   restart   a `restart:` line: leg (the Leg it starts), how (pending | started | manual), started, manual.
   escape    each piece of serial-score.py's escapes block (`fixes:` only: a fix task that names a chain task, its
             Leg-filed smoke fixes among them), dated as the sweep dates a fixer, with at and inWindow. The sweep below
@@ -940,16 +941,20 @@ class Span:
                               "stage": SERIAL_STAGES.get(e.get("status"), "block"), "status": e.get("status"),
                               "reasonClass": None, "setAsideAt": "leg", "taskNote": self.task_note(e["task"]),
                               "movedBy": moved, "mover": mover, "explainedIn": None})
-        took = {}
+        took, halted = {}, {}
         for g in st.get("legs") or []:
             for e in g.get("took") or []:
                 took.setdefault(e.get("from"), e.get("task"))
+            if g.get("outcome") == "halted":  # its close line, `halted: <reason>`: what the trace starts from
+                halted[g.get("n")] = (g.get("closed") or "").split(":", 1)[-1].strip() or None
         for c in st.get("haltCleared") or []:
             t = at_ms(c.get("at"))
             if t is None or not since <= t <= until:
                 continue
             detail = "Leg %s's halt cleared: %s" % (c.get("leg"), c.get("reason"))
-            items.append(self.ask(slug, took.get(c.get("leg")), t, "haltCleared", detail))
+            item = self.ask(slug, took.get(c.get("leg")), t, "haltCleared", detail)
+            item["halted"] = halted.get(c.get("leg"))
+            items.append(item)
         for r in st.get("restarts") or []:
             t = at_ms(r.get("at"))
             if t is None or not since <= t <= until:
@@ -1494,10 +1499,11 @@ class Span:
         # A serial chain records only Lachy's acts, so a hands-off chain has no record line in the window (or no record
         # at all): it is read when its note's Leg log has a line in the window.
         for slug, note in self.serial_notes():
-            if slug in read or not self.leg_log_in(note, since, until):
+            key = slug.lower()  # a record's name is run_record's lowercased slug
+            if key in read or not self.leg_log_in(note, since, until):
                 continue
-            entry, sc = self.read_rollout(slug, records.get(slug, []), since, until, tunings_file)
-            read[slug] = entry
+            entry, sc = self.read_rollout(slug, records.get(key, []), since, until, tunings_file)
+            read[key] = entry
             entries.append(entry)
             if sc is not None:
                 scores[slug] = sc
@@ -1517,10 +1523,10 @@ class Span:
                 continue
             root = project_root(note) if note else None
             entries.append({"rollout": slug, "mode": "escapes-only" if inw else "repairs-only",
-                            "shape": shape_of(note) if note else "parallel", "note": str(note) if note else None, "root": root, "repo": self.origin(root),
-                            "status": None, "closeLine": None, "score": None, "window": None, "partial": None,
-                            "headline": None, "breached": [], "breachCounts": False, "binding": None, "proposals": [],
-                            "flags": [], "friction": inw + reps})
+                            "shape": shape_of(note) if note else "parallel", "note": str(note) if note else None,
+                            "root": root, "repo": self.origin(root), "status": None, "closeLine": None, "score": None,
+                            "window": None, "partial": None, "headline": None, "breached": [], "breachCounts": False,
+                            "binding": None, "proposals": [], "flags": [], "friction": inw + reps})
         self.cannot_show("a repair run that writes no dated repair: line and records no event is not seen, nor is a "
                          "repair: line on a rollout with no Run record")
         fresh = self.fresh_review(ev, since, until)

@@ -291,8 +291,9 @@ the open Watches and the knob candidates; its header holds every rule. A serial 
 read when its Run record or its Leg log has a line in the window (a hands-off chain writes no Run-record line): span
 scores it through `serial-score.py`, as § 1 does, never with fold-journals, the settings or score.py, and never makes
 it a knob candidate (its entry's `shape` is `serial`, with the chain state in `chain`). Add `--since <TS>` and
-`--until <TS>` only on Lachy's word: by default it starts where the last Reflection ended. Read the whole `span.json`. Exit 1 or 2 stops the reading: quote
-its stderr line. Never re-run it after a write (step 12 on): a new span is a new Reflection, with a new id.
+`--until <TS>` only on Lachy's word: by default it starts where the last Reflection ended. Read the whole
+`span.json`. Exit 1 or 2 stops the reading: quote its stderr line. Never re-run it after a write (step 12 on): a new
+span is a new Reflection, with a new id.
 
 ### 11. The reading
 
@@ -328,8 +329,8 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
 - A serial chain's (`shape: serial`) items come from its record's acts and its Leg log (`leg.py status`), read by the
   chain's rules (`skills/execute/legs.md`, ADR 0040), never as a queue's: it has no Slots, lane, retry, descope, churn
   or breach. A `haltCleared` ask is Lachy clearing a Leg's halt, which stands until his `leg.py clear-halt`
-  (`skills/execute/legs.md` § Begin, repair § 7): trace what halted the Leg, a `--revert` that could not run
-  (`skills/execute/legs.md` § The task loop) or a second lock timeout (`skills/execute/legs.md` § Concurrency). A
+  (`skills/execute/legs.md` § Begin, repair § 7): trace what halted the Leg from its `halted` (the reason its
+  `closed: halted:` line gives), such as a `--revert` that could not run (`skills/execute/legs.md` § The task loop). A
   `set-aside` (its `leg`, its leg.py `status`) is traced to `skills/execute/legs.md` § The task loop (a gate under
   *Gates, before any write*, else *Done or set aside*) or to `skills/execute/legs.md` § Preflight (an MCP namespace
   that did not answer), and by its `movedBy` to what moved it on: a record act, or `unrecorded` when a later Leg
