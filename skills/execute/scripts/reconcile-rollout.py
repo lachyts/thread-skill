@@ -745,6 +745,7 @@ import json
 import math
 import os
 import re
+import stat
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -2130,10 +2131,15 @@ def _print_progress(args, now):
     if not getattr(args, "rollout", None):
         return
     path = Path(os.path.expanduser(args.rollout))
-    if not path.exists():
-        print(f"WARN: rollout note not found at {path} — no progress line", file=sys.stderr)
+    try:
+        if not _is_kind(path, stat.S_ISREG):
+            print(f"WARN: rollout note not found at {path} — no progress line", file=sys.stderr)
+            return
+        line = _progress_for(path, Path(os.path.expanduser(args.tasks_dir)), now)
+    except (OSError, ValueError) as e:  # an unreadable note costs the line, never the verb's own exit (p26-3)
+        print(f"WARN: cannot read rollout note {path}: {e} — no progress line", file=sys.stderr)
         return
-    print(_progress_for(path, Path(os.path.expanduser(args.tasks_dir)), now))
+    print(line)
 
 
 # ---- reconcile --------------------------------------------------------------
@@ -2722,6 +2728,16 @@ def _flag(args, note) -> str:
 GIT_ENV_CANARY_PY = Path(__file__).resolve().parent / "git-env-canary.py"
 
 
+def _is_kind(path, kind) -> bool:
+    """kind(st_mode) (stat.S_ISDIR, stat.S_ISREG) for path, False when it is missing; any other OSError raises, so
+    the caller can fail closed. os.stat, never Path.is_dir()/is_file(): from Python 3.14 those return False on any
+    OSError, EACCES included, so a path that cannot be stat'ed would read as missing (p26-3)."""
+    try:
+        return kind(os.stat(path).st_mode)
+    except (FileNotFoundError, NotADirectoryError, ValueError):  # ValueError: an embedded NUL, a path none can hold
+        return False
+
+
 def _arm_task_window(args, slug, rollout_path) -> int:
     """mark-started's arm (p26-3): `git-env-canary.py arm --kind task` as a subprocess, so the canary keeps its own
     lock, git-env scrub and exit codes; its stdout and stderr pass through. An OSError or a signal counts as 2."""
@@ -2758,9 +2774,9 @@ def _arm_gate(args, slug, rollout, cache):
                       "canary*, p26-3); nothing written")
     root = _project_root(rollout_note)
     try:
-        required, said = root is not None and root.is_dir(), "exists"
+        required, said = root is not None and _is_kind(root, stat.S_ISDIR), "exists"
     except OSError as e:  # a root that cannot be stat'ed may exist: fail closed
-        required, said = True, f"cannot be read ({e.strerror or e})"
+        required, said = True, f"cannot be stat'ed ({e.strerror or e}) and may exist"
     if required:
         return None, (f"{slug}: the rollout's Project root {root} {said}, so mark-started arms the task window: pass "
                       "--arm-repo <repoPath> --arm-default <B> (execute § 4.5 *Git-env canary*, p26-3); nothing "
@@ -3743,7 +3759,7 @@ def _rollout_note_read(args, rollout, cache):
     if key not in cache:
         path = _rollout_note_path(args, rollout)
         try:
-            cache[key] = (path, Note(path), None, False) if path.is_file() else \
+            cache[key] = (path, Note(path), None, False) if _is_kind(path, stat.S_ISREG) else \
                 (path, None, f"no rollout note at {path}", False)
         except (OSError, ValueError) as e:
             cache[key] = (path, None, f"cannot read {path}: {e}", True)
