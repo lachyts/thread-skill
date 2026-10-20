@@ -3976,11 +3976,10 @@ def _journal_dir_refusal(jdir: str, run_id: str):
     run_sub = os.path.join("subagents", "workflows", run_id)
     if os.path.basename(jdir) == "workflows" and os.path.isdir(os.path.join(os.path.dirname(jdir), run_sub)):
         return None
+    # A dir under <session>/subagents/workflows (the Transcript dir, its parent or a file in it) names its session.
     parts = Path(jdir).parts
-    if len(parts) >= 4 and parts[-3:-1] == ("subagents", "workflows"):  # <session>/subagents/workflows/<run>
-        likely = str(Path(*parts[:-3]) / "workflows")
-    else:
-        likely = "<session>/workflows"
+    at = [i for i in range(1, len(parts) - 1) if parts[i:i + 2] == ("subagents", "workflows")]
+    likely = str(Path(*parts[:at[-1]]) / "workflows") if at else "<session>/workflows"
     return (f"--journal-dir {jdir} holds no {run_id}.json and is no workflows/ dir whose session holds "
             f"{run_sub}/ (the Workflow tool's Transcript dir is not the journal dir): pass the session's "
             f"workflows/ dir, {likely}")
@@ -6074,7 +6073,8 @@ def main() -> int:
     br.add_argument("--call", required=True, choices=CALL_CHOICES, help="the call's kind (a resume: the kind it resumes)")
     br.add_argument("--resumed-from", dest="resumed_from", default=None, help="a Lost-call resume: the runId it resumes")
     br.add_argument("--journal-dir", dest="journal_dir", default=None,
-                    help="absolute journal dir (default: from CLAUDE_CODE_SESSION_ID's transcript)")
+                    help="absolute journal dir: the session's workflows/ dir, never the printed Transcript dir "
+                         "(default: from CLAUDE_CODE_SESSION_ID's transcript)")
     br.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     br.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     br.add_argument("--dry-run", action="store_true")

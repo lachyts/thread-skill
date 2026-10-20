@@ -258,6 +258,9 @@ ok "$rc" 1 "the Workflow tool's Transcript dir is refused (exit 1)"
 has "$out" "ERROR: bind-run: bt: --journal-dir $TD holds no wf_bj1.json" "the refusal names the dir and the journal it lacks"
 has "$out" "pass the session's workflows/ dir, $J" "the refusal names the session's workflows/ dir"
 ok "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" 1 "one ERROR line"
+out=$(rrs bind-run --tasks bt --run-id wf_bj1 --call integrate --journal-dir "$SESS/subagents/workflows" --tasks-dir "$V" 2>&1); rc=$?
+ok "$rc" 1 "the Transcript dir's parent, subagents/workflows/, is refused too"
+has "$out" "pass the session's workflows/ dir, $J" "and names the session's workflows/ dir"
 mkdir -p "$TMP/elsewhere"
 out=$(rrs bind-run --tasks bt --run-id wf_bj1 --call integrate --journal-dir "$TMP/elsewhere" --tasks-dir "$V" 2>&1); rc=$?
 ok "$rc" 1 "a dir that holds no journal and whose session holds no run subdir is refused"
