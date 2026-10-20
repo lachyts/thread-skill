@@ -55,6 +55,11 @@ still serves as a baseline, its missing keys read as no baseline.
   `auto`. A close line's `applied` is [], so it never moves a key and never counts toward `agreeing` or `agreed`.
   `agreeing` stays score.py's count (earlier applied Tunings with the same rule and direction); `agreed` is the
   weekly agreement (the Agreement rule below), carried on each entry of an auto landing.
+- Serial (p24-4, ADR 0040): a serial rollout's close line (close-score.py's serial path, through
+  skills/reflect/scripts/serial-score.py and `tune.py --record-only --close completion`) carries `shape: serial` and
+  `repo: null`, since a chain has no one repo: its parallel-only scores (tokensPerMerge, setAsideRate, conflictRate,
+  quotaStalls) and reviewChurn are null. It is a close line only (applied [], no binding, voids, auto, reflection or
+  reverts), never a baseline (score.py's load_tunings reads only a string repo) and never a move of a key.
 
 reflections.jsonl holds the weekly reading's lines (skills/reflect/scripts/reflect.py is its only writer, and tune.py
 reads it for the agreement and to refuse a closed Reflection): a `watch` line per (Reflection, Watch), a `watch-raised`
@@ -160,13 +165,16 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      that wrote it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
                      Reflection's line); auto? (true only: `tune.py --auto` or `--revert`, the weekly reading's own
                      landing); reflection? (the weekly reading's r- id, present exactly when auto is); reverts? (the
-                     t- id of the auto line a revert undoes: auto, with one applied entry). A rollout is required
-                     and a task is refused;
-                     lands in tunings.jsonl, `v` 2. window: since and until UTC `Z` stamps, activeStart and
+                     t- id of the auto line a revert undoes: auto, with one applied entry); shape? (serial only: a
+                     serial rollout's close line, p24-4). A rollout is required and a task is refused;
+                     lands in tunings.jsonl, `v` 2. repo: a non-empty string (owner/name), or null on a `shape:
+                     serial` line and only there. window: since and until UTC `Z` stamps, activeStart and
                      activeEnd a UTC `Z` stamp or null, partial a boolean, no other key. scores: exactly the ten
-                     keys, each a finite number or null, with merges and quotaStalls integers >= 0 and
-                     handsOffRate in [0, 1] (quality is null when nothing landed or no Escape source was read,
-                     p21-4; reviewChurn when no review round was recorded, p21-3). applied: key
+                     keys, each a finite number or null, with merges an integer >= 0, quotaStalls an integer >= 0
+                     (null only on a serial line) and handsOffRate in [0, 1] (quality is null when nothing landed
+                     or no Escape source was read, p21-4; reviewChurn when no review round was recorded, p21-3). A
+                     serial line has applied [] and a close, and no binding, voids, auto, reflection or reverts.
+                     applied: key
                      one of parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds; from, to
                      and ranAt integers >= 1 with from != to; rule a string of at most 64 characters;
                      evidence one of at most 300; agreeing an integer >= 0; agreed (an integer >= 1, on every
@@ -436,6 +444,8 @@ def _scores(v):
     if not isinstance(v, dict) or set(v) != set(SCORE_KEYS):
         return "an object with exactly the keys %s" % ", ".join(SCORE_KEYS)
     for k in SCORE_KEYS:
+        if k == "quotaStalls" and v[k] is None:
+            continue  # null only on a serial line: _check_tuning holds that rule
         if k in ("merges", "quotaStalls"):
             if _int(0)(v[k]):
                 return "an object with %s an integer >= 0" % k
@@ -527,6 +537,11 @@ def _true(v):
     return None if v is True else "true (omit it otherwise)"
 
 
+def _repo(v):
+    """A tuning's repo: an owner/name, or null (a serial line's only: _check_tuning holds that rule)."""
+    return None if v is None or (isinstance(v, str) and v) else "a non-empty string, or null on a serial line"
+
+
 def _short(n):
     def check(v):
         return None if isinstance(v, str) and v.strip() and len(v) <= n else "a non-empty string of at most %d characters" % n
@@ -610,9 +625,9 @@ KINDS = {
     "gate-signed": (True, {"standing": _bool, "gates": _int(1)}, {}),
     "handed-back": (True, {"via": _enum("answer", "descope", "retry"), "arm": _enum("run", "integration")}, {}),
     "race-decided": (True, {"mark": _enum("RACE", "UNVERIFIED"), "by": _enum("resume", "hand-back", "auto-retry")}, {}),
-    "tuning": (False, {"id": _str, "repo": _str, "window": _window, "scores": _scores, "applied": _applied},
+    "tuning": (False, {"id": _str, "repo": _repo, "window": _window, "scores": _scores, "applied": _applied},
                {"binding": _enum(*BINDINGS), "voids": _str, "close": _enum(*CLOSES), "auto": _true,
-                "reflection": _rid, "reverts": _tid}),
+                "reflection": _rid, "reverts": _tid, "shape": _enum("serial")}),
     "watch": (False, {"id": _str, "rule": _short(RULE_MAX), "shape": _short(RULE_MAX),
                       "rollouts": _slugs(1, MAX_ROLLOUTS), "count": _int(1), "reflection": _rid}, {}),
     "watch-raised": (False, {"id": _str, "reflection": _rid, "via": _enum(*VIAS)}, {}),
@@ -750,8 +765,23 @@ def _check_fields(kind, fields):
 
 
 def _check_tuning(f):
-    """The auto rules (the Files' Auto bullet): auto <=> reflection; reverts => auto with one entry; agreed only on an
+    """The serial rule (the Files' Serial bullet): repo is a string unless `shape: serial`, and then null; a serial line
+    is a close line with applied [] and no binding, voids, auto, reflection or reverts; quotaStalls is null only there.
+    Then the auto rules (the Files' Auto bullet): auto <=> reflection; reverts => auto with one entry; agreed only on an
     auto line without reverts, and on every entry of a non-void auto landing; never auto and close on one line."""
+    if f.get("shape") == "serial":
+        if f["repo"] is not None:
+            raise Refused("tuning: a serial line's repo is null (a chain has no one repo)")
+        if f["applied"] or "close" not in f:
+            raise Refused("tuning: a serial line is a close line: applied [] and a close")
+        extra = [k for k in ("binding", "voids", "auto", "reflection", "reverts") if k in f]
+        if extra:
+            raise Refused("tuning: a serial line carries no %s" % ", ".join(extra))
+    else:
+        if f["repo"] is None:
+            raise Refused("tuning: repo must be a non-empty string (null only on a serial line)")
+        if f["scores"]["quotaStalls"] is None:
+            raise Refused("tuning: scores must be an object with quotaStalls an integer >= 0 (null only on a serial line)")
     auto = f.get("auto") is True
     if auto != ("reflection" in f):
         raise Refused("tuning: auto and reflection go together (the weekly reading's landing carries both)")

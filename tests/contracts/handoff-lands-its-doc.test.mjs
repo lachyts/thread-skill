@@ -40,6 +40,16 @@ test('description, intro and README name the landing', () => {
   assert.ok(!readme.includes('Write and commit'), 'README still says Write and commit')
 })
 
+test('Rollout launch: Run from is the Project root, <home> is handoff-home.sh\'s, and it runs before Split launch (ADR 0042)', () => {
+  const t = text()
+  const rl = t.indexOf('**Rollout launch.**')
+  const sl = t.indexOf('**Split launch.** Before resolving')
+  assert.ok(rl >= 0 && sl > rl, '**Rollout launch.** comes before **Split launch.**')
+  const para = collapse(slice(t, /^\*\*Rollout launch\.\*\*/, /^\*\*Split launch\.\*\*/) ?? '')
+  assertHas(para, '**Rollout launch.**', ['`/thread:execute`', "orient § 9's Fresh session", '`Run from:` and `create_thread`\'s `cwd` are the Project root',
+    "`<home>` is handoff-home.sh's", 'rule 0', 'never on the clone\'s default branch', '`placement: split launch skipped — rollout launch`'])
+})
+
 test('the Invocation gate states the misfire cost honestly', () => {
   const gate = collapse(slice(text(), /^\*\*Invocation gate\.\*\*/, /^## /) ?? '')
   assertHas(gate, 'the Invocation gate', [

@@ -99,6 +99,16 @@ test('§ Thread state maps each route to its state and INDEX group', () => {
   assert.match(close[0], /\/thread:open save/, 'the close row does not name /thread:open save')
 })
 
+test("open's handoff-doc pickup reads a doc in a rollout clone as its twin's copy (ADR 0042)", () => {
+  const open = readIf('skills/open/SKILL.md') ?? ''
+  const pickup = slice(open, /^### `\/thread:open <path-to-handoff-doc>`/, /^### /) ?? ''
+  const step1 = pickup.split('\n').find((l) => l.startsWith('1. ')) ?? ''
+  for (const p of ["**A doc in a rollout clone reads as its twin's.**", 'self-rollout-check.sh" --in-place', "Steps 2–4 read and mark the twin's copy, never the clone's",
+    'A doc the twin does not hold']) {
+    assert.ok(step1.includes(p), `the pickup's step 1 lacks: ${p}`)
+  }
+})
+
 test('open pickups and task-writer § 6 apply § Thread state', () => {
   const open = readIf('skills/open/SKILL.md')
   const writer = readIf('skills/_shared/task-writer.md')

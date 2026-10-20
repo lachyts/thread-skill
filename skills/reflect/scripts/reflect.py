@@ -1093,8 +1093,12 @@ class Span:
                 elif src == "review":
                     docs.append(ev.get("doc"))
         env = git_env()
+        # The checkout escapes.py read: the Project root's, or its fresher in-place twin's (ADR 0042), so a revert only
+        # the twin has fetched is dated from it.
+        top = (block.get("ref") or {}).get("top") or root
+        trees = block.get("reviewTrees") or [root]
         if reverts:
-            rc, so, _e = run(["git", "-C", root, "log", "--no-walk", "--format=%H%x1f%cI"] + sorted(set(reverts)) + ["--"],
+            rc, so, _e = run(["git", "-C", top, "log", "--no-walk", "--format=%H%x1f%cI"] + sorted(set(reverts)) + ["--"],
                              GIT_TIMEOUT, env)
             if rc == 0:
                 for line in so.splitlines():
@@ -1102,13 +1106,14 @@ class Span:
                     if len(parts) == 2:
                         out[("revert", parts[0])] = (fmt(_ts({"ts": parts[1]})) if _ts({"ts": parts[1]}) is not None else None, False)
         for doc in sorted(set(d for d in docs if d)):
-            rc, so, _e = run(["git", "-C", root, "log", "--all", "--diff-filter=AM", "-1", "--format=%cI", "--", doc],
+            rc, so, _e = run(["git", "-C", top, "log", "--all", "--diff-filter=AM", "-1", "--format=%cI", "--", doc],
                              GIT_TIMEOUT, env)
             t = _ts({"ts": so.strip()}) if rc == 0 and so.strip() else None
-            if t is None:
-                p = os.path.join(root, doc)
+            for tree in trees if t is None else []:  # a working-tree doc: the Project root's copy first
+                p = os.path.join(tree, doc)
                 if os.path.exists(p):
                     t = int(os.stat(p).st_mtime * 1000)
+                    break
             out[("review", doc)] = (fmt(t) if t is not None else None, False)
         return out
 

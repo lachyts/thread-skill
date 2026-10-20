@@ -50,10 +50,14 @@ cut-over, done by hand.
 
 - Only landing is guarded. Checking out another branch in the primary checkout, own-branch work there
   (`land.sh --own-branch` moves that branch), a manual pull or a plugin update are moves too: don't, while
-  a rollout runs. Work on the plugin happens in a worktree or the clone.
+  a rollout runs. Work on the plugin happens in a worktree (narrowed by ADR 0042: the clone is every
+  rollout's Project root, which only merge-task moves).
 - While held, the checkout's THREAD.md and handoff docs go stale against `origin`, and a close-out made
   there commits on that stale base (a protected repo's PR may then conflict). During a self-rollout, close
-  thread-skill sessions from the clone or a worktree.
+  thread-skill sessions from a worktree. A session in the clone (the lead) resolves the primary checkout's
+  thread, handoff home and consumed review docs (ADR 0042), so its close-outs commit there, on the held,
+  stale base this section describes, and land by PR. The completion ceremony catches the primary up once
+  its `status: done` stamp means no rollout runs on it (`self-rollout-check.sh --refresh-in-place`).
 - Once nothing runs, `git -C <primary> reset --keep origin/<default>` catches it up: held commits are
   already on `origin` by content (S11 pushed them; a protected PR merged them). Until their PR merges,
   wait, as pushed-base's remedy says.

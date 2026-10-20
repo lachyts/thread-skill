@@ -14,14 +14,16 @@
 //       Report table verbatim, never `running`, a `waiting` line from `next --waiting`, a labelled and pushed manual
 //       hand-over;
 //   e7  the close order (leg.py close before create_thread → pushes → /thread:close with the hand-over between 7 and
-//       8 → handed → banner → ROLLOUT-STATUS), the lock and exit 5's retry-once, no question tool;
+//       8 → handed → banner → ROLLOUT-STATUS), step 1's outcomes without a bare `complete` (it needs --reflection: §
+//       Complete step 4), the lock and exit 5's retry-once, no question tool;
 //   e8  the docs: CONTEXT's **Leg** and **Serial rollout** entries, ADR 0040's Decision line and its new bullet, the
 //       README row;
 //   e9  close § Under a Leg: each rule (a follow-on after Complete filed with no pointer among them), placed after ##
 //       Edge cases, no fence and no retired close:asks phrase, and the four appended pointers after their pinned
 //       sentences;
-//   e10 Complete: legs.md § Complete's steps in order with the routed land follow-on, and the serial template's
-//       Post-rollout in the same order.
+//   e10 Complete: legs.md § Complete's five steps in order (phases, items, the score through close-score.py, close
+//       with its --reflection, /thread:close) with the routed land follow-on, and the serial template's Post-rollout in
+//       the same order (its seven steps).
 // Each rule has a mutation control that must fail with exactly that rule. Phrase checks run on collapsed text. Reads
 // files only.
 import { test } from 'node:test'
@@ -175,6 +177,12 @@ function check(f, product = tree) {
     /^3\. `\/thread:close`.*runs between sub-step 7 and step 8/, /^4\. `leg\.py handed`/,
     /^5\. close's banner, then the `ROLLOUT-STATUS:` line/].map((re) => cl.findIndex((x) => re.test(x)))
   if (ci.some((i, k) => i !== k)) flag('e7', `§ Close's steps are out of order: ${ci}`)
+  const close1 = cl[0] ?? ''
+  const cmd1 = (close1.match(/^1\. `([^`]*)`/) ?? ['', ''])[1]
+  if (/\bcomplete\b/.test(cmd1) && !cmd1.includes('--reflection')) flag('e7', `§ Close step 1 offers complete without --reflection: ${cmd1}`)
+  if (!close1.includes('closes in § Complete step 4 instead, with `--outcome complete --reflection`')) {
+    flag('e7', '§ Close step 1 does not send a completing Leg to § Complete step 4')
+  }
   need('e7', 'legs.md § Concurrency', sec(legs, 'Concurrency'), ['holds the rollout\'s lock', 'exit 5',
     'retry the verb once', '`halted reason="halt: rollout note locked"`'])
   need('e7', 'legs.md § Don\'ts', sec(legs, "Don'ts"), ['Never call the question tool in a Leg', 'Never make a Workflow call',
@@ -210,14 +218,15 @@ function check(f, product = tree) {
 
   // ---- e10: Complete ----
   const cp = items(sec(legs, 'Complete'))
-  const want = [/^1\. \*\*Phases\.\*\*/, /^2\. \*\*Post-rollout items\.\*\*/, /^3\. \*\*`leg\.py close --outcome complete/,
-    /^4\. `\/thread:close`/]
-  if (cp.length !== 4 || want.some((re, k) => !re.test(cp[k] ?? ''))) flag('e10', 'legs.md § Complete\'s steps are not phases, items, close, /thread:close')
-  need('e10', 'legs.md § Complete step 3', cp[2] ?? '', ['`land.sh --route`', 'On `landable <d>`',
+  const want = [/^1\. \*\*Phases\.\*\*/, /^2\. \*\*Post-rollout items\.\*\*/,
+    /^3\. \*\*Score\.\*\* `python3 \$\{CLAUDE_PLUGIN_ROOT\}\/skills\/reflect\/scripts\/close-score\.py --rollout <rollout note> --close completion`/,
+    /^4\. \*\*`leg\.py close --outcome complete .*--reflection "<step 3's line>"`/, /^5\. `\/thread:close`/]
+  if (cp.length !== 5 || want.some((re, k) => !re.test(cp[k] ?? ''))) flag('e10', 'legs.md § Complete\'s steps are not phases, items, score, close, /thread:close')
+  need('e10', 'legs.md § Complete step 4', cp[3] ?? '', ['`land.sh --route`', 'On `landable <d>`',
     "the chain's commits are only its `Task:`-trailered ones", 'On `not landed: <reason>` it files nothing'])
   const tp = items(section(f.template, /^## Post-rollout/))
-  const tw = [/phases/, /follow-on.*land-chain follow-on/, /`status: done`/, /`## Completion log`/, /Archive\/Rollouts\/.*commit it/,
-    /`\/thread:close`/]
+  const tw = [/phases/, /follow-on.*land-chain follow-on/, /`close-score\.py --rollout <this note> --close completion`/, /`status: done`/,
+    /`## Completion log`/, /Archive\/Rollouts\/.*commit it/, /`\/thread:close`/]
   if (tp.length !== tw.length || tw.some((re, k) => !re.test(tp[k] ?? ''))) flag('e10', `the template's Post-rollout steps are not in the Complete order: ${tp.length}`)
 
   return { fails: [...fails].sort(), details }
@@ -288,6 +297,10 @@ test('control: a status table row that drifts fails e6', () => {
 test('control: create_thread before leg.py close fails e7', () => {
   only('legs', '--cwd "$PWD"`, before any `create_thread`, so', '--cwd "$PWD"`, after `create_thread`, so', ['e7'], 'order')
 })
+test('control: § Close step 1 offering a bare complete fails e7', () => {
+  only('legs', '1. `leg.py close --outcome handoff|stuck|stopped|halt [--reason <r>]', '1. `leg.py close --outcome handoff|complete|stuck|stopped|halt [--reason <r>]',
+    ['e7'], 'complete')
+})
 test('control: a Leg that may call the question tool fails e7', () => {
   only('legs', '- Never call the question tool in a Leg:', '- Call the question tool when unsure:', ['e7'], 'question')
 })
@@ -321,10 +334,18 @@ test('control: a Complete without the routed land follow-on fails e10', () => {
   only('legs', 'It asks land.sh\'s own route for each chain checkout (`land.sh --route`, read-only).',
     'It pushes each chain checkout.', ['e10'], 'route')
 })
+test('control: a Complete without its score step fails e10', () => {
+  const s = real.legs.split('\n').find((l) => l.startsWith('3. **Score.**'))
+  assert.ok(s, 'control setup: legs.md § Complete step 3')
+  only('legs', `${s}\n`, '', ['e10'], 'score')
+})
+test('control: a close without --reflection fails e10', () => {
+  only('legs', ' --reflection "<step 3\'s line>"`.**', '`.**', ['e10'], 'reflection')
+})
 test('control: a template Post-rollout with its phases step last fails e10', () => {
   const lines = real.template.split('\n')
   const i = lines.findIndex((l) => l.startsWith('1. Close the phases this chain touched'))
-  const j = lines.findIndex((l) => l.startsWith('6. Run `/thread:close`'))
+  const j = lines.findIndex((l) => l.startsWith('7. Run `/thread:close`'))
   assert.ok(i >= 0 && j > i, 'control setup: the template\'s steps 1 and 6')
   const moved = [...lines.slice(0, i), ...lines.slice(i + 1, j + 1), lines[i], ...lines.slice(j + 1)].join('\n')
   const { fails } = check({ ...real, template: moved })

@@ -202,6 +202,15 @@ Subcommands:
               prints nothing. Each line is the argument list for `reconcile-project.py <line> --kinds
               phase --apply`, so only phases this rollout touched are ever closed.
 
+  cited       Read-only, for /thread:execute § 2.7's pushed-base scoping (ADR 0042): given a rollout note, print
+              the paths its not-yet-merged tasks cite, one per line, sorted and de-duplicated. Its tasks are the
+              linked ones whose queue state is queued, running, awaiting-integration, integrating or set-aside.
+              It prints each `touches:` item; `docs/adr/NNNN-*.md` for every `docs/adr/NNNN` path and every
+              `ADR NNNN` or `ADR-NNNN` mention; `CONTEXT.md`, or a relative `…/CONTEXT.md`, when named; and every
+              `~/` path as written, a trailing `:<line>` and trailing `.,;:)`'"` stripped. Never THREAD.md. Exit
+              0; exit 2 on a usage error or a missing rollout note. A clone-rooted rollout's pushed-base check
+              blocks on a peer clone's ahead commits only when they touch one of these.
+
   fold-journals  For execute's completion ceremony and every Reflection (p15-3, ADR 0032): `--rollout <note path |
               [[slug]] | slug> [--dry-run]`. Resolves the slug with run_record.normalise_slug and never opens
               the note, so a superseded, dropped or archived rollout folds the same way. Reads the rollout's
@@ -3165,6 +3174,55 @@ def cmd_touched_phases(args) -> int:
     return 0
 
 
+CITED_STATES = ("queued", "running", "awaiting-integration", "integrating", "set-aside")
+CITED_ADR_PATH = re.compile(r"docs/adr/(\d{4})")
+CITED_ADR_WORD = re.compile(r"\bADR[ -](\d{4})\b")
+CITED_CONTEXT = re.compile(r"(?:^|(?<=[\s`'\"(\[]))((?:[A-Za-z0-9_.-]+/)*CONTEXT\.md)\b")
+CITED_HOME = re.compile(r"(?:^|(?<=[\s`'\"(\[]))(~/[^\s`'\"()<>\[\]]+)")
+CITED_TRAIL = ".,;:)`'\""
+
+
+def _cited_home(path: str) -> str:
+    """A `~/` path as written, a trailing `:<line>` and trailing punctuation stripped."""
+    prev = None
+    while prev != path:
+        prev = path
+        path = path.rstrip(CITED_TRAIL)
+        path = re.sub(r":\d+$", "", path)
+    return path
+
+
+def cmd_cited(args) -> int:
+    """Print the paths the rollout's not-yet-merged tasks cite (execute § 2.7, ADR 0042)."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 2
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    out = set()
+    for _path, note in _linked_task_notes(rollout_path, tasks_dir):
+        if _queue_state(note)[0] not in CITED_STATES:
+            continue
+        for item in note.get_list("touches"):
+            item = str(item).strip().strip("\"'")
+            if item:
+                out.add(item)
+        body = note._body
+        for m in CITED_ADR_PATH.finditer(body):
+            out.add(f"docs/adr/{m.group(1)}-*.md")
+        for m in CITED_ADR_WORD.finditer(body):
+            out.add(f"docs/adr/{m.group(1)}-*.md")
+        for m in CITED_CONTEXT.finditer(body):
+            out.add(m.group(1))
+        for m in CITED_HOME.finditer(body):
+            p = _cited_home(m.group(1))
+            if len(p) > 2:
+                out.add(p)
+    for p in sorted(x for x in out if x.rstrip("/").rsplit("/", 1)[-1] != "THREAD.md"):
+        print(p)
+    return 0
+
+
 # ---- fold-journals ----------------------------------------------------------
 
 # run_record.py, shared with every skill: the Run record's one writer and its schema (ADR 0032).
@@ -5969,6 +6027,12 @@ def main() -> int:
     tp.add_argument("--rollout", required=True, help="path to the rollout note")
     tp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     tp.set_defaults(func=cmd_touched_phases)
+
+    ci = sub.add_parser("cited", help="print the paths the rollout's not-yet-merged tasks cite, for execute § 2.7's "
+                                      "pushed-base scoping (read-only; ADR 0042)")
+    ci.add_argument("--rollout", required=True, help="path to the rollout note")
+    ci.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    ci.set_defaults(func=cmd_cited)
 
     fj = sub.add_parser("fold-journals", help="fold each bound Workflow call's journal into the rollout's Run record "
                                               "as call-journal lines (idempotent; ADR 0032)")

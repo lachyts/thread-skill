@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The one handoff <home> resolver, skills/_shared/scripts/handoff-home.sh (handoff-lifecycle.md § Home),
-# run against runtime-built temp HOMEs: every rule, --dir, --shared, --shared-root, a symlinked HOME, the
-# known workspaces/docs oddity and the error exits. Then grep asserts that the skills call it instead of
+# run against runtime-built temp HOMEs: every rule (rule 0, a rollout clone read as its in-place twin, included),
+# --dir, --shared, --shared-root, a symlinked HOME, the known workspaces/docs oddity and the error exits. Then grep asserts that the skills call it instead of
 # resolving <home> by hand, and carry the Run from:, open-captures and withdrawal contracts.
 #
 # Hermetic: every path lives under mktemp, HOME is a temp dir, GIT_CEILING_DIRECTORIES stops git walking
@@ -83,6 +83,35 @@ if [ -f "$script" ]; then
   ok "$ctl" "$S" "poison control: unpinned, a global docs/ ignore sends the tool repo to _shared (precondition)"
   out=$(XDG_CONFIG_HOME="$tmp/xdg" GIT_CONFIG_GLOBAL="$tmp/poison" hh "$h" "$T/sub"; printf '%s' "$out")
   ok "$out" "$T" "poison: the pinned environment keeps the tool repo at its toplevel"
+fi
+
+# ---- rule 0: a directory inside a rollout clone resolves as its in-place twin (ADR 0042) --------------------
+if [ -f "$script" ]; then
+  tg -C "$W" remote add origin https://github.com/o/ws.git
+  tg init -q "$W-rollout"; tg -C "$W-rollout" remote add origin git@github.com:o/ws.git
+  mkdir -p "$W/ops-workspace/x" "$W-rollout/ops-workspace/x" "$W-rollout/_shared"
+  X="$h/repos/tools/x"; mkdir -p "$X/sub" "$X-rollout/sub"
+  tg init -q "$X"; tg -C "$X" remote add origin https://github.com/o/x.git
+  tg init -q "$X-rollout"; tg -C "$X-rollout" remote add origin https://github.com/O/X.git
+  N="$P/N/nest"; mkdir -p "$N/sub" "$N-rollout/sub"
+  tg init -q "$N"; tg -C "$N" remote add origin git@github.com:o/nest.git
+  tg init -q "$N-rollout"; tg -C "$N-rollout" remote add origin git@github.com:o/nest.git
+  Y="$h/repos/tools/y-rollout"; mkdir -p "$Y/sub" "$h/repos/tools/y"; tg init -q "$Y"; tg init -q "$h/repos/tools/y"
+  hh "$h" "$W-rollout";                    ok "$out" "$S"                  "rule 0: the workspaces rollout clone resolves to the in-place _shared"
+  hh "$h" "$W-rollout/_shared";            ok "$out" "$S"                  "rule 0: … its _shared/ to the in-place _shared"
+  hh "$h" "$W-rollout/ops-workspace/x";    ok "$out" "$W/ops-workspace"    "rule 0: a seat in the clone resolves to the in-place seat"
+  hh "$h" "$W-rollout/ops-workspace/x" --shared; ok "$out" "$S"            "rule 0: --shared from there resolves to the in-place _shared"
+  hh "$h" "$X-rollout/sub";                ok "$out" "$X"                  "rule 0: a tool repo's clone resolves to the in-place toplevel"
+  hh "$h" "$N-rollout/sub";                ok "$out" "$N"                  "rule 0: a nested ~/Projects clone resolves to its twin's project directory"
+  hh "$h" "$Y/sub";                        ok "$out" "$Y"                  "rule 0: a y-rollout with no origin is no rollout clone: its own toplevel"
+  # R4-4: a hand-made ~/Projects-rollout reads as ~/Projects, so its homes equal today's for the same twin directory
+  h2="$tmp/h2"; mkdir -p "$h2/Projects/A/P/sub" "$h2/Projects-rollout/A/P/sub" "$h2/repos/workspaces/_shared"
+  tg init -q "$h2/Projects"; tg -C "$h2/Projects" remote add origin https://github.com/o/projects.git
+  tg init -q "$h2/Projects-rollout"; tg -C "$h2/Projects-rollout" remote add origin https://github.com/o/projects.git
+  hh "$h2" "$h2/Projects-rollout/A/P/sub"; ok "$out" "$h2/Projects/A/P" "rule 0: ~/Projects-rollout/<A>/<P>/sub → ~/Projects/<A>/<P> (rule 1 on the twin)"
+  hh "$h2" "$h2/Projects"; want=$out
+  ok "$want" "$h2/Projects" "rule 4: ~/Projects itself resolves to the monorepo toplevel, as before (precondition)"
+  hh "$h2" "$h2/Projects-rollout";         ok "$out" "$want"               "rule 0: ~/Projects-rollout prints exactly what ~/Projects prints"
 fi
 
 # ---- the skills call it -----------------------------------------------------------------------------------

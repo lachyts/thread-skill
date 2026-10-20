@@ -10,7 +10,8 @@ reading, no picks, no prompt (stdin is never read). Called as one command, throu
 
 Callers, each with the Bash tool's `timeout: 600000`:
 - `--close completion`: execute § 4.5 step 5's completion ceremony (attended, or the unattended Stop driver: one
-  text), and the rollout template's manual ceremony (step 4), before the note moves;
+  text), and the rollout template's manual ceremony (step 4), before the note moves; and a serial rollout's Complete
+  (skills/execute/legs.md § Complete step 3, the serial template's scoring step), before `leg.py close` moves it;
 - `--close supersede`: schedule step 7.5, before it stamps the prior note; schedule § 0's `file` finish (a run
   that died after the stamps) and its `interrupted` item 3; repair § 1's close-out of an interrupted supersede.
 The sign-off form (execute step 5, ADR 0034) never runs it: a rollout gets one close line, written by the later
@@ -46,6 +47,16 @@ every exit and on a signal):
    line; `already recorded <id> (<k>)` is its guard; `tune: not recorded: <r>` (a null repo) is `not recorded: <r>`;
    a non-zero exit is `not scored`.
 
+A serial note (`shape: serial`, read with reconcile-rollout.py's Note and _shape after the close-line check) takes the
+serial path instead of steps 1-5 (p24-4, ADR 0040): a chain of Legs has no Workflow journals, no Slots or lane and no
+one repo, so it never runs fold-journals, rollout-settings.py, land.sh or score.py. `--close supersede` is `not
+scored` (nothing supersedes a serial rollout) and so is `--repo` (a chain has no Project root). Then, from the
+scratch dir: (s1) `serial-score.py --rollout <note> [--tasks-dir d] --out <f>` (skills/reflect/scripts/
+serial-score.py, its header the one copy of the serial score's rules); a non-zero exit or an unreadable score is `not
+scored`. With window.activeStart null (no Leg began) it prints `not recorded: nothing ran (no Leg)` and exits 0 with
+no tune call. (s2) `tune.py --scores <f> --record-only --close completion`, read as step 5 reads it: the line is
+stamped `shape: serial` with `repo: null`.
+
 Time. Each step runs in its own process group (start_new_session; SIGTERM, SIGINT and SIGHUP held across the
 start), stdin closed, from the scratch dir, with git's repo-local variables (GIT_DIR & co., as `git rev-parse
 --local-env-vars` names them) dropped from the env, as declared-check.py does: an inherited GIT_DIR reaches no step.
@@ -72,10 +83,12 @@ bad flag, a --rollout that is no .md path, a reserved or bad slug, a non-positiv
 empty.
 
 Writes, both under the events directory, outside the vault and the repo: fold-journals' `call-journal` lines in the
-rollout's Run record, and tune.py's one tunings.jsonl line. Reads: the rollout note; the Run record, reviews.jsonl and
+rollout's Run record (never on the serial path), and tune.py's one tunings.jsonl line. The serial path reads the
+note's Leg log through serial-score.py's `leg.py status`, the Run record, and every note under its Work/Tasks for
+`fixes:`. Reads: the rollout note; the Run record, reviews.jsonl and
 tunings.jsonl; ~/.config/thread/rollouts.toml through rollout-settings.py; every note under Work/Tasks/ (Archive
-included) for `fixes:` and `merged_into:` (score.py's escapes.py); the Project root's git, read-only and never
-fetched: land.sh's `git remote get-url origin`, escapes.py's rev-parse, symbolic-ref, show, log, rev-list,
+included) for `fixes:` and `merged_into:` (score.py's escapes.py); the Project root's git (or its in-place
+checkout's when fresher, ADR 0042), read-only and never fetched: land.sh's `git remote get-url origin`, escapes.py's rev-parse, symbolic-ref, show, log, rev-list,
 merge-base, cat-file, diff-tree and blame, and `git remote get-url origin` in each clone reviews.jsonl names
 (score.py, through rollout-settings.py's _origin_slug).
 
@@ -101,6 +114,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 sys.dont_write_bytecode = True
 
@@ -111,6 +125,7 @@ RECONCILE_PY = os.path.join(SKILLS, "execute", "scripts", "reconcile-rollout.py"
 SETTINGS_PY = os.path.join(SKILLS, "_shared", "scripts", "rollout-settings.py")
 LAND_SH = os.path.join(SKILLS, "_shared", "scripts", "land.sh")
 SCORE_PY = os.path.join(HERE, "score.py")
+SERIAL_PY = os.path.join(HERE, "serial-score.py")
 TUNE_PY = os.path.join(HERE, "tune.py")
 
 # DEADLINE + KILL_GRACE + REAP_WAIT must stay under the Bash tool's 600 s foreground ceiling, with a margin, so the
@@ -125,6 +140,7 @@ CAPS = {
     "rollout-settings.py": 60,
     "land.sh --origin-slug": 30,
     "score.py": 420,
+    "serial-score.py": 120,
     "tune.py": 60,
 }
 SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
@@ -141,10 +157,11 @@ def _load(name, path):
     return mod
 
 
-try:  # one copy of each rule: the slug and the events dir, the close line, the Project root line
+try:  # one copy of each rule: the slug and the events dir, the close line, the Project root line, the Shape
     RR = _load("thread_run_record", RUN_RECORD_PY)
     TUNE = _load("thread_tune", TUNE_PY)
-    PROJECT_ROOT_RE = _load("thread_reconcile_rollout", RECONCILE_PY).PROJECT_ROOT_RE
+    REC = _load("thread_reconcile_rollout", RECONCILE_PY)
+    PROJECT_ROOT_RE = REC.PROJECT_ROOT_RE
 except Exception as e:  # a broken install: report it as this script, never as a traceback
     sys.stdout.write("close-score: not scored: cannot load its helpers: %s\n" % e)
     sys.exit(1)
@@ -312,11 +329,22 @@ class Close:
         if hit is not None:
             raise Outcome("already recorded %s (%s)" % (hit.get("id"), hit.get("close")), 0)
 
-    def inputs(self):
-        """(0b): the note's absolute path and the Project root."""
+    def note_path(self):
+        """(0b): the note's absolute path."""
         note = os.path.abspath(os.path.expanduser(self.a.rollout))
         if not os.path.isfile(note):
             raise Outcome("not scored: no rollout note at %s" % note, 1)
+        return note
+
+    def serial(self, note):
+        """Whether the note is `shape: serial` (reconcile-rollout.py's _shape); a note Note cannot read is not."""
+        try:
+            return REC._shape(REC.Note(Path(note))) == "serial"
+        except (OSError, ValueError):
+            return False
+
+    def root(self, note):
+        """(0c): the Project root: --repo, else the note's Project root line."""
         root = self.a.repo
         if root is None:
             try:
@@ -332,7 +360,7 @@ class Close:
         root = os.path.abspath(os.path.expanduser(root))
         if not os.path.isdir(root):
             raise Outcome("not scored: Project root %s is not a directory" % root, 1)
-        return note, root
+        return root
 
     def make_scratch(self):
         mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
@@ -343,19 +371,67 @@ class Close:
         finally:
             signal.pthread_sigmask(signal.SIG_SETMASK, mask)
 
-    def run(self):
-        self.already()
-        note, root = self.inputs()
-        self.env = git_env(max(1, min(GIT_ENV_CAP, int(self.left()))))
-        self.make_scratch()
-
-        # (1) fold the journals: a failure is a WARN and the score goes on; a timeout is not scored
+    def fold(self, note):
+        """(1) fold the journals: a failure is a WARN and the score goes on; a timeout is not scored."""
         ran = self.step("fold-journals", [sys.executable, RECONCILE_PY, "fold-journals", "--rollout", note])
         for line in ran.err.splitlines():
             if line.startswith("WARN: "):
                 warn("fold-journals: %s" % line[len("WARN: "):].strip()[:TAIL_MAX])
         if ran.rc != 0:
             warn("fold-journals exited %d: %s" % (ran.rc, first_line(ran.err)))
+
+    def record(self, out, close):
+        """The one line, through tune.py (step 5 and s2)."""
+        ran = self.step("tune.py", [sys.executable, TUNE_PY, "--scores", out, "--record-only", "--close", close])
+        if ran.rc != 0:
+            raise Outcome("not scored: tune.py exited %d: %s" % (ran.rc, first_line(ran.err)), 1)
+        m = re.match(r"recorded (\S+) ", ran.out)
+        if m:
+            raise Outcome("recorded %s (%s)" % (m.group(1), close), 0)
+        m = re.match(r"already recorded (\S+) \(([a-z]+)\)", ran.out)
+        if m:
+            raise Outcome("already recorded %s (%s)" % (m.group(1), m.group(2)), 0)
+        m = re.search(r"^tune: not recorded: (.*)$", ran.err, re.M)
+        if m:
+            raise Outcome("not recorded: %s" % m.group(1).strip(), 0)
+        raise Outcome("not scored: tune.py printed no record line: %s" % first_line(ran.out), 1)
+
+    def run_serial(self, note):
+        """The serial path (the header's s1, s2): no fold, settings, origin slug or score.py."""
+        if self.a.close == "supersede":
+            raise Outcome("not scored: a serial rollout is never superseded (--close supersede is a parallel close)", 1)
+        if self.a.repo is not None:
+            raise Outcome("not scored: a serial rollout has no Project root, so --repo does not apply", 1)
+        self.env = git_env(max(1, min(GIT_ENV_CAP, int(self.left()))))
+        self.make_scratch()
+        out = os.path.join(self.scratch, "serial-score.json")
+        argv = [sys.executable, SERIAL_PY, "--rollout", note]
+        if self.a.tasks_dir:
+            argv += ["--tasks-dir", os.path.abspath(os.path.expanduser(self.a.tasks_dir))]
+        ran = self.step("serial-score.py", argv + ["--out", out])
+        if ran.rc != 0:
+            raise Outcome("not scored: serial-score.py exited %d: %s" % (ran.rc, first_line(ran.err)), 1)
+        try:
+            with open(out, encoding="utf-8") as f:
+                doc = json.load(f)
+            if not isinstance(doc, dict):
+                raise ValueError("not an object")
+        except (OSError, ValueError):
+            raise Outcome("not scored: serial-score.py wrote no readable score", 1)
+        window = doc.get("window") if isinstance(doc.get("window"), dict) else {}
+        if window.get("activeStart") is None:
+            raise Outcome("not recorded: nothing ran (no Leg)", 0)
+        self.record(out, "completion")
+
+    def run(self):
+        self.already()
+        note = self.note_path()
+        if self.serial(note):
+            return self.run_serial(note)
+        root = self.root(note)
+        self.env = git_env(max(1, min(GIT_ENV_CAP, int(self.left()))))
+        self.make_scratch()
+        self.fold(note)
 
         # (2) the settings
         ran = self.step("rollout-settings.py", [sys.executable, SETTINGS_PY, "--repo", root])
@@ -404,19 +480,7 @@ class Close:
             raise Outcome("not recorded: nothing ran (%s)" % why, 0)
 
         # (5) the one line, through tune.py
-        ran = self.step("tune.py", [sys.executable, TUNE_PY, "--scores", out, "--record-only", "--close", self.a.close])
-        if ran.rc != 0:
-            raise Outcome("not scored: tune.py exited %d: %s" % (ran.rc, first_line(ran.err)), 1)
-        m = re.match(r"recorded (\S+) ", ran.out)
-        if m:
-            raise Outcome("recorded %s (%s)" % (m.group(1), self.a.close), 0)
-        m = re.match(r"already recorded (\S+) \(([a-z]+)\)", ran.out)
-        if m:
-            raise Outcome("already recorded %s (%s)" % (m.group(1), m.group(2)), 0)
-        m = re.search(r"^tune: not recorded: (.*)$", ran.err, re.M)
-        if m:
-            raise Outcome("not recorded: %s" % m.group(1).strip(), 0)
-        raise Outcome("not scored: tune.py printed no record line: %s" % first_line(ran.out), 1)
+        self.record(out, self.a.close)
 
 
 def parse(argv):

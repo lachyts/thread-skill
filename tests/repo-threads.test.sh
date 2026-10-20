@@ -225,6 +225,71 @@ repos/tools/renamed/THREAD.md" "$L an empty slug lists exactly the eight repo th
   ok "$(diff "$tmp/lk.sh" "$tmp/m4.sh" | grep -c '^[<>]')" 2 "M4: exactly one line differs"
   lk "$tmp/m4.sh" bash "$tmp/plain" "$h1" ""
   ok "$(inl "$R/tools/_archive/old/THREAD.md")" y "M4: without the test tools/_archive/old/THREAD.md is listed (the fixture is sensitive)"
+
+  # 15: rollout clones (ADR 0042): a clone's THREAD.md copy is never a thread, and a session in a clone resolves its
+  # in-place twin's. h1's foo-rollout (no origin) stays listed above: only a same-origin pair is a rollout clone.
+  h5="$tmp/h5"; R5="$h5/repos"
+  fx "$R5/tools/sam/THREAD.md"                   '---\nslug: sam\n---\n# Sam\n'
+  fx "$R5/tools/sam-rollout/THREAD.md"           '---\nslug: sam\n---\n# the clone copy\n'
+  mkdir -p "$R5/tools/sam-rollout/sub"
+  fx "$R5/workspaces-rollout/seat/THREAD.md"     '---\nslug: seat\n---\n'
+  fx "$h5/Projects/N/nest/THREAD.md"             '---\nslug: nest\n---\n'
+  fx "$h5/Projects/N/nest-rollout/THREAD.md"     '---\nslug: nest\n---\n# the nested clone copy\n'
+  fx "$h5/Projects/A/one/THREAD.md"              '---\nslug: twin\n---\n'
+  fx "$h5/Projects/B/two/THREAD.md"              '---\nslug: twin\n---\n'
+  G init -q "$R5/tools/sam"; G -C "$R5/tools/sam" remote add origin git@github.com:Own/Sam.git
+  G init -q "$R5/tools/sam-rollout"; G -C "$R5/tools/sam-rollout" remote add origin https://github.com/own/sam.git
+  G init -q "$R5/workspaces-rollout"; G -C "$R5/workspaces-rollout" remote add origin https://github.com/o/ws.git
+  G init -q "$h5/Projects/N/nest"; G -C "$h5/Projects/N/nest" remote add origin git@github.com:o/nest.git
+  G init -q "$h5/Projects/N/nest-rollout"; G -C "$h5/Projects/N/nest-rollout" remote add origin https://github.com/o/nest.git
+  for sh in "${shells[@]}"; do
+    L="[$sh]"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h5" sam
+    ok "$(rel "$h5")" "repos/tools/sam/THREAD.md" "$L slug=sam from outside: only sam, never the clone's copy (ssh vs https, mixed case)"
+    lk "$tmp/lk.sh" "$sh" "$R5/tools/sam-rollout/sub" "$h5" sam
+    ok "$(rel "$h5")" "repos/tools/sam/THREAD.md" "$L slug=sam from inside the clone: the in-place twin's thread"
+    ok "$err" "" "$L … with empty stderr"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h5" ""
+    ok "$(rel "$h5")" "repos/tools/sam/THREAD.md" "$L the repo-thread list: no clone copy, no workspaces-rollout seat"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h5" nest
+    ok "$(rel "$h5")" "Projects/N/nest/THREAD.md" "$L slug=nest: a nested ~/Projects clone's copy is never a thread"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h5" twin
+    ok "$(rel "$h5")" "Projects/A/one/THREAD.md
+Projects/B/two/THREAD.md" "$L control: two same-slug project folders both print"
+  done
+  # 16: mutation M5 — without the workspaces-rollout path test, its seat (no in-place twin here) is listed.
+  sed 's# -not -path "$r/workspaces-rollout/\*"##' "$tmp/lk.sh" > "$tmp/m5.sh"
+  ok "$(occ "$tmp/m5.sh" '-not -path "$r/workspaces-rollout/*"')" 0 "M5: exactly the workspaces-rollout path test was removed"
+  ok "$(diff "$tmp/lk.sh" "$tmp/m5.sh" | grep -c '^[<>]')" 2 "M5: exactly one line differs"
+  lk "$tmp/m5.sh" bash "$tmp/plain" "$h5" ""
+  ok "$(inl "$R5/workspaces-rollout/seat/THREAD.md")" y "M5: without it the workspaces-rollout seat is listed (the fixture is sensitive)"
+
+  # 17: rc parity with self-rollout-check.sh --in-place, under bash and zsh -f, and no plugin-root path in the snippet
+  ok "$(grep -c 'CLAUDE_PLUGIN_ROOT' "$tmp/lk.sh")" 0 "the snippet holds no plugin-root path"
+  awk '/^ghs\(\) \{/{on=1} on; /^rc\(\) \{/{r=1} r && /^\}$/{exit}' "$tmp/lk.sh" > "$tmp/rc.sh"
+  ok "$(grep -c '^rc() {' "$tmp/rc.sh")|$(grep -c '^ghs() {' "$tmp/rc.sh")" "1|1" "rc and ghs are extracted from the snippet"
+  printf '. "%s"\nc="$1"; if rc; then echo 0; else echo 1; fi\n' "$tmp/rc.sh" > "$tmp/rcrun.sh"
+  pz="$tmp/parity"; mkdir -p "$pz"
+  pair() {  # pair <name> <twin origin|-> <clone origin|->: a twin <name> and a clone <name>-rollout
+    G init -q "$pz/$1"; G init -q "$pz/$1-rollout"
+    [ "$2" = - ] || G -C "$pz/$1" remote add origin "$2"
+    [ "$3" = - ] || G -C "$pz/$1-rollout" remote add origin "$3"
+  }
+  pair a git@github.com:Own/A.git https://github.com/own/a.git
+  pair b https://github.com/o/b.git https://github.com/x/b.git
+  pair c https://gitlab.com/o/c.git https://gitlab.com/o/c.git
+  pair d - -
+  pair e ssh://git@github.com/o/e.git https://github.com/o/e.git/
+  G init -q "$pz/f"; G -C "$pz/f" remote add origin https://github.com/o/f.git; G -C "$pz/f" commit -q --allow-empty -m i
+  G -C "$pz/f" worktree add -q --detach "$pz/f-rollout"
+  G init -q "$pz/g-rollout"; G -C "$pz/g-rollout" remote add origin https://github.com/o/g.git; mkdir -p "$pz/g"
+  for d in a-rollout a b-rollout c-rollout d-rollout e-rollout f-rollout g-rollout; do
+    want=$(HOME="$h5" bash "$root/skills/execute/scripts/self-rollout-check.sh" --in-place "$pz/$d" >/dev/null 2>&1; echo $?)
+    for sh in "${shells[@]}"; do
+      got=$(cd "$tmp/plain" && GIT_CEILING_DIRECTORIES="$tmp" $sh "$tmp/rcrun.sh" "$pz/$d" 2>/dev/null)
+      ok "$got" "$want" "[$sh] rc parity with --in-place: $d → $want"
+    done
+  done
 fi
 
 # open's list step 2 and the lookup's ~/Projects walk prune the same directories (p19-9)

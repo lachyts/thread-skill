@@ -4,6 +4,9 @@
 // rollout where nothing ran is `not recorded`; a failed or timed-out step, the overall deadline and an unusable note,
 // Project root, events dir or tunings.jsonl are `not scored`, with nothing written. stdout is one line; a signal kills
 // the live step's group and leaves stdout empty; the scratch dir never outlives a run.
+// A serial note (p24-4) takes the serial path: serial-score.py, then tune.py, a close line stamped shape serial with
+// repo null, and never fold-journals, rollout-settings.py, land.sh or score.py (each pinned with a control that shows
+// the step would be seen).
 //
 // Hermetic: each case gets its own mkdtemp HOME (its own THREAD_EVENTS_DIR and TMPDIR under it), an env built from
 // scratch (no inherited GIT_*, an empty global git config), a temp git repo with one commit whose origin is
@@ -376,6 +379,152 @@ test('SIGTERM mid-run kills the live step\'s group, removes the scratch dir and 
   assert.ok(await gone(pid), `the sleeper ${pid} is gone`)
   assert.deepEqual(fs.readdirSync(tmpDir(fx.home)).filter((n) => n.startsWith('thread-close-score-')), [], 'no scratch dir left')
   assert.ok(!fs.existsSync(tuningsPath(fx.home)))
+})
+
+// ---- a serial rollout (p24-4): serial-score.py, then tune.py; no fold, settings, land.sh or score.py -------------------
+
+const SCORE = path.join(root, 'skills', 'reflect', 'scripts', 'score.py')
+const SERIAL = path.join(root, 'skills', 'reflect', 'scripts', 'serial-score.py')
+const tasksOf = (home) => path.join(home, 'repos', 'obsidian', 'Work', 'Tasks')
+const recordOf = (home) => path.join(evDir(home), `${SLUG}.jsonl`)
+
+// The serial note (no Project root: a chain has none) with a Leg log, or none (log false), and its two done tasks:
+// Leg 1 began at T(0), finished t1 and t2, and closed at T(60) (so its hour is fixed whatever now is).
+function writeSerial(fx, { log = true } = {}) {
+  for (const s of ['t1', 't2']) {
+    fs.writeFileSync(path.join(tasksOf(fx.home), `${s}.md`), ['---', 'tags: [task]', 'status: done', `rollout: "[[${SLUG}]]"`, '---', '',
+      `Do ${s}.`, ''].join('\n'))
+  }
+  const legLog = ['## Leg log', '', `- ${T(0)} Leg 1 began: leg-1 session s1 in cc-demo from /work`,
+    `- ${T(1)} Leg 1 claimed [[t1]]`, `- ${T(30)} Leg 1 done [[t1]] (verify pass)`,
+    `- ${T(31)} Leg 1 claimed [[t2]]`, `- ${T(60)} Leg 1 done [[t2]] (verify pass)`, `- ${T(60)} Leg 1 closed: stopped: out of context`, '']
+  fs.writeFileSync(fx.note, ['---', 'tags: [task, rollout]', 'status: open', 'protocol_version: 5', 'shape: serial', '---', '',
+    '## Queue', '', '| # | Task | Launch | Surfaces |', '|---|---|---|---|', '| 1 | [[t1\\|t1]] | `cc-demo` from `/work` | `ext:x` |',
+    '| 2 | [[t2\\|t2]] | `cc-demo` from `/work` | `ext:x` |', '', ...(log ? legLog : [])].join('\n'))
+}
+
+// A run-bound line whose journal exists: fold-journals, if it ran, would fold it into a `call-journal` line.
+function foldable(fx) {
+  const jdir = path.join(fx.home, 'journals')
+  fs.mkdirSync(jdir)
+  fs.writeFileSync(path.join(jdir, 'wf_fold.json'), JSON.stringify({ runId: 'wf_fold', status: 'completed', args: { mode: 'task' } }))
+  emitAll(fx.home, [[T(2), 'run-bound', 't1', { runId: 'wf_fold', journalDir: jdir, call: 'task' }]])
+}
+const folded = (fx) => lines(recordOf(fx.home)).filter((l) => l.kind === 'call-journal').length
+
+function serialFixture(t, opts) {
+  const fx = fixture(t, { record: false })
+  writeSerial(fx, opts)
+  foldable(fx)
+  return fx
+}
+
+test('serial: one close line, shape serial and repo null, from serial-score.py; a second run writes none', (t) => {
+  const fx = serialFixture(t)
+  const id = recorded(fx, closeScore(fx))
+  const [l, ...rest] = lines(tuningsPath(fx.home))
+  assert.equal(rest.length, 0)
+  assert.deepEqual([l.id, l.shape, l.repo, l.close, l.applied, l.rollout], [id, 'serial', null, 'completion', [], SLUG])
+  assert.deepEqual([l.scores.merges, l.scores.runningHours, l.scores.quotaStalls, l.scores.handsOffRate], [2, 1, null, 1])
+  assert.equal(l.window.activeStart, T(0))
+  const again = closeScore(fx)
+  settled(fx, again)
+  assert.equal(again.stdout, `close-score: ${SLUG}: already recorded ${id} (completion)\n`)
+  assert.equal(lines(tuningsPath(fx.home)).length, 1)
+})
+
+test('serial: the window must be UTC Z: a raw offset stamp (the unconverted Leg log) is refused by the record (control)', (t) => {
+  const fx = serialFixture(t)
+  const out = path.join(fx.home, 'serial.json')
+  const r = spawnSync('python3', ['-B', SERIAL, '--rollout', fx.note, '--out', out], { encoding: 'utf8', cwd: fx.home, env: fx.env })
+  assert.equal(r.status, 0, r.stderr)
+  const doc = JSON.parse(fs.readFileSync(out, 'utf8'))
+  doc.window.since = doc.window.activeStart = '2026-10-20T10:15+11:00'
+  fs.writeFileSync(out, JSON.stringify(doc))
+  const tn = spawnSync('python3', ['-B', TUNE, '--scores', out, '--record-only', '--close', 'completion'], { encoding: 'utf8', cwd: fx.home, env: fx.env })
+  assert.equal(tn.status, 2, tn.stderr)
+  assert.match(tn.stderr, /window must be an object with since a UTC Z stamp/)
+  assert.ok(!fs.existsSync(tuningsPath(fx.home)))
+})
+
+test('serial: --close supersede and --repo are not scored; no Leg is not recorded (nothing ran)', (t) => {
+  const fx = serialFixture(t)
+  notScored(fx, closeScore(fx, ARGS(fx, 'supersede')), /: not scored: a serial rollout is never superseded/)
+  notScored(fx, closeScore(fx, [...ARGS(fx), '--repo', fx.repo]), /: not scored: a serial rollout has no Project root/)
+  const none = serialFixture(t, { log: false })
+  const r = closeScore(none)
+  settled(none, r)
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stdout, `close-score: ${SLUG}: not recorded: nothing ran (no Leg)\n`)
+  assert.ok(!fs.existsSync(tuningsPath(none.home)))
+})
+
+test('serial: no fold (no call-journal line), with its parallel control and a mutant run_serial that folds', (t) => {
+  const fx = serialFixture(t)
+  recorded(fx, closeScore(fx))
+  assert.equal(folded(fx), 0, 'the serial path never runs fold-journals')
+  // control: the same record under the parallel path folds its journal
+  const par = fixture(t)
+  foldable(par)
+  recorded(par, closeScore(par))
+  assert.equal(folded(par), 1, 'the parallel path folds it: so a fold would show')
+  // mutant: run_serial that folds first writes the line, so the zero above is no vacuous pass
+  const mut = serialFixture(t)
+  const body = ['import importlib.util, sys',
+    'spec = importlib.util.spec_from_file_location("close_score", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'orig = m.Close.run_serial',
+    'def mutant(self, note):',
+    '    self.env = m.git_env(30); self.make_scratch(); self.fold(note)',
+    '    return orig(self, note)',
+    'm.Close.run_serial = mutant',
+    'sys.exit(m.main(sys.argv[2:]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', body, CLOSE, ...ARGS(mut)], { encoding: 'utf8', cwd: mut.home, env: mut.env })
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(folded(mut), 1, 'the mutant folds')
+})
+
+test('serial: no rollout-settings.py (a refused rollouts.toml still records), with its parallel control', (t) => {
+  const write = (home) => {
+    const toml = path.join(home, '.config', 'thread', 'rollouts.toml')
+    fs.mkdirSync(path.dirname(toml), { recursive: true })
+    fs.writeFileSync(toml, '[defaults]\nparallel_ceiling = 0\n')
+  }
+  const fx = serialFixture(t)
+  write(fx.home)
+  recorded(fx, closeScore(fx))
+  const par = fixture(t)
+  write(par.home)
+  notScored(par, closeScore(par), /: not scored: rollout-settings\.py exited 2: /)
+})
+
+test('serial: no land.sh (a bash shim on PATH is never run), with its parallel control', (t) => {
+  const shimmed = (fx) => {
+    const shim = path.join(fx.home, 'shim')
+    fs.mkdirSync(shim)
+    const saw = path.join(fx.home, 'bash-ran')
+    fs.writeFileSync(path.join(shim, 'bash'), ['#!/bin/sh', `echo "$*" >> '${saw}'`, `exec '${REAL_BASH}' "$@"`, ''].join('\n'), { mode: 0o755 })
+    return { PATH: `${shim}:${process.env.PATH}`, saw }
+  }
+  const fx = serialFixture(t)
+  const s = shimmed(fx)
+  recorded(fx, closeScore(fx, ARGS(fx), { PATH: s.PATH }))
+  assert.ok(!fs.existsSync(s.saw), 'no bash step ran')
+  const par = fixture(t)
+  const p = shimmed(par)
+  recorded(par, closeScore(par, ARGS(par), { PATH: p.PATH }))
+  assert.match(fs.readFileSync(p.saw, 'utf8'), /land\.sh --origin-slug/, 'the parallel path runs land.sh through it')
+})
+
+test('serial: the close line is never a baseline (score.py\'s load_tunings reads only a string repo)', (t) => {
+  const fx = serialFixture(t)
+  recorded(fx, closeScore(fx))
+  const body = ['import importlib.util, json, sys',
+    'spec = importlib.util.spec_from_file_location("score", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'print(json.dumps(len(m.load_tunings(sys.argv[2]))))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', body, SCORE, evDir(fx.home)], { encoding: 'utf8', cwd: fx.home, env: fx.env })
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(JSON.parse(r.stdout), 0)
+  assert.equal(lines(tuningsPath(fx.home)).length, 1, 'the line is there, and load_tunings skips it')
 })
 
 // ---- usage and the script itself ------------------------------------------------------------------------------------

@@ -53,8 +53,9 @@ no stamp; `started:` and `started_unattended:` are other keys.
   schedule § 0's **Put back**, which only restores to a prior the exact line its Supersede prep removed,
   when the run stops before step 6 writes its note.
 - **Readers**: the Chorus Stage (`src/stage/unattended.py` in the Chorus repo, Chorus ADR 0052 d6 as
-  amended). It starts one lead (`/thread:execute [[<rollout>]]`) in the note's Project root once the
-  note is runnable, and replaces the stamp in place with its own record,
+  amended). It starts one lead (`/thread:execute [[<rollout>]]`) in the note's Project root, the
+  rollout clone for every rollout scheduled after P26 (ADR 0042), so its launch passes execute § 2.8,
+  once the note is runnable, and replaces the stamp in place with its own record,
   `started_unattended: <stamp>`, which thread-skill never writes or clears. And `/thread:status`
   (§ 1's **Start stamp**), which reports a stamped note nothing has started as waiting for the Stage
   (its § 4 action 13). And `/thread:orient-all`'s `estate-dispatch.py plan`, through

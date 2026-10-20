@@ -23,7 +23,8 @@
 # Exit codes (single source for p12-9; "counter" is the base-moved cap state, see Cap):
 #   0  Merged, or already merged; verified (head = integrated head, one squash parent = integrated base).
 #      The local refresh ran, or printed a non-fatal WARN (non-base checkout, local-only commits, a dirty
-#      tree or an autostash refusal).                                    counter cleared    lead: mark-done
+#      tree or an autostash refusal), and the in-place checkout's refresh line (a clone root only, ADR
+#      0042; it never changes the exit).                                 counter cleared    lead: mark-done
 #   1  Definitive halt; the reason is printed (Exit 1 causes, below).   counter cleared    lead: set aside
 #                                                                                          (own run or human)
 #   2  Usage or environment: bad arg count; a SHA not 40-hex; <pr> neither a positive number nor a
@@ -249,7 +250,8 @@ classify_failed_steps() (  # stdin: failed step names; stdout: "infra" | "genuin
 # applied and popped into conflict markers (or left in the stash list), so it is refused like any dirty
 # overlap. Every other refusal (a non-base checkout, local-only commits, a dirty tree) is a non-fatal WARN
 # and returns 0 (a false halt after a successful merge). Defined before the self-test hooks so
-# --self-test-base can exercise it against a temp repo.
+# --self-test-base can exercise it against a temp repo. For a rollout clone (every rollout scheduled after ADR 0042)
+# repoPath is the clone, so refresh_in_place (below) then fast-forwards its in-place twin.
 REPO_STATE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../close/scripts/repo-state.sh"
 refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)  [$3=a SHA origin/<base> must contain]
   local repo="$1" base="$2" must="${3:-}" cur ff=0 line='' raw='' why='' n before oh try fwhy=''
@@ -328,6 +330,25 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)  [$3=a
     *) echo "  WARN: local $base did not fast-forward: $n commit(s) not on origin/$base — not named ($why)." ;;
   esac
   echo "        origin/$base holds the merges and later tasks' worktrees branch from it; the worktree reaper keeps zero-commit task branches until it advances."
+  return 0
+}
+
+# ---- the in-place checkout's refresh (ADR 0042) --------------------------------------------------------------
+# A rollout scheduled after P26 runs from its rollout clone, so refresh_local_base moves the clone, and nothing else
+# would give the in-place twin (the checkout Lachy's sessions work in) the rollout's merges. After every merge,
+# `self-rollout-check.sh --refresh-in-place <repoPath>` fast-forwards the twin when it can (fetch, then
+# `merge --ff-only --no-autostash`, never a merge commit, held while the twin is the primary checkout under a running
+# rollout, ADR 0031) and prints one line, indented here; for an in-place root (a rollout scheduled before ADR 0042) it
+# prints nothing, and this prints nothing either. It never changes merge-task's exit, and costs one fetch per merge,
+# only for a clone root.
+SELF_ROLLOUT_CHECK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/self-rollout-check.sh"
+refresh_in_place() {  # $1=repoPath
+  local line
+  [ -f "$SELF_ROLLOUT_CHECK" ] || return 0
+  line=$(bash "$SELF_ROLLOUT_CHECK" --refresh-in-place "$1" 2>/dev/null) || return 0
+  [ -n "$line" ] || return 0
+  echo "== refreshing the in-place checkout =="
+  printf '%s\n' "$line" | sed 's/^/  /'
   return 0
 }
 
@@ -1010,6 +1031,7 @@ land_and_finish() {  # land_and_finish <fresh 1|0> — verify, clean up, refresh
   fi
   if [ -n "$M" ]; then refresh_local_base "$REPO_PATH" "$BASE" "$M"; rrc=$?
   else refresh_local_base "$REPO_PATH" "$BASE"; rrc=$?; fi
+  refresh_in_place "$REPO_PATH"
   case "$VERDICT" in
     race) printf '%s\n' "$VMSG"; finish 5 "$VMSG" ;;
     unverified) finish 8 "$VMSG" ;;

@@ -832,9 +832,10 @@ const RUN = { escalation: ACTIONS.indexOf('an open escalation') + 1, nothing: AC
 const CAVEAT = 'drift is invisible offline; re-run with the live check before resuming'
 const ANCHOR = 'update-ref -d refs/integration-anchor/<inputs.branch> <X>'
 // The only commands status may invoke: its two script reads, § 3's gh/git reads, execute § 4's default-branch
-// resolver and § 2's room-stop read, `step-boundary.py stands` (p18-1; the grep reads are no command).
+// resolver, § 2's room-stop read, `step-boundary.py stands` (p18-1), and § 5's serial-chain read, `leg.py status`
+// (p24-4; the grep reads are no command).
 const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr view', 'gh pr list', 'git worktree list', 'git remote get-url',
-  'default-branch.sh', 'step-boundary.py stands']
+  'default-branch.sh', 'step-boundary.py stands', 'leg.py status']
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
 const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep
 const UNLANDED = 'queued, running, awaiting-integration, integrating or set-aside'
@@ -1207,9 +1208,18 @@ function check({ status, repair, execute, fx }) {
   if (!rc.startsWith("- **Recut, only on Lachy's explicit ask:**") ||
     !['landing-register check', "§ 5's retire block", 'branch -D', '--kind own', '`hand-back`'].every((k) => rc.includes(k))) fails.push('recut')
 
-  // hand-off: no live lead and no pause; execute § 2.5, then execute § 3's verify_timeout check (p14-2: the hand-off
-  // enters § 4.5 directly, past execute's § 3), then resume, then the loop with --running ""; no § 2.7.
-  if (!ho.includes('no lead is live and no pause stands') || !before(ho, 'execute § 2.5', '`reconcile-rollout.py resume`') ||
+  // hand-off: no live lead and no pause; first execute § 2.8's launch-directory check (ADR 0042: a repair launched
+  // outside the Project root would run the loop from the wrong tree), whose exit 3 or any other non-zero exit stops at
+  // the diagnosis with no hand-off and sends Lachy to /thread:execute from the Project root; then execute § 2.5, then
+  // execute § 3's verify_timeout check (p14-2: the hand-off enters § 4.5 directly, past execute's § 3), then resume,
+  // then the loop with --running ""; no § 2.7.
+  if (!ho.includes('no lead is live and no pause stands') ||
+    !ho.includes("First the launch-directory check, execute § 2.8's snippet") ||
+    !ho.includes('`self-rollout-check.sh --launch-check <Project root> <launch dir>`') ||
+    !before(ho, '--launch-check', 'Then execute § 2.5') || !ho.includes('never `pwd`') ||
+    !ho.includes('exit 3, exit 2 or any other non-zero exit stops repair at the diagnosis, with no hand-off') ||
+    !ho.includes('start a session in the Project root and run `/thread:execute [[<rollout>]]` there') ||
+    !before(ho, 'execute § 2.5', '`reconcile-rollout.py resume`') ||
     !before(ho, 'execute § 2.5', "execute § 3's `verify_timeout` check") ||
     !before(ho, "execute § 3's `verify_timeout` check", '`reconcile-rollout.py resume`') ||
     !before(ho, '`reconcile-rollout.py resume`', '`--running ""`') || !ho.includes('§4.5 resume') || !ho.includes('§ 2.7') ||
@@ -1904,6 +1914,15 @@ test("control: a hand-off without execute § 3's verify_timeout check fails hand
 
 test('control: a hand-off under a pause fails hand-off', () => {
   only(rp('- **Hand-off, when no lead is live and no pause stands**', '- **Hand-off, when no lead is live**'), 'hand-off', 'pause')
+})
+
+test("control: a hand-off without execute § 2.8's launch-directory check, or going on at its exit 3, fails hand-off", () => {
+  only(rp("(*Cold resume*). First the launch-directory check, execute § 2.8's snippet (point at it; never copy it here):",
+    '(*Cold resume*). First a note of where this session runs:'), 'hand-off', 'no launch check')
+  only(rp('exit 3, exit 2 or any other non-zero exit\n  stops repair at the diagnosis, with no hand-off:', 'exit 3 is passed on and the hand-off goes on; exit 2 or any other non-zero exit\n  stops repair:'),
+    'hand-off', 'exit 3 goes on')
+  only(rp('start a session in\n  the Project root and run `/thread:execute [[<rollout>]]` there.', 'cd to the Project root.'),
+    'hand-off', 'no remedy')
 })
 test('control: a wave in status fails no-wave', () => {
   only(st('**Outside the count.**', 'Group by wave.\n\n**Outside the count.**'), 'no-wave', 'status wave')

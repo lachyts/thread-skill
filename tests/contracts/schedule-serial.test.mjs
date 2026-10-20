@@ -15,7 +15,7 @@
 //       body-read surfaces only for members that declare none; and the Don'ts let S6's last write remove
 //       `incomplete: true` beside step 7's, a stamp left on a serial note ending only by `status: dropped`;
 //   t4  § 0's first check span is the parallel one, with `--shape parallel` and `--regenerate`, and a supersede
-//       never crosses shapes;
+//       never crosses shapes; § 0, S3 and ADR 0040 say a clone root never overlaps an in-place chain (ADR 0042);
 //   t5  execute § 2's shape line, orient § 6's § 0 stop naming a live serial chain on the repo and its
 //       `status: dropped` remedy, orient § 7's one note per chain, orient § 9's no-offer sentence for a serial
 //       note, and the vault grammar's parallel-only Writers clause;
@@ -37,6 +37,7 @@ import path from 'node:path'
 import { collapse, root, section, slice } from '../lib/contract-text.mjs'
 
 const SCHEDULE = 'skills/schedule/SKILL.md'
+const ADR40 = 'docs/adr/0040-a-rollout-is-parallel-or-serial.md'
 const TEMPLATE = 'skills/schedule/rollout-template.md'
 const SERIAL = 'skills/schedule/serial-rollout-template.md'
 const EXECUTE = 'skills/execute/SKILL.md'
@@ -67,7 +68,7 @@ function readTree() {
     }
   }
   for (const d of ['skills', 'hooks']) walk(d)
-  for (const f of ['README.md', CONTEXT]) add(f)
+  for (const f of ['README.md', CONTEXT, ADR40]) add(f)
   return files
 }
 
@@ -145,6 +146,14 @@ function check(files) {
   const first = spans(s0).find((x) => x.includes('unfinished-rollout.py check')) ?? ''
   if (!first.includes('--shape parallel') || !first.includes('--regenerate')) flag('t4', `§ 0's first check span is not the parallel one: ${first}`)
   if (!s0.includes('a supersede never crosses shapes')) flag('t4', '§ 0 does not say a supersede never crosses shapes')
+  // ADR 0042: a clone root never overlaps an in-place chain. Said on purpose in § 0, S3 and ADR 0040's bullet, so the
+  // guard is not silently vacuous for clone roots; it still fires for repo:<clone> and a pre-P26 root.
+  need('t4', '§ 0 overlap prose', s0, ['A clone root never overlaps a chain on the in-place checkout, so the two coexist as peers (ADR 0042, intended)',
+    'the refusal still fires for a chain that claims `repo:<clone>`, and for a rollout rooted in place before ADR 0042'])
+  need('t4', 'S3 overlap prose', C(para(serialPath, '**S3. Live chains.**')), ['never overlaps a parallel rollout rooted in its rollout clone',
+    'a chain that claims `repo:<clone>`, or a parallel rollout rooted in place before ADR 0042, still refuses'])
+  need('t4', 'ADR 0040 cross-shape bullet', C(files[ADR40] ?? ''), ['Amended by ADR 0042', 'the two coexist as peers by design',
+    'the refusal still fires for a chain that claims `repo:<clone>`'])
 
   // ---- t5: execute, orient and the vault grammar ----
   need('t5', `${EXECUTE} § 2`, section(files[EXECUTE], /^### 2\. /) ?? '', [
@@ -282,6 +291,12 @@ test('control: a § 0 check without --shape parallel fails t4', () => {
 
 test('control: a § 0 that lets a supersede cross shapes fails t4', () => {
   only(swap(SCHEDULE, 'and a supersede never crosses shapes', 'and a supersede may take either shape'), ['t4'], 'cross')
+})
+
+test('control: § 0, S3 or ADR 0040 without the clone-root overlap prose fails t4', () => {
+  only(swap(SCHEDULE, '(ADR 0042, intended)', '(ADR 0042)'), ['t4'], '§ 0 peers')
+  only(swap(SCHEDULE, 'never overlaps a parallel rollout rooted in its rollout clone', 'may overlap a parallel rollout'), ['t4'], 'S3 peers')
+  only(swap(ADR40, 'Amended by ADR 0042', 'Unchanged'), ['t4'], 'ADR 0040')
 })
 
 test('control: an execute § 2 without its shape line fails t5', () => {

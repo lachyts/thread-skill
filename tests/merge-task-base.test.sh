@@ -4,8 +4,9 @@
 # off the base, an unreadable, missing or CLOSED PR, an unreadable default — halts before the merge (1 when
 # definitive, 8 when transient). A clean PR merges into the default and a re-run takes the already-merged
 # path; the local refresh names stranded and queued close-outs through a working fetch; an inherited GIT_DIR
-# never reaches another repo (8a–8c); a SIGTERM never reads `ok` (9). Hermetic: temp repos, PATH shim,
-# ssh disabled.
+# never reaches another repo (8a–8c); a SIGTERM never reads `ok` (9); a clone root's in-place twin fast-forwards
+# after the merge, or is named diverged with its remedy and never moved (10, ADR 0042). Hermetic: temp repos, PATH
+# shim, ssh disabled but for scenario 10's fake ssh.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -56,6 +57,7 @@ has "$out" "on the integrated base $B at the integrated head $I (verified)" "6. 
 ok "$(sent)" "ok" "6. sentinel records success"
 ok "$(gc rev-parse HEAD)" "$(srvtip)" "6. the checkout fast-forwarded to the merge"
 has "$out" "local master fast-forwarded to origin/master." "6. reports the fast-forward"
+lacks "$out" "in-place:" "6. (pin) an in-place root prints no in-place checkout line"
 run 21 "$I" "$B"
 ok "$rc" 0 "6. re-run exits 0"; ok "$(nmerge)" 0 "6. re-run: no second merge"
 has "$out" "PR #21 already merged" "6. re-run reports the already-merged path"; ok "$(sent)" "ok" "6. re-run: ok"
@@ -158,6 +160,40 @@ ok "$rc" 143 "9. SIGTERM in a checks wait exits 143"
 ok "$(sent)" "failed:143" "9. SIGTERM: the sentinel reads failed:143, never ok"
 ok "$(ctr 91)" "$B" "9. SIGTERM: the counter is byte-unchanged"
 ok "$(nmerge)" 0 "9. SIGTERM: nothing merged"
+
+# 10. a clone root (ADR 0042): $tmp/r-rollout is the Project root and $tmp/r its in-place twin, both clones of
+#     git@github.com:o/r.git served from $MT_SRV by the fake ssh. After the merge the twin fast-forwards too; a twin
+#     with a local-only commit is named diverged, with its landing route's remedy, and never moved. The exit and the
+#     sentinel are unchanged either way.
+cp "$root/tests/fixtures/land/fake-ssh.sh" "$tmp/bin/fake-ssh"; chmod +x "$tmp/bin/fake-ssh"
+export SRV="$tmp/srv/github.com" LOG_SSH="$tmp/ssh.log"; : > "$LOG_SSH"
+mkdir -p "$tmp/home"; : > "$tmp/register.md"
+for c in r-rollout r; do
+  GIT_SSH_COMMAND="$tmp/bin/fake-ssh" GIT_SSH_VARIANT=ssh git -c init.defaultBranch=master clone -q git@github.com:o/r.git "$tmp/$c" 2>/dev/null
+done
+twin=$(cd "$tmp/r" && pwd -P)
+run_ssh() {  # run_ssh <pr> <head> <base> — merge-task.sh on the clone root $tmp/r-rollout over the fake ssh
+  : > "$MT_STATE/gh.log"; rm -rf "$tmp/r-rollout/.claude/merge-task"
+  out=$(HOME="$tmp/home" LANDING_REGISTER="$tmp/register.md" PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND="$tmp/bin/fake-ssh" \
+        GIT_SSH_VARIANT=ssh bash "$MT" "$tmp/r-rollout" "$@" 2>&1); rc=$?
+}
+fresh; pair; mkpr 101 "$I"
+run_ssh 101 "$I" "$B"
+ok "$rc" 0 "10. a clean merge from a clone root exits 0"
+ok "$(cat "$tmp/r-rollout/.claude/merge-task.status" 2>/dev/null)" ok "10. … sentinel ok"
+ok "$(git -C "$tmp/r-rollout" rev-parse HEAD)" "$(srvtip)" "10. … the clone fast-forwarded to the squash commit"
+ok "$(git -C "$tmp/r" rev-parse HEAD)" "$(srvtip)" "10. … and so did its in-place twin"
+has "$out" "== refreshing the in-place checkout ==" "10. … under its own heading"
+has "$out" "  in-place: $twin fast-forwarded to origin/master" "10. … indented, saying so"
+gt -C "$tmp/r" commit -q --allow-empty -m local-only; held=$(git -C "$tmp/r" rev-parse HEAD)
+fresh; pair; mkpr 102 "$I"
+run_ssh 102 "$I" "$B"
+ok "$rc" 0 "10. a twin with a local-only commit: the merge still exits 0"
+ok "$(cat "$tmp/r-rollout/.claude/merge-task.status" 2>/dev/null)" ok "10. … sentinel ok"
+ok "$(git -C "$tmp/r-rollout" rev-parse HEAD)" "$(srvtip)" "10. … the clone still fast-forwarded"
+ok "$(git -C "$tmp/r" rev-parse HEAD)" "$held" "10. … the twin unmoved"
+has "$out" "in-place: $twin not moved: diverged: 1 local-only commit(s)" "10. … named diverged"
+has "$out" "$twin lands by PR: once its queued landing PR merges, the next merge-task or land.sh S4 fast-forwards it" "10. … with its landing route's remedy"
 
 echo; [ "$fail" -eq 0 ] && echo "merge-task base: ALL PASS" || echo "merge-task base: SOME FAILED"
 exit "$fail"

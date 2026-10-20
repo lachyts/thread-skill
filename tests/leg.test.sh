@@ -16,6 +16,9 @@
 #   L7   the launch check, a two-launch chain, a codex boundary and a manual hand-over
 #   L8   refusals; L9 an exported GIT_DIR; L10 the close-out landing under a Leg; L11 the status mapping
 #   L12  the lock: an interleaved hand-over and successor, racing begins, the timeout
+#   L13  status (read-only, no lock): the chain states, the stall, the restart and its blockers, set-asides, per-Leg
+#        lists, a take-over's lastAt, dependants and the defer closure, a terminal chain with no restart, next or
+#        smoke list (L13g, L13o); restarted: its checks, in order
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -50,6 +53,7 @@ chmod +x "$TMP/bin/gh" "$TMP/bin/fake-ssh"
 export PATH="$TMP/bin:$PATH" GIT_SSH_COMMAND="$TMP/bin/fake-ssh"
 : > "$TMP/net.log"
 NOW=2026-10-20T10:00+00:00
+REFL="close-score: demo-rollout-2026-10-20: recorded t-20261020T100000Z-abc123 (completion)"   # legs.md § Complete step 3's line
 
 hasnt() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
 
@@ -173,13 +177,18 @@ ok "$(fm "$fu" status)|$(fm "$fu" rollout)|$(fm "$fu" phase)|$(fm "$fu" owner)" 
 has "$(sed -n '/^projects:/,/^contexts:/p' "$T/$fu.md")" '"[[Demo]]"' "L1: … projects: copied from the rollout"
 has "$(cat "$T/$RO.md")" "- → [[$fu]]: Re-run the audit" "L1: … and item 1 becomes its pointer"
 SESS=s2 leg post-items; ok "$(q 'd["items"][0]["pointer"]')|$(q 'd["items"][1]["pointer"]')" "$fu|None" "L1: item 1 has a pointer, item 2 none"
-snap; SESS=s2 leg close --outcome complete --cwd "$F"
+snap; SESS=s2 leg close --outcome complete --cwd "$F" --disposition 2="told them in the Monday note"
+ok "$rc|$out" "2|" "L1: complete without --reflection is a usage error (exit 2, stdout empty)"
+has "$err" "--reflection" "L1: … naming --reflection"; same "L1: no --reflection"
+SESS=s2 leg close --outcome handoff --cwd "$F" --reflection "$REFL"
+ok "$rc|$out" "2|" "L1: --reflection on a handoff close is a usage error"; same "L1: --reflection on handoff"
+SESS=s2 leg close --outcome complete --cwd "$F" --reflection "$REFL"
 ok "$rc" 1 "L1: complete without item 2's disposition is exit 1"; has "$err" "item(s) 2" "L1: … naming item 2"; same "L1: refused complete"
 mkdir -p "$T/Archive/Rollouts"; echo x > "$T/Archive/Rollouts/$RO.md"
-SESS=s2 leg close --outcome complete --cwd "$F" --disposition 2="told them in the Monday note"
+SESS=s2 leg close --outcome complete --cwd "$F" --disposition 2="told them in the Monday note" --reflection "$REFL"
 ok "$rc" 1 "L1: an Archive collision is exit 1"; has "$err" "archive collision" "L1: … says so"; same "L1: the collision"
 rm "${T:?}/Archive/Rollouts/${RO:?}.md"
-SESS=s2 leg close --outcome complete --cwd "$F" --disposition 2="told them in the Monday note"
+SESS=s2 leg close --outcome complete --cwd "$F" --disposition 2="told them in the Monday note" --reflection "$REFL"
 ok "$rc|$(q 'd["status_line"]')" "0|ROLLOUT-STATUS: $RO merged=7/7 running=0 state=done" "L1: complete prints state=done"
 keepline
 A="$T/Archive/Rollouts/$RO.md"
@@ -191,7 +200,7 @@ has "$cl" 'done [[t1]], [[t2]], [[t3]], [[t4]], [[t5]]; set aside none' "L1: …
 has "$cl" 'done [[t6]], [[t7]]; set aside none' "L1: … Leg 2 did t6–t7"
 has "$cl" "Post-rollout items: 1. → [[$fu]]; 2. told them in the Monday note" "L1: … both dispositions"
 has "$cl" "- Chain commits: none" "L1: … Chain commits: none"
-has "$cl" "- Reflection: not scored (serial; p24-4)" "L1: … and the Reflection line"
+has "$cl" "- Reflection: $REFL" "L1: … and the Reflection line, close-score's line verbatim"
 ok "$(git -C "$V" show --name-status --no-renames --format= HEAD | sort -k2 | tr '\t\n' ' |')" \
    "A Work/Tasks/Archive/Rollouts/$RO.md|A Work/Tasks/$fu.md|D Work/Tasks/$RO.md|" \
    "L1: the vault commit holds exactly the archived note, the follow-on and the tracked old path"
@@ -262,7 +271,7 @@ work "$R" t3 c.txt "t3 work"
 mkdir -p "$R/docs/reviews"; printf -- '---\nstatus: pending\n---\nx\n' > "$R/docs/reviews/x.md"
 git -C "$R" add -A; git -C "$R" commit -qm "📝 docs(review): fresh-review findings"
 t3sha=$(git -C "$R" log --format=%H --grep 'Task: \[\[t3\]\]' -1)
-leg close --outcome complete --cwd "$R"
+leg close --outcome complete --cwd "$R" --reflection "$REFL"
 ok "$rc" 0 "L1v: complete"
 fu=$(q '[f for f in d["followups"] if "-land-chain-" in f][0]')
 ok "$fu" "demo-followup-land-chain-2026-10-20" "L1v: a landable checkout ahead with chain commits files the land follow-on"
@@ -284,7 +293,7 @@ landctl() {
   leg begin --cwd "$R"; ok "$rc" 0 "$1: begin"
   work "$R" t9 c.txt "c $1"
   [ -z "${HOOK_CMD:-}" ] || eval "$HOOK_CMD"
-  leg close --outcome complete --cwd "$R"; ok "$rc" 0 "$1: complete"
+  leg close --outcome complete --cwd "$R" --reflection "$REFL"; ok "$rc" 0 "$1: complete"
   has "$(cat "$T/Archive/Rollouts/$RO.md")" "- Chain commits: $R: $2" "$1: Chain commits: … $2"
   ok "$(ls "$T" | grep -c -- '-land-chain-')" "$( [ "${3:-n}" = y ] && echo 1 || echo 0)" "$1: land follow-on filed: ${3:-n}"
 }
@@ -710,6 +719,221 @@ LEGENV=THREAD_LEG_LOCK_TIMEOUT=1 SESS=s3 leg done --task t6 --verify pass
 ok "$rc" 5 "L12: a lock held past THREAD_LEG_LOCK_TIMEOUT is exit 5"; same "L12: timeout"
 kill "$hp"; wait "$hp" 2>/dev/null
 ok "$(find "$TMP" -path '*/Work/Tasks/*' -name '.*.tmp' | wc -l | tr -d ' ')" 0 "L12: no temp file is left under any Work/Tasks"
+
+# ════ L13: status and restarted (p24-4: /thread:status § 5, /thread:repair § 7) ══════════════════════════════════
+# Every chain is built through leg.py's own verbs; status is read-only and takes no lock.
+mstime() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+# (a) not started
+scen l13a
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2); mkt t1; mkt t2
+leg status
+ok "$rc|$(q 'd["chain"]')|$(q 'd["openLeg"]')|$(q 'd["stall"]')|$(q 'd["legs"]')|$(q 'd["restarted"]')" "0|not-started|None|None|[]|None" \
+   "L13a: a chain no Leg began reads not-started, no open Leg, no stall"
+ok "$(q 'd["restart"]["leg"]')|$(q 'd["restart"]["task"]')|$(q 'd["restart"]["launch"]')|$(q 'd["restart"]["cwd"]')|$(q 'd["restart"]["harness"]')|$(q 'd["restart"]["anyLaunch"]')|$(q 'd["restart"]["blockedBy"]')" \
+   "1|t1|cc-demo from $F|$F|claude|False|None" "L13a: … its restart is Leg 1 in row 1's launch, nothing blocking"
+ok "$(q 'd["progress"]')|$(q 'd["note"]["archived"]')" "{'done': 0, 'total': 2, 'running': 0}|False" "L13a: … progress 0/2, live"
+# (b) a Leg stopped holding t1; (b2) its successor between begin and claim --inherit
+scen l13b
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2 t3); for t in t1 t2 t3; do mkt "$t"; done
+leg begin --cwd "$F"; leg claim --task t1; leg close --outcome stopped --reason "out of time"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["stall"]["claimed"][0]')" "stopped|{'task': 't1', 'owner': 'leg-1', 'leg': 1, 'legOutcome': 'stopped'}" \
+   "L13b: a Leg stopped holding t1: stopped, with the stall naming t1"
+ok "$(q 'd["restart"]["prompt"].split(chr(10))[0]')|$(q 'd["restart"]["takeOver"]')|$(q 'd["restart"]["blockedBy"]')" "/thread:execute [[$RO]]|False|None" \
+   "L13b: … the restart prompt's first line runs the next Leg, no take-over"
+ok "$(q 'd["next"]["action"]')|$(q 'd["next"]["task"]')|$(q 'd["next"]["inherit"]')" "finish|t1|True" "L13b: … next is finish t1, inherited"
+has "$(q 'd["needsYou"]')" "stalled: no Leg is open" "L13b: … and a needs-you item for the stall"
+ok "$(q 'd["legs"][0]["outcome"]')|$(q 'd["legs"][0]["claimed"]')" "stopped|[{'task': 't1', 'at': '$NOW'}]" "L13b: … Leg 1's outcome and claims"
+SESS=s2 leg begin --cwd "$F"; ok "$rc|$(q 'd["leg"]')" "0|2" "L13b2: Leg 2 begins"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["openLeg"]')|$(q 'd["stall"]')|$(q 'd["progress"]["running"]')" "live|2|None|0" \
+   "L13b2: before its claim --inherit: live, open Leg 2, no stall"
+# (c) an open Leg of s1, read from s2; (k) restarted never checks the open Leg
+scen l13c
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2); mkt t1; mkt t2
+leg begin --cwd "$F"; leg claim --task t1
+SESS=s2 leg status
+ok "$(q 'd["chain"]')|$(q 'd["progress"]["running"]')|$(q 'd["restart"]["takeOver"]')|$(q 'd["restart"]["blockedBy"]')" "live|1|True|open Leg 1 (session s1)" \
+   "L13c: an open Leg of s1, read from s2: live, a take-over restart blocked by the open Leg"
+ok "$(q 'd["restart"]["prompt"].split(chr(10))[0]')|$(q 'd["restart"]["leg"]')|$(q 'd["restart"]["task"]')" "/thread:execute [[$RO]] --take-over|2|t1" \
+   "L13c: … its prompt carries --take-over, for Leg 2 finishing t1"
+SESS=r1 leg restarted --leg 2 --pending
+ok "$rc|$(q 'd["recorded"]')|$(logn 'restart: Leg 2 pending (session r1)')" "0|True|1" "L13k: restarted over an open Leg records (it never checks the open Leg)"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')" "restarting|restart Leg 2 (pending)" "L13k: … restarting, blocked by the restart"
+# (d) a halt holding a claim, then clear-halt; (k) the restart lifecycle on that stalled chain
+scen l13d
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2 t3); for t in t1 t2 t3; do mkt "$t"; done
+leg begin --cwd "$F"; finish t1; leg claim --task t2; leg close --outcome halt --reason "a revert conflict"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["halt"]')" "halted|halt|{'reason': 'a revert conflict', 'leg': 1}" \
+   "L13d: a halt holding t2: halted, the restart blocked by the halt"
+has "$(q 'd["needsYou"]')" "halted at Leg 1: a revert conflict" "L13d: … a needs-you item for the halt"
+snap; SESS=r1 leg restarted --leg 2 --pending; ok "$rc" 3 "L13k: restarted under a standing halt is exit 3"; same "L13k: halt"
+leg clear-halt --reason "resolved by hand"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["restart"]["task"]')|$(q 'd["haltCleared"]')" "stalled|None|t2|[{'at': '$NOW', 'reason': 'resolved by hand', 'leg': 1}]" \
+   "L13d: after clear-halt: stalled, nothing blocking the restart of t2"
+snap; SESS= leg restarted --leg 2 --pending
+ok "$rc" 1 "L13k: restarted with no session id is exit 1"; has "$err" "--session" "L13k: … naming --session"; same "L13k: unknown --pending"
+SESS= leg restarted --leg 2 --started X; ok "$rc" 1 "L13k: … whatever the form"; same "L13k: unknown --started"
+SESS=r1 leg restarted --leg 2 --pending --started X; ok "$rc|$out" "2|" "L13k: two forms are a usage error"
+SESS=r1 leg restarted --leg 2 --pending
+ok "$rc|$(q 'd["recorded"]')|$(q 'd["restarted"]["how"]')|$(q 'd["restarted"]["session"]')" "0|True|pending|r1" "L13k: r1 --pending records"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')" "restarting|restart Leg 2 (pending)" "L13k: … restarting, blocked by the restart"
+snap; SESS=r2 leg restarted --leg 2 --pending
+ok "$rc" 3 "L13k: a second repair's --pending is exit 3"; has "$err" "a restart of Leg 2 stands (pending" "L13k: … naming the standing restart"
+same "L13k: r2 --pending"
+SESS=r1 leg restarted --leg 2 --pending; ok "$rc|$(q 'd["recorded"]')" "0|False" "L13k: the same line again records nothing"; same "L13k: r1 again"
+SESS=r1 leg restarted --leg 2 --started X
+ok "$rc|$(q 'd["recorded"]')|$(q 'd["restarted"]["how"]')|$(q 'd["restarted"]["started"]')" "0|True|started|X" "L13k: r1's own --started is the update"
+snap; SESS=r2 leg restarted --leg 2 --manual "no host tool"
+ok "$rc" 3 "L13k: r2 --manual over a started restart is exit 3"; has "$err" "--replace" "L13k: … naming --replace"; same "L13k: r2 --manual"
+SESS=r2 leg restarted --leg 2 --manual "no host tool" --replace
+ok "$rc|$(q 'd["restarted"]["how"]')|$(q 'd["restarted"]["manual"]')" "0|manual|no host tool" "L13k: … with --replace it records"
+snap; SESS=r2 leg restarted --leg 3 --pending; ok "$rc" 1 "L13k: --leg 3 (not the next Leg) is exit 1"; same "L13k: --leg 3"
+printf -- '- %s restart: Leg 2 pending (session unknown)\n' "$NOW" >> "$T/$RO.md"
+leg status; ok "$(q 'd["restarted"]["how"]')|$(q 'd["restarted"]["session"]')" "pending|unknown" "L13k: a hand-written pending line of session unknown stands"
+ok "$(q '[x["how"] for x in d["restarts"]]')" "['pending', 'started', 'manual', 'pending']" "L13k: … status lists every restart line"
+snap; SESS=r9 leg restarted --leg 2 --started X; ok "$rc" 3 "L13k: … and never matches: exit 3"; same "L13k: unknown pending"
+SESS=s2 leg begin --cwd "$F"; ok "$rc|$(q 'd["leg"]')|$(q 'd["inherited"]')" "0|2|['t2']" "L13k: Leg 2 begins and inherits t2"
+ok "$(logn 'Leg 2 began: leg-2 session s2')" 1 "L13k: … its began line reads Leg 2"
+leg status; ok "$(q 'd["chain"]')|$(q 'd["restarted"]')" "live|None" "L13k: … live, and no restart stands"
+snap; SESS=r3 leg restarted --leg 2 --started Z
+ok "$rc|$(q 'd["recorded"]')|$(q 'd["began"]')" "0|False|True" "L13k: a later --started for a begun Leg records nothing"; same "L13k: began"
+# (e) a handoff: no hand-over line, then started; and a manual one
+scen l13e
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2 t3 t4 t5 t6 t7); for t in t1 t2 t3 t4 t5 t6 t7; do mkt "$t"; done
+leg begin --cwd "$F"; for t in t1 t2 t3 t4 t5; do finish "$t"; done; leg close --outcome handoff
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["restart"]["task"]')" "awaiting-successor|None|t6" \
+   "L13e: a handoff with no hand-over line: awaiting-successor, nothing blocking"
+# (h) per-Leg event lists equal the log lines
+ok "$(q '",".join(x["task"] for x in d["legs"][0]["claimed"])')|$(q '",".join(x["task"] for x in d["legs"][0]["done"])')" "t1,t2,t3,t4,t5|t1,t2,t3,t4,t5" "L13h: Leg 1's claimed and done lists"
+ok "$(q 'len(d["legs"][0]["claimed"])')|$(q 'len(d["legs"][0]["done"])')" "$(logn 'Leg 1 claimed ')|$(logn 'Leg 1 done ')" "L13h: … equal its log lines"
+leg handed --started task_x
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["legs"][0]["handover"]')" "awaiting-successor|handover started task_x|started task_x" \
+   "L13e: started: the restart is blocked by the started Session"
+scen l13e2
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2); mkt t1; mkt t2
+leg begin --cwd "$F"; finish t1; leg close --outcome handoff; leg handed --manual "no host tool"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')" "awaiting-successor|None" "L13e: a manual hand-over blocks nothing"
+has "$(q 'd["needsYou"]')" "manual hand-over: start Leg 2 in cc-demo from $F" "L13e: … it is a needs-you item"
+# (f) stuck: a gate and a block, their dependants and fingerprints
+scen l13f
+G1='spend: OpenAI API for the audit — cap 5 USD'
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2 t3); mkt t1; mkt t2; mkt t3 'depends-on:' '  - "[[t1]]"'
+leg begin --cwd "$F"; leg claim --task t1 --gate "$G1"; leg set-aside --task t1 --kind gate --gate "$G1" --reason "unapproved gate"
+leg claim --task t2; leg set-aside --task t2 --reason "blocked on a missing key"
+leg close --outcome stuck
+git -C "$V" add -A; git -C "$V" commit -qm vault
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["rows"][0]["setAside"]["status"]')|$(q 'd["rows"][0]["setAside"]["gates"]')" "stuck|gate-pending|['$G1']" \
+   "L13f: stuck, t1 set aside at its gate, the gate listed"
+ok "$(q 'd["rows"][1]["setAside"]["summary"]')" "Set aside by Leg 1 of [[$RO]]: blocked on a missing key" "L13f: t2's summary is its diagnosis"
+fp=$(python3 -c 'import importlib.util, sys, pathlib
+s = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+print(m._block_fingerprint(m.Note(pathlib.Path(sys.argv[2]))))' "$RR" "$T/t2.md")
+ok "$(q 'd["rows"][1]["setAside"]["fingerprint"]')|$(q 'd["rows"][0]["setAside"]["fingerprint"]')" "$fp|None" "L13f: … its fingerprint is rr._block_fingerprint ($fp); a gate has none"
+ok "$(q 'd["rows"][2]["held"]')|$(q 'd["rows"][0]["dependants"]')" "depends on [[t1]] (gate-pending)|[{'slug': 't3', 'state': 'queued', 'owner': None}]" \
+   "L13f: t3 is held on t1, and is t1's dependant"
+# (i) read-only: nothing changes, and it answers while another verb holds the lock
+before=$( { git -C "$V" status --porcelain; find "$V" -path "$V/.git" -prune -o -type f -print | sort | xargs shasum; ls -l "$THREAD_LEG_LOCK_DIR"; } 2>&1)
+hold "$TMP/held-l13"
+t0=$(mstime); leg status; t1=$(mstime)
+ok "$rc|$([ $((t1 - t0)) -lt 5000 ] && echo fast)" "0|fast" "L13i: status answers in under 5 s while the lock is held ($((t1 - t0)) ms)"
+kill "$hp"; wait "$hp" 2>/dev/null
+after=$( { git -C "$V" status --porcelain; find "$V" -path "$V/.git" -prune -o -type f -print | sort | xargs shasum; ls -l "$THREAD_LEG_LOCK_DIR"; } 2>&1)
+ok "$after" "$before" "L13i: … and writes nothing: the porcelain, every file's sha1 and the lock dir are unchanged"
+# (g) L1's chain, from the Archive
+A1="$TMP/l1/vault/Work/Tasks/Archive/Rollouts/$RO.md"; c1=$(cksum < "$A1")
+T="$TMP/l1/vault/Work/Tasks" V="$TMP/l1/vault" leg status
+ok "$rc|$(q 'd["chain"]')|$(q 'd["note"]["archived"]')|$(q 'd["note"]["status"]')|$(q 'd["progress"]')" "0|complete|True|done|{'done': 7, 'total': 7, 'running': 0}" \
+   "L13g: L1's archived chain reads complete"
+ok "$(q '[g["outcome"] for g in d["legs"]]')" "['handoff', 'complete']" "L13g: … Leg 1 handed off, Leg 2 completed"
+ok "$(q 'd["restart"]')|$(q 'd["next"]')|$(q 'd["smoke"]')" "None|None|[]" \
+   "L13g: … no restart, no next act and no smoke list: begin refuses a complete chain"
+T="$TMP/l1/vault/Work/Tasks" V="$TMP/l1/vault" SESS=r1 leg restarted --leg 3 --pending
+ok "$rc" 1 "L13k: restarted on an archived note is exit 1"; ok "$(cksum < "$A1")" "$c1" "L13g: … the archived note unchanged"
+# (j) a non-serial note, and no note
+scen l13j
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1); mkt t1; subst "$T/$RO.md" 'shape: serial' 'shape: parallel'
+leg status; ok "$rc|$(q 'd["exit"]')" "1|1" "L13j: a parallel note is exit 1"; has "$err" "read it with reconcile-rollout.py status" "L13j: … with the hint"
+rm "${T:?}/${RO:?}.md"; leg status; ok "$rc" 1 "L13j: a missing note is exit 1"
+# (l) completable: a Complete Leg begins from the last Leg's folder or any folder but this plugin's checkout
+scen l13l
+FA="$S/a"; mkdir -p "$FA" "$S/elsewhere"
+mkro '' $(rows cc-a "$FA" '`ext:x`' t1 t2); mkt t1; mkt t2
+export CWD="$FA"
+leg begin --cwd "$FA"; finish t1; finish t2; leg close --outcome stopped --reason "out of context"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["anyLaunch"]')|$(q 'd["restart"]["launch"]')|$(q 'd["restart"]["harness"]')|$(q 'd["restart"]["cwd"]')" "completable|True|None|None|$FA" \
+   "L13l: every row done, no Leg open: completable, a restart in any launch from Leg 1's folder"
+snap; leg begin --cwd "$FA" --dry-run; ok "$rc|$(q 'd["leg"]')" "0|2" "L13l: begin --dry-run from restart.cwd"
+CWD="$S/elsewhere" leg begin --cwd "$S/elsewhere" --dry-run
+ok "$rc|$(q 'd["launch"]["folder"]')" "0|$S/elsewhere" "L13l: … and from an unrelated folder, which becomes its launch"
+TS="$S/ts"; mkrepo "$TS" https://github.com/lachyts/thread-skill.git
+CWD="$TS" leg begin --cwd "$TS" --dry-run; ok "$rc" 1 "L13l: … but never from this plugin's own checkout"; has "$err" "this plugin's own checkout" "L13l: … naming it"
+same "L13l: the dry runs"
+unset CWD
+# (m) a take-over: the lost Leg's lastAt is its own last line, never the taker's
+scen l13m
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2); mkt t1; mkt t2
+LNOW=2026-10-20T10:05+00:00 leg begin --cwd "$F"; LNOW=2026-10-20T10:10+00:00 leg claim --task t1
+LNOW=2026-10-20T11:00+00:00 SESS=s2 leg begin --cwd "$F" --take-over
+leg status
+ok "$(q 'd["legs"][0]["outcome"]')|$(q 'd["legs"][0]["lastAt"]')|$(q 'd["legs"][0]["closedStamp"]')|$(q 'd["legs"][1]["tookOver"]')" \
+   "lost|2026-10-20T10:10+00:00|2026-10-20T11:00+00:00|1" "L13m: a lost Leg's lastAt is its own claim, not the taker's close line"
+# (n) dependants, and the defer closure (repair § 7 (b))
+scen l13n
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2 t3 t4 t5)
+mkt t1; mkt t2 'depends-on:' '  - "[[t1]]"'; mkt t3 'blocked-by:' '  - "[[t2]]"'; mkt t4; mkt t5 'depends-on:' '  - "[[m]]"'
+printf -- '---\ntags: [task]\nstatus: merged\nmerged_into: "[[t1]]"\n---\n\nFolded into [[t1]].\n' > "$T/m.md"
+leg begin --cwd "$F"; leg claim --task t1; leg set-aside --task t1 --reason "blocked on a missing key"
+leg next; ok "$(q 'd["task"]')" t4 "L13n: t2, t3 and t5 are held, so t4 is next"; finish t4; leg close --outcome stuck
+cp -R "$V" "$S/vault2"
+leg status
+ok "$(q 'd["chain"]')|$(q '[x["slug"] for x in d["rows"][0]["dependants"]]')|$(q 'd["rows"][3]["dependants"]')" "stuck|['t2', 't3', 't5']|[]" \
+   "L13n: stuck; t1's dependants are t2, t3 (blocked-by) and t5 (through the tombstone m)"
+ok "$(q 'd["rows"][4]["deps"]')" "['t1']" "L13n: … t5's dependency resolves through m to t1"
+snap; python3 "$RR" defer --tasks t1 --rollout "$T/$RO.md" --tasks-dir "$T" > "$TMP/df" 2>&1; ok "$?" 0 "L13n1: defer t1 alone"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["rows"][0]["state"]')|$(q 'd["rows"][1]["held"]')" "stuck|deferred|depends on [[t1]] (open)" \
+   "L13n1: deferring t1 alone strands its dependants: the chain stays stuck, t2 held on the open t1"
+same "L13n1: defer never writes the rollout note"
+T2="$S/vault2/Work/Tasks"; cp "$T2/$RO.md" "$TMP/snap2"
+python3 "$RR" defer --tasks t1,t2,t3,t5 --rollout "$T2/$RO.md" --tasks-dir "$T2" > "$TMP/df" 2>&1; ok "$?" 0 "L13n2: defer the closure"
+T="$T2" V="$S/vault2" leg status
+ok "$(q 'd["chain"]')|$(q '[r["state"] for r in d["rows"]]')" "completable|['deferred', 'deferred', 'deferred', 'done', 'deferred']" \
+   "L13n2: deferring the closure makes the chain completable"
+cmp -s "$T2/$RO.md" "$TMP/snap2"; ok "$?" 0 "L13n2: … and the rollout note is byte-identical"
+# (o) the terminal states: dropped, superseded and incomplete print no restart, no next and no smoke list; paused
+# keeps them (what runs once the stamp is gone)
+scen l13o
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2); mkt t1; mkt t2
+leg begin --cwd "$F"; finish t1; leg close --outcome stopped --reason "out of time"
+cp "$T/$RO.md" "$TMP/l13o-note"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["task"]')|$(q 'd["next"]["action"]')|$(q '[x["task"] for x in d["smoke"]]')" "stopped|t2|claim|['t1']" \
+   "L13o: stopped with t1 done: a restart of t2, next claims it, t1 on the smoke list"
+for st in 'status: dropped|dropped' 'superseded_by: "[[other-rollout]]"|superseded' 'incomplete: true|incomplete' \
+          'paused: 2026-10-20T10:00+00:00|paused'; do
+  line=${st%|*}; want=${st#*|}
+  cp "$TMP/l13o-note" "$T/$RO.md"
+  if [ "$want" = dropped ]; then subst "$T/$RO.md" 'status: open' "$line"; else subst "$T/$RO.md" 'status: open' "status: open
+$line"; fi
+  leg status
+  if [ "$want" = paused ]; then
+    ok "$rc|$(q 'd["chain"]')|$(q 'd["restart"]["task"]')|$(q 'd["next"]["action"]')|$(q 'len(d["smoke"])')" "0|paused|t2|claim|1" \
+       "L13o: paused keeps the restart, next and smoke list"
+  else
+    ok "$rc|$(q 'd["chain"]')|$(q 'd["restart"]')|$(q 'd["next"]')|$(q 'd["smoke"]')" "0|$want|None|None|[]" \
+       "L13o: $want prints no restart, no next and no smoke list"
+  fi
+done
 
 echo
 if [ "$fail" -eq 0 ]; then echo "leg.test.sh: ALL PASS"; else echo "leg.test.sh: FAILED"; fi

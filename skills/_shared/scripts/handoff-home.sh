@@ -8,6 +8,9 @@
 # Exit 0 with one stdout line; exit 2 with a stderr line starting "handoff-home:" on a usage error.
 #
 # Rules, on physical paths, first hit wins:
+#   0. first: a directory inside a rollout clone (a `-rollout/` path component that self-rollout-check.sh
+#      --in-place names: its twin's same directory, or the twin's toplevel) reads as that in-place directory, and
+#      rules 1–6 run on it. No handoff doc lives in a clone, whose default branch only merge-task moves (ADR 0042).
 #   1. under $HOME/Projects/<Area>/<Project>/            → that project directory
 #   2. $HOME/repos/workspaces itself, anything under its _shared/, or --shared under a seat → _shared
 #   3. under $HOME/repos/workspaces/<ws>/                → that seat
@@ -27,6 +30,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+
 # phys <path> — the physical path when it exists (macOS /var → /private/var), else the path as given.
 phys() { if [ -d "$1" ]; then (cd "$1" && pwd -P); else printf '%s' "$1"; fi; }
 h=$(phys "$HOME")
@@ -39,6 +44,13 @@ if [ "$root_only" = 1 ]; then printf '%s\n' "$shared_root"; exit 0; fi
 start=${dir:-$PWD}
 [ -d "$start" ] || die "no such directory: $start"
 d=$(cd "$start" && pwd -P)
+
+# Rule 0: a rollout clone reads as its in-place twin. Any exit but 0 (not a clone, the check unable to run) leaves d.
+case "$d/" in
+  *-rollout/*)
+    m=$(bash "$here/../../execute/scripts/self-rollout-check.sh" --in-place "$d" 2>/dev/null) || m=''
+    [ -z "$m" ] || d=$m ;;
+esac
 
 case "$d/" in
   "$projects"/*/*/*)

@@ -28,7 +28,8 @@ The Queue. Each `## Queue` table row is `| <n> | [[<slug>\\|<alias>]] | `<launch
 deferred out of the chain: skipped and not counted. A row whose note is missing is held `note not found`. K is the
 done rows, fix rows included; N every counted row.
 
-Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-followup, close, handed, clear-halt):
+Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-followup, close, handed, clear-halt,
+restarted):
   begin [--cwd <dir>] [--take-over | --resume <N>]
       Refuses (exit 1): a note not found, a non-serial note, an incomplete note (`incomplete: true`, or
       reconcile-rollout.py's incomplete), a dropped or superseded note, a done note, a `paused:` or
@@ -109,7 +110,10 @@ Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-follo
       read from `Archive/Rollouts/`) it files the task alone: no pointer and no log line, since the archived note's
       committed Completion log is the chain's final record (`pointer: false`); --item there is exit 1.
   close --outcome handoff|complete|stuck|stopped|halt [--reason <r>] [--cwd <dir>] [--disposition <k>=<text>]...
-        [--log-line <text>]... [--also <path>]...
+        [--log-line <text>]... [--also <path>]... [--reflection <text>]
+      --reflection (close-score.py's one line, legs.md § Complete step 3) is required with --outcome complete and
+      refused with any other outcome (usage, exit 2); it is written as the Completion log's `- Reflection: <text>`
+      line, cut to 300 characters.
       Refuses handoff, complete and stuck while this Leg owns an in_progress task (stopped and halt leave it claimed
       for the next Leg), handoff with nothing to hand over, and complete unless every counted row is done. Writes the
       close line and prints `progress`, `commit_only` (the cwd's toplevel and every chain checkout: each `leg_base`
@@ -123,7 +127,7 @@ Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-follo
       timeout it files the follow-on with every chain commit there and the act prefixed `check the landing route
       (<reason>), then`. Then `status: done`, `completed:`, a `## Completion log` (a line per Leg: launch, begun–closed,
       done and set aside; each --log-line; `Post-rollout items:` with each disposition; a `Chain commits:` line per
-      checkout or `Chain commits: none`; `Reflection: not scored (serial; p24-4)`), the move to
+      checkout or `Chain commits: none`; `Reflection: <--reflection>`), the move to
       `Archive/Rollouts/` (a git move when `git ls-files --error-unmatch` finds the note, else a rename), and one
       vault commit by pathspec (the archived note,
       the follow-ons this Leg filed, each --also path, the old path when tracked). A failed commit is
@@ -133,9 +137,45 @@ Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-follo
       prints its status line. Idempotent once logged.
   clear-halt --reason <r>
       Logs `halt cleared: <r>` when a halt stands (else exit 1); the halted claim is then inherited by the next Leg.
+  status                                     (read-only, no lock, no git; an archived note is read too)
+      The whole chain at a glance, for /thread:status § 5, /thread:repair § 7 and reflect's serial-score.py. A note
+      not found, or one that is not serial, is exit 1 (`read it with reconcile-rollout.py status`). It prints `note`
+      {status, archived, incomplete (its reason, or null), paused (the `paused:` stamp, `pause_requested`, or null),
+      supersededBy}, `progress`, `chain` (the chain state, below), `openLeg` (its number, or null), `halt` {reason,
+      leg} (the standing halt), `haltCleared` (every `halt cleared:` line: [{at, reason, leg (the halted Leg it
+      cleared)}]), `restarted` and `restart` (below), `restarts` (every `restart:` line, as `restarted` reads one),
+      `legs` (one per Leg: n, owner, session, alias, folder, began, closed, closedStamp, outcome (handoff, complete,
+      stuck, stopped, halted, lost, or null while open), handover, tookOver, lastAt (its own last line's stamp: a
+      taker's `closed: lost` line for it is not its own), and its log lines in order, each with its stamp `at`:
+      claimed, done, filed and followOns [{task, at}], took [{task, at, from}], setAside [{task, at, status}], smoke
+      [{task, at, result}], reverted [{sha, top, at}]), `rows` (one per Queue row: n, slug,
+      state, status, owner, leg, launch, fix (the task its `verifies:` names, a fix task's target), fixes (its
+      `fixes:`), held (why next holds it), deps (each depends-on/blocked-by entry resolved through `merged_into:`
+      tombstones, rr._fold_unit), dependants (below) and setAside {status, summary, gates, fingerprint
+      (rr._block_fingerprint)} for a set-aside row), `smoke` (the smoke list of the Leg that acts next: the open
+      one, else Leg last + 1), `fixes` (the not-done fix rows), `next` (the open Leg's next act, else a fresh
+      Leg's), `stall` and `needsYou` (needs_you's items, plus a halt, a manual hand-over, a pending or manual
+      restart and a stall). In a terminal chain state (complete, dropped, superseded, incomplete: begin refuses
+      each, so no Leg acts next) `restart` and `next` are null and `smoke` is empty. Stamps print raw, as the log
+      holds them.
+  restarted --leg <N> (--pending | --started <id> | --manual <why>) [--replace]
+      Records that /thread:repair is starting Leg N (repair § 7 (e)), so a second repair, or status, sees it:
+      `--pending` before its create_thread, then `--started <id>` (the new Session's id) or `--manual <why>` (a
+      paste-ready manual handoff). Exactly one form, else usage (exit 2). Its checks, in order, are the complete
+      list: the note (begin's refusals, exit 1); the session (`unknown`, no --session and no session env, is exit 1
+      naming `--session`, whatever the form: nothing is written); a standing halt (exit 3); Leg N already has a
+      `began` line (exit 0, `recorded: false`, `began: true`, nothing written); N is not the last Leg + 1 (exit 1);
+      a standing restart (below): the same line again is exit 0 `recorded: false`; a `pending` one whose session is
+      this session's (both real ids: `unknown` never matches), met by --started or --manual, is its update and is
+      written; any other is exit 3 (`a restart of Leg N stands (<how>, <at>): check that session; --replace once
+      it is gone`) unless --replace. It checks nothing else: never the open Leg (a take-over's evidence is the
+      caller's: repair § 7 (d)) and never the hand-over. Logs `restart: Leg <N> pending (session <sid>)`,
+      `restart: Leg <N> started <id>` or `restart: Leg <N> manual (<why>)` and prints {verb, rollout, leg,
+      restarted, recorded: true}.
 
 The Leg log (`## Leg log`, at the note's end: below `## Queue` and `## Post-rollout`, so a queue reader never ranks
-it). Its line forms are stable (p24-4 reads them); readers key them by Leg number, never by position:
+it). Its line forms are stable (status and reflect's serial-score.py read them); readers key them by Leg number, never
+by position:
   - <stamp> Leg <N> began: leg-<N> session <id|unknown> in <alias> from <folder>[; took over from Leg <K>]
   - <stamp> Leg <N> resumed: session <id>
   - <stamp> Leg <N> smoke: [[t]] pass|fail|not run[: <why>]
@@ -150,6 +190,38 @@ it). Its line forms are stable (p24-4 reads them); readers key them by Leg numbe
   - <stamp> Leg <N> hand-over: started <id> | manual (<why>)
   - <stamp> Leg <N> follow-on [[f]] (close|post-item <k>|land)
   - <stamp> halt cleared: <reason>
+  - <stamp> restart: Leg <N> pending (session <sid>) | started <id> | manual (<why>)
+A `restart:` line carries no Leg number of its own (it names the Leg to come), so no reader counts it as a Leg.
+The Completion log's last line is `- Reflection: <close --reflection's text>`.
+
+The chain, as status reads it (repair and serial-score.py read these; this is their one copy):
+- The chain state, the first that matches: `complete` (status: done, live or archived); `dropped`; `superseded`
+  (a `superseded_by:`); `incomplete` (`incomplete: true`, or reconcile-rollout.py's incomplete); `paused` (a
+  `paused:` or `pause_requested:` stamp); `halted` (a standing halt); `restarting` (a standing restart); `live` (an
+  open Leg); `awaiting-successor` (the last Leg closed `handoff to Leg <N+1>`, and no Leg N+1 began); `completable`
+  (every counted row done, no Leg open); `stopped` (the last Leg closed `stopped:`); `stalled` (the stall below);
+  `not-started` (no Leg began); `stuck` (a fresh Leg's next is `stuck`); else `ready`.
+- The stall: {claimed [{task, owner, leg, legOutcome}], why}, the in_progress rows owned `leg-K` by a Leg K that is
+  closed or absent (legOutcome `absent`), or null. It is null whenever a Leg is open: a successor between its
+  begin and its `claim --inherit`, and a take-over, hold the claim too.
+- The restart: what a fresh Leg N (N = the last Leg + 1) would do, from next's plan for it (no cap, no launch
+  boundary, an open Leg K read as dead), when that plan is finish, claim or complete and the chain state is not
+  terminal (complete, dropped, superseded or incomplete); else null. A paused chain keeps it: what runs once the
+  stamp is gone. {leg, title
+  (`Leg <N>: <slug>`, at most 60 characters), prompt (the Leg prompt, ` --take-over` on its first line when a Leg
+  is open), takeOver, tldr, cwd, harness, launch, task, anyLaunch, blockedBy}. For finish or claim: cwd is the
+  row's folder (realpath), harness codex for a `cx-*` alias else claude, launch `<alias> from <folder>`, task its
+  slug, anyLaunch false. For complete: cwd the last Leg's folder (realpath; begin accepted it, so it is never this
+  plugin's checkout; the vault when no Leg began), harness, launch and task null, anyLaunch true (a Complete Leg
+  works no row, so begin takes any cwd but this plugin's checkout). blockedBy, the first that holds, else null:
+  `halt`; `restart Leg <N> (<how>)` (a standing restart); `open Leg <K> (session <id>)`; `handover started <id>`
+  (the last Leg handed off to a started Session that never began). A manual hand-over is null: it waits on Lachy.
+- The standing restart (`restarted`): the latest `restart:` line with no `began` line after it, as {leg, how
+  (pending, started or manual), started, manual, session (a pending line's), at}, else null.
+- A row's dependants: the counted, not-done rows D with an entry in D's depends-on or blocked-by that resolves
+  (rr._fold_unit, through `merged_into:` tombstones) to the row or to a row already found: transitive,
+  cycle-guarded, in Queue order, each {slug, state, owner}. repair § 7 (b) defers a set-aside with them (repair § 5's
+  closure, read the way next's holds read a dependency).
 
 The status mapping (legs.md § Report): every Leg turn ends `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R>
 state=<state>[ reason="…"]`, R 1 while this Leg owns an in_progress task. It is never `running`: next --waiting
@@ -197,6 +269,7 @@ GATES_PENDING = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES = "## Approved gates"
 CAP = 5
 OUTCOMES = ("handoff", "complete", "stuck", "stopped", "halt")
+TERMINAL = ("complete", "dropped", "superseded", "incomplete")   # the chain states begin refuses for good
 REVIEWS = "docs/reviews/"
 SET_ASIDE = {"blocked", "review-blocked", "plan-blocked", "gate-pending"}
 LAUNCH_RE = re.compile(r"^`([^`]+)`\s+from\s+`([^`]+)`$")
@@ -204,6 +277,7 @@ VERIFY_RE = re.compile(r"^\s*\*\*Verify:\*\*.*$", re.M)
 MCP_RE = re.compile(r"\*\*MCP:\*\*\s*required\s+(.*?)(?:;\s*optional\b.*)?$", re.I)
 LOG_RE = re.compile(r"^- (?P<stamp>\S+) Leg (?P<n>\d+) (?P<rest>.*)$")
 CLEARED_RE = re.compile(r"^- (?P<stamp>\S+) halt cleared: (?P<reason>.*)$")
+RESTART_RE = re.compile(r"^- (\S+) restart: Leg (\d+) (pending \(session (\S+)\)|started (\S+)|manual \((.*)\))$")
 LINK_RE = re.compile(r"\[\[([^\]|#^\\]+)[^\]]*\]\]")
 BEGAN_RE = re.compile(r"^began: leg-(\d+) session (\S+) in (\S+) from (.*?)(?:; took over from Leg (\d+))?$")
 
@@ -586,7 +660,8 @@ KINDS = ("began:", "resumed:", "smoke:", "filed ", "claimed ", "took ", "done ",
 
 
 def parse_log(note):
-    """The `## Leg log` lines, in write order: {pos, n (None for `halt cleared`), stamp, rest, kind, slug}."""
+    """The `## Leg log` lines, in write order: {pos, n (None for `halt cleared` and `restart`), stamp, rest, kind,
+    slug}; a `restart` line adds {leg, how, session, started, manual}. A line of no known form is skipped."""
     found = note._section_bounds(LEG_LOG)
     out = []
     if found is None:
@@ -607,7 +682,29 @@ def parse_log(note):
         if c:
             out.append({"pos": pos, "n": None, "stamp": c.group("stamp"), "rest": c.group("reason"),
                         "kind": "halt cleared", "slug": None})
+            continue
+        r = RESTART_RE.match(line.rstrip())
+        if r:
+            how = r.group(3).split(" ", 1)[0]
+            out.append({"pos": pos, "n": None, "stamp": r.group(1), "rest": r.group(3), "kind": "restart", "slug": None,
+                        "leg": int(r.group(2)), "how": how, "session": r.group(4), "started": r.group(5),
+                        "manual": r.group(6)})
     return out
+
+
+def standing_restart(log):
+    """The standing restart (the module docstring's `restarted`): the latest `restart:` line with no `began` line
+    after it, as {leg, how, started, manual, session, at}, else None."""
+    cur = None
+    for e in log:
+        if e["kind"] == "restart":
+            cur = e
+        elif e["kind"] == "began":
+            cur = None
+    if cur is None:
+        return None
+    return {"leg": cur["leg"], "how": cur["how"], "started": cur["started"], "manual": cur["manual"],
+            "session": cur["session"], "at": cur["stamp"]}
 
 
 def parse_legs(log):
@@ -650,6 +747,21 @@ def verify_line(note):
 
 # ---- next ---------------------------------------------------------------------------------------------------------
 
+def holds_of(chain, r):
+    """Why next holds row r ([] when it is free): a dependency (depends-on/blocked-by) that is not done, or a done one
+    with a not-done fix."""
+    why = []
+    for dep in rr._dep_entries(r.note):
+        ok, w = rr._dep_status(dep, chain.index)
+        if not ok:
+            why.append(f"depends on [[{dep}]] ({w})")
+        else:
+            f = chain.open_fix_for(dep)
+            if f:
+                why.append(f"depends on [[{dep}]] (awaiting fix [[{f}]])")
+    return why
+
+
 def plan_next(chain, leg_n, alias, folder, cap=True, launch=True, dead=()):
     """The Leg's next act (the module docstring's `next`). `dead`: Legs to read as closed (a take-over's)."""
     held, aside, inherited = [], [], []
@@ -676,18 +788,6 @@ def plan_next(chain, leg_n, alias, folder, cap=True, launch=True, dead=()):
             return False
         return r.state == "queued" or not rr._valued(r.note.get("owner"))
 
-    def holds(r):
-        why = []
-        for dep in rr._dep_entries(r.note):
-            ok, w = rr._dep_status(dep, chain.index)
-            if not ok:
-                why.append(f"depends on [[{dep}]] ({w})")
-            else:
-                f = chain.open_fix_for(dep)
-                if f:
-                    why.append(f"depends on [[{dep}]] (awaiting fix [[{f}]])")
-        return why
-
     def choose(cands):
         for r in cands:
             if r.state == "missing":
@@ -697,7 +797,7 @@ def plan_next(chain, leg_n, alias, folder, cap=True, launch=True, dead=()):
                 if r.state == "running" and r.note is not None and owner_leg(r.note) is None:
                     held.append({"slug": r.slug, "why": f"in progress ({rr._scalar(r.note.get('owner'))})"})
                 continue
-            why = holds(r)
+            why = holds_of(chain, r)
             if why:
                 held.append({"slug": r.slug, "why": "; ".join(why)})
                 continue
@@ -802,6 +902,15 @@ def plugin_origin():
 def leg_prompt(ctx, n):
     return (f"/thread:execute [[{ctx.slug}]]\nLeg {n} of the serial chain; the brief is the rollout note's "
             f"## Leg log: {os.path.realpath(ctx.rollout)}")
+
+
+def leg_title(ctx, n):
+    title = f"Leg {n}: {ctx.slug}"
+    return title if len(title) <= 60 else title[:59].rstrip("-") + "…"
+
+
+def launch_harness(alias):
+    return "codex" if (alias or "").startswith("cx-") else "claude"
 
 
 # ---- smoke list ---------------------------------------------------------------------------------------------------
@@ -925,7 +1034,7 @@ def _begin_locked(ctx, a, chain, cwd):
     plan = plan_next(chain, n, None, None, cap=False, launch=False, dead=() if took_over is None else (took_over,))
     row = plan.get("row") if plan["action"] in ("finish", "claim") else None
     if row is not None:
-        need = "codex" if (row.alias or "").startswith("cx-") else "claude"
+        need = launch_harness(row.alias)
         if _fold(row.folder or "") != cwd.casefold() or need != ctx.harness:
             why = (f"wrong launch: [[{row.slug}]] runs as `{row.alias}` from `{row.folder}` ({need}); this session is "
                    f"{ctx.harness} in {cwd}; nothing written, so start Leg {n} there with the prompt below")
@@ -1670,6 +1779,10 @@ def cmd_close(ctx, a):
     outcome = a.outcome
     if outcome in ("stopped", "halt") and not (a.reason or "").strip():
         raise Usage(f"--outcome {outcome} needs --reason")
+    if outcome == "complete" and not (a.reflection or "").strip():
+        raise Usage("--outcome complete needs --reflection <close-score.py's line> (legs.md § Complete step 3)")
+    if outcome != "complete" and a.reflection is not None:
+        raise Usage("--reflection goes with --outcome complete only")
     dispositions = {}
     for d in a.disposition:
         k, sep, text = d.partition("=")
@@ -1695,19 +1808,16 @@ def cmd_close(ctx, a):
             plan = plan_next(chain, n + 1, None, None, cap=False, launch=False)
             row = plan.get("row")
             if row is None:
-                raise Refuse(1, f"nothing to hand over (next is {plan['action']}): close --outcome complete or stuck")
+                raise Refuse(1, f"nothing to hand over (next is {plan['action']}): run legs.md § Complete (its close "
+                                "--outcome complete takes --reflection), or close --outcome stuck")
             line = f"closed: handoff to Leg {n + 1} in {row.alias} from {row.folder}"
             prog = chain.progress(n)
-            title = f"Leg {n + 1}: {ctx.slug}"
-            if len(title) > 60:
-                title = title[:59].rstrip("-") + "…"
             out["handover"] = {
-                "title": title, "prompt": leg_prompt(ctx, n + 1),
+                "title": leg_title(ctx, n + 1), "prompt": leg_prompt(ctx, n + 1),
                 "tldr": (f"Leg {n + 1} of the {project_of(ctx)} serial chain. {prog['done']} of {prog['total']} tasks "
                          "are done; it picks up at the next row."),
                 "cwd": os.path.realpath(os.path.expanduser(row.folder)),
-                "harness": "codex" if (row.alias or "").startswith("cx-") else "claude",
-                "launch": row.launch, "task": row.slug}
+                "harness": launch_harness(row.alias), "launch": row.launch, "task": row.slug}
         elif outcome == "complete":
             plan = plan_next(chain, n, None, None, cap=False, launch=False)
             if plan["action"] != "complete":
@@ -1799,7 +1909,7 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
         content += [f"- Chain commits: {l}" for l in chain_lines]
     else:
         content.append("- Chain commits: none")
-    content.append("- Reflection: not scored (serial; p24-4)")
+    content.append(f"- Reflection: {reason_text(a.reflection, 300)}")
     chain.note.append_section(COMPLETION_LOG, "\n".join(content))
     prog = chain.progress(n)
     out.update(progress=prog, needs_you=[], followups=followups,
@@ -1877,6 +1987,354 @@ def cmd_clear_halt(ctx, a):
         return {"verb": "clear-halt", "rollout": ctx.slug, "cleared": halt[0], "leg": halt[1], "dryRun": ctx.dry}
 
 
+# ---- status and restarted (/thread:status § 5, /thread:repair § 7) ---------------------------------------------------
+
+OUTCOME_WORDS = (("handoff to Leg", "handoff"), ("chain complete", "complete"), ("chain stuck", "stuck"),
+                 ("stopped:", "stopped"), ("halted:", "halted"), ("lost", "lost"))
+
+
+def leg_outcome(closed):
+    """A Leg's close line as one word (OUTCOME_WORDS), or None while it is open."""
+    if closed is None:
+        return None
+    return next((w for prefix, w in OUTCOME_WORDS if closed.startswith(prefix)), "other")
+
+
+def is_archived(ctx):
+    if ctx.archived:
+        return True
+    p = ctx.rollout.resolve()
+    return p.parent.name == "Rollouts" and p.parent.parent.name == "Archive"
+
+
+def dependants(chain, row):
+    """The row's dependants (the module docstring's): transitive, through `merged_into:` tombstones, in Queue order."""
+    cands = [r for r in chain.counted() if r.state != "done" and r.note is not None]
+    keys, found = {row.slug.lower()}, set()
+    grew = True
+    while grew:
+        grew = False
+        for d in cands:
+            k = d.slug.lower()
+            if k in keys:
+                continue
+            if any(rr._fold_unit(e, chain.index)[0].lower() in keys for e in rr._dep_entries(d.note)):
+                keys.add(k)
+                found.add(k)
+                grew = True
+    return [{"slug": r.slug, "state": r.state, "owner": rr._scalar(r.note.get("owner")) or None}
+            for r in chain.rows if r.slug.lower() in found]
+
+
+def pending_gates(note):
+    out = []
+    for g in note.section_text(GATES_PENDING).split("\n"):
+        g = re.sub(r"^[-*]\s+", "", g.strip())
+        if g:
+            out.append(g)
+    return out
+
+
+def row_held(chain, r):
+    if r.state == "missing":
+        return "note not found"
+    if r.note is None:
+        return None
+    if r.state == "running" and owner_leg(r.note) is None and rr._valued(r.note.get("owner")):
+        return f"in progress ({rr._scalar(r.note.get('owner'))})"
+    if r.state == "queued" or (r.state == "running" and not rr._valued(r.note.get("owner"))):
+        return "; ".join(holds_of(chain, r)) or None
+    return None
+
+
+def row_json(chain, r):
+    note = r.note
+    out = {"n": r.i + 1, "slug": r.slug, "state": r.state, "status": (rr._status(note) or None) if note else None,
+           "owner": (rr._scalar(note.get("owner")) or None) if note else None, "leg": None,
+           "launch": r.launch if r.alias else None, "fix": None, "fixes": None, "held": row_held(chain, r), "deps": [],
+           "dependants": [], "setAside": None}
+    if note is None:
+        return out
+    k = rr._scalar(note.get("leg"))
+    out["leg"] = int(k) if k.isdigit() else None
+    out["fix"] = rr._wikilink_slug(rr._scalar(note.get("verifies"))) or None
+    out["fixes"] = rr._wikilink_slug(rr._scalar(note.get("fixes"))) or None
+    out["deps"] = [rr._fold_unit(e, chain.index)[0] for e in rr._dep_entries(note)]
+    if r.state not in ("done", "deferred", "other"):
+        out["dependants"] = dependants(chain, r)
+    if r.state == "set-aside":
+        st = rr._status(note)
+        if st == "gate-pending":
+            gates = pending_gates(note)
+            summary = "gated input awaiting sign-off: " + ("; ".join(gates) or "none listed")
+        else:
+            gates = []
+            summary = note.latest_run_text(rr.BLOCKED_SECTIONS.get(st, BLOCKER)).split("\n")[0].strip()
+        out["setAside"] = {"status": st, "summary": summary, "gates": gates, "fingerprint": rr._block_fingerprint(note)}
+    return out
+
+
+def legs_json(chain):
+    out = []
+    for n in sorted(chain.legs):
+        g = chain.legs[n]
+        own = [e for e in chain.log if e["n"] == n]
+        # A lost Leg's `closed: lost` line is its taker's, written at the take-over: never this Leg's own activity.
+        mine = [e for e in own if not (e["kind"] == "closed" and e["rest"].split(":", 1)[1].strip().startswith("lost"))]
+
+        def tasks(kind):
+            return [{"task": e["slug"], "at": e["stamp"]} for e in own if e["kind"] == kind and e["slug"]]
+
+        took = []
+        for e in own:
+            m = re.search(r"\(inherited from Leg (\d+)\)", e["rest"]) if e["kind"] == "took" and e["slug"] else None
+            if m:
+                took.append({"task": e["slug"], "at": e["stamp"], "from": int(m.group(1))})
+        aside = []
+        for e in own:
+            m = re.match(r"^set aside \[\[[^\]]*\]\] \(([^)]*)\)", e["rest"]) if e["kind"] == "set aside" else None
+            if m and e["slug"]:
+                aside.append({"task": e["slug"], "at": e["stamp"], "status": m.group(1)})
+        smoke = [{"task": e["slug"], "at": e["stamp"], "result": e["rest"].split("]]", 1)[-1].strip()}
+                 for e in own if e["kind"] == "smoke" and e["slug"]]
+        reverted = []
+        for e in own:
+            m = re.match(r"^reverted (\S+) in (.*)$", e["rest"]) if e["kind"] == "reverted" else None
+            if m:
+                reverted.append({"sha": m.group(1), "top": m.group(2), "at": e["stamp"]})
+        out.append({"n": n, "owner": f"leg-{n}", "session": g["session"], "alias": g["alias"], "folder": g["folder"],
+                    "began": g["began"], "closed": g["closed"], "closedStamp": g["closedStamp"],
+                    "outcome": leg_outcome(g["closed"]), "handover": g["handover"], "tookOver": g["tookOver"],
+                    "lastAt": mine[-1]["stamp"] if mine else None, "claimed": tasks("claimed"), "took": took,
+                    "done": tasks("done"), "setAside": aside, "smoke": smoke, "filed": tasks("filed"),
+                    "reverted": reverted, "followOns": tasks("follow-on")})
+    return out
+
+
+def cleared_json(chain):
+    """Every `halt cleared:` line as {at, reason, leg}: leg is the halted Leg it cleared (the latest `closed: halted:`
+    line before it)."""
+    out, halted = [], None
+    for e in chain.log:
+        if e["kind"] == "closed" and leg_outcome(e["rest"].split(":", 1)[1].strip()) == "halted":
+            halted = e["n"]
+        elif e["kind"] == "halt cleared":
+            out.append({"at": e["stamp"], "reason": e["rest"], "leg": halted})
+    return out
+
+
+def stall_of(chain, open_leg):
+    """The stall (the module docstring's): claimed rows of a closed or absent Leg, with no Leg open; else None."""
+    if open_leg is not None:
+        return None
+    claimed = []
+    for r in chain.rows:
+        if r.state != "running" or r.note is None:
+            continue
+        k = owner_leg(r.note)
+        if k is None:
+            continue
+        g = chain.legs.get(k)
+        if g is None or g["closed"] is not None:
+            claimed.append({"task": r.slug, "owner": f"leg-{k}", "leg": k,
+                            "legOutcome": leg_outcome(g["closed"]) if g else "absent"})
+    if not claimed:
+        return None
+    held = ", ".join(f"[[{c['task']}]] (leg-{c['leg']}, {c['legOutcome']})" for c in claimed)
+    return {"claimed": claimed,
+            "why": f"no Leg is open, yet {held} is claimed: the next Leg inherits it, and nothing starts that Leg"}
+
+
+def restart_of(ctx, chain, plan, n, open_leg, halt, restarted):
+    """The restart (the module docstring's) from a fresh Leg N's plan, or None."""
+    if plan["action"] not in ("finish", "claim", "complete"):
+        return None
+    take = open_leg is not None
+    first, _, rest = leg_prompt(ctx, n).partition("\n")
+    prompt = f"{first} --take-over\n{rest}" if take else f"{first}\n{rest}"
+    prog = chain.progress()
+    out = {"leg": n, "title": leg_title(ctx, n), "prompt": prompt, "takeOver": take}
+    if plan["action"] == "complete":
+        last = chain.legs.get(chain.last_n()) if chain.legs else None
+        folder = (last or {}).get("folder")
+        cwd = os.path.realpath(os.path.expanduser(folder)) if folder else os.path.realpath(ctx.vault)
+        out.update(tldr=(f"Leg {n} of the {project_of(ctx)} serial chain. All {prog['total']} tasks are done; it runs "
+                         "the chain's Complete."),
+                   cwd=cwd, harness=None, launch=None, task=None, anyLaunch=True)
+    else:
+        row = plan["row"]
+        lead = "takes over the open Leg and " if take else ""
+        out.update(tldr=(f"Leg {n} of the {project_of(ctx)} serial chain. {prog['done']} of {prog['total']} tasks are "
+                         f"done; it {lead}picks up at the next row."),
+                   cwd=os.path.realpath(os.path.expanduser(row.folder)), harness=launch_harness(row.alias),
+                   launch=row.launch, task=row.slug, anyLaunch=False)
+    blocked = None
+    if halt is not None:
+        blocked = "halt"
+    elif restarted is not None:
+        blocked = f"restart Leg {restarted['leg']} ({restarted['how']})"
+    elif take:
+        blocked = f"open Leg {open_leg['n']} (session {open_leg['session'] or 'unknown'})"
+    elif chain.legs:
+        last = chain.legs[chain.last_n()]
+        ho = last["handover"] or ""
+        if leg_outcome(last["closed"]) == "handoff" and ho.startswith("started "):
+            blocked = f"handover started {ho[len('started '):].strip()}"
+    out["blockedBy"] = blocked
+    return out
+
+
+def chain_state(chain, inc, paused, superseded, halt, restarted, open_leg, stall, fresh):
+    """The chain state (the module docstring's): the first that matches."""
+    st = rr._status(chain.note)
+    last = chain.legs.get(chain.last_n()) if chain.legs else None
+    counted = chain.counted()
+    if st == "done":
+        return "complete"
+    if st == "dropped":
+        return "dropped"
+    if superseded:
+        return "superseded"
+    if inc:
+        return "incomplete"
+    if paused:
+        return "paused"
+    if halt is not None:
+        return "halted"
+    if restarted is not None:
+        return "restarting"
+    if open_leg is not None:
+        return "live"
+    if last is not None and leg_outcome(last["closed"]) == "handoff":
+        return "awaiting-successor"
+    if counted and all(r.state == "done" for r in counted):
+        return "completable"
+    if last is not None and leg_outcome(last["closed"]) == "stopped":
+        return "stopped"
+    if stall is not None:
+        return "stalled"
+    if not any(g["began"] for g in chain.legs.values()):
+        return "not-started"
+    if fresh["action"] == "stuck":
+        return "stuck"
+    return "ready"
+
+
+def cmd_status(ctx, a):
+    chain = Chain(ctx)
+    note = chain.note
+    if rr._shape(note) != "serial":
+        raise Refuse(1, f"{ctx.slug} is not a serial rollout (shape: {rr._scalar(note.get('shape')) or 'parallel'}): "
+                        "read it with reconcile-rollout.py status")
+    if rr._truthy_flag(note.get("incomplete")):
+        inc = "incomplete: true (/thread:schedule never finished it)"
+    else:
+        inc = rr.incomplete(ctx.rollout, note, chain.linked, chain.index) or None
+    if rr._valued(note.get("paused")):
+        paused = rr._scalar(note.get("paused"))
+    elif rr._truthy_flag(note.get("pause_requested")):
+        paused = "pause_requested"
+    else:
+        paused = None
+    superseded = (rr._wikilink_slug(rr._scalar(note.get("superseded_by"))) or rr._scalar(note.get("superseded_by"))) \
+        if rr._valued(note.get("superseded_by")) else None
+    open_leg = chain.open_leg()
+    halt = chain.halt()
+    restarted = standing_restart(chain.log)
+    n_next = chain.last_n() + 1
+    fresh = plan_next(chain, n_next, None, None, cap=False, launch=False,
+                      dead=(open_leg["n"],) if open_leg is not None else ())
+    own = plan_next(chain, open_leg["n"], open_leg["alias"], open_leg["folder"]) if open_leg is not None else fresh
+    stall = stall_of(chain, open_leg)
+    state = chain_state(chain, inc, paused, superseded, halt, restarted, open_leg, stall, fresh)
+    # begin refuses each terminal state, so no Leg acts next: no restart, no smoke list, no next act.
+    ended = state in TERMINAL
+    restart = None if ended else restart_of(ctx, chain, fresh, n_next, open_leg, halt, restarted)
+    items = needs_you(ctx, chain, None, None)
+    if halt is not None:
+        items.append(f"[[{ctx.slug}]] halted at Leg {halt[1]}: {reason_text(halt[0], 140)}: the halt is yours to "
+                     f"clear → /thread:repair [[{ctx.slug}]]")
+    last = chain.legs.get(chain.last_n()) if chain.legs else None
+    if last is not None and leg_outcome(last["closed"]) == "handoff" and (last["handover"] or "").startswith("manual"):
+        m = re.match(r"handoff to Leg (\d+) in (\S+) from (.*)$", last["closed"])
+        where = f"{m.group(2)} from {m.group(3)}" if m else "its launch"
+        items.append(f"[[{ctx.slug}]] manual hand-over: start Leg {last['n'] + 1} in {where} with the prompt "
+                     f"(/thread:status shows it), or /thread:repair [[{ctx.slug}]]")
+    if restarted is not None and restarted["how"] in ("pending", "manual"):
+        if restarted["how"] == "manual":
+            items.append(f"[[{ctx.slug}]] restart of Leg {restarted['leg']} is a manual handoff "
+                         f"({reason_text(restarted['manual'] or '', 100)}): paste its prompt in its launch")
+        else:
+            items.append(f"[[{ctx.slug}]] restart of Leg {restarted['leg']} pending since {restarted['at']} (session "
+                         f"{restarted['session']}): wait for it, or /thread:repair [[{ctx.slug}]] once that session is gone")
+    if stall is not None:
+        items.append(f"[[{ctx.slug}]] stalled: {stall['why']} → /thread:repair [[{ctx.slug}]]")
+    fixes = [{"task": r.slug, "verifies": v, "state": r.state} for r, v in chain.fixes() if r.state != "done"]
+    return {"verb": "status", "rollout": ctx.slug,
+            "note": {"status": rr._status(note) or None, "archived": is_archived(ctx), "incomplete": inc,
+                     "paused": paused, "supersededBy": superseded},
+            "progress": chain.progress(open_leg["n"] if open_leg is not None else None), "chain": state,
+            "openLeg": open_leg["n"] if open_leg is not None else None,
+            "halt": {"reason": halt[0], "leg": halt[1]} if halt is not None else None,
+            "haltCleared": cleared_json(chain), "restarted": restarted,
+            "restarts": [{"leg": e["leg"], "how": e["how"], "started": e["started"], "manual": e["manual"],
+                          "session": e["session"], "at": e["stamp"]} for e in chain.log if e["kind"] == "restart"],
+            "legs": legs_json(chain), "rows": [row_json(chain, r) for r in chain.rows],
+            "smoke": [] if ended else smoke_list(chain, open_leg["n"] if open_leg is not None else n_next),
+            "fixes": fixes, "next": None if ended else next_json(own), "stall": stall, "restart": restart,
+            "needsYou": items}
+
+
+def cmd_restarted(ctx, a):
+    forms = [f for f, on in (("pending", a.pending), ("started", a.started is not None),
+                              ("manual", a.manual is not None)) if on]
+    if len(forms) != 1:
+        raise Usage("restarted takes exactly one of --pending, --started <id> and --manual <why>")
+    if (a.started is not None and not a.started.strip()) or (a.manual is not None and not a.manual.strip()):
+        raise Usage("--started needs the new Session's id, and --manual its reason")
+    with Lock(ctx):
+        chain = Chain(ctx)
+        validate_note(ctx, chain)
+        if ctx.session == "unknown":
+            raise Refuse(1, "`leg.py restarted` needs this session's id: pass `--session <id>` (no CLAUDE_CODE_SESSION_ID "
+                            "or CODEX_THREAD_ID is set); nothing written")
+        halt = chain.halt()
+        if halt is not None:
+            raise Refuse(3, f"halted at Leg {halt[1]}: {halt[0]}; nothing restarts until `leg.py clear-halt --reason <why>`")
+        n = a.leg
+        g = chain.legs.get(n)
+        if g is not None and g["began"]:
+            return {"verb": "restarted", "rollout": ctx.slug, "leg": n, "restarted": standing_restart(chain.log),
+                    "recorded": False, "began": True, "dryRun": ctx.dry}
+        if n != chain.last_n() + 1:
+            raise Refuse(1, f"Leg {n} is not the next Leg (Leg {chain.last_n() + 1}): nothing written")
+        form = forms[0]
+        if form == "pending":
+            text = f"restart: Leg {n} pending (session {ctx.session})"
+        elif form == "started":
+            text = f"restart: Leg {n} started {a.started.strip().split()[0]}"
+        else:
+            text = f"restart: Leg {n} manual ({reason_text(a.manual, 200)})"
+        cur = standing_restart(chain.log)
+        if cur is not None:
+            same = next((e for e in reversed(chain.log) if e["kind"] == "restart"), None)
+            if same is not None and f"restart: Leg {same['leg']} {same['rest']}" == text:
+                return {"verb": "restarted", "rollout": ctx.slug, "leg": n, "restarted": cur, "recorded": False,
+                        "began": False, "dryRun": ctx.dry}
+            update = (cur["how"] == "pending" and form != "pending" and cur["session"] not in (None, "unknown")
+                      and cur["session"] == ctx.session)
+            if not update and not a.replace:
+                raise Refuse(3, f"a restart of Leg {cur['leg']} stands ({cur['how']}, {cur['at']}): check that session; "
+                                "--replace once it is gone", restarted=cur)
+        if not ctx.dry:
+            log_line(chain.note, f"- {ctx.stamp} {text}")
+            save(ctx, chain.note)
+            chain = Chain(ctx)
+        return {"verb": "restarted", "rollout": ctx.slug, "leg": n,
+                "restarted": standing_restart(chain.log) if not ctx.dry else None, "recorded": not ctx.dry,
+                "dryRun": ctx.dry}
+
+
 # ---- main -----------------------------------------------------------------------------------------------------------
 
 class Parser(argparse.ArgumentParser):
@@ -1943,19 +2401,28 @@ def parser():
     s.add_argument("--disposition", action="append", default=[])
     s.add_argument("--log-line", action="append", default=[])
     s.add_argument("--also", action="append", default=[])
+    s.add_argument("--reflection")
     s = sub.add_parser("handed", parents=[common])
     s.add_argument("--started")
     s.add_argument("--manual")
     s = sub.add_parser("clear-halt", parents=[common])
     s.add_argument("--reason", required=True)
+    sub.add_parser("status", parents=[common])
+    s = sub.add_parser("restarted", parents=[common])
+    s.add_argument("--leg", type=int, required=True)
+    s.add_argument("--pending", action="store_true")
+    s.add_argument("--started")
+    s.add_argument("--manual")
+    s.add_argument("--replace", action="store_true")
     return p
 
 
 VERBS = {"begin": cmd_begin, "next": cmd_next, "claim": cmd_claim, "change": cmd_change, "smoke": cmd_smoke,
          "file-fix": cmd_file_fix, "done": cmd_done, "set-aside": cmd_set_aside, "post-items": cmd_post_items,
-         "file-followup": cmd_file_followup, "close": cmd_close, "handed": cmd_handed, "clear-halt": cmd_clear_halt}
+         "file-followup": cmd_file_followup, "close": cmd_close, "handed": cmd_handed, "clear-halt": cmd_clear_halt,
+         "status": cmd_status, "restarted": cmd_restarted}
 # The writing verbs an archived (completed) note refuses up front; begin refuses it as done, with its status line.
-ARCHIVE_REFUSED = ("claim", "smoke", "file-fix", "done", "set-aside", "close", "handed", "clear-halt")
+ARCHIVE_REFUSED = ("claim", "smoke", "file-fix", "done", "set-aside", "close", "handed", "clear-halt", "restarted")
 
 
 def main(argv=None) -> int:
