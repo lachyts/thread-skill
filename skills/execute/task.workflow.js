@@ -149,9 +149,6 @@ export const meta = {
 //                                    //   A commit pushed without a PR is in no entry (lead-integrate.py prepare's
 //                                    //   `unlisted`): the integrator's and the judge's prompts send both to
 //                                    //   `log --first-parent taskBase..mainSha` for those.
-//       plan            : string,    // the approved plan: `lead-integrate.py plan`'s `plan` (the note's
-//                                    //   "## Approved plan"); '' when the last own call was not plan-gated;
-//                                    //   reference for the integrator, never the contract.
 //       reviewHistory   : [{ round, feedback: string[], stage?: 'integration' }], // rounds strictly ascending; [] ok;
 //                                    //   a round with empty feedback is accepted and dropped (liveHistory).
 //       reviewRoundsUsed: number,    // >= 1 and >= the history's last round.
@@ -2438,7 +2435,6 @@ function integrationArgsError(a) {
       return `landed entries must be { prUrl, title, files: string[], taskPath }, got ${JSON.stringify(p)}`
     }
   }
-  if (typeof I.plan !== 'string') return 'plan must be a string'
   const he = historyError(I.reviewHistory, true)
   if (he) return 'reviewHistory ' + he
   const last = I.reviewHistory.length ? I.reviewHistory[I.reviewHistory.length - 1].round : 0
@@ -2705,11 +2701,10 @@ ${KILL_RULE}
 Why you are here — the lead's trouble: ${trouble}.
 ${INTEGRATION_PRIOR_NOTE}
 
-The approved plan, for reference only. The brief is the contract: a deviation from this plan that the PR body declares
-(a step-back revise may make one) stands, and your resolution never undoes it.
----
-${I.plan || '(no plan: the task was not plan-gated — the brief is the contract)'}
----${history}
+The approved plan, for reference only: read the \`## Approved plan\` section of the task note above (${task.taskPath}),
+the \`> \` quote under its lead-in, even though your prompt carries no plan. No such section: the task's last own call
+was not plan-gated. The brief is the contract: a deviation from this plan that the PR body declares
+(a step-back revise may make one) stands, and your resolution never undoes it.${history}
 
 PRs that landed on origin/${def} since the task's base ${I.taskBase}:
 ${landedBlock(a, task, I)}

@@ -889,7 +889,7 @@ function agentPrompts(E) {
   const ar = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
   const I = {
     prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
-    landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }], plan: 'PLAN',
+    landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }],
     reviewHistory: [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }], reviewRoundsUsed: 2,
     rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] },
   }
@@ -993,7 +993,7 @@ function agentPrompts(E) {
   const arB = { ...ar, knownBaselineFailures: ['t — env'] }
   const I = {
     prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
-    landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }], plan: 'PLAN',
+    landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }],
     reviewHistory: [{ round: 1, feedback: ['fix it'] }], reviewRoundsUsed: 1,
     rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [] },
   }
@@ -1068,7 +1068,7 @@ function agentPrompts(E) {
   const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
   const I = {
     prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
-    landed: [], plan: 'PLAN', reviewHistory: [{ round: 1, feedback: ['fix it'] }], reviewRoundsUsed: 1,
+    landed: [], reviewHistory: [{ round: 1, feedback: ['fix it'] }], reviewRoundsUsed: 1,
     rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [] },
   }
   const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }
