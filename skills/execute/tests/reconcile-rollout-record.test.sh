@@ -29,8 +29,11 @@ unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR
 EV="$TMP/events"
 export THREAD_EVENTS_DIR="$EV"   # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_GIT_ENV_DIR="$TMP/git-env"  # mark-started's canary arm (p26-3) keeps its records in temp
-V="$TMP/vault"; J="$TMP/journals"
+# J is a session's workflows/ dir; bind-run accepts it while a call is in flight because the session holds that
+# run's transcript dir, subagents/workflows/<runId>/, which the Workflow tool creates at launch (p27-3).
+V="$TMP/vault"; SESS="$TMP/sess"; J="$SESS/workflows"
 mkdir -p "$V" "$J" "$EV"
+for r in wf_a1 wf_d1 wf_d2 wf_e1 wf_r1 wf_r2 wf_c1; do mkdir -p "$SESS/subagents/workflows/$r"; done
 NOW=2026-10-05T10:00:00Z
 PR=https://github.com/o/r/pull
 A40=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; B40=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; C40=cccccccccccccccccccccccccccccccccccccccc
@@ -245,6 +248,41 @@ mkdir -p "$TMP/cfg/projects/-proj"; : > "$TMP/cfg/projects/-proj/sess-1.jsonl"
 ok "$(CLAUDE_CONFIG_DIR="$TMP/cfg" CLAUDE_CODE_SESSION_ID=sess-1 rrs bind-run --tasks x --run-id wf_r3 --call integrate --tasks-dir "$V" --dry-run)" \
   "x: run-bound wf_r3 call=integrate journalDir=$TMP/cfg/projects/-proj/sess-1/workflows (dry-run)" "journalDir derived from the session's transcript"
 ok "$(since ro "$M")" "" "refusals and a dry-run record nothing"
+
+echo "== 9b. bind-run refuses a --journal-dir with no journal and no run subdir (p27-3)"
+mkro bj
+mkt bt bj review "pr: $PR/90" "ready: 2026-10-05T09:00+00:00"
+rrs mark-integrating --tasks bt --tasks-dir "$V" --now "$NOW" >/dev/null
+TD="$SESS/subagents/workflows/wf_bj1"; mkdir -p "$TD"; : > "$TD/journal.jsonl"
+M=$(cnt bj)
+out=$(rrs bind-run --tasks bt --run-id wf_bj1 --call integrate --journal-dir "$TD" --tasks-dir "$V" 2>&1); rc=$?
+ok "$rc" 1 "the Workflow tool's Transcript dir is refused (exit 1)"
+has "$out" "ERROR: bind-run: bt: --journal-dir $TD holds no wf_bj1.json" "the refusal names the dir and the journal it lacks"
+has "$out" "pass the session's workflows/ dir, $J" "the refusal names the session's workflows/ dir"
+ok "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" 1 "one ERROR line"
+out=$(rrs bind-run --tasks bt --run-id wf_bj1 --call integrate --journal-dir "$SESS/subagents/workflows" --tasks-dir "$V" 2>&1); rc=$?
+ok "$rc" 1 "the Transcript dir's parent, subagents/workflows/, is refused too"
+has "$out" "pass the session's workflows/ dir, $J" "and names the session's workflows/ dir"
+mkdir -p "$TMP/elsewhere"
+out=$(rrs bind-run --tasks bt --run-id wf_bj1 --call integrate --journal-dir "$TMP/elsewhere" --tasks-dir "$V" 2>&1); rc=$?
+ok "$rc" 1 "a dir that holds no journal and whose session holds no run subdir is refused"
+has "$out" "pass the session's workflows/ dir" "and points at the workflows/ dir"
+ok "$(rrs bind-run --tasks bt --run-id wf_bj9 --call integrate --journal-dir "$J" --tasks-dir "$V" 2>/dev/null; echo $?)" 1 \
+  "the workflows/ dir is refused for a runId the session never launched"
+ok "$(rrs bind-run --tasks bt --run-id wf_bj1 --call integrate --journal-dir "$TMP/missing" --tasks-dir "$V" 2>/dev/null; echo $?)" 1 \
+  "a dir that does not exist is refused"
+ok "$(since bj "$M")" "" "the refusals record nothing"
+ok "$(rrs bind-run --tasks bt --run-id wf_bj1 --call integrate --journal-dir "$J/" --tasks-dir "$V" --now "$NOW")" \
+  "bt: run-bound wf_bj1 call=integrate journalDir=$J" "the session's workflows/ dir is accepted while the call is in flight"
+ok "$(since bj "$M" '[d["runId"], d["journalDir"], d["call"]]')" "[\"wf_bj1\",\"$J\",\"integrate\"]" "run-bound records the workflows/ dir"
+mkdir -p "$TMP/landed"
+python3 -c 'import json, sys; json.dump({"runId": "wf_bj2", "status": "completed"}, open(sys.argv[1], "w"))' "$TMP/landed/wf_bj2.json"
+ok "$(rrs bind-run --tasks bt --run-id wf_bj2 --call integrate --journal-dir "$TMP/landed" --tasks-dir "$V" --dry-run)" \
+  "bt: run-bound wf_bj2 call=integrate journalDir=$TMP/landed (dry-run)" "a dir that holds <runId>.json is accepted"
+python3 -c 'import json, sys; json.dump({"runId": "wf_bj1", "status": "completed", "totalTokens": 4321, "durationMs": 9000, "agentCount": 2, "args": {}}, open(sys.argv[1], "w"))' "$J/wf_bj1.json"
+out=$(rrs fold-journals --rollout bj 2>&1)
+has "$out" "folded wf_bj1 [[bt]] integrate status=completed tokens=4321 durationMs=9000 agents=2" "fold-journals folds the call once its journal lands"
+has "$out" "fold-journals: bj: 1 folded, 0 already folded, 0 unchanged, 0 warnings" "no journal warning"
 
 echo "== 10. a rejected integrate row -> lane-freed(reject) only"
 M=$(cnt ro)
