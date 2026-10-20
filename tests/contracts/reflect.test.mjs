@@ -13,9 +13,11 @@
 // reflections.jsonl; its trace list names the grills a mid-run ask is traced to, in full form; it reads what moved an
 // unrecorded set-aside from what its `explainedIn` names, the standing approval reported and a sign-off traced (p22-7);
 // Lachy's no is recorded; a held trade reaches the decision task, once per (knob id, from), and a yes that cannot
-// apply is answered `moot` (p22-7, w16); step 15 names `{}` for a week with no recurring Watch (p22-7, w15); and the
-// decision task stays out of schedule § 1, the reshuffle's R1 and orient § 7's serial rollout, listed by orient
-// § 2 (the `weekly` rule).
+// apply is answered `moot` (p22-7, w16); step 15 names `{}` for a week with no recurring Watch (p22-7, w15); step 11
+// reads the Grade log's `grades` block against readiness-grade.md and never as a knob, step 17 reports the grade
+// accuracy, and § What the record cannot show names the constants with no measure (p25-4, w17); and the decision task
+// stays out of schedule § 1, the reshuffle's R1 and orient § 7's serial rollout, listed by orient § 2 (the `weekly`
+// rule).
 //
 // One pure function, check(files), over { name: text } plus `tree` (the paths under skills/) and `rest` ({ relPath:
 // text } of every other file the retired-name scan reads): the real files and the controls run through it, and each
@@ -212,10 +214,15 @@ const TRADE_S14 = 'step 15\'s `decide` puts it in the decision task'
 const TRADE_S15 = 'A held trade is listed once per (knob id, `from`)'
 const TRADE_DEC = ['**A yes to a trade**', 'step 7\'s `--pick` applies it', '**A yes that cannot apply**', 'The item is answered, moot',
   'A moot trade is not decided', 'Its `- trade` line is the record']
+// Step 11's grade accuracy (p25-4, w17): the block, its headline and the grading rules it traces to, never a knob.
+const GRADE_S11 = ['Read `span.json`\'s `grades`', '`window.readyHandsOff`', '`${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`',
+  'never a knob: the grading constants are no operator setting']
+const GRADE_S17 = 'the grade accuracy (the Ready headline'
+const GRADE_CANNOT = ['`DECISION_MINUTES`', '`REVIEW_MINUTES`']
 const WEEKLY_ORDER = [/reflect\.py span /, /reflect\.py watch /, /reflect\.py bug /, /tune\.py\b.*--revert /, /tune\.py\b.*--auto /,
   /reflect\.py knobs /, /reflect\.py decide /, /reflect\.py close /]
 
-// The weekly clauses that fail (w1..w16; w15 and w16 are p22-7's), [] when all hold.
+// The weekly clauses that fail (w1..w17; w15 and w16 are p22-7's, w17 p25-4's), [] when all hold.
 function weeklyFails(files) {
   const s = files.skill
   const out = []
@@ -257,6 +264,8 @@ function weeklyFails(files) {
   const decFenced = fencedLines(sectionOf(s, /^## Deciding the decision task$/))
   if (!collapse(sectionOf(s, /^### 14\. /)).includes(TRADE_S14) || !s15.includes(TRADE_S15) || !TRADE_DEC.every((n) => dec.includes(n)) ||
     !decFenced.some((l) => l.startsWith(`${PY}moot --task`))) out.push('w16')
+  if (!GRADE_S11.every((n) => s11.includes(n)) || !collapse(sectionOf(s, /^### 17\. /)).includes(GRADE_S17) ||
+    !GRADE_CANNOT.every((n) => cannot.includes(n))) out.push('w17')
   return out
 }
 
@@ -627,6 +636,13 @@ test('control: a held trade unnamed in step 14, not listed once in step 15, or u
   weekly('skill:s15', cut('skill', TRADE_S15, 'A held trade is listed'), 'w16')
   for (const n of TRADE_DEC) weekly(`skill:${n}`, cut('skill', n, 'x'), 'w16')
   weekly('skill:fence', swap('skill', `${PY}moot --task`, `${PY}moot-trade --task`), 'w16')
+})
+
+test('control: step 11 tracing grade accuracy as a knob or with no grades block, step 17 without it, or the constants\' cannot-show line gone, fails weekly (w17)', () => {
+  weekly('skill', cut('skill', 'never a knob: the grading constants are no operator setting', 'or a knob'), 'w17')
+  weekly('skill:block', cut('skill', 'Read `span.json`\'s `grades`', 'Read the grades'), 'w17')
+  weekly('skill:s17', cut('skill', `${GRADE_S17}, each grade's rate in \`window\` and \`all\`, the \`bySize\` readout and each grade trace),`, ''), 'w17')
+  weekly('skill:cannot', cut('skill', '(`DECISION_MINUTES`, `REVIEW_MINUTES`)', ''), 'w17')
 })
 
 test('control: § Deciding the decision task without --declined, its cycle close or its done rule, fails weekly (w14)', () => {

@@ -242,7 +242,7 @@ function readersOf(text) {
 }
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
   'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE',
-  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py']
+  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py', 'grades.py']
 const NOT_ADOPTED = []
 
 // The names of the failed § Readers checks; [] when every conforming reader is listed as such and, with

@@ -129,7 +129,12 @@ half of a Reflection at each rollout's close (fold, settings, score,
 script half and is the only writer of `reflections.jsonl` and of the bug and
 decision tasks. `skills/reflect/scripts/reflect-due.py` tells the daily sweep
 when the weekly reading is due: 7 days after the last one, 14 after three quiet
-Reflections in a row (ADR 0037 d4, d6).
+Reflections in a row (ADR 0037 d4, d6). The Grade log (`grades.jsonl` beside the
+Run record, ADR 0041) has one writer, `estate-dispatch.py log`, which keeps each
+estate pass's grades (a task whose note name is no slug, with spaces or
+capitals, is skipped and reported in its outcome line, and the rest are still
+logged), and one reader, `skills/reflect/scripts/grades.py`, which the weekly
+reading loads to join each grade to what followed it.
 
 ## Design
 
@@ -315,6 +320,9 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   the bug and decision tasks never written over, Lachy's recorded no, the close and the rung),
   `tests/reflect-due.test.mjs` (`reflect-due.py` on fixture records: due at day 7 and not day 6, three quiet
   Reflections to the 14-day cadence and a non-quiet one back to 7, and the cadence `close` writes),
+  `tests/reflect-grades.test.mjs` (`grades.py` on fixture grade lines, records and notes: each grade's episode to the
+  next grade or the close, dispatch by record or by link, foreseen sign-offs, every outcome and the hands-off rate's
+  denominator, window against all, and Slot hours per size),
   `tests/contracts/reflect.test.mjs` (the verb's wiring, every close scoring its rollout, its
   SKILL's order and triggers, and the retired name staying gone) and `tests/contracts/escapes-fixes-key.test.mjs` (every
   writer of a fix of landed work adds `fixes:`, and the Reflection presents Quality).
@@ -358,8 +366,10 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   (decided, unheld members only, each with every dependency it needs scheduled and every why read against the final
   schedule, blockers, shared roots and parked runs waiting, batches that keep names that may meet apart, each live
   rollout's holds and the signed reinstate), `sessions` (written notes, the status allow-list
-  behind the holds, orients last) and `record` (the answer folded to one line into `## Decisions (asked ahead
-  <date>)`, the fork's ruling, every refusal byte-identical), usage exits, byte-equal reruns and read-only runs;
+  behind the holds, orients last), `record` (the answer folded to one line into `## Decisions (asked ahead
+  <date>)`, the fork's ruling, every refusal byte-identical) and `log` (one grade line per graded task under one pass,
+  a rerun `exists`, a half-written pass completed, refusals that write nothing), usage exits, byte-equal reruns and
+  read-only runs;
   `tests/contracts/orient-all.test.mjs` pins `skills/orient-all/SKILL.md` to the script, to schedule's answered
   questions and to status § 4's numbered actions.
 - **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos

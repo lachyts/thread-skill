@@ -79,6 +79,9 @@ no stamp; `started:` and `started_unattended:` are other keys.
 - `skills/reflect/scripts/reflect.py` `bug`, `decide`, `close` and `moot`: reconcile-project.py's `LANDED` and its
   status read (`Rec.status`), loaded, so an open task and a done one are told apart as everywhere else; decide and
   close count only done and merged as deciding a held trade (`DECIDED`, LANDED less dropped).
+- `skills/reflect/scripts/grades.py` (the Grade log's reader): Landed through reconcile-project.py's `LANDED` and
+  `Rec.status`, loaded, not copied: `done` and `merged` land a graded task and `dropped` drops it; any other status
+  leaves its latest grade open.
 - `skills/close/scripts/repo-track.sh`: `active` (Active), read as reconcile-project's `Rec.status` reads
   it (a matched `'…'` or `"…"` pair stripped, as `_unq` does, then lower-cased with `-` as `_`). Close
   step 2's tracked-task search prose and its edge-case bullet (`skills/close/SKILL.md`) read Active the

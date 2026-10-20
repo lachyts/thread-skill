@@ -1,6 +1,6 @@
 // skills/reflect/scripts/reflect.py — the weekly reading's script half (p21-7, ADR 0037 d3-d5): span reads every
 // rollout with a line in the window (score.py per rollout, the friction, the Escapes sweep over every record, the knob
-// candidates); watch, raised, bug, knobs, decide and close write reflections.jsonl (and the bug and decision tasks);
+// candidates, and the Grade log joined to outcomes through grades.py, whose own suite is tests/reflect-grades.test.mjs); watch, raised, bug, knobs, decide and close write reflections.jsonl (and the bug and decision tasks);
 // rung reads the ladder. Every rule lives in reflect.py's docstring and run_record.py's; this pins the behaviour.
 //
 // Hermetic: each case gets its own mkdtemp HOME, THREAD_EVENTS_DIR and tasks dir (with Archive/2026/ and
@@ -141,10 +141,11 @@ const entryOf = (s, slug) => s.rollouts.find((r) => r.rollout === slug)
 // A span.json written by hand in span's shape (the writers read reflection, since, until and rollouts only, plus
 // knobs for `knobs`).
 let spanN = 0
-function fakeSpan(h, rid, rollouts, { since = '2026-09-03T14:00:00.000Z', until = '2026-09-10T14:00:00.000Z', knobs = { revert: [], land: [], held: [] }, entries = {} } = {}) {
+function fakeSpan(h, rid, rollouts, { since = '2026-09-03T14:00:00.000Z', until = '2026-09-10T14:00:00.000Z', knobs = { revert: [], land: [], held: [] }, entries = {}, grades } = {}) {
   const p = path.join(h.out, `span-${++spanN}.json`)
   fs.writeFileSync(p, JSON.stringify({ reflection: rid, since, until, previous: null, knobs,
-    rollouts: rollouts.map((r) => ({ rollout: r, mode: 'read', repo: 'o/r', breached: [], breachCounts: false, proposals: [], friction: [], ...(entries[r] || {}) })) }))
+    rollouts: rollouts.map((r) => ({ rollout: r, mode: 'read', repo: 'o/r', breached: [], breachCounts: false, proposals: [], friction: [], ...(entries[r] || {}) })),
+    ...(grades ? { grades } : {}) }))
   return p
 }
 const RID = (n) => `r-2026090${n}T000000Z-00000${n}`
@@ -159,7 +160,7 @@ test('reflect.py parses as python 3.9 and imports nothing outside the stdlib and
 test('span: the default since is the last reflection line\'s until, else until - 7 days; a future until is clamped; reserved files are no rollouts', (t) => {
   const h = setup(t)
   emitAll(h, 'demo', byTs(life('a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
-  for (const f of ['reviews.jsonl', 'tunings.jsonl']) fs.writeFileSync(path.join(h.ev, f), '{"v":1,"ts":"2026-09-04T00:00:00.000Z","kind":"x"}\n')
+  for (const f of ['reviews.jsonl', 'tunings.jsonl', 'grades.jsonl']) fs.writeFileSync(path.join(h.ev, f), '{"v":1,"ts":"2026-09-04T00:00:00.000Z","kind":"x"}\n')
   rolloutNote(h, 'demo')
   const s = span(h, [], { since: null })
   assert.equal(s.until, '2026-09-09T14:00:00.000Z')
@@ -334,6 +335,40 @@ test('span: an ask on a task that has not landed by until is an item, read strai
   // next week: later lands, and its ask (before since) is not read again
   const s2 = span(h, [], { since: UNTIL, until: '2026-09-17T00:00+10:00' })
   assert.deepEqual(asks(s2), [])
+})
+
+// The Grade log (p25-4): span joins grades.jsonl to the outcomes (grades.py) and writes the block as `grades`; an ask
+// carries the grade in force for its task at the act, null for a task never graded.
+test('span: grades carries the Grade log joined to outcomes, readyHandsOff first; an ask carries its task\'s grade, null when never graded', (t) => {
+  const h = setup(t)
+  const G = (task, ts, pass, f = {}) => [ts, 'grade', task, { pass, digest: '0123456789ab', project: 'P', grade: 'Ready',
+    agentGrade: 'Ready', shape: 'parallel', size: 'S', decisions: 0, low: 0, held: false, gates: [], ...f }, null]
+  const P1 = 'g-20260903T000000Z-000001'
+  emitAll(h, 'demo', byTs([
+    ...life('a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] }),
+    ...life('b', W(4, '02:00'), W(4, '03:00'), { lane: [W(4, '03:00'), W(4, '03:10')] }),
+    [W(4, '02:30'), 'answer-recorded', 'b', { answerKind: 'decision' }],
+    ...life('u', W(5, '00:00'), W(5, '01:00')),
+    [W(5, '00:30'), 'answer-recorded', 'u', { answerKind: 'decision' }],
+  ]))
+  emitAll(h, null, [G('a', W(3, '00:00'), P1), G('b', W(3, '00:00'), P1),
+    G('b', W(4, '02:40'), 'g-20260904T024000Z-000002', { grade: 'One call', decisions: 1 })])
+  rolloutNote(h, 'demo')
+  for (const slug of ['a', 'b']) taskNote(h, slug, { status: 'done' })
+  const s = span(h)
+  assert.deepEqual(s.grades.window.readyHandsOff, { rate: 0.5, handsOff: 1, dispatched: 2 })
+  const outcomes = Object.fromEntries(s.grades.episodes.map((e) => [`${e.task}/${e.grade}`, [e.outcome, e.rollouts]]))
+  assert.deepEqual(outcomes, { 'a/Ready': ['hands-off', ['demo']], 'b/Ready': ['bounced', ['demo']], 'b/One call': ['hands-off', ['demo']] })
+  const asks = entryOf(s, 'demo').friction.filter((x) => x.kind === 'ask')
+  assert.deepEqual(asks.map((x) => [x.task, x.grade && x.grade.grade]), [['b', 'Ready'], ['u', null]])
+  assert.deepEqual(asks[0].grade, { grade: 'Ready', agentGrade: 'Ready', raised: [], gates: [], pass: P1 })
+  assert.ok(!s.flags.some((f) => f.startsWith('grades: ')), JSON.stringify(s.flags))
+  // no grades.jsonl: an empty block and the flag, and span goes on
+  fs.rmSync(path.join(h.ev, 'grades.jsonl'))
+  const bare = span(h)
+  assert.ok(bare.flags.includes('grades: no grade log'), JSON.stringify(bare.flags))
+  assert.deepEqual([bare.grades.episodes, bare.grades.window.readyHandsOff.rate], [[], null])
+  assert.equal(entryOf(bare, 'demo').friction.find((x) => x.kind === 'ask').grade, null)
 })
 
 test('span: a missing note is scored by slug and flagged; without --fold the events and tasks dirs are unchanged', (t) => {
@@ -559,6 +594,28 @@ test('watch: one line naming both rollouts; a rollout outside the span is exit 2
   const out = reflect(h, watchArgs(sp, ['zzz']))
   assert.equal(out.status, 2)
   assert.match(out.stderr, /^reflect: rollout zzz is not in the span \(a, b\)\n$/)
+  assert.equal(rlines(h).length, 1)
+})
+
+// A grade miss is watched where it ran (p25-4): an in-window grade episode's rollouts are watch's to name, read in the
+// span or not (a serial chain dispatched by link, a regraded task's earlier run); an out-of-window episode's are not,
+// and bug, which a grade miss never becomes, takes the read rollouts alone.
+test('watch: a rollout an in-window grade episode lists is accepted though the span did not read it; bug still refuses it', (t) => {
+  const h = setup(t)
+  const [wid] = ids(h, [['w', 'readiness-grade.md § The grade', 'a Ready serial chain bounced']])
+  const ep = (task, rollouts, inWindow = true) => ({ task, grade: 'Ready', outcome: 'regraded', dispatchedBy: 'link', rollouts, inWindow })
+  const sp = fakeSpan(h, RID(1), ['a'], { grades: { episodes: [ep('t1', ['chain-x']), ep('t2', ['old-y'], false)] } })
+  const args = (rollouts) => watchArgs(sp, rollouts, { rule: 'readiness-grade.md § The grade', shape: 'a Ready serial chain bounced' })
+  const r = ok(h, args(['a', '[[chain-x]]']))
+  assert.equal(r.stdout, `watched ${wid} (a, chain-x): readiness-grade.md § The grade\n`)
+  assert.deepEqual(rlines(h).map((l) => l.rollouts), [['a', 'chain-x']])
+  const out = reflect(h, args(['old-y']))
+  assert.equal(out.status, 2, 'an episode outside the window lists nothing watch takes')
+  assert.equal(out.stderr, 'reflect: rollout old-y is not in the span (a, chain-x)\n')
+  const bug = reflect(h, ['bug', '--span', sp, '--rule', 'readiness-grade.md § The grade', '--shape', 'x', '--slug', 'grade-miss',
+    '--title', 'Thread Skill: x', '--why', 'w', '--rollout', 'chain-x', '--tasks-dir', h.tasks])
+  assert.equal(bug.status, 2)
+  assert.equal(bug.stderr, 'reflect: rollout chain-x is not in the span (a)\n')
   assert.equal(rlines(h).length, 1)
 })
 

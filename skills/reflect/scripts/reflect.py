@@ -67,8 +67,9 @@ r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in th
             handed-back via retry (retry) and race-decided (raceDecided), each with score.py's human_act() detail;
             and each merge hold (mergeHold) and git-env hold (gitEnvHold, task null), at the hold-started that opens
             it (holds paired as score.py pairs them). Each carries askedAhead (the task note holds a `## Decisions
-            (asked ahead` section or an `asked ahead at schedule` gate) and needsYou (its `## Needs you`, at most 600
-            characters).
+            (asked ahead` section or an `asked ahead at schedule` gate), needsYou (its `## Needs you`, at most 600
+            characters) and grade: the Grade log's line in force for the task at the act (grades.py's Log.at:
+            {grade, agentGrade, raised, gates, pass}), null with no task or no grade line before it.
   set-aside a set-aside line in the window: stage, reasonClass, setAsideAt, taskNote (Work/Tasks, then Archive, or
             null) and movedBy, the first later event of auto-retry, handed-back (with its via), answer-recorded,
             gate-signed, race-decided, carried, slot-taken, lane-taken or merged; `unrecorded` when a slot-taken,
@@ -107,6 +108,12 @@ r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in th
   or a knob: escapes-only when the sweep traced an in-window Escape to it, else repairs-only when its rollout note
   holds an in-window repair line; either carries both kinds it holds. A repair line on a rollout with no Run record is
   not read, and cannotShow says so.
+- grades: the Grade log joined to outcomes (p25-4, ADR 0041; skills/reflect/scripts/grades.py, loaded by path, whose
+  docstring holds every rule: each grade line's episode, which runs to the task's next grade line or its close; whether
+  it was dispatched; its acts; its outcome; each grade's hands-off rate over [since, until] (`window`) and over every
+  closed episode (`all`); and Slot hours per size). It reads grades.jsonl once (its flags prefixed `grades: `, its gaps
+  in cannotShow), every record span lists and each graded task's note, and never stops the span: no grades.jsonl is an
+  empty block and the flag `grades: no grade log`.
 - knobs: revert[] (each non-voided, un-reverted auto tunings line that is no revert, paired with a read non-partial
   rollout of its repo that passes tune.py's revert_check), land[] (the proposals of a repo's newest non-partial read
   rollout that pass tune.py's auto_check, over the same reflections.jsonl read and the same agreement as tune.py, and
@@ -116,10 +123,14 @@ root, repo, status, closeLine, score, window, partial, headline{handsOffRate, qu
 breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[]}], freshReview[] (/fresh-review
 rounds in the window with regression > 0, reported only: reviews.jsonl names no rollout), watches[] (every open Watch:
 rule, shape, rollouts, count, recurring, stale, new, declinedBefore, lastSeen), knobs{revert, land, held}, bugsOpen[],
-decisionTask, cannotShow[], flags[]}. stderr gets one summary line.
+decisionTask, grades (grades.py's block: log, window, all, pending, episodes), cannotShow[], flags[]}. stderr gets one
+summary line.
 
 watch. One `watch` line per (Reflection, Watch), naming every rollout where the reading saw it. id is run_record's
-watch_id(rule, shape); the line stores the stripped rule and shape. A rollout outside the span is exit 2. A repeat call
+watch_id(rule, shape); the line stores the stripped rule and shape. A rollout must be one the span read (its
+rollouts[]) or one an in-window grade episode lists (grades.episodes[].rollouts, grade_rollouts(): a grade miss's
+rollout, read this week or not, as a serial chain dispatched by link or a regraded task's earlier run); any other is
+exit 2. A grade trace whose episodes list no rollout is reported, never a Watch (SKILL.md § 11). A repeat call
 for an id this Reflection already holds compares its rollouts with that Reflection's latest line for the id: the same
 set prints `exists <id>` and writes nothing (whatever --count); a strict superset writes ONE extending line naming the
 union and prints `extended <id>: +<new>`; any other set is exit 2, naming both sets and their union to re-run with.
@@ -137,7 +148,8 @@ of them closes the Watch's cycle, so a declined pattern returns only when two la
 an id with no open Watch (unknown, or closed by another line: `Watch <id> was closed by Reflection <rid> (<via>)`), or
 a plain raise of a one-rollout Watch. A repeat whose cycle that same reflection and via closed prints `exists <id>`.
 
-bug. The key is watch_id(rule, shape); the rollouts must be in the span; --slug is one to five kebab words, none
+bug. The key is watch_id(rule, shape); the rollouts must be ones the span read (a grade episode's alone is refused: a
+grade miss is a Watch or a rule, never a bug); --slug is one to five kebab words, none
 starting reflect or call. Dedupe first: an open task directly under Work/Tasks (status not Landed; a note with no
 frontmatter is skipped and flagged) carrying `bug_key: <key>`. If its `## Notes` holds `Found by Reflection <this
 id>` the line records filed: true (a re-run after a failed line write); otherwise it prints `exists <slug>` and the
@@ -309,6 +321,7 @@ RS = _load("thread_rollout_settings", os.path.join(SHARED, "rollout-settings.py"
 SCORE = _load("thread_score", SCORE_PY)
 TUNE = _load("thread_tune", os.path.join(HERE, "tune.py"))
 ESC = _load("thread_escapes", os.path.join(HERE, "escapes.py"))
+GR = _load("thread_grades", os.path.join(HERE, "grades.py"))
 REC = _load("thread_reconcile_rollout", RECONCILE_PY)
 RP = _load("thread_reconcile_project", os.path.join(SHARED, "reconcile-project.py"))
 LADDER = _load("thread_ladder", os.path.join(SHARED, "ladder.py"))
@@ -662,6 +675,7 @@ class Span:
         self.out_dir = os.path.dirname(os.path.abspath(expand(a.out)))
         self.origins = {}
         self.genv = git_env()
+        self.grade_log = None  # grades.py's Log, read once in run()
 
     def flag(self, text):
         if text not in self.flags:
@@ -850,7 +864,7 @@ class Span:
                 if (hold, task) not in holding:
                     holding.add((hold, task))
                     if inside:
-                        items.append(self.ask(slug, task, fmt(t), *HOLD_ASKS[hold]))
+                        items.append(self.ask(slug, task, t, *HOLD_ASKS[hold]))
             elif kind == "hold-ended":
                 holding.discard((hold, task))
             elif kind == "lane-freed" and task:
@@ -860,7 +874,7 @@ class Span:
             elif inside and task and kind in SCORE.ACT_KINDS:
                 act = SCORE.human_act(kind, d)
                 if act is not None:
-                    items.append(self.ask(slug, task, fmt(t), act[0], act[1]))
+                    items.append(self.ask(slug, task, t, act[0], act[1]))
         for i, (t, n, d) in enumerate(lines):
             if not since <= t <= until:
                 continue
@@ -928,8 +942,10 @@ class Span:
         return out
 
     def ask(self, slug, task, at, act, detail):
-        item = {"kind": "ask", "rollout": slug, "task": task, "at": at, "act": act, "detail": detail,
-                "askedAhead": False, "needsYou": None}
+        """An `ask` friction item for the act at `at` (ms), with the grade in force for its task then."""
+        grade = self.grade_log.at(task, at) if task and self.grade_log is not None else None
+        item = {"kind": "ask", "rollout": slug, "task": task, "at": fmt(at), "act": act, "detail": detail,
+                "askedAhead": False, "needsYou": None, "grade": grade}
         p = self.task_note(task)
         note = read_note(p) if p else None
         if note is not None:
@@ -1217,6 +1233,24 @@ class Span:
         except (OSError, ValueError, KeyError, TypeError):
             return {}
 
+    # -- grade accuracy (p25-4) ---------------------------------------------------------------------------------------
+
+    def grades(self, records, since, until):
+        """grades.py's block over every record: its flags prefixed `grades: `, its gaps in cannotShow. Never stops the
+        span: a fault in the join is a flag and an empty block."""
+        try:
+            out, flags, cannot = GR.accuracy(self.grade_log, records, self.vault.find, date_in, mdate, since, until)
+        except Stop:
+            raise
+        except Exception as e:
+            out, flags, cannot = GR.block(self.grade_log), ["grade accuracy failed (%s: %s): an empty block"
+                                                            % (type(e).__name__, e)], []
+        for f in flags:
+            self.flag("grades: %s" % f)
+        for c in cannot:
+            self.cannot_show(c)
+        return out
+
     # -- the whole span -------------------------------------------------------------------------------------------------
 
     def run(self):
@@ -1232,6 +1266,7 @@ class Span:
         except OSError as e:
             raise Stop("cannot make %s: %s" % (self.out_dir, e), 1)
         records = self.records(ev)
+        self.grade_log = GR.load(ev)
         tunings_file = os.path.join(ev, RR.TUNINGS + ".jsonl")
         read, scores, entries = {}, {}, []
         for slug in sorted(records):
@@ -1274,10 +1309,11 @@ class Span:
                 bugs.append({"slug": p.stem, "bug_key": rec.scalar("bug_key"), "status": rec.status})
             if "decisions" in rec.tags and decision is None:
                 decision = {"slug": p.stem, "scheduled": rec.scalar("scheduled") or None, "status": rec.status}
+        grades = self.grades(records, since, until)
         doc = {"reflection": rid, "since": fmt(since), "until": fmt(until), "previous": previous,
                "rollouts": entries, "freshReview": fresh,
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
-               "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "cannotShow": self.cannot,
+               "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "cannotShow": self.cannot,
                "flags": self.flags}
         out = expand(self.a.out)
         try:
@@ -1296,8 +1332,17 @@ class Span:
 
 # ---- the writers -------------------------------------------------------------------------------------------------
 
-def norm_rollouts(values, span):
-    allowed = span_rollouts(span)
+def grade_rollouts(span):
+    """The rollouts an in-window grade episode lists (grades.py's episodes[].rollouts): where a grade miss ran, read in
+    the span or not, so `watch` can name it."""
+    grades = span.get("grades") if isinstance(span.get("grades"), dict) else {}
+    eps = grades.get("episodes") if isinstance(grades.get("episodes"), list) else []
+    return {r for e in eps if isinstance(e, dict) and e.get("inWindow") is True
+            for r in (e.get("rollouts") if isinstance(e.get("rollouts"), list) else []) if isinstance(r, str)}
+
+
+def norm_rollouts(values, span, graded=False):
+    allowed = span_rollouts(span) | (grade_rollouts(span) if graded else set())
     out = []
     for v in values:
         try:
@@ -1314,7 +1359,7 @@ def norm_rollouts(values, span):
 def cmd_watch(a):
     span = read_span(a.span)
     rid = span["reflection"]
-    rollouts = norm_rollouts(a.rollout, span)
+    rollouts = norm_rollouts(a.rollout, span, graded=True)
     rule, shape = a.rule.strip(), a.shape.strip()
     wid = RR.watch_id(rule, shape)
     lines = read_reflections()

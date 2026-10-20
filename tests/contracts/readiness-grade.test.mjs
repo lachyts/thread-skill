@@ -1,11 +1,11 @@
 // The Readiness grade's prose contract (p25-2; ADR 0041): skills/_shared/readiness-grade.md is the grading agents'
 // brief and the ranking's prose, skills/_shared/scripts/estate-rank.py does the deterministic half, and CONTEXT.md
-// words the terms. Eight rules pin them to each other:
+// words the terms. Nine rules pin them to each other:
 //   c1  the doc's twelve `##` headings, in order (orient-all's SKILL.md and this test cite them).
 //   c2  the grade names agree three ways: the doc's § The grade bullets, the script's GRADES and the bold names in
 //       CONTEXT.md **Readiness grade**.
 //   c3  § The ranking's `| Constant | Value |` table equals the script's constants, name for name and value for value
-//       (p25-4's grade log and the weekly Reflection tune them in one place).
+//       (a change the weekly Reflection's grade accuracy calls for lands in one place).
 //   c4  § The Unpark offer names both SNOOZE_KEYS and SNOOZE_DAYS, the writer's `snooze <project> --clear` and its
 //       sibling `unpark <project>` and `kill <project>` writes, which clear both keys in the same save as their status
 //       write (a re-parked project must not come back snoozed), each accepted by the script's own parser; GATE_KINDS
@@ -20,8 +20,12 @@
 //   c7  CONTEXT.md has **Ranked slate**, and **Readiness grade** says low confidence raises the grade (no scan-only
 //       first pass).
 //   c8  § Dependencies names every `blockedBy` why the script can emit, its HOLD_WHYS.
+//   c9  the Grade log's enums (p25-4): run_record.py's GRADE_NAMES, GRADE_SHAPES, GRADE_SIZES and GRADE_GATES equal the
+//       script's GRADES, SHAPES, SIZE_MINUTES keys and GATE_KINDS (run_record stays at python 3.8 and loads no sibling,
+//       so it keeps its own copy).
 // One pure function, check(files, consts), returns the failing rules; the script's constants come from a python child
-// that loads estate-rank.py and gated_inputs.py by path (importing either runs no sibling and writes no bytecode).
+// that loads estate-rank.py, gated_inputs.py and run_record.py by path (importing each runs no sibling and writes no
+// bytecode).
 // Each control mutates one place and must fail exactly its rule. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -32,6 +36,7 @@ import { collapse, readIf, root, section, slice } from '../lib/contract-text.mjs
 const DOC = 'skills/_shared/readiness-grade.md'
 const SCRIPT = 'skills/_shared/scripts/estate-rank.py'
 const GATED = 'skills/_shared/scripts/gated_inputs.py'
+const RUN_RECORD = 'skills/_shared/scripts/run_record.py'
 const CONTEXT = 'CONTEXT.md'
 const ADR = 'docs/adr/0041-orient-all-runs-the-estate-pass.md'
 
@@ -51,7 +56,9 @@ def load(name, p):
     s.loader.exec_module(m)
     return m
 er, gi = load("thread_estate_rank", sys.argv[1]), load("thread_gated_inputs", sys.argv[2])
+rr = load("thread_run_record", sys.argv[4])
 out = {n: getattr(er, n) for n in json.loads(sys.argv[3])}
+out["runRecord"] = {n: list(getattr(rr, n)) for n in ("GRADE_NAMES", "GRADE_SHAPES", "GRADE_SIZES", "GRADE_GATES")}
 out["HOLD_WHYS"] = er.HOLD_WHYS
 out["sweepKeys"] = list(gi.sweep(""))
 for key, argv, want in (("clears", ["snooze", "p", "--clear"], "snooze"), ("unparks", ["unpark", "p"], "unpark"),
@@ -64,7 +71,7 @@ for key, argv, want in (("clears", ["snooze", "p", "--clear"], "snooze"), ("unpa
 print(json.dumps(out))
 `
 function constants() {
-  const r = spawnSync('python3', ['-c', PY, path.join(root, SCRIPT), path.join(root, GATED), JSON.stringify(CONSTANTS)],
+  const r = spawnSync('python3', ['-c', PY, path.join(root, SCRIPT), path.join(root, GATED), JSON.stringify(CONSTANTS), path.join(root, RUN_RECORD)],
     { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
   assert.equal(r.status, 0, r.stderr)
   return JSON.parse(r.stdout)
@@ -163,6 +170,13 @@ function check(files, consts) {
   if (!(consts.HOLD_WHYS ?? []).length) flag('c8', 'HOLD_WHYS is empty')
   for (const why of consts.HOLD_WHYS ?? []) if (!deps.includes(`\`${why}\``)) flag('c8', `§ Dependencies does not name \`${why}\``)
 
+  // c9: the Grade log's enums are the ranker's.
+  const rr = consts.runRecord ?? {}
+  for (const [mine, theirs] of [['GRADE_NAMES', consts.GRADES], ['GRADE_SHAPES', consts.SHAPES],
+    ['GRADE_SIZES', Object.keys(consts.SIZE_MINUTES ?? {})], ['GRADE_GATES', consts.GATE_KINDS]]) {
+    if (JSON.stringify(rr[mine]) !== JSON.stringify(theirs)) flag('c9', `run_record ${mine} ${JSON.stringify(rr[mine])} ≠ ${JSON.stringify(theirs)}`)
+  }
+
   return { fails: [...fails].sort(), details }
 }
 
@@ -184,7 +198,7 @@ const only = (files, consts, rules, what) => {
   assert.deepEqual(r.fails, rules, `${what}: ${r.details.join('\n')}`)
 }
 
-test('the doc, the script, CONTEXT.md and ADR 0041 agree (c1-c8)', () => {
+test('the doc, the script, CONTEXT.md and ADR 0041 agree (c1-c9)', () => {
   const r = check(FILES, CONSTS)
   assert.deepEqual(r.fails, [], r.details.join('\n'))
 })
@@ -227,4 +241,9 @@ test('control c7: CONTEXT.md without **Ranked slate** fails c7 alone', () => {
 
 test('control c8: a hold why the doc no longer names fails c8 alone', () => {
   only(swap(FILES, DOC, '`cycle`', '`loop`'), CONSTS, ['c8'], 'c8')
+})
+
+test('control c9: a grade size run_record knows and the ranker does not, or a gate kind it lacks, fails c9 alone', () => {
+  only(FILES, { ...CONSTS, runRecord: { ...CONSTS.runRecord, GRADE_SIZES: ['S', 'M', 'L', 'XL'] } }, ['c9'], 'c9 sizes')
+  only(FILES, { ...CONSTS, runRecord: { ...CONSTS.runRecord, GRADE_GATES: ['spend', 'credential'] } }, ['c9'], 'c9 gates')
 })

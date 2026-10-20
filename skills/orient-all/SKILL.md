@@ -20,6 +20,7 @@ itself when a router or `sed` reads it instead of the Skill tool rendering it) r
 - **Reads**: the vault, the repos (only through `estate-scan.py`'s read-only probes) and the Stage's session list.
 - **Writes**, only through scripts:
   - `estate-dispatch.py record`, each answer into its task note;
+  - `estate-dispatch.py log`, the grades into the Grade log (never on a dry run);
   - `estate-rank.py snooze`, `unpark` and `kill`, the Unpark offer's answers;
   - `reconcile-rollout.py approve-gates --tasks`, for a gate Lachy signs in this pass;
   - its schedule forks (§ 6), each one `/thread:schedule` run.
@@ -69,6 +70,11 @@ asks: its budget is `--budget`, else 30.
    `invalid[]`, is re-asked once with its errors; still invalid, it stays ungraded. A status answer with no number in
    1–13 is recorded as unread, and so is a serial chain's: its rule is one of status § 5's S rules, never a § 4 number.
 6. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan "$S/scan.json" --grades <each grades file> --compact > "$S/rank.json"`.
+7. Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank "$S/rank.json" --scan "$S/scan.json"`:
+   one line per graded task into the Grade log (CONTEXT.md **Grade log**), which the weekly Reflection reads against
+   what followed each grade. A task whose note name is no slug (spaces or capitals) is skipped, named on stderr and
+   counted in the outcome line (`; <k> skipped (not a slug): …`), and the rest are logged. A skip or a non-zero exit
+   is a § 8 caveat, and the pass goes on.
 
 ### 3. The Ranked slate
 
@@ -217,6 +223,7 @@ see it, and the orient prompt's second line names the note this pass wrote for t
 
 One message of statements, no question:
 
+- the grades logged: § 2 step 7's `logged`, `exists` or `completed` line, its skipped tasks as a caveat;
 - the decisions recorded, and those left for the next pass (`later[]`, `skipped[]`, a Grill stopped part-way);
 - the sign-offs, the bounced ones marked;
 - the unparks, snoozes and kills;
@@ -237,7 +244,7 @@ with no tool call and no question.
 
 ### 9. Dry run
 
-Runs §§ 2–3 with the budget, then
+Runs §§ 2–3 (not § 2 step 7) with the budget, then
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py plan --rank "$S/rank.json" --scan "$S/scan.json" --rounds "$S/rounds.json" --assume-answered > "$S/plan.json"`
 and `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan "$S/plan.json" --status <rollout>=<N>`,
 with no `--wrote`. It assumes every in-budget decision answered, nothing signed and nothing unparked.
@@ -246,8 +253,9 @@ It prints the slate (§ 3's glance), the decision batch (each AskUserQuestion ca
 and the dispatch plan: each batch's schedule args with the execute or Leg 1 each would start, then each item with
 its cwd and prompt, and `left[]`.
 
-It asks nothing, and writes only under `$S`. It never runs `record`, `approve-gates`, `estate-rank.py snooze`,
-`unpark` or `kill`, a schedule fork, `list_sessions`, `read_session`, `relay_session` or `create_thread`.
+It asks nothing, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `approve-gates`,
+`estate-rank.py snooze`, `unpark` or `kill`, a schedule fork, `list_sessions`, `read_session`, `relay_session` or
+`create_thread`.
 
 ## Don't
 

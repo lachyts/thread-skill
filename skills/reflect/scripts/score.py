@@ -13,8 +13,8 @@ the vault's task notes, as unfinished-rollout.py's and reconcile-rollout.py's do
 `~` read against the scored env's HOME). Both only feed the Escapes, below; without them those sources read unread.
 
 Reads: the rollout's record `<events dir>/<slug>.jsonl` (run_record.py's directory chain), every other
-`<slug>.jsonl` there for load (reviews.jsonl and tunings.jsonl are never read as rollouts, though reviews.jsonl is
-read for its /fresh-review rounds, Review churn below; only lines from the
+`<slug>.jsonl` there for load (the reserved files, run_record's RESERVED, are never read as rollouts, though
+reviews.jsonl is read for its /fresh-review rounds, Review churn below; only lines from the
 scored record's host count, and only where a record's live span overlaps this run's running time, not the window, so
 a Reflection run long after the rollout never counts a later rollout; the live span runs to its last line or, while a
 Slot it took is open, to --until, flagged, so a busy rollout whose long calls write nothing still counts), tunings.jsonl for the baseline, earlier
