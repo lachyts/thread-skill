@@ -222,6 +222,17 @@ for (const [name, args] of REFUSALS) {
   })
 }
 
+test('idle-slots (p28-1): a hold-trickle reason is accepted; an unknown reason is still refused', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-trickle', free: 3, settings: SETTINGS })], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.equal(l.reason, 'hold-trickle')
+  assert.equal(l.free, 3)
+  const r = cli(home, ['emit', '--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'trickle', free: 3, settings: SETTINGS })], { env: EV(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+})
+
 test('auto-retry (p16-4): a valid emit, and a quota retry with used 0 and its quotaRetries', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json',

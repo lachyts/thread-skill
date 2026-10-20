@@ -4,7 +4,7 @@
 // calls are executed elsewhere (tests/lead-integrate.test.sh, skills/execute/tests/reconcile-rollout-lead.test.sh,
 // skills/execute/tests/rollout-stop-driver.test.sh); this pins the prose an LLM lead follows.
 //
-// Every rule lives in one function, checkExecute({ skill, hooksJson, exists, template }), that returns named failures, so the
+// Every rule lives in one function, checkExecute({ skill, hooksJson, exists, template, driver }), that returns named failures, so the
 // real files and the controls run through identical logic and no matcher can pass vacuously: each control mutates
 // the real text in one place and must fail with exactly its rule. The status-line rule parses § 6's spec with the
 // driver's own STATUS_RE (python, via spawnSync). Reads files only.
@@ -20,6 +20,7 @@ const real = {
   hooksJson: read('hooks/hooks.json'),
   exists: (p) => fs.existsSync(path.join(root, p)),
   template: read('skills/schedule/rollout-template.md'),
+  driver: read('hooks/rollout-stop-driver.py'),
 }
 const DRIVER = path.join(root, 'hooks', 'rollout-stop-driver.py')
 
@@ -102,7 +103,7 @@ const BUDGET = 'Integrations run one at a time: each merges the latest `main` in
   'required checks + squash) per approved task, **sequentially**'
 
 // Named failures for execute's queue prose, its hook wiring and the driver path; [] means every rule holds.
-function checkExecute({ skill, hooksJson, exists, template }) {
+function checkExecute({ skill, hooksJson, exists, template, driver }) {
   const fails = []
   const s2 = S(skill, S2)
   const s45 = S(skill, S45)
@@ -147,7 +148,7 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   const s2sub = sub(/\*\*Seeded revises \(automatic\)/)
   if (!slots.includes("A **slot** is one task's own Workflow call") || !/a seeded revise — held/.test(slots) ||
     !slots.includes('Integration holds **no slot**') || !slots.includes('One Integration runs at a time') || !s2sub ||
-    !s2sub.text.includes('`slotsInUse` (live plus restarts) plus the revises already launched in this step is below `ceiling`') ||
+    !s2sub.text.includes('`slotsInUse` (live plus restarts) plus the revises already launched in this step is below `slotLimit`') ||
     !s2sub.text.includes('otherwise it waits') || !s2sub.text.includes('re-run `next --running <the live slugs, them included>`')) {
     fails.push('slots')
   }
@@ -664,6 +665,33 @@ function checkExecute({ skill, hooksJson, exists, template }) {
 
   // s5 (the dead-run resume keeps its shape for its consumers) is part of lost-call's routing: § 5 names *Lost call*.
   if (!s5.includes('(§ 4.5 *Lost call*)') || !before(s5, '(§ 4.5 *Lost call*)', 'resumeFromRunId: <runId>')) fails.push('lost-call')
+
+  // trickle (p28-1, Chorus ADR 0104): § 4.5's *The Trickle* paragraph names the state file, its spec, slotLimit and the
+  // `trickle:` hold that never halts; step 1.1 relays the WARN line verbatim, once per session; step 1.6 waits on a
+  // `trickle:` hold with its reason=; § 5's Heartbeat paragraph covers that waiting turn and clause (7) reads its reason
+  // as no hold; § 6's waiting bullet, § 8's Stop-hook paragraph and the driver's docstring and block reason name it.
+  const trickleP = labelled(skill, 'The Trickle (Chorus ADR 0104).')
+  const tr1 = subs[0]?.text ?? ''
+  const tr6 = sub(/^End the turn `waiting`/)?.text ?? ''
+  const waitingB = collapse(s6raw.split('\n').find((l) => l.startsWith('- `waiting` — ')) ?? '')
+  const hookP = collapse(skill.split('\n').find((l) => l.startsWith('**The Stop-hook driver**')) ?? '')
+  const drvDoc = collapse((driver ?? '').split('"""')[1] ?? '')
+  const drv = driver ?? ''
+  const drvBlock = drv.indexOf('ROLLOUT-DRIVER:') >= 0 ? drv.slice(drv.indexOf('ROLLOUT-DRIVER:'), drv.indexOf('Do not end the turn while')) : ''
+  if (!trickleP.includes('`~/.config/thread/away.json`') || !trickleP.includes('`skills/execute/away.md` holds the spec') ||
+    !trickleP.includes('`slotLimit`') || !trickleP.includes('`trickle: <running>/<N> tasks running on this Mac`') ||
+    !trickleP.includes('a `trickle:` hold never halts the rollout') || !trickleP.includes('A running call is never stopped') ||
+    !trickleP.includes('`WARN: ~/.config/thread/away.json …` line') || !trickleP.includes('The lead never reads or writes the file') ||
+    !tr1.includes('A `WARN: ~/.config/thread/away.json` line on its stderr') ||
+    !tr1.includes('is printed verbatim the first time this session sees that exact line') ||
+    !tr6.includes('A `trickle:` hold (*The Trickle*) ends the turn `waiting` too') ||
+    !tr6.includes('`reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`') ||
+    !tr6.includes('a Trickle wait can stand with nothing of this rollout in flight') ||
+    !hbPara.includes("a Trickle wait's `waiting` turn (§4.5 step 1.6)") ||
+    !hb7.includes('(a `trickle:` reason is no hold: the Trickle may have room now)') ||
+    !waitingB.includes('or `next` holds a task on the Trickle (§4.5 step 1.6)') || !waitingB.includes("a Trickle wait's (`trickle: …`)") ||
+    !hookP.includes('or a Trickle wait stands)') ||
+    !drvDoc.includes('or a Trickle wait stands') || !drvBlock.includes('or a Trickle wait stands')) fails.push('trickle')
   return [...new Set(fails)]
 }
 
@@ -677,7 +705,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
-  'verify-slots', 'clone-root']
+  'verify-slots', 'clone-root', 'trickle']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -1180,7 +1208,29 @@ test("control: no Don't on a hand-written key fails recorded-answer", () => {
   only(sk(', and never write, supersede or spend a `## Repair input` key by hand', ''), 'recorded-answer', 'keys by hand')
 })
 
-test('the rules are all named (35) and each has a control', () => {
-  assert.equal(RULES.length, 35)
+// trickle (p28-1)
+test('control: § 4.5 without the Trickle at any one site fails trickle', () => {
+  const p = real.skill.split('\n').find((l) => l.startsWith('**The Trickle (Chorus ADR 0104).**'))
+  only(sk(p + '\n\n', ''), 'trickle', 'no Trickle paragraph')
+  only(sk('N from `~/.config/thread/away.json`, else 2', 'N from `~/.config/chorus/away.json`, else 2'), 'trickle', 'another path')
+  only(sk('`skills/execute/away.md` holds the spec', 'the Chorus brief holds the spec'), 'trickle', 'no spec pointer')
+  only(sk('and a `trickle:` hold never halts the rollout', 'and a `trickle:` hold halts the rollout `stuck`'), 'trickle', 'a Trickle hold halts')
+  only(sk(' A `WARN: ~/.config/thread/away.json` line on its stderr (a stale or unreadable Away state file, `skills/execute/away.md` § Reading it) is printed verbatim the first time this session sees that exact line, which is held for the session\'s life like step 1.2\'s judged keys; nothing else changes.', ''),
+    'trickle', 'no WARN relay in step 1.1')
+  only(sk(' A `trickle:` hold (*The Trickle*) ends the turn `waiting` too:', ' A `trickle:` hold (*The Trickle*) halts the turn:'), 'trickle', 'no Trickle wait in step 1.6')
+  only(sk('`reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`', '`reason="trickle"`'), 'trickle', 'no Trickle reason=')
+  only(sk(" and a Trickle wait's `waiting` turn (§4.5 step 1.6).", '.'), 'trickle', 'heartbeat paragraph without the Trickle wait')
+  only(sk(' (a `trickle:` reason is no hold: the Trickle may have room now)', ''), 'trickle', 'clause (7) without its parenthetical')
+  only(sk(', or `next` holds a task on the Trickle (§4.5 step 1.6); nothing to do until', '; nothing to do until'), 'trickle', "§ 6's waiting bullet without it")
+  only(sk(', a retry cool-down is pending, or a Trickle wait stands)', ', or a retry cool-down is pending)'), 'trickle', "§ 8's Stop-hook paragraph without it")
+})
+test("control: the driver's docstring or block reason without the Trickle wait fails trickle", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv('or a Trickle wait stands (`next` holds a task on the machine-wide', 'or (`next` holds a task on the machine-wide'), 'trickle', 'docstring')
+  only(drv('or a Trickle wait stands (`next` holds a task on the "', 'or (`next` holds a task on the "'), 'trickle', 'block reason')
+})
+
+test('the rules are all named (36) and each has a control', () => {
+  assert.equal(RULES.length, 36)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

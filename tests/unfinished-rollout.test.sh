@@ -29,6 +29,7 @@ set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+. tests/lib/rollout-fixtures.sh   # away_file
 unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR & co.)
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 root=$(pwd -P)
@@ -41,7 +42,9 @@ TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
-EH="$TMP/settings-home"; mkdir -p "$EH"
+# Its one fresh Away file (p28-1, execute away.md) runs each rollout to its own ceiling, never the Trickle; nx reads the
+# real clock (no --now), so the file is written now and stays fresh for the suite's run.
+EH="$TMP/settings-home"; mkdir -p "$EH"; away_file "$EH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 
 hasnt() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
