@@ -110,11 +110,11 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   batch of their own after the last parallel one, in rank order. Listed by batch, then rank.
   rollouts[]: one per scan rollout, {slug, note, shape, projectRoot, pausedFor, owners? (the `owner:` tags of its open
   tasks), holds[], canExecute, canRepair, reinstate}. holds, in this order: superseded (supersededBy), lineage
-  (another live rollout's supersedes names it), version (protocol_version not 5), incomplete, serial (status reads no
-  Leg log yet), paused, draining (pause_requested), live queue (running + integrating > 0), start stamp
-  (RR._start_unattended: the Stage starts it), status unread (a null summary). reinstate: awaitingSignOff with every
-  pending sign-off in --signed. canExecute: no hold, or reinstate with paused the only hold. canRepair: none of
-  superseded, lineage, version, serial and status unread.
+  (another live rollout's supersedes names it), version (protocol_version not 5), incomplete, serial (status § 5
+  reads a chain by its own S rules, which STATUS_ACTIONS never maps), paused, draining (pause_requested), live queue
+  (running + integrating > 0), start stamp (RR._start_unattended: the Stage starts it), status unread (a null
+  summary). reinstate: awaitingSignOff with every pending sign-off in --signed. canExecute: no hold, or reinstate
+  with paused the only hold. canRepair: none of superseded, lineage, version, serial and status unread.
   Output: {schema, vault, today, schedule[], waiting[] {run, project, note, shape, root, rolloutRoot, members[], why},
   rollouts[], reinstate[], orient[] {name, note, area[]} (the rank's, whatever the budget), held[] {slug, run, grade,
   blockedBy (the rank holds that stand, then, for a member the dependencies took, read against the final schedule:

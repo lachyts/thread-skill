@@ -67,7 +67,7 @@ asks: its budget is `--budget`, else 30.
      **Recommended action** rule that matched; the command that line names; and its Needs you lines".
 5. Save each grading answer as `$S/grades-<NN>.json`. An answer that does not parse, or a task the ranker lists in
    `invalid[]`, is re-asked once with its errors; still invalid, it stays ungraded. A status answer with no number in
-   1–13 is recorded as unread.
+   1–13 is recorded as unread, and so is a serial chain's: its rule is one of status § 5's S rules, never a § 4 number.
 6. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan "$S/scan.json" --grades <each grades file> --compact > "$S/rank.json"`.
 
 ### 3. The Ranked slate
