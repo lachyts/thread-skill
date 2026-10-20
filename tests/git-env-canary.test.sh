@@ -2,7 +2,8 @@
 # p14-6, executed: skills/execute/scripts/git-env-canary.py, the lead's git-env canary (execute § 4.5 *Git-env
 # canary*). A window is armed before a launch and checked when it ends; a change to the shared checkout's
 # refs/heads/<default> or its bareness that is not a close-out is logged on the rollout note's `## Git-env log` and
-# holds the queue until a human ack (repair § 3e). tests/contracts/git-env-canary.test.mjs pins the prose.
+# holds the queue until a human ack (repair § 3e). tests/contracts/git-env-canary.test.mjs pins the prose. The pc
+# cases pin a rollout clone beside its in-place twin (ADR 0042): only the clone is armed, and only its own move trips.
 #
 # Hermetic: every repo lives under mktemp with a local bare repo as its only remote; the vault (rollout note + task
 # notes) is temp; THREAD_GIT_ENV_DIR points the records into temp; every canary verb gets --tasks-dir explicitly
@@ -835,6 +836,54 @@ for variant in ref bare; do
   python3 "$CAN" check-all --rollout "$RO" --tasks-dir "$V" > /dev/null 2>&1 && touch "$S/merged"
   ok "$([ -e "$S/merged" ] && echo merged || echo held)" held "o ($variant): the pre-merge check-all → 3, so the merge never runs"
 done
+
+# ── pc: the rollout clone and its in-place twin (ADR 0042), invariant pins ──────────────────────────────────────
+# R is the rollout clone (the Project root, pc-rollout) and IP its in-place twin (pc), both clones of one bare origin
+# served as git@github.com:o/pc.git by the fake ssh, so self-rollout-check.sh --in-place pairs them. Only R is armed:
+# peer work in IP, a peer push, a push from R and the twin's fast-forward are clean; R's own non-benign move trips.
+cp "$root/tests/fixtures/land/fake-ssh.sh" "$TMP/fake-ssh"; chmod +x "$TMP/fake-ssh"
+export GIT_SSH_COMMAND="$TMP/fake-ssh" GIT_SSH_VARIANT=ssh LOG_SSH="$TMP/ssh.log"; : > "$LOG_SSH"
+IP=""
+pcscen() {
+  S="$TMP/$1"; O="$S/srv/o/pc.git"; R="$S/w/pc-rollout"; IP="$S/w/pc"; C2="$S/clone2"; V="$S/vault"; RO="$V/ro.md"
+  mkdir -p "$S/srv/o" "$S/w" "$V"
+  export THREAD_GIT_ENV_DIR="$S/state" SRV="$S/srv"
+  g init -q --bare "$O"
+  g init -q "$S/seed"
+  echo a > "$S/seed/a.txt"; echo t > "$S/seed/THREAD.md"
+  g -C "$S/seed" add -A; g -C "$S/seed" commit -q -m init; g -C "$S/seed" push -q "$O" master
+  for c in "$R" "$IP" "$C2"; do g clone -q git@github.com:o/pc.git "$c" 2>/dev/null; done
+  mkro "$R"
+  echo "== $1"
+}
+ipcode() { echo "$RANDOM" >> "$IP/${1:-code.txt}"; g -C "$IP" add -A; g -C "$IP" commit -q -m "peer ${1:-code}"; }
+pcscen pc1
+mkt A in_progress
+ok "$(bash "$root/skills/execute/scripts/self-rollout-check.sh" --in-place "$R")" "$IP" "pc: (fixture) R is a rollout clone whose twin is IP"
+arm A; ipcode; ipcode THREAD.md; push2
+chk A; ok "$rc|$(recf A task state)" '0|"checked"' "pc1: IP's code and THREAD.md commits and a peer push during R's window → clean"
+pcscen pc1b
+mkt A in_progress
+code; arm A; g -C "$R" push -q origin master
+ok "$(git -C "$R" rev-parse origin/master)" "$(cur)" "pc1b: (fixture) the push moved R's tracking ref"
+chk A; ok "$rc|$(recf A task state)" '0|"checked"' "pc1b: a push from R during its window (the sweep's, edge case 11) → clean"
+pcscen pc2
+mkt A in_progress
+arm A; code
+chk A; ok "$rc|$(trips A)" "3|1" "pc2: R's own non-benign commit during its window → a trip"
+pcscen pc3
+mkt A in_progress
+can arm --repo "$IP" --default master --slug A --kind task
+ok "$rc" 2 "pc3: arm --repo <the in-place twin> → 2: the twin is never armed"
+has "$err" "is not this rollout's repo" "pc3: … naming the rollout's repo"
+pcscen pc4
+mkt A in_progress
+arm A; push2; old=$(git -C "$IP" rev-parse HEAD)
+line=$(bash "$root/skills/execute/scripts/self-rollout-check.sh" --refresh-in-place "$R")
+has "$line" "in-place: $IP fast-forwarded to origin/master" "pc4: --refresh-in-place R fast-forwards IP during R's integrate window"
+ok "$([ "$(git -C "$IP" rev-parse HEAD)" != "$old" ] && echo moved)" moved "pc4: … IP moved"
+chk A; ok "$rc|$(recf A task state)" '0|"checked"' "pc4: … and R's check is clean"
+unset GIT_SSH_COMMAND GIT_SSH_VARIANT SRV
 
 # ── p: the snippet's guard ───────────────────────────────────────────────────────────────────────────────────
 awk '/^# thread:git-env-canary/{on=1; next} /^# end thread:git-env-canary/{on=0} on' "$SKILL" > "$TMP/canary.sh"

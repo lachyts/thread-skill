@@ -470,15 +470,28 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: checkpoint, pointer, progress marker.
 - **Primary checkout** — the git checkout the plugin runs from, live (a
   directory-source install, or `--plugin-dir`): every rollout's lead, in any
-  repo, runs its engine from it. A self-rollout's repo is a separate clone,
-  so its merges never reach it. It never moves while a **Running rollout**
-  exists (ADR 0031). Not the engine's "main checkout", which is a rollout's own
-  repo. _Avoid_: live checkout, installed copy.
-- **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, the
-  Project root of its parallel rollouts so peer sessions' commits to the
-  checkout they share never reach a rollout's windows. Today only a
-  self-rollout uses one; from P26, every parallel rollout does (ADR 0042).
-  _Avoid_: mirror, fork.
+  repo, runs its engine from it. A self-rollout runs from its **Rollout
+  clone**, like every rollout, so its merges never reach it; it is that clone's
+  **In-place checkout**, caught up once a run completes. It never moves while a
+  **Running rollout** exists (ADR 0031). Not the engine's "main checkout",
+  which is a rollout's own repo. _Avoid_: live checkout, installed copy.
+- **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, beside
+  its toplevel and never nested inside it: the Project root of every parallel
+  rollout scheduled after P26 (ADR 0042), so peer sessions' commits to the
+  **In-place checkout** never reach a rollout's windows. Schedule § 0 makes it
+  (`self-rollout-check.sh --ensure`, after Lachy's yes), execute § 2.7 and
+  merge-task keep it current, and only merge-task moves its default branch:
+  no session commits there, and its THREAD.md copy is never a thread
+  (`--in-place` reads a directory in it as the twin's). _Avoid_: mirror, fork,
+  separate clone.
+- **In-place checkout** — the checkout Lachy's sessions and the daily sweep
+  work in, the **Rollout clone**'s twin: the repo's toplevel itself. A
+  clone-rooted rollout never runs there; its threads, handoff homes, consumed
+  review docs and ledgers live there, and merge-task fast-forwards it after
+  every merge when it can (`--refresh-in-place`: ff-only, never a merge commit;
+  held while it is the **Primary checkout** under a **Running rollout**). A
+  commit in it blocks a rollout only when it touches a path a not-yet-merged
+  task cites. _Avoid_: main checkout, shared checkout.
 - **Running rollout** — a live, started rollout at the current protocol,
   neither `done` nor `dropped` and not hard-paused: one a lead may be running
   on the primary checkout. It differs from unfinished both ways: it leaves out
@@ -488,13 +501,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Start when ready** — the execute offer's fourth answer (orient § 9,
   schedule step 8): it stamps `start: unattended` on the rollout note just
   written and ends, running nothing. The Chorus Stage starts the lead in the
-  note's Project root once the note is runnable, and that lead's first `next`
+  note's Project root, the **Rollout clone** (ADR 0042), once the note is runnable, and that lead's first `next`
   clears the stamp, so no second lead starts (vault grammar § Rollout start
   stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.
   _Avoid_: auto-start, scheduled start.
 - **Git-env canary** — the lead's check that the shared checkout (a rollout's
-  `Project root`) kept its `refs/heads/<default>` and its bareness across each
-  **Window** (execute § 4.5, ADR 0030). A local commit not on
+  `Project root`, its **Rollout clone** since ADR 0042) kept its
+  `refs/heads/<default>` and its bareness across each **Window** (execute § 4.5,
+  ADR 0030). The **In-place checkout** is never armed: a peer's commit or
+  push there, and its fast-forward by `--refresh-in-place`, never trip it. A local commit not on
   `origin/<default>` is benign only when every one is a non-merge commit
   touching only close-out paths (land.sh's `closeout_shaped`) or deleting a
   review doc directly under `docs/reviews/` (`closeout_change`), stricter than

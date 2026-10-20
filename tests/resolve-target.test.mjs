@@ -6,7 +6,8 @@
 // ~/repos/obsidian/Work/Projects. Departures are marked [stand-in] (no such note in the real vault) or [departs]
 // (a real note with a changed field). Numbers that hold only because of a stand-in are marked "fixture only".
 // The fake HOME copies the real layout: umbrella repos at ~/Projects, ~/repos/workspaces and ~/.agents, repos
-// nested inside them, dated project dirs, a linked worktree outside HOME, and a second HOME with no git at all.
+// nested inside them, dated project dirs, a linked worktree outside HOME, and a second HOME with no git at all. One
+// case adds rollout clones (ADR 0042) with GitHub origins beside their in-place twins.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -411,6 +412,32 @@ test('a linked worktree of an umbrella repo reads as the same sub-path of its ma
     assert.deepEqual(r, at(h(`Projects/${d}`)), d)
     assert.notEqual(r.learn_dir, '~/Projects', 'never the umbrella')
   }
+})
+
+test('a rollout clone reads as its in-place twin (ADR 0042): same answer, same learn_dir', () => {
+  // pair <twin> <its origin> <the clone's origin> [sub-dirs]: a main checkout and its <twin>-rollout clone
+  const pair = (twin, a, b, subs = []) => {
+    for (const [d, u] of [[twin, a], [`${twin}-rollout`, b]]) {
+      if (!fs.existsSync(path.join(d, '.git'))) repo(d)
+      if (u) git(['-C', d, 'remote', 'add', 'origin', u])
+      for (const s of subs) mkdir(path.join(d, s))
+    }
+  }
+  pair(h('repos/tools/bar'), 'git@github.com:o/bar.git', 'https://github.com/O/Bar.git', ['sub'])
+  const bar = at(h('repos/tools/bar/sub'))
+  assert.deepEqual(at(h('repos/tools/bar-rollout/sub')), bar, 'tools/bar-rollout/sub gives the same JSON as bar/sub')
+  assert.equal(bar.learn_dir, '~/repos/tools/bar', 'learn_dir is the twin, never the clone')
+  pair(h('Projects/N/nest'), 'git@github.com:o/nest.git', 'git@github.com:o/nest.git')
+  assert.deepEqual(at(h('Projects/N/nest-rollout')), at(h('Projects/N/nest')), 'a nested ~/Projects clone gives the same as its twin')
+  pair(h('repos/workspaces'), 'https://github.com/o/ws.git', 'https://github.com/o/ws.git',
+    ['animately-workspace/launchers/seo', 'ops-workspace/launchers/lean'])
+  const seo = at(h('repos/workspaces-rollout/animately-workspace/launchers/seo'))
+  resolved(seo, target('area', 'Animately', `${P}/Animately/Animately.md`, 'Animately', 'Animately'), 'workspace')
+  assert.deepEqual(seo, at(h('repos/workspaces/animately-workspace/launchers/seo')), 'workspaces-rollout reads as the in-place seat')
+  assert.deepEqual(at(h('repos/workspaces-rollout/ops-workspace/launchers/lean')), at(h('repos/workspaces/ops-workspace/launchers/lean')))
+  // no GitHub origin, or no same-origin twin: not a rollout clone, so it answers for itself (thread-skill-rollout above)
+  pair(h('repos/tools/qux'), 'https://github.com/o/qux.git', 'https://github.com/o/other.git')
+  assert.notDeepEqual(at(h('repos/tools/qux-rollout')), at(h('repos/tools/qux')), 'another origin is no rollout clone')
 })
 
 test('rung 3: missing or unparseable launch folders skip it with a reason', () => {

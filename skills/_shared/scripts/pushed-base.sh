@@ -24,6 +24,17 @@
 #     origin/<b> (no file they touch differs: a squash or cherry-picked PR) are a note naming that reset;
 #     ahead commits touching only THREAD.md are a note. An ahead set touching no file blocks. A reset that
 #     would move the primary checkout while a rollout runs on it says to wait (primary-hold.sh, ADR 0031).
+#   Clone-rooted (ADR 0042) — when <repoPath>'s toplevel is a rollout clone (`self-rollout-check.sh --in-place`
+#     names its twin: every rollout scheduled after P26, and every self-rollout), the root keeps the rule above and
+#     every other member is a peer: the in-place checkout, the primary checkout of a self-rollout among them. A
+#     peer blocks only when its ahead commits touch a scoping cited path; any other ahead peer is one note naming
+#     up to three of its commits (plus the ADR 0031 wait for a held primary). A cited path scopes a member when it
+#     resolves there as the Warn half resolves it (relative paths and globs in every member, `~/` and absolute paths
+#     only in the member that contains them, made member-relative; THREAD.md dropped) and is not an existing
+#     directory in that member, its toplevel included: such a directory is noted once per member,
+#     `cited directory <p> does not scope <member>'s ahead commits`, so a task body naming a repo root never
+#     re-blocks every peer. With no cited paths (schedule § 0; execute § 2.7 when no not-yet-merged task cites one,
+#     `reconcile-rollout.py cited`) no peer blocks.
 #   Warn — each cited path on its own (never batched): a relative path in every member, an absolute or ~/
 #     one in the member containing it (else a note). Per (member, path): `diff HEAD` + `diff --cached`
 #     (uncommitted), `diff origin/<b>...HEAD` three-dot AND `diff origin/<b> HEAD` two-dot (committed on the
@@ -103,6 +114,10 @@ EOF
   fi
 fi
 
+# ---- clone-rooted: the root is a rollout clone (ADR 0042), so every other member is a peer ------------------
+clone_rooted=0
+if [ -f "$SELF_CHECK" ] && bash "$SELF_CHECK" --in-place "$top" >/dev/null 2>&1; then clone_rooted=1; fi
+
 # ---- fetch every member: origin/<b> and origin/close/* (remote-tracking refs only) ---------------------
 # --prune with explicit refspecs touches only those destinations: a close/… branch deleted on origin (its
 # landing PR merged or closed) drops its tracking ref, so repo-state never reads its commits as queued.
@@ -112,6 +127,50 @@ for c in "${members[@]}"; do
     exit 2
   fi
 done
+
+# ---- path helpers: the Warn half and the clone-rooted scoping resolve cited paths the same way ------------
+resolve() {  # resolve <absolute path>: the deepest existing ancestor through `pwd -P`, plus the rest as written
+  local p="$1" rest='' d
+  while [ "${#p}" -gt 1 ] && [ "${p%/}" != "$p" ]; do p=${p%/}; done
+  while [ -n "$p" ] && [ ! -d "$p" ]; do rest="/${p##*/}$rest"; p=${p%/*}; done
+  [ -n "$p" ] || p=/
+  d=$(cd "$p" 2>/dev/null && pwd -P) || d=$p
+  [ "$d" = / ] && d=''
+  printf '%s%s\n' "$d" "$rest"
+}
+within() {  # within <member> <resolved path>: prints the path relative to the member, or fails
+  case "$2" in
+    "$1") printf '.\n' ;;
+    "$1"/*) case "/${2#"$1"/}/" in */../*) return 1 ;; esac; printf '%s\n' "${2#"$1"/}" ;;
+    *) return 1 ;;
+  esac
+}
+member_rel() {  # member_rel <member> <cited path as written>: the path relative to the member, or fail
+  local q p
+  q=$2; while [ "${#q}" -gt 1 ] && [ "${q%/}" != "$q" ]; do q=${q%/}; done
+  [ "${q##*/}" = THREAD.md ] && return 1
+  p=$(expand "$2")
+  case "$p" in
+    /*) within "$1" "$(resolve "$p")" ;;
+    *) within "$1" "$(resolve "$1/$p")" ;;
+  esac
+}
+peer_scoped() {  # peer_scoped <member> [<cited path>…]: 0 when the member's ahead commits touch a scoping cited path
+  local m="$1" raw rel o; shift
+  local -a specs=()
+  for raw in "$@"; do
+    [ -n "$raw" ] || continue
+    rel=$(member_rel "$m" "$raw") || continue
+    if [ "$rel" = . ] || [ -d "$m/$rel" ]; then
+      note "cited directory $raw does not scope $m's ahead commits"
+      continue
+    fi
+    specs+=("$rel")
+  done
+  [ ${#specs[@]} -gt 0 ] || return 1
+  o=$(git -C "$m" -c core.quotePath=false diff --no-renames --name-only "$up...refs/heads/$b" -- "${specs[@]}" 2>/dev/null) || return 0
+  [ -n "$o" ]
+}
 
 # ---- block: a member's local <b> ahead of origin/<b> --------------------------------------------------
 # Ancestry alone over-counts: a commit landed by a squash or cherry-picked PR stays "ahead" for ever. So an
@@ -166,6 +225,12 @@ for c in "${members[@]}"; do
     fi
     continue
   fi
+  if [ "$clone_rooted" = 1 ] && [ "$c" != "$top" ] && ! peer_scoped "$c" "$@"; then
+    shown=$(git -C "$c" log --no-decorate --format='%h %s' -n 3 "$up..refs/heads/$b" 2>/dev/null | paste -sd ';' - | sed 's/;/; /g')
+    [ "$n" -le 3 ] || shown="$shown; …"
+    note "local $b in $c is $n commit(s) ahead of origin/$b ($shown): $c is a peer of the clone-rooted Project root $top, and none of them touches a path a not-yet-merged task cites: not a blocker (ADR 0042); they land by PR as usual, and \`$(reset_hint "$c")\` drops the local copies once they have$hh"
+    continue
+  fi
   blocked=1
   rh=$(reset_hint "$c")
   echo "pushed-base: local $b in $c is $n commit(s) ahead of origin/$b: rollout worktrees branch from origin/$b, so agents will not see them:" >&2
@@ -190,22 +255,6 @@ done
 [ "$broken" = 0 ] || exit 2
 
 # ---- warn: each cited path on its own ------------------------------------------------------------------
-resolve() {  # resolve <absolute path>: the deepest existing ancestor through `pwd -P`, plus the rest as written
-  local p="$1" rest='' d
-  while [ "${#p}" -gt 1 ] && [ "${p%/}" != "$p" ]; do p=${p%/}; done
-  while [ -n "$p" ] && [ ! -d "$p" ]; do rest="/${p##*/}$rest"; p=${p%/*}; done
-  [ -n "$p" ] || p=/
-  d=$(cd "$p" 2>/dev/null && pwd -P) || d=$p
-  [ "$d" = / ] && d=''
-  printf '%s%s\n' "$d" "$rest"
-}
-within() {  # within <member> <resolved path>: prints the path relative to the member, or fails
-  case "$2" in
-    "$1") printf '.\n' ;;
-    "$1"/*) case "/${2#"$1"/}/" in */../*) return 1 ;; esac; printf '%s\n' "${2#"$1"/}" ;;
-    *) return 1 ;;
-  esac
-}
 warns=''
 cant() {  # cant <path> <loc> <git output>: that (member, path) pair only
   warns="$warns

@@ -148,7 +148,10 @@ and Drift and the slots for each swept project.
   classifies from this sweep; it does not walk the folders again.
 - **Threads**: THREAD.md state lines across the area's project dirs
   (`~/Projects/<Area>/*/THREAD.md`), in `<repo>/THREAD.md` for every repo the target's projects
-  declare (a code project's thread lives in its repo, ADR 0039), and in `_shared/threads/`.
+  declare (a code project's thread lives in its repo, ADR 0039), and in `_shared/threads/`. Skip a
+  directory `bash "${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh" --in-place <dir>`
+  names (exit 0, a rollout clone, ADR 0042) and read its in-place twin's file instead: a clone's
+  THREAD.md is a copy of the twin's, never a thread.
 - **Drift** (ADR 0026): run the shared reconcile step as a dry run for every project in the target
   in one Bash call,
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/reconcile-project.py --project <slug> --json`,
@@ -391,13 +394,17 @@ offer per parallel note written; a serial note (`shape: serial`) gets no offer: 
 each row's launch and Leg 1's start line, and never stamp `start: unattended` on it:
 
 - **Fresh session** (recommended after a reshuffle, which has filled this context) — run
-  `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with its usual home (never a commit on the
-  target repo's default-branch checkout: that would diverge it from `origin` before the first
-  merge) and this continuation: start in the target repo, then `/thread:execute [[<rollout>]]`.
-  Handoff creates the visible task where the harness can, and labels it a manual handoff
-  elsewhere.
+  `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with its usual home, never the Project root's
+  default-branch checkout (handoff-home.sh reads a rollout clone as its in-place twin; a doc
+  committed on the root would hold the lead's first § 2.7 entry until its landing merged), through
+  handoff's **Rollout launch.**, and this continuation: start in the Project root, then
+  `/thread:execute [[<rollout>]]`. The Project root is the rollout clone the note names (ADR 0042),
+  and execute § 2.8 halts a lead launched anywhere else. Handoff creates the visible task where the
+  harness can, and labels it a manual handoff elsewhere.
 - **Here** — run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` on the rollout note in this
-  session, when the reshuffle was small and this session was launched in the target repo.
+  session, when the reshuffle was small and this session was launched in the Project root
+  (`bash "${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh" --launch-check <Project root> <this session's launch directory>`
+  exits 0). Offer it only then.
 - **Not yet** — name the rollout note and the `/thread:execute [[<rollout>]]` line, and stop.
 - **Start when ready** — stamp `start: unattended` as a top-level frontmatter line just below
   `status:` on the rollout note § 6 or § 7 wrote (`_shared/vault-grammar.md` § Rollout start stamp), then

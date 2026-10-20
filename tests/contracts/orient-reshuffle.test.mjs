@@ -166,6 +166,16 @@ test('the execute offer has four answers and never homes a commit on the target 
     /`start: unattended`/, /default-branch/])
 })
 
+test('the execute offer starts the lead in the Project root, the rollout clone (ADR 0042), and § 2 skips clone threads', () => {
+  const s9 = S(9)
+  assertHas(s9, 'orient § 9', ['Project root', '**Rollout launch.**', '--launch-check', 'start in the Project root, then `/thread:execute [[<rollout>]]`',
+    'handoff-home.sh reads a rollout clone as its in-place twin'])
+  assert.ok(!s9.includes('start in the target repo'), 'orient § 9 no longer says start in the target repo')
+  assert.ok(!s9.includes('launched in the target repo'), 'orient § 9 Here no longer keys on the target repo')
+  const threads = collapse(slice(section(orient, /^### 2\./) ?? '', /^- \*\*Threads\*\*/, /^- /) ?? '')
+  assertHas(threads, 'orient § 2 Threads', ['--in-place', "read its in-place twin's file instead", 'never a thread'])
+})
+
 test('Start when ready stamps the note and runs neither execute nor handoff', () => {
   const answer = startWhenReady(S(9))
   assertHas(answer, 'orient § 9 Start when ready', [/stamp `start: unattended`/, /nothing runs/, /no handoff/,

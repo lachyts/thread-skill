@@ -4,8 +4,8 @@
 # `next` refuses until schedule step 7's last write removes it), then fed to reconcile-rollout.py `next` /
 # `status`, which read the `## Queue` rows as the schedule rank: three tasks on one file give one queue, no
 # waves (Q2); a Solo task ranked first holds the rest (Q3); a frontmatter dependency holds its dependant
-# (Q4); a head Solo pair at `normal` starts ahead of `high` tasks (Q5). Temp notes only; no vault, no
-# network. bash 3.2-compatible (macOS).
+# (Q4); a head Solo pair at `normal` starts ahead of `high` tasks (Q5). `cited` lists the paths the not-yet-merged
+# tasks cite, for execute § 2.7's pushed-base scoping (ADR 0042). Temp notes only; no vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
@@ -166,6 +166,32 @@ sed -i.bak 's/^status: open$/status: done/' "$D/p1.md"; rm -f "$D/p1.md.bak"
 ok "$(q "$(nxt)" 'd["start"]')" '["p2"]' "Q5: once it merges the second Solo row starts"
 sed -i.bak 's/^status: open$/status: done/' "$D/p2.md"; rm -f "$D/p2.md.bak"
 ok "$(q "$(nxt)" 'd["start"]')" '["h1","h2","h3"]' "Q5: once both merge the high tasks start"
+
+# ── cited: the paths the not-yet-merged tasks cite, for execute § 2.7's pushed-base scoping (ADR 0042) ───────
+scen cited
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n---\n## Queue\n' > "$D/ro.md"
+ct() {  # ct <slug> <status> <body> [frontmatter line] — a task note linked to `ro`
+  printf -- '---\ntags: [task]\nstatus: %s\nrollout: "[[ro]]"\n%s\n---\n%s\n' "$2" "${4:-}" "$3" > "$D/$1.md"
+}
+ct q open 'Read ADR 0031 and `docs/adr/0042-x.md`; keep THREAD.md and `src/THREAD.md` current.' 'touches: [a/b.py, THREAD.md]'
+ct r in_progress 'Update CONTEXT.md and ~/.claude/settings.json:170 (the hook block).'
+ct v review 'Run it in ~/repos/workspaces. Then ADR-0031 again.' 'pr: https://github.com/o/r/pull/7'
+ct d done 'Landed: ADR 0099, ~/landed/x.md and docs/CONTEXT.md.' 'touches: [z/landed.py]'
+ct x dropped 'Dropped: ADR 0098 and ~/dropped/y.md.'
+out=$(python3 "$RR" cited --rollout "$D/ro.md" --tasks-dir "$D" 2>"$TMP/err"); rc=$?
+ok "$out" "CONTEXT.md
+a/b.py
+docs/adr/0031-*.md
+docs/adr/0042-*.md
+~/.claude/settings.json
+~/repos/workspaces" "cited: queued, running and awaiting-Integration tasks' touches:, ADR globs, CONTEXT.md and ~/ paths, sorted, never THREAD.md, never a done or dropped task's"
+ok "$rc|$(cat "$TMP/err")" "0|" "cited: exit 0, silent"
+ct s blocked 'A set-aside task still cites tools/CONTEXT.md and ADR 0007.'
+out=$(python3 "$RR" cited --rollout "$D/ro.md" --tasks-dir "$D" 2>/dev/null)
+has "$out" "tools/CONTEXT.md" "cited: a set-aside task's relative …/CONTEXT.md is cited"
+has "$out" "docs/adr/0007-*.md" "cited: … and its ADR"
+python3 "$RR" cited --rollout "$D/missing.md" --tasks-dir "$D" >/dev/null 2>&1; ok "$?" 2 "cited: a missing rollout note → 2"
+python3 "$RR" cited --tasks-dir "$D" >/dev/null 2>&1; ok "$?" 2 "cited: no --rollout → usage error 2"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "schedule-queue: ALL PASS"; else echo "schedule-queue: FAILED"; fi

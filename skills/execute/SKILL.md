@@ -41,7 +41,7 @@ Existing scheduled jobs and journals retain their runtime.
 
 ## Scope
 
-Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` produced by `/thread:schedule` (older undated `<slug>-rollout` notes still resolve — see step 1). The Workflow's agents operate in isolated git worktrees they create under the target repo (`<repoPath>/.claude/worktrees/`) and open PRs. The lead session updates task frontmatter in the vault and, at completion, sets `status: done` on the phase notes the rollout finished and may file a `phase-close-followup-*` task (ADR 0026), and, at completion, records the rollout's score: `close-score.py` writes fold's `call-journal` lines and one `tunings.jsonl` line under the events directory, outside the vault (ADR 0037 d4). Does not touch any other backlog source. A serial rollout's Legs (`legs.md`) write its task notes, the rollout note's `## Leg log` and commits in its chain checkouts; they make no task worktrees, only `leg.py`'s scratch revert worktree, removed before the verb returns. At its Complete, a chain's score is one `tunings.jsonl` line, written by close-score.py's serial path (`skills/execute/legs.md` § Complete), with no `call-journal` line.
+Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` produced by `/thread:schedule` (older undated `<slug>-rollout` notes still resolve — see step 1). The Workflow's agents operate in isolated git worktrees they create under the target repo (`<repoPath>/.claude/worktrees/`) and open PRs. The target repo is the rollout's Project root, its rollout clone for every rollout scheduled after P26 (ADR 0042); § 2.7 fast-forwards that clone at entry points, and after every merge, and once at completion, `self-rollout-check.sh --refresh-in-place` fast-forwards its in-place twin, the checkout Lachy's sessions work in (`fetch` and `merge --ff-only --no-autostash` only, never a merge commit; held while the twin is the primary checkout under a running rollout, ADR 0031). The lead session updates task frontmatter in the vault and, at completion, sets `status: done` on the phase notes the rollout finished and may file a `phase-close-followup-*` task (ADR 0026), and, at completion, records the rollout's score: `close-score.py` writes fold's `call-journal` lines and one `tunings.jsonl` line under the events directory, outside the vault (ADR 0037 d4). Does not touch any other backlog source. A serial rollout's Legs (`legs.md`) write its task notes, the rollout note's `## Leg log` and commits in its chain checkouts; they make no task worktrees, only `leg.py`'s scratch revert worktree, removed before the verb returns. At its Complete, a chain's score is one `tunings.jsonl` line, written by close-score.py's serial path (`skills/execute/legs.md` § Complete), with no `call-journal` line.
 
 ## Invocation forms
 
@@ -152,13 +152,24 @@ Execute never swaps a root itself.
 ### 2.7. Pushed-base gate
 
 Every task worktree branches from a freshly fetched `origin/<default>`, so commits that exist only on a
-local default branch (a close-out, an ADR a task cites) are invisible to the agents. Run the pushed-base
-check in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at it; never
-copy the snippet here) against the rollout's `Project root`, with no cited paths. For `<localPath>`, take
-the rollout's first `projects:` wikilink and resolve it with
+local default branch (a close-out, an ADR a task cites) are invisible to the agents. First refresh the
+rollout clone: `bash ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh --refresh <Project root>`.
+On a Project root that is a rollout clone (ADR 0042) it fetches and fast-forwards the clone's default
+branch, with a `note:` when it cannot move; a `WARN:` that the refresh changed the lead's own config
+(CLAUDE.md, AGENTS.md, CLAUDE.local.md, .mcp.json or `.claude/` at the root or an ancestor) says this
+session loaded the old copy: pass it on, and start a fresh session in the Project root when it matters. It
+never halts and never touches a root rolled out in place before ADR 0042. Then run the pushed-base check in
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at it; never copy the
+snippet here) against the rollout's `Project root`. Its `<citedPaths>` are the lines of
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py cited --rollout <rollout-note>`,
+each single-quoted: the paths the not-yet-merged tasks cite (their `touches:`, ADR globs, `CONTEXT.md` and
+`~/` paths, never THREAD.md). A non-zero exit there fails closed: the pushed-base check never runs, and the
+entry takes the write-nothing halt below with `reason="pushed-base check failed"`, its stderr printed verbatim.
+Running it with no cited paths instead would let no peer block, so a commit a task needs would pass silently. For
+`<localPath>`, take the rollout's first `projects:` wikilink and resolve it with
 `find ~/repos/obsidian/Work/Projects -name '<Name>.md'`: with exactly one match carrying a `Local:` line,
 use its backticked path; otherwise leave it empty (the marketplace registry still covers the primary
-checkout of a self-rollout's separate clone).
+checkout of a self-rollout).
 
 **Entry points only.** § 2.7 runs only when this invocation **entered at § 1**: a user turn naming
 `/thread:execute` or `execute [[…]]` (fresh, cold resume, reinstate, `--gated` and its
@@ -171,10 +182,8 @@ with or without a `Chorus: ` head. When it
 runs, it runs directly after § 2.6, before the § 3/§ 4 stamps and before §4.5 *Reinstate*'s `clear-pause`.
 
 It runs at entry points and never per merge: `origin/<default>` moves with every merge, and a close-out
-committed on the local default branch mid-rollout must not halt an unattended run. The git-env canary (§ 4.5) honours this: it accepts local commits not on `origin/<default>` when every one is a non-merge commit touching only close-out paths (land.sh's `closeout_shaped`; stricter than its S9, so no merge and no empty commit) or deleting a file directly under `docs/reviews/` (land.sh's `closeout_change`: a consumed review doc's deletion), so a close-out landed mid-run trips no window; any other local commit, reset or bare flip during a window still does. Only one in `repoPath`
-itself is named at each merge (`merge-task.sh`'s local refresh reads `repoPath` alone); one committed in another
-clone of the set, such as the primary checkout of a self-rollout's separate clone, is named first when the
-next entry at § 1 halts on it with the queued-aware remedy.
+committed on the local default branch mid-rollout must not halt an unattended run. The git-env canary (§ 4.5) honours this: it accepts local commits not on `origin/<default>` when every one is a non-merge commit touching only close-out paths (land.sh's `closeout_shaped`; stricter than its S9, so no merge and no empty commit) or deleting a file directly under `docs/reviews/` (land.sh's `closeout_change`: a consumed review doc's deletion), so a close-out landed mid-run trips no window; any other local commit, reset or bare flip during a window still does. In a clone-rooted rollout (every rollout scheduled after P26, and every self-rollout), a commit in any other clone of the set (the in-place checkout, the primary checkout of a self-rollout among them) halts an entry only when it touches a path a not-yet-merged task cites (`reconcile-rollout.py cited`); any other is a pushed-base note.
+In an in-place-rooted rollout, one in another clone of the set is still named first when the next entry at § 1 halts on it with the queued-aware remedy.
 "Re-run § 2.5" keeps its meaning (§ 2.5 then § 2.6); it does not include this gate. **Pausing is exempt**,
 exactly as for § 2.5.
 
@@ -184,11 +193,47 @@ exactly as for § 2.5.
   clone, and the remedy: land them by PR, or wait for the queued `close/…` landing PR) above the
   ROLLOUT-STATUS line and end the turn with
   `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="local default branch is ahead of origin"`.
-- **Exit 2** (a fetch or the default-branch lookup failed, a script not found with the root set): the
-  same write-nothing halt with `reason="pushed-base check failed"`. The guard's `pushed-base: /skills/… not
+- **Exit 2** (a fetch or the default-branch lookup failed, a script not found with the root set), or
+  `reconcile-rollout.py cited` exiting non-zero before it: the same write-nothing halt with
+  `reason="pushed-base check failed"`. The guard's `pushed-base: /skills/… not
   found` is no halt: export the root and re-run by `plugin-root.md` rule 4 first.
 - **Any other non-zero exit** (1, 127, …): the same write-nothing halt with
   `reason="pushed-base check failed"`. The gate fails closed on any status it does not define.
+
+### 2.8. Launch-directory gate
+
+A lead's tools reset every `cd` outside the directory the session was launched in, so the lead of a rollout
+run from its clone (ADR 0042) must launch at the rollout's `Project root`, or at an ancestor of it within the
+root's toplevel: anywhere else its merges, verifies and worktrees would run in the wrong tree.
+**Entry points only**, exactly as § 2.7: run the snippet directly after § 2.7, and never on a heartbeat, driver, completion
+notification, `resumeFromRunId` resume or Stage re-send. Repair's hand-off (`/thread:repair` § 4) enters the loop past
+§ 2.7, so it runs this snippet itself before it hands off, and on exit 3 stops at its diagnosis with no hand-off,
+telling Lachy to run `/thread:execute` from the Project root. `<repoPath>` is the rollout's
+`Project root`; `<launchDir>` is this session's primary working directory as the harness reports it (the
+environment block's "Primary working directory"), never `pwd`: a `cd` earlier in the session moves the
+shell, not the launch directory. **Pausing is exempt**, exactly as for § 2.5.
+
+```bash
+# thread:launch-dir-check (extracted and tested by tests/self-rollout-check.test.sh)
+R="<repoPath>"
+D="<launchDir>"
+case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
+sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
+[ -f "$sc" ] || { echo "self-rollout-check.sh not found at $sc: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
+bash "$sc" --launch-check "$R" "$D"
+# end thread:launch-dir-check
+```
+
+- **Exit 0**: proceed. A `WARN:` (a Project root rolled out in place before ADR 0042, whose launch directory
+  is not checked) is passed on to the user.
+- **Exit 3**: write nothing (no stamp, no `clear-pause`, no `mark-started`, `mark-integrating` or
+  `log-integration`, no push, no merge, no Workflow call). Print the stderr verbatim above the
+  ROLLOUT-STATUS line (it names the remedy: start a session in the Project root, then
+  `/thread:execute [[<rollout>]]`) and end the turn with
+  `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="launched outside the Project root"`.
+- **Exit 2** (the script not found with the root set) or **any other non-zero exit**: the same write-nothing
+  halt with `reason="launch-directory check failed"`. The guard's `not found at /skills/…` is no halt: export
+  the root and re-run by `plugin-root.md` rule 4 first.
 
 ### 3. Resolve effective config per task
 
@@ -485,6 +530,7 @@ python3 "$gc" <verb> --rollout <rollout-note> <its flags: --repo <repoPath> --de
        - Existing follow-on: look in `Work/Tasks/` root, then `Work/Tasks/Archive/**`, and never create a second same-named note. A failure already listed (an unresolved line with the same `close phase <slug>-p<N>`, `close phases <slug>-p<N,M>` or `touched-phases` key) gets only the in-place `still failing` annotation below, never a second line; only failures not yet listed are appended as new lines. If the only copy is archived and done, move it back to `Work/Tasks/` as the archive move below moves the rollout note (`git mv` when `git ls-files --error-unmatch` finds it, else a plain `mv`, printing `tracked` or `untracked` as that snippet does) and reset `status: open` before appending. A `tracked` move-back staged the deletion of its old `Work/Tasks/Archive/**` path, which the archive commit below (or the sign-off form's vault commit) must name.
      - **Resolving a stale follow-on (resume or hand fix).** On any re-run where `phase-close-followup-<rollout-slug>` already exists, walk its unresolved lines. Append `resolved <date>: <outcome>` to a `close phase <slug>-p<N>` line when phase N is absent from Errors in a run of its line that printed sections, whatever the exit code and whatever its new outcome; to a `close phases` line when that line no longer exits 2 or crashes (it printed sections); and to a `touched-phases` line when `touched-phases` exits 0. Append `still failing <date>: exited <code>: <message>` in place to each line that still fails. When every line is resolved, stamp the follow-on `status: done` + `completed: <date>`, so a follow-on never keeps claiming a failure that no longer exists. The full ceremony (never the sign-off form below) also re-points at the post-move path every re-run command whose `--rollout` still names the live `Work/Tasks/<rollout-slug>.md` (the sign-off form writes them so), since the move below archives the note.
    - Stamp `status: done` + `completed: <date>` on the rollout frontmatter.
+   - Refresh the in-place checkout once: `bash ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh --refresh-in-place <Project root>` (ADR 0042). For a rollout clone it fast-forwards the in-place twin to `origin/<default>` (`fetch`, then `merge --ff-only --no-autostash`: never a merge commit, a rebase or an autostash) and prints one `in-place: …` line; for a root rolled out in place it prints nothing. After the stamp the rollout no longer reads as running, so a self-rollout's primary checkout, held all run (ADR 0031), is caught up here; from here on the ceremony runs the merged engine, as after land.sh S4. Put its line in the Completion log below. A `not moved` or `held` line is repeated in § 6's report with its remedy (the line carries it: a diverged twin's follows its landing route, `land.sh --route`). It never halts the ceremony.
    - File any follow-on work the rollout's Post-rollout section names (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/`, and rewrite those items in the rollout note as thin pointers to the new tasks, and add a pointer to any phase-close follow-on filed above. Both kinds of follow-on use the vault's new-task frontmatter (after `_System/Templates/Task.md` and the rollout template's own), never `rollout:`, `phase:` or `owner:`:
      ```yaml
      tags: [task]
@@ -497,7 +543,7 @@ python3 "$gc" <verb> --rollout <rollout-note> <its flags: --repo <repoPath> --de
      due:
      captured: <today>
      ```
-   - Append a `## Completion log` to the rollout note: dispatch dates, tasks → PRs (links + merge dates), convergence stats per task, **total duration + a per-task duration breakdown** (read the `timeline` block from `reconcile-rollout.py status --rollout <rollout-note>` — it's computed from each task note's `started:`/`merged:` stamps, ADR 0030), the rollout note's `## Race log` copied (when it has one), phase closure: phases closed, already closed, ambiguous (with the tool's reason), failed (with the follow-on task link), left open (with the fixed reason), the automatic descopes copied from the rollout note's `## Notes` `descope:` lines (task, part, follow-up or owner, run), the automatic retries copied from its `auto-retry:` lines (task, count, stage, feedback sha, any raise), the disposition of each post-rollout item, and the Reflection line `Reflection: <close-score's line>; the weekly Reflection reads it`. An unattended Stop-driver run writes the same line. When the associated thread stays open, the log also records why; otherwise the ceremony's last bullet closes it.
+   - Append a `## Completion log` to the rollout note: dispatch dates, tasks → PRs (links + merge dates), convergence stats per task, **total duration + a per-task duration breakdown** (read the `timeline` block from `reconcile-rollout.py status --rollout <rollout-note>` — it's computed from each task note's `started:`/`merged:` stamps, ADR 0030), the rollout note's `## Race log` copied (when it has one), phase closure: phases closed, already closed, ambiguous (with the tool's reason), failed (with the follow-on task link), left open (with the fixed reason), the automatic descopes copied from the rollout note's `## Notes` `descope:` lines (task, part, follow-up or owner, run), the automatic retries copied from its `auto-retry:` lines (task, count, stage, feedback sha, any raise), the disposition of each post-rollout item, the in-place checkout's refresh line (above; none for a root rolled out in place), and the Reflection line `Reflection: <close-score's line>; the weekly Reflection reads it`. An unattended Stop-driver run writes the same line. When the associated thread stays open, the log also records why; otherwise the ceremony's last bullet closes it.
    - Delete the rollout's `ROLLOUT-HEARTBEAT` cron if one is registered (`CronList` → `CronDelete`); the heartbeat also self-deletes on its next tick, but don't leave it ticking for up to 20 minutes against a finished rollout.
    - Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py retire --rollout <rollout-note>` (*Git-env canary*): it runs `check-all`, then removes the rollout's records. A non-zero exit halts before the move.
    - Move the rollout note to `Work/Tasks/Archive/Rollouts/`, then commit the ceremony's notes (task, phase, follow-on and rollout) by pathspec. A rollout note is usually untracked (the vault's daily sweep commits notes), and `git mv` of an untracked file fails (`fatal: not under version control`, rc 128), so the move depends on tracking: `git mv` when `git ls-files --error-unmatch` finds the note, else a plain `mv`. Each branch prints its case, `tracked` or `untracked`, and the commit keys on that word. A move never overwrites: a same-named note already in `Archive/Rollouts/` is a collision, which halts the ceremony and is reported. The snippet exits 1 with nothing moved; surface its message to the user and stop before the commit, leaving both notes as they are (`mv -n` is no guard: on macOS it exits 0 when it skips the move):
@@ -687,7 +733,10 @@ Needs you (each pushed once; the queue runs on without your answer — § 6.5):
 Held: [[task-l]] — depends on [[task-h]] (blocked)
 Descoped: [[task-p]] — "a canary" → follow-up [[proj-followup-canary]] (automatic, Plan-blocked feedback run 1; restarted)
 Auto-retried: [[task-q]] — 1/2 (plan; feedback 3f2a9c1b0d4e) (automatic; restarted)
+In-place checkout: in-place: ~/repos/<repo> not moved: diverged: 1 local-only commit(s) (…), 3 behind origin/master; <remedy>
 ```
+
+The `In-place checkout:` line, at completion only, repeats § 4.5 step 5's `--refresh-in-place` line when it reads `not moved` or `held`, its remedy with it (a diverged twin's follows its landing route; a held primary checkout catches up at the next land.sh S4 or `--refresh-in-place` once no rollout runs on it). A twin it fast-forwarded, or a root rolled out in place, prints no such line.
 
 At completion, in § 4.5 step 5's sign-off form and on the halt guard's `done` route (§ 4.5 step 1.5), the report prints before step 5's last bullet runs `/thread:close`, so close's banner and the status line end the Turn (close step 9, rule (2)). At completion the report ends with one more line, in chat only (never written to the note): `Reflection: /thread:reflect [[<rollout-slug>]]`, the offer of a Reflection that Lachy runs when he chooses.
 
@@ -766,8 +815,9 @@ The queue (§4.5) halts only when nothing can start and nothing is running or in
 - a RACE re-verify is red, timed out or left no rc (`reason="RACE: origin/<default> fails the verifier"`), or
 - a RACE re-verify reads `noslot` a third time in a row (`reason="RACE: no verify slot for the re-verify of [[slug]]"`), or the Integration verify does (`reason="no verify slot for [[slug]] in 3 tries"`, after `undo`): a verify slot held that long is a hung holder, a human's to look at (`verify-slot.py status` names it), or
 - § 2.5, or a §4.5 re-check of it, reports the repo on the landing register, or the check itself fails (`reason="<owner/name> is on the landing register"` or `reason="landing-register check failed"` — a **designed** stop: unlisting is Lachy's call; open PRs stay open and re-invocation after unlisting flushes them), or
-- § 2.6, or its run after a §4.5 re-check, finds `repoPath` is a directory-source plugin marketplace checkout, or the check itself fails (`reason="repoPath is a live plugin marketplace checkout"` or `reason="self-rollout check failed"` — nothing is stamped, dispatched or merged; the check's stderr, printed verbatim, names the fix, a separate clone and `/thread:schedule --regenerate`), or
-- § 2.7, at an entry point, finds a known clone's local `<default>` ahead of `origin/<default>` beyond THREAD.md, or the check itself fails (`reason="local default branch is ahead of origin"` or `reason="pushed-base check failed"` — nothing is stamped, cleared or dispatched; land those commits by PR, or wait for the queued `close/…` landing PR to merge, then re-invoke), or
+- § 2.6, or its run after a §4.5 re-check, finds `repoPath` is a directory-source plugin marketplace checkout, or the check itself fails (`reason="repoPath is a live plugin marketplace checkout"` or `reason="self-rollout check failed"` — nothing is stamped, dispatched or merged; the check's stderr, printed verbatim, names the fix, a rollout clone and `/thread:schedule --regenerate`), or
+- § 2.7, at an entry point, finds a known clone's local `<default>` ahead of `origin/<default>` beyond THREAD.md (in a clone-rooted rollout, the clone's own, or a peer's touching a cited path), or the check itself fails (`reason="local default branch is ahead of origin"` or `reason="pushed-base check failed"` — nothing is stamped, cleared or dispatched; land those commits by PR, or wait for the queued `close/…` landing PR to merge, then re-invoke), or
+- § 2.8, at an entry point, finds the lead launched outside a clone-rooted rollout's Project root, or the check itself fails (`reason="launched outside the Project root"` or `reason="launch-directory check failed"` — nothing is stamped, cleared or dispatched; start a session in the Project root, then re-invoke), or
 - § 4's git-env check finds a repo-local `GIT_*` variable exported in the lead session, or the check itself fails (`reason="git env set in the lead session"` or `reason="git-env check failed"` — nothing is stamped or dispatched; relaunch Claude Code from a shell without them, or put a working `git` on PATH, then re-invoke), or
 - the git-env canary (§ 4.5 *Git-env canary*) exits non-zero anywhere, or `next` reports `halt: "git-env"` (`reason="git-env trip: the shared checkout changed"` on exit 3 or a hold, `reason="git-env canary failed"` on anything else — a **designed** stop: `/thread:repair` (its git-env step, 3e) shows the evidence and records Lachy's ack, and re-invocation resumes), or
 - `reconcile-rollout.py verify-timeout` exits 1 at an entry (`reason="invalid verify_timeout on [[rollout]]"`: nothing is stamped, cleared or dispatched; fix the rollout frontmatter and re-invoke), or
@@ -897,11 +947,12 @@ A Leg of a serial rollout runs `skills/execute/legs.md` § Room stop instead.
 
 **The five read-only agents read the task tree, never `repoPath`.** The planner, plan judge, plan reviser and investigator are handed `Task tree: <tree>` and enter it with `taskTreeSetup`; the review judge is handed the same path as context only (the PR is authoritative: it reads the tree only when its HEAD equals the PR head and its status is clean, else `gh pr diff` / `gh pr view` alone). The planner and investigator **refresh** a reused tree: after a fetch they fast-forward it to `origin/<default branch>` only when it has no tracked changes and no commits of its own (`merge --ff-only` on a branch, `checkout --detach` only when already detached, so a branch tree is never detached); any skip prints `tree NOT refreshed: <why>; N behind origin/<base> as last fetched` for the agent to quote. The plan judge and reviser never move it. The planner and investigator also run the rollout's `env_bootstrap`, last and only once the shell is inside a tree that is its own toplevel, so a failed fetch or a stale plain directory at the tree path never runs it in (or under) the main checkout. Every `taskTreeSetup` prints `tree base: <sha>`; the plan's first line is `Planned on: <sha>`, and the plan judge compares the two and returns `changes` when a tree recreated or moved since planning no longer backs the plan. A detached tree met by a code-writing task's planner or judge (a read-only → code-writing scope flip on the same slug) is attached to `audit-fix/<alias>`: the existing branch, else a new one at HEAD, so no commit is lost. Agents tidy only what their own verifier run added (a before/after `status --porcelain` diff), never the env bootstrap's output. **`repoPath` is only the anchor and the branch source**; no agent reads its files. `merge-task.sh` still fast-forwards it after each merge (when it is on the base branch), because the reaper measures task branches against it (Cleanup, below).
 
-**Why explicit, not `isolation: "worktree"`:** the harness's `isolation: "worktree"` worktrees the *session's* git root, not the target repo — from an ops/vault session it would grab `~/repos/workspaces` (the wrong repo) and ignore `repoPath` (verified empirically). Anchoring on `repoPath` makes the engine correct **from any launch location** (vault, ops, or the repo itself) and places worktrees under the target repo where the daily reaper finds them. The Workflow script has no shell, so the task's first agent creates the tree, not the engine.
+**Why explicit, not `isolation: "worktree"`:** the harness's `isolation: "worktree"` worktrees the *session's* git root, not the target repo — from an ops/vault session it would grab `~/repos/workspaces` (the wrong repo) and ignore `repoPath` (verified empirically). Anchoring on `repoPath` places worktrees under the target repo, wherever an agent's session sits, and puts them where the daily reaper finds them. It does not free the lead: its tools reset every `cd` outside its launch directory, so the lead itself launches at the Project root, the rollout clone (ADR 0042), or an ancestor of it within its toplevel, which § 2.8 checks at every entry point. The Workflow script has no shell, so the task's first agent creates the tree, not the engine.
 
 **Cleanup** is the daily sweep's worktree reaper (`_shared/scripts/daily-sweep.sh` → `prune_worktrees`); the engine does not clean up after itself. Its rules, per worktree under `.claude/worktrees/`:
 
 - It never reaps a tree whose `status --porcelain` is non-empty; untracked files count.
+- A rollout clone under `~/repos` (`~/repos/workspaces-rollout` among them) is a main checkout like any other, so the reaper reaches its `.claude/worktrees/` too, measured against the clone's own local default branch, which merge-task fast-forwards after every merge.
 - `ahead` is `rev-list <main checkout's current branch>..<branch>`, measured against the **local** branch, not origin. A branch that reads as ahead is kept unless a merged PR exists for it. A detached tree resolves to `HEAD`, reads 0 ahead, and is reaped once clean.
 - It skips a tree whose lock file names a live `pid N`, and unlocks and reaps stale locks.
 

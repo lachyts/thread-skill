@@ -87,8 +87,8 @@ rollout's Run record (never on the serial path), and tune.py's one tunings.jsonl
 note's Leg log through serial-score.py's `leg.py status`, the Run record, and every note under its Work/Tasks for
 `fixes:`. Reads: the rollout note; the Run record, reviews.jsonl and
 tunings.jsonl; ~/.config/thread/rollouts.toml through rollout-settings.py; every note under Work/Tasks/ (Archive
-included) for `fixes:` and `merged_into:` (score.py's escapes.py); the Project root's git, read-only and never
-fetched: land.sh's `git remote get-url origin`, escapes.py's rev-parse, symbolic-ref, show, log, rev-list,
+included) for `fixes:` and `merged_into:` (score.py's escapes.py); the Project root's git (or its in-place
+checkout's when fresher, ADR 0042), read-only and never fetched: land.sh's `git remote get-url origin`, escapes.py's rev-parse, symbolic-ref, show, log, rev-list,
 merge-base, cat-file, diff-tree and blame, and `git remote get-url origin` in each clone reviews.jsonl names
 (score.py, through rollout-settings.py's _origin_slug).
 

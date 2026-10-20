@@ -476,6 +476,37 @@ test('span: the Escapes sweep reads an old, never-read record: an in-window reve
   assert.equal(old.breachCounts, false)
 })
 
+test('span: a clone-rooted record whose in-place twin is fresher reads the twin, and dates the revert only the twin has (ADR 0042)', (t) => {
+  const h = setup(t)
+  h.gitEnv = { GIT_AUTHOR_DATE: '2026-08-09T00:00:00Z', GIT_COMMITTER_DATE: '2026-08-09T00:00:00Z' }
+  git(h, ['commit', '-q', '--allow-empty', '-m', 'init'])
+  fs.writeFileSync(path.join(h.repo, 'f.txt'), 'one\n')
+  git(h, ['add', '.'])
+  h.gitEnv = { GIT_AUTHOR_DATE: '2026-08-10T00:00:00Z', GIT_COMMITTER_DATE: '2026-08-10T00:00:00Z' }
+  git(h, ['commit', '-q', '-m', 'old a (#7)'])
+  const shaA = git(h, ['rev-parse', 'HEAD'])
+  // the rollout clone, cloned before the revert: its object store never holds it
+  const clone = path.join(h.home, 'repo-rollout')
+  execFileSync(REAL_GIT, ['clone', '-q', h.repo, clone], { env: { PATH: process.env.PATH, HOME: h.home } })
+  git(h, ['remote', 'set-url', 'origin', 'https://github.com/o/r.git'], clone)
+  git(h, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'], clone)
+  h.gitEnv = { GIT_AUTHOR_DATE: '2026-09-05T00:00:00Z', GIT_COMMITTER_DATE: '2026-09-05T00:00:00Z' }
+  git(h, ['revert', '--no-edit', shaA])
+  h.gitEnv = {}
+  git(h, ['update-ref', 'refs/remotes/origin/main', 'HEAD'])
+  git(h, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'])
+  assert.equal(git(h, ['rev-parse', 'refs/remotes/origin/main'], clone), shaA, 'fixture: the clone root is behind its twin')
+  emitAll(h, 'clone-r', byTs(life('cl-a', '2026-08-10T00:00:00Z', '2026-08-10T01:00:00Z', { lane: ['2026-08-10T01:00:00Z', '2026-08-10T01:10:00Z'], pr: 7 })))
+  rolloutNote(h, 'clone-r', { status: 'done', archived: true, root: clone })
+  const s = span(h)
+  const r = entryOf(s, 'clone-r')
+  assert.ok(r, JSON.stringify([s.flags, s.cannotShow]))
+  const rv = r.friction.find((x) => x.kind === 'escape' && x.source === 'revert')
+  assert.ok(rv, JSON.stringify(r.friction))
+  assert.deepEqual([rv.task, rv.at, rv.inWindow], ['cl-a', '2026-09-05T00:00:00.000Z', true])
+  assert.ok(s.flags.some((f) => f.includes(`ref read from the in-place checkout ${h.repo}: fresher than the Project root's`)), JSON.stringify(s.flags))
+})
+
 test('span: two Project roots for one repo: the newest is read, flagged', (t) => {
   const h = setup(t)
   const second = path.join(h.home, 'clone')

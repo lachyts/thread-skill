@@ -51,7 +51,7 @@ Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/na
 (`[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+`, a name that is not all dots), never ending `.git`. It is
 matched, ignoring case, against `land.sh --origin-slug <--repo>`: the clone's local `git remote get-url
 origin` (no network) in any of the three GitHub URL forms, with a trailing `/` and `.git` stripped. So a
-self-rollout's separate clone resolves the same as its primary checkout. Two repo keys equal ignoring case
+rollout clone (ADR 0042) resolves the same as its in-place checkout. Two repo keys equal ignoring case
 are refused as a duplicate. land.sh is run only when the file holds at least one repo table and `--repo`
 was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole on expiry).
 

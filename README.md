@@ -231,9 +231,14 @@ Reflections in a row (ADR 0037 d4, d6).
   rollout on the machine at its next entry, stamped or not. Stamping a key on
   the rollout note does not clear that halt; only fixing the file at the line
   its stderr names does.
-- **Schedule picks the rollout root (#108).** When the Project root is the
-  live directory-source plugin checkout, schedule uses the separate
-  `<repoPath>-rollout` clone, or refuses with the fix.
+- **Every parallel rollout runs from its rollout clone (#108, ADR 0042).**
+  Schedule § 0 resolves every repo to `<toplevel>-rollout`, a second full
+  clone beside its toplevel, and makes it on the first rollout after Lachy's
+  yes (`self-rollout-check.sh --ensure`), so peer sessions committing in the
+  in-place checkout never trip a rollout's windows. The lead launches in the
+  clone (execute § 2.8), merge-task fast-forwards the in-place checkout after
+  each merge, and a clone's THREAD.md copy is never a thread. A rollout
+  scheduled before then keeps its root; `--regenerate` re-roots it.
 
 ## Install
 
