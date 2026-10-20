@@ -109,6 +109,7 @@ that ends a killed holder's suite before its verify slot frees;
 `verify-slot.py status` shows who holds each verify slot and who waits.
 `skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
 watches the shared checkout's default branch and bareness around every launch
+(a task call's window is armed by `reconcile-rollout.py mark-started` itself)
 and halts the queue on a change that is not a close-out (execute § 4.5).
 `skills/execute/scripts/step-boundary.py` is the lead's side of a Chorus room
 stop: it reads the Workflow journals to stop each call at a step boundary and

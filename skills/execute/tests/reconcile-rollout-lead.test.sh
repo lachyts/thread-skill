@@ -6,6 +6,7 @@
 # Usage: bash reconcile-rollout-lead.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
+unset $(git rev-parse --local-env-vars 2>/dev/null)   # the Project roots are git checkouts (p26-3)
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
@@ -20,7 +21,9 @@ has() { case "$1" in *"$2"*) echo "ok   - $3";; *) echo "FAIL - $3: [$2] not in 
 hasnt() { case "$1" in *"$2"*) echo "FAIL - $3: unexpected [$2] in [$1]"; fail=1;; *) echo "ok   - $3";; esac; }
 
 D=""
-scen() { D="$TMP/$1"; mkdir -p "$D/repo"; echo "== $1"; }
+# scen <name>: the Project root $D/repo is a git checkout, so mark-started's arm (p26-3) has a repo to read; every
+# scenario's rollout is ro, so the canary's records are kept per scenario, in temp.
+scen() { D="$TMP/$1"; mkdir -p "$D/repo"; git -c init.defaultBranch=master init -q "$D/repo"; echo "== $1"; export THREAD_GIT_ENV_DIR="$TMP/git-env/$1"; }
 mkro() {
   { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'
     for l in "$@"; do printf '%s\n' "$l"; done
@@ -255,14 +258,17 @@ ok "$(q "$(inp b)" 'd["resumeAt"]')" '"revise"' "approve-gates b: Restart routin
 ok "$(fm a gates_signed)" "<none>" "approve-gates a: no gates_signed: on the Integration route"
 ok "$(fm b gates_signed)|$(fm c gates_signed)" "gates_signed: 2026-10-03T09:00+00:00|gates_signed: 2026-10-03T09:00+00:00" \
   "approve-gates b, c: gates_signed: stamped from --now"
-ms() { out=$(python3 "$SCRIPT" mark-started --tasks "$1" --tasks-dir "$D" --now "$NOW" 2>&1); rc=$?; }
+ms() { out=$(python3 "$SCRIPT" mark-started --tasks "$1" --tasks-dir "$D" --now "$NOW" --arm-repo "$D/repo" --arm-default master 2>&1); rc=$?; }
 ms b
 ok "$rc|$(fm b gates_signed)" "0|<none>" "mark-started b: consumes gates_signed:"
 has "$out" "b: signed-gate restart (gates signed 2026-10-03T09:00+00:00; gates_signed: cleared)" "mark-started b: names the signed-gate restart"
 ms b
 ok "$rc" 0 "mark-started b: a later restart exits 0"
 hasnt "$out" "signed-gate restart" "mark-started b: a later restart is not a signed-gate restart"
-ms a
+# a fresh running note with no marker (a is at review, so the arm would refuse it, p26-3)
+mkt d in_progress
+ms d
+ok "$rc" 0 "mark-started d: a running note with no marker exits 0"
 hasnt "$out" "signed-gate restart" "mark-started: a note with no marker never says signed-gate restart"
 python3 "$SCRIPT" defer --tasks c --tasks-dir "$D" >/dev/null
 ok "$(fm c status)|$(fm c gates_signed)" "status: open|<none>" "defer c: clears gates_signed: with the other run stamps"

@@ -12,6 +12,8 @@ block is agent-fixable, up to `auto_retries` times, before a hand-back is needed
 *(Amended 2026-10-19 by thread-skill-p26-1: a non-task window's owner is the Integration lane (reconcile-rollout.py
 `_holds_lane`), not `integrating:` alone, and `arm` refuses (exit 2, nothing written) a window whose owner does not
 hold.)*
+*(Amended 2026-10-20 by thread-skill-p26-3: a task call's window is armed by reconcile-rollout.py mark-started itself,
+required while the Project root exists, before any write.)*
 
 ## Context
 
@@ -120,7 +122,10 @@ Considered:
   (`rev-parse --is-bare-repository`, so a `config --worktree core.bare` flip counts), and `check`
   compares them when the window ends. A window is open only while its vault owner holds (`in_progress`
   for a task call, the Integration lane for the rest: `integrating:` or a current `integrated`
-  Integration-log line), and `arm` refuses one whose owner does not hold; an orphan is compared once and closed. A change that
+  Integration-log line), and `arm` refuses one whose owner does not hold; an orphan is compared once and closed. A
+  task call's window is armed by `reconcile-rollout.py mark-started` itself (`--arm-repo`/`--arm-default`, required
+  while the Project root exists), after its own refusals and before any write, so a start, restart or seeded revise
+  never launches unarmed (p26-3); a *Lost call* or § 5 resume, which runs no `mark-started`, keeps its own arm. A change that
   is not benign appends a `git-env trip` line to the rollout note's `## Git-env log`, which halts the
   queue before any merge (`next` reports `halt: "git-env"`, `carry` refuses) and is never retried; only
   `/thread:repair` (its git-env step, 3e) clears it, through an `ack` on Lachy's word that names exactly the tripped set
