@@ -64,22 +64,22 @@ Subcommands:
               restart reads as a second block and descope asks. It also removes hand-back's `handed_back:`
               marker (p15-2). `--start start|restart|revise|resume` names the start for the Run record (below).
               It arms the task window itself (p26-3, execute § 4.5 *Git-env canary*): `--arm-repo <repoPath>
-              --arm-default <B>`, which go together (one without the other is a usage error, exit 2, before any
-              note is read), are required while the task's rollout note (resolved as slot-taken resolves it: a
-              --rollout whose stem is the note's `rollout:`, else <tasks-dir>/<rollout>.md) has a `Project root:`
-              line naming a directory that exists, or exists but cannot be read (fail-closed); missing there, the
-              note is refused with exit 2 and nothing written, its ERROR line naming both flags. With no `Project
-              root:` line, a root that does not exist or no rollout note, it behaves as before; the flags given
-              with no rollout note to arm against are exit 2, nothing written. Per slug, in order: a note not found
-              or unparseable, a finished status (exit 1, nothing armed), then the arm, then the writes and
+              --arm-default <B>`, which go together (one without the other is a usage error, exit 2, before any note
+              is read), are required while the task's rollout note (resolved as slot-taken resolves it: a --rollout
+              whose stem is the note's `rollout:`, else <tasks-dir>/<rollout>.md) has a `Project root:` line naming a
+              directory that exists (or that cannot be stat'ed), or exists but cannot be read (both fail-closed);
+              missing there, the note is refused with exit 2 and nothing written, its ERROR line naming both flags.
+              With no `Project root:` line, a root that does not exist or no rollout note, it behaves as before; the
+              flags given with no rollout note to arm against are exit 2, nothing written. Per slug, in order: a note
+              not found or unparseable, a finished status (exit 1, nothing armed), then the arm, then the writes and
               slot-taken. The arm is a subprocess, `git-env-canary.py arm --rollout <that note> --tasks-dir <dir>
               --repo <R> --default <B> --slug <slug> --kind task`, its stdout and stderr inherited (its `armed`,
-              refusal and HOLD lines pass through); a non-zero arm (an OSError or a signal counts as 2) writes
-              nothing for that note: no `started:`, no `integrating:` removal, no marker consumed, no slot-taken,
-              and an `ERROR: <slug>: the task window's arm exited <rc>; nothing written` line. Exit 3 when any arm
-              exited 3 (a trip or a hold); else 2 (an arm failure or refusal, a missing or unpaired flag, the flags
-              with no rollout note); else 1 (a refused note); else 0. --dry-run never runs the canary: it prints
-              `<slug>: would arm the task window (dry-run)`, and the flag requirement still applies.
+              refusal and HOLD lines pass through); a non-zero arm (an OSError or a signal counts as 2) writes nothing
+              for that note: no `started:`, no `integrating:` removal, no marker consumed, no slot-taken, and an
+              `ERROR: <slug>: the task window's arm exited <rc>; nothing written` line. Exit 3 when any arm exited 3
+              (a trip or a hold); else 2 (an arm failure or refusal, a missing or unpaired flag, the flags with no
+              rollout note); else 1 (a refused note); else 0. --dry-run never runs the canary: it prints `<slug>:
+              would arm the task window (dry-run)`, and the flag requirement still applies.
 
   mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
               (the first wins): the durable signal /thread:status reads.
@@ -2753,8 +2753,12 @@ def _arm_gate(args, slug, rollout, cache):
                       "arm the task window: pass --arm-repo <repoPath> --arm-default <B> (execute § 4.5 *Git-env "
                       "canary*, p26-3); nothing written")
     root = _project_root(rollout_note)
-    if root is not None and root.is_dir():
-        return None, (f"{slug}: the rollout's Project root {root} exists, so mark-started arms the task window: pass "
+    try:
+        required, said = root is not None and root.is_dir(), "exists"
+    except OSError as e:  # a root that cannot be stat'ed may exist: fail closed
+        required, said = True, f"cannot be read ({e.strerror or e})"
+    if required:
+        return None, (f"{slug}: the rollout's Project root {root} {said}, so mark-started arms the task window: pass "
                       "--arm-repo <repoPath> --arm-default <B> (execute § 4.5 *Git-env canary*, p26-3); nothing "
                       "written")
     return None, None
