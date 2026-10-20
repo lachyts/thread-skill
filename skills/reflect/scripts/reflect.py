@@ -73,8 +73,10 @@ parallel with no note). For each:
   set-aside a Leg log `set aside` line: leg, status (leg.py's), stage (gate for gate-pending, plan, review, else
             block), reasonClass null, setAsideAt `leg`, taskNote, and movedBy: the first record act on the task after
             it (answer-recorded, gate-signed, `gate-signed (standing)` for a standing one, handed-back with its via, or
-            race-decided) no later than the Leg log's next claimed, took or done of it; else `unrecorded`, with mover
-            {kind (claimed | took | done), at, leg} of that pick-up; null while nothing picked it up by until.
+            race-decided) before the end of the minute of the Leg log's next claimed, took or done of it (a Leg-log
+            stamp floors to its minute, so an act in that minute came first: serial-score.py's done + 60 s rule);
+            else `unrecorded`, with mover {kind (claimed | took | done), at, leg} of that pick-up; null while nothing
+            picked it up by until.
             explainedIn and cannotShow as a parallel unrecorded set-aside's.
   ask       a `halt cleared:` line, act haltCleared (serial-score.py's act: a halt is Lachy's to clear), its task the
             first one a later Leg took from the halted Leg (null when none), detail `Leg <K>'s halt cleared: <reason>`.
@@ -305,6 +307,7 @@ RESOLVE_DAY_PY = os.path.join(SHARED, "resolve-day.py")
 ZONE = "Australia/Melbourne"
 STALE_DAYS = 28
 DAY_MS = 24 * 3600 * 1000
+MINUTE_MS = 60 * 1000  # a Leg-log stamp's precision: it floors to its minute
 NEEDS_YOU_MAX = 600
 REPAIR_TEXT_MAX = 300
 SCORE_TIMEOUT = 420
@@ -969,14 +972,16 @@ class Span:
     @staticmethod
     def chain_moved_by(lines, moves, task, at, until):
         """(movedBy, mover) of a chain's set-aside at `at` (ms): the first human act on the task in the record after it
-        (its kind, a hand-back with its via), when it comes no later than the Leg log's next claim, take or done of the
-        task; `unrecorded` with mover {kind, at, leg} when a Leg picked the task up with no act before it; else None."""
+        (its kind, a hand-back with its via), when it comes before the end of the minute of the Leg log's next claim,
+        take or done of the task (a Leg-log stamp floors to its minute and a record act is ms, so an act in that minute
+        came first: legs.md signs a gate, then claims, serial-score.py's done + 60 s rule); `unrecorded` with mover
+        {kind, at, leg} when a Leg picked the task up with no act before it; else None."""
         key = task.lower()
         pick = next((m for m in moves if m[0] > at and m[1] == key and m[0] <= until), None)
         for t, _n, d in lines:
             if t <= at:
                 continue
-            if t > until or (pick is not None and t > pick[0]):
+            if t > until or (pick is not None and t >= pick[0] + MINUTE_MS):
                 break
             if str(d.get("task") or "").lower() != key or d.get("kind") not in SERIAL_MOVERS:
                 continue

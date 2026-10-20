@@ -288,10 +288,10 @@ It folds each read rollout's journals and scores it, reads its friction and clos
 every record (ADR 0037 d4) and the dated `repair:` lines over every record's rollout note, joins the Grade log to what
 followed each grade (`skills/reflect/scripts/grades.py`, loaded by span, whose header holds the join's rules), and lists
 the open Watches and the knob candidates; its header holds every rule. A serial chain (`shape: serial`, ADR 0040) is
-read when its Run record or its Leg log has a line in the window (a hands-off chain records nothing): span
+read when its Run record or its Leg log has a line in the window (a hands-off chain writes no Run-record line): span
 scores it through `serial-score.py`, as § 1 does, never with fold-journals, the settings or score.py, and never makes
-it a knob candidate (its entry's `shape` is `serial`, with the chain state in `chain`). Add `--since <TS>` and `--until <TS>` only on Lachy's word: by
-default it starts where the last Reflection ended. Read the whole `span.json`. Exit 1 or 2 stops the reading: quote
+it a knob candidate (its entry's `shape` is `serial`, with the chain state in `chain`). Add `--since <TS>` and
+`--until <TS>` only on Lachy's word: by default it starts where the last Reflection ended. Read the whole `span.json`. Exit 1 or 2 stops the reading: quote
 its stderr line. Never re-run it after a write (step 12 on): a new span is a new Reflection, with a new id.
 
 ### 11. The reading
@@ -327,13 +327,16 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
 - A `churn` item is a review round that only answered the last round's fix (execute § 5): trace what the fix broke.
 - A serial chain's (`shape: serial`) items come from its record's acts and its Leg log (`leg.py status`), read by the
   chain's rules (`skills/execute/legs.md`, ADR 0040), never as a queue's: it has no Slots, lane, retry, descope, churn
-  or breach. A `haltCleared` ask is Lachy clearing a Leg's halt (legs.md § The task loop, a `--revert` that stands, and
-  § Begin): trace what halted the Leg. A `set-aside` (its `leg`, its leg.py `status`) is traced to legs.md § The task
-  loop (a gate under *Gates, before any write*, else *Done or set aside*), and by its `movedBy` to
-  what moved it on: a record act, or `unrecorded` when a later Leg picked it up (`mover`) with none, read as a
-  parallel unrecorded set-aside is (below). A `restart` is repair § 7 starting a Leg that no hand-over started: trace
-  why the last Leg did not hand over. An `escape` is a fix task naming a chain task in `fixes:` (legs.md § Fix tasks),
-  traced to the smoke Verify or review that should have caught it, only when its `inWindow` is true.
+  or breach. A `haltCleared` ask is Lachy clearing a Leg's halt, which stands until his `leg.py clear-halt`
+  (`skills/execute/legs.md` § Begin, repair § 7): trace what halted the Leg, a `--revert` that could not run
+  (`skills/execute/legs.md` § The task loop) or a second lock timeout (`skills/execute/legs.md` § Concurrency). A
+  `set-aside` (its `leg`, its leg.py `status`) is traced to `skills/execute/legs.md` § The task loop (a gate under
+  *Gates, before any write*, else *Done or set aside*) or to `skills/execute/legs.md` § Preflight (an MCP namespace
+  that did not answer), and by its `movedBy` to what moved it on: a record act, or `unrecorded` when a later Leg
+  picked it up (`mover`) with none, read as a parallel unrecorded set-aside is (below). A `restart` is repair § 7
+  starting a Leg that no hand-over started: trace why the last Leg did not hand over. An `escape` is a fix task naming
+  a chain task in `fixes:` (`skills/execute/legs.md` § Fix tasks), traced to the smoke Verify or review that should
+  have caught it, only when its `inWindow` is true.
 
 For each `set-aside` item whose `movedBy` is `unrecorded`, read what its `explainedIn` names: its `taskNote`'s
 `## Needs you` and `## Integration log`, a gate set-aside's `## Approved gates`, and the rollout note's `## Notes`

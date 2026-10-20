@@ -1584,3 +1584,25 @@ test('span reads a hands-off chain with no Run record through its Leg log; one w
   assert.deepEqual([b.headline.handsOffRate, b.friction], [1, []])
   assert.equal(JSON.parse(fs.readFileSync(b.score, 'utf8')).merges.count, 1)
 })
+
+test('a chain set-aside\'s act counts through the minute of the Leg-log pick-up that follows it, and no later', (t) => {
+  // A Leg-log stamp is a minute floor and a record act is ms, so a sign-off 20 s into the minute its re-claim is
+  // stamped in came first (legs.md: approve-gates, then the claim): it moved the task, not the claim. An act a full
+  // minute after the pick-up came after it, so the pick-up moved the task with no act before it.
+  const h = setup(t)
+  for (const s of ['g1', 'g2']) chainTask(h, 'chain-c', s)
+  serialNote(h, 'chain-c', ['g1', 'g2'], [
+    `- ${CAT('10:00')} Leg 1 began: leg-1 session s1 in cc-demo from /work`,
+    `- ${CAT('10:01')} Leg 1 claimed [[g1]]`, `- ${CAT('10:02')} Leg 1 set aside [[g1]] (gate-pending): a spend gate`,
+    `- ${CAT('10:03')} Leg 1 claimed [[g1]]`, `- ${CAT('10:10')} Leg 1 done [[g1]] (verify pass)`,
+    `- ${CAT('10:11')} Leg 1 claimed [[g2]]`, `- ${CAT('10:12')} Leg 1 set aside [[g2]] (gate-pending): a spend gate`,
+    `- ${CAT('10:13')} Leg 1 claimed [[g2]]`, `- ${CAT('10:20')} Leg 1 done [[g2]] (verify pass)`,
+  ])
+  const at = (hms) => new Date(`2026-10-12T${hms}+11:00`).toISOString()
+  emitAll(h, 'chain-c', [[at('10:03:20'), 'gate-signed', 'g1', { standing: true, gates: 1 }],
+    [at('10:14:05'), 'gate-signed', 'g2', { standing: true, gates: 1 }]])
+  const c = entryOf(span(h, [], { since: KSINCE, until: KUNTIL }), 'chain-c')
+  const asides = Object.fromEntries(c.friction.filter((x) => x.kind === 'set-aside').map((x) => [x.task, x]))
+  assert.deepEqual([asides.g1.movedBy, asides.g1.mover], ['gate-signed (standing)', null])
+  assert.deepEqual([asides.g2.movedBy, asides.g2.mover], ['unrecorded', { kind: 'claimed', at: CZ('10:13'), leg: 1 }])
+})
