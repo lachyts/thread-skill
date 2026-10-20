@@ -771,7 +771,8 @@ scen w1
 mkt A open
 arm A task; ok "$rc|$(recf A task state)|$(grep -c git-env "$RO")" "2|<none>|0" "w1: arm a task window on a note that is not running → 2, no record, no log line"
 has "$err" "[[A]] is not running" "w1: … stderr names the note"
-has "$err" "mark-started" "w1: … and the stamp to run"
+has "$err" "stamp status: in_progress (execute § 4) first" "w1: … and the § 4 stamp to run"
+ok "$(printf '%s\n' "$err" | grep -c 'mark-started')" 0 "w1: … and never mark-started (its own arm runs this refusal, p26-3)"
 scen w2
 mkt A review 'pr: https://github.com/o/r/pull/1'
 for k in integrate verify race-verify; do
@@ -855,6 +856,8 @@ a0=$(cksum < "$V/A.md")
 msa A
 ok "$rc" 2 "m2: mark-started with the flags on a note not stamped in_progress → 2 (the arm refused)"
 has "$err" "[[A]] is not running" "m2: … the canary's refusal passes through"
+has "$err" "stamp status: in_progress (execute § 4) first" "m2: … naming the § 4 stamp"
+ok "$(printf '%s\n' "$err" | grep -c 'run reconcile-rollout.py mark-started')" 0 "m2: … never 'run mark-started first' out of mark-started itself"
 has "$err" "ERROR: A: the task window's arm exited 2; nothing written" "m2: … and mark-started's own line"
 ok "$(cksum < "$V/A.md")|$(recf A task state)|$(slots)" "$a0|<none>|0" "m2: … A.md byte-identical (gates_signed: kept, no started:), no record, no slot-taken"
 # m3: under a git-env hold the arm exits 3 and mark-started writes nothing.

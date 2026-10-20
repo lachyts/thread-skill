@@ -20,11 +20,11 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
         single state read, only when the pass exits 0. R bare at arm is itself a trip (`core.bare true at arm`;
         no record). Under a hold it exits 3 and writes no record. A retired rollout: exit 2, nothing created.
         Refuses (exit 2, nothing written: no record, no log line, no pass) a window whose owner does not hold
-        (the owner rule below), its stderr naming the missing stamp (`mark-started` for a task window,
-        `mark-integrating` for the rest), so a skipped stamp stops at the arm, never as a later
-        `record not armed` trip (p26-1). A task call's arm is run by `reconcile-rollout.py mark-started
-        --arm-repo/--arm-default` (p26-3), as a subprocess before any write of its own, which passes this exit
-        code through (a non-zero arm writes nothing for that note).
+        (the owner rule below), its stderr naming the missing stamp (§ 4's `status: in_progress` for a task
+        window, right for mark-started's arm and a direct one alike; `mark-integrating` for the rest), so a
+        skipped stamp stops at the arm, never as a later `record not armed` trip (p26-1). A task call's arm is
+        run by `reconcile-rollout.py mark-started --arm-repo/--arm-default` (p26-3), as a subprocess before any
+        write of its own, which passes this exit code through (a non-zero arm writes nothing for that note).
   check --repo R --default B --slug S --kind K
         Runs the pass, then closes this window's record: `armed` and clean -> a `checked` tombstone; tripped
         (now or by an earlier verb) -> `closed: true`, no second trip line; a closed tripped record -> unchanged.
@@ -580,8 +580,9 @@ def cmd_arm(ctx, args):
     if not ctx.owner_holds({"slug": args.slug, "kind": args.kind}):
         if args.kind == "task":
             st = RR._status(ctx._index[args.slug.lower()][1]) or "none"
-            raise CanaryError(f"refused: [[{args.slug}]] is not running (status {st}): stamp status: in_progress and "
-                              "run reconcile-rollout.py mark-started first; nothing armed")
+            # Only the § 4 stamp: mark-started's own arm (p26-3) runs this, so naming mark-started would be circular.
+            raise CanaryError(f"refused: [[{args.slug}]] is not running (status {st}): stamp status: in_progress "
+                              "(execute § 4) first; nothing armed")
         raise CanaryError(f"refused: [[{args.slug}]] holds no integrating: — run reconcile-rollout.py "
                           "mark-integrating first; nothing armed")
     rc, state, recs = _pass(ctx, want_state=True)
