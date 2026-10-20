@@ -43,7 +43,7 @@ const H = (c) => c.repeat(40)
 const I = {
   prUrl: impl.prUrl, branch: impl.branch, worktreePath: impl.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'),
   trouble: ['conflict'], landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }],
-  plan: 'PLAN', reviewHistory: [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }],
+  reviewHistory: [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }],
   reviewRoundsUsed: 2, rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] },
 }
 const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }

@@ -223,7 +223,7 @@ function approvedGatesLeaks(E) {
               const withGates = { ...task, approvedGates: SENTINEL_GATES }
               const I = {
                 prUrl: PR, branch: BR, worktreePath: WT, headSha: sha('a'), taskBase: sha('b'), mainSha: sha('c'),
-                trouble: ['conflict'], landed, plan: planText, reviewHistory: HIST, reviewRoundsUsed: 2,
+                trouble: ['conflict'], landed, reviewHistory: HIST, reviewRoundsUsed: 2,
                 rung: E.rungRecord(st),
               }
               const c = {

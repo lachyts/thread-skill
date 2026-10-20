@@ -51,7 +51,7 @@ const mkTask = (over = {}) => ({
 const RUNG = { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] }
 const mkI = (over = {}) => ({
   prUrl: PR, branch: BR, worktreePath: WT, headSha: H0, taskBase: TB, mainSha: B1, trouble: [], landed: [],
-  plan: 'THE APPROVED PLAN', reviewHistory: [], reviewRoundsUsed: 1, rung: RUNG, startedAt: START, ...over,
+  reviewHistory: [], reviewRoundsUsed: 1, rung: RUNG, startedAt: START, ...over,
 })
 const mkArgs = (I, over = {}, taskOver = {}) => ({
   rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01',
@@ -181,14 +181,15 @@ test('b1-b3: a conflict from the log, from trouble, or from conflict: lines alon
   }
 })
 
-test('b4: the integrator prompt carries the landed PRs, the plan, the merge step, its anchor STOPs and the rules', async () => {
+test("b4: the integrator prompt carries the landed PRs, the note's plan pointer, the merge step, its anchor STOPs and the rules", async () => {
   const I = mkI({ trouble: ['conflict'], landed: LANDED, reviewHistory: [{ round: 1, feedback: ['own fix'] }] })
   const r = await run(mkArgs(I), { [ILABEL]: ir({ state: 'merged', conflicts: ['a.js'] }), [JLABEL(2)]: jv() })
   clean(r)
   const p = promptOf(r, ILABEL)
   for (const s of [
     'https://github.com/o/r/pull/5 — theirs: rename', 'files: a.js, b.js', 'task brief: /vault/Tasks/proj-theirs.md',
-    'Read EVERY brief above', 'THE APPROVED PLAN', 'Round 1 rejection:\n- own fix', 'ANTI-REGRESSION',
+    'Read EVERY brief above', 'Task note (the brief): /vault/Tasks/proj-fix-a.md',
+    'read the `## Approved plan` section of the task note above (/vault/Tasks/proj-fix-a.md)', 'Round 1 rejection:\n- own fix', 'ANTI-REGRESSION',
     "the lead's trouble: conflict", 'keeping BOTH intents', 'merge --abort', 'VERBATIM into mergeLog',
     'stash push --quiet -m "$L"', 'echo "stashed: $L"', 'L="integration leftovers $(git -C "$WT" rev-parse HEAD)"',
     'never pop or apply it', `This list ends at ${B1}, origin/main as the lead read it`,
@@ -216,9 +217,14 @@ test('b4: the integrator prompt carries the landed PRs, the plan, the merge step
   for (const s of ["the task's contract — your resolution keeps it", 'The approved plan and the review history below are the contract']) {
     assert.ok(!p.replace(/\n/g, ' ').includes(s), `integrator prompt (p14-2): no ${s}`)
   }
-  assert.ok(!p.includes('(no plan:'), 'a plan was passed: no placeholder')
-  const noPlan = T.integratorPrompt(mkTask(), mkArgs(mkI({ plan: '' })), mkI({ plan: '' }))
-  assert.ok(noPlan.includes('---\n(no plan: the task was not plan-gated — the brief is the contract)\n---'), 'the no-plan placeholder keeps its bytes')
+  assert.ok(!p.includes('(no plan:'), 'no placeholder: the prompt never carries a plan (p27-1)')
+  // p27-1: the integrate args carry no plan. The prompt sends the integrator to the note's section, says what a
+  // missing one means, and has no plan fence left after the framing.
+  for (const s of ["No such section: the task's last own call", 'even though your prompt carries no plan']) {
+    assert.ok(p.includes(s), `integrator prompt (p27-1): ${s}`)
+  }
+  const framing = p.indexOf('The approved plan, for reference only')
+  assert.ok(!p.slice(framing, p.indexOf('PRs that landed on origin/')).includes('---\n'), 'integrator prompt (p27-1): no plan fence')
   // p17-1: a commit pushed without a PR is in no landed entry, so a non-empty list points at the first-parent log.
   for (const s of [
     'Commits pushed to origin/main without a PR', `\`${T.GIT_ENV_SCRUB} git -C "${WT}" log --first-parent --oneline ${TB}..${B1}\``,
@@ -248,16 +254,34 @@ test('b4b: the step-back reviser and the integrator agree — the plan is refere
   const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: HIST2, reviewRoundsUsed: 2, plan: P }
   const a = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', task: mkTask({ resume }) }
   const reviser = T.reviserPrompt(a.task, { prUrl: PR, branch: BR, worktreePath: WT }, HIST2, 3, a, P, { history: HIST2, roundsUsed: 2 })
-  const I = mkI({ plan: P })
+  const I = mkI()
   const integrator = T.integratorPrompt(mkTask(), mkArgs(I), I)
+  assert.ok(reviser.includes(P), 'the reviser renders the plan')
+  // p27-1: the integrator reads the plan from the note, never its prompt.
+  assert.ok(!integrator.includes(P) && integrator.includes('`## Approved plan`'), "the integrator points at the note's plan")
   for (const p of [reviser, integrator]) {
-    assert.ok(p.includes(P), 'both render the plan')
     const flat = p.replace(/\s+/g, ' ')
     assert.ok(!/plan[^.]{0,40}\bis (the|your) contract|the task's contract/i.test(flat), 'neither calls the plan the contract')
     assert.match(flat, /The (task )?brief (remains your contract|is the contract|and the review history below are the contract)/)
   }
   assert.ok(reviser.includes('STEP-BACK ROUND') && reviser.replace(/\s+/g, ' ').includes('the plan is reference, not law'))
   assert.ok(integrator.includes('The approved plan, for reference only'))
+})
+
+// p27-1: the integrate args carry no plan; a stray one (an old lead habit, a hand-built Lost-call relaunch) is
+// tolerated and ignored, never rendered: refusing it would read as a Lost call.
+test('p27-1: a stray integration.plan is ignored and never rendered', async () => {
+  const I = mkI({ plan: 'STRAY ' + 'y'.repeat(61000) })
+  assert.equal(T.integrationArgsError(mkArgs(I)), '')
+  const r = await run(mkArgs(I), { [ILABEL]: ir({ state: 'merged', conflicts: ['a.js'] }), [JLABEL(2)]: jv() })
+  clean(r)
+  assert.deepEqual(r.labels, [ILABEL, JLABEL(2)])
+  for (const label of [ILABEL, JLABEL(2)]) {
+    const p = promptOf(r, label)
+    assert.ok(p.length > 0, `${label}: dispatched`)
+    assert.ok(!p.includes('STRAY') && !p.includes('y'.repeat(100)), `${label}: the stray plan is never rendered`)
+  }
+  assert.equal(r.row.plan, null)
 })
 
 test('b5: an already-merged M integrates with that M', async () => {
@@ -914,7 +938,6 @@ test('arg validation: every bad field throws before any dispatch', async () => {
     ['taskBase', mkI({ taskBase: TB.toUpperCase() })], ['mainSha', mkI({ mainSha: undefined })],
     ['trouble', mkI({ trouble: ['merge'] })], ['trouble', mkI({ trouble: ['red', 'red'] })], ['trouble', mkI({ trouble: 'red' })],
     ['landed', mkI({ landed: [{ prUrl: 'x', title: 't', files: [], taskPath: '' }] })], ['landed', mkI({ landed: [{ ...LANDED[0], files: 'a.js' }] })],
-    ['plan', mkI({ plan: null })],
     ['reviewHistory', mkI({ reviewHistory: [{ round: 2, feedback: ['x'] }, { round: 1, feedback: ['y'] }], reviewRoundsUsed: 2 })],
     ['reviewHistory', mkI({ reviewHistory: [{ round: 1, feedback: [3] }] })], ['reviewHistory', mkI({ reviewHistory: [{ round: 1, feedback: 'x' }] })],
     ['reviewHistory', mkI({ reviewHistory: [{ round: 1, feedback: ['x'], stage: 'run' }] })],

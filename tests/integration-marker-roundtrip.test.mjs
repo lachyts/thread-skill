@@ -5,7 +5,8 @@
 // engine's diagnosis as the latest `### Run` after any agent-written text, and whose `status` reads
 // `setAsideAt` (any latest run starting `integration:` → integration) and `blockerSummary` (that latest run).
 // p14-2: x13–x15 carry the approved plan from the plan-gate to Integration and a seeded revise through the note's
-// `## Approved plan` (reconcile writes it from the own call's row; `lead-integrate.py plan` reads it back).
+// `## Approved plan` (reconcile writes it from the own call's row; `lead-integrate.py plan` reads it back for the
+// seeded revise, and the integrator reads it from the note itself, p27-1: the integrate args carry no plan).
 // p12-16: reconcile also writes the Integration log — one `## Integration log` line per integrate row and the
 // `ready:` stamp the lead passes back as integration.readyAt. x7–x12 read both back from engine-built rows.
 //
@@ -43,7 +44,7 @@ const HIST2 = [{ round: 1, feedback: ['own-run fix'] }, { round: 2, feedback: ['
 const mkTask = (over = {}) => ({ slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 4, maxPlanRounds: 3, rung: 'opus-xhigh', ...over })
 const mkI = (over = {}) => ({
   prUrl: PR, branch: BR, worktreePath: WT, headSha: sha('a'), taskBase: sha('b'), mainSha: sha('c'), trouble: [], landed: [],
-  plan: 'PLAN', reviewHistory: [{ round: 1, feedback: ['own-run fix'] }], reviewRoundsUsed: 1,
+  reviewHistory: [{ round: 1, feedback: ['own-run fix'] }], reviewRoundsUsed: 1,
   rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] }, ...over,
 })
 const base = { rolloutSlug: ROLLOUT, repoPath: '/repo', verifier: 'make test', date: '2026-10-01' }
@@ -341,7 +342,7 @@ function planSection(d) {
   return (j < 0 ? rest : rest.slice(0, j + 1)).trimEnd()
 }
 
-test('x13: a plan-gated own call carries its plan through the note into the integrate call', async (t) => {
+test('x13: a plan-gated own call carries its plan into the note, and the integrate call points its integrator there', async (t) => {
   if (!PRESENT) return t.skip(SKIP)
   const d = vault('')
   try {
@@ -352,9 +353,9 @@ test('x13: a plan-gated own call carries its plan through the note into the inte
     assert.ok(planSection(d).startsWith(`## Approved plan\n\n${LEAD_IN}\n\n> ---\n> ### Files to modify\n`), planSection(d))
     const out = planOf(d)
     assert.deepEqual(Object.keys(out).sort(), ['plan', 'slug'])
-    assert.equal(out.plan, PLAN, 'lead-integrate.py plan reads back the exact plan')
+    assert.equal(out.plan, PLAN, 'lead-integrate.py plan reads back the exact plan (the seeded revise still takes it)')
     const section = planSection(d)
-    const I = mkI({ plan: out.plan })
+    const I = mkI()
     const r = await runTask({ ...base, mode: 'integrate', task: mkTask(), integration: I }, async (prompt, o) => {
       if (o.label === `integrate:${SLUG}`) return merged
       if (o.label === `integration-review:${SLUG} r2`) return { verdict: 'changes', feedback: ['keep their rename'], unreadable: false, finishedAt: NOW }
@@ -362,9 +363,11 @@ test('x13: a plan-gated own call carries its plan through the note into the inte
     })
     assert.equal(r.error, undefined, String(r.error))
     const p = r.calls.find((c) => c.label === `integrate:${SLUG}`).prompt
-    assert.ok(p.includes(`---\n${PLAN}\n---`), 'the integrate prompt renders the approved plan')
-    assert.ok(p.includes('The approved plan, for reference only'))
-    assert.ok(!p.includes('(no plan:'), 'not the no-plan placeholder')
+    // p27-1: the integrate args carry no plan; the prompt sends the integrator to the note's section instead.
+    assert.ok(p.includes(`Task note (the brief): /vault/Tasks/${SLUG}.md`), 'the prompt names the task note')
+    assert.ok(p.includes('read the `## Approved plan` section'), "the prompt points at the note's approved plan")
+    assert.ok(!p.includes(PLAN), 'the prompt never renders the plan')
+    assert.ok(!p.includes('(no plan:'), 'not the old no-plan placeholder')
     const ir = JSON.parse(JSON.stringify(r.result))
     assert.equal(ir.tasks[0].plan, null)
     reconcile(d, ir)
@@ -373,6 +376,49 @@ test('x13: a plan-gated own call carries its plan through the note into the inte
     assert.equal(s.queueState, 'set-aside')
     assert.equal(s.setAsideAt, 'run')
     assert.equal(s.blockerSummary.split('\n')[0], T.REVISE_MARKER, 'the plan never reads as the latest run')
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+// p27-1: in thread-skill-rollout-2026-10-19 three plans of 40k to 71k characters had to be hand-copied into the
+// integrate call's args, and one copy was cut off part-way. The integrate args now carry no plan at all: the
+// integrator reads the note's `## Approved plan` from the path its prompt names.
+test('x13b: a plan over 60k characters reaches its integrate call without the lead transcribing anything', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    const steps = Array.from({ length: 1500 }, (_, i) => `- step ${i}: ` + 'x'.repeat(40))
+    const BIG = 'Planned on: abc\n### Files to modify\n' + steps.join('\n') + '\n### Gated inputs\nNone'
+    assert.ok(BIG.length > 60000, `the plan is over 60k characters (${BIG.length})`)
+    const own = await ownCall({}, { [`plan:${SLUG}`]: { ready: true, blocked: false, blockerCause: '', plan: BIG } })
+    assert.equal(own.tasks[0].status, 'review')
+    assert.equal(own.tasks[0].plan, BIG)
+    reconcile(d, own)
+    assert.ok(planSection(d).includes('> - step 1499: '), 'the whole plan is in the note')
+    const section = planSection(d)
+    // reconcile resolves <tasks-dir>/<slug>.md (engine rows carry no taskPath), so NOTE is the note it wrote.
+    const NOTE = path.join(d, `${SLUG}.md`)
+    // Built without a plan key whatever mkI's default is, so the base engine's `plan must be a string` fails it.
+    const { plan: _p, ...I } = mkI()
+    const args = { ...base, mode: 'integrate', task: mkTask({ taskPath: NOTE }), integration: I }
+    assert.ok(!('plan' in args.integration), 'the integrate args carry no plan')
+    assert.ok(JSON.stringify(args).length < 10000, `the integrate args stay small (${JSON.stringify(args).length})`)
+    const r = await runTask(args, async (prompt, o) => {
+      if (o.label === `integrate:${SLUG}`) return merged
+      if (o.label === `integration-review:${SLUG} r2`) return { verdict: 'approve', feedback: [], unreadable: false, finishedAt: NOW }
+      throw new Error('stub: unknown agent label ' + o.label)
+    })
+    assert.equal(r.error, undefined, String(r.error))
+    const p = r.calls.find((c) => c.label === `integrate:${SLUG}`).prompt
+    assert.ok(p.includes(`Task note (the brief): ${NOTE}`), 'the prompt names the note')
+    assert.ok(p.includes('read the `## Approved plan` section of the task note above (' + NOTE + ')'), 'and sends the integrator to its plan')
+    assert.ok(!p.includes('- step 0: ') && !p.includes('x'.repeat(40)), 'the prompt carries none of the plan')
+    assert.ok(p.length < 40000, `the integrator prompt stays small (${p.length})`)
+    const text = fs.readFileSync(NOTE, 'utf8')
+    assert.ok(text.includes('\n## Approved plan\n') && text.includes('> - step 1499: '), 'the path the integrator is told to read holds the whole plan')
+    const ir = JSON.parse(JSON.stringify(r.result))
+    assert.equal(ir.tasks[0].plan, null)
+    reconcile(d, ir)
+    assert.equal(planSection(d), section, 'an integrate row leaves the section byte-identical')
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
 
@@ -434,14 +480,17 @@ test('x15: only a later own call settles the plan — no-outcome rows keep it, a
     assert.ok(!noteText(d).includes(LEAD_IN))
     const out = planOf(d)
     assert.equal(out.plan, '')
-    const I = mkI({ plan: out.plan })
+    const I = mkI()
     const r = await runTask({ ...base, mode: 'integrate', task: mkTask({ planGate: false }), integration: I }, async (prompt, o) => {
       if (o.label === `integrate:${SLUG}`) return merged
       if (o.label === `integration-review:${SLUG} r2`) return { verdict: 'approve', feedback: [], unreadable: false, finishedAt: NOW }
       throw new Error('stub: unknown agent label ' + o.label)
     })
     assert.equal(r.error, undefined, String(r.error))
-    assert.ok(r.calls[0].prompt.includes('---\n(no plan: the task was not plan-gated — the brief is the contract)\n---'))
+    // p27-1: the note has no section (asserted above), and the prompt says what that means.
+    assert.ok(r.calls[0].prompt.includes('read the `## Approved plan` section'))
+    assert.ok(r.calls[0].prompt.includes("No such section: the task's last own call"))
+    assert.ok(!r.calls[0].prompt.includes('(no plan:'))
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
 

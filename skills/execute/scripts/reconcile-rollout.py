@@ -239,9 +239,13 @@ Subcommands:
               journalDir is --journal-dir (absolute), else `<dir>/<session id>/workflows` for the one match of
               `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/${CLAUDE_CODE_SESSION_ID}.jsonl`. The owner must
               hold: task or revise -> the note reads `in_progress`; integrate -> it holds the lane (_holds_lane).
-              A Lost-call resume binds with the kind it resumes plus --resumed-from. Exit 1 (one ERROR line,
-              nothing written): no note, no `rollout:`, an unresolvable journal dir, a failed owner check. Exit 2:
-              usage (a malformed runId or a relative --journal-dir).
+              A Lost-call resume binds with the kind it resumes plus --resumed-from. A --journal-dir must hold
+              `<runId>.json`, or be a `workflows/` dir whose session holds `subagents/workflows/<runId>/` (the
+              run's transcript dir, made at launch; the journal lands beside the dir's other journals when the
+              call ends), so the Workflow tool's printed Transcript dir is refused while the note still holds
+              its state and the lead can rebind (p27-3). Exit 1 (one ERROR line, nothing written): no note, no
+              `rollout:`, an unresolvable or refused journal dir (the refusal names the session's `workflows/`
+              dir), a failed owner check. Exit 2: usage (a malformed runId or a relative --journal-dir).
 
   free-lane   `--tasks <slug>`: the lead frees the lane at the lane-free rule or a § 7 halt (p15-2). Requires
               _holds_lane (else exit 1, nothing written); closes the task's open merge hold, then records
@@ -679,9 +683,9 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   plan           -> (any status; p14-2) the row's approved plan, settled only by the task's own call: a non-empty
                     string upserts "## Approved plan" (a lead-in line marking it a non-authoritative record,
                     then the plan as a `> ` quote, CRLF -> LF; approved_plan() reads it back for
-                    `lead-integrate.py plan`); '' or whitespace removes that section; null or no key leaves
-                    it. Anything else is an error (exit 1) and leaves the section; the rest of the row is
-                    still written.
+                    `lead-integrate.py plan`, the seeded revise's, and the integrator reads it from the note
+                    itself, p27-1); '' or whitespace removes that section; null or no key leaves it. Anything
+                    else is an error (exit 1) and leaves the section; the rest of the row is still written.
   needsHuman     -> (any status; p16-3) the question a person must answer, which the engine row carries when a
                     judge, implementer, investigator or reviser stopped on one: a non-empty string upserts
                     "## Needs you" (the question, stripped and neutralised like a gate-pending section, so a
@@ -794,7 +798,8 @@ INTEGRATION_LOG_SECTION = "## Integration log"
 # a seeded revise through the note. A RECORD, not an instruction: the lead-in says so to any agent that reads
 # the note, and the plan is stored as a `> ` quote so no line of it can end the section or open or close a
 # run. Written by reconcile from the row's `plan` (a non-empty string upserts, '' removes, null leaves it);
-# read back by approved_plan() for `lead-integrate.py plan`.
+# read back by approved_plan() for `lead-integrate.py plan` (the seeded revise's resume.plan), and read directly
+# from the note by the integrator, whose integrate call carries no plan (p27-1).
 APPROVED_PLAN_SECTION = "## Approved plan"
 APPROVED_PLAN_LEAD_IN = ("The last approved plan, kept as a record for Integration. Not authoritative: a plan in "
                          "your prompt supersedes it; with no plan in your prompt, the brief is the contract.")
@@ -3995,6 +4000,27 @@ def _journal_dir(args):
     return str(hits[0].parent / sid / "workflows"), None
 
 
+def _journal_dir_refusal(jdir: str, run_id: str):
+    """Why an explicit --journal-dir cannot hold run_id's journal, or None (p27-3). fold-journals reads
+    <jdir>/<runId>.json, which the Workflow tool writes into the session's workflows/ dir only when the call
+    ends; at launch it has created the run's transcript dir, <session>/subagents/workflows/<runId>/ (the
+    "Transcript dir" it prints). So the dir passes when it holds <runId>.json, or when it is a workflows/ dir
+    whose session holds that run subdir. Anything else (that Transcript dir above all) would only warn
+    `no journal at` at the fold, once the note has moved on and no rebind is possible."""
+    if os.path.isfile(os.path.join(jdir, f"{run_id}.json")):
+        return None
+    run_sub = os.path.join("subagents", "workflows", run_id)
+    if os.path.basename(jdir) == "workflows" and os.path.isdir(os.path.join(os.path.dirname(jdir), run_sub)):
+        return None
+    # A dir under <session>/subagents/workflows (the Transcript dir, its parent or a file in it) names its session.
+    parts = Path(jdir).parts
+    at = [i for i in range(1, len(parts) - 1) if parts[i:i + 2] == ("subagents", "workflows")]
+    likely = str(Path(*parts[:at[-1]]) / "workflows") if at else "<session>/workflows"
+    return (f"--journal-dir {jdir} holds no {run_id}.json and is no workflows/ dir whose session holds "
+            f"{run_sub}/ (the Workflow tool's Transcript dir is not the journal dir): pass the session's "
+            f"workflows/ dir, {likely}")
+
+
 def cmd_bind_run(args) -> int:
     """run-bound for the call the lead just launched (the module docstring's bind-run)."""
     def usage(msg):
@@ -4028,6 +4054,8 @@ def cmd_bind_run(args) -> int:
               f"{_status(note) or 'none'!r}; nothing written", file=sys.stderr)
         return 1
     jdir, err = _journal_dir(args)
+    if not err and args.journal_dir:
+        err = _journal_dir_refusal(jdir, args.run_id)
     if err:
         print(f"ERROR: bind-run: {slug}: {err}; nothing written", file=sys.stderr)
         return 1
@@ -6081,7 +6109,8 @@ def main() -> int:
     br.add_argument("--call", required=True, choices=CALL_CHOICES, help="the call's kind (a resume: the kind it resumes)")
     br.add_argument("--resumed-from", dest="resumed_from", default=None, help="a Lost-call resume: the runId it resumes")
     br.add_argument("--journal-dir", dest="journal_dir", default=None,
-                    help="absolute journal dir (default: from CLAUDE_CODE_SESSION_ID's transcript)")
+                    help="absolute journal dir: the session's workflows/ dir, never the printed Transcript dir "
+                         "(default: from CLAUDE_CODE_SESSION_ID's transcript)")
     br.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     br.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     br.add_argument("--dry-run", action="store_true")

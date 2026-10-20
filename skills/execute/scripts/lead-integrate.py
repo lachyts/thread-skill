@@ -116,11 +116,12 @@ Subcommands:
       read against (default: now).
 
   plan --note N
-      The task's approved plan, for the two launches that pass it (execute § 4.5 step 1.2's seeded revise,
-      as `resume.plan`, and step 3's integrate call, as `integration.plan`): {slug, plan}, where plan is
-      the note's `## Approved plan` quote unquoted (reconcile-rollout.py approved_plan), or "" when the note
-      has none (its last own call was not plan-gated, or it predates p14-2). Kept out of `inputs`, which
-      every status and repair read prints. Read-only.
+      The task's approved plan, for the one launch that passes it (execute § 4.5 step 1.2's seeded revise,
+      as `resume.plan`): {slug, plan}, where plan is the note's `## Approved plan` quote unquoted
+      (reconcile-rollout.py approved_plan), or "" when the note has none (its last own call was not
+      plan-gated, or it predates p14-2). Step 3's integrate call passes no plan: its integrator reads the
+      same `## Approved plan` from the note itself (p27-1). Kept out of `inputs`, which every status and
+      repair read prints. Read-only.
 
   set-aside --note N --kind integration|revise-stopped|own     (the reason on stdin)
       The lead's own set-aside row, for `reconcile-rollout.py reconcile --result -`: {rolloutSlug,
@@ -1467,7 +1468,7 @@ def main(argv=None):
                     "against the note for the integrate record")
     ip.add_argument("--now", type=rr._iso_arg, default=None, help="the time a retry cool-down is read against (default: now)")
 
-    pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan or an integrate call's plan")
+    pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan")
     pl.add_argument("--note", required=True)
 
     sa = sub.add_parser("set-aside", help="the lead's own set-aside row (reason on stdin) for reconcile --result -")
