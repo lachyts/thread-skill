@@ -106,8 +106,9 @@ steps, over the order Ready, One call, Grill, Orient:
 
 So a Ready task with one `low` decision becomes One call, then Grill. A One call or a Grill with no decision at all is
 invalid, never raised: there would be nothing to ask. The output keeps the agent's grade (`agentGrade`), the result
-(`grade`) and each step (`raised[]`), which p25-4's grade log reads against outcomes. A doubt that a task is Ready is
-written as the decision it may hide, with `confidence: low`.
+(`grade`) and each step (`raised[]`), which the Grade log keeps (CONTEXT.md **Grade log**: `estate-dispatch.py log`
+writes it, `skills/reflect/scripts/grades.py` reads it against outcomes). A doubt that a task is Ready is written as the
+decision it may hide, with `confidence: low`.
 
 ## Size, deadlines and review
 
@@ -240,8 +241,10 @@ or none when every member is blocked. The runs are listed in rank order, the unr
 each with its `minutes` and the `cumulativeMinutes` so far, so the lead can stop at Lachy's stated budget. The tasks
 of parked projects wait on their Unpark offer and are left out.
 
-**The constants** are starting values. tests/contracts/readiness-grade.test.mjs pins this table to the script, so
-p25-4's grade log and the weekly Reflection tune both together; they are never operator settings.
+**The constants** are starting values. tests/contracts/readiness-grade.test.mjs pins this table to the script, so a
+change the weekly Reflection's grade accuracy calls for lands in both together; they are never operator settings. The
+Grade log measures the grades and, through Slot hours per size, `SIZE_MINUTES`; `DECISION_MINUTES`, `REVIEW_MINUTES` and
+the fortnight have no measure in the record (reflect § What the record cannot show).
 
 | Constant | Value | What it sets |
 | --- | --- | --- |

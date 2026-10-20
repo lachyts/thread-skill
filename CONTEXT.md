@@ -53,6 +53,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   project's thread, ADRs and code can recommend on), or **Orient** (the
   decisions shape the project, so it needs a full-context session). A decision
   the agent cannot recommend on with confidence raises the grade one step.
+  Each grade is kept in the Grade log (§ Run record and tuning).
   _Avoid_: tier 1/2/3, traffic lights.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
@@ -713,6 +714,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Quality. Questions belong before the run starts, so every mid-run ask counts
   against it; a gate passed under the Standing approval does not.
   _Avoid_: autonomy score, automation rate.
+- **Grade log** — `grades.jsonl` beside the Run record: one line per task
+  each estate pass grades, written by `estate-dispatch.py log`. The weekly
+  reading joins each grade to what followed until the task's next grade or
+  its close, and reports each grade's hands-off share (of the work it sent
+  that landed hands-off, bounced back to Lachy, was regraded or dropped;
+  work done by hand or never dispatched is set aside). A miss is traced to
+  the grading rules and never tuned as a knob. _Avoid_: grade history,
+  calibration log.
 - **Quality** — the other headline: how few Escapes a rollout's landed work
   produces. _Avoid_: correctness, polish.
 - **Escape** — landed work that later needs a fix it should not have needed:
@@ -742,6 +751,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Companion's record. Its verb is `/thread:reflect`. A serial rollout is read
   from its Leg log instead (serial-score.py): running time, the Hands-off rate
   and a Quality from `fixes:` alone, with no load, binding or proposal.
+  The weekly reading also reports each Readiness grade's hands-off share
+  from the **Grade log**.
   _Avoid_: retro, review (the engine's).
 - **Tuning** — one proposed change at one
   of three altitudes, as in Chorus: a **knob** (a value in the operator's

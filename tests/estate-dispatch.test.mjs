@@ -6,7 +6,7 @@
 // one blocker and two clones' rolloutRoot are injected into a copy of its JSON, as the status probes and repo checks
 // would have found them. The rank is the real `estate-rank.py rank` over that copy. Both run once and are shared.
 // The notes three schedule forks would have written are added to V after the scan, as they land after it in a real
-// pass. record writes only copies of V.
+// pass. record writes only copies of V, and log (D16) only its own events dirs under S.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -855,14 +855,16 @@ test('D12. acceptance: record writes each answer into its task note, folded to o
 })
 
 // ---- D13. usage ---------------------------------------------------------------------------------------------------------
-test('D13. usage: a bad verb, flag, input, budget, status or written note is exit 2 with one line; a missing vault exit 3', () => {
+test('D13. usage: a bad verb, flag (log\'s included), input, budget, status or written note is exit 2 with one line; a missing vault exit 3', () => {
   ranked()
   const notJson = keep('not-json.json', 'not json\n')
   const scan2 = keep('scan-2.json', JSON.stringify({ ...scanned(), schema: 2 }))
   const rank2 = keep('rank-2.json', JSON.stringify({ ...ranked(), schema: 2 }))
   const plan2 = keep('plan-2.json', JSON.stringify({ ...ok(PLAN()), schema: 2 }))
   refusal(py(['frob']))
-  refusal(py([]))
+  refusal(py([]), /a verb is required: slices \| rounds \| plan \| sessions \| record \| log$/)
+  refusal(py(['log', '--rank', RANK_FILE]), /--scan/)
+  refusal(py(['log', '--rank', RANK_FILE, '--scan', SCAN_FILE, '--budget', '5']), /--budget/)
   refusal(py(['rounds', '--rank', RANK_FILE, '--scan', SCAN_FILE, '--budget', '5', '--bogus']))
   refusal(py(['rounds', '--rank', RANK_FILE, '--scan', notJson, '--budget', '5']), /not JSON/)
   refusal(py(['rounds', '--rank', notJson, '--scan', SCAN_FILE, '--budget', '5']), /not JSON/)
@@ -999,4 +1001,108 @@ test('D15. acceptance: sessions starts written notes, live rollouts only on the 
     assert.ok(x.title.length <= 60, x.title)
     assert.ok(x.tldr && !x.tldr.includes('/'), `a tldr with no paths: ${x.tldr}`)
   }
+})
+
+// ---- D16. log: the Grade log (p25-4) ----------------------------------------------------------------------------------
+test('D16. log: one grade line per graded task, Orient included, under one pass; reruns, a half pass, a dry run and refusals', () => {
+  const rk = ranked()
+  const sc = scanned()
+  const evOf = (name) => path.join(S, 'grade-ev', name)
+  const log = (rankFile, scanFile, ev, more = []) => py(['log', '--rank', rankFile, '--scan', scanFile, ...more], { THREAD_EVENTS_DIR: ev })
+  const fileOf = (ev) => path.join(ev, 'grades.jsonl')
+  const linesOf = (ev) => fs.readFileSync(fileOf(ev), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  const PASS = /g-\d{8}T\d{6}Z-[0-9a-f]{6}/
+  // The real rank and scan: one line per rank task, in rank order, Orient included.
+  const EV = evOf('one')
+  const first = log(RANK_FILE, SCAN_FILE, EV)
+  assert.equal(first.status, 0, first.stderr)
+  assert.equal(first.stderr, '')
+  assert.match(first.stdout, new RegExp(`^logged ${rk.tasks.length} grade\\(s\\), pass ${PASS.source}\\n$`))
+  const lines = linesOf(EV)
+  assert.deepEqual(lines.map((l) => l.task), rk.tasks.map((t) => t.slug.toLowerCase()))
+  assert.ok(lines.some((l) => l.grade === 'Orient') && lines.some((l) => l.grade === 'Ready'), 'Orient and Ready both logged')
+  for (const k of ['pass', 'ts', 'digest']) assert.equal(new Set(lines.map((l) => l[k])).size, 1, `one ${k}`)
+  assert.match(lines[0].pass, new RegExp(`^${PASS.source}$`))
+  assert.match(lines[0].digest, /^[0-9a-f]{12}$/)
+  assert.equal(first.stdout.trim().split(' ').at(-1), lines[0].pass)
+  const rowOf = Object.fromEntries(sc.tasks.map((r) => [r.slug.toLowerCase(), r]))
+  rk.tasks.forEach((t, i) => {
+    const l = lines[i]
+    const want = { v: 1, rollout: null, kind: 'grade', project: t.home, grade: t.grade, agentGrade: t.agentGrade, shape: t.shape,
+      size: t.size, decisions: t.decisions.length, low: t.decisions.filter((d) => d.confidence === 'low').length,
+      held: t.blockedBy.length > 0, gates: t.gates }
+    for (const [k, v] of Object.entries(want)) assert.deepEqual(l[k], v, `${t.slug}: ${k}`)
+    assert.deepEqual(l.raised, t.raised.length ? t.raised.map((r) => r.why) : undefined, `${t.slug}: raised`)
+    assert.equal(l.rank, t.rank ?? undefined, `${t.slug}: rank`)
+    assert.equal(rowOf[l.task]?.rollout ?? null, null, `${t.slug}: the fixture rows link no rollout`)
+    assert.equal(l.linked, undefined)
+  })
+  const by = Object.fromEntries(lines.map((l) => [l.task, l]))
+  assert.deepEqual([by['act-orient'].grade, by['act-orient'].shape, 'rank' in by['act-orient']], ['Orient', 'serial', false])
+  assert.deepEqual([by['act-held'].held, by['act-a'].held, by['act-a'].size, by['act-a'].rank >= 1], [true, false, 'M', true])
+  assert.deepEqual([by['act-call'].grade, by['act-call'].decisions, by['grl-a'].grade, by['grl-a'].decisions], ['One call', 1, 'Grill', 2])
+  // A rerun of the same pass is `exists`, byte-identical.
+  const bytes = fs.readFileSync(fileOf(EV))
+  const again = log(RANK_FILE, SCAN_FILE, EV)
+  assert.equal(again.status, 0, again.stderr)
+  assert.equal(again.stdout, `exists ${lines[0].pass} (${lines.length} grade(s))\n`)
+  assert.deepEqual(fs.readFileSync(fileOf(EV)), bytes)
+  // A pass whose write stopped half-way: the rerun writes only the missing line, under the same pass and ts.
+  fs.writeFileSync(fileOf(EV), bytes.toString('utf8').split('\n').filter(Boolean).slice(0, -1).map((l) => `${l}\n`).join(''))
+  const half = log(RANK_FILE, SCAN_FILE, EV)
+  assert.equal(half.status, 0, half.stderr)
+  assert.equal(half.stdout, `completed ${lines[0].pass}: 1 more\n`)
+  assert.deepEqual(fs.readFileSync(fileOf(EV)), bytes, 'the completed pass is the whole pass again')
+  // The same rank at another path is another pass ($S is mktemp'd per pass).
+  const copy = keep('rank-copy.json', fs.readFileSync(RANK_FILE, 'utf8'))
+  const other = log(copy, SCAN_FILE, EV)
+  assert.equal(other.status, 0, other.stderr)
+  assert.match(other.stdout, /^logged \d+ grade\(s\), pass /)
+  const both = linesOf(EV)
+  assert.equal(both.length, 2 * lines.length)
+  assert.equal(new Set(both.map((l) => l.pass)).size, 2)
+  assert.equal(new Set(both.map((l) => l.digest)).size, 2)
+  // The rarer fields, from a rank and scan copy: raised whys, gates, low decisions and the linked rollout, normalised; a
+  // reserved or non-slug rollout links nothing.
+  const rk2 = structuredClone(rk)
+  const crown = rk2.tasks.find((t) => t.slug === 'crown-a')
+  Object.assign(crown, { grade: 'Grill', gates: ['spend', 'credential'],
+    raised: [{ from: 'Ready', to: 'One call', why: 'decisions' }, { from: 'One call', to: 'Grill', why: 'confidence' }],
+    decisions: [{ question: 'Q?', recommendation: 'a', options: ['a', 'b'], confidence: 'low', why: 'w' }] })
+  const sc2 = structuredClone(sc)
+  const setRow = (slug, rollout) => { sc2.tasks.find((r) => r.slug === slug).rollout = rollout }
+  setRow('crown-a', 'Crown-Rollout-2026-10-20')
+  setRow('crown-b', 'grades')
+  setRow('act-a', 'not a slug!')
+  const EV2 = evOf('two')
+  const two = log(keep('rank-fields.json', JSON.stringify(rk2)), keep('scan-fields.json', JSON.stringify(sc2)), EV2)
+  assert.equal(two.status, 0, two.stderr)
+  const by2 = Object.fromEntries(linesOf(EV2).map((l) => [l.task, l]))
+  assert.deepEqual([by2['crown-a'].grade, by2['crown-a'].gates, by2['crown-a'].raised, by2['crown-a'].decisions, by2['crown-a'].low,
+    by2['crown-a'].linked], ['Grill', ['spend', 'credential'], ['decisions', 'confidence'], 1, 1, 'crown-rollout-2026-10-20'])
+  assert.deepEqual(['linked' in by2['crown-b'], 'linked' in by2['act-a']], [false, false])
+  // --dry-run prints the lines and writes nothing.
+  const EV3 = evOf('dry')
+  const dry = log(RANK_FILE, SCAN_FILE, EV3, ['--dry-run'])
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.equal(dry.stdout.split('\n').filter((l) => l.startsWith('would log grade ')).length, rk.tasks.length)
+  assert.match(dry.stdout, /^dry run, nothing written: logged \d+ grade\(s\), pass /m)
+  assert.ok(!fs.existsSync(EV3), 'a dry run creates nothing')
+  // A rank or scan that is not JSON, or of another schema: exit 2, nothing written.
+  const notJson = keep('log-not-json.json', 'nope\n')
+  const scanSchema = keep('log-scan-2.json', JSON.stringify({ ...sc, schema: 2 }))
+  const EV4 = evOf('refused')
+  refusal(log(notJson, SCAN_FILE, EV4), /not JSON/)
+  refusal(log(RANK_FILE, scanSchema, EV4), /schema/)
+  refusal(log(keep('rank-bad-grade.json', JSON.stringify({ ...rk, tasks: [{ ...rk.tasks[0], grade: 'Maybe' }] })), SCAN_FILE, EV4), /refused/)
+  assert.ok(!fs.existsSync(EV4), 'nothing written')
+  // An events dir under a regular file: run_record warns and nothing lands, exit 1; the vault is untouched.
+  const blocker = keep('events-blocker', 'a file\n')
+  const blocked = log(RANK_FILE, SCAN_FILE, blocker)
+  assert.equal(blocked.status, 1, blocked.stderr)
+  assert.equal(blocked.stdout, '')
+  assert.match(blocked.stderr, /run_record: warning: cannot write/)
+  assert.match(blocked.stderr, /^estate-dispatch: .*grade/m)
+  assert.equal(fs.readFileSync(blocker, 'utf8'), 'a file\n')
+  assert.deepEqual(snap(V), BEFORE, 'the vault is untouched')
 })

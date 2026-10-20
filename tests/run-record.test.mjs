@@ -780,16 +780,78 @@ print(json.dumps(out))`, { env: EV(home), args: [JSON.stringify([
   assert.ok(!fs.existsSync(ev(path.join(home, 'other'))), 'check never creates the events dir')
 })
 
-test('the tuning keys are rollout-settings.py\'s KEYS, and RESERVED holds all three record files', (t) => {
+test('the tuning keys are rollout-settings.py\'s KEYS, and RESERVED holds all four record files', (t) => {
   const home = tmpHome(t)
   const rs = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
   const r = api(home, `
 spec2 = importlib.util.spec_from_file_location("rs", sys.argv[2]); rs = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(rs)
-print(json.dumps([list(m.TUNING_KEYS), list(rs.KEYS), list(m.RESERVED)]))`, { args: [rs] })
+print(json.dumps([list(m.TUNING_KEYS), list(rs.KEYS), list(m.RESERVED), m.GRADE_LOG]))`, { args: [rs] })
   assert.equal(r.status, 0, r.stderr)
-  const [mine, theirs, reserved] = JSON.parse(r.stdout)
+  const [mine, theirs, reserved, gradeLog] = JSON.parse(r.stdout)
   assert.deepEqual(mine, theirs)
-  assert.deepEqual(reserved, ['reviews', 'tunings', 'reflections'])
+  assert.deepEqual(reserved, ['reviews', 'tunings', 'reflections', 'grades'])
+  assert.equal(gradeLog, 'grades')
+})
+
+// ---- the Grade log's kind (p25-4, ADR 0041) ---------------------------------------------------------------------
+
+const GRADE = { pass: 'g-20261020T010203Z-abc123', digest: '0123456789ab', project: 'Thread Skill', grade: 'One call',
+  agentGrade: 'Ready', shape: 'parallel', size: 'S', decisions: 1, low: 1, held: false, gates: ['spend'],
+  raised: ['confidence'], rank: 3, linked: 'thread-skill-rollout-2026-10-19' }
+
+test('grade (p25-4) lands in grades.jsonl only, as v 1 with rollout null and its task kept', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--task', '[[Thread-Skill-P25-4]]', '--kind', 'grade', '--json', JSON.stringify(GRADE)], { env: EV(home) })
+  const { raised, rank, linked, ...bare } = GRADE
+  emitOk(home, ['--task', 't2', '--kind', 'grade', '--json',
+    JSON.stringify({ ...bare, grade: 'Orient', agentGrade: 'Orient', shape: 'serial', size: 'L', gates: [], decisions: 0, low: 0, held: true })],
+  { env: EV(home) })
+  assert.deepEqual(listing(ev(home)), ['grades.jsonl'])
+  const [a, b] = lines(path.join(ev(home), 'grades.jsonl'))
+  assert.deepEqual([a.v, a.rollout, a.task, a.kind, a.pass, a.digest, a.grade, a.agentGrade, a.raised, a.gates, a.rank, a.linked],
+    [1, null, 'thread-skill-p25-4', 'grade', GRADE.pass, GRADE.digest, 'One call', 'Ready', ['confidence'], ['spend'], 3, GRADE.linked])
+  assert.deepEqual([b.task, b.grade, b.gates, b.held, 'raised' in b, 'rank' in b, 'linked' in b], ['t2', 'Orient', [], true, false, false, false])
+})
+
+test('grade refusals (p25-4): exit 2, one line and nothing written', (t) => {
+  const home = tmpHome(t)
+  const cases = [
+    ['a grade with a rollout', GRADE, ['--rollout', 'r', '--task', 't']],
+    ['a grade with no task', GRADE, []],
+    ['a grade outside the four', { ...GRADE, grade: 'Two calls' }],
+    ['an agentGrade outside the four', { ...GRADE, agentGrade: 'ready' }],
+    ['a shape outside the three', { ...GRADE, shape: 'solo' }],
+    ['a size outside S, M and L', { ...GRADE, size: 'XL' }],
+    ['a gate outside the kinds', { ...GRADE, gates: ['money'] }],
+    ['a gate named twice', { ...GRADE, gates: ['spend', 'spend'] }],
+    ['gates not a list', { ...GRADE, gates: 'spend' }],
+    ['a raise why outside decisions and confidence', { ...GRADE, raised: ['hunch'] }],
+    ['an empty raised', { ...GRADE, raised: [] }],
+    ['a pass that is no g- id', { ...GRADE, pass: 'pass-1' }],
+    ['a digest that is not 12 hex', { ...GRADE, digest: '0123456789AB' }],
+    ['a reserved linked', { ...GRADE, linked: 'grades' }],
+    ['a linked that is no slug', { ...GRADE, linked: 'Not A Slug' }],
+    ['rank 0', { ...GRADE, rank: 0 }],
+    ['low above decisions', { ...GRADE, low: 2 }],
+    ['held not a bool', { ...GRADE, held: 'no' }],
+    ['no project', (({ project, ...rest }) => rest)(GRADE)],
+  ]
+  for (const [name, fields, extra = ['--task', 't']] of cases) {
+    const r = cli(home, ['emit', ...extra, '--kind', 'grade', '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, name)
+    assert.deepEqual(listing(ev(home)), [], name)
+  }
+  const roll = cli(home, ['emit', '--rollout', 'r', '--task', 't', '--kind', 'grade', '--json', JSON.stringify(GRADE)], { env: EV(home) })
+  assert.match(roll.stderr, /grade has no rollout \(it lands in grades\.jsonl\)/)
+  // `grades` is reserved: no other kind takes it as a rollout, nor a carried line as its from
+  for (const args of [['--rollout', 'grades', '--kind', 'resumed'], ['--rollout', '[[Grades]]', '--task', 't', '--kind', 'ready'],
+    ['--rollout', 'r', '--task', 't', '--kind', 'carried', '--json', '{"from":"[[grades]]"}']]) {
+    const r = cli(home, ['emit', ...args], { env: EV(home) })
+    assert.equal(r.status, 2, `${args.join(' ')}: ${r.stderr}`)
+    assert.match(r.stderr, /reserved/)
+    assert.deepEqual(listing(ev(home)), [])
+  }
 })
 
 test('rollout and task slugs normalise from wikilinks, note paths and any case', (t) => {

@@ -1,7 +1,7 @@
 // The estate pass's lead (p25-3; ADR 0041): skills/orient-all/SKILL.md runs estate-scan.py, the grading and status
 // agents, estate-rank.py and estate-dispatch.py, asks the decision round, forks the schedules and starts the sessions.
 // Its script half is tests/estate-dispatch.test.mjs; this file pins the prose to the scripts, to the siblings it cites,
-// and to the docs that name it. Ten rules:
+// and to the docs that name it. Eleven rules:
 //   o1  the headings, in order, and none of the retired or forbidden words.
 //   o2  § 2 runs estate-scan.py, `estate-dispatch.py slices` and `estate-rank.py rank`, cites readiness-grade.md
 //       § The grading agents, and briefs the status agents to run /thread:status and return the number of the status
@@ -25,12 +25,15 @@
 //       exact `title` alone (sessions cuts it); row 8 needs plan.reinstate[] and canExecute; create_thread, the
 //       paste-ready prompts, orients last with the note line; its cites; and `start: unattended` only in the Don't.
 //   o8  § 9 asks nothing, writes only under $S, runs `plan --rounds --assume-answered` and `sessions` with no --wrote,
-//       and names every command it never runs.
+//       runs no `estate-dispatch.py log`, and names every command it never runs.
 //   o9  plugin-root.md, CONTEXT.md (**Decision round**, **Dispatch plan**), ADR 0041's p25-3 ruling and the README
 //       row name the skill.
 //   o10 status parity: estate-dispatch.py's STATUS_ACTIONS opens each of status § 4's thirteen numbered
 //       **Recommended action** rules, the set that starts something is exactly {6, 7, 8, 11, 13}, and § 7's table
 //       names the same numbers.
+//   o11 the Grade log (p25-4): § 2 step 7 runs `estate-dispatch.py log --rank` with `--scan`, guarded "Unless this is a
+//       dry run"; § 9 runs §§ 2–3 without that step and names the verb among the commands it never runs; the Scope
+//       lists it among the writes; and CONTEXT.md § Run record and tuning has **Grade log**, naming the writer.
 // One pure function, check(files, consts), returns the failing rules; every control mutates one place and fails exactly
 // its rule. Reads files only (the python child imports estate-dispatch.py, which runs nothing at import).
 import { test } from 'node:test'
@@ -221,6 +224,7 @@ function check(files, consts) {
     'schedule fork', '`list_sessions`', '`read_session`', '`relay_session`', '`create_thread`'])
   const dryCmds = s9.slice(0, s9.indexOf('It never runs'))
   if (/--wrote </.test(dryCmds)) flag('o8', 'the dry run passes --wrote')
+  if (/estate-dispatch\.py log\b/.test(dryCmds)) flag('o8', 'the dry run logs the grades')
 
   // o9: the docs that name the skill.
   need('o9', PLUGIN_ROOT, C(files[PLUGIN_ROOT]), ['orient-all → schedule (its forks), status, execute, repair or orient',
@@ -246,6 +250,17 @@ function check(files, consts) {
   if (JSON.stringify(started) !== JSON.stringify(STARTS)) flag('o10', `the started set is ${JSON.stringify(started)}`)
   if (JSON.stringify(starts) !== JSON.stringify(started)) flag('o10', `§ 7's table ${JSON.stringify(starts)} ≠ STATUS_ACTIONS ${JSON.stringify(started)}`)
 
+  // o11: the Grade log.
+  if (!/Unless this is a dry run, `[^`]*estate-dispatch\.py log --rank "\$S\/rank\.json" --scan "\$S\/scan\.json"`/.test(s2)) {
+    flag('o11', '§ 2 does not run `estate-dispatch.py log --rank ... --scan ...` guarded "Unless this is a dry run"')
+  }
+  need('o11', '§ 9', s9, ['Runs §§ 2–3 (not § 2 step 7)'])
+  need('o11', '§ 9 never-runs', never, ['`estate-dispatch.py log`'])
+  need('o11', 'the Scope', S(/^## Scope/), ['`estate-dispatch.py log`, the grades into the Grade log (never on a dry run)'])
+  const runRecord = section(context, /^## Run record and tuning$/) ?? ''
+  need('o11', 'CONTEXT.md **Grade log**', C(slice(runRecord, /^- \*\*Grade log\*\*/, /^(- \*\*|#)/)), ['`grades.jsonl`',
+    '`estate-dispatch.py log`'])
+
   return { fails: [...fails].sort(), details }
 }
 
@@ -262,7 +277,7 @@ const only = (files, consts, rules, what) => {
   assert.deepEqual(r.fails, rules, `${what}: ${r.details.join('\n')}`)
 }
 
-test('the skill, its scripts, schedule, status and the docs agree (o1-o10)', () => {
+test('the skill, its scripts, schedule, status and the docs agree (o1-o11)', () => {
   const r = check(FILES, CONSTS)
   assert.deepEqual(r.fails, [], r.details.join('\n'))
 })
@@ -312,12 +327,20 @@ test('control o7: any Session in the project holding an orient, a repair matched
   only(swap(FILES, SKILL, ' and `plan` holds nothing else on it (`canExecute`)', ''), CONSTS, ['o7'], 'row 8 canExecute')
 })
 
-test('control o8: a dry run that relays fails o8 alone', () => {
-  only(swap(FILES, SKILL, '`read_session`, `relay_session` or `create_thread`.', '`read_session` or `create_thread`.'), CONSTS, ['o8'], 'relay')
+test('control o8: a dry run that relays, or one that logs the grades, fails o8 alone', () => {
+  only(swap(FILES, SKILL, '`read_session`, `relay_session` or\n`create_thread`.', '`read_session` or\n`create_thread`.'), CONSTS, ['o8'], 'relay')
+  only(swap(FILES, SKILL, 'with no `--wrote`. It assumes', 'with no `--wrote`, then `estate-dispatch.py log --rank "$S/rank.json"`. It assumes'),
+    CONSTS, ['o8'], 'log')
 })
 
 test('control o9: CONTEXT.md without **Dispatch plan** fails o9 alone', () => {
   only(swap(FILES, CONTEXT, '- **Dispatch plan**', '- **Launch list**'), CONSTS, ['o9'], 'context')
+})
+
+test('control o11: the log run with no dry-run guard, the dry run naming no log, or CONTEXT.md without **Grade log** fails o11 alone', () => {
+  only(swap(FILES, SKILL, '7. Unless this is a dry run, `python3', '7. `python3'), CONSTS, ['o11'], 'guard')
+  only(swap(FILES, SKILL, 'It never runs `record`, `estate-dispatch.py log`, ', 'It never runs `record`, '), CONSTS, ['o11'], 'never-runs')
+  only(swap(FILES, CONTEXT, '- **Grade log**', '- **Grade history**'), CONSTS, ['o11'], 'context')
 })
 
 test('control o10: status rules 9 and 10 swapped, or a map that starts on 12, fails o10 alone', () => {

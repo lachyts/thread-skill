@@ -69,7 +69,7 @@ root's git (commit messages, `docs/reviews/` and `git blame`), never fetched. By
 `/tmp/thread-reflect-<rollout-slug>/`, and it makes no vault write. A serial note's reading (§ 1) runs
 `serial-score.py` alone, which reads the note's Leg log through `leg.py status`, the Run record and the task notes,
 and writes nothing. The weekly reading reads every rollout record,
-`reflections.jsonl` and the contract (above) too, and writes: `reflections.jsonl` through reflect.py; a bug task and
+`reflections.jsonl`, `grades.jsonl` (the Grade log, read-only) and the contract (above) too, and writes: `reflections.jsonl` through reflect.py; a bug task and
 the decision task under `~/repos/obsidian/Work/Tasks/`; the decision task's one line on its day page (task-writer
 § 3b); `tunings.jsonl` lines only through tune.py's `--auto` and `--revert`; and `call-journal` lines through
 `span --fold`. Its scratch dir is `/tmp/thread-reflect-week-<YYYY-MM-DD>/`. `--decide` writes `watch-raised` lines
@@ -285,8 +285,9 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py span --fold --ou
 ```
 
 It folds each read rollout's journals and scores it, reads its friction and close line, sweeps the Escapes over
-every record (ADR 0037 d4) and the dated `repair:` lines over every record's rollout note, and lists the open Watches
-and the knob candidates; its header holds every rule. Add `--since <TS>` and `--until <TS>` only on Lachy's word: by
+every record (ADR 0037 d4) and the dated `repair:` lines over every record's rollout note, joins the Grade log to what
+followed each grade (`skills/reflect/scripts/grades.py`, loaded by span, whose header holds the join's rules), and lists
+the open Watches and the knob candidates; its header holds every rule. Add `--since <TS>` and `--until <TS>` only on Lachy's word: by
 default it starts where the last Reflection ended. Read the whole `span.json`. Exit 1 or 2 stops the reading: quote
 its stderr line. Never re-run it after a write (step 12 on): a new span is a new Reflection, with a new id.
 
@@ -341,6 +342,25 @@ named with why. Read `freshReview` and `cannotShow` as reported, not traced. A `
 reported, not traced: that rollout leaves no baseline (ADRs 0030, 0033, 0034, 0035 and 0037 bound what each
 trace may conclude). The Watch, its id and its recurring rule are Chorus's Reflection's, borrowed and never imported;
 recording Lachy's no (step 15's decision task, § Deciding the decision task) is this skill's own.
+
+**Grade accuracy.** Read `span.json`'s `grades`: the Grade log (p25-4, ADR 0041) joined to what followed each grade,
+scored over its own episode, which runs to the task's next grade or its close. Read the Ready headline
+(`window.readyHandsOff`) first, then each grade's `rate` in `window` and in `all`, with its counts: `handsOff`,
+`bounced`, `regraded` and `dropped` make the rate, and `byHand`, `undispatched`, `unknown` and `pending` sit beside it.
+Trace each miss to `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`, the grading rules:
+
+- A `bounced` or `regraded` episode, by its acts: an `answer` to readiness-grade.md § The grade (a decision the grader
+  missed), an unforeseen `signOff` (one on a grade that named no `gates`) to readiness-grade.md § Size, deadlines and
+  review, and a `retry` or a set-aside to readiness-grade.md § The grade. A sign-off on a grade that named its gates is
+  foreseen Review load (`foreseenSignOffs`), no miss.
+- A task raised for confidence (`byAgentGrade`, its `raised`) that still went hands-off to readiness-grade.md § The
+  raise.
+- A size whose median Slot hours (`bySize`) sits outside its `estimateHours` to readiness-grade.md § The ranking
+  (`SIZE_MINUTES`).
+- A `mergeHoldOnly` bounce is read as the merge hold it is: a `--gated` run's hold cannot be told from an ask.
+
+Each becomes a sighting (step 12) or, once it recurs, a rule proposal (step 15), never a knob: the grading constants are
+no operator setting. An `ask` item's `grade` says what grade its task carried when it asked.
 
 ### 12. Sightings
 
@@ -421,8 +441,9 @@ held trade no decision task lists for this Reflection): run the step its stderr 
 
 ### 17. Report, then tidy
 
-Report the rollouts read (and the escapes-only and repairs-only ones), each trace and what it became, the Watches
-written (and any `extended` line), the bugs filed or found, each knob landed, reverted or held with its reason, the
+Report the rollouts read (and the escapes-only and repairs-only ones), each trace and what it became, the grade
+accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySize` readout and each grade trace), the
+Watches written (and any `extended` line), the bugs filed or found, each knob landed, reverted or held with its reason, the
 decision task (or none), with each held trade it lists, found decided or skipped behind a revert, the close line's
 counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
 
@@ -527,6 +548,15 @@ or `exists`). An item left open keeps the task open.
 - A knob's revert does not by itself make a reading not quiet: the contract's quiet reading also has no revert, but
   `close`'s `quiet` counts new Watches, rule proposals, bugs and Guardrail breaches only, and the breach behind a
   revert counts only on a rollout whose run ended in the window (reflect.py's header).
+- Lachy's minutes per decision and per review item (`DECISION_MINUTES`, `REVIEW_MINUTES`) and the fortnight constants
+  (`DUE_SOON_DAYS`, `SNOOZE_DAYS`) have no measure in the record: the Grade log measures the grades and, through Slot
+  hours per size, `SIZE_MINUTES` alone. Slot hours include the lead's set-up and in-Slot waits, so they read high.
+- In grade accuracy a serial task is seen as dispatched only through its `rollout:` link or an act line: it has no Slot
+  hours, and a halt clear is no act there. A task scheduled into a rollout that closed before it ran reads as
+  `regraded` by its link (`dispatchedBy: link`), and a `--gated` rollout's merge holds count as bounces
+  (`mergeHoldOnly` counts them).
+- Fit disagreements (the grader's shape against schedule's outcome, orient-all § 8) are not logged, a renamed task's
+  grades read `unknown`, and grades from before the first logged estate pass do not exist.
 - A `tunings.jsonl` line can carry several Tunings: the contract's ledger has one line per Tuning, but tune.py writes
   a run's Tunings on ONE `tuning` line, an `applied` entry per knob, for a by-hand `--pick` of several (step 7) and
   for an `--auto` call that lands several (step 14). Only the weekly reading's `proposal` lines in
