@@ -14,6 +14,11 @@
 //   hold-back   every "only … holds one back" claim names the Trickle: the rollout template's, schedule § 5's and
 //               CONTEXT.md's **Queue**
 //   glossary    CONTEXT.md has **Trickle** and **Away** entries, each citing its Chorus ADR 0104 decision (d2, d3)
+//   restart     § The Trickle says a restart waits on the ceiling alone, never `slotLimit`, and that a new start counts
+//               every in_progress task of this rollout, live or stalled (the round-1 respawn deadlock)
+//   no-lead     § The Trickle says a parallel rollout with no lead holds the Trickle for nobody, and its remedy: the
+//               rollout named in `trickle.elsewhere`, a `paused:` stamp, a liveness signal left to a later task
+//   sample      § Without a writer's hand-written `until` is the next 09:00 strictly after now, never tomorrow's always
 // One function (checkAway) returns named failures, so the real files and each control (one mutation, exactly its
 // rule) run through identical logic. Reads files only.
 import { test } from 'node:test'
@@ -101,6 +106,18 @@ function checkAway({ away, code, template, schedule, context }) {
 
   if (!entry(context, 'Trickle').includes('(Chorus ADR 0104 d2)') || !entry(context, 'Away').includes('(Chorus ADR 0104 d3)')) fails.push('glossary')
 
+  if (!trickleS.includes('**A restart waits on the ceiling alone.**') || !trickleS.includes('never by `slotLimit`') ||
+    !trickleS.includes('counting every `in_progress` task of this rollout, live or stalled')) fails.push('restart')
+
+  if (!trickleS.includes('**A parallel rollout with no lead holds the Trickle for nobody.**') ||
+    !trickleS.includes('`trickle.elsewhere` names the rollout') || !trickleS.includes('stamping it `paused:`') ||
+    !trickleS.includes('takes it out of the count at once') || !trickleS.includes('A liveness signal')) fails.push('no-lead')
+
+  const writer = h2(away, 'Without a writer')
+  if (!writer.includes('until = now.replace(hour=9, minute=0, second=0, microsecond=0)') ||
+    !writer.includes('if until <= now:\n    until += datetime.timedelta(days=1)') ||
+    /now \+ datetime\.timedelta\(days=1\)/.test(writer)) fails.push('sample')
+
   return fails
 }
 
@@ -110,7 +127,8 @@ test('away.md, the code that reads the file and the hold-back prose agree', () =
 
 // ---- controls: each mutates one place and must fail with exactly its rule ---------------------------------------
 
-const RULES = ['keys', 'path', 'staleness', 'default', 'refresh', 'until', 'morning', 'serial', 'warn', 'hold-back', 'glossary']
+const RULES = ['keys', 'path', 'staleness', 'default', 'refresh', 'until', 'morning', 'serial', 'warn', 'hold-back', 'glossary',
+  'restart', 'no-lead', 'sample']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -166,11 +184,28 @@ test('control: a hold-back claim without the Trickle fails hold-back', () => {
   only('context', '**Solo** task and, by day, the **Trickle**, never a shared file', '**Solo** task, never a shared file', 'hold-back', 'CONTEXT Queue')
 })
 test('control: a glossary entry without its ADR fails glossary', () => {
-  only('context', 'Away state file, else 2 (Chorus ADR 0104 d2)', 'Away state file, else 2', 'glossary', 'Trickle')
+  only('context', 'Chorus sets another (Chorus ADR 0104 d2)', 'Chorus sets another', 'glossary', 'Trickle')
   only('context', '**Parallel ceiling** (Chorus ADR 0104 d3)', '**Parallel ceiling**', 'glossary', 'Away')
 })
 
-test('the rules are all named (11) and each has a control', () => {
-  assert.equal(RULES.length, 11)
+test('control: a restart bounded by slotLimit, or starts that skip stalled tasks, fail restart', () => {
+  only('away', '**A restart waits on the ceiling alone.**', '**A restart waits on the Trickle too.**', 'restart', 'no heading')
+  only('away', 'never by `slotLimit`', 'and by `slotLimit`', 'restart', 'bounded by slotLimit')
+  only('away', 'counting every `in_progress` task of this rollout, live or stalled, as every other lead counts them',
+    'counting its live tasks only', 'restart', 'stalled tasks uncounted')
+})
+test('control: no word on a lead-less rollout, or no remedy, fails no-lead', () => {
+  only('away', '**A parallel rollout with no lead holds the Trickle for nobody.**', '**Every lead is live.**', 'no-lead', 'no paragraph')
+  only('away', 'stamping it `paused:` (execute', 'leaving it (execute', 'no-lead', 'no paused: remedy')
+  only('away', 'A liveness signal (a lease the live lead refreshes, so a lapsed one stops counting) is a later task\'s.', '', 'no-lead', 'no follow-up')
+})
+test("control: a hand-written until that is always tomorrow's 09:00 fails sample", () => {
+  const w = h2(real.away, 'Without a writer')
+  const from = w.slice(w.indexOf('until = now.replace('), w.indexOf('path = os.path.expanduser'))
+  only('away', from, 'until = (now + datetime.timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)\n', 'sample', 'always tomorrow')
+})
+
+test('the rules are all named (14) and each has a control', () => {
+  assert.equal(RULES.length, 14)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

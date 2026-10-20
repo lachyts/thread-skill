@@ -455,17 +455,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rollout. Not the retired model-tier **Ceiling** (see **Top rung**).
   _Avoid_: bare "ceiling", concurrency, max agents.
 - **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
-  across the whole Mac at once, whatever the number of Rollouts: N from the
-  Away state file, else 2 (Chorus ADR 0104 d2). `next` counts the tasks every
-  other started parallel Rollout is running and starts nothing past it; a
-  running task is never stopped. Specified in `skills/execute/away.md`.
-  _Avoid_: global ceiling, throttle.
+  across the whole Mac at once, whatever the number of Rollouts: 2, unless
+  Chorus sets another (Chorus ADR 0104 d2). _Avoid_: global ceiling, throttle.
 - **Away** — Lachy has told Chorus he is away from the Mac (the Evening, an
-  Away block, the Lunch restart; Chorus ADR 0104 d1), as a fresh
-  `~/.config/thread/away.json` says; then each Rollout runs to its own
-  **Parallel ceiling** (Chorus ADR 0104 d3). Missing, stale or unreadable
-  reads not Away. Never a reading of whether he is at the Mac. _Avoid_: idle,
-  night mode.
+  Away block, the Lunch restart; Chorus ADR 0104 d1); then each Rollout runs
+  to its own **Parallel ceiling** (Chorus ADR 0104 d3). Never a reading of
+  whether he is at the Mac. _Avoid_: idle, night mode.
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
   (ADR 0030). Queued with its dependencies met, it holds every task whose row
