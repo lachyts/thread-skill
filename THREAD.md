@@ -1046,11 +1046,11 @@ scheduled 2026-07-15.
 **Now (from 2026-10-20, later):** `[[thread-skill-rollout-2026-10-20]]` is executing from the clone in a successor Session (it consumed `docs/handoffs/2026-10-20-execute-p26-p28-rollout.md`).
 1. Check it with `/thread:status [[thread-skill-rollout-2026-10-20]]`; if stuck, `/thread:repair` from a session launched in `~/repos/tools/thread-skill-rollout`.
 2. When it completes: [[thread-skill-release-after-p24-p25]] with P26–P28 folded in, once no rollout holds the primary checkout (ADR 0031); weigh [[thread-skill-install-from-the-version-cache]] there.
-3. Landing PR #182 (10-19 close-out) read merge state UNKNOWN: check whether it needs an update-branch.
-4. `/thread:reflect [[thread-skill-rollout-2026-10-19]]` is on offer; the next weekly Reflection is due 2026-10-24.
+3. `/thread:reflect [[thread-skill-rollout-2026-10-19]]` is on offer; the next weekly Reflection is due 2026-10-24.
 
 ## Session log
 
+- 2026-10-20 (later, close 2): landing PR #182 (10-19 orient close-out) closed unmerged on Lachy's word: superseded, conflicting; its branch deleted.
 - 2026-10-20 (later): `/thread:orient Thread Skill` reshuffled the backlog into P27 (run fixes) and P28 (the Trickle), grilled four forks, scheduled `[[thread-skill-rollout-2026-10-20]]` (8 tasks) from the clone and handed execute to a successor Session (#194).
 - 2026-10-20: executed `[[thread-skill-rollout-2026-10-19]]` from the clone: 10/10 merged (#183–#192) in 20h 46m through one room stop. Phases 24 and 25 closed, P26 left on p26-3; the integrate-args plan-size limit was filed after Lachy ruled `plan: ""` for three integrations.
 - 2026-10-19: executed `[[thread-skill-rollout-2026-10-18]]` from the clone: 7/7 merged (#171–#177) in 25h 9m through three room stops and three usage-limit cuts; phases 19 and 23 closed; 4.1.0 release decision filed as [[thread-skill-release-4-1-0]].
