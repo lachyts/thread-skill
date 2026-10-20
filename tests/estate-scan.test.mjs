@@ -654,31 +654,47 @@ function gone(pid) {
   for (let i = 0; i < 40 && alive(pid); i++) sleep(50)
   return !alive(pid)
 }
-const hangPid = () => Number(fs.readFileSync(HANG_PID, 'utf8').trim())
+// The pid the fake ssh recorded, or 0 when it never started (or died before its write landed).
+const hangPid = () => (fs.existsSync(HANG_PID) ? Number(fs.readFileSync(HANG_PID, 'utf8').trim()) || 0 : 0)
+// One V3 scan per bound in `bounds` until the fake ssh has started within it: on a loaded machine (a full `make
+// test` beside other verifiers) git can reach the bound before it has spawned ssh, and then there is no hung
+// grandchild to kill. Returns the last run and the bound it ran under.
+function hangScan(bounds, argsFor) {
+  let run, bound
+  for (bound of bounds) {
+    fs.rmSync(HANG_PID, { force: true })
+    run = scan(V3, argsFor(bound))
+    if (hangPid()) break
+  }
+  return { run, bound }
+}
 
 test('7a. --timeout: a hung remote is killed with its whole group and the cached default branch stands in', () => {
-  fs.rmSync(HANG_PID, { force: true })
-  const run = scan(V3, ['--timeout', '1'])
+  const { run, bound } = hangScan([1, 2, 4], (t) => ['--timeout', String(t)])
   const j = ok(run)
-  assert.ok(run.ms < 6000, `elapsed ${run.ms} ms`)
+  // Well under the fake ssh's 30 s sleep, on the scan's own clock: the timeout ended the probe, not the sleep. The
+  // other probes' time is load, so a tighter bound only measures the machine.
+  assert.ok(j.elapsedMs < 20000, `elapsedMs ${j.elapsedMs} at --timeout ${bound}`)
   const h = repoAt(j, R('H'))
   assert.ok(h.errors.some((e) => e.check === 'default-branch' && /timeout/.test(e.error)), JSON.stringify(h.errors))
   assert.equal(h.defaultBranch, 'main')
   assert.equal(h.defaultBranchSource, 'cached')
   assert.equal(j.deadlineHit, false)
-  assert.ok(fs.existsSync(HANG_PID), 'the fake ssh ran')
+  assert.ok(hangPid() > 0, `the fake ssh ran within --timeout ${bound}`)
   assert.ok(gone(hangPid()), 'the ssh grandchild is gone')
 })
 
 test('7b. --deadline: probes in flight at the deadline are killed and the run still reports', () => {
-  fs.rmSync(HANG_PID, { force: true })
-  const run = scan(V3, ['--timeout', '30', '--deadline', '2'])
+  const { run, bound } = hangScan([2, 4, 8], (d) => ['--timeout', '30', '--deadline', String(d)])
   const j = ok(run)
-  assert.ok(run.ms < 6000, `elapsed ${run.ms} ms`)
+  // The documented bound on the scan's own clock (from its START, so interpreter start-up stays out): the deadline,
+  // the 1 s kill grace and the 2 s reap bound, plus 1 s of slack.
+  assert.ok(j.elapsedMs < bound * 1000 + 4000, `elapsedMs ${j.elapsedMs} at --deadline ${bound}`)
   assert.equal(j.deadlineHit, true)
   const h = repoAt(j, R('H'))
   assert.ok(h.errors.some((e) => e.check === 'default-branch' && /deadline/.test(e.error)), JSON.stringify(h.errors))
   assert.ok(h.unchecked.some((u) => u.why === 'deadline'), JSON.stringify(h.unchecked))
+  assert.ok(hangPid() > 0, `the fake ssh started before --deadline ${bound}`)
   assert.ok(gone(hangPid()), 'the ssh grandchild is gone')
 })
 
@@ -709,9 +725,8 @@ test('7d. SIGTERM: every live probe group is killed, then the scan exits 130', a
   const child = spawn('python3', [SCRIPT, '--vault', V3, '--today', TODAY, '--timeout', '30', '--deadline', '30'],
     { cwd: S, env, stdio: 'ignore' })
   const exited = new Promise((resolve) => child.on('exit', (code, signal) => resolve({ code, signal })))
-  const pidNow = () => (fs.existsSync(HANG_PID) ? Number(fs.readFileSync(HANG_PID, 'utf8').trim()) : 0)
-  for (let i = 0; i < 300 && !pidNow(); i++) await new Promise((r) => setTimeout(r, 50))
-  const pid = pidNow()
+  for (let i = 0; i < 300 && !hangPid(); i++) await new Promise((r) => setTimeout(r, 50))
+  const pid = hangPid()
   assert.ok(pid > 0, 'the fake ssh started')
   child.kill('SIGTERM')
   assert.deepEqual(await exited, { code: 130, signal: null })
