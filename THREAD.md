@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-19
+last_touched: 2026-10-20
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,27 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-20: P24 and P25 have landed, and P26 is one task short. `[[thread-skill-rollout-2026-10-19]]` (archived, § Completion log): 10/10 merged (#183–#192) in 20h 46m from the clone. Phases 24 and 25 closed; P26 stays open on [[thread-skill-p26-3-mark-started-arms-the-task-window]].**
+- **Landed:**
+  - p24-1 three-way fit test (#183).
+  - p26-1 arm and prepare refuse without an owner (#184).
+  - p25-1 estate scan (#185).
+  - p24-2 schedule writes serial rollouts (#186).
+  - p24-3 execute runs Legs (#187).
+  - p26-2 every rollout runs from its clone (#188).
+  - p25-2 grading and ranking (#189).
+  - p24-4 status, repair and reflect read serial rollouts (#190).
+  - p25-3 decision round and dispatch, `/thread:orient-all` (#191).
+  - p25-4 grade calibration (#192).
+- **Run shape:**
+  - p24-2 and p26-2 plan-blocked once each (3 rounds), then landed on auto-retry 1/2.
+  - Five integrations were the lead's clean merge.
+  - Three were verify plus a shared-file judge (p25-1, p24-2, p24-4).
+  - Two were conflict integrators (p26-2 on land.sh, execute/SKILL.md and tests/land.test.sh; p25-3 on schedule/SKILL.md).
+  - One Chorus room stop (main's week line, 03:26–04:07): both calls stopped at a boundary and resumed on fauxmuse with nothing lost.
+- **One needs-you item, about 6h:** the integrate calls for p26-2, p24-4 and p25-3 had to carry 40–71k-character plans verbatim, too large for the lead to pass. Lachy ruled `plan: ""` for those three, and all of them integrated clean. Follow-up: [[thread-skill-integrate-args-plan-too-large]].
+- **Not live yet:** the installed plugin is still 4.0.0. One release now follows P24–P26 ([[thread-skill-release-after-p24-p25]]), once p26-3 lands or is carried. Scored `t-20261020T034106Z-4f1b50`.
 
 **2026-10-19: P23 and the P19 tail have landed. `[[thread-skill-rollout-2026-10-18]]` (archived, § Completion log): 7/7 merged (#171–#177) in 25h 9m from the clone; phases 19 and 23 closed.**
 - **Landed:** p23-1 one-line spend gate + plan-judge pricing (#171), p19-5 description trim + 700 hard cap (#172; post-trim evals 0.986 vs 0.978, US$40.52), p23-5 a code project's thread lives in its repo + `thread-placement.py` + ADR 0039 (#173), p23-4 machine-wide verify slots + `tests/run.sh` cap (#174), p23-6 Start when ready (#175), p23-3 ntfy fallback for undelivered needs-you pushes (#176), p23-7 PR #88's still-true corrections + the reflect-close-score deadline-regex flake fix (#177; #88 closed, superseded).
@@ -754,7 +775,7 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
-- **An integrate call's `plan` must go in verbatim, and plans run to 60k+ characters (2026-10-19).** The Workflow tool takes args only inline (no file path), so the lead copies the `lead-integrate.py plan` output into the call. Check fidelity after launch: the integrator's prompt embeds the plan indented two spaces, so de-indent from `Planned on:` and compare with the plan file. A shared-file judge-only call carries no plan.
+- **An integrate call's `plan` must go in verbatim, and plans run to 60k+ characters (2026-10-19; hit again 2026-10-20).** On 2026-10-20 a 74k-character args object for p26-2 could not be sent: the attempt was cut off part-way. Lachy ruled `plan: ""` for p26-2, p24-4 and p25-3 (the rollout's `## Notes`). The judge-only path never renders `I.plan`; the conflict integrator worked from the brief and review history and resolved both conflicts. Tracked by [[thread-skill-integrate-args-plan-too-large]]; until it lands, ask Lachy before passing `""` again. The Workflow tool takes args only inline (no file path), so the lead copies the `lead-integrate.py plan` output into the call. Check fidelity after launch: the integrator's prompt embeds the plan indented two spaces, so de-indent from `Planned on:` and compare with the plan file. A shared-file judge-only call carries no plan.
 - **Usage-limit cuts read as `transient infrastructure failure` rows (2026-10-19).** A call cut by a session, 5-hour or monthly limit returns `blocked` with that diagnosis and the CLI's `You've hit your … limit` in `<failures>`: never reconcile it; resume the same runId with its original args after the reset.
 - **The 1800 s Integration verify times out under concurrent suites (2026-10-19).** At load ~157 (four agents' `make test` plus the lead's) p19-5's lead verify hit rc 124 with zero failures. #174's `tests/run.sh` cap (4 suites) fixed it for later verifies; the machine-wide verify slots go live only after a plugin update.
 - **`parallel_ceiling` is live:** `reconcile-rollout.py next` re-reads it from the rollout note on every call, so editing the note changes a running rollout at the lead's next loop entry, which can lag the edit (Chorus: edited 09:43+11:00, first `running=5` at 10:29+11:00). No event records the change: it shows only in the `settings` stamped on the next `slot-taken` / `idle-slots`, and the Reflection flags `ceiling changed mid-window` (split with `--since`/`--until`).
@@ -1014,13 +1035,15 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Now (from 2026-10-19):** no rollout is running on this repo; P19 and P23 are closed.
-1. [[thread-skill-release-4-1-0]]: decide and cut 4.1.0 (`claude plugin update thread@thread`, `make release-check`, release PR citing `docs/evals/2026-10-18-p19-5-description-trim.md`). Until it is installed the lead runs the 4.0.0 engine: none of P22/P23 is live.
-2. Only after installing: set `[notify] ntfy_topic` (once [[ntfy-noise-audit]] names it) and, if wanted, `verify_slots` under `[defaults]` in `~/.config/thread/rollouts.toml`. An older install refuses both.
-3. Next weekly Reflection is due 2026-10-24; `/thread:reflect [[thread-skill-rollout-2026-10-18]]` is on offer meanwhile.
+**Now (from 2026-10-20):** no rollout is running on this repo. P24 and P25 are closed; P26 waits on p26-3.
+1. [[thread-skill-p26-3-mark-started-arms-the-task-window]] (filed by p26-1): finish P26, or carry it into the release.
+2. [[thread-skill-release-after-p24-p25]]: one release with one paid eval run, then `claude plugin update thread@thread` once no rollout runs on the primary checkout (ADR 0031). Until it is installed, the lead runs the 4.0.0 engine, so none of P22–P26 is live.
+3. Follow-ups: [[thread-skill-integrate-args-plan-too-large]], [[thread-skill-weekly-reading-reads-serial-chains]], [[workspaces-sweep-integrates-origin-before-push]].
+4. `/thread:reflect [[thread-skill-rollout-2026-10-19]]` is on offer; the next weekly Reflection is due 2026-10-24.
 
 ## Session log
 
+- 2026-10-20: executed `[[thread-skill-rollout-2026-10-19]]` from the clone: 10/10 merged (#183–#192) in 20h 46m through one room stop. Phases 24 and 25 closed, P26 left on p26-3; the integrate-args plan-size limit was filed after Lachy ruled `plan: ""` for three integrations.
 - 2026-10-19: executed `[[thread-skill-rollout-2026-10-18]]` from the clone: 7/7 merged (#171–#177) in 25h 9m through three room stops and three usage-limit cuts; phases 19 and 23 closed; 4.1.0 release decision filed as [[thread-skill-release-4-1-0]].
 - 2026-10-18: signed p19-10 (US$20) so it landed; grilled the overnight spend-gate stall into ADR 0038 (#168); superseded and archived the 10-17 rollout; scheduled P23 + carried p19-5 as `[[thread-skill-rollout-2026-10-18]]` and handed execute to a clone session (#169); archived the 5c5a and redesign evidence.
 - 2026-10-17 (evening): executed the P22 rollout from the clone: 9/11 merged (#157–#165) in 7h 16m, phase 22 closed; p19-10 spend gate refused by the standing approval (unpriceable "each"), so the run closed in the sign-off form with p19-10 and p19-5 waiting; landing PR #156 needed an update-branch.
