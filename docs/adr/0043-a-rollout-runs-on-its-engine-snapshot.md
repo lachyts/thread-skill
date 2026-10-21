@@ -25,6 +25,6 @@ Every rollout lead, in any repo, runs its scripts, its Workflow engine (`skills/
 ## Consequences
 
 - Two rollouts can run on two engine versions at once. Their shared machine-wide state (verify slots, the Trickle's count, `~/.config/thread/*`) and what a reader across rollouts reads (the Run record a Reflection or the Watchdog reads, the notes the Trickle counts) must stay readable across versions, so a change to its format is a migration, never a silent rewrite.
-- The rollout settings file is the sharpest case. Today an older `rollout-settings.py` refuses an unknown key (ADR 0016), and a refused file halts every rollout on the machine at its next entry. So a key only a newer snapshot knows (P29's `inert_paths` and the Away cap among them) must not be written while a rollout runs on an older one: whatever writes it checks first that every running rollout's snapshot knows it.
-- The snapshot does not cover the plugin's hooks. Claude Code runs them from the session's plugin root, the Primary checkout, so the Stop-hook driver (`hooks/rollout-stop-driver.py`) that decides whether a lead's stop is blocked moves with a pull. A change to the driver, or to the `ROLLOUT-STATUS` line it parses, must stay compatible with every snapshot still running, like the shared state above.
-- The lead session's rendered skill comes from the Primary checkout, so on entry it reads its prose from the snapshot as a file, by `skills/_shared/plugin-root.md` (the root is the path read).
+- The rollout settings file is the sharpest case: an older snapshot refuses a key it does not know (ADR 0016), so a key only a newer snapshot knows is not written while an older one runs.
+- The snapshot does not cover the plugin's hooks, which run from the Primary checkout, so the Stop-hook driver and the line it parses stay compatible with every snapshot still running.
+- A session's rendered skill comes from the Primary checkout, so a lead reads its prose from the snapshot as a file.
