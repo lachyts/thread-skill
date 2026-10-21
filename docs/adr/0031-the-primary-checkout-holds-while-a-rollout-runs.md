@@ -3,6 +3,8 @@
 Date: 2026-10-03
 Status: accepted (amends ADR 0030's migration consequence; decided with Lachy in the 2026-10-03
 `/thread:orient Thread Skill` reshuffle, after two clean-room review rounds of PR #72)
+Superseded in part by ADR 0043 (2026-10-21): the hold covers only a running rollout whose note names no
+Engine snapshot.
 
 ## Context
 

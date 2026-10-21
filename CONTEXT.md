@@ -55,6 +55,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the agent cannot recommend on with confidence raises the grade one step.
   Each grade is kept in the Grade log (§ Run record and tuning).
   _Avoid_: tier 1/2/3, traffic lights.
+- **Pre-flight** — schedule's pass over a rollout's tasks before it is written:
+  each task's **Readiness grade** (only Ready tasks enter the queue as they
+  stand; One call and Grill tasks get one batched decision round with Lachy
+  first; Orient tasks stay out), then the plan gate run on each queued task,
+  its approved plan kept on the note with the commit it was judged on. At the
+  task's start the plan stands unless `main` has since moved in the files the
+  plan names (ADR 0047). _Avoid_: preflight check, dry run.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
   a fortnight or when its ready work grows), or kill it (done and archived).
@@ -469,7 +476,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the latest `main` merged in, the verifier re-run and, when needed, a short
   re-review (ADR 0030). In plain English, a **merge queue** (GitHub's merge
   queue, bors, the 'not rocket science' rule): one approved change at a time,
-  re-verified on the latest `main` before it merges; run by the lead, never
+  re-verified on the latest `main` before it merges, or a **Merge train** of
+  them verified once (ADR 0044); run by the lead, never
   GitHub's own merge queue, which merge-task refuses. _Avoid_: update-branch
   (GitHub's merge-in, which re-verifies nothing without CI), rebase.
 - **Integration lane** — the one-at-a-time Integration step itself, held by one
@@ -481,6 +489,20 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in `next`'s order: a task a queued task depends on, directly or through a
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
   order. _Avoid_: the lane (that is the step, not the line).
+- **Merge train** — the head of the Integration queue taken through the lane
+  together: up to **Train size** approved tasks stacked on the latest `main`
+  in queue order, each still merged in and re-reviewed on its own, and the
+  verifier run once at the top of the stack. Green merges every car in order;
+  red falls back to one task at a time (ADR 0044). _Avoid_: batch, bundle, merge group.
+- **Train size** — the most tasks one Merge train carries: a knob, 4 by
+  default, logged per train in the Run record so a Reflection can raise or
+  lower it. A Train size of 1 is plain one-at-a-time Integration.
+  _Avoid_: batch size.
+- **Inert path** — a file a repo's verifier provably never reads, so a `main`
+  that moved only in inert paths since a green run leaves that run standing
+  and Integration re-runs nothing. Per repo, in the operator's rollout
+  settings, empty by default; schedule proposes them only once it has shown
+  no test reads them (ADR 0045). _Avoid_: doc-only, ignored path.
 - **Integration conflict** — Integration's merge of the latest `main`
   conflicted and the integrator could not keep both intents, so it aborted
   the merge and pushed nothing (Vibe Kanban's 'rebase conflicts'). The note is
@@ -510,9 +532,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   directory-source install, or `--plugin-dir`): every rollout's lead, in any
   repo, runs its engine from it. A self-rollout runs from its **Rollout
   clone**, like every rollout, so its merges never reach it; it is that clone's
-  **In-place checkout**, caught up once a run completes. It never moves while a
-  **Running rollout** exists (ADR 0031). Not the engine's "main checkout",
+  **In-place checkout**, caught up once a run completes. It is free to move:
+  each rollout runs on its own **Engine snapshot** (ADR 0043), and ADR 0031's
+  hold covers only a running rollout that has none. Not the engine's "main checkout",
   which is a rollout's own repo. _Avoid_: live checkout, installed copy.
+- **Engine snapshot** — a frozen copy of the **Primary checkout** at one
+  commit, made when a rollout launches and named on its rollout note: the
+  lead's scripts, Workflow engine and skill prose all come from it for the
+  whole run, so the Primary checkout can move under a **Running rollout**. A
+  rollout moves to a newer snapshot only at its **Reinstate** (ADR 0043).
+  _Avoid_: pinned root, frozen plugin, engine version.
 - **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, beside
   its toplevel and never nested inside it: the Project root of every parallel
   rollout scheduled after P26 (ADR 0042), so peer sessions' commits to the
@@ -562,13 +591,20 @@ through time, from attention to merged PRs. Terms only — no implementation.
   armed by `mark-started` itself (p26-3), so a start, restart or seeded
   revise never launches unarmed. _Avoid_: watch, session.
 - **Git-env hold** — the unacked trip lines on a rollout note's
-  `## Git-env log`: while one stands, `next` halts `git-env`, nothing starts,
-  integrates or merges, and `carry` refuses the rollout. Only a **Git-env ack**
-  lifts it. _Avoid_: git-env halt (the lead's stop, not the hold).
-- **Git-env ack** — Lachy's recorded acceptance of the tripped windows, written
-  only by `/thread:repair` (its git-env step, 3e) through the canary's `ack`, naming exactly the
-  set shown and the ref shown (`--ref`), after an optional `restore`. Never
-  written by execute. _Avoid_: clear, reset.
+  `## Git-env log`: while one stands, nothing integrates or merges and `carry`
+  refuses the rollout, but task calls keep running and starting in their own
+  worktrees, which the canary never watches (ADR 0046). Only a **Git-env ack**
+  lifts it.
+  _Avoid_: git-env halt (the lead's stop, not the hold).
+- **Git-env ack** — the recorded acceptance of the tripped windows, naming
+  exactly the set shown and the ref shown (`--ref`). Lachy's, through
+  `/thread:repair` (its git-env step, 3e), after an optional `restore`; or an
+  **Automatic ack**. _Avoid_: clear, reset.
+- **Automatic ack** — a Git-env ack the lead writes itself when the evidence
+  proves the checkout unharmed: its `<default>` equals `origin/<default>`, no
+  local commit is missing from origin, its tree is clean and it is not bare.
+  Logged with that evidence; any trip short of it still waits for Lachy
+  (ADR 0046). _Avoid_: auto-clear, self-heal.
 - **Dependent closure** — the set of tasks transitively depending on a task
   via `depends-on:` / `blocked-by:` (schedule § 3) — the blast radius that
   must move together if it's deferred, and the tasks a set-aside task holds
