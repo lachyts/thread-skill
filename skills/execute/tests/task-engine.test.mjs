@@ -22,9 +22,11 @@ const mkTask = (slug, over = {}) => ({
   slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: false,
   maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, rung: 'opus-xhigh', ...over,
 })
+// args.verifySlot is required (estate ADR 0009 d4): every call carries one.
+const VSLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
 const mkArgs = (task, over = {}) => ({
   rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01',
-  task, ...over,
+  verifySlot: VSLOT, task, ...over,
 })
 const slugOf = (label) => label.split(':')[1].split(/[ @]/)[0]
 

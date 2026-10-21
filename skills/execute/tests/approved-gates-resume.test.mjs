@@ -42,9 +42,11 @@ const mkTask = (over = {}) => ({
   slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: false,
   maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, rung: BOTTOM, ...over,
 })
+// args.verifySlot is required (estate ADR 0009 d4): every call carries one.
+const VSLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
 const mkArgs = (taskOver = {}, over = {}) => ({
   rolloutSlug: 'proj-rollout-2026-10-02', repoPath: '/repo', verifier: 'make test', date: '2026-10-02',
-  task: mkTask(taskOver), ...over,
+  verifySlot: VSLOT, task: mkTask(taskOver), ...over,
 })
 
 const green = (label) => ({ verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: `${label} done` })
@@ -174,7 +176,9 @@ const ARG_VARIANTS = [
   { name: 'knownBaselineFailures', args: { knownBaselineFailures: ['test_x — env (pre-existing)'] }, task: {} },
   { name: 'ignoreGate', args: {}, task: { ignoreGate: true } },
   { name: 'legacy model and effort', args: {}, task: { model: 'fable', effort: 'max' } },
-  { name: 'verifySlot', args: { verifySlot: { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 } }, task: {} },
+  // Every other variant is slotted (mkArgs); the renderers still take an absent slot (only the entry refuses one,
+  // estate ADR 0009 d4), so this one renders them unslotted.
+  { name: 'no verifySlot', args: { verifySlot: undefined }, task: {} },
   // ADR 0038: PLAN_G's spend gate renders the plan judge's pricing fragment. Its gates come from the plan text, never
   // from task.approvedGates, so the fragment is the same with and without them.
   { name: 'gatePricer', args: { gatePricer: '/home/x/.claude/plugins/cache/thread/thread/4.1.0/skills/_shared/scripts/gated_inputs.py' }, task: {} },

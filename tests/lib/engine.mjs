@@ -27,8 +27,9 @@ export function loadEngine(names) {
 // call recorded as { label, prompt }, then delegated to agentImpl(prompt, opts)).
 // Returns { result, logs, calls } on success or { error, logs, calls } when the script throws. The
 // result is JSON round-tripped into this realm so deepStrictEqual can compare runs across contexts.
-export async function runTask(args, agentImpl) {
-  const src = fs.readFileSync(enginePath, 'utf8')
+// options.source runs that engine text instead of the file's (a test's broken-variant control).
+export async function runTask(args, agentImpl, options = {}) {
+  const src = options.source === undefined ? fs.readFileSync(enginePath, 'utf8') : options.source
   if (!src.includes('export const meta')) throw new Error('export const meta not found in ' + enginePath)
   const body = src.replace('export const meta', 'const meta')
   const logs = []

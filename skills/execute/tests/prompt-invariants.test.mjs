@@ -21,10 +21,12 @@
 //                               gated) fires on the round-3+ reviser; both ceiling outcomes return the
 //                               accumulated reviewHistory, and only a with-history final-round approval
 //                               sets approvedAtCeiling.
-//   - verify slots (p23-4)    → args.verifySlot absent: every prompt byte-identical (the whole-call pins); set: the
-//                               eight verifier-bearing builders render the wrapped line with SLOT_TEXT once, the four
+//   - verify slots (p23-4)    → args.verifySlot is required (estate ADR 0009 d4): absent or null, runTask refuses
+//                               before any dispatch in both modes, and so does a malformed value; set: the eight
+//                               verifier-bearing builders render the wrapped line with SLOT_TEXT once, the four
 //                               TASK_TREE_RULE builders carry slotRule after KILL_RULE, only the integrator carries
-//                               --priority, and a malformed value is refused before any dispatch.
+//                               --priority, and the whole-call pins' slotted calls are their unslotted bytes plus
+//                               exactly those pieces.
 // Evaluates only the pure-function region of the engine (before the orchestration that needs Workflow
 // globals) in a vm sandbox. Run: node tests/prompt-invariants.test.mjs   (exit 0 = pass)
 import fs from 'node:fs'
@@ -1058,7 +1060,9 @@ function agentPrompts(E) {
 // (`<scrub> python3 '<script>' run --slots N -- bash -c '<verifier>'`), never the bare scrubbed verifier; SLOT_TEXT
 // sits once in each (beside the verify block's `- Verifier:` line, or in slotRule); the four TASK_TREE_RULE builders
 // carry slotRule right after KILL_RULE; only the integrator's line carries `--priority`; the two review judges render
-// no verifier and stay byte-identical. Absent, every prompt is byte-identical (the whole-call pins below).
+// no verifier and stay byte-identical. The renderers still take an absent slot (slotted(V, undefined) is scrubbed(V));
+// the engine's entry refuses a call without one (estate ADR 0009 d4), and the whole-call pins below show the slotted
+// calls are their unslotted bytes plus exactly the slot pieces.
 {
   const E = loadEngine(['KILL_RULE', 'SLOT_TEXT', 'GIT_ENV_SCRUB', 'shq', 'slotted', 'slotRule', 'scrubbed', 'verifySlotArgsError', ...RULE_BUILDERS])
   const V = `make test && echo "it's $HOME"`
@@ -1153,7 +1157,28 @@ function agentPrompts(E) {
       ok(r.error && /args\.verifySlot/.test(String(r.error)) && r.calls.length === 0, `runTask (${mode || 'task'} mode) refuses verifySlot ${what} before any agent() call`)
     }
   }
-  ok(E.verifySlotArgsError(undefined) === '' && E.verifySlotArgsError(null) === '' && E.verifySlotArgsError(SLOT) === '', 'verifySlotArgsError: absent, null and { script, slots } are usable')
+  ok(E.verifySlotArgsError(undefined) === '' && E.verifySlotArgsError(null) === '' && E.verifySlotArgsError(SLOT) === '', 'verifySlotArgsError: absent, null and { script, slots } pass its shape check (the entry refuses absent and null itself)')
+  // estate ADR 0009 d4: an absent or null verifySlot is refused before any agent() call, in both modes, naming what to
+  // pass. The runtime passes args JSON-stringified, which drops an undefined key, so that form is run too.
+  const REQUIRED = /args\.verifySlot: is required \(estate ADR 0009 d4\): pass \{ "script": "[^"]*\/skills\/execute\/scripts\/verify-slot\.py", "slots": /
+  const absent = (mode) => { const { verifySlot: _drop, ...rest } = mk(undefined, mode); return rest }
+  const ABSENT = [['absent', (mode) => absent(mode)], ['absent (stringified args)', (mode) => JSON.stringify(absent(mode))],
+    ['undefined', (mode) => mk(undefined, mode)], ['null', (mode) => mk(null, mode)]]
+  for (const mode of [undefined, 'integrate']) {
+    for (const [what, args] of ABSENT) {
+      const r = await runTask(args(mode), async () => { throw new Error('agent() must not run') })
+      ok(r.error && REQUIRED.test(String(r.error.message)) && r.calls.length === 0, `runTask (${mode || 'task'} mode) refuses verifySlot ${what} before any agent() call, naming what to pass`)
+    }
+  }
+  // control: the same engine with the required check cut dispatches an unslotted call, so the cases above would catch
+  // the check being removed.
+  const cut = src.replace(/(const badSlot = verifySlotArgsError\(a\.verifySlot\)) \|\|\n[^\n]*\n/, '$1\n')
+  ok(cut !== src && !cut.includes('is required (estate ADR 0009 d4)'), 'verifySlot control: the required check is cut from the variant')
+  for (const mode of [undefined, 'integrate']) {
+    const args = mode ? { ...absent(mode), integration: { ...I, startedAt: '2026-10-18T10:00:00Z' } } : absent(mode)
+    const r = await runTask(args, async () => { throw new Error('stub') }, { source: cut })
+    ok(!(r.error && /args\.verifySlot/.test(String(r.error.message))) && r.calls.length > 0, `verifySlot control (${mode || 'task'} mode): without the check an absent verifySlot reaches agent()`)
+  }
 }
 
 // ---- Byte pins (p12-6): task mode renders exactly what it did before Integration existed ----------
@@ -1254,13 +1279,22 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   // revise and two review rounds; a top-rung task on master with env bootstrap and a baseline; a plan-gated
   // read-only task on the top rung). Each task keeps the legacy `model:` that gave the p13-1 engine the same
   // call shape; `rung:` wins over it here.
+  // Slotted since estate ADR 0009 d4 made args.verifySlot required: the calls with the slot pieces taken back out
+  // (slotRule, slotNote, the wrapped line back to the scrubbed one) are what every pin below hashes, and they hash to
+  // the pre-0009 pins, so each slotted prompt is its unslotted bytes plus exactly the slot pieces. The slotted calls
+  // themselves have their own pin (the last one).
   const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
   const LADDER = { source: 'built-in', rungs: [
     { name: 'opus-high', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh' },
     { name: 'opus-xhigh', model: 'opus', effort: 'xhigh', judge: 'high', review: 'xhigh' },
   ] }
   const mkT = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: false, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, model: 'fable', rung: 'opus-xhigh', ...over })
-  const mkA = (task, over = {}) => ({ rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', ladder: LADDER, task, ...over })
+  const PIN_SLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
+  const mkA = (task, over = {}) => ({ rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', ladder: LADDER, verifySlot: PIN_SLOT, task, ...over })
+  const SL = loadEngine(['slotted', 'slotRule', 'slotNote', 'scrubbed'])
+  const unslot = (p) => p.split(SL.slotRule('make test', PIN_SLOT)).join('').split(SL.slotNote(PIN_SLOT)).join('')
+    .split(SL.slotted('make test', PIN_SLOT)).join(SL.scrubbed('make test'))
+  const slottedCalls = []
   const scripted = async (prompt, opts) => {
     const label = opts.label
     const kind = label.split(':')[0]
@@ -1285,6 +1319,9 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
     mkA(mkT('proj-audit-x', { scope: 'read-only', planGate: true })),
   ]) {
     const r = await runTask(args, scripted)
+    slottedCalls.push(JSON.stringify(r.calls))
+    ok(r.calls.length > 0 && r.calls.every((c) => !c.prompt.includes(SL.scrubbed('make test'))), `ADR 0009 d4: ${args.task.slug}: no prompt renders the bare verifier`)
+    r.calls = r.calls.map((c) => ({ ...c, prompt: unslot(c.prompt) }))
     calls.push(JSON.stringify(r.calls))
     rows.push(JSON.stringify({ result: r.result, err: r.error && String(r.error) }))
     logs.push(...r.logs)
@@ -1319,6 +1356,9 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
     'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p23-1: the p23-1 base above plus the ADR 0038 edits)')
   ok(sha(rows.join('\n')) === '0137cf70ddf1d5131b4511462f43f1d639311e6b4ada4016af30a2269bd563d4',
     'byte pin: three whole task-mode calls — every row, rung record and reviewVerdicts included (re-pinned by p21-3: the p21-3 base above plus reviewVerdicts)')
+  ok(slottedCalls.join('\n') !== calls.join('\n'), 'ADR 0009 d4: the slot is in these calls, so taking it out is no no-op')
+  ok(sha(slottedCalls.join('\n')) === '986d4024967d3b0c2cd38db5372fcf6637fb5102e2319c75d28444cba44a1f3c',
+    'byte pin (estate ADR 0009 d4): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
 }
 
 console.log()

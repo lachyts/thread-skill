@@ -34,6 +34,7 @@ const Q = 'Which retention window should the cache use: 7 or 30 days?'
 const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
 const mkArgs = (over = {}) => ({
   rolloutSlug: ROLLOUT, repoPath: '/repo', verifier: 'make test', date: '2026-10-09',
+  verifySlot: { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }, // required (estate ADR 0009 d4)
   task: { slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, rung: 'opus-xhigh', ...over },
 })
 

@@ -29,6 +29,7 @@ UNFINISHED="$HERE/../../_shared/scripts/unfinished-rollout.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="$TMP/events"  # this suite reads the Run record, so it keeps its own dir
+export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots"  # S8's engine args name verify-slot.py (estate ADR 0009 d4); keep any pool in temp
 NOW=2026-10-14T09:00:00Z
 DATE=2026-10-14
 
@@ -220,6 +221,7 @@ const G24 = 'spend: eval re-runs — cap 24 USD'
 const plan = `Planned on: abc\n### Files to modify\n- x\n### Gated inputs\n- ${G24}\n  - 10 invocations at --max-cost-usd 4 (40 USD)\n### Risks / unknowns\n- none`
 const feedback = ['the sub-bullet spends 40 USD (10 invocations at --max-cost-usd 4) against a Cap of 24 USD: raise the Cap or trim the runs']
 const args = { rolloutSlug: 'ro', repoPath: '/repo', verifier: 'make test', date: '2026-10-14',
+  verifySlot: { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }, // required (estate ADR 0009 d4)
   gatePricer: '/x/skills/_shared/scripts/gated_inputs.py',
   task: { slug, taskPath: `/vault/${slug}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 2, rung: 'opus-high' } }
 const out = await runTask(args, async (prompt, opts) => {

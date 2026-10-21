@@ -57,8 +57,10 @@ const mkTask = (slug, over = {}) => ({
   slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'single-file', planGate: false,
   maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, ...over,
 })
+// args.verifySlot is required (estate ADR 0009 d4): every call carries one.
 const mkArgs = (task, over = {}) => ({
-  rolloutSlug: 'proj-rollout-2026-10-03', repoPath: '/repo', verifier: 'make test', date: '2026-10-03', task, ...over,
+  rolloutSlug: 'proj-rollout-2026-10-03', repoPath: '/repo', verifier: 'make test', date: '2026-10-03',
+  verifySlot: { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }, task, ...over,
 })
 const green = (label) => {
   const s = label.split(':')[1].split(/[ @]/)[0]
