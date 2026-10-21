@@ -1,4 +1,4 @@
-# 0046 — A proven-false git-env trip acks itself, and a trip holds only the lane
+# 0046 — A proven-false git-env trip acks itself, and a trip holds only what it threatens
 
 Date: 2026-10-21
 Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`, built by P29. Amends ADR 0030's git-env canary consequence (only `/thread:repair` acks, on Lachy's word) and the Git-env hold.
@@ -11,15 +11,17 @@ A git-env trip holds the whole queue (nothing starts, integrates or merges) unti
 
 **When the evidence proves the checkout unharmed, the lead writes the Git-env ack itself (an Automatic ack), logged with that evidence. A trip, while it stands, holds only the Integration lane.**
 
-- **The evidence, all of it:** the Project root's `<default>` equals origin's tip, read from GitHub with `ls-remote` as well as from `origin/<default>` (a forged tracking ref could match a bad local one, which is why repair § 3e reads both), so no commit on it is missing from origin; its tree is clean; and it is not bare. Anything short of that still waits for Lachy, who is pushed a needs-you notification.
+- **Only a bookkeeping trip acks itself.** A trip that observed nothing (`record missing`, `record unreadable`, `record not armed`: a window was never armed or could not be read) is the only kind an Automatic ack may clear. A trip that observed a change (the default branch moved, `core.bare` flipped) is never acked automatically, whatever the checkout reads afterwards: evidence read at ack time cannot show what the window saw, and a harmful change can be pushed or reverted before anyone looks.
+- **The evidence, all of it, read at the ack:** the Project root's `<default>` is an ancestor of origin's tip, read from GitHub with `ls-remote` as well as from `origin/<default>` (a forged tracking ref could match a bad local one, which is why repair § 3e reads both), so no commit on it is missing from origin, while a peer's push since does not fail it; it has no tracked changes; and it is not bare. A trip short of either test is the Companion's, then Lachy's (ADR 0048).
 - **The merge still checks its base.** The tripped window's verify stands, because the evidence shows the checkout it ran against was unharmed. Integration resumes through merge-task, whose base check re-integrates when `main` moved.
 - **A RACE stays Lachy's.** A git-env halt at a RACE site keeps ADR 0030's rule: after any ack, automatic or not, the task is an undecided RACE that repair § 3e hands to § 3c. An Automatic ack never re-runs a RACE re-verify.
-- **Task calls keep going under a hold.** Each task's worktree is cut from `origin/<default>` after a fetch, never from the Project root's local ref, so a trip in the root cannot reach them. Starts, seeded revises and automatic retries continue; only Integration and merging wait. Their windows are still armed and checked: today the canary's `arm` refuses under a hold (exit 3) and `mark-started` passes the refusal through, so under this decision a task call's window arms as usual while a hold stands, and a trip it finds joins the unacked set.
+- **A trip holds what it threatens (ADR 0048).** A bookkeeping trip or a moved default branch holds only the lane: each task's worktree is cut from `origin/<default>` after a fetch, never from the Project root's local ref, so starts, seeded revises and automatic retries continue, their windows armed and checked as usual, and a trip one finds joins the unacked set. A `core.bare` flip holds the whole rollout: linked worktrees share the root's config, so it reaches every task. Nothing new starts, running calls finish, and the restore runs once none is in flight.
 
 ## Considered options
 
 - **Self-ack only, the hold still freezing everything:** rejected. A real trip at night would still idle every slot until morning.
 - **Lane-only hold, Lachy still acks every trip:** rejected. It still loses the night's merges to a formality.
+- **Any trip kind acks itself on stronger evidence** (the trip line's own recorded state, the moved ref merged by merge-task): rejected in the re-grill. Both false trips of `chorus-rollout-2026-10-18` were bookkeeping trips, and an observed change is rare enough to be worth a look.
 
 ## Consequences
 

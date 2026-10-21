@@ -1,7 +1,11 @@
 # 0044 — Integration runs as a Merge train
 
 Date: 2026-10-21
-Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`, built by P29. Amends ADR 0030 decision 3's one-at-a-time Integration, and takes up the merge train it deferred "until the first queue runs measure how long tasks wait".
+Status: deferred. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`, then deferred in the re-grill the same day (§ Deferred). ADR 0030 decision 3's one-at-a-time Integration stands; Train size is 1.
+
+## Deferred
+
+The re-grill audited where rollout time went from September to 21 October before ruling on the train's gaps. Stalls that hold the whole queue (a question, a halt, a gate, a dead lead or Mac), usage limits and machine load cost about 150 to 185 hours; the lane's real merge time cost about 35 to 50. In `chorus-rollout-2026-10-18` the 23-hour wait below was 15.2 hours of an overnight git-env halt, 0.7 hours of usage limits and about 6.6 hours of a busy lane, and on a stall-free stretch the one-at-a-time lane merged 1.15 PRs an hour against 0.76 approvals an hour. The train attacks the smallest of those costs and carries the largest open design gap (each car after the first is never up to date with the squash below it, so merge-task's head-contains-base guard refuses it). It returns only if the Run record shows the lane binding once stalls and load are dealt with; the design below is kept as the starting point.
 
 ## Context
 
