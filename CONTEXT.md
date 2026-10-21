@@ -465,9 +465,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   across the whole Mac at once, whatever the number of Rollouts: 2, unless
   Chorus sets another (Chorus ADR 0104 d2). _Avoid_: global ceiling, throttle.
 - **Away** — Lachy has told Chorus he is away from the Mac (the Evening, an
-  Away block, the Lunch restart; Chorus ADR 0104 d1); then the **Away cap**
-  binds instead of the Trickle (ADR 0049). Never a reading of whether he is
-  at the Mac. _Avoid_: idle, night mode.
+  Away block, the Lunch restart; Chorus ADR 0104 d1); then each Rollout runs
+  to its own **Parallel ceiling** (Chorus ADR 0104 d3), until the **Away cap**
+  replaces that (ADR 0049). Never a reading of whether he is at the Mac.
+  _Avoid_: idle, night mode.
 - **Away cap** — while Lachy is **Away**, the most Rollout tasks that run
   across the whole Mac at once: a knob larger than the Trickle, sized so
   suites do not contend, tuned from the Run record (ADR 0049). Each
