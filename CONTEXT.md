@@ -771,7 +771,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Stalled rollout** — a rollout with work it could do and nothing moving,
   not paused and not in a Room stop: its lead, session or Mac stopped, or a
   hold froze more than it threatens (ADR 0048). A wait that is meant (a
-  pause, the Trickle, a cool-down) is not a stall. _Avoid_: stuck, hung,
+  pause, the Trickle or the Away cap, a cool-down) is not a stall. _Avoid_: stuck, hung,
   idle (a Slot can be idle in a moving rollout).
 - **Watchdog** — what notices a Stalled rollout from outside its session:
   thread-skill's read-only verdict, acted on by Chorus's Companion, or by a

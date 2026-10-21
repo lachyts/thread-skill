@@ -13,7 +13,7 @@ Every rollout lead, in any repo, runs its scripts, its Workflow engine (`skills/
 
 - **A rollout moves only at its Reinstate.** A pause followed by `/thread:execute` re-snapshots onto the Primary checkout as it then stands. Nothing moves a rollout's snapshot mid-run, by schedule or by the lead's own judgement.
 - **The Primary checkout is free to move.** A pull, a landing's fast-forward or a plugin update reaches every new rollout and every Reinstate, and none of a running rollout's scripts, engine or prose. ADR 0031's `primary-hold.sh` holds only for a running rollout whose note names no snapshot (one launched before P29). The plugin's hooks are the exception (Consequences).
-- **A rollout is touched only by its own engine.** Any verb acting on one rollout (execute, status, repair) takes its scripts and prose from that rollout's snapshot, whichever session runs it, so a rollout's canary records, Run record and note lines are only ever written by the version that started writing them.
+- **A rollout is touched only by its own engine.** Any verb acting on one rollout (execute, status, repair) takes its scripts and prose from that rollout's snapshot, whichever session runs it, so between Reinstates a rollout's canary records, Run record and note lines are written by one version only. A Reinstate crosses versions, so those formats follow the migration rule below.
 - **Snapshots are retired with their rollouts.** A snapshot is removed once every rollout note naming it is archived; one a live note names is never removed, a hard-paused one or one past its last merge included.
 
 ## Considered options
@@ -24,7 +24,7 @@ Every rollout lead, in any repo, runs its scripts, its Workflow engine (`skills/
 
 ## Consequences
 
-- Two rollouts can run on two engine versions at once. Their shared machine-wide state (verify slots, the Trickle's count, `~/.config/thread/*`) and what a reader across rollouts reads (the Run record a Reflection or the Watchdog reads, the notes the Trickle counts) must stay readable across versions, so a change to its format is a migration, never a silent rewrite.
+- Two rollouts can run on two engine versions at once. Their shared machine-wide state (verify slots, the Trickle's count, `~/.config/thread/*`) what a Reinstated rollout's newer snapshot reads of its own earlier state, and what a reader across rollouts reads (the Run record a Reflection or the Watchdog reads, the notes the Trickle counts) must stay readable across versions, so a change to its format is a migration, never a silent rewrite.
 - The rollout settings file is the sharpest case: an older snapshot refuses a key it does not know (ADR 0016), so a key only a newer snapshot knows is not written while an older one runs.
 - The snapshot does not cover the plugin's hooks, which run from the Primary checkout, so the Stop-hook driver and the line it parses stay compatible with every snapshot still running.
 - A session's rendered skill comes from the Primary checkout, so a lead reads its prose from the snapshot as a file.

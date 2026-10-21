@@ -22,6 +22,7 @@ day, the Trickle: while Lachy is not Away, `next` starts nothing past a machine-
 unharmed, and a Git-env hold stops only Integration and merging unless the trip flipped `core.bare`.)*
 *(Amended by ADR 0048, 2026-10-21: no single cause holds the whole queue; a Watchdog outside the session catches a
 Stalled rollout.)*
+*(Amended by ADR 0049, 2026-10-21: while Lachy is Away, the Away cap bounds running Rollout tasks across the Mac.)*
 *(Amended by ADR 0050, 2026-10-21: decision 3's Integration verify reads a red that passes on its own re-run, outside the
 task's diff, as a Flake.)*
 

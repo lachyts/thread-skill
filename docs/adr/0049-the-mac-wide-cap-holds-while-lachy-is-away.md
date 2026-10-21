@@ -22,4 +22,6 @@ Machine load cost about 25 to 40 hours from September to 21 October, and more in
 ## Consequences
 
 - A night of many rollouts finishes later per rollout but wastes fewer suites; Throughput is the Guardrail that bounds how low the cap may go.
+- The Away cap counts as the Trickle does, by notes, so a rollout whose lead died holds its room until the Watchdog recovers or pauses it (ADR 0048), and a rollout the cap alone holds is waiting as meant, not Stalled.
+- The key is written only once every running rollout's snapshot knows it (ADR 0043).
 - Chorus ADR 0104 needs its decision 3 amended to point here.

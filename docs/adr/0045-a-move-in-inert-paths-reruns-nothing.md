@@ -12,7 +12,7 @@ Integration re-runs the verifier whenever `main` moves under it (merge-task's ex
 **A `main` that moved only in a repo's Inert paths since a green verifier run leaves that run standing: Integration re-runs nothing and merges.**
 
 - **Inert paths are per repo**, in the operator's rollout settings (`~/.config/thread/rollouts.toml`), and empty by default, so a repo nobody has checked always re-runs.
-- **Schedule proposes them and proves them, failing closed.** It offers globs (git pathspec globs; for Chorus: `THREAD.md`, `docs/handoffs/**`, `docs/reviews/**`) only after showing that no test and no verifier step reads a matching path, and records them on Lachy's yes. A test or step that walks the tree (a link-check of every `*.md`, a recursive glob) names no path, so it fails the proof for every glob under what it walks.
+- **Schedule proposes them and proves them, failing closed.** It offers globs (git pathspec globs; for Chorus: `THREAD.md`, `docs/handoffs/**`, `docs/reviews/**`) only after showing that no test and no verifier step reads a matching path, and records them on Lachy's yes, once every running rollout's snapshot knows the key (ADR 0043). A test or step that walks the tree (a link-check of every `*.md`, a recursive glob) names no path, so it fails the proof for every glob under what it walks.
 - **A change to the readers suspends the list.** Once a task merged since the last proof touches the tests or the verifier, the repo re-runs on every move until schedule proves its list again.
 - The check is a path test on what changed between the green run's base and the new `main`; a file moved into an inert path still counts at the path it left, and one non-inert path means a re-run.
 
