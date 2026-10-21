@@ -61,7 +61,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   first; Orient tasks stay out), then the plan gate run on each queued task,
   its approved plan kept on the note with the commit it was judged on. At the
   task's start the plan stands unless `main` has since moved in the files the
-  plan names (ADR 0047). _Avoid_: preflight check, dry run.
+  plan names (ADR 0047). Not schedule step 8's "Pre-flight —" report
+  blocks, nor a Leg's preflight. _Avoid_: preflight check, dry run.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
   a fortnight or when its ready work grows), or kill it (done and archived).
@@ -481,7 +482,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   GitHub's own merge queue, which merge-task refuses. _Avoid_: update-branch
   (GitHub's merge-in, which re-verifies nothing without CI), rebase.
 - **Integration lane** — the one-at-a-time Integration step itself, held by one
-  approved task at a time until it is released (a merge, a set-aside, a
+  approved task, or one **Merge train**, at a time until it is released (a merge, a set-aside, a
   rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
   to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue
   (Integration's gloss: the whole step, never the lane alone).
@@ -502,7 +503,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   that moved only in inert paths since a green run leaves that run standing
   and Integration re-runs nothing. Per repo, in the operator's rollout
   settings, empty by default; schedule proposes them only once it has shown
-  no test reads them (ADR 0045). _Avoid_: doc-only, ignored path.
+  no test and no verifier step reads them (ADR 0045). _Avoid_: doc-only, ignored path.
 - **Integration conflict** — Integration's merge of the latest `main`
   conflicted and the integrator could not keep both intents, so it aborted
   the merge and pushed nothing (Vibe Kanban's 'rebase conflicts'). The note is
@@ -556,12 +557,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   clone-rooted rollout never runs there; its threads, handoff homes, consumed
   review docs and ledgers live there, and merge-task fast-forwards it after
   every merge when it can (`--refresh-in-place`: ff-only, never a merge commit;
-  held while it is the **Primary checkout** under a **Running rollout**). A
+  held while it is the **Primary checkout** under a **Running rollout** with
+  no **Engine snapshot**). A
   commit in it blocks a rollout only when it touches a path a not-yet-merged
   task cites. _Avoid_: main checkout, shared checkout.
 - **Running rollout** — a live, started rollout at the current protocol,
-  neither `done` nor `dropped` and not hard-paused: one a lead may be running
-  on the primary checkout. It differs from unfinished both ways: it leaves out
+  neither `done` nor `dropped` and not hard-paused: one a lead may be running.
+  ADR 0031's hold on the primary checkout counts it only when its note names
+  no **Engine snapshot** (ADR 0043). It differs from unfinished both ways: it leaves out
   paused, never-started and protocol-3 rollouts, and keeps one whose every
   task merged but whose completion ceremony has not run. _Avoid_: active, in
   flight.
@@ -592,17 +595,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   revise never launches unarmed. _Avoid_: watch, session.
 - **Git-env hold** — the unacked trip lines on a rollout note's
   `## Git-env log`: while one stands, nothing integrates or merges and `carry`
-  refuses the rollout, but task calls keep running and starting in their own
-  worktrees, which the canary never watches (ADR 0046). Only a **Git-env ack**
-  lifts it.
+  refuses the rollout, but task calls keep running and starting: their
+  worktrees are cut from `origin/<default>` after a fetch, so a trip in the
+  Project root cannot reach them, and their **Window**s are still armed and
+  checked (ADR 0046). Only a **Git-env ack** lifts it.
   _Avoid_: git-env halt (the lead's stop, not the hold).
 - **Git-env ack** — the recorded acceptance of the tripped windows, naming
   exactly the set shown and the ref shown (`--ref`). Lachy's, through
   `/thread:repair` (its git-env step, 3e), after an optional `restore`; or an
   **Automatic ack**. _Avoid_: clear, reset.
 - **Automatic ack** — a Git-env ack the lead writes itself when the evidence
-  proves the checkout unharmed: its `<default>` equals `origin/<default>`, no
-  local commit is missing from origin, its tree is clean and it is not bare.
+  proves the checkout unharmed: its `<default>` equals origin's tip (read with
+  `ls-remote` as well as from `origin/<default>`), so no commit on it is
+  missing from origin, its tree is clean and it is not bare.
   Logged with that evidence; any trip short of it still waits for Lachy
   (ADR 0046). _Avoid_: auto-clear, self-heal.
 - **Dependent closure** — the set of tasks transitively depending on a task

@@ -11,9 +11,12 @@ Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus
 
 **Before a rollout note is written, schedule runs a Pre-flight: it grades every task, settles the decisions with Lachy in one round, and runs the plan gate on every task it queues.**
 
-- **Grade.** Each task gets its Readiness grade by `skills/_shared/readiness-grade.md`. Ready tasks enter the queue as they stand; One call and Grill tasks get one batched decision round with Lachy first, their answers written into their notes; Orient tasks stay out of the rollout.
+- **Grade.** Each task gets its Readiness grade by `skills/_shared/readiness-grade.md`. Ready tasks enter the queue as they stand; One call and Grill tasks get one batched decision round with Lachy first, their answers written into their notes; Orient tasks stay out of the rollout. A carried task (a `--regenerate` supersede) is graded too, though it is still in the rollout being superseded.
 - **Plan.** Every queued task's plan is drafted and judged by the engine's plan gate before launch, and the approved plan is kept on the note with the commit it was judged on.
+- **A plan not approved keeps its task out.** It goes back to Lachy in the same sitting, never into the queue.
+- **A task left out takes its Dependent closure with it**, whether graded Orient or held back by its plan, so nothing queued waits on a task the rollout will never run.
 - **A plan stands at the start** unless `main` has since moved in the files the plan names; then the gate re-runs with the kept plan as its draft.
+- **Under orient-all, the estate pass has already graded these tasks and held the decision round** (ADR 0041), and its schedule forks ask nothing. The Pre-flight takes those grades and answers as they stand and asks no second round.
 
 ## Considered options
 
@@ -25,3 +28,5 @@ Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus
 
 - Schedule now costs one plan-gate run per task, paid while Lachy is around, and takes longer to write a rollout.
 - The plan gate's run at launch is usually skipped, so a rollout's first hours go to building, not planning.
+- A Pre-flight plan gate is a launch against the Project root like any other: it runs inside a git-env window. And because a task builds from the `main` of its start (ADR 0030), the implementer never reuses as it stands a worktree the Pre-flight cut days earlier. That tree is brought to the current `origin/<default>` or cut again at the start.
+- Schedule step 8's existing "Pre-flight —" report blocks (gated tasks, capture-shaped notes and the rest) are renamed when this is built, so the word names this pass alone.

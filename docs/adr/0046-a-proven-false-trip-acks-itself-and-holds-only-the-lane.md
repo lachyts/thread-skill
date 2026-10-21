@@ -1,7 +1,7 @@
 # 0046 — A proven-false git-env trip acks itself, and a trip holds only the lane
 
 Date: 2026-10-21
-Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`, built by P29. Amends ADR 0030's git-env rule ("never ack from execute") and the Git-env hold.
+Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`, built by P29. Amends ADR 0030's git-env canary consequence (only `/thread:repair` acks, on Lachy's word) and the Git-env hold.
 
 ## Context
 
@@ -11,9 +11,10 @@ A git-env trip holds the whole queue (nothing starts, integrates or merges) unti
 
 **When the evidence proves the checkout unharmed, the lead writes the Git-env ack itself (an Automatic ack), logged with that evidence. A trip, while it stands, holds only the Integration lane.**
 
-- **The evidence, all of it:** the Project root's `<default>` equals `origin/<default>`, no local commit is missing from origin, its tree is clean and it is not bare. Anything short of that still waits for Lachy, who is pushed a needs-you notification.
-- **The merge still checks its base.** An Automatic ack never merges what the window verified: Integration resumes through merge-task, whose base check re-integrates when `main` moved.
-- **Task calls keep going under a hold.** Each task's worktree is cut from `origin/<default>` after a fetch, never from the Project root's local ref, so a trip in the root cannot reach them. Starts, seeded revises and automatic retries continue; only Integration and merging wait.
+- **The evidence, all of it:** the Project root's `<default>` equals origin's tip, read from GitHub with `ls-remote` as well as from `origin/<default>` (a forged tracking ref could match a bad local one, which is why repair § 3e reads both), so no commit on it is missing from origin; its tree is clean; and it is not bare. Anything short of that still waits for Lachy, who is pushed a needs-you notification.
+- **The merge still checks its base.** The tripped window's verify stands, because the evidence shows the checkout it ran against was unharmed. Integration resumes through merge-task, whose base check re-integrates when `main` moved.
+- **A RACE stays Lachy's.** A git-env halt at a RACE site keeps ADR 0030's rule: after any ack, automatic or not, the task is an undecided RACE that repair § 3e hands to § 3c. An Automatic ack never re-runs a RACE re-verify.
+- **Task calls keep going under a hold.** Each task's worktree is cut from `origin/<default>` after a fetch, never from the Project root's local ref, so a trip in the root cannot reach them. Starts, seeded revises and automatic retries continue; only Integration and merging wait. Their windows are still armed and checked: today the canary's `arm` refuses under a hold (exit 3) and `mark-started` passes the refusal through, so under this decision a task call's window arms as usual while a hold stands, and a trip it finds joins the unacked set.
 
 ## Considered options
 

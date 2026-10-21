@@ -17,6 +17,11 @@ required while the Project root exists, before any write.)*
 *(Amended 2026-10-21 by thread-skill-p28-1: decision 1's "only dependencies and a solo task hold a task back" gains, by
 day, the Trickle: while Lachy is not Away, `next` starts nothing past a machine-wide count of running Rollout tasks
 (Chorus ADR 0104; skills/execute/away.md).)*
+*(Amended by ADR 0044, 2026-10-21: decision 3's one-at-a-time Integration becomes a Merge train of up to Train size
+tasks, verified once at the top.)*
+*(Amended by ADR 0045, 2026-10-21: decision 3's re-verify is skipped when `main` moved only in a repo's proven Inert paths.)*
+*(Amended by ADR 0046, 2026-10-21: the lead writes an Automatic ack when the evidence proves the checkout unharmed, and a
+Git-env hold stops only Integration and merging.)*
 
 ## Context
 
