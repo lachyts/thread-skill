@@ -858,6 +858,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   thing again, or at once when Lachy confirms it. Lachy's no closes it too:
   it comes back only when two later rollouts show it again. Knobs need no
   Watch. _Avoid_: candidate, hunch.
+- **Time-lost ledger** — the hours each cause class cost (stalls by cause,
+  usage limits, machine load, the Integration lane, Integration rework, plan
+  blocks), summed across every rollout a weekly reading reads and trended
+  week on week; a class that tops it twice running becomes a design question
+  for a grill (ADR 0051). Ranks causes, never rollouts. _Avoid_: time
+  budget, cost report.
+- **Monthly audit** — the pass once a month that reads past the Run record
+  (transcripts, suite logs, pause logs, the Mac's history), writes into the
+  Time-lost ledger and names what the record should have carried (ADR 0051).
+  Not a Reflection, which reads the record alone. _Avoid_: retro, deep dive.
 - **Quiet Reflection** — one that finds no new Watch (one first seen in this
   reading; a declined one seen again is not new), no rule proposal, no
   bug and no Guardrail breach. Three in a row move the reading from weekly
