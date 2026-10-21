@@ -58,10 +58,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Pre-flight** — schedule's pass over a rollout's tasks before it is written:
   each task's **Readiness grade** (only Ready tasks enter the queue as they
   stand; One call and Grill tasks get one batched decision round with Lachy
-  first; Orient tasks stay out), then the plan gate run on each queued task,
-  its approved plan kept on the note with the commit it was judged on. At the
-  task's start the plan stands unless `main` has since moved in the files the
-  plan names (ADR 0047). Not schedule step 8's "Pre-flight —" report
+  first; Orient tasks stay out, with their Dependent closure). It grades only
+  tasks still to start and runs no plan gate: plans stay at each task's start
+  (ADR 0047). Not schedule step 8's "Pre-flight —" report
   blocks, nor a Leg's preflight. _Avoid_: preflight check, dry run.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
@@ -498,7 +497,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   that moved only in inert paths since a green run leaves that run standing
   and Integration re-runs nothing. Per repo, in the operator's rollout
   settings, empty by default; schedule proposes them only once it has shown
-  no test and no verifier step reads them (ADR 0045). _Avoid_: doc-only, ignored path.
+  no test and no verifier step reads them, a tree walk failing the proof,
+  and a merged change to the tests or verifier suspends the list until it is
+  proved again (ADR 0045). _Avoid_: doc-only, ignored path.
 - **Integration conflict** — Integration's merge of the latest `main`
   conflicted and the integrator could not keep both intents, so it aborted
   the merge and pushed nothing (Vibe Kanban's 'rebase conflicts'). The note is
@@ -530,17 +531,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   marked done being a task merged (ADR 0030).
   _Avoid_: checkpoint, pointer, progress marker.
 - **Primary checkout** — the git checkout the plugin runs from, live (a
-  directory-source install, or `--plugin-dir`): every rollout's lead, in any
-  repo, runs its engine from it. A self-rollout runs from its **Rollout
-  clone**, like every rollout, so its merges never reach it; it is that clone's
-  **In-place checkout**, caught up once a run completes. It is free to move:
-  each rollout runs on its own **Engine snapshot** (ADR 0043), and ADR 0031's
-  hold covers only a running rollout that has none. Not the engine's "main checkout",
+  directory-source install, or `--plugin-dir`): sessions render their skills
+  and run their hooks from it, and each rollout's **Engine snapshot** is cut
+  from it at launch and at Reinstate, so no lead runs its engine from it live.
+  For thread-skill it is also the **In-place checkout**, which merge-task
+  fast-forwards after each merge of a self-rollout. It is free to move
+  (ADR 0043); ADR 0031's hold covers only a running rollout that has no
+  snapshot. Not the engine's "main checkout",
   which is a rollout's own repo. _Avoid_: live checkout, installed copy.
 - **Engine snapshot** — a frozen copy of the **Primary checkout** at one
   commit, made when a rollout launches and named on its rollout note: the
   lead's scripts, Workflow engine and skill prose all come from it for the
-  whole run, so the Primary checkout can move under a **Running rollout**. A
+  whole run, as do status's and repair's for that rollout, whichever session
+  runs them, so the Primary checkout can move under a **Running rollout**. A
   rollout moves to a newer snapshot only at its **Reinstate** (ADR 0043).
   _Avoid_: pinned root, frozen plugin, engine version.
 - **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, beside

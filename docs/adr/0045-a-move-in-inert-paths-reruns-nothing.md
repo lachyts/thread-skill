@@ -12,15 +12,16 @@ Integration re-runs the verifier whenever `main` moves under it (merge-task's ex
 **A `main` that moved only in a repo's Inert paths since a green verifier run leaves that run standing: Integration re-runs nothing and merges.**
 
 - **Inert paths are per repo**, in the operator's rollout settings (`~/.config/thread/rollouts.toml`), and empty by default, so a repo nobody has checked always re-runs.
-- **Schedule proposes them and proves them.** It offers globs (for Chorus: `THREAD.md`, `docs/handoffs/**`, `docs/reviews/**`) only after showing that no test and no verifier step reads a matching path, and records them on Lachy's yes.
+- **Schedule proposes them and proves them, failing closed.** It offers globs (git pathspec globs; for Chorus: `THREAD.md`, `docs/handoffs/**`, `docs/reviews/**`) only after showing that no test and no verifier step reads a matching path, and records them on Lachy's yes. A test or step that walks the tree (a link-check of every `*.md`, a recursive glob) names no path, so it fails the proof for every glob under what it walks.
+- **A change to the readers suspends the list.** Once a task merged since the last proof touches the tests or the verifier, the repo re-runs on every move until schedule proves its list again.
 - The check is a path test on the diff between the green run's base and the new `main`, with rename detection off (`--no-renames`), so a file moved into an inert path still counts at the path it left. One non-inert path means a re-run.
 
 ## Considered options
 
 - **A fixed built-in list** (THREAD.md and the doc folders everywhere): rejected. Thread-skill's own tests read its markdown (the SKILL.md wiring assertions), so a blanket "docs are inert" is wrong for the very repo that ships the rule.
-- **Never skip, rely on the Merge train and a faster suite:** rejected. A peer's close-out would still cost a full suite.
+- **Never skip, rely on a Merge train (ADR 0044, deferred) and a faster suite:** rejected. A peer's close-out would still cost a full suite.
 
 ## Consequences
 
-- The proof holds for the tests and verifier steps of its day. A later one that reads an inert path makes the list wrong, so schedule proves a repo's recorded list again each time it schedules there, and drops a glob that no longer passes.
+- The proof holds for the tests and verifier steps of its day, so schedule proves a repo's recorded list again each time it schedules there, and drops a glob that no longer passes.
 - A wrong list merges a combination nobody verified. The proof at schedule is the guard, and the Run record logs every skipped re-run with its diff, so an Escape traced to one is visible to a Reflection.
