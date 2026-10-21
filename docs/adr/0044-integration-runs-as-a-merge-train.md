@@ -1,7 +1,7 @@
 # 0044 — Integration runs as a Merge train
 
 Date: 2026-10-21
-Status: deferred. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`, then deferred in the re-grill the same day (§ Deferred). ADR 0030 decision 3's one-at-a-time Integration stands; Train size is 1.
+Status: deferred. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`, then deferred in the re-grill the same day (§ Deferred). ADR 0030 decision 3's one-at-a-time Integration stands.
 
 ## Deferred
 
