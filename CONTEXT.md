@@ -542,8 +542,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   snapshot. Not the engine's "main checkout",
   which is a rollout's own repo. _Avoid_: live checkout, installed copy.
 - **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
-  default branch, fetched fresh when a rollout launches (never the **Primary
-  checkout**'s working state) and named on its rollout note: the
+  default branch, fetched fresh when schedule writes the rollout note (never
+  the **Primary checkout**'s working state) and named on it: the
   lead's scripts, Workflow engine and skill prose all come from it for the
   whole run, as do status's and repair's for that rollout, whichever session
   runs them, so the Primary checkout can move under a **Running rollout**. A
