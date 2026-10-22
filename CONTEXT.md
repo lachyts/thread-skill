@@ -498,9 +498,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   that moved only in inert paths since a green run leaves that run standing
   and Integration re-runs nothing. Per repo, in the operator's rollout
   settings, empty by default; schedule proposes them only once it has shown
-  no test and no verifier step reads them, a tree walk failing the proof,
-  and a merged change to the tests or verifier suspends the list until it is
-  proved again (ADR 0045). _Avoid_: doc-only, ignored path.
+  nothing in the repo reads them, and that proof runs again on the exact
+  tree being merged before every skip, a tree walk failing it (ADR 0045).
+  _Avoid_: doc-only, ignored path.
 - **Integration conflict** — Integration's merge of the latest `main`
   conflicted and the integrator could not keep both intents, so it aborted
   the merge and pushed nothing (Vibe Kanban's 'rebase conflicts'). The note is
