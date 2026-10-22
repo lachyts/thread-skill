@@ -11,6 +11,7 @@ In `chorus-rollout-2026-10-18`, 6 of 9 Integration suites the lead ran failed on
 
 **When an Integration verify is red only on tests the task's diff does not touch, those failing tests are re-run once on the same tree. If they pass, the verify counts green and each such test is a Flake: logged, and filed as a follow-up for its repo, never fixed inside the task. A failure that repeats is red.**
 
+- The same holds for a RACE re-verify (ADR 0046), where the diff is the merged task's.
 - A failing test the diff touches is red, as today.
 - A repo whose verifier cannot re-run named tests keeps today's rule.
 
