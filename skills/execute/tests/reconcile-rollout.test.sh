@@ -11,6 +11,7 @@ trap 'rm -rf "$TMP"' EXIT
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
 EH="$TMP/settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots"  # verify-timeout names verify-slot.py (its verifySlot); keep any pool in temp
 
 fail=0
 check() {  # check <label> <expected-substring> <file>
