@@ -1638,16 +1638,16 @@ function ladderArgsError(l) {
   return ''
 }
 
-// args.verifySlot (p23-4): '' when usable (or absent: the orchestration entry refuses that itself, estate ADR 0009
-// d4), else why not. Exactly { script, slots }: the absolute,
-// single-line path of verify-slot.py and an integer >= 1. Any other key (`priority` included: only
-// integrationVerify sets it, on its own copy) is a lead bug, refused before any dispatch in both modes.
+// args.verifySlot (p23-4): '' when usable, else why not. Required (estate ADR 0009 d4): absent or null is refused.
+// Exactly { script, slots }: the absolute, single-line path of verify-slot.py (never under a bare /skills/, an
+// unexported plugin root) and an integer >= 1. Any other key (`priority` included: only integrationVerify sets
+// it, on its own copy) is a lead bug, refused before any dispatch in both modes.
 function verifySlotArgsError(v) {
-  if (v === undefined || v === null) return ''
+  if (v === undefined || v === null) return `is required (estate ADR 0009 d4): pass this entry's verify-timeout verifySlot, verbatim (execute § 4)`
   if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${JSON.stringify(v)}`
   const keys = Object.keys(v).sort()
   if (keys.length !== 2 || keys[0] !== 'script' || keys[1] !== 'slots') return `must hold exactly script and slots, got keys ${JSON.stringify(Object.keys(v))}`
-  if (typeof v.script !== 'string' || !v.script.startsWith('/') || /[\r\n]/.test(v.script) || v.script.split('/').pop() !== 'verify-slot.py') {
+  if (typeof v.script !== 'string' || !v.script.startsWith('/') || v.script.startsWith('/skills/') || /[\r\n]/.test(v.script) || v.script.split('/').pop() !== 'verify-slot.py') {
     return `script must be the absolute, single-line path of verify-slot.py, got ${JSON.stringify(v.script)}`
   }
   if (!Number.isInteger(v.slots) || v.slots < 1) return `slots must be an integer >= 1, got ${JSON.stringify(v.slots)}`
@@ -3162,12 +3162,11 @@ if (mode !== 'task' && mode !== 'integrate') throw new Error(`args.mode: refusin
 // one is a lead bug, refused before any dispatch in both modes; an absent one is the built-in ladder.
 const badLadder = ladderArgsError(a.ladder)
 if (badLadder) throw new Error('args.ladder: ' + badLadder)
-// args.verifySlot (p23-4): the machine's verify slots. A malformed one is a lead bug, refused here. An absent one
-// is refused too (estate ADR 0009 d4): from 14 to 21 Oct 2026 no lead passed it, so 917 full Chorus suites ran
+// args.verifySlot (p23-4): the machine's verify slots. A malformed or absent one is a lead bug, refused here
+// (estate ADR 0009 d4): from 14 to 21 Oct 2026 no lead passed it, so 917 full Chorus suites ran
 // unslotted, up to 7 at once, and the Mac froze from heat. A resume replays its run's own version-keyed engine, so a
-// call launched on an engine that took it as optional resumes there unchanged.
-const badSlot = verifySlotArgsError(a.verifySlot) ||
-  (a.verifySlot === undefined || a.verifySlot === null ? `is required (estate ADR 0009 d4): pass { "script": "<abs \${CLAUDE_PLUGIN_ROOT}>/skills/execute/scripts/verify-slot.py", "slots": <this entry's verify-timeout verifySlots> } (execute § 4)` : '')
+// call launched on an engine that took it as optional (before 5.0.0) resumes there unchanged.
+const badSlot = verifySlotArgsError(a.verifySlot)
 if (badSlot) throw new Error('args.verifySlot: ' + badSlot)
 // Printed at every call, so a run's log names the ladder it ran on (a path, or built-in).
 function logLadder() {

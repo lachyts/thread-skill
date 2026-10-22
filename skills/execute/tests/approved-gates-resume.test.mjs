@@ -20,7 +20,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { runTask, loadEngine, enginePath } from '../../../tests/lib/engine.mjs'
+import { runTask, loadEngine, enginePath, VERIFY_SLOT } from '../../../tests/lib/engine.mjs'
 
 const SLUG = 'proj-gate-x'
 const PR = 'https://github.com/o/r/pull/9'
@@ -42,11 +42,9 @@ const mkTask = (over = {}) => ({
   slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: false,
   maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, rung: BOTTOM, ...over,
 })
-// args.verifySlot is required (estate ADR 0009 d4): every call carries one.
-const VSLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
 const mkArgs = (taskOver = {}, over = {}) => ({
   rolloutSlug: 'proj-rollout-2026-10-02', repoPath: '/repo', verifier: 'make test', date: '2026-10-02',
-  verifySlot: VSLOT, task: mkTask(taskOver), ...over,
+  verifySlot: VERIFY_SLOT, task: mkTask(taskOver), ...over,
 })
 
 const green = (label) => ({ verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: `${label} done` })

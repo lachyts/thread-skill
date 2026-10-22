@@ -1150,17 +1150,17 @@ function agentPrompts(E) {
   })
   const BAD = [['a string', SLOT.script], ['an extra key', { ...SLOT, extra: 1 }], ['priority: true', { ...SLOT, priority: true }],
     ['a relative script', { script: 'skills/execute/scripts/verify-slot.py', slots: 2 }], ['a multi-line script', { script: '/a/verify-slot.py\n/b/verify-slot.py', slots: 2 }],
-    ['a wrong basename', { script: '/a/verify.py', slots: 2 }], ['slots 0', { ...SLOT, slots: 0 }], ['slots 1.5', { ...SLOT, slots: 1.5 }]]
+    ['a wrong basename', { script: '/a/verify.py', slots: 2 }], ['an unexported plugin root', { script: '/skills/execute/scripts/verify-slot.py', slots: 2 }], ['slots 0', { ...SLOT, slots: 0 }], ['slots 1.5', { ...SLOT, slots: 1.5 }]]
   for (const mode of [undefined, 'integrate']) {
     for (const [what, v] of BAD) {
       const r = await runTask(mk(v, mode), async () => { throw new Error('agent() must not run') })
       ok(r.error && /args\.verifySlot/.test(String(r.error)) && r.calls.length === 0, `runTask (${mode || 'task'} mode) refuses verifySlot ${what} before any agent() call`)
     }
   }
-  ok(E.verifySlotArgsError(undefined) === '' && E.verifySlotArgsError(null) === '' && E.verifySlotArgsError(SLOT) === '', 'verifySlotArgsError: absent, null and { script, slots } pass its shape check (the entry refuses absent and null itself)')
+  ok(E.verifySlotArgsError(SLOT) === '' && E.verifySlotArgsError(undefined) !== '' && E.verifySlotArgsError(null) !== '', 'verifySlotArgsError: { script, slots } passes; absent and null are refused by the same check')
   // estate ADR 0009 d4: an absent or null verifySlot is refused before any agent() call, in both modes, naming what to
   // pass. The runtime passes args JSON-stringified, which drops an undefined key, so that form is run too.
-  const REQUIRED = /args\.verifySlot: is required \(estate ADR 0009 d4\): pass \{ "script": "[^"]*\/skills\/execute\/scripts\/verify-slot\.py", "slots": /
+  const REQUIRED = /args\.verifySlot: is required \(estate ADR 0009 d4\): pass this entry's verify-timeout verifySlot, verbatim/
   const absent = (mode) => { const { verifySlot: _drop, ...rest } = mk(undefined, mode); return rest }
   const ABSENT = [['absent', (mode) => absent(mode)], ['absent (stringified args)', (mode) => JSON.stringify(absent(mode))],
     ['undefined', (mode) => mk(undefined, mode)], ['null', (mode) => mk(null, mode)]]
@@ -1172,7 +1172,7 @@ function agentPrompts(E) {
   }
   // control: the same engine with the required check cut dispatches an unslotted call, so the cases above would catch
   // the check being removed.
-  const cut = src.replace(/(const badSlot = verifySlotArgsError\(a\.verifySlot\)) \|\|\n[^\n]*\n/, '$1\n')
+  const cut = src.replace(/(function verifySlotArgsError\(v\) \{\n)  if \(v === undefined \|\| v === null\) return [^\n]*\n/, "$1  if (v === undefined || v === null) return ''\n")
   ok(cut !== src && !cut.includes('is required (estate ADR 0009 d4)'), 'verifySlot control: the required check is cut from the variant')
   for (const mode of [undefined, 'integrate']) {
     const args = mode ? { ...absent(mode), integration: { ...I, startedAt: '2026-10-18T10:00:00Z' } } : absent(mode)

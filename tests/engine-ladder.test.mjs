@@ -18,7 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { runTask, loadEngine, enginePath } from './lib/engine.mjs'
+import { runTask, loadEngine, enginePath, VERIFY_SLOT } from './lib/engine.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const LADDER_PY = path.join(root, 'skills', '_shared', 'scripts', 'ladder.py')
@@ -60,7 +60,7 @@ const mkTask = (slug, over = {}) => ({
 // args.verifySlot is required (estate ADR 0009 d4): every call carries one.
 const mkArgs = (task, over = {}) => ({
   rolloutSlug: 'proj-rollout-2026-10-03', repoPath: '/repo', verifier: 'make test', date: '2026-10-03',
-  verifySlot: { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }, task, ...over,
+  verifySlot: VERIFY_SLOT, task, ...over,
 })
 const green = (label) => {
   const s = label.split(':')[1].split(/[ @]/)[0]

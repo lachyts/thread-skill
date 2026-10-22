@@ -594,6 +594,8 @@ echo "== verify-timeout (p14-2, p23-4: the rollout's Integration verify timeout 
 mkvt() {  # mkvt <frontmatter line or ''> -> $TMP/vt-rollout.md
   { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'; [ -n "$1" ] && printf '%s\n' "$1"; printf -- '---\n\n## Notes\n'; } > "$TMP/vt-rollout.md"
 }
+# verify-timeout's verifySlot.script: the absolute path of the script's sibling verify-slot.py.
+VSP="$(cd "$(dirname "$SCRIPT")" && pwd)/verify-slot.py"
 vt_ok() {  # vt_ok <label> <frontmatter line> <expected stdout> [HOME]
   mkvt "$2"; local before after got rc; before=$(shaof "$TMP/vt-rollout.md")
   got=$(HOME="${4:-$EH}" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>/dev/null); rc=$?
@@ -617,17 +619,17 @@ vt_refused() {  # vt_refused <label> <frontmatter line> <HOME> <file:line the er
   if [ "$rc" -eq 3 ] && [ -z "$got" ] && [ "$m" = y ] && [ "$(printf '%s\n' "$err" | wc -l | tr -d ' ')" = 1 ]; then echo "ok   - verify-timeout: $1"
   else echo "FAIL - verify-timeout: $1 (rc $rc, out '$got', err '$err')"; fail=1; fi
 }
-vt_ok "absent -> 1800, the harness maximum, slotWait 4800, verify_slots 2" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2}'
-vt_ok "3600 -> slotWait 3000" 'verify_timeout: 3600' '{"verifyTimeout": 3600, "harnessTimeoutMs": 7200000, "slotWait": 3000, "verifySlots": 2}'
-vt_ok "6600 -> slotWait 60 (the floor)" 'verify_timeout: 6600' '{"verifyTimeout": 6600, "harnessTimeoutMs": 7200000, "slotWait": 60, "verifySlots": 2}'
-vt_ok "6540 -> slotWait 60" 'verify_timeout: 6540' '{"verifyTimeout": 6540, "harnessTimeoutMs": 7200000, "slotWait": 60, "verifySlots": 2}'
-vt_ok "1 is the floor -> slotWait 6599" 'verify_timeout: 1' '{"verifyTimeout": 1, "harnessTimeoutMs": 7200000, "slotWait": 6599, "verifySlots": 2}'
-vt_ok 'a quoted "1800"' 'verify_timeout: "1800"' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2}'
-vt_ok "a trailing comment" 'verify_timeout: 1800 # note' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2}'
-vt_ok "a commented-out key is absent" '# verify_timeout: 99' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2}'
+vt_ok "absent -> 1800, the harness maximum, slotWait 4800, verify_slots 2" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "3600 -> slotWait 3000" 'verify_timeout: 3600' '{"verifyTimeout": 3600, "harnessTimeoutMs": 7200000, "slotWait": 3000, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "6600 -> slotWait 60 (the floor)" 'verify_timeout: 6600' '{"verifyTimeout": 6600, "harnessTimeoutMs": 7200000, "slotWait": 60, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "6540 -> slotWait 60" 'verify_timeout: 6540' '{"verifyTimeout": 6540, "harnessTimeoutMs": 7200000, "slotWait": 60, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "1 is the floor -> slotWait 6599" 'verify_timeout: 1' '{"verifyTimeout": 1, "harnessTimeoutMs": 7200000, "slotWait": 6599, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok 'a quoted "1800"' 'verify_timeout: "1800"' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "a trailing comment" 'verify_timeout: 1800 # note' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "a commented-out key is absent" '# verify_timeout: 99' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
 VH="$TMP/vt-home"; mkdir -p "$VH/.config/thread"; printf '[defaults]\nverify_slots = 3\n' > "$VH/.config/thread/rollouts.toml"
-vt_ok "[defaults] verify_slots = 3 -> verifySlots 3" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 3}' "$VH"
-vt_ok "a rollout note's verify_slots: is ignored (never stamped, never read)" 'verify_slots: 9' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 3}' "$VH"
+vt_ok "[defaults] verify_slots = 3 -> verifySlots 3" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 3, "verifySlot": {"script": "'"$VSP"'", "slots": 3}}' "$VH"
+vt_ok "a rollout note's verify_slots: is ignored (never stamped, never read)" 'verify_slots: 9' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 3, "verifySlot": {"script": "'"$VSP"'", "slots": 3}}' "$VH"
 BH="$TMP/vt-bad-home"; mkdir -p "$BH/.config/thread"; printf '# settings\n[defaults]\nverify_slots = 0\n' > "$BH/.config/thread/rollouts.toml"
 vt_refused "a refused rollouts.toml -> exit 3, naming its file and line" '' "$BH" "$BH/.config/thread/rollouts.toml:3"
 vt_refused "a stamped rollout is halted too (the whole file is validated)" 'verify_timeout: 1800' "$BH" "$BH/.config/thread/rollouts.toml:3"

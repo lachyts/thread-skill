@@ -20,7 +20,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { runTask, loadEngine } from './lib/engine.mjs'
+import { runTask, loadEngine, VERIFY_SLOT } from './lib/engine.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const RECONCILE = path.join(root, 'skills', 'execute', 'scripts', 'reconcile-rollout.py')
@@ -49,7 +49,7 @@ const mkI = (over = {}) => ({
 })
 // args.verifySlot is required (estate ADR 0009 d4): every call carries one.
 const base = { rolloutSlug: ROLLOUT, repoPath: '/repo', verifier: 'make test', date: '2026-10-01',
-  verifySlot: { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 } }
+  verifySlot: VERIFY_SLOT }
 const merged = {
   blocked: false, blockerDiagnosis: '', verified: true, mergeState: 'merged', mergeCommit: sha('d'), taskHead: sha('a'),
   baseSha: sha('c'), headSha: sha('d'), pushedSha: sha('d'), conflictFiles: ['a.js'], fixCommits: [], summary: 's', finishedAt: NOW,

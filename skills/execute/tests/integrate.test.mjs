@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { runTask, loadEngine, enginePath } from '../../../tests/lib/engine.mjs'
+import { runTask, loadEngine, enginePath, VERIFY_SLOT } from '../../../tests/lib/engine.mjs'
 
 const T = loadEngine([
   'parseIntegrationMarker', 'REVISE_MARKER', 'INTEGRATION_PREFIX', 'ANCHOR_RECIPE', 'TRANSIENT_DIAGNOSIS',
@@ -53,11 +53,9 @@ const mkI = (over = {}) => ({
   prUrl: PR, branch: BR, worktreePath: WT, headSha: H0, taskBase: TB, mainSha: B1, trouble: [], landed: [],
   reviewHistory: [], reviewRoundsUsed: 1, rung: RUNG, startedAt: START, ...over,
 })
-// args.verifySlot is required (estate ADR 0009 d4): every call carries one.
-const VSLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
 const mkArgs = (I, over = {}, taskOver = {}) => ({
   rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01',
-  verifySlot: VSLOT, mode: 'integrate', task: mkTask(taskOver), integration: I, ...over,
+  verifySlot: VERIFY_SLOT, mode: 'integrate', task: mkTask(taskOver), integration: I, ...over,
 })
 
 // An integrator result whose merge log is what the merge step prints for that state.
@@ -254,7 +252,7 @@ test("b4: the integrator prompt carries the landed PRs, the note's plan pointer,
 test('b4b: the step-back reviser and the integrator agree — the plan is reference, the brief the contract', () => {
   const P = 'PLAN P: rename foo to bar'
   const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: HIST2, reviewRoundsUsed: 2, plan: P }
-  const a = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VSLOT, task: mkTask({ resume }) }
+  const a = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ resume }) }
   const reviser = T.reviserPrompt(a.task, { prUrl: PR, branch: BR, worktreePath: WT }, HIST2, 3, a, P, { history: HIST2, roundsUsed: 2 })
   const I = mkI()
   const integrator = T.integratorPrompt(mkTask(), mkArgs(I), I)
@@ -478,7 +476,7 @@ test('d4: a task.resume built only from d1\'s diagnosis passes validation and di
     stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, plan: 'THE APPROVED PLAN',
     reviewHistory: parsed.history, reviewRoundsUsed: parsed.history[parsed.history.length - 1].round,
   }
-  const args = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VSLOT, task: mkTask({ resume }) }
+  const args = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ resume }) }
   assert.equal(T.resumeArgsError(args), '')
   const r = await run(args, {
     [`revise:${SLUG} r3`]: { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: 'revised' },
@@ -827,7 +825,7 @@ test('f4: the second Integration after a seeded revise keeps the landed PRs and 
 
 test('f5: an own-run diagnosis that looks like a marker is escaped as `own run: `', async () => {
   for (const diag of ['integration: the agent said so', T.REVISE_MARKER + ' (quoted)', 'INTEGRATION: shouting']) {
-    const args = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VSLOT, task: mkTask({ planGate: false }) }
+    const args = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ planGate: false }) }
     // a top-rung task: the block climbs as a recorded no-op and the same rung retries once, blocking again
     const blocked = { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: WT, blockerDiagnosis: diag, summary: '' }
     const r = await run(args, { [`implement:${SLUG}`]: blocked, [`implement:${SLUG}@opus-xhigh`]: blocked })
@@ -837,7 +835,7 @@ test('f5: an own-run diagnosis that looks like a marker is escaped as `own run: 
     assert.equal(T.parseIntegrationMarker(r.row.blockerDiagnosis).stage, 'own')
   }
   const red = { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: WT, blockerDiagnosis: 'red suite', summary: '' }
-  const plain = await run({ rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VSLOT, task: mkTask({ planGate: false }) }, {
+  const plain = await run({ rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ planGate: false }) }, {
     [`implement:${SLUG}`]: red, [`implement:${SLUG}@opus-xhigh`]: red,
   })
   assert.equal(plain.row.blockerDiagnosis, 'red suite', 'an ordinary diagnosis is untouched')
@@ -996,7 +994,7 @@ test('rung: Integration runs on the top rung whatever rung the task reached; the
 // ---- seeded revise (task.resume) -----------------------------------------------------------------
 
 const mkResume = (over = {}) => ({ stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: HIST2, reviewRoundsUsed: 2, plan: 'THE APPROVED PLAN', ...over })
-const resumeArgs = (resume, taskOver = {}, over = {}) => ({ rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VSLOT, task: mkTask({ resume, ...taskOver }), ...over })
+const resumeArgs = (resume, taskOver = {}, over = {}) => ({ rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ resume, ...taskOver }), ...over })
 const implOk = { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: 'revised' }
 
 test('S1: a seeded revise dispatches revise r3 then review r3 and approves with 3 rounds used', async () => {
@@ -1143,7 +1141,7 @@ test('S8 (p21-3): a seeded judge r3 changes then a gate-pending reviser r4 keeps
 
 test('h1: a live own-run history with an empty round passes verbatim into args.integration and is dropped', async () => {
   // the engine's own run: review r1 says changes with [], the revise lands, review r2 approves
-  const own = await run({ rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VSLOT, task: mkTask({ planGate: false }) }, {
+  const own = await run({ rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ planGate: false }) }, {
     [`implement:${SLUG}`]: { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: '' },
     [`review:${SLUG} r1`]: { verdict: 'changes', feedback: [] },
     [`revise:${SLUG} r2`]: { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: '' },
@@ -1172,7 +1170,7 @@ test('h1: a live own-run history with an empty round passes verbatim into args.i
 test('h2: a seeded revise whose live history ends in an empty round passes and revises the latest real round', async () => {
   const hist = [...HIST2, { round: 3, feedback: [] }]
   const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: hist, reviewRoundsUsed: 3, plan: 'P' }
-  const args = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VSLOT, task: mkTask({ resume, maxReviewRounds: 5 }) }
+  const args = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ resume, maxReviewRounds: 5 }) }
   assert.equal(T.resumeArgsError(args), '')
   const r = await run(args, {
     [`revise:${SLUG} r4`]: { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: '' },
@@ -1235,7 +1233,7 @@ test('static: no force, no PR merge, approvedGates-independent prompts, the row 
     assert.equal(T.integrationReviewPrompt(gated.task, gated, I, j), T.integrationReviewPrompt(a.task, a, I, j))
     // p23-4: with verifySlot the integrator's own verifier carries the Integration priority, exactly once; the judge
     // renders no verifier, so it is byte-identical with and without it.
-    const prio = `run --slots ${VSLOT.slots} --priority --`
+    const prio = `run --slots ${VERIFY_SLOT.slots} --priority --`
     assert.equal(T.integratorPrompt(a.task, a, I).split(prio).length - 1, a.verifySlot ? 1 : 0)
     const { verifySlot: _drop, ...noSlot } = a
     assert.equal(T.integrationReviewPrompt(a.task, a, I, j), T.integrationReviewPrompt(a.task, noSlot, I, j))
