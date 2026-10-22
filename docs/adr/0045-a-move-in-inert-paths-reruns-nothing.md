@@ -24,4 +24,4 @@ Integration re-runs the verifier whenever `main` moves under it (merge-task's ex
 ## Consequences
 
 - A glob that fails its proof at a skip only costs that merge a suite; schedule drops a glob that keeps failing.
-- A wrong list merges a combination nobody verified. The proof at schedule is the guard, and the Run record logs every skipped re-run with its diff, so an Escape traced to one is visible to a Reflection.
+- A proof that misses a reader merges a combination nobody verified. The proof at each skip is the guard, and the Run record logs every skipped re-run with its diff, so an Escape traced to one is visible to a Reflection.
