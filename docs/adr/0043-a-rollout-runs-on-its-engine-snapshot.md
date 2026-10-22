@@ -25,6 +25,6 @@ Every rollout lead, in any repo, runs its scripts, its Workflow engine (`skills/
 ## Consequences
 
 - Two rollouts can run on two engine versions at once. Their shared machine-wide state (verify slots, the Trickle's count, `~/.config/thread/*`) what a Reinstated rollout's newer snapshot reads of its own earlier state, and what a reader across rollouts reads (the Run record a Reflection or the Watchdog reads, the notes the Trickle counts) must stay readable across versions, so a change to its format is a migration, never a silent rewrite.
-- The rollout settings file is the sharpest case: an older snapshot refuses a key it does not know (ADR 0016), so a key only a newer snapshot knows is not written while an older one runs.
+- The rollout settings file is the sharpest case: an older snapshot refuses a key it does not know (ADR 0016), so a key only a newer snapshot knows is not written while a live rollout note, a paused one included, names an older one.
 - The snapshot does not cover the plugin's hooks, which run from the Primary checkout, so the Stop-hook driver and the line it parses stay compatible with every snapshot still running.
 - A session's rendered skill comes from the Primary checkout, so a lead reads its prose from the snapshot as a file.

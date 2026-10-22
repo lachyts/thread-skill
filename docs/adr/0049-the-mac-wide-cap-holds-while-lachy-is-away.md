@@ -12,7 +12,7 @@ Machine load cost about 25 to 40 hours from September to 21 October, and more in
 **A Mac-wide cap on running Rollout tasks holds while Lachy is Away too: the Away cap, a knob of its own, larger than the Trickle and sized so suites do not contend.**
 
 - By day the Trickle binds; Away, the Away cap does; each rollout's `parallel_ceiling` still bounds its own share either way.
-- The Away cap starts from the Run record and is tuned there like any knob (ADR 0032): the Reflection reads suite times and verify reds against how many tasks were running.
+- The Away cap starts at a built-in default, used whenever the key is absent, and is tuned from the Run record like any knob (ADR 0032) once the record carries suite times, verify reds and load (ADR 0051): the Reflection reads them against how many tasks were running.
 
 ## Considered options
 
@@ -22,6 +22,6 @@ Machine load cost about 25 to 40 hours from September to 21 October, and more in
 ## Consequences
 
 - A night of many rollouts finishes later per rollout but wastes fewer suites; Throughput is the Guardrail that bounds how low the cap may go.
-- The Away cap counts as the Trickle does, by notes, so a rollout whose lead died holds its room until the Watchdog recovers or pauses it (ADR 0048), and a rollout the cap alone holds is waiting as meant, not Stalled.
-- The key is written only once every running rollout's snapshot knows it (ADR 0043).
+- The Away cap counts as the Trickle does, by notes, so a rollout whose lead died holds its room until the Watchdog recovers it (ADR 0048) or Lachy pauses it, and a rollout the cap alone holds is waiting as meant, not Stalled.
+- The key is written only once every snapshot a live rollout note names knows it (ADR 0043).
 - Chorus ADR 0104 needs its decision 3 amended to point here.

@@ -452,8 +452,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (ADR 0009). Retired by ADR 0030: see **Queue**. Its fit-test adjective
   **Wave-shaped** is now **Parallel-shaped**. _Avoid_: round, phase, stage.
 - **Queue** — how a parallel rollout runs: tasks in parallel, each from the `main` of
-  its start, up to the parallel ceiling, held back only by dependencies or a
-  **Solo** task and, by day, the **Trickle**, never a shared file (ADR 0030).
+  its start, up to the parallel ceiling, held back only by dependencies, a
+  **Solo** task, the **Trickle** by day or the **Away cap** while Lachy is
+  Away, and a bare checkout's **Git-env hold**, never a shared file (ADR 0030).
   _Avoid_: batch (the session lane's).
 - **Slot** — one task's own run (a start, a restart or a seeded revise) in a
   Queue, held from its launch until its result is reconciled. Integration
@@ -533,8 +534,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: checkpoint, pointer, progress marker.
 - **Primary checkout** — the git checkout the plugin runs from, live (a
   directory-source install, or `--plugin-dir`): sessions render their skills
-  and run their hooks from it, and each rollout's **Engine snapshot** is cut
-  from it at launch and at Reinstate, so no lead runs its engine from it live.
+  and run their hooks from it, but no rollout's **Engine snapshot** is cut from
+  it (each is fetched from origin's tip), so no lead runs its engine from it.
   For thread-skill it is also the **In-place checkout**, which merge-task
   fast-forwards after each merge of a self-rollout. It is free to move
   (ADR 0043); ADR 0031's hold covers only a running rollout that has no
@@ -603,8 +604,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   refuses the rollout. A bookkeeping trip or a moved default branch holds
   only that: task calls keep running and starting, since their worktrees are
   cut from `origin/<default>` after a fetch, and their **Window**s are still
-  armed and checked. A `core.bare` flip holds the whole rollout, since every
-  linked worktree shares the root's config (ADR 0046, ADR 0048). Only a
+  armed and checked. A bare checkout (`core.bare` flipped, or `core.bare true
+  at arm`) holds the whole rollout, since every linked worktree shares the
+  root's config (ADR 0046, ADR 0048). Only a
   **Git-env ack** lifts it.
   _Avoid_: git-env halt (the lead's stop, not the hold).
 - **Git-env ack** — the recorded acceptance of the tripped windows, naming
@@ -868,8 +870,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   budget, cost report.
 - **Monthly audit** — the pass once a month that reads past the Run record
   (transcripts, suite logs, pause logs, the Mac's history), writes into the
-  Time-lost ledger and names what the record should have carried (ADR 0051).
-  Not a Reflection, which reads the record alone. _Avoid_: retro, deep dive.
+  Time-lost ledger and names what the record should have carried: an extra
+  step of the month's first weekly reading (ADR 0051). _Avoid_: retro, deep
+  dive.
 - **Quiet Reflection** — one that finds no new Watch (one first seen in this
   reading; a declined one seen again is not new), no rule proposal, no
   bug and no Guardrail breach. Three in a row move the reading from weekly
