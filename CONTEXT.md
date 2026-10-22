@@ -55,6 +55,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the agent cannot recommend on with confidence raises the grade one step.
   Each grade is kept in the Grade log (§ Run record and tuning).
   _Avoid_: tier 1/2/3, traffic lights.
+- **Pre-flight** — schedule's pass over a rollout's tasks before it is
+  written: each task still to start gets its **Readiness grade**, One call
+  and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
+  stay out with their Dependent closure; it runs no plan gate (ADR 0047). Not
+  schedule step 8's "Pre-flight —" report blocks, nor a Leg's preflight.
+  _Avoid_: preflight check, dry run.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
   a fortnight or when its ready work grows), or kill it (done and archived).
@@ -75,7 +81,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   after its gates are shown verbatim, then One calls, then Unpark offers,
   batched through AskUserQuestion. Then Grill rounds, in conversation, while
   time remains. Each answer is written into its task's `## Decisions (asked
-  ahead <date>)` (`skills/orient-all/SKILL.md`). _Avoid_: triage round.
+  ahead <date>)` (`skills/orient-all/SKILL.md`). Schedule's **Pre-flight**
+  holds the same round for one rollout's tasks (ADR 0047). _Avoid_: triage
+  round.
 - **Dispatch plan** — what the estate pass starts once the decisions are in:
   a schedule per candidate run whose decided, unheld members are clear of
   dispatch blockers, each with every dependency it needs scheduled in the
@@ -444,10 +452,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Wave** — a set of tasks safe to run together because none shares a file
   (ADR 0009). Retired by ADR 0030: see **Queue**. Its fit-test adjective
   **Wave-shaped** is now **Parallel-shaped**. _Avoid_: round, phase, stage.
-- **Queue** — how a parallel rollout runs: tasks in parallel, each from the `main` of
-  its start, up to the parallel ceiling, held back only by dependencies or a
-  **Solo** task and, by day, the **Trickle**, never a shared file (ADR 0030).
-  _Avoid_: batch (the session lane's).
+- **Queue** — how a parallel rollout runs: tasks in parallel, each from its
+  start's `main`, up to the parallel ceiling, held back only by dependencies
+  or a **Solo** task and, by day, the **Trickle**, never a shared file
+  (ADR 0030); Away, by the **Away cap** instead of the Trickle (ADR 0049); and
+  all of them by a bare checkout's **Git-env hold** (ADR 0046). _Avoid_:
+  batch (the session lane's).
 - **Slot** — one task's own run (a start, a restart or a seeded revise) in a
   Queue, held from its launch until its result is reconciled. Integration
   holds none. _Avoid_: worker, agent (a slot's run holds many agents).
@@ -458,9 +468,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   across the whole Mac at once, whatever the number of Rollouts: 2, unless
   Chorus sets another (Chorus ADR 0104 d2). _Avoid_: global ceiling, throttle.
 - **Away** — Lachy has told Chorus he is away from the Mac (the Evening, an
-  Away block, the Lunch restart; Chorus ADR 0104 d1); then each Rollout runs
-  to its own **Parallel ceiling** (Chorus ADR 0104 d3). Never a reading of
-  whether he is at the Mac. _Avoid_: idle, night mode.
+  Away block, the Lunch restart; Chorus ADR 0104 d1); then the **Away cap**
+  bounds Rollout tasks Mac-wide (ADR 0049), each Rollout still within its own
+  **Parallel ceiling** (Chorus ADR 0104 d3). Never a reading of whether he is
+  at the Mac. _Avoid_: idle, night mode.
+- **Away cap** — while Lachy is **Away**, the most Rollout tasks that run
+  across the whole Mac at once: a knob larger than the Trickle, sized so
+  suites do not contend, tuned from the Run record (ADR 0049). Each
+  rollout's **Parallel ceiling** still bounds its own share. _Avoid_: night
+  ceiling, global ceiling.
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
   (ADR 0030). Queued with its dependencies met, it holds every task whose row
@@ -481,6 +497,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in `next`'s order: a task a queued task depends on, directly or through a
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
   order. _Avoid_: the lane (that is the step, not the line).
+- **Inert path** — a file a repo's verifier provably never reads, listed per
+  repo in the **Rollout settings** and re-proven at every skip: a `main` that
+  moved only in inert paths since a green run leaves that run standing, and
+  Integration re-runs nothing (ADR 0045). _Avoid_: doc-only, ignored path.
 - **Integration conflict** — Integration's merge of the latest `main`
   conflicted and the integrator could not keep both intents, so it aborted
   the merge and pushed nothing (Vibe Kanban's 'rebase conflicts'). The note is
@@ -493,6 +513,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   re-enters at Integration like any set-aside there (p27-4). _Avoid_: rebase
   conflict, merge failure; a conflict Integration resolved is only a
   re-review trigger.
+- **Flake** — a named test that failed any verifier run in a rollout, sits
+  outside the task's diff, and passed when re-run by name and then when the
+  full suite ran once more on the same tree: the verify counts green, and the
+  Flake is logged and filed for its repo, never fixed inside the task
+  (ADR 0050). Never a known baseline failure (schedule § 2.6: a test already
+  red on a clean `main`, which execute's green criterion already allows
+  for), nor a remote CI step merge-task's `infra_flake_rerun` re-runs.
+  _Avoid_: flaky failure, quarantined test.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier suite
   runs in, shared by every rollout on the machine (p23-4,
   `scripts/verify-slot.py`): the lead's Integration and RACE verifies and every
@@ -507,12 +535,22 @@ through time, from attention to merged PRs. Terms only — no implementation.
   marked done being a task merged (ADR 0030).
   _Avoid_: checkpoint, pointer, progress marker.
 - **Primary checkout** — the git checkout the plugin runs from, live (a
-  directory-source install, or `--plugin-dir`): every rollout's lead, in any
-  repo, runs its engine from it. A self-rollout runs from its **Rollout
-  clone**, like every rollout, so its merges never reach it; it is that clone's
-  **In-place checkout**, caught up once a run completes. It never moves while a
-  **Running rollout** exists (ADR 0031). Not the engine's "main checkout",
-  which is a rollout's own repo. _Avoid_: live checkout, installed copy.
+  directory-source install, or `--plugin-dir`): sessions render their skills
+  and run their hooks from it, but no **Engine snapshot** is cut from it, so
+  no lead runs its engine from it. For thread-skill it is also the
+  **In-place checkout**, which merge-task fast-forwards after each merge of a
+  self-rollout. It is free to move (ADR 0043): ADR 0031's hold covers only a
+  **Running rollout** with no Engine snapshot. Not the engine's "main
+  checkout", which is a rollout's own repo. _Avoid_: live checkout, installed
+  copy.
+- **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
+  default branch, fetched fresh when schedule writes the rollout note (never
+  the **Primary checkout**'s working state) and named on it: the
+  lead's scripts, Workflow engine and skill prose all come from it for the
+  whole run, as do status's and repair's for that rollout, whichever session
+  runs them, so the Primary checkout can move under a **Running rollout**. A
+  rollout moves to a newer snapshot only at its **Reinstate** (ADR 0043).
+  _Avoid_: pinned root, frozen plugin, engine version.
 - **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, beside
   its toplevel and never nested inside it: the Project root of every parallel
   rollout scheduled after P26 (ADR 0042), so peer sessions' commits to the
@@ -527,15 +565,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   clone-rooted rollout never runs there; its threads, handoff homes, consumed
   review docs and ledgers live there, and merge-task fast-forwards it after
   every merge when it can (`--refresh-in-place`: ff-only, never a merge commit;
-  held while it is the **Primary checkout** under a **Running rollout**). A
-  commit in it blocks a rollout only when it touches a path a not-yet-merged
-  task cites. _Avoid_: main checkout, shared checkout.
+  held while it is the **Primary checkout** under ADR 0031's hold). A commit
+  in it blocks a rollout only when it touches a path a not-yet-merged task
+  cites. _Avoid_: main checkout, shared checkout.
 - **Running rollout** — a live, started rollout at the current protocol,
-  neither `done` nor `dropped` and not hard-paused: one a lead may be running
-  on the primary checkout. It differs from unfinished both ways: it leaves out
-  paused, never-started and protocol-3 rollouts, and keeps one whose every
-  task merged but whose completion ceremony has not run. _Avoid_: active, in
-  flight.
+  neither `done` nor `dropped` and not hard-paused: one a lead may be running.
+  It differs from unfinished both ways: it leaves out paused, never-started
+  and protocol-3 rollouts, and keeps one whose every task merged but whose
+  completion ceremony has not run. _Avoid_: active, in flight.
 - **Start when ready** — the execute offer's fourth answer (orient § 9,
   schedule step 8): it stamps `start: unattended` on the rollout note just
   written and ends, running nothing. The Chorus Stage starts the lead in the
@@ -562,13 +599,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   armed by `mark-started` itself (p26-3), so a start, restart or seeded
   revise never launches unarmed. _Avoid_: watch, session.
 - **Git-env hold** — the unacked trip lines on a rollout note's
-  `## Git-env log`: while one stands, `next` halts `git-env`, nothing starts,
-  integrates or merges, and `carry` refuses the rollout. Only a **Git-env ack**
-  lifts it. _Avoid_: git-env halt (the lead's stop, not the hold).
-- **Git-env ack** — Lachy's recorded acceptance of the tripped windows, written
-  only by `/thread:repair` (its git-env step, 3e) through the canary's `ack`, naming exactly the
-  set shown and the ref shown (`--ref`), after an optional `restore`. Never
-  written by execute. _Avoid_: clear, reset.
+  `## Git-env log`: while one stands, nothing integrates or merges and `carry`
+  refuses the rollout, while task calls keep starting and running; a bare
+  checkout holds the whole rollout (ADR 0046, ADR 0048). Only a **Git-env
+  ack** lifts it. _Avoid_: git-env halt (the lead's stop, not the hold).
+- **Git-env ack** — the recorded acceptance of the tripped windows, naming
+  exactly the set shown and the ref shown (`--ref`). Lachy's, through
+  `/thread:repair` (its git-env step, 3e), after an optional `restore`; never
+  an agent's (ADR 0046). _Avoid_: clear, reset.
+- **Bookkeeping miss** — a window the canary could not read (`record
+  missing`, `record unreadable`, `record not armed`): it observed nothing, so
+  it never trips. It is logged with the checkout's state, read there and
+  then, and only a failing state check trips (ADR 0046). _Avoid_: false
+  trip, automatic ack.
 - **Dependent closure** — the set of tasks transitively depending on a task
   via `depends-on:` / `blocked-by:` (schedule § 3) — the blast radius that
   must move together if it's deferred, and the tasks a set-aside task holds
@@ -697,7 +740,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   drift, hands off to the engine's resume — never merges or converges
   (ADR 0004). _Avoid_: orchestrator, controller, wrapper.
 - **Situational report** — the read-only output of `status`: cursor, per-task
-  queue state (ADR 0030), blockers, drift flags, one recommended next action.
+  queue state (ADR 0030), blockers, drift flags, whether the rollout is moving
+  (the reading a **Watchdog** acts on, ADR 0048), one recommended next action.
   _Avoid_: dashboard, summary, snapshot.
 - **Repair bridge** — the path by which a blocked task is fixed and re-landed
   while the engine keeps sole merge authority. _Avoid_: handoff, recovery.
@@ -721,6 +765,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   unfinished rollout until each gate is signed or deferred; its Reinstate
   runs the Standing approval again and refuses while a gate is unsigned.
   _Avoid_: stuck, gate hold.
+- **Stalled rollout** — a rollout with work it could do and nothing moving:
+  its lead, session or Mac stopped, or a hold froze more than it threatens
+  (ADR 0048). A wait that is meant is not a stall: a pause or Room stop
+  (status § Pauses, § Room stop), the Trickle or the Away cap, a cool-down.
+  Not a **Stalled chain** (a serial chain's). _Avoid_: stuck, hung, idle (a
+  Slot can be idle in a moving rollout).
+- **Watchdog** — what acts on a Stalled rollout from outside its session,
+  reading it from the **Situational report**: Chorus's Companion, or a
+  launchd fallback that only notifies when Chorus is not running (ADR 0048).
+  Never the rollout's own heartbeat, which stops with its session, nor a
+  looped `/thread:status` (status § Loopable), which only recommends.
+  _Avoid_: monitor, heartbeat.
 
 ## Run record and tuning
 
@@ -802,6 +858,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   thing again, or at once when Lachy confirms it. Lachy's no closes it too:
   it comes back only when two later rollouts show it again. Knobs need no
   Watch. _Avoid_: candidate, hunch.
+- **Time-lost ledger** — the hours each cause class cost (stalls by cause,
+  usage limits, machine load, the Integration lane, Integration rework, plan
+  blocks, named from the Run record's own values where one fits), summed
+  across every rollout a weekly reading reads and trended week on week; a
+  class that tops it twice running opens a **Watch** on that class
+  (ADR 0051). Ranks causes, never rollouts. _Avoid_: time budget, cost
+  report.
+- **Monthly audit** — the pass once a month that reads past the Run record
+  (transcripts, suite logs, pause logs, the Mac's history), writes into the
+  Time-lost ledger and names what the record should have carried: an extra
+  step of the month's first weekly reading (ADR 0051). _Avoid_: retro, deep
+  dive.
 - **Quiet Reflection** — one that finds no new Watch (one first seen in this
   reading; a declined one seen again is not new), no rule proposal, no
   bug and no Guardrail breach. Three in a row move the reading from weekly
@@ -822,11 +890,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   schedule never stamps, and `verify_slots`, which is machine-wide
   (`[defaults]` only), never stamped, and read by execute's `verify-timeout`
   at each loop entry. That read validates the whole file, so a refused file
-  halts every rollout on the machine at its next entry; write a key (or the
-  `[notify]` table) only once the installed plugin knows it. The
-  machine-wide `[notify]` table holds `ntfy_topic`, read by two scripts and
-  never stamped: execute's needs-you fallback publishes to it (ADR 0038),
-  and tune.py refuses a Tuning whose edit would change it.
+  halts every rollout on the machine at its next entry; the file carries its
+  schema version, and a snapshot ignores a key newer than itself while still
+  refusing a typo (ADR 0043). The machine-wide `[notify]` table holds
+  `ntfy_topic`, read by two scripts and never stamped: execute's needs-you
+  fallback publishes to it (ADR 0038), and tune.py refuses a Tuning whose
+  edit would change it.
   `rollout-settings.py`'s JSON says only whether a topic is set, never the
   topic. _Avoid_: hardcoded defaults, config.
 
