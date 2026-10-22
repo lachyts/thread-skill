@@ -514,9 +514,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   re-enters at Integration like any set-aside there (p27-4). _Avoid_: rebase
   conflict, merge failure; a conflict Integration resolved is only a
   re-review trigger.
-- **Flake** — a test that failed an Integration or RACE verify, sits outside
-  the task's diff, and passed when the full suite ran once more on the same
-  tree: the verify counts green, and the Flake is logged and filed for its repo, never fixed
+- **Flake** — a named test that failed any verifier run in a rollout, sits
+  outside the task's diff, and passed when the full suite ran once more on
+  the same tree: the verify counts green, and the Flake is logged and filed for its repo, never fixed
   inside the task (ADR 0050). _Avoid_: flaky failure, known failure,
   quarantined test.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier suite

@@ -24,8 +24,8 @@ reverted on `main` and its task set aside.)*
 *(Amended by ADR 0048, 2026-10-21: no single cause holds the whole queue; a Watchdog outside the session catches a
 Stalled rollout.)*
 *(Amended by ADR 0049, 2026-10-21: while Lachy is Away, the Away cap bounds running Rollout tasks across the Mac.)*
-*(Amended by ADR 0050, 2026-10-21: decision 3's Integration verify reads a red outside the task's diff that one more full run
-clears as a Flake.)*
+*(Amended by ADR 0050, 2026-10-21: every verifier run in a rollout reads a red on named tests outside the task's diff that one
+more full run clears as a Flake.)*
 
 ## Context
 

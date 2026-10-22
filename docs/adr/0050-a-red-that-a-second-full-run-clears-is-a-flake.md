@@ -9,9 +9,10 @@ In `chorus-rollout-2026-10-18`, 6 of 9 Integration suites the lead ran failed on
 
 ## Decision
 
-**When an Integration verify is red only on tests the task's diff does not touch, the full suite runs exactly once more on the same tree. If it is green, the verify counts green and each test that failed the first run is a Flake: logged, and filed as a follow-up for its repo, never fixed inside the task. A red second run is red.**
+**When any verifier run in a rollout (a task call's, an integrator's, the lead's Integration verify or a RACE re-verify) is red only on named tests the task's diff does not touch, the full suite runs exactly once more on the same tree. If it is green, the verify counts green and each test that failed the first run is a Flake: logged, and filed as a follow-up for its repo, never fixed inside the task. A red second run is red.**
 
-- The same holds for a RACE re-verify (ADR 0046), where the diff is the merged task's.
+- For a RACE re-verify (ADR 0046) the diff is the merged task's.
+- **A red that names no failing test is never a Flake.** A timeout, or a lint, typecheck or build step, is red; a timeout is also logged as load (ADR 0051).
 - A failing test the diff touches is red, as today.
 
 ## Considered options
