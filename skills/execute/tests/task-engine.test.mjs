@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { runTask, loadEngine, enginePath } from '../../../tests/lib/engine.mjs'
+import { runTask, loadEngine, enginePath, VERIFY_SLOT } from '../../../tests/lib/engine.mjs'
 
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
@@ -24,7 +24,7 @@ const mkTask = (slug, over = {}) => ({
 })
 const mkArgs = (task, over = {}) => ({
   rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01',
-  task, ...over,
+  verifySlot: VERIFY_SLOT, task, ...over,
 })
 const slugOf = (label) => label.split(':')[1].split(/[ @]/)[0]
 

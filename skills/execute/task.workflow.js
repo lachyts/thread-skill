@@ -51,18 +51,19 @@ export const meta = {
 //                                    //   reconcile-rollout.py, and the engine only RELAYS the line via
 //                                    //   log() for live /workflows visibility. Absent/empty ⇒ no extra log
 //                                    //   line (byte-identical).
-//   verifySlot  : object,            // optional (p23-4); { script, slots }: the absolute path of
+//   verifySlot  : object,            // REQUIRED (p23-4; estate ADR 0009 d4); { script, slots }: the absolute path of
 //                                    //   skills/execute/scripts/verify-slot.py and the machine's verify_slots
-//                                    //   (execute § 3's verify-timeout `verifySlots`). Set ⇒ every verifier line
+//                                    //   (execute § 3's verify-timeout `verifySlot`, copied verbatim). Set ⇒ every verifier line
 //                                    //   the engine renders runs as `<scrub> python3 '<script>' run --slots N --
 //                                    //   bash -c '<verifier>'` (slotted), so at most N suites run at once on the
 //                                    //   machine, with SLOT_TEXT beside it; the four TASK_TREE_RULE agents carry
 //                                    //   slotRule after KILL_RULE; and the integrate call's line carries
 //                                    //   `--priority` (engine-only: verifySlotArgsError refuses any key but script
 //                                    //   and slots, so no lead can give a task call the Integration priority).
-//                                    //   Absent/null ⇒ every prompt byte-identical. Validated before any dispatch,
-//                                    //   in both modes. A resume re-passes its call's own args, so a call launched
-//                                    //   without it is resumed without it.
+//                                    //   Absent/null is refused before any dispatch, in both modes (estate ADR
+//                                    //   0009 d4: no lead passed it while it was optional). A resume re-passes
+//                                    //   its call's own args on its own version-keyed engine, so a call launched
+//                                    //   without it, on an engine that took it as optional, resumes there.
 //   gatePricer  : string,            // optional (ADR 0038); the absolute path of the plugin's gated_inputs.py,
 //                                    //   which `reconcile-rollout.py gate-pricer` prints. The lead passes it on
 //                                    //   a task's own call (start or restart) with planGate, and only while the
@@ -415,7 +416,8 @@ const KILL_RULE = 'Stopping processes (hard rule, the 2026-10-04 incident): stop
 
 // Verify slots (p23-4, Chorus ADR 0098 d6): at ceiling 4 every agent's verifier is a full suite, and on 2026-10-17
 // uncapped suites from several sessions drove one machine to load 66 and lost a merge to a load flake. With
-// args.verifySlot set, every verifier line the engine renders goes through scripts/verify-slot.py, which holds
+// args.verifySlot set (required since estate ADR 0009 d4; the renderers below still take it absent, for the
+// tests), every verifier line the engine renders goes through scripts/verify-slot.py, which holds
 // one of the machine's `verify_slots` slots for the suite's life and ends the suite (its guard) if the wrapper is
 // killed. shq quotes one POSIX word ('…', each ' written '\''), so the verifier reaches `bash -c` byte for byte.
 function shq(s) {
@@ -1636,14 +1638,16 @@ function ladderArgsError(l) {
   return ''
 }
 
-// args.verifySlot (p23-4): '' when usable (or absent), else why not. Exactly { script, slots }: the absolute,
-// single-line path of verify-slot.py and an integer >= 1. Any other key (`priority` included: only
-// integrationVerify sets it, on its own copy) is a lead bug, refused before any dispatch in both modes.
+// args.verifySlot (p23-4): '' when usable, else why not. Required (estate ADR 0009 d4): absent or null is refused.
+// Exactly { script, slots }: the absolute, single-line path of verify-slot.py (never under a bare /skills/, an
+// unexported plugin root) and an integer >= 1. Any other key (`priority` included: only integrationVerify sets
+// it, on its own copy) is a lead bug, refused before any dispatch in both modes.
 function verifySlotArgsError(v) {
-  if (v === undefined || v === null) return ''
+  if (v === undefined || v === null) return `is required (estate ADR 0009 d4): pass this entry's verify-timeout verifySlot, verbatim (execute § 4)`
   if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${JSON.stringify(v)}`
   const keys = Object.keys(v).sort()
   if (keys.length !== 2 || keys[0] !== 'script' || keys[1] !== 'slots') return `must hold exactly script and slots, got keys ${JSON.stringify(Object.keys(v))}`
+  if (typeof v.script === 'string' && v.script.startsWith('/skills/')) return `script ${JSON.stringify(v.script)} sits under a bare /skills/: CLAUDE_PLUGIN_ROOT was empty (re-run by plugin-root.md rule 4)`
   if (typeof v.script !== 'string' || !v.script.startsWith('/') || /[\r\n]/.test(v.script) || v.script.split('/').pop() !== 'verify-slot.py') {
     return `script must be the absolute, single-line path of verify-slot.py, got ${JSON.stringify(v.script)}`
   }
@@ -3159,7 +3163,10 @@ if (mode !== 'task' && mode !== 'integrate') throw new Error(`args.mode: refusin
 // one is a lead bug, refused before any dispatch in both modes; an absent one is the built-in ladder.
 const badLadder = ladderArgsError(a.ladder)
 if (badLadder) throw new Error('args.ladder: ' + badLadder)
-// args.verifySlot (p23-4): the machine's verify slots, or absent. A malformed one is a lead bug, refused here.
+// args.verifySlot (p23-4): the machine's verify slots. A malformed or absent one is a lead bug, refused here
+// (estate ADR 0009 d4): from 14 to 21 Oct 2026 no lead passed it, so 917 full Chorus suites ran
+// unslotted, up to 7 at once, and the Mac froze from heat. A resume replays its run's own version-keyed engine, so a
+// call launched on an engine that took it as optional (before 5.0.0) resumes there unchanged.
 const badSlot = verifySlotArgsError(a.verifySlot)
 if (badSlot) throw new Error('args.verifySlot: ' + badSlot)
 // Printed at every call, so a run's log names the ladder it ran on (a path, or built-in).

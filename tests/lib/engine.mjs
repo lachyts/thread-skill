@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 export const enginePath = path.join(root, 'skills', 'execute', 'task.workflow.js')
+// The args.verifySlot every engine test passes (required, estate ADR 0009 d4); the path is never run.
+export const VERIFY_SLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
 
 export function loadEngine(names) {
   const src = fs.readFileSync(enginePath, 'utf8')
@@ -27,9 +29,11 @@ export function loadEngine(names) {
 // call recorded as { label, prompt }, then delegated to agentImpl(prompt, opts)).
 // Returns { result, logs, calls } on success or { error, logs, calls } when the script throws. The
 // result is JSON round-tripped into this realm so deepStrictEqual can compare runs across contexts.
-export async function runTask(args, agentImpl) {
-  const src = fs.readFileSync(enginePath, 'utf8')
-  if (!src.includes('export const meta')) throw new Error('export const meta not found in ' + enginePath)
+// options.source runs that engine text instead of the file's (a test's broken-variant control).
+export async function runTask(args, agentImpl, options = {}) {
+  const src = options.source === undefined ? fs.readFileSync(enginePath, 'utf8') : options.source
+  const name = options.source === undefined ? enginePath : enginePath + ' (options.source variant)'
+  if (!src.includes('export const meta')) throw new Error('export const meta not found in ' + name)
   const body = src.replace('export const meta', 'const meta')
   const logs = []
   const calls = []
@@ -44,7 +48,7 @@ export async function runTask(args, agentImpl) {
   }
   vm.createContext(ctx)
   try {
-    const out = await vm.runInContext(`(async () => {\n${body}\n})()`, ctx, { filename: enginePath })
+    const out = await vm.runInContext(`(async () => {\n${body}\n})()`, ctx, { filename: name })
     return { result: out === undefined ? out : JSON.parse(JSON.stringify(out)), logs, calls }
   } catch (error) {
     return { error, logs, calls }

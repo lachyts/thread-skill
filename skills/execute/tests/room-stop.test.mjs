@@ -19,7 +19,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { runTask } from '../../../tests/lib/engine.mjs'
+import { runTask, VERIFY_SLOT } from '../../../tests/lib/engine.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPTS = path.join(here, '..', 'scripts')
@@ -428,7 +428,9 @@ function script({ nullOnce = false } = {}) {
       worktreePath: `/repo/.claude/worktrees/${s}`, blockerDiagnosis: '', summary: `${label} done` }
   }
 }
+// args.verifySlot is required (estate ADR 0009 d4): every call carries one.
 const argsFor = (slug) => ({ rolloutSlug: 'proj-rollout-2026-10-14', repoPath: '/repo', verifier: 'make test', date: '2026-10-14',
+  verifySlot: VERIFY_SLOT,
   task: { slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: false, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, rung: 'opus-xhigh' } })
 function watchBg(state) {
   return new Promise((resolve) => {

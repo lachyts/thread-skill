@@ -43,7 +43,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { FENCE, collapse, fencedBlocks, read, root, section } from '../lib/contract-text.mjs'
-import { runTask } from '../lib/engine.mjs'
+import { runTask, VERIFY_SLOT } from '../lib/engine.mjs'
 
 // ---- the scripts ------------------------------------------------------------------------------------------------
 
@@ -78,7 +78,9 @@ const mkI = (slug, n) => ({
   mainSha: sha('c'), trouble: [], landed: [], reviewHistory: [{ round: 1, feedback: ['own-run fix'] }], reviewRoundsUsed: 1,
   rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] },
 })
-const base = (rolloutSlug) => ({ rolloutSlug, repoPath: '/repo', verifier: 'make test', date: '2026-10-01' })
+// args.verifySlot is required (estate ADR 0009 d4): every call carries one.
+const base = (rolloutSlug) => ({ rolloutSlug, repoPath: '/repo', verifier: 'make test', date: '2026-10-01',
+  verifySlot: VERIFY_SLOT })
 const integrateStep = {
   blocked: false, blockerDiagnosis: '', verified: true, mergeState: 'merged', mergeCommit: sha('d'), taskHead: sha('a'),
   baseSha: sha('c'), headSha: sha('d'), pushedSha: sha('d'), conflictFiles: ['a.js'], fixCommits: [], summary: 's', finishedAt: NOW,

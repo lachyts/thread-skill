@@ -176,6 +176,7 @@ used = int(sys.argv[4]) if len(sys.argv) > 4 else 1
 s = lambda c: c * 40
 alias = slug.split("-", 1)[1] if "-" in slug else slug
 print(json.dumps({"rolloutSlug": "ro", "repoPath": "/repo", "verifier": "true", "date": "2026-10-02", "mode": "integrate",
+  "verifySlot": {"script": "/plugins/thread/x/skills/execute/scripts/verify-slot.py", "slots": 2},
   "task": {"slug": slug, "taskPath": "", "scope": "cross-cutting", "planGate": False, "maxIterations": 3,
            "maxReviewRounds": maxr, "maxPlanRounds": 3, "rung": "opus-xhigh"},
   "integration": {"prUrl": f"https://github.com/o/r/pull/{ord(slug[-1])}", "branch": f"audit-fix/{alias}",
@@ -810,6 +811,7 @@ SARGS=$(python3 - "$I" "$(p1pr proj-a)" <<'PY'
 import json, sys
 i = json.loads(sys.argv[1])
 print(json.dumps({"rolloutSlug": "ro", "repoPath": "/repo", "verifier": "true", "date": "2026-10-02",
+  "verifySlot": {"script": "/plugins/thread/x/skills/execute/scripts/verify-slot.py", "slots": 2},
   "task": {"slug": "proj-a", "taskPath": "", "scope": "cross-cutting", "planGate": False, "maxIterations": 3, "maxReviewRounds": 3,
            "maxPlanRounds": 3, "rung": "opus-xhigh", "resume": {"stage": "revise", "prUrl": sys.argv[2], "branch": i["branch"],
            "worktreePath": "/repo/.claude/worktrees/proj-a", "reviewHistory": i["history"], "reviewRoundsUsed": i["lastRound"], "plan": ""}}}))
