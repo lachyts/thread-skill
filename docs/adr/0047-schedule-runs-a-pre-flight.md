@@ -14,7 +14,7 @@ Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus
 - **Grade.** Each task gets its Readiness grade by `skills/_shared/readiness-grade.md`. Ready tasks enter the queue as they stand; One call and Grill tasks get one batched decision round with Lachy first, their answers written into their notes; Orient tasks stay out of the rollout.
 - **Only a task still to start is graded.** A carried task (a `--regenerate` supersede) that has started keeps its state, as supersede already rules; a carried task still queued is graded like any other.
 - **A task left out takes its Dependent closure with it,** so nothing queued waits on a task the rollout will never run.
-- **Under orient-all, the estate pass has already graded these tasks and held the decision round** (ADR 0041), and its schedule forks ask nothing. The Pre-flight takes those grades and answers as they stand and asks no second round.
+- **Under orient-all, the estate pass has already graded these tasks and held the decision round** (ADR 0041), and its schedule forks ask nothing. The Pre-flight takes those grades and answers as they stand and asks no second round. A One call or Grill task the round never reached stays out of the rollout with its Dependent closure, like an Orient task, and the estate pass's report lists it as waiting on Lachy's answer, so it reaches the next round: nothing enters a queue with a decision open.
 
 ## Considered options
 
