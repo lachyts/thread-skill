@@ -14,6 +14,7 @@ needs". d6's quiet definition and the cadence are unchanged.)*
 *(Amended by ADR 0051, 2026-10-21: the weekly reading keeps a Time-lost ledger, a Monthly audit rides the month's first
 reading, the Run record gains stop, suite, load and moved-`main` events, and d4's reading falls due on the Thursday
 Reflection Routine's morning, made by Chorus's weekly Runner, the daily sweep its fallback.)*
+
 ## Context
 
 ADR 0032 gave rollouts a Run record and a Retro that scored it on Throughput and proposed knob

@@ -1,11 +1,11 @@
 # 0050 — A red that a second full run clears is a Flake
 
 Date: 2026-10-21
-Status: accepted. Ruled with Lachy in the re-grill of PR #202, after an audit of where rollout time went. Amends ADR 0030 decision 3's Integration verify, which reads any red as red.
+Status: accepted. Ruled with Lachy in the re-grill of PR #202 (ADR 0048's audit). Amends ADR 0030 decision 3's Integration verify, which reads any red as red.
 
 ## Context
 
-In `chorus-rollout-2026-10-18`, 6 of 9 Integration suites the lead ran failed on one timing test outside every diff, under load. Each red cost another full suite (20 to 50 minutes), and conflict Integrations that chased such reds took about 17 hours across three tasks; one integrator (p84-8) wrote a fix for the timing test inside its own task. Execute has no notion of a flaky test: a red is a re-verify or a set-aside. ADR 0049's Away cap makes such reds rarer, not impossible.
+In `chorus-rollout-2026-10-18`, 6 of 9 Integration suites the lead ran failed on one timing test outside every diff, under load. Each red cost another full suite (20 to 50 minutes), and conflict Integrations that chased such reds took about 17 hours across three tasks; one integrator (p84-8) wrote a fix for the timing test inside its own task. Execute has no notion of a flaky test: a red is a re-verify or a set-aside. Its two neighbours do not cover it: a known baseline failure (schedule § 2.6's manifest) is a test already red on a clean `main`, which execute's green criterion already allows for (no new failures beyond the manifest), so it is never a Flake candidate; merge-task's `infra_flake_rerun` re-runs a remote CI job only when every failed step is setup, never a named test. ADR 0049's Away cap makes such reds rarer, not impossible.
 
 ## Decision
 
@@ -19,7 +19,7 @@ In `chorus-rollout-2026-10-18`, 6 of 9 Integration suites the lead ran failed on
 
 - **Re-run only the failing tests, alone, as the proof** (ruled first, then changed in the round-3 review the same day): rejected. A test the task's change leaks state into, or makes order-dependent, fails in the full suite and passes alone, so the break merges as a Flake and keeps passing alone at every later Integration. The named re-run now only decides fast that a red is real; the full run proves a Flake.
 - **A full run straight away** (ruled in round 3, then changed in the simplify round, 2026-10-22): rejected. A real red that fails again on its own named tests would pay a whole suite to find out.
-- **A quarantine list** each repo's Integration verify ignores: rejected. Faster, but a listed test can hide a real break for as long as it stays listed.
+- **A quarantine list** each repo's Integration verify ignores, like the known-baseline-failures manifest but for tests green on a clean `main`: rejected. Faster, but a listed test can hide a real break for as long as it stays listed.
 - **Red is red, and fix flakes at the source** (the Away cap, Chorus P86): rejected as the whole answer. Both reduce flakes; neither ends them, and every one left costs a suite.
 
 ## Consequences

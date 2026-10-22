@@ -17,14 +17,12 @@ required while the Project root exists, before any write.)*
 *(Amended 2026-10-21 by thread-skill-p28-1: decision 1's "only dependencies and a solo task hold a task back" gains, by
 day, the Trickle: while Lachy is not Away, `next` starts nothing past a machine-wide count of running Rollout tasks
 (Chorus ADR 0104; skills/execute/away.md).)*
-*(Amended by ADR 0045, 2026-10-21: decision 3's re-verify is skipped when `main` moved only in a repo's proven Inert paths.)*
-*(Amended by ADR 0046, 2026-10-21: a Bookkeeping miss never trips unless its state check fails, a Git-env hold stops only Integration and merging unless the checkout is bare, and a RACE red twice is
-reverted on `main` and its task set aside.)*
-*(Amended by ADR 0048, 2026-10-21: no single cause holds the whole queue; a Watchdog outside the session catches a
-Stalled rollout.)*
-*(Amended by ADR 0049, 2026-10-21: while Lachy is Away, the Away cap bounds running Rollout tasks across the Mac.)*
-*(Amended by ADR 0050, 2026-10-21: every verifier run in a rollout reads a red on named tests outside the task's diff that one
-more full run clears as a Flake.)*
+*(Amended by ADR 0045, 2026-10-21: the Inert-path skip.)*
+*(Amended by ADR 0046, 2026-10-21: a Bookkeeping miss never trips; a trip holds only what it threatens; a RACE red
+twice is reverted.)*
+*(Amended by ADR 0048, 2026-10-21: scoped holds, and the Watchdog.)*
+*(Amended by ADR 0049, 2026-10-21: the Away cap.)*
+*(Amended by ADR 0050, 2026-10-21: the Flake rule.)*
 
 ## Context
 

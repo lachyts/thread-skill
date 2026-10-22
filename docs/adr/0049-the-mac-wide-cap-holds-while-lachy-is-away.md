@@ -1,7 +1,7 @@
 # 0049 — The Mac-wide cap holds while Lachy is Away
 
 Date: 2026-10-21
-Status: accepted. Ruled with Lachy in the re-grill of PR #202, after an audit of where rollout time went. Overturns Chorus ADR 0104 decision 3 ("Away, every Rollout to its own ceiling"); the Trickle by day (its decision 2) stands.
+Status: accepted. Ruled with Lachy in the re-grill of PR #202 (ADR 0048's audit). Overturns Chorus ADR 0104 decision 3 ("Away, every Rollout to its own ceiling"); the Trickle by day (its decision 2) stands.
 
 ## Context
 
@@ -17,7 +17,6 @@ Machine load cost about 25 to 40 hours from September to 21 October, and more in
 ## Considered options
 
 - **Leave it to a cheaper suite** (Chorus P86's lean, parallel suite): rejected as the whole answer. A parallel suite uses more cores, so it contends harder under the same load.
-- **Lane first only:** already built; it orders suites but leaves the load.
 
 ## Consequences
 
