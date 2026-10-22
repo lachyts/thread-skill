@@ -863,8 +863,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Time-lost ledger** — the hours each cause class cost (stalls by cause,
   usage limits, machine load, the Integration lane, Integration rework, plan
   blocks), summed across every rollout a weekly reading reads and trended
-  week on week; a class that tops it twice running becomes a design question
-  for a grill (ADR 0051). Ranks causes, never rollouts. _Avoid_: time
+  week on week; a class that tops it twice running raises one design
+  question for a grill, held like a Watch (ADR 0051). Ranks causes, never rollouts. _Avoid_: time
   budget, cost report.
 - **Monthly audit** — the pass once a month that reads past the Run record
   (transcripts, suite logs, pause logs, the Mac's history), writes into the
