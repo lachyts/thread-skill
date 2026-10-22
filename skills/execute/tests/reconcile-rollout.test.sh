@@ -596,7 +596,7 @@ mkvt() {  # mkvt <frontmatter line or ''> -> $TMP/vt-rollout.md
   { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'; [ -n "$1" ] && printf '%s\n' "$1"; printf -- '---\n\n## Notes\n'; } > "$TMP/vt-rollout.md"
 }
 # verify-timeout's verifySlot.script: the absolute path of the script's sibling verify-slot.py.
-VSP="$(cd "$(dirname "$SCRIPT")" && pwd)/verify-slot.py"
+VSP="$(cd "$(dirname "$SCRIPT")" && pwd -P)/verify-slot.py"
 vt_ok() {  # vt_ok <label> <frontmatter line> <expected stdout> [HOME]
   mkvt "$2"; local before after got rc; before=$(shaof "$TMP/vt-rollout.md")
   got=$(HOME="${4:-$EH}" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>/dev/null); rc=$?

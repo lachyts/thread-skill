@@ -360,14 +360,13 @@ Build the args object for each task call:
                { "name": "opus-xhigh", "model": "opus", "effort": "xhigh", "judge": "high", "review": "xhigh" } ] },
                                           //   read at THIS call's start (§ 3); "source": "built-in" when
                                           //   there is no file. A resume re-passes its call's own ladder.
-  "verifySlot": { "script": "/Users/<you>/.claude/plugins/cache/thread/thread/<v>/skills/execute/scripts/verify-slot.py", "slots": 2 },
+  "verifySlot": { "script": "<verify-timeout verifySlot.script>", "slots": 2 },
                                           // REQUIRED: the machine's verify slots (§4.5 *Verify slots*): this
                                           //   entry's `verify-timeout` `verifySlot`, verbatim (§ 3). On
                                           //   EVERY task call, seeded revise and integrate call; the engine
                                           //   wraps every verifier line it renders in `verify-slot.py run
                                           //   --slots N -- …`, and refuses a call without it before any
-                                          //   dispatch (estate ADR 0009 d4); that refusal is a
-                                          //   lead bug, never a *Lost call* (below)
+                                          //   dispatch (estate ADR 0009 d4)
   "progress": "progress: 2/6 merged, 1 running, 3 queued — 42m elapsed, ~50m remaining (rough)",
                                           // optional; the progress line `mark-started --rollout` or
                                           //   `next` prints (reconcile-rollout.py) — the engine log()s it
@@ -396,7 +395,7 @@ bash "$db" "$R"
 # end thread:default-branch-resolver
 ```
 
-Pass the printed name as `defaultBranch` only when it is not `main`. Resolve it before the call's stamps, because `mark-started --arm-default` takes it (§4.5 *Git-env canary*: the printed name, `main` included); the resolver writes nothing, so running it first changes nothing else. Any non-zero exit stops: 1 means the remote did not answer, 2 means `scripts/default-branch.sh` was not found with the root set or `<repoPath>` was left empty (a `not found at /skills/…` is an unexported root: re-run by `plugin-root.md` rule 4 first). A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` or `verifySlot` to a run that started without it changes prompt bytes and re-runs cached agents. A resume also replays its run's own version-keyed engine (its original `scriptPath`), so a call launched without `verifySlot`, on an engine that took it as optional (every release before 5.0.0), is resumed there without it, and *Can no longer resume*'s sha check catches a changed engine; a new call always passes it. **A refused `args.verifySlot`.** A call whose error begins `args.verifySlot:` dispatched nothing, and identical args are refused again, so it is never a *Lost call*: no resume, no *Set aside*, no retry. The lead writes nothing more for it and ends the turn with `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="engine refused args.verifySlot"`, printing the error verbatim above that line; the fix is the lead's own args (this entry's `verifySlot`, copied verbatim), then re-invoke. The one sanctioned exception is § 3.7's signed-gate resume, which adds `task.approvedGates`: it never reaches a prompt.
+Pass the printed name as `defaultBranch` only when it is not `main`. Resolve it before the call's stamps, because `mark-started --arm-default` takes it (§4.5 *Git-env canary*: the printed name, `main` included); the resolver writes nothing, so running it first changes nothing else. Any non-zero exit stops: 1 means the remote did not answer, 2 means `scripts/default-branch.sh` was not found with the root set or `<repoPath>` was left empty (a `not found at /skills/…` is an unexported root: re-run by `plugin-root.md` rule 4 first). A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` or `verifySlot` to a run that started without it changes prompt bytes and re-runs cached agents. A resume also replays its run's own version-keyed engine (its original `scriptPath`), so a call launched without `verifySlot`, on an engine that took it as optional (before 5.0.0), is resumed there without it; a new call always passes it. The one sanctioned exception is § 3.7's signed-gate resume, which adds `task.approvedGates`: it never reaches a prompt.
 
 **Resolve `gatePricer` (ADR 0038)** only for a task's own call (a start or restart) whose `task.planGate` is `true`; never for a resume (the original-args rule above and § 5: a resume re-passes its call's own `gatePricer`, or none), a seeded revise or an integrate call, which run no plan judge. Run:
 
@@ -830,8 +829,7 @@ The queue (§4.5) halts only when nothing can start and nothing is running or in
 - `reconcile-rollout.py verify-timeout` exits 3 at an entry (§ 3: `reason="rollout settings refused"`: nothing is stamped, cleared or dispatched; stamping a key does not clear it, only fixing `~/.config/thread/rollouts.toml` at the line its stderr names, or a python >= 3.11 when it names tomllib, then re-invoke), or
 - §3's round-budget validation finds a `max_iterations`, `max_review_rounds` or `max_plan_rounds` that is not an integer >= 1 (`reason="invalid round budget: <field> on [[task]]"` — nothing is stamped or dispatched; fix the frontmatter and re-invoke), or
 - `rollout-settings.py` exits 2 or 3 for a round-budget key absent at both levels (§ 3: `reason="rollout settings refused"` — nothing is stamped or dispatched; fix `~/.config/thread/rollouts.toml` at the line its stderr names, or stamp the key on the rollout note, the only fix when its stderr names `--repo` (the Project root is gone), then re-invoke), or
-- `ladder.py` exits non-zero at a call's start (§ 3: `reason="ladder file refused"` — nothing is written for that call; fix `~/.config/thread/ladder.toml` at the line its stderr names, or run a python >= 3.11, then re-invoke), or
-- the engine refuses a call with `args.verifySlot:` (§ 4: `reason="engine refused args.verifySlot"` — never a *Lost call*, nothing more is written for it; pass this entry's `verify-timeout` `verifySlot` verbatim, then re-invoke).
+- `ladder.py` exits non-zero at a call's start (§ 3: `reason="ladder file refused"` — nothing is written for that call; fix `~/.config/thread/ladder.toml` at the line its stderr names, or run a python >= 3.11, then re-invoke).
 
 A **merge hold** (`--gated`, or merge-task's exit 7) is not a halt: it ends `waiting` (§4.5 *Merge hold*). A **soft pause** (*Pausing + reinstating a rollout* below) exits through `state=halted reason="paused at user request"` once it drains, but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation. After a halt, completions of calls still in flight are only reconciled: nothing new starts, integrates or merges.
 

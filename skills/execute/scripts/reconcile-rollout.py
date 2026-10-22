@@ -5045,6 +5045,7 @@ AUTO_RETRY_STAGES = ("plan", "implement", "verify", "review", "integrate")  # se
 # (frontmatter key, the budget's JSON key, the least valid value): what _retry_budget resolves.
 RETRY_BUDGET_KEYS = (("auto_retries", "autoRetries", 0), ("max_review_rounds", "maxReviewRounds", 1))
 LEAD_INTEGRATE_PY = Path(__file__).resolve().parent / "lead-integrate.py"
+VERIFY_SLOT_PY = Path(__file__).resolve().parent / "verify-slot.py"
 _LEAD = None
 
 
@@ -6290,8 +6291,7 @@ def cmd_verify_timeout(args) -> int:
     print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000,
                       "slotWait": max(VERIFY_SLOT_WAIT_MIN, HARNESS_MAX_S - VERIFY_HARNESS_MARGIN - seconds),
                       "verifySlots": slots,
-                      "verifySlot": {"script": os.path.join(os.path.dirname(os.path.abspath(__file__)), "verify-slot.py"),
-                                     "slots": slots}}))
+                      "verifySlot": {"script": str(VERIFY_SLOT_PY), "slots": slots}}))
     return 0
 
 

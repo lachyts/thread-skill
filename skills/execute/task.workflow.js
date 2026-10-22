@@ -53,7 +53,7 @@ export const meta = {
 //                                    //   line (byte-identical).
 //   verifySlot  : object,            // REQUIRED (p23-4; estate ADR 0009 d4); { script, slots }: the absolute path of
 //                                    //   skills/execute/scripts/verify-slot.py and the machine's verify_slots
-//                                    //   (execute § 3's verify-timeout `verifySlots`). Set ⇒ every verifier line
+//                                    //   (execute § 3's verify-timeout `verifySlot`, copied verbatim). Set ⇒ every verifier line
 //                                    //   the engine renders runs as `<scrub> python3 '<script>' run --slots N --
 //                                    //   bash -c '<verifier>'` (slotted), so at most N suites run at once on the
 //                                    //   machine, with SLOT_TEXT beside it; the four TASK_TREE_RULE agents carry
@@ -1647,7 +1647,8 @@ function verifySlotArgsError(v) {
   if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${JSON.stringify(v)}`
   const keys = Object.keys(v).sort()
   if (keys.length !== 2 || keys[0] !== 'script' || keys[1] !== 'slots') return `must hold exactly script and slots, got keys ${JSON.stringify(Object.keys(v))}`
-  if (typeof v.script !== 'string' || !v.script.startsWith('/') || v.script.startsWith('/skills/') || /[\r\n]/.test(v.script) || v.script.split('/').pop() !== 'verify-slot.py') {
+  if (typeof v.script === 'string' && v.script.startsWith('/skills/')) return `script ${JSON.stringify(v.script)} sits under a bare /skills/: CLAUDE_PLUGIN_ROOT was empty (re-run by plugin-root.md rule 4)`
+  if (typeof v.script !== 'string' || !v.script.startsWith('/') || /[\r\n]/.test(v.script) || v.script.split('/').pop() !== 'verify-slot.py') {
     return `script must be the absolute, single-line path of verify-slot.py, got ${JSON.stringify(v.script)}`
   }
   if (!Number.isInteger(v.slots) || v.slots < 1) return `slots must be an integer >= 1, got ${JSON.stringify(v.slots)}`

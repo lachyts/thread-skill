@@ -477,7 +477,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
       !vsRow.includes('read by `verify-timeout`') || !vsRow.includes('becomes `--slots`') || !vsRow.includes('`args.verifySlot.slots`') ||
       !exit3.includes('reason="rollout settings refused"') || !exit3.includes('The lead writes nothing') ||
       !exit3.includes('Stamping a key on the rollout note does not clear a `verify-timeout` exit 3: `verify_slots` is never stamped and the whole file is validated, so only fixing `~/.config/thread/rollouts.toml` at the line its stderr names') ||
-      !s4.includes('"verifySlot": { "script": "/Users/<you>/.claude/plugins/cache/thread/thread/<v>/skills/execute/scripts/verify-slot.py", "slots": 2 }') ||
+      !s4.includes('"verifySlot": { "script": "<verify-timeout verifySlot.script>", "slots": 2 }') ||
       !s4.includes('adding `defaultBranch` or `verifySlot` to a run that started without it changes prompt bytes') ||
       !vsP.includes("The lead's `lead-integrate.py verify` (the Integration verify and the RACE re-verify) and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode) register as Integration waiters") ||
       !vsP.includes('before the verify slot frees') || !vsP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status --slots <verify_slots>`') ||
