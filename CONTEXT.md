@@ -452,9 +452,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (ADR 0009). Retired by ADR 0030: see **Queue**. Its fit-test adjective
   **Wave-shaped** is now **Parallel-shaped**. _Avoid_: round, phase, stage.
 - **Queue** — how a parallel rollout runs: tasks in parallel, each from the `main` of
-  its start, up to the parallel ceiling, held back only by dependencies, a
-  **Solo** task, the **Trickle** by day or the **Away cap** while Lachy is
-  Away, and a bare checkout's **Git-env hold**, never a shared file (ADR 0030).
+  its start, up to the parallel ceiling, held back only by dependencies or a
+  **Solo** task and, by day, the **Trickle**, never a shared file (ADR 0030).
+  While Lachy is Away the **Away cap** holds starts back instead of the
+  Trickle (ADR 0049), and a bare checkout's **Git-env hold** holds them all
+  (ADR 0046).
   _Avoid_: batch (the session lane's).
 - **Slot** — one task's own run (a start, a restart or a seeded revise) in a
   Queue, held from its launch until its result is reconciled. Integration
