@@ -442,7 +442,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !raceLine.includes('`timeout: <harnessTimeoutMs>`') || /--timeout 1800\b/.test(skill) ||
     !verifyP.includes("(7200000, the harness maximum, from this entry's § 3 `verify_timeout` check") || /\b2400000\b/.test(skill) ||
     /\+ 600\) × 1000/.test(skill) ||
-    !vtP.includes('Exit 0 prints `{"verifyTimeout": <verify_timeout>, "harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlots": <verify_slots>}`') ||
+    !vtP.includes('Exit 0 prints `{"verifyTimeout": <verify_timeout>, "harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlots": <verify_slots>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`') ||
     !timeoutGuard.includes('`timeout: <harnessTimeoutMs>` (7200000; their own `--slot-wait <slot_wait>` bounds the verify-slot wait and `--timeout <verify_timeout>` the verifier)') ||
     !recheck.includes("Every entry then runs § 3's `verify_timeout` check once, before anything it writes") ||
     !before(coldVT, VT, 'reconcile-rollout.py resume') || !before(reinstateVT, VT, 'clear-pause') || !before(pzReinstate, VT, 'clear-pause') ||
@@ -477,7 +477,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
       !vsRow.includes('read by `verify-timeout`') || !vsRow.includes('becomes `--slots`') || !vsRow.includes('`args.verifySlot.slots`') ||
       !exit3.includes('reason="rollout settings refused"') || !exit3.includes('The lead writes nothing') ||
       !exit3.includes('Stamping a key on the rollout note does not clear a `verify-timeout` exit 3: `verify_slots` is never stamped and the whole file is validated, so only fixing `~/.config/thread/rollouts.toml` at the line its stderr names') ||
-      !s4.includes('"verifySlot": { "script": "<abs ${CLAUDE_PLUGIN_ROOT}>/skills/execute/scripts/verify-slot.py", "slots": 2 }') ||
+      !s4.includes('"verifySlot": { "script": "<verify-timeout verifySlot.script>", "slots": 2 }') ||
       !s4.includes('adding `defaultBranch` or `verifySlot` to a run that started without it changes prompt bytes') ||
       !vsP.includes("The lead's `lead-integrate.py verify` (the Integration verify and the RACE re-verify) and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode) register as Integration waiters") ||
       !vsP.includes('before the verify slot frees') || !vsP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status --slots <verify_slots>`') ||
@@ -998,7 +998,7 @@ test('control: a verify paragraph back on (<verify_timeout> + 600) × 1000 fails
 })
 
 test('control: a verify-timeout JSON without slotWait fails verify-timeout', () => {
-  only(sk('"harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlots": <verify_slots>}`:', '"harnessTimeoutMs": <harnessTimeoutMs>}`:'),
+  only(sk('"harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlots": <verify_slots>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`:', '"harnessTimeoutMs": <harnessTimeoutMs>}`:'),
     'verify-timeout', 'two keys')
 })
 

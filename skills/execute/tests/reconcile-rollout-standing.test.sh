@@ -214,12 +214,13 @@ ok "$(cat "$D/c.md")" "$before" "S7: the unpriceable gate's note is untouched"
 # without the section is signed (the control: the section is what refuses). Lachy's sign-off removes both sections.
 ROOTDIR="$(cd "$HERE/../../.." && pwd)"
 S8_JS=$(cat <<'JS'
-import { runTask } from './tests/lib/engine.mjs'
+import { runTask, VERIFY_SLOT } from './tests/lib/engine.mjs'
 const [slug, bounce] = process.argv.slice(1)
 const G24 = 'spend: eval re-runs — cap 24 USD'
 const plan = `Planned on: abc\n### Files to modify\n- x\n### Gated inputs\n- ${G24}\n  - 10 invocations at --max-cost-usd 4 (40 USD)\n### Risks / unknowns\n- none`
 const feedback = ['the sub-bullet spends 40 USD (10 invocations at --max-cost-usd 4) against a Cap of 24 USD: raise the Cap or trim the runs']
 const args = { rolloutSlug: 'ro', repoPath: '/repo', verifier: 'make test', date: '2026-10-14',
+  verifySlot: VERIFY_SLOT, // required (estate ADR 0009 d4)
   gatePricer: '/x/skills/_shared/scripts/gated_inputs.py',
   task: { slug, taskPath: `/vault/${slug}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 2, rung: 'opus-high' } }
 const out = await runTask(args, async (prompt, opts) => {
