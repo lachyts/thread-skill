@@ -18,8 +18,7 @@ required while the Project root exists, before any write.)*
 day, the Trickle: while Lachy is not Away, `next` starts nothing past a machine-wide count of running Rollout tasks
 (Chorus ADR 0104; skills/execute/away.md).)*
 *(Amended by ADR 0045, 2026-10-21: decision 3's re-verify is skipped when `main` moved only in a repo's proven Inert paths.)*
-*(Amended by ADR 0046, 2026-10-21: the lead writes an Automatic ack for a bookkeeping trip when the checkout reads
-unharmed, a Git-env hold stops only Integration and merging unless the checkout is bare, and a RACE red twice is
+*(Amended by ADR 0046, 2026-10-21: a Bookkeeping miss never trips unless its state check fails, a Git-env hold stops only Integration and merging unless the checkout is bare, and a RACE red twice is
 reverted on `main` and its task set aside.)*
 *(Amended by ADR 0048, 2026-10-21: no single cause holds the whole queue; a Watchdog outside the session catches a
 Stalled rollout.)*

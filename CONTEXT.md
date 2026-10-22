@@ -517,8 +517,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   conflict, merge failure; a conflict Integration resolved is only a
   re-review trigger.
 - **Flake** — a named test that failed any verifier run in a rollout, sits
-  outside the task's diff, and passed when the full suite ran once more on
-  the same tree: the verify counts green, and the Flake is logged and filed for its repo, never fixed
+  outside the task's diff, and passed when re-run by name and then when the
+  full suite ran once more on the same tree: the verify counts green, and the Flake is logged and filed for its repo, never fixed
   inside the task (ADR 0050). _Avoid_: flaky failure, known failure,
   quarantined test.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier suite
@@ -603,8 +603,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   revise never launches unarmed. _Avoid_: watch, session.
 - **Git-env hold** — the unacked trip lines on a rollout note's
   `## Git-env log`: while one stands, nothing integrates or merges and `carry`
-  refuses the rollout. A bookkeeping trip or a moved default branch holds
-  only that: task calls keep running and starting, since their worktrees are
+  refuses the rollout. A moved default branch, or a **Bookkeeping miss**
+  whose state check failed, holds only that: task calls keep running and starting, since their worktrees are
   cut from `origin/<default>` after a fetch, and their **Window**s are still
   armed and checked. A bare checkout (`core.bare` flipped, or `core.bare true
   at arm`) holds the whole rollout, since every linked worktree shares the
@@ -613,14 +613,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: git-env halt (the lead's stop, not the hold).
 - **Git-env ack** — the recorded acceptance of the tripped windows, naming
   exactly the set shown and the ref shown (`--ref`). Lachy's, through
-  `/thread:repair` (its git-env step, 3e), after an optional `restore`; or an
-  **Automatic ack**. _Avoid_: clear, reset.
-- **Automatic ack** — a Git-env ack the lead writes itself for a
-  bookkeeping trip (`record missing`, `record unreadable`, `record not
-  armed`: the trip observed nothing) when the checkout reads unharmed at the
-  ack: its `<default>` an ancestor of origin's tip, no tracked changes, not
-  bare. Logged with that evidence. A trip that observed a change is never
-  acked automatically (ADR 0046). _Avoid_: auto-clear, self-heal.
+  `/thread:repair` (its git-env step, 3e), after an optional `restore`; never
+  an agent's (ADR 0046). _Avoid_: clear, reset.
+- **Bookkeeping miss** — a window the canary could not read (`record
+  missing`, `record unreadable`, `record not armed`): it observed nothing, so
+  it never trips. The check reads the checkout's state there and then (its
+  `<default>` an ancestor of origin's tip, no tracked changes, not bare) and
+  logs the miss with it; only a failing state check trips (ADR 0046).
+  _Avoid_: false trip, automatic ack.
 - **Dependent closure** — the set of tasks transitively depending on a task
   via `depends-on:` / `blocked-by:` (schedule § 3) — the blast radius that
   must move together if it's deferred, and the tasks a set-aside task holds
@@ -867,9 +867,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Time-lost ledger** — the hours each cause class cost (stalls by cause,
   usage limits, machine load, the Integration lane, Integration rework, plan
   blocks), summed across every rollout a weekly reading reads and trended
-  week on week; a class that tops it twice running raises one design
-  question for a grill, held like a Watch (ADR 0051). Ranks causes, never rollouts. _Avoid_: time
-  budget, cost report.
+  week on week; a class that tops it twice running opens a **Watch** on
+  that class (ADR 0051). Ranks causes, never rollouts. _Avoid_: time budget,
+  cost report.
 - **Monthly audit** — the pass once a month that reads past the Run record
   (transcripts, suite logs, pause logs, the Mac's history), writes into the
   Time-lost ledger and names what the record should have carried: an extra
@@ -895,8 +895,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   schedule never stamps, and `verify_slots`, which is machine-wide
   (`[defaults]` only), never stamped, and read by execute's `verify-timeout`
   at each loop entry. That read validates the whole file, so a refused file
-  halts every rollout on the machine at its next entry; write a key (or the
-  `[notify]` table) only once the installed plugin knows it. The
+  halts every rollout on the machine at its next entry; the file carries its
+  schema version, and a snapshot ignores a key newer than itself while still
+  refusing a typo (ADR 0043). The
   machine-wide `[notify]` table holds `ntfy_topic`, read by two scripts and
   never stamped: execute's needs-you fallback publishes to it (ADR 0038),
   and tune.py refuses a Tuning whose edit would change it.
