@@ -9,9 +9,9 @@ Every rollout lead, in any repo, runs its scripts, its Workflow engine (`skills/
 
 ## Decision
 
-**A rollout runs on an Engine snapshot: a frozen copy of the Primary checkout at one commit, made when the rollout launches and named on its rollout note.** The lead takes its scripts, its Workflow `scriptPath` and the execute, status and repair prose from the snapshot for the whole run, never from the Primary checkout.
+**A rollout runs on an Engine snapshot: a frozen copy of the plugin at origin's tip of its default branch, fetched fresh when the rollout launches and named on its rollout note.** Never the Primary checkout's working state: a branch, an unpushed commit or a stale checkout there reaches no rollout. The lead takes its scripts, its Workflow `scriptPath` and the execute, status and repair prose from the snapshot for the whole run, never from the Primary checkout.
 
-- **A rollout moves only at its Reinstate.** A pause followed by `/thread:execute` re-snapshots onto the Primary checkout as it then stands. Nothing moves a rollout's snapshot mid-run, by schedule or by the lead's own judgement.
+- **A rollout moves only at its Reinstate.** A pause followed by `/thread:execute` re-snapshots onto origin's tip as it then stands. Nothing moves a rollout's snapshot mid-run, by schedule or by the lead's own judgement.
 - **The Primary checkout is free to move.** A pull, a landing's fast-forward or a plugin update reaches every new rollout and every Reinstate, and none of a running rollout's scripts, engine or prose. ADR 0031's `primary-hold.sh` holds only for a running rollout whose note names no snapshot (one launched before P29). The plugin's hooks are the exception (Consequences).
 - **A rollout is touched only by its own engine.** Any verb acting on one rollout (execute, status, repair) takes its scripts and prose from that rollout's snapshot, whichever session runs it, so between Reinstates a rollout's canary records, Run record and note lines are written by one version only. A Reinstate crosses versions, so those formats follow the migration rule below.
 - **Snapshots are retired with their rollouts.** A snapshot is removed once every rollout note naming it is archived; one a live note names is never removed, a hard-paused one or one past its last merge included.

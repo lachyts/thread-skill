@@ -540,8 +540,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (ADR 0043); ADR 0031's hold covers only a running rollout that has no
   snapshot. Not the engine's "main checkout",
   which is a rollout's own repo. _Avoid_: live checkout, installed copy.
-- **Engine snapshot** — a frozen copy of the **Primary checkout** at one
-  commit, made when a rollout launches and named on its rollout note: the
+- **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
+  default branch, fetched fresh when a rollout launches (never the **Primary
+  checkout**'s working state) and named on its rollout note: the
   lead's scripts, Workflow engine and skill prose all come from it for the
   whole run, as do status's and repair's for that rollout, whichever session
   runs them, so the Primary checkout can move under a **Running rollout**. A
