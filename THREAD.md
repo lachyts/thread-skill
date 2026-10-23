@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-20
+last_touched: 2026-10-21
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,8 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-21: ADRs 0043–0047 (PR #202, P29's design) are held for a re-grill.** Round 1 of clean-room review found 15 wrong claims, fixed in `0fc0723`. Round 2's ledger STOPped (8 of 15 findings were about mechanism the fix round added). The rest are design gaps: the merge train vs strict up-to-date branches, the healed-trip auto-ack, git config the task worktrees share, and Pre-flight vs supersede, orient-all and plan_approval. Re-grill handed to a fresh session.
 
 **2026-10-20: P24 and P25 have landed, and P26 is one task short. `[[thread-skill-rollout-2026-10-19]]` (archived, § Completion log): 10/10 merged (#183–#192) in 20h 46m from the clone. Phases 24 and 25 closed; P26 stays open on [[thread-skill-p26-3-mark-started-arms-the-task-window]].**
 - **Landed:**
@@ -1035,6 +1037,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-10-21:** PR #202 (ADRs 0043–0047) is held, not merged. Its re-grill runs in the Stage session "Re-grill ADRs 0043–0047 (PR #202)", whose brief (`docs/handoffs/2026-10-21-regrill-adrs-0043-0047.md`, now consumed) lists round 2's six design gaps (`docs/reviews/2026-10-21-0fc0723-6a9ac7.md` on the PR branch). The plan: rule the gaps with Lachy, trim the ADRs back to decisions, run a fresh-review round on the trimmed text, and queue the merge once it's clean. `[[thread-skill-rollout-2026-10-21]]` (P29) must not start until #202 merges.
+
 **Now (from 2026-10-20):** no rollout is running on this repo. P24 and P25 are closed; P26 waits on p26-3.
 1. [[thread-skill-p26-3-mark-started-arms-the-task-window]] (filed by p26-1): finish P26, or carry it into the release.
 2. [[thread-skill-release-after-p24-p25]]: one release with one paid eval run, then `claude plugin update thread@thread` once no rollout runs on the primary checkout (ADR 0031). Until it is installed, the lead runs the 4.0.0 engine, so none of P22–P26 is live.
@@ -1043,6 +1047,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
+- 2026-10-21: `/fresh-review` of PR #202 (ADRs 0043–0047). Round 1 had 15 findings, fixed in `0fc0723`. Round 2's 15 hit the ledger's STOP (8 were regressions). Lachy held #202 for a re-grill, which was handed to a fresh session (landing PR #204).
 - 2026-10-20: executed `[[thread-skill-rollout-2026-10-19]]` from the clone: 10/10 merged (#183–#192) in 20h 46m through one room stop. Phases 24 and 25 closed, P26 left on p26-3; the integrate-args plan-size limit was filed after Lachy ruled `plan: ""` for three integrations.
 - 2026-10-19: executed `[[thread-skill-rollout-2026-10-18]]` from the clone: 7/7 merged (#171–#177) in 25h 9m through three room stops and three usage-limit cuts; phases 19 and 23 closed; 4.1.0 release decision filed as [[thread-skill-release-4-1-0]].
 - 2026-10-18: signed p19-10 (US$20) so it landed; grilled the overnight spend-gate stall into ADR 0038 (#168); superseded and archived the 10-17 rollout; scheduled P23 + carried p19-5 as `[[thread-skill-rollout-2026-10-18]]` and handed execute to a clone session (#169); archived the 5c5a and redesign evidence.
