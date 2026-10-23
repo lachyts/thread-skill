@@ -23,6 +23,7 @@ plan_approval: scope-gated  # off | scope-gated | required
 parallel_ceiling: {{PARALLEL_CEILING}}
 # env_bootstrap:   # optional: shell cmd thread:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — thread:schedule step 2.7
 # completion_verifier:   # optional (estate ADR 0009 d6): the full suite of a project whose verifier: is its declared fast tier, run once on merged main at the completion ceremony. Uncomment with the project CLAUDE.md's `Completion verifier:` command — thread:schedule step 2.5
+# completion_timeout:   # optional (ADR 0052): seconds, 1 to 6600, for the completion verifier's run; absent: 3600. Never verify_timeout, which bounds the fast tier
 # No rollout cursor: progress lives on the task notes' started:/merged: stamps (ADR 0030; reconcile-rollout.py).
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when § 0 printed `supersede` (see SKILL.md steps 6 and 7.5)
 ---

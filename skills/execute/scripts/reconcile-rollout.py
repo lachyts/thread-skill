@@ -395,43 +395,53 @@ Subcommands:
               a present one on a python with no tomllib, or a resolver that will not load: `ERROR: rollout
               settings refused: <the resolver's line>`, exit 3, no stdout.
 
-  completion-verify  The completion verify (estate ADR 0009 d6, Chorus ADR 0107 d1; execute § 4.5 step 5): a
-              rollout whose note declares `completion_verifier: <cmd>` runs it once on merged origin/<default>,
-              through `lead-integrate.py verify --outcome`, before the note reads done; a note with none keeps the
-              ceremony as it was. The value: a quoted one is the text inside its quotes, then nothing but an
-              optional ` # comment`; a bare one drops an inline ` # comment` (so a command holding ` #` is quoted);
-              empty, a comment alone, `null` or `~` is none. A form the reader cannot represent exactly (a value
-              continued on an indented next line, an escape inside double quotes, text after the closing quote, a
-              bare value starting with a YAML indicator) is exit 2, never truncated into another command. Read
-              mode, read-only: one JSON line. With none, {"verifier": null, "state": "absent"}, and the ceremony
-              runs nothing. Otherwise {verifier, state, attempt, sha, repo, tree, out, streak, followup, summary}:
-              state `run` (no verdict yet: attempt 1, on a fresh origin/<default>, sha null), `rerun` (attempt 1
-              was red: attempt 2 on its sha), `in-flight` (that attempt's verify holds `<out>.lock`, probed
-              shared), `record` (no lock, and the attempt's `<out>.outcome.json` is there: a run ended and nobody
-              recorded it), or the decided `green`, `flake` or `red`. repo is the note's `Project root:` (none:
-              exit 1); tree and out the attempt's own `<repo>/.claude/worktrees/completion-<rollout>-<n>` and
-              `<repo>/.claude/integration/completion-<rollout>-<n>`; streak the `noslot` and `unrun` lines at the
-              log's tail (a `stopped` one skipped); followup the fix task's stem once red; summary the Completion
-              log's one line once decided. --record classifies the attempt's run from verify's outcome file alone,
-              never its log's text: `ended: running` with the lock free (verify died), `bootstrap`, or a deadline
-              in the env_bootstrap is `unrun`; `noslot` is `noslot`; `signal` (verify's own stop: a hard pause, a
-              room stop) is `stopped`; a deadline in the verifier is red at once, since a timeout names no failing
-              test and is never a Flake (ADR 0050); `done` with rc 0 is green on attempt 1 and a Flake on attempt
-              2 (recorded, no task); any other `done` is `rerun` on attempt 1 and red on attempt 2. A no-verdict
-              result moves no attempt. In this order it files the fix task on a final red
-              (`<tasks-dir>/completion-red-<rollout>.md`, open, priority high, `projects:` copied,
-              `completion_red_of:` naming the rollout; the sha, the rc and why, the log and the failing ids read
-              from it; never a second one when it exists in the tasks dir or its Archive), appends one
-              `## Completion verify log` line, `- <stamp> attempt <n> at <sha> rc <rc|absent> -> <result>: <why>
-              (run <id>; log <out>.<id>.log)`, then moves the log there and removes the rc and outcome, so a
-              failure anywhere leaves the run recordable; a run whose id a line already carries only finishes the
-              move. It records `completion-verify` {result, rc, sha, attempt, log, followup?} and prints {result,
-              decided, attempt, streak, halt, line, followup, written}: halt is true from the third `noslot` or
-              `unrun` in a row (COMPLETION_HALT_STREAK), as the RACE re-verify halts. A decided verify prints its
-              decided line, `written: false`. Exit 1: a file it could not write or move (the run stays
-              recordable). Exit 2: no `completion_verifier:`, an unreadable one, an outcome file that is not
-              verify's, a run with no sha, or an attempt 2 off the red tree. Exit 3, nothing written: nothing to
-              record (the verify still runs, or the attempt has no outcome file).
+  completion-verify  The completion verify (estate ADR 0009 d6, Chorus ADR 0107 d1, ADR 0052; execute § 4.5 step
+              5): a rollout whose note declares `completion_verifier: <cmd>` runs it once on merged
+              origin/<default> before the note reads done; a note with none keeps the ceremony as it was. The
+              value (and `env_bootstrap:`, read the same way): a quoted one is the text inside its quotes, then
+              nothing but an optional ` # comment`; a bare one drops an inline ` # comment` (so a command holding
+              ` #` is quoted); empty, a comment alone, `null` or `~` is none. A form the reader cannot represent
+              exactly (a value continued on an indented next line, an escape inside double quotes, text after the
+              closing quote, a bare value starting with a YAML indicator or `- `, holding `: ` or ending in `:`) is
+              exit 2, never truncated into another command; so is a `completion_timeout:` that is not an integer
+              from 1 to 6600 (absent: 3600, the full suite's own deadline, never verify_timeout's). Read mode,
+              read-only: one JSON line. With none, {"verifier": null, "state": "absent"}. Otherwise {verifier,
+              state, attempt, sha, repo, tree, out, streak, followup, summary}: state `run` (no verdict yet:
+              attempt 1, on a fresh origin/<default>, sha null), `rerun` (attempt 1 was red: attempt 2 on its sha),
+              `in-flight` (a --run holds the attempt's `<out>.lock`, probed shared), or the decided `green`,
+              `flake` or `red`. repo is the note's `Project root:` (none: exit 1); tree and out the attempt's own
+              `<repo>/.claude/worktrees/completion-<rollout>-<n>` and `<repo>/.claude/integration/completion-
+              <rollout>-<n>`; streak the `noslot` and `unrun` lines at the log's tail (a `stopped` one skipped);
+              followup the fix task's stem once red; summary the Completion log's one line once decided.
+              --run owns one attempt end to end under `<out>.lock`, held for its whole life (the lead launches it
+              in the background and reads again when it ends). Decided already, it runs nothing. Otherwise, under
+              the lock it reads the note again, clears a dead run's tree, resolves origin's default branch
+              (default-branch.sh) and the sha (attempt 1: fetch, then origin/<default>; attempt 2: the red run's),
+              arms the git-env canary (`--kind completion-verify --slug <rollout>`), runs `lead-integrate.py verify
+              --outcome --detach-at <sha>` in its own process (the machine's verify slots, `--timeout
+              <completion_timeout>`, the slot wait max(60, 7200 - 600 - completion_timeout), the env_bootstrap),
+              checks the window once, and classifies the run from verify's outcome file alone, never its log's
+              text: no outcome, `running`, `bootstrap`, or a deadline in the env_bootstrap is `unrun`; `noslot` is
+              `noslot`; `signal` (a hard pause, a room stop, a TaskStop) is `stopped`; a deadline in the verifier
+              is red at once, since a timeout names no failing test and is never a Flake (ADR 0050); `done` with rc
+              0 is green on attempt 1 and a Flake on attempt 2 (recorded, no task); any other `done` is `rerun` on
+              attempt 1 and red on attempt 2. A git-env trip inside the window (its own check's, or one a loop-entry
+              check-all caught and an ack re-armed meanwhile: one more `[[<rollout>]] completion-verify` trip line
+              than at the arm) makes it `unrun` whatever the rc. It keeps the log as `<out>.<run id>.log`, files
+              the fix task on a final red (`<tasks-dir>/completion-red-<rollout>.md`, open, priority high,
+              `projects:` copied, `completion_red_of:` naming the rollout; the sha, the rc and why, the log and the
+              failing ids read from it; never a second one when it exists in the tasks dir or its Archive), then
+              appends one `## Completion verify log` line, the commit point, `- <stamp> attempt <n> at <sha> rc
+              <rc|absent> -> <result>: <why> (run <id>; log <kept log>)`, records `completion-verify` {result, rc,
+              sha, attempt, log, followup?} in the Run record and prints {ran: true, result, decided, attempt,
+              streak, halt, line, followup}: halt is true at the third `noslot` or `unrun` in a row since the last
+              halt (COMPLETION_HALT_STREAK). A --run that dies before its line leaves a free lock and no line: the
+              same attempt runs again, never counted. When it runs nothing it prints {ran: false, state, result,
+              decided, attempt, streak, halt: false}. Exit 0: recorded, or nothing to run. Exit 1: nothing
+              recorded (origin unread, refused rollout settings, a file it could not write). Exit 2: refused (no
+              `completion_verifier:`, an unreadable value, no fcntl). Exit 3: another --run holds the attempt.
+              Exit 4: the canary's arm (nothing run) or check (recorded `unrun`) exited non-zero, its stderr passed
+              through and its exit in the line's canary_exit.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`, and `paused_for`) from the rollout note. Run by /thread:execute's resume path
@@ -589,8 +599,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     (a hard pause whose record-pause never ran), then resumed. Removing only
                     pause_requested records nothing; a refusal (STILL-AWAITING) records nothing.
   await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
-  completion-verify (--record, not --dry-run) completion-verify {result, rc, sha, attempt, log, followup?}:
-                    one per recorded run, a no-verdict one included (task null); never for a run already recorded.
+  completion-verify (--run) completion-verify {result, rc, sha, attempt, log, followup?}: one per recorded run, a
+                    no-verdict one included (task null), after its log line.
   bind-run, free-lane, hold, record-pause   above.
   git-env-canary.py hold-started / hold-ended hold=git-env (task null) on the hold's empty <-> non-empty edge.
 set-aside stage, first match (auto-retry's stage too, when the record holds no set-aside line for the task: the lead
@@ -805,7 +815,7 @@ already written is ever deleted.
 """
 
 import argparse
-import fcntl
+import contextlib
 import fnmatch
 import hashlib
 import importlib.util
@@ -813,11 +823,18 @@ import json
 import math
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
+import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:   # Windows: completion-verify --run refuses there; every other verb runs (run_record.py's guard)
+    fcntl = None
 
 DEFAULT_TASKS_DIR = Path(os.path.expanduser("~/repos/obsidian/Work/Tasks"))
 
@@ -6341,11 +6358,14 @@ def cmd_verify_timeout(args) -> int:
     return 0
 
 
-# ---- completion-verify (estate ADR 0009 d6, Chorus ADR 0107 d1) ----------------
+# ---- completion-verify (estate ADR 0009 d6, Chorus ADR 0107 d1, ADR 0052) -------
 
 COMPLETION_VERIFIER_KEY = "completion_verifier"
+COMPLETION_TIMEOUT_KEY = "completion_timeout"
+DEFAULT_COMPLETION_TIMEOUT = 3600   # the full suite's own deadline, never verify_timeout (a fast tier's), ADR 0052
 COMPLETION_VERIFY_SECTION = "## Completion verify log"
 COMPLETION_RED_PREFIX = "completion-red-"   # never prefix-matches `<slug>-rollout-<date>*`, as phase-close-followup-
+COMPLETION_KIND = "completion-verify"       # the canary window's kind; its slug is the rollout's own stem
 # Every result a run is recorded as. `noslot`, `unrun` and `stopped` are no verdict and move no attempt; `stopped`
 # (verify's own signal: a hard pause, a room stop) is deliberate, so it never counts toward the halt streak either.
 COMPLETION_RESULTS = ("green", "rerun", "flake", "red", "noslot", "unrun", "stopped")
@@ -6353,11 +6373,14 @@ COMPLETION_DECIDED = ("green", "flake", "red")
 COMPLETION_NO_VERDICT = ("noslot", "unrun", "stopped")
 COMPLETION_STREAK = ("noslot", "unrun")
 COMPLETION_HALT_STREAK = 3   # no-verdict runs in a row before the lead halts, as the RACE re-verify does
-COMPLETION_LINE_RE = re.compile(r"^- (?P<at>\S+) attempt (?P<n>[12]) at (?P<sha>[0-9a-f]{7,40}|-) rc (?P<rc>\S+) -> "
+COMPLETION_LINE_RE = re.compile(r"^- (?P<at>\S+) attempt (?P<n>[12]) at (?P<sha>[0-9a-f]{40}|-) "
+                                r"rc (?P<rc>\S+) -> "
                                 rf"(?P<result>{'|'.join(COMPLETION_RESULTS)})\b.*?(?:\(run (?P<run>[\w.-]+);.*)?$")
-# lead-integrate.py verify --outcome's files beside <out>: its run lock and its structured result.
+# The attempt's files beside <out>: --run's lock (held for the attempt's whole life) and verify --outcome's result.
 VERIFY_LOCK_SUFFIX = ".lock"
 VERIFY_OUTCOME_SUFFIX = ".outcome.json"
+GIT_ENV_CANARY_PY = Path(__file__).resolve().parent / "git-env-canary.py"
+DEFAULT_BRANCH_SH = Path(__file__).resolve().parent / "default-branch.sh"
 # Best-effort failing-test ids for the fix task, one pattern per common runner; the log path always goes with them.
 FAILING_ID_RES = (
     re.compile(r"^(?:FAILED|ERROR) (\S+)"),                    # pytest -rfE summary
@@ -6374,21 +6397,22 @@ class CompletionValueError(ValueError):
     pass
 
 
-def _completion_verifier(note):
-    """The rollout note's `completion_verifier:` command ('' when absent, empty, a comment alone, `null` or `~`). A
-    quoted value is the text inside its quotes, then nothing but an optional ` # comment`; a bare one drops an inline
-    ` # comment`, as every frontmatter scalar does, so a command holding ` #` is quoted. A form this reader cannot
-    represent exactly raises CompletionValueError, refused, never truncated into another command: a value continued
-    on an indented next line (a block scalar, a folded plain scalar, a command under an empty key), an escape inside
-    double quotes, text after the closing quote, or a bare value starting with a YAML indicator."""
+def _command_value(note, key):
+    """A frontmatter command (`completion_verifier:`, `env_bootstrap:`): '' when absent, empty, a comment alone,
+    `null` or `~`. A quoted value is the text inside its quotes, then nothing but an optional ` # comment`; a bare one
+    drops an inline ` # comment`, as every frontmatter scalar does, so a command holding ` #` is quoted. A form this
+    reader cannot represent exactly raises CompletionValueError, refused, never truncated into another command: a
+    value continued on an indented next line (a block scalar, a folded plain scalar, a command under an empty key),
+    an escape inside double quotes, text after the closing quote, a bare value starting with a YAML indicator or
+    `- `, or a bare value holding `: ` or ending in `:`."""
     raw = None
     for i, line in enumerate(note._fm):
-        m = re.match(rf"^{re.escape(COMPLETION_VERIFIER_KEY)}:(.*)$", line)
+        m = re.match(rf"^{re.escape(key)}:(.*)$", line)
         if m:
             raw = m.group(1).strip()
             if i + 1 < len(note._fm) and re.match(r"^[ \t]+\S", note._fm[i + 1]):
-                raise CompletionValueError(f"{COMPLETION_VERIFIER_KEY}: continues on the next line; write the command "
-                                           "on one line, quoted")
+                raise CompletionValueError(f"{key}: continues on the next line; write the command on one line, "
+                                           "quoted")
             break
     raw = raw or ""
     if raw[:1] in ("'", '"'):
@@ -6397,16 +6421,35 @@ def _completion_verifier(note):
         inner, rest = raw[1:end], raw[end + 1:]
         # A doubled '' or text after the quote fails the rest; a \ inside "" is an escape.
         if end < 0 or (q == '"' and "\\" in inner) or not re.fullmatch(r"(\s+#.*)?", rest):
-            raise CompletionValueError(f"{COMPLETION_VERIFIER_KEY}: {raw!r} is not one plainly quoted command")
+            raise CompletionValueError(f"{key}: {raw!r} is not one plainly quoted command")
         cmd = inner.strip()
     else:
         cmd = re.sub(r"(^|\s+)#.*$", "", raw).strip()
-        if cmd and cmd[0] in "|>[]{}&*!%@`,?":
-            raise CompletionValueError(f"{COMPLETION_VERIFIER_KEY}: {raw!r} is a YAML form, not a command: write the "
-                                       "command on one line, quoted")
+        if cmd and (cmd[0] in "|>[]{}&*!%@`,?" or re.match(r"-(\s|$)", cmd) or ": " in cmd or cmd.endswith(":")):
+            raise CompletionValueError(f"{key}: {raw!r} is a YAML form, not a command: write the command on one "
+                                       "line, quoted")
         if cmd.lower() in ("null", "~"):
             cmd = ""
     return cmd
+
+
+def _completion_verifier(note):
+    """The rollout note's `completion_verifier:` command, read by _command_value."""
+    return _command_value(note, COMPLETION_VERIFIER_KEY)
+
+
+def _completion_timeout(note):
+    """`completion_timeout`, an integer from 1 to MAX_VERIFY_TIMEOUT; absent -> DEFAULT_COMPLETION_TIMEOUT; anything
+    else -> CompletionValueError. Read like `verify_timeout` (_scalar), its own key, so a fast tier's verify_timeout
+    never bounds the full suite (ADR 0052)."""
+    raw = note.get(COMPLETION_TIMEOUT_KEY)
+    if raw is None:
+        return DEFAULT_COMPLETION_TIMEOUT
+    s = _scalar(raw)
+    if re.fullmatch(r"[0-9]+", s) and 1 <= int(s) <= MAX_VERIFY_TIMEOUT:
+        return int(s)
+    raise CompletionValueError(f"{COMPLETION_TIMEOUT_KEY} must be an integer from 1 to {MAX_VERIFY_TIMEOUT}, "
+                               f"got {raw!r}")
 
 
 def _completion_lines(note):
@@ -6440,11 +6483,18 @@ def _completion_state(lines):
     return last["result"], last["n"], last, streak
 
 
-def _failing_ids(log_text):
-    """Up to FAILING_IDS_MAX distinct failing-test ids read from the verify log's text, in order; [] when none
-    parse."""
+def _completion_halts(result, streak):
+    """True when this no-verdict run is the COMPLETION_HALT_STREAK-th in a row since the last halt: the streak
+    restarts at each halt, so one transient no-verdict run after a resume never halts again at once."""
+    return result in COMPLETION_STREAK and streak > 0 and streak % COMPLETION_HALT_STREAK == 0
+
+
+def _failing_ids(lines):
+    """Up to FAILING_IDS_MAX distinct failing-test ids read from the verify log's lines (an open file streams), in
+    order; [] when none parse."""
     ids = []
-    for line in log_text.splitlines():
+    for line in lines:
+        line = line.rstrip("\n")
         for rx in FAILING_ID_RES:
             m = rx.match(line)
             if m and m.group(1) not in ids:
@@ -6461,12 +6511,12 @@ def _completion_paths(root, ro, attempt):
             str(root / ".claude" / "integration" / f"completion-{ro}-{attempt}"))
 
 
-def _verify_running(out) -> bool:
-    """True while a `lead-integrate.py verify --outcome --out <out>` holds `<out>.lock` (for its whole life; the kernel
-    drops it on any death). Probed shared, so two readers never see each other as a verify; released by the close,
-    never LOCK_UN. A lock that cannot be opened reads as not running."""
+def _attempt_running(out) -> bool:
+    """True while a `completion-verify --run` holds `<out>.lock` (for the attempt's whole life; the kernel drops it on
+    any death). Probed shared, so two readers never see each other as a run; released by the close, never LOCK_UN. A
+    lock that cannot be opened, or no fcntl (Windows, where --run refuses), reads as not running."""
     lock = Path(f"{out}{VERIFY_LOCK_SUFFIX}")
-    if not lock.exists():
+    if fcntl is None or not lock.exists():
         return False
     try:
         with open(lock, "a") as fh:
@@ -6502,7 +6552,8 @@ def _find_note(tasks_dir: Path, stem: str):
 
 
 def _write_completion_red(path: Path, note, ro, verifier, sha, rc, why, log, ids, now):
-    """File the one fix task a red completion verify owes its project, in _new_task_fm's shape."""
+    """File the one fix task a red completion verify owes its project, in _new_task_fm's shape. Exclusive: an
+    existing file is never overwritten."""
     lines = [*_new_task_fm(note, now, "high", [f'completion_red_of: "[[{ro}]]"']), "",
              f"# Fix the red completion verifier after [[{ro}]]", "", "## Notes", "",
              f"The completion verifier `{verifier}` was red on merged main at `{sha}` when [[{ro}]] completed: "
@@ -6511,14 +6562,18 @@ def _write_completion_red(path: Path, note, ro, verifier, sha, rc, why, log, ids
              f"- Log: `{log}`",
              "- Failing ids: " + (", ".join(f"`{i}`" for i in ids) if ids else "none read from the log; read it"), "",
              f"**Verify:** `{verifier}` exits 0 on merged main."]
-    path.write_text("\n".join(lines) + "\n")
+    with open(path, "x") as fh:
+        fh.write("\n".join(lines) + "\n")
 
 
 def _classify_completion(outcome, attempt):
-    """(result, why) for one finished run, from verify's structured outcome alone (never its log's text)."""
+    """(result, why) for one finished run, from verify's structured outcome alone (never its log's text); None (no
+    readable outcome file) is a verify that never got going."""
+    if outcome is None:
+        return "unrun", "verify left no outcome (it refused or died before its run), no verdict: the attempt re-runs"
     ended, rc, step = outcome.get("ended"), outcome.get("rc"), outcome.get("step")
     if ended == "running":
-        return "unrun", "verify died before it finished (no outcome), no verdict: the attempt re-runs"
+        return "unrun", "verify never finished (no final outcome), no verdict: the attempt re-runs"
     if ended == "noslot":
         return "noslot", "no verify slot in time, no verdict: it retries at the next tick"
     if ended == "signal":
@@ -6526,8 +6581,8 @@ def _classify_completion(outcome, attempt):
     if ended == "bootstrap" or (ended == "deadline" and step != "verifier"):
         return "unrun", f"the {step or 'env_bootstrap'} never let the suite run ({ended}), no verdict: the attempt re-runs"
     if ended == "deadline":
-        return "red", ("verify's own `verify_timeout` deadline, red at once: a timeout names no failing test, so it "
-                       "is never a Flake; the suite is over its budget or hung")
+        return "red", ("the completion verify's own `completion_timeout` deadline, red at once: a timeout names no "
+                       "failing test, so it is never a Flake; the suite is over its budget or hung")
     if rc == 0:
         return (("green", "the completion verifier passed") if attempt == 1 else
                 ("flake", "attempt 1's red cleared on the same tree: a Flake, no task"))
@@ -6537,23 +6592,172 @@ def _classify_completion(outcome, attempt):
 
 
 def _read_outcome(path: Path):
-    """verify's outcome file as a dict with a string id and a known `ended`, else CompletionValueError."""
+    """verify's outcome file as a dict with a string id and a known `ended`, else None."""
     try:
         d = json.loads(path.read_text())
-    except (OSError, ValueError) as e:
-        raise CompletionValueError(f"{path} is unreadable: {e}")
+    except (OSError, ValueError):
+        return None
     if not (isinstance(d, dict) and isinstance(d.get("id"), str) and re.fullmatch(r"[\w.-]+", d["id"])
             and d.get("ended") in ("running", "done", "deadline", "bootstrap", "signal", "noslot")):
-        raise CompletionValueError(f"{path} is not a verify --outcome file")
+        return None
     return d
 
 
+def _git_env_trips(note, slug, kind):
+    """How many trip lines the note's git-env log holds for one window: an ack re-arms a window with a new baseline,
+    so a trip inside a run is seen only as one more line than at its arm."""
+    want = f"{GIT_ENV_TRIP_MARK} [[{slug}]] {kind}:"
+    return sum(1 for line in note.section_text(GIT_ENV_LOG_SECTION).split("\n") if want in line)
+
+
+def _canary(verb, path, tasks_dir, root, default, ro):
+    """git-env-canary.py <verb> for the completion verify's window; its output goes to stderr (--run's stdout is its
+    one JSON line). Returns its exit code."""
+    p = subprocess.run([sys.executable, str(GIT_ENV_CANARY_PY), verb, "--rollout", str(path), "--tasks-dir",
+                        str(tasks_dir), "--repo", str(root), "--default", default, "--slug", ro, "--kind",
+                        COMPLETION_KIND], capture_output=True, text=True)
+    sys.stderr.write(p.stdout + p.stderr)
+    return p.returncode
+
+
+def _completion_json(**kw):
+    print(json.dumps(kw))
+
+
+def _completion_not_ran(state, attempt, streak, **extra):
+    """--run's line when it ran nothing: decided already, another --run holds the attempt, or a refusal."""
+    _completion_json(ran=False, state=state, result=state if state in COMPLETION_DECIDED else None,
+                     decided=state in COMPLETION_DECIDED, attempt=attempt, streak=streak, halt=False, **extra)
+
+
+def _completion_run(args, path, ro, root, tasks_dir) -> int:
+    """--run (ADR 0052): one attempt end to end, under the attempt's `<out>.lock`, held for this process's life."""
+    if fcntl is None:
+        print("ERROR: completion-verify: --run needs fcntl (POSIX); nothing run", file=sys.stderr)
+        return 2
+    note = Note(path)
+    state, attempt, last, streak = _completion_state(_completion_lines(note))
+    if state in COMPLETION_DECIDED:
+        _completion_not_ran(state, attempt, streak)
+        return 0
+    tree, out = _completion_paths(root, ro, attempt)
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    lock = open(f"{out}{VERIFY_LOCK_SUFFIX}", "a")   # never closed by hand: the process's end releases it
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, PermissionError):
+        print(f"ERROR: completion-verify: attempt {attempt} is in flight (another --run holds {lock.name}); "
+              "nothing run", file=sys.stderr)
+        _completion_not_ran("in-flight", attempt, streak)
+        return 3
+    # Read again under the lock: another --run may have recorded this attempt just before it let go.
+    note = Note(path)
+    state2, attempt2, last, streak = _completion_state(_completion_lines(note))
+    if (state2, attempt2) != (state, attempt):
+        _completion_not_ran(state2, attempt2, streak)
+        return 0
+    try:
+        verifier = _completion_verifier(note)
+        bootstrap = _command_value(note, "env_bootstrap")
+        timeout = _completion_timeout(note)
+    except CompletionValueError as e:
+        print(f"ERROR: completion-verify: {e}; nothing run", file=sys.stderr)
+        return 2
+    settings, err = _machine_settings()
+    try:
+        slots = settings["verify_slots"]["value"] if err is None else None
+    except Exception as e:
+        err = f"no verify_slots ({e})"
+    if err:
+        print(f"ERROR: completion-verify: rollout settings refused: {err}; nothing run", file=sys.stderr)
+        return 1
+    li = _lead()
+    p = subprocess.run(["bash", str(DEFAULT_BRANCH_SH), str(root)], capture_output=True, text=True)
+    default = p.stdout.strip()
+    if p.returncode != 0 or not default:
+        print(f"ERROR: completion-verify: origin unread: {p.stderr.strip()}; nothing run", file=sys.stderr)
+        return 1
+    if attempt == 1:
+        f = li.git(root, "fetch", "--quiet", "origin", default)
+        r = li.git(root, "rev-parse", "--verify", f"refs/remotes/origin/{default}^{{commit}}") if f.returncode == 0 else f
+        sha = r.stdout.strip()
+        if r.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            print(f"ERROR: completion-verify: origin unread: {li.why(r)}; nothing run", file=sys.stderr)
+            return 1
+    else:
+        sha = last["sha"]
+    # Under the lock nothing else runs in this attempt: a tree or files left behind are a dead run's.
+    if Path(tree).exists():
+        li.git(root, "worktree", "remove", "--force", "--force", tree)
+        li.git(root, "worktree", "prune")
+        shutil.rmtree(tree, ignore_errors=True)
+    trips = _git_env_trips(note, ro, COMPLETION_KIND)
+    arm = _canary("arm", path, tasks_dir, root, default, ro)
+    if arm != 0:
+        _completion_not_ran(state, attempt, streak, git_env="arm", canary_exit=arm)
+        return 4
+    argv = ["verify", "--outcome", "--repo", str(root), "--detach-at", sha, "--tree", tree, "--out", out,
+            "--timeout", str(timeout), "--slots", str(slots),
+            "--slot-wait", str(max(VERIFY_SLOT_WAIT_MIN, HARNESS_MAX_S - VERIFY_HARNESS_MARGIN - timeout)),
+            "--verifier", verifier] + (["--bootstrap", bootstrap] if bootstrap else [])
+    with contextlib.redirect_stdout(sys.stderr):
+        try:
+            li.main(argv)
+        except Exception:
+            traceback.print_exc()
+    check = _canary("check", path, tasks_dir, root, default, ro)
+    note = Note(path)   # fresh: the canary may have written its log
+    outcome_path = Path(f"{out}{VERIFY_OUTCOME_SUFFIX}")
+    outcome = _read_outcome(outcome_path)
+    result, why = _classify_completion(outcome, attempt)
+    if check != 0 or _git_env_trips(note, ro, COMPLETION_KIND) > trips:
+        # RACE's rule: an rc after a git-env trip is never acted on, even one an ack re-armed meanwhile.
+        result, why = "unrun", ("a git-env trip fell inside its window (the shared checkout changed during the run), "
+                                "so its rc is never acted on, no verdict: the attempt re-runs")
+    now = _now(args)
+    run_id = outcome["id"] if outcome else f"{now.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
+    rc_word = str(outcome["rc"]) if outcome and "rc" in outcome else "absent"
+    red_stem = f"{COMPLETION_RED_PREFIX}{ro}"
+    followup = red_stem if result == "red" else None
+    log_path, kept = Path(f"{out}.log"), Path(f"{out}.{run_id}.log")
+    line = (f"- {_stamp(now)} attempt {attempt} at {sha} rc {rc_word} -> {result}: {why}"
+            + (f"; fix task [[{red_stem}]]" if followup else "") + f" (run {run_id}; log {kept})")
+    try:
+        # The log and the fix task, then the line, the commit point: a failure before it records nothing, and the
+        # attempt runs again.
+        if log_path.exists():
+            os.replace(log_path, kept)
+        Path(f"{out}.rc").unlink(missing_ok=True)
+        if followup and _find_note(tasks_dir, red_stem) is None:
+            ids = []
+            if kept.exists():
+                with open(kept, errors="replace") as fh:
+                    ids = _failing_ids(fh)
+            _write_completion_red(tasks_dir / f"{red_stem}.md", note, ro, verifier, sha, rc_word, why, kept, ids, now)
+        note.append_line(COMPLETION_VERIFY_SECTION, line)
+        note.save()
+    except OSError as e:
+        print(f"ERROR: completion-verify: {e}; nothing recorded: the attempt runs again", file=sys.stderr)
+        return 1
+    fields = {"result": result, "rc": rc_word, "sha": sha, "attempt": attempt, "log": str(kept)}
+    if followup:
+        fields["followup"] = followup
+    _event(ro, "completion-verify", None, fields, args)
+    try:
+        outcome_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    _s, _a, _l, streak = _completion_state(_completion_lines(note))
+    _completion_json(ran=True, result=result, decided=result in COMPLETION_DECIDED, attempt=attempt, streak=streak,
+                     halt=_completion_halts(result, streak), line=line[2:], followup=followup,
+                     **({"canary_exit": check} if check != 0 else {}))
+    return 4 if check != 0 else 0
+
+
 def cmd_completion_verify(args) -> int:
-    """The completion verify (estate ADR 0009 d6): a rollout whose note declares `completion_verifier:` runs it once
-    on merged origin/<default> at the completion ceremony (execute § 4.5 step 5). Read mode prints one JSON line;
-    --record reads the attempt's own verify outcome, appends one `## Completion verify log` line, records
-    `completion-verify` in the Run record and, on a final red, files the fix task. The module docstring holds the
-    rules."""
+    """The completion verify (estate ADR 0009 d6, ADR 0052): a rollout whose note declares `completion_verifier:`
+    runs it once on merged origin/<default> at the completion ceremony (execute § 4.5 step 5). Read mode prints one
+    JSON line; --run owns one attempt end to end. The module docstring holds the rules."""
     path = Path(os.path.expanduser(args.rollout))
     if not path.is_file():
         print(f"ERROR: completion-verify: rollout note not found at {path}", file=sys.stderr)
@@ -6561,13 +6765,16 @@ def cmd_completion_verify(args) -> int:
     try:
         note = Note(path)
         verifier = _completion_verifier(note)
+        if verifier:
+            _command_value(note, "env_bootstrap")
+            _completion_timeout(note)
     except ValueError as e:
         print(f"ERROR: completion-verify: {e}", file=sys.stderr)
         return 2 if isinstance(e, CompletionValueError) else 1
     ro = path.stem
     if not verifier:
-        if args.record:
-            print(f"ERROR: completion-verify: {ro} declares no {COMPLETION_VERIFIER_KEY}:; nothing written",
+        if args.run:
+            print(f"ERROR: completion-verify: {ro} declares no {COMPLETION_VERIFIER_KEY}:; nothing run",
                   file=sys.stderr)
             return 2
         print(json.dumps({"verifier": None, "state": "absent"}))
@@ -6577,93 +6784,17 @@ def cmd_completion_verify(args) -> int:
         print(f"ERROR: completion-verify: {ro} has no `Project root:` line", file=sys.stderr)
         return 1
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
-    red_stem = f"{COMPLETION_RED_PREFIX}{ro}"
-    lines = _completion_lines(note)
-    state, attempt, last, streak = _completion_state(lines)
-    sha = last["sha"] if last else None
+    if args.run:
+        return _completion_run(args, path, ro, root, tasks_dir)
+    state, attempt, last, streak = _completion_state(_completion_lines(note))
     tree, out = _completion_paths(root, ro, attempt)
-    rc_path, log_path, outcome_path = Path(f"{out}.rc"), Path(f"{out}.log"), Path(f"{out}{VERIFY_OUTCOME_SUFFIX}")
-    decided = state in COMPLETION_DECIDED
-    if not decided:
-        if _verify_running(out):
-            state = "in-flight"
-        elif outcome_path.exists():
-            state = "record"
-    found = _find_note(tasks_dir, red_stem) if state == "red" else None
-    found_stem = found.stem if found else None
-    if not args.record:
-        print(json.dumps({"verifier": verifier, "state": state, "attempt": attempt, "sha": sha, "repo": str(root),
-                          "tree": tree, "out": out, "streak": streak, "followup": found_stem,
-                          "summary": _completion_summary(state, last, verifier, found_stem)}))
-        return 0
-    if decided:
-        print(json.dumps({"result": state, "decided": True, "attempt": attempt, "streak": 0, "halt": False,
-                          "line": last["line"][2:], "followup": found_stem, "written": False}))
-        return 0
-    if state != "record":
-        print(f"ERROR: completion-verify: attempt {attempt} has nothing to record ("
-              + ("its verify still runs" if state == "in-flight" else f"no {outcome_path.name}") + "); nothing written",
-              file=sys.stderr)
-        return 3
-    try:
-        outcome = _read_outcome(outcome_path)
-    except CompletionValueError as e:
-        print(f"ERROR: completion-verify: {e}; nothing written", file=sys.stderr)
-        return 2
-    run_sha = outcome.get("sha") or "-"
-    if sha and run_sha != sha:
-        print(f"ERROR: completion-verify: attempt 2 ran at {run_sha}, not the red tree {sha}; nothing written",
-              file=sys.stderr)
-        return 2
-    if attempt == 1 and run_sha == "-" and outcome["ended"] in ("done", "deadline"):
-        print("ERROR: completion-verify: the run names no sha (verify ran without --detach-at); nothing written",
-              file=sys.stderr)
-        return 2
-    run_id = outcome["id"]
-    kept = log_path.with_name(f"{log_path.name[:-4]}.{run_id}.log")
-    recorded = next((d for d in lines if d.get("run") == run_id), None)
-    now = _now(args)
-    result, why = _classify_completion(outcome, attempt)
-    rc_word = str(outcome["rc"]) if "rc" in outcome else "absent"
-    followup = red_stem if result == "red" else None
-    line = None
-    try:
-        if recorded is None:
-            log_text = log_path.read_text(errors="replace") if log_path.exists() else ""
-            line = (f"- {_stamp(now)} attempt {attempt} at {run_sha} rc {rc_word} -> {result}: {why}"
-                    + (f"; fix task [[{red_stem}]]" if followup else "") + f" (run {run_id}; log {kept})")
-            if not args.dry_run:
-                # The fix task, then the note, then the files: a failure anywhere leaves the run recordable, and
-                # the run's id in its line makes a re-record finish the move instead of writing a second line.
-                if followup and _find_note(tasks_dir, red_stem) is None:
-                    _write_completion_red(tasks_dir / f"{red_stem}.md", note, ro, verifier, run_sha, rc_word, why, kept,
-                                          _failing_ids(log_text), now)
-                note.append_line(COMPLETION_VERIFY_SECTION, line)
-                note.save()
-        if not args.dry_run:
-            if log_path.exists():
-                os.replace(log_path, kept)
-            rc_path.unlink(missing_ok=True)
-            outcome_path.unlink(missing_ok=True)
-    except OSError as e:
-        print(f"ERROR: completion-verify: {e}; the run stays recordable", file=sys.stderr)
-        return 1
-    if recorded is not None:
-        print(json.dumps({"result": recorded["result"], "decided": recorded["result"] in COMPLETION_DECIDED,
-                          "attempt": attempt, "streak": streak, "halt": False, "line": recorded["line"][2:],
-                          "followup": followup, "written": False}))
-        return 0
-    fields = {"result": result, "rc": rc_word, "sha": run_sha, "attempt": attempt, "log": str(kept)}
-    if followup:
-        fields["followup"] = followup
-    _event(ro, "completion-verify", None, fields, args)
-    if result in COMPLETION_STREAK:
-        streak += 1
-    elif result != "stopped":
-        streak = 0
-    print(json.dumps({"result": result, "decided": result in COMPLETION_DECIDED, "attempt": attempt,
-                      "streak": streak, "halt": result in COMPLETION_STREAK and streak >= COMPLETION_HALT_STREAK,
-                      "line": line[2:], "followup": followup, "written": not args.dry_run}))
+    if state not in COMPLETION_DECIDED and _attempt_running(out):
+        state = "in-flight"
+    found = _find_note(tasks_dir, f"{COMPLETION_RED_PREFIX}{ro}") if state == "red" else None
+    followup = found.stem if found else None
+    print(json.dumps({"verifier": verifier, "state": state, "attempt": attempt, "sha": last["sha"] if last else None,
+                      "repo": str(root), "tree": tree, "out": out, "streak": streak, "followup": followup,
+                      "summary": _completion_summary(state, last, verifier, followup)}))
     return 0
 
 
@@ -6889,16 +7020,14 @@ def main() -> int:
     vt.add_argument("--rollout", required=True, help="path to the rollout note")
     vt.set_defaults(func=cmd_verify_timeout)
 
-    cv = sub.add_parser("completion-verify", help="the completion verify (estate ADR 0009 d6): print what the ceremony "
-                                                  "runs next as JSON (read-only), or with --record record the attempt's "
-                                                  "finished run from its own rc and log, filing the fix task on a "
-                                                  "final red")
+    cv = sub.add_parser("completion-verify", help="the completion verify (estate ADR 0009 d6, ADR 0052): print the "
+                                                  "attempt's state as JSON (read-only), or with --run run one attempt "
+                                                  "end to end (arm, verify, check, record) under its lock")
     cv.add_argument("--rollout", required=True, help="path to the rollout note")
     cv.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help + " (the fix task's home)")
-    cv.add_argument("--record", action="store_true", help="record the current attempt's ended run from its verify "
-                                                          "outcome file")
+    cv.add_argument("--run", action="store_true", help="run the current attempt: the canary arm, lead-integrate.py "
+                                                       "verify --outcome, the check and the record")
     cv.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the log line's stamp)")
-    cv.add_argument("--dry-run", action="store_true")
     cv.set_defaults(func=cmd_completion_verify)
 
     ag = sub.add_parser("approve-gates", help="record a sign-off for a gate-pending task's gated inputs: Lachy's explicit "

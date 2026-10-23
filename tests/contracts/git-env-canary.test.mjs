@@ -44,7 +44,7 @@ const C3_ITEM5 = "5. for a RACE only, the lead's re-verify verdict, so Lachy dec
   "   never ran (no verify slot came in time); absent: it never finished, which reads as red) with the tail of\n" +
   '   `race-<slug>.log` beside it. An UNVERIFIED task was never re-verified: say so.'
 // Heartbeat clause (4), byte for byte: the merge-result rule reaches it through "act on it as §4.5 would".
-const HB4 = '(4) If a background Integration command this session launched (the verifier, merge-task.sh, a backoff, the completion verify) has not ' +
+const HB4 = '(4) If a background Integration command this session launched (the verifier, merge-task.sh, a backoff) has not ' +
   'reported: when its result file exists (`<out>.rc`, or `.claude/merge-task.status`), act on it as §4.5 would; otherwise do nothing more.'
 
 // mark-started's arm (p26-3): the three call sites that open a task window, flags included.
