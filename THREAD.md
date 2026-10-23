@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-21
+last_touched: 2026-10-23
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,8 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-23: thread 5.0.0 is released and installed.** #203 (the engine refuses a call without `verifySlot`) merged at `21f349a` after two clean-room rounds: round 1's 9 findings fixed, round 2 stopped the review ledger (11 of 15 were about round 1's own one-off refusal halt), so that halt was reverted at the root and the rest filed as [[thread-skill-execute-args-refusal-and-slot-followups]]. `verify-timeout` now prints the `verifySlot` object the lead copies. Release PR #206 (`078ffc7`, tag `thread--v5.0.0`, eval record `docs/evals/2026-10-22-release-5-0.md`: 24/24, overall 0.979, one unexplained `next-undecided-what-now` miss) merged; `claude plugin update thread@thread` installed 5.0.0 at `0d45df4`; `make release-check` green. Running sessions keep the engine they loaded: a lead must restart to run 5.0.0. Docs follow-ups (README 5.0.0 notes, manifest wording, eval traces kept): [[thread-skill-5-0-docs-follow-ups]].
 
 **2026-10-21: ADRs 0043–0047 (PR #202, P29's design) are held for a re-grill.** Round 1 of clean-room review found 15 wrong claims, fixed in `0fc0723`. Round 2's ledger STOPped (8 of 15 findings were about mechanism the fix round added). The rest are design gaps: the merge train vs strict up-to-date branches, the healed-trip auto-ack, git config the task worktrees share, and Pre-flight vs supersede, orient-all and plan_approval. Re-grill handed to a fresh session.
 
@@ -777,6 +779,10 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **This machine's `gh` has no `pr update-branch` (2026-10-23).** It prints the command list and exits 1, so a "behind" PR with auto-merge queued never updates. Use `gh api -X PUT repos/<owner>/<repo>/pulls/<N>/update-branch -f expected_head_sha=<sha>`. A PR whose branch is behind sits `BEHIND` with green checks indefinitely.
+- **Never wait on GitHub in an unbounded background `until` loop (2026-10-23).** A `connection reset by peer` from `gh` exits the loop "successfully" with the PR still open; the notification reads as done. Poll in the foreground with a bounded count, treat a `gh` error as unknown, and read the result before ending the turn.
+- **A release-time `make evals` keeps no traces.** The recipe has no `--keep-temp`, so a sub-1.00 case is unexplainable and the loaded plugins and resolved model are unverified (5.0.0 record). Tracked by [[thread-skill-5-0-docs-follow-ups]].
+
 - **An integrate call's `plan` must go in verbatim, and plans run to 60k+ characters (2026-10-19; hit again 2026-10-20).** On 2026-10-20 a 74k-character args object for p26-2 could not be sent: the attempt was cut off part-way. Lachy ruled `plan: ""` for p26-2, p24-4 and p25-3 (the rollout's `## Notes`). The judge-only path never renders `I.plan`; the conflict integrator worked from the brief and review history and resolved both conflicts. Tracked by [[thread-skill-integrate-args-plan-too-large]]; until it lands, ask Lachy before passing `""` again. The Workflow tool takes args only inline (no file path), so the lead copies the `lead-integrate.py plan` output into the call. Check fidelity after launch: the integrator's prompt embeds the plan indented two spaces, so de-indent from `Planned on:` and compare with the plan file. A shared-file judge-only call carries no plan.
 - **Usage-limit cuts read as `transient infrastructure failure` rows (2026-10-19).** A call cut by a session, 5-hour or monthly limit returns `blocked` with that diagnosis and the CLI's `You've hit your … limit` in `<failures>`: never reconcile it; resume the same runId with its original args after the reset.
 - **The 1800 s Integration verify times out under concurrent suites (2026-10-19).** At load ~157 (four agents' `make test` plus the lead's) p19-5's lead verify hit rc 124 with zero failures. #174's `tests/run.sh` cap (4 suites) fixed it for later verifies; the machine-wide verify slots go live only after a plugin update.
@@ -1037,6 +1043,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-10-23:** 5.0.0 is installed. Next: restart the Stage session "Lead the thread-skill rollout of 2026-10-21" (or open one in `~/repos/tools/thread-skill-rollout`) and run `/thread:schedule thread-skill --regenerate` to supersede `[[thread-skill-rollout-2026-10-21]]` with the re-grilled P29 set (p29-7…p29-13) on the 5.0.0 engine; the two filed follow-ups ([[thread-skill-5-0-docs-follow-ups]], [[thread-skill-execute-args-refusal-and-slot-followups]]) can join it. Lachy's own: `[notify] ntfy_topic` (after [[ntfy-noise-audit]]) and `verify_slots` in `~/.config/thread/rollouts.toml` are now safe to set. The 2026-10-21 and 2026-10-20 notes below are history.
+
 **From 2026-10-21:** PR #202 (ADRs 0043–0047) is held, not merged. Its re-grill runs in the Stage session "Re-grill ADRs 0043–0047 (PR #202)", whose brief (`docs/handoffs/2026-10-21-regrill-adrs-0043-0047.md`, now consumed) lists round 2's six design gaps (`docs/reviews/2026-10-21-0fc0723-6a9ac7.md` on the PR branch). The plan: rule the gaps with Lachy, trim the ADRs back to decisions, run a fresh-review round on the trimmed text, and queue the merge once it's clean. `[[thread-skill-rollout-2026-10-21]]` (P29) must not start until #202 merges.
 
 **Now (from 2026-10-20):** no rollout is running on this repo. P24 and P25 are closed; P26 waits on p26-3.
@@ -1046,6 +1054,8 @@ scheduled 2026-07-15.
 4. `/thread:reflect [[thread-skill-rollout-2026-10-19]]` is on offer; the next weekly Reflection is due 2026-10-24.
 
 ## Session log
+
+- 2026-10-23 (close, from 2026-10-22): reviewed and merged #203 (2 rounds, ledger STOP, root revert), released 5.0.0 (#206, tag, eval $7.50) and installed it; landed #205; filed the args-refusal and 5.0.0 docs follow-ups. My slip: a background wait died on a GitHub network reset and I answered its notification "No response requested" instead of acting, so the install sat a day.
 
 - 2026-10-21: `/fresh-review` of PR #202 (ADRs 0043–0047). Round 1 had 15 findings, fixed in `0fc0723`. Round 2's 15 hit the ledger's STOP (8 were regressions). Lachy held #202 for a re-grill, which was handed to a fresh session (landing PR #204).
 - 2026-10-20: executed `[[thread-skill-rollout-2026-10-19]]` from the clone: 10/10 merged (#183–#192) in 20h 46m through one room stop. Phases 24 and 25 closed, P26 left on p26-3; the integrate-args plan-size limit was filed after Lachy ruled `plan: ""` for three integrations.
