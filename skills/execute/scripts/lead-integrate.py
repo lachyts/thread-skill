@@ -760,13 +760,15 @@ def cmd_verify(args):
         added = True
     elif not tree.is_dir():
         raise EnvError(f"no tree at {tree}")
-    for s in SIGNALS:
-        signal.signal(s, _on_signal)
     rc = None
     slot = None
     result = {"v": 1, "id": f"{datetime.now().strftime('%Y%m%dT%H%M%S')}-{os.getpid()}", "sha": args.detach_at,
               "ended": "running"}
+    # The caller's dispositions come back at the end: completion-verify --run calls verify in its own process.
+    before = {s: signal.getsignal(s) for s in SIGNALS}
     try:
+        for s in SIGNALS:   # inside the try, so a signal that lands at once still removes the tree
+            signal.signal(s, _on_signal)
         if outcome_path:
             _write_atomic(outcome_path, json.dumps(result) + "\n")
         with open(log_path, "ab", buffering=0) as log:
@@ -837,6 +839,8 @@ def cmd_verify(args):
                 _write_atomic(outcome_path, json.dumps(result) + "\n")
             else:
                 _write_atomic(rc_path, f"{rc}\n")
+        for s, h in before.items():
+            signal.signal(s, h)
     print(f"verify: rc={rc} (log {log_path})")
     if rc == "noslot":
         return 75

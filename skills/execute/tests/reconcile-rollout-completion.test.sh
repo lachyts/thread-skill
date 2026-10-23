@@ -225,7 +225,7 @@ scen c9 "\"git -C '$TMP/c9/repo' -c user.email=t@t -c user.name=t commit -q --al
 cv --run; ok "$rc|$(js ran)|$(js result)|$(js decided)" "4|True|unrun|False" "C9: the shared checkout moved during the run → its own check trips: unrun, exit 4"
 has "$(grep ' -> unrun' "$RO")" "git-env" "C9: … the line says the verdict was never acted on"
 has "$err" "git-env" "C9: … the canary's stderr passed through"
-scen c9b '"sleep 3"'
+scen c9b "\"i=0; while [ ! -f $TMP/c9b.go ] && [ \$i -lt 600 ]; do sleep 0.1; i=\$((i + 1)); done\""
 python3 "$SCRIPT" completion-verify --rollout "$RO" --tasks-dir "$D/tasks" --now "$NOW" --run > "$D/bg.out" 2> "$D/bg.err" &
 bp=$!
 wait_for "$(integ)/completion-ro-rollout-2026-10-24-1.log" '^== verifier'
@@ -233,6 +233,7 @@ g -C "$D/repo" commit -q --allow-empty -m moved; new=$(git -C "$D/repo" rev-pars
 python3 "$CANARY" check-all --rollout "$RO" --tasks-dir "$D/tasks" > /dev/null 2>&1; ok "$?" 3 "C9: a loop-entry check-all catches the trip"
 python3 "$CANARY" ack --rollout "$RO" --tasks-dir "$D/tasks" --repo "$D/repo" --default master --slugs ro-rollout-2026-10-24 --ref "$new" > /dev/null 2>&1
 ok "$?|$(window)" "0|armed" "C9: … and an ack re-arms the window while the run goes on"
+touch "$TMP/c9b.go"
 wait "$bp"; brc=$?; out=$(cat "$D/bg.out")
 ok "$brc|$(js result)" "0|unrun" "C9: the run's own check passes, but a trip fell inside its window → unrun, never green"
 
@@ -288,8 +289,12 @@ PY
 cv; ok "$rc|$(js state)" "0|absent" "C11: the template's lines uncommented as they stand → absent"
 scen c11f '"true"' 'completion_timeout:   # optional (ADR 0052): uncommented as written'
 cv; ok "$rc|$(js state)" "0|run" "C11: with a verifier declared, a comment-only completion_timeout: → its default, never refused"
+scen c11h '"true"' 'completion_timeout: ""'
+cv; ok "$rc|$(js state)" "0|run" "C11: a quoted empty completion_timeout: → its default"
+scen c11i "bash -c 'echo # hi'"
+cv; ok "$rc|$out" "2|" "C11: a bare command holding a quote and a # → refused (2), never cut inside its own quotes"
 scen c11g '"true"' 'env_bootstrap: >-'
-HOME="$TMP/home" python3 "$SCRIPT" verify-timeout --rollout "$RO" > /dev/null 2> "$D/err"; ok "$?" 1 "C11: verify-timeout, run at every loop entry, refuses a completion key the reader cannot represent (1)"
+HOME="$TMP/home" python3 "$SCRIPT" verify-timeout --rollout "$RO" > /dev/null 2> "$D/err"; ok "$?" 2 "C11: verify-timeout, run at every loop entry, refuses a completion key the reader cannot represent (2, never verify_timeout's 1)"
 has "$(cat "$D/err")" "env_bootstrap" "C11: … naming it, before any work runs"
 i=0
 for v in '>-' '|' "'make test ''all'''" '"python3 -c \"x\""' '"make test" all' '[make, test]' 'make|  test-all' '|  make test-all' '- make test' 'make test: all'; do
@@ -341,6 +346,20 @@ sys.argv = [script, "completion-verify", "--rollout", ro, "--tasks-dir", tasks]
 exec(compile(open(script).read(), script, "exec"), {"__name__": "__main__", "__file__": script})
 PY
 ok "$rc|$(js state)" "0|run" "C14: with no fcntl, reconcile-rollout.py still loads and a read verb runs"
+python3 - "$LI" "$D/repo" "$(integ)/sig" <<'PY'
+import importlib.util, signal, sys, argparse
+li_path, tree, out = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("li", li_path); li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+mine = lambda *_: None
+signal.signal(signal.SIGTERM, mine)
+import contextlib, io
+with contextlib.redirect_stdout(io.StringIO()):
+  li.cmd_verify(argparse.Namespace(outcome=True, repo=None, detach_at=None, tree=tree, out=out, timeout=60.0, slots=None,
+                                   slot_wait=None, bootstrap="", verifier="true"))
+print("ok   - C14: verify called in-process hands back the caller's signal dispositions"
+      if signal.getsignal(signal.SIGTERM) is mine else "FAIL - C14: verify left SIGTERM at %r" % signal.getsignal(signal.SIGTERM))
+PY
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-completion: ALL PASS"; else echo "reconcile-rollout-completion: FAILED"; fi

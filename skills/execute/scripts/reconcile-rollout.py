@@ -391,8 +391,9 @@ Subcommands:
               rollouts.toml's [defaults], else the built-in 2; never read from the note). harnessTimeoutMs is
               the harness maximum; slotWait bounds the lead verify's wait for a verify slot, so the wait, the
               verifier and the 600 s margin fit inside it. A bad `verify_timeout`, or no note: one ERROR line on
-              stderr, exit 1, no stdout (checked first); so is, when the note declares `completion_verifier:`,
-              a value of it, `env_bootstrap:` or `completion_timeout:` that completion-verify would refuse. A refused rollouts.toml (the whole file is validated),
+              stderr, exit 1, no stdout (checked first). When the note declares `completion_verifier:`, a value of
+              it, `env_bootstrap:` or `completion_timeout:` that completion-verify would refuse: its ERROR line,
+              exit 2, no stdout. A refused rollouts.toml (the whole file is validated),
               a present one on a python with no tomllib, or a resolver that will not load: `ERROR: rollout
               settings refused: <the resolver's line>`, exit 3, no stdout.
 
@@ -419,10 +420,11 @@ Subcommands:
               whole life (the lead launches it
               in the background and reads again when it ends). Decided already, it runs nothing. Otherwise, under
               the lock it reads the note again, clears a dead run's tree, resolves origin's default branch
-              (default-branch.sh; each origin read bounded by 300 s) and the sha (attempt 1: fetch, then origin/<default>; attempt 2: the red run's),
+              (default-branch.sh; each origin read bounded by 120 s) and the sha (attempt 1: fetch, then origin/<default>; attempt 2: the red run's),
               arms the git-env canary (`--kind completion-verify --slug <rollout>`), runs `lead-integrate.py verify
               --outcome --detach-at <sha>` in its own process (the machine's verify slots, `--timeout
-              <completion_timeout>`, the slot wait max(60, 7200 - 600 - completion_timeout), the env_bootstrap),
+              <completion_timeout>`, the slot wait max(60, 7200 - 600 - completion_timeout - the seconds --run has
+              spent so far), the env_bootstrap),
               checks the window once, and classifies the run from verify's outcome file alone, never its log's
               text: no outcome, `running`, `bootstrap`, or a deadline in the env_bootstrap is `unrun`; `noslot` is
               `noslot`; `signal` (a hard pause, a room stop, a TaskStop while verify runs) is `stopped` (a stop before
@@ -820,7 +822,6 @@ already written is ever deleted.
 
 import argparse
 import contextlib
-import io
 import fnmatch
 import hashlib
 import importlib.util
@@ -2137,6 +2138,17 @@ def _verify_timeout(rollout_note, key="verify_timeout", default=DEFAULT_VERIFY_T
     if re.fullmatch(r"[0-9]+", s) and 1 <= int(s) <= MAX_VERIFY_TIMEOUT:
         return int(s), None
     return None, f"{key} must be an integer from 1 to {MAX_VERIFY_TIMEOUT}, got {raw!r}"
+
+
+def _verify_slots():
+    """(slots, error): the machine's `verify_slots` (rollout-settings.py, machine-wide); error the resolver's words."""
+    settings, err = _machine_settings()
+    if err:
+        return None, err
+    try:
+        return settings["verify_slots"]["value"], None
+    except Exception as e:
+        return None, f"rollout-settings.py failed: no verify_slots ({e})"
 
 
 def _slot_wait(seconds):
@@ -6362,13 +6374,8 @@ def cmd_verify_timeout(args) -> int:
             _completion_timeout(note)
     except CompletionValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-    settings, err = _machine_settings()
-    if err is None:
-        try:
-            slots = settings["verify_slots"]["value"]
-        except Exception as e:
-            err = f"rollout-settings.py failed: no verify_slots ({e})"
+        return 2
+    slots, err = _verify_slots()
     if err:
         print(f"ERROR: rollout settings refused: {err}", file=sys.stderr)
         return 3
@@ -6401,7 +6408,7 @@ COMPLETION_LINE_RE = re.compile(r"^- (?P<at>\S+) attempt (?P<n>[12]) at (?P<sha>
 # result beside <out>.
 VERIFY_LOCK_SUFFIX = ".lock"
 ATTEMPT_LOCK_WAIT = 2.0      # seconds --run retries its lock, outlasting a reader's microsecond shared probe
-ORIGIN_TIMEOUT = 300         # seconds for each origin read before verify (ls-remote, fetch): a hang is a halt
+ORIGIN_TIMEOUT = 120         # seconds for each origin read before verify (ls-remote, fetch): a hang is a halt
 VERIFY_OUTCOME_SUFFIX = ".outcome.json"
 GIT_ENV_CANARY_PY = Path(__file__).resolve().parent / "git-env-canary.py"
 DEFAULT_BRANCH_SH = Path(__file__).resolve().parent / "default-branch.sh"
@@ -6449,6 +6456,9 @@ def _command_value(note, key):
         cmd = inner.strip()
     else:
         cmd = re.sub(r"(^|\s+)#.*$", "", raw).strip()
+        if cmd.count("'") % 2 or cmd.count('"') % 2:
+            # The ` #` cut fell inside the command's own shell quotes: what is left is another command.
+            raise CompletionValueError(f"{key}: {raw!r} has a ` #` inside its own quotes: quote the whole command")
         if cmd and (cmd[0] in "|>[]{}&*!%@`,?" or re.match(r"-(\s|$)", cmd) or ": " in cmd or cmd.endswith(":")):
             raise CompletionValueError(f"{key}: {raw!r} is a YAML form, not a command: write the command on one "
                                        "line, quoted")
@@ -6467,8 +6477,8 @@ def _completion_timeout(note):
     the full suite (ADR 0052): absent, empty, a comment alone, `null` or `~` -> DEFAULT_COMPLETION_TIMEOUT, as the
     command keys read the same forms as none; anything else invalid -> CompletionValueError."""
     raw = note.get(COMPLETION_TIMEOUT_KEY)
-    if raw is None or re.sub(r"(^|\s+)#.*$", "", raw).strip().lower() in ("", "null", "~"):
-        return DEFAULT_COMPLETION_TIMEOUT   # empty, a comment alone (the template's line uncommented), null or ~
+    if raw is None or _scalar(re.sub(r"(^|\s+)#.*$", "", raw)).lower() in ("", "null", "~"):
+        return DEFAULT_COMPLETION_TIMEOUT   # empty, quoted empty, a comment alone (the template's line), null or ~
     seconds, err = _verify_timeout(note, COMPLETION_TIMEOUT_KEY, DEFAULT_COMPLETION_TIMEOUT)
     if err:
         raise CompletionValueError(err)
@@ -6541,7 +6551,8 @@ def _attempt_lock(root, ro, attempt):
     the git dir cannot be read."""
     try:
         p = subprocess.run(["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60,
+                           env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")})  # GIT_DIR beats -C
     except (OSError, subprocess.TimeoutExpired):
         return None
     d = p.stdout.strip()
@@ -6670,6 +6681,7 @@ def _completion_not_ran(state, attempt, streak, **extra):
 def _completion_run(args, path, ro, root, tasks_dir) -> int:
     """--run (ADR 0052): one attempt end to end, under the attempt's lock (_attempt_lock), held for this process's
     life."""
+    started = time.monotonic()
     if fcntl is None:
         print("ERROR: completion-verify: --run needs fcntl (POSIX); nothing run", file=sys.stderr)
         return 2
@@ -6712,11 +6724,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     except CompletionValueError as e:
         print(f"ERROR: completion-verify: {e}; nothing run", file=sys.stderr)
         return 2
-    settings, err = _machine_settings()
-    try:
-        slots = settings["verify_slots"]["value"] if err is None else None
-    except Exception as e:
-        err = f"no verify_slots ({e})"
+    slots, err = _verify_slots()
     if err:
         print(f"ERROR: completion-verify: rollout settings refused: {err}; nothing run", file=sys.stderr)
         return 1
@@ -6752,29 +6760,34 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     li.git(root, "worktree", "remove", "--force", "--force", tree)
     li.git(root, "worktree", "prune")
     shutil.rmtree(tree, ignore_errors=True)
-    trips = _git_env_trips(note, ro, COMPLETION_KIND)
+    trips = _git_env_trips(Note(path), ro, COMPLETION_KIND)   # read right before the arm: the window's baseline
     arm = _canary("arm", path, tasks_dir, root, default, ro)
     if arm != 0:
         _completion_not_ran(state, attempt, streak, git_env="arm", canary_exit=arm)
         return 4
-    # `--flag=value`, so a command starting with `-` is never read as an option.
-    argv = ["verify", "--outcome", "--repo", str(root), f"--detach-at={sha}", "--tree", tree, "--out", out,
-            "--timeout", str(timeout), "--slots", str(slots), "--slot-wait", str(_slot_wait(timeout)),
-            f"--verifier={verifier}"] + ([f"--bootstrap={bootstrap}"] if bootstrap else [])
-    said = io.StringIO()
-    with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said):
-        try:
-            li.main(argv)
-        except (Exception, SystemExit):   # argparse exits; neither may skip the check and the record below
-            traceback.print_exc()
-    sys.stderr.write(said.getvalue())
+    # The slot wait takes what is left of the harness cap after this run's own work so far, so the suite's deadline
+    # still lands inside it and a cap's TERM never stops a run that was on time.
+    spent = time.monotonic() - started
+    ns = argparse.Namespace(outcome=True, repo=str(root), detach_at=sha, tree=tree, out=out, timeout=float(timeout),
+                            slots=slots, slot_wait=float(max(VERIFY_SLOT_WAIT_MIN, _slot_wait(timeout) - spent)),
+                            bootstrap=bootstrap, verifier=verifier)
+    refusal = None
+    try:
+        with contextlib.redirect_stdout(sys.stderr):   # verify's `verify: rc=` line; --run's stdout is its JSON
+            li.cmd_verify(ns)
+    except li.EnvError as e:
+        refusal = f"verify refused: {e}"
+    except Exception:
+        refusal = traceback.format_exc()
     log_path = Path(f"{out}.log")
-    if not log_path.exists() and said.getvalue():
-        # verify stopped before it opened its log (a refusal): its words become the kept log the line names.
-        try:
-            log_path.write_text(said.getvalue())
-        except OSError:
-            pass
+    if refusal:
+        print(f"completion-verify: {refusal}", file=sys.stderr)
+        if not log_path.exists():
+            # verify stopped before it opened its log: its words become the kept log the line names.
+            try:
+                log_path.write_text(refusal + "\n")
+            except OSError:
+                pass
     check = _canary("check", path, tasks_dir, root, default, ro)
     note = Note(path)   # fresh: the canary may have written its log
     outcome_path = Path(f"{out}{VERIFY_OUTCOME_SUFFIX}")
