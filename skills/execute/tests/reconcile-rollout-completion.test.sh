@@ -113,6 +113,7 @@ has "$(grep ' -> green' "$RO")" "at $SHA rc 0" "C2: … the line names the merge
 ok "$(ls "$(integ)" | grep -c '^completion-ro-rollout-2026-10-24-1\..*-[0-9]*\.log$')|$(ls "$(integ)" | grep -c '\.rc$\|\.outcome\.json$')" "1|0" "C2: the log kept under its run's name, no rc or outcome left"
 ok "$(red_exists)|$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')" "no|1" "C2: no fix task; the detached tree removed"
 ok "$(window)" "checked" "C2: the canary window armed and checked once"
+ok "$(test -f "$D/repo/.git/thread/completion-ro-rollout-2026-10-24-1.lock" && echo git-dir)" "git-dir" "C2: the attempt's lock lives in the git dir, out of reach of a git clean or rm -rf .claude"
 r0=$(cksum < "$RO")
 cv --run; ok "$rc|$(js ran)|$(js result)|$(cksum < "$RO")|$(records)" "0|False|green|$r0|green/1" "C2: --run once decided runs nothing and writes nothing"
 
@@ -191,6 +192,17 @@ out=$(cat "$D/bg.out")
 ok "$brc|$(js result)|$(js streak)" "0|stopped|0" "C7: TERMed, --run records its own stopped, the streak unmoved"
 ok "$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')|$(window)" "1|checked" "C7: … the locked tree removed, the window checked"
 cv; ok "$(js state)|$(js attempt)" "run|1" "C7: … the same attempt runs again"
+python3 - "$D/repo/.git/thread/completion-ro-rollout-2026-10-24-1.lock" <<'PY' &
+import fcntl, sys, time
+fh = open(sys.argv[1], "a"); fcntl.flock(fh, fcntl.LOCK_SH); time.sleep(0.5)
+PY
+sp=$!; sleep 0.1
+python3 - "$RO" <<'PY'
+import sys
+t = open(sys.argv[1]).read(); open(sys.argv[1], "w").write(t.replace('completion_verifier: "sleep 30"', 'completion_verifier: "true"'))
+PY
+cv --run; wait "$sp"
+ok "$rc|$(js result)" "0|green" "C7: a reader's shared probe as --run starts → --run waits it out, never exits 3"
 
 # ── C8 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c8 "\"test -f $TMP/c8.once || { touch $TMP/c8.once; sleep 30; }\""
@@ -203,6 +215,10 @@ cv; ok "$(js state)|$(js attempt)|$(log_lines)" "run|1|0" "C8: killed outright �
 ok "$(test -d "$D/repo/.claude/worktrees/completion-ro-rollout-2026-10-24-1" && echo left)" "left" "C8: … its tree left behind"
 cv --run; ok "$rc|$(js result)|$(js streak)" "0|green|0" "C8: the next --run clears the leftovers and runs it → green, the dead run never counted"
 ok "$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')|$(log_lines)" "1|1" "C8: … one tree gone, one line"
+scen c8b '"true"'
+g -C "$D/repo" worktree add -q --lock --reason "pid 1" --detach "$D/repo/.claude/worktrees/completion-ro-rollout-2026-10-24-1" "$SHA"
+rm -rf "$D/repo/.claude/worktrees"
+cv --run; ok "$rc|$(js result)" "0|green" "C8: a dead run's locked worktree entry with its directory gone is pruned, and the attempt runs"
 
 # ── C9 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c9 "\"git -C '$TMP/c9/repo' -c user.email=t@t -c user.name=t commit -q --allow-empty -m moved\""
@@ -234,6 +250,22 @@ hasnt "$err" "Traceback" "C10: … cleanly"
 cv; ok "$(js state)|$(js attempt)" "rerun|2" "C10: … attempt 2 runs again"
 cv --run; ok "$(js result)|$(red_exists)|$(log_lines)" "red|yes|2" "C10: a later run lands it"
 
+scen c10c '"--no-such-option"'
+cv --run; ok "$rc|$(js ran)|$(js result)" "0|True|rerun" "C10: a command starting with - is the verifier, never an option: an ordinary red"
+scen c10d '"true"'
+seed rerun; sed -i '' -e 's/ -> rerun: seeded/ -> rerun: seeded by hand/' "$RO" 2>/dev/null || sed -i -e 's/ -> rerun: seeded/ -> rerun: seeded by hand/' "$RO"
+cv; ok "$(js state)|$(js attempt)" "run|1" "C10: a verdict line at - (no tree named) is not --run's: skipped"
+scen c10e '"true"'
+mkdir -p "$D/repo/.claude/worktrees/completion-ro-rollout-2026-10-24-1x"
+cv --run --now 2026-10-24T09:10:00Z
+python3 - "$RO" <<'PY'
+import re, sys
+for l in open(sys.argv[1]):
+    m = re.search(r"\(run \S+; log (\S+)\)", l)
+    if m and m.group(1) != "-":
+        import os; print("ok   - C10: the line's log exists" if os.path.exists(m.group(1)) else f"FAIL - C10: {m.group(1)} missing")
+PY
+
 # ── C11 ───────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c11 '  # optional (estate ADR 0009 d6): uncommented as written'
 cv; ok "$(js state)" "absent" "C11: a comment-only completion_verifier: → absent, never a passing bash comment"
@@ -253,7 +285,12 @@ for key in ("# completion_verifier:", "# completion_timeout:"):
     t = t.replace("verifier: \"true\"\n", "verifier: \"true\"\n" + line[2:], 1)
 open(ro, "w").write(t)
 PY
-cv; ok "$rc|$(js state)" "0|absent" "C11: the template's lines uncommented as they stand → absent, completion_timeout's default"
+cv; ok "$rc|$(js state)" "0|absent" "C11: the template's lines uncommented as they stand → absent"
+scen c11f '"true"' 'completion_timeout:   # optional (ADR 0052): uncommented as written'
+cv; ok "$rc|$(js state)" "0|run" "C11: with a verifier declared, a comment-only completion_timeout: → its default, never refused"
+scen c11g '"true"' 'env_bootstrap: >-'
+HOME="$TMP/home" python3 "$SCRIPT" verify-timeout --rollout "$RO" > /dev/null 2> "$D/err"; ok "$?" 1 "C11: verify-timeout, run at every loop entry, refuses a completion key the reader cannot represent (1)"
+has "$(cat "$D/err")" "env_bootstrap" "C11: … naming it, before any work runs"
 i=0
 for v in '>-' '|' "'make test ''all'''" '"python3 -c \"x\""' '"make test" all' '[make, test]' 'make|  test-all' '|  make test-all' '- make test' 'make test: all'; do
   i=$((i + 1)); scen "c11x$i" -
@@ -291,6 +328,8 @@ scen c13 '"true"'
 python3 "$LI" verify --repo "$D/repo" --detach-at "$SHA" --tree "$D/race" --out "$(integ)/race-x" --timeout 60 --verifier true > /dev/null 2>&1
 ok "$?|$(cat "$(integ)/race-x.rc")" "0|0" "C13: a verify with no --outcome (Integration, RACE) runs as before"
 ok "$(ls "$(integ)" | grep -c 'race-x\.lock\|race-x\.outcome')" "0" "C13: … no lock, no outcome file"
+python3 "$LI" verify --outcome --tree "$D/repo" --out "$(integ)/oc-x" --timeout 60 --verifier true > /dev/null 2>&1
+ok "$(test -e "$(integ)/oc-x.rc" && echo rc || echo none)|$(test -e "$(integ)/oc-x.outcome.json" && echo outcome)" "none|outcome" "C13: verify --outcome writes its outcome in place of an rc (the file heartbeat clause (4) acts on)"
 
 # ── C14 ───────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c14 '"true"'

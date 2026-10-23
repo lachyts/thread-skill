@@ -391,7 +391,8 @@ Subcommands:
               rollouts.toml's [defaults], else the built-in 2; never read from the note). harnessTimeoutMs is
               the harness maximum; slotWait bounds the lead verify's wait for a verify slot, so the wait, the
               verifier and the 600 s margin fit inside it. A bad `verify_timeout`, or no note: one ERROR line on
-              stderr, exit 1, no stdout (checked first). A refused rollouts.toml (the whole file is validated),
+              stderr, exit 1, no stdout (checked first); so is, when the note declares `completion_verifier:`,
+              a value of it, `env_bootstrap:` or `completion_timeout:` that completion-verify would refuse. A refused rollouts.toml (the whole file is validated),
               a present one on a python with no tomllib, or a resolver that will not load: `ERROR: rollout
               settings refused: <the resolver's line>`, exit 3, no stdout.
 
@@ -408,21 +409,24 @@ Subcommands:
               read-only: one JSON line. With none, {"verifier": null, "state": "absent"}. Otherwise {verifier,
               state, attempt, sha, repo, tree, out, streak, followup, summary}: state `run` (no verdict yet:
               attempt 1, on a fresh origin/<default>, sha null), `rerun` (attempt 1 was red: attempt 2 on its sha),
-              `in-flight` (a --run holds the attempt's `<out>.lock`, probed shared), or the decided `green`,
+              `in-flight` (a --run holds the attempt's lock, `<git common dir>/thread/completion-<rollout>-<n>.lock`, probed
+              shared), or the decided `green`,
               `flake` or `red`. repo is the note's `Project root:` (none: exit 1); tree and out the attempt's own
               `<repo>/.claude/worktrees/completion-<rollout>-<n>` and `<repo>/.claude/integration/completion-
               <rollout>-<n>`; streak the `noslot` and `unrun` lines at the log's tail (a `stopped` one skipped);
               followup the fix task's stem once red; summary the Completion log's one line once decided.
-              --run owns one attempt end to end under `<out>.lock`, held for its whole life (the lead launches it
+              --run owns one attempt end to end under that lock (retried for 2 s past a reader's probe), held for its
+              whole life (the lead launches it
               in the background and reads again when it ends). Decided already, it runs nothing. Otherwise, under
               the lock it reads the note again, clears a dead run's tree, resolves origin's default branch
-              (default-branch.sh) and the sha (attempt 1: fetch, then origin/<default>; attempt 2: the red run's),
+              (default-branch.sh; each origin read bounded by 300 s) and the sha (attempt 1: fetch, then origin/<default>; attempt 2: the red run's),
               arms the git-env canary (`--kind completion-verify --slug <rollout>`), runs `lead-integrate.py verify
               --outcome --detach-at <sha>` in its own process (the machine's verify slots, `--timeout
               <completion_timeout>`, the slot wait max(60, 7200 - 600 - completion_timeout), the env_bootstrap),
               checks the window once, and classifies the run from verify's outcome file alone, never its log's
               text: no outcome, `running`, `bootstrap`, or a deadline in the env_bootstrap is `unrun`; `noslot` is
-              `noslot`; `signal` (a hard pause, a room stop, a TaskStop) is `stopped`; a deadline in the verifier
+              `noslot`; `signal` (a hard pause, a room stop, a TaskStop while verify runs) is `stopped` (a stop before
+              verify starts kills --run with no line, which reads the same: the attempt runs again); a deadline in the verifier
               is red at once, since a timeout names no failing test and is never a Flake (ADR 0050); `done` with rc
               0 is green on attempt 1 and a Flake on attempt 2 (recorded, no task); any other `done` is `rerun` on
               attempt 1 and red on attempt 2. A git-env trip inside the window (its own check's, or one a loop-entry
@@ -816,6 +820,7 @@ already written is ever deleted.
 
 import argparse
 import contextlib
+import io
 import fnmatch
 import hashlib
 import importlib.util
@@ -827,6 +832,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -2119,17 +2125,23 @@ def _ceiling(rollout_note):
     return _ceiling_detail(rollout_note)[:2]
 
 
-def _verify_timeout(rollout_note):
-    """(seconds, error): `verify_timeout`, an integer from 1 to MAX_VERIFY_TIMEOUT; absent -> 1800; anything
-    else -> error. Read like `parallel_ceiling` (_scalar: a quoted value or a trailing ` # comment` is fine).
-    Only the rollout note is read, so a task-level key never applies."""
-    raw = rollout_note.get("verify_timeout")
+def _verify_timeout(rollout_note, key="verify_timeout", default=DEFAULT_VERIFY_TIMEOUT):
+    """(seconds, error): `verify_timeout` (or the completion verify's `completion_timeout`, its own key and
+    default), an integer from 1 to MAX_VERIFY_TIMEOUT; absent -> default; anything else -> error. Read like
+    `parallel_ceiling` (_scalar: a quoted value or a trailing ` # comment` is fine). Only the rollout note is read,
+    so a task-level key never applies."""
+    raw = rollout_note.get(key)
     if raw is None:
-        return DEFAULT_VERIFY_TIMEOUT, None
+        return default, None
     s = _scalar(raw)
     if re.fullmatch(r"[0-9]+", s) and 1 <= int(s) <= MAX_VERIFY_TIMEOUT:
         return int(s), None
-    return None, f"verify_timeout must be an integer from 1 to {MAX_VERIFY_TIMEOUT}, got {raw!r}"
+    return None, f"{key} must be an integer from 1 to {MAX_VERIFY_TIMEOUT}, got {raw!r}"
+
+
+def _slot_wait(seconds):
+    """The verify-slot wait a verify of `seconds` gets inside the harness cap: max(60, 7200 - 600 - seconds)."""
+    return max(VERIFY_SLOT_WAIT_MIN, HARNESS_MAX_S - VERIFY_HARNESS_MARGIN - seconds)
 
 
 def _overlap(files, in_flight) -> int:
@@ -6342,6 +6354,15 @@ def cmd_verify_timeout(args) -> int:
     if err:
         print(f"ERROR: {err}", file=sys.stderr)
         return 1
+    try:
+        # The completion verify's keys, read at every entry, so a value its reader refuses halts before any work
+        # runs, never only at the ceremony after every task merged.
+        if _completion_verifier(note):
+            _command_value(note, "env_bootstrap")
+            _completion_timeout(note)
+    except CompletionValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
     settings, err = _machine_settings()
     if err is None:
         try:
@@ -6352,7 +6373,7 @@ def cmd_verify_timeout(args) -> int:
         print(f"ERROR: rollout settings refused: {err}", file=sys.stderr)
         return 3
     print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000,
-                      "slotWait": max(VERIFY_SLOT_WAIT_MIN, HARNESS_MAX_S - VERIFY_HARNESS_MARGIN - seconds),
+                      "slotWait": _slot_wait(seconds),
                       "verifySlots": slots,
                       "verifySlot": {"script": str(VERIFY_SLOT_PY), "slots": slots}}))
     return 0
@@ -6376,8 +6397,11 @@ COMPLETION_HALT_STREAK = 3   # no-verdict runs in a row before the lead halts, a
 COMPLETION_LINE_RE = re.compile(r"^- (?P<at>\S+) attempt (?P<n>[12]) at (?P<sha>[0-9a-f]{40}|-) "
                                 r"rc (?P<rc>\S+) -> "
                                 rf"(?P<result>{'|'.join(COMPLETION_RESULTS)})\b.*?(?:\(run (?P<run>[\w.-]+);.*)?$")
-# The attempt's files beside <out>: --run's lock (held for the attempt's whole life) and verify --outcome's result.
+# The attempt's lock (_attempt_lock, in the git dir, held for the attempt's whole life) and verify --outcome's
+# result beside <out>.
 VERIFY_LOCK_SUFFIX = ".lock"
+ATTEMPT_LOCK_WAIT = 2.0      # seconds --run retries its lock, outlasting a reader's microsecond shared probe
+ORIGIN_TIMEOUT = 300         # seconds for each origin read before verify (ls-remote, fetch): a hang is a halt
 VERIFY_OUTCOME_SUFFIX = ".outcome.json"
 GIT_ENV_CANARY_PY = Path(__file__).resolve().parent / "git-env-canary.py"
 DEFAULT_BRANCH_SH = Path(__file__).resolve().parent / "default-branch.sh"
@@ -6439,17 +6463,16 @@ def _completion_verifier(note):
 
 
 def _completion_timeout(note):
-    """`completion_timeout`, an integer from 1 to MAX_VERIFY_TIMEOUT; absent -> DEFAULT_COMPLETION_TIMEOUT; anything
-    else -> CompletionValueError. Read like `verify_timeout` (_scalar), its own key, so a fast tier's verify_timeout
-    never bounds the full suite (ADR 0052)."""
+    """`completion_timeout`, read by _verify_timeout under its own key, so a fast tier's verify_timeout never bounds
+    the full suite (ADR 0052): absent, empty, a comment alone, `null` or `~` -> DEFAULT_COMPLETION_TIMEOUT, as the
+    command keys read the same forms as none; anything else invalid -> CompletionValueError."""
     raw = note.get(COMPLETION_TIMEOUT_KEY)
-    if raw is None:
-        return DEFAULT_COMPLETION_TIMEOUT
-    s = _scalar(raw)
-    if re.fullmatch(r"[0-9]+", s) and 1 <= int(s) <= MAX_VERIFY_TIMEOUT:
-        return int(s)
-    raise CompletionValueError(f"{COMPLETION_TIMEOUT_KEY} must be an integer from 1 to {MAX_VERIFY_TIMEOUT}, "
-                               f"got {raw!r}")
+    if raw is None or re.sub(r"(^|\s+)#.*$", "", raw).strip().lower() in ("", "null", "~"):
+        return DEFAULT_COMPLETION_TIMEOUT   # empty, a comment alone (the template's line uncommented), null or ~
+    seconds, err = _verify_timeout(note, COMPLETION_TIMEOUT_KEY, DEFAULT_COMPLETION_TIMEOUT)
+    if err:
+        raise CompletionValueError(err)
+    return seconds
 
 
 def _completion_lines(note):
@@ -6457,7 +6480,8 @@ def _completion_lines(note):
     out = []
     for line in note.section_text(COMPLETION_VERIFY_SECTION).split("\n"):
         m = COMPLETION_LINE_RE.match(line.strip())
-        if m:
+        # A verdict names the tree it ran on: one at `-` is not --run's, so it is skipped like any unparsed line.
+        if m and (m.group("sha") != "-" or m.group("result") in COMPLETION_NO_VERDICT):
             out.append(dict(m.groupdict(), n=int(m.group("n")), line=line.strip()))
     return out
 
@@ -6511,12 +6535,25 @@ def _completion_paths(root, ro, attempt):
             str(root / ".claude" / "integration" / f"completion-{ro}-{attempt}"))
 
 
-def _attempt_running(out) -> bool:
-    """True while a `completion-verify --run` holds `<out>.lock` (for the attempt's whole life; the kernel drops it on
-    any death). Probed shared, so two readers never see each other as a run; released by the close, never LOCK_UN. A
-    lock that cannot be opened, or no fcntl (Windows, where --run refuses), reads as not running."""
-    lock = Path(f"{out}{VERIFY_LOCK_SUFFIX}")
-    if fcntl is None or not lock.exists():
+def _attempt_lock(root, ro, attempt):
+    """The attempt's lock file, `<git common dir>/thread/completion-<rollout>-<n>.lock`: inside the repo's git dir, so
+    an agent's `git clean` or `rm -rf .claude` in the shared checkout never deletes it under a live run. None when
+    the git dir cannot be read."""
+    try:
+        p = subprocess.run(["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    d = p.stdout.strip()
+    return Path(d) / "thread" / f"completion-{ro}-{attempt}{VERIFY_LOCK_SUFFIX}" if p.returncode == 0 and d else None
+
+
+def _attempt_running(lock) -> bool:
+    """True while a `completion-verify --run` holds the attempt's lock (_attempt_lock; for the attempt's whole life,
+    the kernel drops it on any death). Probed shared, so two readers never see each other as a run (a --run starting
+    meanwhile retries for ATTEMPT_LOCK_WAIT); released by the close, never LOCK_UN. No lock path, a lock that cannot
+    be opened, or no fcntl (Windows, where --run refuses), reads as not running."""
+    if fcntl is None or lock is None or not lock.exists():
         return False
     try:
         with open(lock, "a") as fh:
@@ -6631,7 +6668,8 @@ def _completion_not_ran(state, attempt, streak, **extra):
 
 
 def _completion_run(args, path, ro, root, tasks_dir) -> int:
-    """--run (ADR 0052): one attempt end to end, under the attempt's `<out>.lock`, held for this process's life."""
+    """--run (ADR 0052): one attempt end to end, under the attempt's lock (_attempt_lock), held for this process's
+    life."""
     if fcntl is None:
         print("ERROR: completion-verify: --run needs fcntl (POSIX); nothing run", file=sys.stderr)
         return 2
@@ -6641,15 +6679,26 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
         _completion_not_ran(state, attempt, streak)
         return 0
     tree, out = _completion_paths(root, ro, attempt)
+    lock_path = _attempt_lock(root, ro, attempt)
+    if lock_path is None:
+        print(f"ERROR: completion-verify: {root}'s git dir is unreadable; nothing run", file=sys.stderr)
+        return 1
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    lock = open(f"{out}{VERIFY_LOCK_SUFFIX}", "a")   # never closed by hand: the process's end releases it
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (BlockingIOError, PermissionError):
-        print(f"ERROR: completion-verify: attempt {attempt} is in flight (another --run holds {lock.name}); "
-              "nothing run", file=sys.stderr)
-        _completion_not_ran("in-flight", attempt, streak)
-        return 3
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock = open(lock_path, "a")   # never closed by hand: the process's end releases it
+    deadline = time.monotonic() + ATTEMPT_LOCK_WAIT
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except (BlockingIOError, PermissionError):
+            # A reader's shared probe lasts microseconds; only another --run holds the lock past the wait.
+            if time.monotonic() >= deadline:
+                print(f"ERROR: completion-verify: attempt {attempt} is in flight (another --run holds {lock_path}); "
+                      "nothing run", file=sys.stderr)
+                _completion_not_ran("in-flight", attempt, streak)
+                return 3
+            time.sleep(0.05)
     # Read again under the lock: another --run may have recorded this attempt just before it let go.
     note = Note(path)
     state2, attempt2, last, streak = _completion_state(_completion_lines(note))
@@ -6672,39 +6721,60 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
         print(f"ERROR: completion-verify: rollout settings refused: {err}; nothing run", file=sys.stderr)
         return 1
     li = _lead()
-    p = subprocess.run(["bash", str(DEFAULT_BRANCH_SH), str(root)], capture_output=True, text=True)
-    default = p.stdout.strip()
-    if p.returncode != 0 or not default:
-        print(f"ERROR: completion-verify: origin unread: {p.stderr.strip()}; nothing run", file=sys.stderr)
+
+    def origin(argv):
+        """One origin read, bounded by ORIGIN_TIMEOUT so a hung remote halts instead of holding the attempt for the
+        harness's whole cap: (rc, stdout, why)."""
+        try:
+            p = subprocess.run(argv, capture_output=True, text=True, env=li.ENV, timeout=ORIGIN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return 1, "", f"no answer in {ORIGIN_TIMEOUT}s"
+        return p.returncode, p.stdout.strip(), (p.stderr or p.stdout).strip()
+
+    rc, default, why = origin(["bash", str(DEFAULT_BRANCH_SH), str(root)])
+    if rc != 0 or not default:
+        print(f"ERROR: completion-verify: origin unread: {why}; nothing run", file=sys.stderr)
         return 1
     if attempt == 1:
-        f = li.git(root, "fetch", "--quiet", "origin", default)
-        r = li.git(root, "rev-parse", "--verify", f"refs/remotes/origin/{default}^{{commit}}") if f.returncode == 0 else f
-        sha = r.stdout.strip()
-        if r.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", sha):
-            print(f"ERROR: completion-verify: origin unread: {li.why(r)}; nothing run", file=sys.stderr)
+        rc, _o, why = origin(["git", "-C", str(root), "fetch", "--quiet", "origin", default])
+        if rc == 0:
+            rc, sha, why = origin(["git", "-C", str(root), "rev-parse", "--verify",
+                                   f"refs/remotes/origin/{default}^{{commit}}"])
+        if rc != 0 or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            print(f"ERROR: completion-verify: origin unread: {why}; nothing run", file=sys.stderr)
             return 1
     else:
         sha = last["sha"]
-    # Under the lock nothing else runs in this attempt: a tree or files left behind are a dead run's.
-    if Path(tree).exists():
-        li.git(root, "worktree", "remove", "--force", "--force", tree)
-        li.git(root, "worktree", "prune")
-        shutil.rmtree(tree, ignore_errors=True)
+    # Under the lock nothing else runs in this attempt: a tree left behind is a dead run's. Its worktree entry is
+    # locked with that run's pid, so it is unlocked and pruned whether its directory survived or not (a locked entry
+    # whose directory is gone would refuse every later `worktree add`).
+    li.git(root, "worktree", "unlock", tree)
+    li.git(root, "worktree", "remove", "--force", "--force", tree)
+    li.git(root, "worktree", "prune")
+    shutil.rmtree(tree, ignore_errors=True)
     trips = _git_env_trips(note, ro, COMPLETION_KIND)
     arm = _canary("arm", path, tasks_dir, root, default, ro)
     if arm != 0:
         _completion_not_ran(state, attempt, streak, git_env="arm", canary_exit=arm)
         return 4
-    argv = ["verify", "--outcome", "--repo", str(root), "--detach-at", sha, "--tree", tree, "--out", out,
-            "--timeout", str(timeout), "--slots", str(slots),
-            "--slot-wait", str(max(VERIFY_SLOT_WAIT_MIN, HARNESS_MAX_S - VERIFY_HARNESS_MARGIN - timeout)),
-            "--verifier", verifier] + (["--bootstrap", bootstrap] if bootstrap else [])
-    with contextlib.redirect_stdout(sys.stderr):
+    # `--flag=value`, so a command starting with `-` is never read as an option.
+    argv = ["verify", "--outcome", "--repo", str(root), f"--detach-at={sha}", "--tree", tree, "--out", out,
+            "--timeout", str(timeout), "--slots", str(slots), "--slot-wait", str(_slot_wait(timeout)),
+            f"--verifier={verifier}"] + ([f"--bootstrap={bootstrap}"] if bootstrap else [])
+    said = io.StringIO()
+    with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said):
         try:
             li.main(argv)
-        except Exception:
+        except (Exception, SystemExit):   # argparse exits; neither may skip the check and the record below
             traceback.print_exc()
+    sys.stderr.write(said.getvalue())
+    log_path = Path(f"{out}.log")
+    if not log_path.exists() and said.getvalue():
+        # verify stopped before it opened its log (a refusal): its words become the kept log the line names.
+        try:
+            log_path.write_text(said.getvalue())
+        except OSError:
+            pass
     check = _canary("check", path, tasks_dir, root, default, ro)
     note = Note(path)   # fresh: the canary may have written its log
     outcome_path = Path(f"{out}{VERIFY_OUTCOME_SUFFIX}")
@@ -6719,27 +6789,28 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     rc_word = str(outcome["rc"]) if outcome and "rc" in outcome else "absent"
     red_stem = f"{COMPLETION_RED_PREFIX}{ro}"
     followup = red_stem if result == "red" else None
-    log_path, kept = Path(f"{out}.log"), Path(f"{out}.{run_id}.log")
+    kept = Path(f"{out}.{run_id}.log")
+    kept_name = str(kept) if log_path.exists() else "-"   # a line never names a log that is not there
     line = (f"- {_stamp(now)} attempt {attempt} at {sha} rc {rc_word} -> {result}: {why}"
-            + (f"; fix task [[{red_stem}]]" if followup else "") + f" (run {run_id}; log {kept})")
+            + (f"; fix task [[{red_stem}]]" if followup else "") + f" (run {run_id}; log {kept_name})")
     try:
         # The log and the fix task, then the line, the commit point: a failure before it records nothing, and the
         # attempt runs again.
         if log_path.exists():
             os.replace(log_path, kept)
-        Path(f"{out}.rc").unlink(missing_ok=True)
         if followup and _find_note(tasks_dir, red_stem) is None:
             ids = []
             if kept.exists():
                 with open(kept, errors="replace") as fh:
                     ids = _failing_ids(fh)
-            _write_completion_red(tasks_dir / f"{red_stem}.md", note, ro, verifier, sha, rc_word, why, kept, ids, now)
+            _write_completion_red(tasks_dir / f"{red_stem}.md", note, ro, verifier, sha, rc_word, why, kept_name, ids,
+                                  now)
         note.append_line(COMPLETION_VERIFY_SECTION, line)
         note.save()
     except OSError as e:
         print(f"ERROR: completion-verify: {e}; nothing recorded: the attempt runs again", file=sys.stderr)
         return 1
-    fields = {"result": result, "rc": rc_word, "sha": sha, "attempt": attempt, "log": str(kept)}
+    fields = {"result": result, "rc": rc_word, "sha": sha, "attempt": attempt, "log": kept_name}
     if followup:
         fields["followup"] = followup
     _event(ro, "completion-verify", None, fields, args)
@@ -6788,7 +6859,7 @@ def cmd_completion_verify(args) -> int:
         return _completion_run(args, path, ro, root, tasks_dir)
     state, attempt, last, streak = _completion_state(_completion_lines(note))
     tree, out = _completion_paths(root, ro, attempt)
-    if state not in COMPLETION_DECIDED and _attempt_running(out):
+    if state not in COMPLETION_DECIDED and _attempt_running(_attempt_lock(root, ro, attempt)):
         state = "in-flight"
     found = _find_note(tasks_dir, f"{COMPLETION_RED_PREFIX}{ro}") if state == "red" else None
     followup = found.stem if found else None

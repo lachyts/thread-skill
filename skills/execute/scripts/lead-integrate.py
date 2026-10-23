@@ -57,13 +57,13 @@ Subcommands:
       verify slot within Ws (held: …); verifier not run`, the exit is 75 and the race tree is still removed. An
       unusable slots dir logs a WARN and runs the steps unslotted, still under the guard.
       --outcome (reconcile-rollout.py completion-verify --run's, which calls verify in its own process while it
-      holds the attempt's O.lock, ADR 0052) adds two things and changes nothing else. It also removes
-      O.outcome.json first, and writes it, the run's structured result, at the start ({v, id, sha, ended:
-      "running"}) and again just before O.rc ({v, id, sha, ended, rc, step, signal}: ended done | deadline |
-      bootstrap | signal | noslot; step the step a deadline ended in), each by tmp + rename, so a reader
-      classifies a run by its fields, never by log text, and one that still reads `running` never finished. And
-      --detach-at's tree is locked with `pid <this process's pid>`, so the daily sweep's reaper leaves it alone,
-      and removed with `--force --force`.
+      holds the attempt's lock, ADR 0052) changes two things and nothing else. Its result is O.outcome.json, in
+      place of O.rc, which it never writes: removed first, then written at the start ({v, id, sha, ended:
+      "running"}) and again at the end ({v, id, sha, ended, rc, step, signal}: ended done | deadline | bootstrap
+      | signal | noslot; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
+      by its fields, never by log text, and one that still reads `running` never finished. And --detach-at's
+      tree is locked with `pid <this process's pid>`, so the daily sweep's reaper leaves it alone, and removed
+      with `--force --force`.
 
   push --repo R --slug S --head M
       A plain push of the task tree's M to origin/<branch> (never forced); the ls-remote read-back must
@@ -832,9 +832,11 @@ def cmd_verify(args):
             git(os.path.expanduser(args.repo), "worktree", "prune")
         if rc is not None:
             if outcome_path:
+                # --outcome's result is the outcome file alone: no O.rc, the file heartbeat clause (4) acts on.
                 result["rc"] = rc
                 _write_atomic(outcome_path, json.dumps(result) + "\n")
-            _write_atomic(rc_path, f"{rc}\n")
+            else:
+                _write_atomic(rc_path, f"{rc}\n")
     print(f"verify: rc={rc} (log {log_path})")
     if rc == "noslot":
         return 75
