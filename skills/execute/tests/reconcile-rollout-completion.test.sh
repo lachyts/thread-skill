@@ -332,7 +332,10 @@ PY
 scen c13 '"true"'
 python3 "$LI" verify --repo "$D/repo" --detach-at "$SHA" --tree "$D/race" --out "$(integ)/race-x" --timeout 60 --verifier true > /dev/null 2>&1
 ok "$?|$(cat "$(integ)/race-x.rc")" "0|0" "C13: a verify with no --outcome (Integration, RACE) runs as before"
-ok "$(ls "$(integ)" | grep -c 'race-x\.lock\|race-x\.outcome')" "0" "C13: … no lock, no outcome file"
+ok "$(ls "$(integ)" | grep -c 'race-x\.outcome')" "0" "C13: … no outcome file"
+python3 "$LI" verify --repo "$D/repo" --detach-at "$SHA" --tree "$D/race2" --out "$(integ)/race-y" --timeout 60 \
+  --verifier "git -C '$D/repo' worktree list --porcelain > '$D/wt-during.txt'" > /dev/null 2>&1
+ok "$(grep -c '^worktree .*/race2$' "$D/wt-during.txt")|$(grep -c '^locked' "$D/wt-during.txt")" "1|0" "C13: … and its tree, read while it runs, is not locked"
 python3 "$LI" verify --outcome --tree "$D/repo" --out "$(integ)/oc-x" --timeout 60 --verifier true > /dev/null 2>&1
 ok "$(test -e "$(integ)/oc-x.rc" && echo rc || echo none)|$(test -e "$(integ)/oc-x.outcome.json" && echo outcome)" "none|outcome" "C13: verify --outcome writes its outcome in place of an rc (the file heartbeat clause (4) acts on)"
 

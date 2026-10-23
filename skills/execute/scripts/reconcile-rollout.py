@@ -3040,20 +3040,26 @@ def _is_kind(path, kind) -> bool:
         return False
 
 
-def _arm_task_window(args, slug, rollout_path) -> int:
-    """mark-started's arm (p26-3): `git-env-canary.py arm --kind task` as a subprocess, so the canary keeps its own
-    lock, git-env scrub and exit codes; its stdout and stderr pass through. An OSError or a signal counts as 2."""
-    cmd = [sys.executable, str(GIT_ENV_CANARY_PY), "arm", "--rollout", str(rollout_path),
-           "--tasks-dir", str(Path(os.path.expanduser(args.tasks_dir))), "--repo", args.arm_repo,
-           "--default", args.arm_default, "--slug", slug, "--kind", "task"]
+def _run_canary(verb, rollout_path, tasks_dir, repo, default, slug, kind, stdout=None) -> int:
+    """`git-env-canary.py <verb>` for one window as a subprocess, so the canary keeps its own lock, git-env scrub and
+    exit codes; its stderr passes through, its stdout too unless `stdout` redirects it. An OSError or a signal
+    counts as 2."""
+    cmd = [sys.executable, str(GIT_ENV_CANARY_PY), verb, "--rollout", str(rollout_path), "--tasks-dir",
+           str(tasks_dir), "--repo", str(repo), "--default", default, "--slug", slug, "--kind", kind]
     sys.stdout.flush()
     sys.stderr.flush()
     try:
-        rc = subprocess.run(cmd, stdin=subprocess.DEVNULL).returncode
+        rc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=stdout).returncode
     except OSError as e:
         print(f"git-env-canary: cannot run {GIT_ENV_CANARY_PY}: {e}", file=sys.stderr)
         return 2
     return 2 if rc < 0 else rc
+
+
+def _arm_task_window(args, slug, rollout_path) -> int:
+    """mark-started's arm (p26-3): _run_canary's `arm --kind task`."""
+    return _run_canary("arm", rollout_path, Path(os.path.expanduser(args.tasks_dir)), args.arm_repo,
+                       args.arm_default, slug, "task")
 
 
 def _arm_gate(args, slug, rollout, cache):
@@ -6369,9 +6375,7 @@ def cmd_verify_timeout(args) -> int:
     try:
         # The completion verify's keys, read at every entry, so a value its reader refuses halts before any work
         # runs, never only at the ceremony after every task merged.
-        if _completion_verifier(note):
-            _command_value(note, "env_bootstrap")
-            _completion_timeout(note)
+        _completion_config(note)
     except CompletionValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
@@ -6390,27 +6394,24 @@ def cmd_verify_timeout(args) -> int:
 
 COMPLETION_VERIFIER_KEY = "completion_verifier"
 COMPLETION_TIMEOUT_KEY = "completion_timeout"
+ENV_BOOTSTRAP_KEY = "env_bootstrap"
 DEFAULT_COMPLETION_TIMEOUT = 3600   # the full suite's own deadline, never verify_timeout (a fast tier's), ADR 0052
 COMPLETION_VERIFY_SECTION = "## Completion verify log"
 COMPLETION_RED_PREFIX = "completion-red-"   # never prefix-matches `<slug>-rollout-<date>*`, as phase-close-followup-
 COMPLETION_KIND = "completion-verify"       # the canary window's kind; its slug is the rollout's own stem
 # Every result a run is recorded as. `noslot`, `unrun` and `stopped` are no verdict and move no attempt; `stopped`
 # (verify's own signal: a hard pause, a room stop) is deliberate, so it never counts toward the halt streak either.
-COMPLETION_RESULTS = ("green", "rerun", "flake", "red", "noslot", "unrun", "stopped")
 COMPLETION_DECIDED = ("green", "flake", "red")
-COMPLETION_NO_VERDICT = ("noslot", "unrun", "stopped")
 COMPLETION_STREAK = ("noslot", "unrun")
+COMPLETION_NO_VERDICT = (*COMPLETION_STREAK, "stopped")
+COMPLETION_RESULTS = (*COMPLETION_DECIDED, "rerun", *COMPLETION_NO_VERDICT)
 COMPLETION_HALT_STREAK = 3   # no-verdict runs in a row before the lead halts, as the RACE re-verify does
-COMPLETION_LINE_RE = re.compile(r"^- (?P<at>\S+) attempt (?P<n>[12]) at (?P<sha>[0-9a-f]{40}|-) "
-                                r"rc (?P<rc>\S+) -> "
-                                rf"(?P<result>{'|'.join(COMPLETION_RESULTS)})\b.*?(?:\(run (?P<run>[\w.-]+);.*)?$")
-# The attempt's lock (_attempt_lock, in the git dir, held for the attempt's whole life) and verify --outcome's
-# result beside <out>.
-VERIFY_LOCK_SUFFIX = ".lock"
+COMPLETION_LINE_RE = re.compile(r"^- \S+ attempt (?P<n>[12]) at (?P<sha>[0-9a-f]{40}|-) rc (?P<rc>\S+) -> "
+                                rf"(?P<result>{'|'.join(COMPLETION_RESULTS)})\b")
+# verify --outcome's result beside <out>; the attempt's lock is _attempt_lock's, in the git dir.
 ATTEMPT_LOCK_WAIT = 2.0      # seconds --run retries its lock, outlasting a reader's microsecond shared probe
 ORIGIN_TIMEOUT = 120         # seconds for each origin read before verify (ls-remote, fetch): a hang is a halt
 VERIFY_OUTCOME_SUFFIX = ".outcome.json"
-GIT_ENV_CANARY_PY = Path(__file__).resolve().parent / "git-env-canary.py"
 DEFAULT_BRANCH_SH = Path(__file__).resolve().parent / "default-branch.sh"
 # Best-effort failing-test ids for the fix task, one pattern per common runner; the log path always goes with them.
 FAILING_ID_RES = (
@@ -6467,9 +6468,15 @@ def _command_value(note, key):
     return cmd
 
 
-def _completion_verifier(note):
-    """The rollout note's `completion_verifier:` command, read by _command_value."""
-    return _command_value(note, COMPLETION_VERIFIER_KEY)
+def _completion_config(note):
+    """(verifier, env_bootstrap, completion_timeout) for the completion verify, each read by its own reader, or
+    ('', '', None) when the note declares no `completion_verifier:` (the other two are then never read). The one
+    reader every caller uses: verify-timeout at each entry, the read and --run. CompletionValueError on a value a
+    reader refuses."""
+    verifier = _command_value(note, COMPLETION_VERIFIER_KEY)
+    if not verifier:
+        return "", "", None
+    return verifier, _command_value(note, ENV_BOOTSTRAP_KEY), _completion_timeout(note)
 
 
 def _completion_timeout(note):
@@ -6492,15 +6499,16 @@ def _completion_lines(note):
         m = COMPLETION_LINE_RE.match(line.strip())
         # A verdict names the tree it ran on: one at `-` is not --run's, so it is skipped like any unparsed line.
         if m and (m.group("sha") != "-" or m.group("result") in COMPLETION_NO_VERDICT):
-            out.append(dict(m.groupdict(), n=int(m.group("n")), line=line.strip()))
+            out.append(dict(m.groupdict(), n=int(m.group("n"))))
     return out
 
 
-def _completion_state(lines):
-    """(state, attempt, last, streak) from the parsed log lines: `run` (no verdict yet: attempt 1 on a fresh
+def _completion_state(note):
+    """(state, attempt, last, streak) from the note's parsed log lines (_completion_lines): `run` (no verdict yet: attempt 1 on a fresh
     origin/<default>), `rerun` (attempt 1 was red: attempt 2 on its sha), or the decided `green`, `flake` or `red`.
     A no-verdict line moves nothing. last: the deciding line, or None; streak: the COMPLETION_STREAK lines at the
     log's tail, a `stopped` one skipped."""
+    lines = _completion_lines(note)
     streak = 0
     for d in reversed(lines):
         if d["result"] == "stopped":
@@ -6556,7 +6564,7 @@ def _attempt_lock(root, ro, attempt):
     except (OSError, subprocess.TimeoutExpired):
         return None
     d = p.stdout.strip()
-    return Path(d) / "thread" / f"completion-{ro}-{attempt}{VERIFY_LOCK_SUFFIX}" if p.returncode == 0 and d else None
+    return Path(d) / "thread" / f"completion-{ro}-{attempt}.lock" if p.returncode == 0 and d else None
 
 
 def _attempt_running(lock) -> bool:
@@ -6596,7 +6604,7 @@ def _find_note(tasks_dir: Path, stem: str):
     if root.exists():
         return root
     archive = tasks_dir / "Archive"
-    return next(iter(sorted(archive.rglob(f"{stem}.md"))), None) if archive.is_dir() else None
+    return next(archive.rglob(f"{stem}.md"), None) if archive.is_dir() else None
 
 
 def _write_completion_red(path: Path, note, ro, verifier, sha, rc, why, log, ids, now):
@@ -6658,24 +6666,10 @@ def _git_env_trips(note, slug, kind):
     return sum(1 for line in note.section_text(GIT_ENV_LOG_SECTION).split("\n") if want in line)
 
 
-def _canary(verb, path, tasks_dir, root, default, ro):
-    """git-env-canary.py <verb> for the completion verify's window; its output goes to stderr (--run's stdout is its
-    one JSON line). Returns its exit code."""
-    p = subprocess.run([sys.executable, str(GIT_ENV_CANARY_PY), verb, "--rollout", str(path), "--tasks-dir",
-                        str(tasks_dir), "--repo", str(root), "--default", default, "--slug", ro, "--kind",
-                        COMPLETION_KIND], capture_output=True, text=True)
-    sys.stderr.write(p.stdout + p.stderr)
-    return p.returncode
-
-
-def _completion_json(**kw):
-    print(json.dumps(kw))
-
-
 def _completion_not_ran(state, attempt, streak, **extra):
     """--run's line when it ran nothing: decided already, another --run holds the attempt, or a refusal."""
-    _completion_json(ran=False, state=state, result=state if state in COMPLETION_DECIDED else None,
-                     decided=state in COMPLETION_DECIDED, attempt=attempt, streak=streak, halt=False, **extra)
+    print(json.dumps(dict(ran=False, state=state, result=state if state in COMPLETION_DECIDED else None,
+                          decided=state in COMPLETION_DECIDED, attempt=attempt, streak=streak, halt=False, **extra)))
 
 
 def _completion_run(args, path, ro, root, tasks_dir) -> int:
@@ -6686,7 +6680,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
         print("ERROR: completion-verify: --run needs fcntl (POSIX); nothing run", file=sys.stderr)
         return 2
     note = Note(path)
-    state, attempt, last, streak = _completion_state(_completion_lines(note))
+    state, attempt, last, streak = _completion_state(note)
     if state in COMPLETION_DECIDED:
         _completion_not_ran(state, attempt, streak)
         return 0
@@ -6713,14 +6707,12 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
             time.sleep(0.05)
     # Read again under the lock: another --run may have recorded this attempt just before it let go.
     note = Note(path)
-    state2, attempt2, last, streak = _completion_state(_completion_lines(note))
+    state2, attempt2, last, streak = _completion_state(note)
     if (state2, attempt2) != (state, attempt):
         _completion_not_ran(state2, attempt2, streak)
         return 0
     try:
-        verifier = _completion_verifier(note)
-        bootstrap = _command_value(note, "env_bootstrap")
-        timeout = _completion_timeout(note)
+        verifier, bootstrap, timeout = _completion_config(note)
     except CompletionValueError as e:
         print(f"ERROR: completion-verify: {e}; nothing run", file=sys.stderr)
         return 2
@@ -6745,11 +6737,10 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
         return 1
     if attempt == 1:
         rc, _o, why = origin(["git", "-C", str(root), "fetch", "--quiet", "origin", default])
-        if rc == 0:
-            rc, sha, why = origin(["git", "-C", str(root), "rev-parse", "--verify",
-                                   f"refs/remotes/origin/{default}^{{commit}}"])
-        if rc != 0 or not re.fullmatch(r"[0-9a-f]{40}", sha):
-            print(f"ERROR: completion-verify: origin unread: {why}; nothing run", file=sys.stderr)
+        sha = li.rev(root, f"refs/remotes/origin/{default}") if rc == 0 else ""
+        if not sha:
+            print(f"ERROR: completion-verify: origin unread: {why or f'no origin/{default}'}; nothing run",
+                  file=sys.stderr)
             return 1
     else:
         sha = last["sha"]
@@ -6761,7 +6752,8 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     li.git(root, "worktree", "prune")
     shutil.rmtree(tree, ignore_errors=True)
     trips = _git_env_trips(Note(path), ro, COMPLETION_KIND)   # read right before the arm: the window's baseline
-    arm = _canary("arm", path, tasks_dir, root, default, ro)
+    # The canary's own words go to stderr: --run's stdout is its one JSON line.
+    arm = _run_canary("arm", path, tasks_dir, root, default, ro, COMPLETION_KIND, stdout=sys.stderr)
     if arm != 0:
         _completion_not_ran(state, attempt, streak, git_env="arm", canary_exit=arm)
         return 4
@@ -6769,7 +6761,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     # still lands inside it and a cap's TERM never stops a run that was on time.
     spent = time.monotonic() - started
     ns = argparse.Namespace(outcome=True, repo=str(root), detach_at=sha, tree=tree, out=out, timeout=float(timeout),
-                            slots=slots, slot_wait=float(max(VERIFY_SLOT_WAIT_MIN, _slot_wait(timeout) - spent)),
+                            slots=slots, slot_wait=float(_slot_wait(timeout + spent)),
                             bootstrap=bootstrap, verifier=verifier)
     refusal = None
     try:
@@ -6788,7 +6780,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
                 log_path.write_text(refusal + "\n")
             except OSError:
                 pass
-    check = _canary("check", path, tasks_dir, root, default, ro)
+    check = _run_canary("check", path, tasks_dir, root, default, ro, COMPLETION_KIND, stdout=sys.stderr)
     note = Note(path)   # fresh: the canary may have written its log
     outcome_path = Path(f"{out}{VERIFY_OUTCOME_SUFFIX}")
     outcome = _read_outcome(outcome_path)
@@ -6831,10 +6823,11 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
         outcome_path.unlink(missing_ok=True)
     except OSError:
         pass
-    _s, _a, _l, streak = _completion_state(_completion_lines(note))
-    _completion_json(ran=True, result=result, decided=result in COMPLETION_DECIDED, attempt=attempt, streak=streak,
-                     halt=_completion_halts(result, streak), line=line[2:], followup=followup,
-                     **({"canary_exit": check} if check != 0 else {}))
+    # The tail rule _completion_state reads back: a no-verdict run counts, a stop is skipped, a verdict restarts it.
+    streak = streak + 1 if result in COMPLETION_STREAK else streak if result == "stopped" else 0
+    print(json.dumps(dict(ran=True, result=result, decided=result in COMPLETION_DECIDED, attempt=attempt,
+                          streak=streak, halt=_completion_halts(result, streak), line=line[2:], followup=followup,
+                          **({"canary_exit": check} if check != 0 else {}))))
     return 4 if check != 0 else 0
 
 
@@ -6848,10 +6841,7 @@ def cmd_completion_verify(args) -> int:
         return 1
     try:
         note = Note(path)
-        verifier = _completion_verifier(note)
-        if verifier:
-            _command_value(note, "env_bootstrap")
-            _completion_timeout(note)
+        verifier, _bootstrap, _timeout = _completion_config(note)
     except ValueError as e:
         print(f"ERROR: completion-verify: {e}", file=sys.stderr)
         return 2 if isinstance(e, CompletionValueError) else 1
@@ -6870,7 +6860,7 @@ def cmd_completion_verify(args) -> int:
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     if args.run:
         return _completion_run(args, path, ro, root, tasks_dir)
-    state, attempt, last, streak = _completion_state(_completion_lines(note))
+    state, attempt, last, streak = _completion_state(note)
     tree, out = _completion_paths(root, ro, attempt)
     if state not in COMPLETION_DECIDED and _attempt_running(_attempt_lock(root, ro, attempt)):
         state = "in-flight"
