@@ -3,7 +3,7 @@
 
 The lead session (execute § 4.5 *Git-env canary*) opens a **window** around every launch that can run agents or a
 verifier against the rollout's shared checkout R (its `Project root:`): a task call, a seeded revise, an integrate
-call, a *Lost call* or § 3.7 resume, the lead's own Integration verify and a RACE re-verify. A task call's window (a
+call, a *Lost call* or § 3.7 resume, the lead's own Integration verify, a RACE re-verify and the completion verify. A task call's window (a
 start, a restart, a seeded revise or a room-stopped call's resume) is armed by `reconcile-rollout.py mark-started
 --arm-repo <R> --arm-default <B>` itself (p26-3), which runs `arm` before any write and passes its exit code through;
 the lead runs `arm` directly for the rest. `arm` records R's `refs/heads/<B>` and its effective bareness before the
@@ -15,7 +15,7 @@ own. Stdlib only, POSIX only (fcntl), like every script in this repo.
 Verbs (every verb takes --rollout <note>; every verb but `restore` takes --tasks-dir <dir>, default
 reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
 
-  arm --repo R --default B --slug S --kind task|integrate|verify|race-verify
+  arm --repo R --default B --slug S --kind task|integrate|verify|race-verify|completion-verify
         Runs the common pass (below), then writes this window's open `armed` record, with the ref of the pass's
         single state read, only when the pass exits 0. R bare at arm is itself a trip (`core.bare true at arm`;
         no record). Under a hold it exits 3 and writes no record. A retired rollout: exit 2, nothing created.
@@ -64,7 +64,9 @@ an unacked trip or any record reads `tripped`, else 0.
 Owner rule: an `armed` window can only be open while its vault owner holds: kind `task` while the task note's queue
 state is `running`; `integrate`, `verify` and `race-verify` while the note holds the Integration lane
 (reconcile-rollout.py `_holds_lane`: `review` with a `pr:` and `integrating:`, or a current `integrated`
-Integration-log line, the window an integrate call's reconciled row leaves before step 4's RACE re-verify). A note
+Integration-log line, the window an integrate call's reconciled row leaves before step 4's RACE re-verify);
+`completion-verify` (estate ADR 0009 d6: the ceremony's run of the rollout's `completion_verifier`, its slug the
+rollout's own stem) while the rollout note is not done, so its check comes before the ceremony's `status: done`. A note
 missing from an existing tasks dir counts as holding (fail-closed), with a stderr WARN. An orphan is compared once
 and closed. `arm` refuses a window whose owner does not hold.
 
@@ -123,7 +125,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-KINDS = ("task", "integrate", "verify", "race-verify")
+KINDS = ("task", "integrate", "verify", "race-verify", "completion-verify")
 LOCK_TIMEOUT = 30.0
 
 
@@ -445,6 +447,8 @@ class Ctx:
 
     # -- the owner rule
     def owner_holds(self, rec):
+        if rec["kind"] == "completion-verify":
+            return rec["slug"].lower() == self.stem.lower() and RR._status(self.note()) != "done"
         if self._index is None:
             tasks_dir = self.tasks_dir or DEFAULT_TASKS_DIR
             self._index = _scan(self.rollout, tasks_dir)[1]
@@ -583,6 +587,9 @@ def cmd_arm(ctx, args):
             # Only the § 4 stamp: mark-started's own arm (p26-3) runs this, so naming mark-started would be circular.
             raise CanaryError(f"refused: [[{args.slug}]] is not running (status {st}): stamp status: in_progress "
                               "(execute § 4) first; nothing armed")
+        if args.kind == "completion-verify":
+            raise CanaryError(f"refused: a completion-verify window is the rollout's own ([[{ctx.stem}]]) and opens "
+                              "only before its status: done stamp; nothing armed")
         raise CanaryError(f"refused: [[{args.slug}]] holds no integrating: — run reconcile-rollout.py "
                           "mark-integrating first; nothing armed")
     rc, state, recs = _pass(ctx, want_state=True)

@@ -143,6 +143,14 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      >= 1: the raised max_review_rounds); quotaRetries? (int >= 1: quota_retries_used after a quota
                      retry). p16-4, ADR 0033: reconcile-rollout.py auto-retry, execute's automatic retry of a
                      set-aside task.
+  completion-verify  result (green | rerun | flake | red | noslot | unrun | stopped), rc, sha, attempt (int 1 or 2); log?,
+                     followup?
+                     (estate ADR 0009 d6: reconcile-rollout.py completion-verify, one line per run of a rollout's
+                     completion_verifier on merged origin/<default> at its completion ceremony; rc the run's
+                     verbatim, 0-255, noslot or absent; rerun is attempt 1's red, re-run on the same sha; flake a
+                     green attempt 2 after it; noslot (no verify slot), unrun (verify died, or the env_bootstrap never
+                     let the suite run) and stopped (verify's own signal stop) no verdict, the attempt runs again;
+                     followup the fix task a final red filed).
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
@@ -667,6 +675,8 @@ KINDS = {
                           "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
                           "used": _int(0), "budget": _int(1)},
                    {"fingerprint": _str, "reviewRounds": _int(1), "quotaRetries": _int(1)}),
+    "completion-verify": (False, {"result": _enum("green", "rerun", "flake", "red", "noslot", "unrun", "stopped"), "rc": _str, "sha": _str,
+                                  "attempt": _int(1)}, {"log": _str, "followup": _str}),
     "call-journal": (False, {"runId": _str, "status": _str},
                      {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),
                       "startTime": _int(0)}),
