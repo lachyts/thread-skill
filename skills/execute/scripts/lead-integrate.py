@@ -45,7 +45,8 @@ Subcommands:
       rc 128+n. They are held while a step starts, so one landing before its group is recorded still kills it,
       and each step starts with the caller's signal mask. --detach-at adds T as a detached worktree of R at SHA
       (refusing an existing path) and removes it (`worktree remove --force`) whatever the verdict: the RACE
-      re-verify.
+      re-verify. Only the verifier's rc is a verdict: a green bootstrap sets none, so a verifier step that never
+      starts leaves no O.rc (red), never the bootstrap's 0.
       --slots N --slot-wait W (given together or not at all; one alone is exit 2 with no rc file) first waits,
       up to W seconds, for one of the machine's N verify slots (verify-slot.py, p23-4), as an Integration waiter
       (the priority: agents' runs wait while it does), logging `verify: waiting for one of N verify slots (…)`
@@ -841,8 +842,11 @@ def cmd_verify(args):
                         rc = got
                         result["ended"] = "bootstrap"
                         break
-                    rc = got
-                    result["ended"] = "done"
+                    if name == "verifier":
+                        # Only the verifier's own rc is the verdict: a green bootstrap sets nothing, so a verifier
+                        # step that never starts (a raise) leaves no rc, which reads as red.
+                        rc = got
+                        result["ended"] = "done"
     except _Signalled as s:
         if _live["proc"] is not None:
             _stop_live(_live["proc"])
