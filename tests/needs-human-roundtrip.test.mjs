@@ -11,7 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { runTask } from './lib/engine.mjs'
+import { runTask, VERIFY_SLOT } from './lib/engine.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const RECONCILE = path.join(root, 'skills', 'execute', 'scripts', 'reconcile-rollout.py')
@@ -34,6 +34,7 @@ const Q = 'Which retention window should the cache use: 7 or 30 days?'
 const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
 const mkArgs = (over = {}) => ({
   rolloutSlug: ROLLOUT, repoPath: '/repo', verifier: 'make test', date: '2026-10-09',
+  verifySlot: VERIFY_SLOT, // required (estate ADR 0009 d4)
   task: { slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, rung: 'opus-xhigh', ...over },
 })
 

@@ -14,7 +14,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import vm from 'node:vm'
 import path from 'node:path'
-import { loadEngine, enginePath } from './lib/engine.mjs'
+import { loadEngine, enginePath, VERIFY_SLOT } from './lib/engine.mjs'
 
 const T = loadEngine([
   'GIT_ENV_SCRUB', 'GIT_ENV_RULE', 'scrubbed', 'worktreeSetup', 'ralphLoop', 'oneShotVerify',
@@ -143,15 +143,14 @@ test('(f) every inline code span that runs git starts with the scrub', () => {
 })
 
 // p23-4: the same two rules with args.verifySlot set, the integrator (its `--priority` line) included.
-const SLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
 test('(e) with verifySlot: every verifier-bearing prompt renders the wrapped line, scrubbed, after GIT_ENV_RULE', () => {
-  for (const a of [{ repoPath: '/repo', verifier: 'make test', verifySlot: SLOT }, { repoPath: '/repo', verifier: 'make test', knownBaselineFailures: ['t — env'], verifySlot: SLOT }]) {
+  for (const a of [{ repoPath: '/repo', verifier: 'make test', verifySlot: VERIFY_SLOT }, { repoPath: '/repo', verifier: 'make test', knownBaselineFailures: ['t — env'], verifySlot: VERIFY_SLOT }]) {
     const all = builders(a)
     for (const [name, prompts] of Object.entries(all)) {
       for (const p of prompts) {
         assert.equal(count(p, T.GIT_ENV_RULE), 1, `${name}: GIT_ENV_RULE once`)
         if (VERIFYING.includes(name)) {
-          const line = T.slotted('make test', name === 'integratorPrompt' ? { ...SLOT, priority: true } : SLOT)
+          const line = T.slotted('make test', name === 'integratorPrompt' ? { ...VERIFY_SLOT, priority: true } : VERIFY_SLOT)
           assert.ok(line.startsWith(`${SCRUB} python3 `), line)
           const v = p.indexOf(line)
           assert.ok(v > -1, `${name}: renders the wrapped verifier`)
@@ -164,7 +163,7 @@ test('(e) with verifySlot: every verifier-bearing prompt renders the wrapped lin
 })
 
 test('(f) with verifySlot: every inline code span that runs git starts with the scrub; SLOT_TEXT has no git span', () => {
-  const a = { repoPath: '/repo', verifier: 'git status && make test', verifySlot: SLOT }
+  const a = { repoPath: '/repo', verifier: 'git status && make test', verifySlot: VERIFY_SLOT }
   for (const [name, prompts] of Object.entries(builders(a))) {
     for (const p of prompts) {
       for (const [, span] of p.matchAll(/`([^`\n]*)`/g)) {

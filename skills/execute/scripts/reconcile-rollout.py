@@ -384,7 +384,8 @@ Subcommands:
 
   verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2, p23-4): given a rollout
               note, print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
-              max(60, 7200 - 600 - N), "verifySlots": V} from its `verify_timeout` frontmatter (an integer
+              max(60, 7200 - 600 - N), "verifySlots": V, "verifySlot": {"script": <abs verify-slot.py>,
+              "slots": V}} from its `verify_timeout` frontmatter (an integer
               from 1 to 6600; absent -> 1800; a quoted value or a trailing ` # comment` is read as
               `parallel_ceiling` is) and the machine's `verify_slots` (rollout-settings.py resolve(repo=None):
               rollouts.toml's [defaults], else the built-in 2; never read from the note). harnessTimeoutMs is
@@ -5044,6 +5045,7 @@ AUTO_RETRY_STAGES = ("plan", "implement", "verify", "review", "integrate")  # se
 # (frontmatter key, the budget's JSON key, the least valid value): what _retry_budget resolves.
 RETRY_BUDGET_KEYS = (("auto_retries", "autoRetries", 0), ("max_review_rounds", "maxReviewRounds", 1))
 LEAD_INTEGRATE_PY = Path(__file__).resolve().parent / "lead-integrate.py"
+VERIFY_SLOT_PY = Path(__file__).resolve().parent / "verify-slot.py"
 _LEAD = None
 
 
@@ -6260,7 +6262,8 @@ def cmd_await_sign_off(args) -> int:
 def cmd_verify_timeout(args) -> int:
     """The lead's per-entry check of the rollout's `verify_timeout` and the machine's `verify_slots` (execute § 3,
     p14-2, p23-4). Read-only. Valid: one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
-    max(60, 7200 - 600 - N), "verifySlots": V}, exit 0. A bad verify_timeout or no note: one ERROR line on stderr,
+    max(60, 7200 - 600 - N), "verifySlots": V, "verifySlot": {"script": <this script's sibling verify-slot.py>,
+    "slots": V}}, exit 0: `verifySlot` is the engine's args.verifySlot, copied verbatim (execute § 4). A bad verify_timeout or no note: one ERROR line on stderr,
     exit 1 (checked first). A refused rollouts.toml: `ERROR: rollout settings refused: …`, exit 3. Either way the
     lead's entry writes nothing."""
     path = Path(os.path.expanduser(args.rollout))
@@ -6287,7 +6290,8 @@ def cmd_verify_timeout(args) -> int:
         return 3
     print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000,
                       "slotWait": max(VERIFY_SLOT_WAIT_MIN, HARNESS_MAX_S - VERIFY_HARNESS_MARGIN - seconds),
-                      "verifySlots": slots}))
+                      "verifySlots": slots,
+                      "verifySlot": {"script": str(VERIFY_SLOT_PY), "slots": slots}}))
     return 0
 
 

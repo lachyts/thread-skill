@@ -17,6 +17,12 @@ required while the Project root exists, before any write.)*
 *(Amended 2026-10-21 by thread-skill-p28-1: decision 1's "only dependencies and a solo task hold a task back" gains, by
 day, the Trickle: while Lachy is not Away, `next` starts nothing past a machine-wide count of running Rollout tasks
 (Chorus ADR 0104; skills/execute/away.md).)*
+*(Amended by ADR 0045, 2026-10-21: the Inert-path skip.)*
+*(Amended by ADR 0046, 2026-10-21: a Bookkeeping miss never trips; a trip holds only what it threatens; a RACE red
+twice is reverted.)*
+*(Amended by ADR 0048, 2026-10-21: scoped holds, and the Watchdog.)*
+*(Amended by ADR 0049, 2026-10-21: the Away cap.)*
+*(Amended by ADR 0050, 2026-10-21: the Flake rule.)*
 
 ## Context
 
