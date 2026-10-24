@@ -1023,10 +1023,11 @@ ISO_STAMP_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?
 # ---- small value helpers ----------------------------------------------------
 
 def _scalar(value) -> str:
-    """A frontmatter scalar: inline ` # comment` dropped, quotes and whitespace stripped ('' for None)."""
+    """A frontmatter scalar: inline ` # comment` dropped, quotes and whitespace stripped ('' for None). A value that is
+    only a comment is '' (YAML's null): Note.get has already stripped the space before it."""
     if value is None:
         return ""
-    s = re.sub(r"\s+#.*$", "", str(value)).strip()
+    s = re.sub(r"(^|\s+)#.*$", "", str(value)).strip()
     return s.strip('"').strip("'").strip()
 
 
@@ -6627,7 +6628,7 @@ def _completion_timeout(note):
         raise CompletionValueError(f"{COMPLETION_TIMEOUT_KEY}: continues on a later line; write the seconds on its "
                                    "own line")
     raw = note.get(COMPLETION_TIMEOUT_KEY)
-    if raw is None or _scalar(_drop_comment(raw)).lower() in ("", "null", "~"):
+    if raw is None or not _valued(raw):
         return DEFAULT_COMPLETION_TIMEOUT   # empty, quoted empty, a comment alone (the template's line), null or ~
     seconds, err = _verify_timeout(note, COMPLETION_TIMEOUT_KEY)
     if err:

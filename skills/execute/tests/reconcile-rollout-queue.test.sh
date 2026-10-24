@@ -1046,6 +1046,21 @@ mkt x open
 J=$(nxt --dry-run); rc=$?
 ok "$rc|$(q "$J" 'd["start"]')" '0|["x"]' "serial control: shape: parallel with a Project root runs as today"
 
+# ── a comment-only value reads as no value (_scalar; YAML reads `key:   # x` as null) ─────────────────────────
+# Note.get strips the space before the comment, so `_scalar` once saw `# cleared` with no space to drop and read it
+# as a value: a rollout whose paused: stamp was cleared to a comment read as paused, a task with `integrating:   # x`
+# as integrating.
+scen comment-only
+mkro $'- [[x]]' 'paused:   # cleared by hand'
+mkt x open
+J=$(nxt --dry-run)
+ok "$(q "$J" '[d["paused"], d["halt"], d["start"]]')" '[null,null,["x"]]' "comment-only: paused:   # cleared → not paused, x starts"
+scen comment-only-integrating
+mkro $'- [[x]]'
+mkt x review 'pr: https://github.com/o/r/pull/1' 'integrating:   # none yet'
+J=$(nxt --dry-run)
+ok "$(q "$J" '[d["integrating"], d["awaitingIntegration"]]')" '[[],["x"]]' "comment-only: integrating:   # none yet → awaiting Integration, never integrating"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-queue: ALL PASS"; else echo "reconcile-rollout-queue: FAILED"; fi
 exit "$fail"
