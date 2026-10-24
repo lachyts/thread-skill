@@ -22,3 +22,8 @@ The completion verifier (the vault task `thread-skill-the-rollout-runs-its-full-
 - **Keep the multi-entry shape and fix round 6's findings in place:** rejected. Each round's fixes to that seam drew more regressions than they fixed.
 - **verify inside `--run`'s own process** (the first build of this shape): rejected after review rounds 2, 4 and 5 kept finding signal state leaking between the two (dispositions left ignored, a TaskStop swallowed during cleanup, a second signal escaping as a refusal).
 - **Both attempts in one process,** so the lead only ever sees decided results: rejected. A 40-minute suite run twice, plus slot waits, can go past the 2 h background cap, and a `rerun` read is cheap.
+
+## Consequences
+
+- Attempt 2 runs the note's command as it is when it starts, and resolves the default branch through origin as attempt 1 does. An edit to the command between attempts is the operator's own act, and an origin outage halts the ceremony, which re-invocation clears.
+- A git-env trip inside an attempt's window is found by counting the canary's own trip lines for that window before the arm and after the check, because the canary's `ack` re-baselines an open window. A trip memory in the canary record, which `check` would report for every window kind, is the deeper fix and is left to its own task.

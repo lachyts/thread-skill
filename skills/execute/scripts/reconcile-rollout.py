@@ -6409,7 +6409,7 @@ COMPLETION_STREAK = ("noslot", "unrun")
 COMPLETION_NO_VERDICT = (*COMPLETION_STREAK, "stopped")
 COMPLETION_RESULTS = (*COMPLETION_DECIDED, "rerun", *COMPLETION_NO_VERDICT)
 COMPLETION_HALT_STREAK = 3   # no-verdict runs in a row before the lead halts, as the RACE re-verify does
-COMPLETION_LINE_RE = re.compile(r"^- \S+ attempt (?P<n>[12]) at (?P<sha>[0-9a-f]{40}|-) rc (?P<rc>\S+) -> "
+COMPLETION_LINE_RE = re.compile(r"^- \S+ attempt (?P<n>[12]) at (?P<sha>[0-9a-f]{40}(?:[0-9a-f]{24})?|-) rc (?P<rc>\S+) -> "
                                 rf"(?P<result>{'|'.join(COMPLETION_RESULTS)})\b")
 # verify --outcome's result beside <out>; the attempt's lock is _attempt_lock's, in the git dir.
 ATTEMPT_LOCK_WAIT = 2.0      # seconds --run retries its lock, outlasting a reader's microsecond shared probe
@@ -6432,6 +6432,17 @@ class CompletionValueError(ValueError):
     pass
 
 
+def _continued(note, key):
+    """True when the key's value goes on below its own line: the next line that is not blank is indented and no
+    comment (YAML folds a plain scalar across blank lines, and reads a value under an empty key)."""
+    lines = note._fm
+    i = next((n for n, line in enumerate(lines) if re.match(rf"^{re.escape(key)}:", line)), None)
+    if i is None:
+        return False
+    nxt = next((line for line in lines[i + 1:] if line.strip()), "")
+    return bool(re.match(r"^[ \t]+[^\s#]", nxt))
+
+
 def _command_value(note, key):
     """A frontmatter command (`completion_verifier:`, `env_bootstrap:`): '' when absent, empty, a comment alone,
     `null` or `~`. A quoted value is the text inside its quotes, then nothing but an optional ` # comment`; a bare one
@@ -6441,14 +6452,13 @@ def _command_value(note, key):
     an escape inside double quotes, text after the closing quote, a bare value starting with a YAML indicator or
     `- `, or a bare value holding `: ` or ending in `:`."""
     raw = None
-    for i, line in enumerate(note._fm):
+    for line in note._fm:
         m = re.match(rf"^{re.escape(key)}:(.*)$", line)
         if m:
             raw = m.group(1).strip()
-            if i + 1 < len(note._fm) and re.match(r"^[ \t]+[^\s#]", note._fm[i + 1]):   # an indented comment is no value
-                raise CompletionValueError(f"{key}: continues on the next line; write the command on one line, "
-                                           "quoted")
             break
+    if raw is not None and _continued(note, key):
+        raise CompletionValueError(f"{key}: continues on a later line; write the command on one line, quoted")
     raw = raw or ""
     if raw[:1] in ("'", '"'):
         q = raw[0]
@@ -6488,6 +6498,9 @@ def _completion_timeout(note):
     """`completion_timeout`, read by _verify_timeout under its own key, so a fast tier's verify_timeout never bounds
     the full suite (ADR 0052): absent, empty, a comment alone, `null` or `~` -> DEFAULT_COMPLETION_TIMEOUT, as the
     command keys read the same forms as none; anything else invalid -> CompletionValueError."""
+    if _continued(note, COMPLETION_TIMEOUT_KEY):
+        raise CompletionValueError(f"{COMPLETION_TIMEOUT_KEY}: continues on a later line; write the seconds on its "
+                                   "own line")
     raw = note.get(COMPLETION_TIMEOUT_KEY)
     if raw is None or _scalar(re.sub(r"(^|\s+)#.*$", "", raw)).lower() in ("", "null", "~"):
         return DEFAULT_COMPLETION_TIMEOUT   # empty, quoted empty, a comment alone (the template's line), null or ~
@@ -6734,6 +6747,17 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
         print(f"ERROR: completion-verify: rollout settings refused: {err}; nothing run", file=sys.stderr)
         return 1
     li = _lead()
+    reading = []   # the origin read in flight, so a stop before verify ends it too
+
+    def stop_early(signum, _frame):
+        """A stop before verify starts: end the origin read's group, then exit with no line (the attempt runs
+        again)."""
+        for p in reading:
+            li._kill_group(p)
+        raise SystemExit(128 + signum)
+
+    for sig in li.SIGNALS:
+        signal.signal(sig, stop_early)
 
     def origin(argv):
         """One origin read, bounded by ORIGIN_TIMEOUT so a hung remote halts instead of holding the attempt for the
@@ -6742,12 +6766,17 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
         # a fetch gets to drop its ref lockfiles (li._kill_group: TERM, a grace, then KILL).
         p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=li.ENV,
                              start_new_session=True)
+        reading[:] = [p]
         try:
             out_, err_ = p.communicate(timeout=ORIGIN_TIMEOUT)
         except subprocess.TimeoutExpired:
             li._kill_group(p)
-            p.communicate()
+            # Close, never drain: a helper outside the group (an ssh ControlMaster) may hold the pipes open.
+            p.stdout.close()
+            p.stderr.close()
             return 1, "", f"no answer in {ORIGIN_TIMEOUT}s"
+        finally:
+            reading.clear()
         return p.returncode, out_.strip(), (err_ or out_).strip()
 
     rc, default, why = origin(["bash", str(DEFAULT_BRANCH_SH), str(root)])
@@ -6796,19 +6825,23 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
             proc.send_signal(signum)
         stopped.append(signum)
 
+    outcome_path, log_path = Path(f"{out}{VERIFY_OUTCOME_SUFFIX}"), Path(f"{out}.log")
+    for p in (outcome_path, log_path):   # a dead run's files are never read as this run's
+        p.unlink(missing_ok=True)
     sys.stdout.flush()
     sys.stderr.flush()
     try:
+        # Its own session, so a stop to --run's group reaches verify only through `forward`, once.
         proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, errors="replace", pass_fds=(lock.fileno(),))
+                                text=True, errors="replace", pass_fds=(lock.fileno(),), start_new_session=True)
     except OSError as e:
-        said = f"verify would not start: {e}"
+        said = f"verify would not start: {e}\n"
     else:
         for sig in li.SIGNALS:   # kept through the check and the record: a stop there is recorded, never a kill
             signal.signal(sig, forward)
         said = proc.communicate()[0]
+    said = said if not said or said.endswith("\n") else said + "\n"
     sys.stderr.write(said)
-    log_path = Path(f"{out}.log")
     if not log_path.exists() and said.strip():
         # verify stopped before it opened its log (a refusal): its words become the kept log the line names.
         try:
@@ -6817,8 +6850,9 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
             pass
     check = _run_canary("check", path, tasks_dir, root, default, ro, COMPLETION_KIND, stdout=sys.stderr)
     note = Note(path)   # fresh: the canary may have written its log
-    outcome_path = Path(f"{out}{VERIFY_OUTCOME_SUFFIX}")
     outcome = _read_outcome(outcome_path)
+    if outcome is not None and outcome.get("sha") != sha:
+        outcome = None   # not this run's tree: never read as its verdict
     result, why = _classify_completion(outcome, attempt)
     if stopped:
         result, why = "stopped", (f"--run was stopped by signal {stopped[0]} (forwarded to verify), no verdict: the "
@@ -6849,12 +6883,13 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
         if log_path.exists():
             os.replace(log_path, kept)
         if followup and _find_note(tasks_dir, red_stem) is None:
-            filed = tasks_dir / f"{red_stem}.md"
             ids = []
             if kept.exists():
                 with open(kept, errors="replace") as fh:
                     ids = _failing_ids(fh)
-            _write_completion_red(filed, note, ro, verifier, sha, rc_word, why, kept_name, ids, now)
+            _write_completion_red(tasks_dir / f"{red_stem}.md", note, ro, verifier, sha, rc_word, why, kept_name, ids,
+                                  now)
+            filed = tasks_dir / f"{red_stem}.md"   # only once this run wrote it: an existing one is never removed
         # The note read again right here, so a Pause log line or an ack written during the run is kept, and written
         # by tmp + rename, so a kill mid-write never truncates it.
         note = Note(path)
@@ -6875,8 +6910,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
         outcome_path.unlink(missing_ok=True)
     except OSError:
         pass
-    # The tail rule _completion_state reads back: a no-verdict run counts, a stop is skipped, a verdict restarts it.
-    streak = streak + 1 if result in COMPLETION_STREAK else streak if result == "stopped" else 0
+    _s, _a, _l, streak = _completion_state(note)   # the note as written, so the one tail rule decides
     print(json.dumps(dict(ran=True, result=result, decided=result in COMPLETION_DECIDED, attempt=attempt,
                           streak=streak, halt=_completion_halts(result, streak), line=line[2:], followup=followup,
                           **({"canary_exit": check} if check != 0 else {}))))

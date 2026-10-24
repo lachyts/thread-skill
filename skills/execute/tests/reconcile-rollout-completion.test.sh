@@ -258,6 +258,9 @@ chmod 555 "$D/tasks"; cv --run; chmod 755 "$D/tasks"
 ok "$rc|$(log_lines)|$(red_exists)" "1|1|no" "C10: a fix task that cannot be written on a final red → 1, no second line"
 hasnt "$err" "Traceback" "C10: … cleanly"
 cv; ok "$(js state)|$(js attempt)" "rerun|2" "C10: … attempt 2 runs again"
+ln -s "$D/no-such-target" "$(red)"
+cv --run; ok "$rc|$(test -L "$(red)" && echo kept)" "1|kept" "C10: a fix-task path this run could not write (a dangling link) is never removed"
+rm -f "$(red)"
 cv --run; ok "$(js result)|$(red_exists)|$(log_lines)" "red|yes|2" "C10: a later run lands it"
 
 scen c10c '"--no-such-option"'
@@ -275,6 +278,35 @@ for l in open(sys.argv[1]):
     if m and m.group(1) != "-":
         import os; print("ok   - C10: the line's log exists" if os.path.exists(m.group(1)) else f"FAIL - C10: {m.group(1)} missing")
 PY
+
+scen c10f "\"exit 1\""
+big=$(printf 'ab%.0s' $(seq 1 32))
+python3 - "$RO" "$big" <<'PY'
+import sys
+ro, sha = sys.argv[1:]
+t = open(ro).read().rstrip("\n") + "\n\n## Completion verify log\n\n"
+t += f"- 2026-10-24T08:00+00:00 attempt 1 at {sha} rc 1 -> rerun: seeded (run seed0; log -)\n"
+open(ro, "w").write(t)
+PY
+o="$(integ)/completion-ro-rollout-2026-10-24-2"; mkdir -p "$(integ)"
+printf '{"v": 1, "id": "dead1", "sha": "%s", "ended": "done", "rc": 0}\n' "$big" > "$o.outcome.json"; echo "dead log" > "$o.log"
+cv --run; ok "$(js result)" "unrun" "C10: a dead run's green outcome is never read as this run's verdict (verify never started: unrun, not flake)"
+scen c10g '"sleep 30"'
+python3 - "$SCRIPT" "$RO" "$D/tasks" "$NOW" "$(integ)/completion-ro-rollout-2026-10-24-1.log" > "$D/out" <<'PY'
+import os, signal, subprocess, sys, time
+script, ro, tasks, now, log = sys.argv[1:]
+p = subprocess.Popen([sys.executable, script, "completion-verify", "--rollout", ro, "--tasks-dir", tasks, "--now", now,
+                      "--run"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True)
+for _ in range(200):
+    if os.path.exists(log) and "== verifier" in open(log).read():
+        break
+    time.sleep(0.1)
+os.killpg(p.pid, signal.SIGTERM)   # the whole group, as a tree-wide stop does
+print(p.communicate()[0].strip())
+PY
+out=$(cat "$D/out")
+ok "$(js result)" "stopped" "C10: a TERM to --run's whole group → stopped"
+has "$(grep ' -> stopped' "$RO")" "rc 143" "C10: … verify got it once, through --run, and ended cleanly (its own signal rc)"
 
 # ── C11 ───────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c11 '  # optional (estate ADR 0009 d6): uncommented as written'
@@ -306,6 +338,15 @@ scen c11j "echo \"it's\" 'x #y' \"z's\""
 cv; ok "$rc|$out" "2|" "C11: a bare command with both quote kinds and a # inside quotes → refused (2)"
 scen c11k '"true"' '  # runs every tier'
 cv; ok "$rc|$(js verifier)" "0|true" "C11: an indented comment after the key is no continuation"
+scen c11l -
+python3 - "$RO" <<'PY'
+import sys
+t = open(sys.argv[1]).read()
+open(sys.argv[1], "w").write(t.replace('verifier: "true"\n', 'verifier: "true"\ncompletion_verifier: make\n\n  test-all\n', 1))
+PY
+cv; ok "$rc|$out" "2|" "C11: a value continued after a blank line → refused (2), never cut to its first line"
+scen c11m '"true"' 'completion_timeout:' '  900'
+cv; ok "$rc|$out" "2|" "C11: a completion_timeout: whose value sits on the next line → refused (2), never the default"
 scen c11g '"true"' 'env_bootstrap: >-'
 HOME="$TMP/home" python3 "$SCRIPT" verify-timeout --rollout "$RO" > /dev/null 2> "$D/err"; ok "$?" 2 "C11: verify-timeout, run at every loop entry, refuses a completion key the reader cannot represent (2, never verify_timeout's 1)"
 has "$(cat "$D/err")" "env_bootstrap" "C11: … naming it, before any work runs"
