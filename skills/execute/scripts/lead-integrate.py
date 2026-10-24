@@ -752,12 +752,14 @@ def cmd_verify(args):
             raise EnvError("--detach-at needs --repo")
         if tree.exists():
             raise EnvError(f"{tree} already exists — refusing to reuse it for a detached verify")
-        # --outcome locks the tree with this pid: the daily sweep's reaper skips a tree locked by a live pid.
-        lock = ["--lock", "--reason", f"pid {os.getpid()}"] if args.outcome else []
-        p = git(os.path.expanduser(args.repo), "worktree", "add", "--quiet", *lock, "--detach", str(tree), args.detach_at)
+        p = git(os.path.expanduser(args.repo), "worktree", "add", "--quiet", "--detach", str(tree), args.detach_at)
         if p.returncode != 0:
             raise EnvError(f"could not add a detached worktree at {tree} ({args.detach_at}): {why(p)}")
         added = True
+        if args.outcome:
+            # Locked with this pid, best-effort as the engine's own tree lock is: the daily sweep's reaper skips a
+            # tree locked by a live pid.
+            git(os.path.expanduser(args.repo), "worktree", "lock", "--reason", f"pid {os.getpid()}", str(tree))
     elif not tree.is_dir():
         raise EnvError(f"no tree at {tree}")
     rc = None

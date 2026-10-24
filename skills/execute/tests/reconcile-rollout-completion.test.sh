@@ -254,8 +254,11 @@ cv --run; ok "$rc|$(cksum < "$RO")|$(window)" "1|$before|none" "C10: origin unre
 has "$err" "origin" "C10: … saying so"
 scen c10b '"exit 1"'
 cv --run
+if [ "$(id -u)" -eq 0 ]; then echo "ok   - C10: (root ignores a 555 dir: the unwritable fix task case is skipped)"; cv --run; else
+trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 chmod 555 "$D/tasks"; cv --run; chmod 755 "$D/tasks"
 ok "$rc|$(log_lines)|$(red_exists)" "1|1|no" "C10: a fix task that cannot be written on a final red → 1, no second line"
+fi
 hasnt "$err" "Traceback" "C10: … cleanly"
 cv; ok "$(js state)|$(js attempt)" "rerun|2" "C10: … attempt 2 runs again"
 ln -s "$D/no-such-target" "$(red)"
@@ -280,17 +283,27 @@ for l in open(sys.argv[1]):
 PY
 
 scen c10f "\"exit 1\""
-big=$(printf 'ab%.0s' $(seq 1 32))
-python3 - "$RO" "$big" <<'PY'
-import sys
-ro, sha = sys.argv[1:]
-t = open(ro).read().rstrip("\n") + "\n\n## Completion verify log\n\n"
-t += f"- 2026-10-24T08:00+00:00 attempt 1 at {sha} rc 1 -> rerun: seeded (run seed0; log -)\n"
-open(ro, "w").write(t)
+o="$(integ)/completion-ro-rollout-2026-10-24-1"; mkdir -p "$(integ)"
+git -C "$D/repo" fetch -q origin
+printf '{"v": 1, "id": "dead1", "sha": "%s", "ended": "done", "rc": 0}\n' "$SHA" > "$o.outcome.json"; echo "dead log" > "$o.log"
+python3 - "$SCRIPT" "$RO" "$D/tasks" "$NOW" > "$D/out" 2> "$D/err" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+script, ro, tasks, now = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("rr", script); rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+rr._lead()                                       # loaded first: only the child verify is pointed away
+rr.LEAD_INTEGRATE_PY = Path(script).with_name("no-such-lead-integrate.py")
+sys.argv = [script, "completion-verify", "--rollout", ro, "--tasks-dir", tasks, "--now", now, "--run"]
+sys.exit(rr.main())
 PY
-o="$(integ)/completion-ro-rollout-2026-10-24-2"; mkdir -p "$(integ)"
-printf '{"v": 1, "id": "dead1", "sha": "%s", "ended": "done", "rc": 0}\n' "$big" > "$o.outcome.json"; echo "dead log" > "$o.log"
-cv --run; ok "$(js result)" "unrun" "C10: a dead run's green outcome is never read as this run's verdict (verify never started: unrun, not flake)"
+out=$(cat "$D/out")
+ok "$(js result)" "unrun" "C10: verify never starts, a dead run's green outcome left behind → unrun, never green"
+hasnt "$(grep ' -> ' "$RO")" "dead1" "C10: … the dead run's outcome is never read as this run's"
+scen c10h '"true"'
+big=$(printf 'ab%.0s' $(seq 1 32)); seed rerun; sed -i '' -e "s/ at - rc absent -> rerun/ at $big rc 1 -> rerun/" "$RO" 2>/dev/null || sed -i -e "s/ at - rc absent -> rerun/ at $big rc 1 -> rerun/" "$RO"
+cv --run; ok "$rc" 1 "C10: a 64-hex (SHA-256) sha → exit 1, nothing run, never an endless unrun loop"
+has "$err" "SHA-256" "C10: … saying so"
 scen c10g '"sleep 30"'
 python3 - "$SCRIPT" "$RO" "$D/tasks" "$NOW" "$(integ)/completion-ro-rollout-2026-10-24-1.log" > "$D/out" <<'PY'
 import os, signal, subprocess, sys, time
