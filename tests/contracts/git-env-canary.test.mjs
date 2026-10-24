@@ -258,6 +258,14 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !s7.includes('`reason="git-env trip: the shared checkout changed"`') || !s7.includes('`reason="git-env canary failed"`') ||
     !donts.includes('never ack from execute') || !pz.includes("TaskStop'd calls keep their open git-env records")) fails.push('exit-rule')
 
+  // no-verdict (ADR 0053): a check's exit 4 never halts, and each window kind's route is stated.
+  if (!ex.includes('**Exit 4 is the one exception:** `check` exits 4 when a trip inside its window was acked before the check (ADR 0053)') ||
+    !ex.includes('It never halts, needs no ack and overrides the check site\'s non-zero route') ||
+    !ex.includes('a task call\'s row is reconciled and acted on as after 0') ||
+    !ex.includes('its `integration.outcome` is not acted on') ||
+    !ex.includes('the lead\'s verify runs `lead-integrate.py undo') ||
+    !ex.includes('re-verify gave no verdict: an acked git-env trip (rc <rc|absent>)` to the `## Race log` and re-runs the re-verify')) fails.push('no-verdict')
+
   // owner-closeout: the owner rule and the close-out rule, stricter than S9, everywhere they are stated.
   const ctxCanary = collapse((context.split('\n- **').find((x) => x.startsWith('Git-env canary**')) ?? ''))
   const ctxWindow = collapse((context.split('\n- **').find((x) => x.startsWith('Window**')) ?? ''))
@@ -334,7 +342,7 @@ test('the git-env canary holds at every site, consumer and record', () => {
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------------------
 
 const RULES = ['marker-tie', 'arm-sites', 'check-sites', 'check-all-sites', 'integrate-check', 'prepare-cases', 'step11-halt',
-  'lane-free', 'race-gitenv', 'race-followon', 'drop-guard', 'merge-result', 'exit-rule', 'owner-closeout', 'status', 'schedule',
+  'lane-free', 'race-gitenv', 'race-followon', 'drop-guard', 'merge-result', 'exit-rule', 'no-verdict', 'owner-closeout', 'status', 'schedule',
   'repair', 'adr', 'context-readme', 'owner-refusal', 'mark-started-arm']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
@@ -345,6 +353,11 @@ const only = (key, from, to, rule, label) => {
   CONTROLLED.add(rule)
   assert.deepEqual(check({ ...real, [key]: edit(real[key], from, to) }), [rule], label)
 }
+
+test('control: an exit 4 that halts, or a RACE that acts on it, fails no-verdict', () => {
+  only('execute', 'It never halts, needs no ack', 'It halts, needs no ack', 'no-verdict', 'exit 4 halts')
+  only('execute', 'and re-runs the re-verify with the lane held (the canary arm first); the completion', 'and runs `mark-done`; the completion', 'no-verdict', 'RACE acts on 4')
+})
 
 test('control: status without the log section, or a literal marker in the canary, fails marker-tie', () => {
   only('status', `rollout note's \`${LOG}\` that no later`, "rollout note's log that no later", 'marker-tie', 'status')

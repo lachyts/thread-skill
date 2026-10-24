@@ -28,6 +28,8 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
   check --repo R --default B --slug S --kind K
         Runs the pass, then closes this window's record: `armed` and clean -> a `checked` tombstone; tripped
         (now or by an earlier verb) -> `closed: true`, no second trip line; a closed tripped record -> unchanged.
+        An `armed` window that carries an acked trip (`ackedTrips`, below) closes `checked` and exits 4, its run
+        no verdict (ADR 0053), naming each acked trip on stdout; a trip or hold that still stands exits 3 instead.
         A missing record trips `record missing`, an unreadable one `record unreadable`, and a closed `checked` or
         `acked` tombstone `record not armed`: the owner holds at its own check, so a tombstone left by an earlier
         window with the same slug and kind (a revise, a restart or a resume) means this window was never armed,
@@ -38,7 +40,8 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
         Runs the pass, re-reads the note and the state once more, and refuses (exit 3, nothing more written)
         unless --slugs is exactly the unacked set (the hold's slugs plus every record still `tripped`), R is not
         bare and refs/heads/B is --ref. Nothing to ack: exit 1. Otherwise every open window whose owner still
-        holds is re-baselined to `armed` on that read, every other tripped or orphaned record becomes an `acked`
+        holds is re-baselined to `armed` on that read, a tripped one keeping its trip line in `ackedTrips` so its
+        own check still reports it (ADR 0053), every other tripped or orphaned record becomes an `acked`
         tombstone, and one ack line is appended and confirmed.
   retire
         check-all (a non-zero exit is returned, nothing deleted), then writes `<dir>/<stem>.retired` and deletes
@@ -91,7 +94,8 @@ default and every unacked `refs/heads/<B>` trip line's branch. `check-all` and `
 (records that disagree: exit 2).
 
 Records live outside the repo: ${THREAD_GIT_ENV_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/thread/git-env}/
-<rollout-stem>/<slug>.<kind>.json, {v, slug, kind, repo, default, ref, bare, state, closed, armedAt, trip}, so an
+<rollout-stem>/<slug>.<kind>.json, {v, slug, kind, repo, default, ref, bare, state, closed, armedAt, trip,
+ackedTrips (optional: the trip lines an ack re-baselined this window past)}, so an
 agent's `git clean` or `rm -rf .claude` in the shared checkout never reaches them. Every verb but `restore` holds
 `<dir>/<rollout-stem>.lock` (fcntl.flock; 30 s, or THREAD_GIT_ENV_LOCK_TIMEOUT seconds; a timeout is exit 2).
 Every git call runs with git's own --local-env-vars list (GIT_DIR, GIT_CONFIG_PARAMETERS, …) and the
@@ -108,8 +112,10 @@ and after; an empty -> non-empty edge (a trip opens it) records `hold-started ho
 edge (the ack) `hold-ended hold=git-env`, rollout the note's stem and task null, through reconcile-rollout.py's
 _event: best-effort, never changing an exit.
 
-Exit codes: 0 clean, 3 a trip or a hold, 1 nothing to ack, 2 a failure, a usage or a validation error. The lead
-treats every non-zero exit as a halt.
+Exit codes: 0 clean, 3 a trip or a hold, 4 (check only) clean but a trip inside this window was acked, so the
+window's run gives no verdict (ADR 0053), 1 nothing to ack, 2 a failure, a usage or a validation error. The lead
+treats every non-zero exit but 4 as a halt; on 4 it acts on none of the window's results and runs it again (a task
+call's window excepted: its PR is verified again at its own Integration).
 """
 
 import argparse
@@ -422,7 +428,9 @@ class Ctx:
                       and isinstance(rec.get("closed"), bool) and isinstance(rec.get("bare"), bool)
                       and (rec.get("ref") is None or isinstance(rec.get("ref"), str))
                       and isinstance(rec.get("repo"), str) and isinstance(rec.get("default"), str)
-                      and (rec.get("state") != "tripped" or isinstance((rec.get("trip") or {}).get("line"), str)))
+                      and (rec.get("state") != "tripped" or isinstance((rec.get("trip") or {}).get("line"), str))
+                      and isinstance(rec.get("ackedTrips", []), list)
+                      and all(isinstance(x, str) for x in rec.get("ackedTrips", [])))
             except (OSError, ValueError):
                 ok, rec = False, None
             if not ok:
@@ -608,6 +616,7 @@ def cmd_arm(ctx, args):
 
 def cmd_check(ctx, args):
     _validate(ctx, args.repo, args.default)
+    acked = []
     rc, _state, recs = _pass(ctx)
     own = next((r for r in recs if r["slug"] == args.slug and r["kind"] == args.kind), None)
     if own is None:
@@ -619,6 +628,7 @@ def cmd_check(ctx, args):
     elif own["state"] == "armed":
         own.update(state="checked", closed=True)
         ctx.save(own)
+        acked = own.get("ackedTrips") or []
     elif own["state"] == "tripped" and not own["closed"]:
         own["closed"] = True
         ctx.save(own)
@@ -630,6 +640,11 @@ def cmd_check(ctx, args):
         ctx.save(rec)
         ctx.append([rec["trip"]["line"]])
     rc = 3 if ctx.hold() or any(r["state"] == "tripped" for r in ctx.records()) else 0
+    if rc == 0 and acked:
+        # ADR 0053: the ack re-baselined this window mid-run, so the checkout changed under its run.
+        print(f"checked [[{args.slug}]] {args.kind}: no verdict, a trip inside this window was acked; act on none "
+              "of its results and run it again: " + "; ".join(acked))
+        return 4
     if rc == 0:
         print(f"checked [[{args.slug}]] {args.kind}: clean")
     return _report(ctx, rc)
@@ -672,6 +687,8 @@ def cmd_ack(ctx, args):
         return 3
     for r in recs:
         if r["state"] in ("armed", "tripped") and not r["closed"] and ctx.owner_holds(r):
+            if r["state"] == "tripped":
+                r["ackedTrips"] = (r.get("ackedTrips") or []) + [r["trip"]["line"]]
             r.update(state="armed", closed=False, ref=ref, bare=False, trip=None, armedAt=_stamp())
             ctx.save(r)
         elif r["state"] in ("armed", "tripped"):

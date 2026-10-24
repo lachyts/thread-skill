@@ -436,8 +436,8 @@ Subcommands:
               room stop) is forwarded to verify once, and the run is `stopped` whatever it ends with; one before
               verify starts ends any origin read and exits 128+n at the next checkpoint with no line (the attempt
               runs again); one after verify ended on its own leaves its verdict standing. A git-env trip inside the
-              window (its own check's, or one a loop-entry check-all caught and an ack re-armed meanwhile: one more
-              `[[<rollout>]] completion-verify` trip line than at the arm) makes it `unrun` whatever the rc. It
+              window (its own check's exit 3, or its exit 4: one a loop-entry check-all caught and an ack re-armed
+              meanwhile, ADR 0053) makes it `unrun` whatever the rc. It
               keeps the log as `<out>.<run id>.log`, files the fix task on a final red
               (`<tasks-dir>/completion-red-<rollout>.md`, open, priority high, `projects:` copied,
               `completion_red_of:` naming the rollout; the sha, the rc and why, the log and the failing ids read
@@ -452,8 +452,9 @@ Subcommands:
               unread, a git dir it cannot read, refused rollout settings, a file it could not write, no fcntl, a sha
               that is not 40-hex). 128+n: stopped by signal n before verify started, nothing recorded. Exit 2:
               refused (no `completion_verifier:`, an unreadable value). Exit 3: another --run holds the attempt.
-              Exit 4: the canary's arm (nothing run) or check (recorded `unrun`) exited non-zero, its stderr passed
-              through and its exit in the line's canary_exit.
+              Exit 4: the canary's arm (nothing run) or check (recorded `unrun`) exited non-zero, but for the
+              check's own exit 4 (an acked trip: recorded `unrun`, exit 0), its stderr passed through and its exit
+              in the line's canary_exit.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`, and `paused_for`) from the rollout note. Run by /thread:execute's resume path
@@ -6704,13 +6705,6 @@ def _read_outcome(path: Path):
     return d
 
 
-def _git_env_trips(note, slug, kind):
-    """How many trip lines the note's git-env log holds for one window: an ack re-arms a window with a new baseline,
-    so a trip inside a run is seen only as one more line than at its arm."""
-    want = f"{GIT_ENV_TRIP_MARK} [[{slug}]] {kind}:"
-    return sum(1 for line in note.section_text(GIT_ENV_LOG_SECTION).split("\n") if want in line)
-
-
 def _completion_not_ran(state, attempt, streak, **extra):
     """--run's line when it ran nothing: decided already, another --run holds the attempt, or a refusal."""
     print(json.dumps(dict(ran=False, state=state, result=state if state in COMPLETION_DECIDED else None,
@@ -6844,7 +6838,6 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     li.git(root, "worktree", "remove", "--force", "--force", tree)
     li.git(root, "worktree", "prune")
     shutil.rmtree(tree, ignore_errors=True)
-    trips = _git_env_trips(Note(path), ro, COMPLETION_KIND)   # read right before the arm: the window's baseline
     # The canary's own words go to stderr: --run's stdout is its one JSON line.
     if st.sig is not None:
         return 128 + st.sig
@@ -6909,11 +6902,11 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     if result == "rerun" and ids:
         # The Flake log (ADR 0050): attempt 1's failing ids, so a test that flakes again can be seen in the lines.
         why += "; failing " + ", ".join(ids[:10]) + (" …" if len(ids) > 10 else "")
-    if check not in (0, 3) and _git_env_trips(note, ro, COMPLETION_KIND) <= trips:
+    if check not in (0, 3, 4):
         result, why = "unrun", (f"the canary check failed (exit {check}), so its rc is never acted on, no verdict: "
                                 "the attempt re-runs")
-    elif check != 0 or _git_env_trips(note, ro, COMPLETION_KIND) > trips:
-        # RACE's rule: an rc after a git-env trip is never acted on, even one an ack re-armed meanwhile.
+    elif check != 0:
+        # 3, a trip that stands, or 4, one an ack re-armed meanwhile (ADR 0053): either way the rc is never acted on.
         result, why = "unrun", ("a git-env trip fell inside its window (the shared checkout changed during the run), "
                                 "so its rc is never acted on, no verdict: the attempt re-runs")
     now = _now(args)
@@ -6957,7 +6950,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     print(json.dumps(dict(ran=True, result=result, decided=result in COMPLETION_DECIDED, attempt=attempt,
                           streak=streak, halt=_completion_halts(result, streak), line=line[2:], followup=followup,
                           **({"canary_exit": check} if check != 0 else {}))))
-    return 4 if check != 0 else 0
+    return 4 if check not in (0, 4) else 0   # an acked trip (4) needs no halt: the attempt re-runs (ADR 0053)
 
 
 def cmd_completion_verify(args) -> int:
