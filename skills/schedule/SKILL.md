@@ -245,7 +245,7 @@ and a rollout clone § 0 made.
 
 Resolve the rollout-level default verifier — the shell command(s) `/thread:execute` will run inside each subagent's worktree to decide pass/fail. Detection order:
 
-1. Project's `CLAUDE.md` — look for a line like `Verifier: \`<cmd>\`` or a "Verification" / "Testing" section that names a single canonical command
+1. Project's `CLAUDE.md` — look for a line starting `Verifier: \`<cmd>\`` (never a `Completion verifier:` line, step 2.5's full suite) or a "Verification" / "Testing" section that names a single canonical command
 2. Project's `Makefile` at repo root — presence of a `test` target → `make test`
 3. `pyproject.toml` with `[tool.poetry]` → `poetry run pytest`
 4. `package.json` with a `test` script → `npm test`

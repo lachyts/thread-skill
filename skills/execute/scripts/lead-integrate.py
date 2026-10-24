@@ -56,8 +56,8 @@ Subcommands:
       leaves no rc (red), still ends the step. No slot within W: O.rc reads `noslot`, the log says `verify: no
       verify slot within Ws (held: …); verifier not run`, the exit is 75 and the race tree is still removed. An
       unusable slots dir logs a WARN and runs the steps unslotted, still under the guard.
-      --outcome (reconcile-rollout.py completion-verify --run's, which calls verify in its own process while it
-      holds the attempt's lock, ADR 0052) changes two things and nothing else. Its result is O.outcome.json, in
+      --outcome (reconcile-rollout.py completion-verify --run's, which runs verify as its child while it holds
+      the attempt's lock, ADR 0052) changes two things and nothing else. Its result is O.outcome.json, in
       place of O.rc, which it never writes: removed first, then written at the start ({v, id, sha, ended:
       "running"}) and again at the end ({v, id, sha, ended, rc, step, signal}: ended done | deadline | bootstrap
       | signal | noslot; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
@@ -764,8 +764,6 @@ def cmd_verify(args):
     slot = None
     result = {"v": 1, "id": f"{datetime.now().strftime('%Y%m%dT%H%M%S')}-{os.getpid()}", "sha": args.detach_at,
               "ended": "running"}
-    # The caller's dispositions come back at the end: completion-verify --run calls verify in its own process.
-    before = {s: signal.getsignal(s) for s in SIGNALS}
     try:
         for s in SIGNALS:   # inside the try, so a signal that lands at once still removes the tree
             signal.signal(s, _on_signal)
@@ -839,8 +837,6 @@ def cmd_verify(args):
                 _write_atomic(outcome_path, json.dumps(result) + "\n")
             else:
                 _write_atomic(rc_path, f"{rc}\n")
-        for s, h in before.items():
-            signal.signal(s, h)
     print(f"verify: rc={rc} (log {log_path})")
     if rc == "noslot":
         return 75

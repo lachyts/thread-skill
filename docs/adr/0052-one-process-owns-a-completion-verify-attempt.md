@@ -14,8 +14,11 @@ The completion verifier (the vault task `thread-skill-the-rollout-runs-its-full-
 - One attempt per process. A red attempt 1 reads `rerun`, and the lead launches `--run` again; `--run` re-runs it on the red run's own sha. Each background command fits one deadline inside the harness's 2 h cap: its own `completion_timeout:` (default 3600 s, validated like `verify_timeout`, the slot wait taking the rest), never `verify_timeout`, which a project with a fast tier sets for that tier, so a full suite under it would deadline red every rollout.
 - The record's commit point is its `## Completion verify log` line: the log moves and a final red's fix task are written before it, the Run record event after it. A process that dies before the line leaves a free lock and no line, which reads as the same attempt still to run. A dead attempt never counts toward the three-in-a-row no-verdict halt.
 - A git-env trip during the attempt, its own check's or a loop-entry `check-all`'s that was acked meanwhile, records no verdict (RACE's rule: an rc after a git-env halt is never acted on).
+- verify runs as `--run`'s child, never inside its process, and inherits the attempt's lock: no signal state is shared, and a `--run` killed outright still holds the attempt until its verify ends. A stop signal to `--run` is forwarded to verify once, and the run records `stopped` whatever it ends with.
+- **A completion Flake files no task.** This amends ADR 0050's "filed as a follow-up for its repo" for the completion verify alone, as the brief rules: the `rerun` line names attempt 1's failing ids, so a test that flakes again shows in the log.
 
 ## Considered options
 
 - **Keep the multi-entry shape and fix round 6's findings in place:** rejected. Each round's fixes to that seam drew more regressions than they fixed.
+- **verify inside `--run`'s own process** (the first build of this shape): rejected after review rounds 2, 4 and 5 kept finding signal state leaking between the two (dispositions left ignored, a TaskStop swallowed during cleanup, a second signal escaping as a refusal).
 - **Both attempts in one process,** so the lead only ever sees decided results: rejected. A 40-minute suite run twice, plus slot waits, can go past the 2 h background cap, and a `rerun` read is cheap.

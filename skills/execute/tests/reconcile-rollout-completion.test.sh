@@ -16,8 +16,8 @@
 #       the sixth does; a `stopped` line never counts.
 #   C7  a run in flight holds the attempt's lock: the read says in-flight, a second --run exits 3 and writes nothing;
 #       TERMed, the run records its own `stopped` and removes its tree.
-#   C8  a --run killed outright leaves a free lock and no line: the same attempt runs again, its leftover tree and
-#       files cleared first.
+#   C8  a --run killed outright leaves its verify holding the lock until it ends, then a free lock and no line: the
+#       same attempt runs again; a dead run's locked worktree entry is pruned first.
 #   C9  git-env: a trip caught by --run's own check records `unrun` and exits 4; a trip a loop-entry check-all caught
 #       and an ack re-armed meanwhile still records `unrun`, never the run's verdict.
 #   C10 origin unread is exit 1 with nothing armed or written; a fix task that cannot be written on a final red is
@@ -185,7 +185,8 @@ bp=$!
 wait_for "$(integ)/completion-ro-rollout-2026-10-24-1.log" '^== verifier'
 cv; ok "$(js state)" "in-flight" "C7: --run holds the attempt's lock → in-flight"
 cv; ok "$(js state)" "in-flight" "C7: … a second read still sees it (a shared probe never blocks a reader)"
-has "$(git -C "$D/repo" worktree list --porcelain)" "locked pid $bp" "C7: the detached tree is locked with --run's pid (the sweep's reaper skips it)"
+lp=$(git -C "$D/repo" worktree list --porcelain | sed -n 's/^locked pid //p')
+ok "$(test -n "$lp" && kill -0 "$lp" 2>/dev/null && echo live)" "live" "C7: the detached tree is locked with its live verify's pid (the sweep's reaper skips it)"
 before=$(cksum < "$RO")
 cv --run; ok "$rc|$(js ran)|$(js state)|$(cksum < "$RO")" "3|False|in-flight|$before" "C7: a second --run → 3, nothing written"
 kill -TERM "$bp" 2>/dev/null; wait "$bp"; brc=$?
@@ -212,9 +213,10 @@ bp=$!
 wait_for "$(integ)/completion-ro-rollout-2026-10-24-1.log" '^== verifier'
 for _ in $(seq 1 100); do [ -f "$TMP/c8.once" ] && break; sleep 0.1; done   # the verifier is past its touch
 kill -KILL "$bp"; wait "$bp" 2>/dev/null
-pkill -f "c8.once" 2>/dev/null; sleep 0.5
-cv; ok "$(js state)|$(js attempt)|$(log_lines)" "run|1|0" "C8: killed outright → a free lock and no line: the same attempt"
-ok "$(test -d "$D/repo/.claude/worktrees/completion-ro-rollout-2026-10-24-1" && echo left)" "left" "C8: … its tree left behind"
+cv; ok "$(js state)" "in-flight" "C8: --run killed outright → its verify, a child holding the attempt's lock, still runs: in-flight"
+pkill -f "$TMP/c8.once" 2>/dev/null
+for _ in $(seq 1 100); do cv; [ "$(js state)" = "in-flight" ] || break; sleep 0.1; done
+cv; ok "$(js state)|$(js attempt)|$(log_lines)" "run|1|0" "C8: … once it ends, a free lock and no line: the same attempt"
 cv --run; ok "$rc|$(js result)|$(js streak)" "0|green|0" "C8: the next --run clears the leftovers and runs it → green, the dead run never counted"
 ok "$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')|$(log_lines)" "1|1" "C8: … one tree gone, one line"
 scen c8b '"true"'
@@ -372,20 +374,6 @@ sys.argv = [script, "completion-verify", "--rollout", ro, "--tasks-dir", tasks]
 exec(compile(open(script).read(), script, "exec"), {"__name__": "__main__", "__file__": script})
 PY
 ok "$rc|$(js state)" "0|run" "C14: with no fcntl, reconcile-rollout.py still loads and a read verb runs"
-python3 - "$LI" "$D/repo" "$(integ)/sig" <<'PY'
-import importlib.util, signal, sys, argparse
-li_path, tree, out = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("li", li_path); li = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(li)
-mine = lambda *_: None
-signal.signal(signal.SIGTERM, mine)
-import contextlib, io
-with contextlib.redirect_stdout(io.StringIO()):
-  li.cmd_verify(argparse.Namespace(outcome=True, repo=None, detach_at=None, tree=tree, out=out, timeout=60.0, slots=None,
-                                   slot_wait=None, bootstrap="", verifier="true"))
-print("ok   - C14: verify called in-process hands back the caller's signal dispositions"
-      if signal.getsignal(signal.SIGTERM) is mine else "FAIL - C14: verify left SIGTERM at %r" % signal.getsignal(signal.SIGTERM))
-PY
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-completion: ALL PASS"; else echo "reconcile-rollout-completion: FAILED"; fi
