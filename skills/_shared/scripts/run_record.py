@@ -676,8 +676,9 @@ KINDS = {
                           "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
                           "used": _int(0), "budget": _int(1)},
                    {"fingerprint": _str, "reviewRounds": _int(1), "quotaRetries": _int(1)}),
-    "completion-verify": (False, {"result": _enum("green", "rerun", "flake", "red", "noslot", "unrun", "stopped"), "rc": _str, "sha": _str,
-                                  "attempt": _int(1, 2)}, {"log": _str, "followup": _str}),
+    # result: reconcile-rollout.py's COMPLETION_RESULTS, in its order.
+    "completion-verify": (False, {"result": _enum("green", "flake", "red", "rerun", "noslot", "unrun", "stopped"),
+                                  "rc": _str, "sha": _str, "attempt": _int(1, 2)}, {"log": _str, "followup": _str}),
     "call-journal": (False, {"runId": _str, "status": _str},
                      {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),
                       "startTime": _int(0)}),

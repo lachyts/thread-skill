@@ -67,7 +67,8 @@ scen() {
 }
 cv() { python3 "$SCRIPT" completion-verify --rollout "$RO" --tasks-dir "$D/tasks" --now "$NOW" "$@" > "$D/out" 2> "$D/err"; rc=$?
        out=$(cat "$D/out"); err=$(cat "$D/err"); }
-js() { python3 -c 'import json,sys; v=json.loads(sys.argv[1] or "{}").get(sys.argv[2]); print("null" if v is None else v)' "$out" "$1"; }
+# js <key>… — the keys' values from the last JSON line, joined with |, in one interpreter start
+js() { python3 -c 'import json,sys; d=json.loads(sys.argv[1] or "{}"); print("|".join("null" if d.get(k) is None else str(d.get(k)) for k in sys.argv[2:]))' "$out" "$@"; }
 log_lines() { grep -c ' -> ' "$RO" || true; }
 records() { cat "$THREAD_EVENTS_DIR"/ro-rollout-2026-10-24.jsonl 2>/dev/null | python3 -c '
 import json, sys
@@ -81,12 +82,12 @@ window() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d[
 seed() {
   python3 - "$RO" "$SHA" "$@" <<'PY'
 import sys
-ro, sha, *results = sys.argv[1:]
+ro, sha, *results = sys.argv[1:]   # a no-verdict line still names the tree it would have run on
 t = open(ro).read()
 if "## Completion verify log" not in t:
     t = t.rstrip("\n") + "\n\n## Completion verify log\n\n"
 for i, r in enumerate(results):
-    t += f"- 2026-10-24T08:0{i}+00:00 attempt 1 at - rc absent -> {r}: seeded (run seed{i}; log -)\n"
+    t += f"- 2026-10-24T08:0{i}+00:00 attempt 1 at {sha} rc absent -> {r}: seeded (run seed{i}; log -)\n"
 open(ro, "w").write(t)
 PY
 }
@@ -268,9 +269,6 @@ cv --run; ok "$(js result)|$(red_exists)|$(log_lines)" "red|yes|2" "C10: a later
 
 scen c10c '"--no-such-option"'
 cv --run; ok "$rc|$(js ran)|$(js result)" "0|True|rerun" "C10: a command starting with - is the verifier, never an option: an ordinary red"
-scen c10d '"true"'
-seed rerun; sed -i '' -e 's/ -> rerun: seeded/ -> rerun: seeded by hand/' "$RO" 2>/dev/null || sed -i -e 's/ -> rerun: seeded/ -> rerun: seeded by hand/' "$RO"
-cv; ok "$(js state)|$(js attempt)" "run|1" "C10: a verdict line at - (no tree named) is not --run's: skipped"
 scen c10e '"true"'
 mkdir -p "$D/repo/.claude/worktrees/completion-ro-rollout-2026-10-24-1x"
 cv --run --now 2026-10-24T09:10:00Z
@@ -301,8 +299,12 @@ out=$(cat "$D/out")
 ok "$(js result)" "unrun" "C10: verify never starts, a dead run's green outcome left behind → unrun, never green"
 hasnt "$(grep ' -> ' "$RO")" "dead1" "C10: … the dead run's outcome is never read as this run's"
 scen c10h '"true"'
-big=$(printf 'ab%.0s' $(seq 1 32)); seed rerun; sed -i '' -e "s/ at - rc absent -> rerun/ at $big rc 1 -> rerun/" "$RO" 2>/dev/null || sed -i -e "s/ at - rc absent -> rerun/ at $big rc 1 -> rerun/" "$RO"
-cv --run; ok "$rc" 1 "C10: a 64-hex (SHA-256) sha → exit 1, nothing run, never an endless unrun loop"
+rm -rf "$D/origin.git" "$D/repo"
+g init -q --bare --object-format=sha256 "$D/origin.git"; g init -q --object-format=sha256 "$D/repo"
+echo a > "$D/repo/a.txt"; g -C "$D/repo" add -A; g -C "$D/repo" commit -q -m init
+g -C "$D/repo" remote add origin "$D/origin.git"; g -C "$D/repo" push -q origin master
+g -C "$D/origin.git" symbolic-ref HEAD refs/heads/master
+cv --run; ok "$rc|$(log_lines)" "1|0" "C10: a SHA-256 repository → exit 1, nothing run or written, never an endless unrun loop"
 has "$err" "SHA-256" "C10: … saying so"
 scen c10g '"sleep 30"'
 python3 - "$SCRIPT" "$RO" "$D/tasks" "$NOW" "$(integ)/completion-ro-rollout-2026-10-24-1.log" > "$D/out" <<'PY'

@@ -764,7 +764,7 @@ def cmd_verify(args):
         raise EnvError(f"no tree at {tree}")
     rc = None
     slot = None
-    result = {"v": 1, "id": f"{datetime.now().strftime('%Y%m%dT%H%M%S')}-{os.getpid()}", "sha": args.detach_at,
+    result = {"v": 1, "id": rr._run_id(datetime.now(), os.getpid()), "sha": args.detach_at,
               "ended": "running"}
     try:
         for s in SIGNALS:   # inside the try, so a signal that lands at once still removes the tree
