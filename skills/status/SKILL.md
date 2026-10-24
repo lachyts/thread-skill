@@ -506,7 +506,11 @@ Keep the whole report scannable: it's a glance, not a wall of text.
 5. `incomplete` → `/thread:schedule <project> --regenerate`; on a `shape: serial` note, stamp it `status: dropped`,
    then `/thread:schedule --tasks <its tasks>` (§ 1's **Incomplete**).
 6. Every task merged → "rollout complete: run the completion ceremony through `/thread:execute [[<rollout>]]`"
-   (or "already archived").
+   (or "already archived"). When the note declares `completion_verifier:`, also print a `Completion verify:` line
+   from the note's `## Completion verify log` (execute § 4.5 step 5): its last line, or `not run yet` with none.
+   A `-> green`, `-> flake` or `-> red` line is decided; any other (`rerun` or a no-verdict one) is the ceremony
+   waiting on the suite, which the lead's own `--run` owns while its turn reads `completion verify in flight`; a halt whose reason starts `completion verify` → `/thread:repair [[<rollout>]]`
+   (its § 3f).
 7. An open escalation, an undecided RACE / UNVERIFIED or a possible PR-less merge →
    `/thread:repair [[<rollout>]]`, whatever the pause or the queue: repair records Lachy's decision in every
    mode (its § 1). Never reinstate or resume with `/thread:execute` until each RACE / UNVERIFIED task has its

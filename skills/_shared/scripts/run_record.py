@@ -143,6 +143,15 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      >= 1: the raised max_review_rounds); quotaRetries? (int >= 1: quota_retries_used after a quota
                      retry). p16-4, ADR 0033: reconcile-rollout.py auto-retry, execute's automatic retry of a
                      set-aside task.
+  completion-verify  result (green | rerun | flake | red | noslot | unrun | stopped), rc, sha, attempt (int 1 or 2); log?,
+                     followup?
+                     (estate ADR 0009 d6: reconcile-rollout.py completion-verify, one line per run of a rollout's
+                     completion_verifier on merged origin/<default> at its completion ceremony; rc the run's
+                     verbatim, 0-255, noslot or absent; rerun is attempt 1's red, re-run on the same sha; flake a
+                     green attempt 2 after it; noslot (no verify slot), unrun (verify never got going, the
+                     env_bootstrap never let the suite run, or a git-env trip fell inside the window) and stopped (a
+                     signal stop: a TaskStop, a hard pause, a room stop) no verdict, the attempt runs again; followup
+                     the fix task a final red filed; ADR 0052: completion-verify --run writes it).
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
@@ -380,10 +389,10 @@ def _str(v):
     return None if isinstance(v, str) and v else "a non-empty string"
 
 
-def _int(lo):
+def _int(lo, hi=None):
     def check(v):
-        ok = isinstance(v, int) and not isinstance(v, bool) and v >= lo
-        return None if ok else "an integer >= %d" % lo
+        ok = isinstance(v, int) and not isinstance(v, bool) and v >= lo and (hi is None or v <= hi)
+        return None if ok else ("an integer >= %d" % lo if hi is None else "an integer from %d to %d" % (lo, hi))
     return check
 
 
@@ -667,6 +676,9 @@ KINDS = {
                           "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
                           "used": _int(0), "budget": _int(1)},
                    {"fingerprint": _str, "reviewRounds": _int(1), "quotaRetries": _int(1)}),
+    # result: reconcile-rollout.py's COMPLETION_RESULTS, in its order.
+    "completion-verify": (False, {"result": _enum("green", "flake", "red", "rerun", "noslot", "unrun", "stopped"),
+                                  "rc": _str, "sha": _str, "attempt": _int(1, 2)}, {"log": _str, "followup": _str}),
     "call-journal": (False, {"runId": _str, "status": _str},
                      {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),
                       "startTime": _int(0)}),

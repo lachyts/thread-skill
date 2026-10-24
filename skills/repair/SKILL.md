@@ -518,6 +518,26 @@ carries a `git-env halt` line, first show this evidence:
 This reading replaces § 3c item 5's halt-reason reading for this slug only. Then go straight to § 3c in this run:
 Lachy decides once, and § 4's hand-off waits for that decision, as § 3c already requires.
 
+**3f — a completion verify halt → diagnose, then the hand-off (execute § 4.5 step 5, ADR 0052).** Every task
+merged and the ceremony stopped at its completion verify: the last ROLLOUT-STATUS reason starts `completion verify`,
+or status's `Completion verify:` line reads undecided with no lead live. Read it first, read-only:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py completion-verify --rollout <rollout-note>`.
+Never stamp the note done, skip the suite or write a `## Completion verify log` line by hand: the ceremony waits on
+the suite, and only `--run` records a run. There is nothing to discard: a dead run leaves a free lock and no line, a
+run whose verify refused (its words in the kept log the line names) records `unrun`, which counts toward the halt,
+and the next `--run` clears its tree and files itself.
+- `in-flight` → the lead's own `--run`: report it and wait, as for a RACE re-verify in flight.
+- `completion verify: no verdict in three runs` → read the kept logs (`<out>.<run id>.log`, the lines name them)
+  and `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status`: wedged verify slots, a saturated
+  Mac or a broken `env_bootstrap`. A broken bootstrap or a wedged slot whose holder is gone is the note's or the
+  machine's to fix: escalate with that evidence (§ 3c's form), never edit the command. Then § 4's hand-off: the next
+  entry runs the attempt again.
+- `completion verify failed` → its ERROR line says which: `origin unread` (the remote, its URL or its auth), a git dir it cannot read, refused rollout settings (`rollouts.toml`), a file it could not write (the tasks dir, the integration dir), no fcntl (`--run` is POSIX only: run the lead on a Mac or Linux machine), or a SHA-256 repository (`--detach-at` is 40-hex engine-wide: the completion verify cannot run there, so escalate whether to remove `completion_verifier:` from the note). Fix what is the machine's, escalate the rest, then § 4's hand-off.
+- `completion verify: rollout note unreadable` → the `completion_verifier:`, `env_bootstrap:` or
+  `completion_timeout:` value is Lachy's to fix: escalate with the ERROR line, never guess the command.
+- A git-env trip at the completion verify (`git-env trip: …`, `git-env canary failed`) is § 3e's.
+Log each in the rollout's `## Notes` as a dated `repair:` line, which § 6 copies.
+
 ### 4. Hand back: re-enter at the stage it stopped
 
 Repair hands back only on Lachy's answer (§ 3b), this run's or one recorded for the task's current block (§ 3b's

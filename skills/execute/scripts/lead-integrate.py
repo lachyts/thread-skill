@@ -36,7 +36,7 @@ Subcommands:
       comes first, then `<n> commit(s) in <TB>..<B> name no PR …` naming each unlisted commit).
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
-         [--slots N --slot-wait W]
+         [--slots N --slot-wait W] [--outcome]
       Run the env bootstrap, then the verifier, each `bash -c` in its own session (process group) in T,
       appending to O.log, under one deadline of S seconds. The exit code goes to O.rc, written LAST (tmp +
       rename); O.rc and O.log are removed first, so a missing O.rc means the run did not finish (red). A
@@ -45,7 +45,8 @@ Subcommands:
       rc 128+n. They are held while a step starts, so one landing before its group is recorded still kills it,
       and each step starts with the caller's signal mask. --detach-at adds T as a detached worktree of R at SHA
       (refusing an existing path) and removes it (`worktree remove --force`) whatever the verdict: the RACE
-      re-verify.
+      re-verify. Only the verifier's rc is a verdict: a green bootstrap sets none, so a verifier step that never
+      starts leaves no O.rc (red), never the bootstrap's 0.
       --slots N --slot-wait W (given together or not at all; one alone is exit 2 with no rc file) first waits,
       up to W seconds, for one of the machine's N verify slots (verify-slot.py, p23-4), as an Integration waiter
       (the priority: agents' runs wait while it does), logging `verify: waiting for one of N verify slots (…)`
@@ -55,6 +56,14 @@ Subcommands:
       leaves no rc (red), still ends the step. No slot within W: O.rc reads `noslot`, the log says `verify: no
       verify slot within Ws (held: …); verifier not run`, the exit is 75 and the race tree is still removed. An
       unusable slots dir logs a WARN and runs the steps unslotted, still under the guard.
+      --outcome (reconcile-rollout.py completion-verify --run's, which runs verify as its child while it holds
+      the attempt's lock, ADR 0052) changes two things and nothing else. Its result is O.outcome.json, in
+      place of O.rc, which it never writes: removed first, then written at the start ({v, id, sha, ended:
+      "running"}) and again at the end ({v, id, sha, ended, rc, step, signal}: ended done | deadline | bootstrap
+      | signal | noslot; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
+      by its fields, never by log text, and one that still reads `running` never finished. And --detach-at's
+      tree is locked with `pid <this process's pid>`, so the daily sweep's reaper leaves it alone, and removed
+      with `--force --force`.
 
   push --repo R --slug S --head M
       A plain push of the task tree's M to origin/<branch> (never forced); the ls-remote read-back must
@@ -712,18 +721,21 @@ def _stop_live(live):
         _kill_group(live)
 
 
-def _write_rc(rc_path, rc):
-    tmp = rc_path.with_name(rc_path.name + ".tmp")
-    tmp.write_text(f"{rc}\n")
-    os.replace(tmp, rc_path)
+def _write_atomic(path, text):
+    """O.rc and O.outcome.json: tmp + rename, so a reader never sees half a file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
 
 
 def cmd_verify(args):
     out = Path(os.path.expanduser(args.out))
-    out.parent.mkdir(parents=True, exist_ok=True)
     rc_path, log_path = Path(f"{out}.rc"), Path(f"{out}.log")
-    for p in (rc_path, log_path):
-        p.unlink(missing_ok=True)
+    outcome_path = Path(f"{out}{rr.VERIFY_OUTCOME_SUFFIX}") if args.outcome else None
+    out.parent.mkdir(parents=True, exist_ok=True)
+    for p in (rc_path, log_path, outcome_path):
+        if p:
+            p.unlink(missing_ok=True)
     if args.timeout <= 0:
         raise EnvError("--timeout must be a positive number of seconds")
     slotted = args.slots is not None
@@ -744,13 +756,21 @@ def cmd_verify(args):
         if p.returncode != 0:
             raise EnvError(f"could not add a detached worktree at {tree} ({args.detach_at}): {why(p)}")
         added = True
+        if args.outcome:
+            # Locked with this pid, best-effort as the engine's own tree lock is: the daily sweep's reaper skips a
+            # tree locked by a live pid.
+            git(os.path.expanduser(args.repo), "worktree", "lock", "--reason", f"pid {os.getpid()}", str(tree))
     elif not tree.is_dir():
         raise EnvError(f"no tree at {tree}")
-    for s in SIGNALS:
-        signal.signal(s, _on_signal)
     rc = None
     slot = None
+    result = {"v": 1, "id": rr._run_id(datetime.now(), os.getpid()), "sha": args.detach_at,
+              "ended": "running"}
     try:
+        for s in SIGNALS:   # inside the try, so a signal that lands at once still removes the tree
+            signal.signal(s, _on_signal)
+        if outcome_path:
+            _write_atomic(outcome_path, json.dumps(result) + "\n")
         with open(log_path, "ab", buffering=0) as log:
             note = lambda msg: log.write((msg + "\n").encode())  # noqa: E731
             if slotted:
@@ -766,6 +786,7 @@ def cmd_verify(args):
                         held = VS.held_by(args.slots) or "none read held"
                         note(f"verify: no verify slot within {args.slot_wait:g}s (held: {held}); verifier not run")
                         rc = "noslot"
+                        result["ended"] = "noslot"
                     else:
                         note(f"== verify slot {slot.index + 1} of {args.slots} after {slot.waited:.0f}s")
                         VS.write_holder(slot, {"pid": os.getpid(), "guard": None, "group": None, "cwd": str(tree),
@@ -779,17 +800,24 @@ def cmd_verify(args):
                     if got is TIMED_OUT:
                         note(f"verify: timed out after {args.timeout:g}s during the {name}; killed its process group (rc 124)")
                         rc = 124
+                        result.update(ended="deadline", step=name)
                         break
                     note(f"== {name} rc {got}")
                     if name == "env_bootstrap" and got != 0:
                         note("env_bootstrap failed; verifier not run")
                         rc = got
+                        result["ended"] = "bootstrap"
                         break
-                    rc = got
+                    if name == "verifier":
+                        # Only the verifier's own rc is the verdict: a green bootstrap sets nothing, so a verifier
+                        # step that never starts (a raise) leaves no rc, which reads as red.
+                        rc = got
+                        result["ended"] = "done"
     except _Signalled as s:
         if _live["proc"] is not None:
             _stop_live(_live["proc"])
         rc = 128 + s.signum
+        result.update(ended="signal", signal=s.signum)
         try:
             with open(log_path, "ab") as log:
                 log.write(f"verify: stopped by signal {s.signum}; killed the process group (rc {rc})\n".encode())
@@ -801,10 +829,16 @@ def cmd_verify(args):
         if slot is not None:
             slot.release()  # a close, never LOCK_UN (verify-slot.py's contract)
         if added:
-            git(os.path.expanduser(args.repo), "worktree", "remove", "--force", str(tree))
+            git(os.path.expanduser(args.repo), "worktree", "remove", "--force", *(["--force"] if args.outcome else []),
+                str(tree))
             git(os.path.expanduser(args.repo), "worktree", "prune")
         if rc is not None:
-            _write_rc(rc_path, rc)
+            if outcome_path:
+                # --outcome's result is the outcome file alone: no O.rc, the file heartbeat clause (4) acts on.
+                result["rc"] = rc
+                _write_atomic(outcome_path, json.dumps(result) + "\n")
+            else:
+                _write_atomic(rc_path, f"{rc}\n")
     print(f"verify: rc={rc} (log {log_path})")
     if rc == "noslot":
         return 75
@@ -1444,6 +1478,9 @@ def main(argv=None):
     vf.add_argument("--verifier", required=True)
     vf.add_argument("--repo", default=None)
     vf.add_argument("--detach-at", default=None, type=_sha)
+    vf.add_argument("--outcome", action="store_true",
+                    help="completion-verify --run's: write <out>.outcome.json (its structured result) and lock a "
+                         "--detach-at tree with this pid")
     vf.add_argument("--slots", default=None, type=int, help="the machine's verify slots (rollouts.toml verify_slots); "
                     "with --slot-wait, wait for one first (verify-slot.py, p23-4)")
     vf.add_argument("--slot-wait", default=None, type=float, help="seconds to wait for a verify slot (verify-timeout's "

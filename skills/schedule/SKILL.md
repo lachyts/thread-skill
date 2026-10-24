@@ -245,13 +245,15 @@ and a rollout clone § 0 made.
 
 Resolve the rollout-level default verifier — the shell command(s) `/thread:execute` will run inside each subagent's worktree to decide pass/fail. Detection order:
 
-1. Project's `CLAUDE.md` — look for a line like `Verifier: \`<cmd>\`` or a "Verification" / "Testing" section that names a single canonical command
+1. Project's `CLAUDE.md` — look for a line starting `Verifier: \`<cmd>\`` (never a `Completion verifier:` line, step 2.5's full suite) or a "Verification" / "Testing" section that names a single canonical command
 2. Project's `Makefile` at repo root — presence of a `test` target → `make test`
 3. `pyproject.toml` with `[tool.poetry]` → `poetry run pytest`
 4. `package.json` with a `test` script → `npm test`
 5. Fall back to no detection → surface to user, ask them to provide one (or proceed without; `/thread:execute` will refuse to dispatch without a verifier)
 
 Print the detected command and ask the user to confirm or override before continuing. Store it for step 6.
+
+**The completion verifier (estate ADR 0009 d6).** A project that declares a **fast tier** for Integration names its full suite beside it: a `Completion verifier: \`<cmd>\`` line in its `CLAUDE.md` (the fast tier is then its `Verifier:`). Found → the rollout runs that suite once on merged main at its completion ceremony (execute § 4.5 step 5): show it with the verifier for the same confirm, and store it for step 6, where it uncomments the template's `completion_verifier:` line. None → leave the line commented out: the ceremony then runs as it did before the key existed. Never derive one from a project that declares no fast tier: its `verifier:` already is its full suite, at every Integration. A `shape: serial` note never carries it: a serial chain's Complete does not run it yet (execute § 3's `completion_verifier` row).
 
 ### 2.6. Capture known baseline failures
 
@@ -434,6 +436,7 @@ Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`.
 - `{{ROLLOUT_SLUG}}` — the resolved dated rollout slug, no extension (e.g. `giflab-rollout-2026-07-18`)
 - `{{DATE}}` — today's date (YYYY-MM-DD)
 - `{{VERIFIER}}` — the verifier command detected in step 2.5 (or user-provided)
+- The `# completion_verifier:` line — when step 2.5 found the project's `Completion verifier:`, replace the whole line (its trailing comment included) with `completion_verifier: "<cmd>"`, on one line, always quoted, so an inline ` #` in the command survives: double-quoted, or single-quoted when it holds a `"` or a `\` (the reader takes the text up to the matching quote and refuses an escape: a `\` inside double quotes, a `''` inside single ones); a command holding a `'` and a `"` or a `\` cannot be stamped, so wrap it in a script the project runs. Otherwise leave the line commented out as written. Leave the `# completion_timeout:` line commented out as written (3600 s); a project whose full suite runs longer sets it on the note by hand.
 - `{{MAX_ITERATIONS}}` — `max_iterations` as step 2.8 resolved it
 - `{{MAX_REVIEW_ROUNDS}}` — `max_review_rounds` as step 2.8 resolved it
 - `{{MAX_PLAN_ROUNDS}}` — `max_plan_rounds` as step 2.8 resolved it (the template's trailing comment on that line stays)
@@ -704,7 +707,7 @@ End-to-end test against an existing backlog (e.g. GifLab):
 3. Step 2.5 detects `make test` (or whatever GifLab's CLAUDE.md prescribes) — prints it and asks to confirm
 4. Orders the queue (dependencies first, Solo proposals and § 4.7's rung offers in the confirm batch)
 5. Writes the always-dated note `giflab-rollout-<YYYY-MM-DD>.md` (advancing to the next `-N` ordinal if today's already exists), its `## Queue` table in schedule order.
-6. Rollout note carries no `incomplete:` line (step 7's last write removed the one it was born with), and carries `protocol_version: 5`, `verifier:`, `plan_approval: scope-gated`, and `max_iterations`, `max_review_rounds`, `max_plan_rounds` and `parallel_ceiling` at the four values step 2.8 printed (with no `rollouts.toml`, the built-ins 3, 4, 3 and 4) in frontmatter, plus a commented-out `env_bootstrap:` line (set only when the run needs it). No inline execution playbook — the rollout body is data only.
+6. Rollout note carries no `incomplete:` line (step 7's last write removed the one it was born with), and carries `protocol_version: 5`, `verifier:`, `plan_approval: scope-gated`, and `max_iterations`, `max_review_rounds`, `max_plan_rounds` and `parallel_ceiling` at the four values step 2.8 printed (with no `rollouts.toml`, the built-ins 3, 4, 3 and 4) in frontmatter, plus a commented-out `env_bootstrap:` line (set only when the run needs it) and a `completion_verifier:` line, commented out unless step 2.5 found the project's `Completion verifier:`. No inline execution playbook — the rollout body is data only.
 7. Stamps `rollout: "[[...]]"` and `scope:` on each task, and removes any legacy `wave:`
 8. Prints summary pointing the user toward `/thread:execute`
 
