@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-23
+last_touched: 2026-10-24
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,16 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-24: PR #202 merged (ADRs 0043–0051), after an audit of where rollout time goes.** The re-grill widened into that audit. From September to 21 Oct, stalls, usage limits and machine load cost about 150–185 h; the Integration lane's real merge time cost about 35–50 h. On the Chorus 10-18 run, a stall-free stretch merged 1.15 PRs/h against 0.76 approvals/h. The rulings:
+- **Deferred:** the merge train (0044; § Deferred keeps the evidence).
+- **New ADRs:** 0048 (no single cause holds the whole queue, plus a Watchdog the Companion acts on), 0049 (the Away cap, overturning Chorus 0104 d3), 0050 (a Flake: named failing tests re-run first, then one full suite confirms) and 0051 (a Time-lost ledger in the weekly reading, a monthly audit, new Run-record events, Thread's reading made for Thursday's Routine).
+- **0046:** a Bookkeeping miss never trips, a trip holds only what it threatens, and a RACE red twice is reverted on main.
+- **0043:** the snapshot is cut at schedule from origin's tip, and every verb routes to it first.
+- **Settings:** the file carries a schema version, and a snapshot ignores newer keys.
+- **0047:** grading plus a decision round only.
+
+Review: rounds 3–5 (xhigh, xhigh, simplify) on the reset text; every design gap went to Lachy, and every fix was wording only. The P29 tasks were re-scoped (p29-4 parked, p29-6 dropped, p29-7…13 new), and their plan-gate considerations were filed. Chorus tasks were filed for the Watchdog, the Runner, the Away cap, a Tuesday Inbox Routine and prep-waiting Routines, plus [[fresh-review-grades-its-findings]] (per-finding outcomes, and a `/code-review max` trial on 3 risky PRs) and [[launchd-jobs-refused-on-the-default-claude-profile]] (urgent: no com.lachy job pins a profile). **Not done:** the P29 rollout regenerate. Its checks passed and its 13-task queue was shown, but Lachy dismissed the confirm, so `[[thread-skill-rollout-2026-10-21]]` still holds the old six tasks.
 
 **2026-10-23: thread 5.0.0 is released and installed.** #203 (the engine refuses a call without `verifySlot`) merged at `21f349a` after two clean-room rounds: round 1's 9 findings fixed, round 2 stopped the review ledger (11 of 15 were about round 1's own one-off refusal halt), so that halt was reverted at the root and the rest filed as [[thread-skill-execute-args-refusal-and-slot-followups]]. `verify-timeout` now prints the `verifySlot` object the lead copies. Release PR #206 (`078ffc7`, tag `thread--v5.0.0`, eval record `docs/evals/2026-10-22-release-5-0.md`: 24/24, overall 0.979, one unexplained `next-undecided-what-now` miss) merged; `claude plugin update thread@thread` installed 5.0.0 at `0d45df4`; `make release-check` green. Running sessions keep the engine they loaded: a lead must restart to run 5.0.0. Docs follow-ups (README 5.0.0 notes, manifest wording, eval traces kept): [[thread-skill-5-0-docs-follow-ups]].
 
@@ -1041,11 +1051,18 @@ scheduled 2026-07-15.
 - **A landing PR that falls BEHIND master never auto-merges:** the ruleset requires an up-to-date branch, and GitHub does not update it. On 2026-10-17 #156 sat green but BEHIND after #155 merged; `gh api -X PUT repos/<o>/<r>/pulls/<n>/update-branch -f expected_head_sha=<sha>` unblocked it (the installed `gh` has no `pr update-branch`). Pushed-base waits on every queued close/… PR, not just the newest.
 - **A Workflow run's args are recorded in `<session>/workflows/<runId>.json`** once it completes: compare them with the built args file to prove a hand-pasted integrate call was verbatim (all five on 2026-10-17 matched).
 
+- **CONTEXT.md phrases are pinned by contract tests** (2026-10-24). `tests/contracts/away-state.test.mjs` asserts exact substrings in the Queue, Trickle and Away entries, such as `**Solo** task and, by day, the **Trickle**, never a shared file` and `**Parallel ceiling** (Chorus ADR 0104 d3)`. A glossary rewrite that drops one fails `make test`, so add new holds as a following sentence rather than rewording the pinned one.
+- **`make test` can pass 10 minutes; check its real exit code** (2026-10-24). A background run with a 600 s limit gets killed mid-suite, and `cmd; echo rc=$?` makes the background job report exit 0 even when make failed. End the command with `exit $rc` and read the `make test: ALL PASS` line. A worktree push also leaves no `origin/<branch>` tracking ref, so confirm with `git ls-remote`.
+
 ## Resume instructions
+
+**From 2026-10-24 (completion verifier):** grill and build the one-process design. Its brief, `docs/handoffs/2026-10-24-completion-verifier-one-process.md`, is consumed: a live session picked it up.
+
+**From 2026-10-24 (re-grill):** #202 is merged. To start P29, run `/thread:schedule thread-skill --regenerate` from `~/repos/tools/thread-skill-rollout`, then execute it. The queue shown on 2026-10-23: p29-1 Solo, then p29-3, -9, -5, -8, -12, then -2, -10, -7, -11, -13, plus carried p28-2 and p27-5. Each P29 note's `depends-on` holds that order. The 5.0.0 engine predates ADRs 0043–0051, so P29 builds them.
 
 **From 2026-10-23:** 5.0.0 is installed. Next: restart the Stage session "Lead the thread-skill rollout of 2026-10-21" (or open one in `~/repos/tools/thread-skill-rollout`) and run `/thread:schedule thread-skill --regenerate` to supersede `[[thread-skill-rollout-2026-10-21]]` with the re-grilled P29 set (p29-7…p29-13) on the 5.0.0 engine; the two filed follow-ups ([[thread-skill-5-0-docs-follow-ups]], [[thread-skill-execute-args-refusal-and-slot-followups]]) can join it. Lachy's own: `[notify] ntfy_topic` (after [[ntfy-noise-audit]]) and `verify_slots` in `~/.config/thread/rollouts.toml` are now safe to set. The 2026-10-21 and 2026-10-20 notes below are history.
 
-**From 2026-10-21:** PR #202 (ADRs 0043–0047) is held, not merged. Its re-grill runs in the Stage session "Re-grill ADRs 0043–0047 (PR #202)", whose brief (`docs/handoffs/2026-10-21-regrill-adrs-0043-0047.md`, now consumed) lists round 2's six design gaps (`docs/reviews/2026-10-21-0fc0723-6a9ac7.md` on the PR branch). The plan: rule the gaps with Lachy, trim the ADRs back to decisions, run a fresh-review round on the trimmed text, and queue the merge once it's clean. `[[thread-skill-rollout-2026-10-21]]` (P29) must not start until #202 merges.
+**From 2026-10-21 (history: #202 merged 2026-10-22):** PR #202 (ADRs 0043–0047) is held, not merged. Its re-grill runs in the Stage session "Re-grill ADRs 0043–0047 (PR #202)", whose brief (`docs/handoffs/2026-10-21-regrill-adrs-0043-0047.md`, now consumed) lists round 2's six design gaps (`docs/reviews/2026-10-21-0fc0723-6a9ac7.md` on the PR branch). The plan: rule the gaps with Lachy, trim the ADRs back to decisions, run a fresh-review round on the trimmed text, and queue the merge once it's clean. `[[thread-skill-rollout-2026-10-21]]` (P29) must not start until #202 merges.
 
 **Now (from 2026-10-20):** no rollout is running on this repo. P24 and P25 are closed; P26 waits on p26-3.
 1. [[thread-skill-p26-3-mark-started-arms-the-task-window]] (filed by p26-1): finish P26, or carry it into the release.
@@ -1055,6 +1072,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
+- 2026-10-24 (close, from 2026-10-21): re-grilled #202 into an audit of rollout time; ruled the merge train deferred, ADRs 0048–0051 added, 0043/0045/0046/0047/0050 reshaped; 3 review rounds (wording-only fixes), merged #202; filed P29 re-scope, Chorus, fresh-review and launchd tasks; the P29 regenerate is left for the next session.
 - 2026-10-23 (close, from 2026-10-22): reviewed and merged #203 (2 rounds, ledger STOP, root revert), released 5.0.0 (#206, tag, eval $7.50) and installed it; landed #205; filed the args-refusal and 5.0.0 docs follow-ups. My slip: a background wait died on a GitHub network reset and I answered its notification "No response requested" instead of acting, so the install sat a day.
 
 - 2026-10-21: `/fresh-review` of PR #202 (ADRs 0043–0047). Round 1 had 15 findings, fixed in `0fc0723`. Round 2's 15 hit the ledger's STOP (8 were regressions). Lachy held #202 for a re-grill, which was handed to a fresh session (landing PR #204).
