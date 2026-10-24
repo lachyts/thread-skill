@@ -1048,14 +1048,14 @@ def _start_unattended(note) -> bool:
 def _clear_start(note) -> bool:
     """Remove every top-level `start:` frontmatter line whose scalar reads `unattended` (so a stale second line can
     never re-arm the Stage); any other `start:` value and every indented line stay. True when one was removed."""
-    pat = re.compile(rf"^{re.escape(START_KEY)}:\s*(.*)$")
-    kept = [line for line in note._fm
-            if not ((m := pat.match(line)) and _scalar(m.group(1)).lower() == START_UNATTENDED)]
-    if len(kept) == len(note._fm):
-        return False
-    note._fm = kept
-    note.dirty = True
-    return True
+    before = len(note._fm)
+    note.filter_fm(_not_start_unattended)
+    return len(note._fm) != before
+
+
+def _not_start_unattended(line) -> bool:
+    m = re.match(rf"^{re.escape(START_KEY)}:\s*(.*)$", line)
+    return not (m and _scalar(m.group(1)).lower() == START_UNATTENDED)
 
 
 def _truthy_flag(value) -> bool:
@@ -1320,12 +1320,45 @@ def _top_run(runs):
 
 # ---- frontmatter surgery (order/format preserving) --------------------------
 
+NOTE_LOCK_TIMEOUT = 30.0
+
+
+def _note_lock_path(path) -> Path:
+    """The note's save lock: one file per note (its real path's hash), outside the vault so it never syncs."""
+    base = os.environ.get("THREAD_NOTE_LOCK_DIR") or os.path.join(
+        os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state"),
+        "thread", "note-locks")
+    real = os.path.realpath(str(path))
+    return Path(base) / f"{hashlib.sha256(real.encode()).hexdigest()[:16]}-{Path(real).stem[:60]}.lock"
+
+
+def _journaled(method):
+    """A Note edit that save() can re-apply to a fresh read: only the outermost call is recorded, so an edit built on
+    another (upsert_section on append_section) is replayed once."""
+    def wrapper(self, *args, **kwargs):
+        if self._depth == 0:
+            self._ops.append((method, args, kwargs))
+        self._depth += 1
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._depth -= 1
+    wrapper.__name__, wrapper.__doc__ = method.__name__, method.__doc__
+    return wrapper
+
+
 class Note:
-    """A markdown note split into (frontmatter lines, body text), edited in place."""
+    """A markdown note split into (frontmatter lines, body text), edited in place. Every edit is journaled, and save()
+    re-applies the journal to the note as it reads under the note's lock, so writers in other processes (the canary,
+    a reconcile verb, completion-verify --run) never lose each other's lines. A hand edit made through no script
+    (the lead's Edit tool, Obsidian) takes no lock."""
 
     def __init__(self, path: Path):
         self.path = path
         text = path.read_text()
+        self._text = text      # what this Note read, or last wrote: save() replays only when the file differs
+        self._ops = []
+        self._depth = 0
         m = re.match(r"^(---\n)(.*?\n)(---\n)(.*)$", text, re.DOTALL)
         if not m:
             raise ValueError(f"{path}: no YAML frontmatter block found")
@@ -1363,6 +1396,7 @@ class Note:
             return out
         return []
 
+    @_journaled
     def unset(self, key: str):
         """Remove `key:` from the frontmatter entirely. Idempotent; used to retire a marker that a
         later, better-informed run has superseded (a stale marker is triaged against, so leaving one
@@ -1373,6 +1407,7 @@ class Note:
             self._fm = kept
             self.dirty = True
 
+    @_journaled
     def set(self, key: str, value, after=("owner", "status")):
         """Replace `key:`'s value in place, or insert a new line after the first present anchor key."""
         newline = f"{key}: {value}"
@@ -1394,6 +1429,7 @@ class Note:
         self._fm.append(newline)
         self.dirty = True
 
+    @_journaled
     def remove(self, key: str):
         """Delete the `key:` line from frontmatter entirely (idempotent — no-op if absent)."""
         pat = re.compile(rf"^{re.escape(key)}:\s*")
@@ -1418,6 +1454,7 @@ class Note:
                 out.append(line)
         return "\n".join(out).strip()
 
+    @_journaled
     def append_section(self, heading: str, content: str):
         """Append `## heading\\n\\n<content>` to the body once (idempotent on the heading)."""
         if self.has_heading(heading):
@@ -1444,6 +1481,7 @@ class Note:
             self._body = new_body
             self.dirty = True
 
+    @_journaled
     def upsert_section(self, heading: str, content: str):
         """Create `## heading` with content, or REPLACE the existing section's content in place
         (unlike append_section's heading-idempotence — for sections whose content must track the
@@ -1458,6 +1496,7 @@ class Note:
         lines, start, end = found
         self._set_body_lines(lines[:start + 1] + [""] + content.rstrip().split("\n") + [""] + lines[end:])
 
+    @_journaled
     def remove_section(self, heading: str):
         """Delete `## heading` and its content from the body (idempotent — no-op if absent)."""
         found = self._section_bounds(heading)
@@ -1498,6 +1537,7 @@ class Note:
         lines, start, end = found
         return _normalise("\n".join(lines[start + 1:end]))
 
+    @_journaled
     def append_run(self, heading: str, content: str, now):
         """Record one run of feedback under `heading` (p6-4: every run is kept, not only the first).
 
@@ -1557,6 +1597,7 @@ class Note:
         block = ["", head, "", *written.split("\n"), "", _run_end(n, sha), ""]
         self._set_body_lines(lines[:j] + block + lines[end:] if end < len(lines) else lines[:j] + block)
 
+    @_journaled
     def append_line(self, heading: str, line: str):
         """Record one bare line under `heading` (the Integration log), creating the section when absent.
 
@@ -1590,10 +1631,73 @@ class Note:
     def render(self) -> str:
         return "---\n" + "\n".join(self._fm) + "\n---\n" + self._body
 
+    @_journaled
+    def filter_fm(self, keep):
+        """Keep only the frontmatter lines `keep(line)` is true for."""
+        kept = [line for line in self._fm if keep(line)]
+        if len(kept) != len(self._fm):
+            self._fm = kept
+            self.dirty = True
+
     def save(self, dry_run=False):
+        """Under the note's lock: read the note again, re-apply this Note's edits when another writer changed it
+        since, and replace it atomically (a temp file renamed over it), so no reader sees a truncated note. A note
+        gone from its path (moved or deleted meanwhile) is never written back: FileNotFoundError. A lock not taken
+        within THREAD_NOTE_LOCK_TIMEOUT seconds (30) is an OSError, nothing written."""
         if dry_run or not self.dirty:
             return
-        self.path.write_text(self.render())
+        with _note_lock(self.path):
+            now = self.path.read_text()
+            if now != self._text:
+                fresh = Note(self.path)
+                for method, args, kwargs in self._ops:
+                    method(fresh, *args, **kwargs)
+                self._fm, self._body = fresh._fm, fresh._body
+            text = self.render()
+            tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
+            try:
+                with open(tmp, "w") as f:
+                    f.write(text)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, self.path)
+            finally:
+                tmp.unlink(missing_ok=True)
+        self._text, self._ops = text, []
+
+
+class _note_lock:
+    """The note's save lock (_note_lock_path), held only for a save's read and write, never across a child process;
+    the canary takes it inside its own lock, and nothing takes the canary's inside this one. No fcntl (Windows): no
+    lock, the atomic replace alone."""
+
+    def __init__(self, path):
+        self.lock_path, self.fh = _note_lock_path(path), None
+
+    def __enter__(self):
+        if fcntl is None:
+            return self
+        try:
+            timeout = float(os.environ.get("THREAD_NOTE_LOCK_TIMEOUT") or NOTE_LOCK_TIMEOUT)
+        except ValueError:
+            timeout = NOTE_LOCK_TIMEOUT
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.fh = open(self.lock_path, "a")
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    self.fh.close()
+                    raise OSError(f"timed out after {timeout:g}s waiting for the note lock {self.lock_path}")
+                time.sleep(0.05)
+
+    def __exit__(self, *exc):
+        if self.fh is not None:
+            self.fh.close()   # closing the file drops the flock
+        return False
 
 
 def bullets(items):

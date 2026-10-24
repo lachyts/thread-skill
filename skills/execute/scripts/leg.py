@@ -473,7 +473,7 @@ def atomic_write(path, text):
 def save(ctx, note):
     if ctx.dry or not note.dirty:
         return
-    atomic_write(note.path, note.render())
+    note.save()   # under the note's lock, re-applied to a fresh read, replaced atomically (reconcile-rollout.py)
     note.dirty = False
 
 
