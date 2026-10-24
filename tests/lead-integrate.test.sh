@@ -790,6 +790,9 @@ ok "$(cat "$F/out/b.rc")" 0 "C17: the bootstrap runs after the merge checkout (i
 python3 "$LI" verify --tree "$WT" --out "$F/out/b2" --timeout 60 --bootstrap 'exit 3' --verifier 'touch .verifier-ran' >/dev/null
 ok "$(cat "$F/out/b2.rc")|$([ -e "$WT/.verifier-ran" ] && echo ran || echo skipped)" "3|skipped" "C17: a failing bootstrap → its rc; the verifier never runs"
 has "$(cat "$F/out/b2.log")" "env_bootstrap failed; verifier not run" "C17: … and the log says so"
+BT="$F/boot-gone"; mkdir -p "$BT"
+python3 "$LI" verify --tree "$BT" --out "$F/out/b3" --timeout 60 --bootstrap "cd / && rm -rf '$BT'" --verifier true >/dev/null 2>&1
+ok "$([ -e "$F/out/b3.rc" ] && cat "$F/out/b3.rc" || echo none)" "none" "C17: a green bootstrap, then a verifier step that never starts → no rc (red), never the bootstrap's 0"
 RT="$R/.claude/worktrees/race-$SLUG"
 python3 "$LI" verify --repo "$R" --detach-at "$M" --tree "$RT" --out "$F/out/race" --timeout 60 --verifier 'test -f from-main.txt && false' >/dev/null
 ok "$(cat "$F/out/race.rc")|$([ -e "$RT" ] && echo left || echo removed)" "1|removed" "C17: --detach-at verifies the race tree and removes it, even on red"

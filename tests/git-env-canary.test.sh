@@ -822,6 +822,20 @@ arm A; code
 arm B task; ok "$rc|$(trips A)|$(recf A task state)|$(recf B task state)" '2|0|"armed"|<none>' "w6: A armed, the ref moves, arm B (not running) → 2, A's window untouched"
 call; ok "$rc|$(trips A)" "3|1" "w6: … the next check-all trips A"
 
+# w7: the completion verify's window (estate ADR 0009 d6) is the rollout's own: its slug is the rollout's stem, and
+# its owner holds while the rollout note is not done, so its check comes before the ceremony's `status: done`.
+scen w7
+mkt A done
+arm A completion-verify; ok "$rc|$(recf A completion-verify state)" "2|<none>" "w7: a completion-verify window slugged by a task → 2, no record"
+has "$err" "the rollout's own ([[ro]])" "w7: … stderr names the rollout's own slug"
+arm ro completion-verify; ok "$rc|$(recf ro completion-verify state)" '0|"armed"' "w7: arm completion-verify on the open rollout → 0, armed"
+chk ro completion-verify; ok "$rc|$(recf ro completion-verify state)|$(trips ro)" '0|"checked"|0' "w7: … its clean check → 0, a checked tombstone"
+arm ro completion-verify; code
+chk ro completion-verify; ok "$rc|$(trips ro)" "3|1" "w7: re-armed (attempt 2), the ref moves → its check trips the rollout"
+scen w7b
+setst ro done   # the rollout note is $V/ro.md
+arm ro completion-verify; ok "$rc|$(recf ro completion-verify state)" "2|<none>" "w7b: a done rollout opens no completion-verify window → 2"
+
 # ── m: mark-started arms the task window (p26-3) ─────────────────────────────────────────────────────────────
 # The 2026-10-19 incident: a seeded revise launched with `mark-started --start revise` and no `arm --kind task`, so
 # its return's check met the first window's `checked` tombstone and tripped `record not armed`, a false halt.

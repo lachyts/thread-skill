@@ -521,6 +521,22 @@ through time, from attention to merged PRs. Terms only — no implementation.
   red on a clean `main`, which execute's green criterion already allows
   for), nor a remote CI step merge-task's `infra_flake_rerun` re-runs.
   _Avoid_: flaky failure, quarantined test.
+- **Completion verifier** — a rollout note's optional `completion_verifier:`,
+  the full suite of a project whose `verifier:` is its declared fast tier
+  (estate ADR 0009 d6): the completion ceremony runs it once on merged main,
+  before the note reads done, under its own `completion_timeout:` (never the
+  fast tier's `verify_timeout`). One process owns each attempt end to end
+  (ADR 0052), and each run is classified from verify's structured outcome,
+  never its log's text. A red is re-run once on the same tree:
+  green there is a Flake, recorded with no task; red again, or verify's own
+  deadline in the suite, files one fix task for the project, and the rollout
+  completes either way, since its tasks merged green at their own Integration.
+  A run with no verdict (no verify slot, verify never got going or was
+  stopped, the bootstrap never let the suite run) waits for the next tick,
+  and three in a row halt (a deliberate stop never counts). A git-env trip
+  inside its window gives no verdict either: the rollout halts on the
+  git-env trip, or, when the trip was already acked, waits like the rest. A parallel rollout's only, so far.
+  A note with none completes as before. _Avoid_: final verify, post-merge suite.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier suite
   runs in, shared by every rollout on the machine (p23-4,
   `scripts/verify-slot.py`): the lead's Integration and RACE verifies and every
