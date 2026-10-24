@@ -532,9 +532,7 @@ and the next `--run` clears its tree and files itself.
   Mac or a broken `env_bootstrap`. A broken bootstrap or a wedged slot whose holder is gone is the note's or the
   machine's to fix: escalate with that evidence (§ 3c's form), never edit the command. Then § 4's hand-off: the next
   entry runs the attempt again.
-- `completion verify failed` → its ERROR line says which: `origin unread` (the remote, its URL or its auth), refused
-  rollout settings (`rollouts.toml`), or a file it could not write (the tasks dir, the integration dir). Fix what
-  is the machine's, escalate the rest, then § 4's hand-off.
+- `completion verify failed` → its ERROR line says which: `origin unread` (the remote, its URL or its auth), a git dir it cannot read, refused rollout settings (`rollouts.toml`), a file it could not write (the tasks dir, the integration dir), no fcntl (`--run` is POSIX only: run the lead on a Mac or Linux machine), or a SHA-256 repository (`--detach-at` is 40-hex engine-wide: the completion verify cannot run there, so escalate whether to remove `completion_verifier:` from the note). Fix what is the machine's, escalate the rest, then § 4's hand-off.
 - `completion verify: rollout note unreadable` → the `completion_verifier:`, `env_bootstrap:` or
   `completion_timeout:` value is Lachy's to fix: escalate with the ERROR line, never guess the command.
 - A git-env trip at the completion verify (`git-env trip: …`, `git-env canary failed`) is § 3e's.

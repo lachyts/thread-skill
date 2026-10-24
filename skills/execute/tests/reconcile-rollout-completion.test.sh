@@ -219,6 +219,7 @@ pkill -f "$TMP/c8.once" 2>/dev/null
 for _ in $(seq 1 100); do cv; [ "$(js state)" = "in-flight" ] || break; sleep 0.1; done
 cv; ok "$(js state)|$(js attempt)|$(log_lines)" "run|1|0" "C8: … once it ends, a free lock and no line: the same attempt"
 cv --run; ok "$rc|$(js result)|$(js streak)" "0|green|0" "C8: the next --run clears the leftovers and runs it → green, the dead run never counted"
+ok "$(ls "$(integ)" | grep -c '^completion-ro-rollout-2026-10-24-1\.dead-.*\.log$')" "1" "C8: … the dead run's log kept under a name of its own"
 ok "$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')|$(log_lines)" "1|1" "C8: … one tree gone, one line"
 scen c8b '"true"'
 g -C "$D/repo" worktree add -q --lock --reason "pid 1" --detach "$D/repo/.claude/worktrees/completion-ro-rollout-2026-10-24-1" "$SHA"
@@ -362,6 +363,17 @@ PY
 cv; ok "$rc|$out" "2|" "C11: a value continued after a blank line → refused (2), never cut to its first line"
 scen c11m '"true"' 'completion_timeout:' '  900'
 cv; ok "$rc|$out" "2|" "C11: a completion_timeout: whose value sits on the next line → refused (2), never the default"
+for v in false off yes '"# todo"'; do
+  scen "c11b$v" "$v"
+  cv; ok "$rc|$out" "2|" "C11: completion_verifier: $v (a YAML boolean or a quoted comment) → refused (2), never run"
+done
+scen c11n -
+python3 - "$RO" <<'PY'
+import sys
+t = open(sys.argv[1]).read()
+open(sys.argv[1], "w").write(t.replace('verifier: "true"\n', 'verifier: "true"\ncompletion_verifier:\n  # the full suite\n  make test-all\n', 1))
+PY
+cv; ok "$rc|$out" "2|" "C11: a value below an indented comment line → refused (2), never read as none"
 scen c11g '"true"' 'env_bootstrap: >-'
 HOME="$TMP/home" python3 "$SCRIPT" verify-timeout --rollout "$RO" > /dev/null 2> "$D/err"; ok "$?" 2 "C11: verify-timeout, run at every loop entry, refuses a completion key the reader cannot represent (2, never verify_timeout's 1)"
 has "$(cat "$D/err")" "env_bootstrap" "C11: … naming it, before any work runs"

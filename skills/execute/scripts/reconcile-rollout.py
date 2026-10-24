@@ -402,18 +402,19 @@ Subcommands:
               before the note reads done; a note with none keeps the ceremony as it was. The value (and
               `env_bootstrap:`, read the same way): a quoted one is the text inside its quotes, then nothing but an
               optional ` # comment`; a bare one drops an inline ` # comment` (so a command holding ` #` is quoted);
-              empty, a comment alone, `null` or `~` is none. A form the reader cannot represent exactly (a value
-              continued on an indented next line, an escape inside double quotes, text after the closing quote, a
-              bare value starting with a YAML indicator or `- `, holding `: ` or ending in `:`) is exit 2, never
-              truncated into another command; so is a `completion_timeout:` that is not an integer from 1 to 6600
-              (absent, empty or a comment alone: 3600, the deadline the env_bootstrap and the full suite share, never
-              verify_timeout's). Read mode, read-only: one JSON
-              line. With none, {"verifier": null, "state": "absent"}. Otherwise {verifier, state, attempt, sha,
-              repo, tree, out, streak, followup, summary}: state `run` (no verdict yet: attempt 1, on a fresh
-              origin/<default>, sha null), `rerun` (attempt 1 was red: attempt 2 on its sha), `in-flight` (a --run
-              holds the attempt's lock, `<git common dir>/thread/completion-<rollout>-<n>.lock`, probed shared), or
-              the decided `green`, `flake` or `red`. repo is the note's `Project root:` (none: exit 1); tree and out
-              the attempt's own `<repo>/.claude/worktrees/completion-<rollout>-<n>` and
+              empty, a comment alone, `null` or `~` is none; a YAML boolean (`true`, `false`, `yes`, `no`, `on`,
+              `off`) or a quoted comment is exit 2, never run as a command. A form the reader cannot represent
+              exactly (a value continued on an indented next line, an escape inside double quotes, text after the
+              closing quote, a bare value starting with a YAML indicator or `- `, holding `: ` or ending in `:`) is
+              exit 2, never truncated into another command; so is a `completion_timeout:` that is not an integer
+              from 1 to 6600 (absent, empty or a comment alone: 3600, the deadline the env_bootstrap and the full
+              suite share, never verify_timeout's). Read mode, read-only: one JSON line. With none, {"verifier":
+              null, "state": "absent"}. Otherwise {verifier, state, attempt, sha, repo, tree, out, streak, followup,
+              summary}: state `run` (no verdict yet: attempt 1, on a fresh origin/<default>, sha null), `rerun`
+              (attempt 1 was red: attempt 2 on its sha), `in-flight` (a --run holds the attempt's lock, `<git common
+              dir>/thread/completion-<rollout>-<n>.lock`, probed shared), or the decided `green`, `flake` or `red`.
+              repo is the note's `Project root:` (none: exit 1); tree and out the attempt's own
+              `<repo>/.claude/worktrees/completion-<rollout>-<n>` and
               `<repo>/.claude/integration/completion-<rollout>-<n>`; streak the `noslot` and `unrun` lines at the
               log's tail (a `stopped` one skipped); followup the fix task's stem once red; summary the Completion
               log's one line once decided.
@@ -3046,16 +3047,16 @@ def _is_kind(path, kind) -> bool:
         return False
 
 
-def _run_canary(verb, rollout_path, tasks_dir, repo, default, slug, kind, stdout=None) -> int:
+def _run_canary(verb, rollout_path, tasks_dir, repo, default, slug, kind, stdout=None, own_session=False) -> int:
     """`git-env-canary.py <verb>` for one window as a subprocess, so the canary keeps its own lock, git-env scrub and
-    exit codes; its stderr passes through, its stdout too unless `stdout` redirects it. An OSError or a signal
-    counts as 2."""
+    exit codes; its stderr passes through, its stdout too unless `stdout` redirects it. own_session keeps a stop
+    sent to the caller's group from killing it mid-pass. An OSError or a signal counts as 2."""
     cmd = [sys.executable, str(GIT_ENV_CANARY_PY), verb, "--rollout", str(rollout_path), "--tasks-dir",
            str(tasks_dir), "--repo", str(repo), "--default", default, "--slug", slug, "--kind", kind]
     sys.stdout.flush()
     sys.stderr.flush()
     try:
-        rc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=stdout).returncode
+        rc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=stdout, start_new_session=own_session).returncode
     except OSError as e:
         print(f"git-env-canary: cannot run {GIT_ENV_CANARY_PY}: {e}", file=sys.stderr)
         return 2
@@ -6448,14 +6449,16 @@ def _drop_comment(raw):
 
 
 def _continued(note, key):
-    """True when the key's value goes on below its own line: the next line that is not blank is indented and no
-    comment (YAML folds a plain scalar across blank lines, and reads a value under an empty key)."""
+    """True when the key's value goes on below its own line: the next line that is neither blank nor an indented
+    comment is indented (YAML folds a plain scalar across blank and comment lines, and reads a value under an empty
+    key)."""
     lines = note._fm
     i = next((n for n, line in enumerate(lines) if re.match(rf"^{re.escape(key)}:", line)), None)
     if i is None:
         return False
-    nxt = next((line for line in lines[i + 1:] if line.strip()), "")
-    return bool(re.match(r"^[ \t]+[^\s#]", nxt))
+    # An indented comment is skipped like a blank line: YAML reads a value below it.
+    nxt = next((line for line in lines[i + 1:] if line.strip() and not re.match(r"^[ \t]+#", line)), "")
+    return bool(re.match(r"^[ \t]+\S", nxt))
 
 
 def _command_value(note, key):
@@ -6478,6 +6481,9 @@ def _command_value(note, key):
         if end < 0 or (q == '"' and "\\" in inner) or not re.fullmatch(r"(\s+#.*)?", rest):
             raise CompletionValueError(f"{key}: {raw!r} is not one plainly quoted command")
         cmd = inner.strip()
+        if cmd.startswith("#"):
+            raise CompletionValueError(f"{key}: {raw!r} is a comment, not a command: remove the key, or write the "
+                                       "command")
     else:
         cmd = _drop_comment(raw).strip()
         try:
@@ -6491,6 +6497,9 @@ def _command_value(note, key):
                                        "line, quoted")
         if cmd.lower() in ("null", "~"):
             cmd = ""
+        elif cmd.lower() in ("true", "false", "yes", "no", "on", "off"):
+            raise CompletionValueError(f"{key}: {raw!r} is a YAML boolean, not a command: remove the key to turn it "
+                                       "off, or quote a command")
     return cmd
 
 
@@ -6839,7 +6848,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     # The canary's own words go to stderr: --run's stdout is its one JSON line.
     if st.sig is not None:
         return 128 + st.sig
-    arm = _run_canary("arm", path, tasks_dir, root, default, ro, COMPLETION_KIND, stdout=sys.stderr)
+    arm = _run_canary("arm", path, tasks_dir, root, default, ro, COMPLETION_KIND, stdout=sys.stderr, own_session=True)
     if st.sig is not None:
         return 128 + st.sig   # armed, never launched: the window closes by the owner rule or the next arm
     if arm != 0:
@@ -6856,8 +6865,12 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
             "--slot-wait", str(_slot_wait(timeout + spent)), f"--verifier={verifier}"]
     argv += [f"--bootstrap={bootstrap}"] if bootstrap else []
     outcome_path, log_path = Path(f"{out}{VERIFY_OUTCOME_SUFFIX}"), Path(f"{out}.log")
-    for p in (outcome_path, log_path):   # a dead run's files are never read as this run's
-        p.unlink(missing_ok=True)
+    # A dead run's files are never read as this run's: its outcome goes, its log is kept under a name of its own.
+    outcome_path.unlink(missing_ok=True)
+    if log_path.exists():
+        os.replace(log_path, Path(f"{out}.dead-{_run_id(datetime.now(), os.getpid())}.log"))
+    if st.sig is not None:
+        return 128 + st.sig
     sys.stdout.flush()
     sys.stderr.flush()
     try:
@@ -6878,7 +6891,8 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
             log_path.write_text(said)
         except OSError:
             pass
-    check = _run_canary("check", path, tasks_dir, root, default, ro, COMPLETION_KIND, stdout=sys.stderr)
+    check = _run_canary("check", path, tasks_dir, root, default, ro, COMPLETION_KIND, stdout=sys.stderr,
+                        own_session=True)
     note = Note(path)   # fresh: the canary may have written its log
     outcome = _read_outcome(outcome_path)
     if outcome is not None and outcome.get("sha") != sha:
@@ -6895,7 +6909,10 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     if result == "rerun" and ids:
         # The Flake log (ADR 0050): attempt 1's failing ids, so a test that flakes again can be seen in the lines.
         why += "; failing " + ", ".join(ids[:10]) + (" …" if len(ids) > 10 else "")
-    if check != 0 or _git_env_trips(note, ro, COMPLETION_KIND) > trips:
+    if check not in (0, 3) and _git_env_trips(note, ro, COMPLETION_KIND) <= trips:
+        result, why = "unrun", (f"the canary check failed (exit {check}), so its rc is never acted on, no verdict: "
+                                "the attempt re-runs")
+    elif check != 0 or _git_env_trips(note, ro, COMPLETION_KIND) > trips:
         # RACE's rule: an rc after a git-env trip is never acted on, even one an ack re-armed meanwhile.
         result, why = "unrun", ("a git-env trip fell inside its window (the shared checkout changed during the run), "
                                 "so its rc is never acted on, no verdict: the attempt re-runs")
