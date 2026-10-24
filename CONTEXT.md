@@ -532,9 +532,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   deadline in the suite, files one fix task for the project, and the rollout
   completes either way, since its tasks merged green at their own Integration.
   A run with no verdict (no verify slot, verify never got going or was
-  stopped, the bootstrap never let the suite run, a git-env trip inside its
-  window) waits for the next tick, and three in a row halt (a deliberate stop
-  never counts). A parallel rollout's only, so far.
+  stopped, the bootstrap never let the suite run) waits for the next tick,
+  and three in a row halt (a deliberate stop never counts). A git-env trip
+  inside its window gives no verdict either: the rollout halts on the
+  git-env trip, or, when the trip was already acked, waits like the rest. A parallel rollout's only, so far.
   A note with none completes as before. _Avoid_: final verify, post-merge suite.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier suite
   runs in, shared by every rollout on the machine (p23-4,

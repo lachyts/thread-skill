@@ -523,8 +523,9 @@ merged and the ceremony stopped at its completion verify: the last ROLLOUT-STATU
 or status's `Completion verify:` line reads undecided with no lead live. Read it first, read-only:
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py completion-verify --rollout <rollout-note>`.
 Never stamp the note done, skip the suite or write a `## Completion verify log` line by hand: the ceremony waits on
-the suite, and only `--run` records a run. There is nothing to discard: a dead or refused run leaves a free lock and
-no line, and the next `--run` clears its tree and files itself.
+the suite, and only `--run` records a run. There is nothing to discard: a dead run leaves a free lock and no line, a
+run whose verify refused (its words in the kept log the line names) records `unrun`, which counts toward the halt,
+and the next `--run` clears its tree and files itself.
 - `in-flight` → the lead's own `--run`: report it and wait, as for a RACE re-verify in flight.
 - `completion verify: no verdict in three runs` → read the kept logs (`<out>.<run id>.log`, the lines name them)
   and `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status`: wedged verify slots, a saturated

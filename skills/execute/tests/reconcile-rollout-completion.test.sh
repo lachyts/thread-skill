@@ -120,6 +120,7 @@ cv --run; ok "$rc|$(js ran)|$(js result)|$(cksum < "$RO")|$(records)" "0|False|g
 # ── C3 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c3 "\"printf 'FAILED tests/test_x.py::test_slow - boom'; echo; exit 1\""
 cv --run; ok "$(js result)|$(js attempt)|$(js decided)" "rerun|1|False" "C3: red on attempt 1 → rerun"
+has "$(grep ' -> rerun' "$RO")" "failing tests/test_x.py::test_slow" "C3: … its line names the failing ids (the Flake log)"
 cv; ok "$(js state)|$(js attempt)|$(js sha)" "rerun|2|$SHA" "C3: … attempt 2 on the red run's sha"
 ok "$(js out)" "$(integ)/completion-ro-rollout-2026-10-24-2" "C3: … with its own out"
 g -C "$D/repo" commit -q --allow-empty -m later; g -C "$D/repo" push -q origin master
@@ -209,6 +210,7 @@ scen c8 "\"test -f $TMP/c8.once || { touch $TMP/c8.once; sleep 30; }\""
 python3 "$SCRIPT" completion-verify --rollout "$RO" --tasks-dir "$D/tasks" --now "$NOW" --run > /dev/null 2>&1 &
 bp=$!
 wait_for "$(integ)/completion-ro-rollout-2026-10-24-1.log" '^== verifier'
+for _ in $(seq 1 100); do [ -f "$TMP/c8.once" ] && break; sleep 0.1; done   # the verifier is past its touch
 kill -KILL "$bp"; wait "$bp" 2>/dev/null
 pkill -f "c8.once" 2>/dev/null; sleep 0.5
 cv; ok "$(js state)|$(js attempt)|$(log_lines)" "run|1|0" "C8: killed outright → a free lock and no line: the same attempt"
@@ -233,9 +235,14 @@ g -C "$D/repo" commit -q --allow-empty -m moved; new=$(git -C "$D/repo" rev-pars
 python3 "$CANARY" check-all --rollout "$RO" --tasks-dir "$D/tasks" > /dev/null 2>&1; ok "$?" 3 "C9: a loop-entry check-all catches the trip"
 python3 "$CANARY" ack --rollout "$RO" --tasks-dir "$D/tasks" --repo "$D/repo" --default master --slugs ro-rollout-2026-10-24 --ref "$new" > /dev/null 2>&1
 ok "$?|$(window)" "0|armed" "C9: … and an ack re-arms the window while the run goes on"
+python3 - "$RO" <<'PY'
+import sys
+t = open(sys.argv[1]).read(); open(sys.argv[1], "w").write(t.replace("## Queue\n", "## Queue\n\n- written during the run\n", 1))
+PY
 touch "$TMP/c9b.go"
 wait "$bp"; brc=$?; out=$(cat "$D/bg.out")
 ok "$brc|$(js result)" "0|unrun" "C9: the run's own check passes, but a trip fell inside its window → unrun, never green"
+has "$(cat "$RO")" "- written during the run" "C9: … and a line written to the note during the run is kept"
 
 # ── C10 ───────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c10 '"true"'
@@ -293,6 +300,10 @@ scen c11h '"true"' 'completion_timeout: ""'
 cv; ok "$rc|$(js state)" "0|run" "C11: a quoted empty completion_timeout: → its default"
 scen c11i "bash -c 'echo # hi'"
 cv; ok "$rc|$out" "2|" "C11: a bare command holding a quote and a # → refused (2), never cut inside its own quotes"
+scen c11j "echo \"it's\" 'x #y' \"z's\""
+cv; ok "$rc|$out" "2|" "C11: a bare command with both quote kinds and a # inside quotes → refused (2)"
+scen c11k '"true"' '  # runs every tier'
+cv; ok "$rc|$(js verifier)" "0|true" "C11: an indented comment after the key is no continuation"
 scen c11g '"true"' 'env_bootstrap: >-'
 HOME="$TMP/home" python3 "$SCRIPT" verify-timeout --rollout "$RO" > /dev/null 2> "$D/err"; ok "$?" 2 "C11: verify-timeout, run at every loop entry, refuses a completion key the reader cannot represent (2, never verify_timeout's 1)"
 has "$(cat "$D/err")" "env_bootstrap" "C11: … naming it, before any work runs"
@@ -310,6 +321,18 @@ PY
 done
 scen c11y '"true"' 'env_bootstrap: >-'
 cv; ok "$rc" 2 "C11: an env_bootstrap the reader cannot represent → refused (2)"
+
+scen c11z '"true"'
+python3 - "$D/repo/.git/thread" "$RO" <<'PY' &
+import fcntl, os, sys, time
+d, ro = sys.argv[1:]; os.makedirs(d, exist_ok=True)
+fh = open(os.path.join(d, "completion-ro-rollout-2026-10-24-1.lock"), "a"); fcntl.flock(fh, fcntl.LOCK_EX)
+time.sleep(0.5)
+t = open(ro).read(); open(ro, "w").write(t.replace('completion_verifier: "true"\n', ""))
+PY
+hp=$!; sleep 0.2
+cv --run; wait "$hp"
+ok "$rc|$(window)" "2|none" "C11: the verifier removed before --run gets its lock → refused (2), nothing armed"
 
 # ── C12 ───────────────────────────────────────────────────────────────────────────────────────────────────────
 python3 - "$SCRIPT" <<'PY'
