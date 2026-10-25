@@ -14,6 +14,7 @@ SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 NOW=2026-10-02T14:05:00Z
 
 fail=0
@@ -296,6 +297,50 @@ ag a
 ok "$rc|$(fm a status)" "0|status: in_progress" "approve-gates: a set-aside line with no pr: -> in_progress"
 has "$out" "WARN: a: the Integration log's last line is set-aside but the note has no pr:" "approve-gates: warns that it cannot integrate"
 ok "$(fm a ready)" "<none>" "approve-gates: no ready: without a PR"
+
+# ── reconcile --no-verdict (ADR 0053): an integrate call whose window was acked mid-run gives no verdict ─────
+# Its `integrated` row would leave a line backing prepare's case (ii), a merge with no verifier. Reconciled with
+# --no-verdict (its check exited 4), the line reads `void`: the lane frees and the task is integrated again. Any
+# other outcome is reconciled as usual: none is a verdict to merge on.
+irow() {  # irow <slug> <status> <outcome>: an integrate-call row on stdout
+  python3 -c 'import json, sys; s, st, o = sys.argv[1:4]; print(json.dumps({"rolloutSlug": "ro", "tasks": [{"slug": s, "status": st, "prUrl": "https://github.com/o/r/pull/7", "reviewRoundsUsed": 1, "rung": "", "blockerDiagnosis": "", "integration": {"outcome": o, "path": "integrator", "anchor": {"headSha": "1" * 40}, "headSha": "2" * 40, "baseSha": "3" * 40, "triggers": [], "metrics": {"startedAt": "2026-10-02T10:00+00:00", "waitMinutes": 5, "durationMinutes": 3}}}]}))' "$1" "$2" "$3"
+}
+loglast() { awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/$1.md" | tail -n 1; }
+holds() { python3 "$SCRIPT" free-lane --tasks "$1" --tasks-dir "$D" --dry-run >/dev/null 2>&1 && echo holds || echo free; }
+lanefreed() { grep -h '"lane-freed"' "$THREAD_EVENTS_DIR"/*.jsonl 2>/dev/null | grep -c "\"$1\""; }
+scen noverdict
+mkro
+mkt a review "pr: $PR" 'integrating: 2026-10-02T10:00+00:00' 'ready: 2026-10-02T09:00+00:00'
+f0=$(lanefreed a)
+out=$(irow a review integrated | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "$NOW" --no-verdict 2>&1); rc=$?
+ok "$rc|$(loglast a | cut -d' ' -f2)" "0|void" "no-verdict: an integrated row reconciled --no-verdict leaves a void line"
+ok "$(fm a integrating)|$(holds a)|$(q "$(nxt)" 'd["awaitingIntegration"]')" '<none>|free|["a"]' "no-verdict: … the lane frees and a waits for Integration again"
+ok "$(( $(lanefreed a) - f0 ))" 1 "no-verdict: … one lane-freed event"
+ok "$(python3 - "$LI" "$D/a.md" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("li", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.last_integration(m.rr.Note(Path(sys.argv[2])))["outcome"])
+PY
+)" void "no-verdict: prepare's last record is not an integrated one (no case (ii) merge)"
+scen noverdict-rejected
+mkro
+mkt a review "pr: $PR" 'integrating: 2026-10-02T10:00+00:00' 'ready: 2026-10-02T09:00+00:00'
+irow a blocked rejected | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "$NOW" --no-verdict >/dev/null 2>&1
+ok "$(loglast a | cut -d' ' -f2)|$(fm a status)" "rejected|status: blocked" "no-verdict: a rejected row is reconciled as usual (its seeded revise follows)"
+
+# reconcile: a note that cannot be saved is that row's error; the other rows still land, exit 1, no traceback
+scen save-fails
+mkro
+mkt a review "pr: $PR" 'integrating: 2026-10-02T10:00+00:00'
+mkt b review "pr: $PR" 'integrating: 2026-10-02T10:00+00:00'
+chmod 444 "$D/a.md"
+out=$(python3 -c 'import json; print(json.dumps({"rolloutSlug": "ro", "tasks": [{"slug": s, "status": "review", "prUrl": "https://github.com/o/r/pull/7", "reviewRoundsUsed": 1, "rung": "", "blockerDiagnosis": ""} for s in ("a", "b")]}))' \
+  | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "$NOW" 2>&1); rc=$?
+chmod 644 "$D/a.md"
+ok "$rc|$(fm b integrating)" "1|<none>" "save-fails: a's unwritable note → exit 1, b still reconciled"
+has "$out" "a: cannot write" "save-fails: … a's error names the write"
+hasnt "$out" "Traceback" "save-fails: … never a traceback"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-lead: ALL PASS"; else echo "reconcile-rollout-lead: SOME FAILED"; fi

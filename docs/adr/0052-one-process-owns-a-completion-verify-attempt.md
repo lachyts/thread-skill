@@ -26,4 +26,4 @@ The completion verifier (the vault task `thread-skill-the-rollout-runs-its-full-
 ## Consequences
 
 - Attempt 2 runs the note's command as it is when it starts, and resolves the default branch through origin as attempt 1 does. An edit to the command between attempts is the operator's own act, and an origin outage halts the ceremony, which re-invocation clears.
-- A git-env trip inside an attempt's window is found by counting the canary's own trip lines for that window before the arm and after the check, because the canary's `ack` re-baselines an open window. A trip memory in the canary record, which `check` would report for every window kind, is the deeper fix and is left to its own task.
+- A git-env trip inside an attempt's window is found by counting the canary's own trip lines for that window before the arm and after the check, because the canary's `ack` re-baselines an open window. A trip memory in the canary record, which `check` would report for every window kind, is the deeper fix and is left to its own task. ADR 0053 built it: `check` now exits 4 for a window acked mid-run, and the count is gone.

@@ -26,6 +26,7 @@ trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
 EH="$TMP/settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master -c commit.gpgsign=false "$@"; }
 
 S=""; O=""; R=""; V=""; RO=""; C2=""
@@ -667,20 +668,20 @@ scen q5
 mkt A in_progress; mkt B in_progress
 arm A; arm B; code; chk A; ackc A,B "$(cur)"
 ok "$(recf B task state)" '"armed"' "q5: an ack with B's window still open re-baselines it"
-chk B; ok "$rc" 0 "q5: … and B's later clean check → 0"
+chk B; ok "$rc" 0 "q5: … and B's later check → 0: a task window takes its acked trip as it stands (ADR 0053)"
 
 # ── rs: a room stop's stopped verify (execute § Room stop item 9: its `undo` runs with no canary `check`) ────────
 # A verify the room stop TaskStopped keeps its window open while the note keeps `integrating:`. The resume entry's
 # check-all compares that window; a `check` at the undo adds nothing, and it trips `record not armed` once the window
 # is closed (rs2, and a3's second check), so item 9 runs none. rs1 is the half that does not trip: an ack while the
-# owner holds re-baselines the window, so a check after it is clean.
+# owner holds re-baselines the window, so a check after it trips nothing, but reports the acked trip (ADR 0053).
 scen rs1
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
 arm A verify; code
 call; ok "$rc|$(recf A verify state)|$(recf A verify closed)" '3|"tripped"|false' "rs1: the stop's window trips at the entry check-all, still open (the owner holds)"
 ackc A "$(cur)"; ok "$rc|$(recf A verify state)|$(recf A verify closed)" '0|"armed"|false' "rs1: … an ack while the owner holds re-baselines it"
-chk A verify; ok "$rc" 0 "rs1: … and a check after it → 0"
-has "$out" "checked [[A]] verify: clean" "rs1: … clean"
+chk A verify; ok "$rc|$(trips A)" "4|1" "rs1: … and a check after it → 4, no second trip line"
+has "$out" "checked [[A]] verify: no verdict" "rs1: … no verdict, never clean"
 scen rs2
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
 arm A verify; code
@@ -694,6 +695,55 @@ PY
 ackc A "$(cur)"; ok "$rc|$(recf A verify state)" '0|"acked"' "rs2: integrating: removed before the ack → the record is an acked tombstone"
 chk A verify; ok "$rc|$(trips A)" "3|2" "rs2: … a check on it → 3, a second trip line"
 has "$(grep 'git-env trip \[\[A\]\]' "$RO" | tail -n 1)" "verify: record not armed" "rs2: … logged as record not armed"
+
+# ── nv: a window acked mid-run gives no verdict (ADR 0053) ────────────────────────────────────────────────────
+# The lead halts on a trip while a verify runs on in the background; Lachy acks; the resumed lead reads the rc and
+# checks. The ack re-baselined the open window, so before ADR 0053 that check read clean and the rc was acted on.
+for k in verify race-verify integrate; do
+  scen "nv-$k"
+  mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+  arm A "$k"; old=$(cur); code
+  call; ok "$rc|$(recf A "$k" state)" '3|"tripped"' "nv-$k: a commit mid-window trips at a check-all, the window still open"
+  ackc A "$(cur)"; ok "$rc|$(recf A "$k" state)" '0|"armed"' "nv-$k: … the ack re-baselines it"
+  chk A "$k"; ok "$rc|$(trips A)" "4|1" "nv-$k: … its check → 4, no second trip line"
+  has "$out" "checked [[A]] $k: no verdict" "nv-$k: … no verdict"
+  has "$out" "refs/heads/master ${old}→" "nv-$k: … naming the acked trip"
+  call; ok "$rc" 0 "nv-$k: … and check-all after it → 0 (it speaks for the rollout, never 4)"
+  arm A "$k"; chk A "$k"; ok "$rc" 0 "nv-$k: a fresh window of the same slug and kind → 0 (the memory is the window's own)"
+done
+scen nv-task
+# A task call's work is taken as it stands (ADR 0053): its check exits 0, naming the acked trip it ran through.
+mkt A in_progress
+arm A; old=$(cur); code; call; ackc A "$(cur)"
+chk A; ok "$rc|$(trips A)" "0|1" "nv-task: a task window acked mid-run → its check 0, no second trip line"
+has "$out" "checked [[A]] task: clean, taken as it stands" "nv-task: … taken as it stands"
+has "$out" "refs/heads/master ${old}→" "nv-task: … naming the acked trip"
+scen nv-rearm
+# A Lost-call or § 5 resume arms the same window again before its check: the trip memory must survive that arm.
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+arm A integrate; code; call; ackc A "$(cur)"
+can arm --repo "$R" --default master --slug A --kind integrate --resume; ok "$rc" 0 "nv-rearm: a resume's arm (--resume) over the acked, still-open window → 0"
+chk A integrate; ok "$rc" 4 "nv-rearm: … and its check still → 4 (the acked trip kept across the re-arm)"
+scen nv-rearm-closed
+# A usage-limit row: the integrate check (4) closes the window, then the Lost-call resume arms with --resume. The
+# trips carry from that closed window, so the resumed call's verdict is still void.
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+arm A integrate; code; call; ackc A "$(cur)"; chk A integrate; ok "$rc" 4 "nv-rearm-closed: the check → 4 and closes the window"
+can arm --repo "$R" --default master --slug A --kind integrate --resume; chk A integrate
+ok "$rc" 4 "nv-rearm-closed: … the Lost-call resume (--resume) over the closed window still checks 4"
+scen nv-rearm-new
+# A new run arming over an earlier window nobody checked (a room stop's stopped verify) starts with no memory.
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+arm A verify; code; call; ackc A "$(cur)"
+arm A verify; chk A verify; ok "$rc" 0 "nv-rearm-new: a new run's arm (no --resume) over the acked window → its check 0, no inherited trips"
+scen nv-open
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+arm A verify; code; call; ackc A "$(cur)"
+call; ok "$rc" 0 "nv-open: check-all with the acked window still open → 0"
+scen nv-3
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+arm A verify; code; call; ackc A "$(cur)"; code
+chk A verify; ok "$rc|$(trips A)" "3|2" "nv-3: an acked trip, then a second commit before the check → 3 (a standing trip wins over 4)"
 
 # ── s: --tasks-dir ───────────────────────────────────────────────────────────────────────────────────────────
 scen s

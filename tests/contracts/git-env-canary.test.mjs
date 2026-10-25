@@ -194,7 +194,8 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
 
   // integrate-check: the integrate return checks, then reconciles whatever the exit, and acts on no outcome.
   if (!integ.includes('run the canary `check` for its window first, then reconcile the row whatever the exit') ||
-    !integ.includes('no step 4, no seeded revise, no stale-anchor-ref deletion')) fails.push('integrate-check')
+    !integ.includes('no step 4, no seeded revise, no stale-anchor-ref deletion') ||
+    !integ.includes('with `--no-verdict` after any non-zero check')) fails.push('integrate-check')
 
   // prepare-cases: after the ack, prepare re-derives the case.
   const lane = bullet(canRaw, 'The lane-free rule.')
@@ -257,6 +258,14 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
   if (!ex.includes('Any non-zero exit halts: exit 3 `reason="git-env trip: the shared checkout changed"`, anything else `reason="git-env canary failed"`') ||
     !s7.includes('`reason="git-env trip: the shared checkout changed"`') || !s7.includes('`reason="git-env canary failed"`') ||
     !donts.includes('never ack from execute') || !pz.includes("TaskStop'd calls keep their open git-env records")) fails.push('exit-rule')
+
+  // no-verdict (ADR 0053): a check's exit 4 never halts, and each window kind's route is stated.
+  if (!ex.includes('**Exit 4 is the one exception:** `check` exits 4 when a trip inside its window was acked before the check (ADR 0053)') ||
+    !ex.includes('It never halts, needs no ack and overrides the check site\'s non-zero route') ||
+    !ex.includes('a task window checks 0 instead, naming the acked trip: a task call\'s work, PR or none, is taken as it stands') ||
+    !ex.includes('an integrate call\'s row is reconciled with `--no-verdict`, so an `integrated` row\'s line reads `void` and is not acted on (no step 4)') ||
+    !ex.includes('the lead\'s verify runs `lead-integrate.py undo') ||
+    !ex.includes('re-verify gave no verdict: an acked git-env trip (rc <rc|absent>)` to the `## Race log` and re-runs the re-verify')) fails.push('no-verdict')
 
   // owner-closeout: the owner rule and the close-out rule, stricter than S9, everywhere they are stated.
   const ctxCanary = collapse((context.split('\n- **').find((x) => x.startsWith('Git-env canary**')) ?? ''))
@@ -334,7 +343,7 @@ test('the git-env canary holds at every site, consumer and record', () => {
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------------------
 
 const RULES = ['marker-tie', 'arm-sites', 'check-sites', 'check-all-sites', 'integrate-check', 'prepare-cases', 'step11-halt',
-  'lane-free', 'race-gitenv', 'race-followon', 'drop-guard', 'merge-result', 'exit-rule', 'owner-closeout', 'status', 'schedule',
+  'lane-free', 'race-gitenv', 'race-followon', 'drop-guard', 'merge-result', 'exit-rule', 'no-verdict', 'owner-closeout', 'status', 'schedule',
   'repair', 'adr', 'context-readme', 'owner-refusal', 'mark-started-arm']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
@@ -346,6 +355,12 @@ const only = (key, from, to, rule, label) => {
   assert.deepEqual(check({ ...real, [key]: edit(real[key], from, to) }), [rule], label)
 }
 
+test('control: an exit 4 that halts, or a RACE that acts on it, fails no-verdict', () => {
+  only('execute', 'It never halts, needs no ack', 'It halts, needs no ack', 'no-verdict', 'exit 4 halts')
+  only('execute', 'and re-runs the re-verify with the lane held (the canary arm first); the completion', 'and runs `mark-done`; the completion', 'no-verdict', 'RACE acts on 4')
+  only('execute', 'is reconciled with `--no-verdict`, so', 'is reconciled, so', 'no-verdict', 'integrate merges on 4')
+})
+
 test('control: status without the log section, or a literal marker in the canary, fails marker-tie', () => {
   only('status', `rollout note's \`${LOG}\` that no later`, "rollout note's log that no later", 'marker-tie', 'status')
   only('canary', 'KINDS = (', `X = "${TRIP}"\nKINDS = (`, 'marker-tie', 'literal copy')
@@ -356,7 +371,7 @@ test('control: each arm site without its arm fails arm-sites', () => {
   only('execute', '--rollout <rollout-note> --arm-repo <repoPath> --arm-default <B>` with the `--start` that routing chose', '--rollout <rollout-note>` with the `--start` that routing chose', 'arm-sites', 'step 1.3')
   only('execute', 'then `mark-started --tasks <slug> --rollout <rollout-note> --start resume --arm-repo <repoPath> --arm-default <B>`, then', 'then `mark-started --tasks <slug> --rollout <rollout-note> --start resume`, then', 'arm-sites', 'room-stop resume')
   only('execute', ', then the canary arm (§ 4.5 *Git-env canary*, `--kind task`; a non-zero exit halts and resumes nothing), then:', ', then:', 'arm-sites', '§ 3.7')
-  only('execute', ' then the canary arm (§ 4.5 *Git-env canary*: `--kind task`, or `integrate` for an integrate call; a non-zero exit halts and resumes nothing), then resume once', ' then resume once', 'arm-sites', '§ 5')
+  only('execute', ' then the canary arm (§ 4.5 *Git-env canary*: `--kind task`, or `integrate` for an integrate call, with `--resume`; a non-zero exit halts and resumes nothing), then resume once', ' then resume once', 'arm-sites', '§ 5')
   only('execute', 'then the canary arm (*Git-env canary*: `--kind race-verify`;', 'then (', 'arm-sites', 'RACE')
 })
 
@@ -377,6 +392,7 @@ test('control: a merge hold release without check-all fails check-all-sites', ()
 
 test('control: an integrate return that drops "whatever the exit" fails integrate-check', () => {
   only('execute', 'then reconcile the row whatever the exit, exactly as at step 2', 'then reconcile the row, exactly as at step 2', 'integrate-check', 'integrate')
+  only('execute', 'with `--no-verdict` after any non-zero check', 'after any non-zero check', 'integrate-check', 'integrate --no-verdict')
 })
 
 test('control: the old "an Integration log line makes it case (ii)" wording fails prepare-cases', () => {

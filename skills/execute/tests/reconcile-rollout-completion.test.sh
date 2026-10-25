@@ -24,7 +24,8 @@
 #       exit 1 with no line, so the attempt runs again.
 #   C11 the value: absent forms, kept comments, refused forms; env_bootstrap is read the same way.
 #   C12 the outcome classes (verify's outcome file alone, never its log's text).
-#   C13 a verify with no --outcome (Integration, RACE) writes no outcome file and leaves its tree unlocked.
+#   C13 a verify with no --outcome (Integration, RACE) writes no outcome file; its --detach-at tree is pid-locked
+#       like --outcome's, so the daily sweep's reaper never removes a RACE re-verify's tree mid-run, and removed.
 #   C14 reconcile-rollout.py loads where fcntl does not (the Windows machine): a read verb still runs.
 # Temp repos and notes only; no vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -37,6 +38,7 @@ CANARY="$HERE/../scripts/git-env-canary.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="$TMP/events"  # this suite reads the Run record: each scenario keeps its own dir (scen)
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots"
 export HOME="$TMP/home"; mkdir -p "$HOME"   # an empty HOME: rollout-settings.py resolves the built-ins
 NOW=2026-10-24T09:00:00Z
@@ -428,7 +430,9 @@ ok "$?|$(cat "$(integ)/race-x.rc")" "0|0" "C13: a verify with no --outcome (Inte
 ok "$(ls "$(integ)" | grep -c 'race-x\.outcome')" "0" "C13: … no outcome file"
 python3 "$LI" verify --repo "$D/repo" --detach-at "$SHA" --tree "$D/race2" --out "$(integ)/race-y" --timeout 60 \
   --verifier "git -C '$D/repo' worktree list --porcelain > '$D/wt-during.txt'" > /dev/null 2>&1
-ok "$(grep -c '^worktree .*/race2$' "$D/wt-during.txt")|$(grep -c '^locked' "$D/wt-during.txt")" "1|0" "C13: … and its tree, read while it runs, is not locked"
+lp=$(sed -n '/\/race2$/,/^$/s/^locked pid //p' "$D/wt-during.txt")
+ok "$(grep -c '^worktree .*/race2$' "$D/wt-during.txt")|$(test -n "$lp" && echo locked)" "1|locked" "C13: … and its tree, read while it runs, is locked with a pid (the sweep's reaper skips it)"
+ok "$([ -e "$D/race2" ] && echo left || echo removed)|$(git -C "$D/repo" worktree list | grep -c race2)" "removed|0" "C13: … and the locked tree is still removed at the end"
 python3 "$LI" verify --outcome --tree "$D/repo" --out "$(integ)/oc-x" --timeout 60 --verifier true > /dev/null 2>&1
 ok "$(test -e "$(integ)/oc-x.rc" && echo rc || echo none)|$(test -e "$(integ)/oc-x.outcome.json" && echo outcome)" "none|outcome" "C13: verify --outcome writes its outcome in place of an rc (the file heartbeat clause (4) acts on)"
 

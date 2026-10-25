@@ -34,6 +34,7 @@ trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
 unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR XDG_STATE_HOME
 export THREAD_EVENTS_DIR="$TMP/events"   # the Run record (run_record.py, ADR 0032); each scenario points it at its own dir
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 NOW=2026-10-03T09:00:00Z
 PR=https://github.com/o/r/pull/5
 REVISE='revise: rejected at Integration re-review — revise on the branch, then re-integrate'

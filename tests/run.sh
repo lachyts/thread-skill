@@ -54,6 +54,8 @@ export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$scratch/events}"; unset XDG
 # The machine's verify slots (verify-slot.py, p23-4) stay in temp too: each suite that reaches a pool exports its
 # own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
 export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
+# The note save lock (reconcile-rollout.py's _note_lock_path): one lock file per note directory, in temp like the rest.
+export THREAD_NOTE_LOCK_DIR="$scratch/note-locks"
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"
 # A git hook running `make test` exports GIT_DIR & co. (and `git -c ...` exports GIT_CONFIG_PARAMETERS);
 # left set, every git call below and every suite's temp-repo git call (commits, pushes included) would land

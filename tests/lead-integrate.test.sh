@@ -800,6 +800,12 @@ lacks "$(git -C "$R" worktree list)" "race-$SLUG" "C17: … unregistered too"
 mkdir -p "$RT"
 python3 "$LI" verify --repo "$R" --detach-at "$M" --tree "$RT" --out "$F/out/race2" --timeout 60 --verifier true >/dev/null 2>&1
 ok "$?|$([ -e "$F/out/race2.rc" ] && echo rc || echo none)" "2|none" "C17: --detach-at refuses an existing path (no rc: red)"
+rmdir "$RT"
+# A killed re-verify leaves its tree's registration locked with a dead pid; once the directory is gone, the next
+# re-verify at the same path unlocks and prunes it rather than wedging on "missing but locked worktree".
+git -C "$R" worktree add -q --lock --reason "pid 1" --detach "$RT" "$M" && rm -rf "$RT"
+python3 "$LI" verify --repo "$R" --detach-at "$M" --tree "$RT" --out "$F/out/race3" --timeout 60 --verifier true >/dev/null 2>&1
+ok "$?|$(cat "$F/out/race3.rc" 2>/dev/null)" "0|0" "C17: a dead re-verify's locked registration (directory gone) is cleared, and the re-verify runs"
 
 # ======== C18: no relaunch loop ===========================================================================
 nfx c18 4

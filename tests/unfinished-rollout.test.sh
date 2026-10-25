@@ -46,6 +46,7 @@ trap 'rm -rf "$TMP"' EXIT
 # real clock (no --now), so the file is written now and stays fresh for the suite's run.
 EH="$TMP/settings-home"; mkdir -p "$EH"; away_file "$EH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 
 hasnt() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
 

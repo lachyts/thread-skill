@@ -473,7 +473,10 @@ def atomic_write(path, text):
 def save(ctx, note):
     if ctx.dry or not note.dirty:
         return
-    atomic_write(note.path, note.render())
+    try:
+        note.save()   # under the note's lock, re-applied to a fresh read, renamed into place (Note.save)
+    except OSError as e:
+        raise Refuse(5, f"cannot write {note.path}: {e}; nothing written: run it again")
     note.dirty = False
 
 
@@ -497,12 +500,17 @@ def split_cells(line):
     return [c.strip() for c in cells[1:-1]] if line.strip().startswith("|") else []
 
 
+def _cells_slug(cells):
+    """The task slug a Queue row's cells link, else None."""
+    m = LINK_RE.search(cells[1] if len(cells) > 1 else "")
+    return rr._wikilink_slug(m.group(1)) if m else None
+
+
 class Row:
     def __init__(self, i, cells, line_no):
         self.i, self.line_no = i, line_no
         self.cells = cells
-        m = LINK_RE.search(cells[1] if len(cells) > 1 else "")
-        self.slug = rr._wikilink_slug(m.group(1)) if m else None
+        self.slug = _cells_slug(cells)
         lm = LAUNCH_RE.match(cells[2]) if len(cells) > 2 else None
         self.alias, self.folder = (lm.group(1), lm.group(2)) if lm else (None, None)
         self.surfaces_cell = cells[3] if len(cells) > 3 else ""
@@ -834,6 +842,10 @@ def next_json(plan):
 # ---- the log writer -----------------------------------------------------------------------------------------------
 
 def log_line(note, line):
+    note.apply(_log_line, line)   # journaled, so Note.save re-applies it to a note another writer changed
+
+
+def _log_line(note, line):
     found = note._section_bounds(LEG_LOG)
     if found is None:
         note.append_section(LEG_LOG, line)
@@ -1319,18 +1331,22 @@ def check_cause(chain, target, a):
 
 
 def insert_row(chain, row_text):
-    note = chain.note
+    if chain.note._section_bounds(QUEUE) is None:
+        raise Refuse(1, f"{chain.ctx.slug} has no {QUEUE} table")
+    before = next((r.slug for r in chain.rows if r.state == "queued"), None)
+    chain.note.apply(_insert_row, row_text, before)   # journaled: re-applied to a note another writer changed
+
+
+def _insert_row(note, row_text, before):
+    """The row before the Queue row linking `before` (the first queued task), else after the table's last row, read
+    from the note itself so Note.apply can re-apply it; the rows renumbered."""
     found = note._section_bounds(QUEUE)
     if found is None:
-        raise Refuse(1, f"{chain.ctx.slug} has no {QUEUE} table")
+        return
     lines, start, end = found
     table = [k for k in range(start + 1, end) if lines[k].lstrip().startswith("|")]
-    data = [r for r in chain.rows]
-    at = None
-    for r in data:
-        if r.state == "queued":
-            at = r.line_no
-            break
+    at = next((k for k in table if before is not None
+               and (_cells_slug(split_cells(lines[k])) or "").lower() == before.lower()), None)
     if at is None:
         at = (table[-1] + 1) if table else end
     lines = lines[:at] + [row_text] + lines[at:]
@@ -1617,6 +1633,10 @@ def cmd_post_items(ctx, a):
 
 
 def set_pointer(note, item_k, name, title):
+    note.apply(_set_pointer, item_k, name, title)   # journaled, as log_line
+
+
+def _set_pointer(note, item_k, name, title):
     found = note._section_bounds(POST_ROLLOUT)
     if found is None:
         note.append_section(POST_ROLLOUT, f"{ITEMS_MARK}\n\n- → [[{name}]]: {title}")

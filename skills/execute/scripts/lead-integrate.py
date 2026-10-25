@@ -44,8 +44,8 @@ Subcommands:
       gets SIGTERM, 10 s, then SIGKILL: rc 124. TERM/INT/HUP to verify itself kill the group the same way:
       rc 128+n. They are held while a step starts, so one landing before its group is recorded still kills it,
       and each step starts with the caller's signal mask. --detach-at adds T as a detached worktree of R at SHA
-      (refusing an existing path) and removes it (`worktree remove --force`) whatever the verdict: the RACE
-      re-verify. Only the verifier's rc is a verdict: a green bootstrap sets none, so a verifier step that never
+      (refusing an existing path), locks it with `pid <this process's pid>` so the daily sweep's reaper leaves
+      it alone, and removes it (`worktree remove --force --force`) whatever the verdict: the RACE re-verify. Only the verifier's rc is a verdict: a green bootstrap sets none, so a verifier step that never
       starts leaves no O.rc (red), never the bootstrap's 0.
       --slots N --slot-wait W (given together or not at all; one alone is exit 2 with no rc file) first waits,
       up to W seconds, for one of the machine's N verify slots (verify-slot.py, p23-4), as an Integration waiter
@@ -57,13 +57,11 @@ Subcommands:
       verify slot within Ws (held: …); verifier not run`, the exit is 75 and the race tree is still removed. An
       unusable slots dir logs a WARN and runs the steps unslotted, still under the guard.
       --outcome (reconcile-rollout.py completion-verify --run's, which runs verify as its child while it holds
-      the attempt's lock, ADR 0052) changes two things and nothing else. Its result is O.outcome.json, in
+      the attempt's lock, ADR 0052) changes one thing and nothing else. Its result is O.outcome.json, in
       place of O.rc, which it never writes: removed first, then written at the start ({v, id, sha, ended:
       "running"}) and again at the end ({v, id, sha, ended, rc, step, signal}: ended done | deadline | bootstrap
       | signal | noslot; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
-      by its fields, never by log text, and one that still reads `running` never finished. And --detach-at's
-      tree is locked with `pid <this process's pid>`, so the daily sweep's reaper leaves it alone, and removed
-      with `--force --force`.
+      by its fields, never by log text, and one that still reads `running` never finished.
 
   push --repo R --slug S --head M
       A plain push of the task tree's M to origin/<branch> (never forced); the ls-remote read-back must
@@ -752,14 +750,14 @@ def cmd_verify(args):
             raise EnvError("--detach-at needs --repo")
         if tree.exists():
             raise EnvError(f"{tree} already exists — refusing to reuse it for a detached verify")
+        # A killed verify's registration, locked with its dead pid, outlives its directory: unlock and prune it, or
+        # `worktree add` refuses a "missing but locked" path (completion-verify --run does the same for its tree).
+        git(os.path.expanduser(args.repo), "worktree", "unlock", str(tree))
+        git(os.path.expanduser(args.repo), "worktree", "prune")
         p = git(os.path.expanduser(args.repo), "worktree", "add", "--quiet", "--detach", str(tree), args.detach_at)
         if p.returncode != 0:
             raise EnvError(f"could not add a detached worktree at {tree} ({args.detach_at}): {why(p)}")
         added = True
-        if args.outcome:
-            # Locked with this pid, best-effort as the engine's own tree lock is: the daily sweep's reaper skips a
-            # tree locked by a live pid.
-            git(os.path.expanduser(args.repo), "worktree", "lock", "--reason", f"pid {os.getpid()}", str(tree))
     elif not tree.is_dir():
         raise EnvError(f"no tree at {tree}")
     rc = None
@@ -769,6 +767,11 @@ def cmd_verify(args):
     try:
         for s in SIGNALS:   # inside the try, so a signal that lands at once still removes the tree
             signal.signal(s, _on_signal)
+        if added:
+            # Locked with this pid, best-effort as the engine's own tree lock is: the daily sweep's reaper skips a
+            # tree locked by a live pid, so a RACE re-verify's tree is never removed under its suite. Inside the try,
+            # so the finally's `remove --force --force` takes a tree a stop left locked.
+            git(os.path.expanduser(args.repo), "worktree", "lock", "--reason", f"pid {os.getpid()}", str(tree))
         if outcome_path:
             _write_atomic(outcome_path, json.dumps(result) + "\n")
         with open(log_path, "ab", buffering=0) as log:
@@ -829,8 +832,7 @@ def cmd_verify(args):
         if slot is not None:
             slot.release()  # a close, never LOCK_UN (verify-slot.py's contract)
         if added:
-            git(os.path.expanduser(args.repo), "worktree", "remove", "--force", *(["--force"] if args.outcome else []),
-                str(tree))
+            git(os.path.expanduser(args.repo), "worktree", "remove", "--force", "--force", str(tree))
             git(os.path.expanduser(args.repo), "worktree", "prune")
         if rc is not None:
             if outcome_path:
@@ -1479,8 +1481,7 @@ def main(argv=None):
     vf.add_argument("--repo", default=None)
     vf.add_argument("--detach-at", default=None, type=_sha)
     vf.add_argument("--outcome", action="store_true",
-                    help="completion-verify --run's: write <out>.outcome.json (its structured result) and lock a "
-                         "--detach-at tree with this pid")
+                    help="completion-verify --run's: write <out>.outcome.json (its structured result) in place of <out>.rc")
     vf.add_argument("--slots", default=None, type=int, help="the machine's verify slots (rollouts.toml verify_slots); "
                     "with --slot-wait, wait for one first (verify-slot.py, p23-4)")
     vf.add_argument("--slot-wait", default=None, type=float, help="seconds to wait for a verify slot (verify-timeout's "

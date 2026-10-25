@@ -14,6 +14,7 @@ SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"   # physical: the stub gh logs the cwd gh ran in (macOS /var -> /private/var)
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 NOW=2026-10-02T14:05:00Z
 
 fail=0
@@ -1045,6 +1046,43 @@ mkro $'- [[x]]' 'shape: parallel'
 mkt x open
 J=$(nxt --dry-run); rc=$?
 ok "$rc|$(q "$J" 'd["start"]')" '0|["x"]' "serial control: shape: parallel with a Project root runs as today"
+
+# ── a comment-only value reads as no value (_scalar; YAML reads `key:   # x` as null) ─────────────────────────
+# Note.get strips the space before the comment, so `_scalar` once saw `# cleared` with no space to drop and read it
+# as a value: a rollout whose paused: stamp was cleared to a comment read as paused, a task with `integrating:   # x`
+# as integrating.
+scen comment-only
+mkro $'- [[x]]' 'paused:   # cleared by hand'
+mkt x open
+J=$(nxt --dry-run)
+ok "$(q "$J" '[d["paused"], d["halt"], d["start"]]')" '[null,null,["x"]]' "comment-only: paused:   # cleared → not paused, x starts"
+scen comment-only-integrating
+mkro $'- [[x]]'
+mkt x review 'pr: https://github.com/o/r/pull/1' 'integrating:   # none yet'
+J=$(nxt --dry-run)
+ok "$(q "$J" '[d["integrating"], d["awaitingIntegration"]]')" '[[],["x"]]' "comment-only: integrating:   # none yet → awaiting Integration, never integrating"
+scen bare-pr
+# A bare `#N` pr: is a value (the code builds a PR URL from it), never a comment: only `# …` or a lone `#` is one.
+mkro $'- [[x]]'
+mkt x review 'pr: #7' 'integrating: 2026-10-02T10:00+00:00'
+ok "$(python3 - "$SCRIPT" "$D/x.md" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+n = m.Note(Path(sys.argv[2]))
+print(m._pr(n), m._holds_lane(n), repr(m._scalar("# optional")), repr(m._scalar("#")))
+PY
+)" "#7 True '' ''" "bare-pr: pr: #7 reads #7 and holds the lane; '# optional' and a lone # read as none"
+scen comment-only-list
+mkro $'- [[x]]'
+mkt x open 'depends-on:' '  - # none yet'
+ok "$(python3 - "$SCRIPT" "$D/x.md" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.Note(Path(sys.argv[2])).get_list("depends-on"))
+PY
+)" "[]" "comment-only: get_list reads a block list whose only item is a comment as empty"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-queue: ALL PASS"; else echo "reconcile-rollout-queue: FAILED"; fi

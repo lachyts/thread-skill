@@ -16,7 +16,10 @@ Subcommands:
               `merged:` (the first stamp wins): a read-only task is done when its review approves and
               never enters Integration. Every row removes `integrating:` (the run that produced the row
               ended any Integration). It also stamps `ready:` and appends the `## Integration log` line
-              (see the Status mapping below).
+              (see the Status mapping below). --no-verdict (the integrate call's canary check exited 4, a trip
+              inside its window acked before the check, ADR 0053): an `integrated` row's line reads `void`
+              instead, so it never backs prepare's case (ii), and the lane frees (`lane-freed release=halt`);
+              the task waits for Integration again. A row with any other outcome is reconciled as usual.
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start and restart
               within the parallel ceiling, every held task with its reason, the running, awaiting-Integration,
@@ -436,8 +439,8 @@ Subcommands:
               room stop) is forwarded to verify once, and the run is `stopped` whatever it ends with; one before
               verify starts ends any origin read and exits 128+n at the next checkpoint with no line (the attempt
               runs again); one after verify ended on its own leaves its verdict standing. A git-env trip inside the
-              window (its own check's, or one a loop-entry check-all caught and an ack re-armed meanwhile: one more
-              `[[<rollout>]] completion-verify` trip line than at the arm) makes it `unrun` whatever the rc. It
+              window (its own check's exit 3, or its exit 4: one a loop-entry check-all caught and an ack re-armed
+              meanwhile, ADR 0053) makes it `unrun` whatever the rc. It
               keeps the log as `<out>.<run id>.log`, files the fix task on a final red
               (`<tasks-dir>/completion-red-<rollout>.md`, open, priority high, `projects:` copied,
               `completion_red_of:` naming the rollout; the sha, the rc and why, the log and the failing ids read
@@ -452,8 +455,9 @@ Subcommands:
               unread, a git dir it cannot read, refused rollout settings, a file it could not write, no fcntl, a sha
               that is not 40-hex). 128+n: stopped by signal n before verify started, nothing recorded. Exit 2:
               refused (no `completion_verifier:`, an unreadable value). Exit 3: another --run holds the attempt.
-              Exit 4: the canary's arm (nothing run) or check (recorded `unrun`) exited non-zero, its stderr passed
-              through and its exit in the line's canary_exit.
+              Exit 4: the canary's arm (nothing run) or check (recorded `unrun`) exited non-zero, but for the
+              check's own exit 4 (an acked trip: recorded `unrun`, exit 0), its stderr passed through and its exit
+              in the line's canary_exit.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`, and `paused_for`) from the rollout note. Run by /thread:execute's resume path
@@ -1021,11 +1025,18 @@ ISO_STAMP_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?
 
 # ---- small value helpers ----------------------------------------------------
 
+def _drop_comment(raw):
+    """A frontmatter value without its ` # comment`. A value that is only a comment (`# x`, or a lone `#`) becomes '';
+    a bare `#7` stays a value (a `pr:` the code builds a PR URL from)."""
+    return re.sub(r"\s+#.*$|^#(\s.*)?$", "", raw)
+
+
 def _scalar(value) -> str:
-    """A frontmatter scalar: inline ` # comment` dropped, quotes and whitespace stripped ('' for None)."""
+    """A frontmatter scalar: inline ` # comment` dropped, quotes and whitespace stripped ('' for None). A value that is
+    only a comment is '' (YAML's null): Note.get has already stripped the space before it."""
     if value is None:
         return ""
-    s = re.sub(r"\s+#.*$", "", str(value)).strip()
+    s = _drop_comment(str(value)).strip()
     return s.strip('"').strip("'").strip()
 
 
@@ -1047,14 +1058,15 @@ def _start_unattended(note) -> bool:
 def _clear_start(note) -> bool:
     """Remove every top-level `start:` frontmatter line whose scalar reads `unattended` (so a stale second line can
     never re-arm the Stage); any other `start:` value and every indented line stay. True when one was removed."""
-    pat = re.compile(rf"^{re.escape(START_KEY)}:\s*(.*)$")
-    kept = [line for line in note._fm
-            if not ((m := pat.match(line)) and _scalar(m.group(1)).lower() == START_UNATTENDED)]
-    if len(kept) == len(note._fm):
-        return False
-    note._fm = kept
-    note.dirty = True
-    return True
+    return note.filter_fm(_not_start_unattended)
+
+
+START_LINE_RE = re.compile(rf"^{re.escape(START_KEY)}:\s*(.*)$")
+
+
+def _not_start_unattended(line) -> bool:
+    m = START_LINE_RE.match(line)
+    return not (m and _scalar(m.group(1)).lower() == START_UNATTENDED)
 
 
 def _truthy_flag(value) -> bool:
@@ -1319,12 +1331,50 @@ def _top_run(runs):
 
 # ---- frontmatter surgery (order/format preserving) --------------------------
 
-class Note:
-    """A markdown note split into (frontmatter lines, body text), edited in place."""
+NOTE_LOCK_TIMEOUT = 30.0
 
-    def __init__(self, path: Path):
+
+def _note_lock_path(path) -> Path:
+    """The note's save lock: one file per directory of notes (its real path's hash), shared by every note in it so
+    the lock files stay few, and outside the vault so it never syncs. A save holds it for milliseconds."""
+    absolute = lambda v: v if v and os.path.isabs(v) else None   # noqa: E731  a relative dir is ignored (the XDG rule)
+    base = absolute(os.environ.get("THREAD_NOTE_LOCK_DIR")) or os.path.join(
+        absolute(os.environ.get("XDG_STATE_HOME")) or os.path.join(os.path.expanduser("~"), ".local", "state"),
+        "thread", "note-locks")
+    real = os.path.dirname(os.path.realpath(str(path)))
+    return Path(base) / f"{hashlib.sha256(real.encode()).hexdigest()[:16]}-{os.path.basename(real)[:60]}.lock"
+
+
+def _journaled(method):
+    """A Note edit that save() can re-apply to a fresh read: only the outermost call is recorded, so an edit built on
+    another (upsert_section on append_section) is replayed once, and only when it changed the note, so a no-op on a
+    stale read (a remove of a key that was absent) never undoes another writer's fresh write."""
+    def wrapper(self, *args, **kwargs):
+        outer = self._depth == 0
+        before = (list(self._fm), self._body) if outer else None
+        self._depth += 1
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._depth -= 1
+            if outer and (self._fm, self._body) != before:
+                self._ops.append((method, args, kwargs))
+    wrapper.__name__, wrapper.__doc__ = method.__name__, method.__doc__
+    return wrapper
+
+
+class Note:
+    """A markdown note split into (frontmatter lines, body text), edited in place. Every edit is journaled, and save()
+    re-applies the journal to the note as it reads under the note's lock, so writers in other processes (the canary,
+    a reconcile verb, completion-verify --run) never lose each other's lines. A hand edit made through no script
+    (the lead's Edit tool, Obsidian) takes no lock."""
+
+    def __init__(self, path: Path, text=None):
         self.path = path
-        text = path.read_text()
+        text = path.read_text() if text is None else text
+        self._text = text      # what this Note read, or last wrote: save() replays only when the file differs
+        self._ops = []
+        self._depth = 0
         m = re.match(r"^(---\n)(.*?\n)(---\n)(.*)$", text, re.DOTALL)
         if not m:
             raise ValueError(f"{path}: no YAML frontmatter block found")
@@ -1349,29 +1399,28 @@ class Note:
             mm = pat.match(line)
             if not mm:
                 continue
-            value = re.sub(r"\s+#.*$", "", mm.group(1)).strip()
+            value = _drop_comment(mm.group(1)).strip()
             if value:
                 return _list_items(value)
             out = []
             for item in self._fm[i + 1:]:
                 mi = re.match(r"^\s*-\s*(.*)$", item)
                 if mi:
-                    out.extend(_list_items(re.sub(r"\s+#.*$", "", mi.group(1)).strip()))
+                    out.extend(_list_items(_drop_comment(mi.group(1)).strip()))   # `- # x`: no item
                 elif item.strip():
                     break
             return out
         return []
 
+    @_journaled
     def unset(self, key: str):
         """Remove `key:` from the frontmatter entirely. Idempotent; used to retire a marker that a
         later, better-informed run has superseded (a stale marker is triaged against, so leaving one
         is worse than never writing it)."""
         pat = re.compile(rf"^{re.escape(key)}:\s*")
-        kept = [line for line in self._fm if not pat.match(line)]
-        if len(kept) != len(self._fm):
-            self._fm = kept
-            self.dirty = True
+        self.filter_fm(lambda line: not pat.match(line))
 
+    @_journaled
     def set(self, key: str, value, after=("owner", "status")):
         """Replace `key:`'s value in place, or insert a new line after the first present anchor key."""
         newline = f"{key}: {value}"
@@ -1393,13 +1442,11 @@ class Note:
         self._fm.append(newline)
         self.dirty = True
 
+    @_journaled
     def remove(self, key: str):
         """Delete the `key:` line from frontmatter entirely (idempotent — no-op if absent)."""
         pat = re.compile(rf"^{re.escape(key)}:\s*")
-        kept = [line for line in self._fm if not pat.match(line)]
-        if len(kept) != len(self._fm):
-            self._fm = kept
-            self.dirty = True
+        self.filter_fm(lambda line: not pat.match(line))
 
     def has_heading(self, heading: str) -> bool:
         return any(line.strip() == heading for line in self._body.split("\n"))
@@ -1417,6 +1464,7 @@ class Note:
                 out.append(line)
         return "\n".join(out).strip()
 
+    @_journaled
     def append_section(self, heading: str, content: str):
         """Append `## heading\\n\\n<content>` to the body once (idempotent on the heading)."""
         if self.has_heading(heading):
@@ -1438,11 +1486,16 @@ class Note:
         return None
 
     def _set_body_lines(self, lines):
+        if self._depth == 0:
+            # Only a journaled edit may change the body, so save() can re-apply it; a direct call fails here, every
+            # time, never only under a concurrent write. Use Note.apply for an edit of your own.
+            raise RuntimeError("Note._set_body_lines outside a journaled edit: wrap the edit in Note.apply")
         new_body = "\n".join(lines)
         if new_body != self._body:
             self._body = new_body
             self.dirty = True
 
+    @_journaled
     def upsert_section(self, heading: str, content: str):
         """Create `## heading` with content, or REPLACE the existing section's content in place
         (unlike append_section's heading-idempotence — for sections whose content must track the
@@ -1457,6 +1510,7 @@ class Note:
         lines, start, end = found
         self._set_body_lines(lines[:start + 1] + [""] + content.rstrip().split("\n") + [""] + lines[end:])
 
+    @_journaled
     def remove_section(self, heading: str):
         """Delete `## heading` and its content from the body (idempotent — no-op if absent)."""
         found = self._section_bounds(heading)
@@ -1497,6 +1551,7 @@ class Note:
         lines, start, end = found
         return _normalise("\n".join(lines[start + 1:end]))
 
+    @_journaled
     def append_run(self, heading: str, content: str, now):
         """Record one run of feedback under `heading` (p6-4: every run is kept, not only the first).
 
@@ -1556,6 +1611,7 @@ class Note:
         block = ["", head, "", *written.split("\n"), "", _run_end(n, sha), ""]
         self._set_body_lines(lines[:j] + block + lines[end:] if end < len(lines) else lines[:j] + block)
 
+    @_journaled
     def append_line(self, heading: str, line: str):
         """Record one bare line under `heading` (the Integration log), creating the section when absent.
 
@@ -1589,10 +1645,124 @@ class Note:
     def render(self) -> str:
         return "---\n" + "\n".join(self._fm) + "\n---\n" + self._body
 
+    @_journaled
+    def apply(self, fn, *args):
+        """`fn(self, *args)`, journaled: for an edit computed from the note itself (a log line placed after the
+        section's last line), so save() re-applies it to a fresh read. Returns fn's result."""
+        return fn(self, *args)
+
+    @_journaled
+    def filter_fm(self, keep):
+        """Keep only the frontmatter lines `keep(line)` is true for. True when one went."""
+        kept = [line for line in self._fm if keep(line)]
+        if len(kept) == len(self._fm):
+            return False
+        self._fm = kept
+        self.dirty = True
+        return True
+
+    def _replay(self, ops):
+        """Re-apply another Note's journal here, as journaled edits (inside the journal's depth)."""
+        self._depth += 1
+        try:
+            for method, args, kwargs in ops:
+                method(self, *args, **kwargs)
+        finally:
+            self._depth -= 1
+
     def save(self, dry_run=False):
-        if dry_run or not self.dirty:
-            return
-        self.path.write_text(self.render())
+        """Under the note's lock: read the note again, re-apply this Note's edits when another writer changed it
+        since, and rename a temp file over it (_replace_keeping_metadata), so no reader ever sees it torn and a kill
+        never truncates it, while it keeps its created time and Finder tags. A note
+        gone from its path (moved or deleted meanwhile) is never written back: FileNotFoundError. A lock not taken
+        within THREAD_NOTE_LOCK_TIMEOUT seconds (30) is an OSError, nothing written."""
+        text = self.render()
+        if dry_run or not self.dirty or text == self._text:
+            return   # nothing since the read or the last save
+        target = Path(os.path.realpath(self.path))   # a symlinked note: its target takes the save, the link stays
+        with _note_lock(target):
+            now = target.read_text()
+            if now != self._text:
+                # An edit outside the journal (a direct _set_body_lines) cannot be re-applied: refuse rather than
+                # drop it. The journal replayed on what this Note read must give what it holds.
+                base = Note(self.path, self._text)
+                base._replay(self._ops)
+                if base.render() != text:
+                    raise OSError(f"{self.path} changed since it was read, and an edit here cannot be re-applied to "
+                                  "it; nothing written: run it again")
+                fresh = Note(self.path, now)
+                fresh._replay(self._ops)
+                self._fm, self._body = fresh._fm, fresh._body
+                text = self.render()
+            if not os.access(target, os.W_OK):
+                # A rename would replace a read-only note anyway: refuse it as write_text did.
+                raise PermissionError(13, "Permission denied", str(self.path))
+            _replace_keeping_metadata(target, text)
+        self._text, self._ops = text, []
+
+
+def _replace_keeping_metadata(target, text):
+    """Write `text` to a temp file beside `target` and rename it over `target`, so no reader sees a torn note and a
+    kill never truncates it. The note keeps its metadata (Lachy's ruling: Obsidian sorts by created time): on macOS
+    the temp file starts as a `cp -p` clone (mode, flags, ACLs and extended attributes such as Finder tags), and the
+    note's created time is carried over (macOS sets a file's created time back when its mtime is set before it)."""
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        st = os.stat(target)
+        if sys.platform == "darwin":
+            subprocess.run(["/bin/cp", "-p", str(target), str(tmp)], capture_output=True)   # best-effort
+            if tmp.exists():
+                os.chmod(tmp, 0o600)
+        with open(tmp, "w") as f:   # into the clone (its attributes kept), else a new file
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, stat.S_IMODE(st.st_mode))
+        birth = getattr(st, "st_birthtime", None)
+        if birth is not None:
+            os.utime(tmp, (st.st_atime, birth))
+            now = time.time()
+            os.utime(tmp, (now, now))
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+class _note_lock:
+    """The note's save lock (_note_lock_path), held only for a save's read and write, never across a child process
+    (the `cp -p` clone aside, which takes no lock); the canary takes it inside its own lock, and nothing takes the
+    canary's inside this one. No fcntl (Windows): no lock, the atomic replace alone."""
+
+    def __init__(self, path):
+        self.lock_path, self.fh = _note_lock_path(path), None
+
+    def __enter__(self):
+        if fcntl is None:
+            return self
+        try:
+            timeout = float(os.environ.get("THREAD_NOTE_LOCK_TIMEOUT") or NOTE_LOCK_TIMEOUT)
+        except ValueError:
+            timeout = NOTE_LOCK_TIMEOUT
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.fh = open(self.lock_path, "a")
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    self.fh.close()
+                    raise OSError(f"timed out after {timeout:g}s waiting for the note lock {self.lock_path}")
+                time.sleep(0.05)
+            except OSError as e:
+                self.fh.close()
+                raise OSError(f"cannot lock {self.lock_path}: {e}")
+
+    def __exit__(self, *exc):
+        if self.fh is not None:
+            self.fh.close()   # closing the file drops the flock
+        return False
 
 
 def bullets(items):
@@ -2380,6 +2550,10 @@ def cmd_reconcile(args) -> int:
     warnings = []
     top = None  # (name, source) of the ladder's top rung, read once, only for a pre-3.0.0 row
     for task in tasks:
+        integ = task.get("integration")
+        if args.no_verdict and isinstance(integ, dict) and integ.get("outcome") == "integrated":
+            # ADR 0053: a trip inside the integrate call's window was acked before its check, so its verdict is void.
+            task = {**task, "integration": {**integ, "outcome": "void"}}
         slug = task.get("slug", "<no-slug>")
         status = task.get("status")
         path = resolve_task_path(task, tasks_dir)
@@ -2534,7 +2708,13 @@ def cmd_reconcile(args) -> int:
             errors.append(f"{slug}: needsHuman is not a string or null ({type(ask).__name__}) — "
                           f"{NEEDS_HUMAN_SECTION} left untouched")
 
-        note.save(dry_run=args.dry_run)
+        try:
+            note.save(dry_run=args.dry_run)
+        except OSError as e:
+            # This row's error, never the whole reconcile's: the other rows still land (Note.save's lock timeout,
+            # an edit it cannot re-apply, a note moved away meanwhile).
+            errors.append(f"{slug}: cannot write {path}: {e} — nothing written for this row")
+            continue
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
                           ready_stamped)
         _review_verdict_events(args, rollout, slug, task, prior)
@@ -4215,7 +4395,7 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
         _event(rollout, "merged", slug, {"readOnly": True}, args)
     rejected = integ is not None and outcome == "rejected"
     if held and not (integ is not None and outcome == "integrated"):
-        fields = {"release": "reject" if rejected else "set-aside"}
+        fields = {"release": "reject" if rejected else "halt" if outcome == "void" else "set-aside"}
         fields.update(_lane_fields_from_row(integ) if integ is not None else lane_fields)
         _close_holds(rollout, slug, ("merge",), args, _record_state(rollout))
         _event(rollout, "lane-freed", slug, fields, args)
@@ -5065,21 +5245,7 @@ def cmd_descope(args) -> int:
                 _write_followup(fu_path, note, slug, part, reason, run_n, now, hits[0][0][3] if hits else "")
             except OSError as e:
                 return error(f"cannot write {fu_path}: {e}", "a re-run finishes the records")
-    # the brief pointer: on every item holding the part, else (an emergent part) one line in the first brief section
-    if hits:
-        for item, *_rest in hits:
-            if _fold(DESCOPE_POINTER) not in _fold(item[3]):
-                lines[item[2]] = lines[item[2]].rstrip() + " " + DESCOPE_POINTER
-    else:
-        _lines, sections = _body_sections(note)
-        first = next((s for s in sections if s[0] and _is_brief(s[0])), sections[0])
-        filled = [i for i in first[1] if lines[i].strip()]
-        at = (filled[-1] + 1) if filled else (first[1][0] if first[1] else len(lines))
-        lines.insert(at, f'- out of scope (automatic descope, Plan-blocked feedback run {run_n}): "{part}", '
-                         f"{'owned by [[' + owner + ']]' if owner else 'filed as [[' + fu_name + ']]'} {DESCOPE_POINTER}")
-        if filled and at < len(lines) - 1 and lines[at + 1].strip():
-            lines.insert(at + 1, "")
-    note._set_body_lines(lines)
+    _descope_pointer(note, part, part_f, run_n, owner, fu_name)
     if not marks:
         why = "is optional in the brief" if mode == "optional" else f'is owned by [[{owner}]] ("{quote}")'
         note.append_line(SCOPE_AUTO_SECTION, f'{DESCOPE_ENTRY}{stamp}, Plan-blocked feedback run {run_n}: "{part}" {why}; '
@@ -5490,9 +5656,33 @@ def _answer_recorded(note):
     return {"stamp": m.group(1), "kind": m.group(2), "form": FORM_NAMES[m.group(4)], "line": line}
 
 
+@_journaled
+def _descope_pointer(note, part, part_f, run_n, owner, fu_name):
+    """The brief pointer, read from the note itself (journaled: Note.save re-applies it to a fresh read): on every item holding
+    the part, else (an emergent part) one line in the first brief section."""
+    lines, items, _fenced = _brief_items(note)
+    hits = _part_hits(items, part_f)
+    if hits:
+        for item, *_rest in hits:
+            if _fold(DESCOPE_POINTER) not in _fold(item[3]):
+                lines[item[2]] = lines[item[2]].rstrip() + " " + DESCOPE_POINTER
+    else:
+        _lines, sections = _body_sections(note)
+        first = next((s for s in sections if s[0] and _is_brief(s[0])), sections[0])
+        filled = [i for i in first[1] if lines[i].strip()]
+        at = (filled[-1] + 1) if filled else (first[1][0] if first[1] else len(lines))
+        lines.insert(at, f'- out of scope (automatic descope, Plan-blocked feedback run {run_n}): "{part}", '
+                         f"{'owned by [[' + owner + ']]' if owner else 'filed as [[' + fu_name + ']]'} {DESCOPE_POINTER}")
+        if filled and at < len(lines) - 1 and lines[at + 1].strip():
+            lines.insert(at + 1, "")
+    note._set_body_lines(lines)
+
+
+@_journaled
 def _rewrite_keys(note, pick, to):
     """Rewrite the key of each `## Repair input` entry `pick(fingerprint)` selects among the live ones to
-    `(block <fp>; <to>)`, in memory (the caller saves). Returns how many changed."""
+    `(block <fp>; <to>)`, in memory (the caller saves; journaled, so Note.save re-applies it). Returns how many
+    changed."""
     found = note._section_bounds(REPAIR_INPUT_SECTION)
     if found is None:
         return 0
@@ -6443,11 +6633,6 @@ class CompletionValueError(ValueError):
     pass
 
 
-def _drop_comment(raw):
-    """A frontmatter value without its ` # comment` (a value that is only a comment becomes '')."""
-    return re.sub(r"(^|\s+)#.*$", "", raw)
-
-
 def _continued(note, key):
     """True when the key's value goes on below its own line: the next line that is neither blank nor an indented
     comment is indented (YAML folds a plain scalar across blank and comment lines, and reads a value under an empty
@@ -6522,7 +6707,7 @@ def _completion_timeout(note):
         raise CompletionValueError(f"{COMPLETION_TIMEOUT_KEY}: continues on a later line; write the seconds on its "
                                    "own line")
     raw = note.get(COMPLETION_TIMEOUT_KEY)
-    if raw is None or _scalar(_drop_comment(raw)).lower() in ("", "null", "~"):
+    if not _valued(raw):
         return DEFAULT_COMPLETION_TIMEOUT   # empty, quoted empty, a comment alone (the template's line), null or ~
     seconds, err = _verify_timeout(note, COMPLETION_TIMEOUT_KEY)
     if err:
@@ -6704,13 +6889,6 @@ def _read_outcome(path: Path):
     return d
 
 
-def _git_env_trips(note, slug, kind):
-    """How many trip lines the note's git-env log holds for one window: an ack re-arms a window with a new baseline,
-    so a trip inside a run is seen only as one more line than at its arm."""
-    want = f"{GIT_ENV_TRIP_MARK} [[{slug}]] {kind}:"
-    return sum(1 for line in note.section_text(GIT_ENV_LOG_SECTION).split("\n") if want in line)
-
-
 def _completion_not_ran(state, attempt, streak, **extra):
     """--run's line when it ran nothing: decided already, another --run holds the attempt, or a refusal."""
     print(json.dumps(dict(ran=False, state=state, result=state if state in COMPLETION_DECIDED else None,
@@ -6844,7 +7022,6 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     li.git(root, "worktree", "remove", "--force", "--force", tree)
     li.git(root, "worktree", "prune")
     shutil.rmtree(tree, ignore_errors=True)
-    trips = _git_env_trips(Note(path), ro, COMPLETION_KIND)   # read right before the arm: the window's baseline
     # The canary's own words go to stderr: --run's stdout is its one JSON line.
     if st.sig is not None:
         return 128 + st.sig
@@ -6909,11 +7086,11 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     if result == "rerun" and ids:
         # The Flake log (ADR 0050): attempt 1's failing ids, so a test that flakes again can be seen in the lines.
         why += "; failing " + ", ".join(ids[:10]) + (" …" if len(ids) > 10 else "")
-    if check not in (0, 3) and _git_env_trips(note, ro, COMPLETION_KIND) <= trips:
+    if check not in (0, 3, 4):
         result, why = "unrun", (f"the canary check failed (exit {check}), so its rc is never acted on, no verdict: "
                                 "the attempt re-runs")
-    elif check != 0 or _git_env_trips(note, ro, COMPLETION_KIND) > trips:
-        # RACE's rule: an rc after a git-env trip is never acted on, even one an ack re-armed meanwhile.
+    elif check != 0:
+        # 3, a trip that stands, or 4, one an ack re-armed meanwhile (ADR 0053): either way the rc is never acted on.
         result, why = "unrun", ("a git-env trip fell inside its window (the shared checkout changed during the run), "
                                 "so its rc is never acted on, no verdict: the attempt re-runs")
     now = _now(args)
@@ -6935,11 +7112,11 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
             _write_completion_red(tasks_dir / f"{red_stem}.md", note, ro, verifier, sha, rc_word, why, kept_name, ids,
                                   now)
             filed = tasks_dir / f"{red_stem}.md"   # only once this run wrote it: an existing one is never removed
-        # The note read again right here, so a Pause log line or an ack written during the run is kept, and written
-        # by tmp + rename, so a kill mid-write never truncates it.
+        # The note read again right here, and saved under the note's lock (Note.save), so a Pause log line or an
+        # ack written during the run is kept and a kill mid-write never truncates it.
         note = Note(path)
         note.append_line(COMPLETION_VERIFY_SECTION, line)
-        li._write_atomic(path, note.render())
+        note.save()
     except (OSError, ValueError) as e:
         if filed is not None:
             filed.unlink(missing_ok=True)   # a fix task for a red the record never shows would be an orphan
@@ -6957,7 +7134,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     print(json.dumps(dict(ran=True, result=result, decided=result in COMPLETION_DECIDED, attempt=attempt,
                           streak=streak, halt=_completion_halts(result, streak), line=line[2:], followup=followup,
                           **({"canary_exit": check} if check != 0 else {}))))
-    return 4 if check != 0 else 0
+    return 4 if check not in (0, 4) else 0   # an acked trip (4) needs no halt: the attempt re-runs (ADR 0053)
 
 
 def cmd_completion_verify(args) -> int:
@@ -7014,6 +7191,8 @@ def main() -> int:
     r.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     r.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the run headings' stamp)")
     r.add_argument("--dry-run", action="store_true")
+    r.add_argument("--no-verdict", action="store_true",
+                   help="ADR 0053: the integrate call's canary check exited 4: an integrated row's line reads void")
     r.set_defaults(func=cmd_reconcile)
 
     nx = sub.add_parser("next", help="print the queue's next moves as JSON (start/restart/hold/halt)")
