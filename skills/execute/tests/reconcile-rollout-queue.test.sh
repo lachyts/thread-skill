@@ -1060,6 +1060,16 @@ mkro $'- [[x]]'
 mkt x review 'pr: https://github.com/o/r/pull/1' 'integrating:   # none yet'
 J=$(nxt --dry-run)
 ok "$(q "$J" '[d["integrating"], d["awaitingIntegration"]]')" '[[],["x"]]' "comment-only: integrating:   # none yet → awaiting Integration, never integrating"
+scen comment-only-list
+mkro $'- [[x]]'
+mkt x open 'depends-on:' '  - # none yet'
+ok "$(python3 - "$SCRIPT" "$D/x.md" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.Note(Path(sys.argv[2])).get_list("depends-on"))
+PY
+)" "[]" "comment-only: get_list reads a block list whose only item is a comment as empty"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-queue: ALL PASS"; else echo "reconcile-rollout-queue: FAILED"; fi

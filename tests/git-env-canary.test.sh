@@ -714,8 +714,13 @@ scen nv-rearm
 # A Lost-call or § 5 resume arms the same window again before its check: the trip memory must survive that arm.
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
 arm A integrate; code; call; ackc A "$(cur)"
-arm A integrate; ok "$rc" 0 "nv-rearm: a resume's arm over the acked, still-open window → 0"
+can arm --repo "$R" --default master --slug A --kind integrate --resume; ok "$rc" 0 "nv-rearm: a resume's arm (--resume) over the acked, still-open window → 0"
 chk A integrate; ok "$rc" 4 "nv-rearm: … and its check still → 4 (the acked trip kept across the re-arm)"
+scen nv-rearm-new
+# A new run arming over an earlier window nobody checked (a room stop's stopped verify) starts with no memory.
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+arm A verify; code; call; ackc A "$(cur)"
+arm A verify; chk A verify; ok "$rc" 0 "nv-rearm-new: a new run's arm (no --resume) over the acked window → its check 0, no inherited trips"
 scen nv-open
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
 arm A verify; code; call; ackc A "$(cur)"

@@ -370,7 +370,7 @@ test('control: each arm site without its arm fails arm-sites', () => {
   only('execute', '--rollout <rollout-note> --arm-repo <repoPath> --arm-default <B>` with the `--start` that routing chose', '--rollout <rollout-note>` with the `--start` that routing chose', 'arm-sites', 'step 1.3')
   only('execute', 'then `mark-started --tasks <slug> --rollout <rollout-note> --start resume --arm-repo <repoPath> --arm-default <B>`, then', 'then `mark-started --tasks <slug> --rollout <rollout-note> --start resume`, then', 'arm-sites', 'room-stop resume')
   only('execute', ', then the canary arm (§ 4.5 *Git-env canary*, `--kind task`; a non-zero exit halts and resumes nothing), then:', ', then:', 'arm-sites', '§ 3.7')
-  only('execute', ' then the canary arm (§ 4.5 *Git-env canary*: `--kind task`, or `integrate` for an integrate call; a non-zero exit halts and resumes nothing), then resume once', ' then resume once', 'arm-sites', '§ 5')
+  only('execute', ' then the canary arm (§ 4.5 *Git-env canary*: `--kind task`, or `integrate` for an integrate call, with `--resume`; a non-zero exit halts and resumes nothing), then resume once', ' then resume once', 'arm-sites', '§ 5')
   only('execute', 'then the canary arm (*Git-env canary*: `--kind race-verify`;', 'then (', 'arm-sites', 'RACE')
 })
 

@@ -1323,18 +1323,28 @@ def check_cause(chain, target, a):
 
 
 def insert_row(chain, row_text):
-    note = chain.note
+    if chain.note._section_bounds(QUEUE) is None:
+        raise Refuse(1, f"{chain.ctx.slug} has no {QUEUE} table")
+    before = next((r.slug for r in chain.rows if r.state == "queued"), None)
+    chain.note.apply(_insert_row, row_text, before)   # journaled: re-applied to a note another writer changed
+
+
+def _insert_row(note, row_text, before):
+    """The row before the Queue row linking `before` (the first queued task), else after the table's last row, read
+    from the note itself so Note.apply can re-apply it; the rows renumbered."""
     found = note._section_bounds(QUEUE)
     if found is None:
-        raise Refuse(1, f"{chain.ctx.slug} has no {QUEUE} table")
+        return
     lines, start, end = found
     table = [k for k in range(start + 1, end) if lines[k].lstrip().startswith("|")]
-    data = [r for r in chain.rows]
     at = None
-    for r in data:
-        if r.state == "queued":
-            at = r.line_no
-            break
+    if before is not None:
+        for k in table:
+            cells = split_cells(lines[k])
+            m = LINK_RE.search(cells[1]) if len(cells) >= 3 else None
+            if m and (rr._wikilink_slug(m.group(1)) or "").lower() == before.lower():
+                at = k
+                break
     if at is None:
         at = (table[-1] + 1) if table else end
     lines = lines[:at] + [row_text] + lines[at:]

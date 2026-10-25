@@ -328,6 +328,41 @@ vi a
 ok "$rc|$(cat "$D/a.md")" "1|$snap" "void-integration: a second run (no integrated last line) exits 1, nothing written"
 has "$out" "nothing written" "void-integration: … saying so"
 
+# void-integration: any last `integrated` line prepare would merge on, a legacy `-` startedAt included
+scen void-legacy
+mkro
+mkt a review "pr: $PR" 'ready: 2026-10-02T09:00+00:00'
+printf '\n## Integration log\n\n- integrated path=integrator pr=7 anchor=%s head=%s base=%s wait=5 duration=3 triggers=-\n' \
+  "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))" >> "$D/a.md"
+vi a
+ok "$rc|$(awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/a.md" | tail -n 1 | cut -d' ' -f2)" "0|void" "void-legacy: a legacy integrated line (startedAt -) is voided too"
+# a second void in the same minute, after a new integrated line, still lands last
+scen void-twice
+mkro
+mkt a review "pr: $PR" 'ready: 2026-10-02T09:00+00:00'
+il() { printf '%s integrated path=integrator pr=7 anchor=%s head=%s base=%s wait=5 duration=3 triggers=-\n' "$1" \
+  "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))"; }
+printf '\n## Integration log\n\n%s\n' "$(il 2026-10-02T10:00+00:00)" >> "$D/a.md"
+vi a 2026-10-02T12:00:00Z
+python3 - "$D/a.md" "$(il 2026-10-02T12:00+00:00)" <<'PY'
+import sys
+p, line = sys.argv[1:]
+open(p, "a").write(line + "\n")
+PY
+vi a 2026-10-02T12:00:00Z
+ok "$rc|$(awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/a.md" | tail -n 1 | cut -d' ' -f2)" "0|void" "void-twice: a second void stamped like the first still lands last"
+# a save that fails writes no lane-freed event and exits 1 with an ERROR
+scen void-ro
+mkro
+mkt a review "pr: $PR" 'ready: 2026-10-02T09:00+00:00'
+printf '\n## Integration log\n\n%s\n' "$(il 2026-10-02T10:00+00:00)" >> "$D/a.md"
+chmod 444 "$D/a.md"
+ev0=$(cat "$THREAD_EVENTS_DIR"/ro.jsonl 2>/dev/null | grep -c lane-freed)
+vi a
+chmod 644 "$D/a.md"
+ok "$rc|$(cat "$THREAD_EVENTS_DIR"/ro.jsonl 2>/dev/null | grep -c lane-freed)" "1|$ev0" "void-ro: an unwritable note → exit 1, no lane-freed event"
+has "$out" "ERROR: void-integration" "void-ro: … an ERROR line, never a traceback"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-lead: ALL PASS"; else echo "reconcile-rollout-lead: SOME FAILED"; fi
 exit "$fail"

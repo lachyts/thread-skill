@@ -56,13 +56,13 @@ a.set("owner", "o"); a.remove("owner"); a.save()
 '
 ok "$(grep -c '^owner:' "$N")|$(grep -c '^ready: x' "$N")" "0|1" "order: set then remove → removed, the other writer's key kept"
 
-# ── atomic: the save replaces the file (a new inode), never truncates it in place ────────────────────────────
+# ── in place: the save writes the note itself (same inode), so its created time, tags and links stay ─────────
 N="$TMP/ro3.md"; mknote "$N"
 before=$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$N")
 py 'a = rr.Note(p); a.set("ready", "y"); a.save()'
 after=$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$N")
-ok "$([ "$before" != "$after" ] && echo replaced || echo "in place")" replaced "atomic: the save replaces the note, never a truncating write"
-ok "$(ls -A "$TMP" | grep -c 'ro3.md.*tmp')" 0 "atomic: … and leaves no temp file"
+ok "$([ "$before" = "$after" ] && echo "in place" || echo replaced)|$(grep -c '^ready: y' "$N")" "in place|1" "in place: the save writes the note itself, never a new file"
+ok "$(ls -A "$TMP" | grep -c 'ro3.md.*tmp')" 0 "in place: … and leaves no temp file"
 
 # ── the lock: a save waits for the note's lock, and gives up with an error after its timeout ─────────────────
 N="$TMP/ro4.md"; mknote "$N"
@@ -131,7 +131,7 @@ N="$TMP/ro8.md"; mknote "$N"
 out=$(py '
 a = rr.Note(p); b = rr.Note(p)
 b.set("ready", "b"); b.save()
-lines = a._body.split("\n"); lines.append("- an edit no journal holds"); a._set_body_lines(lines)
+a._body += "- an edit no journal holds\n"; a.dirty = True
 try:
     a.save(); print("saved")
 except OSError as e:
@@ -140,7 +140,7 @@ except OSError as e:
 has "$out" "refused:" "fail-closed: an unjournaled edit over a changed note is refused"
 ok "$(grep -c 'an edit no journal holds' "$N")|$(grep -c '^ready: b' "$N")" "0|1" "fail-closed: … nothing written, the other writer's key kept"
 py '
-a = rr.Note(p); lines = a._body.split("\n"); lines.append("- unchanged under it"); a._set_body_lines(lines); a.save()
+a = rr.Note(p); a._body += "- unchanged under it\n"; a.dirty = True; a.save()
 '
 ok "$(grep -c 'unchanged under it' "$N")" 1 "fail-closed: … the same edit on an unchanged note saves"
 
@@ -160,6 +160,37 @@ mkdir -p "$TMP/real"; mknote "$TMP/real/t.md"; chmod 640 "$TMP/real/t.md"; ln -s
 N="$TMP/link.md"
 py 'a = rr.Note(p); a.set("ready", "l"); a.save()'
 ok "$([ -L "$N" ] && echo link || echo file)|$(grep -c '^ready: l' "$TMP/real/t.md")|$(python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$TMP/real/t.md")" "link|1|0o640" "symlink: the link stays, its target takes the save, its mode kept"
+
+# ── _set_body_lines outside a journaled edit is refused at once, so a missed site fails every test run ───────
+out=$(N="$TMP/ro.md" py '
+a = rr.Note(p)
+try:
+    a._set_body_lines(a._body.split("\n") + ["- x"]); print("allowed")
+except RuntimeError as e:
+    print("refused")
+' 2>&1)
+ok "$out" "refused" "journal: a direct _set_body_lines outside a journaled edit raises"
+
+# ── leg's Queue row insert is re-applied: placed before the first queued row, found by its slug ─────────────
+N="$TMP/ro10.md"
+printf -- '---\ntags: [task, rollout]\n---\n\n## Queue\n\n| # | Task | Mode |\n|---|---|---|\n| 1 | [[t1]] | — |\n| 2 | [[t2]] | — |\n\n## Git-env log\n\n- first\n' > "$N"
+python3 - "$SCRIPT" "$LEG" "$N" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+def load(name, src):
+    spec = importlib.util.spec_from_file_location(name, src); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+rr = load("rr", sys.argv[1]); leg = load("leg", sys.argv[2]); leg.rr = rr
+p = Path(sys.argv[3])
+a = rr.Note(p); b = rr.Note(p)
+b.append_line("## Git-env log", "- second"); b.save()
+a.apply(leg._insert_row, "| 9 | [[fix]] | — |", "t2"); a.save()
+PY
+ok "$(grep -n '\[\[' "$N" | tr '\n' ' ')" "9:| 1 | [[t1]] | — | 10:| 2 | [[fix]] | — | 11:| 3 | [[t2]] | — | " "insert-row: the row lands before t2, renumbered, after a concurrent write"
+ok "$(grep -c -- '- second' "$N")" 1 "insert-row: … beside the other writer's line"
+
+# ── one lock per directory: every note in it shares the lock, so the lock files stay few ─────────────────────
+out=$(N="$TMP/ro.md" py 'print(rr._note_lock_path(p) == rr._note_lock_path(p.with_name("other.md")))')
+ok "$out" "True" "lock: two notes in one directory share one lock file"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "note-save: ALL PASS"; else echo "note-save: FAILED"; fi

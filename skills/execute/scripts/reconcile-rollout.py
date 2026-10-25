@@ -276,9 +276,10 @@ Subcommands:
               `lane-freed release=halt`. The note is not changed.
 
   void-integration  `--tasks <slug>`: an integrate call whose git-env window was acked mid-run gives no verdict
-              (the canary's check exit 4, ADR 0053). Requires the note's current Integration-log line to be
-              `integrated` (_current_log_tokens; else exit 1, nothing written). Frees the lane as free-lane does
-              (`lane-freed release=halt`), then appends `<now> void path=lead pr=<n>` with every other field `-`:
+              (the canary's check exit 4, ADR 0053). Requires the note's last Integration-log line to be
+              `integrated`, the line prepare's case (ii) reads (else exit 1, nothing written). Appends `<now>
+              void path=lead pr=<n>` with every other field `-` as the log's last line, saves, then frees the lane
+              as free-lane does (`lane-freed release=halt`; a failed save frees nothing, exit 1):
               the last line no longer backs prepare's case (ii) or _holds_lane, so the task waits for
               Integration again and prepare re-integrates it.
 
@@ -1332,12 +1333,13 @@ NOTE_LOCK_TIMEOUT = 30.0
 
 
 def _note_lock_path(path) -> Path:
-    """The note's save lock: one file per note (its real path's hash), outside the vault so it never syncs."""
+    """The note's save lock: one file per directory of notes (its real path's hash), shared by every note in it so
+    the lock files stay few, and outside the vault so it never syncs. A save holds it for milliseconds."""
     base = os.environ.get("THREAD_NOTE_LOCK_DIR") or os.path.join(
         os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state"),
         "thread", "note-locks")
-    real = os.path.realpath(str(path))
-    return Path(base) / f"{hashlib.sha256(real.encode()).hexdigest()[:16]}-{Path(real).stem[:60]}.lock"
+    real = os.path.dirname(os.path.realpath(str(path)))
+    return Path(base) / f"{hashlib.sha256(real.encode()).hexdigest()[:16]}-{os.path.basename(real)[:60]}.lock"
 
 
 def _journaled(method):
@@ -1401,7 +1403,7 @@ class Note:
             for item in self._fm[i + 1:]:
                 mi = re.match(r"^\s*-\s*(.*)$", item)
                 if mi:
-                    out.extend(_list_items(re.sub(r"\s+#.*$", "", mi.group(1)).strip()))
+                    out.extend(_list_items(re.sub(r"(^|\s+)#.*$", "", mi.group(1)).strip()))   # `- # x`: no item
                 elif item.strip():
                     break
             return out
@@ -1487,6 +1489,10 @@ class Note:
         return None
 
     def _set_body_lines(self, lines):
+        if self._depth == 0:
+            # Only a journaled edit may change the body, so save() can re-apply it; a direct call fails here, every
+            # time, never only under a concurrent write. Use Note.apply for an edit of your own.
+            raise RuntimeError("Note._set_body_lines outside a journaled edit: wrap the edit in Note.apply")
         new_body = "\n".join(lines)
         if new_body != self._body:
             self._body = new_body
@@ -1609,7 +1615,7 @@ class Note:
         self._set_body_lines(lines[:j] + block + lines[end:] if end < len(lines) else lines[:j] + block)
 
     @_journaled
-    def append_line(self, heading: str, line: str):
+    def append_line(self, heading: str, line: str, dedupe=True):
         """Record one bare line under `heading` (the Integration log), creating the section when absent.
 
         Dedupe, keyed on the line's first token (its startedAt): a line whose startedAt is set is skipped
@@ -1626,7 +1632,9 @@ class Note:
         lines, start, end = found
         filled = [i for i in range(start + 1, end) if lines[i].strip()]
         kept = [lines[i].rstrip() for i in filled]
-        if line.split(" ", 1)[0] != "-":
+        if not dedupe:
+            pass   # the caller needs the line last (void-integration), even when an identical one sits earlier
+        elif line.split(" ", 1)[0] != "-":
             if line in kept:
                 return
         elif kept and kept[-1] == line:
@@ -1656,43 +1664,39 @@ class Note:
             self._fm = kept
             self.dirty = True
 
+    def _replay(self, ops):
+        """Re-apply another Note's journal here, as journaled edits (inside the journal's depth)."""
+        self._depth += 1
+        try:
+            for method, args, kwargs in ops:
+                method(self, *args, **kwargs)
+        finally:
+            self._depth -= 1
+
     def save(self, dry_run=False):
         """Under the note's lock: read the note again, re-apply this Note's edits when another writer changed it
         since, and replace it atomically (a temp file renamed over it), so no reader sees a truncated note. A note
         gone from its path (moved or deleted meanwhile) is never written back: FileNotFoundError. A lock not taken
-        within THREAD_NOTE_LOCK_TIMEOUT seconds (30) is an OSError, nothing written."""
+        within THREAD_NOTE_LOCK_TIMEOUT seconds (30) is an OSError, nothing written. The write is in place."""
         if dry_run or not self.dirty or self.render() == self._text:
             return   # nothing since the read or the last save
-        target = Path(os.path.realpath(self.path))   # a symlinked note: write its target, keep the link
-        with _note_lock(target):
-            now = target.read_text()
+        with _note_lock(self.path):
+            now = self.path.read_text()
             if now != self._text:
                 # An edit outside the journal (a direct _set_body_lines) cannot be re-applied: refuse rather than
                 # drop it. The journal replayed on what this Note read must give what it holds.
                 base = Note(self.path, self._text)
-                for method, args, kwargs in self._ops:
-                    method(base, *args, **kwargs)
+                base._replay(self._ops)
                 if base.render() != self.render():
                     raise OSError(f"{self.path} changed since it was read, and an edit here cannot be re-applied to "
                                   "it; nothing written: run it again")
                 fresh = Note(self.path, now)
-                for method, args, kwargs in self._ops:
-                    method(fresh, *args, **kwargs)
+                fresh._replay(self._ops)
                 self._fm, self._body = fresh._fm, fresh._body
             text = self.render()
-            if not os.access(target, os.W_OK):
-                # A rename would replace a read-only note anyway: refuse it as write_text did.
-                raise PermissionError(13, "Permission denied", str(self.path))
-            tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-            try:
-                with open(tmp, "w") as f:
-                    f.write(text)
-                    f.flush()
-                    os.fsync(f.fileno())
-                shutil.copymode(target, tmp)
-                os.replace(tmp, target)
-            finally:
-                tmp.unlink(missing_ok=True)
+            # In place, through a symlink to its target, so the note keeps its inode, created time, tags and links
+            # (Obsidian sorts by them); the lock keeps every other script writer out meanwhile.
+            self.path.write_text(text)
         self._text, self._ops = text, []
 
 
@@ -1723,6 +1727,9 @@ class _note_lock:
                     self.fh.close()
                     raise OSError(f"timed out after {timeout:g}s waiting for the note lock {self.lock_path}")
                 time.sleep(0.05)
+            except OSError as e:
+                self.fh.close()
+                raise OSError(f"cannot lock {self.lock_path}: {e}")
 
     def __exit__(self, *exc):
         if self.fh is not None:
@@ -3498,18 +3505,26 @@ def cmd_void_integration(args) -> int:
     if isinstance(note, str):
         print(f"ERROR: void-integration: {note}; nothing written", file=sys.stderr)
         return 1
-    t = _current_log_tokens(note)
-    if _status(note) != "review" or not _pr(note) or t is None or t["outcome"] != "integrated":
-        print(f"ERROR: void-integration: {slug}: its current Integration-log line is not `integrated` (status "
+    # Any last `integrated` line, as prepare's case (ii) reads it (lead-integrate.py last_integration), not only a
+    # current one: a legacy `-` startedAt or one before `ready:` still backs a merge with no verifier.
+    last = _log_tokens(_last_log_line(note)) if _last_log_line(note) else None
+    if _status(note) != "review" or not _pr(note) or last is None or last["outcome"] != "integrated":
+        print(f"ERROR: void-integration: {slug}: its last Integration-log line is not `integrated` (status "
               f"{_status(note) or 'none'!r}); nothing written", file=sys.stderr)
         return 1
     line = _integration_log_line({"prUrl": _pr(note), "integration": {
         "outcome": "void", "path": "lead", "metrics": {"startedAt": now.astimezone().isoformat(timespec="minutes")}}})
+    held = _holds_lane(note)
+    note.append_line(INTEGRATION_LOG_SECTION, line, dedupe=False)
+    try:
+        note.save(dry_run=args.dry_run)
+    except OSError as e:
+        print(f"ERROR: void-integration: cannot write {slug}: {e}; nothing written, the lane not freed", file=sys.stderr)
+        return 1
+    # The lane's record only once the void line is on the note, so the record never shows a lane the note holds.
     rollout = _note_rollout(note)
-    if rollout and not args.dry_run and _holds_lane(note):
+    if rollout and not args.dry_run and held:
         _halt_lane(rollout, slug, args, _record_state(rollout))
-    note.append_line(INTEGRATION_LOG_SECTION, line)
-    note.save(dry_run=args.dry_run)
     print(f"{slug}: integration log += {line}{_flag(args, note)}")
     return 0
 
@@ -5224,21 +5239,7 @@ def cmd_descope(args) -> int:
                 _write_followup(fu_path, note, slug, part, reason, run_n, now, hits[0][0][3] if hits else "")
             except OSError as e:
                 return error(f"cannot write {fu_path}: {e}", "a re-run finishes the records")
-    # the brief pointer: on every item holding the part, else (an emergent part) one line in the first brief section
-    if hits:
-        for item, *_rest in hits:
-            if _fold(DESCOPE_POINTER) not in _fold(item[3]):
-                lines[item[2]] = lines[item[2]].rstrip() + " " + DESCOPE_POINTER
-    else:
-        _lines, sections = _body_sections(note)
-        first = next((s for s in sections if s[0] and _is_brief(s[0])), sections[0])
-        filled = [i for i in first[1] if lines[i].strip()]
-        at = (filled[-1] + 1) if filled else (first[1][0] if first[1] else len(lines))
-        lines.insert(at, f'- out of scope (automatic descope, Plan-blocked feedback run {run_n}): "{part}", '
-                         f"{'owned by [[' + owner + ']]' if owner else 'filed as [[' + fu_name + ']]'} {DESCOPE_POINTER}")
-        if filled and at < len(lines) - 1 and lines[at + 1].strip():
-            lines.insert(at + 1, "")
-    note._set_body_lines(lines)
+    note.apply(_descope_pointer, part, part_f, run_n, owner, fu_name)
     if not marks:
         why = "is optional in the brief" if mode == "optional" else f'is owned by [[{owner}]] ("{quote}")'
         note.append_line(SCOPE_AUTO_SECTION, f'{DESCOPE_ENTRY}{stamp}, Plan-blocked feedback run {run_n}: "{part}" {why}; '
@@ -5647,6 +5648,27 @@ def _answer_recorded(note):
         return None
     m, line = top[0]
     return {"stamp": m.group(1), "kind": m.group(2), "form": FORM_NAMES[m.group(4)], "line": line}
+
+
+def _descope_pointer(note, part, part_f, run_n, owner, fu_name):
+    """The brief pointer, read from the note itself (Note.apply re-applies it to a fresh read): on every item holding
+    the part, else (an emergent part) one line in the first brief section."""
+    lines, items, _fenced = _brief_items(note)
+    hits = _part_hits(items, part_f)
+    if hits:
+        for item, *_rest in hits:
+            if _fold(DESCOPE_POINTER) not in _fold(item[3]):
+                lines[item[2]] = lines[item[2]].rstrip() + " " + DESCOPE_POINTER
+    else:
+        _lines, sections = _body_sections(note)
+        first = next((s for s in sections if s[0] and _is_brief(s[0])), sections[0])
+        filled = [i for i in first[1] if lines[i].strip()]
+        at = (filled[-1] + 1) if filled else (first[1][0] if first[1] else len(lines))
+        lines.insert(at, f'- out of scope (automatic descope, Plan-blocked feedback run {run_n}): "{part}", '
+                         f"{'owned by [[' + owner + ']]' if owner else 'filed as [[' + fu_name + ']]'} {DESCOPE_POINTER}")
+        if filled and at < len(lines) - 1 and lines[at + 1].strip():
+            lines.insert(at + 1, "")
+    note._set_body_lines(lines)
 
 
 def _rewrite_keys(note, pick, to):
