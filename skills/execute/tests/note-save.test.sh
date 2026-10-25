@@ -69,13 +69,28 @@ a.set("owner", "o"); a.remove("owner"); a.save()
 '
 ok "$(grep -c '^owner:' "$N")|$(grep -c '^ready: x' "$N")" "0|1" "order: set then remove → removed, the other writer's key kept"
 
-# ── in place: the save writes the note itself (same inode), so its created time, tags and links stay ─────────
+# ── atomic, metadata kept: the save renames a temp file over the note (a reader never sees it torn), and the
+# note keeps its created time and, on macOS, its extended attributes (Finder tags) ─────────────────────────────
 N="$TMP/ro3.md"; mknote "$N"
-before=$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$N")
+python3 -c 'import os,sys; os.utime(sys.argv[1], (1000000000, 1000000000))' "$N"   # an old created time (macOS)
+xok=no; command -v xattr >/dev/null 2>&1 && xattr -w com.example.tag red "$N" 2>/dev/null && xok=yes
+before=$(python3 -c 'import os,sys; s=os.stat(sys.argv[1]); print(s.st_ino, int(getattr(s, "st_birthtime", 0)))' "$N")
 py 'a = rr.Note(p); a.set("ready", "y"); a.save()'
-after=$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$N")
-ok "$([ "$before" = "$after" ] && echo "in place" || echo replaced)|$(grep -c '^ready: y' "$N")" "in place|1" "in place: the save writes the note itself, never a new file"
-ok "$(ls -A "$TMP" | grep -c 'ro3.md.*tmp')" 0 "in place: … and leaves no temp file"
+after=$(python3 -c 'import os,sys; s=os.stat(sys.argv[1]); print(s.st_ino, int(getattr(s, "st_birthtime", 0)))' "$N")
+ok "$([ "${before% *}" != "${after% *}" ] && echo replaced || echo "in place")|$(grep -c '^ready: y' "$N")" "replaced|1" "atomic: the save renames a new file over the note"
+ok "$(ls -A "$TMP" | grep -c 'ro3.md.*tmp')" 0 "atomic: … and leaves no temp file"
+ok "${after#* }" "${before#* }" "atomic: … the note keeps its created time"
+[ "$xok" = yes ] && ok "$(xattr -p com.example.tag "$N" 2>/dev/null)" red "atomic: … and its extended attributes (Finder tags)"
+mknote "$TMP/ro3b.md"; chmod 444 "$TMP/ro3b.md"
+out=$(N="$TMP/ro3b.md" py '
+a = rr.Note(p); a.set("ready", "z")
+try:
+    a.save(); print("saved")
+except PermissionError:
+    print("refused")
+' 2>&1)
+chmod 644 "$TMP/ro3b.md"
+ok "$out|$(grep -c '^ready: z' "$TMP/ro3b.md")" "refused|0" "atomic: a read-only note is refused, as write_text refused it"
 
 # ── the lock: a save waits for the note's lock, and gives up with an error after its timeout ─────────────────
 N="$TMP/ro4.md"; mknote "$N"
@@ -191,6 +206,23 @@ ok "$(grep -c -- '- second' "$N")" 1 "insert-row: … beside the other writer's 
 # ── one lock per directory: every note in it shares the lock, so the lock files stay few ─────────────────────
 out=$(N="$TMP/ro.md" py 'print(rr._note_lock_path(p) == rr._note_lock_path(p.with_name("other.md")))')
 ok "$out" "True" "lock: two notes in one directory share one lock file"
+
+# ── the lock dir: a relative THREAD_NOTE_LOCK_DIR or XDG_STATE_HOME is ignored (the XDG rule) ─────────────────
+out=$(cd "$TMP" && THREAD_NOTE_LOCK_DIR=rel XDG_STATE_HOME=rel2 N="$TMP/ro.md" py 'print(str(rr._note_lock_path(p)).startswith("/"))')
+ok "$out" "True" "lock: a relative lock dir is never used, so two cwds never take two locks"
+
+# ── leg: a save that fails is leg's own exit 5 (Refuse), never a traceback past its main ────────────────────
+N="$TMP/ro11.md"; mknote "$N"; chmod 444 "$N"
+out=$(pyleg '
+import types
+a = rr.Note(p); a.set("ready", "q")
+try:
+    leg.save(types.SimpleNamespace(dry=False), a); print("saved")
+except leg.Refuse as e:
+    print("refuse", e.code)
+' 2>&1)
+chmod 644 "$N"
+ok "$out" "refuse 5" "leg: an unwritable rollout note → Refuse(5), leg's lock-trouble exit"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "note-save: ALL PASS"; else echo "note-save: FAILED"; fi

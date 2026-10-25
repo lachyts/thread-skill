@@ -25,6 +25,7 @@ export PYTHONDONTWRITEBYTECODE=1
 tmp=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
 tmp=$(cd "$tmp" && pwd -P)
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$tmp/events}"   # the Run record stays in temp
+export THREAD_NOTE_LOCK_DIR="${tmp}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_VERIFY_SLOTS_DIR="$tmp/slots"                          # never the machine's real pool
 export THREAD_VERIFY_SLOT_POLL=0.1
 VS="$root/skills/execute/scripts/verify-slot.py"

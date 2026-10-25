@@ -18,8 +18,8 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
   arm --repo R --default B --slug S --kind task|integrate|verify|race-verify|completion-verify [--resume]
         Runs the common pass (below), then writes this window's open `armed` record, with the ref of the pass's
         single state read, only when the pass exits 0. --resume (a *Lost call* or § 5 resume of the same run)
-        keeps the `ackedTrips` of that window's still-open record; a new run's arm over an earlier window nobody
-        checked (a room stop's stopped verify) starts with none. R bare at arm is itself a trip (`core.bare true at arm`;
+        keeps the `ackedTrips` of that window's record, open or closed by the check that sent the row to Lost
+        call; a new run's arm over an earlier window nobody checked (a room stop's stopped verify) starts with none. R bare at arm is itself a trip (`core.bare true at arm`;
         no record). Under a hold it exits 3 and writes no record. A retired rollout: exit 2, nothing created.
         Refuses (exit 2, nothing written: no record, no log line, no pass) a window whose owner does not hold
         (the owner rule below), its stderr naming the missing stamp (§ 4's `status: in_progress` for a task
@@ -614,8 +614,10 @@ def cmd_arm(ctx, args):
            "bare": False, "state": "armed", "closed": False, "armedAt": _stamp(), "trip": None}
     # A resume's arm over its own still-open window (a Lost call, § 5: --resume) keeps the window's acked trips (ADR
     # 0053): its run carries on from the run they fell in. A new run's arm never inherits another run's trips.
-    prior = next((r for r in recs if r["slug"] == args.slug and r["kind"] == args.kind and r["state"] == "armed"
-                  and not r["closed"]), None) if args.resume else None
+    # The window it resumes may still be open, or closed by the check that sent its row to Lost call (a usage-limit
+    # row): either way it is this slug and kind's last record.
+    prior = next((r for r in recs if r["slug"] == args.slug and r["kind"] == args.kind
+                  and r["state"] in ("armed", "checked")), None) if args.resume else None
     if prior is not None and prior.get("ackedTrips"):
         rec["ackedTrips"] = prior["ackedTrips"]
     ctx.save(rec)

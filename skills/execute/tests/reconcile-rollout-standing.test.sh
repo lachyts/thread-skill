@@ -29,6 +29,7 @@ UNFINISHED="$HERE/../../_shared/scripts/unfinished-rollout.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="$TMP/events"  # this suite reads the Run record, so it keeps its own dir
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 NOW=2026-10-14T09:00:00Z
 DATE=2026-10-14
 

@@ -194,7 +194,8 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
 
   // integrate-check: the integrate return checks, then reconciles whatever the exit, and acts on no outcome.
   if (!integ.includes('run the canary `check` for its window first, then reconcile the row whatever the exit') ||
-    !integ.includes('no step 4, no seeded revise, no stale-anchor-ref deletion')) fails.push('integrate-check')
+    !integ.includes('no step 4, no seeded revise, no stale-anchor-ref deletion') ||
+    !integ.includes('with `--no-verdict` after any non-zero check')) fails.push('integrate-check')
 
   // prepare-cases: after the ack, prepare re-derives the case.
   const lane = bullet(canRaw, 'The lane-free rule.')
@@ -391,6 +392,7 @@ test('control: a merge hold release without check-all fails check-all-sites', ()
 
 test('control: an integrate return that drops "whatever the exit" fails integrate-check', () => {
   only('execute', 'then reconcile the row whatever the exit, exactly as at step 2', 'then reconcile the row, exactly as at step 2', 'integrate-check', 'integrate')
+  only('execute', 'with `--no-verdict` after any non-zero check', 'after any non-zero check', 'integrate-check', 'integrate --no-verdict')
 })
 
 test('control: the old "an Integration log line makes it case (ii)" wording fails prepare-cases', () => {

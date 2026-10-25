@@ -750,6 +750,10 @@ def cmd_verify(args):
             raise EnvError("--detach-at needs --repo")
         if tree.exists():
             raise EnvError(f"{tree} already exists — refusing to reuse it for a detached verify")
+        # A killed verify's registration, locked with its dead pid, outlives its directory: unlock and prune it, or
+        # `worktree add` refuses a "missing but locked" path (completion-verify --run does the same for its tree).
+        git(os.path.expanduser(args.repo), "worktree", "unlock", str(tree))
+        git(os.path.expanduser(args.repo), "worktree", "prune")
         p = git(os.path.expanduser(args.repo), "worktree", "add", "--quiet", "--detach", str(tree), args.detach_at)
         if p.returncode != 0:
             raise EnvError(f"could not add a detached worktree at {tree} ({args.detach_at}): {why(p)}")

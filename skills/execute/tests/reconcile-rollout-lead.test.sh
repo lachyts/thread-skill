@@ -14,6 +14,7 @@ SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 NOW=2026-10-02T14:05:00Z
 
 fail=0
@@ -327,6 +328,19 @@ mkro
 mkt a review "pr: $PR" 'integrating: 2026-10-02T10:00+00:00' 'ready: 2026-10-02T09:00+00:00'
 irow a blocked rejected | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "$NOW" --no-verdict >/dev/null 2>&1
 ok "$(loglast a | cut -d' ' -f2)|$(fm a status)" "rejected|status: blocked" "no-verdict: a rejected row is reconciled as usual (its seeded revise follows)"
+
+# reconcile: a note that cannot be saved is that row's error; the other rows still land, exit 1, no traceback
+scen save-fails
+mkro
+mkt a review "pr: $PR" 'integrating: 2026-10-02T10:00+00:00'
+mkt b review "pr: $PR" 'integrating: 2026-10-02T10:00+00:00'
+chmod 444 "$D/a.md"
+out=$(python3 -c 'import json; print(json.dumps({"rolloutSlug": "ro", "tasks": [{"slug": s, "status": "review", "prUrl": "https://github.com/o/r/pull/7", "reviewRoundsUsed": 1, "rung": "", "blockerDiagnosis": ""} for s in ("a", "b")]}))' \
+  | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "$NOW" 2>&1); rc=$?
+chmod 644 "$D/a.md"
+ok "$rc|$(fm b integrating)" "1|<none>" "save-fails: a's unwritable note → exit 1, b still reconciled"
+has "$out" "a: cannot write" "save-fails: … a's error names the write"
+hasnt "$out" "Traceback" "save-fails: … never a traceback"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-lead: ALL PASS"; else echo "reconcile-rollout-lead: SOME FAILED"; fi

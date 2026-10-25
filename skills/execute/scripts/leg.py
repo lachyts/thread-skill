@@ -473,7 +473,10 @@ def atomic_write(path, text):
 def save(ctx, note):
     if ctx.dry or not note.dirty:
         return
-    note.save()   # under the note's lock, re-applied to a fresh read (reconcile-rollout.py's Note.save)
+    try:
+        note.save()   # under the note's lock, re-applied to a fresh read, renamed into place (Note.save)
+    except OSError as e:
+        raise Refuse(5, f"cannot write {note.path}: {e}; nothing written: run it again")
     note.dirty = False
 
 

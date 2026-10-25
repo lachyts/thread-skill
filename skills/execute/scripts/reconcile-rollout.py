@@ -278,7 +278,6 @@ Subcommands:
               _holds_lane (else exit 1, nothing written); closes the task's open merge hold, then records
               `lane-freed release=halt`. The note is not changed.
 
-
   hold        `--tasks <slug> --hold merge|race --state start|end` (p15-2): the lead's hold transitions. A merge
               start requires _holds_lane; a race start requires the rollout's `## Race log` to name the task
               undecided (_race_holds' RACE). Exit 1 (nothing written) when it does not. A start is skipped
@@ -1027,8 +1026,9 @@ ISO_STAMP_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?
 # ---- small value helpers ----------------------------------------------------
 
 def _drop_comment(raw):
-    """A frontmatter value without its ` # comment` (a value that is only a comment becomes '')."""
-    return re.sub(r"(^|\s+)#.*$", "", raw)
+    """A frontmatter value without its ` # comment`. A value that is only a comment (`# x`, or a lone `#`) becomes '';
+    a bare `#7` stays a value (a `pr:` the code builds a PR URL from)."""
+    return re.sub(r"\s+#.*$|^#(\s.*)?$", "", raw)
 
 
 def _scalar(value) -> str:
@@ -1337,8 +1337,9 @@ NOTE_LOCK_TIMEOUT = 30.0
 def _note_lock_path(path) -> Path:
     """The note's save lock: one file per directory of notes (its real path's hash), shared by every note in it so
     the lock files stay few, and outside the vault so it never syncs. A save holds it for milliseconds."""
-    base = os.environ.get("THREAD_NOTE_LOCK_DIR") or os.path.join(
-        os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state"),
+    absolute = lambda v: v if v and os.path.isabs(v) else None   # noqa: E731  a relative dir is ignored (the XDG rule)
+    base = absolute(os.environ.get("THREAD_NOTE_LOCK_DIR")) or os.path.join(
+        absolute(os.environ.get("XDG_STATE_HOME")) or os.path.join(os.path.expanduser("~"), ".local", "state"),
         "thread", "note-locks")
     real = os.path.dirname(os.path.realpath(str(path)))
     return Path(base) / f"{hashlib.sha256(real.encode()).hexdigest()[:16]}-{os.path.basename(real)[:60]}.lock"
@@ -1671,14 +1672,16 @@ class Note:
 
     def save(self, dry_run=False):
         """Under the note's lock: read the note again, re-apply this Note's edits when another writer changed it
-        since, and write it in place, so the note keeps its inode, created time, tags and links. A note
+        since, and rename a temp file over it (_replace_keeping_metadata), so no reader ever sees it torn and a kill
+        never truncates it, while it keeps its created time and Finder tags. A note
         gone from its path (moved or deleted meanwhile) is never written back: FileNotFoundError. A lock not taken
         within THREAD_NOTE_LOCK_TIMEOUT seconds (30) is an OSError, nothing written."""
         text = self.render()
         if dry_run or not self.dirty or text == self._text:
             return   # nothing since the read or the last save
-        with _note_lock(self.path):
-            now = self.path.read_text()
+        target = Path(os.path.realpath(self.path))   # a symlinked note: its target takes the save, the link stays
+        with _note_lock(target):
+            now = target.read_text()
             if now != self._text:
                 # An edit outside the journal (a direct _set_body_lines) cannot be re-applied: refuse rather than
                 # drop it. The journal replayed on what this Note read must give what it holds.
@@ -1691,16 +1694,44 @@ class Note:
                 fresh._replay(self._ops)
                 self._fm, self._body = fresh._fm, fresh._body
                 text = self.render()
-            # In place, through a symlink to its target, so the note keeps its inode, created time, tags and links
-            # (Obsidian sorts by them); the lock keeps every other script writer out meanwhile.
-            self.path.write_text(text)
+            if not os.access(target, os.W_OK):
+                # A rename would replace a read-only note anyway: refuse it as write_text did.
+                raise PermissionError(13, "Permission denied", str(self.path))
+            _replace_keeping_metadata(target, text)
         self._text, self._ops = text, []
 
 
+def _replace_keeping_metadata(target, text):
+    """Write `text` to a temp file beside `target` and rename it over `target`, so no reader sees a torn note and a
+    kill never truncates it. The note keeps its metadata (Lachy's ruling: Obsidian sorts by created time): on macOS
+    the temp file starts as a `cp -p` clone (mode, flags, ACLs and extended attributes such as Finder tags), and the
+    note's created time is carried over (macOS sets a file's created time back when its mtime is set before it)."""
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        st = os.stat(target)
+        if sys.platform == "darwin":
+            subprocess.run(["/bin/cp", "-p", str(target), str(tmp)], capture_output=True)   # best-effort
+            if tmp.exists():
+                os.chmod(tmp, 0o600)
+        with open(tmp, "w") as f:   # into the clone (its attributes kept), else a new file
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, stat.S_IMODE(st.st_mode))
+        birth = getattr(st, "st_birthtime", None)
+        if birth is not None:
+            os.utime(tmp, (st.st_atime, birth))
+            now = time.time()
+            os.utime(tmp, (now, now))
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 class _note_lock:
-    """The note's save lock (_note_lock_path), held only for a save's read and write, never across a child process;
-    the canary takes it inside its own lock, and nothing takes the canary's inside this one. No fcntl (Windows): no
-    lock: the write alone."""
+    """The note's save lock (_note_lock_path), held only for a save's read and write, never across a child process
+    (the `cp -p` clone aside, which takes no lock); the canary takes it inside its own lock, and nothing takes the
+    canary's inside this one. No fcntl (Windows): no lock, the atomic replace alone."""
 
     def __init__(self, path):
         self.lock_path, self.fh = _note_lock_path(path), None
@@ -2677,7 +2708,13 @@ def cmd_reconcile(args) -> int:
             errors.append(f"{slug}: needsHuman is not a string or null ({type(ask).__name__}) — "
                           f"{NEEDS_HUMAN_SECTION} left untouched")
 
-        note.save(dry_run=args.dry_run)
+        try:
+            note.save(dry_run=args.dry_run)
+        except OSError as e:
+            # This row's error, never the whole reconcile's: the other rows still land (Note.save's lock timeout,
+            # an edit it cannot re-apply, a note moved away meanwhile).
+            errors.append(f"{slug}: cannot write {path}: {e} — nothing written for this row")
+            continue
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
                           ready_stamped)
         _review_verdict_events(args, rollout, slug, task, prior)

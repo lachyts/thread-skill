@@ -22,6 +22,7 @@ trap 'rm -rf "$TMP"' EXIT
 # Its one fresh Away file (p28-1, execute away.md) runs each rollout to its own ceiling, never the Trickle.
 EH="$TMP/settings-home"; mkdir -p "$EH"; away_file "$EH" 2026-10-02T00:00:00Z
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 NOW=2026-10-02T14:05:00Z
 
 D=""

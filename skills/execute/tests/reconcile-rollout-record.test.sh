@@ -29,6 +29,7 @@ export HOME="$TMP/home"; mkdir -p "$HOME"
 unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR
 EV="$TMP/events"
 export THREAD_EVENTS_DIR="$EV"   # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_GIT_ENV_DIR="$TMP/git-env"  # mark-started's canary arm (p26-3) keeps its records in temp
 # J is a session's workflows/ dir; bind-run accepts it while a call is in flight because the session holds that
 # run's transcript dir, subagents/workflows/<runId>/, which the Workflow tool creates at launch (p27-3).

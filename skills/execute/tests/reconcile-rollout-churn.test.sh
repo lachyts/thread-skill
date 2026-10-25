@@ -28,6 +28,7 @@ trap 'rm -rf "$TMP"' EXIT
 # Calls that reach rollout-settings.py read ~/.config/thread/rollouts.toml: HOME is an empty dir (p15-4's rule).
 export HOME="$TMP/home"; mkdir -p "$HOME"
 export THREAD_EVENTS_DIR="$TMP/events"   # the Run record (run_record.py, ADR 0032) stays in temp; each case sets its own
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
 git config --global user.name "churn-tests"; git config --global user.email "churn-tests@example.invalid"
 V="$TMP/vault"; R="$TMP/repo"

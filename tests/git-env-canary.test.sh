@@ -26,6 +26,7 @@ trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
 EH="$TMP/settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master -c commit.gpgsign=false "$@"; }
 
 S=""; O=""; R=""; V=""; RO=""; C2=""
@@ -723,6 +724,13 @@ mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+
 arm A integrate; code; call; ackc A "$(cur)"
 can arm --repo "$R" --default master --slug A --kind integrate --resume; ok "$rc" 0 "nv-rearm: a resume's arm (--resume) over the acked, still-open window → 0"
 chk A integrate; ok "$rc" 4 "nv-rearm: … and its check still → 4 (the acked trip kept across the re-arm)"
+scen nv-rearm-closed
+# A usage-limit row: the integrate check (4) closes the window, then the Lost-call resume arms with --resume. The
+# trips carry from that closed window, so the resumed call's verdict is still void.
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+arm A integrate; code; call; ackc A "$(cur)"; chk A integrate; ok "$rc" 4 "nv-rearm-closed: the check → 4 and closes the window"
+can arm --repo "$R" --default master --slug A --kind integrate --resume; chk A integrate
+ok "$rc" 4 "nv-rearm-closed: … the Lost-call resume (--resume) over the closed window still checks 4"
 scen nv-rearm-new
 # A new run arming over an earlier window nobody checked (a room stop's stopped verify) starts with no memory.
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'

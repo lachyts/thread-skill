@@ -115,8 +115,9 @@ overwrites, because each is independent of the pause and the lead:
   `## Needs you` section it answers, a `--raise <field>` on Lachy's word and a confirmed `--pr`.
 - § 5: a defer of a set-aside task with its queued dependants.
 - § 3e: the git-env ack, on Lachy's word. The canary's `ack` writes only the rollout note's `## Git-env log` and
-  its own records, and it re-baselines a live window rather than overwriting a note; a live window that tripped then
-  checks exit 4, so its run gives no verdict and is done again (ADR 0053). § 3e's `restore` is not an
+  its own records, and it re-baselines a live window rather than overwriting a note; a live verify, RACE or integrate
+  window that tripped then checks exit 4, so its run gives no verdict and is done again, while a task window checks
+  0 and its work is taken as it stands (ADR 0053). § 3e's `restore` is not an
   every-mode write: it waits until nothing of the rollout is in flight. Its `--bare-only` form, which moves no
   ref, runs with (b)'s ack.
 
