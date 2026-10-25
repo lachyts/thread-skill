@@ -754,9 +754,6 @@ def cmd_verify(args):
         if p.returncode != 0:
             raise EnvError(f"could not add a detached worktree at {tree} ({args.detach_at}): {why(p)}")
         added = True
-        # Locked with this pid, best-effort as the engine's own tree lock is: the daily sweep's reaper skips a tree
-        # locked by a live pid, so a RACE re-verify's tree is never removed under its suite.
-        git(os.path.expanduser(args.repo), "worktree", "lock", "--reason", f"pid {os.getpid()}", str(tree))
     elif not tree.is_dir():
         raise EnvError(f"no tree at {tree}")
     rc = None
@@ -766,6 +763,11 @@ def cmd_verify(args):
     try:
         for s in SIGNALS:   # inside the try, so a signal that lands at once still removes the tree
             signal.signal(s, _on_signal)
+        if added:
+            # Locked with this pid, best-effort as the engine's own tree lock is: the daily sweep's reaper skips a
+            # tree locked by a live pid, so a RACE re-verify's tree is never removed under its suite. Inside the try,
+            # so the finally's `remove --force --force` takes a tree a stop left locked.
+            git(os.path.expanduser(args.repo), "worktree", "lock", "--reason", f"pid {os.getpid()}", str(tree))
         if outcome_path:
             _write_atomic(outcome_path, json.dumps(result) + "\n")
         with open(log_path, "ab", buffering=0) as log:

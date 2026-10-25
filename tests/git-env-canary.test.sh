@@ -710,6 +710,12 @@ for k in verify race-verify integrate task; do
   call; ok "$rc" 0 "nv-$k: … and check-all after it → 0 (it speaks for the rollout, never 4)"
   arm A "$k"; chk A "$k"; ok "$rc" 0 "nv-$k: a fresh window of the same slug and kind → 0 (the memory is the window's own)"
 done
+scen nv-rearm
+# A Lost-call or § 5 resume arms the same window again before its check: the trip memory must survive that arm.
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+arm A integrate; code; call; ackc A "$(cur)"
+arm A integrate; ok "$rc" 0 "nv-rearm: a resume's arm over the acked, still-open window → 0"
+chk A integrate; ok "$rc" 4 "nv-rearm: … and its check still → 4 (the acked trip kept across the re-arm)"
 scen nv-open
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
 arm A verify; code; call; ackc A "$(cur)"

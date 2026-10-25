@@ -834,6 +834,10 @@ def next_json(plan):
 # ---- the log writer -----------------------------------------------------------------------------------------------
 
 def log_line(note, line):
+    note.apply(_log_line, line)   # journaled, so Note.save re-applies it to a note another writer changed
+
+
+def _log_line(note, line):
     found = note._section_bounds(LEG_LOG)
     if found is None:
         note.append_section(LEG_LOG, line)
@@ -1617,6 +1621,10 @@ def cmd_post_items(ctx, a):
 
 
 def set_pointer(note, item_k, name, title):
+    note.apply(_set_pointer, item_k, name, title)   # journaled, as log_line
+
+
+def _set_pointer(note, item_k, name, title):
     found = note._section_bounds(POST_ROLLOUT)
     if found is None:
         note.append_section(POST_ROLLOUT, f"{ITEMS_MARK}\n\n- → [[{name}]]: {title}")

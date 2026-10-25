@@ -97,6 +97,69 @@ except OSError as e:
 ' 2>&1)
 ok "$out|$([ -e "$N" ] && echo present || echo gone)" "refused: FileNotFoundError|gone" "gone: a note moved away under a writer is not written back"
 
+# ── a no-op edit is not replayed: a stale remove never deletes what another writer just wrote ────────────────
+N="$TMP/ro6.md"; mknote "$N"
+py '
+a = rr.Note(p); b = rr.Note(p)
+b.set("pause_requested", "true"); b.save()
+a.remove("pause_requested"); a.set("ready", "r"); a.save()
+'
+ok "$(grep -c '^pause_requested: true' "$N")|$(grep -c '^ready: r' "$N")" "1|1" "no-op: a remove of an absent key, replayed, keeps the other writer's fresh key"
+
+# ── an edit computed from the note itself (apply) is re-applied: leg's log line survives a concurrent write ──
+N="$TMP/ro7.md"; mknote "$N"
+LEG="$HERE/../scripts/leg.py"
+python3 - "$SCRIPT" "$LEG" "$N" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+def load(name, src):
+    spec = importlib.util.spec_from_file_location(name, src); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+rr = load("rr", sys.argv[1]); leg = load("leg", sys.argv[2]); leg.rr = rr   # leg loads rr in its main
+p = Path(sys.argv[3])
+a = rr.Note(p); b = rr.Note(p)
+b.append_line("## Git-env log", "- 2026-10-24T11:00+00:00 git-env trip [[y]] task: x; repo /r"); b.save()
+a.set("owner", "leg-2"); leg.log_line(a, "- began: leg-2"); leg.log_line(a, "- step: two"); a.save()
+PY
+t=$(cat "$N")
+has "$t" "- began: leg-2" "apply: leg's Leg-log line lands after a concurrent writer's save"
+has "$t" "- step: two" "apply: … and its second, in order"
+has "$t" "git-env trip [[y]]" "apply: … beside the other writer's line"
+
+# ── an edit save cannot re-apply fails closed: nothing written, an OSError naming the note ───────────────────
+N="$TMP/ro8.md"; mknote "$N"
+out=$(py '
+a = rr.Note(p); b = rr.Note(p)
+b.set("ready", "b"); b.save()
+lines = a._body.split("\n"); lines.append("- an edit no journal holds"); a._set_body_lines(lines)
+try:
+    a.save(); print("saved")
+except OSError as e:
+    print("refused:", e)
+' 2>&1)
+has "$out" "refused:" "fail-closed: an unjournaled edit over a changed note is refused"
+ok "$(grep -c 'an edit no journal holds' "$N")|$(grep -c '^ready: b' "$N")" "0|1" "fail-closed: … nothing written, the other writer's key kept"
+py '
+a = rr.Note(p); lines = a._body.split("\n"); lines.append("- unchanged under it"); a._set_body_lines(lines); a.save()
+'
+ok "$(grep -c 'unchanged under it' "$N")" 1 "fail-closed: … the same edit on an unchanged note saves"
+
+# ── a second save with nothing new writes nothing (so a note moved meanwhile is no error) ────────────────────
+N="$TMP/ro9.md"; mknote "$N"
+out=$(py '
+a = rr.Note(p); a.set("ready", "s"); a.save(); os.rename(p, str(p) + ".moved")
+try:
+    a.save(); print("ok", a.dirty)
+except OSError as e:
+    print("refused:", type(e).__name__)
+' 2>&1)
+ok "$out" "ok True" "resave: a save with nothing new after a save is a no-op (dirty still reports the write)"
+
+# ── a symlinked note: the save writes through to its target, keeping the link and the mode ──────────────────
+mkdir -p "$TMP/real"; mknote "$TMP/real/t.md"; chmod 640 "$TMP/real/t.md"; ln -s "$TMP/real/t.md" "$TMP/link.md"
+N="$TMP/link.md"
+py 'a = rr.Note(p); a.set("ready", "l"); a.save()'
+ok "$([ -L "$N" ] && echo link || echo file)|$(grep -c '^ready: l' "$TMP/real/t.md")|$(python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$TMP/real/t.md")" "link|1|0o640" "symlink: the link stays, its target takes the save, its mode kept"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "note-save: ALL PASS"; else echo "note-save: FAILED"; fi
 exit "$fail"

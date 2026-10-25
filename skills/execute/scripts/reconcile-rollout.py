@@ -275,6 +275,13 @@ Subcommands:
               _holds_lane (else exit 1, nothing written); closes the task's open merge hold, then records
               `lane-freed release=halt`. The note is not changed.
 
+  void-integration  `--tasks <slug>`: an integrate call whose git-env window was acked mid-run gives no verdict
+              (the canary's check exit 4, ADR 0053). Requires the note's current Integration-log line to be
+              `integrated` (_current_log_tokens; else exit 1, nothing written). Frees the lane as free-lane does
+              (`lane-freed release=halt`), then appends `<now> void path=lead pr=<n>` with every other field `-`:
+              the last line no longer backs prepare's case (ii) or _holds_lane, so the task waits for
+              Integration again and prepare re-integrates it.
+
   hold        `--tasks <slug> --hold merge|race --state start|end` (p15-2): the lead's hold transitions. A merge
               start requires _holds_lane; a race start requires the rollout's `## Race log` to name the task
               undecided (_race_holds' RACE). Exit 1 (nothing written) when it does not. A start is skipped
@@ -1335,15 +1342,18 @@ def _note_lock_path(path) -> Path:
 
 def _journaled(method):
     """A Note edit that save() can re-apply to a fresh read: only the outermost call is recorded, so an edit built on
-    another (upsert_section on append_section) is replayed once."""
+    another (upsert_section on append_section) is replayed once, and only when it changed the note, so a no-op on a
+    stale read (a remove of a key that was absent) never undoes another writer's fresh write."""
     def wrapper(self, *args, **kwargs):
-        if self._depth == 0:
-            self._ops.append((method, args, kwargs))
+        outer = self._depth == 0
+        before = (list(self._fm), self._body) if outer else None
         self._depth += 1
         try:
             return method(self, *args, **kwargs)
         finally:
             self._depth -= 1
+            if outer and (self._fm, self._body) != before:
+                self._ops.append((method, args, kwargs))
     wrapper.__name__, wrapper.__doc__ = method.__name__, method.__doc__
     return wrapper
 
@@ -1354,9 +1364,9 @@ class Note:
     a reconcile verb, completion-verify --run) never lose each other's lines. A hand edit made through no script
     (the lead's Edit tool, Obsidian) takes no lock."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, text=None):
         self.path = path
-        text = path.read_text()
+        text = path.read_text() if text is None else text
         self._text = text      # what this Note read, or last wrote: save() replays only when the file differs
         self._ops = []
         self._depth = 0
@@ -1633,6 +1643,12 @@ class Note:
         return "---\n" + "\n".join(self._fm) + "\n---\n" + self._body
 
     @_journaled
+    def apply(self, fn, *args):
+        """`fn(self, *args)`, journaled: for an edit computed from the note itself (a log line placed after the
+        section's last line), so save() re-applies it to a fresh read. Returns fn's result."""
+        return fn(self, *args)
+
+    @_journaled
     def filter_fm(self, keep):
         """Keep only the frontmatter lines `keep(line)` is true for."""
         kept = [line for line in self._fm if keep(line)]
@@ -1645,23 +1661,36 @@ class Note:
         since, and replace it atomically (a temp file renamed over it), so no reader sees a truncated note. A note
         gone from its path (moved or deleted meanwhile) is never written back: FileNotFoundError. A lock not taken
         within THREAD_NOTE_LOCK_TIMEOUT seconds (30) is an OSError, nothing written."""
-        if dry_run or not self.dirty:
-            return
-        with _note_lock(self.path):
-            now = self.path.read_text()
+        if dry_run or not self.dirty or self.render() == self._text:
+            return   # nothing since the read or the last save
+        target = Path(os.path.realpath(self.path))   # a symlinked note: write its target, keep the link
+        with _note_lock(target):
+            now = target.read_text()
             if now != self._text:
-                fresh = Note(self.path)
+                # An edit outside the journal (a direct _set_body_lines) cannot be re-applied: refuse rather than
+                # drop it. The journal replayed on what this Note read must give what it holds.
+                base = Note(self.path, self._text)
+                for method, args, kwargs in self._ops:
+                    method(base, *args, **kwargs)
+                if base.render() != self.render():
+                    raise OSError(f"{self.path} changed since it was read, and an edit here cannot be re-applied to "
+                                  "it; nothing written: run it again")
+                fresh = Note(self.path, now)
                 for method, args, kwargs in self._ops:
                     method(fresh, *args, **kwargs)
                 self._fm, self._body = fresh._fm, fresh._body
             text = self.render()
-            tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
+            if not os.access(target, os.W_OK):
+                # A rename would replace a read-only note anyway: refuse it as write_text did.
+                raise PermissionError(13, "Permission denied", str(self.path))
+            tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
             try:
                 with open(tmp, "w") as f:
                     f.write(text)
                     f.flush()
                     os.fsync(f.fileno())
-                os.replace(tmp, self.path)
+                shutil.copymode(target, tmp)
+                os.replace(tmp, target)
             finally:
                 tmp.unlink(missing_ok=True)
         self._text, self._ops = text, []
@@ -3459,6 +3488,30 @@ def cmd_log_integration(args) -> int:
         note.save(dry_run=args.dry_run)
         print(f"{slug}: integration log += {line}{_flag(args, note)}")
     return _finish(args, now)
+
+
+def cmd_void_integration(args) -> int:
+    """ADR 0053: void the integrate call's `integrated` record its acked git-env window leaves without a verdict."""
+    now = _now(args)
+    slug = args.tasks.strip()
+    _path, note = _task_note(args, slug)
+    if isinstance(note, str):
+        print(f"ERROR: void-integration: {note}; nothing written", file=sys.stderr)
+        return 1
+    t = _current_log_tokens(note)
+    if _status(note) != "review" or not _pr(note) or t is None or t["outcome"] != "integrated":
+        print(f"ERROR: void-integration: {slug}: its current Integration-log line is not `integrated` (status "
+              f"{_status(note) or 'none'!r}); nothing written", file=sys.stderr)
+        return 1
+    line = _integration_log_line({"prUrl": _pr(note), "integration": {
+        "outcome": "void", "path": "lead", "metrics": {"startedAt": now.astimezone().isoformat(timespec="minutes")}}})
+    rollout = _note_rollout(note)
+    if rollout and not args.dry_run and _holds_lane(note):
+        _halt_lane(rollout, slug, args, _record_state(rollout))
+    note.append_line(INTEGRATION_LOG_SECTION, line)
+    note.save(dry_run=args.dry_run)
+    print(f"{slug}: integration log += {line}{_flag(args, note)}")
+    return 0
 
 
 # ---- resume (p6-8) ------------------------------------------------------------------
@@ -5599,6 +5652,10 @@ def _answer_recorded(note):
 def _rewrite_keys(note, pick, to):
     """Rewrite the key of each `## Repair input` entry `pick(fingerprint)` selects among the live ones to
     `(block <fp>; <to>)`, in memory (the caller saves). Returns how many changed."""
+    return note.apply(_rewrite_keys_in, pick, to)
+
+
+def _rewrite_keys_in(note, pick, to):
     found = note._section_bounds(REPAIR_INPUT_SECTION)
     if found is None:
         return 0
@@ -7033,11 +7090,11 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
             _write_completion_red(tasks_dir / f"{red_stem}.md", note, ro, verifier, sha, rc_word, why, kept_name, ids,
                                   now)
             filed = tasks_dir / f"{red_stem}.md"   # only once this run wrote it: an existing one is never removed
-        # The note read again right here, so a Pause log line or an ack written during the run is kept, and written
-        # by tmp + rename, so a kill mid-write never truncates it.
+        # The note read again right here, and saved under the note's lock (Note.save), so a Pause log line or an
+        # ack written during the run is kept and a kill mid-write never truncates it.
         note = Note(path)
         note.append_line(COMPLETION_VERIFY_SECTION, line)
-        li._write_atomic(path, note.render())
+        note.save()
     except (OSError, ValueError) as e:
         if filed is not None:
             filed.unlink(missing_ok=True)   # a fix task for a red the record never shows would be an orphan
@@ -7239,6 +7296,14 @@ def main() -> int:
     fl.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     fl.add_argument("--dry-run", action="store_true")
     fl.set_defaults(func=cmd_free_lane)
+
+    vi = sub.add_parser("void-integration", help="void an integrate call's integrated record its acked git-env "
+                                                "window left without a verdict (ADR 0053)")
+    vi.add_argument("--tasks", required=True, help="the task slug")
+    vi.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    vi.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the void line's stamp)")
+    vi.add_argument("--dry-run", action="store_true")
+    vi.set_defaults(func=cmd_void_integration)
 
     ho = sub.add_parser("hold", help="the lead's merge or race hold starts or ends (hold-started / hold-ended; p15-2)")
     ho.add_argument("--tasks", required=True, help="the task slug")

@@ -297,6 +297,37 @@ ok "$rc|$(fm a status)" "0|status: in_progress" "approve-gates: a set-aside line
 has "$out" "WARN: a: the Integration log's last line is set-aside but the note has no pr:" "approve-gates: warns that it cannot integrate"
 ok "$(fm a ready)" "<none>" "approve-gates: no ready: without a PR"
 
+# ── void-integration (ADR 0053): an integrate call whose window was acked mid-run gives no verdict ──────────
+# Its reconciled `integrated` line would back prepare's case (ii), a merge with no verifier. The void line ends that
+# record and frees the lane, so the task waits for Integration again and prepare re-integrates it.
+LI="$HERE/../scripts/lead-integrate.py"
+vi() { out=$(python3 "$SCRIPT" void-integration --tasks "$1" --tasks-dir "$D" --now "${2:-2026-10-02T12:00:00Z}" 2>&1); rc=$?; }
+scen void
+mkro
+mkt a review "pr: $PR" 'ready: 2026-10-02T09:00+00:00'
+printf '\n## Integration log\n\n2026-10-02T10:00+00:00 integrated path=integrator pr=7 anchor=%s head=%s base=%s wait=5 duration=3 triggers=conflict\n' \
+  "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))" >> "$D/a.md"
+holds() { python3 "$SCRIPT" free-lane --tasks "$1" --tasks-dir "$D" --dry-run >/dev/null 2>&1 && echo holds || echo free; }
+ok "$(holds a)" holds "void fixture: an integrated row holds the lane"
+vi a
+ok "$rc" 0 "void-integration: exits 0"
+last=$(awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/a.md" | tail -n 1)
+has "$last" " void path=lead pr=7 " "void-integration: appends a void line, the log's last"
+ok "$(holds a)|$(q "$(nxt)" 'd["awaitingIntegration"]')" 'free|["a"]' "void-integration: the lane frees and a waits for Integration again"
+rec_out=$(python3 - "$LI" "$D/a.md" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("li", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+r = m.last_integration(m.rr.Note(Path(sys.argv[2])))
+print(r["outcome"], "record" if (r["outcome"] == "integrated") else "no-record")
+PY
+)
+ok "$rec_out" "void no-record" "void-integration: prepare's last record is no longer an integrated one (no case (ii) merge)"
+snap=$(cat "$D/a.md")
+vi a
+ok "$rc|$(cat "$D/a.md")" "1|$snap" "void-integration: a second run (no integrated last line) exits 1, nothing written"
+has "$out" "nothing written" "void-integration: … saying so"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-lead: ALL PASS"; else echo "reconcile-rollout-lead: SOME FAILED"; fi
 exit "$fail"

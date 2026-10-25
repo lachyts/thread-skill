@@ -17,7 +17,8 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
 
   arm --repo R --default B --slug S --kind task|integrate|verify|race-verify|completion-verify
         Runs the common pass (below), then writes this window's open `armed` record, with the ref of the pass's
-        single state read, only when the pass exits 0. R bare at arm is itself a trip (`core.bare true at arm`;
+        single state read, only when the pass exits 0; an arm over the same window's still-open record (a resume)
+        keeps its `ackedTrips`. R bare at arm is itself a trip (`core.bare true at arm`;
         no record). Under a hold it exits 3 and writes no record. A retired rollout: exit 2, nothing created.
         Refuses (exit 2, nothing written: no record, no log line, no pass) a window whose owner does not hold
         (the owner rule below), its stderr naming the missing stamp (§ 4's `status: in_progress` for a task
@@ -609,6 +610,12 @@ def cmd_arm(ctx, args):
         return _report(ctx, rc)
     rec = {"v": 1, "slug": args.slug, "kind": args.kind, "repo": ctx.repo, "default": ctx.default, "ref": ref,
            "bare": False, "state": "armed", "closed": False, "armedAt": _stamp(), "trip": None}
+    # A resume's arm over its own still-open window (a Lost call, § 5) keeps the window's acked trips (ADR 0053):
+    # its run carries on from the run they fell in.
+    prior = next((r for r in recs if r["slug"] == args.slug and r["kind"] == args.kind and r["state"] == "armed"
+                  and not r["closed"]), None)
+    if prior is not None and prior.get("ackedTrips"):
+        rec["ackedTrips"] = prior["ackedTrips"]
     ctx.save(rec)
     print(f"armed [[{args.slug}]] {args.kind}: refs/heads/{ctx.default} at {ref or 'absent'}, core.bare false")
     return 0

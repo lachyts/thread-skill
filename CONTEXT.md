@@ -622,9 +622,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Git-env ack** — the recorded acceptance of the tripped windows, naming
   exactly the set shown and the ref shown (`--ref`). Lachy's, through
   `/thread:repair` (its git-env step, 3e), after an optional `restore`; never
-  an agent's (ADR 0046). A window still open at the ack keeps running, but
-  its run gives no verdict: a verify is done again, a task call's work goes
-  on to its own Integration (ADR 0053). _Avoid_: clear, reset.
+  an agent's (ADR 0046). A window that tripped and is still open at the
+  ack keeps running, but its run gives no verdict: a verify or an
+  integrate call is done again, while a task call's work is taken as it
+  stands (ADR 0053). _Avoid_: clear, reset.
 - **Bookkeeping miss** — a window the canary could not read (`record
   missing`, `record unreadable`, `record not armed`): it observed nothing, so
   it never trips. It is logged with the checkout's state, read there and
