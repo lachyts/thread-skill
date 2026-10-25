@@ -12,6 +12,7 @@ TMP="$(mktemp -d)"
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_NOTE_LOCK_DIR="$TMP/locks"
+export THREAD_EVENTS_DIR="$TMP/events"   # the Run record stays in temp (tests/contracts/run-record-hermetic.test.mjs)
 . "$HERE/../../../tests/lib/assert.sh"
 
 mknote() {
