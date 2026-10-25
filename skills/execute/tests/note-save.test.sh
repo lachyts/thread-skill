@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # One lock for every script writer of a note (reconcile-rollout.py's Note.save): the canary's trip line, a reconcile
 # verb's stamp and completion-verify --run's line land on the same rollout note from different processes. A save
-# takes the note's lock, reads the note again, re-applies its own edits to what it read and replaces the file
-# atomically, so a concurrent writer's line is never lost and no reader ever sees a truncated note. Temp dirs only.
+# takes the note's lock, reads the note again, re-applies its own edits to what it read and writes it in place, so
+# a concurrent writer's line is never lost and the note keeps its inode. Temp dirs only.
 # Usage: bash note-save.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -24,6 +24,19 @@ import importlib.util, sys, os
 from pathlib import Path
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
 p = Path(sys.argv[2])
+$1
+PY
+}
+
+LEG="$HERE/../scripts/leg.py"
+# pyleg <code> — rr and leg loaded (leg loads rr in its main, so it is set here), the note's path as p
+pyleg() { python3 - "$SCRIPT" "$LEG" "$N" <<PY
+import importlib.util, sys
+from pathlib import Path
+def load(name, src):
+    spec = importlib.util.spec_from_file_location(name, src); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+rr = load("rr", sys.argv[1]); leg = load("leg", sys.argv[2]); leg.rr = rr
+p = Path(sys.argv[3])
 $1
 PY
 }
@@ -109,18 +122,11 @@ ok "$(grep -c '^pause_requested: true' "$N")|$(grep -c '^ready: r' "$N")" "1|1" 
 
 # ── an edit computed from the note itself (apply) is re-applied: leg's log line survives a concurrent write ──
 N="$TMP/ro7.md"; mknote "$N"
-LEG="$HERE/../scripts/leg.py"
-python3 - "$SCRIPT" "$LEG" "$N" <<'PY'
-import importlib.util, sys
-from pathlib import Path
-def load(name, src):
-    spec = importlib.util.spec_from_file_location(name, src); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
-rr = load("rr", sys.argv[1]); leg = load("leg", sys.argv[2]); leg.rr = rr   # leg loads rr in its main
-p = Path(sys.argv[3])
+pyleg '
 a = rr.Note(p); b = rr.Note(p)
 b.append_line("## Git-env log", "- 2026-10-24T11:00+00:00 git-env trip [[y]] task: x; repo /r"); b.save()
 a.set("owner", "leg-2"); leg.log_line(a, "- began: leg-2"); leg.log_line(a, "- step: two"); a.save()
-PY
+'
 t=$(cat "$N")
 has "$t" "- began: leg-2" "apply: leg's Leg-log line lands after a concurrent writer's save"
 has "$t" "- step: two" "apply: … and its second, in order"
@@ -174,17 +180,11 @@ ok "$out" "refused" "journal: a direct _set_body_lines outside a journaled edit 
 # ── leg's Queue row insert is re-applied: placed before the first queued row, found by its slug ─────────────
 N="$TMP/ro10.md"
 printf -- '---\ntags: [task, rollout]\n---\n\n## Queue\n\n| # | Task | Mode |\n|---|---|---|\n| 1 | [[t1]] | — |\n| 2 | [[t2]] | — |\n\n## Git-env log\n\n- first\n' > "$N"
-python3 - "$SCRIPT" "$LEG" "$N" <<'PY'
-import importlib.util, sys
-from pathlib import Path
-def load(name, src):
-    spec = importlib.util.spec_from_file_location(name, src); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
-rr = load("rr", sys.argv[1]); leg = load("leg", sys.argv[2]); leg.rr = rr
-p = Path(sys.argv[3])
+pyleg '
 a = rr.Note(p); b = rr.Note(p)
 b.append_line("## Git-env log", "- second"); b.save()
 a.apply(leg._insert_row, "| 9 | [[fix]] | — |", "t2"); a.save()
-PY
+'
 ok "$(grep -n '\[\[' "$N" | tr '\n' ' ')" "9:| 1 | [[t1]] | — | 10:| 2 | [[fix]] | — | 11:| 3 | [[t2]] | — | " "insert-row: the row lands before t2, renumbered, after a concurrent write"
 ok "$(grep -c -- '- second' "$N")" 1 "insert-row: … beside the other writer's line"
 

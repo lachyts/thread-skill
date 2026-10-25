@@ -261,8 +261,8 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
   // no-verdict (ADR 0053): a check's exit 4 never halts, and each window kind's route is stated.
   if (!ex.includes('**Exit 4 is the one exception:** `check` exits 4 when a trip inside its window was acked before the check (ADR 0053)') ||
     !ex.includes('It never halts, needs no ack and overrides the check site\'s non-zero route') ||
-    !ex.includes('a task call\'s row is reconciled and acted on as after 0, PR or none') ||
-    !ex.includes('an `integrated` one is not acted on (no step 4): `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py void-integration --tasks <slug>` frees the lane and voids that record') ||
+    !ex.includes('a task window checks 0 instead, naming the acked trip: a task call\'s work, PR or none, is taken as it stands') ||
+    !ex.includes('an integrate call\'s row is reconciled with `--no-verdict`, so an `integrated` row\'s line reads `void` and is not acted on (no step 4)') ||
     !ex.includes('the lead\'s verify runs `lead-integrate.py undo') ||
     !ex.includes('re-verify gave no verdict: an acked git-env trip (rc <rc|absent>)` to the `## Race log` and re-runs the re-verify')) fails.push('no-verdict')
 
@@ -357,7 +357,7 @@ const only = (key, from, to, rule, label) => {
 test('control: an exit 4 that halts, or a RACE that acts on it, fails no-verdict', () => {
   only('execute', 'It never halts, needs no ack', 'It halts, needs no ack', 'no-verdict', 'exit 4 halts')
   only('execute', 'and re-runs the re-verify with the lane held (the canary arm first); the completion', 'and runs `mark-done`; the completion', 'no-verdict', 'RACE acts on 4')
-  only('execute', 'frees the lane and voids that record', 'frees the lane', 'no-verdict', 'integrate merges on 4')
+  only('execute', 'is reconciled with `--no-verdict`, so', 'is reconciled, so', 'no-verdict', 'integrate merges on 4')
 })
 
 test('control: status without the log section, or a literal marker in the canary, fails marker-tie', () => {

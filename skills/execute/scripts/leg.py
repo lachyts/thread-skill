@@ -473,7 +473,7 @@ def atomic_write(path, text):
 def save(ctx, note):
     if ctx.dry or not note.dirty:
         return
-    note.save()   # under the note's lock, re-applied to a fresh read, replaced atomically (reconcile-rollout.py)
+    note.save()   # under the note's lock, re-applied to a fresh read (reconcile-rollout.py's Note.save)
     note.dirty = False
 
 
@@ -497,12 +497,17 @@ def split_cells(line):
     return [c.strip() for c in cells[1:-1]] if line.strip().startswith("|") else []
 
 
+def _cells_slug(cells):
+    """The task slug a Queue row's cells link, else None."""
+    m = LINK_RE.search(cells[1] if len(cells) > 1 else "")
+    return rr._wikilink_slug(m.group(1)) if m else None
+
+
 class Row:
     def __init__(self, i, cells, line_no):
         self.i, self.line_no = i, line_no
         self.cells = cells
-        m = LINK_RE.search(cells[1] if len(cells) > 1 else "")
-        self.slug = rr._wikilink_slug(m.group(1)) if m else None
+        self.slug = _cells_slug(cells)
         lm = LAUNCH_RE.match(cells[2]) if len(cells) > 2 else None
         self.alias, self.folder = (lm.group(1), lm.group(2)) if lm else (None, None)
         self.surfaces_cell = cells[3] if len(cells) > 3 else ""
@@ -1337,14 +1342,8 @@ def _insert_row(note, row_text, before):
         return
     lines, start, end = found
     table = [k for k in range(start + 1, end) if lines[k].lstrip().startswith("|")]
-    at = None
-    if before is not None:
-        for k in table:
-            cells = split_cells(lines[k])
-            m = LINK_RE.search(cells[1]) if len(cells) >= 3 else None
-            if m and (rr._wikilink_slug(m.group(1)) or "").lower() == before.lower():
-                at = k
-                break
+    at = next((k for k in table if before is not None
+               and (_cells_slug(split_cells(lines[k])) or "").lower() == before.lower()), None)
     if at is None:
         at = (table[-1] + 1) if table else end
     lines = lines[:at] + [row_text] + lines[at:]

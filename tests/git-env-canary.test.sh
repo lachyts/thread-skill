@@ -667,7 +667,7 @@ scen q5
 mkt A in_progress; mkt B in_progress
 arm A; arm B; code; chk A; ackc A,B "$(cur)"
 ok "$(recf B task state)" '"armed"' "q5: an ack with B's window still open re-baselines it"
-chk B; ok "$rc" 4 "q5: … and B's later check → 4: its window tripped and was acked, so its run gives no verdict (ADR 0053)"
+chk B; ok "$rc" 0 "q5: … and B's later check → 0: a task window takes its acked trip as it stands (ADR 0053)"
 
 # ── rs: a room stop's stopped verify (execute § Room stop item 9: its `undo` runs with no canary `check`) ────────
 # A verify the room stop TaskStopped keeps its window open while the note keeps `integrating:`. The resume entry's
@@ -698,9 +698,9 @@ has "$(grep 'git-env trip \[\[A\]\]' "$RO" | tail -n 1)" "verify: record not arm
 # ── nv: a window acked mid-run gives no verdict (ADR 0053) ────────────────────────────────────────────────────
 # The lead halts on a trip while a verify runs on in the background; Lachy acks; the resumed lead reads the rc and
 # checks. The ack re-baselined the open window, so before ADR 0053 that check read clean and the rc was acted on.
-for k in verify race-verify integrate task; do
+for k in verify race-verify integrate; do
   scen "nv-$k"
-  if [ "$k" = task ]; then mkt A in_progress; else mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'; fi
+  mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
   arm A "$k"; old=$(cur); code
   call; ok "$rc|$(recf A "$k" state)" '3|"tripped"' "nv-$k: a commit mid-window trips at a check-all, the window still open"
   ackc A "$(cur)"; ok "$rc|$(recf A "$k" state)" '0|"armed"' "nv-$k: … the ack re-baselines it"
@@ -710,6 +710,13 @@ for k in verify race-verify integrate task; do
   call; ok "$rc" 0 "nv-$k: … and check-all after it → 0 (it speaks for the rollout, never 4)"
   arm A "$k"; chk A "$k"; ok "$rc" 0 "nv-$k: a fresh window of the same slug and kind → 0 (the memory is the window's own)"
 done
+scen nv-task
+# A task call's work is taken as it stands (ADR 0053): its check exits 0, naming the acked trip it ran through.
+mkt A in_progress
+arm A; old=$(cur); code; call; ackc A "$(cur)"
+chk A; ok "$rc|$(trips A)" "0|1" "nv-task: a task window acked mid-run → its check 0, no second trip line"
+has "$out" "checked [[A]] task: clean, taken as it stands" "nv-task: … taken as it stands"
+has "$out" "refs/heads/master ${old}→" "nv-task: … naming the acked trip"
 scen nv-rearm
 # A Lost-call or § 5 resume arms the same window again before its check: the trip memory must survive that arm.
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'

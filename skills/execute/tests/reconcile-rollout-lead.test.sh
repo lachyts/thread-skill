@@ -297,71 +297,36 @@ ok "$rc|$(fm a status)" "0|status: in_progress" "approve-gates: a set-aside line
 has "$out" "WARN: a: the Integration log's last line is set-aside but the note has no pr:" "approve-gates: warns that it cannot integrate"
 ok "$(fm a ready)" "<none>" "approve-gates: no ready: without a PR"
 
-# ── void-integration (ADR 0053): an integrate call whose window was acked mid-run gives no verdict ──────────
-# Its reconciled `integrated` line would back prepare's case (ii), a merge with no verifier. The void line ends that
-# record and frees the lane, so the task waits for Integration again and prepare re-integrates it.
-LI="$HERE/../scripts/lead-integrate.py"
-vi() { out=$(python3 "$SCRIPT" void-integration --tasks "$1" --tasks-dir "$D" --now "${2:-2026-10-02T12:00:00Z}" 2>&1); rc=$?; }
-scen void
-mkro
-mkt a review "pr: $PR" 'ready: 2026-10-02T09:00+00:00'
-printf '\n## Integration log\n\n2026-10-02T10:00+00:00 integrated path=integrator pr=7 anchor=%s head=%s base=%s wait=5 duration=3 triggers=conflict\n' \
-  "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))" >> "$D/a.md"
+# ── reconcile --no-verdict (ADR 0053): an integrate call whose window was acked mid-run gives no verdict ─────
+# Its `integrated` row would leave a line backing prepare's case (ii), a merge with no verifier. Reconciled with
+# --no-verdict (its check exited 4), the line reads `void`: the lane frees and the task is integrated again. Any
+# other outcome is reconciled as usual: none is a verdict to merge on.
+irow() {  # irow <slug> <status> <outcome>: an integrate-call row on stdout
+  python3 -c 'import json, sys; s, st, o = sys.argv[1:4]; print(json.dumps({"rolloutSlug": "ro", "tasks": [{"slug": s, "status": st, "prUrl": "https://github.com/o/r/pull/7", "reviewRoundsUsed": 1, "rung": "", "blockerDiagnosis": "", "integration": {"outcome": o, "path": "integrator", "anchor": {"headSha": "1" * 40}, "headSha": "2" * 40, "baseSha": "3" * 40, "triggers": [], "metrics": {"startedAt": "2026-10-02T10:00+00:00", "waitMinutes": 5, "durationMinutes": 3}}}]}))' "$1" "$2" "$3"
+}
+loglast() { awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/$1.md" | tail -n 1; }
 holds() { python3 "$SCRIPT" free-lane --tasks "$1" --tasks-dir "$D" --dry-run >/dev/null 2>&1 && echo holds || echo free; }
-ok "$(holds a)" holds "void fixture: an integrated row holds the lane"
-vi a
-ok "$rc" 0 "void-integration: exits 0"
-last=$(awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/a.md" | tail -n 1)
-has "$last" " void path=lead pr=7 " "void-integration: appends a void line, the log's last"
-ok "$(holds a)|$(q "$(nxt)" 'd["awaitingIntegration"]')" 'free|["a"]' "void-integration: the lane frees and a waits for Integration again"
-rec_out=$(python3 - "$LI" "$D/a.md" <<'PY'
+lanefreed() { grep -h '"lane-freed"' "$THREAD_EVENTS_DIR"/*.jsonl 2>/dev/null | grep -c "\"$1\""; }
+scen noverdict
+mkro
+mkt a review "pr: $PR" 'integrating: 2026-10-02T10:00+00:00' 'ready: 2026-10-02T09:00+00:00'
+f0=$(lanefreed a)
+out=$(irow a review integrated | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "$NOW" --no-verdict 2>&1); rc=$?
+ok "$rc|$(loglast a | cut -d' ' -f2)" "0|void" "no-verdict: an integrated row reconciled --no-verdict leaves a void line"
+ok "$(fm a integrating)|$(holds a)|$(q "$(nxt)" 'd["awaitingIntegration"]')" '<none>|free|["a"]' "no-verdict: … the lane frees and a waits for Integration again"
+ok "$(( $(lanefreed a) - f0 ))" 1 "no-verdict: … one lane-freed event"
+ok "$(python3 - "$LI" "$D/a.md" <<'PY'
 import importlib.util, sys
 from pathlib import Path
 spec = importlib.util.spec_from_file_location("li", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-r = m.last_integration(m.rr.Note(Path(sys.argv[2])))
-print(r["outcome"], "record" if (r["outcome"] == "integrated") else "no-record")
+print(m.last_integration(m.rr.Note(Path(sys.argv[2])))["outcome"])
 PY
-)
-ok "$rec_out" "void no-record" "void-integration: prepare's last record is no longer an integrated one (no case (ii) merge)"
-snap=$(cat "$D/a.md")
-vi a
-ok "$rc|$(cat "$D/a.md")" "1|$snap" "void-integration: a second run (no integrated last line) exits 1, nothing written"
-has "$out" "nothing written" "void-integration: … saying so"
-
-# void-integration: any last `integrated` line prepare would merge on, a legacy `-` startedAt included
-scen void-legacy
+)" void "no-verdict: prepare's last record is not an integrated one (no case (ii) merge)"
+scen noverdict-rejected
 mkro
-mkt a review "pr: $PR" 'ready: 2026-10-02T09:00+00:00'
-printf '\n## Integration log\n\n- integrated path=integrator pr=7 anchor=%s head=%s base=%s wait=5 duration=3 triggers=-\n' \
-  "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))" >> "$D/a.md"
-vi a
-ok "$rc|$(awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/a.md" | tail -n 1 | cut -d' ' -f2)" "0|void" "void-legacy: a legacy integrated line (startedAt -) is voided too"
-# a second void in the same minute, after a new integrated line, still lands last
-scen void-twice
-mkro
-mkt a review "pr: $PR" 'ready: 2026-10-02T09:00+00:00'
-il() { printf '%s integrated path=integrator pr=7 anchor=%s head=%s base=%s wait=5 duration=3 triggers=-\n' "$1" \
-  "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))"; }
-printf '\n## Integration log\n\n%s\n' "$(il 2026-10-02T10:00+00:00)" >> "$D/a.md"
-vi a 2026-10-02T12:00:00Z
-python3 - "$D/a.md" "$(il 2026-10-02T12:00+00:00)" <<'PY'
-import sys
-p, line = sys.argv[1:]
-open(p, "a").write(line + "\n")
-PY
-vi a 2026-10-02T12:00:00Z
-ok "$rc|$(awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/a.md" | tail -n 1 | cut -d' ' -f2)" "0|void" "void-twice: a second void stamped like the first still lands last"
-# a save that fails writes no lane-freed event and exits 1 with an ERROR
-scen void-ro
-mkro
-mkt a review "pr: $PR" 'ready: 2026-10-02T09:00+00:00'
-printf '\n## Integration log\n\n%s\n' "$(il 2026-10-02T10:00+00:00)" >> "$D/a.md"
-chmod 444 "$D/a.md"
-ev0=$(cat "$THREAD_EVENTS_DIR"/ro.jsonl 2>/dev/null | grep -c lane-freed)
-vi a
-chmod 644 "$D/a.md"
-ok "$rc|$(cat "$THREAD_EVENTS_DIR"/ro.jsonl 2>/dev/null | grep -c lane-freed)" "1|$ev0" "void-ro: an unwritable note → exit 1, no lane-freed event"
-has "$out" "ERROR: void-integration" "void-ro: … an ERROR line, never a traceback"
+mkt a review "pr: $PR" 'integrating: 2026-10-02T10:00+00:00' 'ready: 2026-10-02T09:00+00:00'
+irow a blocked rejected | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "$NOW" --no-verdict >/dev/null 2>&1
+ok "$(loglast a | cut -d' ' -f2)|$(fm a status)" "rejected|status: blocked" "no-verdict: a rejected row is reconciled as usual (its seeded revise follows)"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-lead: ALL PASS"; else echo "reconcile-rollout-lead: SOME FAILED"; fi

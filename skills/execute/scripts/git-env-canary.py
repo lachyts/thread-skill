@@ -31,7 +31,8 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
         Runs the pass, then closes this window's record: `armed` and clean -> a `checked` tombstone; tripped
         (now or by an earlier verb) -> `closed: true`, no second trip line; a closed tripped record -> unchanged.
         An `armed` window that carries an acked trip (`ackedTrips`, below) closes `checked` and exits 4, its run
-        no verdict (ADR 0053), naming each acked trip on stdout; a trip or hold that still stands exits 3 instead.
+        no verdict (ADR 0053), naming each acked trip on stdout; a task window exits 0 instead, naming them too,
+        since a task call's work is taken as it stands; a trip or hold that still stands exits 3 either way.
         A missing record trips `record missing`, an unreadable one `record unreadable`, and a closed `checked` or
         `acked` tombstone `record not armed`: the owner holds at its own check, so a tombstone left by an earlier
         window with the same slug and kind (a revise, a restart or a resume) means this window was never armed,
@@ -114,10 +115,10 @@ and after; an empty -> non-empty edge (a trip opens it) records `hold-started ho
 edge (the ack) `hold-ended hold=git-env`, rollout the note's stem and task null, through reconcile-rollout.py's
 _event: best-effort, never changing an exit.
 
-Exit codes: 0 clean, 3 a trip or a hold, 4 (check only) clean but a trip inside this window was acked, so the
-window's run gives no verdict (ADR 0053), 1 nothing to ack, 2 a failure, a usage or a validation error. The lead
-treats every non-zero exit but 4 as a halt; on 4 it acts on none of the window's results and runs it again (a task
-call's window excepted: its PR is verified again at its own Integration).
+Exit codes: 0 clean, 3 a trip or a hold, 4 (check only, never a task window) clean but a trip inside this window
+was acked, so the window's run gives no verdict (ADR 0053), 1 nothing to ack, 2 a failure, a usage or a validation
+error. The lead treats every non-zero exit but 4 as a halt; on 4 it runs the window's verdict again (execute § 4.5's
+exit rule).
 """
 
 import argparse
@@ -648,6 +649,11 @@ def cmd_check(ctx, args):
         ctx.save(rec)
         ctx.append([rec["trip"]["line"]])
     rc = 3 if ctx.hold() or any(r["state"] == "tripped" for r in ctx.records()) else 0
+    if rc == 0 and acked and args.kind == "task":
+        # ADR 0053: a task call's work is taken as it stands (its agent worked in its own tree cut from origin).
+        print(f"checked [[{args.slug}]] task: clean, taken as it stands; a trip inside this window was acked "
+              "(ADR 0053): " + "; ".join(acked))
+        return 0
     if rc == 0 and acked:
         # ADR 0053: the ack re-baselined this window mid-run, so the checkout changed under its run.
         print(f"checked [[{args.slug}]] {args.kind}: no verdict, a trip inside this window was acked (ADR 0053; "

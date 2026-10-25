@@ -16,7 +16,10 @@ Subcommands:
               `merged:` (the first stamp wins): a read-only task is done when its review approves and
               never enters Integration. Every row removes `integrating:` (the run that produced the row
               ended any Integration). It also stamps `ready:` and appends the `## Integration log` line
-              (see the Status mapping below).
+              (see the Status mapping below). --no-verdict (the integrate call's canary check exited 4, a trip
+              inside its window acked before the check, ADR 0053): an `integrated` row's line reads `void`
+              instead, so it never backs prepare's case (ii), and the lane frees (`lane-freed release=halt`);
+              the task waits for Integration again. A row with any other outcome is reconciled as usual.
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start and restart
               within the parallel ceiling, every held task with its reason, the running, awaiting-Integration,
@@ -275,13 +278,6 @@ Subcommands:
               _holds_lane (else exit 1, nothing written); closes the task's open merge hold, then records
               `lane-freed release=halt`. The note is not changed.
 
-  void-integration  `--tasks <slug>`: an integrate call whose git-env window was acked mid-run gives no verdict
-              (the canary's check exit 4, ADR 0053). Requires the note's last Integration-log line to be
-              `integrated`, the line prepare's case (ii) reads (else exit 1, nothing written). Appends `<now>
-              void path=lead pr=<n>` with every other field `-` as the log's last line, saves, then frees the lane
-              as free-lane does (`lane-freed release=halt`; a failed save frees nothing, exit 1):
-              the last line no longer backs prepare's case (ii) or _holds_lane, so the task waits for
-              Integration again and prepare re-integrates it.
 
   hold        `--tasks <slug> --hold merge|race --state start|end` (p15-2): the lead's hold transitions. A merge
               start requires _holds_lane; a race start requires the rollout's `## Race log` to name the task
@@ -1030,12 +1026,17 @@ ISO_STAMP_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?
 
 # ---- small value helpers ----------------------------------------------------
 
+def _drop_comment(raw):
+    """A frontmatter value without its ` # comment` (a value that is only a comment becomes '')."""
+    return re.sub(r"(^|\s+)#.*$", "", raw)
+
+
 def _scalar(value) -> str:
     """A frontmatter scalar: inline ` # comment` dropped, quotes and whitespace stripped ('' for None). A value that is
     only a comment is '' (YAML's null): Note.get has already stripped the space before it."""
     if value is None:
         return ""
-    s = re.sub(r"(^|\s+)#.*$", "", str(value)).strip()
+    s = _drop_comment(str(value)).strip()
     return s.strip('"').strip("'").strip()
 
 
@@ -1057,13 +1058,14 @@ def _start_unattended(note) -> bool:
 def _clear_start(note) -> bool:
     """Remove every top-level `start:` frontmatter line whose scalar reads `unattended` (so a stale second line can
     never re-arm the Stage); any other `start:` value and every indented line stay. True when one was removed."""
-    before = len(note._fm)
-    note.filter_fm(_not_start_unattended)
-    return len(note._fm) != before
+    return note.filter_fm(_not_start_unattended)
+
+
+START_LINE_RE = re.compile(rf"^{re.escape(START_KEY)}:\s*(.*)$")
 
 
 def _not_start_unattended(line) -> bool:
-    m = re.match(rf"^{re.escape(START_KEY)}:\s*(.*)$", line)
+    m = START_LINE_RE.match(line)
     return not (m and _scalar(m.group(1)).lower() == START_UNATTENDED)
 
 
@@ -1396,14 +1398,14 @@ class Note:
             mm = pat.match(line)
             if not mm:
                 continue
-            value = re.sub(r"\s+#.*$", "", mm.group(1)).strip()
+            value = _drop_comment(mm.group(1)).strip()
             if value:
                 return _list_items(value)
             out = []
             for item in self._fm[i + 1:]:
                 mi = re.match(r"^\s*-\s*(.*)$", item)
                 if mi:
-                    out.extend(_list_items(re.sub(r"(^|\s+)#.*$", "", mi.group(1)).strip()))   # `- # x`: no item
+                    out.extend(_list_items(_drop_comment(mi.group(1)).strip()))   # `- # x`: no item
                 elif item.strip():
                     break
             return out
@@ -1415,10 +1417,7 @@ class Note:
         later, better-informed run has superseded (a stale marker is triaged against, so leaving one
         is worse than never writing it)."""
         pat = re.compile(rf"^{re.escape(key)}:\s*")
-        kept = [line for line in self._fm if not pat.match(line)]
-        if len(kept) != len(self._fm):
-            self._fm = kept
-            self.dirty = True
+        self.filter_fm(lambda line: not pat.match(line))
 
     @_journaled
     def set(self, key: str, value, after=("owner", "status")):
@@ -1446,10 +1445,7 @@ class Note:
     def remove(self, key: str):
         """Delete the `key:` line from frontmatter entirely (idempotent — no-op if absent)."""
         pat = re.compile(rf"^{re.escape(key)}:\s*")
-        kept = [line for line in self._fm if not pat.match(line)]
-        if len(kept) != len(self._fm):
-            self._fm = kept
-            self.dirty = True
+        self.filter_fm(lambda line: not pat.match(line))
 
     def has_heading(self, heading: str) -> bool:
         return any(line.strip() == heading for line in self._body.split("\n"))
@@ -1615,7 +1611,7 @@ class Note:
         self._set_body_lines(lines[:j] + block + lines[end:] if end < len(lines) else lines[:j] + block)
 
     @_journaled
-    def append_line(self, heading: str, line: str, dedupe=True):
+    def append_line(self, heading: str, line: str):
         """Record one bare line under `heading` (the Integration log), creating the section when absent.
 
         Dedupe, keyed on the line's first token (its startedAt): a line whose startedAt is set is skipped
@@ -1632,9 +1628,7 @@ class Note:
         lines, start, end = found
         filled = [i for i in range(start + 1, end) if lines[i].strip()]
         kept = [lines[i].rstrip() for i in filled]
-        if not dedupe:
-            pass   # the caller needs the line last (void-integration), even when an identical one sits earlier
-        elif line.split(" ", 1)[0] != "-":
+        if line.split(" ", 1)[0] != "-":
             if line in kept:
                 return
         elif kept and kept[-1] == line:
@@ -1658,11 +1652,13 @@ class Note:
 
     @_journaled
     def filter_fm(self, keep):
-        """Keep only the frontmatter lines `keep(line)` is true for."""
+        """Keep only the frontmatter lines `keep(line)` is true for. True when one went."""
         kept = [line for line in self._fm if keep(line)]
-        if len(kept) != len(self._fm):
-            self._fm = kept
-            self.dirty = True
+        if len(kept) == len(self._fm):
+            return False
+        self._fm = kept
+        self.dirty = True
+        return True
 
     def _replay(self, ops):
         """Re-apply another Note's journal here, as journaled edits (inside the journal's depth)."""
@@ -1675,10 +1671,11 @@ class Note:
 
     def save(self, dry_run=False):
         """Under the note's lock: read the note again, re-apply this Note's edits when another writer changed it
-        since, and replace it atomically (a temp file renamed over it), so no reader sees a truncated note. A note
+        since, and write it in place, so the note keeps its inode, created time, tags and links. A note
         gone from its path (moved or deleted meanwhile) is never written back: FileNotFoundError. A lock not taken
-        within THREAD_NOTE_LOCK_TIMEOUT seconds (30) is an OSError, nothing written. The write is in place."""
-        if dry_run or not self.dirty or self.render() == self._text:
+        within THREAD_NOTE_LOCK_TIMEOUT seconds (30) is an OSError, nothing written."""
+        text = self.render()
+        if dry_run or not self.dirty or text == self._text:
             return   # nothing since the read or the last save
         with _note_lock(self.path):
             now = self.path.read_text()
@@ -1687,13 +1684,13 @@ class Note:
                 # drop it. The journal replayed on what this Note read must give what it holds.
                 base = Note(self.path, self._text)
                 base._replay(self._ops)
-                if base.render() != self.render():
+                if base.render() != text:
                     raise OSError(f"{self.path} changed since it was read, and an edit here cannot be re-applied to "
                                   "it; nothing written: run it again")
                 fresh = Note(self.path, now)
                 fresh._replay(self._ops)
                 self._fm, self._body = fresh._fm, fresh._body
-            text = self.render()
+                text = self.render()
             # In place, through a symlink to its target, so the note keeps its inode, created time, tags and links
             # (Obsidian sorts by them); the lock keeps every other script writer out meanwhile.
             self.path.write_text(text)
@@ -1703,7 +1700,7 @@ class Note:
 class _note_lock:
     """The note's save lock (_note_lock_path), held only for a save's read and write, never across a child process;
     the canary takes it inside its own lock, and nothing takes the canary's inside this one. No fcntl (Windows): no
-    lock, the atomic replace alone."""
+    lock: the write alone."""
 
     def __init__(self, path):
         self.lock_path, self.fh = _note_lock_path(path), None
@@ -2522,6 +2519,10 @@ def cmd_reconcile(args) -> int:
     warnings = []
     top = None  # (name, source) of the ladder's top rung, read once, only for a pre-3.0.0 row
     for task in tasks:
+        integ = task.get("integration")
+        if args.no_verdict and isinstance(integ, dict) and integ.get("outcome") == "integrated":
+            # ADR 0053: a trip inside the integrate call's window was acked before its check, so its verdict is void.
+            task = {**task, "integration": {**integ, "outcome": "void"}}
         slug = task.get("slug", "<no-slug>")
         status = task.get("status")
         path = resolve_task_path(task, tasks_dir)
@@ -3497,38 +3498,6 @@ def cmd_log_integration(args) -> int:
     return _finish(args, now)
 
 
-def cmd_void_integration(args) -> int:
-    """ADR 0053: void the integrate call's `integrated` record its acked git-env window leaves without a verdict."""
-    now = _now(args)
-    slug = args.tasks.strip()
-    _path, note = _task_note(args, slug)
-    if isinstance(note, str):
-        print(f"ERROR: void-integration: {note}; nothing written", file=sys.stderr)
-        return 1
-    # Any last `integrated` line, as prepare's case (ii) reads it (lead-integrate.py last_integration), not only a
-    # current one: a legacy `-` startedAt or one before `ready:` still backs a merge with no verifier.
-    last = _log_tokens(_last_log_line(note)) if _last_log_line(note) else None
-    if _status(note) != "review" or not _pr(note) or last is None or last["outcome"] != "integrated":
-        print(f"ERROR: void-integration: {slug}: its last Integration-log line is not `integrated` (status "
-              f"{_status(note) or 'none'!r}); nothing written", file=sys.stderr)
-        return 1
-    line = _integration_log_line({"prUrl": _pr(note), "integration": {
-        "outcome": "void", "path": "lead", "metrics": {"startedAt": now.astimezone().isoformat(timespec="minutes")}}})
-    held = _holds_lane(note)
-    note.append_line(INTEGRATION_LOG_SECTION, line, dedupe=False)
-    try:
-        note.save(dry_run=args.dry_run)
-    except OSError as e:
-        print(f"ERROR: void-integration: cannot write {slug}: {e}; nothing written, the lane not freed", file=sys.stderr)
-        return 1
-    # The lane's record only once the void line is on the note, so the record never shows a lane the note holds.
-    rollout = _note_rollout(note)
-    if rollout and not args.dry_run and held:
-        _halt_lane(rollout, slug, args, _record_state(rollout))
-    print(f"{slug}: integration log += {line}{_flag(args, note)}")
-    return 0
-
-
 # ---- resume (p6-8) ------------------------------------------------------------------
 
 def _gh(gh_bin, argv, cwd):
@@ -4389,7 +4358,7 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
         _event(rollout, "merged", slug, {"readOnly": True}, args)
     rejected = integ is not None and outcome == "rejected"
     if held and not (integ is not None and outcome == "integrated"):
-        fields = {"release": "reject" if rejected else "set-aside"}
+        fields = {"release": "reject" if rejected else "halt" if outcome == "void" else "set-aside"}
         fields.update(_lane_fields_from_row(integ) if integ is not None else lane_fields)
         _close_holds(rollout, slug, ("merge",), args, _record_state(rollout))
         _event(rollout, "lane-freed", slug, fields, args)
@@ -5239,7 +5208,7 @@ def cmd_descope(args) -> int:
                 _write_followup(fu_path, note, slug, part, reason, run_n, now, hits[0][0][3] if hits else "")
             except OSError as e:
                 return error(f"cannot write {fu_path}: {e}", "a re-run finishes the records")
-    note.apply(_descope_pointer, part, part_f, run_n, owner, fu_name)
+    _descope_pointer(note, part, part_f, run_n, owner, fu_name)
     if not marks:
         why = "is optional in the brief" if mode == "optional" else f'is owned by [[{owner}]] ("{quote}")'
         note.append_line(SCOPE_AUTO_SECTION, f'{DESCOPE_ENTRY}{stamp}, Plan-blocked feedback run {run_n}: "{part}" {why}; '
@@ -5650,8 +5619,9 @@ def _answer_recorded(note):
     return {"stamp": m.group(1), "kind": m.group(2), "form": FORM_NAMES[m.group(4)], "line": line}
 
 
+@_journaled
 def _descope_pointer(note, part, part_f, run_n, owner, fu_name):
-    """The brief pointer, read from the note itself (Note.apply re-applies it to a fresh read): on every item holding
+    """The brief pointer, read from the note itself (journaled: Note.save re-applies it to a fresh read): on every item holding
     the part, else (an emergent part) one line in the first brief section."""
     lines, items, _fenced = _brief_items(note)
     hits = _part_hits(items, part_f)
@@ -5671,13 +5641,11 @@ def _descope_pointer(note, part, part_f, run_n, owner, fu_name):
     note._set_body_lines(lines)
 
 
+@_journaled
 def _rewrite_keys(note, pick, to):
     """Rewrite the key of each `## Repair input` entry `pick(fingerprint)` selects among the live ones to
-    `(block <fp>; <to>)`, in memory (the caller saves). Returns how many changed."""
-    return note.apply(_rewrite_keys_in, pick, to)
-
-
-def _rewrite_keys_in(note, pick, to):
+    `(block <fp>; <to>)`, in memory (the caller saves; journaled, so Note.save re-applies it). Returns how many
+    changed."""
     found = note._section_bounds(REPAIR_INPUT_SECTION)
     if found is None:
         return 0
@@ -6628,11 +6596,6 @@ class CompletionValueError(ValueError):
     pass
 
 
-def _drop_comment(raw):
-    """A frontmatter value without its ` # comment` (a value that is only a comment becomes '')."""
-    return re.sub(r"(^|\s+)#.*$", "", raw)
-
-
 def _continued(note, key):
     """True when the key's value goes on below its own line: the next line that is neither blank nor an indented
     comment is indented (YAML folds a plain scalar across blank and comment lines, and reads a value under an empty
@@ -6707,7 +6670,7 @@ def _completion_timeout(note):
         raise CompletionValueError(f"{COMPLETION_TIMEOUT_KEY}: continues on a later line; write the seconds on its "
                                    "own line")
     raw = note.get(COMPLETION_TIMEOUT_KEY)
-    if raw is None or not _valued(raw):
+    if not _valued(raw):
         return DEFAULT_COMPLETION_TIMEOUT   # empty, quoted empty, a comment alone (the template's line), null or ~
     seconds, err = _verify_timeout(note, COMPLETION_TIMEOUT_KEY)
     if err:
@@ -7191,6 +7154,8 @@ def main() -> int:
     r.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     r.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the run headings' stamp)")
     r.add_argument("--dry-run", action="store_true")
+    r.add_argument("--no-verdict", action="store_true",
+                   help="ADR 0053: the integrate call's canary check exited 4: an integrated row's line reads void")
     r.set_defaults(func=cmd_reconcile)
 
     nx = sub.add_parser("next", help="print the queue's next moves as JSON (start/restart/hold/halt)")
@@ -7318,14 +7283,6 @@ def main() -> int:
     fl.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     fl.add_argument("--dry-run", action="store_true")
     fl.set_defaults(func=cmd_free_lane)
-
-    vi = sub.add_parser("void-integration", help="void an integrate call's integrated record its acked git-env "
-                                                "window left without a verdict (ADR 0053)")
-    vi.add_argument("--tasks", required=True, help="the task slug")
-    vi.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
-    vi.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the void line's stamp)")
-    vi.add_argument("--dry-run", action="store_true")
-    vi.set_defaults(func=cmd_void_integration)
 
     ho = sub.add_parser("hold", help="the lead's merge or race hold starts or ends (hold-started / hold-ended; p15-2)")
     ho.add_argument("--tasks", required=True, help="the task slug")
