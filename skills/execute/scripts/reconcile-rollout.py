@@ -20,12 +20,13 @@ Subcommands:
               row) is its call's end (p29-12): `ready:`, a read-only approval's `merged:` and the row's Slot
               events are stamped at the end the journal of the call bound to the task's open Slot records
               (_call_end: its run-bound line in the Run record, then <journalDir>/<runId>.json), not when the
-              lead reconciles, which can be hours later (a lead held on a hold, or idle). With no end readable
-              they fall back to now, and the row's line marks it: `ready=<stamp> (fallback)`. --no-verdict (the
-              integrate call's canary check exited 4, a trip inside its window acked before the check, ADR
-              0053): an `integrated` row's line reads `void` instead, so it never backs prepare's case (ii), and
-              the lane frees (`lane-freed release=halt`); the task waits for Integration again. A row with any
-              other outcome is reconciled as usual.
+              lead reconciles, which can be hours later (a lead held on a hold, or idle). The end must lie at
+              or after the Slot's latest slot-taken (a re-take included), or the Slot would split for a reader
+              by ts. With no end readable they fall back to now, and the row's line marks it: `ready=<stamp>
+              (fallback)`. --no-verdict (the integrate call's canary check exited 4, a trip inside its window
+              acked before the check, ADR 0053): an `integrated` row's line reads `void` instead, so it never
+              backs prepare's case (ii), and the lane frees (`lane-freed release=halt`); the task waits for
+              Integration again. A row with any other outcome is reconciled as usual.
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start and restart
               within the parallel ceiling, every held task with its reason, the running, awaiting-Integration,
@@ -4713,9 +4714,16 @@ def _call_end(rollout, slug, now):
     run-bound for the task inside it that is not an integrate call (a restart after a dead lead binds a newer one). Its
     journal, <journalDir>/<runId>.json (fold-journals' path), must be an object naming that runId with a terminal
     status. The end is startTime + durationMs (epoch ms, ints >= 0: score.py's reading), else the journal's
-    `timestamp`, and must lie between the Slot's first slot-taken (an earlier end is another call's file) and now (a
-    later one is no end yet). A record, journal or field that cannot be read is None: never an error, and never a
-    printed reason (a record that cannot be read is no reason to change a verb's stdout, p15-2)."""
+    `timestamp`, and must lie at or after the Slot's latest slot-taken, a re-take included, and at or before now (a
+    later one is no end yet). An end before the latest slot-taken is not the end of the call the row reports: it is an
+    earlier attempt's, a restart re-took the Slot after it (a launch that failed binds nothing new, and a resume that
+    re-binds the same runId and errors leaves the old journal on disk), or another call's stale file. Stamped there,
+    the row's slot-freed would sit before that slot-taken and split the Slot in two for every reader that reads the
+    record by ts (score.py, the night record; run_record.py's call-end stamps): a second Slot that is never freed. A
+    record, journal or field that cannot be read is None: never an error, no extra reason or warning line is printed,
+    and the verb's exit is unchanged (p15-2). Whether the end is readable does decide the stamps: with none, the note's
+    `ready:` (or a read-only approval's `merged:`) and the line's `ready=`/`merged=` are now, the line marked
+    `(fallback)`, and the events `stamp: fallback`."""
     if not rollout:
         return None
     try:
@@ -4723,16 +4731,20 @@ def _call_end(rollout, slug, now):
         lines, _bad = _record_lines(rr.record_path(rollout))
     except Exception:
         return None  # no record yet, or one that cannot be resolved or read
-    key, taken, bound = slug.lower(), None, None
+    # `taken` is the open Slot (its first slot-taken); `floor` the latest slot-taken ts inside it, a re-take included
+    key, taken, floor, bound = slug.lower(), None, None, None
     for d in lines:
         if d.get("task") != key:
             continue
         kind = d.get("kind")
         if kind == "slot-taken":
             if taken is None:
-                taken, bound = d, None
+                taken, floor, bound = d, None, None
+            at = _parse_ts(d.get("ts"))
+            if at is not None and (floor is None or at > floor):
+                floor = at
         elif kind == "slot-freed" or (kind == "carried" and d.get("rollout") == d.get("from")):
-            taken, bound = None, None
+            taken, floor, bound = None, None, None
         elif kind == "run-bound" and taken is not None and d.get("call") != "integrate":
             bound = d
     if bound is None:  # no open Slot, or no call bound since it was taken
@@ -4760,10 +4772,9 @@ def _call_end(rollout, slug, now):
             end = None
     elif isinstance(journal.get("timestamp"), str):
         end = _parse_ts(journal["timestamp"])
-    if end is None or end > now:
+    if end is None or end > now or (floor is not None and end < floor):
         return None
-    start = _parse_ts(taken.get("ts"))
-    return None if start is not None and end < start else end
+    return end
 
 
 def _call_end_mark(ended, now):

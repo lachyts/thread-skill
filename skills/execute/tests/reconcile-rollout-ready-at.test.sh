@@ -110,6 +110,18 @@ print(json.dumps([[r["ts"]] + [r.get(k) for k in keys] for r in rows if r.get("t
 PY
 }
 count() { if [ -f "$D/events/ro.jsonl" ]; then wc -l < "$D/events/ro.jsonl" | tr -d ' '; else echo 0; fi; }
+# floor_ok <slug>: `ok` when no event of that task written after its last slot-taken is earlier than that slot-taken
+# (a reader that reads the record by ts would otherwise see the Slot end before it was last taken), else the offenders
+floor_ok() {
+  python3 - "$D/events/ro.jsonl" "$1" <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+mine = [r for r in rows if r.get("task") == sys.argv[2]]
+last = max((i for i, r in enumerate(mine) if r["kind"] == "slot-taken"), default=None)
+bad = [] if last is None else [[r["kind"], r["ts"]] for r in mine[last + 1:] if r["ts"] < mine[last]["ts"]]
+print("ok" if last is not None and not bad else json.dumps(bad or "no slot-taken"))
+PY
+}
 nx() { python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$1" 2>"$D/err-next"; }
 q() { printf '%s' "$1" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(json.dumps(eval(sys.argv[1]), separators=(",", ":")))' "$2"; }
 
@@ -196,6 +208,34 @@ mkt g6 open; start g6 2026-10-19T08:00:00Z; bind g6 wf_g6a 2026-10-19T08:01:00Z;
 start g6 2026-10-19T09:00:00Z; bind g6 wf_g6b 2026-10-19T09:01:00Z; journal wf_g6b 2026-10-19T09:01:00Z 44
 rec g6 "$(REVIEW 16)" 2026-10-19T12:00:00Z
 ok "$(fm g6 ready)" "ready: 2026-10-19T09:45+00:00" "R4 g6: the restart's call is read, never the dead one"
+# g6b: a restart re-takes the open Slot after its call died (killed at 08:21), but the launch fails, so nothing new is
+# bound: the dead call's end is earlier than the re-take, so it is no end of this Slot's last call. Stamped there, the
+# slot-freed would sit before the 09:00 slot-taken and split the Slot for every reader that reads the record by ts.
+mkt g6b open; start g6b 2026-10-19T08:00:00Z; bind g6b wf_g6ba 2026-10-19T08:01:00Z
+journal wf_g6ba 2026-10-19T08:01:00Z 20 killed
+start g6b 2026-10-19T09:00:00Z
+printf '%s' "workflow call failed: the launch was refused" | python3 "$HERE/../scripts/lead-integrate.py" set-aside --note "$D/g6b.md" --kind own \
+  | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now 2026-10-19T12:00:00Z >/dev/null 2>&1
+ok "$(ev g6b slot-freed outcome stamp reconciledAt)" '[["2026-10-19T12:00:00.000Z","lost","fallback",null]]' \
+  "R4 g6b: an end before the Slot's last slot-taken is no end: slot-freed falls back"
+ok "$(ev g6b set-aside reasonClass stamp)" '[["2026-10-19T12:00:00.000Z","call-failed","fallback"]]' "R4 g6b: ... and so does set-aside"
+ok "$(floor_ok g6b)" "ok" "R4 g6b: no event is earlier than the Slot's last slot-taken"
+# g6c: the p84-8 pattern, a restart that re-binds the same runId, whose resumed run rewrites its journal: its end is read
+mkt g6c open; start g6c 2026-10-19T01:00:00Z; bind g6c wf_g6c 2026-10-19T01:01:00Z
+start g6c 2026-10-19T04:31:00Z; bind g6c wf_g6c 2026-10-19T04:32:00Z; journal wf_g6c 2026-10-19T04:32:00Z 238
+rec g6c "$(REVIEW 61)" 2026-10-19T12:00:00Z
+ok "$(fm g6c ready)|$(ev g6c ready stamp)" 'ready: 2026-10-19T08:30+00:00|[["2026-10-19T08:30:00.000Z","call-end"]]' \
+  "R4 g6c: a re-take at 04:31, the same runId re-bound at 04:32, its journal ending 08:30: ready at 08:30"
+# g6d: the same re-bind, but the resume never rewrote the journal: the file on disk is the earlier attempt's, ended
+# 08:21, before the 09:00 re-take, so the row falls back
+mkt g6d open; start g6d 2026-10-19T08:00:00Z; bind g6d wf_g6d 2026-10-19T08:01:00Z; journal wf_g6d 2026-10-19T08:01:00Z 20 failed
+start g6d 2026-10-19T09:00:00Z; bind g6d wf_g6d 2026-10-19T09:01:00Z
+rec g6d "$(REVIEW 62)" 2026-10-19T12:00:00Z
+ok "$(fm g6d ready)" "ready: 2026-10-19T12:00+00:00" "R4 g6d: a re-bound run whose journal ended before the re-take: ready: falls back"
+has "$out" "g6d: status=review pr=$PR/62 ready=2026-10-19T12:00+00:00 (fallback) [written]" "R4 g6d: the line marks the fallback"
+ok "$(ev g6d ready stamp)|$(ev g6d slot-freed outcome stamp)" \
+  '[["2026-10-19T12:00:00.000Z","fallback"]]|[["2026-10-19T12:00:00.000Z","ready","fallback"]]' "R4 g6d: ready and slot-freed are marked fallback"
+ok "$(floor_ok g6d)" "ok" "R4 g6d: no event is earlier than the Slot's last slot-taken"
 # g7: a journal that ended before the Slot was taken is a stale file, never this call's end
 mkt g7 open; start g7 2026-10-19T08:00:00Z; bind g7 wf_g7 2026-10-19T08:01:00Z; journal wf_g7 2026-10-19T06:00:00Z 30
 rec g7 "$(REVIEW 17)" 2026-10-19T12:00:00Z
@@ -208,6 +248,21 @@ ok "$rc|$(fm g8 ready)" "0|ready: 2026-10-19T12:00+00:00" "R4 g8: an unreadable 
 mkt g9 open; start g9 2026-10-19T08:00:00Z; bind g9 wf_g9 2026-10-19T08:01:00Z
 rec g9 "$(REVIEW 19)" 2026-10-19T12:00:00Z
 has "$out" "g9: status=review pr=$PR/19 ready=2026-10-19T12:00+00:00 (fallback) [written]" "R4 g9: no journal (still in flight, or never written) falls back"
+
+# ── R4b: score.py reads g6b's record as one Slot, 08:00 to the reconcile ──────────────────────────────────────────
+# The reviewer's reproduction of g6b alone: with the dead call's 08:21 as the Slot's end, the 09:00 re-take opened a
+# second Slot never freed (a never-finished gap, 0.85 running h); at the fallback it is one Slot, freed at 12:00.
+scen r4b-retake-score
+mkt g open; start g 2026-10-19T08:00:00Z; bind g wf_ga 2026-10-19T08:01:00Z
+journal wf_ga 2026-10-19T08:01:00Z 20 killed
+start g 2026-10-19T09:00:00Z
+printf '%s' "workflow call failed: the launch was refused" | python3 "$HERE/../scripts/lead-integrate.py" set-aside --note "$D/g.md" --kind own \
+  | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now 2026-10-19T12:00:00Z >/dev/null 2>&1
+S4=$(python3 "$HERE/../../reflect/scripts/score.py" --rollout ro --note "$D/ro.md" --until 2026-10-19T12:00:00Z --tasks-dir "$D" 2>"$D/err-score")
+ok "$(q "$S4" '[d["runningTime"]["hours"], d["slots"]["closed"], d["slots"]["slotHours"]]')" '[4.0,1,4.0]' \
+  "R4b: score.py reads one closed Slot, 08:00 to 12:00: 4.0 running h"
+ok "$(q "$S4" '[e["kind"] for e in d["runningTime"]["excluded"]] + [f for f in d["flags"] if "never finished" in f]')" '[]' \
+  "R4b: ... with no never-finished gap or flag"
 
 # ── R5: the other events a Slot-ending row writes take the call's end too ───────────────────────────────────────
 scen r5-siblings

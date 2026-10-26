@@ -285,11 +285,15 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   end, read from the journal of the call bound to the task's open Slot, with `stamp: call-end` and `reconciledAt`,
   its own clock (when the lead turned to the row); with no end readable it writes them at its own clock with `stamp:
   fallback` (and a ready or merged on any other row is a fallback too). Such a line's ts can be earlier than lines
-  written before it, so read the record by ts, as score.py does. A slot-freed's `reconciledAt` is when the lead
-  released the Slot: score.py reads the Slot to it, so the lead's absence after a call still reads as lead absent,
-  while the night record (`next`) reads the Slot as ended at the call's end. The lane's events stay at the
-  reconcile's clock, unmarked: the lane is the lead's (ADR 0030). A line from before p29-12 carries no `stamp`: its
-  ts is the reconcile's clock.
+  written before it, so read the record by ts, as score.py does. That is also why the end must lie at or after the
+  Slot's latest slot-taken, a re-take included: a call-end ts earlier than a slot-taken in the same Slot would put the
+  slot-freed before that slot-taken, and every reader that reads by ts would split the Slot in two, the second never
+  freed. An end earlier than it is an earlier attempt's (a restart re-took the Slot, its launch failed or its resume
+  never rewrote the journal), so the row falls back. A slot-freed's `reconciledAt` is when the lead released the
+  Slot: score.py reads the Slot to it, so the lead's absence after a call still reads as lead absent, while the
+  night record (`next`) reads the Slot as ended at the call's end. The lane's events stay at the reconcile's clock,
+  unmarked: the lane is the lead's (ADR 0030). A line from before p29-12 carries no `stamp`: its ts is the
+  reconcile's clock.
 - Idle Slot time is a span. A Reflection derives it from slot-taken / slot-freed pairs against the ceiling
   stamped on each event. An idle-slots event is a reason marker labelling the span it falls in: a change
   of reason splits the span, a repeat is harmless, a span with no marker reads as "unexplained".
