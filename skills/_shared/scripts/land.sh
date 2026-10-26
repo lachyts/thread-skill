@@ -30,9 +30,10 @@
 #   (a non-default checkout may need one ls-remote to learn the default when origin/HEAD is unset).
 #   Unprotected default branch → push it (a diverged origin: one rebase in a scratch worktree, then the
 #   branch moves by a two-tree read-tree, which keeps non-overlapping local changes exactly).
-#   The primary checkout (the checkout this plugin runs from, live) never moves while a rollout runs on it
-#   (ADR 0031): S4 skips its fast-forward, and a diverged unprotected origin gets the rebased tip pushed
-#   without moving the branch. A protected landing is unaffected: its PR merges on GitHub.
+#   The primary checkout (the checkout this plugin runs from, live) never moves while a rollout with no
+#   Engine snapshot runs on it (ADR 0031, narrowed by ADR 0043: a snapshotted rollout never runs on it): S4
+#   skips its fast-forward, and a diverged unprotected origin gets the rebased tip pushed without moving the
+#   branch. A protected landing is unaffected: its PR merges on GitHub.
 #   Protected → push HEAD unchanged to close/<cdate>-<slug>-<sha12>, open the PR over REST, label it
 #   `landing`, queue `gh pr merge --auto --merge`, and update-branch once when origin/<d> moved on.
 #   route_class is the local half (swept, then the register), shared by S2 and O2, so a landing, route mode (which

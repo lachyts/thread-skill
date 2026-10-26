@@ -25,6 +25,12 @@ falling back to a transcript scan for history, and:
 A line without `merged=` and `running=` (a cursor-shaped one included) never
 matches (ADR 0030: a rollout is a queue with no stored cursor).
 
+STATUS_RE is a cross-version contract (ADR 0043; skills/_shared/engine-snapshot.md
+§ Cross-version state): this hook runs from the Primary checkout, while each
+rollout's lead runs on its own Engine snapshot and prints the line from that
+version's prose. So the line's form only ever widens: a change that stops
+matching a line an older snapshot prints is a migration, never a silent rewrite.
+
 Blocking is bounded by a progress-aware cap: consecutive blocks without
 `merged` advancing release the stop and surface the stall to the user instead
 of spinning forever (`running` alone never counts as progress; the harness's own

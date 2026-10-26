@@ -14,6 +14,7 @@ due:
 captured: {{DATE}}
 # saved as: <slug>-rollout-<YYYY-MM-DD>.md — always dated (a 2nd same-day rollout gets a -N suffix); legacy undated <slug>-rollout notes keep their names, the rollout readers resolve both. See schedule SKILL.md step 6.
 protocol_version: 5
+# engine_snapshot: "<path>" and engine_sha: <sha>   # ADR 0043: stamped by `engine-snapshot.py adopt` just below protocol_version:, never by hand
 shape: parallel  # ADR 0040: parallel | serial; a note with no shape: reads as parallel
 verifier: {{VERIFIER}}
 max_iterations: {{MAX_ITERATIONS}}
@@ -102,7 +103,7 @@ When every task has merged, run the **completion ceremony** (`/thread:execute` p
 3. File any follow-on work (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/` and rewrite the items below as thin pointers to them. Never leave live work as checklist prose inside a done note — the moment `status: done` lands, every Bases view filters this note out and the work goes invisible.
 4. Append a `## Completion log`: dispatch dates, tasks → PRs (links + merge dates), convergence stats (plan/review rounds per task), phase closure, the disposition of each post-rollout item, and the Reflection line `Reflection: <close-score's line>; the weekly Reflection reads it`, from execute §4.5 step 5's `close-score.py --rollout <rollout-note> --close completion`, run first with the Bash tool's `timeout: 600000` (one `tunings.jsonl` line, no prompt; a re-run prints `already recorded`; a non-zero exit is logged and the ceremony goes on). Then offer it in chat: `Reflection: /thread:reflect [[<rollout-slug>]]`.
 5. Record here why any associated thread stays open; otherwise step 7 closes it, last.
-6. Move this note to `Work/Tasks/Archive/Rollouts/` (`git mv` when `git ls-files --error-unmatch` finds it tracked, else a plain `mv`: a rollout note is usually untracked, and `git mv` refuses one) and commit the moved note by pathspec, naming the old path too only when it was tracked, and likewise the old Archive path of a follow-on moved back out with `git mv`. A move never overwrites: a same-named note already in `Archive/Rollouts/` halts the move and is reported (never `mv -n`, which exits 0 when it skips). Obsidian wikilinks resolve by filename, so `[[<slug>]]` references and the task notes' `rollout:` backlinks survive the move.
+6. Move this note to `Work/Tasks/Archive/Rollouts/` (`git mv` when `git ls-files --error-unmatch` finds it tracked, else a plain `mv`: a rollout note is usually untracked, and `git mv` refuses one) and commit the moved note by pathspec, naming the old path too only when it was tracked, and likewise the old Archive path of a follow-on moved back out with `git mv`. A move never overwrites: a same-named note already in `Archive/Rollouts/` halts the move and is reported (never `mv -n`, which exits 0 when it skips). Obsidian wikilinks resolve by filename, so `[[<slug>]]` references and the task notes' `rollout:` backlinks survive the move. Then run `engine-snapshot.py retire` (engine-snapshot.md § Retirement).
 7. Close out any associated thread (run `/thread:close`), last, after step 6's move and commit: close's banner, then the lead's `ROLLOUT-STATUS:` line, end the session's last message (close step 9, rule (2)).
 
 Rollout-specific items (audit re-runs etc.) go here:

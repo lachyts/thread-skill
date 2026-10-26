@@ -15,7 +15,8 @@
 //       <decision.options[0]> and [--fork <decision.fork>], `--fork` exactly when the decision carries one; and
 //       DECISIONS_HEADING and RULING_LINE are schedule step 7's heading and orient § 5's ruling line (a python child
 //       loads them).
-//   o5  § 4's Unpark and sign-off writes: estate-rank.py unpark, snooze --ready and kill, and approve-gates --tasks.
+//   o5  § 4's Unpark and sign-off writes: estate-rank.py unpark, snooze --ready and kill, and approve-gates --tasks,
+//       run from the task's rollout's engine root (`engine-snapshot.py resolve`, ADR 0043), never this session's.
 //   o6  § 6 runs `plan`, forks `/thread:schedule <entry.args>` with the projectSlug line, one batch at a time, and
 //       answers schedule's questions in exactly 15 items, § 0's clone question (ADR 0042) with the No, since no fork
 //       holds Lachy's yes; schedule's **Under orient-all.** paragraph cites orient-all § 6 and routes nothing, S1 and S4
@@ -174,7 +175,8 @@ function check(files, consts) {
 
   // o5: the Unpark and sign-off writes.
   need('o5', '§ 4', s4, ['estate-rank.py unpark <note>', 'estate-rank.py snooze <note> --ready', 'estate-rank.py kill <note>',
-    'reconcile-rollout.py approve-gates --tasks <slug>'])
+    'reconcile-rollout.py approve-gates --tasks <slug>', "engine-snapshot.py resolve --rollout <the index entry's rollout>",
+    '`python3 <root>/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <slug> --rollout <rollout-note>`'])
 
   // o6: the schedule forks and their answers.
   need('o6', '§ 6', s6, ['estate-dispatch.py plan', '/thread:schedule <entry.args>', 'name the note with slug <entry.projectSlug>',
@@ -307,8 +309,10 @@ test('control o4: a decision heading that drifts from schedule step 7, a Grill r
     CONSTS, ['o4'], 'one-call question')
 })
 
-test('control o5: the kill write gone fails o5 alone', () => {
+test('control o5: the kill write gone, or a sign-off run from the session root, fails o5 alone', () => {
   only(swap(FILES, SKILL, 'estate-rank.py kill <note>', 'by hand'), CONSTS, ['o5'], 'kill')
+  only(swap(FILES, SKILL, '`python3 <root>/skills/execute/scripts/reconcile-rollout.py approve-gates',
+    '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates'), CONSTS, ['o5'], 'session root')
 })
 
 test('control o6: a sixteenth answer, a fork that makes the clone, or schedule routing for orient-all, fails o6 alone', () => {

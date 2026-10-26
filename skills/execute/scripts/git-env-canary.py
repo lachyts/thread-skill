@@ -118,7 +118,10 @@ _event: best-effort, never changing an exit.
 Exit codes: 0 clean, 3 a trip or a hold, 4 (check only, never a task window) clean but a trip inside this window
 was acked, so the window's run gives no verdict (ADR 0053), 1 nothing to ack, 2 a failure, a usage or a validation
 error. The lead treats every non-zero exit but 4 as a halt; on 4 it runs the window's verdict again (execute § 4.5's
-exit rule).
+exit rule). An exit 2 whose stderr line starts `engine-snapshot: ` is the Engine snapshot guard (ADR 0043): every
+verb first asks engine-snapshot.py's guard(), loaded from this tree, and a rollout stamped with another snapshot
+(or a live one whose snapshot is unusable) is refused before the lock, with nothing written: re-run the same
+command from the root that line names (skills/_shared/engine-snapshot.md), never a halt.
 """
 
 import argparse
@@ -812,6 +815,19 @@ class _Parser(argparse.ArgumentParser):
         raise CanaryError(f"usage: {message}")
 
 
+def _engine_guard(note):
+    """engine-snapshot.py's guard() for the note, loaded from this tree (ADR 0043): its refusal line, else None."""
+    try:
+        sys.dont_write_bytecode = True
+        src = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "engine-snapshot.py"
+        spec = importlib.util.spec_from_file_location("thread_engine_snapshot", src)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # only positive evidence refuses
+        return None
+    return mod.guard(note, src.parent.parent.parent.parent, "skills/execute/scripts/git-env-canary.py")
+
+
 def main(argv=None):
     ap = _Parser(prog="git-env-canary.py", description="the lead's git-env canary (execute § 4.5)")
     sub = ap.add_subparsers(dest="verb", required=True, parser_class=_Parser)
@@ -837,6 +853,10 @@ def main(argv=None):
     try:
         args = ap.parse_args(argv)
         ctx = Ctx(args)
+        refusal = _engine_guard(ctx.rollout)
+        if refusal:   # ADR 0043: a stamped rollout's canary runs on its own Engine snapshot; nothing written
+            print(refusal, file=sys.stderr)
+            return 2
         if args.verb != "restore":
             ctx.lock()
         return VERBS[args.verb](ctx, args)

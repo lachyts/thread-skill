@@ -30,7 +30,11 @@
 #   2  Usage or environment: bad arg count; a SHA not 40-hex; <pr> neither a positive number nor a
 #      github.com/<o>/<r>/pull/<N> URL; a URL whose <o>/<r> is not origin's; gh, git or python3 missing;
 #      not a repo; no origin; a MERGE_TASK_* override that is not a non-negative integer (at most 9
-#      digits); the counter cannot be persisted. Every one is before any GitHub call.
+#      digits); the counter cannot be persisted; the Engine snapshot guard (ADR 0043: a live task note
+#      names the PR and its rollout runs on another Engine snapshot than this script's root, or a live
+#      one whose snapshot is unusable: engine-snapshot.py guard-pr's `engine-snapshot: ` line, so the lead
+#      re-runs this same call from the root that line names, never a halt). Every one is before any
+#      GitHub call.
 #                                                                        counter UNTOUCHED  lead: halt the
 #                                                                                          rollout for a human
 #   3  BASE MOVED: origin/<default> ≠ the integrated base. Nothing merged.
@@ -669,6 +673,21 @@ else
   finish 2 "ERROR: cannot parse a PR number from '$PR_ARG' (a positive number or a https://github.com/<o>/<r>/pull/<N> URL)"
 fi
 PR=$PR_NUM
+
+# The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md): a PR that a live task note names, whose
+# rollout runs on an Engine snapshot, merges only from that snapshot's copy of this script. engine-snapshot.py
+# guard-pr (this tree's) exits 2 with its `engine-snapshot: ` line for a wrong root: that is this script's exit 2,
+# before any GitHub call or counter. Any other failure of the guard is a WARN, and the merge goes on.
+ES_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../_shared/scripts/engine-snapshot.py"
+ES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
+gp_err=$(python3 "$ES_PY" guard-pr --pr-url "https://github.com/$OWNER/$REPO/pull/$PR" --root "$ES_ROOT" \
+  --script skills/execute/scripts/merge-task.sh 2>&1 >/dev/null); gp_rc=$?
+if [ "$gp_rc" != 0 ]; then
+  case "$gp_err" in
+    engine-snapshot:*) [ "$gp_rc" = 2 ] && finish 2 "$gp_err" ;;
+  esac
+  echo "WARN: engine-snapshot.py guard-pr exited $gp_rc (${gp_err%%$'\n'*}): merging without the Engine snapshot guard" >&2
+fi
 
 # Cap pre-flight: an unpersistable counter fails closed (2) before any GitHub call.
 CDIR="$REPO_PATH/.claude/merge-task"

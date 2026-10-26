@@ -80,7 +80,10 @@ stderr carries only `close-score: WARN: ...` lines (a usage error: one `close-sc
 
 Exit codes: 0 recorded, already recorded or not recorded; 1 not scored (tune writes nothing); 2 usage (a missing or
 bad flag, a --rollout that is no .md path, a reserved or bad slug, a non-positive --timeout or --deadline), stdout
-empty.
+empty; and 2 for the Engine snapshot guard (ADR 0043), right after the flags parse: a rollout stamped with another
+usable snapshot than this plugin root, or a live one whose snapshot is unusable (engine-snapshot.py's guard(), loaded
+from this tree), prints that `engine-snapshot: ` line on stderr, stdout empty, and runs nothing: re-run the same
+command from the root it names.
 
 Writes, both under the events directory, outside the vault and the repo: fold-journals' `call-journal` lines in the
 rollout's Run record (never on the serial path), and tune.py's one tunings.jsonl line. The serial path reads the
@@ -508,12 +511,30 @@ def parse(argv):
     return a, slug
 
 
+def engine_guard(note):
+    """engine-snapshot.py's guard() for the rollout note, loaded from this tree (ADR 0043): its refusal, else None."""
+    try:
+        sys.dont_write_bytecode = True
+        src = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "_shared", "scripts",
+                           "engine-snapshot.py")
+        spec = importlib.util.spec_from_file_location("thread_engine_snapshot", src)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # only positive evidence refuses
+        return None
+    return mod.guard(os.path.expanduser(note.strip()), mod.ROOT, "skills/reflect/scripts/close-score.py")
+
+
 def main(argv):
     started = time.monotonic()
     try:
         a, slug = parse(argv)
     except Usage as e:
         sys.stderr.write("close-score: %s\n" % e)
+        return 2
+    refusal = engine_guard(a.rollout)
+    if refusal:   # ADR 0043: a stamped rollout is scored from its own Engine snapshot; nothing run or written
+        sys.stderr.write(refusal + "\n")
         return 2
     for s in SIGNALS:
         signal.signal(s, on_signal)

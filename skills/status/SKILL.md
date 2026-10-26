@@ -28,7 +28,7 @@ notes lack it. Either read of the settings file runs land.sh's `--origin-slug` r
 `git remote get-url origin` in the Project root, when the file holds a repo table: no network. It also runs
 execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*). On a
 `shape: serial` note its one read is `leg.py status` (§ 5): the note's `## Leg log`, its Queue and its task notes,
-read with no lock, no network and no `gh` or `git` call. Writes nothing. Obsidian + GitHub read access only.
+read with no lock, no network and no `gh` or `git` call. § 1's `engine-snapshot.py resolve` reads the note's stamps and makes read-only git calls (rev-parse, status, rev-list) in its Engine snapshot and the Primary checkout (ADR 0043). Writes nothing. Obsidian + GitHub read access only.
 
 ## Invocation forms
 
@@ -47,6 +47,10 @@ rollout whose completion ceremony already ran (a serial chain's Complete moves i
 resolves is `<rollout-note>` in every read below. If several dated/ordinal notes match an ambiguous name (e.g.
 "today's giflab rollout"), **list the matches and ask which**: don't assume. Read the body's `Project root: \`<repoPath>\`` line: it's the repo for the live checks (a serial
 note has none: § 5).
+
+**Engine snapshot first (ADR 0043).** Whichever session runs it, status takes its scripts and prose from the rollout's own engine root (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/engine-snapshot.md`). This text's prose id: `$Id$` (git `ident`, engine-snapshot.md): pass its hex as `--prose-id`; when it shows no hex, pass none. Before any other read, run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py resolve --rollout <rollout-note> --verb status --prose-id <id>`.
+Its `root` is the engine root for every command below, and the hand-over is execute § 1.5's: when `prose.identical` is true keep following this text with `<root>` in place of the rendered root, else read `<root>/skills/status/SKILL.md` as a file and follow it from § 1 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`). Status never moves anything: its `move` field is only reported. Exit 3 (the snapshot is gone, moved or edited) → report `ENGINE SNAPSHOT UNUSABLE: <why>` (its stderr line) in the headline and go on from the session root. Exit 2 (a usage error, such as a `--prose-id` given no value, or no note at that path), or any other exit but 0 and 3, prints no `root`: report `ENGINE SNAPSHOT RESOLVE FAILED: <its stderr line>` and stop, with nothing read from the rendered root. A reverse-lineage rollout's reads run from that rollout's own `resolve` root.
 
 **Lineage first, then the version.** A supersede carries a rollout's unlanded tasks to its successor whatever
 the prior's `protocol_version` (a legacy rollout is exactly what a supersede migrates), so status reads the
@@ -303,9 +307,11 @@ offline too.
 `pause pending (draining)`, `ROOM STOP since <stamp>: awaiting the Stage's resume` or
 `room stop since <stamp> lapsed: the owner's heartbeat re-enters` (§ 2's *Room stop*, exit 0 or 4),
 `INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
-names, once) or the lineage (`supersedes [[<prior>]]`,
+names, once), `ENGINE SNAPSHOT UNUSABLE: <why>` (§ 1) or the lineage (`supersedes [[<prior>]]`,
 `superseded by [[<successor>]]`, or § 1's reverse lineage: `superseded by [[N]], close-out interrupted` or
 `superseded by [[N]], supersede interrupted`) when they apply.
+
+**The engine line**, right under the headline, from § 1's resolve: `Engine: snapshot <sha12> (<a> ahead, <b> behind the Primary checkout at <head12>)` (its `sha`, `ahead`, `behind` and `primaryHead`: the counts are the snapshot's own, its commits the Primary's HEAD lacks and the Primary's commits it lacks, so a snapshot one commit behind a pulled Primary reads `0 ahead, 1 behind`), `Engine: Primary checkout (no snapshot)` for an unstamped note with a git Primary, or `Engine: plugin cache <root> (no snapshot)` with none (`primary` null).
 
 **The queue-state table.** One group per in-count `queueState`, in this order, each task on one line:
 

@@ -106,9 +106,11 @@ notes only: no git.
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py running [--tasks-dir <dir>]
 
 `running` answers primary-hold.sh (ADR 0031 says why): a live rollout note tagged `rollout` at the protocol
-the schedule template writes, neither `done` nor `dropped`, not `paused:`, and started (reconcile-rollout.py's
-never_started is false) is RUNNING. stdout: `running <slug>` per rollout, sorted, or `none` (a missing tasks
-dir included); exit 0.
+the schedule template writes, neither `done` nor `dropped`, not `paused:`, started (reconcile-rollout.py's
+never_started is false) and with no `engine_snapshot:` stamp is RUNNING. A stamped note runs on its own Engine
+snapshot, never on the Primary checkout, so it holds nothing (ADR 0043; skills/_shared/engine-snapshot.md); only a
+rollout scheduled before P29 (or on a version-cache install) still does. stdout: `running <slug>` per rollout,
+sorted, or `none` (a missing tasks dir included); exit 0.
 
 Output (check). stdout is exactly one line on exit 0 and 3: `none` | `supersede <slug>` | `interrupted <prior-slug>
 <new-slug>` | `file <slug> <relpath>` | `refuse <slug>[,<slug>…]`. Slugs are filename stems; an unfinished
@@ -640,6 +642,8 @@ def cmd_running(args, rr) -> int:
     for path, note, _ in rollout_notes(rr, tasks_dir, archive=False):
         if rr._status(note) in CLOSED or rr._scalar(note.get("protocol_version")) != protocol:
             continue
+        if rr._valued(note.get("engine_snapshot")):
+            continue   # ADR 0043: it runs on its Engine snapshot, so the Primary checkout is free to move
         if rr._valued(note.get("paused")) or rr.never_started(note, rr._scan(path, tasks_dir)[0])[0]:
             continue
         running.append(path.stem)

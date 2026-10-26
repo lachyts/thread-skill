@@ -68,7 +68,9 @@ runId (BIND_RUN_ID_RE) with no `..`.
 
 Exit codes: 0 ok; 1 no journals root, an unreadable state file, or an unreadable or unwritable note; 2 usage (a
 bad runId, `mark` with no --run, a --hours or --interval that is not positive, empty or multi-line `begin` text,
-`begin` text holding `[[`);
+`begin` text holding `[[`; and the Engine snapshot guard, ADR 0043: `begin` and `end` on a rollout stamped with another
+snapshot than this plugin root, or a live one whose snapshot is unusable, print engine-snapshot.py's
+`engine-snapshot: ` line and write nothing, so re-run from the root it names; `stands` is a reader and exempt);
 3 `watch` timed out; 4 `stands` found a room stop at or past its bound, or one whose stamp does not parse;
 5 `stands` found no room stop standing.
 """
@@ -396,6 +398,20 @@ def cmd_stands(args):
 VERBS = {"mark": cmd_mark, "watch": cmd_watch, "begin": cmd_begin, "end": cmd_end, "stands": cmd_stands}
 
 
+def _engine_guard(note):
+    """engine-snapshot.py's guard() for the note, loaded from this tree (ADR 0043): its refusal line, else None."""
+    try:
+        sys.dont_write_bytecode = True
+        src = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "_shared", "scripts",
+                           "engine-snapshot.py")
+        spec = importlib.util.spec_from_file_location("thread_engine_snapshot", src)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # only positive evidence refuses
+        return None
+    return mod.guard(note, mod.ROOT, "skills/execute/scripts/step-boundary.py")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="step-boundary.py", description="The lead's side of a Chorus room stop "
                                 "(execute § Room stop): stop each Workflow call at a step boundary, and record the "
@@ -418,6 +434,11 @@ def main(argv=None):
             s.add_argument("--hours", type=float, default=BOUND_HOURS)
             s.add_argument("--now")
     args = p.parse_args(argv)
+    if args.verb in ("begin", "end"):
+        refusal = _engine_guard(args.rollout)
+        if refusal:   # ADR 0043: the room-stop line is written from the rollout's own Engine snapshot
+            print(refusal, file=sys.stderr)
+            return 2
     try:
         return VERBS[args.verb](args)
     except Fail as e:

@@ -14,6 +14,7 @@ due:
 captured: {{DATE}}
 # saved as: <slug>-rollout-<YYYY-MM-DD>.md, named as schedule step 6 names every rollout note (one note per chain; a further chain takes the next -N). See schedule SKILL.md § Serial path.
 protocol_version: 5
+# engine_snapshot: "<path>" and engine_sha: <sha>   # ADR 0043: stamped by `engine-snapshot.py adopt` just below protocol_version:, never by hand
 shape: serial
 surfaces:
 {{SURFACES}}
@@ -54,7 +55,7 @@ When every task is done, the last Leg runs the completion ceremony (the Complete
 3. Score the chain: run `close-score.py --rollout <this note> --close completion`, and keep its one line as the reflection; a failed score never stops the ceremony.
 4. Mark this rollout `status: done` and stamp `completed: <YYYY-MM-DD>` in the frontmatter.
 5. Append a `## Completion log`: each Leg, the tasks it finished and set aside, the disposition of each item below, and the reflection.
-6. Move this note to `Work/Tasks/Archive/Rollouts/`, never overwriting a same-named note there, and commit it by pathspec.
+6. Move this note to `Work/Tasks/Archive/Rollouts/`, never overwriting a same-named note there, and commit it by pathspec. Then run `engine-snapshot.py retire` (engine-snapshot.md § Retirement).
 7. Run `/thread:close`.
 
 Rollout-specific items go here:

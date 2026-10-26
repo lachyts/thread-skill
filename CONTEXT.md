@@ -556,7 +556,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   no lead runs its engine from it. For thread-skill it is also the
   **In-place checkout**, which merge-task fast-forwards after each merge of a
   self-rollout. It is free to move (ADR 0043): ADR 0031's hold covers only a
-  **Running rollout** with no Engine snapshot. Not the engine's "main
+  **Running rollout** with no Engine snapshot. The plugin root counts only as
+  its own work tree's toplevel: a version-cache copy, even inside another repo
+  (~/.claude's config repo), has none, and a snapshot stands for the checkout
+  it was cut from (`engine-snapshot.py`'s git_primary). Not the engine's "main
   checkout", which is a rollout's own repo. _Avoid_: live checkout, installed
   copy.
 - **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
@@ -565,8 +568,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   lead's scripts, Workflow engine and skill prose all come from it for the
   whole run, as do status's and repair's for that rollout, whichever session
   runs them, so the Primary checkout can move under a **Running rollout**. A
-  rollout moves to a newer snapshot only at its **Reinstate** (ADR 0043).
-  _Avoid_: pinned root, frozen plugin, engine version.
+  rollout moves to a newer snapshot only at its **Reinstate** (ADR 0043). A
+  session's rendered prose is followed only when its git `ident` prose id is
+  the snapshot's own; otherwise the snapshot's SKILL.md is read as a file
+  (`skills/_shared/engine-snapshot.md`). _Avoid_: pinned root, frozen plugin,
+  engine version.
+- **Engine root** — the root every command acting on one rollout runs from:
+  its **Engine snapshot**; for a note that names none, the **Primary
+  checkout** when there is one; otherwise the session's plugin root (a
+  version-cache install). `engine-snapshot.py resolve` prints it, and the
+  guarded scripts refuse to write from any other (ADR 0043). _Avoid_: plugin
+  root (the session's, which may differ), engine version.
 - **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, beside
   its toplevel and never nested inside it: the Project root of every parallel
   rollout scheduled after P26 (ADR 0042), so peer sessions' commits to the
@@ -586,6 +598,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   cites. _Avoid_: main checkout, shared checkout.
 - **Running rollout** — a live, started rollout at the current protocol,
   neither `done` nor `dropped` and not hard-paused: one a lead may be running.
+  Only one with no **Engine snapshot** holds the **Primary checkout** (ADR
+  0031's hold, narrowed by ADR 0043).
   It differs from unfinished both ways: it leaves out paused, never-started
   and protocol-3 rollouts, and keeps one whose every task merged but whose
   completion ceremony has not run. _Avoid_: active, in flight.
@@ -769,7 +783,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   and merge, exit paused; ADR 0030).
   Hard: stop now; worktrees keep the work. _Avoid_: suspend, halt, abort.
 - **Reinstate** — resuming a paused rollout: plain `execute` on the rollout
-  note. No separate resume command. _Avoid_: restart, relaunch, unpause.
+  note. No separate resume command. It moves the rollout onto a fresh
+  **Engine snapshot** at origin's tip (ADR 0043); for a serial chain, which is
+  never paused, it is the first Leg begun after a Leg closed `stopped`; never
+  a **Sign-off pause**'s reinstate. _Avoid_: restart, relaunch, unpause.
 - **Room stop** — on the Chorus Stage, at a Login's line: the lead starts
   nothing, stops each Workflow call at a step boundary (just after its running
   agent's result line), and resumes every stopped call by `resumeFromRunId` on
@@ -782,7 +799,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   dependants remain: the run finished everything else and closed, and the
   rest waits on Lachy's sign-off (ADR 0034). It keeps the repo's one
   unfinished rollout until each gate is signed or deferred; its Reinstate
-  runs the Standing approval again and refuses while a gate is unsigned.
+  runs the Standing approval again and refuses while a gate is unsigned. It
+  never moves the Engine snapshot: it is the engine's pause, not Lachy's
+  moment, so its signed-gate handles keep their cache replay (ADR 0043).
   _Avoid_: stuck, gate hold.
 - **Stalled rollout** — a rollout with work it could do and nothing moving:
   its lead, session or Mac stopped, or a hold froze more than it threatens
