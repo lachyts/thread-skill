@@ -242,8 +242,12 @@ One message of statements, no question:
 
 - the grades logged: § 2 step 7's `logged`, `exists` or `completed` line, its skipped tasks as a caveat;
 - the decisions recorded, and those left for the next pass: each undecided One call and Grill (`later[]`,
-  `skipped[]`, a Grill stopped part-way, `plan.undecided[]`, and a fork's Pre-flight leavers) as "waiting on your
-  answer, so it reaches the next round";
+  `skipped[]`, a Grill stopped part-way, `plan.undecided[]`) as "waiting on your answer, so it reaches the next
+  round";
+- each fork's Pre-flight leavers, listed by the `why` the fork returns, as schedule step 8's left-out block lists
+  them: `undecided` as "waiting on your answer, so it reaches the next round"; `orient` with its pointer,
+  `/thread:orient [[<home>]]`; `dependency` as "depends on [[<via>]], which is left out"; `ungraded` as "could not be
+  graded (<reason>): the next pass grades it again";
 - the sign-offs, the bounced ones marked, and any left unsigned with the line that refused it (§ 4);
 - the unparks, snoozes and kills;
 - each schedule's note, or its stop line;
