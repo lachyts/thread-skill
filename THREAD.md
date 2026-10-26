@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-24
+last_touched: 2026-10-26
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,13 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-25: the verify-and-canary follow-ups merged as PR #213 (ADR 0053), CI green on macOS and Ubuntu.** Built items 1, 2, 6 and 4. Items 5 (one strict command reader) and 3 (a `run_verify` core) were not built, by Lachy's ruling.
+- **Item 1, ADR 0053:** a window whose trip is acked before its check exits 4: no verdict, never a halt. Verify and RACE re-verify re-run; an integrate call reconciles `--no-verdict` (its line reads `void`) on any non-zero check; a task window checks 0 and names its acked trip. `arm --resume` carries `ackedTrips` across a Lost-call or § 5 resume. `completion-verify --run` reads the exit, and `_git_env_trips` is gone.
+- **Item 2:** `Note.save` journals every edit, takes a per-directory lock, re-applies its edits over a concurrent writer and refuses one it cannot. It renames a `cp -p` clone into place, keeping the note's created time and xattrs (Lachy's ruling, for Obsidian's sort).
+- **Items 6 and 4:** a comment-only value (`key:   # x`, `- # x`) reads as none, while `pr: #7` stays a value. Every `--detach-at` tree is pid-locked, and a dead one's locked registration is cleared.
+
+Review: four rounds at xhigh (3 code, 1 simplify). The ledger STOPped at round 3, its regressions mostly from Lachy's mid-chain rulings; round 4 ran on his word, and its 14 findings were all fixed before the Verify-list merge. p29-2's task now notes it builds on #213's `check` and `Note.save` changes.
 
 **2026-10-24: PR #202 merged (ADRs 0043–0051), after an audit of where rollout time goes.** The re-grill widened into that audit. From September to 21 Oct, stalls, usage limits and machine load cost about 150–185 h; the Integration lane's real merge time cost about 35–50 h. On the Chorus 10-18 run, a stall-free stretch merged 1.15 PRs/h against 0.76 approvals/h. The rulings:
 - **Deferred:** the merge train (0044; § Deferred keeps the evidence).
@@ -789,6 +796,9 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **`Note._set_body_lines` raises outside a journaled edit (#213).** A body edit computed from the note itself goes through `@_journaled` (a module function taking the note first) or `Note.apply(fn, …)`, so `Note.save` can re-apply it over a concurrent writer. A direct `_fm`/`_body` assignment is caught at save, which refuses rather than drop it.
+- **Note save locks live in `~/.local/state/thread/note-locks`, one per note directory.** Every engine suite exports `THREAD_NOTE_LOCK_DIR` into its temp dir beside `THREAD_EVENTS_DIR`; a new suite that saves notes must too, or direct runs leak lock files into the real state dir (44 did on 2026-10-24).
+
 - **This machine's `gh` has no `pr update-branch` (2026-10-23).** It prints the command list and exits 1, so a "behind" PR with auto-merge queued never updates. Use `gh api -X PUT repos/<owner>/<repo>/pulls/<N>/update-branch -f expected_head_sha=<sha>`. A PR whose branch is behind sits `BEHIND` with green checks indefinitely.
 - **Never wait on GitHub in an unbounded background `until` loop (2026-10-23).** A `connection reset by peer` from `gh` exits the loop "successfully" with the PR still open; the notification reads as done. Poll in the foreground with a bounded count, treat a `gh` error as unknown, and read the result before ending the turn.
 - **A release-time `make evals` keeps no traces.** The recipe has no `--keep-temp`, so a sub-1.00 case is unexplainable and the loaded plugins and resolved model are unverified (5.0.0 record). Tracked by [[thread-skill-5-0-docs-follow-ups]].
@@ -1058,7 +1068,7 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**From 2026-10-24 (completion verifier):** grill and build the one-process design. Its brief, `docs/handoffs/2026-10-24-completion-verifier-one-process.md`, is consumed: a live session picked it up.
+**From 2026-10-25 (verify-and-canary follow-ups merged, #213):** done. Items 5 and 3 of that task were not built: re-file them if wanted. p29-2 builds on #213's canary `check` and `Note.save`.
 
 **From 2026-10-24 (re-grill):** #202 is merged. To start P29, run `/thread:schedule thread-skill --regenerate` from `~/repos/tools/thread-skill-rollout`, then execute it. The queue shown on 2026-10-23: p29-1 Solo, then p29-3, -9, -5, -8, -12, then -2, -10, -7, -11, -13, plus carried p28-2 and p27-5. Each P29 note's `depends-on` holds that order. The 5.0.0 engine predates ADRs 0043–0051, so P29 builds them.
 
@@ -1074,6 +1084,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
+- 2026-10-26 (close, from 2026-10-24): grilled the verify-and-canary follow-ups (items 1, 2, 6, 4; ADR 0053), built them test-first, ran 4 fresh-review rounds (ledger STOP at 3, round 4 on Lachy's word), merged #213 with CI green; task done. My slip: direct test runs leaked 44 lock files into the real state dir, cleaned and fixed.
 - 2026-10-24 (close, from 2026-10-22): led `[[thread-skill-rollout-2026-10-21]]` as far as its gates and halted with nothing written, because #202 was still open (the note's own hold). #202 has since merged, but the note still holds the old six tasks, and this Stage session runs in a worktree that § 2.8 refuses, so the regenerate and execute go to a session in the clone. Filed [[chorus-rollout-lead-starts-in-project-root]].
 - 2026-10-24 (close, from 2026-10-21): re-grilled #202 into an audit of rollout time; ruled the merge train deferred, ADRs 0048–0051 added, 0043/0045/0046/0047/0050 reshaped; 3 review rounds (wording-only fixes), merged #202; filed P29 re-scope, Chorus, fresh-review and launchd tasks; the P29 regenerate is left for the next session.
 - 2026-10-23 (close, from 2026-10-22): reviewed and merged #203 (2 rounds, ledger STOP, root revert), released 5.0.0 (#206, tag, eval $7.50) and installed it; landed #205; filed the args-refusal and 5.0.0 docs follow-ups. My slip: a background wait died on a GitHub network reset and I answered its notification "No response requested" instead of acting, so the install sat a day.
