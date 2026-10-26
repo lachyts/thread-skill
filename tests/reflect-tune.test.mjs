@@ -805,3 +805,76 @@ test('tune.py and the score.py it loads parse as python 3.8', () => {
     assert.equal(r.status, 0, `${path.basename(script)}: ${r.stderr}`)
   }
 })
+
+// ---- KT1: the writer raises the file's schema (ADR 0043, p29-1) ----------------------------------------------------
+// rollout-settings.py's add-a-key recipe: any writer that adds a key above the file's `schema` raises the file's top-level
+// `schema` line in the same edit. tune.py does it through raise_schema(); patched in process here (the file's harness
+// pattern), so the repo-scope parallel_ceiling reads as a schema-2 key.
+const KT_PATCH = [
+  'import importlib.util, sys',
+  'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+  'tune = importlib.util.module_from_spec(spec); spec.loader.exec_module(tune)',
+  'tune.RS.SCHEMA = 2; tune.RS.KEY_SCHEMA[("rollout", "parallel_ceiling")] = 2',
+]
+function ktTune(home, scores, repo, { identity = false } = {}) {
+  const harness = [...KT_PATCH, ...(identity ? ['tune.raise_schema = lambda lines, *a: lines'] : []), 'sys.exit(tune.main(sys.argv[2:]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', harness, TUNE, '--scores', scores, '--pick', 'p1', '--repo', repo], { encoding: 'utf8', cwd: home, env: env(home) })
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr }
+}
+function ktResolves(home, repo) {
+  const r = spawnSync('python3', ['-B', '-c', [...KT_PATCH, 'import json', 'print(json.dumps(tune.RS.resolve(repo=sys.argv[2])))'].join('\n'), TUNE, repo],
+    { encoding: 'utf8', cwd: home, env: env(home) })
+  assert.equal(r.status, 0, r.stderr)
+  return JSON.parse(r.stdout)
+}
+
+test('KT1 (a) a newer key into a file with no schema line: schema = 2 goes before the first table header', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, '# operator settings\n[defaults]\nmax_iterations = 3\n')
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = ktTune(home, scores, repo)
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'),
+    'schema = 2\n\n# operator settings\n[defaults]\nmax_iterations = 3\n\n[repo."o/r"]\nparallel_ceiling = 5\n')
+  assert.equal(lines(tuningsPath(home)).length, 1, 'one tuning line')
+  const after = ktResolves(home, repo)
+  assert.deepEqual([after.schema.file, after.settings.parallel_ceiling], [2, { value: 5, source: 'file:repo' }])
+})
+
+test('KT1 (b) an existing schema = 1 line is rewritten in place; (c) a higher one is left as it is', (t) => {
+  for (const [given, want] of [['schema = 1   # the file\'s version', 'schema = 2   # the file\'s version'], ['schema = 3', 'schema = 3']]) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, `${given}\n\n[defaults]\nmax_iterations = 3\n`)
+    const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+    const r = ktTune(home, scores, repo)
+    assert.equal(r.status, 0, r.stderr)
+    const text = fs.readFileSync(tomlPath(home), 'utf8')
+    assert.equal(text, `${want}\n\n[defaults]\nmax_iterations = 3\n\n[repo."o/r"]\nparallel_ceiling = 5\n`, given)
+    assert.equal(text.match(/^schema\b/gm).length, 1, `${given}: no second schema line`)
+  }
+})
+
+test('KT1 (d) control: a writer that forgets the raise does not validate, and nothing is written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = '[defaults]\nmax_iterations = 3\n'
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = ktTune(home, scores, repo, { identity: true })
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /^tune: the edit does not validate \(.*rollout\.parallel_ceiling is a schema-2 key but the file says schema = 1.*\): nothing written\n$/)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+})
+
+test('KT1 (e) with no newer key, no schema line is ever added', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, '[defaults]\nmax_iterations = 3\n')
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), '[defaults]\nmax_iterations = 3\n\n[repo."o/r"]\nparallel_ceiling = 5\n')
+})

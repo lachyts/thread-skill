@@ -8,6 +8,8 @@ is no env override). Stdlib only. It writes nothing and makes no network call. T
 of the file format:
 
     # ~/.config/thread/rollouts.toml
+    schema = 1                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
     max_review_rounds = 4
@@ -35,7 +37,7 @@ of the file format:
     [repo."lachyts/thread-skill"] # one repo, keyed by its GitHub origin's owner/name
     parallel_ceiling = 5
 
-The only top-level keys are `defaults`, `guardrails`, `notify` and `repo`. A repo table holds every rollout key but
+The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` and `repo`. A repo table holds every rollout key but
 `verify_slots` (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries`, `spend_approval_usd` and
 `verify_slots`; MACHINE_ONLY: `verify_slots`, which is machine-wide and refused under a `[repo."o/r"]` label). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
 
@@ -43,9 +45,24 @@ The only top-level keys are `defaults`, `guardrails`, `notify` and `repo`. A rep
 is an unknown key. Two scripts read it, both through the importable resolve(), in process: execute's
 skills/execute/scripts/ntfy-push.py publishes to the topic (§ 6.5 *The ntfy fallback*), and reflect's tune.py refuses
 an edit whose result resolves another `[notify]` (a Tuning never touches the table). The CLI prints only whether a
-topic is set (see Output), never the topic: on ntfy.sh a topic is its own read and publish credential. Install a
-release that knows the table before writing it: an older rollout-settings.py refuses an unknown top-level table, and
-every rollout's settings with it.
+topic is set (see Output), never the topic: on ntfy.sh a topic is its own read and publish credential.
+
+The schema (ADR 0043: two rollouts can run on two Engine snapshots, so an older reader meets a newer file). The
+top-level `schema` is an integer >= 1 (a boolean, float or string is refused); an absent line reads as 1. SCHEMA is
+this reader's own version, and KEY_SCHEMA registers every key it knows, keyed by (scope, key), with the schema that
+introduced it; the scopes are `top` (the top-level keys), `rollout` (a `[defaults]` or `[repo."o/r"]` table),
+`guardrails` and `notify`. Under a file whose `schema` is above SCHEMA, an unknown key (a top-level table included)
+is ignored and listed in `ignored`, unless it is a near-miss of a key known at its scope (near_miss(): equal once
+lower-cased with `_` and `-` dropped, or within optimal-string-alignment distance 2), which is still refused as a
+typo. Under any other file an unknown key is refused, as ever. A known key whose KEY_SCHEMA is above the file's
+`schema` is refused with `<scope>.<key> is a schema-<N> key but the file says schema = <M>: raise the file's
+top-level `schema` line to <N> in the same edit`. A top-level `schema` needs a P29+ reader: a pre-P29
+rollout-settings.py refuses it as an unknown top-level key, so install a P29+ release before writing one.
+
+Adding a key (the recipe; tests/rollout-settings.test.mjs K10 fails with it): bump SCHEMA; register the key in
+KEY_SCHEMA at the new number; keep it no near-miss of any key registered at its scope (K8); and every writer that
+adds it to a file whose `schema` is lower raises the file's `schema` line to that number in the same edit: tune.py
+does it (raise_schema(), pinned by tests/reflect-tune.test.mjs KT1), and so must a hand edit.
 
 Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/name` by land.sh's slug rule
 (`[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+`, a name that is not all dots), never ending `.git`. It is
@@ -66,11 +83,13 @@ shows it but never stamps it on a rollout, and `reconcile-rollout.py approve-gat
 `spend_approval_usd:`, then rollout, then this file, then the built-in 0, which is off: the approval lives in this
 file, never in the skills, so a fresh install approves nothing). Nor is `verify_slots` (p23-4): machine-wide, so
 `[defaults]` only; never stamped on a rollout; execute's `reconcile-rollout.py verify-timeout` reads it at each loop
-entry through resolve(repo=None), which validates the whole file. Write a key only once the installed plugin knows
-it: an older rollout-settings.py refuses an unknown key, and every rollout's settings with it; and a refused file
-now halts every rollout on this machine at its next entry (execute's `verify-timeout`), stamped or not.
+entry through resolve(repo=None), which validates the whole file. A refused file halts every rollout on this machine at
+its next entry (execute's `verify-timeout`), stamped or not, so a new key follows the schema rule above: an older
+snapshot reading a file whose `schema` is above its own ignores that key and runs.
 
-Validation (ADR 0016: anything unknown or wrong is refused, never dropped):
+Validation (ADR 0016: anything unknown or wrong is refused, never dropped, except a newer file's unknown key under the
+schema rule above):
+- a `schema` that is not an integer >= 1; a known key whose KEY_SCHEMA is above the file's `schema`;
 - an unknown top-level key or table key, `defaults` or `guardrails` that is not a table, a `repo` that is
   not a table, a value under `repo` that is not a table (named by its key: `[repo."o/r"] must be a table`);
 - a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys and `verify_slots`, 0 for
@@ -93,6 +112,8 @@ repo table exists and `--repo` was given, land.sh reads the origin; then the val
 Output. Exit 0 and one JSON line on stdout:
 
     {"path": "<expanded path>", "file": true|false, "repo": "<owner/name>"|null,
+     "schema": {"file": <the file's schema, 1 when absent or no file>, "engine": SCHEMA},
+     "ignored": ["<scope path of each ignored key>", ...],     # e.g. "defaults.foo", 'repo."o/r".foo', "away"
      "settings": {"parallel_ceiling": {"value": 4, "source": "built-in"}, "max_review_rounds": {...},
                   "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...},
                   "spend_approval_usd": {...}, "verify_slots": {...}},
@@ -115,8 +136,8 @@ and this python has none. On failure stdout is empty and stderr carries one line
 Importable: resolve(repo=None, path=None), redacted(out) (resolve()'s object as the CLI prints it), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
 run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`,
 `spend_approval_usd` and `verify_slots`: every key a `settings` object holds), MACHINE_ONLY, MINIMUM, GUARDRAIL_KEYS,
-NOTIFY_KEYS, NOTIFY_BUILT_IN, TOPIC_RE, ORIGIN_TIMEOUT, default_path(), SettingsError(reason, line=None, code=2,
-subject=None).
+NOTIFY_KEYS, NOTIFY_BUILT_IN, TOPIC_RE, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, near_miss(key, known), file_schema(doc),
+default_path(), SettingsError(reason, line=None, code=2, subject=None).
 """
 import argparse
 import importlib.util
@@ -158,6 +179,15 @@ NOTIFY_KEYS = ("ntfy_topic",)
 NOTIFY_BUILT_IN = {"ntfy_topic": None}
 TOPIC_RE = re.compile(r"[-_A-Za-z0-9]{1,64}\Z")  # ntfy's own topic rule
 TABLES = ("defaults", "guardrails", "notify", "repo")
+TOP_KEYS = ("schema",) + TABLES
+# The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
+# registers every key it knows, by (scope, key), at the schema that introduced it. K10 freezes the schema-1 set.
+SCHEMA = 1
+KEY_SCHEMA = {}
+KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
+KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS})
+KEY_SCHEMA.update({("guardrails", k): 1 for k in GUARDRAIL_KEYS})
+KEY_SCHEMA.update({("notify", k): 1 for k in NOTIFY_KEYS})
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.
@@ -339,31 +369,96 @@ def _topic_problem(value):
     return "a string holding another character"
 
 
+def _osa(a, b):
+    """The optimal-string-alignment distance (Levenshtein plus adjacent transpositions)."""
+    d = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
+    for i in range(len(a) + 1):
+        d[i][0] = i
+    for j in range(len(b) + 1):
+        d[0][j] = j
+    for i in range(1, len(a) + 1):
+        for j in range(1, len(b) + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1)
+    return d[len(a)][len(b)]
+
+
+def near_miss(key, known):
+    """The known key `key` is a near-miss of (equal once lower-cased with `_` and `-` dropped, or within optimal-string-
+    alignment distance 2), else None: a typo of a known key is refused even under a newer file's schema."""
+    squash = lambda s: s.lower().replace("_", "").replace("-", "")   # noqa: E731
+    for k in known:
+        if k != key and (squash(k) == squash(key) or _osa(k, key) <= 2):
+            return k
+    return None
+
+
+def file_schema(doc):
+    """The file's top-level `schema` (1 when absent), or None when it is not an integer >= 1."""
+    raw = (doc or {}).get("schema", 1)
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        return None
+    return raw
+
+
 def _validate(text, doc, path):
-    """{"defaults": {...}, "guardrails": {...}, "notify": {...}, "repo": {slug: {...}}} from a parsed file, or
-    SettingsError."""
+    """{"defaults": {...}, "guardrails": {...}, "notify": {...}, "repo": {slug: {...}}, "schema": N, "ignored": [...]}
+    from a parsed file, or SettingsError."""
     idx = _Lines(text)
 
     def refuse(reason, at):
         raise SettingsError(reason, line=idx.line_of(at), subject=path)
 
-    for key in doc:
-        if key not in TABLES:
-            refuse("unknown top-level key %s (rollouts.toml holds only [defaults], [guardrails], [notify] and "
-                   "[repo.\"owner/name\"] tables)" % json.dumps(key), (key,))
+    schema = file_schema(doc)
+    if schema is None:
+        refuse("schema must be an integer >= 1 (the file's schema version), got %s" % _describe(doc.get("schema")),
+               ("schema",))
+    ignored = []
+
+    def unknown(scope, key, label, at, why):
+        """Ignore a newer file's unknown key (the schema rule), else refuse it with `why`."""
+        known = tuple(k for (sc, k) in KEY_SCHEMA if sc == scope)
+        miss = near_miss(key, known)
+        if schema > SCHEMA and miss is None:
+            ignored.append(label)
+            return
+        if miss is not None and schema > SCHEMA:
+            why += " (a near-miss of %s, so it is refused even under a newer schema)" % json.dumps(miss)
+        refuse(why, at)
+
+    def newer(scope, key, at):
+        """Refuse a known key the file's `schema` is too old for."""
+        n = KEY_SCHEMA.get((scope, key), 1)
+        if n > schema:
+            refuse("%s.%s is a schema-%d key but the file says schema = %d: raise the file's top-level `schema` line to "
+                   "%d in the same edit" % (scope, key, n, schema, n), at)
+
+    for key in list(doc):
+        if key not in TOP_KEYS:
+            unknown("top", key, key, (key,),
+                    "unknown top-level key %s (rollouts.toml holds only a top-level schema and [defaults], [guardrails], "
+                    "[notify] and [repo.\"owner/name\"] tables)" % json.dumps(key))
+        else:
+            newer("top", key, (key,))
 
     def rollout_table(table, label, at):
+        kept = {}
         for key, value in table.items():
             if key not in SETTING_KEYS:
-                refuse("%s: unknown key %s (a rollout table holds %s)" % (label, json.dumps(key), ", ".join(SETTING_KEYS)),
-                       at + (key,))
+                unknown("rollout", key, ".".join(json.dumps(a) if "/" in a else a for a in at + (key,)), at + (key,),
+                        "%s: unknown key %s (a rollout table holds %s)" % (label, json.dumps(key), ", ".join(SETTING_KEYS)))
+                continue
+            newer("rollout", key, at + (key,))
             if key in MACHINE_ONLY and at[0] == "repo":
                 refuse("%s %s is machine-wide: set it under [defaults]" % (label, key), at + (key,))
             if isinstance(value, bool) or not isinstance(value, int) or value < MINIMUM[key]:
                 refuse("%s %s must be an integer >= %d, got %s" % (label, key, MINIMUM[key], _describe(value)), at + (key,))
-        return dict(table)
+            kept[key] = value
+        return kept
 
-    out = {"defaults": {}, "guardrails": {}, "notify": {}, "repo": {}}
+    out = {"defaults": {}, "guardrails": {}, "notify": {}, "repo": {}, "schema": schema, "ignored": ignored}
     defaults = doc.get("defaults", {})
     if not isinstance(defaults, dict):
         refuse("defaults must be a table ([defaults]), got %s" % _describe(defaults), ("defaults",))
@@ -372,10 +467,15 @@ def _validate(text, doc, path):
     guardrails = doc.get("guardrails", {})
     if not isinstance(guardrails, dict):
         refuse("guardrails must be a table ([guardrails]), got %s" % _describe(guardrails), ("guardrails",))
+    kept = {}
     for key, value in guardrails.items():
         at = ("guardrails", key)
         if key not in GUARDRAIL_KEYS:
-            refuse("[guardrails]: unknown key %s (guardrails are %s)" % (json.dumps(key), ", ".join(GUARDRAIL_KEYS)), at)
+            unknown("guardrails", key, "guardrails." + key, at,
+                    "[guardrails]: unknown key %s (guardrails are %s)" % (json.dumps(key), ", ".join(GUARDRAIL_KEYS)))
+            continue
+        newer("guardrails", key, at)
+        kept[key] = value
         if key == "quota_stalls":
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 refuse("[guardrails] quota_stalls must be an integer >= 0, got %s" % _describe(value), at)
@@ -386,19 +486,24 @@ def _validate(text, doc, path):
         elif (isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0
               or (isinstance(value, float) and not math.isfinite(value))):
             refuse("[guardrails] %s must be a non-negative number, got %s" % (key, _describe(value)), at)
-    out["guardrails"] = dict(guardrails)
+    out["guardrails"] = kept
 
     notify = doc.get("notify", {})
     if not isinstance(notify, dict):
         refuse("notify must be a table ([notify]), got %s" % _describe(notify), ("notify",))
+    kept = {}
     for key, value in notify.items():
         at = ("notify", key)
         if key not in NOTIFY_KEYS:
-            refuse("[notify]: unknown key %s ([notify] holds %s)" % (json.dumps(key), ", ".join(NOTIFY_KEYS)), at)
+            unknown("notify", key, "notify." + key, at,
+                    "[notify]: unknown key %s ([notify] holds %s)" % (json.dumps(key), ", ".join(NOTIFY_KEYS)))
+            continue
+        newer("notify", key, at)
         if not isinstance(value, str) or not TOPIC_RE.match(value):
             refuse("[notify] ntfy_topic must be an ntfy topic (1 to 64 of A-Z, a-z, 0-9, - and _), got %s"
                    % _topic_problem(value), at)
-    out["notify"] = dict(notify)
+        kept[key] = value
+    out["notify"] = kept
 
     repos = doc.get("repo", {})
     if not isinstance(repos, dict):
@@ -483,7 +588,7 @@ def resolve(repo=None, path=None):
     except ladder.LadderError as e:
         raise SettingsError(e.reason, line=e.line, code=e.code, subject=path)
     tables = (_validate(read[0], read[1], path) if read is not None
-              else {"defaults": {}, "guardrails": {}, "notify": {}, "repo": {}})
+              else {"defaults": {}, "guardrails": {}, "notify": {}, "repo": {}, "schema": 1, "ignored": []})
 
     slug, overrides = None, {}
     if repo is not None and tables["repo"]:
@@ -512,7 +617,7 @@ def resolve(repo=None, path=None):
         else:
             notify[key] = {"value": NOTIFY_BUILT_IN[key], "source": "built-in"}
     return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails,
-            "notify": notify}
+            "notify": notify, "schema": {"file": tables["schema"], "engine": SCHEMA}, "ignored": list(tables["ignored"])}
 
 
 def redacted(out):

@@ -46,7 +46,9 @@ const NOTIFY_KEYS = ['ntfy_topic']
 const NOTIFY_BUILT_IN = { ntfy_topic: null }
 const UNSET = { ntfy_topic: { set: false, source: 'built-in' } }
 const SET = { ntfy_topic: { set: true, source: 'file:notify' } }
-const TABLES_LINE = 'rollouts.toml holds only [defaults], [guardrails], [notify] and [repo."owner/name"] tables'
+const TABLES_LINE = 'rollouts.toml holds only a top-level schema and [defaults], [guardrails], [notify] and [repo."owner/name"] tables'
+// The JSON's top-level keys: the schema pair and the ignored keys (ADR 0043, p29-1) follow the three tables.
+const OUT_KEYS = ['path', 'file', 'repo', 'settings', 'guardrails', 'notify', 'schema', 'ignored']
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 
 // ---- helpers ------------------------------------------------------------------------------------------
@@ -124,7 +126,7 @@ function expectValues(out, values, sources) {
 }
 
 function assertAllBuiltIn(out) {
-  assert.deepEqual(Object.keys(out), ['path', 'file', 'repo', 'settings', 'guardrails', 'notify'])
+  assert.deepEqual(Object.keys(out), OUT_KEYS)
   assert.deepEqual(Object.keys(out.settings), SETTING_KEYS)
   assert.deepEqual(Object.keys(out.guardrails), GUARDRAIL_KEYS)
   for (const k of SETTING_KEYS) assert.deepEqual(out.settings[k], { value: BUILT_IN[k], source: 'built-in' })
@@ -572,7 +574,7 @@ test('R11 [notify] ntfy_topic resolves as file:notify beside [defaults] and a re
     '', '[repo."o/r"]', 'max_iterations = 5'])
   const repo = gitRepo(home, 'r', 'https://github.com/o/r')
   const out = resolves(home, ['--repo', repo])
-  assert.deepEqual(Object.keys(out), ['path', 'file', 'repo', 'settings', 'guardrails', 'notify'])
+  assert.deepEqual(Object.keys(out), OUT_KEYS)
   assert.deepEqual(out.notify, SET)
   assert.deepEqual(resolvedInProcess(home, repo).notify, { ntfy_topic: { value: 'thread-needs-you', source: 'file:notify' } })
   expectValues(out, { parallel_ceiling: 2, max_iterations: 5 }, { parallel_ceiling: 'file:defaults', max_iterations: 'file:repo' })
@@ -601,4 +603,146 @@ test('R11 the CLI never prints the topic: stdout carries `set`, never the topic 
   assert.ok(!r.stdout.includes('a-topic-only-resolve-sees') && !r.stderr.includes('a-topic-only-resolve-sees'), 'the topic is unprinted')
   assert.deepEqual(JSON.parse(r.stdout).notify, SET)
   assert.equal(resolvedInProcess(home).notify.ntfy_topic.value, 'a-topic-only-resolve-sees')
+})
+
+// ---- K2-K10: the file's schema (ADR 0043, p29-1) --------------------------------------------------------------
+// Two rollouts can run on two Engine snapshots, so an older reader meets a newer file: under a `schema` above the
+// reader's SCHEMA an unknown key is ignored (and listed), a near-miss of a known key is still refused as a typo, and a
+// known key the file's `schema` is too old for is refused with the remedy. Patched cases run resolve() in process.
+
+// inProcess(home, patch): resolve() with `patch` (python lines run on module m first); {status, out, err}
+function inProcess(home, patch = '') {
+  const r = run(home, [], {
+    argv: ['-B', '-c', `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+${patch}
+try:
+    print(json.dumps(m.resolve()))
+except m.SettingsError as e:
+    sys.stderr.write("rollout-settings: %s\\n" % e); sys.exit(e.code)`, SCRIPT],
+  })
+  return { status: r.status, out: r.status === 0 ? JSON.parse(r.stdout) : null, err: r.stderr }
+}
+
+test('K2 an absent schema reads as 1, and an unknown key is refused as ever', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['[defaults]', 'parallel_ceiling = 2'])
+  const out = resolves(home)
+  assert.deepEqual(out.schema, { file: 1, engine: 1 })
+  assert.deepEqual(out.ignored, [])
+  writeSettings(home, ['[defaults]', 'foo_bar = 2'])
+  refused(home, { line: 2, reason: /\[defaults\]: unknown key "foo_bar" \(a rollout table holds/ })
+  writeSettings(home, ['schema = 1', '[defaults]', 'foo_bar = 2'])
+  refused(home, { line: 3, reason: /\[defaults\]: unknown key "foo_bar"/ })
+  const none = resolves(tmpHome(t))
+  assert.deepEqual([none.file, none.schema, none.ignored], [false, { file: 1, engine: 1 }, []], 'no file: schema 1')
+})
+
+test('K3 a schema that is not an integer >= 1 is refused, a boolean included', (t) => {
+  for (const v of ['0', '-1', '1.5', '"2"', 'true', '[1]']) {
+    const home = tmpHome(t)
+    writeSettings(home, [`schema = ${v}`, '[defaults]', 'parallel_ceiling = 2'])
+    refused(home, { line: 1, reason: /schema must be an integer >= 1 \(the file's schema version\), got / })
+  }
+})
+
+test('K4 under a schema above SCHEMA an unknown key is ignored and listed, at every scope', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 2', '', '[defaults]', 'inert_paths = 3', 'parallel_ceiling = 3', '', '[guardrails]',
+    'away_hours = 2', '', '[notify]', 'chorus_topic = "x"', '', '[away]', 'cap = 1', '', '[repo."o/r"]', 'inert_paths = 1'])
+  const out = resolves(home)
+  assert.deepEqual(out.ignored, ['away', 'defaults.inert_paths', 'guardrails.away_hours', 'notify.chorus_topic', 'repo."o/r".inert_paths'])
+  assert.deepEqual(out.schema, { file: 2, engine: 1 })
+  expectValues(out, { parallel_ceiling: 3 }, { parallel_ceiling: 'file:defaults' })
+  assert.deepEqual(out.notify, UNSET)
+})
+
+test('K5 a near-miss by case or _/- is refused even under a newer schema', (t) => {
+  for (const [table, key] of [['defaults', 'Parallel_Ceiling'], ['defaults', 'parallel-ceiling'], ['guardrails', 'quotastalls'],
+    ['notify', 'NTFY_TOPIC']]) {
+    const home = tmpHome(t)
+    writeSettings(home, ['schema = 2', `[${table}]`, `${key} = 1`])
+    refused(home, { line: 3, reason: new RegExp(`unknown key "${escapeRe(key)}".*a near-miss of`) })
+  }
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 2', '[Defaults]', 'parallel_ceiling = 1'])
+  refused(home, { line: 2, reason: /unknown top-level key "Defaults".*a near-miss of "defaults"/ })
+})
+
+test('K6 a near-miss within OSA distance 2 is refused; a key three edits away is ignored', (t) => {
+  for (const key of ['paralel_ceiling', 'parallel_cieling', 'max_iteratoins', 'max_review_round', 'verify_slot']) {
+    const home = tmpHome(t)
+    writeSettings(home, ['schema = 2', '[defaults]', `${key} = 1`])
+    refused(home, { line: 3, reason: new RegExp(`unknown key "${key}".*a near-miss of`) })
+  }
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 2', '[defaults]', 'max_iter = 1'])
+  assert.deepEqual(resolves(home).ignored, ['defaults.max_iter'])
+})
+
+test('K7 a known key the file is too old for is refused with the remedy naming the schema line (patched)', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['[defaults]', 'parallel_ceiling = 2'])
+  const patch = 'm.SCHEMA = 2; m.KEY_SCHEMA[("rollout", "parallel_ceiling")] = 2'
+  const r = inProcess(home, patch)
+  assert.equal(r.status, 2, r.err)
+  assert.equal(r.err, `rollout-settings: ${settingsPath(home)}:2: rollout.parallel_ceiling is a schema-2 key but the file says schema = 1: ` +
+    "raise the file's top-level `schema` line to 2 in the same edit\n")
+  writeSettings(home, ['schema = 2', '[defaults]', 'parallel_ceiling = 2'])
+  const ok2 = inProcess(home, patch)
+  assert.equal(ok2.status, 0, ok2.err)
+  assert.deepEqual(ok2.out.schema, { file: 2, engine: 2 })
+  assert.equal(ok2.out.settings.parallel_ceiling.value, 2)
+})
+
+test('K8 no two registered keys at one scope are near-misses of each other', () => {
+  const r = spawnSync('python3', ['-B', '-c', `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+bad = []
+for scope in sorted({s for s, _ in m.KEY_SCHEMA}):
+    keys = sorted(k for s, k in m.KEY_SCHEMA if s == scope)
+    for k in keys:
+        hit = m.near_miss(k, [x for x in keys if x != k])
+        if hit:
+            bad.append([scope, k, hit])
+print(json.dumps(bad))`, SCRIPT], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), [], 'a registered key that is a near-miss of another would be refused as its typo')
+})
+
+test('K9 the JSON carries schema {file, engine} and ignored, in process too', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 3', '[defaults]', 'later_key = 1'])
+  const out = resolves(home)
+  assert.deepEqual(Object.keys(out), OUT_KEYS)
+  assert.deepEqual([out.schema, out.ignored], [{ file: 3, engine: 1 }, ['defaults.later_key']])
+  const inp = resolvedInProcess(home)
+  assert.deepEqual([inp.schema, inp.ignored], [{ file: 3, engine: 1 }, ['defaults.later_key']])
+})
+
+// K10's failure message is the add-a-key recipe (rollout-settings.py's header), the writer rule included.
+const RECIPE = 'adding a key: bump SCHEMA; register the key in KEY_SCHEMA at the new number; keep it no near-miss of any key ' +
+  "registered at its scope (K8); and any writer adding it to a file whose schema is lower raises the file's top-level " +
+  '`schema` line in the same edit (tune.py does: raise_schema(), KT1; a hand edit must)'
+const SCHEMA_1 = [
+  ...['defaults', 'guardrails', 'notify', 'repo', 'schema'].map((k) => `top.${k}`),
+  ...SETTING_KEYS.map((k) => `rollout.${k}`),
+  ...GUARDRAIL_KEYS.map((k) => `guardrails.${k}`),
+  ...NOTIFY_KEYS.map((k) => `notify.${k}`),
+].sort()
+
+test('K10 the schema-1 key set is frozen, and SCHEMA is the highest registered schema', () => {
+  const r = spawnSync('python3', ['-B', '-c', `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps({"one": sorted("%s.%s" % k for k, n in m.KEY_SCHEMA.items() if n == 1), "schema": m.SCHEMA,
+                  "max": max(m.KEY_SCHEMA.values())}))`, SCRIPT], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
+  assert.equal(r.status, 0, r.stderr)
+  const got = JSON.parse(r.stdout)
+  assert.deepEqual(got.one, SCHEMA_1, RECIPE)
+  assert.equal(got.schema, got.max, `SCHEMA must equal the highest KEY_SCHEMA number: ${RECIPE}`)
+  const header = fs.readFileSync(SCRIPT, 'utf8').replace(/\s+/g, ' ')
+  for (const part of ['bump SCHEMA', 'register the key in KEY_SCHEMA at the new number', 'no near-miss',
+    "raises the file's `schema` line to that number in the same edit: tune.py does it", 'and so must a hand edit']) {
+    assert.ok(header.includes(part), `rollout-settings.py's header recipe names: ${part}`)
+  }
 })
