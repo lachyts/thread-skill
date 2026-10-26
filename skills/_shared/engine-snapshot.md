@@ -75,8 +75,8 @@ A rollout moves onto a newer snapshot only at its Reinstate, when `resolve` prin
 
 - **parallel:** a hard pause (`paused:` with no `paused_for:`, no `superseded_by:`, status neither done nor dropped),
   then `/thread:execute`;
-- **serial:** the first Leg begun after a Leg whose close was `stopped` (legs.md § Close maps "pause the rollout" and
-  "stop the chain" to it); a halted, stuck, lost or handed-off Leg moves nothing.
+- **serial:** the first Leg begun after a Leg whose close was `stopped` (`skills/execute/legs.md` § Close maps "pause
+  the rollout" and "stop the chain" to it); a halted, stuck, lost or handed-off Leg moves nothing.
 
 Execute § 1.5 then runs `cut`, the new snapshot's `adopt` and `resolve` again, once per invocation. A sign-off pause
 never moves: `paused_for: sign-off` (ADR 0034) is the engine's own pause, not Lachy's moment, so `move.due` is false
@@ -87,8 +87,8 @@ rollout: no launch, heartbeat, cold resume, Stage re-send or repair hand-off, an
 
 ## Retirement
 
-`retire` runs after the completion ceremony's vault commit (execute § 4.5 step 5, legs.md § Complete step 4, both
-templates' step 6) and, best-effort, inside every `cut`. It keeps, under the snapshots home's lock:
+`retire` runs after the completion ceremony's vault commit (execute § 4.5 step 5, `skills/execute/legs.md` § Complete
+step 4, both templates' step 6) and, best-effort, inside every `cut`. It keeps, under the snapshots home's lock:
 
 - its own root, and a snapshot a cut just made;
 - a snapshot any live note names (outside `Archive/`), a hard-paused one or one past its last merge included;

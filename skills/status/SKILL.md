@@ -28,7 +28,7 @@ notes lack it. Either read of the settings file runs land.sh's `--origin-slug` r
 `git remote get-url origin` in the Project root, when the file holds a repo table: no network. It also runs
 execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*). On a
 `shape: serial` note its one read is `leg.py status` (§ 5): the note's `## Leg log`, its Queue and its task notes,
-read with no lock, no network and no `gh` or `git` call. § 1's `engine-snapshot.py resolve` reads the note's stamps and makes read-only `git rev-parse`, `status` and `rev-list` calls in its Engine snapshot and the Primary checkout (ADR 0043). Writes nothing. Obsidian + GitHub read access only.
+read with no lock, no network and no `gh` or `git` call. § 1's `engine-snapshot.py resolve` reads the note's stamps and makes read-only git calls (rev-parse, status, rev-list) in its Engine snapshot and the Primary checkout (ADR 0043). Writes nothing. Obsidian + GitHub read access only.
 
 ## Invocation forms
 
