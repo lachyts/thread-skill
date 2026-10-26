@@ -53,13 +53,26 @@ close-out) runs from that rollout's own `resolve` root: the Primary for an unsta
 
 ## The refusal rule
 
-The guarded scripts (`reconcile-rollout.py`'s `--rollout` verbs but `status` and `fold-journals`, `git-env-canary.py`,
-`step-boundary.py begin` and `end`, `leg.py` but `status`, `close-score.py`, `lead-integrate.py prepare` and
-`set-aside`, and `merge-task.sh` through `guard-pr`) refuse a wrong root: exit 2, nothing written, and one stderr line
-starting `engine-snapshot:` that names the root to re-run from. An `engine-snapshot:` line, whatever its exit code,
-means a wrong root, never the script's own failure: re-run the same command once from the root it names. An
-unstamped note, and an archived note whose snapshot is gone, pass from any root; a live note whose snapshot is gone,
-moved or edited refuses with the reason and the remedy.
+The guarded scripts refuse a wrong root: exit 2, nothing written, and one stderr line starting `engine-snapshot:` that
+names the root to re-run from. They are:
+
+- `reconcile-rollout.py`, every verb but `status` and `fold-journals`: it asks about the note `--rollout` (carry:
+  `--from`) names, and the rollout each `--tasks` slug's note (and, for `reconcile`, each result row's) names in its
+  `rollout:`, so a task-keyed verb with `--rollout` left off (`reconcile`, `hand-back`, `mark-started`,
+  `mark-integrating`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`, `defer`, `approve-gates`) is
+  guarded too;
+- `git-env-canary.py`, `step-boundary.py begin` and `end`, `leg.py` but `status`, `close-score.py`,
+  `lead-integrate.py prepare` and `set-aside`, and `merge-task.sh` through `guard-pr`.
+
+The exemptions run from any root: `reconcile-rollout.py status` writes nothing (status and the estate scan read every
+rollout with it); `fold-journals` never reads the note and writes only call-journal lines to the Run record,
+cross-version state (below); `step-boundary.py stands`, `leg.py status`, and `lead-integrate.py inputs` and `plan`
+only read; and `lead-integrate.py verify`, `push` and `undo` follow a guarded `prepare` in one flow.
+
+An `engine-snapshot:` line, whatever its exit code, means a wrong root, never the script's own failure: re-run the
+same command once from the root it names. An unstamped note, an archived note whose snapshot is gone, and a task
+note that names no rollout pass from any root; a live note whose snapshot is gone, moved or edited refuses with the
+reason and the remedy.
 
 ## Schedule's cut
 

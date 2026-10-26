@@ -829,12 +829,18 @@ three levels down and a run-end-shaped line is indented, so feedback text can ne
 open or close a run (the sha stays over the content as given). See Note.append_run for the rules; nothing
 already written is ever deleted.
 
-The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb that takes --rollout (carry: its
---from), but `status` and `fold-journals` (cross-version readers), first asks engine-snapshot.py's guard(), loaded
-from this tree: when the note's `engine_snapshot:` names another usable snapshot than this plugin root, or a live
-note's snapshot is unusable, it prints the guard's `engine-snapshot: ` line on stderr, writes nothing and exits 2.
-Re-run the same command from the root the line names. An unstamped note, and an archived one whose snapshot is gone,
-pass from any root.
+The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb but `status` and `fold-journals`
+first asks engine-snapshot.py, loaded from this tree, about each rollout the call acts on: guard() on the note its
+--rollout (carry: its --from) names, and guard_task() on each --tasks slug's note and, for `reconcile`, each result
+row's task note (the rollout its `rollout:` names), so a task-keyed verb run with --rollout left off (hand-back,
+mark-started, mark-integrating, mark-done, log-integration, bind-run, free-lane, hold, defer, approve-gates,
+reconcile) is guarded too. When one names another usable snapshot than this plugin root, or a live note's snapshot is
+unusable, it prints the guard's `engine-snapshot: ` line on stderr, writes nothing and exits 2. Re-run the same
+command from the root the line names. An unstamped note, an archived one whose snapshot is gone, and a task note
+that names no rollout (or one not found), pass from any root. The two exemptions run from any root: `status` writes
+nothing (/thread:status and the estate scan read every rollout with it), and `fold-journals` never reads the note
+and writes only call-journal lines to the Run record, cross-version state (engine-snapshot.md § Cross-version
+state) that reflect folds across rollouts from its own root.
 """
 
 import argparse
@@ -2548,7 +2554,9 @@ def _legacy_climb(task) -> str:
 
 
 def cmd_reconcile(args) -> int:
-    raw = sys.stdin.read() if args.result == "-" else Path(os.path.expanduser(args.result)).read_text()
+    raw = getattr(args, "_result_raw", None)  # read once by the Engine snapshot guard (_guarded_notes)
+    if raw is None:
+        raw = sys.stdin.read() if args.result == "-" else Path(os.path.expanduser(args.result)).read_text()
     data = json.loads(raw)
     tasks = data.get("tasks", [])
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
@@ -7428,7 +7436,8 @@ def main() -> int:
                          "3 some left, 1 an error (ADR 0034)")
     ag.add_argument("--rollout", default=None,
                     help="with --standing (required there): the rollout note, whose frontmatter and Project root "
-                         "resolve spend_approval_usd; the task's rollout: must name it")
+                         "resolve spend_approval_usd; the task's rollout: must name it. Without --standing only the "
+                         "Engine snapshot guard reads it (orient-all's Sign-off passes it)")
     ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ag.add_argument("--date", default=None, help="sign-off date stamped on each gate (default: today)")
     ag.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp of a stop at Integration)")
@@ -7454,15 +7463,46 @@ def main() -> int:
 
 # engine-snapshot.py, this tree's own copy (ADR 0043): loaded only for the guard, as _ladder() loads ladder.py.
 ENGINE_SNAPSHOT_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "engine-snapshot.py"
-GUARD_EXEMPT = ("status", "fold-journals")   # cross-version readers: any root reads them
+GUARD_SCRIPT = "skills/execute/scripts/reconcile-rollout.py"
+# The two verbs any root runs (the module docstring's Engine snapshot guard says why): status writes nothing, and
+# fold-journals never reads the note and writes only the Run record, a cross-version store.
+GUARD_EXEMPT = ("status", "fold-journals")
+
+
+def _guarded_notes(args):
+    """(rollout notes, task notes) the guard asks about for this call: the note --rollout (carry: --from) names; each
+    --tasks slug's note; and, for reconcile, each result row's task note. reconcile's result is read here, once, and
+    kept on args._result_raw for cmd_reconcile (stdin cannot be read twice); a result that cannot be read or parsed
+    adds no row, and cmd_reconcile then fails on it as before."""
+    rollout = getattr(args, "from_", None) if args.cmd == "carry" else getattr(args, "rollout", None)
+    rollouts = [rollout] if rollout else []
+    tasks_dir = Path(os.path.expanduser(getattr(args, "tasks_dir", None) or str(DEFAULT_TASKS_DIR)))
+    raw_tasks = getattr(args, "tasks", None)
+    slugs = [s.strip() for s in raw_tasks.split(",") if s.strip()] if isinstance(raw_tasks, str) else []
+    tasks = [tasks_dir / f"{slug}.md" for slug in slugs]
+    if args.cmd == "reconcile":
+        try:
+            args._result_raw = (sys.stdin.read() if args.result == "-"
+                                else Path(os.path.expanduser(args.result)).read_text())
+        except (OSError, ValueError):
+            return rollouts, tasks
+        try:
+            rows = json.loads(args._result_raw).get("tasks") or []
+            tasks += [resolve_task_path(t, tasks_dir) for t in rows
+                      if isinstance(t, dict) and (t.get("taskPath") or t.get("slug"))]
+        except Exception:  # noqa: BLE001 — an unreadable result guards nothing; cmd_reconcile reports it
+            pass
+    return rollouts, tasks
 
 
 def _engine_guard(args):
-    """The guard's refusal line for this call's rollout (the module docstring's Engine snapshot guard), else None."""
+    """The guard's refusal line for this call (the module docstring's Engine snapshot guard), else None: guard() on
+    its rollout note, then guard_task() on each task note _guarded_notes names (the rollout its `rollout:` names), so
+    a task-keyed verb run without --rollout is guarded too."""
     if args.cmd in GUARD_EXEMPT:
         return None
-    note = getattr(args, "from_", None) if args.cmd == "carry" else getattr(args, "rollout", None)
-    if not note:
+    rollouts, tasks = _guarded_notes(args)
+    if not rollouts and not tasks:
         return None
     try:
         sys.dont_write_bytecode = True
@@ -7471,7 +7511,16 @@ def _engine_guard(args):
         spec.loader.exec_module(mod)
     except Exception:  # an engine-snapshot.py that will not load guards nothing (only positive evidence refuses)
         return None
-    return mod.guard(note, ENGINE_SNAPSHOT_PY.parent.parent.parent.parent, "skills/execute/scripts/reconcile-rollout.py")
+    root = ENGINE_SNAPSHOT_PY.parent.parent.parent.parent
+    for note in rollouts:
+        line = mod.guard(note, root, GUARD_SCRIPT)
+        if line:
+            return line
+    for task in tasks:
+        line = mod.guard_task(task, root, GUARD_SCRIPT)
+        if line:
+            return line
+    return None
 
 
 if __name__ == "__main__":

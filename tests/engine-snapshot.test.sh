@@ -11,7 +11,8 @@
 #          unstamped root (the Primary, or a cache copy's own realpath); an archived note whose snapshot is gone
 #   M1     the move rule: a hard pause moves, a sign-off pause never does (and cuts nothing), a serial chain moves only
 #          after a `stopped` close, until its next Leg begins
-#   G1-G3b the guards: every wrong-root CLI refuses with `engine-snapshot:` and writes nothing; the exemptions;
+#   G1-G3b the guards: every wrong-root CLI refuses with `engine-snapshot:` and writes nothing (a task-keyed
+#          reconcile-rollout verb with --rollout left off, and reconcile's stdin rows, included); the exemptions;
 #          file-followup after Complete, and the retire race closed by the archived grace and close's re-resolve
 #   K1     rollouts.toml's schema: a newer file's unknown key is ignored by an older reader, a typo still refused
 #   T1-T2  retire: the keep-list, the archived grace, an unreadable Archive, no Archive, no git Primary
@@ -390,6 +391,16 @@ keep() { local n; for n in "$@"; do cp "$TASKS/$n.md" "$T/before.$n"; done; }
 keep g1 gt1 sg1
 py "$P" skills/execute/scripts/reconcile-rollout.py clear-pause --rollout "$TASKS/g1.md" --tasks-dir "$TASKS"; refused "reconcile-rollout clear-pause" g1
 py "$P" skills/execute/scripts/reconcile-rollout.py carry --from "$TASKS/g1.md" --dry-run --tasks-dir "$TASKS"; refused "reconcile-rollout carry --from" g1
+# the task-keyed verbs with --rollout left off: the guard asks about each --tasks slug's rollout (and reconcile's rows')
+evsum() { find "$THREAD_EVENTS_DIR" -type f -exec cksum {} + 2>/dev/null | sort; }
+ev0=$(evsum)
+py "$P" skills/execute/scripts/reconcile-rollout.py hand-back --tasks gt1 --tasks-dir "$TASKS"; refused "reconcile-rollout hand-back --tasks (no --rollout)" gt1 g1
+py "$P" skills/execute/scripts/reconcile-rollout.py approve-gates --tasks gt1 --tasks-dir "$TASKS"; refused "reconcile-rollout approve-gates --tasks (no --rollout)" gt1 g1
+py "$P" skills/execute/scripts/reconcile-rollout.py mark-done --tasks gt1 --tasks-dir "$TASKS"; refused "reconcile-rollout mark-done --tasks (no --rollout)" gt1 g1
+ROW='{"tasks": [{"slug": "gt1", "status": "review", "prUrl": "https://github.com/o/r/pull/7"}]}'
+printf '%s' "$ROW" | python3 "$P/skills/execute/scripts/reconcile-rollout.py" reconcile --result - --tasks-dir "$TASKS" > "$T/out" 2> "$T/err"; rc=$?
+err=$(cat "$T/err"); refused "reconcile-rollout reconcile --result - (its row's task)" gt1 g1
+ok "$(evsum)" "$ev0" "G1: … none of them wrote the Run record"
 py "$P" skills/execute/scripts/git-env-canary.py check-all --rollout "$TASKS/g1.md" --tasks-dir "$TASKS"; refused "git-env-canary check-all" g1
 ok "$([ -e "$T/git-env/g1" ] || [ -e "$T/git-env/g1.lock" ] && echo made || echo none)" none "G1: … the canary made no state"
 echo "a room stop" | python3 "$P/skills/execute/scripts/step-boundary.py" begin --rollout "$TASKS/g1.md" > "$T/out" 2> "$T/err"; rc=$?
@@ -413,8 +424,18 @@ py "$B" skills/execute/scripts/leg.py next --rollout "$TASKS/sg1.md" --tasks-dir
 py "$B" skills/reflect/scripts/close-score.py --rollout "$TASKS/g1.md" --close completion; hasnt "$err" "engine-snapshot:" "G1: from B: close-score passes"
 py "$B" skills/execute/scripts/lead-integrate.py prepare --repo "$T/target" --slug gt1 --default master --note "$TASKS/gt1.md"
 hasnt "$err" "engine-snapshot:" "G1: from B: lead-integrate prepare passes"
-echo "own reason" | python3 "$B/skills/execute/scripts/lead-integrate.py" set-aside --note "$TASKS/gt1.md" --kind own > "$T/out" 2> "$T/err"
+echo "own reason" | python3 "$B/skills/execute/scripts/lead-integrate.py" set-aside --note "$TASKS/gt1.md" --kind own > "$T/setaside.row" 2> "$T/err"
 hasnt "$(cat "$T/err")" "engine-snapshot:" "G1: from B: set-aside passes"
+py "$B" skills/execute/scripts/reconcile-rollout.py approve-gates --tasks gt1 --tasks-dir "$TASKS"
+ok "$rc" 1 "G1: from B: approve-gates --tasks gt1 passes the guard to its own status check → 1"
+hasnt "$err" "engine-snapshot:" "G1: … no engine-snapshot: line"; has "$err" "refusing to approve gates" "G1: … its own refusal"
+# set-aside's row ({rolloutSlug, tasks}), reconciled from B through stdin (the guard reads it once), then handed back
+python3 "$B/skills/execute/scripts/reconcile-rollout.py" reconcile --result - --tasks-dir "$TASKS" --now "$NOW" < "$T/setaside.row" > "$T/out" 2> "$T/err"; rc=$?
+ok "$rc|$(fmv "$TASKS/gt1.md" status)" "0|blocked" "G1: from B: reconcile --result - passes the guard and writes the row it read once from stdin"
+hasnt "$(cat "$T/err")" "engine-snapshot:" "G1: … no engine-snapshot: line"
+py "$B" skills/execute/scripts/reconcile-rollout.py hand-back --tasks gt1 --tasks-dir "$TASKS" --now "$NOW"
+ok "$rc" 0 "G1: from B: hand-back --tasks gt1 passes the guard and hands it back → 0"
+hasnt "$err" "engine-snapshot:" "G1: … no engine-snapshot: line"
 out=$(bash "$B/skills/execute/scripts/merge-task.sh" "$T/target" https://github.com/o/r/pull/7 "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" 2>&1)
 hasnt "$out" "engine-snapshot:" "G1: from B: merge-task passes the guard"; ok "$([ -s "$T/gh.log" ] && echo called)" called "G1: … and reaches gh"
 echo "a room stop" | python3 "$B/skills/execute/scripts/step-boundary.py" begin --rollout "$TASKS/g1.md" > "$T/out" 2> "$T/err"; rc=$?
