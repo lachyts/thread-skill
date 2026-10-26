@@ -50,6 +50,8 @@ re-send or a repair hand-off is no § 1 entry for a lead already in hand: it kee
 
 A command on another rollout (schedule's nine prior-acting commands on a superseded rollout, a lineage read, a
 close-out) runs from that rollout's own `resolve` root: the Primary for an unstamped prior, never this run's snapshot.
+So does a write to a rollout from a session that runs none: orient-all's Sign-off (§ 4) resolves the task's
+`rollout:` and runs `approve-gates --tasks <slug> --rollout <its note>` from the `root` that prints.
 
 ## The refusal rule
 

@@ -22,9 +22,12 @@ itself when a router or `sed` reads it instead of the Skill tool rendering it) r
   - `estate-dispatch.py record`, each answer into its task note;
   - `estate-dispatch.py log`, the grades into the Grade log (never on a dry run);
   - `estate-rank.py snooze`, `unpark` and `kill`, the Unpark offer's answers;
-  - `reconcile-rollout.py approve-gates --tasks`, for a gate Lachy signs in this pass;
+  - `reconcile-rollout.py approve-gates --tasks`, for a gate Lachy signs in this pass, run from that task's rollout's
+    engine root (§ 4's Sign-off);
   - its schedule forks (§ 6), each one `/thread:schedule` run.
-- It runs no git and writes no handoff doc. A started session's brief is its prompt plus the note it names
+- It runs no git of its own and writes no handoff doc: a Sign-off's `engine-snapshot.py resolve` (§ 4) reads the
+  rollout note's stamps and makes read-only git calls (rev-parse, status, rev-list) in its Engine snapshot and the
+  Primary checkout (ADR 0043). A started session's brief is its prompt plus the note it names
   (`skills/execute/legs.md` § Hand over).
 - It is never the lead of any rollout, so its questions block only its own session. The rule that a lead never calls
   the question tool while anything it launched is live (execute § 6.5) binds the leads it starts, not this session.
@@ -111,9 +114,16 @@ Act on each answer as it lands:
   `--fork` exactly when the decision carries one. `decision.question` is the bare question: the index text opens
   with `[[<slug>]] `, which `record` cuts too, so the note never links to itself. A refusal (the task went in flight
   since the scan, say) is reported in § 8 with the answer, unrecorded.
-- **Sign-off**: `Sign off` runs
-  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <slug>`; a non-zero
-  exit is reported. `Not now` does nothing.
+- **Sign-off**: `Sign off` writes to a rollout this pass does not run, so it runs from that rollout's own engine
+  root, never this session's (ADR 0043; `${CLAUDE_PLUGIN_ROOT}/skills/_shared/engine-snapshot.md` § Another rollout's
+  commands): first
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py resolve --rollout <the index entry's rollout>`,
+  then, with `<root>` and `<rollout-note>` the `root` and `note` it prints,
+  `python3 <root>/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <slug> --rollout <rollout-note>`.
+  A non-zero resolve exit (3: that rollout's snapshot is gone, moved or edited) signs nothing: its stderr line, which
+  carries the remedy, is reported in § 8 with the answer, unsigned. A non-zero approve-gates exit is reported, except
+  that one whose stderr line starts `engine-snapshot:` (a wrong root) is first re-run once from the root it names.
+  `Not now` does nothing.
 - **Unpark offer**:
   - unpark: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py unpark <note>`;
   - snooze: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py snooze <note> --ready <snoozeWrite.snoozed_ready>`;
@@ -225,7 +235,7 @@ One message of statements, no question:
 
 - the grades logged: § 2 step 7's `logged`, `exists` or `completed` line, its skipped tasks as a caveat;
 - the decisions recorded, and those left for the next pass (`later[]`, `skipped[]`, a Grill stopped part-way);
-- the sign-offs, the bounced ones marked;
+- the sign-offs, the bounced ones marked, and any left unsigned with the line that refused it (§ 4);
 - the unparks, snoozes and kills;
 - each schedule's note, or its stop line;
 - the fit disagreements: the task, the grader's shape, schedule's outcome;
