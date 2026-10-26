@@ -71,8 +71,10 @@ integrates each approved task and merges it:
    code is written (skippable per rollout; a plan's declared gated inputs
    pause the task for sign-off, never the rollout; a spend gate within the
    standing approval passes — ADR 0008, ADR 0034).
-2. **Ralph-style verifier retry** — the implementer re-runs the rollout's
-   verifier and self-corrects until green or the iteration budget is spent.
+2. **Ralph-style verifier retry** — the implementer re-runs its touched tests
+   and self-corrects until they are green, then runs the rollout's verifier
+   once, as its last check before the PR (a Checkpoint, estate ADR 0009), or
+   stops when the iteration budget is spent.
 3. **Master review-and-revise** — a master-side reviewer accepts or sends the
    task back with feedback, up to `max_review_rounds`.
 

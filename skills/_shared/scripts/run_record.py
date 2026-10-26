@@ -63,9 +63,13 @@ still serves as a baseline, its missing keys read as no baseline.
   reverts), never a baseline (score.py's load_tunings reads only a string repo) and never a move of a key.
 
 grades.jsonl holds the Grade log (p25-4, ADR 0041; CONTEXT.md **Grade log**): one `grade` line per graded task per
-estate pass, every line of a pass sharing its `pass` id, its `digest` and its ts. skills/_shared/scripts/estate-dispatch.py
-`log` is its one writer (orient-all § 2 step 7, never on a dry run) and skills/reflect/scripts/grades.py its one reader
-(the weekly reading's grade accuracy, joined to outcomes at read time). A grade line carries no rollout, and a task:
+estate pass or schedule Pre-flight (ADR 0047), every line of a pass sharing its `pass` id, its `digest` and its ts.
+skills/_shared/scripts/estate-dispatch.py `log` is its one writer (orient-all § 2 step 7, never on a dry run, and
+schedule § 1.5 on every run that grades, all but an orient-all fork, whose estate pass logged them) and
+skills/reflect/scripts/grades.py its one reader (the weekly reading's grade accuracy, joined to outcomes at read
+time). A schedule run that regrades a task the estate pass graded ends that estate episode as `regraded`, normally
+undispatched and so outside the rate; a Pre-flight grade's `held` counts holds on dependencies outside the rollout
+too. A grade line carries no rollout, and a task:
 a graded task whose name normalise_slug refuses (a vault note named with spaces or capitals) has no line, `log` skips
 it and reports it.
 
