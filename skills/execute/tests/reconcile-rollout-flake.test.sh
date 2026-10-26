@@ -9,9 +9,11 @@
 #   R3  a second task, the same test: a second line on the same note, priority high, the twice section; one note.
 #   R4  that follow-up done: the next Flake files a -2 note; that one archived: a -3.
 #   R5  a timeout file: one suite-timeout event, no note.
-#   R6  a red or green file: nothing; a missing or unreadable file: ERROR, exit 1, nothing written.
+#   R6  a red or green file: nothing; no file (verify wrote none: noslot, a failed env_bootstrap): `nothing to
+#       record`, exit 0; a malformed or unreadable file: ERROR, exit 1, nothing written.
 #   R7  reconcile: an engine row's flakes (site task), the same row again (no-op), an integrate row (site integrate),
-#       flakes not a list (ERROR, exit 1, nothing recorded), a bad entry (WARNING, skipped).
+#       flakes not a list (ERROR, exit 1, nothing recorded), a bad entry (WARNING, skipped), an integrate row
+#       reconciled with --no-verdict (none recorded, one line says why), whatever its outcome.
 #   R8  --dry-run writes nothing, through either verb.
 #   R9  a follow-up another process created meanwhile is appended to, never overwritten.
 #   R10 a test id holding ]], backticks or | is written inside a code span.
@@ -149,11 +151,24 @@ rv proj-p29-1-a integration "$D/r.json"; r1=$rc
 rv proj-p29-1-a race "$D/g.json"; r2=$rc
 ok "$r1|$r2|$(nev flake)|$(nev suite-timeout)|$(flakenotes)" "0|0|0|0|0" "R6: a red or green file records nothing"
 rv proj-p29-1-a integration "$D/missing.json"
-ok "$rc|$(flakenotes)" "1|0" "R6: a missing file → exit 1, nothing written"
-has "$err" "ERROR: record-verify:" "R6: … one ERROR line"
+ok "$rc|$err|$(flakenotes)|$(nev flake)|$(nev suite-timeout)" "0||0|0|0" "R6: no file (noslot, a failed env_bootstrap: verify wrote none) → exit 0, quiet, nothing written"
+has "$out" "proj-p29-1-a: integration verify wrote no missing.json" "R6: … naming the file it found absent"
+has "$out" "nothing to record" "R6: … and saying there is nothing to record"
+rv proj-p29-1-a race "$D/no-such-dir/race-x.flake.json"
+ok "$rc|$err" "0|" "R6: … a missing integration dir too (verify never got going)"
 printf 'not json' > "$D/bad.json"
 rv proj-p29-1-a integration "$D/bad.json"
-ok "$rc" 1 "R6: an unreadable file → exit 1"
+ok "$rc|$(flakenotes)" "1|0" "R6: a malformed file → exit 1, nothing written"
+has "$err" "ERROR: record-verify:" "R6: … one ERROR line"
+printf '{"v": 2, "verdict": "flake"}' > "$D/v2.json"
+rv proj-p29-1-a integration "$D/v2.json"
+ok "$rc" 1 "R6: a record that is not v 1 → exit 1"
+mkdir -p "$D/dir.json"
+rv proj-p29-1-a integration "$D/dir.json"
+ok "$rc" 1 "R6: an unreadable file (a directory) → exit 1"
+ln -s "$D/gone.json" "$D/dangling.json"
+rv proj-p29-1-a integration "$D/dangling.json"
+ok "$rc" 1 "R6: a dangling symlink is unreadable, never absent → exit 1"
 rv proj-p29-1-a lead "$D/g.json"
 ok "$rc" 2 "R6: a --site other than integration or race → usage, exit 2"
 
@@ -175,6 +190,20 @@ NROW='{"rolloutSlug": "'"$RO_SLUG"'", "tasks": [{"slug": "proj-p29-3-c", "scope"
 recon "$NROW"
 ok "$rc|$(nev flake)" "1|2" "R7: flakes not a list → exit 1, nothing recorded"
 has "$err" "ERROR: proj-p29-3-c: flakes is not a list" "R7: … one ERROR line"
+# --no-verdict (ADR 0053): the integrate call's canary check was non-zero, so a red its integrator saw may be the changed
+# shared checkout's and its re-runs prove nothing: none of the row's flakes is recorded, whatever its outcome.
+VTEST='tests/test_v.py::test_void'
+for outcome in integrated rejected; do
+  VROW='{"rolloutSlug": "'"$RO_SLUG"'", "tasks": [{"slug": "proj-p29-3-c", "scope": "cross-cutting", "status": "review", "prUrl": "https://github.com/o/r/pull/7", "reviewRoundsUsed": 1, "integration": {"outcome": "'"$outcome"'", "path": "integrator"}, "flakes": [{"test": "'"$VTEST"'", "sha": "'"$SHA1"'"}, {"test": "'"$TEST_ID"'", "sha": "'"$SHA1"'"}]}]}'
+  setfm "$T/proj-p29-3-c.md" status review
+  recon "$VROW" --no-verdict
+  ok "$rc|$err|$(nev flake)|$(flakenotes)" "0||2|1" "R7: --no-verdict, an integrate row ($outcome) → exit 0, no flake event, no follow-up"
+  has "$out" "proj-p29-3-c: 2 Flakes not recorded: --no-verdict" "R7: … one line says why ($outcome)"
+  hasnt "$out" "flake: \`" "R7: … and no flake: line ($outcome)"
+done
+ok "$(loglines "$T/$FU.md" | wc -l | tr -d ' ')" 2 "R7: … the existing follow-up gains no line"
+recon "$VROW"
+ok "$rc|$(nev flake)|$(flakenotes)" "0|4|2" "R7: the same row without --no-verdict records both its Flakes (the void is the flag's alone)"
 
 # ---- R8 ------------------------------------------------------------------------------------------------------
 scen r8

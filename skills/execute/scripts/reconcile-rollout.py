@@ -19,7 +19,8 @@ Subcommands:
               (see the Status mapping below). --no-verdict (the integrate call's canary check exited 4, a trip
               inside its window acked before the check, ADR 0053): an `integrated` row's line reads `void`
               instead, so it never backs prepare's case (ii), and the lane frees (`lane-freed release=halt`);
-              the task waits for Integration again. A row with any other outcome is reconciled as usual.
+              the task waits for Integration again. A row with any other outcome is reconciled as usual, except
+              that no integrate row's `flakes` are recorded (one line says so): that window's runs give no verdict.
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start and restart
               within the parallel ceiling, every held task with its reason, the running, awaiting-Integration,
@@ -411,10 +412,12 @@ Subcommands:
               _record_flakes (below) with --site and the file's sha. A `timeout` ({run: first | named | confirm,
               seconds}): one `suite-timeout` event, logged as load, never a Flake. A green or another red records
               nothing. Then `recorded: <stamp>` is written into the file (tmp + rename), so a second call prints
-              `[no-change]` and records nothing. Exit 1, one ERROR line, the file unstamped: a missing or unreadable
-              file (not v 1 with a verdict green | flake | red), a task note not found or whose `rollout:` is not
-              --rollout, a follow-up that could not be written. --dry-run prints what it would record and writes
-              nothing, the file included. Not exempt from the Engine snapshot guard.
+              `[no-change]` and records nothing. No file at all (verify writes none when its verifier never ran:
+              `noslot`, a failed env_bootstrap): one `nothing to record` line, exit 0. Exit 1, one ERROR line, the
+              file unstamped: an unreadable or malformed file (not v 1 with a verdict green | flake | red), a task
+              note not found or whose `rollout:` is not --rollout, a follow-up that could not be written. --dry-run
+              prints what it would record and writes nothing, the file included. Not exempt from the Engine snapshot
+              guard.
 
   completion-verify  The completion verify (estate ADR 0009 d6, Chorus ADR 0107 d1, ADR 0052; execute § 4.5 step 5):
               a rollout whose note declares `completion_verifier: <cmd>` runs it once on merged origin/<default>
@@ -847,7 +850,9 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     fix` section; and one `flake` event per new line. A line already there writes nothing, so a
                     re-reconcile or a replayed row is a no-op. One `flake:` line per entry follows the row's line. A
                     malformed entry is a WARNING, skipped; `flakes` that is not a list is an ERROR (exit 1) and records
-                    none; absent or null records nothing (a lead-written row, a pre-p29-9 engine's). Nothing on
+                    none; absent or null records nothing (a lead-written row, a pre-p29-9 engine's). An integrate row
+                    reconciled with --no-verdict records none (a git-env trip inside its window voids its runs, Flakes
+                    included): one `<slug>: N Flake(s) not recorded: --no-verdict …` line instead. Nothing on
                     --dry-run but the lines.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
@@ -4755,14 +4760,19 @@ def _record_flakes(args, rollout, slug, note, flakes, site, tasks_dir, rollout_p
 
 def _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings):
     """reconcile's side (p29-9): an engine row's `flakes`, a task call's (site task) or an integrator's (site integrate,
-    a row with `integration`). Absent or null records nothing; a non-list is an error, nothing recorded."""
+    a row with `integration`). Absent or null records nothing; a non-list is an error, nothing recorded. An integrate
+    row reconciled with --no-verdict records none either, with one line saying why: a git-env trip fell inside the
+    call's window, so a red its integrator saw may be the changed shared checkout's, and its re-runs prove nothing
+    (the lead never runs record-verify after such a check either, execute § 4.5)."""
     flakes = task.get("flakes")
-    if flakes is None:
+    if flakes is None or flakes == []:
         return []
+    if getattr(args, "no_verdict", False) and task.get("integration") is not None:
+        n = len(flakes) if isinstance(flakes, list) else 1
+        return [f"{slug}: {n} Flake{'' if n == 1 else 's'} not recorded: --no-verdict (a git-env trip fell inside the "
+                "integrate call's window, ADR 0053), so its verifier runs give no verdict, Flakes included"]
     if not isinstance(flakes, list):
         errors.append(f"{slug}: flakes is not a list ({type(flakes).__name__}) — no Flake recorded")
-        return []
-    if not flakes:
         return []
     site = "integrate" if task.get("integration") is not None else "task"
     lines, w, e = _record_flakes(args, rollout, slug, note, flakes, site, tasks_dir)
@@ -6855,10 +6865,17 @@ def cmd_record_verify(args) -> int:
     only after its canary check exited 0: lead-integrate.py verify --diff-base's <out>.flake.json (--from). Verdict
     `flake`: each Flake logged and filed (_record_flakes, site --site). A timeout: one `suite-timeout` event (load,
     ADR 0051). Anything else records nothing. Then `recorded: <stamp>` is written into the file (tmp + rename), so a
-    second call is `[no-change]`. A missing or unreadable file, a task note not found or not of --rollout, or a
-    follow-up that cannot be written: one ERROR line, exit 1, the file not stamped. --dry-run writes nothing."""
+    second call is `[no-change]`. No file (a verify whose verifier never ran writes none): `nothing to record`, exit 0.
+    An unreadable or malformed file, a task note not found or not of --rollout, or a follow-up that cannot be written:
+    one ERROR line, exit 1, the file not stamped. --dry-run writes nothing."""
     src = Path(os.path.expanduser(args.from_))
     slug = args.tasks.strip()
+    if not src.exists() and not src.is_symlink():
+        # lead-integrate.py verify writes no Flake record when the verifier never ran (`noslot`, a failed
+        # env_bootstrap), so the lead's record-verify after such a verify has nothing to read.
+        print(f"{slug}: {args.site} verify wrote no {src.name} (the verifier never ran: noslot or a failed "
+              "env_bootstrap): nothing to record")
+        return 0
     try:
         rec = json.loads(src.read_text())
         if not isinstance(rec, dict) or rec.get("v") != 1 or rec.get("verdict") not in ("green", "flake", "red"):

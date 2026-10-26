@@ -531,7 +531,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Named re-run** — the Flake check's first step: only a red's failing tests,
   re-run alone by name on the same tree before the one confirming full run
   (ADR 0050). At the lead's Integration verify and RACE re-verify it is the
-  rollout's `named_rerun:` command, `{tests}` replaced by the tests; with no
+  rollout's `named_rerun:` command, `{tests}` replaced by the tests, which
+  schedule stamps from the project `CLAUDE.md`'s `Named re-run:` line; with no
   `named_rerun:` the lead's red stays red. An agent (an implementer, a
   reviser, an integrator) uses the repo's own test runner. It takes no verify
   slot of its own and never counts as an iteration. _Avoid_: retry, targeted

@@ -28,7 +28,8 @@
 #   C32 a red confirming run   C33 a touched test   C34 one touched, one not   C35 unnamed, unplaced, too many
 #   C36 timeouts (the first run, the confirming run, no harness time left)   C37 the RACE form   C38 no --named-rerun,
 #   no --diff-base, a green run, an unreadable diff   C39 refusals   C40 ids with spaces and quotes, paths outside
-#   the tree   C41 the SKILL.md verify line with and without named_rerun, under bash and zsh -f.
+#   the tree   C41 the SKILL.md verify line with and without named_rerun, under bash and zsh -f   C42 TERM during the
+#   named re-run or the confirming run, unslotted and slotted: rc 143, why `signal`, the child gone, the slot free.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0; the verify slots in a temp pool
 # (tests/lib/merge-task-env.sh exports THREAD_VERIFY_SLOTS_DIR).
 set -uo pipefail
@@ -1291,13 +1292,14 @@ python3 "$RR" mark-integrating --tasks "$SLUG" --tasks-dir "$V" >/dev/null
 prep
 ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')" "0|ii|verify" "C29b: mark-integrating, then prepare → 0, case (ii), route verify"
 
-# ======== C30–C41: the Flake check (ADR 0050, p29-9) =======================================================
+# ======== C30–C42: the Flake check (ADR 0050, p29-9) =======================================================
 # verify --diff-base REV [--named-rerun CMD]: a red first run whose failing tests are all named, placed in a test
 # file and outside `git diff --name-only REV HEAD` re-runs them by name, then confirms with one more verifier run on
 # the same tree: green is a Flake (rc 0, <out>.flake.json verdict flake), any other red is red. The fixture: a repo
 # whose base B holds tests/test_flaky.py, tests/test_touched.py, "tests/test sp.py" and src/x.py; the task commit T
 # changes src/x.py and tests/test_touched.py. v.sh is the verifier (run n prints v.<n>.out, sleeps v.<n>.sleep, exits
-# v.<n>.rc) and r.sh the named re-run (each call's argv to r.<n>.args, sleeps r.sleep, exits r.rc), both counting.
+# v.<n>.rc) and r.sh the named re-run (each call's argv to r.<n>.args, sleeps r.sleep, exits r.rc), both counting; a
+# sleep is their child, its pid in v.<n>.cpid or r.cpid.
 ffx() {
   echo "== $1"
   F="$tmp/$1"; mkdir -p "$F"; FR="$F/repo"
@@ -1310,12 +1312,14 @@ ffx() {
   mkdir -p "$F/bin"
   cat > "$F/bin/v.sh" <<'SH'
 d="$(dirname "$(dirname "$0")")"; n=$(( $(cat "$d/v.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/v.count"
-[ -f "$d/v.$n.out" ] && cat "$d/v.$n.out"; [ -f "$d/v.$n.sleep" ] && sleep "$(cat "$d/v.$n.sleep")"
+[ -f "$d/v.$n.out" ] && cat "$d/v.$n.out"
+[ -f "$d/v.$n.sleep" ] && { sleep "$(cat "$d/v.$n.sleep")" & echo $! > "$d/v.$n.cpid"; wait; }
 exit "$(cat "$d/v.$n.rc" 2>/dev/null || echo 0)"
 SH
   cat > "$F/bin/r.sh" <<'SH'
 d="$(dirname "$(dirname "$0")")"; n=$(( $(cat "$d/r.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/r.count"
-for a in "$@"; do printf '%s\n' "$a"; done > "$d/r.$n.args"; [ -f "$d/r.sleep" ] && sleep "$(cat "$d/r.sleep")"
+for a in "$@"; do printf '%s\n' "$a"; done > "$d/r.$n.args"
+[ -f "$d/r.sleep" ] && { sleep "$(cat "$d/r.sleep")" & echo $! > "$d/r.cpid"; wait; }
 exit "$(cat "$d/r.rc" 2>/dev/null || echo 0)"
 SH
   O="$F/out/v"; NR="bash $F/bin/r.sh {tests}"
@@ -1485,6 +1489,37 @@ for sh in "${shells[@]}"; do
   done
 done
 R=$R0
+
+# C42: a signal during the Flake check. TERM to verify while the named re-run (r.sh) sleeps, and while the confirming
+# run (v.sh's second call) sleeps, unslotted and slotted (--slots 1 --slot-wait 5): rc 143, flake.json red with why
+# `signal`, the sleeping child gone (verify kills the step's process group, through its guard when slotted), and the
+# verify slot free. Structural, as C17 is: the children sleep 3205 s+, so only verify's kill can end them.
+for arm in named confirm; do
+  for mode in unslotted slotted; do
+    ffx "c42-$arm-$mode"
+    red1 'FAILED tests/test_flaky.py::test_a'
+    if [ "$arm" = named ]; then echo "3205.$u" > "$F/r.sleep"; cp="$F/r.cpid"; else echo "3206.$u" > "$F/v.2.sleep"; cp="$F/v.2.cpid"; fi
+    SL=""; [ "$mode" = slotted ] && SL="--slots 1 --slot-wait 5"
+    python3 "$LI" verify --tree "$FR" --out "$O" --timeout 600 --verifier "bash $F/bin/v.sh" --diff-base "$FB" --named-rerun "$NR" $SL >/dev/null 2>&1 &
+    vp=$!
+    c42up() { test -s "$cp" || ! kill -0 "$vp"; }
+    within 300 c42up && test -s "$cp" && st=sleeping || st="not sleeping (verify ended, or 300 s passed)"
+    ok "$st" sleeping "C42 $arm $mode: the $arm run's child sleeps before the TERM"
+    if [ "$mode" = slotted ]; then
+      has "$(cat "$O.log")" "== verify slot 1 of 1 after" "C42 $arm $mode: … in the pool's only verify slot"
+      ok "$(vstate)" held "C42 $arm $mode: … held while it sleeps"
+    fi
+    kill -TERM "$vp" 2>/dev/null; wait "$vp"; vrc=$?
+    ok "$vrc|$(rcof)|$(fj 'd["verdict"]')|$(fj 'd["why"]')" "143|143|red|signal" "C42 $arm $mode: TERM mid-run → exit 143, rc 143, flake.json red, why signal"
+    ok "$(reaped "$(cat "$cp" 2>/dev/null)")" gone "C42 $arm $mode: … the sleeping child is gone"
+    has "$(cat "$O.log")" "stopped by signal 15; killed the process group (rc 143)" "C42 $arm $mode: … the log says so"
+    if [ "$arm" = named ]; then ok "$(cnt v)|$(cnt r)" "1|1" "C42 $arm $mode: … stopped in the named re-run, no confirming run"
+    else ok "$(cnt v)|$(cnt r)" "2|1" "C42 $arm $mode: … stopped in the confirming run"; fi
+    within 60 vfree && st=free || st="held after 60 s"
+    ok "$st" free "C42 $arm $mode: … and the verify slot is free"
+  done
+done
+ok "$(sleepers "sleep 320[56]\.$u")" 0 "C42: no Flake-check child survives"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"
