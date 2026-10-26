@@ -4579,7 +4579,6 @@ def _review_verdict_events(args, rollout, slug, task, prior):
 # re-verify, from lead-integrate.py verify --diff-base's <out>.flake.json).
 FLAKE_LOG_SECTION = "## Flake log"
 FLAKE_TWICE_SECTION = "## The repo's to fix"
-FLAKE_SITES = ("task", "integrate", "integration", "race")
 FLAKE_TEST_MAX = 300
 FLAKE_SHA_RE = re.compile(r"[0-9a-f]{7,40}\Z")
 FLAKE_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -7128,7 +7127,6 @@ def _failing_ids(lines):
 # lead-integrate.py verify --diff-base reads the first run's failing ids (_failing_ids), then asks flake_verdict
 # whether every one sits in a test file outside the task's diff: only then does it re-run them by name and confirm
 # with one more full run. Pure: no git, no run; the caller passes the diff's paths (None when they could not be read).
-FLAKE_VERDICTS = ("unnamed", "too-many", "unplaced", "diff", "touched", "candidates")
 
 
 def flake_file(test_id, tree):
