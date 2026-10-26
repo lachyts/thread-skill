@@ -501,13 +501,13 @@ case " $(rec "$G4EV/g4.jsonl") " in *" g4-q "*) ok has none "G4: … and g4's re
 # ════ K1: the settings schema across versions ═══════════════════════════════════════════════════════════════════
 echo "== K1"
 mkdir -p "$HOME/.config/thread"
-printf 'schema = 2\n\n[defaults]\nfoo_bar = 3\nparallel_ceiling = 3\n' > "$HOME/.config/thread/rollouts.toml"
+printf 'schema = 3\n\n[defaults]\nfoo_bar = 3\nparallel_ceiling = 3\n' > "$HOME/.config/thread/rollouts.toml"
 py "$B" skills/_shared/scripts/rollout-settings.py
 ok "$rc|$(j 'd["ignored"]')|$(j 'd["schema"]')|$(j 'd["settings"]["parallel_ceiling"]["value"]')" \
-   '0|["defaults.foo_bar"]|{"file": 2, "engine": 1}|3' "K1: a schema-2 file's unknown key is ignored by the snapshot's reader"
+   '0|["defaults.foo_bar"]|{"file": 3, "engine": 2}|3' "K1: a schema-3 file's unknown key is ignored by the snapshot's reader"
 py "$B" skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout "$TASKS/r1.md"
 ok "$rc" 0 "K1: … verify-timeout on a stamped note runs (no exit 3)"
-printf 'schema = 2\n\n[defaults]\nparalel_ceiling = 3\n' > "$HOME/.config/thread/rollouts.toml"
+printf 'schema = 3\n\n[defaults]\nparalel_ceiling = 3\n' > "$HOME/.config/thread/rollouts.toml"
 py "$B" skills/_shared/scripts/rollout-settings.py
 ok "$rc" 2 "K1: … a near-miss typo is still refused"; has "$err" "paralel_ceiling" "K1: … naming it"
 rm -f "$HOME/.config/thread/rollouts.toml"

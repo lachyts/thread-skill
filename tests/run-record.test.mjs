@@ -209,6 +209,17 @@ const REFUSALS = [
   ['review-verdict with a verdict outside approve | changes', ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 1, verdict: 'reject', findings: 0, original: 0, regression: 0, digest: 'abcdef0123456789' })]],
   ['review-verdict at round 0', ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 0, verdict: 'approve', findings: 0, original: 0, regression: 0, digest: 'abcdef0123456789' })]],
   ['review-verdict with original + regression over findings', ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 2, verdict: 'changes', findings: 2, original: 2, regression: 1, digest: 'abcdef0123456789' })]],
+  // The night record (p28-2): morning a UTC Z stamp, history an int >= 0, usualMinutes an int >= 1, a task on the T kinds.
+  ['away-night with a naive morning', ['--rollout', 'r', '--kind', 'away-night', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00' })]],
+  ['away-night with an offset morning (a UTC Z stamp only)', ['--rollout', 'r', '--kind', 'away-night', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00+11:00' })]],
+  ['away-night without a morning', ['--rollout', 'r', '--kind', 'away-night']],
+  ['last-start-held without a task', ['--rollout', 'r', '--kind', 'last-start-held', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', scope: 'cross-cutting', history: 3, usualMinutes: 110 })]],
+  ['last-start-held with a negative history', ['--rollout', 'r', '--task', 't', '--kind', 'last-start-held', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', scope: 'cross-cutting', history: -1 })]],
+  ['last-start-held with usualMinutes 0', ['--rollout', 'r', '--task', 't', '--kind', 'last-start-held', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', scope: 'cross-cutting', history: 3, usualMinutes: 0 })]],
+  ['last-start-held without a scope', ['--rollout', 'r', '--task', 't', '--kind', 'last-start-held', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', history: 0 })]],
+  ['ran-past-morning without a task', ['--rollout', 'r', '--kind', 'ran-past-morning', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', slotTakenAt: '2026-10-03T07:30:00.000Z', scope: 'single-file', history: 3 })]],
+  ['ran-past-morning with a naive slotTakenAt', ['--rollout', 'r', '--task', 't', '--kind', 'ran-past-morning', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', slotTakenAt: '2026-10-03T07:30:00', scope: 'single-file', history: 3 })]],
+  ['ran-past-morning with usualMinutes 0', ['--rollout', 'r', '--task', 't', '--kind', 'ran-past-morning', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', slotTakenAt: '2026-10-03T07:30:00.000Z', scope: 'single-file', history: 3, usualMinutes: 0 })]],
 ]
 
 for (const [name, args] of REFUSALS) {
@@ -268,6 +279,30 @@ test('slot-taken (p29-8): the cap in force is accepted; a malformed cap is refus
     assert.match(r.stderr, /^run_record: refused: \S.*cap.*\n$/, label)
   }
   assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, 2, 'no refused line was written')
+})
+
+test('idle-slots (p28-2): a hold-last-start reason is accepted', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-last-start', free: 3, settings: SETTINGS })], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([l.kind, l.reason, l.free], ['idle-slots', 'hold-last-start', 3])
+})
+
+test('the night record (p28-2): away-night, last-start-held and ran-past-morning land in <rollout>.jsonl as v 1', (t) => {
+  const home = tmpHome(t)
+  const emit = (task, kind, f) => emitOk(home, ['--rollout', 'r', ...(task ? ['--task', task] : []), '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+  emit(null, 'away-night', { morning: '2026-10-03T09:00:00Z' })
+  emit('c1', 'last-start-held', { morning: '2026-10-03T09:00:00Z', scope: 'cross-cutting', history: 3, usualMinutes: 110 })
+  emit('r1', 'last-start-held', { morning: '2026-10-03T09:00:00Z', scope: 'read-only', history: 0 })
+  emit('s1', 'ran-past-morning', { morning: '2026-10-03T09:00:00Z', slotTakenAt: '2026-10-03T07:30:00.000Z', scope: 'single-file', history: 3, usualMinutes: 25 })
+  emit('u1', 'ran-past-morning', { morning: '2026-10-03T09:00:00Z', slotTakenAt: '2026-10-03T06:00:00Z', scope: 'unscoped', history: 2 })
+  const all = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(all.map((l) => [l.v, l.rollout, l.task, l.kind, l.morning]), [
+    [1, 'r', null, 'away-night', '2026-10-03T09:00:00Z'], [1, 'r', 'c1', 'last-start-held', '2026-10-03T09:00:00Z'],
+    [1, 'r', 'r1', 'last-start-held', '2026-10-03T09:00:00Z'], [1, 'r', 's1', 'ran-past-morning', '2026-10-03T09:00:00Z'],
+    [1, 'r', 'u1', 'ran-past-morning', '2026-10-03T09:00:00Z']])
+  assert.deepEqual([all[1].scope, all[1].history, all[1].usualMinutes, 'usualMinutes' in all[2]], ['cross-cutting', 3, 110, false])
+  assert.deepEqual([all[3].slotTakenAt, all[3].usualMinutes, all[4].history], ['2026-10-03T07:30:00.000Z', 25, 2])
 })
 
 test('auto-retry (p16-4): a valid emit, and a quota retry with used 0 and its quotaRetries', (t) => {
@@ -899,6 +934,66 @@ test('grade refusals (p25-4): exit 2, one line and nothing written', (t) => {
     assert.equal(r.status, 2, `${args.join(' ')}: ${r.stderr}`)
     assert.match(r.stderr, /reserved/)
     assert.deepEqual(listing(ev(home)), [])
+  }
+})
+
+// ---- the Inert-path kinds (p29-3, ADR 0045): lead-integrate.py prepare's skip and its failed proof ---------------------
+const SKIP = { repo: 'o/r', paths: ['THREAD.md'], pathsTotal: 1, base: 'b'.repeat(40), main: 'c'.repeat(40), head: 'd'.repeat(40), globs: ['THREAD.md'] }
+const READER = { glob: 'THREAD.md', path: 'tests/t.sh', kind: 'name', line: 3, text: 'cat THREAD.md' }
+const FAILED = { repo: 'o/r', paths: ['THREAD.md'], pathsTotal: 1, readers: [READER], globs: ['THREAD.md'], failed: ['THREAD.md'] }
+
+test('verify-skipped and inert-proof-failed (p29-3) land in <rollout>.jsonl with their task, every reader kind and origin', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'verify-skipped', '--json', JSON.stringify(SKIP)], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'verify-skipped', '--json',
+    JSON.stringify({ repo: 'o/r', paths: Array.from({ length: 200 }, (_, i) => `docs/handoffs/${i}.md`), pathsTotal: 250 })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'inert-proof-failed', '--json', JSON.stringify(FAILED)], { env: EV(home) })
+  const kinds = ['name', 'walk', 'link', 'tool', 'symlink', 'unprovable', 'submodule']
+  const origins = ['repo', 'cwd', 'path', 'input', 'open', 'depth']
+  const readers = kinds.map((kind, i) => ({ glob: 'THREAD.md', path: `f${i}`, kind, ...(kind === 'walk' ? { origin: origins[i % origins.length] } : {}) }))
+  readers.push(...origins.map((origin) => ({ glob: 'docs/handoffs/**', path: 'tests/x.py', kind: 'walk', origin, line: 0, text: 'x'.repeat(120) })))
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'inert-proof-failed', '--json', JSON.stringify({ ...FAILED, readers })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'inert-proof-failed', '--json',
+    JSON.stringify({ repo: 'o/r', paths: [], pathsTotal: 0, readers: [], error: 'inert check error: ProofError: git cat-file --batch exited 128' })], { env: EV(home) })
+  const all = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(all.map((l) => [l.kind, l.task, l.v]), [['verify-skipped', 't', 1], ['verify-skipped', 't', 1], ['inert-proof-failed', 't', 1],
+    ['inert-proof-failed', 't', 1], ['inert-proof-failed', 't', 1]])
+  assert.deepEqual([all[0].paths, all[0].pathsTotal, all[0].head, all[1].paths.length, all[1].pathsTotal], [['THREAD.md'], 1, 'd'.repeat(40), 200, 250])
+  assert.deepEqual(all[2].readers, [READER])
+  assert.equal(all[3].readers.length, 13)
+  assert.deepEqual([all[4].readers, all[4].error], [[], 'inert check error: ProofError: git cat-file --batch exited 128'])
+})
+
+test('the Inert-path kinds are refused, exit 2 and nothing written, when malformed', (t) => {
+  const home = tmpHome(t)
+  const drop = (o, k) => { const c = { ...o }; delete c[k]; return c }
+  const cases = [
+    ['verify-skipped', 'no task', SKIP, []],
+    ['inert-proof-failed', 'no task', FAILED, []],
+    ['verify-skipped', 'no repo', drop(SKIP, 'repo')],
+    ['verify-skipped', 'no paths', drop(SKIP, 'paths')],
+    ['verify-skipped', 'no pathsTotal', drop(SKIP, 'pathsTotal')],
+    ['verify-skipped', '201 paths', { ...SKIP, paths: Array.from({ length: 201 }, (_, i) => `d/${i}.md`) }],
+    ['verify-skipped', 'a negative pathsTotal', { ...SKIP, pathsTotal: -1 }],
+    ['inert-proof-failed', 'no repo', drop(FAILED, 'repo')],
+    ['inert-proof-failed', 'no paths', drop(FAILED, 'paths')],
+    ['inert-proof-failed', 'no readers', drop(FAILED, 'readers')],
+    ['inert-proof-failed', 'readers [] with no error', { ...FAILED, readers: [] }],
+    ['inert-proof-failed', 'a bad reader kind', { ...FAILED, readers: [{ ...READER, kind: 'step' }] }],
+    ['inert-proof-failed', 'a bad origin', { ...FAILED, readers: [{ ...READER, kind: 'walk', origin: 'home' }] }],
+    ['inert-proof-failed', '21 readers', { ...FAILED, readers: Array.from({ length: 21 }, () => READER) }],
+    ['inert-proof-failed', 'a reader with no glob', { ...FAILED, readers: [drop(READER, 'glob')] }],
+    ['inert-proof-failed', 'a reader with an unknown key', { ...FAILED, readers: [{ ...READER, why: 'x' }] }],
+    ['inert-proof-failed', 'a negative line', { ...FAILED, readers: [{ ...READER, line: -1 }] }],
+    ['inert-proof-failed', 'a 121-character text', { ...FAILED, readers: [{ ...READER, text: 'x'.repeat(121) }] }],
+    ['inert-proof-failed', 'a 201-character error', { ...FAILED, readers: [], error: 'e'.repeat(201) }],
+    ['inert-proof-failed', 'an empty error', { ...FAILED, readers: [], error: '' }],
+  ]
+  for (const [kind, name, fields, extra = ['--rollout', 'r', '--task', 't']] of cases) {
+    const r = cli(home, ['emit', ...extra, '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${kind} ${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, `${kind} ${name}`)
+    assert.deepEqual(listing(ev(home)), [], `${kind} ${name}: nothing written`)
   }
 })
 

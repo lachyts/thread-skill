@@ -11,9 +11,10 @@
 //   morning     the `morning` row is local wall-clock time
 //   serial      serial rollouts are outside the count, said with its reason
 //   warn        away.md's WARN line is the code's: AWAY_WARN, then `<stale|unreadable>: <why>`, then the reading
-//   hold-back   every "only … holds one back" claim names the Trickle, and the Away cap in its place while Away (ADR
-//               0049): the rollout template's, schedule § 5's and CONTEXT.md's **Queue**
-//   glossary    CONTEXT.md has **Trickle** and **Away** entries, each citing its Chorus ADR 0104 decision (d2, d3)
+//   hold-back   every "only … holds one back" claim names the Trickle, the Away cap in its place while Away (ADR
+//               0049) and (p28-2) the last starts: the rollout template's, schedule § 5's and CONTEXT.md's **Queue**
+//   glossary    CONTEXT.md has **Trickle**, **Away** and (p28-2) **Last starts** entries, each citing its Chorus ADR 0104
+//               decision (d2, d3, d4)
 //   restart     § The Trickle says a restart waits on the ceiling alone, never `slotLimit`, and that a new start counts
 //               every in_progress task of this rollout, live or stalled (the round-1 respawn deadlock)
 //   no-lead     § The Trickle says a parallel rollout with no lead holds the Trickle for nobody, and its remedy: the
@@ -25,6 +26,11 @@
 //   older-reader  an engine snapshot from before p29-8 (ADR 0043) ignores `away_cap`: the live AWAY_KEYS equals the
 //               frozen p28-1 reader's (tests/fixtures/away-state/p28-1-reader.py), AWAY_CAP_KEY is never one of them,
 //               and away.md says an older snapshot ignores the key
+//   last-starts (p28-2) § The last starts states the code's numbers (LAST_START_FALLBACK, LAST_START_MIN_RUNS,
+//               LAST_START_HISTORY, LAST_START_HORIZON) and its reason prefix, that `until` must be the Morning, that
+//               restarts and revises are exempt and that the hold never halts
+//   night-record (p28-2) § The night record names the code's NIGHT_KINDS, run_record.py's KINDS holds each, and
+//               reflect's score.py skips the same NIGHT_KINDS (a night line is never a task's call activity)
 // One function (checkAway) returns named failures, so the real files and each control (one mutation, exactly its
 // rule) run through identical logic. Reads files only.
 import { test } from 'node:test'
@@ -34,10 +40,11 @@ import { collapse, read } from '../lib/contract-text.mjs'
 const real = {
   away: read('skills/execute/away.md'),
   code: read('skills/execute/scripts/reconcile-rollout.py'),
+  runRecord: read('skills/_shared/scripts/run_record.py'),
+  score: read('skills/reflect/scripts/score.py'),
   template: read('skills/schedule/rollout-template.md'),
   schedule: read('skills/schedule/SKILL.md'),
   context: read('CONTEXT.md'),
-  record: read('skills/_shared/scripts/run_record.py'),
   older: read('tests/fixtures/away-state/p28-1-reader.py'),
 }
 
@@ -61,7 +68,7 @@ function entry(text, name) {
 
 const keysOf = (text) => (grab(text, /^AWAY_KEYS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((s) => s.slice(1, -1)) ?? []
 
-function checkAway({ away, code, template, schedule, context, record, older }) {
+function checkAway({ away, code, runRecord, score, template, schedule, context, older }) {
   const fails = []
   const keys = keysOf(code)
   const capKey = grab(code, /^AWAY_CAP_KEY = "([^"]*)"/m)
@@ -114,14 +121,20 @@ function checkAway({ away, code, template, schedule, context, record, older }) {
 
   const tmplQueue = collapse(template.split('\n').find((l) => l.startsWith('Tasks run in parallel up to `parallel_ceiling`')) ?? '')
   const sched5 = collapse(schedule.split('\n').find((l) => l.startsWith('The rollout is a queue (ADR 0030 decision 1)')) ?? '')
-  const awayClause = "holds one back (while Lachy is Away, the Away cap does in the Trickle's place, ADR 0049)"
+  const awayClause = "holds one back (while Lachy is Away, the Away cap does in the Trickle's place, ADR 0049"
+  const LAST_BACK = 'toward the Morning while Away, the last starts too)'
   if (!/a Solo task or, by day, the Trickle \(.*Chorus ADR 0104; execute `away\.md`\) holds one back/.test(tmplQueue) ||
     !sched5.includes('only a dependency, a Solo task or, by day, the Trickle (Chorus ADR 0104; execute `away.md`) holds one back') ||
     !entry(context, 'Queue').includes('**Solo** task and, by day, the **Trickle**') ||
     !tmplQueue.includes(awayClause) || !sched5.includes(awayClause) ||
-    !entry(context, 'Queue').includes('Away, by the **Away cap** instead of the Trickle (ADR 0049)')) fails.push('hold-back')
+    !entry(context, 'Queue').includes('Away, by the **Away cap** instead of the Trickle (ADR 0049)') ||
+    !tmplQueue.includes(LAST_BACK) || !sched5.includes(LAST_BACK) ||
+    !entry(context, 'Queue').includes('and, toward the Morning, the **Last starts**')) fails.push('hold-back')
 
-  if (!entry(context, 'Trickle').includes('(Chorus ADR 0104 d2)') || !entry(context, 'Away').includes('(Chorus ADR 0104 d3)')) fails.push('glossary')
+  if (!entry(context, 'Trickle').includes('(Chorus ADR 0104 d2)') || !entry(context, 'Away').includes('(Chorus ADR 0104 d3)') ||
+    !entry(context, 'Last starts').includes('(Chorus ADR 0104 d4)') || !entry(context, 'Night record').includes('_Avoid_: night log')) {
+    fails.push('glossary')
+  }
 
   if (!trickleS.includes('**A restart waits on the ceiling alone.**') || !trickleS.includes('never by `slotLimit`') ||
     !trickleS.includes('counting every `in_progress` task of this rollout, live or stalled')) fails.push('restart')
@@ -136,7 +149,7 @@ function checkAway({ away, code, template, schedule, context, record, older }) {
     /now \+ datetime\.timedelta\(days=1\)/.test(writer)) fails.push('sample')
 
   const awayS = collapse(h2(away, 'Away'))
-  const idleEnum = (record.match(/"idle-slots": \(False, \{"reason": _enum\(([^)]*)\)/) ?? [])[1] ?? ''
+  const idleEnum = ((runRecord ?? '').match(/"idle-slots": \(False, \{"reason": _enum\(([^)]*)\)/) ?? [])[1] ?? ''
   if (!capDefault || !capPrefix || !awayS.includes(`With the key absent the built-in is ${capDefault}:`) ||
     !awayS.includes('lifts the built-in to `trickle` + 1, so the Away cap is always above the Trickle') ||
     !awayS.includes(`\`${capPrefix} <running>/<A> tasks running on this Mac\`, and it never halts`) ||
@@ -151,6 +164,33 @@ function checkAway({ away, code, template, schedule, context, record, older }) {
     !collapse(file).includes('An engine snapshot from before it ignores it as an extra key and runs Away to each rollout\'s own ceiling (ADR 0043)') ||
     !collapse(file).includes('The first five keys are required and `away_cap` is optional. Extra keys are ignored')) fails.push('older-reader')
 
+  // last-starts: the numbers and the prefix are the code's, read from it, so a change on either side fails.
+  const fallbackH = grab(code, /^LAST_START_FALLBACK = timedelta\(hours=(\d+)\)/m)
+  const minRuns = grab(code, /^LAST_START_MIN_RUNS = (\d+)/m)
+  const historyD = grab(code, /^LAST_START_HISTORY = timedelta\(days=(\d+)\)/m)
+  const horizonH = grab(code, /^LAST_START_HORIZON = timedelta\(hours=(\d+)\)/m)
+  const prefix = grab(code, /^LAST_START_PREFIX = "([^"]*)"/m)
+  const lastS = collapse(h2(away, 'The last starts'))
+  if (!fallbackH || !minRuns || !historyD || !horizonH || !prefix ||
+    !lastS.includes(`With no history its length is ${fallbackH} h: it starts until exactly ${fallbackH} h before M.`) ||
+    !lastS.includes(`with at least ${minRuns} past runs. Fewer than ${minRuns} is no history.`) ||
+    !lastS.includes(`falls in the last ${historyD} days`) ||
+    !lastS.includes(`at most ${horizonH} h ahead (now < M <= now + ${horizonH} h)`) ||
+    !lastS.includes(`\`${prefix} <kind> usually takes <N> min (median of <k> past runs), past the Morning at <HH:MM>\``) ||
+    !lastS.includes(`\`${prefix} no history for <kind> (<k> past runs, ${minRuns} needed), none starts in the ${fallbackH} h before the Morning at <HH:MM>\``) ||
+    !lastS.includes('its `until` is the Morning: read in local wall-clock time') ||
+    !lastS.includes('Restarts are exempt: a stalled `in_progress` task, a set-aside task handed back and a seeded revise') ||
+    !lastS.includes('**It never halts.** While any row reads `last start:`')) fails.push('last-starts')
+
+  // night-record: NIGHT_KINDS are the three, each named in § The night record and each one of run_record.py's KINDS,
+  // and score.py's NIGHT_KINDS (the lines its pair() skips) are the same three.
+  const kindsOf = (text) => (grab(text ?? '', /^NIGHT_KINDS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((s) => s.slice(1, -1)) ?? []
+  const nightKinds = kindsOf(code)
+  const nightS = h2(away, 'The night record')
+  if (JSON.stringify(nightKinds) !== JSON.stringify(['away-night', 'last-start-held', 'ran-past-morning']) ||
+    JSON.stringify(kindsOf(score)) !== JSON.stringify(nightKinds) ||
+    nightKinds.some((k) => !nightS.includes(`- \`${k}\` `) || !(runRecord ?? '').includes(`    "${k}": (`))) fails.push('night-record')
+
   return fails
 }
 
@@ -161,7 +201,7 @@ test('away.md, the code that reads the file and the hold-back prose agree', () =
 // ---- controls: each mutates one place and must fail with exactly its rule ---------------------------------------
 
 const RULES = ['keys', 'path', 'staleness', 'default', 'refresh', 'until', 'morning', 'serial', 'warn', 'hold-back', 'glossary',
-  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader']
+  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -223,16 +263,21 @@ test('control: a hold-back claim without the Trickle fails hold-back', () => {
   only('schedule', 'only a dependency, a Solo task or, by day, the Trickle (Chorus ADR 0104; execute `away.md`) holds one back',
     'only a dependency or a Solo task holds one back', 'hold-back', 'schedule § 5')
   only('context', '**Solo** task and, by day, the **Trickle**, never a shared file', '**Solo** task, never a shared file', 'hold-back', 'CONTEXT Queue')
+  only('template', '; toward the Morning while Away, the last starts too), never', '), never', 'hold-back', 'template, last starts')
+  only('schedule', '; toward the Morning while Away, the last starts too).', ').', 'hold-back', 'schedule § 5, last starts')
+  only('context', ',\n  and, toward the Morning, the **Last starts**;', ';', 'hold-back', 'CONTEXT Queue, last starts')
 })
 test('control: a hold-back claim without the Away cap fails hold-back', () => {
-  const clause = " (while Lachy is Away, the Away cap does in the Trickle's place, ADR 0049)"
-  only('template', `holds one back${clause}, never a shared file`, 'holds one back, never a shared file', 'hold-back', 'template')
-  only('schedule', `holds one back${clause}.`, 'holds one back.', 'hold-back', 'schedule § 5')
+  const clause = "while Lachy is Away, the Away cap does in the Trickle's place, ADR 0049; "
+  only('template', `holds one back (${clause}toward`, 'holds one back (toward', 'hold-back', 'template')
+  only('schedule', `holds one back (${clause}toward`, 'holds one back (toward', 'hold-back', 'schedule § 5')
   only('context', '; Away, by the **Away cap** instead of the Trickle (ADR 0049)', '', 'hold-back', 'CONTEXT Queue')
 })
 test('control: a glossary entry without its ADR fails glossary', () => {
   only('context', 'Chorus sets another (Chorus ADR 0104 d2)', 'Chorus sets another', 'glossary', 'Trickle')
   only('context', '**Parallel ceiling** (Chorus ADR 0104 d3)', '**Parallel ceiling**', 'glossary', 'Away')
+  only('context', ' (Chorus\n  ADR 0104 d4). They apply', '. They apply', 'glossary', 'Last starts')
+  only('context', '- **Night record** —', '- **Night log** —', 'glossary', 'no Night record entry')
 })
 
 test('control: a restart bounded by slotLimit, or starts that skip stalled tasks, fail restart', () => {
@@ -262,7 +307,8 @@ test('control: § Away without its default, lift, hold, meant wait or dead-lead 
   only('away', "and the Run record's `idle-slots` reads `hold-away-cap`", "and the Run record's `idle-slots` reads `hold-trickle`", 'away-cap', 'hold-trickle in the doc')
   only('away', 'until the Watchdog recovers it (ADR 0048) or Lachy pauses it', 'until its lead returns', 'away-cap', 'no dead-lead remedy')
   only('away', '; the Companion has no pause', '', 'away-cap', 'no word on the Companion')
-  only('record', '"hold-trickle",\n                                           "hold-away-cap"),', '"hold-trickle"),', 'away-cap', 'the enum without hold-away-cap')
+  only('runRecord', '"hold-trickle",\n                                           "hold-away-cap", "hold-last-start"),',
+    '"hold-trickle",\n                                           "hold-last-start"),', 'away-cap', 'the enum without hold-away-cap')
 })
 test('control: an older snapshot that would refuse the key fails older-reader', () => {
   only('code', 'AWAY_KEYS = ("away", "until", "morning", "trickle", "written_at")',
@@ -273,7 +319,28 @@ test('control: an older snapshot that would refuse the key fails older-reader', 
   only('away', 'The first five keys are required and `away_cap` is optional.', 'All six keys are required.', 'older-reader', 'required')
 })
 
-test('the rules are all named (16) and each has a control', () => {
-  assert.equal(RULES.length, 16)
+test('control: a fallback, a run count or a rule the code and § The last starts disagree on fails last-starts', () => {
+  only('code', 'LAST_START_FALLBACK = timedelta(hours=2)', 'LAST_START_FALLBACK = timedelta(hours=3)', 'last-starts', 'a 3 h fallback')
+  only('away', 'with at least 3 past runs. Fewer than 3 is no history.', 'with at least 4 past runs. Fewer than 4 is no history.', 'last-starts', '4 past runs')
+  only('code', 'LAST_START_HISTORY = timedelta(days=30)', 'LAST_START_HISTORY = timedelta(days=60)', 'last-starts', '60 days')
+  only('code', 'LAST_START_HORIZON = timedelta(hours=24)', 'LAST_START_HORIZON = timedelta(hours=36)', 'last-starts', 'a 36 h horizon')
+  only('code', 'LAST_START_PREFIX = "last start:"', 'LAST_START_PREFIX = "morning:"', 'last-starts', 'another prefix')
+  const l = real.away.split('\n').find((x) => x.startsWith('- its `until` is the Morning:'))
+  only('away', l + '\n', '', 'last-starts', 'the until rule dropped')
+  only('away', 'Restarts are exempt: a stalled `in_progress` task, a set-aside task handed back and a seeded revise each re-enter a task already begun, and running tasks finish.',
+    'Restarts are held too.', 'last-starts', 'no exemption')
+  only('away', '**It never halts.** While any row reads `last start:`', '**It halts stuck.** While any row reads `last start:`', 'last-starts', 'it halts')
+})
+test('control: a night kind the doc, the writer or score.py lacks fails night-record', () => {
+  only('away', '- `ran-past-morning` `{morning,', '- `ran-past` `{morning,', 'night-record', 'dropped from the doc')
+  only('runRecord', '    "ran-past-morning": (', '    "ran-past": (', 'night-record', 'dropped from KINDS')
+  only('code', 'NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")', 'NIGHT_KINDS = ("away-night", "last-start-held")',
+    'night-record', 'dropped from NIGHT_KINDS')
+  only('score', 'NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")', 'NIGHT_KINDS = ("away-night", "last-start-held")',
+    'night-record', 'dropped from score.py\'s NIGHT_KINDS')
+})
+
+test('the rules are all named (18) and each has a control', () => {
+  assert.equal(RULES.length, 18)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

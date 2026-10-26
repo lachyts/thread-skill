@@ -234,7 +234,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // is), a non-empty rowRefused printed, a non-empty prUrlError (a note pr: with no PR URL, e.g. a bare #N and no GitHub
   // origin) set aside at Integration, never launched; the rung is the task's own record, the accepted row's, else the note's
   // (neutral when the note has no rung:), never the ladder's top rung, and no tier vocabulary left. prepare's
-  // `unlisted` and `note` only inform.
+  // `unlisted`, `note` and `inert` only inform.
   if (!st3.includes('`startedAt` a fresh `lead-integrate.py stamp` taken at launch') ||
     !st3.includes("`readyAt` the note's `ready:`") ||
     !st3.includes('`prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are, verbatim, the `integrate` record of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --repo <repoPath> [--row') ||
@@ -243,7 +243,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !st3.includes("`rung` is the task's own rung record, the accepted row's (`startRung`, `rung`, `climbs`), else the note's `rung` record") ||
     !st3.includes('(neutral, `{startRung: "", rung: "", climbs: []}`, when the note has no `rung:`)') ||
     !st3.includes("never the ladder's top rung: Integration runs on the top rung whatever the record says") ||
-    !st3.includes('`unlisted`, the commits in `taskBase..mainSha` that name no PR,') || !st3.includes('pass neither to the integrate call') ||
+    !st3.includes('`unlisted`, the commits in `taskBase..mainSha` that name no PR,') || !st3.includes('pass none of them to the integrate call') ||
     /tierCapped|tier_capped|escalated/.test(st3)) {
     fails.push('integrate-args')
   }
@@ -719,6 +719,43 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !trRev.includes('never halts on it (while Away, an Away-cap wait, the same)') ||
     !drvDoc.includes('or an Away-cap wait does (on the machine-wide Away cap while Lachy is Away, ADR 0049)') ||
     !drvBlock.includes('or an Away-cap wait does (on the Away cap, ')) fails.push('trickle')
+
+  // skip-path (ADR 0045, p29-3): step 3's prepare carries the verifier and bootstrap, single-quoted; a `skip` bullet after
+  // set-aside re-checks (§ 2.5 then § 2.6), pushes M, logs (M, mainSha) and goes to step 4 with no verifier, a refused
+  // push undoes and integrates with trouble []; the lead prints inert.why (an inert check error included); the exit-3 row
+  // names the skip and § 3's verifier row the prepare flag.
+  const skipB = st3.slice(st3.indexOf('**`skip`**'), st3.indexOf('**exit 8**'))
+  const verifierRow = (section(skill, S3) ?? '').split('\n').find((l) => l.startsWith('| `verifier` |')) ?? ''
+  if (!st3.includes("lead-integrate.py prepare --repo <repoPath> --slug <slug> --default <defaultBranch> --note <task note> --verifier '<verifier>' --bootstrap '<env_bootstrap>'") ||
+    st3.indexOf('**`set-aside`**') < 0 || st3.indexOf('**`skip`**') < st3.indexOf('**`set-aside`**') ||
+    !skipB.includes('no verifier runs') || !before(skipB, 'Re-run § 2.5', 'then § 2.6') ||
+    !before(skipB, 'then § 2.6', 'lead-integrate.py push --repo <repoPath> --slug <slug> --head M') ||
+    !before(skipB, '--head M`', 'log-integration --tasks <slug> --started "$S" --anchor <anchor> --head M --base <mainSha>') ||
+    !before(skipB, 'log-integration', 'then step 4 with (M, `mainSha`)') ||
+    !skipB.includes('Push refused (exit 1): `undo') || !skipB.includes('then the integrate call with `trouble []`') ||
+    !skipB.includes('Print `inert.why`') || !st3.includes('print `inert.why` whenever the route is `verify` or `skip` (an `inert check error: …` included') ||
+    !(rows['3'] ?? '').includes('it may route `skip`') || !verifierRow.includes('`lead-integrate.py prepare --verifier`')) fails.push('skip-path')
+
+  // last-starts (p28-2, Chorus ADR 0104 d4): § 4.5's *The last starts* paragraph says `next` holds the start and
+  // reports `lastStarts`, the lead never reads the file, the hold never halts and restarts are exempt, pointing at
+  // away.md; step 1.6 waits on a `last start:` hold with its reason=; § 5's Heartbeat paragraph covers that waiting turn
+  // and clause (7) reads its reason as no hold; § 6's waiting bullet and reason list, § 8's Stop-hook paragraph and the
+  // driver's docstring and block reason name it. Each site is its own clause, so one control per site.
+  const lastP = labelled(skill, 'The last starts (Chorus ADR 0104 d4).')
+  if (!lastP.includes('`next` holds the start itself and reports `lastStarts`') || !lastP.includes('the lead never reads the file or the history') ||
+    !lastP.includes('A `last start:` hold never halts the rollout: the turn ends `waiting` (step 1.6)') ||
+    !lastP.includes('Restarts are exempt, a set-aside task\'s hand-back and a seeded revise included') ||
+    !lastP.includes('`skills/execute/away.md` § The last starts and § The night record hold the spec') ||
+    !tr6.includes('A `last start:` hold (*The last starts*) ends the turn `waiting` too') ||
+    !tr6.includes('`reason="last start: held until the Morning at <trickle.morning>"`') ||
+    !hbPara.includes("It covers a last-starts wait's `waiting` turn (§4.5 step 1.6) too.") ||
+    !hb7.includes('A `last start:` reason is no hold either (the Morning may have come)') ||
+    !waitingB.includes('or `next` holds a task on the last starts (§4.5 step 1.6)') ||
+    !waitingB.includes("a last-starts wait's (`last start: …`)") ||
+    !s6all.includes('and on a last-starts wait (§4.5 step 1.6)') ||
+    !hookP.includes('a last-starts wait stands,') ||
+    !drvDoc.includes('or a last-starts wait stands (`next` holds a task on the last starts') ||
+    !drvBlock.includes('or a last-starts wait stands (`next` holds a "') || !drvBlock.includes('reason=\\"last start: …\\"')) fails.push('last-starts')
   return [...new Set(fails)]
 }
 
@@ -732,7 +769,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
-  'verify-slots', 'clone-root', 'trickle']
+  'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -1295,7 +1332,47 @@ test("control: the driver's docstring or block reason without the Trickle wait f
   only(drv('or a Trickle wait stands (`next` holds a task on the "', 'or (`next` holds a task on the "'), 'trickle', 'block reason')
 })
 
-test('the rules are all named (36) and each has a control', () => {
-  assert.equal(RULES.length, 36)
+// skip-path (ADR 0045, p29-3)
+test('control: step 3 without the skip bullet, its order, its undo or its why print fails skip-path', () => {
+  const bullet = real.skill.split('\n').find((l) => l.startsWith('   - **`skip`**'))
+  only(sk(bullet + '\n', ''), 'skip-path', 'no skip bullet')
+  only(sk(" --verifier '<verifier>' --bootstrap '<env_bootstrap>'` (§ 3's", "` (§ 3's"), 'skip-path', 'prepare without the verifier')
+  only(sk('Re-run § 2.5, then § 2.6 (the push re-check, *Landing-register re-check*), then `python3',
+    'Then `python3'), 'skip-path', 'no re-check before the push')
+  only(sk('Push refused (exit 1): `undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, then the integrate call with `trouble []`.',
+    'Push refused (exit 1): halt.'), 'skip-path', 'a refused push halts')
+  only(sk(' Print `inert.why`. Re-run', ' Re-run'), 'skip-path', 'no why print in the bullet')
+  only(sk(', print `inert.why` whenever the route is `verify` or `skip` (an `inert check error: …` included: that check failed closed, so the verifier runs as before)', ''),
+    'skip-path', 'no why print on verify')
+  only(sk(' it may route `skip` when `main` moved only in Inert paths, ADR 0045);', ');'), 'skip-path', 'the exit-3 row without the skip')
+})
+
+// last-starts (p28-2)
+test('control: § 4.5 without the last starts at any one site fails last-starts', () => {
+  const p = real.skill.split('\n').find((l) => l.startsWith('**The last starts (Chorus ADR 0104 d4).**'))
+  only(sk(p + '\n\n', ''), 'last-starts', 'no last-starts paragraph')
+  only(sk('A `last start:` hold never halts the rollout: the turn ends `waiting` (step 1.6)', 'A `last start:` hold halts the rollout `stuck`'),
+    'last-starts', 'the hold halts')
+  only(sk('Restarts are exempt, a set-aside task\'s hand-back and a seeded revise included', 'Restarts wait on it too'), 'last-starts', 'restarts held')
+  only(sk(' A `last start:` hold (*The last starts*) ends the turn `waiting` too:', ' A `last start:` hold (*The last starts*) halts the turn:'),
+    'last-starts', 'no last-starts wait in step 1.6')
+  only(sk('`reason="last start: held until the Morning at <trickle.morning>"`', '`reason="last start"`'), 'last-starts', 'no last-starts reason=')
+  only(sk(" It covers a last-starts wait's `waiting` turn (§4.5 step 1.6) too.", ''), 'last-starts', 'heartbeat paragraph without it')
+  only(sk(' A `last start:` reason is no hold either (the Morning may have come), so this clause re-enters on it too.', ''),
+    'last-starts', 'clause (7) without it')
+  only(sk(', or `next` holds a task on the last starts (§4.5 step 1.6)', ''), 'last-starts', "§ 6's waiting bullet without it")
+  only(sk(", a last-starts wait's (`last start: …`)", ''), 'last-starts', "§ 6's reason forms without it")
+  only(sk(', and on a last-starts wait (§4.5 step 1.6)', ''), 'last-starts', "§ 6's reason list without it")
+  only(sk(' a last-starts wait stands,', ''), 'last-starts', "§ 8's Stop-hook paragraph without it")
+})
+test("control: the driver's docstring or block reason without the last-starts wait fails last-starts", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv(', or a last-starts\n              wait stands (`next` holds a task on the last starts', ', or (`next` holds a task on the last starts'),
+    'last-starts', 'docstring')
+  only(drv(' or a last-starts wait stands (`next` holds a "', ' or (`next` holds a "'), 'last-starts', 'block reason')
+})
+
+test('the rules are all named (38) and each has a control', () => {
+  assert.equal(RULES.length, 38)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
