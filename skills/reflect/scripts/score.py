@@ -56,7 +56,9 @@ soft pause's stamp counts as running. A hold with no Slot open is a wait on Lach
 - Pairing follows run_record.py's reader rules: one Slot per task, the same lane holding, a hold per (hold,
   task), a pause until resumed, a lane-freed closing the task's merge hold, a `carried` line in its from-file
   closing that task's Slot, lane and holds. A lane, hold or pause still open at the last line read ends there,
-  flagged.
+  flagged. The night record's lines (away-night, last-start-held, ran-past-morning: p28-2, NIGHT_KINDS) are not
+  read: `next` writes a ran-past-morning line after the Morning it reads, so none is a task's last record line (an
+  untimed call's last activity) or the record's last line.
 
 Headlines (ADR 0037 d1: two, and Lachy settles any trade between them; there is no tie-breaker):
 - Hands-off rate: the share of the window's landed tasks (distinct tasks with a `merged` line in [since, until])
@@ -253,6 +255,9 @@ GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
 # The human acts' kinds (run_record.py's "Human acts"): never a task's call activity (pair keeps them out of last_line).
 ACT_KINDS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
+# The night record's kinds (p28-2, run_record.py; reconcile-rollout.py's NIGHT_KINDS): `next`'s reading of a Morning,
+# written at a later call, so never a task's call activity nor the record's last line (pair skips them).
+NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")
 ACT_NAMES = ("answer", "signOff", "retry", "mergeHold", "raceDecided")
 MERGE_HOLD_DETAIL = "a --gated or exit-7 hold: the record carries no reason"
 # The two headlines (ADR 0037 d1) and each proposal rule's declared effect: (serves, risks). A heuristic (the header).
@@ -574,6 +579,11 @@ class Score:
                 # activity (last_line) or the record's last line
                 if t <= until and task:
                     self.verdict_lines.append((n, t, task, d))
+                continue
+            if kind in NIGHT_KINDS:
+                # p28-2: a ran-past-morning line names a task whose Slot was open at a Morning, written at a later
+                # `next` call: an observation after the fact, never activity of that task's call (an untimed call's
+                # last_line, its never-finished cap) or the record's last line, as a review-verdict line is not
                 continue
             if t > until:
                 continue

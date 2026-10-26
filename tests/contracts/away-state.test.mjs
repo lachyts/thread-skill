@@ -23,7 +23,8 @@
 //   last-starts (p28-2) § The last starts states the code's numbers (LAST_START_FALLBACK, LAST_START_MIN_RUNS,
 //               LAST_START_HISTORY, LAST_START_HORIZON) and its reason prefix, that `until` must be the Morning, that
 //               restarts and revises are exempt and that the hold never halts
-//   night-record (p28-2) § The night record names the code's NIGHT_KINDS, and run_record.py's KINDS holds each
+//   night-record (p28-2) § The night record names the code's NIGHT_KINDS, run_record.py's KINDS holds each, and
+//               reflect's score.py skips the same NIGHT_KINDS (a night line is never a task's call activity)
 // One function (checkAway) returns named failures, so the real files and each control (one mutation, exactly its
 // rule) run through identical logic. Reads files only.
 import { test } from 'node:test'
@@ -34,6 +35,7 @@ const real = {
   away: read('skills/execute/away.md'),
   code: read('skills/execute/scripts/reconcile-rollout.py'),
   runRecord: read('skills/_shared/scripts/run_record.py'),
+  score: read('skills/reflect/scripts/score.py'),
   template: read('skills/schedule/rollout-template.md'),
   schedule: read('skills/schedule/SKILL.md'),
   context: read('CONTEXT.md'),
@@ -57,7 +59,7 @@ function entry(text, name) {
   return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
 }
 
-function checkAway({ away, code, runRecord, template, schedule, context }) {
+function checkAway({ away, code, runRecord, score, template, schedule, context }) {
   const fails = []
   const keys = (grab(code, /^AWAY_KEYS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((s) => s.slice(1, -1)) ?? []
   const fileRel = grab(code, /^AWAY_FILE_REL = "([^"]*)"/m)
@@ -148,10 +150,13 @@ function checkAway({ away, code, runRecord, template, schedule, context }) {
     !lastS.includes('Restarts are exempt: a stalled `in_progress` task, a set-aside task handed back and a seeded revise') ||
     !lastS.includes('**It never halts.** While any row reads `last start:`')) fails.push('last-starts')
 
-  // night-record: NIGHT_KINDS are the three, each named in § The night record and each one of run_record.py's KINDS.
-  const nightKinds = (grab(code, /^NIGHT_KINDS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((s) => s.slice(1, -1)) ?? []
+  // night-record: NIGHT_KINDS are the three, each named in § The night record and each one of run_record.py's KINDS,
+  // and score.py's NIGHT_KINDS (the lines its pair() skips) are the same three.
+  const kindsOf = (text) => (grab(text ?? '', /^NIGHT_KINDS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((s) => s.slice(1, -1)) ?? []
+  const nightKinds = kindsOf(code)
   const nightS = h2(away, 'The night record')
   if (JSON.stringify(nightKinds) !== JSON.stringify(['away-night', 'last-start-held', 'ran-past-morning']) ||
+    JSON.stringify(kindsOf(score)) !== JSON.stringify(nightKinds) ||
     nightKinds.some((k) => !nightS.includes(`- \`${k}\` `) || !(runRecord ?? '').includes(`    "${k}": (`))) fails.push('night-record')
 
   return fails
@@ -258,11 +263,13 @@ test('control: a fallback, a run count or a rule the code and § The last starts
     'Restarts are held too.', 'last-starts', 'no exemption')
   only('away', '**It never halts.** While any row reads `last start:`', '**It halts stuck.** While any row reads `last start:`', 'last-starts', 'it halts')
 })
-test('control: a night kind the doc or the writer lacks fails night-record', () => {
+test('control: a night kind the doc, the writer or score.py lacks fails night-record', () => {
   only('away', '- `ran-past-morning` `{morning,', '- `ran-past` `{morning,', 'night-record', 'dropped from the doc')
   only('runRecord', '    "ran-past-morning": (', '    "ran-past": (', 'night-record', 'dropped from KINDS')
   only('code', 'NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")', 'NIGHT_KINDS = ("away-night", "last-start-held")',
     'night-record', 'dropped from NIGHT_KINDS')
+  only('score', 'NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")', 'NIGHT_KINDS = ("away-night", "last-start-held")',
+    'night-record', 'dropped from score.py\'s NIGHT_KINDS')
 })
 
 test('the rules are all named (16) and each has a control', () => {
