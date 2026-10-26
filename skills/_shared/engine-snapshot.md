@@ -129,4 +129,7 @@ refuses a typo, and every writer that adds a newer key raises the line (rollout-
 hooks run from the Primary checkout, not a snapshot, so the Stop-hook driver's `STATUS_RE` and the `ROLLOUT-STATUS`
 line it parses are a cross-version contract (hooks/rollout-stop-driver.py). The stamps themselves are read only by
 `resolve`, the guards, `unfinished-rollout.py running` (ADR 0031's hold, now only for an unsnapshotted rollout) and
-`retire`.
+`retire`. The standing approval's month line (ADR 0034's 2026-10-27 amendment) is cross-rollout state too: its
+`signed under the standing approval:` lines in each rollout note's `## Needs-you log` and its machine-wide
+`standing-spend.lock` keep their form across versions. A snapshot older than that amendment writes no such line and
+takes no lock, so its signings stay outside the month sum until its rollout moves or retires.

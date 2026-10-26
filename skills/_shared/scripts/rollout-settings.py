@@ -16,8 +16,9 @@ of the file format:
     max_iterations = 3
     max_plan_rounds = 3
     auto_retries = 2             # execute's automatic retries of a set-aside task (p16-4, ADR 0033); 0 disables
-    spend_approval_usd = 50      # the standing approval (ADR 0034): a spend gate whose total exposure is at most
-                                 # this many US dollars passes without a person; 0 (the built-in) is off
+    spend_approval_usd = 200     # the standing approval (ADR 0034): a spend gate whose total exposure is at most
+                                 # this many US dollars passes without a person, and while the calendar month's
+                                 # standing approvals stay within it; 0 (the built-in) is off
     verify_slots = 2             # machine-wide (p23-4): at most this many verifier suites run at once across every
                                  # rollout on this machine (execute's verify-slot.py); [defaults] only
 

@@ -681,10 +681,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   then goes to Lachy, never to the Standing approval (ADR 0038).
   _Avoid_: budget, limit (the Standing approval's limit is another thing).
 - **Standing approval** — Lachy's one-off sign-off for every spend Gated input
-  whose **total exposure** is at most US$50: the cap summed across Logins,
-  a recurring cap counted per month, US$50 itself included. The limit is
+  whose **total exposure** is at most the operator's limit (US$200 on Lachy's
+  Mac): the cap summed across Logins, a recurring cap counted per month, the
+  limit itself included. It also holds a month line (ADR 0034's 2026-10-27
+  amendment; spend is never asked ahead): a gate passes only while this
+  calendar month's standing approvals, summed from every rollout note's
+  `## Needs-you log`, stay at most the operator's limit with it. The limit is
   the Rollout settings key `spend_approval_usd` (a task may carry its own,
-  an ask-ahead answer; built-in 0, which is off). Exposure counts every USD
+  a limit Lachy named; built-in 0, which is off). Exposure counts every USD
   amount the gate names; a shape it cannot price asks. Such a gate passes
   without him (`approve-gates --standing`, run by the lead) and is recorded
   in `## Approved gates` with `(approved <date> under the standing approval:
@@ -714,7 +718,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the push does not reach him), deduped on its line in the rollout note's
   `## Needs-you log`, the lead's push record; an item whose delivery failed
   on every channel is retried at most once more, at the next loop entry, then
-  deduped (ADR 0038). That log is never the task note's `## Needs you` (p16-3),
+  deduped (ADR 0038). The log also holds the Standing approval's
+  `signed under the standing approval:` lines, the month line's ledger, never
+  a push record. That log is never the task note's `## Needs you` (p16-3),
   which holds the question the engine stopped on; an item whose entry carries
   one shows it on its detail line. The lead never puts an item through the
   question tool while anything the session launched is in flight, and the
