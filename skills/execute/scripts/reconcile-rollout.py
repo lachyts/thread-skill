@@ -3108,7 +3108,8 @@ def _resolve_holds(gh_bin, holds, memo):
         if hold["error"] is not None:
             reason, waits = f"{HOLD_UNTIL_PREFIX}: {HOLD_KEY} unreadable ({hold['error']})", "you"
         elif err is not None:
-            reason, waits = f"{HOLD_UNTIL_PREFIX} {pr} merges (gh: {err.replace(chr(34), chr(39))})", "merge"
+            line = err.replace('"', "'")   # quote-free, so it can ride a ROLLOUT-STATUS reason=
+            reason, waits = f"{HOLD_UNTIL_PREFIX} {pr} merges (gh: {line})", "merge"
         elif state == "MERGED":
             reason, waits = None, None
         else:
