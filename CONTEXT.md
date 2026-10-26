@@ -59,7 +59,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   written: each task still to start gets its **Readiness grade**, One call
   and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
   stay out with their Dependent closure; it runs no plan gate (ADR 0047). Not
-  schedule step 8's "Pre-flight —" report blocks, nor a Leg's preflight.
+  schedule step 8's "Checklist —" report blocks (called "Pre-flight —"
+  before ADR 0047), nor a Leg's preflight.
   _Avoid_: preflight check, dry run.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
@@ -851,7 +852,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   against it; a gate passed under the Standing approval does not.
   _Avoid_: autonomy score, automation rate.
 - **Grade log** — `grades.jsonl` beside the Run record: one line per task
-  each estate pass grades, written by `estate-dispatch.py log`. The weekly
+  each estate pass or schedule Pre-flight grades (every schedule run but an
+  orient-all fork, whose estate pass logged them), written by
+  `estate-dispatch.py log`. The weekly
   reading joins each grade to what followed until the task's next grade or
   its close, and reports each grade's hands-off share (of the work it sent
   that landed hands-off, bounced back to Lachy, was regraded or dropped;
