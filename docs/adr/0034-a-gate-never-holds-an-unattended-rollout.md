@@ -7,6 +7,8 @@ paused the rollout until sign-off; from the 2026-10-13 orient grill of
 *(Amended by ADR 0038, 2026-10-18: a spend Gated input is one line, `spend: <what> — cap N USD`, with the split
 in sub-bullets; the planner is taught it and the plan judge enforces it; the pricer is unchanged; an undelivered
 needs-you push falls back to ntfy.)*
+*(Amended 2026-10-27 by p30-8, § Amendment below: spend is never asked ahead; the standing approval's limit is also a
+calendar-month line.)*
 
 ## Context
 
@@ -86,3 +88,71 @@ nothing can be signed before a plan words its gate; some gates will always first
 - **Install before write.** An installed `rollout-settings.py` older than this change refuses the unknown key, which
   would refuse every rollout's settings (and `auto_retries` with them), so `[defaults] spend_approval_usd` is written
   only after the plugin that knows it is installed.
+
+## Amendment (2026-10-27, p30-8: spend is never asked)
+
+From Chorus ADR 0108 d4 (`docs/adr/0108-upkeep-the-companion-does-the-machinery-and-learns-his-choices.md` in the
+Chorus repo), grilled at Chorus's seventeenth orient, 2026-10-23. Lachy's words: "I have never denied a spend ever …
+my time is far more important than you asking me about $5 here or $10 there … just go ahead and do it."
+
+- **Decision 2 no longer covers spend.** Schedule § 3.6 and orient's R3 (c) record a spend smell and never ask it:
+  the task keeps its `plan_approval: required` stamp, and step 7 (or orient's R5.2) writes ADR 0038 d2's Planner line
+  alone under `## Decisions (recorded <YYYY-MM-DD>)`, a heading reflect.py's `ASKED_AHEAD_RE` never reads as asked.
+  A limit Lachy names unprompted is still recorded exactly as before (`spend_approval_usd: <N>` above the standing
+  approval, and the `## Decisions (asked ahead <date>)` section at any amount) and never asked again. Credential
+  and irreversible gates are unchanged: still asked ahead, signed into `## Approved gates`.
+- **The limit.** Lachy set `[defaults] spend_approval_usd = 200` in his `~/.config/thread/rollouts.toml` by hand on
+  2026-10-23. The built-in stays 0 (off), because the plugin is public: for anyone else "never asked" means a spend
+  gate reaches them mid-run, and schedule step 8 says so. No skill hard-codes 200 except as an example.
+- **The month line.** A gate the per-gate limit covers is signed only while this calendar month's standing-approved
+  spend, with it, stays within the same resolved limit (task, rollout, file, built-in; inclusive, as `covered()` is).
+  The ledger is the rollout notes' `## Needs-you log`: `approve-gates --standing` appends one
+  `- <stamp> [[<slug>]] signed under the standing approval: US$<x> (month to date US$<m> of US$<t>, <source>): <gate>`
+  line per gate it signs, and sums this month's such lines (the mark right after the line's first wikilink, inside
+  the section) over the `--rollout` note and every note directly in the tasks dir, `Archive/` and
+  `Archive/Rollouts/` whose name is a dated rollout note's (`-rollout-<YYYY-MM-DD>[-N].md`), each once by real path,
+  plus the call's own earlier signings. The month and the stamp are local time. A gate already in
+  `## Approved gates`, or listed twice, is counted and logged at most once. A gate past the line is an `ASK:` naming
+  it, and reaches Lachy as an ordinary (a) item.
+- **The lock and the write order.** The read takes a machine-wide `standing-spend.lock` beside the note locks (never
+  on `--dry-run`), held to the call's last save; note locks are taken inside it, never it inside one. A lock not
+  taken in time is exit 1, and nothing written for any slug that needed the month read (taken lazily, it is never
+  needed by a gate already approved, over the limit or bounced). Per slug the log line is saved first, then the task
+  note, so a failure between the two over-counts: it fails closed.
+- **Fail-closed reads.** A dated rollout note that cannot be read, or a directory that exists but cannot be listed,
+  is an `ASK:` naming it, never a blind signing; a missing `Archive/` is skipped.
+- **ADR 0038 d2.** Its Planner line, once written only with an ask-ahead answer, is now written on every spend-smell
+  task, recorded, never asked.
+
+Accepted residuals:
+
+- (i) The line is each task's resolved limit, so a `[repo."o/r"]` table or a task stamp gives that task another line
+  over the one machine-wide sum.
+- (ii) A recurring per-month cap counts once, in the month it was signed.
+- (iii) A gate re-signed (a changed cap, a re-gated task) counts again: an over-count.
+- (iv) Lachy's own bare sign-offs are not counted: d4 counts Upkeep spend, what went ahead without him.
+- (v) Caps are summed, not actual spend: an over-count.
+- (vi) Engine snapshots (ADR 0043). A rollout cut before this change runs its snapshot's older `approve-gates
+  --standing` until it moves (a hard pause's Reinstate, or a serial chain's first Leg after a `stopped` close) or
+  finishes, so its signings, up to the per-gate limit, take no month check, no lock and no log line, and stay
+  outside the month sum; a sign-off pause never moves, so its Reinstate signs the old way too. The window closes when
+  the last pre-change snapshot retires, and nothing can be migrated, since no old line exists. Summing the old
+  engine's `## Approved gates` standing annotations from task notes was considered and rejected: the task names the
+  Needs-you logs as the ledger, and that sum would read every task note on each call.
+- (vii) Chorus's own Upkeep spend (Chorus ADR 0099's Spill) is not in these logs.
+- (viii) A hand-edited or deleted log line under-counts, and a legacy undated `<slug>-rollout.md` note (none live
+  today) counts only as `--rollout`.
+- (ix) orient-all's Sign-off round is unchanged. Its `rounds` never asks a hard-paused rollout's gate, and a pending
+  spend gate on a running or sign-off-paused rollout has already been through the standing approval (step 1.2, or
+  before `await-sign-off`), so it is over the limit, past the month line, unpriceable or bounced: an ask d4 keeps. The
+  remainder, a gate left under an older, lower limit or last month's line on a sign-off-paused rollout, reaches
+  Lachy there before the Reinstate's standing approval would sign it; signing it there is his own act.
+- (x) orient-all's Leverage is unchanged too: `estate-rank.py` charges a sign-off (`REVIEW_MINUTES`' `signOff`) for a
+  gate of any kind, `spend` included, so a spend-only task the standing approval would sign ranks as if it cost Lachy
+  a sign-off. The ranker reads a gate's kind from the grade, never its price, and cannot see the operator's limit or
+  the month line, so it cannot tell a spend gate that will be signed from one that will ask; with the built-in 0 (off)
+  every spend gate asks and the charge is right. The over-charge only lowers that task's leverage, never hides an
+  ask. readiness-grade.md § Leverage says so, and estate-rank's test 6 pins it (`que-call`, spend only, `signOff: 1`).
+- (xi) A month-line `ASK:` on a running rollout is re-judged only under a new step-1.2 key, a new lead session or a
+  Reinstate, never at the turn of the month mid-session; until then it reaches Lachy. A timezone change shifts a
+  boundary line by hours.

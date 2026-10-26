@@ -19,7 +19,11 @@ falling back to a transcript scan for history, and:
               reason="held until …", execute §4.5 step 1.5, vault-grammar
               § Hold until),
               or a Trickle wait stands (`next` holds a task on the machine-wide
-              Trickle, execute §4.5 step 1.6, Chorus ADR 0104); its
+              Trickle, execute §4.5 step 1.6, Chorus ADR 0104) or an Away-cap
+              wait does (on the machine-wide Away cap while Lachy is Away,
+              ADR 0049), or a last-starts
+              wait stands (`next` holds a task on the last starts, with its
+              reason="last start: …", §4.5 step 1.6, Chorus ADR 0104 d4); its
               notification or the heartbeat cron is the wake signal)
   halted   -> allow + clear driver state (a §7 stop condition; human's turn)
   done     -> allow + clear driver state (completion ceremony performed)
@@ -213,7 +217,10 @@ def main():
             "background Integration command or a merge hold is in flight, a retry cool-down is pending "
             "(with its reason=\"…\", §4.5 step 1.5), a PR hold waits on its merge (`next` reports `halt: held`, "
             "with its reason=\"held until …\", §4.5 step 1.5) or a Trickle wait stands (`next` holds a task on the "
-            "Trickle, with its reason=\"trickle: …\", §4.5 step 1.6), state=halted with reason=\"…\" if a §7 stop "
+            "Trickle, with its reason=\"trickle: …\", §4.5 step 1.6) or an Away-cap wait does (on the Away cap, "
+            "with its reason=\"away cap: …\"), or a last-starts wait stands (`next` holds a "
+            "task on the last starts, with its reason=\"last start: …\", §4.5 step 1.6), state=halted with "
+            "reason=\"…\" if a §7 stop "
             "condition fired, or state=done after the completion ceremony. Do not end the turn while "
             "state=running."
         ),
