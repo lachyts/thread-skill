@@ -63,7 +63,21 @@ fix this rollout                     # resolves to the rollout in context
 
 Resolve `[[<slug>]]` (ask if ambiguous): `~/repos/obsidian/Work/Tasks/<slug>.md`, else
 `Work/Tasks/Archive/Rollouts/<slug>.md`, a rollout whose completion ceremony already ran (§ 3a's
-complete-rollout stop). Run the **`/thread:status` scan with the live cross-check on**
+complete-rollout stop).
+
+**Engine snapshot first (ADR 0043).** Whichever session runs it, repair takes its scripts and prose from the
+rollout's own engine root (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/engine-snapshot.md`), and so does the execute
+hand-off it ends in.
+This text's prose id: `$Id$` (git `ident`, engine-snapshot.md): pass its hex as `--prose-id`; when it shows no hex, pass none.
+Before any other read, run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py resolve --rollout <rollout-note> --verb repair --prose-id <id>`.
+Its `root` is the engine root for every command below, and the hand-over is execute § 1.5's: when `prose.identical`
+is true keep following this text with `<root>` in place of the rendered root, else read
+`<root>/skills/repair/SKILL.md` as a file and follow it from § 1 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`).
+Repair never moves a rollout's snapshot: a hand-off cuts nothing. Exit 3 (the snapshot is gone, moved or edited)
+stops the run before anything is written: print its stderr line, which carries the remedy. A guarded script run
+from another root refuses with an `engine-snapshot:` line and writes nothing: re-run it once from the root that
+line names. Another rollout's commands (a lineage close-out) run from that rollout's own `resolve` root. Run the **`/thread:status` scan with the live cross-check on**
 (repair is about to act, so it always checks reality): the per-task queue state, each task's
 `lead-integrate.py inputs`, the drift flags and the repo path. On a `shape: serial` note the scan is status § 5's
 `leg.py status` instead, with no live cross-check: a chain has no PRs and no lead. Show the user the situational

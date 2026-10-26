@@ -828,6 +828,13 @@ of blank lines collapsed). The content is written neutralised: a heading at leve
 three levels down and a run-end-shaped line is indented, so feedback text can never end its section or
 open or close a run (the sha stays over the content as given). See Note.append_run for the rules; nothing
 already written is ever deleted.
+
+The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb that takes --rollout (carry: its
+--from), but `status` and `fold-journals` (cross-version readers), first asks engine-snapshot.py's guard(), loaded
+from this tree: when the note's `engine_snapshot:` names another usable snapshot than this plugin root, or a live
+note's snapshot is unusable, it prints the guard's `engine-snapshot: ` line on stderr, writes nothing and exits 2.
+Re-run the same command from the root the line names. An unstamped note, and an archived one whose snapshot is gone,
+pass from any root.
 """
 
 import argparse
@@ -7438,7 +7445,33 @@ def main() -> int:
     gpr.set_defaults(func=cmd_gate_pricer)
 
     args = p.parse_args()
+    refusal = _engine_guard(args)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 2
     return args.func(args)
+
+
+# engine-snapshot.py, this tree's own copy (ADR 0043): loaded only for the guard, as _ladder() loads ladder.py.
+ENGINE_SNAPSHOT_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "engine-snapshot.py"
+GUARD_EXEMPT = ("status", "fold-journals")   # cross-version readers: any root reads them
+
+
+def _engine_guard(args):
+    """The guard's refusal line for this call's rollout (the module docstring's Engine snapshot guard), else None."""
+    if args.cmd in GUARD_EXEMPT:
+        return None
+    note = getattr(args, "from_", None) if args.cmd == "carry" else getattr(args, "rollout", None)
+    if not note:
+        return None
+    try:
+        sys.dont_write_bytecode = True
+        spec = importlib.util.spec_from_file_location("thread_engine_snapshot", ENGINE_SNAPSHOT_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # an engine-snapshot.py that will not load guards nothing (only positive evidence refuses)
+        return None
+    return mod.guard(note, ENGINE_SNAPSHOT_PY.parent.parent.parent.parent, "skills/execute/scripts/reconcile-rollout.py")
 
 
 if __name__ == "__main__":

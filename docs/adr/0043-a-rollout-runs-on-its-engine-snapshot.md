@@ -30,4 +30,7 @@ Every rollout lead, in any repo, runs its scripts, its Workflow engine (`skills/
   - what a reader across rollouts reads (the Run record a Reflection or the Watchdog reads, the notes the Trickle counts).
 - **The rollout settings file stays readable by an older snapshot.** Today `rollout-settings.py` refuses a key it does not know (p15-4, ADR 0032), so one paused rollout on an older snapshot would refuse every newer key and halt. Instead the file carries its schema version, and a snapshot ignores a key newer than itself while it still refuses a typo, so a new key can be written at any time.
 - The snapshot does not cover the plugin's hooks, which run from the Primary checkout, so the Stop-hook driver and the line it parses stay compatible with every snapshot still running.
-- A session's rendered skill comes from the Primary checkout, so a lead reads its prose from the snapshot as a file.
+- A session's rendered skill comes from the Primary checkout, so a lead reads its prose from the snapshot as a file, unless the rendered text's git `ident` prose id is the snapshot's own; a disk hash is never that evidence (`skills/_shared/engine-snapshot.md`).
+- A serial chain is never paused, so its Reinstate is the first Leg begun after a Leg closed `stopped`; a halted, stuck, lost or handed-off Leg moves nothing.
+- A sign-off pause (ADR 0034) is the engine's own pause, not the moment Lachy chose, so its reinstate moves nothing and its signed-gate handles keep their cache replay; the next hard pause, then `/thread:execute`, moves it.
+- Retirement waits a grace (24 h) after the archive, so a Leg's close still runs on its snapshot; past the grace, close re-resolves to the unstamped root, where the guards pass.

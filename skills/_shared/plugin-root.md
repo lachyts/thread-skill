@@ -26,7 +26,9 @@ Whenever the command comes from a plugin file you read rather than the skill tha
   `execution-fit.md` (schedule, execute, orient), `handoff-lifecycle.md`, `process-scan.md`,
   `readiness-grade.md` (orient-all), `orient/reshuffle.md`;
 - a SKILL.md read from source with `sed` (after a mid-session pull or release, when the rendered body is
-  stale).
+  stale);
+- a rollout verb's SKILL.md (schedule, execute, status, repair) read from that rollout's Engine snapshot after
+  its hand-over (`engine-snapshot.md`), and execute's `legs.md` read from the same root.
 
 A command in the SKILL.md that was rendered for this turn already carries an absolute path; it needs nothing.
 
@@ -37,7 +39,9 @@ A command in the SKILL.md that was rendered for this turn already carries an abs
    `/Users/me/repos/tools/thread-skill/skills/_shared/task-writer.md` → `/Users/me/repos/tools/thread-skill`.
    The rendered skill that sent you there named that file by its absolute path, so the root is always in
    hand. Never derive it another way: no `find`, no guess at `~/.claude/plugins/cache/…` (a stale cache runs
-   old scripts), no root from a different checkout or worktree than the file you read.
+   old scripts), no root from a different checkout or worktree than the file you read. A rollout's commands take
+   their root from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/engine-snapshot.md` (its engine root, the `root` that
+   `engine-snapshot.py resolve` prints), even in rendered text.
 2. **Export it at the start of every Bash tool call that runs such a command**, then the command unchanged:
 
    ```bash

@@ -16,7 +16,7 @@
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
 #           refused by `next`, reported by `status` and the check, until a completed supersede closes it.
 #   I8      § 0's interrupted finish after step 6's carry already ran still prints the prior's `order` lines (p17-2)
-#   R1-R4   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031)
+#   R1-R5   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031), never a snapshotted rollout (R5, ADR 0043)
 #   S1-S13  shapes (ADR 0040, p24-2): the parallel check skips serial notes and refuses a run on a place a live serial
 #           chain writes, before any supersede (S2c), never a clone root beside an in-place chain (S13, ADR 0042); the serial check (`--shape serial --surface <token>...`) refuses a
 #           chain over a live chain's surface or an unfinished parallel rollout's Project root, supersedes nothing,
@@ -1225,6 +1225,12 @@ run
 has "$out" "running ro-ceremony" "R3: every task done but its completion ceremony not run: still running"
 run --tasks-dir "$S/nowhere"
 ok "$rc|$out" "0|none" "R4: a missing tasks dir (no vault) → none"
+# R5 (ADR 0043): a rollout on its Engine snapshot never runs on the primary checkout, so it holds nothing
+mkro ro-snap.md "$R" 'engine_snapshot: "~/repos/tools/plug-snapshots/0123456789ab"' "engine_sha: $(printf '0%.0s' $(seq 40))"
+mkt t-snap.md ro-snap open "owner: lead"
+run
+hasnt "$out" "ro-snap" "R5: a started rollout stamped engine_snapshot: is never running"
+has "$out" "running ro-live" "R5: … an unsnapshotted one still is"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

@@ -149,7 +149,11 @@ Subcommands:
       Now, in reconcile's `_stamp` form (the integrate call's startedAt, log-integration's --started).
 
 Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo, prepare without
-integrating:), 2 usage or environment, 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`). Stdlib only; `Note` and `_stamp` come from
+integrating:), 2 usage or environment, or the Engine snapshot guard (ADR 0043: prepare and set-aside first ask
+engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
+call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
+unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, plan, verify,
+push, undo and stamp are exempt), 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
 (`git rev-parse --local-env-vars`) scrubbed. The engine copies (ANCHOR_RECIPE, the branch and tree names,
 the merge message, integrationMarker, parseIntegrationMarker, stageDiagnosis's escape, and inputs --row's
@@ -1461,6 +1465,23 @@ def _sha(value):
     return value
 
 
+# The verbs that act on one task of a rollout from the lead's root (ADR 0043): its Integration and its own set-aside
+# row. inputs and plan are readers (status reads inputs); verify, push and undo follow a guarded prepare in one flow.
+GUARDED = ("prepare", "set-aside")
+
+
+def _engine_guard(note, tasks_dir):
+    """engine-snapshot.py's guard_task() for the task note's rollout, loaded from this tree: its refusal, else None."""
+    try:
+        src = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "engine-snapshot.py"
+        spec = importlib.util.spec_from_file_location("thread_engine_snapshot", src)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # only positive evidence refuses
+        return None
+    return mod.guard_task(note, mod.ROOT, "skills/execute/scripts/lead-integrate.py", tasks_dir)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="The lead's side of Integration (ADR 0030 decision 3, p12-9).")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1516,6 +1537,11 @@ def main(argv=None):
     sub.add_parser("stamp", help="now, in reconcile's _stamp form")
 
     args = p.parse_args(argv)
+    if args.cmd in GUARDED:
+        refusal = _engine_guard(args.note, getattr(args, "tasks_dir", None))
+        if refusal:   # ADR 0043: before any git call; nothing fetched, merged or printed
+            print(refusal, file=sys.stderr)
+            return 2
     try:
         if args.cmd == "stamp":
             print(rr._stamp(datetime.now()))
