@@ -546,10 +546,27 @@ through time, from attention to merged PRs. Terms only — no implementation.
   lead's Integration and RACE verifies, and the integrate call's own verifier
   runs (`run --priority`), go before any task call's agent. Not a **Slot** (a
   task's run in a Queue). _Avoid_: bare "slot", lock, semaphore.
+- **Checkpoint** — one of the two moments per task where the full suite (the
+  rollout's `verifier:`) runs: a code-writing agent's last check before it
+  opens or updates its PR (the implementer's, and each reviser's), and
+  Integration before the merge (estate ADR 0009 d1; the estate's own
+  `CONTEXT.md` § The Mac's load). The engine renders the verifier there, and
+  elsewhere only when a task brief asks for the full suite. Not the
+  **Cursor** (a saved position). _Avoid_: final run, full check.
+- **Touched tests** — the test files that reach what a change touched, run
+  between Checkpoints: each Ralph try of an implementer or a reviser (touched
+  tests, then the verifier once before it hands back), a reviewer's own check
+  and a planner's or investigator's observation (estate ADR 0009 d1). An agent
+  finds them by the rollout's optional `touched:` pattern (`{module}` for each
+  changed module), else the repo's `CLAUDE.md`/`AGENTS.md` Tests line when it
+  says how to run one file's or module's tests (a line naming only the full
+  suite falls through), else the test files importing the changed modules.
+  They take no **Verify slot**. _Avoid_: quick tests, smoke tests, partial
+  suite.
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
-  _Avoid_: checkpoint, pointer, progress marker.
+  _Avoid_: checkpoint (a **Checkpoint** is a full-suite moment), pointer, progress marker.
 - **Primary checkout** — the git checkout the plugin runs from, live (a
   directory-source install, or `--plugin-dir`): sessions render their skills
   and run their hooks from it, but no **Engine snapshot** is cut from it, so
