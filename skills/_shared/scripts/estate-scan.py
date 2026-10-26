@@ -293,7 +293,8 @@ def in_flight(status, live):
 
 def _link_key(link):
     """A link or a note path as the lower-case basename it names, estate-rank.py's slug_key fold written here (that
-    script loads this one): `[[`/`]]`, an `|alias`, a `#heading` and the path cut, `.md` dropped."""
+    script loads this one): `[[`/`]]`, an `|alias`, a `#heading` and the path cut, `.md` dropped. The two must fold
+    every value alike (still_to_start's matches against preflight's): tests/estate-scan.test.mjs 18 pins them."""
     s = str(link).strip()
     if s.startswith("[[") and s.endswith("]]"):
         s = s[2:-2]

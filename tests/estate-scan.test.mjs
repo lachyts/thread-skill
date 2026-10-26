@@ -917,16 +917,24 @@ test("17. clones: a clone's own ahead set keeps the strict rule; a stale clone l
 
 // ---- 18. still_to_start: the Pre-flight's exception to § In flight -------------------------------------------------
 // schedule § 1.5 (ADR 0047) grades a carried task still queued on a supersede: open, its `rollout:` naming the rollout
-// being superseded. still_to_start reads the status as NA.status_of does and folds the link and the prior as
-// estate-rank's slug_key does. Loaded by path; importing estate-scan.py runs nothing and writes no bytecode.
+// being superseded. still_to_start reads the status as NA.status_of does and folds the link and the prior with
+// _link_key, which must stay estate-rank's slug_key byte for byte: rank, slices and record read still_to_start, and
+// preflight matches candidates by slug_key, so the two folds may never drift apart. Both are loaded by path; importing
+// either script runs nothing and writes no bytecode.
 test('18. still_to_start: open and linked to the rollout being superseded, under the slug fold; anything else is not', () => {
   const PY = `
 import importlib.util, json, sys
 sys.dont_write_bytecode = True
-s = importlib.util.spec_from_file_location("thread_estate_scan", sys.argv[1])
-m = importlib.util.module_from_spec(s)
-s.loader.exec_module(m)
-print(json.dumps([m.still_to_start(st, link, sup) for st, link, sup in json.loads(sys.argv[2])]))
+def load(name, path):
+    s = importlib.util.spec_from_file_location(name, path)
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m
+m, er = load("thread_estate_scan", sys.argv[1]), load("thread_estate_rank", sys.argv[2])
+rows = json.loads(sys.argv[3])
+folds = [v for _, link, sup in rows for v in (link, sup)] + json.loads(sys.argv[4])
+print(json.dumps({"got": [m.still_to_start(st, link, sup) for st, link, sup in rows],
+                  "drift": [[v, m._link_key(v), er.slug_key(v)] for v in folds if m._link_key(v) != er.slug_key(v)]}))
 `
   const rows = [
     ['open', 'prior', 'prior', true],
@@ -947,9 +955,13 @@ print(json.dumps([m.still_to_start(st, link, sup) for st, link, sup in json.load
     ['open', '', 'prior', false],
     ['open', null, 'prior', false],
   ]
-  const r = spawnSync('python3', ['-c', PY, SCRIPT, JSON.stringify(rows.map((x) => x.slice(0, 3)))],
+  // More values for the fold alone: a backslash path, padding, an empty link, a heading and alias together.
+  const extra = ['Work\\Tasks\\Prior.MD', '  [[ prior ]]  ', '[[]]', '[[Prior#Queue|q]]', 'a/b/', '.md', 'x.md.md']
+  const RANK = path.join(root, 'skills', '_shared', 'scripts', 'estate-rank.py')
+  const r = spawnSync('python3', ['-c', PY, SCRIPT, RANK, JSON.stringify(rows.map((x) => x.slice(0, 3))), JSON.stringify(extra)],
     { encoding: 'utf8', env: { ...base, PYTHONDONTWRITEBYTECODE: '1' } })
   assert.equal(r.status, 0, r.stderr)
-  const got = JSON.parse(r.stdout)
+  const { got, drift } = JSON.parse(r.stdout)
   rows.forEach((row, i) => assert.equal(got[i], row[3], JSON.stringify(row)))
+  assert.deepEqual(drift, [], "estate-scan's _link_key and estate-rank's slug_key fold every value alike")
 })

@@ -225,7 +225,9 @@ def canon_grade(v):
 
 
 def slug_key(link):
-    """A dependency link or a graded slug, as the lower-case basename it names (`[[Work/Tasks/X|a]]` -> `x`)."""
+    """A dependency link or a graded slug, as the lower-case basename it names (`[[Work/Tasks/X|a]]` -> `x`).
+    estate-scan.py's _link_key is the same fold, written there for still_to_start; tests/estate-scan.test.mjs 18 pins
+    the two alike."""
     s = str(link).strip()
     if s.startswith("[[") and s.endswith("]]"):
         s = s[2:-2]
