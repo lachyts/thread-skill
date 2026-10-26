@@ -7,9 +7,11 @@ its AskUserQuestion payloads (`rounds`), works out which runs go once the answer
 start and with what (`sessions`), and writes each answer into its task note (`record`); `slices` cuts the scan into
 the grading agents' inputs, and `log` keeps the pass's grades in the Grade log. `preflight` is schedule's Pre-flight
 split (ADR 0047): which candidates queue, which leave with their Dependent closure, and the decision round for one
-rollout's tasks. Two callers: skills/orient-all/SKILL.md, and skills/schedule/SKILL.md § 1.5 (and its serial path's
-S3.5), which runs `slices`, `log`, `preflight` and `record` (`record --by schedule`), and under orient-all only
-`preflight`. This docstring is the only copy of the output schemas. python >= 3.9 with PyYAML (`log` and `preflight`
+rollout's tasks. `decided-for-you` writes the calls a grade ruled for Lachy, never asked (ADR 0054), into the tasks a
+schedule run queues. Two callers: skills/orient-all/SKILL.md, and skills/schedule/SKILL.md § 1.5 (and its serial
+path's S3.5), which runs `slices`, `log`, `preflight`, `record` (`record --by schedule`) and `decided-for-you --by
+schedule --write`, and under orient-all only `preflight` and `decided-for-you --by orient-all --write`; orient's
+reshuffle R5.2 runs `record --owner --by orient`. This docstring is the only copy of the output schemas. python >= 3.9 with PyYAML (`log` and `preflight`
 need none). Called as:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py slices --scan FILE --dir DIR
@@ -21,20 +23,25 @@ need none). Called as:
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan FILE [--wrote PATH]...
         [--status SLUG=N]... [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task SLUG|PATH --question Q
-        --answer A --recommended R [--fork F] [--by orient-all|schedule] [--superseding PRIOR] [--today YYYY-MM-DD]
+        --answer A (--recommended R [--fork F] | --owner priorities|technical [--why W]) [--by orient-all|schedule]
+        [--superseding PRIOR] [--today YYYY-MM-DD] [--vault PATH]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py decided-for-you --rank FILE
+        --tasks SLUG[,SLUG]... [--by orient-all|schedule] [--superseding PRIOR] [--write] [--today YYYY-MM-DD]
         [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank FILE --scan FILE [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank FILE --scan FILE
         --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...
 
 Defaults: rounds, plan and sessions take the vault from the scan's (or the plan's) `vault`; record takes
-~/repos/obsidian and the local date. Only `slices` (its own files under --dir), `record` (one task note) and `log`
-(grades.jsonl, through run_record) write; rounds, plan, sessions and preflight write nothing and are
-byte-deterministic for the same inputs. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before
+~/repos/obsidian and the local date, decided-for-you ~/repos/obsidian and the rank's `today`. Only `slices` (its own
+files under --dir), `record` (one task note), `decided-for-you --write` (the task notes it names) and `log`
+(grades.jsonl, through run_record) write; rounds, plan, sessions, preflight and decided-for-you without --write
+write nothing and are byte-deterministic for the same inputs. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before
 any sibling loads). Exit 0 when done; 1 when `log` cannot write a line (run_record's warning above it; orient-all § 8
 and schedule step 8 report it as a caveat); 2 on a usage error or a refusal (one `estate-dispatch:` stderr line,
 nothing written): an unknown verb or flag, a scan, rank or plan that is not JSON or whose `schema` is not 1, a
-negative budget, a bad --status or --wrote, an existing slice file, every record refusal, a grade line whose field
+negative budget, a bad --status or --wrote, an existing slice file, every record refusal, an empty
+decided-for-you --tasks, a grade line whose field
 run_record refuses (a task whose name is no slug is skipped, never refused), and preflight's own refusals (an empty
 --tasks; a --kept, --decided or --dep slug outside --tasks; a --dep not given as A=B); 3 when the vault, PyYAML or a
 sibling script is missing.
@@ -80,9 +87,13 @@ rounds --rank R --scan S --budget N [--top K=15] [--vault V]: the decision round
   question opens with `[[slug]]` or `[[project]]`, so every text is unique. A label is at most LABEL_MAX chars, "
   (Recommended)" counted: a longer option is asked as `<k>. <leading words>…` (k its 1-based place, so labels stay
   distinct), its description opening with the full text. A One call's options are the decision's, the recommendation
-  first and marked " (Recommended)", its description the grader's why; a sign-off's are `Sign off` (its description
-  lists exactly the gates[] it signs) and `Not now`; an Unpark offer's are unpark, snooze and kill (the kill names the
-  project's open tasks). Sign-offs and Unpark offers carry no recommendation.
+  first and marked " (Recommended)", described by framing(): with the decision's `stakes` (one line per option, ADR
+  0054 d8), each option's stakes line, the recommended one's ending " Recommended: <why>"; without, the grader's why
+  on the recommendation and the bare label on the rest. A One call's text is `[[slug]] <question>`, then its `goal`
+  when it has one, then NOTE_INVITE; a sign-off's are `Sign off` (its description lists exactly the gates[] it signs)
+  and `Not now`; an Unpark offer's are unpark, snooze and kill (the kill names the project's open tasks). Every
+  question ends with NOTE_INVITE; sign-offs and Unpark offers carry no recommendation (the authorisation is his, ADR
+  0008; parking is his standing call, ADR 0041).
   Output: {schema, today, budget, top[] {rank, slug, home, grade, shape, size, leverage, dueSoon, deadline, review,
   blockedBy}, live[] {slug, note, shape, progress, paused, pausedFor, pauseRequested, awaitingSignOff, live,
   pendingSignOffs[], error}, signOffs[], oneCalls[] {slug, home, minutes, decision, blockedBy}, unpark[] (the rank's
@@ -163,7 +174,8 @@ log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; 
   orient-all § 2 step 7 (never on a dry run) and at schedule § 1.5 on every run that grades (all but an orient-all
   fork, whose estate pass logged them). One run_record `grade` line per rank tasks[] entry, Orient included, in rank order:
   task its slug (run_record's normalise_slug), project its home, grade, agentGrade, shape and size; decisions the
-  count of its decisions[] and low those whose confidence is low; held true when its blockedBy[] is non-empty; gates
+  count of its decisions[], his decisions only (owner yours, ADR 0054: a decision ruled for him, in decidedForYou[], is
+  never counted, so lines before ADR 0054 are not comparable), and low those whose confidence is low; held true when its blockedBy[] is non-empty; gates
   its gates[]; raised the `why` of each raised[] step, when there is one; rank when it is not null; linked the scan
   row's `rollout`, through run_record's normalise_slug, when it is a slug and not a reserved name. The pass shares one
   minted id, g-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>, and one ts, and its digest is the first 12 hex of sha1 over the rank
@@ -193,6 +205,20 @@ record --task SLUG|PATH --question Q --answer A --recommended R [--fork F] [--by
   else opens that section at the note's end (schedule step 7's form). --fork also appends RULING_LINE (orient § 5's) as the last `## Notes`
   line. One in-place write (the inode kept), printing `recorded <note>: <Q> → <A>`; nothing to add prints
   `<note>: <Q> → <A> [no-change]`, exit 0.
+  --owner priorities|technical writes a call made for Lachy instead (ADR 0054 d3): the bullet
+  `- <Q> → <A> (decided for you at /thread:<B>, <owner>: <W>)` (`: <W>` dropped with no --why) under DECIDED_HEADING
+  of the same date, a new section opening with DECIDED_PREAMBLE; never under DECISIONS_HEADING. It takes no
+  --recommended, and --fork with it exits 2 (an open fork stays his); --by orient (reshuffle R5.2) is allowed only
+  with --owner. The same refusals hold. Without --owner, --recommended is required.
+
+decided-for-you --rank R --tasks SLUG[,SLUG]... [--by B] [--superseding PRIOR] [--write] [--today D]: the calls the
+  rank ruled for Lachy (each task row's decidedForYou[], the less sure first) for the named tasks, matched by
+  ER.slug_key, in --tasks order and then the rank's. Output: {schema, today, items[] {slug, note, question, answer
+  (the recommendation), options[], owner, confidence, why}, skipped[] {slug, why: not in the rank}, written[] {slug,
+  question}, unchanged[], refused[] {slug, question, why}}. Read-only without --write. With --write, each item goes
+  through record's core with --owner (its own owner) and --by B: a refusal (a task in flight since the scan, say) is
+  listed in refused[] and the rest are still written, exit 0; a rerun is all unchanged. Exit 2 on a usage error, a
+  rank that is not JSON or not schema 1, or an empty --tasks; 3 when --write finds no vault or no PyYAML.
 
 preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...: schedule
   § 1.5's split of its candidates (ADR 0047). It reads only the two files. --tasks is every candidate, deduplicated
@@ -215,10 +241,12 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   `dependency`, via the first such dependency.
   The round: one question per AskUserQuestion call, each candidate still out undecided or ungraded after the closure,
   so never a task already out through an Orient dependency, which leaves whatever the answer: the One calls in rank
-  order (`[[slug]] <question>`), then each Grill's decisions in rank order (`[[slug]] (k/n) <question>`), then the
-  ungraded in --tasks order (`[[slug]] could not be graded (<reason>): leave it out of this rollout, or queue it as it
-  stands?`, UNGRADED_OPTIONS, `Leave it out` recommended). Options are built as rounds builds them (label_for, the
-  recommendation first and marked); HEADERS gives each header. An ungraded answer is never recorded (schedule § 1.5).
+  order (`[[slug]] <question>`), then each Grill's decisions in rank order (`[[slug]] (k/n) <question>`), each text
+  followed by its `goal` when it has one and NOTE_INVITE (framing(), as rounds), then the ungraded in --tasks order
+  (`[[slug]] could not be graded (<reason>): leave it out of this rollout, or queue it as it stands? <NOTE_INVITE>`,
+  UNGRADED_OPTIONS, `Leave it out` recommended, its description and UNGRADED_WHY saying why over his autonomy). Only
+  his decisions are asked: the rank's decisions[] hold only those (ADR 0054). Options are built as rounds builds them
+  (label_for, the recommendation first and marked, framing()'s descriptions); HEADERS gives each header. An ungraded answer is never recorded (schedule § 1.5).
   Output: {schema, today, counts {candidates, graded, ready, oneCall, grill, orient, ungraded, kept, decided, in, out}
   (graded, the grades and ungraded over the candidates not kept), tasks[] {slug, grade, decided, in, why, via?,
   reason?}, queue[] (the slugs in, in --tasks order), out[] {slug, grade, why, via?, reason?, home?, note?}, asks[][]
@@ -254,17 +282,25 @@ VAULT_DEFAULT = "~/repos/obsidian"
 ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 FENCE = re.compile(r"^\s*(```|~~~)")
 
-# AskUserQuestion's shape, as far as this script builds it (orient-all § Risks: assumed, not read from the tool).
+# AskUserQuestion's shape, as far as this script builds it (orient-all § Risks: assumed, not read from the tool); who is
+# asked and how: `skills/_shared/asking.md`.
 QUESTIONS_MAX = 4
 LABEL_MAX = 40
 RECOMMENDED = " (Recommended)"
 ELLIPSIS = "…"
 HEADERS = {"sign-off": "Sign-off", "one-call": "One call", "unpark": "Unpark", "grill": "Grill", "ungraded": "Ungraded"}
+# The Framing's Note (asking.md § 3): the last words of every question this script builds (ADR 0054 d8).
+NOTE_INVITE = "What would make this wrong for you?"
 # schedule § 1.5's question for a task the grading could not grade (its options, the recommendation first).
 UNGRADED_OPTIONS = ("Leave it out", "Queue it as it stands")
 UNGRADED_QUESTION = "could not be graded ({why}): leave it out of this rollout, or queue it as it stands?"
-UNGRADED_DESCRIPTIONS = ("Leaves it out of this rollout, with every task that depends on it; the next schedule grades it again",
-                         "Queues it ungraded: an open decision it hides is met at its start, by its plan")
+UNGRADED_DESCRIPTIONS = ("Leaves it out of this rollout, with every task that depends on it; the next schedule grades it "
+                         "again. Recommended over autonomy because nobody could read it for a decision of yours: queued "
+                         "unread, it can build the wrong thing, which costs you more than one schedule's wait",
+                         "Queues it ungraded: it runs this rollout without you, and an open decision it hides is met at "
+                         "its start, by its plan")
+UNGRADED_WHY = ("nobody could read it for a decision of yours; queued unread it can build the wrong thing, and quality "
+                "over speed outweighs one schedule's wait")
 STATUS_OUTSIDE = "status outside Active"  # an ungraded candidate's reason when its own status is the cause
 SIGN_OFF_OPTIONS = ("Sign off", "Not now")
 TOP_DEFAULT = 15
@@ -276,6 +312,14 @@ DECISIONS_HEADING = "## Decisions (asked ahead {date})"
 RULING_LINE = "- {stamp} orient ruling: {fork} → {answer}"
 DECISION_BULLET = "- {question} → {answer} (asked at /thread:{by}; recommended: {recommended})"
 RECORD_BY = ("orient-all", "schedule")
+# A call made for Lachy, never asked (ADR 0054 d3): its own heading, never `## Decisions`, so no reader of a recorded
+# human decision takes it for one (tests/contracts/question-gate.test.mjs q4).
+DECIDED_HEADING = "## Decided for you ({date})"
+DECIDED_PREAMBLE = ("Calls made for Lachy, never asked (ADR 0054): each stands unless the code shows it wrong, a plan that "
+                    "departs from one says why, and none signs a gated input (ADR 0008); he can overturn any here.")
+DECIDED_BULLET = "- {question} → {answer} (decided for you at /thread:{by}, {owner}: {why})"
+DECIDED_OWNERS = ("priorities", "technical")
+DECIDED_BY = RECORD_BY + ("orient",)
 NOTES_HEADING = "## Notes"
 END_MARK = " orient end: "
 FORK_MARK = "fork for Lachy: "
@@ -528,6 +572,25 @@ def label_for(k, full, recommended):
     return prefix + cut + ELLIPSIS + suffix, True
 
 
+def framing(d):
+    """(suffix, descriptions): a rank decision's Framing (asking.md § 3, ADR 0054 d8). The suffix follows the question
+    text: its `goal`, when it has one, then NOTE_INVITE. The descriptions, one per option in the decision's order (the
+    recommendation first): with `stakes` (one non-empty line per option, as estate-rank.py passes it), each option's
+    stakes line, the recommended one's ending " Recommended: <why>"; without, the why on the recommendation and nothing
+    on the rest (Rounds.options shows a bare label then)."""
+    fulls = list(d.get("options") or [])
+    why = d.get("why") or "the grader's recommendation"
+    stakes = d.get("stakes")
+    if isinstance(stakes, list) and fulls and len(stakes) == len(fulls) and \
+            all(isinstance(x, str) and x.strip() for x in stakes):
+        descs = [stakes[0].strip() + " Recommended: " + why] + [x.strip() for x in stakes[1:]]
+    else:
+        descs = [why] + ["" for _ in fulls[1:]]
+    goal = d.get("goal")
+    suffix = (" " + goal.strip() if isinstance(goal, str) and goal.strip() else "") + " " + NOTE_INVITE
+    return suffix, descs
+
+
 class Rounds:
     def __init__(self, M, rank, scan, vroot, budget, top):
         self.M, self.rank, self.scan, self.vroot = M, rank, scan, vroot
@@ -697,6 +760,7 @@ class Rounds:
         if so["bounced"]:
             text += (" The plan judge bounced this plan (ADR 0038): its feedback is under %s."
                      % self.M.RR.GATE_BOUNCE_SECTION)
+        text += " " + NOTE_INVITE  # no pick: the authorisation is his (ADR 0008)
         descs = ["Signs exactly: " + " · ".join(so["gates"]), "Leaves it set aside; nothing is written"]
         opts, labels = self.options(SIGN_OFF_OPTIONS, descs, False)
         questions.append({"question": text, "header": HEADERS["sign-off"], "multiSelect": False, "options": opts})
@@ -707,9 +771,8 @@ class Rounds:
     def one_call_q(self, oc, questions, index):
         d = oc["decision"] or {}
         fulls = [o for o in d.get("options") or []]
-        text = "[[%s]] %s" % (oc["slug"], d.get("question") or "")
-        why = d.get("why") or "the grader's recommendation"
-        descs = [why] + ["" for _ in fulls[1:]]
+        suffix, descs = framing(d)
+        text = "[[%s]] %s%s" % (oc["slug"], d.get("question") or "", suffix)
         opts, labels = self.options(fulls, descs, True)
         row = self.rows.get(oc["slug"]) or {}
         questions.append({"question": text, "header": HEADERS["one-call"], "multiSelect": False, "options": opts})
@@ -726,8 +789,9 @@ class Rounds:
         names = ", ".join(open_tasks[:KILL_NAMES_MAX]) + (
             " and %d more" % (n - KILL_NAMES_MAX) if n > KILL_NAMES_MAX else "")
         sw = u.get("snoozeWrite") or {}
-        text = "[[%s]]: %s. Unpark, snooze or kill it?" % (
-            u["project"], u.get("why") or "parked with %d ready task%s" % (ready, "" if ready == 1 else "s"))
+        text = "[[%s]]: %s. Unpark, snooze or kill it? %s" % (
+            u["project"], u.get("why") or "parked with %d ready task%s" % (ready, "" if ready == 1 else "s"),
+            NOTE_INVITE)  # no pick: parking is his standing call (ADR 0041)
         descs = ["status: queued; its Ready, unheld work starts this pass",
                  "asked again after %s, or sooner if its Ready work grows past %s"
                  % (sw.get("snoozed_until"), sw.get("snoozed_ready")),
@@ -1279,38 +1343,53 @@ def latest_end_forks(lines, span):
     return hit, forks
 
 
-def cmd_record(args):
-    q, a, rec = fold(args.question), fold(args.answer), fold(args.recommended)
-    fork = fold(args.fork) if args.fork is not None else None
+class Refusal(Exception):
+    """A record refusal: its exit code and its one `estate-dispatch:` line (nothing written)."""
+
+    def __init__(self, code, reason):
+        super().__init__(reason)
+        self.code = code
+
+
+def decided_bullet(q, a, by, owner, why):
+    """DECIDED_BULLET, its `: {why}` dropped when there is no why."""
+    form = DECIDED_BULLET if why else DECIDED_BULLET.replace(": {why}", "")
+    return form.format(question=q, answer=a, by=by, owner=owner, why=why or "")
+
+
+def record_core(M, vault, task, question, answer, today, by, recommended=None, fork=None, owner=None, why=None,
+                superseding=None):
+    """(status, line): one answer, or with `owner` one call made for Lachy, into its task note (the module docstring's
+    record paragraph). status is `recorded` or `no-change`, line what `record` prints. Raises Refusal on every record
+    refusal, the file byte-identical. Shared by `record` and `decided-for-you --write`."""
+    NA, ES = M.NA, M.ES
+    q, a = fold(question), fold(answer)
+    rec = fold(recommended) if recommended is not None else None
+    fork = fold(fork) if fork is not None else None
+    why = fold(why) if why is not None else None
     for flag, v in (("--question", q), ("--answer", a), ("--recommended", rec), ("--fork", fork)):
         if v == "":
-            fail(2, "%s is empty" % flag)
-    M = Mods()
-    NA, ES = M.NA, M.ES
-    vroot = os.path.expanduser(args.vault)
-    if not os.path.isdir(vroot):
-        fail(3, "no vault at %s" % vroot)
-    vault = NA.Vault(vroot)
+            raise Refusal(2, "%s is empty" % flag)
     try:
-        rel = vault.resolve_task(args.task)
+        rel = vault.resolve_task(task)
     except NA.Refused as e:
-        fail(2, str(e))
+        raise Refusal(2, str(e))
     shown = rel.replace(os.sep, "/")
     q = without_self_link(q, os.path.basename(rel)[:-3], M.ER.slug_key)
     if q == "":
-        fail(2, "--question is empty once its leading [[%s]] is stripped" % os.path.basename(rel)[:-3])
+        raise Refusal(2, "--question is empty once its leading [[%s]] is stripped" % os.path.basename(rel)[:-3])
     note = NA.Note.load(os.path.join(vault.root, rel))
     if note.fm is None:
-        fail(2, "%s: %s" % (shown, note.error))
+        raise Refusal(2, "%s: %s" % (shown, note.error))
     if "task" not in NA.tags_of(note):
-        fail(2, "%s is not a task note" % shown)
+        raise Refusal(2, "%s is not a task note" % shown)
     st = NA.status_of(note)
     if st not in NA.OPEN_STATUSES:
-        fail(2, "%s is at status %s, not Active; a decision is written only into Active work" % (shown, st or "none"))
+        raise Refusal(2, "%s is at status %s, not Active; a decision is written only into Active work" % (shown, st or "none"))
     link = ES.first_link(NA, note.get("rollout"))
-    if ES.in_flight(st, ES.link_live(NA, vault, link)) and not ES.still_to_start(st, link, args.superseding):
-        fail(2, "%s is in flight (vault-grammar.md § In flight); its run owns the note, so the answer is not written"
-             % shown)
+    if ES.in_flight(st, ES.link_live(NA, vault, link)) and not ES.still_to_start(st, link, superseding):
+        raise Refusal(2, "%s is in flight (vault-grammar.md § In flight); its run owns the note, so the answer is not "
+                         "written" % shown)
     lines = list(note.lines)
     first = note.span[1] + 1
     notes = section_span(lines, first, NOTES_HEADING)
@@ -1318,16 +1397,21 @@ def cmd_record(args):
     if fork is not None:
         end_at, forks = latest_end_forks(lines, notes) if notes else (None, [])
         if fork not in forks:
-            fail(2, "%s: its latest orient end line names no `fork for Lachy: %s`" % (shown, fork))
+            raise Refusal(2, "%s: its latest orient end line names no `fork for Lachy: %s`" % (shown, fork))
         tail = " orient ruling: %s → %s" % (fork, a)
         ruled = any(ln.rstrip("\r\n").endswith(tail) for ln in lines[end_at + 1:notes[1]])
-    bullet = DECISION_BULLET.format(question=q, answer=a, recommended=rec, by=args.by)
-    heading = DECISIONS_HEADING.format(date=args.today.isoformat())
+    if owner is not None:  # a call made for Lachy (ADR 0054 d3): its own heading and preamble, never ## Decisions
+        bullet = decided_bullet(q, a, by, owner, why)
+        heading = DECIDED_HEADING.format(date=today.isoformat())
+        opening = heading + "\n\n" + DECIDED_PREAMBLE + "\n\n" + bullet + "\n"
+    else:
+        bullet = DECISION_BULLET.format(question=q, answer=a, recommended=rec, by=by)
+        heading = DECISIONS_HEADING.format(date=today.isoformat())
+        opening = heading + "\n\n" + bullet + "\n"
     span = section_span(lines, first, heading)
     has = span is not None and any(lines[i].rstrip("\r\n") == bullet for i in range(span[0] + 1, span[1]))
     if has and (fork is None or ruled):
-        sys.stdout.write("%s: %s → %s [no-change]\n" % (shown, q, a))
-        return
+        return "no-change", "%s: %s → %s [no-change]" % (shown, q, a)
     if fork is not None and not ruled:
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         lines = insert_last(lines, notes, RULING_LINE.format(stamp=stamp, fork=fork, answer=a))
@@ -1341,12 +1425,93 @@ def cmd_record(args):
                 text += "\n"
             if text and not text.endswith("\n\n"):
                 text += "\n"
-            lines = NA.split_lines(text + heading + "\n\n" + bullet + "\n")
+            lines = NA.split_lines(text + opening)
     try:
         note.save("".join(lines))
     except OSError as e:
-        fail(2, "cannot write %s: %s" % (shown, e))
-    sys.stdout.write("recorded %s: %s → %s\n" % (shown, q, a))
+        raise Refusal(2, "cannot write %s: %s" % (shown, e))
+    return "recorded", "recorded %s: %s → %s" % (shown, q, a)
+
+
+def cmd_record(args):
+    if args.owner is not None and args.fork is not None:
+        fail(2, "--fork is never a call made for Lachy: an open fork stays his (ADR 0054), so --owner takes no --fork")
+    if args.owner is None and args.recommended is None:
+        fail(2, "--recommended is required for an answer (only a call made for Lachy, --owner, goes without)")
+    if args.owner is None and args.by not in RECORD_BY:
+        fail(2, "--by %s writes only a call made for Lachy (--owner); an answer is recorded --by %s"
+             % (args.by, " or ".join(RECORD_BY)))
+    if args.owner is None and args.why is not None:
+        fail(2, "--why goes only with --owner")
+    for flag, v in (("--question", args.question), ("--answer", args.answer), ("--recommended", args.recommended),
+                    ("--fork", args.fork)):
+        if v is not None and fold(v) == "":
+            fail(2, "%s is empty" % flag)
+    M = Mods()
+    vroot = os.path.expanduser(args.vault)
+    if not os.path.isdir(vroot):
+        fail(3, "no vault at %s" % vroot)
+    try:
+        _, line = record_core(M, M.NA.Vault(vroot), args.task, args.question, args.answer, args.today, args.by,
+                              recommended=None if args.owner else args.recommended, fork=args.fork, owner=args.owner,
+                              why=args.why, superseding=args.superseding)
+    except Refusal as e:
+        fail(e.code, str(e))
+    sys.stdout.write(line + "\n")
+
+
+# ---- decided-for-you ---------------------------------------------------------------------------------------------
+
+def cmd_decided(args):
+    rank = read_rank(args.rank)
+    ER = load("thread_estate_rank", ESTATE_RANK_PY)
+    slugs = split_slugs(args.tasks)
+    if not slugs:
+        fail(2, "--tasks names no task")
+    if args.today is None:
+        raw = rank.get("today")
+        args.today = datetime.date.fromisoformat(raw) if isinstance(raw, str) and ISO_DATE.fullmatch(raw) \
+            else datetime.date.today()
+    rows = {}
+    for t in rank["tasks"]:
+        if isinstance(t, dict) and isinstance(t.get("slug"), str):
+            rows.setdefault(ER.slug_key(t["slug"]), t)
+    items, skipped, seen = [], [], set()
+    for raw in slugs:
+        k = ER.slug_key(raw)
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        row = rows.get(k)
+        if row is None:
+            skipped.append({"slug": raw, "why": "not in the rank"})
+            continue
+        for d in row.get("decidedForYou") or []:
+            if not isinstance(d, dict):
+                continue
+            items.append({"slug": row["slug"], "note": row.get("note"), "question": d.get("question"),
+                          "answer": d.get("recommendation"), "options": list(d.get("options") or []),
+                          "owner": d.get("owner"), "confidence": d.get("confidence"), "why": d.get("why")})
+    out = {"schema": SCHEMA, "today": args.today.isoformat(), "items": items, "skipped": skipped, "written": [],
+           "unchanged": [], "refused": []}
+    if args.write:
+        M = Mods()
+        vroot = os.path.expanduser(args.vault)
+        if not os.path.isdir(vroot):
+            fail(3, "no vault at %s" % vroot)
+        vault = M.NA.Vault(vroot)
+        for it in items:
+            try:
+                if it["owner"] not in DECIDED_OWNERS:
+                    raise Refusal(2, "owner %s is not one a call made for Lachy carries (%s)"
+                                  % (json.dumps(it["owner"]), ", ".join(DECIDED_OWNERS)))
+                status, _ = record_core(M, vault, it["slug"], it["question"] or "", it["answer"] or "", args.today,
+                                        args.by, owner=it["owner"], why=it["why"], superseding=args.superseding)
+            except Refusal as e:
+                out["refused"].append({"slug": it["slug"], "question": it["question"], "why": str(e)})
+                continue
+            out["written" if status == "recorded" else "unchanged"].append({"slug": it["slug"], "question": it["question"]})
+    emit(out)
 
 
 # ---- log -------------------------------------------------------------------------------------------------------
@@ -1635,25 +1800,25 @@ class Preflight:
         index.append(e)
 
     def one_call(self, k, questions, index):
-        d = decision_of((self.rows[k].get("decisions") or [{}])[0])
-        fulls = d["options"]
-        descs = [d.get("why") or "the grader's recommendation"] + ["" for _ in fulls[1:]]
-        self.ask(k, "one-call", "[[%s]] %s" % (self.shown[k], d["question"] or ""), fulls, descs, d, questions, index)
+        raw = (self.rows[k].get("decisions") or [{}])[0]
+        d = decision_of(raw)
+        suffix, descs = framing(raw)
+        self.ask(k, "one-call", "[[%s]] %s%s" % (self.shown[k], d["question"] or "", suffix), d["options"], descs, d,
+                 questions, index)
 
     def grill(self, k, questions, index):
-        ds = [decision_of(d) for d in self.rows[k].get("decisions") or [] if isinstance(d, dict)]
-        for i, d in enumerate(ds, 1):
-            fulls = d["options"]
-            descs = [d.get("why") or "the grader's recommendation"] + ["" for _ in fulls[1:]]
-            self.ask(k, "grill", "[[%s]] (%d/%d) %s" % (self.shown[k], i, len(ds), d["question"] or ""), fulls, descs, d,
-                     questions, index, {"k": i, "n": len(ds)})
+        raws = [d for d in self.rows[k].get("decisions") or [] if isinstance(d, dict)]
+        for i, raw in enumerate(raws, 1):
+            d = decision_of(raw)
+            suffix, descs = framing(raw)
+            self.ask(k, "grill", "[[%s]] (%d/%d) %s%s" % (self.shown[k], i, len(raws), d["question"] or "", suffix),
+                     d["options"], descs, d, questions, index, {"k": i, "n": len(raws)})
 
     def ungraded(self, k, why, questions, index):
         q = UNGRADED_QUESTION.format(why=why)
-        d = {"question": q, "options": list(UNGRADED_OPTIONS), "recommendation": UNGRADED_OPTIONS[0],
-             "why": "a task the grading could not grade may hide a decision"}
-        self.ask(k, "ungraded", "[[%s]] %s" % (self.shown[k], q), UNGRADED_OPTIONS, UNGRADED_DESCRIPTIONS, d,
-                 questions, index)
+        d = {"question": q, "options": list(UNGRADED_OPTIONS), "recommendation": UNGRADED_OPTIONS[0], "why": UNGRADED_WHY}
+        self.ask(k, "ungraded", "[[%s]] %s %s" % (self.shown[k], q, NOTE_INVITE), UNGRADED_OPTIONS, UNGRADED_DESCRIPTIONS,
+                 d, questions, index)
 
 
 def cmd_preflight(args):
@@ -1698,12 +1863,22 @@ def parse(argv):
     rc.add_argument("--task", required=True)
     rc.add_argument("--question", required=True)
     rc.add_argument("--answer", required=True)
-    rc.add_argument("--recommended", required=True)
+    rc.add_argument("--recommended")
     rc.add_argument("--fork")
+    rc.add_argument("--owner", choices=DECIDED_OWNERS)
+    rc.add_argument("--why")
     rc.add_argument("--today")
     rc.add_argument("--vault", default=VAULT_DEFAULT)
-    rc.add_argument("--by", choices=RECORD_BY, default=RECORD_BY[0])
+    rc.add_argument("--by", choices=DECIDED_BY, default=RECORD_BY[0])
     rc.add_argument("--superseding")
+    dy = sub.add_parser("decided-for-you", allow_abbrev=False)
+    dy.add_argument("--rank", required=True)
+    dy.add_argument("--tasks", action="append", required=True)
+    dy.add_argument("--by", choices=RECORD_BY, default=RECORD_BY[0])
+    dy.add_argument("--superseding")
+    dy.add_argument("--write", action="store_true")
+    dy.add_argument("--today")
+    dy.add_argument("--vault", default=VAULT_DEFAULT)
     lg = sub.add_parser("log", allow_abbrev=False)
     lg.add_argument("--rank", required=True)
     lg.add_argument("--scan", required=True)
@@ -1717,7 +1892,7 @@ def parse(argv):
     pf.add_argument("--dep", action="append", default=[])
     args = p.parse_args(argv)
     if not args.verb:
-        fail(2, "a verb is required: slices | rounds | plan | sessions | record | log | preflight")
+        fail(2, "a verb is required: slices | rounds | plan | sessions | record | decided-for-you | log | preflight")
     if args.verb == "rounds":
         for flag in ("budget", "top"):
             v = getattr(args, flag)
@@ -1727,11 +1902,13 @@ def parse(argv):
             setattr(args, flag, int(v.strip()))
     if args.verb == "record":
         args.today = parse_date(args.today, "--today") if args.today else datetime.date.today()
+    if args.verb == "decided-for-you" and args.today is not None:
+        args.today = parse_date(args.today, "--today")
     return args
 
 
 VERBS = {"slices": cmd_slices, "rounds": cmd_rounds, "plan": cmd_plan, "sessions": cmd_sessions, "record": cmd_record,
-         "log": cmd_log, "preflight": cmd_preflight}
+         "decided-for-you": cmd_decided, "log": cmd_log, "preflight": cmd_preflight}
 
 
 def main(argv):

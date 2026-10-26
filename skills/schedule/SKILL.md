@@ -95,7 +95,9 @@ peer session's commit in the in-place checkout never moves the tree a rollout in
    URL): ask one AskUserQuestion, "Create the rollout clone `<C>`, a full `git clone` of `<origin URL>`?";
    when its stderr has a `nested in <P>` line, the question adds "<P> must ignore it: the clone step checks
    that first and creates nothing if <P> would track it". Yes → run the same snippet with `<mode>` set to
-   `--ensure`, with the Bash tool's `timeout: 600000`; No → stop before step 1, with nothing written.
+   `--ensure`, with the Bash tool's `timeout: 600000`; No → stop before step 1, with nothing written. That question
+   is Owner *technical*, kept a question by ADR 0042 until p30-10 decides it, and is put in the Framing of
+   `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`.
    **Exit 0** (the clone exists) → run the snippet with `<mode>` set to `--ensure` directly, even when its
    stderr has a `note:` that the clone has no `<sub>` yet: `--resolve` never fetches, so a stale clone is no
    stop, and `--ensure` refuses only when the clone still lacks it after its fast-forward. `--ensure`
@@ -283,8 +285,10 @@ rollout note (ADR 0047 § Build rulings).
 
 **The round.** Pass each `asks[i]` to AskUserQuestion's `questions` verbatim, one question per call, each with its
 recommendation first, in its order: the One calls, then each Grill's decisions (`[[slug]] (k/n) …`), then the
-ungraded tasks. `index[]` maps each question to its task (`slug`, `kind`, `decision`), each picked label to its full
-text (`texts[]`), and names the `recommended` one. A Ready, Orient or kept task gets no question, and a task already
+ungraded tasks. Only his decisions are asked (Owner *yours*): the rest were ruled by the grade, and each question
+carries the Framing from the grade (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 6). `index[]` maps each
+question to its task (`slug`, `kind`, `decision`), each picked label to its full text (`texts[]`), and names the
+`recommended` one. A Ready, Orient or kept task gets no question, and a task already
 out through an Orient dependency (directly or through others) is never asked, whatever its grade: it leaves whatever
 Lachy answers, so `preflight` puts it in `out[]` as `dependency` before it builds the round. Lachy's "stop" ends the
 round, and the rest stay undecided.
@@ -307,6 +311,14 @@ candidate set from step 2 on.
 - A carried `queued` task in `out[]` leaves through step 6's `defer`, run from the prior's root before the carry.
 - Its `warnings[]` (a kept task that depends on a task left out) go to step 8.
 
+**Decided for you.** When the final `queue[]` is non-empty, write the calls the grade ruled for Lachy into its tasks
+(ADR 0054 d4), never under `## Decisions`:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py decided-for-you --rank "$S/rank.json" --tasks <queue[]> --by schedule [--superseding <prior>] --write`,
+`--superseding` as at `slices`. Each task's `## Decided for you (<date>)` section opens with its preamble, and step 8
+lists the calls. Each `refused[]` item (a task that went in flight since the scan, say) goes to step 8 as unwritten,
+and the rest are still written. A task dropped later keeps its bullets: the next grade reads them as settled, and a
+plan may overturn one on code evidence.
+
 **An empty queue.** When the final `queue[]` is empty, stop before step 2 and print step 8's left-out block as the
 stop's report. Nothing is stamped, no note is written, there is no `## Queue` row and nothing is deferred. What this
 step wrote stays: `record`'s `## Decisions (asked ahead <date>)` bullets and the Grade log lines `log` wrote. § 0's
@@ -318,7 +330,9 @@ no `record`: the estate pass graded, asked and logged (orient-all § 6 step 3). 
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank <R> --scan <S> --tasks <step 1's confirmed candidates> [--decided <each slug that line names that is among them>]`
 once. A decided slug step 1 skipped is never passed: `preflight` exits 2 on a `--decided` slug outside `--tasks`.
 Its `queue[]` is the candidate set; each `out[]` member is left out with its Dependent closure, unstamped, and
-returned with its why.
+returned with its why. Then, when its `queue[]` is non-empty, the fork writes its own members' ruled calls:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py decided-for-you --rank <R> --tasks <its queue[]> --by orient-all --write`,
+whose `refused[]` the fork returns.
 
 ### 2. Extract file scope per task — best effort
 
@@ -424,7 +438,7 @@ Look for:
 
 ### 3.5. Detect human/release gates
 
-Some task notes carry a **human/release gate** in prose — "don't action until a release ships", "hold for sign-off", "gated on the next deploy". A `/thread:execute` agent reads the note and may refuse mid-dispatch when it hits one, so a buried gate is unreliable either way. Scan each task body, case-insensitively and with each phrase matched where a word starts (so `hold for` skips "threshold for"), for gate language of three kinds: a release hold (`don't action until`, `do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`), sign-off in any wording, named or not (sign, signs, signed or signing before off, spaced, hyphenated or, for `signoff`, joined: `sign-off`, `sign off`, `signoff`, `signs off`, `signs-off`, `signed off`, `signed-off`, `signing off`, `signing-off`, which catch "would need Lachy's sign-off" and "until Lachy signs off" as well as `human sign-off`), and a decision the note leaves to a human (`not decide`, which catches "for the planner to raise, not decide" and "deliberately not decided"). The sign-off and decision kinds matter most unattended: a planner can declare such a line as a gated input (ADR 0008), which `ignore_gate` does not override, and an unattended lead never signs one off, so the task halts at its plan-gate (the 2.7 rollout's p2-6, whose "raise, not decide … would need Lachy's sign-off" the old fixed phrases missed). A match is a question, not a verdict. A note that only quotes or describes such wording (a task about this sweep, say) carries no gate: dismiss that match with no question, or put it to the user with a no-gate recommendation; either way it never reaches step 8's gated-tasks block, unless the user answers that it is a gate. Put each gate to the user in the confirm batch: keep the task (and clear the gate before executing: decide the open question in the note, remove the gate text, or set `ignore_gate: true` on the task, which overrides a release hold for the run) or drop it from this rollout. A task dropped here leaves the candidate set before step 6, so it gets no `## Queue` row, no `## File-sets` line and no `rollout:` stamp. A carried task (step 1) is the exception: step 6's carry takes every unlanded task of the prior rollout, so its drop waits for step 8's checklist, which takes it out whole. Each gate kept here becomes step 8's checklist. Don't bury the gate in the body and hope the agent honours it.
+Some task notes carry a **human/release gate** in prose — "don't action until a release ships", "hold for sign-off", "gated on the next deploy". A `/thread:execute` agent reads the note and may refuse mid-dispatch when it hits one, so a buried gate is unreliable either way. Scan each task body, case-insensitively and with each phrase matched where a word starts (so `hold for` skips "threshold for"), for gate language of three kinds: a release hold (`don't action until`, `do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`), sign-off in any wording, named or not (sign, signs, signed or signing before off, spaced, hyphenated or, for `signoff`, joined: `sign-off`, `sign off`, `signoff`, `signs off`, `signs-off`, `signed off`, `signed-off`, `signing off`, `signing-off`, which catch "would need Lachy's sign-off" and "until Lachy signs off" as well as `human sign-off`), and a decision the note leaves to a human (`not decide`, which catches "for the planner to raise, not decide" and "deliberately not decided"). The sign-off and decision kinds matter most unattended: a planner can declare such a line as a gated input (ADR 0008), which `ignore_gate` does not override, and an unattended lead never signs one off, so the task halts at its plan-gate (the 2.7 rollout's p2-6, whose "raise, not decide … would need Lachy's sign-off" the old fixed phrases missed). A match is a question, not a verdict. A note that only quotes or describes such wording (a task about this sweep, say) carries no gate: dismiss that match with no question, or put it to the user with a no-gate recommendation; either way it never reaches step 8's gated-tasks block, unless the user answers that it is a gate. Put each gate to the user in the confirm batch (a gate is his: a `## Decided for you` bullet clears no gate, ADR 0054): keep the task (and clear the gate before executing: decide the open question in the note, remove the gate text, or set `ignore_gate: true` on the task, which overrides a release hold for the run) or drop it from this rollout. A task dropped here leaves the candidate set before step 6, so it gets no `## Queue` row, no `## File-sets` line and no `rollout:` stamp. A carried task (step 1) is the exception: step 6's carry takes every unlanded task of the prior rollout, so its drop waits for step 8's checklist, which takes it out whole. Each gate kept here becomes step 8's checklist. Don't bury the gate in the body and hope the agent honours it.
 
 ### 3.6. Sweep for gated-input smell (advisory — ADR 0008, ADR 0034)
 
@@ -516,7 +530,7 @@ Then turn each member into a **tombstone** — don't delete it (backlinks to it 
 
 The rollout then references only the combined note, as an ordinary `cross-cutting` task — so `/thread:execute` and its engine need to know nothing about merging.
 
-**After the Pre-flight.** A combined note folds only tasks still in the candidate set (§ 1.5's `queue[]`). It copies each member's `## Decisions (asked ahead <date>)` bullets into its own section of that heading, each prefixed `[[<member>]]:`, so the decisions § 1.5 recorded reach the one note the engine reads. It is not graded again.
+**After the Pre-flight.** A combined note folds only tasks still in the candidate set (§ 1.5's `queue[]`). It copies each member's `## Decisions (asked ahead <date>)` bullets into its own section of that heading, and each member's `## Decided for you (<date>)` bullets into its own section of that heading (its preamble once), each prefixed `[[<member>]]:`, so the decisions § 1.5 recorded and the calls it ruled reach the one note the engine reads. It is not graded again.
 
 **Confirm the result before writing.** Show the user each proposed merge (members → combined note, plus the affinity signal that fired) and — just as important — the same-file pairs you deliberately *kept apart* and the guard that fired for each. This is where a misread gets caught. Get a y/n before authoring anything.
 
@@ -670,6 +684,18 @@ warning: [[task-s]] keeps its place (a carried task that has started) but depend
 ```
 
 Under orient-all, the block lists the fork's leavers the same way, and the fork returns them with each one's why (orient-all § 8 lists each by that why, as this block does).
+
+**Decided for you.** List above the summary what § 1.5's `decided-for-you` wrote (asking.md § 2): the less sure first,
+at most 8 lines, then `and <k> more in the task notes`; then one line per `refused[]` item. Under orient-all, the fork's
+summary carries the block:
+
+```
+Decided for you (<n>; each in its task note's ## Decided for you, where you can overturn it):
+  - [[task-g]] Cache? → none (technical, medium: <why>)
+  - [[task-r]] Log format? → jsonl (priorities: <why>)
+  and <k> more in the task notes
+not written: [[task-q]] Lock file? (<the refusal's why>)
+```
 
 **Checklist — gated tasks.** If the user kept any of step 3.5's human/release-gated tasks (a quote-only match is none), list them above the summary so the user clears them before executing (an unaddressed gate makes the agent refuse mid-run):
 
@@ -828,7 +854,7 @@ the note's `incomplete: true` line, as its last write, once every member is stam
 
 **S7. Summary.** Per note: its name, its chain order with each row's launch, and its surfaces. Then
 the Pre-flight line and its left-out tasks, as step 8 lists them (Orient → `/thread:orient [[<project>]]`, undecided
-→ waiting on your answer, ungraded, `depends on [[x]]`), the session-lane members, the WARNs and the gated checklist (§ 3.5's kept gates, § 3.6's ask-ahead and dismissals, as
+→ waiting on your answer, ungraded, `depends on [[x]]`), its Decided for you block, the session-lane members, the WARNs and the gated checklist (§ 3.5's kept gates, § 3.6's ask-ahead and dismissals, as
 step 8 lists them). Then one line: "Leg 1 opens in row 1's launch and runs `/thread:execute [[<note>]]`;
 no execute offer, no `start: unattended` (the Stage's unattended start needs a Project root); until it finishes or
 is dropped (`status: dropped`) it holds its surfaces, so a parallel run on a checkout it claims, or another chain

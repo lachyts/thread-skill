@@ -66,11 +66,13 @@ resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` 
 
 - **Resolver failure.** If the resolver exits non-zero (2: a refused `--cwd` or a usage error; 3:
   no vault or no PyYAML), report its one `resolve-target:` line and ask in plain text for the
-  target, sweeping nothing before an answer. His answer goes to the resolver as an argument, and a
+  target (Owner *yours*: which project he means, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), sweeping nothing
+  before an answer. His answer goes to the resolver as an argument, and a
   second failure ends the orient with that line.
 - **`resolved`** → name the pick in one line and carry on:
   `Target: <name> (<kind>; <reason>) — say stop to change it`.
-- **`candidates` or `none`** → ask before any § 2 read: `AskUserQuestion` with the candidates, best
+- **`candidates` or `none`** → ask before any § 2 read (Owner *yours*: which project he means,
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`): `AskUserQuestion` with the candidates, best
   first, then `dir_anchor` when it is not already listed, up to four options. With one option, add
   `Stop — orient nothing`, because the tool needs two. With none, ask in plain text for a project
   or area name, or stop, and end the turn. A typed answer (the plain-text one, or
@@ -319,7 +321,9 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
   merge engine.
 - **Serial-shaped and session-lane work → steer.** If any serial-shaped or session-lane work is
   left, steer it with `AskUserQuestion`, recommended option first (informed by the audit — e.g.
-  no serial-shaped cluster → recommend Hands-on):
+  no serial-shaped cluster → recommend Hands-on), in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`
+  (Owner *yours*: how he spends his time on the project). A Hands-on recommendation hands work back to him, so its
+  description says why: no serial-shaped cluster is left for a rollout to take:
   - **Autonomous** (offered only when a serial-shaped cluster exists) — schedule the serial-shaped
     clusters as a serial rollout (§ 7) while Lachy stays focused elsewhere. This answer IS the
     scheduling authorisation: no per-cluster confirm follows. The execute offer (§ 9) follows any
@@ -395,7 +399,8 @@ them, though an end line with an open fork still counts (§ 2 Open forks). Old r
 
 When § 6 or § 7 wrote a rollout note, end with `AskUserQuestion`, recommended option first, one
 offer per parallel note written; a serial note (`shape: serial`) gets no offer: name it, its chain,
-each row's launch and Leg 1's start line, and never stamp `start: unattended` on it:
+each row's launch and Leg 1's start line, and never stamp `start: unattended` on it. The offer is put in the Framing
+of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` (Owner *gate*: p30-9 takes it out):
 
 - **Fresh session** (recommended after a reshuffle, which has filled this context) — run
   `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with its usual home, never the Project root's

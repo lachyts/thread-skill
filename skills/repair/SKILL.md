@@ -306,7 +306,8 @@ its `humanFix` `decide scope or defer`). For a set-aside at its run or at Integr
 
 1. **Ask.** `AskUserQuestion` with the specific decision its block needs: quote the feedback and its `humanFix` (the
    act and the detail the script names, never a cause re-derived from the feedback), and offer the raise (§ 4) when
-   `humanFix.raise` names a field, or for a revise re-entry with no round left.
+   `humanFix.raise` names a field, or for a revise re-entry with no round left. It is his (Owner *yours*), so put it
+   in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`.
 2. **Prerequisites first**, only where hand-back may run (§ 1): whatever his answer needs before a bare hand-back is
    all that is left. That is § 4's push and `gh pr reopen`, a recut's retire and relabel, a `merge-task:` relabel, a
    stale anchor ref's deletion, or § 5's defer (its `## Notes` line is then the record).
@@ -499,7 +500,8 @@ other (exit 2). Show the evidence first:
 8. `git -C R ls-remote --heads origin`.
 
 If a window is still in flight (a Workflow call or a background Integration command of the rollout), advise a
-hard pause first. Then offer (`AskUserQuestion`):
+hard pause first. Then offer (`AskUserQuestion`), in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`
+(Owner *yours*: dropping or keeping a commit on the default branch is his, ADR 0008):
 
 - **(a) Restore and ack**, only when no Workflow call or background Integration command of the rollout is in
   flight. When `origin/<B>..<B>` is non-empty, list those commits and mark each close-out-shaped one ("a
@@ -715,7 +717,7 @@ The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever
 - **A gate** (`setAside.status` gate-pending): present each of its `setAside.gates` verbatim. On his sign-off,
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <t> --rollout <rollout-note>`:
   the next Leg's claim re-enters it. If he declines it, Defer (below).
-- **A block** (blocked, review-blocked or plan-blocked): `AskUserQuestion` quoting `setAside.summary`, offering hand
+- **A block** (blocked, review-blocked or plan-blocked): `AskUserQuestion` quoting `setAside.summary` (Owner *yours*, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), offering hand
   back (with his guidance), defer, or leave it set aside.
   - Hand back: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-answer --tasks <t> --rollout <rollout-note> --kind decision --ask "<the ask, verbatim>" --answer "<his answer, verbatim>" --fingerprint <row.setAside.fingerprint> --form hand-back`,
     then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-back --tasks <t> --answer <the stamp record-answer printed>`.

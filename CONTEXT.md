@@ -51,10 +51,31 @@ through time, from attention to merged PRs. Terms only — no implementation.
   nothing records), **One call** (a single decision, offered with a
   recommendation), **Grill** (a few low-level decisions an agent with the
   project's thread, ADRs and code can recommend on), or **Orient** (the
-  decisions shape the project, so it needs a full-context session). A decision
-  the agent cannot recommend on with confidence raises the grade one step.
-  Each grade is kept in the Grade log (§ Run record and tuning).
+  decisions shape the project, so it needs a full-context session). Only
+  Lachy's own decisions count: a fork the grader settles with evidence, a
+  technical or priorities call, is ruled now and written as Decided for you,
+  never asked (ADR 0054). A decision of his the agent cannot recommend on with
+  confidence raises the grade one step. Each grade is kept in the Grade log
+  (§ Run record and tuning).
   _Avoid_: tier 1/2/3, traffic lights.
+- **Owner** — who a question belongs to, labelled before anything is asked
+  (`skills/_shared/asking.md` § 1): *yours* (intent, importance, robustness,
+  taste, an authorisation an ADR keeps as his), asked; *priorities* (his
+  stated priorities answer it) and *technical* (the code or research settles
+  it), decided and listed as Decided for you; *gate* (a process step such as
+  "next move?"), never asked. A gated input (ADR 0008) is always *yours*.
+  _Avoid_: question type.
+- **Decided for you** — a call an agent made for Lachy instead of asking,
+  one line with its reason, written where he reads it and can overturn it: a
+  task note's `## Decided for you (<date>)` section (never `## Decisions`,
+  which records his own answers), an ADR's Decided for him (overturnable)
+  list, or a report. It settles no gate and signs no gated input (ADR 0054).
+  _Avoid_: assumption, default.
+- **The Framing** — the shape of every question Lachy owns
+  (`skills/_shared/asking.md` § 3): plain words, the goal it ties to, what
+  each option gains and costs, the pick against his priorities, and a Note
+  invited ("What would make this wrong for you?"). Script-built rounds take
+  it from the grade's `goal` and `stakes` (ADR 0054 d8). _Avoid_: template.
 - **Pre-flight** — schedule's pass over a rollout's tasks before it is
   written: each task still to start gets its **Readiness grade**, One call
   and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
@@ -78,10 +99,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   order, the projects that need their own orient, and the Unpark offers
   (`skills/_shared/readiness-grade.md`). _Avoid_: backlog, priority list.
 - **Decision round** — the estate pass's questions, within the time budget
-  Lachy states. First the One-call round: pending sign-offs always, each
-  after its gates are shown verbatim, then One calls, then Unpark offers,
-  batched through AskUserQuestion. Then Grill rounds, in conversation, while
-  time remains. Each answer is written into its task's `## Decisions (asked
+  Lachy states: only his questions, each in the Framing. First the One-call
+  round: pending sign-offs always, each after its gates are shown verbatim,
+  then One calls, then Unpark offers, batched through AskUserQuestion. Then
+  Grill rounds, in conversation, while time remains. Each answer is written into its task's `## Decisions (asked
   ahead <date>)` (`skills/orient-all/SKILL.md`). Schedule's **Pre-flight**
   holds the same round for one rollout's tasks (ADR 0047). _Avoid_: triage
   round.
@@ -882,8 +903,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   its close, and reports each grade's hands-off share (of the work it sent
   that landed hands-off, bounced back to Lachy, was regraded or dropped;
   work done by hand or never dispatched is reported beside the rate). A
-  miss is traced to the grading rules and never tuned as a knob. _Avoid_:
-  grade history, calibration log.
+  miss is traced to the grading rules and never tuned as a knob. A line's
+  `decisions` and `low` count his decisions (owner yours) only since ADR 0054:
+  a decision ruled for him is never counted, so lines before ADR 0054 are not
+  comparable with lines after it. _Avoid_: grade history, calibration log.
 - **Quality** — the other headline: how few Escapes a rollout's landed work
   produces. _Avoid_: correctness, polish.
 - **Escape** — landed work that later needs a fix it should not have needed:

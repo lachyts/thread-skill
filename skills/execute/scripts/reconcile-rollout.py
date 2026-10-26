@@ -323,7 +323,8 @@ Subcommands:
               descope's re-run (exit 0, `[no-change]`) and hand-back stay its way back (repair § 2's **plan-blocked,
               descopable**). Exit 1 and exit 2 record nothing. Exit 3 when: the
               part, or a clause holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
-              `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`) holds the part
+              `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`; never a `## Decided for
+              you…` section, an agent's call, ADR 0054) holds the part
               (or, for --owner, the quote); the part sits in a fenced code block of the brief (the body minus the
               record sections; a fence is never a brief item, so no pointer lands inside one); --optional and an
               occurrence of the part in the brief has no marker word (consider, considering, optional, optionally,
@@ -5159,11 +5160,14 @@ DESCOPE_MARK_RE = re.compile(
 # number and sha (_plan_block_key), so the refusal holds for that block in every session and a new run is judged afresh.
 DESCOPE_REFUSED_SECTION = "## Descope refused (automatic)"
 DESCOPE_REFUSED_RE = re.compile(r"^- (\S+) descope refused \(automatic\) run=(\d+) sha=([0-9a-f]{12}), (.*)$")
+# The calls a grade ruled for Lachy (ADR 0054 d3; estate-dispatch.py's DECIDED_HEADING): a record section, never a
+# recorded human decision, so _recorded_decision never reads it.
+DECIDED_SECTION = "## Decided for you"
 # Record sections: never part of the brief the plan judge judges against.
 BRIEF_EXCLUDE = ("## Plan-blocked feedback", "## Review-blocked feedback", "## Blocker diagnosis",
                  "## Review history", REPAIR_INPUT_SECTION, "## Scope decision", APPROVED_PLAN_SECTION,
                  INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, NEEDS_HUMAN_SECTION,
-                 "## Decisions", "## Resume prompt", "## Descope refused")
+                 "## Decisions", "## Resume prompt", "## Descope refused", DECIDED_SECTION)
 MARKER_WORDS = r"(?:consider|considering|optional|optionally|nice to have|nice-to-have)"
 OPTIONAL_MARK_RE = re.compile(rf"\b{MARKER_WORDS}\b")
 # A marker negated by not / never / no (or an n't) up to two words before it is no marker: "not optional".
@@ -5289,7 +5293,8 @@ def _optional_in_brief(hits) -> bool:
 def _recorded_decision(note, needles) -> str:
     """The recorded human decision holding one of the folded needles, as its heading, or '': a `## Decisions…`
     section, a `## Scope decision…` other than the automatic one, a `## Repair input` line without `(automatic)`,
-    `## Approved gates` and `## Gated inputs (awaiting sign-off)`."""
+    `## Approved gates` and `## Gated inputs (awaiting sign-off)`. A `## Decided for you…` section (DECIDED_SECTION) is
+    an agent's call, never a recorded human decision, so it is never read here (ADR 0054)."""
     lines, sections = _body_sections(note)
     for heading, idxs in sections:
         if heading.startswith("## Decisions") or heading in (APPROVED_GATES_SECTION, GATE_PENDING_SECTION) or \

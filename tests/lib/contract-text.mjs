@@ -53,6 +53,27 @@ export const collapse = (s) => s.replace(/\s+/g, ' ')
 // The fence rule refs.test uses: a line opening with ``` or ~~~ (after whitespace) toggles.
 export const FENCE = /^\s*(```|~~~)/
 
+// The prose units of a markdown text: each paragraph, list item, table row or heading outside a fence, its whitespace
+// collapsed. A unit starts at a list marker, a table row or a heading, and ends at a blank line or the next start, so
+// a check that must hold "in the same paragraph or list item" reads one unit at a time (plugin-root-rule.test.mjs,
+// question-gate.test.mjs).
+const UNIT_START = /^\s*(?:[-*+]|\d+\.)\s|^\s*\||^#/
+export function proseUnits(text) {
+  const units = []
+  let cur = []
+  let inFence = false
+  const flush = () => { if (cur.length) units.push(collapse(cur.join(' ')).trim()); cur = [] }
+  for (const l of text.split('\n')) {
+    if (FENCE.test(l)) { flush(); inFence = !inFence; continue }
+    if (inFence) continue
+    if (!l.trim()) { flush(); continue }
+    if (UNIT_START.test(l)) flush()
+    cur.push(l)
+  }
+  flush()
+  return units
+}
+
 // Fenced blocks as arrays of their inner lines.
 export function fencedBlocks(text) {
   const blocks = []

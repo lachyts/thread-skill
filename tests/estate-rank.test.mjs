@@ -944,3 +944,76 @@ test('R6. rank --superseding: a carried queued task is graded and holds its depe
   // Another rollout's name leaves q in flight.
   assert.deepEqual(pf(['--superseding', 'other-rollout']).skipped, plain.skipped)
 })
+
+// ---- R7. The Owner (ADR 0054): only his decisions are asked, counted and charged; the rest are ruled now ----------
+// readiness-grade.md § Each decision: `owner` yours, priorities or technical (missing, unknown or `gate` read as his),
+// `goal` and `stakes` required with an explicit `owner: yours`; a fork, a low-confidence priorities call and a ruled
+// call naming a gated input the task is gated by read as his; a technical guess is the executing session's.
+test('R7. owner and Framing: his decisions asked and counted, the rest ruled into decidedForYou, the backstop and the switches', () => {
+  const O = (q, rec, opts, owner, extra = {}) => ({ ...D(q, rec, opts, extra.confidence ?? 'high'), owner, ...extra })
+  const FR = { goal: 'Ties to the goal.', stakes: ['gains a; costs b', 'gains c; costs d'] }
+  const his = (q = 'Who?') => O(q, 'a', ['a', 'b'], 'yours', FR)
+  const lab = [
+    G('lab-01', 'One call', 'serial', { decisions: [O('Schema?', 'flat', ['flat', 'nested'], 'technical'), his()] }),
+    G('lab-02', 'Grill', 'serial', { decisions: [O('A?', 'a', ['a', 'b'], 'technical'), O('B?', 'a', ['a', 'b'], 'technical', { confidence: 'medium' })] }),
+    G('lab-03', 'Grill', 'serial', { decisions: [] }),
+    G('lab-04', 'Ready', 'serial', { decisions: [O('Log format?', 'jsonl', ['jsonl', 'text'], 'technical')] }),
+    G('lab-05', 'Ready', 'serial', { decisions: [O('Retry?', 'twice', ['twice', 'never'], 'technical', { confidence: 'low' })] }),
+    G('lab-06', 'Ready', 'serial', { decisions: [O('Cost or polish?', 'polish', ['polish', 'cost'], 'priorities', { confidence: 'low' })] }),
+    G('lab-07', 'One call', 'serial', { decisions: [O('Q?', 'a', ['a', 'b'], 'whatever')] }),
+    G('lab-08', 'One call', 'serial', { decisions: [O('Next move?', 'a', ['a', 'b'], 'gate')] }),
+    G('lab-09', 'One call', 'serial', { decisions: [O('Keep v3?', 'v4', ['v4', 'v3'], 'technical', { fork: 'Keep v3 or v4' })] }),
+    G('lab-10', 'One call', 'serial', { decisions: [O('Index?', 'btree', ['btree', 'hash'], ' Technical '), his()] }),
+    G('lab-11', 'Grill', 'serial', { decisions: [his(), O('A?', 'a', ['a', 'b'], 'technical'), O('B?', 'a', ['a', 'b'], 'technical', { confidence: 'medium' })] }),
+    G('lab-12', 'One call', 'serial', { decisions: [O('Who?', 'a', ['a', 'b'], 'yours')] }),
+    G('lab-13', 'One call', 'serial', { decisions: [O('Who?', 'a', ['a', 'b'], 'yours', { goal: 'g', stakes: ['only one'] })] }),
+    G('lab-14', 'One call', 'serial', { decisions: [D('Who?', 'a', ['a', 'b'])] }),
+    G('lab-15', 'One call', 'serial', { decisions: [O('Order?', 'second', ['first', 'second'], 'yours', { goal: 'g', stakes: ['s-first', 's-second'] })] }),
+    G('lab-16', 'Ready', 'serial', { gates: ['credential'], decisions: [O('Which API key?', 'the deploy one', ['the deploy one', 'a new one'], 'technical')] }),
+    G('lab-17', 'Ready', 'serial', { decisions: [O('Which API key?', 'the deploy one', ['the deploy one', 'a new one'], 'technical')] }),
+    G('lab-18', 'Ready', 'serial', { gates: ['spend'], decisions: [O('Pay for the API?', 'yes, capped', ['yes, capped', 'no'], 'priorities')] }),
+  ]
+  const j = ok(rank([gradesFile('owner', { project: 'Lab', tasks: lab })]))
+  fieldsHold(j)
+  const t = (slug) => row(j, slug)
+  const warned = (re) => assert.ok(j.warnings.some((w) => re.test(w)), `no warning ${re}: ${j.warnings.join('\n')}`)
+  const errs = Object.fromEntries(j.invalid.map((x) => [x.slug, x.errors]))
+  // A One call with a ruled and a decision of his: one asked, one ruled, still a One call, charged for one.
+  assert.deepEqual([t('lab-01').grade, t('lab-01').decisions.map((d) => d.question), t('lab-01').decisionMinutes], ['One call', ['Who?'], 1])
+  assert.deepEqual(t('lab-01').decidedForYou, [{ question: 'Schema?', recommendation: 'flat', options: ['flat', 'nested'], confidence: 'high',
+    why: 'fixture: src/x.py:12', owner: 'technical' }])
+  assert.ok(!('owner' in t('lab-01').decisions[0]), 'his decisions keep today\'s shape, no owner key')
+  assert.deepEqual([t('lab-01').decisions[0].goal, t('lab-01').decisions[0].stakes], [FR.goal, FR.stakes])
+  // A Grill whose every decision is ruled is invalid; an empty one keeps today's message.
+  assert.deepEqual(errs['lab-02'], ['Grill needs at least one decision Lachy owns (owner yours)'])
+  assert.deepEqual(errs['lab-03'], ['Grill needs at least one decision'])
+  // Ready stays Ready with a ruled call; a technical guess is dropped, never raising; a priorities guess is his.
+  assert.deepEqual([t('lab-04').grade, t('lab-04').raised, t('lab-04').decidedForYou.length], ['Ready', [], 1])
+  assert.deepEqual([t('lab-05').grade, t('lab-05').decisions, t('lab-05').decidedForYou], ['Ready', [], []])
+  warned(/^lab-05 decision 1: a technical decision at low confidence is left to the executing session \(grill-fit 2\(a\)\), never ruled; dropped$/)
+  assert.deepEqual([t('lab-06').grade, t('lab-06').raised.map((r) => r.why)], ['Grill', ['decisions', 'confidence']])
+  warned(/^lab-06 decision 1: a priorities decision at low confidence is his to make; read as yours/)
+  // Unknown, gate and a fork read as his, each warned; odd spacing and case are normalised.
+  for (const s of ['lab-07', 'lab-08', 'lab-09']) assert.deepEqual([t(s).decisions.length, t(s).decidedForYou], [1, []], s)
+  warned(/^lab-07 decision 1: owner "whatever" is not yours, priorities or technical; read as yours/)
+  warned(/^lab-08 decision 1: owner gate is never a task decision's owner/)
+  warned(/^lab-09 decision 1: it answers an open fork, which stays Lachy's; owner technical read as yours/)
+  assert.equal(t('lab-10').decidedForYou[0].owner, 'technical')
+  // The less sure ruled call first.
+  assert.deepEqual(t('lab-11').decidedForYou.map((d) => [d.question, d.confidence]), [['B?', 'medium'], ['A?', 'high']])
+  // An explicit owner yours needs its Framing; a grade with no owner is warned and asked as built.
+  const FRAMING = 'decision 1: a decision of his needs a `goal` and one `stakes` line per option (asking.md § 3)'
+  assert.deepEqual(errs['lab-12'], [FRAMING])
+  assert.deepEqual(errs['lab-13'], [FRAMING])
+  assert.equal(t('lab-14').grade, 'One call')
+  warned(/^lab-14 decision 1: no owner, read as yours; asked without its goal and stakes$/)
+  // stakes follow their options when the recommendation moves first.
+  assert.deepEqual([t('lab-15').decisions[0].options, t('lab-15').decisions[0].stakes], [['second', 'first'], ['s-second', 's-first']])
+  // The backstop: a ruled call naming a credential on a credential-gated task is his; the same call ungated stays
+  // ruled; a spend call stays priorities (Chorus ADR 0108 d4).
+  assert.deepEqual([t('lab-16').grade, t('lab-16').decisions.map((d) => d.question), t('lab-16').decidedForYou], ['One call', ['Which API key?'], []])
+  warned(/^lab-16 decision 1: names a credential input \("API key"\) on a task gated credential; read as yours \(ADR 0008\)$/)
+  assert.deepEqual([t('lab-17').grade, t('lab-17').decidedForYou.map((d) => d.owner)], ['Ready', ['technical']])
+  assert.deepEqual([t('lab-18').grade, t('lab-18').decidedForYou.map((d) => d.owner)], ['Ready', ['priorities']])
+  assert.ok(!j.warnings.some((w) => /^lab-1[78] /.test(w)), j.warnings.join('\n'))
+})
