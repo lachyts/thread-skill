@@ -152,6 +152,18 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      env_bootstrap never let the suite run, or a git-env trip fell inside the window) and stopped (a
                      signal stop: a TaskStop, a hard pause, a room stop) no verdict, the attempt runs again; followup
                      the fix task a final red filed; ADR 0052: completion-verify --run writes it).
+  verify-skipped  T  repo (the origin's owner/name, else the repo path), paths (at most 200 paths, the move's first),
+                     pathsTotal (int >= 0: every path the move changed); base?, main?, head? (the green run's base, the
+                     new main and the merge commit M that merges with no re-run), globs? (at most 64: the globs the
+                     proof held for). p29-3, ADR 0045: lead-integrate.py prepare's `skip`, written at the decision,
+                     before the push: main moved only in the repo's Inert paths and the Inert proof held on M's tree.
+  inert-proof-failed T repo, paths, pathsTotal (as verify-skipped), readers (at most 20 {glob, path, kind, line?, text?,
+                     origin?}: kind name | walk | link | tool | symlink | unprovable | submodule, line an int >= 0,
+                     text at most 120 characters, origin repo | cwd | path | input | open | depth; empty only beside an
+                     error); error? (at most 200 characters: the inert check raised, so no skip and nothing proved),
+                     base?, main?, head?, globs? (as verify-skipped), failed? (at most 64: the globs that failed). p29-3:
+                     prepare's path test passed but the proof found a reader, or the check itself failed (`error`), so
+                     the verifier runs as before.
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
@@ -285,6 +297,11 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   standing=true (the Standing approval); `handed-back` via=answer (the answer is the act) and via=descope (an
   automatic descope's re-entry); `auto-retry`. via=answer means a live answer of any block spent, `--answer`, or a
   fresh `(block -)` entry, not this block's answer only.
+- verify-skipped and inert-proof-failed (p29-3, ADR 0045): written by execute's lead-integrate.py prepare (through
+  reconcile-rollout.py's _event), read by skills/_shared/scripts/inert-paths.py `propose`'s drop rule across every
+  rollout's record for the repo (case ignored), in ts order: a verify-skipped line is a pass for each of its `globs`;
+  an inert-proof-failed line is a failure for each glob in `failed` (else each reader's glob) and a pass for the rest of
+  its `globs`; a line with an `error` is neither. score.py and reflect.py match kinds explicitly and read neither.
 - review-round: dedupe on (repo, doc) when doc is present, else on (repo, head, digest), keeping the latest line
   (p15-7's emitter is idempotent per (repo, doc)).
 - review-verdict: one line per verdict_key, (task, round, head) when the line carries a head, else (task, round,
@@ -649,6 +666,53 @@ def _slug(v):
     return None if ok else "a slug ([a-z0-9][a-z0-9._-]*), not reserved"
 
 
+# ---- the Inert-path kinds (skills/execute/scripts/lead-integrate.py prepare; p29-3, ADR 0045) ----------------------
+
+READER_KINDS = ("name", "walk", "link", "tool", "symlink", "unprovable", "submodule")
+READER_ORIGINS = ("repo", "cwd", "path", "input", "open", "depth")
+READER_KEYS = ("glob", "path", "kind")
+READER_OPTIONAL = ("line", "text", "origin")
+MAX_READERS = 20
+MAX_PATHS = 200
+MAX_GLOBS = 64
+READER_TEXT = 120
+ERROR_MAX = 200
+
+
+def _readers(v):
+    if not isinstance(v, list) or len(v) > MAX_READERS:
+        return "a list of at most %d readers" % MAX_READERS
+    for r in v:
+        if not isinstance(r, dict) or not set(READER_KEYS) <= set(r) or set(r) - set(READER_KEYS + READER_OPTIONAL):
+            return "a list of objects with glob, path and kind (and line?, text?, origin? only)"
+        if _str(r["glob"]) or _str(r["path"]):
+            return "a list whose glob and path are non-empty strings"
+        if r["kind"] not in READER_KINDS:
+            return "a list whose kind is one of %s" % ", ".join(READER_KINDS)
+        if "line" in r and _int(0)(r["line"]):
+            return "a list whose line is an integer >= 0"
+        if "text" in r and (not isinstance(r["text"], str) or len(r["text"]) > READER_TEXT):
+            return "a list whose text is a string of at most %d characters" % READER_TEXT
+        if "origin" in r and r["origin"] not in READER_ORIGINS:
+            return "a list whose origin is one of %s" % ", ".join(READER_ORIGINS)
+    return None
+
+
+def _capped(n):
+    def check(v):
+        ok = isinstance(v, list) and len(v) <= n and all(isinstance(x, str) and x for x in v)
+        return None if ok else "a list of at most %d non-empty strings" % n
+    return check
+
+
+def _error(v):
+    return None if isinstance(v, str) and v.strip() and len(v) <= ERROR_MAX else \
+        "a non-empty string of at most %d characters" % ERROR_MAX
+
+
+INERT_FIELDS = {"repo": _str, "paths": _capped(MAX_PATHS), "pathsTotal": _int(0)}
+INERT_OPTIONAL = {"base": _str, "main": _str, "head": _str, "globs": _capped(MAX_GLOBS)}
+
 HOLDS = ("merge", "git-env", "race")
 # kind -> (task required, required fields, optional fields)
 KINDS = {
@@ -676,6 +740,9 @@ KINDS = {
                           "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
                           "used": _int(0), "budget": _int(1)},
                    {"fingerprint": _str, "reviewRounds": _int(1), "quotaRetries": _int(1)}),
+    "verify-skipped": (True, dict(INERT_FIELDS), dict(INERT_OPTIONAL)),
+    "inert-proof-failed": (True, dict(INERT_FIELDS, readers=_readers),
+                           dict(INERT_OPTIONAL, error=_error, failed=_capped(MAX_GLOBS))),
     # result: reconcile-rollout.py's COMPLETION_RESULTS, in its order.
     "completion-verify": (False, {"result": _enum("green", "flake", "red", "rerun", "noslot", "unrun", "stopped"),
                                   "rc": _str, "sha": _str, "attempt": _int(1, 2)}, {"log": _str, "followup": _str}),
@@ -840,6 +907,8 @@ def _check_fields(kind, fields):
         _check_proposal(fields)
     elif kind == "grade" and fields["low"] > fields["decisions"]:
         raise Refused("grade: low (%d) exceeds decisions (%d)" % (fields["low"], fields["decisions"]))
+    elif kind == "inert-proof-failed" and not fields["readers"] and "error" not in fields:
+        raise Refused("inert-proof-failed: readers is empty only beside an error (a failed proof names its reader)")
 
 
 def _check_tuning(f):

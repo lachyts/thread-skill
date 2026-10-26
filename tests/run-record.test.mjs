@@ -865,6 +865,66 @@ test('grade refusals (p25-4): exit 2, one line and nothing written', (t) => {
   }
 })
 
+// ---- the Inert-path kinds (p29-3, ADR 0045): lead-integrate.py prepare's skip and its failed proof ---------------------
+const SKIP = { repo: 'o/r', paths: ['THREAD.md'], pathsTotal: 1, base: 'b'.repeat(40), main: 'c'.repeat(40), head: 'd'.repeat(40), globs: ['THREAD.md'] }
+const READER = { glob: 'THREAD.md', path: 'tests/t.sh', kind: 'name', line: 3, text: 'cat THREAD.md' }
+const FAILED = { repo: 'o/r', paths: ['THREAD.md'], pathsTotal: 1, readers: [READER], globs: ['THREAD.md'], failed: ['THREAD.md'] }
+
+test('verify-skipped and inert-proof-failed (p29-3) land in <rollout>.jsonl with their task, every reader kind and origin', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'verify-skipped', '--json', JSON.stringify(SKIP)], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'verify-skipped', '--json',
+    JSON.stringify({ repo: 'o/r', paths: Array.from({ length: 200 }, (_, i) => `docs/handoffs/${i}.md`), pathsTotal: 250 })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'inert-proof-failed', '--json', JSON.stringify(FAILED)], { env: EV(home) })
+  const kinds = ['name', 'walk', 'link', 'tool', 'symlink', 'unprovable', 'submodule']
+  const origins = ['repo', 'cwd', 'path', 'input', 'open', 'depth']
+  const readers = kinds.map((kind, i) => ({ glob: 'THREAD.md', path: `f${i}`, kind, ...(kind === 'walk' ? { origin: origins[i % origins.length] } : {}) }))
+  readers.push(...origins.map((origin) => ({ glob: 'docs/handoffs/**', path: 'tests/x.py', kind: 'walk', origin, line: 0, text: 'x'.repeat(120) })))
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'inert-proof-failed', '--json', JSON.stringify({ ...FAILED, readers })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'inert-proof-failed', '--json',
+    JSON.stringify({ repo: 'o/r', paths: [], pathsTotal: 0, readers: [], error: 'inert check error: ProofError: git cat-file --batch exited 128' })], { env: EV(home) })
+  const all = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(all.map((l) => [l.kind, l.task, l.v]), [['verify-skipped', 't', 1], ['verify-skipped', 't', 1], ['inert-proof-failed', 't', 1],
+    ['inert-proof-failed', 't', 1], ['inert-proof-failed', 't', 1]])
+  assert.deepEqual([all[0].paths, all[0].pathsTotal, all[0].head, all[1].paths.length, all[1].pathsTotal], [['THREAD.md'], 1, 'd'.repeat(40), 200, 250])
+  assert.deepEqual(all[2].readers, [READER])
+  assert.equal(all[3].readers.length, 13)
+  assert.deepEqual([all[4].readers, all[4].error], [[], 'inert check error: ProofError: git cat-file --batch exited 128'])
+})
+
+test('the Inert-path kinds are refused, exit 2 and nothing written, when malformed', (t) => {
+  const home = tmpHome(t)
+  const drop = (o, k) => { const c = { ...o }; delete c[k]; return c }
+  const cases = [
+    ['verify-skipped', 'no task', SKIP, []],
+    ['inert-proof-failed', 'no task', FAILED, []],
+    ['verify-skipped', 'no repo', drop(SKIP, 'repo')],
+    ['verify-skipped', 'no paths', drop(SKIP, 'paths')],
+    ['verify-skipped', 'no pathsTotal', drop(SKIP, 'pathsTotal')],
+    ['verify-skipped', '201 paths', { ...SKIP, paths: Array.from({ length: 201 }, (_, i) => `d/${i}.md`) }],
+    ['verify-skipped', 'a negative pathsTotal', { ...SKIP, pathsTotal: -1 }],
+    ['inert-proof-failed', 'no repo', drop(FAILED, 'repo')],
+    ['inert-proof-failed', 'no paths', drop(FAILED, 'paths')],
+    ['inert-proof-failed', 'no readers', drop(FAILED, 'readers')],
+    ['inert-proof-failed', 'readers [] with no error', { ...FAILED, readers: [] }],
+    ['inert-proof-failed', 'a bad reader kind', { ...FAILED, readers: [{ ...READER, kind: 'step' }] }],
+    ['inert-proof-failed', 'a bad origin', { ...FAILED, readers: [{ ...READER, kind: 'walk', origin: 'home' }] }],
+    ['inert-proof-failed', '21 readers', { ...FAILED, readers: Array.from({ length: 21 }, () => READER) }],
+    ['inert-proof-failed', 'a reader with no glob', { ...FAILED, readers: [drop(READER, 'glob')] }],
+    ['inert-proof-failed', 'a reader with an unknown key', { ...FAILED, readers: [{ ...READER, why: 'x' }] }],
+    ['inert-proof-failed', 'a negative line', { ...FAILED, readers: [{ ...READER, line: -1 }] }],
+    ['inert-proof-failed', 'a 121-character text', { ...FAILED, readers: [{ ...READER, text: 'x'.repeat(121) }] }],
+    ['inert-proof-failed', 'a 201-character error', { ...FAILED, readers: [], error: 'e'.repeat(201) }],
+    ['inert-proof-failed', 'an empty error', { ...FAILED, readers: [], error: '' }],
+  ]
+  for (const [kind, name, fields, extra = ['--rollout', 'r', '--task', 't']] of cases) {
+    const r = cli(home, ['emit', ...extra, '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${kind} ${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, `${kind} ${name}`)
+    assert.deepEqual(listing(ev(home)), [], `${kind} ${name}: nothing written`)
+  }
+})
+
 test('rollout and task slugs normalise from wikilinks, note paths and any case', (t) => {
   const home = tmpHome(t)
   for (const r of ['[[Foo]]', '/p/Foo.md', 'FOO']) emitOk(home, ['--rollout', r, '--kind', 'resumed'], { env: EV(home) })
