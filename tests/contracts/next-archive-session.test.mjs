@@ -5,10 +5,10 @@
 //
 //   - step 1 detects the case (a consumed or consumer-deleted handoff doc, or a live session holding the thread,
 //     the handoff's own started successor included) and, in a bullet of its own, the own branch every close
-//     option names;
+//     line, part or option names;
 //   - step 3 recommends **Archive this session** (not a route: nothing is written, the THREAD.md stays active),
 //     drops keep going, handoff, stash and defer while another session holds the thread, and says why close
-//     stays on the menu although it still writes to what the other session holds;
+//     stays offered, as the archive line's close part, although it still writes to what the other session holds;
 //   - step 4's archive line is exactly two parts, archive first (since thread-skill-p30-5 archiving is always
 //     clear, so a line and never a menu: next-decides-housekeeping.test.mjs), and every close line, part or
 //     option says what close writes; in wording Lachy reads, **session** is this chat and **thread** the
@@ -42,11 +42,11 @@ const OWN_BRANCH = /^\s*- \*\*This session's own branch\*\*/
 const ARCHIVE_ROUTE = /^\s*- \*\*Archive this session\*\*/
 const CLOSE_ROUTE = /^\s*- \*\*`close`\*\*/
 const HOLDS = /^\s*\*\*While another session holds the thread\.\*\*/
-const MENU_LEAD = /^\s*\*\*The archive line\.\*\*/
-const ARCHIVE_OPTION = /^\s*- the archive part,/
-const CLOSE_OPTION = /^\s*- the close part,/
-const OPTION_LABEL = /^\s*- the (\w+) part,/
-const MENU_LABELS = ['archive', 'close']
+const LINE_LEAD = /^\s*\*\*The archive line\.\*\*/
+const ARCHIVE_PART = /^\s*- the archive part,/
+const CLOSE_PART = /^\s*- the close part,/
+const PART_LABEL = /^\s*- the (\w+) part,/
+const PART_LABELS = ['archive', 'close']
 const DISPATCHED = /^\s*\*\*Archive this session, dispatched\.\*\*/
 const LEAVE = /\bleave it\b/i
 const KEEP = /\bkeep (the )?thread\b/i
@@ -95,7 +95,7 @@ function nextFails(text) {
     '**Run from:**',
   ])
 
-  // P1b — the own-branch fact, in a step-1 bullet of its own, so every menu's close option gets it.
+  // P1b — the own-branch fact, in a step-1 bullet of its own, so every close line, part or option gets it.
   needLine(fails, 'P1b step-1 own-branch bullet', lineOf(s1, OWN_BRANCH), [
     'close § The own branch', 'Every close line, part or option', "the move's line and the menu's as well as the archive line's",
   ])
@@ -121,20 +121,20 @@ function nextFails(text) {
   // P4 — the archive line: exactly two parts, archive first, each saying what it does. The parts are every list
   // item from the lead to the next blank line, so a third one fails wherever it sits.
   const s4lines = s4.split('\n')
-  const lead = s4lines.findIndex((l) => MENU_LEAD.test(l))
-  if (lead < 0) fails.push('P4 archive menu: no **The archive line.** line')
+  const lead = s4lines.findIndex((l) => LINE_LEAD.test(l))
+  if (lead < 0) fails.push('P4 archive line: no **The archive line.** line')
   else {
-    need(fails, 'P4 archive menu lead', C(s4lines[lead]), ['exactly two parts'])
+    need(fails, 'P4 archive line lead', C(s4lines[lead]), ['exactly two parts'])
     const end = s4lines.findIndex((l, i) => i > lead && l.trim() === '')
     const items = s4lines.slice(lead + 1, end < 0 ? undefined : end).filter((l) => /^\s*- /.test(l))
-    const labels = items.map((l) => l.match(OPTION_LABEL)?.[1] ?? l.trim())
-    if (JSON.stringify(labels) !== JSON.stringify(MENU_LABELS)) {
-      fails.push(`P4 archive menu options: ${JSON.stringify(labels)}, not ${JSON.stringify(MENU_LABELS)}`)
+    const labels = items.map((l) => l.match(PART_LABEL)?.[1] ?? l.trim())
+    if (JSON.stringify(labels) !== JSON.stringify(PART_LABELS)) {
+      fails.push(`P4 archive line parts: ${JSON.stringify(labels)}, not ${JSON.stringify(PART_LABELS)}`)
     } else {
-      need(fails, 'P4 archive option', C(items[0]), [
+      need(fails, 'P4 archive part', C(items[0]), [
         ARCHIVE_LEAD, 'Nothing is written.', 'The thread stays active in', 'archive this chat on the Stage', 'Codex Desktop',
       ])
-      need(fails, 'P4 close option', C(items[1]), [
+      need(fails, 'P4 close part', C(items[1]), [
         CLOSE_DESC, 'queues its merge', 'is building on', 'With no THREAD.md',
       ])
     }
@@ -252,9 +252,9 @@ test('control A: the archive part reverted to "Leave it" fails the line and the 
 
 test('control B: a "Leave it" part beside the intact archive part fails the line and the forbidden wording, nothing else', () => {
   const added = '   - the leave part, "Or leave it: do nothing for now."'
-  const bad = insertAfter(next, (l) => ARCHIVE_OPTION.test(l), added)
+  const bad = insertAfter(next, (l) => ARCHIVE_PART.test(l), added)
   assert.deepEqual(nextFails(bad), [
-    `P4 archive menu options: ${JSON.stringify(['archive', 'leave', 'close'])}, not ${JSON.stringify(MENU_LABELS)}`,
+    `P4 archive line parts: ${JSON.stringify(['archive', 'leave', 'close'])}, not ${JSON.stringify(PART_LABELS)}`,
     forbidden(added),
   ])
 })
@@ -268,13 +268,13 @@ test('control B2: the exemption is the quoted literal, never the whole rule line
 })
 
 test('control C: a close part that drops "(it stays active)" fails the line', () => {
-  const fails = nextFails(mutateLine(next, CLOSE_OPTION, '(it stays active)', ''))
-  assert.ok(failsWith(fails, 'P4 close option'), `no P4 failure: ${fails}`)
+  const fails = nextFails(mutateLine(next, CLOSE_PART, '(it stays active)', ''))
+  assert.ok(failsWith(fails, 'P4 close part'), `no P4 failure: ${fails}`)
 })
 
 test('control D: an archive part that drops "archive this chat on the Stage" fails the line', () => {
-  const fails = nextFails(mutateLine(next, ARCHIVE_OPTION, 'archive this chat on the Stage', ''))
-  assert.ok(failsWith(fails, 'P4 archive option'), `no P4 failure: ${fails}`)
+  const fails = nextFails(mutateLine(next, ARCHIVE_PART, 'archive this chat on the Stage', ''))
+  assert.ok(failsWith(fails, 'P4 archive part'), `no P4 failure: ${fails}`)
 })
 
 test('control E: step 3 without the Archive this session bullet fails', () => {
@@ -313,7 +313,7 @@ test('control I: a step-3 close bullet without the no-THREAD.md fallback fails',
 
 test('control J: a Thread entry without the user-facing convention fails', () => {
   const bad = mutate(context,
-    "In wording Lachy reads (a router's menu options and their descriptions) the convention is user-facing: **session** names the live conversation and **thread** the durable work its THREAD.md records, because that is how he reads the word.",
+    "In wording Lachy reads (a router's line, its menu options and their descriptions) the convention is user-facing: **session** names the live conversation and **thread** the durable work its THREAD.md records, because that is how he reads the word.",
     '')
   const fails = contextFails(bad)
   assert.ok(failsWith(fails, 'P9 '), `no P9 failure: ${fails}`)
@@ -327,16 +327,16 @@ test('control K: a Router entry whose archive sentence makes it a route fails, t
 })
 
 test('control L: a third part after close fails the archive line alone', () => {
-  const bad = insertAfter(next, (l) => CLOSE_OPTION.test(l), '   - the handoff part, "Or hand off to a fresh session."')
+  const bad = insertAfter(next, (l) => CLOSE_PART.test(l), '   - the handoff part, "Or hand off to a fresh session."')
   assert.deepEqual(nextFails(bad), [
-    `P4 archive menu options: ${JSON.stringify([...MENU_LABELS, 'handoff'])}, not ${JSON.stringify(MENU_LABELS)}`,
+    `P4 archive line parts: ${JSON.stringify([...PART_LABELS, 'handoff'])}, not ${JSON.stringify(PART_LABELS)}`,
   ])
 })
 
 test('control L2: a third part that is not a part line fails the archive line too', () => {
-  const bad = insertAfter(next, (l) => ARCHIVE_OPTION.test(l), '   - `Hand off`: start a fresh session.')
+  const bad = insertAfter(next, (l) => ARCHIVE_PART.test(l), '   - `Hand off`: start a fresh session.')
   const fails = nextFails(bad)
-  assert.ok(failsWith(fails, 'P4 archive menu options'), `no P4 failure: ${fails}`)
+  assert.ok(failsWith(fails, 'P4 archive line parts'), `no P4 failure: ${fails}`)
 })
 
 test('control M: a detection bullet that drops the successor the handoff itself started fails', () => {
@@ -347,7 +347,7 @@ test('control M: a detection bullet that drops the successor the handoff itself 
   assert.ok(failsWith(fails, 'P1 '), `no P1 failure: ${fails}`)
 })
 
-test('control N: step 1 without its own-branch bullet fails, so the normal menu would lose the fact', () => {
+test('control N: step 1 without its own-branch bullet fails, so the line and the menu would lose the fact', () => {
   const fails = nextFails(dropLine(next, OWN_BRANCH))
   assert.ok(fails.includes('P1b step-1 own-branch bullet: missing'), `no P1b failure: ${fails}`)
 })

@@ -99,10 +99,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Thread** — a live agent conversation carrying working context. Ephemeral;
   dies with the session. (Deliberately overloaded with the file below — the
   plugin name trades on the overlap, but the two must never be confused in
-  skill prose.) In wording Lachy reads (a router's menu options and their
-  descriptions) the convention is user-facing: **session** names the live
-  conversation and **thread** the durable work its THREAD.md records, because
-  that is how he reads the word. Agent-facing prose keeps the two senses above.
+  skill prose.) In wording Lachy reads (a router's line, its menu options
+  and their descriptions) the convention is user-facing: **session** names
+  the live conversation and **thread** the durable work its THREAD.md
+  records, because that is how he reads the word. Agent-facing prose keeps
+  the two senses above.
 - **THREAD.md** — the durable state-of-play *file* a thread can be persisted
   into. A code project's thread is its **Repo thread**: the repo's own
   toplevel `<repo>/THREAD.md` under `~/repos`, found by `open`'s repo-thread
@@ -132,8 +133,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   then dispatches to a route. A sibling, not a parent. "Next move?" is a gate
   (Chorus ADR 0110): when its recommendation is clear, `next` decides it and says
   so in one line, asking only when the pick turns on what only Lachy knows, and it
-  never drops an open confirm (a gate is answered by the rule, his question is
-  carried). Its *keep going* may
+  never drops an open confirm (a gate, technical or priorities question is
+  decided by the rule; his question, and any act the action policy reserves
+  for him, is carried). Its *keep going* may
   carry a **compact recommendation**, which only Lachy acts on: compact is a
   recommendation inside keep going, never a route. When the work already
   continues in another session it recommends **archive this session** instead,
@@ -181,8 +183,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   self-initiated because the context feels long; that recommendation belongs to
   `next`.
 - **Handoff doc** — the durable brief `thread:handoff`, its only writer, writes
-  on explicit fork intent only (Lachy's ask, or his pick from a router's menu;
-  never self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits
+  on explicit fork intent only (Lachy's ask, or a router's dispatch; never
+  self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits
   and lands (pushed, merge queued, never waited on) —
   `<home>` the unit directory: the project dir under `~/Projects/`, the
   workspace dir under `~/repos/workspaces/`, else the git toplevel.

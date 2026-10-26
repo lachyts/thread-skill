@@ -92,7 +92,7 @@ Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` fo
 Body sections, in this order:
 
 1. **Done and verified** — what landed this session, with evidence (paths, SHAs, test output).
-2. **What remains** — the continuation: what the next session does, in order, naming any fork the grill-fit check returned to Lachy.
+2. **What remains** — the continuation: what the next session does, in order, naming any fork the grill-fit check returned to Lachy. An open confirm a dispatching `thread:next` carried (its step 3) is one such fork, word for word.
 3. **Decisions settled** — rulings already made, so they are not re-litigated.
 4. **Gotchas found the hard way.**
 5. **Suggested skills** — the skills the next agent should invoke to continue.
