@@ -268,6 +268,41 @@ test('the human acts (p21-2): answer-recorded, gate-signed, handed-back and race
   assert.deepEqual(all.slice(9).map((l) => [l.mark, l.by]), [['RACE', 'resume'], ['UNVERIFIED', 'hand-back'], ['RACE', 'auto-retry']])
 })
 
+test('flake and suite-timeout (p29-9, ADR 0050/0051): valid emits, with and without their optional fields', (t) => {
+  const home = tmpHome(t)
+  const emit = (kind, f) => emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+  for (const site of ['task', 'integrate', 'integration', 'race']) {
+    emit('flake', { test: 'tests/test_x.py::test_a', repo: 'o/r', sha: 'abcdef0123456789', site })
+  }
+  emit('flake', { test: 'tests/test_x.py::test_a', repo: 'o/r', sha: 'abcdef0', site: 'task', followup: 'proj-followup-flake-0123456789', count: 2 })
+  for (const run of ['first', 'named', 'confirm']) emit('suite-timeout', { site: 'integration', run, seconds: 1800 })
+  emit('suite-timeout', { site: 'race', run: 'first', seconds: 1, sha: 'abcdef0' })
+  const all = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(all.map((l) => [l.kind, l.task, l.v]), [...Array(5).fill(['flake', 't', 1]), ...Array(4).fill(['suite-timeout', 't', 1])])
+  assert.deepEqual(all.slice(0, 4).map((l) => l.site), ['task', 'integrate', 'integration', 'race'])
+  assert.deepEqual([all[4].followup, all[4].count, all[4].test, all[4].repo], ['proj-followup-flake-0123456789', 2, 'tests/test_x.py::test_a', 'o/r'])
+  assert.deepEqual(all.slice(5).map((l) => [l.site, l.run, l.seconds]), [['integration', 'first', 1800], ['integration', 'named', 1800], ['integration', 'confirm', 1800], ['race', 'first', 1]])
+  assert.equal(all[8].sha, 'abcdef0')
+})
+
+test('flake and suite-timeout refuse a bad enum, a missing field and a missing task: exit 2, nothing written', (t) => {
+  const home = tmpHome(t)
+  const F = { test: 'tests/test_x.py::test_a', repo: 'o/r', sha: 'abcdef0', site: 'task' }
+  const S = { site: 'integration', run: 'first', seconds: 60 }
+  const drop = (o, k) => Object.fromEntries(Object.entries(o).filter(([x]) => x !== k))
+  for (const [kind, f, task] of [
+    ['flake', { ...F, site: 'lead' }, 't'], ['flake', { ...F, count: 0 }, 't'], ['flake', { ...F, count: 'two' }, 't'],
+    ...['test', 'repo', 'sha', 'site'].map((k) => ['flake', drop(F, k), 't']), ['flake', F, null],
+    ['suite-timeout', { ...S, site: 'task' }, 't'], ['suite-timeout', { ...S, run: 'second' }, 't'], ['suite-timeout', { ...S, seconds: 0 }, 't'],
+    ...['site', 'run', 'seconds'].map((k) => ['suite-timeout', drop(S, k), 't']), ['suite-timeout', S, null],
+  ]) {
+    const r = cli(home, ['emit', '--rollout', 'r', ...(task ? ['--task', task] : []), '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+    assert.equal(r.status, 2, `${kind} ${JSON.stringify(f)}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+  }
+  assert.ok(!fs.existsSync(path.join(ev(home), 'r.jsonl')), 'nothing written')
+})
+
 test('unknown extra keys are allowed beside the kind fields', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'ready', '--json', '{"pr":"https://github.com/o/r/pull/7","harness":"codex","extra":1}'], { env: EV(home) })

@@ -517,10 +517,25 @@ through time, from attention to merged PRs. Terms only — no implementation.
   outside the task's diff, and passed when re-run by name and then when the
   full suite ran once more on the same tree: the verify counts green, and the
   Flake is logged and filed for its repo, never fixed inside the task
-  (ADR 0050). Never a known baseline failure (schedule § 2.6: a test already
+  (ADR 0050). "Outside the diff" is read by test file: the test is placed in
+  a test file the task's diff does not change (a RACE re-verify's diff is the
+  merged task's); a red that names no test, a test that cannot be placed in a
+  file, or one in the diff is red at once, with no re-run. The named re-run
+  comes first (any red again is red), then exactly one confirming full run.
+  Each Flake is a `flake` Run-record event and a line in the `## Flake log` of
+  one follow-up per (repo, test); a test logged as a Flake twice is the repo's
+  to fix. Never a known baseline failure (schedule § 2.6: a test already
   red on a clean `main`, which execute's green criterion already allows
   for), nor a remote CI step merge-task's `infra_flake_rerun` re-runs.
   _Avoid_: flaky failure, quarantined test.
+- **Named re-run** — the Flake check's first step: only a red's failing tests,
+  re-run alone by name on the same tree before the one confirming full run
+  (ADR 0050). At the lead's Integration verify and RACE re-verify it is the
+  rollout's `named_rerun:` command, `{tests}` replaced by the tests; with no
+  `named_rerun:` the lead's red stays red. An agent (an implementer, a
+  reviser, an integrator) uses the repo's own test runner. It takes no verify
+  slot of its own and never counts as an iteration. _Avoid_: retry, targeted
+  run.
 - **Completion verifier** — a rollout note's optional `completion_verifier:`,
   the full suite of a project whose `verifier:` is its declared fast tier
   (estate ADR 0009 d6): the completion ceremony runs it once on merged main,

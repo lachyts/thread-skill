@@ -492,7 +492,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // plan`, read at that launch only (Restart routing's revise reuses step 1.2's) and passed verbatim. The integrate
   // call (step 3) carries no `plan`: its integrator reads the note's `## Approved plan` itself (p27-1), so § 4.5 names
   // `lead-integrate.py plan` once. No empty-plan literal is left; § 6 lists the row's `plan` (then p21-3's
-  // `reviewVerdicts`, the row's last key), reconcile's three outcomes and who reads the section back.
+  // `reviewVerdicts` and p29-9's `flakes`, the row's last key), reconcile's three outcomes and who reads the section back.
   const planHits = (section(skill, S45) ?? '').split('lead-integrate.py plan').length - 1
   const s6 = S(skill, S6)
   const VERBATIM = 'passed verbatim as the same JSON string, never retyped, summarised or truncated'
@@ -501,7 +501,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !st3.includes('trouble, landed, reviewHistory') || st3.includes('landed, plan') ||
     !st3.includes("It carries no `plan` (p27-1): the integrator reads the task note's `## Approved plan` itself") ||
     planHits !== 1 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
-    !s6.includes('gatedInputs, plan, reviewVerdicts }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
+    !s6.includes('gatedInputs, plan, reviewVerdicts, flakes }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
     !s6.includes('`""` removes that section') || !s6.includes('`null` or absent leaves it') ||
     !s6.includes("`lead-integrate.py plan` reads it back for §4.5 step 1.2's seeded revise")) {
     fails.push('approved-plan')
@@ -890,7 +890,7 @@ test('control: a double-quoted verifier on the verify line fails verify-bound', 
 })
 
 test('control: a double-quoted RACE re-verify fails verify-bound', () => {
-  only(sk("--bootstrap '<env_bootstrap>' --verifier '<verifier>'` in the background", '--bootstrap "<env_bootstrap>" --verifier "<verifier>"` in the background'),
+  only(sk("--bootstrap '<env_bootstrap>' --verifier '<verifier>' --diff-base '<the merge commit>^1'", '--bootstrap "<env_bootstrap>" --verifier "<verifier>" --diff-base \'<the merge commit>^1\''),
     'verify-bound', 'dq race')
 })
 

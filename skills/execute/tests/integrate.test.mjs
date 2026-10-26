@@ -1,7 +1,7 @@
 // p12-6 (ADR 0030 decision 3): Integration's trouble path is its own small Workflow call.
 //
 // args.mode: 'integrate' runs the integrator (or, on P1, only the judge) in the task's worktree and returns
-// ONE row: the task row's 22 keys plus `integration`. These fixtures run the WHOLE script through runTask() with a
+// ONE row: the task row's 23 keys plus `integration`. These fixtures run the WHOLE script through runTask() with a
 // label-keyed stub that throws on any label it was not given (so a stray dispatch fails loudly) and
 // records every dispatch's opts. The rendered steps themselves run in tests/integration-tree.test.sh; the
 // note side of the stage markers runs in tests/integration-marker-roundtrip.test.mjs.
@@ -21,7 +21,7 @@ const T = loadEngine([
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman', 'reviewVerdicts',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman', 'reviewVerdicts', 'flakes',
 ]
 const STATUSES = ['review', 'review-blocked', 'blocked', 'plan-blocked', 'gate-pending']
 const sha = (c) => c.repeat(40)
@@ -577,6 +577,32 @@ test('e1c: a conflict blockKind without the merge step\'s evidence fails closed 
   assert.equal(T.integrationBlockOf(g.row.blockerDiagnosis), '')
   assert.deepEqual(g.row.integration.triggers, [])
   setAsideDiags.push(['e1c gate', g.row.blockerDiagnosis])
+})
+
+// p29-9 (ADR 0050): the integrator's own verifier runs apply the Flake check; it returns each Flake in `flakes`, which the
+// engine sanitises (flakesOf) onto the row's `flakes` on every outcome, an integrated row and a set-aside alike.
+test('f29: the integrator\'s flakes reach the row: integrated, a red set-aside, a dead judge; none by default', async () => {
+  const FL = [{ test: 'tests/test_t.py::test_slow', sha: M.toUpperCase() }, { test: 'tests/test_t.py::test_slow', sha: M }, { test: 'bad\nid', sha: M }]
+  const want = [{ test: 'tests/test_t.py::test_slow', sha: M }]
+  const ok1 = await run(mkArgs(mkI()), { [ILABEL]: { ...ir(), flakes: FL } })
+  clean(ok1)
+  assert.equal(ok1.row.status, 'review')
+  assert.deepEqual(ok1.row.flakes, want)
+  assert.equal(ok1.logs.filter((l) => /^flakes: integrate:proj-fix-a: dropped 1 malformed/.test(l)).length, 1)
+  const red = await run(mkArgs(mkI()), { [ILABEL]: blockedIr('still red', { blockKind: 'red', verified: false, mergeLog: ir({ state: 'merged' }).mergeLog, flakes: FL }) })
+  clean(red)
+  setAside(red, 'f29 red')
+  assert.deepEqual(red.row.flakes, want, 'kept on a set-aside as well')
+  const judged = await run(mkArgs(mkI({ trouble: ['conflict'] })), { [ILABEL]: { ...ir({ state: 'merged', conflicts: ['a.js'] }), flakes: FL }, [JLABEL(2)]: jv() })
+  clean(judged)
+  assert.deepEqual(judged.row.flakes, want, 'a judged integration keeps the integrator\'s')
+  const none = await run(mkArgs(mkI()), { [ILABEL]: ir() })
+  assert.deepEqual(none.row.flakes, [])
+  const threw = await run(mkArgs(mkI()), { [ILABEL]: new Error('boom') })
+  assert.deepEqual(threw.row.flakes, [])
+  const p1 = await run(mkArgs(mkI({ trouble: ['shared-file'], leadMerge: { mergeCommit: M, headSha: M, baseSha: B1, verified: true } })), { [JLABEL(2)]: jv() })
+  clean(p1)
+  assert.deepEqual(p1.row.flakes, [], 'P1 runs no integrator')
 })
 
 test('e1d: a named verifier red at Integration; a conflict resolved, then red, reads red, never conflict', async () => {
