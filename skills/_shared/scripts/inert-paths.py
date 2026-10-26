@@ -23,8 +23,9 @@ The path test. changed(repo, base, head) is `git diff --no-renames base head`'s 
 inert path still counts at the path it left. path_test(repo, base, head, globs) returns {changed, inert, nonInert,
 matched, globs}: `matched` is what git itself matches with `':(glob)G'` for any glob G, `globs` the globs that matched a
 changed path (every glob, when this script's own matcher cannot name the glob for a matched path). A path is inert only
-when a glob matches it AND it has a prose extension (PROSE_EXT: .md .markdown .txt .rst .adoc .org) AND it is a regular
-file on both sides (a symlink or a gitlink is never inert). One non-inert path means a re-run.
+when a glob matches it AND it has a prose extension (PROSE_EXT: .md .markdown .rst .adoc .org; never .txt, which pytest
+collects as `test*.txt` with no flag and which is often code or data) AND it is a regular file on both sides (a symlink
+or a gitlink is never inert). One non-inert path means a re-run.
 
 The Inert proof. prove(repo, tree, globs, steps, places=None) proves each glob on the tree `tree` (prepare passes the
 merge commit M, the exact tree being merged) and returns {glob: {held, readers, readersTotal}}, each reader
@@ -32,8 +33,9 @@ merge commit M, the exact tree being merged) and returns {glob: {held, readers, 
 `cat-file --batch`, one parse per blob) and shares it across every glob it proves; nothing is cached across calls. It
 fails closed: anything it cannot read reads as a reader. A glob holds only when there is none of:
 - Scope. Every tracked blob of the tree that is not prose (the glob's own files included: no own-files exclusion) is
-  scanned, plus the verifier and bootstrap texts as steps (`<verifier>`, `<bootstrap>`), which run at the tree root. A
-  blob holding a NUL byte is binary: the name rule reads it, nothing else does (it has no lines of code).
+  scanned (every .txt among them), plus the verifier and bootstrap texts as steps (`<verifier>`, `<bootstrap>`), which
+  run at the tree root. A blob holding a NUL byte is binary: the name rule reads it, nothing else does (it has no lines
+  of code).
 - unprovable: a glob with no literal segment (`**`, `*.md`) is never proved; past PROOF_BUDGET_S (60 s, a deadline
   check, no signals) every glob fails as unprovable with "proof budget exceeded".
 - submodule: a gitlink anywhere in the tree fails every glob (its contents cannot be read).
@@ -45,28 +47,47 @@ fails closed: anything it cannot read reads as a reader. A glob holds only when 
   docs/handoffs/**. Case-insensitive; only [A-Za-z0-9] are word characters, so `_ - . /` and quotes are boundaries; every
   line counts, comments and docstrings included. So `ROOT / 'docs' / 'handoffs' / n`, `path.join('docs','handoffs',f)`
   and `HANDOFFS_DIR` all hit. An intermediate segment (`docs` alone) is no name: a walk over it is the walk rule's.
-- tool (every glob): a markdown tool named in a scanned file or step, word-bounded and case-sensitive (TOOLS: prettier,
-  markdownlint (and -cli, -cli2), remark-cli, remark-lint*, cspell, mdformat, markdown-link-check, lychee, linkinator,
-  textlint, pymarkdown, proselint, codespell, mkdocs, sphinx-build, doctoc; `remark` and `vale` only in command form,
-  `npx remark …`, a `vale` command with an argument); or any tracked tool config (TOOL_CONFIG_RE: .prettierrc*,
-  prettier.config.*, .markdownlint*, .vale.ini, .remarkrc*, cspell.json, .cspell*, .mdformat.toml, lychee.toml,
-  .lycheeignore). A lock file counts: one named tool anywhere fails every glob.
+- tool (every glob): a markdown tool or whole-tree prose runner named in a scanned file or step, word-bounded and
+  case-sensitive (TOOLS: prettier, markdownlint (and -cli, -cli2), remark-cli, remark-lint*, cspell, mdformat,
+  markdown-link-check, lychee, linkinator, textlint, pymarkdown, proselint, codespell, mkdocs, sphinx-build, doctoc,
+  pre-commit, doctest (so `--doctest-glob` and `--doctest-modules`), markdown-docs, mktestdocs, phmdoctest; `remark` and
+  `vale` only in command form, `npx remark …`, a `vale` command with an argument); or any tracked tool config
+  (TOOL_CONFIG_RE: .prettierrc*, prettier.config.*, .markdownlint*, .vale.ini, .remarkrc*, cspell.json, .cspell*,
+  .mdformat.toml, lychee.toml, .lycheeignore, .pre-commit-config.yaml/.yml). A lock file counts: one named tool anywhere
+  fails every glob.
 - link (every glob): a literal `](` in a scanned file or step (code that parses markdown links).
 - walk: a walk site whose root is not provably outside the repo and that covers the glob (below).
 
-Walk sites. The API forms are matched in their language's code (by extension, or a shebang):
-- Python (ast): os.walk, os.fwalk, os.listdir, os.scandir, glob.glob, glob.iglob, shutil.copytree; the methods
-  .rglob, .glob, .iterdir and .walk on any receiver that is not an imported module (so ast.walk is none).
-- JS/TS: fs.readdir*, fs.opendir* (Sync and promise forms), fs.globSync and fs.glob, glob/globSync, globby, fast-glob,
-  and cpSync/cp with `recursive`, on any receiver.
-- Swift: FileManager's contentsOfDirectory, enumerator, subpathsOfDirectory and subpaths.
+Walk sites. A copy or archive of a tree is a walk of its source (copying the repo to TMP and walking the copy walks
+the repo). The API forms are matched in their language's code (by extension, or a shebang):
+- Python (ast): os.walk, os.fwalk, os.listdir, os.scandir, glob.glob, glob.iglob, shutil.copytree,
+  shutil.make_archive (its root_dir joined with its base_dir), filecmp.dircmp (both sides); TarFile.add and
+  ZipFile.write on a receiver that is a tarfile.open / TarFile(.open, .gzopen, …) / ZipFile / PyZipFile value; the
+  methods .rglob, .glob, .iterdir and .walk on any receiver that is not an imported module (so ast.walk is none).
+  None as the root of os.listdir, os.scandir, glob's root_dir or make_archive's root_dir is the cwd (a number there
+  reads `open`).
+- JS/TS: fs.readdir*, fs.opendir* (Sync and promise forms), fs.globSync and fs.glob, glob/globSync, globby, fast-glob
+  (a `cwd: undefined` option is the cwd), and cpSync/cp with `recursive`, on any receiver.
+- Swift: FileManager's contentsOfDirectory, enumerator, subpathsOfDirectory, subpaths and copyItem.
 The shell forms are matched on every non-comment line of every scanned file and step, strings included (a code
-file's string literals, a config file's lines and strings, a shell file's lines): find, ls, `grep -r` (any recursive
-form) and rg, `git ls-files`/`ls-tree`/`grep`, `for x in <glob>`, and a `**` glob (`**/` at a word's start, `/**` after
-a path character, or a bare `**` word). An argv list is read de-quoted, so `['git', 'ls-files']` reads `git ls-files`;
-a host expression in it (`['find', root]`) is resolved as code. A git listing with no pathspec is a whole-tree (cwd)
-walk; with an exclude pathspec, or no `--` before a git grep's paths, it is whole-tree too. A line holding only a
-comment is skipped.
+file's string literals, a config file's lines and strings, a shell file's lines), when the line holds a hint (a listed
+command word, `**`, an assignment, a `*` in a shell or make file, or a GLOB_CMDS word with a `*` after it in a code
+string): find, ls, `grep -r` (any recursive form) and rg, `git ls-files`/`ls-tree`/`grep`, `for x in <glob>`, and a
+`**` glob (`**/` at a word's start, `/**` after a path character, or a bare `**` word). The copies: a recursive cp
+(`-r`, `-R`, `-a`, `--recursive`, `--archive`: every positional word but the last, all of them with `-t`), rsync and
+ditto (every positional word but the last), a tar that creates, appends or updates (`c`, `r`, `u`, old or dash style;
+every positional word, each under the `-C` before it), `zip -r` (the words after the archive, an `-x`/`-i` pattern
+list skipped; `-R` walks the cwd), `git clone` (every positional word), and `git archive` and `git worktree add` (the
+whole repo: the cwd, or `git -C`'s directory). A command substitution (`$(…)`, backquotes, make's `$(shell …)` and
+`$(wildcard …)`) is read as words of its own. A bare glob, an argument word with an unquoted `*` (not an option, an
+assignment or a `**` word), is a listing of its directory: in a shell or make file's line (outside a heredoc body,
+which the shell never globs) and in a step, after any command; in a code string, only after a GLOB_CMDS word (cat,
+ls, wc, head, tail, grep, sed, awk, cp, echo, diff, tar, zip, git, python, node, bash, …) in the same command; never
+in command position (a `case` pattern line), inside `[[ ]]`, `[`, `test` or a `case`, nor in a config or
+unknown-language file's line. An argv list is read de-quoted, so `['git', 'ls-files']` reads `git ls-files` (its words
+are quoted, so no bare glob); a host expression in it (`['find', root]`) is resolved as code. A git listing with no
+pathspec is a whole-tree (cwd) walk; with an exclude pathspec, or no `--` before a git grep's paths, it is whole-tree
+too. A line holding only a comment is skipped.
 
 The resolver. A walk's root resolves to a set of origins.
 - A Python file that `ast.parse`s is resolved with scopes: function locals, enclosing functions, module globals,
@@ -135,9 +156,20 @@ are treated as recursive. The walk's name filter (a pattern's last segment, find
 must match its name; otherwise it must be able to match a prose name, so a filter that selects only a non-prose
 extension (`*.py`, `.endswith(".tmp")`) does not cover.
 
-Narrowings (each in ADR 0045's amendment, for Escape matching): (i) the call-site chase with the binding rules above;
-(ii) HOME-open; (iii) static text: a name assembled at run time, or a walk reached only through eval, a registry or a
-data-built subprocess, is missed; (iv) pytest fixture names as TMP. Nothing else is exempt.
+Narrowings (each in ADR 0045's amendment, for Escape matching against a `verify-skipped` line): (i) the call-site
+chase with the binding rules above; (ii) HOME-open; (iii) static text: a name assembled at run time, or a walk reached
+only through eval, a registry or a data-built subprocess (`tar -T list`, `rsync --files-from`), is missed; (iv) pytest
+fixture names as TMP; (v) the walk and copy forms are the lists above and no others: a listing, copy or archive only
+through an unlisted form is missed (`du`, `tree`, `diff -r`, `scp -r`, `cpio`, `pax`, `7z`, `npm pack`,
+`docker build .`, a package build, `git checkout-index`, the history and status reads `git log`/`show`/`diff`/
+`status`, a third-party walker such as chokidar or archiver, a TarFile/ZipFile method whose receiver is not provably
+one); (vi) bare globs: a `?`- or `[…]`-only glob, a glob in command position, inside `[[ ]]`, `[`, `test` or a
+`case`, in a config or unknown-language file's line (a CI workflow's `run:`), or in a code string with no GLOB_CMDS
+word before it, is missed, since there the same characters are patterns, regexes and **emphasis** far more often than
+globs; (vii) TOOLS and TOOL_CONFIG_RE are the lists above: a whole-tree prose reader that is neither named nor
+configured by them (dprint, typos, editorconfig-checker, `reuse lint`, a secret scanner, `git diff --check`) is missed
+unless a listed form reaches the tree; (viii) a Python file this python cannot parse is read by the line resolver,
+which knows no Python API walk (its names, tools, links and shell forms are still read). Nothing else is exempt.
 
 CLI. JSON on stdout for prove and propose (one line), human lines for record and drop.
 - prove: {repo, tree, globs: {G: {held, readers (at most 50), readersTotal}}}; exit 0 with the verdict in the JSON,
@@ -158,8 +190,9 @@ CLI. JSON on stdout for prove and propose (one line), human lines for record and
   resolve with exactly the intended list and every other table unchanged.
   The reader check, only when the edit raises the schema: every live rollout note (a `*.md` directly in --tasks-dir,
   default ~/repos/obsidian/Work/Tasks, with a `protocol_version:` line and a status neither done nor dropped) has its
-  engine root read through engine-snapshot.py's engine_root(); for each distinct root, `python3 -I` loads that root's
-  skills/_shared/scripts/rollout-settings.py and resolves the new file, under a 30 s timeout, with git_env(). A
+  engine root read through engine-snapshot.py's engine_root(); for each distinct root, `python3 -I -B` loads that
+  root's skills/_shared/scripts/rollout-settings.py (writing no bytecode there: -I ignores PYTHONDONTWRITEBYTECODE, so
+  -B and sys.dont_write_bytecode do it) and resolves the new file, under a 30 s timeout, with git_env(). A
   non-zero exit, a timeout or a missing script refuses: exit 1, nothing written, one stderr line per note
   (`inert-paths: [[<slug>]] runs on <root>, whose rollout-settings.py refuses the new file (<why>): update that
   checkout to a P29+ release, or wait for the rollout to finish, or re-run with --force`). --force writes anyway and

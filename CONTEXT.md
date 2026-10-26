@@ -500,15 +500,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Inert path** — a file a repo's verifier provably never reads, listed per
   repo in the **Rollout settings** (`inert_paths`, git pathspec globs) and
   re-proven on the tree being merged at every skip: a `main` that moved only
-  in inert paths, prose only (`.md .markdown .txt .rst .adoc .org`), since a
-  green run leaves that run standing, and Integration re-runs nothing (ADR
-  0045). _Avoid_: doc-only, ignored path.
+  in inert paths, prose only (`.md .markdown .rst .adoc .org`, never
+  `.txt`), since a green run leaves that run standing, and Integration
+  re-runs nothing (ADR 0045). _Avoid_: doc-only, ignored path.
 - **Inert proof** — the static check that nothing in the tree being merged
   reads a glob: no non-prose file or step names its deepest literal segment;
-  no walk whose root is not provably outside the repo (a path that is the
-  repo, inside it or an ancestor of it counts) covers it; no markdown tool,
-  link parse, symlink into the glob or submodule. It fails closed (ADR 0045):
-  any error in it means a re-run. skills/_shared/scripts/inert-paths.py's
+  no walk (a copy or archive of the tree included) whose root is not
+  provably outside the repo (a path that is the repo, inside it or an
+  ancestor of it counts) covers it; no markdown tool, link parse, symlink
+  into the glob or submodule. It fails closed (ADR 0045): any error in it
+  means a re-run. skills/_shared/scripts/inert-paths.py's
   header holds its rules. _Avoid_: the docs check.
 - **Integration conflict** — Integration's merge of the latest `main`
   conflicted and the integrator could not keep both intents, so it aborted
