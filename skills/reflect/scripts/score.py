@@ -46,7 +46,10 @@ soft pause's stamp counts as running. A hold with no Slot open is a wait on Lach
   effective end:
   - Terminal, with startTime and durationMs: the earlier of slot-freed (or --until) and the call's end plus
     GRACE. A later slot-freed leaves a gap, excluded and flagged "lead absent". A terminal call that ends after
-    --until was still running at --until: read as non-terminal with its last activity at --until.
+    --until was still running at --until: read as non-terminal with its last activity at --until. Here a
+    slot-freed is read at the Slot's release: its `reconciledAt` when reconcile stamped the line at the call's end
+    (p29-12, run_record.py's call-end stamps), else its ts, so the lead's absence after the call still reads as
+    lead absent; everything else reads the line's ts, the call's end.
   - Non-terminal: its last activity is startTime + durationMs, else the task's last record line (flagged).
     When last activity + GRACE reaches --until on an open Slot, the Slot runs to --until and the window is
     `partial` (a genuine mid-run tail); otherwise it ends at last activity + GRACE (or its earlier
@@ -324,6 +327,15 @@ def to_ms(stamp):
     canon = RR._stamp(stamp)
     dt = datetime.datetime.strptime(canon[:-1], "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=datetime.timezone.utc)
     return int(round(dt.timestamp() * 1000))
+
+
+def _release(t, d):
+    """A slot-freed line's release: its `reconciledAt` when reconcile stamped the line at its call's end (p29-12) and
+    released the Slot later, else its ts. An unreadable reconciledAt reads as the ts."""
+    try:
+        return max(t, to_ms(d["reconciledAt"])) if isinstance(d.get("reconciledAt"), str) else t
+    except Exception:
+        return t
 
 
 def fmt(ms):
@@ -608,10 +620,12 @@ class Score:
             elif kind == "slot-freed" and task in open_slot:
                 s = open_slot.pop(task)
                 s["end"], s["outcome"] = t, d.get("outcome")
+                s["release"] = _release(t, d)
             elif kind == "carried" and task and d.get("rollout") == d.get("from"):
                 if task in open_slot:
                     s = open_slot.pop(task)
                     s["end"], s["outcome"] = t, "carried"
+                    s["release"] = t
                 if lane is not None and lane["task"] == task:
                     lane["end"], lane = t, None
                 for key in [k for k in open_holds if k[1] == task]:
@@ -684,7 +698,7 @@ class Score:
         self.partial = False
         self.gaps = []  # (kind, why, (a, b))
         for s in self.slots:
-            hi = s["end"] if s["end"] is not None else until
+            hi = s.get("release", s["end"]) if s["end"] is not None else until
             calls = [b for b in self.bound if b[1] == s["task"] and s["start"] <= b[0] <= hi and b[3] != "integrate"]
             who = "[[%s]]" % s["task"]
             if not calls:

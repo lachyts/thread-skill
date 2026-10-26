@@ -115,8 +115,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      max_plan_rounds? (ints >= 1), rung? (str)} (the effective values after per-task
                      overrides); start? (start | restart | revise | hand-back | resume); carriedFrom? (slug)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
-  slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed)
-  ready           T  pr? (url or number)
+  slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed); stamp? (call-end | fallback);
+                     reconciledAt? (a UTC Z stamp). p29-12: reconcile's call-end stamp, under Reading the record
+  ready           T  pr? (url or number); stamp?; reconciledAt? (as slot-freed)
   set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
                      not checked as an enum; reconcile-rollout.py's table writes quota | call-failed |
                      merge-task | declined | prepare | revise-stopped | transient | gate | needs-human |
@@ -125,12 +126,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      question for a person, never a plan or review round run out, and integration-conflict and
                      integration-red, p27-4, are an integrate set-aside opening the engine's named markers: an
                      Integration conflict, `integration: conflict unresolved in …`, and a verifier red at
-                     Integration, `integration: verifier red: …`); setAsideAt? (run | integration | gate)
+                     Integration, `integration: verifier red: …`); setAsideAt? (run | integration | gate); stamp?;
+                     reconciledAt? (as slot-freed)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt); path?; triggers? (list of str);
                      conflict? (bool: `conflict` in triggers — a conflict Integration resolved, or, p27-4, an
                      unresolved Integration conflict that set the task aside)
-  merged          T  pr?; readOnly? (bool)
+  merged          T  pr?; readOnly? (bool); stamp?; reconciledAt? (as slot-freed)
   paused             mode (soft | hard | sign-off: reconcile-rollout.py await-sign-off, the queue left only gates for
                      Lachy and closed, ADR 0034)
   resumed            (no fields)
@@ -151,7 +153,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      usualMinutes? (both the kind's reading at the write, so a Reflection tells a fallback overrun
                      from an underestimate). p28-2: one per (task, M), for each task whose Slot was open at a marked
                      Morning (taken before it, not freed at or before it), read from this record's Slot intervals.
-  quota-stall        stage?; detail?
+  quota-stall        stage?; detail?; stamp?; reconciledAt? (as slot-freed)
   auto-retry      T  stage (plan | implement | verify | review | integrate: the stage of the block it re-enters,
                      the task's latest set-aside line's), setAsideAt (run | integration), retryClass (agent | infra
                      | quota), used (int >= 0: auto_retries_used after this retry; a quota retry leaves it), budget
@@ -175,8 +177,10 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   review-verdict  T  round (int >= 1), verdict (approve | changes), findings, original, regression (ints >= 0;
                      original + regression <= findings, the rest unclassified), digest (verdict_digest of the
                      verdict and its bullets); head? (the PR head the judge judged, resolved to a full sha in the
-                     task tree; omitted when the judge gave none). One line per judged master-review round,
-                     written by reconcile-rollout.py from the row's reviewVerdicts; lands in <rollout>.jsonl.
+                     task tree; omitted when the judge gave none); stamp?; reconciledAt? (as slot-freed: the round
+                     was judged inside the call, so its line is at the call's end). One line per judged
+                     master-review round, written by reconcile-rollout.py from the row's reviewVerdicts; lands in
+                     <rollout>.jsonl.
                      Engine rounds are reviewLoop's REVIEW_VERDICT rounds only: an Integration re-review
                      rejection uses a review round but writes no line, so `round` skips it (r1, r2, r4).
   carried         T  from (the old rollout's slug), to (set to the new rollout). Appended to both
@@ -275,6 +279,17 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   event), resume (a Lost-call or signed-gate resume).
 - set-aside stage is where the task stopped; setAsideAt is where it re-enters (merge-task's exit 1 reads
   stage integrate, setAsideAt run).
+- Call-end stamps (p29-12). The lead reconciles a call's row at its next turn, which can come hours after the call
+  ended (a lead held on a hold, or idle). So reconcile-rollout.py `reconcile` writes the events of a row that ends a
+  Slot (slot-freed, ready, a read-only approval's merged, set-aside, quota-stall, review-verdict) at that call's own
+  end, read from the journal of the call bound to the task's open Slot, with `stamp: call-end` and `reconciledAt`,
+  its own clock (when the lead turned to the row); with no end readable it writes them at its own clock with `stamp:
+  fallback` (and a ready or merged on any other row is a fallback too). Such a line's ts can be earlier than lines
+  written before it, so read the record by ts, as score.py does. A slot-freed's `reconciledAt` is when the lead
+  released the Slot: score.py reads the Slot to it, so the lead's absence after a call still reads as lead absent,
+  while the night record (`next`) reads the Slot as ended at the call's end. The lane's events stay at the
+  reconcile's clock, unmarked: the lane is the lead's (ADR 0030). A line from before p29-12 carries no `stamp`: its
+  ts is the reconcile's clock.
 - Idle Slot time is a span. A Reflection derives it from slot-taken / slot-freed pairs against the ceiling
   stamped on each event. An idle-slots event is a reason marker labelling the span it falls in: a change
   of reason splits the span, a repeat is harmless, a span with no marker reads as "unexplained".
@@ -669,20 +684,23 @@ def _slug(v):
 
 
 HOLDS = ("merge", "git-env", "race")
+# p29-12: reconcile-rollout.py's call-end stamp on the events of a row that ends a Slot (Reading the record).
+CALL_END = {"stamp": _enum("call-end", "fallback"), "reconciledAt": _stampz}
 # kind -> (task required, required fields, optional fields)
 KINDS = {
     "slot-taken": (True, {"settings": SETTINGS},
                    {"start": _enum("start", "restart", "revise", "hand-back", "resume"), "carriedFrom": _str}),
     "run-bound": (True, {"runId": _str, "journalDir": _str},
                   {"call": _enum("task", "revise", "integrate", "resume"), "resumedFrom": _str}),
-    "slot-freed": (True, {"outcome": _enum("ready", "set-aside", "completed", "lost", "stopped", "failed")}, {}),
-    "ready": (True, {}, {"pr": _pr}),
+    "slot-freed": (True, {"outcome": _enum("ready", "set-aside", "completed", "lost", "stopped", "failed")},
+                   {**CALL_END}),
+    "ready": (True, {}, {"pr": _pr, **CALL_END}),
     "set-aside": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate", "gate"),
-                         "reasonClass": _str}, {"setAsideAt": _enum("run", "integration", "gate")}),
+                         "reasonClass": _str}, {"setAsideAt": _enum("run", "integration", "gate"), **CALL_END}),
     "lane-taken": (True, {}, {}),
     "lane-freed": (True, {"release": _enum("merge", "set-aside", "reject", "halt")},
                    {"path": _str, "triggers": _strlist, "conflict": _bool}),
-    "merged": (True, {}, {"pr": _pr, "readOnly": _bool}),
+    "merged": (True, {}, {"pr": _pr, "readOnly": _bool, **CALL_END}),
     "paused": (False, {"mode": _enum("soft", "hard", "sign-off")}, {}),
     "resumed": (False, {}, {}),
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
@@ -695,7 +713,7 @@ KINDS = {
     "last-start-held": (True, {"morning": _stampz, "scope": _str, "history": _int(0)}, {"usualMinutes": _int(1)}),
     "ran-past-morning": (True, {"morning": _stampz, "slotTakenAt": _stampz, "scope": _str, "history": _int(0)},
                          {"usualMinutes": _int(1)}),
-    "quota-stall": (False, {}, {"stage": _str, "detail": _str}),
+    "quota-stall": (False, {}, {"stage": _str, "detail": _str, **CALL_END}),
     "auto-retry": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate"),
                           "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
                           "used": _int(0), "budget": _int(1)},
@@ -711,7 +729,7 @@ KINDS = {
                       "regression": _int(0), "verdict": _str}),
     "review-verdict": (True, {"round": _int(1), "verdict": _enum("approve", "changes"), "findings": _int(0),
                               "original": _int(0), "regression": _int(0), "digest": _str},
-                       {"head": _str}),
+                       {"head": _str, **CALL_END}),
     "carried": (True, {"from": _str, "to": _str}, {}),
     "answer-recorded": (True, {"answerKind": _enum("needs-you", "decision")},
                         {"form": _enum("hand-back", "awaiting-repair", "left"),

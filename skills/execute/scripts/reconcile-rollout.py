@@ -16,10 +16,16 @@ Subcommands:
               `merged:` (the first stamp wins): a read-only task is done when its review approves and
               never enters Integration. Every row removes `integrating:` (the run that produced the row
               ended any Integration). It also stamps `ready:` and appends the `## Integration log` line
-              (see the Status mapping below). --no-verdict (the integrate call's canary check exited 4, a trip
-              inside its window acked before the check, ADR 0053): an `integrated` row's line reads `void`
-              instead, so it never backs prepare's case (ii), and the lane frees (`lane-freed release=halt`);
-              the task waits for Integration again. A row with any other outcome is reconciled as usual.
+              (see the Status mapping below). A row that ends a Slot (its note read in_progress; no integrate
+              row) is its call's end (p29-12): `ready:`, a read-only approval's `merged:` and the row's Slot
+              events are stamped at the end the journal of the call bound to the task's open Slot records
+              (_call_end: its run-bound line in the Run record, then <journalDir>/<runId>.json), not when the
+              lead reconciles, which can be hours later (a lead held on a hold, or idle). With no end readable
+              they fall back to now, and the row's line marks it: `ready=<stamp> (fallback)`. --no-verdict (the
+              integrate call's canary check exited 4, a trip inside its window acked before the check, ADR
+              0053): an `integrated` row's line reads `void` instead, so it never backs prepare's case (ii), and
+              the lane frees (`lane-freed release=halt`); the task waits for Integration again. A row with any
+              other outcome is reconciled as usual.
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start and restart
               within the parallel ceiling, every held task with its reason, the running, awaiting-Integration,
@@ -572,7 +578,13 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   reconcile         per row, against the note's status and _holds_lane before the row's writes: slot-freed
                     when it was in_progress and the row is not an integrate row (outcome ready, completed,
                     lost for a lead row whose reason starts `workflow call failed:`, else set-aside); ready
-                    pr= when `ready:` is stamped; merged readOnly=true for a read-only approval; when it
+                    pr= when `ready:` is stamped; merged readOnly=true for a read-only approval. Those three,
+                    and the set-aside, quota-stall and review-verdict lines of a row that ends a Slot, are the
+                    call's end (p29-12): stamped at _call_end's end with `stamp: call-end` and `reconciledAt`
+                    (this run's clock, when the lead released the Slot), or with none readable at this run's
+                    clock with `stamp: fallback` (a ready or merged on a row that ends no Slot is a fallback
+                    too); every other event (the lane's, the holds') is the lead's, at this run's clock,
+                    unmarked. When it
                     held the lane and the row is not an `integrated` integrate row, a merge-hold close and
                     lane-freed (reject for a `rejected` integrate row, else set-aside; path, triggers and
                     conflict from the integrate row; a lead row carries no integration, so only an
@@ -734,7 +746,9 @@ the kind's past runs (_past_runs: this project's folded call journals over LAST_
 call), and with fewer than LAST_START_MIN_RUNS runs the length is LAST_START_FALLBACK. A held row is skipped and the
 greedy loop goes on; restarts, hand-backs and seeded revises are never held; the hold never halts; a git-env or pause
 hold replaces it. Off --dry-run, _night_record writes the night record into the rollout's own Run record (NIGHT_KINDS),
-each line once, read from the record's Slot intervals (_record_night), never from notes.
+each line once, read from the record's Slot intervals (_record_night), never from notes. A Slot reconcile closed
+ends at its slot-freed's ts, its call's end (p29-12), so a call that ended before the Morning never reads as having
+run past it because the lead reconciled it after.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
@@ -765,9 +779,9 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     read-only with no PR -> status: done instead;
                     `ready: <stamp>` (overwriting any earlier one) on a move to review from another status,
                     non-read-only, and NOT for a row carrying `integration`: readyAt is when the approving
-                    own (or seeded revise) call returned, per the engine header. A set-aside re-entry is
-                    leaving Integration, not joining the queue. A re-reconcile (review -> review) never
-                    re-stamps;
+                    own (or seeded revise) call returned, per the engine header, so the stamp is that
+                    call's end (p29-12, _call_end), else now. A set-aside re-entry is leaving Integration,
+                    not joining the queue. A re-reconcile (review -> review) never re-stamps;
                     when approvedAtCeiling: a run of reviewHistory (grouped by round) under
                     "## Review history (approved at ceiling)" — ceiling approvals stay auditable
   review-blocked -> status: review-blocked; pr: <url>; a run of reviewHistory (grouped by round; legacy
@@ -2614,25 +2628,37 @@ def cmd_reconcile(args) -> int:
         prior, held, rollout = _status(note), _holds_lane(note), _note_rollout(note)
         lane_fields = _lane_fields_from_log(note) if held else {}
         ready_stamped = False
+        # p29-12: a row that ends a Slot (its note read in_progress, and no integrate row) is its call's end, and the
+        # lead reconciles it at its next turn, which may come hours later (a lead held or idle). So what records that
+        # end (`ready:`, a read-only approval's `merged:`, and the row's Slot events) is read from the call itself
+        # (_call_end), falling back to now, marked, only when no end is readable.
+        ends_slot = prior == "in_progress" and not isinstance(task.get("integration"), dict)
+        ended = _call_end(rollout, slug, now) if ends_slot else None
+        at = ended or now
+        stamped = []  # the call-end stamps this row writes, for its line
         # A read-only task is done when its review approves: nothing to merge, so it never enters
         # Integration (ADR 0030). The row's scope wins; the note's own is the fallback.
         scope = _scalar(task.get("scope")).lower() or _scope(note)
         note_status = "done" if (status == "review" and not pr and scope == "read-only") else status
         # `ready:` is when the task joined the Integration queue: the approving own (or seeded revise)
-        # call returned (the engine's readyAt). Stamped on a move to review from another status,
-        # overwriting any earlier value; never on a read-only task (it never enters Integration) and
-        # never on an Integration row (an integrated set-aside re-entering review is leaving Integration,
-        # not joining the queue).
+        # call returned (the engine's readyAt), so it is that call's end (p29-12). Stamped on a move to review
+        # from another status, overwriting any earlier value; never on a read-only task (it never enters
+        # Integration) and never on an Integration row (an integrated set-aside re-entering review is leaving
+        # Integration, not joining the queue).
         if (note_status == "review" and _status(note) != "review" and scope != "read-only"
                 and task.get("integration") is None):
-            note.set("ready", _stamp(now))
+            note.set("ready", _stamp(at))
             ready_stamped = True
+            stamped.append(f"ready={_stamp(at)}")
         note.set("status", note_status)
         # Its approval is its completion, so it is stamped `merged:` as a PR task is at its merge (the
-        # first stamp wins): its duration then counts in the timeline, and a read-only task finishing
-        # last ends the rollout's elapsed time.
+        # first stamp wins), at its call's end: its duration then counts in the timeline, and a read-only
+        # task finishing last ends the rollout's elapsed time.
         if note_status == "done" and not _scalar(note.get("merged")):
-            note.set("merged", _stamp(now))
+            note.set("merged", _stamp(at))
+            stamped.append(f"merged={_stamp(at)}")
+        if stamped and ended is None:
+            stamped.append("(fallback)")
         # Whatever Integration this task was in, the run that produced this row ended it.
         note.remove("integrating")
 
@@ -2756,11 +2782,13 @@ def cmd_reconcile(args) -> int:
             errors.append(f"{slug}: cannot write {path}: {e} — nothing written for this row")
             continue
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
-                          ready_stamped)
-        _review_verdict_events(args, rollout, slug, task, prior)
+                          ready_stamped, ended, now)
+        _review_verdict_events(args, rollout, slug, task, prior, ended, now)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
         ro = " (read-only, approved)" if note_status != status else ""
-        print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{flag}")
+        when = "".join(" " + s for s in stamped)
+        print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{when}"
+              f"{flag}")
 
     for w in warnings:
         print(f"WARNING: {w}", file=sys.stderr)
@@ -4306,6 +4334,11 @@ CALL_CHOICES = ("task", "revise", "integrate")
 BIND_RUN_ID_RE = re.compile(r"wf_[A-Za-z0-9][A-Za-z0-9_.-]*")
 CAP_KEYS = ("max_review_rounds", "max_iterations", "max_plan_rounds")
 CALL_FAILED_PREFIX = "workflow call failed:"
+# p29-12: the `stamp` of an event a row that ends a Slot records: its ts is the call's own end (_call_end), or, with no
+# end readable, the reconcile's clock (run_record.py's slot-freed, ready, merged, set-aside, quota-stall and
+# review-verdict, its call-end stamps).
+CALL_END_MARK = "call-end"
+CALL_END_FALLBACK = "fallback"
 # A dead call's error line that reads as a usage or rate limit (quota-stall; only `workflow call failed:` lines
 # are scanned, so task text that mentions a quota never matches).
 QUOTA_RE = re.compile(r"usage limit|rate[ -]?limit|quota|too many requests|\b429\b", re.I)
@@ -4672,9 +4705,85 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
     return "blocked"
 
 
-def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, pr, ready_stamped):
+def _call_end(rollout, slug, now):
+    """The end of the call whose row ends the task's Slot (p29-12), as the Workflow journal of that call records it (an
+    aware UTC datetime), or None when it cannot be read: the caller then falls back to now and marks it. The call is
+    read through the rollout's Run record by its reader rules: the task's open Slot is its first slot-taken since the
+    last slot-freed (or from-file `carried`), a re-take while it is open being the same Slot, and the call is the last
+    run-bound for the task inside it that is not an integrate call (a restart after a dead lead binds a newer one). Its
+    journal, <journalDir>/<runId>.json (fold-journals' path), must be an object naming that runId with a terminal
+    status. The end is startTime + durationMs (epoch ms, ints >= 0: score.py's reading), else the journal's
+    `timestamp`, and must lie between the Slot's first slot-taken (an earlier end is another call's file) and now (a
+    later one is no end yet). A record, journal or field that cannot be read is None: never an error, and never a
+    printed reason (a record that cannot be read is no reason to change a verb's stdout, p15-2)."""
+    if not rollout:
+        return None
+    try:
+        rr = _run_record()
+        lines, _bad = _record_lines(rr.record_path(rollout))
+    except Exception:
+        return None  # no record yet, or one that cannot be resolved or read
+    key, taken, bound = slug.lower(), None, None
+    for d in lines:
+        if d.get("task") != key:
+            continue
+        kind = d.get("kind")
+        if kind == "slot-taken":
+            if taken is None:
+                taken, bound = d, None
+        elif kind == "slot-freed" or (kind == "carried" and d.get("rollout") == d.get("from")):
+            taken, bound = None, None
+        elif kind == "run-bound" and taken is not None and d.get("call") != "integrate":
+            bound = d
+    if bound is None:  # no open Slot, or no call bound since it was taken
+        return None
+    run_id, jdir = bound.get("runId"), bound.get("journalDir")
+    if not isinstance(run_id, str) or not RUN_ID_RE.fullmatch(run_id) or ".." in run_id or not isinstance(jdir, str):
+        return None
+    jdir = os.path.expanduser(jdir)
+    if not os.path.isabs(jdir):
+        return None
+    try:
+        with open(os.path.join(jdir, run_id + ".json"), "rb") as f:
+            journal = json.load(f)
+    except (OSError, ValueError):
+        return None  # no journal yet (still in flight, or never written), or not JSON
+    if not isinstance(journal, dict) or journal.get("runId") != run_id or \
+            journal.get("status") not in rr.TERMINAL_STATUSES:
+        return None  # another call's file, or a call that has not ended
+    st, dur = journal.get("startTime"), journal.get("durationMs")
+    end = None
+    if all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (st, dur)):
+        try:
+            end = datetime.fromtimestamp((st + dur) / 1000, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            end = None
+    elif isinstance(journal.get("timestamp"), str):
+        end = _parse_ts(journal["timestamp"])
+    if end is None or end > now:
+        return None
+    start = _parse_ts(taken.get("ts"))
+    return None if start is not None and end < start else end
+
+
+def _call_end_mark(ended, now):
+    """(fields, ts) for an event that records a call's end (p29-12): at `ended` with `stamp: call-end` and the
+    reconcile's own clock as `reconciledAt` (when the lead turned to the row), or, with no end read, `stamp: fallback`
+    and ts None (the reconcile's clock, _event's default)."""
+    if ended is None:
+        return {"stamp": CALL_END_FALLBACK}, None
+    return {"stamp": CALL_END_MARK, "reconciledAt": _utc_z(now, ms=True)}, ended.isoformat()
+
+
+def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, pr, ready_stamped,
+                      ended, now):
     """One row's events, against the note's status (`prior`), _holds_lane (`held`) and the Integration log's lane
-    fields (`lane_fields`, for a lead row, which carries no `integration`) read before its writes."""
+    fields (`lane_fields`, for a lead row, which carries no `integration`) read before its writes. A row that ends a
+    Slot is its call's end (p29-12): its slot-freed, ready, merged, set-aside and quota-stall (and its review-verdict
+    events, _review_verdict_events) are stamped at `ended` (_call_end) with `stamp: call-end` and the reconcile's own
+    clock as `reconciledAt`, or, with no end read, at the reconcile's clock with `stamp: fallback`
+    (_call_end_mark); a ready or merged on any other row is a fallback too. The lane's events are the lead's (ADR
+    0030): at the reconcile's clock, unmarked."""
     if args.dry_run or not rollout:
         return
     integ = task.get("integration") if isinstance(task.get("integration"), dict) else None
@@ -4686,7 +4795,10 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
     ask = task.get("needsHuman")
     asked = isinstance(ask, str) and bool(ask.strip())
     state_after, at_after = _queue_state(note)
-    if prior == "in_progress" and integ is None:
+    ends_slot = prior == "in_progress" and integ is None
+    mark, end_ts = _call_end_mark(ended, now)
+    slot_mark, slot_ts = (mark, end_ts) if ends_slot else ({}, None)
+    if ends_slot:
         if note_status == "review" and pr:
             outcome_s = "ready"
         elif note_status == "done":
@@ -4695,11 +4807,11 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
             outcome_s = "lost"
         else:
             outcome_s = "set-aside"
-        _event(rollout, "slot-freed", slug, {"outcome": outcome_s}, args)
+        _event(rollout, "slot-freed", slug, {"outcome": outcome_s, **mark}, args, ts=end_ts)
     if ready_stamped:
-        _event(rollout, "ready", slug, {"pr": pr} if pr else {}, args)
+        _event(rollout, "ready", slug, {**({"pr": pr} if pr else {}), **mark}, args, ts=end_ts)
     if note_status == "done" and prior != "done":
-        _event(rollout, "merged", slug, {"readOnly": True}, args)
+        _event(rollout, "merged", slug, {"readOnly": True, **mark}, args, ts=end_ts)
     rejected = integ is not None and outcome == "rejected"
     if held and not (integ is not None and outcome == "integrated"):
         fields = {"release": "reject" if rejected else "halt" if outcome == "void" else "set-aside"}
@@ -4714,10 +4826,11 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
         _event(rollout, "set-aside", slug, {
             "stage": stage,
             "reasonClass": _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked),
-            "setAsideAt": at_after}, args)
+            "setAsideAt": at_after, **slot_mark}, args, ts=slot_ts)
         error_line = reason.split("\n", 1)[0].strip()
         if failed and QUOTA_RE.search(error_line):
-            _event(rollout, "quota-stall", slug, {"stage": stage, "detail": error_line[:500]}, args)
+            _event(rollout, "quota-stall", slug, {"stage": stage, "detail": error_line[:500], **slot_mark}, args,
+                   ts=slot_ts)
 
 
 # review-split.py, beside this module: the original / regression split of one engine review round (p21-3).
@@ -4758,7 +4871,7 @@ def _verdict_entry(e):
     return {"round": rnd, "verdict": verdict, "head": head, "feedback": feedback}
 
 
-def _review_verdict_events(args, rollout, slug, task, prior):
+def _review_verdict_events(args, rollout, slug, task, prior, ended, now):
     """p21-3: one review-verdict event per entry of an engine row's reviewVerdicts (each master-review round the call
     judged), written once per run_record.verdict_key: an entry whose key the record already holds for this task (a
     signed-gate or Lost-call resume replaying the stopped call's rounds) is skipped. Its head is resolved to a full
@@ -4767,7 +4880,8 @@ def _review_verdict_events(args, rollout, slug, task, prior):
     against the task's first judged head (the record's earlier heads, then this row's); an approve is 0/0/0.
     Only for a row that ends a Slot (the note read in_progress) and carries no `integration` (an Integration
     re-review is no master-review round); nothing on --dry-run, with no rollout, or for a row without the key (a
-    pre-p21-3 engine's, a lead-written one). Best-effort: it never changes the verb's exit or stdout."""
+    pre-p21-3 engine's, a lead-written one). Each round was judged inside the call, so it is stamped at the call's end
+    (p29-12, _call_end_mark), never later. Best-effort: it never changes the verb's exit or stdout."""
     if args.dry_run or not rollout or prior != "in_progress" or task.get("integration") is not None:
         return
     verdicts = task.get("reviewVerdicts")
@@ -4792,6 +4906,7 @@ def _review_verdict_events(args, rollout, slug, task, prior):
             seen.add(rr.verdict_key(d))
         sp = _review_split()
         tree = task.get("worktreePath") if isinstance(task.get("worktreePath"), str) else ""
+        mark, end_ts = _call_end_mark(ended, now)
         for i, raw in enumerate(verdicts, 1):
             e = _verdict_entry(raw)
             if e is None:
@@ -4815,7 +4930,7 @@ def _review_verdict_events(args, rollout, slug, task, prior):
                       "original": counts["original"], "regression": counts["regression"], "digest": digest}
             if head:
                 fields["head"] = head
-            _event(rollout, "review-verdict", slug, fields, args)
+            _event(rollout, "review-verdict", slug, {**fields, **mark}, args, ts=end_ts)
             seen.add(key)
             if head:
                 heads.append(head)
