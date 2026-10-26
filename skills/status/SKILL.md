@@ -216,7 +216,7 @@ merge commit in the background for up to two hours, a verify-slot wait included,
 verdict file is `<repoPath>/.claude/integration/race-<slug>.rc`, written last, so an absent one means unfinished. A
 `noslot` verdict file reads like an absent one: the re-verify has not run (no verify slot came in time), and the
 lead re-runs it with the lane held. A `heat` verdict file reads the same way: the Mac was too hot to run it (the Heat
-hold, execute `away.md` § Heat), no verdict, never red. A task that a
+hold, `skills/execute/away.md` § Heat), no verdict, never red. A task that a
 `## Race log` line names and that is not done is in the first of these states that matches:
 
 - **Decided:** a dated `## Notes` line on the rollout note records `repair: [[<slug>]] RACE decided: …`. If

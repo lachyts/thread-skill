@@ -726,7 +726,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
       !heatP.includes('exit 76: no verdict, never red') || !heatP.includes('A running call is never stopped') ||
       !heatP.includes('`skills/execute/away.md` § Heat holds the spec') ||
       !trRev.includes('such a revise is a Heat hold instead, the same wait') ||
-      !trGuard.includes('is a Heat hold, and takes the place of the Trickle clause next') ||
+      !trGuard.includes('is a Heat hold, and takes the place of the Trickle clause that follows') ||
       !trGuard.includes('ends the turn `waiting` with `reason="heat: the Mac is hot (<heat.name>)"`, never § 7, whatever else is set aside') ||
       !tr6.includes('A `heat:` hold (*The Heat hold*) ends the turn `waiting` the same way') ||
       !tr6.includes("and it comes before the Trickle's, since a hot Mac holds every row the Trickle would") ||
