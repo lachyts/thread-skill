@@ -1442,7 +1442,7 @@ ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]["skip"]')" "0|verify|false"
 case "$(j "$J" 'd["inert"]["why"]')" in "inert check error: "*) ok y y "C40: … inert.why starts 'inert check error: '";; *) ok "$(j "$J" 'd["inert"]["why"]')" "inert check error: …" "C40: … inert.why";; esac
 lacks "$(cat "$F/prep.err")" "Traceback" "C40: … no traceback on stderr"
 has "$(cat "$F/prep.err")" "WARN: inert check error: ProofError" "C40: … one WARN line names the error"
-ok "$(ikinds)|$(iline '[ls[0]["readers"], ls[0]["error"][:26]]')" '["inert-proof-failed"]|[[],"inert check error: ProofE"]' "C40: … and an inert-proof-failed line with error and readers []"
+ok "$(ikinds)|$(iline '[ls[0]["readers"], ls[0]["error"][:26]]')" '["inert-proof-failed"]|[[],"inert check error: ProofEr"]' "C40: … and an inert-proof-failed line with error and readers []"
 unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
