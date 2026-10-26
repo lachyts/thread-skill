@@ -547,18 +547,22 @@ through time, from attention to merged PRs. Terms only — no implementation.
   runs (`run --priority`), go before any task call's agent. Not a **Slot** (a
   task's run in a Queue). _Avoid_: bare "slot", lock, semaphore.
 - **Checkpoint** — one of the two moments per task where the full suite (the
-  rollout's `verifier:`) runs: the implementer's last check before its PR, and
+  rollout's `verifier:`) runs: a code-writing agent's last check before it
+  opens or updates its PR (the implementer's, and each reviser's), and
   Integration before the merge (estate ADR 0009 d1; the estate's own
   `CONTEXT.md` § The Mac's load). The engine renders the verifier there, and
   elsewhere only when a task brief asks for the full suite. Not the
   **Cursor** (a saved position). _Avoid_: final run, full check.
 - **Touched tests** — the test files that reach what a change touched, run
-  between Checkpoints: each Ralph try, a revision's re-check, a reviewer's own
-  check and a planner's or investigator's observation (estate ADR 0009 d1).
-  An agent finds them by the rollout's optional `touched:` pattern (`{module}`
-  for each changed module), else the repo's `CLAUDE.md`/`AGENTS.md` Tests line,
-  else the test files importing the changed modules. They take no **Verify
-  slot**. _Avoid_: quick tests, smoke tests, partial suite.
+  between Checkpoints: each Ralph try of an implementer or a reviser (touched
+  tests, then the verifier once before it hands back), a reviewer's own check
+  and a planner's or investigator's observation (estate ADR 0009 d1). An agent
+  finds them by the rollout's optional `touched:` pattern (`{module}` for each
+  changed module), else the repo's `CLAUDE.md`/`AGENTS.md` Tests line when it
+  says how to run one file's or module's tests (a line naming only the full
+  suite falls through), else the test files importing the changed modules.
+  They take no **Verify slot**. _Avoid_: quick tests, smoke tests, partial
+  suite.
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).

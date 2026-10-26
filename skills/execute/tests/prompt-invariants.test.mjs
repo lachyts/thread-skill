@@ -1192,11 +1192,12 @@ function agentPrompts(E, over = {}) {
 }
 
 // ---- Touched tests between Checkpoints (p31-1, estate ADR 0009 d1) ---------------------------------------------
-// The full suite (the rollout's verifier) runs at two Checkpoints per task: the implementer's last check before its
-// PR and Integration before the merge. Every other verify runs the touched tests: each Ralph try (then the verifier
-// once, before the PR), the one-shot (the verifier only when the touched tests are green), the reviser's re-check,
-// the review judge's own check and the four tree agents' observations (the verifier only when the task brief asks
-// for the full suite). Integration is unchanged: PRE_P31 holds sha256 pins recorded on dc07aa5, BEFORE the p31-1
+// The full suite (the rollout's verifier) runs at two Checkpoints per task: a code-writing agent's last check before
+// it opens or updates its PR (the implementer's, and each reviser's) and Integration before the merge. Every other
+// verify runs the touched tests: each Ralph try of an implementer or a reviser (then the verifier once, before the
+// PR), the one-shot (the verifier only when the touched tests are green), the review judge's own check (only when its
+// read rule holds) and the four tree agents' observations (the verifier only when the task brief asks for the full
+// suite). Integration is unchanged: PRE_P31 holds sha256 pins recorded on dc07aa5, BEFORE the p31-1
 // edit, of its two agents' prompts, the pre-p31-1 ralphLoop (now fullSuiteLoop, Integration's loop), the pre-p31-1
 // oneShotVerify (preOneShot below, the swap-back literal) and the integrator's manifest.
 const PRE_P31 = {
@@ -1267,7 +1268,7 @@ const preP31 = (p, slot) => p31Pairs(slot).reduce((x, [nw, od]) => x.split(nw).j
 const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot baseline']
 {
   const E = loadEngine(['ralphLoop', 'fullSuiteLoop', 'oneShotVerify', 'verifyBlock', 'baselineManifest', 'touchedOf', 'touchedTests',
-    'observeTests', 'reviewTests', 'integrationVerify', 'slotted', 'slotRule', 'slotNote', 'SLOT_TEXT', 'KILL_RULE', 'GIT_ENV_SCRUB',
+    'observeTests', 'reviewTests', 'TREE_TIDY', 'integrationVerify', 'slotted', 'slotRule', 'slotNote', 'SLOT_TEXT', 'KILL_RULE', 'GIT_ENV_SCRUB',
     ...RULE_BUILDERS])
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const shaAll = (xs) => sha(xs.join('\n\0\n'))
@@ -1390,7 +1391,8 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
 
   // 4. touchedOf, touchedTests and observeTests.
   for (const g of [PIN, 'skills/{module}/tests/*.test.mjs', 'src/{module}/__tests__/{module}.test.ts', 'pkg/{module}/{module}_test.go',
-    'test/[a-z]*/{module}.spec.js', '@scope/{module}/t?st/a+b,c=1:2~3.js', '{module}', 'x'.repeat(192) + '{module}']) {
+    'test/[a-z]*/{module}.spec.js', '@scope/{module}/t?st/a+b,c=1:2~3.js', '{module}', 'x'.repeat(192) + '{module}',
+    'tests/unit-{module}-test.py', 'tests/{module}--x.py']) {
     ok(E.touchedOf({ touched: g }) === g, `touchedOf: accepts ${JSON.stringify(g.length > 40 ? g.slice(0, 12) + '…' : g)} (${g.length} chars)`)
   }
   for (const [what, v] of [['an object (unquoted YAML {module})', { module: null }], ['a number', 7], ['an array', [PIN]], ['null', null],
@@ -1398,7 +1400,9 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
     ['a tab', 'tests/\t{module}.py'], ['a single quote', "tests/'{module}'.py"], ['a double quote', 'tests/"{module}".py'], ['a $', '$HOME/{module}.py'],
     ['a $(…)', 'tests/$(x){module}'], ['a ;', 'tests/{module}.py;rm'], ['a |', 'tests/{module}.py|x'], ['a &', 'tests/{module}.py&x'],
     ['a backslash', 'tests\\{module}.py'], ['a backtick', 'tests/`{module}`.py'], ['a newline', 'tests/{module}.py\nx'], ['a trailing newline', PIN + '\n'],
-    ['a NUL', 'tests/{module}\u0000.py'], ['a DEL', 'tests/{module}\u007f.py'], ['201 characters', 'x'.repeat(193) + '{module}']]) {
+    ['a NUL', 'tests/{module}\u0000.py'], ['a DEL', 'tests/{module}\u007f.py'], ['201 characters', 'x'.repeat(193) + '{module}'],
+    ['a runner option that hides failures (--deselect={module})', '--deselect={module}'], ['a runner option (-k{module})', '-k{module}'],
+    ['a leading -', '-tests/{module}.py']]) {
     ok(E.touchedOf({ touched: v }) === '', `touchedOf: refuses ${what}`)
   }
   ok(E.touchedOf(undefined) === '' && E.touchedOf(null) === '' && E.touchedOf({}) === '', 'touchedOf: no args.touched ⇒ ""')
@@ -1411,12 +1415,27 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
     t0.includes(`\`${E.GIT_ENV_SCRUB} git grep -l '<module or file name>'\``) && t0.includes('never the verifier line, and never the whole suite under another command') &&
     t0.includes('(a docs-only change), there are none'), 'touchedTests: one line; the repo Tests line, else a scrubbed git grep; never the verifier or the whole suite; none for a docs-only change')
   ok(t1.indexOf('`touched:`') < t1.indexOf('the Tests line') && t1.indexOf('the Tests line') < t1.indexOf('git grep'), 'touchedTests: the sources in order: the pin, the repo Tests line, the imports')
+  // The repo's Tests line applies only when it runs one file's or module's tests; a full-suite-only line (most repos'
+  // `Tests: make test`) falls through to the git grep, so "the first source that applies" never meets "never the
+  // whole suite under another command".
+  const TESTS_LINE = "the Tests line of the repo's own `CLAUDE.md` or `AGENTS.md`, which applies only when it says how to run one file's or one module's tests (a Tests line that names only the whole suite's command does not apply: fall through to the next source); else the test files that import or name each file"
+  for (const t of [t0, t1]) {
+    ok(times(t, TESTS_LINE) === 1 && t.indexOf(TESTS_LINE) < t.indexOf('git grep') && t.indexOf(TESTS_LINE) < t.indexOf('never the whole suite under another command'),
+      `touchedTests: a Tests line applies only when it runs one file's or module's tests; a full-suite-only line falls through to the git grep (pin ${t === t1})`)
+  }
+  const TIDY_SPAN = `\`${E.GIT_ENV_SCRUB} git -C "<task tree>" status --porcelain\``
+  ok(E.TREE_TIDY.startsWith(`take ${TIDY_SPAN} (the \`Task tree:\` path above) immediately before and immediately after it, then revert only the tracked changes`) &&
+    E.TREE_TIDY.endsWith('that appear in the after list but not the before list.') && !E.TREE_TIDY.includes('\n') && !E.TREE_TIDY.includes('rule (iii)'),
+  'TREE_TIDY: one line, the scrubbed before/after status diff, named outright (never by rule (iii))')
   for (const s of [undefined, SLOT]) for (const t of ['', PIN]) {
     const o = E.observeTests('the files the plan names', t, V, s)
     ok(!o.includes(E.SLOT_TEXT) && !/EXACTLY ONCE|ONE-SHOT|Max iterations/.test(o) && times(o, E.slotted(V, s)) === 1 &&
       o.startsWith(`run only the touched tests: ${E.touchedTests(t, 'the files the plan names')} Run them at most once, write no fix code`) &&
       o.endsWith(`run the verifier (\`${E.slotted(V, s)}\`) only when the task brief asks for a full-suite baseline.`),
     `observeTests: touched tests, then the verifier only when the brief asks; no SLOT_TEXT and no one-shot or loop marker (slot ${!!s}, pin ${!!t})`)
+    // The tidy is named outright for every run, the touched tests included, never left to rule (iii) (the verifier's).
+    ok(times(o, E.TREE_TIDY) === 1 && o.includes(`tidy after each run of yours, the touched tests or the verifier: ${E.TREE_TIDY}`) && !o.includes('rule (iii)') &&
+      !o.includes('\n'), `observeTests: one line; it names the before/after status diff for each run, the touched tests or the verifier (slot ${!!s}, pin ${!!t})`)
   }
   const pinned = taskCalls(argsOf(undefined, undefined, { touched: PIN }))
   ok(pinned.length === 13 && pinned.every(([, , p]) => times(p, CLAUSE) === 1), 'p31-1: args.touched reaches every task-call builder, once')
@@ -1425,20 +1444,61 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
   ok([...integPinned.integratorPrompt, ...integPinned.integrationReviewPrompt].every((p) => !p.includes('`touched:`') && !p.includes('Touched tests')), "p31-1: Integration's prompts never read args.touched")
 
   // 5. The review judge: slotRule right after KILL_RULE; the tests block runs touched tests only, its tidy span is
-  // scrubbed, and its one verifier line outside slotRule sits in the only-when-asked clause.
-  for (const b of [undefined, B]) for (const s of [undefined, SLOT]) {
-    const p = E.reviewJudgePrompt(tk, im, argsOf(b, s), [])
+  // scrubbed, and its one verifier line outside slotRule sits in the only-when-asked clause. Both runs are bound to the
+  // read rule: with no usable tree (a mismatch, a non-empty status, a missing tree) the judge runs no tests at all,
+  // never in the shared checkout, and says so in its feedback; with one, each run is in the task tree, inside the
+  // before/after status diff.
+  const NO_TREE = "When the read rule above fails (a mismatch, a non-empty status or a missing\ntree), run no tests at all, neither the touched tests nor the verifier, and never in the project's shared checkout\nor anywhere else: say in your feedback that you ran none, and why."
+  const IN_TREE = 'When it holds, run tests only in the task tree. To check a claim, run only the touched tests: '
+  const READ_RULE = 'On a mismatch, a non-empty status or a missing tree, use `gh pr diff` / `gh pr view` only'
+  // [] when the review judge binds every test run to its read rule; else what failed.
+  const noTreeFails = (p, s) => {
+    const out = []
+    const line = E.slotted(V, s)
+    const verifierClause = `Never run the verifier unless the task brief asks the review for the full suite; then run exactly\n\`${line}\`, once.`
+    const tidy = `Tidy after each run, the touched tests or the verifier: ${E.TREE_TIDY}`
+    const at = (x) => p.indexOf(x)
+    if (times(p, NO_TREE) !== 1) out.push('no tree: no tests at all, never the shared checkout, said in the feedback')
+    if (times(p, IN_TREE) !== 1) out.push('a tree: the touched tests only in the task tree')
+    if (times(p, tidy) !== 1) out.push('the tidy covers both runs')
+    if (!(at(READ_RULE) > -1 && at(READ_RULE) < at(NO_TREE) && at(NO_TREE) < at(IN_TREE) && at(IN_TREE) < at(verifierClause) && at(verifierClause) < at(tidy))) {
+      out.push('in order: the read rule, no tree, the touched tests, the verifier, the tidy')
+    }
+    if (p.includes('Run them in the task tree only when')) out.push('no conditional run wording')
+    return out
+  }
+  for (const b of [undefined, B]) for (const s of [undefined, SLOT]) for (const t of [undefined, PIN]) {
+    const p = E.reviewJudgePrompt(tk, im, argsOf(b, s, t ? { touched: t } : {}), [])
     const rule = E.slotRule(V, s)
     const line = E.slotted(V, s)
     const outside = p.split(rule).join('')
-    ok(p.includes(E.KILL_RULE + rule + '\n\nThe PR is authoritative'), `p31-1: the review judge carries slotRule right after KILL_RULE (baseline ${!!b}, slot ${!!s})`)
-    ok(p.includes(`anywhere else.\n\n${E.reviewTests(V, s, '')}\n\nRead \``) && p.includes('To check a claim, run only the touched tests: ') &&
-      p.includes('Run them in the task tree only when the read rule above lets you read it there'),
-    `p31-1: the review judge's tests block follows its read-only paragraph and runs touched tests only (baseline ${!!b}, slot ${!!s})`)
+    const at = `baseline ${!!b}, slot ${!!s}, pin ${!!t}`
+    ok(p.includes(E.KILL_RULE + rule + '\n\nThe PR is authoritative'), `p31-1: the review judge carries slotRule right after KILL_RULE (${at})`)
+    ok(p.includes(`anywhere else.\n\n${E.reviewTests(V, s, t || '')}\n\nRead \``) && p.includes('To check a claim, run only the touched tests: '),
+      `p31-1: the review judge's tests block follows its read-only paragraph and runs touched tests only (${at})`)
     ok(times(outside, line) === 1 && outside.includes(`Never run the verifier unless the task brief asks the review for the full suite; then run exactly\n\`${line}\`, once.`),
-      `p31-1: the review judge's only verifier line outside slotRule is the only-when-asked clause (baseline ${!!b}, slot ${!!s})`)
+      `p31-1: the review judge's only verifier line outside slotRule is the only-when-asked clause (${at})`)
     ok(E.reviewTests(V, s, '').includes(`\`${E.GIT_ENV_SCRUB} git -C "<task tree>" status --porcelain\``) && !E.reviewTests(V, s, '').includes(E.SLOT_TEXT),
-      `p31-1: the review judge's before/after tidy span is scrubbed, and its tests block holds no SLOT_TEXT (slot ${!!s})`)
+      `p31-1: the review judge's before/after tidy span is scrubbed, and its tests block holds no SLOT_TEXT (${at})`)
+    ok(JSON.stringify(noTreeFails(p, s)) === '[]',
+      `p31-1: with no usable tree the review judge runs no tests at all (never the shared checkout) and says so; with one, both runs are in the task tree, inside the before/after diff (${at})`)
+  }
+  // controls: the gate taken out, and the round-1 block (a conditional touched run, the verifier unbound), each fail
+  {
+    const p = E.reviewJudgePrompt(tk, im, argsOf(undefined, SLOT), [])
+    ok(p.includes(NO_TREE) && noTreeFails(p.replace(NO_TREE + '\n', ''), SLOT).includes('no tree: no tests at all, never the shared checkout, said in the feedback'),
+      'p31-1 control: a review judge without the no-tree sentence fails the no-tree check')
+    const line = E.slotted(V, SLOT)
+    const round1 = `Tests: you need not run any. The implementer ran the verifier at its Checkpoint, and Integration runs it again
+before the merge (estate ADR 0009 d1). To check a claim, run only the touched tests: ${E.touchedTests('', 'the files the PR diff changes')}
+Run them in the task tree only when the read rule above lets you read it there: take
+\`${E.GIT_ENV_SCRUB} git -C "<task tree>" status --porcelain\` (the \`Task tree:\` path above) immediately before and
+immediately after the run, then revert only the tracked changes, and delete only the untracked paths, that appear
+in the after list but not the before list.
+Never run the verifier unless the task brief asks the review for the full suite; then run exactly
+\`${line}\`, once.`
+    const old = p.replace(E.reviewTests(V, SLOT, ''), round1)
+    ok(old !== p && noTreeFails(old, SLOT).length >= 4, 'p31-1 control: the round-1 tests block (a conditional touched run, the verifier unbound) fails the no-tree check')
   }
 
   // 6. The four TASK_TREE_RULE agents observe with observeTests over their own files: one verifier line outside
@@ -1531,7 +1591,8 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
   const plain = await runTask(mkRun(), green)
   const implOf = (r) => r.calls.find((c) => c.label.startsWith('implement:'))
   ok(!plain.error && implOf(plain) && plain.logs.every((l) => !l.startsWith('touched:')), 'runTask: no args.touched ⇒ no touched log line')
-  for (const [what, v] of [['an object', { module: null }], ['no {module}', 'tests/test_x.py'], ['a command', 'make test {module}'], ['a backtick', 'tests/`{module}`.py']]) {
+  for (const [what, v] of [['an object', { module: null }], ['no {module}', 'tests/test_x.py'], ['a command', 'make test {module}'], ['a backtick', 'tests/`{module}`.py'],
+    ['a runner option that hides failures', '--deselect={module}'], ['a runner option', '-k{module}']]) {
     const r = await runTask(mkRun({ touched: v }), green)
     ok(!r.error && r.logs.filter((l) => REFUSED.test(l)).length === 1 && r.logs.filter((l) => l.startsWith('touched:')).length === 1 &&
       implOf(r) && JSON.stringify(r.calls) === JSON.stringify(plain.calls),
@@ -1613,6 +1674,11 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
 // c3efcd93…, 97ff33a1…), and every older base chains on top of that. The rows, taskTreeSetup and the default-branch
 // GOLDENs did not move. A deliberate resume-cache break, like p23-1's: every task-call prompt changed, and so did
 // IMPL_RESULT's escalate description (those calls' opts); a resume re-passes its run's own `scriptPath` (ADR 0043).
+// Re-pinned again in p31-1's review round (the same four pins, through p31Pairs as before): touchedTests says a repo
+// Tests line applies only when it runs one file's or module's tests (a full-suite-only line falls through to the git
+// grep), observeTests names the before/after status diff (TREE_TIDY) instead of pointing at rule (iii), and the review
+// judge binds both its runs to its read rule (no usable tree: no tests at all, said in the feedback). Every changed
+// byte is inside a p31-1 fragment: the p31-1 base pins (4f524ab6…, 986d4024…, c3efcd93…, 97ff33a1…) did not move.
 const P23_1 = [ // [new, old]
   ["   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") at column 0 per human authorisation the task\n                          needs: \"- spend: <what> — cap N USD\" (a hard cap is mandatory: ONE line whose Cap\n                          holds the whole spend, optionally with \"total\", a month, or \"per Login per month\n                          across K Logins\"), \"- credential: <what>\", \"- irreversible: <what>\"; or exactly\n                          \"None\". BULLETS ONLY — no prose or footnotes in this section: the engine reads only\n                          list lines, and anything else is rejected. How a spend splits (run counts, per-call\n                          limits, iterations) goes in sub-bullets nested two spaces under its gate: commentary\n                          the engine never prices, which the Cap must hold. A non-empty declaration pauses the\n                          task for human sign-off —\n                          ",
     "   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") per human authorisation the task needs:\n                          \"- spend: <what> — cap <amount>\" (a hard cap is mandatory), \"- credential: <what>\",\n                          \"- irreversible: <what>\"; or exactly \"None\". BULLETS ONLY — no prose, commentary,\n                          or footnotes in this section: the engine reads only list lines, and anything else\n                          is rejected. A non-empty declaration pauses the task for human sign-off —\n                          "], // planner
@@ -1643,9 +1709,9 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   const KILL = '\n\n' + loadEngine(['KILL_RULE']).KILL_RULE
   const r2new = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
   const r3new = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
-  ok(sha(r2new) === '374e906824ad7084edb4fbc730580bdb48ab7b619f0e52e36e4ad6c0113f68bf',
+  ok(sha(r2new) === '7b6822e41c7a117c865fc0522693bbffa61312e50a2e48456ea0599da54a5910',
     'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p31-1: the p31-1 base below plus the touched-tests loop)')
-  ok(sha(r3new) === 'fb6fe8de3e62f74d396361f49f78be5d7fb4f7e46168cf99ca0705b7c56d2650',
+  ok(sha(r3new) === '4ff225d5259b81bfbe93f7fa61c59a5d67b2091bc34920697dc955fe6d7996d7',
     'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p31-1)')
   ok(preP31(r2new) !== r2new && preP31(r3new) !== r3new, 'p31-1: both revisers render a p31-1 fragment (the loop), so the swap is no no-op')
   // The p31-1 base: the revisers with p31-1's fragments swapped back are their pre-p31-1 bytes (the p23-1 pins), and
@@ -1752,7 +1818,7 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
     'byte pin (p23-1 base): the same calls with the ADR 0038 fragments swapped back are the pre-p23-1 bytes (the p18-1 calls pin)')
   ok(sha(p31Calls.join('\n')) === '4f524ab665ea21cfbacd5db589bcb09d63bb45d1f4420fbe82053dde19e680f0',
     'byte pin (p31-1 base): the same calls with the p31-1 fragments swapped back are the pre-p31-1 bytes (the p23-1 calls pin)')
-  ok(sha(calls.join('\n')) === 'a1d2230ecbb99de770aa3507d3094991991e1d0d54749ad11ce12e65a42a013c',
+  ok(sha(calls.join('\n')) === 'b82f1748cd48dcbfbc737383ffd95e2b08f0aec066e36e3b7afe7ff1fd3adcaf',
     'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p31-1: the p31-1 base above plus the touched-tests fragments)')
   // Each p31-1 pair these calls can render renders here, so its swap is no no-op; the matrix-only pairs render nowhere.
   for (const [slot, hay, which] of [[undefined, calls, 'unslotted'], [PIN_SLOT, slottedCalls, 'slotted']]) {
@@ -1767,7 +1833,7 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   ok(slottedCalls.join('\n') !== calls.join('\n'), 'ADR 0009 d4: the slot is in these calls, so taking it out is no no-op')
   ok(sha(slottedP31Calls.join('\n')) === '986d4024967d3b0c2cd38db5372fcf6637fb5102e2319c75d28444cba44a1f3c',
     'byte pin (p31-1 base, slotted): the slotted calls with the p31-1 fragments swapped back are the pre-p31-1 bytes (the estate ADR 0009 d4 pin)')
-  ok(sha(slottedCalls.join('\n')) === '8cea7327800a2c148ca6ed61230163b5f96a9253cedaa6c67fb61f757bc35acf',
+  ok(sha(slottedCalls.join('\n')) === 'deac8755b9c27275aee06d51a3b45556d7e34b3b252047ec126e15ec3899f89d',
     'byte pin (estate ADR 0009 d4; re-pinned by p31-1): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
 }
 

@@ -79,13 +79,15 @@ export const meta = {
 //   touched     : string,            // optional (p31-1, estate ADR 0009 d1); the rollout's `touched:` key, a path
 //                                    //   pattern naming one changed module's test files with `{module}` (e.g.
 //                                    //   "tests/test_{module}.py"). The full suite (the verifier) runs at two
-//                                    //   Checkpoints per task, the implementer's last check before its PR and
-//                                    //   Integration before the merge; every other verify runs the touched tests,
-//                                    //   and this pins how an agent finds them (touchedTests). Only task-mode
-//                                    //   prompts read it (every task call and seeded revise); Integration's prompts
-//                                    //   never do. Absent, '' or refused by touchedOf (not 1 to 200 characters of a
-//                                    //   path or glob with `{module}` in it) ⇒ no pin clause; a refused value is
-//                                    //   logged once in task mode and read as absent, never an error.
+//                                    //   Checkpoints per task, a code-writing agent's last check before it opens
+//                                    //   or updates its PR (the implementer's, and each reviser's) and Integration
+//                                    //   before the merge; every other verify runs the touched tests, and this
+//                                    //   pins how an agent finds them (touchedTests). Only task-mode prompts read
+//                                    //   it (every task call and seeded revise); Integration's prompts never do.
+//                                    //   Absent, '' or refused by touchedOf (not 1 to 200 characters of a path or
+//                                    //   glob with `{module}` in it, or one starting with `-`, a runner option)
+//                                    //   ⇒ no pin clause; a refused value is logged once in task mode and read
+//                                    //   as absent, never an error.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
 //                                    //   any dispatch, as is a missing, null or array `task`.
@@ -458,53 +460,65 @@ function slotRule(verifier, slot) {
 }
 
 // ---- Touched tests between Checkpoints (p31-1, estate ADR 0009 d1) ----
-// The full suite (the rollout's verifier) runs at two Checkpoints per task: the implementer's last check before its
-// PR, and Integration before the merge. Every other verify runs the touched tests, the test files for what the
-// change touched: each Ralph try, a revision's re-check, a reviewer's own check and a planner's or investigator's
-// observation. From 14 to 21 Oct 2026 a rollout task ran the full suite a median of 6 times (worst 23).
+// The full suite (the rollout's verifier) runs at two Checkpoints per task: a code-writing agent's last check before
+// it opens or updates its PR (the implementer's, and each reviser's: the same loop), and Integration before the
+// merge. Every other verify runs the touched tests, the test files for what the change touched: each Ralph try of an
+// implementer or a reviser (which then runs the verifier once, before it hands back), a reviewer's own check and a
+// planner's or investigator's observation. From 14 to 21 Oct 2026 a rollout task ran the full suite a median of 6
+// times (worst 23).
 
 // What the code-writing roles' touched tests reach.
 const DIFF_FILES = 'the files your diff changes, plus any test file you add or edit'
 
 // How an agent finds and runs the touched tests, the text after a "touched tests:" label: `files` names what they
 // reach in this role; `pattern` is touchedOf(a), the rollout's pin ('' for none). The sources are unnumbered, so a
-// pinned render is the unpinned one plus exactly its pin clause. One line, so it sits inside a bullet or a step; its
-// one git span is scrubbed, and a pattern touchedOf passed holds no backtick, quote or whitespace, so it never opens
-// a span of its own.
+// pinned render is the unpinned one plus exactly its pin clause. The repo's Tests line applies only when it says how
+// to run one file's or module's tests: most repos' line names only the full suite (`Tests: make test`), which falls
+// through to the git grep, so "the first source that applies" never meets "never the whole suite". One line, so it
+// sits inside a bullet or a step; its one git span is scrubbed, and a pattern touchedOf passed holds no backtick,
+// quote or whitespace, so it never opens a span of its own.
 function touchedTests(pattern, files) {
   const pin = pattern ? ` the rollout's \`touched:\` pattern \`${pattern}\`, with \`{module}\` replaced by each changed module's name; else` : ''
-  return `the test files that reach ${files}. Take the first source that applies:${pin} the Tests line of the repo's own \`CLAUDE.md\` or \`AGENTS.md\`; else the test files that import or name each file, from \`${GIT_ENV_SCRUB} git grep -l '<module or file name>'\` over the test directories. Run only those files, with the repo's own test runner: never the verifier line, and never the whole suite under another command. When no test file reaches them (a docs-only change), there are none; say so.`
+  return `the test files that reach ${files}. Take the first source that applies:${pin} the Tests line of the repo's own \`CLAUDE.md\` or \`AGENTS.md\`, which applies only when it says how to run one file's or one module's tests (a Tests line that names only the whole suite's command does not apply: fall through to the next source); else the test files that import or name each file, from \`${GIT_ENV_SCRUB} git grep -l '<module or file name>'\` over the test directories. Run only those files, with the repo's own test runner: never the verifier line, and never the whole suite under another command. When no test file reaches them (a docs-only change), there are none; say so.`
 }
+
+// The before/after status diff that tidies one test run in the task tree (the touched tests or the verifier), for
+// observeTests and reviewTests: each names it outright, never by pointing at TASK_TREE_RULE (iii), which speaks of the
+// verifier alone. One line; its one git span is scrubbed. It ends a sentence whose run it calls "it".
+const TREE_TIDY = `take \`${GIT_ENV_SCRUB} git -C "<task tree>" status --porcelain\` (the \`Task tree:\` path above) immediately before and immediately after it, then revert only the tracked changes, and delete only the untracked paths, that appear in the after list but not the before list.`
 
 // The four TASK_TREE_RULE agents' tests clause (planner, investigator, plan judge, plan reviser): they observe with
 // the touched tests of the files they target and leave the full suite to the implementer's Checkpoint, running the
-// verifier only when the task brief asks for a full-suite baseline. It never renders SLOT_TEXT (slotRule carries it
-// after KILL_RULE) and never a one-shot or loop marker (`EXACTLY ONCE`, `ONE-SHOT`, `Max iterations`).
+// verifier only when the task brief asks for a full-suite baseline; each run is tidied by TREE_TIDY. It never renders
+// SLOT_TEXT (slotRule carries it after KILL_RULE) and never a one-shot or loop marker (`EXACTLY ONCE`, `ONE-SHOT`,
+// `Max iterations`).
 function observeTests(files, pattern, verifier, slot) {
-  return `run only the touched tests: ${touchedTests(pattern, files)} Run them at most once, write no fix code, and tidy after the run as rule (iii) says. The full suite is the implementer's Checkpoint (estate ADR 0009 d1), not yours: run the verifier (\`${slotted(verifier, slot)}\`) only when the task brief asks for a full-suite baseline.`
+  return `run only the touched tests: ${touchedTests(pattern, files)} Run them at most once, write no fix code, and tidy after each run of yours, the touched tests or the verifier: ${TREE_TIDY} The full suite is the implementer's Checkpoint (estate ADR 0009 d1), not yours: run the verifier (\`${slotted(verifier, slot)}\`) only when the task brief asks for a full-suite baseline.`
 }
 
 // The review judge's tests block: no run is needed (the implementer ran the verifier at its Checkpoint, and
-// Integration runs it again before the merge); a claim is checked with the touched tests of the PR's diff, in the
-// task tree only when the judge's read rule lets it read there, tidied by a before/after status diff; the verifier
-// only when the task brief asks the review for the full suite. Its verifier line is the only one outside slotRule.
+// Integration runs it again before the merge). Every run is bound to the judge's read rule: when it fails, no run at
+// all (never the shared checkout), and the feedback says so; when it holds, a claim is checked with the touched tests
+// of the PR's diff, the verifier only when the task brief asks the review for the full suite, each in the task tree
+// and tidied by TREE_TIDY. Its verifier line is the only one outside slotRule.
 function reviewTests(verifier, slot, pattern) {
   return `Tests: you need not run any. The implementer ran the verifier at its Checkpoint, and Integration runs it again
-before the merge (estate ADR 0009 d1). To check a claim, run only the touched tests: ${touchedTests(pattern, 'the files the PR diff changes')}
-Run them in the task tree only when the read rule above lets you read it there: take
-\`${GIT_ENV_SCRUB} git -C "<task tree>" status --porcelain\` (the \`Task tree:\` path above) immediately before and
-immediately after the run, then revert only the tracked changes, and delete only the untracked paths, that appear
-in the after list but not the before list.
+before the merge (estate ADR 0009 d1). When the read rule above fails (a mismatch, a non-empty status or a missing
+tree), run no tests at all, neither the touched tests nor the verifier, and never in the project's shared checkout
+or anywhere else: say in your feedback that you ran none, and why.
+When it holds, run tests only in the task tree. To check a claim, run only the touched tests: ${touchedTests(pattern, 'the files the PR diff changes')}
 Never run the verifier unless the task brief asks the review for the full suite; then run exactly
-\`${slotted(verifier, slot)}\`, once.`
+\`${slotted(verifier, slot)}\`, once.
+Tidy after each run, the touched tests or the verifier: ${TREE_TIDY}`
 }
 
 // The read-only agents' side of the pinned task tree (ADR 0030, p12-4). The planner, plan judge, plan
 // reviser and investigator all work in the task's ONE worktree (taskTreeSetup below), which the
 // implementer then builds in — so what they may touch there is narrow: read under the tree, map the
-// note's checkout paths onto it, and tidy ONLY what their own verifier run added (a before/after
-// status diff), never the env bootstrap's output or anything else already present. Static text; its
-// one git span is scrubbed like every other.
+// note's checkout paths onto it, and tidy ONLY what their own test run added (a before/after
+// status diff), never the env bootstrap's output or anything else already present. Rule (iii) names
+// the verifier run; observeTests names the same diff for the touched tests (p31-1, TREE_TIDY), the
+// tree agents' normal run. Static text; its one git span is scrubbed like every other.
 const TASK_TREE_RULE = `Task tree (hard rule, ADR 0030): this task has ONE worktree, the \`Task tree:\` path above, shared by
 every agent on the task; the implementer builds in it after you, so you edit nothing in it.
 (i) Read every repo file under the task tree, never the project's shared checkout (it may be stale, dirty
@@ -707,8 +721,9 @@ function pricerOf(a) {
 // args.touched when usable, else '' (p31-1, estate ADR 0009 d1): the rollout's `touched:` pattern, one changed
 // module's test files with `{module}` in it. A path or glob, never a command: 1 to 200 characters, `{module}` among
 // them, every one from the allowlist below, so no whitespace, quote, `$`, `;`, `|`, `&`, backslash, backtick or
-// control character. It renders in a code span (touchedTests) and never forms a git span.
-const TOUCHED_PATTERN = /^[\w./*?{}\[\]@+,=:~-]+$/
+// control character; and never a leading `-`, so never a test-runner option (`--deselect={module}`, which would
+// hide failures, or `-k{module}`). It renders in a code span (touchedTests) and never forms a git span.
+const TOUCHED_PATTERN = /^(?!-)[\w./*?{}\[\]@+,=:~-]+$/
 function touchedOf(a) {
   const t = a && a.touched
   if (typeof t !== 'string' || t.length < 1 || t.length > 200 || !t.includes('{module}')) return ''
