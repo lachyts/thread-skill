@@ -1837,7 +1837,7 @@ class LineFile:
     def _shell(self, lang):
         lines = self.sf.lines
         i = 0
-        delim = None
+        delim, body = None, []   # a heredoc's lines count only once its delimiter closes it (a stray `<<x` never does)
         while i < len(lines):
             start, buf = i + 1, lines[i]
             while buf.endswith("\\") and i + 1 < len(lines):
@@ -1847,9 +1847,10 @@ class LineFile:
             s = buf.strip()
             if delim is not None:
                 if s == delim:
-                    delim = None
+                    self.heredoc.update(body)
+                    delim, body = None, []
                     continue
-                self.heredoc.add(start)
+                body.append(start)
             elif lang == "sh":
                 m = HEREDOC_RE.search(buf)
                 delim = m.group(2) if m else None

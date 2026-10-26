@@ -298,6 +298,7 @@ const WALK_FAILS = [
   ['a bare glob in a Python shell string after cat (cwd)', { 'tests/a.py': "import subprocess\nsubprocess.run('cat *.md | wc -l', shell=True)\n" }, 'cwd'],
   ['a bare glob in a JS execSync string after wc (cwd)', { 'tests/t.test.mjs': "import { execSync } from 'node:child_process'\nexecSync('wc -l *.md')\n" }, 'cwd'],
   ['a bare glob after a heredoc ends (cwd)', { 'tests/t.sh': '#!/bin/sh\ncat <<-EOF\n\tx\n\tEOF\ncat *.md\n' }, 'cwd'],
+  ['a bare glob after a stray << that no delimiter closes (cwd)', { 'tests/t.sh': '#!/bin/sh\necho $((x<<y))\ncat *.md\n' }, 'cwd'],
 ]
 
 for (const [name, files, origin] of WALK_FAILS) {
