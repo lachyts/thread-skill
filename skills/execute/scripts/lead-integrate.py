@@ -1012,10 +1012,10 @@ def cmd_verify(args):
                     # path below (reraise), and the record's own write never swallows it.
                     state = rr.tree_state(tree)
                     rec["sha"] = state.get("sha")
+                    rec["t0"] = time.monotonic()   # before the write: a stop delivered as it ends still gets its end
                     rr.suite_started(rec["rollout"], rec["task"], rec["suite"], rec["by"], "lead", state,
                                      tasks_dir=rec["tasks_dir"], waited=slot.waited if slot is not None else None,
                                      reraise=(_Signalled,), written=rec["written"])
-                    rec["t0"] = time.monotonic()
                 deadline = time.monotonic() + args.timeout
                 steps = ([("env_bootstrap", args.bootstrap)] if args.bootstrap else []) + [("verifier", args.verifier)]
                 for name, cmd in steps:

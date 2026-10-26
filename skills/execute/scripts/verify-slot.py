@@ -827,9 +827,9 @@ def _run_recorded(slots, prio, cmd, owner):
             slot = None
         if slot is not None and slot.queued:
             print(f"verify-slot: slot {slot.index + 1} of {slots} after {slot.waited:.0f}s", file=sys.stderr, flush=True)
+        t0 = time.monotonic()   # before the write: a stop delivered as it ends still gets its end line
         rr.suite_started(*common, state, tasks_dir=owner["tasks_dir"], waited=slot.waited if slot is not None else None,
                          reraise=(_Signalled,), written=written)
-        t0 = time.monotonic()
         piped = not (os.isatty(1) or os.isatty(2))
         if piped:
             import tempfile
