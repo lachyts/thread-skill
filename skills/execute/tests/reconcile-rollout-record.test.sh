@@ -609,6 +609,11 @@ ok "$(idle i8 --running "")" "-" "none at halt complete"
 mkro i9 "parallel_ceiling: 2"; mkt x1 i9 in_progress; mkt x2 i9 open
 away_file "$TMP/i9-home" "$NOW" false 2099-01-01T00:00:00Z 1
 ok "$(HOME="$TMP/i9-home" idle i9)" '"hold-trickle"' "hold-trickle"
+# p29-8: Away, a fresh file at Trickle 1 and Away cap 2 with i10's own two live tasks leave slotLimit 0 (it is at most 2,
+# whatever else $V runs), so ac3 is held on the Away cap while a Slot of the ceiling 3 stays free.
+mkro i10 "parallel_ceiling: 3"; mkt ac1 i10 in_progress; mkt ac2 i10 in_progress; mkt ac3 i10 open
+away_file "$TMP/i10-home" "$NOW" true 2099-01-01T00:00:00Z 1 09:00 2
+ok "$(HOME="$TMP/i10-home" idle i10)" '"hold-away-cap"' "hold-away-cap"
 
 echo "== 21b. a stop on a question (p16-3) -> reasonClass needs-human, never plan-rejected or review-rounds"
 # The Reflection raises a round cap on 2+ review-rounds or plan-rejected set-asides, which can never answer a question.
@@ -637,6 +642,35 @@ ok "$(nh nh4 '{"status":"gate-pending","gatedInputs":["spend: one call — cap $
   '"slot-freed" ["gate","gate","gate"]' "gate-pending with a question -> gate still wins"
 ok "$(nh nh5 '{"status":"blocked","needsHuman":"'"$Q"'","blockerDiagnosis":"the implementer asks"}')" \
   '"slot-freed" ["implement","needs-human","run"]' "an engine-blocked row on a question -> needs-human"
+
+echo "== 21c. slot-taken carries the cap in force (p29-8)"
+# mark-started records the Mac-wide cap a Slot starts under (ADR 0049), read from the Away state file of the call's
+# HOME: {away, n, file}, n the Away cap while Away, else the Trickle. Side rollout sc; each call pins its own HOME.
+mkro sc "parallel_ceiling: 5"
+# capof <slug> <home> [mark-started flags...]: mark-started under that HOME; prints each new event's [start, cap]
+capof() {
+  local s=$1 h=$2; shift 2; local m; m=$(cnt sc)
+  HOME="$h" rrs mark-started --tasks "$s" --rollout "$V/sc.md" --tasks-dir "$V" --now "$NOW" "$@" >/dev/null 2>>"$TMP/sc-err"
+  since sc "$m" '[d["start"], d.get("cap")]'
+}
+: > "$TMP/sc-err"
+mkdir -p "$TMP/sc-none"
+away_file "$TMP/sc-day" "$NOW" false 2099-01-01T00:00:00Z 3 09:00 6
+away_file "$TMP/sc-away" "$NOW" true 2099-01-01T00:00:00Z 2 09:00 6
+away_file "$TMP/sc-nokey" "$NOW" true 2099-01-01T00:00:00Z 2 09:00 -
+away_file "$TMP/sc-stale" 2026-10-01T00:00:00Z true 2099-01-01T00:00:00Z 2 09:00 6
+for s in sc1 sc2 sc3 sc4 sc5; do mkt $s sc in_progress; done
+ok "$(capof sc1 "$TMP/sc-none")" '["start",{"away":false,"file":"missing","n":2}]' "no file: not Away, the Trickle 2"
+ok "$(capof sc2 "$TMP/sc-day")" '["start",{"away":false,"file":"fresh","n":3}]' "fresh, not Away: the Trickle 3, the Away cap unused"
+ok "$(capof sc3 "$TMP/sc-away")" '["start",{"away":true,"file":"fresh","n":6}]' "fresh, Away: the Away cap 6"
+ok "$(capof sc4 "$TMP/sc-nokey")" '["start",{"away":true,"file":"fresh","n":4}]' "fresh, Away, no away_cap: the built-in 4"
+ok "$(capof sc5 "$TMP/sc-stale")" '["start",{"away":false,"file":"stale","n":2}]' "stale, its away_cap ignored: not Away, the Trickle 2"
+ok "$(capof sc3 "$TMP/sc-away" --start restart)" '["restart",{"away":true,"file":"fresh","n":6}]' "--start restart carries it"
+mkt sc6 sc blocked
+rrs hand-back --tasks sc6 --tasks-dir "$V" --now "$NOW" >/dev/null
+ok "$(capof sc6 "$TMP/sc-away")" '["hand-back",{"away":true,"file":"fresh","n":6}]' "a hand-back restart carries it"
+ok "$(capof sc2 "$TMP/sc-away" --dry-run)" "" "--dry-run records nothing"
+ok "$(grep -c 'WARN: ~/.config/thread/away.json' "$TMP/sc-err")" 0 "mark-started prints no WARN line, a stale file included"
 
 echo "== 25. human acts (p21-2): record-answer, approve-gates and hand-back record their own act (rollout ha)"
 # Each verb that carries a decision of Lachy's records it (the Hands-off rate's events); hand-back classifies its own

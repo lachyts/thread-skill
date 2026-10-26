@@ -71,8 +71,10 @@ integrates each approved task and merges it:
    code is written (skippable per rollout; a plan's declared gated inputs
    pause the task for sign-off, never the rollout; a spend gate within the
    standing approval, and its month line, passes — ADR 0008, ADR 0034).
-2. **Ralph-style verifier retry** — the implementer re-runs the rollout's
-   verifier and self-corrects until green or the iteration budget is spent.
+2. **Ralph-style verifier retry** — the implementer re-runs its touched tests
+   and self-corrects until they are green, then runs the rollout's verifier
+   once, as its last check before the PR (a Checkpoint, estate ADR 0009), or
+   stops when the iteration budget is spent.
 3. **Master review-and-revise** — a master-side reviewer accepts or sends the
    task back with feedback, up to `max_review_rounds`.
 
@@ -100,10 +102,12 @@ entry. Install a release that knows the table before writing it: an older
 By day the whole Mac runs at most a few rollout tasks at once, the Trickle
 (Chorus ADR 0104): `reconcile-rollout.py next` counts the tasks every open
 rollout is running and starts nothing past it while you are not Away. Away,
-each rollout runs to its own `parallel_ceiling`. Chorus says which by writing
-`~/.config/thread/away.json` (`skills/execute/away.md` specifies it). With no
-file, every rollout on the Mac runs at a combined Trickle of 2, nights
-included. To run a night to each ceiling without a writer, write the file by
+the Away cap holds the whole Mac instead (ADR 0049): larger than the Trickle
+(the file's `away_cap`, else 4), sized so suites do not contend, and each
+rollout still runs within its own `parallel_ceiling`. Chorus says which by
+writing `~/.config/thread/away.json` (`skills/execute/away.md` specifies it).
+With no file, every rollout on the Mac runs at a combined Trickle of 2, nights
+included. To run a night at the Away cap without a writer, write the file by
 hand (`skills/execute/away.md` § Without a writer shows how); a hand-written
 file goes stale 24 h after its `written_at` (or at its `until`), and from then
 on each lead prints a `WARN: ~/.config/thread/away.json stale: …` line and the

@@ -37,6 +37,10 @@ A task stamped `rollout:` whose rollout note is still live (CONTEXT.md **Live ro
 resolves to a note directly in `Work/Tasks/`), or `status: in-progress` (TaskNotes' own spelling),
 `in_progress` or `review`; a phase with any such member.
 
+The one exception, at schedule's Pre-flight on a supersede (schedule § 1.5, ADR 0047): a carried task still
+queued, at `open` with its `rollout:` naming the rollout being superseded, is read as not in flight, so it is graded
+and its answers written; one that has started stays in flight. It is read through estate-scan's `still_to_start`.
+
 ## Rollout start stamp
 
 A rollout note asks the Chorus Stage to start its lead with `start: unattended` (*Start when ready*,
@@ -97,13 +101,17 @@ no stamp; `started:` and `started_unattended:` are other keys.
 - `skills/_shared/scripts/estate-scan.py` (the estate scan): Landed and Active through `DEAD_STATUSES`,
   `OPEN_STATUSES` and `status_of`, loaded from the next-action script rather than copied; Review through its pinned
   literal `REVIEW_STATUSES`; § In flight, for each open task's `inFlight`, through its module-level `first_link`,
-  `link_live` and `in_flight`, the rule's one statement in code; and § Phase and task filenames'
+  `link_live` and `in_flight`, the rule's one statement in code, and its exception's, `still_to_start`; and § Phase and task filenames'
   membership for each phase's `openTasks`: the open tasks named with the phase note's literal prefix
   `<slug>-p<N>-`, never by a task's `phase:` key, with reconcile-project.py's `PHASE_N` loaded rather than copied.
-- `skills/_shared/scripts/estate-dispatch.py` `record` (the estate pass's decision write): Active through
-  next-action's `OPEN_STATUSES` and `status_of`, and § In flight through estate-scan's `in_flight` and `link_live`,
-  all loaded rather than copied. It writes only into an Active task that is not in flight. Its `plan` reads whether
-  a dependency outside the scan has landed through reconcile-rollout's `_dep_status` and `_fold_unit`, loaded, so it
-  holds a member exactly as long as a rollout row would wait on that dependency.
+- `skills/_shared/scripts/estate-dispatch.py` `record` (the estate pass's and schedule's Pre-flight's decision
+  write): Active through next-action's `OPEN_STATUSES` and `status_of`, and § In flight through estate-scan's
+  `in_flight` and `link_live`, all loaded rather than copied. It writes only into an Active task that is not in
+  flight, the exception (`record --superseding`) read through estate-scan's `still_to_start`. Its `plan` reads
+  whether a dependency outside the scan has landed through reconcile-rollout's `_dep_status` and `_fold_unit`,
+  loaded, so it holds a member exactly as long as a rollout row would wait on that dependency.
+- `skills/_shared/scripts/estate-rank.py` `rank --superseding` and estate-dispatch.py's `slices --superseding`
+  (schedule's Pre-flight): § In flight's exception, read through estate-scan's `still_to_start`, loaded, so a
+  carried task still queued is gradeable and one that has started stays in flight.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
   scripts' key and sort helpers against the examples under § Phase and task filenames.

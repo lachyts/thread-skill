@@ -7,6 +7,7 @@
 // - every agent prompt carries GIT_ENV_RULE exactly once, ahead of any verifier command it renders;
 // - the edit-noop-repro diagnostic scrubs every git command its probe runs.
 // - with args.verifySlot (p23-4), the wrapped verifier line starts with the scrub too, and SLOT_TEXT holds no git span.
+// - the touched-tests text (p31-1) scrubs its git grep span, with and without the rollout's `touched:` pin.
 // tests/git-env-scrub.test.sh executes the rendered verifier (bare and wrapped) and the lead's § 4 check under a real
 // GIT_DIR.
 import { test } from 'node:test'
@@ -17,7 +18,7 @@ import path from 'node:path'
 import { loadEngine, enginePath, VERIFY_SLOT } from './lib/engine.mjs'
 
 const T = loadEngine([
-  'GIT_ENV_SCRUB', 'GIT_ENV_RULE', 'scrubbed', 'worktreeSetup', 'ralphLoop', 'oneShotVerify',
+  'GIT_ENV_SCRUB', 'GIT_ENV_RULE', 'scrubbed', 'worktreeSetup', 'ralphLoop', 'oneShotVerify', 'fullSuiteLoop',
   'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt',
   'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt',
   'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck', 'integrationMergeReads', 'ANCHOR_RECIPE',
@@ -64,7 +65,10 @@ function builders(a) {
     integrationReviewPrompt: [T.integrationReviewPrompt(task, a, I, J), T.integrationReviewPrompt(task, a, { ...I, landed: [] }, { ...J, mergeCommit: '', path: 'judge-only' })],
   }
 }
-const VERIFYING = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt', 'integratorPrompt']
+// Every builder that renders the verifier line: all but the Integration review judge (p31-1 gave the review judge, the plan
+// judge and the plan reviser their only-when-asked verifier line).
+const VERIFYING = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt', 'integratorPrompt',
+  'reviewJudgePrompt', 'planJudgePrompt', 'planReviserPrompt']
 const count = (s, sub) => s.split(sub).length - 1
 
 test('(a) GIT_ENV_SCRUB is the land.sh form, exactly', () => {
@@ -80,11 +84,20 @@ test('(b) the worktree setup block starts with the scrub, in every variant', () 
   }
 })
 
-test('(c) the verifier line is scrubbed in both verify templates, with and without a baseline', () => {
+test('(c) the verifier line is scrubbed in every verify template, with and without a baseline or a touched pin', () => {
   for (const base of [undefined, [], ['test_x — env']]) {
-    for (const block of [T.ralphLoop('make test', 3, base), T.oneShotVerify('make test', base)]) {
-      const line = block.split('\n').find((l) => l.startsWith('- Verifier:'))
-      assert.equal(line, `- Verifier: ${SCRUB} make test`)
+    assert.equal(T.fullSuiteLoop('make test', 3, base).split('\n').find((l) => l.startsWith('- Verifier:')), `- Verifier: ${SCRUB} make test`)
+    for (const touched of [undefined, '', 'tests/test_{module}.py']) {
+      for (const block of [T.ralphLoop('make test', 3, base, undefined, touched), T.oneShotVerify('make test', base, undefined, touched)]) {
+        const line = block.split('\n').find((l) => l.startsWith('- Verifier:'))
+        assert.equal(line, `- Verifier: ${SCRUB} make test`)
+        // p31-1: the touched-tests line comes first, and its git span (the git grep) starts with the scrub.
+        const lines = block.split('\n')
+        const t = lines.findIndex((l) => l.startsWith('- Touched tests:'))
+        assert.ok(t > -1 && t < lines.indexOf(line), 'the touched-tests line precedes the verifier line')
+        const spans = [...lines[t].matchAll(/`([^`\n]*)`/g)].map((m) => m[1]).filter((x) => /(^|[\s;&|(])git\s/.test(x))
+        assert.ok(spans.length === 1 && spans[0].startsWith(SCRUB), lines[t])
+      }
     }
   }
 })
@@ -128,17 +141,20 @@ test('(e2) every runAgent call site uses one of the 10 covered builders', () => 
 })
 
 test('(f) every inline code span that runs git starts with the scrub', () => {
-  const a = { repoPath: '/repo', verifier: 'git status && make test' }
-  for (const [name, prompts] of Object.entries(builders(a))) {
-    for (const p of prompts) {
-      for (const [, span] of p.matchAll(/`([^`\n]*)`/g)) {
-        if (/(^|[\s;&|(])git\s/.test(span)) assert.ok(span.startsWith(SCRUB), `${name}: \`${span}\``)
+  // p31-1: the rollout's `touched:` pin renders in a code span of every task-call prompt, so it is checked too.
+  for (const a of [{ repoPath: '/repo', verifier: 'git status && make test' }, { repoPath: '/repo', verifier: 'git status && make test', touched: 'tests/test_{module}.py' }]) {
+    for (const [name, prompts] of Object.entries(builders(a))) {
+      for (const p of prompts) {
+        for (const [, span] of p.matchAll(/`([^`\n]*)`/g)) {
+          if (/(^|[\s;&|(])git\s/.test(span)) assert.ok(span.startsWith(SCRUB), `${name}: \`${span}\``)
+        }
       }
     }
-  }
-  const all = builders(a)
-  for (const name of ['readOnlyPrompt', 'plannerPrompt']) {
-    assert.ok(all[name][0].includes(`${SCRUB} git status && make test`), `${name} renders the scrubbed verifier`)
+    const all = builders(a)
+    for (const name of ['readOnlyPrompt', 'plannerPrompt', 'planJudgePrompt', 'planReviserPrompt', 'reviewJudgePrompt']) {
+      assert.ok(all[name][0].includes(`${SCRUB} git status && make test`), `${name} renders the scrubbed verifier`)
+    }
+    if (a.touched) assert.ok(all.implementerPrompt[0].includes('`tests/test_{module}.py`'), 'the pin renders in the implementer')
   }
 })
 

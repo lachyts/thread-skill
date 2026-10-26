@@ -48,10 +48,15 @@ re-send or a repair hand-off is no § 1 entry for a lead already in hand: it kee
 
 ## Another rollout's commands
 
-A command on another rollout (schedule's nine prior-acting commands on a superseded rollout, a lineage read, a
+A command on another rollout (schedule's ten prior-acting commands on a superseded rollout, a lineage read, a
 close-out) runs from that rollout's own `resolve` root: the Primary for an unstamped prior, never this run's snapshot.
 So does a write to a rollout from a session that runs none: orient-all's Sign-off (§ 4) resolves the task's
 `rollout:` and runs `approve-gates --tasks <slug> --rollout <its note>` from the `root` that prints.
+
+Schedule's Pre-flight scripts (`estate-scan.py`, `estate-dispatch.py` `slices`, `preflight`, `record` and `log`,
+`estate-rank.py rank`) run from the session's own root: they are unguarded and write no rollout note, and `record`'s
+`## Decisions (asked ahead <date>)` bullet into a carried queued task is a form every engine reads as note text
+(ADR 0047 § Build rulings).
 
 ## The refusal rule
 
@@ -125,7 +130,9 @@ versions and change only by migration (engine-snapshot.py's `MIGRATIONS`, run by
 state (verify slots, the Trickle's count, `~/.config/thread/*`); a rollout's own canary records, Run record lines and
 note lines; and what a cross-rollout reader reads (the Run record, the notes the Trickle counts, the Watchdog's
 reads). `rollouts.toml` carries a top-level `schema`: an older reader ignores a newer file's unknown key and still
-refuses a typo, and every writer that adds a newer key raises the line (rollout-settings.py's header). The plugin's
+refuses a typo, and every writer that adds a newer key raises the line (rollout-settings.py's header). `inert_paths`
+(p29-3, ADR 0045) is the first schema-2 key: an older snapshot ignores it and re-runs its verifier, and inert-paths.py's
+`record` refuses to raise the line while a live rollout's engine root cannot read the new file. The plugin's
 hooks run from the Primary checkout, not a snapshot, so the Stop-hook driver's `STATUS_RE` and the `ROLLOUT-STATUS`
 line it parses are a cross-version contract (hooks/rollout-stop-driver.py). The stamps themselves are read only by
 `resolve`, the guards, `unfinished-rollout.py running` (ADR 0031's hold, now only for an unsnapshotted rollout) and

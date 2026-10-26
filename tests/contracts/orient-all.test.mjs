@@ -18,7 +18,7 @@
 //   o5  § 4's Unpark and sign-off writes: estate-rank.py unpark, snooze --ready and kill, and approve-gates --tasks,
 //       run from the task's rollout's engine root (`engine-snapshot.py resolve`, ADR 0043), never this session's.
 //   o6  § 6 runs `plan`, forks `/thread:schedule <entry.args>` with the projectSlug line, one batch at a time, and
-//       answers schedule's questions in exactly 15 items, § 0's clone question (ADR 0042) with the No, since no fork
+//       answers schedule's questions in exactly 16 items, § 0's clone question (ADR 0042) with the No, since no fork
 //       holds Lachy's yes; schedule's **Under orient-all.** paragraph cites orient-all § 6 and routes nothing, S1 and S4
 //       name orient-all, and nothing pairs orient-all with --regenerate.
 //   o7  § 7 runs `sessions` with --wrote and --status and starts exactly items[]; its table's numbers; the Session
@@ -183,7 +183,7 @@ function check(files, consts) {
     'never two batches at once'])
   const answers = slice(s6raw, /^3\. \*\*Schedule's questions, answered\.\*\*/, /^4\. /) ?? ''
   const items = answers.split('\n').filter((l) => /^ {3}\d+\. /.test(l)).map((l) => Number(l.trim().split('.')[0]))
-  if (JSON.stringify(items) !== JSON.stringify(Array.from({ length: 15 }, (_, i) => i + 1))) flag('o6', `the answers are numbered ${JSON.stringify(items)}`)
+  if (JSON.stringify(items) !== JSON.stringify(Array.from({ length: 16 }, (_, i) => i + 1))) flag('o6', `the answers are numbered ${JSON.stringify(items)}`)
   need('o6', "§ 6's answers", C(answers), ['routes nothing', '`none`', 'Advance', 'kebab', '`projectSlug`', '`plan_approval: required`',
     "§ 0's clone question (exit 4)", 'the fork takes the No'])
   const schedule = files[SCHEDULE] ?? ''
@@ -315,7 +315,7 @@ test('control o5: the kill write gone, or a sign-off run from the session root, 
     '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates'), CONSTS, ['o5'], 'session root')
 })
 
-test('control o6: a sixteenth answer, a fork that makes the clone, or schedule routing for orient-all, fails o6 alone', () => {
+test('control o6: a seventeenth answer, a fork that makes the clone, or schedule routing for orient-all, fails o6 alone', () => {
   only(swap(FILES, SKILL, '   15. Serial S1 and S4', '   15. Nothing else.\n   16. Serial S1 and S4'), CONSTS, ['o6'], 'count')
   only(swap(FILES, SKILL, 'the fork takes the No', 'the fork takes the Yes'), CONSTS, ['o6'], 'clone')
   only(swap(FILES, SCHEDULE, 'It routes nothing: § 0\'s session-lane routing', 'It routes the misfits: § 0\'s session-lane routing'),

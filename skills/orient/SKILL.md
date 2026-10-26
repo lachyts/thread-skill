@@ -313,6 +313,8 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
     route), then an orient with `--steer` schedules.
 
   Schedule's own § 0 checks can still stop it with a named remedy, which orient reports.
+  Schedule's Pre-flight (schedule § 1.5) may ask its decision round here (decisions, never a confirm) and leave
+  Orient-graded or undecided tasks out with their dependants, unstamped; orient reports them from schedule's summary.
   A serial rollout never takes parallel-shaped work; orient never re-implements the
   merge engine.
 - **Serial-shaped and session-lane work → steer.** If any serial-shaped or session-lane work is
@@ -356,7 +358,9 @@ exactly one call, under the first project in its `projects:` that this orient sw
 spans two projects: schedule's `projects:` filter is strict, and it writes one serial rollout note
 per chain (schedule § Serial path). Never a bare project run. Schedule's serial path decides chains
 and surfaces (ADR 0040). The steering answer authorises every call, and § 9 follows each
-note written. A project with nothing left gets no call, and orient says so.
+note written. A project with nothing left gets no call, and orient says so. Schedule's Pre-flight (its serial
+path's S3.5, schedule § Serial path) may ask its decision round here too (decisions, never a confirm) and leave
+Orient-graded or undecided members out with their dependants, unstamped; orient reports them from schedule's summary.
 
 - **Exclusions** (kept out of every `--tasks`; the fit test already sends most of them to the
   session lane): conversation-gated tasks (need Lachy's input — say so, leave them for Hands-on or

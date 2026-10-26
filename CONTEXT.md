@@ -59,7 +59,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   written: each task still to start gets its **Readiness grade**, One call
   and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
   stay out with their Dependent closure; it runs no plan gate (ADR 0047). Not
-  schedule step 8's "Pre-flight —" report blocks, nor a Leg's preflight.
+  schedule step 8's "Checklist —" report blocks (called "Pre-flight —"
+  before ADR 0047), nor a Leg's preflight.
   _Avoid_: preflight check, dry run.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
@@ -455,9 +456,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Queue** — how a parallel rollout runs: tasks in parallel, each from its
   start's `main`, up to the parallel ceiling, held back only by dependencies
   or a **Solo** task and, by day, the **Trickle**, never a shared file
-  (ADR 0030); Away, by the **Away cap** instead of the Trickle (ADR 0049); and
-  all of them by a bare checkout's **Git-env hold** (ADR 0046). _Avoid_:
-  batch (the session lane's).
+  (ADR 0030); Away, by the **Away cap** instead of the Trickle (ADR 0049),
+  and, toward the Morning, the **Last starts**; and all of them by a bare
+  checkout's **Git-env hold** (ADR 0046). _Avoid_: batch (the session lane's).
 - **Slot** — one task's own run (a start, a restart or a seeded revise) in a
   Queue, held from its launch until its result is reconciled. Integration
   holds none. _Avoid_: worker, agent (a slot's run holds many agents).
@@ -477,6 +478,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suites do not contend, tuned from the Run record (ADR 0049). Each
   rollout's **Parallel ceiling** still bounds its own share. _Avoid_: night
   ceiling, global ceiling.
+- **Last starts** — toward the Morning, a queued task starts only if its
+  kind's usual length (the median of that kind's past runs in the project,
+  its kind its note's `scope:`) ends it by the Morning's hour; with fewer than
+  three past runs, nothing of that kind starts in the last two hours (Chorus
+  ADR 0104 d4). They apply only while **Away** runs to the Morning, never to
+  a daytime Away block or the Lunch restart. Running tasks finish: a restart,
+  a hand-back or a seeded revise is never held, and the hold never halts the
+  rollout. _Avoid_: curfew, cut-off.
+- **Night record** — per Morning, the **Last starts**' held starts and the
+  tasks still running at the Morning, written into each rollout's **Run
+  record** and keyed by that Morning, so a **Reflection** can tune the
+  two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences).
+  _Avoid_: night log.
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
   (ADR 0030). Queued with its dependencies met, it holds every task whose row
@@ -498,9 +512,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
   order. _Avoid_: the lane (that is the step, not the line).
 - **Inert path** — a file a repo's verifier provably never reads, listed per
-  repo in the **Rollout settings** and re-proven at every skip: a `main` that
-  moved only in inert paths since a green run leaves that run standing, and
-  Integration re-runs nothing (ADR 0045). _Avoid_: doc-only, ignored path.
+  repo in the **Rollout settings** (`inert_paths`, git pathspec globs) and
+  re-proven on the tree being merged at every skip: a `main` that moved only
+  in inert paths, prose only (`.md .markdown .rst .adoc .org`, never
+  `.txt`), since a green run leaves that run standing, and Integration
+  re-runs nothing (ADR 0045). _Avoid_: doc-only, ignored path.
+- **Inert proof** — the static check that nothing in the tree being merged
+  reads a glob: no non-prose file or step names its deepest literal segment;
+  no walk (a copy or archive of the tree included) whose root is not
+  provably outside the repo (a path that is the repo, inside it or an
+  ancestor of it counts) covers it; no markdown tool, link parse, symlink
+  into the glob or submodule. It fails closed (ADR 0045): any error in it
+  means a re-run. skills/_shared/scripts/inert-paths.py's
+  header holds its rules. _Avoid_: the docs check.
 - **Integration conflict** — Integration's merge of the latest `main`
   conflicted and the integrator could not keep both intents, so it aborted
   the merge and pushed nothing (Vibe Kanban's 'rebase conflicts'). The note is
@@ -546,10 +570,27 @@ through time, from attention to merged PRs. Terms only — no implementation.
   lead's Integration and RACE verifies, and the integrate call's own verifier
   runs (`run --priority`), go before any task call's agent. Not a **Slot** (a
   task's run in a Queue). _Avoid_: bare "slot", lock, semaphore.
+- **Checkpoint** — one of the two moments per task where the full suite (the
+  rollout's `verifier:`) runs: a code-writing agent's last check before it
+  opens or updates its PR (the implementer's, and each reviser's), and
+  Integration before the merge (estate ADR 0009 d1; the estate's own
+  `CONTEXT.md` § The Mac's load). The engine renders the verifier there, and
+  elsewhere only when a task brief asks for the full suite. Not the
+  **Cursor** (a saved position). _Avoid_: final run, full check.
+- **Touched tests** — the test files that reach what a change touched, run
+  between Checkpoints: each Ralph try of an implementer or a reviser (touched
+  tests, then the verifier once before it hands back), a reviewer's own check
+  and a planner's or investigator's observation (estate ADR 0009 d1). An agent
+  finds them by the rollout's optional `touched:` pattern (`{module}` for each
+  changed module), else the repo's `CLAUDE.md`/`AGENTS.md` Tests line when it
+  says how to run one file's or module's tests (a line naming only the full
+  suite falls through), else the test files importing the changed modules.
+  They take no **Verify slot**. _Avoid_: quick tests, smoke tests, partial
+  suite.
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
-  _Avoid_: checkpoint, pointer, progress marker.
+  _Avoid_: checkpoint (a **Checkpoint** is a full-suite moment), pointer, progress marker.
 - **Primary checkout** — the git checkout the plugin runs from, live (a
   directory-source install, or `--plugin-dir`): sessions render their skills
   and run their hooks from it, but no **Engine snapshot** is cut from it, so
@@ -840,7 +881,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   against it; a gate passed under the Standing approval does not.
   _Avoid_: autonomy score, automation rate.
 - **Grade log** — `grades.jsonl` beside the Run record: one line per task
-  each estate pass grades, written by `estate-dispatch.py log`. The weekly
+  each estate pass or schedule Pre-flight grades (every schedule run but an
+  orient-all fork, whose estate pass logged them), written by
+  `estate-dispatch.py log`. The weekly
   reading joins each grade to what followed until the task's next grade or
   its close, and reports each grade's hands-off share (of the work it sent
   that landed hands-off, bounced back to Lachy, was regraded or dropped;

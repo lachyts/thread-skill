@@ -56,13 +56,19 @@ Subcommands:
               landed. A gate beside any other set-aside (blocked, review-blocked, plan-blocked, a RACE, an
               UNVERIFIED) stays "stuck". `awaitingSignOff` lists W in rank order, [{slug, why: "gate-pending" |
               "depends on [[<unit>]]"}], and is [] for any other verdict.
-              The Trickle (Chorus ADR 0104; Trickle and Away, below): `slotLimit` (an int) and `trickle` ({away,
-              file, why, limit, until, morning, elsewhere, running}) follow `slotsInUse`; every other key, `ceiling`
-              included, is unchanged. Not Away, a start stops at the Trickle less the tasks running in every
-              other open Rollout on the Mac and less this rollout's own in_progress tasks, live or stalled; a
-              restart stops at the ceiling only. A row held there reads `trickle: <running>/<N> tasks running on
-              this Mac`, and while one is, `halt` stays null. A stale or unreadable state file prints one `WARN:
-              ~/.config/thread/away.json …` line on stderr, --dry-run included.
+              The Trickle and the Away cap (Chorus ADR 0104; ADR 0049; Trickle and Away, below): `slotLimit` (an
+              int) and `trickle` ({away, file, why, limit, awayCap, until, morning, elsewhere, running}) follow
+              `slotsInUse`; every other key, `ceiling` included, is unchanged. A start stops at the Mac-wide cap
+              (the Trickle N not Away, the Away cap A Away) less the tasks running in every other open Rollout on
+              the Mac and less this rollout's own in_progress tasks, live or stalled; a restart stops at the
+              ceiling only. A row held there reads `trickle: <running>/<N> tasks running on this Mac` (not Away)
+              or `away cap: <running>/<A> tasks running on this Mac` (Away), and while one is, `halt` stays null.
+              A stale or unreadable state file prints one `WARN: ~/.config/thread/away.json …` line on stderr,
+              --dry-run included.
+              The last starts (Chorus ADR 0104 d4; The last starts and the night record, below): `lastStarts`
+              ({morning, kinds}) follows `trickle`. While Away runs to the Morning, a start whose kind's usual
+              length would end past it reads `last start: …` and is skipped, never a stop; a restart never does;
+              while one is held, `halt` stays null. Off --dry-run, the night record's lines follow idle-slots.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -567,14 +573,17 @@ the same Slot keeping its first `start`). A
 note holds the lane (_holds_lane) when it reads `review` with a `pr:` and either carries `integrating:` or its
 `## Integration log`'s last line is `integrated` with a startedAt at or after `ready:` (the window between an
 integrate call's reconciled `integrated` row and the merge; a hand-back restamps `ready:`). The events:
-  mark-started      slot-taken {settings, start, carriedFrom?}. settings: parallel_ceiling (the rollout note's,
+  mark-started      slot-taken {settings, start, carriedFrom?, cap}. settings: parallel_ceiling (the rollout note's,
                     _ceiling), max_review_rounds / max_iterations / max_plan_rounds (task fm, then rollout fm,
                     then rollout-settings.py once per process; ints >= 1 kept; max_iterations 1 for a
                     read-only task with no stamp), rung (a rung name). start, first match: --start resume;
                     a `handed_back:`, `gates_signed:` or `descope_armed:` marker -> hand-back; --start
                     revise|restart|start; `started:` present -> restart; else start. carriedFrom: the
-                    record's unconsumed `carried` line for the task. No resolvable ceiling (or no rollout
-                    note): one `run_record: warning: slot-taken for <slug> not recorded: <why>` line.
+                    record's unconsumed `carried` line for the task. cap (p29-8, ADR 0049): the Mac-wide cap
+                    in force, {away, n, file} (_cap_in_force: n the Away cap while Away, else the Trickle),
+                    the Away state file read once per run, silently (`next` prints its WARN). No resolvable
+                    ceiling (or no rollout note): one `run_record: warning: slot-taken for <slug> not
+                    recorded: <why>` line.
   mark-integrating  lane-taken, on every successful call.
   mark-done         (a note not already done) hold-ended race / merge for each the record shows open; then,
                     when it held the lane, lane-freed release=merge with path, triggers and conflict from
@@ -630,7 +639,13 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     (the writer appends it to both files).
   next              (not --dry-run) paused mode=soft when it stamps `paused:`; idle-slots {reason, free,
                     settings} when free = ceiling - (slotsInUse + starts) > 0 and halt is not complete,
-                    done or empty (free stays the ceiling's, never the Trickle's).
+                    done or empty (free stays the ceiling's, never the Trickle's or the Away cap's); then the
+                    night record (p28-2, _night_record): away-night {morning} once per (rollout, M) while the last
+                    starts apply, last-start-held {morning, scope, history, usualMinutes?} once per (task, M) for
+                    each final `last start:` hold, and ran-past-morning {morning, slotTakenAt, scope, history,
+                    usualMinutes?} once per (task, M) for each task whose Slot the record shows open at a marked
+                    Morning at or before now; an unreadable record writes none (one `run_record: warning: night
+                    record not written: <why>` line while the last starts apply).
   clear-pause       when it removes `paused:`: paused mode=hard at the stamp when the record has no open pause
                     (a hard pause whose record-pause never ran), then resumed. Removing only
                     pause_requested records nothing; a refusal (STILL-AWAITING) records nothing.
@@ -660,7 +675,9 @@ Integration conflict, `integration: conflict unresolved in …`), integration-re
 else integration-set-aside; else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
 paused or pauseRequested -> pause-drain; any `trickle:` hold (only ever a queued row: a stalled row waits on the
-ceiling alone) -> hold-trickle; the first held queued row's reason: `depends on` -> dependency,
+ceiling alone) -> hold-trickle, and any `away cap:` hold (the same, Away) -> hold-away-cap; any `last start:` hold
+(p28-2: a queued row or a head Solo the last starts hold toward the Morning) -> hold-last-start (after hold-away-cap,
+with which it can co-occur Away); the first held queued row's reason: `depends on` -> dependency,
 solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
 row -> awaiting-hand-back (a known mislabel when every one is a blocked row step 1.2 relaunches as a seeded
 revise: its slot-taken start=revise splits the span seconds later; also while step 1.2's automatic retry waits out
@@ -719,18 +736,36 @@ is non-empty `next` starts and restarts nothing, holds every stalled or queued t
 and `/thread:repair [[<from>]]`. A `## Race log` line carrying `git-env halt` names its slug like any Race log line,
 so once the hold is acked the RACE hold applies unchanged.
 
-Trickle and Away (Chorus ADR 0104 d2, d3, d6; the spec is skills/execute/away.md): `next` reads the Away state file,
-~/.config/thread/away.json under the home dir at call time (AWAY_FILE_REL), as one JSON object of AWAY_KEYS (_away_state).
-Missing (no file, a dangling symlink, a plain file in its directory's place), unreadable (any other OSError, over 64 KiB,
-not UTF-8, not JSON, not an object, a key missing or ill-typed) or stale (`until` <= now, `written_at` over 24 h old or
-more than 5 minutes ahead) reads not Away at DEFAULT_TRICKLE, the file's own `trickle` ignored; stale and unreadable
-print the AWAY_WARN line. Fresh, `away` and `trickle` are the file's. The count elsewhere (_elsewhere_running) is one
-walk of --tasks-dir, _scan's index: each other rollout note directly in it, tagged `rollout`, not done or dropped,
-parallel, with no `paused:` stamp and started (never_started), counts its `status: in_progress` notes less the ones
-its own undecided RACE or UNVERIFIED holds. Serial rollouts, review and integrating notes never count. This rollout's
-own use is counted the same way, every in_progress row of its own, live or stalled, so a new start fits only while
-elsewhere + its own in_progress + this call's starts < the Trickle; a restart waits on the ceiling alone (no state leaves
-two respawned leads each waiting on the other's stalled notes). `next` never writes the file.
+Trickle and Away (Chorus ADR 0104 d2, d6; ADR 0049, which overturns d3; the spec is skills/execute/away.md): `next`
+reads the Away state file, ~/.config/thread/away.json under the home dir at call time (AWAY_FILE_REL), as one JSON
+object of AWAY_KEYS, all required, and the optional AWAY_CAP_KEY (_away_state). Missing (no file, a dangling symlink, a
+plain file in its directory's place), unreadable (any other OSError, over 64 KiB, not UTF-8, not JSON, not an object, a
+key missing or ill-typed, an `away_cap` not above `trickle`) or stale (`until` <= now, `written_at` over 24 h old or
+more than 5 minutes ahead) reads not Away at DEFAULT_TRICKLE with the Away cap at AWAY_CAP_DEFAULT, the file's own
+`trickle` and `away_cap` ignored; stale and unreadable print the AWAY_WARN line. Fresh, `away` and `trickle` are the
+file's, and the Away cap is its `away_cap`, else AWAY_CAP_DEFAULT lifted to `trickle` + 1 once the Trickle reaches it.
+One Mac-wide cap applies, its value by Away state, the Trickle not Away and the Away cap Away, and each rollout's
+ceiling still bounds its share: slotLimit = min(ceiling, max(0, cap - the count elsewhere)). The count elsewhere
+(_elsewhere_running) is one walk of --tasks-dir, _scan's index: each other rollout note directly in it, tagged
+`rollout`, not done or dropped, parallel, with no `paused:` stamp and started (never_started), counts its `status:
+in_progress` notes less the ones its own undecided RACE or UNVERIFIED holds. Serial rollouts, review and integrating
+notes never count. This rollout's own use is counted the same way, every in_progress row of its own, live or stalled, so
+a new start fits only while elsewhere + its own in_progress + this call's starts < the cap; a restart waits on the
+ceiling alone (no state leaves two respawned leads each waiting on the other's stalled notes). Nothing here writes the
+file; mark-started reads it too, for slot-taken's `cap` (Run record, above).
+
+The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
+last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
+with `until == M`: `until` read in local wall-clock time falls on `morning`'s HH:MM to the minute (M is that `until`,
+its seconds cut: the same instant, at the local offset), and now < M <= now + LAST_START_HORIZON. So a Lunch restart, a
+daytime Away block or one ending before or spanning the Morning holds and records nothing. Then a queued task's start,
+and a head Solo task's lone start, each checked only once a Slot is found, is held (`last start: …`, LAST_START_PREFIX)
+when now plus its kind's usual length is past M. Its kind is its note's `scope:` (_kind), its usual length the median of
+the kind's past runs (_past_runs: this project's folded call journals over LAST_START_HISTORY, read lazily once per
+call), and with fewer than LAST_START_MIN_RUNS runs the length is LAST_START_FALLBACK. A held row is skipped and the
+greedy loop goes on; restarts, hand-backs and seeded revises are never held; the hold never halts; a git-env or pause
+hold replaces it. Off --dry-run, _night_record writes the night record into the rollout's own Run record (NIGHT_KINDS),
+each line once, read from the record's Slot intervals (_record_night), never from notes.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
@@ -875,11 +910,12 @@ import shlex
 import signal
 import shutil
 import stat
+import statistics
 import subprocess
 import sys
 import time
 import types
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -2791,7 +2827,7 @@ def cmd_reconcile(args) -> int:
     return 1 if errors else 0
 
 
-# ---- the Trickle and Away (Chorus ADR 0104 d2, d3, d6; execute away.md) ----------------------------------------
+# ---- the Trickle and the Away cap (Chorus ADR 0104 d2, d6; ADR 0049; execute away.md) ----------------------------
 
 AWAY_FILE_REL = ".config/thread/away.json"                    # under the home dir, resolved at call time
 AWAY_KEYS = ("away", "until", "morning", "trickle", "written_at")  # all required, in away.md's key-table order
@@ -2802,6 +2838,19 @@ AWAY_MAX_BYTES = 64 * 1024
 MORNING_RE = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]\Z", re.ASCII)
 AWAY_WARN = "WARN: ~/.config/thread/away.json"                 # the stale / unreadable stderr line's prefix
 TRICKLE_PREFIX = "trickle:"                                    # a row held for want of a Trickle Slot
+# The Away cap (p29-8, ADR 0049): the Mac-wide cap while Away. Optional, after AWAY_KEYS (the key table's last row),
+# so a reader from before it (p28-1, ADR 0043) ignores it as an extra key; a present one is an integer above `trickle`.
+AWAY_CAP_KEY = "away_cap"
+AWAY_CAP_DEFAULT = 4      # the key absent, or any reading but fresh: twice the Mac's two Verify slots (verify-slot.py)
+AWAY_CAP_PREFIX = "away cap:"                                  # a row held for want of an Away-cap Slot
+# The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; execute away.md).
+LAST_START_PREFIX = "last start:"                              # a row held because it would run past the Morning
+LAST_START_FALLBACK = timedelta(hours=2)                       # a kind with no history starts nothing this close to it
+LAST_START_MIN_RUNS = 3                                        # fewer past runs of a kind than this is no history
+LAST_START_HISTORY = timedelta(days=30)                        # a past run counts when it ended within this window
+LAST_START_HORIZON = timedelta(hours=24)                       # a Morning further out than this holds nothing yet
+UNSCOPED_KIND = "unscoped"                                     # the kind of a task whose note has no `scope:`
+NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")  # the night record's Run-record kinds
 
 
 def _away_stamp(value):
@@ -2848,11 +2897,16 @@ def _away_read(path: Path):
         why = _away_field(key, data[key])
         if why:
             return "unreadable", f"`{key}` {why}", None
+    if AWAY_CAP_KEY in data:  # optional, and the key table's last row, so it is checked last
+        why = _away_field(AWAY_CAP_KEY, data[AWAY_CAP_KEY], data["trickle"])
+        if why:
+            return "unreadable", f"`{AWAY_CAP_KEY}` {why}", None
     return "ok", None, data
 
 
-def _away_field(key, value):
-    """None when one of AWAY_KEYS holds a well-typed value, else what is wrong with it (away.md's key table)."""
+def _away_field(key, value, trickle=None):
+    """None when one of AWAY_KEYS, or AWAY_CAP_KEY (checked against the file's `trickle`), holds a well-typed value,
+    else what is wrong with it (away.md's key table)."""
     if key == "away":
         return None if isinstance(value, bool) else "is not a JSON boolean"
     if key in ("until", "written_at"):
@@ -2860,18 +2914,25 @@ def _away_field(key, value):
         return f"is {why}" if why else None
     if key == "morning":
         return None if isinstance(value, str) and MORNING_RE.match(value) else 'is not "HH:MM" (00:00 to 23:59)'
-    # trickle: a JSON integer of at least 1; a bool, a float, a string or 0 is refused (the Trickle is never 0)
-    return None if not isinstance(value, bool) and isinstance(value, int) and value >= 1 else \
-        "is not a JSON integer of at least 1"
+    # trickle and away_cap: a JSON integer of at least 1; a bool, a float, a string, null or 0 is refused (neither cap
+    # is ever 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return "is not a JSON integer of at least 1"
+    if key == AWAY_CAP_KEY and value <= trickle:  # the Away cap is always above the Trickle (ADR 0049)
+        return "is not above `trickle`"
+    return None
 
 
 def _away_state(now) -> dict:
-    """The Away state `next` reads (execute away.md § Reading it): {away, file, why, limit, until, morning}. `file` is
-    fresh, missing, stale or unreadable; `why` is null only when fresh. Anything but fresh reads not Away at
-    DEFAULT_TRICKLE, and a stale file's own `trickle` is ignored. Stale is any of: `until` <= now; now - `written_at`
-    over 24 h; `written_at` more than 5 minutes after now. `until` and `morning` are the file's, reported only when
-    fresh. The path is the home dir's at call time (a pinned HOME is the only override)."""
-    out = {"away": False, "file": "missing", "why": None, "limit": DEFAULT_TRICKLE, "until": None, "morning": None}
+    """The Away state `next` reads (execute away.md § Reading it): {away, file, why, limit, awayCap, until, morning}.
+    `file` is fresh, missing, stale or unreadable; `why` is null only when fresh. Anything but fresh reads not Away at
+    DEFAULT_TRICKLE with the Away cap at AWAY_CAP_DEFAULT, and a stale file's own `trickle` and `away_cap` are ignored.
+    Fresh, `awayCap` is the file's `away_cap`, else AWAY_CAP_DEFAULT lifted to `trickle` + 1 when the Trickle reaches
+    it (the Away cap is always above the Trickle). Stale is any of: `until` <= now; now - `written_at` over 24 h;
+    `written_at` more than 5 minutes after now. `until` and `morning` are the file's, reported only when fresh. The path
+    is the home dir's at call time (a pinned HOME is the only override)."""
+    out = {"away": False, "file": "missing", "why": None, "limit": DEFAULT_TRICKLE, "awayCap": AWAY_CAP_DEFAULT,
+           "until": None, "morning": None}
     file, why, data = _away_read(Path.home() / AWAY_FILE_REL)
     if data is None:
         out.update(file=file, why=why)
@@ -2887,8 +2948,15 @@ def _away_state(now) -> dict:
     if why:
         out.update(file="stale", why=why)
         return out
-    out.update(away=data["away"], file="fresh", limit=data["trickle"], until=data["until"], morning=data["morning"])
+    out.update(away=data["away"], file="fresh", limit=data["trickle"], until=data["until"], morning=data["morning"],
+               awayCap=data.get(AWAY_CAP_KEY, max(AWAY_CAP_DEFAULT, data["trickle"] + 1)))
     return out
+
+
+def _cap_in_force(away) -> dict:
+    """The Mac-wide cap an Away state puts in force (_away_state): {away, n, file}, n the Away cap while Away, else the
+    Trickle. slot-taken's `cap` (the Run record), so a Reflection reads each Slot against it (ADR 0032, 0049)."""
+    return {"away": away["away"], "n": away["awayCap"] if away["away"] else away["limit"], "file": away["file"]}
 
 
 def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index) -> dict:
@@ -2919,6 +2987,243 @@ def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index) -> dict:
         if n > 0:
             out[path.stem] = n
     return dict(sorted(out.items()))
+
+
+def _project(note):
+    """The first `projects:` link's slug, as written, or None (the rollout's project for the last starts' history and
+    the incomplete refusal's remedy)."""
+    return next((s for s in (_wikilink_slug(v) for v in note.get_list("projects")) if s), None)
+
+
+def _kind(note) -> str:
+    """A task's kind for the last starts (Chorus ADR 0099 d2's reading; execute away.md § The last starts): its note's
+    `scope:` as _scope reads it, else UNSCOPED_KIND."""
+    return _scope(note) or UNSCOPED_KIND
+
+
+def _morning_toward(away, now):
+    """M, the Morning the last starts look toward (execute away.md § The last starts), or None when they do not apply.
+    They apply only while a fresh file reads Away to the Morning: `until`, read in local wall-clock time (the Mac's
+    zone, as `morning` is), falls on `morning`'s HH:MM to the minute, and now < M <= now + LAST_START_HORIZON. M is that
+    `until` with its seconds cut: the same instant, at the local offset (`until.astimezone()`), so a daylight-saving
+    night needs no wall-clock arithmetic. A Lunch restart or a daytime Away block (an `until` off the Morning), a block
+    ending before or spanning it, and a Morning more than 24 h out are no night: None."""
+    if not away["away"] or away["file"] != "fresh":
+        return None
+    until = _away_stamp(away["until"])[0]
+    if until is None:
+        return None
+    u = until.astimezone()
+    if u.strftime("%H:%M") != away["morning"]:
+        return None
+    m = u.replace(second=0, microsecond=0)
+    return m if now < m <= now + LAST_START_HORIZON else None
+
+
+def _is_count(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _past_runs(project, rollout_path: Path, rollout_note, index, now) -> dict:
+    """{kind: [durationMs, ...]}: the past runs the last starts read (Chorus ADR 0099 d2's reading; execute away.md § The
+    last starts), from the folded call journals in every per-rollout `<stem>.jsonl` of the events dir, never a RESERVED
+    file. A file counts only when its rollout note names `project` first in its `projects:` (case ignored): this
+    rollout's own note for its own record, else the note `index` (_scan's: Archive/Rollouts included) holds for the
+    stem. A call counts when its latest terminal call-journal line reads `status: completed` and `mode: task`, with an
+    int durationMs >= 1 and an int startTime, its end (startTime + durationMs) in [now - LAST_START_HISTORY, now], a
+    run-bound line for its runId in the same file and none carrying `resumedFrom`; each runId counts once. Its kind is
+    its task note's (_kind, the note in `index`); a call with no note is skipped. No project, or an events dir, file or
+    line that cannot be read, reads fewer runs, so the fallback holds more, never less."""
+    out = {}
+    if not project:
+        return out
+    want = project.lower()
+    try:
+        rr = _run_record()
+        base = rr.events_dir()
+        names = sorted(os.listdir(base))
+    except Exception:
+        return out
+    this = rollout_path.stem.lower()
+    now_ms = now.timestamp() * 1000
+    lo_ms = now_ms - LAST_START_HISTORY.total_seconds() * 1000
+    seen = set()
+    for name in names:
+        stem = name[:-len(".jsonl")] if name.endswith(".jsonl") else ""
+        if not stem or stem in rr.RESERVED:
+            continue
+        note = rollout_note if stem == this else (index.get(stem) or (None, None))[1]
+        if note is None or (_project(note) or "").lower() != want:
+            continue
+        try:
+            lines, _bad = _record_lines(os.path.join(base, name))
+        except OSError:
+            continue
+        bound, resumed, final = set(), set(), {}
+        for d in lines:
+            run_id = d.get("runId")
+            if not isinstance(run_id, str):
+                continue
+            if d.get("kind") == "run-bound":
+                bound.add(run_id)
+                if d.get("resumedFrom") is not None:
+                    resumed.add(run_id)
+            elif d.get("kind") == "call-journal" and d.get("status") in rr.TERMINAL_STATUSES:
+                final[run_id] = d  # the latest terminal line per runId (run_record.py's reader rule)
+        for run_id, d in final.items():
+            if run_id in seen or run_id not in bound or run_id in resumed:
+                continue
+            ms, start, task = d.get("durationMs"), d.get("startTime"), d.get("task")
+            if d.get("status") != "completed" or d.get("mode") != "task" or not isinstance(task, str):
+                continue
+            if not (_is_count(ms) and ms >= 1 and _is_count(start) and lo_ms <= start + ms <= now_ms):
+                continue
+            entry = index.get(task.lower())
+            if entry is None:
+                continue
+            seen.add(run_id)
+            out.setdefault(_kind(entry[1]), []).append(ms)
+    return out
+
+
+def _usual(lengths):
+    """(median, k) of one kind's past run lengths in ms: the median is None under LAST_START_MIN_RUNS (no history)."""
+    k = len(lengths)
+    return (statistics.median(lengths) if k >= LAST_START_MIN_RUNS else None), k
+
+
+class _LastStarts:
+    """One `next` call's last starts (execute away.md § The last starts): M (`morning`, None when they do not apply),
+    the past runs read lazily once (`runs`, a zero-argument callable: only a start candidate reaching the check or a due
+    ran-past line reads them), and each kind this call's candidates read (`lastStarts.kinds`)."""
+
+    def __init__(self, morning, hhmm, now, runs):
+        self.morning, self.hhmm, self.now, self._runs, self._read, self.kinds = morning, hhmm, now, runs, None, {}
+
+    def reading(self, kind):
+        """(median ms or None, k) for `kind`, the past runs read on first use."""
+        if self._read is None:
+            self._read = self._runs()
+        return _usual(self._read.get(kind, []))
+
+    def fields(self, kind) -> dict:
+        """A night line's {scope, history, usualMinutes?}: the kind's reading now."""
+        median, k = self.reading(kind)
+        out = {"scope": kind, "history": k}
+        if median is not None:
+            out["usualMinutes"] = math.ceil(median / 60000)
+        return out
+
+    def hold(self, row):
+        """The `last start:` reason that holds this start, or None (it ends by M, or the last starts do not apply). A
+        start is held when now + its kind's usual length (with no history, LAST_START_FALLBACK) is past M, so one that
+        ends exactly at M starts. Quote-free, so it can ride a ROLLOUT-STATUS reason."""
+        if self.morning is None:
+            return None
+        kind = _kind(row["note"])
+        median, k = self.reading(kind)
+        self.kinds[kind] = {"usualMinutes": None if median is None else math.ceil(median / 60000), "history": k}
+        if median is None:
+            if self.now + LAST_START_FALLBACK <= self.morning:
+                return None
+            hours = int(LAST_START_FALLBACK.total_seconds() // 3600)
+            return (f"{LAST_START_PREFIX} no history for {kind} ({k} past runs, {LAST_START_MIN_RUNS} needed), none "
+                    f"starts in the {hours} h before the Morning at {self.hhmm}")
+        if self.now + timedelta(milliseconds=median) <= self.morning:
+            return None
+        return (f"{LAST_START_PREFIX} {kind} usually takes {math.ceil(median / 60000)} min (median of {k} past runs), "
+                f"past the Morning at {self.hhmm}")
+
+    def output(self) -> dict:
+        return {"morning": None if self.morning is None else self.morning.isoformat(),
+                "kinds": dict(sorted(self.kinds.items()))}
+
+
+def _utc_z(dt, ms=False) -> str:
+    """A night line's stamp: UTC with a `Z`, to the second (the `morning` key), or to the millisecond as run_record.py
+    stamps `ts` (slotTakenAt)."""
+    u = dt.astimezone(timezone.utc)
+    return u.strftime("%Y-%m-%dT%H:%M:%S") + (".%03dZ" % (u.microsecond // 1000) if ms else "Z")
+
+
+def _record_night(rollout):
+    """(state, why): this rollout's Run record replayed for the night record (execute away.md § The night record).
+    state is {markers: {M}, held: {(task, M)}, ran: {(task, M)}, slots: {task: [(taken, freed)]}}: the Morning of
+    each away-night, last-start-held and ran-past-morning line (aware datetimes; tasks lowercased as the writer stores
+    them), and each task's Slot intervals by _record_state's pairing rules plus ts: a slot-taken while that task's Slot
+    is open is the same Slot (the first ts kept), a slot-freed or a from-file `carried` closes it at its ts, one with
+    nothing open is ignored, and a Slot still open at the record's last line has freed None. A line whose ts or
+    morning does not parse is skipped. No file is an empty record; (None, why) when it cannot be read."""
+    try:
+        path = _run_record().record_path(rollout)
+    except Exception as e:
+        return None, f"cannot resolve the record: {e}"
+    st = {"markers": set(), "held": set(), "ran": set(), "slots": {}}
+    try:
+        lines, _bad = _record_lines(path)
+    except FileNotFoundError:
+        return st, None
+    except OSError as e:
+        return None, f"cannot read {path}: {e.strerror or e}"
+    open_slots = {}
+    for d in lines:
+        kind, task = d.get("kind"), d.get("task")
+        if kind in NIGHT_KINDS:
+            m = _away_stamp(d.get("morning"))[0]
+            if m is None:
+                continue
+            if kind == "away-night":
+                st["markers"].add(m)
+            elif isinstance(task, str):
+                st["held" if kind == "last-start-held" else "ran"].add((task, m))
+            continue
+        ts = _away_stamp(d.get("ts"))[0]
+        if ts is None or not isinstance(task, str):
+            continue
+        if kind == "slot-taken":
+            open_slots.setdefault(task, ts)
+        elif (kind == "slot-freed" or (kind == "carried" and d.get("rollout") == d.get("from"))) and task in open_slots:
+            st["slots"].setdefault(task, []).append((open_slots.pop(task), ts))
+    for task, taken in open_slots.items():
+        st["slots"].setdefault(task, []).append((taken, None))
+    return st, None
+
+
+def _night_record(rollout, last, holds, index, now, args):
+    """The night record's writes for one `next` call off --dry-run, after idle-slots (execute away.md § The night
+    record), each best-effort through _event and checked against this rollout's record (_record_night) so a rerun adds
+    nothing: one away-night {morning} per (rollout, M) while the last starts apply; one last-start-held {morning,
+    scope, history, usualMinutes?} per (task, M) for each final hold that reads `last start:` (after the git-env
+    override, so a git-env or pause hold writes none); and, for every marker whose M <= now, one ran-past-morning
+    {morning, slotTakenAt, scope, history, usualMinutes?} per (task, M) for each task whose Slot was open at M (taken
+    before it, not freed at or before it), read from the record's Slot intervals, never from notes, so a Morning the
+    lead missed is recorded at its next call. scope is the task note's kind (UNSCOPED_KIND with no note), history and
+    usualMinutes its reading now. An unreadable record writes no night line: one `run_record: warning: night record not
+    written: <why>` line while the last starts apply, else silence."""
+    st, why = _record_night(rollout)
+    morning = last.morning
+    if st is None:
+        if morning is not None:
+            print(f"run_record: warning: night record not written: {why}", file=sys.stderr)
+        return
+    if morning is not None:
+        mz = _utc_z(morning)
+        if morning not in st["markers"]:
+            _event(rollout, "away-night", None, {"morning": mz}, args)
+        for r, reason in sorted(holds, key=lambda h: _rank(h[0])):
+            if reason.startswith(LAST_START_PREFIX) and (r["slug"].lower(), morning) not in st["held"]:
+                _event(rollout, "last-start-held", r["slug"], {"morning": mz, **last.fields(_kind(r["note"]))}, args)
+    for m in sorted(st["markers"]):
+        if m > now:
+            continue
+        for task in sorted(st["slots"]):
+            taken = next((t for t, freed in st["slots"][task] if t < m and (freed is None or freed > m)), None)
+            if taken is None or (task, m) in st["ran"]:
+                continue
+            entry = index.get(task)
+            kind = _kind(entry[1]) if entry is not None else UNSCOPED_KIND
+            _event(rollout, "ran-past-morning", task,
+                   {"morning": _utc_z(m), "slotTakenAt": _utc_z(taken, ms=True), **last.fields(kind)}, args)
 
 
 # ---- next -------------------------------------------------------------------
@@ -2964,15 +3269,20 @@ def cmd_next(args) -> int:
     task depends on, directly or through a folded member (`merged_into:`), first, then the oldest `ready:`, then
     schedule order (_lane_key). An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
     while it stands nothing starts or restarts, every stalled or queued task is held (`git-env hold:
-    /thread:repair`) and `halt` is "git-env", ahead of every other verdict. The Trickle (Chorus ADR 0104; execute
-    away.md): once the refusals pass, the Away state file is read (_away_state; a stale or unreadable one prints one
-    AWAY_WARN line on stderr) and every other started parallel Rollout's running tasks are counted (_elsewhere_running).
-    Away, `slotLimit` is the ceiling; not Away, it is min(ceiling, max(0, Trickle - the count elsewhere)). Starts and the
-    head Solo's lone start stop at `slotLimit`, counting every in_progress row of this rollout, live or stalled, as the
-    count elsewhere does; a restart stops at the ceiling only, since every other lead already counts the task it takes
-    back. A running call is never stopped, so `slotsInUse` may exceed `slotLimit`. A row held for want of a Slot reads
-    `ceiling: …` once this rollout fills its ceiling, else `trickle: <trickle.running>/<Trickle> tasks running on this
-    Mac`, and a `trickle:` hold never lets the rollout halt."""
+    /thread:repair`) and `halt` is "git-env", ahead of every other verdict. The Trickle and the Away cap (Chorus ADR
+    0104; ADR 0049; execute away.md): once the refusals pass, the Away state file is read (_away_state; a stale or
+    unreadable one prints one AWAY_WARN line on stderr) and every other started parallel Rollout's running tasks are
+    counted (_elsewhere_running). `slotLimit` is min(ceiling, max(0, cap - the count elsewhere)), the cap the Trickle
+    not Away and the Away cap Away. Starts and the head Solo's lone start stop at `slotLimit`, counting every
+    in_progress row of this rollout, live or stalled, as the count elsewhere does; a restart stops at the ceiling only,
+    since every other lead already counts the task it takes back. A running call is never stopped, so `slotsInUse` may
+    exceed `slotLimit`. A row held for want of a Slot reads `ceiling: …` once this rollout fills its ceiling, else
+    `trickle: <trickle.running>/<Trickle> tasks running on this Mac` (not Away) or `away cap: <trickle.running>/<Away
+    cap> tasks running on this Mac` (Away), and neither hold ever lets the rollout halt. The last starts (Chorus ADR
+    0104 d4; execute away.md): while Away runs to the Morning (_morning_toward), a start or a head Solo's lone start
+    that has its Slot (under the Away cap's `slotLimit`) is held (`last start: …`, skipped, never a stop) when its
+    kind's usual length would end it past the Morning, `lastStarts` reports it, a `last start:` hold never lets the
+    rollout halt either, and off --dry-run the night record follows idle-slots (_night_record)."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -2991,7 +3301,7 @@ def cmd_next(args) -> int:
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     why = incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index)
     if why:
-        project = next((s for s in (_wikilink_slug(v) for v in rollout_note.get_list("projects")) if s), "<project>")
+        project = _project(rollout_note) or "<project>"
         print(f"ERROR: {rollout_path.stem} is incomplete: {why}: never run it as written; supersede it with "
               f"/thread:schedule {project} --regenerate", file=sys.stderr)
         return 1
@@ -2999,15 +3309,23 @@ def cmd_next(args) -> int:
     # lead now runs the rollout. Every refusal above returned first, so a refused call leaves it for the Stage.
     start_unattended = _start_unattended(rollout_note)
     start_cleared = False
-    # The Trickle (Chorus ADR 0104; execute away.md), read once the refusals pass, so a refused call never warns. A
-    # stale or unreadable file warns on every call, --dry-run included; a missing one is the documented default.
+    # The Trickle and the Away cap (Chorus ADR 0104; ADR 0049; execute away.md), read once the refusals pass, so a
+    # refused call never warns. A stale or unreadable file warns on every call, --dry-run included; a missing one is the
+    # documented default.
     away = _away_state(now)
     if away["file"] in ("stale", "unreadable"):
         print(f"{AWAY_WARN} {away['file']}: {away['why']} — read as not Away, Trickle {DEFAULT_TRICKLE}",
               file=sys.stderr)
+    # The last starts (Chorus ADR 0104 d4; execute away.md § The last starts): only while Away runs to the Morning. The
+    # history is read lazily, once, by the first start candidate that reaches the check or a due ran-past line.
+    last = _LastStarts(_morning_toward(away, now), away["morning"], now,
+                       lambda: _past_runs(_project(rollout_note), rollout_path, rollout_note, index, now))
     elsewhere = _elsewhere_running(rollout_path, tasks_dir, index)
     running_elsewhere = sum(elsewhere.values())
-    slot_limit = ceiling if away["away"] else min(ceiling, max(0, away["limit"] - running_elsewhere))
+    # One Mac-wide cap whose value depends on Away state: the Trickle while not Away, the Away cap while Away.
+    cap = _cap_in_force(away)["n"]
+    cap_prefix = AWAY_CAP_PREFIX if away["away"] else TRICKLE_PREFIX
+    slot_limit = min(ceiling, max(0, cap - running_elsewhere))
     race = _race_holds(rollout_note, [(r["path"], r["note"]) for r in rows])
     # race_held_lane: a held task whose `integrating:` stamp stands. The lead's RACE re-verify still holds the
     # lane on it, so it stays in flight for the drain, the solo rule, the overlap and the halt verdict; the
@@ -3044,11 +3362,13 @@ def cmd_next(args) -> int:
     paused = _scalar(rollout_note.get("paused")) or None
     pause_requested = _truthy_flag(rollout_note.get("pause_requested"))
     paused_now = False
-    # slot_held: rows held for want of a Slot, at the ceiling or (not Away) the Trickle; their reason is set below.
+    # slot_held: rows held for want of a Slot, at the ceiling or the Mac-wide cap (the Trickle, or Away the Away cap);
+    # their reason is set below.
     start, restart, holds, slot_held = [], [], [], []
     used = len(live)
-    # mine: this rollout's own use of the Trickle before this call's starts, every in_progress row, live or stalled, as
-    # every other lead counts it (_elsewhere_running). A new start fits only while mine + starts < slot_limit.
+    # mine: this rollout's own use of the Mac-wide cap before this call's starts, every in_progress row, live or
+    # stalled, as every other lead counts it (_elsewhere_running). A new start fits only while
+    # mine + starts < slot_limit.
     mine = len(in_progress)
 
     if paused or pause_requested:
@@ -3066,8 +3386,8 @@ def cmd_next(args) -> int:
         holds += [(r, reason) for r in stalled + queued]
     else:
         # A restart takes back a task every other lead already counts (its note stays in_progress), so only the
-        # ceiling bounds it, never the Trickle: bounding it there would let two respawned leads each wait on the other's
-        # stalled notes with nothing running (execute away.md § The Trickle).
+        # ceiling bounds it, never the Trickle or the Away cap: bounding it there would let two respawned leads each
+        # wait on the other's stalled notes with nothing running (execute away.md § The Trickle).
         for r in sorted(stalled, key=lambda r: (-r["weight"], r["rank"])):
             if used < ceiling:
                 restart.append(r)
@@ -3099,9 +3419,13 @@ def cmd_next(args) -> int:
                 if best["solo"]:
                     remaining.remove(best)
                     if not started and not start and mine + len(start) < slot_limit:
-                        start.append(best)
+                        why = last.hold(best)  # its Slot found: the last starts may still hold it
+                        if why:
+                            holds.append((best, why))
+                        else:
+                            start.append(best)
                     elif not started and not start:
-                        slot_held.append(best)  # nothing of this rollout runs: only the Trickle holds it
+                        slot_held.append(best)  # nothing of this rollout runs: only the Mac-wide cap holds it
                     else:
                         holds.append((best, f"solo: waits for {len(started) + len(start)} started task(s) "
                                             f"to merge or be set aside"))
@@ -3116,15 +3440,19 @@ def cmd_next(args) -> int:
                         else:
                             slot_held.append(r)
                     break
-                start.append(best)
                 remaining.remove(best)
+                why = last.hold(best)  # a Slot is found; a row the last starts hold is skipped, never a stop
+                if why:
+                    holds.append((best, why))
+                    continue
+                start.append(best)
                 in_flight.update(best["files"])
     in_use = used + len(start)
-    # Whichever binds first names the reason: the ceiling once this rollout fills it, else the Trickle, counted as
-    # `trickle.running` is (no quotes, so it can ride a ROLLOUT-STATUS reason=). A stalled row is only ever held at the
-    # ceiling, which it fills first.
+    # Whichever binds first names the reason: the ceiling once this rollout fills it, else the Mac-wide cap in force
+    # (`trickle:` not Away, `away cap:` Away), counted as `trickle.running` is (no quotes, so it can ride a
+    # ROLLOUT-STATUS reason=). A stalled row is only ever held at the ceiling, which it fills first.
     slot_why = (f"ceiling: {in_use}/{ceiling} slots in use" if in_use >= ceiling else
-                f"{TRICKLE_PREFIX} {running_elsewhere + mine + len(start)}/{away['limit']} tasks running on this Mac")
+                f"{cap_prefix} {running_elsewhere + mine + len(start)}/{cap} tasks running on this Mac")
     holds += [(r, slot_why) for r in slot_held]
     if not args.dry_run:
         start_cleared = _clear_start(rollout_note)
@@ -3142,13 +3470,17 @@ def cmd_next(args) -> int:
     counts = _counts(rows)
     halt = None
     sign_off = []
-    # A row the Trickle holds could start once the Mac has room, so it never halts the rollout (D6 of p28-1): the
-    # lead waits (§ 4.5 step 1.6) instead of reading stuck or awaiting-sign-off.
-    trickle_held = any(why.startswith(TRICKLE_PREFIX) for _, why in holds)
+    # A row the Trickle or the Away cap holds could start once the Mac has room, so it never halts the rollout (D6 of
+    # p28-1; ADR 0049: a meant wait, never Stalled): the lead waits (§ 4.5 step 1.6) instead of reading stuck or
+    # awaiting-sign-off. cap_held names the cap that holds a row: "trickle", "away-cap" or None.
+    cap_held = next(("away-cap" if why.startswith(AWAY_CAP_PREFIX) else "trickle" for _, why in holds
+                     if why.startswith((TRICKLE_PREFIX, AWAY_CAP_PREFIX))), None)
+    # Nor does a row the last starts hold: at the Morning the file reads not Away and the Trickle takes over.
+    last_start_held = any(why.startswith(LAST_START_PREFIX) for _, why in holds)
     if git_env:
         halt = "git-env"
     elif not start and not restart and not live and not awaiting and not integrating and not race_held_lane \
-            and not trickle_held:
+            and not cap_held and not last_start_held:
         if paused:
             halt = "paused"
         elif not in_n:
@@ -3164,9 +3496,12 @@ def cmd_next(args) -> int:
     free = ceiling - (used + len(start))
     if free > 0 and halt not in ("complete", "done", "empty") and not args.dry_run:
         reason = _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold,
-                              by_state.get("set-aside", []), trickle_held)
+                              by_state.get("set-aside", []), cap_held, last_start_held)
         _event(rollout_path.stem, "idle-slots", None,
                {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}, args)
+    # The night record (Chorus ADR 0104's Consequences; execute away.md § The night record), after idle-slots.
+    if not args.dry_run:
+        _night_record(rollout_path.stem, last, holds, index, now, args)
     slugs = lambda rs: [r["slug"] for r in rs]  # noqa: E731
     # The Integration queue's order (_lane_key); `awaiting` itself stays in rank order for everything above. A
     # dependency on a folded member waits on its combined unit (_fold_unit), as its hold reason already says.
@@ -3177,9 +3512,11 @@ def cmd_next(args) -> int:
         "slotsInUse": used,
         "slotLimit": slot_limit,
         "trickle": {"away": away["away"], "file": away["file"], "why": away["why"], "limit": away["limit"],
-                    "until": away["until"], "morning": away["morning"], "elsewhere": elsewhere,
-                    # The Trickle's count of the Mac after this call: the count elsewhere plus this rollout's own use.
+                    "awayCap": away["awayCap"], "until": away["until"], "morning": away["morning"],
+                    "elsewhere": elsewhere,
+                    # The Mac-wide cap's count after this call: the count elsewhere plus this rollout's own use.
                     "running": running_elsewhere + mine + len(start)},
+        "lastStarts": last.output(),
         "start": slugs(start),
         "restart": slugs(restart),
         "hold": [{"slug": r["slug"], "reason": why} for r, why in sorted(holds, key=lambda h: _rank(h[0]))],
@@ -3346,13 +3683,21 @@ def cmd_mark_started(args) -> int:
     remove `integrating:`. Consumes approve-gates' `gates_signed:` marker (p12-14): the restart that
     directly follows a sign-off says so, once, and no later restart does. Refuses a done, merged or
     dropped note. Arms the task window first (p26-3, _arm_gate): a failed arm writes nothing for that
-    note. Records slot-taken (p15-2), its start read before the markers are removed."""
+    note. Records slot-taken (p15-2), its start read before the markers are removed, with the Mac-wide cap in force
+    (p29-8)."""
     if (args.arm_repo is None) != (args.arm_default is None):
         print("ERROR: mark-started: --arm-repo <repoPath> and --arm-default <B> go together (p26-3); nothing written",
               file=sys.stderr)
         return 2
     now = _now(args)
     rollouts = {}
+    away = {}  # slot-taken's Away state (_record_slot_taken): read once per run, on first use, never on --dry-run
+
+    def away_once():
+        if "state" not in away:
+            away["state"] = _away_state(now)
+        return away["state"]
+
     worst = 0  # 3 an arm's trip or hold, 2 an arm failure or a flag refusal (D5)
     for slug, _path, note in _each_note(args):
         status = _status(note)
@@ -3392,7 +3737,7 @@ def cmd_mark_started(args) -> int:
             print(f"{slug}: descope restart (descoped {descoped}; {DESCOPE_ARMED_KEY}: cleared) — a block after this "
                   "restart asks Lachy")
         sys.stdout.flush()
-        _record_slot_taken(args, slug, note, rollout, start, rollouts)
+        _record_slot_taken(args, slug, note, rollout, start, rollouts, away_once)
     return max(worst, _finish(args, now))  # 3 > 2 > 1 (a refused note) > 0
 
 
@@ -4329,9 +4674,11 @@ def _rollout_note_read(args, rollout, cache):
     return cache[key]
 
 
-def _record_slot_taken(args, slug, note, rollout, start, cache):
+def _record_slot_taken(args, slug, note, rollout, start, cache, away_once):
     """mark-started's slot-taken. With no `rollout:`, no rollout note or no resolvable ceiling, one warning and
-    nothing recorded (a Slot with no ceiling cannot be read against it)."""
+    nothing recorded (a Slot with no ceiling cannot be read against it). `cap` is the Mac-wide cap in force
+    (_cap_in_force, p29-8): `away_once` reads the Away state at most once per verb run, silently (`next` prints its
+    WARN), and only here, so --dry-run and a warned note never read it."""
     def warn(why):
         print(f"run_record: warning: slot-taken for {slug} not recorded: {why}", file=sys.stderr)
 
@@ -4345,7 +4692,7 @@ def _record_slot_taken(args, slug, note, rollout, start, cache):
     settings, err = _slot_settings(note, rollout_note)
     if err:
         return warn(err)
-    fields = {"settings": settings, "start": start}
+    fields = {"settings": settings, "start": start, "cap": _cap_in_force(away_once())}
     state = _record_state(rollout)
     carried = state["carried"].get(slug.lower()) if state else None
     if carried:
@@ -4578,15 +4925,19 @@ def _review_verdict_events(args, rollout, slug, task, prior):
         _rv_warn(slug, f"not recorded: {type(e).__name__}: {e}")
 
 
-def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside, trickle_held) -> str:
-    """The idle-slots reason (the module docstring's table, first match). `trickle_held`: this call holds a queued row
-    on `trickle:` (a stalled row waits only on the ceiling)."""
+def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside, cap_held,
+                 last_start_held) -> str:
+    """The idle-slots reason (the module docstring's table, first match). `cap_held`: this call holds a queued row on
+    the Mac-wide cap, "trickle" (`trickle:`) or "away-cap" (`away cap:`), else None (a stalled row waits only on the
+    ceiling); `last_start_held`: one on `last start:`."""
     if git_env:
         return "hold-git-env"
     if paused or pause_requested:
         return "pause-drain"
-    if trickle_held:
-        return "hold-trickle"
+    if cap_held:
+        return "hold-away-cap" if cap_held == "away-cap" else "hold-trickle"
+    if last_start_held:
+        return "hold-last-start"
     starting = {id(r) for r in start}
     waiting = [r for r in queued if id(r) not in starting]
     waiting_ids = {id(r) for r in waiting}

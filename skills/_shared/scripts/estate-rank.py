@@ -9,7 +9,7 @@ holds, ranks, groups candidate runs with their Review load, orders the decision 
 yields the Unpark offers. It spawns nothing and asks nothing. python >= 3.9 with PyYAML. Called as:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan FILE|- --grades FILE
-        [--grades FILE]... [--today YYYY-MM-DD] [--vault PATH] [--compact]
+        [--grades FILE]... [--superseding PRIOR] [--today YYYY-MM-DD] [--vault PATH] [--compact]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py snooze <project> (--ready N | --clear)
         [--today YYYY-MM-DD] [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py unpark <project> [--vault PATH]
@@ -29,8 +29,8 @@ vault, PyYAML or a sibling script is missing.
 What it reuses. Loaded by path inside main(), so importing this file runs nothing (the contract test reads its
 constants that way): resolve-target.py (RT: dead_why), and through it next-action.py (RT.NA: Vault, resolve_project,
 Note with its edited and save, status_of, Refused, and the ODD_BREAKS, LOADER and yaml its edit reads by);
-estate-scan.py (ES: as_date, jsonable, STANDING_RANK and standing_of), so the estate pass keeps one frontmatter
-reader, one date reader and one status-to-standing rule.
+estate-scan.py (ES: as_date, jsonable, STANDING_RANK, standing_of and still_to_start), so the estate pass keeps one
+frontmatter reader, one date reader, one status-to-standing rule and one statement of § In flight's exception.
 
 The inputs:
 - The scan: estate-scan.py's schema 1. Read: tasks {slug, note, title, statusClass, inFlight, projects, due,
@@ -44,7 +44,11 @@ The inputs:
 
 Gradeable: a scan task with statusClass `active`, inFlight false and a live project. Its home is projects[0], mapped to
 the first scan project row of that name (a second row of the name is warned). The rest are `skipped`, the first reason
-that fits: `unhomed`, `in flight`, `hold`.
+that fits: `unhomed`, `in flight`, `hold`. The one exception, at schedule's Pre-flight on a supersede (schedule § 1.5,
+ADR 0047): with --superseding PRIOR, a task the scan marks inFlight is read as not in flight when ES.still_to_start
+holds for it (its status, as NA.status_of reads the row, `open`, and its `rollout:` naming PRIOR under slug_key's
+fold): a carried task still queued is graded, and holds its dependants by its grade; one that has started stays in
+flight. Without it (orient-all) the scan's inFlight stands.
 
 Validation. Invalid (listed with every error, never ranked): a grade outside GRADES (read case-insensitively, `-` and
 `_` as spaces) or a shape outside SHAPES; `decisions` that is not a list; a One call or Grill with no decision; a
@@ -221,7 +225,9 @@ def canon_grade(v):
 
 
 def slug_key(link):
-    """A dependency link or a graded slug, as the lower-case basename it names (`[[Work/Tasks/X|a]]` -> `x`)."""
+    """A dependency link or a graded slug, as the lower-case basename it names (`[[Work/Tasks/X|a]]` -> `x`).
+    estate-scan.py's _link_key is the same fold, written there for still_to_start; tests/estate-scan.test.mjs 18 pins
+    the two alike."""
     s = str(link).strip()
     if s.startswith("[[") and s.endswith("]]"):
         s = s[2:-2]
@@ -279,10 +285,11 @@ def read_grades(path):
 # ---- the ranking ---------------------------------------------------------------------------------------------------
 
 class Ranker:
-    def __init__(self, RT, ES, scan, today, vault_root, grade_files):
+    def __init__(self, RT, ES, scan, today, vault_root, grade_files, superseding=None):
         self.RT, self.ES, self.NA = RT, ES, RT.NA
         self.scan, self.today, self.vault_root = scan, today, vault_root
         self.grade_files = grade_files
+        self.superseding = superseding
         self.warnings = []
         self._vault = None
         self._reach = {}
@@ -309,19 +316,22 @@ class Ranker:
                           % (p["name"], first.get("note"), p.get("note")))
                 continue
             self.projects[p["name"]] = p
-        self.tasks, self.lower = {}, {}
+        self.tasks, self.lower, self.inflight = {}, {}, {}
         for t in self.scan["tasks"]:
             if not isinstance(t, dict) or not isinstance(t.get("slug"), str) or t["slug"] in self.tasks:
                 continue
             self.tasks[t["slug"]] = t
             self.lower.setdefault(t["slug"].lower(), t["slug"])
+            # The module docstring's Gradeable exception: a carried task still queued, at schedule's Pre-flight.
+            self.inflight[t["slug"]] = bool(t.get("inFlight")) and not ES.still_to_start(
+                self.NA.status_of(t), t.get("rollout"), self.superseding)
         self.skip, self.home = {}, {}
         for slug in sorted(self.tasks):
             t = self.tasks[slug]
             projects = [x for x in (t.get("projects") or []) if isinstance(x, str)]
             if not projects or projects[0] not in self.projects:
                 self.skip[slug] = "unhomed"
-            elif t.get("inFlight"):
+            elif self.inflight[slug]:
                 self.skip[slug] = "in flight"
             elif t.get("statusClass") != "active":
                 self.skip[slug] = "hold"
@@ -582,7 +592,7 @@ class Ranker:
         return out
 
     def hold_why(self, t, d, rows, memo, visiting):
-        if self.tasks[d].get("inFlight"):
+        if self.inflight[d]:
             return None
         if t in self.reach(d):
             return "cycle"
@@ -972,6 +982,7 @@ def parse(argv):
     r = sub.add_parser("rank", allow_abbrev=False)
     r.add_argument("--scan", required=True)
     r.add_argument("--grades", action="append", required=True)
+    r.add_argument("--superseding")
     r.add_argument("--today")
     r.add_argument("--vault")
     r.add_argument("--compact", action="store_true")
@@ -1018,7 +1029,7 @@ def main(argv):
     vroot = os.path.expanduser(vault)
     if not os.path.isdir(vroot):
         fail(3, "no vault at %s" % vroot)
-    out = Ranker(RT, ES, scan, today, vroot, grade_files).run()
+    out = Ranker(RT, ES, scan, today, vroot, grade_files, superseding=args.superseding).run()
     body = json.dumps(out, ensure_ascii=False, separators=(",", ":")) if args.compact else \
         json.dumps(out, ensure_ascii=False, indent=2)
     sys.stdout.buffer.write((body + "\n").encode("utf-8", "replace"))
