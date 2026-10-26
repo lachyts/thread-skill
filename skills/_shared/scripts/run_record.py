@@ -142,8 +142,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   idle-slots         reason (dependency | solo | pause-drain | queue-tail | awaiting-hand-back |
                      hold-merge | hold-git-env | hold-race | hold-trickle: a row waits on the machine-wide Trickle,
                      execute away.md | hold-away-cap: a row waits on the machine-wide Away cap, execute away.md |
-                     hold-last-start: a row the last starts hold toward the Morning, p28-2);
-                     free (int >= 0); settings (as slot-taken)
+                     hold-last-start: a row the last starts hold toward the Morning, p28-2 | hold-pr: a row waits
+                     on a PR's hold_until, vault-grammar § Hold until); free (int >= 0); settings (as slot-taken)
   away-night         morning (a UTC Z stamp, to the second: M, the Morning the last starts looked toward while Away
                      ran to it). p28-2, the night record (execute away.md § The night record): reconcile-rollout.py
                      `next` writes one per (rollout, M) on a call off --dry-run while the last starts apply, so a
@@ -772,7 +772,7 @@ KINDS = {
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
     "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
-                                           "hold-merge", "hold-git-env", "hold-race", "hold-trickle",
+                                           "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-trickle",
                                            "hold-away-cap", "hold-last-start"),
                            "free": _int(0), "settings": SETTINGS}, {}),
     # The night record (p28-2, Chorus ADR 0104's Consequences): reconcile-rollout.py `next` is its one writer.

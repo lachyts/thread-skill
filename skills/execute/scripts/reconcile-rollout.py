@@ -44,7 +44,7 @@ Subcommands:
               `ready:`, then schedule order. Each `setAside` entry is {slug, status, setAsideAt}, plus `needsHuman`
               (p16-3: the note's `## Needs you` question, normalised) only when the note holds one. `halt` is null
               while anything starts, restarts, runs, awaits Integration or integrates; otherwise the first of
-              "git-env", "paused", "empty", "complete" (or "done"), "awaiting-sign-off" and "stuck". With every
+              "git-env", "paused", "empty", "complete" (or "done"), "held", "awaiting-sign-off" and "stuck". With every
               task merged, `halt` is "complete" (run the completion ceremony), or "done" when the ceremony already
               ran through its archive move (p19-14: the rollout note reads `status: done` and sits in
               `Archive/Rollouts/`), so no entry runs it twice (the lead's `done` route runs only its last step,
@@ -69,6 +69,18 @@ Subcommands:
               ({morning, kinds}) follows `trickle`. While Away runs to the Morning, a start whose kind's usual
               length would end past it reads `last start: …` and is skipped, never a stop; a restart never does;
               while one is held, `halt` stays null. Off --dry-run, the night record's lines follow idle-slots.
+              A PR hold (Hold until, below; --gh-bin, default `gh`): `holdUntil` lists each hold this call read, the
+              rollout's first, then the tasks' in rank order, as {note, scope: rollout|task, pr, url, state, error, held,
+              waits: merge|you|null, cleared}, and is [] with gh never called when no note it reads carries one (every
+              other key byte-identical). A rollout hold that stands, unless a pause stands (it wins), starts and
+              restarts nothing and holds every stalled or queued task with its reason; git-env still wins over it. A
+              task's own hold is read only while no pause and no rollout hold stands, on a stalled task, a queued one
+              whose dependencies are met or one set aside at its run or a gate: it holds that task's new call (a held
+              Solo task holds nothing), and a held setAside entry gains `holdUntil: "<reason>"`. "held" is the halt when
+              nothing starts, restarts, runs, awaits Integration or integrates, no Trickle, Away-cap or last-starts
+              hold stands and any entry holds; a MERGED hold releases at once and, off --dry-run, is removed from its
+              note (`cleared`: true only once no `hold_until` stands on the note after the save, so a hold rewritten
+              meanwhile, which the compare-and-swap keeps, reads false).
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -210,7 +222,7 @@ Subcommands:
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
               pause_requested, pausedFor, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline, ladder,
-              gitEnvHold, tasks}; `pausedFor` is the rollout's `paused_for` (`sign-off` under await-sign-off's
+              gitEnvHold, holdUntil, tasks}; `pausedFor` is the rollout's `paused_for` (`sign-off` under await-sign-off's
               pause, ADR 0034), else null; `ceiling` is `parallel_ceiling`, or for a note without it the operator's
               rollout settings (rollout-settings.py for the Project root: rollouts.toml, then built-in 4),
               and null with `ceilingError` the reason when it is invalid or cannot be resolved (`next`
@@ -227,8 +239,9 @@ Subcommands:
               question also carries `needsHuman` (p16-3, normalised); no other task carries the key. A task
               set aside at Integration whose latest run opens a named marker (p27-4, integration_block) also
               carries `integrationBlock`: `conflict` (an Integration conflict, `integration: conflict
-              unresolved in …`) or `red` (`integration: verifier red: …`); the key is absent otherwise. Pure
-              read; no network.
+              unresolved in …`) or `red` (`integration: verifier red: …`); the key is absent otherwise. `holdUntil`
+              (p30-3, Hold until below), at the top level for the rollout and on every task row: its hold_until as
+              parsed, {pr, url, error}, or null; the PR's state is never read here. Pure read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -375,7 +388,12 @@ Subcommands:
               in both modes, writing nothing; with --to and a --from still open, the tasks already on --to
               count as carried too, so § 0's interrupted finish prints them after the dying run's own carry
               moved every task; a closed re-run's --from reads only its own), then `[no-change]`, `[written: <n>]`
-              or `(dry-run)`.
+              or `(dry-run)`. A --from carrying `hold_until` (Hold until, below) prints, after the carry, keep and
+              restamp lines and before the order lines, `hold_until pr=<pr> merged=<value>` or `hold_until unreadable:
+              <why>`; off --dry-run its lines are copied verbatim into --to (Note.insert_block, after `parallel_ceiling:`,
+              else `status:`) before any task write, only while --to has none (--to then counts in `[written: <n>]`),
+              and a different hold already on --to is kept with `WARN: carry: hold_until on <to> differs from
+              <from>'s; <to>'s kept` on stderr.
               --dry-run previews and needs no --to. Refuses (exit 2,
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
@@ -677,8 +695,10 @@ idle-slots reason, first match ("queued" is queued and not starting this call): 
 paused or pauseRequested -> pause-drain; any `trickle:` hold (only ever a queued row: a stalled row waits on the
 ceiling alone) -> hold-trickle, and any `away cap:` hold (the same, Away) -> hold-away-cap; any `last start:` hold
 (p28-2: a queued row or a head Solo the last starts hold toward the Morning) -> hold-last-start (after hold-away-cap,
-with which it can co-occur Away); the first held queued row's reason: `depends on` -> dependency,
-solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
+with which it can co-occur Away); the rollout's own hold_until standing -> hold-pr; the first held queued row's
+reason: `hold until` (a task's own hold_until) -> hold-pr, `depends on` -> dependency,
+solo or behind solo -> solo; any task's own hold_until standing (a stalled row's, or a row's set aside at its run or a
+gate) -> hold-pr; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
 row -> awaiting-hand-back (a known mislabel when every one is a blocked row step 1.2 relaunches as a seeded
 revise: its slot-taken start=revise splits the span seconds later; also while step 1.2's automatic retry waits out
 a quota or infra cool-down, p16-4, since `next` never reads the retry verdict: the task's auto-retry event ends
@@ -766,6 +786,23 @@ call), and with fewer than LAST_START_MIN_RUNS runs the length is LAST_START_FAL
 greedy loop goes on; restarts, hand-backs and seeded revises are never held; the hold never halts; a git-env or pause
 hold replaces it. Off --dry-run, _night_record writes the night record into the rollout's own Run record (NIGHT_KINDS),
 each line once, read from the record's Slot intervals (_record_night), never from notes.
+
+Hold until (p30-3; _hold_until, read by `next`, `status` and `carry`; the grammar is skills/_shared/vault-grammar.md §
+Hold until): a hold is frontmatter, never a sentence. A top-level `hold_until: {pr: <owner/repo>#<N>, merged: true}`
+(or the block form, `hold_until:` then indented `pr:` and `merged:` lines) on a parallel rollout note holds every start
+until that PR merges; on a task note it holds that task's new calls. `pr` is `owner/repo#N` (gh reads it as
+`https://github.com/owner/repo/pull/N`), a PR URL, or a bare `N` / quoted `"#N"` read in the rollout's Project root;
+`merged` defaults to true and reads no other value. An unknown or repeated key, an empty value, `null`, a missing pr or
+a bare number with no Project root directory is unreadable: it holds, waits on Lachy and makes no gh call (fail closed).
+`next` reads each hold's PR with `gh pr view <url|N> --json state,mergedAt,url` (_gh, 60 s, memoised per call): MERGED
+releases it and, off --dry-run, removes its lines (Note.remove_block, a compare-and-swap replayed under the note lock,
+so a hold rewritten meanwhile stays and reads `cleared: false`; each in a save of its own, the rollout's after its start
+stamp's save, which still fails the call; a failed clear is one stderr `WARN: hold_until on <note>: not cleared: <err>`
+and the hold still releases for this call); OPEN or a gh error holds and waits on the merge (the next call retries);
+CLOSED holds and waits on Lachy. Its reasons, all quote-free and opening
+HOLD_UNTIL_PREFIX: `hold until <pr> merges (<STATE>)`, `hold until <pr> merges (gh: <its line>)` and `hold until:
+hold_until unreadable (<why>)`. `status` reports each parsed hold, never its state. `carry` copies the prior's into the
+note that supersedes it. A serial note's `hold_until` is read by nothing: `next` refuses the note first.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
@@ -979,6 +1016,14 @@ PAUSE_LOG_SECTION = "## Pause log"
 # --dry-run, removes it, so the Stage never starts a second lead. Chorus's record, `started_unattended:`, is untouched.
 START_KEY = "start"
 START_UNATTENDED = "unattended"
+# The PR hold (p30-3; skills/_shared/vault-grammar.md § Hold until): a top-level `hold_until: {pr: <owner/repo>#<N>,
+# merged: true}` on a parallel rollout note holds every start until that PR merges, one on a task note holds that task's
+# new calls; `next` reads the PR through gh and, off --dry-run, removes a merged one. Every reason it gives opens with
+# HOLD_UNTIL_PREFIX and is quote-free, so it can ride a ROLLOUT-STATUS reason=.
+HOLD_KEY = "hold_until"
+HOLD_UNTIL_PREFIX = "hold until"
+HOLD_FIELDS = ("pr", "merged")
+HOLD_GH_TIMEOUT = 60   # seconds for each gh pr view `next` makes: one per held PR per call, memoised
 
 # Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
 # (engine flag approvedAtCeiling) persists the accumulated by-round rationale. An AUDIT RECORD, not an
@@ -1540,6 +1585,49 @@ class Note:
         """Delete the `key:` line from frontmatter entirely (idempotent — no-op if absent)."""
         pat = re.compile(rf"^{re.escape(key)}:\s*")
         self.filter_fm(lambda line: not pat.match(line))
+
+    def _fm_span(self, key: str):
+        """(i, j): the first top-level `key:` frontmatter line, i, through the indented, non-blank lines right after
+        it (a block mapping's or a continued value's), ending before j; None when the key is absent."""
+        pat = re.compile(rf"^{re.escape(key)}:")
+        for i, line in enumerate(self._fm):
+            if pat.match(line):
+                j = i + 1
+                while j < len(self._fm) and self._fm[j][:1] in (" ", "\t") and self._fm[j].strip():
+                    j += 1
+                return i, j
+        return None
+
+    def fm_block(self, key: str):
+        """The `key:` block's lines (_fm_span) as a list, or None when the key is absent."""
+        span = self._fm_span(key)
+        return None if span is None else self._fm[span[0]:span[1]]
+
+    @_journaled
+    def remove_block(self, key: str, expected):
+        """Remove the `key:` block (fm_block) only while it still equals `expected`, the lines a caller read: a
+        compare-and-swap, so save()'s replay on a fresh read keeps a block another writer rewrote meanwhile."""
+        span = self._fm_span(key)
+        if span is None or self._fm[span[0]:span[1]] != list(expected):
+            return
+        del self._fm[span[0]:span[1]]
+        self.dirty = True
+
+    @_journaled
+    def insert_block(self, key: str, lines, after=("status",)):
+        """Insert `lines` (a `key:` block, verbatim) after the first present anchor key, else at the end, only while
+        the note has no top-level `key:` line, so a replay on a fresh read never writes a second one."""
+        if self.fm_block(key) is not None:
+            return
+        for anchor in after:
+            apat = re.compile(rf"^{re.escape(anchor)}:")
+            for i, line in enumerate(self._fm):
+                if apat.match(line):
+                    self._fm[i + 1:i + 1] = list(lines)
+                    self.dirty = True
+                    return
+        self._fm.extend(lines)
+        self.dirty = True
 
     def has_heading(self, heading: str) -> bool:
         return any(line.strip() == heading for line in self._body.split("\n"))
@@ -3226,15 +3314,194 @@ def _night_record(rollout, last, holds, index, now, args):
                    {"morning": _utc_z(m), "slotTakenAt": _utc_z(taken, ms=True), **last.fields(kind)}, args)
 
 
+# ---- hold until (p30-3; vault-grammar § Hold until) ---------------------------------------------------------
+
+HOLD_REPO_PR_RE = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)$")
+HOLD_PAIR_RE = re.compile(r"^([^:\s][^:]*?)\s*:(?:[ \t]+(.*))?$")
+HOLD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+HOLD_NOT_MAPPING = "not a {pr, merged} mapping"
+
+
+def _yaml_uncomment(raw: str) -> str:
+    """A YAML value without its comment, stripped: a `#` at the start or after whitespace, outside quotes, opens one, so
+    an unquoted ` #7` is a comment and a quoted `"#7"` is a value."""
+    quote = None
+    for i, ch in enumerate(raw):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or raw[i - 1] in " \t"):
+            return raw[:i].strip()
+    return raw.strip()
+
+
+def _yaml_unquote(value: str) -> str:
+    v = value.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        return v[1:-1].strip()
+    return v
+
+
+def _flow_items(inner: str):
+    """A flow mapping's inside split at the commas outside quotes."""
+    parts, cur, quote = [], "", None
+    for ch in inner:
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "\"'":
+            quote = ch
+        elif ch == ",":
+            parts.append(cur)
+            cur = ""
+            continue
+        cur += ch
+    return parts + [cur]
+
+
+def _hold_until(note, project_root):
+    """A note's PR hold (vault-grammar § Hold until), or None when its frontmatter has no top-level `hold_until:` line.
+    Two forms read: the flow `hold_until: {pr: <pr>, merged: true}` (an optional trailing ` # comment`) and the block
+    form Obsidian re-serialises it to (`hold_until:` then indented `pr:` and `merged:` lines). `pr` is required:
+    `owner/repo#N` (read through its URL, `https://github.com/owner/repo/pull/N`: gh takes no `owner/repo#N`), a PR URL
+    (run as written) or a bare `N` / quoted `"#N"` (run in the Project root, `project_root`, as `resume` runs one).
+    `merged` is optional, true by default; any other value is unreadable, and so is an empty value, `null`, an unknown
+    or repeated key, a missing pr, a pr of no form above and a bare number with no Project root directory.
+    Returns {pr (as written, quotes stripped), url, error (why it is unreadable, from a fixed set, quote-free), argv
+    (gh's), cwd, key (the memo key: the canonical URL, or ("root", N)), merged, lines (the block, verbatim)}: a hold with
+    an error makes no gh call and never clears itself (fail closed)."""
+    lines = note.fm_block(HOLD_KEY)
+    if lines is None:
+        return None
+    out = {"pr": None, "url": None, "error": None, "argv": None, "cwd": None, "key": None, "merged": None,
+           "lines": lines}
+
+    def fail(why):
+        out["error"] = why
+        return out
+
+    value = _yaml_uncomment(lines[0][len(HOLD_KEY) + 1:])
+    if value.lower() in ("null", "~"):
+        return fail("null value")
+    if value:
+        text = " ".join([value] + [_yaml_uncomment(line) for line in lines[1:]]).strip()
+        if not (text.startswith("{") and text.endswith("}")):
+            return fail(HOLD_NOT_MAPPING)
+        items = [i.strip() for i in _flow_items(text[1:-1]) if i.strip()]
+    else:
+        items = [i for i in (_yaml_uncomment(line) for line in lines[1:]) if i]
+        if not items:
+            return fail("empty value")
+    fields = {}
+    for item in items:
+        m = HOLD_PAIR_RE.match(item)
+        if not m or not HOLD_NAME_RE.match(m.group(1)):
+            return fail(HOLD_NOT_MAPPING)
+        k = m.group(1)
+        if k not in HOLD_FIELDS:
+            return fail(f"unknown key {k}")
+        if k in fields:
+            return fail(f"duplicate key {k}")
+        fields[k] = _yaml_unquote(m.group(2) or "")
+    merged = fields.get("merged")
+    out["merged"] = "true" if merged is None else merged
+    pr = fields.get("pr") or ""
+    if not pr or pr.lower() in ("null", "~"):
+        return fail("no pr")
+    out["pr"] = pr
+    if merged is not None and merged.lower() != "true":
+        return fail("merged must be true")
+    view = ["--json", "state,mergedAt,url"]
+    repo_pr, url, num = HOLD_REPO_PR_RE.match(pr), PR_URL_RE.match(pr), PR_NUM_RE.match(pr)
+    if repo_pr:
+        canonical = f"https://github.com/{repo_pr.group(1)}/pull/{repo_pr.group(2)}"
+        out.update(url=canonical, argv=["pr", "view", canonical, *view], key=canonical)
+    elif url:
+        out.update(url=pr, argv=["pr", "view", pr, *view], key=f"https://github.com/{url.group(1)}/pull/{url.group(2)}")
+    elif num:
+        if project_root is None or not project_root.is_dir():
+            return fail("a bare PR number and no Project root")
+        out.update(argv=["pr", "view", num.group(1), *view], cwd=str(project_root), key=("root", num.group(1)))
+    else:
+        return fail("pr is not owner/repo#N, a PR URL or a PR number")
+    return out
+
+
+def _hold_public(hold):
+    """`status`'s view of a parsed hold: {pr, url, error}, or None."""
+    return None if hold is None else {"pr": hold["pr"], "url": hold["url"], "error": hold["error"]}
+
+
+def _resolve_holds(gh_bin, holds, memo):
+    """`next`'s reading of each parsed hold, [(entry, reason)] in order: `holds` is [(note stem, scope, hold)], and
+    `memo` (one per call of `next`) maps a hold's key to gh's answer, so one PR is read once whatever names it. entry is
+    {note, scope, pr, url, state, error, held, waits, cleared}: MERGED releases it (held false, waits null); OPEN or a gh
+    error or timeout (HOLD_GH_TIMEOUT) holds and waits on the merge, retried at the next call; CLOSED and an unreadable
+    hold (no gh call) hold and wait on Lachy (`you`). reason is the quote-free hold reason, None once released."""
+    out = []
+    for stem, scope, hold in holds:
+        state, url, err = None, hold["url"], hold["error"]
+        if err is None:
+            if hold["key"] not in memo:
+                raw, gh_err = _gh(gh_bin, hold["argv"], hold["cwd"], timeout=HOLD_GH_TIMEOUT)
+                info = {}
+                if gh_err is None:
+                    try:
+                        info = json.loads(raw)
+                    except ValueError:
+                        info = None
+                    if not isinstance(info, dict):
+                        info, gh_err = {}, "gh pr view printed no JSON"
+                    elif not str(info.get("state") or "").strip():
+                        gh_err = "gh pr view printed no state"
+                memo[hold["key"]] = (str(info.get("state") or "").strip().upper() or None,
+                                     info.get("url") if isinstance(info.get("url"), str) else None, gh_err)
+            state, gh_url, err = memo[hold["key"]]
+            url = url or gh_url
+        pr = (hold["pr"] or "").replace('"', "'")
+        if hold["error"] is not None:
+            reason, waits = f"{HOLD_UNTIL_PREFIX}: {HOLD_KEY} unreadable ({hold['error']})", "you"
+        elif err is not None:
+            line = err.replace('"', "'")   # quote-free, so it can ride a ROLLOUT-STATUS reason=
+            reason, waits = f"{HOLD_UNTIL_PREFIX} {pr} merges (gh: {line})", "merge"
+        elif state == "MERGED":
+            reason, waits = None, None
+        else:
+            reason, waits = f"{HOLD_UNTIL_PREFIX} {pr} merges ({state})", "you" if state == "CLOSED" else "merge"
+        out.append(({"note": stem, "scope": scope, "pr": hold["pr"], "url": url, "state": state, "error": err,
+                     "held": reason is not None, "waits": waits, "cleared": False}, reason))
+    return out
+
+
+def _clear_hold(note, hold, label, dry_run) -> bool:
+    """`next`'s clear of a merged hold off --dry-run: Note.remove_block (a compare-and-swap) and the note's own save.
+    True once saved with no `hold_until` left on the note: a hold another writer rewrote since the read stays (the
+    swap's replay keeps it), so it reads False and the lead never reports a standing hold cleared. An OSError is one
+    stderr WARN line and False, and the hold still releases for this call (the next call retries the clear)."""
+    if dry_run:
+        return False
+    note.remove_block(HOLD_KEY, hold["lines"])
+    try:
+        note.save()
+    except OSError as e:
+        print(f"WARN: {HOLD_KEY} on {label}: not cleared: {e}", file=sys.stderr)
+        return False
+    return note.fm_block(HOLD_KEY) is None
+
+
 # ---- next -------------------------------------------------------------------
 
-def _set_aside_entry(r) -> dict:
+def _set_aside_entry(r, hold_reason=None) -> dict:
     """One `next` setAside entry: slug, status, setAsideAt, and `needsHuman` (p16-3) only when the note holds an
-    open question, so an entry with none is byte-identical to the pre-p16-3 output."""
+    open question, so an entry with none is byte-identical to the pre-p16-3 output. `holdUntil` (p30-3): the reason of
+    the task's own hold_until, only while it holds (set aside at `run` or at a gate, read while no rollout hold stands)."""
     entry = {"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
     ask = needs_human(r["note"])
     if ask:
         entry["needsHuman"] = ask
+    if hold_reason:
+        entry["holdUntil"] = hold_reason
     return entry
 
 
@@ -3282,7 +3549,11 @@ def cmd_next(args) -> int:
     0104 d4; execute away.md): while Away runs to the Morning (_morning_toward), a start or a head Solo's lone start
     that has its Slot (under the Away cap's `slotLimit`) is held (`last start: …`, skipped, never a stop) when its
     kind's usual length would end it past the Morning, `lastStarts` reports it, a `last start:` hold never lets the
-    rollout halt either, and off --dry-run the night record follows idle-slots (_night_record)."""
+    rollout halt either, and off --dry-run the night record follows idle-slots (_night_record). A PR hold (_hold_until;
+    the module docstring's "Hold until") is read through `--gh-bin` (_resolve_holds, memoised for the call): the
+    rollout's whenever its note carries one, a task's only while no pause and no rollout hold stands and the task could
+    start or re-enter; a merged one is released and, off --dry-run, cleared (_clear_hold, Note.remove_block), and one
+    that stands holds as `holdUntil` says, with `halt: "held"` once nothing else moves."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -3326,6 +3597,15 @@ def cmd_next(args) -> int:
     cap = _cap_in_force(away)["n"]
     cap_prefix = AWAY_CAP_PREFIX if away["away"] else TRICKLE_PREFIX
     slot_limit = min(ceiling, max(0, cap - running_elsewhere))
+    # The PR hold (p30-3; vault-grammar § Hold until): the rollout's own hold_until, read once the refusals pass,
+    # whenever the key is present (gh, memoised for this call). No key anywhere: gh is never called.
+    root = _project_root(rollout_note)
+    hold_memo, hold_entries = {}, []
+    ro_hold = _hold_until(rollout_note, root)
+    ro_entry, ro_reason = None, None
+    if ro_hold is not None:
+        (ro_entry, ro_reason), = _resolve_holds(args.gh_bin, [(rollout_path.stem, "rollout", ro_hold)], hold_memo)
+        hold_entries.append(ro_entry)
     race = _race_holds(rollout_note, [(r["path"], r["note"]) for r in rows])
     # race_held_lane: a held task whose `integrating:` stamp stands. The lead's RACE re-verify still holds the
     # lane on it, so it stays in flight for the drain, the solo rule, the overlap and the halt verdict; the
@@ -3362,6 +3642,23 @@ def cmd_next(args) -> int:
     paused = _scalar(rollout_note.get("paused")) or None
     pause_requested = _truthy_flag(rollout_note.get("pause_requested"))
     paused_now = False
+    # A task's own hold_until is read only while no pause and no rollout hold stands, and only on a task this call
+    # could start or re-enter: a stalled one, a queued one whose dependencies are met (a dependency reason wins and costs
+    # no gh call), or one set aside at its run or at a gate. task_held: lowercased slug -> its hold reason.
+    ro_held = ro_entry is not None and ro_entry["held"]
+    task_held, task_clears = {}, []
+    if not (paused or pause_requested) and not ro_held:
+        readers = stalled + [r for r in queued if not _unsatisfied(r, index)] + \
+            [r for r in by_state.get("set-aside", []) if r["setAsideAt"] in ("run", "gate")]
+        parsed = [(r, _hold_until(r["note"], root)) for r in sorted(readers, key=_rank)]
+        parsed = [(r, h) for r, h in parsed if h is not None]
+        resolved = _resolve_holds(args.gh_bin, [(r["slug"], "task", h) for r, h in parsed], hold_memo)
+        for (r, h), (entry, reason) in zip(parsed, resolved):
+            hold_entries.append(entry)
+            if reason is not None:
+                task_held[r["slug"].lower()] = reason
+            elif entry["state"] == "MERGED":
+                task_clears.append((r, h, entry))
     # slot_held: rows held for want of a Slot, at the ceiling or the Mac-wide cap (the Trickle, or Away the Away cap);
     # their reason is set below.
     start, restart, holds, slot_held = [], [], [], []
@@ -3389,7 +3686,9 @@ def cmd_next(args) -> int:
         # ceiling bounds it, never the Trickle or the Away cap: bounding it there would let two respawned leads each
         # wait on the other's stalled notes with nothing running (execute away.md § The Trickle).
         for r in sorted(stalled, key=lambda r: (-r["weight"], r["rank"])):
-            if used < ceiling:
+            if r["slug"].lower() in task_held:
+                holds.append((r, task_held[r["slug"].lower()]))  # its own hold_until: never restarted
+            elif used < ceiling:
                 restart.append(r)
                 used += 1
             else:
@@ -3400,6 +3699,8 @@ def cmd_next(args) -> int:
             unsat = _unsatisfied(r, index)
             if unsat:
                 holds.append((r, "; ".join(unsat)))
+            elif r["slug"].lower() in task_held:
+                holds.append((r, task_held[r["slug"].lower()]))  # no candidate: a held Solo task holds nothing
             else:
                 candidates.append(r)
         solo_started = next((r for r in sorted(started, key=_rank) if r["solo"]), None)
@@ -3454,9 +3755,22 @@ def cmd_next(args) -> int:
     slot_why = (f"ceiling: {in_use}/{ceiling} slots in use" if in_use >= ceiling else
                 f"{cap_prefix} {running_elsewhere + mine + len(start)}/{cap} tasks running on this Mac")
     holds += [(r, slot_why) for r in slot_held]
+    # A rollout hold that stands (vault-grammar § Hold until) holds the whole queue, after the pause (a pause wins) and
+    # before the git-env override (git-env wins): nothing starts or restarts, and every stalled or queued task waits on
+    # it, its dependency, Solo and Slot reasons replaced. Live calls, Integration and set-asides carry on as they are.
+    if ro_held and not (paused or pause_requested):
+        start, restart = [], []
+        used = len(live)
+        holds = [(r, ro_reason) for r in stalled + queued]
     if not args.dry_run:
         start_cleared = _clear_start(rollout_note)
         rollout_note.save()
+    # A merged rollout hold is removed in a save of its own, after the start stamp's: that save still fails the call
+    # (exit 1, the stamp left for the Stage), while a failed clear only warns and the hold still releases for this call.
+    if ro_entry is not None and ro_entry["state"] == "MERGED":
+        ro_entry["cleared"] = _clear_hold(rollout_note, ro_hold, rollout_path.stem, args.dry_run)
+    for r, h, entry in task_clears:
+        entry["cleared"] = _clear_hold(r["note"], h, r["slug"], args.dry_run)
 
     # An unacked git-env trip (execute § 4.5 *Git-env canary*) holds the whole queue until /thread:repair records
     # Lachy's ack: nothing starts or restarts, every stalled or queued task is held, and the halt is "git-env",
@@ -3487,6 +3801,11 @@ def cmd_next(args) -> int:
             halt = "empty"
         elif counts["merged"] == counts["total"]:
             halt = "done" if _ceremony_done(rollout_path, rollout_note) else "complete"
+        elif any(e["held"] for e in hold_entries):
+            # A PR hold (vault-grammar § Hold until) explains the idle queue: the lead waits on the merge, or puts a
+            # CLOSED or unreadable hold to Lachy (execute § 4.5 step 1.5), never reading it as stuck. Ahead of
+            # awaiting-sign-off: under a rollout hold the lead's standing approval is skipped (step 1.2).
+            halt = "held"
         else:
             # ADR 0034: a gate alone never halts `stuck`. When every unlanded task waits only on a gate (W), the
             # verdict is awaiting-sign-off: execute's step 5 runs its sign-off form and the rollout closes.
@@ -3496,7 +3815,7 @@ def cmd_next(args) -> int:
     free = ceiling - (used + len(start))
     if free > 0 and halt not in ("complete", "done", "empty") and not args.dry_run:
         reason = _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold,
-                              by_state.get("set-aside", []), cap_held, last_start_held)
+                              by_state.get("set-aside", []), cap_held, last_start_held, ro_held, bool(task_held))
         _event(rollout_path.stem, "idle-slots", None,
                {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}, args)
     # The night record (Chorus ADR 0104's Consequences; execute away.md § The night record), after idle-slots.
@@ -3523,9 +3842,11 @@ def cmd_next(args) -> int:
         "running": slugs(live),
         "awaitingIntegration": slugs(sorted(awaiting, key=lambda r: _lane_key(r, waited))),
         "integrating": slugs(integrating),
-        "setAside": [_set_aside_entry(r) for r in by_state.get("set-aside", [])],
+        "setAside": [_set_aside_entry(r, task_held.get(r["slug"].lower())) for r in by_state.get("set-aside", [])],
         "raceHold": race_hold,
         "gitEnvHold": git_env,
+        # The PR holds this call read (vault-grammar § Hold until): the rollout's first, then the tasks' in rank order.
+        "holdUntil": hold_entries,
         "paused": paused,
         "pauseRequested": pause_requested,
         "pausedNow": paused_now,
@@ -3568,7 +3889,8 @@ def _awaits_sign_off(rollout_path: Path, rollout_note, tasks_dir: Path):
     """`next`'s awaiting-sign-off verdict, read-only, as `next` with no --running and any pause ignored would give it:
     no git-env hold; nothing running (every in_progress note counts as live), awaiting Integration or integrating (a
     race-held lane included); no queued task free to start; then _sign_off_wait. Returns (W, rows): W [] when the queue
-    is anything else. Read by await-sign-off and clear-pause; it writes nothing."""
+    is anything else. Read by await-sign-off and clear-pause; it writes nothing. It reads no hold_until and calls no gh
+    (p30-3): `next` halts "held" ahead of awaiting-sign-off, so the lead never reaches await-sign-off on a held rollout."""
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     if _git_env_hold(rollout_note):
         return [], rows
@@ -3944,10 +4266,11 @@ def cmd_log_integration(args) -> int:
 
 # ---- resume (p6-8) ------------------------------------------------------------------
 
-def _gh(gh_bin, argv, cwd):
-    """(stdout, error) for one gh call; error is None on success."""
+def _gh(gh_bin, argv, cwd, timeout=120):
+    """(stdout, error) for one gh call; error is None on success. `timeout` in seconds (`next`'s hold reads pass
+    HOLD_GH_TIMEOUT)."""
     try:
-        p = subprocess.run([gh_bin, *argv], cwd=cwd, capture_output=True, text=True, timeout=120)
+        p = subprocess.run([gh_bin, *argv], cwd=cwd, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as e:
         return "", f"{gh_bin}: {e}"
     if p.returncode != 0:
@@ -4072,6 +4395,7 @@ def cmd_status(args) -> int:
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     counts = _counts(rows)
     timeline = _timeline(rows, counts, ceiling, now)
+    root = _project_root(rollout_note)   # a bare hold_until number reads against it (no gh: status is a pure read)
     # The operator's ladder (one local file read, no network): each task's `rung:` stamp, and its drift when a
     # readable ladder lacks it. Drift is scoped to the unlanded rows (CARRIED_STATES): a merged, folded or other
     # row keeps the rung it reached as a record, and an edit to the ladder since is no drift. A refused ladder
@@ -4100,6 +4424,8 @@ def cmd_status(args) -> int:
             "blockerSummary": _blocker_summary(r["note"]),
             "rung": _scalar(r["note"].get("rung")) or None,
             "rungDrift": rung_drift(r),
+            # p30-3: the task's own hold_until as parsed, {pr, url, error}, whatever its state, or null (no gh call).
+            "holdUntil": _hold_public(_hold_until(r["note"], root)),
         }
         # p16-3: the open question, only on a set-aside task whose note holds one (the key is absent otherwise).
         ask = needs_human(r["note"]) if r["state"] == "set-aside" else ""
@@ -4145,6 +4471,9 @@ def cmd_status(args) -> int:
         # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*): [] when none. Vault-only, so
         # status § 3's Git-env trip flag holds offline too.
         "gitEnvHold": _git_env_hold(rollout_note),
+        # The rollout's own hold_until (p30-3; vault-grammar § Hold until) as parsed, {pr, url, error}, or null. Only
+        # `next` reads its PR (gh) and clears it, so /thread:status reads the state live itself (status § 3).
+        "holdUntil": _hold_public(_hold_until(rollout_note, root)),
         "tasks": tasks,
     }
     print(json.dumps(out, indent=2))
@@ -4926,10 +5255,11 @@ def _review_verdict_events(args, rollout, slug, task, prior):
 
 
 def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside, cap_held,
-                 last_start_held) -> str:
+                 last_start_held, pr_held=False, task_pr_held=False) -> str:
     """The idle-slots reason (the module docstring's table, first match). `cap_held`: this call holds a queued row on
     the Mac-wide cap, "trickle" (`trickle:`) or "away-cap" (`away cap:`), else None (a stalled row waits only on the
-    ceiling); `last_start_held`: one on `last start:`."""
+    ceiling); `last_start_held`: one on `last start:`. `pr_held`: the rollout's own hold_until stands (p30-3).
+    `task_pr_held`: a task's own hold_until stands, on a queued, stalled or set-aside (at run or a gate) row."""
     if git_env:
         return "hold-git-env"
     if paused or pause_requested:
@@ -4938,16 +5268,22 @@ def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_ho
         return "hold-away-cap" if cap_held == "away-cap" else "hold-trickle"
     if last_start_held:
         return "hold-last-start"
+    if pr_held:
+        return "hold-pr"
     starting = {id(r) for r in start}
     waiting = [r for r in queued if id(r) not in starting]
     waiting_ids = {id(r) for r in waiting}
     held = sorted(((r, why) for r, why in holds if id(r) in waiting_ids), key=lambda h: _rank(h[0]))
     if held:
         why = held[0][1]
+        if why.startswith(HOLD_UNTIL_PREFIX):
+            return "hold-pr"
         if why.startswith("depends on"):
             return "dependency"
         if why.startswith("solo") or why.startswith("behind solo"):
             return "solo"
+    if task_pr_held:
+        return "hold-pr"   # a stalled or set-aside task's own hold: it, not the queue's tail, keeps the Slot idle
     if not waiting:
         if any(h["kind"] == "RACE" for h in race_hold):
             return "hold-race"
@@ -6530,6 +6866,12 @@ def cmd_carry(args) -> int:
         if carried and (plan["rung"] == "top" or plan["drop"]):
             rung = top if plan["rung"] == "top" else plan["rung"]
             print(f"restamp {path.stem} rung={rung} drop={','.join(plan['drop']) or '-'}")
+    # The prior's own PR hold (p30-3; vault-grammar § Hold until), named with the parser `next` reads it by: a hold kept
+    # only as prose was lost in a regenerate (Q50), so the carry copies it below. Printed in both modes.
+    src_hold = _hold_until(src_note, _project_root(src_note))
+    if src_hold is not None:
+        print(f"{HOLD_KEY} unreadable: {src_hold['error']}" if src_hold["error"] else
+              f"{HOLD_KEY} pr={src_hold['pr']} merged={src_hold['merged']}")
     # The order hints read --from's prose against its carried tasks and, while --from is still open, against the
     # tasks already on --to: an interrupted supersede whose own carry ran before it died (§ 0's finish) left none
     # on --from, and this is the only run that reads that prose. A closed re-run's step 7 has confirmed them.
@@ -6546,6 +6888,21 @@ def cmd_carry(args) -> int:
         print("(dry-run)")
         return 0
     written = 0
+    # The hold first, before any task write: its lines verbatim (block form included, an unreadable one too, so it still
+    # fails closed) after `parallel_ceiling:`, else `status:`, only while --to has none (Note.insert_block); an identical
+    # one is left, a different one kept with a WARN. An interrupted re-run finds it there.
+    if src_hold is not None:
+        dst_lines = dst_note.fm_block(HOLD_KEY)
+        if dst_lines is None:
+            dst_note.insert_block(HOLD_KEY, src_hold["lines"], after=("parallel_ceiling", "status"))
+            try:
+                dst_note.save()
+            except OSError as e:
+                print(f"ERROR: carry: {dst.stem}: cannot write {dst}: {e} (no note carried yet)", file=sys.stderr)
+                return 1
+            written += 1
+        elif dst_lines != src_hold["lines"]:
+            print(f"WARN: carry: {HOLD_KEY} on {dst.stem} differs from {src.stem}'s; {dst.stem}'s kept", file=sys.stderr)
     for path, note, state, carried, plan in rows:
         if not carried:
             continue
@@ -7771,6 +8128,7 @@ def main() -> int:
                     help="comma-separated slugs whose task calls are live (default: every in_progress note); "
                          "any other in_progress note is stalled and restarts")
     nx.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    nx.add_argument("--gh-bin", default="gh", help="the gh executable a hold_until's PR is read through (tests pass a stub)")
     nx.add_argument("--dry-run", action="store_true",
                     help="write nothing (a drained pause is reported, not stamped; a start stamp is reported, not cleared)")
     nx.set_defaults(func=cmd_next)

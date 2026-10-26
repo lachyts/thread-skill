@@ -254,6 +254,17 @@ test('idle-slots (p29-8): a hold-away-cap reason is accepted; an unknown reason 
   assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
 })
 
+test('idle-slots (p30-3): a hold-pr reason (a row waits on a hold_until PR) is accepted; hold-until is refused', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-pr', free: 2, settings: SETTINGS })], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.equal(l.reason, 'hold-pr')
+  assert.equal(l.free, 2)
+  const r = cli(home, ['emit', '--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-until', free: 2, settings: SETTINGS })], { env: EV(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+})
+
 test('slot-taken (p29-8): the cap in force is accepted; a malformed cap is refused, nothing written', (t) => {
   const home = tmpHome(t)
   const cap = { away: true, n: 4, file: 'fresh' }

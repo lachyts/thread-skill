@@ -14,7 +14,8 @@
 // loop entry, where that log lives in the rollout note, the turn
 // ending `waiting`, the report's `Needs you:` block, the answers' existing routes, § 3.7's and § 7's sign-off,
 // the § 8 guardrail and the Don't, CONTEXT.md's glossary entry, and no other ask site outside § 6.5, § 8 and the
-// Don'ts but the exact exemptions below.
+// Don'ts but the exact exemptions below. p30-3 adds (f): a PR hold (`next`'s `holdUntil`) that waits on Lachy, an item
+// on every turn whatever the halt, never also (e).
 //
 // A separate file from execute-queue.test.mjs (p12-9's rule count stays its own), the same shape as
 // execute-signed-gate.test.mjs: every rule lives in one function, checkNeedsYou(skill, context), that returns
@@ -113,6 +114,7 @@ function checkNeedsYou(skill, context = realContext) {
   const kindB = kind(items, '- (b) **An undecided RACE or UNVERIFIED**')
   const kindC = kind(items, '- (c) **A set-aside only a person moves on**')
   const kindE = kind(items, '- (e) **Any other § 7 halt**')
+  const kindF = kind(items, '- (f) **A PR hold that waits on Lachy**')
   const s37 = collapse(section(skill, S37) ?? '')
   const s45raw = section(skill, S45) ?? ''
   const s6raw = section(skill, S6) ?? ''
@@ -358,6 +360,24 @@ function checkNeedsYou(skill, context = realContext) {
     fails.push('answered-items')
   }
 
+  // hold-until (p30-3; vault-grammar § Hold until): every `holdUntil` entry that holds and waits on Lachy (a CLOSED PR,
+  // an unreadable hold) is an (f) item on every turn, whatever the halt, with fixed item text and act, so the dedupe
+  // holds; § 6.5's lead-in derives it from `next`'s `holdUntil`, step 1.1 names it, (e) excludes the hold_until halt (one
+  // item, one push), and (c)'s null-humanFix entries wait for the release under a PR hold, as for the reinstate under a
+  // pause.
+  const step11 = collapse(s45raw.split('\n').find((l) => /^ {3}1\. Run `python3/.test(l)) ?? '')
+  if (!kindF.includes('every `holdUntil` entry with `held: true` and `waits: you`, on every turn, whatever the halt') ||
+    !kindF.includes('`[[<note>]] hold_until needs you: <pr> closed unmerged` for a CLOSED PR') ||
+    !kindF.includes('`[[<note>]] hold_until needs you: unreadable` for an unreadable hold') ||
+    !kindF.includes('A step 1.5 halt on it is this item, never (e), so it is one item with one push') ||
+    !kindF.includes('Act `remove or fix hold_until on [[<note>]]`') ||
+    !items.includes("this turn's `next` output (its `setAside` entries, `raceHold` and `holdUntil`;") ||
+    !kindE.includes('not a hold_until halt, which is (f)') ||
+    !kindC.includes('and under a PR hold (step 1.2) it waits for the release') ||
+    !step11.includes('is an (f) needs-you item on this turn (§ 6.5), whatever the halt')) {
+    fails.push('hold-until')
+  }
+
   // glossary: CONTEXT.md defines the term, with its block, its log, § 6.5 and an Avoid list, so later tasks reuse it,
   // and tells the rollout note's `## Needs-you log` (the lead's push record) apart from the task note's
   // `## Needs you` (p16-3, the engine's question), two near-identical section names; it names the ntfy fallback and
@@ -401,7 +421,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
       'the reviser\'s needs-human exit'],
     [engine, "needsHuman: status === 'review' ? '' : askOf(norm),", 'the row\'s needsHuman'],
     [reconcile, 'entry["needsHuman"] = ask', '`next`\'s setAside entry key'],
-    [reconcile, '"setAside": [_set_aside_entry(r) for r in by_state.get("set-aside", [])]', '`next`\'s setAside entries'],
+    [reconcile, '"setAside": [_set_aside_entry(r, task_held.get(r["slug"].lower())) for r in by_state.get("set-aside", [])]', '`next`\'s setAside entries'],
     [engine, "'plan not approved after '", 'plan-loop budget run out'],
     [engine, '`plan round budget exhausted without a verdict', 'plan-loop guard'],
     [engine, "'transient infrastructure failure — ", 'TRANSIENT_DIAGNOSIS'],
@@ -428,7 +448,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
 
 const RULES = ['no-ask-in-flight', 'push-dedupe', 'ntfy-fallback', 'not-sent', 'push-retry', 'kinds', 'turn-waiting', 'report-block', 'sign-off',
   'guardrails', 'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers',
-  'answered-items', 'glossary']
+  'answered-items', 'glossary', 'hold-until']
 const CONTROLLED = new Set()
 
 // Replaces the one occurrence of `from`; a control whose target is missing or ambiguous fails its setup.
@@ -627,7 +647,18 @@ test('control: CONTEXT.md without the entry, or without its Avoid list, fails gl
   only(real, 'glossary', 'the bounded retry removed', edit(realContext, 'retried at most once more, at the next loop entry', 'retried'))
 })
 
-test('the rules are all named (19) and each has a control', () => {
-  assert.equal(RULES.length, 19)
+test('control: (f) without its item, its every-turn rule or its act, or its sites without it, fails hold-until', () => {
+  only(edit(real, '`[[<note>]] hold_until needs you: <pr> closed unmerged` for a CLOSED PR, or', 'a CLOSED PR, or'), 'hold-until', 'no CLOSED item text')
+  only(edit(real, 'and `waits: you`, on every turn, whatever the halt:', 'and `waits: you`, at a halt:'), 'hold-until', 'only at a halt')
+  only(edit(real, 'Act `remove or fix hold_until on [[<note>]]`', 'Act `see /thread:status`'), 'hold-until', 'another act')
+  only(edit(real, ' A step 1.5 halt on it is this item, never (e), so it is one item with one push.', ''), 'hold-until', 'also (e)')
+  only(edit(real, '(its `setAside` entries, `raceHold` and `holdUntil`;', '(its `setAside` entries and `raceHold`;'), 'hold-until', 'lead-in without holdUntil')
+  only(edit(real, '; not a hold_until halt, which is (f)', ''), 'hold-until', '(e) without its exclusion')
+  only(edit(real, ', and under a PR hold (step 1.2) it waits for the release', ''), 'hold-until', '(c) without the release')
+  only(edit(real, 'is an (f) needs-you item on this turn (§ 6.5), whatever the halt', 'is reported'), 'hold-until', 'step 1.1 without (f)')
+})
+
+test('the rules are all named (20) and each has a control', () => {
+  assert.equal(RULES.length, 20)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

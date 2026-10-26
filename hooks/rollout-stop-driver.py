@@ -15,6 +15,9 @@ falling back to a transcript scan for history, and:
   waiting  -> allow (a task call, an integrate call, a background Integration
               command or a merge hold is in flight, or a retry cool-down,
               quota or infra, is pending (execute §4.5 step 1.5, ADR 0033),
+              or a PR hold waits on its merge (`next` reports `halt: held`,
+              reason="held until …", execute §4.5 step 1.5, vault-grammar
+              § Hold until),
               or a Trickle wait stands (`next` holds a task on the machine-wide
               Trickle, execute §4.5 step 1.6, Chorus ADR 0104) or an Away-cap
               wait does (on the machine-wide Away cap while Lachy is Away,
@@ -212,7 +215,8 @@ def main():
             "with the correct line: "
             f"`ROLLOUT-STATUS: {slug} merged=<K>/{total} running=<R> state=waiting` while a call, a "
             "background Integration command or a merge hold is in flight, a retry cool-down is pending "
-            "(with its reason=\"…\", §4.5 step 1.5) or a Trickle wait stands (`next` holds a task on the "
+            "(with its reason=\"…\", §4.5 step 1.5), a PR hold waits on its merge (`next` reports `halt: held`, "
+            "with its reason=\"held until …\", §4.5 step 1.5) or a Trickle wait stands (`next` holds a task on the "
             "Trickle, with its reason=\"trickle: …\", §4.5 step 1.6) or an Away-cap wait does (on the Away cap, "
             "with its reason=\"away cap: …\"), or a last-starts wait stands (`next` holds a "
             "task on the last starts, with its reason=\"last start: …\", §4.5 step 1.6), state=halted with "
