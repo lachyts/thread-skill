@@ -162,7 +162,8 @@ ok "$(q "$J" "[d['halt'], $hu]")" '["held",[["ro","rollout","CLOSED",true,"you",
 
 # ── H8: the unreadable forms hold, wait on Lachy and make no gh call ─────────────────────────────────────────────
 for form in 'hold_until:' 'hold_until: null' 'hold_until: {merged: true}' 'hold_until: {pr: o/r#1, merged: false}' \
-            'hold_until: {pr: o/r#1, base: main}' 'hold_until: wait for #202 to merge' 'hold_until: {pr: #7}'; do
+            'hold_until: {pr: o/r#1, base: main}' 'hold_until: wait for #202 to merge' 'hold_until: {pr: #7}' \
+            'hold_until: {pr: o/r#1, pr: o/r#1}'; do
   scen h8
   mkro $'- [[a]]' "$form"
   mkt a open
@@ -184,7 +185,7 @@ J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["a"]' "H9: the unheld task starts"
 ok "$(q "$J" "$holds")" '{"b":"hold until o/r#5 merges (OPEN)","c":"depends on [[b]] (open)"}' "H9: b is held; its dependant waits on it"
 ok "$(q "$J" "[d['halt'], $hu]")" '[null,[["b","task","OPEN",true,"merge",false]]]' "H9: one task entry, no halt while a starts"
-ok "$(grep -c 'pull/6' "$GHLOG")" 0 "H19: a task hold behind an unmet dependency makes no gh call"
+ok "$(grep -c 'pull/6' "$GHLOG")" 0 "H9: a task hold behind an unmet dependency makes no gh call"
 sed -i.bak 's/^status: open$/status: done/' "$D/a.md"
 J=$(nxt)
 ok "$(q "$J" '[d["start"], d["halt"]]')" '[[],"held"]' "H9: only b and c left: halt held"
@@ -234,7 +235,7 @@ ok "$(q "$J" '[d["running"], d["awaitingIntegration"], d["start"], d["restart"],
 ok "$(q "$J" "$holds")" '{"q":"hold until o/r#202 merges (OPEN)","s":"hold until o/r#202 merges (OPEN)"}' "H11: the stalled and queued tasks are held"
 ok "$(q "$J" 'd["slotsInUse"]')" '1' "H11: slotsInUse is the live calls"
 
-# ── H12: idle-slots records hold-pr, for a rollout hold and for a task hold ──────────────────────────────────────────
+# ── H12: idle-slots records hold-pr, for a rollout hold and for a task hold on a queued, stalled or set-aside row ─────
 scen h12
 EVD="$D/events"
 ev() { python3 -c 'import json,sys
@@ -254,6 +255,18 @@ mkro $'- [[a]]'
 mkt a open 'hold_until: {pr: o/r#202}'
 THREAD_EVENTS_DIR="$EVD" nxt >/dev/null
 ok "$(ev)" '["hold-pr","hold-pr"]' "H12: a task hold records hold-pr"
+mkt a in_progress 'hold_until: {pr: o/r#202}'
+THREAD_EVENTS_DIR="$EVD" nxt --running '' >/dev/null
+ok "$(ev)" '["hold-pr","hold-pr","hold-pr"]' "H12: a stalled task's own hold records hold-pr, not queue-tail"
+mkt a blocked 'hold_until: {pr: o/r#202}'
+THREAD_EVENTS_DIR="$EVD" nxt >/dev/null
+ok "$(ev)" '["hold-pr","hold-pr","hold-pr","hold-pr"]' "H12: a set-aside-at-run task's own hold records hold-pr, not awaiting-hand-back"
+mkt a gate-pending 'hold_until: {pr: o/r#202}'
+THREAD_EVENTS_DIR="$EVD" nxt >/dev/null
+ok "$(ev)" '["hold-pr","hold-pr","hold-pr","hold-pr","hold-pr"]' "H12: a set-aside-at-gate task's own hold records hold-pr, not awaiting-hand-back"
+mkt a blocked
+THREAD_EVENTS_DIR="$EVD" nxt >/dev/null
+ok "$(ev)" '["hold-pr","hold-pr","hold-pr","hold-pr","hold-pr","awaiting-hand-back"]' "H12: control: the same set-aside row with no hold records awaiting-hand-back"
 
 # ── H13: no hold anywhere: no gh call, and the output is unchanged apart from holdUntil: [] ─────────────────────────
 scen h13
@@ -344,6 +357,85 @@ chmod 644 "$D/a.md"
 ok "$(q "$J" "[d['start'], $hu]")" '[["a"],[["a","task","MERGED",false,null,false]]]' "H20: the task starts, cleared false"
 has "$(cat "$D/err")" "WARN: hold_until on a: not cleared: " "H20: one WARN line on stderr"
 ok "$(fm a hold_until)" "hold_until: {pr: o/r#5}" "H20: the hold stays for the next call"
+
+# ── H21: the rollout note's save: a failed clear of the start stamp still fails the call; a failed hold clear warns ──
+scen h21
+mkro $'- [[a]]' 'start: unattended' 'hold_until: {pr: o/r#202}'
+mkt a open
+prj "$U/202" MERGED
+cp "$D/ro.md" "$D/ro.before"
+chmod 444 "$D/ro.md"
+J=$(nxt 2>"$D/err"); rc=$?
+chmod 644 "$D/ro.md"
+ok "$rc" 1 "H21: a read-only rollout note with a merged hold and start: unattended exits 1"
+ok "$J" "" "H21: … prints no output, so nothing starts"
+cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "H21: … and the start stamp and the hold both stay"
+ok "$(fm ro start)" "start: unattended" "H21: … the stamp still invites the Stage"
+hasnt "$(cat "$D/err")" "WARN: hold_until" "H21: … no hold WARN stands in for the failure"
+mkro $'- [[a]]' 'hold_until: {pr: o/r#202}'
+chmod 444 "$D/ro.md"
+J=$(nxt 2>"$D/err"); rc=$?
+chmod 644 "$D/ro.md"
+ok "$rc" 0 "H21: with no start stamp a read-only rollout note's hold clear only warns"
+ok "$(q "$J" "[d['start'], d['startCleared'], $hu]")" '[["a"],false,[["ro","rollout","MERGED",false,null,false]]]' "H21: … the hold releases for this call, cleared false"
+has "$(cat "$D/err")" "WARN: hold_until on ro: not cleared: " "H21: … one WARN line on stderr"
+ok "$(fm ro hold_until)" "hold_until: {pr: o/r#202}" "H21: … the hold stays for the next call"
+mkro $'- [[a]]' 'start: unattended' 'hold_until: {pr: o/r#202}'
+J=$(nxt 2>"$D/err"); rc=$?
+ok "$(q "$J" "[d['start'], d['startCleared'], $hu]")" '[["a"],true,[["ro","rollout","MERGED",false,null,true]]]' "H21: writable: the stamp and the hold both clear"
+ok "$(fm ro start)|$(fm ro hold_until)" "<none>|<none>" "H21: … both lines gone"
+
+# ── H22: a hold another writer rewrites before next's save stays and reads cleared false ─────────────────────────────
+scen h22
+mkro $'- [[a]]\n- [[b]]' 'hold_until: {pr: o/r#202}'
+mkt a open; mkt b open 'hold_until: {pr: o/r#5}'
+prj "$U/202" MERGED; prj "$U/5" MERGED
+# gh's first call stands in for another writer: it rewrites both holds after next read the notes, before it saves
+printf '#!/usr/bin/env bash\nsed -i.bak "s|o/r#202|o/r#303|; s|o/r#5|o/r#303|" "%s" "%s"\nexec "%s" "$@"\n' \
+  "$D/ro.md" "$D/b.md" "$D/bin/gh" > "$D/bin/ghrw"; chmod +x "$D/bin/ghrw"
+J=$(HOME="$EH" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" --gh-bin "$D/bin/ghrw" 2>"$D/err")
+ok "$(q "$J" "[d['start'], $hu]")" '[["a","b"],[["ro","rollout","MERGED",false,null,false],["b","task","MERGED",false,null,false]]]' "H22: both release for this call, neither reads cleared"
+ok "$(fm ro hold_until)|$(fm b hold_until)" "hold_until: {pr: o/r#303}|hold_until: {pr: o/r#303}" "H22: … the rewritten holds stand"
+ok "$(cat "$D/err")" "" "H22: … and nothing on stderr"
+
+# ── H23: a task's own hold on a stalled task: never restarted, held with its reason, halt held ─────────────────────
+scen h23
+mkro $'- [[s]]'
+mkt s in_progress 'hold_until: {pr: o/r#5}'
+prj "$U/5" OPEN
+J=$(nxt)
+ok "$(q "$J" "[d['running'], d['holdUntil']]")" '[["s"],[]]' "H23: a live task's own hold is not read"
+ok "$(gh_calls)" 0 "H23: … and makes no gh call"
+J=$(nxt --running '')
+ok "$(q "$J" "[d['restart'], d['start'], $holds, d['halt']]")" '[[],[],{"s":"hold until o/r#5 merges (OPEN)"},"held"]' "H23: stalled and held: never restarted, held with its reason, halt held"
+ok "$(q "$J" "$hu")" '[["s","task","OPEN",true,"merge",false]]' "H23: … its entry waits on the merge"
+prj "$U/5" MERGED
+J=$(nxt --running '')
+ok "$(q "$J" "[d['restart'], d['halt'], $hu]")" '[["s"],null,[["s","task","MERGED",false,null,true]]]' "H23: on MERGED it restarts, cleared"
+ok "$(fm s hold_until)" "<none>" "H23: … its note loses the key"
+
+# ── H24: a task's own hold on a task set aside at a gate; held wins over awaiting-sign-off ─────────────────────────
+scen h24
+mkro $'- [[g]]\n- [[h]]'
+mkt g gate-pending 'hold_until: {pr: o/r#5}'; mkt h gate-pending
+prj "$U/5" OPEN
+J=$(nxt)
+ok "$(q "$J" '[d["halt"], d["awaitingSignOff"], d["setAside"]]')" '["held",[],[{"holdUntil":"hold until o/r#5 merges (OPEN)","setAsideAt":"gate","slug":"g","status":"gate-pending"},{"setAsideAt":"gate","slug":"h","status":"gate-pending"}]]' "H24: every task gate-pending, one held: halt held, not awaiting-sign-off"
+ok "$(q "$J" "$hu")" '[["g","task","OPEN",true,"merge",false]]' "H24: … the gate task's entry"
+prj "$U/5" MERGED
+J=$(nxt)
+ok "$(q "$J" '[d["halt"], [e["slug"] for e in d["awaitingSignOff"]], [sorted(e) for e in d["setAside"]]]')" '["awaiting-sign-off",["g","h"],[["setAsideAt","slug","status"],["setAsideAt","slug","status"]]]' "H24: once it merged: awaiting-sign-off, no holdUntil on the entries"
+ok "$(fm g hold_until)" "<none>" "H24: … g's note loses the key"
+
+# ── H25: the per-call memo: a rollout and a task hold on one PR, written two ways, make one gh call ─────────────────
+scen h25
+mkro $'- [[a]]' 'hold_until: {pr: o/r#7}'
+mkt a open "hold_until: {pr: $U/7}"
+prj "$U/7" MERGED
+J=$(nxt)
+ok "$(gh_calls)" 1 "H25: owner/repo#7 and its URL make one gh call"
+ok "$(q "$J" "[d['start'], $hu]")" '[["a"],[["ro","rollout","MERGED",false,null,true],["a","task","MERGED",false,null,true]]]' "H25: … both release and both are cleared"
+ok "$(fm ro hold_until)|$(fm a hold_until)" "<none>|<none>" "H25: … both lines gone"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-hold: ALL PASS"; else echo "reconcile-rollout-hold: FAILED"; fi

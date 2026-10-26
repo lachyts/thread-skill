@@ -91,9 +91,9 @@ merged: true}`.
   no `owner/repo#N`), a PR URL, or a bare `N` or a quoted `"#N"`, read in the rollout's `Project root:` as
   `resume` reads a bare `pr:`. An unquoted ` #N` is a YAML comment, so it reads as empty.
 - **`merged`** is optional and defaults to `true`; any other value is unreadable.
-- **Unreadable**: an unknown key, an empty value, `null`, a missing `pr`, a `pr` of no form above, or a bare
-  number with no Project root directory. It fails closed: it holds, waits on Lachy, makes no gh call and never
-  clears itself.
+- **Unreadable**: an unknown key, a repeated key, an empty value, `null`, a missing `pr`, a `pr` of no form
+  above, or a bare number with no Project root directory. It fails closed: it holds, waits on Lachy, makes no
+  gh call and never clears itself.
 - **Writers**: any agent, or Lachy, holding a note on a PR, as this key on the note it holds; the rollout
   template's commented `# hold_until:` line shows the form. A hold is never a sentence in the note.
 - **Readers**: `reconcile-rollout.py next` (the lead's, execute § 4.5 step 1), which reads each hold's PR
@@ -105,8 +105,8 @@ merged: true}`.
   the Stage starts on a held rollout waits on the merge (execute § 4.5 step 1.5) rather than asking.
 - **Clearer**: `next`, off `--dry-run`, on MERGED: it removes the `hold_until:` line and its indented lines
   only while they still read as it read them (a compare-and-swap under the note's lock, so a hold rewritten
-  meanwhile stays); a save that fails leaves the hold for the next call, and the hold still releases for
-  that call.
+  meanwhile stays, and `next` reports it not cleared); a save that fails leaves the hold for the next call,
+  and the hold still releases for that call.
 - **Supersede**: a rollout-scope hold survives a supersede: `reconcile-rollout.py carry` (schedule step 6)
   copies the prior's lines verbatim into the note that supersedes it. A task-scope hold rides on its task
   note, which the carry never edits there.
