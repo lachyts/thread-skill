@@ -1,6 +1,6 @@
 # Away, the Trickle and the Away cap — how many Rollout tasks the Mac runs at once
 
-By day, while Lachy is at the Mac, at most a few Rollout tasks run across the whole Mac, whatever the number of Rollouts: the **Trickle** (Chorus ADR 0104 d2). While he is **Away**, the **Away cap** bounds them instead of each Rollout's own `parallel_ceiling`: a larger Mac-wide cap, sized so suites do not contend, and each Rollout still runs within its own ceiling (ADR 0049, overturning Chorus ADR 0104 d3). Chorus says whether he is Away; this repo's queue keeps the count (Chorus ADR 0104 d6), so a Rollout run from a terminal obeys it too.
+By day, while Lachy is at the Mac, at most a few Rollout tasks run across the whole Mac, whatever the number of Rollouts: the **Trickle** (Chorus ADR 0104 d2). While he is **Away**, the **Away cap** bounds them: a larger Mac-wide cap, sized so suites do not contend, where each Rollout once ran to its own `parallel_ceiling`; each Rollout still runs within its own ceiling (ADR 0049, overturning Chorus ADR 0104 d3). Chorus says whether he is Away; this repo's queue keeps the count (Chorus ADR 0104 d6), so a Rollout run from a terminal obeys it too.
 
 thread-skill owns the state file below as its one reader: `next` (`skills/execute/scripts/reconcile-rollout.py`, `_away_state`) reads it on every call, `mark-started` reads it once per run for the Run record (§ Away), and nothing else here does. The lead never reads or writes it. Any writer may write it: Chorus does, and so may a person by hand (§ Without a writer).
 
