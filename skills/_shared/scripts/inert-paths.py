@@ -19,7 +19,7 @@ Git. One _git() runs every git call (`diff`, `ls-tree -r -z`, `cat-file --batch`
 removed (the GIT_CONFIG_* channels kept), GIT_TERMINAL_PROMPT=0 (the 2026-09-23 leak rule). A non-zero exit, a timeout
 or a short read raises ProofError. Library functions never print or exit; only the CLI does (exit 2 on ProofError).
 
-The path test. changed(repo, base, head) is `git diff --name-only --no-renames base head`, so a file moved into an
+The path test. changed(repo, base, head) is `git diff --no-renames base head`'s paths, so a file moved into an
 inert path still counts at the path it left. path_test(repo, base, head, globs) returns {changed, inert, nonInert,
 matched, globs}: `matched` is what git itself matches with `':(glob)G'` for any glob G, `globs` the globs that matched a
 changed path (every glob, when this script's own matcher cannot name the glob for a matched path). A path is inert only
@@ -389,7 +389,8 @@ def _covers(segs, unk, filt, glob):
 
 # ---- the path test --------------------------------------------------------------------------------------------------
 
-def _changed_entries(repo, base, head):
+def changed(repo, base, head, modes=False):
+    """`git diff --no-renames base head`'s paths, as a list; with modes, [(path, old mode, new mode)]."""
     out = _git(repo, "diff", "--raw", "-z", "--no-renames", "--no-abbrev", base, head)
     parts = out.split(b"\0")
     entries, i = [], 0
@@ -401,18 +402,12 @@ def _changed_entries(repo, base, head):
         fields = meta[1:].split()
         entries.append((_dec(parts[i + 1]), fields[0], fields[1]))
         i += 2
-    return entries
-
-
-def changed(repo, base, head):
-    """`git diff --name-only --no-renames base head`, as a list."""
-    out = _git(repo, "diff", "--name-only", "-z", "--no-renames", base, head)
-    return [_dec(p) for p in out.split(b"\0") if p]
+    return entries if modes else [e[0] for e in entries]
 
 
 def path_test(repo, base, head, globs):
     """{changed, inert, nonInert, matched, globs}: the header's path test."""
-    entries = _changed_entries(repo, base, head)
+    entries = changed(repo, base, head, modes=True)
     paths = [e[0] for e in entries]
     matched = set()
     if globs and paths:
@@ -1537,16 +1532,6 @@ def _parse_text(text, lang):
         return ("open",)
 
 
-def _parse_args_at(text, lang):
-    """(args, kwargs) of the call whose `(` starts `text`, or None."""
-    try:
-        end = _balanced(text, 0, "(", ")")
-        p = _Parser(_js_tokens(text[:end], lang), lang)
-        return p.args()
-    except (ValueError, IndexError, RecursionError):
-        return None
-
-
 JS_KEYWORDS = frozenset("if for while switch catch function return typeof new delete void in of instanceof await "
                         "yield else do try case throw class const let var import export from with super this "
                         "def elif lambda not and or is pass assert raise print func guard let".split())
@@ -2064,11 +2049,6 @@ def _wshape(w):
     if w is SEP:
         return ""
     return "".join(p[1] if p[0] == "lit" else "*" for p in w)
-
-
-def _is_globword(w):
-    return any(p[0] == "lit" and not p[2] and _has_glob(p[1]) for p in w) or \
-        any(p[0] == "lit" and p[2] and _has_glob(p[1]) for p in w)
 
 
 def _starstar(w):
