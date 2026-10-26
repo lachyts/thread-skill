@@ -394,7 +394,7 @@ It prints one JSON line: each key's `value` and its `source`, `file:repo` (the f
 
 - **A non-zero exit stops the run before this run writes a rollout note or a task stamp**: print its stderr line verbatim (`rollout-settings: <path>:<line>: <reason>`, or `rollout-settings: --repo <p>: <reason>`) with the remedy "edit `~/.config/thread/rollouts.toml` at the named line, then re-run". Exit 3 adds "needs python ≥ 3.11" (a present file needs tomllib). A bad value is refused loudly, never dropped (ADR 0016).
 - **On success**, name each value and its source in the confirm batch (e.g. `parallel_ceiling 5 (file:repo), max_review_rounds 4 (built-in), …`) and store them for step 6's four settings substitutions. When its `ignored` list is non-empty (a `rollouts.toml` whose `schema` is newer than this snapshot's reader, ADR 0043), name each ignored key in the confirm batch too: this rollout runs without it.
-- **`spend_approval_usd`** resolves here too (ADR 0034: the standing approval's limit in US dollars; built-in `0`, which is off). Name it beside the four (`standing approval 50 USD (file:defaults)`, or `standing approval off (built-in 0)`) for § 3.6's ask-ahead question. It is never stamped on the rollout: execute's `approve-gates --standing` resolves it itself at run time.
+- **`spend_approval_usd`** resolves here too (ADR 0034: the standing approval's limit in US dollars, both a gate's and the calendar month's; built-in `0`, which is off). Name it beside the four (`standing approval 200 USD a gate and a month (file:defaults)`, or `standing approval off (built-in 0)`) for step 8's *expected to gate* lines, never for a question (§ 3.6: spend is recorded, never asked). It is never stamped on the rollout: execute's `approve-gates --standing` resolves it itself at run time.
 - **`verify_slots`** resolves here too (machine-wide, `[defaults]` only, built-in 2): name it in the confirm batch; it is never stamped on the rollout, and execute's `verify-timeout` reads it at each entry.
 
 ### 2.9. Propose Inert paths (ADR 0045)
@@ -441,12 +441,13 @@ It prints one JSON line per note, `{slug, spend, credential, irreversible}`, eac
 - a hit whose context plainly names nothing the task pays for or authorises is dismissed with no question: an LLM or design token count, a shell variable, a note that only describes this sweep;
 - a currency amount, or a spend word about something the task buys or runs, is never dismissed;
 - step 8 lists each dismissal on one line (`swept, dismissed: [[task]] <word> (<why>)`), so nothing drops silently;
-- every other hit is put to Lachy in the confirm batch, as below.
+- every other credential or irreversible hit is put to Lachy in the confirm batch, as below; a spend hit is recorded, never put to him.
 
-A task with an undismissed hit gets **`plan_approval: required`** stamped in step 7 (user-confirmed in the confirm batch), so it always produces a plan whose required `### Gated inputs` declaration the engine can stop on. Like every step-7 stamp, it is proposed only for a task in the `queued` state: step 7 writes nothing to a carried task that has started.
+A task with an undismissed hit gets **`plan_approval: required`** stamped in step 7 (listed in the confirm batch, never asked about for a spend hit), so it always produces a plan whose required `### Gated inputs` declaration the engine can stop on. Like every step-7 stamp, it is proposed only for a task in the `queued` state: step 7 writes nothing to a carried task that has started.
 
-**Ask ahead (ADR 0034).** In the confirm batch, for each `queued` task with an undismissed hit:
-- **Spend.** Ask: "up to what total exposure in USD (summed across Logins, a recurring cap counted per month)? The standing approval covers <t> USD (<source>)", from step 2.8's `spend_approval_usd`; when its source is `built-in`, say "standing approval off (built-in 0)" instead. A task that already carries an answer (a `spend_approval_usd:` stamp, or a `## Decisions (asked ahead <date>)` Spend line, an earlier schedule's or orient's, kept through a defer) shows "approved up to <N> USD (asked ahead <date>)" and is not asked again unless he changes it. An answer above <t> is stamped at step 7 as `spend_approval_usd: <N>`; any amount, above <t> or at or below it, also gets step 7's `## Decisions (asked ahead <date>)` section; "ask me" writes nothing.
+**Spend is recorded, never asked** (Chorus ADR 0108 d4). Lachy has never denied a spend, and a question about five dollars here or ten there costs him more than the spend, so no spend hit is put to him, in the confirm batch or anywhere ahead of the run. A `queued` task with an undismissed spend hit gets its `plan_approval: required` stamp, so its plan declares the gate, and step 7 writes its Planner line under `## Decisions (recorded <YYYY-MM-DD>)`, so the planner words that gate as one priceable total. Execute's standing approval (`approve-gates --standing`, ADR 0034) then signs it mid-run when its total exposure is at most <t> USD (step 2.8's `spend_approval_usd`, with its source) and this calendar month's standing approvals, with it, stay within the same <t> (the month line); a gate above either, or one it cannot price, reaches him mid-run as a needs-you item, and with the standing approval off (built-in 0), every spend gate reaches him mid-run. A limit Lachy names unprompted, in the confirm batch or before it (a `spend_approval_usd:` stamp, or a `## Decisions (asked ahead <date>)` Spend line, an earlier schedule's or orient's, kept through a defer), is shown and honoured, never asked again: one above <t> is stamped at step 7 as `spend_approval_usd: <N>`, which sets that task's per-gate limit and its month line, and any named amount also gets step 7's `## Decisions (asked ahead <date>)` section.
+
+**Ask ahead (ADR 0034), credential and irreversible only.** In the confirm batch, for each `queued` task with an undismissed credential or irreversible hit:
 - **Credential or irreversible:** sign it now, or leave it. A sign-off becomes a `## Approved gates` bullet, `- <kind>: <his words> (approved <date>, asked ahead at schedule)`, which the engine's planner restates verbatim, so a matching declaration never stops the task.
 
 **Advisory only — the plan's declaration is authoritative** (ADR 0008): only the implementer's plan reliably knows the task needs 30 USD of Replicate credits, so the engine stops on the *declaration*, never on this sweep. The stamp merely guarantees the gate surfaces predictively at the plan-gate rather than reactively mid-implementation (a missed smell still stops — every code-writing agent carries the same stop rule). A declared gate that nothing recorded covers sets its task aside for sign-off, never the rollout (execute § 3.7). List the stamped tasks in step 8's summary as **expected to gate**, so a mid-run ask reads as designed when it happens.
@@ -591,9 +592,10 @@ For each task in the rollout:
 - For the body dependencies the user confirmed in step 3 (its body phrases and its `order` lines), append `depends-on:` entries (`- "[[<slug>]]"`) to the dependant; never drop an existing entry
 - For a task whose § 4.7 offer the user confirmed, or whose rung the user named explicitly, add `rung: <name>` (a rung the ladder lists) — never by default, and never on the rollout note
 - For a non-carried `queued` candidate that still has a legacy stamp (a `model:`, an `effort:` or the stale cap stamp), apply carry's mapping (`reconcile-rollout.py carry`): with no non-empty `rung:` of its own, a `model: fable` or an `effort: xhigh` or `max` (trimmed, any case) becomes `rung: <the ladder's top rung>`; then remove each recognised key (`model:` at fable, opus or empty; `effort:` at low, medium, high, xhigh, max or empty; the cap stamp at any value) and leave an unrecognised value in place, listing it in step 8's "Checklist — legacy values left in place" block. When `ladder.py` refused at schedule time, still remove the drop-only keys (they need no rung name, as in carry), but leave a top-mapping legacy stamp in place, unmapped: execute's compat read (execute SKILL.md, *Legacy stamps*) maps it at runtime once the file reads, and execute halts `ladder file refused` until then. List each such task in step 8's "Checklist — ladder refused" block
-- For tasks the §3.6 sweep flagged (user-confirmed), add `plan_approval: required` — advisory: it guarantees a plan-gate exists where the plan's own `### Gated inputs` declaration (the authoritative signal, ADR 0008) can stop for sign-off
-- For a task whose § 3.6 spend answer is above the standing approval, add `spend_approval_usd: <N>` (whole US dollars): `approve-gates --standing` reads it before rollouts.toml (ADR 0034)
-- For each § 3.6 spend answer (any amount, above, at or below the standing approval), append the `## Decisions (asked ahead <YYYY-MM-DD>)` section below to the task body, or extend in place one for the same date
+- For tasks the §3.6 sweep flagged (listed in the confirm batch; a credential or irreversible hit confirmed there), add `plan_approval: required` — advisory: it guarantees a plan-gate exists where the plan's own `### Gated inputs` declaration (the authoritative signal, ADR 0008) can stop for sign-off
+- For a task whose per-task limit Lachy named (§ 3.6) is above the standing approval, add `spend_approval_usd: <N>` (whole US dollars): `approve-gates --standing` reads it before rollouts.toml, and it sets that task's per-gate limit and its month line (ADR 0034)
+- For each limit Lachy named at § 3.6 (any amount, above, at or below the standing approval), append the `## Decisions (asked ahead <YYYY-MM-DD>)` section below to the task body, or extend in place one for the same date
+- For every other task § 3.6 stamped for a spend hit, append the recorded section to the task body, or extend in place one for the same date: the heading `## Decisions (recorded <YYYY-MM-DD>)` and, under it, the template's Planner line alone, verbatim, with no Spend line (nothing was asked, so nothing was approved). A task whose body already holds a `- Planner:` line under any `## Decisions` heading gets none
 - For a credential or irreversible gate he signed at § 3.6, append its bullet to the task's `## Approved gates` section (created when absent): `- <kind>: <his words> (approved <date>, asked ahead at schedule)`
 - Preserve all other frontmatter fields verbatim
 
@@ -606,7 +608,7 @@ The ask-ahead section is exactly:
 - Planner: word each spend gate as one line whose Cap is one priceable total, its period and count (in the cap's own unit) inside the cap clause, e.g. `spend: <what> — cap 50 USD per Login per month across 3 Logins`; the Cap is the task's whole ceiling, so price per-item spend into the total (never "every push" or "each image"); put how it splits (run counts, per-call limits, iterations) in sub-bullets nested under the gate, which the Cap must hold, and keep other counts, `per`/`each` words, bare numbers and words that widen the cap (`plus` tax, fees or overage, `soft`, `to start`) off the gate's own line (ADR 0038). A cap the standing approval cannot price is asked mid-run.
 ```
 
-The `## Decisions` prefix makes it a recorded decision (descope asks before touching it) and keeps it out of the brief; the planner reads the note in full, so its Planner line shapes the gate the standing approval prices.
+The recorded section is the same block with `recorded` in place of `asked ahead` in its heading and its Planner line alone. The `## Decisions` prefix makes either a recorded decision (descope asks before touching it) and keeps it out of the brief; the planner reads the note in full, so its Planner line shapes the gate the standing approval prices; the `(recorded <date>)` heading, unlike `(asked ahead …)`, tells Reflection nothing was asked.
 
 A carried task that has started (any queue state but `queued` in step 1's preview) keeps the frontmatter `carry` left it: step 7 writes nothing to it. A carried `queued` task is stamped like any other, unless § 1.5 left it out (step 6's `defer` unlinked it).
 
@@ -614,7 +616,7 @@ The combined notes authored in step 4.5 are stamped here like any other task (`r
 
 Use the same YAML field ordering the file already has; insert the new fields just below the existing `status:` line.
 
-**Do NOT stamp `verifier:` / `max_iterations:` / `max_review_rounds:` on individual tasks by default, and never stamp a `model:` or an `effort:` at all.** The first three are rollout-level defaults — tasks inherit them automatically. Only set them per-task if the user explicitly asks to override the rollout default for a specific task during the confirm-batch step. `model:` and `effort:` are legacy stamps the engine never dispatches at: step 7 only maps and removes them. The sanctioned exceptions are read-only's `max_iterations: 1`, the user-confirmed `rung:` from § 4.7 (a rung offer confirmed, or a rung named explicitly; per-task only, it has no rollout-level form), the §3.6 sweep's `plan_approval: required` on gated-input-smelling tasks, and the § 3.6 ask-ahead answer: `spend_approval_usd: <N>` above the standing approval, the `## Decisions (asked ahead <date>)` section, and a credential or irreversible sign-off's `## Approved gates` bullet — all deliberate per-task decisions, not defaults.
+**Do NOT stamp `verifier:` / `max_iterations:` / `max_review_rounds:` on individual tasks by default, and never stamp a `model:` or an `effort:` at all.** The first three are rollout-level defaults — tasks inherit them automatically. Only set them per-task if the user explicitly asks to override the rollout default for a specific task during the confirm-batch step. `model:` and `effort:` are legacy stamps the engine never dispatches at: step 7 only maps and removes them. The sanctioned exceptions are read-only's `max_iterations: 1`, the user-confirmed `rung:` from § 4.7 (a rung offer confirmed, or a rung named explicitly; per-task only, it has no rollout-level form), the §3.6 sweep's `plan_approval: required` on gated-input-smelling tasks, and the § 3.6 records: `spend_approval_usd: <N>` above the standing approval and the `## Decisions (asked ahead <date>)` section for a limit Lachy named, the `## Decisions (recorded <date>)` Planner line for every other spend hit, and a credential or irreversible sign-off's `## Approved gates` bullet — all deliberate per-task decisions, not defaults.
 
 **Then clear this note's stamp.** Once every task above has its stamps (a carried task that has started keeps what `carry` wrote), remove the `incomplete: true` line from this rollout note's frontmatter: it is step 7's last write, after every task stamp and before step 7.5's close-out. A run that stops anywhere earlier leaves the stamp, so `reconcile-rollout.py next` refuses the note and § 0 offers it to the next `--regenerate`. Remove only the stamp on the note this run wrote: one § 0 put on an interrupted supersede's note ends only when a supersede closes that note.
 
@@ -640,7 +642,7 @@ scored [[<P>]]: <close-score's line>                     # per close-score.py ru
 cleared [[<P>]]'s start when ready: superseded here      # when § 0's Supersede prep removed its start: unattended
 Engine: snapshot <sha12> at <path> (origin/<default>)     # or: Engine: no snapshot (<the cut's exit-4 reason>)
 Verifier: <detected command>
-Settings: parallel_ceiling <n> (<source>), max_review_rounds <n> (<source>), max_iterations <n> (<source>), max_plan_rounds <n> (<source>); standing approval <t> USD (<source>), or off (built-in 0)
+Settings: parallel_ceiling <n> (<source>), max_review_rounds <n> (<source>), max_iterations <n> (<source>), max_plan_rounds <n> (<source>); standing approval <t> USD a gate and a month (<source>), or off (built-in 0)
 Pre-flight: <n> graded (<r> Ready, <c> One call, <g> Grill, <o> Orient), <u> ungraded, <k> decided in the round, <m> left out; Grade log: <log's line>
                                                          # under orient-all: Pre-flight: grades and answers from the estate pass, <m> left out
 
@@ -740,9 +742,10 @@ Likewise list the §3.6 gated-input stamps with what was recorded ahead and what
 
 ```
 Expected to gate (each set aside for your sign-off if its plan declares a gate nothing recorded covers; never the rollout):
-  - [[task-y]] — smells of API spend ("~30 USD of Replicate credits") → plan_approval: required; approved up to 30 USD (asked ahead 2026-10-14)
+  - [[task-y]] — smells of API spend ("~30 USD of Replicate credits") → plan_approval: required; signed mid-run by the standing approval up to 200 USD a gate and 200 USD a month (file:defaults); above either it reaches you mid-run
   - [[task-x]] — smells of a credential ("the Stripe API key") → plan_approval: required; signed ahead: credential: the Stripe test key
-  - [[task-w]] — smells of API spend ("fast mode") → plan_approval: required; a gate above the standing approval (50 USD, file:defaults) still asks mid-run
+  - [[task-w]] — smells of API spend ("fast mode") → plan_approval: required; approved up to 300 USD (you named it, asked ahead 2026-10-27); above it, or past its month line, it reaches you mid-run
+  - [[task-t]] — smells of API spend ("paid API") → plan_approval: required; standing approval off (built-in 0): every spend gate reaches you mid-run
   - [[task-v]] — carried gate-pending, waiting on your sign-off: spend: fast mode — cap 50 USD per Login per month
 swept, dismissed: [[task-u]] token (an LLM token count: "~31.5k tokens")
 ```
@@ -802,7 +805,7 @@ the members. § 3.6's `<t>` comes from
 chain holds one `repo:` token that is a directory, else with no `--repo`; a non-zero exit stops the run as step
 2.8's does. A standalone run's confirm batch lists S1's members; each chain (its order, each row's launch, each
 member's surfaces with its source and its added tokens); the session-lane members; the WARNs; and the questions
-(§ 3's dependencies, § 3.5's gates, § 3.6's ask-ahead). A confirmed dependency (passed as
+(§ 3's dependencies, § 3.5's gates, § 3.6's credential and irreversible ask-ahead). A confirmed dependency (passed as
 `--dep <dependant>=<dependency>`), or a surface Lachy adds for any member (passed as `--surface`, which always
 unions in, declared or not), re-runs S2 and S3; a confirmed dependency whose dependency left at S3.5 also re-runs
 step 1.5's final `preflight` with `--dep`. Under orient § 7 or orient-all § 6 nothing is asked: the kept gates and § 3.6's hits
@@ -821,15 +824,17 @@ the template's own as below. Keep the template's `incomplete: true`: S6 removes 
 Then stamp each note written with the Engine snapshot, as step 6 does: `python3 <snapshot>/skills/_shared/scripts/engine-snapshot.py adopt --rollout <the note>` from the cut's snapshot, right after writing it; a non-zero exit stops the run with its stderr, the note keeping `incomplete: true`; skipped after a cut exit 4.
 
 **S6. Stamp.** Each member of each note written gets `rollout: "[[<its note>]]"`, step 7's clear (its second
-bullet), its confirmed `depends-on:` entries and, on a standalone run, § 3.6's ask-ahead writes (step 7's
-`spend_approval_usd:`, `## Decisions (asked ahead <date>)` and `## Approved gates` bullets). Nothing else is
+bullet), its confirmed `depends-on:` entries, on every run step 7's `## Decisions (recorded <date>)` Planner
+section for a member with a spend hit and, on a standalone run, § 3.6's ask-ahead writes (step 7's
+`spend_approval_usd:` and `## Decisions (asked ahead <date>)` for a limit Lachy named, and the `## Approved gates`
+bullets). Nothing else is
 stamped: no `scope:`, `plan_approval:`, `rung:` or `solo:`, and never a derived or added `surfaces:`. Then remove
 the note's `incomplete: true` line, as its last write, once every member is stamped.
 
 **S7. Summary.** Per note: its name, its chain order with each row's launch, and its surfaces. Then
 the Pre-flight line and its left-out tasks, as step 8 lists them (Orient → `/thread:orient [[<project>]]`, undecided
-→ waiting on your answer, ungraded, `depends on [[x]]`), the session-lane members, the WARNs and the gated checklist (§ 3.5's kept gates, § 3.6's ask-ahead and dismissals, as
-step 8 lists them). Then one line: "Leg 1 opens in row 1's launch and runs `/thread:execute [[<note>]]`;
+→ waiting on your answer, ungraded, `depends on [[x]]`), the session-lane members, the WARNs and the gated checklist (§ 3.5's kept gates, § 3.6's expected-to-gate lines,
+credential or irreversible ask-ahead and dismissals, as step 8 lists them). Then one line: "Leg 1 opens in row 1's launch and runs `/thread:execute [[<note>]]`;
 no execute offer, no `start: unattended` (the Stage's unattended start needs a Project root); until it finishes or
 is dropped (`status: dropped`) it holds its surfaces, so a parallel run on a checkout it claims, or another chain
 over them, is refused".

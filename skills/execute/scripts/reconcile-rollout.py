@@ -509,7 +509,26 @@ Subcommands:
               `spend_approval_usd`, resolved task frontmatter -> rollout frontmatter -> rollouts.toml
               (_resolved_settings: file:repo, file:defaults) -> built-in 0, which is off (sources `task`,
               `rollout`, `file:repo`, `file:defaults`, `built-in`; _retry_budget's order). A gate is covered iff
-              the limit is > 0 and its total exposure is at most the limit. Each covered gate moves to
+              the limit is > 0, its total exposure is at most the limit, and (p30-8, ADR 0034's 2026-10-27
+              amendment: spend is never asked ahead) this calendar month's standing-approved spend with it stays
+              within the same limit, the month line, inclusive. The month (local time, from --now) sums the
+              `- <stamp> [[<slug>]] signed under the standing approval: US$<x> …` lines under `## Needs-you log`
+              of the --rollout note and of every note directly in the tasks dir, Archive/ and Archive/Rollouts/
+              whose name is a dated rollout note's (`-rollout-<YYYY-MM-DD>[-N].md`), each once by real path, plus
+              the earlier gates and slugs this call signed; the mark must follow a line's first wikilink, so a
+              push line never counts, and Lachy's bare sign-offs are never logged. It is read lazily, only for a
+              gate that prices within the limit and is not already in `## Approved gates`, under a machine-wide
+              lock (`standing-spend.lock` beside the note locks; never on --dry-run) held from that read to the
+              call's last save; a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 1, and nothing written
+              for any slug that needed the month read. A gate past the month line is an ASK whose why is `this
+              month's (<YYYY-MM>) standing approvals would reach US$<m> with this gate, past the US$<t> month line
+              (<source>)`; a note it cannot read (or a directory it cannot list) is an ASK whose why is `cannot
+              read <path> for this month's standing approvals (<error>)`. For a slug with gates newly signed, the
+              rollout note is written first: one `- <stamp> [[<slug>]] signed under the standing approval:
+              US$<x> (month to date US$<m> of US$<t>, <source>): <gate>` line per gate, appended inside
+              `## Needs-you log` (created at the note's end when absent); a failed log save is exit 1 for that
+              slug, its task note untouched. Then the task note, as below: a task save that fails after the log
+              save leaves the log line (over-count, fail closed). Each covered gate moves to
               `## Approved gates` with gated_inputs.annotation()'s suffix, `(approved <date> under the standing
               approval: total exposure US$<x>, limit US$<t> from <source>)` (GATE_ANNOT_RE strips it), deduped by
               _norm_gate, and prints `<slug>: gate approved under the standing approval: <gate> (exposure US$<x>
@@ -525,7 +544,8 @@ Subcommands:
               3: some or none covered (the covered ones written, an ASK line for each of the rest; a re-run on
               gates already judged writes nothing and exits 3); 1: an error, nothing written for that slug (a
               missing note, a task whose `rollout:` is not --rollout, a note that is not gate-pending with
-              pending gates, a `spend_approval_usd` stamp that is not an integer >= 0, rollout settings refused).
+              pending gates, a `spend_approval_usd` stamp that is not an integer >= 0, rollout settings refused,
+              the standing-spend lock held past its timeout, a Needs-you log line that cannot be saved).
               --standing without --rollout is exit 1 (`ERROR: --standing needs --rollout`), nothing written. A
               note already fully approved stays `[no-change]`, exit 0.
 
@@ -896,6 +916,7 @@ import sys
 import time
 import types
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 try:
@@ -938,6 +959,17 @@ GATES_SIGNED_KEY = "gates_signed"
 # rollouts.toml through rollout-settings.py), and the rollout's sign-off pause, `paused_for: sign-off` beside `paused:`
 # (await-sign-off writes both; clear-pause removes both).
 SPEND_APPROVAL_KEY = "spend_approval_usd"
+# The standing approval's month line (p30-8, ADR 0034's 2026-10-27 amendment): approve-gates --standing logs each gate it
+# signs in the rollout note's `## Needs-you log` as `- <stamp> [[<slug>]] signed under the standing approval: US$<x> …`,
+# and sums this calendar month's such lines across every rollout note (ROLLOUT_NOTE_NAME_RE's dated names in the tasks
+# dir, Archive/ and Archive/Rollouts/, plus --rollout) under the machine-wide STANDING_SPEND_LOCK. The mark must follow
+# the line's first wikilink directly, so a push line that quotes it never counts.
+NEEDS_YOU_LOG_SECTION = "## Needs-you log"
+STANDING_SPEND_MARK = "signed under the standing approval:"
+STANDING_SPEND_RE = re.compile(
+    r"^- (\d{4}-\d{2})-\d{2}T\S+ \[\[[^\]]+\]\] signed under the standing approval: US\$(\d+(?:\.\d+)?)(?:\s|$)")
+ROLLOUT_NOTE_NAME_RE = re.compile(r"-rollout-\d{4}-\d\d-\d\d(?:-\d+)?\.md\Z")
+STANDING_SPEND_LOCK = "standing-spend.lock"
 PAUSED_FOR_KEY = "paused_for"
 SIGN_OFF = "sign-off"
 PAUSE_LOG_SECTION = "## Pause log"
@@ -1383,15 +1415,27 @@ def _top_run(runs):
 NOTE_LOCK_TIMEOUT = 30.0
 
 
-def _note_lock_path(path) -> Path:
-    """The note's save lock: one file per directory of notes (its real path's hash), shared by every note in it so
-    the lock files stay few, and outside the vault so it never syncs. A save holds it for milliseconds."""
+def _note_lock_dir() -> Path:
+    """Where the note save locks (and the standing approval's spend lock) live: THREAD_NOTE_LOCK_DIR, else
+    XDG_STATE_HOME/thread/note-locks, else ~/.local/state/thread/note-locks; outside the vault so they never sync."""
     absolute = lambda v: v if v and os.path.isabs(v) else None   # noqa: E731  a relative dir is ignored (the XDG rule)
     base = absolute(os.environ.get("THREAD_NOTE_LOCK_DIR")) or os.path.join(
         absolute(os.environ.get("XDG_STATE_HOME")) or os.path.join(os.path.expanduser("~"), ".local", "state"),
         "thread", "note-locks")
+    return Path(base)
+
+
+def _note_lock_path(path) -> Path:
+    """The note's save lock: one file per directory of notes (its real path's hash), shared by every note in it so
+    the lock files stay few, and outside the vault so it never syncs. A save holds it for milliseconds."""
     real = os.path.dirname(os.path.realpath(str(path)))
-    return Path(base) / f"{hashlib.sha256(real.encode()).hexdigest()[:16]}-{os.path.basename(real)[:60]}.lock"
+    return _note_lock_dir() / f"{hashlib.sha256(real.encode()).hexdigest()[:16]}-{os.path.basename(real)[:60]}.lock"
+
+
+def _spend_lock_path() -> Path:
+    """The standing approval's machine-wide spend lock (STANDING_SPEND_LOCK, beside the note locks): approve-gates
+    --standing holds it from its month read to its last save, so two calls never both sign against one month sum."""
+    return _note_lock_dir() / STANDING_SPEND_LOCK
 
 
 def _journaled(method):
@@ -1780,10 +1824,13 @@ def _replace_keeping_metadata(target, text):
 class _note_lock:
     """The note's save lock (_note_lock_path), held only for a save's read and write, never across a child process
     (the `cp -p` clone aside, which takes no lock); the canary takes it inside its own lock, and nothing takes the
-    canary's inside this one. No fcntl (Windows): no lock, the atomic replace alone."""
+    canary's inside this one. With lock_path (and a label) it is another lock of the same kind: approve-gates
+    --standing takes note locks (Note.save) inside the standing-spend lock (_spend_lock_path), and nothing takes the
+    spend lock inside a note lock or the canary's. No fcntl (Windows): no lock, the atomic replace alone."""
 
-    def __init__(self, path):
-        self.lock_path, self.fh = _note_lock_path(path), None
+    def __init__(self, path=None, lock_path=None, label="note lock"):
+        self.lock_path = Path(lock_path) if lock_path is not None else _note_lock_path(path)
+        self.label, self.fh = label, None
 
     def __enter__(self):
         if fcntl is None:
@@ -1802,11 +1849,11 @@ class _note_lock:
             except BlockingIOError:
                 if time.monotonic() >= deadline:
                     self.fh.close()
-                    raise OSError(f"timed out after {timeout:g}s waiting for the note lock {self.lock_path}")
+                    raise OSError(f"timed out after {timeout:g}s waiting for the {self.label} {self.lock_path}")
                 time.sleep(0.05)
             except OSError as e:
                 self.fh.close()
-                raise OSError(f"cannot lock {self.lock_path}: {e}")
+                raise OSError(f"cannot lock the {self.label} {self.lock_path}: {e}")
 
     def __exit__(self, *exc):
         if self.fh is not None:
@@ -6681,9 +6728,118 @@ def _bounce_why(verdict, gi):
             f"standing approval signs none of its gates; the pricer reads: {reading}")
 
 
+def _standing_month_spend(text, month) -> Decimal:
+    """The standing approvals one rollout note's text logs for `month` (YYYY-MM): the STANDING_SPEND_RE lines under
+    every `## Needs-you log` heading (line.strip() equal to it), each to the next line starting `## ` (Note.section_text's
+    bounds), summed. A line outside the section, of another month, or with the mark anywhere but right after its first
+    wikilink (a push line quoting it) never counts."""
+    total, on = Decimal(0), False
+    for line in text.split("\n"):
+        if line.strip() == NEEDS_YOU_LOG_SECTION:
+            on = True
+            continue
+        if line.startswith("## "):
+            on = False
+            continue
+        if on:
+            m = STANDING_SPEND_RE.match(line)
+            if m and m.group(1) == month:
+                total += Decimal(m.group(2))
+    return total
+
+
+class _StandingLedger:
+    """This calendar month's standing-approved spend for one approve-gates --standing call (p30-8, ADR 0034's
+    2026-10-27 amendment), built once per call and used lazily: only a gate that first prices under its limit asks for
+    it, so an off limit, a bounced note or an over-limit gate never reads or locks anything.
+
+    spent() -> (Decimal, None) or (None, why). On first need it takes the standing-spend lock (_spend_lock_path; never
+    on --dry-run) and holds it until close(), from the month read to the call's last save, then sums
+    _standing_month_spend over the --rollout note and every file directly in the tasks dir, Archive/ and
+    Archive/Rollouts/ whose name matches ROLLOUT_NOTE_NAME_RE (schedule step 6's names, `-N` ordinals included), each
+    once by real path and read fresh from disk. A missing directory is skipped; a note that cannot be read, or a
+    directory that exists but cannot be listed, is (None, why), cached, so every later gate asks with it. A lock not
+    taken in time raises OSError, cached too, so every later slug that needs the month read fails at once with the same
+    message; a slug that never needs it is still written or asked. add() keeps the call's own running total (on
+    --dry-run too, so its lines read as a real run's), which spent() includes."""
+
+    def __init__(self, tasks_dir, rollout_path, month, dry_run):
+        self.tasks_dir, self.rollout_path = Path(tasks_dir), Path(rollout_path)
+        self.month, self.dry_run = month, dry_run
+        self._lock = self._lock_error = self._base = self._why = None
+        self._added = Decimal(0)
+
+    def _read(self):
+        """(sum, None) over the month's notes, or (None, why) on the first one it cannot read."""
+        files, seen = [], set()
+
+        def take(path):
+            real = os.path.realpath(str(path))
+            if real not in seen:
+                seen.add(real)
+                files.append(path)
+
+        take(self.rollout_path)
+        for d in (self.tasks_dir, self.tasks_dir / "Archive", self.tasks_dir / "Archive" / "Rollouts"):
+            try:
+                names = sorted(os.listdir(d))
+            except (FileNotFoundError, NotADirectoryError):
+                continue   # no Archive yet: nothing there to sum
+            except OSError as e:
+                return None, f"cannot read {d} for this month's standing approvals ({e})"
+            for name in names:
+                if ROLLOUT_NOTE_NAME_RE.search(name) and (d / name).is_file():
+                    take(d / name)
+        total = Decimal(0)
+        for path in files:
+            try:
+                text = Path(path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                return None, f"cannot read {path} for this month's standing approvals ({e})"
+            total += _standing_month_spend(text, self.month)
+        return total, None
+
+    def spent(self):
+        if self._lock_error is not None:
+            raise OSError(self._lock_error)
+        if self._base is None and self._why is None:
+            if not self.dry_run and self._lock is None:
+                lock = _note_lock(lock_path=_spend_lock_path(), label="standing-spend lock")
+                try:
+                    lock.__enter__()
+                except OSError as e:
+                    self._lock_error = str(e)
+                    raise
+                self._lock = lock
+            self._base, self._why = self._read()
+        if self._why:
+            return None, self._why
+        return self._base + self._added, None
+
+    def add(self, usd):
+        self._added += usd
+
+    def close(self):
+        if self._lock is not None:
+            self._lock.__exit__(None, None, None)
+            self._lock = None
+
+
+def _month_why(month, total, limit, gi):
+    """Why a gate the per-gate limit covers still asks: this month's standing approvals would pass the month line, the
+    same resolved limit (inclusive, as covered() is)."""
+    return (f"this month's ({month}) standing approvals would reach US${gi.format_usd(total)} with this gate, past the "
+            f"US${gi.format_usd(limit['value'])} month line ({limit['source']})")
+
+
 def _approve_standing(args) -> int:
     """approve-gates --standing (ADR 0034; the module docstring): sign each pending spend gate the standing approval
-    covers, leave the rest pending with an ASK line. Exit 0 every gate written, 3 some left, 1 an error."""
+    covers, leave the rest pending with an ASK line. A gate is covered when it prices within the resolved limit and,
+    unless it is already in `## Approved gates`, when this calendar month's standing approvals (_StandingLedger, the
+    month line, ADR 0034's 2026-10-27 amendment) stay within the same limit with it. A slug's new signings are logged
+    in the rollout note's `## Needs-you log` first, then its task note is written, so a failure between the two
+    over-counts (fails closed). Exit 0 every gate written, 3 some left, 1 an error (a held standing-spend lock
+    included)."""
     if not args.rollout:
         print("ERROR: --standing needs --rollout", file=sys.stderr)
         return 1
@@ -6701,76 +6857,123 @@ def _approve_standing(args) -> int:
     slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
     date = args.date or datetime.now().astimezone().date().isoformat()
     now = _now(args)
+    month = now.astimezone().strftime("%Y-%m")
     suffix = " (dry-run)" if args.dry_run else " [written]"
     errors, asked = [], False
-    for slug in slugs:
-        path = tasks_dir / f"{slug}.md"
-        if not path.exists():
-            errors.append(f"{slug}: task note not found at {path}")
-            continue
-        try:
-            note = Note(path)
-        except ValueError as e:
-            errors.append(str(e))
-            continue
-        if (_note_rollout(note) or "").lower() != rollout_path.stem.lower():
-            errors.append(f"{slug}: its rollout: is {note.get('rollout')!r}, not [[{rollout_path.stem}]]; nothing written")
-            continue
-        status = note.get("status")
-        pending = note.section_text(GATE_PENDING_SECTION)
-        if status != GATE_PENDING_STATUS:
-            if note.has_heading(APPROVED_GATES_SECTION) and not pending:
-                print(f"{slug}: gates already approved [no-change]")
+    ledger = _StandingLedger(tasks_dir, rollout_path, month, args.dry_run)
+    try:
+        for slug in slugs:
+            path = tasks_dir / f"{slug}.md"
+            if not path.exists():
+                errors.append(f"{slug}: task note not found at {path}")
                 continue
-            errors.append(f"{slug}: status is {status!r}, not {GATE_PENDING_STATUS!r} — refusing to approve gates")
-            continue
-        gates = [re.sub(r"^[-*]\s+", "", l.strip()) for l in pending.split("\n") if l.strip()]
-        if not gates:
-            errors.append(f"{slug}: no gates under {GATE_PENDING_SECTION!r} — nothing to sign off")
-            continue
-        limit, err = _standing_limit(note, rollout_note)
-        if err:
-            errors.append(f"{slug}: {err}; nothing written")
-            continue
-        # ADR 0038: a note the plan judge bounced went to sign-off on a plan it never approved; nothing on it is the
-        # standing approval's to sign, whatever the gate prices. The heading alone counts (fail-closed: an emptied
-        # section still refuses).
-        bounced = note.has_heading(GATE_BOUNCE_SECTION)
-        covered, left = [], []
-        for g in gates:
-            verdict = gi.covered(g, limit["value"])
-            if bounced:
-                left.append((g, _bounce_why(verdict, gi)))
-            elif verdict["covered"]:
+            try:
+                note = Note(path)
+            except ValueError as e:
+                errors.append(str(e))
+                continue
+            if (_note_rollout(note) or "").lower() != rollout_path.stem.lower():
+                errors.append(f"{slug}: its rollout: is {note.get('rollout')!r}, not [[{rollout_path.stem}]]; nothing written")
+                continue
+            status = note.get("status")
+            pending = note.section_text(GATE_PENDING_SECTION)
+            if status != GATE_PENDING_STATUS:
+                if note.has_heading(APPROVED_GATES_SECTION) and not pending:
+                    print(f"{slug}: gates already approved [no-change]")
+                    continue
+                errors.append(f"{slug}: status is {status!r}, not {GATE_PENDING_STATUS!r} — refusing to approve gates")
+                continue
+            gates = [re.sub(r"^[-*]\s+", "", l.strip()) for l in pending.split("\n") if l.strip()]
+            if not gates:
+                errors.append(f"{slug}: no gates under {GATE_PENDING_SECTION!r} — nothing to sign off")
+                continue
+            limit, err = _standing_limit(note, rollout_note)
+            if err:
+                errors.append(f"{slug}: {err}; nothing written")
+                continue
+            # ADR 0038: a note the plan judge bounced went to sign-off on a plan it never approved; nothing on it is the
+            # standing approval's to sign, whatever the gate prices. The heading alone counts (fail-closed: an emptied
+            # section still refuses).
+            bounced = note.has_heading(GATE_BOUNCE_SECTION)
+            approved = {_norm_gate(l) for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()}
+            covered, left, logged, slug_new, lock_err = [], [], [], Decimal(0), None
+            for g in gates:
+                verdict = gi.covered(g, limit["value"])
+                if bounced:
+                    left.append((g, _bounce_why(verdict, gi)))
+                    continue
+                if not verdict["covered"]:
+                    left.append((g, _ask_why(verdict, limit, gi)))
+                    continue
+                norm = _norm_gate(g)
+                if norm in approved:
+                    covered.append((g, verdict["usd"]))   # signed already, or listed twice: no month check, no log line
+                    continue
+                # The month line (ADR 0034's 2026-10-27 amendment): this month's standing approvals, the earlier slugs
+                # and gates of this call included, plus this gate, within the same limit.
+                try:
+                    spent, why = ledger.spent()
+                except OSError as e:
+                    lock_err = e
+                    break
+                if why:
+                    left.append((g, why))
+                    continue
+                total = spent + slug_new + verdict["usd"]
+                if total > limit["value"]:
+                    left.append((g, _month_why(month, total, limit, gi)))
+                    continue
+                slug_new += verdict["usd"]
+                approved.add(norm)
                 covered.append((g, verdict["usd"]))
-            else:
-                left.append((g, _ask_why(verdict, limit, gi)))
-        if covered:
-            existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
-            have = {_norm_gate(l) for l in existing}
-            for g, usd in covered:
-                if _norm_gate(g) not in have:
-                    have.add(_norm_gate(g))
-                    existing.append(f"- {g} {gi.annotation(date, usd, limit['value'], limit['source'])}")
-            note.upsert_section(APPROVED_GATES_SECTION, "\n".join(existing))
-            stage = None
-            if left:
-                note.upsert_section(GATE_PENDING_SECTION, bullets([g for g, _ in left]))
-            else:
-                stage, route, ready_pr = _sign_route(note, slug, now)
-            note.save(dry_run=args.dry_run)
-            # the Standing approval signed these, not Lachy: recorded, and not counted as his act (p21-2)
-            _event(_note_rollout(note), "gate-signed", slug, {"standing": True, "gates": len(covered)}, args)
-            if stage == "integration":
-                _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
-            for g, usd in covered:
-                print(f"{slug}: gate approved under the standing approval: {g} (exposure US${gi.format_usd(usd)} of "
-                      f"US${gi.format_usd(limit['value'])}, {limit['source']})" + suffix)
-            if not left:
-                print(f"{slug}: every gate signed under the standing approval -> {route}" + suffix)
-        for g, why in left:
-            print(f"ASK: {slug}: {g}: {why}")
-            asked = True
+                logged.append((g, verdict["usd"], spent + slug_new))
+            if lock_err is not None:
+                errors.append(f"{slug}: {lock_err}; nothing written")
+                continue
+            if logged:
+                # The month line's ledger first: a failure before the task note's save over-counts (fails closed). A
+                # fresh read per slug, so a failed save's journal never replays into a later one.
+                try:
+                    rn = Note(rollout_path)
+                    for g, usd, m in logged:
+                        rn.append_line(NEEDS_YOU_LOG_SECTION,
+                                       f"- {_stamp(now)} [[{slug}]] {STANDING_SPEND_MARK} US${gi.format_usd(usd)} (month to "
+                                       f"date US${gi.format_usd(m)} of US${gi.format_usd(limit['value'])}, "
+                                       f"{limit['source']}): {g}")
+                    rn.save(dry_run=args.dry_run)
+                except (OSError, ValueError) as e:
+                    errors.append(f"{slug}: cannot log the standing approval in [[{rollout_path.stem}]]: {e}; "
+                                  "nothing written")
+                    continue
+                ledger.add(slug_new)
+            if covered:
+                existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
+                have = {_norm_gate(l) for l in existing}
+                for g, usd in covered:
+                    if _norm_gate(g) not in have:
+                        have.add(_norm_gate(g))
+                        existing.append(f"- {g} {gi.annotation(date, usd, limit['value'], limit['source'])}")
+                note.upsert_section(APPROVED_GATES_SECTION, "\n".join(existing))
+                stage = None
+                if left:
+                    note.upsert_section(GATE_PENDING_SECTION, bullets([g for g, _ in left]))
+                else:
+                    stage, route, ready_pr = _sign_route(note, slug, now)
+                note.save(dry_run=args.dry_run)
+                # the Standing approval signed these, not Lachy: recorded, and not counted as his act (p21-2)
+                _event(_note_rollout(note), "gate-signed", slug, {"standing": True, "gates": len(covered)}, args)
+                if stage == "integration":
+                    _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
+                for g, usd in covered:
+                    print(f"{slug}: gate approved under the standing approval: {g} (exposure US${gi.format_usd(usd)} of "
+                          f"US${gi.format_usd(limit['value'])}, {limit['source']})" + suffix)
+                if not left:
+                    print(f"{slug}: every gate signed under the standing approval -> {route}" + suffix)
+            for g, why in left:
+                print(f"ASK: {slug}: {g}: {why}")
+                asked = True
+    finally:
+        ledger.close()
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else (3 if asked else 0)
@@ -7783,15 +7986,19 @@ def main() -> int:
     ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")
     ag.add_argument("--standing", action="store_true",
                     help="sign only the spend gates the standing approval covers (spend_approval_usd: task, rollout, "
-                         "rollouts.toml, built-in 0 = off); the rest stay pending as ASK lines: exit 0 all signed, "
-                         "3 some left, 1 an error (ADR 0034)")
+                         "rollouts.toml, built-in 0 = off), and while this calendar month's standing-approved spend "
+                         "(every rollout note's ## Needs-you log) stays within the same limit; each signing is logged "
+                         "there; the rest stay pending as ASK lines: exit 0 all signed, 3 some left, 1 an error "
+                         "(ADR 0034)")
     ag.add_argument("--rollout", default=None,
                     help="with --standing (required there): the rollout note, whose frontmatter and Project root "
                          "resolve spend_approval_usd; the task's rollout: must name it. Without --standing only the "
                          "Engine snapshot guard reads it (orient-all's Sign-off passes it)")
     ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ag.add_argument("--date", default=None, help="sign-off date stamped on each gate (default: today)")
-    ag.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp of a stop at Integration)")
+    ag.add_argument("--now", type=_iso_arg, default=None,
+                    help=now_help + " (the ready: restamp of a stop at Integration; with --standing also the Needs-you "
+                                    "log line's stamp and the calendar month the month line sums)")
     ag.add_argument("--dry-run", action="store_true")
     ag.set_defaults(func=cmd_approve_gates)
 

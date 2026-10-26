@@ -10,11 +10,20 @@
 #   Q3-Q5  await-sign-off (the sign-off pause), status's pausedFor and clear-pause's STILL-AWAITING refusal, then the
 #          reinstate once signed (by hand, or by a raised standing approval).
 #   S7     ADR 0038's one-line gates through approve-gates --standing: p19-10's restated gate (cap 24 USD) and p19-5's
-#          (cap 50 USD total) are signed; p19-10's original one-line gate asks, naming its two `each`.
+#          (cap 50 USD total) are signed; p19-10's original one-line gate asks, naming its two `each`. It runs at a
+#          US$200 limit, so the month line (S9) never touches its pricing; S9c3 is the same two gates at US$50.
 #   S8     ADR 0038's bounce, end to end from the engine: a priced gate (cap 24 USD) whose sub-bullet spends 40, flagged
 #          on both plan rounds, is plan-blocked when the judge obeys the usd-null rule; a judge that wrongly bounces it
 #          leaves `## Gate bounce (awaiting sign-off)` on the gate-pending note, and the standing approval asks instead of
 #          signing (the same gate without the section is signed). Lachy's sign-off removes it; other rows settle it.
+#   S9     the month line (p30-8, ADR 0034's 2026-10-27 amendment): each signing is logged in the rollout note's
+#          `## Needs-you log`, and a covered gate still asks when this calendar month's standing-approved spend (every
+#          rollout note's log: the live ones in the tasks dir, Archive/ and Archive/Rollouts/, dated names only, each
+#          once by real path) would pass the limit with it: Verify's US$30 signs and US$250 asks; the sum runs across
+#          notes, calls, gates and slugs, inclusive; dry-run writes and locks nothing; bare sign-offs, push lines, other
+#          sections, undated notes and task notes never count; an unreadable dated note or an unlistable directory
+#          asks; a held standing-spend lock exits 1, while a slug that needs no month read still asks; a task stamp is
+#          its own line.
 #   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
 #          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
 #          refused rollouts.toml. It writes nothing.
@@ -38,8 +47,10 @@ ok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected
 has() { case "$1" in *"$2"*) echo "ok   - $3";; *) echo "FAIL - $3: [$2] not in [$1]"; fail=1;; esac; }
 hasnt() { case "$1" in *"$2"*) echo "FAIL - $3: unexpected [$2] in [$1]"; fail=1;; *) echo "ok   - $3";; esac; }
 
-# Settings homes: H50 holds `[defaults] spend_approval_usd = 50`; HE is empty (the built-in 0, off); HR is refused.
+# Settings homes: H50 holds `[defaults] spend_approval_usd = 50`, H200 `= 200` (Lachy's, 2026-10-23); HE is empty (the
+# built-in 0, off); HR is refused.
 H50="$TMP/home50"; mkdir -p "$H50/.config/thread"; printf '[defaults]\nspend_approval_usd = 50\n' > "$H50/.config/thread/rollouts.toml"
+H200="$TMP/home200"; mkdir -p "$H200/.config/thread"; printf '[defaults]\nspend_approval_usd = 200\n' > "$H200/.config/thread/rollouts.toml"
 HE="$TMP/home-empty"; mkdir -p "$HE"
 HR="$TMP/home-refused"; mkdir -p "$HR/.config/thread"; printf '[defaults]\nspend_approval_usd = -5\n' > "$HR/.config/thread/rollouts.toml"
 HH="$H50"   # the home the helpers below pass
@@ -52,12 +63,12 @@ mkro() {
     for l in "$@"; do printf '%s\n' "$l"; done
     printf -- '---\n\n## Notes\n\nProject root: `%s`\n\n## Queue\n\n%s\n' "$D/repo" "${ORDER:-- [[a]]}"; } > "$D/ro.md"
 }
-# mkt <slug> <status|-> [frontmatter lines...] — a task note linked to ro
+# mkt <slug> <status|-> [frontmatter lines...] — a task note linked to ro (or to $RO's note when set)
 mkt() {
   local s="$1" st="$2"; shift 2
   { printf -- '---\ntags: [task]\n'
     [ "$st" = "-" ] || printf 'status: %s\n' "$st"
-    printf 'rollout: "[[ro]]"\n'
+    printf 'rollout: "[[%s]]"\n' "${RO:-ro}"
     for l in "$@"; do printf '%s\n' "$l"; done
     printf -- '---\n\n## Notes\n\nbody %s\n' "$s"; } > "$D/$s.md"
 }
@@ -69,9 +80,9 @@ gate() {
 fm() { grep -m1 "^$2:" "$D/$1.md" || echo "<none>"; }
 # section <slug> <heading> — the section's non-blank lines
 section() { awk -v h="$2" '$0 == h {on=1; next} /^## /{on=0} on && NF' "$D/$1.md"; }
-sa() {  # sa <slugs> [extra args] — approve-gates --standing; $out (stdout+stderr), $rc
+sa() {  # sa <slugs> [extra args] — approve-gates --standing on $D/ro.md (or $RONOTE when set); $out (stdout+stderr), $rc
   local t="$1"; shift
-  out=$(HOME="$HH" python3 "$SCRIPT" approve-gates --standing --tasks "$t" --rollout "$D/ro.md" --tasks-dir "$D" \
+  out=$(HOME="$HH" python3 "$SCRIPT" approve-gates --standing --tasks "$t" --rollout "${RONOTE:-$D/ro.md}" --tasks-dir "$D" \
     --date "$DATE" --now "$NOW" "$@" 2>&1); rc=$?
 }
 nxt() { HOME="$HE" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" --dry-run "$@"; }
@@ -164,6 +175,8 @@ for bad in -1 fifty; do
   ok "$rc|$(cat "$D/d.md")" "1|$before" "S5: a stamp of $bad exits 1, nothing written"
   has "$out" "spend_approval_usd on [[d]] must be an integer >= 0" "S5: … naming the stamp ($bad)"
 done
+# This mkro rewrites ro.md, wiping b's US$150 Needs-you log line, so e's US$9 sums against 0 this month. Were the log
+# kept, e asking (150 + 9 is past the rollout's 10 month line) would be the month line working, not a bug to fix.
 mkro 'spend_approval_usd: 10'
 mkt e gate-pending; gate e "$PROBE"
 sa e
@@ -198,10 +211,10 @@ mkt a gate-pending; gate a "$ONE24"
 mkt b gate-pending; gate b "$ONE50"
 mkt c gate-pending; gate c "$P19_10"
 before=$(cat "$D/c.md")
-sa a,b,c
+HH="$H200" sa a,b,c
 ok "$rc" 3 "S7: two signed, one asks: exit 3"
-has "$out" "a: gate approved under the standing approval: $ONE24 (exposure US\$24 of US\$50, file:defaults)" "S7: p19-10's restated gate signs US\$24"
-has "$out" "b: gate approved under the standing approval: $ONE50 (exposure US\$50 of US\$50, file:defaults)" "S7: p19-5's one-line gate signs US\$50"
+has "$out" "a: gate approved under the standing approval: $ONE24 (exposure US\$24 of US\$200, file:defaults)" "S7: p19-10's restated gate signs US\$24"
+has "$out" "b: gate approved under the standing approval: $ONE50 (exposure US\$50 of US\$200, file:defaults)" "S7: p19-5's one-line gate signs US\$50"
 has "$out" "ASK: c: $P19_10: per/each outside the cap clause: each, each" "S7: p19-10's original gate asks, naming its two each"
 ok "$(cat "$D/c.md")" "$before" "S7: the unpriceable gate's note is untouched"
 
@@ -290,6 +303,209 @@ rec "$TMP/s8-d.json"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d["tasks"][0]; r["status"]="plan-blocked"; r["gatedInputs"]=[]; json.dump(d, open(sys.argv[2], "w"))' "$TMP/s8-d.json" "$TMP/s8-d3.json"
 rec "$TMP/s8-d3.json"
 ok "$(fm d status)|$(section d "$BOUNCE_H")" "status: plan-blocked|" "S8: a row of another status removes it too"
+
+# ── S9: the month line (p30-8; ADR 0034's 2026-10-27 amendment, Chorus ADR 0108 d4) ───────────────────────────────
+# Spend is never asked ahead: a covered gate is signed and its signing logged in the rollout note's `## Needs-you log`,
+# and it still asks when this calendar month's standing-approved spend (summed from every rollout note's log) would
+# pass the limit with it. LOG(x, m, gate) is that line at NOW, under the H200 limit unless named.
+logl() {  # logl <slug> <x> <m> <gate> [limit] [source] — the standing approval's Needs-you log line at NOW
+  printf -- '- 2026-10-14T09:00+00:00 [[%s]] signed under the standing approval: US$%s (month to date US$%s of US$%s, %s): %s' \
+    "$1" "$2" "$3" "${5:-200}" "${6:-file:defaults}" "$4"
+}
+mkarch() {  # mkarch <path> [log line] — an archived rollout note, its `## Needs-you log` holding the line
+  { printf -- '---\ntags: [task, rollout]\nstatus: done\n---\n\n## Queue\n\n- [[x]]\n'
+    [ -z "${2:-}" ] || printf '\n## Needs-you log\n\n%s\n' "$2"; } > "$1"
+}
+R30='spend: replicate credits — cap 30 USD'
+R250='spend: replicate credits — cap 250 USD'
+DECOY='- 2026-10-03T10:00+00:00 [[z1]] signed under the standing approval: US$500 (month to date US$500 of US$200, file:defaults): spend: z1 — cap 500 USD'
+
+# S9a: Verify's US$30 asks nothing and is signed, its signing logged below `## Queue`
+scen s9a
+mkro; mkt a gate-pending; gate a "$R30"
+HH="$H200" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S9a: Verify's US\$30 is signed by the standing approval: exit 0, in_progress"
+ok "$(section a '## Approved gates')" "- $R30 (approved $DATE under the standing approval: total exposure US\$30, limit US\$200 from file:defaults)" "S9a: … annotated as before"
+ok "$(section ro '## Needs-you log')" "$(logl a 30 30 "$R30")" "S9a: the signing is the rollout note's one Needs-you log line"
+ok "$(grep '^## ' "$D/ro.md" | tail -1)" "## Needs-you log" "S9a: … in a section created at the note's end, below ## Queue"
+hasnt "$out" "ASK:" "S9a: nothing asks"
+
+# S9b: Verify's US$250 still reaches him
+scen s9b
+mkro; mkt a gate-pending; gate a "$R250"
+before=$(cat "$D/a.md" "$D/ro.md")
+HH="$H200" sa a
+ok "$rc" 3 "S9b: Verify's US\$250 asks: exit 3"
+has "$out" "ASK: a: $R250: total exposure US\$250 is over the standing approval's US\$200 (file:defaults)" "S9b: … over the per-gate limit"
+ok "$(cat "$D/a.md" "$D/ro.md")" "$before" "S9b: a.md and ro.md byte-identical (no Needs-you log)"
+
+# S9c: the month line sums every rollout note's log (live, Archive/, Archive/Rollouts/, a -2 ordinal), this month only,
+# inclusive, and across calls (S9j: the tasks dir itself, the dedupe, and what never counts there)
+scen s9c
+mkro; mkt a gate-pending; gate a "$R30"
+printf '\n## Needs-you log\n\n%s\n%s\n' \
+  '- 2026-10-02T10:00+00:00 [[old1]] signed under the standing approval: US$100 (month to date US$100 of US$200, file:defaults): spend: x — cap 100 USD' \
+  '- 2026-09-30T10:00+00:00 [[old0]] signed under the standing approval: US$150 (month to date US$150 of US$200, file:defaults): spend: y — cap 150 USD' >> "$D/ro.md"
+mkdir -p "$D/Archive/Rollouts"
+mkarch "$D/Archive/Rollouts/x-rollout-2026-10-01.md" '- 2026-10-05T10:00+00:00 [[x1]] signed under the standing approval: US$40 (month to date US$140 of US$200, file:defaults): spend: x1 — cap 40 USD'
+mkarch "$D/Archive/y-rollout-2026-10-02-2.md" '- 2026-10-07T10:00+00:00 [[y1]] signed under the standing approval: US$30 (month to date US$170 of US$200, file:defaults): spend: y1 — cap 30 USD'
+HH="$H200" sa a
+ok "$rc" 0 "S9c: 100 + 40 + 30 this month, plus 30, lands exactly on the US\$200 line: signed (inclusive)"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 30 200 "$R30")" "S9c: … logged at month to date US\$200"
+P10='spend: one more probe — cap 10 USD'
+mkt b gate-pending; gate b "$P10"
+before=$(cat "$D/b.md" "$D/ro.md")
+HH="$H200" sa b
+ok "$rc" 3 "S9c: a later call's US\$10 is past the month line: exit 3"
+has "$out" "ASK: b: $P10: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9c: … the ASK names the month line (a's persisted line was read)"
+ok "$(cat "$D/b.md" "$D/ro.md")" "$before" "S9c: b.md and ro.md byte-identical across the call"
+
+# S9c2: two gates on one note: the first signs, the second is past the month line
+scen s9c2
+B150='spend: batch one — cap 150 USD'; B60='spend: batch two — cap 60 USD'
+mkro; mkt a gate-pending; gate a "$B150" "$B60"
+HH="$H200" sa a
+ok "$rc|$(fm a status)" "3|status: gate-pending" "S9c2: one gate signed, one left: exit 3, still gate-pending"
+ok "$(section a '## Approved gates')" "- $B150 (approved $DATE under the standing approval: total exposure US\$150, limit US\$200 from file:defaults)" "S9c2: batch one approved"
+ok "$(section a '## Gated inputs (awaiting sign-off)')" "- $B60" "S9c2: batch two alone stays pending"
+has "$out" "ASK: a: $B60: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9c2: … asking past the month line"
+ok "$(section ro '## Needs-you log')" "$(logl a 150 150 "$B150")" "S9c2: one log line, batch one's"
+
+# S9c3: S7's two gates at US$50 in one call: the running sum crosses slugs
+scen s9c3
+ORDER=$'- [[a]]\n- [[b]]' mkro
+mkt a gate-pending; gate a "$ONE24"
+mkt b gate-pending; gate b "$ONE50"
+before=$(cat "$D/b.md")
+sa a,b
+ok "$rc" 3 "S9c3: a signs, b asks: exit 3"
+has "$out" "a: gate approved under the standing approval: $ONE24 (exposure US\$24 of US\$50, file:defaults)" "S9c3: a's US\$24 signs"
+has "$out" "ASK: b: $ONE50: this month's (2026-10) standing approvals would reach US\$74 with this gate, past the US\$50 month line (file:defaults)" "S9c3: b's US\$50 alone is covered, but a's US\$24 earlier in the call puts it past the line"
+ok "$(cat "$D/b.md")" "$before" "S9c3: b.md byte-identical"
+ok "$(section ro '## Needs-you log')" "$(logl a 24 24 "$ONE24" 50)" "S9c3: one log line, a's"
+
+# S9d: dry-run writes nothing and takes no lock
+scen s9d
+mkro; mkt a gate-pending; gate a "$R30"
+before=$(cat "$D/a.md" "$D/ro.md")
+out=$(THREAD_NOTE_LOCK_DIR="$TMP/locks-dry" HOME="$H200" python3 "$SCRIPT" approve-gates --standing --tasks a --rollout "$D/ro.md" \
+  --tasks-dir "$D" --date "$DATE" --now "$NOW" --dry-run 2>&1); rc=$?
+ok "$rc" 0 "S9d: dry-run exits 0"
+has "$out" "(dry-run)" "S9d: … and says so"
+ok "$(cat "$D/a.md" "$D/ro.md")" "$before" "S9d: a.md and ro.md byte-identical"
+if [ ! -e "$TMP/locks-dry/standing-spend.lock" ]; then echo "ok   - S9d: no standing-spend lock taken"; else echo "FAIL - S9d: a standing-spend lock was taken"; fail=1; fi
+
+# S9e: Lachy's bare sign-off logs nothing and never counts
+scen s9e
+mkro; mkt a gate-pending; gate a "$R30"
+before=$(cat "$D/ro.md")
+out=$(python3 "$SCRIPT" approve-gates --tasks a --tasks-dir "$D" --date "$DATE" --now "$NOW" 2>&1); rc=$?
+ok "$rc|$(cat "$D/ro.md")" "0|$before" "S9e: a bare sign-off leaves ro.md byte-identical"
+R200='spend: replicate credits — cap 200 USD'
+mkt b gate-pending; gate b "$R200"
+HH="$H200" sa b
+ok "$rc" 0 "S9e: a later US\$200 gate is signed: the bare sign-off's 30 is not counted"
+ok "$(section ro '## Needs-you log')" "$(logl b 200 200 "$R200")" "S9e: … logged at month to date US\$200"
+
+# S9f: push lines and other sections never count; the new line goes inside the log section
+scen s9f
+mkro; mkt a gate-pending; gate a "$R30"
+printf '\n## Needs-you log\n\n%s\n%s\n\n## Completion log\n\n%s\n' \
+  '- 2026-10-14T08:00+00:00 [[z]] pushed via push: sign off gated input: spend: probe — cap 190 USD' \
+  '- 2026-10-14T08:01+00:00 [[z]] push failed: [[y]] signed under the standing approval: US$190' \
+  '- 2026-10-14T08:02+00:00 [[y]] signed under the standing approval: US$190 (month to date US$190 of US$200, file:defaults): spend: q — cap 190 USD' >> "$D/ro.md"
+cl=$(section ro '## Completion log')
+HH="$H200" sa a
+ok "$rc" 0 "S9f: a push line, a quoted mark and a Completion log line are not counted: signed"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 30 30 "$R30")" "S9f: the new line is the log section's last, month to date US\$30"
+ok "$(section ro '## Completion log')" "$cl" "S9f: the Completion log is unchanged"
+
+# S9g: an unreadable dated rollout note, or a directory it cannot list, asks (fail closed); an undated note is never
+# opened
+if [ "$(id -u)" = 0 ]; then
+  echo "ok   - S9g: skipped as root (chmod 000 reads anyway)"
+else
+  scen s9g
+  mkro; mkt a gate-pending; gate a "$R30"
+  mkdir -p "$D/Archive/Rollouts"
+  W="$D/Archive/Rollouts/w-rollout-2026-10-03.md"
+  mkarch "$W"; chmod 000 "$W"
+  before=$(cat "$D/a.md")
+  HH="$H200" sa a
+  ok "$rc" 3 "S9g: an unreadable rollout note: exit 3"
+  has "$out" "cannot read $W for this month's standing approvals" "S9g: … the ASK names it"
+  ok "$(cat "$D/a.md")" "$before" "S9g: a.md byte-identical"
+  chmod 644 "$W"
+  chmod 000 "$D/Archive/Rollouts"
+  before=$(cat "$D/a.md" "$D/ro.md")
+  HH="$H200" sa a
+  chmod 755 "$D/Archive/Rollouts"
+  ok "$rc" 3 "S9g: a directory that exists but cannot be listed: exit 3"
+  has "$out" "ASK: a: $R30: cannot read $D/Archive/Rollouts for this month's standing approvals (" "S9g: … the ASK names the directory"
+  ok "$(cat "$D/a.md" "$D/ro.md")" "$before" "S9g: a.md and ro.md byte-identical"
+  U="$D/z-p1-1-rollout-face.md"
+  mkarch "$U" "$DECOY"; chmod 000 "$U"
+  HH="$H200" sa a
+  ok "$rc" 0 "S9g: an unreadable undated note is never opened: signed"
+  chmod 644 "$U"
+fi
+
+# S9h: the standing-spend lock is taken; held elsewhere, the call exits 1 and writes nothing for a slug that needed the
+# month read, while a later slug that needs none (b, over the per-gate limit) still asks
+scen s9h
+ORDER=$'- [[a]]\n- [[b]]' mkro; mkt a gate-pending; gate a "$R30"; mkt b gate-pending; gate b "$R250"
+mkdir -p "$TMP/locks-held"
+python3 -c 'import fcntl, sys, time
+f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").close(); time.sleep(60)' \
+  "$TMP/locks-held/standing-spend.lock" "$TMP/held" &
+HOLDER=$!
+for _ in $(seq 100); do [ -e "$TMP/held" ] && break; sleep 0.1; done
+before=$(cat "$D/a.md" "$D/b.md" "$D/ro.md")
+out=$(THREAD_NOTE_LOCK_DIR="$TMP/locks-held" THREAD_NOTE_LOCK_TIMEOUT=1 HOME="$H200" python3 "$SCRIPT" approve-gates --standing \
+  --tasks a,b --rollout "$D/ro.md" --tasks-dir "$D" --date "$DATE" --now "$NOW" 2>&1); rc=$?
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+ok "$rc" 1 "S9h: a held standing-spend lock: exit 1"
+has "$out" "ERROR: a: " "S9h: … an ERROR for a, which needed the month read"
+has "$out" "standing-spend.lock" "S9h: … naming the lock"
+has "$out" "ASK: b: $R250: total exposure US\$250 is over the standing approval's US\$200 (file:defaults)" "S9h: b, after it and needing no month read, still asks"
+ok "$(cat "$D/a.md" "$D/b.md" "$D/ro.md")" "$before" "S9h: a.md, b.md and ro.md byte-identical"
+
+# S9i: a task stamp sets its own per-gate limit and its own month line
+scen s9i
+R120='spend: replicate credits — cap 120 USD'
+mkro; mkt a gate-pending 'spend_approval_usd: 300'; gate a "$R120"
+printf '\n## Needs-you log\n\n%s\n' \
+  '- 2026-10-02T10:00+00:00 [[old1]] signed under the standing approval: US$170 (month to date US$170 of US$200, file:defaults): spend: x — cap 170 USD' >> "$D/ro.md"
+HH="$H200" sa a
+ok "$rc" 0 "S9i: 170 + 120 is within the task's own US\$300 line: signed"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 120 290 "$R120" 300 task)" "S9i: … logged against the task's line"
+
+# S9j: the live layout. A dated rollout note sits in the tasks dir beside its tasks, so the dir's listing finds it as
+# well as --rollout, here given by a second spelling of the same file (`repo/..`: pathlib collapses a `./` but keeps a
+# `..`, so only the real path dedupes it): it counts once. Another project's live dated note in the same dir counts;
+# an undated note and a task note there, each holding a US$500 standing line this month, never count.
+scen s9j
+X=x-rollout-2026-10-14; XP="$D/repo/../$X.md"
+R60='spend: replicate credits — cap 60 USD'
+ORDER=$'- [[a]]\n- [[b]]' mkro; mv "$D/ro.md" "$D/$X.md"
+printf '\n## Needs-you log\n\n%s\n' \
+  '- 2026-10-03T10:00+00:00 [[x0]] signed under the standing approval: US$100 (month to date US$100 of US$200, file:defaults): spend: x0 — cap 100 USD' >> "$D/$X.md"
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n---\n\n## Queue\n\n- [[y1]]\n\n## Needs-you log\n\n%s\n' \
+  '- 2026-10-04T10:00+00:00 [[y1]] signed under the standing approval: US$40 (month to date US$40 of US$200, file:defaults): spend: y1 — cap 40 USD' \
+  > "$D/y-rollout-2026-10-09.md"
+mkarch "$D/z-p1-1-rollout-face.md" "$DECOY"
+mkt c open; printf '\n## Needs-you log\n\n%s\n' "$DECOY" >> "$D/c.md"
+RO=$X mkt a gate-pending; gate a "$R60"
+RONOTE="$XP" HH="$H200" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S9j: its own note's 100 (listed and named, counted once) + another live note's 40 + 60 lands on the US\$200 line: signed"
+ok "$(section "$X" '## Needs-you log' | tail -1)" "$(logl a 60 200 "$R60")" "S9j: … logged in the dated note at month to date US\$200 (neither decoy's US\$500 counted)"
+ok "$(section y-rollout-2026-10-09 '## Needs-you log' | wc -l | tr -d ' ')" 1 "S9j: the other project's note is read, never written"
+RO=$X mkt b gate-pending; gate b "$P10"
+before=$(cat "$D/b.md" "$D/$X.md")
+RONOTE="$XP" HH="$H200" sa b
+ok "$rc" 3 "S9j: a later call's US\$10 is past the month line: exit 3"
+has "$out" "ASK: b: $P10: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9j: … at US\$210, each note still counted once"
+ok "$(cat "$D/b.md" "$D/$X.md")" "$before" "S9j: b.md and the rollout note byte-identical across the call"
 
 # ── G1-G4: gate-pricer, the plan judge's pricer path for one call (ADR 0038) ─────────────────────────
 GI="$(cd "$HERE/../../_shared/scripts" && pwd -P)/gated_inputs.py"

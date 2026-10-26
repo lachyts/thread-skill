@@ -70,7 +70,7 @@ integrates each approved task and merges it:
 1. **Plan-gate** — an autonomous judge approves the implementation plan before
    code is written (skippable per rollout; a plan's declared gated inputs
    pause the task for sign-off, never the rollout; a spend gate within the
-   standing approval passes — ADR 0008, ADR 0034).
+   standing approval, and its month line, passes — ADR 0008, ADR 0034).
 2. **Ralph-style verifier retry** — the implementer re-runs its touched tests
    and self-corrects until they are green, then runs the rollout's verifier
    once, as its last check before the PR (a Checkpoint, estate ADR 0009), or
@@ -81,8 +81,12 @@ integrates each approved task and merges it:
 The standing approval is off until `~/.config/thread/rollouts.toml` sets
 `spend_approval_usd` (whole US dollars) under `[defaults]`; set it only after
 installing a version that knows the key, because an older `rollout-settings.py`
-refuses it, and every rollout's settings with it. `skills/_shared/scripts/gated_inputs.py`
-holds the exposure reading it applies and schedule's gated-input sweep.
+refuses it, and every rollout's settings with it. The same limit is also a
+calendar-month line: a gate it covers still reaches you once this month's
+standing approvals, summed from every rollout note's `## Needs-you log`, would
+pass it with that gate. Spend is never asked ahead of a run.
+`skills/_shared/scripts/gated_inputs.py` holds the exposure reading it applies
+and schedule's gated-input sweep.
 
 A needs-you push that does not reach you (any "not sent" but you at the
 terminal, such as Remote Control inactive or notifications turned off, a
