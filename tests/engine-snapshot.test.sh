@@ -292,7 +292,7 @@ echo "== R3"
 push notes/v6.txt v6; git -C "$P" pull -q --ff-only; git -C "$P" checkout -q -b elsewhere; echo moved >> "$P/hooks/hooks.json"
 es "$P" resolve --rollout "$TASKS/r1.md"
 ok "$rc|$(j 'd["root"]')|$(j 'd["sha"]')" "0|$B|$V5" "R3: a pulled, branched, dirty Primary → root is still the snapshot"
-ok "$(j 'd["primary"]')|$(j 'd["ahead"]')|$(j 'd["behind"]')" "$P|0|1" "R3: … with the Primary's position (0 ahead, 1 behind)"
+ok "$(j 'd["primary"]')|$(j 'd["ahead"]')|$(j 'd["behind"]')" "$P|0|1" "R3: … the snapshot's own counts against the Primary's HEAD (0 ahead, 1 behind it)"
 py "$B" skills/execute/scripts/reconcile-rollout.py touched-phases --rollout "$TASKS/r1.md" --tasks-dir "$TASKS"
 hasnt "$err" "engine-snapshot:" "R3: … the guards from the snapshot still pass"
 git -C "$P" checkout -q -- hooks/hooks.json; git -C "$P" checkout -q master

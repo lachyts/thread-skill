@@ -90,6 +90,8 @@ function check(t) {
   if (i15 < 0 || i2 < 0 || i15 > i2) fail('execute')
   if (!s15.includes('`move.due`') || !s15.includes('a hard-paused parallel note') || !s15.includes('a Leg closed `stopped`') ||
     !s15.includes('A launch, a heartbeat, a cold resume, a Stage re-send or a repair hand-off cuts no snapshot')) fail('execute')
+  if (!s15.includes('**Exit 2** (a usage error') || !s15.includes('reason="engine snapshot resolve failed"') ||
+    !s15.includes('a lead never goes on to § 2 from the rendered root')) fail('execute')
   const s45 = collapse(section(ex, /^### 4\.5\. /) ?? '')
   if (!s45.includes("drop this session's runIds and signed-gate handles from the old snapshot's calls")) fail('execute')
   if (!before(s45, '**Retire unneeded snapshots**', '**Close out the associated thread, last:**') ||
@@ -117,6 +119,10 @@ function check(t) {
 
   // doc: engine-snapshot.md cites plugin-root.md, states the toplevel test, the sign-off rule, the archived grace and
   // the Leg close's re-resolve.
+  const refusal = collapse(section(t.doc, /^## The refusal rule/) ?? '')
+  const another = collapse(section(t.doc, /^## Another rollout's commands/) ?? '')
+  if (!refusal.includes('`reconcile-rollout.py`, every verb but `status` and `fold-journals`') ||
+    !refusal.includes('a task-keyed verb with `--rollout` left off') || !another.includes("orient-all's Sign-off")) fail('doc')
   if (!t.doc.includes('`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`') ||
     !doc.includes('The plugin root counts only when it is the toplevel of its own work tree') ||
     !doc.includes('A sign-off pause never moves') || !doc.includes('its reinstate keeps the signed-gate handles') ||
@@ -147,13 +153,15 @@ function check(t) {
   const st4 = collapse(section(t.status, /^### 4\. /) ?? '')
   if (!st1.includes('**Engine snapshot first (ADR 0043).**') || !st1.includes('`ENGINE SNAPSHOT UNUSABLE: <why>`') ||
     !st1.includes('go on from the session root')) fail('status')
-  for (const form of ['`Engine: snapshot <sha12> · Primary checkout at <head12> (<a> ahead, <b> behind)`', '`Engine: Primary checkout (no snapshot)`',
+  if (!st1.includes('`ENGINE SNAPSHOT RESOLVE FAILED: <its stderr line>` and stop, with nothing read from the rendered root')) fail('status')
+  for (const form of ['`Engine: snapshot <sha12> (<a> ahead, <b> behind the Primary checkout at <head12>)`', '`Engine: Primary checkout (no snapshot)`',
     '`Engine: plugin cache <root> (no snapshot)`']) if (!st4.includes(form)) fail('status')
 
   // repair: § 1 resolves first; exit 3 stops the run with the remedy; a hand-off cuts nothing.
   const rp1 = collapse(section(t.repair, /^### 1\. /) ?? '')
   if (!rp1.includes('**Engine snapshot first (ADR 0043).**') || !rp1.includes('Exit 3 (the snapshot is gone, moved or edited) stops the run') ||
     !rp1.includes('a hand-off cuts nothing')) fail('repair')
+  if (!rp1.includes('or any other exit but 0 and 3, stops it the same way') || !rp1.includes('nothing runs from the rendered root')) fail('repair')
 
   // plugin-root: the When-it-applies bullet and rule 1's engine-root sentence.
   const pr = collapse(t.pluginRoot)
@@ -224,6 +232,17 @@ test('control: a heartbeat that cuts, and a retire after /thread:close, fail exe
   const line = ex.slice(i, j + 1)
   const moved = ex.replace(line, () => '').replace('\n\n   A done rollout left sitting in `Work/Tasks/`', () => `\n${line}\n   A done rollout left sitting in \`Work/Tasks/\``)
   only({ ...real, execute: moved }, 'execute', 'retire after the close')
+})
+
+test('control: § 1.5 without its resolve exit-2 halt fails execute', () => {
+  const ex = real.execute
+  const i = ex.indexOf('- **Exit 2** (a usage error')
+  const line = ex.slice(i, ex.indexOf('\n', i) + 1)
+  only(edit('execute', line, ''), 'execute', 'no exit-2 halt')
+})
+
+test('control: the refusal rule naming only --rollout verbs fails doc', () => {
+  only(edit('doc', 'so a task-keyed verb with `--rollout` left off', 'so a verb with no `--rollout`'), 'doc', 'task-keyed verbs dropped')
 })
 
 test('control: a merge-task exit 2 that always halts fails execute-pointers', () => {

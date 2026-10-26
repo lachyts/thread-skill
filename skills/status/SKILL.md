@@ -50,7 +50,7 @@ note has none: § 5).
 
 **Engine snapshot first (ADR 0043).** Whichever session runs it, status takes its scripts and prose from the rollout's own engine root (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/engine-snapshot.md`). This text's prose id: `$Id$` (git `ident`, engine-snapshot.md): pass its hex as `--prose-id`; when it shows no hex, pass none. Before any other read, run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py resolve --rollout <rollout-note> --verb status --prose-id <id>`.
-Its `root` is the engine root for every command below, and the hand-over is execute § 1.5's: when `prose.identical` is true keep following this text with `<root>` in place of the rendered root, else read `<root>/skills/status/SKILL.md` as a file and follow it from § 1 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`). Status never moves anything: its `move` field is only reported. Exit 3 (the snapshot is gone, moved or edited) → report `ENGINE SNAPSHOT UNUSABLE: <why>` (its stderr line) in the headline and go on from the session root. A reverse-lineage rollout's reads run from that rollout's own `resolve` root.
+Its `root` is the engine root for every command below, and the hand-over is execute § 1.5's: when `prose.identical` is true keep following this text with `<root>` in place of the rendered root, else read `<root>/skills/status/SKILL.md` as a file and follow it from § 1 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`). Status never moves anything: its `move` field is only reported. Exit 3 (the snapshot is gone, moved or edited) → report `ENGINE SNAPSHOT UNUSABLE: <why>` (its stderr line) in the headline and go on from the session root. Exit 2 (a usage error, such as a `--prose-id` given no value, or no note at that path), or any other exit but 0 and 3, prints no `root`: report `ENGINE SNAPSHOT RESOLVE FAILED: <its stderr line>` and stop, with nothing read from the rendered root. A reverse-lineage rollout's reads run from that rollout's own `resolve` root.
 
 **Lineage first, then the version.** A supersede carries a rollout's unlanded tasks to its successor whatever
 the prior's `protocol_version` (a legacy rollout is exactly what a supersede migrates), so status reads the
@@ -311,7 +311,7 @@ names, once), `ENGINE SNAPSHOT UNUSABLE: <why>` (§ 1) or the lineage (`supersed
 `superseded by [[<successor>]]`, or § 1's reverse lineage: `superseded by [[N]], close-out interrupted` or
 `superseded by [[N]], supersede interrupted`) when they apply.
 
-**The engine line**, right under the headline, from § 1's resolve: `Engine: snapshot <sha12> · Primary checkout at <head12> (<a> ahead, <b> behind)` (its `sha`, `primaryHead`, `ahead` and `behind`), `Engine: Primary checkout (no snapshot)` for an unstamped note with a git Primary, or `Engine: plugin cache <root> (no snapshot)` with none (`primary` null).
+**The engine line**, right under the headline, from § 1's resolve: `Engine: snapshot <sha12> (<a> ahead, <b> behind the Primary checkout at <head12>)` (its `sha`, `ahead`, `behind` and `primaryHead`: the counts are the snapshot's own, its commits the Primary's HEAD lacks and the Primary's commits it lacks, so a snapshot one commit behind a pulled Primary reads `0 ahead, 1 behind`), `Engine: Primary checkout (no snapshot)` for an unstamped note with a git Primary, or `Engine: plugin cache <root> (no snapshot)` with none (`primary` null).
 
 **The queue-state table.** One group per in-count `queueState`, in this order, each task on one line:
 

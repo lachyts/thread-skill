@@ -75,7 +75,9 @@ Its `root` is the engine root for every command below, and the hand-over is exec
 is true keep following this text with `<root>` in place of the rendered root, else read
 `<root>/skills/repair/SKILL.md` as a file and follow it from § 1 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`).
 Repair never moves a rollout's snapshot: a hand-off cuts nothing. Exit 3 (the snapshot is gone, moved or edited)
-stops the run before anything is written: print its stderr line, which carries the remedy. A guarded script run
+stops the run before anything is written: print its stderr line, which carries the remedy. Exit 2 (a usage error,
+such as a `--prose-id` given no value, or no note at that path), or any other exit but 0 and 3, stops it the same
+way, with its stderr line: it prints no `root`, so nothing runs from the rendered root. A guarded script run
 from another root refuses with an `engine-snapshot:` line and writes nothing: re-run it once from the root that
 line names. Another rollout's commands (a lineage close-out) run from that rollout's own `resolve` root. Run the **`/thread:status` scan with the live cross-check on**
 (repair is about to act, so it always checks reality): the per-task queue state, each task's
