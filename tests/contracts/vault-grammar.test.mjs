@@ -15,7 +15,9 @@
 // § Readers bullet says so (tests/estate-scan.test.mjs case 14 holds the behaviour); its `inFlight` goes through its
 // own in_flight helper. estate-dispatch.py (p25-3) loads Active, § In flight, the start stamp's reader and the
 // dependency rule a rollout row waits on (NA.OPEN_STATUSES, ES.in_flight, ES.link_live, RR._start_unattended,
-// RR._dep_status) and copies none of them.
+// RR._dep_status) and copies none of them. § Hold until (p30-3) states the PR hold (`hold_until:`), its two scopes, that
+// it is parallel-only, its two forms, its writers, readers, clearer and supersede; reconcile-rollout.py's HOLD_KEY is
+// pinned to it, and § Readers lists it.
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -62,7 +64,7 @@ def load(name, p):
 rp, rr, na = (load(n, p) for n, p in zip(("rp", "rr", "na"), sys.argv[1:4]))
 print(json.dumps({"LANDED": sorted(rp.LANDED), "ACTIVE": sorted(rp.ACTIVE), "PHASE_N": rp.PHASE_N,
                   "PHASED_STEM_RE": rr.PHASED_STEM_RE.pattern, "SHORT_ID_RE": rr.SHORT_ID_RE.pattern,
-                  "START_KEY": rr.START_KEY, "START_UNATTENDED": rr.START_UNATTENDED,
+                  "START_KEY": rr.START_KEY, "START_UNATTENDED": rr.START_UNATTENDED, "HOLD_KEY": rr.HOLD_KEY,
                   "DEAD_STATUSES": sorted(na.DEAD_STATUSES),
                   "OPEN_STATUSES": sorted(na.OPEN_STATUSES), "doc": rp.__doc__}))
 `
@@ -242,7 +244,7 @@ function readersOf(text) {
 }
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
   'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE',
-  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py', 'grades.py']
+  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py', 'grades.py', 'HOLD_KEY']
 const NOT_ADOPTED = []
 
 // The names of the failed § Readers checks; [] when every conforming reader is listed as such and, with
@@ -294,10 +296,32 @@ function startStampChecks(text, s) {
   return out
 }
 
+// ---- the hold until (p30-3) ----------------------------------------------------------------------------
+
+// The names of the failed § Hold until checks; [] when the section states the key in its flow form, both scopes, that
+// it is parallel-only (next refuses a serial note first), both forms, that a hold is never a sentence, its writers
+// (the template's commented line), readers (next and its gh read, status, /thread:status, the Chorus Stage), clearer
+// (next off --dry-run on MERGED, a compare-and-swap) and supersede (carry), and the script's HOLD_KEY equals the key.
+function holdUntilChecks(text, s) {
+  const sec = collapse(section(text, /^## Hold until$/) ?? '')
+  const key = sec.match(/written `([a-z_]+): \{pr: /)
+  if (!key) return ['states the key']
+  const out = []
+  if (s.HOLD_KEY !== key[1]) out.push('script constant')
+  for (const want of ['**Two scopes.**', 'rollout scope', 'task scope', '**Parallel-only.**', 'refuses a `shape: serial` note before it reads one',
+    '**Two forms.**', 'the block form Obsidian re-serialises it to', 'never a sentence', '**Writers**', '`# hold_until:`',
+    '**Readers**', '`reconcile-rollout.py next`', '`gh pr view <url|N> --json state,mergedAt,url`', '`reconcile-rollout.py status`',
+    '`/thread:status`', 'Chorus Stage', '**Clearer**', '--dry-run', 'MERGED', 'compare-and-swap', '**Supersede**',
+    '`reconcile-rollout.py carry`', 'fails closed']) {
+    if (!sec.includes(want)) out.push(`names ${want}`)
+  }
+  return out
+}
+
 // ---- tests --------------------------------------------------------------------------------------------
 
-test('the doc has the five sections the readers cite', () => {
-  for (const h of ['Phase and task filenames', 'Statuses', 'In flight', 'Rollout start stamp', 'Readers']) {
+test('the doc has the six sections the readers cite', () => {
+  for (const h of ['Phase and task filenames', 'Statuses', 'In flight', 'Rollout start stamp', 'Hold until', 'Readers']) {
     assert.ok(section(doc, new RegExp(`^## ${h}$`)), `${DOC} has no ## ${h}`)
   }
 })
@@ -405,6 +429,25 @@ test('control: a drifted stamp or a dropped writer fails the start-stamp check',
   assert.deepEqual(startStampChecks(mutate(doc, 'And `/thread:status`', 'And status'), s), ['names `/thread:status`'])
   assert.deepEqual(startStampChecks(mutate(doc, '## Rollout start stamp', '## Start stamp'), s), ['states the stamp'])
   assert.deepEqual(startStampChecks(doc, { ...s, START_UNATTENDED: 'auto' }), ['script constants'])
+})
+
+test("§ Hold until states the hold, its scopes, forms, writers, readers, clearer and supersede, and pins HOLD_KEY", () => {
+  assert.deepEqual(holdUntilChecks(doc, scripts()), [])
+})
+
+test('control: a drifted key, a dropped scope rule or a dropped reader fails the hold-until check', () => {
+  const s = scripts()
+  assert.deepEqual(holdUntilChecks(mutate(doc, 'written `hold_until: {pr: ', 'written `hold: {pr: '), s), ['script constant'])
+  assert.deepEqual(holdUntilChecks(doc, { ...s, HOLD_KEY: 'hold' }), ['script constant'])
+  assert.deepEqual(holdUntilChecks(mutate(doc, '- **Parallel-only.**', '- **Any shape.**'), s), ['names **Parallel-only.**'])
+  assert.deepEqual(holdUntilChecks(mutate(doc, 'refuses a `shape: serial` note before it reads one', 'reads a serial note too'), s),
+    ['names refuses a `shape: serial` note before it reads one'])
+  assert.deepEqual(holdUntilChecks(mutate(mutate(doc, 'A hold is never a sentence in the note.', 'A sentence works too.'),
+    'is frontmatter, never a sentence in the note', 'is frontmatter or a sentence'), s), ['names never a sentence'])
+  assert.deepEqual(holdUntilChecks(mutate(doc, 'And the Chorus Stage,', 'And the Stage,'), s), ['names Chorus Stage'])
+  assert.deepEqual(holdUntilChecks(mutate(doc, '`reconcile-rollout.py carry` (schedule step 6)', 'the supersede'), s),
+    ['names `reconcile-rollout.py carry`'])
+  assert.deepEqual(holdUntilChecks(mutate(doc, '## Hold until', '## Holds'), s), ['states the key'])
 })
 
 test('§ Readers lists every reader, and no Not yet adopted line is left', () => {

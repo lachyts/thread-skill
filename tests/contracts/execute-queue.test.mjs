@@ -706,6 +706,39 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !trGuard.includes('ends the turn `waiting` with `reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`, never § 7') ||
     !trGuard.includes("Like `next`'s own `trickle:` hold, it waits whatever else is set aside") ||
     !(S(skill, S7) ?? '').includes('and never while step 1.2 holds a seeded revise on the Trickle, a Trickle wait (§4.5 step 1.5)')) fails.push('trickle')
+
+  // hold (p30-3; vault-grammar § Hold until): `next` reads a PR hold itself, so the lead never asks whether one stands.
+  // Step 1.1 prints each cleared hold and makes a hold that waits on Lachy an (f) item; a rollout hold skips step 1.2
+  // whole, as a pause does (every part of it launches a call or re-queues a task), Integration carrying on, and a
+  // set-aside with its own hold is skipped the same way; step 1.5's `held` goes to § 7 only when Lachy must act (a
+  // rollout hold waiting on him, or no hold waiting on a merge), else ends `waiting` on `held until <pr> merges`; step
+  // 1.6 and § 5 register the heartbeat for that wait, and clause (7) reads its reason as no hold, so each tick re-runs
+  // `next`, which sees the merge; § 6's waiting bullet, § 7, § 8 and the driver's docstring and block reason name it.
+  const hoStand = sub(/^\*\*Standing approval \(ADR 0034\), first\.\*\*/)?.text ?? ''
+  const hookP8 = collapse(skill.split('\n').find((l) => l.startsWith('**The Stop-hook driver**')) ?? '')
+  const hbCron8 = collapse(skill.split('\n').find((l) => l.startsWith('**The heartbeat cron**')) ?? '')
+  const s7c = S(skill, S7)
+  if (!tr1.includes('Its `holdUntil` (a PR hold, `skills/_shared/vault-grammar.md` § Hold until) is read now too') ||
+    !tr1.includes('print `hold released: <pr> merged; hold_until cleared on [[<note>]]`') ||
+    !hoStand.includes('**A PR hold skips this whole step.** While any `holdUntil` entry with `scope: rollout` reads `held: true`, none of step 1.2 runs, as under a pause') ||
+    !hoStand.includes('Integration of the tasks that already have a PR carries on (sub-step 4)') ||
+    !hoStand.includes('A `setAside` entry that carries its own `holdUntil` (a task-scope hold) is skipped by every part of this step in the same way') ||
+    !hoStand.includes('`next` reads `halt: held`, never `stuck`') ||
+    !trGuard.includes('`held` → a PR hold') ||
+    !trGuard.includes('when a held entry with `scope: rollout` has `waits: you`, or no held entry has `waits: merge`, go to § 7 with `reason="hold_until needs you on [[<note>]]: <pr> closed unmerged"`') ||
+    !trGuard.includes('otherwise end the turn `waiting` with `reason="held until <pr> merges"` (the first held entry with `waits: merge`), never § 7') ||
+    !tr6.includes("A PR hold's wait (step 1.5's `held until …`) can stand with nothing in flight too: it registers the heartbeat, and each tick re-enters *Cold resume* through clause (7)") ||
+    !hbPara.includes("a PR hold's `waiting` turn (§4.5 step 1.5)") ||
+    !hb7.includes('nor is a `held until` reason (a PR hold: the PR may have merged, and only `next` reads it)') ||
+    !waitingB.includes('or a PR hold waits on its merge (`next` reports `halt: held`, §4.5 step 1.5)') ||
+    !waitingB.includes("a PR hold's (`held until …`)") ||
+    !s7c.includes('- `next` reports `halt: held` with a hold that waits on Lachy') ||
+    !s7c.includes('A **PR hold** that can release itself is not a halt: it ends `waiting`') ||
+    !hookP8.includes('a merge hold is in flight, a PR hold waits on its merge,') ||
+    !hbCron8.includes("as it does under a PR hold's wait") ||
+    !drvDoc.includes('or a PR hold waits on its merge (`next` reports `halt: held`, reason="held until …", execute §4.5 step 1.5') ||
+    !drvBlock.includes('a PR hold waits on its merge (`next` reports `halt: held`, ') ||
+    !drvBlock.includes('with its reason=\\"held until …\\", §4.5 step 1.5)')) fails.push('hold')
   return [...new Set(fails)]
 }
 
@@ -719,7 +752,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
-  'verify-slots', 'clone-root', 'trickle']
+  'verify-slots', 'clone-root', 'trickle', 'hold']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -1260,7 +1293,35 @@ test("control: the driver's docstring or block reason without the Trickle wait f
   only(drv('or a Trickle wait stands (`next` holds a task on the "', 'or (`next` holds a task on the "'), 'trickle', 'block reason')
 })
 
-test('the rules are all named (36) and each has a control', () => {
-  assert.equal(RULES.length, 36)
+// hold (p30-3)
+test('control: the PR hold missing from any one lead site fails hold', () => {
+  only(sk(' Its `holdUntil` (a PR hold, `skills/_shared/vault-grammar.md` § Hold until) is read now too:', ' Its `holdUntil` is ignored:'), 'hold', 'step 1.1 reads no hold')
+  only(sk(', none of step 1.2 runs, as under a pause:', ', step 1.2 runs as usual:'), 'hold', 'step 1.2 runs under a rollout hold')
+  only(sk(' A `setAside` entry that carries its own `holdUntil` (a task-scope hold) is skipped by every part of this step in the same way.', ''),
+    'hold', 'step 1.2 re-enters a task-scope hold')
+  only(sk('otherwise end the turn `waiting` with `reason="held until <pr> merges"`', 'otherwise go to § 7 with `reason="held until <pr> merges"`'),
+    'hold', 'the guard halts on a merge wait')
+  only(sk(" A PR hold's wait (step 1.5's `held until …`) can stand with nothing in flight too: it registers the heartbeat, and each tick re-enters *Cold resume* through clause (7), whose `next` reads the PR again and clears a merged hold.", ''),
+    'hold', 'step 1.6 without the PR hold wait')
+  only(sk(", a PR hold's `waiting` turn (§4.5 step 1.5)", ''), 'hold', 'the heartbeat not registered for it')
+  only(sk(', nor is a `held until` reason (a PR hold: the PR may have merged, and only `next` reads it)', ''), 'hold', 'clause (7) reads it as a hold')
+  only(sk(' or a PR hold waits on its merge (`next` reports `halt: held`, §4.5 step 1.5),', ''), 'hold', "§ 6's waiting bullet without it")
+  only(sk("a PR hold's (`held until …`), ", ''), 'hold', "§ 6's reasons without it")
+  only(sk('A **PR hold** that can release itself is not a halt: it ends `waiting`', 'A **PR hold** halts'), 'hold', '§ 7 halts on a merge wait')
+  const bullet7 = real.skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: held` with a hold that waits on Lachy'))
+  only(sk(bullet7 + '\n', ''), 'hold', 'no § 7 bullet')
+  only(sk(', a PR hold waits on its merge, a retry cool-down is pending', ', a retry cool-down is pending'), 'hold', "§ 8's Stop-hook paragraph without it")
+  only(sk(", as it does under a PR hold's wait (a `held until` reason is no hold to clause (7): only `next` sees the merge, and it releases the hold itself)", ''),
+    'hold', "§ 8's heartbeat paragraph without it")
+})
+test("control: the driver's docstring or block reason without the PR hold fails hold", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv('or a PR hold waits on its merge (`next` reports `halt: held`,\n              reason="held until …", execute §4.5 step 1.5, vault-grammar\n              § Hold until),\n', ''),
+    'hold', 'docstring')
+  only(drv('a PR hold waits on its merge (`next` reports `halt: held`, "\n            "with its reason=\\"held until …\\", §4.5 step 1.5) or ', 'or '), 'hold', 'block reason')
+})
+
+test('the rules are all named (37) and each has a control', () => {
+  assert.equal(RULES.length, 37)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

@@ -658,6 +658,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   ack keeps running, but its run gives no verdict: a verify or an
   integrate call is done again, while a task call's work is taken as it
   stands (ADR 0053). _Avoid_: clear, reset.
+- **Hold until** — a PR hold the engine reads: a `hold_until: {pr:
+  <owner/repo>#<N>, merged: true}` frontmatter key. On a parallel rollout
+  note it holds every start and restart until that PR merges (live calls and
+  Integration carry on); on a task note it holds that task's new calls.
+  `next` reads the PR through gh, reports `holdUntil` and `halt: held`,
+  releases the hold on the merge and clears the key itself, so the lead
+  waits instead of asking; a CLOSED or unreadable hold is Lachy's to edit.
+  A supersede's `carry` copies a rollout's hold to its successor. A hold kept
+  as a sentence in the note is read by nothing (the 2026-10-25 audit's Q50;
+  `skills/_shared/vault-grammar.md` § Hold until). _Avoid_: a hold sentence.
 - **Bookkeeping miss** — a window the canary could not read (`record
   missing`, `record unreadable`, `record not armed`): it observed nothing, so
   it never trips. It is logged with the checkout's state, read there and
