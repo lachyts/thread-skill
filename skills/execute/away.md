@@ -1,6 +1,6 @@
 # Away and the Trickle — how many Rollout tasks the Mac runs at once
 
-By day, while Lachy is at the Mac, at most a few Rollout tasks run across the whole Mac, whatever the number of Rollouts: the **Trickle** (Chorus ADR 0104 d2). While he is **Away**, every Rollout runs to its own `parallel_ceiling` (Chorus ADR 0104 d3). Chorus says whether he is Away; this repo's queue keeps the count (Chorus ADR 0104 d6), so a Rollout run from a terminal obeys it too.
+By day, while Lachy is at the Mac, at most a few Rollout tasks run across the whole Mac, whatever the number of Rollouts: the **Trickle** (Chorus ADR 0104 d2). While he is **Away**, every Rollout runs to its own `parallel_ceiling` (Chorus ADR 0104 d3). Toward the Morning, a task starts only if it will finish by then: the **last starts** (Chorus ADR 0104 d4), and each night's held starts and overruns are recorded (§ The night record). Chorus says whether he is Away; this repo's queue keeps the count (Chorus ADR 0104 d6), so a Rollout run from a terminal obeys it too.
 
 thread-skill owns the state file below as its one reader: `next` (`skills/execute/scripts/reconcile-rollout.py`, `_away_state`) reads it on every call, and nothing else here does. The lead never reads or writes it. Any writer may write it: Chorus does, and so may a person by hand (§ Without a writer).
 
@@ -14,7 +14,7 @@ It is one JSON object, read as at most 64 KiB of UTF-8. All five keys are requir
 |---|---|---|
 | `away` | a JSON boolean | True while Lachy is Away (Chorus ADR 0104 d1: the Evening, an Away block or the Lunch restart). |
 | `until` | ISO 8601 with an offset or `Z` (a naive stamp is refused as ambiguous) | When this state is next due to change. Away: the Morning's hour, or the end of the Away block, that ends it. Not Away: the next Evening's hour, or the start of the next Away block. With no change scheduled: any time after the writer's next refresh. In both states a passed `until` reads stale. |
-| `morning` | `"HH:MM"`, 00:00 to 23:59 | The Morning's hour, in local wall-clock time (the Mac's system time zone). `next` checks its shape and reports it; the last starts toward the Morning (Chorus ADR 0104 d4) are a later task's. |
+| `morning` | `"HH:MM"`, 00:00 to 23:59 | The Morning's hour, in local wall-clock time (the Mac's system time zone). `next` checks its shape and reports it, and reads it for the last starts (§ The last starts): an Away `until` on this hour is a night. |
 | `trickle` | a JSON integer of at least 1 | N, the most Rollout tasks the Mac runs while not Away. A bool, a float, a string or 0 is refused: the Trickle is never 0 (§ The Trickle). |
 | `written_at` | ISO 8601 with an offset or `Z` | When the writer last wrote the file. |
 
@@ -80,7 +80,63 @@ Two leads can overshoot the Trickle by at most one call's starts each: the windo
 
 ## Away
 
-A fresh file with `away: true` gives each Rollout its own `parallel_ceiling`, nothing else changed: `slotLimit` is the ceiling, the count elsewhere is still reported, and a hold reads `ceiling:` as it always has. What is still running at the Morning finishes; nothing new starts above the Trickle until he is Away again (Chorus ADR 0104 d4).
+A fresh file with `away: true` gives each Rollout its own `parallel_ceiling`, nothing else changed: `slotLimit` is the ceiling, the count elsewhere is still reported, and a hold reads `ceiling:` as it always has. What is still running at the Morning finishes; nothing new starts above the Trickle until he is Away again (Chorus ADR 0104 d4). While Away runs to the Morning, the last starts hold a start that would not finish by it (§ The last starts).
+
+## The last starts
+
+Toward the Morning a task starts only if its kind's usual length ends it by the Morning's hour; with no history for its kind, nothing starts in the last two hours. Running tasks finish (Chorus ADR 0104 d4). `next` holds the start; the lead never reads the file or the history.
+
+**When they apply.** All three must hold:
+
+- a fresh file reads `away: true`;
+- its `until` is the Morning: read in local wall-clock time (the Mac's system time zone, as `morning` is), `until` falls on `morning`'s HH:MM to the minute;
+- M, that `until` with its seconds cut, is after now and at most 24 h ahead (now < M <= now + 24 h).
+
+M keeps `until`'s own offset, so a night across a daylight-saving change needs no wall-clock arithmetic. `until` must be the Morning because Chorus writes it as the latest end among what holds now (Chorus ADR 0104 § Built): the Morning's hour for the Evening and its 05:00 to 09:00 tail, the block's end for an Away block, Lunch's end for the Lunch restart. So the Evening, its tail, an Away block ending at the Morning and § Without a writer's hand-written file all apply.
+
+Nothing applies, and nothing is recorded, for any of these:
+
+- the Lunch restart, or a daytime Away block (an `until` of 13:00, 17:00 or 22:05);
+- an Away block ending before the Morning, or spanning it (until 11:00) while he is still away;
+- Away with `until` on the Morning but more than 24 h out (a weekend block until Monday's 09:00 before Sunday's, a hand-written file far ahead);
+- the 05:00 to 09:00 press of *the Evening, now* (until tomorrow's 09:00) toward today's 09:00: it applies only from today's 09:00, once tomorrow's Morning is 24 h out;
+- not Away: by day, or a missing, stale or unreadable file. The Trickle already bounds the Mac.
+
+**A task's kind and its usual length** (Chorus ADR 0099 d2's reading of past journals):
+
+- A task's kind is its note's `scope:` (lowercased), else `unscoped`.
+- Its past runs are read per project, the rollout's first `projects:` link (case ignored), from the folded `call-journal` lines of every per-rollout `<rollout>.jsonl` in the Run record's events dir (never `reviews`, `tunings`, `reflections` or `grades`). A file counts only when its rollout note (this rollout's own, or one `next`'s walk of `--tasks-dir` finds, `Archive/Rollouts/` included) names the same first project.
+- A call counts when its latest terminal line reads `status: completed` and `mode: task`, with an integer `durationMs` of at least 1 and an integer `startTime`; its end (`startTime` + `durationMs`) falls in the last 30 days; its file's `run-bound` line for that runId carries no `resumedFrom`; and its task's note is found (its kind is that note's). Each runId counts once.
+- The usual length is the median of the kind's lengths, with at least 3 past runs. Fewer than 3 is no history.
+- A rollout with no `projects:` reads no history. An events dir, file or line that cannot be read reads fewer runs, so the fallback holds more, never less.
+- The history is read once per call, and only when a start reaches the check or a ran-past line is due.
+
+**The rule.** A start is held when now + its usual length is past M, so a start that ends exactly at M starts. With no history its length is 2 h: it starts until exactly 2 h before M.
+
+**What they hold.** A queued task's start and a head Solo task's lone start, checked only once a Slot is found: a row held for want of one keeps its `ceiling:` (or `trickle:`) reason, and the Trickle never binds while Away. Restarts are exempt: a stalled `in_progress` task, a set-aside task handed back and a seeded revise each re-enter a task already begun, and running tasks finish. The hold reads, quote-free:
+
+- with history: `last start: <kind> usually takes <N> min (median of <k> past runs), past the Morning at <HH:MM>`, N the median rounded up to a minute;
+- with none: `last start: no history for <kind> (<k> past runs, 3 needed), none starts in the 2 h before the Morning at <HH:MM>`.
+
+A held row is skipped, never a stop: the next best row may still fit, so a short kind starts below a long one. A head Solo task the last starts hold reads `last start:`, and the rows below it read `behind solo [[…]]`. A git-env hold replaces every hold, and a pause holds its rows itself, so neither ever reads `last start:`.
+
+**It never halts.** While any row reads `last start:`, the rollout is neither `stuck` nor `awaiting-sign-off`: `halt` stays null and the lead waits (execute § 4.5 step 1.6). At the Morning the file reads not Away and the Trickle takes over. The Run record's `idle-slots` event reads `hold-last-start` whenever the call holds a row on `last start:` (after `hold-trickle`, which never co-occurs).
+
+**The output.** `next` adds one key after `trickle`, every other key unchanged: `lastStarts`, `{morning, kinds}`. `morning` is M as ISO 8601 with its local offset, or null when the last starts do not apply. `kinds` is `{<kind>: {usualMinutes, history}}` for each kind this call's start candidates read, sorted: `usualMinutes` the median rounded up to a minute, or null with no history, and `history` the kind's past runs. It is `{}` when they do not apply, or when no candidate reached the check.
+
+## The night record
+
+Per night, the starts the last starts held and the tasks still running at the Morning are recorded in each rollout's own Run record (`<rollout>.jsonl`, `skills/_shared/scripts/run_record.py`), the Reflection's input (ADR 0032), so a Reflection can tune the two-hour fallback and the Trickle's number (Chorus ADR 0104's Consequences). `next` is the one writer: off `--dry-run`, once its refusals pass, after its `idle-slots` event, each line best-effort. It reads this rollout's record once per call, and writes each line once (a missing record is an empty one):
+
+- `away-night` `{morning}`, no task: one per (rollout, M), on any call where the last starts apply. It is the night's denominator, nights with no hold included. A daytime Away block never writes one.
+- `last-start-held` `{morning, scope, history, usualMinutes?}`: one per (task, M), for each row of the call's final holds that reads `last start:`. A git-env or pause hold writes none.
+- `ran-past-morning` `{morning, slotTakenAt, scope, history, usualMinutes?}`: for every `away-night` marker in this record whose M is at or before now, one per (task, M) for each task whose Slot was open at M: its first `slot-taken` before M, and no `slot-freed` (or `carried` in this, its from-file) at or before M, by the record's pairing rules. `slotTakenAt` is that `slot-taken`'s ts.
+
+The Slots are read from the record, never from notes, so a Morning the lead missed (down at 09:00), or a file gone stale after it, is still recorded at its next call, whatever the file then says. A dead lead's Slots count, as they do for the Trickle; a night whose writer died before the Morning ran at Trickle 2 from then on, so a task the Trickle started that was still open at M ran past it too. `scope` is the task note's kind (`unscoped` with no note); `history` and `usualMinutes` are the kind's reading at the write (`usualMinutes` only with history), so a Reflection tells a fallback overrun from an underestimate.
+
+`morning` and `slotTakenAt` are UTC `Z` stamps. A night is keyed by its `morning`: its record is the union of the three kinds sharing that `morning` across every `<rollout>.jsonl`. A rollout with no `next` call while Away to the Morning (every Slot busy all night with tasks begun by day) writes no marker, so that night has no record for it. Serial rollouts never run `next`, so they are outside the last starts, as they are outside the Trickle.
+
+An unreadable record writes no night line, since its dedupe cannot be checked: while the last starts apply, `next` prints one `run_record: warning: night record not written: <why>` line on stderr; otherwise it is silent.
 
 ## Without a writer
 
@@ -102,4 +158,4 @@ os.replace(path + ".tmp", path)
 PY
 ```
 
-A hand-written file goes stale at its `until`, or 24 h after its `written_at`, whichever comes first; from then on each lead prints the `WARN: ~/.config/thread/away.json stale: …` line on every `next` call, and the Mac is back at Trickle 2. Delete the file to go back to the default with no WARN.
+Its `until` is the Morning, so the last starts apply to it (§ The last starts). A hand-written file goes stale at its `until`, or 24 h after its `written_at`, whichever comes first; from then on each lead prints the `WARN: ~/.config/thread/away.json stale: …` line on every `next` call, and the Mac is back at Trickle 2. Delete the file to go back to the default with no WARN.

@@ -11,14 +11,19 @@
 //   morning     the `morning` row is local wall-clock time
 //   serial      serial rollouts are outside the count, said with its reason
 //   warn        away.md's WARN line is the code's: AWAY_WARN, then `<stale|unreadable>: <why>`, then the reading
-//   hold-back   every "only … holds one back" claim names the Trickle: the rollout template's, schedule § 5's and
-//               CONTEXT.md's **Queue**
-//   glossary    CONTEXT.md has **Trickle** and **Away** entries, each citing its Chorus ADR 0104 decision (d2, d3)
+//   hold-back   every "only … holds one back" claim names the Trickle and (p28-2) the last starts: the rollout
+//               template's, schedule § 5's and CONTEXT.md's **Queue**
+//   glossary    CONTEXT.md has **Trickle**, **Away** and (p28-2) **Last starts** entries, each citing its Chorus ADR 0104
+//               decision (d2, d3, d4)
 //   restart     § The Trickle says a restart waits on the ceiling alone, never `slotLimit`, and that a new start counts
 //               every in_progress task of this rollout, live or stalled (the round-1 respawn deadlock)
 //   no-lead     § The Trickle says a parallel rollout with no lead holds the Trickle for nobody, and its remedy: the
 //               rollout named in `trickle.elsewhere`, a `paused:` stamp, a liveness signal left to a later task
 //   sample      § Without a writer's hand-written `until` is the next 09:00 strictly after now, never tomorrow's always
+//   last-starts (p28-2) § The last starts states the code's numbers (LAST_START_FALLBACK, LAST_START_MIN_RUNS,
+//               LAST_START_HISTORY, LAST_START_HORIZON) and its reason prefix, that `until` must be the Morning, that
+//               restarts and revises are exempt and that the hold never halts
+//   night-record (p28-2) § The night record names the code's NIGHT_KINDS, and run_record.py's KINDS holds each
 // One function (checkAway) returns named failures, so the real files and each control (one mutation, exactly its
 // rule) run through identical logic. Reads files only.
 import { test } from 'node:test'
@@ -28,6 +33,7 @@ import { collapse, read } from '../lib/contract-text.mjs'
 const real = {
   away: read('skills/execute/away.md'),
   code: read('skills/execute/scripts/reconcile-rollout.py'),
+  runRecord: read('skills/_shared/scripts/run_record.py'),
   template: read('skills/schedule/rollout-template.md'),
   schedule: read('skills/schedule/SKILL.md'),
   context: read('CONTEXT.md'),
@@ -51,7 +57,7 @@ function entry(text, name) {
   return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
 }
 
-function checkAway({ away, code, template, schedule, context }) {
+function checkAway({ away, code, runRecord, template, schedule, context }) {
   const fails = []
   const keys = (grab(code, /^AWAY_KEYS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((s) => s.slice(1, -1)) ?? []
   const fileRel = grab(code, /^AWAY_FILE_REL = "([^"]*)"/m)
@@ -100,11 +106,17 @@ function checkAway({ away, code, template, schedule, context }) {
 
   const tmplQueue = collapse(template.split('\n').find((l) => l.startsWith('Tasks run in parallel up to `parallel_ceiling`')) ?? '')
   const sched5 = collapse(schedule.split('\n').find((l) => l.startsWith('The rollout is a queue (ADR 0030 decision 1)')) ?? '')
+  const LAST_BACK = 'holds one back (toward the Morning while Away, the last starts too)'
   if (!/a Solo task or, by day, the Trickle \(.*Chorus ADR 0104; execute `away\.md`\) holds one back/.test(tmplQueue) ||
     !sched5.includes('only a dependency, a Solo task or, by day, the Trickle (Chorus ADR 0104; execute `away.md`) holds one back') ||
-    !entry(context, 'Queue').includes('**Solo** task and, by day, the **Trickle**')) fails.push('hold-back')
+    !entry(context, 'Queue').includes('**Solo** task and, by day, the **Trickle**') ||
+    !tmplQueue.includes(LAST_BACK) || !sched5.includes(LAST_BACK) ||
+    !entry(context, 'Queue').includes('and, toward the Morning, the **Last starts**')) fails.push('hold-back')
 
-  if (!entry(context, 'Trickle').includes('(Chorus ADR 0104 d2)') || !entry(context, 'Away').includes('(Chorus ADR 0104 d3)')) fails.push('glossary')
+  if (!entry(context, 'Trickle').includes('(Chorus ADR 0104 d2)') || !entry(context, 'Away').includes('(Chorus ADR 0104 d3)') ||
+    !entry(context, 'Last starts').includes('(Chorus ADR 0104 d4)') || !entry(context, 'Night record').includes('_Avoid_: night log')) {
+    fails.push('glossary')
+  }
 
   if (!trickleS.includes('**A restart waits on the ceiling alone.**') || !trickleS.includes('never by `slotLimit`') ||
     !trickleS.includes('counting every `in_progress` task of this rollout, live or stalled')) fails.push('restart')
@@ -118,6 +130,30 @@ function checkAway({ away, code, template, schedule, context }) {
     !writer.includes('if until <= now:\n    until += datetime.timedelta(days=1)') ||
     /now \+ datetime\.timedelta\(days=1\)/.test(writer)) fails.push('sample')
 
+  // last-starts: the numbers and the prefix are the code's, read from it, so a change on either side fails.
+  const fallbackH = grab(code, /^LAST_START_FALLBACK = timedelta\(hours=(\d+)\)/m)
+  const minRuns = grab(code, /^LAST_START_MIN_RUNS = (\d+)/m)
+  const historyD = grab(code, /^LAST_START_HISTORY = timedelta\(days=(\d+)\)/m)
+  const horizonH = grab(code, /^LAST_START_HORIZON = timedelta\(hours=(\d+)\)/m)
+  const prefix = grab(code, /^LAST_START_PREFIX = "([^"]*)"/m)
+  const lastS = collapse(h2(away, 'The last starts'))
+  if (!fallbackH || !minRuns || !historyD || !horizonH || !prefix ||
+    !lastS.includes(`With no history its length is ${fallbackH} h: it starts until exactly ${fallbackH} h before M.`) ||
+    !lastS.includes(`with at least ${minRuns} past runs. Fewer than ${minRuns} is no history.`) ||
+    !lastS.includes(`falls in the last ${historyD} days`) ||
+    !lastS.includes(`at most ${horizonH} h ahead (now < M <= now + ${horizonH} h)`) ||
+    !lastS.includes(`\`${prefix} <kind> usually takes <N> min (median of <k> past runs), past the Morning at <HH:MM>\``) ||
+    !lastS.includes(`\`${prefix} no history for <kind> (<k> past runs, ${minRuns} needed), none starts in the ${fallbackH} h before the Morning at <HH:MM>\``) ||
+    !lastS.includes('its `until` is the Morning: read in local wall-clock time') ||
+    !lastS.includes('Restarts are exempt: a stalled `in_progress` task, a set-aside task handed back and a seeded revise') ||
+    !lastS.includes('**It never halts.** While any row reads `last start:`')) fails.push('last-starts')
+
+  // night-record: NIGHT_KINDS are the three, each named in § The night record and each one of run_record.py's KINDS.
+  const nightKinds = (grab(code, /^NIGHT_KINDS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((s) => s.slice(1, -1)) ?? []
+  const nightS = h2(away, 'The night record')
+  if (JSON.stringify(nightKinds) !== JSON.stringify(['away-night', 'last-start-held', 'ran-past-morning']) ||
+    nightKinds.some((k) => !nightS.includes(`- \`${k}\` `) || !(runRecord ?? '').includes(`    "${k}": (`))) fails.push('night-record')
+
   return fails
 }
 
@@ -128,7 +164,7 @@ test('away.md, the code that reads the file and the hold-back prose agree', () =
 // ---- controls: each mutates one place and must fail with exactly its rule ---------------------------------------
 
 const RULES = ['keys', 'path', 'staleness', 'default', 'refresh', 'until', 'morning', 'serial', 'warn', 'hold-back', 'glossary',
-  'restart', 'no-lead', 'sample']
+  'restart', 'no-lead', 'sample', 'last-starts', 'night-record']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -182,10 +218,15 @@ test('control: a hold-back claim without the Trickle fails hold-back', () => {
   only('schedule', 'only a dependency, a Solo task or, by day, the Trickle (Chorus ADR 0104; execute `away.md`) holds one back',
     'only a dependency or a Solo task holds one back', 'hold-back', 'schedule § 5')
   only('context', '**Solo** task and, by day, the **Trickle**, never a shared file', '**Solo** task, never a shared file', 'hold-back', 'CONTEXT Queue')
+  only('template', ' holds one back (toward the Morning while Away, the last starts too), never', ' holds one back, never', 'hold-back', 'template, last starts')
+  only('schedule', ' holds one back (toward the Morning while Away, the last starts too).', ' holds one back.', 'hold-back', 'schedule § 5, last starts')
+  only('context', ',\n  and, toward the Morning, the **Last starts**;', ';', 'hold-back', 'CONTEXT Queue, last starts')
 })
 test('control: a glossary entry without its ADR fails glossary', () => {
   only('context', 'Chorus sets another (Chorus ADR 0104 d2)', 'Chorus sets another', 'glossary', 'Trickle')
   only('context', '**Parallel ceiling** (Chorus ADR 0104 d3)', '**Parallel ceiling**', 'glossary', 'Away')
+  only('context', ' (Chorus\n  ADR 0104 d4). They apply', '. They apply', 'glossary', 'Last starts')
+  only('context', '- **Night record** —', '- **Night log** —', 'glossary', 'no Night record entry')
 })
 
 test('control: a restart bounded by slotLimit, or starts that skip stalled tasks, fail restart', () => {
@@ -205,7 +246,26 @@ test("control: a hand-written until that is always tomorrow's 09:00 fails sample
   only('away', from, 'until = (now + datetime.timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)\n', 'sample', 'always tomorrow')
 })
 
-test('the rules are all named (14) and each has a control', () => {
-  assert.equal(RULES.length, 14)
+test('control: a fallback, a run count or a rule the code and § The last starts disagree on fails last-starts', () => {
+  only('code', 'LAST_START_FALLBACK = timedelta(hours=2)', 'LAST_START_FALLBACK = timedelta(hours=3)', 'last-starts', 'a 3 h fallback')
+  only('away', 'with at least 3 past runs. Fewer than 3 is no history.', 'with at least 4 past runs. Fewer than 4 is no history.', 'last-starts', '4 past runs')
+  only('code', 'LAST_START_HISTORY = timedelta(days=30)', 'LAST_START_HISTORY = timedelta(days=60)', 'last-starts', '60 days')
+  only('code', 'LAST_START_HORIZON = timedelta(hours=24)', 'LAST_START_HORIZON = timedelta(hours=36)', 'last-starts', 'a 36 h horizon')
+  only('code', 'LAST_START_PREFIX = "last start:"', 'LAST_START_PREFIX = "morning:"', 'last-starts', 'another prefix')
+  const l = real.away.split('\n').find((x) => x.startsWith('- its `until` is the Morning:'))
+  only('away', l + '\n', '', 'last-starts', 'the until rule dropped')
+  only('away', 'Restarts are exempt: a stalled `in_progress` task, a set-aside task handed back and a seeded revise each re-enter a task already begun, and running tasks finish.',
+    'Restarts are held too.', 'last-starts', 'no exemption')
+  only('away', '**It never halts.** While any row reads `last start:`', '**It halts stuck.** While any row reads `last start:`', 'last-starts', 'it halts')
+})
+test('control: a night kind the doc or the writer lacks fails night-record', () => {
+  only('away', '- `ran-past-morning` `{morning,', '- `ran-past` `{morning,', 'night-record', 'dropped from the doc')
+  only('runRecord', '    "ran-past-morning": (', '    "ran-past": (', 'night-record', 'dropped from KINDS')
+  only('code', 'NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")', 'NIGHT_KINDS = ("away-night", "last-start-held")',
+    'night-record', 'dropped from NIGHT_KINDS')
+})
+
+test('the rules are all named (16) and each has a control', () => {
+  assert.equal(RULES.length, 16)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

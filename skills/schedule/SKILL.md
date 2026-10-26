@@ -436,7 +436,7 @@ Present the offers in the confirm batch, beside step 5's Solo and dependency pro
 
 ### 5. Order the queue
 
-The rollout is a queue (ADR 0030 decision 1): tasks run in parallel up to `parallel_ceiling`, each from the `main` of its start, and only a dependency, a Solo task or, by day, the Trickle (Chorus ADR 0104; execute `away.md`) holds one back. Schedule decides the order, written as the `## Queue` table's rows (step 6): a task's row is its schedule rank.
+The rollout is a queue (ADR 0030 decision 1): tasks run in parallel up to `parallel_ceiling`, each from the `main` of its start, and only a dependency, a Solo task or, by day, the Trickle (Chorus ADR 0104; execute `away.md`) holds one back (toward the Morning while Away, the last starts too). Schedule decides the order, written as the `## Queue` table's rows (step 6): a task's row is its schedule rank.
 
 Solo and dependency proposals apply only to tasks in the `queued` state, and the confirm batch offers them for no other task. Step 7 writes nothing to a carried task that has started (running, awaiting or in Integration, or set aside), so a confirmed `solo: true` or `depends-on:` on one would be silently dropped, and a started task can't be held back anyway. Such a task keeps its place in the order (1. below) all the same.
 
