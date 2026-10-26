@@ -63,9 +63,13 @@ still serves as a baseline, its missing keys read as no baseline.
   reverts), never a baseline (score.py's load_tunings reads only a string repo) and never a move of a key.
 
 grades.jsonl holds the Grade log (p25-4, ADR 0041; CONTEXT.md **Grade log**): one `grade` line per graded task per
-estate pass, every line of a pass sharing its `pass` id, its `digest` and its ts. skills/_shared/scripts/estate-dispatch.py
-`log` is its one writer (orient-all § 2 step 7, never on a dry run) and skills/reflect/scripts/grades.py its one reader
-(the weekly reading's grade accuracy, joined to outcomes at read time). A grade line carries no rollout, and a task:
+estate pass or schedule Pre-flight (ADR 0047), every line of a pass sharing its `pass` id, its `digest` and its ts.
+skills/_shared/scripts/estate-dispatch.py `log` is its one writer (orient-all § 2 step 7, never on a dry run, and
+schedule § 1.5 on every run that grades, all but an orient-all fork, whose estate pass logged them) and
+skills/reflect/scripts/grades.py its one reader (the weekly reading's grade accuracy, joined to outcomes at read
+time). A schedule run that regrades a task the estate pass graded ends that estate episode as `regraded`, normally
+undispatched and so outside the rate; a Pre-flight grade's `held` counts holds on dependencies outside the rollout
+too. A grade line carries no rollout, and a task:
 a graded task whose name normalise_slug refuses (a vault note named with spaces or capitals) has no line, `log` skips
 it and reports it.
 
@@ -134,7 +138,19 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   hold-ended         hold (merge | git-env | race)
   idle-slots         reason (dependency | solo | pause-drain | queue-tail | awaiting-hand-back |
                      hold-merge | hold-git-env | hold-race | hold-trickle: a row waits on the machine-wide Trickle,
-                     execute away.md); free (int >= 0); settings (as slot-taken)
+                     execute away.md | hold-last-start: a row the last starts hold toward the Morning, p28-2);
+                     free (int >= 0); settings (as slot-taken)
+  away-night         morning (a UTC Z stamp, to the second: M, the Morning the last starts looked toward while Away
+                     ran to it). p28-2, the night record (execute away.md § The night record): reconcile-rollout.py
+                     `next` writes one per (rollout, M) on a call off --dry-run while the last starts apply, so a
+                     Reflection counts the nights, zero-hold nights included.
+  last-start-held T  morning, scope (the task note's kind, `unscoped` with none), history (int >= 0: the kind's
+                     past runs); usualMinutes? (int >= 1: the ceiling of their median, only at 3 runs or more). p28-2:
+                     one per (task, M), for each row a call's final holds hold on `last start:`.
+  ran-past-morning T morning, slotTakenAt (a UTC Z stamp: the open Slot's first slot-taken ts), scope, history;
+                     usualMinutes? (both the kind's reading at the write, so a Reflection tells a fallback overrun
+                     from an underestimate). p28-2: one per (task, M), for each task whose Slot was open at a marked
+                     Morning (taken before it, not freed at or before it), read from this record's Slot intervals.
   quota-stall        stage?; detail?
   auto-retry      T  stage (plan | implement | verify | review | integrate: the stage of the block it re-enters,
                      the task's latest set-aside line's), setAsideAt (run | integration), retryClass (agent | infra
@@ -336,6 +352,9 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   quiet flags, never from a written value. A line's `cadence` records the rule's value as that Reflection closed it,
   its own line counted (reflect.py's close writes it on every line, so each change is on a record line); absent (a
   line from before p21-8) reads as 7.
+- The night record (p28-2): a night is assembled by its `morning`. Its record is the union of the away-night,
+  last-start-held and ran-past-morning lines sharing that `morning` across every <rollout>.jsonl: the marker is
+  per (rollout, M), the others per (task, M), each written once (the writer checks the record first).
 - Skip a line that does not parse: a crash can leave a last line with no newline, which the next append
   then merges with (a known limit; checking the tail would mean locking every emit).
 
@@ -733,8 +752,13 @@ KINDS = {
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
     "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
-                                           "hold-merge", "hold-git-env", "hold-race", "hold-trickle"),
+                                           "hold-merge", "hold-git-env", "hold-race", "hold-trickle", "hold-last-start"),
                            "free": _int(0), "settings": SETTINGS}, {}),
+    # The night record (p28-2, Chorus ADR 0104's Consequences): reconcile-rollout.py `next` is its one writer.
+    "away-night": (False, {"morning": _stampz}, {}),
+    "last-start-held": (True, {"morning": _stampz, "scope": _str, "history": _int(0)}, {"usualMinutes": _int(1)}),
+    "ran-past-morning": (True, {"morning": _stampz, "slotTakenAt": _stampz, "scope": _str, "history": _int(0)},
+                         {"usualMinutes": _int(1)}),
     "quota-stall": (False, {}, {"stage": _str, "detail": _str}),
     "auto-retry": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate"),
                           "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),

@@ -48,10 +48,15 @@ re-send or a repair hand-off is no § 1 entry for a lead already in hand: it kee
 
 ## Another rollout's commands
 
-A command on another rollout (schedule's nine prior-acting commands on a superseded rollout, a lineage read, a
+A command on another rollout (schedule's ten prior-acting commands on a superseded rollout, a lineage read, a
 close-out) runs from that rollout's own `resolve` root: the Primary for an unstamped prior, never this run's snapshot.
 So does a write to a rollout from a session that runs none: orient-all's Sign-off (§ 4) resolves the task's
 `rollout:` and runs `approve-gates --tasks <slug> --rollout <its note>` from the `root` that prints.
+
+Schedule's Pre-flight scripts (`estate-scan.py`, `estate-dispatch.py` `slices`, `preflight`, `record` and `log`,
+`estate-rank.py rank`) run from the session's own root: they are unguarded and write no rollout note, and `record`'s
+`## Decisions (asked ahead <date>)` bullet into a carried queued task is a form every engine reads as note text
+(ADR 0047 § Build rulings).
 
 ## The refusal rule
 

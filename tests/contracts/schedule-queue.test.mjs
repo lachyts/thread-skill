@@ -213,10 +213,10 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
   // line that clears it, and skips a note only when its Rollout run line names this rollout, flagging one that names
   // another (a carried task's line for the superseded rollout) so it is rewritten. A `## Launch` repo of another
   // repository is no capture shape: it goes back to § 0's misfit rule, dropped and never cleared. The block is read
-  // up to the next pre-flight block, so another block's wording can't stand in for its own.
+  // up to the next checklist block, so another block's wording can't stand in for its own.
   const s8c = section(schedule, S8) ?? ''
-  const capAt = s8c.indexOf('**Pre-flight — capture-shaped notes.**')
-  const capEnd = s8c.indexOf('**Pre-flight — ', capAt + 1)
+  const capAt = s8c.indexOf('**Checklist — capture-shaped notes.**')
+  const capEnd = s8c.indexOf('**Checklist — ', capAt + 1)
   const cap = capAt < 0 ? '' : collapse(s8c.slice(capAt, capEnd < 0 ? undefined : capEnd))
   const capS = sentences(cap)
   if (capAt < 0 || !closeTemplateLine(taskWriter).includes('mark the capture done') ||
@@ -267,17 +267,17 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
   // ladder-refused-preflight: under a refused ladder, step 7 still drops the drop-only keys but leaves a top-mapping
   // legacy stamp for execute's compat read; step 8's block shows ladder.py's stderr and the left-in-place tasks.
   const s8 = section(schedule, S8) ?? ''
-  const pre = s8.slice(s8.indexOf('**Pre-flight — ladder refused.**'))
+  const pre = s8.slice(s8.indexOf('**Checklist — ladder refused.**'))
   if (!s7.includes('When `ladder.py` refused at schedule time, still remove the drop-only keys') ||
     !s7.includes('leave a top-mapping legacy stamp in place, unmapped') || !s7.includes("execute's compat read") ||
-    s8.indexOf('**Pre-flight — ladder refused.**') < 0 || !collapse(pre).includes('show its stderr line verbatim') ||
+    s8.indexOf('**Checklist — ladder refused.**') < 0 || !collapse(pre).includes('show its stderr line verbatim') ||
     !pre.includes("— model: fable left for execute's compat read")) fails.push('ladder-refused-preflight')
 
   // legacy-left-preflight: an unrecognised legacy value step 7 leaves on a non-carried candidate is listed in step 8's
   // own block, one line per value in carry's `WARN:` format.
-  const left = s8.slice(s8.indexOf('**Pre-flight — legacy values left in place.**'))
-  if (!s7.includes('leave an unrecognised value in place, listing it in step 8\'s "Pre-flight — legacy values left in place" block') ||
-    s8.indexOf('**Pre-flight — legacy values left in place.**') < 0 ||
+  const left = s8.slice(s8.indexOf('**Checklist — legacy values left in place.**'))
+  if (!s7.includes('leave an unrecognised value in place, listing it in step 8\'s "Checklist — legacy values left in place" block') ||
+    s8.indexOf('**Checklist — legacy values left in place.**') < 0 ||
     !left.includes('WARN: schedule: task-w: effort: banana unrecognised, left in place')) fails.push('legacy-left-preflight')
 
   // no-tier: the skill and the template speak no tier: none of the tier words, no "step-up", no `model:` in the
@@ -519,7 +519,7 @@ test('control: § 3.5 keeping a quote-only match as a gate fails gate-quote-only
 })
 
 test('control: step 8 without the capture block, or task-writer rewording its close line, fails capture-preflight', () => {
-  only({ schedule: edit(real.schedule, S8, '**Pre-flight — capture-shaped notes.**', '**Pre-flight — other notes.**') },
+  only({ schedule: edit(real.schedule, S8, '**Checklist — capture-shaped notes.**', '**Checklist — other notes.**') },
     ['capture-preflight'], 'no block')
   // Only the template line changes: § 5's prose still names the phrase, so a § 5-wide match would pass this.
   const reworded = edit(real.taskWriter, null, 'First: you now own this work — mark the capture done:', 'First: you now own this work — close the capture:')
@@ -586,13 +586,13 @@ test('control: § 4.7 without its never-lower sentence fails rung-no-lower', () 
 })
 
 test('control: step 8 without the ladder-refused block fails ladder-refused-preflight', () => {
-  only({ schedule: edit(real.schedule, S8, '**Pre-flight — ladder refused.**', '**Pre-flight — other.**') }, ['ladder-refused-preflight'], 'no block')
+  only({ schedule: edit(real.schedule, S8, '**Checklist — ladder refused.**', '**Checklist — other.**') }, ['ladder-refused-preflight'], 'no block')
 })
 
 test('control: step 7 naming no block for an unrecognised value fails legacy-left-preflight', () => {
-  only({ schedule: edit(real.schedule, S7, 'listing it in step 8\'s "Pre-flight — legacy values left in place" block', "naming it in step 8's summary") },
+  only({ schedule: edit(real.schedule, S7, 'listing it in step 8\'s "Checklist — legacy values left in place" block', "naming it in step 8's summary") },
     ['legacy-left-preflight'], 'dangling reference')
-  only({ schedule: edit(real.schedule, S8, '**Pre-flight — legacy values left in place.**', '**Pre-flight — other values.**') },
+  only({ schedule: edit(real.schedule, S8, '**Checklist — legacy values left in place.**', '**Checklist — other values.**') },
     ['legacy-left-preflight'], 'no block')
 })
 

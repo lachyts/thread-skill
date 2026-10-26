@@ -14,6 +14,8 @@
 #   G1-G3b the guards: every wrong-root CLI refuses with `engine-snapshot:` and writes nothing (a task-keyed
 #          reconcile-rollout verb with --rollout left off, and reconcile's stdin rows, included); the exemptions;
 #          file-followup after Complete, and the retire race closed by the archived grace and close's re-resolve
+#   G4     schedule step 6's defer of a Pre-flight leaver (ADR 0047): refused from this run's root, then run from
+#          the prior's root before its carry, which carries only the rest; step 6's flags only
 #   K1     rollouts.toml's schema: a newer file's unknown key is ignored by an older reader, a typo still refused
 #   T1-T2  retire: the keep-list, the archived grace, an unreadable Archive, no Archive, no git Primary
 #   H1     ADR 0031's hold: only an unsnapshotted running rollout holds; a snapshot stands for its Primary; a cache
@@ -462,6 +464,39 @@ py "$P" skills/execute/scripts/reconcile-rollout.py touched-phases --rollout "$T
 pass "an archived note whose snapshot is gone"
 py "$B" skills/execute/scripts/reconcile-rollout.py touched-phases --rollout "$TASKS/r4g.md" --tasks-dir "$TASKS"
 ok "$rc" 2 "G2: a live note whose snapshot is gone refuses from any root"; has "$err" "is gone" "G2: … with gone"
+
+# ════ G4: schedule step 6's defer of a Pre-flight leaver, from the prior's root, before its carry ═══════════════
+# schedule § 1.5 (ADR 0047) leaves out a carried task still queued; step 6 takes it off the prior with the existing
+# `defer --tasks --rollout` (flags every snapshot has), run from the prior's root, then carries the rest from there.
+echo "== G4"
+G4EV="$T/g4-events"
+ro g4 "$STAMP" "$SHA"
+ro g4n 'supersedes: "[[g4]]"'
+g4t() { printf -- '---\ntags: [task]\nstatus: %s\nprojects:\n  - "[[Demo]]"\nrollout: "[[g4]]"\n---\n\n## Notes\n\nA task.\n' "$2" > "$TASKS/$1.md"; }
+g4t g4-q open; g4t g4-q2 open; g4t g4-s in_progress
+keep g4 g4n g4-q g4-q2 g4-s
+THREAD_EVENTS_DIR="$G4EV" py "$P" skills/execute/scripts/reconcile-rollout.py defer --tasks g4-q --rollout "$TASKS/g4.md" --tasks-dir "$TASKS"
+ok "$rc" 2 "G4: defer of a prior's task from this run's root (the Primary) → exit 2"
+has "$err" "engine-snapshot: [[" "G4: … the engine-snapshot: line"; has "$err" "$B" "G4: … naming the prior's snapshot"
+for n in g4 g4-q; do cmp -s "$TASKS/$n.md" "$T/before.$n"; ok "$?" 0 "G4: … $n byte-identical"; done
+THREAD_EVENTS_DIR="$G4EV" py "$B" skills/execute/scripts/reconcile-rollout.py defer --tasks g4-q --rollout "$TASKS/g4.md" --tasks-dir "$TASKS"
+ok "$rc" 0 "G4: the same defer from the prior's root → 0"; hasnt "$err" "engine-snapshot:" "G4: … no engine-snapshot: line"
+ok "$(fmv "$TASKS/g4-q.md" rollout)|$(fmv "$TASKS/g4-q.md" status)" "<none>|open" "G4: … g4-q is unlinked and open"
+THREAD_EVENTS_DIR="$G4EV" py "$B" skills/execute/scripts/reconcile-rollout.py carry --from "$TASKS/g4.md" --to "$TASKS/g4n.md" --tasks-dir "$TASKS"
+ok "$rc" 0 "G4: then the carry from the prior's root → 0"
+has "$out" "carry g4-q2 queued" "G4: … carries the queued task left in"; has "$out" "carry g4-s running" "G4: … and the started one"
+hasnt "$out" "g4-q " "G4: … and never names the leaver"
+ok "$(fmv "$TASKS/g4-q2.md" rollout)|$(fmv "$TASKS/g4-s.md" rollout)|$(fmv "$TASKS/g4-q.md" rollout)" \
+   '"[[g4n]]"|"[[g4n]]"|<none>' "G4: … g4-q2 and g4-s link g4n, g4-q links nothing"
+# rec <record> [kind]: the sorted tasks of a Run record's lines (of that kind), one line; none when it is absent
+rec() { python3 -c 'import json, sys
+try:
+    rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+except OSError:
+    rows = []
+print(" ".join(sorted(str(r.get("task")) for r in rows if len(sys.argv) < 3 or r.get("kind") == sys.argv[2])))' "$@"; }
+ok "$(rec "$G4EV/g4n.jsonl" carried)" "g4-q2 g4-s" "G4: … g4n's Run record carries g4-q2 and g4-s only"
+case " $(rec "$G4EV/g4.jsonl") " in *" g4-q "*) ok has none "G4: … and g4's record has no line for g4-q";; *) ok none none "G4: … and g4's record has no line for g4-q";; esac
 
 # ════ K1: the settings schema across versions ═══════════════════════════════════════════════════════════════════
 echo "== K1"

@@ -25,6 +25,7 @@ parallel_ceiling: {{PARALLEL_CEILING}}
 # env_bootstrap:   # optional: shell cmd thread:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — thread:schedule step 2.7
 # completion_verifier:   # optional (estate ADR 0009 d6): the full suite of a project whose verifier: is its declared fast tier, run once on merged main at the completion ceremony. Uncomment with the project CLAUDE.md's `Completion verifier:` command — thread:schedule step 2.5
 # completion_timeout:   # optional (ADR 0052): seconds, 1 to 6600, for the completion verifier's run; absent: 3600. Never verify_timeout, which bounds the fast tier
+# touched: "tests/test_{module}.py"   # optional (estate ADR 0009 d1): how an agent finds one changed module's tests, the touched tests it runs between Checkpoints; a quoted path pattern with {module}, never starting with -. Absent: the repo's CLAUDE.md/AGENTS.md Tests line when it runs one module's tests (a full-suite-only line falls through), else the test files importing the changed modules
 # No rollout cursor: progress lives on the task notes' started:/merged: stamps (ADR 0030; reconcile-rollout.py).
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when § 0 printed `supersede` (see SKILL.md steps 6 and 7.5)
 ---
@@ -53,7 +54,7 @@ The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-
 
 ## Queue
 
-Tasks run in parallel up to `parallel_ceiling`, each branching from the `main` of its start; only a dependency (`depends-on:`/`blocked-by:`), a Solo task or, by day, the Trickle (the machine-wide count of running Rollout tasks while Lachy is not Away, Chorus ADR 0104; execute `away.md`) holds one back, never a shared file. Every approved task goes through Integration (the latest `main` merged in, the verifier re-run) before its merge. When a slot frees, the next task is chosen by `priority:`, then least file overlap with what is running (`## File-sets`), then its row order here: the row is the task's schedule rank. A queued Solo task whose dependencies are met holds every task whose row is below it, whatever its `priority:`.
+Tasks run in parallel up to `parallel_ceiling`, each branching from the `main` of its start; only a dependency (`depends-on:`/`blocked-by:`), a Solo task or, by day, the Trickle (the machine-wide count of running Rollout tasks while Lachy is not Away, Chorus ADR 0104; execute `away.md`) holds one back (toward the Morning while Away, the last starts too), never a shared file. Every approved task goes through Integration (the latest `main` merged in, the verifier re-run) before its merge. When a slot frees, the next task is chosen by `priority:`, then least file overlap with what is running (`## File-sets`), then its row order here: the row is the task's schedule rank. A queued Solo task whose dependencies are met holds every task whose row is below it, whatever its `priority:`.
 
 The table's **Mode** column reads `solo` for a Solo task (nothing new starts beside it until it merges or is set aside), `sequential-merged (one agent/PR)` for a unit `/thread:schedule` folded from an affine same-file cluster (one agent works its sub-tasks in sequence on one branch/PR), `carried (<queue state>)` for a task carried from the rollout this one supersedes, and `—` for every other task.
 

@@ -56,6 +56,11 @@ T="$TMP/t2c.jsonl"
 assistant_line 'ROLLOUT-STATUS: demo merged=1/3 running=0 state=waiting reason="trickle: 3/2 tasks running on this Mac"' > "$T"
 run_driver "$T" s2c
 [ -z "$OUT" ] && ok "waiting on a Trickle wait allows stop" || fail "Trickle wait: expected empty, got: $OUT"
+# p28-2: a last-starts wait (execute §4.5 step 1.6) is a waiting turn too.
+T="$TMP/t2d.jsonl"
+assistant_line 'ROLLOUT-STATUS: demo merged=1/3 running=0 state=waiting reason="last start: held until the Morning at 09:00"' > "$T"
+run_driver "$T" s2d
+[ -z "$OUT" ] && ok "waiting on a last-starts wait allows stop" || fail "last-starts wait: expected empty, got: $OUT"
 
 # --- 3. state=running → block, naming the next steps of the queue loop ---
 T="$TMP/t3.jsonl"
@@ -63,7 +68,7 @@ assistant_line "ROLLOUT-STATUS: demo merged=1/3 running=1 state=running" > "$T"
 run_driver "$T" s3
 echo "$OUT" | grep -q '"decision": "block"' && ok "running: blocks stop" || fail "running: expected block, got: $OUT"
 echo "$OUT" | grep -q 'ROLLOUT-DRIVER: \[\[demo\]\]' && ok "running: reason names the rollout" || fail "running: reason missing slug: $OUT"
-for w in "merged 1/3" "reconcile" "Integration" "merge-task.sh" "next" "Trickle" "Do not end the turn while state=running"; do
+for w in "merged 1/3" "reconcile" "Integration" "merge-task.sh" "next" "Trickle" "last start" "Do not end the turn while state=running"; do
   echo "$OUT" | grep -qF "$w" && ok "running: reason names $w" || fail "running: reason lacks [$w]: $OUT"
 done
 echo "$OUT" | grep -q "cursor" && fail "running: reason still names a cursor: $OUT" || ok "running: no cursor in the reason"

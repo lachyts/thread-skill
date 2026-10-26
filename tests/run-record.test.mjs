@@ -209,6 +209,17 @@ const REFUSALS = [
   ['review-verdict with a verdict outside approve | changes', ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 1, verdict: 'reject', findings: 0, original: 0, regression: 0, digest: 'abcdef0123456789' })]],
   ['review-verdict at round 0', ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 0, verdict: 'approve', findings: 0, original: 0, regression: 0, digest: 'abcdef0123456789' })]],
   ['review-verdict with original + regression over findings', ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 2, verdict: 'changes', findings: 2, original: 2, regression: 1, digest: 'abcdef0123456789' })]],
+  // The night record (p28-2): morning a UTC Z stamp, history an int >= 0, usualMinutes an int >= 1, a task on the T kinds.
+  ['away-night with a naive morning', ['--rollout', 'r', '--kind', 'away-night', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00' })]],
+  ['away-night with an offset morning (a UTC Z stamp only)', ['--rollout', 'r', '--kind', 'away-night', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00+11:00' })]],
+  ['away-night without a morning', ['--rollout', 'r', '--kind', 'away-night']],
+  ['last-start-held without a task', ['--rollout', 'r', '--kind', 'last-start-held', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', scope: 'cross-cutting', history: 3, usualMinutes: 110 })]],
+  ['last-start-held with a negative history', ['--rollout', 'r', '--task', 't', '--kind', 'last-start-held', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', scope: 'cross-cutting', history: -1 })]],
+  ['last-start-held with usualMinutes 0', ['--rollout', 'r', '--task', 't', '--kind', 'last-start-held', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', scope: 'cross-cutting', history: 3, usualMinutes: 0 })]],
+  ['last-start-held without a scope', ['--rollout', 'r', '--task', 't', '--kind', 'last-start-held', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', history: 0 })]],
+  ['ran-past-morning without a task', ['--rollout', 'r', '--kind', 'ran-past-morning', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', slotTakenAt: '2026-10-03T07:30:00.000Z', scope: 'single-file', history: 3 })]],
+  ['ran-past-morning with a naive slotTakenAt', ['--rollout', 'r', '--task', 't', '--kind', 'ran-past-morning', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', slotTakenAt: '2026-10-03T07:30:00', scope: 'single-file', history: 3 })]],
+  ['ran-past-morning with usualMinutes 0', ['--rollout', 'r', '--task', 't', '--kind', 'ran-past-morning', '--json', JSON.stringify({ morning: '2026-10-03T09:00:00Z', slotTakenAt: '2026-10-03T07:30:00.000Z', scope: 'single-file', history: 3, usualMinutes: 0 })]],
 ]
 
 for (const [name, args] of REFUSALS) {
@@ -231,6 +242,30 @@ test('idle-slots (p28-1): a hold-trickle reason is accepted; an unknown reason i
   const r = cli(home, ['emit', '--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'trickle', free: 3, settings: SETTINGS })], { env: EV(home) })
   assert.equal(r.status, 2, r.stderr)
   assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+})
+
+test('idle-slots (p28-2): a hold-last-start reason is accepted', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-last-start', free: 3, settings: SETTINGS })], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([l.kind, l.reason, l.free], ['idle-slots', 'hold-last-start', 3])
+})
+
+test('the night record (p28-2): away-night, last-start-held and ran-past-morning land in <rollout>.jsonl as v 1', (t) => {
+  const home = tmpHome(t)
+  const emit = (task, kind, f) => emitOk(home, ['--rollout', 'r', ...(task ? ['--task', task] : []), '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+  emit(null, 'away-night', { morning: '2026-10-03T09:00:00Z' })
+  emit('c1', 'last-start-held', { morning: '2026-10-03T09:00:00Z', scope: 'cross-cutting', history: 3, usualMinutes: 110 })
+  emit('r1', 'last-start-held', { morning: '2026-10-03T09:00:00Z', scope: 'read-only', history: 0 })
+  emit('s1', 'ran-past-morning', { morning: '2026-10-03T09:00:00Z', slotTakenAt: '2026-10-03T07:30:00.000Z', scope: 'single-file', history: 3, usualMinutes: 25 })
+  emit('u1', 'ran-past-morning', { morning: '2026-10-03T09:00:00Z', slotTakenAt: '2026-10-03T06:00:00Z', scope: 'unscoped', history: 2 })
+  const all = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(all.map((l) => [l.v, l.rollout, l.task, l.kind, l.morning]), [
+    [1, 'r', null, 'away-night', '2026-10-03T09:00:00Z'], [1, 'r', 'c1', 'last-start-held', '2026-10-03T09:00:00Z'],
+    [1, 'r', 'r1', 'last-start-held', '2026-10-03T09:00:00Z'], [1, 'r', 's1', 'ran-past-morning', '2026-10-03T09:00:00Z'],
+    [1, 'r', 'u1', 'ran-past-morning', '2026-10-03T09:00:00Z']])
+  assert.deepEqual([all[1].scope, all[1].history, all[1].usualMinutes, 'usualMinutes' in all[2]], ['cross-cutting', 3, 110, false])
+  assert.deepEqual([all[3].slotTakenAt, all[3].usualMinutes, all[4].history], ['2026-10-03T07:30:00.000Z', 25, 2])
 })
 
 test('auto-retry (p16-4): a valid emit, and a quota retry with used 0 and its quotaRetries', (t) => {
