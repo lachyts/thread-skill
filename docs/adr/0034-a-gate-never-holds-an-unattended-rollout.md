@@ -116,8 +116,9 @@ my time is far more important than you asking me about $5 here or $10 there … 
   it, and reaches Lachy as an ordinary (a) item.
 - **The lock and the write order.** The read takes a machine-wide `standing-spend.lock` beside the note locks (never
   on `--dry-run`), held to the call's last save; note locks are taken inside it, never it inside one. A lock not
-  taken in time is exit 1, nothing written. Per slug the log line is saved first, then the task note, so a failure
-  between the two over-counts: it fails closed.
+  taken in time is exit 1, and nothing written for any slug that needed the month read (taken lazily, it is never
+  needed by a gate already approved, over the limit or bounced). Per slug the log line is saved first, then the task
+  note, so a failure between the two over-counts: it fails closed.
 - **Fail-closed reads.** A dated rollout note that cannot be read, or a directory that exists but cannot be listed,
   is an `ASK:` naming it, never a blind signing; a missing `Archive/` is skipped.
 - **ADR 0038 d2.** Its Planner line, once written only with an ask-ahead answer, is now written on every spend-smell

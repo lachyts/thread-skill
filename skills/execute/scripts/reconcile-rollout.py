@@ -513,9 +513,9 @@ Subcommands:
               push line never counts, and Lachy's bare sign-offs are never logged. It is read lazily, only for a
               gate that prices within the limit and is not already in `## Approved gates`, under a machine-wide
               lock (`standing-spend.lock` beside the note locks; never on --dry-run) held from that read to the
-              call's last save; a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 1 for that slug and
-              every later one, nothing written. A gate past the month line is an ASK whose why is `this month's
-              (<YYYY-MM>) standing approvals would reach US$<m> with this gate, past the US$<t> month line
+              call's last save; a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 1, and nothing written
+              for any slug that needed the month read. A gate past the month line is an ASK whose why is `this
+              month's (<YYYY-MM>) standing approvals would reach US$<m> with this gate, past the US$<t> month line
               (<source>)`; a note it cannot read (or a directory it cannot list) is an ASK whose why is `cannot
               read <path> for this month's standing approvals (<error>)`. For a slug with gates newly signed, the
               rollout note is written first: one `- <stamp> [[<slug>]] signed under the standing approval:
@@ -6408,8 +6408,9 @@ class _StandingLedger:
     Archive/Rollouts/ whose name matches ROLLOUT_NOTE_NAME_RE (schedule step 6's names, `-N` ordinals included), each
     once by real path and read fresh from disk. A missing directory is skipped; a note that cannot be read, or a
     directory that exists but cannot be listed, is (None, why), cached, so every later gate asks with it. A lock not
-    taken in time raises OSError, cached too, so every later slug fails at once with the same message. add() keeps the
-    call's own running total (on --dry-run too, so its lines read as a real run's), which spent() includes."""
+    taken in time raises OSError, cached too, so every later slug that needs the month read fails at once with the same
+    message; a slug that never needs it is still written or asked. add() keeps the call's own running total (on
+    --dry-run too, so its lines read as a real run's), which spent() includes."""
 
     def __init__(self, tasks_dir, rollout_path, month, dry_run):
         self.tasks_dir, self.rollout_path = Path(tasks_dir), Path(rollout_path)
