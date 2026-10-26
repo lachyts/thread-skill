@@ -5,8 +5,9 @@ gives each of its open tasks a **Readiness grade**, and `estate-rank.py` ranks t
 slate**: candidate runs with their **Review load**, the decision rounds, the projects that need their own orient, and
 the **Unpark offer** for each parked project with ready work. Scripts scan, the model decides: the grade is the
 model's half, and everything after it is the script's. This file is the grading agents' brief and the ranking's prose
-contract; the script's docstring holds its output schema. The lead that runs both is `orient-all`
-(`${CLAUDE_PLUGIN_ROOT}/skills/orient-all/SKILL.md`).
+contract; the script's docstring holds its output schema. Two leads run both: `orient-all`
+(`${CLAUDE_PLUGIN_ROOT}/skills/orient-all/SKILL.md`), and schedule's Pre-flight (schedule § 1.5, ADR 0047), which grades
+one rollout's tasks before its note is written.
 
 **Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
@@ -18,7 +19,9 @@ there, whatever else it links. Every other open task is skipped with the first r
 
 - `unhomed`: no live project;
 - `in flight`: in progress, in review, or in a live rollout (`_shared/vault-grammar.md` § In flight). In-flight work
-  is never graded or routed again;
+  is never graded or routed again. At schedule's Pre-flight on a supersede, a carried task still queued (status
+  `open`, its `rollout:` naming the rollout being superseded) is gradeable (`--superseding`, ADR 0047); one that has
+  started stays `in flight`;
 - `hold`: any other status.
 
 ## The grading agents
@@ -220,8 +223,10 @@ unparked, by an offer or by hand, the next pass lists its Orient tasks.
 **Leverage** is agent work per minute of Lachy's attention: `SIZE_MINUTES[size]` over the larger of
 `ATTENTION_FLOOR` and the attention minutes. Attention is deciding plus reviewing: `DECISION_MINUTES[grade]` per
 decision (none for Ready), plus the Review load at `REVIEW_MINUTES` per item (a parallel task's PR, a sign-off when it
-has gates, an eye-check when `eyeCheck` is set). A session task adds its whole agent time, since Lachy is there
-throughout.
+has gates, an eye-check when `eyeCheck` is set). A gate of any kind costs the sign-off, `spend` included: the ranker
+sees a gate's kind, never its price, the standing approval's limit or the month line, so a spend gate the standing
+approval would sign is still charged (ADR 0034's 2026-10-27 amendment, residual (x)). A session task adds its whole
+agent time, since Lachy is there throughout.
 
 **Runs.** The candidate runs group the ranked parallel and serial tasks by home, shape and root:
 

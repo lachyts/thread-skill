@@ -40,6 +40,9 @@
 #   3  BASE MOVED: origin/<default> ≠ the integrated base. Nothing merged.
 #                                                                        counter appended   lead: re-integrate
 #                                                                                          on the same anchor
+#      (the lead's `lead-integrate.py prepare` may then route `skip`: when main moved only in the repo's Inert
+#      paths and the Inert proof holds on the new merge, the green run stands and no verifier re-runs, ADR 0045;
+#      the cap below still counts each base move)
 #   4  Set aside AT Integration. Prints `set-aside reason: integration: <why>` on stdout and stderr:
 #      (a) the cap: `integration: base moved before the merge 4 times in a row after 3 re-integrations
 #      (bases …)`; (b) `integration: head moved after Integration (PR head <h>, origin <b> at <r>, integrated

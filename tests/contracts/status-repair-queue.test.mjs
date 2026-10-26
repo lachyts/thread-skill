@@ -120,11 +120,12 @@ process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 // so it reads the built-in ladder and the operator's file never reaches the assertions.
 const STATUS_ENV = { ...ENV, HOME: path.join(tmp, 'status-home') }
 // next reads the Away state file under HOME (p28-1, execute away.md): nextOf runs in a HOME of its own whose fresh Away
-// file gives each rollout its own ceiling at NOW, never the Trickle, whatever the scratch HOME holds.
+// file, its Away cap 99 never binding (p29-8), gives each rollout its own ceiling at NOW, never the Trickle or the Away
+// cap, whatever the scratch HOME holds.
 const NEXT_ENV = { ...ENV, HOME: path.join(tmp, 'next-home') }
 fs.mkdirSync(path.join(NEXT_ENV.HOME, '.config', 'thread'), { recursive: true })
 fs.writeFileSync(path.join(NEXT_ENV.HOME, '.config', 'thread', 'away.json'),
-  JSON.stringify({ away: true, until: '2099-01-01T00:00:00Z', morning: '09:00', trickle: 2, written_at: '2026-10-02T12:00:00Z' }))
+  JSON.stringify({ away: true, until: '2099-01-01T00:00:00Z', morning: '09:00', trickle: 2, away_cap: 99, written_at: '2026-10-02T12:00:00Z' }))
 
 function writeTask(dir, slug, fm, body = '') {
   fs.writeFileSync(path.join(dir, `${slug}.md`), ['---', 'tags: [task]', ...fm, '---', '', '## Notes', '', `body ${slug}`, ''].join('\n') + body)

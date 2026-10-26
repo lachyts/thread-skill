@@ -59,7 +59,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   written: each task still to start gets its **Readiness grade**, One call
   and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
   stay out with their Dependent closure; it runs no plan gate (ADR 0047). Not
-  schedule step 8's "Pre-flight —" report blocks, nor a Leg's preflight.
+  schedule step 8's "Checklist —" report blocks (called "Pre-flight —"
+  before ADR 0047), nor a Leg's preflight.
   _Avoid_: preflight check, dry run.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
@@ -455,9 +456,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Queue** — how a parallel rollout runs: tasks in parallel, each from its
   start's `main`, up to the parallel ceiling, held back only by dependencies
   or a **Solo** task and, by day, the **Trickle**, never a shared file
-  (ADR 0030); Away, by the **Away cap** instead of the Trickle (ADR 0049); and
-  all of them by a bare checkout's **Git-env hold** (ADR 0046). _Avoid_:
-  batch (the session lane's).
+  (ADR 0030); Away, by the **Away cap** instead of the Trickle (ADR 0049),
+  and, toward the Morning, the **Last starts**; and all of them by a bare
+  checkout's **Git-env hold** (ADR 0046). _Avoid_: batch (the session lane's).
 - **Slot** — one task's own run (a start, a restart or a seeded revise) in a
   Queue, held from its launch until its result is reconciled. Integration
   holds none. _Avoid_: worker, agent (a slot's run holds many agents).
@@ -477,6 +478,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suites do not contend, tuned from the Run record (ADR 0049). Each
   rollout's **Parallel ceiling** still bounds its own share. _Avoid_: night
   ceiling, global ceiling.
+- **Last starts** — toward the Morning, a queued task starts only if its
+  kind's usual length (the median of that kind's past runs in the project,
+  its kind its note's `scope:`) ends it by the Morning's hour; with fewer than
+  three past runs, nothing of that kind starts in the last two hours (Chorus
+  ADR 0104 d4). They apply only while **Away** runs to the Morning, never to
+  a daytime Away block or the Lunch restart. Running tasks finish: a restart,
+  a hand-back or a seeded revise is never held, and the hold never halts the
+  rollout. _Avoid_: curfew, cut-off.
+- **Night record** — per Morning, the **Last starts**' held starts and the
+  tasks still running at the Morning, written into each rollout's **Run
+  record** and keyed by that Morning, so a **Reflection** can tune the
+  two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences).
+  _Avoid_: night log.
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
   (ADR 0030). Queued with its dependencies met, it holds every task whose row
@@ -498,9 +512,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
   order. _Avoid_: the lane (that is the step, not the line).
 - **Inert path** — a file a repo's verifier provably never reads, listed per
-  repo in the **Rollout settings** and re-proven at every skip: a `main` that
-  moved only in inert paths since a green run leaves that run standing, and
-  Integration re-runs nothing (ADR 0045). _Avoid_: doc-only, ignored path.
+  repo in the **Rollout settings** (`inert_paths`, git pathspec globs) and
+  re-proven on the tree being merged at every skip: a `main` that moved only
+  in inert paths, prose only (`.md .markdown .rst .adoc .org`, never
+  `.txt`), since a green run leaves that run standing, and Integration
+  re-runs nothing (ADR 0045). _Avoid_: doc-only, ignored path.
+- **Inert proof** — the static check that nothing in the tree being merged
+  reads a glob: no non-prose file or step names its deepest literal segment;
+  no walk (a copy or archive of the tree included) whose root is not
+  provably outside the repo (a path that is the repo, inside it or an
+  ancestor of it counts) covers it; no markdown tool, link parse, symlink
+  into the glob or submodule. It fails closed (ADR 0045): any error in it
+  means a re-run. skills/_shared/scripts/inert-paths.py's
+  header holds its rules. _Avoid_: the docs check.
 - **Integration conflict** — Integration's merge of the latest `main`
   conflicted and the integrator could not keep both intents, so it aborted
   the merge and pushed nothing (Vibe Kanban's 'rebase conflicts'). The note is
@@ -714,10 +738,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   then goes to Lachy, never to the Standing approval (ADR 0038).
   _Avoid_: budget, limit (the Standing approval's limit is another thing).
 - **Standing approval** — Lachy's one-off sign-off for every spend Gated input
-  whose **total exposure** is at most US$50: the cap summed across Logins,
-  a recurring cap counted per month, US$50 itself included. The limit is
+  whose **total exposure** is at most the operator's limit (US$200 on Lachy's
+  Mac): the cap summed across Logins, a recurring cap counted per month, the
+  limit itself included. It also holds a month line (ADR 0034's 2026-10-27
+  amendment; spend is never asked ahead): a gate passes only while this
+  calendar month's standing approvals, summed from every rollout note's
+  `## Needs-you log`, stay at most the operator's limit with it. The limit is
   the Rollout settings key `spend_approval_usd` (a task may carry its own,
-  an ask-ahead answer; built-in 0, which is off). Exposure counts every USD
+  a limit Lachy named; built-in 0, which is off). Exposure counts every USD
   amount the gate names; a shape it cannot price asks. Such a gate passes
   without him (`approve-gates --standing`, run by the lead) and is recorded
   in `## Approved gates` with `(approved <date> under the standing approval:
@@ -747,7 +775,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the push does not reach him), deduped on its line in the rollout note's
   `## Needs-you log`, the lead's push record; an item whose delivery failed
   on every channel is retried at most once more, at the next loop entry, then
-  deduped (ADR 0038). That log is never the task note's `## Needs you` (p16-3),
+  deduped (ADR 0038). The log also holds the Standing approval's
+  `signed under the standing approval:` lines, the month line's ledger, never
+  a push record. That log is never the task note's `## Needs you` (p16-3),
   which holds the question the engine stopped on; an item whose entry carries
   one shows it on its detail line. The lead never puts an item through the
   question tool while anything the session launched is in flight, and the
@@ -867,7 +897,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   against it; a gate passed under the Standing approval does not.
   _Avoid_: autonomy score, automation rate.
 - **Grade log** — `grades.jsonl` beside the Run record: one line per task
-  each estate pass grades, written by `estate-dispatch.py log`. The weekly
+  each estate pass or schedule Pre-flight grades (every schedule run but an
+  orient-all fork, whose estate pass logged them), written by
+  `estate-dispatch.py log`. The weekly
   reading joins each grade to what followed until the task's next grade or
   its close, and reports each grade's hands-off share (of the work it sent
   that landed hands-off, bounced back to Lachy, was regraded or dropped;

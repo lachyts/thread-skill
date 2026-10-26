@@ -878,3 +878,37 @@ test('KT1 (e) with no newer key, no schema line is ever added', (t) => {
   assert.equal(r.status, 0, r.stderr)
   assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), '[defaults]\nmax_iterations = 3\n\n[repo."o/r"]\nparallel_ceiling = 5\n')
 })
+
+// ---- KT2: a Tuning never touches a repo's Inert paths (p29-3, ADR 0045) -------------------------------------------------
+// inert_paths (schema 2) is written only by schedule's inert-paths.py record and drop: a Tuning keeps it, and an edit
+// whose result changes any repo's inert_paths is refused with nothing written.
+
+test('KT2 a Tuning keeps inert_paths: the line stays, the schema stays 2, and it resolves as before', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = 'schema = 2\n\n[repo."o/r"]\nparallel_ceiling = 4\ninert_paths = ["THREAD.md", "docs/handoffs/**"]\n\n[repo."o/other"]\ninert_paths = ["THREAD.md"]\n'
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config.replace('parallel_ceiling = 4', 'parallel_ceiling = 5'))
+  const after = resolved(home, repo)
+  assert.deepEqual([after.settings.parallel_ceiling, after.inert_paths], [{ value: 5, source: 'file:repo' },
+    { value: ['THREAD.md', 'docs/handoffs/**'], source: 'file:repo' }])
+})
+
+test('KT2 control: an edit that drops another repo\'s inert_paths is refused, nothing written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = 'schema = 2\n\n[repo."o/r"]\nparallel_ceiling = 4\n\n[repo."o/other"]\ninert_paths = ["THREAD.md"]\n'
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const harness = ['import importlib.util, sys', 'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+    'tune = importlib.util.module_from_spec(spec); spec.loader.exec_module(tune)', 'edit = tune.edit_text',
+    'tune.edit_text = lambda *a: edit(*a).replace(\'inert_paths = ["THREAD.md"]\\n\', "")', 'sys.exit(tune.main(sys.argv[2:]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', harness, TUNE, '--scores', scores, '--pick', 'p1', '--repo', repo], { encoding: 'utf8', cwd: home, env: env(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.equal(r.stderr, "tune: the edit changes a repo's inert_paths: nothing written\n")
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+})

@@ -5,7 +5,7 @@
 // the real one (`estate-scan.py --vault V --today 2026-10-20 --deadline 0`, which starts no subprocess), run once and
 // shared, so the ranker is pinned to the scan's actual schema; the cases that need a blocker mutate that JSON in
 // memory into S/scan-*.json. Every rank run passes --today 2026-10-20; the snooze, unpark and kill cases (R1-R4: the
-// Unpark offer's writes, p25-3) write only copies of V.
+// Unpark offer's writes, p25-3) write only copies of V. R6 (schedule's Pre-flight, ADR 0047) ranks a vault of its own, VP.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -462,7 +462,8 @@ test('6. leverage: agent minutes over attention minutes (deciding plus reviewing
   assert.equal(t('que-serial').attentionMinutes, 0)
   assert.equal(t('que-call').leverage, 7.5)
   assert.equal(t('que-call').decisionMinutes, 1)
-  assert.deepEqual(t('que-call').review, { pr: 1, signOff: 1, eyeCheck: 0, minutes: 3 })
+  assert.deepEqual(t('que-call').review, { pr: 1, signOff: 1, eyeCheck: 0, minutes: 3 },
+    "a spend-only gate still costs a sign-off: the ranker cannot see the standing approval's limit (ADR 0034's 2026-10-27 amendment, residual (x))")
   assert.equal(t('que-call').attentionMinutes, 4)
   assert.equal(t('crown-low').leverage, 1)
   assert.equal(t('crown-low').attentionMinutes, 120, 'a session task holds Lachy for its whole length')
@@ -903,4 +904,44 @@ test('R5. a decision fork passes through the ranker when given, and nothing chan
   assert.deepEqual(t.decisions[0], { question: 'Keep v3 or v4?', recommendation: 'v4', options: ['v4', 'v3'], confidence: 'high',
     why: 'fixture: src/x.py:12', fork: 'Keep v3 or v4' })
   assert.ok(!('fork' in row(ok(rank([forked('')])), 'lab-01').decisions[0]), 'an empty fork is left out')
+})
+
+// ---- R6. A carried task still queued is gradeable at schedule's Pre-flight (ADR 0047) -----------------------------
+// Its own vault VP: project Pf and a live, never-started prior rollout `prior`. q is open and linked to it (carried,
+// still queued), s is in_progress and linked to it (carried, started), r-on-q is Ready work that depends on q.
+// Without --superseding q is in flight, skipped, and its grade warned and ignored, so nothing waits on it; with
+// `--superseding prior` (schedule § 1.5) q is graded, and r-on-q is held by q's grade; s stays in flight either way.
+test('R6. rank --superseding: a carried queued task is graded and holds its dependants; a started one stays in flight', () => {
+  const VP = path.join(S, 'pf')
+  const TP = (slug, status, rest = '') => write(path.join(VP, 'Work', 'Tasks', `${slug}.md`),
+    fm(`tags:\n  - task\nstatus: ${status}\nprojects:\n  - "[[Pf]]"${rest}`, `\n# Task ${slug}\n`))
+  write(path.join(VP, 'Work', 'Projects', 'Pf.md'), fm('tags:\n  - project\nstatus: active'))
+  write(path.join(VP, 'Work', 'Tasks', 'prior.md'), fm('tags:\n  - rollout\nstatus: open\nprotocol_version: 5\nprojects:\n  - "[[Pf]]"'))
+  TP('q', 'open', '\nrollout: "[[prior]]"')
+  TP('s', 'in_progress', '\nrollout: "[[prior]]"')
+  TP('r-on-q', 'open', links('depends-on', ['q']))
+  const sc = spawnSync('python3', [SCAN, '--vault', VP, '--today', TODAY, '--deadline', '0'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(sc.status, 0, sc.stderr)
+  const scanFile = path.join(S, 'scan-pf.json')
+  write(scanFile, sc.stdout)
+  assert.deepEqual(JSON.parse(sc.stdout).tasks.filter((t) => t.slug !== 'r-on-q').map((t) => [t.slug, t.inFlight]), [['q', true], ['s', true]],
+    'the scan leaves both carried tasks in flight: the exception is the ranker\'s, at the Pre-flight only')
+  const grades = gradesFile('pf', { project: 'Pf', tasks: [G('q', 'One call', 'parallel', { decisions: one() }), G('s', 'Ready', 'parallel'),
+    G('r-on-q', 'Ready', 'parallel')] })
+  const pf = (more = []) => ok(py(['rank', '--scan', scanFile, '--today', TODAY, '--grades', grades, ...more]))
+  const plain = pf()
+  assert.deepEqual(plain.skipped, [{ slug: 'q', why: 'in flight' }, { slug: 's', why: 'in flight' }])
+  assert.ok(plain.warnings.some((w) => /^grade for q .*the task is in flight, never graded; ignored$/.test(w)), plain.warnings.join('\n'))
+  assert.deepEqual(row(plain, 'r-on-q').blockedBy, [], 'an in-flight dependency holds nothing')
+  assert.ok(!plain.tasks.some((t) => t.slug === 'q'))
+  for (const sup of ['prior', '[[prior]]', path.join(VP, 'Work', 'Tasks', 'prior.md')]) {
+    const j = pf(['--superseding', sup])
+    assert.deepEqual(j.skipped, [{ slug: 's', why: 'in flight' }], sup)
+    assert.equal(row(j, 'q').grade, 'One call', sup)
+    assert.deepEqual(row(j, 'r-on-q').blockedBy, [{ slug: 'q', why: 'One call' }], `${sup}: held by q's grade`)
+    assert.ok(j.warnings.some((w) => /^grade for s .*the task is in flight, never graded; ignored$/.test(w)), j.warnings.join('\n'))
+    assert.equal(j.counts.gradeable, 2)
+  }
+  // Another rollout's name leaves q in flight.
+  assert.deepEqual(pf(['--superseding', 'other-rollout']).skipped, plain.skipped)
 })

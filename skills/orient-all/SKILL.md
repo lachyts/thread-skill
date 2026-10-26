@@ -146,7 +146,8 @@ rounds. A Grill task is decided only when every one of its decisions is answered
 
 1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py plan --rank "$S/rank.json" --scan "$S/scan.json" --decided <each decided slug> --unparked <each note unparked> --signed <each slug signed> > "$S/plan.json"`.
 2. Give each `plan.schedule[]` entry one forked subagent, whose prompt is `/thread:schedule <entry.args>`, then the
-   line `Under orient-all § 6: name the note with slug <entry.projectSlug>; root <entry.root>.` Run batch 1's
+   line `Under orient-all § 6: name the note with slug <entry.projectSlug>; root <entry.root>; Pre-flight: rank $S/rank.json, scan $S/scan.json, decided <each decided slug among entry.members, or none>.`
+   Run batch 1's
    entries side by side, then batch 2's, and so on, never two batches at once: `plan` keeps one parallel run per
    root, and never puts two entries whose `batchKeys` meet into one batch, because schedule step 6 names its note by
    globbing for the slug's next free ordinal and then writing, which is not atomic. Serial entries come one per
@@ -171,7 +172,8 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    7. schedule § 3's body dependencies: written only between two members of this call; any other is named.
    8. schedule § 3.5's gates: a match that a recorded `## Decisions` answer settles is dismissed. Any other match drops
       its task from this rollout: named, unstamped, never `ignore_gate`.
-   9. schedule § 3.6's sweep: every undismissed hit is stamped `plan_approval: required`, with no ask-ahead (ADR 0034).
+   9. schedule § 3.6's sweep: every undismissed hit is stamped `plan_approval: required`, with no ask-ahead (ADR 0034),
+      and a spend hit also gets step 7's `## Decisions (recorded <date>)` Planner line.
    10. Step 4.5's affine merges: none; the candidates are named.
    11. Step 4.7's rung offers: none.
    12. Step 5's Solo: none stamped; the proposals are named.
@@ -180,7 +182,13 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    14. Step 8: no execute offer, and no Start when ready.
    15. Serial S1 and S4 ask nothing, as under orient § 7; S2's `sessionLane` members are returned as answer 2's
        misfits are.
-4. A fork returns schedule's summary verbatim, the path of each note it wrote, its fit disagreements, or its stop line.
+   16. schedule's Pre-flight (schedule § 1.5, and S3.5 on the serial path) takes this pass's grades and answers as they
+       stand: no grading agent, no round and no Grade log line (§ 2 step 7 logged them). Its `--tasks` is the fork's
+       step 1 confirmed candidates, and its `--decided` the prompt line's decided slugs among them. A member not
+       decided (a One call or Grill the round never reached, or an Orient one) is left out with its Dependent closure,
+       unstamped, and returned.
+4. A fork returns schedule's summary verbatim, the path of each note it wrote, its fit disagreements, its Pre-flight's
+   left-out members with each one's why, or its stop line.
 
 ### 7. Start
 
@@ -234,7 +242,13 @@ see it, and the orient prompt's second line names the note this pass wrote for t
 One message of statements, no question:
 
 - the grades logged: § 2 step 7's `logged`, `exists` or `completed` line, its skipped tasks as a caveat;
-- the decisions recorded, and those left for the next pass (`later[]`, `skipped[]`, a Grill stopped part-way);
+- the decisions recorded, and those left for the next pass: each undecided One call and Grill (`later[]`,
+  `skipped[]`, a Grill stopped part-way, `plan.undecided[]`) as "waiting on your answer, so it reaches the next
+  round";
+- each fork's Pre-flight leavers, listed by the `why` the fork returns, as schedule step 8's left-out block lists
+  them: `undecided` as "waiting on your answer, so it reaches the next round"; `orient` with its pointer,
+  `/thread:orient [[<home>]]`; `dependency` as "depends on [[<via>]], which is left out"; `ungraded` as "could not be
+  graded (<reason>): the next pass grades it again";
 - the sign-offs, the bounced ones marked, and any left unsigned with the line that refused it (§ 4);
 - the unparks, snoozes and kills;
 - each schedule's note, or its stop line;
