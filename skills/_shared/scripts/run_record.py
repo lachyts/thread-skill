@@ -138,7 +138,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   hold-ended         hold (merge | git-env | race)
   idle-slots         reason (dependency | solo | pause-drain | queue-tail | awaiting-hand-back |
                      hold-merge | hold-git-env | hold-race | hold-trickle: a row waits on the machine-wide Trickle,
-                     execute away.md); free (int >= 0); settings (as slot-taken)
+                     execute away.md | hold-pr: a row waits on a PR's hold_until, vault-grammar § Hold until); free
+                     (int >= 0); settings (as slot-taken)
   quota-stall        stage?; detail?
   auto-retry      T  stage (plan | implement | verify | review | integrate: the stage of the block it re-enters,
                      the task's latest set-aside line's), setAsideAt (run | integration), retryClass (agent | infra
@@ -673,7 +674,7 @@ KINDS = {
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
     "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
-                                           "hold-merge", "hold-git-env", "hold-race", "hold-trickle"),
+                                           "hold-merge", "hold-git-env", "hold-race", "hold-trickle", "hold-pr"),
                            "free": _int(0), "settings": SETTINGS}, {}),
     "quota-stall": (False, {}, {"stage": _str, "detail": _str}),
     "auto-retry": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate"),
