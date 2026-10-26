@@ -726,14 +726,14 @@ two respawned leads each waiting on the other's stalled notes). `next` never wri
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
 with `until == M`: `until` read in local wall-clock time falls on `morning`'s HH:MM to the minute (M is that `until`,
-its seconds cut, at its own offset), and now < M <= now + LAST_START_HORIZON. So a Lunch restart, a daytime Away block
-or one ending before or spanning the Morning holds and records nothing. Then a queued task's start, and a head Solo
-task's lone start, each checked only once a Slot is found, is held (`last start: …`, LAST_START_PREFIX) when now plus
-its kind's usual length is past M. Its kind is its note's `scope:` (_kind), its usual length the median of the kind's
-past runs (_past_runs: this project's folded call journals over LAST_START_HISTORY, read lazily once per call), and
-with fewer than LAST_START_MIN_RUNS runs the length is LAST_START_FALLBACK. A held row is skipped and the greedy loop
-goes on; restarts, hand-backs and seeded revises are never held; the hold never halts; a git-env or pause hold
-replaces it. Off --dry-run, _night_record writes the night record into the rollout's own Run record (NIGHT_KINDS),
+its seconds cut: the same instant, at the local offset), and now < M <= now + LAST_START_HORIZON. So a Lunch restart, a
+daytime Away block or one ending before or spanning the Morning holds and records nothing. Then a queued task's start,
+and a head Solo task's lone start, each checked only once a Slot is found, is held (`last start: …`, LAST_START_PREFIX)
+when now plus its kind's usual length is past M. Its kind is its note's `scope:` (_kind), its usual length the median of
+the kind's past runs (_past_runs: this project's folded call journals over LAST_START_HISTORY, read lazily once per
+call), and with fewer than LAST_START_MIN_RUNS runs the length is LAST_START_FALLBACK. A held row is skipped and the
+greedy loop goes on; restarts, hand-backs and seeded revises are never held; the hold never halts; a git-env or pause
+hold replaces it. Off --dry-run, _night_record writes the night record into the rollout's own Run record (NIGHT_KINDS),
 each line once, read from the record's Slot intervals (_record_night), never from notes.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
@@ -2922,10 +2922,10 @@ def _kind(note) -> str:
 def _morning_toward(away, now):
     """M, the Morning the last starts look toward (execute away.md § The last starts), or None when they do not apply.
     They apply only while a fresh file reads Away to the Morning: `until`, read in local wall-clock time (the Mac's
-    zone, as `morning` is), falls on `morning`'s HH:MM to the minute, and now < M <= now + LAST_START_HORIZON. M is
-    that `until` with its seconds cut, at its own offset, so a daylight-saving night needs no wall-clock arithmetic. A
-    Lunch restart or a daytime Away block (an `until` off the Morning), a block ending before or spanning it, and a
-    Morning more than 24 h out are no night: None."""
+    zone, as `morning` is), falls on `morning`'s HH:MM to the minute, and now < M <= now + LAST_START_HORIZON. M is that
+    `until` with its seconds cut: the same instant, at the local offset (`until.astimezone()`), so a daylight-saving
+    night needs no wall-clock arithmetic. A Lunch restart or a daytime Away block (an `until` off the Morning), a block
+    ending before or spanning it, and a Morning more than 24 h out are no night: None."""
     if not away["away"] or away["file"] != "fresh":
         return None
     until = _away_stamp(away["until"])[0]

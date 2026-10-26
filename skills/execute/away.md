@@ -92,7 +92,7 @@ Toward the Morning a task starts only if its kind's usual length ends it by the 
 - its `until` is the Morning: read in local wall-clock time (the Mac's system time zone, as `morning` is), `until` falls on `morning`'s HH:MM to the minute;
 - M, that `until` with its seconds cut, is after now and at most 24 h ahead (now < M <= now + 24 h).
 
-M keeps `until`'s own offset, so a night across a daylight-saving change needs no wall-clock arithmetic. `until` must be the Morning because Chorus writes it as the latest end among what holds now (Chorus ADR 0104 § Built): the Morning's hour for the Evening and its 05:00 to 09:00 tail, the block's end for an Away block, Lunch's end for the Lunch restart. So the Evening, its tail, an Away block ending at the Morning and § Without a writer's hand-written file all apply.
+M is the same instant, at the local offset (an `until` written as `2026-10-03T22:00:00Z` under Australia/Melbourne gives M `2026-10-04T09:00:00+11:00`), so a night across a daylight-saving change needs no wall-clock arithmetic. `until` must be the Morning because Chorus writes it as the latest end among what holds now (Chorus ADR 0104 § Built): the Morning's hour for the Evening and its 05:00 to 09:00 tail, the block's end for an Away block, Lunch's end for the Lunch restart. So the Evening, its tail, an Away block ending at the Morning and § Without a writer's hand-written file all apply.
 
 Nothing applies, and nothing is recorded, for any of these:
 
