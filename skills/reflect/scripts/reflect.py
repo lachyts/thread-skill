@@ -1500,7 +1500,8 @@ class Span:
         read, scores, entries = {}, {}, []
         for slug in sorted(records):
             lines = records[slug]
-            if not any(since <= t <= until for t, _n, _d in lines):
+            # A ledger line alone (p29-10, LEDGER_KINDS: a heartbeat's lead-entry, a stop) never makes a rollout read.
+            if not any(since <= t <= until and d.get("kind") not in SCORE.LEDGER_KINDS for t, _n, d in lines):
                 continue
             entry, sc = self.read_rollout(slug, lines, since, until, tunings_file)
             read[slug] = entry

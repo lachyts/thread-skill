@@ -1,7 +1,7 @@
 # 0051 — The Reflection keeps a Time-lost ledger, and a monthly audit reads past the record
 
 Date: 2026-10-21
-Status: accepted. Ruled with Lachy in the re-grill of PR #202 (ADR 0048's audit). Extends ADR 0037's weekly reading, and amends its decision 4: the reading falls due on the Thursday Routine's morning, made by Chorus's weekly Runner.
+Status: accepted. Ruled with Lachy in the re-grill of PR #202 (ADR 0048's audit). Extends ADR 0037's weekly reading, and amends its decision 4: the reading falls due on the Thursday Routine's morning, made by Chorus's weekly Runner. The Run record's half built by p29-10 (2026-10-27): five kinds, `stopped`, `lead-entry`, `suite-started`, `suite-ended` and `base-moved`, and `quota-stall` gains the call it stopped (`runId`, `call`); `run_record.py`'s docstring holds the schema and the stop model. Decided there: a stop is its own kind, never a `paused` line. `paused` is not close: every reader reads `paused` .. `resumed` as Lachy's pause, so stops written as pauses would change what existing lines mean (ADR 0043). A heartbeat tick writes a `lead-entry` every 20 minutes, so an inferred dead lead or Mac restart starts at most one tick after the lead's last sign of life. p29-11 scores the new kinds.
 
 ## Context
 

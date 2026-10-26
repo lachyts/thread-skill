@@ -295,6 +295,20 @@ Subcommands:
               mode=hard` (at the stamp), `slot-freed outcome=stopped` for each linked in_progress note and, for
               each lane holder, a merge-hold close and `lane-freed release=halt`. Nothing in the vault changes.
 
+  record-entry  `--rollout <note> --by lachy|stage|watchdog|heartbeat|repair [--cause usage-limit|dead-lead|watchdog]
+              [--session ID] [--now T] [--dry-run]` (p29-10, ADR 0051; execute § 4.5 *Run record*): the lead's loop
+              entry in the Run record, run at every loop entry (right after § 2's lineage, version and shape lines) and
+              by every heartbeat tick that finds no pause or room stop (its clause 2b). It writes only the Run record:
+              the stops the record does not hold yet, as inferred `stopped` lines, then exactly one `lead-entry` {by,
+              session?, stop?} (cmd_record_entry holds the rule: the gap stop, first match a standing pause, the open
+              stop, --cause, a boot after the latest live line, a session change, --by watchdog; every boot or sleep
+              before it written first). --session defaults to CLAUDE_CODE_SESSION_ID. The Mac's evidence is
+              machine_times: kern.boottime, kern.waketime, and `pmset -g log` at most once per wake (THREAD_MACHINE_TIMES
+              replaces every read). A serial, superseded, done or dropped note prints `[skip] <stem>: <why>: no entry
+              recorded` and writes nothing. Prints one line naming what it wrote (`(dry-run)`: nothing written). Exit 0
+              (written, skipped, or a warned write failure); 1 no rollout note (an ERROR line); 2 usage and the Engine
+              snapshot guard.
+
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
               and the four automatic-retry markers (`auto_retries_used`, `quota_retries_used`, `auto_retry_sha`,
@@ -588,7 +602,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     integrate row that leaves the note `blocked`: its seeded revise follows, so it is not a
                     set-aside; a rejected row that ends review-blocked is one); quota-stall {stage, detail}
                     for a `workflow call failed:` lead row whose error line reads as a usage or rate limit
-                    (QUOTA_RE); then (p21-3) review-verdict {round, verdict, findings, original, regression,
+                    (QUOTA_RE), with the task's latest run-bound's runId and call (p29-10; omitted when it has none);
+                    then (p21-3) review-verdict {round, verdict, findings, original, regression,
                     digest, head?} per reviewVerdicts entry of a row that was in_progress and carries no
                     integration (the row-field mapping's reviewVerdicts, below), written once per verdict_key.
   hand-back         (p21-2) race-decided {mark, by=hand-back} when a `RACE decided:` line lifted the task's hold
@@ -625,13 +640,18 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     each final `last start:` hold, and ran-past-morning {morning, slotTakenAt, scope, history,
                     usualMinutes?} once per (task, M) for each task whose Slot the record shows open at a marked
                     Morning at or before now; an unreadable record writes none (one `run_record: warning: night
-                    record not written: <why>` line while the last starts apply).
+                    record not written: <why>` line while the last starts apply). Before idle-slots (p29-10,
+                    _record_sleeps): a sleep no entry follows, stopped {cause: mac-sleep, inferred: true, at, wake,
+                    calls}, only while the record has a lead-entry, no pause stands and no stop is open, and the
+                    Mac's last wake is later than the last lead-entry and the latest recorded wake.
   clear-pause       when it removes `paused:`: paused mode=hard at the stamp when the record has no open pause
                     (a hard pause whose record-pause never ran), then resumed. Removing only
                     pause_requested records nothing; a refusal (STILL-AWAITING) records nothing.
   await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
   completion-verify (--run) completion-verify {result, rc, sha, attempt, log, followup?}: one per recorded run, a
                     no-verdict one included (task null), after its log line.
+  record-entry      (p29-10) stopped {cause, inferred: true, at, calls, boot?, wake?} for each stop the entry finds, in
+                    `at` order, then one lead-entry {by, session?, stop?}; nothing for a skipped note.
   bind-run, free-lane, hold, record-pause   above.
   git-env-canary.py hold-started / hold-ended hold=git-env (task null) on the hold's empty <-> non-empty edge.
 set-aside stage, first match (auto-retry's stage too, when the record holds no set-aside line for the task: the lead
@@ -665,9 +685,10 @@ a quota or infra cool-down, p16-4, since `next` never reads the retry verdict: t
 that span); else queue-tail. `next` never records hold-merge: a merge hold is lead state, recorded by `hold`.
 Departures from the p15-2 brief: no ceiling-changed (the writer refuses it; the settings on every slot-taken
 and idle-slots carry the ceiling); log-integration records nothing (the lane is held through the merge, ADR
-0030; its path and triggers ride on mark-done's lane-freed release=merge); merge-task.sh records nothing (its
+0030; its path and triggers ride on mark-done's lane-freed release=merge); merge-task.sh records no `merged` (its
 positional args name neither rollout nor task, and `merged` has one writer per landing: the vault flip to
-done).
+done); since p29-10 it records each newly counted exit-3 refusal's `base-moved`, through lead-integrate.py
+`base-moved`, which finds the task by its PR.
 
 Stdlib only. Frontmatter is edited line-surgically (not via a YAML round-trip) to preserve field order,
 comments, and spacing exactly — matching how the rest of the vault tooling treats frontmatter. Importing
@@ -2914,13 +2935,47 @@ def _cap_in_force(away) -> dict:
 
 def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index) -> dict:
     """{<rollout stem>: n} for every other open, started, parallel Rollout on the Mac running n > 0 tasks, sorted (execute
-    away.md § The Trickle). `index` is _scan's, one walk of `tasks_dir`. A rollout note counts only when it sits directly
-    in `tasks_dir` (never under Archive/), is tagged `rollout`, is not done or dropped, reads parallel, carries no
-    `paused:` stamp, is not this rollout, and has started (never_started over the index notes whose `rollout:` names
-    it). Its n is those notes at `status: in_progress`, less the ones its own undecided RACE or UNVERIFIED holds
-    (_race_holds): such a task never restarts, so it holds no Slot. Review and integrating notes never count (Integration
-    holds no Slot), nor does a serial rollout's Leg."""
-    this = rollout_path.resolve()
+    away.md § The Trickle): _running_by_rollout with this rollout excluded."""
+    return _running_by_rollout(tasks_dir, index, exclude=rollout_path)
+
+
+def _note_index(tasks_dir: Path) -> dict:
+    """_scan's index with no rollout left out: stem (lowercased) -> (path, Note) for every note under tasks_dir, Archive
+    included, a root copy preferred over an archived one."""
+    index = {}
+    for path in sorted(tasks_dir.rglob("*.md")):
+        try:
+            note = Note(path)
+        except (OSError, ValueError):
+            continue
+        key = path.stem.lower()
+        prev = index.get(key)
+        if prev is None or (prev[0].parent != tasks_dir and path.parent == tasks_dir):
+            index[key] = (path, note)
+    return index
+
+
+def mac_running(tasks_dir):
+    """The Mac-wide count of running Rollout tasks, every rollout included (the Trickle's count, execute away.md: the Run
+    record's suite `running`, p29-10), from one walk of `tasks_dir`; None when it cannot be walked."""
+    try:
+        tasks_dir = Path(os.path.expanduser(str(tasks_dir)))
+        if not tasks_dir.is_dir():
+            return None
+        return sum(_running_by_rollout(tasks_dir, _note_index(tasks_dir)).values())
+    except Exception:  # noqa: BLE001 — a count for the record only: never a failure of the suite it describes
+        return None
+
+
+def _running_by_rollout(tasks_dir: Path, index, exclude=None) -> dict:
+    """{<rollout stem>: n} for every open, started, parallel Rollout on the Mac running n > 0 tasks, sorted, but the
+    rollout note `exclude` names (execute away.md § The Trickle). `index` is one walk of `tasks_dir` (_scan's, or
+    _note_index's). A rollout note counts only when it sits directly in `tasks_dir` (never under Archive/), is tagged
+    `rollout`, is not done or dropped, reads parallel, carries no `paused:` stamp, is not `exclude`, and has started
+    (never_started over the index notes whose `rollout:` names it). Its n is those notes at `status: in_progress`, less
+    the ones its own undecided RACE or UNVERIFIED holds (_race_holds): such a task never restarts, so it holds no Slot.
+    Review and integrating notes never count (Integration holds no Slot), nor does a serial rollout's Leg."""
+    this = exclude.resolve() if exclude is not None else None
     by_rollout = {}
     for path, note in index.values():
         target = (_wikilink_slug(note.get("rollout")) or "").lower()
@@ -2930,7 +2985,7 @@ def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index) -> dict:
     for path, note in index.values():
         if path.parent != tasks_dir or "rollout" not in _tags(note) or _status(note) in CLOSED_ROLLOUT_STATUSES:
             continue
-        if _shape(note) != "parallel" or _valued(note.get("paused")) or path.resolve() == this:
+        if _shape(note) != "parallel" or _valued(note.get("paused")) or (this is not None and path.resolve() == this):
             continue
         linked = by_rollout.get(path.stem.lower(), [])
         if never_started(note, linked)[0]:
@@ -3445,6 +3500,9 @@ def cmd_next(args) -> int:
             # verdict is awaiting-sign-off: execute's step 5 runs its sign-off form and the rollout closes.
             sign_off = _sign_off_wait(rows, index)
             halt = "awaiting-sign-off" if sign_off else "stuck"
+    # The time-lost ledger (p29-10): a sleep no entry follows is written here, off --dry-run, before idle-slots.
+    if not args.dry_run:
+        _record_sleeps(rollout_path.stem, rollout_note, now, args)
     # The Run record (p15-2): a reason marker for the idle Slots this call leaves (none at complete, done or empty).
     free = ceiling - (used + len(start))
     if free > 0 and halt not in ("complete", "done", "empty") and not args.dry_run:
@@ -4443,6 +4501,565 @@ def _record_state(rollout):
     return st
 
 
+# ---- the time-lost ledger (p29-10, ADR 0051): stops, resumes, suites and the load around them ---------------------
+# run_record.py's docstring holds the kinds and the stop model (its one copy); these are the writers' shared pieces.
+
+ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair")       # record-entry --by
+ENTRY_CAUSES = ("usage-limit", "dead-lead", "watchdog")                 # record-entry --cause
+OPEN_STOP_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog")  # a stop an entry resumes from
+CALL_KINDS = ("task", "revise", "integrate", "resume")                  # run-bound's `call`
+MAX_CALLS = 64
+# A line that is no sign of the lead's life: the night record (written at a later `next`), a suite-ended (an orphaned
+# suite can outlive its lead), a call-journal (folded at completion or by a Reflection, at fold time) and an inferred
+# stopped line (written by the entry that found it).
+NOT_LIVE_KINDS = NIGHT_KINDS + ("suite-ended", "call-journal")
+MACHINE_TIMES_ENV = "THREAD_MACHINE_TIMES"   # a test's {boot, sleeps: [[S, W], ...], wake?} in place of the Mac's reads
+PMSET_TIMEOUT = 15
+PMSET_LINE_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d{4}) (Sleep|Wake|DarkWake)\s*\t")
+KERN_TIME_RE = re.compile(r"\bsec\s*=\s*(\d+)(?:\s*,\s*usec\s*=\s*(\d+))?")
+SAME_WAKE = timedelta(seconds=120)   # pmset's full Wake and kern.waketime name one wake within this
+DIFF_HASH_MAX = 32 * 1024 * 1024     # tree_state hashes `git diff HEAD --binary` only up to this size
+TREE_GIT_TIMEOUT = 60
+# git's own repo-local variables (`git rev-parse --local-env-vars`): never let a caller's GIT_DIR read another tree.
+GIT_LOCAL_VARS = ("GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
+                  "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
+                  "GIT_INDEX_FILE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX", "GIT_SHALLOW_FILE",
+                  "GIT_COMMON_DIR")
+SUITE_SIGNALS = tuple(getattr(signal, n) for n in ("SIGTERM", "SIGINT", "SIGHUP") if hasattr(signal, n))
+
+
+def _rec_ts(d):
+    """A record line's ts as an aware datetime, or None."""
+    return _away_stamp(d.get("ts"))[0]
+
+
+def _ms(dt) -> int:
+    """An instant's identity to the millisecond (a boot or a wake the record names)."""
+    return int(round(dt.timestamp() * 1000))
+
+
+def _zms(dt) -> str:
+    """A ledger stamp (at, boot, wake): UTC `Z`, to the millisecond, as run_record.py stamps ts."""
+    return _utc_z(dt, ms=True)
+
+
+def _record_read(rollout):
+    """The rollout's Run record lines (dicts, file order): [] with no file, None when it cannot be read."""
+    try:
+        path = _run_record().record_path(rollout)
+    except Exception:  # noqa: BLE001 — an unresolvable record is an unreadable one
+        return None
+    try:
+        return _record_lines(path)[0]
+    except FileNotFoundError:
+        return []
+    except OSError:
+        return None
+
+
+def _call_entry(task, run):
+    out = {"task": task}
+    if isinstance(run, dict):
+        if isinstance(run.get("runId"), str) and run["runId"]:
+            out["runId"] = run["runId"]
+        if run.get("call") in CALL_KINDS:
+            out["call"] = run["call"]
+    return out
+
+
+def inflight_calls(lines, upto=None):
+    """The calls the record shows in flight at `upto` (an aware datetime; None: after the last line), at most MAX_CALLS
+    {task, runId?, call?}: the Slots, the lane and the run-bound lines replayed over the lines whose ts is at or before
+    `upto`, by run_record.py's pairing rules. Each open Slot gives its task's latest run-bound after its slot-taken (a
+    task, revise or resume call); the lane holder, when no Slot of its own is open, gives its latest integrate run-bound
+    after its lane-taken, and nothing without one (the lead's own Integration is no call)."""
+    slots, lane, lane_run = {}, None, None
+    for d in lines:
+        if upto is not None:
+            ts = _rec_ts(d)
+            if ts is None or ts > upto:
+                continue
+        kind, task = d.get("kind"), d.get("task")
+        if not isinstance(task, str) or not task:
+            continue
+        if kind == "slot-taken":
+            slots.setdefault(task, None)
+        elif kind == "slot-freed":
+            slots.pop(task, None)
+        elif kind == "carried" and d.get("rollout") == d.get("from"):
+            slots.pop(task, None)
+            if lane == task:
+                lane, lane_run = None, None
+        elif kind == "lane-taken":
+            if lane != task:
+                lane, lane_run = task, None
+        elif kind == "lane-freed":
+            if lane == task:
+                lane, lane_run = None, None
+        elif kind == "run-bound":
+            run = {"runId": d.get("runId"), "call": d.get("call")}
+            if d.get("call") == "integrate":
+                if lane == task:
+                    lane_run = run
+            elif task in slots:
+                slots[task] = run
+    out = [_call_entry(task, run) for task, run in slots.items()]
+    if lane is not None and lane_run is not None and lane not in slots:
+        out.append(_call_entry(lane, lane_run))
+    return out[:MAX_CALLS]
+
+
+def _pause_stands(note, lines):
+    """(stands, start): whether Lachy's pause stands, for record-entry and the Stop hook alike. It stands when the
+    rollout note carries a `paused:` stamp, or the record's replay leaves a `paused` line open (no `resumed` after it).
+    start is that open line's ts, else the stamp; None when neither parses."""
+    open_line = None
+    for d in lines or ():
+        kind = d.get("kind")
+        if kind == "paused" and open_line is None:
+            open_line = d
+        elif kind == "resumed":
+            open_line = None
+    stamp = _scalar(note.get("paused")) if note is not None else ""
+    if open_line is None and not _valued(stamp):
+        return False, None
+    start = _rec_ts(open_line) if open_line is not None else None
+    return True, start or (_parse_ts(stamp) if _valued(stamp) else None)
+
+
+def _ledger_skip(note) -> str:
+    """Why a rollout's lead records no stop and no entry, or "": a serial rollout (Legs never run record-entry), a
+    superseded note, or a done or dropped one."""
+    if _shape(note) == "serial":
+        return "shape: serial (a serial rollout runs as Legs)"
+    if _valued(note.get("superseded_by")):
+        return "superseded"
+    if _status(note) in CLOSED_ROLLOUT_STATUSES:
+        return f"status: {_status(note)}"
+    return ""
+
+
+def _kern_time(text):
+    """kern.boottime / kern.waketime / kern.sleeptime's `{ sec = S, usec = U }` as an aware UTC datetime; None for
+    sec 0 or no match."""
+    m = KERN_TIME_RE.search(text or "")
+    if not m or int(m.group(1)) == 0:
+        return None
+    return datetime.fromtimestamp(int(m.group(1)) + int(m.group(2) or 0) / 1e6, timezone.utc)
+
+
+def _sysctl_times():
+    """(boot, wake, sleep): the Mac's kern.boottime, kern.waketime and kern.sleeptime, each None when unreadable (a
+    machine without them reads None)."""
+    out = []
+    for key in ("kern.boottime", "kern.waketime", "kern.sleeptime"):
+        try:
+            p = subprocess.run(["sysctl", "-n", key], capture_output=True, text=True, timeout=5)
+            out.append(_kern_time(p.stdout) if p.returncode == 0 else None)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            out.append(None)
+    return tuple(out)
+
+
+def sleep_spans(text, since, wake):
+    """The sleeps in `pmset -g log` output (pure): [(S, W)] in log order, aware UTC. Only lines matching
+    PMSET_LINE_RE are read (`<date> <time> <zone> Sleep|Wake|DarkWake<tab>`), so "Wake Requests", WakeDetails and
+    WakeTime never match. A span opens at the first Sleep after a full Wake (or at the log's start) and closes at the
+    next full Wake: the DarkWake .. Sleep cycles between (Power Nap) stay inside it. A span still open at the log's end
+    closes at `wake` (kern.waketime) when that is later; otherwise the last span's wake, when within SAME_WAKE of
+    `wake`, becomes `wake` itself, the identity `next`'s gate compares. Spans whose wake is not after `since` (None:
+    every span) are dropped."""
+    spans, start = [], None
+    for line in (text or "").splitlines():
+        m = PMSET_LINE_RE.match(line)
+        if not m:
+            continue
+        try:
+            t = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S %z").astimezone(timezone.utc)
+        except ValueError:
+            continue
+        if m.group(2) == "Sleep":
+            if start is None:
+                start = t
+        elif m.group(2) == "Wake" and start is not None:
+            spans.append([start, t])
+            start = None
+    if start is not None and wake is not None and wake > start:
+        spans.append([start, wake])
+    elif spans and wake is not None and abs(spans[-1][1] - wake) <= SAME_WAKE:
+        spans[-1][1] = wake
+    return [(s, w) for s, w in spans if s <= w and (since is None or w > since)]
+
+
+def _machine_override(raw, since):
+    """THREAD_MACHINE_TIMES (tests, and tests/run.sh's backstop `{}`): {boot, sleeps: [[S, W], ...], wake?}, Z stamps
+    or null, in place of every read of the Mac. Malformed reads as no evidence."""
+    out = {"boot": None, "wake": None, "sleeps": []}
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except ValueError:
+        return out
+    if not isinstance(data, dict):
+        return out
+    stamp = lambda v: _away_stamp(v)[0].astimezone(timezone.utc) if _away_stamp(v)[0] else None  # noqa: E731
+    out["boot"] = stamp(data.get("boot"))
+    spans = []
+    for pair in data.get("sleeps") or []:
+        if isinstance(pair, list) and len(pair) == 2:
+            s, w = stamp(pair[0]), stamp(pair[1])
+            if s is not None and w is not None and s <= w:
+                spans.append((s, w))
+    out["wake"] = stamp(data.get("wake")) or (max(w for _s, w in spans) if spans else None)
+    out["sleeps"] = [(s, w) for s, w in spans if since is None or w > since]
+    return out
+
+
+def machine_times(since, now=None):
+    """The Mac's own evidence of a stop no process lived to log: {boot, wake, sleeps: [(S, W)]}, aware UTC (run_record's
+    stop model; ADR 0051). boot is kern.boottime; wake kern.waketime, the cheap gate: with none, or one not after
+    `since`, sleeps is [] and pmset is never read. Otherwise `pmset -g log` (PMSET_TIMEOUT) through sleep_spans, since
+    kern.sleeptime is only the last sleep (a Power Nap cycle's, often); when pmset fails or finds no span, one span
+    (kern.sleeptime, wake) when it is earlier. Evidence after `now` is dropped. THREAD_MACHINE_TIMES replaces every
+    read."""
+    raw = os.environ.get(MACHINE_TIMES_ENV)
+    if raw is not None:
+        out = _machine_override(raw, since)
+    else:
+        boot, wake, slept = _sysctl_times()
+        out = {"boot": boot, "wake": wake, "sleeps": []}
+        if wake is not None and (since is None or wake > since):
+            try:
+                p = subprocess.run(["pmset", "-g", "log"], capture_output=True, text=True, errors="replace",
+                                   timeout=PMSET_TIMEOUT)
+                text = p.stdout if p.returncode == 0 else ""
+            except (OSError, subprocess.SubprocessError, ValueError):
+                text = ""
+            out["sleeps"] = sleep_spans(text, since, wake)
+            if not out["sleeps"] and slept is not None and slept < wake:
+                out["sleeps"] = [(slept, wake)]
+    if now is not None:
+        if out["boot"] is not None and out["boot"] > now:
+            out["boot"] = None
+        out["sleeps"] = [(s, w) for s, w in out["sleeps"] if w <= now]
+    return out
+
+
+def _git_env():
+    return {k: v for k, v in os.environ.items() if k not in GIT_LOCAL_VARS}
+
+
+def tree_state(tree) -> dict:
+    """{sha, dirty, diff?} of a git tree, the suite's identity (so a re-run of a passed tree shows): sha its HEAD, dirty
+    whether it has tracked changes, diff the first 12 hex of the sha256 of `git diff HEAD --binary` on a dirty tree
+    (skipped past DIFF_HASH_MAX). git runs with GIT_LOCAL_VARS stripped and TREE_GIT_TIMEOUT. {} when git cannot read
+    the tree."""
+    env = _git_env()
+
+    def git(*argv):
+        return subprocess.run(["git", "-C", str(tree), *argv], capture_output=True, env=env, timeout=TREE_GIT_TIMEOUT)
+    try:
+        p = git("rev-parse", "--verify", "-q", "HEAD")
+        sha = p.stdout.decode("ascii", "replace").strip()
+        if p.returncode != 0 or not sha:
+            return {}
+        st = git("status", "--porcelain", "--untracked-files=no")
+        out = {"sha": sha, "dirty": st.returncode == 0 and bool(st.stdout.strip())}
+        if not out["dirty"]:
+            return out
+        proc = subprocess.Popen(["git", "-C", str(tree), "diff", "HEAD", "--binary"], stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, env=env)
+        h, size, whole = hashlib.sha256(), 0, True
+        try:
+            for chunk in iter(lambda: proc.stdout.read(1 << 16), b""):
+                size += len(chunk)
+                if size > DIFF_HASH_MAX:
+                    whole = False
+                    break
+                h.update(chunk)
+        finally:
+            if proc.poll() is None and not whole:
+                proc.kill()
+            proc.stdout.close()
+            proc.wait(timeout=TREE_GIT_TIMEOUT)
+        if whole and proc.returncode == 0:
+            out["diff"] = h.hexdigest()[:12]
+        return out
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
+
+
+def load_now():
+    """The 1, 5 and 15 minute load average, rounded to 2 places, or None."""
+    try:
+        return [round(x, 2) for x in os.getloadavg()]
+    except (OSError, AttributeError):
+        return None
+
+
+def _secs(x):
+    """A ledger duration in seconds: >= 0, to a tenth, and an int when whole (a 2 s --timeout reads 2, not 2.0)."""
+    v = round(max(0.0, float(x)), 1)
+    return int(v) if v == int(v) else v
+
+
+def new_suite_id() -> str:
+    """A suite's id: `s-` and 16 lowercase hex, shared by its suite-started and suite-ended."""
+    return "s-" + os.urandom(8).hex()
+
+
+class _signals_held:
+    """Hold TERM, INT and HUP across one record write: run_record.emit swallows any exception, so a stop's handler
+    raising inside it would be lost. A signal that lands meanwhile is delivered, and its handler runs, as the block
+    ends, so a caller's `reraise` still takes its own signal path."""
+
+    def __enter__(self):
+        try:
+            self.mask = signal.pthread_sigmask(signal.SIG_BLOCK, SUITE_SIGNALS)
+        except (AttributeError, OSError, ValueError):
+            self.mask = None
+        return self
+
+    def __exit__(self, *_exc):
+        if self.mask is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, self.mask)
+        return False
+
+
+def suite_started(rollout, task, suite, by, runner, state, tasks_dir=None, waited=None, reraise=(), written=None):
+    """Record one suite's start (suite-started; run_record.py's suite pairing): `state` is tree_state's reading, taken
+    by the caller (verify-slot.py reads it before its slot wait). load is load_now(), running mac_running(tasks_dir).
+    Best-effort: never raises, but an exception in `reraise` (the caller's signal) propagates; a tree with no sha
+    records nothing. written["started"] is set to whether the line landed, before a held signal is delivered. Returns
+    that."""
+    try:
+        if not rollout or not isinstance(state, dict) or not state.get("sha"):
+            return False
+        fields = {"suite": suite, "by": by, "runner": runner, "sha": state["sha"], "dirty": bool(state.get("dirty"))}
+        if state.get("diff"):
+            fields["diff"] = state["diff"]
+        load = load_now()
+        if load is not None:
+            fields["load"] = load
+        if waited is not None:
+            fields["waited"] = _secs(waited)
+        if tasks_dir is not None:
+            n = mac_running(tasks_dir)
+            if n is not None:
+                fields["running"] = n
+        with _signals_held():
+            ok = _event(rollout, "suite-started", task, fields)
+            if written is not None:
+                written["started"] = ok
+        return ok
+    except reraise:
+        raise
+    except Exception:  # noqa: BLE001 — recording never changes a suite's outcome
+        return False
+
+
+def suite_ended(rollout, task, suite, by, runner, outcome, seconds, tasks_dir=None, scan=True, reraise=(), rc=None,
+                failing=None, timeout=None, step=None, sha=None, waited=None):
+    """Record one suite's end (suite-ended): load is load_now(); running mac_running(tasks_dir), only with `scan` (a
+    stop by signal passes scan=False: no vault walk on that path); rc only an int 0-255 and never on noslot; timeout only
+    on outcome timeout; failing cut to 50 names of 200 characters. Best-effort, as suite_started."""
+    try:
+        if not rollout:
+            return False
+        fields = {"suite": suite, "by": by, "runner": runner, "outcome": outcome,
+                  "seconds": _secs(seconds)}
+        load = load_now()
+        if load is not None:
+            fields["load"] = load
+        if isinstance(rc, int) and not isinstance(rc, bool) and 0 <= rc <= 255 and outcome != "noslot":
+            fields["rc"] = rc
+        if failing is not None:
+            fields["failing"] = [str(f)[:200] for f in failing if f][:50]
+        if timeout is not None and outcome == "timeout":
+            fields["timeout"] = _secs(timeout)
+        if step in ("env_bootstrap", "verifier"):
+            fields["step"] = step
+        if sha:
+            fields["sha"] = sha
+        if waited is not None:
+            fields["waited"] = _secs(waited)
+        if scan and tasks_dir is not None:
+            n = mac_running(tasks_dir)
+            if n is not None:
+                fields["running"] = n
+        with _signals_held():
+            return _event(rollout, "suite-ended", task, fields)
+    except reraise:
+        raise
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _stop_state(lines) -> dict:
+    """The record read for a stop (run_record.py's stop model): {entry, session, live, open, named, wake}. entry is the
+    last lead-entry's ts and session that line's session (None when it carried none); live the sorted ts of every line
+    that is a sign of the lead's life (all but NOT_LIVE_KINDS and an inferred stopped line: a lead-entry and a live
+    stopped count); open the non-sleep stopped lines after the last lead-entry, in file order (the last is the open
+    stop); named the boots and wakes the record already names (_ms); wake the latest mac-sleep's wake."""
+    st = {"entry": None, "session": None, "live": [], "open": [], "named": set(), "wake": None}
+    last = -1
+    for i, d in enumerate(lines):
+        kind, ts = d.get("kind"), _rec_ts(d)
+        if kind == "lead-entry":
+            last = i
+            st["entry"] = ts
+            st["session"] = d.get("session") if isinstance(d.get("session"), str) and d.get("session") else None
+        elif kind == "stopped":
+            for key in ("boot", "wake"):
+                t = _away_stamp(d.get(key))[0]
+                if t is not None:
+                    st["named"].add(_ms(t))
+                    if key == "wake" and (st["wake"] is None or t > st["wake"]):
+                        st["wake"] = t
+        if ts is not None and kind not in NOT_LIVE_KINDS and not (kind == "stopped" and d.get("inferred") is True):
+            st["live"].append(ts)
+    st["live"].sort()
+    st["open"] = [d for d in lines[last + 1:] if d.get("kind") == "stopped" and d.get("cause") in OPEN_STOP_CAUSES]
+    return st
+
+
+def _live_before(live, t):
+    """The latest live line strictly before `t`, or None."""
+    before = [x for x in live if x < t]
+    return before[-1] if before else None
+
+
+def _evidence(st, mt, now):
+    """The Mac's evidence that passes the window test (run_record.py's stop model): (boot, [(S, W)]). Evidence E passes
+    when it falls after the last lead-entry (any E when there is none) and at or before now, the record names it not
+    yet, and a live line precedes the stop it starts (L_B, the latest live line before the boot B; a sleep's S)."""
+    def window(e):
+        return (st["entry"] is None or st["entry"] < e) and e <= now and _ms(e) not in st["named"]
+    boot = mt.get("boot")
+    if boot is None or not window(boot) or _live_before(st["live"], boot) is None:
+        boot = None
+    sleeps = [(s, w) for s, w in mt.get("sleeps") or [] if window(w) and _live_before(st["live"], s) is not None]
+    return boot, sleeps
+
+
+def _stop_fields(cause, at, lines, **more):
+    fields = {"cause": cause, "inferred": True, "calls": inflight_calls(lines, upto=at), "at": _zms(at)}
+    fields.update({k: _zms(v) for k, v in more.items()})
+    return fields
+
+
+def cmd_record_entry(args) -> int:
+    """The lead's entry into its loop (execute § 4.5 *Run record*): every stop the record does not hold yet, then one
+    lead-entry (run_record.py's stop model). Step 1, the gap stop G this entry resumes from, first match: a pause that
+    stands (no line; the entry says stop: pause); the open stop; --cause (inferred at L, the latest live line); a boot
+    that passes the window test after L (mac-restart at L); a session other than the last lead-entry's, both known
+    (dead-lead at L); --by watchdog (watchdog at L). Step 2: every boot or sleep that passes the window test, that G did
+    not take and that starts before G's start (or with no G) is written first, in `at` order (a boot at L_B, a sleep at
+    S with its wake): evidence after G's start is inside G. Step 3: G's own stopped line, when new, then exactly one
+    lead-entry {by, session?, stop?}. Every stopped line carries the calls in flight at its `at`."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        print(f"ERROR: record-entry: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    try:
+        note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        print(f"ERROR: record-entry: cannot read {rollout_path}: {e}", file=sys.stderr)
+        return 1
+    ro = rollout_path.stem
+    why = _ledger_skip(note)
+    if why:
+        print(f"[skip] {ro}: {why}: no entry recorded")
+        return 0
+    lines = _record_read(ro)
+    if lines is None:
+        print(f"run_record: warning: record-entry: the Run record of {ro} cannot be read; nothing recorded",
+              file=sys.stderr)
+        return 0
+    now = _now(args)
+    session = args.session if args.session is not None else os.environ.get("CLAUDE_CODE_SESSION_ID")
+    session = session or None
+    st = _stop_state(lines)
+    live = st["live"]
+    last_live = live[-1] if live else None
+    mt = machine_times(st["entry"] or (live[0] if live else now), now)
+    boot, sleeps = _evidence(st, mt, now)
+    gap = None   # {stop, start, fields (a new stopped line) or None}
+    pause, pause_start = _pause_stands(note, lines)
+    if pause:
+        gap = {"stop": "pause", "start": pause_start, "fields": None}
+    elif st["open"]:
+        o = st["open"][-1]
+        gap = {"stop": o["cause"], "start": _away_stamp(o.get("at"))[0] or _rec_ts(o), "fields": None}
+    elif last_live is not None:
+        if args.cause:
+            gap = {"stop": args.cause, "fields": _stop_fields(args.cause, last_live, lines)}
+        elif boot is not None and boot > last_live:
+            gap = {"stop": "mac-restart", "fields": _stop_fields("mac-restart", last_live, lines, boot=boot)}
+            boot = None   # G took it
+        elif session and st["session"] and session != st["session"]:
+            gap = {"stop": "dead-lead", "fields": _stop_fields("dead-lead", last_live, lines)}
+        elif args.by == "watchdog":
+            gap = {"stop": "watchdog", "fields": _stop_fields("watchdog", last_live, lines)}
+        if gap is not None and gap["fields"] is not None:
+            gap["start"] = last_live
+    earlier = []
+    inside = lambda t: gap is not None and (gap["start"] is None or t >= gap["start"])  # noqa: E731
+    if boot is not None and not inside(_live_before(live, boot)):
+        lb = _live_before(live, boot)
+        earlier.append((lb, _stop_fields("mac-restart", lb, lines, boot=boot)))
+    for s, w in sleeps:
+        if not inside(s):
+            earlier.append((s, _stop_fields("mac-sleep", s, lines, wake=w)))
+    earlier.sort(key=lambda e: e[0])
+    writes = [f for _t, f in earlier] + ([gap["fields"]] if gap is not None and gap["fields"] is not None else [])
+    said = []
+    for fields in writes:
+        _event(ro, "stopped", None, fields, args)
+        said.append(f"stopped {fields['cause']} (inferred, at {fields['at']})")
+    entry = {"by": args.by}
+    if session:
+        entry["session"] = session
+    if gap is not None:
+        entry["stop"] = gap["stop"]
+    _event(ro, "lead-entry", None, entry, args)
+    said.append(f"lead-entry by={args.by}" + (f" stop={gap['stop']}" if gap is not None else ""))
+    print(f"{ro}: " + "; ".join(said) + (" (dry-run)" if args.dry_run else ""))
+    return 0
+
+
+def _record_sleeps(rollout, note, now, args):
+    """`next`'s sleep line (run_record.py's stop writers): a sleep no entry follows, the rollout's last calls running
+    through it, say. Off --dry-run, only when the record has a lead-entry, no pause stands and no stop is open, and
+    kern.waketime is later than both the last lead-entry and the latest recorded wake (the cheap gate, so pmset is read
+    at most once per wake): each sleep that passes the window test is a mac-sleep {at: S, wake: W, calls}. A mac-sleep
+    closes itself, so `next` writes no lead-entry. Never raises."""
+    try:
+        lines = _record_read(rollout)
+        if not lines:
+            return
+        st = _stop_state(lines)
+        if st["entry"] is None or st["open"] or _pause_stands(note, lines)[0]:
+            return
+        since = max(t for t in (st["entry"], st["wake"]) if t is not None)
+        mt = machine_times(since, now)
+        if mt["wake"] is None or mt["wake"] <= since:
+            return
+        for s, w in _evidence(st, mt, now)[1]:
+            _event(rollout, "stopped", None, _stop_fields("mac-sleep", s, lines, wake=w), args)
+    except Exception:  # noqa: BLE001 — recording never breaks `next`
+        return
+
+
+def _latest_run(rollout, slug) -> dict:
+    """{runId?, call?} of the task's latest run-bound in the record (quota-stall's, p29-10), {} with none."""
+    lines = _record_read(rollout) or []
+    key = (slug or "").lower()
+    run = next((d for d in reversed(lines) if d.get("kind") == "run-bound" and d.get("task") == key), None)
+    out = _call_entry(key, run)
+    out.pop("task")
+    return out
+
+
 def _log_tokens(line) -> dict:
     """An Integration log line as {startedAt, outcome, <key>: <value>...} (the `key=value` tokens)."""
     toks = (line or "").split(" ")
@@ -4772,7 +5389,9 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
             "setAsideAt": at_after}, args)
         error_line = reason.split("\n", 1)[0].strip()
         if failed and QUOTA_RE.search(error_line):
-            _event(rollout, "quota-stall", slug, {"stage": stage, "detail": error_line[:500]}, args)
+            # p29-10: the call the limit killed, from the task's latest run-bound (omitted when it has none)
+            _event(rollout, "quota-stall", slug, {"stage": stage, "detail": error_line[:500], **_latest_run(rollout, slug)},
+                   args)
 
 
 # review-split.py, beside this module: the original / regression split of one engine review round (p21-3).
@@ -7119,16 +7738,16 @@ def _completion_halts(result, streak):
     return result in COMPLETION_STREAK and streak > 0 and streak % COMPLETION_HALT_STREAK == 0
 
 
-def _failing_ids(lines):
+def _failing_ids(lines, marker="== verifier:"):
     """Up to FAILING_IDS_MAX distinct failing-test ids read from the verify log's lines (an open file streams), in
     order, from verify's `== verifier:` line on, so an env_bootstrap's own ERROR lines are never read as tests; []
-    when none parse."""
+    when none parse. marker=None reads from the first line (an agent suite's captured output, verify-slot.py run)."""
     ids = []
-    started = False
+    started = marker is None
     for line in lines:
         line = line.rstrip("\n")
         if not started:
-            started = line.startswith("== verifier:")
+            started = line.startswith(marker)
             continue
         for rx in FAILING_ID_RES:
             m = rx.match(line)
@@ -7405,7 +8024,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     # beside it. `--flag=value`, so a command starting with `-` is never read as an option.
     argv = [sys.executable, str(LEAD_INTEGRATE_PY), "verify", "--outcome", "--repo", str(root), f"--detach-at={sha}",
             "--tree", tree, "--out", out, "--timeout", str(timeout), "--slots", str(slots),
-            "--slot-wait", str(_slot_wait(timeout + spent)), f"--verifier={verifier}"]
+            "--slot-wait", str(_slot_wait(timeout + spent)), f"--verifier={verifier}", f"--rollout={path}"]
     argv += [f"--bootstrap={bootstrap}"] if bootstrap else []
     outcome_path, log_path = Path(f"{out}{VERIFY_OUTCOME_SUFFIX}"), Path(f"{out}.log")
     # A dead run's files are never read as this run's: its outcome goes, its log is kept under a name of its own.
@@ -7701,6 +8320,17 @@ def main() -> int:
     rp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     rp.add_argument("--dry-run", action="store_true")
     rp.set_defaults(func=cmd_record_pause)
+
+    ren = sub.add_parser("record-entry", help="the lead's loop entry in the Run record: the stops it finds, then one "
+                                              "lead-entry (p29-10, ADR 0051; execute § 4.5 *Run record*)")
+    ren.add_argument("--rollout", required=True, help="path to the rollout note")
+    ren.add_argument("--by", required=True, choices=ENTRY_BYS, help="what opened this entry")
+    ren.add_argument("--cause", choices=ENTRY_CAUSES, default=None,
+                     help="why the session stopped, when the Prompt that opened the entry names it")
+    ren.add_argument("--session", default=None, help="the lead's session id (default: CLAUDE_CODE_SESSION_ID)")
+    ren.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    ren.add_argument("--dry-run", action="store_true", help="print what it would record; write nothing")
+    ren.set_defaults(func=cmd_record_entry)
 
     df = sub.add_parser("defer", help="pop task(s) out of a rollout back to open backlog (/thread:repair)")
     df.add_argument("--tasks", required=True, help="comma-separated task slugs to defer")

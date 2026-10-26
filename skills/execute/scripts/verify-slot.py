@@ -55,7 +55,19 @@ Contract.
    once, keeps one and closes the rest; priority acquirers ignore the count and compete by polling. Every
    poll, and `status`, reaps a `waiter-*.wait` or `.waiter-*.tmp` it can flock LOCK_NB (the inode re-checked
    against the path before the unlink).
-6. Residuals. A slots dir deleted while held, or a different HOME or XDG chain, makes a separate pool. A
+7. The Run record (p29-10, ADR 0051). A `run` whose real cwd lies under `<repo>/.claude/worktrees/<slug>` (the last
+   such part) and whose task note, reconcile-rollout.py's DEFAULT_TASKS_DIR/<slug>.md, names a rollout records the
+   suite in that rollout's Run record: suite-started (by task, or integration with --priority; runner agent; the
+   tree's sha, dirty and diff read before the slot wait, the load and the Mac-wide running count after it) and,
+   once the slot is released, suite-ended: green (rc 0), stopped (128+n, or a signal to `run`: no vault scan, no
+   output read), unrun (127), else red with the failing names read from the last 16 MiB of its output. Unless fd 1
+   or fd 2 is a TTY, the guard's stdout and stderr then go through pipes: a pump forwards each chunk to fd 1 or
+   fd 2 within GUARD_POLL and keeps a copy in an unlinked temp file; once the guard exits it drains what is ready
+   for at most a second and never waits for EOF, so a leftover that writes after `run` exits gets EPIPE, and output
+   written while a stop ends the suite may be lost. Any other run (no task tree, no note, no `rollout:`) takes the
+   path above unchanged. Recording failures are silent and never change the rc; a SIGKILL of `run` leaves a
+   started line with no ended line.
+8. Residuals. A slots dir deleted while held, or a different HOME or XDG chain, makes a separate pool. A
    process the suite itself moves into another session or group escapes the guard's kill, as it escapes a
    harness kill today, and so does a suite whose guard and wrapper are SIGKILLed together (a tree kill by pid
    snapshot). An unusable slots dir fails open: `verify-slot: WARN <dir>: <err>; running unslotted`, and the
@@ -654,8 +666,49 @@ def _parse_run(argv):
     raise _Usage("run: no -- before the command")
 
 
+RECONCILE_PY = os.path.join(os.path.dirname(SCRIPT), "reconcile-rollout.py")
+WORKTREES = (".claude", "worktrees")
+CAPTURE_TAIL = 16 * 1024 * 1024   # the bytes of an agent suite's output its failing names are read from
+DRAIN_FOR = 1.0                   # seconds the pump drains what is ready once the guard exits; never waits for EOF
+
+
+def _load_reconcile():
+    """reconcile-rollout.py, loaded only for a suite in a task tree (step-boundary.py's _load_reconcile pattern)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("reconcile_rollout", RECONCILE_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _suite_owner():
+    """The task an agent's suite is for (contract item 7), or None: the last `/.claude/worktrees/<slug>` of the real cwd
+    names the task, and its note in reconcile-rollout.py's DEFAULT_TASKS_DIR names the rollout (`rollout:`). Silent:
+    any failure is no owner."""
+    try:
+        parts = os.path.realpath(os.getcwd()).split(os.sep)
+        at = [i for i in range(len(parts) - 2) if tuple(parts[i:i + 2]) == WORKTREES and parts[i + 2]]
+        if not at:
+            return None
+        i = at[-1]
+        slug, tree = parts[i + 2], os.sep.join(parts[:i + 3])
+        rr = _load_reconcile()
+        note = rr.DEFAULT_TASKS_DIR / f"{slug}.md"
+        if not note.is_file():
+            return None
+        rollout = rr._note_rollout(rr.Note(note))
+        if not rollout:
+            return None
+        return {"rr": rr, "rollout": rollout, "task": slug, "tree": tree, "tasks_dir": rr.DEFAULT_TASKS_DIR}
+    except Exception:
+        return None
+
+
 def cmd_run(argv):
     slots, prio, cmd = _parse_run(argv)
+    owner = _suite_owner()
+    if owner is not None:
+        return _run_recorded(slots, prio, cmd, owner)
     for s in SIGNALS:
         signal.signal(s, _on_signal)
     box = {"g": None}
@@ -690,6 +743,136 @@ def cmd_run(argv):
     finally:
         if slot is not None:
             slot.release()
+    return rc
+
+
+def _put(fd, data):
+    """Write all of `data` to fd; a closed reader (EPIPE) or any other error drops the rest."""
+    try:
+        while data:
+            data = data[os.write(fd, data):]
+    except OSError:
+        pass
+
+
+def _pump(g, capture):
+    """Forward the guard's stdout and stderr, as they come, to fd 1 and fd 2, appending both to `capture`; once the guard
+    exits, drain what is ready for at most DRAIN_FOR seconds, never waiting for EOF (a leftover background process may
+    hold the pipes), close the pipes and return the command's rc as Guarded.wait does."""
+    srcs = {g.proc.stdout.fileno(): 1, g.proc.stderr.fileno(): 2}
+    until = None
+    while srcs:
+        if until is None and g.proc.poll() is not None:
+            until = time.monotonic() + DRAIN_FOR
+        ready, _, _ = select.select(list(srcs), [], [], 0 if until is not None else GUARD_POLL)
+        for fd in ready:
+            try:
+                chunk = os.read(fd, 1 << 16)
+            except OSError:
+                chunk = b""
+            if not chunk:
+                del srcs[fd]
+                continue
+            _put(srcs[fd], chunk)
+            try:
+                capture.write(chunk)
+            except OSError:
+                pass
+        if until is not None and (not ready or time.monotonic() >= until):
+            break
+    rc = g.proc.wait()
+    for f in (g.proc.stdout, g.proc.stderr):
+        try:
+            f.close()
+        except OSError:
+            pass
+    g.close()
+    return g._after(rc)
+
+
+def _failing_from(rr, capture):
+    """The failing-test names in the last CAPTURE_TAIL bytes of an agent suite's captured output (reconcile-rollout.py
+    _failing_ids, from the first line), or None when nothing could be read."""
+    try:
+        capture.flush()
+        size = capture.seek(0, os.SEEK_END)
+        capture.seek(max(0, size - CAPTURE_TAIL))
+        return rr._failing_ids(capture.read().decode("utf-8", "replace").splitlines(), marker=None)
+    except (OSError, ValueError):
+        return None
+
+
+def _run_recorded(slots, prio, cmd, owner):
+    """`run` for a suite in a task tree (contract item 7): the slotted run as cmd_run's, plus its suite-started and
+    suite-ended lines in the rollout's Run record, and, unless fd 1 or fd 2 is a TTY, its output captured through a pump
+    for the failing names. The tree's state is read before the slot wait; the load and the running count after it.
+    suite-ended is written once the slot is released, so recording never holds a slot; a stop by signal skips the vault
+    scan and the capture. Recording never changes the rc."""
+    rr = owner["rr"]
+    for s in SIGNALS:
+        signal.signal(s, _on_signal)
+    box = {"g": None}
+    slot = capture = None
+    rc = signalled = None
+    written, t0 = {}, None
+    suite, by = rr.new_suite_id(), ("integration" if prio else "task")
+    common = (owner["rollout"], owner["task"], suite, by, "agent")
+    try:
+        state = rr.tree_state(owner["tree"])   # the agent's tree is still while it waits for a slot
+        try:
+            slot = acquire(slots, priority=prio, kind="run",
+                           on_wait=lambda m: print(f"verify-slot: {m}", file=sys.stderr, flush=True))
+        except SlotDirError as e:
+            print(f"verify-slot: WARN {e}; running unslotted", file=sys.stderr, flush=True)
+            slot = None
+        if slot is not None and slot.queued:
+            print(f"verify-slot: slot {slot.index + 1} of {slots} after {slot.waited:.0f}s", file=sys.stderr, flush=True)
+        rr.suite_started(*common, state, tasks_dir=owner["tasks_dir"], waited=slot.waited if slot is not None else None,
+                         reraise=(_Signalled,), written=written)
+        t0 = time.monotonic()
+        piped = not (os.isatty(1) or os.isatty(2))
+        if piped:
+            import tempfile
+            capture = tempfile.TemporaryFile()
+        g = Guarded(cmd, hold=slot, on_spawn=lambda x: box.__setitem__("g", x),
+                    **({"stdout": subprocess.PIPE, "stderr": subprocess.PIPE} if piped else {}))
+        if slot is not None:
+            write_holder(slot, {"pid": os.getpid(), "guard": g.pid, "group": g.group, "cwd": os.getcwd(),
+                                "since": _stamp(), "kind": "run"})
+        rc = _pump(g, capture) if piped else g.wait()
+    except _Signalled as s:
+        for sig in SIGNALS:
+            signal.signal(sig, signal.SIG_IGN)
+        if box["g"] is not None:
+            box["g"].stop()
+        rc, signalled = 128 + s.signum, True
+    except BaseException:
+        if box["g"] is not None:
+            box["g"].close()
+        if capture is not None:
+            capture.close()
+        raise
+    finally:
+        if slot is not None:
+            slot.release()
+    try:
+        if written.get("started") and t0 is not None:
+            seconds = time.monotonic() - t0
+            if signalled or rc > 128:
+                rr.suite_ended(*common, "stopped", seconds, tasks_dir=owner["tasks_dir"], scan=False, rc=rc)
+            else:
+                outcome = "green" if rc == 0 else "unrun" if rc == 127 else "red"
+                failing = _failing_from(rr, capture) if outcome == "red" and capture is not None else None
+                rr.suite_ended(*common, outcome, seconds, tasks_dir=owner["tasks_dir"], rc=rc, failing=failing)
+    except _Signalled:
+        pass   # a stop after the suite ended: the recording is abandoned and the exit stays the suite's rc
+    except Exception:
+        pass
+    finally:
+        for sig in SIGNALS:   # the suite and its record are done: a late stop changes nothing now
+            signal.signal(sig, signal.SIG_IGN)
+        if capture is not None:
+            capture.close()
     return rc
 
 

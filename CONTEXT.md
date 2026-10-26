@@ -823,6 +823,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `pause_requested` flag (start nothing new, let what is running integrate
   and merge, exit paused; ADR 0030).
   Hard: stop now; worktrees keep the work. _Avoid_: suspend, halt, abort.
+- **Stop** — the run halting for a cause other than Lachy's **Pause**: a
+  usage limit, a dead lead, a Mac restart or sleep, a § 7 halt, a Watchdog
+  recovery. The Run record keeps each as its own kind, never a pause: logged
+  live when a process saw it begin, else inferred by the resume that finds
+  it, with the calls in flight at its start (ADR 0051). _Avoid_: pause, halt
+  (alone).
 - **Reinstate** — resuming a paused rollout: plain `execute` on the rollout
   note. No separate resume command. It moves the rollout onto a fresh
   **Engine snapshot** at origin's tip (ADR 0043); for a serial chain, which is
@@ -861,9 +867,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 - **Run record** — the append-only events a rollout's Slots and
   Integration lane leave as they run, with the settings in force at each
-  Slot start, written by scripts, never by a model (ADR 0032). _Avoid_:
-  telemetry, metrics, log (a task note's `## Integration log` is a
-  different thing).
+  Slot start, written by scripts, never by a model (ADR 0032). It also
+  carries every **Stop** and resume, every suite with the load around it,
+  and why main moved at each base-moved refusal: what the Time-lost ledger
+  needs (ADR 0051). _Avoid_: telemetry, metrics, log (a task note's
+  `## Integration log` is a different thing).
 - **Throughput** — merges per running hour, a Guardrail: a Tuning may not
   slow a run past its bound, since an overnight rollout must still finish by
   morning. Running time leaves out pauses, halts and waits on Lachy.

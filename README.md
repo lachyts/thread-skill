@@ -129,9 +129,13 @@ watches the shared checkout's default branch and bareness around every launch
 and halts the queue on a change that is not a close-out (execute § 4.5).
 `skills/execute/scripts/step-boundary.py` is the lead's side of a Chorus room
 stop: it reads the Workflow journals to stop each call at a step boundary and
-records the stop on the rollout note (execute § Room stop).
+records the stop on the rollout note (execute § Room stop), and in the Run record
+as a stop, as the Stop hook records each halt (ADR 0051).
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
-every emitter appends its events through it, and its header is the schema.
+every emitter appends its events through it, and its header is the schema. Its
+writers include the suites' (`verify-slot.py run`, `lead-integrate.py verify`),
+the lead's loop entries (`reconcile-rollout.py record-entry`) and why main moved
+(`lead-integrate.py base-moved`, which `merge-task.sh` calls at each exit 3).
 `skills/reflect/scripts/score.py` reads a record into a Reflection's scores and
 proposals (writing nothing), and `skills/reflect/scripts/escapes.py`, which it loads,
 reads the landed tasks' Escapes and Quality from the task notes' `fixes:` and the

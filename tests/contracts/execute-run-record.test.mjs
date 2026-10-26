@@ -4,7 +4,9 @@
 // record*: each call and form, the end-before-launch and end-before-set-aside order, best-effort; that each new
 // verb is documented in reconcile-rollout.py's docstring and wired in main(); and run_record.py's pairing rules,
 // which every reader of the record (a Reflection, the record suite's checker) relies on. The behaviour is pinned by
-// skills/execute/tests/reconcile-rollout-record.test.sh. Reads files only.
+// skills/execute/tests/reconcile-rollout-record.test.sh. p29-10 (ADR 0051) adds the lead's loop entry (record-entry,
+// § 2's first write and the heartbeat's clause (2b)) and the verify lines' --rollout and --slug; its behaviour is
+// skills/execute/tests/reconcile-rollout-stops.test.sh's. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collapse, read, section } from '../lib/contract-text.mjs'
@@ -121,5 +123,74 @@ for (const [rule, mutate] of controls) {
     const mutated = mutate(skill)
     assert.notEqual(mutated, skill, 'the mutation applied')
     assert.deepEqual(checkRunRecord(mutated), [rule])
+  })
+}
+
+// ---- p29-10 (ADR 0051): the lead's loop entry, the heartbeat's liveness line, and the suites' flags ----------------
+// record-entry is every loop entry's first write: at a § 1 entry right after § 2's lineage, version and shape lines,
+// before § 2.5 (so a write-nothing halt in a gate is a stop the Stop hook records and the next entry closes); its
+// --by and --cause forms are tabled in § 4.5 *Run record*; every heartbeat tick with no pause or room stop runs it as
+// clause (2b), the pinned clause (2) and (3) sentences kept verbatim; the verify and RACE lines carry --rollout and
+// --slug so the lead's suites record themselves.
+function checkLedger(md) {
+  const bad = []
+  const need = (name, ok) => { if (!ok) bad.push(name) }
+  const s2 = section(md, /^### 2\. Protocol-version gate/) ?? ''
+  const ENTRY = '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <rollout-note> --by <by> [--cause <cause>] || true`'
+  const shape = s2.indexOf('Then the shape (`shape:`')
+  const entry = s2.indexOf("**The Run record's entry (ADR 0051, p29-10).**")
+  need('entry-placement', shape >= 0 && entry > shape && s2.includes(ENTRY) &&
+    collapse(s2).includes("from the engine root (§ 1.5's hand-over): before § 2.5, § 2.6, § 2.7, § 2.8, § 3's `verify_timeout` check and `check-all`"))
+  const p = labelled(md, 'Run record.')
+  need('entry-bullet', p.includes('- `record-entry --rollout <rollout-note> --by <by> [--cause <cause>]` (ADR 0051, p29-10): every loop entry runs it once, as its first write.') &&
+    p.includes("right after § 2's lineage, version and shape lines pass") && p.includes('It writes only the Run record, never the vault or git') &&
+    p.includes("The heartbeat's lapse re-entry (clause (2) exit 4) runs it as the entry's first act; its stall re-entry (clause (7)) does not"))
+  need('by-forms', [['his own `/thread:execute` or resume', 'lachy'], ['a `Chorus: ` Prompt (a start, a room resume or a re-send)', 'stage'],
+    ['a `Chorus: ` Prompt naming a Watchdog recovery', 'watchdog'], ['a heartbeat tick or its re-entry', 'heartbeat'],
+    ["`/thread:repair`'s hand-off", 'repair']].every(([what, by]) => p.includes(`| ${what} | \`${by}\` |`)))
+  need('cause-forms', [['a usage-limit re-send', 'usage-limit'], ['a signed-out re-send or a dead session', 'dead-lead'],
+    ['the Watchdog stopped the lead', 'watchdog']].every(([what, c]) => p.includes(`| ${what} | \`${c}\` |`)))
+  need('no-hand-writes', p.includes('The lead adds nothing for a halt or a room stop: the Stop hook records each halt (§ 8), and `step-boundary.py begin` each room stop'))
+  const hb = md.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
+  const B2 = "On any other exit no room stop stands: go on to the next clause. (2b) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <the rollout note's path> --by heartbeat || true` once (the tick's liveness line, execute § 4.5 *Run record*), then go on to the next clause. (3) Lost calls (always run this clause, under a merge hold too):"
+  need('heartbeat-2b', hb.includes(B2))
+  need('entry-order', md.includes("**Validate `verify_timeout` once per loop entry, before anything the entry writes.** (The Run record's `record-entry` aside: § 2's first write.)") &&
+    labelled(md, 'Landing-register re-check.').includes('re-runs § 2.5 before anything else it does, `record-entry` aside (*Run record*)') &&
+    collapse(md).includes("**Cold resume.** Its first write is the Run record's `record-entry`, once per entry") &&
+    md.includes("with § 2's `record-entry` already run (a standing pause makes its `lead-entry` read `stop: pause`)"))
+  const vline = (md.match(/^# thread:integration-verify[^\n]*\n([^\n]*)\n# end thread:integration-verify/m) ?? [])[1] ?? ''
+  const race = (section(md, /^### 4\.5\. /) ?? '').split('\n').find((l) => l.includes('**RACE procedure**')) ?? ''
+  const FLAGS = '--slot-wait <slot_wait> --rollout "<rollout-note>" --slug <slug> --bootstrap'
+  need('verify-flags', vline.includes(FLAGS) && race.includes(FLAGS))
+  return bad
+}
+
+test('execute (p29-10): record-entry at every entry, its forms, the heartbeat\'s clause (2b), the suites\' flags', () => {
+  assert.deepEqual(checkLedger(skill), [])
+})
+
+test('record-entry is documented in the module docstring and wired in main()', () => {
+  const doc = rrs.slice(0, rrs.indexOf('\nimport argparse'))
+  assert.ok(/^ {2}record-entry\s/m.test(doc), 'documented')
+  assert.ok(rrs.includes('sub.add_parser("record-entry"'), 'wired')
+  assert.ok(!/GUARD_EXEMPT = \([^)]*record-entry/.test(rrs), 'never exempt from the Engine snapshot guard')
+})
+
+const ledgerControls = [
+  ['entry-placement', (t) => t.replace("**The Run record's entry (ADR 0051, p29-10).**", '**The Run record.**')],
+  ['entry-placement', (t) => t.replace("before § 2.5, § 2.6, § 2.7, § 2.8, § 3's `verify_timeout` check and `check-all`, so a write-nothing halt in any of them", 'after § 2.8, so a halt')],
+  ['entry-bullet', (t) => t.replace('every loop entry runs it once, as its first write.', 'every loop entry runs it when convenient.')],
+  ['by-forms', (t) => t.replace('| a heartbeat tick or its re-entry | `heartbeat` |', '| a heartbeat tick or its re-entry | `stage` |')],
+  ['cause-forms', (t) => t.replace('| a usage-limit re-send | `usage-limit` |', '| a usage-limit re-send | `dead-lead` |')],
+  ['no-hand-writes', (t) => t.replace('The lead adds nothing for a halt or a room stop', 'The lead writes a stop for each halt')],
+  ['heartbeat-2b', (t) => t.replace(' (2b) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <the rollout note\'s path> --by heartbeat || true` once (the tick\'s liveness line, execute § 4.5 *Run record*), then go on to the next clause.', '')],
+  ['entry-order', (t) => t.replace(", `record-entry` aside (*Run record*),", ',')],
+  ['verify-flags', (t) => t.replace('--slot-wait <slot_wait> --rollout "<rollout-note>" --slug <slug> --bootstrap \'<env_bootstrap>\' --verifier \'<verifier>\'\n# end', '--slot-wait <slot_wait> --bootstrap \'<env_bootstrap>\' --verifier \'<verifier>\'\n# end')],
+]
+for (const [rule, mutate] of ledgerControls) {
+  test(`control (p29-10): ${rule}`, () => {
+    const mutated = mutate(skill)
+    assert.notEqual(mutated, skill, 'the mutation applied')
+    assert.deepEqual(checkLedger(mutated), [rule])
   })
 }

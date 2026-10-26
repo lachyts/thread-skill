@@ -29,6 +29,9 @@
 #   no file or no --verifier re-runs   C34 the task's own diff adds a reader   C35 a step walks the tree   C36 a shared
 #   THREAD.md   C37 a refused rollouts.toml   C38 chained skips across merge-task's exit 3   C39 a cwd glob in a test
 #   C40 fail closed: a failing cat-file is an inert check error, route verify, exit 0.
+#   The Run record (p29-10, ADR 0051): S1–S7b verify --rollout's suite lines (green, red, timeout, race, completion,
+#   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files); M1–M6 base-moved (a rollout's
+#   merge from the record or its note, a peer's push, the Inert path test, no task note, main unreadable).
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0; the verify slots in a temp pool
 # (tests/lib/merge-task-env.sh exports THREAD_VERIFY_SLOTS_DIR).
 set -uo pipefail
@@ -135,7 +138,7 @@ setaside_at() { python3 "$RR" status --rollout "$V/ro.md" --tasks-dir "$V" | pyt
 # bootstrap written as '\''): verify_line <tree> <slug> <verifier> [bootstrap]. VERIFY_FILL=dq fills them the
 # old way instead (double quotes, only " escaped): C15's control.
 verify_line() {
-  python3 - "$SKILL" "$R" "$@" <<'PY'
+  ROLLOUT_NOTE="$V/ro.md" python3 - "$SKILL" "$R" "$@" <<'PY'
 import os, re, sys
 skill, repo, tree, slug, verifier = sys.argv[1:6]
 boot = sys.argv[6] if len(sys.argv) > 6 else ""
@@ -154,6 +157,7 @@ if not boot:
 # <verify_timeout>, <verify_slots> and <slot_wait> are § 3's per-entry values (p14-2, p23-4); left literal, the shell
 # would read them as redirections.
 line = (line.replace("<tree>", tree).replace("<repoPath>", repo).replace("<slug>", slug)
+        .replace("<rollout-note>", os.environ.get("ROLLOUT_NOTE", "<rollout-note>"))
         .replace("<verify_timeout>", os.environ.get("VERIFY_TIMEOUT", "1800"))
         .replace("<verify_slots>", os.environ.get("VERIFY_SLOTS", "2")).replace("<slot_wait>", os.environ.get("SLOT_WAIT", "60"))
         .replace("<env_bootstrap>", esc(boot)).replace("<verifier>", esc(verifier)))
@@ -1443,6 +1447,117 @@ case "$(j "$J" 'd["inert"]["why"]')" in "inert check error: "*) ok y y "C40: …
 lacks "$(cat "$F/prep.err")" "Traceback" "C40: … no traceback on stderr"
 has "$(cat "$F/prep.err")" "WARN: inert check error: ProofError" "C40: … one WARN line names the error"
 ok "$(ikinds)|$(iline '[ls[0]["readers"], ls[0]["error"][:26]]')" '["inert-proof-failed"]|[[],"inert check error: ProofEr"]' "C40: … and an inert-proof-failed line with error and readers []"
+unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
+
+# ======== S1–S7b: verify --rollout records its suite in the Run record (p29-10, ADR 0051) =======================
+# by integration (with --slug), race (--detach-at) or completion (--outcome, no task), runner lead; suite-started after
+# the slot and before the deadline, suite-ended after the rc or outcome file. These cases read the record, so they keep
+# their own (THREAD_TEST_EVENTS_DIR does not apply); HOME is an empty dir (the Mac-wide count reads the note's vault).
+fx s1
+SEV="$F/events"; SH_HOME="$F/home"; mkdir -p "$SH_HOME"
+sv() {  # sv <out> [verify args…]: verify on the task tree with --rollout ro, the record in SEV; the exit in $rc
+  local o="$1"; shift
+  HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --tree "$WT" --out "$F/out/$o" --rollout "$V/ro.md" "$@" >/dev/null 2>&1; rc=$?
+}
+sq() {  # sq <python expr over L, the record's lines>
+  python3 - "$SEV/ro.jsonl" "$1" <<'PY2'
+import json, sys
+try:
+    L = [json.loads(x) for x in open(sys.argv[1]).read().splitlines() if x.strip()]
+except FileNotFoundError:
+    L = []
+print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))
+PY2
+}
+HEAD0=$(git -C "$WT" rev-parse HEAD)
+sv s1 --slug "$SLUG" --timeout 60 --verifier true
+ok "$rc|$(sq '[d["kind"] for d in L]')" '0|["suite-started","suite-ended"]' "S1: green: a suite-started and a suite-ended"
+ok "$(sq '[L[0]["task"], L[0]["by"], L[0]["runner"], L[0]["sha"], L[0]["dirty"], len(L[0]["load"]), L[0]["running"]]')" "[\"$SLUG\",\"integration\",\"lead\",\"$HEAD0\",false,3,0]" "S1: by integration, runner lead, the tree's sha, the load, the running count"
+ok "$(sq '[L[1]["suite"] == L[0]["suite"], L[1]["outcome"], L[1]["rc"], "failing" in L[1], "running" in L[1]]')" '[true,"green",0,false,true]' "S1: ended green, rc 0, no failing"
+: > "$SEV/ro.jsonl"
+sv s2 --slug "$SLUG" --timeout 60 --verifier 'echo "FAILED tests/b.py::u - boom"; exit 1'
+ok "$rc|$(sq '[L[1]["outcome"], L[1]["rc"], L[1]["failing"]]')" '1|["red",1,["tests/b.py::u"]]' "S2: red: its failing names, read from the log"
+: > "$SEV/ro.jsonl"
+sv s3 --slug "$SLUG" --timeout 2 --verifier "sleep 3181.$u"
+ok "$rc|$(sq '[L[1]["outcome"], L[1]["rc"], L[1]["timeout"], L[1]["step"], L[1]["failing"]]')" '124|["timeout",124,2,"verifier",[]]' "S3: timeout: its --timeout and step"
+: > "$SEV/ro.jsonl"
+RT="$R/.claude/worktrees/race-$SLUG"
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --repo "$R" --detach-at "$HEAD0" --tree "$RT" --out "$F/out/s4" --timeout 60 --rollout "$V/ro.md" --slug "$SLUG" --verifier true >/dev/null 2>&1
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --repo "$R" --detach-at "$HEAD0" --tree "$RT" --out "$F/out/s4c" --timeout 60 --outcome --rollout "$V/ro.md" --verifier true >/dev/null 2>&1
+ok "$(sq '[[d["kind"], d["by"], d["task"], d.get("outcome")] for d in L]')" "[[\"suite-started\",\"race\",\"$SLUG\",null],[\"suite-ended\",\"race\",\"$SLUG\",\"green\"],[\"suite-started\",\"completion\",null,null],[\"suite-ended\",\"completion\",null,\"green\"]]" "S4: --detach-at is a race suite; --outcome a completion suite with no task"
+: > "$SEV/ro.jsonl"
+VSL="$root/skills/execute/scripts/verify-slot.py"
+python3 "$VSL" run --slots 1 -- sh -c "echo \$\$ > '$F/s5.pid'; until [ -e '$F/s5.go' ]; do sleep 0.1; done" > /dev/null 2>&1 &
+hp=$!
+within 300 test -s "$F/s5.pid" || echo "FAIL - S5: the holder did not start within 300 s"
+sv s5 --slug "$SLUG" --timeout 60 --slots 1 --slot-wait 1 --verifier true
+touch "$F/s5.go"; wait "$hp"
+ok "$rc|$(sq '[[d["kind"], d["outcome"], d["seconds"], d["waited"] >= 1, "rc" in d] for d in L]')" '75|[["suite-ended","noslot",0,true,false]]' "S5: noslot: an ended line only, with its wait, no rc"
+rm -rf "$SEV"
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --tree "$WT" --out "$F/out/s6" --timeout 60 --verifier true >/dev/null 2>&1
+ok "$([ -e "$SEV" ] && echo written || echo none)" none "S6: no --rollout: no record"
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --tree "$WT" --out "$F/out/s6b" --timeout 60 --slug "$SLUG" --verifier true >/dev/null 2>&1
+ok "$?|$([ -e "$F/out/s6b.rc" ] && echo rc || echo none)" "2|none" "S6: --slug without --rollout is a usage error, no rc file"
+# S7: TERM to a slotted verify once its suite-started line is in: 143, the rc file first, then suite-ended stopped.
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --tree "$WT" --out "$F/out/s7" --timeout 600 --slots 1 --slot-wait 60 --rollout "$V/ro.md" --slug "$SLUG" --verifier "sleep 3182.$u" >/dev/null 2>&1 &
+vp=$!
+within 300 grep -q suite-started "$SEV/ro.jsonl" || echo "FAIL - S7: no suite-started within 300 s"
+kill -TERM "$vp"; wait "$vp"; rc=$?
+ok "$rc|$(cat "$F/out/s7.rc" 2>/dev/null)" "143|143" "S7: exit 143 and <out>.rc reads 143"
+ok "$(sq '[[d["kind"], d.get("outcome"), d.get("rc"), "running" in d, "failing" in d] for d in L]')" '[["suite-started",null,null,true,false],["suite-ended","stopped",143,false,false]]' "S7: suite-ended stopped, no running, no failing"
+within 60 nosleeper "sleep 3182\.$u"
+: > "$SEV/ro.jsonl"
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --tree "$WT" --out "$F/out/s7b" --timeout 600 --slots 1 --slot-wait 60 --outcome --rollout "$V/ro.md" --verifier "sleep 3183.$u" >/dev/null 2>&1 &
+vp=$!
+within 300 grep -q suite-started "$SEV/ro.jsonl" || echo "FAIL - S7b: no suite-started within 300 s"
+kill -TERM "$vp"; wait "$vp"
+ok "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["rc"], d["ended"])' "$F/out/s7b.outcome.json")" "143 signal" "S7b: --outcome: the outcome file carries rc 143 and ended signal"
+ok "$(sq '[d.get("outcome") for d in L]')" '[null,"stopped"]' "S7b: … and the suite ended stopped"
+within 60 nosleeper "sleep 3183\.$u"
+
+# ======== M1–M6: base-moved, why main moved at a merge-task exit 3 (p29-10, ADR 0051) ===========================
+# base-moved finds the task by its PR (the vault's pr:), fetches origin, classifies each first-parent commit base..main
+# (a rollout's merge from the Run records or its task note, else a peer's push) and runs the Inert path test.
+fx m1
+MEV="$F/events"; MH="$F/home"; mkdir -p "$MH"
+bm() {  # bm [args…]: base-moved for PR 5 with --base TB, the record in MEV, HOME an empty dir; its JSON in $J
+  J=$(HOME="$MH" THREAD_EVENTS_DIR="$MEV" python3 "$LI" base-moved --repo "$R" --pr "${PRN:-5}" --base "$TB" --main "$B" --default master --tasks-dir "$V" "$@" 2>"$F/bm.err"); rc=$?
+}
+mq() { python3 -c 'import json,sys; ls=[json.loads(l) for l in open(sys.argv[1])]; print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))' "$MEV/ro.jsonl" "$1" 2>/dev/null || echo none; }
+HOME="$MH" THREAD_EVENTS_DIR="$MEV" python3 "$root/skills/_shared/scripts/run_record.py" emit --rollout other-ro --task other-t --kind merged --json '{"pr":"https://github.com/O/R/pull/9"}'
+printf -- '---\ntags: [task]\nstatus: done\nrollout: "[[r2]]"\npr: https://github.com/o/r/pull/11\n---\n\nnote-t\n' > "$V/note-t.md"
+main x.txt "x" "feat: x (#9)"; C1=$B
+main y.txt "y" "a peer's push"; C2=$B
+main z.txt "z" "fix: z (#11)"; C3=$B
+bm --refusal 1
+ok "$rc|$(j "$J" 'd["written"]')" "0|true" "M1: exit 0, one line written"
+ok "$(mq '[[l["kind"], l["task"], l["pr"], l["base"], l["main"], l["refusal"], l["moversTotal"]] for l in ls]')" "[[\"base-moved\",\"$SLUG\",5,\"$TB\",\"$C3\",1,3]]" "M1: one base-moved for the task, with its PR, base, main and refusal"
+ok "$(mq 'ls[0]["movers"]')" "[{\"sha\":\"$C1\",\"kind\":\"rollout\",\"pr\":9,\"rollout\":\"other-ro\",\"task\":\"other-t\",\"source\":\"record\"},{\"sha\":\"$C2\",\"kind\":\"peer\"},{\"sha\":\"$C3\",\"kind\":\"rollout\",\"pr\":11,\"rollout\":\"r2\",\"task\":\"note-t\",\"source\":\"note\"}]" \
+  "M1–M3: oldest first: a rollout's merge from the record (owner/name read ignoring case), a PR-less peer push, a rollout's merge from its task note"
+ok "$(mq '[ls[0]["inertOnly"], ls[0]["pathsTotal"], ls[0]["nonInert"], "error" in ls[0]]')" '[false,3,["x.txt","y.txt","z.txt"],false]' "M4: no inert_paths: inertOnly false, the paths named"
+# M2b: a bare-number merged line matches only by its task: #11's line under another task stays a note match.
+HOME="$MH" THREAD_EVENTS_DIR="$MEV" python3 "$root/skills/_shared/scripts/run_record.py" emit --rollout third-ro --task not-note-t --kind merged --json '{"pr":11}'
+HOME="$MH" THREAD_EVENTS_DIR="$MEV" python3 "$root/skills/_shared/scripts/run_record.py" emit --rollout fourth-ro --task note-t --kind merged --json '{"pr":"#11"}'
+bm
+ok "$(mq '[ls[-1]["movers"][2]["rollout"], ls[-1]["movers"][2]["source"], "refusal" in ls[-1]]')" '["fourth-ro","record",false]' "M2: a bare-number merged line counts only under the PR's own task"
+PRN=77 bm
+ok "$rc|$(j "$J" 'd["written"]')|$(mq 'len(ls)')" "0|false|2" "M5: no task note names the PR: nothing written"
+B=$(sha f) bm
+ok "$rc|$(mq '[ls[-1]["inertOnly"], ls[-1]["movers"], ls[-1]["moversTotal"], ls[-1]["error"][:24]]')" '0|[null,[],0,"main ffffffffffff is not"]' "M6: main not readable: null beside its error, movers []"
+ok "$(python3 "$LI" base-moved --repo "$R" --pr x --base "$TB" --main "$B" --default master >/dev/null 2>&1; echo $?)" 2 "M6: a bad --pr is a usage error"
+# M4: the Inert path test on the repo's inert_paths (an ssh GitHub origin, as C30's): only THREAD.md moved → true; a
+# source file beside it → false; a refused rollouts.toml → null beside its error.
+ifx m4 '["THREAD.md"]'
+MEV="$F/events"; MH="$IH"
+main THREAD.md "close-out" "docs(thread): close-out"
+bm
+ok "$(mq '[ls[0]["inertOnly"], ls[0]["globs"], ls[0]["nonInert"], ls[0]["movers"][0]["kind"]]')" '[true,["THREAD.md"],[],"peer"]' "M4: a THREAD.md-only move: inertOnly true"
+main src.py "print(1)" "feat: src"
+bm
+ok "$(mq '[ls[1]["inertOnly"], ls[1]["nonInert"], ls[1]["moversTotal"]]')" '[false,["src.py"],2]' "M4: a source file beside it: inertOnly false"
+printf '[repo."o/r"]\ninert_paths = ["THREAD.md"]\n' > "$IH/.config/thread/rollouts.toml"
+bm
+ok "$(mq '[ls[2]["inertOnly"], ls[2]["error"][:12], ls[2]["moversTotal"]]')" '[null,"inert test: ",2]' "M4: a refused rollouts.toml: inertOnly null beside its error"
 unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"

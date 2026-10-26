@@ -155,7 +155,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      usualMinutes? (both the kind's reading at the write, so a Reflection tells a fallback overrun
                      from an underestimate). p28-2: one per (task, M), for each task whose Slot was open at a marked
                      Morning (taken before it, not freed at or before it), read from this record's Slot intervals.
-  quota-stall        stage?; detail?
+  quota-stall        stage?; detail?; runId?, call? (task | revise | integrate | resume: the task's latest run-bound,
+                     omitted when it has none; p29-10)
   auto-retry      T  stage (plan | implement | verify | review | integrate: the stage of the block it re-enters,
                      the task's latest set-aside line's), setAsideAt (run | integration), retryClass (agent | infra
                      | quota), used (int >= 0: auto_retries_used after this retry; a quota retry leaves it), budget
@@ -266,6 +267,34 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      non-empty; counts exactly sightings, newWatches, rules, bugs, filed, knobs, landed, reverted and
                      breaches, each an integer >= 0; quiet a boolean; cadence 7 or 14, absent read as 7). No
                      rollout, no task; lands in reflections.jsonl.
+  stopped            cause (usage-limit | dead-lead | mac-restart | mac-sleep | halt | watchdog), inferred (a bool:
+                     false for a stop a live process logged as it began, true for one a later entry found), calls (at
+                     most 64 {task, runId?, call?}, call task | revise | integrate | resume: the calls the record shows
+                     in flight at the stop's start); at? (a UTC Z stamp: the stop's start, required when inferred), boot?
+                     (a UTC Z stamp: the boot a mac-restart found, only there), wake? (a UTC Z stamp: a mac-sleep's wake,
+                     required there and only there, never before at), reason? (at most 200 characters: a halt's reason,
+                     a room stop's line). p29-10, ADR 0051: the run stopped for a cause other than Lachy's pause (the
+                     stop model, below), never a `paused` line.
+  lead-entry         by (lachy | stage | watchdog | heartbeat | repair: what opened the lead's entry); session? (its
+                     CLAUDE_CODE_SESSION_ID), stop? (usage-limit | dead-lead | mac-restart | halt | watchdog | pause:
+                     the stop this entry resumes from, absent when the lead was alive). p29-10: reconcile-rollout.py
+                     record-entry, one per loop entry and per heartbeat tick.
+  suite-started      suite (s- and 16 lowercase hex, shared with its suite-ended), by (task | integration | race |
+                     completion), runner (agent | lead), sha (the tree's HEAD), dirty (a bool: tracked changes on
+                     it); load? (exactly 3 finite numbers >= 0: the 1, 5 and 15 minute load average), diff? (12 hex:
+                     the first of the sha256 of `git diff HEAD --binary`, only on a dirty tree), waited? (seconds >= 0:
+                     the verify-slot wait), running? (an int >= 0: the Mac-wide count of running Rollout tasks). A task
+                     is optional: a completion suite has none.
+  suite-ended        suite, by, runner (as suite-started), outcome (green | red | timeout | stopped | unrun | noslot),
+                     seconds (>= 0: the run, after any slot wait); load?, rc? (an int 0-255, never on noslot),
+                     failing? (at most 50 names of at most 200 characters each, read from the run's output on red or
+                     timeout), timeout? (seconds >= 0: the deadline, only on timeout), step? (env_bootstrap |
+                     verifier: where a deadline or a bootstrap ended it), sha?, waited?, running? (as suite-started).
+  base-moved      T  repo, pr, base, main (the refused integrated base and the live main merge-task read), inertOnly
+                     (true | false | null: null only beside an error), moversTotal (an int >= 0), movers (at most 20
+                     {sha, kind, rollout?, task?, pr?, source?}, oldest first: kind rollout | peer, source record |
+                     note); nonInert? (at most 20 paths), pathsTotal? (an int >= 0), globs? (at most 64: the Inert
+                     globs read), refusal? (an int >= 1: merge-task's refusal count), error? (at most 200 characters).
 
 There is no ceiling-changed kind, and it is refused: the settings stamped on every slot-taken and
 idle-slots replace it, which keeps `next` stateless and also covers round caps and per-task overrides.
@@ -359,6 +388,38 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
 - The night record (p28-2): a night is assembled by its `morning`. Its record is the union of the away-night,
   last-start-held and ran-past-morning lines sharing that `morning` across every <rollout>.jsonl: the marker is
   per (rollout, M), the others per (task, M), each written once (the writer checks the record first).
+- The time-lost ledger's kinds (p29-10, ADR 0051): stopped, lead-entry, suite-started, suite-ended and base-moved,
+  every one written by a script, never by a model. score.py and reflect.py skip these kinds for now (LEDGER_KINDS);
+  p29-11 scores them. Their caps (64 calls, 50 failing names of 200 characters, 20 movers, 20 nonInert paths, a
+  200-character reason) keep each line well under 16 KiB.
+- The stop model. A stop is the run halting for a cause other than Lachy's pause. It is its own kind, never `paused`:
+  every reader reads paused .. resumed as his pause, so a stop written as one would change what existing lines mean
+  (ADR 0043). A stop starts at its `at`, else its ts. A mac-sleep ends at its `wake`. Any other stop ends at the first
+  of the next lead-entry, the next non-sleep stopped line's start and the next paused line; with none of those (a lead
+  on a pre-p29-10 Engine snapshot writes no lead-entry) at the next slot-taken, lane-taken or run-bound, else it stays
+  open and is flagged. Where a sleep overlaps another stop, the sleep owns the overlap. `calls` are those in flight at
+  the stop's start: killed by a usage-limit stop, a dead lead, a restart or a Watchdog recovery, carried on through a
+  halt, suspended through a sleep. A lead-entry with `stop` is a resume and its `by` what restarted the run; one
+  without `stop` marks the lead alive. The heartbeat writes one every tick (20 minutes), so an inferred dead-lead or
+  mac-restart starts at most one tick after the lead's last sign of life. An inferred line's ts is its write time,
+  never backdated, so file order stays ts order; `at` carries the past. A stop no evidence shows (the same session
+  resumed hours later with no stated cause and no Mac event) is not inferred: the heartbeat's lead-entries bound it,
+  and ADR 0051's monthly audit covers it.
+- Stop writers: step-boundary.py `begin` (a room stop: usage-limit, live); the Stop-hook driver
+  hooks/rollout-stop-driver.py (a § 7 halt, live; never a serial rollout's Leg and never while a pause stands);
+  reconcile-rollout.py `record-entry` (every inferred stop and every lead-entry, at each loop entry and heartbeat
+  tick); reconcile-rollout.py `next` (a sleep no entry follows: a mac-sleep closes itself, so `next` writes no
+  lead-entry).
+- Suites pair by `suite`. A suite-started with no suite-ended never finished (killed with its wrapper, the lead or the
+  Mac); a suite-ended with no suite-started is a noslot (the suite never got a slot, so it never started). Writers:
+  skills/execute/scripts/verify-slot.py `run` (an agent's suite, runner agent, the task read from a cwd under
+  `<repo>/.claude/worktrees/<slug>`) and lead-integrate.py `verify --rollout` (the lead's Integration, RACE and
+  completion suites, runner lead). `running` is absent on a stop by signal (no vault scan on that path).
+- base-moved: one line per newly counted merge-task exit-3 refusal (merge-task.sh's record_base_moved, through
+  lead-integrate.py `base-moved`), its movers the first-parent commits base..main, oldest first: a rollout's merge
+  (source record: a `merged` line in any rollout's record names its PR; source note: its task note carries
+  `rollout:`) or a peer's push (anything else, a PR-less commit included). "This base was already counted" writes
+  none.
 - Skip a line that does not parse: a crash can leave a last line with no newline, which the next append
   then merges with (a known limit; checking the tail would mean locking every emit).
 
@@ -377,7 +438,8 @@ Exit codes: 0 written, skipped as a duplicate fold, or a warned write failure; 2
 a missing or out-of-enum field, a task-scoped kind with no task, a tuning with one, a grade with a rollout, a reserved
 rollout or `from`, --json not a JSON object, a common-key
 collision, NaN, a bad slug, a naive or malformed --ts, a line over 16 KiB, a review-verdict whose original +
-regression exceed its findings), with one line starting `run_record: ` on
+regression exceed its findings, a stopped, suite-ended or base-moved line that breaks its kind's cross-field rules),
+with one line starting `run_record: ` on
 stderr and nothing written; `dir` exits 1 when the directory cannot be resolved.
 """
 from __future__ import annotations
@@ -751,6 +813,117 @@ def _error(v):
 INERT_FIELDS = {"repo": _str, "paths": _capped(MAX_PATHS), "pathsTotal": _int(0)}
 INERT_OPTIONAL = {"base": _str, "main": _str, "head": _str, "globs": _capped(MAX_GLOBS)}
 
+# ---- the time-lost ledger's kinds (p29-10, ADR 0051) ------------------------------------------------------------
+# stopped and lead-entry (reconcile-rollout.py record-entry and next, step-boundary.py begin, the Stop-hook driver),
+# suite-started and suite-ended (verify-slot.py run, lead-integrate.py verify), base-moved (lead-integrate.py base-moved).
+
+STOP_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "mac-sleep", "halt", "watchdog")
+ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair")
+ENTRY_STOPS = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog", "pause")
+CALL_KINDS = ("task", "revise", "integrate", "resume")      # run-bound's `call`
+SUITE_BYS = ("task", "integration", "race", "completion")
+SUITE_RUNNERS = ("agent", "lead")
+SUITE_OUTCOMES = ("green", "red", "timeout", "stopped", "unrun", "noslot")
+SUITE_STEPS = ("env_bootstrap", "verifier")
+MOVER_KINDS = ("rollout", "peer")
+MOVER_SOURCES = ("record", "note")
+MAX_CALLS = 64
+MAX_FAILING = 50
+FAILING_NAME = 200
+MAX_MOVERS = 20
+MAX_NON_INERT = 20
+REASON_MAX = 200
+SUITE_ID_RE = re.compile(r"s-[0-9a-f]{16}\Z")
+HEX12_RE = re.compile(r"[0-9a-f]{12}\Z")
+
+
+def _calls(v):
+    """stopped's calls: at most MAX_CALLS {task, runId?, call?}."""
+    if not isinstance(v, list) or len(v) > MAX_CALLS:
+        return "a list of at most %d calls" % MAX_CALLS
+    for c in v:
+        if not isinstance(c, dict) or "task" not in c or set(c) - {"task", "runId", "call"}:
+            return "a list of objects with task (and runId?, call? only)"
+        if _str(c["task"]) or ("runId" in c and _str(c["runId"])):
+            return "a list whose task and runId are non-empty strings"
+        if "call" in c and c["call"] not in CALL_KINDS:
+            return "a list whose call is one of %s" % ", ".join(CALL_KINDS)
+    return None
+
+
+def _load3(v):
+    """A load average: exactly 3 finite numbers >= 0."""
+    ok = isinstance(v, list) and len(v) == 3 and all(_number(x) and x >= 0 for x in v)
+    return None if ok else "exactly 3 finite numbers >= 0"
+
+
+def _seconds(v):
+    return None if _number(v) and v >= 0 else "a finite number of seconds >= 0"
+
+
+def _suite_id(v):
+    return None if isinstance(v, str) and SUITE_ID_RE.match(v) else "s- and 16 lowercase hex"
+
+
+def _hex12(v):
+    return None if isinstance(v, str) and HEX12_RE.match(v) else "12 lowercase hex"
+
+
+def _names(n, width):
+    def check(v):
+        ok = isinstance(v, list) and len(v) <= n and all(isinstance(x, str) and x and len(x) <= width for x in v)
+        return None if ok else "a list of at most %d non-empty strings of at most %d characters" % (n, width)
+    return check
+
+
+def _movers(v):
+    """base-moved's movers: at most MAX_MOVERS {sha, kind, rollout?, task?, pr?, source?}."""
+    if not isinstance(v, list) or len(v) > MAX_MOVERS:
+        return "a list of at most %d movers" % MAX_MOVERS
+    for m in v:
+        if not isinstance(m, dict) or not {"sha", "kind"} <= set(m) or \
+                set(m) - {"sha", "kind", "rollout", "task", "pr", "source"}:
+            return "a list of objects with sha and kind (and rollout?, task?, pr?, source? only)"
+        if _str(m["sha"]) or m["kind"] not in MOVER_KINDS:
+            return "a list whose sha is a non-empty string and kind one of %s" % ", ".join(MOVER_KINDS)
+        if any(k in m and _str(m[k]) for k in ("rollout", "task")):
+            return "a list whose rollout and task are non-empty strings"
+        if "pr" in m and _pr(m["pr"]):
+            return "a list whose pr is a url or a number"
+        if "source" in m and m["source"] not in MOVER_SOURCES:
+            return "a list whose source is one of %s" % ", ".join(MOVER_SOURCES)
+    return None
+
+
+def _bool_or_null(v):
+    return None if v is None or isinstance(v, bool) else "true, false or null"
+
+
+def _z_time(v):
+    """A UTC Z stamp (UTC_Z_RE) as an aware datetime, for the cross-field order checks."""
+    s = v[:-1]
+    if "." in s:
+        head, frac = s.split(".", 1)
+        s = "%s.%s" % (head, frac.ljust(6, "0"))
+    return datetime.datetime.fromisoformat(s + "+00:00")
+
+
+def _check_stopped(f):
+    """stopped's cross-field rules: boot only on mac-restart; wake on mac-sleep and only there, never before at; an
+    inferred stop carries at (its start in the past; its ts is its write time)."""
+    cause = f["cause"]
+    if "boot" in f and cause != "mac-restart":
+        raise Refused("stopped: boot is a mac-restart's field")
+    if (cause == "mac-sleep") != ("wake" in f):
+        raise Refused("stopped: wake is required on a mac-sleep and only there")
+    if f["inferred"] and "at" not in f:
+        raise Refused("stopped: an inferred stop carries at (its start)")
+    if "wake" in f and "at" in f and _z_time(f["at"]) > _z_time(f["wake"]):
+        raise Refused("stopped: at %s is after wake %s" % (f["at"], f["wake"]))
+
+
+SUITE_REQUIRED = {"suite": _suite_id, "by": _enum(*SUITE_BYS), "runner": _enum(*SUITE_RUNNERS)}
+
 HOLDS = ("merge", "git-env", "race")
 # kind -> (task required, required fields, optional fields)
 KINDS = {
@@ -780,7 +953,7 @@ KINDS = {
     "last-start-held": (True, {"morning": _stampz, "scope": _str, "history": _int(0)}, {"usualMinutes": _int(1)}),
     "ran-past-morning": (True, {"morning": _stampz, "slotTakenAt": _stampz, "scope": _str, "history": _int(0)},
                          {"usualMinutes": _int(1)}),
-    "quota-stall": (False, {}, {"stage": _str, "detail": _str}),
+    "quota-stall": (False, {}, {"stage": _str, "detail": _str, "runId": _str, "call": _enum(*CALL_KINDS)}),
     "auto-retry": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate"),
                           "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
                           "used": _int(0), "budget": _int(1)},
@@ -828,6 +1001,20 @@ KINDS = {
     "reflection": (False, {"id": _rid, "since": _stampz, "until": _stampz, "rollouts": _slugs(0, 4096),
                            "escapesOnly": _slugs(0, 4096), "counts": _counts, "quiet": _bool},
                    {"decisionTask": _str, "cadence": _cadence, "repairsOnly": _slugs(1, 4096)}),
+    # The time-lost ledger (p29-10, ADR 0051): stops and resumes, suites with the load around them, why main moved.
+    "stopped": (False, {"cause": _enum(*STOP_CAUSES), "inferred": _bool, "calls": _calls},
+                {"at": _stampz, "boot": _stampz, "wake": _stampz, "reason": _short(REASON_MAX)}),
+    "lead-entry": (False, {"by": _enum(*ENTRY_BYS)}, {"session": _str, "stop": _enum(*ENTRY_STOPS)}),
+    "suite-started": (False, dict(SUITE_REQUIRED, sha=_str, dirty=_bool),
+                      {"load": _load3, "diff": _hex12, "waited": _seconds, "running": _int(0)}),
+    "suite-ended": (False, dict(SUITE_REQUIRED, outcome=_enum(*SUITE_OUTCOMES), seconds=_seconds),
+                    {"load": _load3, "rc": _int(0, 255), "failing": _names(MAX_FAILING, FAILING_NAME),
+                     "timeout": _seconds, "step": _enum(*SUITE_STEPS), "sha": _str, "waited": _seconds,
+                     "running": _int(0)}),
+    "base-moved": (True, {"repo": _str, "pr": _pr, "base": _str, "main": _str, "inertOnly": _bool_or_null,
+                          "moversTotal": _int(0), "movers": _movers},
+                   {"nonInert": _capped(MAX_NON_INERT), "pathsTotal": _int(0), "globs": _capped(MAX_GLOBS),
+                    "refusal": _int(1), "error": _error}),
 }
 
 
@@ -954,6 +1141,15 @@ def _check_fields(kind, fields):
         raise Refused("grade: low (%d) exceeds decisions (%d)" % (fields["low"], fields["decisions"]))
     elif kind == "inert-proof-failed" and not fields["readers"] and "error" not in fields:
         raise Refused("inert-proof-failed: readers is empty only beside an error (a failed proof names its reader)")
+    elif kind == "stopped":
+        _check_stopped(fields)
+    elif kind == "suite-ended":
+        if "timeout" in fields and fields["outcome"] != "timeout":
+            raise Refused("suite-ended: timeout is only on outcome timeout")
+        if "rc" in fields and fields["outcome"] == "noslot":
+            raise Refused("suite-ended: a noslot suite never ran, so it has no rc")
+    elif kind == "base-moved" and fields["inertOnly"] is None and "error" not in fields:
+        raise Refused("base-moved: inertOnly is null only beside an error (the inert test could not run)")
 
 
 def _check_tuning(f):

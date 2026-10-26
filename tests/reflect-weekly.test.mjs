@@ -384,6 +384,24 @@ test('span: a missing note is scored by slug and flagged; without --fold the eve
   assert.deepEqual(listing(h.out).filter((f) => !/^(span\.json|orphan\.score\.json)$/.test(f)), [], 'span writes only under --out\'s dir')
 })
 
+// p29-10 (ADR 0051): the time-lost ledger's lines are not read yet (score.py's LEDGER_KINDS), so a rollout whose only
+// in-window lines are ledger lines (a heartbeat's lead-entries, a stop) is not read this week; one with a real line is.
+test('span: a rollout whose only in-window lines are ledger lines (p29-10) is not read', (t) => {
+  const h = setup(t)
+  const before = byTs(life('a', '2026-08-20T00:00:00Z', '2026-08-20T01:00:00Z', { lane: ['2026-08-20T01:00:00Z', '2026-08-20T01:10:00Z'] }))
+  emitAll(h, 'ledger-only', [...before,
+    [W(4, '00:00'), 'lead-entry', null, { by: 'heartbeat' }],
+    [W(4, '00:20'), 'stopped', null, { cause: 'halt', inferred: false, calls: [] }],
+    [W(4, '00:30'), 'suite-ended', 'a', { suite: 's-0000000000000001', by: 'task', runner: 'agent', outcome: 'green', seconds: 5 }]])
+  emitAll(h, 'live-r', [...byTs(life('b', '2026-08-20T00:00:00Z', '2026-08-20T01:00:00Z')), [W(4, '00:00'), 'idle-slots', null,
+    { reason: 'queue-tail', free: 1, settings: { parallel_ceiling: 2 } }]])
+  rolloutNote(h, 'ledger-only')
+  rolloutNote(h, 'live-r')
+  const s = span(h)
+  assert.equal(entryOf(s, 'ledger-only'), undefined, 'ledger lines alone never make a rollout read')
+  assert.equal(entryOf(s, 'live-r')?.mode, 'read', 'a real in-window line does')
+})
+
 test('span: close lines: a completed rollout\'s is read, a running one\'s null passes, a dropped or archived one with none is flagged; tunings.jsonl untouched', (t) => {
   const h = setup(t)
   for (const s of ['done-r', 'run-r', 'drop-r', 'arch-r']) emitAll(h, s, byTs(life(`${s}-t`, W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))

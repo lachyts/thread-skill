@@ -11,6 +11,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { collapse, read, root, section } from '../lib/contract-text.mjs'
@@ -87,7 +88,9 @@ function driverStates(lines) {
     '    h = m.STATUS_RE.search(l)\n' +
     '    out.append(h.group("state") if h else None)\n' +
     'print(json.dumps(out))\n'
-  const r = spawnSync('python3', ['-c', py, DRIVER, JSON.stringify(lines)], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
+  // The driver only loads here (STATUS_RE), recording nothing; its Run record still points at temp (p29-10: it records halts).
+  const r = spawnSync('python3', ['-c', py, DRIVER, JSON.stringify(lines)],
+    { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(os.tmpdir(), 'execute-queue-no-events') } })
   if (r.status !== 0) return lines.map(() => null)
   return JSON.parse(r.stdout)
 }
@@ -465,7 +468,9 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     const vsP = labelled(skill, 'Verify slots')
     const s4 = S(skill, S4)
     const s7 = S(skill, S7)
-    if (!vline.includes(` ${SLOTS} --bootstrap`) || !raceLine.includes(` ${SLOTS} --bootstrap`) ||
+    // p29-10: the Run record's --rollout and --slug ride between the slot flags and the bootstrap (execute-run-record).
+    const REC = '--rollout "<rollout-note>" --slug <slug>'
+    if (!vline.includes(` ${SLOTS} ${REC} --bootstrap`) || !raceLine.includes(` ${SLOTS} ${REC} --bootstrap`) ||
       !verifyP.includes('its `--timeout` deadline starts only once it holds one, so the wait never counts against `verify_timeout`') ||
       !verifyP.includes('only a SIGKILL leaves no rc, which reads as red; its guard still ends the verifier') ||
       !verifyP.includes('Any rc but 0 is red, except `noslot` (exit 75: no verify slot within `<slot_wait>`, the verifier never ran), which is no verdict') ||
