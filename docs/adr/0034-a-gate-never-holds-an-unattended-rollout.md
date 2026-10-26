@@ -147,6 +147,12 @@ Accepted residuals:
   before `await-sign-off`), so it is over the limit, past the month line, unpriceable or bounced: an ask d4 keeps. The
   remainder, a gate left under an older, lower limit or last month's line on a sign-off-paused rollout, reaches
   Lachy there before the Reinstate's standing approval would sign it; signing it there is his own act.
-- (x) A month-line `ASK:` on a running rollout is re-judged only under a new step-1.2 key, a new lead session or a
+- (x) orient-all's Leverage is unchanged too: `estate-rank.py` charges a sign-off (`REVIEW_MINUTES`' `signOff`) for a
+  gate of any kind, `spend` included, so a spend-only task the standing approval would sign ranks as if it cost Lachy
+  a sign-off. The ranker reads a gate's kind from the grade, never its price, and cannot see the operator's limit or
+  the month line, so it cannot tell a spend gate that will be signed from one that will ask; with the built-in 0 (off)
+  every spend gate asks and the charge is right. The over-charge only lowers that task's leverage, never hides an
+  ask. readiness-grade.md § Leverage says so, and estate-rank's test 6 pins it (`que-call`, spend only, `signOff: 1`).
+- (xi) A month-line `ASK:` on a running rollout is re-judged only under a new step-1.2 key, a new lead session or a
   Reinstate, never at the turn of the month mid-session; until then it reaches Lachy. A timezone change shifts a
   boundary line by hours.

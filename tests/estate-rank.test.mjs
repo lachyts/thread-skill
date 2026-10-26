@@ -462,7 +462,8 @@ test('6. leverage: agent minutes over attention minutes (deciding plus reviewing
   assert.equal(t('que-serial').attentionMinutes, 0)
   assert.equal(t('que-call').leverage, 7.5)
   assert.equal(t('que-call').decisionMinutes, 1)
-  assert.deepEqual(t('que-call').review, { pr: 1, signOff: 1, eyeCheck: 0, minutes: 3 })
+  assert.deepEqual(t('que-call').review, { pr: 1, signOff: 1, eyeCheck: 0, minutes: 3 },
+    "a spend-only gate still costs a sign-off: the ranker cannot see the standing approval's limit (ADR 0034's 2026-10-27 amendment, residual (x))")
   assert.equal(t('que-call').attentionMinutes, 4)
   assert.equal(t('crown-low').leverage, 1)
   assert.equal(t('crown-low').attentionMinutes, 120, 'a session task holds Lachy for its whole length')
