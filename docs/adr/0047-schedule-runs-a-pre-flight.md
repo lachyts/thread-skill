@@ -26,3 +26,23 @@ Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus
 
 - Schedule costs one grading pass and, when any task needs it, one decision round, paid while Lachy is around.
 - Schedule step 8's existing "Pre-flight —" report blocks (gated tasks, capture-shaped notes and the rest) are renamed when this is built, so the word names this pass alone.
+
+## Build rulings
+
+Rulings made while P29 is built (the p29-5 plan, 2026-10-26; `skills/schedule/SKILL.md` § 1.5 is canonical). Each is a plan's reading of the Decision above, and each awaits Lachy's confirmation.
+
+- **The word.** Schedule step 8's report blocks are now `Checklist —` (gated tasks, capture-shaped notes, the rollout clone, local copies agents won't see, a refused ladder, legacy values left in place, unfinished-rollout warnings), so "Pre-flight" names this pass alone. Its own report is step 8's **Pre-flight's left-out tasks.** block and the summary's `Pre-flight:` line.
+- **The serial path is graded too.** S3.5 runs the Pre-flight over a serial run's chain members, after S3, so an orient-invoked run (orient § 6 or § 7) may ask its round: decisions, never a confirm. A member that leaves re-runs S2 and S3 without it.
+- **One question per AskUserQuestion call.** The round asks One calls, then each Grill's decisions (`(k/n)`), then the ungraded tasks, each with its recommendation first.
+- **An ungraded task is asked, never guessed.** A task the grading could not grade (an answer still invalid after one re-ask, a task the scan cannot see, one in flight) is asked `Leave it out` (recommended) or `Queue it as it stands`, and the answer is recorded through `record --by schedule`. A refused write is named in step 8, and the answer still governs the run.
+- **A refused record leaves its task undecided.** A One call or Grill whose `record` refuses stays out with its Dependent closure, its answer named as unrecorded: nothing enters a queue with a decision that is not on its note.
+- **A carried queued task left out is deferred out of the prior at step 6**, by `reconcile-rollout.py defer --tasks <slugs> --rollout <prior>` run from the prior's root, before the carry, so the carry never takes it and it is never left stamped to the prior. The alternatives weighed:
+  - a new `carry --leave` flag: rejected, because a prior's Engine snapshot can predate it, and the carry runs from that snapshot;
+  - carrying everything, then a `defer --rollout <this note>` from this run's root at step 7: the fallback, at the cost of a `carried` Run-record line for a task never queued, and carry's legacy mapping on it;
+  - a hand edit: untestable.
+- **Which root each command runs from (ADR 0043, cross-version).**
+  - *This run's root*: `estate-scan.py`, `estate-dispatch.py` `slices --tasks/--superseding`, `preflight`, `record --by/--superseding` and `log`, and `estate-rank.py rank --superseding`. All are unguarded and write no rollout note. `record` writes a carried queued task's `## Decisions (asked ahead <date>)` bullet, a form every engine reads as note text, and descope reads `## Decisions…` as recorded in every version; a supersede cancelled before step 6 leaves those answers for the prior's own run to read.
+  - *The prior's root*: the ten prior-acting commands, each with only the flags it had at the first Engine snapshot: carry `--from`, `--to`, `--dry-run`; defer `--tasks`, `--rollout` (since p12-8); resume, the canary's `check-all` and `retire`, `--rollout`; close-score `--rollout`, `--close`.
+  - *The rule*: a new flag on a prior-root command must exist on the oldest snapshot a live prior can name, or the work runs from this run's root. `tests/contracts/schedule-preflight.test.mjs` p12 pins it.
+- **The Grade log.** Every schedule run that grades logs its grades (a standalone run, and one under orient § 6 or § 7); an orient-all fork logs nothing, since the estate pass logged them. A schedule regrade ends an estate episode as `regraded`.
+- **Under orient-all, the fork's prompt carries the pass's rank and scan and the decided slugs among its members.** The fork runs only `preflight`: its `--tasks` is its step 1's confirmed candidates, and its `--decided` the decided slugs among them, so a slug its step 1 skipped is never passed.

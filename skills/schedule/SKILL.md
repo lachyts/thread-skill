@@ -13,7 +13,7 @@ This skill is the **planner**. The rollout note it produces is a data artefact �
 
 ## Scope
 
-**Obsidian only**, plus the Engine snapshot (ADR 0043: the first step's `engine-snapshot.py cut` runs `default-branch.sh`'s `git ls-remote`, one `git fetch` of origin's default branch into the Primary checkout's remote-tracking ref, and `git worktree add --detach` plus `git worktree lock` of a snapshot under `<primary>-snapshots/`, then its best-effort retire sweep's `git worktree unlock`, `remove` and `prune` of unneeded snapshots; never the Primary's HEAD, branch or working tree; and step 6's and S5's `adopt` writes only the two stamps, `engine_snapshot:` and `engine_sha:`, on the note this run wrote), plus § 0's rollout-clone setup (ADR 0042) and its remote, landing-register, self-rollout and pushed-base probes of the target repo; the self-rollout probe's `--resolve` makes read-only `git rev-parse`, `git check-ignore` and `git remote get-url` calls in the repo and its rollout clone `<toplevel>-rollout` and reads the plugin marketplace registry; its `--ensure` writes only that clone, after Lachy's yes when it is new: an empty-directory probe with `git check-ignore` (removed again when the parent work tree would track it) when it would sit inside another work tree, one `git clone` of the repo's origin into it, and on every run a `git fetch` of its default branch and, with that branch checked out, a `git merge --ff-only --no-autostash`; a clone it made stays when a later step stops; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; § 3.6 runs `gated_inputs.py sweep` (it reads task notes only); step 7.5 (and § 0's `file` finish) runs `close-score.py` on the prior (ADR 0037 d4), which reads the prior note, the Run record, `reviews.jsonl` and `tunings.jsonl` under the events directory, `rollouts.toml` through `rollout-settings.py`, every note under `Work/Tasks/` (Archive included) for `fixes:`/`merged_into:`, and the Project root's git (or its in-place checkout's when fresher, ADR 0042), read-only and never fetched (land.sh's `git remote get-url origin`, escapes.py's read-only rev-parse/symbolic-ref/log/show/rev-list/merge-base/cat-file/diff-tree/blame reads, and `git remote get-url origin` in each clone `reviews.jsonl` names), and writes only fold-journals' `call-journal` lines to the prior's Run record and tune.py's one `tunings.jsonl` line, both under the events directory, outside the vault and the repo (its scratch dir is removed on exit); and step 7.5 moves a superseded rollout note with a plain `mv`; § Serial path's `serial-chains.py` (S2) reads task notes, project notes under `Work/Projects/`, `launch-folders.json` and the plugin's `.claude-plugin/plugin.json`, with a read-only `git rev-parse --show-toplevel` and `git remote get-url origin` per path it claims, its S3 check reads notes only, and its S4 runs `rollout-settings.py` as step 2.8 does. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
+**Obsidian only**, plus the Engine snapshot (ADR 0043: the first step's `engine-snapshot.py cut` runs `default-branch.sh`'s `git ls-remote`, one `git fetch` of origin's default branch into the Primary checkout's remote-tracking ref, and `git worktree add --detach` plus `git worktree lock` of a snapshot under `<primary>-snapshots/`, then its best-effort retire sweep's `git worktree unlock`, `remove` and `prune` of unneeded snapshots; never the Primary's HEAD, branch or working tree; and step 6's and S5's `adopt` writes only the two stamps, `engine_snapshot:` and `engine_sha:`, on the note this run wrote), plus § 0's rollout-clone setup (ADR 0042) and its remote, landing-register, self-rollout and pushed-base probes of the target repo; the self-rollout probe's `--resolve` makes read-only `git rev-parse`, `git check-ignore` and `git remote get-url` calls in the repo and its rollout clone `<toplevel>-rollout` and reads the plugin marketplace registry; its `--ensure` writes only that clone, after Lachy's yes when it is new: an empty-directory probe with `git check-ignore` (removed again when the parent work tree would track it) when it would sit inside another work tree, one `git clone` of the repo's origin into it, and on every run a `git fetch` of its default branch and, with that branch checked out, a `git merge --ff-only --no-autostash`; a clone it made stays when a later step stops; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; § 3.6 runs `gated_inputs.py sweep` (it reads task notes only); step 7.5 (and § 0's `file` finish) runs `close-score.py` on the prior (ADR 0037 d4), which reads the prior note, the Run record, `reviews.jsonl` and `tunings.jsonl` under the events directory, `rollouts.toml` through `rollout-settings.py`, every note under `Work/Tasks/` (Archive included) for `fixes:`/`merged_into:`, and the Project root's git (or its in-place checkout's when fresher, ADR 0042), read-only and never fetched (land.sh's `git remote get-url origin`, escapes.py's read-only rev-parse/symbolic-ref/log/show/rev-list/merge-base/cat-file/diff-tree/blame reads, and `git remote get-url origin` in each clone `reviews.jsonl` names), and writes only fold-journals' `call-journal` lines to the prior's Run record and tune.py's one `tunings.jsonl` line, both under the events directory, outside the vault and the repo (its scratch dir is removed on exit); and step 7.5 moves a superseded rollout note with a plain `mv`; § Serial path's `serial-chains.py` (S2) reads task notes, project notes under `Work/Projects/`, `launch-folders.json` and the plugin's `.claude-plugin/plugin.json`, with a read-only `git rev-parse --show-toplevel` and `git remote get-url origin` per path it claims, its S3 check reads notes only, and its S4 runs `rollout-settings.py` as step 2.8 does. § 1.5's Pre-flight (and S3.5): `estate-scan.py --deadline 0` reads the vault and starts no subprocess; `slices` writes only under a `mktemp` dir; the grading agents are read-only (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md` § The grading agents); `rank` and `preflight` write nothing; on every run but an orient-all fork, `log` writes one `grade` line per graded task to `grades.jsonl` under the events directory; `record` writes each answer's bullet into its task note's `## Decisions (asked ahead <date>)`, and with a fork the `orient ruling:` line; and step 6's `reconcile-rollout.py defer`, from the prior's root, writes only the carried queued tasks § 1.5 left out (`status: open`, with `rollout:`, `owner:`, the run stamps and the automatic-retry markers cleared). Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
 
 ## Invocation forms
 
@@ -74,7 +74,7 @@ this run is done. A run writes one shape.
 decision round there authorised the member set. Each question below takes orient-all § 6's answer, and step 6
 names the note with the slug its prompt gives. It routes nothing: § 0's session-lane routing and the follow-up
 `/thread:schedule --tasks <serial members>` line are returned to orient-all, never run. Step 8 (or S7) reports
-them.
+them. § 1.5 takes the estate pass's grades and answers from the prompt's Pre-flight line and asks no second round.
 
 After the misfit scan, resolve the target repo and the Project root the rollout note will carry, and
 check the dispatch blockers. Every parallel rollout runs from its **rollout clone** (ADR 0042): a second
@@ -104,7 +104,7 @@ peer session's commit in the in-place checkout never moves the tree a rollout in
    `merge --ff-only` of its default branch) and notes the gitignored local state the in-place checkout
    has and the clone lacks; nothing is copied. Its one stdout line is the resolved path: every check
    below runs against it, and step 6 writes it as `{{REPO_PATH}}`. Say in one line that the rollout runs
-   from the clone, naming both paths, and carry its `note:` and `WARN:` lines to step 8's "Pre-flight —
+   from the clone, naming both paths, and carry its `note:` and `WARN:` lines to step 8's "Checklist —
    rollout clone". Only the Project root moves: `<localPath>` below and step 6's Thread line keep the
    `Local:` path, where the thread lives. Exit 3 (no usable clone: outside git, a linked worktree,
    `~/Projects` itself, an unusable clone, a parent that would track it, or, from `--ensure` alone, a
@@ -164,7 +164,7 @@ this project's rollout carries them forward still gate-pending. The check prints
 - **Loop guard.** Each finish removes the note it names from the next check, so a second `file`
   or `interrupted` line naming the same note stops the run with that line.
 - `refuse …` (exit 3) or exit 2 → a failure, below.
-- `WARN:` lines (stderr, on any exit) → carry them to step 8's pre-flight.
+- `WARN:` lines (stderr, on any exit) → carry them to step 8's checklist.
 
 On any failure **stop before step 1**: no task stamped, no rollout note, no heartbeat, with two
 exceptions: a `file` move or an `interrupted` finish that § 0 made before a later refusal stays,
@@ -182,10 +182,13 @@ cluster is still parallel-shaped; don't re-route it to the session lane or a ser
 engine root, never this run's snapshot: the `root` that
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/engine-snapshot.py resolve --rollout <the prior note where it sits>`
 prints (its Engine snapshot, or the Primary for an unstamped prior), exported as `CLAUDE_PLUGIN_ROOT` for that Bash
-call (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md` rule 2). Those are the nine commands that name it: the
-Supersede prep's `resume`, step 1's canary `check-all` and carry preview, step 6's `check-all`, carry and canary
-`retire`, step 7.5's `close-score.py`, § 0's `file` finish's `close-score.py` and the `interrupted` finish's carry
-(with its step 7.5). Resolve once per prior, before its first such command; an exit 3 (its snapshot is unusable)
+call (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md` rule 2). Those are the ten commands that name it: the
+Supersede prep's `resume`, step 1's canary `check-all` and carry preview, step 6's `check-all`, `defer` (of § 1.5's
+leavers), carry and canary `retire`, step 7.5's `close-score.py`, § 0's `file` finish's `close-score.py` and the
+`interrupted` finish's carry (with its step 7.5). Each passes only flags every snapshot a live prior can name already
+has (ADR 0047 § Build rulings): a new flag would exit 2 on an older prior, so new work on a prior's tasks takes an
+existing verb, as step 6's `defer` does, or runs from this run's root, as § 1.5's unguarded estate scripts do.
+Resolve once per prior, before its first such command; an exit 3 (its snapshot is unusable)
 stops the run before anything is written, with its stderr line and remedy. A guarded script run from another root
 refuses with an `engine-snapshot:` line and writes nothing: re-run it once from the root that line names.
 
@@ -237,6 +240,80 @@ A non-zero preview exit stops the run before this run writes a rollout note or a
 
 Report the count and let the user confirm before proceeding. The confirm lists the candidates, each skipped task with its rollout, each skipped decision task and, on a supersede, both the carried and the kept lists (the carried list with its `restamp` lines and any `WARN: carry:` line for a value carry left in place), the `order` lines (this preview's and, after an `interrupted` finish, § 0's carry's) with step 3's proposals from them, any `ERROR:` lines from § 0's `resume`, § 0's `cleared [[<prior>]]'s start when ready` line when the Supersede prep removed one, the check's `WARN: <prior> is incomplete` line when it printed one, and, after an `interrupted` finish, § 0's pinned report.
 
+### 1.5. Pre-flight (ADR 0047)
+
+Before anything below writes a rollout note, grade every task still to start and settle the decisions it hides with
+Lachy in one round (CONTEXT.md **Pre-flight**). Ready tasks queue as they stand; One call and Grill tasks queue once
+their decisions are answered and recorded; Orient tasks stay out with their Dependent closure, so nothing queued waits
+on a task this rollout never runs. It runs no plan gate: a task's plan is still drafted and judged at its start
+(ADR 0030).
+
+**The sets.** From step 1's confirmed set:
+- *candidates*: every task in it, carried tasks included, less any § 0 misfit;
+- *kept*: each task on a step 1 `carry <slug> <state>` line whose state is not `queued`. A carried task that has
+  started keeps its state, as the supersede rules, and is never graded or asked about;
+- *the graded set*: the candidates less the kept ones, so a carried task still queued is graded like any other. An
+  empty graded set runs nothing below and says so in step 8, and `queue[]` is then the candidates.
+
+**Grade.** Every command here runs from this run's root, never a prior's: these scripts are unguarded and write no
+rollout note (ADR 0047 § Build rulings).
+1. `S=$(mktemp -d -t schedule-preflight)`. It stays in temp, as orient-all's `$S` does.
+2. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-scan.py --deadline 0 --compact > "$S/scan.json"`: it
+   reads the vault only and starts no subprocess. Exit 2 or 3 stops the run here, with its one line, under § 0's
+   **Put back**.
+3. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py slices --scan "$S/scan.json" --dir "$S/slices" --tasks <graded set> [--superseding <prior>]`.
+   `--superseding` is passed exactly on a supersede, naming § 0's final `supersede <prior>` (after an `interrupted`
+   finish, that is `<new>`), so a carried task still queued is gradeable. Each task in its `notGradeable[]` is asked
+   about in the round as ungraded, never graded.
+4. The grading agents, as orient-all § 2 steps 4–5 run them: started in one message, one read-only agent per slice
+   file, each briefed with `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md` § The grading agents, the slice
+   file's path and "return only the § Output JSON". Save each answer as `$S/grades-<NN>.json`. An answer that does
+   not parse, or a task the ranker lists in `invalid[]`, is re-asked once with its errors; still invalid, the task is
+   ungraded. With no subagent available, grade each slice here, one at a time.
+5. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan "$S/scan.json" --grades <each grades file> [--superseding <prior>] --compact > "$S/rank.json"`.
+6. On every run that grades, all but an orient-all fork,
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank "$S/rank.json" --scan "$S/scan.json"`:
+   one line per graded task into the Grade log (CONTEXT.md **Grade log**). Its outcome line and any skipped slugs go
+   to step 8; a non-zero exit is a caveat there, never a stop.
+7. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank "$S/rank.json" --scan "$S/scan.json" --tasks <every candidate> [--kept <each kept slug>] > "$S/preflight.json"`.
+   Every later `preflight` call in this run passes the same `--rank`, `--scan`, `--tasks` and `--kept`, and adds only
+   `--decided` and `--dep`.
+
+**The round.** Pass each `asks[i]` to AskUserQuestion's `questions` verbatim, one question per call, each with its
+recommendation first, in its order: the One calls, then each Grill's decisions (`[[slug]] (k/n) …`), then the
+ungraded tasks. `index[]` maps each question to its task (`slug`, `kind`, `decision`), each picked label to its full
+text (`texts[]`), and names the `recommended` one. A Ready, Orient, kept or closure-only task gets no question.
+Lachy's "stop" ends the round, and the rest stay undecided.
+
+**Record each answer at once**, before step 6 writes anything:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --question <decision.question> --answer <the full option text, or his words> --recommended <the index entry's recommended> [--fork <decision.fork>] --by schedule [--superseding <prior>]`,
+`--fork` exactly when the decision carries one, and `--superseding` as at `slices`.
+- A One call is decided once it is answered and its `record` exits 0; a Grill only once every one of its decisions
+  is answered and recorded.
+- An answer that defers or drops the work is recorded, and the task stays undecided.
+- A One call or Grill whose `record` refuses stays undecided; step 8 names its answer as unrecorded.
+- An ungraded task: `Queue it as it stands` decides it, and `Leave it out` (recommended) does not. A refused `record`
+  is named in step 8, and the answer still governs this run.
+
+**The final call.** `preflight` with the same four flags and `--decided <each decided slug>`. Its `queue[]` is the
+candidate set from step 2 on.
+- A task in `out[]` that is not carried leaves now: no `rollout:` stamp, no `## Queue` row, no `## File-sets` line.
+- A carried `queued` task in `out[]` leaves through step 6's `defer`, run from the prior's root before the carry.
+- Its `warnings[]` (a kept task that depends on a task left out) go to step 8.
+
+**An empty queue.** When the final `queue[]` is empty, stop before step 2 and print step 8's left-out block as the
+stop's report. Nothing is stamped, no note is written, there is no `## Queue` row and nothing is deferred. What this
+step wrote stays: `record`'s `## Decisions (asked ahead <date>)` bullets and the Grade log lines `log` wrote. § 0's
+**Put back** restores a prior's `start: unattended`, and a rollout clone § 0 made stays.
+
+**The orient-all form.** Under orient-all there are no `slices`, no grading agent, no `rank`, no round, no `log` and
+no `record`: the estate pass graded, asked and logged (orient-all § 6 step 3). The fork's prompt carries
+`Pre-flight: rank <R>, scan <S>, decided <slugs or none>`, and the fork runs
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank <R> --scan <S> --tasks <step 1's confirmed candidates> [--decided <each slug that line names that is among them>]`
+once. A decided slug step 1 skipped is never passed: `preflight` exits 2 on a `--decided` slug outside `--tasks`.
+Its `queue[]` is the candidate set; each `out[]` member is left out with its Dependent closure, unstamped, and
+returned with its why.
+
 ### 2. Extract file scope per task — best effort
 
 File-sets are best-effort. For each task:
@@ -256,13 +333,13 @@ After detection, re-run the pushed-base check (§ 0's pointer, same path and `<l
 cited paths: the detected file-sets plus every repo path the task bodies name (`docs/adr/NNNN-*.md`
 as a git glob, `CONTEXT.md`, any `~/…` path as written; do not pre-filter them), never THREAD.md.
 Its `pushed-base: WARN:` lines name local copies the agents won't see (an uncommitted change, a
-commit only on the checked-out branch, an untracked file); carry them to step 8's pre-flight. Show
+commit only on the checked-out branch, an untracked file); carry them to step 8's checklist. Show
 its notes here. With the rollout clone as the root (ADR 0042), this re-run is where a commit in another
 clone of the set, the in-place checkout among them, blocks: only when it touches one of these cited
 paths, and never through a cited existing directory (a repo root a body names notes, never scopes);
 any other ahead commit there is a note. An exit 3 or 2 stops exactly as in § 0; nothing has been
 written yet, except `resume`'s done flips (§ 0's Supersede prep), a § 0 `file` or `interrupted` finish,
-and a rollout clone § 0 made.
+§ 1.5's `## Decisions` bullets and Grade log lines, and a rollout clone § 0 made.
 
 ### 2.5. Detect the project's verifier
 
@@ -322,10 +399,11 @@ Look for:
 - `[[other-task]]` wikilinks in the body that match tasks in the discovered set — soft order hints for step 5's tiebreak, never recorded
 - Body phrases like "gated on", "after X lands", "depends on" — surface them in the confirm batch (step 5) when the dependant is in the `queued` state (step 5 says why); a confirmed one is written into the dependant's frontmatter `depends-on:` at step 7, so the queue holds it back
 - On a supersede, step 1's `order` lines (and, after an `interrupted` finish, § 0's): each is an order the prior rollout kept only in prose. Read each `order` line's clause: when it states that a `queued` carried task waits on another candidate, surface that `depends-on:` in the confirm batch (step 5). Skip one the dependant already records, and a clause that orders no two candidates (such as a kept task's own order: "p37-4 after p36-2, p36-6" with p37-4 landed). A confirmed one is written at step 7
+- A body dependency or order line confirmed at step 5 whose dependency is in § 1.5's `out[]` re-runs § 1.5's final `preflight` with `--dep <dependant>=<dependency>`, keeping the earlier `--dep`s, and a § 4.5 combined note passed as its members. Every task the re-run newly leaves out leaves before step 6 as § 1.5's leavers do, a carried `queued` one through step 6's `defer`; a combined note leaves when any member does
 
 ### 3.5. Detect human/release gates
 
-Some task notes carry a **human/release gate** in prose — "don't action until a release ships", "hold for sign-off", "gated on the next deploy". A `/thread:execute` agent reads the note and may refuse mid-dispatch when it hits one, so a buried gate is unreliable either way. Scan each task body, case-insensitively and with each phrase matched where a word starts (so `hold for` skips "threshold for"), for gate language of three kinds: a release hold (`don't action until`, `do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`), sign-off in any wording, named or not (sign, signs, signed or signing before off, spaced, hyphenated or, for `signoff`, joined: `sign-off`, `sign off`, `signoff`, `signs off`, `signs-off`, `signed off`, `signed-off`, `signing off`, `signing-off`, which catch "would need Lachy's sign-off" and "until Lachy signs off" as well as `human sign-off`), and a decision the note leaves to a human (`not decide`, which catches "for the planner to raise, not decide" and "deliberately not decided"). The sign-off and decision kinds matter most unattended: a planner can declare such a line as a gated input (ADR 0008), which `ignore_gate` does not override, and an unattended lead never signs one off, so the task halts at its plan-gate (the 2.7 rollout's p2-6, whose "raise, not decide … would need Lachy's sign-off" the old fixed phrases missed). A match is a question, not a verdict. A note that only quotes or describes such wording (a task about this sweep, say) carries no gate: dismiss that match with no question, or put it to the user with a no-gate recommendation; either way it never reaches step 8's gated-tasks block, unless the user answers that it is a gate. Put each gate to the user in the confirm batch: keep the task (and clear the gate before executing: decide the open question in the note, remove the gate text, or set `ignore_gate: true` on the task, which overrides a release hold for the run) or drop it from this rollout. A task dropped here leaves the candidate set before step 6, so it gets no `## Queue` row, no `## File-sets` line and no `rollout:` stamp. A carried task (step 1) is the exception: step 6's carry takes every unlanded task of the prior rollout, so its drop waits for step 8's pre-flight, which takes it out whole. Each gate kept here becomes step 8's pre-flight. Don't bury the gate in the body and hope the agent honours it.
+Some task notes carry a **human/release gate** in prose — "don't action until a release ships", "hold for sign-off", "gated on the next deploy". A `/thread:execute` agent reads the note and may refuse mid-dispatch when it hits one, so a buried gate is unreliable either way. Scan each task body, case-insensitively and with each phrase matched where a word starts (so `hold for` skips "threshold for"), for gate language of three kinds: a release hold (`don't action until`, `do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`), sign-off in any wording, named or not (sign, signs, signed or signing before off, spaced, hyphenated or, for `signoff`, joined: `sign-off`, `sign off`, `signoff`, `signs off`, `signs-off`, `signed off`, `signed-off`, `signing off`, `signing-off`, which catch "would need Lachy's sign-off" and "until Lachy signs off" as well as `human sign-off`), and a decision the note leaves to a human (`not decide`, which catches "for the planner to raise, not decide" and "deliberately not decided"). The sign-off and decision kinds matter most unattended: a planner can declare such a line as a gated input (ADR 0008), which `ignore_gate` does not override, and an unattended lead never signs one off, so the task halts at its plan-gate (the 2.7 rollout's p2-6, whose "raise, not decide … would need Lachy's sign-off" the old fixed phrases missed). A match is a question, not a verdict. A note that only quotes or describes such wording (a task about this sweep, say) carries no gate: dismiss that match with no question, or put it to the user with a no-gate recommendation; either way it never reaches step 8's gated-tasks block, unless the user answers that it is a gate. Put each gate to the user in the confirm batch: keep the task (and clear the gate before executing: decide the open question in the note, remove the gate text, or set `ignore_gate: true` on the task, which overrides a release hold for the run) or drop it from this rollout. A task dropped here leaves the candidate set before step 6, so it gets no `## Queue` row, no `## File-sets` line and no `rollout:` stamp. A carried task (step 1) is the exception: step 6's carry takes every unlanded task of the prior rollout, so its drop waits for step 8's checklist, which takes it out whole. Each gate kept here becomes step 8's checklist. Don't bury the gate in the body and hope the agent honours it.
 
 ### 3.6. Sweep for gated-input smell (advisory — ADR 0008, ADR 0034)
 
@@ -417,6 +495,8 @@ Then turn each member into a **tombstone** — don't delete it (backlinks to it 
 
 The rollout then references only the combined note, as an ordinary `cross-cutting` task — so `/thread:execute` and its engine need to know nothing about merging.
 
+**After the Pre-flight.** A combined note folds only tasks still in the candidate set (§ 1.5's `queue[]`). It copies each member's `## Decisions (asked ahead <date>)` bullets into its own section of that heading, each prefixed `[[<member>]]:`, so the decisions § 1.5 recorded reach the one note the engine reads. It is not graded again.
+
 **Confirm the result before writing.** Show the user each proposed merge (members → combined note, plus the affinity signal that fired) and — just as important — the same-file pairs you deliberately *kept apart* and the guard that fired for each. This is where a misread gets caught. Get a y/n before authoring anything.
 
 ### 4.7. Offer a starting rung per task
@@ -432,7 +512,7 @@ The default offer is the rung just above the bottom (the top rung on the built-i
 
 **§ 4.7 never lowers a rung.** It makes no offer for a task that already has a non-empty `rung:`, for one step 1's preview lists as `restamp <slug> rung=<name>` (a name, not `-` or `kept`: carry writes that rung), or for a non-carried candidate whose legacy stamps map to the top rung (step 7). Show each such task in the confirm batch as `<slug>: rung <name> (kept)`. Only Lachy explicitly naming a different listed rung changes it: no default and no batch "y" ever writes a lower rung over it.
 
-Present the offers in the confirm batch, beside step 5's Solo and dependency proposals and the gates of § 3.5 and § 3.6: "these N are hard → rung <name>: …", one line of justification each, and get a y/n (or per-task veto) before step 7 stamps them. Never stamp a rung by default, and never add `rung:` to the rollout note: it is per-task only. When `ladder.py` exits non-zero (the file is refused), make no offers: step 7's fallback leaves a top-mapping legacy stamp for execute, and step 8's "Pre-flight — ladder refused" block shows the file's error.
+Present the offers in the confirm batch, beside step 5's Solo and dependency proposals and the gates of § 3.5 and § 3.6: "these N are hard → rung <name>: …", one line of justification each, and get a y/n (or per-task veto) before step 7 stamps them. Never stamp a rung by default, and never add `rung:` to the rollout note: it is per-task only. When `ladder.py` exits non-zero (the file is refused), make no offers: step 7's fallback leaves a top-mapping legacy stamp for execute, and step 8's "Checklist — ladder refused" block shows the file's error.
 
 ### 5. Order the queue
 
@@ -452,7 +532,7 @@ Location: `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` — **alw
 
 **Dated-note naming — handles more than one rollout per day.** The filename is `<slug>-rollout-<YYYY-MM-DD>.md` for the **first** rollout of a given day, and `<slug>-rollout-<YYYY-MM-DD>-<N>.md` (N≥2) for each **subsequent** rollout that same day. Resolve N deterministically: glob `<slug>-rollout-<YYYY-MM-DD>*.md` — nothing matches → bare date (no `-N`); only the bare-date note exists → `-2`; otherwise → one past the highest existing ordinal. The first-of-day note never carries `-1` (kept bare, backward-compatible with every existing dated rollout). So a day's sequence reads `…-2026-06-09.md`, `…-2026-06-09-2.md`, `…-2026-06-09-3.md`. **Never overwrite or reuse an existing dated note** — always advance to the next free ordinal. When today's name is taken, offer only **Advance** or **Cancel**, never **Overwrite**: Advance writes the next free ordinal. A note you just wrote in error is unfinished, so § 0 already supersedes it (`--regenerate`, which writes a new note: `carry` refuses to run from a note into itself) or refuses. Any other same-day note is finished, and reusing its slug would attach its tasks' `rollout:` backlinks to the new note and lose its record, `## Completion log` included. Substitute the resolved slug into `{{ROLLOUT_SLUG}}` everywhere downstream — the note's own filename, the per-task `rollout:` stamps (step 7), the summary (step 8), and any `supersedes:` / `superseded_by:` links.
 
-**Supersede: write, then carry.** When § 0 printed `supersede <prior-slug>`, stamp `supersedes: "[[<prior-slug>]]"` in this note's frontmatter (the template's commented line, uncommented). Once this note is written and stamped (below), run, from the prior's root (§ 0's *The prior's root*, as are this paragraph's canary `check-all` and `retire`), `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py carry --from ~/repos/obsidian/Work/Tasks/<prior-slug>.md --to ~/repos/obsidian/Work/Tasks/<this-slug>.md`. Right before it, run step 1's canary `check-all` on the prior again (`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py check-all --rollout ~/repos/obsidian/Work/Tasks/<prior-slug>.md`; a non-zero exit stops the run with its stderr, exit 3 → `/thread:repair [[<prior-slug>]]`), and once carry exits 0 run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py retire --rollout ~/repos/obsidian/Work/Tasks/<prior-slug>.md`, which removes the prior's canary records (a retire failure is a `WARN:` carried to step 8's pre-flight, never a stop). It re-points every unlanded task of the prior rollout to this note, clears its `owner:`, `integrating:` and legacy `wave:`, and maps its legacy stamps to a rung (step 1's `restamp` lines); it never writes the prior note. Its `order` lines repeat step 1's preview, and nothing reads them again. A non-zero exit stops the run with its stderr: the prior note is still open, so the next run's § 0 pairs the two notes as `interrupted` and finishes the supersede. Step 7 then stamps every task, and step 7.5 closes out the prior rollout.
+**Supersede: write, then carry.** When § 0 printed `supersede <prior-slug>`, stamp `supersedes: "[[<prior-slug>]]"` in this note's frontmatter (the template's commented line, uncommented). Once this note is written and stamped (below), run, from the prior's root (§ 0's *The prior's root*, as are this paragraph's canary `check-all` and `retire`), `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py carry --from ~/repos/obsidian/Work/Tasks/<prior-slug>.md --to ~/repos/obsidian/Work/Tasks/<this-slug>.md`. Before it, run step 1's canary `check-all` on the prior again (`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py check-all --rollout ~/repos/obsidian/Work/Tasks/<prior-slug>.md`; a non-zero exit stops the run with its stderr, exit 3 → `/thread:repair [[<prior-slug>]]`). Then, when § 1.5's final `out[]` (with § 3's re-runs) holds a carried `queued` task, run from the same prior's root, before the carry, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py defer --tasks <each such slug, comma-joined> --rollout ~/repos/obsidian/Work/Tasks/<prior-slug>.md` (`/thread:repair` § 5's clean defer, which takes no `## Queue` row edit here: the prior note is closed at step 7.5). It sets each back to `status: open` with its `rollout:`, `owner:`, run stamps and automatic-retry markers cleared, so the carry, which takes every task still linked to the prior, never sees it: never carried into this queue, never left stamped to the prior. A carried task that has started is kept, never in `out[]`, so it is never passed. A non-zero exit stops the run before the carry, with its stderr: the prior is still open, so the next run's § 0 pairs the two notes as `interrupted`, and that run's Pre-flight grades the tasks again. § 0's `interrupted` finish and step 1's preview run no `defer`. Once carry exits 0, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py retire --rollout ~/repos/obsidian/Work/Tasks/<prior-slug>.md`, which removes the prior's canary records (a retire failure is a `WARN:` carried to step 8's checklist, never a stop). The carry re-points every unlanded task still linked to the prior rollout to this note, clears its `owner:`, `integrating:` and legacy `wave:`, and maps its legacy stamps to a rung (step 1's `restamp` lines); it never writes the prior note. Its `order` lines repeat step 1's preview, and nothing reads them again. A non-zero exit stops the run with its stderr: the prior note is still open, so the next run's § 0 pairs the two notes as `interrupted` and finishes the supersede. Step 7 then stamps every task, and step 7.5 closes out the prior rollout.
 
 **Stamp the Engine snapshot (ADR 0043).** Right after writing the note, before the carry, run from the cut's snapshot `python3 <snapshot>/skills/_shared/scripts/engine-snapshot.py adopt --rollout ~/repos/obsidian/Work/Tasks/<this-slug>.md`: it writes `engine_snapshot:` and `engine_sha:` just below `protocol_version:` (never by hand). A non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`. After a cut exit 4 there is no snapshot: skip it, and the note runs unstamped.
 
@@ -489,7 +569,7 @@ For each task in the rollout:
 - For tasks the user confirmed as Solo in step 5, add `solo: true`
 - For the body dependencies the user confirmed in step 3 (its body phrases and its `order` lines), append `depends-on:` entries (`- "[[<slug>]]"`) to the dependant; never drop an existing entry
 - For a task whose § 4.7 offer the user confirmed, or whose rung the user named explicitly, add `rung: <name>` (a rung the ladder lists) — never by default, and never on the rollout note
-- For a non-carried `queued` candidate that still has a legacy stamp (a `model:`, an `effort:` or the stale cap stamp), apply carry's mapping (`reconcile-rollout.py carry`): with no non-empty `rung:` of its own, a `model: fable` or an `effort: xhigh` or `max` (trimmed, any case) becomes `rung: <the ladder's top rung>`; then remove each recognised key (`model:` at fable, opus or empty; `effort:` at low, medium, high, xhigh, max or empty; the cap stamp at any value) and leave an unrecognised value in place, listing it in step 8's "Pre-flight — legacy values left in place" block. When `ladder.py` refused at schedule time, still remove the drop-only keys (they need no rung name, as in carry), but leave a top-mapping legacy stamp in place, unmapped: execute's compat read (execute SKILL.md, *Legacy stamps*) maps it at runtime once the file reads, and execute halts `ladder file refused` until then. List each such task in step 8's "Pre-flight — ladder refused" block
+- For a non-carried `queued` candidate that still has a legacy stamp (a `model:`, an `effort:` or the stale cap stamp), apply carry's mapping (`reconcile-rollout.py carry`): with no non-empty `rung:` of its own, a `model: fable` or an `effort: xhigh` or `max` (trimmed, any case) becomes `rung: <the ladder's top rung>`; then remove each recognised key (`model:` at fable, opus or empty; `effort:` at low, medium, high, xhigh, max or empty; the cap stamp at any value) and leave an unrecognised value in place, listing it in step 8's "Checklist — legacy values left in place" block. When `ladder.py` refused at schedule time, still remove the drop-only keys (they need no rung name, as in carry), but leave a top-mapping legacy stamp in place, unmapped: execute's compat read (execute SKILL.md, *Legacy stamps*) maps it at runtime once the file reads, and execute halts `ladder file refused` until then. List each such task in step 8's "Checklist — ladder refused" block
 - For tasks the §3.6 sweep flagged (user-confirmed), add `plan_approval: required` — advisory: it guarantees a plan-gate exists where the plan's own `### Gated inputs` declaration (the authoritative signal, ADR 0008) can stop for sign-off
 - For a task whose § 3.6 spend answer is above the standing approval, add `spend_approval_usd: <N>` (whole US dollars): `approve-gates --standing` reads it before rollouts.toml (ADR 0034)
 - For each § 3.6 spend answer (any amount, above, at or below the standing approval), append the `## Decisions (asked ahead <YYYY-MM-DD>)` section below to the task body, or extend in place one for the same date
@@ -507,7 +587,7 @@ The ask-ahead section is exactly:
 
 The `## Decisions` prefix makes it a recorded decision (descope asks before touching it) and keeps it out of the brief; the planner reads the note in full, so its Planner line shapes the gate the standing approval prices.
 
-A carried task that has started (any queue state but `queued` in step 1's preview) keeps the frontmatter `carry` left it: step 7 writes nothing to it. A carried `queued` task is stamped like any other.
+A carried task that has started (any queue state but `queued` in step 1's preview) keeps the frontmatter `carry` left it: step 7 writes nothing to it. A carried `queued` task is stamped like any other, unless § 1.5 left it out (step 6's `defer` unlinked it).
 
 The combined notes authored in step 4.5 are stamped here like any other task (`rollout:`, `scope: cross-cutting`). Their folded-in members are **not** stamped — they already carry `status: merged` + `merged_into:` from step 4.5 and are never dispatched.
 
@@ -525,7 +605,7 @@ Use the same YAML field ordering the file already has; insert the new fields jus
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/close-score.py --rollout <the prior note where it sits> --close supersede
 ```
 
-It records one `tunings.jsonl` line, or prints `already recorded <id>` (a re-run, after a run that died past this point) or `not recorded: nothing ran` (a never-started prior). Report its one line in step 8's summary. A non-zero exit is a `WARN:` for step 8's pre-flight, never a stop: the close-out goes on.
+It records one `tunings.jsonl` line, or prints `already recorded <id>` (a re-run, after a run that died past this point) or `not recorded: nothing ran` (a never-started prior). Report its one line in step 8's summary. A non-zero exit is a `WARN:` for step 8's checklist, never a stop: the close-out goes on.
 
 **Superseding a prior rollout.** Close out the prior rollout last, after step 7 has stamped this rollout's tasks, so an interrupted run always leaves the prior note open for § 0 to pair with this one. Step 6 stamped `supersedes: "[[<prior-slug>]]"` in this note's frontmatter and carried the prior note's unlanded tasks here. Now set `status: done` + `superseded_by: "[[<this-slug>]]"` on the prior note, stamps first and then the move. This note is always a new file (step 6 never offers **Overwrite**), so the prior note is never the note this run wrote. Then move it with a plain `mv` into `~/repos/obsidian/Work/Tasks/Archive/Rollouts/`, running `mkdir -p` on that folder first if it is absent. The move is explicit because a note left in `Work/Tasks/` at `status: done` is filed into `Work/Tasks/Archive/` by the daily sweep (`_shared/scripts/daily-sweep.sh`), which is the wrong folder for a rollout. Find the prior note wherever it now sits: `Work/Tasks/<prior-slug>.md` is the normal case; at `Work/Tasks/Archive/<prior-slug>.md` the daily sweep already filed it (a run that died between the stamps and the move, which § 0's `file` line finishes, or a note superseded under older wording), so move it on from there; already in `Work/Tasks/Archive/Rollouts/`, leave it where it is. Never overwrite a same-named file already in `Archive/Rollouts/`: on a collision skip only the move, report the collision and continue the run; meanwhile the daily sweep files the stamped note into `Work/Tasks/Archive/`, and ADR 0026's shared reconcile step flags it as drift until someone resolves the collision. Schedule leaves the commit to the daily sweep, which commits the move with the rest of this run's vault writes (the planner runs no git, per the Don'ts). Wikilinks resolve by filename, so `supersedes:`, `superseded_by:` and the tasks' `rollout:` backlinks survive the move. As a backstop, ADR 0026's shared reconcile step reports a superseded rollout note outside `Archive/Rollouts/` as drift. Landed tasks stay linked to the prior note; carried ones now belong here.
 
@@ -540,6 +620,8 @@ cleared [[<P>]]'s start when ready: superseded here      # when § 0's Supersede
 Engine: snapshot <sha12> at <path> (origin/<default>)     # or: Engine: no snapshot (<the cut's exit-4 reason>)
 Verifier: <detected command>
 Settings: parallel_ceiling <n> (<source>), max_review_rounds <n> (<source>), max_iterations <n> (<source>), max_plan_rounds <n> (<source>); standing approval <t> USD (<source>), or off (built-in 0)
+Pre-flight: <n> graded (<r> Ready, <c> One call, <g> Grill, <o> Orient), <u> ungraded, <k> decided in the round, <m> left out; Grade log: <log's line>
+                                                         # under orient-all: Pre-flight: grades and answers from the estate pass, <m> left out
 
 Project root: {{REPO_PATH}}                              # the rollout clone (ADR 0042)
 Open in Obsidian to review. To execute, start a session in the Project root, then:
@@ -552,19 +634,34 @@ The thread:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads 
 
 **Start when ready.** When Lachy answers a standalone run's summary with it, stamp `start: unattended` as a top-level frontmatter line just below `status:` on the note this run wrote (`_shared/vault-grammar.md` § Rollout start stamp) and stop: nothing runs. Under orient § 6, schedule writes nothing here, because orient § 9's offer asks it. Under orient-all, schedule writes nothing here either. The stamp is never written before step 7's last write; the vault grammar's reader would wait on `incomplete:` anyway.
 
-**Pre-flight — gated tasks.** If the user kept any of step 3.5's human/release-gated tasks (a quote-only match is none), list them above the summary so the user clears them before executing (an unaddressed gate makes the agent refuse mid-run):
+**Pre-flight's left-out tasks.** List above the summary every task § 1.5 left out (its final `out[]`, with § 3's re-runs), each with its why, then each answer § 1.5 could not write and each of its `warnings[]`. None of them is stamped, and a carried one is no longer linked to the prior:
 
 ```
-⚠️ Pre-flight — these tasks carry a human/release gate. Clear each before executing, or they'll refuse mid-dispatch:
+Left out by the Pre-flight (none is stamped; each waits on what its line names):
+  - [[task-o]] — graded Orient: /thread:orient [[<home>]]
+  - [[task-c]] — One call, waiting on your answer: the next schedule asks it again
+  - [[task-u]] — ungraded (no grade), left out at your answer
+  - [[task-d]] — depends on [[x]], which is left out (the Dependent closure)
+  - [[task-q]] — Grill, waiting on your answer; carried from [[<prior>]], deferred out of it at step 6
+answered, not written: [[task-g]] Cache? → lru (record refused: <its estate-dispatch line>)
+warning: [[task-s]] keeps its place (a carried task that has started) but depends on [[task-o]], which this rollout leaves out
+```
+
+Under orient-all, the block lists the fork's leavers the same way, and the fork returns them (orient-all § 8 lists each undecided one as waiting on your answer).
+
+**Checklist — gated tasks.** If the user kept any of step 3.5's human/release-gated tasks (a quote-only match is none), list them above the summary so the user clears them before executing (an unaddressed gate makes the agent refuse mid-run):
+
+```
+⚠️ Checklist — these tasks carry a human/release gate. Clear each before executing, or they'll refuse mid-dispatch:
   - [[task-x]] — "don't action until the v0.5 release ships"
   - [[task-u]] — "open question for the planner to raise, not decide … would need Lachy's sign-off"
 To run a release hold anyway, set `ignore_gate: true` on its task note (overrides the gate for the run). A sign-off or an undecided question needs deciding in the note (or its text removed): `ignore_gate` cannot unblock a gated input a planner declares from it. To drop one after all, take it out whole: clear its `rollout:` and delete its `## Queue` row and its `## File-sets` line from this note.
 ```
 
-**Pre-flight — capture-shaped notes.** Engine agents read a task note in full, so a note still shaped as a capture (`skills/_shared/task-writer.md` § 5) steers them wrong. Scan each task in the rollout (carried ones included) for either shape: a `## Resume prompt` carrying task-writer's close-the-capture line (`mark the capture done`), which tells an agent to set `status: done` on a note the engine owns, or a `## Launch` section whose **Repo:** names another checkout of the same repo: a path other than § 0's resolved repo path with the same `origin` URL (`git -C <path> remote get-url origin`), which points an agent at the wrong tree. A **Repo:** that names a different repository (another `origin`) is no capture shape: that task's work is not in this rollout's repo, so it is a misfit under § 0's rule, to drop and never to clear (take it out whole, as for a gated task above). When the path is missing here, so no origin can be read, ask the user which it is. Skip a note only when its **Rollout run** line names this rollout, `[[{{ROLLOUT_SLUG}}]]`: that note is already cleared. A **Rollout run** line that names another rollout (a carried task's line, written for the superseded rollout and perhaps its old root) is stale, so flag the note to have that line rewritten for this one. The repo comparison is against § 0's path. § 0's self-rollout check keeps a rollout off a primary checkout it can see (a directory-source marketplace in a readable registry, or this session's `${CLAUDE_PLUGIN_ROOT}`), so a **Repo:** naming that checkout is flagged; one it cannot see (another session's `--plugin-dir`, or a malformed registry, where the check fails open) may be § 0's path itself, and then a **Repo:** naming it matches and is not flagged. List each match above the summary with the shape it shows, then the line that clears it, to add at the top of the note's `## Notes` (in place of a stale **Rollout run** line) with the sentence for each shape the note shows, and list each misfit to drop:
+**Checklist — capture-shaped notes.** Engine agents read a task note in full, so a note still shaped as a capture (`skills/_shared/task-writer.md` § 5) steers them wrong. Scan each task in the rollout (carried ones included) for either shape: a `## Resume prompt` carrying task-writer's close-the-capture line (`mark the capture done`), which tells an agent to set `status: done` on a note the engine owns, or a `## Launch` section whose **Repo:** names another checkout of the same repo: a path other than § 0's resolved repo path with the same `origin` URL (`git -C <path> remote get-url origin`), which points an agent at the wrong tree. A **Repo:** that names a different repository (another `origin`) is no capture shape: that task's work is not in this rollout's repo, so it is a misfit under § 0's rule, to drop and never to clear (take it out whole, as for a gated task above). When the path is missing here, so no origin can be read, ask the user which it is. Skip a note only when its **Rollout run** line names this rollout, `[[{{ROLLOUT_SLUG}}]]`: that note is already cleared. A **Rollout run** line that names another rollout (a carried task's line, written for the superseded rollout and perhaps its old root) is stale, so flag the note to have that line rewritten for this one. The repo comparison is against § 0's path. § 0's self-rollout check keeps a rollout off a primary checkout it can see (a directory-source marketplace in a readable registry, or this session's `${CLAUDE_PLUGIN_ROOT}`), so a **Repo:** naming that checkout is flagged; one it cannot see (another session's `--plugin-dir`, or a malformed registry, where the check fails open) may be § 0's path itself, and then a **Repo:** naming it matches and is not flagged. List each match above the summary with the shape it shows, then the line that clears it, to add at the top of the note's `## Notes` (in place of a stale **Rollout run** line) with the sentence for each shape the note shows, and list each misfit to drop:
 
 ```
-⚠️ Pre-flight — capture-shaped notes (engine agents read the whole note and may follow its resume prompt):
+⚠️ Checklist — capture-shaped notes (engine agents read the whole note and may follow its resume prompt):
   - [[task-v]] — resume prompt says "mark the capture done"; ## Launch repo ~/repos/tools/x-old, another checkout of ~/repos/tools/x
   - [[task-s]] — its Rollout run line names [[<prior>]], not this rollout
 Clear each by adding at the top of its ## Notes (keep the sentence for each shape it shows; replace a stale Rollout run line):
@@ -575,7 +672,7 @@ Drop each of these whole, as for a gated task (its ## Launch repo is another rep
   - [[task-t]] — ## Launch repo ~/repos/workspaces, another origin
 ```
 
-**Pre-flight — rollout clone.** List the `note:` and `WARN:` lines § 0's `--ensure` printed verbatim
+**Checklist — rollout clone.** List the `note:` and `WARN:` lines § 0's `--ensure` printed verbatim
 above the summary: the gitignored local state the in-place checkout has and the clone lacks (nothing is
 copied; copy an item by hand when the lead needs it), a clone it could not fast-forward, and a launch
 marker with no `.mcp.json` beside it, which the Chorus Stage refuses to start a Session in. Name the
@@ -584,36 +681,36 @@ toplevel (execute § 2.8): a lead started by hand in a never-opened clone sees t
 once; the Stage's unattended start does not.
 
 ```
-⚠️ Pre-flight — rollout clone (~/repos/<repo>-rollout; made by this run):
+⚠️ Checklist — rollout clone (~/repos/<repo>-rollout; made by this run):
   self-rollout-check: note: ~/repos/<repo>-rollout lacks .claude/settings.local.json, which ~/repos/<repo> has: …
 ```
 
-**Pre-flight — local copies agents won't see.** If step 2's pushed-base re-run printed any WARN
+**Checklist — local copies agents won't see.** If step 2's pushed-base re-run printed any WARN
 lines, list them verbatim above the summary, so the user commits and lands those files (or accepts
 GitHub's copy) before executing:
 
 ```
-⚠️ Pre-flight — local copies agents won't see (agents read origin/<default>'s copy):
+⚠️ Checklist — local copies agents won't see (agents read origin/<default>'s copy):
   pushed-base: WARN: docs/adr/0031-x.md: uncommitted change: agents see origin/master's copy, not this one
 ```
 
-**Pre-flight — ladder refused.** If `ladder.py` exited non-zero at § 4.7 (so no rung was offered), show its stderr line verbatim above the summary, then one line per task whose top-mapping legacy stamp step 7 left in place, then the remedy:
+**Checklist — ladder refused.** If `ladder.py` exited non-zero at § 4.7 (so no rung was offered), show its stderr line verbatim above the summary, then one line per task whose top-mapping legacy stamp step 7 left in place, then the remedy:
 
 ```
-⚠️ Pre-flight — ladder refused (execute halts `ladder file refused` at each call's start until it reads):
+⚠️ Checklist — ladder refused (execute halts `ladder file refused` at each call's start until it reads):
   ladder: /Users/<you>/.config/thread/ladder.toml:11: rung 2 ("opus-xhigh"): effort "huge" is not one of low, medium, high, xhigh, max
   - [[task-z]] — model: fable left for execute's compat read
 Fix: edit the named line of ~/.config/thread/ladder.toml, then execute.
 ```
 
-**Pre-flight — legacy values left in place.** If step 7 left an unrecognised legacy value on a non-carried candidate, list one line per value above the summary, in carry's own `WARN: carry:` format with `schedule` in its place, so the two read alike (a carried task's lines already showed in step 1's confirm):
+**Checklist — legacy values left in place.** If step 7 left an unrecognised legacy value on a non-carried candidate, list one line per value above the summary, in carry's own `WARN: carry:` format with `schedule` in its place, so the two read alike (a carried task's lines already showed in step 1's confirm):
 
 ```
-⚠️ Pre-flight — legacy values left in place (no rung was mapped from them; correct or remove each by hand):
+⚠️ Checklist — legacy values left in place (no rung was mapped from them; correct or remove each by hand):
   WARN: schedule: task-w: effort: banana unrecognised, left in place
 ```
 
-**Pre-flight — unfinished-rollout warnings.** List the `WARN:` lines § 0's unfinished-rollout check printed (a Project root matched on its path only, a rollout left out for want of a Project root line, a complete rollout whose ceremony never ran, a superseded note it could not file, an incomplete rollout this run superseded) verbatim above the summary, so the user can resolve each.
+**Checklist — unfinished-rollout warnings.** List the `WARN:` lines § 0's unfinished-rollout check printed (a Project root matched on its path only, a rollout left out for want of a Project root line, a complete rollout whose ceremony never ran, a superseded note it could not file, an incomplete rollout this run superseded) verbatim above the summary, so the user can resolve each.
 
 The detected file-sets (step 2) are listed as information, never as a question: they only break queue-order ties.
 
@@ -671,6 +768,12 @@ never overlaps a parallel rollout rooted in its rollout clone: the two coexist a
 chain that claims `repo:<clone>`, or a parallel rollout rooted in place before ADR 0042, still refuses. Carry `WARN:`
 lines to S7.
 
+**S3.5. Pre-flight.** It runs step 1.5 over S2's chain members, the session-lane ones left out; nothing is kept and
+nothing is superseded on this path, so there is no `--kept` and no `--superseding`. Under orient's § 7 too it asks its
+round (decisions, never a confirm). A member that leaves re-runs S2 and S3 without it, as S4's confirmed dependency
+does. An empty queue stops before S4 with step 1.5's empty-queue report. Under orient-all it takes § 1.5's
+orient-all form, with `--tasks` the chain members.
+
 **S4. Gates and confirm.** § 3's dependency extraction, § 3.5's gate sweep and § 3.6's gated-input sweep run over
 the members. § 3.6's `<t>` comes from
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py`, with `--repo <path>` exactly when the
@@ -679,7 +782,8 @@ chain holds one `repo:` token that is a directory, else with no `--repo`; a non-
 member's surfaces with its source and its added tokens); the session-lane members; the WARNs; and the questions
 (§ 3's dependencies, § 3.5's gates, § 3.6's ask-ahead). A confirmed dependency (passed as
 `--dep <dependant>=<dependency>`), or a surface Lachy adds for any member (passed as `--surface`, which always
-unions in, declared or not), re-runs S2 and S3. Under orient § 7 or orient-all § 6 nothing is asked: the kept gates and § 3.6's hits
+unions in, declared or not), re-runs S2 and S3; a confirmed dependency whose dependency left at S3.5 also re-runs
+step 1.5's final `preflight` with `--dep`. Under orient § 7 or orient-all § 6 nothing is asked: the kept gates and § 3.6's hits
 are listed in S7. Steps 2, 2.5–2.8, 4, 4.5, 4.7 and Solo are skipped on this path, and `plan_approval:`, `scope:`,
 `rung:` and `solo:` are never proposed.
 
@@ -700,8 +804,9 @@ bullet), its confirmed `depends-on:` entries and, on a standalone run, § 3.6's 
 stamped: no `scope:`, `plan_approval:`, `rung:` or `solo:`, and never a derived or added `surfaces:`. Then remove
 the note's `incomplete: true` line, as its last write, once every member is stamped.
 
-**S7. Summary.** Per note: its name, its chain order with each row's launch, and its surfaces. Then the
-session-lane members, the WARNs and the gated pre-flight (§ 3.5's kept gates, § 3.6's ask-ahead and dismissals, as
+**S7. Summary.** Per note: its name, its chain order with each row's launch, and its surfaces. Then
+the Pre-flight line and its left-out tasks, as step 8 lists them (Orient → `/thread:orient [[<project>]]`, undecided
+→ waiting on your answer, ungraded, `depends on [[x]]`), the session-lane members, the WARNs and the gated checklist (§ 3.5's kept gates, § 3.6's ask-ahead and dismissals, as
 step 8 lists them). Then one line: "Leg 1 opens in row 1's launch and runs `/thread:execute [[<note>]]`;
 no execute offer, no `start: unattended` (the Stage's unattended start needs a Project root); until it finishes or
 is dropped (`status: dropped`) it holds its surfaces, so a parallel run on a checkout it claims, or another chain
@@ -719,7 +824,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Never remove `incomplete: true` from a rollout note except as step 7's (or § Serial path S6's) last write on the note this run wrote: a stamp on any other parallel note (§ 0's on an interrupted supersede's note, or one a stopped run left) ends only when a supersede closes that note out, and one on a serial note, which a supersede never takes, ends only by `status: dropped`.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).
 - Don't fill in `touches:` on tasks where you regex-detected files — that promotes a guess into authoritative metadata. Only the user does that. The **one** exception is the combined note authored in step 4.5: when every member has its own `touches:`, its `touches:` is their union, so it's a derivation, not a fresh guess. (Separately, the `## File-sets` block in the **rollout note** — step 6 — records the best-effort file-sets, but that's rollout-note data the executor reads, never task frontmatter, so it doesn't touch this rule.)
-- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except the Engine snapshot's cut and its sweep (listed under Scope), § 0's probes (listed under Scope) and its rollout-clone setup (the `git clone`, the empty-directory probe, and the fetch plus `--ff-only` merge of the clone, listed there too), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table), `close-score.py` (step 7.5, § 0's `file` finish), whose git calls are read-only and whose only writes are its events-directory lines (both listed under Scope), and § Serial path's `serial-chains.py`, whose `git rev-parse --show-toplevel` and `git remote get-url origin` calls are read-only (listed under Scope).
+- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except the Engine snapshot's cut and its sweep (listed under Scope), § 0's probes (listed under Scope) and its rollout-clone setup (the `git clone`, the empty-directory probe, and the fetch plus `--ff-only` merge of the clone, listed there too), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table), `close-score.py` (step 7.5, § 0's `file` finish), whose git calls are read-only and whose only writes are its events-directory lines (both listed under Scope), § Serial path's `serial-chains.py`, whose `git rev-parse --show-toplevel` and `git remote get-url origin` calls are read-only (listed under Scope), and § 1.5's grading agents, which only read (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md` § What the agent reads).
 - Never write a second unfinished parallel rollout on a repo, or a serial chain over a live chain's surface, and never supersede one that § 0 did not print as `supersede`.
 - Never supersede across shapes: a serial run supersedes nothing, and a parallel run never takes a serial note.
 - Never stamp a derived or added `surfaces:` on a task: a task's `surfaces:` is its own declaration.
@@ -733,12 +838,13 @@ End-to-end test against an existing backlog (e.g. GifLab):
 
 1. `/thread:schedule GifLab` from any Claude Code session
 2. § 0's unfinished-rollout check prints `none` (or `supersede <prior>` on `--regenerate`), then it confirms ~9 open tasks and prints the detected file-sets as information, with no confirm turn for them
-3. Step 2.5 detects `make test` (or whatever GifLab's CLAUDE.md prescribes) — prints it and asks to confirm
-4. Orders the queue (dependencies first, Solo proposals and § 4.7's rung offers in the confirm batch)
-5. Writes the always-dated note `giflab-rollout-<YYYY-MM-DD>.md` (advancing to the next `-N` ordinal if today's already exists), its `## Queue` table in schedule order.
-6. Rollout note carries no `incomplete:` line (step 7's last write removed the one it was born with), and carries `protocol_version: 5`, `verifier:`, `plan_approval: scope-gated`, and `max_iterations`, `max_review_rounds`, `max_plan_rounds` and `parallel_ceiling` at the four values step 2.8 printed (with no `rollouts.toml`, the built-ins 3, 4, 3 and 4) in frontmatter, plus a commented-out `env_bootstrap:` line (set only when the run needs it) and a `completion_verifier:` line, commented out unless step 2.5 found the project's `Completion verifier:`. No inline execution playbook — the rollout body is data only.
-7. Stamps `rollout: "[[...]]"` and `scope:` on each task, and removes any legacy `wave:`
-8. Prints summary pointing the user toward `/thread:execute`
+3. § 1.5 grades the tasks still to start, asks One calls and Grills one question at a time with a recommendation each, and leaves Orient tasks out with their dependants, listed with `/thread:orient`
+4. Step 2.5 detects `make test` (or whatever GifLab's CLAUDE.md prescribes) — prints it and asks to confirm
+5. Orders the queue (dependencies first, Solo proposals and § 4.7's rung offers in the confirm batch)
+6. Writes the always-dated note `giflab-rollout-<YYYY-MM-DD>.md` (advancing to the next `-N` ordinal if today's already exists), its `## Queue` table in schedule order.
+7. Rollout note carries no `incomplete:` line (step 7's last write removed the one it was born with), and carries `protocol_version: 5`, `verifier:`, `plan_approval: scope-gated`, and `max_iterations`, `max_review_rounds`, `max_plan_rounds` and `parallel_ceiling` at the four values step 2.8 printed (with no `rollouts.toml`, the built-ins 3, 4, 3 and 4) in frontmatter, plus a commented-out `env_bootstrap:` line (set only when the run needs it) and a `completion_verifier:` line, commented out unless step 2.5 found the project's `Completion verifier:`. No inline execution playbook — the rollout body is data only.
+8. Stamps `rollout: "[[...]]"` and `scope:` on each task, and removes any legacy `wave:`
+9. Prints summary pointing the user toward `/thread:execute`
 
 Then from a fresh session: paste `execute [[giflab-rollout-<YYYY-MM-DD>]]` (the dated note just written) — the `/thread:execute` skill should pick it up, gate on `protocol_version: 5`, resolve per-task config, and call the Workflow tool with `task.workflow.js` to run the three-layer convergence engine per task (visible live via `/workflows`).
 
