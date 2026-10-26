@@ -203,7 +203,7 @@ ES = _load("thread_engine_snapshot", "engine-snapshot.py")
 RS = _load("thread_rollout_settings", "rollout-settings.py")
 RR = _load("thread_run_record", "run_record.py")
 
-PROSE_EXT = (".md", ".markdown", ".txt", ".rst", ".adoc", ".org")
+PROSE_EXT = (".md", ".markdown", ".rst", ".adoc", ".org")   # never .txt: pytest collects test*.txt, and a .txt is often data
 CANDIDATES = ("THREAD.md", "docs/handoffs/**", "docs/reviews/**")
 PROOF_BUDGET_S = 60
 DROP_AFTER = 3
@@ -217,12 +217,14 @@ FIXTURES = ("tmp_path", "tmpdir", "tmp_path_factory")
 GLOB_CHARS = "*?["
 
 TOOLS = ("prettier", "markdownlint", "remark-cli", "remark-lint", "cspell", "mdformat", "markdown-link-check", "lychee",
-         "linkinator", "textlint", "pymarkdown", "proselint", "codespell", "mkdocs", "sphinx-build", "doctoc")
+         "linkinator", "textlint", "pymarkdown", "proselint", "codespell", "mkdocs", "sphinx-build", "doctoc", "pre-commit",
+         "doctest", "markdown-docs", "mktestdocs", "phmdoctest")
 TOOL_RE = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(re.escape(t) for t in TOOLS) + r")(?![A-Za-z0-9])")
 TOOL_CMD_RE = re.compile(r"(?:\b(?:npx|pnpx|bunx|pnpm|yarn|exec)\s+(?:--?\S+\s+)*remark(?![A-Za-z0-9])"
                          r"|(?:^|[;&|(`'\"]\s*|\b(?:npx|bunx|pnpx|exec)\s+)(?:remark|vale)\s+[-.\w/'\"*$])", re.M)
 TOOL_CONFIG_RE = re.compile(r"(?:\.prettierrc.*|prettier\.config\..*|\.markdownlint.*|\.vale\.ini|\.remarkrc.*"
-                            r"|cspell\.json|\.cspell.*|\.mdformat\.toml|lychee\.toml|\.lycheeignore)\Z")
+                            r"|cspell\.json|\.cspell.*|\.mdformat\.toml|lychee\.toml|\.lycheeignore"
+                            r"|\.pre-commit-config\.ya?ml)\Z")
 LINK = "]("
 
 
@@ -874,7 +876,8 @@ def _py_ir(n):
     return ("open",)
 
 
-PY_WALK_NAMES = ("walk", "fwalk", "listdir", "scandir", "glob", "iglob", "rglob", "iterdir", "copytree")
+PY_WALK_NAMES = ("walk", "fwalk", "listdir", "scandir", "glob", "iglob", "rglob", "iterdir", "copytree", "make_archive",
+                 "dircmp", "add", "write")
 
 
 class PyFile:
@@ -1160,9 +1163,9 @@ class _PyBuilder(ast.NodeVisitor):
         self.visit(node.value)
 
     def visit_Constant(self, node):
-        if isinstance(node.value, str) and node.value and SHELL_HINT.search(node.value):
+        if isinstance(node.value, str) and node.value and _hint(node.value):
             for i, part in enumerate(node.value.split("\n")):
-                if part.strip() and not part.strip().startswith("#") and SHELL_HINT.search(part):
+                if part.strip() and not part.strip().startswith("#") and _hint(part):
                     self.pf.shell.append((node.lineno + i, [("t", part)], self.scope))
 
     def visit_JoinedStr(self, node):
@@ -1173,7 +1176,7 @@ class _PyBuilder(ast.NodeVisitor):
             elif isinstance(v, ast.FormattedValue):
                 segs.append(("x", py_ir(v.value)))
                 self.visit(v.value)
-        if SHELL_HINT.search("".join(s[1] for s in segs if s[0] == "t")):
+        if _hint("".join(s[1] for s in segs if s[0] == "t")):
             self.pf.shell.append((node.lineno, segs, self.scope))
 
     def _seq(self, node):
@@ -1537,7 +1540,7 @@ JS_KEYWORDS = frozenset("if for while switch catch function return typeof new de
                         "def elif lambda not and or is pass assert raise print func guard let".split())
 JS_WALK = ("readdirSync", "readdir", "opendirSync", "opendir", "globSync", "glob", "globby", "globbySync",
            "globStream", "globIterate", "cpSync", "cp")
-SWIFT_WALK = ("contentsOfDirectory", "enumerator", "subpathsOfDirectory", "subpaths")
+SWIFT_WALK = ("contentsOfDirectory", "enumerator", "subpathsOfDirectory", "subpaths", "copyItem")
 
 
 class LineFile:
@@ -1551,6 +1554,7 @@ class LineFile:
         self.imports = {}     # name -> value-ish ("vals", ...) | ("importfrom", fid, attr)
         self.shell_vars = {}  # name -> [(words, line)]
         self.views = []       # (line, [items])
+        self.heredoc = set()  # the lines of a shell file's heredoc bodies (the shell globs none of them)
         self.walks = []       # (line, kind, callee_text, args, kwargs)
         lang = sf.lang
         if lang in ("js", "swift", "py"):
@@ -1728,7 +1732,7 @@ class LineFile:
         for line, idxs in sorted(by_line.items()):
             seg = " ".join(str(toks[i][1]) if toks[i][0] != "tmpl" else _tmpl_text(toks[i][1]) for i in idxs
                            if toks[i][0] in ("str", "tmpl"))
-            if not seg or not SHELL_HINT.search(seg):
+            if not seg or not _hint(seg):
                 continue
             self.views.append((line, _code_items([toks[i] for i in idxs], lang)))
 
@@ -1800,6 +1804,7 @@ class LineFile:
     def _shell(self, lang):
         lines = self.sf.lines
         i = 0
+        delim = None
         while i < len(lines):
             start, buf = i + 1, lines[i]
             while buf.endswith("\\") and i + 1 < len(lines):
@@ -1807,6 +1812,14 @@ class LineFile:
                 buf = buf[:-1] + " " + lines[i]
             i += 1
             s = buf.strip()
+            if delim is not None:
+                if s == delim:
+                    delim = None
+                    continue
+                self.heredoc.add(start)
+            elif lang == "sh":
+                m = HEREDOC_RE.search(buf)
+                delim = m.group(2) if m else None
             if not s or s.startswith("#") or (lang == "conf" and s.startswith(("//", ";"))):
                 continue
             if lang == "make":
@@ -1814,7 +1827,8 @@ class LineFile:
                 m = re.match(r"([A-Za-z_][\w.]*)\s*[:?+]?=\s*(.*)$", s)
                 if m and not s.startswith("\t"):
                     self.shell_vars.setdefault(m.group(1), []).append(([[("lit", m.group(2), True)]], start))
-            if not SHELL_HINT.search(s) and not re.search(r"[A-Za-z_]\w*=|\bread\b", s):
+            if not SHELL_HINT.search(s) and not re.search(r"[A-Za-z_]\w*=|\bread\b", s) and \
+                    not (lang in ("sh", "make") and "*" in s):
                 continue
             items = shell_items([("t", s)], self.sf.lang)
             self.views.append((start, items))
@@ -1854,7 +1868,15 @@ class LineFile:
             k += 1
 
 
-SHELL_HINT = re.compile(r"(?<![\w.$-])(?:find|ls|grep|egrep|fgrep|rg|ripgrep|git|for)(?![\w$-])|\*\*")
+def _hint(text):
+    """A code string (or a code line's strings) that could hold a shell form: a SHELL_HINT word or `**`, or a GLOB_CMDS
+    word with a `*` after it on its line (a bare glob)."""
+    return bool(SHELL_HINT.search(text) or GLOB_HINT.search(text))
+
+
+HEREDOC_RE = re.compile(r"(?<!<)<<-?\s*(['\"]?)([A-Za-z_][\w.-]*)\1")
+SHELL_HINT = re.compile(r"(?<![\w.$-])(?:find|ls|grep|egrep|fgrep|rg|ripgrep|git|for|cp|gcp|rsync|ditto|tar|gtar|bsdtar|zip)"
+                        r"(?![\w$-])|\*\*")
 
 
 def _closers(toks):
@@ -2011,7 +2033,7 @@ def _dollar(text, i, cur, lit, quoted, lang):
     n = len(text)
     if text.startswith("$((", i):
         j = _balanced(text, i + 1, "(", ")")
-        lit(text[i:j], quoted)
+        lit(text[i:j], True)   # arithmetic: its `*` is no glob
         return j
     if text.startswith("$(", i):
         j = _balanced(text, i + 1, "(", ")")
@@ -2079,6 +2101,10 @@ TMPDIRS = ("tempfile.gettempdir", "tempfile.gettempdirb", "os.tmpdir", "NSTempor
 ENVGET = ("os.getenv", "os.environ.get")
 INPUTS = ("input", "sys.stdin.read", "sys.stdin.readline")
 WALKVAL = ("os.walk", "os.fwalk", "os.scandir", "glob.glob", "glob.iglob", "shutil.copytree")
+ARCHIVES = {"tarfile.open": "<tarfile>", "tarfile.TarFile": "<tarfile>", "tarfile.TarFile.open": "<tarfile>",
+            "tarfile.TarFile.taropen": "<tarfile>", "tarfile.TarFile.gzopen": "<tarfile>",
+            "tarfile.TarFile.bz2open": "<tarfile>", "tarfile.TarFile.xzopen": "<tarfile>", "zipfile.ZipFile": "<zipfile>",
+            "zipfile.PyZipFile": "<zipfile>"}
 CANON_VALUES = {
     "os.curdir": lambda r: STR("."), "os.pardir": lambda r: STR(".."), "tempfile.tempdir": lambda r: STR(_tmpdir()),
     "sys.argv": lambda r: ("argv",), "process.argv": lambda r: ("argv",), "CommandLine.arguments": lambda r: ("argv",),
@@ -2243,6 +2269,10 @@ class Resolver:
             return F(out)
         if k in ("item",):
             return self.ev(ir[1], ctx, depth)
+        if k == "nonecwd":
+            # a root where None (or undefined) means the cwd (os.listdir(None), glob's root_dir=None, a JS glob's
+            # cwd: undefined); a number there is a descriptor nobody can place
+            return F(STR(".") if v[0] == "none" else (OPEN if v[0] == "int" else v) for v in self.ev(ir[1], ctx, depth))
         if k == "tmpl":
             return compose([self.ev(p, ctx, depth) for p in ir[1]], join=False)
         if k == "join":
@@ -2601,6 +2631,8 @@ class Resolver:
             return F(out or [INPUT])
         if d in INPUTS:
             return F([INPUT])
+        if d in ARCHIVES:
+            return F([("canon", ARCHIVES[d])])   # an archive object: its .add / .write are walks (_py_walks)
         if d in WALKVAL:
             v = av(0)
             if d.startswith("glob."):
@@ -2807,15 +2839,33 @@ def _py_walks(f, res):
         args = node.args
         kw = {k.arg: k.value for k in node.keywords if k.arg}
         roots, pfilt = [], None
-        if any(c in ("os.walk", "os.fwalk", "os.listdir", "os.scandir", "shutil.copytree") for c in canons):
-            a = args[0] if args else kw.get("top") or kw.get("path") or kw.get("src")
+        if any(c in ("os.listdir", "os.scandir") for c in canons):
+            # os.listdir(None) and os.scandir(None) list the cwd
+            a = args[0] if args else kw.get("path")
+            roots.append(("nonecwd", py_ir(a)) if a is not None else ("lit", "."))
+        elif any(c in ("os.walk", "os.fwalk", "shutil.copytree") for c in canons):
+            a = args[0] if args else kw.get("top") or kw.get("src")
             roots.append(py_ir(a) if a is not None else ("lit", "."))
         elif any(c in ("glob.glob", "glob.iglob") for c in canons):
             pat = args[0] if args else kw.get("pathname")
             pir = py_ir(pat) if pat is not None else ("lit", "*")
             rd = kw.get("root_dir")
-            roots.append(("join", [py_ir(rd), pir]) if rd is not None else pir)
+            roots.append(("join", [("nonecwd", py_ir(rd)), pir]) if rd is not None else pir)
             pfilt = _pattern_filter(_ir_shape(pir))
+        elif any(c == "shutil.make_archive" for c in canons):
+            # make_archive(base_name, format, root_dir=None, base_dir=None): it archives root_dir/base_dir, each None
+            # meaning the cwd (root_dir) or root_dir itself (base_dir)
+            rd = args[2] if len(args) > 2 else kw.get("root_dir")
+            bd = args[3] if len(args) > 3 else kw.get("base_dir")
+            roots.append(("join", [("nonecwd", py_ir(rd)), ("nonecwd", py_ir(bd))]))
+        elif any(c == "filecmp.dircmp" for c in canons):
+            for a in list(args[:2]) + [kw[k] for k in ("a", "b") if k in kw]:
+                roots.append(py_ir(a))
+        elif any(c in ("<tarfile>.add", "<zipfile>.write") for c in canons):
+            # TarFile.add(name) (recursive by default) and ZipFile.write(filename), on a receiver typed by
+            # tarfile.open / TarFile / ZipFile (canon_call)
+            a = args[0] if args else kw.get("name") or kw.get("filename")
+            roots.append(py_ir(a) if a is not None else ("open",))
         elif isinstance(fn, ast.Attribute) and fn.attr in ("rglob", "glob", "iterdir", "walk"):
             recv = res.ev(py_ir(fn.value), ctx, 0)
             if recv and all(v[0] in ("canon", "module") for v in recv):
@@ -2881,7 +2931,7 @@ def _line_walks(f, res):
             pats = pat[1] if pat[0] == "union" else [pat]
             shapes = []
             for p in pats:
-                roots.append(("join", [cwd, p]) if cwd is not None else p)
+                roots.append(("join", [("nonecwd", cwd), p]) if cwd is not None else p)   # cwd: undefined is the cwd
                 shapes.append(_ir_shape(p))
             fl = [_pattern_filter(s) for s in shapes]
             filt = None if any(x is None for x in fl) else [y for x in fl for y in x]
@@ -2898,11 +2948,44 @@ RG_VALUE_OPTS = frozenset("-g --glob --iglob -t --type -T --type-not -e --regexp
                           "--max-depth -d -j --threads -M --max-columns -E --encoding --sort --sortr --color --colors "
                           "--path-separator --pre --pre-glob --replace -r --context-separator --type-add "
                           "--ignore-file --max-filesize".split())
-PROSE_TYPES = {"md": "*.md", "markdown": "*.md", "rst": "*.rst", "txt": "*.txt", "org": "*.org", "asciidoc": "*.adoc"}
+PROSE_TYPES = {"md": "*.md", "markdown": "*.md", "rst": "*.rst", "org": "*.org", "asciidoc": "*.adoc"}
+SH_KEYWORDS = frozenset("if then else elif do while until ! { } time".split())
+# In a code file's string a bare glob counts only after one of these words (a docstring's **emphasis** is no glob).
+GLOB_CMDS = frozenset("cat ls wc head tail grep egrep fgrep rg sed awk cp mv rm echo printf xargs stat du md5sum shasum "
+                      "sha1sum sha256sum cksum diff cmp tar zip rsync ditto chmod touch git python python3 node bash sh "
+                      "zsh perl pandoc".split())
+GLOB_HINT = re.compile(r"(?<![\w.$-])(?:%s)(?![\w$-])[^\n]*\*" % "|".join(sorted(GLOB_CMDS)))
+SUBST_DEPTH = 4
+_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*\+?=")
 
 
-def _shell_walks(f, items, line, ctx, step):
-    """Shell walk sites among words: [Walk] (roots are ("shellword", word) IRs)."""
+def _glob_arg(w):
+    """A word the shell expands as a glob: an unquoted `*` in a literal part (a `**` word has its own form), and not an
+    option (`--include=*.md`) or an assignment (`X=*.md`), which the shell does not expand."""
+    if w is SEP or not w or _starstar(w):
+        return False
+    p0 = w[0]
+    if p0[0] == "lit" and not p0[2] and (p0[1].startswith("-") or _ASSIGN_RE.match(p0[1])):
+        return False
+    return any(p[0] == "lit" and not p[2] and "*" in p[1] for p in w)
+
+
+def _under(cdir, w):
+    """A path word as seen from a `-C cdir` option (an absolute literal word is itself)."""
+    if cdir is None or (w and w[0][0] == "lit" and w[0][1].startswith("/")):
+        return w
+    return list(cdir) + [("lit", "/", False)] + list(w)
+
+
+def _positional(a, opts):
+    return [x for x, o in zip(a, opts) if not o or not o.startswith("-")]
+
+
+def _shell_walks(f, items, line, ctx, step, globs=None, depth=0):
+    """Shell walk sites among words: [Walk] (roots are ("shellword", word) IRs). `globs` reads an argument word with an
+    unquoted `*` as a walk too: "shell" (a shell or make file's line outside a heredoc body, a step) after any command;
+    "code" (a code file's string) only after a GLOB_CMDS word in the same command; None (a config or unknown file's
+    line, a heredoc body) never."""
     out = []
 
     def args_from(i):
@@ -2915,6 +2998,41 @@ def _shell_walks(f, items, line, ctx, step):
     def walk(roots, filt, form):
         out.append(Walk(f, line, [(("shellword", r), ctx) for r in roots] or [(("lit", "."), ctx)], filt, form))
 
+    # a command substitution ($(...), `...`, make's $(shell ...) and $(wildcard ...)) is read as words of its own
+    if depth < SUBST_DEPTH:
+        for w in items:
+            for p in (w if w is not SEP else ()):
+                if p[0] == "cmd" and p[1].strip():
+                    out.extend(_shell_walks(f, shell_items([("t", p[1])], "sh"), line, ctx, step, globs, depth + 1))
+    # a glob argument: the shell lists the directory. Not in command position (a `case` pattern line `*.md)`), and
+    # not inside `[[ ]]`, `[`, `test` or a `case` (patterns, not globs).
+    if globs:
+        cmd, in_test, in_case, known = None, False, False, False
+        for w in items:
+            if w is SEP:
+                cmd, known = None, False
+                continue
+            t = _wtext(w)
+            if t == "]]":
+                in_test = False
+                continue
+            if t == "esac":
+                in_case = False
+                continue
+            if cmd is None:
+                if t in SH_KEYWORDS or (t is not None and _ASSIGN_RE.match(t)):
+                    continue
+                cmd = t if t is not None else ""
+                in_test = in_test or cmd == "[["
+                in_case = in_case or cmd == "case"
+                continue
+            known = known or cmd in GLOB_CMDS
+            if in_test or in_case or cmd in ("[", "test"):
+                continue
+            if _glob_arg(w) and (globs == "shell" or known):
+                walk([w], _pattern_filter(_wshape(w)), "glob")
+            known = known or _wtext(w) in GLOB_CMDS
+
     for i, w in enumerate(items):
         if w is SEP:
             continue
@@ -2923,7 +3041,72 @@ def _shell_walks(f, items, line, ctx, step):
         t = _wtext(w)
         if t is None:
             continue
-        if t == "find":
+        if t in ("cp", "gcp"):
+            # a recursive copy reads its sources (every positional word but the destination; all of them with -t)
+            a = args_from(i + 1)
+            opts = [_wtext(x) or "" for x in a]
+            if not any(o in ("--recursive", "--archive") or re.fullmatch(r"-[A-Za-z]*[rRa][A-Za-z]*", o) for o in opts):
+                continue
+            target = any(o.startswith("--target-directory") or re.fullmatch(r"-[A-Za-z]*t", o) for o in opts)
+            pos = _positional(a, opts)
+            roots = pos if target or len(pos) < 2 else pos[:-1]
+            if roots:
+                walk(roots, None, t)
+        elif t in ("rsync", "ditto"):
+            a = args_from(i + 1)
+            pos = _positional(a, [_wtext(x) or "" for x in a])
+            roots = pos if len(pos) < 2 else pos[:-1]
+            if roots:
+                walk(roots, None, t)
+        elif t in ("tar", "gtar", "bsdtar"):
+            # a tar that creates, appends or updates reads its paths (each under the -C before it)
+            a = args_from(i + 1)
+            opts = [_wtext(x) or "" for x in a]
+            modes, j = set(), 0
+            if opts and re.fullmatch(r"[A-Za-z]+", opts[0]):   # the old style: `tar czf out.tgz dir`
+                modes |= set(opts[0])
+                j = 1
+            for o in opts[j:]:
+                if re.fullmatch(r"-[A-Za-z0-9]+", o):
+                    modes |= set(o[1:])
+                elif o in ("--create", "--append", "--update"):
+                    modes.add("c")
+            if not modes & set("cru"):
+                continue
+            cdir, roots = None, []
+            while j < len(a):
+                o = opts[j]
+                if o in ("-C", "--directory") and j + 1 < len(a):
+                    cdir = a[j + 1]
+                    j += 2
+                    continue
+                if o.startswith("--directory="):
+                    cdir = [("lit", o.split("=", 1)[1], False)]
+                elif not o or not o.startswith("-"):
+                    roots.append(_under(cdir, a[j]))
+                j += 1
+            if roots:
+                walk(roots, None, t)
+        elif t == "zip":
+            # zip -r out.zip <paths>: the paths after the archive (an -x/-i pattern list skipped); -R walks the cwd
+            a = args_from(i + 1)
+            opts = [_wtext(x) or "" for x in a]
+            flags = set("".join(o[1:] for o in opts if re.fullmatch(r"-[A-Za-z0-9@$]+", o)))
+            pat = "R" in flags or "--recurse-patterns" in opts
+            if not (pat or "r" in flags or "--recurse-paths" in opts):
+                continue
+            pos, listing = [], False
+            for x, o in zip(a, opts):
+                if o in ("-x", "-i", "--exclude", "--include"):
+                    listing = True
+                elif o and o.startswith("-"):
+                    listing = False
+                elif not (listing and _has_glob(_wshape(x))):
+                    pos.append(x)
+            roots = pos[1:] + ([[("lit", ".", False)]] if pat else [])
+            if roots:
+                walk(roots, None, "zip")
+        elif t == "find":
             a = args_from(i + 1)
             roots = []
             for x in a:
@@ -3003,7 +3186,20 @@ def _shell_walks(f, items, line, ctx, step):
                     j += 2
                     continue
                 j += 1
-            if j >= len(a) or opts[j] not in ("ls-files", "ls-tree", "grep"):
+            if j >= len(a):
+                continue
+            if opts[j] == "clone":
+                # a clone copies its source (every positional word is read as a root, the destination too)
+                roots = [_under(cdir, x) for x, o in zip(a[j + 1:], opts[j + 1:]) if o is None or not o.startswith("-")]
+                if roots:
+                    walk(roots, None, "git clone")
+                continue
+            if opts[j] == "archive" or opts[j] == "worktree" and \
+                    next((o for o in opts[j + 1:] if o is None or not o.startswith("-")), None) == "add":
+                # an archive or a new worktree copies the repo's tree: a whole-tree walk of the repo (cwd or -C)
+                walk([_under(cdir, [("lit", ".", False)])], None, "git " + opts[j])
+                continue
+            if opts[j] not in ("ls-files", "ls-tree", "grep"):
                 continue
             sub, rest, ropts = opts[j], a[j + 1:], opts[j + 1:]
             whole = False
@@ -3034,8 +3230,7 @@ def _shell_walks(f, items, line, ctx, step):
             if whole or not roots:
                 roots = roots + [[("lit", ".", False)]]
                 filt = None
-            if cdir is not None:
-                roots = [list(cdir) + [("lit", "/", False)] + r for r in roots]
+            roots = [_under(cdir, r) for r in roots]
             walk(roots, filt or None, "git " + sub)
         elif t == "for" and i + 2 < len(items) and _wtext(items[i + 2]) == "in":
             j = i + 3
@@ -3212,11 +3407,13 @@ def _prove(t, repo, globs, steps, places, readers, deadline):
                 ctx = (f, scope, line)
                 items = segs[1] if isinstance(segs, tuple) and segs[0] == "argv" else shell_items(segs, "sh",
                                                                                                argv_quoted=True)
-                walks.extend(_shell_walks(f, items, line, ctx, f.step))
+                walks.extend(_shell_walks(f, items, line, ctx, f.step, "code"))
         elif f.lx is not None:
             walks.extend(_line_walks(f, res))
+            mode = "shell" if f.lang in ("sh", "make") else ("code" if f.lang in ("py", "js", "swift") else None)
             for line, items in f.lx.views:
-                walks.extend(_shell_walks(f, items, line, (f, None, line), f.step))
+                walks.extend(_shell_walks(f, items, line, (f, None, line), f.step,
+                                          mode if line not in f.lx.heredoc else None))
     for w in walks:
         ix.tick()
         vals = set()
@@ -3356,7 +3553,9 @@ def edit_inert(text, slug, globs, current_schema):
 # ---- the reader check -----------------------------------------------------------------------------------------------
 
 CHECK_CODE = r"""
-import importlib.util, sys
+import sys
+sys.dont_write_bytecode = True
+import importlib.util
 try:
     spec = importlib.util.spec_from_file_location("rs", sys.argv[1])
     m = importlib.util.module_from_spec(spec)
@@ -3415,7 +3614,7 @@ def reader_check(new_file, tasks_dir):
             why = "no skills/_shared/scripts/rollout-settings.py there"
         else:
             try:
-                p = subprocess.run([sys.executable, "-I", "-c", CHECK_CODE, script, new_file], capture_output=True,
+                p = subprocess.run([sys.executable, "-I", "-B", "-c", CHECK_CODE, script, new_file], capture_output=True,
                                    text=True, timeout=CHECK_TIMEOUT, stdin=subprocess.DEVNULL, env=ES.git_env())
                 if p.returncode != 0:
                     lines = [x for x in (p.stderr or "").strip().splitlines() if x.strip()]

@@ -140,6 +140,16 @@ test('path test: a non-prose file, a symlink or a deletion under a glob', (t) =>
   assert.deepEqual([pt.inert, pt.nonInert.sort()], [['docs/reviews/r.md'], ['docs/handoffs/l.md', 'docs/handoffs/x.py']])
 })
 
+test('path test: a .txt is never inert (pytest collects test*.txt with no flag; a .txt is often data)', (t) => {
+  const fx = fixture(t)
+  const base = git(fx.home, fx.repo, 'rev-parse', 'HEAD')
+  write(fx.repo, { 'docs/handoffs/test_notes.txt': '>>> 1 + 1\n3\n', 'docs/handoffs/n.md': 'a note\n', 'notes.txt': 'x\n' })
+  git(fx.home, fx.repo, 'add', '-A')
+  git(fx.home, fx.repo, 'commit', '-qm', 'txt')
+  const pt = pathTest(fx, base, git(fx.home, fx.repo, 'rev-parse', 'HEAD'), ['docs/handoffs/**', '*.txt'])
+  assert.deepEqual([pt.inert, pt.nonInert.sort()], [['docs/handoffs/n.md'], ['docs/handoffs/test_notes.txt', 'notes.txt']])
+})
+
 test('glob_match agrees with git on the glob forms', (t) => {
   const got = inProcess(tmpHome(t), `print(json.dumps([m.glob_match(g, p) for g, p in json.loads(sys.argv[2])]))`, {
     args: [JSON.stringify([['THREAD.md', 'THREAD.md'], ['THREAD.md', 'a/THREAD.md'], ['docs/handoffs/**', 'docs/handoffs/a.md'],
@@ -193,6 +203,25 @@ test('the tool rule: a named markdown tool or a tool config fails every glob; a 
   holds(prove(fx, ['THREAD.md']), 'THREAD.md')
 })
 
+// Whole-tree runners that read prose (round 2): each held before it joined TOOLS / TOOL_CONFIG_RE.
+const TOOL_FAILS = [
+  ['pre-commit run --all-files with the whitespace hooks (its config)', {
+    '.pre-commit-config.yaml': 'repos:\n  - repo: https://github.com/pre-commit/pre-commit-hooks\n    rev: v4.6.0\n    hooks:\n' +
+      '      - id: trailing-whitespace\n      - id: end-of-file-fixer\n',
+  }, 'pre-commit run --all-files', '.pre-commit-config.yaml'],
+  ['pytest with addopts --doctest-glob=*.md', { 'pyproject.toml': '[tool.pytest.ini_options]\naddopts = "--doctest-glob=*.md"\n' }, 'python3 -m pytest', 'pyproject.toml'],
+  ['pytest --markdown-docs', {}, 'python3 -m pytest --markdown-docs', '<verifier>'],
+  ['mktestdocs in a test', { 'tests/test_docs.py': 'from mktestdocs import check_md_file\n' }, 'python3 -m pytest', 'tests/test_docs.py'],
+  ['phmdoctest', {}, 'phmdoctest README.md --outfile t.py && python3 -m pytest t.py', '<verifier>'],
+]
+
+for (const [name, files, verifier, where] of TOOL_FAILS) {
+  test(`tool rule: ${name}`, (t) => {
+    const res = prove(fixture(t, files), ['THREAD.md', 'docs/handoffs/**'], { verifier })
+    fails(res, 'THREAD.md', { kind: 'tool', path: where }); fails(res, 'docs/handoffs/**', { kind: 'tool', path: where })
+  })
+}
+
 test('the link rule: a literal ]( in a non-prose file fails every glob', (t) => {
   const fx = fixture(t, { 'src/links.py': 'LINK = "[a](b)"\n' })
   const res = prove(fx, ['THREAD.md', 'docs/handoffs/**'])
@@ -213,6 +242,11 @@ test('the name rule: split-segment joins, an UPPER_CASE constant and a comment h
   fx = fixture(t, { 'docs/notes.md': 'THREAD.md and docs/handoffs are named here\n', 'src/c.py': 'THREADS = 1\n' }, { home: tmpHome(t) })
   const res = prove(fx, ['THREAD.md', 'docs/handoffs/**'])
   holds(res, 'THREAD.md'); holds(res, 'docs/handoffs/**')
+})
+
+test('the name rule reads a .txt blob (a fixture list of paths a test opens): .txt is never prose', (t) => {
+  const fx = fixture(t, { 'tests/fixtures/paths.txt': 'THREAD.md\nREADME.md\n' })
+  fails(prove(fx, ['THREAD.md']), 'THREAD.md', { kind: 'name', path: 'tests/fixtures/paths.txt', line: 1 })
 })
 
 test("the name rule reads the steps, and a glob's own non-prose files are scanned (no own-files exclusion)", (t) => {
@@ -240,6 +274,30 @@ const WALK_FAILS = [
   ['subprocess git ls-files *.md in a test file (cwd)', { 'tests/t.py': "import subprocess\nsubprocess.run(['git', 'ls-files', '*.md'])\n" }, 'cwd'],
   ['a shell test walking the tree (cwd)', { 'tests/run.sh': "#!/bin/sh\ncd \"$(dirname \"$0\")/..\"\nfind . -name '*.md' | wc -l\n" }, 'cwd'],
   ['a Makefile recipe with a ** glob', { Makefile: "check:\n\tnpx some-linter '**/*.md'\n" }, 'cwd'],
+  // round 2: a copy or archive of the repo is a walk of its source (a later walk of the copy is under TMP)
+  ['cp -R of the repo into a temp dir, then a find over the copy (cwd)', { 'tests/t.sh': 'T=$(mktemp -d); cp -R . "$T/r"; find "$T/r" -name \'*.md\'\n' }, 'cwd'],
+  ['rsync -a of the repo (cwd)', { 'tests/t.sh': 'T=$(mktemp -d)\nrsync -a --exclude .git . "$T/r"\n' }, 'cwd'],
+  ['ditto of the repo (cwd)', { 'tests/t.sh': 'T=$(mktemp -d)\nditto . "$T/r"\n' }, 'cwd'],
+  ['tar czf of the repo, the old option style (cwd)', { 'tests/t.sh': 'T=$(mktemp -d)\ntar czf "$T/x.tgz" .\n' }, 'cwd'],
+  ['zip -qr of the repo with an -x pattern list (cwd)', { 'tests/t.sh': 'T=$(mktemp -d)\nzip -qr "$T/x.zip" . -x "*.git*"\n' }, 'cwd'],
+  ['git clone of the repo (cwd)', { 'tests/t.sh': 'T=$(mktemp -d)\ngit clone -q . "$T/r"\n' }, 'cwd'],
+  ['git archive -o into a temp dir (cwd)', { 'tests/t.sh': 'T=$(mktemp -d)\ngit archive -o "$T/x.tar" HEAD\n' }, 'cwd'],
+  ['git worktree add into a temp dir (cwd)', { 'tests/t.sh': 'T=$(mktemp -d)\ngit worktree add -q "$T/w"\n' }, 'cwd'],
+  ['TarFile.add of the cwd, the archive in a temp dir (cwd)', { 'tests/b.py': "import os, tarfile, tempfile\ntarfile.open(os.path.join(tempfile.mkdtemp(), 'x.tar'), 'w').add('.')\n" }, 'cwd'],
+  ['ZipFile.write of argv names in a with block (input)', { 'tests/b.py': "import os, sys, tempfile, zipfile\nwith zipfile.ZipFile(os.path.join(tempfile.mkdtemp(), 'x.zip'), 'w') as z:\n    for name in sys.argv[1:]:\n        z.write(name)\n" }, 'input'],
+  ['shutil.make_archive with no root_dir (cwd)', { 'tests/b.py': "import os, shutil, tempfile\nshutil.make_archive(os.path.join(tempfile.mkdtemp(), 'x'), 'gztar')\n" }, 'cwd'],
+  ['shutil.make_archive of the repo root (repo)', { 'tests/b.py': `${PY_HEAD}import shutil\nshutil.make_archive(os.path.join(tempfile.mkdtemp(), 'x'), 'zip', root_dir=REPO_ROOT)\n` }, 'repo'],
+  ['filecmp.dircmp of the cwd (cwd)', { 'tests/b.py': "import filecmp, tempfile\nfilecmp.dircmp('.', tempfile.mkdtemp()).report_full_closure()\n" }, 'cwd'],
+  ['a Swift FileManager.copyItem of the cwd (cwd)', { 'tests/T.swift': 'import Foundation\ntry FileManager.default.copyItem(atPath: ".", toPath: "/tmp/x")\n' }, 'cwd'],
+  // round 2: a command substitution is read as words of its own, and a bare `*` argument is a listing
+  ['a $(find …) command substitution (cwd)', { 'tests/t.sh': '#!/bin/sh\nfor f in $(find . -name "*.md"); do echo "$f"; done\n' }, 'cwd'],
+  ['a backquoted git ls-files (cwd)', { 'tests/t.sh': '#!/bin/sh\nx=`git ls-files`\necho "$x"\n' }, 'cwd'],
+  ["a Makefile's $(shell find …) (cwd)", { Makefile: 'FILES := $(shell find . -name "*.md")\nall:\n\techo $(FILES)\n' }, 'cwd'],
+  ["a Makefile's $(wildcard *.md) (cwd)", { Makefile: 'FILES := $(wildcard *.md)\nall:\n\techo $(FILES)\n' }, 'cwd'],
+  ['a bare *.md glob argument in a shell test (cwd)', { 'tests/t.sh': '#!/bin/sh\ngrep -l TODO *.md\n' }, 'cwd'],
+  ['a bare glob in a Python shell string after cat (cwd)', { 'tests/a.py': "import subprocess\nsubprocess.run('cat *.md | wc -l', shell=True)\n" }, 'cwd'],
+  ['a bare glob in a JS execSync string after wc (cwd)', { 'tests/t.test.mjs': "import { execSync } from 'node:child_process'\nexecSync('wc -l *.md')\n" }, 'cwd'],
+  ['a bare glob after a heredoc ends (cwd)', { 'tests/t.sh': '#!/bin/sh\ncat <<-EOF\n\tx\n\tEOF\ncat *.md\n' }, 'cwd'],
 ]
 
 for (const [name, files, origin] of WALK_FAILS) {
@@ -261,6 +319,7 @@ test('walk counts: a step that walks the tree (cwd); a non-prose step walk does 
   const fx = fixture(t)
   fails(prove(fx, ['THREAD.md'], { verifier: "find . -name '*.md' | xargs wc -l" }), 'THREAD.md', { kind: 'walk', origin: 'cwd', path: '<verifier>' })
   holds(prove(fx, ['THREAD.md'], { verifier: "find tests -name '*.py' -exec python3 {} \\;" }), 'THREAD.md')
+  fails(prove(fx, ['THREAD.md'], { verifier: 'cat *.md | wc -l' }), 'THREAD.md', { kind: 'walk', origin: 'cwd', path: '<verifier>' })
 })
 
 // ---- walks that hold -----------------------------------------------------------------------------------------------------
@@ -274,6 +333,18 @@ const WALK_HOLDS = [
   ['a comment-only line', { 'tests/t.py': `${PY_HEAD}# os.walk(REPO_ROOT)\nprint(1)\n` }],
   ['a comprehension filtering a listing to .tmp', { 'tests/t.py': `${PY_HEAD}tmps = [n for n in os.listdir(REPO_ROOT) if n.endswith(".tmp")]\n` }],
   ['ast.walk (a module function, no Path method)', { 'tests/t.py': 'import ast\nfor n in ast.walk(ast.parse("x = 1")):\n    pass\n' }],
+  ['case patterns, a [[ ]] test, arithmetic and a glob under a temp dir are no listing of the repo', {
+    'tests/t.sh': '#!/bin/bash\ncase "$1" in\n  *.md) echo md ;;\n  *) echo other ;;\nesac\nif [[ $1 == *.md ]]; then echo y; fi\necho $((2*3))\nT=$(mktemp -d)\nrm -rf "$T"/*\n',
+  }],
+  ['markdown emphasis in a docstring and a heredoc body are no globs', {
+    'tests/a.py': 'def f():\n    """A *closed* Session for **Question:** and **bold**.\n    on closed NOW **or** closed beneath."""\n    return 1\n',
+    'tests/t.sh': '#!/bin/sh\nT=$(mktemp -d)\ncat > "$T/n.md" <<EOF\nsome **bold** text and * bullets\n- item *x*\nEOF\necho done\n',
+  }],
+  ['copies and archives that stay in a temp dir: tar -C, tar -x, a zip or cp with no -r, git -C on a temp repo, make_archive of a temp dir, set.add', {
+    'tests/t.sh': 'T=$(mktemp -d)\ntar -C "$T" -czf "$T/x.tgz" .\ntar -xf "$T/x.tgz" -C "$T"\nzip "$T/x.zip" a.py\ncp a.py "$T"\n' +
+      'git -C "$T" archive -o "$T/x.tar" HEAD\ngit worktree list\n',
+    'tests/b.py': "import os, shutil, tempfile\nd = tempfile.mkdtemp()\nshutil.make_archive(os.path.join(d, 'x'), 'tar', root_dir=d)\nseen = set()\nseen.add('x')\n",
+  }],
   ['an event-scanner shape: production _discover(pages_dir) from main on expanduser(args.vault), and a test on a TemporaryDirectory', {
     'board.py': 'import argparse, os\n\ndef _discover(pages_dir):\n    return sorted(os.listdir(pages_dir))\n\n' +
       'def main():\n    ap = argparse.ArgumentParser()\n    ap.add_argument("--vault")\n    args = ap.parse_args()\n' +
@@ -346,6 +417,12 @@ const BINDING_FAILS = [
   }, 'repo'],
   ['an omitted argument with no default (open)', { 'tests/t.py': `${PY_HEAD}def scan(scratch, root):\n    return os.listdir(root)\nscan(tempfile.mkdtemp())\n` }, 'open'],
   ['a None-only default: an empty set reads open', { 'tests/t.py': `${PY_HEAD}def f(root=None):\n    return os.walk(root)\nf()\n` }, 'open'],
+  ['os.listdir(None) from a None default lists the cwd (cwd)', { 'tests/a.py': `${PY_HEAD}def scan(root=None):\n    return os.listdir(root)\nscan(tempfile.mkdtemp())\nscan()\n` }, 'cwd'],
+  ['os.scandir(None) from a None default lists the cwd (cwd)', { 'tests/a.py': `${PY_HEAD}def scan(root=None):\n    return list(os.scandir(root))\nscan(tempfile.mkdtemp())\nscan()\n` }, 'cwd'],
+  ["glob's root_dir=None is the cwd (cwd)", { 'tests/a.py': `${PY_HEAD}def md(root=None):\n    return glob.glob('*.md', root_dir=root)\nmd(tempfile.mkdtemp())\nmd()\n` }, 'cwd'],
+  ['a JS glob with cwd: undefined is the cwd (cwd)', {
+    'tests/t.test.mjs': "import fs from 'node:fs'\nfunction md(dir = undefined) { return fs.globSync('*.md', { cwd: dir }) }\nmd(fs.mkdtempSync('/tmp/x-'))\nmd()\n",
+  }, 'cwd'],
   ['a method call skips self (repo; an unshifted alignment would read open)', { 'tests/t.py': `${PY_HEAD}class Scan:\n    def md(self, scratch, root):\n        return root.rglob('*.md')\nScan().md(tempfile.mkdtemp(), REPO_ROOT)\n` }, 'repo'],
   ['a constructor call binds __init__ and self.root reads it (repo)', { 'tests/t.py': `${PY_HEAD}class Docs:\n    def __init__(self, root):\n        self.root = root\n    def files(self):\n        return self.root.rglob('*.md')\nDocs(REPO_ROOT).files()\n` }, 'repo'],
   ['an unbound @staticmethod call (repo)', { 'tests/t.py': `${PY_HEAD}class Scan:\n    @staticmethod\n    def md(root):\n        return root.rglob('*.md')\nScan.md(REPO_ROOT)\n` }, 'repo'],
@@ -525,6 +602,15 @@ function pluginFixture(t, fx) {
   return { P, W, c1, c2, td }
 }
 
+// The reader check loads another root's rollout-settings.py (and the ladder.py it loads) under -I, which ignores
+// PYTHONDONTWRITEBYTECODE: it must still write no __pycache__ there (a stray one trips estate D14/15/9).
+function noBytecode(...dirs) {
+  for (const d of dirs) {
+    const hits = fs.readdirSync(d, { recursive: true }).map(String).filter((p) => p.split(path.sep).includes('__pycache__'))
+    assert.deepEqual(hits, [], `no __pycache__ under ${d}`)
+  }
+}
+
 function recordFrom(fx, pf, extra = []) {
   const r = spawnSync('python3', ['-B', path.join(pf.W, 'skills', '_shared', 'scripts', 'inert-paths.py'), 'record', '--repo', fx.repo,
     '--glob', 'THREAD.md', '--verifier', 'true', '--tasks-dir', pf.td, ...extra], { encoding: 'utf8', cwd: fx.home, env: baseEnv(fx.home) })
@@ -544,9 +630,10 @@ test('record: the reader check refuses under a pre-P29 Primary (exit 1, file byt
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stderr, /^WARN: inert-paths: \[\[ro\]\] runs on /m)
   assert.match(fs.readFileSync(settingsPath(fx.home), 'utf8'), /^schema = 2\n[\s\S]*inert_paths = \["THREAD\.md"\]\n$/)
+  noBytecode(pf.P, pf.W)
 })
 
-test('record: a P29+ Primary, a live note stamped at a usable P29+ snapshot, and a file already at schema 2 all write with no WARN', (t) => {
+test('record: the reader check passes a P29+ Primary, a live note stamped at a usable P29+ snapshot, and a file already at schema 2: all write with no WARN', (t) => {
   // the Primary moved to commit 2
   let fx = fixture(t)
   let pf = pluginFixture(t, fx)
@@ -555,6 +642,7 @@ test('record: a P29+ Primary, a live note stamped at a usable P29+ snapshot, and
   let r = recordFrom(fx, pf)
   assert.equal(r.status, 0, r.stderr)
   assert.doesNotMatch(r.stderr, /WARN/)
+  noBytecode(pf.P, pf.W)
   // a stamped note at a usable snapshot (the Primary still pre-P29): the snapshot reads the file, no wait
   fx = fixture(t, {}, { home: tmpHome(t) })
   pf = pluginFixture(t, fx)
@@ -567,6 +655,7 @@ test('record: a P29+ Primary, a live note stamped at a usable P29+ snapshot, and
   assert.equal(r.status, 0, r.stderr)
   assert.doesNotMatch(r.stderr, /WARN/)
   assert.ok(Date.now() - started < 30000, 'no wait')
+  noBytecode(pf.P, pf.W, S)
   // a file already at schema 2: no check runs, so the pre-P29 Primary is never asked
   fx = fixture(t, {}, { home: tmpHome(t) })
   pf = pluginFixture(t, fx)
