@@ -71,8 +71,9 @@ PY
 fm() { grep -m1 "^$2:" "$D/$1.md" || echo "<none>"; }   # fm <slug> <key> — the frontmatter line
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
-# The dir holds one fresh Away file (p28-1, execute away.md), so each rollout runs to its own ceiling, never the Trickle
-# (reconcile-rollout-trickle.test.sh pins that): Away from the day's start, it never lapses at any --now used here.
+# The dir holds one fresh Away file (p28-1, execute away.md) whose Away cap (99, p29-8) never binds, so each rollout runs
+# to its own ceiling, never the Trickle or the Away cap (reconcile-rollout-trickle.test.sh pins those): Away from the
+# day's start, it never lapses at any --now used here.
 EH="$TMP/settings-home"; mkdir -p "$EH"; away_file "$EH" 2026-10-02T00:00:00Z
 nxt() { HOME="$EH" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
 # status reads the operator's ladder file (its `ladder` key, each task's rungDrift): HOME is pinned to an empty

@@ -244,6 +244,43 @@ test('idle-slots (p28-1): a hold-trickle reason is accepted; an unknown reason i
   assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
 })
 
+test('idle-slots (p29-8): a hold-away-cap reason is accepted; an unknown reason is still refused', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-away-cap', free: 2, settings: SETTINGS })], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.equal(l.reason, 'hold-away-cap')
+  const r = cli(home, ['emit', '--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-away', free: 2, settings: SETTINGS })], { env: EV(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+})
+
+test('slot-taken (p29-8): the cap in force is accepted; a malformed cap is refused, nothing written', (t) => {
+  const home = tmpHome(t)
+  const cap = { away: true, n: 4, file: 'fresh' }
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'slot-taken', '--json', JSON.stringify({ settings: SETTINGS, start: 'start', cap })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--task', 't2', '--kind', 'slot-taken', '--json',
+    JSON.stringify({ settings: SETTINGS, start: 'restart', cap: { away: false, n: 2, file: 'missing' } })], { env: EV(home) })
+  const [a, b] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(a.cap, cap)
+  assert.deepEqual(b.cap, { away: false, n: 2, file: 'missing' })
+  const BAD = [
+    ['cap not an object', 4],
+    ['n 0', { away: true, n: 0, file: 'fresh' }],
+    ['n true', { away: true, n: true, file: 'fresh' }],
+    ['n 2.5', { away: true, n: 2.5, file: 'fresh' }],
+    ['away "yes"', { away: 'yes', n: 4, file: 'fresh' }],
+    ['file "other"', { away: true, n: 4, file: 'other' }],
+    ['a missing n', { away: true, file: 'fresh' }],
+    ['an extra key', { away: true, n: 4, file: 'fresh', trickle: 2 }],
+  ]
+  for (const [label, bad] of BAD) {
+    const r = cli(home, ['emit', '--rollout', 'r', '--task', 't', '--kind', 'slot-taken', '--json', JSON.stringify({ settings: SETTINGS, cap: bad })], { env: EV(home) })
+    assert.equal(r.status, 2, `${label}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*cap.*\n$/, label)
+  }
+  assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, 2, 'no refused line was written')
+})
+
 test('idle-slots (p28-2): a hold-last-start reason is accepted', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-last-start', free: 3, settings: SETTINGS })], { env: EV(home) })

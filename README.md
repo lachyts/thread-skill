@@ -98,10 +98,12 @@ entry. Install a release that knows the table before writing it: an older
 By day the whole Mac runs at most a few rollout tasks at once, the Trickle
 (Chorus ADR 0104): `reconcile-rollout.py next` counts the tasks every open
 rollout is running and starts nothing past it while you are not Away. Away,
-each rollout runs to its own `parallel_ceiling`. Chorus says which by writing
-`~/.config/thread/away.json` (`skills/execute/away.md` specifies it). With no
-file, every rollout on the Mac runs at a combined Trickle of 2, nights
-included. To run a night to each ceiling without a writer, write the file by
+the Away cap holds the whole Mac instead (ADR 0049): larger than the Trickle
+(the file's `away_cap`, else 4), sized so suites do not contend, and each
+rollout still runs within its own `parallel_ceiling`. Chorus says which by
+writing `~/.config/thread/away.json` (`skills/execute/away.md` specifies it).
+With no file, every rollout on the Mac runs at a combined Trickle of 2, nights
+included. To run a night at the Away cap without a writer, write the file by
 hand (`skills/execute/away.md` § Without a writer shows how); a hand-written
 file goes stale 24 h after its `written_at` (or at its `until`), and from then
 on each lead prints a `WARN: ~/.config/thread/away.json stale: …` line and the

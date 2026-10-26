@@ -673,7 +673,9 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // A restart waits on the ceiling alone (the round-1 respawn deadlock), so the paragraph says so, and step 1.2's
   // automatic retry restarts within the ceiling, never held by the Trickle. Step 1.5's halt guard turns a `stuck` over
   // a seeded revise step 1.2 held only for want of `slotLimit` into a Trickle wait, never § 7 (the round-1 false stuck),
-  // and step 1.2's seeded revise names that clause.
+  // and step 1.2's seeded revise names that clause. p29-8 (ADR 0049): while Away the Away cap takes the Trickle's place,
+  // so the paragraph gives its slotLimit and its `away cap:` hold that never halts (a meant wait, never Stalled), and
+  // steps 1.5 and 1.6, clause (7), § 6, § 8 and the driver name the Away-cap wait beside the Trickle wait.
   const trickleP = labelled(skill, 'The Trickle (Chorus ADR 0104).')
   const tr1 = subs[0]?.text ?? ''
   const tr6 = sub(/^End the turn `waiting`/)?.text ?? ''
@@ -694,7 +696,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !tr6.includes('`reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`') ||
     !tr6.includes('a Trickle wait can stand with nothing of this rollout in flight') ||
     !hbPara.includes("a Trickle wait's `waiting` turn (§4.5 step 1.6)") ||
-    !hb7.includes('(a `trickle:` reason is no hold: the Trickle may have room now)') ||
+    !hb7.includes('(a `trickle:` or `away cap:` reason is no hold: the Trickle or the Away cap may have room now)') ||
     !waitingB.includes('or `next` holds a task on the Trickle (§4.5 step 1.6)') || !waitingB.includes("a Trickle wait's (`trickle: …`)") ||
     !hookP.includes('or a Trickle wait stands)') ||
     !drvDoc.includes('or a Trickle wait stands') || !drvBlock.includes('or a Trickle wait stands') ||
@@ -705,7 +707,18 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !trGuard.includes('A `stuck` while step 1.2 held an `autoRevise: true` seeded revise only for want of `slotLimit`') ||
     !trGuard.includes('ends the turn `waiting` with `reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`, never § 7') ||
     !trGuard.includes("Like `next`'s own `trickle:` hold, it waits whatever else is set aside") ||
-    !(S(skill, S7) ?? '').includes('and never while step 1.2 holds a seeded revise on the Trickle, a Trickle wait (§4.5 step 1.5)')) fails.push('trickle')
+    !(S(skill, S7) ?? '').includes('and never while step 1.2 holds a seeded revise on the Trickle, a Trickle wait (§4.5 step 1.5)') ||
+    // the Away cap (p29-8)
+    !trickleP.includes('`min(ceiling, max(0, A − that count))` while Away') ||
+    !trickleP.includes('While Away the same row reads `away cap: <running>/<A> tasks running on this Mac`, and an `away cap:` hold never halts the rollout either') ||
+    !trickleP.includes('a rollout the Away cap alone holds is a meant wait, never Stalled (ADR 0048)') ||
+    !trGuard.includes('While Away (`trickle.away` true) it is an Away-cap wait, the same in every way but its reason, `reason="away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac"`') ||
+    !tr6.includes('An `away cap:` hold, or step 1.5\'s revise held while Away, ends the turn `waiting` the same way with `reason="away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac"`') ||
+    !waitingB.includes('or on the Away cap while Away') || !waitingB.includes("an Away-cap wait's (`away cap: …`)") ||
+    !hookP.includes('an Away-cap wait stands') || !hbPara.includes("a Trickle wait's `waiting` turn (§4.5 step 1.6), an Away-cap wait's included") ||
+    !trRev.includes('never halts on it (while Away, an Away-cap wait, the same)') ||
+    !drvDoc.includes('or an Away-cap wait does (on the machine-wide Away cap while Lachy is Away, ADR 0049)') ||
+    !drvBlock.includes('or an Away-cap wait does (on the Away cap, ')) fails.push('trickle')
 
   // skip-path (ADR 0045, p29-3): step 3's prepare carries the verifier and bootstrap, single-quoted; a `skip` bullet after
   // set-aside re-checks (§ 2.5 then § 2.6), pushes M, logs (M, mainSha) and goes to step 4 with no verifier, a refused
@@ -1270,9 +1283,9 @@ test('control: § 4.5 without the Trickle at any one site fails trickle', () => 
     'trickle', 'no WARN relay in step 1.1')
   only(sk(' A `trickle:` hold (*The Trickle*) ends the turn `waiting` too,', ' A `trickle:` hold (*The Trickle*) halts the turn,'), 'trickle', 'no Trickle wait in step 1.6')
   only(sk('`reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`', '`reason="trickle"`'), 'trickle', 'no Trickle reason=')
-  only(sk(" and a Trickle wait's `waiting` turn (§4.5 step 1.6).", '.'), 'trickle', 'heartbeat paragraph without the Trickle wait')
-  only(sk(' (a `trickle:` reason is no hold: the Trickle may have room now)', ''), 'trickle', 'clause (7) without its parenthetical')
-  only(sk(', or `next` holds a task on the Trickle (§4.5 step 1.6) or step 1.2 holds a seeded revise on it (§4.5 step 1.5); nothing to do until', '; nothing to do until'),
+  only(sk(" and a Trickle wait's `waiting` turn (§4.5 step 1.6), an Away-cap wait's included.", '.'), 'trickle', 'heartbeat paragraph without the Trickle wait')
+  only(sk(' (a `trickle:` or `away cap:` reason is no hold: the Trickle or the Away cap may have room now)', ''), 'trickle', 'clause (7) without its parenthetical')
+  only(sk(', or `next` holds a task on the Trickle (§4.5 step 1.6) or step 1.2 holds a seeded revise on it (§4.5 step 1.5), or on the Away cap while Away; nothing to do until', '; nothing to do until'),
     'trickle', "§ 6's waiting bullet without it")
   only(sk(', a retry cool-down is pending, or a Trickle wait stands)', ', or a retry cool-down is pending)'), 'trickle', "§ 8's Stop-hook paragraph without it")
 })
@@ -1281,7 +1294,7 @@ test('control: a restart held by the Trickle, or a Trickle-held revise that halt
   only(sk('counting every `in_progress` task of this rollout, live or stalled, as every other lead counts them. A restart',
     'counting its live tasks only. A restart'), 'trickle', 'stalled tasks uncounted')
   only(sk('within the ceiling like any restart, never held by the Trickle', 'within `slotLimit`'), 'trickle', 'an automatic retry held by the Trickle')
-  only(sk(' A revise held only by `slotLimit`, below `ceiling`, is a Trickle wait: the halt guard (step 1.5) never halts on it.', ''),
+  only(sk(' A revise held only by `slotLimit`, below `ceiling`, is a Trickle wait: the halt guard (step 1.5) never halts on it (while Away, an Away-cap wait, the same).', ''),
     'trickle', 'step 1.2 without the pointer to the guard')
   only(sk(', never § 7: the revise launches once the Mac has room', ', then § 7: the revise launches once the Mac has room'), 'trickle', 'the guard halts')
   const guard = real.skill.split('\n').find((l) => l.includes('**Halt guard (last).**'))
@@ -1290,6 +1303,28 @@ test('control: a restart held by the Trickle, or a Trickle-held revise that halt
   only(sk("Like `next`'s own `trickle:` hold, it waits whatever else is set aside", 'It waits unless an UNVERIFIED task is set aside'),
     'trickle', 'an UNVERIFIED task halts the Trickle wait')
   only(sk(', and never while step 1.2 holds a seeded revise on the Trickle, a Trickle wait (§4.5 step 1.5)', ''), 'trickle', "§ 7's stuck halts over a Trickle-held revise")
+})
+test('control: § 4.5 without the Away cap at any one site fails trickle', () => {
+  only(sk(', `min(ceiling, max(0, A − that count))` while Away', ''), 'trickle', 'no Away-cap slotLimit')
+  only(sk(' While Away the same row reads `away cap: <running>/<A> tasks running on this Mac`, and an `away cap:` hold never halts the rollout either',
+    ' While Away the same row reads `away cap: <running>/<A> tasks running on this Mac`, and an `away cap:` hold halts the rollout `stuck`'), 'trickle', 'an Away-cap hold halts')
+  only(sk('a rollout the Away cap alone holds is a meant wait, never Stalled (ADR 0048)', 'a rollout the Away cap alone holds is Stalled'), 'trickle', 'Stalled')
+  only(sk(' While Away (`trickle.away` true) it is an Away-cap wait, the same in every way but its reason, `reason="away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac"`.', ''),
+    'trickle', 'the halt guard without the Away-cap wait')
+  only(sk(' An `away cap:` hold, or step 1.5\'s revise held while Away, ends the turn `waiting` the same way with', ' An `away cap:` hold, or step 1.5\'s revise held while Away, halts the turn with'),
+    'trickle', 'no Away-cap wait in step 1.6')
+  only(sk(' (a `trickle:` or `away cap:` reason is no hold: the Trickle or the Away cap may have room now)', ' (a `trickle:` reason is no hold: the Trickle may have room now)'),
+    'trickle', 'clause (7) holding on an Away-cap reason')
+  only(sk(', or on the Away cap while Away; nothing to do until', '; nothing to do until'), 'trickle', "§ 6's waiting bullet without the Away cap")
+  only(sk(", an Away-cap wait's (`away cap: …`) and the completion verify's", ' and the completion verify\'s'), 'trickle', "§ 6's reason list without the Away cap")
+  only(sk(' an Away-cap wait stands, a retry cool-down is pending,', ' a retry cool-down is pending,'), 'trickle', "§ 8's Stop-hook paragraph without the Away cap")
+  only(sk(" (§4.5 step 1.6), an Away-cap wait's included.", ' (§4.5 step 1.6).'), 'trickle', 'heartbeat paragraph without the Away-cap wait')
+  only(sk(' never halts on it (while Away, an Away-cap wait, the same).', ' never halts on it.'), 'trickle', 'step 1.2 without the Away-cap wait')
+})
+test("control: the driver's docstring or block reason without the Away-cap wait fails trickle", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv(' or an Away-cap\n              wait does (on the machine-wide Away cap while Lachy is Away,\n              ADR 0049)', ''), 'trickle', 'docstring')
+  only(drv(' or an Away-cap wait does (on the Away cap, "\n            "with its reason=\\"away cap: …\\")', ''), 'trickle', 'block reason')
 })
 test("control: the driver's docstring or block reason without the Trickle wait fails trickle", () => {
   const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }

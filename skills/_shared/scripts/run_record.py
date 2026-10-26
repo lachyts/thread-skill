@@ -113,7 +113,10 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
 
   slot-taken      T  settings{parallel_ceiling (int >= 1), max_review_rounds?, max_iterations?,
                      max_plan_rounds? (ints >= 1), rung? (str)} (the effective values after per-task
-                     overrides); start? (start | restart | revise | hand-back | resume); carriedFrom? (slug)
+                     overrides); start? (start | restart | revise | hand-back | resume); carriedFrom? (slug);
+                     cap? {away (bool), n (int >= 1: the Mac-wide cap in force, the Away cap while Away, else the
+                     Trickle), file (fresh | missing | stale | unreadable: the Away state file's reading)} (exactly
+                     those keys; p29-8, ADR 0049: the cap the Slot started under, so a Reflection tunes it)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
   slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed)
   ready           T  pr? (url or number)
@@ -138,7 +141,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   hold-ended         hold (merge | git-env | race)
   idle-slots         reason (dependency | solo | pause-drain | queue-tail | awaiting-hand-back |
                      hold-merge | hold-git-env | hold-race | hold-trickle: a row waits on the machine-wide Trickle,
-                     execute away.md | hold-last-start: a row the last starts hold toward the Morning, p28-2);
+                     execute away.md | hold-away-cap: a row waits on the machine-wide Away cap, execute away.md |
+                     hold-last-start: a row the last starts hold toward the Morning, p28-2);
                      free (int >= 0); settings (as slot-taken)
   away-night         morning (a UTC Z stamp, to the second: M, the Morning the last starts looked toward while Away
                      ran to it). p28-2, the night record (execute away.md § The night record): reconcile-rollout.py
@@ -466,6 +470,21 @@ def _settings(v):
 
 SETTINGS = _settings
 
+CAP_FILES = ("fresh", "missing", "stale", "unreadable")  # reconcile-rollout.py _away_state's readings
+
+
+def _cap(v):
+    """slot-taken's cap (p29-8): the Mac-wide cap in force at the Slot's start, {away, n, file} and nothing else."""
+    if not isinstance(v, dict) or set(v) != {"away", "n", "file"}:
+        return "an object of exactly away, n and file"
+    if _bool(v["away"]):
+        return "an object with away true or false"
+    if _int(1)(v["n"]):
+        return "an object with n an integer >= 1"
+    if v["file"] not in CAP_FILES:
+        return "an object with file one of %s" % ", ".join(CAP_FILES)
+    return None
+
 # ---- the tuning kind (skills/reflect/scripts/tune.py) -----------------------------------------------------
 
 UTC_Z_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z\Z", re.ASCII)
@@ -736,7 +755,8 @@ HOLDS = ("merge", "git-env", "race")
 # kind -> (task required, required fields, optional fields)
 KINDS = {
     "slot-taken": (True, {"settings": SETTINGS},
-                   {"start": _enum("start", "restart", "revise", "hand-back", "resume"), "carriedFrom": _str}),
+                   {"start": _enum("start", "restart", "revise", "hand-back", "resume"), "carriedFrom": _str,
+                    "cap": _cap}),
     "run-bound": (True, {"runId": _str, "journalDir": _str},
                   {"call": _enum("task", "revise", "integrate", "resume"), "resumedFrom": _str}),
     "slot-freed": (True, {"outcome": _enum("ready", "set-aside", "completed", "lost", "stopped", "failed")}, {}),
@@ -752,7 +772,8 @@ KINDS = {
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
     "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
-                                           "hold-merge", "hold-git-env", "hold-race", "hold-trickle", "hold-last-start"),
+                                           "hold-merge", "hold-git-env", "hold-race", "hold-trickle",
+                                           "hold-away-cap", "hold-last-start"),
                            "free": _int(0), "settings": SETTINGS}, {}),
     # The night record (p28-2, Chorus ADR 0104's Consequences): reconcile-rollout.py `next` is its one writer.
     "away-night": (False, {"morning": _stampz}, {}),
