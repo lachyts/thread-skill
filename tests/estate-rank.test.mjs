@@ -5,7 +5,7 @@
 // the real one (`estate-scan.py --vault V --today 2026-10-20 --deadline 0`, which starts no subprocess), run once and
 // shared, so the ranker is pinned to the scan's actual schema; the cases that need a blocker mutate that JSON in
 // memory into S/scan-*.json. Every rank run passes --today 2026-10-20; the snooze, unpark and kill cases (R1-R4: the
-// Unpark offer's writes, p25-3) write only copies of V.
+// Unpark offer's writes, p25-3) write only copies of V. R6 (schedule's Pre-flight, ADR 0047) ranks a vault of its own, VP.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
