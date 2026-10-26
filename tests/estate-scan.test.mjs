@@ -914,3 +914,42 @@ test("17. clones: a clone's own ahead set keeps the strict rule; a stale clone l
   assert.deepEqual(st.unpushed.map((u) => [u.clone, u.ahead]), [[R('ST-rollout'), 0], [R('ST'), 0]])
   assert.deepEqual(st.verifier, { command: 'make test', source: 'Makefile' })
 })
+
+// ---- 18. still_to_start: the Pre-flight's exception to § In flight -------------------------------------------------
+// schedule § 1.5 (ADR 0047) grades a carried task still queued on a supersede: open, its `rollout:` naming the rollout
+// being superseded. still_to_start reads the status as NA.status_of does and folds the link and the prior as
+// estate-rank's slug_key does. Loaded by path; importing estate-scan.py runs nothing and writes no bytecode.
+test('18. still_to_start: open and linked to the rollout being superseded, under the slug fold; anything else is not', () => {
+  const PY = `
+import importlib.util, json, sys
+sys.dont_write_bytecode = True
+s = importlib.util.spec_from_file_location("thread_estate_scan", sys.argv[1])
+m = importlib.util.module_from_spec(s)
+s.loader.exec_module(m)
+print(json.dumps([m.still_to_start(st, link, sup) for st, link, sup in json.loads(sys.argv[2])]))
+`
+  const rows = [
+    ['open', 'prior', 'prior', true],
+    ['open', 'Work/Tasks/Prior.md', 'prior', true],
+    ['open', '[[Work/Tasks/Prior.md|x]]', 'prior', true],
+    ['open', 'PRIOR', 'prior', true],
+    ['open', 'prior', '[[prior]]', true],
+    ['open', 'prior', '~/repos/obsidian/Work/Tasks/prior.md', true],
+    ['open', 'prior#Queue', 'Prior', true],
+    ['in_progress', 'prior', 'prior', false],
+    ['review', 'prior', 'prior', false],
+    ['', 'prior', 'prior', false],
+    [null, 'prior', 'prior', false],
+    ['open', 'prior', '', false],
+    ['open', 'prior', null, false],
+    ['open', 'other', 'prior', false],
+    ['open', 'prior-2', 'prior', false],
+    ['open', '', 'prior', false],
+    ['open', null, 'prior', false],
+  ]
+  const r = spawnSync('python3', ['-c', PY, SCRIPT, JSON.stringify(rows.map((x) => x.slice(0, 3)))],
+    { encoding: 'utf8', env: { ...base, PYTHONDONTWRITEBYTECODE: '1' } })
+  assert.equal(r.status, 0, r.stderr)
+  const got = JSON.parse(r.stdout)
+  rows.forEach((row, i) => assert.equal(got[i], row[3], JSON.stringify(row)))
+})

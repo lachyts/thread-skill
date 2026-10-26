@@ -21,7 +21,9 @@ reconcile-rollout.py for its PROJECT_ROOT_RE; reconcile-project.py for its PHASE
 REVIEW_STATUSES, pinned to the doc by tests/contracts/vault-grammar.test.mjs. In flight is § In flight, stated once in
 three module-level helpers that estate-dispatch.py's `record` loads too: first_link (a `rollout:` value's first link),
 link_live (it resolves to a note directly in Work/Tasks) and in_flight (live, `in_progress` or Review, on a status
-already read by status_of); a phase's members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as
+already read by status_of), with its one exception, still_to_start (a carried task still queued, open and linked to
+the rollout being superseded: schedule's Pre-flight grades it, ADR 0047), loaded by estate-rank.py and `record` too;
+a phase's members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as
 children, never copied: self-rollout-check.sh --resolve, land.sh --origin-slug, landing-register.py check,
 unfinished-rollout.py check and reconcile-rollout.py status. Restated, each cited: schedule § 2.5's verifier detection
 (SKILL.md prose, nothing to import), and pushed-base.sh's ahead classification (execution-fit.md § Dispatch blockers,
@@ -287,6 +289,29 @@ def in_flight(status, live):
     """vault-grammar.md § In flight for a task: its rollout link is live, or its status (as NA.status_of reads it, so
     `in-progress` is `in_progress`) is in_progress or Review."""
     return live or status == "in_progress" or status in REVIEW_STATUSES
+
+
+def _link_key(link):
+    """A link or a note path as the lower-case basename it names, estate-rank.py's slug_key fold written here (that
+    script loads this one): `[[`/`]]`, an `|alias`, a `#heading` and the path cut, `.md` dropped."""
+    s = str(link).strip()
+    if s.startswith("[[") and s.endswith("]]"):
+        s = s[2:-2]
+    s = s.split("|")[0].split("#")[0].strip().replace("\\", "/").rstrip("/")
+    s = s.rsplit("/", 1)[-1]
+    if s.lower().endswith(".md"):
+        s = s[:-3]
+    return s.strip().lower()
+
+
+def still_to_start(status, link, superseding):
+    """The one exception to § In flight, at schedule's Pre-flight on a supersede (schedule § 1.5, ADR 0047): a carried
+    task still queued, its status (as NA.status_of reads it) `open` and its `rollout:` naming the rollout being
+    superseded. A task that has started (in_progress, Review, any other status) is still in flight."""
+    if not superseding or status != "open" or not link:
+        return False
+    key = _link_key(link)
+    return bool(key) and key == _link_key(superseding)
 
 
 def link_why(raw):

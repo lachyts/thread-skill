@@ -5,11 +5,15 @@ Scripts scan, the model decides: estate-scan.py lists the estate, the grading ag
 it, and this script does the rest that needs no judgement. It cuts the decision round to Lachy's budget and builds
 its AskUserQuestion payloads (`rounds`), works out which runs go once the answers are in (`plan`), which sessions
 start and with what (`sessions`), and writes each answer into its task note (`record`); `slices` cuts the scan into
-the grading agents' inputs, and `log` keeps the pass's grades in the Grade log. skills/orient-all/SKILL.md is its one
-caller, and this docstring is the only copy of the output schemas. python >= 3.9 with PyYAML (`log` needs none).
-Called as:
+the grading agents' inputs, and `log` keeps the pass's grades in the Grade log. `preflight` is schedule's Pre-flight
+split (ADR 0047): which candidates queue, which leave with their Dependent closure, and the decision round for one
+rollout's tasks. Two callers: skills/orient-all/SKILL.md, and skills/schedule/SKILL.md § 1.5 (and its serial path's
+S3.5), which runs `slices`, `log`, `preflight` and `record` (`record --by schedule`), and under orient-all only
+`preflight`. This docstring is the only copy of the output schemas. python >= 3.9 with PyYAML (`log` and `preflight`
+need none). Called as:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py slices --scan FILE --dir DIR
+        [--tasks SLUG[,SLUG]]... [--superseding PRIOR]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rounds --rank FILE --scan FILE --budget N
         [--top K] [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py plan --rank FILE --scan FILE
@@ -17,34 +21,45 @@ Called as:
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan FILE [--wrote PATH]...
         [--status SLUG=N]... [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task SLUG|PATH --question Q
-        --answer A --recommended R [--fork F] [--today YYYY-MM-DD] [--vault PATH]
+        --answer A --recommended R [--fork F] [--by orient-all|schedule] [--superseding PRIOR] [--today YYYY-MM-DD]
+        [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank FILE --scan FILE [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank FILE --scan FILE
+        --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...
 
 Defaults: rounds, plan and sessions take the vault from the scan's (or the plan's) `vault`; record takes
 ~/repos/obsidian and the local date. Only `slices` (its own files under --dir), `record` (one task note) and `log`
-(grades.jsonl, through run_record) write; rounds, plan and sessions write nothing and are byte-deterministic for the
-same inputs. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before any sibling loads). Exit 0
-when done; 1 when `log` cannot write a line (run_record's warning above it; orient-all § 8 reports it as a caveat); 2
-on a usage error or a refusal (one `estate-dispatch:` stderr line, nothing written): an unknown verb or flag, a scan,
-rank or plan that is not JSON or whose `schema` is not 1, a negative budget, a bad --status or --wrote, an existing
-slice file, every record refusal and a grade line whose field run_record refuses (a task whose name is no slug is
-skipped, never refused); 3 when the vault, PyYAML or a sibling script is missing.
+(grades.jsonl, through run_record) write; rounds, plan, sessions and preflight write nothing and are
+byte-deterministic for the same inputs. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before
+any sibling loads). Exit 0 when done; 1 when `log` cannot write a line (run_record's warning above it; orient-all § 8
+and schedule step 8 report it as a caveat); 2 on a usage error or a refusal (one `estate-dispatch:` stderr line,
+nothing written): an unknown verb or flag, a scan, rank or plan that is not JSON or whose `schema` is not 1, a
+negative budget, a bad --status or --wrote, an existing slice file, every record refusal, a grade line whose field
+run_record refuses (a task whose name is no slug is skipped, never refused), and preflight's own refusals (an empty
+--tasks; a --kept, --decided or --dep slug outside --tasks; a --dep not given as A=B); 3 when the vault, PyYAML or a
+sibling script is missing.
 
 What it reuses. Loaded by path inside main(), so importing this file runs nothing (the contract tests read its
 constants that way): estate-rank.py (ER: Ranker's index, the gradeable rule; slug_key; DECISION_MINUTES and
 REVIEW_MINUTES), and through ER.load_siblings resolve-target.py's next-action.py (NA: Vault, Note, status_of,
 OPEN_STATUSES, links_in, tags_of) and estate-scan.py (ES: first_link, link_live and in_flight, vault-grammar.md
-§ In flight stated once); reconcile-rollout.py (RR: Note, GATE_PENDING_SECTION, GATE_BOUNCE_SECTION,
+§ In flight stated once, and still_to_start, its one exception); `preflight` loads ER alone, for slug_key;
+reconcile-rollout.py (RR: Note, GATE_PENDING_SECTION, GATE_BOUNCE_SECTION,
 PROJECT_ROOT_RE, _shape and _start_unattended, the start stamp's reader; _dep_status and _fold_unit, the dependency
 rule a rollout row waits on); and, for `sessions` only, leg.py (LEG:
 split_cells, LAUNCH_RE, LINK_RE and QUEUE, the serial Queue's row grammar); and, for `log` only, run_record.py (RRec:
 check, emit, events_dir, normalise_slug, GRADE_LOG and RESERVED: the Grade log's one writer is run_record itself).
 
-slices --scan F --dir D: one file per home project with gradeable tasks (ER's rule: statusClass active, not in flight,
-a live first project), `D/<NN>-<kebab name>.json`, NN from 01 in the scan's project order, holding {project (the scan
-row), tasks[] (its gradeable scan task rows), repos[] (the scan repo rows whose declared paths meet the project's
-`repos:`), today}. It creates D; any target file that already exists is exit 2 with nothing written. Prints
-{homes[] {project, note, file, tasks}, gradeable, skipped}.
+slices --scan F --dir D [--tasks SLUG[,SLUG]]... [--superseding PRIOR]: one file per home project with gradeable tasks
+(ER's rule: statusClass active, not in flight, a live first project), `D/<NN>-<kebab name>.json`, NN from 01 in the
+scan's project order, holding {project (the scan row), tasks[] (its gradeable scan task rows), repos[] (the scan repo
+rows whose declared paths meet the project's `repos:`), today}. It creates D; any target file that already exists is
+exit 2 with nothing written. Prints {homes[] {project, note, file, tasks}, gradeable, skipped}. --tasks (schedule
+§ 1.5's graded set) keeps only the named tasks that are gradeable, matched by ER.slug_key, so a home with none gets
+no file, and adds notGradeable[] {slug, why}, in the order named: each named task that is not gradeable, why the
+Ranker's skip reason (`unhomed`, `in flight`, `hold`) or `not in the scan`. --superseding passes the prior to the
+Ranker, so a carried task still queued is gradeable (ER's Gradeable exception). gradeable and skipped count the whole
+scan either way. With neither flag (orient-all § 2) the output is as it always was.
 
 rounds --rank R --scan S --budget N [--top K=15] [--vault V]: the decision round, cut to N minutes.
   Sign-offs: each scan rollout summary's `pendingSignOffs` (with a null summary, the scan's open tasks at status
@@ -144,8 +159,9 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]...: the sessions to start,
   Output: {schema, today, items[] {kind (execute | leg | repair | orient), rollout | project, note, title, cwd, alias?,
   prompt, tldr, manual, why}, left[]}.
 
-log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md **Grade log**), orient-all
-  § 2 step 7, never on a dry run. One run_record `grade` line per rank tasks[] entry, Orient included, in rank order:
+log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md **Grade log**), at
+  orient-all § 2 step 7 (never on a dry run) and at schedule § 1.5 on every run that grades (all but an orient-all
+  fork, whose estate pass logged them). One run_record `grade` line per rank tasks[] entry, Orient included, in rank order:
   task its slug (run_record's normalise_slug), project its home, grade, agentGrade, shape and size; decisions the
   count of its decisions[] and low those whose confidence is low; held true when its blockedBy[] is non-empty; gates
   its gates[]; raised the `why` of each raised[] step, when there is one; rank when it is not null; linked the scan
@@ -163,18 +179,47 @@ log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; 
   that outcome after `dry run, nothing written: `, and writes nothing. A torn grades.jsonl line is skipped, and a log
   that cannot be read counts as empty.
 
-record --task SLUG|PATH --question Q --answer A --recommended R [--fork F] [--today D]: one answer into its task. Q, A,
-  R and F have every whitespace run (newlines included) folded to one space, and Q loses a leading link to its own
-  task (`[[<slug>]] `, as a rounds index text opens; ER.slug_key compares), so the note never links to itself and a
-  rerun with the bare question is [no-change]. Refused (exit 2, the file byte-identical): no such task note directly
+record --task SLUG|PATH --question Q --answer A --recommended R [--fork F] [--by B] [--superseding PRIOR] [--today D]:
+  one answer into its task. Q, A, R and F have every whitespace run (newlines included) folded to one space, and Q
+  loses a leading link to its own task (`[[<slug>]] `, as a rounds or preflight index text opens; ER.slug_key
+  compares), so the note never links to itself and a rerun with the bare question is [no-change]. Refused (exit 2, the file byte-identical): no such task note directly
   in Work/Tasks, a note that is not a `task`, a status outside Active (NA.status_of not in NA.OPEN_STATUSES), a task
-  in flight (ES.in_flight over ES.link_live of its `rollout:`), a value empty after the fold (Q after its link is cut
-  too), and a --fork that the latest `orient end:` line in its `## Notes` does not name as `fork for Lachy: F`. The
-  bullet `- <Q> → <A> (asked at /thread:orient-all; recommended: <R>)` extends in place the section DECISIONS_HEADING
-  of the same date (after its last line, before the next `## ` heading outside a fence), else opens that section at
-  the note's end (schedule step 7's form). --fork also appends RULING_LINE (orient § 5's) as the last `## Notes`
+  in flight (ES.in_flight over ES.link_live of its `rollout:`), unless --superseding names the prior and
+  ES.still_to_start holds (schedule § 1.5's carried task still queued: open, its `rollout:` that prior; one that has
+  started is still refused), a value empty after the fold (Q after its link is cut too), and a --fork that the latest
+  `orient end:` line in its `## Notes` does not name as `fork for Lachy: F`. The bullet `- <Q> → <A> (asked at
+  /thread:<B>; recommended: <R>)`, B the --by caller (orient-all, the default, or schedule), extends in place the
+  section DECISIONS_HEADING of the same date (after its last line, before the next `## ` heading outside a fence),
+  else opens that section at the note's end (schedule step 7's form). --fork also appends RULING_LINE (orient § 5's) as the last `## Notes`
   line. One in-place write (the inode kept), printing `recorded <note>: <Q> → <A>`; nothing to add prints
   `<note>: <Q> → <A> [no-change]`, exit 0.
+
+preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...: schedule
+  § 1.5's split of its candidates (ADR 0047). It reads only the two files. --tasks is every candidate, deduplicated
+  by ER.slug_key in first-seen order (a scan task is shown by its scan slug); --kept, --decided and --dep (each
+  repeatable, --kept and --decided also comma-joined) must name candidates. Each candidate, in order:
+  - kept (a carried task that has started): in, `kept`, never graded or asked;
+  - graded Ready (the rank's tasks[]): in, `ready`;
+  - One call or Grill: in when decided (`decided`), else out (`undecided`);
+  - Orient: out (`orient`, with its `home`), decided or not;
+  - not graded (the rank's invalid[], ungraded[] or skipped[], or no scan row): ungraded, its reason `invalid: <the
+    errors>`, the rank's why (`no grade`, a skip reason) or `not in the scan`; in when decided (`queued as it
+    stands`), else out (`ungraded`).
+  The Dependent closure: the edges are each candidate's scan `dependsOn`, matched by ER.slug_key among the
+  candidates, and each --dep (A depends on B). A candidate that is in and not kept leaves, to a fixpoint, when a
+  dependency is out: `dependency`, via the first such dependency. A kept candidate never leaves; one whose dependency
+  is out gives one warnings[] line naming them.
+  The round: one question per AskUserQuestion call, each candidate that is out undecided or ungraded: the One calls
+  in rank order (`[[slug]] <question>`), then each Grill's decisions in rank order (`[[slug]] (k/n) <question>`), then
+  the ungraded in --tasks order (`[[slug]] could not be graded (<reason>): leave it out of this rollout, or queue it as
+  it stands?`, UNGRADED_OPTIONS, `Leave it out` recommended). Options are built as rounds builds them (label_for,
+  the recommendation first and marked); HEADERS gives each header.
+  Output: {schema, today, counts {candidates, graded, ready, oneCall, grill, orient, ungraded, kept, decided, in, out}
+  (graded, the grades and ungraded over the candidates not kept), tasks[] {slug, grade, decided, in, why, via?,
+  reason?}, queue[] (the slugs in, in --tasks order), out[] {slug, grade, why, via?, reason?, home?, note?}, asks[][]
+  (one question each), index[] {question, kind (one-call | grill | ungraded), slug, note, decision {question,
+  options[], recommendation, why?, fork?} (an ungraded one's synthesised from UNGRADED_QUESTION), labels[], texts[],
+  recommended (texts[0]), k?, n?, fork?}, warnings[]}.
 """
 import argparse
 import datetime
@@ -209,7 +254,12 @@ QUESTIONS_MAX = 4
 LABEL_MAX = 40
 RECOMMENDED = " (Recommended)"
 ELLIPSIS = "…"
-HEADERS = {"sign-off": "Sign-off", "one-call": "One call", "unpark": "Unpark"}
+HEADERS = {"sign-off": "Sign-off", "one-call": "One call", "unpark": "Unpark", "grill": "Grill", "ungraded": "Ungraded"}
+# schedule § 1.5's question for a task the grading could not grade (its options, the recommendation first).
+UNGRADED_OPTIONS = ("Leave it out", "Queue it as it stands")
+UNGRADED_QUESTION = "could not be graded ({why}): leave it out of this rollout, or queue it as it stands?"
+UNGRADED_DESCRIPTIONS = ("Leaves it out of this rollout, with every task that depends on it; the next schedule grades it again",
+                         "Queues it ungraded: an open decision it hides is met at its start, by its plan")
 SIGN_OFF_OPTIONS = ("Sign off", "Not now")
 TOP_DEFAULT = 15
 TITLE_MAX = 60  # create_thread's title (skills/execute/legs.md § Hand over)
@@ -218,7 +268,8 @@ KILL_NAMES_MAX = 8
 # schedule step 7's ask-ahead heading and orient § 5's ruling line (tests/contracts/orient-all.test.mjs o4).
 DECISIONS_HEADING = "## Decisions (asked ahead {date})"
 RULING_LINE = "- {stamp} orient ruling: {fork} → {answer}"
-DECISION_BULLET = "- {question} → {answer} (asked at /thread:orient-all; recommended: {recommended})"
+DECISION_BULLET = "- {question} → {answer} (asked at /thread:{by}; recommended: {recommended})"
+RECORD_BY = ("orient-all", "schedule")
 NOTES_HEADING = "## Notes"
 END_MARK = " orient end: "
 FORK_MARK = "fork for Lachy: "
@@ -391,15 +442,36 @@ def is_five(v):
 
 # ---- slices ------------------------------------------------------------------------------------------------------
 
+def split_slugs(values):
+    """Each repeated SLUG[,SLUG] value as one list of stripped, non-empty slugs, in the order given."""
+    return [s.strip() for v in values or [] for s in v.split(",") if s.strip()]
+
+
 def cmd_slices(args):
     scan = read_scan(args.scan)
     M = Mods()
     today = scan.get("today")
-    ranker = M.ER.Ranker(M.RT, M.ES, scan, None, None, [])
+    ranker = M.ER.Ranker(M.RT, M.ES, scan, None, None, [], superseding=args.superseding)
     ranker.index()
+    wanted, not_gradeable = None, []
+    if args.tasks:  # schedule § 1.5's graded set: only these, and why each named task that is not gradeable is not
+        wanted, seen = set(), set()
+        for raw in split_slugs(args.tasks):
+            key = M.ER.slug_key(raw)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            slug = ranker.lower.get(key)
+            if slug is None:
+                not_gradeable.append({"slug": raw, "why": "not in the scan"})
+            elif slug not in ranker.home:
+                not_gradeable.append({"slug": slug, "why": ranker.skip[slug]})
+            else:
+                wanted.add(slug)
     by_home = {}
     for slug in sorted(ranker.home):
-        by_home.setdefault(ranker.home[slug]["name"], []).append(slug)
+        if wanted is None or slug in wanted:
+            by_home.setdefault(ranker.home[slug]["name"], []).append(slug)
     plan, n = [], 0
     for p in scan["projects"]:
         if not isinstance(p, dict) or p.get("name") not in by_home or ranker.projects.get(p["name"]) is not p:
@@ -422,9 +494,12 @@ def cmd_slices(args):
                 fh.write(json.dumps(body, ensure_ascii=False, indent=2) + "\n")
     except OSError as e:
         fail(2, "cannot write the slices under %s: %s" % (d, e))
-    emit({"homes": [{"project": b["project"]["name"], "note": b["project"].get("note"), "file": os.path.join(d, f),
-                     "tasks": [t["slug"] for t in b["tasks"]]} for f, b in plan],
-          "gradeable": len(ranker.home), "skipped": len(ranker.skip)})
+    out = {"homes": [{"project": b["project"]["name"], "note": b["project"].get("note"), "file": os.path.join(d, f),
+                      "tasks": [t["slug"] for t in b["tasks"]]} for f, b in plan],
+           "gradeable": len(ranker.home), "skipped": len(ranker.skip)}
+    if wanted is not None:
+        out["notGradeable"] = not_gradeable
+    emit(out)
 
 
 # ---- rounds ------------------------------------------------------------------------------------------------------
@@ -1226,7 +1301,8 @@ def cmd_record(args):
     st = NA.status_of(note)
     if st not in NA.OPEN_STATUSES:
         fail(2, "%s is at status %s, not Active; a decision is written only into Active work" % (shown, st or "none"))
-    if ES.in_flight(st, ES.link_live(NA, vault, ES.first_link(NA, note.get("rollout")))):
+    link = ES.first_link(NA, note.get("rollout"))
+    if ES.in_flight(st, ES.link_live(NA, vault, link)) and not ES.still_to_start(st, link, args.superseding):
         fail(2, "%s is in flight (vault-grammar.md § In flight); its run owns the note, so the answer is not written"
              % shown)
     lines = list(note.lines)
@@ -1239,7 +1315,7 @@ def cmd_record(args):
             fail(2, "%s: its latest orient end line names no `fork for Lachy: %s`" % (shown, fork))
         tail = " orient ruling: %s → %s" % (fork, a)
         ruled = any(ln.rstrip("\r\n").endswith(tail) for ln in lines[end_at + 1:notes[1]])
-    bullet = DECISION_BULLET.format(question=q, answer=a, recommended=rec)
+    bullet = DECISION_BULLET.format(question=q, answer=a, recommended=rec, by=args.by)
     heading = DECISIONS_HEADING.format(date=args.today.isoformat())
     span = section_span(lines, first, heading)
     has = span is not None and any(lines[i].rstrip("\r\n") == bullet for i in range(span[0] + 1, span[1]))
@@ -1372,6 +1448,190 @@ def cmd_log(args):
     print(outcome)
 
 
+# ---- preflight ---------------------------------------------------------------------------------------------------
+
+def decision_of(d):
+    """A rank decision as the index carries it: question, options (the recommendation first), recommendation, and its
+    why and fork when it has them."""
+    out = {"question": d.get("question"), "options": list(d.get("options") or []), "recommendation": d.get("recommendation")}
+    for k in ("why", "fork"):
+        if d.get(k):
+            out[k] = d[k]
+    return out
+
+
+class Preflight:
+    """schedule § 1.5's split of its candidates (the module docstring's preflight paragraph). Reads the rank and the
+    scan only; ER is loaded for slug_key alone."""
+
+    def __init__(self, ER, rank, scan, tasks, kept, decided, deps):
+        self.ER, self.rank, self.scan = ER, rank, scan
+        key = ER.slug_key
+        self.rows = {}  # the rank's graded tasks by key, in rank order
+        for t in rank["tasks"]:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                self.rows.setdefault(key(t["slug"]), t)
+        self.scanned = {}
+        for t in scan["tasks"]:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                self.scanned.setdefault(key(t["slug"]), t)
+        self.listed = {}  # the rank's other lists: the why of a task it could not grade
+        for t in rank.get("invalid") or []:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                errs = [e for e in t.get("errors") or [] if isinstance(e, str)]
+                self.listed.setdefault(key(t["slug"]), "invalid: " + ("; ".join(errs) or "no reason given"))
+        for t in rank.get("ungraded") or []:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                self.listed.setdefault(key(t["slug"]), t.get("why") or "no grade")
+        for t in rank.get("skipped") or []:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                self.listed.setdefault(key(t["slug"]), t.get("why") or "skipped")
+        self.order, self.shown = [], {}  # the candidates' keys in first-seen order, and each one's slug as shown
+        for raw in tasks:
+            k = key(raw)
+            if k and k not in self.shown:
+                self.order.append(k)
+                row = self.scanned.get(k) or self.rows.get(k)
+                self.shown[k] = row["slug"] if row else raw
+        if not self.order:
+            fail(2, "--tasks names no task")
+
+        def inside(flag, raw):
+            k = key(raw)
+            if k not in self.shown:
+                fail(2, "%s %s is not one of --tasks" % (flag, raw))
+            return k
+        self.kept = {inside("--kept", s) for s in kept}
+        self.decided = {inside("--decided", s) for s in decided}
+        self.edges = {k: [] for k in self.order}
+        for k in self.order:
+            for link in (self.scanned.get(k) or {}).get("dependsOn") or []:
+                d = key(link)
+                if d in self.shown and d != k and d not in self.edges[k]:
+                    self.edges[k].append(d)
+        for raw in deps:
+            a, sep, b = raw.partition("=")
+            if not sep or not a.strip() or not b.strip():
+                fail(2, "--dep %s: give it as <dependant>=<dependency>" % raw)
+            ka, kb = key(a), key(b)
+            if ka not in self.shown or kb not in self.shown:
+                fail(2, "--dep %s: both tasks must be among --tasks" % raw)
+            if ka != kb and kb not in self.edges[ka]:
+                self.edges[ka].append(kb)
+
+    def note_of(self, k):
+        row = self.scanned.get(k) or self.rows.get(k) or {}
+        return row.get("note") if isinstance(row.get("note"), str) else None
+
+    def run(self):
+        entry = {}
+        for k in self.order:
+            row = self.rows.get(k)
+            grade = row.get("grade") if row else None
+            e = {"slug": self.shown[k], "grade": grade, "decided": k in self.decided}
+            if k in self.kept:
+                e.update({"in": True, "why": "kept"})
+            elif grade == "Ready":
+                e.update({"in": True, "why": "ready"})
+            elif grade in ("One call", "Grill"):
+                e.update({"in": k in self.decided, "why": "decided" if k in self.decided else "undecided"})
+            elif grade == "Orient":
+                e.update({"in": False, "why": "orient", "home": row.get("home")})
+            else:
+                reason = self.listed.get(k) or ("no grade" if k in self.scanned else "not in the scan")
+                e.update({"in": k in self.decided, "why": "queued as it stands" if k in self.decided else "ungraded",
+                          "reason": reason})
+            entry[k] = e
+        # The Dependent closure, to a fixpoint: a task that is in, and not kept, leaves when a dependency is out.
+        out = {k for k in self.order if not entry[k]["in"]}
+        while True:
+            more = {k for k in self.order if k not in out and k not in self.kept and any(d in out for d in self.edges[k])}
+            if not more:
+                break
+            out |= more
+        for k in self.order:
+            if k in out and entry[k]["in"]:
+                entry[k].update({"in": False, "why": "dependency",
+                                 "via": self.shown[next(d for d in self.edges[k] if d in out)]})
+        warnings = []
+        for k in self.order:
+            if k in self.kept:
+                gone = [self.shown[d] for d in self.edges[k] if d in out]
+                if gone:
+                    warnings.append("[[%s]] keeps its place (a carried task that has started) but depends on %s, which "
+                                    "this rollout leaves out" % (self.shown[k], ", ".join("[[%s]]" % g for g in gone)))
+        questions, index = [], []
+        asked = [k for k in self.order if not entry[k]["in"] and entry[k]["why"] == "undecided"]
+        pos = {k: i for i, k in enumerate(self.rows)}
+        ranked = sorted(asked, key=lambda k: pos[k])
+        for k in (x for x in ranked if entry[x]["grade"] == "One call"):
+            self.one_call(k, questions, index)
+        for k in (x for x in ranked if entry[x]["grade"] == "Grill"):
+            self.grill(k, questions, index)
+        for k in self.order:
+            if not entry[k]["in"] and entry[k]["why"] == "ungraded":
+                self.ungraded(k, entry[k]["reason"], questions, index)
+        tasks, queue, left = [], [], []
+        for k in self.order:
+            e = entry[k]
+            tasks.append({x: e[x] for x in ("slug", "grade", "decided", "in", "why", "via", "reason") if x in e})
+            if e["in"]:
+                queue.append(e["slug"])
+                continue
+            o = {x: e[x] for x in ("slug", "grade", "why", "via", "reason", "home") if x in e}
+            if self.note_of(k):
+                o["note"] = self.note_of(k)
+            left.append(o)
+        graded = [k for k in self.order if k not in self.kept and entry[k]["grade"]]
+        n = lambda g: sum(1 for k in graded if entry[k]["grade"] == g)  # noqa: E731
+        counts = {"candidates": len(self.order), "graded": len(graded), "ready": n("Ready"), "oneCall": n("One call"),
+                  "grill": n("Grill"), "orient": n("Orient"),
+                  "ungraded": sum(1 for k in self.order if k not in self.kept and not entry[k]["grade"]),
+                  "kept": len(self.kept), "decided": sum(1 for k in self.order if entry[k]["decided"]),
+                  "in": len(queue), "out": len(left)}
+        return {"schema": SCHEMA, "today": self.rank.get("today") or today_of(self.scan), "counts": counts,
+                "tasks": tasks, "queue": queue, "out": left, "asks": [[q] for q in questions], "index": index,
+                "warnings": warnings}
+
+    def ask(self, k, kind, text, fulls, descs, decision, questions, index, extra=None):
+        opts, labels = Rounds.options(fulls, descs, True)
+        questions.append({"question": text, "header": HEADERS[kind], "multiSelect": False, "options": opts})
+        e = {"question": text, "kind": kind, "slug": self.shown[k], "note": self.note_of(k), "decision": decision,
+             "labels": labels, "texts": list(fulls), "recommended": fulls[0] if fulls else None}
+        e.update(extra or {})
+        if decision.get("fork"):
+            e["fork"] = decision["fork"]
+        index.append(e)
+
+    def one_call(self, k, questions, index):
+        d = decision_of((self.rows[k].get("decisions") or [{}])[0])
+        fulls = d["options"]
+        descs = [d.get("why") or "the grader's recommendation"] + ["" for _ in fulls[1:]]
+        self.ask(k, "one-call", "[[%s]] %s" % (self.shown[k], d["question"] or ""), fulls, descs, d, questions, index)
+
+    def grill(self, k, questions, index):
+        ds = [decision_of(d) for d in self.rows[k].get("decisions") or [] if isinstance(d, dict)]
+        for i, d in enumerate(ds, 1):
+            fulls = d["options"]
+            descs = [d.get("why") or "the grader's recommendation"] + ["" for _ in fulls[1:]]
+            self.ask(k, "grill", "[[%s]] (%d/%d) %s" % (self.shown[k], i, len(ds), d["question"] or ""), fulls, descs, d,
+                     questions, index, {"k": i, "n": len(ds)})
+
+    def ungraded(self, k, why, questions, index):
+        q = UNGRADED_QUESTION.format(why=why)
+        d = {"question": q, "options": list(UNGRADED_OPTIONS), "recommendation": UNGRADED_OPTIONS[0],
+             "why": "a task the grading could not grade may hide a decision"}
+        self.ask(k, "ungraded", "[[%s]] %s" % (self.shown[k], q), UNGRADED_OPTIONS, UNGRADED_DESCRIPTIONS, d,
+                 questions, index)
+
+
+def cmd_preflight(args):
+    rank, scan = read_rank(args.rank), read_scan(args.scan)
+    ER = load("thread_estate_rank", ESTATE_RANK_PY)
+    emit(Preflight(ER, rank, scan, split_slugs(args.tasks), split_slugs(args.kept), split_slugs(args.decided),
+                   [d for d in args.dep or []]).run())
+
+
 # ---- main --------------------------------------------------------------------------------------------------------
 
 def parse(argv):
@@ -1381,6 +1641,8 @@ def parse(argv):
     s = sub.add_parser("slices", allow_abbrev=False)
     s.add_argument("--scan", required=True)
     s.add_argument("--dir", required=True)
+    s.add_argument("--tasks", action="append", default=[])
+    s.add_argument("--superseding")
     r = sub.add_parser("rounds", allow_abbrev=False)
     r.add_argument("--rank", required=True)
     r.add_argument("--scan", required=True)
@@ -1409,13 +1671,22 @@ def parse(argv):
     rc.add_argument("--fork")
     rc.add_argument("--today")
     rc.add_argument("--vault", default=VAULT_DEFAULT)
+    rc.add_argument("--by", choices=RECORD_BY, default=RECORD_BY[0])
+    rc.add_argument("--superseding")
     lg = sub.add_parser("log", allow_abbrev=False)
     lg.add_argument("--rank", required=True)
     lg.add_argument("--scan", required=True)
     lg.add_argument("--dry-run", action="store_true")
+    pf = sub.add_parser("preflight", allow_abbrev=False)
+    pf.add_argument("--rank", required=True)
+    pf.add_argument("--scan", required=True)
+    pf.add_argument("--tasks", action="append", required=True)
+    pf.add_argument("--kept", action="append", default=[])
+    pf.add_argument("--decided", action="append", default=[])
+    pf.add_argument("--dep", action="append", default=[])
     args = p.parse_args(argv)
     if not args.verb:
-        fail(2, "a verb is required: slices | rounds | plan | sessions | record | log")
+        fail(2, "a verb is required: slices | rounds | plan | sessions | record | log | preflight")
     if args.verb == "rounds":
         for flag in ("budget", "top"):
             v = getattr(args, flag)
@@ -1429,7 +1700,7 @@ def parse(argv):
 
 
 VERBS = {"slices": cmd_slices, "rounds": cmd_rounds, "plan": cmd_plan, "sessions": cmd_sessions, "record": cmd_record,
-         "log": cmd_log}
+         "log": cmd_log, "preflight": cmd_preflight}
 
 
 def main(argv):
