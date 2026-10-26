@@ -1135,7 +1135,8 @@ test('D16. log: one grade line per graded task, Orient included, under one pass;
 // Its own vault VF, scanned with --deadline 0 like V: project Pf and a live, never-started prior rollout `prior`.
 // r Ready, c One call, g a Grill of two decisions, o Orient; d1 depends on o and d2 on d1; q open and linked to the
 // prior (carried, still queued); s in_progress and linked to it (carried, started), depending on o; u open and left
-// ungraded; e linked to the prior at an empty status; x open and never named. The rank is the real one, run with
+// ungraded; co a One call and uo open and ungraded, both depending on o, so they leave whatever Lachy answers; e
+// linked to the prior at an empty status; x open and never named. The rank is the real one, run with
 // `--superseding prior` as schedule § 1.5 runs it. record writes only copies of VF, log only its own events dir.
 const VF = path.join(S, 'vf')
 const VF_TASKS = path.join(VF, 'Work', 'Tasks')
@@ -1150,14 +1151,17 @@ TF('d2', 'open', links('depends-on', ['d1']))
 TF('q', 'open', CARRIED)
 TF('s', 'in_progress', CARRIED + links('depends-on', ['o']))
 TF('e', '', CARRIED)
-const PF = ['r', 'c', 'g', 'o', 'd1', 'd2', 'q', 's', 'u']
+TF('co', 'open', links('depends-on', ['o']))
+TF('uo', 'open', links('depends-on', ['o']))
+const PF = ['r', 'c', 'g', 'o', 'd1', 'd2', 'q', 's', 'u', 'co', 'uo']
 const vfScanRun = spawnSync('python3', [SCAN, '--vault', VF, '--today', TODAY, '--deadline', '0'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
 const VF_SCAN = path.join(S, 'pf', 'scan.json')
 if (vfScanRun.status === 0) write(VF_SCAN, vfScanRun.stdout)
 const VF_GRADES = path.join(S, 'pf', 'grades-01.json')
 write(VF_GRADES, JSON.stringify({ project: 'Pf', tasks: [R('r', 'serial'), G('c', 'One call', 'serial', { decisions: one() }),
   G('g', 'Grill', 'serial', { decisions: [D('Schema?', 'flat', ['flat', 'nested']), D('Cache?', 'none', ['none', 'lru'])] }),
-  G('o', 'Orient', 'serial'), R('d1', 'serial'), R('d2', 'serial'), R('q', 'serial')] }, null, 2) + '\n')
+  G('o', 'Orient', 'serial'), R('d1', 'serial'), R('d2', 'serial'), R('q', 'serial'),
+  G('co', 'One call', 'serial', { decisions: one('Which side?') })] }, null, 2) + '\n')
 const VF_RANK = path.join(S, 'pf', 'rank.json')
 const vfRankRun = vfScanRun.status === 0 ? spawnSync('python3', [RANK, 'rank', '--scan', VF_SCAN, '--today', TODAY, '--grades', VF_GRADES,
   '--superseding', 'prior'], { encoding: 'utf8', cwd: S, env, timeout: 60000 }) : null
@@ -1187,8 +1191,8 @@ test('D17. slices --tasks keeps only the named gradeable tasks; --superseding ma
   const sup = ok(sl('sup', ['--superseding', 'prior']))
   assert.deepEqual(fileTasks(sup), ['c', 'd1', 'd2', 'g', 'o', 'q', 'r', 'u'])
   assert.deepEqual(sup.notGradeable, [{ slug: 's', why: 'in flight' }, { slug: 'zz', why: 'not in the scan' }])
-  // gradeable and skipped still count the whole scan: x is gradeable and named nowhere; e and s are skipped.
-  assert.deepEqual([plain.gradeable, plain.skipped, sup.gradeable, sup.skipped], [8, 3, 9, 2])
+  // gradeable and skipped still count the whole scan: x, co and uo are gradeable and named nowhere; e and s are skipped.
+  assert.deepEqual([plain.gradeable, plain.skipped, sup.gradeable, sup.skipped], [10, 3, 11, 2])
   assert.ok(!fileTasks(sup).includes('x'), 'x is in no file')
   // Without --tasks: no notGradeable key, every gradeable task sliced (orient-all § 2's call, unchanged).
   const all = ok(py(['slices', '--scan', VF_SCAN, '--dir', path.join(S, 'pf', 'all')]))
@@ -1199,22 +1203,26 @@ test('D17. slices --tasks keeps only the named gradeable tasks; --superseding ma
 })
 
 // ---- D18. preflight: the queue, what leaves, and the round ------------------------------------------------------------
-test('D18. preflight: Ready and kept tasks queue, One calls and Grills wait on the round, Orient leaves with its Dependent closure', () => {
+test('D18. preflight: Ready and kept tasks queue, One calls and Grills wait on the round, Orient leaves with its Dependent closure, unasked', () => {
   const rk = pfRanked()
   assert.deepEqual(rk.skipped.map((x) => x.slug).sort(), ['e', 's'], 'q is graded under --superseding prior')
   const j = ok(PRE())
   assert.equal(j.schema, 1)
   assert.deepEqual(j.queue, ['r', 'q', 's'])
   assert.deepEqual(outOf(j), [['c', 'undecided', null], ['g', 'undecided', null], ['o', 'orient', null], ['d1', 'dependency', 'o'],
-    ['d2', 'dependency', 'd1'], ['u', 'ungraded', null]])
+    ['d2', 'dependency', 'd1'], ['u', 'ungraded', null], ['co', 'dependency', 'o'], ['uo', 'dependency', 'o']])
   const o = j.out.find((x) => x.slug === 'o')
   assert.deepEqual([o.grade, o.home, o.note], ['Orient', 'Pf', 'Work/Tasks/o.md'])
   assert.equal(j.out.find((x) => x.slug === 'u').reason, 'no grade')
   assert.deepEqual(j.tasks.map((t) => [t.slug, t.in, t.why]), [['r', true, 'ready'], ['c', false, 'undecided'], ['g', false, 'undecided'],
     ['o', false, 'orient'], ['d1', false, 'dependency'], ['d2', false, 'dependency'], ['q', true, 'ready'], ['s', true, 'kept'],
-    ['u', false, 'ungraded']])
-  assert.deepEqual(j.counts, { candidates: 9, graded: 7, ready: 4, oneCall: 1, grill: 1, orient: 1, ungraded: 1, kept: 1, decided: 0,
-    in: 3, out: 6 })
+    ['u', false, 'ungraded'], ['co', false, 'dependency'], ['uo', false, 'dependency']])
+  assert.deepEqual(j.counts, { candidates: 11, graded: 8, ready: 4, oneCall: 2, grill: 1, orient: 1, ungraded: 2, kept: 1, decided: 0,
+    in: 3, out: 8 })
+  // co (a One call) and uo (ungraded) depend on o, so they leave whatever Lachy answers: out through o, never asked.
+  assert.deepEqual(j.out.filter((x) => ['co', 'uo'].includes(x.slug)), [
+    { slug: 'co', grade: 'One call', why: 'dependency', via: 'o', note: 'Work/Tasks/co.md' },
+    { slug: 'uo', grade: null, why: 'dependency', via: 'o', reason: 'no grade', note: 'Work/Tasks/uo.md' }])
   // One question per call: the One call, the Grill's two decisions, then the ungraded task; the recommendation first.
   assert.ok(j.asks.every((call) => call.length === 1), 'one question per AskUserQuestion call')
   const qs = j.asks.map((call) => call[0])
@@ -1226,7 +1234,8 @@ test('D18. preflight: Ready and kept tasks queue, One calls and Grills wait on t
   assert.deepEqual(qs.map((q) => q.options.map((x) => x.label)), [['left (Recommended)', 'right'], ['flat (Recommended)', 'nested'],
     ['none (Recommended)', 'lru'], ['Leave it out (Recommended)', 'Queue it as it stands']])
   for (const q of qs) assert.ok(q.header.length <= 12 && q.options.every((x) => x.label.length <= 40))
-  for (const name of ['r', 'q', 's', 'o', 'd1', 'd2']) assert.ok(!qs.some((q) => q.question.includes(`[[${name}]]`)), `no question names ${name}`)
+  for (const name of ['r', 'q', 's', 'o', 'd1', 'd2', 'co', 'uo']) assert.ok(!qs.some((q) => q.question.includes(`[[${name}]]`)), `no question names ${name}`)
+  assert.ok(!j.index.some((x) => ['co', 'uo'].includes(x.slug)), 'no index entry for co or uo')
   // The index: each question to its task, its decision, its labels' full texts and the recommendation.
   assert.deepEqual(j.index.map((x) => [x.kind, x.slug, x.k ?? null, x.n ?? null, x.recommended, x.decision.question]), [
     ['one-call', 'c', null, null, 'left', 'Which way?'], ['grill', 'g', 1, 2, 'flat', 'Schema?'], ['grill', 'g', 2, 2, 'none', 'Cache?'],
@@ -1238,19 +1247,39 @@ test('D18. preflight: Ready and kept tasks queue, One calls and Grills wait on t
   // A started carried task that depends on a task left out keeps its place and is named once.
   assert.equal(j.warnings.length, 1)
   assert.match(j.warnings[0], /^\[\[s\]\] .*\[\[o\]\]/)
-  // Without --kept s, s is asked as ungraded (the ranker skipped it in flight) and leaves.
+  // Without --kept s, s is ungraded (the ranker skipped it in flight), and it depends on o: out through o, unasked.
   const noKept = ok(preflight(['--tasks', PF.join(',')]))
   assert.deepEqual(noKept.queue, ['r', 'q'])
-  assert.ok(noKept.out.some((x) => x.slug === 's' && x.why === 'ungraded' && x.reason === 'in flight'))
-  assert.ok(noKept.asks.some((call) => call[0].question.startsWith('[[s]] could not be graded (in flight)')))
+  assert.deepEqual(noKept.out.find((x) => x.slug === 's'),
+    { slug: 's', grade: null, why: 'dependency', via: 'o', reason: 'in flight', note: 'Work/Tasks/s.md' })
+  assert.ok(!noKept.asks.some((call) => call[0].question.includes('[[s]]')), 'no question names s')
   assert.deepEqual(noKept.warnings, [])
+  // With o no candidate, nothing takes s out regardless: it is asked as ungraded, in flight.
+  const alone = ok(preflight(['--tasks', 'r,s']))
+  assert.deepEqual(outOf(alone), [['s', 'ungraded', null]])
+  assert.deepEqual(alone.asks.map((call) => call[0].question),
+    ['[[s]] could not be graded (in flight): leave it out of this rollout, or queue it as it stands?'])
+  // A carried task at an empty status: carry queues it, but the ranker skips it (in flight, as still_to_start reads
+  // `open` alone). Its reason is its status, the real cause, never `in flight`.
+  const empty = ok(preflight(['--tasks', 'r,e']))
+  assert.deepEqual(empty.out, [{ slug: 'e', grade: null, why: 'ungraded', reason: 'status outside Active', note: 'Work/Tasks/e.md' }])
+  assert.deepEqual(empty.asks.map((call) => call[0].question),
+    ['[[e]] could not be graded (status outside Active): leave it out of this rollout, or queue it as it stands?'])
   // The answers in: c, g and u decided join the queue; o and its closure stay out; nothing is asked.
   const decided = ok(PRE(['--decided', 'c,g', '--decided', 'u']))
   assert.deepEqual(decided.queue, ['r', 'c', 'g', 'q', 's', 'u'])
-  assert.deepEqual(outOf(decided), [['o', 'orient', null], ['d1', 'dependency', 'o'], ['d2', 'dependency', 'd1']])
+  assert.deepEqual(outOf(decided), [['o', 'orient', null], ['d1', 'dependency', 'o'], ['d2', 'dependency', 'd1'],
+    ['co', 'dependency', 'o'], ['uo', 'dependency', 'o']])
   assert.deepEqual([decided.asks, decided.index], [[], []])
   assert.equal(decided.tasks.find((t) => t.slug === 'u').why, 'queued as it stands')
   assert.equal(decided.counts.decided, 3)
+  // co and uo decided anyway (an answer cannot bring them in): still out through o, and still never asked.
+  const overruled = ok(PRE(['--decided', 'co,uo']))
+  assert.deepEqual(overruled.queue, ['r', 'q', 's'])
+  assert.deepEqual(outOf(overruled).filter((x) => ['co', 'uo'].includes(x[0])), [['co', 'dependency', 'o'], ['uo', 'dependency', 'o']])
+  assert.deepEqual(overruled.index.map((x) => x.slug), ['c', 'g', 'g', 'u'])
+  assert.deepEqual(overruled.tasks.filter((t) => t.decided).map((t) => [t.slug, t.in, t.why]),
+    [['co', false, 'dependency'], ['uo', false, 'dependency']])
   // Orient stays out, decided or not; a --dep adds an edge (schedule § 3's confirmed body dependency).
   assert.ok(ok(PRE(['--decided', 'o'])).out.some((x) => x.slug === 'o' && x.why === 'orient'))
   const dep = ok(PRE(['--dep', 'r=o']))
@@ -1328,11 +1357,11 @@ test('D21. log over the Pre-flight rank: one grade line per graded candidate, th
   const EV = path.join(S, 'pf', 'events')
   const run = py(['log', '--rank', VF_RANK, '--scan', VF_SCAN], { THREAD_EVENTS_DIR: EV })
   assert.equal(run.status, 0, run.stderr)
-  assert.match(run.stdout, /^logged 7 grade\(s\), pass g-/)
+  assert.match(run.stdout, /^logged 8 grade\(s\), pass g-/)
   const lines = fs.readFileSync(path.join(EV, 'grades.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
   assert.deepEqual(lines.map((l) => l.task), rk.tasks.map((t) => t.slug))
-  assert.deepEqual([...lines.map((l) => l.task)].sort(), ['c', 'd1', 'd2', 'g', 'o', 'q', 'r'])
+  assert.deepEqual([...lines.map((l) => l.task)].sort(), ['c', 'co', 'd1', 'd2', 'g', 'o', 'q', 'r'])
   assert.deepEqual(lines.filter((l) => 'linked' in l).map((l) => [l.task, l.linked]), [['q', 'prior']])
-  for (const s of ['u', 's', 'x', 'e']) assert.ok(!lines.some((l) => l.task === s), `${s} has no line`)
+  for (const s of ['u', 'uo', 's', 'x', 'e']) assert.ok(!lines.some((l) => l.task === s), `${s} has no line`)
   assert.deepEqual(snap(VF), VF_BEFORE)
 })

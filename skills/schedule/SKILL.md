@@ -253,7 +253,9 @@ on a task this rollout never runs. It runs no plan gate: a task's plan is still 
 - *kept*: each task on a step 1 `carry <slug> <state>` line whose state is not `queued`. A carried task that has
   started keeps its state, as the supersede rules, and is never graded or asked about;
 - *the graded set*: the candidates less the kept ones, so a carried task still queued is graded like any other. An
-  empty graded set runs nothing below and says so in step 8, and `queue[]` is then the candidates.
+  empty graded set runs nothing below and says so in step 8, and `queue[]` is then the candidates. A carried task at
+  an empty `status:` is `queued` in the carry preview, so it is in the graded set, but the grading takes only an
+  `open` one: it is asked as ungraded, its reason `status outside Active`.
 
 **Grade.** Every command here runs from this run's root, never a prior's: these scripts are unguarded and write no
 rollout note (ADR 0047 § Build rulings).
@@ -282,18 +284,22 @@ rollout note (ADR 0047 § Build rulings).
 **The round.** Pass each `asks[i]` to AskUserQuestion's `questions` verbatim, one question per call, each with its
 recommendation first, in its order: the One calls, then each Grill's decisions (`[[slug]] (k/n) …`), then the
 ungraded tasks. `index[]` maps each question to its task (`slug`, `kind`, `decision`), each picked label to its full
-text (`texts[]`), and names the `recommended` one. A Ready, Orient, kept or closure-only task gets no question.
-Lachy's "stop" ends the round, and the rest stay undecided.
+text (`texts[]`), and names the `recommended` one. A Ready, Orient or kept task gets no question, and a task already
+out through an Orient dependency (directly or through others) is never asked, whatever its grade: it leaves whatever
+Lachy answers, so `preflight` puts it in `out[]` as `dependency` before it builds the round. Lachy's "stop" ends the
+round, and the rest stay undecided.
 
-**Record each answer at once**, before step 6 writes anything:
+**Record each answer at once**, a One call's or a Grill's, before step 6 writes anything:
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --question <decision.question> --answer <the full option text, or his words> --recommended <the index entry's recommended> [--fork <decision.fork>] --by schedule [--superseding <prior>]`,
 `--fork` exactly when the decision carries one, and `--superseding` as at `slices`.
 - A One call is decided once it is answered and its `record` exits 0; a Grill only once every one of its decisions
   is answered and recorded.
 - An answer that defers or drops the work is recorded, and the task stays undecided.
 - A One call or Grill whose `record` refuses stays undecided; step 8 names its answer as unrecorded.
-- An ungraded task: `Queue it as it stands` decides it, and `Leave it out` (recommended) does not. A refused `record`
-  is named in step 8, and the answer still governs this run.
+- An ungraded task's answer is never recorded: it governs this run alone. A `## Decisions` bullet would outlive the
+  run, since descope reads that section as recorded decisions and every later grader and planner reads the note in
+  full. `Queue it as it stands` decides it, and step 8 names it; `Leave it out` (recommended) decides nothing, so the
+  next schedule asks again.
 
 **The final call.** `preflight` with the same four flags and `--decided <each decided slug>`. Its `queue[]` is the
 candidate set from step 2 on.
@@ -634,20 +640,21 @@ The thread:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads 
 
 **Start when ready.** When Lachy answers a standalone run's summary with it, stamp `start: unattended` as a top-level frontmatter line just below `status:` on the note this run wrote (`_shared/vault-grammar.md` § Rollout start stamp) and stop: nothing runs. Under orient § 6, schedule writes nothing here, because orient § 9's offer asks it. Under orient-all, schedule writes nothing here either. The stamp is never written before step 7's last write; the vault grammar's reader would wait on `incomplete:` anyway.
 
-**Pre-flight's left-out tasks.** List above the summary every task § 1.5 left out (its final `out[]`, with § 3's re-runs), each with its why, then each answer § 1.5 could not write and each of its `warnings[]`. None of them is stamped, and a carried one is no longer linked to the prior:
+**Pre-flight's left-out tasks.** List above the summary every task § 1.5 left out (its final `out[]`, with § 3's re-runs), each with its why, then each answer § 1.5 could not write, each ungraded task queued as it stands (its answer is never recorded, so this line is its only trace) and each of its `warnings[]`. None of the left-out tasks is stamped, and a carried one is no longer linked to the prior:
 
 ```
 Left out by the Pre-flight (none is stamped; each waits on what its line names):
   - [[task-o]] — graded Orient: /thread:orient [[<home>]]
   - [[task-c]] — One call, waiting on your answer: the next schedule asks it again
-  - [[task-u]] — ungraded (no grade), left out at your answer
+  - [[task-u]] — ungraded (no grade), left out at your answer: the next schedule asks again
   - [[task-d]] — depends on [[x]], which is left out (the Dependent closure)
   - [[task-q]] — Grill, waiting on your answer; carried from [[<prior>]], deferred out of it at step 6
 answered, not written: [[task-g]] Cache? → lru (record refused: <its estate-dispatch line>)
+queued as it stands: [[task-v]] (ungraded: status outside Active), at your answer, for this run only
 warning: [[task-s]] keeps its place (a carried task that has started) but depends on [[task-o]], which this rollout leaves out
 ```
 
-Under orient-all, the block lists the fork's leavers the same way, and the fork returns them (orient-all § 8 lists each undecided one as waiting on your answer).
+Under orient-all, the block lists the fork's leavers the same way, and the fork returns them with each one's why (orient-all § 8 lists each by that why, as this block does).
 
 **Checklist — gated tasks.** If the user kept any of step 3.5's human/release-gated tasks (a quote-only match is none), list them above the summary so the user clears them before executing (an unaddressed gate makes the agent refuse mid-run):
 

@@ -7,15 +7,17 @@
 //       `estate-dispatch.py preflight` and `record ... --by schedule`.
 //   p2  the sets: a carried task that has started is kept (never graded) and passed as --kept; a carried task still
 //       queued is graded; every preflight call passes the same --rank, --scan, --tasks (every candidate) and --kept.
-//   p3  the round: no question for a Ready, Orient, kept or closure-only task; one question per call, its
-//       recommendation first; each answer recorded before step 6; a One call or Grill whose record refuses stays
-//       undecided; the ungraded question recommends `Leave it out`.
+//   p3  the round: no question for a Ready, Orient or kept task, nor for a task already out through an Orient
+//       dependency; one question per call, its recommendation first; each One call's and Grill's answer recorded
+//       before step 6; a One call or Grill whose record refuses stays undecided; the ungraded question recommends
+//       `Leave it out`, and its answer is never recorded (`Leave it out` decides nothing; the next schedule asks
+//       again), as ADR 0047 § Build rulings says too.
 //   p4  what leaves: Orient tasks with their Dependent closure; a task left out unstamped, or, carried and queued,
 //       through step 6's `reconcile-rollout.py defer`; step 8's left-out block points an Orient one at /thread:orient.
 //   p5  under orient-all: no grading agent, no round, no log; --tasks is step 1's confirmed candidates and --decided
 //       the prompt line's slugs among them; orient-all § 6 answers it in item 16 and its prompt carries the line (the
-//       decided slugs among entry.members); orient-all § 8 lists a leaver as waiting on your answer; no § 1.5 or
-//       S3.5 line names --regenerate.
+//       decided slugs among entry.members); orient-all § 8 lists each leaver by its why (waiting on your answer, its
+//       /thread:orient pointer, depends on [[<via>]]); no § 1.5 or S3.5 line names --regenerate.
 //   p6  § 1.5 runs no plan gate (ADR 0030) and names no Workflow and no task.workflow.js.
 //   p7  the Grade log: § 1.5's log runs on every run that grades, all but an orient-all fork, and never says
 //       "standalone"; CONTEXT.md **Grade log** names schedule's Pre-flight; run_record.py's Grade log paragraph names
@@ -45,7 +47,8 @@ const CONTEXT = 'CONTEXT.md'
 const RUN_RECORD = 'skills/_shared/scripts/run_record.py'
 const GRADE = 'skills/_shared/readiness-grade.md'
 const GRAMMAR = 'skills/_shared/vault-grammar.md'
-const FILES = Object.fromEntries([SCHEDULE, ORIENT_ALL, CONTEXT, RUN_RECORD, GRADE, GRAMMAR].map((f) => [f, readIf(f)]))
+const ADR = 'docs/adr/0047-schedule-runs-a-pre-flight.md'
+const FILES = Object.fromEntries([SCHEDULE, ORIENT_ALL, CONTEXT, RUN_RECORD, GRADE, GRAMMAR, ADR].map((f) => [f, readIf(f)]))
 
 // The flags each prior-root command has had since the first Engine snapshot (ADR 0047 § Build rulings).
 const PRIOR_VERBS = [
@@ -123,9 +126,15 @@ function check(files) {
 
   // p3: the round and the records.
   need('p3', '§ 1.5 **The round.**', round, ['one question per call', 'its recommendation first',
-    'A Ready, Orient, kept or closure-only task gets no question'])
-  need('p3', '§ 1.5 **Record each answer at once**', record, ['before step 6 writes anything',
-    'A One call or Grill whose `record` refuses stays undecided', '`Leave it out` (recommended) does not'])
+    'A Ready, Orient or kept task gets no question',
+    'a task already out through an Orient dependency (directly or through others) is never asked'])
+  need('p3', '§ 1.5 **Record each answer at once**', record, ["a One call's or a Grill's, before step 6 writes anything",
+    'A One call or Grill whose `record` refuses stays undecided', "An ungraded task's answer is never recorded",
+    '`Leave it out` (recommended) decides nothing, so the next schedule asks again'])
+  const adrRulings = C(sec(files[ADR], /^## Build rulings$/))
+  need('p3', 'ADR 0047 § Build rulings', adrRulings, ['**A task already out through an Orient dependency is never asked.**',
+    'is asked `Leave it out` (recommended) or `Queue it as it stands`', 'The answer governs this run alone and is never recorded'])
+  never('p3', 'ADR 0047 § Build rulings', adrRulings, ['the answer is recorded through `record --by schedule`'])
 
   // p4: what leaves, and how.
   need('p4', '§ 1.5', pf, ['Orient tasks stay out with their Dependent closure'])
@@ -146,7 +155,8 @@ function check(files) {
     'among them'])
   need('p5', 'orient-all § 6', C(sec(oa, /^### 6\. /)), ['Pre-flight: rank $S/rank.json, scan $S/scan.json',
     'among entry.members'])
-  need('p5', 'orient-all § 8', C(sec(oa, /^### 8\. /)), ['waiting on your answer'])
+  need('p5', 'orient-all § 8', C(sec(oa, /^### 8\. /)), ['waiting on your answer', 'listed by the `why` the fork returns',
+    '`/thread:orient [[<home>]]`', 'depends on [[<via>]]'])
   for (const [name, text] of [['§ 1.5', pfRaw], ['S3.5', s35]]) never('p5', name, text, ['--regenerate'])
 
   // p6: no plan gate.
@@ -243,8 +253,13 @@ test('control p2: a started carried task graded fails p2 alone', () => {
   only(swap(FILES, SCHEDULE, 'line whose state is not `queued`', 'line, whatever its state', PF), ['p2'], 'kept')
 })
 
-test('control p3: a batched round fails p3 alone', () => {
+test('control p3: a batched round, an asked closure task or a recorded ungraded answer fails p3 alone', () => {
   only(swap(FILES, SCHEDULE, 'one question per call', 'up to four questions per call', PF), ['p3'], 'batched')
+  only(swap(FILES, SCHEDULE, 'is never asked, whatever its grade', 'is asked like any other', PF), ['p3'], 'closure asked')
+  only(swap(FILES, SCHEDULE, "An ungraded task's answer is never recorded", "An ungraded task's answer is recorded", PF), ['p3'],
+    'ungraded recorded')
+  only(swap(FILES, ADR, 'The answer governs this run alone and is never recorded', 'the answer is recorded through `record --by schedule`'),
+    ['p3'], 'ADR records it')
 })
 
 test('control p4: a left-out Orient task with no pointer to its orient fails p4 alone', () => {
@@ -253,6 +268,10 @@ test('control p4: a left-out Orient task with no pointer to its orient fails p4 
 
 test('control p5: the orient-all form passing every decided slug fails p5 alone', () => {
   only(swap(FILES, SCHEDULE, ' that is among them', '', PF), ['p5'], 'among them')
+})
+
+test('control p5: orient-all § 8 listing every leaver as waiting on your answer fails p5 alone', () => {
+  only(swap(FILES, ORIENT_ALL, '`dependency` as "depends on [[<via>]], which is left out"; ', '', /^### 8\. /), ['p5'], 'dependency why')
 })
 
 test('control p6: a plan gate at schedule fails p6 alone', () => {

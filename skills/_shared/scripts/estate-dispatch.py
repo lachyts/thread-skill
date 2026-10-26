@@ -203,17 +203,22 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   - One call or Grill: in when decided (`decided`), else out (`undecided`);
   - Orient: out (`orient`, with its `home`), decided or not;
   - not graded (the rank's invalid[], ungraded[] or skipped[], or no scan row): ungraded, its reason `invalid: <the
-    errors>`, the rank's why (`no grade`, a skip reason) or `not in the scan`; in when decided (`queued as it
+    errors>`, the rank's why (`no grade`, a skip reason) or `not in the scan`, with STATUS_OUTSIDE in place of a skip
+    reason `in flight` or `hold` when the scan row's statusClass is `hold` (its own status is the cause: a carried
+    task at an empty status, which carry queues but ES.still_to_start does not); in when decided (`queued as it
     stands`), else out (`ungraded`).
-  The Dependent closure: the edges are each candidate's scan `dependsOn`, matched by ER.slug_key among the
-  candidates, and each --dep (A depends on B). A candidate that is in and not kept leaves, to a fixpoint, when a
-  dependency is out: `dependency`, via the first such dependency. A kept candidate never leaves; one whose dependency
-  is out gives one warnings[] line naming them.
-  The round: one question per AskUserQuestion call, each candidate that is out undecided or ungraded: the One calls
-  in rank order (`[[slug]] <question>`), then each Grill's decisions in rank order (`[[slug]] (k/n) <question>`), then
-  the ungraded in --tasks order (`[[slug]] could not be graded (<reason>): leave it out of this rollout, or queue it as
-  it stands?`, UNGRADED_OPTIONS, `Leave it out` recommended). Options are built as rounds builds them (label_for,
-  the recommendation first and marked); HEADERS gives each header.
+  The Dependent closure, in two steps. The edges are each candidate's scan `dependsOn`, matched by ER.slug_key among
+  the candidates, and each --dep (A depends on B). A kept candidate never leaves; one whose dependency is out gives
+  one warnings[] line naming them. First what leaves whatever Lachy answers: every candidate that depends on an
+  Orient one, directly or through others, leaves as `dependency` (Ready, decided, undecided or ungraded alike), via
+  its first dependency in that closure. Then a candidate still in leaves, to a fixpoint, when a dependency is out:
+  `dependency`, via the first such dependency.
+  The round: one question per AskUserQuestion call, each candidate still out undecided or ungraded after the closure,
+  so never a task already out through an Orient dependency, which leaves whatever the answer: the One calls in rank
+  order (`[[slug]] <question>`), then each Grill's decisions in rank order (`[[slug]] (k/n) <question>`), then the
+  ungraded in --tasks order (`[[slug]] could not be graded (<reason>): leave it out of this rollout, or queue it as it
+  stands?`, UNGRADED_OPTIONS, `Leave it out` recommended). Options are built as rounds builds them (label_for, the
+  recommendation first and marked); HEADERS gives each header. An ungraded answer is never recorded (schedule § 1.5).
   Output: {schema, today, counts {candidates, graded, ready, oneCall, grill, orient, ungraded, kept, decided, in, out}
   (graded, the grades and ungraded over the candidates not kept), tasks[] {slug, grade, decided, in, why, via?,
   reason?}, queue[] (the slugs in, in --tasks order), out[] {slug, grade, why, via?, reason?, home?, note?}, asks[][]
@@ -260,6 +265,7 @@ UNGRADED_OPTIONS = ("Leave it out", "Queue it as it stands")
 UNGRADED_QUESTION = "could not be graded ({why}): leave it out of this rollout, or queue it as it stands?"
 UNGRADED_DESCRIPTIONS = ("Leaves it out of this rollout, with every task that depends on it; the next schedule grades it again",
                          "Queues it ungraded: an open decision it hides is met at its start, by its plan")
+STATUS_OUTSIDE = "status outside Active"  # an ungraded candidate's reason when its own status is the cause
 SIGN_OFF_OPTIONS = ("Sign off", "Not now")
 TOP_DEFAULT = 15
 TITLE_MAX = 60  # create_thread's title (skills/execute/legs.md § Hand over)
@@ -1523,6 +1529,30 @@ class Preflight:
         row = self.scanned.get(k) or self.rows.get(k) or {}
         return row.get("note") if isinstance(row.get("note"), str) else None
 
+    def reason(self, k):
+        """Why a candidate could not be graded: the rank's why, else `no grade` or `not in the scan`. A task whose own
+        status is outside Active (its scan statusClass `hold`) is skipped by the ranker as `hold`, or as `in flight`
+        when its `rollout:` is live: a carried task at an empty status, which carry queues but ES.still_to_start does
+        not, as it reads `open` alone. Either way the real cause is its status, so it is named STATUS_OUTSIDE."""
+        row = self.scanned.get(k)
+        why = self.listed.get(k) or ("no grade" if row else "not in the scan")
+        if why in ("in flight", "hold") and row and row.get("statusClass") == "hold":
+            return STATUS_OUTSIDE
+        return why
+
+    def closure(self, seed):
+        """seed and, to a fixpoint, every candidate not kept with a dependency in it (a kept task never leaves)."""
+        out = set(seed)
+        while True:
+            more = {k for k in self.order if k not in out and k not in self.kept and any(d in out for d in self.edges[k])}
+            if not more:
+                return out
+            out |= more
+
+    def via(self, k, out):
+        """The first of k's dependencies in out, as shown."""
+        return self.shown[next(d for d in self.edges[k] if d in out)]
+
     def run(self):
         entry = {}
         for k in self.order:
@@ -1538,21 +1568,22 @@ class Preflight:
             elif grade == "Orient":
                 e.update({"in": False, "why": "orient", "home": row.get("home")})
             else:
-                reason = self.listed.get(k) or ("no grade" if k in self.scanned else "not in the scan")
+                reason = self.reason(k)
                 e.update({"in": k in self.decided, "why": "queued as it stands" if k in self.decided else "ungraded",
                           "reason": reason})
             entry[k] = e
-        # The Dependent closure, to a fixpoint: a task that is in, and not kept, leaves when a dependency is out.
-        out = {k for k in self.order if not entry[k]["in"]}
-        while True:
-            more = {k for k in self.order if k not in out and k not in self.kept and any(d in out for d in self.edges[k])}
-            if not more:
-                break
-            out |= more
+        # The Dependent closure, in two steps. First what leaves whatever Lachy answers: the Orient candidates and
+        # every task that depends on one, directly or through another, whatever its grade or answer. Those are out as
+        # `dependency` before the round is built, so none of them is asked.
+        fixed = self.closure(k for k in self.order if entry[k]["why"] == "orient")
+        for k in self.order:
+            if k in fixed and entry[k]["why"] != "orient":
+                entry[k].update({"in": False, "why": "dependency", "via": self.via(k, fixed)})
+        # Then the rest: a task that is in leaves when a dependency is out (one undecided or ungraded included).
+        out = self.closure(k for k in self.order if not entry[k]["in"])
         for k in self.order:
             if k in out and entry[k]["in"]:
-                entry[k].update({"in": False, "why": "dependency",
-                                 "via": self.shown[next(d for d in self.edges[k] if d in out)]})
+                entry[k].update({"in": False, "why": "dependency", "via": self.via(k, out)})
         warnings = []
         for k in self.order:
             if k in self.kept:
