@@ -56,8 +56,8 @@ export const meta = {
 //                                    //   (execute § 3's verify-timeout `verifySlot`, copied verbatim). Set ⇒ every verifier line
 //                                    //   the engine renders runs as `<scrub> python3 '<script>' run --slots N --
 //                                    //   bash -c '<verifier>'` (slotted), so at most N suites run at once on the
-//                                    //   machine, with SLOT_TEXT beside it; the four TASK_TREE_RULE agents carry
-//                                    //   slotRule after KILL_RULE; and the integrate call's line carries
+//                                    //   machine, with SLOT_TEXT beside it; the four TASK_TREE_RULE agents and the
+//                                    //   review judge carry slotRule after KILL_RULE; and the integrate call's line carries
 //                                    //   `--priority` (engine-only: verifySlotArgsError refuses any key but script
 //                                    //   and slots, so no lead can give a task call the Integration priority).
 //                                    //   Absent/null is refused before any dispatch, in both modes (estate ADR
@@ -76,6 +76,18 @@ export const meta = {
 //                                    //   PLAN_JUDGE's schema (byte-identical). A value that is not an absolute
 //                                    //   path ending /gated_inputs.py (or holds a quote, backslash or control
 //                                    //   character) is logged once and read as absent, never an error.
+//   touched     : string,            // optional (p31-1, estate ADR 0009 d1); the rollout's `touched:` key, a path
+//                                    //   pattern naming one changed module's test files with `{module}` (e.g.
+//                                    //   "tests/test_{module}.py"). The full suite (the verifier) runs at two
+//                                    //   Checkpoints per task, a code-writing agent's last check before it opens
+//                                    //   or updates its PR (the implementer's, and each reviser's) and Integration
+//                                    //   before the merge; every other verify runs the touched tests, and this
+//                                    //   pins how an agent finds them (touchedTests). Only task-mode prompts read
+//                                    //   it (every task call and seeded revise); Integration's prompts never do.
+//                                    //   Absent, '' or refused by touchedOf (not 1 to 200 characters of a path or
+//                                    //   glob with `{module}` in it, or one starting with `-`, a runner option)
+//                                    //   ⇒ no pin clause; a refused value is logged once in task mode and read
+//                                    //   as absent, never an error.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
 //                                    //   any dispatch, as is a missing, null or array `task`.
@@ -336,7 +348,7 @@ const IMPL_RESULT = {
   properties: {
     verified: { type: 'boolean', description: 'true if the verifier reached the accepted green state (exit 0, or — when a baseline manifest is present — only known-baseline tests fail, each matching its listed reason) before the PR was opened' },
     blocked: { type: 'boolean', description: 'true if Ralph exhausted max iterations or the worktree was unsafe' },
-    escalate: { type: 'boolean', description: 'true ONLY when your instructions gave you a ONE-SHOT verifier run and it was red — the task climbs one rung and hands over. Always false when you ran the full verification loop or did no implementation.' },
+    escalate: { type: 'boolean', description: 'true ONLY when your instructions gave you a ONE-SHOT verification (the touched tests, then the verifier) and it was red — the task climbs one rung and hands over. Always false when you ran the full verification loop or did no implementation.' },
     prUrl: { type: 'string', description: 'PR URL, or empty string when blocked / read-only' },
     branch: { type: 'string', description: 'branch name, or empty string' },
     worktreePath: { type: 'string', description: 'absolute worktree path from git rev-parse --show-toplevel' },
@@ -439,18 +451,74 @@ function slotNote(slot) {
   return slot ? `\n- Verify slot: ${SLOT_TEXT}` : ''
 }
 
-// The TASK_TREE_RULE agents' side (planner, investigator, plan judge, plan reviser): rule (iii) invites a verifier
-// run, so when slot is set they get the exact wrapped line after KILL_RULE; '' when it is absent (byte-identical).
+// The TASK_TREE_RULE agents' side (planner, investigator, plan judge, plan reviser) and, since p31-1, the review
+// judge's: rule (iii) and their tests clauses (observeTests, reviewTests) allow a verifier run when the task brief
+// asks for one, so when slot is set they get the exact wrapped line after KILL_RULE; '' when it is absent
+// (byte-identical).
 function slotRule(verifier, slot) {
   return slot ? `\n\nVerify slot (hard rule, p23-4): if you run the verifier, run exactly \`${slotted(verifier, slot)}\`. ${SLOT_TEXT}` : ''
+}
+
+// ---- Touched tests between Checkpoints (p31-1, estate ADR 0009 d1) ----
+// The full suite (the rollout's verifier) runs at two Checkpoints per task: a code-writing agent's last check before
+// it opens or updates its PR (the implementer's, and each reviser's: the same loop), and Integration before the
+// merge. Every other verify runs the touched tests, the test files for what the change touched: each Ralph try of an
+// implementer or a reviser (which then runs the verifier once, before it hands back), a reviewer's own check and a
+// planner's or investigator's observation. From 14 to 21 Oct 2026 a rollout task ran the full suite a median of 6
+// times (worst 23).
+
+// What the code-writing roles' touched tests reach.
+const DIFF_FILES = 'the files your diff changes, plus any test file you add or edit'
+
+// How an agent finds and runs the touched tests, the text after a "touched tests:" label: `files` names what they
+// reach in this role; `pattern` is touchedOf(a), the rollout's pin ('' for none). The sources are unnumbered, so a
+// pinned render is the unpinned one plus exactly its pin clause. The repo's Tests line applies only when it says how
+// to run one file's or module's tests: most repos' line names only the full suite (`Tests: make test`), which falls
+// through to the git grep, so "the first source that applies" never meets "never the whole suite". One line, so it
+// sits inside a bullet or a step; its one git span is scrubbed, and a pattern touchedOf passed holds no backtick,
+// quote or whitespace, so it never opens a span of its own.
+function touchedTests(pattern, files) {
+  const pin = pattern ? ` the rollout's \`touched:\` pattern \`${pattern}\`, with \`{module}\` replaced by each changed module's name; else` : ''
+  return `the test files that reach ${files}. Take the first source that applies:${pin} the Tests line of the repo's own \`CLAUDE.md\` or \`AGENTS.md\`, which applies only when it says how to run one file's or one module's tests (a Tests line that names only the whole suite's command does not apply: fall through to the next source); else the test files that import or name each file, from \`${GIT_ENV_SCRUB} git grep -l '<module or file name>'\` over the test directories. Run only those files, with the repo's own test runner: never the verifier line, and never the whole suite under another command. When no test file reaches them (a docs-only change), there are none; say so.`
+}
+
+// The before/after status diff that tidies one test run in the task tree (the touched tests or the verifier), for
+// observeTests and reviewTests: each names it outright, never by pointing at TASK_TREE_RULE (iii), which speaks of the
+// verifier alone. One line; its one git span is scrubbed. It ends a sentence whose run it calls "it".
+const TREE_TIDY = `take \`${GIT_ENV_SCRUB} git -C "<task tree>" status --porcelain\` (the \`Task tree:\` path above) immediately before and immediately after it, then revert only the tracked changes, and delete only the untracked paths, that appear in the after list but not the before list.`
+
+// The four TASK_TREE_RULE agents' tests clause (planner, investigator, plan judge, plan reviser): they observe with
+// the touched tests of the files they target and leave the full suite to the implementer's Checkpoint, running the
+// verifier only when the task brief asks for a full-suite baseline; each run is tidied by TREE_TIDY. It never renders
+// SLOT_TEXT (slotRule carries it after KILL_RULE) and never a one-shot or loop marker (`EXACTLY ONCE`, `ONE-SHOT`,
+// `Max iterations`).
+function observeTests(files, pattern, verifier, slot) {
+  return `run only the touched tests: ${touchedTests(pattern, files)} Run them at most once, write no fix code, and tidy after each run of yours, the touched tests or the verifier: ${TREE_TIDY} The full suite is the implementer's Checkpoint (estate ADR 0009 d1), not yours: run the verifier (\`${slotted(verifier, slot)}\`) only when the task brief asks for a full-suite baseline.`
+}
+
+// The review judge's tests block: no run is needed (the implementer ran the verifier at its Checkpoint, and
+// Integration runs it again before the merge). Every run is bound to the judge's read rule: when it fails, no run at
+// all (never the shared checkout), and the feedback says so; when it holds, a claim is checked with the touched tests
+// of the PR's diff, the verifier only when the task brief asks the review for the full suite, each in the task tree
+// and tidied by TREE_TIDY. Its verifier line is the only one outside slotRule.
+function reviewTests(verifier, slot, pattern) {
+  return `Tests: you need not run any. The implementer ran the verifier at its Checkpoint, and Integration runs it again
+before the merge (estate ADR 0009 d1). When the read rule above fails (a mismatch, a non-empty status or a missing
+tree), run no tests at all, neither the touched tests nor the verifier, and never in the project's shared checkout
+or anywhere else: say in your feedback that you ran none, and why.
+When it holds, run tests only in the task tree. To check a claim, run only the touched tests: ${touchedTests(pattern, 'the files the PR diff changes')}
+Never run the verifier unless the task brief asks the review for the full suite; then run exactly
+\`${slotted(verifier, slot)}\`, once.
+Tidy after each run, the touched tests or the verifier: ${TREE_TIDY}`
 }
 
 // The read-only agents' side of the pinned task tree (ADR 0030, p12-4). The planner, plan judge, plan
 // reviser and investigator all work in the task's ONE worktree (taskTreeSetup below), which the
 // implementer then builds in — so what they may touch there is narrow: read under the tree, map the
-// note's checkout paths onto it, and tidy ONLY what their own verifier run added (a before/after
-// status diff), never the env bootstrap's output or anything else already present. Static text; its
-// one git span is scrubbed like every other.
+// note's checkout paths onto it, and tidy ONLY what their own test run added (a before/after
+// status diff), never the env bootstrap's output or anything else already present. Rule (iii) names
+// the verifier run; observeTests names the same diff for the touched tests (p31-1, TREE_TIDY), the
+// tree agents' normal run. Static text; its one git span is scrubbed like every other.
 const TASK_TREE_RULE = `Task tree (hard rule, ADR 0030): this task has ONE worktree, the \`Task tree:\` path above, shared by
 every agent on the task; the implementer builds in it after you, so you edit nothing in it.
 (i) Read every repo file under the task tree, never the project's shared checkout (it may be stale, dirty
@@ -650,6 +718,18 @@ function pricerOf(a) {
   return /['\\\u0000-\u001f\u007f]/.test(p) ? '' : p
 }
 
+// args.touched when usable, else '' (p31-1, estate ADR 0009 d1): the rollout's `touched:` pattern, one changed
+// module's test files with `{module}` in it. A path or glob, never a command: 1 to 200 characters, `{module}` among
+// them, every one from the allowlist below, so no whitespace, quote, `$`, `;`, `|`, `&`, backslash, backtick or
+// control character; and never a leading `-`, so never a test-runner option (`--deselect={module}`, which would
+// hide failures, or `-k{module}`). It renders in a code span (touchedTests) and never forms a git span.
+const TOUCHED_PATTERN = /^(?!-)[\w./*?{}\[\]@+,=:~-]+$/
+function touchedOf(a) {
+  const t = a && a.touched
+  if (typeof t !== 'string' || t.length < 1 || t.length > 200 || !t.includes('{module}')) return ''
+  return TOUCHED_PATTERN.test(t) ? t : ''
+}
+
 // A gate's `cap`/`capped` clauses followed by an amount (any currency): the backstop that keeps a spend gate without
 // exactly one cap on ADR 0008's automatic, climbing `changes`, never a bounce. Keyed on the gate's own line, never on
 // the pricer's why: the pricer reports a non-USD cap (`cap 30 AUD`) as "no cap clause" too.
@@ -770,17 +850,25 @@ async function pastSignedGates(task, r, prompt, opts, st) {
 // the same reds. Returns "" when empty so the surrounding prompt is BYTE-IDENTICAL to pre-item-2 behaviour
 // (the resume-cache invariant) — the non-empty string carries its OWN leading "\n\n", so callers
 // interpolate it bare (`${BUG_PREFLIGHTS}${baselineManifest(a)}`) with no surrounding whitespace.
-function baselineManifest(a) {
+// integration (p31-1): only integratorPrompt passes true, and gets the pre-p31-1 text byte for byte (Integration
+// runs the full verifier, a Checkpoint). Every task call runs touched tests between its Checkpoints, so its text
+// rules out skipping the reds from any run, touched or full, and never tells it to keep running the full verifier.
+function baselineManifest(a, integration) {
   const reds = a.knownBaselineFailures
   if (!reds || !reds.length) return ''
+  const tail = integration
+    ? `Do NOT try to fix them, do NOT flag them as findings, and do NOT \`--deselect\`/skip them (that would hide a
+real regression). Keep running the full verifier; only a NEW failure — or a baseline test failing in a way
+that does not match its listed reason — is yours to act on.`
+    : `Do NOT try to fix them, do NOT flag them as findings, and do NOT \`--deselect\`/skip them
+from any run, touched or full (that would hide a real regression). Only a NEW failure — or a baseline test
+failing in a way that does not match its listed reason — is yours to act on.`
   return `
 
 This repo has KNOWN BASELINE FAILURES — tests that already fail on a clean \`main\` for pre-existing,
 environmental reasons. They are NOT in your scope:
 ${reds.map((b) => '- ' + b).join('\n')}
-Do NOT try to fix them, do NOT flag them as findings, and do NOT \`--deselect\`/skip them (that would hide a
-real regression). Keep running the full verifier; only a NEW failure — or a baseline test failing in a way
-that does not match its listed reason — is yours to act on.`
+${tail}`
 }
 
 // Per-task human/release gate override (per-task-override-channel). Some task notes carry a prose gate
@@ -798,9 +886,59 @@ OPERATOR OVERRIDE: this task note may carry a human/release gate (e.g. "do not a
 on account of it; proceed with the task as specified.`
 }
 
+// The Ralph loop of the task calls (p31-1, estate ADR 0009 d1): each try runs the touched tests, and the verifier
+// runs once, when they pass, as the last check before the PR (the implementer's Checkpoint). A verifier red adds the
+// test files it failed in to the touched tests, so the next try re-runs them before the verifier runs again: the one
+// more round d1 accepts. touched is touchedOf(a) ('' or absent: no pin clause). Step d keeps its note-write sentence
+// verbatim, because coldEntryBlock overrides it. It never renders `EXACTLY ONCE` (the one-shot's marker).
+// baseline (item 2): array of "test_id — reason" lines, or empty/undefined; its green criterion covers every run.
+function ralphLoop(verifier, maxIterations, baseline, slot, touched) {
+  const lines = `- Touched tests: ${touchedTests(touched, DIFF_FILES)}
+- Verifier: ${slotted(verifier, slot)}${slotNote(slot)}
+- Max iterations: ${maxIterations}`
+  if (baseline && baseline.length) {
+    return `
+Verification loop (Ralph-style):
+${lines}
+- KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; do NOT \`--deselect\`/skip them
+  from any run, touched or full — that hides real regressions):
+${baseline.map((b) => '  - ' + b).join('\n')}
+- GREEN CRITERION (baseline-aware), for every run below, touched or full: a run is green when EVERY failing
+  test is in the known-baseline set above (fewer is fine — a baseline red going green is GOOD, never a
+  failure; a baseline entry absent from this run is simply ignored).
+- For i = 1 .. ${maxIterations}:
+  a. Run the touched tests, never the verifier here.
+  b. When they are green, run the verifier ONCE, as your last check before you open or update the PR (a
+     Checkpoint, estate ADR 0009 d1). If it is green, stop the loop: the work is verified.
+  c. On a REAL failure of either — a test OUTSIDE the baseline set fails, OR a baseline test fails in a way
+     that does NOT match its listed reason (when unsure whether it matches, treat it as a NEW failure:
+     fail-closed): when the verifier failed, first add the test files it failed in to your touched tests.
+     Then read the output, diagnose the ROOT cause (not the surface symptom), apply a targeted fix, and
+     commit it on the branch (so history records each attempt).
+  d. If i == ${maxIterations} and a REAL (non-baseline) failure still remains in the touched tests or the verifier:
+     do NOT open/update a PR. Return a result with blocked=true, verified=false, and a one-paragraph
+     blockerDiagnosis of what you tried and why it did not converge. Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.`.trim()
+  }
+  return `
+Verification loop (Ralph-style):
+${lines}
+- For i = 1 .. ${maxIterations}:
+  a. Run the touched tests, never the verifier here.
+  b. When they pass, run the verifier ONCE, as your last check before you open or update the PR (a
+     Checkpoint, estate ADR 0009 d1). If it passes (exit 0), stop the loop: the work is verified.
+  c. On a failure of either: when the verifier failed, first add the test files it failed in to your
+     touched tests. Then read the output, diagnose the ROOT cause (not the surface symptom), apply a
+     targeted fix, and commit it on the branch (so history records each attempt).
+  d. If i == ${maxIterations} and the touched tests or the verifier still fail: do NOT open/update a PR. Return a
+     result with blocked=true, verified=false, and a one-paragraph blockerDiagnosis of what you tried and why
+     it did not converge. Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.`.trim()
+}
+
+// Integration's loop (p31-1): the pre-p31-1 ralphLoop, verbatim, the verifier on every try. Its only caller is
+// integrationVerify: Integration runs the full suite before the merge, a Checkpoint, so its prompts never change.
 // baseline (item 2): array of "test_id — reason" lines, or empty/undefined. When empty the returned text is
 // BYTE-IDENTICAL to the pre-item-2 template (resume-cache invariant — do NOT edit the empty branch below).
-function ralphLoop(verifier, maxIterations, baseline, slot) {
+function fullSuiteLoop(verifier, maxIterations, baseline, slot) {
   if (baseline && baseline.length) {
     return `
 Verification loop (Ralph-style):
@@ -836,24 +974,28 @@ Verification loop (Ralph-style):
      it did not converge. Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.`.trim()
 }
 
-// A first pass below the top rung does NOT iterate — one verifier run, then either green or a hand-over one
-// rung up. Iteration is evidence of hardness, and iteration runs on the rung above (see The ladder below).
-// baseline: same "test_id — reason" array as ralphLoop; the green criterion stays baseline-aware.
-function oneShotVerify(verifier, baseline, slot) {
+// A first pass below the top rung does NOT iterate — one try, then either green or a hand-over one rung up.
+// Iteration is evidence of hardness, and iteration runs on the rung above (see The ladder below). The try is the
+// touched tests once, then the verifier once (the implementer's Checkpoint) only when they are green (p31-1,
+// estate ADR 0009 d1), so a touched red escalates without spending a full suite. baseline: same "test_id —
+// reason" array as ralphLoop; the green criterion stays baseline-aware for both runs. touched: as ralphLoop's.
+function oneShotVerify(verifier, baseline, slot, touched) {
   const green = baseline && baseline.length ? `
-- KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; keep running the full verifier, do NOT
-  \`--deselect\`/skip them — that hides real regressions):
+- KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; do NOT \`--deselect\`/skip them
+  from any run, touched or full — that hides real regressions):
 ${baseline.map((b) => '  - ' + b).join('\n')}
-- GREEN CRITERION (baseline-aware): the work is verified when EVERY failing test is in the known-baseline
-  set above (fewer is fine — a baseline red going green is GOOD, never a failure; a baseline entry absent
-  from this run is simply ignored).` : `
-- GREEN CRITERION: the verifier exits 0 — the work is verified.`
+- GREEN CRITERION (baseline-aware), for each run, touched or full: a run is green when EVERY failing test is
+  in the known-baseline set above (fewer is fine — a baseline red going green is GOOD, never a failure; a
+  baseline entry absent from this run is simply ignored).` : `
+- GREEN CRITERION, for each run: it exits 0.`
   return `
 Verification (ONE-SHOT first pass — you do NOT iterate):
+- Touched tests: ${touchedTests(touched, DIFF_FILES)}
 - Verifier: ${slotted(verifier, slot)}${slotNote(slot)}
-- Run the verifier EXACTLY ONCE.${green}
-- If green: the work is verified — proceed.
-- If red (any failure outside the green criterion): do NOT attempt a fix, do NOT run the verifier again,
+- Run the touched tests EXACTLY ONCE. If they are green, run the verifier EXACTLY ONCE (a Checkpoint,
+  estate ADR 0009 d1); if they are red, do NOT run the verifier.${green}
+- If both are green: the work is verified — proceed.
+- If either is red (any failure outside the green criterion): do NOT attempt a fix, do NOT run either again,
   and do NOT open/update a PR. Commit your work so far on the branch (so the next rung inherits it),
   append a one-paragraph diagnosis of the failure to the task note under a "## Blocker diagnosis"
   heading, and return escalate=true, verified=false, blocked=false with the same diagnosis in
@@ -864,11 +1006,11 @@ Verification (ONE-SHOT first pass — you do NOT iterate):
 // Rung-selected verification block for code-writing prompts (ADR 0029 decision 3): the implement stage's
 // first pass BELOW the top rung gets the one-shot (hand over one rung up on the first red); the retry after
 // the stage's climb, and every pass on the top rung, get the full Ralph loop — on the top there is no rung
-// to hand to.
-function verifyBlock(st, verifier, maxIterations, baseline, slot) {
+// to hand to. touched: touchedOf(a), passed through to either.
+function verifyBlock(st, verifier, maxIterations, baseline, slot, touched) {
   return !onTop(st) && !climbOf(st, 'implement')
-    ? oneShotVerify(verifier, baseline, slot)
-    : ralphLoop(verifier, maxIterations, baseline, slot)
+    ? oneShotVerify(verifier, baseline, slot, touched)
+    : ralphLoop(verifier, maxIterations, baseline, slot, touched)
 }
 
 // Escalation hand-over context (empty-when-unused, like baselineManifest/gateOverride — the non-empty
@@ -1003,7 +1145,7 @@ Steps:
 2. If the fix is well-defined, work test-first (write the failing test before the fix). Use the
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix in the task note, then implement.
-4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot)}
+4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
 5. If the verifier passed: open a PR titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
 6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
@@ -1038,8 +1180,7 @@ ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
 Steps:
 1. Read the task note in full + every file it references (under the task tree).
-2. Run the read-only investigation it asks for (greps, reading tests, and a baseline verifier run to OBSERVE:
-   run it as \`${slotted(task.verifier || a.verifier, a.verifySlot)}\` from the task tree).
+2. Run the read-only investigation it asks for (greps, reading tests). To OBSERVE tests, ${observeTests('the files the investigation targets (none when it targets no code)', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
 3. Append your findings to the task note under a "## Findings" heading, starting with
    \`Investigated on: <sha from the setup's tree base: line>\` followed verbatim by any \`tree NOT refreshed:\`
    line the setup printed — concrete, with file:line refs.
@@ -1076,7 +1217,7 @@ Steps:
 2. Read-only investigation to back the plan:
    - grep for sibling sites of the same anti-pattern across the file + codebase
    - identify callers of any function you intend to change/add
-   - run the verifier ONCE from the task tree to capture the baseline (\`${slotted(a.verifier, a.verifySlot)}\`) — observe only, write no fix code
+   - to capture the baseline, ${observeTests('the files the plan will change', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
    - skim related tests
 3. Produce a plan whose FIRST line is \`Planned on: <sha from the setup's tree base: line>\`, followed verbatim
    by any \`tree NOT refreshed:\` or \`tree NOT attached\` line the setup printed, then EXACTLY these
@@ -1150,6 +1291,7 @@ ${RM_RULE}
 ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
 Read the brief and grep the task tree as needed to verify the plan's claims — do not approve on faith.
+Tests: you need not run any. To check a claim, ${observeTests('the files the plan names', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
 specific, actionable feedback bullets.${NEEDS_HUMAN_RULE}`
 }
@@ -1181,7 +1323,9 @@ ${RM_RULE}
 
 ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
-Run additional READ-ONLY investigation in the task tree as needed. Rewrite the plan so that its
+Run additional READ-ONLY investigation in the task tree as needed.
+Tests: to re-check a baseline or a claim, ${observeTests('the files your plan will change', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
+Rewrite the plan so that its
 FIRST line is \`Planned on: <sha from your setup's tree base: line>\`, followed verbatim by any \`tree NOT
 attached\` line the setup printed and any \`tree NOT refreshed:\` line your prior plan quoted, with the SAME required sub-sections
 (Files to modify / Test strategy / Sibling-site check / Caller-wiring / Edge cases / Risks /
@@ -1218,7 +1362,7 @@ blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 
 Steps:
 1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
-2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot)}
+2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
 3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
    otherwise), prUrl, branch, worktreePath (\`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\`), blockerDiagnosis, summary.
@@ -1249,7 +1393,7 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
-${KILL_RULE}
+${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
 The PR is authoritative: judge \`gh pr diff ${prevImpl.prUrl}\` at the PR head. The task tree is context only
 (the rest of the repo at that commit): read files there only when
@@ -1258,6 +1402,8 @@ The PR is authoritative: judge \`gh pr diff ${prevImpl.prUrl}\` at the PR head. 
 \`${GIT_ENV_SCRUB} git -C "${worktreeDir(a.repoPath, task.slug)}" status --porcelain\` prints nothing.
 On a mismatch, a non-empty status or a missing tree, use \`gh pr diff\` / \`gh pr view\` only — never the
 project's shared checkout. You are read-only: no edit, commit or push, in the tree or anywhere else.
+
+${reviewTests(task.verifier || a.verifier, a.verifySlot, touchedOf(a))}
 
 Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "approve" if the PR is sound, else
 "changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${NEEDS_HUMAN_RULE}`
@@ -1300,7 +1446,7 @@ ${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorF
 
 Push new commits to the existing branch (the PR auto-updates) — do NOT open a new PR.
 
-${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot)}
+${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
 
 ${BUG_PREFLIGHTS}
 
@@ -2708,12 +2854,13 @@ function integrationJudgeCheck(a, task, I, j) {
   ].join('\n')
 }
 
-// The integrator's verification: the full Ralph loop (Integration runs on the top rung, so there is no
-// one-shot hand-over) with the note write replaced — the engine records the diagnosis with its marker.
+// The integrator's verification: the full-suite loop (Integration runs on the top rung, so there is no
+// one-shot hand-over, and it is a Checkpoint, so every try runs the verifier: fullSuiteLoop, p31-1) with the note
+// write replaced — the engine records the diagnosis with its marker.
 function integrationVerify(task, a) {
   const noteWrite = 'Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.'
   // The serial lane's own agent verifier: the only render with the Integration priority (p23-4).
-  return ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot && { ...a.verifySlot, priority: true })
+  return fullSuiteLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot && { ...a.verifySlot, priority: true })
     .replace(noteWrite, 'Write nothing to the task note (the engine records the diagnosis), and push nothing.')
 }
 
@@ -2817,7 +2964,7 @@ Step 4 — push and read back. Push plainly with \`${GIT_ENV_SCRUB} git -C "${wt
 read \`${GIT_ENV_SCRUB} git -C "${wt}" ls-remote origin "refs/heads/${I.branch}"\`: its sha is pushedSha, and
 \`${GIT_ENV_SCRUB} git -C "${wt}" rev-parse HEAD\` is headSha. A rejected push is a STOP: return blocked with blockKind "stop".
 
-${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}
+${GATED_INPUTS_CHECK}${baselineManifest(a, true)}${gateOverride(task)}
 
 Rules: never edit the PR (title, body, labels, comments), never merge it, never write the task note. Return
 blocked, blockKind (only when blocked: "conflict", "red" or "stop"), blockerDiagnosis, verified (true only if the verifier went green in THIS call), mergeLog, mergeState,
@@ -3217,6 +3364,13 @@ if (a.progress) log(a.progress)
 // (approve-gates --standing still prices fail-closed), so a bad value is logged once and never throws.
 if (a.gatePricer !== undefined && a.gatePricer !== null && a.gatePricer !== '' && !pricerOf(a)) {
   log(`gatePricer: refusing ${JSON.stringify(a.gatePricer)} — the plan judge's pricing check is off for this call (ADR 0038)`)
+}
+// args.touched (p31-1, estate ADR 0009 d1): a value touchedOf refuses reads as absent, so the prompts fall back to
+// the repo's own Tests line, then its imports. Logged once and never thrown, like gatePricer: the pattern only
+// steers how an agent finds the touched tests, and the Checkpoints still run the full suite. Integrate mode never
+// reads it (its prompts are unchanged), so it is checked here, in task mode only.
+if (a.touched !== undefined && a.touched !== null && a.touched !== '' && !touchedOf(a)) {
+  log(`touched: refusing ${JSON.stringify(a.touched)} — the rollout's touched-tests pattern is off for this call (estate ADR 0009 d1)`)
 }
 
 // A seeded revise uses its validated history with the empty rounds dropped (liveHistory); any other task
