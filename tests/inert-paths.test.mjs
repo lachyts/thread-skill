@@ -356,6 +356,7 @@ const BINDING_FAILS = [
   }, 'open'],
   ['functools.partial (open)', { 'tests/t.py': `${PY_HEAD}def md_files(root):\n    return Path(root).rglob('*.md')\ng = functools.partial(md_files, REPO_ROOT)\n` }, 'open'],
   ['a fixture name with a call site is chased (repo)', { 'tests/t.py': `${PY_HEAD}def scan(tmpdir):\n    return os.walk(tmpdir)\nscan(REPO_ROOT)\n` }, 'repo'],
+  ['a subclass binding self.root read by a base-class walk (repo)', { 'tests/t.py': `${PY_HEAD}class Base:\n    def files(self):\n        return list(self.root.rglob('*.md'))\nclass Docs(Base):\n    def __init__(self):\n        self.root = REPO_ROOT\nDocs().files()\n` }, 'repo'],
   ['a tmp_path fixture override reads open', {
     'tests/conftest.py': `${PY_HEAD}def tmp_path():\n    return REPO_ROOT\n`,
     'tests/test_t.py': "def test_x(tmp_path):\n    assert not list(tmp_path.rglob('*.md'))\n",
@@ -372,6 +373,7 @@ const BINDING_HOLDS = [
   ['a constructor called only with a temp dir', { 'tests/t.py': `${PY_HEAD}class Docs:\n    def __init__(self, root):\n        self.root = root\n    def files(self):\n        return Path(self.root).rglob('*.md')\nDocs(tempfile.mkdtemp()).files()\n` }],
   ['a keyword argument only with a temp dir (the default unused)', { 'tests/t.py': `${PY_HEAD}def md_files(root=REPO_ROOT):\n    return Path(root).rglob('*.md')\nmd_files(root=tempfile.mkdtemp())\n` }],
   ['a pytest tmp_path with no call site', { 'tests/test_t.py': "def test_x(tmp_path):\n    assert not list(tmp_path.rglob('*.md'))\n" }],
+  ['a base class setUp binding self.tmp to a temp dir, read in a subclass', { 'tests/test_t.py': `${PY_HEAD}import unittest\nclass Base(unittest.TestCase):\n    def setUp(self):\n        self.tmp = tempfile.mkdtemp()\nclass T(Base):\n    def test_x(self):\n        self.assertEqual(os.listdir(self.tmp), [])\n` }],
 ]
 
 for (const [name, files] of BINDING_HOLDS) {

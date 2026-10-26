@@ -125,7 +125,9 @@ versions and change only by migration (engine-snapshot.py's `MIGRATIONS`, run by
 state (verify slots, the Trickle's count, `~/.config/thread/*`); a rollout's own canary records, Run record lines and
 note lines; and what a cross-rollout reader reads (the Run record, the notes the Trickle counts, the Watchdog's
 reads). `rollouts.toml` carries a top-level `schema`: an older reader ignores a newer file's unknown key and still
-refuses a typo, and every writer that adds a newer key raises the line (rollout-settings.py's header). The plugin's
+refuses a typo, and every writer that adds a newer key raises the line (rollout-settings.py's header). `inert_paths`
+(p29-3, ADR 0045) is the first schema-2 key: an older snapshot ignores it and re-runs its verifier, and inert-paths.py's
+`record` refuses to raise the line while a live rollout's engine root cannot read the new file. The plugin's
 hooks run from the Primary checkout, not a snapshot, so the Stop-hook driver's `STATUS_RE` and the `ROLLOUT-STATUS`
 line it parses are a cross-version contract (hooks/rollout-stop-driver.py). The stamps themselves are read only by
 `resolve`, the guards, `unfinished-rollout.py running` (ADR 0031's hold, now only for an unsnapshotted rollout) and

@@ -24,6 +24,11 @@
 #   slotted (the LATE signal lands while the guard starts). C29 prepare refuses a note with no integrating: (exit 1,
 #   nothing fetched, deleted, stashed or merged)   C29b the 2026-10-19 slip: merge-task's exit 3 after an integrate
 #   call's integrated row, re-run with no mark-integrating (p26-1).
+#   C30–C40 the Inert-path skip (ADR 0045, p29-3): C30 a THREAD.md-only move skips (push, log, merge-task, no verifier)
+#   C31 a source file beside it re-runs   C32 a rename into docs/handoffs/ re-runs (case ii)   C33 an empty list, no table,
+#   no file or no --verifier re-runs   C34 the task's own diff adds a reader   C35 a step walks the tree   C36 a shared
+#   THREAD.md   C37 a refused rollouts.toml   C38 chained skips across merge-task's exit 3   C39 a cwd glob in a test
+#   C40 fail closed: a failing cat-file is an inert check error, route verify, exit 0.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0; the verify slots in a temp pool
 # (tests/lib/merge-task-env.sh exports THREAD_VERIFY_SLOTS_DIR).
 set -uo pipefail
@@ -1279,6 +1284,166 @@ ok "$prc" 1 "C29b: base moved after an integrated row, prepare with no mark-inte
 python3 "$RR" mark-integrating --tasks "$SLUG" --tasks-dir "$V" >/dev/null
 prep
 ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')" "0|ii|verify" "C29b: mark-integrating, then prepare → 0, case (ii), route verify"
+
+# ======== C30–C40: the Inert-path skip (ADR 0045, p29-3) ==================================================
+# prepare --verifier: when main moved only in the repo's Inert paths (rollouts.toml, schema 2) and the Inert proof holds
+# on M's tree, route `skip` (push M, log, merge-task; no verifier) and a `verify-skipped` Run-record line; anything else
+# routes `verify` exactly as before, with `inert.why`. These fixtures give the clone a GitHub ssh origin served by the fake
+# ssh (land.sh --origin-slug reads `remote get-url`), HOME a rollouts.toml of their own, and the Run record its own dir
+# (these cases read it, so THREAD_TEST_EVENTS_DIR does not apply).
+cp "$root/tests/fixtures/land/fake-ssh.sh" "$tmp/bin/fake-ssh"; chmod +x "$tmp/bin/fake-ssh"
+REAL_GIT=$(command -v git)
+ifx() {  # ifx <name> [inert_paths TOML value]: fx with the ssh origin, HOME and the record of its own
+  fx "$1"
+  export SRV="$F/srv/github.com" LOG_SSH="$F/ssh.log" GIT_SSH_COMMAND="$tmp/bin/fake-ssh" GIT_SSH_VARIANT=ssh
+  g -C "$R" remote set-url origin git@github.com:o/r.git
+  IH="$F/home"; IEV="$F/events"; mkdir -p "$IH/.config/thread"
+  if [ -n "${2-}" ]; then printf 'schema = 2\n\n[repo."o/r"]\ninert_paths = %s\n' "$2" > "$IH/.config/thread/rollouts.toml"; fi
+}
+iprep() { J=$(HOME="$IH" THREAD_EVENTS_DIR="$IEV" python3 "$LI" prepare --repo "$R" --slug "$SLUG" --default master --note "$V/$SLUG.md" --verifier "${VER:-true}" "$@" 2>"$F/prep.err"); prc=$?; }
+ikinds() { python3 -c 'import json,sys; print(json.dumps([json.loads(l)["kind"] for l in open(sys.argv[1])], separators=(",", ":")))' "$IEV/ro.jsonl" 2>/dev/null || echo '[]'; }
+iline() { python3 -c 'import json,sys; ls=[json.loads(l) for l in open(sys.argv[1])]; print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))' "$IEV/ro.jsonl" "$1"; }
+mtg() { : > "$MT_STATE/gh.log"; out=$(PATH="$tmp/bin:$PATH" bash "$MT" "$R" "$@" 2>&1); rc=$?; }
+taskfile() {  # taskfile <path> <content>: a commit on origin's task branch from p (the task's own diff)
+  g -C "$F/p" fetch -q origin; g -C "$F/p" checkout -q -B "$BR" "origin/$BR"
+  mkdir -p "$F/p/$(dirname "$1")"; printf '%s\n' "$2" > "$F/p/$1"; g -C "$F/p" add "$1"; g -C "$F/p" commit -q -m "task: $1"
+  g -C "$F/p" push -q origin "$BR"; g -C "$F/p" checkout -q master
+}
+mainmv() {  # mainmv <from> <to>: a rename on origin's master; B is the new tip
+  g -C "$F/p" checkout -q master; g -C "$F/p" pull -q --ff-only origin master 2>/dev/null
+  mkdir -p "$F/p/$(dirname "$2")"; g -C "$F/p" mv "$1" "$2"; g -C "$F/p" commit -q -m "mv $1 $2"; g -C "$F/p" push -q origin master
+  B=$(git -C "$F/p" rev-parse HEAD)
+}
+
+# C30: a THREAD.md-only move skips the re-run: push M, log it, merge-task merges (M, B); no verifier ran.
+ifx c30 '["THREAD.md", "docs/handoffs/**"]'
+main THREAD.md "a peer's close-out" "docs(thread): close-out"
+iprep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" 'd["trouble"]')|$(j "$J" 'd["sharedFiles"]')" "0|skip|i|[]|[]" "C30: a THREAD.md-only move → route skip, trouble []"
+M=$(j "$J" 'd["mergeCommit"]')
+ok "$(git -C "$WT" rev-list --parents -n 1 HEAD)" "$M $H0 $B" "C30: M merges B into H (unpushed)"
+ok "$(j "$J" '[d["inert"]["skip"], d["inert"]["changed"], d["inert"]["changedTotal"], d["inert"]["nonInert"], d["inert"]["globs"]]')" '[true,["THREAD.md"],1,[],["THREAD.md"]]' "C30: inert names the move, the glob it proved, nothing non-inert"
+has "$(j "$J" 'd["inert"]["why"]')" "the Inert proof held" "C30: … and why"
+ok "$(python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M" >/dev/null 2>&1; echo $?)" 0 "C30: push M exits 0"
+python3 "$RR" log-integration --tasks "$SLUG" --tasks-dir "$V" --started "$(python3 "$LI" stamp)" --anchor "$H0" --head "$M" --base "$B" >/dev/null
+has "$(loglines)" " integrated path=lead pr=5 anchor=$H0 head=$M base=$B " "C30: log-integration writes head=M base=B"
+mkpr 5 "$M"; printf '%s\n' "$B" > "$MT_STATE/base.seq"
+mtg 5 "$M" "$B"
+ok "$rc|$(cat "$R/.claude/merge-task.status")" "0|ok" "C30: merge-task merges (M, B): rc 0, ok"
+ok "$([ -e "$R/.claude/integration/$SLUG.rc" ] && echo ran || echo none)" none "C30: no verifier ran (no rc file)"
+ok "$(ikinds)" '["verify-skipped"]' "C30: the Run record holds one verify-skipped line"
+ok "$(iline '[ls[0]["task"], ls[0]["repo"], ls[0]["paths"], ls[0]["pathsTotal"], ls[0]["head"], ls[0]["main"], ls[0]["globs"]]')" "[\"$SLUG\",\"o/r\",[\"THREAD.md\"],1,\"$M\",\"$B\",[\"THREAD.md\"]]" "C30: … with the paths, M, main and the glob"
+
+# C31: THREAD.md plus a source file re-runs.
+ifx c31 '["THREAD.md"]'
+main THREAD.md "close-out"; main src.py "print(1)"
+iprep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]["skip"]')|$(j "$J" 'd["inert"]["nonInert"]')" '0|verify|false|["src.py"]' "C31: THREAD.md plus src.py → verify, src.py non-inert"
+has "$(j "$J" 'd["inert"]["why"]')" "not inert prose" "C31: … why names the non-inert path"
+ok "$(ikinds)" '[]' "C31: … and no record line (the path test decided)"
+
+# C32: a rename from a source path into docs/handoffs/ re-runs (case ii, the path test on record.base..B).
+ifx c32 '["THREAD.md", "docs/handoffs/**"]'
+main s.py "print(1)"; B1=$B
+iprep
+ok "$(j "$J" 'd["route"]')" verify "C32: a source move first → verify"
+M1=$(j "$J" 'd["mergeCommit"]')
+python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M1" >/dev/null 2>&1
+python3 "$RR" log-integration --tasks "$SLUG" --tasks-dir "$V" --started "$(python3 "$LI" stamp)" --anchor "$H0" --head "$M1" --base "$B1" >/dev/null
+mainmv s.py docs/handoffs/s.md
+iprep
+ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]["nonInert"]')" '0|ii|verify|["s.py"]' "C32: git mv s.py docs/handoffs/s.md → case (ii), verify, s.py counts at the path it left"
+
+# C33: no inert_paths re-runs: an empty list, no repo table, no file, and no --verifier at all.
+ifx c33 '[]'
+main THREAD.md "close-out"
+iprep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]["skip"]')" "0|verify|false" "C33: inert_paths = [] → verify"
+has "$(j "$J" 'd["inert"]["why"]')" "inert_paths is empty" "C33: … why says so"
+g -C "$WT" reset -q --hard "$H0"
+printf 'schema = 2\n\n[repo."o/other"]\ninert_paths = ["THREAD.md"]\n' > "$IH/.config/thread/rollouts.toml"
+iprep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]["why"]')" "verify|no inert_paths for this repo in rollouts.toml: the verifier runs" "C33: another repo's table → verify"
+g -C "$WT" reset -q --hard "$H0"; rm -f "$IH/.config/thread/rollouts.toml"
+iprep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]["skip"]')" "verify|false" "C33: no rollouts.toml → verify"
+g -C "$WT" reset -q --hard "$H0"
+J=$(python3 "$LI" prepare --repo "$R" --slug "$SLUG" --default master --note "$V/$SLUG.md" 2>"$F/prep.err")
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]')" 'verify|{"skip":false,"why":"no --verifier given: the verifier runs","globs":[],"changed":[],"changedTotal":0,"nonInert":[],"readers":[]}' "C33: no --verifier → verify, inert off"
+
+# C34: the task's own diff adds a test reading THREAD.md: the proof on M's tree catches it.
+ifx c34 '["THREAD.md"]'
+taskfile tests/t.sh 'cat THREAD.md'
+main THREAD.md "close-out"
+iprep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" '[r["path"] for r in d["inert"]["readers"]]')" '0|verify|i|["tests/t.sh"]' "C34: a test the task adds reads THREAD.md → verify, the reader named"
+ok "$(ikinds)|$(iline '[ls[0]["failed"], [r["path"] for r in ls[0]["readers"]], ls[0]["readers"][0]["kind"]]')" '["inert-proof-failed"]|[["THREAD.md"],["tests/t.sh"],"name"]' "C34: … and an inert-proof-failed line naming it"
+
+# C35: a verifier step that walks the tree fails the proof.
+ifx c35 '["THREAD.md"]'
+main THREAD.md "close-out"
+VER="find . -name '*.md' | wc -l" iprep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" '[d["inert"]["readers"][0][k] for k in ("path", "kind", "origin")]')" '0|verify|["<verifier>","walk","cwd"]' "C35: a step walking the tree → verify, kind walk, origin cwd"
+
+# C36: a shared THREAD.md (the task and main both add it) is no skip: today's shared-file trouble stands.
+ifx c36 '["THREAD.md"]'
+taskfile THREAD.md "same"
+main THREAD.md "same"
+iprep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" 'd["trouble"]')|$(j "$J" 'd["sharedFiles"]')|$(j "$J" 'd["inert"]["skip"]')" '0|verify|["shared-file"]|["THREAD.md"]|false' "C36: a shared THREAD.md → verify with the shared-file trouble"
+has "$(j "$J" 'd["inert"]["why"]')" "shared file" "C36: … why names it"
+
+# C37: a refused rollouts.toml (inert_paths with no schema line) gives no skip and exit 0.
+ifx c37
+printf '[repo."o/r"]\ninert_paths = ["THREAD.md"]\n' > "$IH/.config/thread/rollouts.toml"
+main THREAD.md "close-out"
+iprep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]["skip"]')" "0|verify|false" "C37: a refused rollouts.toml → verify, exit 0"
+has "$(j "$J" 'd["inert"]["why"]')" "rollout settings refused" "C37: … why names the refusal"
+
+# C38: chained skips: after a skip merged-in-waiting, main moves in THREAD.md again (merge-task exit 3), and the next
+# prepare (case ii, the path test on record.base..B2) skips again on the newest M.
+ifx c38 '["THREAD.md"]'
+main THREAD.md "close-out 1"; B1=$B
+iprep
+M1=$(j "$J" 'd["mergeCommit"]')
+ok "$(j "$J" 'd["route"]')" skip "C38: the first THREAD.md move → skip"
+python3 "$LI" push --repo "$R" --slug "$SLUG" --head "$M1" >/dev/null 2>&1
+python3 "$RR" log-integration --tasks "$SLUG" --tasks-dir "$V" --started "$(python3 "$LI" stamp)" --anchor "$H0" --head "$M1" --base "$B1" >/dev/null
+main THREAD.md "close-out 2"; B2=$B
+mkpr 5 "$M1"; printf '%s\n' "$B2" > "$MT_STATE/base.seq"
+mtg 5 "$M1" "$B1"
+ok "$rc" 3 "C38: merge-task (M1, B1) after main moved → exit 3 (base moved)"
+python3 "$RR" mark-integrating --tasks "$SLUG" --tasks-dir "$V" >/dev/null
+iprep
+ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')" "0|ii|skip" "C38: prepare again → case (ii), skip again"
+M2=$(j "$J" 'd["mergeCommit"]')
+ok "$(git -C "$WT" rev-list --parents -n 1 HEAD)" "$M2 $M1 $B2" "C38: … on the newest M (M1 + B2)"
+ok "$(ikinds)" '["verify-skipped","verify-skipped"]' "C38: … two verify-skipped lines"
+
+# C39: a test file with a cwd-relative recursive glob fails the proof (kind walk, origin cwd).
+ifx c39 '["THREAD.md"]'
+taskfile tests/test_md.py "$(printf 'import glob\nFILES = glob.glob("**/*.md", recursive=True)')"
+main THREAD.md "close-out"
+iprep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" '[d["inert"]["readers"][0][k] for k in ("path", "kind", "origin")]')" '0|verify|["tests/test_md.py","walk","cwd"]' "C39: glob.glob('**/*.md') in a test → verify, kind walk, origin cwd"
+ok "$(ikinds)" '["inert-proof-failed"]' "C39: … and an inert-proof-failed line"
+
+# C40: fail closed: a git that fails `cat-file --batch` makes the inert check raise; prepare routes verify, exits 0, and
+# records the error, with no traceback.
+ifx c40 '["THREAD.md"]'
+taskfile src/x.py 'print(1)'   # a non-prose blob, so the proof reads one through cat-file --batch
+main THREAD.md "close-out"
+mkdir -p "$F/shim"
+printf '#!/bin/sh\ncase " $* " in *" cat-file --batch "*) echo "shim: cat-file refused" >&2; exit 128 ;; esac\nexec "%s" "$@"\n' "$REAL_GIT" > "$F/shim/git"
+chmod +x "$F/shim/git"
+PATH="$F/shim:$PATH" iprep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" 'd["inert"]["skip"]')" "0|verify|false" "C40: a failing cat-file → prepare exits 0, route verify, no skip"
+case "$(j "$J" 'd["inert"]["why"]')" in "inert check error: "*) ok y y "C40: … inert.why starts 'inert check error: '";; *) ok "$(j "$J" 'd["inert"]["why"]')" "inert check error: …" "C40: … inert.why";; esac
+lacks "$(cat "$F/prep.err")" "Traceback" "C40: … no traceback on stderr"
+has "$(cat "$F/prep.err")" "WARN: inert check error: ProofError" "C40: … one WARN line names the error"
+ok "$(ikinds)|$(iline '[ls[0]["readers"], ls[0]["error"][:26]]')" '["inert-proof-failed"]|[[],"inert check error: ProofE"]' "C40: … and an inert-proof-failed line with error and readers []"
+unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"

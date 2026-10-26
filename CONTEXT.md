@@ -498,9 +498,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
   order. _Avoid_: the lane (that is the step, not the line).
 - **Inert path** — a file a repo's verifier provably never reads, listed per
-  repo in the **Rollout settings** and re-proven at every skip: a `main` that
-  moved only in inert paths since a green run leaves that run standing, and
-  Integration re-runs nothing (ADR 0045). _Avoid_: doc-only, ignored path.
+  repo in the **Rollout settings** (`inert_paths`, git pathspec globs) and
+  re-proven on the tree being merged at every skip: a `main` that moved only
+  in inert paths, prose only (`.md .markdown .txt .rst .adoc .org`), since a
+  green run leaves that run standing, and Integration re-runs nothing (ADR
+  0045). _Avoid_: doc-only, ignored path.
+- **Inert proof** — the static check that nothing in the tree being merged
+  reads a glob: no non-prose file or step names its deepest literal segment;
+  no walk whose root is not provably outside the repo (a path that is the
+  repo, inside it or an ancestor of it counts) covers it; no markdown tool,
+  link parse, symlink into the glob or submodule. It fails closed (ADR 0045):
+  any error in it means a re-run. skills/_shared/scripts/inert-paths.py's
+  header holds its rules. _Avoid_: the docs check.
 - **Integration conflict** — Integration's merge of the latest `main`
   conflicted and the integrator could not keep both intents, so it aborted
   the merge and pushed nothing (Vibe Kanban's 'rebase conflicts'). The note is

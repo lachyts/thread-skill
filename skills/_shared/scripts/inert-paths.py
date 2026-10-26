@@ -71,7 +71,8 @@ comment is skipped.
 The resolver. A walk's root resolves to a set of origins.
 - A Python file that `ast.parse`s is resolved with scopes: function locals, enclosing functions, module globals,
   imports of tracked files (`from m import X`, `import m`, relative imports), and `self.x`/`cls.x`, meaning every
-  `self.x =` in its class (and its class-level `x =`). Any other file, and a Python file that fails to parse, uses the
+  `self.x =` (and class-level `x =`) in its class, its scanned bases (by name) and their scanned subclasses; a method
+  is the first found along the bases. Any other file, and a Python file that fails to parse, uses the
   line resolver: a name resolves to the union of every same-file binding (`x =`, `const|let|var x =`, `this.x =`,
   `for (… x of E)`, shell `x=`) and every same-file parameter of that name, plus its import (`import {X} from './m'`,
   `require('./m').X`, `import X from …`); a union only adds origins. Bindings followed: assignment, `with E as x`,
@@ -776,11 +777,11 @@ class Param:
 
 
 class ClassInfo:
-    __slots__ = ("key", "name", "file", "methods", "attrs")
+    __slots__ = ("key", "name", "file", "methods", "attrs", "bases")
 
     def __init__(self, key, name, file):
         self.key, self.name, self.file = key, name, file
-        self.methods, self.attrs = {}, {}
+        self.methods, self.attrs, self.bases = {}, {}, []
 
 
 class CallSite:
@@ -974,6 +975,8 @@ class _PyBuilder(ast.NodeVisitor):
             self.visit(d)
         key = (self.pf.sf.fid, node.lineno, node.name)
         ci = ClassInfo(key, node.name, self.pf.sf)
+        ci.bases = [b.attr if isinstance(b, ast.Attribute) else b.id for b in node.bases
+                    if isinstance(b, (ast.Name, ast.Attribute))]
         self.ix.classes[key] = ci
         self.ix.classes_by_name.setdefault(node.name, []).append(ci)
         self.scope.bind(node.name, ("vals", F([("cls", key)])))
@@ -2431,17 +2434,30 @@ class Resolver:
         if k == "module":
             return self.module_name(self.files[v[1]], a, depth + 1)
         if k == "inst" or k == "cls":
-            ci = self.ix.classes.get(v[1])
-            if ci is None:
-                return F([OPEN])
-            if a in ci.methods:
-                return F([("bound", ("func", ci.methods[a].key), "__method__")]) if k == "inst" else \
-                    F([("func", ci.methods[a].key)])
-            if a in ci.attrs:
+            # the class and its scanned bases (by name): a method is the first found; an attribute is the union of every
+            # binding along the chain, and of every scanned subclass that binds it too
+            todo, seen, chain = [self.ix.classes.get(v[1])], set(), []
+            while todo:
+                ci = todo.pop(0)
+                if ci is None or ci.key in seen or len(seen) > 16:
+                    continue
+                seen.add(ci.key)
+                chain.append(ci)
+                for b in ci.bases:
+                    todo.extend(self.ix.classes_by_name.get(b, ()))
+            binders = [ci for ci in chain if a in ci.attrs]
+            names = {ci.name for ci in chain}
+            binders += [o for o in self.ix.classes.values() if o not in binders and a in o.attrs and set(o.bases) & names]
+            if binders:
                 out = set()
-                for ir, scope in ci.attrs[a]:
-                    out |= self.ev(ir, (ci.file, scope, 0), depth + 1)
+                for ci in binders:
+                    for ir, scope in ci.attrs[a]:
+                        out |= self.ev(ir, (ci.file, scope, 0), depth + 1)
                 return F(out)
+            for ci in chain:
+                if a in ci.methods:
+                    return F([("bound", ("func", ci.methods[a].key), "__method__")]) if k == "inst" else \
+                        F([("func", ci.methods[a].key)])
             return F([OPEN])
         if k == "env":
             return F([STR(self.ix.home)]) if a == "HOME" else (F([STR(self.ix.tmpdir)]) if a == "TMPDIR" else F([INPUT]))

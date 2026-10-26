@@ -39,6 +39,7 @@ const s = (text, re) => collapse(section(text, re) ?? '')
 const S0 = /^### 0\./
 const S47 = /^### 4\.7\. /
 const S28 = /^### 2\.8\. /
+const S29 = /^### 2\.9\. /
 const S1 = /^### 1\. /
 const S3 = /^### 3\. /
 const S35 = /^### 3\.5\. /
@@ -335,6 +336,18 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
   if (!sentences(s(schedule, S5)).some((x) => x.includes('Solo task') && x.includes('holds every task whose row is below it') &&
     x.includes('whatever their `priority:`')) ||
     !collapse(template).includes('holds every task whose row is below it, whatever its `priority:`')) fails.push('solo-rank')
+
+  // inert-paths (ADR 0045, p29-3): § 2.9 proposes Inert paths with inert-paths.py propose (the verifier and bootstrap
+  // single-quoted), drops what the drop rule names (an `error` line neutral), records only on Lachy's yes, prints and goes
+  // on at record's exit 1 (the reader check never blocks), never passes --force, and the serial path skips it.
+  const s29 = s(schedule, S29)
+  const recordAt = s29.indexOf('inert-paths.py record --repo')
+  if (!s29.includes("inert-paths.py propose --repo <§ 0's resolved repo path> --tree origin/<default> --verifier '<verifier>' --bootstrap '<env_bootstrap>'") ||
+    recordAt < 0 || s29.lastIndexOf('On yes:', recordAt) < 0 || !s29.includes('On no, nothing') ||
+    !s29.includes('inert-paths.py drop --repo') || !s29.includes('a line with an `error` (the check itself failed) is neither a failure nor a pass') ||
+    !s29.includes('It never blocks the schedule') || !s29.includes('never passes `--force`') ||
+    !s29.includes('name the refusing rollout in the confirm batch') ||
+    !collapse(schedule).includes('Steps 2, 2.5–2.9, 4, 4.5, 4.7 and Solo are skipped on this path')) fails.push('inert-paths')
 
   // Orient leaves the one-per-repo rule to schedule § 0: it reads no rollout state itself.
   const o6 = s(orient, /^### 6\./)
@@ -634,4 +647,13 @@ test("control: § 0's interrupted finish dropping its order lines fails interrup
 test('control: a template that lets priority jump a Solo task fails solo-rank', () => {
   only({ template: real.template.replace('holds every task whose row is below it, whatever its `priority:`',
     'holds every task whose row is below it and whose `priority:` is no higher') }, ['solo-rank'], 'template')
+})
+
+// inert-paths (ADR 0045, p29-3)
+test('control: § 2.9 recording with no yes, blocking on record, counting an error line, or run on the serial path fails inert-paths', () => {
+  only({ schedule: edit(real.schedule, S29, 'On yes: `python3', 'Then `python3') }, ['inert-paths'], 'record with no yes')
+  only({ schedule: edit(real.schedule, S29, 'It never blocks the schedule, and this skill', 'It halts the schedule, and this skill') }, ['inert-paths'], 'record blocks')
+  only({ schedule: edit(real.schedule, S29, '; a line with an `error` (the check itself failed) is neither a failure nor a pass', '') }, ['inert-paths'], 'error lines counted')
+  only({ schedule: edit(real.schedule, null, 'Steps 2, 2.5–2.9, 4', 'Steps 2, 2.5–2.8, 4') }, ['inert-paths'], 'serial runs § 2.9')
+  only({ schedule: edit(real.schedule, S29, ", name the refusing rollout in the confirm batch,", ',') }, ['inert-paths'], 'no refusing rollout named')
 })
