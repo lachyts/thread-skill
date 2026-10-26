@@ -129,7 +129,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Route** — a decisive member (`stash`, `defer`, `handoff`, `close`) that
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
-  then dispatches to a route. A sibling, not a parent. Its *keep going* may
+  then dispatches to a route. A sibling, not a parent. "Next move?" is a gate
+  (Chorus ADR 0110): when its recommendation is clear, `next` decides it and says
+  so in one line, asking only when the pick turns on what only Lachy knows, and it
+  never drops an open confirm (a gate is answered by the rule, his question is
+  carried). Its *keep going* may
   carry a **compact recommendation**, which only Lachy acts on: compact is a
   recommendation inside keep going, never a route. When the work already
   continues in another session it recommends **archive this session** instead,

@@ -19,7 +19,7 @@ Every handoff produces two artefacts: a **durable handoff doc**, committed to th
 handoff of THIS conversation) or when a router (`next`/`orient`) dispatched it.
 Never self-initiate a handoff because the session feels long or the context is
 filling — that is a recommendation, and recommendations for the undecided
-moment belong to `thread:next`'s ask-first menu. (Model invocation enabled
+moment belong to `thread:next`, which decides the move and says so in one line. (Model invocation enabled
 2026-08-12: the old `disable-model-invocation` flag was inherited from the
 flat-skill port, never a recorded decision; handoff was then judged the
 cheapest-misfire route of the family, a misfire costing one committed doc
