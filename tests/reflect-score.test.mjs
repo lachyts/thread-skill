@@ -710,6 +710,38 @@ test('an act stamped while an untimed call is open never extends its Slot', (t) 
   assert.equal(out.window.activeEnd, Z(at('00:30')))
 })
 
+// p28-2: the night record is `next`'s reading of a Morning after the fact. A dead lead's Slot (s1, taken at 07:30, its
+// call wf_1 with no journal) still open at the 09:00 Morning gets a ran-past-morning line at the next lead's 12:00
+// call (execute away.md § The night record): that line, the night's marker and a held line are no activity of the
+// call, so its never-finished cap, the running time and Throughput read as they do with no night line at all.
+test('a night-record line never extends an untimed call\'s Slot (p28-2)', (t) => {
+  const slot = [
+    [at('07:30'), 'slot-taken', 's1', { settings: S(2) }],
+    [at('07:30'), 'run-bound', 's1', { runId: 'wf_1', journalDir: '/nonexistent' }],
+  ]
+  const night = [
+    [at('07:00'), 'away-night', null, { morning: at('09:00') }],
+    [at('07:30'), 'last-start-held', 'c1', { morning: at('09:00'), scope: 'cross-cutting', history: 3, usualMinutes: 110 }],
+    [at('12:00'), 'ran-past-morning', 's1', { morning: at('09:00'), slotTakenAt: '2026-10-05T07:30:00.000Z', scope: 'single-file', history: 3, usualMinutes: 25 }],
+  ]
+  const run = (events) => {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs(events))
+    return scored(home, ['--since', at('07:30'), '--until', at('14:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })])
+  }
+  const bare = run(slot)
+  const out = run([...slot, ...night])
+  for (const o of [bare, out]) {
+    assert.equal(o.runningTime.hours, 0.5, 'the Slot ends at its last activity (07:30) + 30 min, not at 12:30')
+    assert.equal(o.window.activeEnd, Z(at('08:00')))
+    assert.ok(has(o.flags, new RegExp(`^call wf_1 never finished: capped at last activity \\+ 30 min \\(${Z(at('08:00')).replace(/\./g, '\\.')}\\)$`)))
+    assert.equal(o.guardrails.throughput.breached, false, '0.5 running h against one task\'s 1.5 h allowance')
+  }
+  assert.deepEqual(out.guardrails.throughput, bare.guardrails.throughput, 'Throughput reads as with no night line')
+  const flags = (o) => o.flags.map((f) => f.replace(/reflect-score-[^/]+/g, 'HOME')) // each run its own temp HOME
+  assert.deepEqual(flags(out), flags(bare), 'and so does every flag')
+})
+
 test('Throughput counts the tasks whose Slot or lane holding overlaps a mid-run window (a --since split)', (t) => {
   const home = tmpHome(t)
   emitAll(home, 'demo', slotBound())

@@ -97,8 +97,11 @@ ok "$(sums)" "$before" "T1: --dry-run leaves every note byte-identical"
 scen t2-away
 two_rollouts
 away_file "$D/home" "$HOUR_AGO" true "$TONIGHT" 2 09:00
-J=$(nx ro-b)
+J=$(THREAD_EVENTS_DIR="$D/events" nx ro-b)   # this call reads its own record dir (p28-2's marker assert below)
 ok "$(q "$J" '[d["start"], d["slotLimit"], d["hold"]]')" '[["b2","b3"],4,[]]' "T2: Away, ro-b starts b2 and b3 (slotLimit 4)"
+# p28-2: an Away block until 22:05 is no night (its until is not the Morning, 09:00), so the last starts hold nothing.
+ok "$(q "$J" 'd["lastStarts"]')" '{"kinds":{},"morning":null}' "T2: until 22:05 is no Morning: the last starts do not apply"
+ok "$(cat "$D/events"/*.jsonl 2>/dev/null | grep -c '"kind":"away-night"')" 0 "T2: … and no away-night marker is written"
 ok "$(q "$J" "$tk")" '[true,"fresh",2,{"ro-a":2},5]' "T2: trickle reads the fresh file, still counting elsewhere"
 ok "$(q "$J" '[d["trickle"]["until"], d["trickle"]["morning"], d["trickle"]["why"]]')" "[\"$TONIGHT\",\"09:00\",null]" \
   "T2: until and morning come from the fresh file, why null"
@@ -279,6 +282,7 @@ ok "$(q "$J" "$holds")" '{"s1":"trickle: 2/2 tasks running on this Mac","s2":"be
 away_file "$D/home" "$HOUR_AGO" true "$TONIGHT"
 J=$(nx ro-s --running "")
 ok "$(q "$J" '[d["start"], d["hold"]]')" '[["s1"],[{"reason":"behind solo [[s1]]","slug":"s2"}]]' "T12: Away, the Solo starts alone"
+ok "$(q "$J" 'd["lastStarts"]["morning"]')" 'null' "T12: until 22:05 is no Morning: the last starts do not apply"
 
 # ── T13: over the Trickle, nothing starts and nothing is stopped ──────────────────────────────────────────────
 scen t13-over
