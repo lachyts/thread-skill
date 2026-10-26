@@ -78,7 +78,8 @@ NIGHT='[[r["kind"], r["task"]] + [r.get(k) for k in ("morning", "scope", "histor
 # JSON {stem, slug, scope, minutes, end, project, extra}: an archived task note <slug> (scope `-` writes no scope:),
 # an archived rollout note <stem> (projects [[<project>]]), and in <stem>.jsonl a run-bound line and a completed
 # `mode: task` call-journal line of durationMs <minutes>, ending at <end>. extra: note false (no task note), rnote
-# false (no rollout note), bind / cj (fields merged in; a null drops one), torn (the call-journal line torn, unparseable).
+# false (no rollout note), bound false (no run-bound line), bind / cj (fields merged in; a null drops one), torn (the
+# call-journal line torn, unparseable), runId (the call's, else wf_<slug>).
 cat > "$TMP/hist.py" <<'PY'
 import importlib.util, json, os, sys
 from datetime import datetime
@@ -104,7 +105,8 @@ for raw in sys.argv[3:]:
     cj = dict({"runId": run, "status": "completed", "mode": "task", "durationMs": ms,
                "startTime": int(end.timestamp() * 1000) - ms}, **x.get("cj", {}))
     cj = {k: v for k, v in cj.items() if v is not None}
-    assert rr.emit(stem, "run-bound", slug, {k: v for k, v in bind.items() if v is not None}, ts=s["end"], strict=True)
+    if x.get("bound", True):
+        assert rr.emit(stem, "run-bound", slug, {k: v for k, v in bind.items() if v is not None}, ts=s["end"], strict=True)
     if x.get("torn"):
         with open(rr.record_path(stem), "a") as f:
             f.write(json.dumps(dict(cj, kind="call-journal", task=slug))[:40] + "\n")
@@ -249,6 +251,9 @@ edge killed old-ro h-cc3 cross-cutting 120 "" "" '{"cj": {"status": "killed"}}'
 edge integrate old-ro h-cc3 cross-cutting 120 "" "" '{"bind": {"call": "integrate"}, "cj": {"mode": "integrate"}}'
 edge no-start-time old-ro h-cc3 cross-cutting 120 "" "" '{"cj": {"startTime": null}}'
 edge torn-line old-ro h-cc3 cross-cutting 120 "" "" '{"torn": true}'
+edge no-run-bound old-ro h-cc3 cross-cutting 120 "" "" '{"bound": false}'
+# h-cc2's own call (runId wf_h_cc2) folded into a second file of the project too: one run, counted once
+edge one-run-in-two-files old-ro2 h-cc2 cross-cutting 110
 # The edge's spec reads its defaults when given "": spec turns an empty end or project into the default.
 scen l8-a-good-third
 ro; mkt c1 ro open 'scope: cross-cutting'
@@ -257,6 +262,17 @@ python3 "$TMP/hist.py" "$RR" "$D" "$(spec old-ro h-cc1 cross-cutting 100)" "$(sp
   "$(spec old-ro h-cc3 cross-cutting 120 2026-09-03T07:30:00Z)"
 J=$(nx 2026-10-03T07:30:00Z --dry-run)
 ok "$(q "$J" "$holds")" "{\"c1\":\"$CC\"}" "L8: control: a third run ending exactly 30 days ago counts"
+# A mid-run Reflection's fold-journals puts this rollout's own finished calls into ro.jsonl itself: its own note (never
+# in the walk's index, which skips the rollout note) names the project, so they read as history.
+scen l8-own-record
+ro; mkt c1 ro open 'scope: cross-cutting'
+night
+own='{"rnote": false}'
+python3 "$TMP/hist.py" "$RR" "$D" "$(spec ro h-cc1 cross-cutting 100 "" "" "$own")" "$(spec ro h-cc2 cross-cutting 110 "" "" "$own")" \
+  "$(spec ro h-cc3 cross-cutting 120 "" "" "$own")"
+ok "$(ls "$D/Archive/Rollouts")" "" "L8 own-record: no other note stands in for the rollout's own"
+J=$(nx 2026-10-03T07:30:00Z --dry-run)
+ok "$(q "$J" "$holds")" "{\"c1\":\"$CC\"}" "L8 own-record: three runs folded into the rollout's own record read as history"
 scen l8-no-projects
 mkro ro 3; mkt c1 ro open 'scope: cross-cutting'
 history; night
@@ -314,6 +330,28 @@ ok "$(q "$J" '[d["trickle"]["file"], d["trickle"]["limit"], d["start"]]')" '["st
 ok "$(lines)" 1 "L9b: one WARN line, nothing more"
 ok "$(recq '[r["task"] for r in rows if r["kind"] == "ran-past-morning"]')" '["s1"]' "L9b: s1's ran-past-morning line is written from the marker"
 
+# ── L9c: the Slot pairing at the Morning: a from-file carried closes a Slot, and M itself is neither in nor out ──────
+scen l9c-pairing
+ro; mkt c1 ro open 'scope: cross-cutting'
+history; night
+J=$(nx 2026-10-03T07:30:00Z)
+ok "$(count away-night)" 1 "L9c: the 07:30 call writes the night's marker"
+ev() { python3 "$RR" emit --kind "$1" --rollout "$2" --task "$3" --json "$4" --ts "$5"; }  # ev <kind> <rollout> <task> <json> <ts>
+TAKE='{"settings":{"parallel_ceiling":3}}'
+ev slot-taken ro g1 "$TAKE" 2026-10-03T06:00:00Z; ev carried next-ro g1 '{"from":"ro"}' 2026-10-03T08:40:00Z
+ev slot-taken ro h1 "$TAKE" 2026-10-03T09:00:00Z
+ev slot-taken ro i1 "$TAKE" 2026-10-03T06:00:00Z; ev slot-freed ro i1 '{"outcome":"ready"}' 2026-10-03T09:00:00Z
+ev slot-taken ro k1 "$TAKE" 2026-10-03T08:59:59Z; ev slot-freed ro k1 '{"outcome":"ready"}' 2026-10-03T09:00:01Z
+ok "$(recq '[[r["task"], r["from"]] for r in rows if r["kind"] == "carried"]')" '[["g1","ro"]]' "L9c: g1's carried line sits in ro.jsonl, its from-file"
+away_file "$D/home" 2026-10-03T09:00:00Z false 2026-10-03T18:00:00Z 2
+J=$(nx 2026-10-03T09:15:00Z)
+ran='[r["task"] for r in rows if r["kind"] == "ran-past-morning"]'
+ok "$(recq "\"g1\" in $ran")" false "L9c: g1, its Slot closed by a from-file carried at 08:40, ran past no Morning"
+ok "$(recq "\"h1\" in $ran")" false "L9c: h1, taken exactly at the Morning, did not run past it"
+ok "$(recq "\"i1\" in $ran")" false "L9c: i1, freed exactly at the Morning, did not run past it"
+ok "$(recq "$ran")" '["k1"]' "L9c: control: k1, taken a second before the Morning and freed a second after, ran past it"
+ok "$(lines)" 0 "L9c: nothing on stderr"
+
 # ── L10: --dry-run decides the same and writes nothing ────────────────────────────────────────────────────────
 scen l10-dry-run
 ro; mkt c1 ro open 'scope: cross-cutting'; mkt s1 ro open 'scope: single-file'
@@ -340,6 +378,10 @@ J=$(TZ=Australia/Melbourne nx 2026-10-03T20:10:00Z --dry-run)
 ok "$(q "$J" 'd["start"]')" '["c1"]' "L11: at 20:10Z, 20:10 + 110 min is 22:00Z, the Morning: c1 starts"
 J=$(TZ=Australia/Melbourne nx 2026-10-03T20:11:00Z --dry-run)
 ok "$(q "$J" "$holds")" "{\"c1\":\"$CC\"}" "L11: at 20:11Z it is held, where a +10:00 reading would start it"
+# M is the same instant at the local offset, never `until`'s own: the same Morning written in Z reads alike
+away_file "$D/home" 2026-10-03T15:00:00Z true 2026-10-03T22:00:00Z 2 09:00
+J=$(TZ=Australia/Melbourne nx 2026-10-03T15:30:00Z --dry-run)
+ok "$(q "$J" 'd["lastStarts"]["morning"]')" '"2026-10-04T09:00:00+11:00"' "L11: an until of 22:00:00Z reads M 09:00+11:00, at the local offset"
 
 # ── L12: the 05:00 press (until tomorrow's 09:00) looks only toward tomorrow's Morning, from 24 h before it ──────
 scen l12-press
