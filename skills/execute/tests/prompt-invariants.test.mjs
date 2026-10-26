@@ -22,11 +22,17 @@
 //                               accumulated reviewHistory, and only a with-history final-round approval
 //                               sets approvedAtCeiling.
 //   - verify slots (p23-4)    → args.verifySlot is required (estate ADR 0009 d4): absent or null, runTask refuses
-//                               before any dispatch in both modes, and so does a malformed value; set: the eight
+//                               before any dispatch in both modes, and so does a malformed value; set: the nine
 //                               verifier-bearing builders render the wrapped line with SLOT_TEXT once, the four
-//                               TASK_TREE_RULE builders carry slotRule after KILL_RULE, only the integrator carries
-//                               --priority, and the whole-call pins' slotted calls are their unslotted bytes plus
-//                               exactly those pieces.
+//                               TASK_TREE_RULE builders and the review judge carry slotRule after KILL_RULE, only the
+//                               integrator carries --priority, and the whole-call pins' slotted calls are their
+//                               unslotted bytes plus exactly those pieces.
+//   - touched tests (p31-1)   → the full suite runs at two Checkpoints (estate ADR 0009 d1): each Ralph try runs the
+//                               touched tests and the verifier runs once, before the PR; the one-shot runs the verifier
+//                               only when the touched tests are green; the reviser re-checks the same way; the review
+//                               judge and the four tree agents observe with touched tests (the verifier only when the
+//                               brief asks); args.touched pins how they are found; Integration's prompts are their
+//                               pre-p31-1 bytes, and the whole-call pins swap p31-1's fragments back (P31_1).
 // Evaluates only the pure-function region of the engine (before the orchestration that needs Workflow
 // globals) in a vm sandbox. Run: node tests/prompt-invariants.test.mjs   (exit 0 = pass)
 import fs from 'node:fs'
@@ -35,7 +41,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { loadEngine, runTask } from '../../../tests/lib/engine.mjs'
+import { loadEngine, runTask, VERIFY_SLOT } from '../../../tests/lib/engine.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const src = fs.readFileSync(path.join(here, '..', 'task.workflow.js'), 'utf8')
@@ -44,7 +50,7 @@ const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, BUILT_IN_LADDER, CAPPED_RETRY_ITERATIONS, rungState, startRung, cur, onTop, climbOf, implEffort, judgeEffort, escalate, readOnlyPrompt, roundBudgetDiagnosis, taskTreeSetup };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, BUILT_IN_LADDER, CAPPED_RETRY_ITERATIONS, rungState, startRung, cur, onTop, climbOf, implEffort, judgeEffort, escalate, readOnlyPrompt, roundBudgetDiagnosis, taskTreeSetup, fullSuiteLoop, touchedOf, touchedTests, observeTests, baselineManifest, integrationVerify };\n'
 
 // `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
 // against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
@@ -884,11 +890,12 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
 // (e2) proves every runAgent site is one of them). Shared by the RM_RULE and KILL_RULE blocks below.
 const RULE_BUILDERS = ['rungState', 'escalate', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt',
   'plannerPrompt', 'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt']
-function agentPrompts(E) {
+// over: extra rollout args (p31-1 renders the Integration builders with a baseline, a slot and args.touched).
+function agentPrompts(E, over = {}) {
   const H = (c) => c.repeat(40)
   const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
   const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
-  const ar = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
+  const ar = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r', ...over }
   const I = {
     prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
     landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }],
@@ -1056,11 +1063,12 @@ function agentPrompts(E) {
 }
 
 // ---- Verify slots (p23-4): args.verifySlot wraps every verifier line the engine renders ------------------------
-// With args.verifySlot = { script, slots }, the eight verifier-bearing builders render the wrapped line
+// With args.verifySlot = { script, slots }, the nine verifier-bearing builders render the wrapped line
 // (`<scrub> python3 '<script>' run --slots N -- bash -c '<verifier>'`), never the bare scrubbed verifier; SLOT_TEXT
 // sits once in each (beside the verify block's `- Verifier:` line, or in slotRule); the four TASK_TREE_RULE builders
-// carry slotRule right after KILL_RULE; only the integrator's line carries `--priority`; the two review judges render
-// no verifier and stay byte-identical. The renderers still take an absent slot (slotted(V, undefined) is scrubbed(V));
+// and, since p31-1 (its tests block may run the verifier when the brief asks), the review judge carry slotRule right
+// after KILL_RULE; only the integrator's line carries `--priority`; the Integration review judge renders no verifier
+// and stays byte-identical. The renderers still take an absent slot (slotted(V, undefined) is scrubbed(V));
 // the engine's entry refuses a call without one (estate ADR 0009 d4), and the whole-call pins below show the slotted
 // calls are their unslotted bytes plus exactly the slot pieces.
 {
@@ -1098,8 +1106,9 @@ function agentPrompts(E) {
   const on = render({ ...base, verifySlot: SLOT })
   const onB = render({ ...base, verifySlot: SLOT, knownBaselineFailures: ['t — env'] })
   const BEARING = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt',
-    'planJudgePrompt', 'planReviserPrompt', 'integratorPrompt']
-  const TREE = ['readOnlyPrompt', 'plannerPrompt', 'planJudgePrompt', 'planReviserPrompt']
+    'planJudgePrompt', 'planReviserPrompt', 'reviewJudgePrompt', 'integratorPrompt']
+  // The builders that carry slotRule right after KILL_RULE: the four TASK_TREE_RULE agents and the review judge (p31-1).
+  const TREE = ['readOnlyPrompt', 'plannerPrompt', 'planJudgePrompt', 'planReviserPrompt', 'reviewJudgePrompt']
   const times = (hay, needle) => hay.split(needle).length - 1
   const wrapped = E.slotted(V, SLOT)
   const prio = E.slotted(V, { ...SLOT, priority: true })
@@ -1119,17 +1128,18 @@ function agentPrompts(E) {
     return out
   }
   const ruleOf = () => E.slotRule(V, SLOT)
-  ok(JSON.stringify(slotFails(on, ruleOf)) === '[]', 'verifySlot: the eight verifier-bearing builders render the wrapped line once-noted, slotRule after KILL_RULE in the four tree builders, --priority only in the integrator')
+  ok(JSON.stringify(slotFails(on, ruleOf)) === '[]', 'verifySlot: the nine verifier-bearing builders render the wrapped line once-noted, slotRule after KILL_RULE in the four tree builders and the review judge, --priority only in the integrator')
   ok(JSON.stringify(slotFails(onB, ruleOf)) === '[]', 'verifySlot: … with a baseline manifest too')
-  for (const name of ['reviewJudgePrompt', 'integrationReviewPrompt']) {
-    ok(on[name][0] === off[name][0], `verifySlot: ${name} is byte-identical with and without it (it renders no verifier)`)
-  }
+  ok(on.integrationReviewPrompt[0] === off.integrationReviewPrompt[0], 'verifySlot: integrationReviewPrompt is byte-identical with and without it (it renders no verifier)')
+  ok(on.reviewJudgePrompt[0] !== off.reviewJudgePrompt[0], 'verifySlot: the review judge is no longer byte-identical with and without it (p31-1: its tests block and slotRule)')
   for (const name of TREE) {
     ok(on[name][0].replace(E.slotRule(V, SLOT), '') === off[name][0].replace(E.scrubbed(V), wrapped), `verifySlot: ${name} is its unslotted bytes, the wrapped line in place of the scrubbed one, plus exactly slotRule`)
   }
   // controls: each fails exactly its check
   const noRule = { ...on, planJudgePrompt: on.planJudgePrompt.map((p) => p.replace(E.slotRule(V, SLOT), '')) }
   ok(slotFails(noRule, ruleOf).some((f) => f.startsWith('planJudgePrompt:')), 'verifySlot control: a plan judge without slotRule fails')
+  const noJudgeRule = { ...on, reviewJudgePrompt: on.reviewJudgePrompt.map((p) => p.replace(E.slotRule(V, SLOT), '')) }
+  ok(JSON.stringify(slotFails(noJudgeRule, ruleOf)) === JSON.stringify(['reviewJudgePrompt: SLOT_TEXT once', 'reviewJudgePrompt: slotRule right after KILL_RULE']), 'verifySlot control: a review judge without slotRule fails')
   const prioLeak = { ...on, implementerPrompt: on.implementerPrompt.map((p) => p.replace(wrapped, prio)) }
   ok(slotFails(prioLeak, ruleOf).some((f) => f === 'implementerPrompt: --priority only in the integrator, once'), 'verifySlot control: --priority in a task-call builder fails')
   ok(typeof E.SLOT_TEXT === 'string' && !E.SLOT_TEXT.includes('\n') && !/['$]|\$\{/.test(E.SLOT_TEXT) && !/`[^`]*\bgit\s/.test(E.SLOT_TEXT) &&
@@ -1178,6 +1188,370 @@ function agentPrompts(E) {
     const args = mode ? { ...absent(mode), integration: { ...I, startedAt: '2026-10-18T10:00:00Z' } } : absent(mode)
     const r = await runTask(args, async () => { throw new Error('stub') }, { source: cut })
     ok(!(r.error && /args\.verifySlot/.test(String(r.error.message))) && r.calls.length > 0, `verifySlot control (${mode || 'task'} mode): without the check an absent verifySlot reaches agent()`)
+  }
+}
+
+// ---- Touched tests between Checkpoints (p31-1, estate ADR 0009 d1) ---------------------------------------------
+// The full suite (the rollout's verifier) runs at two Checkpoints per task: the implementer's last check before its
+// PR and Integration before the merge. Every other verify runs the touched tests: each Ralph try (then the verifier
+// once, before the PR), the one-shot (the verifier only when the touched tests are green), the reviser's re-check,
+// the review judge's own check and the four tree agents' observations (the verifier only when the task brief asks
+// for the full suite). Integration is unchanged: PRE_P31 holds sha256 pins recorded on dc07aa5, BEFORE the p31-1
+// edit, of its two agents' prompts, the pre-p31-1 ralphLoop (now fullSuiteLoop, Integration's loop), the pre-p31-1
+// oneShotVerify (preOneShot below, the swap-back literal) and the integrator's manifest.
+const PRE_P31 = {
+  integrator: '5e13e60b47a68c76da50b467c1a84243b2d3ddedcb24af16d15374c27e71e4a8', // agentPrompts' 2 fixtures × baseline/none × slot/none
+  integrationReview: '1fe90542e90840a835b0dbe3e790d8fb1a9cea047f666fd209a65bb8bae29398', // agentPrompts' 2 fixtures
+  ralph: 'fe643bca0565ea08227a68722ee4054936e8aca671ca0aa3d4d0708ec95bfeca', // ralphLoop('make test', n {2,3}, baseline/none, slot/none/priority)
+  oneShot: '0ab3700329eb89c84bcd70c556208e6d8ca0748a47b599bdf1b24476cc3dba6d', // oneShotVerify('make test', baseline/none, slot/none)
+  manifest: 'bf4f9ac1a846a8d8dfc860459e2698d6fe4e8aa1ec4cbe07adbc151929b1828b', // baselineManifest({ knownBaselineFailures: ['t — env'] })
+}
+const P31X = loadEngine(['slotted', 'slotNote', 'slotRule', 'ralphLoop', 'fullSuiteLoop', 'oneShotVerify', 'observeTests', 'reviewTests'])
+// The pre-p31-1 oneShotVerify, verbatim: its renders hash to PRE_P31.oneShot (the p31-1 block checks it).
+function preOneShot(verifier, baseline, slot) {
+  const green = baseline && baseline.length ? `
+- KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; keep running the full verifier, do NOT
+  \`--deselect\`/skip them — that hides real regressions):
+${baseline.map((b) => '  - ' + b).join('\n')}
+- GREEN CRITERION (baseline-aware): the work is verified when EVERY failing test is in the known-baseline
+  set above (fewer is fine — a baseline red going green is GOOD, never a failure; a baseline entry absent
+  from this run is simply ignored).` : `
+- GREEN CRITERION: the verifier exits 0 — the work is verified.`
+  return `
+Verification (ONE-SHOT first pass — you do NOT iterate):
+- Verifier: ${P31X.slotted(verifier, slot)}${P31X.slotNote(slot)}
+- Run the verifier EXACTLY ONCE.${green}
+- If green: the work is verified — proceed.
+- If red (any failure outside the green criterion): do NOT attempt a fix, do NOT run the verifier again,
+  and do NOT open/update a PR. Commit your work so far on the branch (so the next rung inherits it),
+  append a one-paragraph diagnosis of the failure to the task note under a "## Blocker diagnosis"
+  heading, and return escalate=true, verified=false, blocked=false with the same diagnosis in
+  blockerDiagnosis. The next rung up (a stronger model or more effort) picks up your worktree and
+  iterates from there.`.trim()
+}
+// The task calls' manifest tail [new, old]; integratorPrompt (baselineManifest(a, true)) keeps the old one.
+const MANIFEST_P31 = [
+  'Do NOT try to fix them, do NOT flag them as findings, and do NOT `--deselect`/skip them\nfrom any run, touched or full (that would hide a real regression). Only a NEW failure — or a baseline test\nfailing in a way that does not match its listed reason — is yours to act on.',
+  'Do NOT try to fix them, do NOT flag them as findings, and do NOT `--deselect`/skip them (that would hide a\nreal regression). Keep running the full verifier; only a NEW failure — or a baseline test failing in a way\nthat does not match its listed reason — is yours to act on.',
+]
+// p31-1's [new, old, label] fragments for one slot state (undefined: the unslotted calls; the pins' slot: the slotted
+// ones), the way P23_1 holds p23-1's; the slot state matters here, unlike there. The loop pairs are the new loop
+// against fullSuiteLoop (the old one, verbatim: PRE_P31.ralph proves it) and the one-shot pairs the new one against
+// preOneShot; the rest are literal fragments, each old '' anchored on its neighbour. The review judge's slotRule pair
+// is an identity when unslotted: unslot() already takes slotRule out.
+function p31Pairs(slot) {
+  const V = 'make test'
+  const pairs = []
+  for (const n of [2, 3]) {
+    for (const b of [undefined, ['t — env']]) pairs.push([P31X.ralphLoop(V, n, b, slot, ''), P31X.fullSuiteLoop(V, n, b, slot), `loop n=${n}${b ? ' baseline' : ''}`])
+  }
+  for (const b of [undefined, ['t — env']]) pairs.push([P31X.oneShotVerify(V, b, slot, ''), preOneShot(V, b, slot), `one-shot${b ? ' baseline' : ''}`])
+  pairs.push([...MANIFEST_P31, 'manifest'])
+  pairs.push([`   - to capture the baseline, ${P31X.observeTests('the files the plan will change', '', V, slot)}\n`,
+    `   - run the verifier ONCE from the task tree to capture the baseline (\`${P31X.slotted(V, slot)}\`) — observe only, write no fix code\n`, 'planner'])
+  pairs.push([`2. Run the read-only investigation it asks for (greps, reading tests). To OBSERVE tests, ${P31X.observeTests('the files the investigation targets (none when it targets no code)', '', V, slot)}\n`,
+    `2. Run the read-only investigation it asks for (greps, reading tests, and a baseline verifier run to OBSERVE:\n   run it as \`${P31X.slotted(V, slot)}\` from the task tree).\n`, 'investigator'])
+  pairs.push([`do not approve on faith.\nTests: you need not run any. To check a claim, ${P31X.observeTests('the files the plan names', '', V, slot)}\n`,
+    'do not approve on faith.\n', 'plan judge'])
+  pairs.push([`as needed.\nTests: to re-check a baseline or a claim, ${P31X.observeTests('the files your plan will change', '', V, slot)}\nRewrite the plan so that its\n`,
+    'as needed. Rewrite the plan so that its\n', 'plan reviser'])
+  pairs.push([`${P31X.slotRule(V, slot)}\n\nThe PR is authoritative`, '\n\nThe PR is authoritative', 'review judge slotRule'])
+  pairs.push([`anywhere else.\n\n${P31X.reviewTests(V, slot, '')}\n\nRead \``, 'anywhere else.\n\nRead `', 'review judge tests'])
+  return pairs
+}
+// A prompt with every p31-1 fragment swapped back for its old text.
+const preP31 = (p, slot) => p31Pairs(slot).reduce((x, [nw, od]) => x.split(nw).join(od), p)
+// The pairs no pinned call renders: the n=2 loops (a top-rung retry) and the one-shot (every pinned implementer runs
+// on the top rung: proj-fix-p's plan judge climbs it there). They stay in p31Pairs for any other render, and the
+// p31-1 block pins the one-shot against PRE_P31.oneShot; the pins block checks that every other pair renders.
+const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot baseline']
+{
+  const E = loadEngine(['ralphLoop', 'fullSuiteLoop', 'oneShotVerify', 'verifyBlock', 'baselineManifest', 'touchedOf', 'touchedTests',
+    'observeTests', 'reviewTests', 'integrationVerify', 'slotted', 'slotRule', 'slotNote', 'SLOT_TEXT', 'KILL_RULE', 'GIT_ENV_SCRUB',
+    ...RULE_BUILDERS])
+  const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
+  const shaAll = (xs) => sha(xs.join('\n\0\n'))
+  const times = (hay, needle) => hay.split(needle).length - 1
+  const V = 'make test'
+  const SLOT = VERIFY_SLOT
+  const B = ['t — env']
+  const PIN = 'tests/test_{module}.py'
+  const CLAUSE = " the rollout's `touched:` pattern `tests/test_{module}.py`, with `{module}` replaced by each changed module's name; else"
+  const NOTE_WRITE = 'Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.'
+  const ar = { repoPath: '/repo', verifier: V, rolloutSlug: 'r' }
+  const argsOf = (b, s, over = {}) => ({ ...ar, ...(b ? { knownBaselineFailures: b } : {}), ...(s ? { verifySlot: s } : {}), ...over })
+  const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
+  const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
+  const hist = [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }]
+  const stAt = (rung, stages) => {
+    const st = E.rungState({ ...tk, rung }, {})
+    for (const s of stages) E.escalate(st, tk.slug, s)
+    return st
+  }
+  const ST = { bottom: stAt('opus-high', []), climbed: stAt('opus-high', ['implement']), top: stAt('opus-xhigh', ['implement']) }
+  // Every task-call builder, as [name, variant, prompt]: the implementers on the bottom rung (one-shot), after a climb
+  // and on the top rung; the reviser unseeded and seeded (COLD ENTRY); the review judge and the four tree agents.
+  const taskCalls = (a) => [
+    ...['bottom', 'climbed', 'top'].flatMap((k) => [
+      ['implementerPrompt', k, E.implementerPrompt(tk, a, ST[k], '')],
+      ['approvedPlanImplementerPrompt', k, E.approvedPlanImplementerPrompt(tk, 'PLAN', a, ST[k], '')],
+    ]),
+    ['reviserPrompt', 'r2', E.reviserPrompt(tk, im, hist.slice(0, 1), 2, a, '')],
+    ['reviserPrompt', 'seeded', E.reviserPrompt(tk, im, hist, 3, a, '', { history: hist, roundsUsed: 2 })],
+    ['reviewJudgePrompt', '', E.reviewJudgePrompt(tk, im, a, [])],
+    ['plannerPrompt', '', E.plannerPrompt(tk, a, ST.bottom, '')],
+    ['readOnlyPrompt', '', E.readOnlyPrompt(tk, a, ST.bottom, '')],
+    ['planJudgePrompt', '', E.planJudgePrompt(tk, 'PLAN', a)],
+    ['planReviserPrompt', '', E.planReviserPrompt(tk, 'PLAN', hist.slice(0, 1), 2, a)],
+  ]
+  const oneShotOf = (name, k) => k === 'bottom' && (name === 'implementerPrompt' || name === 'approvedPlanImplementerPrompt')
+
+  // 3. Integration unchanged: its two agents hash to their pre-edit pins with args.touched unset, set and refused;
+  // fullSuiteLoop is the old ralphLoop, preOneShot the old one-shot, and the integrator's manifest the old one.
+  for (const touched of [undefined, PIN, 'make test {module}']) {
+    const over = touched === undefined ? {} : { touched }
+    const integ = []
+    for (const b of [undefined, B]) for (const s of [undefined, SLOT]) integ.push(...agentPrompts(E, argsOf(b, s, over)).integratorPrompt)
+    ok(integ.length === 8 && shaAll(integ) === PRE_P31.integrator, `p31-1: integratorPrompt is its pre-p31-1 bytes (2 fixtures × baseline × slot), touched ${JSON.stringify(touched)}`)
+    ok(shaAll(agentPrompts(E, over).integrationReviewPrompt) === PRE_P31.integrationReview, `p31-1: integrationReviewPrompt is its pre-p31-1 bytes, touched ${JSON.stringify(touched)}`)
+  }
+  const loops = []
+  for (const n of [2, 3]) for (const b of [undefined, B]) for (const s of [undefined, SLOT, { ...SLOT, priority: true }]) loops.push(E.fullSuiteLoop(V, n, b, s))
+  ok(shaAll(loops) === PRE_P31.ralph, 'p31-1: fullSuiteLoop is the pre-p31-1 ralphLoop, byte for byte (12 renders)')
+  const shots = []
+  for (const b of [undefined, B]) for (const s of [undefined, SLOT]) shots.push(preOneShot(V, b, s))
+  ok(shaAll(shots) === PRE_P31.oneShot, 'p31-1: preOneShot (the swap-back literal) is the pre-p31-1 oneShotVerify, byte for byte')
+  const aB = argsOf(B)
+  ok(sha(E.baselineManifest(aB, true)) === PRE_P31.manifest, "p31-1: baselineManifest(a, true), the integrator's, is its pre-p31-1 bytes")
+  ok(E.baselineManifest(aB) !== E.baselineManifest(aB, true) && times(E.baselineManifest(aB), MANIFEST_P31[0]) === 1 &&
+    E.baselineManifest(aB).split(MANIFEST_P31[0]).join(MANIFEST_P31[1]) === E.baselineManifest(aB, true),
+  "p31-1: a task call's manifest is the integrator's with exactly the new tail (from any run, touched or full)")
+  ok(E.baselineManifest(ar) === '' && E.baselineManifest(ar, true) === '' && E.baselineManifest(argsOf([]), true) === '', 'p31-1: the manifest is still empty without reds, in both arms')
+  for (const a of [ar, aB, argsOf(undefined, SLOT), argsOf(B, SLOT, { touched: PIN })]) {
+    const want = E.fullSuiteLoop(V, 3, a.knownBaselineFailures, a.verifySlot && { ...a.verifySlot, priority: true })
+      .replace(NOTE_WRITE, 'Write nothing to the task note (the engine records the diagnosis), and push nothing.')
+    ok(E.integrationVerify(tk, a) === want && !want.includes('Touched tests'), `p31-1: integrationVerify is fullSuiteLoop with the note write replaced (baseline ${!!a.knownBaselineFailures}, slot ${!!a.verifySlot}, touched ${!!a.touched})`)
+  }
+
+  // 1. Touched tests in every try: `- Touched tests:` before `- Verifier:`; the loop's step a runs the touched tests,
+  // never the verifier, and step d keeps the note write coldEntryBlock overrides; the one-shot's `EXACTLY ONCE` twice,
+  // and a red touched run skips the verifier. [] when the prompt holds; else what failed.
+  const triesFail = (p, shot) => {
+    const out = []
+    const t = p.indexOf('\n- Touched tests: ')
+    const v = p.indexOf('\n- Verifier: ')
+    if (t < 0 || v < 0 || t > v) out.push('touched tests before the verifier')
+    if (shot) {
+      if (times(p, 'EXACTLY ONCE') !== 2) out.push('EXACTLY ONCE twice')
+      if (!p.includes('- Run the touched tests EXACTLY ONCE. If they are green, run the verifier EXACTLY ONCE') ||
+        !p.includes('if they are red, do NOT run the verifier.')) out.push('a red touched run skips the verifier')
+    } else {
+      if (!p.includes('\n  a. Run the touched tests, never the verifier here.\n')) out.push('step a: the touched tests, never the verifier')
+      if (!p.includes(NOTE_WRITE)) out.push('step d: the note write')
+    }
+    return out
+  }
+  for (const b of [undefined, B]) for (const s of [undefined, SLOT]) {
+    const a = argsOf(b, s)
+    const coders = taskCalls(a).filter(([name]) => ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt'].includes(name))
+    ok(coders.length === 8 && coders.every(([name, k, p]) => triesFail(p, oneShotOf(name, k)).length === 0),
+      `p31-1: every implementer, approved-plan implementer and reviser runs the touched tests in its tries (baseline ${!!b}, slot ${!!s})`)
+    const seeded = coders.find(([, k]) => k === 'seeded')[2]
+    ok(seeded.includes('COLD ENTRY') && seeded.includes("this overrides the verification loop's last step") && seeded.includes(NOTE_WRITE),
+      "p31-1: the seeded reviser's COLD ENTRY still has step d's note write to override")
+  }
+  ok(triesFail(E.fullSuiteLoop(V, 3, undefined), false).length === 2 && triesFail(E.fullSuiteLoop(V, 3, B), false).length === 2,
+    "p31-1 control: fullSuiteLoop's text fails the touched check (no touched tests, the verifier at step a)")
+  {
+    const p = E.implementerPrompt(tk, ar, ST.climbed, '')
+    const spliced = p.replace(E.ralphLoop(V, 3, undefined, undefined, ''), E.fullSuiteLoop(V, 3, undefined))
+    ok(spliced !== p && triesFail(spliced, false).length > 0, 'p31-1 control: an implementer with the old loop spliced in fails the touched check')
+  }
+
+  // 2. The verifier once, at the end: step b runs it only when the touched tests pass, as the last check before the
+  // PR; the loop never renders `EXACTLY ONCE` and names one verifier run.
+  const endFails = (loop) => {
+    const out = []
+    const ia = loop.indexOf('\n  a. Run the touched tests')
+    const ib = loop.indexOf('\n  b. When they ')
+    const ic = loop.indexOf('\n  c. On a ')
+    if (!(ia > -1 && ib > ia && ic > ib)) out.push('steps a, b, c in order')
+    else if (!/^\n {2}b\. When they (pass|are green), run the verifier ONCE, as your last check before you open or update the PR \(a\n {5}Checkpoint, estate ADR 0009 d1\)\./.test(loop.slice(ib, ic))) {
+      out.push('step b: the verifier once, when the touched tests pass, as the check before the PR')
+    }
+    if (loop.includes('EXACTLY ONCE') || loop.includes('ONE-SHOT')) out.push('no one-shot marker')
+    if (times(loop, 'run the verifier') !== 1) out.push('one verifier step')
+    return out
+  }
+  const ends = []
+  for (const n of [1, 2, 3]) for (const b of [undefined, [], B]) for (const s of [undefined, SLOT]) for (const t of [undefined, '', PIN]) ends.push(...endFails(E.ralphLoop(V, n, b, s, t)))
+  ok(ends.length === 0, 'p31-1: in every ralphLoop render the verifier runs once, only when the touched tests pass, as the check before the PR')
+  ok(endFails(E.fullSuiteLoop(V, 3, undefined)).length > 0 && endFails(E.fullSuiteLoop(V, 3, B)).length > 0, 'p31-1 control: fullSuiteLoop fails the verifier-at-the-end check')
+
+  // 4. touchedOf, touchedTests and observeTests.
+  for (const g of [PIN, 'skills/{module}/tests/*.test.mjs', 'src/{module}/__tests__/{module}.test.ts', 'pkg/{module}/{module}_test.go',
+    'test/[a-z]*/{module}.spec.js', '@scope/{module}/t?st/a+b,c=1:2~3.js', '{module}', 'x'.repeat(192) + '{module}']) {
+    ok(E.touchedOf({ touched: g }) === g, `touchedOf: accepts ${JSON.stringify(g.length > 40 ? g.slice(0, 12) + '…' : g)} (${g.length} chars)`)
+  }
+  for (const [what, v] of [['an object (unquoted YAML {module})', { module: null }], ['a number', 7], ['an array', [PIN]], ['null', null],
+    ['undefined', undefined], ['empty', ''], ['no {module}', 'tests/test_x.py'], ['a space', 'tests/test {module}.py'], ['a command', 'make test {module}'],
+    ['a tab', 'tests/\t{module}.py'], ['a single quote', "tests/'{module}'.py"], ['a double quote', 'tests/"{module}".py'], ['a $', '$HOME/{module}.py'],
+    ['a $(…)', 'tests/$(x){module}'], ['a ;', 'tests/{module}.py;rm'], ['a |', 'tests/{module}.py|x'], ['a &', 'tests/{module}.py&x'],
+    ['a backslash', 'tests\\{module}.py'], ['a backtick', 'tests/`{module}`.py'], ['a newline', 'tests/{module}.py\nx'], ['a trailing newline', PIN + '\n'],
+    ['a NUL', 'tests/{module}\u0000.py'], ['a DEL', 'tests/{module}\u007f.py'], ['201 characters', 'x'.repeat(193) + '{module}']]) {
+    ok(E.touchedOf({ touched: v }) === '', `touchedOf: refuses ${what}`)
+  }
+  ok(E.touchedOf(undefined) === '' && E.touchedOf(null) === '' && E.touchedOf({}) === '', 'touchedOf: no args.touched ⇒ ""')
+  const F = 'the files your diff changes, plus any test file you add or edit'
+  const t0 = E.touchedTests('', F)
+  const t1 = E.touchedTests(PIN, F)
+  ok(times(t1, CLAUSE) === 1 && t1.split(CLAUSE).join('') === t0 && E.touchedTests(undefined, F) === t0,
+    'touchedTests: the pinned text is the unpinned one plus exactly the pin clause, the pattern in a code span')
+  ok(!t0.includes('\n') && t0.startsWith(`the test files that reach ${F}.`) && t0.includes("the Tests line of the repo's own `CLAUDE.md` or `AGENTS.md`") &&
+    t0.includes(`\`${E.GIT_ENV_SCRUB} git grep -l '<module or file name>'\``) && t0.includes('never the verifier line, and never the whole suite under another command') &&
+    t0.includes('(a docs-only change), there are none'), 'touchedTests: one line; the repo Tests line, else a scrubbed git grep; never the verifier or the whole suite; none for a docs-only change')
+  ok(t1.indexOf('`touched:`') < t1.indexOf('the Tests line') && t1.indexOf('the Tests line') < t1.indexOf('git grep'), 'touchedTests: the sources in order: the pin, the repo Tests line, the imports')
+  for (const s of [undefined, SLOT]) for (const t of ['', PIN]) {
+    const o = E.observeTests('the files the plan names', t, V, s)
+    ok(!o.includes(E.SLOT_TEXT) && !/EXACTLY ONCE|ONE-SHOT|Max iterations/.test(o) && times(o, E.slotted(V, s)) === 1 &&
+      o.startsWith(`run only the touched tests: ${E.touchedTests(t, 'the files the plan names')} Run them at most once, write no fix code`) &&
+      o.endsWith(`run the verifier (\`${E.slotted(V, s)}\`) only when the task brief asks for a full-suite baseline.`),
+    `observeTests: touched tests, then the verifier only when the brief asks; no SLOT_TEXT and no one-shot or loop marker (slot ${!!s}, pin ${!!t})`)
+  }
+  const pinned = taskCalls(argsOf(undefined, undefined, { touched: PIN }))
+  ok(pinned.length === 13 && pinned.every(([, , p]) => times(p, CLAUSE) === 1), 'p31-1: args.touched reaches every task-call builder, once')
+  ok(taskCalls(ar).every(([, , p]) => !p.includes('`touched:`')), 'p31-1: no task-call builder names a pin when args.touched is unset')
+  const integPinned = agentPrompts(E, { touched: PIN })
+  ok([...integPinned.integratorPrompt, ...integPinned.integrationReviewPrompt].every((p) => !p.includes('`touched:`') && !p.includes('Touched tests')), "p31-1: Integration's prompts never read args.touched")
+
+  // 5. The review judge: slotRule right after KILL_RULE; the tests block runs touched tests only, its tidy span is
+  // scrubbed, and its one verifier line outside slotRule sits in the only-when-asked clause.
+  for (const b of [undefined, B]) for (const s of [undefined, SLOT]) {
+    const p = E.reviewJudgePrompt(tk, im, argsOf(b, s), [])
+    const rule = E.slotRule(V, s)
+    const line = E.slotted(V, s)
+    const outside = p.split(rule).join('')
+    ok(p.includes(E.KILL_RULE + rule + '\n\nThe PR is authoritative'), `p31-1: the review judge carries slotRule right after KILL_RULE (baseline ${!!b}, slot ${!!s})`)
+    ok(p.includes(`anywhere else.\n\n${E.reviewTests(V, s, '')}\n\nRead \``) && p.includes('To check a claim, run only the touched tests: ') &&
+      p.includes('Run them in the task tree only when the read rule above lets you read it there'),
+    `p31-1: the review judge's tests block follows its read-only paragraph and runs touched tests only (baseline ${!!b}, slot ${!!s})`)
+    ok(times(outside, line) === 1 && outside.includes(`Never run the verifier unless the task brief asks the review for the full suite; then run exactly\n\`${line}\`, once.`),
+      `p31-1: the review judge's only verifier line outside slotRule is the only-when-asked clause (baseline ${!!b}, slot ${!!s})`)
+    ok(E.reviewTests(V, s, '').includes(`\`${E.GIT_ENV_SCRUB} git -C "<task tree>" status --porcelain\``) && !E.reviewTests(V, s, '').includes(E.SLOT_TEXT),
+      `p31-1: the review judge's before/after tidy span is scrubbed, and its tests block holds no SLOT_TEXT (slot ${!!s})`)
+  }
+
+  // 6. The four TASK_TREE_RULE agents observe with observeTests over their own files: one verifier line outside
+  // slotRule, in the only-when-asked clause; slotRule still right after KILL_RULE; no old observe-with-the-verifier text.
+  const TREE_FILES = {
+    plannerPrompt: 'the files the plan will change', readOnlyPrompt: 'the files the investigation targets (none when it targets no code)',
+    planJudgePrompt: 'the files the plan names', planReviserPrompt: 'the files your plan will change',
+  }
+  for (const s of [undefined, SLOT]) for (const t of [undefined, PIN]) {
+    const byName = Object.fromEntries(taskCalls(argsOf(undefined, s, t ? { touched: t } : {})).map(([name, , p]) => [name, p]))
+    const rule = E.slotRule(V, s)
+    const line = E.slotted(V, s)
+    for (const [name, files] of Object.entries(TREE_FILES)) {
+      const p = byName[name]
+      const outside = p.split(rule).join('')
+      ok(p.includes(E.observeTests(files, t || '', V, s)) && times(outside, line) === 1 &&
+        outside.includes(`run the verifier (\`${line}\`) only when the task brief asks for a full-suite baseline`) && p.includes(E.KILL_RULE + rule) &&
+        !p.includes('run the verifier ONCE') && !p.includes('a baseline verifier run'),
+      `p31-1: ${name} observes with its own touched tests, the verifier only when the brief asks, slotRule after KILL_RULE (slot ${!!s}, pin ${!!t})`)
+    }
+  }
+
+  // 7. The full-verifier sweep over every task-call builder × baseline × slot. Code-writers render exactly one
+  // verifier line, the `- Verifier:` line; the review judge and the tree agents exactly one outside slotRule, in their
+  // only-when-asked clause; no task call says "full verifier" or "Keep running"; a baseline manifest rules out
+  // skipping the reds from any run, touched or full; only the bottom-rung implementers render the one-shot.
+  const ROLE = {
+    implementerPrompt: 'coder', approvedPlanImplementerPrompt: 'coder', reviserPrompt: 'coder', reviewJudgePrompt: 'judge',
+    plannerPrompt: 'tree', readOnlyPrompt: 'tree', planJudgePrompt: 'tree', planReviserPrompt: 'tree',
+  }
+  const MANIFESTED = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'reviewJudgePrompt', 'plannerPrompt', 'readOnlyPrompt']
+  // [] when every prompt holds; else `<check>: <name> <variant>`.
+  const sweepFails = (entries, a) => {
+    const out = []
+    const line = E.slotted(V, a.verifySlot)
+    const rule = E.slotRule(V, a.verifySlot)
+    const based = !!(a.knownBaselineFailures && a.knownBaselineFailures.length)
+    for (const [name, k, p] of entries) {
+      const at = k ? `${name} ${k}` : name
+      if (/full verifier/i.test(p) || p.includes('Keep running')) out.push(`full verifier: ${at}`)
+      if (based && MANIFESTED.includes(name) && !p.includes('from any run, touched or full')) out.push(`manifest: ${at}`)
+      if (ROLE[name] === 'coder') {
+        const lines = p.split('\n').filter((l) => l.includes(line))
+        if (times(p, line) !== 1 || lines.length !== 1 || lines[0] !== `- Verifier: ${line}`) out.push(`verifier lines: ${at}`)
+      } else if (ROLE[name]) {
+        const outside = p.split(rule).join('')
+        const clause = ROLE[name] === 'judge'
+          ? `Never run the verifier unless the task brief asks the review for the full suite; then run exactly\n\`${line}\`, once.`
+          : `run the verifier (\`${line}\`) only when the task brief asks for a full-suite baseline`
+        if (times(outside, line) !== 1 || !outside.includes(clause)) out.push(`verifier lines: ${at}`)
+      }
+      const marked = p.includes('EXACTLY ONCE') || p.includes('ONE-SHOT')
+      if (oneShotOf(name, k) ? !(p.includes('EXACTLY ONCE') && p.includes('ONE-SHOT')) : marked) out.push(`one-shot: ${at}`)
+    }
+    return out
+  }
+  for (const b of [undefined, B]) for (const s of [undefined, SLOT]) {
+    const a = argsOf(b, s)
+    const entries = taskCalls(a)
+    ok(entries.length === 13 && JSON.stringify(sweepFails(entries, a)) === '[]',
+      `p31-1 sweep: every task call runs the verifier only at its Checkpoint or when asked, and never says "full verifier" (baseline ${!!b}, slot ${!!s})`)
+  }
+  // controls: each fails exactly its check
+  ok(JSON.stringify(sweepFails([['integratorPrompt', '', agentPrompts(E, { knownBaselineFailures: B }).integratorPrompt[0]]], aB)) === '["full verifier: integratorPrompt"]',
+    'p31-1 sweep control: the integrator with a baseline still says "Keep running the full verifier", and fails')
+  {
+    const p = E.implementerPrompt(tk, aB, ST.top, '')
+    const spliced = p.replace(E.ralphLoop(V, 3, B, undefined, ''), E.fullSuiteLoop(V, 3, B))
+    ok(spliced !== p && JSON.stringify(sweepFails([['implementerPrompt', 'top', spliced]], aB)) === '["full verifier: implementerPrompt top"]',
+      "p31-1 sweep control: a prompt with fullSuiteLoop's baseline text spliced in fails the full-verifier check")
+    const planner = E.plannerPrompt(tk, aB, ST.bottom, '')
+    const [newBullet, oldBullet] = p31Pairs(undefined).find(([, , label]) => label === 'planner')
+    const old = planner.replace(newBullet, oldBullet)
+    ok(old !== planner && JSON.stringify(sweepFails([['plannerPrompt', '', old]], aB)) === '["verifier lines: plannerPrompt"]',
+      'p31-1 sweep control: a planner with the old run-the-verifier-ONCE bullet fails the verifier-line check')
+  }
+
+  // 8. runTask: a refused args.touched is logged once and read as absent (the call still dispatches); a good one reaches
+  // the implementer; integrate mode neither reads nor logs it.
+  const LADDER1 = { source: 'built-in', rungs: [{ name: 'opus-high', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh' }] }
+  const mkRun = (over = {}) => ({
+    rolloutSlug: 'r', repoPath: '/repo', verifier: V, date: '2026-10-26', ladder: LADDER1, verifySlot: SLOT,
+    task: { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', scope: 'single-file', planGate: false, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3 },
+    ...over,
+  })
+  const green = async (prompt, opts) => opts.label.startsWith('review:')
+    ? { verdict: 'approve', feedback: [] }
+    : { verified: true, blocked: false, escalate: false, prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, blockerDiagnosis: '', summary: 's' }
+  const REFUSED = /^touched: refusing .+ — the rollout's touched-tests pattern is off for this call \(estate ADR 0009 d1\)$/
+  const plain = await runTask(mkRun(), green)
+  const implOf = (r) => r.calls.find((c) => c.label.startsWith('implement:'))
+  ok(!plain.error && implOf(plain) && plain.logs.every((l) => !l.startsWith('touched:')), 'runTask: no args.touched ⇒ no touched log line')
+  for (const [what, v] of [['an object', { module: null }], ['no {module}', 'tests/test_x.py'], ['a command', 'make test {module}'], ['a backtick', 'tests/`{module}`.py']]) {
+    const r = await runTask(mkRun({ touched: v }), green)
+    ok(!r.error && r.logs.filter((l) => REFUSED.test(l)).length === 1 && r.logs.filter((l) => l.startsWith('touched:')).length === 1 &&
+      implOf(r) && JSON.stringify(r.calls) === JSON.stringify(plain.calls),
+    `runTask: a refused touched (${what}) is logged once and read as absent; the call still dispatches`)
+  }
+  const pinnedRun = await runTask(mkRun({ touched: PIN }), green)
+  ok(!pinnedRun.error && pinnedRun.logs.every((l) => !l.startsWith('touched:')) && implOf(pinnedRun).prompt.includes(CLAUSE) &&
+    pinnedRun.calls.find((c) => c.label.startsWith('review:')).prompt.includes(CLAUSE), 'runTask: a good touched reaches the implementer and the review judge, unlogged')
+  const H = (c) => c.repeat(40)
+  const I = {
+    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
+    landed: [], reviewHistory: [{ round: 1, feedback: ['fix it'] }], reviewRoundsUsed: 1,
+    rung: { startRung: 'opus-high', rung: 'opus-high', climbs: [] }, startedAt: '2026-10-26T10:00:00Z',
+  }
+  const integrate = (over) => runTask(mkRun({ mode: 'integrate', integration: I, ...over }), async () => { throw new Error('stub') })
+  const i0 = await integrate({})
+  for (const v of [PIN, 'make test {module}', { module: null }]) {
+    const r = await integrate({ touched: v })
+    ok(i0.calls.length > 0 && JSON.stringify(r.calls) === JSON.stringify(i0.calls) && JSON.stringify(r.logs) === JSON.stringify(i0.logs),
+      `runTask (integrate mode): prompts and logs are unchanged with touched ${JSON.stringify(v)}`)
   }
 }
 
@@ -1230,6 +1604,15 @@ function agentPrompts(E) {
 // judge's pricing fragment renders '' and its schema stays PLAN_JUDGE. The rows hash did not move (no row field
 // changed, and no log line of these calls names ADR 0038); taskTreeSetup and the default-branch GOLDENs read none of
 // these fragments. Like KILL_RULE, a deliberate resume-cache break: a resume re-passes its run's own `scriptPath`.
+// Re-pinned on purpose by p31-1 (estate ADR 0009 d1: the full suite is a Checkpoint), the reviser pins, the calls hash
+// and the slotted calls hash: each Ralph try runs the touched tests and the verifier once, before the PR; the one-shot
+// runs the verifier only when the touched tests are green; the task calls' manifest rules out skipping the reds from
+// any run, touched or full; the planner, investigator, plan judge and plan reviser observe with touched tests; and the
+// review judge gains slotRule and a tests block. p31Pairs (above, by slot state) holds each [new, old] fragment: the
+// calls and revisers with every new fragment swapped back hash to the p23-1 pins (4f524ab6…, 986d4024… slotted,
+// c3efcd93…, 97ff33a1…), and every older base chains on top of that. The rows, taskTreeSetup and the default-branch
+// GOLDENs did not move. A deliberate resume-cache break, like p23-1's: every task-call prompt changed, and so did
+// IMPL_RESULT's escalate description (those calls' opts); a resume re-passes its run's own `scriptPath` (ADR 0043).
 const P23_1 = [ // [new, old]
   ["   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") at column 0 per human authorisation the task\n                          needs: \"- spend: <what> — cap N USD\" (a hard cap is mandatory: ONE line whose Cap\n                          holds the whole spend, optionally with \"total\", a month, or \"per Login per month\n                          across K Logins\"), \"- credential: <what>\", \"- irreversible: <what>\"; or exactly\n                          \"None\". BULLETS ONLY — no prose or footnotes in this section: the engine reads only\n                          list lines, and anything else is rejected. How a spend splits (run counts, per-call\n                          limits, iterations) goes in sub-bullets nested two spaces under its gate: commentary\n                          the engine never prices, which the Cap must hold. A non-empty declaration pauses the\n                          task for human sign-off —\n                          ",
     "   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") per human authorisation the task needs:\n                          \"- spend: <what> — cap <amount>\" (a hard cap is mandatory), \"- credential: <what>\",\n                          \"- irreversible: <what>\"; or exactly \"None\". BULLETS ONLY — no prose, commentary,\n                          or footnotes in this section: the engine reads only list lines, and anything else\n                          is rejected. A non-empty declaration pauses the task for human sign-off —\n                          "], // planner
@@ -1258,12 +1641,21 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   const aR = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
   const h2 = [{ round: 1, feedback: ['a'] }, { round: 2, feedback: ['b'] }]
   const KILL = '\n\n' + loadEngine(['KILL_RULE']).KILL_RULE
-  const r2 = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
-  const r3 = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
+  const r2new = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
+  const r3new = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
+  ok(sha(r2new) === '374e906824ad7084edb4fbc730580bdb48ab7b619f0e52e36e4ad6c0113f68bf',
+    'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p31-1: the p31-1 base below plus the touched-tests loop)')
+  ok(sha(r3new) === 'fb6fe8de3e62f74d396361f49f78be5d7fb4f7e46168cf99ca0705b7c56d2650',
+    'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p31-1)')
+  ok(preP31(r2new) !== r2new && preP31(r3new) !== r3new, 'p31-1: both revisers render a p31-1 fragment (the loop), so the swap is no no-op')
+  // The p31-1 base: the revisers with p31-1's fragments swapped back are their pre-p31-1 bytes (the p23-1 pins), and
+  // every older base below chains on top of it.
+  const r2 = preP31(r2new)
+  const r3 = preP31(r3new)
   ok(sha(r2) === 'c3efcd934c7a8cb35159177c8786d920092e9ed721e1ae21c609a7413111a703',
-    'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p23-1: the p23-1 base below plus the ADR 0038 edits)')
+    'byte pin (p31-1 base): the round-2 reviser with the p31-1 fragments swapped back is its pre-p31-1 bytes (p23-1 pin)')
   ok(sha(r3) === '97ff33a14d2b551893ee237975369c7e5947db49345828a7f09a6978123c413c',
-    'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p23-1)')
+    'byte pin (p31-1 base): the round-3 reviser with the p31-1 fragments swapped back is its pre-p31-1 bytes (p23-1 pin)')
   ok(preP23(r2) !== r2 && preP23(r3) !== r3, 'p23-1: both revisers render a p23-1 fragment (GATED_INPUTS_CHECK), so the swap is no no-op')
   ok(sha(preP23(r2)) === '7c82d98ade2ee614902acc1de14809c93e8a1c029fe1d2ac4a3e370e5b307f33',
     'byte pin (p23-1 base): the round-2 reviser with the ADR 0038 fragments swapped back is its pre-p23-1 bytes (p18-1 pin)')
@@ -1308,6 +1700,8 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   const calls = []
   const rows = []
   const p23Calls = []
+  const p31Calls = []
+  const slottedP31Calls = []
   const logs = []
   const baseCalls = []
   const oldCalls = []
@@ -1320,14 +1714,18 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   ]) {
     const r = await runTask(args, scripted)
     slottedCalls.push(JSON.stringify(r.calls))
+    slottedP31Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP31(c.prompt, PIN_SLOT) }))))
     ok(r.calls.length > 0 && r.calls.every((c) => !c.prompt.includes(SL.scrubbed('make test'))), `ADR 0009 d4: ${args.task.slug}: no prompt renders the bare verifier`)
     r.calls = r.calls.map((c) => ({ ...c, prompt: unslot(c.prompt) }))
     calls.push(JSON.stringify(r.calls))
     rows.push(JSON.stringify({ result: r.result, err: r.error && String(r.error) }))
     logs.push(...r.logs)
-    p23Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP23(c.prompt) }))))
-    baseCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP23(c.prompt).replace(KILL, '') }))))
-    oldCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP23(c.prompt).replace(KILL, '').replace(RULE, '') }))))
+    // Every older base chains on top of the p31-1 one: the calls with p31-1's fragments swapped back.
+    const pre = r.calls.map((c) => ({ ...c, prompt: preP31(c.prompt) }))
+    p31Calls.push(JSON.stringify(pre))
+    p23Calls.push(JSON.stringify(pre.map((c) => ({ ...c, prompt: preP23(c.prompt) }))))
+    baseCalls.push(JSON.stringify(pre.map((c) => ({ ...c, prompt: preP23(c.prompt).replace(KILL, '') }))))
+    oldCalls.push(JSON.stringify(pre.map((c) => ({ ...c, prompt: preP23(c.prompt).replace(KILL, '').replace(RULE, '') }))))
     const base = JSON.parse(JSON.stringify(r.result))
     for (const row of base.tasks) delete row.reviewVerdicts
     baseRows.push(JSON.stringify({ result: base, err: r.error && String(r.error) }))
@@ -1352,13 +1750,25 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   ok(logs.every((l) => !l.includes('ADR 0038')), 'p23-1: no log line of these calls names ADR 0038 (no gatePricer, no bounce)')
   ok(sha(p23Calls.join('\n')) === '1e51b62c997f39814ea75373fe38d97955c596ce77c7aa63762a4ab5c230cacc',
     'byte pin (p23-1 base): the same calls with the ADR 0038 fragments swapped back are the pre-p23-1 bytes (the p18-1 calls pin)')
-  ok(sha(calls.join('\n')) === '4f524ab665ea21cfbacd5db589bcb09d63bb45d1f4420fbe82053dde19e680f0',
-    'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p23-1: the p23-1 base above plus the ADR 0038 edits)')
+  ok(sha(p31Calls.join('\n')) === '4f524ab665ea21cfbacd5db589bcb09d63bb45d1f4420fbe82053dde19e680f0',
+    'byte pin (p31-1 base): the same calls with the p31-1 fragments swapped back are the pre-p31-1 bytes (the p23-1 calls pin)')
+  ok(sha(calls.join('\n')) === 'a1d2230ecbb99de770aa3507d3094991991e1d0d54749ad11ce12e65a42a013c',
+    'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p31-1: the p31-1 base above plus the touched-tests fragments)')
+  // Each p31-1 pair these calls can render renders here, so its swap is no no-op; the matrix-only pairs render nowhere.
+  for (const [slot, hay, which] of [[undefined, calls, 'unslotted'], [PIN_SLOT, slottedCalls, 'slotted']]) {
+    for (const [nw, od, label] of p31Pairs(slot)) {
+      if (nw === od) continue
+      const seen = hay.some((c) => c.includes(JSON.stringify(nw).slice(1, -1)))
+      ok(P31_MATRIX_ONLY.includes(label) ? !seen : seen, `p31-1: the ${label} pair ${P31_MATRIX_ONLY.includes(label) ? 'is in no pinned call' : 'renders in these calls'} (${which}), so its swap is no no-op`)
+    }
+  }
   ok(sha(rows.join('\n')) === '0137cf70ddf1d5131b4511462f43f1d639311e6b4ada4016af30a2269bd563d4',
     'byte pin: three whole task-mode calls — every row, rung record and reviewVerdicts included (re-pinned by p21-3: the p21-3 base above plus reviewVerdicts)')
   ok(slottedCalls.join('\n') !== calls.join('\n'), 'ADR 0009 d4: the slot is in these calls, so taking it out is no no-op')
-  ok(sha(slottedCalls.join('\n')) === '986d4024967d3b0c2cd38db5372fcf6637fb5102e2319c75d28444cba44a1f3c',
-    'byte pin (estate ADR 0009 d4): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
+  ok(sha(slottedP31Calls.join('\n')) === '986d4024967d3b0c2cd38db5372fcf6637fb5102e2319c75d28444cba44a1f3c',
+    'byte pin (p31-1 base, slotted): the slotted calls with the p31-1 fragments swapped back are the pre-p31-1 bytes (the estate ADR 0009 d4 pin)')
+  ok(sha(slottedCalls.join('\n')) === '8cea7327800a2c148ca6ed61230163b5f96a9253cedaa6c67fb61f757bc35acf',
+    'byte pin (estate ADR 0009 d4; re-pinned by p31-1): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
 }
 
 console.log()
