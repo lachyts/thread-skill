@@ -28,6 +28,7 @@ export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$tmp/events}"   # the Run re
 export THREAD_NOTE_LOCK_DIR="${tmp}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_VERIFY_SLOTS_DIR="$tmp/slots"                          # never the machine's real pool
 export THREAD_VERIFY_SLOT_POLL=0.1
+export THREAD_HEAT_LEVEL=0                                           # the Heat hold's reading, pinned (tests/verify-slot-heat.test.sh unpins it)
 VS="$root/skills/execute/scripts/verify-slot.py"
 LI="$root/skills/execute/scripts/lead-integrate.py"
 u=$(printf %07d $$)

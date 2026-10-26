@@ -54,6 +54,9 @@ export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$scratch/events}"; unset XDG
 # The machine's verify slots (verify-slot.py, p23-4) stay in temp too: each suite that reaches a pool exports its
 # own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
 export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
+# The Heat hold's reading (verify-slot.py heat_level, estate ADR 0009 d5) is pinned at nominal, so a hot Mac never
+# flips an assertion and an inner `make test` never waits on the real heat; each suite that reaches it pins it too.
+export THREAD_HEAT_LEVEL=0
 # The note save lock (reconcile-rollout.py's _note_lock_path): one lock file per note directory, in temp like the rest.
 export THREAD_NOTE_LOCK_DIR="$scratch/note-locks"
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"

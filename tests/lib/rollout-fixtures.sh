@@ -1,3 +1,7 @@
+# The Heat hold's reading (verify-slot.py heat_level, estate ADR 0009 d5), pinned for every suite that sources this:
+# a hot Mac never flips an assertion on `next`.
+export THREAD_HEAT_LEVEL=0
+
 # prollout <tasks-dir> [<frontmatter line>]: a started protocol-5 rollout note, demo-rollout-2026-10-03 (a
 # linked task carries owner:, a lead's mark), for ADR 0031's hold. The extra line (e.g. `paused: …`) goes in
 # the rollout note's frontmatter. Sourced by tests that need `unfinished-rollout.py running` to list one.

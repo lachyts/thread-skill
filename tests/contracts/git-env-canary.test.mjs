@@ -41,8 +41,9 @@ const [LOG, TRIP, ACK] = consts
 const C3_ITEM5 = "5. for a RACE only, the lead's re-verify verdict, so Lachy decides with it on screen: the owner session's halt\n" +
   "   reason (`RACE: origin/<default> fails the verifier`), and the verdict file\n" +
   "   `<repoPath>/.claude/integration/race-<slug>.rc` (`0` green; any other rc red, `124` a timeout; `noslot`\n" +
-  "   never ran (no verify slot came in time); absent: it never finished, which reads as red) with the tail of\n" +
-  '   `race-<slug>.log` beside it. An UNVERIFIED task was never re-verified: say so.'
+  "   never ran (no verify slot came in time); `heat` no verdict (the Mac was too hot, the Heat hold); absent: it\n" +
+  "   never finished, which reads as red) with the tail of `race-<slug>.log` beside it. An UNVERIFIED task\n" +
+  '   was never re-verified: say so.'
 // Heartbeat clause (4), byte for byte: the merge-result rule reaches it through "act on it as §4.5 would".
 const HB4 = '(4) If a background Integration command this session launched (the verifier, merge-task.sh, a backoff; never the completion verify\'s `--run`, which writes no result file: the stall clause below re-enters it) has not ' +
   'reported: when its result file exists (`<out>.rc`, or `.claude/merge-task.status`), act on it as §4.5 would; otherwise do nothing more.'

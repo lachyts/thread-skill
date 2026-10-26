@@ -41,6 +41,7 @@ git config --global init.defaultBranch master; git config --global advice.detach
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$T/events}"   # the Run record (run_record.py) stays in temp
 export THREAD_NOTE_LOCK_DIR="$T/note-locks" THREAD_GIT_ENV_DIR="$T/git-env" THREAD_LEG_LOCK_DIR="$T/leg-locks"
 export THREAD_VERIFY_SLOTS_DIR="$T/verify-slots" TMPDIR="$T/tmp"
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 mkdir -p "$TMPDIR" "$T/bin"
 printf '#!/bin/sh\necho "gh $*" >> "%s/gh.log"\nexit 1\n' "$T" > "$T/bin/gh"; chmod +x "$T/bin/gh"
 export PATH="$T/bin:$PATH"

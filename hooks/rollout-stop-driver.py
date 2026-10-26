@@ -16,8 +16,10 @@ falling back to a transcript scan for history, and:
               command or a merge hold is in flight, or a retry cool-down,
               quota or infra, is pending (execute §4.5 step 1.5, ADR 0033),
               or a Trickle wait stands (`next` holds a task on the machine-wide
-              Trickle, execute §4.5 step 1.6, Chorus ADR 0104); its
-              notification or the heartbeat cron is the wake signal)
+              Trickle, execute §4.5 step 1.6, Chorus ADR 0104), or a Heat hold
+              stands (`heat: …`: the Mac is too hot to start a task, estate
+              ADR 0009 d5); its notification or the heartbeat cron is the wake
+              signal)
   halted   -> allow + clear driver state (a §7 stop condition; human's turn)
   done     -> allow + clear driver state (completion ceremony performed)
   (none)   -> allow (not a rollout-driving session)
@@ -209,7 +211,8 @@ def main():
             f"`ROLLOUT-STATUS: {slug} merged=<K>/{total} running=<R> state=waiting` while a call, a "
             "background Integration command or a merge hold is in flight, a retry cool-down is pending "
             "(with its reason=\"…\", §4.5 step 1.5) or a Trickle wait stands (`next` holds a task on the "
-            "Trickle, with its reason=\"trickle: …\", §4.5 step 1.6), state=halted with reason=\"…\" if a §7 stop "
+            "Trickle, with its reason=\"trickle: …\", §4.5 step 1.6) or a Heat hold stands (`heat: …`, the "
+            "same wait), state=halted with reason=\"…\" if a §7 stop "
             "condition fired, or state=done after the completion ceremony. Do not end the turn while "
             "state=running."
         ),

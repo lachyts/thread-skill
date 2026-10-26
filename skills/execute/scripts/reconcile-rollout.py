@@ -63,6 +63,10 @@ Subcommands:
               restart stops at the ceiling only. A row held there reads `trickle: <running>/<N> tasks running on
               this Mac`, and while one is, `halt` stays null. A stale or unreadable state file prints one `WARN:
               ~/.config/thread/away.json …` line on stderr, --dry-run included.
+              The Heat hold (estate ADR 0009 d5; Heat hold, below): `heat` ({level, name}) follows `trickle`. At
+              heavy or worse `slotLimit` is 0, Away too, so nothing new starts; a restart stops at the ceiling only. A
+              row held there reads `heat: the Mac is hot (<name>)` (a full ceiling still reads `ceiling:`), and while
+              one is, `halt` stays null.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -419,8 +423,8 @@ Subcommands:
               repo is the note's `Project root:` (none: exit 1); tree and out the attempt's own
               `<repo>/.claude/worktrees/completion-<rollout>-<n>` and
               `<repo>/.claude/integration/completion-<rollout>-<n>`; streak the `noslot` and `unrun` lines at the
-              log's tail (a `stopped` one skipped); followup the fix task's stem once red; summary the Completion
-              log's one line once decided.
+              log's tail (a `stopped` or `heat` one skipped); followup the fix task's stem once red; summary the
+              Completion log's one line once decided.
               --run owns one attempt end to end under that lock (retried for 2 s past a reader's probe), held for
               its whole life (the lead launches it in the background and reads again when it ends). Decided already,
               it runs nothing. Otherwise, under the lock it reads the note again, clears a dead run's tree, resolves
@@ -431,7 +435,8 @@ Subcommands:
               `--timeout <completion_timeout>`, the slot wait max(60, 7200 - 600 - completion_timeout - the seconds
               --run has spent so far), the env_bootstrap), checks the window once, and classifies the run from
               verify's outcome file alone, never its log's text: no outcome, `running`, `bootstrap`, or a deadline
-              in the env_bootstrap is `unrun`; `noslot` is `noslot`; `signal` is `stopped`; a deadline in the
+              in the env_bootstrap is `unrun`; `noslot` is `noslot`; `heat` (the Heat hold outlasted the slot wait:
+              the Mac was too hot to run the suite) is `heat`; `signal` is `stopped`; a deadline in the
               verifier is red at once, since a timeout names no failing test and is never a Flake (ADR 0050); `done`
               with rc 0 is green on attempt 1 and a Flake on attempt 2 (recorded, no task); any other `done` is
               `rerun` on attempt 1 (its line naming up to ten failing ids read from the log, the Flake log ADR 0050
@@ -610,7 +615,7 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     (the writer appends it to both files).
   next              (not --dry-run) paused mode=soft when it stamps `paused:`; idle-slots {reason, free,
                     settings} when free = ceiling - (slotsInUse + starts) > 0 and halt is not complete,
-                    done or empty (free stays the ceiling's, never the Trickle's).
+                    done or empty (free stays the ceiling's, never the Trickle's or the Heat hold's).
   clear-pause       when it removes `paused:`: paused mode=hard at the stamp when the record has no open pause
                     (a hard pause whose record-pause never ran), then resumed. Removing only
                     pause_requested records nothing; a refusal (STILL-AWAITING) records nothing.
@@ -639,8 +644,9 @@ integrate row's set-aside by its diagnosis's first line (integration_block, p27-
 Integration conflict, `integration: conflict unresolved in …`), integration-red (`integration: verifier red: …`),
 else integration-set-aside; else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
-paused or pauseRequested -> pause-drain; any `trickle:` hold (only ever a queued row: a stalled row waits on the
-ceiling alone) -> hold-trickle; the first held queued row's reason: `depends on` -> dependency,
+paused or pauseRequested -> pause-drain; any `heat:` hold (the Heat hold; only ever a queued row) -> hold-heat; any
+`trickle:` hold (only ever a queued row: a stalled row waits on the ceiling alone) -> hold-trickle; the first held
+queued row's reason: `depends on` -> dependency,
 solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
 row -> awaiting-hand-back (a known mislabel when every one is a blocked row step 1.2 relaunches as a seeded
 revise: its slot-taken start=revise splits the span seconds later; also while step 1.2's automatic retry waits out
@@ -711,6 +717,13 @@ its own undecided RACE or UNVERIFIED holds. Serial rollouts, review and integrat
 own use is counted the same way, every in_progress row of its own, live or stalled, so a new start fits only while
 elsewhere + its own in_progress + this call's starts < the Trickle; a restart waits on the ceiling alone (no state leaves
 two respawned leads each waiting on the other's stalled notes). `next` never writes the file.
+
+Heat hold (estate ADR 0009 d5; the spec is skills/execute/away.md § Heat): `next` reads the Mac's thermal pressure once
+per call, right after the Away state (so a refused call reads neither), through verify-slot.py's heat_level()
+(_heat_module, _heat_state: THREAD_HEAT_LEVEL pins it; a module that will not load, as on Windows, or a failed reading
+reads 0, fail open). At heavy (2) or worse `slotLimit` is 0, Away included, so nothing new starts; a restart still waits
+on the ceiling alone. A row held for want of a Slot then reads `heat: the Mac is hot (<name>)` (HEAT_PREFIX) unless the
+ceiling is full (`ceiling:` first); a git-env hold and a pause hold their rows themselves. A `heat:` hold never halts.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
@@ -2755,6 +2768,36 @@ AWAY_MAX_BYTES = 64 * 1024
 MORNING_RE = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]\Z", re.ASCII)
 AWAY_WARN = "WARN: ~/.config/thread/away.json"                 # the stale / unreadable stderr line's prefix
 TRICKLE_PREFIX = "trickle:"                                    # a row held for want of a Trickle Slot
+HEAT_PREFIX = "heat:"                                          # a row the Heat hold holds (estate ADR 0009 d5)
+_HEAT_MOD = None
+
+
+def _heat_module():
+    """verify-slot.py as a module, for its heat reading (loaded once per process), or None when it will not load
+    (Windows: its `import fcntl` fails, so `next` still runs there). Never raises."""
+    global _HEAT_MOD
+    if _HEAT_MOD is None:
+        try:
+            spec = importlib.util.spec_from_file_location("thread_verify_slot", VERIFY_SLOT_PY)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _HEAT_MOD = mod
+        except Exception:
+            _HEAT_MOD = False
+    return _HEAT_MOD or None
+
+
+def _heat_state() -> dict:
+    """The Heat hold's reading for `next` (execute away.md § Heat): {level, name, held}, through verify-slot.py's
+    heat_level() (THREAD_HEAT_LEVEL pins it), read once per call. held is true at heavy (HEAT_HOLD) or worse. Fails
+    open: a module that will not load, or a reading that raises, reads 0 nominal."""
+    mod = _heat_module()
+    try:
+        level = int(mod.heat_level()) if mod else 0
+        return {"level": level, "name": mod.heat_name(level) if mod else "nominal",
+                "held": bool(mod) and level >= mod.HEAT_HOLD}
+    except Exception:
+        return {"level": 0, "name": "nominal", "held": False}
 
 
 def _away_stamp(value):
@@ -2925,7 +2968,11 @@ def cmd_next(args) -> int:
     count elsewhere does; a restart stops at the ceiling only, since every other lead already counts the task it takes
     back. A running call is never stopped, so `slotsInUse` may exceed `slotLimit`. A row held for want of a Slot reads
     `ceiling: …` once this rollout fills its ceiling, else `trickle: <trickle.running>/<Trickle> tasks running on this
-    Mac`, and a `trickle:` hold never lets the rollout halt."""
+    Mac`, and a `trickle:` hold never lets the rollout halt. The Heat hold (estate ADR 0009 d5; away.md § Heat): the
+    heat is read once, right after the Away state (_heat_state), and at heavy or worse `slotLimit` is 0, Away too; a
+    restart still waits on the ceiling alone. A row it holds reads `heat: the Mac is hot (<name>)` (the ceiling, once
+    full, names the hold first), a `heat:` hold never lets the rollout halt either, and `heat` ({level, name}) is
+    reported after `trickle`."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -2958,9 +3005,14 @@ def cmd_next(args) -> int:
     if away["file"] in ("stale", "unreadable"):
         print(f"{AWAY_WARN} {away['file']}: {away['why']} — read as not Away, Trickle {DEFAULT_TRICKLE}",
               file=sys.stderr)
+    # The Heat hold (estate ADR 0009 d5; away.md § Heat), read once right after the Away state: at heavy or worse
+    # nothing new starts, Away too (heat overnight is still heat). Restarts still wait on the ceiling alone.
+    heat = _heat_state()
     elsewhere = _elsewhere_running(rollout_path, tasks_dir, index)
     running_elsewhere = sum(elsewhere.values())
     slot_limit = ceiling if away["away"] else min(ceiling, max(0, away["limit"] - running_elsewhere))
+    if heat["held"]:
+        slot_limit = 0
     race = _race_holds(rollout_note, [(r["path"], r["note"]) for r in rows])
     # race_held_lane: a held task whose `integrating:` stamp stands. The lead's RACE re-verify still holds the
     # lane on it, so it stays in flight for the drain, the solo rule, the overlap and the halt verdict; the
@@ -3073,10 +3125,11 @@ def cmd_next(args) -> int:
                 remaining.remove(best)
                 in_flight.update(best["files"])
     in_use = used + len(start)
-    # Whichever binds first names the reason: the ceiling once this rollout fills it, else the Trickle, counted as
-    # `trickle.running` is (no quotes, so it can ride a ROLLOUT-STATUS reason=). A stalled row is only ever held at the
-    # ceiling, which it fills first.
+    # Whichever binds first names the reason: the ceiling once this rollout fills it, else the Heat hold while the Mac
+    # is hot, else the Trickle, counted as `trickle.running` is (no quotes, so it can ride a ROLLOUT-STATUS reason=). A
+    # stalled row is only ever held at the ceiling, which it fills first.
     slot_why = (f"ceiling: {in_use}/{ceiling} slots in use" if in_use >= ceiling else
+                f"{HEAT_PREFIX} the Mac is hot ({heat['name']})" if heat["held"] else
                 f"{TRICKLE_PREFIX} {running_elsewhere + mine + len(start)}/{away['limit']} tasks running on this Mac")
     holds += [(r, slot_why) for r in slot_held]
     if not args.dry_run:
@@ -3096,12 +3149,14 @@ def cmd_next(args) -> int:
     halt = None
     sign_off = []
     # A row the Trickle holds could start once the Mac has room, so it never halts the rollout (D6 of p28-1): the
-    # lead waits (§ 4.5 step 1.6) instead of reading stuck or awaiting-sign-off.
+    # lead waits (§ 4.5 step 1.6) instead of reading stuck or awaiting-sign-off. A row the Heat hold holds could start
+    # once the Mac cools, so it never halts either.
     trickle_held = any(why.startswith(TRICKLE_PREFIX) for _, why in holds)
+    heat_held = any(why.startswith(HEAT_PREFIX) for _, why in holds)
     if git_env:
         halt = "git-env"
     elif not start and not restart and not live and not awaiting and not integrating and not race_held_lane \
-            and not trickle_held:
+            and not trickle_held and not heat_held:
         if paused:
             halt = "paused"
         elif not in_n:
@@ -3117,7 +3172,7 @@ def cmd_next(args) -> int:
     free = ceiling - (used + len(start))
     if free > 0 and halt not in ("complete", "done", "empty") and not args.dry_run:
         reason = _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold,
-                              by_state.get("set-aside", []), trickle_held)
+                              by_state.get("set-aside", []), trickle_held, heat_held)
         _event(rollout_path.stem, "idle-slots", None,
                {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}, args)
     slugs = lambda rs: [r["slug"] for r in rs]  # noqa: E731
@@ -3133,6 +3188,7 @@ def cmd_next(args) -> int:
                     "until": away["until"], "morning": away["morning"], "elsewhere": elsewhere,
                     # The Trickle's count of the Mac after this call: the count elsewhere plus this rollout's own use.
                     "running": running_elsewhere + mine + len(start)},
+        "heat": {"level": heat["level"], "name": heat["name"]},
         "start": slugs(start),
         "restart": slugs(restart),
         "hold": [{"slug": r["slug"], "reason": why} for r, why in sorted(holds, key=lambda h: _rank(h[0]))],
@@ -4531,13 +4587,16 @@ def _review_verdict_events(args, rollout, slug, task, prior):
         _rv_warn(slug, f"not recorded: {type(e).__name__}: {e}")
 
 
-def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside, trickle_held) -> str:
-    """The idle-slots reason (the module docstring's table, first match). `trickle_held`: this call holds a queued row
-    on `trickle:` (a stalled row waits only on the ceiling)."""
+def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside, trickle_held,
+                 heat_held) -> str:
+    """The idle-slots reason (the module docstring's table, first match). `trickle_held` and `heat_held`: this call
+    holds a queued row on `trickle:` or `heat:` (a stalled row waits only on the ceiling)."""
     if git_env:
         return "hold-git-env"
     if paused or pause_requested:
         return "pause-drain"
+    if heat_held:
+        return "hold-heat"
     if trickle_held:
         return "hold-trickle"
     starting = {id(r) for r in start}
@@ -6612,11 +6671,12 @@ DEFAULT_COMPLETION_TIMEOUT = 3600   # the full suite's own deadline, never verif
 COMPLETION_VERIFY_SECTION = "## Completion verify log"
 COMPLETION_RED_PREFIX = "completion-red-"   # never prefix-matches `<slug>-rollout-<date>*`, as phase-close-followup-
 COMPLETION_KIND = "completion-verify"       # the canary window's kind; its slug is the rollout's own stem
-# Every result a run is recorded as. `noslot`, `unrun` and `stopped` are no verdict and move no attempt; `stopped`
-# (verify's own signal: a hard pause, a room stop) is deliberate, so it never counts toward the halt streak either.
+# Every result a run is recorded as. `noslot`, `unrun`, `stopped` and `heat` are no verdict and move no attempt;
+# `stopped` (verify's own signal: a hard pause, a room stop) is deliberate and `heat` (the Heat hold, estate ADR 0009
+# d5: the Mac was too hot to run the suite) is meant, so neither ever counts toward the halt streak.
 COMPLETION_DECIDED = ("green", "flake", "red")
 COMPLETION_STREAK = ("noslot", "unrun")
-COMPLETION_NO_VERDICT = (*COMPLETION_STREAK, "stopped")
+COMPLETION_NO_VERDICT = (*COMPLETION_STREAK, "stopped", "heat")
 COMPLETION_RESULTS = (*COMPLETION_DECIDED, "rerun", *COMPLETION_NO_VERDICT)
 COMPLETION_HALT_STREAK = 3   # no-verdict runs in a row before the lead halts, as the RACE re-verify does
 COMPLETION_LINE_RE = re.compile(r"^- \S+ attempt (?P<n>[12]) at (?P<sha>[0-9a-f]{40}) rc (?P<rc>\S+) -> "
@@ -6625,7 +6685,7 @@ COMPLETION_LINE_RE = re.compile(r"^- \S+ attempt (?P<n>[12]) at (?P<sha>[0-9a-f]
 ATTEMPT_LOCK_WAIT = 2.0      # seconds --run retries its lock, outlasting a reader's microsecond shared probe
 ORIGIN_TIMEOUT = 120         # seconds for each origin read before verify (ls-remote, fetch): a hang is a halt
 VERIFY_OUTCOME_SUFFIX = ".outcome.json"
-VERIFY_OUTCOME_ENDED = ("running", "done", "deadline", "bootstrap", "signal", "noslot")   # lead-integrate.py's
+VERIFY_OUTCOME_ENDED = ("running", "done", "deadline", "bootstrap", "signal", "noslot", "heat")  # lead-integrate.py's
 
 
 def _run_id(dt, pid):
@@ -6744,11 +6804,11 @@ def _completion_state(note):
     """(state, attempt, last, streak) from the note's parsed log lines (_completion_lines): `run` (no verdict yet: attempt 1 on a fresh
     origin/<default>), `rerun` (attempt 1 was red: attempt 2 on its sha), or the decided `green`, `flake` or `red`.
     A no-verdict line moves nothing. last: the deciding line, or None; streak: the COMPLETION_STREAK lines at the
-    log's tail, a `stopped` one skipped."""
+    log's tail, every other no-verdict one (`stopped`, `heat`) skipped."""
     lines = _completion_lines(note)
     streak = 0
     for d in reversed(lines):
-        if d["result"] == "stopped":
+        if d["result"] in COMPLETION_NO_VERDICT and d["result"] not in COMPLETION_STREAK:
             continue
         if d["result"] not in COMPLETION_STREAK:
             break
@@ -6876,6 +6936,8 @@ def _classify_completion(outcome, attempt):
         return "unrun", "verify never finished (no final outcome), no verdict: the attempt re-runs"
     if ended == "noslot":
         return "noslot", "no verify slot in time, no verdict: it retries at the next tick"
+    if ended == "heat":
+        return "heat", "the Mac was too hot to run the suite (a Heat hold), no verdict: it retries at the next tick"
     if ended == "signal":
         return "stopped", f"verify was stopped by signal {outcome.get('signal')}, no verdict: the attempt re-runs"
     if ended == "bootstrap" or (ended == "deadline" and step != "verifier"):
