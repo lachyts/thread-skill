@@ -572,7 +572,7 @@ ok "$(q "$J" '[d["halt"], d["awaitingSignOff"]]')" '["stuck",[]]' "Q2: gate-pend
 mkt r review 'pr: https://github.com/o/r/pull/9'
 printf '\n## Race log\n\n- 2026-10-14T08:00+00:00 [[r]] RACE: merged as an unverified combination\n' >> "$D/ro.md"
 J=$(nxt)
-ok "$(q "$J" '[d["halt"], d["awaitingSignOff"]]')" '["stuck",[]]' "Q2: gate-pending plus a RACE hold is not awaiting sign-off"
+ok "$(q "$J" '[d["halt"], d["awaitingSignOff"]]')" '["race",[]]' "Q2: gate-pending plus a RACE hold is not awaiting sign-off (the RACE holds the lane: halt race)"
 ORDER=$'- [[g]]\n- [[r]]' mkro
 mkt r blocked
 printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-14T08:00+00:00)\n\nUNVERIFIED: the merge was never re-verified\n\n<!-- run 1 end sha=000000000000 -->\n' >> "$D/r.md"

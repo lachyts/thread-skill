@@ -316,7 +316,12 @@ scen t15-git-env
 two_rollouts
 printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro-b.md"
 J=$(nx ro-b --running "")
-ok "$(q "$J" '[d["halt"], d["start"], d["restart"]]')" '["git-env",[],[]]' "T15: a git-env trip halts git-env"
+ok "$(q "$J" '[d["halt"], [h["scope"] for h in d["gitEnvHold"]], d["laneHold"], d["restart"]]')" '[null,["lane"],[{"hold":"git-env","slug":"b1"}],["b1"]]' "T15: a lane trip (ADR 0046) holds only the lane: b1 restarts, no halt"
+scen t15-bare
+two_rollouts
+printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: core.bare false→true; repo /x\n' >> "$D/ro-b.md"
+J=$(nx ro-b --running "")
+ok "$(q "$J" '[d["halt"], d["start"], d["restart"]]')" '["git-env",[],[]]' "T15: a whole-rollout git-env trip (a bare checkout) halts git-env"
 ok "$(q "$J" "$holds")" '{"b1":"git-env hold: /thread:repair","b2":"git-env hold: /thread:repair","b3":"git-env hold: /thread:repair"}' \
   "T15: every row is held on the git-env hold, none on the Trickle"
 scen t16-pause
@@ -567,10 +572,10 @@ ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"], d["slotLimit"]]')" '[{},["
 scen a12-git-env
 by_two ro-a 2 ro-c 2
 mkro ro-b 4; mkt b1 ro-b in_progress 'owner: lead-b'; mkt b2 ro-b open; mkt b3 ro-b open
-printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro-b.md"
+printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: core.bare false→true; repo /x\n' >> "$D/ro-b.md"
 away_file "$D/home" "$HOUR_AGO" true "$TONIGHT" 2 09:00 4
 J=$(nx ro-b --running "")
-ok "$(q "$J" '[d["halt"], d["start"], d["restart"]]')" '["git-env",[],[]]' "A12: a git-env trip halts git-env"
+ok "$(q "$J" '[d["halt"], d["start"], d["restart"], [h["scope"] for h in d["gitEnvHold"]]]')" '["git-env",[],[],["rollout"]]' "A12: a whole-rollout git-env trip (a bare checkout) halts git-env"
 ok "$(q "$J" "$holds")" '{"b1":"git-env hold: /thread:repair","b2":"git-env hold: /thread:repair","b3":"git-env hold: /thread:repair"}' \
   "A12: every row is held on the git-env hold, none on the Away cap"
 scen a12b-pause

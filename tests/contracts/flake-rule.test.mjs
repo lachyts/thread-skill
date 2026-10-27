@@ -74,7 +74,7 @@ function check(f) {
   need('race-record', race.includes('Otherwise, first `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/' + RV +
     ' race --from <repoPath>/.claude/integration/race-<slug>.flake.json || true`') &&
     before(race, 'on a non-zero check append', RV) && before(race, RV, 'then green → `mark-done`') &&
-    race.includes("p29-2's revert replaces this halt"))
+    race.includes('red, rc 124 or a missing rc → the RACE revert'))
   need('run-record-bullet', s45.includes('- `record-verify --rollout <rollout-note> --tasks <slug> --site integration|race') &&
     s45.includes('Never after a non-zero check or its exit 4: that rc is never acted on.') &&
     s45.includes('A verify whose verifier never ran (`noslot`, a failed `env_bootstrap`) writes no `.flake.json`: `record-verify` then prints `nothing to record` and exits 0'))
