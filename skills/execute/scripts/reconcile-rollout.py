@@ -26,7 +26,8 @@ Subcommands:
               (fallback)`. --no-verdict (the integrate call's canary check exited 4, a trip inside its window
               acked before the check, ADR 0053): an `integrated` row's line reads `void` instead, so it never
               backs prepare's case (ii), and the lane frees (`lane-freed release=halt`); the task waits for
-              Integration again. A row with any other outcome is reconciled as usual.
+              Integration again. A row with any other outcome is reconciled as usual, except that no integrate
+              row's `flakes` are recorded (one line says so): that window's runs give no verdict.
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start and restart
               within the parallel ceiling, every held task with its reason, the running, awaiting-Integration,
@@ -446,9 +447,27 @@ Subcommands:
               verifier and the 600 s margin fit inside it. A bad `verify_timeout`, or no note: one ERROR line on
               stderr, exit 1, no stdout (checked first). When the note declares `completion_verifier:`, a value of
               it, `env_bootstrap:` or `completion_timeout:` that completion-verify would refuse: its ERROR line,
-              exit 2, no stdout (argparse's own usage error is exit 2 too; its line names no key). A refused
+              exit 2, no stdout (argparse's own usage error is exit 2 too; its line names no key). The note's
+              `named_rerun:` (p29-9, ADR 0050: the repo's runner for named tests, the lead's Flake check's named
+              re-run) is read the same way (_named_rerun: completion_verifier's reader, plus `{tests}` exactly once);
+              set, the line gains `"namedRerun": "<cmd>"` after `verifySlot`, absent or empty no key; a value it
+              refuses is exit 2 like a completion key's. A refused
               rollouts.toml (the whole file is validated), a present one on a python with no tomllib, or a resolver
               that will not load: `ERROR: rollout settings refused: <the resolver's line>`, exit 3, no stdout.
+
+  record-verify  The lead's record of one Integration verify or RACE re-verify (ADR 0050, 0051; execute § 4.5 step 3
+              and the RACE procedure), run only once that verify's canary check exited 0: `--rollout <note> --tasks
+              <slug> --site integration|race --from <out>.flake.json [--now] [--dry-run]`, the file lead-integrate.py
+              verify --diff-base wrote. Verdict `flake`: each first-run failing id is a Flake, logged and filed by
+              _record_flakes (below) with --site and the file's sha. A `timeout` ({run: first | named | confirm,
+              seconds}): one `suite-timeout` event, logged as load, never a Flake. A green or another red records
+              nothing. Then `recorded: <stamp>` is written into the file (tmp + rename), so a second call prints
+              `[no-change]` and records nothing. No file at all (verify writes none when its verifier never ran:
+              `noslot`, a failed env_bootstrap): one `nothing to record` line, exit 0. Exit 1, one ERROR line, the
+              file unstamped: an unreadable or malformed file (not v 1 with a verdict green | flake | red), a task
+              note not found or whose `rollout:` is not --rollout, a follow-up that could not be written. --dry-run
+              prints what it would record and writes nothing, the file included. Not exempt from the Engine snapshot
+              guard.
 
   completion-verify  The completion verify (estate ADR 0009 d6, Chorus ADR 0107 d1, ADR 0052; execute § 4.5 step 5):
               a rollout whose note declares `completion_verifier: <cmd>` runs it once on merged origin/<default>
@@ -708,6 +727,9 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
   completion-verify (--run) completion-verify {result, rc, sha, attempt, log, followup?}: one per recorded run, a
                     no-verdict one included (task null), after its log line.
+  record-verify     (p29-9) flake {test, repo, sha, site, followup, count} per new Flake log line (_record_flakes);
+                    suite-timeout {site, run, seconds, sha?} for a timeout. reconcile writes flake events too, from a
+                    row's `flakes` (the row-field mapping below).
   record-entry      (p29-10) stopped {cause, inferred: true, at, calls, boot?, wake?} for each stop the entry finds, in
                     `at` order, then one lead-entry {by, session?, stop?}; nothing for a skipped note.
   bind-run, free-lane, hold, record-pause   above.
@@ -958,6 +980,24 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     for a row that ends a Slot (the note read in_progress) and carries no `integration`; nothing for
                     a row without the key (a pre-p21-3 engine's, a lead-written one) or on --dry-run; a non-list
                     or a malformed entry is one warning. Never changes the exit, stdout or vault writes.
+
+  flakes         -> (any status; p29-9, ADR 0050) the Flakes this call's agents reported: [{test, sha}], a task call's
+                    (site task: its implementers' and revisers' verifier loops) or an integrator's (site integrate:
+                    a row with `integration`). Each well-formed entry (_flake_entry: test a one-line string of at most
+                    300 characters, sha 7-40 hex) is logged by _record_flakes: one `## Flake log` line keyed (task,
+                    sha12, site) on its follow-up, `<project>-followup-flake-<h>` (h the first 10 hex of the sha256
+                    of the repo and the test, a newline between; the repo the Project root's origin owner/name, else
+                    its basename, else the project slug), found by a glob of the Tasks root for one not done, merged or
+                    dropped, else filed
+                    fresh (exclusive create: one created meanwhile is appended to), a finished or archived one getting
+                    a `-2`, `-3`; from its second line the follow-up reads `priority: high` with a `## The repo's to
+                    fix` section; and one `flake` event per new line. A line already there writes nothing, so a
+                    re-reconcile or a replayed row is a no-op. One `flake:` line per entry follows the row's line. A
+                    malformed entry is a WARNING, skipped; `flakes` that is not a list is an ERROR (exit 1) and records
+                    none; absent or null records nothing (a lead-written row, a pre-p29-9 engine's). An integrate row
+                    reconciled with --no-verdict records none (a git-env trip inside its window voids its runs, Flakes
+                    included): one `<slug>: N Flake(s) not recorded: --no-verdict …` line instead. Nothing on
+                    --dry-run but the lines.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -2968,11 +3008,14 @@ def cmd_reconcile(args) -> int:
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
                           ready_stamped, ended, now)
         _review_verdict_events(args, rollout, slug, task, prior, ended, now)
+        flake_lines = _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
         ro = " (read-only, approved)" if note_status != status else ""
         when = "".join(" " + s for s in stamped)
         print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{when}"
               f"{flag}")
+        for line in flake_lines:
+            print(line)
 
     for w in warnings:
         print(f"WARNING: {w}", file=sys.stderr)
@@ -6067,6 +6110,213 @@ def _review_verdict_events(args, rollout, slug, task, prior, ended, now):
         _rv_warn(slug, f"not recorded: {type(e).__name__}: {e}")
 
 
+# ---- Flakes (ADR 0050, p29-9) ----------------------------------------------------------------------------------
+# A Flake is a named test that failed a verifier run in a rollout outside the task's diff, then passed its named re-run
+# and a confirming full run on the same tree. Each one is logged once per (task, sha, site) as a `flake` Run-record
+# event and a line in the `## Flake log` of one follow-up task per (repo, test): `<project>-followup-flake-<h>`, h the
+# first 10 hex of sha256(repo + "\n" + test). The follow-up is found by a glob of the Tasks root for a note that is not
+# finished; a finished or archived one gets a fresh `-2`, `-3`. At its second line it is priority high and the repo's to
+# fix. Two callers: reconcile (an engine row's `flakes`) and record-verify (the lead's Integration verify and RACE
+# re-verify, from lead-integrate.py verify --diff-base's <out>.flake.json).
+FLAKE_LOG_SECTION = "## Flake log"
+FLAKE_TWICE_SECTION = "## The repo's to fix"
+FLAKE_TEST_MAX = 300
+FLAKE_SHA_RE = re.compile(r"[0-9a-f]{7,40}\Z")
+FLAKE_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+ORIGIN_SLUG_RE = re.compile(r"([^/:\s]+/[^/:\s]+?)(?:\.git)?/*$")
+
+
+def _flake_entry(e):
+    """(test, sha) for a well-formed Flake entry {test, sha}: test a non-empty one-line string of at most 300
+    characters (stripped), sha 7-40 hex (lowercased); else None. The engine's flakesOf keeps the same rule."""
+    if not isinstance(e, dict):
+        return None
+    test, sha = e.get("test"), e.get("sha")
+    if not isinstance(test, str) or not isinstance(sha, str):
+        return None
+    test, sha = test.strip(), sha.strip().lower()
+    if not test or len(test) > FLAKE_TEST_MAX or FLAKE_CTRL_RE.search(test) or not FLAKE_SHA_RE.match(sha):
+        return None
+    return test, sha
+
+
+def _code(text):
+    """`text` as one inline code span: a backtick run inside it gets a longer fence, padded, so a test id holding `]]`,
+    `|` or backticks can never open a wikilink, a table cell or another span."""
+    run = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    fence = "`" * (run + 1)
+    pad = " " if run or text[:1] == " " or text[-1:] == " " else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
+
+
+def _repo_identity(root, fallback):
+    """The repo a Flake is filed for: `owner/name` from the Project root's origin URL, else the Project root's basename,
+    else `fallback` (the task's project slug, when the rollout names no Project root)."""
+    if root is None:
+        return fallback
+    try:
+        p = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"], capture_output=True, text=True,
+                           timeout=30, env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")})
+        m = ORIGIN_SLUG_RE.search(p.stdout.strip()) if p.returncode == 0 else None
+        if m:
+            return m.group(1)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return Path(root).name or fallback
+
+
+def _flake_key(repo, test):
+    return hashlib.sha256(f"{repo}\n{test}".encode("utf-8")).hexdigest()[:10]
+
+
+def _flake_followup(tasks_dir, slug, h):
+    """(path, True) for the open follow-up of key h in the Tasks root (glob `*-followup-flake-<h>*.md`, a note that is
+    not done, merged or dropped), else (path, False) for the next free name: `<project>-followup-flake-<h>`, then -2, -3
+    (a name a note in the Tasks root or its Archive holds is taken)."""
+    stem_re = re.compile(rf".+-followup-flake-{h}(?:-\d+)?")
+    for p in sorted(tasks_dir.glob(f"*-followup-flake-{h}*.md")):
+        if not stem_re.fullmatch(p.stem):
+            continue
+        try:
+            if _status(Note(p)) not in FINISHED_STATUSES:
+                return p, True
+        except (OSError, ValueError):
+            continue
+    base = _followup_name(slug, f"flake-{h}")
+    k = 1
+    while True:
+        name = base if k == 1 else f"{base}-{k}"
+        if _find_note(tasks_dir, name) is None:
+            return tasks_dir / f"{name}.md", False
+        k += 1
+
+
+def _flake_twice_text(test, repo):
+    return (f"{_code(test)} was logged as a Flake twice: it is {repo}'s to fix (ADR 0050). Fix it at its source in "
+            f"{repo}; never inside a rollout task.")
+
+
+def _flake_add(n, key, line, twice):
+    """One Flake log line, unless a line already carries `key` ((task, sha12, site)); from the second line on, priority
+    high and the twice section. Run through Note.apply, so a save replays it on a fresh read. True when it added one."""
+    lines = [x.strip() for x in n.section_text(FLAKE_LOG_SECTION).split("\n")]
+    if any(x.startswith("- ") and x.endswith(key) for x in lines):
+        return False
+    n.append_line(FLAKE_LOG_SECTION, line)
+    if sum(1 for x in n.section_text(FLAKE_LOG_SECTION).split("\n") if x.strip().startswith("- ")) >= 2:
+        n.set("priority", "high")
+        n.upsert_section(FLAKE_TWICE_SECTION, twice)
+    return True
+
+
+def _flake_count(n):
+    return sum(1 for x in n.section_text(FLAKE_LOG_SECTION).split("\n") if x.strip().startswith("- "))
+
+
+def _write_flake_followup(path, note, test, repo, h, line, now):
+    """File the follow-up for one test, in _new_task_fm's shape (projects copied from the task), its first Flake log line
+    included. Exclusive: an existing file is never overwritten (FileExistsError)."""
+    lines = [*_new_task_fm(note, now, "normal", [f'flake_key: "{h}"']), "",
+             f"# Flake: {_code(test)} in {repo}", "", "## Notes", "",
+             f"{_code(test)} failed a verifier run in a rollout of {repo} outside the task's diff, then passed its named "
+             "re-run and a confirming full run on the same tree: the verify counted green and the test was logged as a "
+             "Flake (ADR 0050). Fix it at its source in the repo, never inside a rollout task; a second line below "
+             "makes it the repo's to fix.", "",
+             f"- Test: {_code(test)}", f"- Repo: {repo}", "",
+             FLAKE_LOG_SECTION, "", line]
+    with open(path, "x") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def _rollout_root(tasks_dir, rollout, rollout_path=None):
+    """The Project root of the rollout note (rollout_path, else <tasks-dir>/<rollout>.md or its Archive copy), or None."""
+    path = rollout_path or (_find_note(tasks_dir, rollout) if rollout else None)
+    try:
+        return _project_root(Note(Path(path))) if path else None
+    except (OSError, ValueError):
+        return None
+
+
+def _record_flakes(args, rollout, slug, note, flakes, site, tasks_dir, rollout_path=None):
+    """Log each Flake (ADR 0050): one `## Flake log` line on its follow-up and, for each new line, one `flake` event.
+    `flakes` is a list of {test, sha}; a malformed entry is a warning and skipped (_flake_entry). A line keyed (task,
+    sha, site) that is already there writes nothing, so a re-run is a no-op. --dry-run writes nothing. Returns (stdout
+    lines, warnings, errors): an error is a follow-up that could not be read or written."""
+    out, warns, errs = [], [], []
+    m = PHASED_STEM_RE.match(slug)
+    project = m.group("slug") if m else slug
+    repo = None
+    now = _now(args)
+    dry = getattr(args, "dry_run", False)
+    for i, raw in enumerate(flakes, 1):
+        e = _flake_entry(raw)
+        if e is None:
+            warns.append(f"{slug}: flakes entry {i} is malformed (test a one-line string of at most {FLAKE_TEST_MAX} "
+                         "characters, sha 7-40 hex); skipped")
+            continue
+        test, sha = e
+        if repo is None:
+            repo = _repo_identity(_rollout_root(tasks_dir, rollout, rollout_path), project)
+        h = _flake_key(repo, test)
+        key = f"[[{slug}]] at {sha[:12]} ({site})"
+        line = f"- {_stamp(now)} {key}"
+        twice = _flake_twice_text(test, repo)
+        path, found = _flake_followup(tasks_dir, slug, h)
+        head = f"flake: {_code(test)} in {repo} at {sha[:12]} ([[{slug}]], {site})"
+        if dry:
+            out.append(f"{head} -> [[{path.stem}]]" + ("" if found else " (a new follow-up)") + " (dry-run)")
+            continue
+        added, created = False, False
+        try:
+            if not found:
+                try:
+                    _write_flake_followup(path, note, test, repo, h, line, now)
+                    added = created = True
+                except FileExistsError:
+                    found = True   # another writer filed it meanwhile: append to theirs
+            if not created:
+                fu = Note(path)
+                added = fu.apply(_flake_add, key, line, twice)
+                fu.save()
+                count = _flake_count(fu)
+            else:
+                count = 1
+        except (OSError, ValueError) as ex:
+            errs.append(f"{slug}: the Flake follow-up {path} could not be written: {ex}; this Flake is not logged")
+            continue
+        if not added:
+            out.append(f"{head} -> [[{path.stem}]] already logged [no-change]")
+            continue
+        _event(rollout, "flake", slug, {"test": test, "repo": repo, "sha": sha, "site": site, "followup": path.stem,
+                                        "count": count}, args)
+        tail = " (filed)" if created else (f" (logged {count} times: the repo's to fix)" if count >= 2 else "")
+        out.append(f"{head} -> [[{path.stem}]]{tail} [written]")
+    return out, warns, errs
+
+
+def _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings):
+    """reconcile's side (p29-9): an engine row's `flakes`, a task call's (site task) or an integrator's (site integrate,
+    a row with `integration`). Absent or null records nothing; a non-list is an error, nothing recorded. An integrate
+    row reconciled with --no-verdict records none either, with one line saying why: a git-env trip fell inside the
+    call's window, so a red its integrator saw may be the changed shared checkout's, and its re-runs prove nothing
+    (the lead never runs record-verify after such a check either, execute § 4.5)."""
+    flakes = task.get("flakes")
+    if flakes is None or flakes == []:
+        return []
+    if getattr(args, "no_verdict", False) and task.get("integration") is not None:
+        n = len(flakes) if isinstance(flakes, list) else 1
+        return [f"{slug}: {n} Flake{'' if n == 1 else 's'} not recorded: --no-verdict (a git-env trip fell inside the "
+                "integrate call's window, ADR 0053), so its verifier runs give no verdict, Flakes included"]
+    if not isinstance(flakes, list):
+        errors.append(f"{slug}: flakes is not a list ({type(flakes).__name__}) — no Flake recorded")
+        return []
+    site = "integrate" if task.get("integration") is not None else "task"
+    lines, w, e = _record_flakes(args, rollout, slug, note, flakes, site, tasks_dir)
+    warnings.extend(w)
+    errors.extend(e)
+    return lines
+
+
 def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside, cap_held,
                  last_start_held, pr_held=False, task_pr_held=False, heat_held=False) -> str:
     """The idle-slots reason (the module docstring's table, first match). `cap_held`: this call holds a queued row on
@@ -8318,8 +8568,9 @@ def cmd_verify_timeout(args) -> int:
         return 1
     try:
         # The completion verify's keys, read at every entry, so a value its reader refuses halts before any work
-        # runs, never only at the ceremony after every task merged.
+        # runs, never only at the ceremony after every task merged. `named_rerun:` (p29-9) the same way.
         _completion_config(note)
+        named = _named_rerun(note)
     except CompletionValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
@@ -8327,10 +8578,91 @@ def cmd_verify_timeout(args) -> int:
     if err:
         print(f"ERROR: rollout settings refused: {err}", file=sys.stderr)
         return 3
-    print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000,
-                      "slotWait": _slot_wait(seconds),
-                      "verifySlots": slots,
-                      "verifySlot": {"script": str(VERIFY_SLOT_PY), "slots": slots}}))
+    out = {"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000, "slotWait": _slot_wait(seconds),
+           "verifySlots": slots, "verifySlot": {"script": str(VERIFY_SLOT_PY), "slots": slots}}
+    if named:
+        out["namedRerun"] = named   # only when the note sets it, so a line for a note without it is unchanged
+    print(json.dumps(out))
+    return 0
+
+
+# ---- record-verify (ADR 0050, p29-9) -------------------------------------------
+
+RECORD_VERIFY_SITES = ("integration", "race")
+
+
+def cmd_record_verify(args) -> int:
+    """The lead's record of one Integration verify or RACE re-verify (execute § 4.5 step 3, the RACE procedure), run
+    only after its canary check exited 0: lead-integrate.py verify --diff-base's <out>.flake.json (--from). Verdict
+    `flake`: each Flake logged and filed (_record_flakes, site --site). A timeout: one `suite-timeout` event (load,
+    ADR 0051). Anything else records nothing. Then `recorded: <stamp>` is written into the file (tmp + rename), so a
+    second call is `[no-change]`. No file (a verify whose verifier never ran writes none): `nothing to record`, exit 0.
+    An unreadable or malformed file, a task note not found or not of --rollout, or a follow-up that cannot be written:
+    one ERROR line, exit 1, the file not stamped. --dry-run writes nothing."""
+    src = Path(os.path.expanduser(args.from_))
+    slug = args.tasks.strip()
+    if not src.exists() and not src.is_symlink():
+        # lead-integrate.py verify writes no Flake record when the verifier never ran (`noslot`, a failed
+        # env_bootstrap), so the lead's record-verify after such a verify has nothing to read.
+        print(f"{slug}: {args.site} verify wrote no {src.name} (the verifier never ran: noslot or a failed "
+              "env_bootstrap): nothing to record")
+        return 0
+    try:
+        rec = json.loads(src.read_text())
+        if not isinstance(rec, dict) or rec.get("v") != 1 or rec.get("verdict") not in ("green", "flake", "red"):
+            raise ValueError("not a verify Flake record (v 1, verdict green | flake | red)")
+    except (OSError, ValueError) as e:
+        print(f"ERROR: record-verify: {src}: {e}; nothing recorded", file=sys.stderr)
+        return 1
+    if rec.get("recorded"):
+        print(f"{slug}: {args.site} verify at {str(rec.get('sha') or '')[:12]} already recorded {rec['recorded']} "
+              "[no-change]")
+        return 0
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    path = tasks_dir / f"{slug}.md"
+    try:
+        note = Note(path)
+    except (OSError, ValueError) as e:
+        print(f"ERROR: record-verify: {slug}: task note unreadable at {path}: {e}; nothing recorded", file=sys.stderr)
+        return 1
+    ro = rollout_path.stem
+    if (_note_rollout(note) or "").lower() != ro.lower():
+        print(f"ERROR: record-verify: {slug}: its rollout: is {note.get('rollout') or 'none'}, not [[{ro}]]; nothing "
+              "recorded", file=sys.stderr)
+        return 1
+    out, warns, errs = [], [], []
+    if rec["verdict"] == "flake":
+        flakes = [{"test": x, "sha": rec.get("sha")} for x in (rec.get("flakes") or [])]
+        out, warns, errs = _record_flakes(args, ro, slug, note, flakes, args.site, tasks_dir, rollout_path=rollout_path)
+    timeout = rec.get("timeout")
+    if isinstance(timeout, dict):
+        fields = {"site": args.site, "run": timeout.get("run"), "seconds": timeout.get("seconds")}
+        if isinstance(rec.get("sha"), str) and rec["sha"]:
+            fields["sha"] = rec["sha"]
+        _event(ro, "suite-timeout", slug, fields, args)
+        out.append(f"suite-timeout: [[{slug}]] {args.site} verify's {timeout.get('run')} run hit its "
+                   f"{timeout.get('seconds')}s deadline: logged as load (ADR 0051), never a Flake"
+                   + (" (dry-run)" if args.dry_run else ""))
+    for w in warns:
+        print(f"WARNING: {w}", file=sys.stderr)
+    for line in out:
+        print(line)
+    if errs:
+        for e in errs:
+            print(f"ERROR: record-verify: {e}", file=sys.stderr)
+        return 1
+    if not args.dry_run:
+        try:
+            rec["recorded"] = _stamp(_now(args))
+            tmp = src.with_name(src.name + ".tmp")
+            tmp.write_text(json.dumps(rec, ensure_ascii=False) + "\n")
+            os.replace(tmp, src)
+        except OSError as e:
+            print(f"WARNING: record-verify: {src} not stamped recorded: {e}", file=sys.stderr)
+    if not out:
+        print(f"{slug}: {args.site} verify {rec['verdict']}" + (f" ({rec.get('why')})" if rec.get("why") else "")
+              + ": nothing to record" + (" (dry-run)" if args.dry_run else ""))
     return 0
 
 
@@ -8462,6 +8794,22 @@ def _completion_timeout(note):
     return seconds
 
 
+NAMED_RERUN_KEY = "named_rerun"
+NAMED_RERUN_SLOT = "{tests}"
+
+
+def _named_rerun(note):
+    """The rollout's `named_rerun:` (ADR 0050, p29-9): the repo's own runner for named tests, holding `{tests}` exactly
+    once, which lead-integrate.py verify --named-rerun replaces with the failing ids, each shell-quoted. Read by
+    _command_value, so its forms are completion_verifier's; '' when absent (the lead's Flake check then leaves a red
+    red). A value without `{tests}`, or with it twice, raises CompletionValueError."""
+    cmd = _command_value(note, NAMED_RERUN_KEY)
+    if cmd and cmd.count(NAMED_RERUN_SLOT) != 1:
+        raise CompletionValueError(f"{NAMED_RERUN_KEY}: {cmd!r} must hold {NAMED_RERUN_SLOT} exactly once (where the "
+                                   "failing tests go), e.g. \"scripts/test -n0 {tests}\"")
+    return cmd
+
+
 def _completion_lines(note):
     """The parsed `## Completion verify log` lines, oldest first; a line that does not parse is skipped."""
     out = []
@@ -8502,23 +8850,90 @@ def _completion_halts(result, streak):
 
 def _failing_ids(lines, marker="== verifier:"):
     """Up to FAILING_IDS_MAX distinct failing-test ids read from the verify log's lines (an open file streams), in
-    order, from verify's `== verifier:` line on, so an env_bootstrap's own ERROR lines are never read as tests; []
-    when none parse. marker=None reads from the first line (an agent suite's captured output, verify-slot.py run)."""
+    order, from verify's last `== verifier:` line to its `== verifier rc` line, so an env_bootstrap's own ERROR lines
+    are never read as tests, nor a heat-stopped pass's run the Heat hold re-queued (lead-integrate.py verify: the log
+    keeps every pass, and only the last is the verdict), nor the Flake check's named re-run and confirming run that
+    follow the first run (lead-integrate.py verify --diff-base, ADR 0050); [] when none parse. marker=None reads from
+    the first line (an agent suite's captured output, verify-slot.py run)."""
     ids = []
-    started = marker is None
+    reading = marker is None
     for line in lines:
         line = line.rstrip("\n")
-        if not started:
-            started = line.startswith(marker)
+        if marker is not None and line.startswith(marker):
+            ids, reading = [], True   # a later pass's run (the Heat hold's re-queue): only the last one is read
+            continue
+        if not reading:
+            continue
+        if line.startswith("== verifier rc"):
+            reading = False   # the run ended; a later `== verifier:` (a re-queued pass) starts over
+            continue
+        if len(ids) >= FAILING_IDS_MAX:
             continue
         for rx in FAILING_ID_RES:
             m = rx.match(line)
             if m and m.group(1) not in ids:
                 ids.append(m.group(1))
                 break
-        if len(ids) >= FAILING_IDS_MAX:
-            break
     return ids
+
+
+# ---- the Flake check's placement (ADR 0050, p29-9) ----------------------------
+# lead-integrate.py verify --diff-base reads the first run's failing ids (_failing_ids), then asks flake_verdict
+# whether every one sits in a test file outside the task's diff: only then does it re-run them by name and confirm
+# with one more full run. Pure: no git, no run; the caller passes the diff's paths (None when they could not be read).
+
+
+def flake_file(test_id, tree):
+    """The repo-relative test file a failing id names, or None when it names none: the id before any `::` (pytest's
+    `path::name`), else the whole id. A path absolute inside the tree is made relative; a `..` part, a path outside the
+    tree, a directory or a missing file is no test file (a node spec name, a TAP name, unittest's `name (mod.Class)`,
+    a go or cargo id all land here)."""
+    raw = str(test_id).split("::", 1)[0]
+    if not raw or "\x00" in raw:
+        return None
+    root = os.path.realpath(str(tree))
+    path = raw
+    if os.path.isabs(path):
+        for base in (str(tree), root):
+            base = base.rstrip(os.sep)
+            if path.startswith(base + os.sep):
+                path = path[len(base) + 1:]
+                break
+        else:
+            return None
+    parts = [x for x in path.replace(os.sep, "/").split("/") if x not in ("", ".")]
+    if not parts or ".." in parts:
+        return None
+    full = os.path.join(root, *parts)
+    real = os.path.realpath(full)
+    if not (real == root or real.startswith(root + os.sep)) or not os.path.isfile(full):
+        return None
+    return "/".join(parts)
+
+
+def flake_verdict(ids, tree, diff_files):
+    """The Flake check's placement of a red's failing ids, first match: no id -> `unnamed` (a timeout, a lint,
+    typecheck or build step); FAILING_IDS_MAX ids -> `too-many` (the parser's cap: not every failure is seen); an id
+    flake_file places in no test file -> `unplaced`; diff_files None (the diff could not be read) -> `diff`; an id whose
+    file the diff changes -> `touched`; else `candidates`, the only verdict that re-runs. Returns {verdict, files: {id:
+    file or None}, touched: [ids], unplaced: [ids]}."""
+    ids = list(ids)
+    files = {i: flake_file(i, tree) for i in ids}
+    unplaced = [i for i in ids if files[i] is None]
+    touched = [i for i in ids if files[i] is not None and diff_files is not None and files[i] in diff_files]
+    if not ids:
+        verdict = "unnamed"
+    elif len(ids) >= FAILING_IDS_MAX:
+        verdict = "too-many"
+    elif unplaced:
+        verdict = "unplaced"
+    elif diff_files is None:
+        verdict = "diff"
+    elif touched:
+        verdict = "touched"
+    else:
+        verdict = "candidates"
+    return {"verdict": verdict, "files": files, "touched": touched, "unplaced": unplaced}
 
 
 def _completion_paths(root, ro, attempt):
@@ -9162,6 +9577,19 @@ def main() -> int:
                                                "verify_timeout, 3 on refused rollout settings (read-only; execute § 3)")
     vt.add_argument("--rollout", required=True, help="path to the rollout note")
     vt.set_defaults(func=cmd_verify_timeout)
+
+    rvf = sub.add_parser("record-verify", help="record the lead's Integration verify or RACE re-verify from its "
+                                                "<out>.flake.json: each Flake logged and filed, a timeout logged as "
+                                                "load (ADR 0050, 0051); run only after its canary check exited 0")
+    rvf.add_argument("--rollout", required=True, help="path to the rollout note")
+    rvf.add_argument("--tasks", required=True, help="the verified task's slug")
+    rvf.add_argument("--site", required=True, choices=RECORD_VERIFY_SITES, help="integration (step 3) or race (the RACE "
+                                                                                 "procedure)")
+    rvf.add_argument("--from", dest="from_", required=True, help="lead-integrate.py verify --diff-base's <out>.flake.json")
+    rvf.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help + " (the follow-ups' home)")
+    rvf.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the Flake log line's stamp)")
+    rvf.add_argument("--dry-run", action="store_true", help="print what would be recorded; write nothing")
+    rvf.set_defaults(func=cmd_record_verify)
 
     cv = sub.add_parser("completion-verify", help="the completion verify (estate ADR 0009 d6, ADR 0052): print the "
                                                   "attempt's state as JSON (read-only), or with --run run one attempt "

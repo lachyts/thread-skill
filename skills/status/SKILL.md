@@ -218,7 +218,9 @@ nothing more:
 **A RACE has three states.** Merge-task's exit 5 means the PR merged, but as a combination nobody
 verified. Execute's RACE procedure (execute § 4.5) appends the `## Race log` line first, then re-verifies the
 merge commit in the background for up to two hours, a verify-slot wait included, with the lane held: green →
-`mark-done`; red, rc 124 or a missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`. Its
+`mark-done`; red, rc 124 or a missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`, its red
+the one the re-verify's Flake check left (ADR 0050: an out-of-diff red its named re-run and confirming run clear
+reads green, its Flakes logged by `record-verify`). Its
 verdict file is `<repoPath>/.claude/integration/race-<slug>.rc`, written last, so an absent one means unfinished. A
 `noslot` verdict file reads like an absent one: the re-verify has not run (no verify slot came in time), and the
 lead re-runs it with the lane held. A `heat` verdict file reads the same way: the Mac was too hot to run it (the Heat
