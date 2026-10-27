@@ -759,8 +759,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   environment exit 2, a `lead-integrate.py` exit 2 on the task holding the
   lane, the Integration verify's third `noslot`) held on the **Integration
   lane** alone: one `## Lane log` line (`lane-hold`), read by `next` as a
-  `lane` entry in `laneHold`, so nothing integrates or merges while task calls
-  go on, and `halt: lane` once nothing else moves (ADR 0048). Only Lachy's ack,
+  `lane` entry in `laneHold`, so nothing integrates or merges and `carry`
+  refuses the rollout while task calls go on, and `halt: lane` once nothing
+  else moves (ADR 0048). Only Lachy's ack,
   through `/thread:repair` (its lane-hold step, 3g, `lane-ack`), releases it.
   _Avoid_: lane halt (the lead's stop, not the hold).
 - **Git-env ack** — the recorded acceptance of the tripped windows, naming

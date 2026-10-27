@@ -483,7 +483,10 @@ Subcommands:
               included; the line names each held slug and `/thread:repair [[<from>]]`); a --from with an
               unacked git-env trip (Git-env hold, below; --dry-run included; `ERROR: carry: --from <stem> holds
               an unacked git-env trip: [[a]], [[b]]: record Lachy's ack first with /thread:repair [[<stem>]]`,
-              checked after the RACE hold); a carried note that
+              checked after the RACE hold); a --from with an unacked Lane hold (Lane hold, below; --dry-run
+              included; `ERROR: carry: --from <stem> holds an unacked Lane hold: [[a]]: record Lachy's ack first
+              with /thread:repair [[<stem>]]`, checked after the git-env hold: the carry strips `integrating:` and
+              never copies the `## Lane log`, so the held task would integrate unacked); a carried note that
               needs the top rung when the ladder file is refused (--dry-run included; `ERROR: carry: ladder
               file refused: <path>:<line>: <reason>`, no stdout); a --to that is
               missing, not directly in the tasks dir, untagged, done or
@@ -995,18 +998,20 @@ verdict; a `lane` entry holds only the Integration lane (`laneHold`), and `halt`
 and `/thread:repair [[<from>]]`. A `## Race log` line carrying `git-env halt` names its slug like any Race log line,
 so once the hold is acked the RACE hold applies unchanged.
 
-Lane hold (ADR 0048, p29-7; _lane_log_hold, read by `next`, `status`, `lane-hold` and `lane-ack`, and by `moving` through
-`next`; execute § 4.5 *Lane hold*): a cause that reaches every merge (merge-task's abort or its environment exit 2, a
-lead-integrate.py exit 2 on the task holding the lane, the Integration verify's third `noslot`) holds the Integration
-lane, never the whole rollout. The rollout note's `## Lane log` (LANE_LOG_SECTION, at the note's end) holds one line per
-hold, `- <stamp> lane hold [[<slug>]] <cause>: <evidence>` (LANE_HOLD_RE, the cause one of LANE_HOLD_CAUSES:
-merge-task-abort, merge-task-env, integrate-env, verify-noslot), written only by `lane-hold`, and one line per ack,
-`- <stamp> lane ack [[a]], [[b]]: <his words>` (LANE_ACK_RE: its slugs are the wikilinks before its first `]]: `),
-written only by `lane-ack` (through /thread:repair § 3g). The hold is every hold line no later ack names, in log order;
-a hold after an ack holds again. While one stands, `next` lists a {slug, hold: "lane", cause, stamp} entry in
+Lane hold (ADR 0048, p29-7; _lane_log_hold, read by `next`, `status`, `carry`, `lane-hold` and `lane-ack`, and by
+`moving` through `next`; execute § 4.5 *Lane hold*): a cause that reaches every merge (merge-task's abort or its
+environment exit 2, a lead-integrate.py exit 2 on the task holding the lane, the Integration verify's third `noslot`)
+holds the Integration lane, never the whole rollout. The rollout note's `## Lane log` (LANE_LOG_SECTION, at the note's
+end) holds one line per hold, `- <stamp> lane hold [[<slug>]] <cause>: <evidence>` (LANE_HOLD_RE, the cause one of
+LANE_HOLD_CAUSES: merge-task-abort, merge-task-env, integrate-env, verify-noslot), written only by `lane-hold`, and one
+line per ack, `- <stamp> lane ack [[a]], [[b]]: <his words>` (LANE_ACK_RE: its slugs are the wikilinks before its first
+`]]: `), written only by `lane-ack` (through /thread:repair § 3g). The hold is every hold line no later ack names, in
+log order; a hold after an ack holds again. While one stands, `next` lists a {slug, hold: "lane", cause, stamp} entry in
 `laneHold` after the git-env and race entries: the lane does not move (a pending RACE revert included), task calls go
 on, and `halt` is "lane" once nothing else moves, after "race" (lane) and before "paused". The held task's note keeps
-`integrating:`, so a soft pause never drains past it. `status` reports the holds as `laneLog`.
+`integrating:`, so a soft pause never drains past it. `status` reports the holds as `laneLog`; and `carry` refuses the
+prior (exit 2, --dry-run included) with an ERROR line naming each held slug and `/thread:repair [[<from>]]`, since the
+carry strips `integrating:` and never copies the `## Lane log`.
 
 Trickle and Away (Chorus ADR 0104 d2, d6; ADR 0049, which overturns d3; the spec is skills/execute/away.md): `next`
 reads the Away state file, ~/.config/thread/away.json under the home dir at call time (AWAY_FILE_REL), as one JSON
@@ -9398,6 +9403,13 @@ def cmd_carry(args) -> int:
     if git_env:
         names = ", ".join(dict.fromkeys(f"[[{t['slug']}]]" for t in git_env))
         return refuse(f"--from {src.stem} holds an unacked git-env trip: {names}: record Lachy's ack first with "
+                      f"/thread:repair [[{src.stem}]]")
+    # An unacked Lane hold (ADR 0048): carry strips `integrating:` and never copies the `## Lane log`, so the held task
+    # would integrate in the new rollout with no ack. Only his ack through /thread:repair § 3g releases it.
+    lane_log = _lane_log_hold(src_note)
+    if lane_log:
+        names = ", ".join(dict.fromkeys(f"[[{h['slug']}]]" for h in lane_log))
+        return refuse(f"--from {src.stem} holds an unacked Lane hold: {names}: record Lachy's ack first with "
                       f"/thread:repair [[{src.stem}]]")
     dst_linked = []
     if dst is not None:

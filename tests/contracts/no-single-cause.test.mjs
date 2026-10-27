@@ -7,8 +7,8 @@
 //   kept          each kept `reason="…"` matches WHOLE_HALT_PATTERNS (or a LIVE_WHOLE_REASONS prefix), and each pattern
 //                 and prefix matches a kept reason
 //   narrowed      each narrowed site routes to a Set aside, a Lane hold or the Race log, never § 7
-//   lane-hold     the *Lane hold* paragraph: its four causes, its one write, no free-lane, the unreadable note, the soft
-//                 pause; no `prepare-env` anywhere
+//   lane-hold     the *Lane hold* paragraph: its four causes, its one write, no free-lane, the session's own lane freed
+//                 too, carry's refusal, the unreadable note, the soft pause; no `prepare-env` anywhere
 //   needs-you     § 6.5 (c) carries `autoRetryError`, and (h) exists
 //   merge-task    merge-task.sh's exit-2 header has three cases, and exactly four `merge-task args:` exits
 //   task-scoped   lead-integrate.py raises TaskScoped at exactly the six task-scoped texts
@@ -135,6 +135,8 @@ function check(f) {
     !causes.every((c) => laneP.includes(`\`${c}\``)) ||
     !laneP.includes('reconcile-rollout.py lane-hold --rollout <rollout-note> --tasks <slug> --cause <cause>') ||
     !laneP.includes('so no `free-lane` follows it') || !laneP.includes('`/thread:repair` (its lane-hold step, 3g)') ||
+    !laneP.includes('on its exit 0 the lead frees the lane (this session\'s state) too, as *The lane-free rule* does') ||
+    !laneP.includes('`carry` refuses the rollout until then') ||
     !laneP.includes('one that cannot (`lead-integrate.py`\'s `task note unreadable:`) is out of `next`\'s scan, so the task shows only through `laneHold` and § 6.5 (h)') ||
     !laneP.includes('A `pause_requested` behind a lane verdict never drains, because the note keeps `integrating:`. Step 1.2 is skipped, so no wait clause holds, and the lane arm goes to § 7 `lane held:`. After the ack the held task integrates (a soft pause lets Integration carry on), and the pause drains after it.') ||
     prepareEnv)
@@ -277,6 +279,8 @@ test('control: a narrowed site routed back to § 7 fails narrowed', () => {
 test('control: the Lane hold paragraph without a cause, its no-free-lane rule or its soft-pause sentence, or a prepare-env, fails lane-hold', () => {
   only('execute', '`verify-noslot` (the Integration verify\'s third consecutive `noslot`, step 3)', 'a verify slot (step 3)', 'lane-hold')
   only('execute', 'so no `free-lane` follows it', 'then `free-lane`', 'lane-hold')
+  only('execute', '; on its exit 0 the lead frees the lane (this session\'s state) too, as *The lane-free rule* does,', ',', 'lane-hold')
+  only('execute', ', and `carry` refuses the rollout until then', '', 'lane-hold')
   only('execute', 'and the pause drains after it. Its release', 'and the pause never drains. Its release', 'lane-hold')
   only('rr', '"integrate-env", "verify-noslot")', '"prepare' + '-env", "verify-noslot")', 'lane-hold')
 })

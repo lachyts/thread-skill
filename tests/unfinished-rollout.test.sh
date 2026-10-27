@@ -10,6 +10,7 @@
 #   K1-K5   skills/execute/scripts/reconcile-rollout.py carry: preview, refusals, per-field writes, re-runs, and
 #           the refusal of a prior that holds an undecided RACE or UNVERIFIED
 #   K5b     carry refuses a prior that holds an unacked git-env trip until its ack line (p14-6)
+#   K5c     carry refuses a prior that holds an unacked Lane hold until `lane-ack` (p29-7, ADR 0048)
 #   K6      carry maps each carried task's legacy stamps to a rung (ADR 0029 consequences): the `restamp`
 #           lines, the ladder's top rung, a refused ladder file, and a re-run
 #   K7      carry prints an `order` line per clause of the prior's prose that orders two carried tasks (p17-2),
@@ -817,6 +818,32 @@ printf -- '- 2026-09-30T10:05:00+00:00 git-env ack [[g1]]: refs/heads/main at bb
 carry --from "$T/$P.md" --to "$T/$N.md"
 ok "$rc" 0 "K5b: with the git-env ack line, it carries"
 ok "$(fm g1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5b: … both unlanded tasks"
+
+# ── K5c: carry refuses a prior that holds an unacked Lane hold until lane-ack (p29-7, ADR 0048) ──────────────────
+# The carry strips `integrating:` and never copies the `## Lane log`, so the held task would integrate unacked.
+scen k5c
+BODY=$'## Lane log\n\n- 2026-09-30T09:50+00:00 lane hold [[a1]] merge-task-abort: ERROR: merge-task aborted (70): set -u' \
+  mkro $P.md "$R" "$DEMO" "$PAUSED"
+mkt a1.md $P review 'pr: https://github.com/demo/repo/pull/7' 'integrating: 2026-09-30T09:40+00:00'
+mkt q1.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc" 2 "K5c: carry --dry-run refuses a prior holding an unacked Lane hold"
+ok "$err" "ERROR: carry: --from $P holds an unacked Lane hold: [[a1]]: record Lachy's ack first with /thread:repair [[$P]]" \
+  "K5c: … its one ERROR line names the held task and /thread:repair"
+ok "$out" "" "K5c: … no carry line"
+ok "$(sums)" "$before" "K5c: … writing nothing"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(sums)" "2|$before" "K5c: carry refuses it for real too, writing nothing"
+ok "$(fm a1.md integrating)|$(fm a1.md rollout)" "integrating: 2026-09-30T09:40+00:00|rollout: \"[[$P]]\"" \
+  "K5c: … the held task keeps integrating: and its rollout"
+python3 "$RR" lane-ack --rollout "$T/$P.md" --tasks a1 --fix "rebuilt merge-task's bash" --tasks-dir "$T" \
+  --now 2026-09-30T10:05:00Z > "$S.ack" 2>&1
+ok "$?|$(cat "$S.ack")" "0|a1: lane ack [written]" "K5c: (lane-ack records Lachy's ack)"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc" 0 "K5c: after lane-ack, it carries"
+ok "$(fm a1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5c: … both unlanded tasks"
 
 # ── K6: carry maps the legacy stamps of each carried task to a rung ──────────────────────────────────
 TIER_KEY=tier_"capped"   # the stale cap stamp's key, quoted in two parts so this file stays out of the Verify grep

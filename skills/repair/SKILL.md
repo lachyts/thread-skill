@@ -626,7 +626,10 @@ any mode: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollou
 and nothing else. Exit 1 (a slug no hold line names, a failed save) is shown and stops; `[no-change]` means every hold
 was already acked. Then § 4's hand-off when no lead is live: the next entry's step 1.4 re-enters the held task through
 step 3's `prepare`. A task note that could not be read stays out of the queue after the ack until its note is fixed;
-say so. A Companion (ADR 0048) may gather this evidence and notify Lachy, never ack: every lane hold is his.
+say so. Until the ack `carry` refuses the rollout (`ERROR: carry: --from <stem> holds an unacked Lane hold: …`), so a
+`--regenerate` that supersedes it stops and sends Lachy here: the carry strips `integrating:` and never copies the
+`## Lane log`, so the held task would otherwise integrate in the new rollout unacked. A Companion (ADR 0048) may gather
+this evidence and notify Lachy, never ack: every lane hold is his.
 
 ### 4. Hand back: re-enter at the stage it stopped
 

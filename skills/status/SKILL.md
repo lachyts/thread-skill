@@ -364,8 +364,10 @@ takes none of them, nor does a RACE revert in flight.
   merge-task's abort or its environment exit 2, a `lead-integrate.py` exit 2 on the task holding the lane, the
   Integration verify's third `noslot`) holds the Integration lane only, never the whole rollout, until Lachy's ack. Render
   each line verbatim. While it stands nothing in the lane runs, a pending RACE revert included, and task calls go on;
-  `next` reports `halt: "lane"` once nothing else moves. Route it to `/thread:repair [[<rollout>]]` (its lane-hold step, 3g, shows the
-  evidence and records his ack, `lane-ack`). It reads only the vault, so it holds offline too.
+  `next` reports `halt: "lane"` once nothing else moves. `carry` refuses the rollout while it stands (the carry strips
+  `integrating:` and never copies the `## Lane log`, so the held task would integrate unacked). Route it to
+  `/thread:repair [[<rollout>]]` (its lane-hold step, 3g, shows the evidence and records his ack, `lane-ack`). It reads
+  only the vault, so it holds offline too.
 - **Hold until:** a non-null `holdUntil`, the rollout's or a task's (`_shared/vault-grammar.md` § Hold until),
   read with the `gh pr view` above. Render `HELD until <pr> merges (<state>)` while the PR reads OPEN (or the
   read fails: `(state unread: <its line>)`), `HELD until <pr> merges (CLOSED): remove or fix hold_until on [[<note>]]`
