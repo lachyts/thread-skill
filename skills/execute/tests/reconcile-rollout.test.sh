@@ -80,9 +80,10 @@ check "revised: the reached rung stamped on a landed task" "rung: opus-xhigh"   
 refute "revised: never a model stamp"            "model:"                             "$TMP/task-revised.md"
 refute "approved: an empty rung stamps nothing"  "rung:"                              "$TMP/task-approved.md"
 refute "approved: no model stamp"                "model:"                             "$TMP/task-approved.md"
-case "$out" in *"task-revised: status=review pr=https://github.com/o/r/pull/2 rung=opus-xhigh from=opus-high climbs=review:opus-high->opus-xhigh [written]"*) echo "ok   - revised: the line shows the rung, where it started and the climb" ;;
+# p29-12: a review row names its ready: stamp; these notes name no rollout, so no call end is read: the fallback.
+case "$out" in *"task-revised: status=review pr=https://github.com/o/r/pull/2 rung=opus-xhigh from=opus-high climbs=review:opus-high->opus-xhigh ready="*" (fallback) [written]"*) echo "ok   - revised: the line shows the rung, where it started and the climb" ;;
   *) echo "FAIL - revised: reconcile line (got: $out)"; fail=1 ;; esac
-case "$out" in *"task-approved: status=review pr=https://github.com/o/r/pull/1 [written]"*) echo "ok   - approved: no rung on the line" ;;
+case "$out" in *"task-approved: status=review pr=https://github.com/o/r/pull/1 ready="*" (fallback) [written]"*) echo "ok   - approved: no rung on the line" ;;
   *) echo "FAIL - approved: reconcile line (got: $out)"; fail=1 ;; esac
 
 check "review-blocked: status"          "status: review-blocked"                       "$TMP/task-reviewblocked.md"
