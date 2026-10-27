@@ -1,7 +1,8 @@
 // A Chorus room stop, the lead's side (execute § Room stop; Chorus ADR 0071; p18-1): skills/execute/scripts/
-// step-boundary.py, executed. When the Stage says a Login is at its line, the lead stops each Workflow call the moment
-// its running agent's result is in the run's journal, records the stop on the rollout note's `## Pause log`, and
-// resumes every stopped call on the Stage's re-send. tests/contracts/execute-room-stop.test.mjs pins the prose.
+// step-boundary.py, executed. When the Stage says a Login is at its line, or would reach it (a spread,
+// Chorus ADR 0109), the lead stops each Workflow call the moment its running agent's result is in the run's journal,
+// records the stop on the rollout note's `## Pause log`, and resumes every stopped call on the Stage's re-send.
+// tests/contracts/execute-room-stop.test.mjs pins the prose.
 //
 // (a)  the journal model: open keys, the running agent, a stale key, labels, a torn line, a missing journal, usage;
 // (a2) the gap re-mark: a relaunch after a gap marks afresh, so a watch never stops an agent that started later;
@@ -332,6 +333,24 @@ test('(b) begin refuses a wikilink and writes nothing: a [[slug]] above ## Queue
   assert.equal(stands(p).rc, 5, 'no room stop stands')
   const bare = begin(p, 'Lachy at its week\'s line; stopping at a step boundary: wf_x proj-a (task); lane: none\n')
   assert.equal(bare.rc, 0, 'the same line with the slug bare is recorded')
+})
+
+test("(b) a spread's line records and stands like a line's; a line signal after it writes nothing", () => {
+  const p = note()
+  const spread = 'L spreading its Rollouts (would reach its 5-hour line ~17:51); stopping at a step boundary: wf_x proj-a (task); lane: none'
+  const r = begin(p, spread + '\n')
+  assert.equal(r.rc, 0, r.err)
+  assert.match(r.out, STAMP)
+  assert.ok(r.out.trimEnd().endsWith(` room stop: ${spread}`), r.out)
+  assert.equal(stands(p).rc, 0, 'a spread room stop stands')
+  const t = fs.readFileSync(p, 'utf8')
+  const since = r.out.split(' ')[1]
+  const line = begin(p, 'L at its 5-hour line; stopping at a step boundary: wf_x proj-a (task); lane: none\n')
+  assert.deepEqual([line.rc, line.out], [0, `room stop already stands since ${since}\n`])
+  assert.equal(fs.readFileSync(p, 'utf8'), t, 'the line signal writes nothing: the spread stays the record')
+  const e = sb(['end', '--rollout', p])
+  assert.deepEqual([e.rc, e.out], [0, `room stop ended (stood since ${since})\n`])
+  assert.equal(stands(p).rc, 5)
 })
 
 test('(b) begin over a lapsed start line records a fresh one', () => {

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """step-boundary.py — the lead's side of a Chorus room stop (execute § Room stop; Chorus ADR 0071).
 
-When the Chorus Stage says a Session's Login is at its week's or 5-hour line, the lead starts nothing, stops each
-Workflow call the moment its running agent's result is in the run's journal, reports that nothing is mid-step, and
-resumes every stopped call on the Stage's re-send. The engine (task.workflow.js) has no shell to read a flag, so
-the lead watches the journals with this script, and records the stop on the rollout note's `## Pause log`, where a
-compaction cannot lose it. A room stop is never a Pause: it writes no `paused:` stamp.
+When the Chorus Stage says a Session's Login is at its week's or 5-hour line, or would reach its 5-hour line (a
+spread, Chorus ADR 0109), the lead starts nothing, stops each Workflow call the moment its running agent's result
+is in the run's journal, reports that nothing is mid-step, and resumes every stopped call on the Stage's re-send.
+The engine (task.workflow.js) has no shell to read a flag, so the lead watches the journals with this script, and
+records the stop on the rollout note's `## Pause log`, where a compaction cannot lose it. A room stop is never a
+Pause: it writes no `paused:` stamp.
 
 Verbs:
 

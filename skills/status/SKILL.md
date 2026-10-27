@@ -439,22 +439,22 @@ integrates, the lead's next step stamps `paused:`.
 
 **Room stop.** A standing room stop (§ 2's `stands`, exit 0) renders as a room stop, not a stall: headline
 `ROOM STOP since <stamp>: awaiting the Stage's resume`, what's left listed as usual, and no stalled framing.
-On the Chorus Stage the lead stopped each Workflow call at a step boundary for a Login at its line (execute
-§ Room stop), so its owner session (the lead that wrote it, which the tasks' `owner:` tags name) shows no run in
-`/workflows` by design. Its tasks need not read running or integrating either: a call whose row came in before
-its stop was reconciled, and the signal can come in a cool-down's `waiting` turn with nothing in flight, so they
-may all await Integration, sit set aside or wait queued. While that session is alive (not known to have ended)
-the room stop is a live queue whatever its tasks read and whatever `/workflows` shows: action 10 matches it ahead
-of drift and every resume (11 to 13), and the Stage owes it the resume, so the recommendation is to wait for it,
-never `/thread:execute` from here, because any loop entry, whoever opens it, ends the room stop and resumes the
-stopped calls on a Login still at its line, and the Stage then sends nothing, since its resume skips a lead that
-has launched work since. A lapsed one (exit 4) renders `room stop since <stamp> lapsed: the owner's heartbeat
-re-enters`: it is a live queue the same way, and the owner session's heartbeat re-enters *Cold resume* on its
-next tick, which ends it and resumes the stopped calls by handle, so wait for that too. Under either, once the
-owner session has ended (the owner-session qualifier), nothing owes the resume and the room stop is no live
-queue: action 10's or 12's resume applies as usual, and that *Cold resume* ends it. A stamped pause comes first
-(action 8): the Stage's resume skips a paused lead, so the reinstate is yours, and it ends the room stop as any
-loop entry does.
+On the Chorus Stage the lead stopped each Workflow call at a step boundary for a Login at its line, or nearing it
+in a spread (execute § Room stop), so its owner session (the lead that wrote it, which the tasks' `owner:` tags
+name) shows no run in `/workflows` by design. Its tasks need not read running or integrating either: a call whose
+row came in before its stop was reconciled, and the signal can come in a cool-down's `waiting` turn with nothing
+in flight, so they may all await Integration, sit set aside or wait queued. While that session is alive (not
+known to have ended) the room stop is a live queue whatever its tasks read and whatever `/workflows` shows:
+action 10 matches it ahead of drift and every resume (11 to 13), and the Stage owes it the resume, so the
+recommendation is to wait for it, never `/thread:execute` from here, because any loop entry, whoever opens it,
+ends the room stop and resumes the stopped calls on a Login still at its line, and the Stage then sends nothing,
+since its resume skips a lead that has launched work since. A lapsed one (exit 4) renders `room stop since
+<stamp> lapsed: the owner's heartbeat re-enters`: it is a live queue the same way, and the owner session's
+heartbeat re-enters *Cold resume* on its next tick, which ends it and resumes the stopped calls by handle, so
+wait for that too. Under either, once the owner session has ended (the owner-session qualifier), nothing owes the
+resume and the room stop is no live queue: action 10's or 12's resume applies as usual, and that *Cold resume*
+ends it. A stamped pause comes first (action 8): the Stage's resume skips a paused lead, so the reinstate is
+yours, and it ends the room stop as any loop entry does.
 
 **Owner-session qualifier.** It applies to a live queue: a running or integrating task with an `owner:`, or a
 room stop, standing or lapsed, whatever its tasks read (*Room stop* above). A Workflow run is listed in
