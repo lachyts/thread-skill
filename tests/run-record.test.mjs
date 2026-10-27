@@ -668,6 +668,12 @@ test('a tuning line is v 2 with its ten scores; every other kind stays v 1', (t)
     'conflictRate', 'quotaStalls', 'handsOffRate', 'quality', 'reviewChurn']])
 })
 
+test('a tuning with binding trickle-bound (p28-6) is recorded; an unknown binding is still refused (below)', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ binding: 'trickle-bound' }))], { env: EV(home) })
+  assert.equal(lines(path.join(ev(home), 'tunings.jsonl'))[0].binding, 'trickle-bound')
+})
+
 test('a tuning with a null activeStart and activeEnd (no running time) is recorded', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ window: { since: WINDOW.since, until: WINDOW.until, activeStart: null, activeEnd: null } }))], { env: EV(home) })

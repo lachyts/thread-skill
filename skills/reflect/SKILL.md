@@ -180,8 +180,9 @@ headlines first (ADR 0037 d1), then the Guardrails:
   rollout, so a later re-score can lower Quality.
 - **Guardrails**: **Throughput** first, against its bound: merges per running hour, the running hours against the
   allowance (`allowanceHours` for its `tasks`, `bound`), and whether it is breached; then every excluded span by kind
-  (`paused`, `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `lead-absent`, `never-finished`,
-  `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
+  (`paused`, `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `hold-trickle` / `hold-away-cap` /
+  `hold-heat` meant Mac-wide waits, never Lachy's (p28-6: the Trickle, the Away cap, the Heat hold), `lead-absent`,
+  `never-finished`, `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
   Reflection). Then tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
   stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so. Last,
   **Review churn** (`reviewChurn`, p21-3): its value, or "unknown" when no review round was recorded or no
@@ -195,7 +196,10 @@ headlines first (ADR 0037 d1), then the Guardrails:
 - **Load**: the overlapping rollouts on this machine, their span and the Slots each held open (`slotsOpen`). A
   rollout counts through this run while a Slot it took has no slot-freed, even when its long calls wrote nothing
   meanwhile; say so when its `load:` flag reads it live past its last line (a lost slot-freed overcounts it).
-- **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this".
+- **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this". Nor does a
+  trickle-bound one (p28-6: the Mac-wide cap, the Trickle or the Away cap, kept Slots free for at least half the
+  time, its no-Slot-open spans counted in, and held as much Slot time as any other idle reason): say "the Trickle
+  moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling.
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says
   3", so a jump such as 3 → 6 reads as one step past what the run proved. Then what it `serves` and `risks`. A

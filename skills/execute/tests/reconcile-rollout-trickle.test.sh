@@ -601,4 +601,71 @@ ok "$(lines)" 0 "A13: … with empty stderr"
 ok "$(q "$J" '[d["halt"], d["trickle"]["file"], d["trickle"]["away"], d["trickle"]["awayCap"]]')" '["paused","fresh",true,4]' \
   "A13: halt paused, the file fresh, its away_cap read and the unknown key ignored"
 
+# ── E1: the ETA by day uses the Trickle's limit (p28-6) ─────────────────────────────────────────────────────────
+# ro-a (ceiling 4): two tasks done in 60 min each, one running and two queued (3 pending); ro-b runs one elsewhere. The
+# remaining estimate is 60 x ceil(3 / width), width min(ceiling, max(1, cap - elsewhere)) (_eta_width).
+st() { HOME="$D/home" python3 "$SCRIPT" status --rollout "$D/$1.md" --tasks-dir "$D" --now "$NOW" 2>"$D/err"; }
+eta='[d["timeline"]["etaWidth"], d["timeline"]["etaBy"], d["timeline"]["remainingLabel"]]'
+scen e1-eta
+mkro ro-a 4
+for s in a1 a2; do mkt $s ro-a done 'started: 2026-10-02T10:00+00:00' 'merged: 2026-10-02T11:00+00:00'; done
+mkt a3 ro-a in_progress 'owner: lead-a' 'started: 2026-10-02T13:00+00:00'; mkt a4 ro-a open; mkt a5 ro-a open
+mkro ro-b 4; mkt b1 ro-b in_progress 'owner: lead-b'; mkt b2 ro-b open; mkt b3 ro-b open
+away_raw "$(mod 'd["away"] = False')"
+J=$(st ro-a)
+ok "$(q "$J" "$eta")" '[1,"trickle","~3h (rough)"]' "E1: not Away, Trickle 2 less ro-b's 1: width 1 by the Trickle, ~3h"
+has "$(q "$J" 'd["progress"]')" "~3h remaining (rough)" "E1: status's progress line reads ~3h"
+has "$(q "$(nx ro-a --dry-run)" 'd["progress"]')" "~3h remaining (rough)" "E1: next --dry-run's progress line reads ~3h too"
+out=$(HOME="$D/home" python3 "$SCRIPT" mark-started --tasks a4 --tasks-dir "$D" --now "$NOW" --rollout "$D/ro-a.md" 2>"$D/err"); rc=$?
+ok "$rc" 0 "E1: mark-started --rollout exits 0"
+has "$out" "progress: 2/5 merged, 1 running, 2 queued" "E1: mark-started prints its progress line"
+has "$out" "~3h remaining (rough)" "E1: … whose ETA reads the Trickle's width 1 too"
+away_raw "$BASE"
+ok "$(q "$(st ro-a)" "$eta")" '[4,"ceiling","~1h (rough)"]' "E1: control: Away, the Away cap 99 never binds: width 4 by the ceiling, ~1h"
+rm -f "$D/home/.config/thread/away.json"
+ok "$(q "$(st ro-a)" "$eta")" '[1,"trickle","~3h (rough)"]' "E1: control: no file reads Trickle 2: width 1 with ro-b's 1"
+fmline ro-b 'paused: 2026-10-02T14:00+00:00'
+ok "$(q "$(st ro-a)" "$eta")" '[2,"trickle","~2h (rough)"]' "E1: control: no file and nothing elsewhere: width 2 by the Trickle, ~2h"
+scen e1b-full
+mkro ro-a 4
+for s in a1 a2; do mkt $s ro-a done 'started: 2026-10-02T10:00+00:00' 'merged: 2026-10-02T11:00+00:00'; done
+mkt a3 ro-a in_progress 'owner: lead-a'; mkt a4 ro-a open; mkt a5 ro-a open
+mkro ro-b 4; for s in b1 b2 b3; do mkt $s ro-b in_progress 'owner: lead-b'; done
+away_raw "$(mod 'd["away"] = False')"
+ok "$(q "$(st ro-a)" "$eta")" '[1,"trickle","~3h (rough)"]' "E1: control: ro-b holds 3, past the Trickle's 2: the floor gives width 1, never a divide by zero"
+fmline ro-b 'paused: 2026-10-02T14:00+00:00'
+mkro ro-c 4; mkt c1 ro-c in_progress 'owner: lead-c'
+away_raw "$(mod 'd["away_cap"] = 3')"
+ok "$(q "$(st ro-a)" "$eta")" '[2,"away cap","~2h (rough)"]' "E1: control: Away, the Away cap 3 less ro-c's 1: width 2 by the Away cap, ~2h"
+
+# ── S1: status reports the Trickle from a fixture away.json (p28-6), read-only and never through next ────────────
+tks='[d["trickle"][k] for k in ("away", "file", "limit", "elsewhere", "here", "running")]'
+scen s1-status
+two_rollouts
+away_raw "$(mod 'd["away"] = False')"
+before=$(sums)
+J=$(st ro-b); rc=$?
+ok "$rc" 0 "S1: status exits 0"
+ok "$(q "$J" "$tks")" '[false,"fresh",2,{"ro-a":2},1,3]' "S1: not Away, fresh, Trickle 2, ro-a's 2 elsewhere, 1 here, 3 running"
+ok "$(q "$J" 'sorted(d["trickle"])')" '["away","awayCap","elsewhere","file","here","limit","morning","running","until","why"]' "S1: the trickle block's exact keys"
+ok "$(lines)" 0 "S1: … with empty stderr"
+away_raw "$BASE"
+J=$(st ro-b)
+ok "$(q "$J" '[d["trickle"][k] for k in ("away", "file", "awayCap", "until", "why")]')" '[true,"fresh",99,"2099-01-01T00:00:00Z",null]' \
+  "S1: Away: the Away cap and the file's until are reported"
+away_file "$D/home" "$HOUR_AGO" true 2026-10-02T14:04:00Z
+J=$(st ro-b)
+ok "$(q "$J" '[d["trickle"]["file"], bool(d["trickle"]["why"]), d["trickle"]["away"], d["trickle"]["limit"]]')" '["stale",true,false,2]' \
+  "S1: stale reads not Away at Trickle 2, why set"
+ok "$(lines)" 0 "S1: … and status prints no WARN (only next does)"
+away_raw '{"away": true,'
+J=$(st ro-b)
+ok "$(q "$J" '[d["trickle"]["file"], bool(d["trickle"]["why"]), d["trickle"]["limit"]]')" '["unreadable",true,2]' "S1: unreadable reads Trickle 2, why set"
+ok "$(lines)" 0 "S1: … with no WARN either"
+rm -f "$D/home/.config/thread/away.json"
+ok "$(q "$(st ro-b)" '[d["trickle"]["file"], d["trickle"]["limit"]]')" '["missing",2]' "S1: no file reads missing, Trickle 2"
+ok "$(sums)" "$before" "S1: status writes no note (a pure read)"
+fmline ro-b 'paused: 2026-10-02T14:00+00:00'
+ok "$(q "$(st ro-b)" '[d["trickle"]["here"], d["trickle"]["running"]]')" '[0,2]' "S1: a paused rollout counts 0 here, as others read it"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }
