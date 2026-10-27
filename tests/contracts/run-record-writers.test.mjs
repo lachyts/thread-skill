@@ -2,7 +2,7 @@
 // suite-started, suite-ended, base-moved) are each emitted by a script under skills/**/scripts or hooks/, never by
 // prose: no skill or doc tells an agent to run `run_record.py emit`. And recording never delays a result a caller waits
 // on: lead-integrate.py verify writes its suite-ended only after the rc and outcome files, and verify-slot.py run only
-// after its slot is released. Pure matchers, so the real tree and the controls run through the same code. Reads files
+// after its slot is released, a heat-stopped run's (_heat_run_ended) too. Pure matchers, so the real tree and the controls run through the same code. Reads files
 // only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -40,6 +40,11 @@ export function checkOrder({ li, vs }) {
   const ended = run.indexOf('suite_ended(')
   const release = run.indexOf('slot.release()')
   if (ended < 0 || release < 0 || ended < release || !vs.includes('return _run_recorded(')) bad.push('run')
+  // The Heat hold's stop (contract item 7): the heat-stopped run's suite ends in _heat_run_ended, after its release.
+  const heat = defBody(vs, '_heat_run_ended')
+  const heatEnded = heat.indexOf('suite_ended(')
+  const heatRelease = heat.indexOf('slot.release()')
+  if (heatEnded < 0 || heatRelease < 0 || heatEnded < heatRelease || !run.includes('_heat_run_ended(')) bad.push('heat')
   return bad
 }
 
@@ -73,7 +78,7 @@ test('control: the matchers', () => {
   assert.ok(!tellsEmit('`run_record.py` is the one writer; every emitter goes through it.'))
 })
 
-test('control: an ended line written before the rc file, or before the slot is released, fails the order', () => {
+test('control: an ended line written before the rc file, or before the slot is released (a heat stop too), fails the order', () => {
   const li = read('skills/execute/scripts/lead-integrate.py')
   const vs = read('skills/execute/scripts/verify-slot.py')
   const early = li.replace('    try:\n        for s in SIGNALS:   # inside the try', '    _suite_end(rec, rc, result, log_path, args)\n    try:\n        for s in SIGNALS:   # inside the try')
@@ -85,4 +90,7 @@ test('control: an ended line written before the rc file, or before the slot is r
     .replace(/\n {16}rr\.suite_ended\(\*common, "stopped"[^\n]*/, '').replace(/\n {16}rr\.suite_ended\(\*common, outcome[^\n]*/, '')
   assert.notEqual(held, vs, 'the mutation applied')
   assert.deepEqual(checkOrder({ li, vs: held }), ['run'])
+  const hot = vs.replace(/\n {4}slot\.release\(\)\n( {4}if written\.get\("started"\):\n {8}rr\.suite_ended\([^)]*\))/, '\n$1\n    slot.release()')
+  assert.notEqual(hot, vs, 'the mutation applied')
+  assert.deepEqual(checkOrder({ li, vs: hot }), ['heat'])
 })

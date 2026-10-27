@@ -35,6 +35,7 @@ export THREAD_EVENTS_DIR="$EV"
 export THREAD_NOTE_LOCK_DIR="$TMP/note-locks"
 export ROLLOUT_DRIVER_STATE_DIR="$TMP/driver"
 export THREAD_MACHINE_TIMES='{}'
+export THREAD_HEAT_LEVEL=0   # `next` reads the Heat hold's level: pinned at nominal, never this Mac's heat
 S='{"parallel_ceiling":2}'
 
 fail=0

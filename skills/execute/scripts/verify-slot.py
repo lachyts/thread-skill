@@ -960,6 +960,16 @@ def _failing_from(rr, capture):
         return None
 
 
+def _heat_run_ended(rr, owner, slot, suite, by, t0, written):
+    """A heat-stopped run in a task tree (contract items 7 and 8): its slot released (a close), then, when its started
+    line landed, its suite ended heat, no verdict and no rc, so the record never holds a slot. The caller holds stops
+    across it."""
+    slot.release()
+    if written.get("started"):
+        rr.suite_ended(owner["rollout"], owner["task"], suite, by, "agent", "heat", time.monotonic() - t0,
+                       tasks_dir=owner["tasks_dir"])
+
+
 def _run_recorded(slots, prio, cmd, owner):
     """`run` for a suite in a task tree (contract item 8): the slotted run as cmd_run's, the Heat hold included, plus its
     suite-started and suite-ended lines in the rollout's Run record, and, unless fd 1 or fd 2 is a TTY, its output
@@ -1008,17 +1018,14 @@ def _run_recorded(slots, prio, cmd, owner):
             if rc is not HEAT_STOPPED:
                 break
             stopped = heat_name(g.heat)
-            # The heat-stopped run's suite ends heat once its slot is released, with stops held, so a stop meanwhile
-            # ends no suite twice; the restart is a fresh suite.
+            # With stops held, so a stop meanwhile ends no suite twice: the slot released, then the heat-stopped run's
+            # suite ended heat (_heat_run_ended); the restart is a fresh suite.
             with rr._signals_held():
-                slot.release()
-                slot = None
-                box["g"] = None
                 _say(f"heat stop ({stopped}): ended the suite after {time.monotonic() - t0:.0f}s; no verdict, never "
                      "red: back in line to restart from the beginning once the Mac cools")
-                if written.get("started"):
-                    rr.suite_ended(owner["rollout"], owner["task"], suite, by, "agent", "heat", time.monotonic() - t0,
-                                   tasks_dir=owner["tasks_dir"])
+                _heat_run_ended(rr, owner, slot, suite, by, t0, written)
+                slot = None
+                box["g"] = None
                 if capture is not None:
                     capture.close()
                     capture = None
@@ -1046,10 +1053,10 @@ def _run_recorded(slots, prio, cmd, owner):
     finally:
         if slot is not None:
             slot.release()
-    common = (owner["rollout"], owner["task"], suite, by, "agent")
     try:
         if written.get("started") and t0 is not None:
             seconds = time.monotonic() - t0
+            common = (owner["rollout"], owner["task"], suite, by, "agent")
             if signalled or rc > 128:
                 rr.suite_ended(*common, "stopped", seconds, tasks_dir=owner["tasks_dir"], scan=False, rc=rc)
             else:
