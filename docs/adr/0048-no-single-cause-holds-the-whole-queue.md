@@ -34,8 +34,9 @@ From September to 21 October about 150 to 185 hours of rollout time went to stal
   cause, or skip, read-only and guard-exempt, from the Run record's life signs and `next`'s own dry run. Its algorithm's
   one copy is reconcile-rollout.py's module docstring; the safety wording (what `stalled` means, and that it never by
   itself starts a second lead) and *Which waits silence judges* are status SKILL.md § The Watchdog's reading. A wait
-  only the lead's own heartbeat ends (a merge hold) is judged by silence; one `next` or the clock reads live (a
-  cool-down, the Trickle, the Away cap, the Heat hold, the last starts, a PR hold) by its own condition.
+  only the lead's own heartbeat ends (a merge hold) is judged by silence, as is the lane the lead holds for a RACE
+  re-verify (a re-verify in flight never halts on its own task); one `next` or the clock reads live (a cool-down, the
+  Trickle, the Away cap, the Heat hold, the last starts, a PR hold) by its own condition.
 - **The Lane hold.** merge-task's abort (70) and its environment exit 2, every `lead-integrate.py` exit 2 on the task
   that holds the lane, and the Integration verify's third `noslot` write one `## Lane log` line (`lane-hold`), which
   `next` reads into `laneHold` and halts `lane` on once nothing else moves; only Lachy's ack through `/thread:repair`

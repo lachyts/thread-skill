@@ -753,7 +753,10 @@ Subcommands:
                  `RACE: the revert of [[x]] did not land: <why>`.
               8. W, the work the lead could act on now: `running` and `start` (and `restart`); the lane (laneHold
                  empty, no open ("merge", task) hold in the record on an integrating task, and something integrating
-                 or awaiting Integration; or a `race` entry with `revert: true` and no `git-env` or `lane` entry); halt
+                 or awaiting Integration; or a `race` entry with `revert: true` and no `git-env` or `lane` entry; or
+                 the Run record's open lane (_record_state's `lane`) on a task whose `race` entry has `revert: false`:
+                 the lead's RACE re-verify or its landing tail, which never halts on its own task, so judged by
+                 silence; the third `noslot`'s `free-lane` closes it, and the RACE left to Lachy then reads `you`); halt
                  `complete` or `regenerate`; and `reentry`: each setAside entry at `run` or `integration`, not
                  race-held, with no task `holdUntil`, under no held rollout hold and no `pauseRequested`, read as step
                  1.2 reads it (k = _retry_budget's max_review_rounds, None when invalid; lead-integrate.py task_inputs
@@ -11204,9 +11207,16 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
     merge_held = [x for x in (nx.get("integrating") or []) + [h["slug"] for h in nx.get("raceHold") or []]
                   if x.lower() in merge_open]
     blocked = any(e.get("hold") in ("git-env", "lane") for e in lane_hold)
+    # The lead's own RACE re-verify (or its landing tail) holds the lane on the undecided RACE's task: the Run record's
+    # lane is still open on it (execute § 4.5's RACE procedure keeps it held; the third `noslot` frees it, and the RACE
+    # then waits for Lachy). It is work, judged by silence: a re-verify in flight never halts on its own task.
+    rec_lane = (state.get("lane") or "").lower()
+    race_lane = bool(rec_lane) and any(e.get("hold") == "race" and not e.get("revert") and e["slug"].lower() == rec_lane
+                                       for e in lane_hold)
     work["lane"] = ((not lane_hold and bool(nx.get("integrating") or nx.get("awaitingIntegration"))
                      and not merge_held)
-                    or (not blocked and any(e.get("hold") == "race" and e.get("revert") for e in lane_hold)))
+                    or (not blocked and any(e.get("hold") == "race" and e.get("revert") for e in lane_hold))
+                    or race_lane)
     work["running"] = list(nx.get("running") or [])
     work["start"] = list(nx.get("start") or []) + list(nx.get("restart") or [])
     race_slugs = {h["slug"].lower() for h in nx.get("raceHold") or []}

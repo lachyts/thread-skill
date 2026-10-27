@@ -810,7 +810,10 @@ read-only and guard-exempt (any root reads any rollout), writes no bytecode, and
 look (`ERROR: moving: <why> (a lost look, never a stall)`: the note, the Run record or `next` unreadable), 2 on usage
 (`--stall-after` outside 1 to 1440). Its algorithm's one copy is reconcile-rollout.py's module docstring (`moving`).
 - `moving`: work the lead could act on now (a running task, a start, a moving Integration lane, a re-entry step 1.2
-  would take, `halt: complete`) and a life sign within `--stall-after`.
+  would take, `halt: complete`) and a life sign within `--stall-after`. The lane the lead holds for a RACE re-verify, or
+  its landing tail, is work too (the Run record's open lane on the undecided RACE's task): a re-verify in flight never
+  halts on its own task, so a live one reads `moving` and a dead lead's reads `stalled`. The third `noslot`'s
+  `free-lane` closes it, and the RACE left to Lachy then reads `you`.
 - `stalled`, its cause `silent` (no life sign within the bound), `mac-restart` (a boot came after the last life sign),
   `usage-limit` (a usage-limit stop is open: a room stop past its 6 h bound included) or `halt` (an open halt holds
   more than it threatens: work appeared beside a halt that is not on execute § 7's *Whole-rollout halts kept*).
@@ -868,7 +871,7 @@ wait clauses included, *Merge hold*, *lead-integrate's exit 2* and § Room stop 
 | `approved queue waits: <onMerge.why>` | `waiting approved-queue` |
 | `gated: awaiting merge approval for [[slug]] (PR #N)`, `review required: approve PR #N (<url>)` (*Merge hold*'s `<hold reason>`) | `waiting merge-hold`, judged by silence |
 | `room stop: stopping calls at a step boundary`, `room stop: nothing mid-step, awaiting the Stage resume` | `waiting room-stop` |
-| `lane held: the shared checkout changed`, `lane held: RACE undecided: [[slug]]`, `lane held: <cause> on [[<slug>]]` (other work moves) | `moving`, judged by silence |
+| `lane held: the shared checkout changed`, `lane held: RACE undecided: [[slug]]`, `lane held: <cause> on [[<slug>]]` (other work moves, the lead's own RACE re-verify or its landing tail included) | `moving`, judged by silence |
 | `paused at user request` | `waiting paused` |
 | `superseded by [[<supersededBy>]]` | `skip` |
 | `RACE undecided: [[<slug>]]`, `lane held: <cause> on [[<slug>]]`, `git-env trip: the shared checkout changed` (a lane trip), `hold_until needs you on [[<note>]]: <pr> closed unmerged`, `hold_until needs you on [[<note>]]: unreadable`, `the rollout links no task` (end-of-run verdicts) | `waiting you`; `stalled halt` once work appears beside it |

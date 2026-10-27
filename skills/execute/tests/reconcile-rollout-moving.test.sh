@@ -3,7 +3,7 @@
 # verdict (moving | stalled | waiting | skip), and the narrowings it reads: the Lane hold (`lane-hold` / `lane-ack`, `next`'s
 # `lane` entry and halt), prepare's and merge-task's task-scoped set-asides, the lead's infra set-asides, a task-level
 # invalid round budget (H12, never a halt) and the wait clauses' inputs.
-#   S1 stop_spans' reason and index   M1-M20 the verdicts   N1-N9b the narrowings, each through the real verbs
+#   S1 stop_spans' reason and index   M1-M21 the verdicts   N1-N9b the narrowings, each through the real verbs
 # Each scenario builds its own tasks dir, Run record (run_record.py emit --ts for the past), HOME and THREAD_MACHINE_TIMES,
 # so nothing reads this machine's history; a stub gh stands in for every PR read. Temp notes only; no vault, no network.
 # This suite reads the record, so it keeps its own THREAD_EVENTS_DIR per scenario and ignores THREAD_TEST_EVENTS_DIR.
@@ -394,6 +394,34 @@ setfm v max_review_rounds 0
 entry 2026-10-26T10:00:00Z
 ok "$(j "$(inp v)" '[d["autoRevise"], d["humanFix"]["act"]]')" '[false,"fix the round budget"]' "M20b: inputs with no flag: autoRevise false, H12"
 ok "$(vcr)" '["waiting","you","nothing can start: 1 set aside"]' "M20b: an invalid K is no work: you"
+
+# ── M21 family: the lane the lead holds for a RACE re-verify (or its landing tail) is work, judged by silence ───────
+# execute § 4.5's RACE procedure keeps the lane held through the re-verify (the Run record's lane-taken, no lane-freed),
+# and a re-verify in flight never halts on its own task: a dead lead there is a stall, never a RACE waiting on Lachy.
+scen m21
+QUEUE="a"; mkro; integrating a
+em lane-taken a '{}' 2026-10-26T08:00:00Z
+printf '\n## Race log\n\n- 2026-10-26T08:30+00:00 [[a]] RACE: PR #5 merged as %s on parent x\n' "$A40" >> "$D/$RO.md"
+em hold-started a '{"hold":"race"}' 2026-10-26T08:31:00Z
+entry 2026-10-26T09:00:00Z
+ok "$(j "$(nx)" '[d["laneHold"], d["halt"]]')" '[[{"slug":"a","hold":"race","revert":false}],"race"]' \
+  "M21: (next: laneHold race, revert false, halt race: the lead's own lane state keeps it from halting)"
+ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["reason"], d["work"]["lane"]]')" '["stalled","silent","no life sign for 180m",true]' \
+  "M21: the lead silent 3 h mid re-verify → stalled silent, the lane work (never RACE undecided)"
+entry 2026-10-26T11:50:00Z
+ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["work"]["lane"]]')" '["moving",null,true]' "M21b: a live lead's re-verify → moving"
+printf -- '- 2026-10-26T11:55+00:00 [[a]] re-verify not run: no verify slot in 3 tries; the RACE waits for you\n' >> "$D/$RO.md"
+out=$(python3 "$SCRIPT" free-lane --tasks a --tasks-dir "$D" --now 2026-10-26T11:55:00Z 2>&1); rc=$?
+ok "$rc|$out" "0|a: lane freed (halt)" "M21c: (the third noslot's free-lane)"
+ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["reason"], d["work"]["lane"]]')" '["waiting","you","RACE undecided: [[a]]",false]' \
+  "M21c: the lane freed, the RACE left to Lachy → you"
+scen m21d
+QUEUE="a b"; mkro; integrating a; integrating b
+em lane-taken b '{}' 2026-10-26T08:00:00Z
+printf '\n## Race log\n\n- 2026-10-26T08:30+00:00 [[a]] RACE: PR #5 merged as %s on parent x\n' "$A40" >> "$D/$RO.md"
+entry 2026-10-26T09:00:00Z
+ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["work"]["lane"]]')" '["waiting","you",false]' \
+  "M21d: (control) the record's lane open on another task is not the RACE's re-verify: you"
 
 # ════ The narrowings, each through the real verbs ══════════════════════════════════════════════════════════════════
 
