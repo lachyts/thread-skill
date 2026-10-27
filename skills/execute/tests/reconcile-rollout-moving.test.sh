@@ -533,12 +533,16 @@ ok "$(j "$(inp a)" '[d["humanFix"]["act"], d["humanFix"]["handBack"]]')" '["hand
 ok "$(j "$(nx)" '[d["start"], d["halt"]]')" '[["b"],null]' "N2b: the queue runs on"
 
 # ── N3: a task-level invalid round budget → that task set aside (H12), never a halt ─────────────────────────────
+# Driven from a queued (`open`) note, as execute § 3 runs it: the lead writes its own Set aside row before any start,
+# so there is no `status: in_progress` stamp, no mark-started and no slot event.
 scen n3
 QUEUE="q r"; mkro; mkt q open "max_plan_rounds: 0"; mkt r open
-setfm q status in_progress
 lead q own "invalid round budget: max_plan_rounds on [[q]] must be an integer >= 1, got '0'" 2026-10-26T11:00:00Z
+ok "$(grep -m1 '^status:' "$D/q.md")" "status: blocked" "N3: the own row sets the open note aside (status blocked)"
+ok "$(evs slot-taken,slot-freed)" '[]' "N3: … with no slot event (no start ran)"
 J=$(nx)
-ok "$(j "$J" '[d["start"], [e["slug"] for e in d["setAside"]], d["halt"]]')" '[["r"],["q"],null]' "N3: q set aside, r starts"
+ok "$(j "$J" '[d["start"], [[e["slug"], e["setAsideAt"]] for e in d["setAside"]], d["halt"]]')" '[["r"],[["q","run"]],null]' \
+  "N3: q set aside at its run, r starts"
 I=$(inp q)
 ok "$(j "$I" '[d["humanFix"]["act"], d["autoRetryError"]]')" "[\"fix the round budget\",\"max_plan_rounds on [[q]] must be an integer >= 1, got '0'\"]" "N3: inputs → H12 naming the field"
 out=$(python3 "$SCRIPT" auto-retry --tasks q --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" 2>&1); rc=$?
@@ -549,14 +553,14 @@ out=$(python3 "$SCRIPT" auto-retry --tasks q --rollout "$D/$RO.md" --tasks-dir "
 ok "$rc" 0 "N3: auto-retry re-enters it"
 ok "$(j "$(nx)" 'd["restart"] + d["running"]')" '["q"]' "N3: next takes q back"
 scen n3-h10
-QUEUE="q r"; mkro; mkt q in_progress "max_plan_rounds: 0" "auto_retries: 0"; mkt r open
+QUEUE="q r"; mkro; mkt q open "max_plan_rounds: 0" "auto_retries: 0"; mkt r open
 lead q own "invalid round budget: max_plan_rounds on [[q]] must be an integer >= 1, got '0'" 2026-10-26T11:00:00Z
 setfm q max_plan_rounds 3
 ok "$(j "$(inp q)" '[d["humanFix"]["act"], d["humanFix"]["raise"]]')" '["hand back or defer",null]' "N3: fixed with auto_retries 0 → H10, raise null"
 
 # ── N3b: an invalid max_review_rounds is never passed to inputs ─────────────────────────────────────────────────
 scen n3b
-QUEUE="q r"; mkro; mkt q in_progress "max_review_rounds: 0"; mkt r open
+QUEUE="q r"; mkro; mkt q open "max_review_rounds: 0"; mkt r open
 lead q own "invalid round budget: max_review_rounds on [[q]] must be an integer >= 1, got '0'" 2026-10-26T11:00:00Z
 I=$(python3 "$LI" inputs --note "$D/q.md" --repo "$D/root" --now "$NOW"); rc=$?
 ok "$rc|$(j "$I" '[d["autoRevise"], d["humanFix"]["act"]]')" '0|[false,"fix the round budget"]' "N3b: inputs with no flag → exit 0, H12"

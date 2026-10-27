@@ -436,10 +436,11 @@ setfm "$A" max_iterations 3
 ok "$(j "$(inp "$A")" '[d["autoRetryError"], d["humanFix"]]')" '[null,null]' "H12b: once fixed, not H12 (the lead's own retry)"
 setfm "$A" max_plan_rounds '"3"'
 ok "$(hf "$(inp "$A")")" '["fix the round budget",false,null]' "H12b: a quoted max_plan_rounds → H12"
-# H12c: the lead's own `invalid round budget:` row (execute § 3's task-level budget), fixed, with auto_retries 0 → H10
+# H12c: the lead's own `invalid round budget:` row (execute § 3's task-level budget), fixed, with auto_retries 0 → H10.
+# Driven from a queued (`open`) note, as § 3 runs it: no `status: in_progress` stamp and no mark-started precede the row.
 scen h12c
 mkro; mkt "$B" open
-mkt "$A" in_progress "max_plan_rounds: 0" "auto_retries: 0"
+mkt "$A" open "max_plan_rounds: 0" "auto_retries: 0"
 lead "$A" own "invalid round budget: max_plan_rounds on [[$A]] must be an integer >= 1, got '0'"
 ok "$(hf "$(inp "$A")")" '["fix the round budget",false,null]' "H12c: the own-run row reads H12 while the stamp is invalid"
 setfm "$A" max_plan_rounds 3
