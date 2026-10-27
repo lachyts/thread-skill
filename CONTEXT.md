@@ -638,8 +638,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   than piling on. Each slotted suite runs under a guard that ends a killed
   holder's suite before its verify slot frees. The Integration priority: the
   lead's Integration and RACE verifies, and the integrate call's own verifier
-  runs (`run --priority`), go before any task call's agent. Not a **Slot** (a
-  task's run in a Queue). _Avoid_: bare "slot", lock, semaphore.
+  runs (`run --priority`), go before any task call's agent. An agent waits for
+  its suite's verdict inside its turn (`verify-slot.py wait`, p31-3), never by
+  ending it. Not a **Slot** (a task's run in a Queue). _Avoid_: bare "slot",
+  lock, semaphore.
 - **Checkpoint** — one of the two moments per task where the full suite (the
   rollout's `verifier:`) runs: a code-writing agent's last check before it
   opens or updates its PR (the implementer's, and each reviser's), and
