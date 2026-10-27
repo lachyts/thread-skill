@@ -186,7 +186,7 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    12. Step 5's Solo: none stamped; the proposals are named.
    13. Step 6's naming: the slug is the `projectSlug` the fork's prompt gives (the lowercase kebab form of the project
        wikilink, apostrophes dropped), never a scope slug, and a taken name is Advance.
-   14. Step 8: no execute offer, and no Start when ready.
+   14. Step 8: no execute handoff, and no Start when ready.
    15. Serial S1 and S4 ask nothing, as under orient § 7; S2's `sessionLane` members are returned as answer 2's
        misfits are.
    16. schedule's Pre-flight (schedule § 1.5, and S3.5 on the serial path) takes this pass's grades and answers as they

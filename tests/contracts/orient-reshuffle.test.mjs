@@ -161,12 +161,12 @@ test('control: --regenerate only in a later sentence fails scheduleCall', () => 
 // list; null when absent.
 const startWhenReady = (s9) => s9.match(/- \*\*Start when ready\*\*(.*?)(?= - \*\*|Execute's own runtime gate|$)/)?.[1] ?? null
 
-test('the execute offer has four answers and never homes a commit on the target default branch', () => {
+test('the execute handoff has four moves and never homes a commit on the target default branch', () => {
   assertHas(S(9), 'orient § 9', ['**Fresh session**', '**Here**', '**Not yet**', '**Start when ready**',
     /`start: unattended`/, /default-branch/])
 })
 
-test('the execute offer starts the lead in the Project root, the rollout clone (ADR 0042), and § 2 skips clone threads', () => {
+test('the execute handoff starts the lead in the Project root, the rollout clone (ADR 0042), and § 2 skips clone threads', () => {
   const s9 = S(9)
   assertHas(s9, 'orient § 9', ['Project root', '**Rollout launch.**', '--launch-check', 'start in the Project root, then `/thread:execute [[<rollout>]]`',
     'handoff-home.sh reads a rollout clone as its in-place twin'])

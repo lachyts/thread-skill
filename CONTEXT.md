@@ -91,6 +91,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   schedule step 8's "Checklist —" report blocks (called "Pre-flight —"
   before ADR 0047), nor a Leg's preflight.
   _Avoid_: preflight check, dry run.
+- **Pickup sweep** — schedule step 1.2, on a standalone parallel `--tasks` run
+  only (ADR 0057): before the **Pre-flight** it reads the same repo's other
+  open tasks on the named tasks' projects (`unfinished-rollout.py pickups`)
+  and joins those that fit, each one a named task needs (uncapped) and up to
+  five others, by priority, then phase. A misfit, a gate hit or a dependency it
+  cannot meet stays out, named; a task on another repo, or with no `## Launch`
+  **Repo:** line, is only counted. A whole-project reshuffle stays orient's.
+  _Avoid_: backlog scan.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
   a fortnight or when its ready work grows), or kill it (done and archived).
@@ -174,8 +182,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   unless told to steer it as it stands or just look. It schedules parallel-shaped
   work itself and, when Lachy steers Autonomous or Mixed, serial-shaped work as
   a serial rollout; it routes the rest by the execution-fit test and ends with the
-  **execute offer** (run the rollout in a fresh session, here, not yet, or
-  start when ready).
+  **execute handoff** (a fresh session by default; here, not yet or start when
+  ready on his word).
   Pointed at a single plan, design note or brain dump it runs a **scoped
   reshuffle** of that note alone. Absorbs the former `split` and `gather` verbs
   (ADR 0027).
@@ -514,6 +522,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suites do not contend, tuned from the Run record (ADR 0049). Each
   rollout's **Parallel ceiling** still bounds its own share. _Avoid_: night
   ceiling, global ceiling.
+- **Lease** — a lead's stamp that keeps its Rollout's running tasks in the
+  Mac-wide count (the **Trickle**, the **Away cap**), rewritten at its every
+  `next` and loop entry: it lapses 45 minutes after its last write, or after
+  the Mac's latest boot or wake if later, unless a room stop stands, and a
+  Rollout with no lease still counts (ADR 0049, amended). _Avoid_: heartbeat
+  file, lock.
 - **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
   the **Away cap**) for a start it has picked but not yet stamped, so every
   other lead counts it. The stamp consumes it, and it lapses after 20
@@ -727,9 +741,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   It differs from unfinished both ways: it leaves out paused, never-started
   and protocol-3 rollouts, and keeps one whose every task merged but whose
   completion ceremony has not run. _Avoid_: active, in flight.
-- **Start when ready** — the execute offer's fourth answer (orient § 9,
-  schedule step 8): it stamps `start: unattended` on the rollout note just
-  written and ends, running nothing. The Chorus Stage starts the lead in the
+- **Execute handoff** — how a session that wrote a parallel rollout note ends
+  (orient § 9, schedule step 8; ADR 0057): decided and never asked, it hands
+  the note to a fresh session through handoff's **Rollout launch.**, whose doc
+  carries `launches:` and briefs the rollout's lead, never this thread. Only his
+  words choose here, not yet or start when ready instead, and only a refused
+  ladder file holds it. Close's `rollout not started:` row names it again for a
+  note this session wrote and left with no lead. _Avoid_: execute offer.
+- **Start when ready** — the execute handoff's fourth move, on his word
+  (orient § 9, schedule step 8): it stamps `start: unattended` on the rollout note just
+  written and ends, running nothing. Said after the handoff, it withdraws the
+  launch first, and stamps nothing when a lead already runs. The Chorus Stage starts the lead in the
   note's Project root, the **Rollout clone** (ADR 0042), once the note is runnable, and that lead's first `next`
   clears the stamp, so no second lead starts (vault grammar § Rollout start
   stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.

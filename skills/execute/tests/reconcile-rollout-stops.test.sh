@@ -11,8 +11,9 @@
 #   hook's halt after a boot: both stops   E8c a sleep inside a halt   E9 next's sleep, once   E9b next writes no sleep
 #   with an open stop, a pause or no entry yet   E10 --dry-run   E10b an unwritable record   E11 the guard   E12 the
 #   skips   E13 --by watchdog   E14 another session's entry, then the live lead's heartbeat: one dead-lead, never a
-#   second   E14b a heartbeat in a session other than the last entry's infers no dead-lead   P1 sleep_spans on a
-#   pmset-shaped log, and machine_times' kern.sleeptime fallback.
+#   second   E14b a heartbeat in a session other than the last entry's infers no dead-lead   E15 (p28-4) record-entry
+#   renews the lead's lease; --dry-run, a skip and the guard write none, and a lease it cannot write only warns
+#   P1 sleep_spans on a pmset-shaped log, and machine_times' kern.sleeptime fallback.
 # This suite reads the record, so it keeps its own THREAD_EVENTS_DIR and ignores THREAD_TEST_EVENTS_DIR.
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -306,6 +307,36 @@ out=$(ent e14b --by heartbeat --session B --now 2026-10-26T10:20:00Z)
 ok "$out" "e14b: lead-entry by=heartbeat" "E14b: no dead-lead from the session change"
 THREAD_MACHINE_TIMES='{"boot":"2026-10-26T10:30:00Z"}' ent e14b --by heartbeat --session A --now 2026-10-26T10:40:00Z >/dev/null
 ok "$(seq e14b)" '["lead-entry:-","lead-entry:-","stopped:mac-restart:inf","lead-entry:mac-restart"]' "E14b: a heartbeat still infers a Mac restart"
+
+echo "== E15. record-entry renews the lead's lease (p28-4); --dry-run, a skip and the guard write none"
+LD="$HOME/.config/thread/leases"   # under this suite's own HOME
+leased() { python3 -c 'import json,sys
+try:
+    d = json.load(open(sys.argv[1]))
+except FileNotFoundError:
+    print("none"); sys.exit(0)
+print(json.dumps([d["rollout"], d["written_at"], d["by"]], separators=(",", ":")))' "$LD/$1.json"; }
+mkro e15
+out=$(ent e15 --by stage --now 2026-10-26T12:00:00Z); rc=$?
+ok "$rc" 0 "E15: exit 0"
+ok "$out" "e15: lead-entry by=stage" "E15: stdout still names only what the record got"
+ok "$(leased e15)" '["e15","2026-10-26T12:00:00Z","entry"]' "E15: the lease is written at --now, by entry"
+THREAD_EVENTS_DIR="$V/e15.md/events" ent e15 --by heartbeat --now 2026-10-26T12:20:00Z >/dev/null 2>&1; rc=$?
+ok "$rc/$(leased e15)" '0/["e15","2026-10-26T12:20:00Z","entry"]' "E15: a Run record it cannot read still renews the lease (written first)"
+mkro e15b
+ent e15b --by stage --now 2026-10-26T12:00:00Z --dry-run >/dev/null
+ok "$(leased e15b)" none "E15: --dry-run writes no lease"
+for r in e12a e12b e12c; do ok "$(leased $r)" none "E15: the skipped $r has no lease"; done
+ok "$(leased e11)" none "E15: the guarded e11 has no lease"
+rm -rf "$LD"; : > "$LD"
+mkro e15c
+out=$(ent e15c --by stage --now 2026-10-26T12:00:00Z 2>"$TMP/e15.err"); rc=$?
+rm -f "$LD"; mkdir -p "$LD"
+ok "$rc" 0 "E15: a lease it cannot write (a file at the leases dir): exit 0"
+ok "$(wc -l < "$TMP/e15.err" | tr -d ' ')" 1 "E15: … with exactly one stderr line"
+has "$(cat "$TMP/e15.err")" "lease: warning: cannot write ~/.config/thread/leases/e15c.json: " "E15: … the lease's warning"
+ok "$out" "e15c: lead-entry by=stage" "E15: … and the entry is still written"
+ok "$(seq e15c)" '["lead-entry:-"]' "E15: … in the record"
 
 echo "== P1. sleep_spans reads a pmset log shaped like this Mac's; machine_times falls back to kern.sleeptime"
 cat > "$TMP/pmset.txt" <<'LOG'
