@@ -54,7 +54,7 @@ function check(text) {
     !/Look only learns nothing/.test(learn4)) fails.push('learn')
   if (!/\*\*Look only\*\*[^.]*no writes of any kind/.test(s4)) fails.push('look')
 
-  if (!collapse(section(text, /^## Don't/) ?? '').includes('drift fixes and the learned `repos:` entry (§ 4) aside')) fails.push('dont')
+  if (!collapse(section(text, /^## Don't/) ?? '').includes("**Don't write before the reshuffle's gate**, drift fixes, the learned `repos:` entry (§ 4)")) fails.push('dont')
   const forms = section(text, /^## Invocation forms/) ?? ''
   if (/infer the area/i.test(forms) || !forms.includes('# resolve the target from the session directory')) fails.push('forms')
   return fails
@@ -90,7 +90,7 @@ test('each control fails with exactly its rule', () => {
     scope: edit(real, 'link it or any swept sub-project', 'link it'),
     slots: edit(real, '- **Next-action slots, first**', '- **Slots**'),
     look: edit(real, 'no writes of any kind', 'nothing more'),
-    dont: edit(real, 'drift fixes and the learned `repos:` entry (§ 4) aside', 'drift fixes (§ 4) aside'),
+    dont: edit(real, 'drift fixes, the learned `repos:` entry (§ 4) and', 'drift fixes (§ 4) and'),
     forms: edit(real, '# resolve the target from the session directory', '# infer the area from CWD'),
   }
   for (const [rule, text] of Object.entries(controls)) assert.deepEqual(check(text), [rule], rule)

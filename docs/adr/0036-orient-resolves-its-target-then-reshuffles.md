@@ -4,6 +4,11 @@ Date: 2026-10-14
 Status: accepted, shipped in 3.1.0 (d1–d4 implemented by p20-1, #120; d5 by p20-2, #131; d6 by p20-3,
 #134). P20, orient's front door; amends ADR 0027's three-way question and ADR 0026's drift
 authorisation; from the 2026-10-14 `/thread:orient Thread Skill` grill.
+*(Amended 2026-10-27 by p30-6: orient § 3.5 asks a project's Priorities card after the audit and
+before the reshuffle, and writes his answers into the project note at once (Chorus ADR 0110 d5). It
+is no question about the reshuffle, which still follows the audit without one (d5). So d4's learned
+directory is no longer the one write before the gate besides drift fixes: the card is another, and
+so is a Note of his that corrects a card, written back at once, the grill's included.)*
 
 ## Context
 
