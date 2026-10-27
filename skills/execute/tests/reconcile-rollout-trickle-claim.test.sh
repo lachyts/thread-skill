@@ -467,4 +467,19 @@ J=$(nx ro-a); ok "$(q "$J" 'd["start"]')" '["s1"]' "C13: ro-a starts its head So
 J=$(nx ro-b)
 ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"]]')" '[{"ro-a":1},["b1"]]' "C13: ro-b counts s1's claim: b1 starts alone"
 
+# ── C14: a claims write that fails fails open: one WARN, the starts stand, nothing claimed ───────────────────────────
+scen c14-write-fails
+ab
+mkdir -p "$L"; : > "$L/trickle.lock"
+chmod 555 "$L"   # the lock opens (it exists); the claims file's temp file cannot be made beside it
+J=$(nx ro-a); rc=$?
+chmod 755 "$L"
+ok "$rc" 0 "C14: an unwritable lock dir: next still exits 0"
+ok "$(q "$J" 'd["start"]')" '["a1","a2"]' "C14: … starts a1 and a2"
+ok "$(lines)" 1 "C14: … prints exactly one stderr line"
+starts "$(err)" "WARN: trickle claims $(CF): " "C14: … a WARN naming the claims file"
+case "$(err)" in *"— this call's starts are not claimed") echo "ok   - C14: … that says this call's starts are not claimed";;
+  *) echo "FAIL - C14: [$(err)] does not end in the not-claimed clause"; fail=1;; esac
+ok "$(nofile)" none "C14: … and writes no claims file"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }
