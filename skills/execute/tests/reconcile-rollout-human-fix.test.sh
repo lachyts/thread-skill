@@ -413,7 +413,7 @@ ra "$A" --kind decision --ask "fix the budget?" --answer "leave it" --fingerprin
 ok "$rc" 0 "H12 answered: (a left answer)"
 I=$(inp "$A")
 ok "$(j "$I" 'd["autoRetryError"]')|$(j "$I" 'd["autoRetryClass"]')|$(j "$I" 'd["answerRecorded"]["form"]')" "$ERR|$CLS|left" \
-  "H12 answered: the answer keeps the cause's autoRetryError and autoRetryClass (execute § 3's halt, status's flag)"
+  "H12 answered: the answer keeps the cause's autoRetryError and autoRetryClass (H12, status's flag)"
 ok "$(fix "$I" act)" "fix the round budget" "H12 answered: the left answer keeps H12's act"
 before=$(snap); ar "$A"
 ok "$rc|$(snap)" "1|$before" "H12 answered: auto-retry exits 1, nothing written"
@@ -424,6 +424,26 @@ mkt "$A" open "auto_retries: -1"; planblock "$A" "$FA" 2026-10-03T08:00:00Z "{\"
 I=$(inp "$A")
 ok "$(hf "$I")" '["answer the question",false,null]' "H12 under a question: H4, its handBack H12's (false)"
 has "$(j "$I" 'd["autoRetryError"]')" "auto_retries on [[$A]] must be an integer >= 0" "H12 under a question: autoRetryError kept"
+
+# H12b (p29-7, ADR 0048): max_iterations and max_plan_rounds are read live too, so a fixed stamp clears H12
+scen h12b
+mkro; mkt "$B" open
+mkt "$A" open "max_iterations: 0"; planblock "$A" "$FA"
+I=$(inp "$A")
+ok "$(hf "$I")" '["fix the round budget",false,null]' "H12b: an invalid max_iterations stamp → H12"
+has "$(j "$I" 'd["autoRetryError"]')" "max_iterations on [[$A]] must be an integer >= 1, got '0'" "H12b: … naming it"
+setfm "$A" max_iterations 3
+ok "$(j "$(inp "$A")" '[d["autoRetryError"], d["humanFix"]]')" '[null,null]' "H12b: once fixed, not H12 (the lead's own retry)"
+setfm "$A" max_plan_rounds '"3"'
+ok "$(hf "$(inp "$A")")" '["fix the round budget",false,null]' "H12b: a quoted max_plan_rounds → H12"
+# H12c: the lead's own `invalid round budget:` row (execute § 3's task-level budget), fixed, with auto_retries 0 → H10
+scen h12c
+mkro; mkt "$B" open
+mkt "$A" in_progress "max_plan_rounds: 0" "auto_retries: 0"
+lead "$A" own "invalid round budget: max_plan_rounds on [[$A]] must be an integer >= 1, got '0'"
+ok "$(hf "$(inp "$A")")" '["fix the round budget",false,null]' "H12c: the own-run row reads H12 while the stamp is invalid"
+setfm "$A" max_plan_rounds 3
+ok "$(hf "$(inp "$A")")" '["hand back or defer",true,null]' "H12c: fixed with auto_retries 0 → H10, no raise (NO_BUDGET_OPENINGS)"
 
 # the null cases: the way back is the lead's own
 scen null

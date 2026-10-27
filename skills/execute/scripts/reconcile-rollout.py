@@ -1177,9 +1177,11 @@ state) that reflect folds across rollouts from its own root.
 """
 
 import argparse
+import contextlib
 import fnmatch
 import hashlib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -1275,6 +1277,9 @@ ON_MERGE_BAD = "on_merge must be regenerate"
 # step-boundary.py's ROOM_LINE is this object (it loads this module; this module cannot load it), and _approved_marks
 # reads the same lines as no run mark on an approved queue.
 ROOM_STOP_LINE_RE = re.compile(r"^- (\S+) room stop(: | ended\b)")
+# A room stop's bound (execute § Room stop): a start line stands for 6 h, the Chorus Stage's horizon for an owed resume
+# (its OWED_MAX_S, 21600 s). The rule's one copy: step-boundary.py's `begin` and `stands` and `moving` read it here.
+ROOM_STOP_BOUND_HOURS = 6.0
 
 # Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
 # (engine flag approvedAtCeiling) persists the accumulated by-round rationale. An AUDIT RECORD, not an
@@ -1522,6 +1527,33 @@ def _parse_ts(value):
         return ts if ts.tzinfo else ts.astimezone()
     except (ValueError, OverflowError, OSError):
         return None
+
+
+def _last_room_line(note):
+    """(stamp, 'start' | 'ended') for the last room-stop line (ROOM_STOP_LINE_RE) of the rollout note's `## Pause log`, or
+    None (moved here from step-boundary.py, p29-7, so `moving` reads the same rule)."""
+    last = None
+    for line in note.section_text(PAUSE_LOG_SECTION).split("\n"):
+        m = ROOM_STOP_LINE_RE.match(line.strip())
+        if m:
+            last = (m.group(1), "start" if m.group(2) == ": " else "ended")
+    return last
+
+
+def _room_standing(last, now, hours=ROOM_STOP_BOUND_HOURS):
+    """0 under the bound, 4 at or past it (or an unparseable stamp), 5 with no start line last (step-boundary.py
+    stands' exits)."""
+    if last is None or last[1] == "ended":
+        return 5
+    ts = _parse_ts(last[0])
+    if ts is None or now - ts >= timedelta(hours=hours):
+        return 4
+    return 0
+
+
+def _room_stop_state(note, now, hours=ROOM_STOP_BOUND_HOURS):
+    """Whether a room stop stands on the rollout note at `now`: _room_standing of its last room-stop line."""
+    return _room_standing(_last_room_line(note), now, hours)
 
 
 # The engine's isoMinutes / wholeMinutes (task.workflow.js), ported byte for byte so the lead's own log
@@ -2956,6 +2988,71 @@ def _git_env_hold(rollout_note):
             acked = {(_wikilink_slug(m.group(1)) or "").lower() for m in WIKILINK_OPEN_RE.finditer(line)}
             trips = [t for t in trips if t["slug"].lower() not in acked]
     return trips
+
+
+# The Lane hold (ADR 0048; p29-7; the module docstring's "Lane hold"): a cause that reaches every merge holds the
+# Integration lane, never the whole rollout, until Lachy's ack through /thread:repair § 3g. Its log is the rollout
+# note's `## Lane log`, written only by `lane-hold` and `lane-ack`, at the note's end (a new section is appended there),
+# so its wikilinks never rank a task ahead of the `## Queue` row that already links it.
+LANE_LOG_SECTION = "## Lane log"
+LANE_HOLD_CAUSES = ("merge-task-abort", "merge-task-env", "integrate-env", "verify-noslot")
+LANE_HOLD_RE = re.compile(r"^- (\S+) lane hold \[\[([^\]|#\\]+)\]\] (" + "|".join(map(re.escape, LANE_HOLD_CAUSES))
+                          + r"): (.*)$")
+# An ack's slugs are the wikilinks before its first `]]: `; his words follow it.
+LANE_ACK_RE = re.compile(r"^- (\S+) lane ack (.*?\]\]): (.*)$")
+LANE_EVIDENCE_MAX = 200
+
+
+def _lane_log_hold(rollout_note):
+    """The unacked Lane-log holds: [{slug, cause, stamp, line}] in log order, the `## Lane log` hold lines
+    (LANE_HOLD_RE) no later ack line (LANE_ACK_RE) names. A hold after an ack holds again; a second unacked line for the
+    same slug and cause adds nothing. `rollout_note` None has no log, so no hold."""
+    if rollout_note is None:
+        return []
+    holds = []
+    for raw in rollout_note.section_text(LANE_LOG_SECTION).split("\n"):
+        line = raw.rstrip()
+        m = LANE_HOLD_RE.match(line)
+        if m:
+            slug = _wikilink_slug(m.group(2)) or m.group(2)
+            if not any(h["slug"].lower() == slug.lower() and h["cause"] == m.group(3) for h in holds):
+                holds.append({"slug": slug, "cause": m.group(3), "stamp": m.group(1), "line": line})
+            continue
+        a = LANE_ACK_RE.match(line)
+        if a:
+            acked = {(_wikilink_slug(x.group(1)) or "").lower() for x in WIKILINK_OPEN_RE.finditer(a.group(2))}
+            holds = [h for h in holds if h["slug"].lower() not in acked]
+    return holds
+
+
+def _lane_log_named(rollout_note):
+    """Every slug (lowercased) a `## Lane log` hold line names, acked or not: lane-ack's refusal reads it."""
+    if rollout_note is None:
+        return set()
+    out = set()
+    for raw in rollout_note.section_text(LANE_LOG_SECTION).split("\n"):
+        m = LANE_HOLD_RE.match(raw.rstrip())
+        if m:
+            out.add((_wikilink_slug(m.group(2)) or m.group(2)).lower())
+    return out
+
+
+def _queue_links(rollout_note):
+    """The slugs (lowercased) wikilinked on a list-item or table-row line of the rollout note's `## Queue` section only,
+    outside fenced code, read as _schedule_positions reads them: lane-hold's membership check for a task note it cannot
+    read."""
+    out, fenced = set(), False
+    for line in rollout_note.section_text("## Queue").split("\n"):
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced or not RANKED_LINE_RE.match(line):
+            continue
+        for m in WIKILINK_OPEN_RE.finditer(line):
+            slug = (_wikilink_slug(m.group(1)) or "").lower()
+            if slug:
+                out.add(slug)
+    return out
 
 
 # rollout-settings.py, shared with every skill: the operator's ~/.config/thread/rollouts.toml (p15-4).
@@ -4828,7 +4925,8 @@ def cmd_next(args) -> int:
     # laneHold: what holds the Integration lane. One `git-env` entry per unacked trip's slug, in log order; then one
     # `race` entry per undecided RACE (rank order) that is not reverted, or whose revert the lead still owes (`revert`:
     # true, the lane's first work, execute § 4.5 step 1.4), or that was reverted with `main not re-verified`. A RACE
-    # reverted with main's tree restored, its tail done, frees the lane (it stays in raceHold for Lachy).
+    # reverted with main's tree restored, its tail done, frees the lane (it stays in raceHold for Lachy). Then one `lane`
+    # entry per unacked `## Lane log` hold (ADR 0048, p29-7: a cause that reaches every merge), in log order.
     reverts = _race_reverts(rollout_note)
     in_lane = {r["slug"].lower() for r in race_held_lane}
     lane_hold, seen = [], set()
@@ -4843,11 +4941,15 @@ def cmd_next(args) -> int:
         pending = _race_revert_pending(e, h["slug"].lower() in in_lane)
         if not (e and e["reverted"]) or pending or e["unverified"]:
             lane_hold.append({"slug": h["slug"], "hold": "race", "revert": pending})
+    for h in _lane_log_hold(rollout_note):
+        lane_hold.append({"slug": h["slug"], "hold": "lane", "cause": h["cause"], "stamp": h["stamp"]})
     lane_git_env = any(e["hold"] == "git-env" for e in lane_hold)
+    # A git-env trip or a Lane hold stops everything in the lane, a pending RACE revert included.
+    lane_blocked = any(e["hold"] in ("git-env", "lane") for e in lane_hold)
     # The lane moves while nothing holds it and something awaits Integration, integrates or holds it for a RACE
-    # re-verify, or while the lead owes a RACE revert and no git-env trip stands.
+    # re-verify, or while the lead owes a RACE revert and no git-env trip or Lane hold stands.
     lane_moving = (not lane_hold and bool(awaiting or integrating or race_held_lane)) or \
-        (not lane_git_env and any(e.get("revert") for e in lane_hold))
+        (not lane_blocked and any(e.get("revert") for e in lane_hold))
     in_n = [r for r in rows if r["state"] not in OUTSIDE_N]
     counts = _counts(rows)
     halt = None
@@ -4876,6 +4978,8 @@ def cmd_next(args) -> int:
             halt = "git-env"
         elif any(e["hold"] == "race" and not e["revert"] for e in lane_hold):
             halt = "race"
+        elif any(e["hold"] == "lane" for e in lane_hold):
+            halt = "lane"   # a Lane hold (ADR 0048): only Lachy's ack, through /thread:repair § 3g, releases it
         elif paused:
             halt = "paused"
         elif not in_n:
@@ -5592,6 +5696,9 @@ def cmd_status(args) -> int:
         # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*), each with its `scope`: [] when
         # none. Vault-only, so status § 3's Git-env trip flag holds offline too.
         "gitEnvHold": _git_env_hold(rollout_note),
+        # The unacked Lane-log holds (_lane_log_hold; ADR 0048, execute § 4.5 *Lane hold*): [{slug, cause, stamp,
+        # line}], [] when none. Vault-only, so status § 3's Lane hold flag holds offline too.
+        "laneLog": _lane_log_hold(rollout_note),
         # The RACE reverts that did not land and that no `RACE decided:` line lifts (_main_red): main is red, so the
         # whole rollout is held (status § 3's Main red). Vault-only too.
         "mainRed": _main_red(rollout_note),
@@ -6531,7 +6638,8 @@ def stop_spans(lines) -> list:
     paused line, or a stopped line that is no sleep (at that line's start); with none of those (a lead on a pre-p29-10
     Engine snapshot writes no lead-entry) at the first later slot-taken, lane-taken or run-bound; else it stays open.
     An end never precedes its start. Overlaps are kept: the sleep owns an overlap only for a reader that splits time by
-    cause, and a union (_span_ms) reads it once either way."""
+    cause, and a union (_span_ms) reads it once either way. Each span also carries its `stopped` line's `reason` (a
+    string, else "") and `index`, the line's position in `lines` (p29-7: `moving` reads an open halt's reason by it)."""
     seq = []
     for i, d in enumerate(lines or ()):
         ts = _rec_ts(d) if isinstance(d, dict) else None
@@ -6543,7 +6651,7 @@ def stop_spans(lines) -> list:
         return _away_stamp(d.get("at"))[0] or ts
 
     out = []
-    for k, (ts, _i, d) in enumerate(seq):
+    for k, (ts, i, d) in enumerate(seq):
         if d.get("kind") != "stopped":
             continue
         cause, start = d.get("cause"), start_of(ts, d)
@@ -6565,7 +6673,9 @@ def stop_spans(lines) -> list:
                 end = fallback
         if end is not None and end < start:
             end = start
-        out.append({"cause": cause, "start": start, "end": end})
+        reason = d.get("reason")
+        out.append({"cause": cause, "start": start, "end": end, "reason": reason if isinstance(reason, str) else "",
+                    "index": i})
     return out
 
 
@@ -7622,6 +7732,122 @@ def cmd_free_lane(args) -> int:
     return 0
 
 
+def _lane_evidence(text) -> str:
+    """lane-hold's evidence: the first non-empty line of `text`, whitespace collapsed, `[[` written as `[` (no wikilink
+    on a Lane-log line but its own), cut to LANE_EVIDENCE_MAX characters; `(no message)` when there is none."""
+    first = next((l for l in (text or "").splitlines() if l.strip()), "")
+    first = " ".join(first.split()).replace("[[", "[")
+    return first[:LANE_EVIDENCE_MAX] or "(no message)"
+
+
+def cmd_lane_hold(args) -> int:
+    """The Lane hold's one write (ADR 0048; execute § 4.5 *Lane hold*): `- <stamp> lane hold [[<slug>]] <cause>:
+    <evidence>` on the rollout's `## Lane log`, the evidence on stdin, then the lane freed in the Run record
+    (_halt_lane), when the record is unreadable or its lane is this task. A task note that cannot be read is no refusal
+    when the rollout's `## Queue` links the slug (_queue_links): the hold must land exactly when the note will not
+    parse, since `next` then no longer scans the task. Exit 2 usage; 1 the rollout note unreadable, the task another
+    rollout's or no task of this one, or a failed save; an unacked hold with the same slug and cause writes nothing."""
+    def error(msg, code=1):
+        print(f"ERROR: lane-hold: {msg}; nothing written", file=sys.stderr)
+        return code
+
+    slugs = [s_.strip() for s_ in args.tasks.split(",") if s_.strip()]
+    if len(slugs) != 1:
+        return error("usage: --tasks takes one task slug", 2)
+    if args.cause not in LANE_HOLD_CAUSES:
+        return error(f"usage: --cause must be one of {', '.join(LANE_HOLD_CAUSES)}", 2)
+    slug = _wikilink_slug(slugs[0]) or slugs[0]
+    evidence = _lane_evidence(sys.stdin.read() if not sys.stdin.isatty() else "")
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        return error(f"rollout note not found at {rollout_path}")
+    try:
+        rollout_note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        return error(f"cannot read {rollout_path}: {e}")
+    ro = rollout_path.stem
+    _path, note = _task_note(args, slug)
+    unreadable = None
+    if isinstance(note, str):
+        unreadable = note
+        if slug.lower() not in _queue_links(rollout_note):
+            return error(f"{slug}: names no task of [[{ro}]] (its task note is unreadable: {note}, and the rollout's "
+                         "## Queue does not link it)")
+    elif (_note_rollout(note) or "").lower() != ro.lower():
+        return error(f"{slug}: its rollout: is {note.get('rollout') or 'none'}, not [[{ro}]]")
+    tail = f" (task note unreadable: {unreadable})" if unreadable else ""
+    state = _record_state(ro) if not args.dry_run else None
+    on_it = state is not None and state["lane"] == slug.lower()
+    if any(h["slug"].lower() == slug.lower() and h["cause"] == args.cause for h in _lane_log_hold(rollout_note)):
+        # A re-run after a save whose lane free never ran finishes it; nothing else is written.
+        if on_it:
+            _halt_lane(ro, slug, args, state)
+        print(f"{slug}: lane hold ({args.cause}) [no-change]" + ("; lane freed" if on_it else "") + tail)
+        return 0
+    line = f"- {_stamp(_now(args))} lane hold [[{slug}]] {args.cause}: {evidence}"
+    rollout_note.append_line(LANE_LOG_SECTION, line)
+    try:
+        rollout_note.save(dry_run=args.dry_run)
+    except OSError as e:
+        return error(f"cannot write {rollout_path}: {e}")
+    if args.dry_run:
+        print(f"{slug}: lane hold ({args.cause}) (dry-run){tail}")
+        return 0
+    try:
+        landed = line in Note(rollout_path).section_text(LANE_LOG_SECTION).split("\n")
+    except (OSError, ValueError):
+        landed = False
+    if not landed:
+        print(f"ERROR: lane-hold: {slug}: the line is not on {rollout_path}'s {LANE_LOG_SECTION} on re-read", file=sys.stderr)
+        return 1
+    freed = state is None or on_it
+    if freed:
+        _halt_lane(ro, slug, args, state)
+    print(f"{slug}: lane hold ({args.cause}) [written]; " + ("lane freed" if freed else "the record holds no lane on it")
+          + tail)
+    return 0
+
+
+def cmd_lane_ack(args) -> int:
+    """Lachy's ack of a Lane hold (repair § 3g, its one writer): `- <stamp> lane ack [[a]], [[b]]: <his words>` on the
+    rollout's `## Lane log`. Reads no task note and writes no event. Exit 2 usage (no slug, an empty or multi-line
+    --fix); 1 the rollout note unreadable, a slug no hold line names, or a failed save; every slug already acked writes
+    nothing (`[no-change]`)."""
+    def error(msg, code=1):
+        print(f"ERROR: lane-ack: {msg}; nothing written", file=sys.stderr)
+        return code
+
+    slugs = [_wikilink_slug(s_.strip()) or s_.strip() for s_ in args.tasks.split(",") if s_.strip()]
+    if not slugs:
+        return error("usage: --tasks takes one or more task slugs", 2)
+    fix = args.fix if args.fix is not None else ""
+    if not fix.strip() or "\n" in fix or "\r" in fix:
+        return error("usage: --fix takes one non-empty line, Lachy's words", 2)
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        return error(f"rollout note not found at {rollout_path}")
+    try:
+        rollout_note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        return error(f"cannot read {rollout_path}: {e}")
+    named = _lane_log_named(rollout_note)
+    unknown = [s_ for s_ in slugs if s_.lower() not in named]
+    if unknown:
+        return error(f"no {LANE_LOG_SECTION} hold line names " + ", ".join(f"[[{s_}]]" for s_ in unknown))
+    held = {h["slug"].lower() for h in _lane_log_hold(rollout_note)}
+    if not any(s_.lower() in held for s_ in slugs):
+        print(", ".join(slugs) + ": lane ack [no-change] (every hold is acked)")
+        return 0
+    line = f"- {_stamp(_now(args))} lane ack " + ", ".join(f"[[{s_}]]" for s_ in slugs) + f": {fix.strip()}"
+    rollout_note.append_line(LANE_LOG_SECTION, line)
+    try:
+        rollout_note.save(dry_run=args.dry_run)
+    except OSError as e:
+        return error(f"cannot write {rollout_path}: {e}")
+    print(", ".join(slugs) + ": lane ack" + (" (dry-run)" if args.dry_run else " [written]"))
+    return 0
+
+
 def cmd_hold(args) -> int:
     """The lead's merge and race holds: hold-started / hold-ended, idempotent against the record."""
     slug = args.tasks.strip()
@@ -8330,14 +8556,23 @@ def _note_reason(note):
     return kind, _lead_reason(kind, text)
 
 
+# The lead's own Integration set-asides that are the environment's, never the task's (ADR 0048, p29-7; execute § 4.5
+# step 3's exit 8 and step 4's signal row): an origin outage, or a merge-task killed twice. Each cools down as infra.
+# merge-task's exit-8 text stays `agent` (ADR 0033's tested contract).
+INFRA_LEAD_OPENINGS = ("prepare: origin unreachable three times", "merge-task signalled twice")
+
+
 def _retry_class(note) -> str:
     """How an automatic retry treats a block: `quota` (a dead call, `workflow call failed:`, whose error line reads as
-    a usage or rate limit: QUOTA_RE), `infra` (the engine's TRANSIENT_DIAGNOSIS, or any other dead call) or `agent`
-    (everything else: an agent can act on its feedback)."""
-    _kind, reason = _note_reason(note)
+    a usage or rate limit: QUOTA_RE), `infra` (the engine's TRANSIENT_DIAGNOSIS, any other dead call, or a lead-written
+    Integration set-aside whose reason opens with one of INFRA_LEAD_OPENINGS) or `agent` (everything else: an agent
+    can act on its feedback)."""
+    kind, reason = _note_reason(note)
     first = reason.split("\n", 1)[0].strip()
     if first.lower().startswith(CALL_FAILED_PREFIX):
         return "quota" if QUOTA_RE.search(first) else "infra"
+    if kind == "integration" and first.startswith(INFRA_LEAD_OPENINGS):
+        return "infra"
     return "infra" if TRANSIENT_MARK in _blocker_summary(note) else "agent"
 
 
@@ -8353,9 +8588,9 @@ def _retry_budget(note, rollout_note) -> dict:
     """The automatic-retry budget: {autoRetries, maxReviewRounds, error, unresolved}. Each key resolves task note ->
     rollout note -> rollouts.toml (_resolved_settings, run once, only for a key absent at both levels) -> built-in, as
     {value, source} with source `task`, `rollout`, `file:repo`, `file:defaults` or `built-in` (None when it cannot).
-    `error` names the first invalid stamp (`<key> on [[<note>]] must be an integer >= <min>, got '<raw>'`: execute
-    § 3's write-nothing halt); `unresolved` is the resolver's words when it could not run (a refused rollouts.toml,
-    a Project root that is gone): no retry, and no halt."""
+    `error` names the first invalid stamp (`<key> on [[<note>]] must be an integer >= <min>, got '<raw>'`: H12, an
+    execute § 6.5 (c) item, ADR 0048); `unresolved` is the resolver's words when it could not run (a refused
+    rollouts.toml, a Project root that is gone): no retry, and no halt."""
     out = {"autoRetries": None, "maxReviewRounds": None, "error": None, "unresolved": None}
     res = None
     for key, name, minimum in RETRY_BUDGET_KEYS:
@@ -8379,6 +8614,27 @@ def _retry_budget(note, rollout_note) -> dict:
             else:
                 out["unresolved"] = out["unresolved"] or (res["error"] or f"rollout-settings.py resolves no {key}")
     return out
+
+
+# The two round budgets _retry_budget does not resolve (p29-7): the engine reads them, and an invalid stamp on a task
+# is H12 (lead-integrate.py cause 16), never a halt (ADR 0048).
+ROUND_BUDGET_ONLY_KEYS = ("max_iterations", "max_plan_rounds")
+
+
+def _round_budget_error(note, rollout_note):
+    """`<key> on [[<note>]] must be an integer >= 1, got '<raw>'` for the first invalid `max_iterations` or
+    `max_plan_rounds` stamp, else None. Each key is read at the first level that carries it, task then rollout (an
+    empty value counts as present, and is invalid); the resolver is never run, since a key absent at both levels
+    resolves to a valid value."""
+    for key in ROUND_BUDGET_ONLY_KEYS:
+        for n in (note, rollout_note):
+            raw = n.get(key) if n is not None else None
+            if raw is None:
+                continue
+            if _stamp_value(raw, 1) is None:
+                return f"{key} on [[{n.path.stem}]] must be an integer >= 1, got {raw!r}"
+            break
+    return None
 
 
 def _retry_stage(rollout, slug, note) -> str:
@@ -10624,7 +10880,329 @@ def cmd_completion_verify(args) -> int:
 
 # ---- CLI --------------------------------------------------------------------
 
-def main() -> int:
+# ---- moving: the Watchdog's reading (ADR 0048, p29-7; the module docstring's "moving") ---------------------------
+
+STALL_AFTER_MIN = 45          # two missed 20-minute heartbeat ticks, and some slack
+STALL_AFTER_MAX = 1440
+REGENERATE_STALL_MIN = 120    # the Approved-queue route's one foreground turn: one harness step, never its bound
+# The meant waits that silence ends: only the lead's own tick releases them (status § The Watchdog's reading, *Which
+# waits silence judges*, binds this list by a contract test).
+SILENCE_JUDGED = ("merge-hold", "regenerating")
+# Execute § 7's *Whole-rollout halts kept (ADR 0048)*, judged from the open halt H's reason (re.match): a halt that
+# holds the whole rollout on purpose, so work beside it waits on Lachy, never a stall. {rollout} is the rollout's stem,
+# escaped. A contract test binds this list to § 7's, both ways.
+WHOLE_HALT_PATTERNS = (
+    r"engine snapshot cut failed",
+    r"engine snapshot unusable",
+    r"engine snapshot resolve failed",
+    r"\S+ is on the landing register",
+    r"landing-register check failed",
+    r"repoPath is a live plugin marketplace checkout",
+    r"self-rollout check failed",
+    r"local default branch is ahead of origin",
+    r"pushed-base check failed",
+    r"launched outside the Project root",
+    r"launch-directory check failed",
+    r"git env set in the lead session",
+    r"git-env check failed",
+    r"git-env canary failed",
+    r"next refused the rollout",
+    r"invalid verify_timeout on \[\[[^\]]+\]\]",
+    r"completion verify: rollout note unreadable",
+    r"rollout settings refused",
+    r"invalid round budget: \S+ on \[\[{rollout}\]\]",
+    r"ladder file refused",
+    r"lead-integrate\.py failed on \[\[[^\]]+\]\]",
+    r"merge-task\.sh exited \S+ on the revert of \[\[[^\]]+\]\]",
+    r"origin unreachable while reverting \[\[[^\]]+\]\]",
+    r"completion verify: no verdict in three runs",
+    r"completion verify failed",
+    r"paused at user request",
+    r"hold_until needs you on \[\[{rollout}\]\]",
+    r"approved queue: regenerate stopped:",
+    r"approved queue: \[\[[^\]]+\]\] written unstamped:",
+)
+# The two kept halts `moving` reads live from `next` (step 7), never from H: a bare checkout's git-env trip and a RACE
+# revert that did not land.
+LIVE_WHOLE_REASONS = ("git-env trip:", "RACE: the revert of")
+
+
+class MovingError(Exception):
+    """A lost look (`moving` exit 1): the note, the Run record or `next` could not be read. Never a stall."""
+
+
+def _whole_halt_res(stem):
+    """WHOLE_HALT_PATTERNS compiled for one rollout (its stem formatted in where a pattern names the rollout)."""
+    return [re.compile(pat.replace("{rollout}", re.escape(stem))) for pat in WHOLE_HALT_PATTERNS]
+
+
+def _next_dry_run(rollout_path, tasks_dir, now, gh_bin):
+    """`next --dry-run` in-process through _parser() (no --running: every in_progress note is live, as status reads it):
+    (rc, its JSON or None, its stderr). Under --dry-run it writes no note and no event, takes no claim lock and writes
+    no claims file, and runs no _record_sleeps, idle-slots or night record. An exception is a MovingError."""
+    ns = _parser().parse_args(["next", "--rollout", str(rollout_path), "--tasks-dir", str(tasks_dir), "--dry-run",
+                               "--now", now.isoformat(), "--gh-bin", gh_bin])
+    out, err = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cmd_next(ns)
+    except Exception as e:  # noqa: BLE001 — a `next` that raises is a lost look, never a verdict
+        raise MovingError(f"next raised {type(e).__name__}: {e}")
+    if rc != 0:
+        return rc, None, err.getvalue()
+    try:
+        return 0, json.loads(out.getvalue()), err.getvalue()
+    except ValueError as e:
+        raise MovingError(f"next printed no JSON: {e}")
+
+
+def _next_idle_reason(nx):
+    """`next`'s verdict worded as execute § 7 words it, for a reading with no work and no open halt (step 12c)."""
+    halt = nx.get("halt")
+    lane = nx.get("laneHold") or []
+    if halt == "stuck":
+        unv = next((h["slug"] for h in nx.get("raceHold") or [] if h.get("kind") == UNVERIFIED_MARK.rstrip(":")), None)
+        if unv:
+            return f"UNVERIFIED undecided: [[{unv}]]"
+        return f"nothing can start: {len(nx.get('setAside') or [])} set aside"
+    if halt == "awaiting-sign-off":
+        first = (nx.get("awaitingSignOff") or [{}])[0].get("slug")
+        return f"awaiting sign-off: [[{first}]]" if first else "awaiting sign-off"
+    if halt == "race":
+        first = next((e["slug"] for e in lane if e.get("hold") == "race" and not e.get("revert")), None)
+        return f"RACE undecided: [[{first}]]" if first else "RACE undecided"
+    if halt == "lane":
+        e = next((e for e in lane if e.get("hold") == "lane"), None)
+        return f"lane held: {e['cause']} on [[{e['slug']}]]" if e else "lane held"
+    if halt == "git-env":
+        return "git-env trip: the shared checkout changed"
+    if halt == "held":
+        h = next((h for h in nx.get("holdUntil") or [] if h.get("held") and h.get("waits") == "you"), None) or \
+            next((h for h in nx.get("holdUntil") or [] if h.get("held")), None)
+        if h:
+            tail = f"{h.get('pr')} closed unmerged" if h.get("state") == "CLOSED" else "unreadable"
+            return f"hold_until needs you on [[{h.get('note')}]]: {tail}"
+        return "hold_until needs you"
+    if halt == "empty":
+        return "the rollout links no task"
+    if halt == "paused":
+        return "paused at user request"
+    return f"nothing moves (next's halt: {halt})"
+
+
+def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MIN, gh_bin="gh") -> dict:
+    """The Watchdog's reading of one rollout (the module docstring's "moving", the algorithm's one copy): {rollout,
+    verdict, cause, reason, lastEvent, ageMinutes, stallAfter, until, work}, verdict moving | stalled | waiting | skip.
+    Read-only: it writes no note, no event and no lock or claims file, and no bytecode. Raises MovingError when the
+    note, the Run record or `next` cannot be read."""
+    sys.dont_write_bytecode = True
+    rollout_path = Path(os.path.expanduser(str(rollout_path)))
+    tasks_dir = Path(os.path.expanduser(str(tasks_dir)))
+    now = now or datetime.now().astimezone()
+    ro = rollout_path.stem
+    work = {"running": [], "lane": False, "start": [], "halt": None, "reentry": [], "coolDown": [], "capHeld": []}
+    out = {"rollout": ro, "verdict": None, "cause": None, "reason": "", "lastEvent": None, "ageMinutes": None,
+           "stallAfter": stall_after, "until": None, "work": work}
+
+    def done(verdict, cause, reason, until=None):
+        out.update(verdict=verdict, cause=cause, reason=reason, until=until)
+        return out
+
+    if not rollout_path.is_file():
+        raise MovingError(f"rollout note not found at {rollout_path}")
+    try:
+        note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        raise MovingError(f"cannot read {rollout_path}: {e}")
+    # 1. skip: serial, superseded, done or dropped; or archived (not directly in the tasks dir).
+    why = _ledger_skip(note)
+    if why:
+        return done("skip", why, f"{ro}: {why}")
+    if os.path.realpath(rollout_path.parent) != os.path.realpath(tasks_dir):
+        return done("skip", "archived", f"{ro}: not directly in {tasks_dir}")
+    # 2. the Run record.
+    lines, state = _record_read(ro), _record_state(ro)
+    if lines is None or state is None:
+        raise MovingError(f"the Run record of {ro} cannot be read")
+    # 9 (read first, reported on every verdict). L, the last life sign; S, the silence since the latest of L, the
+    # wake and the boot (machine_times with since=now never reads pmset).
+    st = _stop_state(lines)
+    last_live = st["live"][-1] if st["live"] else None
+    mt = machine_times(since=now, now=now)
+    boot = mt.get("boot")
+    wake = mt.get("wake") if mt.get("wake") is not None and mt.get("wake") <= now else None
+    bases = [t for t in (last_live, wake, boot) if t is not None]
+    base = max(bases) if bases else None
+    silence = (now - base).total_seconds() / 60 if base is not None else None
+    if last_live is not None:
+        out["lastEvent"] = _zms(last_live)
+        out["ageMinutes"] = max(0, int((now - last_live).total_seconds() // 60))
+    spans = stop_spans(lines)
+
+    def silent(bound):
+        """The silence test at `bound` minutes: a stalled reading, or None while the lead's life signs hold."""
+        if last_live is None:
+            return done("stalled", "silent", "no life sign in the Run record")
+        if silence is not None and silence > bound:
+            if boot is not None and boot > last_live:
+                cause = "mac-restart"
+            elif any(sp["cause"] == "usage-limit" and sp["end"] is None for sp in spans):
+                cause = "usage-limit"
+            else:
+                cause = "silent"
+            return done("stalled", cause, f"no life sign for {out['ageMinutes']}m")
+        return None
+
+    # 3. Pauses: a sign-off pause first (await-sign-off stamps paused: with it), then a stamped pause (his act).
+    if _scalar(note.get(PAUSED_FOR_KEY)).lower() == SIGN_OFF:
+        return done("waiting", "sign-off", f"paused for sign-off since {_scalar(note.get('paused')) or '?'}")
+    if _pause_stands(note, lines)[0]:
+        return done("waiting", "paused", "paused at user request")
+    # 4. A room stop under its bound.
+    room = _last_room_line(note)
+    if _room_standing(room, now) == 0:
+        until = _parse_ts(room[0]) + timedelta(hours=ROOM_STOP_BOUND_HOURS)
+        return done("waiting", "room-stop", f"room stop since {room[0]}", _stamp(until))
+    # 5. Never started.
+    linked, _index = _scan(rollout_path, tasks_dir)
+    if never_started(note, linked)[0] and not any(d.get("kind") == "lead-entry" for d in lines):
+        return done("waiting", "not-started", "the rollout has not started")
+    # 6. `next`, in-process and dry.
+    rc, nx, err = _next_dry_run(rollout_path, tasks_dir, now, gh_bin)
+    if rc != 0:
+        line = next((l for l in err.splitlines() if l.startswith("ERROR")), err.strip().splitlines()[-1] if err.strip()
+                    else f"exit {rc}")
+        return done("waiting", "you", f"next refused the rollout: {line}")
+    if nx.get("halt") in ("superseded", "done"):
+        return done("skip", nx["halt"], f"{ro}: next reports halt {nx['halt']}")
+    work["halt"] = nx.get("halt")
+    # 7. The whole holds `next` reads live.
+    if any(t.get("scope") == "rollout" for t in nx.get("gitEnvHold") or []):
+        return done("waiting", "you", "git-env trip: the shared checkout changed")
+    if nx.get("mainRed"):
+        first = nx["mainRed"][0]
+        return done("waiting", "you", f"RACE: the revert of [[{first['slug']}]] did not land: {first.get('why', '')}")
+    # 8. W, the work the lead could act on now.
+    lane_hold = nx.get("laneHold") or []
+    merge_open = {t for h, t in state["holds"] if h == "merge" and t}
+    merge_held = [x for x in (nx.get("integrating") or []) + [h["slug"] for h in nx.get("raceHold") or []]
+                  if x.lower() in merge_open]
+    blocked = any(e.get("hold") in ("git-env", "lane") for e in lane_hold)
+    work["lane"] = ((not lane_hold and bool(nx.get("integrating") or nx.get("awaitingIntegration"))
+                     and not merge_held)
+                    or (not blocked and any(e.get("hold") == "race" and e.get("revert") for e in lane_hold)))
+    work["running"] = list(nx.get("running") or [])
+    work["start"] = list(nx.get("start") or []) + list(nx.get("restart") or [])
+    race_slugs = {h["slug"].lower() for h in nx.get("raceHold") or []}
+    ro_held = any(h.get("scope") == "rollout" and h.get("held") for h in nx.get("holdUntil") or [])
+    if not ro_held and not nx.get("pauseRequested"):
+        root = _project_root(note)
+        repo = str(root) if root is not None and root.is_dir() else None
+        heat_mod = _heat_module()
+        hot = bool(heat_mod) and (nx.get("heat") or {}).get("level", 0) >= heat_mod.HEAT_HOLD
+        revises = 0
+        for e in nx.get("setAside") or []:
+            if e.get("setAsideAt") not in ("run", "integration") or e["slug"].lower() in race_slugs or e.get("holdUntil"):
+                continue
+            path = tasks_dir / f"{e['slug']}.md"
+            try:
+                tnote = Note(path)
+            except (OSError, ValueError):
+                continue
+            try:
+                budget = _retry_budget(tnote, note)
+                k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] and not budget["error"] else None
+                inp = _lead().task_inputs(path, tnote, max_rounds=k, repo=repo)
+                v = _lead().auto_retry_verdict(path, tnote, inp, note, now)
+            except Exception as ex:  # noqa: BLE001 — a lost look, never a verdict
+                raise MovingError(f"inputs on [[{e['slug']}]] raised {type(ex).__name__}: {ex}")
+            if v.get("humanFix") is not None:
+                continue
+            after = _parse_ts(v["autoRetryAfter"]) if v.get("autoRetryAfter") else None
+            if after is not None and after > now:
+                work["coolDown"].append({"slug": e["slug"], "class": v.get("autoRetryClass"), "until": v["autoRetryAfter"]})
+            elif inp.get("autoRevise"):
+                if nx.get("slotsInUse", 0) + revises < nx.get("slotLimit", 0):
+                    work["reentry"].append(e["slug"])
+                else:
+                    cause = "heat" if hot else "away-cap" if (nx.get("trickle") or {}).get("away") else "trickle"
+                    work["capHeld"].append({"slug": e["slug"], "cause": cause})
+                revises += 1
+            else:
+                work["reentry"].append(e["slug"])
+    has_work = bool(work["running"] or work["lane"] or work["start"] or work["reentry"]
+                    or work["halt"] in ("complete", "regenerate"))
+    # 10. The open halt H: the last open `halt` stop, its reason read off its own `stopped` line.
+    h = next((sp for sp in reversed(spans) if sp["cause"] == "halt" and sp["end"] is None), None)
+    # 11. With work.
+    if has_work:
+        if h is not None and any(r.match(h["reason"]) for r in _whole_halt_res(ro)):
+            return done("waiting", "you", h["reason"])
+        if h is not None:
+            return done("stalled", "halt", f"{h['reason'] or 'halted'}: the halt holds more than it threatens")
+        if work["halt"] == "regenerate":
+            # The Approved-queue route runs as one foreground turn with no life sign: its own bound, in place of
+            # stall-after, whatever else is in W.
+            if last_live is not None and silence is not None and silence <= REGENERATE_STALL_MIN:
+                return done("waiting", "regenerating", "approved queue: regenerating",
+                            _stamp(base + timedelta(minutes=REGENERATE_STALL_MIN)))
+            return silent(REGENERATE_STALL_MIN) or done("waiting", "regenerating", "approved queue: regenerating")
+        return silent(stall_after) or done("moving", None, "work moves")
+    # 12a. A wait only the lead's own tick ends: a merge hold, judged by silence.
+    if merge_held:
+        return silent(stall_after) or done("waiting", "merge-hold", f"merge hold on [[{merge_held[0]}]]")
+    # 12b. Waits judged by their own condition, in step 1.6's order.
+    if work["coolDown"]:
+        first = min(work["coolDown"], key=lambda c: _parse_ts(c["until"]))
+        return done("waiting", "cool-down", f"{first['class']} cool-down: [[{first['slug']}]] retries at {first['until']}",
+                    first["until"])
+    holds = [x["reason"] for x in nx.get("hold") or []]
+    for cause, prefix in (("heat", HEAT_PREFIX), ("away-cap", AWAY_CAP_PREFIX), ("trickle", TRICKLE_PREFIX)):
+        why_ = next((x for x in holds if x.startswith(prefix)), None)
+        held_ = next((c for c in work["capHeld"] if c["cause"] == cause), None)
+        if why_ or held_:
+            tr = nx.get("trickle") or {}
+            if why_ is None:
+                why_ = (f"{HEAT_PREFIX} the Mac is hot ({(nx.get('heat') or {}).get('name')})" if cause == "heat" else
+                        f"{AWAY_CAP_PREFIX} {tr.get('running')}/{tr.get('awayCap')} tasks running on this Mac"
+                        if cause == "away-cap" else
+                        f"{TRICKLE_PREFIX} {tr.get('running')}/{tr.get('limit')} tasks running on this Mac")
+            return done("waiting", cause, why_)
+    why_ = next((x for x in holds if x.startswith(LAST_START_PREFIX)), None)
+    if why_:
+        return done("waiting", "last-start", why_, (nx.get("lastStarts") or {}).get("morning"))
+    om = nx.get("onMerge")
+    if om and om.get("action") == "waits":
+        return done("waiting", "approved-queue", f"approved queue waits: {om.get('why')}")
+    pr_hold = next((x for x in nx.get("holdUntil") or [] if x.get("held") and x.get("waits") == "merge"), None)
+    if pr_hold:
+        return done("waiting", "pr-hold", f"held until {pr_hold.get('pr')} merges")
+    if work["halt"] == "paused":
+        return done("waiting", "paused", "paused at user request")
+    # 12c. Lachy's: the open halt's reason, else `next`'s verdict as § 7 words it.
+    return done("waiting", "you", h["reason"] if h is not None and h["reason"] else _next_idle_reason(nx))
+
+
+def cmd_moving(args) -> int:
+    """`moving` (the module docstring's "moving"): one compact JSON line, exit 0 for any verdict; 1 a lost look; 2
+    usage."""
+    sys.dont_write_bytecode = True
+    if not 1 <= args.stall_after <= STALL_AFTER_MAX:
+        print(f"ERROR: moving: usage: --stall-after must be an integer from 1 to {STALL_AFTER_MAX}, got "
+              f"{args.stall_after}", file=sys.stderr)
+        return 2
+    try:
+        out = moving_verdict(args.rollout, args.tasks_dir, _now(args), args.stall_after, args.gh_bin)
+    except MovingError as e:
+        print(f"ERROR: moving: {e} (a lost look, never a stall)", file=sys.stderr)
+        return 1
+    print(json.dumps(out, separators=(",", ":")))
+    return 0
+
+
+def _parser():
+    """The CLI's argparse parser (p29-7: moved out of main() unchanged, so `moving` builds `next`'s Namespace through
+    it and every default `next` gains reaches that dry run too)."""
     p = argparse.ArgumentParser(description="Deterministic vault reconcile for a rollout's queue (ADR 0030).")
     sub = p.add_subparsers(dest="cmd", required=True)
     tasks_dir_help = "task-note dir (default: the vault's Work/Tasks)"
@@ -10925,7 +11503,41 @@ def main() -> int:
     gpr.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     gpr.set_defaults(func=cmd_gate_pricer)
 
-    args = p.parse_args()
+    lh = sub.add_parser("lane-hold", help="hold the Integration lane for a cause that reaches every merge (ADR 0048; "
+                                          "execute § 4.5 *Lane hold*): one ## Lane log line, the evidence on stdin, "
+                                          "then the lane freed; exit 1 refused, nothing written")
+    lh.add_argument("--rollout", required=True, help="path to the rollout note")
+    lh.add_argument("--tasks", required=True, help="the one task slug that held the lane")
+    lh.add_argument("--cause", required=True, help="one of " + ", ".join(LANE_HOLD_CAUSES))
+    lh.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    lh.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the line's stamp)")
+    lh.add_argument("--dry-run", action="store_true")
+    lh.set_defaults(func=cmd_lane_hold)
+
+    la = sub.add_parser("lane-ack", help="record Lachy's ack of a Lane hold (repair § 3g, its one writer): one ## Lane "
+                                         "log line; exit 1 refused, nothing written")
+    la.add_argument("--rollout", required=True, help="path to the rollout note")
+    la.add_argument("--tasks", required=True, help="comma-separated slugs the hold lines name")
+    la.add_argument("--fix", required=True, help="Lachy's words: what he fixed or decided (one line)")
+    la.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help + " (the guard's only read)")
+    la.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the line's stamp)")
+    la.add_argument("--dry-run", action="store_true")
+    la.set_defaults(func=cmd_lane_ack)
+
+    mv = sub.add_parser("moving", help="the Watchdog's reading (ADR 0048; status § The Watchdog's reading): one JSON "
+                                       "line, moving | stalled | waiting | skip; read-only, guard-exempt")
+    mv.add_argument("--rollout", required=True, help="path to the rollout note")
+    mv.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    mv.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    mv.add_argument("--stall-after", type=int, default=STALL_AFTER_MIN,
+                    help=f"minutes of silence before work reads stalled, 1 to 1440 (default {STALL_AFTER_MIN})")
+    mv.add_argument("--gh-bin", default="gh", help="the gh executable `next`'s dry run reads PR holds through")
+    mv.set_defaults(func=cmd_moving)
+    return p
+
+
+def main() -> int:
+    args = _parser().parse_args()
     refusal = _engine_guard(args)
     if refusal:
         print(refusal, file=sys.stderr)
@@ -10936,9 +11548,10 @@ def main() -> int:
 # engine-snapshot.py, this tree's own copy (ADR 0043): loaded only for the guard, as _ladder() loads ladder.py.
 ENGINE_SNAPSHOT_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "engine-snapshot.py"
 GUARD_SCRIPT = "skills/execute/scripts/reconcile-rollout.py"
-# The two verbs any root runs (the module docstring's Engine snapshot guard says why): status writes nothing, and
-# fold-journals never reads the note and writes only the Run record, a cross-version store.
-GUARD_EXEMPT = ("status", "fold-journals")
+# The three verbs any root runs (the module docstring's Engine snapshot guard says why): status and moving write
+# nothing (moving is the Watchdog's reading, which must read any rollout from any root), and fold-journals never reads
+# the note and writes only the Run record, a cross-version store.
+GUARD_EXEMPT = ("status", "fold-journals", "moving")
 
 
 def _guarded_notes(args):

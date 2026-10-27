@@ -90,7 +90,7 @@ import re
 import sys
 import time
 from argparse import Namespace
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 
@@ -113,7 +113,8 @@ PAUSE_LOG = "## Pause log"
 # The room-stop line's one source is reconcile-rollout.py's ROOM_STOP_LINE_RE (p30-4), which its _approved_marks reads
 # too (an approved queue's room stops are no run mark): this module loads that one, never a copy.
 ROOM_LINE = RR.ROOM_STOP_LINE_RE
-BOUND_HOURS = 6.0
+# The 6 h bound's one copy is reconcile-rollout.py's ROOM_STOP_BOUND_HOURS (p29-7), which `moving` reads too.
+BOUND_HOURS = RR.ROOM_STOP_BOUND_HOURS
 STEP_TYPES = ("started", "result", "failed")
 
 
@@ -330,23 +331,15 @@ def _save_note(note, verb):
 
 
 def _last_room_line(note):
-    """(stamp, 'start' | 'ended') for the last room-stop line of `## Pause log`, or None."""
-    last = None
-    for line in note.section_text(PAUSE_LOG).split("\n"):
-        m = ROOM_LINE.match(line.strip())
-        if m:
-            last = (m.group(1), "start" if m.group(2) == ": " else "ended")
-    return last
+    """(stamp, 'start' | 'ended') for the last room-stop line of `## Pause log`, or None: reconcile-rollout.py's
+    _last_room_line, the rule's one copy (p29-7)."""
+    return RR._last_room_line(note)
 
 
 def _standing(last, now, hours):
-    """0 under the bound, 4 at or past it (or an unparseable stamp), 5 with no start line last."""
-    if last is None or last[1] == "ended":
-        return 5
-    ts = RR._parse_ts(last[0])
-    if ts is None or now - ts >= timedelta(hours=hours):
-        return 4
-    return 0
+    """0 under the bound, 4 at or past it (or an unparseable stamp), 5 with no start line last: reconcile-rollout.py's
+    _room_standing (p29-7)."""
+    return RR._room_standing(last, now, hours)
 
 
 def cmd_begin(args):
