@@ -9,7 +9,8 @@ decomposition and task writing.
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
 **Write surface.** `~/repos/obsidian/Work/Tasks/`, `~/repos/obsidian/Work/Phases/`, the target
-project note and, for pull-ins, the source project's phase and task notes (the moved notes
+project note, a swept project note's `## Priorities` card when a Note of his corrects it
+(R3, orient § 3.5) and, for pull-ins, the source project's phase and task notes (the moved notes
 themselves, pointer lines, and retiring a phase the move emptied). When R3 grills **with
 docs**, the interview also writes `CONTEXT.md` + `docs/adr/` in the **resolved project repo**
 (never committed here: orient § 6 holds scheduling until they land). Nothing else outside the
@@ -184,11 +185,13 @@ edits propagate. Resolve the project's repo from the project note's `repos:` fro
   interview shape inline, by `_shared/asking.md` § 5.
 
 **Invoke it with these `args`**, the only way the gate reaches the skill, `<plugin root>` the root this file was read
-from and `<project note>` the target project note's absolute path (its `## Priorities` card is orient § 3.5's; a
-note with none, or a scoped target with no project note yet, passes `none`, and the grill reads the estate brief
-alone). Keep every Decided for you line
-the grill shows: R4's footer counts them, R5.2 writes them into their tasks, and the report lists them. A Note of his
-in the grill that corrects the card is written back into it the same day (orient § 3.5).
+from and `<project note>` the absolute path of the project note whose `## Priorities` card (orient § 3.5) the grill
+reads: a project target's own note; a scoped target's resolved project note (§ Scoped targets); and for an area
+target, the note of the project whose cluster is being grilled, one per grill invocation. A note with no card, or a
+scoped target with no project note yet, passes `none`, and the grill reads the estate brief alone. Keep every Decided
+for you line the grill shows: R4's footer counts them, R5.2 writes them into their tasks, and the report lists them. A
+Note of his in the grill that corrects the card is written back into it at once, the same day (orient § 3.5): it is
+the one write the reshuffle makes before R4's gate, and it stands if he stops the grill or declines the gate.
 
 > Ask Lachy only the questions he owns: intent, how important, how robust, who it is for, how it feels, and a
 > credential or irreversible sign-off R3 (c) names (Owner yours). Ask each one at a time, in plain words, tied to the
@@ -203,7 +206,8 @@ in the grill that corrects the card is written back into it the same day (orient
 
 ## R4. The gate
 
-Print the final disposition table and get a y/n (or adjustments) **before writing any file**. **Owner *yours***
+Print the final disposition table and get a y/n (or adjustments) **before writing any file**, a Note's correction of a
+Priorities card that R3 already wrote back aside (orient § 3.5). **Owner *yours***
 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1): the table is the roadmap (ADR 0036), so it is asked in the
 Framing, with the phases' goal and what each disposition gains and costs:
 
@@ -318,8 +322,8 @@ The rules above are the contract; these are the ones most easily broken.
 - **Don't touch frozen items** (in flight, possibly landed, thread captures, decision tasks) beyond
   adding new members to an in-flight phase.
 - **Don't renumber.** Existing phases and ordinals are immutable, and an ordinal is never reused.
-- **Don't write before the R4 gate**, and don't rename without the basename check and the
-  backlink rewrite.
+- **Don't write before the R4 gate**, a Note's correction of a Priorities card (R3) aside, and
+  don't rename without the basename check and the backlink rewrite.
 - **Don't advance a declared check** except through `advance --expect <digest>` after R4 passed
   every entry; never run its `--advance` by hand.
 - **Don't copy the grill skills' instructions inline**: invoke `grill-with-docs` / `grill-me` by

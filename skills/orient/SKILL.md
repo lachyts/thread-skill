@@ -182,8 +182,8 @@ and Drift and the slots for each swept project.
   runs no check.
 - **Priorities card** (Chorus ADR 0110 d5; CONTEXT.md **Priorities card**): each swept project note's
   `## Priorities` section, read whole when it has one: how robust the work must be, who it is for, what matters most
-  and the technical details he steers himself. Every later ask in this orient reads it (§ 3.5's own aside): a call
-  it answers is *priorities*, decided and listed as Decided for you, and a detail it says he steers is *yours*
+  and the technical details he steers himself. Every later ask in this orient reads it (§ 3.5's own ask excepted): a
+  call it answers is *priorities*, decided and listed as Decided for you, and a detail it says he steers is *yours*
   (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1). A project target whose note has none is what § 3.5 is for.
 - **Related projects**: projects the target's notes link or name, and projects linking the
   target, especially ones `status: parked` or being absorbed by it. Read their unstarted phases
@@ -277,19 +277,23 @@ estate brief (`~/.agents/knowledge/how-lachy-decides.md`) and the next orient pu
 write in one line with the note's `obsidian://` link.
 
 **Once.** A note with a `## Priorities` heading is never asked again, whole or in part: § 2 reads it, and he
-changes it by hand or through a Note. Look only, a dry run, an area target and a scoped target ask none and write
-none: an area's projects are asked at their own project orient, and a scoped target's project at its own. Steer
-only asks it, like a default run.
+changes it by hand or through a Note. An area target and a scoped target put no card and write no new one: an
+area's projects are asked at their own project orient, and a scoped target's project at its own. A card § 2 read
+for either still takes his Note that corrects it (below). Only Look only and a dry run write nothing: they put no
+card and write back no Note. Steer only asks it, like a default run.
 
-**A Note corrects it.** A Note of his on any later ask in this orient (the grill, R4's gate, § 6's steer, § 9's
-offer) that corrects a line of the card is written back into it the same day: that line takes his words, followed
-by `(<YYYY-MM-DD>, from a Note)`, and the report says so in one line.
+**A Note corrects it.** Whatever the target, a Note of his on any later ask in this orient (the grill, R4's gate,
+§ 6's steer, § 9's offer) that corrects a line of a card this orient holds (one § 2 read, or the one just written
+above) is written back into that card at once, the same day: that line takes his words, followed by
+`(<YYYY-MM-DD>, from a Note)`, and the report says so in one line. A correction made in the grill is the one write
+the reshuffle makes before its gate (reshuffle R3), and it stands if he stops the grill or declines the gate.
 
 ### 4. Reshuffle by default
 
 No question (ADR 0036 d5): Lachy picked Reshuffle at every orient, so the audit flows straight into
-the reshuffle (§ 5), which writes nothing before its gate and whose grill he can stop at any
-question. The opt-outs come with the invocation (§ Invocation forms):
+the reshuffle (§ 5), which writes nothing before its gate but a Note's correction of a Priorities
+card (§ 3.5), and whose grill he can stop at any question. The opt-outs come with the invocation
+(§ Invocation forms):
 
 - **Steer only** (`--steer`, or "steer only" in the arguments) — no reshaping: route the open work
   as it stands (§ 6), e.g. to schedule a serial rollout.
@@ -499,8 +503,8 @@ given). It resolves, asks, reads and writes nothing.
   the slot write included — in Look only or dry runs.
 - **Don't reshuffle in-flight work.** Its scope, phase and body are frozen; only new members may
   join its phase (`reshuffle.md` R1).
-- **Don't write before the reshuffle's gate**, drift fixes and the learned `repos:` entry (§ 4) aside, and the Priorities card (§ 3.5)
-  with the Notes that correct it.
+- **Don't write before the reshuffle's gate**, drift fixes, the learned `repos:` entry (§ 4) and the
+  Priorities card with the Notes that correct it (§ 3.5) aside.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, drift, shape, one recommendation, then the reshuffle (§ 4).
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s
