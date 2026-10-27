@@ -216,12 +216,16 @@ ok "$rc" 0 "settings: mark-started --rollout exits 0"
 has "$out" "progress: 2/5 merged, 1 running, 2 queued" "settings: … and prints its progress line"
 has "$out" "~3h remaining (rough)" "settings: mark-started's ~remaining uses the repo table's ceiling 1"
 # Control: the same notes, read through status's progress line (the same _progress_line), move with the ceiling:
-# the repo table's 1 again, then [defaults]' 2 with the repo table gone, then the built-in 4 with no file.
+# the repo table's 1 again, then [defaults]' 2 with the repo table gone, then the built-in 4 with no file. A fresh Away
+# file whose Away cap (99) never binds keeps the ETA at the ceiling's width (p28-6: the ETA reads the Trickle's limit).
+away_file "$D/home" 2026-10-02T00:00:00Z
 has "$(q "$(rst)" 'd["progress"]')" "~3h remaining (rough)" "settings: control: the repo table's 1 gives ~3h"
 rs_toml '[defaults]' 'parallel_ceiling = 2'
 has "$(q "$(rst)" 'd["progress"]')" "~2h remaining (rough)" "settings: control: [defaults]' 2 gives ~2h"
 rm -f "$D/home/.config/thread/rollouts.toml"
 has "$(q "$(rst)" 'd["progress"]')" "~1h remaining (rough)" "settings: control: no rollouts.toml (built-in 4) gives ~1h"
+rm -f "$D/home/.config/thread/away.json"
+has "$(q "$(rst)" 'd["progress"]')" "~2h remaining (rough)" "settings: control: no away.json reads the Trickle's 2 under the built-in 4: ~2h"
 scen settings-refused
 mkro "$five"; rs_toml '# operator settings' '[defaults]' 'parallel_ceiling = 0'
 mkt a open; mkt b open
@@ -603,7 +607,7 @@ mkt s-x dropped
 J=$(st "" 2026-10-02T12:00:00Z)
 ok "$(q "$J" 'd["counts"]')" '{"awaitingIntegration":1,"folded":1,"integrating":0,"merged":2,"other":1,"queued":1,"running":1,"setAside":1,"setAsideAtIntegration":0,"total":6}' "status: counts"
 ok "$(q "$J" 'd["progress"]')" '"progress: 2/6 merged, 1 running, 1 awaiting integration, 1 queued, 1 set aside — 2h elapsed, ~45m remaining (rough)"' "status: exact progress line"
-ok "$(q "$J" 'd["timeline"]')" '{"avgTaskMinutes":45.0,"complete":false,"durationsUsed":2,"elapsedLabel":"2h","elapsedMinutes":120,"firstStarted":"2026-10-02T10:00+00:00","lastMerged":"2026-10-02T11:15+00:00","remainingEstimateMinutes":45,"remainingLabel":"~45m (rough)","tasks":[{"durationMinutes":30,"merged":"2026-10-02T10:30+00:00","slug":"s-a","started":"2026-10-02T10:00+00:00"},{"durationMinutes":60,"merged":"2026-10-02T11:15+00:00","slug":"s-b","started":"2026-10-02T10:15+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-d","started":"2026-10-02T10:20+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-e","started":"2026-10-02T10:40+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-c","started":"2026-10-02T11:00+00:00"}]}' "status: exact timeline"
+ok "$(q "$J" 'd["timeline"]')" '{"avgTaskMinutes":45.0,"complete":false,"durationsUsed":2,"elapsedLabel":"2h","elapsedMinutes":120,"etaBy":"trickle","etaWidth":2,"firstStarted":"2026-10-02T10:00+00:00","lastMerged":"2026-10-02T11:15+00:00","remainingEstimateMinutes":45,"remainingLabel":"~45m (rough)","tasks":[{"durationMinutes":30,"merged":"2026-10-02T10:30+00:00","slug":"s-a","started":"2026-10-02T10:00+00:00"},{"durationMinutes":60,"merged":"2026-10-02T11:15+00:00","slug":"s-b","started":"2026-10-02T10:15+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-d","started":"2026-10-02T10:20+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-e","started":"2026-10-02T10:40+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-c","started":"2026-10-02T11:00+00:00"}]}' "status: exact timeline"
 ok "$(q "$J" '[t["slug"] for t in d["tasks"]]')" '["s-a","s-b","s-c","s-d","s-e","s-f","s-t","s-x"]' "status: tasks sorted by schedule rank"
 ok "$(q "$J" '{t["slug"]: [t["queueState"], t["setAsideAt"]] for t in d["tasks"]}')" '{"s-a":["merged",null],"s-b":["merged",null],"s-c":["running",null],"s-d":["awaiting-integration",null],"s-e":["set-aside","run"],"s-f":["queued",null],"s-t":["folded",null],"s-x":["other",null]}' "status: queue states"
 ok "$(q "$J" '[t for t in d["tasks"] if t["slug"] == "s-f"][0]')" '{"blockerSummary":"","holdUntil":null,"integrating":null,"merged":null,"pr":null,"priority":"normal","queueState":"queued","rung":null,"rungDrift":"","setAsideAt":null,"slug":"s-f","solo":true,"started":null,"status":"open","waitingOn":["depends on [[s-e]] (blocked)"]}' "status: a queued task's row"
@@ -611,7 +615,7 @@ ok "$(q "$J" '[[t["blockerSummary"], t["priority"]] for t in d["tasks"] if t["sl
 ok "$(q "$J" 'sorted(set(k for t in d["tasks"] for k in t))')" \
   '["blockerSummary","holdUntil","integrating","merged","pr","priority","queueState","rung","rungDrift","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key; holdUntil, p30-3)"
 ok "$(q "$J" 'sorted(d)')" \
-  '["ceiling","ceilingCause","ceilingError","counts","gitEnvHold","holdUntil","incomplete","ladder","pause_requested","paused","pausedFor","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError and ceilingCause, p15-4; pausedFor, ADR 0034; holdUntil, p30-3)"
+  '["ceiling","ceilingCause","ceilingError","counts","gitEnvHold","holdUntil","incomplete","ladder","pause_requested","paused","pausedFor","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline","trickle"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError and ceilingCause, p15-4; pausedFor, ADR 0034; holdUntil, p30-3; trickle, p28-6)"
 setkey s-d integrating 2026-10-02T11:50+00:00
 printf '\n### Run 2 (2026-10-02T11:30+00:00)\n\nIntegration: conflict in a.py\n\n<!-- run 2 end sha=111111111111 -->\n' >> "$D/s-e.md"
 J=$(st "" 2026-10-02T12:00:00Z)

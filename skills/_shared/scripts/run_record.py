@@ -189,6 +189,17 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      base?, main?, head?, globs? (as verify-skipped), failed? (at most 64: the globs that failed). p29-3:
                      prepare's path test passed but the proof found a reader, or the check itself failed (`error`), so
                      the verifier runs as before.
+  flake           T  test, repo, sha, site (task | integrate | integration | race); followup?, count? (int >= 1)
+                     (p29-9, ADR 0050: one line per new Flake log line, the test a verifier run in a rollout failed
+                     outside the task's diff that passed its named re-run and a confirming full run on the same tree;
+                     repo the Project root's origin owner/name; sha the tree's; site where the run was: a task call's
+                     verifier loop, an integrator's, the lead's Integration verify or a RACE re-verify; followup the
+                     follow-up task it was filed under, count that task's Flake log lines so far.
+                     reconcile-rollout.py's _record_flakes writes it, from an engine row's flakes or record-verify).
+  suite-timeout   T  site (integration | race), run (first | named | confirm), seconds (int >= 1); sha?
+                     (p29-9, ADR 0051: a lead verify whose run hit its deadline, logged as load, never a Flake: the
+                     first run, the Flake check's named re-run or its confirming run, and the seconds it was given.
+                     reconcile-rollout.py record-verify writes it).
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
@@ -221,8 +232,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   tuning             id, repo, window{since, until, activeStart?, activeEnd?, partial?}, scores{throughput,
                      runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
                      quality, reviewChurn}, applied (a list of at most 8 {key, from, to, ranAt, rule, evidence,
-                     agreeing, agreed?}); binding? (slot-bound | lane-bound | quota-bound | dependency-bound |
-                     none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
+                     agreeing, agreed?}); binding? (slot-bound | lane-bound | quota-bound | trickle-bound (p28-6) |
+                     dependency-bound | none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
                      that wrote it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
                      Reflection's line); auto? (true only: `tune.py --auto` or `--revert`, the weekly reading's own
                      landing); reflection? (the weekly reading's r- id, present exactly when auto is); reverts? (the
@@ -592,7 +603,7 @@ APPLIED_KEYS = ("key", "from", "to", "ranAt", "rule", "evidence", "agreeing")
 # p21-7: `agreed`, the weekly agreement (the Agreement rule), on every entry of a non-void auto landing only
 APPLIED_OPTIONAL = ("agreed",)
 MAX_APPLIED = 8
-BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "dependency-bound", "none-clear")
+BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "trickle-bound", "dependency-bound", "none-clear")
 # a close line's `close` (p21-6): the close that wrote it, through close-score.py and tune.py --close
 CLOSES = ("completion", "supersede")
 
@@ -1002,6 +1013,11 @@ KINDS = {
     "completion-verify": (False, {"result": _enum("green", "flake", "red", "rerun", "noslot", "unrun", "stopped",
                                                   "heat"),
                                   "rc": _str, "sha": _str, "attempt": _int(1, 2)}, {"log": _str, "followup": _str}),
+    # p29-9 (ADR 0050, ADR 0051): reconcile-rollout.py's _record_flakes and record-verify.
+    "flake": (True, {"test": _str, "repo": _str, "sha": _str, "site": _enum("task", "integrate", "integration", "race")},
+              {"followup": _str, "count": _int(1)}),
+    "suite-timeout": (True, {"site": _enum("integration", "race"), "run": _enum("first", "named", "confirm"),
+                             "seconds": _int(1)}, {"sha": _str}),
     "call-journal": (False, {"runId": _str, "status": _str},
                      {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),
                       "startTime": _int(0)}),
