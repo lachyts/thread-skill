@@ -135,6 +135,46 @@ Subcommands:
       prints one JSON line ({written, why, rollout, task, the fields}). Exit 0 always; 2 on usage. Not guarded:
       merge-task.sh ran engine-snapshot.py guard-pr first.
 
+  revert --repo R --slug S --default B --merge M --note N --rollout RN [--verifier CMD] [--bootstrap CMD]
+         [--tasks-dir T] [--gh-bin GH]
+      The RACE revert (ADR 0046; execute § 4.5 *The RACE revert*): a RACE whose re-verify stayed red after the Flake
+      check is reverted on main through a revert PR that merges only through merge-task. It never merges, never
+      force-pushes and never writes the vault; the lead appends its Race-log lines and runs merge-task. In order:
+      1. the target guard (exit 1, before any fetch, gh call or push): N's stem is S, its `rollout:` names RN, it reads
+         `review` with a `pr:` and `integrating:`, the latest merge-task `RACE: PR #<n> merged as <oid>` line naming
+         [[S]] whose PR number is N's `pr:` names M (a RACE line for another PR is skipped), a `revert started: <M>`
+         line names [[S]] and no `revert did not land:` line does (a `reverted on main:` line never refuses);
+      2. GitHub: `gh pr view <n> --json state,mergeCommit` must read MERGED as M (a 404 or 422: exit 1; any other
+         failure: 8);
+      3. `git fetch --quiet origin`, retried once (two failures: 8); M not an ancestor of origin/B: exit 1;
+      4. landed already: `gh pr list --head thread-revert/<S>-<M12> --state merged`, a PR whose mergeCommit is on
+         origin/B routes `reverted` (a failed read: 8);
+      5. the tree <R>/.claude/worktrees/revert-<S>, detached at origin/B and locked (a stale one removed first);
+         `git revert --no-commit [-m 1] M`: a conflict routes `conflict` (conflictFiles, aborted), an empty index
+         routes `noop` (M's change already gone from B), with `openPr` the open PR on the branch;
+      6. the branch (ls-remote): absent, a commit `Revert "<M's subject>"` whose body says `This reverts commit <M>.`
+         and the RACE sentence; present, its commits in origin/B..origin/<branch> must hold one saying `This reverts
+         commit <M>` (else exit 1), and origin/B is merged into it (a conflict routes `conflict`);
+      7. a plain push (`HEAD:refs/heads/<branch>`, never --force or a `+`), read back through ls-remote (refused: 8),
+         skipped when the branch holds the head already; then the open PR on the branch, or `gh pr create
+         --body-file` (its body says `This reverts commit <M>` too): route `pr`;
+      8. the tree is removed in a `finally`, after `restores` is read.
+      Prints {route: pr | reverted | noop | conflict, pr, url, head, base, revertCommit, branch, merge, conflictFiles,
+      openPr, restores, restoresBy, restoredTo, landedAfter, inert, raceLog: {opened, reverted}, tail}. `restores`
+      reads x (the head for `pr`, the landed commit for `reverted`, origin/B for `noop`): `git diff --quiet M^1 x`
+      holds (restoresBy `tree`), else, with --verifier, prepare's own Inert check (_inert: ADR 0045's path test on
+      M^1..x and the Inert proof re-run on x, its Run-record line with base M^1 and main and head x) skips (restoresBy
+      `inert`); anything else is false (restoresBy null, inert.why the reason: no inert_paths, refused settings, a
+      failed proof, an inert check error or no --verifier). restoredTo is M^1; landedAfter is `rev-list --count
+      --first-parent M..y`, y origin/B (pr, noop) or x^1 (reverted). raceLog is what the `## Race log` already holds
+      (`revert opened:`, `reverted on main:`), so the lead never appends either twice. `tail` (reverted and noop only):
+      {line: `- <stamp> [[S]] reverted on main: <x> (revert PR #R of PR #n's merge <M12>; <main back at <P12>'s tree |
+      … but for Inert paths (<k> path(s): <first 3>) | main not re-verified: <k> commit(s) landed after <M12>>)[; stale
+      revert PR #R2 (<url>) is still open and must not merge: close it]; set aside for Lachy` (noop: `(no revert needed:
+      PR #n's merge <M12>'s change is already gone from <B>; …)`), reason: the set-aside reason (`RACE: the re-verify
+      was red after the Flake check; its merge <M12> is reverted on main by <x12>`, plus `; main not re-verified: …`
+      and the stale-PR clause), unverified: not restores}; the lead copies both verbatim.
+
   push --repo R --slug S --head M
       A plain push of the task tree's M to origin/<branch> (never forced); the ls-remote read-back must
       equal M. Exit 1 when refused.
@@ -221,11 +261,13 @@ Subcommands:
       Now, in reconcile's `_stamp` form (the integrate call's startedAt, log-integration's --started).
 
 Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo, prepare without
-integrating:), 2 usage or environment, or the Engine snapshot guard (ADR 0043: prepare and set-aside first ask
+integrating:, revert's guard), 2 usage or environment, or the Engine snapshot guard (ADR 0043: prepare, set-aside and
+revert first ask
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
 call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
 unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, plan, verify,
-push, undo, base-moved and stamp are exempt), 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`),
+push, undo, base-moved and stamp are exempt), 8 retryable (prepare's fetch failed twice; revert's fetch, push, gh read
+or PR create), 75 verify got no verify slot in time (O.rc `noslot`),
 76 verify's Heat hold outlasted the slot wait (O.rc `heat`). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
 (`git rev-parse --local-env-vars`) scrubbed. The engine copies (ANCHOR_RECIPE, the branch and tree names,
@@ -240,9 +282,11 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1499,6 +1543,300 @@ def cmd_undo(args):
     return {"undone": args.merge, "head": args.to, "stashed": stashed}
 
 
+# ---- revert: the RACE revert (ADR 0046; execute § 4.5 *The RACE revert*) -------------------------------------------
+
+GH_TIMEOUT = 120
+GH_DEFINITIVE_RE = re.compile(r"HTTP 404|HTTP 422|Could not resolve to a")
+REVERT_RACE_SENTENCE = ("RACE (ADR 0046): its PR merged as a combination nobody verified, and the rollout verifier stayed "
+                        "red on it after the Flake check, so the lead reverts it on main through this PR (merged only "
+                        "through merge-task, never force-pushed) and sets the task aside for Lachy.")
+
+
+def revert_branch(slug, merge):
+    """The revert PR's branch: one per task and merge, so a re-run finds it."""
+    return f"thread-revert/{slug}-{merge[:12]}"
+
+
+def revert_tree(repo, slug):
+    return Path(repo) / ".claude" / "worktrees" / f"revert-{slug}"
+
+
+def _gh_json(gh_bin, argv, cwd):
+    """(parsed JSON, None), or (None, (definitive, why)): definitive is a 404, a 422 or a GraphQL not-found."""
+    try:
+        p = subprocess.run([gh_bin, *argv], cwd=str(cwd), capture_output=True, text=True, env=ENV, timeout=GH_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, (False, f"{gh_bin}: {e}")
+    if p.returncode != 0:
+        text = (p.stderr or p.stdout or "").strip() or f"exit {p.returncode}"
+        return None, (bool(GH_DEFINITIVE_RE.search(text)), text.splitlines()[-1])
+    try:
+        return json.loads(p.stdout), None
+    except ValueError:
+        return None, (False, f"gh {' '.join(argv[:2])} printed no JSON")
+
+
+def _revert_guard(args, path, note):
+    """The target guard (exit 1, before any fetch, gh call or push): (the task PR's number, the rollout note). The note is
+    --slug's, its `rollout:` names --rollout, it holds the lane (`review` with a `pr:` and `integrating:`), the latest
+    merge-task RACE line naming [[S]] with the note's PR number names --merge, a `revert started: <M>` line names [[S]],
+    and no `revert did not land:` line does. A `reverted on main:` line never refuses: a re-run after a landing routes
+    `reverted`."""
+    slug, merge = args.slug, args.merge
+    if path.stem != slug:
+        raise Refused(f"--note {path} is not [[{slug}]]'s note; nothing fetched")
+    ro_path = Path(os.path.expanduser(args.rollout))
+    if (rr._wikilink_slug(rr._scalar(note.get("rollout"))) or "").lower() != ro_path.stem.lower():
+        raise Refused(f"[[{slug}]]'s rollout: is not [[{ro_path.stem}]]; nothing fetched")
+    try:
+        ro_note = rr.Note(ro_path)
+    except (OSError, ValueError) as e:
+        raise EnvError(f"cannot read the rollout note {ro_path}: {e}")
+    if rr._status(note) != "review" or not rr._pr(note) or not rr._scalar(note.get("integrating")):
+        raise Refused(f"[[{slug}]] does not hold the lane (status {rr._status(note) or 'none'}, a pr: and integrating: "
+                      "needed): only a RACE the lead still holds is reverted; nothing fetched")
+    n = rr._pr_number(note.get("pr"))
+    if n is None:
+        raise Refused(f"[[{slug}]]'s pr: {rr._pr(note)!r} names no PR number; nothing fetched")
+    race, started, failed = None, False, False
+    for _stamp, s, rest in rr._race_log_entries(ro_note):
+        if s.lower() != slug.lower():
+            continue
+        m = rr.RACE_LINE_RE.search(rest)
+        if m and int(m.group(1)) == n:   # the task's own RACE line: one for another PR number is skipped
+            race = m.group(2)
+        if rest.startswith(rr.RACE_REVERT_STARTED_MARK) and rest[len(rr.RACE_REVERT_STARTED_MARK):].split()[:1] == [merge]:
+            started = True
+        if rest.startswith(rr.RACE_REVERT_FAILED_MARK):
+            failed = True
+    if race is None:
+        raise Refused(f"no `RACE: PR #{n} merged as …` line names [[{slug}]] in {ro_path.stem}'s {rr.RACE_LOG_SECTION}; "
+                      "nothing fetched")
+    if race != merge:
+        raise Refused(f"[[{slug}]]'s RACE line names merge {race}, not --merge {merge}; nothing fetched")
+    if not started:
+        raise Refused(f"no `revert started: {merge}` line names [[{slug}]]: append it first (execute § 4.5 *The RACE "
+                      "revert*); nothing fetched")
+    if failed:
+        raise Refused(f"a `revert did not land:` line names [[{slug}]]: main is red until Lachy decides (/thread:repair); "
+                      "nothing fetched")
+    return n, ro_note
+
+
+def _remove_tree(repo, tree):
+    git(repo, "worktree", "unlock", str(tree))
+    git(repo, "worktree", "remove", "--force", "--force", str(tree))
+    git(repo, "worktree", "prune")
+    shutil.rmtree(str(tree), ignore_errors=True)
+
+
+def _is_ancestor(repo, a, b):
+    p = git(repo, "merge-base", "--is-ancestor", a, b)
+    if p.returncode not in (0, 1):
+        return None
+    return p.returncode == 0
+
+
+def _restores(args, repo, place, merge, x, note):
+    """Whether x (the revert's result) restores main to M^1's tree: (restores, restoresBy, inert). Exact tree equality
+    first; else, with --verifier, prepare's own Inert check (ADR 0045: the path test on M^1..x and the Inert proof
+    re-run on x, its Run-record line with base M^1), failing closed to false."""
+    p1 = rev(repo, f"{merge}^1")
+    d = git(repo, "diff", "--quiet", p1, x)
+    if d.returncode == 0:
+        return True, "tree", _inert_off(f"x's tree is {p1[:12]}'s: restored by tree")
+    if d.returncode != 1:
+        raise EnvError(f"git diff {p1[:12]} {x[:12]} failed: {why(d)}")
+    if not getattr(args, "verifier", None):
+        return False, None, _inert_off("no --verifier given: the verifier runs")
+    inert = _inert(args, repo, place, p1, x, x, note)
+    return (True, "inert", inert) if inert["skip"] else (False, None, inert)
+
+
+def _landed_after(repo, merge, upto):
+    return int(out_of(git(repo, "rev-list", "--count", "--first-parent", f"{merge}..{upto}")) or 0)
+
+
+def _revert_tail(args, route, n, rpr, x, merge, restores, by, inert, landed_after, stale):
+    """The landing tail's two texts, copied verbatim by the lead: the `reverted on main:` Race-log line and the
+    set-aside reason."""
+    p12, m12, b = rev(args.repo, f"{merge}^1")[:12], merge[:12], args.default
+    if restores and by == "tree":
+        phrase = f"main back at {p12}'s tree"
+    elif restores:
+        phrase = (f"main back at {p12}'s tree but for Inert paths ({inert['changedTotal']} path(s): "
+                  f"{', '.join(inert['changed'][:3])})")
+    else:
+        phrase = f"{rr.RACE_REVERT_UNVERIFIED_MARK}: {landed_after} commit(s) landed after {m12}"
+    stale_clause = (f"; stale revert PR #{stale['number']} ({stale['url']}) is still open and must not merge: close it"
+                    if stale else "")
+    if route == "reverted":
+        body = f"revert PR #{rpr} of PR #{n}'s merge {m12}; {phrase}"
+        reason = f"RACE: the re-verify was red after the Flake check; its merge {m12} is reverted on main by {x[:12]}"
+    else:
+        body = f"no revert needed: PR #{n}'s merge {m12}'s change is already gone from {b}; {phrase}"
+        reason = (f"RACE: the re-verify was red after the Flake check; its merge {m12} needs no revert: its change is "
+                  f"already gone from {b} at {x[:12]}")
+    if not restores:
+        reason += f"; {rr.RACE_REVERT_UNVERIFIED_MARK}: {landed_after} commit(s) landed after {m12}"
+    line = (f"- {rr._stamp(datetime.now())} [[{args.slug}]] {rr.RACE_REVERTED_MARK} {x} ({body}){stale_clause}; "
+            "set aside for Lachy")
+    return {"line": line, "reason": reason + stale_clause, "unverified": not restores}
+
+
+def cmd_revert(args):
+    repo = Path(os.path.expanduser(args.repo))
+    path, note = _load_note(args.note)
+    n, ro_note = _revert_guard(args, path, note)   # exit 1 before any fetch, gh call or push
+    gh, merge, b_name, slug = args.gh_bin, args.merge, args.default, args.slug
+    if not out_of(git(repo, "rev-parse", "--git-dir")):
+        raise EnvError(f"{repo} is not a git repo")
+    owner_repo = _owner_repo(repo, note)
+    rflag = ["-R", owner_repo] if owner_repo else []
+    view, err = _gh_json(gh, ["pr", "view", str(n), *rflag, "--json", "state,mergeCommit"], repo)
+    if err:
+        if err[0]:
+            raise Refused(f"gh pr view {n}: {err[1]}")
+        raise Retryable(f"gh pr view {n}: {err[1]}")
+    oid = (view.get("mergeCommit") or {}).get("oid") if isinstance(view, dict) else None
+    if not isinstance(view, dict) or str(view.get("state") or "").upper() != "MERGED" or oid != merge:
+        raise Refused(f"PR #{n} is {(view or {}).get('state') or 'unknown'} with merge commit {oid or 'none'}, not MERGED "
+                      f"as {merge}: nothing to revert")
+    for attempt in (1, 2):
+        p = git(repo, "fetch", "--quiet", "origin")
+        if p.returncode == 0:
+            break
+        if attempt == 2:
+            raise Retryable(f"fetch origin failed twice: {why(p)}")
+    b = rev(repo, f"refs/remotes/origin/{b_name}")
+    if not b:
+        raise EnvError(f"origin/{b_name} does not exist in {repo}")
+    if not _is_ancestor(repo, merge, b):
+        raise Refused(f"{merge} is not on origin/{b_name} ({b[:12]}): nothing to revert")
+    branch = revert_branch(slug, merge)
+    reverts = rr._race_reverts(ro_note).get(slug.lower()) or {}
+    out = {"route": None, "pr": None, "url": None, "head": None, "base": b, "revertCommit": None, "branch": branch,
+           "merge": merge, "conflictFiles": [], "openPr": None, "restores": None, "restoresBy": None,
+           "restoredTo": rev(repo, f"{merge}^1"), "landedAfter": None, "inert": None,
+           "raceLog": {"opened": reverts.get("opened"), "reverted": reverts.get("reverted")}, "tail": None}
+    listing = ["--head", branch, "--json", "number,url,mergeCommit,headRefName"]
+    merged, err = _gh_json(gh, ["pr", "list", *rflag, *listing[:2], "--state", "merged", *listing[2:]], repo)
+    if err:
+        raise Retryable(f"gh pr list --head {branch} --state merged: {err[1]}")
+    opened, err = _gh_json(gh, ["pr", "list", *rflag, *listing[:2], "--state", "open", *listing[2:]], repo)
+    if err:
+        raise Retryable(f"gh pr list --head {branch} --state open: {err[1]}")
+    stale = next(({"number": o["number"], "url": o["url"]} for o in (opened or []) if isinstance(o, dict)), None)
+    # Landed already (a crash after merge-task's 0, or a re-run): the merged revert PR's commit on main.
+    for pr in merged or []:
+        x = ((pr or {}).get("mergeCommit") or {}).get("oid") if isinstance(pr, dict) else None
+        if x and _is_ancestor(repo, x, b):
+            restores, by, inert = _restores(args, repo, repo, merge, x, note)
+            la = _landed_after(repo, merge, f"{x}^1")
+            out.update(route="reverted", pr=pr.get("number"), url=pr.get("url"), revertCommit=x, openPr=stale,
+                       restores=restores, restoresBy=by, inert=inert, landedAfter=la,
+                       tail=_revert_tail(args, "reverted", n, pr.get("number"), x, merge, restores, by, inert, la, stale))
+            return out
+    tree = revert_tree(repo, slug)
+    _remove_tree(repo, tree)
+    tree.parent.mkdir(parents=True, exist_ok=True)
+    p = git(repo, "worktree", "add", "--quiet", "--detach", "--lock", "--reason", f"pid {os.getpid()}", str(tree), b)
+    if p.returncode != 0:
+        raise EnvError(f"could not add the revert tree {tree}: {why(p)}")
+    try:
+        parents = out_of(git(repo, "rev-list", "--parents", "-n", "1", merge)).split()[1:]
+        mflag = ["-m", "1"] if len(parents) > 1 else []
+        p = git(tree, "revert", "--no-commit", *mflag, merge)
+        if p.returncode != 0:
+            files = [f for f in out_of(git(tree, "diff", "--name-only", "--diff-filter=U")).split("\n") if f]
+            git(tree, "revert", "--abort")
+            if not files:
+                raise EnvError(f"git revert --no-commit {merge} failed with no conflict: {why(p)}")
+            out.update(route="conflict", conflictFiles=files)
+            return out
+        if git(tree, "diff", "--cached", "--quiet", "HEAD").returncode == 0:
+            # Nothing to revert: M's change is already gone from main (a hand revert, a later fix).
+            restores, by, inert = _restores(args, repo, tree, merge, b, note)
+            la = _landed_after(repo, merge, b)
+            out.update(route="noop", openPr=stale, restores=restores, restoresBy=by, inert=inert, landedAfter=la,
+                       tail=_revert_tail(args, "noop", n, None, b, merge, restores, by, inert, la, stale))
+            return out
+        ls = git(repo, "ls-remote", "origin", f"refs/heads/{branch}")
+        if ls.returncode != 0:
+            raise Retryable(f"cannot read origin's {branch}: {why(ls)}")
+        remote = (out_of(ls).split() or [""])[0]
+        if not remote:
+            subject = out_of(git(repo, "log", "-1", "--format=%s", merge))
+            msg = f'Revert "{subject}"\n\nThis reverts commit {merge}.\n\n{REVERT_RACE_SENTENCE}'
+            p = git(tree, "commit", "--quiet", "-m", msg)
+            if p.returncode != 0:
+                raise EnvError(f"could not commit the revert of {merge}: {why(p)}")
+            revert_commit = rev(tree, "HEAD")
+        else:
+            git(tree, "reset", "--hard", "--quiet", "HEAD")
+            git(tree, "revert", "--quit")
+            p = git(repo, "fetch", "--quiet", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+            if p.returncode != 0:
+                raise Retryable(f"fetch of origin's {branch} failed: {why(p)}")
+            rb = rev(repo, f"refs/remotes/origin/{branch}")
+            revert_commit = next((c for c in out_of(git(repo, "rev-list", f"{b}..{rb}")).split()
+                                  if f"This reverts commit {merge}" in out_of(git(repo, "log", "-1", "--format=%B", c))),
+                                 None)
+            if not revert_commit:
+                raise Refused(f"origin's {branch} holds no commit in {b[:12]}..{rb[:12]} that says `This reverts commit "
+                              f"{merge}`: not this revert's branch; nothing pushed")
+            git(tree, "checkout", "--quiet", "--detach", rb)
+            p = git(tree, "merge", "--no-edit", "--quiet", "-m", f"Merge origin/{b_name} into {branch}", b)
+            if p.returncode != 0:
+                files = [f for f in out_of(git(tree, "diff", "--name-only", "--diff-filter=U")).split("\n") if f]
+                git(tree, "merge", "--abort")
+                if not files:
+                    raise EnvError(f"merging origin/{b_name} into {branch} failed with no conflict: {why(p)}")
+                out.update(route="conflict", conflictFiles=files)
+                return out
+        head = rev(tree, "HEAD")
+        if remote != head:
+            p = git(tree, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")   # never --force, never a `+`
+            if p.returncode != 0:
+                raise Retryable(f"push of {head[:12]} to origin's {branch} refused: {why(p)}")
+            got = (out_of(git(repo, "ls-remote", "origin", f"refs/heads/{branch}")).split() or [""])[0]
+            if got != head:
+                raise Retryable(f"origin's {branch} reads {got or 'nothing'} after the push, not {head}")
+        if stale:
+            rpr, url = stale["number"], stale["url"]
+        else:
+            title = f'Revert "{out_of(git(repo, "log", "-1", "--format=%s", merge))}"'
+            body = (f"This reverts commit {merge}, the merge of PR #{n} ([[{slug}]]).\n\n{REVERT_RACE_SENTENCE}\n")
+            fd, body_file = tempfile.mkstemp(prefix="thread-revert-", suffix=".md")
+            try:
+                with os.fdopen(fd, "w") as fh:
+                    fh.write(body)
+                p = subprocess.run([gh, "pr", "create", *rflag, "--head", branch, "--base", b_name, "--title", title,
+                                    "--body-file", body_file], cwd=str(repo), capture_output=True, text=True, env=ENV,
+                                   timeout=GH_TIMEOUT)
+            except (OSError, subprocess.SubprocessError) as e:
+                raise Retryable(f"gh pr create: {e}")
+            finally:
+                try:
+                    os.unlink(body_file)
+                except OSError:
+                    pass
+            text = (p.stdout or "").strip()
+            m = re.search(r"https://github\.com/[^\s]+/pull/(\d+)", text)
+            if p.returncode != 0 or not m:
+                said = (p.stderr or text or f"exit {p.returncode}").strip().splitlines()[-1]
+                if GH_DEFINITIVE_RE.search(p.stderr or ""):
+                    raise Refused(f"gh pr create: {said}")
+                raise Retryable(f"gh pr create: {said}")
+            rpr, url = int(m.group(1)), m.group(0)
+        restores, by, inert = _restores(args, repo, tree, merge, head, note)
+        out.update(route="pr", pr=rpr, url=url, head=head, revertCommit=revert_commit, restores=restores,
+                   restoresBy=by, inert=inert, landedAfter=_landed_after(repo, merge, b))
+        return out
+    finally:
+        _remove_tree(repo, tree)
+
+
 # ---- inputs / set-aside --------------------------------------------------------------------------------
 
 def _latest_run(note, heading):
@@ -1801,7 +2139,9 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
       2. not set aside at its run or at Integration (running, queued, awaiting Integration, landed): null;
       3. a code-writing review note with no pr:: H11 `hand back or defer`, handBack true, label `(review, no PR)`;
       4. no rollout note: H2 `fix its rollout: or defer`;
-      5. an undecided RACE or UNVERIFIED: H3 `decide RACE` / `decide UNVERIFIED` (the hold's line);
+      5. an undecided RACE or UNVERIFIED: H3 `decide RACE` / `decide UNVERIFIED` (the hold's line); then a note whose
+         `pr:` the RACE revert reverted on main (reconcile-rollout.py _reverted_pr, ADR 0046): H7 `fix the note's pr: or
+         defer` (its latest `## Race log` line), handBack false: a re-land needs a new `pr:`;
       6. a `## Needs you` question: H4 `answer the question` (the question), its handBack that of the first cause
          below that refuses (7 skipped), true when none;
       7. a recorded answer (answerRecorded non-null): `answered for this block (<form>, <stamp>): <the cause's why>`,
@@ -1908,6 +2248,10 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
     if hold:
         return no(f"{hold[1]} undecided: only Lachy's RACE decided: line (through /thread:repair) releases it",
                   fix(f"decide {hold[1]}", _hold_line(rollout_note, path.stem, hold[1], note), False))
+    if rr._reverted_pr(rollout_note, note):
+        # The RACE revert undid this pr:'s merge on main (ADR 0046): re-entering would integrate or land a reverted PR.
+        return no("its merge was reverted on main: re-land it through a new pr: or defer",
+                  fix("fix the note's pr: or defer", _hold_line(rollout_note, path.stem, "RACE", note), False))
     question = rr.needs_human(note)
     if question and not skip_needs:
         below = _verdict(path, note, inp, rollout_note, now, None, skip_needs=True)
@@ -2068,9 +2412,10 @@ def _sha(value):
     return value
 
 
-# The verbs that act on one task of a rollout from the lead's root (ADR 0043): its Integration and its own set-aside
-# row. inputs and plan are readers (status reads inputs); verify, push and undo follow a guarded prepare in one flow.
-GUARDED = ("prepare", "set-aside")
+# The verbs that act on one task of a rollout from the lead's root (ADR 0043): its Integration, its own set-aside row and
+# its RACE revert. inputs and plan are readers (status reads inputs); verify, push and undo follow a guarded prepare in
+# one flow.
+GUARDED = ("prepare", "set-aside", "revert")
 
 
 def _engine_guard(note, tasks_dir):
@@ -2156,6 +2501,18 @@ def main(argv=None):
     sa.add_argument("--note", required=True)
     sa.add_argument("--kind", required=True, choices=["integration", "revise-stopped", "own"])
 
+    rv = sub.add_parser("revert", help="the RACE revert (ADR 0046): open, find or land the revert PR of a RACE's merge")
+    rv.add_argument("--repo", required=True)
+    rv.add_argument("--slug", required=True)
+    rv.add_argument("--default", required=True, help="the repo's default branch")
+    rv.add_argument("--merge", required=True, type=_sha, help="the RACE's merge commit M (its Race-log RACE line's)")
+    rv.add_argument("--note", required=True, help="the task note's path")
+    rv.add_argument("--rollout", required=True, help="the rollout note's path (its ## Race log)")
+    rv.add_argument("--verifier", default=None, help="the rollout's verifier: `restores` may then hold by the Inert check")
+    rv.add_argument("--bootstrap", default=None, help="the rollout's env_bootstrap, a step of the Inert proof too")
+    rv.add_argument("--tasks-dir", default=None, help="the vault's task notes (the Engine snapshot guard)")
+    rv.add_argument("--gh-bin", default="gh")
+
     sub.add_parser("stamp", help="now, in reconcile's _stamp form")
 
     args = p.parse_args(argv)
@@ -2173,7 +2530,7 @@ def main(argv=None):
         if args.cmd == "base-moved":
             return cmd_base_moved(args)
         handler = {"prepare": cmd_prepare, "push": cmd_push, "undo": cmd_undo, "inputs": cmd_inputs,
-                   "plan": cmd_plan, "set-aside": cmd_set_aside}[args.cmd]
+                   "plan": cmd_plan, "set-aside": cmd_set_aside, "revert": cmd_revert}[args.cmd]
         emit(handler(args))
         return 0
     except Refused as e:

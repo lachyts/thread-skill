@@ -308,6 +308,29 @@ I=$(inp "$A" --repo "$D/root" --max-review-rounds 4)
 ok "$(j "$I" 'd["autoRetryWhy"]')|$(hf "$I")" "autoRevise: step 1.2's seeded revise owns it|[\"fix the note's pr: or defer\",false,null]" "H7: the autoRevise form, handBack false"
 setfm "$A" pr "$PR"
 ok "$(hf "$(inp "$A" --repo "$D/root" --max-review-rounds 4)")" null "H7 control: without prUrlError the autoRevise form is null"
+# H7r (ADR 0046): a decided RACE whose merge the RACE revert reverted on main never re-enters: H7, a re-land needs a
+# new pr:. Undecided, the RACE decision (H3) comes first.
+scen h7-reverted
+mkro; mkt "$B" open
+mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"
+lead "$A" integration "RACE: the re-verify was red after the Flake check; its merge ffffffffffff is reverted on main by eeeeeeeeeeee"
+F40=$(printf 'f%.0s' {1..40}); E40=$(printf 'e%.0s' {1..40})
+{ printf '\n## Race log\n\n'
+  printf -- "- 2026-10-03T07:10+00:00 [[%s]] RACE: PR #5 merged as %s on parent %s at head %s, not the integrated pair\n" "$A" "$F40" "$C40" "$B40"
+  printf -- "- 2026-10-03T07:20+00:00 [[%s]] revert started: %s (re-verify rc 1, red after the Flake check)\n" "$A" "$F40"
+  printf -- "- 2026-10-03T07:40+00:00 [[%s]] reverted on main: %s (revert PR #6 of PR #5's merge ffffffffffff; main back at cccccccccccc's tree); set aside for Lachy\n" "$A" "$E40"
+} >> "$D/$RO.md"
+I=$(inp "$A")
+ok "$(hf "$I")" '["decide RACE",false,null]' "H7r: undecided, the RACE decision comes first (H3)"
+python3 -c 'import sys
+p, a = sys.argv[1:]
+t = open(p).read()
+open(p, "w").write(t.replace("## Notes\n\n", "## Notes\n\n- 2026-10-03 repair: [[%s]] RACE decided: re-land it\n" % a, 1))' "$D/$RO.md" "$A"
+I=$(inp "$A")
+ok "$(j "$I" 'd["autoRetryWhy"]')|$(hf "$I")" "its merge was reverted on main: re-land it through a new pr: or defer|[\"fix the note's pr: or defer\",false,null]" "H7r: decided and reverted → H7, handBack false"
+has "$(fix "$I" detail)" "reverted on main: " "H7r: … its detail the reverted line"
+setfm "$A" pr https://github.com/o/r/pull/7
+hasnt "$(j "$(inp "$A")" 'd["autoRetryWhy"]')" "reverted on main" "H7r: a new pr: (a re-land) is no longer refused for the revert"
 
 scen h8
 mkro; mkt "$B" open
