@@ -374,6 +374,21 @@ const fails = (rule, files, consts, re, what) => {
   const r = RULES[rule](files, consts)
   assert.ok(r.some((x) => re.test(x)), `${what}: ${rule} gave ${JSON.stringify(r)}`)
 }
+// The controls never pin today's § Sites figures or a follow-up row: each owner task that lands deletes its rows, and
+// p30-5's form N1 adds three, so the lead-in's count is read from the ADR and new rows go in at the table's top.
+const LEAD = /The table holds (\d+)(\s+)rows: (\d+) cited/
+function lead(files) {
+  const m = (files[ADR] ?? '').match(LEAD)
+  assert.ok(m, `${ADR} has no "The table holds <n> rows: <n> cited" lead-in: update this control`)
+  return m
+}
+const SEP = '| --- | --- | --- | --- | --- | --- |\n'
+const withRow = (files, row) => swap(files, ADR, SEP, `${SEP}${row}\n`)
+// One more `cited` row, and the lead-in counts it.
+function withCitedRow(files, row) {
+  const m = lead(files)
+  return swap(withRow(files, row), ADR, m[0], `The table holds ${+m[1] + 1}${m[2]}rows: ${+m[3] + 1} cited`)
+}
 
 test('the gate, its cites, its readers, ADR 0054 § Sites and the Framing agree (q1-q7)', () => {
   const r = check(FILES, CONSTS)
@@ -387,9 +402,12 @@ test('control q1: asking.md over 90 lines, without its "spends less for lower qu
 })
 
 test('control q2: an uncited ask fails q2; the exemption is exact and case-blind; a fourth exempt unit fails', () => {
-  // A follow-up row's unit with its cite removed fails q2 alone (its row needs no cite).
-  only(swap(FILES, ORIENT, 'of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` (Owner *gate*:', 'of the Framing (Owner *gate*:'),
-    CONSTS, ['q2'], 'cite removed')
+  // A follow-up unit naming AskUserQuestion with no cite fails q2, while q5 asks no cite of its row (its owner task
+  // removes the ask).
+  const fu = withRow({ ...FILES, 'skills/new/SKILL.md': '- End with `AskUserQuestion`, one offer per note.\n' },
+    '| skills/new/SKILL.md | § 1 | `` End with `AskUserQuestion`, one offer per note `` | *gate* | follow-up | p30-77 |')
+  fails('q2', fu, CONSTS, /skills\/new\/SKILL\.md: names AskUserQuestion/, 'follow-up uncited')
+  assert.ok(!q5(fu).some((x) => /does not cite/.test(x)), 'q5 asks no cite of a follow-up row')
   // execute's capitalised Don't is exempt; a fourth "never calls" unit is one too many.
   const dont = (FILES['skills/execute/SKILL.md'] ?? '').split('\n').find((l) => l.startsWith('- Never call the question tool (`AskUserQuestion`'))
   assert.ok(dont && EXEMPT.test(dont), 'execute\'s "Never call the question tool" line is exempt')
@@ -414,29 +432,30 @@ test('control q4: the never-settles clause dropped, a preamble with a § 3.5 phr
 })
 
 test('control q5: a renamed anchor, an uncited cited or listed row, an unlisted task, a designed-out ask still present, a count off by one, or an Owner label against its row, fails q5', () => {
-  only(swap(FILES, ADR, '`` ask the user which it is ``', '`` ask the user what it is ``'), CONSTS, ['q5', 'q6'], 'renamed')
+  only(swap(FILES, ADR, '`` Then ask which proposals to apply ``', '`` Then ask what proposals to apply ``'), CONSTS, ['q5', 'q6'], 'renamed')
   only(swap(FILES, 'skills/repair/SKILL.md', 'quoting `setAside.summary` (Owner *yours*, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`)',
     'quoting `setAside.summary` (Owner *yours*)'), CONSTS, ['q2', 'q5'], 'uncited')
-  fails('q5', swap(FILES, ADR, '| follow-up | p30-9 |', '| follow-up | p30-77 |'), CONSTS, /p30-77 is not in § Follow-ups/, 'unlisted task')
+  fails('q5', withRow({ ...FILES, 'skills/new/SKILL.md': '- Several trees: list them and ask which one.\n' },
+    '| skills/new/SKILL.md | § 1 | `` list them and ask which one `` | *technical* | follow-up | p30-77 |'),
+  CONSTS, /p30-77 is not in § Follow-ups/, 'unlisted task')
   only(swap(FILES, 'skills/open/SKILL.md', '3. If not found → ask for the scope', '3. If not found → confirm with the user, ask for the scope'),
     CONSTS, ['q5'], 'designed out present')
-  only(swap(FILES, ADR, '78\nrows: 36 cited', '78\nrows: 37 cited'), CONSTS, ['q5'], 'count')
+  const m = lead(FILES)
+  only(swap(FILES, ADR, m[0], `The table holds ${m[1]}${m[2]}rows: ${+m[3] + 1} cited`), CONSTS, ['q5'], 'count')
   // An ask that stands loses its cite: status § 1's cited ask, and a listed pointer (neither names AskUserQuestion, so
   // q2 cannot see them).
   only(swap(FILES, 'skills/status/SKILL.md', "don't assume (Owner *yours*: which rollout he means, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`).",
     "don't assume."), CONSTS, ['q5'], 'status uncited')
   only(swap(FILES, ORIENT, '(its Owner labelled above,\n  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`)', '(as above)'), CONSTS, ['q5'], 'listed uncited')
-  // One Owner per ask: schedule § 0's rollout clone labelled *yours* against its *technical* row.
-  only(swap(FILES, SCHEDULE, 'is Owner *technical*, kept a question by ADR 0042', 'is Owner *yours*, kept a question by ADR 0042'),
+  // One Owner per ask: status § 1's ask labelled *technical* against its *yours* row.
+  only(swap(FILES, 'skills/status/SKILL.md', "don't assume (Owner *yours*: which rollout he means,", "don't assume (Owner *technical*: which rollout he means,"),
     CONSTS, ['q5'], 'owner mismatch')
 })
 
 test('control q6: an uncovered "list them and ask which", a cited unit with no row, a unit with two anchors, and the past-tense narrative', () => {
   const add = (text) => ({ ...FILES, 'skills/status/SKILL.md': `${FILES['skills/status/SKILL.md']}\n- Several notes: list them and ask which one (Owner *yours*, \`_shared/asking.md\`).\n${text}` })
   only(add(''), CONSTS, ['q6'], 'no row')
-  const row = '| skills/status/SKILL.md | § 1 | `` list them and ask which one `` | *yours* | cited | — |'
-  const withRow = swap(add(''), ADR, '| skills/status/SKILL.md |', `${row}\n| skills/status/SKILL.md |`)
-  only(swap(swap(withRow, ADR, 'The table holds 78\nrows', 'The table holds 79\nrows'), ADR, '36 cited', '37 cited'), CONSTS, [], 'with its row')
+  only(withCitedRow(add(''), '| skills/status/SKILL.md | § 1 | `` list them and ask which one `` | *yours* | cited | — |'), CONSTS, [], 'with its row')
   fails('q6', { ...FILES, 'skills/new/SKILL.md': '- Pick one (`AskUserQuestion`, `_shared/asking.md`).\n' }, CONSTS, /skills\/new\/SKILL\.md: an ask unit holds 0/, 'cited, no row')
   fails('q6', swap(FILES, 'skills/reflect/SKILL.md', 'Then ask which proposals to apply', 'Then ask which proposals to apply. Several matches for a loose name: list them and ask which'),
     CONSTS, /holds 2 § Sites anchors/, 'two anchors')
