@@ -11097,7 +11097,7 @@ def _next_idle_reason(nx):
         e = next((e for e in lane if e.get("hold") == "lane"), None)
         return f"lane held: {e['cause']} on [[{e['slug']}]]" if e else "lane held"
     if halt == "git-env":
-        return "git-env trip: the shared checkout changed"
+        return f"{LIVE_GIT_ENV} the shared checkout changed"
     if halt == "held":
         h = next((h for h in nx.get("holdUntil") or [] if h.get("held") and h.get("waits") == "you"), None) or \
             next((h for h in nx.get("holdUntil") or [] if h.get("held")), None)
@@ -11665,7 +11665,7 @@ def _parser():
     mv.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     mv.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     mv.add_argument("--stall-after", type=int, default=STALL_AFTER_MIN,
-                    help=f"minutes of silence before work reads stalled, 1 to 1440 (default {STALL_AFTER_MIN})")
+                    help=f"minutes of silence before work reads stalled, 1 to {STALL_AFTER_MAX} (default {STALL_AFTER_MIN})")
     mv.add_argument("--gh-bin", default="gh", help="the gh executable `next`'s dry run reads PR holds through")
     mv.set_defaults(func=cmd_moving)
     return p
