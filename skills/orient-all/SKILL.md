@@ -162,7 +162,7 @@ rounds. A Grill task is decided only when every one of its decisions is answered
 3. **Schedule's questions, answered.** The list schedule's **Under orient-all.** paragraph cites. A fork asks
    nothing: the decision round authorised its member set. A `## Decided for you` bullet is an agent's call: it
    never settles a § 3.5 match (answer 8) or a decision.
-   1. Step 1's count confirm: confirmed as given; the skips are named.
+   1. Step 1's count: reported, as on every run; the skips are named.
    2. schedule § 0's misfit routing: the fork routes nothing. It runs no `defer` or `open`, and never the follow-up
       `/thread:schedule --tasks <serial members>`. When session-lane misfits dominate, it stops before writing and
       returns them. In a mixed set it schedules the parallel subset, leaves each misfit unstamped and returns each
@@ -191,7 +191,7 @@ rounds. A Grill task is decided only when every one of its decisions is answered
        misfits are.
    16. schedule's Pre-flight (schedule § 1.5, and S3.5 on the serial path) takes this pass's grades and answers as they
        stand: no grading agent, no round and no Grade log line (§ 2 step 7 logged them). Its `--tasks` is the fork's
-       step 1 confirmed candidates, and its `--decided` the prompt line's decided slugs among them. A member not
+       step 1 candidates, and its `--decided` the prompt line's decided slugs among them. A member not
        decided (a One call or Grill the round never reached, or an Orient one) is left out with its Dependent closure,
        unstamped, and returned. Its queue's ruled calls are written by its `decided-for-you --write --by orient-all`
        (schedule § 1.5's orient-all form), and the fork returns their block.

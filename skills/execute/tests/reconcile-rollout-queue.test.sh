@@ -615,7 +615,7 @@ ok "$(q "$J" '[[t["blockerSummary"], t["priority"]] for t in d["tasks"] if t["sl
 ok "$(q "$J" 'sorted(set(k for t in d["tasks"] for k in t))')" \
   '["blockerSummary","holdUntil","integrating","merged","pr","priority","queueState","rung","rungDrift","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key; holdUntil, p30-3)"
 ok "$(q "$J" 'sorted(d)')" \
-  '["ceiling","ceilingCause","ceilingError","counts","gitEnvHold","holdUntil","incomplete","ladder","pause_requested","paused","pausedFor","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline","trickle"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError and ceilingCause, p15-4; pausedFor, ADR 0034; holdUntil, p30-3; trickle, p28-6)"
+  '["ceiling","ceilingCause","ceilingError","chainStart","counts","gitEnvHold","holdUntil","incomplete","ladder","onMerge","pause_requested","paused","pausedFor","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline","trickle"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError and ceilingCause, p15-4; pausedFor, ADR 0034; holdUntil, p30-3; onMerge and chainStart, p30-4; trickle, p28-6)"
 setkey s-d integrating 2026-10-02T11:50+00:00
 printf '\n### Run 2 (2026-10-02T11:30+00:00)\n\nIntegration: conflict in a.py\n\n<!-- run 2 end sha=111111111111 -->\n' >> "$D/s-e.md"
 J=$(st "" 2026-10-02T12:00:00Z)

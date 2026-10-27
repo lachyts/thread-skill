@@ -110,7 +110,9 @@ def _load_reconcile():
 RR = _load_reconcile()
 
 PAUSE_LOG = "## Pause log"
-ROOM_LINE = re.compile(r"^- (\S+) room stop(: | ended\b)")
+# The room-stop line's one source is reconcile-rollout.py's ROOM_STOP_LINE_RE (p30-4), which its _approved_marks reads
+# too (an approved queue's room stops are no run mark): this module loads that one, never a copy.
+ROOM_LINE = RR.ROOM_STOP_LINE_RE
 BOUND_HOURS = 6.0
 STEP_TYPES = ("started", "result", "failed")
 
