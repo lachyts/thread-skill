@@ -522,6 +522,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suites do not contend, tuned from the Run record (ADR 0049). Each
   rollout's **Parallel ceiling** still bounds its own share. _Avoid_: night
   ceiling, global ceiling.
+- **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
+  the **Away cap**) for a start it has picked but not yet stamped, so every
+  other lead counts it. The stamp consumes it, and it lapses after 20
+  minutes. _Avoid_: bare "claim" (a Leg's task claim and a **Surface** claim
+  use it).
 - **Last starts** — toward the Morning, a queued task starts only if its
   kind's usual length (the median of that kind's past runs in the project,
   its kind its note's `scope:`) ends it by the Morning's hour; with fewer than
@@ -1083,8 +1088,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Reflection. It becomes a rule proposal when a later rollout shows the same
   thing again, or at once when Lachy confirms it. Lachy's no closes it too:
   it comes back only when two later rollouts show it again. A Watch the
-  Time-lost ledger opens on a class counts readings instead of rollouts.
-  Knobs need no Watch. _Avoid_: candidate, hunch.
+  Time-lost ledger opens on a class, or the circling detector on its rule
+  (**Circling**), counts readings instead of rollouts. Knobs need no Watch.
+  _Avoid_: candidate, hunch.
 - **Time-lost ledger** — the hours each cause class cost (stalls by cause,
   usage limits, machine load, the Integration lane, Integration rework, plan
   blocks, named from the Run record's own values where one fits), summed by
@@ -1102,6 +1108,39 @@ through time, from attention to merged PRs. Terms only — no implementation.
   step of the month's first weekly reading, whatever its cadence, run beside
   the trace (ADR 0051). Its gaps go in the decision task and never change
   whether the reading is quiet. _Avoid_: retro, deep dive.
+- **Attention ledger** — what the weekly reading reads past the Run record
+  about Lachy's attention and the work that waits on it: the **Question
+  ledger**, the **Review trails**, each rollout's **Wait to start** and
+  **Circling**, read by a script from the session transcripts,
+  `reviews.jsonl`, read-only git and the vault, and kept as one `attention`
+  line per reading in `reflections.jsonl`, written by `reflect.py attention`
+  with the reading's Owner label for each question (ADR 0056). _Avoid_: loop
+  ledger; attention minutes; Review load (the estate pass's forecast of the
+  attention a rollout will take, above).
+- **Question ledger** — every question put to Lachy through the question
+  tool in a reading's window, read from the session transcripts' main chain:
+  its outcome (answered, dismissed, dropped or open; a call he never saw is
+  failed and never counted as asked), the recommended option and whether he
+  picked it, his own words or note, the hours it held work, and its Owner by
+  `skills/_shared/asking.md` § 1, labelled by the reading (an `unknown`
+  remainder never blocks the close). _Avoid_: ask log.
+- **Review trail** — one PR's run of /fresh-review rounds, keyed by its
+  landing merge, else its branch, else a run of rounds in one checkout: its
+  rounds, its **STOP entries** (each time the rounds enter the stop verdict),
+  the stops **handed to Lachy** (a question within 30 minutes of a stop
+  round from the same checkout), and whether the PR changed docs alone.
+  _Avoid_: review loop (the engine's convergence of plan, verify and review
+  rounds, above); chain (`review-ledger.py`'s, narrower).
+- **Wait to start** — a rollout's time from Lachy's ask (the earliest
+  `captured:` of the tasks its queue links) and from its scheduling (its own
+  `captured:`) to its first Slot. _Avoid_: lead time.
+- **Circling** — work touched and not merged: a work item (a task with
+  `phase:`, `pr:` or `rollout:`) three or more Sessions named while no
+  rollout held it, before its dispatch or once set aside (W1), or a rollout
+  open 48 hours with nothing merged (W2). Each opens a **Watch** counted in
+  readings; a reading's own Sessions never count as touches (ADR 0056).
+  _Avoid_: loop; stuck item; stall or **Stalled rollout** (one with nothing
+  moving; circling work moves without landing).
 - **Quiet Reflection** — one that finds no new Watch (one first seen in this
   reading; a declined one seen again is not new), no rule proposal, no
   bug and no Guardrail breach. Three in a row move the reading from weekly

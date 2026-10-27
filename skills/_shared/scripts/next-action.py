@@ -238,12 +238,16 @@ class Vault:
         self._notes = {}
 
     def index(self):
-        """(lower name -> [rel], lower rel without .md -> rel), built on first use."""
+        """(lower name -> [rel], lower rel without .md -> rel), built on first use.
+
+        Each directory's entries are walked in sorted order, so a name's notes list the same on every file system: a
+        shallower copy before a deeper one (os.walk lists a directory's files before it descends), then sibling
+        directories by name."""
         if self._index is None:
             by_name, by_path = {}, {}
             for d, dirs, files in os.walk(self.root):
-                dirs[:] = [x for x in dirs if not x.startswith(".")]
-                for name in files:
+                dirs[:] = sorted(x for x in dirs if not x.startswith("."))
+                for name in sorted(files):
                     if name.lower().endswith(".md"):
                         rel = os.path.relpath(os.path.join(d, name), self.root)
                         by_name.setdefault(name[:-3].lower(), []).append(rel)
