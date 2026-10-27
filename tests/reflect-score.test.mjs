@@ -219,6 +219,14 @@ function trickleHeld({ reason = 'hold-trickle', drop = false } = {}) {
   ])
 }
 
+// `next`'s idle-slots marker at every 20-min tick in [from, to), minutes after 00:00, while a Slot is free.
+const hmOf = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+function ticks(from, to, reason, free, c) {
+  const out = []
+  for (let m = from; m < to; m += 20) out.push([at(hmOf(m)), 'idle-slots', null, { reason, free, settings: S(c) }])
+  return out
+}
+
 test('trickle-bound: no-Slot-open time held by the Trickle scores as hold-trickle and binds', (t) => {
   const home = tmpHome(t)
   emitAll(home, 'demo', trickleHeld())
@@ -229,13 +237,41 @@ test('trickle-bound: no-Slot-open time held by the Trickle scores as hold-trickl
   assert.equal(out.runningTime.hours, 4)
   assert.equal(out.slots.idleHours['hold-trickle'], 12, '3 free Slots x 4 running h')
   assert.equal(out.binding.constraint, 'trickle-bound')
-  assert.equal(out.binding.why, 'the Mac-wide cap held 80% of Slot capacity (the Trickle 16 h, the Away cap 0 h of Slot time; 1 h with no Slot open)')
+  assert.equal(out.binding.why, 'the Mac-wide cap kept Slots free 100% of the time (running time plus 1 h with no Slot open; Slot time it held: the Trickle 16 h, the Away cap 0 h)')
   assert.ok(has(out.flags, /^trickle-bound: no rollout key moves this \(the Trickle is the Mac-wide cap in ~\/\.config\/thread\/away\.json\)$/))
   assert.ok(has(out.flags, /^throughput: read under the Mac-wide cap \(trickle-bound\): .* not at the ceiling 4$/))
   assert.deepEqual(out.proposals, [], 'no slot-bound raise')
   assert.deepEqual(out.withheld, [])
   assert.equal(out.thresholds.trickleBound, 0.5)
   assert.equal(out.thresholds.holdMarkerSpanMinutes, 40)
+})
+
+// A day run the Trickle held with its Slots open at the Trickle's room, every tick marking hold-trickle: the cap left
+// (ceiling - Trickle) of the ceiling free, so against Slot capacity it held only 33%, 40% (with a queue tail) and 25%.
+// Read by time, as slot-bound's full share, it kept a Slot free 100%, 80% and 100% of the run.
+test('trickle-bound: a day run the Trickle held with Slots open binds, read by time and not by Slot capacity', (t) => {
+  const two = (to, c) => [...life('a', { from: at('00:00'), to: at('04:00'), c }), ...life('b', { from: at('00:00'), to: at(to), c })]
+  const cases = [
+    { name: 'ceiling 3 at Trickle 2', c: 3, until: '04:00', ev: [...two('04:00', 3), ...ticks(0, 240, 'hold-trickle', 1, 3)],
+      idle: { 'hold-trickle': 4 }, capacity: 12, share: 100, trickle: 4 },
+    { name: 'ceiling 4 at Trickle 2, then a one-hour queue tail', c: 4, until: '05:00',
+      ev: [...two('05:00', 4), ...ticks(0, 240, 'hold-trickle', 2, 4), ...ticks(240, 300, 'queue-tail', 3, 4)],
+      idle: { 'hold-trickle': 8, 'queue-tail': 3 }, capacity: 20, share: 80, trickle: 8 },
+    { name: 'ceiling 4 at a Trickle of 3', c: 4, until: '04:00',
+      ev: [...two('04:00', 4), ...life('c', { from: at('00:00'), to: at('04:00'), c: 4 }), ...ticks(0, 240, 'hold-trickle', 1, 4)],
+      idle: { 'hold-trickle': 4 }, capacity: 16, share: 100, trickle: 4 },
+  ]
+  for (const k of cases) {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs(k.ev))
+    const out = scored(home, ['--until', at(k.until), '--settings', writeSettings(home, { parallel_ceiling: k.c })])
+    assert.deepEqual(out.runningTime.excluded, [], `${k.name}: a Slot open throughout`)
+    assert.deepEqual(out.slots.idleHours, k.idle, k.name)
+    assert.equal(out.slots.capacityHours, k.capacity, k.name)
+    assert.equal(out.binding.constraint, 'trickle-bound', k.name)
+    assert.equal(out.binding.why, `the Mac-wide cap kept Slots free ${k.share}% of the time (running time plus 0 h with no Slot open; Slot time it held: the Trickle ${k.trickle} h, the Away cap 0 h)`, k.name)
+    assert.deepEqual(out.proposals, [], `${k.name}: no rollout key moves it`)
+  }
 })
 
 test('trickle-bound controls: a marker labels 40 min at most; dependency markers are no Trickle; the Away cap binds, Heat does not', (t) => {
@@ -260,7 +296,7 @@ test('trickle-bound controls: a marker labels 40 min at most; dependency markers
     const out = scored(home, settings(home))
     assert.deepEqual(out.runningTime.excludedHours, { 'hold-away-cap': 1 })
     assert.equal(out.binding.constraint, 'trickle-bound')
-    assert.match(out.binding.why, /the Trickle 0 h, the Away cap 16 h of Slot time; 1 h with no Slot open/)
+    assert.match(out.binding.why, /^the Mac-wide cap kept Slots free 100% of the time \(running time plus 1 h with no Slot open; Slot time it held: the Trickle 0 h, the Away cap 16 h\)$/)
   }
   {
     const home = tmpHome(t)
@@ -283,6 +319,48 @@ test('trickle-bound controls: a marker labels 40 min at most; dependency markers
     const out = scored(home, settings(home))
     assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [
       ['hold-trickle', Z(at('02:00')), Z(at('03:00'))]], 'back-filled from the stretch start, the last marker spanning to b')
+  }
+  for (const [before, want] of [
+    // ... unless another reason is in force there: the queue-tail marked at 01:00 still holds when a stops at 02:00,
+    // so only the hold-trickle marker's own span reads as the Trickle (and adds nothing to its held time)
+    ['queue-tail', [['idle', Z(at('02:00')), Z(at('02:30'))], ['hold-trickle', Z(at('02:30')), Z(at('03:00'))]]],
+    // ... while the same Mac-wide reason in force there back-fills
+    ['hold-trickle', [['hold-trickle', Z(at('02:00')), Z(at('03:00'))]]],
+  ]) {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs([
+      ...life('a', { from: at('00:00'), to: at('02:00'), c: 4 }),
+      ...life('b', { from: at('03:00'), to: at('05:00'), c: 4 }),
+      [at('01:00'), 'idle-slots', null, { reason: before, free: 3, settings: S(4) }],
+      [at('02:30'), 'idle-slots', null, { reason: 'hold-trickle', free: 4, settings: S(4) }],
+    ]))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), want, `${before} in force at the stop`)
+  }
+  {
+    // the cap kept a Slot free half the time (three Slots at a Trickle of 3, 00:00-03:00, of 6 h), but the dependency
+    // waits after it left 9 Slot-hours idle to the cap's 3: the larger reason binds, never the Trickle
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs([
+      ...['a', 'b', 'c'].flatMap((s) => life(s, { from: at('00:00'), to: at('03:00'), c: 4 })),
+      ...life('d', { from: at('03:00'), to: at('06:00'), c: 4 }),
+      ...ticks(0, 180, 'hold-trickle', 1, 4), ...ticks(180, 360, 'dependency', 3, 4),
+    ]))
+    const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
+    assert.deepEqual(out.slots.idleHours, { dependency: 9, 'hold-trickle': 3 })
+    assert.equal(out.binding.constraint, 'dependency-bound')
+    assert.ok(!has(out.flags, /^trickle-bound/))
+  }
+  {
+    // a run the Trickle held with no Slot ever open: the window starts at its first line, nothing runs, and the cap
+    // held all of its time
+    const home = tmpHome(t)
+    emitAll(home, 'demo', ticks(0, 60, 'hold-trickle', 4, 4))
+    const out = scored(home, ['--until', at('01:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
+    assert.equal(out.runningTime.hours, 0)
+    assert.deepEqual(out.runningTime.excludedHours, { 'hold-trickle': 1 })
+    assert.equal(out.throughput, null)
+    assert.equal(out.binding.constraint, 'trickle-bound')
   }
 })
 
