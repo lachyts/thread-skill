@@ -210,3 +210,8 @@ from the proposals above, and each is listed here so it can be overturned:
 Proposal 4 is built as proposed, except that the recording hook is land.sh (`--queue`/`--hold`
 run `review-round.py --branch-docs`), not the ledger: the ledger stays read-only. Proposal 5
 is built as the size on the landing row and in the Run record, with no warning.
+
+Two refinements came from the build's own review rounds (agents-config 228d39b/1cacbe #5 and #9).
+Data loss and security holes now block on any path the change ships, not only normal-use paths;
+Lachy's option named them without that qualifier. A full-cap round with no blocking finding now
+earns one more code round, once, because its cut tail may hold a blocking finding.

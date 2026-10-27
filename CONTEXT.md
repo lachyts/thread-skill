@@ -219,9 +219,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Own branch** — the feature branch whose work this session did. Close may
   push, review and merge it; a branch close can't prove is its own is only
   reported. _Avoid_: current branch (it may be another session's), my branch.
-- **Blocking finding** — a review finding whose failure scenario is a crash
-  or hang, data loss, a wrong result or a security hole on a path the branch
-  ships for normal use, or the named test failing. Only a blocking finding
+- **Blocking finding** — a review finding whose failure scenario is a crash,
+  hang or wrong result on a path the branch ships for normal use, data loss or
+  a security hole on any path it ships, or the named test failing. Only a blocking finding
   holds an own-branch landing; the rest are filed in its follow-up task, and
   a clean round is one with none (ADR 0055). The session grades it, never
   the reviewer. _Avoid_: accepted finding, must-fix, high (the reviewer
