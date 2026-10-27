@@ -13,7 +13,8 @@
 #   until the suite's group is gone   V16 no code calls fcntl.LOCK_UN; the header's close-only contract. The Run record
 #   (p29-10, contract item 7): VR1 a suite in a task tree records its start and end (sha, load, count, failing), its
 #   output still split   VR2 --priority   VR3 TERM ends it stopped, the slot free; a SIGKILL leaves no ended line
-#   VR4 no task tree or no note: no record, as today   VR5 a dirty tree   VR6 a green run names no failing.
+#   VR4 no task tree or no note: no record, as today   VR5 a dirty tree   VR6 a green run names no failing   VR7 a
+#   TERM while suite-started walks the vault: never swallowed (143, the suite never runs, no line, the slot free).
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound (60 to 300 s) only slows a real failure; a pid is "alive" only when `kill -0` succeeds AND its `ps`
 # state is not Z (an unreaped zombie runs nothing). Every background pid is recorded and stopped only by that pid.
@@ -419,6 +420,32 @@ git -C "$TREE" checkout -q -- a.txt
 : > "$VEV/r1.jsonl"
 vrun "$TREE" "$D/vr6.out" "$D/vr6.err" -- sh -c 'echo "FAILED tests/never.py::x"; exit 0'
 ok "$(recq '[L[1]["outcome"], L[1]["rc"], "failing" in L[1]]')" '["green",0,false]' "VR6: a green run carries no failing"
+
+# VR7: the stop lands inside suite-started's vault walk (the running count), with the slot held: a TaskStop or a hard
+# pause there must end the run, never be swallowed by the walk's best-effort count and run the suite green.
+: > "$VEV/r1.jsonl"
+cat > "$D/vr7.py" <<'PY2'
+import importlib.util, os, signal, sys
+spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1])
+vs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vs)
+load = vs._load_reconcile
+def stopped_in_the_walk():
+    rr = load()
+    walk = rr._note_index
+    def index(tasks_dir):   # the TERM lands as suite-started walks the vault for its running count
+        os.kill(os.getpid(), signal.SIGTERM)
+        return walk(tasks_dir)
+    rr._note_index = index
+    return rr
+vs._load_reconcile = stopped_in_the_walk
+sys.exit(vs.main(["run", "--slots", "1", "--"] + sys.argv[2:]))
+PY2
+(cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" exec python3 "$D/vr7.py" "$VS" sh -c "touch '$D/vr7.ran'") > "$D/vr7.out" 2> "$D/vr7.err"; rc=$?
+ok "$rc" 143 "VR7: a TERM in suite-started's vault walk: exit 143, never swallowed"
+ok "$([ -e "$D/vr7.ran" ] && echo ran || echo never)" never "VR7: the suite never ran"
+ok "$(recq '[d["kind"] for d in L]')" '[]' "VR7: no line: no suite-started, no green suite-ended"
+ok "$(slot_state 0 1)" free "VR7: the slot is free"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot: ALL PASS" || echo "verify-slot: SOME FAILED"
 exit "$fail"

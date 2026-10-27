@@ -29,9 +29,10 @@
 #   no file or no --verifier re-runs   C34 the task's own diff adds a reader   C35 a step walks the tree   C36 a shared
 #   THREAD.md   C37 a refused rollouts.toml   C38 chained skips across merge-task's exit 3   C39 a cwd glob in a test
 #   C40 fail closed: a failing cat-file is an inert check error, route verify, exit 0.
-#   The Run record (p29-10, ADR 0051): S1–S7b verify --rollout's suite lines (green, red, timeout, race, completion,
-#   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files); M1–M6 base-moved (a rollout's
-#   merge from the record or its note, a peer's push, the Inert path test, no task note, main unreadable).
+#   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
+#   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
+#   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
+#   path test, no task note, main unreadable).
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0; the verify slots in a temp pool
 # (tests/lib/merge-task-env.sh exports THREAD_VERIFY_SLOTS_DIR).
 set -uo pipefail
@@ -1449,7 +1450,7 @@ has "$(cat "$F/prep.err")" "WARN: inert check error: ProofError" "C40: … one W
 ok "$(ikinds)|$(iline '[ls[0]["readers"], ls[0]["error"][:26]]')" '["inert-proof-failed"]|[[],"inert check error: ProofEr"]' "C40: … and an inert-proof-failed line with error and readers []"
 unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
 
-# ======== S1–S7b: verify --rollout records its suite in the Run record (p29-10, ADR 0051) =======================
+# ======== S1–S8: verify --rollout records its suite in the Run record (p29-10, ADR 0051) ========================
 # by integration (with --slug), race (--detach-at) or completion (--outcome, no task), runner lead; suite-started after
 # the slot and before the deadline, suite-ended after the rc or outcome file. These cases read the record, so they keep
 # their own (THREAD_TEST_EVENTS_DIR does not apply); HOME is an empty dir (the Mac-wide count reads the note's vault).
@@ -1514,6 +1515,26 @@ kill -TERM "$vp"; wait "$vp"
 ok "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["rc"], d["ended"])' "$F/out/s7b.outcome.json")" "143 signal" "S7b: --outcome: the outcome file carries rc 143 and ended signal"
 ok "$(sq '[d.get("outcome") for d in L]')" '[null,"stopped"]' "S7b: … and the suite ended stopped"
 within 60 nosleeper "sleep 3183\.$u"
+
+# S8: a TERM while suite-started walks the vault for its running count, a slot held: never swallowed by the count's
+# best effort. 143 and <out>.rc 143, the verifier never runs, no line (no green), the slot free.
+: > "$SEV/ro.jsonl"
+cat > "$F/s8.py" <<'PY2'
+import importlib.util, os, signal, sys
+spec = importlib.util.spec_from_file_location("lead_integrate", sys.argv[1])
+li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+walk = li.rr._note_index
+def index(tasks_dir):   # the TERM lands as suite-started walks the vault
+    os.kill(os.getpid(), signal.SIGTERM)
+    return walk(tasks_dir)
+li.rr._note_index = index
+sys.exit(li.main(sys.argv[2:]))
+PY2
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$F/s8.py" "$LI" verify --tree "$WT" --out "$F/out/s8" --timeout 60 --slots 1 --slot-wait 60 --rollout "$V/ro.md" --slug "$SLUG" --verifier "touch '$F/s8.ran'" >/dev/null 2>&1; rc=$?
+ok "$rc|$(cat "$F/out/s8.rc" 2>/dev/null)" "143|143" "S8: a TERM in suite-started's vault walk: exit 143 and <out>.rc reads 143"
+ok "$([ -e "$F/s8.ran" ] && echo ran || echo never)|$(sq '[d["kind"] for d in L]')" "never|[]" "S8: the verifier never ran, and no line was written"
+ok "$(python3 "$root/skills/execute/scripts/verify-slot.py" status --slots 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["slots"][0]["state"])')" free "S8: the slot is free"
 
 # ======== M1–M6: base-moved, why main moved at a merge-task exit 3 (p29-10, ADR 0051) ===========================
 # base-moved finds the task by its PR (the vault's pr:), fetches origin, classifies each first-parent commit base..main

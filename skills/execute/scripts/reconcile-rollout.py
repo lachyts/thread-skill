@@ -2955,14 +2955,17 @@ def _note_index(tasks_dir: Path) -> dict:
     return index
 
 
-def mac_running(tasks_dir):
+def mac_running(tasks_dir, reraise=()):
     """The Mac-wide count of running Rollout tasks, every rollout included (the Trickle's count, execute away.md: the Run
-    record's suite `running`, p29-10), from one walk of `tasks_dir`; None when it cannot be walked."""
+    record's suite `running`, p29-10), from one walk of `tasks_dir`; None when it cannot be walked. An exception in
+    `reraise` (the caller's stop signal, raised by its handler mid-walk) propagates: the walk never swallows a stop."""
     try:
         tasks_dir = Path(os.path.expanduser(str(tasks_dir)))
         if not tasks_dir.is_dir():
             return None
         return sum(_running_by_rollout(tasks_dir, _note_index(tasks_dir)).values())
+    except reraise:
+        raise
     except Exception:  # noqa: BLE001 — a count for the record only: never a failure of the suite it describes
         return None
 
@@ -4828,9 +4831,9 @@ class _signals_held:
 def suite_started(rollout, task, suite, by, runner, state, tasks_dir=None, waited=None, reraise=(), written=None):
     """Record one suite's start (suite-started; run_record.py's suite pairing): `state` is tree_state's reading, taken
     by the caller (verify-slot.py reads it before its slot wait). load is load_now(), running mac_running(tasks_dir).
-    Best-effort: never raises, but an exception in `reraise` (the caller's signal) propagates; a tree with no sha
-    records nothing. written["started"] is set to whether the line landed, before a held signal is delivered. Returns
-    that."""
+    Best-effort: never raises, but an exception in `reraise` (the caller's signal) propagates, from the vault walk for
+    `running` too (a stop there writes no line); a tree with no sha records nothing. written["started"] is set to
+    whether the line landed, before a held signal is delivered. Returns that."""
     try:
         if not rollout or not isinstance(state, dict) or not state.get("sha"):
             return False
@@ -4843,7 +4846,7 @@ def suite_started(rollout, task, suite, by, runner, state, tasks_dir=None, waite
         if waited is not None:
             fields["waited"] = _secs(waited)
         if tasks_dir is not None:
-            n = mac_running(tasks_dir)
+            n = mac_running(tasks_dir, reraise=reraise)
             if n is not None:
                 fields["running"] = n
         with _signals_held():
@@ -4883,7 +4886,7 @@ def suite_ended(rollout, task, suite, by, runner, outcome, seconds, tasks_dir=No
         if waited is not None:
             fields["waited"] = _secs(waited)
         if scan and tasks_dir is not None:
-            n = mac_running(tasks_dir)
+            n = mac_running(tasks_dir, reraise=reraise)
             if n is not None:
                 fields["running"] = n
         with _signals_held():

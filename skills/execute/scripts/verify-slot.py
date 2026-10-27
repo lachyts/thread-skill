@@ -60,7 +60,9 @@ Contract.
    suite in that rollout's Run record: suite-started (by task, or integration with --priority; runner agent; the
    tree's sha, dirty and diff read before the slot wait, the load and the Mac-wide running count after it) and,
    once the slot is released, suite-ended: green (rc 0), stopped (128+n, or a signal to `run`: no vault scan, no
-   output read), unrun (127), else red with the failing names read from the last 16 MiB of its output. Unless fd 1
+   output read), unrun (127), else red with the failing names read from the last 16 MiB of its output. Only
+   suite-started is written while the slot is held, before the command starts (its vault walk for the running
+   count, a fraction of a second); a stop signal in that walk ends the run 128+n with no line written. Unless fd 1
    or fd 2 is a TTY, the guard's stdout and stderr then go through pipes: a pump forwards each chunk to fd 1 or
    fd 2 within GUARD_POLL and keeps a copy in an unlinked temp file; once the guard exits it drains what is ready
    for at most a second and never waits for EOF, so a leftover that writes after `run` exits gets EPIPE, and output
@@ -805,9 +807,10 @@ def _failing_from(rr, capture):
 def _run_recorded(slots, prio, cmd, owner):
     """`run` for a suite in a task tree (contract item 7): the slotted run as cmd_run's, plus its suite-started and
     suite-ended lines in the rollout's Run record, and, unless fd 1 or fd 2 is a TTY, its output captured through a pump
-    for the failing names. The tree's state is read before the slot wait; the load and the running count after it.
-    suite-ended is written once the slot is released, so recording never holds a slot; a stop by signal skips the vault
-    scan and the capture. Recording never changes the rc."""
+    for the failing names. The tree's state is read before the slot wait; the load and the running count after it, so
+    suite-started (that vault walk included) is written with the slot held, before the command starts. suite-ended is
+    written once the slot is released, so its walk and the failing names never hold one; a stop by signal skips the
+    vault scan and the capture. Recording never changes the rc, nor swallows a stop: one in that walk is 128+n too."""
     rr = owner["rr"]
     for s in SIGNALS:
         signal.signal(s, _on_signal)

@@ -80,12 +80,13 @@ Subcommands:
       the rollout's Run record (the note's stem; the tasks dir is its parent): by completion with --outcome, race with
       --detach-at, else integration (with SLUG as its task; a completion suite has none), runner lead. suite-started
       (reconcile-rollout.py suite_started: the tree's sha, dirty and diff, the load, the Mac-wide running count, the
-      slot's wait) is written after the slot and before the deadline starts; a stop signal while it is written takes
-      the signal path as before. suite-ended is written in the finally, after O.rc or O.outcome.json, with signals
-      ignored there: green (the verifier's rc 0), timeout (--timeout and the step), unrun (the env_bootstrap failed),
-      stopped (a signal: no vault scan, no log read), else red, with `failing` read from the log on red or timeout.
-      No slot in time writes only suite-ended noslot with its wait; a SIGKILL leaves a started line with no ended
-      line. Recording never changes verify's files, output or exit. Without --rollout nothing is recorded.
+      slot's wait) is written after the slot and before the deadline starts; a stop signal while it is written, the
+      vault walk for the count included, takes the signal path as before (128+n, the verifier never started).
+      suite-ended is written in the finally, after O.rc or O.outcome.json, with signals ignored there: green (the
+      verifier's rc 0), timeout (--timeout and the step), unrun (the env_bootstrap failed), stopped (a signal: no
+      vault scan, no log read), else red, with `failing` read from the log on red or timeout. No slot in time writes
+      only suite-ended noslot with its wait; a SIGKILL leaves a started line with no ended line. Recording never
+      changes verify's files, output or exit. Without --rollout nothing is recorded.
 
   base-moved --repo R --pr N --base SHA --main SHA --default B [--refusal N] [--tasks-dir T]
       Why main moved (p29-10, ADR 0051): merge-task.sh calls it at each newly counted exit-3 refusal (its
