@@ -35,7 +35,14 @@ line the score is empty and flagged "no record".
 Running time is the time in [since, until] when the run is active and not paused. Active: a Slot is open (to
 its effective end, below), or the lane is held with no merge, race or git-env hold open and no Slot open, for
 at most LANE_ONLY_CAP of each such stretch of one holding (a pause splits a stretch). Paused spans (paused .. resumed) are excluded; the drain before a
-soft pause's stamp counts as running. A hold with no Slot open is a wait on Lachy: excluded, listed by kind.
+soft pause's stamp counts as running. A hold with no Slot open is a wait on Lachy: excluded, listed by kind. A
+Mac-wide hold (MAC_HOLDS: the Trickle, the Away cap, the Heat hold; execute away.md) with no Slot open is a meant wait,
+never Lachy's: excluded under its own kind (hold-trickle, hold-away-cap, hold-heat), after every kind above (so a pause
+or a hold wins) and before `idle`. Its idle-slots marker at t labels [t, e), e the earliest of the next marker (any
+reason), t + HOLD_MARKER_SPAN (two heartbeat ticks: the lead re-checks at each) and --until, so a dead lead's silence
+reads idle past the span, never the Trickle; a not-running stretch whose first marker is a Mac-wide hold within
+HOLD_MARKER_SPAN of its start takes that label from its start. A run the Trickle held with no Slot ever open has no
+first slot-taken, so the default window is empty, as with no Slot at all, and it never reads trickle-bound (C = 0).
 - A Slot's active intervals. Its calls are every run-bound (not an integrate call) for its task inside it (a
   restart after a dead lead re-takes the open Slot, keeping its first start, and binds a new call); a call's
   journal is its latest terminal call-journal line, else its latest line. The Slot is active from its start to
@@ -140,8 +147,12 @@ review_churn_pct x Σfindings, never from the rounded value (11 of 20 is at a 55
 
 Binding, the first that holds: quota-bound (quota stalls >= QUOTA_STALLS); lane-bound (lane busy >=
 LANE_BOUND_BUSY of running time, or the waits climbing: the last third's mean over WAIT_CLIMB_RATIO times the
-first third's and at least WAIT_CLIMB_MIN minutes); slot-bound (Slots full >= SLOT_BOUND_FULL); dependency-bound
-(idle >= DEPENDENCY_IDLE of Slot capacity, dependency plus solo the largest reason); else none-clear.
+first third's and at least WAIT_CLIMB_MIN minutes); slot-bound (Slots full >= SLOT_BOUND_FULL); trickle-bound (the
+Mac-wide cap, the Trickle or the Away cap, held >= TRICKLE_BOUND of Slot capacity: H = the hold-trickle and
+hold-away-cap idle Slot time plus each such excluded span times the ceiling in force at its start, over C = Slot
+capacity plus that same term, and H at least every other idle reason's; flagged that no rollout key moves it, and
+Throughput flagged as read under the cap, its value and Guardrail unchanged); dependency-bound (idle >=
+DEPENDENCY_IDLE of Slot capacity, dependency plus solo the largest reason); else none-clear.
 
 Proposals, one rule each: slot-bound -> parallel_ceiling +1, withheld ("lane N% busy, at or above 60%") when the
 lane is LANE_FREE_FOR_RAISE busy or more (so a Slot-bound run always shows its raise); quota-bound ->
@@ -249,6 +260,8 @@ WAIT_CLIMB_RATIO = 2.0           # last third's mean wait over this times the fi
 WAIT_CLIMB_MIN = 10.0            # ... and at least this many minutes -> waits climbing
 DEPENDENCY_IDLE = 0.5            # idle Slot time this share of capacity -> dependency-bound (with that reason largest)
 QUOTA_STALLS = 1                 # this many quota stalls -> quota-bound
+TRICKLE_BOUND = 0.5              # Slot capacity the Mac-wide cap held this share -> trickle-bound (as DEPENDENCY_IDLE)
+HOLD_MARKER_SPAN = 40 * MINUTE   # a Mac-wide hold marker labels no-Slot-open time this long at most (two */20 ticks)
 ROUND_SET_ASIDES = 2             # this many review-rounds (plan-rejected) set-asides -> a round cap +1
 EVIDENCE_MAX = 300
 # rollout-settings.py's GUARDRAILS_BUILT_IN; review_churn_pct (p21-3) is Review churn's absolute bound, hours_per_task
@@ -277,6 +290,16 @@ RULE_EFFECTS = {
 # A rule missing from RULE_EFFECTS fails closed: it serves nothing and risks every Guardrail, so any breach withholds
 # its raise, as every breach withheld every raise before p21-2 weighed effects, instead of none.
 UNDECLARED_EFFECT = ((), GUARDRAILS)
+# The Mac-wide holds (execute away.md; _idle_reason's reasons): an idle-slots reason -> its excluded kind and why. A
+# stretch with no Slot open that one of these marks is a meant wait on the Mac-wide cap, never a wait on Lachy, nor idle.
+# p28-7 adds hold-last-start here.
+MAC_HOLDS = {
+    "hold-trickle": ("hold-trickle", "a row waits on the Trickle, the Mac-wide cap by day: a meant wait, not Lachy's"),
+    "hold-away-cap": ("hold-away-cap", "the Away cap holds it while Away (ADR 0049)"),
+    "hold-heat": ("hold-heat", "the Heat hold: the Mac is too hot to start anything (estate ADR 0009 d5)"),
+}
+# The Mac-wide holds that bind as trickle-bound (the one Mac-wide cap, its value by Away state); Heat is transient.
+CAP_HOLDS = ("hold-trickle", "hold-away-cap")
 HOLD_WHY = {"merge": "a merge hold with no Slot open (a --gated or exit-7 hold: a wait on Lachy)",
             "race": "a RACE hold with no Slot open (an undecided RACE or its re-verify: a wait on Lachy)",
             "git-env": "a git-env hold with no Slot open (an unacked canary trip: a wait on Lachy)"}
@@ -842,6 +865,7 @@ class Score:
             labels.append(("lane-only-over-cap", "the lane held with no Slot or hold open past %d h"
                            % (LANE_ONLY_CAP // HOUR), iv))
         rest = subtract(win, self.run_iv)
+        labels.extend(self._mac_hold_labels(rest, until))
         excluded = []
         for kind, why, iv in labels:
             for a, b in intersect(rest, [iv]):
@@ -857,7 +881,33 @@ class Score:
         self.excluded = [{"kind": e["kind"], "start": fmt(e["start"]), "end": fmt(e["end"]),
                           "hours": hours(e["end"] - e["start"]), "why": e["why"]} for e in excluded]
         self.excluded_hours = {k: hours(v) for k, v in sorted(by_kind.items())}
+        self._excluded_ms = [(e["kind"], e["start"], e["end"]) for e in excluded]  # raw, for binding()'s trickle-bound
         self.run_ms = total(self.run_iv)
+
+    def _mac_hold_labels(self, rest, until):
+        """The Mac-wide holds' labels (MAC_HOLDS), after every other kind, so a pause or a hold wins: a marker at t
+        labels [t, e), e the earliest of the next idle-slots marker (any reason), t + HOLD_MARKER_SPAN and --until, so a
+        dead lead, who writes no markers, reads idle past the span. A not-running stretch (of `rest`) whose first marker
+        is a Mac-wide hold within HOLD_MARKER_SPAN of its start takes that label from its start (slots_score's "the first
+        marker labels its idle span from the start")."""
+        markers = sorted(self.markers)
+        out = []
+        for i, (t, r) in enumerate(markers):
+            if r not in MAC_HOLDS:
+                continue
+            e = min([t + HOLD_MARKER_SPAN, until] + [u for u, _r in markers[i + 1:] if u > t][:1])
+            if e > t:
+                kind, why = MAC_HOLDS[r]
+                out.append((kind, why, (t, e)))
+        for a, b in rest:
+            first = next(((t, r) for t, r in markers if a <= t < b), None)
+            if first and first[1] in MAC_HOLDS and a < first[0] <= a + HOLD_MARKER_SPAN:
+                kind, why = MAC_HOLDS[first[1]]
+                out.append((kind, why, (a, first[0])))
+        merged = {}  # one label per kind, its pieces unioned, so back-to-back ticks read as one excluded span
+        for kind, why, iv in out:
+            merged.setdefault(kind, (why, []))[1].append(iv)
+        return [(kind, why, x) for kind, (why, ivs) in merged.items() for x in union(ivs)]
 
     # ---- Slots -----------------------------------------------------------------------------------------------
 
@@ -1214,6 +1264,7 @@ class Score:
             "laneFreeForRaise": LANE_FREE_FOR_RAISE, "waitClimbRatio": WAIT_CLIMB_RATIO,
             "waitClimbMinMinutes": WAIT_CLIMB_MIN, "dependencyIdle": DEPENDENCY_IDLE,
             "quotaStalls": QUOTA_STALLS, "roundSetAsides": ROUND_SET_ASIDES,
+            "trickleBound": TRICKLE_BOUND, "holdMarkerSpanMinutes": HOLD_MARKER_SPAN // MINUTE,
         }
         return out
 
@@ -1522,6 +1573,9 @@ class Score:
         if sm["fullShare"] is not None and sm["fullShare"] >= SLOT_BOUND_FULL:
             return {"constraint": "slot-bound", "why": "Slots full %d%% of running time at ceiling %s"
                     % (round(sm["fullShare"] * 100), sm["ceiling"])}
+        trickle = self._trickle_bound()
+        if trickle:
+            return trickle
         if self.capacity and self.idle_total / self.capacity >= DEPENDENCY_IDLE:
             dep = self.idle.get("dependency", 0) + self.idle.get("solo", 0)
             others = [v for k, v in self.idle.items() if k not in ("dependency", "solo")]
@@ -1529,6 +1583,36 @@ class Score:
                 return {"constraint": "dependency-bound", "why": "free Slots %d%% of capacity, mostly waiting on "
                         "dependencies or a Solo task" % round(self.idle_total * 100 / self.capacity)}
         return {"constraint": "none-clear", "why": "no rule held"}
+
+    def _trickle_bound(self):
+        """The trickle-bound rule (the header's Binding), or None. H, the Slot time the Mac-wide cap held: its idle
+        Slot-ms in running time (CAP_HOLDS' slots_score labels) plus each excluded CAP_HOLDS span times the ceiling in
+        force at its start (every Slot is free then; no ceiling step, no term). C: Slot capacity plus that same term. It
+        holds when C > 0, H / C >= TRICKLE_BOUND and H is at least every other idle reason's Slot-ms. Slot-full time and
+        held time never overlap: a hold marker is only written while a Slot is free."""
+        held = {k: self.idle.get(k, 0) for k in CAP_HOLDS}
+        no_slot = 0
+        extra = 0
+        for kind, a, b in self._excluded_ms:
+            if kind not in CAP_HOLDS:
+                continue
+            no_slot += b - a
+            c = self.ceiling_at(a)
+            if c:
+                held[kind] += (b - a) * c
+                extra += (b - a) * c
+        h, cap = sum(held.values()), self.capacity + extra
+        others = [v for k, v in self.idle.items() if k not in CAP_HOLDS]
+        if not cap or not h or h / cap < TRICKLE_BOUND or h < max(others or [0]):
+            return None
+        self.flag("trickle-bound: no rollout key moves this (the Trickle is the Mac-wide cap in "
+                  "~/.config/thread/away.json)")
+        self.flag("throughput: read under the Mac-wide cap (trickle-bound): merges per running hour at the Slots the "
+                  "cap allowed, not at the ceiling %s" % self.slot_metrics["ceiling"])
+        return {"constraint": "trickle-bound",
+                "why": "the Mac-wide cap held %d%% of Slot capacity (the Trickle %g h, the Away cap %g h of Slot time; "
+                       "%g h with no Slot open)" % (round(h * 100 / cap), hours(held["hold-trickle"]),
+                                                    hours(held["hold-away-cap"]), hours(no_slot))}
 
     def _ran_at(self, key, since, until):
         """(ran, spread) for a round cap: its most common value on the window's slot-taken lines (ties to the later),

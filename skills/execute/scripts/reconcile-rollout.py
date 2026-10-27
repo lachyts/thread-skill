@@ -232,8 +232,11 @@ Subcommands:
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
-              pause_requested, pausedFor, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline, ladder,
-              gitEnvHold, holdUntil, tasks}; `pausedFor` is the rollout's `paused_for` (`sign-off` under await-sign-off's
+              pause_requested, pausedFor, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline,
+              trickle, ladder, gitEnvHold, holdUntil, tasks}; `trickle` (p28-6) is `next`'s trickle block read the same
+              way, silently (no WARN), plus `here`: {away, file, why, limit, awayCap, until, morning, elsewhere, here,
+              running}, `here` this rollout's own count as another lead's count elsewhere reads it and `running`
+              elsewhere plus here (Trickle and Away, below); `pausedFor` is the rollout's `paused_for` (`sign-off` under await-sign-off's
               pause, ADR 0034), else null; `ceiling` is `parallel_ceiling`, or for a note without it the operator's
               rollout settings (rollout-settings.py for the Project root: rollouts.toml, then built-in 4),
               and null with `ceilingError` the reason when it is invalid or cannot be resolved (`next`
@@ -792,7 +795,10 @@ in_progress` notes less the ones its own undecided RACE or UNVERIFIED holds. Ser
 notes never count. This rollout's own use is counted the same way, every in_progress row of its own, live or stalled, so
 a new start fits only while elsewhere + its own in_progress + this call's starts < the cap; a restart waits on the
 ceiling alone (no state leaves two respawned leads each waiting on the other's stalled notes). Nothing here writes the
-file; mark-started reads it too, for slot-taken's `cap` (Run record, above).
+file; mark-started reads it too, for slot-taken's `cap` (Run record, above), `status` for its `trickle` block, and every
+progress line (_progress_for, `next`, `status`) for the ETA's width (p28-6, _eta_width: the chunks still ahead at
+min(ceiling, max(1, cap - the count elsewhere)), the Heat hold aside); all of them read it silently, and only `next`
+prints the WARN.
 
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
@@ -2571,10 +2577,26 @@ def _counts(rows):
     return c
 
 
-def _timeline(rows, counts, ceiling, now):
+def _eta_width(ceiling, away, elsewhere):
+    """(n, by): how many of this rollout's tasks run at once for the ETA (p28-6), the Trickle's limit (execute away.md's
+    slotLimit, min(ceiling, max(0, cap - the count elsewhere))) floored at 1 and without the Heat hold, which passes: a
+    full Mac still drains one at a time, and the ETA never divides by zero. `by` is "ceiling" when the ceiling binds,
+    else "trickle" (not Away) or "away cap" (Away). `away` is _away_state's, `elsewhere` _elsewhere_running's. A ceiling
+    of None (unresolved) gives (None, "ceiling"): _timeline then has no remaining."""
+    if not ceiling:
+        return None, "ceiling"
+    room = max(1, _cap_in_force(away)["n"] - sum(elsewhere.values()))
+    if ceiling <= room:
+        return ceiling, "ceiling"
+    return room, "away cap" if away["away"] else "trickle"
+
+
+def _timeline(rows, counts, ceiling, now, width=None):
     """The per-task progress/ETA block, or None when no task has a parseable `started:`. In-rollout
     arithmetic only, deliberately rough (always labelled `~… (rough)`): the mean per-task duration
-    (started -> merged) x the chunks still ahead at the ceiling."""
+    (started -> merged) x the chunks still ahead at the limit, `width` (_eta_width's (n, by): the ceiling, or the
+    Trickle's or the Away cap's room on this Mac), reported as etaWidth and etaBy. With no width it is the ceiling's."""
+    n, by = width if width is not None else (ceiling, "ceiling")
     in_n = [r for r in rows if r["state"] not in OUTSIDE_N]
     entries = []
     for r in in_n:
@@ -2600,7 +2622,7 @@ def _timeline(rows, counts, ceiling, now):
                  if e[2]["durationMinutes"] is not None and e[2]["durationMinutes"] >= 0]
     avg = sum(durations) / len(durations) if durations else None
     pending = counts["running"] + counts["queued"]
-    remaining = int(round(avg * math.ceil(pending / ceiling))) if (avg is not None and pending and ceiling) else None
+    remaining = int(round(avg * math.ceil(pending / n))) if (avg is not None and pending and n) else None
     return {
         "tasks": [e[2] for e in entries],
         "firstStarted": entries[0][2]["started"],
@@ -2611,6 +2633,8 @@ def _timeline(rows, counts, ceiling, now):
         "durationsUsed": len(durations),
         "remainingEstimateMinutes": remaining,
         "remainingLabel": _rough_label(remaining) if remaining is not None else None,
+        "etaWidth": n,
+        "etaBy": by,
         "complete": complete,
     }
 
@@ -2643,10 +2667,12 @@ def _progress_line(counts, timeline) -> str:
 def _progress_for(rollout_path: Path, tasks_dir: Path, now) -> str:
     """The progress line for a rollout, read fresh from its notes (after any writes this call made)."""
     rollout_note = Note(rollout_path)
-    rows, _index = _rows(rollout_path, rollout_note, tasks_dir)
+    rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     counts = _counts(rows)
     ceiling, _err = _ceiling(rollout_note)
-    return _progress_line(counts, _timeline(rows, counts, ceiling, now))
+    # The ETA's width (p28-6): the Away state and the count elsewhere, read silently (only `next` prints the WARN).
+    width = _eta_width(ceiling, _away_state(now), _elsewhere_running(rollout_path, tasks_dir, index))
+    return _progress_line(counts, _timeline(rows, counts, ceiling, now, width))
 
 
 def _print_progress(args, now):
@@ -3137,18 +3163,28 @@ def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index) -> dict:
             by_rollout.setdefault(target, []).append((path, note))
     out = {}
     for path, note in index.values():
-        if path.parent != tasks_dir or "rollout" not in _tags(note) or _status(note) in CLOSED_ROLLOUT_STATUSES:
+        if path.parent != tasks_dir:
             continue
-        if _shape(note) != "parallel" or _valued(note.get("paused")) or path.resolve() == this:
-            continue
-        linked = by_rollout.get(path.stem.lower(), [])
-        if never_started(note, linked)[0]:
-            continue
-        held = _race_holds(note, linked)
-        n = sum(1 for p, t in linked if _status(t) == "in_progress" and p.stem.lower() not in held)
-        if n > 0:
+        n = _counted_running(note, by_rollout.get(path.stem.lower(), []))
+        if n > 0 and path.resolve() != this:
             out[path.stem] = n
     return dict(sorted(out.items()))
+
+
+def _counted_running(note, linked) -> int:
+    """The tasks a rollout note runs as the Mac-wide count reads them (_elsewhere_running, whose caller checks the
+    note sits directly in --tasks-dir): 0 unless it is tagged `rollout`, not done or dropped, parallel, carries no
+    `paused:` stamp and has started (never_started over `linked`, the notes whose `rollout:` names it); else its
+    `status: in_progress` notes less the ones its own undecided RACE or UNVERIFIED holds (_race_holds). Read by
+    _elsewhere_running for each other rollout and by `status` for its own (the Trickle line's `here`)."""
+    if "rollout" not in _tags(note) or _status(note) in CLOSED_ROLLOUT_STATUSES:
+        return 0
+    if _shape(note) != "parallel" or _valued(note.get("paused")):
+        return 0
+    if never_started(note, linked)[0]:
+        return 0
+    held = _race_holds(note, linked)
+    return sum(1 for p, t in linked if _status(t) == "in_progress" and p.stem.lower() not in held)
 
 
 def _project(note):
@@ -3943,7 +3979,8 @@ def cmd_next(args) -> int:
         "startCleared": start_cleared,
         "halt": halt,
         "awaitingSignOff": sign_off,
-        "progress": _progress_line(counts, _timeline(rows, counts, ceiling, now)),
+        "progress": _progress_line(counts, _timeline(rows, counts, ceiling, now,
+                                                     _eta_width(ceiling, away, elsewhere))),
     }
     print(json.dumps(out, indent=2))
     return 0
@@ -4483,7 +4520,17 @@ def cmd_status(args) -> int:
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     counts = _counts(rows)
-    timeline = _timeline(rows, counts, ceiling, now)
+    # The Trickle line (p28-6; status SKILL.md § 4): the Away state and the Mac-wide count, read as `next` reads them
+    # but silently (no WARN: only `next` prints it), and never through `next`. `here` is this rollout's own count as
+    # another lead's _elsewhere_running reads it: 0 unless its note sits directly in --tasks-dir.
+    away = _away_state(now)
+    elsewhere = _elsewhere_running(rollout_path, tasks_dir, index)
+    direct = rollout_path.resolve().parent == tasks_dir.resolve()
+    here = _counted_running(rollout_note, [(r["path"], r["note"]) for r in rows]) if direct else 0
+    trickle = {"away": away["away"], "file": away["file"], "why": away["why"], "limit": away["limit"],
+               "awayCap": away["awayCap"], "until": away["until"], "morning": away["morning"],
+               "elsewhere": elsewhere, "here": here, "running": sum(elsewhere.values()) + here}
+    timeline = _timeline(rows, counts, ceiling, now, _eta_width(ceiling, away, elsewhere))
     root = _project_root(rollout_note)   # a bare hold_until number reads against it (no gh: status is a pure read)
     # The operator's ladder (one local file read, no network): each task's `rung:` stamp, and its drift when a
     # readable ladder lacks it. Drift is scoped to the unlanded rows (CARRIED_STATES): a merged, folded or other
@@ -4554,6 +4601,9 @@ def cmd_status(args) -> int:
         # Per-task started:/merged: stamps — durable on the notes, so elapsed + the rough (~) remaining
         # estimate render with no workflow run alive. null when no task has a started: stamp.
         "timeline": timeline,
+        # The Trickle and the Away cap as `next` reads them (execute away.md), plus `here`, this rollout's own count:
+        # {away, file, why, limit, awayCap, until, morning, elsewhere, here, running}. A pure read of away.json.
+        "trickle": trickle,
         # {source, rungs, error}: the ladder status read (built-in, or the file's path); error non-null when the
         # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start).
         "ladder": ladder,

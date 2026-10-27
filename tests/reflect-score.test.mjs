@@ -205,6 +205,87 @@ test('slot-bound: running time leaves out the pause and the hold, and the ceilin
   signsHold(out)
 })
 
+// ---- 1b. a run the Trickle held (p28-6) ----------------------------------------------------------------------
+
+// Ceiling 4. a runs 00:00-02:00 with a hold-trickle marker (free 3) at 00:00; no Slot is open 02:00-03:00, the lead
+// re-checking at each tick (markers at 02:00, 02:20, 02:40, free 4); b runs 03:00-05:00 with a marker at 03:00.
+// `reason` swaps every marker's reason; `drop` leaves out the 02:20 and 02:40 ticks.
+function trickleHeld({ reason = 'hold-trickle', drop = false } = {}) {
+  const mark = (hm, free) => [at(hm), 'idle-slots', null, { reason, free, settings: S(4) }]
+  return byTs([
+    ...life('a', { from: at('00:00'), to: at('02:00'), c: 4 }),
+    ...life('b', { from: at('03:00'), to: at('05:00'), c: 4 }),
+    mark('00:00', 3), mark('02:00', 4), ...(drop ? [] : [mark('02:20', 4), mark('02:40', 4)]), mark('03:00', 3),
+  ])
+}
+
+test('trickle-bound: no-Slot-open time held by the Trickle scores as hold-trickle and binds', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', trickleHeld())
+  const out = scored(home, ['--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
+  assert.deepEqual(out.runningTime.excludedHours, { 'hold-trickle': 1 })
+  assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [['hold-trickle', Z(at('02:00')), Z(at('03:00'))]])
+  assert.match(out.runningTime.excluded[0].why, /Trickle.*not Lachy's/)
+  assert.equal(out.runningTime.hours, 4)
+  assert.equal(out.slots.idleHours['hold-trickle'], 12, '3 free Slots x 4 running h')
+  assert.equal(out.binding.constraint, 'trickle-bound')
+  assert.equal(out.binding.why, 'the Mac-wide cap held 80% of Slot capacity (the Trickle 16 h, the Away cap 0 h of Slot time; 1 h with no Slot open)')
+  assert.ok(has(out.flags, /^trickle-bound: no rollout key moves this \(the Trickle is the Mac-wide cap in ~\/\.config\/thread\/away\.json\)$/))
+  assert.ok(has(out.flags, /^throughput: read under the Mac-wide cap \(trickle-bound\): .* not at the ceiling 4$/))
+  assert.deepEqual(out.proposals, [], 'no slot-bound raise')
+  assert.deepEqual(out.withheld, [])
+  assert.equal(out.thresholds.trickleBound, 0.5)
+  assert.equal(out.thresholds.holdMarkerSpanMinutes, 40)
+})
+
+test('trickle-bound controls: a marker labels 40 min at most; dependency markers are no Trickle; the Away cap binds, Heat does not', (t) => {
+  const settings = (home) => ['--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })]
+  {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', trickleHeld({ drop: true }))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [
+      ['hold-trickle', Z(at('02:00')), Z(at('02:40'))], ['idle', Z(at('02:40')), Z(at('03:00'))]], 'a silent lead past the span reads idle')
+  }
+  {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', trickleHeld({ reason: 'dependency' }))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excludedHours, { idle: 1 })
+    assert.equal(out.binding.constraint, 'dependency-bound')
+  }
+  {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', trickleHeld({ reason: 'hold-away-cap' }))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excludedHours, { 'hold-away-cap': 1 })
+    assert.equal(out.binding.constraint, 'trickle-bound')
+    assert.match(out.binding.why, /the Trickle 0 h, the Away cap 16 h of Slot time; 1 h with no Slot open/)
+  }
+  {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', trickleHeld({ reason: 'hold-heat' }))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excludedHours, { 'hold-heat': 1 })
+    assert.match(out.runningTime.excluded[0].why, /Heat hold/)
+    assert.notEqual(out.binding.constraint, 'trickle-bound')
+    assert.ok(!has(out.flags, /^trickle-bound/))
+  }
+  {
+    // the head of a no-Slot stretch before its first Mac-wide marker (within the span) takes that marker's label
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs([
+      ...life('a', { from: at('00:00'), to: at('02:00'), c: 4 }),
+      ...life('b', { from: at('03:00'), to: at('05:00'), c: 4 }),
+      [at('02:10'), 'idle-slots', null, { reason: 'hold-trickle', free: 4, settings: S(4) }],
+      [at('02:30'), 'idle-slots', null, { reason: 'hold-trickle', free: 4, settings: S(4) }],
+    ]))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [
+      ['hold-trickle', Z(at('02:00')), Z(at('03:00'))]], 'back-filled from the stretch start, the last marker spanning to b')
+  }
+})
+
 // ---- 2. a lane-bound run ------------------------------------------------------------------------------------
 
 // Ceiling 4. Six tasks, each holding the lane 1.5 h back to back from 01:00 to 10:00; the ready -> lane waits climb

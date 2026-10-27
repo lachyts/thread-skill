@@ -200,6 +200,13 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
     JSON.stringify(kindsOf(score)) !== JSON.stringify(nightKinds) ||
     nightKinds.some((k) => !nightS.includes(`- \`${k}\` `) || !(runRecord ?? '').includes(`    "${k}": (`))) fails.push('night-record')
 
+  // mac-holds (p28-6): score.py's MAC_HOLDS keys (the Mac-wide holds it scores as their own excluded kinds) hold the
+  // Trickle, the Away cap and the Heat hold, and each is a reason of run_record.py's idle-slots enum (hold-away-cap's
+  // place in the enum is the away-cap rule's, so each control fails one rule).
+  const macHolds = [...(grab(score ?? '', /^MAC_HOLDS = \{([\s\S]*?)^\}/m) ?? '').matchAll(/^ {4}"([^"]+)":/gm)].map((m) => m[1])
+  if (!['hold-trickle', 'hold-away-cap', 'hold-heat'].every((k) => macHolds.includes(k)) ||
+    macHolds.some((k) => k !== 'hold-away-cap' && !idleEnum.includes(`"${k}"`))) fails.push('mac-holds')
+
   return fails
 }
 
@@ -210,7 +217,7 @@ test('away.md, the code that reads the file and the hold-back prose agree', () =
 // ---- controls: each mutates one place and must fail with exactly its rule ---------------------------------------
 
 const RULES = ['keys', 'path', 'staleness', 'default', 'refresh', 'until', 'morning', 'serial', 'warn', 'hold-back', 'glossary',
-  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record', 'heat']
+  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record', 'heat', 'mac-holds']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -359,7 +366,12 @@ test('control: a Heat hold the doc or the code says another way fails heat', () 
   only('context', 'the Trickle or the Away cap, the Heat\n  hold, a cool-down.', 'the Trickle or the Away cap, a cool-down.', 'heat', 'a hot spell reads as a stall')
 })
 
-test('the rules are all named (19) and each has a control', () => {
-  assert.equal(RULES.length, 19)
+test('control: a Mac-wide hold score.py lacks, or one the idle-slots enum lacks, fails mac-holds', () => {
+  only('score', '    "hold-trickle": ("hold-trickle",', '    "hold-trickled": ("hold-trickle",', 'mac-holds', 'dropped from MAC_HOLDS')
+  only('runRecord', '"hold-trickle",\n', '"hold-trickles",\n', 'mac-holds', 'dropped from the idle-slots enum')
+})
+
+test('the rules are all named (20) and each has a control', () => {
+  assert.equal(RULES.length, 20)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
