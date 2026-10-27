@@ -158,12 +158,12 @@ spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.
 a, h, b = sys.argv[2:5]
 print(m._integration_log_line({"prUrl": "https://github.com/o/r/pull/7", "integration": {
   "outcome": "integrated", "path": "lead", "anchor": {"headSha": a}, "headSha": h, "baseSha": b, "triggers": [],
-  "metrics": {"startedAt": "2026-10-02T12:30+00:00", "waitMinutes": 30, "durationMinutes": 17}}}))
+  "metrics": {"startedAt": "2026-10-02T12:30+00:00", "waitMinutes": 30, "durationMinutes": 17}}}, 17))
 PY
 )
 got=$(awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/a.md")
-ok "$got" "$want" "log-integration: the line is _integration_log_line's for the lead row (wait 30, duration 17)"
-has "$got" " integrated path=lead pr=7 anchor=$A head=$H base=$B wait=30 duration=17 triggers=-" "log-integration: path=lead, the three SHAs, triggers=-"
+ok "$got" "$want" "log-integration: the line is _integration_log_line's for the lead row (wait 30, duration 17, active 17: no stop)"
+has "$got" " integrated path=lead pr=7 anchor=$A head=$H base=$B wait=30 duration=17 triggers=- active=17" "log-integration: path=lead, the three SHAs, triggers=-"
 ok "$(awk '/^---$/{n++; print; next} n<2{print}' "$D/a.md")" "$fmb" "log-integration: the frontmatter is byte-identical"
 snap=$(cat "$D/a.md")
 li a 2026-10-02T12:30+00:00 "$A" "$H" "$B" 2026-10-02T13:59:00+00:00
@@ -173,6 +173,30 @@ li a 2026-10-02T12:50+00:00 "$A" "$B" "$B" 2026-10-02T12:49:00+00:00
 ok "$rc" 0 "log-integration: a second Integration appends"
 ok "$(awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/a.md" | tail -n 1 | cut -d' ' -f1,2,8,9)" \
   "2026-10-02T12:50+00:00 integrated wait=50 duration=-" "log-integration: a negative duration is -"
+# p29-13: active= is the wall less the stops the rollout's Run record logs inside [--started, --now]. The lead's own
+# Integration is no call, so no journal is read. Its own events dir, so no other scenario's record reads these stops.
+scen log-stop
+mkro
+mkt a review "pr: $PR" 'ready: 2026-10-02T12:00+00:00'
+mkt b review "pr: $PR" 'ready: 2026-10-02T12:00+00:00'
+RR="$HERE/../../_shared/scripts/run_record.py"
+EVS="$THREAD_EVENTS_DIR"; export THREAD_EVENTS_DIR="$TMP/events-stop"
+python3 "$RR" emit --rollout ro --kind stopped --ts 2026-10-02T12:40:00Z --json '{"cause": "usage-limit", "inferred": false, "calls": []}'
+python3 "$RR" emit --rollout ro --kind lead-entry --ts 2026-10-02T13:40:00Z --json '{"by": "stage", "stop": "usage-limit"}'
+li a 2026-10-02T12:30+00:00 "$A" "$H" "$B" 2026-10-02T13:47:30+00:00
+ok "$rc|$(awk '/^## Integration log/{on=1; next} on && NF' "$D/a.md" | awk '{print $9, $NF}')" "0|duration=77 active=17" \
+  "log-integration: an hour's usage-limit stop inside the Integration comes off active, never off duration (77.5 - 60)"
+snap=$(cat "$D/a.md")
+python3 "$RR" emit --rollout ro --kind stopped --ts 2026-10-02T14:00:00Z --json '{"cause": "mac-sleep", "inferred": true, "calls": [], "at": "2026-10-02T12:31:00.000Z", "wake": "2026-10-02T12:35:00.000Z"}'
+li a 2026-10-02T12:30+00:00 "$A" "$H" "$B" 2026-10-02T13:59:00+00:00
+ok "$rc|$(cat "$D/a.md")" "0|$snap" "log-integration: a re-run after a later-inferred stop is still a no-op"
+python3 "$RR" emit --rollout ro --kind stopped --ts 2026-10-02T15:00:00Z --json '{"cause": "halt", "inferred": false, "calls": [], "reason": "a halt"}'
+python3 "$RR" emit --rollout ro --kind lead-entry --ts 2026-10-02T15:30:00Z --json '{"by": "lachy", "stop": "halt"}'
+li b 2026-10-02T14:50+00:00 "$A" "$H" "$B" 2026-10-02T15:40:00+00:00
+ok "$(awk '/^## Integration log/{on=1; next} on && NF' "$D/b.md" | awk '{print $9, $NF}')" "duration=50 active=50" \
+  "log-integration: a halt is no stall (the lead's work carries on through it): nothing comes off"
+export THREAD_EVENTS_DIR="$EVS"
+
 scen log-noready
 mkro
 mkt a review "pr: 9"

@@ -536,6 +536,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
   to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue
   (Integration's gloss: the whole step, never the lane alone).
+- **Active Integration time** — an Integration's wall time less the **Stops**
+  inside it that stop its calls (all but a halt, which carries them on): an
+  `## Integration log` line's `active=`, beside its wall `duration=`. Where the
+  Run record logs no stop inside it, the integrate call's journal gaps come off
+  instead. A Reflection prices the Integration lane by it, so a usage-limit
+  stall is never lane work (p29-13). _Avoid_: duration (that is wall time).
 - **Integration queue** — the approved tasks waiting for the Integration lane,
   in `next`'s order: a task a queued task depends on, directly or through a
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule

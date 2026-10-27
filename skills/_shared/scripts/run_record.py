@@ -430,6 +430,9 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   carries the past. A stop no evidence shows (the same session
   resumed hours later with no stated cause and no Mac event) is not inferred: the heartbeat's lead-entries bound it,
   and ADR 0051's monthly audit covers it.
+- Stop readers: reconcile-rollout.py stop_spans() reads every stop by this model (p29-13), and an Integration log
+  line's `active=` is its `duration=` less the union of the stops inside its window whose calls stop with them (all but
+  a halt, which carries its calls on), so no reader prices a usage-limit stall as Integration lane work.
 - Stop writers: step-boundary.py `begin` (a room stop: usage-limit, live); the Stop-hook driver
   hooks/rollout-stop-driver.py (a § 7 halt, live; never a serial rollout's Leg and never while a pause stands);
   reconcile-rollout.py `record-entry` (every inferred stop and every lead-entry, at each loop entry and heartbeat

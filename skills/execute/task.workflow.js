@@ -181,8 +181,9 @@ export const meta = {
 // The Integration log. reconcile-rollout.py stamps `ready:` when a task's status changes to review, and
 // appends one line per Integration call under the note's `## Integration log`, from this row's
 // `integration` field: `<startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha>
-// wait=<n|-> duration=<n|-> triggers=<list|->`. It is the durable record the clean path and the
-// review-blocked rule below read.
+// wait=<n|-> duration=<n|-> triggers=<list|-> active=<n|->`. It is the durable record the clean path and the
+// review-blocked rule below read. duration is metrics.durationMinutes, the wall time; active (p29-13) is
+// reconcile's own, the wall less the stalls the Run record logs inside it, since this sandbox reads no record.
 // The anchor (ADR 0030 decision 3: a merge already in the branch is still judged). Every Integration of a
 // task pins one anchor: integration.headSha, with taskBase = merge-base(anchor, origin/<default>). The
 // anchor is ALWAYS ANCHOR_RECIPE's output on the PR head (render the constant verbatim and pin the copy):

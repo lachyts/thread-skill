@@ -394,6 +394,13 @@ episodes), which `watch` takes whether or not the span read them: a serial chain
 dropped task whose rollout had no line this week. A trace whose episodes list no rollout (a `bySize` readout seen only
 in `all`) is reported, never made a Watch. An `ask` item's `grade` says what grade its task carried when it asked.
 
+**Integration lane time.** Read each read rollout's `laneTime` (p29-13): its Integrations started in the window, from
+its tasks' `## Integration log` lines. The lane's time is `minutes`, each line's active figure (`active=`: the wall less
+the stalls the Run record logged inside it, a usage limit, a dead lead, a Mac restart or sleep, a Watchdog recovery),
+never `wallMinutes`, the lines' `duration=`. Price the Integration lane by `minutes` alone: `stalledMinutes` is stall
+time, never lane work, and belongs with the stalls by cause. A non-zero `wallOnly` counts lines written before p29-13,
+read by their wall, which can hold a stall: say so beside the figure. Never read lane time off a `duration=` by hand.
+
 ### 12. Sightings
 
 After the whole reading, make ONE `reflect.py watch` call per Watch, naming every rollout where you saw it. Reuse an

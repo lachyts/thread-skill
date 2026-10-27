@@ -142,6 +142,15 @@ parallel with no note). For each:
   a fixer note's captured: (else its mtime, flagged "undated fixer"), a revert's committer date, a review doc's
   newest add or modify commit (else its mtime). A record with no resolvable note or root, and a repo with no origin,
   are named in cannotShow.
+- laneTime (p29-13), on a read parallel rollout (null on a serial chain and a light read): the Integration lane's time
+  in the window, read from the `## Integration log` of each task the record names whose note links this rollout
+  (`rollout:`, so a carried task is read once, by the rollout it now belongs to), every line whose startedAt falls in
+  [since, until] (a `-` startedAt places none). A line's lane minutes are its active figure (`active=`, the wall less
+  the stalls the Run record logged inside it), else its wall (`duration=`: a line from before p29-13, which may hold a
+  stall), through reconcile-rollout.py's log_minutes(), the writer's own parse. {integrations, minutes (the lane time,
+  the sum), wallMinutes, stalledMinutes (wall - active where a line has both: stall, never lane work), wallOnly (lines
+  read by their wall alone), unmeasured (neither), lines[{task, startedAt, outcome, path, wall, active, lane}] in
+  startedAt order}.
 - The light reads. A record not read this week is read for its in-window evidence alone, never scored, never a breach
   or a knob: escapes-only when the sweep traced an in-window Escape to it, else repairs-only when its rollout note
   holds an in-window repair line; either carries both kinds it holds. A repair line on a rollout with no Run record is
@@ -158,8 +167,8 @@ parallel with no note). For each:
   whose key no revert[] item names) and held[] (the rest, each with its reason).
 span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), shape
 (parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
-reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[], and
-chain on a read serial one}], freshReview[] (/fresh-review
+reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[],
+laneTime, and chain on a read serial one}], freshReview[] (/fresh-review
 rounds in the window with regression > 0, reported only: reviews.jsonl names no rollout), watches[] (every open Watch:
 rule, shape, rollouts, count, recurring, stale, new, declinedBefore, lastSeen), knobs{revert, land, held}, bugsOpen[],
 decisionTask, grades (grades.py's block: log, window, all, pending, episodes), cannotShow[], flags[]}. stderr gets one
@@ -807,7 +816,8 @@ class Span:
     def read_rollout(self, slug, lines, since, until, tunings_file):
         entry = {"rollout": slug, "mode": "read", "shape": "parallel", "note": None, "root": None, "repo": None,
                  "status": None, "closeLine": None, "score": None, "window": None, "partial": None, "headline": None,
-                 "breached": [], "breachCounts": False, "binding": None, "proposals": [], "flags": [], "friction": []}
+                 "breached": [], "breachCounts": False, "binding": None, "proposals": [], "flags": [], "friction": [],
+                 "laneTime": None}
         try:
             hit = TUNE.close_line(slug, path=tunings_file)
         except OSError as e:
@@ -879,9 +889,48 @@ class Span:
         if sc is not None:
             self.scored(entry, sc, since, until)
         self.friction(entry, lines, since, until)
+        entry["laneTime"] = self.lane_time(slug, lines, since, until)
         for f in entry["flags"]:
             self.flag("[[%s]]: %s" % (slug, f))
         return entry, sc
+
+    # -- the Integration lane's time (p29-13) -------------------------------------------------------------------------
+
+    def lane_time(self, slug, lines, since, until):
+        """The Integration lane's time in the window, from the `## Integration log` lines of the tasks this record names
+        whose note links this rollout (`rollout:`, so a task carried on is read once, by the rollout it now belongs to):
+        each line whose startedAt falls in [since, until] (a `-` startedAt places none). Its lane minutes are its
+        active figure (`active=`, the wall less the stalls the Run record logged inside it), else its wall (`duration=`,
+        a line from before p29-13), through reconcile-rollout.py's log_minutes, the writer's own parse. {integrations,
+        minutes (the lane time), wallMinutes, stalledMinutes (wall - active, where a line has both), wallOnly (lines read
+        by their wall alone), unmeasured (lines with neither), lines[{task, startedAt, outcome, path, wall, active,
+        lane}] in startedAt order}."""
+        tasks = sorted({d["task"] for _t, _n, d in lines if isinstance(d.get("task"), str) and d["task"]})
+        rows = []
+        for task in tasks:
+            p = self.vault.find(task)
+            note = read_note(p) if p is not None else None
+            if note is None or (REC._note_rollout(note) or "").lower() != slug.lower():
+                continue
+            for line in REC._log_lines(note):
+                tok = REC._log_tokens(line)
+                try:
+                    at = SCORE.to_ms(tok["startedAt"])
+                except Exception:  # `-` (no startedAt), or anything _stamp refuses: no place in a window
+                    continue
+                if not since <= at <= until:
+                    continue
+                m = REC.log_minutes(line)
+                rows.append((at, task, {"task": task, "startedAt": tok["startedAt"], "outcome": tok["outcome"] or None,
+                                        "path": tok.get("path") if tok.get("path") not in (None, "", "-") else None,
+                                        "wall": m["wall"], "active": m["active"], "lane": m["lane"]}))
+        rows.sort(key=lambda r: (r[0], r[1]))
+        out = [r[2] for r in rows]
+        return {"integrations": len(out), "minutes": sum(r["lane"] or 0 for r in out),
+                "wallMinutes": sum(r["wall"] or 0 for r in out),
+                "stalledMinutes": sum(r["wall"] - r["active"] for r in out if r["wall"] is not None and r["active"] is not None),
+                "wallOnly": sum(1 for r in out if r["active"] is None and r["wall"] is not None),
+                "unmeasured": sum(1 for r in out if r["lane"] is None), "lines": out}
 
     # -- one read serial chain (ADR 0040) -----------------------------------------------------------------------------
 
@@ -1540,7 +1589,7 @@ class Span:
                             "shape": shape_of(note) if note else "parallel", "note": str(note) if note else None,
                             "root": root, "repo": self.origin(root), "status": None, "closeLine": None, "score": None,
                             "window": None, "partial": None, "headline": None, "breached": [], "breachCounts": False,
-                            "binding": None, "proposals": [], "flags": [], "friction": inw + reps})
+                            "binding": None, "proposals": [], "flags": [], "friction": inw + reps, "laneTime": None})
         self.cannot_show("a repair run that writes no dated repair: line and records no event is not seen, nor is a "
                          "repair: line on a rollout with no Run record")
         fresh = self.fresh_review(ev, since, until)
