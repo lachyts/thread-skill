@@ -152,9 +152,12 @@ half of a Reflection at each rollout's close (fold, settings, score,
 `tune.py --record-only --close`) and records one line per rollout through it
 (ADR 0037 d4). `skills/reflect/scripts/reflect.py` runs the weekly reading's
 script half and is the only writer of `reflections.jsonl` and of the bug and
-decision tasks. `skills/reflect/scripts/reflect-due.py` tells the daily sweep
-when the weekly reading is due: 7 days after the last one, 14 after three quiet
-Reflections in a row (ADR 0037 d4, d6). The Grade log (`grades.jsonl` beside the
+decision tasks, and keeps the Time-lost ledger (`skills/reflect/scripts/ledger.py`,
+ADR 0051: the hours each cause class cost across rollouts, and a Monthly audit).
+`skills/reflect/scripts/reflect-due.py` tells Chorus's weekly Runner, and the
+daily sweep as its fallback, when the weekly reading is due: the Thursday after
+the last one, or the Thursday after that once three Reflections in a row were
+quiet (ADR 0037 d4, d6; ADR 0051). The Grade log (`grades.jsonl` beside the
 Run record, ADR 0041) has one writer, `estate-dispatch.py log`, which keeps each
 estate pass's grades (a task whose note name is no slug, with spaces or
 capitals, is skipped and reported in its outcome line, and the rest are still
@@ -346,8 +349,12 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   the GIT_* scrub), `tests/reflect-weekly.test.mjs` (`reflect.py`'s weekly reading against throwaway records,
   vaults and repos: the span and its friction, close lines and the Escapes sweep, one line per Watch and per Tuning,
   the bug and decision tasks never written over, Lachy's recorded no, the close and the rung),
-  `tests/reflect-due.test.mjs` (`reflect-due.py` on fixture records: due at day 7 and not day 6, three quiet
-  Reflections to the 14-day cadence and a non-quiet one back to 7, and the cadence `close` writes),
+  `tests/reflect-due.test.mjs` (`reflect-due.py` on fixture records: due from Thursday 00:00 and not the Wednesday
+  before, after a Friday, Thursday or Wednesday close, three quiet Reflections to the fortnightly cadence and a non-quiet
+  one back, and the cadence `close` writes), `tests/reflect-ledger.test.mjs` (the Time-lost ledger: fixture records
+  summed by class and cause, the waits on Lachy as stalls, the trend from persisted rows, the baseline, the ledger's
+  Watch counted in readings, the load hold, the Monthly audit's month rule and window, its gaps in the decision task and
+  never against `quiet`),
   `tests/reflect-grades.test.mjs` (`grades.py` on fixture grade lines, records and notes: each grade's episode to the
   next grade or the close, dispatch by record or by link, foreseen sign-offs, every outcome and the hands-off rate's
   denominator, window against all, and Slot hours per size),

@@ -181,8 +181,9 @@ export const meta = {
 // The Integration log. reconcile-rollout.py stamps `ready:` when a task's status changes to review, and
 // appends one line per Integration call under the note's `## Integration log`, from this row's
 // `integration` field: `<startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha>
-// wait=<n|-> duration=<n|-> triggers=<list|->`. It is the durable record the clean path and the
-// review-blocked rule below read.
+// wait=<n|-> duration=<n|-> triggers=<list|-> active=<n|->`. It is the durable record the clean path and the
+// review-blocked rule below read. duration is metrics.durationMinutes, the wall time; active (p29-13) is
+// reconcile's own, the wall less the stalls the Run record logs inside it, since this sandbox reads no record.
 // The anchor (ADR 0030 decision 3: a merge already in the branch is still judged). Every Integration of a
 // task pins one anchor: integration.headSha, with taskBase = merge-base(anchor, origin/<default>). The
 // anchor is ALWAYS ANCHOR_RECIPE's output on the PR head (render the constant verbatim and pin the copy):
@@ -451,7 +452,13 @@ function slotted(verifier, slot) {
 }
 
 // What an agent needs to know about the wrapped line. Static, single-quoted, one line: no apostrophe, no git span.
-const SLOT_TEXT = 'The wrapped verifier first waits for a free verify slot on this machine (a `verify-slot: waiting …` line on stderr): that wait is not a failure or a hang and never counts as an iteration. Run it in the background with a long timeout (up to 7200000 ms) and wait for it. To stop your own run, kill the wrapper by the pid you recorded (`kill <pid>`): its guard ends the suite with it. Never run the bare verifier, and never stop a run of another session. When the Mac is hot the wrapper holds or stops the suite and puts it back in line (`verify-slot: waiting (heat: …)`, `verify-slot: heat stop …`): only the final exit is the verdict, and an exit 76 with a `verify-slot: no verdict` line is no verdict, never red and never an iteration, so run it again.'
+// p31-3: an agent cannot wait for its run by ending its turn. A foreground Bash call is capped at 600000 ms, a long
+// `sleep` is blocked, and the harness ends a background run when the agent returns, so five calls in three rollouts
+// returned with no verdict and were retried. `verify-slot.py run` now prints a first line naming its pid and the exact
+// `wait` command (contract item 9), and the agent runs that command in the foreground, again after each still-running
+// line, until it prints the run's exit line. Its sentence replaced "and wait for it.". A deliberate resume-cache break,
+// as p31-4's sentence was: every slotted prompt changes; a resume re-passes its run's own `scriptPath` (ADR 0043).
+const SLOT_TEXT = 'The wrapped verifier first waits for a free verify slot on this machine (a `verify-slot: waiting …` line on stderr): that wait is not a failure or a hang and never counts as an iteration. Run it in the background with a long timeout (up to 7200000 ms). The first line of its output file (the file the harness names), `verify-slot: run <pid> started; wait for its verdict with: …`, gives its pid and the exact wait command. Then wait inside your turn: run that wait command in the foreground with a 600000 ms timeout, and again after each `verify-slot: still running …` line, until it prints `verify-slot: exit <rc> (run <pid>)`, whose rc is the verdict. A wait cut by its own timeout is no verdict either: run it again. Never end your turn or return while the run goes on, and never wait with a sleep or a monitor: the harness ends your background run when you return, so an early return is no verdict and costs the task a retry. To stop your own run, kill the wrapper by the pid you recorded (`kill <pid>`): its guard ends the suite with it. Never run the bare verifier, and never stop a run of another session. When the Mac is hot the wrapper holds or stops the suite and puts it back in line (`verify-slot: waiting (heat: …)`, `verify-slot: heat stop …`): only the final exit is the verdict, and an exit 76 with a `verify-slot: no verdict` line is no verdict, never red and never an iteration, so run it again.'
 
 // SLOT_TEXT beside a verify block's `- Verifier:` line; '' when slot is absent.
 function slotNote(slot) {

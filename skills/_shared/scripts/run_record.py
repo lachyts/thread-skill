@@ -21,6 +21,9 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
                                            identities, p21-7: reflect.py writes them, tune.py reads them back)
     cadence(lines) -> (days, streak)       (the cadence rule, p21-8: reflect.py's close writes it, reflect-due.py
                                            reads it)
+    line_bytes(kind, fields, rollout=None, task=None) -> int   (the bytes emit would write for these fields now, on
+                                           this host, its newline included, MAX_LINE or not, no field checked: a writer
+                                           keeps a long line under MAX_LINE in its own words; p29-11, ledger.py's audit)
 
 Callers: in-process callers use the default strict=False, which never raises; shell callers append
 `|| true`. Recording must never break a rollout.
@@ -36,8 +39,8 @@ there. THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the r
 the same place.
 
 Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning to tunings.jsonl, the
-weekly reading's kinds (watch, watch-raised, proposal, reflection) to reflections.jsonl, and the Grade log's kind (grade)
-to grades.jsonl. All four names are RESERVED: refused as a rollout slug and as a carried `from`.
+weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost) to reflections.jsonl, and the Grade log's
+kind (grade) to grades.jsonl. All four names are RESERVED: refused as a rollout slug and as a carried `from`.
 
 tunings.jsonl holds one line per by-hand Reflection, plus one `close` line per rollout, at its completion ceremony or
 its supersede, plus one `auto` line per knob the weekly reading lands or reverts (skills/reflect/scripts/tune.py is
@@ -74,8 +77,9 @@ a graded task whose name normalise_slug refuses (a vault note named with spaces 
 it and reports it.
 
 reflections.jsonl holds the weekly reading's lines (skills/reflect/scripts/reflect.py is its only writer, and tune.py
-reads it for the agreement and to refuse a closed Reflection): a `watch` line per (Reflection, Watch), a `watch-raised`
-line per decided Watch, a `proposal` line per (Reflection, Tuning) at each altitude, and one `reflection` line that
+reads it for the agreement, the load hold and to refuse a closed Reflection): a `watch` line per (Reflection, Watch), a
+`watch-raised` line per decided Watch, a `proposal` line per (Reflection, Tuning) at each altitude, a `time-lost` line per
+(Reflection, source) (the Time-lost ledger, p29-11: reflect.py `ledger` its one writer), and one `reflection` line that
 closes the Reflection. None carries a rollout or a task.
 - Baseline: the next Reflection on that repo (matched ignoring case) compares against the `scores` of the line with
   the latest window.activeEnd at or before its own window.activeStart, preferring a line not marked partial; a
@@ -101,7 +105,7 @@ with its newline. The common keys come first, in this order:
              Any other ISO timestamp field a caller adds must be UTC `Z` too; call-journal's
              startTime is the one epoch field (the journal's own epoch-ms integer, verbatim).
     host     the hostname up to its first dot
-    rollout  the rollout slug (null only for review-round, grade and the four reflections.jsonl kinds; a tuning's is
+    rollout  the rollout slug (null only for review-round, grade and the five reflections.jsonl kinds; a tuning's is
              a provenance stamp)
     task     the task slug, or null
     kind     one of the kinds below
@@ -252,10 +256,12 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      evidence one of at most 300; agreeing an integer >= 0; agreed (an integer >= 1, on every
                      entry of a non-void auto landing and on no other line); no other key. Never auto and close on one
                      line.
-  watch              id, rule, shape, rollouts, count, reflection (p21-7: one per (Reflection, Watch); id is
-                     watch_id(rule, shape); rule and shape stripped, each at most 120 characters; rollouts 1 to 64
-                     slugs, none reserved, every rollout where the Reflection saw it; count an integer >= 1).
-                     No rollout, no task; lands in reflections.jsonl.
+  watch              id, rule, shape, rollouts, count, reflection; ledgerClass? (p21-7: one per (Reflection, Watch); id
+                     is watch_id(rule, shape); rule and shape stripped, each at most 120 characters; rollouts 1 to 64
+                     slugs, none reserved, every rollout where the Reflection saw it; count an integer >= 1; ledgerClass,
+                     p29-11, one of TIME_LOST_CLASSES: the Time-lost ledger's Watch on that class, written by reflect.py
+                     `ledger` alone, its rollouts the class's top contributors). No rollout, no task; lands in
+                     reflections.jsonl.
   watch-raised       id, reflection, via (recurring | confirmed | declined: Lachy's yes to a recurring Watch, his yes
                      to a Watch to confirm, or his no; any of them closes the Watch's cycle). No rollout, no task;
                      lands in reflections.jsonl.
@@ -310,6 +316,23 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      red or timeout), timeout? (seconds >= 0: the deadline, only on timeout), step? (env_bootstrap |
                      verifier: where a deadline, a bootstrap or a heat stop ended it), sha?, waited?, running? (as
                      suite-started).
+  time-lost          id, source, since, until; month?, reflection?, hours?, recorded?, rank?, top?, byCause?, rollouts?,
+                     other?, events?, streak?, audit?, ranges?, cites? (p29-11, ADR 0051: the Time-lost ledger, one line
+                     per (Reflection, source), reflect.py `ledger` its one writer; skills/reflect/scripts/ledger.py's
+                     docstring holds the model. id a tl- id; source record (the week's row, summed by ledger.py from the
+                     Run record), audit (a Monthly audit's row) or baseline (the 2026-10-21 audit, written once); since
+                     and until UTC Z stamps, since <= until; month YYYY-MM, the Melbourne month of the reading's until,
+                     required on an audit or a baseline line; reflection an r- id, required on a record or an audit line;
+                     hours exactly the six TIME_LOST_CLASSES, each a finite number >= 0, required on a record or an
+                     audit line and on no other; recorded, audit only, the same six; rank, audit only, the six classes
+                     each once; top, record only, a class or null; byCause {class: {cause: hours}}, each cause in
+                     TIME_LOST_CAUSES of its class; rollouts {class: at most 8 [slug, hours]}; other {cause: hours},
+                     each cause in TIME_LOST_OTHER; events {name: an integer >= 0}; streak, record only, an integer >=
+                     0; audit, required on an audit line and only there, {sources (1 to 8 {source, read, why?}), entries
+                     (at most 16 {class, cause, rollout, from, to, hours, what, evidence}), gaps (at most 8 {what,
+                     evidence})}, the caps sized so a full audit of plain text fits the 16 KiB line (text JSON escapes
+                     can still overflow it, and ledger.py's audit_line() refuses that first); ranges and cites,
+                     baseline only, lists of at most 16 objects). No rollout, no task; lands in reflections.jsonl.
   base-moved      T  repo, pr, base, main (the refused integrated base and the live main merge-task read), inertOnly
                      (true | false | null: null only beside an error), moversTotal (an int >= 0), movers (at most 20
                      {sha, kind, rollout?, task?, pr?, source?}, oldest first: kind rollout | peer, source record |
@@ -403,7 +426,10 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   A sighting after a close opens a new cycle that recurs only on two distinct rollouts of its own, so a declined rule
   returns only when two later rollouts show it afresh. Within a cycle each Reflection counts by its latest line, the
   cycle's rollouts are the union and its count the sum. Recurring: two or more distinct rollouts in the open cycle,
-  one of them this Reflection's. A Watch is new only at its id's first-ever `watch` line.
+  one of them this Reflection's. A Watch is new only at its id's first-ever `watch` line. A Watch whose lines carry
+  `ledgerClass` (the Time-lost ledger's, p29-11: reflect.py `ledger` alone writes it) counts readings, not rollouts:
+  within a cycle its sightings are the Reflections with a line, recurring is two or more of them, one this
+  Reflection's, so a declined class returns only when two later readings show it on top again.
 - The Agreement rule (p21-7, ADR 0037 d5: a knob lands once three Reflections agree). For K = knob_key(repo, key,
   rule, direction) of the current proposal P, from rollout X in Reflection R: the key's last move is the latest
   non-voided tuning line for the repo (case ignored) with an applied entry on `key`, any rule or direction (a pick, an
@@ -419,13 +445,14 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   is not quiet moves it back to weekly at once. cadence() computes it, and readers (reflect-due.py) take it from the
   quiet flags, never from a written value. A line's `cadence` records the rule's value as that Reflection closed it,
   its own line counted (reflect.py's close writes it on every line, so each change is on a record line); absent (a
-  line from before p21-8) reads as 7.
+  line from before p21-8) reads as 7. A Monthly audit's gaps (a `time-lost` audit line's) never count against `quiet`:
+  the audit runs at either cadence, and like a held trade a gap leaves the week quiet (ADR 0051, p29-11).
 - The night record (p28-2): a night is assembled by its `morning`. Its record is the union of the away-night,
   last-start-held and ran-past-morning lines sharing that `morning` across every <rollout>.jsonl: the marker is
   per (rollout, M), the others per (task, M), each written once (the writer checks the record first).
 - The time-lost ledger's kinds (p29-10, ADR 0051): stopped, lead-entry, suite-started, suite-ended and base-moved,
-  every one written by a script, never by a model. score.py and reflect.py skip these kinds for now (LEDGER_KINDS);
-  p29-11 scores them. Their caps (64 calls, 50 failing names of 200 characters, 20 movers, 20 nonInert paths, a
+  every one written by a script, never by a model. score.py and reflect.py's other readers skip these kinds
+  (LEDGER_KINDS); reflect.py's Time-lost ledger (ledger.py) reads them; a score never does. Their caps (64 calls, 50 failing names of 200 characters, 20 movers, 20 nonInert paths, a
   200-character reason) keep each line well under 16 KiB.
 - The stop model. A stop is the run halting for a cause other than Lachy's pause. It is its own kind, never `paused`:
   every reader reads paused .. resumed as his pause, so a stop written as one would change what existing lines mean
@@ -441,6 +468,13 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   carries the past. A stop no evidence shows (the same session
   resumed hours later with no stated cause and no Mac event) is not inferred: the heartbeat's lead-entries bound it,
   and ADR 0051's monthly audit covers it.
+- Stop readers: reconcile-rollout.py stop_spans() reads every stop by this model (p29-13), and an Integration log
+  line's `active=` is its `duration=` less the union of the stops inside its window whose calls stop with them (all but
+  a halt, which carries its calls on), so no reader prices a usage-limit stall as Integration lane work. The line is
+  written when the lead reconciles the call (or logs its own Integration), before `next`, so a sleep inside it is
+  usually not a line yet: _unrecorded_sleeps reads the sleeps `next` would write (machine_times since the last
+  lead-entry or recorded wake, through the window test) into that union without writing them, and `next` or
+  record-entry stays the writer.
 - Stop writers: step-boundary.py `begin` (a room stop: usage-limit, live); the Stop-hook driver
   hooks/rollout-stop-driver.py (a § 7 halt, live; never a serial rollout's Leg and never while a pause stands);
   reconcile-rollout.py `record-entry` (every inferred stop and every lead-entry, at each loop entry and heartbeat
@@ -475,7 +509,8 @@ Exit codes: 0 written, skipped as a duplicate fold, or a warned write failure; 2
 a missing or out-of-enum field, a task-scoped kind with no task, a tuning with one, a grade with a rollout, a reserved
 rollout or `from`, --json not a JSON object, a common-key
 collision, NaN, a bad slug, a naive or malformed --ts, a line over 16 KiB, a review-verdict whose original +
-regression exceed its findings, a stopped, suite-ended or base-moved line that breaks its kind's cross-field rules),
+regression exceed its findings, a stopped, suite-ended, base-moved or time-lost line that breaks its kind's cross-field
+rules),
 with one line starting `run_record: ` on
 stderr and nothing written; `dir` exits 1 when the directory cannot be resolved.
 """
@@ -671,7 +706,7 @@ def _applied(v):
 # ---- the weekly reading's kinds (skills/reflect/scripts/reflect.py; p21-7, ADR 0037 d3-d5) --------------------
 
 # The kinds that land in reflections.jsonl: no rollout, no task (the Files rule).
-REFLECTION_KINDS = ("watch", "watch-raised", "proposal", "reflection")
+REFLECTION_KINDS = ("watch", "watch-raised", "proposal", "reflection", "time-lost")
 RULE_MAX = 120             # a Watch's rule and shape
 MAX_ROLLOUTS = 64          # a watch's or proposal's rollouts
 VIAS = ("recurring", "confirmed", "declined")
@@ -768,6 +803,171 @@ def _cadence(v):
 
 def _direction(v):
     return None if isinstance(v, int) and not isinstance(v, bool) and v in (1, -1) else "1 or -1"
+
+
+# ---- the Time-lost ledger's line (skills/reflect/scripts/ledger.py's model, reflect.py `ledger`; p29-11, ADR 0051) ------
+# The schema's one copy of its classes and causes: ledger.py imports them. ADR 0051's six classes, in their ranking's
+# tie order; each class's causes keyed by the record's own value where one fits (a stop's cause, a hold, an idle-slots
+# reason); the unranked causes are `other`'s.
+
+TIME_LOST_CLASSES = ("stalls", "quota-bound", "load", "lane-bound", "rework", "plan-rejected")
+TIME_LOST_CAUSES = {
+    "stalls": ("dead-lead", "mac-restart", "mac-sleep", "watchdog", "halt", "gate", "question", "hand-back", "cool-down",
+               "hold-git-env", "hold-merge", "hold-race", "hold-trickle", "hold-away-cap", "lead-absent",
+               "never-finished", "unexplained"),
+    "quota-bound": ("usage-limit", "cool-down"),
+    "load": ("hold-heat", "slot-wait", "heat", "timeout"),
+    "lane-bound": ("lane",),
+    "rework": ("integration", "race"),
+    "plan-rejected": ("plan-rejected",),
+}
+TIME_LOST_OTHER = ("pause", "pause-drain", "dependency", "solo", "queue-tail", "hold-last-start", "hold-pr", "revise")
+TIME_LOST_SOURCES = ("record", "audit", "baseline")
+AUDIT_SOURCES = ("transcripts", "suite-logs", "pause-logs", "mac-history")
+MAX_TL_ROLLOUTS = 8        # contributors kept per class on a time-lost line
+# An audit line at its caps (16 entries and 8 gaps, every what, evidence and why at full length in plain ASCII, 64-character
+# rollout slugs, a 63-character host) is 14,150 bytes, under MAX_LINE; 24 and 10 were 19,674. Text JSON escapes (a quote,
+# a backslash, a non-ASCII character as \uXXXX) can still overflow it: ledger.py's audit_line() measures the line
+# (line_bytes) and refuses it in its own words. tests/reflect-ledger.test.mjs pins the maximal line through check().
+MAX_AUDIT_ENTRIES = 16
+MAX_AUDIT_GAPS = 8
+MAX_TL_LIST = 16           # a baseline's ranges and cites
+TL_WHAT = 160              # an audit entry's or gap's `what`, a source's `why`, a cite's `what`
+TL_EVIDENCE = 200          # an audit entry's or gap's `evidence`
+TL_ID_RE = re.compile(r"tl-[A-Za-z0-9._-]+\Z")
+MONTH_RE = re.compile(r"\d{4}-(0[1-9]|1[0-2])\Z")
+
+
+def _tl_id(v):
+    return None if isinstance(v, str) and TL_ID_RE.match(v) else "a tl- id (a Time-lost ledger line's)"
+
+
+def _month(v):
+    return None if isinstance(v, str) and MONTH_RE.match(v) else "a YYYY-MM month"
+
+
+def _hours_num(v):
+    return _number(v) and v >= 0
+
+
+def _six(v):
+    """Exactly the six classes, each a finite number >= 0 (hours, recorded)."""
+    if not isinstance(v, dict) or set(v) != set(TIME_LOST_CLASSES) or not all(_hours_num(v[k]) for k in v):
+        return "an object with exactly the keys %s, each a finite number >= 0" % ", ".join(TIME_LOST_CLASSES)
+    return None
+
+
+def _class_or_null(v):
+    return None if v is None or v in TIME_LOST_CLASSES else "one of %s, or null" % ", ".join(TIME_LOST_CLASSES)
+
+
+def _rank(v):
+    ok = isinstance(v, list) and len(v) == len(TIME_LOST_CLASSES) and set(v) == set(TIME_LOST_CLASSES)
+    return None if ok else "a list of the six classes, each once"
+
+
+def _by_cause(v):
+    if not isinstance(v, dict) or not set(v) <= set(TIME_LOST_CLASSES):
+        return "an object keyed by the classes"
+    for cls, causes in v.items():
+        if not isinstance(causes, dict):
+            return "an object of {cause: hours} per class"
+        for cause, h in causes.items():
+            if cause not in TIME_LOST_CAUSES[cls]:
+                return "an object whose %s causes are among %s (not %r)" % (cls, ", ".join(TIME_LOST_CAUSES[cls]), cause)
+            if not _hours_num(h):
+                return "an object of hours, each a finite number >= 0"
+    return None
+
+
+def _tl_rollouts(v):
+    if not isinstance(v, dict) or not set(v) <= set(TIME_LOST_CLASSES):
+        return "an object keyed by the classes"
+    for rows in v.values():
+        if not isinstance(rows, list) or len(rows) > MAX_TL_ROLLOUTS:
+            return "an object of at most %d [slug, hours] per class" % MAX_TL_ROLLOUTS
+        for r in rows:
+            if not isinstance(r, list) or len(r) != 2 or _slug(r[0]) or not _hours_num(r[1]):
+                return "an object of [slug, hours] pairs (a slug, a finite number >= 0)"
+    return None
+
+
+def _other(v):
+    ok = isinstance(v, dict) and set(v) <= set(TIME_LOST_OTHER) and all(_hours_num(h) for h in v.values())
+    return None if ok else "an object of {cause: hours}, each cause among %s" % ", ".join(TIME_LOST_OTHER)
+
+
+def _events(v):
+    ok = isinstance(v, dict) and all(isinstance(k, str) and k and not _int(0)(n) for k, n in v.items())
+    return None if ok else "an object of {name: an integer >= 0}"
+
+
+def _text(n):
+    def check(v):
+        return None if isinstance(v, str) and v.strip() and len(v) <= n else "a non-empty string of at most %d characters" % n
+    return check
+
+
+def _audit(v):
+    """An audit line's {sources, entries, gaps} (the catalogue's time-lost entry)."""
+    if not isinstance(v, dict) or set(v) != {"sources", "entries", "gaps"}:
+        return "an object of exactly sources, entries and gaps"
+    src = v["sources"]
+    if not isinstance(src, list) or not 1 <= len(src) <= 8:
+        return "an object whose sources is a list of 1 to 8"
+    for s in src:
+        if not isinstance(s, dict) or not {"source", "read"} <= set(s) or set(s) - {"source", "read", "why"}:
+            return "an object whose sources are {source, read, why?}"
+        if s["source"] not in AUDIT_SOURCES or _bool(s["read"]) or ("why" in s and _text(TL_WHAT)(s["why"])):
+            return "an object whose sources name one of %s, read a bool, why a short string" % ", ".join(AUDIT_SOURCES)
+    if len({s["source"] for s in src}) != len(src):
+        return "an object whose sources are distinct"
+    ent = v["entries"]
+    if not isinstance(ent, list) or len(ent) > MAX_AUDIT_ENTRIES:
+        return "an object whose entries is a list of at most %d" % MAX_AUDIT_ENTRIES
+    keys = {"class", "cause", "rollout", "from", "to", "hours", "what", "evidence"}
+    for e in ent:
+        if not isinstance(e, dict) or set(e) != keys:
+            return "an object whose entries are {%s}" % ", ".join(sorted(keys))
+        if e["class"] not in TIME_LOST_CLASSES or e["cause"] not in TIME_LOST_CAUSES[e["class"]]:
+            return "an object whose entries name a class and one of its causes"
+        if _slug(e["rollout"]) or not _utcz(e["from"]) or not _utcz(e["to"]) or not _hours_num(e["hours"]):
+            return "an object whose entries carry a rollout slug, UTC Z from and to, and hours"
+        if _text(TL_WHAT)(e["what"]) or _text(TL_EVIDENCE)(e["evidence"]):
+            return "an object whose entries' what is at most %d characters and evidence at most %d" % (TL_WHAT, TL_EVIDENCE)
+    gaps = v["gaps"]
+    if not isinstance(gaps, list) or len(gaps) > MAX_AUDIT_GAPS:
+        return "an object whose gaps is a list of at most %d" % MAX_AUDIT_GAPS
+    for g in gaps:
+        if not isinstance(g, dict) or set(g) != {"what", "evidence"} or _text(TL_WHAT)(g["what"]) or \
+                _text(TL_EVIDENCE)(g["evidence"]):
+            return "an object whose gaps are {what, evidence} (at most %d and %d characters)" % (TL_WHAT, TL_EVIDENCE)
+    return None
+
+
+def _objects(v):
+    ok = isinstance(v, list) and len(v) <= MAX_TL_LIST and all(isinstance(x, dict) and x for x in v)
+    return None if ok else "a list of at most %d non-empty objects" % MAX_TL_LIST
+
+
+def _check_time_lost(f):
+    """time-lost's cross-field rules (the catalogue's entry): what each source carries, and since <= until."""
+    src = f["source"]
+    if _z_time(f["since"]) > _z_time(f["until"]):
+        raise Refused("time-lost: since %s is after until %s" % (f["since"], f["until"]))
+    need = {"record": ("reflection", "hours"), "audit": ("reflection", "month", "hours", "audit"),
+            "baseline": ("month",)}[src]
+    missing = [k for k in need if k not in f]
+    if missing:
+        raise Refused("time-lost: %s %s line needs %s" % ("an" if src == "audit" else "a", src, ", ".join(missing)))
+    only = {"recorded": "audit", "rank": "audit", "audit": "audit", "top": "record", "streak": "record",
+            "ranges": "baseline", "cites": "baseline"}
+    wrong = sorted(k for k, s in only.items() if k in f and s != src)
+    if wrong:
+        raise Refused("time-lost: %s %s not on %s %s line" % (", ".join(wrong), "is" if len(wrong) == 1 else "are",
+                                                             "an" if src == "audit" else "a", src))
+    if src == "baseline" and "hours" in f:
+        raise Refused("time-lost: hours is a record or an audit line's (a baseline carries ranges and cites)")
 
 
 # ---- the Grade log's kind (skills/_shared/scripts/estate-dispatch.py log; p25-4, ADR 0041) -------------------------
@@ -1031,7 +1231,8 @@ KINDS = {
                {"binding": _enum(*BINDINGS), "voids": _str, "close": _enum(*CLOSES), "auto": _true,
                 "reflection": _rid, "reverts": _tid, "shape": _enum("serial")}),
     "watch": (False, {"id": _str, "rule": _short(RULE_MAX), "shape": _short(RULE_MAX),
-                      "rollouts": _slugs(1, MAX_ROLLOUTS), "count": _int(1), "reflection": _rid}, {}),
+                      "rollouts": _slugs(1, MAX_ROLLOUTS), "count": _int(1), "reflection": _rid},
+              {"ledgerClass": _enum(*TIME_LOST_CLASSES)}),
     "watch-raised": (False, {"id": _str, "reflection": _rid, "via": _enum(*VIAS)}, {}),
     "proposal": (False, {"id": _str, "altitude": _enum(*ALTITUDES), "reflection": _rid,
                          "rollouts": _slugs(1, MAX_ROLLOUTS)},
@@ -1048,6 +1249,11 @@ KINDS = {
     "reflection": (False, {"id": _rid, "since": _stampz, "until": _stampz, "rollouts": _slugs(0, 4096),
                            "escapesOnly": _slugs(0, 4096), "counts": _counts, "quiet": _bool},
                    {"decisionTask": _str, "cadence": _cadence, "repairsOnly": _slugs(1, 4096)}),
+    # The Time-lost ledger's own line (p29-11, ADR 0051): one per (Reflection, source), reflect.py `ledger` its writer.
+    "time-lost": (False, {"id": _tl_id, "source": _enum(*TIME_LOST_SOURCES), "since": _stampz, "until": _stampz},
+                  {"month": _month, "reflection": _rid, "hours": _six, "recorded": _six, "rank": _rank,
+                   "top": _class_or_null, "byCause": _by_cause, "rollouts": _tl_rollouts, "other": _other,
+                   "events": _events, "streak": _int(0), "audit": _audit, "ranges": _objects, "cites": _objects}),
     # The time-lost ledger (p29-10, ADR 0051): stops and resumes, suites with the load around them, why main moved.
     "stopped": (False, {"cause": _enum(*STOP_CAUSES), "inferred": _bool, "calls": _calls},
                 {"at": _stampz, "boot": _stampz, "wake": _stampz, "reason": _short(REASON_MAX)}),
@@ -1197,6 +1403,8 @@ def _check_fields(kind, fields):
             raise Refused("suite-ended: a %s suite has no verdict, so it has no rc" % fields["outcome"])
     elif kind == "base-moved" and fields["inertOnly"] is None and "error" not in fields:
         raise Refused("base-moved: inertOnly is null only beside an error (the inert test could not run)")
+    elif kind == "time-lost":
+        _check_time_lost(fields)
 
 
 def _check_tuning(f):
@@ -1281,7 +1489,7 @@ def verdict_key(line):
     return (line.get("task"), line.get("round"), "digest", line.get("digest"))
 
 
-def _line(ts, host, rollout, task, kind, fields):
+def _encode(ts, host, rollout, task, kind, fields):
     obj = {"v": KIND_VERSIONS.get(kind, VERSION), "ts": ts, "host": host, "rollout": rollout, "task": task, "kind": kind}
     obj.update(fields)
     try:
@@ -1290,10 +1498,21 @@ def _line(ts, host, rollout, task, kind, fields):
         raise Refused("%s: %s" % (kind, e))
     except TypeError as e:
         raise Refused("%s: a field is not JSON: %s" % (kind, e))
-    data = (text + "\n").encode("ascii")
+    return (text + "\n").encode("ascii")
+
+
+def _line(ts, host, rollout, task, kind, fields):
+    data = _encode(ts, host, rollout, task, kind, fields)
     if len(data) > MAX_LINE:
         raise Refused("%s: the line is %d bytes, over the %d-byte limit" % (kind, len(data), MAX_LINE))
     return data
+
+
+def line_bytes(kind, fields, rollout=None, task=None):
+    """The bytes emit would write for `fields` now, on this host, its newline included, whether or not they pass MAX_LINE
+    (no field is checked; Refused only for a field that is no JSON). Every stamp is the same length, so the size holds at
+    any later emit on this host."""
+    return len(_encode(_stamp(None), _host(), rollout, task, kind, dict(fields or {})))
 
 
 # ---- writing ---------------------------------------------------------------------------------------------

@@ -52,7 +52,12 @@ Subcommands:
               `ready:`, then schedule order. Each `setAside` entry is {slug, status, setAsideAt}, plus `needsHuman`
               (p16-3: the note's `## Needs you` question, normalised) only when the note holds one. `halt` is null
               while anything starts, restarts, runs, awaits Integration or integrates; otherwise the first of
-              "git-env", "paused", "empty", "complete" (or "done"), "held", "awaiting-sign-off" and "stuck". With every
+              "git-env", "paused", "empty", "complete" (or "done"), "held", "awaiting-sign-off" and "stuck". Two halts
+              sit outside that list (p30-4, Approved queue below): "superseded", returned at once for a note with a
+              valued `superseded_by:`, before its ceiling is read, and "regenerate", set whenever an approved queue's
+              verdict regenerates and git-env is clear, ahead of every other verdict, "empty" included. So the order
+              is superseded > git-env > regenerate > paused > empty > complete/done > held > awaiting-sign-off >
+              stuck. With every
               task merged, `halt` is "complete" (run the completion ceremony), or "done" when the ceremony already
               ran through its archive move (p19-14: the rollout note reads `status: done` and sits in
               `Archive/Rollouts/`), so no entry runs it twice (the lead's `done` route runs only its last step,
@@ -92,7 +97,12 @@ Subcommands:
               nothing starts, restarts, runs, awaits Integration or integrates, no Trickle, Away-cap, last-starts or
               heat hold stands and any entry holds; a MERGED hold releases at once and, off --dry-run, is removed from
               its note (`cleared`: true only once no `hold_until` stands on the note after the save, so a hold
-              rewritten meanwhile, which the compare-and-swap keeps, reads false).
+              rewritten meanwhile, which the compare-and-swap keeps, reads false), except an approved queue's, whose
+              verdict may keep it standing. `onMerge` and `supersededBy` follow `holdUntil`: the approved queue's
+              verdict ({note, pr, url, action: regenerate|waits|released, members, successor, why, detail}) or null,
+              and the superseded backstop's successor or null. A superseded note's output is {halt: "superseded",
+              supersededBy, progress} with every other key at its empty value: no ceiling read, no gh call, no write,
+              no event.
               The Heat hold (estate ADR 0009 d5; Heat hold, below): `heat` ({level, name}) follows `lastStarts`. At
               heavy or worse `slotLimit` is 0, Away too, so nothing new starts; a restart stops at the ceiling only. A
               row held there reads `heat: the Mac is hot (<name>)` (a full ceiling still reads `ceiling:`), and while
@@ -220,8 +230,11 @@ Subcommands:
               line to a `review` note with a `pr:` through _integration_log_line, from --started (the
               lead's `lead-integrate.py stamp` at the Integration's start), --anchor, --head and --base
               (40 hex each). wait = --started - `ready:`, duration = --now - --started, both in whole
-              minutes (_whole_minutes, the engine's wholeMinutes); triggers `-`. A re-run of the same
-              Integration (same --started and SHAs) is a no-op, even at a later --now. Changes no status,
+              minutes (_whole_minutes, the engine's wholeMinutes); triggers `-`; active the duration less
+              the stalls inside [--started, --now]: the stops the rollout's Run record logs and the Mac's
+              sleeps it does not hold yet (p29-13, _active_minutes; no call, so no journal is read). A
+              re-run of the same Integration (same --started and SHAs)
+              is a no-op, even at a later --now or after a later-inferred stop. Changes no status,
               rounds, `rung:`, `integrating:` or `ready:`. Refuses (exit 1, nothing written) a note
               that is not `review` with a `pr:`, a SHA that is not 40 hex and a --started that is not an
               ISO stamp.
@@ -260,7 +273,11 @@ Subcommands:
               carries `integrationBlock`: `conflict` (an Integration conflict, `integration: conflict
               unresolved in …`) or `red` (`integration: verifier red: …`); the key is absent otherwise. `holdUntil`
               (p30-3, Hold until below), at the top level for the rollout and on every task row: its hold_until as
-              parsed, {pr, url, error}, or null; the PR's state is never read here. Pure read; no network.
+              parsed, {pr, url, error}, or null; the PR's state is never read here. `onMerge` (p30-4, Approved queue
+              below): the note's on_merge as read, {value, error}, on a parallel note carrying a rollout hold_until,
+              else null; `chainStart`: {prior, pr} when the note is a chain's N never started, unstamped and not
+              started by the Stage, whose `supersedes:` prior carries `on_merge: regenerate` (_chain_start), else
+              null. Pure read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -427,11 +444,13 @@ Subcommands:
               <why>`; off --dry-run its lines are copied verbatim into --to (Note.insert_block, after `parallel_ceiling:`,
               else `status:`) before any task write, only while --to has none (--to then counts in `[written: <n>]`),
               and a different hold already on --to is kept with `WARN: carry: hold_until on <to> differs from
-              <from>'s; <to>'s kept` on stderr.
+              <from>'s; <to>'s kept` on stderr. An approved queue's `on_merge:` is never copied (p30-4): the new note
+              keeps a plain hold, released at its first `next`.
               --dry-run previews and needs no --to. Refuses (exit 2,
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
-              nor never started; a --from with a task an undecided RACE or UNVERIFIED holds (--dry-run
+              nor never started (or an approved queue whose only marks are ended room stops: approved_unrun); a
+              --from with a task an undecided RACE or UNVERIFIED holds (--dry-run
               included; the line names each held slug and `/thread:repair [[<from>]]`); a --from with an
               unacked git-env trip (Git-env hold, below; --dry-run included; `ERROR: carry: --from <stem> holds
               an unacked git-env trip: [[a]], [[b]]: record Lachy's ack first with /thread:repair [[<stem>]]`,
@@ -442,6 +461,30 @@ Subcommands:
               dropped, whose `supersedes:` does not name --from, that is --from, or that is not never
               started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
               open, so the next unfinished-rollout check pairs the two notes as interrupted.
+
+  approve-queue  `--rollout <note> --pr <owner/repo#N | PR URL>` (p30-4; Approved queue below): run on Lachy's words
+              naming a queue and its gating PR (execute § Invocation forms, orient § 9, schedule step 8). Writes, in one
+              locked save, `hold_until: {pr: <ref>, merged: true}` (after `parallel_ceiling:`, else `status:`),
+              `on_merge: regenerate` right after it, and `start: unattended` below `status:` unless a valued
+              `started_unattended:` stands; a key already at its value is not rewritten. Exit 0 prints one line, `undo:
+              remove hold_until, on_merge and start: unattended from [[<note>]] before <pr> merges, or pause [[<note>]]
+              once its lead runs` (with no start stamp, `remove hold_until and on_merge`); a hold that stood before the
+              run, his own or an earlier run's, is never named (`remove on_merge and start: unattended`, or `remove
+              on_merge`), so following the line never drops a hold he wrote. Refuses (exit 1, one `ERROR:
+              approve-queue:` line, nothing written): a note not found, serial, incomplete, done or dropped, superseded,
+              paused or pause-requested, one _approved_marks reads as run (room stops and an `integrating:` stamp never
+              refuse: the verdict judges them at the merge), an unreadable --pr ("name the PR as owner/repo#N or its
+              URL"; no gh call), a standing hold on another PR (by canonical key: a bare-number hold, read in the
+              Project root, never matches, and is told "rewrite it as owner/repo#N first, or remove it") or an
+              unreadable one, and an `on_merge:` of another value. Exit 2 is usage.
+
+  stamp-start  `--rollout <note>` (p30-4): schedule step 8 under the chain, after step 7.5, stamps `start: unattended`
+              below `status:` on the note an approved queue's regenerate wrote (no write when it is already there) and
+              prints `undo: remove start: unattended from [[<note>]] before the Stage starts it, or pause [[<note>]]
+              once it runs; it superseded [[<prior>]] when <pr> merged`. Refuses (exit 1, one `ERROR: stamp-start:`
+              line, nothing written): not found, serial, incomplete (so it runs after step 7.5, which closes the prior),
+              closed, superseded, paused or pause-requested, not never started, a valued `started_unattended:`, or no
+              `supersedes:`.
 
   verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2, p23-4): given a rollout
               note, print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
@@ -893,7 +936,25 @@ and the hold still releases for this call); OPEN or a gh error holds and waits o
 CLOSED holds and waits on Lachy. Its reasons, all quote-free and opening
 HOLD_UNTIL_PREFIX: `hold until <pr> merges (<STATE>)`, `hold until <pr> merges (gh: <its line>)` and `hold until:
 hold_until unreadable (<why>)`. `status` reports each parsed hold, never its state. `carry` copies the prior's into the
-note that supersedes it. A serial note's `hold_until` is read by nothing: `next` refuses the note first.
+note that supersedes it. A serial note's `hold_until` is read by nothing: `next` refuses the note first. The clear has
+one exception, an approved queue's (below): its verdict keeps a merged hold standing while it waits or regenerates.
+
+Approved queue (p30-4; the grammar is skills/_shared/vault-grammar.md § Approved queue): `on_merge: regenerate`
+(ON_MERGE_KEY, ON_MERGE_REGENERATE; read as `_scalar(...).lower()` by _on_merge) beside a rollout hold_until on a
+parallel note (_approved_queue). Its writer is `approve-queue`. Once the hold reads MERGED with no error, `next`'s verdict
+(_on_merge_verdict), the first that applies: a done or dropped note releases plainly; an unreadable value fails closed
+(held, `waits: you`, error ON_MERGE_BAD); _approved_marks (the queue's own read of what has run: never_started's marks
+with the Chorus Stage's room-stop lines, ROOM_STOP_LINE_RE, read as no run mark) reading `run` releases it as a plain hold
+with a `WARN: on_merge:` line; a room stop that stands holds it (`waits: room-stop`); an `integrating:` stamp whose task
+is in flight (integrating, or a RACE-held lane) holds it (`waits: integration`), one with no Integration in flight reads
+as run; with no linked member left after the project filter (_approved_members) it releases with a WARN; otherwise it
+holds (`waits: regenerate`) and `halt` is "regenerate", with the members: this note's unlanded rows, a never-started
+successor's (an interrupted chain's), and the open siblings in their phases (schedule step 1's skip rule), each carrying
+the note's first project (_norm_project). While it holds nothing starts, restarts or newly integrates
+(`awaitingIntegration` is []), and the hold is never cleared. A plain release (the verdict's `released`, or a done or
+dropped note) clears the hold and its `on_merge:` lines in one compare-and-swap (Note.remove_block's `also`), so a hold
+added by hand later is a plain hold. `carry` never copies `on_merge`.
+
 
 Heat hold (estate ADR 0009 d5; the spec is skills/execute/away.md § Heat): `next` reads the Mac's thermal pressure once
 per call, right after the Away state (so a refused call reads neither), through verify-slot.py's heat_level()
@@ -903,13 +964,16 @@ on the ceiling alone. A row held for want of a Slot then reads `heat: the Mac is
 ceiling is full (`ceiling:` first); no Slot is found, so the last starts never read it; a git-env hold, a pause and a
 standing rollout hold_until hold their rows themselves. A `heat:` hold never halts.
 
-Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
+Never started (never_started, read by `carry`, `stamp-start`, status's chainStart and, through approved_unrun,
+skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
 `pause_requested`, `completed:`, or a `## Pause log`, `## Completion log` or `## Leg log` (a serial rollout's Legs,
 leg.py) heading line. On a linked task note:
 a non-empty `owner:` or `integrating:`. A task's status and its `started:` / `ready:` / `merged:` stamps never
 count, because a carry keeps them. A protocol-3 run shows through the `owner:` its engine stamped on each task
-at dispatch.
+at dispatch. approved_unrun is the approved queue's widening (Approved queue above): an approved queue whose only marks
+are the Chorus Stage's room stops, each one ended, reads as never started to `carry` (--from), `approve-queue` and
+unfinished-rollout.py; never_started itself is unchanged, and every other reader keeps it.
 
 Incomplete (incomplete, read by `next`, `status` and unfinished-rollout.py): a never-started rollout that must
 not run as written. The first that applies:
@@ -949,17 +1013,38 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   gate bounce    -> (any status) a row that is not gate-pending, or a gate-pending row with no bounce paragraph,
                     removes "## Gate bounce (awaiting sign-off)"; approve-gates' sign-off removes it too
   integration    -> (any status; a mode-'integrate' row's `integration` object) one bare line under
-                    "## Integration log", exactly 10 space-separated tokens:
+                    "## Integration log", exactly 11 space-separated tokens:
                       <startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha> wait=<n|->
-                      duration=<n|-> triggers=<list|->
+                      duration=<n|-> triggers=<list|-> active=<n|->
                     from metrics.startedAt (verbatim), outcome, path, the row's prUrl (its PR number; `pr=-`
                     when missing, empty or neither a GitHub PR URL nor `#7`/`7`), anchor.headSha, headSha,
                     baseSha (full SHAs), metrics.waitMinutes / durationMinutes (ints) and triggers
                     (comma-joined, in order). `-` stands for a missing value (None, '', [], a non-int minute
-                    count); whitespace inside a value becomes `_`. Dedupe: a line whose startedAt is set is
-                    skipped if an identical line appears anywhere in the section; a line whose startedAt is
-                    `-` is skipped only if it equals the section's last non-blank line. So a re-reconcile is
-                    byte-identical, and with startedAt so is a replay of an older row (two Integrations of
+                    count); whitespace inside a value becomes `_`. duration is the Integration's wall time;
+                    active (p29-13) its active time, the wall less the stalls inside the window from startedAt
+                    to metrics.finishedAt (startedAt + duration when finishedAt gives other minutes): the
+                    union of the rollout's Run-record stops whose calls stop with them (stop_spans: a usage
+                    limit, a dead lead, a Mac restart or sleep, a Watchdog recovery; a halt carries the calls
+                    on, so it is none), the Mac's sleeps the record does not hold yet (_unrecorded_sleeps:
+                    `next` writes a sleep only after the lead has reconciled the call, and an agent's
+                    durationMs holds the sleep, so this line reads them from the Mac itself, without writing)
+                    and, where no stop is logged inside it, the integrate call's journal gaps (each span of 30
+                    minutes or more no live agent of the call ran in, JOURNAL_GAP_MS). A resumed call's
+                    journal replays each agent that finished before the kill as a `cached: true` entry
+                    stamped at the resume with no durationMs: it places no time in this run, so it is skipped,
+                    and the gap before the first live agent holds the earlier run's work by the replayed
+                    agents as well as the stall and the attempts it killed (an overcount of the stall, never
+                    a stall counted as lane work). `-` with no startedAt or duration, when the Run record
+                    cannot be read (no `rollout:` on the note, an unreadable file), or when the journal it
+                    falls back to places no live agent at all (every one replayed: the stall cannot be
+                    placed, and active = wall would read as a stall-free Integration). It is appended last,
+                    so a line from before p29-13 (ten tokens, no active) still parses, and every reader reads
+                    tokens by key; log_minutes() is the lane-time readers' one parse (its lane: active, else
+                    the wall). Dedupe: a line whose
+                    startedAt is set is skipped if an identical line appears anywhere in the section; a line
+                    whose startedAt is `-` is skipped only if it equals the section's last non-blank line;
+                    both compare lines without their active= (_log_identity), the one value a later stop can
+                    move. So a re-reconcile is byte-identical, and with startedAt so is a replay of an older row (two Integrations of
                     one task started in the same minute with identical fields would collapse: negligible).
                     Until the lead passes startedAt, lines are told apart only by position: S, I, S' keeps
                     three lines, back-to-back identical lines collapse to one. Readers take the LAST line.
@@ -1141,6 +1226,16 @@ HOLD_KEY = "hold_until"
 HOLD_UNTIL_PREFIX = "hold until"
 HOLD_FIELDS = ("pr", "merged")
 HOLD_GH_TIMEOUT = 60   # seconds for each gh pr view `next` makes: one per held PR per call, memoised
+# The approved queue (p30-4; skills/_shared/vault-grammar.md § Approved queue): `on_merge: regenerate` beside a
+# rollout-scope hold_until on a parallel note nothing has run turns the gating PR's merge into `next`'s `regenerate`
+# verdict (execute's route runs schedule --regenerate and stamps the new note's start), read as `_scalar(...).lower()`.
+ON_MERGE_KEY = "on_merge"
+ON_MERGE_REGENERATE = "regenerate"
+ON_MERGE_BAD = "on_merge must be regenerate"
+# The Chorus Stage's room-stop lines under `## Pause log` (execute § Room stop), the one source of the pattern:
+# step-boundary.py's ROOM_LINE is this object (it loads this module; this module cannot load it), and _approved_marks
+# reads the same lines as no run mark on an approved queue.
+ROOM_STOP_LINE_RE = re.compile(r"^- (\S+) room stop(: | ended\b)")
 
 # Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
 # (engine flag approvedAtCeiling) persists the accumulated by-round rationale. An AUDIT RECORD, not an
@@ -1722,26 +1817,35 @@ class Note:
         return None if span is None else self._fm[span[0]:span[1]]
 
     @_journaled
-    def remove_block(self, key: str, expected):
+    def remove_block(self, key: str, expected, also=()):
         """Remove the `key:` block (fm_block) only while it still equals `expected`, the lines a caller read: a
-        compare-and-swap, so save()'s replay on a fresh read keeps a block another writer rewrote meanwhile."""
+        compare-and-swap, so save()'s replay on a fresh read keeps a block another writer rewrote meanwhile. Each
+        (key, lines) pair in `also` goes in the same swap, only once the first block went and only while it too still
+        reads as read: a block kept by the swap keeps its companions."""
         span = self._fm_span(key)
         if span is None or self._fm[span[0]:span[1]] != list(expected):
             return
         del self._fm[span[0]:span[1]]
+        for k, lines in also:
+            s = self._fm_span(k)
+            if s is not None and self._fm[s[0]:s[1]] == list(lines):
+                del self._fm[s[0]:s[1]]
         self.dirty = True
 
     @_journaled
-    def insert_block(self, key: str, lines, after=("status",)):
+    def insert_block(self, key: str, lines, after=("status",), after_span=False):
         """Insert `lines` (a `key:` block, verbatim) after the first present anchor key, else at the end, only while
-        the note has no top-level `key:` line, so a replay on a fresh read never writes a second one."""
+        the note has no top-level `key:` line, so a replay on a fresh read never writes a second one. With
+        `after_span`, after the anchor's whole block (_fm_span: its indented lines too), so a block-form anchor such as
+        `hold_until:` keeps its lines together."""
         if self.fm_block(key) is not None:
             return
         for anchor in after:
             apat = re.compile(rf"^{re.escape(anchor)}:")
             for i, line in enumerate(self._fm):
                 if apat.match(line):
-                    self._fm[i + 1:i + 1] = list(lines)
+                    at = self._fm_span(anchor)[1] if after_span else i + 1
+                    self._fm[at:at] = list(lines)
                     self.dirty = True
                     return
         self._fm.extend(lines)
@@ -1918,7 +2022,9 @@ class Note:
         when an identical line (right-stripped) appears ANYWHERE in the section, so a re-reconcile and a
         replay of an older row are both no-ops; a line whose startedAt is `-` is skipped only when it
         equals the section's LAST non-blank line, so S, I, S' keeps three lines and the latest stays
-        truthful (back-to-back identical `-` lines collapse). Otherwise the line goes right after the
+        truthful (back-to-back identical `-` lines collapse). Under `## Integration log`, lines are compared
+        by _log_identity (without their `active=`, p29-13), so a later stop the Run record learns of never
+        writes the same Integration twice. Otherwise the line goes right after the
         section's last non-blank line, keeping one blank line after the heading and before any following
         `## ` section. Nothing already written is deleted or rewritten."""
         found = self._section_bounds(heading)
@@ -1927,11 +2033,12 @@ class Note:
             return
         lines, start, end = found
         filled = [i for i in range(start + 1, end) if lines[i].strip()]
-        kept = [lines[i].rstrip() for i in filled]
+        same = _log_identity if heading == INTEGRATION_LOG_SECTION else (lambda x: x)
+        kept = [same(lines[i].rstrip()) for i in filled]
         if line.split(" ", 1)[0] != "-":
-            if line in kept:
+            if same(line) in kept:
                 return
-        elif kept and kept[-1] == line:
+        elif kept and kept[-1] == same(line):
             return
         if not filled:
             # An empty section: its blank lines become one either side of the new line.
@@ -2085,7 +2192,7 @@ def history_block(history):
 
 def _log_field(value, minutes=False) -> str:
     """One Integration log value. None, '', [] (or a non-int, or bool, minute count) -> `-`; a list is
-    comma-joined in order; whitespace inside becomes `_`, so a line always has exactly 10 tokens. This
+    comma-joined in order; whitespace inside becomes `_`, so a line always has exactly 11 tokens. This
     guards the token count only: a value may still start with `#`, a backtick or `>`, which is why the
     line's one unprefixed token (startedAt) goes through _log_started instead."""
     if minutes:
@@ -2117,12 +2224,15 @@ def _log_pr(pr_url) -> str:
     return m.group(1) if m else "-"
 
 
-def _integration_log_line(task) -> str:
+def _integration_log_line(task, active=None) -> str:
     """The `## Integration log` line for a row carrying a dict `integration` (the engine's
     integrationResult): `<startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha>
-    wait=<n|-> duration=<n|-> triggers=<list|->`. startedAt is written verbatim when it is an ISO stamp
-    (else `-`, see _log_started), SHAs in full. The line carries no `now`, so a re-reconcile at another
-    time writes the same line."""
+    wait=<n|-> duration=<n|-> triggers=<list|-> active=<n|->`. startedAt is written verbatim when it is an
+    ISO stamp (else `-`, see _log_started), SHAs in full. duration is the Integration's wall time; active
+    (p29-13) the caller's _active_minutes, the wall less the stalls inside it, appended last so the ten
+    tokens before it keep their places and a line from before it (ten tokens) still reads. The line carries no
+    `now`, so a re-reconcile at another time writes the same line; the one value the Run record can still move
+    after the fact is active, which append_line's dedupe ignores (_log_identity)."""
     integ = task["integration"]
     metrics = integ.get("metrics") if isinstance(integ.get("metrics"), dict) else {}
     anchor = integ.get("anchor") if isinstance(integ.get("anchor"), dict) else {}
@@ -2137,7 +2247,30 @@ def _integration_log_line(task) -> str:
         "wait=" + _log_field(metrics.get("waitMinutes"), minutes=True),
         "duration=" + _log_field(metrics.get("durationMinutes"), minutes=True),
         "triggers=" + _log_field(integ.get("triggers")),
+        ACTIVE_TOKEN + _log_field(active, minutes=True),
     ])
+
+
+ACTIVE_TOKEN = "active="   # an Integration log line's last token (p29-13): the wall less the stalls inside it
+
+
+def _log_identity(line) -> str:
+    """An Integration log line with its `active=` token dropped: the line as append_line's dedupe compares it. active
+    is the one value read from the Run record, which a stop inferred after the reconcile can still move, so the same
+    Integration re-reconciled later (or a replay of a row whose line predates p29-13) is still the same line."""
+    return " ".join(t for t in line.split(" ") if not t.startswith(ACTIVE_TOKEN))
+
+
+def log_minutes(line) -> dict:
+    """An Integration log line's minutes, for every reader of Integration (lane) time (p29-13): {wall, active, lane},
+    each a whole number of minutes or None. wall is `duration=`, the Integration's wall time; active its `active=`, the
+    wall less the stalls inside it (_active_minutes); lane the active figure, else the wall: a
+    line from before p29-13 carries no `active=` and still reads, its wall (which can hold a stall) standing in. A
+    `-`, or anything but digits, reads None."""
+    t = _log_tokens(line)
+    wall, active = (int(v) if isinstance(v, str) and re.fullmatch(r"[0-9]+", v) else None
+                    for v in (t.get("duration"), t.get(ACTIVE_TOKEN[:-1])))
+    return {"wall": wall, "active": active, "lane": active if active is not None else wall}
 
 
 def _log_lines(note) -> list:
@@ -2277,6 +2410,174 @@ def incomplete(rollout_path: Path, rollout_note, linked, index) -> str:
         return (f"its supersedes: names [[{entry[0].stem}]], still unfinished beside it: the supersede has not "
                 "closed that rollout out (schedule step 7.5)")
     return ""
+
+
+# ---- the approved queue (p30-4; vault-grammar § Approved queue) ---------------------------------------------------
+
+def _on_merge(note):
+    """A note's `on_merge:` as read, {value, error}, or None when its frontmatter has no top-level `on_merge:` line. The
+    value is the first such line's scalar lower-cased (_scalar: quotes and an inline ` # comment` dropped), so
+    `Regenerate` and `"REGENERATE"  # x` read `regenerate`; any other value, an empty one included, is unreadable
+    (ON_MERGE_BAD). Whether anything reads it is _approved_queue's question."""
+    raw = note.get(ON_MERGE_KEY)
+    if raw is None:
+        return None
+    value = _scalar(raw).lower()
+    return {"value": value, "error": None if value == ON_MERGE_REGENERATE else ON_MERGE_BAD}
+
+
+def _approved_queue(note) -> bool:
+    """An approved queue (vault-grammar § Approved queue): a parallel note carrying a top-level `hold_until` block and an
+    `on_merge:` that reads `regenerate`. An `on_merge` on a serial note or with no rollout hold is read by nothing."""
+    om = _on_merge(note)
+    return (_shape(note) == SHAPES[0] and note.fm_block(HOLD_KEY) is not None
+            and om is not None and om["error"] is None)
+
+
+def _approved_marks(rollout_note, linked):
+    """(kind, detail): the approved queue's own read of what has run (vault-grammar § Approved queue). The Chorus Stage's
+    room stops (ROOM_STOP_LINE_RE, step-boundary.py's lines) are no run mark; every mark never_started counts is,
+    except a task's `integrating:`, read as an Integration in flight. The first that applies:
+      ("run", why): never_started's own marks in its words (`paused:`, `pause_requested`, `completed:`, a
+        `## Completion log` or `## Leg log` heading); a `## Pause log` with no line under it, or with a non-blank line
+        that is no room stop (a hard pause's, a sign-off's); a linked task's valued `owner:`;
+      ("room-stop", "since <stamp>"): the last room-stop line is a start line, lapsed or not (step-boundary.py end's rule);
+      ("integrating", [slug, ...]): the sorted linked tasks that carry a valued `integrating:`;
+      ("unrun", ""): none of the above."""
+    if _valued(rollout_note.get("paused")):
+        return "run", f"it carries paused: {_scalar(rollout_note.get('paused'))}"
+    if _truthy_flag(rollout_note.get("pause_requested")):
+        return "run", "it carries pause_requested"
+    if _valued(rollout_note.get("completed")):
+        return "run", f"it carries completed: {_scalar(rollout_note.get('completed'))}"
+    for heading in STARTED_HEADINGS:
+        if heading != PAUSE_LOG_SECTION and rollout_note.has_heading(heading):
+            return "run", f"it has a {heading} section"
+    last = None
+    if rollout_note.has_heading(PAUSE_LOG_SECTION):
+        lines = [line.strip() for line in rollout_note.section_text(PAUSE_LOG_SECTION).split("\n") if line.strip()]
+        if not lines:
+            return "run", f"it has a {PAUSE_LOG_SECTION} section"
+        for line in lines:
+            m = ROOM_STOP_LINE_RE.match(line)
+            if not m:
+                return "run", f"it has a {PAUSE_LOG_SECTION} line that is no room stop"
+            last = (m.group(1), "start" if m.group(2) == ": " else "ended")
+    ordered = sorted(linked, key=lambda pn: (pn[0].stem.lower(), str(pn[0])))
+    for path, note in ordered:
+        if _valued(note.get("owner")):
+            return "run", f"its task {path.stem} carries owner: {_scalar(note.get('owner'))}"
+    if last is not None and last[1] == "start":
+        return "room-stop", f"since {last[0]}"
+    integ = sorted({path.stem for path, note in ordered if _valued(note.get("integrating"))}, key=str.lower)
+    if integ:
+        return "integrating", integ
+    return "unrun", ""
+
+
+def approved_unrun(rollout_note, linked):
+    """(True, '') when nothing has run the rollout, else (False, reason): never_started, widened for an approved queue
+    (_approved_queue) whose only marks are the Chorus Stage's room stops, each one ended (_approved_marks reads
+    `unrun`). A room stop that still stands reads (False, 'a room stop stands since <stamp>'), and a task's
+    `integrating:` keeps never_started's reason. Read by `carry` (--from), `approve-queue` and unfinished-rollout.py;
+    never_started itself is unchanged, and every other reader keeps it."""
+    fresh, why = never_started(rollout_note, linked)
+    if fresh or not _approved_queue(rollout_note):
+        return fresh, why
+    kind, detail = _approved_marks(rollout_note, linked)
+    if kind == "unrun":
+        return True, ""
+    if kind == "room-stop":
+        return False, f"a room stop stands {detail}"
+    if kind == "integrating":
+        first = next(note for path, note in sorted(linked, key=lambda pn: (pn[0].stem.lower(), str(pn[0])))
+                     if path.stem == detail[0])
+        return False, f"its task {detail[0]} carries integrating: {_scalar(first.get('integrating'))}"
+    return False, detail
+
+
+def _norm_project(value) -> str:
+    """A `projects:` entry as unfinished-rollout.py's norm_project reads it: the wikilink's note name, lower-cased, every
+    run of non-alphanumerics turned into `-`, trimmed."""
+    name = _wikilink_slug(_scalar(value)) or ""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def _live_rollout(tasks_dir: Path, value) -> bool:
+    """Schedule step 1's skip rule: a `rollout:` value that links a rollout note directly in the tasks dir that is neither
+    done nor dropped."""
+    slug = _wikilink_slug(_scalar(value))
+    path = tasks_dir / f"{slug}.md" if slug else None
+    if path is None or not path.is_file():
+        return False
+    try:
+        return _status(Note(path)) not in CLOSED_ROLLOUT_STATUSES
+    except (OSError, ValueError):
+        return False
+
+
+def _approved_members(rollout_path: Path, rollout_note, rows, index, tasks_dir: Path) -> dict:
+    """The tasks an approved queue's regenerate takes (`next`'s verdict; vault-grammar § Approved queue): {members,
+    successor, linked}. Linked rows: this note's rows in CARRIED_STATES, plus each successor's (a never-started rollout
+    note beside it whose `supersedes:` names this one: an interrupted chain's N, I8, whose carry already moved them).
+    Siblings: each note directly in the tasks dir at `status: open`, tagged `task` and neither `rollout` nor
+    `decisions`, whose name shares a linked row's (slug, phase) by PHASED_STEM_RE (the phase compared by _phase_key) and
+    whose `rollout:` links no live rollout note (schedule step 1's skip rule). Every member, linked or sibling, carries
+    this note's first project (_norm_project); the rest are left out. members is sorted and deduped; successor is the
+    first successor's name or None; linked counts the linked rows the filter kept (0: nothing of its own left)."""
+    want = _norm_project(_project(rollout_note) or "")
+
+    def mine(note):
+        return bool(want) and want in {_norm_project(v) for v in note.get_list("projects")}
+
+    stem = rollout_path.stem.lower()
+    here = rollout_path.parent.resolve()
+    successors = []
+    for key, (path, note) in sorted(index.items()):
+        if path.parent.resolve() != here or "rollout" not in _tags(note) or \
+                _status(note) in CLOSED_ROLLOUT_STATUSES or _link_slug(note, "supersedes") != stem:
+            continue
+        n_linked = [(p, n) for p, n in index.values()
+                    if (_wikilink_slug(n.get("rollout")) or "").lower() == path.stem.lower()]
+        if never_started(note, n_linked)[0]:
+            successors.append((path, n_linked))
+    linked = [(r["path"], r["note"]) for r in rows if r["state"] in CARRIED_STATES]
+    for _path, n_linked in successors:
+        linked += [(p, n) for p, n in n_linked if _queue_state(n)[0] in CARRIED_STATES]
+    kept = sorted({p.stem for p, n in linked if mine(n)}, key=str.lower)
+    phases = {(m.group("slug").lower(), _phase_key(m.group("n"))) for m in (PHASED_STEM_RE.match(s) for s in kept) if m}
+    siblings = set()
+    root = tasks_dir.resolve()
+    for key, (path, note) in index.items():
+        m = PHASED_STEM_RE.match(path.stem)
+        if not m or (m.group("slug").lower(), _phase_key(m.group("n"))) not in phases or path.parent.resolve() != root:
+            continue
+        tags = _tags(note)
+        if _status(note) != "open" or "task" not in tags or tags & {"rollout", "decisions"} or not mine(note) or \
+                _live_rollout(tasks_dir, note.get("rollout")):
+            continue
+        siblings.add(path.stem)
+    members = sorted(set(kept) | siblings, key=str.lower)
+    return {"members": members, "successor": successors[0][0].stem if successors else None, "linked": len(kept)}
+
+
+def _chain_start(rollout_path: Path, rollout_note, linked, index):
+    """`status`'s chainStart (vault-grammar § Approved queue): {prior, pr} when this note is a chain's N whose start was
+    never stamped (the lead died after schedule step 7.5, before its stamp-start): never started (never_started), no
+    `start: unattended` and no valued `started_unattended:`, and its `supersedes:` names a prior (root or Archive) that
+    carries `on_merge: regenerate`; pr is the prior's hold_until pr, else N's own copy. Else None."""
+    if not never_started(rollout_note, linked)[0] or _start_unattended(rollout_note) or \
+            _valued(rollout_note.get("started_unattended")):
+        return None
+    prior = _link_slug(rollout_note, "supersedes")
+    entry = index.get(prior) if prior else None
+    if entry is None:
+        return None
+    om = _on_merge(entry[1])
+    if om is None or om["error"] is not None:
+        return None
+    hold = _hold_until(entry[1], None) or _hold_until(rollout_note, None)
+    return {"prior": entry[0].stem, "pr": hold["pr"] if hold else None}
 
 
 def _priority(note) -> str:
@@ -3015,7 +3316,13 @@ def cmd_reconcile(args) -> int:
         # record a cold lead, repair and the gate resume read). `integration: null` counts as absent.
         integration = task.get("integration")
         if isinstance(integration, dict):
-            note.append_line(INTEGRATION_LOG_SECTION, _integration_log_line(task))
+            # p29-13: its `active=`, the wall less the stalls inside the window: the rollout's Run record's stops and
+            # the Mac's sleeps the record does not hold yet (else the integrate call's journal gaps), read before this
+            # row's own events are written.
+            m = integration.get("metrics") if isinstance(integration.get("metrics"), dict) else {}
+            active = _active_minutes(rollout, slug, m.get("startedAt"), m.get("finishedAt"), m.get("durationMinutes"),
+                                     call=True, now=now)
+            note.append_line(INTEGRATION_LOG_SECTION, _integration_log_line(task, active))
         elif integration is not None:
             errors.append(f"{slug}: integration is not an object ({type(integration).__name__}) — "
                           "no Integration log line written")
@@ -3867,14 +4174,15 @@ def _resolve_holds(gh_bin, holds, memo):
     return out
 
 
-def _clear_hold(note, hold, label, dry_run) -> bool:
+def _clear_hold(note, hold, label, dry_run, also=()) -> bool:
     """`next`'s clear of a merged hold off --dry-run: Note.remove_block (a compare-and-swap) and the note's own save.
     True once saved with no `hold_until` left on the note: a hold another writer rewrote since the read stays (the
     swap's replay keeps it), so it reads False and the lead never reports a standing hold cleared. An OSError is one
-    stderr WARN line and False, and the hold still releases for this call (the next call retries the clear)."""
+    stderr WARN line and False, and the hold still releases for this call (the next call retries the clear). `also`:
+    the (key, lines) blocks that go with the hold in its swap (an approved queue's `on_merge:` on a plain release)."""
     if dry_run:
         return False
-    note.remove_block(HOLD_KEY, hold["lines"])
+    note.remove_block(HOLD_KEY, hold["lines"], also=also)
     try:
         note.save()
     except OSError as e:
@@ -3909,6 +4217,77 @@ def _ceremony_done(rollout_path: Path, rollout_note) -> bool:
     parent = rollout_path.absolute().parent
     return (_status(rollout_note) == "done"
             and parent.name == "Rollouts" and parent.parent.name == "Archive")
+
+
+def _superseded_output(stem, successor, progress) -> dict:
+    """`next`'s output on a superseded note (p30-4's backstop): halt "superseded" and supersededBy, the progress line,
+    and every other key of the usual output at its empty value, in the usual order."""
+    return {"rollout": stem, "ceiling": None, "slotsInUse": 0, "slotLimit": 0, "trickle": None, "lastStarts": None,
+            "heat": None, "start": [], "restart": [], "hold": [], "running": [], "awaitingIntegration": [],
+            "integrating": [], "setAside": [], "raceHold": [], "gitEnvHold": [], "holdUntil": [], "onMerge": None,
+            "supersededBy": successor, "paused": None, "pauseRequested": False, "pausedNow": False,
+            "startUnattended": False, "startCleared": False, "halt": "superseded", "awaitingSignOff": [],
+            "progress": progress}
+
+
+def _on_merge_verdict(rollout_path: Path, rollout_note, ro_entry, ro_hold, rows, index, tasks_dir: Path,
+                      integrating, race_held_lane):
+    """The approved queue's verdict at the gating PR's merge (p30-4; vault-grammar § Approved queue), run by `next` once
+    the rollout hold reads MERGED with no error on a note carrying `on_merge:`. Returns (onMerge, reason), onMerge None
+    for a plain release; it edits ro_entry in place when the hold must keep standing. The first that applies:
+      - the note is done or dropped: a plain release;
+      - the value is unreadable: fail closed, held and waiting on Lachy (`waits: you`, error ON_MERGE_BAD);
+      - _approved_marks reads `run` (or `integrating` with a stamp no Integration in flight explains): a WARN line and a
+        plain release (onMerge action "released");
+      - a room stop stands: the hold stays (`waits: room-stop`, action "waits"), decided again at the next call;
+      - every task stamped `integrating:` is in flight (integrating or race_held_lane): the hold stays (`waits:
+        integration`);
+      - no linked member is left after the project filter (_approved_members): a WARN line and a plain release;
+      - else the regenerate: the hold stays (`waits: regenerate`, action "regenerate") with its members."""
+    om = _on_merge(rollout_note)
+    if _status(rollout_note) in CLOSED_ROLLOUT_STATUSES:
+        return None, None
+    pr = (ro_hold["pr"] or "").replace('"', "'")
+    stem = rollout_path.stem
+
+    def hold(waits, reason):
+        ro_entry.update(held=True, waits=waits, cleared=False)
+        return reason
+
+    if om["error"] is not None:
+        ro_entry["error"] = om["error"]
+        return None, hold("you", f"{HOLD_UNTIL_PREFIX}: {ON_MERGE_KEY} unreadable ({om['error']})")
+    base = {"note": stem, "pr": ro_hold["pr"], "url": ro_entry["url"], "action": None, "members": [], "successor": None,
+            "why": None, "detail": None}
+
+    def released(why, detail):
+        tail = f" ({detail})" if detail else ""
+        print(f"WARN: {ON_MERGE_KEY}: {ON_MERGE_REGENERATE} on {stem} not run: {why}{tail}: released as a plain hold",
+              file=sys.stderr)
+        return {**base, "action": "released", "why": why, "detail": detail}, None
+
+    kind, detail = _approved_marks(rollout_note, [(r["path"], r["note"]) for r in rows])
+    if kind == "integrating":
+        flight = {r["slug"].lower() for r in list(integrating) + list(race_held_lane)}
+        loose = [s for s in detail if s.lower() not in flight]
+        if not loose:
+            return ({**base, "action": "waits", "why": "an Integration in flight", "detail": detail},
+                    hold("integration", f"{HOLD_UNTIL_PREFIX} {pr} merged: {ON_MERGE_KEY} {ON_MERGE_REGENERATE} waits "
+                                        f"for the Integration of [[{detail[0]}]]"))
+        note = next(r["note"] for r in rows if r["slug"] == loose[0])
+        kind, detail = "run", (f"its task {loose[0]} carries integrating: {_scalar(note.get('integrating'))} with no "
+                               "Integration in flight")
+    if kind == "run":
+        return released("it has run", detail)
+    if kind == "room-stop":
+        return ({**base, "action": "waits", "why": "a room stop stands", "detail": detail},
+                hold("room-stop", f"{HOLD_UNTIL_PREFIX} {pr} merged: {ON_MERGE_KEY} {ON_MERGE_REGENERATE} waits for the "
+                                  f"room stop {detail} to end"))
+    found = _approved_members(rollout_path, rollout_note, rows, index, tasks_dir)
+    if not found["linked"]:
+        return released("nothing of its own left", None)
+    return ({**base, "action": "regenerate", "members": found["members"], "successor": found["successor"]},
+            hold("regenerate", f"{HOLD_UNTIL_PREFIX} {pr} merged: {ON_MERGE_KEY} {ON_MERGE_REGENERATE}"))
 
 
 def cmd_next(args) -> int:
@@ -3966,6 +4345,17 @@ def cmd_next(args) -> int:
         print(f"ERROR: {rollout_path.stem}: shape: serial: a serial rollout runs as Legs, never through next: "
               f"/thread:execute [[{rollout_path.stem}]] runs its next Leg (execute legs.md)", file=sys.stderr)
         return 1
+    # The superseded backstop (p30-4): a note a supersede closed out (its `superseded_by:`, moved to Archive/Rollouts/ or
+    # not yet) has nothing left to run. Exit 0 with halt "superseded" and its successor, every other key empty: no
+    # ceiling read, no gh call, no write, no event, so a late heartbeat tick on an approved queue's prior ends quietly.
+    successor = _wikilink_slug(_scalar(rollout_note.get("superseded_by"))) if _valued(rollout_note.get("superseded_by")) \
+        else None
+    if successor:
+        rows, _index = _rows(rollout_path, rollout_note, Path(os.path.expanduser(args.tasks_dir)))
+        counts = _counts(rows)
+        print(json.dumps(_superseded_output(rollout_path.stem, successor,
+                                            _progress_line(counts, _timeline(rows, counts, None, now))), indent=2))
+        return 0
     ceiling, err = _ceiling(rollout_note)
     if err:
         print(f"ERROR: {rollout_path.stem}: {err}", file=sys.stderr)
@@ -4041,6 +4431,17 @@ def cmd_next(args) -> int:
     paused = _scalar(rollout_note.get("paused")) or None
     pause_requested = _truthy_flag(rollout_note.get("pause_requested"))
     paused_now = False
+    # The approved queue's verdict (p30-4; vault-grammar § Approved queue): a merged rollout hold on a note carrying
+    # `on_merge:` releases as usual, or keeps standing to wait (an Integration in flight, a standing room stop), to
+    # regenerate, or to wait on Lachy (an unreadable value). While it stands nothing new integrates either.
+    on_merge = None
+    if ro_entry is not None and ro_entry["state"] == "MERGED" and ro_entry["error"] is None and \
+            _on_merge(rollout_note) is not None:
+        on_merge, reason = _on_merge_verdict(rollout_path, rollout_note, ro_entry, ro_hold, rows, index, tasks_dir,
+                                             integrating, race_held_lane)
+        if ro_entry["held"]:
+            ro_reason = reason
+            awaiting = []
     # A task's own hold_until is read only while no pause and no rollout hold stands, and only on a task this call
     # could start or re-enter: a stalled one, a queued one whose dependencies are met (a dependency reason wins and costs
     # no gh call), or one set aside at its run or at a gate. task_held: lowercased slug -> its hold reason.
@@ -4205,8 +4606,13 @@ def cmd_next(args) -> int:
         rollout_note.save()
     # A merged rollout hold is removed in a save of its own, after the start stamp's: that save still fails the call
     # (exit 1, the stamp left for the Stage), while a failed clear only warns and the hold still releases for this call.
-    if ro_entry is not None and ro_entry["state"] == "MERGED":
-        ro_entry["cleared"] = _clear_hold(rollout_note, ro_hold, rollout_path.stem, args.dry_run)
+    # An approved queue's verdict that keeps the hold standing (waits, regenerate, an unreadable on_merge) never clears it.
+    # A plain release of one (its verdict's `released`, or a done or dropped note) takes the `on_merge:` beside the hold
+    # in the same swap, so a hold Lachy adds by hand later is a plain hold, never this PR's approval judged at its merge.
+    if ro_entry is not None and ro_entry["state"] == "MERGED" and not ro_entry["held"]:
+        om_lines = rollout_note.fm_block(ON_MERGE_KEY)
+        ro_entry["cleared"] = _clear_hold(rollout_note, ro_hold, rollout_path.stem, args.dry_run,
+                                          also=[(ON_MERGE_KEY, om_lines)] if om_lines is not None else [])
     for r, h, entry in task_clears:
         entry["cleared"] = _clear_hold(r["note"], h, r["slug"], args.dry_run)
 
@@ -4251,6 +4657,10 @@ def cmd_next(args) -> int:
     heat_held = any(why.startswith(HEAT_PREFIX) for _, why in holds)
     if git_env:
         halt = "git-env"
+    elif on_merge is not None and on_merge["action"] == "regenerate":
+        # The approved queue's regenerate (p30-4): ahead of every verdict but git-env, `empty` included (an interrupted
+        # chain's prior links no task once step 6's carry moved them), so the lead takes execute's route.
+        halt = "regenerate"
     elif not start and not restart and not live and not awaiting and not integrating and not race_held_lane \
             and not cap_held and not last_start_held and not heat_held:
         if paused:
@@ -4310,6 +4720,10 @@ def cmd_next(args) -> int:
         "gitEnvHold": git_env,
         # The PR holds this call read (vault-grammar § Hold until): the rollout's first, then the tasks' in rank order.
         "holdUntil": hold_entries,
+        # The approved queue's verdict at the merge (p30-4; vault-grammar § Approved queue): {note, pr, url, action:
+        # regenerate|waits|released, members, successor, why, detail}, or null. supersededBy is the backstop's (null here).
+        "onMerge": on_merge,
+        "supersededBy": None,
         "paused": paused,
         "pauseRequested": pause_requested,
         "pausedNow": paused_now,
@@ -4705,6 +5119,7 @@ def cmd_log_integration(args) -> int:
             print(f"ERROR: log-integration: {e}", file=sys.stderr)
         return 1
     started = args.started.strip()
+    ended = now.astimezone().isoformat(timespec="seconds")
     for slug, _path, note in _each_note(args):
         if _status(note) != "review" or not _pr(note):
             args._errors.append(f"{slug}: status is {_status(note) or 'none'!r}{'' if _pr(note) else ' with no pr:'}, "
@@ -4715,11 +5130,15 @@ def cmd_log_integration(args) -> int:
             "baseSha": args.base, "triggers": [],
             "metrics": {"startedAt": started,
                         "waitMinutes": _whole_minutes(_scalar(note.get("ready")), started),
-                        "durationMinutes": _whole_minutes(started, now.astimezone().isoformat(timespec="seconds"))},
+                        "durationMinutes": _whole_minutes(started, ended)},
         }}
-        line = _integration_log_line(row)
+        # p29-13: the lead's own Integration is no call, so only the stops its Run record logs and the Mac's sleeps it
+        # does not hold yet come off.
+        line = _integration_log_line(row, _active_minutes(_note_rollout(note), slug, started, ended,
+                                                          row["integration"]["metrics"]["durationMinutes"], call=False,
+                                                          now=now))
         # A re-run of the same Integration (same --started, same record) is a no-op even at a later --now:
-        # every token but the measured duration must match. append_line's own dedupe covers the rest.
+        # every token but the measured duration and active must match. append_line's own dedupe covers the rest.
         key = line.split(" ")[:8]
         logged = [l.split(" ") for l in _log_lines(note)]
         if not any(t[:8] == key for t in logged):
@@ -4952,6 +5371,12 @@ def cmd_status(args) -> int:
         # The rollout's own hold_until (p30-3; vault-grammar § Hold until) as parsed, {pr, url, error}, or null. Only
         # `next` reads its PR (gh) and clears it, so /thread:status reads the state live itself (status § 3).
         "holdUntil": _hold_public(_hold_until(rollout_note, root)),
+        # p30-4 (vault-grammar § Approved queue): the note's on_merge as read, {value, error}, on a parallel note that
+        # carries a rollout hold_until (anywhere else it is read by nothing), else null; and chainStart, {prior, pr} when
+        # this note is a chain's N whose start was never stamped (_chain_start), else null. Pure reads, no gh.
+        "onMerge": _on_merge(rollout_note) if _shape(rollout_note) == SHAPES[0] and
+        rollout_note.fm_block(HOLD_KEY) is not None else None,
+        "chainStart": _chain_start(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index),
         "tasks": tasks,
     }
     print(json.dumps(out, indent=2))
@@ -5853,6 +6278,207 @@ def _record_sleeps(rollout, note, now, args):
             _event(rollout, "stopped", None, _stop_fields("mac-sleep", s, lines, wake=w), args)
     except Exception:  # noqa: BLE001 — recording never breaks `next`
         return
+
+
+# ---- active Integration time (p29-13): an Integration log line's `active=` -------------------------------------------
+# An Integration's `duration=` is its wall time, so a usage-limit stall inside it reads as lane work (chorus-p80-1's
+# 876 minutes held about 9.5 h of them). `active=` is the wall less the stalls inside the window: the stops the Run
+# record logs, read by run_record.py's stop model (stop_spans), and the Mac's sleeps it does not hold yet
+# (_unrecorded_sleeps), with the integrate call's journal gaps where no stop is logged.
+
+# The stop causes during which the calls in flight do not run (run_record.py's stop model: a usage limit, a dead lead,
+# a Mac restart and a Watchdog recovery kill them, a sleep suspends them). A halt carries them on, so it is no stall.
+STALL_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "mac-sleep", "watchdog")
+STOP_ENDS = ("lead-entry", "paused")                            # a stop ends at the next of these, or a non-sleep stop
+STOP_FALLBACK_ENDS = ("slot-taken", "lane-taken", "run-bound")  # ... with none of those, at the next of these
+# A gap in the integrate call's journal shorter than this is the call's own launch or an agent hand-over (the stamp
+# floors to its minute), never a stall: score.py's GRACE, the quiet a call's Slot still counts as running.
+JOURNAL_GAP_MS = 30 * 60 * 1000
+
+
+def stop_spans(lines) -> list:
+    """Every `stopped` line of a Run record as {cause, start, end} (aware datetimes; end None while open),
+    read by run_record.py's stop model, its one copy. The lines are read in ts order, file order breaking ties (an
+    inferred line's ts is its write time, and its lead-entry follows it in the same write). A stop starts at its `at`,
+    else its ts. A mac-sleep ends at its `wake`. Any other stop ends at the first later line that is a lead-entry or a
+    paused line, or a stopped line that is no sleep (at that line's start); with none of those (a lead on a pre-p29-10
+    Engine snapshot writes no lead-entry) at the first later slot-taken, lane-taken or run-bound; else it stays open.
+    An end never precedes its start. Overlaps are kept: the sleep owns an overlap only for a reader that splits time by
+    cause, and a union (_span_ms) reads it once either way."""
+    seq = []
+    for i, d in enumerate(lines or ()):
+        ts = _rec_ts(d) if isinstance(d, dict) else None
+        if ts is not None:
+            seq.append((ts, i, d))
+    seq.sort(key=lambda x: (x[0], x[1]))
+
+    def start_of(ts, d):
+        return _away_stamp(d.get("at"))[0] or ts
+
+    out = []
+    for k, (ts, _i, d) in enumerate(seq):
+        if d.get("kind") != "stopped":
+            continue
+        cause, start = d.get("cause"), start_of(ts, d)
+        if cause == "mac-sleep":
+            end = _away_stamp(d.get("wake"))[0]
+        else:
+            end = fallback = None
+            for t2, _j, d2 in seq[k + 1:]:
+                kind = d2.get("kind")
+                if kind in STOP_ENDS:
+                    end = t2
+                    break
+                if kind == "stopped" and d2.get("cause") != "mac-sleep":
+                    end = start_of(t2, d2)
+                    break
+                if fallback is None and kind in STOP_FALLBACK_ENDS:
+                    fallback = t2
+            if end is None:
+                end = fallback
+        if end is not None and end < start:
+            end = start
+        out.append({"cause": cause, "start": start, "end": end})
+    return out
+
+
+def _union(spans, lo, hi) -> list:
+    """The union of `spans` [(start, end or None)] (epoch ms) inside [lo, hi], as sorted disjoint [a, b]; an open one
+    runs to hi."""
+    out = []
+    for a, b in sorted((max(a, lo), min(hi if b is None else b, hi)) for a, b in spans):
+        if b <= a:
+            continue
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+
+def _span_ms(spans, lo, hi) -> int:
+    """The milliseconds of the union of `spans` inside [lo, hi] (_union)."""
+    return sum(b - a for a, b in _union(spans, lo, hi))
+
+
+def _gaps(spans, lo, hi, least) -> list:
+    """The spans of [lo, hi] that `spans` leave uncovered, as [(a, b)], only those of at least `least`."""
+    gaps, at = [], lo
+    for a, b in _union(spans, lo, hi):
+        gaps.append((at, a))
+        at = b
+    gaps.append((at, hi))
+    return [(a, b) for a, b in gaps if b - a >= least]
+
+
+def _integrate_agents(lines, slug, lo, hi):
+    """[(start, end)] (epoch ms) of the agents the integrate call's Workflow journal places in its own run, None when
+    it cannot be read, and [] when it shows a resumed call whose agents were all replayed (so it places none). The call
+    is the task's latest `run-bound` with call integrate stamped inside [lo, hi] (a Lost-call resume binds the same
+    runId again); its journal <journalDir>/<runId>.json (fold-journals' path) must be an object naming that runId with
+    a terminal status. A workflow_agent entry of its workflowProgress marked `cached: true` is skipped: a resumed call
+    replays each agent that finished before the kill that way, stamped at the resume (its startedAt) with no
+    durationMs, so it places no time in this run. Every other (live) one must carry startedAt and durationMs (epoch ms,
+    ints >= 0), else the journal is refused (None): an agent it cannot place would read as a gap. A resumed call's
+    journal so places only its last run's live agents, and the time before the first of them (the stall, the attempts
+    it killed and the earlier run's work by the agents it replayed) reads as one gap: that run's work is counted as
+    stall, never a stall as lane work."""
+    key, bound = slug.lower(), None
+    for d in lines:
+        if d.get("kind") == "run-bound" and d.get("task") == key and d.get("call") == "integrate":
+            ts = _rec_ts(d)
+            if ts is not None and lo <= _ms(ts) <= hi:
+                bound = d
+    if bound is None:
+        return None
+    run_id, jdir = bound.get("runId"), bound.get("journalDir")
+    if not isinstance(run_id, str) or not RUN_ID_RE.fullmatch(run_id) or ".." in run_id or not isinstance(jdir, str):
+        return None
+    jdir = os.path.expanduser(jdir)
+    if not os.path.isabs(jdir):
+        return None
+    try:
+        with open(os.path.join(jdir, run_id + ".json"), "rb") as f:
+            journal = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(journal, dict) or journal.get("runId") != run_id or \
+            journal.get("status") not in _run_record().TERMINAL_STATUSES:
+        return None
+    progress = journal.get("workflowProgress")
+    agents = [a for a in progress if isinstance(a, dict) and a.get("type") == "workflow_agent"] \
+        if isinstance(progress, list) else []
+    out, replayed = [], 0
+    for a in agents:
+        if a.get("cached") is True:
+            replayed += 1
+            continue
+        st, dur = a.get("startedAt"), a.get("durationMs")
+        if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (st, dur)):
+            return None
+        out.append((st, st + dur))
+    if not out:
+        return [] if replayed else None
+    return out
+
+
+def _unrecorded_sleeps(lines, now, until) -> list:
+    """[(S, W)] (epoch ms): the Mac's sleeps its Run record does not name yet, read without writing (p29-13). The
+    record's sleep writers are `next` (_record_sleeps), which runs only after the lead has reconciled a returned call
+    or logged its own Integration (execute step 2, the Stop-hook driver's reconcile, integrate, merge, then `next`),
+    and record-entry, at the next loop entry or 20-minute heartbeat tick. So a sleep inside an Integration is usually
+    not in the record when its line is written, and an agent's durationMs holds the time the Mac slept, so no journal
+    gap shows it either. These are the reads _record_sleeps
+    makes: machine_times since the mark, the later of the last lead-entry and the latest recorded wake (with neither,
+    the record's first live line: a record-entry would read from there), kept by _evidence's window test. Unlike
+    _record_sleeps it reads through an open stop, a standing pause and a record with no lead-entry yet, which gate a
+    write, not whether the Mac slept. [] with no live line, when `until` (epoch ms, the window's end) is not after
+    the mark (a sleep the record does not name yet wakes after the mark, and the Mac was awake at it, so it starts
+    after it too: nothing to read), or when the Mac's last wake is not after the mark."""
+    st = _stop_state(lines)
+    marks = [t for t in (st["entry"], st["wake"]) if t is not None]
+    since = max(marks) if marks else (st["live"][0] if st["live"] else None)
+    if since is None or _ms(since) >= until:
+        return []
+    mt = machine_times(since, now)
+    if mt["wake"] is None or mt["wake"] <= since:
+        return []
+    return [(_ms(s), _ms(w)) for s, w in _evidence(st, mt, now)[1]]
+
+
+def _active_minutes(rollout, slug, started, ended, wall, call, now) -> "int | None":
+    """An Integration's `active=` (p29-13): its wall minutes (`duration=`) less the stalls inside its window, in whole
+    minutes, never more than the wall; None (`active=-`) when the wall or the start is missing, the Run record cannot
+    be read (no rollout, or an unreadable file), or the integrate call's journal is read and places no agent of its
+    own run (a resumed call that only replayed, see below). The window runs from `started` to `ended` (the integrate
+    row's finishedAt, the lead's --now) when that gives the wall's own minutes, else to started + wall. The stalls are
+    the union, inside it, of the STALL_CAUSES stops of stop_spans(), the Mac's sleeps the record does not name yet
+    (_unrecorded_sleeps, as of `now`: `next` writes them only after this line) and, where the record logs no such stop
+    inside it and `call` (an integrate call's row), the integrate call's journal gaps (_integrate_agents: the spans of
+    the window no live agent of the call ran in, each of at least JOURNAL_GAP_MS; a replayed, `cached`, agent places
+    none, so a resumed call's earlier run reads as stall). With none of them, nothing comes off. It reads the record as
+    it stands at the reconcile, before the row's own events."""
+    if not isinstance(wall, int) or isinstance(wall, bool) or wall < 0 or not rollout:
+        return None
+    s = _iso_minutes(started)
+    if s is None:
+        return None
+    lo = int(round(s * 60000))
+    e = _iso_minutes(ended) if _whole_minutes(started, ended) == wall else None
+    hi = int(round(e * 60000)) if e is not None else lo + wall * 60000
+    lines = _record_read(rollout)
+    if lines is None:
+        return None
+    stops = [(_ms(sp["start"]), None if sp["end"] is None else _ms(sp["end"]))
+             for sp in stop_spans(lines) if sp["cause"] in STALL_CAUSES]
+    spans = stops + _unrecorded_sleeps(lines, now, hi)
+    if call and _span_ms(stops, lo, hi) == 0:
+        agents = _integrate_agents(lines, slug, lo, hi)
+        if agents == []:
+            return None
+        if agents:
+            spans += _gaps(agents, lo, hi, JOURNAL_GAP_MS)
+    return min(wall, max(0, (hi - lo) - _span_ms(spans, lo, hi)) // 60000)
 
 
 def _latest_run(rollout, slug) -> dict:
@@ -8166,7 +8792,10 @@ def cmd_carry(args) -> int:
         if not rerun:
             return refuse(f"--from {src.stem} is {src_status}: a closed rollout carries nothing")
     linked = _scan(src, tasks_dir)[0]
-    fresh, why = never_started(src_note, linked)
+    # An approved queue whose only marks are the Stage's ended room stops reads as never started (approved_unrun,
+    # vault-grammar § Approved queue): its regenerate's carry, and § 0's interrupted finish, take it. --to keeps
+    # never_started below.
+    fresh, why = approved_unrun(src_note, linked)
     if not fresh and not _valued(src_note.get("paused")):
         return refuse(f"--from {src.stem} has run and is not paused ({why}): only a paused or never-started "
                       "rollout is superseded")
@@ -8287,6 +8916,142 @@ def cmd_carry(args) -> int:
             _halt_lane(src.stem, path.stem, args, _record_state(src.stem))
         _event(dst.stem, "carried", path.stem, {"from": src.stem}, args)
     print(f"[written: {written}]" if written else "[no-change]")
+    return 0
+
+
+# ---- approve-queue and stamp-start (p30-4; vault-grammar § Approved queue) ----------------------------------------
+
+def _queue_note(path: Path):
+    """(Note, None) for an existing, parseable note, else (None, why) for a verb's refusal."""
+    if not path.is_file():
+        return None, f"rollout note not found at {path}"
+    try:
+        return Note(path), None
+    except ValueError as e:
+        return None, str(e)
+
+
+def cmd_approve_queue(args) -> int:
+    """Approve a queue on Lachy's words naming it and its gating PR: write `hold_until: {pr: <ref>, merged: true}`,
+    `on_merge: regenerate` and `start: unattended` in one locked save, and print the one undo line. Refuses (exit 1,
+    one ERROR line, nothing written) a note that is not found, serial, incomplete, closed, superseded or paused, one
+    _approved_marks reads as run (room stops and an `integrating:` stamp do not refuse: the verdict judges them at the
+    merge), an unreadable --pr, a standing hold on another PR (a bare-number one is told to become owner/repo#N) or an
+    unreadable one, and an `on_merge:` of another value. A key already at its value is not rewritten. The undo line
+    names `hold_until` only when this run wrote it."""
+    def refuse(msg):
+        print(f"ERROR: approve-queue: {msg}", file=sys.stderr)
+        return 1
+
+    path = Path(os.path.expanduser(args.rollout))
+    note, why = _queue_note(path)
+    if why:
+        return refuse(why)
+    stem = path.stem
+    if _shape(note) == SHAPES[1]:
+        return refuse(f"{stem}: shape: serial: a serial rollout runs as Legs and is never an approved queue")
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    linked, index = _scan(path, tasks_dir)
+    why = incomplete(path, note, linked, index)
+    if why:
+        return refuse(f"{stem} is incomplete: {why}: /thread:schedule {_project(note) or '<project>'} --regenerate "
+                      "first, then approve the new note")
+    if _status(note) in CLOSED_ROLLOUT_STATUSES:
+        return refuse(f"{stem} is {_status(note)}: a closed rollout runs nothing")
+    if _valued(note.get("superseded_by")):
+        return refuse(f"{stem} is superseded by [[{_link_slug(note, 'superseded_by')}]]: approve that note instead")
+    if _valued(note.get("paused")) or _truthy_flag(note.get("pause_requested")):
+        return refuse(f"{stem} is paused (or a pause is requested): only a queue nothing has run is approved")
+    kind, detail = _approved_marks(note, linked)
+    if kind == "run":
+        return refuse(f"{stem}: it has run ({detail}): only a queue nothing has run is approved")
+    pr = (args.pr or "").strip()
+    repo_pr, url = HOLD_REPO_PR_RE.match(pr), PR_URL_RE.match(pr)
+    if repo_pr:
+        key = f"https://github.com/{repo_pr.group(1)}/pull/{repo_pr.group(2)}"
+    elif url:
+        key = f"https://github.com/{url.group(1)}/pull/{url.group(2)}"
+    else:
+        return refuse(f"--pr {pr or '<empty>'}: name the PR as owner/repo#N or its URL")
+    hold = _hold_until(note, _project_root(note))
+    if hold is not None and hold["error"] is not None:
+        return refuse(f"{stem}: its {HOLD_KEY} is unreadable ({hold['error']}): fix or remove it first")
+    if hold is not None and hold["key"] != key:
+        # A bare number is read in the Project root, so it never matches a --pr, and --pr takes no bare number.
+        fix = "rewrite it as owner/repo#N first, or remove it" if isinstance(hold["key"], tuple) else \
+            "remove it first, or name its PR"
+        return refuse(f"{stem}: its {HOLD_KEY} names {hold['pr']}, not {pr}: {fix}")
+    om = _on_merge(note)
+    if om is not None and om["error"] is not None:
+        return refuse(f"{stem}: its {ON_MERGE_KEY}: reads {om['value'] or '<empty>'}: {ON_MERGE_BAD}")
+    if hold is None:
+        note.insert_block(HOLD_KEY, [f"{HOLD_KEY}: {{pr: {pr}, merged: true}}"], after=("parallel_ceiling", "status"))
+    if om is None:
+        note.insert_block(ON_MERGE_KEY, [f"{ON_MERGE_KEY}: {ON_MERGE_REGENERATE}"], after=(HOLD_KEY,), after_span=True)
+    stamp = not _valued(note.get("started_unattended"))
+    if stamp and not _start_unattended(note):
+        note.set(START_KEY, START_UNATTENDED, after=("status",))
+    try:
+        note.save()
+    except OSError as e:
+        return refuse(f"{stem}: cannot write {path}: {e}; nothing written")
+    shown = hold["pr"] if hold is not None else pr
+    # A hold that stood before this run (his own, or an earlier run's: the note cannot say which) is never named, so
+    # following the line never drops a hold he wrote; removing on_merge (and the start stamp) undoes the approval.
+    named = ([] if hold is not None else [HOLD_KEY]) + [ON_MERGE_KEY] + ([f"{START_KEY}: {START_UNATTENDED}"] if stamp else [])
+    keys = f"{', '.join(named[:-1])} and {named[-1]}" if len(named) > 1 else named[0]
+    print(f"undo: remove {keys} from [[{stem}]] before {shown} merges, or pause [[{stem}]] once its lead runs")
+    return 0
+
+
+def cmd_stamp_start(args) -> int:
+    """Under the chain (schedule step 8, after step 7.5): stamp `start: unattended` on the note the approved queue's
+    regenerate just wrote, and print the one undo line. Refuses (exit 1, one ERROR line, nothing written) a note that
+    is not found, serial, incomplete, closed, superseded, paused, not never started, already started by the Stage (a
+    valued `started_unattended:`) or that supersedes nothing. A stamp already there is not rewritten."""
+    def refuse(msg):
+        print(f"ERROR: stamp-start: {msg}", file=sys.stderr)
+        return 1
+
+    path = Path(os.path.expanduser(args.rollout))
+    note, why = _queue_note(path)
+    if why:
+        return refuse(why)
+    stem = path.stem
+    if _shape(note) == SHAPES[1]:
+        return refuse(f"{stem}: shape: serial: the Stage never starts a serial note")
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    linked, index = _scan(path, tasks_dir)
+    why = incomplete(path, note, linked, index)
+    if why:
+        return refuse(f"{stem} is incomplete: {why}: never start it as written")
+    if _status(note) in CLOSED_ROLLOUT_STATUSES:
+        return refuse(f"{stem} is {_status(note)}: a closed rollout runs nothing")
+    if _valued(note.get("superseded_by")):
+        return refuse(f"{stem} is superseded by [[{_link_slug(note, 'superseded_by')}]]")
+    if _valued(note.get("paused")) or _truthy_flag(note.get("pause_requested")):
+        return refuse(f"{stem} is paused (or a pause is requested): its reinstate is Lachy's")
+    fresh, why = never_started(note, linked)
+    if not fresh:
+        return refuse(f"{stem} has run ({why}): a running queue needs no start stamp")
+    if _valued(note.get("started_unattended")):
+        return refuse(f"{stem} carries started_unattended: {_scalar(note.get('started_unattended'))}: the Stage "
+                      "already started it")
+    prior = _link_slug(note, "supersedes")
+    if not prior:
+        return refuse(f"{stem} supersedes nothing: only an approved queue's regenerate stamps its new note here")
+    if not _start_unattended(note):
+        note.set(START_KEY, START_UNATTENDED, after=("status",))
+    try:
+        note.save()
+    except OSError as e:
+        return refuse(f"{stem}: cannot write {path}: {e}; nothing written")
+    entry = index.get(prior)
+    hold = (_hold_until(entry[1], None) if entry is not None else None) or _hold_until(note, None)
+    prior_name = entry[0].stem if entry is not None else _wikilink_slug(_scalar(note.get("supersedes")))
+    shown = hold["pr"] if hold is not None and hold["pr"] else "its gating PR"
+    print(f"undo: remove {START_KEY}: {START_UNATTENDED} from [[{stem}]] before the Stage starts it, or pause [[{stem}]] "
+          f"once it runs; it superseded [[{prior_name}]] when {shown} merged")
     return 0
 
 
@@ -9838,6 +10603,20 @@ def main() -> int:
     ca.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ca.add_argument("--dry-run", action="store_true", help="print the carry/keep lines and write nothing")
     ca.set_defaults(func=cmd_carry)
+
+    aq = sub.add_parser("approve-queue", help="approve a queue on Lachy's words (p30-4; vault-grammar § Approved queue): "
+                                              "write hold_until, on_merge: regenerate and start: unattended, print "
+                                              "one undo line; exit 1 refused, nothing written")
+    aq.add_argument("--rollout", required=True, help="path to the rollout note he approved")
+    aq.add_argument("--pr", required=True, help="the gating PR: owner/repo#N or its URL")
+    aq.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    aq.set_defaults(func=cmd_approve_queue)
+
+    ss = sub.add_parser("stamp-start", help="under an approved queue's chain (schedule step 8): stamp start: unattended "
+                                            "on the note its regenerate wrote, print one undo line; exit 1 refused")
+    ss.add_argument("--rollout", required=True, help="path to the new rollout note (it supersedes the approved queue)")
+    ss.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    ss.set_defaults(func=cmd_stamp_start)
 
     cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested/paused_for "
                                             "(/thread:execute resume); exit 3 STILL-AWAITING under a sign-off pause "
