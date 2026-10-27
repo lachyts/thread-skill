@@ -146,8 +146,8 @@ parallel with no note). For each:
   in the window, read from the `## Integration log` of each task the record names whose note links this rollout
   (`rollout:`, so a carried task is read once, by the rollout it now belongs to), every line whose startedAt falls in
   [since, until] (a `-` startedAt places none). A line's lane minutes are its active figure (`active=`, the wall less
-  the stalls the Run record logged inside it), else its wall (`duration=`: a line from before p29-13, which may hold a
-  stall), through reconcile-rollout.py's log_minutes(), the writer's own parse. {integrations, minutes (the lane time,
+  the stalls the Run record logged inside it), else its wall (`duration=`: a line from before p29-13, or one with
+  `active=-`, which may hold a stall), through reconcile-rollout.py's log_minutes(), the writer's own parse. {integrations, minutes (the lane time,
   the sum), wallMinutes, stalledMinutes (wall - active where a line has both: stall, never lane work), wallOnly (lines
   read by their wall alone), unmeasured (neither), lines[{task, startedAt, outcome, path, wall, active, lane}] in
   startedAt order}.
@@ -901,7 +901,8 @@ class Span:
         whose note links this rollout (`rollout:`, so a task carried on is read once, by the rollout it now belongs to):
         each line whose startedAt falls in [since, until] (a `-` startedAt places none). Its lane minutes are its
         active figure (`active=`, the wall less the stalls the Run record logged inside it), else its wall (`duration=`,
-        a line from before p29-13), through reconcile-rollout.py's log_minutes, the writer's own parse. {integrations,
+        a line from before p29-13 or one with `active=-`), through reconcile-rollout.py's log_minutes, the writer's own
+        parse. {integrations,
         minutes (the lane time), wallMinutes, stalledMinutes (wall - active, where a line has both), wallOnly (lines read
         by their wall alone), unmeasured (lines with neither), lines[{task, startedAt, outcome, path, wall, active,
         lane}] in startedAt order}."""

@@ -398,8 +398,9 @@ in `all`) is reported, never made a Watch. An `ask` item's `grade` says what gra
 its tasks' `## Integration log` lines. The lane's time is `minutes`, each line's active figure (`active=`: the wall less
 the stalls the Run record logged inside it, a usage limit, a dead lead, a Mac restart or sleep, a Watchdog recovery),
 never `wallMinutes`, the lines' `duration=`. Price the Integration lane by `minutes` alone: `stalledMinutes` is stall
-time, never lane work, and belongs with the stalls by cause. A non-zero `wallOnly` counts lines written before p29-13,
-read by their wall, which can hold a stall: say so beside the figure. Never read lane time off a `duration=` by hand.
+time, never lane work, and belongs with the stalls by cause. A non-zero `wallOnly` counts lines read by their wall,
+which can hold a stall (written before p29-13, or `active=-`: a resumed integrate call whose journal placed no live
+agent, say): say so beside the figure. Never read lane time off a `duration=` by hand.
 
 ### 12. Sightings
 

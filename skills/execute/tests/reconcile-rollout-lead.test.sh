@@ -15,6 +15,9 @@ TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
+# log-integration's active= reads the Mac's sleeps the Run record does not hold yet (p29-13): none stands in for this
+# Mac's kern.waketime and pmset log, so nothing reads its history; the log-sleep case sets its own.
+export THREAD_MACHINE_TIMES='{}'
 NOW=2026-10-02T14:05:00Z
 
 fail=0
@@ -195,6 +198,17 @@ python3 "$RR" emit --rollout ro --kind lead-entry --ts 2026-10-02T15:30:00Z --js
 li b 2026-10-02T14:50+00:00 "$A" "$H" "$B" 2026-10-02T15:40:00+00:00
 ok "$(awk '/^## Integration log/{on=1; next} on && NF' "$D/b.md" | awk '{print $9, $NF}')" "duration=50 active=50" \
   "log-integration: a halt is no stall (the lead's work carries on through it): nothing comes off"
+# A Mac sleep inside the lead's Integration that only the Mac shows yet (`next`, its writer, runs after this line): it
+# comes off active, and log-integration writes no stopped line for it.
+scen log-sleep
+mkro
+mkt a review "pr: $PR" 'ready: 2026-10-02T12:00+00:00'
+export THREAD_EVENTS_DIR="$TMP/events-sleep"
+python3 "$RR" emit --rollout ro --kind lead-entry --ts 2026-10-02T12:00:00Z --json '{"by": "stage"}'
+THREAD_MACHINE_TIMES='{"sleeps":[["2026-10-02T12:40:00Z","2026-10-02T13:10:00Z"]]}' \
+  li a 2026-10-02T12:30+00:00 "$A" "$H" "$B" 2026-10-02T13:47:30+00:00
+ok "$rc|$(awk '/^## Integration log/{on=1; next} on && NF' "$D/a.md" | awk '{print $9, $NF}')|$(grep -c '"stopped"' "$TMP/events-sleep/ro.jsonl")" \
+  "0|duration=77 active=47|0" "log-integration: a sleep only the Mac shows yet comes off active (77.5 - 30), and no stopped line is written"
 export THREAD_EVENTS_DIR="$EVS"
 
 scen log-noready

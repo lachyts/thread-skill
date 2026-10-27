@@ -18,6 +18,9 @@ EH="$D/.settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$D/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_NOTE_LOCK_DIR="${D}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
+# An Integration line's active= reads the Mac's sleeps the Run record does not hold yet (p29-13): no sleep stands in
+# for this Mac's kern.waketime and pmset log, so nothing reads its history; a case that wants one sets its own.
+export THREAD_MACHINE_TIMES='{}'
 NOW=2026-10-02T14:05:00Z
 
 fail=0
@@ -487,6 +490,25 @@ irow j1
 ok "$(active j1)" "active=78" \
   "no stop logged: the journal's gaps of 30 min or more come off (the 13 h before its agents), its 5-min hand-over stays (40 + 5 + 33.55)"
 
+# A resumed call (chorus-p80-1's second Integration, wf_93426d81-87d): its journal replays each agent that finished
+# before the kill as `cached: true`, stamped at the resume with no durationMs, then runs the rest live. A cached agent
+# places no time in this run, so it is skipped: the gap before the first live agent (the stall, and the earlier run's
+# work by the replayed agent) comes off, and only the live review is active.
+RES=$(ms 2026-10-18T23:45:00Z)
+mkr j6 sj6
+ev sj6 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j6\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" j6
+journal wf_j6 completed "[{\"label\": \"integrate:x\", \"state\": \"done\", \"cached\": true, \"startedAt\": $RES},
+  {\"label\": \"integration-review:x r3\", \"state\": \"done\", \"startedAt\": $RES, \"durationMs\": 2013000}]"
+irow j6
+ok "$(active j6)" "active=33" \
+  "a resumed call: its cached integrate agent is skipped, the 843 min before the live review comes off (876.55 - 843)"
+mkr j7 sj7
+ev sj7 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j7\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" j7
+journal wf_j7 completed "[{\"label\": \"integrate:x\", \"state\": \"done\", \"cached\": true, \"startedAt\": $RES}]"
+irow j7
+ok "$(active j7)" "active=-" \
+  "a resumed call whose every agent was replayed places no live agent: the stall cannot be placed, so active is -, never the wall"
+
 mkr j5 sj5
 ev sj5 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j5\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" j5
 journal wf_j5 completed "[{\"startedAt\": $(ms 2026-10-18T09:43:10Z), \"durationMs\": 52523000}]"
@@ -507,13 +529,41 @@ irow j3
 ok "$(active j3)" "active=876" "no stop and no journal on disk: nothing comes off"
 journal wf_j3 running "$AG"; mkr j3 sj3; irow j3
 ok "$(active j3)" "active=876" "… nor from a journal whose call has not ended"
-journal wf_j3 completed '[{"startedAt": 1}]'; mkr j3 sj3; irow j3
-ok "$(active j3)" "active=876" "… nor from one with an agent it cannot place"
+journal wf_j3 completed "[{\"label\": \"integration-review:x r1\", \"state\": \"done\", \"startedAt\": $(ms 2026-10-18T23:45:00Z)}]"
+mkr j3 sj3; irow j3
+ok "$(active j3)" "active=876" "… nor from one with a live (not cached) agent it cannot place: a startedAt and no durationMs"
+journal wf_j3 completed "[{\"cached\": true, \"startedAt\": $RES}, {\"startedAt\": $RES}]"
+mkr j3 sj3; irow j3
+ok "$(active j3)" "active=876" "… a cached agent beside it changes nothing: the live one still refuses the journal"
 mkr j4 sj4
 ev sj4 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j4\", \"journalDir\": \"$J\", \"call\": \"task\"}" j4
 journal wf_j4 completed "$AG"
 irow j4
 ok "$(active j4)" "active=876" "… nor from the journal of a call that is no integrate call"
+
+# A Mac sleep inside the Integration that the Run record does not hold yet: `next` writes it only after the lead has
+# reconciled the call (execute step 2), so the reconcile reads it from the Mac itself (THREAD_MACHINE_TIMES here),
+# through `next`'s own window test, and writes nothing. --now is after the window, so the sleep has happened.
+NOW0=$NOW; NOW=2026-10-19T00:30:00Z
+mkr s1 ss1
+ev ss1 lead-entry 2026-10-18T09:40:00Z '{"by": "stage"}'
+ev ss1 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_s1\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" s1
+THREAD_MACHINE_TIMES='{"sleeps":[["2026-10-18T12:00:00Z","2026-10-18T13:00:00Z"]]}' irow s1
+ok "$(active s1)|$(grep -c '"stopped"' "$THREAD_EVENTS_DIR/ss1.jsonl")" "active=816|0" \
+  "a sleep only the Mac shows yet comes off (876.55 - 60), and the reconcile writes no stopped line: next stays its writer"
+mkr s2 ss2
+ev ss2 lead-entry 2026-10-18T09:40:00Z '{"by": "stage"}'
+ev ss2 lead-entry 2026-10-18T14:00:00Z '{"by": "heartbeat"}'
+THREAD_MACHINE_TIMES='{"sleeps":[["2026-10-18T12:00:00Z","2026-10-18T13:00:00Z"]]}' irow s2
+ok "$(active s2)" "active=876" \
+  "… but not one before the last lead-entry: that entry read it (as next does, only sleeps that wake after the mark)"
+mkr s3 ss3
+ev ss3 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_s3\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" s3
+journal wf_s3 completed "$AG"
+THREAD_MACHINE_TIMES='{"sleeps":[["2026-10-18T23:50:00Z","2026-10-19T00:10:00Z"]]}' irow s3
+ok "$(active s3)" "active=58" \
+  "a sleep inside a live agent's run (its durationMs holds it, so no journal gap shows it) comes off beside the gaps (78.55 - 20)"
+NOW=$NOW0
 
 # log_minutes: the one parse every reader of lane time shares (reflect.py's span); a line from before p29-13 reads.
 LM=$(python3 - "$SCRIPT" <<'PY4'
