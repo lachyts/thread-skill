@@ -125,7 +125,7 @@ Contract.
    verify-slot: line>): run this wait again`), or with no run named yet (`… no verify-slot: run line in <FILE> yet:
    check the path …`); 76 when the pid is gone (ESRCH; EPERM is alive) and a final read finds no exit line
    (`verify-slot: no verdict: run <pid> ended with no exit line (stopped or killed); exit 76`); 2 on a usage error (a
-   missing or unreadable FILE, a bad --for or --pid, an unknown flag); 128+n when a TERM, INT or HUP cuts it
+   missing or unreadable FILE, a bad --for or --pid, anything but ASCII digits included, an unknown flag); 128+n when a TERM, INT or HUP cuts it
    (`verify-slot: wait cut by a signal after <N>s (run <pid>): no verdict; run this wait again`). A wait cut by its own
    timeout or a signal is no verdict: run it again. It takes no slot, registers no waiter, never calls slots_dir(),
    writes no Run record line and never signals the run. The printed line is authoritative where a code is ambiguous (a
@@ -140,7 +140,7 @@ wait ends), runs CMD under the guard and exits with its rc (128+n for a signal),
 the Mac is hot it waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat stop prints `verify-slot: heat
 stop (<name>): ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac
 cools`, and the exit is the last run's rc. The slot wait is bounded (p32-1): `--slot-wait S` (or `--slot-wait=S`), an
-integer >= 0 in seconds, default RUN_SLOT_WAIT, 4800: the lead's `slotWait` at the default `verify_timeout` of 1800 s,
+integer >= 0 in seconds, written in ASCII digits only, default RUN_SLOT_WAIT, 4800: the lead's `slotWait` at the default `verify_timeout` of 1800 s,
 max(60, 7200 - 600 - 1800), so an agent's wait fits its harness maximum as the lead's verify does; a constant, never
 a rollout's own `verify_timeout`, and the engine renders no `--slot-wait`. S is one deadline for the whole run: every
 slot wait, heat hold and heat-stopped run counts against it; the first pass always tries (0: one try, and a free slot
@@ -149,8 +149,8 @@ never restarted): `verify-slot: no verdict: no verify slot within <S>s[ (heat: <
 red. A TERM, INT or HUP before the suite starts exits 76 too, no verdict, never red: `verify-slot: no verdict: stopped
 while the Mac was hot (heat: <name>); exit 76` while it waits on the heat or is back in line after a heat stop, else
 `verify-slot: no verdict: stopped before the suite started; exit 76` (contract 4). Usage errors exit 2: `--slots`
-missing, 0, negative, a non-integer; `--slot-wait` with no value, negative, a non-integer or with whitespace; no `--`;
-no CMD; an unknown flag. A command that cannot be started exits 127.
+missing, 0, or anything but ASCII digits; `--slot-wait` with no value or anything but ASCII digits (each refuses a
+sign, `+1` included, an underscore such as `1_0`, whitespace and a non-ASCII digit); no `--`; no CMD; an unknown flag. A command that cannot be started exits 127.
 
 `status [--slots N]` reaps stale waiter files and prints {dir, slots: [{index, state: free|held, holder}],
 waiters: [{pid, cwd, since, kind}], heat: {level, name}}; without --slots it lists the slot files present. Stdlib
@@ -797,23 +797,25 @@ class _Usage(Exception):
     pass
 
 
+def _digits(v):
+    """A flag's integer value, written in ASCII digits only, else None (p32-1). int() alone also takes a sign (`+5`),
+    an underscore (`1_000`), surrounding whitespace and non-ASCII digits, none of which the usage contract allows."""
+    if not isinstance(v, str) or not v.isascii() or not v.isdigit():
+        return None
+    return int(v, 10)
+
+
 def _positive_int(v):
-    try:
-        n = int(v, 10)
-    except (TypeError, ValueError):
-        raise _Usage(f"--slots must be an integer >= 1, got {v!r}")
-    if n < 1 or str(v).strip() != v:
+    n = _digits(v)
+    if n is None or n < 1:
         raise _Usage(f"--slots must be an integer >= 1, got {v!r}")
     return n
 
 
 def _slot_wait_arg(v):
-    """`run --slot-wait S` (p32-1): an integer >= 0 in seconds (0: one try), written with no whitespace; else usage."""
-    try:
-        n = int(v, 10)
-    except (TypeError, ValueError):
-        raise _Usage(f"run: --slot-wait must be an integer >= 0 (seconds), got {v!r}")
-    if n < 0 or str(v).strip() != v:
+    """`run --slot-wait S` (p32-1): an integer >= 0 in seconds (0: one try), in ASCII digits only; else usage."""
+    n = _digits(v)
+    if n is None:
         raise _Usage(f"run: --slot-wait must be an integer >= 0 (seconds), got {v!r}")
     return n
 
@@ -1341,11 +1343,8 @@ def _run_framed(argv):
 
 
 def _int_in(v, lo, hi, name):
-    try:
-        n = int(v, 10)
-    except (TypeError, ValueError):
-        n = None
-    if n is None or str(v).strip() != v or n < lo or (hi is not None and n > hi):
+    n = _digits(v)
+    if n is None or n < lo or (hi is not None and n > hi):
         span = f"from {lo} to {hi}" if hi is not None else f">= {lo}"
         raise _Usage(f"wait: {name} must be an integer {span}, got {v!r}")
     return n

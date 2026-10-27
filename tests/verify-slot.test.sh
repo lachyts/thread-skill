@@ -169,7 +169,7 @@ touch "$D/t2.go"; wait "$(w t2)"
 
 # ======== V6: usage ========================================================================================
 pool v6
-for a in "--slots 0 -- true" "--slots -1 -- true" "--slots abc -- true" "--slots 1.5 -- true" "--slots 1 true" \
+for a in "--slots 0 -- true" "--slots -1 -- true" "--slots abc -- true" "--slots 1.5 -- true" "--slots +1 -- true" "--slots 1_0 -- true" "--slots 1 true" \
          "--slots 1 --" "--priority -- true" "--slots 1 --prio -- true" "-- true"; do
   python3 "$VS" run $a > /dev/null 2>&1; ok "$?" 2 "V6: run $a → exit 2"
 done
@@ -373,11 +373,12 @@ ok "$rc|$(grep -c 'no verdict' "$D/d.err")" "3|0" "V17: --slot-wait 0 with the s
 
 # ======== V18: --slot-wait usage =============================================================================
 pool v18
-for v in -1 abc 1.5 ' 2' '2 ' '' --; do
+# Only ASCII digits (p32-1): int() alone would take a sign, an underscore and a non-ASCII digit.
+for v in -1 abc 1.5 ' 2' '2 ' '' -- +1 1_0 '٣'; do
   python3 "$VS" run --slots 1 --slot-wait "$v" -- touch "$D/ran" > /dev/null 2>&1; rc=$?
   ok "$rc|$([ -e "$D/ran" ] && echo ran || echo never)" "2|never" "V18: run --slot-wait '$v' → exit 2"
 done
-for a in --slot-wait= --slot-wait=-1 --slot-wait=x; do
+for a in --slot-wait= --slot-wait=-1 --slot-wait=x --slot-wait=+1 --slot-wait=1_0; do
   python3 "$VS" run --slots 1 "$a" -- touch "$D/ran" > /dev/null 2>&1; ok "$?" 2 "V18: run $a → exit 2"
 done
 python3 "$VS" run --slots 1 --slot-wait > /dev/null 2>&1; ok "$?" 2 "V18: run --slot-wait with no value → exit 2"
