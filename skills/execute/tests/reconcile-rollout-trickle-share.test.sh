@@ -193,7 +193,8 @@ ok "$(q "$J" 'd["start"]')" '[]' "F1: a1 lands; ro-a does not refill the freed p
 ok "$(q "$J" '[d["hold"][0]["slug"], d["hold"][0]["reason"]]')" "[\"a3\",\"trickle: 1/2 $T, 1 kept for [[ro-b]]\"]" \
   "F1: … a3 reads the place kept for ro-b"
 ok "$(q "$J" '[d["trickle"]["kept"], d["slotLimit"]]')" '[{"ro-b":1},1]' "F1: … trickle.kept {ro-b: 1} and slotLimit 1"
-ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","running","kept"]' \
+# p28-4's `lapsed` follows `elsewhere`; `kept` stays last.
+ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","lapsed","running","kept"]' \
   "F1: … kept is the trickle block's last key"
 J=$(nx ro-b --now "$(at 20)")
 ok "$(q "$J" 'd["start"]')" '["b1"]' "F1: ro-b's next tick (+20m) starts b1 into the kept place"
