@@ -1251,7 +1251,7 @@ STANDING_SPEND_LOCK = "standing-spend.lock"
 PAUSED_FOR_KEY = "paused_for"
 SIGN_OFF = "sign-off"
 PAUSE_LOG_SECTION = "## Pause log"
-# The rollout start stamp (p23-6; skills/_shared/vault-grammar.md § Rollout start stamp): the execute offer's
+# The rollout start stamp (p23-6; skills/_shared/vault-grammar.md § Rollout start stamp): the execute handoff's
 # Start when ready writes a top-level `start: unattended`, the Chorus Stage reads it (the first `start:` line, scalar
 # lower-cased) and starts one lead once the note is runnable, and `next` reports it and, past its refusals and off
 # --dry-run, removes it, so the Stage never starts a second lead. Chorus's record, `started_unattended:`, is untouched.

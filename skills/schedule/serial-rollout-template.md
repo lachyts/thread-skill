@@ -28,7 +28,7 @@ Serial-rollout plan for one chain of `[[{{PROJECT_NAME}}]]` tasks (ADR 0040): Le
 
 ## How to execute
 
-Legs run this chain (execute's legs.md). Leg 1 opens in row 1's launch (its alias, from its folder) and runs `/thread:execute [[<this note>]]`. Each Leg works only rows of the launch it opened in, so a launch change between two rows is a Leg boundary: it claims up to five tasks, one at a time, closes, and hands the rest to a fresh Leg, whose brief is this note's `## Leg log`. This note takes no execute offer and no start stamp, and it is never paused: a Leg stops through `leg.py close --outcome stopped`. To give its surfaces back before it runs, stamp it `status: dropped`; its tasks are then free for a later `/thread:schedule`.
+Legs run this chain (execute's legs.md). Leg 1 opens in row 1's launch (its alias, from its folder) and runs `/thread:execute [[<this note>]]`. Each Leg works only rows of the launch it opened in, so a launch change between two rows is a Leg boundary: it claims up to five tasks, one at a time, closes, and hands the rest to a fresh Leg, whose brief is this note's `## Leg log`. This note takes no execute handoff and no start stamp, and it is never paused: a Leg stops through `leg.py close --outcome stopped`. To give its surfaces back before it runs, stamp it `status: dropped`; its tasks are then free for a later `/thread:schedule`.
 
 ## Queue
 

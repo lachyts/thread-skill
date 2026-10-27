@@ -252,7 +252,8 @@ apply the rules above to that run.
 
 **Close's form.** `close` writes only when the thread has a concrete next
 task, and never invents one. It stands down entirely — neither field — while
-a pending handoff doc owns the thread's continuation (ADR 0017). Otherwise
+a pending handoff doc owns the thread's continuation (ADR 0017; a Rollout
+launch's `launch` doc owns nothing). Otherwise
 its task is matched **concretely**, first hit wins: (1) this thread's
 capture — the one row of `captures --slug <thread slug> --thread-file
 <THREAD.md> --for-close`, run in close's step 5, before step 7.6 creates
