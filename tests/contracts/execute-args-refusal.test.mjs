@@ -5,8 +5,10 @@
 // set-aside row, the error line printed, the halt, then a fresh call by *Restart routing* or step 1.4's `prepare`);
 // *Lost call*'s exclusion in its definition, its dead-call bullet and its git-env-hold bullet; the lead's three
 // decision points for a call that comes back (step 2, the integrate call's return, § 5's resume), each sending an error
-// that contains the sentinel to *Args refusal* before its *Lost call* clause; § 3.7's fifth *Can no longer resume* case; § 4's verifySlot check before the stamps (its halt, its integrate `free-lane`, the resume
-// exemption); the *Run record*'s free-lane bullet; § 7's three halts; § 3's `verify-timeout` exit 4 and its shape
+// that contains the sentinel to *Args refusal* before its *Lost call* clause; § Room stop item 6 and *Lost call*'s
+// room-stop bullet, each excluding such an error from room-stopped; § 3.7's fifth *Can no longer resume* case; § 4's
+// verifySlot check before the stamps (its halt, its integrate `free-lane`, the resume exemption) and the three launch
+// sequences that name it (step 1.2's seeded revise, step 1.3, the integrate call); the *Run record*'s free-lane bullet; § 7's three halts; § 3's `verify-timeout` exit 4 and its shape
 // without `verifySlots`; and no "reads as a *Lost call*" left. The engine half (the sentinel on every refusal) is pinned
 // by skills/execute/tests/args-refusal.test.mjs.
 //
@@ -25,6 +27,7 @@ const S4 = /^### 4\. /
 const S45 = /^### 4\.5\. /
 const S5 = /^### 5\. /
 const S7 = /^### 7\. /
+const ROOM = /^## Room stop \(/
 
 // A bold-labelled paragraph inside a section: from its label line to the next bold label at column 0.
 function labelled(text, sectionRe, label) {
@@ -67,6 +70,10 @@ function check(skill) {
   const slotsP = labelled(skill, S45, 'Verify slots')
   const step2 = lineAt(s45raw, '2. **A task call returns.**')
   const s5 = collapse(section(skill, S5) ?? '')
+  const lostRoom = lineAt(lostRaw.join('\n'), '- While a room stop stands')
+  const item6 = lineAt(section(skill, ROOM), '6. **Room-stopped.**')
+  const seeded = lineAt(s45raw, '   2. **Standing approval (ADR 0034), first.**')
+  const step13 = lineAt(s45raw, '   3. For each slug in `restart`')
 
   // args-refusal: the paragraph sits right before *Lost call*; it covers every call kind and its resumes; it matches the
   // sentinel by contains; it is never a Lost call; the six steps in order (the check, the drops, the integrate
@@ -120,6 +127,15 @@ function check(skill) {
     fails.push('routing-sites')
   }
 
+  // room-stop: a call that ends with an error is room-stopped while a room stop stands (it keeps its handle, counts in
+  // `--running`, an integrate call keeps the lane, and it is resumed after the stop), except an error that contains the
+  // sentinel: § Room stop item 6 and *Lost call*'s room-stop bullet each send it to *Args refusal*, which drops its runId
+  // and frees an integrate call's lane.
+  if (!item6.includes(`An error that contains ${SENTINEL} is never room-stopped either: *Args refusal* (§ 4.5) drops its runId and frees an integrate call's lane.`) ||
+    !lostRoom.includes(`An error that contains ${SENTINEL} is never room-stopped: *Args refusal* drops its runId and frees an integrate call's lane.`)) {
+    fails.push('room-stop')
+  }
+
   // cannot-resume: § 3.7 counts five cases, the fifth the engine's refusal of a resumed call's args, whose fresh call
   // the next entry's Restart routing makes after the halt.
   if (!cannot.includes('Five cases') || /Four cases/.test(cannot) ||
@@ -139,6 +155,20 @@ function check(skill) {
     !pre.includes(`after ${FREE} while the note keeps \`integrating:\``) ||
     !pre.includes('A resume is exempt: it keeps the original-args rule (below), and a refusal there is an *Args refusal* (§ 4.5)')) {
     fails.push('pre-check')
+  }
+
+  // launch-sites: the launch sequences a lead follows name § 4's check at the point it runs, before any stamp: step
+  // 1.2's seeded-revise launch and step 1.3 right after § 3's config, and the integrate call after `mark-integrating`,
+  // before its `startedAt` stamp and the canary arm.
+  const CHECK = "§ 4's *Check verifySlot before the stamps*"
+  const SEEDED = `A launch is: § 2.5, § 3's config, ${CHECK} (a missing or different \`args.verifySlot\` writes nothing and halts), stamp \`status: in_progress\``
+  const ST13 = `§ 2.5, § 3's config, ${CHECK} for a fresh call (a start, or the own call or seeded revise *Restart routing* resolves for a restart; a resume is exempt), for a restart resolve *Restart routing* (it writes nothing), stamp \`status: in_progress\``
+  const INT = `${CHECK} runs after step 3's \`mark-integrating\`, before its \`startedAt\` stamp and the canary arm: a mismatch frees the lane and halts.`
+  if (!seeded.includes(SEEDED) || !before(seeded, SEEDED, '`mark-started --tasks <slug>') ||
+    !step13.includes(ST13) || !before(step13, ST13, 'mark-started --tasks <slug>') ||
+    !integrateCall.includes(INT) || !before(integrateCall, INT, 'The canary arm (*Git-env canary*: `--kind integrate`) runs right before its launch') ||
+    !pre.includes("at the point each launch sequence names it: § 4.5 step 1.2's seeded-revise launch and step 1.3, each right after § 3's config, and the integrate call (step 3)")) {
+    fails.push('launch-sites')
   }
 
   // free-lane: the Run record's free-lane bullet names both integrate halts among the § 7 halts that leave the lane held.
@@ -181,7 +211,7 @@ test('execute § 3, § 3.7, § 4, § 4.5, § 5 and § 7 hold every args-refusal 
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
-const RULES = ['args-refusal', 'lost-exclusion', 'routing-sites', 'cannot-resume', 'pre-check', 'free-lane', 'halts', 'verify-timeout', 'prose-sites']
+const RULES = ['args-refusal', 'lost-exclusion', 'routing-sites', 'room-stop', 'cannot-resume', 'pre-check', 'launch-sites', 'free-lane', 'halts', 'verify-timeout', 'prose-sites']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -226,6 +256,13 @@ test('control: a decision point that sends every error to Lost call again fails 
     'If a call dies or'), 'routing-sites', '§ 5')
 })
 
+test('control: a refused call counted room-stopped again fails room-stop', () => {
+  only(edit(real, ` An error that contains ${SENTINEL} is never room-stopped either: *Args refusal* (§ 4.5) drops its runId and frees an integrate call's lane.`, ''),
+    'room-stop', 'item 6')
+  only(edit(real, ` An error that contains ${SENTINEL} is never room-stopped: *Args refusal* drops its runId and frees an integrate call's lane.`, ''),
+    'room-stop', 'Lost call room-stop bullet')
+})
+
 test('control: Can no longer resume back on four cases fails cannot-resume', () => {
   only(edit(real, "Five cases: no handle (another session, or the record was lost), the script's sha differs, the script file is gone, the Workflow tool refuses the resume, or the engine refuses the resumed call's args (*Args refusal*, § 4.5: e.g. a call launched without `verifySlot` before 5.0.0, resumed on a refusing engine).",
     "Four cases: no handle (another session, or the record was lost), the script's sha differs, the script file is gone, or the Workflow tool refuses the resume."),
@@ -240,6 +277,13 @@ test('control: the pre-check without its integrate free-lane fails pre-check', (
 test('control: the pre-check moved after the stamps fails pre-check', () => {
   only(edit(real, "For a task call or seeded revise that is before § 4's `status: in_progress` and `owner:` stamps and before `mark-started`:",
     "For a task call or seeded revise that is after § 4's `status: in_progress` and `owner:` stamps and `mark-started`:"), 'pre-check', 'after the stamps')
+})
+
+test('control: a launch sequence that no longer names the verifySlot check fails launch-sites', () => {
+  only(edit(real, "A launch is: § 2.5, § 3's config, § 4's *Check verifySlot before the stamps* (a missing or different `args.verifySlot` writes nothing and halts), stamp",
+    "A launch is: § 2.5, § 3's config, stamp"), 'launch-sites', 'seeded revise')
+  only(edit(real, " § 4's *Check verifySlot before the stamps* runs after step 3's `mark-integrating`, before its `startedAt` stamp and the canary arm: a mismatch frees the lane and halts.", ''),
+    'launch-sites', 'integrate call')
 })
 
 test('control: the free-lane bullet without the integrate halts fails free-lane', () => {
@@ -259,7 +303,7 @@ test('control: the prUrlError clause reading as a Lost call again fails prose-si
   only(edit(real, 'before dispatch (an *Args refusal*, which halts the entry);', 'before dispatch and the refusal reads as a *Lost call*;'), 'prose-sites', 'prUrlError')
 })
 
-test('the rules are all named (9) and each has a control', () => {
-  assert.equal(RULES.length, 9)
+test('the rules are all named (11) and each has a control', () => {
+  assert.equal(RULES.length, 11)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
