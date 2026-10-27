@@ -907,6 +907,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   agent's result line), and resumes every stopped call by `resumeFromRunId` on
   the Stage's re-send (Chorus ADR 0071; execute § Room stop). It stands from
   its `## Pause log` line to `room stop ended`, and it never stamps `paused:`.
+  A spread (Chorus ADR 0109) is one too, sent before the line: the Stage
+  moves the lead off a Login whose 5-hour window would not carry its
+  Rollouts, and the Pause-log line says `spreading its Rollouts`.
   _Avoid_: drain (Chorus's signal calls it "a drain, not a pause"; here the
   soft pause is the drain), pause, hard pause, handoff.
 - **Sign-off pause** — the pause execute's sign-off form stamps (`paused:`
