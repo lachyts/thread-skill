@@ -40,8 +40,10 @@ kills its group (`<step> timed out after <n>s`) and is never retried; less than 
 <step>`); any git error or missing ref fails closed. A passing state check logs one miss line (GIT_ENV_MISS_MARK,
 imported) and holds nothing: `record missing` writes a closed `checked` tombstone carrying `miss`; `record not armed`
 leaves the tombstone untouched, so its `ackedTrips` survive; `record unreadable` becomes a closed `checked` tombstone
-with `miss: "record unreadable"` and `missChecked: false`, which that window's own later check consumes, writing no
-second line.
+with `miss: "record unreadable"` and `missChecked: false`, which that window's own later check consumes. That check
+reads the state check there and then too (cached, so free when its own pass logged the miss), never an earlier verb's:
+passing, it writes no second line; failing (a change since a `check-all` logged the miss), the window trips
+(`record unreadable, and the state check failed: <failure>`).
 
 Verbs (every verb takes --rollout <note>; every verb but `restore` takes --tasks-dir <dir>, default
 reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
@@ -66,7 +68,8 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
         A missing record is the Bookkeeping miss `record missing`, a closed `checked` or `acked` tombstone `record
         not armed` (the owner holds at its own check, so a tombstone left by an earlier window with the same slug
         and kind means this window was never armed), and an unreadable record `record unreadable` (the pass turns
-        it into a tombstone this check consumes): each runs the state check above. A task window exits 3 only for a
+        it into a tombstone this check consumes, reading the state check again at this check, so a change since an
+        earlier verb logged the miss trips here): each runs the state check above. A task window exits 3 only for a
         whole-rollout hold, else 0: its work is taken as it stands (its agent worked in its own tree cut from
         origin), and its stdout names any acked trip, any logged miss and any lane hold; a trip it saw is logged and
         joins the unacked set. Every other kind exits 3 for a whole-rollout hold, else 9 for a lane hold, else 4
@@ -936,10 +939,18 @@ def cmd_check(ctx, args):
         ctx.save(own)
     elif own["state"] == "checked" and own.get("miss") == "record unreadable" and own.get("missChecked") is False:
         # The pass logged this window's own unreadable record as a miss just now (or an earlier verb did): consume
-        # it, no second line. The window could not be read, so its run gives no verdict.
+        # it. The state check is read there and then, at this check (cached: free when this check's own pass ran it),
+        # never taken from an earlier verb's pass, so a change since that miss trips here. Passing: no second line,
+        # and the window could not be read, so its run gives no verdict. Failing: the window trips, closed.
         own["missChecked"] = True
-        ctx.save(own)
-        missed, acked, void = "record unreadable", own.get("ackedTrips") or [], True
+        sc = _state_check(ctx, ctx.repo, ctx.default)
+        if sc["ok"]:
+            ctx.save(own)
+            missed, acked, void = "record unreadable", own.get("ackedTrips") or [], True
+        else:
+            _tripped(own, f"record unreadable, and the state check failed: {_sanitise(sc['failure'])}", ctx.repo, True)
+            ctx.save(own)
+            ctx.append([own["trip"]["line"]])
     elif own["state"] in ("checked", "acked"):
         # A tombstone of an earlier window: this one was never armed. A Bookkeeping miss: the state check decides,
         # and a passing one leaves the tombstone untouched, so its `ackedTrips` survive (ADR 0053).

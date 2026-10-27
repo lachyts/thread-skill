@@ -189,6 +189,20 @@ has "$out" "checked [[I]] verify: no verdict" "bm-unread: … no verdict"
 arm I verify; echo '{x' > "$(recp I verify)"; sleep 1   # a second apart, so this miss line is not the last one's twin
 call; ok "$rc|$(misses I)|$(recf I verify missChecked)" "0|2|false" "bm-unread: a check-all logs the window's miss (its tombstone unconsumed)"
 chk I verify; ok "$rc|$(misses I)|$(recf I verify missChecked)" "4|2|true" "bm-unread: … the window's own check consumes it: 4, no second line"
+# bm-unread-late: the window's own check reads the state there and then, never the earlier check-all's: a local
+# commit after the check-all logged the miss trips the window at its own check, so the re-run's arm never baselines
+# on it. (A's closed window gives check-all its repo: with none known the miss trips at once.)
+scen bm-unread-late
+mkt A in_progress; mkt I review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-19T10:00+00:00'
+arm A; chk A
+arm I verify; echo '{not json' > "$(recp I verify)"
+call; ok "$rc|$(misses I)|$(trips I)|$(recf I verify missChecked)" "0|1|0|false" "bm-unread-late: check-all logs the unreadable record's miss (its tombstone unconsumed)"
+code; X=$(cur)
+chk I verify; ok "$rc|$(misses I)|$(trips I)" "9|1|1" "bm-unread-late: … a local commit, then the window's own check → 9 (the lane), a trip, no second miss"
+has "$(grep 'git-env trip \[\[I\]\]' "$RO")" "verify: record unreadable, and the state check failed: refs/heads/master $X holds commits not on origin master" "bm-unread-late: … the trip line names the failed state check"
+ok "$(recf I verify state)|$(recf I verify closed)|$(recf I verify missChecked)" '"tripped"|true|true' "bm-unread-late: … the record reads tripped, closed and consumed"
+arm I verify; ok "$rc|$(recf I verify state)" '9|"tripped"' "bm-unread-late: … the re-run's arm → 9, nothing baselined on the local commit"
+chk I verify; ok "$rc|$(trips I)" "9|1" "bm-unread-late: … a repeated check of the tripped window → 9, no second trip line"
 scen bm-behind
 mkt A in_progress
 arm A; chk A; push2
