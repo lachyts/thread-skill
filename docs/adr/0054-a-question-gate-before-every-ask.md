@@ -79,9 +79,10 @@ Each row is one ask unit (a paragraph, list item or table row) in `skills/`, fou
 unit holds. Dispositions: `cited` (the ask stands and its unit cites `_shared/asking.md`), `listed` (a pointer at an
 ask another unit holds, whose Owner it shares: it cites `_shared/asking.md` too), `follow-up` (an ask the gate
 removes, left to the owner task named in Task and put in the Framing until it lands), `no ask` (the unit names an ask
-only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 80
-rows: 39 cited, 29 follow-up (p30-4 14, p30-9 2, p30-10 13), 2 listed, 7 no ask, 3 designed out. That is form N1:
-p30-5 (PR #226) is on main, its step 4 cited in three units.
+only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 81
+rows: 40 cited, 29 follow-up (p30-4 14, p30-9 2, p30-10 13), 2 listed, 7 no ask, 3 designed out. That is form N1:
+p30-5 (PR #226) is on main, its step 4 cited in three units. Orient § 3.5's Priorities card (p30-6, Chorus ADR 0110
+d5) added one `cited` row.
 
 | File | § | Anchor | Owner | Disposition | Task |
 | --- | --- | --- | --- | --- | --- |
@@ -97,6 +98,7 @@ p30-5 (PR #226) is on main, its step 4 cited in three units.
 | skills/open/SKILL.md | § Repo-thread lookup | `` list them as `<label> — <abs path>` and ask `` | *yours* | cited | — |
 | skills/orient/SKILL.md | § 1 | `` report its one `resolve-target:` line and ask in plain text for the target `` | *yours* | cited | — |
 | skills/orient/SKILL.md | § 1 | `` **`candidates` or `none`** → ask before any § 2 read `` | *yours* | cited | — |
+| skills/orient/SKILL.md | § 3.5 | `` in one `AskUserQuestion` call of four questions `` | *yours* | cited | — |
 | skills/orient/SKILL.md | § 6 | `` steer it with `AskUserQuestion` `` | *yours* | cited | — |
 | skills/orient/reshuffle.md | R3 | `` Ask Lachy only the questions he owns `` | *yours* | cited | — |
 | skills/orient/reshuffle.md | R4 | `` Print the final disposition table and get a y/n `` | *yours* (ADR 0036) | cited | — |

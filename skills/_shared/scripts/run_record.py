@@ -232,8 +232,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   tuning             id, repo, window{since, until, activeStart?, activeEnd?, partial?}, scores{throughput,
                      runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
                      quality, reviewChurn}, applied (a list of at most 8 {key, from, to, ranAt, rule, evidence,
-                     agreeing, agreed?}); binding? (slot-bound | lane-bound | quota-bound | dependency-bound |
-                     none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
+                     agreeing, agreed?}); binding? (slot-bound | lane-bound | quota-bound | trickle-bound (p28-6) |
+                     dependency-bound | none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
                      that wrote it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
                      Reflection's line); auto? (true only: `tune.py --auto` or `--revert`, the weekly reading's own
                      landing); reflection? (the weekly reading's r- id, present exactly when auto is); reverts? (the
@@ -441,6 +441,13 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   carries the past. A stop no evidence shows (the same session
   resumed hours later with no stated cause and no Mac event) is not inferred: the heartbeat's lead-entries bound it,
   and ADR 0051's monthly audit covers it.
+- Stop readers: reconcile-rollout.py stop_spans() reads every stop by this model (p29-13), and an Integration log
+  line's `active=` is its `duration=` less the union of the stops inside its window whose calls stop with them (all but
+  a halt, which carries its calls on), so no reader prices a usage-limit stall as Integration lane work. The line is
+  written when the lead reconciles the call (or logs its own Integration), before `next`, so a sleep inside it is
+  usually not a line yet: _unrecorded_sleeps reads the sleeps `next` would write (machine_times since the last
+  lead-entry or recorded wake, through the window test) into that union without writing them, and `next` or
+  record-entry stays the writer.
 - Stop writers: step-boundary.py `begin` (a room stop: usage-limit, live); the Stop-hook driver
   hooks/rollout-stop-driver.py (a § 7 halt, live; never a serial rollout's Leg and never while a pause stands);
   reconcile-rollout.py `record-entry` (every inferred stop and every lead-entry, at each loop entry and heartbeat
@@ -596,7 +603,7 @@ APPLIED_KEYS = ("key", "from", "to", "ranAt", "rule", "evidence", "agreeing")
 # p21-7: `agreed`, the weekly agreement (the Agreement rule), on every entry of a non-void auto landing only
 APPLIED_OPTIONAL = ("agreed",)
 MAX_APPLIED = 8
-BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "dependency-bound", "none-clear")
+BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "trickle-bound", "dependency-bound", "none-clear")
 # a close line's `close` (p21-6): the close that wrote it, through close-score.py and tune.py --close
 CLOSES = ("completion", "supersede")
 
