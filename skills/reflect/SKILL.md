@@ -23,11 +23,14 @@ passes Lachy's answer on:
   Reflection's line beside the record). Never edit either file by hand from this skill, and never compute a score
   or write a Tuning in the conversation.
 - `skills/reflect/scripts/reflect.py` is the **only writer** of `reflections.jsonl` (the weekly reading's Watches,
-  proposals, Time-lost ledger lines and close), and of the bug and decision tasks it files. Its header is the one copy
-  of its rules.
+  proposals, Time-lost ledger lines, attention lines and close), and of the bug and decision tasks it files. Its header
+  is the one copy of its rules.
 - `skills/reflect/scripts/ledger.py` prices the **Time-lost ledger** (ADR 0051): the hours each cause class cost,
   summed from the Run record across every rollout. reflect.py loads it; it reads only, and its header is the one copy
   of the model (the classes, the precedence, the waits on Lachy, the baseline and the Monthly audit's month rule).
+- `skills/reflect/scripts/attention.py` reads the **attention ledger** (ADR 0056): the questions put to Lachy, from the
+  session transcripts, each PR's /fresh-review trail, each rollout's wait to start, and the work items and rollouts that
+  circle without merging. reflect.py loads it; it reads only, and its header is the one copy of its rules.
 - `skills/reflect/scripts/reflect-due.py` says whether the weekly reading is due (ADR 0037 d4 and d6, ADR 0051). It
   reads `reflections.jsonl` only and writes nothing; its header is the one copy of its rule.
 
@@ -47,7 +50,8 @@ Thread does, in the contract's words:
   proposes Tunings. Never *review* (code review's word) or *retro*. The by-hand form scores and proposes; the
   weekly reading also traces.
 - **Watch**: a pattern seen once, carried to the next reading. Thread's sighting is per rollout, so it becomes a rule
-  proposal when another rollout shows it again, or at once when Lachy confirms it (step 12).
+  proposal when another rollout shows it again, or at once when Lachy confirms it (step 12) (the Time-lost ledger's and
+  the circling detector's Watches count readings instead: steps 13a and 13b).
 - **Tuning**: one change at one of three altitudes: a **knob** (a number: cheap, reversible, and it may land on its
   own), a **rule** (a grill and an ADR before a build; never lands unasked) and a **bug** (filed as a task, never
   picked, never filed twice). Chorus's word and map altitudes are not Thread's. A knob that lands is its own `applied`
@@ -80,7 +84,10 @@ the decision task under `~/repos/obsidian/Work/Tasks/`; the decision task's one 
 § 3b); `tunings.jsonl` lines only through tune.py's `--auto` and `--revert`; and `call-journal` lines through
 `span --fold`. Its scratch dir is `/tmp/thread-reflect-week-<YYYY-MM-DD>/`. The Monthly audit (step 10a) also reads,
 read-only, the lead sessions' transcripts, the suite logs, the rollout notes' pause logs and the Mac's own history, and
-writes only `audit.json` in that scratch dir. `--decide` writes `watch-raised` lines
+writes only `audit.json` in that scratch dir. The attention ledger (steps 10, 11 and 13b) also reads, read-only, the
+main chain of the session transcripts (Claude's own and each profile's), `reviews.jsonl` and each /fresh-review
+checkout's git, never fetched; it writes the `attention` line and the circling Watches through reflect.py, and
+`owners.json`, the reading's Owner labels, in that scratch dir. `--decide` writes `watch-raised` lines
 through `reflect.py raised` and a `moot` line in the decision task through `reflect.py moot`, and marks the task done.
 Neither form makes a git write or a PR.
 
@@ -270,8 +277,10 @@ and the writers record the outcome. It lands a bug task, an agreed knob or a kno
 rule proposal (with any Watch to confirm beside it), a held trade (a knob ADR 0037 d1 leaves to Lachy) or a Monthly
 audit's gap goes into one decision task for Lachy's next morning. It also keeps the **Time-lost ledger** (ADR 0051):
 the hours each cause class cost across every rollout, ranked by cause and trended week on week, with a Monthly audit
-on the month's first reading. Every write goes through `reflect.py` or tune.py, each idempotent, so a reading that dies
-part-way is finished by running the remaining steps against the same `span.json`.
+on the month's first reading. And it keeps the **attention ledger** (ADR 0056): the questions put to Lachy by Owner, each
+PR's review trail, each rollout's wait to start, and the work items and rollouts that circle without merging. Every
+write goes through `reflect.py` or tune.py, each idempotent, so a reading that dies part-way is finished by running the
+remaining steps against the same `span.json`.
 
 What starts it is Chorus's weekly Runner first: on the Thursday Reflection Routine's morning it makes this reading
 beside the Companion's, so both are fresh when the Routine walks them with Lachy. The daily sweep is the fallback, and
@@ -327,6 +336,17 @@ the `streak`; `watch`, whether this reading sights a Watch on the top class; the
 `holds` (a ceiling raise the ledger holds, step 14); and `audit`, whether the Monthly audit is due (step 10a). Waits on
 Lachy are priced as stalls (`gate`, `question`, `hand-back`), read from the record's own evidence; only his own pause is
 unranked.
+
+Its `attention` block is the **attention ledger** (ADR 0056; `skills/reflect/scripts/attention.py`'s header holds every
+rule), read past the Run record: `questions`, each question put to Lachy in the window, from the session transcripts'
+main chain (its `items`, each with an `id`, its outcome, its recommended option and whether he picked it, his own words
+or note, and the hours it held work; its `counts`, the totals); `trails`, the /fresh-review rounds of each PR, keyed by
+its landing merge, its branch, or a run of rounds in one checkout (rounds, STOP entries and those handed to him, and
+whether the PR changed docs alone); `waits`, each rollout's wait to start, from his ask (the earliest `captured:` of its
+queue's tasks) and from its scheduling; `circling`, `W1` (a work item three or more Sessions touched with nothing merged
+while no rollout held it, each with its `heldBy`), `W2` (a rollout open 48 hours with nothing merged) and `readings` (the
+reading Sessions it left out: a Session that runs the reading's own scripts is never a touch); `watches`, each circling
+rule's Watch as step 13b would write it (`fresh`, and `held`, the items a closed cycle named); and `trend`.
 
 ### 10a. The Monthly audit
 
@@ -469,6 +489,17 @@ time, never lane work, and belongs with the stalls by cause. A non-zero `wallOnl
 which can hold a stall (written before p29-13, or `active=-`: a resumed integrate call whose journal placed no live
 agent, say): say so beside the figure. Never read lane time off a `duration=` by hand.
 
+**The attention ledger** (`span.json`'s `attention`). Label each question's Owner by
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1 (with `~/.agents/knowledge/how-lachy-decides.md` when it is there)
+into `/tmp/thread-reflect-week-<YYYY-MM-DD>/owners.json`, `{"<id>": "<owner>"}`, the owner one of `yours`, `priorities`,
+`technical`, `gate` and `unknown`, one entry per `attention.questions.items` id whose `outcome` is not `failed`. Label
+in batches of at most 100 questions per subagent call, side by side when the harness offers subagents, and merge the
+labels by id. Judge each question as it stood when it was put to him, never by his answer, and use `unknown` only when
+its text cannot tell. When labelling cannot finish, step 13b runs with `--rest-unknown`, step 17 names how many went
+unlabelled, and close never waits on labels. Read `trails` and `waits` as reported, never traced. Trace each `circling`
+item to what held it: a set-aside item starts at its `heldBy` (the stage and reasonClass that stopped it), the others at
+the Sessions that touched it. Name the rule the trace reaches: step 15's `amends` cites it.
+
 ### 12. Sightings
 
 After the whole reading, make ONE `reflect.py watch` call per Watch, naming every rollout where you saw it. Reuse an
@@ -482,7 +513,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py watch --span /tm
 The rule is the citation the trace reached (at most 120 characters); the shape says what happened, in a few words.
 A Watch seen in two rollouts, or confirmed by Lachy, becomes a rule proposal (step 15). Never make a Watch on a
 Time-lost ledger class by hand: a class that tops the ledger two readings running opens its own Watch at step 13a,
-counted in readings, not rollouts, and `watch` refuses the ledger's rule.
+counted in readings, not rollouts, and `watch` refuses the ledger's rule. Never make a Watch on a circling rule by hand
+either: step 13b writes both rules' Watches, counted in readings, and `watch` refuses them.
 
 ### 13. Bugs
 
@@ -514,6 +546,26 @@ due, or the audit is refused (another month, an unknown class or cause, an entry
 overlaps an interval the record already priced in its class: name that as a gap instead; more than 16 entries or 8
 gaps; or a line over the Run record's 16 KiB: trim entries or their text, then run it again).
 
+### 13b. The attention ledger
+
+Once, after step 13a and before step 14, with the labels step 11 wrote:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py attention --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --owners /tmp/thread-reflect-week-<YYYY-MM-DD>/owners.json
+```
+
+It writes this reading's `attention` line (the questions by Owner, the trails, the waits and the circling items), then,
+for each circling rule with fresh items, that rule's Watch: counted in readings, so seen in a second reading it becomes a
+rule proposal at step 15, and a decided item (a yes or a no) never returns on its rule. When labelling could not finish,
+add `--rest-unknown` (with `--owners` for the labels there are, or alone): the rest are written as `unknown`, and it
+prints `flag: <n> of <asked> questions unlabelled, written as unknown`. A rule whose every item a closed cycle named
+prints `held <id>: every item was in a closed cycle`; an item whose name is no rollout slug is dropped, `flag: dropped
+<slug> from <rule>: not a rollout slug`. A re-run prints `exists attention <id>` (and `exists <id>` per Watch), or
+appends one line when the labels changed. Exit 2 names what to fix and writes nothing: an owners file that is no JSON
+object, names an id the span lacks or an Owner outside the five, or leaves a question out without `--rest-unknown`; no
+`--owners` while questions were put to him, without `--rest-unknown`; a closed Reflection; a span with no `attention`
+block.
+
 ### 14. Knobs
 
 From `span.json`'s `knobs`: each revert first, then each landing, then one `knobs` call.
@@ -541,14 +593,19 @@ refuses (`run ledger`) for the same reason.
 ### 15. Decide
 
 Write `/tmp/thread-reflect-week-<YYYY-MM-DD>/decisions.json`, `{"<watch id>": {"why": "...", "amends": "..."}}`,
-one entry per recurring Watch: why it matters, and the rule it would amend; with no recurring Watch, write `{}`. Then:
+one entry per recurring Watch: why it matters, and the rule it would amend; with no recurring Watch, write `{}`. For a
+recurring circling Watch (step 13b's), `why` names its items, each with its Sessions (or, on a rollout, its hours) and
+what held it, and `amends` names the hand-over rule step 11's trace reached for most of them, cited by section; with no
+rule in common, `amends` is `ADR 0056 d5`. Then:
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py decide --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --decisions /tmp/thread-reflect-week-<YYYY-MM-DD>/decisions.json
 ```
 
 It refuses (`run ledger`, exit 2, nothing written) while step 13a's `ledger` has not written this reading's row: the
-ledger's Watch and the audit's gaps reach the task only through its lines, and the task's section is written once.
+ledger's Watch and the audit's gaps reach the task only through its lines, and the task's section is written once. It
+refuses (`run attention`) for the same reason while step 13b has not written this reading's `attention` line: the
+circling Watches reach the task only through it.
 It writes a decision task only with a rule proposal or a held trade, or a Monthly audit that names a gap: a week with
 Watches to confirm alone writes none, and they wait (a task a held trade alone writes lists none). An audit's gaps come
 after the trades, in an audit part of their own: the hours it found and the record's by class, the sources read and
@@ -573,9 +630,12 @@ record (what it was then), and its outcome line ends `cadence <old> -> <new>` wh
 only record lines, and no vault task but the decision task a held trade needs (step 15): a held trade is no rule
 proposal, so it leaves the week quiet. An audit's gaps never count against `quiet`: the audit runs at either cadence,
 and like a held trade a gap leaves the week quiet. Every writer refuses a closed Reflection, so `close` refuses first
-(exit 2, nothing written) while step 13a's `ledger` has not written this reading's row (`run ledger`), or step 14's
+(exit 2, nothing written) while step 13a's `ledger` has not written this reading's row (`run ledger`), or step 13b's
+`attention` its line (`run attention`), or step 14's
 `knobs` or step 15's `decide` has a line to write (a knob line, a rule line, a held trade, or an audit gap no decision
-task lists for this Reflection): run the step its stderr line names, then close.
+task lists for this Reflection): run the step its stderr line names, then close. A circling Watch counts like any other
+Watch: its first-ever line makes the week not quiet, its second reading is a rule proposal, and a later cycle's first
+reading leaves the week quiet.
 
 ### 17. Report, then tidy
 
@@ -585,7 +645,9 @@ Watches written (and any `extended` line), the bugs filed or found, the Time-los
 class against last week, the trend, any Watch it opened, any ceiling raise it held), the Monthly audit's row when one
 ran (its hours found against the record's, the sources it could not read) and each gap it named, each knob landed,
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or
-skipped behind a revert, the close line's counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
+skipped behind a revert, the attention ledger (the questions put to Lachy, *yours* beside `unlabelled`, a lower bound
+while that is above 0, the recommended-pick rate and the hours questions held work; the trails, their STOP entries,
+those handed to him and the docs-only PRs; the waits to start; each circling item and any Watch it opened), the close line's counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
 
 ## Deciding the decision task
 
@@ -601,7 +663,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py raised --watch <
 - **A yes to a Watch to confirm**: the same with `--confirmed`, then the grill task.
 - **A no to a rule item or a Watch to confirm**: the same with `--declined`. It records his no and
   closes the Watch's cycle, so the pattern is proposed again only when two later rollouts show it afresh, never next
-  week from the same evidence.
+  week from the same evidence. A circling Watch's items, once decided, are never listed again: it returns only when
+  two later readings find fresh items.
 - **A yes to a trade** (a `- trade` item): run `/thread:reflect [[<rollout>]]`, the item's by-hand Reflection (steps
   1–8). At step 6 his yes is the score's proposal with the item's key and rule, and step 7's `--pick` applies it;
   tune.py's line is the record.
@@ -724,6 +787,30 @@ or `exists`). An item left open keeps the task open.
   hold: those rest on hours a script sums from the record.
 - An audit's gaps never make a reading not quiet, so the cadence can relax while audits keep naming gaps; the audit
   still runs on the month's first reading.
+- The Question ledger reads the question tool's questions alone: a question put in plain text, a grill's spoken
+  question or one the Stage put for him is not in it.
+- Only Claude's session transcripts are read (Claude's own and each profile's): another harness's are not, and a
+  transcript cleaned up or past its retention is gone.
+- The Owner is the reading's label (asking.md § 1), never his: *yours* is a lower bound while `unlabelled` is above 0.
+- An answer the Stage gave in his place reads as his.
+- A STOP entry is an entry into the stop verdict, not the end of a review: one trail can enter it more than once.
+- A STOP handed to him is any question within 30 minutes of a stop round from the same checkout, whatever it was about.
+- A PR reviewed in a checkout whose heads reach no branch and no landing merge reads as a trail of its own (#211's
+  rounds read as two trails).
+- Docs-only is unknown after a landing with no merge commit (a fast-forward, or a squash whose branch is gone).
+- A touch means the note was named in a prompt or a tool call, not that work was done on it.
+- A work item needs `phase:`, `pr:` or `rollout:`: a task with none (chorus-the-companion-recovers-a-stalled-rollout)
+  is never W1's.
+- A work item a rollout holds at until is never W1's that week; it counts again once set aside, so an item circling
+  inside one live run shows only through W2 and the Time-lost ledger.
+- A note tagged `rollout` that is not a rollout note (a name that is no slug, neither `protocol_version:` nor `## Queue`,
+  or the Rollouts hub) is never W2's.
+- A Session that runs the reading (its span verb, a verb on its span file, or a score) is never a touch, even where it
+  also worked on an item, so a by-hand test of those verbs hides that Session's touches; and a reading run through a
+  shell variable is not recognised, so it keeps its own.
+- A rollout note with no record is judged by its status now, so one closed after until is never W2's for that week.
+- The ask behind a wait to start is known only to the day: a `captured:` date.
+- A decided circling item never returns on its rule, and a later cycle's first reading leaves the week quiet.
 - A `tunings.jsonl` line can carry several Tunings: the contract's ledger has one line per Tuning, but tune.py writes
   a run's Tunings on ONE `tuning` line, an `applied` entry per knob, for a by-hand `--pick` of several (step 7) and
   for an `--auto` call that lands several (step 14). Only the weekly reading's `proposal` lines in

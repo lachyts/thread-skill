@@ -39,8 +39,8 @@ there. THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the r
 the same place.
 
 Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning to tunings.jsonl, the
-weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost) to reflections.jsonl, and the Grade log's
-kind (grade) to grades.jsonl. All four names are RESERVED: refused as a rollout slug and as a carried `from`.
+weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost, attention) to reflections.jsonl, and the
+Grade log's kind (grade) to grades.jsonl. All four names are RESERVED: refused as a rollout slug and as a carried `from`.
 
 tunings.jsonl holds one line per by-hand Reflection, plus one `close` line per rollout, at its completion ceremony or
 its supersede, plus one `auto` line per knob the weekly reading lands or reverts (skills/reflect/scripts/tune.py is
@@ -79,8 +79,9 @@ it and reports it.
 reflections.jsonl holds the weekly reading's lines (skills/reflect/scripts/reflect.py is its only writer, and tune.py
 reads it for the agreement, the load hold and to refuse a closed Reflection): a `watch` line per (Reflection, Watch), a
 `watch-raised` line per decided Watch, a `proposal` line per (Reflection, Tuning) at each altitude, a `time-lost` line per
-(Reflection, source) (the Time-lost ledger, p29-11: reflect.py `ledger` its one writer), and one `reflection` line that
-closes the Reflection. None carries a rollout or a task.
+(Reflection, source) (the Time-lost ledger, p29-11: reflect.py `ledger` its one writer), an `attention` line per
+Reflection (the attention ledger, p30-7: reflect.py `attention` its one writer; a changed re-run appends one, and readers
+take the last), and one `reflection` line that closes the Reflection. None carries a rollout or a task.
 - Baseline: the next Reflection on that repo (matched ignoring case) compares against the `scores` of the line with
   the latest window.activeEnd at or before its own window.activeStart, preferring a line not marked partial; a
   line whose activeEnd is null never qualifies. Comparing active spans, not ts or until, keeps a Reflection run late
@@ -105,7 +106,7 @@ with its newline. The common keys come first, in this order:
              Any other ISO timestamp field a caller adds must be UTC `Z` too; call-journal's
              startTime is the one epoch field (the journal's own epoch-ms integer, verbatim).
     host     the hostname up to its first dot
-    rollout  the rollout slug (null only for review-round, grade and the five reflections.jsonl kinds; a tuning's is
+    rollout  the rollout slug (null only for review-round, grade and the six reflections.jsonl kinds; a tuning's is
              a provenance stamp)
     task     the task slug, or null
     kind     one of the kinds below
@@ -256,11 +257,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      evidence one of at most 300; agreeing an integer >= 0; agreed (an integer >= 1, on every
                      entry of a non-void auto landing and on no other line); no other key. Never auto and close on one
                      line.
-  watch              id, rule, shape, rollouts, count, reflection; ledgerClass? (p21-7: one per (Reflection, Watch); id
-                     is watch_id(rule, shape); rule and shape stripped, each at most 120 characters; rollouts 1 to 64
-                     slugs, none reserved, every rollout where the Reflection saw it; count an integer >= 1; ledgerClass,
+  watch              id, rule, shape, rollouts, count, reflection; ledgerClass?, circling? (p21-7: one per (Reflection,
+                     Watch); id is watch_id(rule, shape); rule and shape stripped, each at most 120 characters;
+                     rollouts 1 to 64 slugs, none reserved, every rollout where the Reflection saw it; count an integer >= 1; ledgerClass,
                      p29-11, one of TIME_LOST_CLASSES: the Time-lost ledger's Watch on that class, written by reflect.py
-                     `ledger` alone, its rollouts the class's top contributors). No rollout, no task; lands in
+                     `ledger` alone, its rollouts the class's top contributors; circling?, p30-7, one of CIRCLING_RULES:
+                     the circling detector's Watch on that rule, written by reflect.py `attention` alone, its rollouts
+                     the work items (W1) or rollouts (W2) it found; never both on one line). No rollout, no task; lands in
                      reflections.jsonl.
   watch-raised       id, reflection, via (recurring | confirmed | declined: Lachy's yes to a recurring Watch, his yes
                      to a Watch to confirm, or his no; any of them closes the Watch's cycle). No rollout, no task;
@@ -333,6 +336,23 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      evidence})}, the caps sized so a full audit of plain text fits the 16 KiB line (text JSON escapes
                      can still overflow it, and ledger.py's audit_line() refuses that first); ranges and cites,
                      baseline only, lists of at most 16 objects). No rollout, no task; lands in reflections.jsonl.
+  attention          reflection, since, until, questions, trails; waits?, circling? (p30-7, ADR 0056: the attention
+                     ledger, one line per Reflection, a changed re-run appending one that readers take as the last;
+                     reflect.py `attention` its one writer; skills/reflect/scripts/attention.py's docstring holds the
+                     rules. reflection an r- id; since and until UTC Z stamps, since <= until; questions exactly asked,
+                     calls, answered, dismissed, dropped, open, failed, unparsed, notes, ownWords and unlabelled
+                     (integers >= 0, unlabelled <= asked), recommended {offered, picked} (picked <= offered), hoursHeld
+                     (a finite number >= 0), longest (at most 5 {call, session, repo, header of at most 60 characters,
+                     hours, outcome}), byRepo ({repo: count}, at most 12 repos and `other`), byOwner and hoursByOwner
+                     (keyed by exactly ATTENTION_OWNERS, byOwner summing to asked); trails exactly count, rounds,
+                     codeRounds, simplifyRounds, stopRounds, stops, stopsHanded, findings, regression and engineStops
+                     (integers >= 0), docsOnly {trails, rounds}, longest (at most 5 {label of at most 120 characters,
+                     rounds, stopRounds, stops, stopsHanded, docsOnly true, false or null, handedAfterStop at most 8
+                     ids}); waits at most 16 {rollout (a slug), ask (a UTC Z stamp), scheduled and started (a stamp or
+                     null), hours, scheduleHours (or null), open}; circling W1 and W2 only (never span's readings), at
+                     most 32 items each {slug (a slug, not reserved), sessions, questions, hours?}. The caps keep a full
+                     line under 16 KiB with 64-character slugs; attention.py trims the circling lists, then the waits,
+                     when a line would pass it). No rollout, no task; lands in reflections.jsonl.
   base-moved      T  repo, pr, base, main (the refused integrated base and the live main merge-task read), inertOnly
                      (true | false | null: null only beside an error), moversTotal (an int >= 0), movers (at most 20
                      {sha, kind, rollout?, task?, pr?, source?}, oldest first: kind rollout | peer, source record |
@@ -427,9 +447,11 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   returns only when two later rollouts show it afresh. Within a cycle each Reflection counts by its latest line, the
   cycle's rollouts are the union and its count the sum. Recurring: two or more distinct rollouts in the open cycle,
   one of them this Reflection's. A Watch is new only at its id's first-ever `watch` line. A Watch whose lines carry
-  `ledgerClass` (the Time-lost ledger's, p29-11: reflect.py `ledger` alone writes it) counts readings, not rollouts:
-  within a cycle its sightings are the Reflections with a line, recurring is two or more of them, one this
-  Reflection's, so a declined class returns only when two later readings show it on top again.
+  `ledgerClass` (the Time-lost ledger's, p29-11: reflect.py `ledger` alone writes it) or `circling` (the circling
+  detector's, p30-7: reflect.py `attention` alone writes it) counts readings, not rollouts: within a cycle its sightings
+  are the Reflections with a line, recurring is two or more of them, one this Reflection's, so a declined class returns
+  only when two later readings show it on top again, and a declined circling item never returns on its rule (its Watch
+  writes fresh items alone: two later readings that find some).
 - The Agreement rule (p21-7, ADR 0037 d5: a knob lands once three Reflections agree). For K = knob_key(repo, key,
   rule, direction) of the current proposal P, from rollout X in Reflection R: the key's last move is the latest
   non-voided tuning line for the repo (case ignored) with an applied entry on `key`, any rule or direction (a pick, an
@@ -509,8 +531,8 @@ Exit codes: 0 written, skipped as a duplicate fold, or a warned write failure; 2
 a missing or out-of-enum field, a task-scoped kind with no task, a tuning with one, a grade with a rollout, a reserved
 rollout or `from`, --json not a JSON object, a common-key
 collision, NaN, a bad slug, a naive or malformed --ts, a line over 16 KiB, a review-verdict whose original +
-regression exceed its findings, a stopped, suite-ended, base-moved or time-lost line that breaks its kind's cross-field
-rules),
+regression exceed its findings, a stopped, suite-ended, base-moved, time-lost or attention line that breaks its kind's
+cross-field rules, a watch carrying both ledgerClass and circling),
 with one line starting `run_record: ` on
 stderr and nothing written; `dir` exits 1 when the directory cannot be resolved.
 """

@@ -67,9 +67,9 @@ module's: span leaves it out, and `reflect.py attention --owners` brings it in.
 
 Review trails. The /fresh-review rounds in reviews.jsonl (run_record's REVIEWS), its `review-round` lines stamped at or
 before until, deduplicated by run_record's reader rule: the latest line per (repo, doc) when doc is set, else per (repo,
-head, digest) (a local copy: score.py:1494's and reflect.py's Span.fresh_review keep their own; the shared reader is ADR
-0055's to make). A round's time is its `reviewedAt`, else the first line of its key. Each round's checkout (its `repo`)
-resolves to a main repo: an existing path through `git rev-parse --path-format=absolute --git-common-dir`; a gone path
+head, digest) (a local copy: score.py's fresh_review_rounds and reflect.py's Span.fresh_review keep their own, and a
+shared reader, once one lands, replaces all three). A round's time is its `reviewedAt`, else the first line of its key.
+Each round's checkout (its `repo`) resolves to a main repo: an existing path through `git rev-parse --path-format=absolute --git-common-dir`; a gone path
 holding `/.claude/worktrees/`, the part before it; another gone path `<parent>/<base>`, the longest sibling
 `<parent>/<name>` with `<base>` starting `<name>-` whose repo holds the head's object; else none (cannotShow). The
 identity is the main repo's origin (owner/name), else its path; the ref is refs/remotes/origin/HEAD, else exactly one of

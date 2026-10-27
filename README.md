@@ -50,7 +50,7 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 | `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg. |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. A serial chain reads as its Legs, its chain state and any stall (`leg.py status`). |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. A stalled serial chain gets its set-asides answered or deferred with their dependants, and its next Leg started as a new Session. |
-| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; by hand only the ones Lachy picks are applied, by the tune script, which records each by-hand Reflection in `tunings.jsonl`. The weekly reading (`--weekly`, ADR 0037 d3–d5) reads every rollout since the last one, traces the friction to its rules, keeps Watches in `reflections.jsonl`, files bugs and lands a knob three Reflections agree on, never a rule: a rule proposal, or a held trade (a knob that trades one headline against the other), waits in one decision task for Lachy. A serial chain is scored from its Leg log (`serial-score.py`) into one close line at its Complete, and the weekly reading scores it the same way, never as a knob candidate. |
+| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; by hand only the ones Lachy picks are applied, by the tune script, which records each by-hand Reflection in `tunings.jsonl`. The weekly reading (`--weekly`, ADR 0037 d3–d5) reads every rollout since the last one, traces the friction to its rules, keeps Watches in `reflections.jsonl`, files bugs and lands a knob three Reflections agree on, never a rule: a rule proposal, or a held trade (a knob that trades one headline against the other), waits in one decision task for Lachy. It keeps the Time-lost ledger (ADR 0051) and the attention ledger (ADR 0056): the questions put to Lachy by Owner, each PR's /fresh-review trail, each rollout's wait to start, and a Watch on work that circles without merging. A serial chain is scored from its Leg log (`serial-score.py`) into one close line at its Complete, and the weekly reading scores it the same way, never as a knob candidate. |
 
 ## Runtime support
 
@@ -153,7 +153,11 @@ half of a Reflection at each rollout's close (fold, settings, score,
 (ADR 0037 d4). `skills/reflect/scripts/reflect.py` runs the weekly reading's
 script half and is the only writer of `reflections.jsonl` and of the bug and
 decision tasks, and keeps the Time-lost ledger (`skills/reflect/scripts/ledger.py`,
-ADR 0051: the hours each cause class cost across rollouts, and a Monthly audit).
+ADR 0051: the hours each cause class cost across rollouts, and a Monthly audit) and
+the attention ledger (`skills/reflect/scripts/attention.py`, ADR 0056: the questions
+put to Lachy, read from the session transcripts and labelled by Owner, each PR's
+/fresh-review trail, each rollout's wait to start, and the circling detector's
+Watches).
 `skills/reflect/scripts/reflect-due.py` tells Chorus's weekly Runner, and the
 daily sweep as its fallback, when the weekly reading is due: the Thursday after
 the last one, or the Thursday after that once three Reflections in a row were
@@ -354,7 +358,11 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   one back, and the cadence `close` writes), `tests/reflect-ledger.test.mjs` (the Time-lost ledger: fixture records
   summed by class and cause, the waits on Lachy as stalls, the trend from persisted rows, the baseline, the ledger's
   Watch counted in readings, the load hold, the Monthly audit's month rule and window, its gaps in the decision task and
-  never against `quiet`),
+  never against `quiet`), `tests/reflect-attention.test.mjs` (the attention ledger: fixture transcripts read once per
+  question with each outcome and the hours held, `tally`, the owners file's refusals and its `unknown` remainder, Review
+  trails keyed by landing, branch or path run with their STOP entries and docs-only diffs, waits to start, both circling
+  rules with a reading's own Sessions left out, and their Watches counted in readings through decide, close and the
+  cadence),
   `tests/reflect-grades.test.mjs` (`grades.py` on fixture grade lines, records and notes: each grade's episode to the
   next grade or the close, dispatch by record or by link, foreseen sign-offs, every outcome and the hands-off rate's
   denominator, window against all, and Slot hours per size),

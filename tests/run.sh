@@ -51,6 +51,9 @@ printf '%s\n' '# Seeded by tests/run.sh and refused on purpose: a suite that rea
 # file>/events make test` runs them all against an unwritable record (p15-2: recording never breaks a verb).
 # The suites that read the record (run-record, the fold and record suites) keep their own dir.
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$scratch/events}"; unset XDG_STATE_HOME
+# The session transcripts the weekly reading's attention ledger reads (attention.py, p30-7) stay in temp too: an empty
+# dir, so no suite reads this Mac's own sessions; each suite that reads transcripts sets its own.
+mkdir -p "$scratch/transcripts"; export THREAD_TRANSCRIPTS_DIR="$scratch/transcripts"
 # The machine's verify slots (verify-slot.py, p23-4) stay in temp too: each suite that reaches a pool exports its
 # own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
 export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
