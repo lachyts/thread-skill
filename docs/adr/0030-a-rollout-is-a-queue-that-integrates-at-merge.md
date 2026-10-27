@@ -23,6 +23,9 @@ twice is reverted.)*
 *(Amended by ADR 0048, 2026-10-21: scoped holds, and the Watchdog.)*
 *(Amended by ADR 0049, 2026-10-21: the Away cap.)*
 *(Amended by ADR 0050, 2026-10-21: the Flake rule.)*
+*(Amended by ADR 0048, 2026-10-28: merge-task's exit 70 and its environment exit 2, and lead-integrate's exit 2 on the
+task holding the lane, hold the Integration lane, never the whole rollout; a revert PR's and the RACE revert's still
+halt.)*
 
 ## Context
 

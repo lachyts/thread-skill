@@ -254,15 +254,17 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !(rows['`failed:git-env:<any other rc>`'] ?? '').includes('reason="git-env canary failed"') ||
     /git-env trip/.test(rows['`failed:git-env:<any other rc>`'] ?? '') ||
     !backoff.includes('`# thread:git-env-backoff` snippet') ||
-    !['0 → `mark-done`', '5 → the `## Race log` line only', '2/70 → halt', '`failed:git-env:<rc>` → halt by the exit rule', 'anything else does nothing'].every((k) => mr.includes(k)) ||
+    !['0 → `mark-done`', '5 → the `## Race log` line only', '`failed:git-env:<rc>` → halt by the exit rule', 'anything else does nothing, 2 and 70 included'].every((k) => mr.includes(k)) ||
+    mr.includes('2/70 → halt') ||
     !mr.includes("A revert PR's result (*The RACE revert*) takes its own hold route: 2 or 70 → halt, with no `## Race log` line; `failed:git-env:<rc>` → the exit rule; every other code, 0, 5 and 6 included, does nothing, and the revert stays pending") ||
-    !donts.includes('never take a route under a git-env hold but 0/5/2/70 (a revert PR\'s: 2/70 only)') ||
-    !donts.includes('never take a route under a git-env hold but 0/5/2/70')) fails.push('merge-result')
+    !donts.includes('never take a route under a git-env hold but 0 and 5 (a revert PR\'s: 2/70 only)') ||
+    donts.includes('never take a route under a git-env hold but 0/5/2/70')) fails.push('merge-result')
 
   // exit-rule: any non-zero exit halts with one of two reasons, in the paragraph and in § 7; never ack from execute.
   const ex = bullet(canRaw, 'The exit rule.')
   if (!ex.includes('The canary\'s exit 9 is a lane hold, never a halt (the next bullet). Any other non-zero exit halts: exit 3 `reason="git-env trip: the shared checkout changed"`, anything else `reason="git-env canary failed"`') ||
-    !s7.includes('`reason="git-env trip: the shared checkout changed"`') || !s7.includes('`reason="git-env canary failed"`') ||
+    !s7.includes('`reason="git-env trip: the shared checkout changed"`') ||
+    !s7.includes('`reason="git-env canary failed"` on anything else') ||
     !donts.includes('never ack from execute') || !pz.includes("TaskStop'd calls keep their open git-env records")) fails.push('exit-rule')
 
   // no-verdict (ADR 0053): a check's exit 4 never halts, and each window kind's route is stated.
@@ -535,7 +537,7 @@ test('control: the close-out rule losing "stricter than S9" fails owner-closeout
 })
 
 test("control: status's action 7 without the git-env trip fails status", () => {
-  only('status', "   An unacked git-env trip (§ 3's Git-env trip flag) is an open escalation too → `/thread:repair [[<rollout>]]`,\n   ahead of every reinstate or resume: only its § 3e ack, on Lachy's word, lifts the hold.\n", '', 'status', 'action 7')
+  only('status', "   An unacked git-env trip (§ 3's Git-env trip flag) is an open escalation too → `/thread:repair [[<rollout>]]`,\n   ahead of every reinstate or resume: only its § 3e ack, on Lachy's word, lifts the hold.", '  ', 'status', 'action 7')
 })
 
 test('control: schedule without the intended-write sentence fails schedule', () => {

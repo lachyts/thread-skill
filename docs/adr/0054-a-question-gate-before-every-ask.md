@@ -79,8 +79,8 @@ Each row is one ask unit (a paragraph, list item or table row) in `skills/`, fou
 unit holds. Dispositions: `cited` (the ask stands and its unit cites `_shared/asking.md`), `listed` (a pointer at an
 ask another unit holds, whose Owner it shares: it cites `_shared/asking.md` too), `follow-up` (an ask the gate
 removes, left to the owner task named in Task and put in the Framing until it lands), `no ask` (the unit names an ask
-only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 67
-rows: 40 cited, 15 follow-up (p30-9 2, p30-10 13), 2 listed, 7 no ask, 3 designed out. That is form N1:
+only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 68
+rows: 41 cited, 15 follow-up (p30-9 2, p30-10 13), 2 listed, 7 no ask, 3 designed out. That is form N1:
 p30-5 (PR #226) is on main, its step 4 cited in three units. p30-4 (the approved queue) removed its 14 rows. Orient
 § 3.5's Priorities card (p30-6, Chorus ADR 0110 d5) added one `cited` row.
 
@@ -115,6 +115,7 @@ p30-5 (PR #226) is on main, its step 4 cited in three units. p30-4 (the approved
 | skills/repair/SKILL.md | § 3 | `` Ask the question verbatim, quoting the latest feedback `` | *yours* (ADR 0033) | cited | — |
 | skills/repair/SKILL.md | § 3 | `` so Lachy decides with it on screen `` | *yours* | cited | — |
 | skills/repair/SKILL.md | § 3 | `` show it again and ask again `` | *yours* | cited | — |
+| skills/repair/SKILL.md | § 3 | `` whether the cause is fixed and the lane may run again `` | *yours* (ADR 0048) | cited | — |
 | skills/repair/SKILL.md | § 7 | `` `AskUserQuestion` quoting `setAside.summary` `` | *yours* | cited | — |
 | skills/repair/SKILL.md | § 7 | `` present each of its `setAside.gates` verbatim `` | *yours* (ADR 0008) | cited | — |
 | skills/repair/SKILL.md | § Don'ts | `` refuses a second block after a restart (exit 3): ask Lachy then `` | *yours* | cited | — |

@@ -53,7 +53,8 @@ Subcommands:
               "race", revert} per undecided RACE in `raceHold`, in rank order, that is not reverted on main, or whose
               revert the lead still owes (`revert: true`: started, not failed, its `integrating:` standing; the lane's
               first work, execute § 4.5 step 1.4), or that was reverted with `main not re-verified` (Race holds,
-              below). `mainRed` (after `laneHold`, _main_red) is every RACE whose revert did not land that no `RACE
+              below), then one {slug, hold: "lane", cause, stamp} per unacked `## Lane log` hold (Lane hold, below),
+              in log order. `mainRed` (after `laneHold`, _main_red) is every RACE whose revert did not land that no `RACE
               decided:` line lifts, [{slug, why, stamp}]: while it is non-empty nothing starts or restarts, every
               stalled or queued task is held (`main red: the revert of [[<first>]] did not land: /thread:repair`) and
               `halt` is "race" at once, whatever runs, pauses or holds; only a whole-rollout git-env hold outranks it
@@ -64,14 +65,19 @@ Subcommands:
               "git-env" under a whole-rollout git-env hold, else "race" while `mainRed` is non-empty; otherwise it is
               null while anything starts, restarts or runs, or while the lane moves (`laneHold` empty and something
               awaits Integration, integrates or holds the lane for a RACE re-verify; or a `race` entry reads `revert:
-              true` and no `git-env` entry stands); otherwise the first of "git-env" (a lane `git-env` entry), "race"
-              (a `race` entry with `revert: false`), "paused", "empty", "complete" (or "done"), "held",
+              true` and no `git-env` or `lane` entry stands); otherwise the first of "git-env" (a lane `git-env`
+              entry), "race" (a `race` entry with `revert: false`), "lane" (a `lane` entry), "paused", "empty",
+              "complete" (or "done"), "held",
               "awaiting-sign-off" and "stuck". Two halts sit outside that list (p30-4, Approved queue below):
               "superseded", returned at once for a note with a valued `superseded_by:`, before its ceiling is read,
               and "regenerate", set whenever an approved queue's verdict regenerates and no git-env trip, `mainRed`
               entry or `laneHold` entry stands (each halts first, ADR 0046), ahead of every other verdict, "empty"
               included. So the order is superseded > git-env (whole) > race (main red) > regenerate > git-env (lane)
-              > race (lane) > paused > empty > complete/done > held > awaiting-sign-off > stuck. With every
+              > race (lane) > lane > paused > empty > complete/done > held > awaiting-sign-off > stuck. `git-env`
+              (lane), `race`, `lane`, `stuck` and a task-scope `held` are the lead's to act on only after execute
+              § 4.5 step 1.5's wait clauses, because `next` cannot see step 1.2's cool-downs or its cap-held
+              revises; a `pause_requested` behind a lane verdict never drains while the note keeps `integrating:`.
+              With every
               task merged, `halt` is "complete" (run the completion ceremony), or "done" when the ceremony already
               ran through its archive move (p19-14: the rollout note reads `status: done` and sits in
               `Archive/Rollouts/`), so no entry runs it twice (the lead's `done` route runs only its last step,
@@ -222,8 +228,11 @@ Subcommands:
               `rollout:` must name --rollout (else exit 1); an undecided RACE or UNVERIFIED is exit 2 with
               hand-back's ERROR line. It then re-runs lead-integrate.py's auto_retry_verdict, the one `inputs`
               prints (its task_inputs read with the rollout's Project root as --repo, the lead's `--repo
-              <repoPath>`, so the note's pr: reads as the same PR URL or `prUrlError`): an `autoRetryError` (an `auto_retries` or `max_review_rounds` stamp that is not a valid
-              integer) is exit 1; --auto-retries and --fingerprint are assertions the lead copies from `inputs`,
+              <repoPath>`, so the note's pr: reads as the same PR URL or `prUrlError`): an `autoRetryError` (an invalid
+              round-budget stamp: `auto_retries` or `max_review_rounds` through _retry_budget, `max_iterations` or
+              `max_plan_rounds` through _round_budget_error) is exit 1, and the task stays set aside under H12, never a
+              halt (ADR 0048): the lead reaches this only by hand or after the note changed, since an `autoRetryError`
+              always comes with `autoRetry: false`; --auto-retries and --fingerprint are assertions the lead copies from `inputs`,
               and a mismatch is exit 1 (the note changed since `inputs`); `autoRetry: false` is exit 1, `ERROR:
               auto-retry: <slug>: not auto-retryable: <why>; nothing written`. Otherwise it writes, in order, each
               finished by a re-run: (a) `- <stamp> auto-retry: [[<slug>]] <n>/<N> (<stage>; feedback <sha>)[;
@@ -269,7 +278,7 @@ Subcommands:
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
               pause_requested, pausedFor, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline,
-              trickle, ladder, gitEnvHold, mainRed, holdUntil, tasks}; `trickle` (p28-6) is `next`'s trickle block read the same
+              trickle, ladder, gitEnvHold, laneLog, mainRed, holdUntil, tasks}; `trickle` (p28-6) is `next`'s trickle block read the same
               way, silently (no WARN), plus `here`: {away, file, why, limit, awayCap, until, morning, elsewhere, here,
               running}, `here` this rollout's own count as another lead's count elsewhere reads it and `running`
               elsewhere plus here (Trickle and Away, below); `pausedFor` is the rollout's `paused_for` (`sign-off` under await-sign-off's
@@ -280,6 +289,7 @@ Subcommands:
               is what the error needs: `stamp` (the note's own value is invalid), `file` (rollouts.toml was
               refused), `root` (the Project root is gone or its origin unreadable) or `resolver`, else null;
               `gitEnvHold` is the unacked git-env trips (Git-env hold, below), each with its `scope`, [] when none;
+              `laneLog` is the unacked Lane holds (Lane hold, below), each {slug, cause, stamp, line}, [] when none;
               `mainRed` is `next`'s (_main_red: the RACE reverts that did not land, undecided), [] when none; `incomplete`
               is why the rollout must not run as written (below), or null. `ladder` is {source, rungs (names,
               bottom first), error}: the local ladder file through ladder.py's load(); a refused file gives
@@ -695,6 +705,85 @@ Subcommands:
               missing gated_inputs.py; the lead then omits the key. It writes nothing and records no Run-record
               event.
 
+  lane-hold   The Lane hold's one write (ADR 0048, p29-7; Lane hold, below; execute § 4.5 *Lane hold*): `--rollout
+              <note> --tasks <slug> --cause <cause> [--tasks-dir D] [--now] [--dry-run]`, the evidence on stdin (its
+              first non-empty line, whitespace collapsed, `[[` written `[`, cut to 200 characters; `(no message)` when
+              empty). It appends `- <stamp> lane hold [[<slug>]] <cause>: <evidence>` to the rollout's `## Lane log`
+              (Note.append_line; a new section at the note's end), re-reads it, then frees the lane in the Run record
+              (_halt_lane) when the record is unreadable or its lane is this task, and prints `<slug>: lane hold
+              (<cause>) [written]; lane freed` (or `; the record holds no lane on it`), plus ` (task note unreadable:
+              <why>)` when it could not read the task note. Exit 2: more than one slug, or a cause outside
+              LANE_HOLD_CAUSES. Exit 1, nothing written: the rollout note unreadable; the task note readable but its
+              `rollout:` another rollout's; the task note unreadable and the rollout's `## Queue` not linking the slug
+              (`names no task of [[<ro>]]`, _queue_links); a failed save or a line missing on re-read. An unacked hold
+              with the same slug and cause writes nothing (`[no-change]`; a lane the record still shows on the task is
+              freed). It needs no task note, so a hold lands exactly when the note will not parse.
+
+  lane-ack    Lachy's ack of a Lane hold (repair § 3g, its one writer): `--rollout <note> --tasks <slug>[,<slug>…]
+              --fix "<his words>" [--now] [--dry-run]`. It appends `- <stamp> lane ack [[a]], [[b]]: <fix>` to the
+              `## Lane log`. Exit 2: no slug, or an empty or multi-line --fix. Exit 1: the note unreadable, a slug no
+              hold line names, or a failed save. Every slug already acked writes nothing (`[no-change]`). It reads no
+              task note and writes no event.
+
+  moving      The Watchdog's reading (ADR 0048, p29-7; status SKILL.md § The Watchdog's reading, which carries the
+              safety wording's one copy): `--rollout <note> [--tasks-dir D] [--now ISO] [--stall-after MIN]
+              [--gh-bin gh]`. One compact JSON line, {rollout, verdict, cause, reason, lastEvent, ageMinutes,
+              stallAfter, until, work: {running, lane, start, halt, reentry, coolDown, capHeld}}, verdict moving |
+              stalled | waiting (its cause the meant wait) | skip. Read-only and guard-exempt: no note, event, lock or
+              claims file is written, and no bytecode. Exit 0 any verdict; 1 `ERROR: moving: <why> (a lost look, never
+              a stall)` when the note, the Run record or `next` cannot be read (MovingError); 2 usage (--stall-after
+              outside 1 to 1440; default STALL_AFTER_MIN 45, two missed 20-minute heartbeat ticks and some slack).
+              moving_verdict is the body; watchdog.py calls it in-process. The algorithm's one copy, first match wins:
+              1. skip: _ledger_skip (serial, superseded, done or dropped), or the note not directly in --tasks-dir
+                 (archived).
+              2. The Run record (_record_read, _record_state): either unreadable is a MovingError.
+              3. Pauses: waiting `sign-off` when `paused_for: sign-off` (checked first: await-sign-off stamps `paused:`
+                 with it); then waiting `paused` when _pause_stands (a stamped pause, his whole-rollout act, read as
+                 `paused` even beside an unacked Lane hold: status's LANE HOLD headline carries that ack).
+              4. A room stop under its bound (_room_stop_state 0): waiting `room-stop`, `until` its stamp + 6 h.
+              5. Never started (never_started) and no `lead-entry`: waiting `not-started`.
+              6. `next --dry-run` in-process through _parser() (no --running: every in_progress note is live), its
+                 stdout and stderr captured; exit 1 → waiting `you` (`next refused the rollout: <its ERROR line>`); an
+                 exception → MovingError; halt superseded or done → skip.
+              7. The whole holds `next` reads live (LIVE_WHOLE_REASONS): a `gitEnvHold` entry with scope rollout →
+                 waiting `you`, `git-env trip: the shared checkout changed`; a non-empty `mainRed` → waiting `you`,
+                 `RACE: the revert of [[x]] did not land: <why>`.
+              8. W, the work the lead could act on now: `running` and `start` (and `restart`); the lane (laneHold
+                 empty, no open ("merge", task) hold in the record on an integrating task, and something integrating
+                 or awaiting Integration; or a `race` entry with `revert: true` and no `git-env` or `lane` entry); halt
+                 `complete` or `regenerate`; and `reentry`: each setAside entry at `run` or `integration`, not
+                 race-held, with no task `holdUntil`, under no held rollout hold and no `pauseRequested`, read as step
+                 1.2 reads it (k = _retry_budget's max_review_rounds, None when invalid; lead-integrate.py task_inputs
+                 with that k and auto_retry_verdict). A null `humanFix` with a future `autoRetryAfter` goes to
+                 `coolDown`; an `autoRevise` seeded revise is W only while `slotsInUse` plus the revises before it is
+                 below `slotLimit`, else `capHeld` (cause `heat` at verify-slot's HEAT_HOLD or worse, `away-cap` while
+                 Away, else `trickle`); any other null `humanFix` is W.
+              9. Life signs: L, the last of _stop_state's `live` (every heartbeat tick's lead-entry and every verb the
+                 lead runs); S, the silence, now minus the latest of L, kern.waketime and kern.boottime
+                 (machine_times(since=now): pmset is never read). The silence test at a bound B: L None → stalled
+                 `silent` (`no life sign in the Run record`); S > B → stalled `no life sign for <age>m`, cause
+                 `mac-restart` when a boot came after L, `usage-limit` when a usage-limit stop is open, else `silent`.
+              10. H, the open halt: the last stop_spans entry with cause `halt` and no end, its reason that span's own
+                  `stopped` line's (stop_spans' `reason` and `index`).
+              11. With W: H's reason matching WHOLE_HALT_RES (execute § 7's *Whole-rollout halts kept*) → waiting
+                  `you`; any other H → stalled `halt` at once (`<H>: the halt holds more than it threatens`); `next`'s
+                  `halt: regenerate` → waiting `regenerating` while S <= REGENERATE_STALL_MIN (120; `until` the base +
+                  120), else the silence test at 120: regenerate is judged before the stall-after test and in its
+                  place, whatever else is in W (a running task included), because the Approved-queue route runs as one
+                  foreground turn with no life sign; then the silence test at stall-after; otherwise moving.
+              12. With no W: (a) an open ("merge", task) hold on an integrating task, released only by the lead's own
+                  tick, is judged by silence at stall-after, else waiting `merge-hold`; (b) the waits judged by their
+                  own condition, in execute step 1.6's order: `cool-down` (`until` the earliest), `heat`, `away-cap`,
+                  `trickle` (`next`'s hold prefixes, or capHeld), `last-start` (`until` the Morning), `approved-queue`
+                  (onMerge `waits`), `pr-hold` (a held `waits: merge` holdUntil entry), and `paused` only when `next`
+                  reports `halt: paused` (a drained soft pause: one behind a lane verdict never drains while the note
+                  keeps `integrating:`, so it falls to (c) and its ack is never hidden); (c) otherwise waiting `you`,
+                  with H's reason, else `next`'s verdict worded as execute § 7 words it.
+              Which waits silence judges (SILENCE_JUDGED, bound to status's list by a contract test): `merge-hold` and
+              `regenerating`, and every reading with work; `room-stop` by its 6 h bound; the waits of 12(b) by their
+              own condition; never `paused`, `sign-off`, `not-started` or `you`. A wait the verdict fails to name
+              changes only `waiting`'s cause, never moving or stalled.
+
 Run record (p15-2, ADR 0032): each verb records its own Slot and lane transitions, and (p21-2) the human acts it
 carries out (a Recorded answer, a sign-off, a hand-back, a consumed RACE decision), through run_record.py's
 emit (one helper, _event), best-effort: a refusal or a write failure prints one `run_record:` line on stderr
@@ -905,6 +994,19 @@ verdict; a `lane` entry holds only the Integration lane (`laneHold`), and `halt`
 `status` reports it as `gitEnvHold`; and `carry` refuses the prior (exit 2, --dry-run included) with an ERROR line naming each held slug
 and `/thread:repair [[<from>]]`. A `## Race log` line carrying `git-env halt` names its slug like any Race log line,
 so once the hold is acked the RACE hold applies unchanged.
+
+Lane hold (ADR 0048, p29-7; _lane_log_hold, read by `next`, `status`, `lane-hold` and `lane-ack`, and by `moving` through
+`next`; execute § 4.5 *Lane hold*): a cause that reaches every merge (merge-task's abort or its environment exit 2, a
+lead-integrate.py exit 2 on the task holding the lane, the Integration verify's third `noslot`) holds the Integration
+lane, never the whole rollout. The rollout note's `## Lane log` (LANE_LOG_SECTION, at the note's end) holds one line per
+hold, `- <stamp> lane hold [[<slug>]] <cause>: <evidence>` (LANE_HOLD_RE, the cause one of LANE_HOLD_CAUSES:
+merge-task-abort, merge-task-env, integrate-env, verify-noslot), written only by `lane-hold`, and one line per ack,
+`- <stamp> lane ack [[a]], [[b]]: <his words>` (LANE_ACK_RE: its slugs are the wikilinks before its first `]]: `),
+written only by `lane-ack` (through /thread:repair § 3g). The hold is every hold line no later ack names, in log order;
+a hold after an ack holds again. While one stands, `next` lists a {slug, hold: "lane", cause, stamp} entry in
+`laneHold` after the git-env and race entries: the lane does not move (a pending RACE revert included), task calls go
+on, and `halt` is "lane" once nothing else moves, after "race" (lane) and before "paused". The held task's note keeps
+`integrating:`, so a soft pause never drains past it. `status` reports the holds as `laneLog`.
 
 Trickle and Away (Chorus ADR 0104 d2, d6; ADR 0049, which overturns d3; the spec is skills/execute/away.md): `next`
 reads the Away state file, ~/.config/thread/away.json under the home dir at call time (AWAY_FILE_REL), as one JSON
@@ -1162,16 +1264,17 @@ three levels down and a run-end-shaped line is indented, so feedback text can ne
 open or close a run (the sha stays over the content as given). See Note.append_run for the rules; nothing
 already written is ever deleted.
 
-The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb but `status` and `fold-journals`
-first asks engine-snapshot.py, loaded from this tree, about each rollout the call acts on: guard() on the note its
+The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb but `status`, `fold-journals` and
+`moving` first asks engine-snapshot.py, loaded from this tree, about each rollout the call acts on: guard() on the note its
 --rollout (carry: its --from) names, and guard_task() on each --tasks slug's note and, for `reconcile`, each result
 row's task note (the rollout its `rollout:` names), so a task-keyed verb run with --rollout left off (hand-back,
 mark-started, mark-integrating, mark-done, log-integration, bind-run, free-lane, hold, defer, approve-gates,
-reconcile) is guarded too. When one names another usable snapshot than this plugin root, or a live note's snapshot is
+lane-hold, lane-ack, reconcile) is guarded too. When one names another usable snapshot than this plugin root, or a live note's snapshot is
 unusable, it prints the guard's `engine-snapshot: ` line on stderr, writes nothing and exits 2. Re-run the same
 command from the root the line names. An unstamped note, an archived one whose snapshot is gone, and a task note
-that names no rollout (or one not found), pass from any root. The two exemptions run from any root: `status` writes
-nothing (/thread:status and the estate scan read every rollout with it), and `fold-journals` never reads the note
+that names no rollout (or one not found), pass from any root. The three exemptions run from any root: `status` writes
+nothing (/thread:status and the estate scan read every rollout with it), `moving` writes nothing either and is the
+Watchdog's reading of any rollout from any root, and `fold-journals` never reads the note
 and writes only call-journal lines to the Run record, cross-version state (engine-snapshot.md § Cross-version
 state) that reflect folds across rollouts from its own root.
 """
@@ -4576,11 +4679,12 @@ def cmd_next(args) -> int:
     (a bare checkout) stands nothing starts or restarts, every stalled or queued task is held (`git-env hold:
     /thread:repair`) and `halt` is "git-env", ahead of every other verdict; a lane one holds the Integration lane
     only. `laneHold` lists what holds the lane (every unacked trip's slug, then each undecided RACE not reverted, or
-    whose revert is pending, `revert: true`, or reverted with `main not re-verified`), and `mainRed` the RACE reverts
+    whose revert is pending, `revert: true`, or reverted with `main not re-verified`, then each unacked `## Lane log`
+    hold, ADR 0048, which stops the lane as a git-env trip does, a pending revert included), and `mainRed` the RACE reverts
     that did not land (_main_red): while one stands nothing starts or restarts, every stalled or queued task is held
     (`main red: …`) and `halt` is "race" at once. Once nothing starts, restarts or runs, no cap, last-start or heat
-    hold stands and the lane does not move, a lane `git-env` entry halts "git-env" and a `race` entry with `revert:
-    false` halts "race", ahead of the other verdicts. The Trickle and the Away cap (Chorus ADR
+    hold stands and the lane does not move, a lane `git-env` entry halts "git-env", a `race` entry with `revert:
+    false` halts "race" and a `lane` entry halts "lane", ahead of the other verdicts. The Trickle and the Away cap (Chorus ADR
     0104; ADR 0049; execute away.md): once the refusals pass, the Away state file is read (_away_state; a stale or
     unreadable one prints one AWAY_WARN line on stderr) and every other started parallel Rollout's running tasks are
     counted (_elsewhere_running), plus every other lead's live Trickle claims (_trickle_claims_judge). `slotLimit` is
@@ -10217,7 +10321,7 @@ COMPLETION_DECIDED = ("green", "flake", "red")
 COMPLETION_STREAK = ("noslot", "unrun")
 COMPLETION_NO_VERDICT = (*COMPLETION_STREAK, "stopped", "heat")
 COMPLETION_RESULTS = (*COMPLETION_DECIDED, "rerun", *COMPLETION_NO_VERDICT)
-COMPLETION_HALT_STREAK = 3   # no-verdict runs in a row before the lead halts, as the RACE re-verify does
+COMPLETION_HALT_STREAK = 3   # no-verdict runs in a row before the lead halts
 COMPLETION_LINE_RE = re.compile(r"^- \S+ attempt (?P<n>[12]) at (?P<sha>[0-9a-f]{40}) rc (?P<rc>\S+) -> "
                                 rf"(?P<result>{'|'.join(COMPLETION_RESULTS)})\b")
 # verify --outcome's result beside <out>; the attempt's lock is _attempt_lock's, in the git dir.

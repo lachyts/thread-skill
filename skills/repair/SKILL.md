@@ -132,6 +132,8 @@ overwrites, because each is independent of the pause and the lead:
   block-keyed so a later run, status and the lead find it). Its one save carries, the entry last, the removal of the
   `## Needs you` section it answers, a `--raise <field>` on Lachy's word and a confirmed `--pr`.
 - § 5: a defer of a set-aside task with its queued dependants.
+- § 3g: the lane ack, on Lachy's word (`reconcile-rollout.py lane-ack`, ADR 0048). It writes only the rollout note's
+  `## Lane log`: no task note, no event, and nothing a live call reads, so a pause or a live lead never holds it back.
 - § 3e: the git-env ack, on Lachy's word. The canary's `ack` writes only the rollout note's `## Git-env log` and
   its own records, and it re-baselines a live window rather than overwriting a note; a live verify, RACE or integrate
   window that tripped then checks exit 4, so its run gives no verdict and is done again, while a task window checks
@@ -194,7 +196,8 @@ each task a fresh call beside that resume: two calls per task.
 headline, neither the standing `ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`): the
 full flow, § 3 to § 6, except that an undecided RACE / UNVERIFIED escalation holds § 3a's `resume` (§ 3c), and an
 undecided UNVERIFIED, a RACE revert that did not land or a bare git-env trip holds the hand-off too (§ 4); an
-undecided RACE or a lane-only git-env trip holds only the Integration lane, so the hand-off runs (ADR 0046).
+undecided RACE, a lane-only git-env trip or an unacked Lane hold (status's `laneLog`, § 3g) holds only the Integration
+lane, so the hand-off runs (ADR 0046, ADR 0048).
 
 **Sent here by schedule's unfinished-rollout refusal.** Repair sorts out what is stuck; superseding stays
 schedule's `--regenerate`. A refusal line `<P> is named by the supersedes: of <N>, which has since run` is
@@ -225,6 +228,7 @@ class below it.
 | **merged into another base** | its PR is MERGED into a branch other than the default (status's flag) | escalate with evidence (§ 3c); never hand it back or defer it, and `resume` leaves it unchanged (it checks the base) |
 | **merged, never marked** | not done; its PR is MERGED into the default branch | `reconcile-rollout.py resume` (§ 3a) flips it done; never hand it back or defer it |
 | **merge hold** | merge-task exit 7: review required on the integrating PR | "approve PR #N": Lachy's; never re-integrated, never set aside |
+| **lane held** | a `laneLog` entry names it (status's Lane hold flag): a cause that reaches every merge holds the lane on it (execute § 4.5 *Lane hold*, ADR 0048) | § 3g: the evidence, then Lachy's ack; never handed back, re-integrated or set aside by repair |
 | **live** | running or integrating under a live lead | nothing: the lead owns it (§ 1) |
 | **PR CLOSED / branch missing** | awaiting Integration, integrating (no lead live) or set aside at Integration, and its PR is CLOSED unmerged (status's flag) or `git -C <repoPath> ls-remote --exit-code --heads origin <inputs.branch>` finds no branch; or set aside at Integration with no `pr:` (`humanFix.act` `restore, recut or defer` with no `pr:`), which `hand-back` refuses | input-gated: § 4's restore, recut, defer or leave; never left to the loop, which would integrate it only for merge-task to set it aside at its own run; with no `pr:`, restore starts by finding its PR (§ 4) |
 | **awaiting Integration** | `review` with a `pr:` | nothing: the loop integrates it |
@@ -253,8 +257,9 @@ reaches repair because its automatic retry is over (the auto-retry budget is spe
 budget, a quota block past its five free retries, a declined merge, a gone branch, a merge-task text a human must
 clear, a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / branch missing**) or a code-writing
 review with no `pr:`. Either way it is input-gated (§ 3b), and the ask quotes `humanFix` (its act and its detail). A non-empty
-`autoRetryError` is execute § 3's round-budget halt: report it; the fix is the stamp it names, on Lachy's word, and
-nothing is handed back until that reads. A usage limit that kills an agent mid-run is an infra block, never a quota
+`autoRetryError` is an invalid round-budget stamp: its `humanFix` is H12 `fix the round budget`. Report it; the fix is
+the stamp it names, on Lachy's word; once the stamp reads valid the verdict falls through to the lead's own retry or to
+H10 (ADR 0048). A usage limit that kills an agent mid-run is an infra block, never a quota
 block: it gets the infra cool-downs and the budget, then Lachy. When the limit is known to the lead's Session,
 execute § 4.5 *Lost call* first resumes such a transient row once from its own run, so only that resume's row, or
 the dead call's row, reaches this class.
@@ -597,6 +602,32 @@ and the next `--run` clears its tree and files itself.
 - A git-env trip at the completion verify (`git-env trip: …`, `git-env canary failed`) is § 3e's.
 Log each in the rollout's `## Notes` as a dated `repair:` line, which § 6 copies.
 
+**3g — a lane hold → the evidence, then Lachy's ack (ADR 0048; execute § 4.5 *Lane hold*).** Status's Lane hold
+flag (`laneLog` non-empty) means a cause that reaches every merge held the Integration lane on one task: merge-task
+aborted (`merge-task-abort`), merge-task's or `lead-integrate.py`'s environment failed on the task holding the lane
+(`merge-task-env`, `integrate-env`), or the Integration verify found no verify slot three times (`verify-noslot`). It
+holds only the lane: task calls, seeded revises and automatic retries go on, and `next` reports `halt: "lane"` once
+nothing else moves. R is the rollout's `Project root:` and B its default branch. Show the evidence first:
+
+1. the unacked `## Lane log` lines, verbatim (each `- <stamp> lane hold [[<slug>]] <cause>: <evidence>`);
+2. for `merge-task-abort` and `merge-task-env`: merge-task's last output (the evidence line) and its sentinel,
+   `cat R/.claude/merge-task.status`;
+3. for `integrate-env` and `merge-task-env`: `command -v gh git python3`, `git -C R remote get-url origin`, `git -C R
+   rev-parse --verify origin/<B>`, the counter dir `ls -la R/.claude/merge-task/`, whether the task note can be read
+   (status lists it, or `inputs` exits 2 with `task note unreadable:`), and the `lead-integrate` verb the evidence line
+   names (`lead-integrate <verb>: …`);
+4. for `verify-noslot`: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status --slots
+   <verify_slots>` (it names the holder).
+
+Then ask once, one AskUserQuestion per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` (Owner *yours*: whether the
+cause is fixed and the lane may run again), offering **(a) Fixed: release the lane** and **(b) Leave it**. On (a), in
+any mode: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py lane-ack --rollout <rollout-note>
+--tasks <the slugs shown> --fix "<his words, one line>"`; it writes one `- <stamp> lane ack [[a]], [[b]]: <fix>` line
+and nothing else. Exit 1 (a slug no hold line names, a failed save) is shown and stops; `[no-change]` means every hold
+was already acked. Then § 4's hand-off when no lead is live: the next entry's step 1.4 re-enters the held task through
+step 3's `prepare`. A task note that could not be read stays out of the queue after the ack until its note is fixed;
+say so. A Companion (ADR 0048) may gather this evidence and notify Lachy, never ack: every lane hold is his.
+
 ### 4. Hand back: re-enter at the stage it stopped
 
 Repair hands back only on Lachy's answer (§ 3b), this run's or one recorded for the task's current block (§ 3b's
@@ -684,7 +715,8 @@ there is nothing to clear. Per stage:
   hold on the Integration lane alone never stops it (ADR 0046): a git-env trip with `scope: lane` (§ 3e) or an
   undecided RACE (§ 3c, its escalation shown) holds only the lane, while starts, seeded revises and automatic
   retries go on, so report it (its slugs, and that the lane stays held until Lachy's ack or his `RACE decided:`
-  line) and hand off. The hand-off is execute's queue loop, entered at its §4.5 resume
+  line) and hand off. A lane hold (§ 3g, ADR 0048) holds only the lane the same way: report it (its slug, its cause and
+  that the lane stays held until his ack) and hand off. The hand-off is execute's queue loop, entered at its §4.5 resume
   (*Cold resume*). First the launch-directory check, execute § 2.8's snippet (point at it; never copy it here):
   `self-rollout-check.sh --launch-check <Project root> <launch dir>`, the launch directory being this session's
   primary working directory as the harness reports it, never `pwd`. A lead's tools reset every `cd` outside it, so
@@ -876,6 +908,8 @@ record, and its Completion log is the last Leg's.
   a rollout-note record, so no pause or live lead holds it back (§ 1).
 - **Don't touch a signed task while its lead is live.** After `approve-gates`, its owner session holds the
   signed-gate handle (execute § 3.7): no hand-back, recut, defer, re-plan or `## Repair input` (§ 2).
+- **Don't ack a lane hold unseen.** Never `lane-ack` a slug whose `## Lane log` line and evidence Lachy was not shown
+  (§ 3g), and never from a Companion or a loop: the ack is his word.
 - **Don't ack a git-env trip unseen.** Never ack trips or a ref Lachy was not shown (`ack --slugs` is exactly the
   set shown, `--ref` the sha shown), never restore with anything in flight, `--bare-only` included, and never pass `--drop-local` for
   commits Lachy was not shown (§ 3e).

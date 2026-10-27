@@ -64,16 +64,17 @@ ADR 0054).
 The guarded scripts refuse a wrong root: exit 2, nothing written, and one stderr line starting `engine-snapshot:` that
 names the root to re-run from. They are:
 
-- `reconcile-rollout.py`, every verb but `status` and `fold-journals`: it asks about the note `--rollout` (carry:
+- `reconcile-rollout.py`, every verb but `status`, `fold-journals` and `moving`: it asks about the note `--rollout` (carry:
   `--from`) names, and the rollout each `--tasks` slug's note (and, for `reconcile`, each result row's) names in its
   `rollout:`, so a task-keyed verb with `--rollout` left off (`reconcile`, `hand-back`, `mark-started`,
-  `mark-integrating`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`, `defer`, `approve-gates`) is
-  guarded too;
+  `mark-integrating`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`, `defer`, `approve-gates`,
+  `lane-hold`, `lane-ack`) is guarded too;
 - `git-env-canary.py`, `step-boundary.py begin` and `end`, `leg.py` but `status`, `close-score.py`,
   `lead-integrate.py prepare` and `set-aside`, and `merge-task.sh` through `guard-pr`.
 
 The exemptions run from any root: `reconcile-rollout.py status` writes nothing (status and the estate scan read every
-rollout with it); `fold-journals` never reads the note and writes only call-journal lines to the Run record,
+rollout with it); `moving` writes nothing either, and is the Watchdog's reading of any rollout from any root (status §
+The Watchdog's reading); `fold-journals` never reads the note and writes only call-journal lines to the Run record,
 cross-version state (below); `step-boundary.py stands`, `leg.py status`, and `lead-integrate.py inputs` and `plan`
 only read; and `lead-integrate.py verify`, `push` and `undo` follow a guarded `prepare` in one flow.
 

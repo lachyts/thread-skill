@@ -1,7 +1,7 @@
 # 0048 — No single cause holds the whole queue
 
 Date: 2026-10-21
-Status: accepted. Ruled with Lachy in the re-grill of PR #202, after the audit of where rollout time went (§ Context). Generalises ADR 0046 (a git-env trip holds only the lane) and ADR 0034 (a gate sets its task aside, never halts the rollout).
+Status: accepted. Ruled with Lachy in the re-grill of PR #202, after the audit of where rollout time went (§ Context). Generalises ADR 0046 (a git-env trip holds only the lane) and ADR 0034 (a gate sets its task aside, never halts the rollout). Built by p29-7 (2026-10-28). Amends ADR 0030 (merge-task 2/70 halts) and ADR 0033 (an invalid budget stamp; a cool-down over an UNVERIFIED task).
 
 ## Context
 
@@ -27,3 +27,35 @@ From September to 21 October about 150 to 185 hours of rollout time went to stal
 - Every whole-rollout halt in execute must justify itself against the first bullet, or narrow.
 - Every stop and every resume lands in the Run record, whatever caused it, so a Reflection can price it (ADR 0051).
 - Which Login a recovered lead moves to, and how rollouts spread across Logins, stay Chorus's (its Login-spread task); thread-skill decides nothing about Logins.
+
+## How p29-7 built it
+
+- **The reading.** `reconcile-rollout.py moving` is the Watchdog's verdict: moving, stalled, a meant wait with its
+  cause, or skip, read-only and guard-exempt, from the Run record's life signs and `next`'s own dry run. Its algorithm's
+  one copy is reconcile-rollout.py's module docstring; the safety wording (what `stalled` means, and that it never by
+  itself starts a second lead) and *Which waits silence judges* are status SKILL.md § The Watchdog's reading. A wait
+  only the lead's own heartbeat ends (a merge hold) is judged by silence; one `next` or the clock reads live (a
+  cool-down, the Trickle, the Away cap, the Heat hold, the last starts, a PR hold) by its own condition.
+- **The Lane hold.** merge-task's abort (70) and its environment exit 2, every `lead-integrate.py` exit 2 on the task
+  that holds the lane, and the Integration verify's third `noslot` write one `## Lane log` line (`lane-hold`), which
+  `next` reads into `laneHold` and halts `lane` on once nothing else moves; only Lachy's ack through `/thread:repair`
+  (`lane-ack`) releases it.
+- **The wait clauses.** Execute § 4.5 step 1.5 reads a cool-down, a cap-held seeded revise and (for the lane arms) a
+  `waits: merge` PR hold before a lane verdict, `stuck` or a task-scope hold goes to § 7: a wait `next` cannot see
+  never becomes a halt.
+- **lead-integrate's exit 2, by verb and site.** On the task that holds the lane it is a Lane hold; a note race on a task
+  that holds no lane (`task note unreadable:`) touches only that task this turn; `revert`'s exit 2 and a malformed
+  re-entry command stay whole.
+- **The kept and narrowed lists.** Execute § 7 lists every whole-rollout halt kept with its reason, and every halt
+  narrowed with the site that now holds less; `moving`'s WHOLE_HALT_PATTERNS is bound to the kept list by a contract
+  test.
+- **The retry classes.** `prepare: origin unreachable three times` and `merge-task signalled twice` retry as `infra`;
+  `merge-task exit 8 three times` stays `agent`.
+- **prepare's task-scoped set-aside.** A failure that threatens only the task (its anchor, its worktree, its anchor
+  ref) routes `set-aside`, exit 0; the environment's stays exit 2, the Lane hold.
+- **The regenerate bound.** Under `halt: regenerate` the Approved-queue route runs one foreground turn with no life
+  sign, so `moving` judges it at 120 minutes from the last life sign, in place of the 45-minute default.
+- **The launchd fallback.** `watchdog.py check` reads the same verdict when Chorus is not running and only notifies,
+  once per stall, through `ntfy-push.py`. It probes the Stage as `ctl.sh status` does (`api/logins`), never through
+  `host.lock`. Until the Chorus task that consumes `moving` lands, a running Stage silences the fallback, so a stall
+  then goes unnotified (*The interim gap*); `watchdog.py plist --chorus-url ''` installs one that never probes.
