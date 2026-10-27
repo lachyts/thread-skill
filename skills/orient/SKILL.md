@@ -12,13 +12,13 @@ Lachy's time, then reshuffles without asking (ADR 0036 d5): `--steer` routes the
 `--look` stops at the audit. A reshuffle re-sorts all the open work, grills what is unclear and writes
 the result at one gate (`reshuffle.md`). Orient then routes by the three-way execution-fit test:
 it schedules parallel-shaped phases itself, steers the serial-shaped and session-lane work (a
-serial rollout, a focus item, or both) and ends with the **execute offer**.
+serial rollout, a focus item, or both) and ends with the **execute handoff**.
 Pointed at a single plan, design note or brain dump, it runs a **scoped reshuffle** of that note
 alone.
 
 **Contains no route logic of its own** beyond the reshuffle: hands-on focus
 dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the task's own `## Launch` block);
-parallel- and serial-shaped work go to `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`; the execute offer runs
+parallel- and serial-shaped work go to `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`; the execute handoff runs
 `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` or `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md`,
 or stamps the note for the Stage. None is re-implemented here. The execution-fit test
 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane and shape, hard, not as a
@@ -283,7 +283,7 @@ for either still takes his Note that corrects it (below). Only Look only and a d
 card and write back no Note. Steer only asks it, like a default run.
 
 **A Note corrects it.** Whatever the target, a Note of his on any later ask in this orient (the grill, R4's gate,
-§ 6's steer, § 9's offer) that corrects a line of a card this orient holds (one § 2 read, or the one just written
+§ 6's steer) that corrects a line of a card this orient holds (one § 2 read, or the one just written
 above) is written back into that card at once, the same day: that line takes his words, followed by
 `(<YYYY-MM-DD>, from a Note)`, and the report says so in one line. A correction made in the grill is the one write
 the reshuffle makes before its gate (reshuffle R3), and it stands if he stops the grill or declines the gate.
@@ -384,7 +384,7 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
   description says why: no serial-shaped cluster is left for a rollout to take:
   - **Autonomous** (offered only when a serial-shaped cluster exists) — schedule the serial-shaped
     clusters as a serial rollout (§ 7) while Lachy stays focused elsewhere. This answer IS the
-    scheduling authorisation: no per-cluster confirm follows. The execute offer (§ 9) follows any
+    scheduling authorisation: no per-cluster confirm follows. § 9's execute handoff follows any
     note written, and the session-lane work stays where the reshuffle put it.
   - **Hands-on** — he has time for this project: if the best-focus item has a THREAD.md or capture
     task, run `open`'s pickup logic; else follow the task note's `## Launch` / `## Resume prompt`.
@@ -453,27 +453,35 @@ stamps and orient run lines already in task notes are inert history: § 2 In fli
 them, though an end line with an open fork still counts (§ 2 Open forks). Old run directories under
 `.scratch/orient/` are left alone.
 
-### 9. The execute offer
+### 9. The execute handoff
 
-When § 6 or § 7 wrote a rollout note, end with `AskUserQuestion`, recommended option first, one
-offer per parallel note written; a serial note (`shape: serial`) gets no offer: name it, its chain,
-each row's launch and Leg 1's start line, and never stamp `start: unattended` on it. The offer is put in the Framing
-of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` (Owner *gate*: p30-9 takes it out):
+When § 6 or § 7 wrote a rollout note, end with the execute handoff, decided and never asked (Owner *gate*: the
+reshuffle routed the work to run, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1; ADR 0057). One handoff per
+parallel note written; a serial note (`shape: serial`) gets no handoff: name it, its chain, each row's launch and Leg
+1's start line, and never stamp `start: unattended` on it. For each parallel note, print
+`Execute: a fresh session runs [[<slug>]] from <root> (decided: you scheduled it to run; say "not yet" to withdraw the handoff)`
+(`<slug>` the note, `<root>` its Project root), then run **Fresh session** below, the decided move. Only his words
+choose another of the moves: Here, Not yet or Start when ready. The one hold is a refused ladder file (schedule's
+"Checklist — ladder refused" block: a settings file every call refuses, so no call could start; ADR 0048): then print
+`Execute: held (the ladder file is refused, so every call would halt at its start); once it reads, say "hand it off"`
+and hand nothing off. No other checklist holds it. With several notes, each gets its own handoff, and the last
+handoff's closing line ends the turn.
 
-- **Fresh session** (recommended after a reshuffle, which has filled this context) — run
+- **Fresh session** (the decided move: a reshuffle has filled this context, and the lead runs best fresh) — run
   `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with its usual home, never the Project root's
   default-branch checkout (handoff-home.sh reads a rollout clone as its in-place twin; a doc
   committed on the root would hold the lead's first § 2.7 entry until its landing merged), through
   handoff's **Rollout launch.**, and this continuation: start in the Project root, then
   `/thread:execute [[<rollout>]]`. The Project root is the rollout clone the note names (ADR 0042),
   and execute § 2.8 halts a lead launched anywhere else. Handoff creates the visible task where the
-  harness can, and labels it a manual handoff elsewhere.
-- **Here** — run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` on the rollout note in this
-  session, when the reshuffle was small and this session was launched in the Project root
-  (`bash "${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh" --launch-check <Project root> <this session's launch directory>`
-  exits 0). Offer it only then.
-- **Not yet** — name the rollout note and the `/thread:execute [[<rollout>]]` line, and stop.
-- **Start when ready** — stamp `start: unattended` as a top-level frontmatter line just below
+  harness can, and labels it a manual handoff elsewhere. Its doc carries `launches: <slug>`.
+- **Here** — on his word only: run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` on the rollout note
+  in this session, when this session was launched in the Project root
+  (`bash "${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh" --launch-check <Project root> <this session's launch directory>`),
+  and only when that check exits 0; otherwise it stays Fresh session and says why.
+- **Not yet** — on his word, or held: name the rollout note and the `/thread:execute [[<rollout>]]` line, and stop.
+  Said after the handoff, it is the handoff's withdrawal (handoff § Lifecycle).
+- **Start when ready** — on his word: stamp `start: unattended` as a top-level frontmatter line just below
   `status:` on the rollout note § 6 or § 7 wrote (`_shared/vault-grammar.md` § Rollout start stamp), then
   end: nothing runs here and no handoff is made. Print the note, the `/thread:execute [[<rollout>]]`
   line (still valid by hand) and one line: the Chorus Stage starts a lead in its Project root once
@@ -485,7 +493,7 @@ of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` (Owner *gate*: p30-9 takes i
   the note becomes an approved queue (`_shared/vault-grammar.md` § Approved queue), whose merge regenerates it and
   starts the new note with no confirm.
 
-Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6 or
+Execute's own runtime gate still applies wherever it runs. No rollout written → no handoff; § 6 or
 § 7 names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker, or a surface
 overlap with a live chain).
 
@@ -513,7 +521,7 @@ given). It resolves, asks, reads and writes nothing.
   headline, balls in the air, drift, shape, one recommendation, then the reshuffle (§ 4).
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s
   logic; parallel- and serial-shaped work go to schedule (the execution-fit test
-  decides, hard); execute runs only through the execute offer.
+  decides, hard); execute runs only through the execute handoff.
 - **Don't put parallel-shaped work in a serial rollout**, and don't schedule a bare project run (always `--tasks`).
 - **Never a second unfinished parallel rollout per repo, never a serial chain over a live chain's
   surface, and never another rollout's lifecycle**: schedule

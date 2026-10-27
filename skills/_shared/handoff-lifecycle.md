@@ -35,6 +35,7 @@ thread: <the active thread's effective slug — its THREAD.md `slug:`, or a repo
 written: <YYYY-MM-DD>
 status: pending          # pending -> consumed, set by the session that picks it up
 refreshed: <YYYY-MM-DD>  # optional — added by thread:close when it refreshes a pending doc
+launches: <rollout slug>  # optional — a Rollout launch's doc only (handoff **Rollout launch.**)
 ---
 ```
 
@@ -55,6 +56,8 @@ The consuming session's first instruction — carried in the prompt, and equally
 ## While pending
 
 `thread:close` treats a pending doc as the thread's continuation: it refreshes the doc in place when later work has made it stale, and proposes no vault task for anything the doc carries (`close` § The handoff owns the continuation, ADR 0017).
+
+A **Rollout launch**'s doc (its front matter carries `launches:`; handoff **Rollout launch.**, ADR 0057) is no continuation: it briefs a rollout's lead, never this thread, so close's scan reads it as `launch`, never `pending`, and leaves it for its lead.
 
 A **manual handoff** — the doc and prompt were produced but no native task was created (handoff § Fail closed) — is a complete handoff for this rule: the committed doc is the object Lachy tracks, and close's step-8 row shows it pending. What it lacks is a task, not a tracker.
 
@@ -88,7 +91,7 @@ A consumer that exits by `stash` or `defer` instead leaves the consumed doc for 
 
 ## Withdrawn
 
-A handoff called off in the same session ("never mind, keep going") is no handoff at all: the session removes the doc at once and lands the removal the same way — the commands are handoff § Lifecycle — and undoes the handoff row: when the thread has a THREAD.md, it rewrites real Resume instructions there in place of the `Read <abs doc path> first` pointer (the session's own close then carries the file). The undo also **reopens the captures the handoff superseded** (handoff **Open captures.**): every `Work/Tasks` note carrying `Superseded by handoff <abs doc path>` goes back to `status: open`, drops `completed:` and that Notes line, and a scheduled one gets its unchecked day-page line back (`task-writer.md` § 3b, with its dedup). The marker is on disk, so this survives a compaction. No pending doc outlives the intent, no pointer names a deleted file, and close finds nothing pending. A doc left by a misfire is the one way the handoff route can silence a later close: a pending doc nobody meant suppresses that thread's continuation tasks. On the Chorus Stage a next Session the Stage already started keeps its brief: the doc stays, and the row with it, until Lachy says that Session is stopped or wants the doc gone (handoff § Lifecycle).
+A handoff called off in the same session ("never mind, keep going") is no handoff at all: the session removes the doc at once and lands the removal the same way — the commands are handoff § Lifecycle — and undoes the handoff row: when the thread has a THREAD.md, it rewrites real Resume instructions there in place of the `Read <abs doc path> first` pointer (the session's own close then carries the file). The undo also **reopens the captures the handoff superseded** (handoff **Open captures.**): every `Work/Tasks` note carrying `Superseded by handoff <abs doc path>` goes back to `status: open`, drops `completed:` and that Notes line, and a scheduled one gets its unchecked day-page line back (`task-writer.md` § 3b, with its dedup). The marker is on disk, so this survives a compaction. No pending doc outlives the intent, no pointer names a deleted file, and close finds nothing pending. A doc left by a misfire is the one way the handoff route can silence a later close: a pending doc nobody meant suppresses that thread's continuation tasks. On the Chorus Stage a next Session the Stage already started keeps its brief: the doc stays, and the row with it, until Lachy says that Session is stopped or wants the doc gone (handoff § Lifecycle). A Rollout launch's withdrawal has no handoff row or captures to undo, and close reads it as no handover (close step 2).
 
 ## Thread state
 
@@ -103,6 +106,7 @@ The single definition of the `state:` transitions every continuity route applies
 | `close`, `/thread:open save` | unchanged; `done` only when Lachy says the thread is finished | `## Done` when set |
 | creation | `active` | `## Active` |
 
+- A **Rollout launch** applies no row: its doc briefs a rollout's lead, never this thread (handoff **Rollout launch.**).
 - Every transition also sets the THREAD.md's `last_touched:` and, for a shared thread, its INDEX line's `last:` to today — including a row that leaves `state:` unchanged. The INDEX is `~/repos/workspaces/_shared/threads/INDEX.md`; its line format is `open` § Index updates.
 - Project threads and repo threads have no INDEX line: the rows apply to front matter only.
 - A **repo thread without front matter** (`~/repos/tools/maquette/THREAD.md`) keeps none. Every row's front-matter writes (`state:`, `last_touched:`) are skipped and no front-matter block is added unless Lachy asks. The body writes still happen: close step 4's session-log line and Resume instructions, task-writer § 6's session-log line, and the handoff row's Resume pointer, each appended as a `## Session log` / `## Resume instructions` section at the end when missing. Its effective slug stays its directory's name, the lookup and `list` see it the same before and after, and `list` shows `—` for its state.
