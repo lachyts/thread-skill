@@ -1188,6 +1188,8 @@ test('(d) review churn: /fresh-review rounds are attributed by repo (owner/name 
     rr(at('00:50'), { repo: path.join(clone, '.claude', 'worktrees', 'gone'), head: 'h4', digest: 'g4', ...c(2, 1, 0) }), // a deleted worktree
     rr(at('01:00'), { repo: 'o/other', head: 'h5', digest: 'g5', ...c(9, 0, 9) }), // another repo
     rr(at('01:01'), { repo: other, head: 'h6', digest: 'g6', ...c(9, 0, 9) }), // another repo by path
+    // swept into the window at a landing's end, but reviewed long before it: its round is not this window's
+    rr(at('01:10'), { repo: 'O/R', head: 'h7', digest: 'g7', doc: 'docs/reviews/old.md', reviewedAt: '2026-01-01T00:00:00.000Z', ...c(8, 0, 8) }),
   ])
   // a.md's latest (4: 3 original, 1 regression), b.md and c.md (2 regression each), the clone (1 original) and the
   // deleted worktree (2: 1 original, 1 unclassified); o/other and the other clone are another repo's
