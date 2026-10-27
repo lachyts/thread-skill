@@ -5370,7 +5370,8 @@ def _stop_state(lines) -> dict:
     """The record read for a stop (run_record.py's stop model): {entry, session, live, open, named, wake}. entry is the
     last lead-entry's ts and session that line's session (None when it carried none); live the sorted ts of every line
     that is a sign of the lead's life (all but NOT_LIVE_KINDS and an inferred stopped line: a lead-entry and a live
-    stopped count); open the non-sleep stopped lines after the last lead-entry, in file order (the last is the open
+    stopped count), a line stamped at its call's end (p29-12) counting at its reconciledAt when that is later, the
+    lead's own write; open the non-sleep stopped lines after the last lead-entry, in file order (the last is the open
     stop); named the boots and wakes the record already names (_ms); wake the latest mac-sleep's wake."""
     st = {"entry": None, "session": None, "live": [], "open": [], "named": set(), "wake": None}
     last = -1
@@ -5388,7 +5389,8 @@ def _stop_state(lines) -> dict:
                     if key == "wake" and (st["wake"] is None or t > st["wake"]):
                         st["wake"] = t
         if ts is not None and kind not in NOT_LIVE_KINDS and not (kind == "stopped" and d.get("inferred") is True):
-            st["live"].append(ts)
+            wrote = _away_stamp(d.get("reconciledAt"))[0]
+            st["live"].append(max(ts, wrote) if wrote is not None else ts)
     st["live"].sort()
     st["open"] = [d for d in lines[last + 1:] if d.get("kind") == "stopped" and d.get("cause") in OPEN_STOP_CAUSES]
     return st

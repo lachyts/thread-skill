@@ -5,7 +5,7 @@
 # own rollout's record (run_record.py emit with --ts for the past), and THREAD_MACHINE_TIMES stands in for the Mac's
 # kern.boottime, kern.waketime and pmset log, so nothing reads this machine's history.
 #   E1 a first entry   E2 a heartbeat's plain entry   E3 a room stop and its resume   E3b --cause with nothing open
-#   E4 a session change: dead-lead   E5 a boot after the last live line: mac-restart   E5b a sleep with lines after it
+#   E3c a line stamped at its call's end (p29-12) is the lead's sign of life at its reconciledAt   E4 a session change: dead-lead   E5 a boot after the last live line: mac-restart   E5b a sleep with lines after it
 #   E5c a sleep before the first live line   E5d two sleeps, in at order   E6 --cause owns a later boot   E7 a pause
 #   owns a later boot   E7b a boot before the pause is written first   E8 an open halt, then a plain entry   E8b the
 #   hook's halt after a boot: both stops   E8c a sleep inside a halt   E9 next's sleep, once   E9b next writes no sleep
@@ -109,6 +109,17 @@ ok "$(q e3b '[[d["kind"], d.get("cause") or d.get("stop"), d.get("inferred"), d.
   '[["stopped","usage-limit",true,"2026-10-26T09:06:00.000Z",[{"task":"a","runId":"wf_a1","call":"task"}]],["lead-entry","usage-limit",null,null,null]]' \
   "E3b: stopped usage-limit inferred at L with its call, then the lead-entry"
 ok "$(q e3b 'L[3]["ts"]')" '"2026-10-26T12:00:00.000Z"' "E3b: an inferred line's ts is its write time, never backdated"
+
+echo "== E3c. a line stamped at its call's end (p29-12) is the lead's sign of life at its reconciledAt, its write"
+mkro e3c
+em e3c lead-entry - '{"by":"stage","session":"A"}' 2026-10-26T09:00:00Z
+em e3c slot-taken a "{\"settings\":$S}" 2026-10-26T09:05:00Z
+em e3c run-bound a '{"runId":"wf_a1","journalDir":"/j","call":"task"}' 2026-10-26T09:06:00Z
+em e3c slot-freed a '{"outcome":"ready","stamp":"call-end","reconciledAt":"2026-10-26T10:00:00.000Z"}' 2026-10-26T09:30:00Z
+ent e3c --by stage --cause usage-limit --session A --now 2026-10-26T12:00:00Z >/dev/null
+ok "$(q e3c '[[d["cause"], d["at"], d["calls"]] for d in L if d["kind"] == "stopped"]')" \
+  '[["usage-limit","2026-10-26T10:00:00.000Z",[]]]' \
+  "E3c: the stop starts at the reconciledAt, never the call's end, and the freed Slot's call is not in flight"
 
 echo "== E4. a new session after A's heartbeat, no Mac evidence: a dead lead found only at the resume"
 mkro e4

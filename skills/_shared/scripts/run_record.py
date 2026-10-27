@@ -424,8 +424,9 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   the stop's start: killed by a usage-limit stop, a dead lead, a restart or a Watchdog recovery, carried on through a
   halt, suspended through a sleep. A lead-entry with `stop` is a resume and its `by` what restarted the run; one
   without `stop` marks the lead alive. The heartbeat writes one every tick (20 minutes), so an inferred dead-lead or
-  mac-restart starts at most one tick after the lead's last sign of life. An inferred line's ts is its write time,
-  never backdated, so file order stays ts order; `at` carries the past. A stop no evidence shows (the same session
+  mac-restart starts at most one tick after the lead's last sign of life (a line stamped at its call's end, p29-12,
+  is one at its reconciledAt, the lead's write). An inferred line's ts is its write time, never backdated; `at`
+  carries the past. A stop no evidence shows (the same session
   resumed hours later with no stated cause and no Mac event) is not inferred: the heartbeat's lead-entries bound it,
   and ADR 0051's monthly audit covers it.
 - Stop writers: step-boundary.py `begin` (a room stop: usage-limit, live); the Stop-hook driver
