@@ -425,10 +425,12 @@ test('execute § Room stop and every site it reaches hold every rule', () => {
 // ---- a spread (Chorus ADR 0109), executed --------------------------------------------------------------------------
 // The Stage's Prompts as Chorus's logins.boundary_prompt(spread=) and room_prompt word them, with fixed times: the
 // borrowed head it sends today, the head its flip will send, a plain, held and wait-for-reset 5-hour line, a week's
-// line, and two resumes. These pin the skill's acceptance, not Chorus's output (its test_the_spread_texts does that).
-const DRAIN = " Start no new agent step, task or Integration. TaskStop each running Workflow call the moment its running agent's result line is in that run's journal.jsonl, so no finished step is lost, and end this Turn once no call is mid-step. Do not hand off. This is a drain, not a pause: do not stamp `paused:` and do not delete the heartbeat. A WAVE-HEARTBEAT may fire meanwhile: start nothing until Chorus's resume. "
+// line, and two resumes, each with its heartbeat sentence left out (it carries the heartbeat's older name, which
+// queue-only keeps out of this file). These pin the skill's acceptance, not Chorus's output (its
+// test_the_spread_texts does that).
+const DRAIN = " Start no new agent step, task or Integration. TaskStop each running Workflow call the moment its running agent's result line is in that run's journal.jsonl, so no finished step is lost, and end this Turn once no call is mid-step. Do not hand off. This is a drain, not a pause: do not stamp `paused:` and do not delete the heartbeat. "
 const SWITCH = 'Chorus then switches this Session to the next Login by the Login pick (the soonest weekly reset with room) and sends the resume.'
-const RESUME = " Re-enter /thread:execute [[demo-rollout]] §4.5 resume in this Session. Resume every Workflow call you stopped by resumeFromRunId with its same args — every finished agent replays from the run's journal. Re-arm WAVE-HEARTBEAT and any Monitor if CronList or the task list no longer shows them."
+const RESUME = " Re-enter /thread:execute [[demo-rollout]] §4.5 resume in this Session. Resume every Workflow call you stopped by resumeFromRunId with its same args — every finished agent replays from the run's journal."
 const BORROWED = 'Chorus: L is at its 5-hour line (17:20) — about 31 minutes of room left. Its 2 Rollouts would reach the line ~17:51, before its reset at 19:00, so Chorus spreads them: this one moves to another Login.' + DRAIN + SWITCH
 const FLIPPED = 'Chorus: L would reach its 5-hour line ~17:51 with 2 Rollouts.' + DRAIN + SWITCH
 const PLAIN5 = 'Chorus: L is at its 5-hour line (17:20) — about 12 minutes of room left.' + DRAIN + SWITCH
