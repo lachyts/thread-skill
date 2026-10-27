@@ -25,6 +25,8 @@ const PY_ENV = {
   ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1', HOME,
   THREAD_EVENTS_DIR: process.env.THREAD_TEST_EVENTS_DIR || path.join(SCRATCH, 'events'),
   THREAD_HEAT_LEVEL: '0',   // the Heat hold's reading (verify-slot.py heat_level), pinned: a hot Mac never flips `next`
+  // The note-lock dir, and so `next`'s Trickle claims beside it (p28-3), stays this suite's own.
+  THREAD_NOTE_LOCK_DIR: path.join(SCRATCH, 'note-locks'),
 }
 
 const SLUG = 'proj-fix-a'

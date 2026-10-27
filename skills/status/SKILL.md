@@ -168,12 +168,16 @@ being alive**. `null` when no task has a `started:` stamp. `progress` is the one
 relays, e.g. `progress: 2/6 merged, 1 running, 1 awaiting integration, 1 queued, 1 set aside — 2h elapsed,
 ~45m remaining (rough)`.
 
-`trickle` is the Mac-wide cap as `next` reads it (execute away.md), read silently (no WARN: only `next` prints
-it): `{away, file, why, limit, awayCap, until, morning, elsewhere, here, running}`. `file` is `fresh`, `missing`,
-`stale` or `unreadable` (`why` says how, null only when fresh; anything but fresh reads not Away at Trickle 2),
-`limit` the Trickle N, `awayCap` the Away cap, `until` the file's (fresh only), `elsewhere` `{<rollout>: n}` the
-other open, started, parallel rollouts' running tasks, `here` this rollout's own as they count it (0 when paused,
-closed, never started or not directly in the tasks dir) and `running` their sum.
+`trickle` is the Mac-wide cap read from the notes only (`skills/execute/away.md` § The ETA), read silently (no
+WARN: only `next` prints it): `{away, file, why, limit, awayCap, until, morning, elsewhere, here, running}`. `file`
+is `fresh`, `missing`, `stale` or `unreadable` (`why` says how, null only when fresh; anything but fresh reads not
+Away at Trickle 2), `limit` the Trickle N, `awayCap` the Away cap, `until` the file's (fresh only), `elsewhere`
+`{<rollout>: n}` the other open, started, parallel rollouts' running tasks, `here` this rollout's own as they count
+it (0 when paused, closed, never started or not directly in the tasks dir) and `running` their sum. `elsewhere` and
+`running` count notes only, never `next`'s Trickle claims (`skills/execute/away.md` § The Trickle, *Trickle
+claims*), so they can trail `next`'s count by up to 20 minutes of unstamped claims (a claim's life): while another
+lead's starts are claimed but not yet stamped, `status` shows room on the Mac that `next` still holds as
+`trickle: N/N`.
 
 **Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
 rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
