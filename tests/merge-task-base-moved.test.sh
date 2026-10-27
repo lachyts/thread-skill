@@ -2,7 +2,7 @@
 # p29-10 (ADR 0051): merge-task.sh records why main moved. Each newly counted exit-3 refusal (the cap's 4th included)
 # runs lead-integrate.py base-moved, which writes one base-moved line into the task's rollout record: the movers
 # base..main and whether only Inert paths moved. "This base was already counted" writes none, and recording never
-# changes an exit or a line of output. Driven end to end against the shared fake gh and a real bare "GitHub" repo
+# changes an exit or a line of output; a PR no task note names (a RACE revert's) writes none (5). Driven end to end against the shared fake gh and a real bare "GitHub" repo
 # (tests/lib/merge-task-env.sh); the vault (the task note whose pr: names the PR) and the record live in temp.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -64,6 +64,14 @@ THREAD_EVENTS_DIR="$tmp/not-a-dir/events" run 5 "$I" "$B"
 ok "$rc|$(sent)" "$rc_w|failed:3" "4. an unwritable record: the same exit, failed:3"
 ok "$out" "$out_w" "4. … and the same output"
 has "$OUT1" "BASE MOVED: origin/master is" "4. (the output names the move)"
+
+# 5. a PR no task note names (the RACE revert's PR, ADR 0046): exit 3, no base-moved line, the counter still appended
+fresh; pair; mkpr 9 "$I"; moved
+n0=$(rec 'len(L)')
+run 9 "$I" "$B"
+ok "$rc" 3 "5. a revert PR (no task note names it): base moved, exit 3"
+ok "$(rec 'len(L)')" "$n0" "5. … no base-moved line"
+ok "$(ctr 9)" "$B" "5. … the counter appended"
 
 echo; [ "$fail" -eq 0 ] && echo "merge-task-base-moved: ALL PASS" || echo "merge-task-base-moved: SOME FAILED"
 exit "$fail"

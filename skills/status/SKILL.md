@@ -124,7 +124,8 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   execute → *Pausing + reinstating a rollout*), `pausedFor` (`sign-off` under execute § 4.5 step 5's sign-off
   pause, ADR 0034: the run finished everything else and only gates wait on Lachy; null otherwise), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
   included), `progress`, `timeline` and `ladder`, plus `gitEnvHold` (the unacked git-env trips, each
-  `{slug, kind, line}`; § 3's Git-env trip flag), `holdUntil` (the rollout's own PR hold, its `hold_until:`
+  `{slug, kind, line, scope}`, `scope` `rollout` for a bare checkout, else `lane`; § 3's Git-env trip flag), `mainRed`
+  (`{slug, why, stamp}` per RACE whose revert did not land and that no `RACE decided:` line lifts; § 3's Main red), `holdUntil` (the rollout's own PR hold, its `hold_until:`
   as parsed, `{pr, url, error}`, null when it has none: `_shared/vault-grammar.md` § Hold until; § 3's Hold
   until flag), `onMerge` (an approved queue's `on_merge:` as read, `{value, error}`, null on a note with no rollout
   hold or none: `_shared/vault-grammar.md` § Approved queue; § 3's Hold until flag), `chainStart` (`{prior, pr}`
@@ -231,10 +232,12 @@ nothing more:
   (§ 2's top-level `holdUntil`) or by a queued, running or set-aside (at its run or at a gate) task (its row's
   `holdUntil`), the holds `next` reads: its `url` as written, or a bare `N` run in the Project root.
 
-**A RACE has three states.** Merge-task's exit 5 means the PR merged, but as a combination nobody
+**A RACE has six states.** Merge-task's exit 5 means the PR merged, but as a combination nobody
 verified. Execute's RACE procedure (execute § 4.5) appends the `## Race log` line first, then re-verifies the
 merge commit in the background for up to two hours, a verify-slot wait included, with the lane held: green →
-`mark-done`; red, rc 124 or a missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`, its red
+`mark-done`; red, rc 124 or a missing rc → the RACE revert (execute § 4.5 *The RACE revert*, ADR 0046: a revert PR
+merged through merge-task, its `revert started:`, `revert opened:`, `reverted on main:` or `revert did not land:`
+lines in the `## Race log`, the task then set aside for Lachy), its red
 the one the re-verify's Flake check left (ADR 0050: an out-of-diff red its named re-run and confirming run clear
 reads green, its Flakes logged by `record-verify`). Its
 verdict file is `<repoPath>/.claude/integration/race-<slug>.rc`, written last, so an absent one means unfinished. A
@@ -247,24 +250,41 @@ hold, `skills/execute/away.md` § Heat), no verdict, never red. A task that a
   the merge stands, the task reads as merged, never marked; if it does not, repair defers it.
 - **In flight:** it still reads `integrating` with an `owner:` whose session is not known to have ended, no
   `paused:` stamp stands (a hard pause stops the re-verify), and its verdict file is absent or reads `0`. That
-  is the lead's own procedure, not drift. Render `RACE re-verify in flight` on its Integrating line, flag
+  is the lead's own procedure, not drift (no `revert started:` line names it yet). Render `RACE re-verify in flight` on its Integrating line, flag
   nothing, and treat it as the live queue (§ 4's actions 9 and 10: wait, and check the owner session). It
   turns undecided once that session shows the `RACE: …` halt or no run, or has ended. From any other session,
   status cannot tell which, so say so. It turns undecided too once a `## Race log` line naming it carries
   `git-env halt` (readable from any session), or once that session shows a git-env halt (`git-env trip: the
   shared checkout changed` or `git-env canary failed`, execute § 4.5 *Git-env canary*): the lead never acts on
   a re-verify after a git-env halt, so a `0` verdict there was never acted on.
+- **Revert in flight:** a `revert started:` line names it, no `revert did not land:` line does, and it still
+  reads `integrating`: the lead's RACE revert (its revert PR opening, merging through merge-task, or its landing
+  tail), which step 1.4 of any entry resumes. Render `RACE revert in flight (PR #R)` on its Integrating line (#R
+  from its `revert opened:` line; `PR #?` before one), flag nothing, and treat it as the live queue, as for a
+  re-verify in flight.
+- **Main red:** a `revert did not land:` line names it (§ 2's `mainRed`). Render `RACE: revert did not land (main
+  red)` with the line's reason, flag it (RACE / UNVERIFIED, below), and say that the whole rollout is held:
+  nothing starts, restarts or retries, and execute halts at once on every entry until Lachy's `RACE decided:`
+  line, since `main` is red and every new start would branch from it.
+- **Reverted:** a `reverted on main:` line names it and it no longer reads `integrating` (the landing tail's
+  set-aside row ran): its merge is undone on `main` and the task is set aside for Lachy. Render `RACE reverted on
+  main (<sha12>)` with the line's `main back at …`, `… but for Inert paths` or `main not re-verified (lane held)`,
+  and flag it: the decision is about the task alone (re-land it through a new `pr:`, or defer it), and a `main not
+  re-verified` one still holds the Integration lane.
 - **Undecided:** anything else. That is an open escalation, the flag below.
 
 Flag **drift**, one line each in the Drift block. The first three flags are first-match, in this order: a RACE
 or UNVERIFIED task's PR is MERGED too, so it is never also flagged merged, never marked, and a RACE in flight
-takes none of them.
+takes none of them, nor does a RACE revert in flight.
 
-- **RACE / UNVERIFIED:** a RACE that is undecided (above), or a set-aside task whose reason
+- **RACE / UNVERIFIED:** a RACE that is undecided (above), main red or reverted, or a set-aside task whose reason
   (`blockerSummary`) carries `UNVERIFIED:` and has no `repair: [[<slug>]] RACE decided: …` line (a
   set-aside is never in flight). Main's state is Lachy's call, and until it is recorded the task cannot land:
-  `resume` skips it (a `HOLD:` line, exit 3), `hand-back` refuses it (exit 2), and execute halts on a RACE
-  once its lane is free and holds an UNVERIFIED task set aside (execute § 4.5). The flag reads only the vault
+  `resume` skips it (a `HOLD:` line, exit 3), `hand-back` refuses it (exit 2), and an undecided RACE holds the
+  Integration lane, never a start (ADR 0046), until it is reverted with `main` restored: execute halts `race`
+  once nothing else moves. A main-red one holds the whole rollout: execute halts at once on every entry. An
+  UNVERIFIED task is held set aside (execute § 4.5). A reverted RACE's PR never re-enters: `resume`, `hand-back`
+  and the automatic retry leave it until a new `pr:` re-lands it. The flag reads only the vault
   and that local verdict file, so it holds offline too.
 - **Merged into another base:** a MERGED PR whose `baseRefName` is not the default branch (the resolver's
   answer). That is the test `resume` applies: it leaves such a task alone, so it is escalated, never flipped:
@@ -312,10 +332,13 @@ takes none of them.
   is gone or its origin unreadable), the fix is that stamp. The flag reads only the vault and local files, so
   it holds offline too.
 - **Git-env trip:** `gitEnvHold` is non-empty: execute's git-env canary (execute § 4.5 *Git-env canary*) saw
-  the shared checkout's `refs/heads/<default>` or its bareness change during a window, and logged one
-  `git-env trip` line per tripped window on the rollout note's `## Git-env log` that no later `git-env ack`
-  line names. Render each line verbatim. The whole queue is held: `next` reports `halt: "git-env"`, every
-  canary verb exits 3, and `carry` refuses the rollout until `/thread:repair` (its git-env step, 3e) shows the evidence and records
+  the shared checkout's `refs/heads/<default>` or its bareness change during a window, or a Bookkeeping miss's
+  state check fail, and logged one `git-env trip` line per tripped window on the
+  rollout note's `## Git-env log` that no later `git-env ack` line names (a `git-env miss` line holds
+  nothing). Render each line verbatim. It holds what it threatens (ADR 0046), by each entry's `scope`: a bare checkout (`rollout`) holds the whole rollout:
+  `next` reports `halt: "git-env"` at once, every canary verb exits 3 and nothing new starts; any other trip
+  (`lane`) holds the Integration lane only (`next`'s `laneHold`, the canary's exit 9), while task calls go on.
+  `carry` refuses the rollout under either until `/thread:repair` (its git-env step, 3e) shows the evidence and records
   Lachy's ack. It reads only the vault, so it holds offline too.
 - **Hold until:** a non-null `holdUntil`, the rollout's or a task's (`_shared/vault-grammar.md` § Hold until),
   read with the `gh pr view` above. Render `HELD until <pr> merges (<state>)` while the PR reads OPEN (or the
@@ -348,7 +371,8 @@ offline too, and so does the Hold until flag, its state unchecked.
 `pause pending (draining)`, `ROOM STOP since <stamp>: awaiting the Stage's resume` or
 `room stop since <stamp> lapsed: the owner's heartbeat re-enters` (§ 2's *Room stop*, exit 0 or 4),
 `INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
-names, once), `HELD until <pr> merges (<state>)` or `HOLD_UNTIL UNREADABLE: <why>` (the rollout's own
+names, once, then ` — lane only`, or ` — whole rollout` when an entry reads `scope: rollout`), `MAIN RED: [[x]]
+(revert did not land)` (each `mainRed` slug: § 3's Main red), `HELD until <pr> merges (<state>)` or `HOLD_UNTIL UNREADABLE: <why>` (the rollout's own
 `holdUntil`, § 3's Hold until flag: the lead waits on the merge and releases itself), `ENGINE SNAPSHOT UNUSABLE: <why>` (§ 1) or the lineage (`supersedes [[<prior>]]`,
 `superseded by [[<successor>]]`, or § 1's reverse lineage: `superseded by [[N]], close-out interrupted` or
 `superseded by [[N]], supersede interrupted`) when they apply.
@@ -368,7 +392,7 @@ never stalled)`: a row held on `trickle:` or `away cap:` is the cap at work, nev
 | `queueState` | Group | Each task shows |
 |---|---|---|
 | `merged` | **Merged** | its PR and `durationMinutes` from `timeline` |
-| `integrating` | **Integrating** | the lane: its PR and live state, the time since `integrating:`, and the outcome of `lastIntegration`, or `RACE re-verify in flight` (§ 3) |
+| `integrating` | **Integrating** | the lane: its PR and live state, the time since `integrating:`, and the outcome of `lastIntegration`, or `RACE re-verify in flight` or `RACE revert in flight (PR #R)` (§ 3) |
 | `awaiting-integration` | **Awaiting Integration** | its PR and `ready:` (`inputs.readyAt`) |
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting; `auto-retry <autoRetriesUsed>` when above 0 (the verdict sets the counters before its first refusal, so `inputs` carries them for a running note too) |
 | `queued` | **Queued** | `held until <pr> merges` while the rollout's `holdUntil` holds (§ 3), else `waitingOn`, else `held until <pr> merges` for its own held `holdUntil`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else "next free slot" |
@@ -504,7 +528,9 @@ genuine stall (execute § 8); a closed terminal stops it, and another session re
 session has ended. **The RACE exception:** with a RACE re-verify in flight (§ 3), the owner session's answer
 never leads to `/thread:execute`. If that session shows the `RACE: …` halt or no run, or has ended, the RACE
 is undecided, and the next step is `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`:
-`/thread:execute`'s *Cold resume* would only halt on the RACE (`RACE undecided`) once its lane is free.
+`/thread:execute`'s *Cold resume* would only hold the lane on the RACE and halt `race` (`RACE undecided`) once
+nothing else moves. A RACE revert in flight (§ 3) is the lead's own work too: the owner session finishes it, and
+any entry's step 1.4 resumes it.
 
 **Example report** (the live check on):
 
@@ -577,6 +603,7 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    held task. A possible PR-less merge gets a confirmed `pr:` only when no lead is live or under a
    stamped pause; while a lead is live repair records it only. A RACE re-verify in flight (§ 3) is not an
    open escalation: the lead decides it itself, so it waits under 9 or 10, and nobody asks Lachy mid-re-verify.
+   Nor is a RACE revert in flight (§ 3): the lead finishes it, so it waits the same way.
    An unacked git-env trip (§ 3's Git-env trip flag) is an open escalation too → `/thread:repair [[<rollout>]]`,
    ahead of every reinstate or resume: only its § 3e ack, on Lachy's word, lifts the hold.
 8. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add

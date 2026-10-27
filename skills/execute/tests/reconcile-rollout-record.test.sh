@@ -604,8 +604,14 @@ ok "$(idle i4)" '"queue-tail"' "queue-tail"
 mkro i5 "parallel_ceiling: 2" "pause_requested: true"; mkt v1 i5 in_progress
 ok "$(idle i5)" '"pause-drain"' "pause-drain"
 mkro i6 "parallel_ceiling: 2"; mkt w1 i6 open
-printf '\n## Git-env log\n\n- 2026-10-05T10:00+00:00 git-env trip [[w1]] task: refs/heads/main a→b; repo /x\n' >> "$V/i6.md"
-ok "$(idle i6 --running "")" '"hold-git-env"' "hold-git-env"
+printf '\n## Git-env log\n\n- 2026-10-05T10:00+00:00 git-env trip [[w1]] task: core.bare false→true; repo /x\n' >> "$V/i6.md"
+ok "$(idle i6 --running "")" '"hold-git-env"' "hold-git-env (a whole-rollout trip: a bare checkout)"
+mkro i6b "parallel_ceiling: 2"; mkt w2 i6b open
+printf '\n## Git-env log\n\n- 2026-10-05T10:00+00:00 git-env trip [[w2]] task: refs/heads/main a→b; repo /x\n' >> "$V/i6b.md"
+ok "$(idle i6b --running "")" '"hold-trickle"' "a lane trip holds no Slot: the idle Slot reads the Trickle's hold, never hold-git-env"
+mkro i6c "parallel_ceiling: 2"; mkt rr1 i6c review "pr: $PR/22" 'integrating: 2026-10-05T09:00+00:00'; mkt w3 i6c open
+printf '\n## Race log\n\n- 2026-10-05T10:00+00:00 [[rr1]] RACE: PR #22 merged as %s\n- 2026-10-05T10:10+00:00 [[rr1]] revert started: %s (re-verify rc 1, red after the Flake check)\n- 2026-10-05T10:20+00:00 [[rr1]] revert did not land: conflict in a.py\n' "$(printf 'f%.0s' {1..40})" "$(printf 'f%.0s' {1..40})" >> "$V/i6c.md"
+ok "$(idle i6c --running "")" '"hold-race"' "hold-race (mainRed: a RACE revert that did not land holds every start)"
 mkro i7 "parallel_ceiling: 2"; mkt rc i7 review "pr: $PR/21"
 printf '\n## Race log\n\n- 2026-10-05T10:00+00:00 [[rc]] RACE: unverified\n' >> "$V/i7.md"
 ok "$(idle i7 --running "")" '"hold-race"' "hold-race"

@@ -269,10 +269,13 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
     !cold.includes('A room-stopped task call this session holds the handle of counts as a live task call here and in every `--running` until step 1.3 resumes it') ||
     !soft.includes('A room-stopped call (§ Room stop) is in-flight work: it counts as running in `--running`, and the drain resumes it')) fails.push('resume-live')
 
-  // git-env-hold: the resumes run after step 1.1, whose hold halts them all.
+  // git-env-hold: the resumes run after step 1.1, whose whole-rollout hold (or mainRed) halts them all; under a lane hold
+  // (ADR 0046) task calls still resume and the integrate call waits for the ack.
   if (!s13.includes('After step 1.1, and before the first restart, step 1.3 resumes') ||
     !s14.includes('After step 1.1, a room-stopped integrate call') ||
-    !it(9).includes('After step 1.1, whose `gitEnvHold` halt resumes nothing')) fails.push('git-env-hold')
+    !it(9).includes('After step 1.1, whose `gitEnvHold` halt resumes nothing') ||
+    !it(9).includes("That halt is a whole-rollout hold's, as is a `mainRed` halt, which resumes nothing either") ||
+    !it(9).includes('Under a lane hold, step 1.3 still resumes task calls and seeded revises, and step 1.4 resumes a room-stopped integrate call only once its `git-env` entry is acked')) fails.push('git-env-hold')
 
   // lost-call-room: while it stands a call that ends rowless writes nothing; after it, a fresh once at step 1.3/1.4.
   const lostHead = lostRaw.slice(0, Math.max(0, lostRaw.indexOf('- Otherwise, once:')))
@@ -413,8 +416,8 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
     !rc.includes(`They run only when no lead is live (every owner session has ended, or shows no run there under no room-stop headline, ${LAPSED},`) ||
     !rc.includes('while a lead is live (the owner check below, under which a room stop counts as live)') ||
     !rc.includes('every loop entry ends a room stop, here one an ended owner session left, lapsed or not') ||
-    !before(rc, "then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>`",
-      '`reconcile-rollout.py resume`, then the loop with')) fails.push('repair-live')
+    !before(rc, "then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts, but its exit 9, the lane hold, goes on), then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>`",
+      '`reconcile-rollout.py resume` (its exit 3,')) fails.push('repair-live')
   return [...new Set(fails)]
 }
 
@@ -585,9 +588,9 @@ test('control: a skip past the lane, no nothing-live sentence, or a gap relaunch
 })
 
 test('control: an entry that never ends the stop, ends it before its gates, or a guarded or re-entering clause (2) fails durable', () => {
-  const END = " then, once the entry's `check-all` (*Landing-register re-check*) has exited 0, end any standing room stop: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (§ Room stop; with none standing it writes nothing, and a non-zero exit is printed and the entry goes on);"
+  const END = " then, once the entry's `check-all` (*Landing-register re-check*) has exited 0, or 9 (the canary's lane hold), end any standing room stop: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (§ Room stop; with none standing it writes nothing, and a non-zero exit is printed and the entry goes on);"
   only(sk(END, ''), 'durable', 'Cold resume never ends it')
-  only(sk(" then, once the entry's `check-all` has exited 0, end any standing room stop (`step-boundary.py end`, as at *Cold resume*);", ''), 'durable', 'Reinstate never ends it')
+  only(sk(" then, once the entry's `check-all` has exited 0, or 9 (the canary's lane hold), end any standing room stop (`step-boundary.py end`, as at *Cold resume*);", ''), 'durable', 'Reinstate never ends it')
   only({ skill: edit(edit(real.skill, END, ''), 'on a rollout that has run: first re-run § 2.5', 'on a rollout that has run: first end any standing room stop (`step-boundary.py end`); then re-run § 2.5') },
     'durable', 'ended before the gates')
   only(sk('never resume a paused rollout. Otherwise run `python3', 'never resume a paused rollout. Otherwise, while the last ROLLOUT-STATUS reason starts `room stop:`, run `python3'),
@@ -627,6 +630,7 @@ test('control: room-stopped calls sent to restart, no pause_requested, or no sof
 test('control: resumes before step 1.1, or no hold clause, fails git-env-hold', () => {
   only(sk('Nothing is resumed before the loop. After step 1.1, whose `gitEnvHold` halt resumes nothing, step 1.3', 'Before step 1.1, step 1.3'), 'git-env-hold', 'before step 1.1')
   only(sk(', whose `gitEnvHold` halt resumes nothing,', ','), 'git-env-hold', 'no hold clause')
+  only(sk(' Under a lane hold, step 1.3 still resumes task calls and seeded revises, and step 1.4 resumes a room-stopped integrate call only once its `git-env` entry is acked.', ''), 'git-env-hold', 'no lane-hold clause')
 })
 
 test('control: each Lost call room-bullet part missing, or resumeFromRunId in it, fails lost-call-room', () => {
