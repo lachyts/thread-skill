@@ -1581,7 +1581,7 @@ const BRANCH_NAME = /^(?!-)(?!\/)(?!.*\/\/)(?!.*\.\.)(?!\.)(?!.*\/\.)(?!.*\.lock
 function defaultBranch(a) {
   const b = a.defaultBranch || 'main'
   if (typeof b !== 'string' || !BRANCH_NAME.test(b)) {
-    throw new Error(`defaultBranch: refusing ${JSON.stringify(b)} — not a valid branch name`)
+    throw new Error(`defaultBranch: refusing ${refusedEcho(b)} — not a valid branch name`)
   }
   return b
 }
@@ -1820,24 +1820,35 @@ function argsRefused(why) {
   return new Error(`${ARGS_REFUSED}: ${why}`)
 }
 
+// A refused value, as a refusal or a refusing log line echoes it (p32-1): its JSON, exactly as JSON.stringify writes
+// it up to 200 characters; a longer one is cut there, marked `…` and its full length given, so one bad value never
+// floods the line the lead prints verbatim (§ 4.5 *Args refusal* step (5)). A value JSON cannot write (undefined)
+// echoes as its type.
+function refusedEcho(v) {
+  let s
+  try { s = JSON.stringify(v) } catch (e) { s = undefined }
+  if (s === undefined) return typeof v
+  return s.length > 200 ? `${s.slice(0, 200)}… (${s.length} characters)` : s
+}
+
 // args.ladder: '' when usable (or absent), else why not. A bad value is a lead bug: the orchestration
 // refuses it before any dispatch (argsRefused), in both modes.
 function ladderArgsError(l) {
   if (l === undefined || l === null) return ''
-  if (!l || typeof l !== 'object' || Array.isArray(l)) return `must be one object { source, rungs }, got ${JSON.stringify(l)}`
-  if (typeof l.source !== 'string' || !l.source) return `source must be a non-empty string, got ${JSON.stringify(l.source)}`
+  if (!l || typeof l !== 'object' || Array.isArray(l)) return `must be one object { source, rungs }, got ${refusedEcho(l)}`
+  if (typeof l.source !== 'string' || !l.source) return `source must be a non-empty string, got ${refusedEcho(l.source)}`
   if (!Array.isArray(l.rungs) || !l.rungs.length) return 'rungs must be a non-empty array, bottom rung first'
   const seen = []
   for (let i = 0; i < l.rungs.length; i++) {
     const r = l.rungs[i]
     const at = `rung ${i + 1}`
     if (!r || typeof r !== 'object' || Array.isArray(r)) return `${at} must be an object { name, model, effort, judge, review }`
-    if (!rungName(r.name)) return `${at}: name ${JSON.stringify(r.name)} must be lowercase [a-z][a-z0-9._-]* and not a YAML word`
-    if (seen.includes(r.name)) return `${at}: duplicate name ${JSON.stringify(r.name)}`
+    if (!rungName(r.name)) return `${at}: name ${refusedEcho(r.name)} must be lowercase [a-z][a-z0-9._-]* and not a YAML word`
+    if (seen.includes(r.name)) return `${at}: duplicate name ${refusedEcho(r.name)}`
     seen.push(r.name)
-    if (!LADDER_MODELS.includes(r.model)) return `${at} (${r.name}): unknown model ${JSON.stringify(r.model)} (known: ${LADDER_MODELS.join(', ')})`
+    if (!LADDER_MODELS.includes(r.model)) return `${at} (${r.name}): unknown model ${refusedEcho(r.model)} (known: ${LADDER_MODELS.join(', ')})`
     for (const k of ['effort', 'judge', 'review']) {
-      if (!LADDER_EFFORTS.includes(r[k])) return `${at} (${r.name}): ${k} ${JSON.stringify(r[k])} is not one of ${LADDER_EFFORTS.join(', ')}`
+      if (!LADDER_EFFORTS.includes(r[k])) return `${at} (${r.name}): ${k} ${refusedEcho(r[k])} is not one of ${LADDER_EFFORTS.join(', ')}`
     }
   }
   return ''
@@ -1849,14 +1860,14 @@ function ladderArgsError(l) {
 // it, on its own copy) is a lead bug, refused before any dispatch in both modes (argsRefused, execute § 4.5 *Args refusal*).
 function verifySlotArgsError(v) {
   if (v === undefined || v === null) return `is required (estate ADR 0009 d4): pass this entry's verify-timeout verifySlot, verbatim (execute § 4)`
-  if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${JSON.stringify(v)}`
+  if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${refusedEcho(v)}`
   const keys = Object.keys(v).sort()
-  if (keys.length !== 2 || keys[0] !== 'script' || keys[1] !== 'slots') return `must hold exactly script and slots, got keys ${JSON.stringify(Object.keys(v))}`
-  if (typeof v.script === 'string' && v.script.startsWith('/skills/')) return `script ${JSON.stringify(v.script)} sits under a bare /skills/: CLAUDE_PLUGIN_ROOT was empty (re-run by plugin-root.md rule 4)`
+  if (keys.length !== 2 || keys[0] !== 'script' || keys[1] !== 'slots') return `must hold exactly script and slots, got keys ${refusedEcho(Object.keys(v))}`
+  if (typeof v.script === 'string' && v.script.startsWith('/skills/')) return `script ${refusedEcho(v.script)} sits under a bare /skills/: CLAUDE_PLUGIN_ROOT was empty (re-run by plugin-root.md rule 4)`
   if (typeof v.script !== 'string' || !v.script.startsWith('/') || /[\r\n]/.test(v.script) || v.script.split('/').pop() !== 'verify-slot.py') {
-    return `script must be the absolute, single-line path of verify-slot.py, got ${JSON.stringify(v.script)}`
+    return `script must be the absolute, single-line path of verify-slot.py, got ${refusedEcho(v.script)}`
   }
-  if (!Number.isInteger(v.slots) || v.slots < 1) return `slots must be an integer >= 1, got ${JSON.stringify(v.slots)}`
+  if (!Number.isInteger(v.slots) || v.slots < 1) return `slots must be an integer >= 1, got ${refusedEcho(v.slots)}`
   return ''
 }
 
@@ -2692,11 +2703,11 @@ function prIdentityError(a, o) {
   if (typeof t.slug !== 'string' || !t.slug) return 'task.slug must be a non-empty string'
   if (typeof a.repoPath !== 'string' || !a.repoPath) return 'repoPath must be a non-empty string'
   if (t.scope === 'read-only') return 'a read-only task has no PR to integrate or revise'
-  if (typeof o.prUrl !== 'string' || !PR_URL.test(o.prUrl)) return `prUrl must be a PR URL (…/pull/<n>), got ${JSON.stringify(o.prUrl)}`
+  if (typeof o.prUrl !== 'string' || !PR_URL.test(o.prUrl)) return `prUrl must be a PR URL (…/pull/<n>), got ${refusedEcho(o.prUrl)}`
   const br = `audit-fix/${shortAlias(t.slug)}`
-  if (o.branch !== br) return `branch must be ${br}, got ${JSON.stringify(o.branch)}`
+  if (o.branch !== br) return `branch must be ${br}, got ${refusedEcho(o.branch)}`
   const wt = worktreeDir(a.repoPath, t.slug)
-  if (o.worktreePath !== wt) return `worktreePath must be ${wt}, got ${JSON.stringify(o.worktreePath)}`
+  if (o.worktreePath !== wt) return `worktreePath must be ${wt}, got ${refusedEcho(o.worktreePath)}`
   return ''
 }
 
@@ -2710,11 +2721,11 @@ function prIdentityError(a, o) {
 //   Lost-call resume of an old integrate call), which reads as neutral: Integration runs on the top rung
 //   anyway, so the old record decides nothing.
 function rungRecordError(g) {
-  if (!isObj(g)) return `must be one object { startRung, rung, climbs }, got ${JSON.stringify(g)}`
+  if (!isObj(g)) return `must be one object { startRung, rung, climbs }, got ${refusedEcho(g)}`
   if ('model' in g) {
     if (!['opus', 'fable'].includes(g.model) || typeof g.escalated !== 'boolean' || typeof g.escalatedAt !== 'string' ||
       typeof g.tierCapped !== 'boolean' || typeof g.tierCappedAt !== 'string') {
-      return `a pre-3.0.0 tier record must be { model: opus|fable, escalated: boolean, escalatedAt: string, tierCapped: boolean, tierCappedAt: string }, got ${JSON.stringify(g)}`
+      return `a pre-3.0.0 tier record must be { model: opus|fable, escalated: boolean, escalatedAt: string, tierCapped: boolean, tierCappedAt: string }, got ${refusedEcho(g)}`
     }
     return ''
   }
@@ -2722,7 +2733,7 @@ function rungRecordError(g) {
   const name = (v) => v === '' || rungName(v)
   if (keys !== 'climbs,rung,startRung' || !name(g.startRung) || !name(g.rung) || !Array.isArray(g.climbs) ||
     g.climbs.some((c) => !isObj(c) || Object.keys(c).sort().join(',') !== 'from,stage,to' || !STAGES.includes(c.stage) || !rungName(c.from) || !rungName(c.to))) {
-    return `must be { startRung, rung, climbs } (rung names or '', climbs [{ stage: ${STAGES.join('|')}, from, to }]), got ${JSON.stringify(g)}`
+    return `must be { startRung, rung, climbs } (rung names or '', climbs [{ stage: ${STAGES.join('|')}, from, to }]), got ${refusedEcho(g)}`
   }
   return ''
 }
@@ -2742,25 +2753,25 @@ function integrationArgsError(a) {
   if (!isObj(I)) return 'must be one object'
   const id = prIdentityError(a, I)
   if (id) return id
-  if (!(Number.isInteger(t.maxIterations) && t.maxIterations >= 1)) return `task.maxIterations must be an integer >= 1, got ${JSON.stringify(t.maxIterations)}`
+  if (!(Number.isInteger(t.maxIterations) && t.maxIterations >= 1)) return `task.maxIterations must be an integer >= 1, got ${refusedEcho(t.maxIterations)}`
   const budget = roundBudgetDiagnosis(t, ['maxReviewRounds'])
   if (budget) return budget
-  for (const k of ['headSha', 'taskBase', 'mainSha']) if (!isSha(I[k])) return `${k} must be a 40-hex commit sha, got ${JSON.stringify(I[k])}`
+  for (const k of ['headSha', 'taskBase', 'mainSha']) if (!isSha(I[k])) return `${k} must be a 40-hex commit sha, got ${refusedEcho(I[k])}`
   if (!Array.isArray(I.trouble) || I.trouble.some((x) => !INTEGRATION_TROUBLE.includes(x)) || new Set(I.trouble).size !== I.trouble.length) {
-    return `trouble must be a deduplicated subset of ${INTEGRATION_TROUBLE.join('|')}, got ${JSON.stringify(I.trouble)}`
+    return `trouble must be a deduplicated subset of ${INTEGRATION_TROUBLE.join('|')}, got ${refusedEcho(I.trouble)}`
   }
   if (!Array.isArray(I.landed)) return 'landed must be an array'
   for (const p of I.landed) {
     if (!isObj(p) || typeof p.prUrl !== 'string' || !PR_URL.test(p.prUrl) || typeof p.title !== 'string' ||
       typeof p.taskPath !== 'string' || !Array.isArray(p.files) || p.files.some((f) => typeof f !== 'string')) {
-      return `landed entries must be { prUrl, title, files: string[], taskPath }, got ${JSON.stringify(p)}`
+      return `landed entries must be { prUrl, title, files: string[], taskPath }, got ${refusedEcho(p)}`
     }
   }
   const he = historyError(I.reviewHistory, true)
   if (he) return 'reviewHistory ' + he
   const last = I.reviewHistory.length ? I.reviewHistory[I.reviewHistory.length - 1].round : 0
   if (!(Number.isInteger(I.reviewRoundsUsed) && I.reviewRoundsUsed >= 1 && I.reviewRoundsUsed >= last)) {
-    return `reviewRoundsUsed must be an integer >= 1 and >= the history's last round (${last}), got ${JSON.stringify(I.reviewRoundsUsed)}`
+    return `reviewRoundsUsed must be an integer >= 1 and >= the history's last round (${last}), got ${refusedEcho(I.reviewRoundsUsed)}`
   }
   const rungBad = rungRecordError(I.rung)
   if (rungBad) return 'rung ' + rungBad
@@ -2781,13 +2792,13 @@ function integrationArgsError(a) {
 function resumeArgsError(a) {
   const R = a.task.resume
   if (!isObj(R)) return 'must be one object'
-  if (R.stage !== 'revise') return `stage must be 'revise', got ${JSON.stringify(R.stage)}`
+  if (R.stage !== 'revise') return `stage must be 'revise', got ${refusedEcho(R.stage)}`
   const id = prIdentityError(a, R)
   if (id) return id
   const he = historyError(R.reviewHistory, false)
   if (he) return 'reviewHistory ' + he
   const last = R.reviewHistory[R.reviewHistory.length - 1].round
-  if (R.reviewRoundsUsed !== last) return `reviewRoundsUsed must equal the history's last round (${last}), got ${JSON.stringify(R.reviewRoundsUsed)}`
+  if (R.reviewRoundsUsed !== last) return `reviewRoundsUsed must equal the history's last round (${last}), got ${refusedEcho(R.reviewRoundsUsed)}`
   if (typeof R.plan !== 'string') return 'plan must be a string'
   return ''
 }
@@ -3405,13 +3416,19 @@ function integrationResult(task, out, a, trace) {
 // object (confirmed empirically: the script sees `typeof args === 'string'`). Parse defensively
 // so the engine works whether args arrives as a string or an object; args that are not JSON, or not one
 // object (undefined, null, a number, an array), are refused here rather than dying in a TypeError below.
+// The refusal names the value's kind, then its bounded echo (refusedEcho): args the lead stringified before the
+// tool stringified them again parse to one string, the whole args JSON, which echoed in full ran to 50,658 characters.
 let a
 try {
   a = typeof args === 'string' ? JSON.parse(args) : args
 } catch (e) {
   throw argsRefused('args: not JSON: ' + e.message)
 }
-if (!a || typeof a !== 'object' || Array.isArray(a)) throw argsRefused('args must be one object, got ' + JSON.stringify(a))
+if (!a || typeof a !== 'object' || Array.isArray(a)) {
+  const kind = a === null ? 'null' : Array.isArray(a) ? 'array' : typeof a
+  const shown = a === null || a === undefined ? '' : ' ' + refusedEcho(a)
+  throw argsRefused('args must be one object, got ' + kind + shown + (kind === 'string' ? ' — args JSON-stringified twice: pass one object' : ''))
+}
 // Fail the run before any dispatch on an unusable args.defaultBranch (its own message after the sentinel).
 try { defaultBranch(a) } catch (e) { throw argsRefused(e.message) }
 // Refuse the pre-p12-5 `waves` args shape before any dispatch: a lead on a stale SKILL.md, or a resume of a
@@ -3421,7 +3438,7 @@ if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw argsRe
 // args.mode (p12-6): absent or 'task' runs the task's own call; 'integrate' runs Integration's trouble
 // path. Bad Integration or seeded-revise args are lead bugs, refused before any dispatch.
 const mode = a.mode === undefined ? 'task' : a.mode
-if (mode !== 'task' && mode !== 'integrate') throw argsRefused(`args.mode: refusing ${JSON.stringify(a.mode)} — 'task' (the default) or 'integrate'`)
+if (mode !== 'task' && mode !== 'integrate') throw argsRefused(`args.mode: refusing ${refusedEcho(a.mode)} — 'task' (the default) or 'integrate'`)
 // args.ladder (ADR 0029 decision 6): the ladder.py JSON the lead resolved at this call's start. A malformed
 // one is a lead bug, refused before any dispatch in both modes; an absent one is the built-in ladder.
 const badLadder = ladderArgsError(a.ladder)
@@ -3480,14 +3497,14 @@ if (a.progress) log(a.progress)
 // args.gatePricer (ADR 0038): a value pricerOf refuses reads as absent. The plan judge's pricing check is advisory
 // (approve-gates --standing still prices fail-closed), so a bad value is logged once and never throws.
 if (a.gatePricer !== undefined && a.gatePricer !== null && a.gatePricer !== '' && !pricerOf(a)) {
-  log(`gatePricer: refusing ${JSON.stringify(a.gatePricer)} — the plan judge's pricing check is off for this call (ADR 0038)`)
+  log(`gatePricer: refusing ${refusedEcho(a.gatePricer)} — the plan judge's pricing check is off for this call (ADR 0038)`)
 }
 // args.touched (p31-1, estate ADR 0009 d1): a value touchedOf refuses reads as absent, so the prompts fall back to
 // the repo's own Tests line, then its imports. Logged once and never thrown, like gatePricer: the pattern only
 // steers how an agent finds the touched tests, and the Checkpoints still run the full suite. Integrate mode never
 // reads it (its prompts are unchanged), so it is checked here, in task mode only.
 if (a.touched !== undefined && a.touched !== null && a.touched !== '' && !touchedOf(a)) {
-  log(`touched: refusing ${JSON.stringify(a.touched)} — the rollout's touched-tests pattern is off for this call (estate ADR 0009 d1)`)
+  log(`touched: refusing ${refusedEcho(a.touched)} — the rollout's touched-tests pattern is off for this call (estate ADR 0009 d1)`)
 }
 
 // A seeded revise uses its validated history with the empty rounds dropped (liveHistory); any other task

@@ -6,7 +6,9 @@
 // Three parts:
 // - the constant and the message shape (loadEngine);
 // - a table of refused args, run through the whole script (runTask): each is refused with the sentinel and its own kind
-//   head right after it, with no agent() call and no log line;
+//   head right after it, with no agent() call and no log line, in a line under 400 characters: a refused value is
+//   echoed bounded (refusedEcho), so double-encoded args, one string of the whole args JSON, never flood the line the
+//   lead prints (a control puts the whole echo back);
 // - a source check on the entry (from the orchestration marker to the integrate branch's first log line): every refusal
 //   head is in it, it holds no plain `throw new Error(` and exactly 12 `throw argsRefused(`. Its controls swap a late
 //   throw back to a plain Error (each must fail both the sentinel and the source check) and cut the end anchor (the
@@ -46,11 +48,13 @@ const omit = (o, k) => { const { [k]: _drop, ...rest } = o; return rest }
 // [what, args, the kind head right after the prefix]
 const CASES = [
   ['unparsable string args', '{"task": ', 'args: not JSON: '],
-  ['undefined args', undefined, 'args must be one object, got '],
-  ['null args', null, 'args must be one object, got '],
-  ['a number', 5, 'args must be one object, got 5'],
-  ['an array', [], 'args must be one object, got []'],
+  ['undefined args', undefined, 'args must be one object, got undefined'],
+  ['null args', null, 'args must be one object, got null'],
+  ['a number', 5, 'args must be one object, got number 5'],
+  ['an array', [], 'args must be one object, got array []'],
   ["the string 'null'", 'null', 'args must be one object, got null'],
+  // Args stringified twice (the lead stringified them, then the tool did): they parse to one string, echoed bounded.
+  ['double-encoded args', JSON.stringify(JSON.stringify(taskArgs())), 'args must be one object, got string "{\\"rolloutSlug\\":'],
   ['a bad defaultBranch', taskArgs({ defaultBranch: '-x' }), 'defaultBranch: refusing "-x"'],
   ['the pre-p12-5 waves shape', taskArgs({ waves: [{ wave: 1, tasks: [mkTask()] }] }), 'task.workflow.js takes one args.task, not args.waves'],
   ['an array task', taskArgs({ task: [mkTask()] }), 'args.task must be one task object'],
@@ -95,11 +99,42 @@ test('the sentinel: ARGS_REFUSED and argsRefused(why)', () => {
   assert.equal(e.name, 'Error')
 })
 
-test('every pre-dispatch refusal carries the sentinel and its head, with no dispatch and no log', async () => {
+test('every pre-dispatch refusal carries the sentinel and its head, with no dispatch and no log, in one short line', async () => {
   for (const [what, args, head] of CASES) {
     const r = await runTask(args, never)
-    assert.deepEqual(refusalFails(r, head), [], `${what}: ${r.error && r.error.message}`)
+    assert.deepEqual(refusalFails(r, head), [], `${what}: ${r.error && String(r.error.message).slice(0, 400)}`)
+    assert.ok(r.error.message.length < 400, `${what}: message length ${r.error.message.length}`)
   }
+})
+
+const longDoubleEncoded = () => {
+  const resume = mkResume({ plan: 'p'.repeat(20000), reviewHistory: [{ round: 1, feedback: ['f'.repeat(20000)] }] })
+  return JSON.stringify(JSON.stringify(taskArgs({}, { resume })))
+}
+
+// The refused value is echoed bounded (refusedEcho): a double-encoded seeded revise, whose plan and history make the
+// args JSON long (one measured run: 50,658 characters), keeps the sentinel, its head and the stringified-twice hint in
+// one short line, with no dispatch and no log; a malformed ladder passed as its JSON string is cut the same way.
+test('a long refused value is echoed bounded: double-encoded args and a stringified ladder', async () => {
+  const long = longDoubleEncoded()
+  assert.ok(long.length > 40000, `the fixture is long (${long.length})`)
+  const r = await runTask(long, never)
+  assert.deepEqual(refusalFails(r, 'args must be one object, got string "{'), [], String(r.error && r.error.message).slice(0, 400))
+  assert.ok(r.error.message.length < 400, `message length ${r.error.message.length}`)
+  assert.ok(r.error.message.includes('… ('), 'the cut is marked')
+  assert.ok(r.error.message.endsWith(' — args JSON-stringified twice: pass one object'), r.error.message.slice(-80))
+  const ladder = JSON.stringify({ ...LADDER, rungs: Array.from({ length: 40 }, (_, i) => ({ ...LADDER.rungs[0], name: `rung-${i}` })) })
+  const l = await runTask(taskArgs({ ladder }), never)
+  assert.deepEqual(refusalFails(l, 'args.ladder: must be one object { source, rungs }, got "'), [], String(l.error && l.error.message).slice(0, 400))
+  assert.ok(l.error.message.length < 400, `ladder message length ${l.error.message.length}`)
+})
+
+test('refusedEcho: JSON.stringify up to 200 characters, a longer value cut and marked, undefined as its type', () => {
+  const { refusedEcho } = loadEngine(['refusedEcho'])
+  for (const v of [5, 'merge', null, [], { a: 1 }, 'x'.repeat(198)]) assert.equal(refusedEcho(v), JSON.stringify(v))
+  assert.equal(refusedEcho(undefined), 'undefined')
+  const s = 'x'.repeat(199)
+  assert.equal(refusedEcho(s), `${JSON.stringify(s).slice(0, 200)}… (201 characters)`)
 })
 
 test('the valid args of both modes are not refused (the table is not vacuous)', async () => {
@@ -160,6 +195,13 @@ test("control: the else-branch args.integration throw back on a plain Error fail
   const r = await runTask(args, never, { source: v })
   assert.deepEqual(refusalFails(r, head), ['sentinel'])
   assert.deepEqual(sourceFails(v), ['a plain throw', '11 argsRefused throws'])
+})
+
+test('control: the top-level refusal echoing the whole value again fails the length bound', async () => {
+  const v = swap(src, "' ' + refusedEcho(a)", "' ' + JSON.stringify(a)")
+  const r = await runTask(longDoubleEncoded(), never, { source: v })
+  assert.deepEqual(refusalFails(r, 'args must be one object, got string "{'), [])
+  assert.ok(r.error.message.length > 40000, `unbounded message length ${r.error.message.length}`)
 })
 
 test('control: the end anchor cut fails the source check, never an empty slice that passes', () => {
