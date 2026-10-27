@@ -11,7 +11,7 @@
 #   file, reaped next   V12 a kill of the wrapper's whole process group   V13 the guard SIGKILLed alone   V14
 #   release is a close (a co-holder keeps the slot)   V15 a failure injected after the spawn: the slot stays held
 #   until the suite's group is gone   V16 no code calls fcntl.LOCK_UN; the header's close-only contract. The Run record
-#   (p29-10, contract item 7): VR1 a suite in a task tree records its start and end (sha, load, count, failing), its
+#   (p29-10, contract item 8): VR1 a suite in a task tree records its start and end (sha, load, count, failing), its
 #   output still split   VR2 --priority   VR3 TERM ends it stopped, the slot free; a SIGKILL leaves no ended line
 #   VR4 no task tree or no note: no record, as today   VR5 a dirty tree   VR6 a green run names no failing   VR7 a
 #   TERM while suite-started walks the vault: never swallowed (143, the suite never runs, no line, the slot free).
@@ -32,6 +32,7 @@ export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$tmp/events}"   # the Run re
 export THREAD_NOTE_LOCK_DIR="${tmp}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_VERIFY_SLOTS_DIR="$tmp/slots"                          # never the machine's real pool
 export THREAD_VERIFY_SLOT_POLL=0.1
+export THREAD_HEAT_LEVEL=0                                           # the Heat hold's reading, pinned (tests/verify-slot-heat.test.sh unpins it)
 VS="$root/skills/execute/scripts/verify-slot.py"
 LI="$root/skills/execute/scripts/lead-integrate.py"
 u=$(printf %07d $$)
@@ -344,7 +345,7 @@ ok "$s" free "V15: … and the slot is free afterwards"
 ok "$(grep -rn 'fcntl\.LOCK_UN' skills hooks)" "" "V16: no script calls fcntl.LOCK_UN (a release is a close)"
 has "$(sed -n '1,/^"""$/p' "$VS")" "Release closes the fd and never calls LOCK_UN" "V16: verify-slot.py's header states the close-only contract"
 
-# ======== VR1–VR6: a suite in a task tree records itself in the Run record (contract item 7; p29-10) ===============
+# ======== VR1–VR6: a suite in a task tree records itself in the Run record (contract item 8; p29-10) ===============
 # A git project R with its task tree at R/.claude/worktrees/t1, and a vault (under VH, the HOME these runs use) where t1
 # is in_progress in r1, a started parallel rollout: so its suites land in r1's record, with a Mac-wide count of 1.
 pool vr

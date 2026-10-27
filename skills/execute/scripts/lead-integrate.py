@@ -69,12 +69,21 @@ Subcommands:
       the step's group when verify dies by any means, before the slot frees: so even a SIGKILL of verify, which
       leaves no rc (red), still ends the step. No slot within W: O.rc reads `noslot`, the log says `verify: no
       verify slot within Ws (held: …); verifier not run`, the exit is 75 and the race tree is still removed. An
-      unusable slots dir logs a WARN and runs the steps unslotted, still under the guard.
+      unusable slots dir logs a WARN and runs the steps unslotted, still under the guard, with no heat watch.
+      The Heat hold (verify-slot.py contract 7, estate ADR 0009 d5): at heavy or worse no slot is free (`verify:
+      waiting (heat: <name>)`); at trapping or sleeping a step that holds a slot (the bootstrap or the verifier) is
+      stopped through its guard, logged `verify: heat stop (<name>) during the <step>: stopped its process group, no
+      verdict; back in line`, its slot released, and verify goes back in line to rerun every step from the beginning,
+      each pass under a fresh S-second deadline and from a clean result. Every slot wait, heat hold and heat-stopped
+      run counts against W (the first pass always tries once, a re-queue only while W remains), so verify still ends
+      within W + S plus one kill grace. When W runs out on a heat hold or after a heat stop: O.rc reads `heat`, the log
+      says `verify: no verdict: the Mac was too hot (heat: <name>) within Ws; verifier not run to a verdict (rc
+      heat)`, the exit is 76: no verdict, never red. The log keeps every attempt.
       --outcome (reconcile-rollout.py completion-verify --run's, which runs verify as its child while it holds
       the attempt's lock, ADR 0052) changes one thing and nothing else. Its result is O.outcome.json, in
       place of O.rc, which it never writes: removed first, then written at the start ({v, id, sha, ended:
       "running"}) and again at the end ({v, id, sha, ended, rc, step, signal}: ended done | deadline | bootstrap
-      | signal | noslot; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
+      | signal | noslot | heat; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
       by its fields, never by log text, and one that still reads `running` never finished.
       --rollout NOTE [--slug SLUG] (p29-10, ADR 0051; --slug only with --rollout, else exit 2) records the suite in
       the rollout's Run record (the note's stem; the tasks dir is its parent): by completion with --outcome, race with
@@ -85,8 +94,10 @@ Subcommands:
       suite-ended is written in the finally, after O.rc or O.outcome.json, with signals ignored there: green (the
       verifier's rc 0), timeout (--timeout and the step), unrun (the env_bootstrap failed), stopped (a signal: no
       vault scan, no log read), else red, with `failing` read from the log on red or timeout. No slot in time writes
-      only suite-ended noslot with its wait; a SIGKILL leaves a started line with no ended line. Recording never
-      changes verify's files, output or exit. Without --rollout nothing is recorded.
+      only suite-ended noslot with its wait, and a Heat hold that outlasts the wait only suite-ended heat with its
+      wait; a heat stop ends its pass's suite heat (no verdict, no rc, its step), written once its slot is released
+      with stops held, and the re-queued pass is a suite of its own. A SIGKILL leaves a started line with no ended
+      line. Recording never changes verify's files, output or exit. Without --rollout nothing is recorded.
 
   base-moved --repo R --pr N --base SHA --main SHA --default B [--refusal N] [--tasks-dir T]
       Why main moved (p29-10, ADR 0051): merge-task.sh calls it at each newly counted exit-3 refusal (its
@@ -190,7 +201,8 @@ integrating:), 2 usage or environment, or the Engine snapshot guard (ADR 0043: p
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
 call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
 unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, plan, verify,
-push, undo, base-moved and stamp are exempt), 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`). Stdlib only; `Note` and `_stamp` come from
+push, undo, base-moved and stamp are exempt), 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`),
+76 verify's Heat hold outlasted the slot wait (O.rc `heat`). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
 (`git rev-parse --local-env-vars`) scrubbed. The engine copies (ANCHOR_RECIPE, the branch and tree names,
 the merge message, integrationMarker, parseIntegrationMarker, stageDiagnosis's escape, and inputs --row's
@@ -791,7 +803,7 @@ class _Signalled(Exception):
         self.signum = signum
 
 
-_live = {"proc": None}
+_live = {"proc": None, "heat": None}   # the live step; "heat": the level a heat stop read (verify-slot.py, contract 7)
 
 
 def _on_signal(signum, _frame):
@@ -825,7 +837,8 @@ def _kill_group(proc):
 
 def _run_step(cmd, tree, log, deadline, guard=False, slot=None):
     if guard:
-        return _run_guarded(cmd, tree, log, deadline, slot)
+        # The Heat hold's stop watches a step only while a slot is held: unslotted (a SlotDirError) it runs unwatched.
+        return _run_guarded(cmd, tree, log, deadline, slot, heat=slot is not None)
     # The new group lives in its own session, so a signal that lands before `_live` holds it would leave it running
     # with no limit: hold SIGNALS until it does. The step itself starts with the caller's mask, not the held one.
     mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
@@ -846,20 +859,25 @@ def _run_step(cmd, tree, log, deadline, guard=False, slot=None):
             _live["proc"] = None
 
 
-def _run_guarded(cmd, tree, log, deadline, slot):
+def _run_guarded(cmd, tree, log, deadline, slot, heat=False):
     """A slotted step: `bash -c cmd` under verify-slot.py's guard, which shares the slot's lock and ends the step's
     group if verify dies by any means. Guarded holds SIGNALS across its spawn and records itself in `_live` inside
-    that window (on_spawn), as the unslotted step does. A deadline stops it through the guard: TIMED_OUT."""
+    that window (on_spawn), as the unslotted step does. A deadline stops it through the guard: TIMED_OUT. With
+    `heat`, the Heat hold's stop (verify-slot.py contract 7) watches it too: VS.HEAT_STOPPED, the level in
+    `_live["heat"]`."""
     g = VS.Guarded(["bash", "-c", cmd], hold=slot, on_spawn=lambda x: _live.__setitem__("proc", x), cwd=tree,
                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=ENV)
     try:
         if slot is not None:
             VS.write_holder(slot, {"pid": os.getpid(), "guard": g.pid, "group": g.group, "cwd": tree,
                                    "since": rr._stamp(datetime.now()), "kind": "verify"})
-        got = g.wait(timeout=max(0.0, deadline - time.monotonic()))
+        got = g.watch(timeout=max(0.0, deadline - time.monotonic()), heat=heat)
         if got is None:
             g.stop()
             return TIMED_OUT
+        if got is VS.HEAT_STOPPED:
+            _live["heat"] = g.heat
+            return VS.HEAT_STOPPED
         return got
     finally:
         if g.done():
@@ -893,21 +911,32 @@ def _suite_record(args):
             "waited": None}
 
 
+def _suite_pass(rec):
+    """A fresh suite for verify's next pass (p29-10): the Heat hold's re-queue reruns every step from the beginning, so
+    each pass that starts is its own suite-started and suite-ended pair."""
+    rec.update(suite=rr.new_suite_id(), written={}, t0=None, sha=None, waited=None)
+
+
 def _suite_end(rec, rc, result, log_path, args):
-    """The suite-ended line: noslot (no started line: it never ran) with its wait; else only after a started line
-    landed: stopped on a signal (no vault scan, no log read), green on the verifier's rc 0, timeout at the deadline
-    (its --timeout and step), unrun when the env_bootstrap failed, red otherwise; failing read from the log (from
-    `== verifier:` on) on red or timeout. Never raises."""
+    """The suite-ended line: noslot, or heat when the Heat hold held it past the slot wait (no started line: it never
+    ran), with its wait; else only after a started line landed: heat on a heat stop (`ended` heat-stop: no verdict, no
+    rc, its step), stopped on a signal (no vault scan, no log read), green on the verifier's rc 0, timeout at the
+    deadline (its --timeout and step), unrun when the env_bootstrap failed, red otherwise; failing read from the log
+    (from `== verifier:` on) on red or timeout. Never raises."""
     try:
         ended = result.get("ended")
         common = (rec["rollout"], rec["task"], rec["suite"], rec["by"], "lead")
-        if rc == "noslot":
-            rr.suite_ended(*common, "noslot", 0, tasks_dir=rec["tasks_dir"], waited=rec["waited"],
+        if rc in ("noslot", "heat"):
+            rr.suite_ended(*common, rc, 0, tasks_dir=rec["tasks_dir"], waited=rec["waited"],
                            sha=args.detach_at or None)
             return
         if not rec["written"].get("started") or rec["t0"] is None:
             return
         seconds = time.monotonic() - rec["t0"]
+        if ended == "heat-stop":
+            rr.suite_ended(*common, "heat", seconds, tasks_dir=rec["tasks_dir"], step=result.get("step"),
+                           sha=rec["sha"])
+            return
         extra = {"rc": rc if isinstance(rc, int) else None, "sha": rec["sha"]}
         if ended == "signal":
             rr.suite_ended(*common, "stopped", seconds, tasks_dir=rec["tasks_dir"], scan=False, **extra)
@@ -986,28 +1015,56 @@ def cmd_verify(args):
             _write_atomic(outcome_path, json.dumps(result) + "\n")
         with open(log_path, "ab", buffering=0) as log:
             note = lambda msg: log.write((msg + "\n").encode())  # noqa: E731
-            if slotted:
-                # The Integration priority (p23-4): wait for a verify slot BEFORE the deadline starts, so the wait
-                # never counts against --timeout. An unusable slots dir fails open: unslotted, still guarded.
-                waiting = time.monotonic()
-                try:
-                    slot = VS.acquire(args.slots, max_wait=args.slot_wait, priority=True, kind="verify",
-                                      on_wait=lambda m: note(f"verify: {m}"))
-                except VS.SlotDirError as e:
-                    note(f"verify: WARN {e}; running unslotted")
-                else:
-                    if slot is None:
-                        held = VS.held_by(args.slots) or "none read held"
-                        note(f"verify: no verify slot within {args.slot_wait:g}s (held: {held}); verifier not run")
-                        rc = "noslot"
-                        result["ended"] = "noslot"
-                        if rec is not None:
-                            rec["waited"] = time.monotonic() - waiting
+            # The Heat hold (verify-slot.py contract 7): a step a heat stop ended goes back in line and every step
+            # reruns from the beginning, under a fresh deadline. Every slot wait, heat hold and heat-stopped run counts
+            # against W (t0 is taken before the first acquire), and a pass starts only while W remains.
+            t0 = time.monotonic()
+            why = {"heat": None}   # acquire's: the level that held its last poll, or None
+            stopped = None         # the heat name of the last heat stop
+            first = True
+            while True:
+                # Each pass starts clean: no verdict, no step or signal, no live step, no slot.
+                rc = None
+                result["ended"] = "running"
+                result.pop("step", None)
+                result.pop("signal", None)
+                _live["proc"] = _live["heat"] = None
+                if slot is not None:
+                    slot.release()  # a close, never LOCK_UN (verify-slot.py's contract)
+                    slot = None
+                if slotted:
+                    # The Integration priority (p23-4): wait for a verify slot BEFORE the deadline starts, so the wait
+                    # never counts against --timeout. An unusable slots dir fails open: unslotted, still guarded, with
+                    # no heat watch, and that pass is the last. The first pass always tries (a W of 0: one try); a
+                    # re-queue only while W remains.
+                    budget = args.slot_wait - (0.0 if first else time.monotonic() - t0)
+                    tries, first = first or budget > 0, False
+                    waiting = time.monotonic()
+                    try:
+                        slot = (VS.acquire(args.slots, max_wait=max(0.0, budget), priority=True, kind="verify", why=why,
+                                           on_wait=lambda m: note(f"verify: {m}")) if tries else None)
+                    except VS.SlotDirError as e:
+                        note(f"verify: WARN {e}; running unslotted")
                     else:
+                        if slot is None:
+                            if why["heat"] is not None or stopped is not None:
+                                name = VS.heat_name(why["heat"]) if why["heat"] is not None else stopped
+                                note(f"verify: no verdict: the Mac was too hot (heat: {name}) within "
+                                     f"{args.slot_wait:g}s; verifier not run to a verdict (rc heat)")
+                                rc = "heat"
+                                result["ended"] = "heat"
+                            else:
+                                held = VS.held_by(args.slots) or "none read held"
+                                note(f"verify: no verify slot within {args.slot_wait:g}s (held: {held}); "
+                                     "verifier not run")
+                                rc = "noslot"
+                                result["ended"] = "noslot"
+                            if rec is not None:
+                                rec["waited"] = time.monotonic() - waiting
+                            break
                         note(f"== verify slot {slot.index + 1} of {args.slots} after {slot.waited:.0f}s")
                         VS.write_holder(slot, {"pid": os.getpid(), "guard": None, "group": None, "cwd": str(tree),
                                                "since": rr._stamp(datetime.now()), "kind": "verify"})
-            if rc is None:
                 if rec is not None:
                     # p29-10: the suite's start, after the slot and before the deadline; a stop here takes the signal
                     # path below (reraise), and the record's own write never swallows it.
@@ -1019,9 +1076,13 @@ def cmd_verify(args):
                                      reraise=(_Signalled,), written=rec["written"])
                 deadline = time.monotonic() + args.timeout
                 steps = ([("env_bootstrap", args.bootstrap)] if args.bootstrap else []) + [("verifier", args.verifier)]
+                heat_step = None
                 for name, cmd in steps:
                     note(f"== {name}: {cmd}")
                     got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot)
+                    if got is VS.HEAT_STOPPED:
+                        heat_step = name
+                        break
                     if got is TIMED_OUT:
                         note(f"verify: timed out after {args.timeout:g}s during the {name}; killed its process group (rc 124)")
                         rc = 124
@@ -1038,6 +1099,21 @@ def cmd_verify(args):
                         # step that never starts (a raise) leaves no rc, which reads as red.
                         rc = got
                         result["ended"] = "done"
+                if heat_step is None:   # only a watched step (a slot held) is ever heat-stopped
+                    break
+                stopped = VS.heat_name(_live["heat"])
+                note(f"verify: heat stop ({stopped}) during the {heat_step}: stopped its process group, no verdict; "
+                     "back in line")
+                if rec is not None:
+                    # p29-10: the heat-stopped pass's suite ends `heat` (no verdict, no rc) once its slot is released,
+                    # with stops held for the write, so a stop meanwhile ends no suite twice; the next pass is a suite
+                    # of its own.
+                    with rr._signals_held():
+                        if slot is not None:
+                            slot.release()  # a close, never LOCK_UN (verify-slot.py's contract)
+                            slot = None
+                        _suite_end(rec, None, {"ended": "heat-stop", "step": heat_step}, log_path, args)
+                        _suite_pass(rec)
     except _Signalled as s:
         if _live["proc"] is not None:
             _stop_live(_live["proc"])
@@ -1070,6 +1146,8 @@ def cmd_verify(args):
     print(f"verify: rc={rc} (log {log_path})")
     if rc == "noslot":
         return 75
+    if rc == "heat":
+        return VS.HEAT_EXIT
     return rc if isinstance(rc, int) and 0 <= rc <= 255 else 1
 
 
@@ -1866,7 +1944,8 @@ def main(argv=None):
     vf.add_argument("--slots", default=None, type=int, help="the machine's verify slots (rollouts.toml verify_slots); "
                     "with --slot-wait, wait for one first (verify-slot.py, p23-4)")
     vf.add_argument("--slot-wait", default=None, type=float, help="seconds to wait for a verify slot (verify-timeout's "
-                    "slotWait); none in time is rc `noslot`, exit 75")
+                    "slotWait), heat holds and heat-stopped runs included; none in time is rc `noslot`, exit 75, or "
+                    "`heat`, exit 76, when the Mac was too hot")
     vf.add_argument("--rollout", default=None, help="the rollout note: record the suite in its Run record (p29-10)")
     vf.add_argument("--slug", default=None, help="with --rollout: the task the suite is for (none for a completion suite)")
 

@@ -13,6 +13,7 @@ EH="$TMP/settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots"  # verify-timeout names verify-slot.py (its verifySlot); keep any pool in temp
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 
 fail=0
 check() {  # check <label> <expected-substring> <file>
@@ -79,9 +80,10 @@ check "revised: the reached rung stamped on a landed task" "rung: opus-xhigh"   
 refute "revised: never a model stamp"            "model:"                             "$TMP/task-revised.md"
 refute "approved: an empty rung stamps nothing"  "rung:"                              "$TMP/task-approved.md"
 refute "approved: no model stamp"                "model:"                             "$TMP/task-approved.md"
-case "$out" in *"task-revised: status=review pr=https://github.com/o/r/pull/2 rung=opus-xhigh from=opus-high climbs=review:opus-high->opus-xhigh [written]"*) echo "ok   - revised: the line shows the rung, where it started and the climb" ;;
+# p29-12: a review row names its ready: stamp; these notes name no rollout, so no call end is read: the fallback.
+case "$out" in *"task-revised: status=review pr=https://github.com/o/r/pull/2 rung=opus-xhigh from=opus-high climbs=review:opus-high->opus-xhigh ready="*" (fallback) [written]"*) echo "ok   - revised: the line shows the rung, where it started and the climb" ;;
   *) echo "FAIL - revised: reconcile line (got: $out)"; fail=1 ;; esac
-case "$out" in *"task-approved: status=review pr=https://github.com/o/r/pull/1 [written]"*) echo "ok   - approved: no rung on the line" ;;
+case "$out" in *"task-approved: status=review pr=https://github.com/o/r/pull/1 ready="*" (fallback) [written]"*) echo "ok   - approved: no rung on the line" ;;
   *) echo "FAIL - approved: reconcile line (got: $out)"; fail=1 ;; esac
 
 check "review-blocked: status"          "status: review-blocked"                       "$TMP/task-reviewblocked.md"

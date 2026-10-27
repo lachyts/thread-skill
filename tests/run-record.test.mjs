@@ -254,6 +254,17 @@ test('idle-slots (p29-8): a hold-away-cap reason is accepted; an unknown reason 
   assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
 })
 
+test('idle-slots (p30-3): a hold-pr reason (a row waits on a hold_until PR) is accepted; hold-until is refused', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-pr', free: 2, settings: SETTINGS })], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.equal(l.reason, 'hold-pr')
+  assert.equal(l.free, 2)
+  const r = cli(home, ['emit', '--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-until', free: 2, settings: SETTINGS })], { env: EV(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+})
+
 test('slot-taken (p29-8): the cap in force is accepted; a malformed cap is refused, nothing written', (t) => {
   const home = tmpHome(t)
   const cap = { away: true, n: 4, file: 'fresh' }
@@ -303,6 +314,22 @@ test('the night record (p28-2): away-night, last-start-held and ran-past-morning
     [1, 'r', 'u1', 'ran-past-morning', '2026-10-03T09:00:00Z']])
   assert.deepEqual([all[1].scope, all[1].history, all[1].usualMinutes, 'usualMinutes' in all[2]], ['cross-cutting', 3, 110, false])
   assert.deepEqual([all[3].slotTakenAt, all[3].usualMinutes, all[4].history], ['2026-10-03T07:30:00.000Z', 25, 2])
+})
+
+test('idle-slots hold-heat and completion-verify heat (p31-4, the Heat hold) are accepted; an unknown value is still refused', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-heat', free: 3, settings: SETTINGS })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--kind', 'completion-verify', '--json',
+    JSON.stringify({ result: 'heat', rc: 'heat', sha: 'a'.repeat(40), attempt: 1 })], { env: EV(home) })
+  const ls = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([ls[0].reason, ls[0].free, ls[1].result, ls[1].rc], ['hold-heat', 3, 'heat', 'heat'])
+  for (const [kind, json] of [['idle-slots', { reason: 'heat', free: 3, settings: SETTINGS }],
+    ['completion-verify', { result: 'hot', rc: 'heat', sha: 'a'.repeat(40), attempt: 1 }]]) {
+    const r = cli(home, ['emit', '--rollout', 'r', '--kind', kind, '--json', JSON.stringify(json)], { env: EV(home) })
+    assert.equal(r.status, 2, `${kind}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+  }
+  assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, 2, 'the refused emits wrote nothing')
 })
 
 test('auto-retry (p16-4): a valid emit, and a quota retry with used 0 and its quotaRetries', (t) => {
@@ -1046,6 +1073,15 @@ test('quota-stall (p29-10) takes runId and call; an old line with neither is sti
   assert.equal(r.status, 2, r.stderr)
 })
 
+test('a heat suite-ended (the Heat hold) is a stopped run or a held wait, with no rc', (t) => {
+  const home = tmpHome(t)
+  const emit = (f) => emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'suite-ended', '--json', JSON.stringify(f)], { env: EV(home) })
+  emit({ suite: SUITE, by: 'task', runner: 'agent', outcome: 'heat', seconds: 42, step: 'verifier', load: [9, 8, 7] })
+  emit({ suite: 's-1111111111111111', by: 'integration', runner: 'lead', outcome: 'heat', seconds: 0, waited: 60 })
+  const [a, b] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([a.outcome, 'rc' in a, a.step, b.outcome, b.waited, 'rc' in b], ['heat', false, 'verifier', 'heat', 60, false])
+})
+
 test('the ledger kinds are refused, exit 2 and nothing written, when malformed', (t) => {
   const home = tmpHome(t)
   const drop = (o, k) => { const c = { ...o }; delete c[k]; return c }
@@ -1079,6 +1115,7 @@ test('the ledger kinds are refused, exit 2 and nothing written, when malformed',
     ['suite-ended', 'a 201-character failing name', { ...ENDED, failing: ['f'.repeat(201)] }],
     ['suite-ended', 'timeout on a red', { ...ENDED, timeout: 1800 }],
     ['suite-ended', 'rc on a noslot', { ...ENDED, outcome: 'noslot', failing: undefined }],
+    ['suite-ended', 'rc on a heat', { ...ENDED, outcome: 'heat', failing: undefined }],
     ['suite-ended', 'rc 256', { ...ENDED, rc: 256 }],
     ['suite-ended', 'negative seconds', { ...ENDED, seconds: -1 }],
     ['suite-ended', 'a bad step', { ...ENDED, step: 'teardown' }],

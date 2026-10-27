@@ -980,6 +980,40 @@ test('a dead lead: a terminal call with its Slot left open is excluded past the 
   assert.ok(has(out.flags, /^lead absent: \[\[a\]\]'s call wf_a ended at/))
 })
 
+// p29-12: reconcile stamps a Slot-ending row's events at its call's own end (here 02:00) and carries the moment the
+// lead turned to it as reconciledAt (09:00). The Slot reads to that release, so the dead-lead reading above holds
+// unchanged; the ready line at the call's end makes the lane wait the true one.
+test('a slot-freed stamped at its call\'s end reads to its reconciledAt: lead absent as before, the true lane wait', (t) => {
+  const home = tmpHome(t)
+  const late = { stamp: 'call-end', reconciledAt: Z(at('09:00')) }
+  emitAll(home, 'demo', byTs([
+    [at('00:00'), 'slot-taken', 'a', { settings: S(2), start: 'start' }],
+    [at('00:00'), 'run-bound', 'a', { runId: 'wf_a', journalDir: '/nonexistent/workflows', call: 'task' }],
+    [at('02:00'), 'slot-freed', 'a', { outcome: 'ready', ...late }],
+    [at('02:00'), 'ready', 'a', { pr: 7, ...late }],
+    [at('09:00'), 'call-journal', null, { runId: 'wf_a', status: 'completed', mode: 'task', startTime: ms(at('00:00')), durationMs: 2 * 3600e3, tokens: 100000 }],
+    [at('09:00'), 'lane-taken', 'a', {}],
+    [at('09:10'), 'lane-freed', 'a', { release: 'merge', path: 'lead', triggers: [], conflict: false }],
+    [at('09:10'), 'merged', 'a', { pr: 7 }],
+  ]))
+  const out = scored(home, ['--until', at('09:10')])
+  assert.equal(out.runningTime.hours, 2.667, 'as the dead-lead case: 00:00-02:30 and the 10-min Integration')
+  const gap = out.runningTime.excluded.find((e) => e.kind === 'lead-absent')
+  assert.deepEqual([gap.start, gap.end], [Z(at('02:30')), Z(at('09:00'))])
+  assert.ok(has(out.flags, /^lead absent: \[\[a\]\]'s call wf_a ended at/))
+  assert.deepEqual(out.lane.waitsMinutes, [420], 'the wait for the lane runs from the call\'s end, not the lead\'s turn')
+  // Control: the same record with no reconciledAt reads the Slot as freed at the call's end, with no lead absence.
+  const home2 = tmpHome(t)
+  emitAll(home2, 'demo', byTs([
+    [at('00:00'), 'slot-taken', 'a', { settings: S(2), start: 'start' }],
+    [at('00:00'), 'run-bound', 'a', { runId: 'wf_a', journalDir: '/nonexistent/workflows', call: 'task' }],
+    [at('02:00'), 'slot-freed', 'a', { outcome: 'ready' }],
+    [at('09:00'), 'call-journal', null, { runId: 'wf_a', status: 'completed', mode: 'task', startTime: ms(at('00:00')), durationMs: 2 * 3600e3, tokens: 100000 }],
+  ]))
+  const out2 = scored(home2, ['--until', at('09:10')])
+  assert.ok(!out2.runningTime.excluded.some((e) => e.kind === 'lead-absent'), 'no reconciledAt: no lead-absent gap')
+})
+
 // fold-journals stamps a call-journal line with the fold time (here 12:00), so a split at 06:00 must still read it.
 test('journals folded after --until are read, and each call is clamped to --until', (t) => {
   const home = tmpHome(t)

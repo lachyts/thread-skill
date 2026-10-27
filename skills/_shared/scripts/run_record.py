@@ -118,8 +118,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      Trickle), file (fresh | missing | stale | unreadable: the Away state file's reading)} (exactly
                      those keys; p29-8, ADR 0049: the cap the Slot started under, so a Reflection tunes it)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
-  slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed)
-  ready           T  pr? (url or number)
+  slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed); stamp? (call-end | fallback);
+                     reconciledAt? (a UTC Z stamp). p29-12: reconcile's call-end stamp, under Reading the record
+  ready           T  pr? (url or number); stamp?; reconciledAt? (as slot-freed)
   set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
                      not checked as an enum; reconcile-rollout.py's table writes quota | call-failed |
                      merge-task | declined | prepare | revise-stopped | transient | gate | needs-human |
@@ -128,12 +129,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      question for a person, never a plan or review round run out, and integration-conflict and
                      integration-red, p27-4, are an integrate set-aside opening the engine's named markers: an
                      Integration conflict, `integration: conflict unresolved in …`, and a verifier red at
-                     Integration, `integration: verifier red: …`); setAsideAt? (run | integration | gate)
+                     Integration, `integration: verifier red: …`); setAsideAt? (run | integration | gate); stamp?;
+                     reconciledAt? (as slot-freed)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt); path?; triggers? (list of str);
                      conflict? (bool: `conflict` in triggers — a conflict Integration resolved, or, p27-4, an
                      unresolved Integration conflict that set the task aside)
-  merged          T  pr?; readOnly? (bool)
+  merged          T  pr?; readOnly? (bool); stamp?; reconciledAt? (as slot-freed)
   paused             mode (soft | hard | sign-off: reconcile-rollout.py await-sign-off, the queue left only gates for
                      Lachy and closed, ADR 0034)
   resumed            (no fields)
@@ -142,8 +144,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   idle-slots         reason (dependency | solo | pause-drain | queue-tail | awaiting-hand-back |
                      hold-merge | hold-git-env | hold-race | hold-trickle: a row waits on the machine-wide Trickle,
                      execute away.md | hold-away-cap: a row waits on the machine-wide Away cap, execute away.md |
-                     hold-last-start: a row the last starts hold toward the Morning, p28-2);
-                     free (int >= 0); settings (as slot-taken)
+                     hold-last-start: a row the last starts hold toward the Morning, p28-2 | hold-pr: a row waits
+                     on a PR's hold_until, vault-grammar § Hold until | hold-heat: a row waits for the Mac to cool,
+                     the Heat hold, execute away.md § Heat); free (int >= 0); settings (as slot-taken)
   away-night         morning (a UTC Z stamp, to the second: M, the Morning the last starts looked toward while Away
                      ran to it). p28-2, the night record (execute away.md § The night record): reconcile-rollout.py
                      `next` writes one per (rollout, M) on a call off --dry-run while the last starts apply, so a
@@ -156,7 +159,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      from an underestimate). p28-2: one per (task, M), for each task whose Slot was open at a marked
                      Morning (taken before it, not freed at or before it), read from this record's Slot intervals.
   quota-stall        stage?; detail?; runId?, call? (task | revise | integrate | resume: the task's latest run-bound,
-                     omitted when it has none; p29-10)
+                     omitted when it has none; p29-10); stamp?; reconciledAt? (as slot-freed)
   auto-retry      T  stage (plan | implement | verify | review | integrate: the stage of the block it re-enters,
                      the task's latest set-aside line's), setAsideAt (run | integration), retryClass (agent | infra
                      | quota), used (int >= 0: auto_retries_used after this retry; a quota retry leaves it), budget
@@ -164,14 +167,15 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      >= 1: the raised max_review_rounds); quotaRetries? (int >= 1: quota_retries_used after a quota
                      retry). p16-4, ADR 0033: reconcile-rollout.py auto-retry, execute's automatic retry of a
                      set-aside task.
-  completion-verify  result (green | rerun | flake | red | noslot | unrun | stopped), rc, sha, attempt (int 1 or 2); log?,
+  completion-verify  result (green | rerun | flake | red | noslot | unrun | stopped | heat), rc, sha, attempt (int 1 or 2); log?,
                      followup?
                      (estate ADR 0009 d6: reconcile-rollout.py completion-verify, one line per run of a rollout's
                      completion_verifier on merged origin/<default> at its completion ceremony; rc the run's
-                     verbatim, 0-255, noslot or absent; rerun is attempt 1's red, re-run on the same sha; flake a
-                     green attempt 2 after it; noslot (no verify slot), unrun (verify never got going, the
-                     env_bootstrap never let the suite run, or a git-env trip fell inside the window) and stopped (a
-                     signal stop: a TaskStop, a hard pause, a room stop) no verdict, the attempt runs again; followup
+                     verbatim, 0-255, noslot, heat or absent; rerun is attempt 1's red, re-run on the same sha; flake
+                     a green attempt 2 after it; noslot (no verify slot), unrun (verify never got going, the
+                     env_bootstrap never let the suite run, or a git-env trip fell inside the window), stopped (a
+                     signal stop: a TaskStop, a hard pause, a room stop) and heat (the Mac was too hot to run the
+                     suite, the Heat hold) no verdict, the attempt runs again; followup
                      the fix task a final red filed; ADR 0052: completion-verify --run writes it).
   verify-skipped  T  repo (the origin's owner/name, else the repo path), paths (at most 200 paths, the move's first),
                      pathsTotal (int >= 0: every path the move changed); base?, main?, head? (the green run's base, the
@@ -192,8 +196,10 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   review-verdict  T  round (int >= 1), verdict (approve | changes), findings, original, regression (ints >= 0;
                      original + regression <= findings, the rest unclassified), digest (verdict_digest of the
                      verdict and its bullets); head? (the PR head the judge judged, resolved to a full sha in the
-                     task tree; omitted when the judge gave none). One line per judged master-review round,
-                     written by reconcile-rollout.py from the row's reviewVerdicts; lands in <rollout>.jsonl.
+                     task tree; omitted when the judge gave none); stamp?; reconciledAt? (as slot-freed: the round
+                     was judged inside the call, so its line is at the call's end). One line per judged
+                     master-review round, written by reconcile-rollout.py from the row's reviewVerdicts; lands in
+                     <rollout>.jsonl.
                      Engine rounds are reviewLoop's REVIEW_VERDICT rounds only: an Integration re-review
                      rejection uses a review round but writes no line, so `round` skips it (r1, r2, r4).
   carried         T  from (the old rollout's slug), to (set to the new rollout). Appended to both
@@ -285,11 +291,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      the first of the sha256 of `git diff HEAD --binary`, only on a dirty tree), waited? (seconds >= 0:
                      the verify-slot wait), running? (an int >= 0: the Mac-wide count of running Rollout tasks). A task
                      is optional: a completion suite has none.
-  suite-ended        suite, by, runner (as suite-started), outcome (green | red | timeout | stopped | unrun | noslot),
-                     seconds (>= 0: the run, after any slot wait); load?, rc? (an int 0-255, never on noslot),
-                     failing? (at most 50 names of at most 200 characters each, read from the run's output on red or
-                     timeout), timeout? (seconds >= 0: the deadline, only on timeout), step? (env_bootstrap |
-                     verifier: where a deadline or a bootstrap ended it), sha?, waited?, running? (as suite-started).
+  suite-ended        suite, by, runner (as suite-started), outcome (green | red | timeout | stopped | unrun | noslot |
+                     heat: the Heat hold, verify-slot.py contract 7, stopped the run, no verdict, or held it past the
+                     slot wait), seconds (>= 0: the run, after any slot wait); load?, rc? (an int 0-255, never on noslot
+                     or heat), failing? (at most 50 names of at most 200 characters each, read from the run's output on
+                     red or timeout), timeout? (seconds >= 0: the deadline, only on timeout), step? (env_bootstrap |
+                     verifier: where a deadline, a bootstrap or a heat stop ended it), sha?, waited?, running? (as
+                     suite-started).
   base-moved      T  repo, pr, base, main (the refused integrated base and the live main merge-task read), inertOnly
                      (true | false | null: null only beside an error), moversTotal (an int >= 0), movers (at most 20
                      {sha, kind, rollout?, task?, pr?, source?}, oldest first: kind rollout | peer, source record |
@@ -320,6 +328,21 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   event), resume (a Lost-call or signed-gate resume).
 - set-aside stage is where the task stopped; setAsideAt is where it re-enters (merge-task's exit 1 reads
   stage integrate, setAsideAt run).
+- Call-end stamps (p29-12). The lead reconciles a call's row at its next turn, which can come hours after the call
+  ended (a lead held on a hold, or idle). So reconcile-rollout.py `reconcile` writes the events of a row that ends a
+  Slot (slot-freed, ready, a read-only approval's merged, set-aside, quota-stall, review-verdict) at that call's own
+  end, read from the journal of the call bound to the task's open Slot, with `stamp: call-end` and `reconciledAt`,
+  its own clock (when the lead turned to the row); with no end readable it writes them at its own clock with `stamp:
+  fallback` (and a ready or merged on any other row is a fallback too). Such a line's ts can be earlier than lines
+  written before it, so read the record by ts, as score.py does. That is also why the end must lie at or after the
+  Slot's latest slot-taken, a re-take included: a call-end ts earlier than a slot-taken in the same Slot would put the
+  slot-freed before that slot-taken, and every reader that reads by ts would split the Slot in two, the second never
+  freed. An end earlier than it is an earlier attempt's (a restart re-took the Slot, its launch failed or its resume
+  never rewrote the journal), so the row falls back. A slot-freed's `reconciledAt` is when the lead released the
+  Slot: score.py reads the Slot to it, so the lead's absence after a call still reads as lead absent, while the
+  night record (`next`) reads the Slot as ended at the call's end. The lane's events stay at the reconcile's clock,
+  unmarked: the lane is the lead's (ADR 0030). A line from before p29-12 carries no `stamp`: its ts is the
+  reconcile's clock.
 - Idle Slot time is a span. A Reflection derives it from slot-taken / slot-freed pairs against the ceiling
   stamped on each event. An idle-slots event is a reason marker labelling the span it falls in: a change
   of reason splits the span, a repeat is harmless, a span with no marker reads as "unexplained".
@@ -411,7 +434,8 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   tick); reconcile-rollout.py `next` (a sleep no entry follows: a mac-sleep closes itself, so `next` writes no
   lead-entry).
 - Suites pair by `suite`. A suite-started with no suite-ended never finished (killed with its wrapper, the lead or the
-  Mac); a suite-ended with no suite-started is a noslot (the suite never got a slot, so it never started). Writers:
+  Mac); a suite-ended with no suite-started is a noslot or a heat (the suite never got a slot, so it never started).
+  A heat stop ends its run's suite `heat`, and the restart once the Mac cools is a suite of its own. Writers:
   skills/execute/scripts/verify-slot.py `run` (an agent's suite, runner agent, the task read from a cwd under
   `<repo>/.claude/worktrees/<slug>`) and lead-integrate.py `verify --rollout` (the lead's Integration, RACE and
   completion suites, runner lead). `running` is absent on a stop by signal (no vault scan on that path).
@@ -823,7 +847,7 @@ ENTRY_STOPS = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog", "p
 CALL_KINDS = ("task", "revise", "integrate", "resume")      # run-bound's `call`
 SUITE_BYS = ("task", "integration", "race", "completion")
 SUITE_RUNNERS = ("agent", "lead")
-SUITE_OUTCOMES = ("green", "red", "timeout", "stopped", "unrun", "noslot")
+SUITE_OUTCOMES = ("green", "red", "timeout", "stopped", "unrun", "noslot", "heat")
 SUITE_STEPS = ("env_bootstrap", "verifier")
 MOVER_KINDS = ("rollout", "peer")
 MOVER_SOURCES = ("record", "note")
@@ -925,6 +949,8 @@ def _check_stopped(f):
 SUITE_REQUIRED = {"suite": _suite_id, "by": _enum(*SUITE_BYS), "runner": _enum(*SUITE_RUNNERS)}
 
 HOLDS = ("merge", "git-env", "race")
+# p29-12: reconcile-rollout.py's call-end stamp on the events of a row that ends a Slot (Reading the record).
+CALL_END = {"stamp": _enum("call-end", "fallback"), "reconciledAt": _stampz}
 # kind -> (task required, required fields, optional fields)
 KINDS = {
     "slot-taken": (True, {"settings": SETTINGS},
@@ -932,20 +958,21 @@ KINDS = {
                     "cap": _cap}),
     "run-bound": (True, {"runId": _str, "journalDir": _str},
                   {"call": _enum("task", "revise", "integrate", "resume"), "resumedFrom": _str}),
-    "slot-freed": (True, {"outcome": _enum("ready", "set-aside", "completed", "lost", "stopped", "failed")}, {}),
-    "ready": (True, {}, {"pr": _pr}),
+    "slot-freed": (True, {"outcome": _enum("ready", "set-aside", "completed", "lost", "stopped", "failed")},
+                   {**CALL_END}),
+    "ready": (True, {}, {"pr": _pr, **CALL_END}),
     "set-aside": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate", "gate"),
-                         "reasonClass": _str}, {"setAsideAt": _enum("run", "integration", "gate")}),
+                         "reasonClass": _str}, {"setAsideAt": _enum("run", "integration", "gate"), **CALL_END}),
     "lane-taken": (True, {}, {}),
     "lane-freed": (True, {"release": _enum("merge", "set-aside", "reject", "halt")},
                    {"path": _str, "triggers": _strlist, "conflict": _bool}),
-    "merged": (True, {}, {"pr": _pr, "readOnly": _bool}),
+    "merged": (True, {}, {"pr": _pr, "readOnly": _bool, **CALL_END}),
     "paused": (False, {"mode": _enum("soft", "hard", "sign-off")}, {}),
     "resumed": (False, {}, {}),
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
     "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
-                                           "hold-merge", "hold-git-env", "hold-race", "hold-trickle",
+                                           "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-heat", "hold-trickle",
                                            "hold-away-cap", "hold-last-start"),
                            "free": _int(0), "settings": SETTINGS}, {}),
     # The night record (p28-2, Chorus ADR 0104's Consequences): reconcile-rollout.py `next` is its one writer.
@@ -953,7 +980,8 @@ KINDS = {
     "last-start-held": (True, {"morning": _stampz, "scope": _str, "history": _int(0)}, {"usualMinutes": _int(1)}),
     "ran-past-morning": (True, {"morning": _stampz, "slotTakenAt": _stampz, "scope": _str, "history": _int(0)},
                          {"usualMinutes": _int(1)}),
-    "quota-stall": (False, {}, {"stage": _str, "detail": _str, "runId": _str, "call": _enum(*CALL_KINDS)}),
+    "quota-stall": (False, {}, {"stage": _str, "detail": _str, "runId": _str, "call": _enum(*CALL_KINDS),
+                                **CALL_END}),
     "auto-retry": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate"),
                           "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
                           "used": _int(0), "budget": _int(1)},
@@ -962,7 +990,8 @@ KINDS = {
     "inert-proof-failed": (True, dict(INERT_FIELDS, readers=_readers),
                            dict(INERT_OPTIONAL, error=_error, failed=_capped(MAX_GLOBS))),
     # result: reconcile-rollout.py's COMPLETION_RESULTS, in its order.
-    "completion-verify": (False, {"result": _enum("green", "flake", "red", "rerun", "noslot", "unrun", "stopped"),
+    "completion-verify": (False, {"result": _enum("green", "flake", "red", "rerun", "noslot", "unrun", "stopped",
+                                                  "heat"),
                                   "rc": _str, "sha": _str, "attempt": _int(1, 2)}, {"log": _str, "followup": _str}),
     "call-journal": (False, {"runId": _str, "status": _str},
                      {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),
@@ -972,7 +1001,7 @@ KINDS = {
                       "regression": _int(0), "verdict": _str}),
     "review-verdict": (True, {"round": _int(1), "verdict": _enum("approve", "changes"), "findings": _int(0),
                               "original": _int(0), "regression": _int(0), "digest": _str},
-                       {"head": _str}),
+                       {"head": _str, **CALL_END}),
     "carried": (True, {"from": _str, "to": _str}, {}),
     "answer-recorded": (True, {"answerKind": _enum("needs-you", "decision")},
                         {"form": _enum("hand-back", "awaiting-repair", "left"),
@@ -1146,8 +1175,8 @@ def _check_fields(kind, fields):
     elif kind == "suite-ended":
         if "timeout" in fields and fields["outcome"] != "timeout":
             raise Refused("suite-ended: timeout is only on outcome timeout")
-        if "rc" in fields and fields["outcome"] == "noslot":
-            raise Refused("suite-ended: a noslot suite never ran, so it has no rc")
+        if "rc" in fields and fields["outcome"] in ("noslot", "heat"):
+            raise Refused("suite-ended: a %s suite has no verdict, so it has no rc" % fields["outcome"])
     elif kind == "base-moved" and fields["inertOnly"] is None and "error" not in fields:
         raise Refused("base-moved: inertOnly is null only beside an error (the inert test could not run)")
 

@@ -45,6 +45,7 @@ git config --global user.name t; git config --global user.email t@t.invalid
 git config --global init.defaultBranch master; git config --global advice.detachedHead false
 export LANDING_REGISTER="$TMP/register.md"; : > "$LANDING_REGISTER"
 export THREAD_LEG_LOCK_DIR="$TMP/locks" THREAD_EVENTS_DIR="$TMP/events" TMPDIR="$TMP/t"
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 mkdir -p "$TMPDIR" "$TMP/bin"
 # A fake gh and ssh: any call is logged and fails, so a test can assert no network was touched.
 printf '#!/bin/sh\necho "gh $*" >> "%s/net.log"\nexit 1\n' "$TMP" > "$TMP/bin/gh"
