@@ -114,6 +114,7 @@ function checkNeedsYou(skill, context = realContext) {
   const kindB = kind(items, '- (b) **An undecided RACE or UNVERIFIED**')
   const kindC = kind(items, '- (c) **A set-aside only a person moves on**')
   const kindE = kind(items, '- (e) **Any other § 7 halt**')
+  const kindG = kind(items, '- (g) **An unacked git-env trip**')
   const kindF = kind(items, '- (f) **A PR hold that waits on Lachy**')
   const s37 = collapse(section(skill, S37) ?? '')
   const s45raw = section(skill, S45) ?? ''
@@ -315,10 +316,11 @@ function checkNeedsYou(skill, context = realContext) {
   // a red RACE re-verify's halt is (b), never also (e), so it is one item with one push.
   if (!kindE.includes('`[[<rollout>]] halted (<YYYY-MM-DD>): <reason>: <act>`') ||
     !kindE.includes("never taken from § 7's prose") ||
-    !kindE.includes('`decide with /thread:repair [[<rollout>]]` for a git-env halt') ||
+    !kindE.includes('`decide with /thread:repair [[<rollout>]]` for `git-env canary failed`') ||
+    !kindE.includes("not a git-env trip's halt, which is (g)") ||
     !kindE.includes('`see /thread:status [[<rollout>]], fix it and re-invoke` for every other') ||
     !kindE.includes("the red re-verify's included, which is (b)") || kindE.includes('the command § 7 names') ||
-    !kindB.includes("A red RACE re-verify's halt (`RACE: origin/<default> fails the verifier`, § 7) is this item, never (e)")) {
+    !kindB.includes("A RACE revert that did not land (`next`'s `mainRed`; `RACE: the revert of [[<slug>]] did not land: …`, § 7) is this item, never (e), with `→ main red: the whole rollout is held until you decide`")) {
     fails.push('halt-act')
   }
 
@@ -376,6 +378,17 @@ function checkNeedsYou(skill, context = realContext) {
     !kindC.includes('and under a PR hold (step 1.2) it waits for the release') ||
     !step11.includes('is an (f) needs-you item on this turn (§ 6.5), whatever the halt')) {
     fails.push('hold-until')
+  }
+
+  // git-env-item (ADR 0046): an unacked git-env trip is an item of its own on every turn, whatever the halt (a lane hold
+  // need never halt), keyed by the stamp of the hold's first unacked trip line, so a trip after an ack is a new item; a
+  // git-env trip's halt is this item, never (e), and no item carries the trip mark.
+  if (!kindG.includes("while `gitEnvHold` is non-empty, on every turn, whatever the halt") ||
+    !kindG.includes("`[[<rollout>]] the shared checkout changed (<the stamp of the hold's first unacked trip line>): decide with /thread:repair [[<rollout>]]`") ||
+    !kindG.includes('The stamp keys it: a trip after an ack is a new item, pushed again') ||
+    !kindG.includes("A git-env trip's halt (§ 7) is this item, never (e)") ||
+    !kindG.includes('Act `decide with /thread:repair [[<rollout>]]`')) {
+    fails.push('git-env-item')
   }
 
   // glossary: CONTEXT.md defines the term, with its block, its log, § 6.5 and an Avoid list, so later tasks reuse it,
@@ -448,7 +461,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
 
 const RULES = ['no-ask-in-flight', 'push-dedupe', 'ntfy-fallback', 'not-sent', 'push-retry', 'kinds', 'turn-waiting', 'report-block', 'sign-off',
   'guardrails', 'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers',
-  'answered-items', 'glossary', 'hold-until']
+  'answered-items', 'glossary', 'hold-until', 'git-env-item']
 const CONTROLLED = new Set()
 
 // Replaces the one occurrence of `from`; a control whose target is missing or ambiguous fails its setup.
@@ -609,9 +622,9 @@ test('control: the needs-human question kept off the detail line or the push fai
 })
 
 test('control: (e) naming § 7\'s prose, or a red RACE re-verify in both (b) and (e), fails halt-act', () => {
-  only(edit(real, "`[[<rollout>]] halted (<YYYY-MM-DD>): <reason>: <act>`. `<reason>` is the halt's `reason=` text, and `<act>` is fixed by the halt, never taken from § 7's prose: `decide with /thread:repair [[<rollout>]]` for a git-env halt (the trip or `git-env canary failed`: repair's step 3e shows the evidence and records the ack), `/thread:execute [[<new>]]` for an approved queue's regenerate that stopped after step 7.5 (§ 4.5's **Approved queue** route, step 6: the new note is unstamped, and a re-invocation here ends `superseded`), and `see /thread:status [[<rollout>]], fix it and re-invoke` for every other.",
+  only(edit(real, "`[[<rollout>]] halted (<YYYY-MM-DD>): <reason>: <act>`. `<reason>` is the halt's `reason=` text, and `<act>` is fixed by the halt, never taken from § 7's prose: `decide with /thread:repair [[<rollout>]]` for `git-env canary failed` (repair's step 3e shows the evidence), `/thread:execute [[<new>]]` for an approved queue's regenerate that stopped after step 7.5 (§ 4.5's **Approved queue** route, step 6: the new note is unstamped, and a re-invocation here ends `superseded`), and `see /thread:status [[<rollout>]], fix it and re-invoke` for every other.",
     '`[[<rollout>]] halted (<YYYY-MM-DD>): <the reason text>: <the command § 7 names for it>`.'), 'halt-act', 'the command § 7 names')
-  only(edit(real, " A red RACE re-verify's halt (`RACE: origin/<default> fails the verifier`, § 7) is this item, never (e): its `## Race log` line keeps the task in `raceHold`, so it is one item with one push.", ''),
+  only(edit(real, " A RACE revert that did not land (`next`'s `mainRed`; `RACE: the revert of [[<slug>]] did not land: …`, § 7) is this item, never (e), with `→ main red: the whole rollout is held until you decide`: its `## Race log` line keeps the task in `raceHold`, so it is one item with one push.", ''),
     'halt-act', 'red re-verify unplaced')
 })
 
@@ -647,6 +660,12 @@ test('control: CONTEXT.md without the entry, or without its Avoid list, fails gl
   only(real, 'glossary', 'the bounded retry removed', edit(realContext, 'retried at most once more, at the next loop entry', 'retried'))
 })
 
+test('control: (g) keyed by no stamp, or its halt read as (e), fails git-env-item', () => {
+  only(edit(real, "the shared checkout changed (<the stamp of the hold's first unacked trip line>): decide with", 'the shared checkout changed: decide with'),
+    'git-env-item', 'no stamp')
+  only(edit(real, " A git-env trip's halt (§ 7) is this item, never (e).", ''), 'git-env-item', 'the halt unplaced')
+})
+
 test('control: (f) without its item, its every-turn rule or its act, or its sites without it, fails hold-until', () => {
   only(edit(real, '`[[<note>]] hold_until needs you: <pr> closed unmerged` for a CLOSED PR, or', 'a CLOSED PR, or'), 'hold-until', 'no CLOSED item text')
   only(edit(real, 'and `waits: you`, on every turn, whatever the halt:', 'and `waits: you`, at a halt:'), 'hold-until', 'only at a halt')
@@ -658,7 +677,7 @@ test('control: (f) without its item, its every-turn rule or its act, or its site
   only(edit(real, 'is an (f) needs-you item on this turn (§ 6.5), whatever the halt', 'is reported'), 'hold-until', 'step 1.1 without (f)')
 })
 
-test('the rules are all named (20) and each has a control', () => {
-  assert.equal(RULES.length, 20)
+test('the rules are all named (21) and each has a control', () => {
+  assert.equal(RULES.length, 21)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

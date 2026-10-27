@@ -41,6 +41,15 @@
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
 #   path test, no task note, main unreadable).
+#   The RACE revert (ADR 0046, p29-2; lead-integrate.py revert): R1 route pr (the head on origin/master, M's files
+#   M^1's, the bodies say `This reverts commit M`, origin/master untouched, restores by tree)   R2 merge-task 0, then
+#   reverted   R3 a re-run before the merge reuses the branch and the PR, and after it reads the landed commit   R4 a
+#   peer push: the branch takes origin/master by a fast-forward merge, restores false   R4b a THREAD.md-only peer close-out
+#   restores by ADR 0045's Inert check (one verify-skipped line per check, base M^1), freeing the lane   R4c a source file
+#   beside it   R4d a refused rollouts.toml   R4e no --verifier   R5 a conflict   R6 the target guard's refusals (a)–(g)
+#   and a two-parent M   R6h another PR's RACE line under the slug is skipped   R7 origin unreachable (8)   R8 the tail
+#   through reconcile frees the lane   R9 a stale open revert PR, noop   R10 an Engine snapshot mismatch (2)   R11
+#   merge-task's exit 3 on the revert PR   R12 the crash tail   R13 merge-task's exit 5 on the revert PR.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0; the verify slots in a temp pool
 # (tests/lib/merge-task-env.sh exports THREAD_VERIFY_SLOTS_DIR).
 set -uo pipefail
@@ -52,6 +61,9 @@ export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
 tmp=$(cd "$(mktemp -d)" && pwd -P); trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
+# The note-lock dir, and so `next`'s Trickle claims beside it (p28-3), stays this suite's own: run.sh shares one across
+# every suite, and another suite's `next` would prune or count claims this one's calls leave.
+export THREAD_NOTE_LOCK_DIR="$tmp/note-locks"
 . tests/lib/merge-task-env.sh
 export THREAD_VERIFY_SLOT_POLL=0.1
 lacks() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
@@ -1847,6 +1859,243 @@ ok "$(mq '[ls[1]["inertOnly"], ls[1]["nonInert"], ls[1]["moversTotal"]]')" '[fal
 printf '[repo."o/r"]\ninert_paths = ["THREAD.md"]\n' > "$IH/.config/thread/rollouts.toml"
 bm
 ok "$(mq '[ls[2]["inertOnly"], ls[2]["error"][:12], ls[2]["moversTotal"]]')" '[null,"inert test: ",2]' "M4: a refused rollouts.toml: inertOnly null beside its error"
+unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
+
+# ======== R1–R13: the RACE revert (lead-integrate.py revert, ADR 0046) ===========================================
+# A RACE red after the Flake check is reverted on main through a revert PR that merges only through merge-task. rvfx is
+# fx (or ifx, for the Inert cases R4b–R4e) plus M, the task's squash merge on origin's master (PR #5 MERGED as M), the
+# rollout's RACE line and `revert started: M`, and a queued proj-t6. srv refuses a non-fast-forward push, the fake gh's
+# squash takes the PR head's tree (squash.tree head) and a PR it opened follows its branch (headRefOid.live).
+RVH="$tmp/rv-home"; mkdir -p "$RVH"
+rvfx() {
+  if [ $# -gt 1 ]; then ifx "$1" "$2"; RVHOME="$IH"; else fx "$1"; RVHOME="$RVH"; fi
+  RVEV="$F/events"; mkdir -p "$RVEV"
+  git --git-dir "$MT_SRV" config receive.denyNonFastForwards true
+  g -C "$F/p" fetch -q origin; g -C "$F/p" checkout -q master
+  g -C "$F/p" merge -q --squash "origin/$BR" >/dev/null 2>&1; g -C "$F/p" commit -q -m "task t5 (#5)"; g -C "$F/p" push -q origin master
+  M=$(git -C "$F/p" rev-parse HEAD); B=$M
+  mkpr 5 "$H0"; echo MERGED > "$MT_STATE/pr/5/state"; echo "$M" > "$MT_STATE/pr/5/mergeCommit"
+  echo head > "$MT_STATE/squash.tree"
+  printf -- '- [[proj-t6]]\n' >> "$V/ro.md"
+  printf -- '---\ntags: [task]\nstatus: open\nrollout: "[[ro]]"\n---\n\nt6\n' > "$V/proj-t6.md"
+  printf '\n## Race log\n\n- 2026-10-02T12:00+00:00 [[%s]] RACE: PR #5 merged as %s on parent %s at head %s, not the integrated pair (head %s, base %s); origin/master holds an unverified combination; re-verify it\n- 2026-10-02T12:10+00:00 [[%s]] revert started: %s (re-verify rc 1, red after the Flake check)\n' \
+    "$SLUG" "$M" "$TB" "$H0" "$H0" "$TB" "$SLUG" "$M" >> "$V/ro.md"
+}
+rlog() { printf '%s\n' "$1" >> "$V/ro.md"; }   # one ## Race log line (the note's last section)
+subro() { python3 -c 'import sys; p, a, b = sys.argv[1:]; t = open(p).read(); open(p, "w").write(t.replace(a, b))' "$V/ro.md" "$1" "$2"; }
+rv() { : > "$MT_STATE/gh.log"; J=$(HOME="$RVHOME" THREAD_EVENTS_DIR="$RVEV" python3 "$LI" revert --repo "$R" --slug "$SLUG" --default master --merge "${RM:-$M}" --note "$V/$SLUG.md" --rollout "$V/ro.md" --gh-bin "$tmp/bin/gh" "$@" 2>"$F/rv.err"); rrc=$?; }
+srvm() { git --git-dir "$MT_SRV" rev-parse refs/heads/master; }
+srvrefs() { git --git-dir "$MT_SRV" for-each-ref --format='%(refname) %(objectname)' | tr '\n' ' '; }
+npc() { grep -c '^pr create' "$MT_STATE/gh.log"; }
+ngh() { grep -c . "$MT_STATE/gh.log"; }
+rmt() {  # rmt [head base]: merge-task on the revert PR, its pair from $J unless given; base.seq is what GitHub's ref read returns
+  local h="${1:-$(j "$J" 'd["head"]')}" b="${2:-$(j "$J" 'd["base"]')}"
+  [ -n "${KEEPSEQ:-}" ] || printf '%s\n' "$b" > "$MT_STATE/base.seq"
+  : > "$MT_STATE/gh.log"; out=$(PATH="$tmp/bin:$PATH" HOME="$RVHOME" THREAD_EVENTS_DIR="$RVEV" bash "$MT" "$R" "$RPR" "$h" "$b" 2>&1); rc=$?
+}
+rhold() { HOME="$RVHOME" THREAD_EVENTS_DIR="$RVEV" python3 "$RR" hold --tasks "$SLUG" --hold race --state "$1" --tasks-dir "$V"; }
+rrow() { printf '%s' "$(j "$J" 'd["tail"]["reason"]')" | python3 "$LI" set-aside --note "$V/$SLUG.md" --kind integration | THREAD_EVENTS_DIR="$RVEV" python3 "$RR" reconcile --result - --tasks-dir "$V" --now 2026-10-02T12:40:00Z >/dev/null; }
+tail_apply() {  # the landing tail, in its order: the line (only when raceLog.reverted is null), hold race end, the set-aside row
+  [ "$(j "$J" 'd["raceLog"]["reverted"]')" != null ] || rlog "$(j "$J" 'd["tail"]["line"]')"
+  rhold end >/dev/null; rrow
+}
+gone() { [ -e "$R/.claude/worktrees/revert-$SLUG" ] && echo kept || echo removed; }
+
+# R1: route pr. R3: a re-run before the merge reuses the branch and the PR. R2: merge-task 0, then reverted. R3: a re-run
+# after landing. R8: the tail through reconcile frees the lane, and next starts the next task.
+rvfx r1
+rv --verifier true
+ok "$rrc|$(j "$J" 'd["route"]')" "0|pr" "R1: a RACE red after the Flake check → route pr"
+H1=$(j "$J" 'd["head"]'); RPR=$(j "$J" 'd["pr"]')
+ok "$(git --git-dir "$MT_SRV" rev-list --parents -n 1 "$H1")" "$H1 $M" "R1: the revert head's parent is origin/master (M)"
+ok "$(git --git-dir "$MT_SRV" diff --quiet "$TB" "$H1" && echo same || echo differs)" same "R1: … and its files are M^1's"
+has "$(git --git-dir "$MT_SRV" log -1 --format=%B "$H1")" "This reverts commit $M." "R1: the commit body says This reverts commit M"
+has "$(cat "$MT_STATE/pr/$RPR/body")" "This reverts commit $M" "R1: … and so does the PR body"
+ok "$(srvm)" "$M" "R1: origin/master untouched (a revert merges only through merge-task)"
+ok "$(j "$J" '[d["raceLog"], d["restores"], d["restoresBy"], d["base"], d["branch"], d["landedAfter"], d["restoredTo"]]')" \
+  "[{\"opened\":null,\"reverted\":null},true,\"tree\",\"$M\",\"thread-revert/$SLUG-${M:0:12}\",0,\"$TB\"]" "R1: raceLog null, restores by tree, base M, its branch"
+ok "$(gone)" removed "R1: the revert tree removed"
+rlog "- 2026-10-02T12:11+00:00 [[$SLUG]] revert opened: PR #$RPR $(j "$J" 'd["url"]')"
+rv --verifier true
+ok "$rrc|$(j "$J" '[d["route"], d["pr"], d["head"], d["raceLog"]["opened"]]')|$(npc)" "0|[\"pr\",$RPR,\"$H1\",\"PR #$RPR https://github.com/o/r/pull/$RPR\"]|0" \
+  "R3: a re-run before the merge reuses the branch and the PR (no pr create), raceLog.opened read"
+rmt
+ok "$rc" 0 "R2: merge-task on the revert PR → 0"
+S=$(srvm)
+rv --verifier true
+ok "$rrc|$(j "$J" '[d["route"], d["revertCommit"], d["restores"], d["restoresBy"], d["landedAfter"], d["tail"]["unverified"]]')" "0|[\"reverted\",\"$S\",true,\"tree\",0,false]" \
+  "R2: revert again → reverted, its commit the PR's merge, main back at M^1's tree"
+has "$(j "$J" 'd["tail"]["line"]')" "[[$SLUG]] reverted on main: $S (revert PR #$RPR of PR #5's merge ${M:0:12}; main back at ${TB:0:12}'s tree); set aside for Lachy" "R2: tail.line"
+ok "$(j "$J" 'd["tail"]["reason"]')" "RACE: the re-verify was red after the Flake check; its merge ${M:0:12} is reverted on main by ${S:0:12}" "R2: tail.reason"
+rv --verifier true
+ok "$(j "$J" '[d["route"], d["revertCommit"]]')|$(npc)" "[\"reverted\",\"$S\"]|0" "R3: a re-run after landing → reverted, revertCommit the PR's mergeCommit"
+tail_apply
+ok "$(fm "$V/$SLUG.md" integrating)|$(grep -c 'reverted on main:' "$V/ro.md")" "<none>|1" "R8: the set-aside row removes integrating:; one reverted on main: line"
+has "$(cat "$RVEV/ro.jsonl")" '"lane-freed"' "R8: … lane-freed recorded"
+N=$(nxt "")
+ok "$(j "$N" '[d["laneHold"], d["start"], [h["slug"] for h in d["raceHold"]]]')" "[[],[\"proj-t6\"],[\"$SLUG\"]]" "R8: next: the lane free, proj-t6 starts, the RACE still in raceHold for Lachy"
+
+# R4: a peer push of src.py after the PR opened (no rollouts.toml): the branch takes origin/master by a merge, pushed as a
+# fast-forward; restores false.
+rvfx r4
+rv --verifier true; H1=$(j "$J" 'd["head"]'); RPR=$(j "$J" 'd["pr"]')
+main src.py "print(1)" "a peer's push"; X=$B
+rv --verifier true; H2=$(j "$J" 'd["head"]')
+ok "$rrc|$(j "$J" '[d["route"], d["pr"], d["base"]]')" "0|[\"pr\",$RPR,\"$X\"]" "R4: a peer push after the PR opened: revert again → the same PR on base X"
+ok "$(git --git-dir "$MT_SRV" rev-list --parents -n 1 "$H2")" "$H2 $H1 $X" "R4: … origin/master merged into the branch (H2 = H1 + X), a fast-forward push (no --force)"
+ok "$(j "$J" '[d["restores"], d["restoresBy"], d["landedAfter"]]')" "[false,null,1]" "R4: … restores false, landedAfter 1"
+has "$(j "$J" 'd["inert"]["why"]')" "no inert_paths for this repo" "R4: … inert.why"
+rmt; ok "$rc" 0 "R4: merge-task (H2, X) → 0"
+rv --verifier true
+ok "$(j "$J" '[d["route"], d["restores"], d["restoresBy"], d["tail"]["unverified"]]')" '["reverted",false,null,true]' "R4: revert → reverted, not restored"
+has "$(j "$J" 'd["tail"]["line"]')" "main not re-verified: 1 commit(s) landed after ${M:0:12}); set aside for Lachy" "R4: … tail.line: main not re-verified"
+has "$(j "$J" 'd["tail"]["reason"]')" "; main not re-verified: 1 commit(s) landed after ${M:0:12}" "R4: … and tail.reason"
+
+# R5: a conflict → route conflict, nothing pushed, the tree removed.
+rvfx r5
+main a.txt "$(printf 'A1 peer\na2\na3\na4\na5')" "a peer's edit of the task's line"
+refs0=$(srvrefs)
+rv
+ok "$rrc|$(j "$J" '[d["route"], d["conflictFiles"]]')" '0|["conflict",["a.txt"]]' "R5: reverting M conflicts → route conflict, the file named"
+ok "$(srvrefs)|$(npc)|$(gone)" "$refs0|0|removed" "R5: … nothing pushed, no PR, the tree removed"
+
+# R6: the target guard refuses (exit 1, no pr create, srv unchanged); (a)–(e) before any gh call. A two-parent M reverts with -m 1.
+rvfx r6
+cp "$V/ro.md" "$F/ro.keep"; cp "$V/$SLUG.md" "$F/t.keep"; refs0=$(srvrefs)
+refuse() {  # refuse <label> [rv args]
+  local l="$1"; shift; rv "$@"
+  ok "$rrc|$(npc)|$(srvrefs)" "1|0|$refs0" "R6 $l: refused (exit 1), no pr create, srv unchanged"
+}
+grep -v ' RACE: PR #5 merged as ' "$F/ro.keep" > "$V/ro.md"; refuse "(a) no RACE line"; ok "$(ngh)" 0 "R6 (a): … no gh call"
+cp "$F/ro.keep" "$V/ro.md"
+RM=$TB refuse "(b) an unrelated --merge"; ok "$(ngh)" 0 "R6 (b): … no gh call"
+grep -v '^integrating:' "$F/t.keep" > "$V/$SLUG.md"; refuse "(c) no integrating:"; ok "$(ngh)" 0 "R6 (c): … no gh call"
+cp "$F/t.keep" "$V/$SLUG.md"
+grep -v ' revert started: ' "$F/ro.keep" > "$V/ro.md"; refuse "(d) no revert started:"; ok "$(ngh)" 0 "R6 (d): … no gh call"
+cp "$F/ro.keep" "$V/ro.md"
+rlog "- 2026-10-02T12:20+00:00 [[$SLUG]] revert did not land: conflict in a.txt"; refuse "(e) a revert did not land: line"; ok "$(ngh)" 0 "R6 (e): … no gh call"
+cp "$F/ro.keep" "$V/ro.md"
+echo "$TB" > "$MT_STATE/pr/5/mergeCommit"; refuse "(f) PR #5's mergeCommit is not M"
+echo "$M" > "$MT_STATE/pr/5/mergeCommit"
+g -C "$R" checkout -q --detach; echo z > "$R/z.txt"; g -C "$R" add z.txt; g -C "$R" commit -q -m local; L=$(git -C "$R" rev-parse HEAD); g -C "$R" checkout -q master
+subro "$M" "$L"; echo "$L" > "$MT_STATE/pr/5/mergeCommit"
+RM=$L refuse "(g) M not on origin"
+has "$(cat "$F/rv.err")" "is not on origin/master" "R6 (g): … saying so"
+cp "$F/ro.keep" "$V/ro.md"; echo "$M" > "$MT_STATE/pr/5/mergeCommit"
+g -C "$F/p" checkout -q -b side "$M"; printf 'side\n' > "$F/p/side.txt"; g -C "$F/p" add side.txt; g -C "$F/p" commit -q -m side
+g -C "$F/p" checkout -q master; g -C "$F/p" merge -q --no-ff -m "Merge pull request #5 from o/side" side; g -C "$F/p" push -q origin master
+M2=$(git -C "$F/p" rev-parse HEAD); subro "$M" "$M2"; echo "$M2" > "$MT_STATE/pr/5/mergeCommit"
+RM=$M2 rv
+ok "$rrc|$(j "$J" 'd["route"]')|$(git --git-dir "$MT_SRV" diff --quiet "$M" "$(j "$J" 'd["head"]')" && echo same || echo differs)" "0|pr|same" "R6: a two-parent M is reverted with -m 1 (the head's files are its first parent's)"
+# R6h: a RACE line for another PR naming [[S]] (a lead's mistake) is skipped: the guard reads PR #5's.
+rvfx r6h
+rlog "- 2026-10-02T12:15+00:00 [[$SLUG]] RACE: PR #77 merged as $TB on parent $TB at head $TB, not the integrated pair"
+rv
+ok "$rrc|$(j "$J" 'd["route"]')" "0|pr" "R6h: another PR's RACE line under [[S]] → the guard still reads PR #5's line and passes"
+
+# R7: origin unreachable → 8, nothing opened.
+rvfx r7
+g -C "$R" remote set-url origin "$F/nowhere.git"
+rv
+ok "$rrc|$(npc)" "8|0" "R7: origin unreachable → exit 8 (retryable), nothing opened"
+
+# R9: a stale open revert PR, M undone by hand on main meanwhile → noop, the PR named in the tail.
+rvfx r9
+rv; RPR=$(j "$J" 'd["pr"]'); URL=$(j "$J" 'd["url"]')
+g -C "$F/p" revert --no-edit "$M" >/dev/null; g -C "$F/p" push -q origin master; HR=$(git -C "$F/p" rev-parse HEAD)
+rv
+ok "$rrc|$(j "$J" '[d["route"], d["openPr"]["number"], d["restores"], d["restoresBy"]]')" "0|[\"noop\",$RPR,true,\"tree\"]" "R9: M undone by hand on main → noop, the open revert PR named"
+has "$(j "$J" 'd["tail"]["line"]')" "reverted on main: $HR (no revert needed: PR #5's merge ${M:0:12}'s change is already gone from master; main back at ${TB:0:12}'s tree); stale revert PR #$RPR ($URL) is still open and must not merge: close it; set aside for Lachy" "R9: tail.line names the stale PR"
+has "$(j "$J" 'd["tail"]["reason"]')" "stale revert PR #$RPR ($URL) is still open and must not merge: close it" "R9: … and tail.reason"
+
+# R10: an Engine snapshot mismatch → exit 2 with its line, nothing fetched, no gh call, the notes byte-identical.
+rvfx r10
+python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("protocol_version: 5\n", "protocol_version: 5\nengine_snapshot: /nonexistent/thread-engine-snapshot\n", 1))' "$V/ro.md"
+main y.txt "y" "a peer's push"
+t0=$(cksum < "$V/$SLUG.md"); r0=$(cksum < "$V/ro.md"); o0=$(git -C "$R" rev-parse origin/master)
+rv
+ok "$rrc" 2 "R10: an Engine snapshot mismatch → exit 2"
+has "$(cat "$F/rv.err")" "engine-snapshot: " "R10: … its engine-snapshot: line"
+ok "$(ngh)|$(git -C "$R" rev-parse origin/master)|$(cksum < "$V/$SLUG.md")|$(cksum < "$V/ro.md")" "0|$o0|$t0|$r0" "R10: … nothing fetched, no gh call, the notes byte-identical"
+
+# R11: merge-task's exit 3 on the revert PR (a peer push) → revert again (H2 = H1 + X) → merge-task 0 → reverted.
+rvfx r11
+rv; H1=$(j "$J" 'd["head"]'); RPR=$(j "$J" 'd["pr"]')
+main x.txt "x" "a peer's push"; X=$B
+printf '%s\n' "$X" > "$MT_STATE/base.seq"; KEEPSEQ=1 rmt "$H1" "$M"
+ok "$rc" 3 "R11: merge-task on the revert PR after a peer push → exit 3 (base moved)"
+ok "$(cat "$RVEV/ro.jsonl" 2>/dev/null | grep -c '"base-moved"')|$(cat "$R/.claude/merge-task/$RPR.base-moved" 2>/dev/null)" "0|$M" "R11: … base-moved writes nothing (no task note names the revert PR); the counter appended"
+rv; H2=$(j "$J" 'd["head"]')
+ok "$(git --git-dir "$MT_SRV" rev-list --parents -n 1 "$H2")" "$H2 $H1 $X" "R11: revert again → H2 with parents H1 and X"
+rmt; ok "$rc" 0 "R11: merge-task (H2, X) → 0"
+rv; ok "$(j "$J" '[d["route"], d["restores"]]')" '["reverted",false]' "R11: revert → reverted, restores false (x.txt landed after M)"
+
+# R12: the crash tail: pending until the set-aside row; the re-run never appends the line twice; hold end is idempotent.
+rvfx r12
+rhold start >/dev/null
+rv; RPR=$(j "$J" 'd["pr"]'); rlog "- 2026-10-02T12:11+00:00 [[$SLUG]] revert opened: PR #$RPR $(j "$J" 'd["url"]')"
+rmt; ok "$rc" 0 "R12: merge-task on the revert PR → 0"
+N=$(nxt ""); ok "$(j "$N" 'd["laneHold"]')" "[{\"slug\":\"$SLUG\",\"hold\":\"race\",\"revert\":true}]" "R12: merged, the tail not run (a crash) → next: revert true"
+rv; rlog "$(j "$J" 'd["tail"]["line"]')"
+N=$(nxt ""); ok "$(j "$N" 'd["laneHold"][0]["revert"]')" true "R12: the line written, integrating: standing (a crash before hold end) → still pending"
+rv; ok "$(j "$J" '[d["route"], d["raceLog"]["reverted"] is not None]')" '["reverted",true]' "R12: the re-run reads the line (raceLog.reverted), so it is not appended again"
+o1=$(rhold end); o2=$(rhold end)
+ok "$o1|$o2" "$SLUG: hold-ended race [written]|$SLUG: hold-ended race [no-change]" "R12: hold race end twice → [written], then [no-change]"
+rrow
+N=$(nxt ""); ok "$(j "$N" 'd["laneHold"]')|$(grep -c 'reverted on main:' "$V/ro.md")" "[]|1" "R12: after the row the lane is free; one reverted on main: line"
+
+# R13: merge-task's exit 5 on the revert PR (GitHub squashed it onto X2): it is on main, so revert routes reverted; no
+# `revert did not land:` line, merge-task's RACE line is never appended, and the lane stays held (main not re-verified).
+rvfx r13
+printf -- '---\ntags: [task]\nstatus: done\nrollout: "[[ro]]"\n---\n\nt6\n' > "$V/proj-t6.md"
+rv; H1=$(j "$J" 'd["head"]'); RPR=$(j "$J" 'd["pr"]')
+main x2.txt "x2" "a peer's push"; X2=$B
+g clone -q "$MT_SRV" "$F/r13c" 2>/dev/null; g -C "$F/r13c" revert --no-edit "$M" >/dev/null; g -C "$F/r13c" push -q origin HEAD:refs/scratch/r13
+git -C "$F/r13c" rev-parse 'HEAD^{tree}' > "$MT_STATE/squash.tree"   # the real revert's tree on X2, its objects on srv
+echo "$X2" > "$MT_STATE/squash-parent"; printf '%s\n' "$M" > "$MT_STATE/base.seq"
+KEEPSEQ=1 rmt "$H1" "$M"
+ok "$rc" 5 "R13: GitHub squashed the revert onto X2 → merge-task exit 5"
+has "$out" "RACE: PR #$RPR merged as" "R13: … merge-task printed its RACE line"
+rv --verifier true
+ok "$(j "$J" '[d["route"], d["restores"], d["landedAfter"]]')" '["reverted",false,1]' "R13: revert → reverted (it is on main), restores false, landedAfter 1"
+tail_apply
+N=$(nxt "")
+ok "$(j "$N" '[d["laneHold"], d["halt"], d["mainRed"]]')" "[[{\"slug\":\"$SLUG\",\"hold\":\"race\",\"revert\":false}],\"race\",[]]" "R13: next keeps the lane held (main not re-verified) and halts race; mainRed []"
+ok "$(grep -c 'revert did not land:' "$V/ro.md")|$(grep -c "RACE: PR #$RPR" "$V/ro.md")" "0|0" "R13: no revert did not land: line, and no RACE: PR #R line"
+HOME="$RVHOME" python3 "$RR" resume --rollout "$V/ro.md" --tasks-dir "$V" --gh-bin "$tmp/bin/gh" >/dev/null 2>&1
+ok "$(fm "$V/$SLUG.md" status)" "status: blocked" "R13: resume never flips it"
+
+# R4b–R4e: restores by ADR 0045's Inert check (ifx: the ssh origin o/r, HOME's rollouts.toml, the Run record).
+rvfx r4b '["THREAD.md"]'
+main THREAD.md "a peer's close-out" "docs(thread): close-out"; X=$B
+rv --verifier true; RPR=$(j "$J" 'd["pr"]')
+ok "$rrc|$(j "$J" '[d["route"], d["restores"], d["restoresBy"]]')" '0|["pr",true,"inert"]' "R4b: a peer close-out in THREAD.md only → restores by inert on the head"
+rmt; ok "$rc" 0 "R4b: merge-task → 0"
+S=$(srvm)
+rv --verifier true
+ok "$(j "$J" '[d["route"], d["restores"], d["restoresBy"], d["tail"]["unverified"]]')" '["reverted",true,"inert",false]' "R4b: revert → reverted, restored but for Inert paths"
+has "$(j "$J" 'd["tail"]["line"]')" "main back at ${TB:0:12}'s tree but for Inert paths (1 path(s): THREAD.md))" "R4b: tail.line"
+ok "$(iline '[[l["kind"], l["base"], l["head"], l["main"], l["paths"]] for l in ls][-1]')" "[\"verify-skipped\",\"$TB\",\"$S\",\"$S\",[\"THREAD.md\"]]" "R4b: the Run record's verify-skipped line: base M^1, head and main the squash"
+ok "$(iline '[l["kind"] for l in ls if l["kind"] != "verify-skipped"]')" '[]' "R4b: … and no inert-proof-failed line"
+tail_apply
+N=$(nxt ""); ok "$(j "$N" '[d["laneHold"], d["start"]]')" '[[],["proj-t6"]]' "R4b: after the tail's row the lane is free and proj-t6 starts"
+rvfx r4c '["THREAD.md"]'
+printf -- '---\ntags: [task]\nstatus: done\nrollout: "[[ro]]"\n---\n\nt6\n' > "$V/proj-t6.md"
+main THREAD.md "close-out"; main src.py "print(1)"
+rv --verifier true; RPR=$(j "$J" 'd["pr"]')
+ok "$(j "$J" '[d["route"], d["restores"], d["restoresBy"], d["inert"]["nonInert"]]')" '["pr",false,null,["src.py"]]' "R4c: src.py beside THREAD.md → restores false, src.py non-inert"
+rmt; rv --verifier true; tail_apply
+N=$(nxt ""); ok "$(j "$N" '[d["laneHold"], d["halt"]]')" "[[{\"slug\":\"$SLUG\",\"hold\":\"race\",\"revert\":false}],\"race\"]" "R4c: … the lane stays held"
+rvfx r4d '["THREAD.md"]'
+printf '[repo."o/r"]\ninert_paths = ["THREAD.md"]\n' > "$IH/.config/thread/rollouts.toml"
+main THREAD.md "close-out"
+rv --verifier true
+ok "$rrc|$(j "$J" '[d["restores"], d["restoresBy"]]')" "0|[false,null]" "R4d: a refused rollouts.toml → restores false"
+has "$(j "$J" 'd["inert"]["why"]')" "rollout settings refused" "R4d: … inert.why names the refusal"
+rvfx r4e '["THREAD.md"]'
+main THREAD.md "close-out"
+rv
+ok "$(j "$J" '[d["restores"], d["inert"]["why"]]')" '[false,"no --verifier given: the verifier runs"]' "R4e: no --verifier → restores false, inert.why says so"
 unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
