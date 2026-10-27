@@ -644,8 +644,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   than piling on. Each slotted suite runs under a guard that ends a killed
   holder's suite before its verify slot frees. The Integration priority: the
   lead's Integration and RACE verifies, and the integrate call's own verifier
-  runs (`run --priority`), go before any task call's agent. Not a **Slot** (a
-  task's run in a Queue). _Avoid_: bare "slot", lock, semaphore.
+  runs (`run --priority`), go before any task call's agent. An agent waits for
+  its suite's verdict inside its turn (`verify-slot.py wait`, p31-3), never by
+  ending it. Not a **Slot** (a task's run in a Queue). _Avoid_: bare "slot",
+  lock, semaphore.
 - **Checkpoint** — one of the two moments per task where the full suite (the
   rollout's `verifier:`) runs: a code-writing agent's last check before it
   opens or updates its PR (the implementer's, and each reviser's), and
@@ -726,7 +728,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note's Project root, the **Rollout clone** (ADR 0042), once the note is runnable, and that lead's first `next`
   clears the stamp, so no second lead starts (vault grammar § Rollout start
   stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.
-  _Avoid_: auto-start, scheduled start.
+  When he names the PR the start waits on, it is an **Approved queue**
+  instead. _Avoid_: auto-start, scheduled start.
 - **Git-env canary** — the lead's check that the shared checkout (a rollout's
   `Project root`, its **Rollout clone** since ADR 0042) kept its
   `refs/heads/<default>` and its bareness across each **Window** (execute § 4.5,
@@ -766,7 +769,20 @@ through time, from attention to merged PRs. Terms only — no implementation.
   waits instead of asking; a CLOSED or unreadable hold is Lachy's to edit.
   A supersede's `carry` copies a rollout's hold to its successor. A hold kept
   as a sentence in the note is read by nothing (the 2026-10-25 audit's Q50;
-  `skills/_shared/vault-grammar.md` § Hold until). _Avoid_: a hold sentence.
+  `skills/_shared/vault-grammar.md` § Hold until). Beside `on_merge:
+  regenerate` it is an **Approved queue**'s, which its merge keeps standing.
+  _Avoid_: a hold sentence.
+- **Approved queue** — a parallel rollout note nothing has run whose start
+  Lachy approved together with the PR it waits on: `approve-queue` writes its
+  `hold_until`, `on_merge: regenerate` and `start: unattended`, and prints one
+  undo line. At the merge `next` keeps the hold and halts `regenerate`, and
+  the lead's route runs `/thread:schedule --regenerate` on its members under
+  the chain, whose last act is `stamp-start` on the new note: no confirm, one
+  undo line (the 2026-10-25 audit's Q54). His own pause still counts as a run
+  and releases it as a plain hold, `on_merge` cleared with the hold; a Room
+  stop is no run mark for it. `skills/_shared/vault-grammar.md` § Approved
+  queue. _Avoid_:
+  auto-regenerate, pre-approved rollout.
 - **Bookkeeping miss** — a window the canary could not read (`record
   missing`, `record unreadable`, `record not armed`): it observed nothing, so
   it never trips. It is logged with the checkout's state, read there and
@@ -934,6 +950,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   A spread (Chorus ADR 0109) is one too, sent before the line: the Stage
   moves the lead off a Login whose 5-hour window would not carry its
   Rollouts, and the Pause-log line says `spreading its Rollouts`.
+  On an Approved queue it is no run mark.
   _Avoid_: drain (Chorus's signal calls it "a drain, not a pause"; here the
   soft pause is the drain), pause, hard pause, handoff.
 - **Sign-off pause** — the pause execute's sign-off form stamps (`paused:`
@@ -1043,24 +1060,32 @@ through time, from attention to merged PRs. Terms only — no implementation.
   propose a rule for: named, written to the record and carried into the next
   Reflection. It becomes a rule proposal when a later rollout shows the same
   thing again, or at once when Lachy confirms it. Lachy's no closes it too:
-  it comes back only when two later rollouts show it again. Knobs need no
-  Watch. _Avoid_: candidate, hunch.
+  it comes back only when two later rollouts show it again. A Watch the
+  Time-lost ledger opens on a class counts readings instead of rollouts.
+  Knobs need no Watch. _Avoid_: candidate, hunch.
 - **Time-lost ledger** — the hours each cause class cost (stalls by cause,
   usage limits, machine load, the Integration lane, Integration rework, plan
-  blocks, named from the Run record's own values where one fits), summed
-  across every rollout a weekly reading reads and trended week on week; a
-  class that tops it twice running opens a **Watch** on that class
-  (ADR 0051). Ranks causes, never rollouts. _Avoid_: time budget, cost
-  report.
+  blocks, named from the Run record's own values where one fits), summed by
+  a script across every rollout a weekly reading reads (a serial chain's
+  aside: its Legs record no Slots or stops) and trended week on
+  week; a class that tops it twice running opens a **Watch** on that class,
+  and a load-topped ledger holds a Parallel ceiling raise (ADR 0051). Waits
+  on Lachy (a gate, a question, a hand-back) are priced as stalls; only his
+  own pause is unranked. Its lines are `time-lost` lines in
+  `reflections.jsonl`, written by `reflect.py ledger`. Ranks causes, never
+  rollouts. _Avoid_: time budget, cost report.
 - **Monthly audit** — the pass once a month that reads past the Run record
   (transcripts, suite logs, pause logs, the Mac's history), writes into the
   Time-lost ledger and names what the record should have carried: an extra
-  step of the month's first weekly reading (ADR 0051). _Avoid_: retro, deep
-  dive.
+  step of the month's first weekly reading, whatever its cadence, run beside
+  the trace (ADR 0051). Its gaps go in the decision task and never change
+  whether the reading is quiet. _Avoid_: retro, deep dive.
 - **Quiet Reflection** — one that finds no new Watch (one first seen in this
   reading; a declined one seen again is not new), no rule proposal, no
   bug and no Guardrail breach. Three in a row move the reading from weekly
-  to fortnightly; one that is not quiet moves it back (ADR 0037).
+  to fortnightly; one that is not quiet moves it back (ADR 0037). The
+  reading falls due on the Thursday Reflection Routine's morning, made by
+  Chorus's weekly Runner (ADR 0051).
   _Avoid_: clean run, empty retro.
 - **Decision task** — the one open vault task tagged `decisions` that the
   weekly reading writes for the next morning when it has a rule proposal

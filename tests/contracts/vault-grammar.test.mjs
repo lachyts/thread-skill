@@ -17,7 +17,12 @@
 // dependency rule a rollout row waits on (NA.OPEN_STATUSES, ES.in_flight, ES.link_live, RR._start_unattended,
 // RR._dep_status) and copies none of them. § Hold until (p30-3) states the PR hold (`hold_until:`), its two scopes, that
 // it is parallel-only, its two forms, its writers, readers, clearer and supersede; reconcile-rollout.py's HOLD_KEY is
-// pinned to it, and § Readers lists it.
+// pinned to it, and § Readers lists it. § Approved queue (p30-4) states `on_merge: regenerate` beside a rollout hold, its
+// writer (approve-queue), its reader (next's verdict, its members and project filter), that a room stop is no run mark
+// and one that stands makes the verdict wait (approved_unrun's readers: carry and unfinished-rollout.py), that it is never
+// carried and fails closed only at the merge, the Integration wait and the chain's windows; reconcile-rollout.py's
+// ON_MERGE_KEY and ON_MERGE_REGENERATE are pinned to it, § Rollout start stamp's Writers name approve-queue and
+// stamp-start, and § Hold until's Clearer names the approved-queue exception.
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -65,6 +70,7 @@ rp, rr, na = (load(n, p) for n, p in zip(("rp", "rr", "na"), sys.argv[1:4]))
 print(json.dumps({"LANDED": sorted(rp.LANDED), "ACTIVE": sorted(rp.ACTIVE), "PHASE_N": rp.PHASE_N,
                   "PHASED_STEM_RE": rr.PHASED_STEM_RE.pattern, "SHORT_ID_RE": rr.SHORT_ID_RE.pattern,
                   "START_KEY": rr.START_KEY, "START_UNATTENDED": rr.START_UNATTENDED, "HOLD_KEY": rr.HOLD_KEY,
+                  "ON_MERGE_KEY": rr.ON_MERGE_KEY, "ON_MERGE_REGENERATE": rr.ON_MERGE_REGENERATE,
                   "DEAD_STATUSES": sorted(na.DEAD_STATUSES),
                   "OPEN_STATUSES": sorted(na.OPEN_STATUSES), "doc": rp.__doc__}))
 `
@@ -244,7 +250,7 @@ function readersOf(text) {
 }
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
   'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE',
-  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py', 'grades.py', 'HOLD_KEY']
+  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py', 'grades.py', 'HOLD_KEY', 'ON_MERGE_KEY']
 const NOT_ADOPTED = []
 
 // The names of the failed § Readers checks; [] when every conforming reader is listed as such and, with
@@ -289,7 +295,8 @@ function startStampChecks(text, s) {
   const out = []
   if (!stamp) return ['states the stamp']
   if (s.START_KEY !== stamp[1] || s.START_UNATTENDED !== stamp[2]) out.push('script constants')
-  for (const want of ['orient § 9', 'schedule step 8', "schedule § 0's **Put back**", 'Chorus Stage', '`started_unattended:',
+  for (const want of ['orient § 9', 'schedule step 8', "schedule § 0's **Put back**", '`reconcile-rollout.py approve-queue`',
+    'stamp-start`', 'Chorus Stage', '`started_unattended:',
     '`/thread:status`', 'reconcile-rollout.py next', '--dry-run', '**Supersede prep**']) {
     if (!sec.includes(want)) out.push(`names ${want}`)
   }
@@ -312,7 +319,30 @@ function holdUntilChecks(text, s) {
     '**Two forms.**', 'the block form Obsidian re-serialises it to', 'never a sentence', '**Writers**', '`# hold_until:`',
     '**Readers**', '`reconcile-rollout.py next`', '`gh pr view <url|N> --json state,mergedAt,url`', '`reconcile-rollout.py status`',
     '`/thread:status`', 'Chorus Stage', '**Clearer**', '--dry-run', 'MERGED', 'compare-and-swap', '**Supersede**',
-    '`reconcile-rollout.py carry`', 'fails closed']) {
+    '`reconcile-rollout.py carry`', 'fails closed', 'The one exception is an approved queue']) {
+    if (!sec.includes(want)) out.push(`names ${want}`)
+  }
+  return out
+}
+
+// ---- the approved queue (p30-4) ---------------------------------------------------------------------------
+
+// The names of the failed § Approved queue checks; [] when the section states the key and its value, its writer and
+// reader (the verdict, the members, the project filter), that it is never carried and fails closed only at the merge,
+// the Integration wait, the room-stop rule (no run mark; one that stands makes the verdict wait), approved_unrun's
+// readers (carry, unfinished-rollout.py) and the chain's windows, and the script's ON_MERGE_KEY / ON_MERGE_REGENERATE
+// equal the key and value.
+function approvedQueueChecks(text, s) {
+  const sec = collapse(section(text, /^## Approved queue$/) ?? '')
+  const key = sec.match(/The key is `([a-z_]+): ([a-z]+)`/)
+  if (!key) return ['states the key']
+  const out = []
+  if (s.ON_MERGE_KEY !== key[1] || s.ON_MERGE_REGENERATE !== key[2]) out.push('script constants')
+  for (const want of ['rollout-scope `hold_until`', 'read by nothing', '**Writer**', '`reconcile-rollout.py approve-queue',
+    '**Reader**', '`reconcile-rollout.py next`', '`halt: "regenerate"`', 'members', 'the project filter', '`stamp-start`',
+    '**Never carried.**', '**Fails closed, only at the merge.**', 'a room stop is no run mark',
+    'A room stop that stands makes the verdict wait', '`approved_unrun`', '`carry`', 'unfinished-rollout.py',
+    'an Integration in flight', '`waits: integration`', 'the I8 window', '`chainStart`', 'Two crashes in a row lose only the start intent']) {
     if (!sec.includes(want)) out.push(`names ${want}`)
   }
   return out
@@ -320,8 +350,8 @@ function holdUntilChecks(text, s) {
 
 // ---- tests --------------------------------------------------------------------------------------------
 
-test('the doc has the six sections the readers cite', () => {
-  for (const h of ['Phase and task filenames', 'Statuses', 'In flight', 'Rollout start stamp', 'Hold until', 'Readers']) {
+test('the doc has the seven sections the readers cite', () => {
+  for (const h of ['Phase and task filenames', 'Statuses', 'In flight', 'Rollout start stamp', 'Hold until', 'Approved queue', 'Readers']) {
     assert.ok(section(doc, new RegExp(`^## ${h}$`)), `${DOC} has no ## ${h}`)
   }
 })
@@ -428,6 +458,8 @@ test('control: a drifted stamp or a dropped writer fails the start-stamp check',
     ["names schedule § 0's **Put back**"])
   assert.deepEqual(startStampChecks(mutate(doc, 'And `/thread:status`', 'And status'), s), ['names `/thread:status`'])
   assert.deepEqual(startStampChecks(mutate(doc, '## Rollout start stamp', '## Start stamp'), s), ['states the stamp'])
+  assert.deepEqual(startStampChecks(mutate(doc, '`reconcile-rollout.py approve-queue`, on Lachy', 'the approval, on Lachy'), s),
+    ['names `reconcile-rollout.py approve-queue`'])
   assert.deepEqual(startStampChecks(doc, { ...s, START_UNATTENDED: 'auto' }), ['script constants'])
 })
 
@@ -448,6 +480,23 @@ test('control: a drifted key, a dropped scope rule or a dropped reader fails the
   assert.deepEqual(holdUntilChecks(mutate(doc, '`reconcile-rollout.py carry` (schedule step 6)', 'the supersede'), s),
     ['names `reconcile-rollout.py carry`'])
   assert.deepEqual(holdUntilChecks(mutate(doc, '## Hold until', '## Holds'), s), ['states the key'])
+  assert.deepEqual(holdUntilChecks(mutate(doc, 'The one exception is an approved queue', 'An approved queue too'), s),
+    ['names The one exception is an approved queue'])
+})
+
+test('§ Approved queue states the key, its writer, reader, room-stop rule, carry and windows, and pins its constants', () => {
+  assert.deepEqual(approvedQueueChecks(doc, scripts()), [])
+})
+
+test('control: a drifted key, a dropped room-stop rule or a carried approval fails the approved-queue check', () => {
+  const s = scripts()
+  assert.deepEqual(approvedQueueChecks(mutate(doc, 'The key is `on_merge: regenerate`', 'The key is `on_merge: rebuild`'), s),
+    ['script constants'])
+  assert.deepEqual(approvedQueueChecks(doc, { ...s, ON_MERGE_KEY: 'merge' }), ['script constants'])
+  assert.deepEqual(approvedQueueChecks(mutate(doc, 'a room stop is no run mark', 'a room stop is a run mark'), s),
+    ['names a room stop is no run mark'])
+  assert.deepEqual(approvedQueueChecks(mutate(doc, '- **Never carried.**', '- **Carried.**'), s), ['names **Never carried.**'])
+  assert.deepEqual(approvedQueueChecks(mutate(doc, '## Approved queue', '## Approved queues'), s), ['states the key'])
 })
 
 test('§ Readers lists every reader, and no Not yet adopted line is left', () => {

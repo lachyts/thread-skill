@@ -1,7 +1,7 @@
 # The vault grammar — phase and task names, statuses, in flight
 
 The one definition of how a vault note's filename places it in a phase and how its `status:` reads,
-a rollout's start stamp, and a hold the engine can read.
+a rollout's start stamp, a hold the engine can read, and an approved queue.
 `reconcile-project.py`'s drift detector, execute's phase-close ceremony, orient § 2's sweep and the
 reshuffle's R1 all read the vault through it, so they classify the same note the same way (§ Readers
 lists every reader). A reader that needs a pattern or a set cites the section here instead of
@@ -53,7 +53,9 @@ no stamp; `started:` and `started_unattended:` are other keys.
 - **Writers**: the execute offer, on the rollout note just written and never started, on a parallel
   note only (the Stage starts a lead in a note's Project root; a serial note has none): orient § 9's
   Start when ready answer, and schedule step
-  8's **Start when ready.** on a standalone run. And
+  8's **Start when ready.** on a standalone run. `reconcile-rollout.py approve-queue`, on Lachy's words
+  naming the queue and the PR its start waits on (§ Approved queue), and `reconcile-rollout.py
+  stamp-start`, schedule step 8's under the chain, on the note an approved queue's regenerate wrote. And
   schedule § 0's **Put back**, which only restores to a prior the exact line its Supersede prep removed,
   when the run stops before step 6 writes its note.
 - **Readers**: the Chorus Stage (`src/stage/unattended.py` in the Chorus repo, Chorus ADR 0052 d6 as
@@ -69,7 +71,7 @@ no stamp; `started:` and `started_unattended:` are other keys.
   execute § 4.5 step 1), which removes every top-level `start:` line reading `unattended` and reports
   `startCleared`, so a running rollout clears it; a refused `next` (exit 1) writes nothing, so the stamp
   waits. And schedule's **Supersede prep**, which removes it from a prior it is about to supersede
-  (and step 1's confirm names the clear).
+  (and step 1's report names the clear).
 
 ## Hold until
 
@@ -95,7 +97,8 @@ merged: true}`.
   above, or a bare number with no Project root directory. It fails closed: it holds, waits on Lachy, makes no
   gh call and never clears itself.
 - **Writers**: any agent, or Lachy, holding a note on a PR, as this key on the note it holds; the rollout
-  template's commented `# hold_until:` line shows the form. A hold is never a sentence in the note.
+  template's commented `# hold_until:` line shows the form. And `reconcile-rollout.py approve-queue`, which writes
+  it with § Approved queue's `on_merge:`. A hold is never a sentence in the note.
 - **Readers**: `reconcile-rollout.py next` (the lead's, execute § 4.5 step 1), which reads each hold's PR
   with `gh pr view <url|N> --json state,mergedAt,url`: MERGED releases it; OPEN, or a gh error or timeout,
   holds and waits on the merge, read again at the next call; CLOSED holds and waits on Lachy. It reports each
@@ -106,10 +109,67 @@ merged: true}`.
 - **Clearer**: `next`, off `--dry-run`, on MERGED: it removes the `hold_until:` line and its indented lines
   only while they still read as it read them (a compare-and-swap under the note's lock, so a hold rewritten
   meanwhile stays, and `next` reports it not cleared); a save that fails leaves the hold for the next call,
-  and the hold still releases for that call.
+  and the hold still releases for that call. The one exception is an approved queue (§ Approved queue): its
+  verdict at the merge keeps the hold standing while it waits or regenerates, and clears it only when it
+  releases as a plain hold, its `on_merge:` lines with it in the same compare-and-swap, so a hold added by hand
+  later is a plain hold.
 - **Supersede**: a rollout-scope hold survives a supersede: `reconcile-rollout.py carry` (schedule step 6)
   copies the prior's lines verbatim into the note that supersedes it. A task-scope hold rides on its task
   note, which the carry never edits there.
+
+## Approved queue
+
+A queue Lachy has already approved, start and all, never waits on a confirm at its gating PR's merge (the loop
+audit's Q54 sat 19 hours and was dropped). The key is `on_merge: regenerate`, read on the first top-level
+`on_merge:` line of a parallel rollout note nothing has run that also carries a rollout-scope `hold_until`
+(§ Hold until), its scalar lower-cased with quotes and an inline ` # comment` dropped, as § Rollout start stamp
+reads `start:`: `regenerate` is the only value, in any case (`Regenerate`, `"REGENERATE"`). `on_merge` on a task
+note, on a serial note or on a note with no rollout `hold_until` is read by nothing.
+
+- **Writer**: `reconcile-rollout.py approve-queue --rollout <note> --pr <owner/repo#N | PR URL>`, run on Lachy's
+  words naming the queue and its gating PR (execute § Invocation forms' `start [[<rollout>]] when <owner/repo>#<N>
+  merges`, orient § 9's and schedule step 8's Start when ready). In one locked save it writes the hold, `on_merge:
+  regenerate` right after it and `start: unattended` below `status:` (unless the Stage's `started_unattended:`
+  stands), and prints one undo line. The line names `hold_until` only when this run wrote it, so following it never
+  drops a hold he wrote; a bare-number hold (`{pr: 202}`, read in the Project root) is refused with "rewrite it as
+  owner/repo#N first". It refuses a note that has run, his pause included, and writes nothing then.
+  Lachy's own hand edit is the other writer; the template's commented `# on_merge:` line shows the form.
+- **Reader**: `reconcile-rollout.py next`, the verdict, once the hold reads MERGED: it keeps the hold standing and
+  reports `halt: "regenerate"` with the members (`onMerge`), and execute § 4.5's **Approved queue** route runs
+  `/thread:schedule --regenerate --tasks <members>` under the chain, whose step 8 runs `stamp-start` on the new note.
+  The members are this note's unlanded linked tasks, a successor's when an interrupted chain's carry already moved
+  them, and the open siblings filed since in the same phases (schedule step 1's skip rule kept); the project filter
+  keeps only those carrying this note's first project. With no linked member left it releases as a plain hold.
+- **Clearer**: `next`, on a plain release (the verdict's `released`: it has run, or nothing of its own is left; or
+  a done or dropped note): it removes the `on_merge:` line with the hold (§ Hold until's Clearer), in the hold's one
+  compare-and-swap, so a hold Lachy adds by hand later for another PR is a plain hold and never brings back an
+  approval he gave for this one. A hold rewritten meanwhile keeps its `on_merge:` too. A verdict that keeps the
+  hold standing (waits, regenerate, an unreadable value) clears neither.
+- **What counts as having run** (`_approved_marks`, the approved queue's own read): a room stop is no run mark. The
+  Chorus Stage's room-stop lines (execute § Room stop; step-boundary.py's, one regex) are never Lachy's run, so a
+  queue whose only marks are room stops, each one ended, reads as unrun to the verdict, to `approve-queue`, to
+  `carry` and to unfinished-rollout.py, all through `approved_unrun`. A room stop that stands makes the verdict
+  wait (`waits: room-stop`), and the next loop entry's `end` closes it. His own `paused:` or `pause_requested`, a
+  `## Pause log` line that is no room stop, `completed:`, a `## Completion log` or `## Leg log`, and a task's
+  `owner:` still read as run: the verdict then releases it as a plain hold, with one `WARN: on_merge:` line the
+  lead relays as a needs-you item. A task's `integrating:` is an Integration in flight, and the verdict waits for
+  it (`waits: integration`); one with no Integration in flight reads as run.
+- **Never carried.** `carry` copies only the `hold_until` block: the new note keeps a plain hold, released at its
+  first `next`. A plain `--regenerate` of an approved queue drops the approval.
+- **Fails closed, only at the merge.** While the PR is open an unreadable `on_merge` waits as any hold does, and
+  only `/thread:status` flags it; at the merge it holds and waits on Lachy (`waits: you`).
+- **`status`** reports `onMerge` ({value, error}) and `chainStart` ({prior, pr} on a chain's new note whose start
+  was never stamped).
+- **The chain and its windows.** A crash or a stop before step 7.5 closes the prior out leaves the hold standing,
+  so a re-entry runs the chain again: before step 6 writes, from the start; after the carry (the I8 window) the
+  prior links nothing, but its `next` still reads `regenerate` with the successor's tasks, and execute § 2's lineage
+  lets the run go on to schedule's `interrupted` finish. Once step 7.5 has closed the prior out, a re-entry on it
+  ends `superseded` and never regenerates: a crash, or a stop (`stamp-start` exiting 1), before the new note is
+  stamped leaves it unstamped, which `/thread:status` flags (`chainStart`, its **Approved queue, unstamped:**
+  flag), and that stop halts with an (e) item whose act is `/thread:execute [[<new>]]` (execute § 4.5's
+  **Approved queue** route). Two crashes in a row lose only the start intent: the new note runs
+  when he starts it. A late heartbeat tick on the closed prior ends at its clause (1), and `next` on a superseded
+  note halts `superseded`.
 
 ## Readers
 
@@ -139,6 +199,9 @@ merged: true}`.
 - `skills/execute/scripts/reconcile-rollout.py` `next`, `status` and `carry`: `HOLD_KEY` (§ Hold until's
   key) and `HOLD_UNTIL_PREFIX` (every hold reason's opening), parsed by `_hold_until`, the one reader of both
   forms.
+- `skills/execute/scripts/reconcile-rollout.py` `next`, `status`, `approve-queue`, `stamp-start` and `carry`:
+  `ON_MERGE_KEY` and `ON_MERGE_REGENERATE` (§ Approved queue's key and value), read by `_on_merge`; and
+  `approved_unrun`, loaded by `skills/_shared/scripts/unfinished-rollout.py`.
 - `skills/status/SKILL.md` § 1's **Start stamp** and § 4 action 13: the stamp above, read straight from the
   frontmatter.
 - `skills/_shared/scripts/estate-scan.py` (the estate scan): Landed and Active through `DEAD_STATUSES`,

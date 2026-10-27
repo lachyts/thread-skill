@@ -33,7 +33,8 @@ Rules.
   norm(its `projects:`) meets that set; the filename never counts. norm: the wikilink's note name,
   lower-cased, every run of non-alphanumerics turned into `-`, trimmed.
 - Complete: at least one linked task and every one merged (reconcile-rollout.py's queue states).
-- Never started: reconcile-rollout.py's never_started (only execute's own marks).
+- Never started: reconcile-rollout.py's never_started (only execute's own marks), widened for an approved queue whose
+  only marks are the Stage's ended room stops (reconcile-rollout.py's approved_unrun; vault-grammar § Approved queue).
 - Eligible: this project's, and paused (`paused:`) or never started.
 - Awaiting sign-off (ADR 0034): paused with `paused_for: sign-off` (reconcile-rollout.py await-sign-off: the
   run finished everything else and closed, and only gates wait on Lachy). It is a `paused:` like any other
@@ -107,7 +108,8 @@ notes only: no git.
 
 `running` answers primary-hold.sh (ADR 0031 says why): a live rollout note tagged `rollout` at the protocol
 the schedule template writes, neither `done` nor `dropped`, not `paused:`, started (reconcile-rollout.py's
-never_started is false) and with no `engine_snapshot:` stamp is RUNNING. A stamped note runs on its own Engine
+approved_unrun is false: never_started, widened for an approved queue whose only marks are the Stage's ended room stops)
+and with no `engine_snapshot:` stamp is RUNNING. A stamped note runs on its own Engine
 snapshot, never on the Primary checkout, so it holds nothing (ADR 0043; skills/_shared/engine-snapshot.md); only a
 rollout scheduled before P29 (or on a version-cache install) still does. stdout: `running <slug>` per rollout,
 sorted, or `none` (a missing tasks dir included); exit 0.
@@ -133,7 +135,7 @@ RR_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/reconc
 SC_SRC = Path(__file__).resolve().parent / "serial-chains.py"
 TEMPLATE = Path(__file__).resolve().parent.parent.parent / "schedule/rollout-template.md"
 RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikilink_slug", "_scalar", "_status",
-            "_valued", "never_started", "incomplete", "_shape", "SHAPES")
+            "_valued", "never_started", "approved_unrun", "incomplete", "_shape", "SHAPES")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin")
 CLOSED = {"done", "dropped"}
 SC = None   # serial-chains.py, loaded by cmd_check (load_sc)
@@ -295,7 +297,7 @@ def shape_of(rr, slug, note, warns, warned):
 def note_state(rr, path, note, tasks_dir, mine):
     """The read a candidate gets: this project's, its label, never started, paused, complete, incomplete."""
     linked, index = rr._scan(path, tasks_dir)
-    fresh, why = rr.never_started(note, linked)
+    fresh, why = rr.approved_unrun(note, linked)
     counts = rr._counts([dict(zip(("state", "setAsideAt"), rr._queue_state(t))) for _, t in linked])
     paused = rr._scalar(note.get("paused")) if rr._valued(note.get("paused")) else ""
     sign_off = bool(paused) and rr._scalar(note.get("paused_for")).lower() == "sign-off"
@@ -644,7 +646,7 @@ def cmd_running(args, rr) -> int:
             continue
         if rr._valued(note.get("engine_snapshot")):
             continue   # ADR 0043: it runs on its Engine snapshot, so the Primary checkout is free to move
-        if rr._valued(note.get("paused")) or rr.never_started(note, rr._scan(path, tasks_dir)[0])[0]:
+        if rr._valued(note.get("paused")) or rr.approved_unrun(note, rr._scan(path, tasks_dir)[0])[0]:
             continue
         running.append(path.stem)
     print("\n".join(f"running {slug}" for slug in running) or "none")

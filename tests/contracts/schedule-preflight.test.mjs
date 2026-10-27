@@ -14,7 +14,9 @@
 //       again), as ADR 0047 § Build rulings says too.
 //   p4  what leaves: Orient tasks with their Dependent closure; a task left out unstamped, or, carried and queued,
 //       through step 6's `reconcile-rollout.py defer`; step 8's left-out block points an Orient one at /thread:orient.
-//   p5  under orient-all: no grading agent, no round, no log; --tasks is step 1's confirmed candidates and --decided
+//       Step 5's dependency-cycle leavers go the same way: a carried `queued` one through step 6's `defer`, whose
+//       sentence names them (the carry takes every task still linked to the prior).
+//   p5  under orient-all: no grading agent, no round, no log; --tasks is step 1's candidates and --decided
 //       the prompt line's slugs among them, and the fork writes its queue's ruled calls (`decided-for-you`, ADR 0054); orient-all § 6 answers it in item 16 and its prompt carries the line (the
 //       decided slugs among entry.members); orient-all § 8 lists each leaver by its why (waiting on your answer, its
 //       /thread:orient pointer, depends on [[<via>]]); no § 1.5 or S3.5 line names --regenerate.
@@ -141,13 +143,19 @@ function check(files) {
   need('p4', '§ 1.5 **The final call.**', final, ['leaves now: no `rollout:` stamp, no `## Queue` row, no `## File-sets` line',
     "A carried `queued` task in `out[]` leaves through step 6's `defer`"])
   need('p4', 'step 6', s6, ['reconcile-rollout.py defer --tasks'])
+  const s5 = C(sec(sch, /^### 5\. /))
+  need('p4', 'step 5', s5, ["A dependency cycle's `queued` members and their dependants leave before step 6, unstamped and named in step 8, " +
+    "a carried `queued` one through step 6's `defer`"])
+  const deferAt4 = s6.indexOf('reconcile-rollout.py defer --tasks')
+  need('p4', "step 6's defer sentence", deferAt4 < 0 ? '' : s6.slice(s6.lastIndexOf('. ', deferAt4), deferAt4),
+    ["§ 1.5's final `out[]` (with § 3's re-runs) or step 5's cycle leavers hold a carried `queued` task"])
   const left = C(slice(sec(sch, /^### 8\. /), /^\*\*Pre-flight's left-out tasks\.\*\*/, /^\*\*Checklist — /) ?? '')
   need('p4', "step 8's **Pre-flight's left-out tasks.**", left, ['/thread:orient [[<home>]]', 'depends on [[x]]',
     'waiting on your answer', 'deferred out of it at step 6'])
 
   // p5: under orient-all.
   need('p5', '§ 1.5 **The orient-all form.**', form, ['no grading agent', 'no round', 'no `log`',
-    '--tasks <step 1\'s confirmed candidates>', 'among them', 'Pre-flight: rank <R>, scan <S>, decided <slugs or none>',
+    '--tasks <step 1\'s candidates>', 'among them', 'Pre-flight: rank <R>, scan <S>, decided <slugs or none>',
     'estate-dispatch.py decided-for-you --rank <R> --tasks <its queue[]> --by orient-all --write'])
   const oa = files[ORIENT_ALL] ?? ''
   const answers = slice(sec(oa, /^### 6\. /), /^3\. \*\*Schedule's questions, answered\.\*\*/, /^4\. /) ?? ''
@@ -189,7 +197,7 @@ function check(files) {
   // p10: the serial path.
   const iS3 = serialRaw.indexOf('**S3. Live chains.**')
   const iS35 = serialRaw.indexOf('**S3.5. Pre-flight.**')
-  const iS4 = serialRaw.indexOf('**S4. Gates and confirm.**')
+  const iS4 = serialRaw.indexOf('**S4. Gates.**')
   if (iS3 < 0 || iS35 < 0 || iS4 < 0 || !(iS3 < iS35 && iS35 < iS4)) flag('p10', `S3.5 is not between S3 and S4 (${iS3}, ${iS35}, ${iS4})`)
   need('p10', 'S3.5', s35, ['runs step 1.5', 're-runs S2 and S3', "§ 1.5's orient-all form"])
   need('p10', 'S7', s7, ['the Pre-flight line and its left-out tasks', '/thread:orient [[<project>]]'])
@@ -265,6 +273,11 @@ test('control p3: a batched round, an asked closure task or a recorded ungraded 
 
 test('control p4: a left-out Orient task with no pointer to its orient fails p4 alone', () => {
   only(swap(FILES, SCHEDULE, '/thread:orient [[<home>]]', 'orient it later', /^### 8\. /), ['p4'], 'pointer')
+})
+
+test('control p4: a carried cycle leaver left to the carry, or a defer that misses it, fails p4 alone', () => {
+  only(swap(FILES, SCHEDULE, ", a carried `queued` one through step 6's `defer` (the carry takes", ' (the carry takes', /^### 5\. /), ['p4'], 'step 5')
+  only(swap(FILES, SCHEDULE, " or step 5's cycle leavers hold a carried `queued` task", ' holds a carried `queued` task', S6), ['p4'], 'step 6')
 })
 
 test('control p5: the orient-all form passing every decided slug fails p5 alone', () => {

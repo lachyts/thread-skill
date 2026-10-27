@@ -479,7 +479,11 @@ of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` (Owner *gate*: p30-9 takes i
   line (still valid by hand) and one line: the Chorus Stage starts a lead in its Project root once
   the note is runnable, and that lead's first `next` clears the stamp. It suits a run nobody will be
   there to start (the evening, a landing PR still queued). Outside a Chorus Stage nothing acts on the
-  stamp, so it waits like Not yet.
+  stamp, so it waits like Not yet. When he names the PR the start waits on (a grill's gating PR, say),
+  run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-queue --rollout <the note> --pr <owner/repo#N or its URL>`
+  in place of the bare stamp, from the note's engine root (`engine-snapshot.py resolve`), and print its undo line:
+  the note becomes an approved queue (`_shared/vault-grammar.md` § Approved queue), whose merge regenerates it and
+  starts the new note with no confirm.
 
 Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6 or
 § 7 names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker, or a surface
