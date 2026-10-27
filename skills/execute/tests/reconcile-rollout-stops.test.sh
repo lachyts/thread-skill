@@ -10,7 +10,9 @@
 #   owns a later boot   E7b a boot before the pause is written first   E8 an open halt, then a plain entry   E8b the
 #   hook's halt after a boot: both stops   E8c a sleep inside a halt   E9 next's sleep, once   E9b next writes no sleep
 #   with an open stop, a pause or no entry yet   E10 --dry-run   E10b an unwritable record   E11 the guard   E12 the
-#   skips   E13 --by watchdog   P1 sleep_spans on a pmset-shaped log, and machine_times' kern.sleeptime fallback.
+#   skips   E13 --by watchdog   E14 another session's entry, then the live lead's heartbeat: one dead-lead, never a
+#   second   E14b a heartbeat in a session other than the last entry's infers no dead-lead   P1 sleep_spans on a
+#   pmset-shaped log, and machine_times' kern.sleeptime fallback.
 # This suite reads the record, so it keeps its own THREAD_EVENTS_DIR and ignores THREAD_TEST_EVENTS_DIR.
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -274,6 +276,24 @@ em e13 lead-entry - '{"by":"stage","session":"A"}' 2026-10-26T10:00:00Z
 em e13 lane-taken t '{}' 2026-10-26T10:10:00Z
 ent e13 --by watchdog --session A --now 2026-10-26T12:00:00Z >/dev/null
 ok "$(q e13 '[[d["kind"], d.get("cause") or d.get("stop"), d.get("at")] for d in L[2:]]')" '[["stopped","watchdog","2026-10-26T10:10:00.000Z"],["lead-entry","watchdog",null]]' "E13: watchdog at L, then its resume"
+
+echo "== E14. another session's entry while lead A lives, then A's heartbeat tick: the tick infers no second dead-lead"
+mkro e14
+ent e14 --by stage --session A --now 2026-10-26T10:00:00Z >/dev/null
+ent e14 --by lachy --session B --now 2026-10-26T10:30:00Z >/dev/null
+ent e14 --by heartbeat --session A --now 2026-10-26T10:40:00Z >/dev/null
+ent e14 --by heartbeat --session A --now 2026-10-26T11:00:00Z >/dev/null
+ok "$(seq e14)" '["lead-entry:-","stopped:dead-lead:inf","lead-entry:dead-lead","lead-entry:-","lead-entry:-"]' \
+  "E14: B's entry infers its dead-lead (by lachy); A's ticks after it are plain entries"
+ok "$(q e14 '[d.get("session") for d in L if d["kind"] == "lead-entry"]')" '["A","B","A","A"]' "E14: each entry names its own session"
+
+echo "== E14b. a heartbeat in a session other than the last entry's: a plain entry, the other stops still inferred"
+mkro e14b
+ent e14b --by stage --session A --now 2026-10-26T10:00:00Z >/dev/null
+out=$(ent e14b --by heartbeat --session B --now 2026-10-26T10:20:00Z)
+ok "$out" "e14b: lead-entry by=heartbeat" "E14b: no dead-lead from the session change"
+THREAD_MACHINE_TIMES='{"boot":"2026-10-26T10:30:00Z"}' ent e14b --by heartbeat --session A --now 2026-10-26T10:40:00Z >/dev/null
+ok "$(seq e14b)" '["lead-entry:-","lead-entry:-","stopped:mac-restart:inf","lead-entry:mac-restart"]' "E14b: a heartbeat still infers a Mac restart"
 
 echo "== P1. sleep_spans reads a pmset log shaped like this Mac's; machine_times falls back to kern.sleeptime"
 cat > "$TMP/pmset.txt" <<'LOG'

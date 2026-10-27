@@ -301,13 +301,13 @@ Subcommands:
               by every heartbeat tick that finds no pause or room stop (its clause 2b). It writes only the Run record:
               the stops the record does not hold yet, as inferred `stopped` lines, then exactly one `lead-entry` {by,
               session?, stop?} (cmd_record_entry holds the rule: the gap stop, first match a standing pause, the open
-              stop, --cause, a boot after the latest live line, a session change, --by watchdog; every boot or sleep
-              before it written first). --session defaults to CLAUDE_CODE_SESSION_ID. The Mac's evidence is
-              machine_times: kern.boottime, kern.waketime, and `pmset -g log` at most once per wake (THREAD_MACHINE_TIMES
-              replaces every read). A serial, superseded, done or dropped note prints `[skip] <stem>: <why>: no entry
-              recorded` and writes nothing. Prints one line naming what it wrote (`(dry-run)`: nothing written). Exit 0
-              (written, skipped, or a warned write failure); 1 no rollout note (an ERROR line); 2 usage and the Engine
-              snapshot guard.
+              stop, --cause, a boot after the latest live line, a session change but on --by heartbeat, --by
+              watchdog; every boot or sleep before it written first). --session defaults to CLAUDE_CODE_SESSION_ID.
+              The Mac's evidence is machine_times: kern.boottime, kern.waketime, and `pmset -g log` at most once per
+              wake (THREAD_MACHINE_TIMES replaces every read). A pause invocation runs none (it is no loop entry). A
+              serial, superseded, done or dropped note prints `[skip] <stem>: <why>: no entry recorded` and writes
+              nothing. Prints one line naming what it wrote (`(dry-run)`: nothing written). Exit 0 (written, skipped,
+              or a warned write failure); 1 no rollout note (an ERROR line); 2 usage and the Engine snapshot guard.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
@@ -4954,11 +4954,13 @@ def cmd_record_entry(args) -> int:
     """The lead's entry into its loop (execute § 4.5 *Run record*): every stop the record does not hold yet, then one
     lead-entry (run_record.py's stop model). Step 1, the gap stop G this entry resumes from, first match: a pause that
     stands (no line; the entry says stop: pause); the open stop; --cause (inferred at L, the latest live line); a boot
-    that passes the window test after L (mac-restart at L); a session other than the last lead-entry's, both known
-    (dead-lead at L); --by watchdog (watchdog at L). Step 2: every boot or sleep that passes the window test, that G did
-    not take and that starts before G's start (or with no G) is written first, in `at` order (a boot at L_B, a sleep at
-    S with its wake): evidence after G's start is inside G. Step 3: G's own stopped line, when new, then exactly one
-    lead-entry {by, session?, stop?}. Every stopped line carries the calls in flight at its `at`."""
+    that passes the window test after L (mac-restart at L); a session other than the last lead-entry's, both known,
+    unless --by heartbeat (dead-lead at L: a tick runs in the live lead's own cron, so the session it differs from is
+    another session's entry, never a dead lead's); --by watchdog (watchdog at L). Step 2: every boot or sleep that
+    passes the window test, that G did not take and that starts before G's start (or with no G) is written first, in
+    `at` order (a boot at L_B, a sleep at S with its wake): evidence after G's start is inside G. Step 3: G's own
+    stopped line, when new, then exactly one lead-entry {by, session?, stop?}. Every stopped line carries the calls in
+    flight at its `at`."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.is_file():
         print(f"ERROR: record-entry: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -4999,7 +5001,8 @@ def cmd_record_entry(args) -> int:
         elif boot is not None and boot > last_live:
             gap = {"stop": "mac-restart", "fields": _stop_fields("mac-restart", last_live, lines, boot=boot)}
             boot = None   # G took it
-        elif session and st["session"] and session != st["session"]:
+        elif session and st["session"] and session != st["session"] and args.by != "heartbeat":
+            # A tick runs in the live lead's own cron: a session change it sees is another session's entry, no death.
             gap = {"stop": "dead-lead", "fields": _stop_fields("dead-lead", last_live, lines)}
         elif args.by == "watchdog":
             gap = {"stop": "watchdog", "fields": _stop_fields("watchdog", last_live, lines)}

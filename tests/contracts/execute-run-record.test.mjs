@@ -162,6 +162,13 @@ function checkLedger(md) {
   const race = (section(md, /^### 4\.5\. /) ?? '').split('\n').find((l) => l.includes('**RACE procedure**')) ?? ''
   const FLAGS = '--slot-wait <slot_wait> --rollout "<rollout-note>" --slug <slug> --bootstrap'
   need('verify-flags', vline.includes(FLAGS) && race.includes(FLAGS))
+  // A pause invocation is no loop entry: § 2 and *Pausing* both say it runs no record-entry (from another session it
+  // would infer a dead lead, in the lead's own it would close an open halt as a resume), and the Run record bullet
+  // says a heartbeat entry never infers a dead lead (reconcile-rollout-stops.test.sh E14 pins the code half).
+  const pausing = collapse(section(md, /^## Pausing \+ reinstating a rollout/) ?? '')
+  need('pause-exempt', collapse(s2).includes('**Pausing is exempt.** A pause invocation (*Pausing + reinstating a rollout* below) runs no `record-entry`: it is not a loop entry.') &&
+    pausing.includes("Nor does a pause invocation run § 2's `record-entry`: it is not a loop entry") &&
+    p.includes("A `--by heartbeat` entry never infers a dead lead from a session change: the tick runs in the live lead's own cron. A pause invocation runs none"))
   return bad
 }
 
@@ -186,6 +193,9 @@ const ledgerControls = [
   ['heartbeat-2b', (t) => t.replace(' (2b) Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-entry --rollout <the rollout note\'s path> --by heartbeat || true` once (the tick\'s liveness line, execute § 4.5 *Run record*), then go on to the next clause.', '')],
   ['entry-order', (t) => t.replace(", `record-entry` aside (*Run record*),", ',')],
   ['verify-flags', (t) => t.replace('--slot-wait <slot_wait> --rollout "<rollout-note>" --slug <slug> --bootstrap \'<env_bootstrap>\' --verifier \'<verifier>\'\n# end', '--slot-wait <slot_wait> --bootstrap \'<env_bootstrap>\' --verifier \'<verifier>\'\n# end')],
+  ['pause-exempt', (t) => t.replace(' **Pausing is exempt.** A pause invocation (*Pausing + reinstating a rollout* below) runs no `record-entry`: it is not a loop entry.', '')],
+  ['pause-exempt', (t) => t.replace("Nor does a pause invocation run § 2's `record-entry`: it is not a loop entry", 'A pause invocation runs § 2 as any entry')],
+  ['pause-exempt', (t) => t.replace("A `--by heartbeat` entry never infers a dead lead from a session change: the tick runs in the live lead's own cron. ", '')],
 ]
 for (const [rule, mutate] of ledgerControls) {
   test(`control (p29-10): ${rule}`, () => {
