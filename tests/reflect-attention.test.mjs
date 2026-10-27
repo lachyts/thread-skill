@@ -443,6 +443,49 @@ test('L3: Review trails key each round by landing, then branch, then path run; c
   assert.deepEqual(q, { 'ha1#0': true, 'hb1#0': false, 'hc1#0': false })
 })
 
+// A branch `bs` off main with origin/main at main, and a detached worktree at its head: a round there with a `branch` keys
+// by that branch.
+function branchCheckout(h, name) {
+  commit(h, { 'README.md': 'x\n' }, 'base')
+  git(h, ['checkout', '-q', '-b', 'bs'])
+  const s1 = commit(h, { 'skills/s.md': 's\n' }, 'bs')
+  git(h, ['checkout', '-q', 'main'])
+  git(h, ['update-ref', 'refs/remotes/origin/main', 'main'])
+  const wt = path.join(h.home, name)
+  git(h, ['worktree', 'add', '-q', '--detach', wt, s1])
+  return [wt, s1]
+}
+
+test('L3: the transcripts\' floor is the first round of a trail read: a round in no trail read never moves it, one before the window in a trail read does, and none older than 28 days before the window is keyed', (t) => {
+  // A: an old round on a gone repo, its trail with no round in the window, and a round 50 days back on the branch of a
+  // trail read. A transcript last written between the old round and the floor (until - 14 days) is never read, so its
+  // ask, a question in the window 10 minutes after the trail's stop, is neither in the Question ledger nor handed.
+  const h = setup(t)
+  const [wa, s1] = branchCheckout(h, 'wa')
+  const goneOld = path.join(h.home, 'gone-old')
+  emitAll(h, null, [
+    round(h, '2026-09-01T00:00:00.000Z', wa, s1, { verdict: 'stop', branch: 'feat/a' }),
+    round(h, T(10, '00:00'), goneOld, 'deadbee'),
+    round(h, T(24, '10:00'), wa, s1, { verdict: 'stop', branch: 'feat/a' }),
+  ])
+  transcript(h, 'early', SID('1'), [askE(T(24, '10:10'), 'a1', [Q('Stop here?', ['Yes', 'No'])], { cwd: wa })], { mtime: new Date(T(11, '00:00')) })
+  const a = block(h)
+  assert.deepEqual(a.attention.trails.items.map((x) => [x.label, x.rounds, x.first, x.stopsHanded, x.handedAfterStop]),
+    [['feat/a', 1, T(24, '10:00'), 0, []]], 'the September round is not keyed; the gone repo\'s trail is not read')
+  assert.deepEqual(a.attention.questions.items, [], 'the early transcript is not read')
+  assert.ok(!a.attention.cannotShow.some((c) => c.includes(goneOld)), 'a trail not read names no checkout')
+  // B: a trail read whose first round, a stop, is 15 days before the window: the transcripts are read back to it, so a
+  // question 10 minutes after that stop, in a file last written then, is handed (and is no question of the window).
+  const h2 = setup(t)
+  const [wr, r1] = branchCheckout(h2, 'wr')
+  emitAll(h2, null, [round(h2, T(5, '00:00'), wr, r1, { verdict: 'stop', branch: 'feat/r' }), round(h2, T(22, '00:00'), wr, r1, { branch: 'feat/r' })])
+  transcript(h2, 'early', SID('2'), [askE(T(5, '00:10'), 'r1', [Q('Stop here?', ['Yes', 'No'])], { cwd: wr })], { mtime: new Date(T(5, '00:10')) })
+  const b = block(h2)
+  assert.deepEqual(b.attention.trails.items.map((x) => [x.label, x.rounds, x.first, x.stopsHanded, x.handedAfterStop]),
+    [['feat/r', 2, T(5, '00:00'), 1, ['r1#0']]])
+  assert.deepEqual(b.attention.questions.items, [])
+})
+
 // ---- L4: waits to start -------------------------------------------------------------------------------------------------
 
 test('L4: a rollout\'s wait runs from the earliest captured: of its queue\'s tasks (carried rows skipped), else its own; open while unstarted', (t) => {

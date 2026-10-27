@@ -31,10 +31,12 @@ under git_env() and ESC.GIT_TIMEOUT, cached per (repo, arguments).
 The transcripts. transcript_dirs(): THREAD_TRANSCRIPTS_DIR when set (tests; a missing one is an empty read and a flag),
 else the union of ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects and $HOME/.claude-profiles/*/projects, deduplicated by
 realpath. Only <dir>/*/*.jsonl is read, never a subagents/ directory. A file is read when its mtime is at or after the
-floor: the earliest of since, until - TOUCH_DAYS and the first round of any Review trail read. A line is parsed only when
-it holds ASK_TOOL, `[[`, `Work/Tasks/` or `skills/reflect/scripts/`, or is a tool_result naming a call of ASK_TOOL already
-seen; only entries of `type` user or assistant with a `timestamp` and no `isSidechain` are read (a subagent's chain and
-any other copy, an api-request say, are not). Each entry is the Session's named by its `sessionId` (else the file's
+floor: the earliest of since, until - TOUCH_DAYS and the first round of each Review trail read (one with a round in
+[since, until]: the trails are keyed before any transcript is read, so a round in no such trail never moves the floor,
+and none is older than since - TRAIL_DAYS). A line is parsed only when it holds ASK_TOOL, `[[`, `Work/Tasks/` or
+`skills/reflect/scripts/`, or is a tool_result naming a call of ASK_TOOL already seen; only entries of `type` user or
+assistant with a `timestamp` and no `isSidechain` are read (a subagent's chain and any other copy, an api-request say,
+are not). Each entry is the Session's named by its `sessionId` (else the file's
 stem), with its `cwd` and `gitBranch`. An unreadable file is named in cannotShow.
 
 The Question ledger. Every ASK_TOOL call whose tool_use stamp falls in [since, until], read once by its call id (a
@@ -68,13 +70,15 @@ module's: span leaves it out, and `reflect.py attention --owners` brings it in.
 Review trails. The /fresh-review rounds in reviews.jsonl (run_record's REVIEWS), its `review-round` lines stamped at or
 before until, deduplicated by run_record's reader rule: the latest line per (repo, doc) when doc is set, else per (repo,
 head, digest) (a local copy: score.py's fresh_review_rounds and reflect.py's Span.fresh_review keep their own, and a
-shared reader, once one lands, replaces all three). A round's time is its `reviewedAt`, else the first line of its key.
+shared reader, once one lands, replaces all three). A round's time is its `reviewedAt`, else the first line of its key;
+a round whose time is before since - TRAIL_DAYS is never keyed, so the git reads and the transcripts' floor stay
+bounded as the file grows (a trail reaches back at most that far).
 Each round's checkout (its `repo`) resolves to a main repo: an existing path through `git rev-parse --path-format=absolute --git-common-dir`; a gone path
 holding `/.claude/worktrees/`, the part before it; another gone path `<parent>/<base>`, the longest sibling
-`<parent>/<name>` with `<base>` starting `<name>-` whose repo holds the head's object; else none (cannotShow). The
-identity is the main repo's origin (owner/name), else its path; the ref is refs/remotes/origin/HEAD, else exactly one of
-origin/main and origin/master, else HEAD. Nothing is fetched, so trails read local refs as they stand. A round's key,
-the first that matches:
+`<parent>/<name>` with `<base>` starting `<name>-` whose repo holds the head's object; else none (cannotShow, for a
+trail read). The identity is the main repo's origin (owner/name), else its path; the ref is refs/remotes/origin/HEAD,
+else exactly one of origin/main and origin/master, else HEAD. Nothing is fetched, so trails read local refs as they
+stand. A round's key, the first that matches:
 1. landing: the head is on the ref and the oldest commit of the ref's first-parent chain that holds it (the chain read
    once per repo, against `git rev-list --ancestry-path <head>..<ref>`) is a merge whose first parent is not the head:
    key (identity, the merge), label `#N` by MERGE_PR_RE on its subject, else the short sha;
@@ -85,10 +89,11 @@ the first that matches:
    joins its checkout's previous keyless trail when it is at most KEYLESS_GAP_HOURS later and its head descends from
    that trail's last head (with ancestry unreadable, the gap alone decides); else it starts a path run of its own,
    labelled by the checkout's basename.
-A trail with a round in [since, until] is read whole, up to until; one with none is not read. Per trail: label, key
-(landing | branch | path), identity, checkouts, rounds, codeRounds, simplifyRounds, stopRounds, stops (STOP entries:
-the stop rounds that follow a round that was no stop, or open the trail), stopsHanded (the stop rounds a question
-followed within HANDED_MINUTES from a main-chain Session whose cwd is that round's checkout), handedAfterStop (those
+A trail with a round in [since, until] is read whole (back to since - TRAIL_DAYS), up to until; one with none is not
+read. Keying needs git alone; only stopsHanded needs the transcripts. Per trail: label, key (landing | branch | path),
+identity, checkouts, rounds, codeRounds, simplifyRounds, stopRounds, stops (STOP entries: the stop rounds that follow
+a round that was no stop, or open the trail), stopsHanded (the stop rounds a question followed within HANDED_MINUTES
+from a main-chain Session whose cwd is that round's checkout), handedAfterStop (those
 questions' ids, at most HANDED_MAX), findings, regression, first, last and docsOnly: the paths `git diff --name-only
 <base> <last head> -- . ':!docs/reviews'` lists, from the base `git merge-base <last head> <merge>^1` on a landing,
 else `git merge-base <last head> <ref>`; true when the list is not empty and every path is under docs/ or a top-level
@@ -203,6 +208,7 @@ ASK_TOOL = "AskUserQuestion"   # the question tool; skills/_shared/asking.md is 
 HOUR = 3600 * 1000
 MINUTE = 60 * 1000
 TOUCH_DAYS = 14
+TRAIL_DAYS = 28
 CIRCLE_SESSIONS = 3
 OPEN_HOURS = 48
 HANDED_MINUTES = 30
@@ -876,8 +882,9 @@ class Repos:
         return names
 
 
-def review_rounds(ev, until, out):
-    """The /fresh-review rounds at or before until, deduplicated (the module docstring), oldest first."""
+def review_rounds(ev, lo, until, out):
+    """The /fresh-review rounds whose lines are stamped at or before until, deduplicated (the module docstring), each
+    with its time at or after lo (since - TRAIL_DAYS: an older round is never keyed), oldest first."""
     path = os.path.join(ev, RR.REVIEWS + ".jsonl")
     if not os.path.exists(path):
         return []
@@ -905,18 +912,18 @@ def review_rounds(ev, until, out):
                        "findings": d.get("findings") if isinstance(d.get("findings"), int) else 0,
                        "regression": d.get("regression") if isinstance(d.get("regression"), int) else 0,
                        "at": at if at is not None else first[key]})
+    rounds = [r for r in rounds if r["at"] >= lo]
     rounds.sort(key=lambda r: (r["at"], r["repo"], r["head"]))
     return rounds
 
 
-def trails(rounds, repos, asks, since, until, out):
-    """Review trails (the module docstring) over the deduplicated rounds; asks are [(t, session, cwd, call ids)]."""
+def key_trails(rounds, repos, since, until):
+    """The Review trails read: the deduplicated rounds keyed (the module docstring's keys), each trail kept when it has a
+    round in [since, until], in order of its first round. Keying reads git alone, never a transcript, so block() takes
+    the transcripts' floor from these trails' first rounds before it reads one; trails() then counts them."""
     by_key, order, keyless = {}, [], {}
     for r in rounds:
         main = repos.main(r["repo"], r["head"])
-        if main is None:
-            out.cannot_show("a /fresh-review checkout %s resolves to no repo: its rounds are keyed by path, docs-only unknown"
-                            % r["repo"])
         has = main is not None and repos.has(main, r["head"])
         ident = repos.identity(main) if main else r["repo"]
         key = label = kind = None
@@ -958,12 +965,24 @@ def trails(rounds, repos, asks, since, until, out):
         tr["rounds"].append(dict(r, main=main, has=has, onRef=on_ref))
         if main and not tr["main"]:
             tr["main"] = main
-    items = []
+    read = []
     for key in order:
         tr = by_key[key]
-        rs = sorted(tr["rounds"], key=lambda r: r["at"])
-        if not any(since <= r["at"] <= until for r in rs):
-            continue
+        tr["rounds"].sort(key=lambda r: r["at"])
+        if any(since <= r["at"] <= until for r in tr["rounds"]):
+            read.append(tr)
+    return read
+
+
+def trails(read, repos, asks, out):
+    """The Review trails' items (the module docstring) over key_trails()'s; asks are [(t, session, cwd, call ids)]."""
+    items = []
+    for tr in read:
+        rs = tr["rounds"]
+        for r in rs:
+            if r["main"] is None:
+                out.cannot_show("a /fresh-review checkout %s resolves to no repo: its rounds are keyed by path, docs-only "
+                                "unknown" % r["repo"])
         stops = stop_rounds = handed = 0
         handed_ids = []
         prev_stop = False
@@ -1428,8 +1447,8 @@ def block(whole, reflections, since, until, rid, ev, find, index, tasks_root, or
     notes = Notes(find, index, tasks_root)
     git = Git(genv)
     repos = Repos(git, origin, out)
-    rounds = review_rounds(ev, until, out)
-    floor = min([since, until - TOUCH_DAYS * 24 * HOUR] + [r["at"] for r in rounds])
+    read = key_trails(review_rounds(ev, since - TRAIL_DAYS * 24 * HOUR, until, out), repos, since, until)
+    floor = min([since, until - TOUCH_DAYS * 24 * HOUR] + [tr["rounds"][0]["at"] for tr in read])
     dirs, why = transcript_dirs(env)
     if why:
         out.flag("%s: no questions or touches read" % why)
@@ -1444,7 +1463,7 @@ def block(whole, reflections, since, until, rid, ev, find, index, tasks_root, or
         if kind != "failed":
             asks.append((a["t"], a["session"], a["cwd"], ["%s#%d" % (cid, i) for i in range(n)]))
     asks.sort(key=lambda x: (x[0], x[3][:1]))
-    trail_items = trails(rounds, repos, asks, since, until, out)
+    trail_items = trails(read, repos, asks, out)
     handed = {i for t in trail_items for i in t["handedAfterStop"]}
     for x in items:
         x["handedAfterStop"] = x["id"] in handed

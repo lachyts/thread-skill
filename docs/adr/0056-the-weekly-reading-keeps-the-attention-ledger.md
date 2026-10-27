@@ -35,9 +35,10 @@ not merged. A script reads every number; the reading's one judgement is each que
   the remainder as `unknown`, counted as `unlabelled`, and *yours* reads as a lower bound while it is above 0.
 - **d3. Review trails.** The /fresh-review rounds of one PR, keyed by its landing merge, else its branch, else a run of
   rounds in one checkout (a gap of 12 hours or a head that does not descend from the last starts a new run), each read
-  whole once a round falls in the window. Per trail: rounds, STOP entries (each entry into the stop verdict), the stop
-  rounds a question followed within 30 minutes from the same checkout (handed to him), and whether the PR changed docs
-  alone. Git is read locally, never fetched.
+  whole once a round falls in the window, back at most 28 days before it. Per trail: rounds, STOP entries (each entry
+  into the stop verdict), the stop rounds a question followed within 30 minutes from the same checkout (handed to him),
+  and whether the PR changed docs alone. Git is read locally, never fetched. The trails are keyed before any transcript
+  is read, so only the trails read reach the transcripts further back than the window.
 - **d4. Waits to start.** A rollout's wait runs from his ask, the earliest `captured:` of the tasks its queue links
   (carried rows aside), and from its scheduling, its own `captured:`, to its first Slot; while it has none, to the
   reading's end.
