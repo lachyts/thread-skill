@@ -416,8 +416,8 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
     !rc.includes(`They run only when no lead is live (every owner session has ended, or shows no run there under no room-stop headline, ${LAPSED},`) ||
     !rc.includes('while a lead is live (the owner check below, under which a room stop counts as live)') ||
     !rc.includes('every loop entry ends a room stop, here one an ended owner session left, lapsed or not') ||
-    !before(rc, "then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>`",
-      '`reconcile-rollout.py resume`, then the loop with')) fails.push('repair-live')
+    !before(rc, "then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts, but its exit 9, the lane hold, goes on), then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>`",
+      '`reconcile-rollout.py resume` (its exit 3,')) fails.push('repair-live')
   return [...new Set(fails)]
 }
 

@@ -313,7 +313,9 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
   // repair: the evidence list, the hand-off held, § 6's record, the every-mode ack.
   if (!d3.includes('git -C R rev-parse --is-bare-repository') || !d3.includes('git -C R config --show-origin --show-scope --get-all core.bare') ||
     !d3.includes('git -C R ls-remote origin refs/heads/<B>') || !d3.includes('If `ack` exits 3') ||
-    !r4.includes('a git-env hold stands (§ 3e; report it and stop there)') || !r6.includes('each git-env trip (§ 3e') ||
+    !r4.includes('a `gitEnvHold` entry with `scope: rollout` (a bare checkout; § 3e: report it and stop there)') ||
+    !r4.includes('a git-env trip with `scope: lane` (§ 3e) or an undecided RACE (§ 3c, its escalation shown) holds only the lane') ||
+    !r6.includes('each git-env trip (§ 3e') ||
     !r1.includes('§ 3e: the git-env ack, on Lachy\'s word') || !rDonts.includes("Never ack trips or a ref Lachy was not shown") ||
     !rifRow.includes('(§ 3e hands it to § 3c)') ||
     // The git-env step is 3e: § 3 holds exactly one `**3d` label (p14-4's descope) and one `**3e`, and no file
@@ -540,8 +542,9 @@ test('control: schedule without the intended-write sentence fails schedule', () 
   only('schedule', ' That write is intended: it records evidence that a window changed.', '', 'schedule', 'intended')
 })
 
-test('control: a repair hand-off not held behind the git-env hold fails repair', () => {
-  only('repair', ', a git-env hold stands (§ 3e; report it and stop there)', '', 'repair', 'hand-off')
+test('control: a repair hand-off not held behind a bare git-env hold, or held behind a lane one, fails repair', () => {
+  only('repair', '`gitEnvHold` entry with `scope: rollout` (a bare checkout; § 3e: report it and stop there), ', '', 'repair', 'hand-off')
+  only('repair', 'a git-env trip with `scope: lane` (§ 3e) or an', 'an', 'repair', 'hand-off held by a lane trip')
   only('repair', '**3e — a git-env trip', '**3d — a git-env trip (old label).**\n\n**3e — a git-env trip', 'repair', 'a second 3d label')
   only('status', '(its git-env step, 3e)', '(its git-env step, 3d)', 'repair', 'status names the step 3d')
   only('repair', ' (§ 3e hands it to § 3c) |', ' |', 'repair', '§ 2 RACE row')

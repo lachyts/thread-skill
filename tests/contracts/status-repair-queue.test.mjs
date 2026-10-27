@@ -18,8 +18,8 @@
 // place and must fail with exactly its rule. Writes only under os.tmpdir().
 //
 // Repair's classes are first-match: a RACE / UNVERIFIED task also matches merged-never-marked and at Integration,
-// so the class order and the hold on every `resume` until Lachy's RACE decision is recorded are pinned
-// (first-match), as are a merge into another base (another-base), a CLOSED PR (closed-pr) and a rollout another
+// so the class order and the hold on § 3a's `resume` (and on the hand-off, for an undecided UNVERIFIED) until Lachy's
+// RACE decision is recorded are pinned (first-match), as are a merge into another base (another-base), a CLOSED PR (closed-pr) and a rollout another
 // rollout's `supersedes:` names (reverse-lineage). An undecided RACE holds every reinstate and resume on both
 // sides (`resume` itself skips it, exit 3), and its record is allowed in every mode (race-hold). A signed task is
 // the lead's while its session holds the signed-gate handle (signed-gate). A RACE whose re-verify
@@ -27,7 +27,10 @@
 // is repair, never a resume (race-in-flight). Status's read-only rule is positive: it may invoke only its two
 // script reads, § 3's gh/git reads and the default-branch read. Both speak rungs, never tiers (ADR 0029, p13-3):
 // status shows each task's rung and flags a Rung drift on unlanded tasks only and a refused ladder file, which
-// reorders no action; repair never edits the file and stops short of the hand-off under it (rung). Agent-fixable is
+// reorders no action; repair never edits the file and stops short of the hand-off under it (rung). ADR 0046: the
+// hand-off stops only for a whole-rollout hold (a `scope: rollout` git-env entry, a non-empty `mainRed`, an undecided
+// UNVERIFIED); a lane-only trip or an undecided RACE is reported and handed off, `check-all`'s 9 and `resume`'s 3
+// going on (hand-off). Agent-fixable is
 // execute's (ADR 0033): repair leaves an `autoRetry: true` or cooling set-aside to the lead's automatic retry, judging
 // a descope first, and asks every other one on its verdict, never on its feedback (auto-retry); status shows each
 // set-aside's retry count (retries) and a Needs you block, and repair answers a `## Needs you` question into
@@ -1067,8 +1070,9 @@ function check({ status, repair, execute, fx }) {
     !ROUTES.every((l) => r4raw.split('\n').some((x) => x.startsWith(`- **${l}`))) ||
     !r4.includes('lead-integrate.py set-aside --note <task note> --kind integration')) fails.push('stages')
 
-  // first-match: the classes are first-match in LABELS' order, and every resume (§ 3a, the hand-off) is held while
-  // a RACE / UNVERIFIED escalation is undecided, i.e. until a dated `RACE decided:` line records Lachy's call;
+  // first-match: the classes are first-match in LABELS' order, and § 3a's resume is held while a RACE / UNVERIFIED
+  // escalation is undecided, i.e. until a dated `RACE decided:` line records Lachy's call, and the hand-off while an
+  // UNVERIFIED one is (an undecided RACE holds only the lane, ADR 0046: the hand-off rule below);
   // status flags a RACE first, so it never also reads as merged, never marked. § 2's intro names where the automatic
   // retry and a question sit: ahead of at Integration and every class below it, not ahead of every class that asks.
   // The order is read over the known classes present (a missing or extra one is stages').
@@ -1077,11 +1081,11 @@ function check({ status, repair, execute, fx }) {
   if (JSON.stringify(order) !== JSON.stringify(LABELS.filter((l) => order.includes(l))) ||
     !collapse(r2raw).includes('Each unmerged task takes the **first** class in table order whose signal it matches') ||
     !collapse(r2raw).includes('**retry (automatic)** and **needs you** come before **at Integration** and every class below it') ||
-    !(cls.RACE ?? '').includes('with no decision recorded (§ 3c)') || !(cls.RACE ?? '').includes('no `resume` runs at all') ||
-    !r3a.includes('no RACE / UNVERIFIED escalation is undecided') || !ho.includes('never while a RACE / UNVERIFIED escalation is undecided') ||
+    !(cls.RACE ?? '').includes('with no decision recorded (§ 3c)') || !(cls.RACE ?? '').includes("while it is undecided § 3a's `resume` does not run") ||
+    !r3a.includes('no RACE / UNVERIFIED escalation is undecided') || !ho.includes('or an undecided UNVERIFIED escalation (§ 3c;') ||
     !c3.includes('`- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>`') ||
-    !c3.includes('neither § 3a nor § 4\'s hand-off runs') ||
-    !collapse(raw(repair, /^## Don'ts/)).includes("Don't run `resume` while a RACE / UNVERIFIED escalation is undecided.") ||
+    !c3.includes("§ 3a does not run, and § 4's hand-off runs only for an undecided RACE") ||
+    !collapse(raw(repair, /^## Don'ts/)).includes("Don't run `resume` while a RACE / UNVERIFIED escalation is undecided, but through an undecided RACE's hand-off.") ||
     !s3.includes('The first three flags are first-match') || !before(s3raw, '- **RACE / UNVERIFIED:**', '- **Merged, never marked:**') ||
     !flag('RACE / UNVERIFIED:').includes('`repair: [[<slug>]] RACE decided: …`')) fails.push('first-match')
 
@@ -1232,8 +1236,17 @@ function check({ status, repair, execute, fx }) {
   // outside the Project root would run the loop from the wrong tree), whose exit 3 or any other non-zero exit stops at
   // the diagnosis with no hand-off and sends Lachy to /thread:execute from the Project root; then execute § 2.5, then
   // execute § 3's verify_timeout check (p14-2: the hand-off enters § 4.5 directly, past execute's § 3), then resume,
-  // then the loop with --running ""; no § 2.7.
+  // then the loop with --running ""; no § 2.7. ADR 0046: only a whole-rollout hold stops it (a `scope: rollout`
+  // gitEnvHold entry, a non-empty mainRed; the undecided UNVERIFIED is first-match's); a lane-only trip or an
+  // undecided RACE holds only the lane, so it is reported and handed off, check-all's exit 9 and resume's exit 3
+  // going on.
   if (!ho.includes('no lead is live and no pause stands') ||
+    !ho.includes('and never while a whole-rollout hold stands: a `gitEnvHold` entry with `scope: rollout` (a bare checkout; § 3e: report it and stop there), a non-empty `mainRed` (a RACE revert that did not land; § 3c: report it and stop there)') ||
+    !ho.includes('A hold on the Integration lane alone never stops it (ADR 0046): a git-env trip with `scope: lane` (§ 3e) or an undecided RACE (§ 3c, its escalation shown) holds only the lane') ||
+    !ho.includes('so report it (its slugs, and that the lane stays held until Lachy\'s ack or his `RACE decided:` line) and hand off') ||
+    /never while a RACE \/ UNVERIFIED escalation is undecided|a git-env hold stands \(§ 3e/.test(ho) ||
+    !ho.includes("the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts, but its exit 9, the lane hold, goes on)") ||
+    !ho.includes('`reconcile-rollout.py resume` (its exit 3, an undecided RACE held back with one `HOLD:` line, is printed and the hand-off goes on') ||
     !ho.includes("First the launch-directory check, execute § 2.8's snippet") ||
     !ho.includes('`self-rollout-check.sh --launch-check <Project root> <launch dir>`') ||
     !before(ho, '--launch-check', 'Then execute § 2.5') || !ho.includes('never `pwd`') ||
@@ -1326,7 +1339,7 @@ function check({ status, repair, execute, fx }) {
     rRung.includes('A Rung drift (status § 3) is never input-gated and needs no write') &&
       rRefused.includes('Repair never edits `~/.config/thread/ladder.toml`') &&
       rRefused.includes("§ 3's vault work, § 4's hand-back routes") && rRefused.includes("§ 5's defers (on Lachy's choice) still run") &&
-      rRefused.includes("Repair stops at § 4's **Hand-off**: no execute loop and no § 6") && ho.includes('or the ladder file is refused'),
+      rRefused.includes("Repair stops at § 4's **Hand-off**: no execute loop and no § 6") && ho.includes('never while the ladder file is refused'),
     !TIER_WORDS.some((w) => lower.includes(w.toLowerCase())),
   ]
   if (!R.every(Boolean)) fails.push('rung')
@@ -1798,8 +1811,8 @@ test('control: no first-match declaration fails first-match', () => {
 test('control: § 3a resume not held behind an undecided RACE fails first-match', () => {
   only(rp(', and **no RACE / UNVERIFIED escalation is undecided** (§ 3c)', ''), 'first-match', '3a')
 })
-test('control: the hand-off not held behind an undecided RACE fails first-match', () => {
-  only(rp(', and never while a RACE / UNVERIFIED escalation is undecided', ''), 'first-match', 'hand-off')
+test('control: the hand-off not held behind an undecided UNVERIFIED fails first-match', () => {
+  only(rp(' or an undecided UNVERIFIED escalation (§ 3c; report the hold and stop there)', ''), 'first-match', 'hand-off')
 })
 test('control: no recorded RACE decision fails first-match', () => {
   only(rp('`- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>`', 'his decision'), 'first-match', 'record')
@@ -1952,6 +1965,25 @@ test("control: a hand-off without execute § 3's verify_timeout check fails hand
 
 test('control: a hand-off under a pause fails hand-off', () => {
   only(rp('- **Hand-off, when no lead is live and no pause stands**', '- **Hand-off, when no lead is live**'), 'hand-off', 'pause')
+})
+
+// ADR 0046: a lane-only hold (a `scope: lane` git-env trip, an undecided RACE) never stops the hand-off; only a
+// whole-rollout one does. Each control mutates the hand-off in one place.
+test('control: a hand-off that stops for any git-env hold fails hand-off', () => {
+  only(rp('a `gitEnvHold` entry with `scope: rollout` (a bare checkout; § 3e: report it and stop there)',
+    'a `gitEnvHold` entry of any scope (§ 3e: report it and stop there)'), 'hand-off', 'any scope')
+})
+test('control: a hand-off that stops for a lane-only hold fails hand-off', () => {
+  only(rp("A hold on the Integration lane alone never stops it (ADR 0046): a git-env trip with `scope: lane` (§ 3e) or an undecided RACE (§ 3c, its escalation shown) holds only the lane, while starts, seeded revises and automatic retries go on, so report it (its slugs, and that the lane stays held until Lachy's ack or his `RACE decided:` line) and hand off.",
+    'A git-env trip with `scope: lane` (§ 3e) or an undecided RACE (§ 3c) stops it too: report it and stop there.'), 'hand-off', 'lane-only stops')
+})
+test('control: a hand-off that runs under main red fails hand-off', () => {
+  only(rp(', a non-empty `mainRed` (a RACE revert that did not land; § 3c: report it and stop there)', ''), 'hand-off', 'mainRed')
+})
+test("control: a hand-off that halts on check-all's lane exit 9 or resume's RACE exit 3 fails hand-off", () => {
+  only(rp(', but its exit 9, the lane hold, goes on)', ')'), 'hand-off', 'check-all 9 halts')
+  only(rp(" (its exit 3, an undecided RACE held back with one `HOLD:` line, is printed and the hand-off goes on, as at execute's *Cold resume*)", ''),
+    'hand-off', 'resume 3 halts')
 })
 
 test("control: a hand-off without execute § 2.8's launch-directory check, or going on at its exit 3, fails hand-off", () => {
