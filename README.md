@@ -329,8 +329,9 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   orient's launch-model history (`orient-launch-model.test.mjs`), the three-way execution-fit test and
   orient's retired batches (`execution-fit-shapes.test.mjs`, ADR 0040), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
-  (`handoff-one-writer.test.mjs`), `next`'s archive-this-session move and its session/thread menu wording
-  (`next-archive-session.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
+  (`handoff-one-writer.test.mjs`), `next`'s archive-this-session move and its session/thread wording in the line and the menu
+  (`next-archive-session.test.mjs`), `next` deciding a clear move in one line and settling or carrying an
+  open confirm (`next-decides-housekeeping.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
 - **Reflection** — `tests/reflect-score.test.mjs` (`score.py` on synthetic records: running time and its
   exclusions, the Hands-off rate and its acts, Throughput's bound, the Slot-bound and lane-bound fixtures, each

@@ -19,7 +19,7 @@ Every handoff produces two artefacts: a **durable handoff doc**, committed to th
 handoff of THIS conversation) or when a router (`next`/`orient`) dispatched it.
 Never self-initiate a handoff because the session feels long or the context is
 filling — that is a recommendation, and recommendations for the undecided
-moment belong to `thread:next`'s ask-first menu. (Model invocation enabled
+moment belong to `thread:next`, which decides the move and says so in one line. (Model invocation enabled
 2026-08-12: the old `disable-model-invocation` flag was inherited from the
 flat-skill port, never a recorded decision; handoff was then judged the
 cheapest-misfire route of the family, a misfire costing one committed doc
@@ -92,7 +92,7 @@ Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` fo
 Body sections, in this order:
 
 1. **Done and verified** — what landed this session, with evidence (paths, SHAs, test output).
-2. **What remains** — the continuation: what the next session does, in order, naming any fork the grill-fit check returned to Lachy.
+2. **What remains** — the continuation: what the next session does, in order, naming any fork the grill-fit check returned to Lachy. An open confirm a dispatching `thread:next` carried (its step 3) is one such fork, word for word.
 3. **Decisions settled** — rulings already made, so they are not re-litigated.
 4. **Gotchas found the hard way.**
 5. **Suggested skills** — the skills the next agent should invoke to continue.
