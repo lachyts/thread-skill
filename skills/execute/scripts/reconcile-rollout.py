@@ -16,10 +16,18 @@ Subcommands:
               `merged:` (the first stamp wins): a read-only task is done when its review approves and
               never enters Integration. Every row removes `integrating:` (the run that produced the row
               ended any Integration). It also stamps `ready:` and appends the `## Integration log` line
-              (see the Status mapping below). --no-verdict (the integrate call's canary check exited 4, a trip
-              inside its window acked before the check, ADR 0053): an `integrated` row's line reads `void`
-              instead, so it never backs prepare's case (ii), and the lane frees (`lane-freed release=halt`);
-              the task waits for Integration again. A row with any other outcome is reconciled as usual.
+              (see the Status mapping below). A row that ends a Slot (its note read in_progress; no integrate
+              row) is its call's end (p29-12): `ready:`, a read-only approval's `merged:` and the row's Slot
+              events are stamped at the end the journal of the call bound to the task's open Slot records
+              (_call_end: its run-bound line in the Run record, then <journalDir>/<runId>.json), not when the
+              lead reconciles, which can be hours later (a lead held on a hold, or idle). The end must lie at
+              or after the Slot's latest slot-taken (a re-take included), or the Slot would split for a reader
+              by ts. With no end readable they fall back to now, and the row's line marks it: `ready=<stamp>
+              (fallback)`. --no-verdict (the integrate call's canary check exited 4, a trip inside its window
+              acked before the check, ADR 0053): an `integrated` row's line reads `void` instead, so it never
+              backs prepare's case (ii), and the lane frees (`lane-freed release=halt`); the task waits for
+              Integration again. A row with any other outcome is reconciled as usual, except that no integrate
+              row's `flakes` are recorded (one line says so): that window's runs give no verdict.
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start and restart
               within the parallel ceiling, every held task with its reason, the running, awaiting-Integration,
@@ -44,7 +52,7 @@ Subcommands:
               `ready:`, then schedule order. Each `setAside` entry is {slug, status, setAsideAt}, plus `needsHuman`
               (p16-3: the note's `## Needs you` question, normalised) only when the note holds one. `halt` is null
               while anything starts, restarts, runs, awaits Integration or integrates; otherwise the first of
-              "git-env", "paused", "empty", "complete" (or "done"), "awaiting-sign-off" and "stuck". With every
+              "git-env", "paused", "empty", "complete" (or "done"), "held", "awaiting-sign-off" and "stuck". With every
               task merged, `halt` is "complete" (run the completion ceremony), or "done" when the ceremony already
               ran through its archive move (p19-14: the rollout note reads `status: done` and sits in
               `Archive/Rollouts/`), so no entry runs it twice (the lead's `done` route runs only its last step,
@@ -69,6 +77,22 @@ Subcommands:
               ({morning, kinds}) follows `trickle`. While Away runs to the Morning, a start whose kind's usual
               length would end past it reads `last start: …` and is skipped, never a stop; a restart never does;
               while one is held, `halt` stays null. Off --dry-run, the night record's lines follow idle-slots.
+              A PR hold (Hold until, below; --gh-bin, default `gh`): `holdUntil` lists each hold this call read, the
+              rollout's first, then the tasks' in rank order, as {note, scope: rollout|task, pr, url, state, error, held,
+              waits: merge|you|null, cleared}, and is [] with gh never called when no note it reads carries one (every
+              other key byte-identical). A rollout hold that stands, unless a pause stands (it wins), starts and
+              restarts nothing and holds every stalled or queued task with its reason; git-env still wins over it. A
+              task's own hold is read only while no pause and no rollout hold stands, on a stalled task, a queued one
+              whose dependencies are met or one set aside at its run or a gate: it holds that task's new call (a held
+              Solo task holds nothing), and a held setAside entry gains `holdUntil: "<reason>"`. "held" is the halt when
+              nothing starts, restarts, runs, awaits Integration or integrates, no Trickle, Away-cap, last-starts or
+              heat hold stands and any entry holds; a MERGED hold releases at once and, off --dry-run, is removed from
+              its note (`cleared`: true only once no `hold_until` stands on the note after the save, so a hold
+              rewritten meanwhile, which the compare-and-swap keeps, reads false).
+              The Heat hold (estate ADR 0009 d5; Heat hold, below): `heat` ({level, name}) follows `lastStarts`. At
+              heavy or worse `slotLimit` is 0, Away too, so nothing new starts; a restart stops at the ceiling only. A
+              row held there reads `heat: the Mac is hot (<name>)` (a full ceiling still reads `ceiling:`), and while
+              one is, `halt` stays null.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -210,7 +234,7 @@ Subcommands:
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
               pause_requested, pausedFor, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline, ladder,
-              gitEnvHold, tasks}; `pausedFor` is the rollout's `paused_for` (`sign-off` under await-sign-off's
+              gitEnvHold, holdUntil, tasks}; `pausedFor` is the rollout's `paused_for` (`sign-off` under await-sign-off's
               pause, ADR 0034), else null; `ceiling` is `parallel_ceiling`, or for a note without it the operator's
               rollout settings (rollout-settings.py for the Project root: rollouts.toml, then built-in 4),
               and null with `ceilingError` the reason when it is invalid or cannot be resolved (`next`
@@ -227,8 +251,9 @@ Subcommands:
               question also carries `needsHuman` (p16-3, normalised); no other task carries the key. A task
               set aside at Integration whose latest run opens a named marker (p27-4, integration_block) also
               carries `integrationBlock`: `conflict` (an Integration conflict, `integration: conflict
-              unresolved in …`) or `red` (`integration: verifier red: …`); the key is absent otherwise. Pure
-              read; no network.
+              unresolved in …`) or `red` (`integration: verifier red: …`); the key is absent otherwise. `holdUntil`
+              (p30-3, Hold until below), at the top level for the rollout and on every task row: its hold_until as
+              parsed, {pr, url, error}, or null; the PR's state is never read here. Pure read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -295,6 +320,20 @@ Subcommands:
               mode=hard` (at the stamp), `slot-freed outcome=stopped` for each linked in_progress note and, for
               each lane holder, a merge-hold close and `lane-freed release=halt`. Nothing in the vault changes.
 
+  record-entry  `--rollout <note> --by lachy|stage|watchdog|heartbeat|repair [--cause usage-limit|dead-lead|watchdog]
+              [--session ID] [--now T] [--dry-run]` (p29-10, ADR 0051; execute § 4.5 *Run record*): the lead's loop
+              entry in the Run record, run at every loop entry (right after § 2's lineage, version and shape lines) and
+              by every heartbeat tick that finds no pause or room stop (its clause 2b). It writes only the Run record:
+              the stops the record does not hold yet, as inferred `stopped` lines, then exactly one `lead-entry` {by,
+              session?, stop?} (cmd_record_entry holds the rule: the gap stop, first match a standing pause, the open
+              stop, --cause, a boot after the latest live line, a session change but on --by heartbeat, --by
+              watchdog; every boot or sleep before it written first). --session defaults to CLAUDE_CODE_SESSION_ID.
+              The Mac's evidence is machine_times: kern.boottime, kern.waketime, and `pmset -g log` at most once per
+              wake (THREAD_MACHINE_TIMES replaces every read). A pause invocation runs none (it is no loop entry). A
+              serial, superseded, done or dropped note prints `[skip] <stem>: <why>: no entry recorded` and writes
+              nothing. Prints one line naming what it wrote (`(dry-run)`: nothing written). Exit 0 (written, skipped,
+              or a warned write failure); 1 no rollout note (an ERROR line); 2 usage and the Engine snapshot guard.
+
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
               and the four automatic-retry markers (`auto_retries_used`, `quota_retries_used`, `auto_retry_sha`,
@@ -323,7 +362,8 @@ Subcommands:
               descope's re-run (exit 0, `[no-change]`) and hand-back stay its way back (repair § 2's **plan-blocked,
               descopable**). Exit 1 and exit 2 record nothing. Exit 3 when: the
               part, or a clause holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
-              `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`) holds the part
+              `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`; never a `## Decided for
+              you…` section, an agent's call, ADR 0054) holds the part
               (or, for --owner, the quote); the part sits in a fenced code block of the brief (the body minus the
               record sections; a fence is never a brief item, so no pointer lands inside one); --optional and an
               occurrence of the part in the brief has no marker word (consider, considering, optional, optionally,
@@ -375,7 +415,12 @@ Subcommands:
               in both modes, writing nothing; with --to and a --from still open, the tasks already on --to
               count as carried too, so § 0's interrupted finish prints them after the dying run's own carry
               moved every task; a closed re-run's --from reads only its own), then `[no-change]`, `[written: <n>]`
-              or `(dry-run)`.
+              or `(dry-run)`. A --from carrying `hold_until` (Hold until, below) prints, after the carry, keep and
+              restamp lines and before the order lines, `hold_until pr=<pr> merged=<value>` or `hold_until unreadable:
+              <why>`; off --dry-run its lines are copied verbatim into --to (Note.insert_block, after `parallel_ceiling:`,
+              else `status:`) before any task write, only while --to has none (--to then counts in `[written: <n>]`),
+              and a different hold already on --to is kept with `WARN: carry: hold_until on <to> differs from
+              <from>'s; <to>'s kept` on stderr.
               --dry-run previews and needs no --to. Refuses (exit 2,
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
@@ -402,9 +447,27 @@ Subcommands:
               verifier and the 600 s margin fit inside it. A bad `verify_timeout`, or no note: one ERROR line on
               stderr, exit 1, no stdout (checked first). When the note declares `completion_verifier:`, a value of
               it, `env_bootstrap:` or `completion_timeout:` that completion-verify would refuse: its ERROR line,
-              exit 2, no stdout (argparse's own usage error is exit 2 too; its line names no key). A refused
+              exit 2, no stdout (argparse's own usage error is exit 2 too; its line names no key). The note's
+              `named_rerun:` (p29-9, ADR 0050: the repo's runner for named tests, the lead's Flake check's named
+              re-run) is read the same way (_named_rerun: completion_verifier's reader, plus `{tests}` exactly once);
+              set, the line gains `"namedRerun": "<cmd>"` after `verifySlot`, absent or empty no key; a value it
+              refuses is exit 2 like a completion key's. A refused
               rollouts.toml (the whole file is validated), a present one on a python with no tomllib, or a resolver
               that will not load: `ERROR: rollout settings refused: <the resolver's line>`, exit 3, no stdout.
+
+  record-verify  The lead's record of one Integration verify or RACE re-verify (ADR 0050, 0051; execute § 4.5 step 3
+              and the RACE procedure), run only once that verify's canary check exited 0: `--rollout <note> --tasks
+              <slug> --site integration|race --from <out>.flake.json [--now] [--dry-run]`, the file lead-integrate.py
+              verify --diff-base wrote. Verdict `flake`: each first-run failing id is a Flake, logged and filed by
+              _record_flakes (below) with --site and the file's sha. A `timeout` ({run: first | named | confirm,
+              seconds}): one `suite-timeout` event, logged as load, never a Flake. A green or another red records
+              nothing. Then `recorded: <stamp>` is written into the file (tmp + rename), so a second call prints
+              `[no-change]` and records nothing. No file at all (verify writes none when its verifier never ran:
+              `noslot`, a failed env_bootstrap): one `nothing to record` line, exit 0. Exit 1, one ERROR line, the
+              file unstamped: an unreadable or malformed file (not v 1 with a verdict green | flake | red), a task
+              note not found or whose `rollout:` is not --rollout, a follow-up that could not be written. --dry-run
+              prints what it would record and writes nothing, the file included. Not exempt from the Engine snapshot
+              guard.
 
   completion-verify  The completion verify (estate ADR 0009 d6, Chorus ADR 0107 d1, ADR 0052; execute § 4.5 step 5):
               a rollout whose note declares `completion_verifier: <cmd>` runs it once on merged origin/<default>
@@ -425,8 +488,8 @@ Subcommands:
               repo is the note's `Project root:` (none: exit 1); tree and out the attempt's own
               `<repo>/.claude/worktrees/completion-<rollout>-<n>` and
               `<repo>/.claude/integration/completion-<rollout>-<n>`; streak the `noslot` and `unrun` lines at the
-              log's tail (a `stopped` one skipped); followup the fix task's stem once red; summary the Completion
-              log's one line once decided.
+              log's tail (a `stopped` or `heat` one skipped); followup the fix task's stem once red; summary the
+              Completion log's one line once decided.
               --run owns one attempt end to end under that lock (retried for 2 s past a reader's probe), held for
               its whole life (the lead launches it in the background and reads again when it ends). Decided already,
               it runs nothing. Otherwise, under the lock it reads the note again, clears a dead run's tree, resolves
@@ -437,7 +500,8 @@ Subcommands:
               `--timeout <completion_timeout>`, the slot wait max(60, 7200 - 600 - completion_timeout - the seconds
               --run has spent so far), the env_bootstrap), checks the window once, and classifies the run from
               verify's outcome file alone, never its log's text: no outcome, `running`, `bootstrap`, or a deadline
-              in the env_bootstrap is `unrun`; `noslot` is `noslot`; `signal` is `stopped`; a deadline in the
+              in the env_bootstrap is `unrun`; `noslot` is `noslot`; `heat` (the Heat hold outlasted the slot wait:
+              the Mac was too hot to run the suite) is `heat`; `signal` is `stopped`; a deadline in the
               verifier is red at once, since a timeout names no failing test and is never a Flake (ADR 0050); `done`
               with rc 0 is green on attempt 1 and a Flake on attempt 2 (recorded, no task); any other `done` is
               `rerun` on attempt 1 (its line naming up to ten failing ids read from the log, the Flake log ADR 0050
@@ -509,7 +573,26 @@ Subcommands:
               `spend_approval_usd`, resolved task frontmatter -> rollout frontmatter -> rollouts.toml
               (_resolved_settings: file:repo, file:defaults) -> built-in 0, which is off (sources `task`,
               `rollout`, `file:repo`, `file:defaults`, `built-in`; _retry_budget's order). A gate is covered iff
-              the limit is > 0 and its total exposure is at most the limit. Each covered gate moves to
+              the limit is > 0, its total exposure is at most the limit, and (p30-8, ADR 0034's 2026-10-27
+              amendment: spend is never asked ahead) this calendar month's standing-approved spend with it stays
+              within the same limit, the month line, inclusive. The month (local time, from --now) sums the
+              `- <stamp> [[<slug>]] signed under the standing approval: US$<x> …` lines under `## Needs-you log`
+              of the --rollout note and of every note directly in the tasks dir, Archive/ and Archive/Rollouts/
+              whose name is a dated rollout note's (`-rollout-<YYYY-MM-DD>[-N].md`), each once by real path, plus
+              the earlier gates and slugs this call signed; the mark must follow a line's first wikilink, so a
+              push line never counts, and Lachy's bare sign-offs are never logged. It is read lazily, only for a
+              gate that prices within the limit and is not already in `## Approved gates`, under a machine-wide
+              lock (`standing-spend.lock` beside the note locks; never on --dry-run) held from that read to the
+              call's last save; a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 1, and nothing written
+              for any slug that needed the month read. A gate past the month line is an ASK whose why is `this
+              month's (<YYYY-MM>) standing approvals would reach US$<m> with this gate, past the US$<t> month line
+              (<source>)`; a note it cannot read (or a directory it cannot list) is an ASK whose why is `cannot
+              read <path> for this month's standing approvals (<error>)`. For a slug with gates newly signed, the
+              rollout note is written first: one `- <stamp> [[<slug>]] signed under the standing approval:
+              US$<x> (month to date US$<m> of US$<t>, <source>): <gate>` line per gate, appended inside
+              `## Needs-you log` (created at the note's end when absent); a failed log save is exit 1 for that
+              slug, its task note untouched. Then the task note, as below: a task save that fails after the log
+              save leaves the log line (over-count, fail closed). Each covered gate moves to
               `## Approved gates` with gated_inputs.annotation()'s suffix, `(approved <date> under the standing
               approval: total exposure US$<x>, limit US$<t> from <source>)` (GATE_ANNOT_RE strips it), deduped by
               _norm_gate, and prints `<slug>: gate approved under the standing approval: <gate> (exposure US$<x>
@@ -525,7 +608,8 @@ Subcommands:
               3: some or none covered (the covered ones written, an ASK line for each of the rest; a re-run on
               gates already judged writes nothing and exits 3); 1: an error, nothing written for that slug (a
               missing note, a task whose `rollout:` is not --rollout, a note that is not gate-pending with
-              pending gates, a `spend_approval_usd` stamp that is not an integer >= 0, rollout settings refused).
+              pending gates, a `spend_approval_usd` stamp that is not an integer >= 0, rollout settings refused,
+              the standing-spend lock held past its timeout, a Needs-you log line that cannot be saved).
               --standing without --rollout is exit 1 (`ERROR: --standing needs --rollout`), nothing written. A
               note already fully approved stays `[no-change]`, exit 0.
 
@@ -577,7 +661,13 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   reconcile         per row, against the note's status and _holds_lane before the row's writes: slot-freed
                     when it was in_progress and the row is not an integrate row (outcome ready, completed,
                     lost for a lead row whose reason starts `workflow call failed:`, else set-aside); ready
-                    pr= when `ready:` is stamped; merged readOnly=true for a read-only approval; when it
+                    pr= when `ready:` is stamped; merged readOnly=true for a read-only approval. Those three,
+                    and the set-aside, quota-stall and review-verdict lines of a row that ends a Slot, are the
+                    call's end (p29-12): stamped at _call_end's end with `stamp: call-end` and `reconciledAt`
+                    (this run's clock, when the lead released the Slot), or with none readable at this run's
+                    clock with `stamp: fallback` (a ready or merged on a row that ends no Slot is a fallback
+                    too); every other event (the lane's, the holds') is the lead's, at this run's clock,
+                    unmarked. When it
                     held the lane and the row is not an `integrated` integrate row, a merge-hold close and
                     lane-freed (reject for a `rejected` integrate row, else set-aside; path, triggers and
                     conflict from the integrate row; a lead row carries no integration, so only an
@@ -588,7 +678,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     integrate row that leaves the note `blocked`: its seeded revise follows, so it is not a
                     set-aside; a rejected row that ends review-blocked is one); quota-stall {stage, detail}
                     for a `workflow call failed:` lead row whose error line reads as a usage or rate limit
-                    (QUOTA_RE); then (p21-3) review-verdict {round, verdict, findings, original, regression,
+                    (QUOTA_RE), with the task's latest run-bound's runId and call (p29-10; omitted when it has none);
+                    then (p21-3) review-verdict {round, verdict, findings, original, regression,
                     digest, head?} per reviewVerdicts entry of a row that was in_progress and carries no
                     integration (the row-field mapping's reviewVerdicts, below), written once per verdict_key.
   hand-back         (p21-2) race-decided {mark, by=hand-back} when a `RACE decided:` line lifted the task's hold
@@ -619,19 +710,28 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     (the writer appends it to both files).
   next              (not --dry-run) paused mode=soft when it stamps `paused:`; idle-slots {reason, free,
                     settings} when free = ceiling - (slotsInUse + starts) > 0 and halt is not complete,
-                    done or empty (free stays the ceiling's, never the Trickle's or the Away cap's); then the
-                    night record (p28-2, _night_record): away-night {morning} once per (rollout, M) while the last
-                    starts apply, last-start-held {morning, scope, history, usualMinutes?} once per (task, M) for
-                    each final `last start:` hold, and ran-past-morning {morning, slotTakenAt, scope, history,
-                    usualMinutes?} once per (task, M) for each task whose Slot the record shows open at a marked
-                    Morning at or before now; an unreadable record writes none (one `run_record: warning: night
-                    record not written: <why>` line while the last starts apply).
+                    done or empty (free stays the ceiling's, never the Trickle's, the Away cap's or the Heat
+                    hold's); then the night record (p28-2, _night_record): away-night {morning} once per
+                    (rollout, M) while the last starts apply, last-start-held {morning, scope, history,
+                    usualMinutes?} once per (task, M) for each final `last start:` hold, and ran-past-morning
+                    {morning, slotTakenAt, scope, history, usualMinutes?} once per (task, M) for each task whose
+                    Slot the record shows open at a marked Morning at or before now; an unreadable record writes
+                    none (one `run_record: warning: night record not written: <why>` line while the last starts
+                    apply). Before idle-slots (p29-10, _record_sleeps): a sleep no entry follows, stopped {cause:
+                    mac-sleep, inferred: true, at, wake, calls}, only while the record has a lead-entry, no pause
+                    stands and no stop is open, and the Mac's last wake is later than the last lead-entry and the
+                    latest recorded wake.
   clear-pause       when it removes `paused:`: paused mode=hard at the stamp when the record has no open pause
                     (a hard pause whose record-pause never ran), then resumed. Removing only
                     pause_requested records nothing; a refusal (STILL-AWAITING) records nothing.
   await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
   completion-verify (--run) completion-verify {result, rc, sha, attempt, log, followup?}: one per recorded run, a
                     no-verdict one included (task null), after its log line.
+  record-verify     (p29-9) flake {test, repo, sha, site, followup, count} per new Flake log line (_record_flakes);
+                    suite-timeout {site, run, seconds, sha?} for a timeout. reconcile writes flake events too, from a
+                    row's `flakes` (the row-field mapping below).
+  record-entry      (p29-10) stopped {cause, inferred: true, at, calls, boot?, wake?} for each stop the entry finds, in
+                    `at` order, then one lead-entry {by, session?, stop?}; nothing for a skipped note.
   bind-run, free-lane, hold, record-pause   above.
   git-env-canary.py hold-started / hold-ended hold=git-env (task null) on the hold's empty <-> non-empty edge.
 set-aside stage, first match (auto-retry's stage too, when the record holds no set-aside line for the task: the lead
@@ -654,20 +754,24 @@ integrate row's set-aside by its diagnosis's first line (integration_block, p27-
 Integration conflict, `integration: conflict unresolved in …`), integration-red (`integration: verifier red: …`),
 else integration-set-aside; else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
-paused or pauseRequested -> pause-drain; any `trickle:` hold (only ever a queued row: a stalled row waits on the
-ceiling alone) -> hold-trickle, and any `away cap:` hold (the same, Away) -> hold-away-cap; any `last start:` hold
-(p28-2: a queued row or a head Solo the last starts hold toward the Morning) -> hold-last-start (after hold-away-cap,
-with which it can co-occur Away); the first held queued row's reason: `depends on` -> dependency,
-solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
+paused or pauseRequested -> pause-drain; any `heat:` hold (the Heat hold; only ever a queued row) -> hold-heat; any
+`trickle:` hold (only ever a queued row: a stalled row waits on the ceiling alone) -> hold-trickle, and any `away cap:`
+hold (the same, Away) -> hold-away-cap; any `last start:` hold (p28-2: a queued row or a head Solo the last starts hold
+toward the Morning) -> hold-last-start (after hold-away-cap, with which it can co-occur Away); the rollout's own
+hold_until standing -> hold-pr; the first held queued row's reason: `hold until` (a task's own hold_until) -> hold-pr,
+`depends on` -> dependency,
+solo or behind solo -> solo; any task's own hold_until standing (a stalled row's, or a row's set aside at its run or a
+gate) -> hold-pr; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
 row -> awaiting-hand-back (a known mislabel when every one is a blocked row step 1.2 relaunches as a seeded
 revise: its slot-taken start=revise splits the span seconds later; also while step 1.2's automatic retry waits out
 a quota or infra cool-down, p16-4, since `next` never reads the retry verdict: the task's auto-retry event ends
 that span); else queue-tail. `next` never records hold-merge: a merge hold is lead state, recorded by `hold`.
 Departures from the p15-2 brief: no ceiling-changed (the writer refuses it; the settings on every slot-taken
 and idle-slots carry the ceiling); log-integration records nothing (the lane is held through the merge, ADR
-0030; its path and triggers ride on mark-done's lane-freed release=merge); merge-task.sh records nothing (its
+0030; its path and triggers ride on mark-done's lane-freed release=merge); merge-task.sh records no `merged` (its
 positional args name neither rollout nor task, and `merged` has one writer per landing: the vault flip to
-done).
+done); since p29-10 it records each newly counted exit-3 refusal's `base-moved`, through lead-integrate.py
+`base-moved`, which finds the task by its PR.
 
 Stdlib only. Frontmatter is edited line-surgically (not via a YAML round-trip) to preserve field order,
 comments, and spacing exactly — matching how the rest of the vault tooling treats frontmatter. Importing
@@ -745,7 +849,34 @@ the kind's past runs (_past_runs: this project's folded call journals over LAST_
 call), and with fewer than LAST_START_MIN_RUNS runs the length is LAST_START_FALLBACK. A held row is skipped and the
 greedy loop goes on; restarts, hand-backs and seeded revises are never held; the hold never halts; a git-env or pause
 hold replaces it. Off --dry-run, _night_record writes the night record into the rollout's own Run record (NIGHT_KINDS),
-each line once, read from the record's Slot intervals (_record_night), never from notes.
+each line once, read from the record's Slot intervals (_record_night), never from notes. A Slot reconcile closed
+ends at its slot-freed's ts, its call's end (p29-12), so a call that ended before the Morning never reads as having
+run past it because the lead reconciled it after.
+
+Hold until (p30-3; _hold_until, read by `next`, `status` and `carry`; the grammar is skills/_shared/vault-grammar.md §
+Hold until): a hold is frontmatter, never a sentence. A top-level `hold_until: {pr: <owner/repo>#<N>, merged: true}`
+(or the block form, `hold_until:` then indented `pr:` and `merged:` lines) on a parallel rollout note holds every start
+until that PR merges; on a task note it holds that task's new calls. `pr` is `owner/repo#N` (gh reads it as
+`https://github.com/owner/repo/pull/N`), a PR URL, or a bare `N` / quoted `"#N"` read in the rollout's Project root;
+`merged` defaults to true and reads no other value. An unknown or repeated key, an empty value, `null`, a missing pr or
+a bare number with no Project root directory is unreadable: it holds, waits on Lachy and makes no gh call (fail closed).
+`next` reads each hold's PR with `gh pr view <url|N> --json state,mergedAt,url` (_gh, 60 s, memoised per call): MERGED
+releases it and, off --dry-run, removes its lines (Note.remove_block, a compare-and-swap replayed under the note lock,
+so a hold rewritten meanwhile stays and reads `cleared: false`; each in a save of its own, the rollout's after its start
+stamp's save, which still fails the call; a failed clear is one stderr `WARN: hold_until on <note>: not cleared: <err>`
+and the hold still releases for this call); OPEN or a gh error holds and waits on the merge (the next call retries);
+CLOSED holds and waits on Lachy. Its reasons, all quote-free and opening
+HOLD_UNTIL_PREFIX: `hold until <pr> merges (<STATE>)`, `hold until <pr> merges (gh: <its line>)` and `hold until:
+hold_until unreadable (<why>)`. `status` reports each parsed hold, never its state. `carry` copies the prior's into the
+note that supersedes it. A serial note's `hold_until` is read by nothing: `next` refuses the note first.
+
+Heat hold (estate ADR 0009 d5; the spec is skills/execute/away.md § Heat): `next` reads the Mac's thermal pressure once
+per call, right after the Away state (so a refused call reads neither), through verify-slot.py's heat_level()
+(_heat_module, _heat_state: THREAD_HEAT_LEVEL pins it; a module that will not load, as on Windows, or a failed reading
+reads 0, fail open). At heavy (2) or worse `slotLimit` is 0, Away included, so nothing new starts; a restart still waits
+on the ceiling alone. A row held for want of a Slot then reads `heat: the Mac is hot (<name>)` (HEAT_PREFIX) unless the
+ceiling is full (`ceiling:` first); no Slot is found, so the last starts never read it; a git-env hold, a pause and a
+standing rollout hold_until hold their rows themselves. A `heat:` hold never halts.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
@@ -776,9 +907,9 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     read-only with no PR -> status: done instead;
                     `ready: <stamp>` (overwriting any earlier one) on a move to review from another status,
                     non-read-only, and NOT for a row carrying `integration`: readyAt is when the approving
-                    own (or seeded revise) call returned, per the engine header. A set-aside re-entry is
-                    leaving Integration, not joining the queue. A re-reconcile (review -> review) never
-                    re-stamps;
+                    own (or seeded revise) call returned, per the engine header, so the stamp is that
+                    call's end (p29-12, _call_end), else now. A set-aside re-entry is leaving Integration,
+                    not joining the queue. A re-reconcile (review -> review) never re-stamps;
                     when approvedAtCeiling: a run of reviewHistory (grouped by round) under
                     "## Review history (approved at ceiling)" — ceiling approvals stay auditable
   review-blocked -> status: review-blocked; pr: <url>; a run of reviewHistory (grouped by round; legacy
@@ -850,6 +981,24 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     a row without the key (a pre-p21-3 engine's, a lead-written one) or on --dry-run; a non-list
                     or a malformed entry is one warning. Never changes the exit, stdout or vault writes.
 
+  flakes         -> (any status; p29-9, ADR 0050) the Flakes this call's agents reported: [{test, sha}], a task call's
+                    (site task: its implementers' and revisers' verifier loops) or an integrator's (site integrate:
+                    a row with `integration`). Each well-formed entry (_flake_entry: test a one-line string of at most
+                    300 characters, sha 7-40 hex) is logged by _record_flakes: one `## Flake log` line keyed (task,
+                    sha12, site) on its follow-up, `<project>-followup-flake-<h>` (h the first 10 hex of the sha256
+                    of the repo and the test, a newline between; the repo the Project root's origin owner/name, else
+                    its basename, else the project slug), found by a glob of the Tasks root for one not done, merged or
+                    dropped, else filed
+                    fresh (exclusive create: one created meanwhile is appended to), a finished or archived one getting
+                    a `-2`, `-3`; from its second line the follow-up reads `priority: high` with a `## The repo's to
+                    fix` section; and one `flake` event per new line. A line already there writes nothing, so a
+                    re-reconcile or a replayed row is a no-op. One `flake:` line per entry follows the row's line. A
+                    malformed entry is a WARNING, skipped; `flakes` that is not a list is an ERROR (exit 1) and records
+                    none; absent or null records nothing (a lead-written row, a pre-p29-9 engine's). An integrate row
+                    reconciled with --no-verdict records none (a git-env trip inside its window voids its runs, Flakes
+                    included): one `<slug>: N Flake(s) not recorded: --no-verdict …` line instead. Nothing on
+                    --dry-run but the lines.
+
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
   ### Run <n> (<stamp>)
@@ -896,6 +1045,7 @@ import sys
 import time
 import types
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 try:
@@ -938,6 +1088,17 @@ GATES_SIGNED_KEY = "gates_signed"
 # rollouts.toml through rollout-settings.py), and the rollout's sign-off pause, `paused_for: sign-off` beside `paused:`
 # (await-sign-off writes both; clear-pause removes both).
 SPEND_APPROVAL_KEY = "spend_approval_usd"
+# The standing approval's month line (p30-8, ADR 0034's 2026-10-27 amendment): approve-gates --standing logs each gate it
+# signs in the rollout note's `## Needs-you log` as `- <stamp> [[<slug>]] signed under the standing approval: US$<x> …`,
+# and sums this calendar month's such lines across every rollout note (ROLLOUT_NOTE_NAME_RE's dated names in the tasks
+# dir, Archive/ and Archive/Rollouts/, plus --rollout) under the machine-wide STANDING_SPEND_LOCK. The mark must follow
+# the line's first wikilink directly, so a push line that quotes it never counts.
+NEEDS_YOU_LOG_SECTION = "## Needs-you log"
+STANDING_SPEND_MARK = "signed under the standing approval:"
+STANDING_SPEND_RE = re.compile(
+    r"^- (\d{4}-\d{2})-\d{2}T\S+ \[\[[^\]]+\]\] signed under the standing approval: US\$(\d+(?:\.\d+)?)(?:\s|$)")
+ROLLOUT_NOTE_NAME_RE = re.compile(r"-rollout-\d{4}-\d\d-\d\d(?:-\d+)?\.md\Z")
+STANDING_SPEND_LOCK = "standing-spend.lock"
 PAUSED_FOR_KEY = "paused_for"
 SIGN_OFF = "sign-off"
 PAUSE_LOG_SECTION = "## Pause log"
@@ -947,6 +1108,14 @@ PAUSE_LOG_SECTION = "## Pause log"
 # --dry-run, removes it, so the Stage never starts a second lead. Chorus's record, `started_unattended:`, is untouched.
 START_KEY = "start"
 START_UNATTENDED = "unattended"
+# The PR hold (p30-3; skills/_shared/vault-grammar.md § Hold until): a top-level `hold_until: {pr: <owner/repo>#<N>,
+# merged: true}` on a parallel rollout note holds every start until that PR merges, one on a task note holds that task's
+# new calls; `next` reads the PR through gh and, off --dry-run, removes a merged one. Every reason it gives opens with
+# HOLD_UNTIL_PREFIX and is quote-free, so it can ride a ROLLOUT-STATUS reason=.
+HOLD_KEY = "hold_until"
+HOLD_UNTIL_PREFIX = "hold until"
+HOLD_FIELDS = ("pr", "merged")
+HOLD_GH_TIMEOUT = 60   # seconds for each gh pr view `next` makes: one per held PR per call, memoised
 
 # Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
 # (engine flag approvedAtCeiling) persists the accumulated by-round rationale. An AUDIT RECORD, not an
@@ -1383,15 +1552,27 @@ def _top_run(runs):
 NOTE_LOCK_TIMEOUT = 30.0
 
 
-def _note_lock_path(path) -> Path:
-    """The note's save lock: one file per directory of notes (its real path's hash), shared by every note in it so
-    the lock files stay few, and outside the vault so it never syncs. A save holds it for milliseconds."""
+def _note_lock_dir() -> Path:
+    """Where the note save locks (and the standing approval's spend lock) live: THREAD_NOTE_LOCK_DIR, else
+    XDG_STATE_HOME/thread/note-locks, else ~/.local/state/thread/note-locks; outside the vault so they never sync."""
     absolute = lambda v: v if v and os.path.isabs(v) else None   # noqa: E731  a relative dir is ignored (the XDG rule)
     base = absolute(os.environ.get("THREAD_NOTE_LOCK_DIR")) or os.path.join(
         absolute(os.environ.get("XDG_STATE_HOME")) or os.path.join(os.path.expanduser("~"), ".local", "state"),
         "thread", "note-locks")
+    return Path(base)
+
+
+def _note_lock_path(path) -> Path:
+    """The note's save lock: one file per directory of notes (its real path's hash), shared by every note in it so
+    the lock files stay few, and outside the vault so it never syncs. A save holds it for milliseconds."""
     real = os.path.dirname(os.path.realpath(str(path)))
-    return Path(base) / f"{hashlib.sha256(real.encode()).hexdigest()[:16]}-{os.path.basename(real)[:60]}.lock"
+    return _note_lock_dir() / f"{hashlib.sha256(real.encode()).hexdigest()[:16]}-{os.path.basename(real)[:60]}.lock"
+
+
+def _spend_lock_path() -> Path:
+    """The standing approval's machine-wide spend lock (STANDING_SPEND_LOCK, beside the note locks): approve-gates
+    --standing holds it from its month read to its last save, so two calls never both sign against one month sum."""
+    return _note_lock_dir() / STANDING_SPEND_LOCK
 
 
 def _journaled(method):
@@ -1496,6 +1677,49 @@ class Note:
         """Delete the `key:` line from frontmatter entirely (idempotent — no-op if absent)."""
         pat = re.compile(rf"^{re.escape(key)}:\s*")
         self.filter_fm(lambda line: not pat.match(line))
+
+    def _fm_span(self, key: str):
+        """(i, j): the first top-level `key:` frontmatter line, i, through the indented, non-blank lines right after
+        it (a block mapping's or a continued value's), ending before j; None when the key is absent."""
+        pat = re.compile(rf"^{re.escape(key)}:")
+        for i, line in enumerate(self._fm):
+            if pat.match(line):
+                j = i + 1
+                while j < len(self._fm) and self._fm[j][:1] in (" ", "\t") and self._fm[j].strip():
+                    j += 1
+                return i, j
+        return None
+
+    def fm_block(self, key: str):
+        """The `key:` block's lines (_fm_span) as a list, or None when the key is absent."""
+        span = self._fm_span(key)
+        return None if span is None else self._fm[span[0]:span[1]]
+
+    @_journaled
+    def remove_block(self, key: str, expected):
+        """Remove the `key:` block (fm_block) only while it still equals `expected`, the lines a caller read: a
+        compare-and-swap, so save()'s replay on a fresh read keeps a block another writer rewrote meanwhile."""
+        span = self._fm_span(key)
+        if span is None or self._fm[span[0]:span[1]] != list(expected):
+            return
+        del self._fm[span[0]:span[1]]
+        self.dirty = True
+
+    @_journaled
+    def insert_block(self, key: str, lines, after=("status",)):
+        """Insert `lines` (a `key:` block, verbatim) after the first present anchor key, else at the end, only while
+        the note has no top-level `key:` line, so a replay on a fresh read never writes a second one."""
+        if self.fm_block(key) is not None:
+            return
+        for anchor in after:
+            apat = re.compile(rf"^{re.escape(anchor)}:")
+            for i, line in enumerate(self._fm):
+                if apat.match(line):
+                    self._fm[i + 1:i + 1] = list(lines)
+                    self.dirty = True
+                    return
+        self._fm.extend(lines)
+        self.dirty = True
 
     def has_heading(self, heading: str) -> bool:
         return any(line.strip() == heading for line in self._body.split("\n"))
@@ -1780,10 +2004,13 @@ def _replace_keeping_metadata(target, text):
 class _note_lock:
     """The note's save lock (_note_lock_path), held only for a save's read and write, never across a child process
     (the `cp -p` clone aside, which takes no lock); the canary takes it inside its own lock, and nothing takes the
-    canary's inside this one. No fcntl (Windows): no lock, the atomic replace alone."""
+    canary's inside this one. With lock_path (and a label) it is another lock of the same kind: approve-gates
+    --standing takes note locks (Note.save) inside the standing-spend lock (_spend_lock_path), and nothing takes the
+    spend lock inside a note lock or the canary's. No fcntl (Windows): no lock, the atomic replace alone."""
 
-    def __init__(self, path):
-        self.lock_path, self.fh = _note_lock_path(path), None
+    def __init__(self, path=None, lock_path=None, label="note lock"):
+        self.lock_path = Path(lock_path) if lock_path is not None else _note_lock_path(path)
+        self.label, self.fh = label, None
 
     def __enter__(self):
         if fcntl is None:
@@ -1802,11 +2029,11 @@ class _note_lock:
             except BlockingIOError:
                 if time.monotonic() >= deadline:
                     self.fh.close()
-                    raise OSError(f"timed out after {timeout:g}s waiting for the note lock {self.lock_path}")
+                    raise OSError(f"timed out after {timeout:g}s waiting for the {self.label} {self.lock_path}")
                 time.sleep(0.05)
             except OSError as e:
                 self.fh.close()
-                raise OSError(f"cannot lock {self.lock_path}: {e}")
+                raise OSError(f"cannot lock the {self.label} {self.lock_path}: {e}")
 
     def __exit__(self, *exc):
         if self.fh is not None:
@@ -2625,25 +2852,37 @@ def cmd_reconcile(args) -> int:
         prior, held, rollout = _status(note), _holds_lane(note), _note_rollout(note)
         lane_fields = _lane_fields_from_log(note) if held else {}
         ready_stamped = False
+        # p29-12: a row that ends a Slot (its note read in_progress, and no integrate row) is its call's end, and the
+        # lead reconciles it at its next turn, which may come hours later (a lead held or idle). So what records that
+        # end (`ready:`, a read-only approval's `merged:`, and the row's Slot events) is read from the call itself
+        # (_call_end), falling back to now, marked, only when no end is readable.
+        ends_slot = prior == "in_progress" and not isinstance(task.get("integration"), dict)
+        ended = _call_end(rollout, slug, now) if ends_slot else None
+        at = ended or now
+        stamped = []  # the call-end stamps this row writes, for its line
         # A read-only task is done when its review approves: nothing to merge, so it never enters
         # Integration (ADR 0030). The row's scope wins; the note's own is the fallback.
         scope = _scalar(task.get("scope")).lower() or _scope(note)
         note_status = "done" if (status == "review" and not pr and scope == "read-only") else status
         # `ready:` is when the task joined the Integration queue: the approving own (or seeded revise)
-        # call returned (the engine's readyAt). Stamped on a move to review from another status,
-        # overwriting any earlier value; never on a read-only task (it never enters Integration) and
-        # never on an Integration row (an integrated set-aside re-entering review is leaving Integration,
-        # not joining the queue).
+        # call returned (the engine's readyAt), so it is that call's end (p29-12). Stamped on a move to review
+        # from another status, overwriting any earlier value; never on a read-only task (it never enters
+        # Integration) and never on an Integration row (an integrated set-aside re-entering review is leaving
+        # Integration, not joining the queue).
         if (note_status == "review" and _status(note) != "review" and scope != "read-only"
                 and task.get("integration") is None):
-            note.set("ready", _stamp(now))
+            note.set("ready", _stamp(at))
             ready_stamped = True
+            stamped.append(f"ready={_stamp(at)}")
         note.set("status", note_status)
         # Its approval is its completion, so it is stamped `merged:` as a PR task is at its merge (the
-        # first stamp wins): its duration then counts in the timeline, and a read-only task finishing
-        # last ends the rollout's elapsed time.
+        # first stamp wins), at its call's end: its duration then counts in the timeline, and a read-only
+        # task finishing last ends the rollout's elapsed time.
         if note_status == "done" and not _scalar(note.get("merged")):
-            note.set("merged", _stamp(now))
+            note.set("merged", _stamp(at))
+            stamped.append(f"merged={_stamp(at)}")
+        if stamped and ended is None:
+            stamped.append("(fallback)")
         # Whatever Integration this task was in, the run that produced this row ended it.
         note.remove("integrating")
 
@@ -2767,11 +3006,16 @@ def cmd_reconcile(args) -> int:
             errors.append(f"{slug}: cannot write {path}: {e} — nothing written for this row")
             continue
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
-                          ready_stamped)
-        _review_verdict_events(args, rollout, slug, task, prior)
+                          ready_stamped, ended, now)
+        _review_verdict_events(args, rollout, slug, task, prior, ended, now)
+        flake_lines = _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
         ro = " (read-only, approved)" if note_status != status else ""
-        print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{flag}")
+        when = "".join(" " + s for s in stamped)
+        print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{when}"
+              f"{flag}")
+        for line in flake_lines:
+            print(line)
 
     for w in warnings:
         print(f"WARNING: {w}", file=sys.stderr)
@@ -2804,6 +3048,36 @@ LAST_START_HISTORY = timedelta(days=30)                        # a past run coun
 LAST_START_HORIZON = timedelta(hours=24)                       # a Morning further out than this holds nothing yet
 UNSCOPED_KIND = "unscoped"                                     # the kind of a task whose note has no `scope:`
 NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")  # the night record's Run-record kinds
+HEAT_PREFIX = "heat:"                                          # a row the Heat hold holds (estate ADR 0009 d5)
+_HEAT_MOD = None
+
+
+def _heat_module():
+    """verify-slot.py as a module, for its heat reading (loaded once per process), or None when it will not load
+    (Windows: its `import fcntl` fails, so `next` still runs there). Never raises."""
+    global _HEAT_MOD
+    if _HEAT_MOD is None:
+        try:
+            spec = importlib.util.spec_from_file_location("thread_verify_slot", VERIFY_SLOT_PY)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _HEAT_MOD = mod
+        except Exception:
+            _HEAT_MOD = False
+    return _HEAT_MOD or None
+
+
+def _heat_state() -> dict:
+    """The Heat hold's reading for `next` (execute away.md § Heat): {level, name, held}, through verify-slot.py's
+    heat_level() (THREAD_HEAT_LEVEL pins it), read once per call. held is true at heavy (HEAT_HOLD) or worse. Fails
+    open: a module that will not load, or a reading that raises, reads 0 nominal."""
+    mod = _heat_module()
+    try:
+        level = int(mod.heat_level()) if mod else 0
+        return {"level": level, "name": mod.heat_name(level) if mod else "nominal",
+                "held": bool(mod) and level >= mod.HEAT_HOLD}
+    except Exception:
+        return {"level": 0, "name": "nominal", "held": False}
 
 
 def _away_stamp(value):
@@ -2914,13 +3188,50 @@ def _cap_in_force(away) -> dict:
 
 def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index) -> dict:
     """{<rollout stem>: n} for every other open, started, parallel Rollout on the Mac running n > 0 tasks, sorted (execute
-    away.md § The Trickle). `index` is _scan's, one walk of `tasks_dir`. A rollout note counts only when it sits directly
-    in `tasks_dir` (never under Archive/), is tagged `rollout`, is not done or dropped, reads parallel, carries no
-    `paused:` stamp, is not this rollout, and has started (never_started over the index notes whose `rollout:` names
-    it). Its n is those notes at `status: in_progress`, less the ones its own undecided RACE or UNVERIFIED holds
-    (_race_holds): such a task never restarts, so it holds no Slot. Review and integrating notes never count (Integration
-    holds no Slot), nor does a serial rollout's Leg."""
-    this = rollout_path.resolve()
+    away.md § The Trickle): _running_by_rollout with this rollout excluded."""
+    return _running_by_rollout(tasks_dir, index, exclude=rollout_path)
+
+
+def _note_index(tasks_dir: Path) -> dict:
+    """_scan's index with no rollout left out: stem (lowercased) -> (path, Note) for every note under tasks_dir, Archive
+    included, a root copy preferred over an archived one."""
+    index = {}
+    for path in sorted(tasks_dir.rglob("*.md")):
+        try:
+            note = Note(path)
+        except (OSError, ValueError):
+            continue
+        key = path.stem.lower()
+        prev = index.get(key)
+        if prev is None or (prev[0].parent != tasks_dir and path.parent == tasks_dir):
+            index[key] = (path, note)
+    return index
+
+
+def mac_running(tasks_dir, reraise=()):
+    """The Mac-wide count of running Rollout tasks, every rollout included (the Trickle's count, execute away.md: the Run
+    record's suite `running`, p29-10), from one walk of `tasks_dir`; None when it cannot be walked. An exception in
+    `reraise` (the caller's stop signal, raised by its handler mid-walk) propagates: the walk never swallows a stop."""
+    try:
+        tasks_dir = Path(os.path.expanduser(str(tasks_dir)))
+        if not tasks_dir.is_dir():
+            return None
+        return sum(_running_by_rollout(tasks_dir, _note_index(tasks_dir)).values())
+    except reraise:
+        raise
+    except Exception:  # noqa: BLE001 — a count for the record only: never a failure of the suite it describes
+        return None
+
+
+def _running_by_rollout(tasks_dir: Path, index, exclude=None) -> dict:
+    """{<rollout stem>: n} for every open, started, parallel Rollout on the Mac running n > 0 tasks, sorted, but the
+    rollout note `exclude` names (execute away.md § The Trickle). `index` is one walk of `tasks_dir` (_scan's, or
+    _note_index's). A rollout note counts only when it sits directly in `tasks_dir` (never under Archive/), is tagged
+    `rollout`, is not done or dropped, reads parallel, carries no `paused:` stamp, is not `exclude`, and has started
+    (never_started over the index notes whose `rollout:` names it). Its n is those notes at `status: in_progress`, less
+    the ones its own undecided RACE or UNVERIFIED holds (_race_holds): such a task never restarts, so it holds no Slot.
+    Review and integrating notes never count (Integration holds no Slot), nor does a serial rollout's Leg."""
+    this = exclude.resolve() if exclude is not None else None
     by_rollout = {}
     for path, note in index.values():
         target = (_wikilink_slug(note.get("rollout")) or "").lower()
@@ -2930,7 +3241,7 @@ def _elsewhere_running(rollout_path: Path, tasks_dir: Path, index) -> dict:
     for path, note in index.values():
         if path.parent != tasks_dir or "rollout" not in _tags(note) or _status(note) in CLOSED_ROLLOUT_STATUSES:
             continue
-        if _shape(note) != "parallel" or _valued(note.get("paused")) or path.resolve() == this:
+        if _shape(note) != "parallel" or _valued(note.get("paused")) or (this is not None and path.resolve() == this):
             continue
         linked = by_rollout.get(path.stem.lower(), [])
         if never_started(note, linked)[0]:
@@ -3179,15 +3490,194 @@ def _night_record(rollout, last, holds, index, now, args):
                    {"morning": _utc_z(m), "slotTakenAt": _utc_z(taken, ms=True), **last.fields(kind)}, args)
 
 
+# ---- hold until (p30-3; vault-grammar § Hold until) ---------------------------------------------------------
+
+HOLD_REPO_PR_RE = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)$")
+HOLD_PAIR_RE = re.compile(r"^([^:\s][^:]*?)\s*:(?:[ \t]+(.*))?$")
+HOLD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+HOLD_NOT_MAPPING = "not a {pr, merged} mapping"
+
+
+def _yaml_uncomment(raw: str) -> str:
+    """A YAML value without its comment, stripped: a `#` at the start or after whitespace, outside quotes, opens one, so
+    an unquoted ` #7` is a comment and a quoted `"#7"` is a value."""
+    quote = None
+    for i, ch in enumerate(raw):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or raw[i - 1] in " \t"):
+            return raw[:i].strip()
+    return raw.strip()
+
+
+def _yaml_unquote(value: str) -> str:
+    v = value.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        return v[1:-1].strip()
+    return v
+
+
+def _flow_items(inner: str):
+    """A flow mapping's inside split at the commas outside quotes."""
+    parts, cur, quote = [], "", None
+    for ch in inner:
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "\"'":
+            quote = ch
+        elif ch == ",":
+            parts.append(cur)
+            cur = ""
+            continue
+        cur += ch
+    return parts + [cur]
+
+
+def _hold_until(note, project_root):
+    """A note's PR hold (vault-grammar § Hold until), or None when its frontmatter has no top-level `hold_until:` line.
+    Two forms read: the flow `hold_until: {pr: <pr>, merged: true}` (an optional trailing ` # comment`) and the block
+    form Obsidian re-serialises it to (`hold_until:` then indented `pr:` and `merged:` lines). `pr` is required:
+    `owner/repo#N` (read through its URL, `https://github.com/owner/repo/pull/N`: gh takes no `owner/repo#N`), a PR URL
+    (run as written) or a bare `N` / quoted `"#N"` (run in the Project root, `project_root`, as `resume` runs one).
+    `merged` is optional, true by default; any other value is unreadable, and so is an empty value, `null`, an unknown
+    or repeated key, a missing pr, a pr of no form above and a bare number with no Project root directory.
+    Returns {pr (as written, quotes stripped), url, error (why it is unreadable, from a fixed set, quote-free), argv
+    (gh's), cwd, key (the memo key: the canonical URL, or ("root", N)), merged, lines (the block, verbatim)}: a hold with
+    an error makes no gh call and never clears itself (fail closed)."""
+    lines = note.fm_block(HOLD_KEY)
+    if lines is None:
+        return None
+    out = {"pr": None, "url": None, "error": None, "argv": None, "cwd": None, "key": None, "merged": None,
+           "lines": lines}
+
+    def fail(why):
+        out["error"] = why
+        return out
+
+    value = _yaml_uncomment(lines[0][len(HOLD_KEY) + 1:])
+    if value.lower() in ("null", "~"):
+        return fail("null value")
+    if value:
+        text = " ".join([value] + [_yaml_uncomment(line) for line in lines[1:]]).strip()
+        if not (text.startswith("{") and text.endswith("}")):
+            return fail(HOLD_NOT_MAPPING)
+        items = [i.strip() for i in _flow_items(text[1:-1]) if i.strip()]
+    else:
+        items = [i for i in (_yaml_uncomment(line) for line in lines[1:]) if i]
+        if not items:
+            return fail("empty value")
+    fields = {}
+    for item in items:
+        m = HOLD_PAIR_RE.match(item)
+        if not m or not HOLD_NAME_RE.match(m.group(1)):
+            return fail(HOLD_NOT_MAPPING)
+        k = m.group(1)
+        if k not in HOLD_FIELDS:
+            return fail(f"unknown key {k}")
+        if k in fields:
+            return fail(f"duplicate key {k}")
+        fields[k] = _yaml_unquote(m.group(2) or "")
+    merged = fields.get("merged")
+    out["merged"] = "true" if merged is None else merged
+    pr = fields.get("pr") or ""
+    if not pr or pr.lower() in ("null", "~"):
+        return fail("no pr")
+    out["pr"] = pr
+    if merged is not None and merged.lower() != "true":
+        return fail("merged must be true")
+    view = ["--json", "state,mergedAt,url"]
+    repo_pr, url, num = HOLD_REPO_PR_RE.match(pr), PR_URL_RE.match(pr), PR_NUM_RE.match(pr)
+    if repo_pr:
+        canonical = f"https://github.com/{repo_pr.group(1)}/pull/{repo_pr.group(2)}"
+        out.update(url=canonical, argv=["pr", "view", canonical, *view], key=canonical)
+    elif url:
+        out.update(url=pr, argv=["pr", "view", pr, *view], key=f"https://github.com/{url.group(1)}/pull/{url.group(2)}")
+    elif num:
+        if project_root is None or not project_root.is_dir():
+            return fail("a bare PR number and no Project root")
+        out.update(argv=["pr", "view", num.group(1), *view], cwd=str(project_root), key=("root", num.group(1)))
+    else:
+        return fail("pr is not owner/repo#N, a PR URL or a PR number")
+    return out
+
+
+def _hold_public(hold):
+    """`status`'s view of a parsed hold: {pr, url, error}, or None."""
+    return None if hold is None else {"pr": hold["pr"], "url": hold["url"], "error": hold["error"]}
+
+
+def _resolve_holds(gh_bin, holds, memo):
+    """`next`'s reading of each parsed hold, [(entry, reason)] in order: `holds` is [(note stem, scope, hold)], and
+    `memo` (one per call of `next`) maps a hold's key to gh's answer, so one PR is read once whatever names it. entry is
+    {note, scope, pr, url, state, error, held, waits, cleared}: MERGED releases it (held false, waits null); OPEN or a gh
+    error or timeout (HOLD_GH_TIMEOUT) holds and waits on the merge, retried at the next call; CLOSED and an unreadable
+    hold (no gh call) hold and wait on Lachy (`you`). reason is the quote-free hold reason, None once released."""
+    out = []
+    for stem, scope, hold in holds:
+        state, url, err = None, hold["url"], hold["error"]
+        if err is None:
+            if hold["key"] not in memo:
+                raw, gh_err = _gh(gh_bin, hold["argv"], hold["cwd"], timeout=HOLD_GH_TIMEOUT)
+                info = {}
+                if gh_err is None:
+                    try:
+                        info = json.loads(raw)
+                    except ValueError:
+                        info = None
+                    if not isinstance(info, dict):
+                        info, gh_err = {}, "gh pr view printed no JSON"
+                    elif not str(info.get("state") or "").strip():
+                        gh_err = "gh pr view printed no state"
+                memo[hold["key"]] = (str(info.get("state") or "").strip().upper() or None,
+                                     info.get("url") if isinstance(info.get("url"), str) else None, gh_err)
+            state, gh_url, err = memo[hold["key"]]
+            url = url or gh_url
+        pr = (hold["pr"] or "").replace('"', "'")
+        if hold["error"] is not None:
+            reason, waits = f"{HOLD_UNTIL_PREFIX}: {HOLD_KEY} unreadable ({hold['error']})", "you"
+        elif err is not None:
+            line = err.replace('"', "'")   # quote-free, so it can ride a ROLLOUT-STATUS reason=
+            reason, waits = f"{HOLD_UNTIL_PREFIX} {pr} merges (gh: {line})", "merge"
+        elif state == "MERGED":
+            reason, waits = None, None
+        else:
+            reason, waits = f"{HOLD_UNTIL_PREFIX} {pr} merges ({state})", "you" if state == "CLOSED" else "merge"
+        out.append(({"note": stem, "scope": scope, "pr": hold["pr"], "url": url, "state": state, "error": err,
+                     "held": reason is not None, "waits": waits, "cleared": False}, reason))
+    return out
+
+
+def _clear_hold(note, hold, label, dry_run) -> bool:
+    """`next`'s clear of a merged hold off --dry-run: Note.remove_block (a compare-and-swap) and the note's own save.
+    True once saved with no `hold_until` left on the note: a hold another writer rewrote since the read stays (the
+    swap's replay keeps it), so it reads False and the lead never reports a standing hold cleared. An OSError is one
+    stderr WARN line and False, and the hold still releases for this call (the next call retries the clear)."""
+    if dry_run:
+        return False
+    note.remove_block(HOLD_KEY, hold["lines"])
+    try:
+        note.save()
+    except OSError as e:
+        print(f"WARN: {HOLD_KEY} on {label}: not cleared: {e}", file=sys.stderr)
+        return False
+    return note.fm_block(HOLD_KEY) is None
+
+
 # ---- next -------------------------------------------------------------------
 
-def _set_aside_entry(r) -> dict:
+def _set_aside_entry(r, hold_reason=None) -> dict:
     """One `next` setAside entry: slug, status, setAsideAt, and `needsHuman` (p16-3) only when the note holds an
-    open question, so an entry with none is byte-identical to the pre-p16-3 output."""
+    open question, so an entry with none is byte-identical to the pre-p16-3 output. `holdUntil` (p30-3): the reason of
+    the task's own hold_until, only while it holds (set aside at `run` or at a gate, read while no rollout hold stands)."""
     entry = {"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
     ask = needs_human(r["note"])
     if ask:
         entry["needsHuman"] = ask
+    if hold_reason:
+        entry["holdUntil"] = hold_reason
     return entry
 
 
@@ -3235,7 +3725,15 @@ def cmd_next(args) -> int:
     0104 d4; execute away.md): while Away runs to the Morning (_morning_toward), a start or a head Solo's lone start
     that has its Slot (under the Away cap's `slotLimit`) is held (`last start: …`, skipped, never a stop) when its
     kind's usual length would end it past the Morning, `lastStarts` reports it, a `last start:` hold never lets the
-    rollout halt either, and off --dry-run the night record follows idle-slots (_night_record)."""
+    rollout halt either, and off --dry-run the night record follows idle-slots (_night_record). A PR hold (_hold_until;
+    the module docstring's "Hold until") is read through `--gh-bin` (_resolve_holds, memoised for the call): the
+    rollout's whenever its note carries one, a task's only while no pause and no rollout hold stands and the task could
+    start or re-enter; a merged one is released and, off --dry-run, cleared (_clear_hold, Note.remove_block), and one
+    that stands holds as `holdUntil` says, with `halt: "held"` once nothing else moves. The Heat hold (estate ADR 0009
+    d5; away.md § Heat): the heat is read once, right after the Away state (_heat_state), and at heavy or worse
+    `slotLimit` is 0, Away too; a restart still waits on the ceiling alone. A row it holds reads `heat: the Mac is hot
+    (<name>)` (the ceiling, once full, names the hold first; no Slot is found, so the last starts never read it), a
+    `heat:` hold never lets the rollout halt either, and `heat` ({level, name}) is reported after `lastStarts`."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -3269,6 +3767,9 @@ def cmd_next(args) -> int:
     if away["file"] in ("stale", "unreadable"):
         print(f"{AWAY_WARN} {away['file']}: {away['why']} — read as not Away, Trickle {DEFAULT_TRICKLE}",
               file=sys.stderr)
+    # The Heat hold (estate ADR 0009 d5; away.md § Heat), read once right after the Away state: at heavy or worse
+    # nothing new starts, Away too (heat overnight is still heat). Restarts still wait on the ceiling alone.
+    heat = _heat_state()
     # The last starts (Chorus ADR 0104 d4; execute away.md § The last starts): only while Away runs to the Morning. The
     # history is read lazily, once, by the first start candidate that reaches the check or a due ran-past line.
     last = _LastStarts(_morning_toward(away, now), away["morning"], now,
@@ -3279,6 +3780,17 @@ def cmd_next(args) -> int:
     cap = _cap_in_force(away)["n"]
     cap_prefix = AWAY_CAP_PREFIX if away["away"] else TRICKLE_PREFIX
     slot_limit = min(ceiling, max(0, cap - running_elsewhere))
+    if heat["held"]:
+        slot_limit = 0
+    # The PR hold (p30-3; vault-grammar § Hold until): the rollout's own hold_until, read once the refusals pass,
+    # whenever the key is present (gh, memoised for this call). No key anywhere: gh is never called.
+    root = _project_root(rollout_note)
+    hold_memo, hold_entries = {}, []
+    ro_hold = _hold_until(rollout_note, root)
+    ro_entry, ro_reason = None, None
+    if ro_hold is not None:
+        (ro_entry, ro_reason), = _resolve_holds(args.gh_bin, [(rollout_path.stem, "rollout", ro_hold)], hold_memo)
+        hold_entries.append(ro_entry)
     race = _race_holds(rollout_note, [(r["path"], r["note"]) for r in rows])
     # race_held_lane: a held task whose `integrating:` stamp stands. The lead's RACE re-verify still holds the
     # lane on it, so it stays in flight for the drain, the solo rule, the overlap and the halt verdict; the
@@ -3315,6 +3827,23 @@ def cmd_next(args) -> int:
     paused = _scalar(rollout_note.get("paused")) or None
     pause_requested = _truthy_flag(rollout_note.get("pause_requested"))
     paused_now = False
+    # A task's own hold_until is read only while no pause and no rollout hold stands, and only on a task this call
+    # could start or re-enter: a stalled one, a queued one whose dependencies are met (a dependency reason wins and costs
+    # no gh call), or one set aside at its run or at a gate. task_held: lowercased slug -> its hold reason.
+    ro_held = ro_entry is not None and ro_entry["held"]
+    task_held, task_clears = {}, []
+    if not (paused or pause_requested) and not ro_held:
+        readers = stalled + [r for r in queued if not _unsatisfied(r, index)] + \
+            [r for r in by_state.get("set-aside", []) if r["setAsideAt"] in ("run", "gate")]
+        parsed = [(r, _hold_until(r["note"], root)) for r in sorted(readers, key=_rank)]
+        parsed = [(r, h) for r, h in parsed if h is not None]
+        resolved = _resolve_holds(args.gh_bin, [(r["slug"], "task", h) for r, h in parsed], hold_memo)
+        for (r, h), (entry, reason) in zip(parsed, resolved):
+            hold_entries.append(entry)
+            if reason is not None:
+                task_held[r["slug"].lower()] = reason
+            elif entry["state"] == "MERGED":
+                task_clears.append((r, h, entry))
     # slot_held: rows held for want of a Slot, at the ceiling or the Mac-wide cap (the Trickle, or Away the Away cap);
     # their reason is set below.
     start, restart, holds, slot_held = [], [], [], []
@@ -3342,7 +3871,9 @@ def cmd_next(args) -> int:
         # ceiling bounds it, never the Trickle or the Away cap: bounding it there would let two respawned leads each
         # wait on the other's stalled notes with nothing running (execute away.md § The Trickle).
         for r in sorted(stalled, key=lambda r: (-r["weight"], r["rank"])):
-            if used < ceiling:
+            if r["slug"].lower() in task_held:
+                holds.append((r, task_held[r["slug"].lower()]))  # its own hold_until: never restarted
+            elif used < ceiling:
                 restart.append(r)
                 used += 1
             else:
@@ -3353,6 +3884,8 @@ def cmd_next(args) -> int:
             unsat = _unsatisfied(r, index)
             if unsat:
                 holds.append((r, "; ".join(unsat)))
+            elif r["slug"].lower() in task_held:
+                holds.append((r, task_held[r["slug"].lower()]))  # no candidate: a held Solo task holds nothing
             else:
                 candidates.append(r)
         solo_started = next((r for r in sorted(started, key=_rank) if r["solo"]), None)
@@ -3401,15 +3934,30 @@ def cmd_next(args) -> int:
                 start.append(best)
                 in_flight.update(best["files"])
     in_use = used + len(start)
-    # Whichever binds first names the reason: the ceiling once this rollout fills it, else the Mac-wide cap in force
-    # (`trickle:` not Away, `away cap:` Away), counted as `trickle.running` is (no quotes, so it can ride a
-    # ROLLOUT-STATUS reason=). A stalled row is only ever held at the ceiling, which it fills first.
+    # Whichever binds first names the reason: the ceiling once this rollout fills it, else the Heat hold while the Mac
+    # is hot, else the Mac-wide cap in force (`trickle:` not Away, `away cap:` Away), counted as `trickle.running` is
+    # (no quotes, so it can ride a ROLLOUT-STATUS reason=). A stalled row is only ever held at the ceiling, which it
+    # fills first.
     slot_why = (f"ceiling: {in_use}/{ceiling} slots in use" if in_use >= ceiling else
+                f"{HEAT_PREFIX} the Mac is hot ({heat['name']})" if heat["held"] else
                 f"{cap_prefix} {running_elsewhere + mine + len(start)}/{cap} tasks running on this Mac")
     holds += [(r, slot_why) for r in slot_held]
+    # A rollout hold that stands (vault-grammar § Hold until) holds the whole queue, after the pause (a pause wins) and
+    # before the git-env override (git-env wins): nothing starts or restarts, and every stalled or queued task waits on
+    # it, its dependency, Solo and Slot reasons replaced. Live calls, Integration and set-asides carry on as they are.
+    if ro_held and not (paused or pause_requested):
+        start, restart = [], []
+        used = len(live)
+        holds = [(r, ro_reason) for r in stalled + queued]
     if not args.dry_run:
         start_cleared = _clear_start(rollout_note)
         rollout_note.save()
+    # A merged rollout hold is removed in a save of its own, after the start stamp's: that save still fails the call
+    # (exit 1, the stamp left for the Stage), while a failed clear only warns and the hold still releases for this call.
+    if ro_entry is not None and ro_entry["state"] == "MERGED":
+        ro_entry["cleared"] = _clear_hold(rollout_note, ro_hold, rollout_path.stem, args.dry_run)
+    for r, h, entry in task_clears:
+        entry["cleared"] = _clear_hold(r["note"], h, r["slug"], args.dry_run)
 
     # An unacked git-env trip (execute § 4.5 *Git-env canary*) holds the whole queue until /thread:repair records
     # Lachy's ack: nothing starts or restarts, every stalled or queued task is held, and the halt is "git-env",
@@ -3430,26 +3978,37 @@ def cmd_next(args) -> int:
                      if why.startswith((TRICKLE_PREFIX, AWAY_CAP_PREFIX))), None)
     # Nor does a row the last starts hold: at the Morning the file reads not Away and the Trickle takes over.
     last_start_held = any(why.startswith(LAST_START_PREFIX) for _, why in holds)
+    # Nor does a row the Heat hold holds: it could start once the Mac cools.
+    heat_held = any(why.startswith(HEAT_PREFIX) for _, why in holds)
     if git_env:
         halt = "git-env"
     elif not start and not restart and not live and not awaiting and not integrating and not race_held_lane \
-            and not cap_held and not last_start_held:
+            and not cap_held and not last_start_held and not heat_held:
         if paused:
             halt = "paused"
         elif not in_n:
             halt = "empty"
         elif counts["merged"] == counts["total"]:
             halt = "done" if _ceremony_done(rollout_path, rollout_note) else "complete"
+        elif any(e["held"] for e in hold_entries):
+            # A PR hold (vault-grammar § Hold until) explains the idle queue: the lead waits on the merge, or puts a
+            # CLOSED or unreadable hold to Lachy (execute § 4.5 step 1.5), never reading it as stuck. Ahead of
+            # awaiting-sign-off: under a rollout hold the lead's standing approval is skipped (step 1.2).
+            halt = "held"
         else:
             # ADR 0034: a gate alone never halts `stuck`. When every unlanded task waits only on a gate (W), the
             # verdict is awaiting-sign-off: execute's step 5 runs its sign-off form and the rollout closes.
             sign_off = _sign_off_wait(rows, index)
             halt = "awaiting-sign-off" if sign_off else "stuck"
+    # The time-lost ledger (p29-10): a sleep no entry follows is written here, off --dry-run, before idle-slots.
+    if not args.dry_run:
+        _record_sleeps(rollout_path.stem, rollout_note, now, args)
     # The Run record (p15-2): a reason marker for the idle Slots this call leaves (none at complete, done or empty).
     free = ceiling - (used + len(start))
     if free > 0 and halt not in ("complete", "done", "empty") and not args.dry_run:
         reason = _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold,
-                              by_state.get("set-aside", []), cap_held, last_start_held)
+                              by_state.get("set-aside", []), cap_held, last_start_held, ro_held, bool(task_held),
+                              heat_held=heat_held)
         _event(rollout_path.stem, "idle-slots", None,
                {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}, args)
     # The night record (Chorus ADR 0104's Consequences; execute away.md § The night record), after idle-slots.
@@ -3470,15 +4029,18 @@ def cmd_next(args) -> int:
                     # The Mac-wide cap's count after this call: the count elsewhere plus this rollout's own use.
                     "running": running_elsewhere + mine + len(start)},
         "lastStarts": last.output(),
+        "heat": {"level": heat["level"], "name": heat["name"]},
         "start": slugs(start),
         "restart": slugs(restart),
         "hold": [{"slug": r["slug"], "reason": why} for r, why in sorted(holds, key=lambda h: _rank(h[0]))],
         "running": slugs(live),
         "awaitingIntegration": slugs(sorted(awaiting, key=lambda r: _lane_key(r, waited))),
         "integrating": slugs(integrating),
-        "setAside": [_set_aside_entry(r) for r in by_state.get("set-aside", [])],
+        "setAside": [_set_aside_entry(r, task_held.get(r["slug"].lower())) for r in by_state.get("set-aside", [])],
         "raceHold": race_hold,
         "gitEnvHold": git_env,
+        # The PR holds this call read (vault-grammar § Hold until): the rollout's first, then the tasks' in rank order.
+        "holdUntil": hold_entries,
         "paused": paused,
         "pauseRequested": pause_requested,
         "pausedNow": paused_now,
@@ -3521,7 +4083,8 @@ def _awaits_sign_off(rollout_path: Path, rollout_note, tasks_dir: Path):
     """`next`'s awaiting-sign-off verdict, read-only, as `next` with no --running and any pause ignored would give it:
     no git-env hold; nothing running (every in_progress note counts as live), awaiting Integration or integrating (a
     race-held lane included); no queued task free to start; then _sign_off_wait. Returns (W, rows): W [] when the queue
-    is anything else. Read by await-sign-off and clear-pause; it writes nothing."""
+    is anything else. Read by await-sign-off and clear-pause; it writes nothing. It reads no hold_until and calls no gh
+    (p30-3): `next` halts "held" ahead of awaiting-sign-off, so the lead never reaches await-sign-off on a held rollout."""
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     if _git_env_hold(rollout_note):
         return [], rows
@@ -3897,10 +4460,11 @@ def cmd_log_integration(args) -> int:
 
 # ---- resume (p6-8) ------------------------------------------------------------------
 
-def _gh(gh_bin, argv, cwd):
-    """(stdout, error) for one gh call; error is None on success."""
+def _gh(gh_bin, argv, cwd, timeout=120):
+    """(stdout, error) for one gh call; error is None on success. `timeout` in seconds (`next`'s hold reads pass
+    HOLD_GH_TIMEOUT)."""
     try:
-        p = subprocess.run([gh_bin, *argv], cwd=cwd, capture_output=True, text=True, timeout=120)
+        p = subprocess.run([gh_bin, *argv], cwd=cwd, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as e:
         return "", f"{gh_bin}: {e}"
     if p.returncode != 0:
@@ -4025,6 +4589,7 @@ def cmd_status(args) -> int:
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     counts = _counts(rows)
     timeline = _timeline(rows, counts, ceiling, now)
+    root = _project_root(rollout_note)   # a bare hold_until number reads against it (no gh: status is a pure read)
     # The operator's ladder (one local file read, no network): each task's `rung:` stamp, and its drift when a
     # readable ladder lacks it. Drift is scoped to the unlanded rows (CARRIED_STATES): a merged, folded or other
     # row keeps the rung it reached as a record, and an edit to the ladder since is no drift. A refused ladder
@@ -4053,6 +4618,8 @@ def cmd_status(args) -> int:
             "blockerSummary": _blocker_summary(r["note"]),
             "rung": _scalar(r["note"].get("rung")) or None,
             "rungDrift": rung_drift(r),
+            # p30-3: the task's own hold_until as parsed, {pr, url, error}, whatever its state, or null (no gh call).
+            "holdUntil": _hold_public(_hold_until(r["note"], root)),
         }
         # p16-3: the open question, only on a set-aside task whose note holds one (the key is absent otherwise).
         ask = needs_human(r["note"]) if r["state"] == "set-aside" else ""
@@ -4098,6 +4665,9 @@ def cmd_status(args) -> int:
         # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*): [] when none. Vault-only, so
         # status § 3's Git-env trip flag holds offline too.
         "gitEnvHold": _git_env_hold(rollout_note),
+        # The rollout's own hold_until (p30-3; vault-grammar § Hold until) as parsed, {pr, url, error}, or null. Only
+        # `next` reads its PR (gh) and clears it, so /thread:status reads the state live itself (status § 3).
+        "holdUntil": _hold_public(_hold_until(rollout_note, root)),
         "tasks": tasks,
     }
     print(json.dumps(out, indent=2))
@@ -4359,6 +4929,11 @@ CALL_CHOICES = ("task", "revise", "integrate")
 BIND_RUN_ID_RE = re.compile(r"wf_[A-Za-z0-9][A-Za-z0-9_.-]*")
 CAP_KEYS = ("max_review_rounds", "max_iterations", "max_plan_rounds")
 CALL_FAILED_PREFIX = "workflow call failed:"
+# p29-12: the `stamp` of an event a row that ends a Slot records: its ts is the call's own end (_call_end), or, with no
+# end readable, the reconcile's clock (run_record.py's slot-freed, ready, merged, set-aside, quota-stall and
+# review-verdict, its call-end stamps).
+CALL_END_MARK = "call-end"
+CALL_END_FALLBACK = "fallback"
 # A dead call's error line that reads as a usage or rate limit (quota-stall; only `workflow call failed:` lines
 # are scanned, so task text that mentions a quota never matches).
 QUOTA_RE = re.compile(r"usage limit|rate[ -]?limit|quota|too many requests|\b429\b", re.I)
@@ -4441,6 +5016,569 @@ def _record_state(rollout):
             else:
                 st["carried"][task] = d.get("from")
     return st
+
+
+# ---- the time-lost ledger (p29-10, ADR 0051): stops, resumes, suites and the load around them ---------------------
+# run_record.py's docstring holds the kinds and the stop model (its one copy); these are the writers' shared pieces.
+
+ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair")       # record-entry --by
+ENTRY_CAUSES = ("usage-limit", "dead-lead", "watchdog")                 # record-entry --cause
+OPEN_STOP_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog")  # a stop an entry resumes from
+CALL_KINDS = ("task", "revise", "integrate", "resume")                  # run-bound's `call`
+# A line that is no sign of the lead's life: the night record (written at a later `next`), a suite-ended (an orphaned
+# suite can outlive its lead), a call-journal (folded at completion or by a Reflection, at fold time) and an inferred
+# stopped line (written by the entry that found it).
+NOT_LIVE_KINDS = NIGHT_KINDS + ("suite-ended", "call-journal")
+MACHINE_TIMES_ENV = "THREAD_MACHINE_TIMES"   # a test's {boot, sleeps: [[S, W], ...], wake?} in place of the Mac's reads
+PMSET_TIMEOUT = 15
+PMSET_LINE_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d{4}) (Sleep|Wake|DarkWake)\s*\t")
+KERN_TIME_RE = re.compile(r"\bsec\s*=\s*(\d+)(?:\s*,\s*usec\s*=\s*(\d+))?")
+SAME_WAKE = timedelta(seconds=120)   # pmset's full Wake and kern.waketime name one wake within this
+DIFF_HASH_MAX = 32 * 1024 * 1024     # tree_state hashes `git diff HEAD --binary` only up to this size
+TREE_GIT_TIMEOUT = 60
+# git's own repo-local variables (`git rev-parse --local-env-vars`): never let a caller's GIT_DIR read another tree.
+GIT_LOCAL_VARS = ("GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
+                  "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
+                  "GIT_INDEX_FILE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX", "GIT_SHALLOW_FILE",
+                  "GIT_COMMON_DIR")
+SUITE_SIGNALS = tuple(getattr(signal, n) for n in ("SIGTERM", "SIGINT", "SIGHUP") if hasattr(signal, n))
+
+
+def _rec_ts(d):
+    """A record line's ts as an aware datetime, or None."""
+    return _away_stamp(d.get("ts"))[0]
+
+
+def _ms(dt) -> int:
+    """An instant's identity to the millisecond (a boot or a wake the record names)."""
+    return int(round(dt.timestamp() * 1000))
+
+
+def _zms(dt) -> str:
+    """A ledger stamp (at, boot, wake): UTC `Z`, to the millisecond, as run_record.py stamps ts."""
+    return _utc_z(dt, ms=True)
+
+
+def _record_read(rollout):
+    """The rollout's Run record lines (dicts, file order): [] with no file, None when it cannot be read."""
+    try:
+        path = _run_record().record_path(rollout)
+    except Exception:  # noqa: BLE001 — an unresolvable record is an unreadable one
+        return None
+    try:
+        return _record_lines(path)[0]
+    except FileNotFoundError:
+        return []
+    except OSError:
+        return None
+
+
+def _call_entry(task, run):
+    out = {"task": task}
+    if isinstance(run, dict):
+        if isinstance(run.get("runId"), str) and run["runId"]:
+            out["runId"] = run["runId"]
+        if run.get("call") in CALL_KINDS:
+            out["call"] = run["call"]
+    return out
+
+
+def inflight_calls(lines, upto=None):
+    """The calls the record shows in flight at `upto` (an aware datetime; None: after the last line), at most
+    run_record.py's MAX_CALLS {task, runId?, call?}: the Slots, the lane and the run-bound lines replayed over the lines
+    whose ts is at or before `upto`, by run_record.py's pairing rules. Each open Slot gives its task's latest run-bound
+    after its slot-taken (a task, revise or resume call); the lane holder, when no Slot of its own is open, gives its
+    latest integrate run-bound after its lane-taken, and nothing without one (the lead's own Integration is no call)."""
+    slots, lane, lane_run = {}, None, None
+    for d in lines:
+        if upto is not None:
+            ts = _rec_ts(d)
+            if ts is None or ts > upto:
+                continue
+        kind, task = d.get("kind"), d.get("task")
+        if not isinstance(task, str) or not task:
+            continue
+        if kind == "slot-taken":
+            slots.setdefault(task, None)
+        elif kind == "slot-freed":
+            slots.pop(task, None)
+        elif kind == "carried" and d.get("rollout") == d.get("from"):
+            slots.pop(task, None)
+            if lane == task:
+                lane, lane_run = None, None
+        elif kind == "lane-taken":
+            if lane != task:
+                lane, lane_run = task, None
+        elif kind == "lane-freed":
+            if lane == task:
+                lane, lane_run = None, None
+        elif kind == "run-bound":
+            run = {"runId": d.get("runId"), "call": d.get("call")}
+            if d.get("call") == "integrate":
+                if lane == task:
+                    lane_run = run
+            elif task in slots:
+                slots[task] = run
+    out = [_call_entry(task, run) for task, run in slots.items()]
+    if lane is not None and lane_run is not None and lane not in slots:
+        out.append(_call_entry(lane, lane_run))
+    return out[:_run_record().MAX_CALLS]
+
+
+def _pause_stands(note, lines):
+    """(stands, start): whether Lachy's pause stands, for record-entry and the Stop hook alike. It stands when the
+    rollout note carries a `paused:` stamp, or the record's replay leaves a `paused` line open (no `resumed` after it).
+    start is that open line's ts, else the stamp; None when neither parses."""
+    open_line = None
+    for d in lines or ():
+        kind = d.get("kind")
+        if kind == "paused" and open_line is None:
+            open_line = d
+        elif kind == "resumed":
+            open_line = None
+    stamp = _scalar(note.get("paused")) if note is not None else ""
+    if open_line is None and not _valued(stamp):
+        return False, None
+    start = _rec_ts(open_line) if open_line is not None else None
+    return True, start or (_parse_ts(stamp) if _valued(stamp) else None)
+
+
+def _ledger_skip(note) -> str:
+    """Why a rollout's lead records no stop and no entry, or "": a serial rollout (Legs never run record-entry), a
+    superseded note, or a done or dropped one."""
+    if _shape(note) == "serial":
+        return "shape: serial (a serial rollout runs as Legs)"
+    if _valued(note.get("superseded_by")):
+        return "superseded"
+    if _status(note) in CLOSED_ROLLOUT_STATUSES:
+        return f"status: {_status(note)}"
+    return ""
+
+
+def _kern_time(text):
+    """kern.boottime / kern.waketime / kern.sleeptime's `{ sec = S, usec = U }` as an aware UTC datetime; None for
+    sec 0 or no match."""
+    m = KERN_TIME_RE.search(text or "")
+    if not m or int(m.group(1)) == 0:
+        return None
+    return datetime.fromtimestamp(int(m.group(1)) + int(m.group(2) or 0) / 1e6, timezone.utc)
+
+
+def _sysctl_times():
+    """(boot, wake, sleep): the Mac's kern.boottime, kern.waketime and kern.sleeptime, each None when unreadable (a
+    machine without them reads None)."""
+    out = []
+    for key in ("kern.boottime", "kern.waketime", "kern.sleeptime"):
+        try:
+            p = subprocess.run(["sysctl", "-n", key], capture_output=True, text=True, timeout=5)
+            out.append(_kern_time(p.stdout) if p.returncode == 0 else None)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            out.append(None)
+    return tuple(out)
+
+
+def sleep_spans(text, since, wake):
+    """The sleeps in `pmset -g log` output (pure): [(S, W)] in log order, aware UTC. Only lines matching
+    PMSET_LINE_RE are read (`<date> <time> <zone> Sleep|Wake|DarkWake<tab>`), so "Wake Requests", WakeDetails and
+    WakeTime never match. A span opens at the first Sleep after a full Wake (or at the log's start) and closes at the
+    next full Wake: the DarkWake .. Sleep cycles between (Power Nap) stay inside it. A span still open at the log's end
+    closes at `wake` (kern.waketime) when that is later; otherwise the last span's wake, when within SAME_WAKE of
+    `wake`, becomes `wake` itself, the identity `next`'s gate compares. Spans whose wake is not after `since` (None:
+    every span) are dropped."""
+    spans, start = [], None
+    for line in (text or "").splitlines():
+        m = PMSET_LINE_RE.match(line)
+        if not m:
+            continue
+        try:
+            t = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S %z").astimezone(timezone.utc)
+        except ValueError:
+            continue
+        if m.group(2) == "Sleep":
+            if start is None:
+                start = t
+        elif m.group(2) == "Wake" and start is not None:
+            spans.append([start, t])
+            start = None
+    if start is not None and wake is not None and wake > start:
+        spans.append([start, wake])
+    elif spans and wake is not None and abs(spans[-1][1] - wake) <= SAME_WAKE:
+        spans[-1][1] = wake
+    return [(s, w) for s, w in spans if s <= w and (since is None or w > since)]
+
+
+def _machine_override(raw, since):
+    """THREAD_MACHINE_TIMES (tests, and tests/run.sh's backstop `{}`): {boot, sleeps: [[S, W], ...], wake?}, Z stamps
+    or null, in place of every read of the Mac. Malformed reads as no evidence."""
+    out = {"boot": None, "wake": None, "sleeps": []}
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except ValueError:
+        return out
+    if not isinstance(data, dict):
+        return out
+    stamp = lambda v: _away_stamp(v)[0].astimezone(timezone.utc) if _away_stamp(v)[0] else None  # noqa: E731
+    out["boot"] = stamp(data.get("boot"))
+    spans = []
+    for pair in data.get("sleeps") or []:
+        if isinstance(pair, list) and len(pair) == 2:
+            s, w = stamp(pair[0]), stamp(pair[1])
+            if s is not None and w is not None and s <= w:
+                spans.append((s, w))
+    out["wake"] = stamp(data.get("wake")) or (max(w for _s, w in spans) if spans else None)
+    out["sleeps"] = [(s, w) for s, w in spans if since is None or w > since]
+    return out
+
+
+def machine_times(since, now=None):
+    """The Mac's own evidence of a stop no process lived to log: {boot, wake, sleeps: [(S, W)]}, aware UTC (run_record's
+    stop model; ADR 0051). boot is kern.boottime; wake kern.waketime, the cheap gate: with none, or one not after
+    `since`, sleeps is [] and pmset is never read. Otherwise `pmset -g log` (PMSET_TIMEOUT) through sleep_spans, since
+    kern.sleeptime is only the last sleep (a Power Nap cycle's, often); when pmset fails or finds no span, one span
+    (kern.sleeptime, wake) when it is earlier. Evidence after `now` is dropped. THREAD_MACHINE_TIMES replaces every
+    read."""
+    raw = os.environ.get(MACHINE_TIMES_ENV)
+    if raw is not None:
+        out = _machine_override(raw, since)
+    else:
+        boot, wake, slept = _sysctl_times()
+        out = {"boot": boot, "wake": wake, "sleeps": []}
+        if wake is not None and (since is None or wake > since):
+            try:
+                p = subprocess.run(["pmset", "-g", "log"], capture_output=True, text=True, errors="replace",
+                                   timeout=PMSET_TIMEOUT)
+                text = p.stdout if p.returncode == 0 else ""
+            except (OSError, subprocess.SubprocessError, ValueError):
+                text = ""
+            out["sleeps"] = sleep_spans(text, since, wake)
+            if not out["sleeps"] and slept is not None and slept < wake:
+                out["sleeps"] = [(slept, wake)]
+    if now is not None:
+        if out["boot"] is not None and out["boot"] > now:
+            out["boot"] = None
+        out["sleeps"] = [(s, w) for s, w in out["sleeps"] if w <= now]
+    return out
+
+
+def _git_env():
+    return {k: v for k, v in os.environ.items() if k not in GIT_LOCAL_VARS}
+
+
+def tree_state(tree) -> dict:
+    """{sha, dirty, diff?} of a git tree, the suite's identity (so a re-run of a passed tree shows): sha its HEAD, dirty
+    whether it has tracked changes, diff the first 12 hex of the sha256 of `git diff HEAD --binary` on a dirty tree
+    (skipped past DIFF_HASH_MAX). git runs with GIT_LOCAL_VARS stripped and TREE_GIT_TIMEOUT. {} when git cannot read
+    the tree."""
+    env = _git_env()
+
+    def git(*argv):
+        return subprocess.run(["git", "-C", str(tree), *argv], capture_output=True, env=env, timeout=TREE_GIT_TIMEOUT)
+    try:
+        p = git("rev-parse", "--verify", "-q", "HEAD")
+        sha = p.stdout.decode("ascii", "replace").strip()
+        if p.returncode != 0 or not sha:
+            return {}
+        st = git("status", "--porcelain", "--untracked-files=no")
+        out = {"sha": sha, "dirty": st.returncode == 0 and bool(st.stdout.strip())}
+        if not out["dirty"]:
+            return out
+        proc = subprocess.Popen(["git", "-C", str(tree), "diff", "HEAD", "--binary"], stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, env=env)
+        h, size, whole = hashlib.sha256(), 0, True
+        try:
+            for chunk in iter(lambda: proc.stdout.read(1 << 16), b""):
+                size += len(chunk)
+                if size > DIFF_HASH_MAX:
+                    whole = False
+                    break
+                h.update(chunk)
+        finally:
+            if proc.poll() is None and not whole:
+                proc.kill()
+            proc.stdout.close()
+            proc.wait(timeout=TREE_GIT_TIMEOUT)
+        if whole and proc.returncode == 0:
+            out["diff"] = h.hexdigest()[:12]
+        return out
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
+
+
+def load_now():
+    """The 1, 5 and 15 minute load average, rounded to 2 places, or None."""
+    try:
+        return [round(x, 2) for x in os.getloadavg()]
+    except (OSError, AttributeError):
+        return None
+
+
+def _secs(x):
+    """A ledger duration in seconds: >= 0, to a tenth, and an int when whole (a 2 s --timeout reads 2, not 2.0)."""
+    v = round(max(0.0, float(x)), 1)
+    return int(v) if v == int(v) else v
+
+
+def new_suite_id() -> str:
+    """A suite's id: `s-` and 16 lowercase hex, shared by its suite-started and suite-ended."""
+    return "s-" + os.urandom(8).hex()
+
+
+class _signals_held:
+    """Hold TERM, INT and HUP across one record write: run_record.emit swallows any exception, so a stop's handler
+    raising inside it would be lost. A signal that lands meanwhile is delivered, and its handler runs, as the block
+    ends, so a caller's `reraise` still takes its own signal path."""
+
+    def __enter__(self):
+        try:
+            self.mask = signal.pthread_sigmask(signal.SIG_BLOCK, SUITE_SIGNALS)
+        except (AttributeError, OSError, ValueError):
+            self.mask = None
+        return self
+
+    def __exit__(self, *_exc):
+        if self.mask is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, self.mask)
+        return False
+
+
+def suite_started(rollout, task, suite, by, runner, state, tasks_dir=None, waited=None, reraise=(), written=None):
+    """Record one suite's start (suite-started; run_record.py's suite pairing): `state` is tree_state's reading, taken
+    by the caller (verify-slot.py reads it before its slot wait). load is load_now(), running mac_running(tasks_dir).
+    Best-effort: never raises, but an exception in `reraise` (the caller's signal) propagates, from the vault walk for
+    `running` too (a stop there writes no line); a tree with no sha records nothing. written["started"] is set to
+    whether the line landed, before a held signal is delivered. Returns that."""
+    try:
+        if not rollout or not isinstance(state, dict) or not state.get("sha"):
+            return False
+        fields = {"suite": suite, "by": by, "runner": runner, "sha": state["sha"], "dirty": bool(state.get("dirty"))}
+        if state.get("diff"):
+            fields["diff"] = state["diff"]
+        load = load_now()
+        if load is not None:
+            fields["load"] = load
+        if waited is not None:
+            fields["waited"] = _secs(waited)
+        if tasks_dir is not None:
+            n = mac_running(tasks_dir, reraise=reraise)
+            if n is not None:
+                fields["running"] = n
+        with _signals_held():
+            ok = _event(rollout, "suite-started", task, fields)
+            if written is not None:
+                written["started"] = ok
+        return ok
+    except reraise:
+        raise
+    except Exception:  # noqa: BLE001 — recording never changes a suite's outcome
+        return False
+
+
+def suite_ended(rollout, task, suite, by, runner, outcome, seconds, tasks_dir=None, scan=True, reraise=(), rc=None,
+                failing=None, timeout=None, step=None, sha=None, waited=None):
+    """Record one suite's end (suite-ended): load is load_now(); running mac_running(tasks_dir), only with `scan` (a
+    stop by signal passes scan=False: no vault walk on that path); rc only an int 0-255 and never on noslot or heat;
+    timeout only on outcome timeout; failing cut to 50 names of 200 characters. Best-effort, as suite_started."""
+    try:
+        if not rollout:
+            return False
+        fields = {"suite": suite, "by": by, "runner": runner, "outcome": outcome,
+                  "seconds": _secs(seconds)}
+        load = load_now()
+        if load is not None:
+            fields["load"] = load
+        if isinstance(rc, int) and not isinstance(rc, bool) and 0 <= rc <= 255 and outcome not in ("noslot", "heat"):
+            fields["rc"] = rc
+        if failing is not None:
+            fields["failing"] = [str(f)[:200] for f in failing if f][:50]
+        if timeout is not None and outcome == "timeout":
+            fields["timeout"] = _secs(timeout)
+        if step in ("env_bootstrap", "verifier"):
+            fields["step"] = step
+        if sha:
+            fields["sha"] = sha
+        if waited is not None:
+            fields["waited"] = _secs(waited)
+        if scan and tasks_dir is not None:
+            n = mac_running(tasks_dir, reraise=reraise)
+            if n is not None:
+                fields["running"] = n
+        with _signals_held():
+            return _event(rollout, "suite-ended", task, fields)
+    except reraise:
+        raise
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _stop_state(lines) -> dict:
+    """The record read for a stop (run_record.py's stop model): {entry, session, live, open, named, wake}. entry is the
+    last lead-entry's ts and session that line's session (None when it carried none); live the sorted ts of every line
+    that is a sign of the lead's life (all but NOT_LIVE_KINDS and an inferred stopped line: a lead-entry and a live
+    stopped count), a line stamped at its call's end (p29-12) counting at its reconciledAt when that is later, the
+    lead's own write; open the non-sleep stopped lines after the last lead-entry, in file order (the last is the open
+    stop); named the boots and wakes the record already names (_ms); wake the latest mac-sleep's wake."""
+    st = {"entry": None, "session": None, "live": [], "open": [], "named": set(), "wake": None}
+    last = -1
+    for i, d in enumerate(lines):
+        kind, ts = d.get("kind"), _rec_ts(d)
+        if kind == "lead-entry":
+            last = i
+            st["entry"] = ts
+            st["session"] = d.get("session") if isinstance(d.get("session"), str) and d.get("session") else None
+        elif kind == "stopped":
+            for key in ("boot", "wake"):
+                t = _away_stamp(d.get(key))[0]
+                if t is not None:
+                    st["named"].add(_ms(t))
+                    if key == "wake" and (st["wake"] is None or t > st["wake"]):
+                        st["wake"] = t
+        if ts is not None and kind not in NOT_LIVE_KINDS and not (kind == "stopped" and d.get("inferred") is True):
+            wrote = _away_stamp(d.get("reconciledAt"))[0]
+            st["live"].append(max(ts, wrote) if wrote is not None else ts)
+    st["live"].sort()
+    st["open"] = [d for d in lines[last + 1:] if d.get("kind") == "stopped" and d.get("cause") in OPEN_STOP_CAUSES]
+    return st
+
+
+def _live_before(live, t):
+    """The latest live line strictly before `t`, or None."""
+    before = [x for x in live if x < t]
+    return before[-1] if before else None
+
+
+def _evidence(st, mt, now):
+    """The Mac's evidence that passes the window test (run_record.py's stop model): (boot, [(S, W)]). Evidence E passes
+    when it falls after the last lead-entry (any E when there is none) and at or before now, the record names it not
+    yet, and a live line precedes the stop it starts (L_B, the latest live line before the boot B; a sleep's S)."""
+    def window(e):
+        return (st["entry"] is None or st["entry"] < e) and e <= now and _ms(e) not in st["named"]
+    boot = mt.get("boot")
+    if boot is None or not window(boot) or _live_before(st["live"], boot) is None:
+        boot = None
+    sleeps = [(s, w) for s, w in mt.get("sleeps") or [] if window(w) and _live_before(st["live"], s) is not None]
+    return boot, sleeps
+
+
+def _stop_fields(cause, at, lines, **more):
+    fields = {"cause": cause, "inferred": True, "calls": inflight_calls(lines, upto=at), "at": _zms(at)}
+    fields.update({k: _zms(v) for k, v in more.items()})
+    return fields
+
+
+def cmd_record_entry(args) -> int:
+    """The lead's entry into its loop (execute § 4.5 *Run record*): every stop the record does not hold yet, then one
+    lead-entry (run_record.py's stop model). Step 1, the gap stop G this entry resumes from, first match: a pause that
+    stands (no line; the entry says stop: pause); the open stop; --cause (inferred at L, the latest live line); a boot
+    that passes the window test after L (mac-restart at L); a session other than the last lead-entry's, both known,
+    unless --by heartbeat (dead-lead at L: a tick runs in the live lead's own cron, so the session it differs from is
+    another session's entry, never a dead lead's); --by watchdog (watchdog at L). Step 2: every boot or sleep that
+    passes the window test, that G did not take and that starts before G's start (or with no G) is written first, in
+    `at` order (a boot at L_B, a sleep at S with its wake): evidence after G's start is inside G. Step 3: G's own
+    stopped line, when new, then exactly one lead-entry {by, session?, stop?}. Every stopped line carries the calls in
+    flight at its `at`."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        print(f"ERROR: record-entry: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    try:
+        note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        print(f"ERROR: record-entry: cannot read {rollout_path}: {e}", file=sys.stderr)
+        return 1
+    ro = rollout_path.stem
+    why = _ledger_skip(note)
+    if why:
+        print(f"[skip] {ro}: {why}: no entry recorded")
+        return 0
+    lines = _record_read(ro)
+    if lines is None:
+        print(f"run_record: warning: record-entry: the Run record of {ro} cannot be read; nothing recorded",
+              file=sys.stderr)
+        return 0
+    now = _now(args)
+    session = args.session if args.session is not None else os.environ.get("CLAUDE_CODE_SESSION_ID")
+    session = session or None
+    st = _stop_state(lines)
+    live = st["live"]
+    last_live = live[-1] if live else None
+    mt = machine_times(st["entry"] or (live[0] if live else now), now)
+    boot, sleeps = _evidence(st, mt, now)
+    gap = None   # {stop, start, fields (a new stopped line) or None}
+    pause, pause_start = _pause_stands(note, lines)
+    if pause:
+        gap = {"stop": "pause", "start": pause_start, "fields": None}
+    elif st["open"]:
+        o = st["open"][-1]
+        gap = {"stop": o["cause"], "start": _away_stamp(o.get("at"))[0] or _rec_ts(o), "fields": None}
+    elif last_live is not None:
+        if args.cause:
+            gap = {"stop": args.cause, "fields": _stop_fields(args.cause, last_live, lines)}
+        elif boot is not None and boot > last_live:
+            gap = {"stop": "mac-restart", "fields": _stop_fields("mac-restart", last_live, lines, boot=boot)}
+            boot = None   # G took it
+        elif session and st["session"] and session != st["session"] and args.by != "heartbeat":
+            # A tick runs in the live lead's own cron: a session change it sees is another session's entry, no death.
+            gap = {"stop": "dead-lead", "fields": _stop_fields("dead-lead", last_live, lines)}
+        elif args.by == "watchdog":
+            gap = {"stop": "watchdog", "fields": _stop_fields("watchdog", last_live, lines)}
+        if gap is not None and gap["fields"] is not None:
+            gap["start"] = last_live
+    earlier = []
+    inside = lambda t: gap is not None and (gap["start"] is None or t >= gap["start"])  # noqa: E731
+    if boot is not None and not inside(_live_before(live, boot)):
+        lb = _live_before(live, boot)
+        earlier.append((lb, _stop_fields("mac-restart", lb, lines, boot=boot)))
+    for s, w in sleeps:
+        if not inside(s):
+            earlier.append((s, _stop_fields("mac-sleep", s, lines, wake=w)))
+    earlier.sort(key=lambda e: e[0])
+    writes = [f for _t, f in earlier] + ([gap["fields"]] if gap is not None and gap["fields"] is not None else [])
+    said = []
+    for fields in writes:
+        _event(ro, "stopped", None, fields, args)
+        said.append(f"stopped {fields['cause']} (inferred, at {fields['at']})")
+    entry = {"by": args.by}
+    if session:
+        entry["session"] = session
+    if gap is not None:
+        entry["stop"] = gap["stop"]
+    _event(ro, "lead-entry", None, entry, args)
+    said.append(f"lead-entry by={args.by}" + (f" stop={gap['stop']}" if gap is not None else ""))
+    print(f"{ro}: " + "; ".join(said) + (" (dry-run)" if args.dry_run else ""))
+    return 0
+
+
+def _record_sleeps(rollout, note, now, args):
+    """`next`'s sleep line (run_record.py's stop writers): a sleep no entry follows, the rollout's last calls running
+    through it, say. Off --dry-run, only when the record has a lead-entry, no pause stands and no stop is open, and
+    kern.waketime is later than both the last lead-entry and the latest recorded wake (the cheap gate, so pmset is read
+    at most once per wake): each sleep that passes the window test is a mac-sleep {at: S, wake: W, calls}. A mac-sleep
+    closes itself, so `next` writes no lead-entry. Never raises."""
+    try:
+        lines = _record_read(rollout)
+        if not lines:
+            return
+        st = _stop_state(lines)
+        if st["entry"] is None or st["open"] or _pause_stands(note, lines)[0]:
+            return
+        since = max(t for t in (st["entry"], st["wake"]) if t is not None)
+        mt = machine_times(since, now)
+        if mt["wake"] is None or mt["wake"] <= since:
+            return
+        for s, w in _evidence(st, mt, now)[1]:
+            _event(rollout, "stopped", None, _stop_fields("mac-sleep", s, lines, wake=w), args)
+    except Exception:  # noqa: BLE001 — recording never breaks `next`
+        return
+
+
+def _latest_run(rollout, slug) -> dict:
+    """{runId?, call?} of the task's latest run-bound in the record (quota-stall's, p29-10), {} with none."""
+    lines = _record_read(rollout) or []
+    key = (slug or "").lower()
+    run = next((d for d in reversed(lines) if d.get("kind") == "run-bound" and d.get("task") == key), None)
+    out = _call_entry(key, run)
+    out.pop("task")
+    return out
 
 
 def _log_tokens(line) -> dict:
@@ -4727,9 +5865,95 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
     return "blocked"
 
 
-def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, pr, ready_stamped):
+def _call_end(rollout, slug, now):
+    """The end of the call whose row ends the task's Slot (p29-12), as the Workflow journal of that call records it (an
+    aware UTC datetime), or None when it cannot be read: the caller then falls back to now and marks it. The call is
+    read through the rollout's Run record by its reader rules: the task's open Slot is its first slot-taken since the
+    last slot-freed (or from-file `carried`), a re-take while it is open being the same Slot, and the call is the last
+    run-bound for the task inside it that is not an integrate call (a restart after a dead lead binds a newer one). Its
+    journal, <journalDir>/<runId>.json (fold-journals' path), must be an object naming that runId with a terminal
+    status. The end is startTime + durationMs (epoch ms, ints >= 0: score.py's reading), else the journal's
+    `timestamp`, and must lie at or after the Slot's latest slot-taken, a re-take included, and at or before now (a
+    later one is no end yet). An end before the latest slot-taken is not the end of the call the row reports: it is an
+    earlier attempt's, a restart re-took the Slot after it (a launch that failed binds nothing new, and a resume that
+    re-binds the same runId and errors leaves the old journal on disk), or another call's stale file. Stamped there,
+    the row's slot-freed would sit before that slot-taken and split the Slot in two for every reader that reads the
+    record by ts (score.py, the night record; run_record.py's call-end stamps): a second Slot that is never freed. A
+    record, journal or field that cannot be read is None: never an error, no extra reason or warning line is printed,
+    and the verb's exit is unchanged (p15-2). Whether the end is readable does decide the stamps: with none, the note's
+    `ready:` (or a read-only approval's `merged:`) and the line's `ready=`/`merged=` are now, the line marked
+    `(fallback)`, and the events `stamp: fallback`."""
+    if not rollout:
+        return None
+    try:
+        rr = _run_record()
+        lines, _bad = _record_lines(rr.record_path(rollout))
+    except Exception:
+        return None  # no record yet, or one that cannot be resolved or read
+    # `taken` is the open Slot (its first slot-taken); `floor` the latest slot-taken ts inside it, a re-take included
+    key, taken, floor, bound = slug.lower(), None, None, None
+    for d in lines:
+        if d.get("task") != key:
+            continue
+        kind = d.get("kind")
+        if kind == "slot-taken":
+            if taken is None:
+                taken, floor, bound = d, None, None
+            at = _parse_ts(d.get("ts"))
+            if at is not None and (floor is None or at > floor):
+                floor = at
+        elif kind == "slot-freed" or (kind == "carried" and d.get("rollout") == d.get("from")):
+            taken, floor, bound = None, None, None
+        elif kind == "run-bound" and taken is not None and d.get("call") != "integrate":
+            bound = d
+    if bound is None:  # no open Slot, or no call bound since it was taken
+        return None
+    run_id, jdir = bound.get("runId"), bound.get("journalDir")
+    if not isinstance(run_id, str) or not RUN_ID_RE.fullmatch(run_id) or ".." in run_id or not isinstance(jdir, str):
+        return None
+    jdir = os.path.expanduser(jdir)
+    if not os.path.isabs(jdir):
+        return None
+    try:
+        with open(os.path.join(jdir, run_id + ".json"), "rb") as f:
+            journal = json.load(f)
+    except (OSError, ValueError):
+        return None  # no journal yet (still in flight, or never written), or not JSON
+    if not isinstance(journal, dict) or journal.get("runId") != run_id or \
+            journal.get("status") not in rr.TERMINAL_STATUSES:
+        return None  # another call's file, or a call that has not ended
+    st, dur = journal.get("startTime"), journal.get("durationMs")
+    end = None
+    if all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (st, dur)):
+        try:
+            end = datetime.fromtimestamp((st + dur) / 1000, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            end = None
+    elif isinstance(journal.get("timestamp"), str):
+        end = _parse_ts(journal["timestamp"])
+    if end is None or end > now or (floor is not None and end < floor):
+        return None
+    return end
+
+
+def _call_end_mark(ended, now):
+    """(fields, ts) for an event that records a call's end (p29-12): at `ended` with `stamp: call-end` and the
+    reconcile's own clock as `reconciledAt` (when the lead turned to the row), or, with no end read, `stamp: fallback`
+    and ts None (the reconcile's clock, _event's default)."""
+    if ended is None:
+        return {"stamp": CALL_END_FALLBACK}, None
+    return {"stamp": CALL_END_MARK, "reconciledAt": _utc_z(now, ms=True)}, ended.isoformat()
+
+
+def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, pr, ready_stamped,
+                      ended, now):
     """One row's events, against the note's status (`prior`), _holds_lane (`held`) and the Integration log's lane
-    fields (`lane_fields`, for a lead row, which carries no `integration`) read before its writes."""
+    fields (`lane_fields`, for a lead row, which carries no `integration`) read before its writes. A row that ends a
+    Slot is its call's end (p29-12): its slot-freed, ready, merged, set-aside and quota-stall (and its review-verdict
+    events, _review_verdict_events) are stamped at `ended` (_call_end) with `stamp: call-end` and the reconcile's own
+    clock as `reconciledAt`, or, with no end read, at the reconcile's clock with `stamp: fallback`
+    (_call_end_mark); a ready or merged on any other row is a fallback too. The lane's events are the lead's (ADR
+    0030): at the reconcile's clock, unmarked."""
     if args.dry_run or not rollout:
         return
     integ = task.get("integration") if isinstance(task.get("integration"), dict) else None
@@ -4741,7 +5965,10 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
     ask = task.get("needsHuman")
     asked = isinstance(ask, str) and bool(ask.strip())
     state_after, at_after = _queue_state(note)
-    if prior == "in_progress" and integ is None:
+    ends_slot = prior == "in_progress" and integ is None
+    mark, end_ts = _call_end_mark(ended, now)
+    slot_mark, slot_ts = (mark, end_ts) if ends_slot else ({}, None)
+    if ends_slot:
         if note_status == "review" and pr:
             outcome_s = "ready"
         elif note_status == "done":
@@ -4750,11 +5977,11 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
             outcome_s = "lost"
         else:
             outcome_s = "set-aside"
-        _event(rollout, "slot-freed", slug, {"outcome": outcome_s}, args)
+        _event(rollout, "slot-freed", slug, {"outcome": outcome_s, **mark}, args, ts=end_ts)
     if ready_stamped:
-        _event(rollout, "ready", slug, {"pr": pr} if pr else {}, args)
+        _event(rollout, "ready", slug, {**({"pr": pr} if pr else {}), **mark}, args, ts=end_ts)
     if note_status == "done" and prior != "done":
-        _event(rollout, "merged", slug, {"readOnly": True}, args)
+        _event(rollout, "merged", slug, {"readOnly": True, **mark}, args, ts=end_ts)
     rejected = integ is not None and outcome == "rejected"
     if held and not (integ is not None and outcome == "integrated"):
         fields = {"release": "reject" if rejected else "halt" if outcome == "void" else "set-aside"}
@@ -4769,10 +5996,13 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
         _event(rollout, "set-aside", slug, {
             "stage": stage,
             "reasonClass": _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked),
-            "setAsideAt": at_after}, args)
+            "setAsideAt": at_after, **slot_mark}, args, ts=slot_ts)
         error_line = reason.split("\n", 1)[0].strip()
         if failed and QUOTA_RE.search(error_line):
-            _event(rollout, "quota-stall", slug, {"stage": stage, "detail": error_line[:500]}, args)
+            # p29-10: the call the limit killed, from the task's latest run-bound (omitted when it has none)
+            _event(rollout, "quota-stall", slug,
+                   {"stage": stage, "detail": error_line[:500], **_latest_run(rollout, slug), **slot_mark}, args,
+                   ts=slot_ts)
 
 
 # review-split.py, beside this module: the original / regression split of one engine review round (p21-3).
@@ -4813,7 +6043,7 @@ def _verdict_entry(e):
     return {"round": rnd, "verdict": verdict, "head": head, "feedback": feedback}
 
 
-def _review_verdict_events(args, rollout, slug, task, prior):
+def _review_verdict_events(args, rollout, slug, task, prior, ended, now):
     """p21-3: one review-verdict event per entry of an engine row's reviewVerdicts (each master-review round the call
     judged), written once per run_record.verdict_key: an entry whose key the record already holds for this task (a
     signed-gate or Lost-call resume replaying the stopped call's rounds) is skipped. Its head is resolved to a full
@@ -4822,7 +6052,8 @@ def _review_verdict_events(args, rollout, slug, task, prior):
     against the task's first judged head (the record's earlier heads, then this row's); an approve is 0/0/0.
     Only for a row that ends a Slot (the note read in_progress) and carries no `integration` (an Integration
     re-review is no master-review round); nothing on --dry-run, with no rollout, or for a row without the key (a
-    pre-p21-3 engine's, a lead-written one). Best-effort: it never changes the verb's exit or stdout."""
+    pre-p21-3 engine's, a lead-written one). Each round was judged inside the call, so it is stamped at the call's end
+    (p29-12, _call_end_mark), never later. Best-effort: it never changes the verb's exit or stdout."""
     if args.dry_run or not rollout or prior != "in_progress" or task.get("integration") is not None:
         return
     verdicts = task.get("reviewVerdicts")
@@ -4847,6 +6078,7 @@ def _review_verdict_events(args, rollout, slug, task, prior):
             seen.add(rr.verdict_key(d))
         sp = _review_split()
         tree = task.get("worktreePath") if isinstance(task.get("worktreePath"), str) else ""
+        mark, end_ts = _call_end_mark(ended, now)
         for i, raw in enumerate(verdicts, 1):
             e = _verdict_entry(raw)
             if e is None:
@@ -4870,7 +6102,7 @@ def _review_verdict_events(args, rollout, slug, task, prior):
                       "original": counts["original"], "regression": counts["regression"], "digest": digest}
             if head:
                 fields["head"] = head
-            _event(rollout, "review-verdict", slug, fields, args)
+            _event(rollout, "review-verdict", slug, {**fields, **mark}, args, ts=end_ts)
             seen.add(key)
             if head:
                 heads.append(head)
@@ -4878,29 +6110,246 @@ def _review_verdict_events(args, rollout, slug, task, prior):
         _rv_warn(slug, f"not recorded: {type(e).__name__}: {e}")
 
 
+# ---- Flakes (ADR 0050, p29-9) ----------------------------------------------------------------------------------
+# A Flake is a named test that failed a verifier run in a rollout outside the task's diff, then passed its named re-run
+# and a confirming full run on the same tree. Each one is logged once per (task, sha, site) as a `flake` Run-record
+# event and a line in the `## Flake log` of one follow-up task per (repo, test): `<project>-followup-flake-<h>`, h the
+# first 10 hex of sha256(repo + "\n" + test). The follow-up is found by a glob of the Tasks root for a note that is not
+# finished; a finished or archived one gets a fresh `-2`, `-3`. At its second line it is priority high and the repo's to
+# fix. Two callers: reconcile (an engine row's `flakes`) and record-verify (the lead's Integration verify and RACE
+# re-verify, from lead-integrate.py verify --diff-base's <out>.flake.json).
+FLAKE_LOG_SECTION = "## Flake log"
+FLAKE_TWICE_SECTION = "## The repo's to fix"
+FLAKE_TEST_MAX = 300
+FLAKE_SHA_RE = re.compile(r"[0-9a-f]{7,40}\Z")
+FLAKE_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+ORIGIN_SLUG_RE = re.compile(r"([^/:\s]+/[^/:\s]+?)(?:\.git)?/*$")
+
+
+def _flake_entry(e):
+    """(test, sha) for a well-formed Flake entry {test, sha}: test a non-empty one-line string of at most 300
+    characters (stripped), sha 7-40 hex (lowercased); else None. The engine's flakesOf keeps the same rule."""
+    if not isinstance(e, dict):
+        return None
+    test, sha = e.get("test"), e.get("sha")
+    if not isinstance(test, str) or not isinstance(sha, str):
+        return None
+    test, sha = test.strip(), sha.strip().lower()
+    if not test or len(test) > FLAKE_TEST_MAX or FLAKE_CTRL_RE.search(test) or not FLAKE_SHA_RE.match(sha):
+        return None
+    return test, sha
+
+
+def _code(text):
+    """`text` as one inline code span: a backtick run inside it gets a longer fence, padded, so a test id holding `]]`,
+    `|` or backticks can never open a wikilink, a table cell or another span."""
+    run = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    fence = "`" * (run + 1)
+    pad = " " if run or text[:1] == " " or text[-1:] == " " else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
+
+
+def _repo_identity(root, fallback):
+    """The repo a Flake is filed for: `owner/name` from the Project root's origin URL, else the Project root's basename,
+    else `fallback` (the task's project slug, when the rollout names no Project root)."""
+    if root is None:
+        return fallback
+    try:
+        p = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"], capture_output=True, text=True,
+                           timeout=30, env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")})
+        m = ORIGIN_SLUG_RE.search(p.stdout.strip()) if p.returncode == 0 else None
+        if m:
+            return m.group(1)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return Path(root).name or fallback
+
+
+def _flake_key(repo, test):
+    return hashlib.sha256(f"{repo}\n{test}".encode("utf-8")).hexdigest()[:10]
+
+
+def _flake_followup(tasks_dir, slug, h):
+    """(path, True) for the open follow-up of key h in the Tasks root (glob `*-followup-flake-<h>*.md`, a note that is
+    not done, merged or dropped), else (path, False) for the next free name: `<project>-followup-flake-<h>`, then -2, -3
+    (a name a note in the Tasks root or its Archive holds is taken)."""
+    stem_re = re.compile(rf".+-followup-flake-{h}(?:-\d+)?")
+    for p in sorted(tasks_dir.glob(f"*-followup-flake-{h}*.md")):
+        if not stem_re.fullmatch(p.stem):
+            continue
+        try:
+            if _status(Note(p)) not in FINISHED_STATUSES:
+                return p, True
+        except (OSError, ValueError):
+            continue
+    base = _followup_name(slug, f"flake-{h}")
+    k = 1
+    while True:
+        name = base if k == 1 else f"{base}-{k}"
+        if _find_note(tasks_dir, name) is None:
+            return tasks_dir / f"{name}.md", False
+        k += 1
+
+
+def _flake_twice_text(test, repo):
+    return (f"{_code(test)} was logged as a Flake twice: it is {repo}'s to fix (ADR 0050). Fix it at its source in "
+            f"{repo}; never inside a rollout task.")
+
+
+def _flake_add(n, key, line, twice):
+    """One Flake log line, unless a line already carries `key` ((task, sha12, site)); from the second line on, priority
+    high and the twice section. Run through Note.apply, so a save replays it on a fresh read. True when it added one."""
+    lines = [x.strip() for x in n.section_text(FLAKE_LOG_SECTION).split("\n")]
+    if any(x.startswith("- ") and x.endswith(key) for x in lines):
+        return False
+    n.append_line(FLAKE_LOG_SECTION, line)
+    if sum(1 for x in n.section_text(FLAKE_LOG_SECTION).split("\n") if x.strip().startswith("- ")) >= 2:
+        n.set("priority", "high")
+        n.upsert_section(FLAKE_TWICE_SECTION, twice)
+    return True
+
+
+def _flake_count(n):
+    return sum(1 for x in n.section_text(FLAKE_LOG_SECTION).split("\n") if x.strip().startswith("- "))
+
+
+def _write_flake_followup(path, note, test, repo, h, line, now):
+    """File the follow-up for one test, in _new_task_fm's shape (projects copied from the task), its first Flake log line
+    included. Exclusive: an existing file is never overwritten (FileExistsError)."""
+    lines = [*_new_task_fm(note, now, "normal", [f'flake_key: "{h}"']), "",
+             f"# Flake: {_code(test)} in {repo}", "", "## Notes", "",
+             f"{_code(test)} failed a verifier run in a rollout of {repo} outside the task's diff, then passed its named "
+             "re-run and a confirming full run on the same tree: the verify counted green and the test was logged as a "
+             "Flake (ADR 0050). Fix it at its source in the repo, never inside a rollout task; a second line below "
+             "makes it the repo's to fix.", "",
+             f"- Test: {_code(test)}", f"- Repo: {repo}", "",
+             FLAKE_LOG_SECTION, "", line]
+    with open(path, "x") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def _rollout_root(tasks_dir, rollout, rollout_path=None):
+    """The Project root of the rollout note (rollout_path, else <tasks-dir>/<rollout>.md or its Archive copy), or None."""
+    path = rollout_path or (_find_note(tasks_dir, rollout) if rollout else None)
+    try:
+        return _project_root(Note(Path(path))) if path else None
+    except (OSError, ValueError):
+        return None
+
+
+def _record_flakes(args, rollout, slug, note, flakes, site, tasks_dir, rollout_path=None):
+    """Log each Flake (ADR 0050): one `## Flake log` line on its follow-up and, for each new line, one `flake` event.
+    `flakes` is a list of {test, sha}; a malformed entry is a warning and skipped (_flake_entry). A line keyed (task,
+    sha, site) that is already there writes nothing, so a re-run is a no-op. --dry-run writes nothing. Returns (stdout
+    lines, warnings, errors): an error is a follow-up that could not be read or written."""
+    out, warns, errs = [], [], []
+    m = PHASED_STEM_RE.match(slug)
+    project = m.group("slug") if m else slug
+    repo = None
+    now = _now(args)
+    dry = getattr(args, "dry_run", False)
+    for i, raw in enumerate(flakes, 1):
+        e = _flake_entry(raw)
+        if e is None:
+            warns.append(f"{slug}: flakes entry {i} is malformed (test a one-line string of at most {FLAKE_TEST_MAX} "
+                         "characters, sha 7-40 hex); skipped")
+            continue
+        test, sha = e
+        if repo is None:
+            repo = _repo_identity(_rollout_root(tasks_dir, rollout, rollout_path), project)
+        h = _flake_key(repo, test)
+        key = f"[[{slug}]] at {sha[:12]} ({site})"
+        line = f"- {_stamp(now)} {key}"
+        twice = _flake_twice_text(test, repo)
+        path, found = _flake_followup(tasks_dir, slug, h)
+        head = f"flake: {_code(test)} in {repo} at {sha[:12]} ([[{slug}]], {site})"
+        if dry:
+            out.append(f"{head} -> [[{path.stem}]]" + ("" if found else " (a new follow-up)") + " (dry-run)")
+            continue
+        added, created = False, False
+        try:
+            if not found:
+                try:
+                    _write_flake_followup(path, note, test, repo, h, line, now)
+                    added = created = True
+                except FileExistsError:
+                    found = True   # another writer filed it meanwhile: append to theirs
+            if not created:
+                fu = Note(path)
+                added = fu.apply(_flake_add, key, line, twice)
+                fu.save()
+                count = _flake_count(fu)
+            else:
+                count = 1
+        except (OSError, ValueError) as ex:
+            errs.append(f"{slug}: the Flake follow-up {path} could not be written: {ex}; this Flake is not logged")
+            continue
+        if not added:
+            out.append(f"{head} -> [[{path.stem}]] already logged [no-change]")
+            continue
+        _event(rollout, "flake", slug, {"test": test, "repo": repo, "sha": sha, "site": site, "followup": path.stem,
+                                        "count": count}, args)
+        tail = " (filed)" if created else (f" (logged {count} times: the repo's to fix)" if count >= 2 else "")
+        out.append(f"{head} -> [[{path.stem}]]{tail} [written]")
+    return out, warns, errs
+
+
+def _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings):
+    """reconcile's side (p29-9): an engine row's `flakes`, a task call's (site task) or an integrator's (site integrate,
+    a row with `integration`). Absent or null records nothing; a non-list is an error, nothing recorded. An integrate
+    row reconciled with --no-verdict records none either, with one line saying why: a git-env trip fell inside the
+    call's window, so a red its integrator saw may be the changed shared checkout's, and its re-runs prove nothing
+    (the lead never runs record-verify after such a check either, execute § 4.5)."""
+    flakes = task.get("flakes")
+    if flakes is None or flakes == []:
+        return []
+    if getattr(args, "no_verdict", False) and task.get("integration") is not None:
+        n = len(flakes) if isinstance(flakes, list) else 1
+        return [f"{slug}: {n} Flake{'' if n == 1 else 's'} not recorded: --no-verdict (a git-env trip fell inside the "
+                "integrate call's window, ADR 0053), so its verifier runs give no verdict, Flakes included"]
+    if not isinstance(flakes, list):
+        errors.append(f"{slug}: flakes is not a list ({type(flakes).__name__}) — no Flake recorded")
+        return []
+    site = "integrate" if task.get("integration") is not None else "task"
+    lines, w, e = _record_flakes(args, rollout, slug, note, flakes, site, tasks_dir)
+    warnings.extend(w)
+    errors.extend(e)
+    return lines
+
+
 def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside, cap_held,
-                 last_start_held) -> str:
+                 last_start_held, pr_held=False, task_pr_held=False, heat_held=False) -> str:
     """The idle-slots reason (the module docstring's table, first match). `cap_held`: this call holds a queued row on
     the Mac-wide cap, "trickle" (`trickle:`) or "away-cap" (`away cap:`), else None (a stalled row waits only on the
-    ceiling); `last_start_held`: one on `last start:`."""
+    ceiling); `last_start_held`: one on `last start:`. `pr_held`: the rollout's own hold_until stands (p30-3).
+    `task_pr_held`: a task's own hold_until stands, on a queued, stalled or set-aside (at run or a gate) row.
+    `heat_held`: one on `heat:` (the Heat hold, estate ADR 0009 d5), ahead of the Mac-wide cap."""
     if git_env:
         return "hold-git-env"
     if paused or pause_requested:
         return "pause-drain"
+    if heat_held:
+        return "hold-heat"
     if cap_held:
         return "hold-away-cap" if cap_held == "away-cap" else "hold-trickle"
     if last_start_held:
         return "hold-last-start"
+    if pr_held:
+        return "hold-pr"
     starting = {id(r) for r in start}
     waiting = [r for r in queued if id(r) not in starting]
     waiting_ids = {id(r) for r in waiting}
     held = sorted(((r, why) for r, why in holds if id(r) in waiting_ids), key=lambda h: _rank(h[0]))
     if held:
         why = held[0][1]
+        if why.startswith(HOLD_UNTIL_PREFIX):
+            return "hold-pr"
         if why.startswith("depends on"):
             return "dependency"
         if why.startswith("solo") or why.startswith("behind solo"):
             return "solo"
+    if task_pr_held:
+        return "hold-pr"   # a stalled or set-aside task's own hold: it, not the queue's tail, keeps the Slot idle
     if not waiting:
         if any(h["kind"] == "RACE" for h in race_hold):
             return "hold-race"
@@ -5159,11 +6608,14 @@ DESCOPE_MARK_RE = re.compile(
 # number and sha (_plan_block_key), so the refusal holds for that block in every session and a new run is judged afresh.
 DESCOPE_REFUSED_SECTION = "## Descope refused (automatic)"
 DESCOPE_REFUSED_RE = re.compile(r"^- (\S+) descope refused \(automatic\) run=(\d+) sha=([0-9a-f]{12}), (.*)$")
+# The calls a grade ruled for Lachy (ADR 0054 d3; estate-dispatch.py's DECIDED_HEADING): a record section, never a
+# recorded human decision, so _recorded_decision never reads it.
+DECIDED_SECTION = "## Decided for you"
 # Record sections: never part of the brief the plan judge judges against.
 BRIEF_EXCLUDE = ("## Plan-blocked feedback", "## Review-blocked feedback", "## Blocker diagnosis",
                  "## Review history", REPAIR_INPUT_SECTION, "## Scope decision", APPROVED_PLAN_SECTION,
                  INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, NEEDS_HUMAN_SECTION,
-                 "## Decisions", "## Resume prompt", "## Descope refused")
+                 "## Decisions", "## Resume prompt", "## Descope refused", DECIDED_SECTION)
 MARKER_WORDS = r"(?:consider|considering|optional|optionally|nice to have|nice-to-have)"
 OPTIONAL_MARK_RE = re.compile(rf"\b{MARKER_WORDS}\b")
 # A marker negated by not / never / no (or an n't) up to two words before it is no marker: "not optional".
@@ -5289,7 +6741,8 @@ def _optional_in_brief(hits) -> bool:
 def _recorded_decision(note, needles) -> str:
     """The recorded human decision holding one of the folded needles, as its heading, or '': a `## Decisions…`
     section, a `## Scope decision…` other than the automatic one, a `## Repair input` line without `(automatic)`,
-    `## Approved gates` and `## Gated inputs (awaiting sign-off)`."""
+    `## Approved gates` and `## Gated inputs (awaiting sign-off)`. A `## Decided for you…` section (DECIDED_SECTION) is
+    an agent's call, never a recorded human decision, so it is never read here (ADR 0054)."""
     lines, sections = _body_sections(note)
     for heading, idxs in sections:
         if heading.startswith("## Decisions") or heading in (APPROVED_GATES_SECTION, GATE_PENDING_SECTION) or \
@@ -6483,6 +7936,12 @@ def cmd_carry(args) -> int:
         if carried and (plan["rung"] == "top" or plan["drop"]):
             rung = top if plan["rung"] == "top" else plan["rung"]
             print(f"restamp {path.stem} rung={rung} drop={','.join(plan['drop']) or '-'}")
+    # The prior's own PR hold (p30-3; vault-grammar § Hold until), named with the parser `next` reads it by: a hold kept
+    # only as prose was lost in a regenerate (Q50), so the carry copies it below. Printed in both modes.
+    src_hold = _hold_until(src_note, _project_root(src_note))
+    if src_hold is not None:
+        print(f"{HOLD_KEY} unreadable: {src_hold['error']}" if src_hold["error"] else
+              f"{HOLD_KEY} pr={src_hold['pr']} merged={src_hold['merged']}")
     # The order hints read --from's prose against its carried tasks and, while --from is still open, against the
     # tasks already on --to: an interrupted supersede whose own carry ran before it died (§ 0's finish) left none
     # on --from, and this is the only run that reads that prose. A closed re-run's step 7 has confirmed them.
@@ -6499,6 +7958,21 @@ def cmd_carry(args) -> int:
         print("(dry-run)")
         return 0
     written = 0
+    # The hold first, before any task write: its lines verbatim (block form included, an unreadable one too, so it still
+    # fails closed) after `parallel_ceiling:`, else `status:`, only while --to has none (Note.insert_block); an identical
+    # one is left, a different one kept with a WARN. An interrupted re-run finds it there.
+    if src_hold is not None:
+        dst_lines = dst_note.fm_block(HOLD_KEY)
+        if dst_lines is None:
+            dst_note.insert_block(HOLD_KEY, src_hold["lines"], after=("parallel_ceiling", "status"))
+            try:
+                dst_note.save()
+            except OSError as e:
+                print(f"ERROR: carry: {dst.stem}: cannot write {dst}: {e} (no note carried yet)", file=sys.stderr)
+                return 1
+            written += 1
+        elif dst_lines != src_hold["lines"]:
+            print(f"WARN: carry: {HOLD_KEY} on {dst.stem} differs from {src.stem}'s; {dst.stem}'s kept", file=sys.stderr)
     for path, note, state, carried, plan in rows:
         if not carried:
             continue
@@ -6681,9 +8155,118 @@ def _bounce_why(verdict, gi):
             f"standing approval signs none of its gates; the pricer reads: {reading}")
 
 
+def _standing_month_spend(text, month) -> Decimal:
+    """The standing approvals one rollout note's text logs for `month` (YYYY-MM): the STANDING_SPEND_RE lines under
+    every `## Needs-you log` heading (line.strip() equal to it), each to the next line starting `## ` (Note.section_text's
+    bounds), summed. A line outside the section, of another month, or with the mark anywhere but right after its first
+    wikilink (a push line quoting it) never counts."""
+    total, on = Decimal(0), False
+    for line in text.split("\n"):
+        if line.strip() == NEEDS_YOU_LOG_SECTION:
+            on = True
+            continue
+        if line.startswith("## "):
+            on = False
+            continue
+        if on:
+            m = STANDING_SPEND_RE.match(line)
+            if m and m.group(1) == month:
+                total += Decimal(m.group(2))
+    return total
+
+
+class _StandingLedger:
+    """This calendar month's standing-approved spend for one approve-gates --standing call (p30-8, ADR 0034's
+    2026-10-27 amendment), built once per call and used lazily: only a gate that first prices under its limit asks for
+    it, so an off limit, a bounced note or an over-limit gate never reads or locks anything.
+
+    spent() -> (Decimal, None) or (None, why). On first need it takes the standing-spend lock (_spend_lock_path; never
+    on --dry-run) and holds it until close(), from the month read to the call's last save, then sums
+    _standing_month_spend over the --rollout note and every file directly in the tasks dir, Archive/ and
+    Archive/Rollouts/ whose name matches ROLLOUT_NOTE_NAME_RE (schedule step 6's names, `-N` ordinals included), each
+    once by real path and read fresh from disk. A missing directory is skipped; a note that cannot be read, or a
+    directory that exists but cannot be listed, is (None, why), cached, so every later gate asks with it. A lock not
+    taken in time raises OSError, cached too, so every later slug that needs the month read fails at once with the same
+    message; a slug that never needs it is still written or asked. add() keeps the call's own running total (on
+    --dry-run too, so its lines read as a real run's), which spent() includes."""
+
+    def __init__(self, tasks_dir, rollout_path, month, dry_run):
+        self.tasks_dir, self.rollout_path = Path(tasks_dir), Path(rollout_path)
+        self.month, self.dry_run = month, dry_run
+        self._lock = self._lock_error = self._base = self._why = None
+        self._added = Decimal(0)
+
+    def _read(self):
+        """(sum, None) over the month's notes, or (None, why) on the first one it cannot read."""
+        files, seen = [], set()
+
+        def take(path):
+            real = os.path.realpath(str(path))
+            if real not in seen:
+                seen.add(real)
+                files.append(path)
+
+        take(self.rollout_path)
+        for d in (self.tasks_dir, self.tasks_dir / "Archive", self.tasks_dir / "Archive" / "Rollouts"):
+            try:
+                names = sorted(os.listdir(d))
+            except (FileNotFoundError, NotADirectoryError):
+                continue   # no Archive yet: nothing there to sum
+            except OSError as e:
+                return None, f"cannot read {d} for this month's standing approvals ({e})"
+            for name in names:
+                if ROLLOUT_NOTE_NAME_RE.search(name) and (d / name).is_file():
+                    take(d / name)
+        total = Decimal(0)
+        for path in files:
+            try:
+                text = Path(path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                return None, f"cannot read {path} for this month's standing approvals ({e})"
+            total += _standing_month_spend(text, self.month)
+        return total, None
+
+    def spent(self):
+        if self._lock_error is not None:
+            raise OSError(self._lock_error)
+        if self._base is None and self._why is None:
+            if not self.dry_run and self._lock is None:
+                lock = _note_lock(lock_path=_spend_lock_path(), label="standing-spend lock")
+                try:
+                    lock.__enter__()
+                except OSError as e:
+                    self._lock_error = str(e)
+                    raise
+                self._lock = lock
+            self._base, self._why = self._read()
+        if self._why:
+            return None, self._why
+        return self._base + self._added, None
+
+    def add(self, usd):
+        self._added += usd
+
+    def close(self):
+        if self._lock is not None:
+            self._lock.__exit__(None, None, None)
+            self._lock = None
+
+
+def _month_why(month, total, limit, gi):
+    """Why a gate the per-gate limit covers still asks: this month's standing approvals would pass the month line, the
+    same resolved limit (inclusive, as covered() is)."""
+    return (f"this month's ({month}) standing approvals would reach US${gi.format_usd(total)} with this gate, past the "
+            f"US${gi.format_usd(limit['value'])} month line ({limit['source']})")
+
+
 def _approve_standing(args) -> int:
     """approve-gates --standing (ADR 0034; the module docstring): sign each pending spend gate the standing approval
-    covers, leave the rest pending with an ASK line. Exit 0 every gate written, 3 some left, 1 an error."""
+    covers, leave the rest pending with an ASK line. A gate is covered when it prices within the resolved limit and,
+    unless it is already in `## Approved gates`, when this calendar month's standing approvals (_StandingLedger, the
+    month line, ADR 0034's 2026-10-27 amendment) stay within the same limit with it. A slug's new signings are logged
+    in the rollout note's `## Needs-you log` first, then its task note is written, so a failure between the two
+    over-counts (fails closed). Exit 0 every gate written, 3 some left, 1 an error (a held standing-spend lock
+    included)."""
     if not args.rollout:
         print("ERROR: --standing needs --rollout", file=sys.stderr)
         return 1
@@ -6701,76 +8284,123 @@ def _approve_standing(args) -> int:
     slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
     date = args.date or datetime.now().astimezone().date().isoformat()
     now = _now(args)
+    month = now.astimezone().strftime("%Y-%m")
     suffix = " (dry-run)" if args.dry_run else " [written]"
     errors, asked = [], False
-    for slug in slugs:
-        path = tasks_dir / f"{slug}.md"
-        if not path.exists():
-            errors.append(f"{slug}: task note not found at {path}")
-            continue
-        try:
-            note = Note(path)
-        except ValueError as e:
-            errors.append(str(e))
-            continue
-        if (_note_rollout(note) or "").lower() != rollout_path.stem.lower():
-            errors.append(f"{slug}: its rollout: is {note.get('rollout')!r}, not [[{rollout_path.stem}]]; nothing written")
-            continue
-        status = note.get("status")
-        pending = note.section_text(GATE_PENDING_SECTION)
-        if status != GATE_PENDING_STATUS:
-            if note.has_heading(APPROVED_GATES_SECTION) and not pending:
-                print(f"{slug}: gates already approved [no-change]")
+    ledger = _StandingLedger(tasks_dir, rollout_path, month, args.dry_run)
+    try:
+        for slug in slugs:
+            path = tasks_dir / f"{slug}.md"
+            if not path.exists():
+                errors.append(f"{slug}: task note not found at {path}")
                 continue
-            errors.append(f"{slug}: status is {status!r}, not {GATE_PENDING_STATUS!r} — refusing to approve gates")
-            continue
-        gates = [re.sub(r"^[-*]\s+", "", l.strip()) for l in pending.split("\n") if l.strip()]
-        if not gates:
-            errors.append(f"{slug}: no gates under {GATE_PENDING_SECTION!r} — nothing to sign off")
-            continue
-        limit, err = _standing_limit(note, rollout_note)
-        if err:
-            errors.append(f"{slug}: {err}; nothing written")
-            continue
-        # ADR 0038: a note the plan judge bounced went to sign-off on a plan it never approved; nothing on it is the
-        # standing approval's to sign, whatever the gate prices. The heading alone counts (fail-closed: an emptied
-        # section still refuses).
-        bounced = note.has_heading(GATE_BOUNCE_SECTION)
-        covered, left = [], []
-        for g in gates:
-            verdict = gi.covered(g, limit["value"])
-            if bounced:
-                left.append((g, _bounce_why(verdict, gi)))
-            elif verdict["covered"]:
+            try:
+                note = Note(path)
+            except ValueError as e:
+                errors.append(str(e))
+                continue
+            if (_note_rollout(note) or "").lower() != rollout_path.stem.lower():
+                errors.append(f"{slug}: its rollout: is {note.get('rollout')!r}, not [[{rollout_path.stem}]]; nothing written")
+                continue
+            status = note.get("status")
+            pending = note.section_text(GATE_PENDING_SECTION)
+            if status != GATE_PENDING_STATUS:
+                if note.has_heading(APPROVED_GATES_SECTION) and not pending:
+                    print(f"{slug}: gates already approved [no-change]")
+                    continue
+                errors.append(f"{slug}: status is {status!r}, not {GATE_PENDING_STATUS!r} — refusing to approve gates")
+                continue
+            gates = [re.sub(r"^[-*]\s+", "", l.strip()) for l in pending.split("\n") if l.strip()]
+            if not gates:
+                errors.append(f"{slug}: no gates under {GATE_PENDING_SECTION!r} — nothing to sign off")
+                continue
+            limit, err = _standing_limit(note, rollout_note)
+            if err:
+                errors.append(f"{slug}: {err}; nothing written")
+                continue
+            # ADR 0038: a note the plan judge bounced went to sign-off on a plan it never approved; nothing on it is the
+            # standing approval's to sign, whatever the gate prices. The heading alone counts (fail-closed: an emptied
+            # section still refuses).
+            bounced = note.has_heading(GATE_BOUNCE_SECTION)
+            approved = {_norm_gate(l) for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()}
+            covered, left, logged, slug_new, lock_err = [], [], [], Decimal(0), None
+            for g in gates:
+                verdict = gi.covered(g, limit["value"])
+                if bounced:
+                    left.append((g, _bounce_why(verdict, gi)))
+                    continue
+                if not verdict["covered"]:
+                    left.append((g, _ask_why(verdict, limit, gi)))
+                    continue
+                norm = _norm_gate(g)
+                if norm in approved:
+                    covered.append((g, verdict["usd"]))   # signed already, or listed twice: no month check, no log line
+                    continue
+                # The month line (ADR 0034's 2026-10-27 amendment): this month's standing approvals, the earlier slugs
+                # and gates of this call included, plus this gate, within the same limit.
+                try:
+                    spent, why = ledger.spent()
+                except OSError as e:
+                    lock_err = e
+                    break
+                if why:
+                    left.append((g, why))
+                    continue
+                total = spent + slug_new + verdict["usd"]
+                if total > limit["value"]:
+                    left.append((g, _month_why(month, total, limit, gi)))
+                    continue
+                slug_new += verdict["usd"]
+                approved.add(norm)
                 covered.append((g, verdict["usd"]))
-            else:
-                left.append((g, _ask_why(verdict, limit, gi)))
-        if covered:
-            existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
-            have = {_norm_gate(l) for l in existing}
-            for g, usd in covered:
-                if _norm_gate(g) not in have:
-                    have.add(_norm_gate(g))
-                    existing.append(f"- {g} {gi.annotation(date, usd, limit['value'], limit['source'])}")
-            note.upsert_section(APPROVED_GATES_SECTION, "\n".join(existing))
-            stage = None
-            if left:
-                note.upsert_section(GATE_PENDING_SECTION, bullets([g for g, _ in left]))
-            else:
-                stage, route, ready_pr = _sign_route(note, slug, now)
-            note.save(dry_run=args.dry_run)
-            # the Standing approval signed these, not Lachy: recorded, and not counted as his act (p21-2)
-            _event(_note_rollout(note), "gate-signed", slug, {"standing": True, "gates": len(covered)}, args)
-            if stage == "integration":
-                _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
-            for g, usd in covered:
-                print(f"{slug}: gate approved under the standing approval: {g} (exposure US${gi.format_usd(usd)} of "
-                      f"US${gi.format_usd(limit['value'])}, {limit['source']})" + suffix)
-            if not left:
-                print(f"{slug}: every gate signed under the standing approval -> {route}" + suffix)
-        for g, why in left:
-            print(f"ASK: {slug}: {g}: {why}")
-            asked = True
+                logged.append((g, verdict["usd"], spent + slug_new))
+            if lock_err is not None:
+                errors.append(f"{slug}: {lock_err}; nothing written")
+                continue
+            if logged:
+                # The month line's ledger first: a failure before the task note's save over-counts (fails closed). A
+                # fresh read per slug, so a failed save's journal never replays into a later one.
+                try:
+                    rn = Note(rollout_path)
+                    for g, usd, m in logged:
+                        rn.append_line(NEEDS_YOU_LOG_SECTION,
+                                       f"- {_stamp(now)} [[{slug}]] {STANDING_SPEND_MARK} US${gi.format_usd(usd)} (month to "
+                                       f"date US${gi.format_usd(m)} of US${gi.format_usd(limit['value'])}, "
+                                       f"{limit['source']}): {g}")
+                    rn.save(dry_run=args.dry_run)
+                except (OSError, ValueError) as e:
+                    errors.append(f"{slug}: cannot log the standing approval in [[{rollout_path.stem}]]: {e}; "
+                                  "nothing written")
+                    continue
+                ledger.add(slug_new)
+            if covered:
+                existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
+                have = {_norm_gate(l) for l in existing}
+                for g, usd in covered:
+                    if _norm_gate(g) not in have:
+                        have.add(_norm_gate(g))
+                        existing.append(f"- {g} {gi.annotation(date, usd, limit['value'], limit['source'])}")
+                note.upsert_section(APPROVED_GATES_SECTION, "\n".join(existing))
+                stage = None
+                if left:
+                    note.upsert_section(GATE_PENDING_SECTION, bullets([g for g, _ in left]))
+                else:
+                    stage, route, ready_pr = _sign_route(note, slug, now)
+                note.save(dry_run=args.dry_run)
+                # the Standing approval signed these, not Lachy: recorded, and not counted as his act (p21-2)
+                _event(_note_rollout(note), "gate-signed", slug, {"standing": True, "gates": len(covered)}, args)
+                if stage == "integration":
+                    _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
+                for g, usd in covered:
+                    print(f"{slug}: gate approved under the standing approval: {g} (exposure US${gi.format_usd(usd)} of "
+                          f"US${gi.format_usd(limit['value'])}, {limit['source']})" + suffix)
+                if not left:
+                    print(f"{slug}: every gate signed under the standing approval -> {route}" + suffix)
+            for g, why in left:
+                print(f"ASK: {slug}: {g}: {why}")
+                asked = True
+    finally:
+        ledger.close()
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else (3 if asked else 0)
@@ -6938,8 +8568,9 @@ def cmd_verify_timeout(args) -> int:
         return 1
     try:
         # The completion verify's keys, read at every entry, so a value its reader refuses halts before any work
-        # runs, never only at the ceremony after every task merged.
+        # runs, never only at the ceremony after every task merged. `named_rerun:` (p29-9) the same way.
         _completion_config(note)
+        named = _named_rerun(note)
     except CompletionValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
@@ -6947,10 +8578,91 @@ def cmd_verify_timeout(args) -> int:
     if err:
         print(f"ERROR: rollout settings refused: {err}", file=sys.stderr)
         return 3
-    print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000,
-                      "slotWait": _slot_wait(seconds),
-                      "verifySlots": slots,
-                      "verifySlot": {"script": str(VERIFY_SLOT_PY), "slots": slots}}))
+    out = {"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000, "slotWait": _slot_wait(seconds),
+           "verifySlots": slots, "verifySlot": {"script": str(VERIFY_SLOT_PY), "slots": slots}}
+    if named:
+        out["namedRerun"] = named   # only when the note sets it, so a line for a note without it is unchanged
+    print(json.dumps(out))
+    return 0
+
+
+# ---- record-verify (ADR 0050, p29-9) -------------------------------------------
+
+RECORD_VERIFY_SITES = ("integration", "race")
+
+
+def cmd_record_verify(args) -> int:
+    """The lead's record of one Integration verify or RACE re-verify (execute § 4.5 step 3, the RACE procedure), run
+    only after its canary check exited 0: lead-integrate.py verify --diff-base's <out>.flake.json (--from). Verdict
+    `flake`: each Flake logged and filed (_record_flakes, site --site). A timeout: one `suite-timeout` event (load,
+    ADR 0051). Anything else records nothing. Then `recorded: <stamp>` is written into the file (tmp + rename), so a
+    second call is `[no-change]`. No file (a verify whose verifier never ran writes none): `nothing to record`, exit 0.
+    An unreadable or malformed file, a task note not found or not of --rollout, or a follow-up that cannot be written:
+    one ERROR line, exit 1, the file not stamped. --dry-run writes nothing."""
+    src = Path(os.path.expanduser(args.from_))
+    slug = args.tasks.strip()
+    if not src.exists() and not src.is_symlink():
+        # lead-integrate.py verify writes no Flake record when the verifier never ran (`noslot`, a failed
+        # env_bootstrap), so the lead's record-verify after such a verify has nothing to read.
+        print(f"{slug}: {args.site} verify wrote no {src.name} (the verifier never ran: noslot or a failed "
+              "env_bootstrap): nothing to record")
+        return 0
+    try:
+        rec = json.loads(src.read_text())
+        if not isinstance(rec, dict) or rec.get("v") != 1 or rec.get("verdict") not in ("green", "flake", "red"):
+            raise ValueError("not a verify Flake record (v 1, verdict green | flake | red)")
+    except (OSError, ValueError) as e:
+        print(f"ERROR: record-verify: {src}: {e}; nothing recorded", file=sys.stderr)
+        return 1
+    if rec.get("recorded"):
+        print(f"{slug}: {args.site} verify at {str(rec.get('sha') or '')[:12]} already recorded {rec['recorded']} "
+              "[no-change]")
+        return 0
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    path = tasks_dir / f"{slug}.md"
+    try:
+        note = Note(path)
+    except (OSError, ValueError) as e:
+        print(f"ERROR: record-verify: {slug}: task note unreadable at {path}: {e}; nothing recorded", file=sys.stderr)
+        return 1
+    ro = rollout_path.stem
+    if (_note_rollout(note) or "").lower() != ro.lower():
+        print(f"ERROR: record-verify: {slug}: its rollout: is {note.get('rollout') or 'none'}, not [[{ro}]]; nothing "
+              "recorded", file=sys.stderr)
+        return 1
+    out, warns, errs = [], [], []
+    if rec["verdict"] == "flake":
+        flakes = [{"test": x, "sha": rec.get("sha")} for x in (rec.get("flakes") or [])]
+        out, warns, errs = _record_flakes(args, ro, slug, note, flakes, args.site, tasks_dir, rollout_path=rollout_path)
+    timeout = rec.get("timeout")
+    if isinstance(timeout, dict):
+        fields = {"site": args.site, "run": timeout.get("run"), "seconds": timeout.get("seconds")}
+        if isinstance(rec.get("sha"), str) and rec["sha"]:
+            fields["sha"] = rec["sha"]
+        _event(ro, "suite-timeout", slug, fields, args)
+        out.append(f"suite-timeout: [[{slug}]] {args.site} verify's {timeout.get('run')} run hit its "
+                   f"{timeout.get('seconds')}s deadline: logged as load (ADR 0051), never a Flake"
+                   + (" (dry-run)" if args.dry_run else ""))
+    for w in warns:
+        print(f"WARNING: {w}", file=sys.stderr)
+    for line in out:
+        print(line)
+    if errs:
+        for e in errs:
+            print(f"ERROR: record-verify: {e}", file=sys.stderr)
+        return 1
+    if not args.dry_run:
+        try:
+            rec["recorded"] = _stamp(_now(args))
+            tmp = src.with_name(src.name + ".tmp")
+            tmp.write_text(json.dumps(rec, ensure_ascii=False) + "\n")
+            os.replace(tmp, src)
+        except OSError as e:
+            print(f"WARNING: record-verify: {src} not stamped recorded: {e}", file=sys.stderr)
+    if not out:
+        print(f"{slug}: {args.site} verify {rec['verdict']}" + (f" ({rec.get('why')})" if rec.get("why") else "")
+              + ": nothing to record" + (" (dry-run)" if args.dry_run else ""))
     return 0
 
 
@@ -6963,11 +8675,12 @@ DEFAULT_COMPLETION_TIMEOUT = 3600   # the full suite's own deadline, never verif
 COMPLETION_VERIFY_SECTION = "## Completion verify log"
 COMPLETION_RED_PREFIX = "completion-red-"   # never prefix-matches `<slug>-rollout-<date>*`, as phase-close-followup-
 COMPLETION_KIND = "completion-verify"       # the canary window's kind; its slug is the rollout's own stem
-# Every result a run is recorded as. `noslot`, `unrun` and `stopped` are no verdict and move no attempt; `stopped`
-# (verify's own signal: a hard pause, a room stop) is deliberate, so it never counts toward the halt streak either.
+# Every result a run is recorded as. `noslot`, `unrun`, `stopped` and `heat` are no verdict and move no attempt;
+# `stopped` (verify's own signal: a hard pause, a room stop) is deliberate and `heat` (the Heat hold, estate ADR 0009
+# d5: the Mac was too hot to run the suite) is meant, so neither ever counts toward the halt streak.
 COMPLETION_DECIDED = ("green", "flake", "red")
 COMPLETION_STREAK = ("noslot", "unrun")
-COMPLETION_NO_VERDICT = (*COMPLETION_STREAK, "stopped")
+COMPLETION_NO_VERDICT = (*COMPLETION_STREAK, "stopped", "heat")
 COMPLETION_RESULTS = (*COMPLETION_DECIDED, "rerun", *COMPLETION_NO_VERDICT)
 COMPLETION_HALT_STREAK = 3   # no-verdict runs in a row before the lead halts, as the RACE re-verify does
 COMPLETION_LINE_RE = re.compile(r"^- \S+ attempt (?P<n>[12]) at (?P<sha>[0-9a-f]{40}) rc (?P<rc>\S+) -> "
@@ -6976,7 +8689,7 @@ COMPLETION_LINE_RE = re.compile(r"^- \S+ attempt (?P<n>[12]) at (?P<sha>[0-9a-f]
 ATTEMPT_LOCK_WAIT = 2.0      # seconds --run retries its lock, outlasting a reader's microsecond shared probe
 ORIGIN_TIMEOUT = 120         # seconds for each origin read before verify (ls-remote, fetch): a hang is a halt
 VERIFY_OUTCOME_SUFFIX = ".outcome.json"
-VERIFY_OUTCOME_ENDED = ("running", "done", "deadline", "bootstrap", "signal", "noslot")   # lead-integrate.py's
+VERIFY_OUTCOME_ENDED = ("running", "done", "deadline", "bootstrap", "signal", "noslot", "heat")  # lead-integrate.py's
 
 
 def _run_id(dt, pid):
@@ -7081,6 +8794,22 @@ def _completion_timeout(note):
     return seconds
 
 
+NAMED_RERUN_KEY = "named_rerun"
+NAMED_RERUN_SLOT = "{tests}"
+
+
+def _named_rerun(note):
+    """The rollout's `named_rerun:` (ADR 0050, p29-9): the repo's own runner for named tests, holding `{tests}` exactly
+    once, which lead-integrate.py verify --named-rerun replaces with the failing ids, each shell-quoted. Read by
+    _command_value, so its forms are completion_verifier's; '' when absent (the lead's Flake check then leaves a red
+    red). A value without `{tests}`, or with it twice, raises CompletionValueError."""
+    cmd = _command_value(note, NAMED_RERUN_KEY)
+    if cmd and cmd.count(NAMED_RERUN_SLOT) != 1:
+        raise CompletionValueError(f"{NAMED_RERUN_KEY}: {cmd!r} must hold {NAMED_RERUN_SLOT} exactly once (where the "
+                                   "failing tests go), e.g. \"scripts/test -n0 {tests}\"")
+    return cmd
+
+
 def _completion_lines(note):
     """The parsed `## Completion verify log` lines, oldest first; a line that does not parse is skipped."""
     out = []
@@ -7095,11 +8824,11 @@ def _completion_state(note):
     """(state, attempt, last, streak) from the note's parsed log lines (_completion_lines): `run` (no verdict yet: attempt 1 on a fresh
     origin/<default>), `rerun` (attempt 1 was red: attempt 2 on its sha), or the decided `green`, `flake` or `red`.
     A no-verdict line moves nothing. last: the deciding line, or None; streak: the COMPLETION_STREAK lines at the
-    log's tail, a `stopped` one skipped."""
+    log's tail, every other no-verdict one (`stopped`, `heat`) skipped."""
     lines = _completion_lines(note)
     streak = 0
     for d in reversed(lines):
-        if d["result"] == "stopped":
+        if d["result"] in COMPLETION_NO_VERDICT and d["result"] not in COMPLETION_STREAK:
             continue
         if d["result"] not in COMPLETION_STREAK:
             break
@@ -7119,25 +8848,92 @@ def _completion_halts(result, streak):
     return result in COMPLETION_STREAK and streak > 0 and streak % COMPLETION_HALT_STREAK == 0
 
 
-def _failing_ids(lines):
+def _failing_ids(lines, marker="== verifier:"):
     """Up to FAILING_IDS_MAX distinct failing-test ids read from the verify log's lines (an open file streams), in
-    order, from verify's `== verifier:` line on, so an env_bootstrap's own ERROR lines are never read as tests; []
-    when none parse."""
+    order, from verify's last `== verifier:` line to its `== verifier rc` line, so an env_bootstrap's own ERROR lines
+    are never read as tests, nor a heat-stopped pass's run the Heat hold re-queued (lead-integrate.py verify: the log
+    keeps every pass, and only the last is the verdict), nor the Flake check's named re-run and confirming run that
+    follow the first run (lead-integrate.py verify --diff-base, ADR 0050); [] when none parse. marker=None reads from
+    the first line (an agent suite's captured output, verify-slot.py run)."""
     ids = []
-    started = False
+    reading = marker is None
     for line in lines:
         line = line.rstrip("\n")
-        if not started:
-            started = line.startswith("== verifier:")
+        if marker is not None and line.startswith(marker):
+            ids, reading = [], True   # a later pass's run (the Heat hold's re-queue): only the last one is read
+            continue
+        if not reading:
+            continue
+        if line.startswith("== verifier rc"):
+            reading = False   # the run ended; a later `== verifier:` (a re-queued pass) starts over
+            continue
+        if len(ids) >= FAILING_IDS_MAX:
             continue
         for rx in FAILING_ID_RES:
             m = rx.match(line)
             if m and m.group(1) not in ids:
                 ids.append(m.group(1))
                 break
-        if len(ids) >= FAILING_IDS_MAX:
-            break
     return ids
+
+
+# ---- the Flake check's placement (ADR 0050, p29-9) ----------------------------
+# lead-integrate.py verify --diff-base reads the first run's failing ids (_failing_ids), then asks flake_verdict
+# whether every one sits in a test file outside the task's diff: only then does it re-run them by name and confirm
+# with one more full run. Pure: no git, no run; the caller passes the diff's paths (None when they could not be read).
+
+
+def flake_file(test_id, tree):
+    """The repo-relative test file a failing id names, or None when it names none: the id before any `::` (pytest's
+    `path::name`), else the whole id. A path absolute inside the tree is made relative; a `..` part, a path outside the
+    tree, a directory or a missing file is no test file (a node spec name, a TAP name, unittest's `name (mod.Class)`,
+    a go or cargo id all land here)."""
+    raw = str(test_id).split("::", 1)[0]
+    if not raw or "\x00" in raw:
+        return None
+    root = os.path.realpath(str(tree))
+    path = raw
+    if os.path.isabs(path):
+        for base in (str(tree), root):
+            base = base.rstrip(os.sep)
+            if path.startswith(base + os.sep):
+                path = path[len(base) + 1:]
+                break
+        else:
+            return None
+    parts = [x for x in path.replace(os.sep, "/").split("/") if x not in ("", ".")]
+    if not parts or ".." in parts:
+        return None
+    full = os.path.join(root, *parts)
+    real = os.path.realpath(full)
+    if not (real == root or real.startswith(root + os.sep)) or not os.path.isfile(full):
+        return None
+    return "/".join(parts)
+
+
+def flake_verdict(ids, tree, diff_files):
+    """The Flake check's placement of a red's failing ids, first match: no id -> `unnamed` (a timeout, a lint,
+    typecheck or build step); FAILING_IDS_MAX ids -> `too-many` (the parser's cap: not every failure is seen); an id
+    flake_file places in no test file -> `unplaced`; diff_files None (the diff could not be read) -> `diff`; an id whose
+    file the diff changes -> `touched`; else `candidates`, the only verdict that re-runs. Returns {verdict, files: {id:
+    file or None}, touched: [ids], unplaced: [ids]}."""
+    ids = list(ids)
+    files = {i: flake_file(i, tree) for i in ids}
+    unplaced = [i for i in ids if files[i] is None]
+    touched = [i for i in ids if files[i] is not None and diff_files is not None and files[i] in diff_files]
+    if not ids:
+        verdict = "unnamed"
+    elif len(ids) >= FAILING_IDS_MAX:
+        verdict = "too-many"
+    elif unplaced:
+        verdict = "unplaced"
+    elif diff_files is None:
+        verdict = "diff"
+    elif touched:
+        verdict = "touched"
+    else:
+        verdict = "candidates"
+    return {"verdict": verdict, "files": files, "touched": touched, "unplaced": unplaced}
 
 
 def _completion_paths(root, ro, attempt):
@@ -7227,6 +9023,8 @@ def _classify_completion(outcome, attempt):
         return "unrun", "verify never finished (no final outcome), no verdict: the attempt re-runs"
     if ended == "noslot":
         return "noslot", "no verify slot in time, no verdict: it retries at the next tick"
+    if ended == "heat":
+        return "heat", "the Mac was too hot to run the suite (a Heat hold), no verdict: it retries at the next tick"
     if ended == "signal":
         return "stopped", f"verify was stopped by signal {outcome.get('signal')}, no verdict: the attempt re-runs"
     if ended == "bootstrap" or (ended == "deadline" and step != "verifier"):
@@ -7405,7 +9203,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     # beside it. `--flag=value`, so a command starting with `-` is never read as an option.
     argv = [sys.executable, str(LEAD_INTEGRATE_PY), "verify", "--outcome", "--repo", str(root), f"--detach-at={sha}",
             "--tree", tree, "--out", out, "--timeout", str(timeout), "--slots", str(slots),
-            "--slot-wait", str(_slot_wait(timeout + spent)), f"--verifier={verifier}"]
+            "--slot-wait", str(_slot_wait(timeout + spent)), f"--verifier={verifier}", f"--rollout={path}"]
     argv += [f"--bootstrap={bootstrap}"] if bootstrap else []
     outcome_path, log_path = Path(f"{out}{VERIFY_OUTCOME_SUFFIX}"), Path(f"{out}.log")
     # A dead run's files are never read as this run's: its outcome goes, its log is kept under a name of its own.
@@ -7568,6 +9366,7 @@ def main() -> int:
                     help="comma-separated slugs whose task calls are live (default: every in_progress note); "
                          "any other in_progress note is stalled and restarts")
     nx.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    nx.add_argument("--gh-bin", default="gh", help="the gh executable a hold_until's PR is read through (tests pass a stub)")
     nx.add_argument("--dry-run", action="store_true",
                     help="write nothing (a drained pause is reported, not stamped; a start stamp is reported, not cleared)")
     nx.set_defaults(func=cmd_next)
@@ -7702,6 +9501,17 @@ def main() -> int:
     rp.add_argument("--dry-run", action="store_true")
     rp.set_defaults(func=cmd_record_pause)
 
+    ren = sub.add_parser("record-entry", help="the lead's loop entry in the Run record: the stops it finds, then one "
+                                              "lead-entry (p29-10, ADR 0051; execute § 4.5 *Run record*)")
+    ren.add_argument("--rollout", required=True, help="path to the rollout note")
+    ren.add_argument("--by", required=True, choices=ENTRY_BYS, help="what opened this entry")
+    ren.add_argument("--cause", choices=ENTRY_CAUSES, default=None,
+                     help="why the session stopped, when the Prompt that opened the entry names it")
+    ren.add_argument("--session", default=None, help="the lead's session id (default: CLAUDE_CODE_SESSION_ID)")
+    ren.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    ren.add_argument("--dry-run", action="store_true", help="print what it would record; write nothing")
+    ren.set_defaults(func=cmd_record_entry)
+
     df = sub.add_parser("defer", help="pop task(s) out of a rollout back to open backlog (/thread:repair)")
     df.add_argument("--tasks", required=True, help="comma-separated task slugs to defer")
     df.add_argument("--rollout", default=None, help="rollout note path (optional; asserts membership before deferring)")
@@ -7768,6 +9578,19 @@ def main() -> int:
     vt.add_argument("--rollout", required=True, help="path to the rollout note")
     vt.set_defaults(func=cmd_verify_timeout)
 
+    rvf = sub.add_parser("record-verify", help="record the lead's Integration verify or RACE re-verify from its "
+                                                "<out>.flake.json: each Flake logged and filed, a timeout logged as "
+                                                "load (ADR 0050, 0051); run only after its canary check exited 0")
+    rvf.add_argument("--rollout", required=True, help="path to the rollout note")
+    rvf.add_argument("--tasks", required=True, help="the verified task's slug")
+    rvf.add_argument("--site", required=True, choices=RECORD_VERIFY_SITES, help="integration (step 3) or race (the RACE "
+                                                                                 "procedure)")
+    rvf.add_argument("--from", dest="from_", required=True, help="lead-integrate.py verify --diff-base's <out>.flake.json")
+    rvf.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help + " (the follow-ups' home)")
+    rvf.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the Flake log line's stamp)")
+    rvf.add_argument("--dry-run", action="store_true", help="print what would be recorded; write nothing")
+    rvf.set_defaults(func=cmd_record_verify)
+
     cv = sub.add_parser("completion-verify", help="the completion verify (estate ADR 0009 d6, ADR 0052): print the "
                                                   "attempt's state as JSON (read-only), or with --run run one attempt "
                                                   "end to end (arm, verify, check, record) under its lock")
@@ -7783,15 +9606,19 @@ def main() -> int:
     ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")
     ag.add_argument("--standing", action="store_true",
                     help="sign only the spend gates the standing approval covers (spend_approval_usd: task, rollout, "
-                         "rollouts.toml, built-in 0 = off); the rest stay pending as ASK lines: exit 0 all signed, "
-                         "3 some left, 1 an error (ADR 0034)")
+                         "rollouts.toml, built-in 0 = off), and while this calendar month's standing-approved spend "
+                         "(every rollout note's ## Needs-you log) stays within the same limit; each signing is logged "
+                         "there; the rest stay pending as ASK lines: exit 0 all signed, 3 some left, 1 an error "
+                         "(ADR 0034)")
     ag.add_argument("--rollout", default=None,
                     help="with --standing (required there): the rollout note, whose frontmatter and Project root "
                          "resolve spend_approval_usd; the task's rollout: must name it. Without --standing only the "
                          "Engine snapshot guard reads it (orient-all's Sign-off passes it)")
     ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ag.add_argument("--date", default=None, help="sign-off date stamped on each gate (default: today)")
-    ag.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp of a stop at Integration)")
+    ag.add_argument("--now", type=_iso_arg, default=None,
+                    help=now_help + " (the ready: restamp of a stop at Integration; with --standing also the Needs-you "
+                                    "log line's stamp and the calendar month the month line sums)")
     ag.add_argument("--dry-run", action="store_true")
     ag.set_defaults(func=cmd_approve_gates)
 
