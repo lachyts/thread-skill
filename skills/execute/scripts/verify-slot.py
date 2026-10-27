@@ -78,6 +78,23 @@ Contract.
    Residuals: a command that exits after the settle check, inside the guard's last poll (at most one GUARD_POLL),
    reads as heat-stopped and is rerun (no verdict, never red); a copy of this script from before the Heat hold
    (another rollout's Engine snapshot, an older plugin install) shares the pool and still runs hot.
+8. The Run record (p29-10, ADR 0051). A `run` whose real cwd lies under `<repo>/.claude/worktrees/<slug>` (the last
+   such part) and whose task note, reconcile-rollout.py's DEFAULT_TASKS_DIR/<slug>.md, names a rollout records the
+   suite in that rollout's Run record: suite-started (by task, or integration with --priority; runner agent; the
+   tree's sha, dirty and diff read before the slot wait, the load and the Mac-wide running count after it) and,
+   once the slot is released, suite-ended: green (rc 0), stopped (128+n, or a signal to `run`: no vault scan, no
+   output read), unrun (127), else red with the failing names read from the last 16 MiB of its output. Only
+   suite-started is written while the slot is held, before the command starts (its vault walk for the running
+   count, a fraction of a second); a stop signal in that walk ends the run 128+n with no line written. The Heat
+   hold (contract 7) holds here too: a heat stop ends that run's suite heat (no verdict, no rc), written once its
+   slot is released and with stops held for the write, and the restart once the Mac cools is a suite of its own,
+   with a fresh suite-started; a stop while held for the heat or back in line exits 76 and writes nothing more.
+   Unless fd 1 or fd 2 is a TTY, the guard's stdout and stderr then go through pipes: a pump forwards each chunk to
+   fd 1 or fd 2 within GUARD_POLL, keeps a copy in an unlinked temp file and reads the heat as Guarded.watch() does;
+   once the guard exits it drains what is ready for at most a second and never waits for EOF, so a leftover that
+   writes after `run` exits gets EPIPE, and output written while a stop ends the suite may be lost. Any other run (no
+   task tree, no note, no `rollout:`) takes the path above unchanged. Recording failures are silent and never change
+   the rc; a SIGKILL of `run` leaves a started line with no ended line.
 
 `run --slots N [--priority] -- CMD…`: waits for a slot (`verify-slot: waiting for one of N verify slots (held
 by pid … in … since …[; K Integration waiter(s) ahead])` on stderr, repeated every 5 minutes; nothing when one
@@ -763,12 +780,53 @@ def _parse_run(argv):
     raise _Usage("run: no -- before the command")
 
 
+RECONCILE_PY = os.path.join(os.path.dirname(SCRIPT), "reconcile-rollout.py")
+WORKTREES = (".claude", "worktrees")
+CAPTURE_TAIL = 16 * 1024 * 1024   # the bytes of an agent suite's output its failing names are read from
+DRAIN_FOR = 1.0                   # seconds the pump drains what is ready once the guard exits; never waits for EOF
+
+
+def _load_reconcile():
+    """reconcile-rollout.py, loaded only for a suite in a task tree (step-boundary.py's _load_reconcile pattern)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("reconcile_rollout", RECONCILE_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _suite_owner():
+    """The task an agent's suite is for (contract item 8), or None: the last `/.claude/worktrees/<slug>` of the real cwd
+    names the task, and its note in reconcile-rollout.py's DEFAULT_TASKS_DIR names the rollout (`rollout:`). Silent:
+    any failure is no owner."""
+    try:
+        parts = os.path.realpath(os.getcwd()).split(os.sep)
+        at = [i for i in range(len(parts) - 2) if tuple(parts[i:i + 2]) == WORKTREES and parts[i + 2]]
+        if not at:
+            return None
+        i = at[-1]
+        slug, tree = parts[i + 2], os.sep.join(parts[:i + 3])
+        rr = _load_reconcile()
+        note = rr.DEFAULT_TASKS_DIR / f"{slug}.md"
+        if not note.is_file():
+            return None
+        rollout = rr._note_rollout(rr.Note(note))
+        if not rollout:
+            return None
+        return {"rr": rr, "rollout": rollout, "task": slug, "tree": tree, "tasks_dir": rr.DEFAULT_TASKS_DIR}
+    except Exception:
+        return None
+
+
 def _say(msg):
     print(f"verify-slot: {msg}", file=sys.stderr, flush=True)
 
 
 def cmd_run(argv):
     slots, prio, cmd = _parse_run(argv)
+    owner = _suite_owner()
+    if owner is not None:
+        return _run_recorded(slots, prio, cmd, owner)
     for s in SIGNALS:
         signal.signal(s, _on_signal)
     box = {"g": None}
@@ -824,6 +882,196 @@ def cmd_run(argv):
     finally:
         if slot is not None:
             slot.release()
+    return rc
+
+
+def _put(fd, data):
+    """Write all of `data` to fd; a closed reader (EPIPE) or any other error drops the rest."""
+    try:
+        while data:
+            data = data[os.write(fd, data):]
+    except OSError:
+        pass
+
+
+def _pump(g, capture, heat=False):
+    """Forward the guard's stdout and stderr, as they come, to fd 1 and fd 2, appending both to `capture`; once the guard
+    exits, drain what is ready for at most DRAIN_FOR seconds, never waiting for EOF (a leftover background process may
+    hold the pipes), close the pipes and return the command's rc as Guarded.wait does. With `heat`, the Heat hold's stop
+    as Guarded.watch() (contract 7): while the guard runs it reads heat_level() every HEAT_POLL_FACTOR * the poll base;
+    at HEAT_STOP or worse it gives the guard HEAT_SETTLE to exit by itself (that rc is kept), else stops it, keeps the
+    level in `g.heat` and returns HEAT_STOPPED."""
+    srcs = {g.proc.stdout.fileno(): 1, g.proc.stderr.fileno(): 2}
+    until = None
+    due = time.monotonic() + HEAT_POLL_FACTOR * _poll_base() if heat else None
+    stopped = False
+    while srcs:
+        if until is None and g.proc.poll() is not None:
+            until = time.monotonic() + DRAIN_FOR
+        if until is None and due is not None and time.monotonic() >= due:
+            due = time.monotonic() + HEAT_POLL_FACTOR * _poll_base()
+            level = heat_level()
+            if level >= HEAT_STOP:
+                try:
+                    g.proc.wait(HEAT_SETTLE)
+                except subprocess.TimeoutExpired:
+                    g.heat = level
+                    g.stop()
+                    stopped = True
+                    break
+                continue   # the guard ended by itself: drain, and its rc is the verdict
+        ready, _, _ = select.select(list(srcs), [], [], 0 if until is not None else GUARD_POLL)
+        for fd in ready:
+            try:
+                chunk = os.read(fd, 1 << 16)
+            except OSError:
+                chunk = b""
+            if not chunk:
+                del srcs[fd]
+                continue
+            _put(srcs[fd], chunk)
+            try:
+                capture.write(chunk)
+            except OSError:
+                pass
+        if until is not None and (not ready or time.monotonic() >= until):
+            break
+    rc = None if stopped else g.proc.wait()
+    for f in (g.proc.stdout, g.proc.stderr):
+        try:
+            f.close()
+        except OSError:
+            pass
+    if stopped:
+        return HEAT_STOPPED
+    g.close()
+    return g._after(rc)
+
+
+def _failing_from(rr, capture):
+    """The failing-test names in the last CAPTURE_TAIL bytes of an agent suite's captured output (reconcile-rollout.py
+    _failing_ids, from the first line), or None when nothing could be read."""
+    try:
+        capture.flush()
+        size = capture.seek(0, os.SEEK_END)
+        capture.seek(max(0, size - CAPTURE_TAIL))
+        return rr._failing_ids(capture.read().decode("utf-8", "replace").splitlines(), marker=None)
+    except (OSError, ValueError):
+        return None
+
+
+def _heat_run_ended(rr, owner, slot, suite, by, t0, written):
+    """A heat-stopped run in a task tree (contract items 7 and 8): its slot released (a close), then, when its started
+    line landed, its suite ended heat, no verdict and no rc, so the record never holds a slot. The caller holds stops
+    across it."""
+    slot.release()
+    if written.get("started"):
+        rr.suite_ended(owner["rollout"], owner["task"], suite, by, "agent", "heat", time.monotonic() - t0,
+                       tasks_dir=owner["tasks_dir"])
+
+
+def _run_recorded(slots, prio, cmd, owner):
+    """`run` for a suite in a task tree (contract item 8): the slotted run as cmd_run's, the Heat hold included, plus its
+    suite-started and suite-ended lines in the rollout's Run record, and, unless fd 1 or fd 2 is a TTY, its output
+    captured through a pump for the failing names. The tree's state is read before the slot wait; the load and the
+    running count after it, so suite-started (that vault walk included) is written with the slot held, before the
+    command starts. suite-ended is written once the slot is released, so its walk and the failing names never hold one;
+    a stop by signal skips the vault scan and the capture. A heat stop ends its run's suite heat, with stops held for the
+    write, and the restart once the Mac cools is a suite of its own. Recording never changes the rc, nor swallows a
+    stop: one in that walk is 128+n too (76 when the Mac was hot, as cmd_run's)."""
+    rr = owner["rr"]
+    for s in SIGNALS:
+        signal.signal(s, _on_signal)
+    box = {"g": None}
+    why = {"heat": None}   # acquire's: the level that held the last poll, or None
+    stopped = None         # the heat name of the last heat stop
+    slot = capture = None
+    rc = signalled = None
+    written, t0 = {}, None
+    suite, by = rr.new_suite_id(), ("integration" if prio else "task")
+    piped = not (os.isatty(1) or os.isatty(2))
+    try:
+        state = rr.tree_state(owner["tree"])   # the agent's tree is still while it waits for a slot
+        # The Heat hold (contract 7), as cmd_run's: a heat stop releases the slot and goes back in line, at the back, to
+        # restart the command from the beginning once the Mac cools. Only the last run's rc is the exit.
+        while True:
+            try:
+                slot = acquire(slots, priority=prio, kind="run", why=why, on_wait=_say)
+            except SlotDirError as e:
+                _say(f"WARN {e}; running unslotted")
+                slot = None
+            if slot is not None and slot.queued:
+                _say(f"slot {slot.index + 1} of {slots} after {slot.waited:.0f}s")
+            t0 = time.monotonic()   # before the write: a stop delivered as it ends still gets its end line
+            rr.suite_started(owner["rollout"], owner["task"], suite, by, "agent", state, tasks_dir=owner["tasks_dir"],
+                             waited=slot.waited if slot is not None else None, reraise=(_Signalled,), written=written)
+            if piped:
+                import tempfile
+                capture = tempfile.TemporaryFile()
+            g = Guarded(cmd, hold=slot, on_spawn=lambda x: box.__setitem__("g", x),
+                        **({"stdout": subprocess.PIPE, "stderr": subprocess.PIPE} if piped else {}))
+            if slot is not None:
+                write_holder(slot, {"pid": os.getpid(), "guard": g.pid, "group": g.group, "cwd": os.getcwd(),
+                                    "since": _stamp(), "kind": "run"})
+            # Unslotted (a SlotDirError) there is no heat watch, so that run is the last.
+            rc = _pump(g, capture, heat=slot is not None) if piped else g.watch(heat=slot is not None)
+            if rc is not HEAT_STOPPED:
+                break
+            stopped = heat_name(g.heat)
+            # With stops held, so a stop meanwhile ends no suite twice: the slot released, then the heat-stopped run's
+            # suite ended heat (_heat_run_ended); the restart is a fresh suite.
+            with rr._signals_held():
+                _say(f"heat stop ({stopped}): ended the suite after {time.monotonic() - t0:.0f}s; no verdict, never "
+                     "red: back in line to restart from the beginning once the Mac cools")
+                _heat_run_ended(rr, owner, slot, suite, by, t0, written)
+                slot = None
+                box["g"] = None
+                if capture is not None:
+                    capture.close()
+                    capture = None
+                suite, written, t0 = rr.new_suite_id(), {}, None
+    except _Signalled as s:
+        for sig in SIGNALS:
+            signal.signal(sig, signal.SIG_IGN)
+        signalled = True
+        if box["g"] is not None:
+            box["g"].stop()
+            rc = 128 + s.signum
+        elif why["heat"] is not None or stopped is not None:
+            # Stopped while held for the heat, or back in line after a heat stop: no verdict, never red.
+            name = heat_name(why["heat"]) if why["heat"] is not None else stopped
+            _say(f"no verdict: stopped while the Mac was hot (heat: {name}); exit {HEAT_EXIT}")
+            rc = HEAT_EXIT
+        else:
+            rc = 128 + s.signum
+    except BaseException:
+        if box["g"] is not None:
+            box["g"].close()
+        if capture is not None:
+            capture.close()
+        raise
+    finally:
+        if slot is not None:
+            slot.release()
+    try:
+        if written.get("started") and t0 is not None:
+            seconds = time.monotonic() - t0
+            common = (owner["rollout"], owner["task"], suite, by, "agent")
+            if signalled or rc > 128:
+                rr.suite_ended(*common, "stopped", seconds, tasks_dir=owner["tasks_dir"], scan=False, rc=rc)
+            else:
+                outcome = "green" if rc == 0 else "unrun" if rc == 127 else "red"
+                failing = _failing_from(rr, capture) if outcome == "red" and capture is not None else None
+                rr.suite_ended(*common, outcome, seconds, tasks_dir=owner["tasks_dir"], rc=rc, failing=failing)
+    except _Signalled:
+        pass   # a stop after the suite ended: the recording is abandoned and the exit stays the suite's rc
+    except Exception:
+        pass
+    finally:
+        for sig in SIGNALS:   # the suite and its record are done: a late stop changes nothing now
+            signal.signal(sig, signal.SIG_IGN)
+        if capture is not None:
+            capture.close()
     return rc
 
 
