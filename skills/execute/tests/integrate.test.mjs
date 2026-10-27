@@ -978,13 +978,13 @@ test('arg validation: every bad field throws before any dispatch', async () => {
   ]
   for (const [name, I] of bad) {
     const r = await run(mkArgs(I))
-    assert.match(String(r.error && r.error.message), new RegExp(`^args\\.integration: .*${name}`), name)
+    assert.match(String(r.error && r.error.message), new RegExp(`^thread:args-refused: args\\.integration: .*${name}`), name)
     assert.equal(r.calls.length, 0, name)
   }
   const shapes = [
     [mkArgs(mkI(), { repoPath: '' }), /repoPath/], [mkArgs(mkI(), {}, { scope: 'read-only' }), /read-only/],
     [mkArgs(mkI(), {}, { maxIterations: 0 }), /maxIterations/], [mkArgs(mkI(), {}, { maxReviewRounds: 0 }), /max_review_rounds = 0/],
-    [mkArgs(mkI(), { mode: 'merge' }), /^args\.mode: refusing "merge"/], [mkArgs(undefined), /args\.integration: must be one object/],
+    [mkArgs(mkI(), { mode: 'merge' }), /^thread:args-refused: args\.mode: refusing "merge"/], [mkArgs(undefined), /args\.integration: must be one object/],
     [{ ...mkArgs(mkI()), mode: undefined }, /only with args\.mode 'integrate'/],
     [mkArgs(mkI(), {}, { resume: { stage: 'revise' } }), /never mode 'integrate'/],
   ]
@@ -1096,7 +1096,7 @@ test('S5: bad resume args throw before any dispatch', async () => {
   ]
   for (const [resume, re] of bad) {
     const r = await run(resumeArgs(resume))
-    assert.match(String(r.error && r.error.message), /^args\.task\.resume: /)
+    assert.match(String(r.error && r.error.message), /^thread:args-refused: args\.task\.resume: /)
     assert.match(String(r.error && r.error.message), re)
     assert.equal(r.calls.length, 0)
   }
@@ -1217,7 +1217,7 @@ test('h2: a seeded revise whose live history ends in an empty round passes and r
   assert.ok(!/^Round 4/m.test(later.row.blockerDiagnosis), later.row.blockerDiagnosis)
   assert.deepEqual(JSON.parse(JSON.stringify(T.parseIntegrationMarker(later.row.blockerDiagnosis).history)), HIST2)
   const empty = await run({ ...args, task: mkTask({ resume: { ...resume, reviewHistory: [{ round: 1, feedback: [] }], reviewRoundsUsed: 1 } }) })
-  assert.match(String(empty.error && empty.error.message), /^args\.task\.resume: reviewHistory must carry at least one round with feedback/)
+  assert.match(String(empty.error && empty.error.message), /^thread:args-refused: args\.task\.resume: reviewHistory must carry at least one round with feedback/)
   assert.equal(empty.calls.length, 0)
 })
 

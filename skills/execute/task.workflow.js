@@ -31,7 +31,7 @@ export const meta = {
 //                                    //   rungs: [{ name, model, effort, judge, review }, …] }, bottom first.
 //                                    //   Fixed for the call: a resume re-passes its call's own ladder, so an
 //                                    //   edit reaches a task at its next call. Validated (ladderArgsError)
-//                                    //   before any dispatch, in both modes. Absent ⇒ the built-in ladder (a
+//                                    //   before any dispatch (argsRefused), in both modes. Absent ⇒ the built-in ladder (a
 //                                    //   Lost-call resume of a call from before 3.0.0); that call's retired
 //                                    //   tier-ceiling and judge-pin args are ignored, never an error.
 //   knownBaselineFailures : string[],// optional; "test_id — reason" lines for tests already red on a
@@ -60,7 +60,8 @@ export const meta = {
 //                                    //   review judge carry slotRule after KILL_RULE; and the integrate call's line carries
 //                                    //   `--priority` (engine-only: verifySlotArgsError refuses any key but script
 //                                    //   and slots, so no lead can give a task call the Integration priority).
-//                                    //   Absent/null is refused before any dispatch, in both modes (estate ADR
+//                                    //   Absent/null is refused before any dispatch (argsRefused: the sentinel
+//                                    //   thread:args-refused, execute § 4.5 *Args refusal*), in both modes (estate ADR
 //                                    //   0009 d4: no lead passed it while it was optional). A resume re-passes
 //                                    //   its call's own args on its own version-keyed engine, so a call launched
 //                                    //   without it, on an engine that took it as optional, resumes there.
@@ -90,7 +91,7 @@ export const meta = {
 //                                    //   as absent, never an error.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
-//                                    //   any dispatch, as is a missing, null or array `task`.
+//                                    //   any dispatch (argsRefused), as is a missing, null or array `task`.
 //       slug            : string,    // task note basename, e.g. "giflab-fix-coalesce"
 //       taskPath        : string,    // absolute path to the task note
 //       scope           : "single-file" | "cross-cutting" | "read-only",
@@ -135,7 +136,7 @@ export const meta = {
 //                                    //   note), then the unchanged judge loop.
 //                                    //   No round left ⇒ review-blocked with no dispatch. A seeded call that
 //                                    //   stops blocked writes REVISE_MARKER + `revise stopped: <why>` + the
-//                                    //   history. Validated (resumeArgsError) before any dispatch: the history
+//                                    //   history. Validated (resumeArgsError) before any dispatch (argsRefused): the history
 //                                    //   strictly ascending with at least one round that has feedback, its
 //                                    //   last round = reviewRoundsUsed, branch/worktreePath the computed ones,
 //                                    //   never a read-only task. A round with empty feedback (reviewLoop
@@ -145,9 +146,9 @@ export const meta = {
 //   mode        : string,            // optional (p12-6); absent or 'task' ⇒ the task's own call, unchanged
 //                                    //   (byte-identical prompts, labels and row). 'integrate' ⇒ Integration's
 //                                    //   trouble path (ADR 0030 decision 3) with args.integration. Any other
-//                                    //   value throws before dispatch.
+//                                    //   value is refused before dispatch (argsRefused).
 //   integration : object,            // mode 'integrate' only; validated (integrationArgsError) before any
-//                                    //   dispatch — a bad value is a lead bug, not a task block:
+//                                    //   dispatch (argsRefused) — a bad value is a lead bug, not a task block:
 //       prUrl, branch, worktreePath  //   the task's PR; branch = audit-fix/<alias>, worktreePath = the task tree.
 //       headSha         : string,    // the ANCHOR (40-hex) — always ANCHOR_RECIPE's output, never "the
 //                                    //   approved head" by assumption (see the lead contract below).
@@ -435,17 +436,20 @@ const RM_RULE = 'Removing files (hard rule, the 2026-10-01 stall): remove a scra
 const KILL_RULE = 'Stopping processes (hard rule, the 2026-10-04 incident): stop only a process you started yourself, by the pid or process group you recorded when you started it (`kill <pid>`, `kill -- -<pgid>`). Never stop one by name or pattern (`pkill`, `killall`, `kill $(pgrep ...)`): the lead, other agents and other sessions run the same verifier on this machine, and an implementer whose `pkill -n` on the verifier pattern killed the Integration verify of the lead is why this rule exists.'
 
 // Verify slots (p23-4, Chorus ADR 0098 d6): at ceiling 4 every agent's verifier is a full suite, and on 2026-10-17
-// uncapped suites from several sessions drove one machine to load 66 and lost a merge to a load flake. With
-// args.verifySlot set (required since estate ADR 0009 d4; the renderers below still take it absent, for the
-// tests), every verifier line the engine renders goes through scripts/verify-slot.py, which holds
-// one of the machine's `verify_slots` slots for the suite's life and ends the suite (its guard) if the wrapper is
-// killed. shq quotes one POSIX word ('…', each ' written '\''), so the verifier reaches `bash -c` byte for byte.
+// uncapped suites from several sessions drove one machine to load 66 and lost a merge to a load flake. args.verifySlot
+// is required (estate ADR 0009 d4: the entry refuses a call without it, an *Args refusal*), so every verifier line the
+// engine renders goes through scripts/verify-slot.py, which holds one of the machine's `verify_slots` slots for the
+// suite's life and ends the suite (its guard) if the wrapper is killed. The renderers' unslotted branches (slotted()'s
+// scrubbed() and the `slot ? … : ''` fragments below) are dead outside the tests: they are kept only as the byte-pin
+// baseline (prompt-invariants' unslot() and the PRE_P31 pins compare each slotted prompt with its unslotted bytes plus
+// exactly the slot pieces), so no prompt byte changed when the slot became required (p32-1).
+// shq quotes one POSIX word ('…', each ' written '\''), so the verifier reaches `bash -c` byte for byte.
 function shq(s) {
   return `'${String(s).replace(/'/g, "'\\''")}'`
 }
 
-// The verifier line an agent runs: scrubbed() when slot is absent (byte-identical); else the scrub, then the
-// wrapper, with `--priority` only from integrationVerify (the serial lane's own agent verifier).
+// The verifier line an agent runs: the scrub, then the wrapper, with `--priority` only from integrationVerify (the
+// serial lane's own agent verifier); scrubbed() when slot is absent, the tests' byte-pin baseline only (above).
 function slotted(verifier, slot) {
   if (!slot) return scrubbed(verifier)
   return `${GIT_ENV_SCRUB} python3 ${shq(slot.script)} run --slots ${slot.slots}${slot.priority ? ' --priority' : ''} -- bash -c ${shq(verifier)}`
@@ -1805,8 +1809,19 @@ function rungName(s) {
   return typeof s === 'string' && LADDER_NAME.test(s) && !LADDER_YAML_WORDS.includes(s)
 }
 
+// The args refusal (p32-1, execute § 4.5 *Args refusal*). Every refusal the entry makes before any dispatch (args
+// that are not JSON or not one object, a bad defaultBranch, `waves`, task, mode, ladder, verifySlot, integration or
+// task.resume) is thrown as argsRefused(why): its message starts with ARGS_REFUSED, so a notification the runtime wraps
+// (`Error: …`) or cuts still carries it, and the lead matches it by contains. Such a call dispatched nothing and the
+// same args are refused again, so the lead never reads it as a *Lost call* (a resume, a dead-call set-aside, an
+// automatic retry): it drops the runId and halts the entry once. A throw after dispatch is caught into a row instead.
+const ARGS_REFUSED = 'thread:args-refused'
+function argsRefused(why) {
+  return new Error(`${ARGS_REFUSED}: ${why}`)
+}
+
 // args.ladder: '' when usable (or absent), else why not. A bad value is a lead bug: the orchestration
-// throws before any dispatch, in both modes.
+// refuses it before any dispatch (argsRefused), in both modes.
 function ladderArgsError(l) {
   if (l === undefined || l === null) return ''
   if (!l || typeof l !== 'object' || Array.isArray(l)) return `must be one object { source, rungs }, got ${JSON.stringify(l)}`
@@ -1831,7 +1846,7 @@ function ladderArgsError(l) {
 // args.verifySlot (p23-4): '' when usable, else why not. Required (estate ADR 0009 d4): absent or null is refused.
 // Exactly { script, slots }: the absolute, single-line path of verify-slot.py (never under a bare /skills/, an
 // unexported plugin root) and an integer >= 1. Any other key (`priority` included: only integrationVerify sets
-// it, on its own copy) is a lead bug, refused before any dispatch in both modes.
+// it, on its own copy) is a lead bug, refused before any dispatch in both modes (argsRefused, execute § 4.5 *Args refusal*).
 function verifySlotArgsError(v) {
   if (v === undefined || v === null) return `is required (estate ADR 0009 d4): pass this entry's verify-timeout verifySlot, verbatim (execute § 4)`
   if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${JSON.stringify(v)}`
@@ -3382,29 +3397,42 @@ function integrationResult(task, out, a, trace) {
 
 // ---- Orchestration: one task per call; the lead holds the calls (ADR 0030) ---
 
+// Every refusal below is thrown before any dispatch through argsRefused (p32-1): its message starts with the sentinel
+// `thread:args-refused`, which execute § 4.5 *Args refusal* matches by contains, so the lead halts the entry once
+// (the runId dropped, an integrate call's lane freed) instead of resuming, setting aside or retrying a call that
+// dispatched nothing and would be refused again. Each message keeps its own text after the sentinel.
 // The Workflow tool passes `args` to a scriptPath workflow JSON-stringified, not as a live
 // object (confirmed empirically: the script sees `typeof args === 'string'`). Parse defensively
-// so the engine works whether args arrives as a string or an object.
-const a = typeof args === 'string' ? JSON.parse(args) : args
-defaultBranch(a)   // fail the run before any dispatch on an unusable args.defaultBranch
+// so the engine works whether args arrives as a string or an object; args that are not JSON, or not one
+// object (undefined, null, a number, an array), are refused here rather than dying in a TypeError below.
+let a
+try {
+  a = typeof args === 'string' ? JSON.parse(args) : args
+} catch (e) {
+  throw argsRefused('args: not JSON: ' + e.message)
+}
+if (!a || typeof a !== 'object' || Array.isArray(a)) throw argsRefused('args must be one object, got ' + JSON.stringify(a))
+// Fail the run before any dispatch on an unusable args.defaultBranch (its own message after the sentinel).
+try { defaultBranch(a) } catch (e) { throw argsRefused(e.message) }
 // Refuse the pre-p12-5 `waves` args shape before any dispatch: a lead on a stale SKILL.md, or a resume of a
 // pre-rename run, must fail loudly here rather than converge nothing. Recovery is a re-dispatch.
-if (a.waves !== undefined) throw new Error('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')
-if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw new Error('args.task must be one task object')
+if (a.waves !== undefined) throw argsRefused('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')
+if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw argsRefused('args.task must be one task object')
 // args.mode (p12-6): absent or 'task' runs the task's own call; 'integrate' runs Integration's trouble
 // path. Bad Integration or seeded-revise args are lead bugs, refused before any dispatch.
 const mode = a.mode === undefined ? 'task' : a.mode
-if (mode !== 'task' && mode !== 'integrate') throw new Error(`args.mode: refusing ${JSON.stringify(a.mode)} — 'task' (the default) or 'integrate'`)
+if (mode !== 'task' && mode !== 'integrate') throw argsRefused(`args.mode: refusing ${JSON.stringify(a.mode)} — 'task' (the default) or 'integrate'`)
 // args.ladder (ADR 0029 decision 6): the ladder.py JSON the lead resolved at this call's start. A malformed
 // one is a lead bug, refused before any dispatch in both modes; an absent one is the built-in ladder.
 const badLadder = ladderArgsError(a.ladder)
-if (badLadder) throw new Error('args.ladder: ' + badLadder)
+if (badLadder) throw argsRefused('args.ladder: ' + badLadder)
 // args.verifySlot (p23-4): the machine's verify slots. A malformed or absent one is a lead bug, refused here
 // (estate ADR 0009 d4): from 14 to 21 Oct 2026 no lead passed it, so 917 full Chorus suites ran
 // unslotted, up to 7 at once, and the Mac froze from heat. A resume replays its run's own version-keyed engine, so a
-// call launched on an engine that took it as optional (before 5.0.0) resumes there unchanged.
+// call launched on an engine that took it as optional (before 5.0.0) resumes there unchanged; one resumed on a
+// refusing engine is an *Args refusal*, and its next call is a fresh one (execute § 3.7 *Can no longer resume*).
 const badSlot = verifySlotArgsError(a.verifySlot)
-if (badSlot) throw new Error('args.verifySlot: ' + badSlot)
+if (badSlot) throw argsRefused('args.verifySlot: ' + badSlot)
 // Printed at every call, so a run's log names the ladder it ran on (a path, or built-in).
 function logLadder() {
   const L = ladderOf(a)
@@ -3414,14 +3442,14 @@ function logLadder() {
 }
 if (mode === 'integrate') {
   const bad = integrationArgsError(a)
-  if (bad) throw new Error('args.integration: ' + bad)
-  if (a.task.resume !== undefined) throw new Error("args.task.resume: a seeded revise is its own call, never mode 'integrate'")
+  if (bad) throw argsRefused('args.integration: ' + bad)
+  if (a.task.resume !== undefined) throw argsRefused("args.task.resume: a seeded revise is its own call, never mode 'integrate'")
 } else if (a.integration !== undefined) {
-  throw new Error("args.integration: only with args.mode 'integrate'")
+  throw argsRefused("args.integration: only with args.mode 'integrate'")
 }
 if (mode === 'task' && a.task.resume !== undefined) {
   const bad = resumeArgsError(a)
-  if (bad) throw new Error('args.task.resume: ' + bad)
+  if (bad) throw argsRefused('args.task.resume: ' + bad)
 }
 
 if (mode === 'integrate') {

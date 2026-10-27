@@ -46,6 +46,12 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
+# The engine tests' args.verifySlot fixture (tests/lib/engine.mjs's VERIFY_SLOT), read once through an absolute file URL
+# built from $root, so the p1args and SARGS calls below never copy it as a literal (p32-1).
+ENGINE_URL=$(node -e "process.stdout.write(require('node:url').pathToFileURL(process.argv[1]).href)" "$root/tests/lib/engine.mjs")
+VERIFY_SLOT_JSON=$([ -n "$ENGINE_URL" ] && node --input-type=module -e "import { VERIFY_SLOT } from '$ENGINE_URL'; process.stdout.write(JSON.stringify(VERIFY_SLOT))")
+[ -n "$ENGINE_URL" ] && [ -n "$VERIFY_SLOT_JSON" ] || { echo "FAIL - lead-integrate: could not read VERIFY_SLOT from $root/tests/lib/engine.mjs"; exit 1; }
+export VERIFY_SLOT_JSON
 . tests/lib/assert.sh
 unset $(git rev-parse --local-env-vars)
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -193,14 +199,14 @@ erow() {
 # verified green, a shared file) for <slug> in rollout ro, repo /repo, with fake SHAs.
 p1args() {
   python3 - "$@" <<'PY'
-import json, sys
+import json, os, sys
 slug, maxr = sys.argv[1], int(sys.argv[2])
 hist = json.loads(sys.argv[3]) if len(sys.argv) > 3 else [{"round": 1, "feedback": ["own-run fix"]}]
 used = int(sys.argv[4]) if len(sys.argv) > 4 else 1
 s = lambda c: c * 40
 alias = slug.split("-", 1)[1] if "-" in slug else slug
 print(json.dumps({"rolloutSlug": "ro", "repoPath": "/repo", "verifier": "true", "date": "2026-10-02", "mode": "integrate",
-  "verifySlot": {"script": "/plugins/thread/x/skills/execute/scripts/verify-slot.py", "slots": 2},
+  "verifySlot": json.loads(os.environ["VERIFY_SLOT_JSON"]),
   "task": {"slug": slug, "taskPath": "", "scope": "cross-cutting", "planGate": False, "maxIterations": 3,
            "maxReviewRounds": maxr, "maxPlanRounds": 3, "rung": "opus-xhigh"},
   "integration": {"prUrl": f"https://github.com/o/r/pull/{ord(slug[-1])}", "branch": f"audit-fix/{alias}",
@@ -848,10 +854,10 @@ ok "$(j "$(inp proj-a --max-review-rounds 2)" 'd["autoRevise"]')" false "C18d: -
 # (b) the seeded revise it launches stops blocked
 I=$(inp proj-a --max-review-rounds 3)
 SARGS=$(python3 - "$I" "$(p1pr proj-a)" <<'PY'
-import json, sys
+import json, os, sys
 i = json.loads(sys.argv[1])
 print(json.dumps({"rolloutSlug": "ro", "repoPath": "/repo", "verifier": "true", "date": "2026-10-02",
-  "verifySlot": {"script": "/plugins/thread/x/skills/execute/scripts/verify-slot.py", "slots": 2},
+  "verifySlot": json.loads(os.environ["VERIFY_SLOT_JSON"]),
   "task": {"slug": "proj-a", "taskPath": "", "scope": "cross-cutting", "planGate": False, "maxIterations": 3, "maxReviewRounds": 3,
            "maxPlanRounds": 3, "rung": "opus-xhigh", "resume": {"stage": "revise", "prUrl": sys.argv[2], "branch": i["branch"],
            "worktreePath": "/repo/.claude/worktrees/proj-a", "reviewHistory": i["history"], "reviewRoundsUsed": i["lastRound"], "plan": ""}}}))
