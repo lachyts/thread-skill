@@ -179,7 +179,8 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    7. schedule § 3's body dependencies: written only between two members of this call; any other is named.
    8. schedule § 3.5's gates: a match that a recorded `## Decisions` answer settles is dismissed. Any other match drops
       its task from this rollout: named, unstamped, never `ignore_gate`.
-   9. schedule § 3.6's sweep: every undismissed hit is stamped `plan_approval: required`, with no ask-ahead (ADR 0034).
+   9. schedule § 3.6's sweep: every undismissed hit is stamped `plan_approval: required`, with no ask-ahead (ADR 0034),
+      and a spend hit also gets step 7's `## Decisions (recorded <date>)` Planner line.
    10. Step 4.5's affine merges: none; the candidates are named.
    11. Step 4.7's rung offers: none.
    12. Step 5's Solo: none stamped; the proposals are named.

@@ -17,6 +17,7 @@ trap 'rm -rf "$D"' EXIT
 EH="$D/.settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$D/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_NOTE_LOCK_DIR="${D}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 NOW=2026-10-02T14:05:00Z
 
 fail=0

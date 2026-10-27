@@ -37,7 +37,9 @@
 #      GitHub call.
 #                                                                        counter UNTOUCHED  lead: halt the
 #                                                                                          rollout for a human
-#   3  BASE MOVED: origin/<default> ≠ the integrated base. Nothing merged.
+#   3  BASE MOVED: origin/<default> ≠ the integrated base. Nothing merged. Each newly counted refusal (the cap's
+#      4th included, never "this base was already counted") records why main moved in the task's Run record
+#      (lead-integrate.py base-moved, p29-10: the movers base..main and whether only Inert paths moved).
 #                                                                        counter appended   lead: re-integrate
 #                                                                                          on the same anchor
 #      (the lead's `lead-integrate.py prepare` may then route `skip`: when main moved only in the repo's Inert
@@ -682,6 +684,8 @@ PR=$PR_NUM
 # guard-pr (this tree's) exits 2 with its `engine-snapshot: ` line for a wrong root: that is this script's exit 2,
 # before any GitHub call or counter. Any other failure of the guard is a WARN, and the merge goes on.
 ES_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../_shared/scripts/engine-snapshot.py"
+# Why main moved (p29-10, ADR 0051): record_base_moved's Run-record line, through lead-integrate.py base-moved.
+LI_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lead-integrate.py"
 ES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 gp_err=$(python3 "$ES_PY" guard-pr --pr-url "https://github.com/$OWNER/$REPO/pull/$PR" --root "$ES_ROOT" \
   --script skills/execute/scripts/merge-task.sh 2>&1 >/dev/null); gp_rc=$?
@@ -876,6 +880,10 @@ record_base_moved() {  # record_base_moved <live> — the cap, inline before exi
     finish 2 "ERROR: cannot persist the base-moved counter $COUNTER — nothing merged (the re-integration cap fails closed)."
   fi
   n=$(sort -u "$COUNTER" | grep -c .)
+  # The Run record's base-moved line (p29-10): what moved main and whether only Inert paths, once per newly counted
+  # refusal (the cap's included), best-effort: its output is dropped and it never changes this exit.
+  python3 "$LI_PY" base-moved --repo "$REPO_PATH" --pr "$PR" --base "$IBASE" --main "$live" --default "$BASE" \
+    --refusal "$n" >/dev/null 2>&1 || true
   if [ "$n" -gt "$REINTEGRATE_MAX" ]; then
     bases=$(sort -u "$COUNTER" | tr '\n' ' ' | sed 's/ $//')
     set_aside "base moved before the merge $n times in a row after $REINTEGRATE_MAX re-integrations (bases $bases)"

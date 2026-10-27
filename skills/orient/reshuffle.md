@@ -155,12 +155,14 @@ Resolving:
 - **(b) per-item speccing** — every unclear item gets its decisions grilled into a real body (goal,
   runnable prompt, verify line, the shape `add-task.md` prescribes). An unbundled task quotes its
   slice of the brain dump verbatim as **His words**.
-- **(c) gates asked ahead** (ADR 0034) — a task the gated-input sweep flags (a hit of schedule
-  § 3.6's `gated_inputs.py sweep` that its dismissal rule keeps) gets § 3.6's ask-ahead question in
-  the grill, clear item or not: for spend, up to what total exposure in USD (summed
-  across Logins, a recurring cap counted per month), against the standing approval
-  (`spend_approval_usd`, e.g. 50 USD, or off at the built-in 0); for a credential or irreversible
-  gate, a sign-off now or none. Asked here, it is not asked again at schedule.
+- **(c) gates ahead** (ADR 0034) — a task the gated-input sweep flags (a hit of schedule § 3.6's
+  `gated_inputs.py sweep` that its dismissal rule keeps), clear item or not:
+  a spend smell is recorded, never grilled (Chorus ADR 0108 d4), so R5.2 writes its recorded
+  Planner line, schedule stamps it, and the standing approval (`spend_approval_usd`, e.g. 200 USD a
+  gate and a month, or off at the built-in 0) signs its gate mid-run; a limit Lachy names
+  unprompted is recorded too. A credential or irreversible gate still gets § 3.6's ask-ahead
+  question in the grill: a sign-off now or none. Asked or recorded here, it is not asked again at
+  schedule.
 
 Clear items are not grilled; they go straight to the gate. Grill cluster by cluster, highest value
 first (the cluster holding orient's recommendation leads). **Lachy can stop at any point**: what is
@@ -253,11 +255,12 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4's: never a phase, a rollout or planned
      follow-on work.
    - Don't set `rollout:` or `scope:`: schedule stamps them (`scope:` inferred from `touches:`).
-   - **Answers from R3 (c)** are written exactly as schedule step 7 does: `spend_approval_usd: <N>`
-     (whole US dollars) when the spend answer is above the standing approval; for any spend amount,
-     the `## Decisions (asked ahead <date>)` section with the same two lines (its Spend line, naming
-     `/thread:orient` where schedule's names `/thread:schedule`, and its Planner line asking for one
-     line whose Cap is one priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`, with its
+   - **Records from R3 (c)** are written exactly as schedule step 7 does: for a spend smell, the
+     `## Decisions (recorded <date>)` section holding the Planner line alone; for a limit Lachy
+     named, `spend_approval_usd: <N>` (whole US dollars) when it is above the standing approval and,
+     for any amount, the `## Decisions (asked ahead <date>)` section with the same two lines (its
+     Spend line, naming `/thread:orient` where schedule's names `/thread:schedule`, and its Planner
+     line asking for one line whose Cap is one priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`, with its
      split in sub-bullets nested under the gate, ADR 0038); and a credential or irreversible sign-off's `## Approved gates` bullet,
      `- <kind>: <his words> (approved <date>, asked ahead at orient)`.
 3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one

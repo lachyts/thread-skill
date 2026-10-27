@@ -22,6 +22,7 @@ max_review_rounds: {{MAX_REVIEW_ROUNDS}}
 max_plan_rounds: {{MAX_PLAN_ROUNDS}}  # 2 was insufficient for cross-cutting plan-gates; 3-with-accumulated-feedback converges (thread:execute item 1)
 plan_approval: scope-gated  # off | scope-gated | required
 parallel_ceiling: {{PARALLEL_CEILING}}
+# hold_until: {pr: <owner/repo>#<N>, merged: true}  # optional, parallel rollouts only (next refuses a serial note before reading it): holds every start until that PR merges and clears itself on the merge (vault-grammar § Hold until); never a sentence in the note
 # env_bootstrap:   # optional: shell cmd thread:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — thread:schedule step 2.7
 # completion_verifier:   # optional (estate ADR 0009 d6): the full suite of a project whose verifier: is its declared fast tier, run once on merged main at the completion ceremony. Uncomment with the project CLAUDE.md's `Completion verifier:` command — thread:schedule step 2.5
 # completion_timeout:   # optional (ADR 0052): seconds, 1 to 6600, for the completion verifier's run; absent: 3600. Never verify_timeout, which bounds the fast tier

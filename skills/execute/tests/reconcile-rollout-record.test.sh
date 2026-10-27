@@ -35,7 +35,7 @@ export THREAD_GIT_ENV_DIR="$TMP/git-env"  # mark-started's canary arm (p26-3) ke
 # run's transcript dir, subagents/workflows/<runId>/, which the Workflow tool creates at launch (p27-3).
 V="$TMP/vault"; SESS="$TMP/sess"; J="$SESS/workflows"
 mkdir -p "$V" "$J" "$EV"
-for r in wf_a1 wf_d1 wf_d2 wf_e1 wf_r1 wf_r2 wf_c1; do mkdir -p "$SESS/subagents/workflows/$r"; done
+for r in wf_a1 wf_d1 wf_d2 wf_e1 wf_r1 wf_r2 wf_c1 wf_q1; do mkdir -p "$SESS/subagents/workflows/$r"; done
 NOW=2026-10-05T10:00:00Z
 PR=https://github.com/o/r/pull
 A40=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; B40=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; C40=cccccccccccccccccccccccccccccccccccccccc
@@ -406,14 +406,21 @@ rrs mark-done --tasks k --tasks-dir "$V" --now "$NOW" >/dev/null
 ok "$(since ro "$M")" "hold-started:k hold-ended:k lane-freed:k merged:k" "race hold ends at mark-done"
 ok "$(since ro "$((M+1))" 'd.get("hold") or d.get("release") or "-"')" '"race" "merge" "-"' "hold-ended race, lane-freed merge"
 
-echo "== 16. a usage-limit dead call -> quota-stall"
+echo "== 16. a usage-limit dead call -> quota-stall, naming the call it stopped (p29-10)"
 mkt q ro in_progress
 rrs mark-started --tasks q --tasks-dir "$V" --now "$NOW" >/dev/null
+rrs bind-run --tasks q --run-id wf_q1 --call task --journal-dir "$J" --tasks-dir "$V" --now "$NOW" >/dev/null
 M=$(cnt ro)
 lead q own "workflow call failed: You've hit your usage limit" >/dev/null
 ok "$(since ro "$M")" "slot-freed:q set-aside:q quota-stall:q" "slot-freed, set-aside, quota-stall"
 ok "$(since ro "$((M+1))" '[d.get("reasonClass"), d.get("stage")]')" '["quota","implement"] [null,"implement"]' "reasonClass quota; quota-stall stage"
 has "$(since ro "$((M+2))" 'd["detail"]')" "usage limit" "quota-stall detail"
+ok "$(since ro "$((M+2))" '[d.get("runId"), d.get("call")]')" '["wf_q1","task"]' "quota-stall names the task's latest run-bound: runId and call"
+mkt q2 ro in_progress
+rrs mark-started --tasks q2 --tasks-dir "$V" --now "$NOW" >/dev/null
+M=$(cnt ro)
+lead q2 own "workflow call failed: rate limit reached" >/dev/null
+ok "$(since ro "$((M+2))" '[d["kind"], "runId" in d, "call" in d]')" '["quota-stall",false,false]' "quota-stall with no run-bound omits runId and call"
 
 echo "== 17. a read-only approval -> slot-freed(completed), merged(readOnly)"
 mkt r ro in_progress "scope_note: x"

@@ -136,7 +136,7 @@ function checkCap(f, E) {
     fails.push('mid-run')
   }
 
-  // schedule-planner: § 7's ask-ahead Planner line asks for the one-line gate, its split in nested sub-bullets.
+  // schedule-planner: § 7's Planner line asks for the one-line gate, its split in nested sub-bullets.
   const sPlanner = collapse((section(f.schedule, SCH7) ?? '').split('\n').find((l) => l.startsWith('- Planner:')) ?? '')
   if (!has(sPlanner, 'word each spend gate as one line whose Cap is one priceable total', '`spend: <what> — cap 50 USD per Login per month across 3 Logins`',
     'put how it splits (run counts, per-call limits, iterations) in sub-bullets nested under the gate, which the Cap must hold',

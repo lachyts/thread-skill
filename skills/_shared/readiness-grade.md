@@ -255,8 +255,10 @@ unparked, by an offer or by hand, the next pass lists its Orient tasks.
 **Leverage** is agent work per minute of Lachy's attention: `SIZE_MINUTES[size]` over the larger of
 `ATTENTION_FLOOR` and the attention minutes. Attention is deciding plus reviewing: `DECISION_MINUTES[grade]` per
 decision (none for Ready), plus the Review load at `REVIEW_MINUTES` per item (a parallel task's PR, a sign-off when it
-has gates, an eye-check when `eyeCheck` is set). A session task adds its whole agent time, since Lachy is there
-throughout.
+has gates, an eye-check when `eyeCheck` is set). A gate of any kind costs the sign-off, `spend` included: the ranker
+sees a gate's kind, never its price, the standing approval's limit or the month line, so a spend gate the standing
+approval would sign is still charged (ADR 0034's 2026-10-27 amendment, residual (x)). A session task adds its whole
+agent time, since Lachy is there throughout.
 
 **Runs.** The candidate runs group the ranked parallel and serial tasks by home, shape and root:
 
