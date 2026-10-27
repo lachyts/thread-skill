@@ -367,7 +367,8 @@ ok "$(cnt)" '[{},["b1","b2"]]' "C9 (i): a claim of a paused rollout counts nothi
 nx ro-b >/dev/null
 ok "$(claims)" '[["ro-b","b1"],["ro-b","b2"]]' "C9 (i): … and goes at the next write"
 
-# ── C10: a call that starts nothing (git-env, pause, a rollout hold, the heat) clears its rollout's claims ───────────
+# ── C10: a call that starts nothing (a whole-rollout git-env hold, main red, a pause, a rollout hold, the heat) clears
+# its rollout's claims; a lane git-env trip (ADR 0046) starts and claims as before ───────────────────────────────────
 c10() {  # c10 <name>: ro-a claims a1 and a2; the caller then changes ro-a and runs it again
   scen "c10$1"; ab
   J=$(nx ro-a); ok "$(q "$J" 'd["start"]')" '["a1","a2"]' "C10 ($1): ro-a claims a1 and a2"
@@ -377,9 +378,20 @@ c10_after() {  # c10_after <label>: ro-a's entries are gone, and ro-b starts int
   J=$(nx ro-b); ok "$(q "$J" 'd["start"]')" '["b1","b2"]' "C10 ($1): … so ro-b starts b1 and b2"
 }
 c10 a-git-env
-printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[a1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro-a.md"
-J=$(nx ro-a); ok "$(q "$J" '[d["halt"], d["start"]]')" '["git-env",[]]' "C10 (a-git-env): a git-env trip halts git-env"
+printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[a1]] task: core.bare false→true; repo /x\n' >> "$D/ro-a.md"
+J=$(nx ro-a)
+ok "$(q "$J" '[d["halt"], [h["scope"] for h in d["gitEnvHold"]], d["start"]]')" '["git-env",["rollout"],[]]' \
+  "C10 (a-git-env): a whole-rollout git-env trip (a bare checkout) halts git-env and starts nothing"
 c10_after a-git-env
+c10 a2-git-env-lane
+printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[a1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro-a.md"
+J=$(nx ro-a)
+ok "$(q "$J" '[d["halt"], [h["scope"] for h in d["gitEnvHold"]], d["start"]]')" '[null,["lane"],["a1","a2"]]' \
+  "C10 (a2-git-env-lane): a lane trip (ADR 0046) holds only the lane: a1 and a2 still start, no halt"
+ok "$(claims)" '[["ro-a","a1"],["ro-a","a2"]]' "C10 (a2-git-env-lane): … and are still claimed"
+J=$(nx ro-b)
+ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"]]')" '[{"ro-a":2},[]]' \
+  "C10 (a2-git-env-lane): … so ro-b counts both claims and starts nothing"
 c10 b-pause
 python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("parallel_ceiling: 3\n", "parallel_ceiling: 3\npause_requested: true\n", 1))' "$D/ro-a.md"
 J=$(nx ro-a); ok "$(q "$J" 'd["start"]')" '[]' "C10 (b-pause): pause_requested starts nothing"
@@ -394,6 +406,12 @@ c10_after c-hold
 c10 d-heat
 J=$(THREAD_HEAT_LEVEL=3 nx ro-a); ok "$(q "$J" '[d["heat"]["level"], d["start"]]')" '[3,[]]' "C10 (d-heat): a hot Mac starts nothing"
 c10_after d-heat
+c10 e-main-red
+printf '\n## Race log\n\n- 2026-10-02T10:00+00:00 [[a3]] revert did not land: conflict in a.py\n' >> "$D/ro-a.md"
+J=$(nx ro-a)
+ok "$(q "$J" '[d["halt"], [m["slug"] for m in d["mainRed"]], d["start"]]')" '["race",["a3"],[]]' \
+  "C10 (e-main-red): a revert that did not land (mainRed) halts race and starts nothing"
+c10_after e-main-red
 
 # ── C11: each write prunes: another dir's expired entries (by the real clock), malformed, consumed and expired ones ──
 scen c11-prune

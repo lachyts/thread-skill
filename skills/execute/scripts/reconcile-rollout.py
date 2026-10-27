@@ -4802,11 +4802,13 @@ def cmd_next(args) -> int:
         used = len(live)
         holds = [(r, "git-env hold: /thread:repair") for r in stalled + queued]
     # The claims write (p28-3), under the lock and only once the rollout note's save has succeeded (a failed one raised
-    # above, so nothing is claimed): every kept entry plus one claim per start of the final `start` (the head Solo
-    # task's lone start included), replacing this rollout's earlier claims. `start` is [] under a pause, a rollout
-    # hold, a git-env hold or the heat, which clears them. Skipped when nothing changed and the file read cleanly, so
-    # a call that starts and finds nothing creates no file; a file of another version is never written. Then the lock
-    # goes, before the best-effort records below.
+    # above, so nothing is claimed), after the main-red and whole-rollout git-env overrides, so it reads the final
+    # `start`: every kept entry plus one claim per start (the head Solo task's lone start included), replacing this
+    # rollout's earlier claims. `start` is [] under a pause, a rollout hold, the heat, a whole-rollout git-env hold (a
+    # bare checkout) or a main-red hold, which clears them; a lane git-env trip (ADR 0046) leaves it as it is, so its
+    # starts are claimed. Skipped when nothing changed and the file read cleanly, so a call that starts and finds
+    # nothing creates no file; a file of another version is never written. Then the lock goes, before the best-effort
+    # records below.
     if claiming and claims_writable:
         at = now.astimezone().isoformat(timespec="seconds")
         here = os.path.realpath(str(tasks_dir))
