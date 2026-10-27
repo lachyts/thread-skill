@@ -514,6 +514,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suites do not contend, tuned from the Run record (ADR 0049). Each
   rollout's **Parallel ceiling** still bounds its own share. _Avoid_: night
   ceiling, global ceiling.
+- **Lease** — a lead's stamp that keeps its Rollout's running tasks in the
+  Mac-wide count (the **Trickle**, the **Away cap**), rewritten at its every
+  `next` and loop entry: it lapses 45 minutes after its last write, or after
+  the Mac's latest boot or wake if later, unless a room stop stands, and a
+  Rollout with no lease still counts (ADR 0049, amended). _Avoid_: heartbeat
+  file, lock.
 - **Last starts** — toward the Morning, a queued task starts only if its
   kind's usual length (the median of that kind's past runs in the project,
   its kind its note's `scope:`) ends it by the Morning's hour; with fewer than
