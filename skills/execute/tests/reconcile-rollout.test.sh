@@ -677,9 +677,10 @@ got=$(HOME="$EH" python3 "$SCRIPT" verify-timeout --rollout "$TMP/no-such-rollou
 # p32-1: a plugin install without verify-slot.py is exit 4 (its own code, never a bad verify_timeout's 1), checked after
 # exit 3, so the lead halts at the entry with nothing stamped instead of passing a verifySlot.script that does not exist.
 # The script is loaded by importlib (-B: no bytecode beside it) with VERIFY_SLOT_PY pointed at a path that does not exist.
-vt_absent() {  # vt_absent <frontmatter line> -> rc, with stdout in $TMP/vt4.out and stderr in $TMP/vt4.err
+# The exits are checked in the order 1, 2, 3, then 4: each earlier exit wins over a missing verify-slot.py.
+vt_absent() {  # vt_absent <frontmatter line> [HOME] -> rc, with stdout in $TMP/vt4.out and stderr in $TMP/vt4.err
   mkvt "$1"
-  HOME="$EH" python3 -B - "$SCRIPT" "$TMP/vt4-absent/verify-slot.py" "$TMP/vt-rollout.md" > "$TMP/vt4.out" 2> "$TMP/vt4.err" <<'PY'
+  HOME="${2:-$EH}" python3 -B - "$SCRIPT" "$TMP/vt4-absent/verify-slot.py" "$TMP/vt-rollout.md" > "$TMP/vt4.out" 2> "$TMP/vt4.err" <<'PY'
 import importlib.util, pathlib, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
 rr.VERIFY_SLOT_PY = pathlib.Path(sys.argv[2])
@@ -698,6 +699,17 @@ got="$rc|$(cat "$TMP/vt4.err")|$(cat "$TMP/vt4.out")"
 want="1|ERROR: verify_timeout must be an integer from 1 to 6600, got '0'|"
 [ "$got" = "$want" ] && echo "ok   - verify-timeout: a bad verify_timeout with verify-slot.py missing still exits 1 (checked first)" \
   || { echo "FAIL - verify-timeout: a bad verify_timeout with verify-slot.py missing: expected [$want] got [$got]"; fail=1; }
+vt_absent 'named_rerun: "pytest -x"'; rc=$?
+got="$rc|$(head -c 20 "$TMP/vt4.err")|$(wc -l < "$TMP/vt4.err" | tr -d ' ')|$(cat "$TMP/vt4.out")"
+want="2|ERROR: named_rerun: |1|"
+[ "$got" = "$want" ] && echo "ok   - verify-timeout: a refused named_rerun with verify-slot.py missing still exits 2 (2 before 4)" \
+  || { echo "FAIL - verify-timeout: a refused named_rerun with verify-slot.py missing: expected [$want] got [$got]"; fail=1; }
+vt_absent '' "$BH"; rc=$?
+case "$(cat "$TMP/vt4.err")" in "ERROR: rollout settings refused: $BH/.config/thread/rollouts.toml:3: "*) m=y;; *) m=n;; esac
+got="$rc|$m|$(wc -l < "$TMP/vt4.err" | tr -d ' ')|$(cat "$TMP/vt4.out")"
+want="3|y|1|"
+[ "$got" = "$want" ] && echo "ok   - verify-timeout: a refused rollouts.toml with verify-slot.py missing still exits 3 (3 before 4)" \
+  || { echo "FAIL - verify-timeout: a refused rollouts.toml with verify-slot.py missing: expected [$want] got [$got] (err: $(cat "$TMP/vt4.err"))"; fail=1; }
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi

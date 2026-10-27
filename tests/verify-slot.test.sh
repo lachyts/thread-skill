@@ -13,7 +13,8 @@
 #   release is a close (a co-holder keeps the slot)   V15 a failure injected after the spawn: the slot stays held
 #   until the suite's group is gone   V16 no code calls fcntl.LOCK_UN; the header's close-only contract   V17 the
 #   bounded slot wait (p32-1): `--slot-wait S` (or `=S`) runs out → 76 and a no-verdict line, the command never run;
-#   `--slot-wait 0` is one try, and a free slot is still taken   V18 a bad `--slot-wait` is usage (exit 2). The Run record
+#   `--slot-wait 0` is one try, and a free slot is still taken   V18 a bad `--slot-wait` is usage (exit 2)   V19 with
+#   no `--slot-wait`, `run` waits RUN_SLOT_WAIT (4800 s), reconcile-rollout.py's _slot_wait at the default 1800. The Run record
 #   (p29-10, contract item 8): VR1 a suite in a task tree records its start and end (sha, load, count, failing), its
 #   output still split   VR2 --priority   VR3 TERM ends it stopped, the slot free; a SIGKILL leaves no ended line
 #   VR4 no task tree or no note: no record, as today   VR5 a dirty tree   VR6 a green run names no failing   VR7 a
@@ -380,6 +381,22 @@ for a in --slot-wait= --slot-wait=-1 --slot-wait=x; do
   python3 "$VS" run --slots 1 "$a" -- touch "$D/ran" > /dev/null 2>&1; ok "$?" 2 "V18: run $a → exit 2"
 done
 python3 "$VS" run --slots 1 --slot-wait > /dev/null 2>&1; ok "$?" 2 "V18: run --slot-wait with no value → exit 2"
+
+# ======== V19: run's default slot wait (p32-1) ================================================================
+# The engine renders no `--slot-wait`, so RUN_SLOT_WAIT is an agent's whole bound. `run` with none waits 4800 s, which
+# is the lead's `slotWait` at the default `verify_timeout` (reconcile-rollout.py's _slot_wait(1800)), so the documented
+# tie cannot drift. Loaded by importlib (-B: no bytecode beside either script); _parse_run returns (slots, prio, cmd, wait).
+got=$(python3 -B - "$VS" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1])
+vs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vs)
+rr = vs._load_reconcile()
+wait = vs._parse_run(["--slots", "1", "--", "true"])[3]
+print(f"{wait}|{rr._slot_wait(1800)}|{rr._slot_wait(rr.DEFAULT_VERIFY_TIMEOUT)}|{vs.RUN_SLOT_WAIT}")
+PY
+)
+ok "$got" "4800|4800|4800|4800" "V19: run with no --slot-wait waits 4800 s, the lead's slotWait at the default verify_timeout (1800)"
 
 # ======== VR1–VR6: a suite in a task tree records itself in the Run record (contract item 8; p29-10) ===============
 # A git project R with its task tree at R/.claude/worktrees/t1, and a vault (under VH, the HOME these runs use) where t1
