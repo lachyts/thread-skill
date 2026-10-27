@@ -12,7 +12,7 @@ checks, and acts on the one line it prints; § Serial path S3 runs the serial ch
 python >= 3.9. No network. Git runs only as `git rev-parse --local-env-vars` (to scrub repo-local env vars such as a
 hook's GIT_DIR, landing-register.py's rule) and `git -C <path> remote get-url origin`. It writes nothing. The
 surface grammar (parse_token, overlaps, read_surfaces) and norm_origin are serial-chains.py's, loaded by `check`
-(never by `running`).
+and `pickups` (never by `running`, primary-hold.sh's verb, which loads only reconcile-rollout.py).
 
 Terms (CONTEXT.md). A LIVE rollout note sits directly in the tasks dir (location only, as
 reconcile-project.py and /thread:close read it). An UNFINISHED rollout is narrower: a live rollout that is
@@ -121,9 +121,82 @@ stdout or the exit code. Exit 2 prints no stdout and one `unfinished-rollout:` s
 non-directory --repo, --repo with serial or --surface with parallel, no --surface with serial, a --surface token
 parse_token refuses, neither or both of --project/--tasks, a --tasks note not found, a missing tasks dir, or
 reconcile-rollout.py or serial-chains.py unloadable.
+
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py pickups --repo <path> --tasks <slug,...>
+        [--misfit <slug>=<why>]... [--tasks-dir <dir>]
+
+`pickups` is schedule § 1.2's Pickup sweep (ADR 0057 d1), run only on a standalone parallel `--tasks` run: which other
+open tasks on the same repo may join the named candidates. It reads notes and runs one `git remote get-url origin` for
+--repo and one per distinct `## Launch` repo path (memoised), read-only; it writes nothing. The agent judges fit only
+on the slugs in `join[]`, re-runs with `--misfit <slug>=<why>` for the misfits, and judges only the newly joined slugs,
+until no slug joins unjudged. Rules, in order:
+- Pool: each note directly in the tasks dir (never Archive/**), parsed as reconcile-rollout.py's Note, tagged `task`
+  and neither `rollout` nor `decisions`, at `status: open`, not one of --tasks, whose `rollout:` links no live rollout
+  (reconcile-rollout.py's _live_rollout, schedule step 1's skip rule), and whose normalised `projects:` meet the run's
+  project set: the intersection of the --tasks notes' projects, as `check` builds it (each found root-first, then under
+  Archive/). An empty set WARNs `the named tasks share no project: the pickup pool is empty`, and the pool is empty.
+- Order: `priority:` weight descending (reconcile-rollout.py's PRIORITY_WEIGHTS; missing or unknown reads normal,
+  `none` weighs 0), then `phase:` read as a finite float ascending (missing, empty or unparseable, `p30` or `30a`,
+  sorts last; never _phase_sort, which raises on those), then the case-folded slug. `order` prints it, counted tasks
+  left out.
+- Repo rule: the first list line under `## Launch` holding `**Repo:**`; its value is the first backtick span after
+  the label, else the first whitespace token, `~` expanded and a trailing `/` dropped. No such line, or an empty
+  value: counted as `no ## Launch repo`, never read further. A path that is no directory here: left, `## Launch repo
+  <p> is missing here: its origin is unread` (<p> as written). The same repo: its realpath is --repo's, or both
+  origins read and are equal once normalised (serial-chains.py's norm_origin). Otherwise counted as `another repo`.
+  With no origin for --repo, `WARN: --repo <p> is not a git repo with an origin here: only paths are compared`, and
+  no task origin is read. `counted` is two integers and names nothing: a counted task appears in no other list, and
+  is outside every rule below (a dependency on one is a dependency outside the pool).
+- Gate rule: gated_inputs.py's `sweep(body_of(text))`; the first kind hit, spend then credential then irreversible,
+  leaves the task, `gated: <kind> "<word>"` (<word> the first of that kind's list among its hits, so "usage credits"
+  reads `credits`). No hit is ever dismissed here.
+- Misfits: each --misfit leaves its task with its why. One naming no pool task, or not `slug=why`, is exit 2.
+- Dependencies: reconcile-rollout.py's _dep_entries, each followed through _fold_unit to its unit. A dependency is
+  satisfied when _dep_status reads it landed, or when its unit is a candidate or joins. A pool task on a dependency
+  cycle (through unlanded dependencies whose units are pool tasks) is left, `a dependency cycle with [[x]]`.
+  - Needed: the pool tasks reachable from the candidates through unlanded dependencies whose unit is a pool task,
+    transitively, never through a task that is left. They are uncapped and join, `needed by [[t]]`, unless left. A
+    needed task with an unlanded dependency whose unit is outside the candidates and the pool, or is a left pool task,
+    is left, `depends on [[x]] (<why>)`, to a fixpoint (a needed task left stops needing what only it needed).
+  - Extras: every other pool task, in order. Each takes its closure D(t): t plus its unlanded pool dependencies not
+    yet joined, transitively. A member that is left, or a dependency outside the candidates, the pool and the landed
+    set, leaves t, `depends on [[x]] (<why>)`. Otherwise, when the extras joined so far plus |D(t)| is at most the
+    cap (5), all of D(t) joins: t `open on [[<project>]] on this repo, priority <p>`, each pulled-in dependency
+    `needed by [[t]]`, every one counted against the cap; else t goes to `beyond`.
+  - Warnings: a candidate or a joined needed task whose dependency's unit is a pool task left alone.
+stdout is one JSON line, keys in this order: {"projects": [<normalised>], "order": [<slug>], "join": [{"slug", "kind":
+"needed"|"extra", "why"}], "needed": [<slug>], "left": [{"slug", "why"}], "counted": {"another repo": n, "no ## Launch
+repo": n}, "beyond": [<slug>], "warnings": [{"task", "dep", "why"}], "cap": 5}; `needed` is the joined needed slugs,
+`left` is in order. `WARN:` lines go to stderr. Exit 2 prints no stdout and one `unfinished-rollout:` line: a missing
+--repo or tasks dir, a --tasks note not found, a bad --misfit, or reconcile-rollout.py, serial-chains.py or
+gated_inputs.py unloadable (loaded here only, never by `check` or `running`).
+
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py unstarted --rollout <slug>
+        [--handoffs <dir>]... [--tasks-dir <dir>]
+
+`unstarted` answers close step 2's **Rollouts this session wrote.** for a note with no unwithdrawn handover (ADR 0057
+d5): whether the rollout still needs its lead started. Close step 2's **Stale launch.** also runs it, with no
+--handoffs, on each pending launch doc's `launches:` value: `closed`, or `started` with the doc 24 h old under the
+peer guard, makes that doc stale (ADR 0057 d4). It reads the note (root-first, then under Archive/), its linked
+tasks, the Run record (run_record.py's record_path for the slug; an unreadable record reads as none) and the `*.md`
+directly in each --handoffs dir; it writes nothing and runs no git. It prints one line, the first that applies:
+  closed <slug> (<status>|archived)     the root note is `done` or `dropped`, or the note sits only under Archive/
+  serial <slug>                         `shape: serial` (Leg 1 starts by hand; no handoff is made for it)
+  started <slug> (<why>)                reconcile-rollout.py's approved_unrun is false
+  started <slug> (a lead entered <ts>)  the Run record holds a `kind: lead-entry` line (a lead waiting on `hold_until`
+                                        stamps no `owner:`); <ts> is the first one's
+  stamped <slug> (start: unattended|started_unattended: <v>)   the Chorus Stage starts it (Start when ready)
+  incomplete <slug> (<why>)             reconcile-rollout.py's incomplete
+  launched <slug> <path> (<status>)     a handoff doc whose front-matter `launches:` names the slug (a wikilink
+                                        stripped, case-folded), the first by sorted path; <status> its `status:`
+  unstarted <slug> <Project root>       none of the above: no lead has started it
+Exit 0, or 2 (no stdout, one `unfinished-rollout:` line) when no note is found, on a usage error, or when
+reconcile-rollout.py or run_record.py will not load.
 """
 import argparse
 import importlib.util
+import json
+import math
 import os
 import re
 import subprocess
@@ -133,12 +206,18 @@ from pathlib import Path
 DEFAULT_TASKS_DIR = Path(os.path.expanduser("~/repos/obsidian/Work/Tasks"))
 RR_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/reconcile-rollout.py"
 SC_SRC = Path(__file__).resolve().parent / "serial-chains.py"
+GI_SRC = Path(__file__).resolve().parent / "gated_inputs.py"
+RUN_RECORD_SRC = Path(__file__).resolve().parent / "run_record.py"
 TEMPLATE = Path(__file__).resolve().parent.parent.parent / "schedule/rollout-template.md"
 RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikilink_slug", "_scalar", "_status",
-            "_valued", "never_started", "approved_unrun", "incomplete", "_shape", "SHAPES")
+            "_valued", "never_started", "approved_unrun", "incomplete", "_shape", "SHAPES", "_priority",
+            "PRIORITY_WEIGHTS", "_dep_entries", "_fold_unit", "_dep_status", "_live_rollout", "_start_unattended")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin")
+GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
+RUN_RECORD_NAMES = ("record_path",)
 CLOSED = {"done", "dropped"}
-SC = None   # serial-chains.py, loaded by cmd_check (load_sc)
+PICKUP_CAP = 5
+SC = None   # serial-chains.py, loaded by cmd_check and cmd_pickups (load_sc)
 
 
 def die(msg):
@@ -361,24 +440,29 @@ def serial_remedy(s) -> str:
     return "wait for it to finish, or /thread:status then /thread:repair"
 
 
-def run_projects(rr, args, tasks_dir, warns):
-    """The run's project set: {norm(--project)}, or the intersection of the --tasks notes' projects."""
-    if args.project is not None:
-        return {norm_project(rr, args.project)} - {""}
-    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
+def named_tasks(rr, tasks_csv, tasks_dir):
+    """[(slug, Note)] for each --tasks slug, found root-first, then under Archive/; a missing one is exit 2."""
+    slugs = [s.strip() for s in tasks_csv.split(",") if s.strip()]
     if not slugs:
         die("--tasks names no task")
-    sets = []
+    out = []
     for s in slugs:
         name = rr._wikilink_slug(s) or s
         path = find_task(tasks_dir, name)
         if path is None:
             die(f"--tasks {name}: no note at {tasks_dir / (name + '.md')} or under Archive/")
         try:
-            sets.append(projects_of(rr, rr.Note(path)))
+            out.append((name, rr.Note(path)))
         except ValueError as e:
             die(f"--tasks {name}: {e}")
-    mine = set.intersection(*sets)
+    return out
+
+
+def run_projects(rr, args, tasks_dir, warns):
+    """The run's project set: {norm(--project)}, or the intersection of the --tasks notes' projects."""
+    if args.project is not None:
+        return {norm_project(rr, args.project)} - {""}
+    mine = set.intersection(*(projects_of(rr, note) for _, note in named_tasks(rr, args.tasks, tasks_dir)))
     if not mine:
         warns.append("WARN: the named tasks share no project: no unfinished rollout counts as this project's")
     return mine
@@ -653,6 +737,355 @@ def cmd_running(args, rr) -> int:
     return 0
 
 
+# ---- the pickup sweep (schedule § 1.2, ADR 0057 d1) -----------------------------------------------------------------
+
+REPO_LABEL = "**Repo:**"
+LIST_LINE_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+BACKTICK_RE = re.compile(r"`([^`]+)`")
+GATE_KINDS = ("spend", "credential", "irreversible")
+
+
+def launch_repo(note):
+    """The `## Launch` **Repo:** value as written ('' when the section has no such list line, or it is empty): the first
+    backtick span after the label, else the first whitespace token, a trailing `/` dropped."""
+    for line in note.section_text("## Launch").split("\n"):
+        if not LIST_LINE_RE.match(line) or REPO_LABEL not in line:
+            continue
+        rest = line.split(REPO_LABEL, 1)[1]
+        m = BACKTICK_RE.search(rest)
+        value = m.group(1).strip() if m else (rest.split() or [""])[0]
+        return value.rstrip("/") if value not in ("", "/") else value
+    return ""
+
+
+def phase_key(rr, note):
+    """`phase:` as a finite float, (0, n); a missing, empty, unparseable or non-finite one sorts last, (1, 0)."""
+    try:
+        n = float(rr._scalar(note.get("phase")))
+    except ValueError:
+        return (1, 0.0)
+    return (0, n) if math.isfinite(n) else (1, 0.0)
+
+
+def build_index(rr, tasks_dir: Path):
+    """stem (lower-cased) -> (path, Note) for every note under the tasks dir, Archive included, a root copy preferred
+    (reconcile-rollout.py's _scan builds its dependency index the same way)."""
+    index = {}
+    for path in sorted(tasks_dir.rglob("*.md")):
+        try:
+            note = rr.Note(path)
+        except (ValueError, OSError):
+            continue
+        prev = index.get(path.stem.lower())
+        if prev is None or (prev[0].parent != tasks_dir and path.parent == tasks_dir):
+            index[path.stem.lower()] = (path, note)
+    return index
+
+
+def first_project(rr, note, mine):
+    """The display name of the note's first project in the run's project set."""
+    for v in note.get_list("projects"):
+        name = rr._wikilink_slug(rr._scalar(v))
+        if name and norm_project(rr, v) in mine:
+            return name
+    return "?"
+
+
+def cmd_pickups(args, rr) -> int:
+    repo = Path(os.path.expanduser(args.repo))
+    if not repo.is_dir():
+        die(f"--repo {args.repo}: not a directory")
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if not tasks_dir.is_dir():
+        die(f"tasks dir {tasks_dir} not found")
+    load_sc()
+    gi = load_module("gated_inputs", GI_SRC, GI_NAMES, "skills/_shared/scripts/gated_inputs.py")
+    warns = []
+    named = named_tasks(rr, args.tasks, tasks_dir)
+    cands = {name.lower() for name, _ in named}
+    mine = set.intersection(*(projects_of(rr, note) for _, note in named))
+    if not mine:
+        warns.append("WARN: the named tasks share no project: the pickup pool is empty")
+    misfits = {}
+    for m in args.misfit or []:
+        slug, sep, why = m.partition("=")
+        slug = (rr._wikilink_slug(slug.strip()) or "").lower()
+        if not sep or not slug or not why.strip():
+            die(f"--misfit {m}: not <slug>=<why>")
+        misfits[slug] = why.strip()
+
+    # The pool: open tasks directly in the tasks dir, on the run's projects, owned by no live rollout.
+    pool = {}
+    for path in sorted(tasks_dir.glob("*.md")) if mine else []:
+        try:
+            note = rr.Note(path)
+        except (ValueError, OSError):
+            continue
+        tags = tags_of(rr, note)
+        key = path.stem.lower()
+        if "task" not in tags or tags & {"rollout", "decisions"} or rr._status(note) != "open" or key in cands or \
+                rr._live_rollout(tasks_dir, note.get("rollout")) or not projects_of(rr, note) & mine:
+            continue
+        pool[key] = (path, note)
+    for slug in misfits:
+        if slug not in pool:
+            die(f"--misfit {slug}: no pool task of that name (an open task on these projects, not one of --tasks)")
+
+    # The Repo rule: a task with no Repo line, or on another repo, is counted and never read further.
+    env = git_env()
+    repo_real = os.path.realpath(repo)
+    repo_origin = origin_of(repo, env)
+    if repo_origin is None:
+        warns.append(f"WARN: --repo {args.repo} is not a git repo with an origin here: only paths are compared")
+    origins = {}
+    counted = {"another repo": 0, "no ## Launch repo": 0}
+    left = {}
+    readable = {}
+    for key, (path, note) in pool.items():
+        value = launch_repo(note)
+        if not value:
+            counted["no ## Launch repo"] += 1
+            continue
+        where = Path(os.path.expanduser(value))
+        if not where.is_dir():
+            readable[key] = (path, note)
+            left[key] = f"## Launch repo {value} is missing here: its origin is unread"
+            continue
+        real = os.path.realpath(where)
+        same = real == repo_real
+        if not same and repo_origin is not None:
+            if real not in origins:
+                origins[real] = origin_of(where, env)
+            same = origins[real] == repo_origin
+        if not same:
+            counted["another repo"] += 1
+            continue
+        readable[key] = (path, note)
+
+    # The gate rule, then the misfits.
+    for key, (path, note) in readable.items():
+        if key in left:
+            continue
+        try:
+            hits = gi.sweep(gi.body_of(path.read_text()))
+        except (OSError, UnicodeDecodeError) as e:
+            left[key] = f"unreadable: {e}"
+            continue
+        kind = next((k for k in GATE_KINDS if hits.get(k)), None)
+        if kind is not None:
+            found = {h["word"] for h in hits[kind]}
+            word = next((w[0] for w in getattr(gi, kind.upper()) if w[0] in found), hits[kind][0]["word"])
+            left[key] = f'gated: {kind} "{word}"'
+        elif key in misfits:
+            left[key] = misfits[key]
+
+    weight = lambda key: rr.PRIORITY_WEIGHTS[rr._priority(readable[key][1])]  # noqa: E731
+    order = sorted(readable, key=lambda k: (-weight(k), phase_key(rr, readable[k][1]), k.casefold()))
+    rank = {k: i for i, k in enumerate(order)}
+    stem = {k: readable[k][0].stem for k in readable}
+    stem.update({name.lower(): name for name, _ in named})   # a candidate's name as given
+    index = build_index(rr, tasks_dir)
+    landed = {}
+
+    def deps(key):
+        """[(dep as written, its unit lower-cased)] for each unlanded dependency of a candidate or pool task."""
+        note = readable[key][1] if key in readable else index.get(key, (None, None))[1]
+        out = []
+        for dep in rr._dep_entries(note) if note is not None else []:
+            if dep.lower() not in landed:
+                landed[dep.lower()] = rr._dep_status(dep, index)
+            if not landed[dep.lower()][0]:
+                out.append((dep, rr._fold_unit(dep, index)[0].lower()))
+        return out
+
+    # A dependency cycle among pool tasks leaves each member.
+    def reach(start):
+        seen, todo = set(), [start]
+        while todo:
+            for _, u in deps(todo.pop()):
+                if u in readable and u not in seen:
+                    seen.add(u)
+                    todo.append(u)
+        return seen
+
+    reaches = {k: reach(k) for k in order}
+    for k in order:
+        if k in reaches[k] and k not in left:
+            others = [u for u in order if u != k and u in reaches[k] and k in reaches[u]]
+            left[k] = f"a dependency cycle with [[{stem[others[0] if others else k]}]]"
+
+    # Needed: reachable from the candidates through unlanded pool dependencies, never through a left task; a needed
+    # task whose dependency cannot be met is left, to a fixpoint.
+    while True:
+        needed, by = [], {}
+        todo = [name.lower() for name, _ in named]
+        while todo:
+            t = todo.pop(0)
+            for _, u in deps(t):
+                if u in readable and u not in by and u not in cands:
+                    by[u] = t
+                    needed.append(u)
+                    if u not in left:
+                        todo.append(u)
+        changed = False
+        for u in needed:
+            if u in left:
+                continue
+            for dep, unit in deps(u):
+                if unit in cands or (unit in by and unit not in left):
+                    continue
+                left[u] = (f"depends on [[{dep}]] (left alone)" if unit in readable
+                           else f"depends on [[{dep}]] ({landed[dep.lower()][1]})")
+                changed = True
+                break
+        if not changed:
+            break
+    joined = {u for u in needed if u not in left}
+    join = [{"slug": stem[u], "kind": "needed", "why": f"needed by [[{stem[by[u]]}]]"}
+            for u in sorted(joined, key=rank.get)]
+
+    # Extras: each other pool task in order, with its closure of unlanded pool dependencies not yet joined.
+    def closure(t):
+        members, todo, bad = [t], [t], None
+        while todo and bad is None:
+            m = todo.pop(0)
+            for dep, unit in deps(m):
+                if unit in cands or unit in joined or unit in members:
+                    continue
+                if unit not in readable:
+                    bad = f"depends on [[{dep}]] ({landed[dep.lower()][1]})"
+                    break
+                if unit in left:
+                    bad = f"depends on [[{dep}]] (left alone)"
+                    break
+                members.append(unit)
+                todo.append(unit)
+        return members, bad
+
+    extras, beyond = 0, []
+    for t in order:
+        if t in joined or t in left or t in by:
+            continue
+        members, bad = closure(t)
+        if bad is not None:
+            left[t] = bad
+            continue
+        if extras + len(members) > PICKUP_CAP:
+            beyond.append(t)
+            continue
+        extras += len(members)
+        note = readable[t][1]
+        join.append({"slug": stem[t], "kind": "extra", "why": f"open on [[{first_project(rr, note, mine)}]] on this "
+                                                               f"repo, priority {rr._priority(note)}"})
+        for m in members[1:]:
+            join.append({"slug": stem[m], "kind": "extra", "why": f"needed by [[{stem[t]}]]"})
+        joined.update(members)
+    beyond = [t for t in beyond if t not in joined]
+
+    warnings = []
+    for t in [name.lower() for name, _ in named] + [u for u in needed if u in joined]:
+        for dep, unit in deps(t):
+            if unit in left:
+                warnings.append({"task": stem[t], "dep": stem[unit], "why": left[unit]})
+    for w in warns:
+        print(w, file=sys.stderr)
+    print(json.dumps({
+        "projects": sorted(mine), "order": [stem[k] for k in order], "join": join,
+        "needed": [stem[u] for u in sorted((u for u in needed if u in joined), key=rank.get)],
+        "left": [{"slug": stem[k], "why": left[k]} for k in order if k in left], "counted": counted,
+        "beyond": [stem[k] for k in beyond], "warnings": warnings, "cap": PICKUP_CAP,
+    }))
+    return 0
+
+
+# ---- unstarted (close step 2, ADR 0057 d5) ---------------------------------------------------------------------------
+
+FM_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.S)
+
+
+def front_matter(path: Path) -> dict:
+    """A doc's top-level `key: value` front-matter lines, quotes stripped, CRLF tolerated ({} when it has none)."""
+    try:
+        m = FM_RE.match(path.read_text())
+    except (OSError, UnicodeDecodeError):
+        return {}
+    out = {}
+    for line in m.group(1).split("\n") if m else []:
+        kv = re.match(r"^([A-Za-z_][\w-]*):[ \t]*(.*?)\s*$", line.rstrip("\r"))
+        if kv and kv.group(1) not in out:
+            out[kv.group(1)] = kv.group(2).strip().strip("\"'").strip()
+    return out
+
+
+def lead_entry(rec, slug):
+    """The ts of the first `kind: lead-entry` line in the slug's Run record, or None (an unreadable record is none)."""
+    try:
+        with open(rec.record_path(slug)) as fh:
+            for line in fh:
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(ev, dict) and ev.get("kind") == "lead-entry":
+                    return ev.get("ts") or "?"
+    except Exception:  # noqa: BLE001 — a missing or unreadable record (or a slug it refuses) reads as none
+        return None
+    return None
+
+
+def cmd_unstarted(args, rr) -> int:
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    slug = rr._wikilink_slug(args.rollout) or ""
+    if not slug:
+        die("--rollout names no rollout")
+    rec = load_module("run_record", RUN_RECORD_SRC, RUN_RECORD_NAMES, "skills/_shared/scripts/run_record.py")
+    path = find_task(tasks_dir, slug) if tasks_dir.is_dir() else None
+    if path is None:
+        die(f"--rollout {slug}: no note at {tasks_dir / (slug + '.md')} or under Archive/")
+    try:
+        note = rr.Note(path)
+    except (ValueError, OSError) as e:
+        die(f"--rollout {slug}: {e}")
+    status = rr._status(note)
+    if path.parent != tasks_dir:
+        print(f"closed {slug} ({status if status in CLOSED else 'archived'})")
+        return 0
+    if status in CLOSED:
+        print(f"closed {slug} ({status})")
+        return 0
+    if rr._shape(note) == "serial":
+        print(f"serial {slug}")
+        return 0
+    linked, index = rr._scan(path, tasks_dir)
+    fresh, why = rr.approved_unrun(note, linked)
+    if not fresh:
+        print(f"started {slug} ({why})")
+        return 0
+    ts = lead_entry(rec, slug)
+    if ts is not None:
+        print(f"started {slug} (a lead entered {ts})")
+        return 0
+    if rr._start_unattended(note):
+        print(f"stamped {slug} (start: unattended)")
+        return 0
+    if rr._valued(note.get("started_unattended")):
+        print(f"stamped {slug} (started_unattended: {rr._scalar(note.get('started_unattended'))})")
+        return 0
+    why = rr.incomplete(path, note, linked, index)
+    if why:
+        print(f"incomplete {slug} ({why})")
+        return 0
+    dirs = [Path(os.path.expanduser(d)) for d in args.handoffs or []]
+    for doc in sorted({p for d in dirs if d.is_dir() for p in d.glob("*.md") if p.is_file()}, key=str):
+        fm = front_matter(doc)
+        if (rr._wikilink_slug(fm.get("launches", "")) or "").lower() == slug.lower():
+            print(f"launched {slug} {doc} ({fm.get('status', '').lower() or 'no status'})")
+            return 0
+    root = rr._project_root(note)
+    print(f"unstarted {slug} {root if root is not None else '(no Project root line)'}")
+    return 0
+
+
 def finish(warns, line, code, errors=()):
     for w in warns:
         print(w, file=sys.stderr)
@@ -678,9 +1111,21 @@ def main() -> int:
     c.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     r = sub.add_parser("running", help="print the rollouts that may have a lead running on the primary checkout")
     r.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
+    k = sub.add_parser("pickups", help="the Pickup sweep (schedule § 1.2): open tasks on this repo that may join")
+    k.add_argument("--repo", required=True, help="the target repo (the path schedule § 0 resolved)")
+    k.add_argument("--tasks", required=True, help="comma-separated candidate slugs (step 1's set)")
+    k.add_argument("--misfit", action="append", default=None,
+                   help="<slug>=<why>: a pool task the agent judged a misfit (repeatable)")
+    k.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
+    u = sub.add_parser("unstarted", help="whether a rollout this session wrote still needs its lead started (close step 2)")
+    u.add_argument("--rollout", required=True, help="the rollout note's slug (or [[wikilink]])")
+    u.add_argument("--handoffs", action="append", default=None,
+                   help="a docs/handoffs dir close's scan read (repeatable): a doc there with `launches:` names a launch")
+    u.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     args = p.parse_args()
     rr = load_rr()
-    return cmd_running(args, rr) if args.cmd == "running" else cmd_check(args, rr)
+    verbs = {"running": cmd_running, "check": cmd_check, "pickups": cmd_pickups, "unstarted": cmd_unstarted}
+    return verbs[args.cmd](args, rr)
 
 
 if __name__ == "__main__":

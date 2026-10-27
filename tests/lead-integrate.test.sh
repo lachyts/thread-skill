@@ -67,6 +67,9 @@ export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
 tmp=$(cd "$(mktemp -d)" && pwd -P); trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
+# The note-lock dir, and so `next`'s Trickle claims beside it (p28-3), stays this suite's own: run.sh shares one across
+# every suite, and another suite's `next` would prune or count claims this one's calls leave.
+export THREAD_NOTE_LOCK_DIR="$tmp/note-locks"
 . tests/lib/merge-task-env.sh
 export THREAD_VERIFY_SLOT_POLL=0.1
 lacks() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
