@@ -133,9 +133,13 @@ watches the shared checkout's default branch and bareness around every launch
 and halts the queue on a change that is not a close-out (execute § 4.5).
 `skills/execute/scripts/step-boundary.py` is the lead's side of a Chorus room
 stop: it reads the Workflow journals to stop each call at a step boundary and
-records the stop on the rollout note (execute § Room stop).
+records the stop on the rollout note (execute § Room stop), and in the Run record
+as a stop, as the Stop hook records each halt (ADR 0051).
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
-every emitter appends its events through it, and its header is the schema.
+every emitter appends its events through it, and its header is the schema. Its
+writers include the suites' (`verify-slot.py run`, `lead-integrate.py verify`),
+the lead's loop entries (`reconcile-rollout.py record-entry`) and why main moved
+(`lead-integrate.py base-moved`, which `merge-task.sh` calls at each exit 3).
 `skills/reflect/scripts/score.py` reads a record into a Reflection's scores and
 proposals (writing nothing), and `skills/reflect/scripts/escapes.py`, which it loads,
 reads the landed tasks' Escapes and Quality from the task notes' `fixes:` and the
@@ -376,23 +380,34 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   out), dependency holds (each why, transitive holds, cycles), the Unpark offers and the snooze writer's round trip,
   its `--clear` and refusals and parity with the scan's standing, the `unpark` and `kill` writes (one save each, the
   snooze cleared with the status, an umbrella with a live sub-project refused, parity with the scan's parked set), a
-  decision's `fork` passed through, usage exits, byte-equal reruns and read-only runs;
-  `tests/contracts/readiness-grade.test.mjs` pins `skills/_shared/readiness-grade.md` to the script's constants and
-  its `--clear`, its hold reasons, gated_inputs.py's gate kinds, the thread homes, CONTEXT.md's terms and ADR 0041's
-  ruling.
+  decision's `fork` passed through, each decision's Owner (his decisions asked, counted and charged; technical and
+  priorities calls ruled into `decidedForYou`, a technical guess dropped, `gate`, an unknown owner, a fork and a
+  credential named on a credential-gated task read as his) with its `goal` and `stakes` (required with an explicit
+  `owner: yours`, reordered with the options), usage exits, byte-equal reruns and read-only runs;
+  `tests/contracts/readiness-grade.test.mjs` pins `skills/_shared/readiness-grade.md` to the script's constants (the
+  Owners included) and its `--clear`, its hold reasons, gated_inputs.py's gate kinds, the thread homes, the three kinds
+  of fork, CONTEXT.md's terms and ADR 0041's ruling.
 - **Estate dispatch** — `tests/estate-dispatch.test.mjs`: `estate-dispatch.py` over the real scan and rank of a
   fixture vault, with injected rollout summaries — `slices` (one file per home, never overwriting), `rounds` (the
   sign-offs asked only under no pause or the sign-off pause, their gates raw and as `approve-gates` signs them, the
-  cut to the budget, held decisions skipped, AskUserQuestion payloads with short labels and unique texts), `plan`
+  cut to the budget, held decisions skipped, AskUserQuestion payloads with short labels and unique texts, each
+  question ending with `NOTE_INVITE` and each option of his decisions described by its `stakes`), `plan`
   (decided, unheld members only, each with every dependency it needs scheduled and every why read against the final
   schedule, blockers, shared roots and parked runs waiting, batches that keep names that may meet apart, each live
   rollout's holds and the signed reinstate), `sessions` (written notes, the status allow-list
   behind the holds, orients last), `record` (the answer folded to one line into `## Decisions (asked ahead
-  <date>)`, the fork's ruling, every refusal byte-identical) and `log` (one grade line per graded task under one pass,
-  a rerun `exists`, a half-written pass completed, refusals that write nothing), usage exits, byte-equal reruns and
-  read-only runs;
+  <date>)`, the fork's ruling, every refusal byte-identical; `record --owner` a call made for Lachy into
+  `## Decided for you (<date>)`), `decided-for-you` (the ruled calls of the queued tasks, the owner split, read-only
+  without `--write`, a task gone in flight refused while the rest are written) and `log` (one grade line per graded
+  task under one pass, a rerun `exists`, a half-written pass completed, refusals that write nothing), usage exits,
+  byte-equal reruns and read-only runs;
   `tests/contracts/orient-all.test.mjs` pins `skills/orient-all/SKILL.md` to the script, to schedule's answered
   questions and to status § 4's numbered actions.
+- **Question gate** — `tests/contracts/question-gate.test.mjs`: `skills/_shared/asking.md` (the Owners, Decided for
+  you, the Framing), its cite in every prose unit that names AskUserQuestion, ADR 0054 § Sites holding one row per ask
+  unit (each anchor in exactly one unit, every ask that stands citing the gate, each `Owner` label its row's, every
+  follow-up row owned by a task in § Follow-ups, the counts), the grill skills' pinned `args`, the readers of
+  `## Decided for you` and the Framing of the script-built rounds.
 - **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos
   with a fixture check — undeclared, whole untruncated output and its digest, the advance on a matching digest
   and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal, even one that

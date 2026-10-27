@@ -26,7 +26,8 @@
 //                               verifier-bearing builders render the wrapped line with SLOT_TEXT once, the four
 //                               TASK_TREE_RULE builders and the review judge carry slotRule after KILL_RULE, only the
 //                               integrator carries --priority, and the whole-call pins' slotted calls are their
-//                               unslotted bytes plus exactly those pieces.
+//                               unslotted bytes plus exactly those pieces. SLOT_TEXT names the Heat hold (p31-4):
+//                               its lines, and exit 76 as no verdict and never an iteration.
 //   - touched tests (p31-1)   → the full suite runs at two Checkpoints (estate ADR 0009 d1): each Ralph try runs the
 //                               touched tests and the verifier runs once, before the PR; the one-shot runs the verifier
 //                               only when the touched tests are green; the reviser re-checks the same way; the review
@@ -1147,6 +1148,11 @@ function agentPrompts(E, over = {}) {
   ok(slotFails(prioLeak, ruleOf).some((f) => f === 'implementerPrompt: --priority only in the integrator, once'), 'verifySlot control: --priority in a task-call builder fails')
   ok(typeof E.SLOT_TEXT === 'string' && !E.SLOT_TEXT.includes('\n') && !/['$]|\$\{/.test(E.SLOT_TEXT) && !/`[^`]*\bgit\s/.test(E.SLOT_TEXT) &&
     E.SLOT_TEXT.includes('`kill <pid>`') && E.SLOT_TEXT.includes('7200000'), 'SLOT_TEXT: one static line, no apostrophe or git span; it names the pid stop and the long timeout')
+  // p31-4, the Heat hold (estate ADR 0009 d5): a heat stop or a stop while the Mac is hot is no verdict, never a red try.
+  ok(E.SLOT_TEXT.includes('`verify-slot: waiting (heat: …)`') && E.SLOT_TEXT.includes('`verify-slot: heat stop …`') &&
+    E.SLOT_TEXT.includes('only the final exit is the verdict') &&
+    E.SLOT_TEXT.includes('an exit 76 with a `verify-slot: no verdict` line is no verdict, never red and never an iteration'),
+    'SLOT_TEXT: the Heat hold: its lines, the final exit is the verdict, and exit 76 is no verdict and never an iteration')
   ok(wrapped.startsWith(E.GIT_ENV_SCRUB + " python3 '" + SLOT.script + "' run --slots 2 -- bash -c '"), 'slotted: the scrub, then the wrapper, then bash -c')
   ok(E.slotted(V, undefined) === E.scrubbed(V) && E.slotted(V, null) === E.scrubbed(V), 'slotted: absent ⇒ exactly scrubbed()')
   // shq round-trips through bash -c
@@ -1210,14 +1216,21 @@ function agentPrompts(E, over = {}) {
 const P29X = loadEngine(['FLAKE_CHECK_TASK', 'FLAKE_CHECK_INTEGRATION', 'flakeCheck', 'GIT_ENV_SCRUB', 'DIFF_FILES'])
 const P29_9 = [['\n' + P29X.FLAKE_CHECK_TASK, ''], ['\n' + P29X.FLAKE_CHECK_INTEGRATION, '']]
 const preP29 = (p) => P29_9.reduce((x, [nw, od]) => x.split(nw).join(od), p)
-// The p29-9 pins (each the p29-9 base, the pin p31-1 recorded, plus exactly the blocks).
+// The p29-9 pins (each the p29-9 base plus exactly the blocks; the base is the pin p31-1 recorded, or for the slotted
+// renders, integrator and slotted, the pin p31-4 recorded). Those two were re-pinned at p29-9's Integration with p31-4:
+// with p31-4's SLOT_TEXT sentence taken out (preHeat, below) they are the pins p29-9 recorded before p31-4 landed
+// (P29_PRE_HEAT), so each side's delta stays pinned on its own.
 const P29_PINS = {
-  integrator: '640cb573dece267eca668e14e3e6649c726ed80ad79a8224f8735639494d7be9', // agentPrompts' 2 fixtures × baseline/none × slot/none
+  integrator: 'f1520bdcee029f3f966c2e399225fe393af6573b6c57ef2a8e80eeeafecc9b60', // agentPrompts' 2 fixtures × baseline/none × slot/none
   r2: '83e62457a38eeb10f70f964a4679a67177027eaf81a021caae0877e512a7871a', // the unseeded round-2 reviser
   r3: '1309d674cedb9d955af05f895d6805b3e2cb03496dc24e7a8b663fb6a1a1f37e', // the unseeded round-3 reviser with the plan
   calls: '867dbc843c58399e743049254a4dc9631af1d8180a2158330eaf7e13cd548863', // three whole task-mode calls, unslotted
-  slotted: '66a3293284ce77d41a3826e0f9f24b6d0194a2096de8da090b1a01410c3ccfbd', // the same calls as run, slotted
+  slotted: '9992fcd46d5958c6cb68e7d21f934be6389e248e985063c4dad38a106f443416', // the same calls as run, slotted
   rows: 'bc54de03bfb55e50cd8c6ead033b2da5c8ea789df8b0945c96ca54690a5398fb', // their rows, flakes included
+}
+const P29_PRE_HEAT = {
+  integrator: '640cb573dece267eca668e14e3e6649c726ed80ad79a8224f8735639494d7be9', // P29_PINS.integrator before p31-4
+  slotted: '66a3293284ce77d41a3826e0f9f24b6d0194a2096de8da090b1a01410c3ccfbd', // P29_PINS.slotted before p31-4
 }
 const PRE_P31 = {
   integrator: '5e13e60b47a68c76da50b467c1a84243b2d3ddedcb24af16d15374c27e71e4a8', // agentPrompts' 2 fixtures × baseline/none × slot/none
@@ -1281,6 +1294,12 @@ function p31Pairs(slot) {
 }
 // A prompt with every p31-1 fragment swapped back for its old text.
 const preP31 = (p, slot) => p31Pairs(slot).reduce((x, [nw, od]) => x.split(nw).join(od), p)
+// p31-4 (the Heat hold, estate ADR 0009 d5): the one sentence SLOT_TEXT gained, appended to its end. A slotted render
+// with it taken out (preHeat) is its pre-p31-4 bytes, so every slotted pin keeps its old hash and says what moved.
+const SLOT_HEAT = ' When the Mac is hot the wrapper holds or stops the suite and puts it back in line (`verify-slot: waiting (heat: …)`, ' +
+  '`verify-slot: heat stop …`): only the final exit is the verdict, and an exit 76 with a `verify-slot: no verdict` line is no verdict, ' +
+  'never red and never an iteration, so run it again.'
+const preHeat = (p) => p.split(SLOT_HEAT).join('')
 // The pairs no pinned call renders: the n=2 loops (a top-rung retry) and the one-shot (every pinned implementer runs
 // on the top rung: proj-fix-p's plan judge climbs it there). They stay in p31Pairs for any other render, and the
 // p31-1 block pins the one-shot against PRE_P31.oneShot; the pins block checks that every other pair renders.
@@ -1332,16 +1351,19 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
     const over = touched === undefined ? {} : { touched }
     const integ = []
     for (const b of [undefined, B]) for (const s of [undefined, SLOT]) integ.push(...agentPrompts(E, argsOf(b, s, over)).integratorPrompt)
-    ok(integ.length === 8 && shaAll(integ.map(preP29)) === PRE_P31.integrator, `p31-1: integratorPrompt with the p29-9 block swapped out is its pre-p31-1 bytes (2 fixtures × baseline × slot), touched ${JSON.stringify(touched)}`)
-    ok(shaAll(integ) === P29_PINS.integrator, `p29-9: integratorPrompt is the p29-9 base plus the Flake check block (2 fixtures × baseline × slot), touched ${JSON.stringify(touched)}`)
+    ok(integ.length === 8 && shaAll(integ.map((p) => preHeat(preP29(p)))) === PRE_P31.integrator, `p31-1: integratorPrompt with the p29-9 block swapped out is its pre-p31-1 bytes (2 fixtures × baseline × slot; p31-4's SLOT_TEXT sentence taken out), touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ.map(preHeat)) === P29_PRE_HEAT.integrator, `p29-9: integratorPrompt with p31-4's SLOT_TEXT sentence taken out is the p29-9 pin recorded before p31-4 landed, touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ) === P29_PINS.integrator, `p29-9: integratorPrompt is the p29-9 base plus the Flake check block (2 fixtures × baseline × slot; re-pinned at p29-9's Integration with p31-4), touched ${JSON.stringify(touched)}`)
     ok(shaAll(agentPrompts(E, over).integrationReviewPrompt) === PRE_P31.integrationReview, `p31-1: integrationReviewPrompt is its pre-p31-1 bytes, touched ${JSON.stringify(touched)}`)
   }
   const loops = []
   for (const n of [2, 3]) for (const b of [undefined, B]) for (const s of [undefined, SLOT, { ...SLOT, priority: true }]) loops.push(E.fullSuiteLoop(V, n, b, s))
-  ok(shaAll(loops) === PRE_P31.ralph, 'p31-1: fullSuiteLoop is the pre-p31-1 ralphLoop, byte for byte (12 renders)')
+  ok(shaAll(loops.map(preHeat)) === PRE_P31.ralph, "p31-1: fullSuiteLoop is the pre-p31-1 ralphLoop, byte for byte (12 renders; p31-4's SLOT_TEXT sentence taken out)")
   const shots = []
   for (const b of [undefined, B]) for (const s of [undefined, SLOT]) shots.push(preOneShot(V, b, s))
-  ok(shaAll(shots) === PRE_P31.oneShot, 'p31-1: preOneShot (the swap-back literal) is the pre-p31-1 oneShotVerify, byte for byte')
+  ok(shaAll(shots.map(preHeat)) === PRE_P31.oneShot, "p31-1: preOneShot (the swap-back literal) is the pre-p31-1 oneShotVerify, byte for byte (p31-4's SLOT_TEXT sentence taken out)")
+  ok(E.SLOT_TEXT.endsWith(SLOT_HEAT) && times(E.SLOT_TEXT, SLOT_HEAT) === 1, "p31-4: SLOT_TEXT ends with the Heat hold's sentence, once, so preHeat takes out exactly it")
+  ok(loops.some((l) => l.includes(SLOT_HEAT)) && shots.some((s) => s.includes(SLOT_HEAT)), 'p31-4: the sentence renders in the slotted loops and one-shots, so its swap is no no-op')
   const aB = argsOf(B)
   ok(sha(E.baselineManifest(aB, true)) === PRE_P31.manifest, "p31-1: baselineManifest(a, true), the integrator's, is its pre-p31-1 bytes")
   ok(E.baselineManifest(aB) !== E.baselineManifest(aB, true) && times(E.baselineManifest(aB), MANIFEST_P31[0]) === 1 &&
@@ -1771,10 +1793,13 @@ Never run the verifier unless the task brief asks the review for the full suite;
 // byte is inside a p31-1 fragment: the p31-1 base pins (4f524ab6…, 986d4024…, c3efcd93…, 97ff33a1…) did not move.
 // Re-pinned on purpose by p29-9 (ADR 0050, the Flake check), the reviser pins, the calls hash, the slotted calls hash and
 // the rows hash: FLAKE_CHECK_TASK follows each code-writing prompt's verification block, and every row carries `flakes`.
-// P29_9 (above) swaps the block out first: the revisers, the calls and the slotted calls with it swapped out hash to the
-// p31-1 pins (7b6822e4…, 4ff225d5…, b82f1748…, deac8755…), and every older base chains on top of that; the rows with
-// `flakes` deleted hash to the p21-3 rows pin (0137cf70…). The integrator, which p31-1 left at its pre-p31-1 bytes, gains
-// FLAKE_CHECK_INTEGRATION after integrationVerify: with it swapped out it is still PRE_P31.integrator. taskTreeSetup and
+// P29_9 (above) swaps the block out first: the revisers and the calls with it swapped out hash to the p31-1 pins
+// (7b6822e4…, 4ff225d5…, b82f1748…), the slotted calls to the p31-4 pin (c78f36f1…, which p31-4's preHeat takes on to
+// the p31-1 slotted pin deac8755…), and every older base chains on top of that; the rows with `flakes` deleted hash to
+// the p21-3 rows pin (0137cf70…). The integrator, which p31-1 left at its pre-p31-1 bytes, gains
+// FLAKE_CHECK_INTEGRATION after integrationVerify: with it swapped out, and p31-4's SLOT_TEXT sentence taken out, it is
+// still PRE_P31.integrator. The integrator and slotted pins were re-pinned at p29-9's Integration with p31-4 (both carry
+// its sentence); P29_PRE_HEAT keeps the pins p29-9 recorded before it, which preHeat reaches. taskTreeSetup and
 // the default-branch GOLDENs did not move. A deliberate resume-cache break, like p31-1's: every code-writing prompt and
 // both result schemas (IMPL_RESULT, INTEGRATE_RESULT gain `flakes`) changed; a resume re-passes its run's own
 // `scriptPath` (ADR 0043).
@@ -1875,7 +1900,9 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   const slottedP31Calls = []
   const p29Calls = []
   const slottedP29Calls = []
+  const slottedPreHeatCalls = []
   const p29Rows = []
+  const slottedP314Calls = []
   const logs = []
   const baseCalls = []
   const oldCalls = []
@@ -1889,7 +1916,9 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
     const r = await runTask(args, scripted)
     slottedCalls.push(JSON.stringify(r.calls))
     slottedP29Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP29(c.prompt) }))))
-    slottedP31Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP31(preP29(c.prompt), PIN_SLOT) }))))
+    slottedPreHeatCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(c.prompt) }))))
+    slottedP31Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(preP31(preP29(c.prompt), PIN_SLOT)) }))))
+    slottedP314Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(preP29(c.prompt)) }))))
     ok(r.calls.length > 0 && r.calls.every((c) => !c.prompt.includes(SL.scrubbed('make test'))), `ADR 0009 d4: ${args.task.slug}: no prompt renders the bare verifier`)
     r.calls = r.calls.map((c) => ({ ...c, prompt: unslot(c.prompt) }))
     calls.push(JSON.stringify(r.calls))
@@ -1951,11 +1980,16 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
     'byte pin: three whole task-mode calls — every row, rung record, reviewVerdicts and flakes included (re-pinned by p29-9: the p29-9 base above plus flakes)')
   ok(slottedCalls.join('\n') !== calls.join('\n'), 'ADR 0009 d4: the slot is in these calls, so taking it out is no no-op')
   ok(sha(slottedP31Calls.join('\n')) === '986d4024967d3b0c2cd38db5372fcf6637fb5102e2319c75d28444cba44a1f3c',
-    'byte pin (p31-1 base, slotted): the slotted calls with the p31-1 fragments swapped back are the pre-p31-1 bytes (the estate ADR 0009 d4 pin)')
-  ok(sha(slottedP29Calls.join('\n')) === 'deac8755b9c27275aee06d51a3b45556d7e34b3b252047ec126e15ec3899f89d',
-    'byte pin (p29-9 base, slotted): the slotted calls with the Flake check block swapped out are the pre-p29-9 bytes (the p31-1 slotted pin)')
+    "byte pin (p31-1 base, slotted): the slotted calls with the Flake check block swapped out, and the p31-1 fragments and p31-4's SLOT_TEXT sentence swapped back, are the pre-p31-1 bytes (the estate ADR 0009 d4 pin)")
+  ok(sha(slottedP314Calls.join('\n')) === 'deac8755b9c27275aee06d51a3b45556d7e34b3b252047ec126e15ec3899f89d',
+    "byte pin (p31-4 base, slotted): the slotted calls with the Flake check block swapped out and p31-4's SLOT_TEXT sentence taken out are the pre-p31-4 bytes (the p31-1 slotted pin)")
+  ok(slottedCalls.some((c) => c.includes(JSON.stringify(SLOT_HEAT).slice(1, -1))), "p31-4: the SLOT_TEXT sentence renders in these slotted calls, so its swap is no no-op")
+  ok(sha(slottedP29Calls.join('\n')) === 'c78f36f1259bc212b1a7b03b656cd30ab2a6f65af32c4b030cc67f3d479c9b75',
+    'byte pin (p29-9 base, slotted): the slotted calls with the Flake check block swapped out are the pre-p29-9 bytes (the p31-4 slotted pin)')
+  ok(sha(slottedPreHeatCalls.join('\n')) === P29_PRE_HEAT.slotted,
+    "byte pin (p29-9 before p31-4, slotted): the slotted calls with p31-4's SLOT_TEXT sentence taken out are the p29-9 slotted pin recorded before p31-4 landed")
   ok(sha(slottedCalls.join('\n')) === P29_PINS.slotted,
-    'byte pin (estate ADR 0009 d4; re-pinned by p29-9): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
+    'byte pin (estate ADR 0009 d4; re-pinned by p31-1, p31-4 and p29-9): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
 }
 
 console.log()

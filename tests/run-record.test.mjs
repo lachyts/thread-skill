@@ -254,6 +254,17 @@ test('idle-slots (p29-8): a hold-away-cap reason is accepted; an unknown reason 
   assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
 })
 
+test('idle-slots (p30-3): a hold-pr reason (a row waits on a hold_until PR) is accepted; hold-until is refused', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-pr', free: 2, settings: SETTINGS })], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.equal(l.reason, 'hold-pr')
+  assert.equal(l.free, 2)
+  const r = cli(home, ['emit', '--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-until', free: 2, settings: SETTINGS })], { env: EV(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+})
+
 test('slot-taken (p29-8): the cap in force is accepted; a malformed cap is refused, nothing written', (t) => {
   const home = tmpHome(t)
   const cap = { away: true, n: 4, file: 'fresh' }
@@ -303,6 +314,22 @@ test('the night record (p28-2): away-night, last-start-held and ran-past-morning
     [1, 'r', 'u1', 'ran-past-morning', '2026-10-03T09:00:00Z']])
   assert.deepEqual([all[1].scope, all[1].history, all[1].usualMinutes, 'usualMinutes' in all[2]], ['cross-cutting', 3, 110, false])
   assert.deepEqual([all[3].slotTakenAt, all[3].usualMinutes, all[4].history], ['2026-10-03T07:30:00.000Z', 25, 2])
+})
+
+test('idle-slots hold-heat and completion-verify heat (p31-4, the Heat hold) are accepted; an unknown value is still refused', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-heat', free: 3, settings: SETTINGS })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--kind', 'completion-verify', '--json',
+    JSON.stringify({ result: 'heat', rc: 'heat', sha: 'a'.repeat(40), attempt: 1 })], { env: EV(home) })
+  const ls = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([ls[0].reason, ls[0].free, ls[1].result, ls[1].rc], ['hold-heat', 3, 'heat', 'heat'])
+  for (const [kind, json] of [['idle-slots', { reason: 'heat', free: 3, settings: SETTINGS }],
+    ['completion-verify', { result: 'hot', rc: 'heat', sha: 'a'.repeat(40), attempt: 1 }]]) {
+    const r = cli(home, ['emit', '--rollout', 'r', '--kind', kind, '--json', JSON.stringify(json)], { env: EV(home) })
+    assert.equal(r.status, 2, `${kind}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+  }
+  assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, 2, 'the refused emits wrote nothing')
 })
 
 test('auto-retry (p16-4): a valid emit, and a quota retry with used 0 and its quotaRetries', (t) => {
@@ -1026,6 +1053,119 @@ test('the Inert-path kinds are refused, exit 2 and nothing written, when malform
   ]
   for (const [kind, name, fields, extra = ['--rollout', 'r', '--task', 't']] of cases) {
     const r = cli(home, ['emit', ...extra, '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${kind} ${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, `${kind} ${name}`)
+    assert.deepEqual(listing(ev(home)), [], `${kind} ${name}: nothing written`)
+  }
+})
+
+// ---- the time-lost ledger's kinds (p29-10, ADR 0051): stops, entries, suites and why main moved ----------------------
+const CALLS = [{ task: 'a', runId: 'wf_a1', call: 'task' }, { task: 'b' }]
+const STOP = { cause: 'usage-limit', inferred: false, calls: CALLS, reason: 'Login at its 5-hour line' }
+const SLEEP = { cause: 'mac-sleep', inferred: true, at: '2026-10-26T11:00:00.000Z', wake: '2026-10-26T20:00:00.000Z', calls: [] }
+const SUITE = 's-0123456789abcdef'
+const STARTED = { suite: SUITE, by: 'task', runner: 'agent', sha: 'a'.repeat(40), dirty: true, load: [3.2, 4, 5.5], diff: 'abcdef012345', waited: 12.5, running: 3 }
+const ENDED = { suite: SUITE, by: 'task', runner: 'agent', outcome: 'red', seconds: 90.2, load: [1, 2, 3], rc: 1, failing: ['tests/a.py::t'], running: 2 }
+const MOVER = { sha: 'c'.repeat(40), kind: 'rollout', rollout: 'other-rollout', task: 'other-task', pr: 'https://github.com/o/r/pull/9', source: 'record' }
+const MOVED = { repo: 'o/r', pr: 7, base: 'b'.repeat(40), main: 'c'.repeat(40), inertOnly: true, moversTotal: 2,
+  movers: [MOVER, { sha: 'd'.repeat(40), kind: 'peer' }], pathsTotal: 1, globs: ['THREAD.md'], refusal: 1 }
+
+test('the ledger kinds (p29-10) land in <rollout>.jsonl as v 1 with their fields', (t) => {
+  const home = tmpHome(t)
+  const emit = (task, kind, f) => emitOk(home, ['--rollout', 'r', ...(task ? ['--task', task] : []), '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+  emit(null, 'stopped', STOP)
+  emit(null, 'stopped', SLEEP)
+  emit(null, 'stopped', { cause: 'mac-restart', inferred: true, at: '2026-10-26T10:00:00Z', boot: '2026-10-26T12:00:00.123Z', calls: [] })
+  emit(null, 'stopped', { cause: 'dead-lead', inferred: true, at: '2026-10-26T10:00:00Z', calls: Array.from({ length: 64 }, (_, i) => ({ task: `t${i}` })) })
+  emit(null, 'lead-entry', { by: 'stage', session: 'sess-1', stop: 'usage-limit' })
+  emit(null, 'lead-entry', { by: 'heartbeat' })
+  emit('t', 'suite-started', STARTED)
+  emit('t', 'suite-ended', ENDED)
+  emit(null, 'suite-started', { suite: 's-fedcba9876543210', by: 'completion', runner: 'lead', sha: 'e'.repeat(40), dirty: false })
+  emit('t', 'suite-ended', { suite: 's-1111111111111111', by: 'integration', runner: 'lead', outcome: 'noslot', seconds: 0, waited: 60 })
+  emit('t', 'suite-ended', { suite: SUITE, by: 'race', runner: 'lead', outcome: 'timeout', seconds: 1800, rc: 124, timeout: 1800, step: 'verifier', failing: [] })
+  emit('t', 'base-moved', MOVED)
+  emit('t', 'base-moved', { ...MOVED, inertOnly: null, error: 'git fetch origin master failed: exit 128', movers: [], moversTotal: 0 })
+  const all = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(all.map((l) => [l.v, l.kind, l.task]), [[1, 'stopped', null], [1, 'stopped', null], [1, 'stopped', null], [1, 'stopped', null],
+    [1, 'lead-entry', null], [1, 'lead-entry', null], [1, 'suite-started', 't'], [1, 'suite-ended', 't'], [1, 'suite-started', null],
+    [1, 'suite-ended', 't'], [1, 'suite-ended', 't'], [1, 'base-moved', 't'], [1, 'base-moved', 't']])
+  assert.deepEqual([all[0].calls, all[0].inferred, all[0].reason], [CALLS, false, 'Login at its 5-hour line'])
+  assert.deepEqual([all[1].at, all[1].wake, all[2].boot, all[3].calls.length], [SLEEP.at, SLEEP.wake, '2026-10-26T12:00:00.123Z', 64])
+  assert.deepEqual([all[4].by, all[4].session, all[4].stop, 'stop' in all[5]], ['stage', 'sess-1', 'usage-limit', false])
+  assert.deepEqual([all[6].load, all[6].diff, all[6].running, all[7].failing, all[7].rc], [[3.2, 4, 5.5], 'abcdef012345', 3, ['tests/a.py::t'], 1])
+  assert.deepEqual([all[9].outcome, 'rc' in all[9], all[10].timeout, all[10].step], ['noslot', false, 1800, 'verifier'])
+  assert.deepEqual([all[11].movers, all[11].inertOnly, all[12].inertOnly, all[12].error], [MOVED.movers, true, null, 'git fetch origin master failed: exit 128'])
+})
+
+test('quota-stall (p29-10) takes runId and call; an old line with neither is still valid', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--task', 'q', '--kind', 'quota-stall', '--json', JSON.stringify({ stage: 'implement', detail: 'usage limit', runId: 'wf_q1', call: 'task' })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--task', 'q', '--kind', 'quota-stall', '--json', JSON.stringify({ stage: 'implement', detail: 'usage limit' })], { env: EV(home) })
+  const [a, b] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([a.runId, a.call, 'runId' in b, 'call' in b], ['wf_q1', 'task', false, false])
+  const r = cli(home, ['emit', '--rollout', 'r', '--kind', 'quota-stall', '--json', JSON.stringify({ call: 'merge' })], { env: EV(home) })
+  assert.equal(r.status, 2, r.stderr)
+})
+
+test('a heat suite-ended (the Heat hold) is a stopped run or a held wait, with no rc', (t) => {
+  const home = tmpHome(t)
+  const emit = (f) => emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'suite-ended', '--json', JSON.stringify(f)], { env: EV(home) })
+  emit({ suite: SUITE, by: 'task', runner: 'agent', outcome: 'heat', seconds: 42, step: 'verifier', load: [9, 8, 7] })
+  emit({ suite: 's-1111111111111111', by: 'integration', runner: 'lead', outcome: 'heat', seconds: 0, waited: 60 })
+  const [a, b] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([a.outcome, 'rc' in a, a.step, b.outcome, b.waited, 'rc' in b], ['heat', false, 'verifier', 'heat', 60, false])
+})
+
+test('the ledger kinds are refused, exit 2 and nothing written, when malformed', (t) => {
+  const home = tmpHome(t)
+  const drop = (o, k) => { const c = { ...o }; delete c[k]; return c }
+  const cases = [
+    ['stopped', 'a bad cause', { ...STOP, cause: 'nap' }],
+    ['stopped', 'no inferred', drop(STOP, 'inferred')],
+    ['stopped', 'no calls', drop(STOP, 'calls')],
+    ['stopped', '65 calls', { ...STOP, calls: Array.from({ length: 65 }, (_, i) => ({ task: `t${i}` })) }],
+    ['stopped', 'a call with no task', { ...STOP, calls: [{ runId: 'wf_1' }] }],
+    ['stopped', 'a call with a bad call', { ...STOP, calls: [{ task: 'a', call: 'merge' }] }],
+    ['stopped', 'a call with an unknown key', { ...STOP, calls: [{ task: 'a', slot: 1 }] }],
+    ['stopped', 'boot on a dead-lead', { cause: 'dead-lead', inferred: true, at: '2026-10-26T10:00:00Z', boot: '2026-10-26T11:00:00Z', calls: [] }],
+    ['stopped', 'wake missing on a mac-sleep', drop(SLEEP, 'wake')],
+    ['stopped', 'wake on a halt', { cause: 'halt', inferred: false, wake: '2026-10-26T11:00:00Z', calls: [] }],
+    ['stopped', 'at after wake', { ...SLEEP, at: '2026-10-26T21:00:00Z' }],
+    ['stopped', 'an inferred stop with no at', { cause: 'dead-lead', inferred: true, calls: [] }],
+    ['stopped', 'a naive at', { ...SLEEP, at: '2026-10-26T11:00:00' }],
+    ['stopped', 'a 201-character reason', { ...STOP, reason: 'r'.repeat(201) }],
+    ['lead-entry', 'stop: mac-sleep', { by: 'stage', stop: 'mac-sleep' }],
+    ['lead-entry', 'a bad by', { by: 'cron' }],
+    ['lead-entry', 'no by', { session: 's' }],
+    ['suite-started', 'a bad suite id', { ...STARTED, suite: 's-123' }],
+    ['suite-started', 'a load of 2 numbers', { ...STARTED, load: [1, 2] }],
+    ['suite-started', 'a negative load', { ...STARTED, load: [1, -2, 3] }],
+    ['suite-started', 'no sha', drop(STARTED, 'sha')],
+    ['suite-started', 'dirty "yes"', { ...STARTED, dirty: 'yes' }],
+    ['suite-started', 'a diff that is not 12 hex', { ...STARTED, diff: 'xyz' }],
+    ['suite-started', 'a bad runner', { ...STARTED, runner: 'human' }],
+    ['suite-ended', 'outcome flaky', { ...ENDED, outcome: 'flaky' }],
+    ['suite-ended', '51 failing names', { ...ENDED, failing: Array.from({ length: 51 }, (_, i) => `t${i}`) }],
+    ['suite-ended', 'a 201-character failing name', { ...ENDED, failing: ['f'.repeat(201)] }],
+    ['suite-ended', 'timeout on a red', { ...ENDED, timeout: 1800 }],
+    ['suite-ended', 'rc on a noslot', { ...ENDED, outcome: 'noslot', failing: undefined }],
+    ['suite-ended', 'rc on a heat', { ...ENDED, outcome: 'heat', failing: undefined }],
+    ['suite-ended', 'rc 256', { ...ENDED, rc: 256 }],
+    ['suite-ended', 'negative seconds', { ...ENDED, seconds: -1 }],
+    ['suite-ended', 'a bad step', { ...ENDED, step: 'teardown' }],
+    ['base-moved', 'no task', MOVED, ['--rollout', 'r']],
+    ['base-moved', 'mover kind push', { ...MOVED, movers: [{ sha: 'c'.repeat(40), kind: 'push' }] }],
+    ['base-moved', 'mover source vault', { ...MOVED, movers: [{ ...MOVER, source: 'vault' }] }],
+    ['base-moved', '21 movers', { ...MOVED, movers: Array.from({ length: 21 }, () => MOVER) }],
+    ['base-moved', 'inertOnly "yes"', { ...MOVED, inertOnly: 'yes' }],
+    ['base-moved', 'inertOnly null with no error', { ...MOVED, inertOnly: null }],
+    ['base-moved', 'no moversTotal', drop(MOVED, 'moversTotal')],
+    ['base-moved', 'refusal 0', { ...MOVED, refusal: 0 }],
+  ]
+  const rolloutLevel = ['stopped', 'lead-entry']
+  for (const [kind, name, fields, args = rolloutLevel.includes(kind) ? ['--rollout', 'r'] : ['--rollout', 'r', '--task', 't']] of cases) {
+    const r = cli(home, ['emit', ...args, '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
     assert.equal(r.status, 2, `${kind} ${name}: ${r.stderr}`)
     assert.match(r.stderr, /^run_record: refused: \S.*\n$/, `${kind} ${name}`)
     assert.deepEqual(listing(ev(home)), [], `${kind} ${name}: nothing written`)

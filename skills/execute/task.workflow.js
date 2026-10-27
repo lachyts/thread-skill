@@ -451,7 +451,7 @@ function slotted(verifier, slot) {
 }
 
 // What an agent needs to know about the wrapped line. Static, single-quoted, one line: no apostrophe, no git span.
-const SLOT_TEXT = 'The wrapped verifier first waits for a free verify slot on this machine (a `verify-slot: waiting …` line on stderr): that wait is not a failure or a hang and never counts as an iteration. Run it in the background with a long timeout (up to 7200000 ms) and wait for it. To stop your own run, kill the wrapper by the pid you recorded (`kill <pid>`): its guard ends the suite with it. Never run the bare verifier, and never stop a run of another session.'
+const SLOT_TEXT = 'The wrapped verifier first waits for a free verify slot on this machine (a `verify-slot: waiting …` line on stderr): that wait is not a failure or a hang and never counts as an iteration. Run it in the background with a long timeout (up to 7200000 ms) and wait for it. To stop your own run, kill the wrapper by the pid you recorded (`kill <pid>`): its guard ends the suite with it. Never run the bare verifier, and never stop a run of another session. When the Mac is hot the wrapper holds or stops the suite and puts it back in line (`verify-slot: waiting (heat: …)`, `verify-slot: heat stop …`): only the final exit is the verdict, and an exit 76 with a `verify-slot: no verdict` line is no verdict, never red and never an iteration, so run it again.'
 
 // SLOT_TEXT beside a verify block's `- Verifier:` line; '' when slot is absent.
 function slotNote(slot) {

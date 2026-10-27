@@ -11,6 +11,8 @@
 #           lines, the ladder's top rung, a refused ladder file, and a re-run
 #   K7      carry prints an `order` line per clause of the prior's prose that orders two carried tasks (p17-2),
 #           and again on a re-run while the prior is open (its tasks already on the new note), never once it closed
+#   K8      carry previews and copies the prior's rollout-scope `hold_until` (p30-3): verbatim, once, a different
+#           one on the new note kept with a WARN
 #   M1-M12  a protocol-3 wave rollout in flight with `review` PRs migrates: check -> resume -> carry preview ->
 #           write -> carry -> step 7 -> close-out (stamps, then the move), crash windows included.
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
@@ -942,6 +944,72 @@ closeout $P $N
 carry --from "$T/Archive/Rollouts/$P.md" --to "$T/$N.md"
 ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(printf '%s\n' "$out" | grep -c '^order ')" "0|[no-change]|0" \
   "K7: a closed P (done, superseded_by N: its step 7 confirmed them) re-runs with no order line"
+
+# ── K8: carry copies a standing rollout-scope hold_until into the new note (p30-3; vault-grammar § Hold until) ──
+# A hold kept only as prose was lost in the 10-21 → 10-26 regenerate (Q50). The preview names the prior's hold with the
+# parser `next` reads it by, and the carry copies its lines verbatim (the block form with its continuation lines) after
+# `parallel_ceiling:`, else after `status:`; an identical hold already on the new note changes nothing, and a different
+# one is kept with a WARN. The prior is never written. A prior with no hold changes nothing: K1-K7 above are that case.
+scen k8
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: true}  # the engine fix lands first'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" 'parallel_ceiling: 2' "supersedes: \"[[$P]]\""
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc|$out" "0|carry a queued
+hold_until pr=o/r#202 merged=true
+(dry-run)" "K8: the preview prints the hold_until line after the carry lines, before the trailer"
+ok "$(sums)" "$before" "K8: … and writes nothing"
+pp=$(sum1 $P.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | grep '^hold_until ')|$(printf '%s\n' "$out" | tail -1)" "0|hold_until pr=o/r#202 merged=true|[written: 2]" \
+  "K8: carry prints it again and writes the task and the new note"
+ok "$(grep -A1 '^parallel_ceiling:' "$T/$N.md" | tail -1)" "hold_until: {pr: o/r#202, merged: true}  # the engine fix lands first" \
+  "K8: … the line copied verbatim, right after parallel_ceiling:"
+ok "$(grep -c '^hold_until:' "$T/$N.md")" 1 "K8: … once"
+ok "$(sum1 $P.md)" "$pp" "K8: … and the prior is never written"
+before=$(sums)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$err" "0|[no-change]|" "K8: an interrupted re-run copies nothing again, with no WARN"
+ok "$(sums)" "$before" "K8: … writing nothing"
+
+scen k8-block
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until:' '  pr: "#202"' '  merged: true'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --dry-run
+ok "$(printf '%s\n' "$out" | grep '^hold_until ')" "hold_until pr=#202 merged=true" "K8: the block form's preview line"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(sed -n '/^status:/,/^protocol_version:/p' "$T/$N.md")" '0|status: open
+hold_until:
+  pr: "#202"
+  merged: true
+protocol_version: 5' "K8: … copied with its continuation lines, after status: when there is no parallel_ceiling:"
+
+scen k8-unreadable
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: false}'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | grep '^hold_until ')|$(fm $N.md hold_until)" \
+  "0|hold_until unreadable: merged must be true|hold_until: {pr: o/r#202, merged: false}" "K8: an unreadable hold is named and copied verbatim, so it still fails closed"
+
+scen k8-same
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: true}'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\"" 'hold_until: {pr: o/r#202, merged: true}'
+pn=$(sum1 $N.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$err|$(sum1 $N.md)" "0|[written: 1]||$pn" "K8: an identical hold already on the new note changes nothing there"
+
+scen k8-differs
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: true}'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\"" 'hold_until: {pr: o/r#303}'
+pn=$(sum1 $N.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(sum1 $N.md)" "0|[written: 1]|$pn" "K8: a different hold on the new note is kept"
+ok "$err" "WARN: carry: hold_until on $N differs from $P's; $N's kept" "K8: … with one WARN line"
 
 # ── M1-M12: a protocol-3 wave rollout in flight, with review PRs, migrates ────────────────────────────
 scen m

@@ -46,7 +46,10 @@ soft pause's stamp counts as running. A hold with no Slot open is a wait on Lach
   effective end:
   - Terminal, with startTime and durationMs: the earlier of slot-freed (or --until) and the call's end plus
     GRACE. A later slot-freed leaves a gap, excluded and flagged "lead absent". A terminal call that ends after
-    --until was still running at --until: read as non-terminal with its last activity at --until.
+    --until was still running at --until: read as non-terminal with its last activity at --until. Here a
+    slot-freed is read at the Slot's release: its `reconciledAt` when reconcile stamped the line at the call's end
+    (p29-12, run_record.py's call-end stamps), else its ts, so the lead's absence after the call still reads as
+    lead absent; everything else reads the line's ts, the call's end.
   - Non-terminal: its last activity is startTime + durationMs, else the task's last record line (flagged).
     When last activity + GRACE reaches --until on an open Slot, the Slot runs to --until and the window is
     `partial` (a genuine mid-run tail); otherwise it ends at last activity + GRACE (or its earlier
@@ -58,7 +61,9 @@ soft pause's stamp counts as running. A hold with no Slot open is a wait on Lach
   closing that task's Slot, lane and holds. A lane, hold or pause still open at the last line read ends there,
   flagged. The night record's lines (away-night, last-start-held, ran-past-morning: p28-2, NIGHT_KINDS) are not
   read: `next` writes a ran-past-morning line after the Morning it reads, so none is a task's last record line (an
-  untimed call's last activity) or the record's last line.
+  untimed call's last activity) or the record's last line. Nor are the time-lost ledger's (stopped, lead-entry,
+  suite-started, suite-ended, base-moved: p29-10, LEDGER_KINDS), dropped as each record is read, the scored one and
+  every other one read for load: a score is byte-equal with or without them, and p29-11 scores them.
 
 Headlines (ADR 0037 d1: two, and Lachy settles any trade between them; there is no tie-breaker):
 - Hands-off rate: the share of the window's landed tasks (distinct tasks with a `merged` line in [since, until])
@@ -258,6 +263,10 @@ ACT_KINDS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
 # The night record's kinds (p28-2, run_record.py; reconcile-rollout.py's NIGHT_KINDS): `next`'s reading of a Morning,
 # written at a later call, so never a task's call activity nor the record's last line (pair skips them).
 NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")
+# The time-lost ledger's kinds (p29-10, ADR 0051; run_record.py): stops, entries, suites and why main moved. Not scored
+# yet (p29-11 scores them): every line of these kinds is dropped as it is read, so a score is byte-equal with or without
+# them, and a late one never extends a record's live span.
+LEDGER_KINDS = ("stopped", "lead-entry", "suite-started", "suite-ended", "base-moved")
 ACT_NAMES = ("answer", "signOff", "retry", "mergeHold", "raceDecided")
 MERGE_HOLD_DETAIL = "a --gated or exit-7 hold: the record carries no reason"
 # The two headlines (ADR 0037 d1) and each proposal rule's declared effect: (serves, risks). A heuristic (the header).
@@ -324,6 +333,15 @@ def to_ms(stamp):
     canon = RR._stamp(stamp)
     dt = datetime.datetime.strptime(canon[:-1], "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=datetime.timezone.utc)
     return int(round(dt.timestamp() * 1000))
+
+
+def _release(t, d):
+    """A slot-freed line's release: its `reconciledAt` when reconcile stamped the line at its call's end (p29-12) and
+    released the Slot later, else its ts. An unreadable reconciledAt reads as the ts."""
+    try:
+        return max(t, to_ms(d["reconciledAt"])) if isinstance(d.get("reconciledAt"), str) else t
+    except Exception:
+        return t
 
 
 def fmt(ms):
@@ -608,10 +626,12 @@ class Score:
             elif kind == "slot-freed" and task in open_slot:
                 s = open_slot.pop(task)
                 s["end"], s["outcome"] = t, d.get("outcome")
+                s["release"] = _release(t, d)
             elif kind == "carried" and task and d.get("rollout") == d.get("from"):
                 if task in open_slot:
                     s = open_slot.pop(task)
                     s["end"], s["outcome"] = t, "carried"
+                    s["release"] = t
                 if lane is not None and lane["task"] == task:
                     lane["end"], lane = t, None
                 for key in [k for k in open_holds if k[1] == task]:
@@ -684,7 +704,7 @@ class Score:
         self.partial = False
         self.gaps = []  # (kind, why, (a, b))
         for s in self.slots:
-            hi = s["end"] if s["end"] is not None else until
+            hi = s.get("release", s["end"]) if s["end"] is not None else until
             calls = [b for b in self.bound if b[1] == s["task"] and s["start"] <= b[0] <= hi and b[3] != "integrate"]
             who = "[[%s]]" % s["task"]
             if not calls:
@@ -1111,6 +1131,7 @@ class Score:
                 lines, skipped = read_lines(path)
             except OSError as e:
                 raise Unreadable("cannot read the run record %s: %s" % (path, e))
+            lines = [x for x in lines if x[2].get("kind") not in LEDGER_KINDS]
         if skipped:
             self.flag("%d record line(s) did not parse: skipped" % skipped)
         repo = a.repo_slug or (settings or {}).get("repo") or None
@@ -1674,6 +1695,7 @@ class Score:
             except OSError:
                 self.flag("load: %s cannot be read: skipped" % name)
                 continue
+            lines = [x for x in lines if x[2].get("kind") not in LEDGER_KINDS]
             mine = []
             for t, _n, d in lines:
                 if host is not None and d.get("host") != host:

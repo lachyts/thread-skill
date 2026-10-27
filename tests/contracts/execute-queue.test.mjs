@@ -11,6 +11,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { collapse, read, root, section } from '../lib/contract-text.mjs'
@@ -87,7 +88,9 @@ function driverStates(lines) {
     '    h = m.STATUS_RE.search(l)\n' +
     '    out.append(h.group("state") if h else None)\n' +
     'print(json.dumps(out))\n'
-  const r = spawnSync('python3', ['-c', py, DRIVER, JSON.stringify(lines)], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
+  // The driver only loads here (STATUS_RE), recording nothing; its Run record still points at temp (p29-10: it records halts).
+  const r = spawnSync('python3', ['-c', py, DRIVER, JSON.stringify(lines)],
+    { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(os.tmpdir(), 'execute-queue-no-events') } })
   if (r.status !== 0) return lines.map(() => null)
   return JSON.parse(r.stdout)
 }
@@ -465,7 +468,9 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     const vsP = labelled(skill, 'Verify slots')
     const s4 = S(skill, S4)
     const s7 = S(skill, S7)
-    if (!vline.includes(` ${SLOTS} --bootstrap`) || !raceLine.includes(` ${SLOTS} --bootstrap`) ||
+    // p29-10: the Run record's --rollout and --slug ride between the slot flags and the bootstrap (execute-run-record).
+    const REC = '--rollout "<rollout-note>" --slug <slug>'
+    if (!vline.includes(` ${SLOTS} ${REC} --bootstrap`) || !raceLine.includes(` ${SLOTS} ${REC} --bootstrap`) ||
       !verifyP.includes('its `--timeout` deadline starts only once it holds one, so the wait never counts against `verify_timeout`') ||
       !verifyP.includes('only a SIGKILL leaves no rc, which reads as red; its guard still ends the verifier') ||
       !verifyP.includes('Any rc but 0 is red, except `noslot` (exit 75: no verify slot within `<slot_wait>`, the verifier never ran), which is no verdict') ||
@@ -720,6 +725,48 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !drvDoc.includes('or an Away-cap wait does (on the machine-wide Away cap while Lachy is Away, ADR 0049)') ||
     !drvBlock.includes('or an Away-cap wait does (on the Away cap, ')) fails.push('trickle')
 
+  // heat (p31-4, estate ADR 0009 d5): § 4.5's *The Heat hold* paragraph names slotLimit 0 Away included, the restart on
+  // the ceiling alone, the `heat:` reason that never halts, exit 76 as no verdict and its spec; step 1.2's revise held at
+  // heat is a Heat hold; step 1.5's heat clause waits with its reason=, never § 7, ahead of the Trickle's; step 1.6 ends
+  // the turn `waiting` on a `heat:` hold, its reason before the Trickle's; step 3 and the RACE procedure re-run on `heat`
+  // and never count it toward the third-`noslot` halt; step 5's completion verify lists `heat` as no verdict that never
+  // counts; *The background verify command* reads `heat` as no verdict with W covering the heat; *Verify slots* names the
+  // hold; § 5's Heartbeat paragraph covers the waiting turn and clause (7) reads a `heat:` reason as no hold (beside the
+  // pinned trickle parenthetical); § 6's waiting bullet and reason list, § 7's stuck bullet, § 8's Stop-hook paragraph
+  // and the driver's docstring and block reason name it.
+  {
+    const heatP = labelled(skill, 'The Heat hold (estate ADR 0009 d5).')
+    const st5 = step(skill, 5)
+    const vsP = labelled(skill, 'Verify slots')
+    const reasonL = collapse(s6raw.split('\n').find((l) => l.startsWith('`reason` appears only on')) ?? '')
+    if (!heatP.includes('`slotLimit` 0, Away included') || !heatP.includes('a restart still waits on the ceiling alone') ||
+      !heatP.includes('`heat: the Mac is hot (<name>)`') || !heatP.includes('a `heat:` hold never halts the rollout') ||
+      !heatP.includes('exit 76: no verdict, never red') || !heatP.includes('A running call is never stopped') ||
+      !heatP.includes('`skills/execute/away.md` § Heat holds the spec') ||
+      !trRev.includes('such a revise is a Heat hold instead, the same wait') ||
+      !trGuard.includes('is a Heat hold, and takes the place of the Trickle clause that follows') ||
+      !trGuard.includes('ends the turn `waiting` with `reason="heat: the Mac is hot (<heat.name>)"`, never § 7, whatever else is set aside') ||
+      !tr6.includes('A `heat:` hold (*The Heat hold*) ends the turn `waiting` the same way') ||
+      !tr6.includes("and it comes before the Trickle's, since a hot Mac holds every row the Trickle would") ||
+      !st3.includes('- `heat` (exit 76: the Mac was too hot for the whole `<slot_wait>`') ||
+      !st3.includes('a `heat` never counts toward the third-`noslot` halt, nor resets its count') ||
+      !raceLine.includes('`heat` (exit 76: the Mac was too hot for the whole `<slot_wait>`, *The Heat hold*: no verdict) → re-run the re-verify the same way with the lane held, never counted toward that halt') ||
+      !st5.includes('`heat`: the Mac was too hot to run the suite within the slot wait, a Heat hold') ||
+      !st5.includes('a `stopped` or `heat` one never counts') ||
+      !verifyP.includes('So is `heat` (exit 76, *The Heat hold*)') ||
+      !verifyP.includes('every slot wait, heat hold and heat-stopped run counts against `<slot_wait>`') ||
+      !vsP.includes('**The Heat hold:** at heavy no verify slot is free') ||
+      !hbPara.includes("A Heat hold's `waiting` turn (§4.5 step 1.6, *The Heat hold*) is covered the same way") ||
+      !hb7.includes('and a `heat:` reason no hold either (the Mac may have cooled)') ||
+      !waitingB.includes('or a Heat hold stands (§4.5 step 1.6, *The Heat hold*)') || !waitingB.includes("a Heat hold's (`heat: …`)") ||
+      !reasonL.includes('and on a Heat hold (§4.5 step 1.6)') ||
+      !(S(skill, S7) ?? '').includes('or on the Heat hold, the same wait') ||
+      !hookP.includes("a Heat hold's `waiting` included") ||
+      !drvDoc.includes('or a Heat hold stands (`heat: …`') || !drvBlock.includes('or a Heat hold stands (`heat: …`, the "')) {
+      fails.push('heat')
+    }
+  }
+
   // skip-path (ADR 0045, p29-3): step 3's prepare carries the verifier and bootstrap, single-quoted; a `skip` bullet after
   // set-aside re-checks (§ 2.5 then § 2.6), pushes M, logs (M, mainSha) and goes to step 4 with no verifier, a refused
   // push undoes and integrates with trouble []; the lead prints inert.why (an inert check error included); the exit-3 row
@@ -756,6 +803,39 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !hookP.includes('a last-starts wait stands,') ||
     !drvDoc.includes('or a last-starts wait stands (`next` holds a task on the last starts') ||
     !drvBlock.includes('or a last-starts wait stands (`next` holds a "') || !drvBlock.includes('reason=\\"last start: …\\"')) fails.push('last-starts')
+
+  // hold (p30-3; vault-grammar § Hold until): `next` reads a PR hold itself, so the lead never asks whether one stands.
+  // Step 1.1 prints each cleared hold and makes a hold that waits on Lachy an (f) item; a rollout hold skips step 1.2
+  // whole, as a pause does (every part of it launches a call or re-queues a task), Integration carrying on, and a
+  // set-aside with its own hold is skipped the same way; step 1.5's `held` goes to § 7 only when Lachy must act (a
+  // rollout hold waiting on him, or no hold waiting on a merge), else ends `waiting` on `held until <pr> merges`; step
+  // 1.6 and § 5 register the heartbeat for that wait, and clause (7) reads its reason as no hold, so each tick re-runs
+  // `next`, which sees the merge; § 6's waiting bullet, § 7, § 8 and the driver's docstring and block reason name it.
+  const hoStand = sub(/^\*\*Standing approval \(ADR 0034\), first\.\*\*/)?.text ?? ''
+  const hookP8 = collapse(skill.split('\n').find((l) => l.startsWith('**The Stop-hook driver**')) ?? '')
+  const hbCron8 = collapse(skill.split('\n').find((l) => l.startsWith('**The heartbeat cron**')) ?? '')
+  const s7c = S(skill, S7)
+  if (!tr1.includes('Its `holdUntil` (a PR hold, `skills/_shared/vault-grammar.md` § Hold until) is read now too') ||
+    !tr1.includes('print `hold released: <pr> merged; hold_until cleared on [[<note>]]`') ||
+    !hoStand.includes('**A PR hold skips this whole step.** While any `holdUntil` entry with `scope: rollout` reads `held: true`, none of step 1.2 runs, as under a pause') ||
+    !hoStand.includes('Integration of the tasks that already have a PR carries on (sub-step 4)') ||
+    !hoStand.includes('A `setAside` entry that carries its own `holdUntil` (a task-scope hold) is skipped by every part of this step in the same way') ||
+    !hoStand.includes('`next` reads `halt: held`, never `stuck`') ||
+    !trGuard.includes('`held` → a PR hold') ||
+    !trGuard.includes('when a held entry with `scope: rollout` has `waits: you`, or no held entry has `waits: merge`, go to § 7 with `reason="hold_until needs you on [[<note>]]: <pr> closed unmerged"`') ||
+    !trGuard.includes('otherwise end the turn `waiting` with `reason="held until <pr> merges"` (the first held entry with `waits: merge`), never § 7') ||
+    !tr6.includes("A PR hold's wait (step 1.5's `held until …`) can stand with nothing in flight too: it registers the heartbeat, and each tick re-enters *Cold resume* through clause (7)") ||
+    !hbPara.includes("a PR hold's `waiting` turn (§4.5 step 1.5)") ||
+    !hb7.includes('nor is a `held until` reason (a PR hold: the PR may have merged, and only `next` reads it)') ||
+    !waitingB.includes('or a PR hold waits on its merge (`next` reports `halt: held`, §4.5 step 1.5)') ||
+    !waitingB.includes("a PR hold's (`held until …`)") ||
+    !s7c.includes('- `next` reports `halt: held` with a hold that waits on Lachy') ||
+    !s7c.includes('A **PR hold** that can release itself is not a halt: it ends `waiting`') ||
+    !hookP8.includes('a merge hold is in flight, a PR hold waits on its merge,') ||
+    !hbCron8.includes("as it does under a PR hold's wait") ||
+    !drvDoc.includes('or a PR hold waits on its merge (`next` reports `halt: held`, reason="held until …", execute §4.5 step 1.5') ||
+    !drvBlock.includes('a PR hold waits on its merge (`next` reports `halt: held`, ') ||
+    !drvBlock.includes('with its reason=\\"held until …\\", §4.5 step 1.5)')) fails.push('hold')
   return [...new Set(fails)]
 }
 
@@ -769,7 +849,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
-  'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts']
+  'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts', 'hold', 'heat']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -1372,7 +1452,67 @@ test("control: the driver's docstring or block reason without the last-starts wa
   only(drv(' or a last-starts wait stands (`next` holds a "', ' or (`next` holds a "'), 'last-starts', 'block reason')
 })
 
-test('the rules are all named (38) and each has a control', () => {
-  assert.equal(RULES.length, 38)
+// hold (p30-3)
+test('control: the PR hold missing from any one lead site fails hold', () => {
+  only(sk(' Its `holdUntil` (a PR hold, `skills/_shared/vault-grammar.md` § Hold until) is read now too:', ' Its `holdUntil` is ignored:'), 'hold', 'step 1.1 reads no hold')
+  only(sk(', none of step 1.2 runs, as under a pause:', ', step 1.2 runs as usual:'), 'hold', 'step 1.2 runs under a rollout hold')
+  only(sk(' A `setAside` entry that carries its own `holdUntil` (a task-scope hold) is skipped by every part of this step in the same way.', ''),
+    'hold', 'step 1.2 re-enters a task-scope hold')
+  only(sk('otherwise end the turn `waiting` with `reason="held until <pr> merges"`', 'otherwise go to § 7 with `reason="held until <pr> merges"`'),
+    'hold', 'the guard halts on a merge wait')
+  only(sk(" A PR hold's wait (step 1.5's `held until …`) can stand with nothing in flight too: it registers the heartbeat, and each tick re-enters *Cold resume* through clause (7), whose `next` reads the PR again and clears a merged hold.", ''),
+    'hold', 'step 1.6 without the PR hold wait')
+  only(sk(", a PR hold's `waiting` turn (§4.5 step 1.5)", ''), 'hold', 'the heartbeat not registered for it')
+  only(sk(', nor is a `held until` reason (a PR hold: the PR may have merged, and only `next` reads it)', ''), 'hold', 'clause (7) reads it as a hold')
+  only(sk(' or a PR hold waits on its merge (`next` reports `halt: held`, §4.5 step 1.5),', ''), 'hold', "§ 6's waiting bullet without it")
+  only(sk("a PR hold's (`held until …`), ", ''), 'hold', "§ 6's reasons without it")
+  only(sk('A **PR hold** that can release itself is not a halt: it ends `waiting`', 'A **PR hold** halts'), 'hold', '§ 7 halts on a merge wait')
+  const bullet7 = real.skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: held` with a hold that waits on Lachy'))
+  only(sk(bullet7 + '\n', ''), 'hold', 'no § 7 bullet')
+  only(sk(', a PR hold waits on its merge, a last-starts wait stands', ', a last-starts wait stands'), 'hold', "§ 8's Stop-hook paragraph without it")
+  only(sk(", as it does under a PR hold's wait (a `held until` reason is no hold to clause (7): only `next` sees the merge, and it releases the hold itself)", ''),
+    'hold', "§ 8's heartbeat paragraph without it")
+})
+test("control: the driver's docstring or block reason without the PR hold fails hold", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv('or a PR hold waits on its merge (`next` reports `halt: held`,\n              reason="held until …", execute §4.5 step 1.5, vault-grammar\n              § Hold until),\n', ''),
+    'hold', 'docstring')
+  only(drv('a PR hold waits on its merge (`next` reports `halt: held`, "\n            "with its reason=\\"held until …\\", §4.5 step 1.5) or ', 'or '), 'hold', 'block reason')
+})
+
+// heat (p31-4)
+test('control: the Heat hold missing at any one site fails heat', () => {
+  const p = real.skill.split('\n').find((l) => l.startsWith('**The Heat hold (estate ADR 0009 d5).**'))
+  only(sk(p + '\n\n', ''), 'heat', 'no Heat hold paragraph')
+  only(sk('`slotLimit` 0, Away included', '`slotLimit` 0 by day'), 'heat', 'heat not held Away')
+  only(sk('and a `heat:` hold never halts the rollout', 'and a `heat:` hold halts the rollout `stuck`'), 'heat', 'a Heat hold halts')
+  only(sk(' While `next` reports `heat` at heavy or worse (`slotLimit` 0, *The Heat hold*), such a revise is a Heat hold instead, the same wait.', ''),
+    'heat', 'step 1.2 without the heat-held revise')
+  only(sk('`reason="heat: the Mac is hot (<heat.name>)"`, never § 7, whatever else is set aside', '`reason="heat"`, then § 7'), 'heat', 'the guard halts on heat')
+  only(sk(' A `heat:` hold (*The Heat hold*) ends the turn `waiting` the same way,', ' A `heat:` hold (*The Heat hold*) halts the turn,'), 'heat', 'no heat wait in step 1.6')
+  only(sk("and it comes before the Trickle's, since a hot Mac holds every row the Trickle would", "and it comes after the Trickle's"), 'heat', 'the Trickle reason first')
+  only(sk('but a `heat` never counts toward the third-`noslot` halt, nor resets its count', 'and a `heat` counts toward the third-`noslot` halt'),
+    'heat', 'step 3 counts heat toward the halt')
+  only(sk(' → re-run the re-verify the same way with the lane held, never counted toward that halt nor resetting it', ' → halt'), 'heat', 'the RACE halts on heat')
+  only(sk("; `heat`: the Mac was too hot to run the suite within the slot wait, a Heat hold) leaves", ') leaves'), 'heat', 'step 5 without heat')
+  only(sk('a `stopped` or `heat` one never counts', 'a `stopped` one never counts'), 'heat', "step 5's halt counts heat")
+  only(sk('every slot wait, heat hold and heat-stopped run counts against `<slot_wait>`', 'the slot wait alone counts against `<slot_wait>`'),
+    'heat', 'W without the heat')
+  only(sk(' **The Heat hold:** at heavy no verify slot is free,', ' At heavy a verify slot is still free,'), 'heat', 'Verify slots without the hold')
+  only(sk(" A Heat hold's `waiting` turn (§4.5 step 1.6, *The Heat hold*) is covered the same way.", ''), 'heat', 'heartbeat paragraph without the Heat hold')
+  only(sk(', and a `heat:` reason no hold either (the Mac may have cooled)', ''), 'heat', 'clause (7) reads heat as a hold')
+  only(sk(' or a Heat hold stands (§4.5 step 1.6, *The Heat hold*),', ''), 'heat', "§ 6's waiting bullet without it")
+  only(sk(', and on a Heat hold (§4.5 step 1.6)', ''), 'heat', "§ 6's reason list without it")
+  only(sk(', or on the Heat hold, the same wait', ''), 'heat', "§ 7's stuck halts over a heat-held revise")
+  only(sk(", a Heat hold's `waiting` included", ''), 'heat', "§ 8's Stop-hook paragraph without it")
+})
+test("control: the driver's docstring or block reason without the Heat hold fails heat", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv(', or a Heat hold\n              stands (`heat: …`', ''), 'heat', 'docstring')
+  only(drv(' or a Heat hold stands (`heat: …`, the "\n            "same wait)', ''), 'heat', 'block reason')
+})
+
+test('the rules are all named (40) and each has a control', () => {
+  assert.equal(RULES.length, 40)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

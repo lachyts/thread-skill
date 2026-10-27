@@ -742,6 +742,58 @@ test('a night-record line never extends an untimed call\'s Slot (p28-2)', (t) =>
   assert.deepEqual(flags(out), flags(bare), 'and so does every flag')
 })
 
+// p29-10 (ADR 0051): the time-lost ledger's kinds (stopped, lead-entry, suite-started, suite-ended, base-moved) are not
+// scored yet (p29-11 scores them). Interleaved anywhere, a task's suites inside an untimed call's Slot and a halt after
+// the record's last line included, they leave every score, flag and window byte-equal; and a concurrent record whose
+// only late lines are ledger lines (a heartbeat's entries, a halt) never reads as live past its last real line.
+const ledgerScore = (t, events, others = []) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs(events))
+  for (const [slug, evs] of others) emitAll(home, slug, byTs(evs))
+  const out = scored(home, ['--until', D(5, '14:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
+  return JSON.parse(JSON.stringify(out).replace(/reflect-score-[^/"]+/g, 'HOME'))
+}
+const SUITE_ID = (n) => `s-${String(n).padStart(16, '0')}`
+test('the ledger kinds (p29-10) are skipped: a record scores byte-equal with or without them', (t) => {
+  const untimed = [
+    [at('07:00'), 'slot-taken', 'g', { settings: S(3) }],
+    [at('07:00'), 'run-bound', 'g', { runId: 'wf_g', journalDir: '/nonexistent' }],
+  ]
+  const ledger = [
+    [at('00:00'), 'lead-entry', null, { by: 'stage', session: 'A' }],
+    [at('00:20'), 'lead-entry', null, { by: 'heartbeat', session: 'A' }],
+    [at('01:00'), 'suite-started', 'a', { suite: SUITE_ID(1), by: 'task', runner: 'agent', sha: 'a'.repeat(40), dirty: false, load: [1, 2, 3], running: 3 }],
+    [at('01:30'), 'suite-ended', 'a', { suite: SUITE_ID(1), by: 'task', runner: 'agent', outcome: 'red', seconds: 1800, rc: 1, failing: ['t::x'] }],
+    [at('05:10'), 'base-moved', 'f', { repo: 'o/r', pr: 7, base: 'b'.repeat(40), main: 'c'.repeat(40), inertOnly: false, moversTotal: 0, movers: [] }],
+    [at('06:10'), 'stopped', null, { cause: 'mac-sleep', inferred: true, at: at('06:05'), wake: at('06:08'), calls: [] }],
+    [at('07:40'), 'suite-started', 'g', { suite: SUITE_ID(2), by: 'task', runner: 'agent', sha: 'd'.repeat(40), dirty: true, diff: 'abcdef012345' }],
+    [at('08:10'), 'suite-ended', 'g', { suite: SUITE_ID(2), by: 'task', runner: 'agent', outcome: 'green', seconds: 1800, rc: 0 }],
+    [at('09:30'), 'stopped', null, { cause: 'dead-lead', inferred: true, at: at('09:00'), calls: [{ task: 'g', runId: 'wf_g', call: 'task' }] }],
+    [at('09:30'), 'lead-entry', null, { by: 'stage', session: 'B', stop: 'dead-lead' }],
+    [at('13:00'), 'stopped', null, { cause: 'halt', inferred: false, calls: [], reason: 'stuck' }],
+  ]
+  const bare = ledgerScore(t, [...slotBound(), ...untimed])
+  const out = ledgerScore(t, [...slotBound(), ...untimed, ...ledger])
+  assert.deepEqual(out, bare)
+  assert.ok(has(out.flags, /^call wf_g never finished: capped at last activity \+ 30 min/), 'g\'s suites never extend its untimed call')
+})
+
+test('ledger-only late lines (p29-10) never extend a concurrent record\'s live span', (t) => {
+  const other = [
+    [at('00:00'), 'slot-taken', 'o1', { settings: S(2) }],
+    [at('00:00'), 'run-bound', 'o1', { runId: 'wf_o1', journalDir: '/nonexistent' }],
+    [at('01:00'), 'slot-freed', 'o1', { outcome: 'set-aside' }],
+  ]
+  const late = [
+    [at('03:00'), 'lead-entry', null, { by: 'heartbeat' }],
+    [at('05:00'), 'lead-entry', null, { by: 'heartbeat' }],
+    [at('06:00'), 'stopped', null, { cause: 'halt', inferred: false, calls: [] }],
+  ]
+  const bare = ledgerScore(t, slotBound(), [['other', other]])
+  const out = ledgerScore(t, slotBound(), [['other', [...other, ...late]]])
+  assert.deepEqual(out, bare)
+})
+
 test('Throughput counts the tasks whose Slot or lane holding overlaps a mid-run window (a --since split)', (t) => {
   const home = tmpHome(t)
   emitAll(home, 'demo', slotBound())
@@ -926,6 +978,40 @@ test('a dead lead: a terminal call with its Slot left open is excluded past the 
   const gap = out.runningTime.excluded.find((e) => e.kind === 'lead-absent')
   assert.deepEqual([gap.start, gap.end], [Z(at('02:30')), Z(at('09:00'))])
   assert.ok(has(out.flags, /^lead absent: \[\[a\]\]'s call wf_a ended at/))
+})
+
+// p29-12: reconcile stamps a Slot-ending row's events at its call's own end (here 02:00) and carries the moment the
+// lead turned to it as reconciledAt (09:00). The Slot reads to that release, so the dead-lead reading above holds
+// unchanged; the ready line at the call's end makes the lane wait the true one.
+test('a slot-freed stamped at its call\'s end reads to its reconciledAt: lead absent as before, the true lane wait', (t) => {
+  const home = tmpHome(t)
+  const late = { stamp: 'call-end', reconciledAt: Z(at('09:00')) }
+  emitAll(home, 'demo', byTs([
+    [at('00:00'), 'slot-taken', 'a', { settings: S(2), start: 'start' }],
+    [at('00:00'), 'run-bound', 'a', { runId: 'wf_a', journalDir: '/nonexistent/workflows', call: 'task' }],
+    [at('02:00'), 'slot-freed', 'a', { outcome: 'ready', ...late }],
+    [at('02:00'), 'ready', 'a', { pr: 7, ...late }],
+    [at('09:00'), 'call-journal', null, { runId: 'wf_a', status: 'completed', mode: 'task', startTime: ms(at('00:00')), durationMs: 2 * 3600e3, tokens: 100000 }],
+    [at('09:00'), 'lane-taken', 'a', {}],
+    [at('09:10'), 'lane-freed', 'a', { release: 'merge', path: 'lead', triggers: [], conflict: false }],
+    [at('09:10'), 'merged', 'a', { pr: 7 }],
+  ]))
+  const out = scored(home, ['--until', at('09:10')])
+  assert.equal(out.runningTime.hours, 2.667, 'as the dead-lead case: 00:00-02:30 and the 10-min Integration')
+  const gap = out.runningTime.excluded.find((e) => e.kind === 'lead-absent')
+  assert.deepEqual([gap.start, gap.end], [Z(at('02:30')), Z(at('09:00'))])
+  assert.ok(has(out.flags, /^lead absent: \[\[a\]\]'s call wf_a ended at/))
+  assert.deepEqual(out.lane.waitsMinutes, [420], 'the wait for the lane runs from the call\'s end, not the lead\'s turn')
+  // Control: the same record with no reconciledAt reads the Slot as freed at the call's end, with no lead absence.
+  const home2 = tmpHome(t)
+  emitAll(home2, 'demo', byTs([
+    [at('00:00'), 'slot-taken', 'a', { settings: S(2), start: 'start' }],
+    [at('00:00'), 'run-bound', 'a', { runId: 'wf_a', journalDir: '/nonexistent/workflows', call: 'task' }],
+    [at('02:00'), 'slot-freed', 'a', { outcome: 'ready' }],
+    [at('09:00'), 'call-journal', null, { runId: 'wf_a', status: 'completed', mode: 'task', startTime: ms(at('00:00')), durationMs: 2 * 3600e3, tokens: 100000 }],
+  ]))
+  const out2 = scored(home2, ['--until', at('09:10')])
+  assert.ok(!out2.runningTime.excluded.some((e) => e.kind === 'lead-absent'), 'no reconciledAt: no lead-absent gap')
 })
 
 // fold-journals stamps a call-journal line with the fold time (here 12:00), so a split at 06:00 must still read it.
