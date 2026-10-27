@@ -702,7 +702,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note's Project root, the **Rollout clone** (ADR 0042), once the note is runnable, and that lead's first `next`
   clears the stamp, so no second lead starts (vault grammar § Rollout start
   stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.
-  _Avoid_: auto-start, scheduled start.
+  When he names the PR the start waits on, it is an **Approved queue**
+  instead. _Avoid_: auto-start, scheduled start.
 - **Git-env canary** — the lead's check that the shared checkout (a rollout's
   `Project root`, its **Rollout clone** since ADR 0042) kept its
   `refs/heads/<default>` and its bareness across each **Window** (execute § 4.5,
@@ -742,7 +743,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   waits instead of asking; a CLOSED or unreadable hold is Lachy's to edit.
   A supersede's `carry` copies a rollout's hold to its successor. A hold kept
   as a sentence in the note is read by nothing (the 2026-10-25 audit's Q50;
-  `skills/_shared/vault-grammar.md` § Hold until). _Avoid_: a hold sentence.
+  `skills/_shared/vault-grammar.md` § Hold until). Beside `on_merge:
+  regenerate` it is an **Approved queue**'s, which its merge keeps standing.
+  _Avoid_: a hold sentence.
+- **Approved queue** — a parallel rollout note nothing has run whose start
+  Lachy approved together with the PR it waits on: `approve-queue` writes its
+  `hold_until`, `on_merge: regenerate` and `start: unattended`, and prints one
+  undo line. At the merge `next` keeps the hold and halts `regenerate`, and
+  the lead's route runs `/thread:schedule --regenerate` on its members under
+  the chain, whose last act is `stamp-start` on the new note: no confirm, one
+  undo line (the 2026-10-25 audit's Q54). His own pause still counts as a run
+  and releases it as a plain hold; a Room stop is no run mark for it.
+  `skills/_shared/vault-grammar.md` § Approved queue. _Avoid_:
+  auto-regenerate, pre-approved rollout.
 - **Bookkeeping miss** — a window the canary could not read (`record
   missing`, `record unreadable`, `record not armed`): it observed nothing, so
   it never trips. It is logged with the checkout's state, read there and
@@ -910,6 +923,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   A spread (Chorus ADR 0109) is one too, sent before the line: the Stage
   moves the lead off a Login whose 5-hour window would not carry its
   Rollouts, and the Pause-log line says `spreading its Rollouts`.
+  On an Approved queue it is no run mark.
   _Avoid_: drain (Chorus's signal calls it "a drain, not a pause"; here the
   soft pause is the drain), pause, hard pause, handoff.
 - **Sign-off pause** — the pause execute's sign-off form stamps (`paused:`

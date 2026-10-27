@@ -70,7 +70,10 @@ closed this note out, so this rollout must never be reinstated or resumed: its t
 `incomplete` from `reconcile-rollout.py status --rollout <N's path>` (the same pure read as § 2):
 
 - non-null → N never ran: headline `superseded by [[N]], supersede interrupted`. Schedule's § 0 pairs the two
-  as `interrupted`, and `/thread:schedule <project> --regenerate` finishes it.
+  as `interrupted`, and `/thread:schedule <project> --regenerate` finishes it. On an approved queue (this note
+  carries `on_merge: regenerate` beside a rollout `hold_until`, `_shared/vault-grammar.md` § Approved queue) it is
+  the chain's I8 window instead: `/thread:execute [[<this>]]` regenerates again (execute § 2 lets it go on), and
+  its schedule run finishes the pair as `interrupted`.
 - null → N has run: headline `superseded by [[N]], close-out interrupted`. This note, still open, is why
   schedule refuses the repo (`<this> is named by the supersedes: of <N>, which has since run`), and
   `/thread:repair [[<this>]]` finishes step 7.5's close-out on Lachy's confirmation. That holds for a legacy
@@ -121,7 +124,10 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   included), `progress`, `timeline` and `ladder`, plus `gitEnvHold` (the unacked git-env trips, each
   `{slug, kind, line}`; § 3's Git-env trip flag), `holdUntil` (the rollout's own PR hold, its `hold_until:`
   as parsed, `{pr, url, error}`, null when it has none: `_shared/vault-grammar.md` § Hold until; § 3's Hold
-  until flag), `ceilingError` (why `ceiling` is null: an invalid
+  until flag), `onMerge` (an approved queue's `on_merge:` as read, `{value, error}`, null on a note with no rollout
+  hold or none: `_shared/vault-grammar.md` § Approved queue; § 3's Hold until flag), `chainStart` (`{prior, pr}`
+  when this note is a chain's new note whose start was never stamped, else null; § 3's **Approved queue,
+  unstamped:** flag), `ceilingError` (why `ceiling` is null: an invalid
   `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise) and
   `ceilingCause` (what that error needs: `stamp`, `file`, `root` or `resolver`; null otherwise), both for § 3's
   Ceiling unresolved flag;
@@ -306,9 +312,17 @@ takes none of them.
   read fails: `(state unread: <its line>)`), `HELD until <pr> merges (CLOSED): remove or fix hold_until on [[<note>]]`
   once it reads CLOSED, `hold released: <pr> merged` once it reads MERGED (the lead's next `next` clears it),
   and `HOLD_UNTIL UNREADABLE: <why>` for a non-null `error`, with no gh call. Offline it renders `HELD until <pr>
-  merges (state unchecked offline)`. A rollout hold holds every start; a task's holds that task. A hold is never
+  merges (state unchecked offline)`. A rollout hold holds every start; a task's holds that task. On an approved
+  queue (a non-null `onMerge` with a null `error`) the OPEN line adds `; then regenerates and starts the new note`,
+  and MERGED reads `merged: the lead regenerates [[<note>]]` (`/thread:execute [[<note>]]` when no lead is live),
+  never `hold released`: its verdict keeps the hold standing. A non-null `onMerge.error` renders `ON_MERGE
+  UNREADABLE: <why>`, waiting silently while the PR is open and holding on Lachy at the merge. A hold is never
   drift: the lead waits on its merge and `next` releases and clears it itself, and a CLOSED or unreadable one is
   Lachy's edit to the note, so status never routes a hold to `/thread:repair`.
+- **Approved queue, unstamped:** a non-null `chainStart`: an approved queue's regenerate wrote this note and
+  closed `[[<prior>]]` out when `<pr>` merged, and its lead died before `stamp-start`, so the Chorus Stage will not
+  start it. Render `APPROVED QUEUE, UNSTAMPED: superseded [[<prior>]] when <pr> merged; start it by hand` (§ 4,
+  action 13). It reads only the vault, so it holds offline too.
 
 **Offline.** `--offline` skips this step: say the report is vault-only, and every resume or reinstate
 recommendation it makes carries the caveat "drift is invisible offline; re-run with the live check before
@@ -600,7 +614,10 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     ready): it starts the lead in the Project root once the note is runnable", and name
     `/thread:execute [[<rollout>]]` only as the way to start it by hand now. Outside a Chorus Stage nothing
     acts on the stamp, so the note waits as Not yet does. A rollout `holdUntil` that holds does not stop the
-    start: the lead it starts waits on the merge (`HELD until <pr> merges`) and releases itself.
+    start: the lead it starts waits on the merge (`HELD until <pr> merges`) and releases itself. An approved
+    queue (§ 3's Hold until, a non-null `onMerge`) is started the same way, and its lead regenerates it at the
+    merge. Under § 3's **Approved queue, unstamped:** flag → `/thread:execute [[<rollout>]]`: the chain that
+    wrote it died before its start stamp.
 
 **A refused ladder.** The Ladder refused flag reorders nothing: whichever action matches, from 7 to 13, gets
 the fix first: "fix `<ladder.source>` (<ladder.error>) first: execute halts `ladder file refused` at each call's

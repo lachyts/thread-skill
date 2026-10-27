@@ -14,7 +14,7 @@
 //       again), as ADR 0047 § Build rulings says too.
 //   p4  what leaves: Orient tasks with their Dependent closure; a task left out unstamped, or, carried and queued,
 //       through step 6's `reconcile-rollout.py defer`; step 8's left-out block points an Orient one at /thread:orient.
-//   p5  under orient-all: no grading agent, no round, no log; --tasks is step 1's confirmed candidates and --decided
+//   p5  under orient-all: no grading agent, no round, no log; --tasks is step 1's candidates and --decided
 //       the prompt line's slugs among them, and the fork writes its queue's ruled calls (`decided-for-you`, ADR 0054); orient-all § 6 answers it in item 16 and its prompt carries the line (the
 //       decided slugs among entry.members); orient-all § 8 lists each leaver by its why (waiting on your answer, its
 //       /thread:orient pointer, depends on [[<via>]]); no § 1.5 or S3.5 line names --regenerate.
@@ -147,7 +147,7 @@ function check(files) {
 
   // p5: under orient-all.
   need('p5', '§ 1.5 **The orient-all form.**', form, ['no grading agent', 'no round', 'no `log`',
-    '--tasks <step 1\'s confirmed candidates>', 'among them', 'Pre-flight: rank <R>, scan <S>, decided <slugs or none>',
+    '--tasks <step 1\'s candidates>', 'among them', 'Pre-flight: rank <R>, scan <S>, decided <slugs or none>',
     'estate-dispatch.py decided-for-you --rank <R> --tasks <its queue[]> --by orient-all --write'])
   const oa = files[ORIENT_ALL] ?? ''
   const answers = slice(sec(oa, /^### 6\. /), /^3\. \*\*Schedule's questions, answered\.\*\*/, /^4\. /) ?? ''
@@ -189,7 +189,7 @@ function check(files) {
   // p10: the serial path.
   const iS3 = serialRaw.indexOf('**S3. Live chains.**')
   const iS35 = serialRaw.indexOf('**S3.5. Pre-flight.**')
-  const iS4 = serialRaw.indexOf('**S4. Gates and confirm.**')
+  const iS4 = serialRaw.indexOf('**S4. Gates.**')
   if (iS3 < 0 || iS35 < 0 || iS4 < 0 || !(iS3 < iS35 && iS35 < iS4)) flag('p10', `S3.5 is not between S3 and S4 (${iS3}, ${iS35}, ${iS4})`)
   need('p10', 'S3.5', s35, ['runs step 1.5', 're-runs S2 and S3', "§ 1.5's orient-all form"])
   need('p10', 'S7', s7, ['the Pre-flight line and its left-out tasks', '/thread:orient [[<project>]]'])

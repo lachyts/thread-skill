@@ -99,7 +99,7 @@ function check(f) {
   const s6s = collapse(section(sch, /^### 6\. /) ?? '')
   const ver = collapse(section(sch, /^## Verification/) ?? '')
   need('schedule-detect', s25.includes('**The named re-run (ADR 0050, p29-9).**') && s25.includes('a `Named re-run: \\`<cmd>\\`` line') &&
-    s25.includes('show it with the verifier for the same confirm') && s25.includes("`reconcile-rollout.py`'s `_named_rerun`") &&
+    s25.includes('print it beside the verifier') && s25.includes("`reconcile-rollout.py`'s `_named_rerun`") &&
     s25.includes('`{tests}` exactly once') && s25.includes('never stored') &&
     s25.includes('A `shape: serial` note never carries it: a Leg runs no Integration'))
   need('schedule-stamp', s6s.includes("- The `# named_rerun:` line — when step 2.5 stored the project's `Named re-run:`, replace the whole line") &&
@@ -205,7 +205,7 @@ test('control: schedule step 2.5 without the named re-run paragraph fails schedu
   const para = real.schedule.split('\n').find((l) => l.startsWith('**The named re-run (ADR 0050, p29-9).**'))
   assert.ok(para, 'the paragraph')
   only(sch(para + '\n', ''), 'schedule-detect', 'dropped')
-  only(sch(' and never stored: stamped,', ' and stored anyway: stamped,'), 'schedule-detect', 'a refused line stored')
+  only(sch(' with why and never stored: the run goes on', ' with why and stored anyway: the run goes on'), 'schedule-detect', 'a refused line stored')
 })
 
 test('control: schedule step 6 without the named_rerun bullet fails schedule-stamp', () => {
