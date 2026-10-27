@@ -8356,7 +8356,7 @@ def cmd_carry(args) -> int:
 
 # ---- approve-queue and stamp-start (p30-4; vault-grammar § Approved queue) ----------------------------------------
 
-def _queue_note(path: Path, verb: str):
+def _queue_note(path: Path):
     """(Note, None) for an existing, parseable note, else (None, why) for a verb's refusal."""
     if not path.is_file():
         return None, f"rollout note not found at {path}"
@@ -8378,7 +8378,7 @@ def cmd_approve_queue(args) -> int:
         return 1
 
     path = Path(os.path.expanduser(args.rollout))
-    note, why = _queue_note(path, "approve-queue")
+    note, why = _queue_note(path)
     if why:
         return refuse(why)
     stem = path.stem
@@ -8442,7 +8442,7 @@ def cmd_stamp_start(args) -> int:
         return 1
 
     path = Path(os.path.expanduser(args.rollout))
-    note, why = _queue_note(path, "stamp-start")
+    note, why = _queue_note(path)
     if why:
         return refuse(why)
     stem = path.stem
