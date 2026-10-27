@@ -100,7 +100,8 @@ line never blocks.
 ### 1. Resolve the rollout note
 
 `[[<slug>]]` → `~/repos/obsidian/Work/Tasks/<slug>.md`, else `~/repos/obsidian/Work/Tasks/Archive/Rollouts/<slug>.md`.
-Several matches for a loose name: list them and ask which. Read its body's ``Project root: `<repoPath>` `` line.
+Several matches for a loose name: list them and ask which (Owner *yours*: which rollout he means,
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`). Read its body's ``Project root: `<repoPath>` `` line.
 A note that cannot be found stops the Reflection: say so, and offer a record-only score by slug (step 4 without
 `--note`) only on Lachy's word.
 
@@ -206,7 +207,9 @@ headlines first (ADR 0037 d1), then the Guardrails:
   shown verbatim, as Lachy's call.
 - **Each withheld entry** with its reason, and every flag.
 
-Then ask which proposals to apply, by id, or none.
+Then ask which proposals to apply, by id, or none (Owner *yours*: which Tunings land is his, ADR 0037 d1), in the
+Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`: each proposal's `serves` and `risks` are its gains and
+costs.
 
 ### 6. Lachy answers
 
@@ -233,7 +236,8 @@ Reflection. Never edit `rollouts.toml` to work around a refusal.
 
 A `--pick` run that wrote no line does not use up the one run: an exit-2 refusal writes nothing (no line, no key),
 and neither does an exit 1 that says `nothing applied: the Reflection's line could not be written` or `cannot write
-next to`. Report it, then either re-ask Lachy once and run the corrected `--pick` (a withheld or mistyped id), or,
+next to`. Report it, then either re-ask Lachy once and run the corrected `--pick` (a withheld or mistyped id; Owner
+*yours*, step 5's question, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), or,
 when he picks nothing more or the refusal cannot be fixed in this Reflection (a stale `from`, another repo), run
 `--record-only`, so the Reflection still leaves its line as the next one's baseline. A run that wrote its line (exit 0,
 or the exit-1 `rollouts.toml was not written` failure, which records the line and voids it) is the one run: never

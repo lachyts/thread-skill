@@ -114,6 +114,11 @@ cv --run; ok "$rc|$(js ran)|$(js result)|$(js decided)|$(js halt)" "0|True|green
 cv; ok "$(js state)" "green" "C2: … decided"
 has "$(js summary)" "Completion verify: green at ${SHA:0:12}" "C2: … its Completion log summary"
 ok "$(log_lines)|$(records)" "1|green/1" "C2: one log line, one completion-verify record"
+suites() { cat "$THREAD_EVENTS_DIR"/ro-rollout-2026-10-24.jsonl 2>/dev/null | python3 -c '
+import json, sys
+print(json.dumps([[d["kind"], d["by"], d["runner"], d["task"], d.get("outcome"), d.get("sha")] for d in map(json.loads, sys.stdin)
+                  if d["kind"].startswith("suite-")], separators=(",", ":")))'; }
+ok "$(suites)" "[[\"suite-started\",\"completion\",\"lead\",null,null,\"$SHA\"],[\"suite-ended\",\"completion\",\"lead\",null,\"green\",\"$SHA\"]]" "C2: --run records the suite (p29-10): a pair by completion, runner lead, no task, the merged sha"
 has "$(grep ' -> green' "$RO")" "at $SHA rc 0" "C2: … the line names the merged sha and the rc"
 ok "$(ls "$(integ)" | grep -c '^completion-ro-rollout-2026-10-24-1\..*-[0-9]*\.log$')|$(ls "$(integ)" | grep -c '\.rc$\|\.outcome\.json$')" "1|0" "C2: the log kept under its run's name, no rc or outcome left"
 ok "$(red_exists)|$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')" "no|1" "C2: no fix task; the detached tree removed"

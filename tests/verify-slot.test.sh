@@ -10,7 +10,11 @@
 #   waiter files are reaped, a locked one is not   V11 a lead verify SIGKILLed while waiting leaves a stale waiter
 #   file, reaped next   V12 a kill of the wrapper's whole process group   V13 the guard SIGKILLed alone   V14
 #   release is a close (a co-holder keeps the slot)   V15 a failure injected after the spawn: the slot stays held
-#   until the suite's group is gone   V16 no code calls fcntl.LOCK_UN; the header's close-only contract.
+#   until the suite's group is gone   V16 no code calls fcntl.LOCK_UN; the header's close-only contract. The Run record
+#   (p29-10, contract item 8): VR1 a suite in a task tree records its start and end (sha, load, count, failing), its
+#   output still split   VR2 --priority   VR3 TERM ends it stopped, the slot free; a SIGKILL leaves no ended line
+#   VR4 no task tree or no note: no record, as today   VR5 a dirty tree   VR6 a green run names no failing   VR7 a
+#   TERM while suite-started walks the vault: never swallowed (143, the suite never runs, no line, the slot free).
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound (60 to 300 s) only slows a real failure; a pid is "alive" only when `kill -0` succeeds AND its `ps`
 # state is not Z (an unreaped zombie runs nothing). Every background pid is recorded and stopped only by that pid.
@@ -340,6 +344,109 @@ ok "$s" free "V15: … and the slot is free afterwards"
 # ======== V16: no code unlocks; the header's contract ======================================================
 ok "$(grep -rn 'fcntl\.LOCK_UN' skills hooks)" "" "V16: no script calls fcntl.LOCK_UN (a release is a close)"
 has "$(sed -n '1,/^"""$/p' "$VS")" "Release closes the fd and never calls LOCK_UN" "V16: verify-slot.py's header states the close-only contract"
+
+# ======== VR1–VR6: a suite in a task tree records itself in the Run record (contract item 8; p29-10) ===============
+# A git project R with its task tree at R/.claude/worktrees/t1, and a vault (under VH, the HOME these runs use) where t1
+# is in_progress in r1, a started parallel rollout: so its suites land in r1's record, with a Mac-wide count of 1.
+pool vr
+VH="$D/home"; VT="$VH/repos/obsidian/Work/Tasks"; VEV="$D/events"; mkdir -p "$VT"
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 2\n---\n\n## Queue\n\n- [[t1]]\n' > "$VT/r1.md"
+printf -- '---\ntags: [task]\nstatus: in_progress\nowner: lead-1\nrollout: "[[r1]]"\n---\n\nt1\n' > "$VT/t1.md"
+R="$D/r"; git -c init.defaultBranch=main init -q "$R"
+printf 'a\n' > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" -c user.name=t -c user.email=t@t commit -q -m a
+git -C "$R" worktree add -q "$R/.claude/worktrees/t1" -b t1 >/dev/null 2>&1
+TREE="$R/.claude/worktrees/t1"; HEAD1=$(git -C "$TREE" rev-parse HEAD)
+mkdir -p "$R/.claude/worktrees/t2"   # a task tree whose note does not exist
+vrun() {  # vrun <cwd> <out> <err> [--priority] -- <cmd…>: run, with the vault's HOME and the record under VEV
+  local cwd="$1" o="$2" e="$3"; shift 3
+  (cd "$cwd" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" exec python3 "$VS" run --slots 1 "$@") > "$o" 2> "$e"
+}
+recq() {  # recq <python expr over L, r1's record lines>
+  python3 - "$VEV/r1.jsonl" "$1" <<'PY2'
+import json, sys
+try:
+    L = [json.loads(x) for x in open(sys.argv[1]).read().splitlines() if x.strip()]
+except FileNotFoundError:
+    L = []
+print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))
+PY2
+}
+vrun "$TREE" "$D/vr1.out" "$D/vr1.err" -- sh -c 'echo out-line; echo "FAILED tests/a.py::t - boom"; echo err-line >&2; exit 1'; rc=$?
+ok "$rc" 1 "VR1: the suite's rc passes through"
+ok "$(cat "$D/vr1.out")" "out-line
+FAILED tests/a.py::t - boom" "VR1: its stdout still reaches the caller's stdout, and only it"
+ok "$(grep -v '^verify-slot' "$D/vr1.err")" "err-line" "VR1: its stderr still reaches the caller's stderr"
+ok "$(recq '[d["kind"] for d in L]')" '["suite-started","suite-ended"]' "VR1: a suite-started and a suite-ended"
+ok "$(recq '[L[0]["task"], L[0]["by"], L[0]["runner"], L[0]["sha"], L[0]["dirty"], len(L[0]["load"]), L[0]["running"] >= 1, "diff" in L[0]]')" \
+  "[\"t1\",\"task\",\"agent\",\"$HEAD1\",false,3,true,false]" "VR1: started: task t1, by task, runner agent, the tree's sha, clean, the load, the running count"
+ok "$(recq '[L[1]["suite"] == L[0]["suite"], L[1]["outcome"], L[1]["rc"], L[1]["failing"], isinstance(L[1]["seconds"], (int, float)), len(L[1]["load"]), "running" in L[1]]')" \
+  '[true,"red",1,["tests/a.py::t"],true,3,true]' "VR1: ended: the same suite, red, rc 1, the printed failing id, its seconds, the load and the count"
+
+: > "$VEV/r1.jsonl"
+vrun "$TREE" "$D/vr2.out" "$D/vr2.err" --priority -- sh -c 'exit 0'
+ok "$(recq '[d["by"] for d in L]')" '["integration","integration"]' "VR2: --priority is the integrate call's suite: by integration"
+
+: > "$VEV/r1.jsonl"
+(cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" exec python3 "$VS" run --slots 1 -- sh -c "echo \$\$ > '$D/vr3.pid'; sleep 3$u") > "$D/vr3.out" 2> "$D/vr3.err" &
+vp=$!; pids+=($vp)
+within 300 grepq suite-started "$VEV/r1.jsonl" || echo "FAIL - VR3: no suite-started within 300 s"
+within 300 nonempty "$D/vr3.pid" || echo "FAIL - VR3: the suite did not start"
+kill -TERM "$vp"; wait "$vp"; rc=$?
+ok "$rc" 143 "VR3: TERM to run: exit 143"
+ok "$(slot_state 0 1)" free "VR3: the slot is free right after the exit"
+ok "$(recq '[[d["kind"], d.get("outcome"), d.get("rc"), "running" in d, "failing" in d] for d in L]')" \
+  '[["suite-started",null,null,true,false],["suite-ended","stopped",143,false,false]]' "VR3: ended stopped, rc 143, no running and no failing"
+: > "$VEV/r1.jsonl"
+(cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" exec python3 "$VS" run --slots 1 -- sh -c "echo \$\$ > '$D/vr3k.pid'; sleep 3$u") > "$D/vr3k.out" 2> "$D/vr3k.err" &
+vp=$!; pids+=($vp)
+within 300 grepq suite-started "$VEV/r1.jsonl" || echo "FAIL - VR3: no suite-started within 300 s (SIGKILL arm)"
+within 300 nonempty "$D/vr3k.pid" || echo "FAIL - VR3: the suite did not start (SIGKILL arm)"
+kill -KILL "$vp"; wait "$vp" 2>/dev/null
+within 60 is_free 0 1 || echo "FAIL - VR3: the guard did not free the slot after a SIGKILL"
+ok "$(recq '[d["kind"] for d in L]')" '["suite-started"]' "VR3: a SIGKILL leaves a started line with no ended line"
+
+: > "$VEV/r1.jsonl"
+vrun "$D" "$D/vr4.out" "$D/vr4.err" -- sh -c 'echo plain; exit 4'; rc=$?
+ok "$rc|$(cat "$D/vr4.out")" "4|plain" "VR4: outside a task tree: the rc and stdout as today"
+vrun "$R/.claude/worktrees/t2" "$D/vr4b.out" "$D/vr4b.err" -- sh -c 'echo plain; exit 0'; rc=$?
+ok "$rc|$(cat "$D/vr4b.out")" "0|plain" "VR4: a task tree with no note: as today"
+ok "$(recq 'len(L)')" 0 "VR4: neither writes a record"
+
+: > "$VEV/r1.jsonl"
+printf 'a changed\n' > "$TREE/a.txt"
+vrun "$TREE" "$D/vr5.out" "$D/vr5.err" -- sh -c 'exit 0'
+ok "$(recq '[L[0]["dirty"], len(L[0].get("diff", "")), all(c in "0123456789abcdef" for c in L[0].get("diff", "x"))]')" '[true,12,true]' "VR5: a dirty tree: dirty true and a 12-hex diff"
+git -C "$TREE" checkout -q -- a.txt
+
+: > "$VEV/r1.jsonl"
+vrun "$TREE" "$D/vr6.out" "$D/vr6.err" -- sh -c 'echo "FAILED tests/never.py::x"; exit 0'
+ok "$(recq '[L[1]["outcome"], L[1]["rc"], "failing" in L[1]]')" '["green",0,false]' "VR6: a green run carries no failing"
+
+# VR7: the stop lands inside suite-started's vault walk (the running count), with the slot held: a TaskStop or a hard
+# pause there must end the run, never be swallowed by the walk's best-effort count and run the suite green.
+: > "$VEV/r1.jsonl"
+cat > "$D/vr7.py" <<'PY2'
+import importlib.util, os, signal, sys
+spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1])
+vs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vs)
+load = vs._load_reconcile
+def stopped_in_the_walk():
+    rr = load()
+    walk = rr._note_index
+    def index(tasks_dir):   # the TERM lands as suite-started walks the vault for its running count
+        os.kill(os.getpid(), signal.SIGTERM)
+        return walk(tasks_dir)
+    rr._note_index = index
+    return rr
+vs._load_reconcile = stopped_in_the_walk
+sys.exit(vs.main(["run", "--slots", "1", "--"] + sys.argv[2:]))
+PY2
+(cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" exec python3 "$D/vr7.py" "$VS" sh -c "touch '$D/vr7.ran'") > "$D/vr7.out" 2> "$D/vr7.err"; rc=$?
+ok "$rc" 143 "VR7: a TERM in suite-started's vault walk: exit 143, never swallowed"
+ok "$([ -e "$D/vr7.ran" ] && echo ran || echo never)" never "VR7: the suite never ran"
+ok "$(recq '[d["kind"] for d in L]')" '[]' "VR7: no line: no suite-started, no green suite-ended"
+ok "$(slot_state 0 1)" free "VR7: the slot is free"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot: ALL PASS" || echo "verify-slot: SOME FAILED"
 exit "$fail"

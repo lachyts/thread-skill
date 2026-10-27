@@ -255,7 +255,7 @@ export const meta = {
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
 //   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, needsHuman, gatedInputs, plan,
-//   reviewVerdicts }] }
+//   reviewVerdicts, flakes }] }
 // — the pre-p12-5 envelope with exactly one row, the called task's, the shape reconcile-rollout.py reads —
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending. The rung record (ADR 0029
 // decision 7): startRung is the rung the call started on, rung the one it ended on (reconcile stamps it as
@@ -292,6 +292,12 @@ export const meta = {
 // reconcile writes them once (one review-verdict Run-record event per verdict_key). [] when no round was judged
 // (read-only, the pre-flight block, plan-blocked, a stop before the judge) and on every integrate row: an
 // Integration re-review is not a master-review round.
+// flakes (p29-9, ADR 0050) is [{ test, sha }]: every Flake this call's code-writing agents returned (an implementer's,
+// a reviser's; an integrate row's, its integrator's), each a test whose verifier red outside the task's diff cleared
+// on its named re-run and one confirming run on the same tree. Sanitised and deduped by flakesOf (a one-line test of
+// at most 300 characters, a 7-40 hex sha lowercased, at most 20), kept on every status, a stage throw included; []
+// when there are none (read-only, the pre-flight block, plan-blocked, a dead agent). reconcile logs each one and
+// files it for its repo (one follow-up per test), never as the task's to fix.
 // A mode 'integrate' row carries one more key, `integration`: { outcome: integrated | rejected | set-aside,
 // path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
 // (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
@@ -356,6 +362,7 @@ const IMPL_RESULT = {
     summary: { type: 'string', description: 'one-paragraph summary of what changed and was tested' },
     gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the task needs that the note\'s "## Approved gates" does not cover ("spend: <what> — cap N USD", one line whose Cap holds the whole spend, with how it splits in blockerDiagnosis / "credential: <what>" / "irreversible: <what>"). Omit or empty otherwise.' },
     needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
+    flakes: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { test: { type: 'string' }, sha: { type: 'string' } }, required: ['test', 'sha'] }, description: 'ONLY when your Flake check cleared a verifier red (ADR 0050): one entry per test that failed the first run, { test: its name exactly as the verifier printed it, sha: the tree HEAD it failed on }. Omit or empty otherwise.' },
   },
   required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
 }
@@ -1013,6 +1020,33 @@ function verifyBlock(st, verifier, maxIterations, baseline, slot, touched) {
     : ralphLoop(verifier, maxIterations, baseline, slot, touched)
 }
 
+// The Flake check (ADR 0050, p29-9): every verifier run in a rollout, an agent's included. A red that names only tests
+// outside the task's diff re-runs those tests by name first (any red again is real), then the same verifier line once
+// more on the same tree: green there is verified, each first-run failure a Flake the agent returns in `flakes` and
+// never fixes. A red that names no test, or one that cannot be placed in a test file, or one in the diff, is real at
+// once. `diff` names what the diff is for the role: DIFF_FILES for the code-writing task calls (FLAKE_CHECK_TASK),
+// the merge step's `task file:` lines plus the integrator's own commits for Integration (FLAKE_CHECK_INTEGRATION).
+// Static text appended right after each code-writing prompt's verification block (implementer, approved-plan
+// implementer, reviser) and after integrationVerify in the integrator, never inside a loop renderer, so ralphLoop,
+// oneShotVerify, fullSuiteLoop, verifyBlock and integrationVerify keep their own bytes. It names the verifier line
+// without rendering it, never says `run the verifier`, `EXACTLY ONCE` or `ONE-SHOT`, and its one git span is scrubbed.
+// A deliberate resume-cache break, like p31-1's: every code-writing prompt and both result schemas change.
+function flakeCheck(diff) {
+  return `Flake check (ADR 0050), before any verifier red above counts as red, the one-shot's included:
+- Read the failing tests' names from the verifier's output, outside the known-baseline set when one is listed.
+- The red is real at once, with no re-run, when it names no failing test (a timeout, or a lint, typecheck or build
+  step), when a failing test cannot be placed in a test file, or when a failing test's file is among ${diff}.
+- Otherwise re-run only those named tests, alone, with the repo's own test runner, on the same tree: no commit or
+  edit in between, and no verify slot. If any of them fails again, the red is real.
+- If they all pass, run the same verifier line above once more on the same tree. Red: the red is real. Green: the
+  work is verified, and each test that failed the first run is a Flake: return each in \`flakes\` as { test, sha },
+  the sha from \`${GIT_ENV_SCRUB} git rev-parse HEAD\`.
+- These re-runs belong to the try that went red: they never count as an iteration or as a second one-shot try.
+- Never fix a Flake inside this task: the lead logs it and files it for its repo.`
+}
+const FLAKE_CHECK_TASK = flakeCheck(DIFF_FILES)
+const FLAKE_CHECK_INTEGRATION = flakeCheck("the merge step's `task file:` lines, plus every file your resolution and fix commits change")
+
 // Escalation hand-over context (empty-when-unused, like baselineManifest/gateOverride — the non-empty
 // string carries its OWN leading "\n\n" so callers interpolate it bare). `prior` is the first-pass
 // attempt's diagnosis/feedback verbatim.
@@ -1146,6 +1180,7 @@ Steps:
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix in the task note, then implement.
 4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
+${FLAKE_CHECK_TASK}
 5. If the verifier passed: open a PR titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
 6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
@@ -1363,6 +1398,7 @@ blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 Steps:
 1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
 2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
+${FLAKE_CHECK_TASK}
 3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
    otherwise), prUrl, branch, worktreePath (\`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\`), blockerDiagnosis, summary.
@@ -1447,6 +1483,7 @@ ${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorF
 Push new commits to the existing branch (the PR auto-updates) — do NOT open a new PR.
 
 ${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
+${FLAKE_CHECK_TASK}
 
 ${BUG_PREFLIGHTS}
 
@@ -1829,7 +1866,8 @@ function rungState(task, a) {
     log(`rung drift: ${task.slug}'s rung: ${s.drift} is not on the ladder (${L.source}) — read as the top rung ${L.rungs[L.rungs.length - 1].name}`)
   }
   // verdicts (p21-3): every master-review round this call judged, pushed by reviewLoop (reviewVerdictOf).
-  return { source: L.source, rungs: L.rungs, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [] }
+  // flakes (p29-9): every Flake the call's code-writing agents returned, pushed by runAgent (flakesOf).
+  return { source: L.source, rungs: L.rungs, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [], flakes: [] }
 }
 
 function cur(st) { return st.rungs[st.at] }
@@ -1838,12 +1876,13 @@ function climbOf(st, stage) { return st.climbs.find((c) => c.stage === stage) ||
 function rungRecord(st) {
   return { startRung: st.rungs[st.start].name, rung: cur(st).name, climbs: st.climbs.map((c) => ({ ...c })) }
 }
-// The record plus the call's drift and its dispatches: the row's five rung keys, and the call's judged review
-// rounds (p21-3), so every task-mode row carries them, a stage throw included.
+// The record plus the call's drift and its dispatches: the row's five rung keys, the call's judged review
+// rounds (p21-3) and its Flakes (p29-9), so every task-mode row carries them, a stage throw included.
 function rowRecord(st) {
   return {
     ...rungRecord(st), rungDrift: st.drift, ran: st.ran.map((x) => ({ ...x })),
     reviewVerdicts: (st.verdicts || []).map((v) => ({ ...v, feedback: [...v.feedback] })),
+    flakes: (st.flakes || []).map((f) => ({ ...f })),
   }
 }
 
@@ -1892,15 +1931,50 @@ const TRANSIENT_DIAGNOSIS =
   '(e.g. "Connection closed mid-response"), NOT a task-authored blocker. Re-dispatch cleanly: the worktree ' +
   'and any committed work are reusable and a fresh dispatch of the same prompt should proceed normally.'
 
+// p29-9 (ADR 0050): the Flakes an agent's Flake check returned, sanitised onto `have` (the call's list so far): each
+// entry { test, sha } with test a non-empty one-line string of at most FLAKE_TEST_MAX characters (trimmed) and sha
+// 7-40 hex (lowercased), deduped by both, at most FLAKES_MAX in all. Anything dropped is logged once per result, with
+// its label; a result with no `flakes` adds nothing. reconcile-rollout.py's _flake_entry keeps the same rule.
+const FLAKES_MAX = 20
+const FLAKE_TEST_MAX = 300
+function flakesOf(r, have, label) {
+  const raw = r && r.flakes
+  if (raw === undefined || raw === null) return have
+  if (!Array.isArray(raw)) {
+    log(`flakes: ${label}: not an array (${typeof raw}); dropped`)
+    return have
+  }
+  const out = have.slice()
+  let bad = 0
+  let over = 0
+  for (const e of raw) {
+    const test = e && typeof e.test === 'string' ? e.test.trim() : ''
+    const sha = e && typeof e.sha === 'string' ? e.sha.trim().toLowerCase() : ''
+    if (!test || test.length > FLAKE_TEST_MAX || /[\u0000-\u001f\u007f]/.test(test) || !/^[0-9a-f]{7,40}$/.test(sha)) { bad += 1; continue }
+    if (out.some((f) => f.test === test && f.sha === sha)) continue
+    if (out.length >= FLAKES_MAX) { over += 1; continue }
+    out.push({ test, sha })
+  }
+  if (bad || over) {
+    log(`flakes: ${label}: ` + [bad ? `dropped ${bad} malformed flakes entr${bad === 1 ? 'y' : 'ies'}` : '', over ? `${over} past the cap of ${FLAKES_MAX}` : ''].filter((x) => x).join('; '))
+  }
+  return out
+}
+
 // st (optional): a task-mode call's rung state. Each dispatch is recorded on st.ran BEFORE it runs, so a
 // stage that throws still reports what it dispatched (ADR 0029 decision 7). The integrate mode passes none:
 // it records its agents on its own trace, also before each runs (integrate()).
+// p29-9: the one push site of a task call's Flakes (st.flakes): an IMPL_RESULT agent's that returned (never a dead
+// one's), the read-only investigator's never (its prompt has no Flake check). A signed-gate replay dedupes.
 async function runAgent(prompt, opts, st) {
   if (st) st.ran.push({ label: (opts && opts.label) || '', rung: cur(st).name, model: opts && opts.model, effort: opts && opts.effort })
   let r = await agent(prompt, opts)
   if (r == null) {
     log(`agent death (null return) on ${(opts && opts.label) || '?'} — one automatic retry`)
     r = await agent(prompt, opts)
+  }
+  if (r != null && st && opts && opts.schema === IMPL_RESULT && !String(opts.label || '').startsWith('investigate:')) {
+    st.flakes = flakesOf(r, st.flakes || [], opts.label || '?')
   }
   return r == null ? { __dead: true } : r
 }
@@ -2327,6 +2401,8 @@ function taskResult(t, r, st) {
     plan: (r && typeof r.plan === 'string') ? r.plan : null,
     // p21-3: every master-review round this call judged (rowRecord), in order, each with its own bullets.
     reviewVerdicts: norm.reviewVerdicts || [],
+    // p29-9: every Flake the call's code-writing agents returned (rowRecord), sanitised and deduped.
+    flakes: norm.flakes || [],
   }
 }
 
@@ -2402,6 +2478,7 @@ const INTEGRATE_RESULT = {
     summary: { type: 'string', description: 'one paragraph: what the merge brought in, how you resolved it, what the verifier said' },
     gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the note\'s "## Approved gates" does not cover. Omit or empty otherwise.' },
     finishedAt: { type: 'string', description: 'the output of date -u +%Y-%m-%dT%H:%M:%SZ, run as your last action' },
+    flakes: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { test: { type: 'string' }, sha: { type: 'string' } }, required: ['test', 'sha'] }, description: 'ONLY when your Flake check cleared a verifier red (ADR 0050): one entry per test that failed the first run, { test: its name exactly as the verifier printed it, sha: the tree HEAD it failed on }. Omit or empty otherwise.' },
   },
   required: ['blocked', 'blockerDiagnosis', 'verified', 'mergeLog', 'mergeState', 'mergeCommit', 'taskHead', 'baseSha', 'headSha', 'pushedSha', 'conflictFiles', 'fixCommits', 'summary', 'finishedAt'],
 }
@@ -2955,6 +3032,7 @@ resolution brief), so the next Integration starts from your account.
 Step 3 — verify. Required unless ALL of these hold: the merge step printed \`merge: up-to-date\`, the lead's
 trouble has no \`red\`, \`task head:\` equals the anchor ${I.headSha}, and you committed nothing. When required:
 ${integrationVerify(task, a)}
+${FLAKE_CHECK_INTEGRATION}
 A verifier still red when the loop ends: return blocked=true with blockKind "red" (the engine records
 \`${INTEGRATION_RED_MARK}<why>\`).
 
@@ -3183,6 +3261,8 @@ async function integrate(task, a, trace) {
     const ri = record('integrator', ilabel)
     const r = await runAgent(integratorPrompt(task, a, I), opts(ilabel, INTEGRATE_RESULT, 'integrator'))
     finished(ri, r)
+    // p29-9: the integrator's Flakes (its own verifier runs' Flake check), kept whatever the outcome, a set-aside too.
+    if (!r.__dead) trace.flakes = flakesOf(r, trace.flakes || [], ilabel)
     const bad = integrationCheck(I, r, task.approvedGates)
     // A named Integration conflict carries triggers ['conflict'] (the Run record's lane-freed reads conflict: true);
     // integration.baseSha stays '' for every integrator set-aside (the only kind this branch returns), so their
@@ -3206,7 +3286,7 @@ async function integrate(task, a, trace) {
   return { outcome: 'rejected', ...j, reReviewed: true, feedback: feedback.length ? feedback : ['the Integration re-review returned changes with no feedback'] }
 }
 
-// The integrate call's ONE row: the task row's 22 keys plus `integration` (the payload the Integration log line
+// The integrate call's ONE row: the task row's 23 keys plus `integration` (the payload the Integration log line
 // records). Its rung record is the task's own, passed through; its `ran` is Integration's agents.
 // Every status is one of reconcile's five: integrated → review; rejected → blocked with the revise
 // marker (review-blocked when no review round is left); set-aside → blocked with `integration: <reason>`
@@ -3215,7 +3295,7 @@ async function integrate(task, a, trace) {
 // conflictMarker (`integration: conflict unresolved in <paths>` and its resolution brief) and triggers
 // ['conflict'], a verifier red gets `integration: verifier red: <why>`; their row reason and summary say so, and
 // any other set-aside keeps the generic marker (escaped `integration: set aside: ` when it would read as either).
-// No new row or payload keys.
+// p29-9 added one row key, `flakes`: the integrator's Flakes (trace.flakes), on every outcome; no new payload key.
 function integrationResult(task, out, a, trace) {
   const I = a.integration
   const o = out || { outcome: 'set-aside', reason: INTEGRATION_THREW }
@@ -3274,6 +3354,8 @@ function integrationResult(task, out, a, trace) {
     // p21-3: always []. INTEGRATION_REVIEW is not a master-review round: a rejection here uses a review round
     // (reviewRoundsUsed + 1) but writes no review-verdict line, so the record's `round` skips it (r1, r2, r4).
     reviewVerdicts: [],
+    // p29-9: the integrator's Flakes (flakesOf), [] for a P1 call, a dead or thrown integrator.
+    flakes: (trace.flakes || []).map((f) => ({ ...f })),
     integration: {
       outcome: o.outcome,
       path: trace.path,
@@ -3342,7 +3424,7 @@ if (mode === 'integrate') {
   // The validated history with its empty rounds dropped (liveHistory) is the one every prompt and the row use.
   const ia = { ...a, integration: { ...a.integration, reviewHistory: liveHistory(a.integration.reviewHistory) } }
   // A stage that throws becomes a set-aside at Integration, never a lost result.
-  const trace = { agents: [], path: '' }
+  const trace = { agents: [], path: '', flakes: [] }
   let out
   try {
     out = await integrate(ia.task, ia, trace)

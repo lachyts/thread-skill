@@ -19,7 +19,7 @@ Every handoff produces two artefacts: a **durable handoff doc**, committed to th
 handoff of THIS conversation) or when a router (`next`/`orient`) dispatched it.
 Never self-initiate a handoff because the session feels long or the context is
 filling — that is a recommendation, and recommendations for the undecided
-moment belong to `thread:next`'s ask-first menu. (Model invocation enabled
+moment belong to `thread:next`, which decides the move and says so in one line. (Model invocation enabled
 2026-08-12: the old `disable-model-invocation` flag was inherited from the
 flat-skill port, never a recorded decision; handoff was then judged the
 cheapest-misfire route of the family, a misfire costing one committed doc
@@ -73,7 +73,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/handoff-home.sh"            #
 
 Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` for a unit outside git or one whose repo ignores `docs/handoffs/` — are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Home; never resolve `<home>` by hand, and never edit a `.gitignore` to make room. Never the OS temp directory (macOS clears it on reboot; a handoff must survive reboots and account switches) and never the vault. Slug: ≤5 words naming the work. Create `docs/handoffs/` if absent. A doc briefs exactly one consumer (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`). Every path in this skill, in `thread:close` and in `thread:open` is this same `<home>/docs/handoffs/<doc>`; the prompt carries it **absolute**.
 
-**Failure path.** If the resolver exits non-zero, prints nothing, or cannot be run (`CLAUDE_PLUGIN_ROOT` still unset after the re-run `plugin-root.md` rule 4 asks for, a stale cache), stop before writing: no doc, no landing call, no Thread-state row, no captures touched, no task created. Print `handoff: resolver failed (<its stderr, or "not found at <path>">) — no doc written` and ask Lachy for an absolute directory. Only a directory he names is used as `<home>`, never one the agent infers.
+**Failure path.** If the resolver exits non-zero, prints nothing, or cannot be run (`CLAUDE_PLUGIN_ROOT` still unset after the re-run `plugin-root.md` rule 4 asks for, a stale cache), stop before writing: no doc, no landing call, no Thread-state row, no captures touched, no task created. Print `handoff: resolver failed (<its stderr, or "not found at <path>">) — no doc written` and ask Lachy for an absolute directory (Owner *yours*: where his handoff docs live, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`). Only a directory he names is used as `<home>`, never one the agent infers.
 
 **Consumer home.** When the consumer will launch somewhere other than this session's launch directory — the work moves to another repo, this repo is about to be deleted or moved, or **Split launch.** below sends it to the project's repo — resolve with `--dir <consumer launch dir>` (plus `--shared` for a shared thread), then write the doc there and hand it to landing with `home` set to that home (§ Commit it): land.sh resolves the repo that holds it. `Run from:` (**Shape.**) is that consumer launch directory, and `create_thread`'s `cwd` moves with it (§ Success contract). The prompt names the doc's absolute path, and the producer's later `thread:close` still finds the doc through the THREAD.md Resume pointer.
 
@@ -92,7 +92,7 @@ Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` fo
 Body sections, in this order:
 
 1. **Done and verified** — what landed this session, with evidence (paths, SHAs, test output).
-2. **What remains** — the continuation: what the next session does, in order, naming any fork the grill-fit check returned to Lachy.
+2. **What remains** — the continuation: what the next session does, in order, naming any fork the grill-fit check returned to Lachy. An open confirm a dispatching `thread:next` carried (its step 3) is one such fork, word for word.
 3. **Decisions settled** — rulings already made, so they are not re-litigated.
 4. **Gotchas found the hard way.**
 5. **Suggested skills** — the skills the next agent should invoke to continue.

@@ -47,7 +47,7 @@ status of [[giflab-rollout]]               # natural language — same thing
 Resolve `[[<slug>]]` → `~/repos/obsidian/Work/Tasks/<slug>.md`, else `Work/Tasks/Archive/Rollouts/<slug>.md`: a
 rollout whose completion ceremony already ran (a serial chain's Complete moves its note there itself). The path it
 resolves is `<rollout-note>` in every read below. If several dated/ordinal notes match an ambiguous name (e.g.
-"today's giflab rollout"), **list the matches and ask which**: don't assume. Read the body's `Project root: \`<repoPath>\`` line: it's the repo for the live checks (a serial
+"today's giflab rollout"), **list the matches and ask which**: don't assume (Owner *yours*: which rollout he means, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`). Read the body's `Project root: \`<repoPath>\`` line: it's the repo for the live checks (a serial
 note has none: § 5).
 
 **Engine snapshot first (ADR 0043).** Whichever session runs it, status takes its scripts and prose from the rollout's own engine root (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/engine-snapshot.md`). This text's prose id: `$Id$` (git `ident`, engine-snapshot.md): pass its hex as `--prose-id`; when it shows no hex, pass none. Before any other read, run
@@ -228,7 +228,9 @@ nothing more:
 **A RACE has three states.** Merge-task's exit 5 means the PR merged, but as a combination nobody
 verified. Execute's RACE procedure (execute § 4.5) appends the `## Race log` line first, then re-verifies the
 merge commit in the background for up to two hours, a verify-slot wait included, with the lane held: green →
-`mark-done`; red, rc 124 or a missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`. Its
+`mark-done`; red, rc 124 or a missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`, its red
+the one the re-verify's Flake check left (ADR 0050: an out-of-diff red its named re-run and confirming run clear
+reads green, its Flakes logged by `record-verify`). Its
 verdict file is `<repoPath>/.claude/integration/race-<slug>.rc`, written last, so an absent one means unfinished. A
 `noslot` verdict file reads like an absent one: the re-verify has not run (no verify slot came in time), and the
 lead re-runs it with the lane held. A `heat` verdict file reads the same way: the Mac was too hot to run it (the Heat
@@ -458,22 +460,22 @@ integrates, the lead's next step stamps `paused:`.
 
 **Room stop.** A standing room stop (§ 2's `stands`, exit 0) renders as a room stop, not a stall: headline
 `ROOM STOP since <stamp>: awaiting the Stage's resume`, what's left listed as usual, and no stalled framing.
-On the Chorus Stage the lead stopped each Workflow call at a step boundary for a Login at its line (execute
-§ Room stop), so its owner session (the lead that wrote it, which the tasks' `owner:` tags name) shows no run in
-`/workflows` by design. Its tasks need not read running or integrating either: a call whose row came in before
-its stop was reconciled, and the signal can come in a cool-down's `waiting` turn with nothing in flight, so they
-may all await Integration, sit set aside or wait queued. While that session is alive (not known to have ended)
-the room stop is a live queue whatever its tasks read and whatever `/workflows` shows: action 10 matches it ahead
-of drift and every resume (11 to 13), and the Stage owes it the resume, so the recommendation is to wait for it,
-never `/thread:execute` from here, because any loop entry, whoever opens it, ends the room stop and resumes the
-stopped calls on a Login still at its line, and the Stage then sends nothing, since its resume skips a lead that
-has launched work since. A lapsed one (exit 4) renders `room stop since <stamp> lapsed: the owner's heartbeat
-re-enters`: it is a live queue the same way, and the owner session's heartbeat re-enters *Cold resume* on its
-next tick, which ends it and resumes the stopped calls by handle, so wait for that too. Under either, once the
-owner session has ended (the owner-session qualifier), nothing owes the resume and the room stop is no live
-queue: action 10's or 12's resume applies as usual, and that *Cold resume* ends it. A stamped pause comes first
-(action 8): the Stage's resume skips a paused lead, so the reinstate is yours, and it ends the room stop as any
-loop entry does.
+On the Chorus Stage the lead stopped each Workflow call at a step boundary for a Login at its line, or nearing it
+in a spread (execute § Room stop), so its owner session (the lead that wrote it, which the tasks' `owner:` tags
+name) shows no run in `/workflows` by design. Its tasks need not read running or integrating either: a call whose
+row came in before its stop was reconciled, and the signal can come in a cool-down's `waiting` turn with nothing
+in flight, so they may all await Integration, sit set aside or wait queued. While that session is alive (not
+known to have ended) the room stop is a live queue whatever its tasks read and whatever `/workflows` shows:
+action 10 matches it ahead of drift and every resume (11 to 13), and the Stage owes it the resume, so the
+recommendation is to wait for it, never `/thread:execute` from here, because any loop entry, whoever opens it,
+ends the room stop and resumes the stopped calls on a Login still at its line, and the Stage then sends nothing,
+since its resume skips a lead that has launched work since. A lapsed one (exit 4) renders `room stop since
+<stamp> lapsed: the owner's heartbeat re-enters`: it is a live queue the same way, and the owner session's
+heartbeat re-enters *Cold resume* on its next tick, which ends it and resumes the stopped calls by handle, so
+wait for that too. Under either, once the owner session has ended (the owner-session qualifier), nothing owes the
+resume and the room stop is no live queue: action 10's or 12's resume applies as usual, and that *Cold resume*
+ends it. A stamped pause comes first (action 8): the Stage's resume skips a paused lead, so the reinstate is
+yours, and it ends the room stop as any loop entry does.
 
 **Owner-session qualifier.** It applies to a live queue: a running or integrating task with an `owner:`, or a
 room stop, standing or lapsed, whatever its tasks read (*Room stop* above). A Workflow run is listed in

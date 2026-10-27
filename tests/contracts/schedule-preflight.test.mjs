@@ -15,7 +15,7 @@
 //   p4  what leaves: Orient tasks with their Dependent closure; a task left out unstamped, or, carried and queued,
 //       through step 6's `reconcile-rollout.py defer`; step 8's left-out block points an Orient one at /thread:orient.
 //   p5  under orient-all: no grading agent, no round, no log; --tasks is step 1's confirmed candidates and --decided
-//       the prompt line's slugs among them; orient-all § 6 answers it in item 16 and its prompt carries the line (the
+//       the prompt line's slugs among them, and the fork writes its queue's ruled calls (`decided-for-you`, ADR 0054); orient-all § 6 answers it in item 16 and its prompt carries the line (the
 //       decided slugs among entry.members); orient-all § 8 lists each leaver by its why (waiting on your answer, its
 //       /thread:orient pointer, depends on [[<via>]]); no § 1.5 or S3.5 line names --regenerate.
 //   p6  § 1.5 runs no plan gate (ADR 0030) and names no Workflow and no task.workflow.js.
@@ -147,7 +147,8 @@ function check(files) {
 
   // p5: under orient-all.
   need('p5', '§ 1.5 **The orient-all form.**', form, ['no grading agent', 'no round', 'no `log`',
-    '--tasks <step 1\'s confirmed candidates>', 'among them', 'Pre-flight: rank <R>, scan <S>, decided <slugs or none>'])
+    '--tasks <step 1\'s confirmed candidates>', 'among them', 'Pre-flight: rank <R>, scan <S>, decided <slugs or none>',
+    'estate-dispatch.py decided-for-you --rank <R> --tasks <its queue[]> --by orient-all --write'])
   const oa = files[ORIENT_ALL] ?? ''
   const answers = slice(sec(oa, /^### 6\. /), /^3\. \*\*Schedule's questions, answered\.\*\*/, /^4\. /) ?? ''
   const item16 = C(slice(answers, /^ {3}16\. /, /^ {3}\d+\. /) ?? '')
