@@ -676,10 +676,10 @@ got=$(HOME="$EH" python3 "$SCRIPT" verify-timeout --rollout "$TMP/no-such-rollou
   && echo "ok   - verify-timeout: a missing note exits 1" || { echo "FAIL - verify-timeout: missing note (rc $rc)"; fail=1; }
 # p32-1: a plugin install without verify-slot.py is exit 4 (its own code, never a bad verify_timeout's 1), checked after
 # exit 3, so the lead halts at the entry with nothing stamped instead of passing a verifySlot.script that does not exist.
-# The script is loaded by importlib with VERIFY_SLOT_PY pointed at a path that does not exist.
+# The script is loaded by importlib (-B: no bytecode beside it) with VERIFY_SLOT_PY pointed at a path that does not exist.
 vt_absent() {  # vt_absent <frontmatter line> -> rc, with stdout in $TMP/vt4.out and stderr in $TMP/vt4.err
   mkvt "$1"
-  HOME="$EH" python3 - "$SCRIPT" "$TMP/vt4-absent/verify-slot.py" "$TMP/vt-rollout.md" > "$TMP/vt4.out" 2> "$TMP/vt4.err" <<'PY'
+  HOME="$EH" python3 -B - "$SCRIPT" "$TMP/vt4-absent/verify-slot.py" "$TMP/vt-rollout.md" > "$TMP/vt4.out" 2> "$TMP/vt4.err" <<'PY'
 import importlib.util, pathlib, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
 rr.VERIFY_SLOT_PY = pathlib.Path(sys.argv[2])

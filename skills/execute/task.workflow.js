@@ -1810,7 +1810,7 @@ function rungName(s) {
 }
 
 // The args refusal (p32-1, execute § 4.5 *Args refusal*). Every refusal the entry makes before any dispatch (args
-// that are not JSON or not one object, a bad defaultBranch, `waves`, task, mode, ladder, verifySlot, integration or
+// that are not JSON or not one object, a bad defaultBranch, the pre-p12-5 shape, task, mode, ladder, verifySlot, integration or
 // task.resume) is thrown as argsRefused(why): its message starts with ARGS_REFUSED, so a notification the runtime wraps
 // (`Error: …`) or cuts still carries it, and the lead matches it by contains. Such a call dispatched nothing and the
 // same args are refused again, so the lead never reads it as a *Lost call* (a resume, a dead-call set-aside, an
