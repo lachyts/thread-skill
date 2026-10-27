@@ -548,6 +548,7 @@ test('span: a repair line on until\'s date is read once, by the next span, repai
   assert.deepEqual(reps(s2, 'old'), [['2026-09-12', ['o'], 'deferred']])
   assert.ok(!s2.flags.some((f) => /undated repair line/.test(f)), 'an unread rollout\'s undated line is not flagged weekly')
   ok(h, ['ledger', '--span', path.join(h.out, 'span.json')]) // p29-11: the Time-lost ledger's line comes before close
+  ok(h, ['attention', '--span', path.join(h.out, 'span.json')]) // p30-7: the attention line comes before close
   assert.match(ok(h, ['close', '--span', path.join(h.out, 'span.json')]).stdout, /^closed r-/)
   const line = rlines(h).filter((l) => l.kind === 'reflection').pop()
   assert.deepEqual([line.rollouts, line.escapesOnly, line.repairsOnly], [[], [], ['demo', 'old']])
@@ -656,6 +657,7 @@ test('span and close: breaches count once per (rollout, Guardrail) only for a fi
   const tail = entryOf(s, 'tail')
   assert.deepEqual([tail.partial, tail.breached, tail.breachCounts], [true, ['throughput'], false])
   ok(h, ['ledger', '--span', path.join(h.out, 'span.json')]) // p29-11: the Time-lost ledger's line comes before close
+  ok(h, ['attention', '--span', path.join(h.out, 'span.json')]) // p30-7: the attention line comes before close
   ok(h, ['close', '--span', path.join(h.out, 'span.json')])
   const [line] = rlines(h).filter((l) => l.kind === 'reflection')
   assert.deepEqual([line.counts.breaches, line.quiet], [1, false])
@@ -1008,6 +1010,7 @@ test('knobs end to end: two agreeing earlier Reflections make the newest rollout
   const scores = [...new Set(s.knobs.land.map((k) => k.scores))]
   assert.equal(scores.length, 1)
   ok(h, ['ledger', '--span', out]) // p29-11: tune.py --auto holds a ceiling raise until the ledger's line is in
+  ok(h, ['attention', '--span', out]) // p30-7: step 13b, before decide and close
   const r = tune(h, ['--scores', scores[0], '--auto', '--repo', s.knobs.land[0].root, '--reflection', s.reflection, '--config', config])
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /^applied parallel_ceiling 3 → 4 for o\/r: /m)
@@ -1047,6 +1050,7 @@ test('knobs end to end: an auto line a later finished run breaches at its to is 
   const rv = s.knobs.revert[0]
   const out = path.join(h.out, 'span.json')
   ok(h, ['ledger', '--span', out]) // p29-11: the Time-lost ledger's line comes before tune.py and knobs
+  ok(h, ['attention', '--span', out]) // p30-7: step 13b, before decide and close
   const r = tune(h, ['--scores', rv.scores, '--revert', rv.tuning, '--repo', rv.root, '--reflection', s.reflection, '--config', config])
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /^applied parallel_ceiling 4 → 3 for o\/r: /m)
@@ -1532,6 +1536,7 @@ test('the Verify week: one watch line per Watch, a rule line and the decision ta
   ok(h, bugArgs(h, out, { rollouts: ['week-a', 'week-b'], rule: 'execute § 4.5', shape: 'a hand-back loses its answer' }))
   ok(h, bugArgs(h, out, { rollouts: ['week-a', 'week-b'], rule: 'execute § 4.5', shape: 'a hand-back loses its answer' }))
   ok(h, ['ledger', '--span', out]) // p29-11: step 13a, before tune.py and knobs
+  ok(h, ['attention', '--span', out]) // p30-7: step 13b, before decide and close
   const tune = spawnSync('python3', ['-B', path.join(root, 'skills', 'reflect', 'scripts', 'tune.py'), '--scores', s.knobs.held[0].scores, '--auto', '--repo', h.repo,
     '--reflection', s.reflection, '--config', config], { encoding: 'utf8', cwd: h.home, env: env(h) })
   assert.equal(tune.status, 0, tune.stderr)

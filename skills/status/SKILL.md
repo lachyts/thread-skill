@@ -23,7 +23,8 @@ target repo (plus, for a RACE task, a plain read of its local verdict file, § 3
 reads the operator's local ladder file (`~/.config/thread/ladder.toml`), and, for a rollout note with no
 `parallel_ceiling:`, the operator's rollout settings (`~/.config/thread/rollouts.toml`), and the Away state file
 (`~/.config/thread/away.json`, a read inside `reconcile-rollout.py status`, for § 4's Trickle line and the ETA's
-width; never through `next`). Status itself runs
+width; never through `next`), with the leads' leases (`~/.config/thread/leases/*.json`, the same read, p28-4) and,
+only when a lease would lapse, the Mac's kern.boottime and kern.waketime (a read-only `sysctl`). Status itself runs
 `rollout-settings.py` for a task whose `max_review_rounds` is absent at both levels (§ 2), and
 `lead-integrate.py inputs` resolves `auto_retries` the same way, inside its own read, for a set-aside task whose
 notes lack it. Either read of the settings file runs land.sh's `--origin-slug` read, and so one local
@@ -172,15 +173,20 @@ relays, e.g. `progress: 2/6 merged, 1 running, 1 awaiting integration, 1 queued,
 ~45m remaining (rough)`.
 
 `trickle` is the Mac-wide cap read from the notes only (`skills/execute/away.md` § The ETA), read silently (no
-WARN: only `next` prints it): `{away, file, why, limit, awayCap, until, morning, elsewhere, here, running}`. `file`
-is `fresh`, `missing`, `stale` or `unreadable` (`why` says how, null only when fresh; anything but fresh reads not
-Away at Trickle 2), `limit` the Trickle N, `awayCap` the Away cap, `until` the file's (fresh only), `elsewhere`
-`{<rollout>: n}` the other open, started, parallel rollouts' running tasks, `here` this rollout's own as they count
-it (0 when paused, closed, never started or not directly in the tasks dir) and `running` their sum. `elsewhere` and
-`running` count notes only, never `next`'s Trickle claims (`skills/execute/away.md` § The Trickle, *Trickle
-claims*), so they can trail `next`'s count by up to 20 minutes of unstamped claims (a claim's life): while another
-lead's starts are claimed but not yet stamped, `status` shows room on the Mac that `next` still holds as
-`trickle: N/N`.
+WARN: only `next` prints it): `{away, file, why, limit, awayCap, until, morning, elsewhere, lapsed, here, running,
+lease}`. `file` is `fresh`, `missing`, `stale` or `unreadable` (`why` says how, null only when fresh; anything but
+fresh reads not Away at Trickle 2), `limit` the Trickle N, `awayCap` the Away cap, `until` the file's (fresh only),
+`elsewhere` `{<rollout>: n}` the other open, started, parallel rollouts' running tasks whose lead's lease has not
+lapsed, `lapsed` the same shape for those whose lease has (left out of the count, `skills/execute/away.md` § The
+Trickle), `here` this rollout's own as they count it (0 when paused, closed, never started, not directly in the
+tasks dir, or its own lease lapsed), `running` elsewhere plus here, and `lease` this rollout's own lead's lease
+(p28-4): `{state, writtenAt, lapsesAt}`, `state` `fresh`, `lapsed`, `room-stop` (lapsed, but a room stop stands, so
+it counts), `none` (no lease file: an older snapshot, still counted) or `unreadable` (still counted), `writtenAt` its
+last write and `lapsesAt` when it lapses (or lapsed), both UTC and null where they do not apply. Status writes no
+lease. `elsewhere` and `running` count notes only, never `next`'s Trickle claims (`skills/execute/away.md` § The
+Trickle, *Trickle claims*), so they can trail `next`'s count by up to 20 minutes of unstamped claims (a claim's
+life): while another lead's starts are claimed but not yet stamped, `status` shows room on the Mac that `next` still
+holds as `trickle: N/N`.
 
 **Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
 rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
@@ -415,7 +421,10 @@ Away state). Not Away: `Trickle: not Away · N <limit> · <running>/<limit> task
 2 | unreadable: <why>, read as not Away, Trickle 2>`. Away: `Trickle: Away until <until> · the Away cap <awayCap>
 holds (N <limit> by day) · <running>/<awayCap> tasks running on this Mac (…) · away.json fresh`. When `running`
 reaches the cap in force (`limit` not Away, `awayCap` Away) the count adds `: full, new starts wait (a meant wait,
-never stalled)`: a row held on `trickle:` or `away cap:` is the cap at work, never a blocker.
+never stalled)`: a row held on `trickle:` or `away cap:` is the cap at work, never a blocker. The lease (p28-4)
+appends, in this order: `· not counted (lease lapsed): <n> in [[<r>]]…` when `lapsed` is non-empty; `· this lead's
+lease lapsed at <lapsesAt>: its in_progress tasks hold no room` when `lease.state` is `lapsed`; `· lease held by the
+room stop` when it is `room-stop`. A fresh, absent or unreadable lease adds nothing.
 
 **The Moving line**, right under the Trickle line, from § 2's *Moving*: `Moving: <verdict> <cause> (<ageMinutes>m since
 the last life sign)` (no cause for `moving`; `no life sign` when `ageMinutes` is null), then ` · until <until>` when it
@@ -559,7 +568,9 @@ so there a run means either. While one is in flight, that session's last `ROLLOU
 `state=waiting`. "No run in `/workflows`" counts as evidence of a stall only when it was checked **in that owner
 session**, or that session is known to have ended (every owner session, when there are several tags); under a
 room stop only the session's end counts, since its run is gone by design. From any other session, status cannot
-tell live from stalled: say so, and recommend checking the owner session first. While the owner session is alive, its heartbeat re-enters *Cold resume* on a
+tell live from stalled: say so, and recommend checking the owner session first. A lapsed lease (`trickle.lease`,
+§ 2) means no entry, tick or `next` for 45 minutes after its last write, or after the Mac's latest boot or wake if
+later: evidence the lead stopped, never proof the session ended. While the owner session is alive, its heartbeat re-enters *Cold resume* on a
 genuine stall (execute § 8); a closed terminal stops it, and another session resumes only once the owner
 session has ended. **The RACE exception:** with a RACE re-verify in flight (§ 3), the owner session's answer
 never leads to `/thread:execute`. If that session shows the `RACE: …` halt or no run, or has ended, the RACE
@@ -824,8 +835,10 @@ look (`ERROR: moving: <why> (a lost look, never a stall)`: the note, the Run rec
 
 `lastEvent` is the last life sign (every heartbeat tick's `lead-entry` and every verb the lead runs), `ageMinutes` the
 minutes since it; the silence is measured from the latest of it, the Mac's last wake and its last boot. The default
-`--stall-after` is **45** minutes: two missed 20-minute heartbeat ticks and some slack. Under `halt: regenerate` the
-bound is **120** minutes from the last life sign instead (the Approved-queue route's one foreground turn writes none).
+`--stall-after` is **45** minutes: two missed 20-minute heartbeat ticks and some slack. It is a lead's lease's lapse
+(`skills/execute/away.md` § The Trickle, *A lead's lease*; reconcile-rollout.py's STALL_AFTER_MIN reads LEASE_LAPSE),
+and both count from the latest of the last sign, the Mac's wake and its boot. Under `halt: regenerate` the bound
+is **120** minutes from the last life sign instead (the Approved-queue route's one foreground turn writes none).
 
 ***Which waits silence judges*:**
 - judged by silence, because the lead's own heartbeat is what ends them:

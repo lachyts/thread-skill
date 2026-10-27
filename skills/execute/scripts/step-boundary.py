@@ -90,7 +90,7 @@ import re
 import sys
 import time
 from argparse import Namespace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -111,10 +111,12 @@ RR = _load_reconcile()
 
 PAUSE_LOG = "## Pause log"
 # The room-stop line's one source is reconcile-rollout.py's ROOM_STOP_LINE_RE (p30-4), which its _approved_marks reads
-# too (an approved queue's room stops are no run mark): this module loads that one, never a copy.
+# too (an approved queue's room stops are no run mark): this module loads that one, never a copy, and since p28-4 reads
+# the lines only through RR._last_room_stop (_last_room_line), the reader a lead's lease shares.
 ROOM_LINE = RR.ROOM_STOP_LINE_RE
-# The 6 h bound's one copy is reconcile-rollout.py's ROOM_STOP_BOUND_HOURS (p29-7), which `moving` reads too.
-BOUND_HOURS = RR.ROOM_STOP_BOUND_HOURS
+# The bound's one source is reconcile-rollout.py's ROOM_STOP_BOUND (p28-4), which a lead's lease reads too (a standing
+# room stop keeps a lapsed lease): `stands` defaults to it.
+BOUND_HOURS = RR.ROOM_STOP_BOUND.total_seconds() / 3600
 STEP_TYPES = ("started", "result", "failed")
 
 
@@ -332,14 +334,14 @@ def _save_note(note, verb):
 
 def _last_room_line(note):
     """(stamp, 'start' | 'ended') for the last room-stop line of `## Pause log`, or None: reconcile-rollout.py's
-    _last_room_line, the rule's one copy (p29-7)."""
-    return RR._last_room_line(note)
+    _last_room_stop, the one reader (a lead's lease reads it too, p28-4)."""
+    return RR._last_room_stop(note)
 
 
 def _standing(last, now, hours):
     """0 under the bound, 4 at or past it (or an unparseable stamp), 5 with no start line last: reconcile-rollout.py's
-    _room_standing (p29-7)."""
-    return RR._room_standing(last, now, hours)
+    _room_standing, the rule's one copy (p29-7)."""
+    return RR._room_standing(last, now, timedelta(hours=hours))
 
 
 def cmd_begin(args):

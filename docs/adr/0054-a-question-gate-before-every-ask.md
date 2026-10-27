@@ -79,10 +79,12 @@ Each row is one ask unit (a paragraph, list item or table row) in `skills/`, fou
 unit holds. Dispositions: `cited` (the ask stands and its unit cites `_shared/asking.md`), `listed` (a pointer at an
 ask another unit holds, whose Owner it shares: it cites `_shared/asking.md` too), `follow-up` (an ask the gate
 removes, left to the owner task named in Task and put in the Framing until it lands), `no ask` (the unit names an ask
-only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 68
-rows: 41 cited, 15 follow-up (p30-9 2, p30-10 13), 2 listed, 7 no ask, 3 designed out. That is form N1:
+only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 67
+rows: 42 cited, 13 follow-up (p30-10 13), 2 listed, 7 no ask, 3 designed out. That is form N1:
 p30-5 (PR #226) is on main, its step 4 cited in three units. p30-4 (the approved queue) removed its 14 rows. Orient
-§ 3.5's Priorities card (p30-6, Chorus ADR 0110 d5) added one `cited` row.
+§ 3.5's Priorities card (p30-6, Chorus ADR 0110 d5) added one `cited` row. p30-9 (ADR 0057) removed its 2 rows and
+added orient § 9's cited *gate* row: the execute handoff, decided and never asked. p29-7 (ADR 0048) added repair
+§ 3g's cited row: Lachy's ack of a Lane hold.
 
 | File | § | Anchor | Owner | Disposition | Task |
 | --- | --- | --- | --- | --- | --- |
@@ -127,8 +129,7 @@ p30-5 (PR #226) is on main, its step 4 cited in three units. p30-4 (the approved
 | skills/next/SKILL.md | § Process | `` **An open question this session left** `` | *yours* (step 3 decides the rest) | cited | — |
 | skills/next/SKILL.md | § Process | `` **Decide the move, and say so in one line.** `` | *gate* | cited | — |
 | skills/next/SKILL.md | § Process | `` **The menu, when the move is not clear.** `` | *yours* | cited | — |
-| skills/orient/SKILL.md | § 9 | `` end with `AskUserQuestion`, recommended option first, one offer per parallel note `` | *gate* | follow-up | p30-9 |
-| skills/schedule/SKILL.md | § 8 | `` **Start when ready.** When Lachy answers a standalone run's summary `` | *gate* | follow-up | p30-9 |
+| skills/orient/SKILL.md | § 9 | `` end with the execute handoff, decided and never asked `` | *gate* | cited | — |
 | skills/schedule/SKILL.md | § 0 | `` ask one AskUserQuestion, "Create the rollout clone `` | *technical* (ADR 0042 holds it) | follow-up | p30-10 |
 | skills/close/SKILL.md | § Identify the active thread | `` offer to create one via `thread:open `` | *gate* | follow-up | p30-10 |
 | skills/close/SKILL.md | § Edge cases | `` rung 4 (offer to create), never rung 3 `` | *gate* | follow-up | p30-10 |
@@ -160,8 +161,6 @@ p30-5 (PR #226) is on main, its step 4 cited in three units. p30-4 (the approved
 Each owner task removes its rows' asks (answering each as orient-all § 6 step 3 answers schedule's questions, listed
 as Decided for you) and deletes its rows; q5 fails a row whose ask is gone, so a landed task cannot leave one behind.
 
-- [[thread-skill-p30-9-schedule-ends-with-pickup-sweep-and-execute-handoff]] (p30-9): 2 rows, the execute offer at
-  orient § 9 and schedule's **Start when ready.**
 - [[thread-skill-p30-10-the-asks-the-gate-leaves-standing]] (p30-10): 13 rows. Filed by the lead at this task's
   Integration, before `mark-done`, from this brief:
   - title "The asks the gate leaves standing", `phase: 30`,
