@@ -36,6 +36,10 @@
 //   heat        § Heat (p31-4, estate ADR 0009 d5) names the `heat: the Mac is hot (<name>)` reason the code builds from its
 //               HEAT_PREFIX, `slotLimit` 0 Away too, that it never halts, and the THREAD_HEAT_LEVEL pin; CONTEXT.md's
 //               **Stalled rollout** names the Heat hold among the meant waits, so a hot spell never reads as a stall
+//   claim       § The Trickle's *Trickle claims* (p28-3) states the code's TRICKLE_CLAIM_TTL, names its TRICKLE_LOCK and
+//               TRICKLE_CLAIMS files and quotes its TRICKLE_WARN prefix, says the § 4 stamp consumes a claim, that a
+//               claim whose rollout note is missing from the walk still counts (it fails safe), and names the seeded-
+//               revise residual and its follow-up task; the old "a claim under a lock is a later task's" is gone
 // One function (checkAway) returns named failures, so the real files and each control (one mutation, exactly its
 // rule) run through identical logic. Reads files only.
 import { test } from 'node:test'
@@ -216,6 +220,22 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
   if (!['hold-trickle', 'hold-away-cap', 'hold-heat'].every((k) => macHolds.includes(k)) ||
     macHolds.some((k) => k !== 'hold-away-cap' && !idleEnum.includes(`"${k}"`))) fails.push('mac-holds')
 
+  // claim (p28-3): the TTL, the two file names and the WARN prefix are the code's, read from it, so a change on either
+  // side fails.
+  const ttlM = grab(code, /^TRICKLE_CLAIM_TTL = timedelta\(minutes=(\d+)\)/m)
+  const lockFile = grab(code, /^TRICKLE_LOCK = "([^"]*)"/m)
+  const claimsFile = grab(code, /^TRICKLE_CLAIMS = "([^"]*)"/m)
+  const claimWarn = grab(code, /^TRICKLE_WARN = "([^"]*)"/m)
+  if (!ttlM || !lockFile || !claimsFile || !claimWarn ||
+    !trickleS.includes(`A claim lives ${ttlM} minutes from its \`at\``) ||
+    !trickleS.includes(`\`${lockFile}\``) || !trickleS.includes(`\`${claimsFile}\``) ||
+    !trickleS.includes(`\`${claimWarn} `) ||
+    !trickleS.includes("A claim is consumed by its task's § 4 stamp") ||
+    !trickleS.includes('and so does one whose rollout note is missing from the walk') ||
+    !trickleS.includes('up to the revises one step 1.2 launches') ||
+    !/\[\[thread-skill-p28-\d+-trickle-claim-a-seeded-revise\]\]/.test(trickleS) ||
+    trickleS.includes("A claim under a lock is a later task's.")) fails.push('claim')
+
   return fails
 }
 
@@ -226,7 +246,7 @@ test('away.md, the code that reads the file and the hold-back prose agree', () =
 // ---- controls: each mutates one place and must fail with exactly its rule ---------------------------------------
 
 const RULES = ['keys', 'path', 'staleness', 'default', 'refresh', 'until', 'morning', 'serial', 'warn', 'hold-back', 'glossary',
-  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record', 'heat', 'mac-holds']
+  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record', 'heat', 'mac-holds', 'claim']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -388,7 +408,22 @@ test('control: a Mac-wide hold score.py lacks, or one the idle-slots enum lacks,
   only('runRecord', '"hold-trickle",\n', '"hold-trickles",\n', 'mac-holds', 'dropped from the idle-slots enum')
 })
 
-test('the rules are all named (20) and each has a control', () => {
-  assert.equal(RULES.length, 20)
+test('control: a Trickle claim the doc or the code says another way fails claim', () => {
+  only('code', 'TRICKLE_CLAIM_TTL = timedelta(minutes=20)', 'TRICKLE_CLAIM_TTL = timedelta(minutes=30)', 'claim', 'a 30-minute TTL in the code')
+  only('away', 'A claim lives 20 minutes from its `at`', 'A claim lives a while', 'claim', 'no TTL in the doc')
+  only('code', 'TRICKLE_LOCK = "trickle.lock"', 'TRICKLE_LOCK = "claims.lock"', 'claim', 'another lock file')
+  only('code', 'TRICKLE_CLAIMS = "trickle-claims.json"', 'TRICKLE_CLAIMS = "claims.json"', 'claim', 'another claims file')
+  only('code', 'TRICKLE_WARN = "WARN: trickle claims"', 'TRICKLE_WARN = "WARN: claims"', 'claim', 'another WARN prefix')
+  only('away', "A claim is consumed by its task's § 4 stamp", 'A claim is consumed by mark-started', 'claim', 'no stamp consumes it')
+  only('away', 'and so does one whose rollout note is missing from the walk', 'but one whose rollout note is missing from the walk does not',
+    'claim', 'a missing rollout note drops its claims')
+  only('away', 'up to the revises one step 1.2 launches', 'nothing more', 'claim', 'no seeded-revise residual')
+  only('away', '[[thread-skill-p28-8-trickle-claim-a-seeded-revise]]', 'a later task', 'claim', 'no follow-up link')
+  const p = real.away.split('\n').find((l) => l.startsWith('**Trickle claims.**'))
+  only('away', p, `${p} A claim under a lock is a later task's.`, 'claim', 'the old sentence back')
+})
+
+test('the rules are all named (21) and each has a control', () => {
+  assert.equal(RULES.length, 21)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

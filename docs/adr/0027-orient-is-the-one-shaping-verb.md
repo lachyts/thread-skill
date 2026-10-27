@@ -6,6 +6,8 @@ Status: accepted (amends ADRs 0003, 0009, 0010 and 0026; retires `split` and `ga
 `--steer` or `--look` (or saying so) opts out, and an empty shape goes straight to steering.)*
 *(Amended 2026-10-18, p23-6: decision 5's execute offer gains a fourth answer, Start when ready,
 which stamps `start: unattended` for the Chorus Stage to start (Chorus ADR 0052 d6, as amended).)*
+*(Amended by ADR 0057, 2026-10-28: decision 5's execute offer is the execute handoff, decided and never asked: a
+fresh session through handoff's Rollout launch by default, Here, Not yet or Start when ready only on his word.)*
 
 ## Context
 

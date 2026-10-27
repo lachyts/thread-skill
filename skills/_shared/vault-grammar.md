@@ -50,9 +50,11 @@ the frontmatter, its scalar lower-cased with quotes and an inline ` # comment` d
 other value (`start: manual`, an empty `start:`), a `start:` nested under another key, and a body line are
 no stamp; `started:` and `started_unattended:` are other keys.
 
-- **Writers**: the execute offer, on the rollout note just written and never started, on a parallel
+- **Writers**: the execute handoff's Start when ready, on the rollout note just written and never started, whose
+  launch was never made or was withdrawn first (handoff § Lifecycle's `dismiss_task` rules; a lead already running
+  gets no stamp), on a parallel
   note only (the Stage starts a lead in a note's Project root; a serial note has none): orient § 9's
-  Start when ready answer, and schedule step
+  Start when ready move, on his word, and schedule step
   8's **Start when ready.** on a standalone run. `reconcile-rollout.py approve-queue`, on Lachy's words
   naming the queue and the PR its start waits on (§ Approved queue), and `reconcile-rollout.py
   stamp-start`, schedule step 8's under the chain, on the note an approved queue's regenerate wrote. And

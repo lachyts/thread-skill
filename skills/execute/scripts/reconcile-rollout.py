@@ -94,7 +94,11 @@ Subcommands:
               this Mac` (not Away) or `away cap: <running>/<A> tasks running on this Mac` (Away), and while one
               is, `halt` stays null.
               A stale or unreadable state file prints one `WARN: ~/.config/thread/away.json …` line on stderr,
-              --dry-run included.
+              --dry-run included. `trickle.elsewhere` and `running` count every other lead's live Trickle claims
+              too (p28-3; Trickle and Away, below): off --dry-run `next` writes this rollout's, one per start,
+              under the trickle claim lock. A claims file it cannot read (--dry-run included), a lock it cannot
+              take or a write that fails prints one `WARN: trickle claims …` line (TRICKLE_WARN) and never fails
+              the call.
               The last starts (Chorus ADR 0104 d4; The last starts and the night record, below): `lastStarts`
               ({morning, kinds}) follows `trickle`. While Away runs to the Morning, a start whose kind's usual
               length would end past it reads `last start: …` and is skipped, never a stop; a restart never does;
@@ -919,17 +923,32 @@ more than 5 minutes ahead) reads not Away at DEFAULT_TRICKLE with the Away cap a
 `trickle` and `away_cap` ignored; stale and unreadable print the AWAY_WARN line. Fresh, `away` and `trickle` are the
 file's, and the Away cap is its `away_cap`, else AWAY_CAP_DEFAULT lifted to `trickle` + 1 once the Trickle reaches it.
 One Mac-wide cap applies, its value by Away state, the Trickle not Away and the Away cap Away, and each rollout's
-ceiling still bounds its share: slotLimit = min(ceiling, max(0, cap - the count elsewhere)). The count elsewhere
-(_elsewhere_running) is one walk of --tasks-dir, _scan's index: each other rollout note directly in it, tagged
-`rollout`, not done or dropped, parallel, with no `paused:` stamp and started (never_started), counts its `status:
-in_progress` notes less the ones its own undecided RACE or UNVERIFIED holds. Serial rollouts, review and integrating
-notes never count. This rollout's own use is counted the same way, every in_progress row of its own, live or stalled, so
-a new start fits only while elsewhere + its own in_progress + this call's starts < the cap; a restart waits on the
-ceiling alone (no state leaves two respawned leads each waiting on the other's stalled notes). Nothing here writes the
-file; mark-started reads it too, for slot-taken's `cap` (Run record, above), `status` for its `trickle` block, and every
+ceiling still bounds its share: slotLimit = min(ceiling, max(0, cap - the count elsewhere)). The count elsewhere is
+one walk of --tasks-dir (off --dry-run a fresh one, _note_index, taken under the trickle claim lock below; under
+--dry-run the call's own, _scan's index) plus every other lead's live Trickle claims. In the walk (_elsewhere_running)
+each other rollout note directly in --tasks-dir, tagged `rollout`, not done or dropped, parallel, with no `paused:`
+stamp and started (never_started), counts its `status: in_progress` notes less the ones its own undecided RACE or
+UNVERIFIED holds. Serial rollouts, review and integrating notes never count. This rollout's own use is counted the same
+way, every in_progress row of its own, live or stalled, so a new start fits only while elsewhere + its own in_progress +
+this call's starts < the cap; a restart waits on the ceiling alone (no state leaves two respawned leads each waiting on
+the other's stalled notes). `status` and every progress line count notes only. Nothing here writes the file;
+mark-started reads it too, for slot-taken's `cap` (Run record, above), `status` for its `trickle` block, and every
 progress line (_progress_for, `next`, `status`) for the ETA's width (p28-6, _eta_width: the chunks still ahead at
 min(ceiling, max(1, cap - the count elsewhere)), the Heat hold aside); all of them read it silently, and only `next`
 prints the WARN.
+
+Trickle claims (p28-3; the spec is skills/execute/away.md § The Trickle, *Trickle claims*): two leads' `next` calls
+would otherwise both see the room one place leaves between one lead's `next` and its § 4 stamp. So off --dry-run, once
+the refusals pass and every PR-hold gh call is made, `next` takes the machine-wide trickle claim lock (TRICKLE_LOCK, in
+the note-lock dir, _trickle_paths), walks --tasks-dir afresh, reads the claims file (TRICKLE_CLAIMS beside it,
+_trickle_claims_read), counts each other lead's live claim it judges (_trickle_claims_judge) beside the notes, picks
+its starts, saves the rollout note and, only once that save succeeds, writes the kept claims plus one per start of
+its final `start` (the head Solo task's lone start included), replacing this rollout's earlier ones, then lets the lock
+go. A claim counts until the note-based count counts its task (its § 4 stamp consumes it), or for TRICKLE_CLAIM_TTL
+from its `at`; a missing or torn rollout or task note keeps it counting until then. --dry-run reads the claims and
+takes no lock, re-walks nothing and writes nothing. A lock it cannot take, a file it cannot read or a write that fails
+prints one TRICKLE_WARN line and fails open (the old window: one call's starts per lead), never a halt; a file of
+another version is read as none and never written.
 
 A lead's lease (p28-4; execute away.md § The Trickle): the count reads notes, never sessions, so each live lead keeps a
 lease, ~/.config/thread/leases/<rollout stem>.json under the home dir at call time (LEASE_DIR_REL), {rollout,
@@ -938,7 +957,9 @@ file and os.replace; a failure prints one LEASE_WARN line and changes nothing el
 last write, or after the Mac's latest boot or wake if later (LEASE_LAPSE; _Leases, kern.boottime and kern.waketime read
 lazily through machine_times), unless a room stop stands on the rollout note (_room_stop_stands, under
 ROOM_STOP_BOUND). A rollout whose lease has lapsed leaves every count (_running_by_rollout: the count elsewhere,
-mac_running, the ETA's width) and `next` names it under `trickle.lapsed`; `status`'s own `here` reads 0 then. No lease
+mac_running, the ETA's width) and `next` names it under `trickle.lapsed`; `status`'s own `here` reads 0 then. Only
+its notes leave: a live Trickle claim of its still counts (the `next` that wrote the claim renewed the lease first,
+so a claim outlives a lease only when that lease write failed). No lease
 file (an older engine snapshot writes none, ADR 0043) and an unreadable one (over LEASE_MAX_BYTES, not JSON, a
 `written_at` missing, naive or more than 5 minutes ahead) still count.
 
@@ -1251,7 +1272,7 @@ STANDING_SPEND_LOCK = "standing-spend.lock"
 PAUSED_FOR_KEY = "paused_for"
 SIGN_OFF = "sign-off"
 PAUSE_LOG_SECTION = "## Pause log"
-# The rollout start stamp (p23-6; skills/_shared/vault-grammar.md § Rollout start stamp): the execute offer's
+# The rollout start stamp (p23-6; skills/_shared/vault-grammar.md § Rollout start stamp): the execute handoff's
 # Start when ready writes a top-level `start: unattended`, the Chorus Stage reads it (the first `start:` line, scalar
 # lower-cased) and starts one lead once the note is runnable, and `next` reports it and, past its refusals and off
 # --dry-run, removes it, so the Stage never starts a second lead. Chorus's record, `started_unattended:`, is untouched.
@@ -1512,7 +1533,10 @@ def _stamp(dt) -> str:
 
 def _parse_ts(value):
     """ISO timestamp from a frontmatter value or gh's mergedAt, or None. A trailing Z is parsed (Python
-    3.9's fromisoformat refuses it); naive values are assumed local time."""
+    3.9's fromisoformat refuses it); naive values are assumed local time. A naive value that cannot be placed in
+    local time (0001-01-01T00:00:00: its astimezone() raises ValueError, OverflowError or OSError, by zone and
+    platform) reads None like any other unparseable stamp, so one hand-typed or seeded stamp never crashes a caller
+    (p28-3: a Trickle claim's `at`, which `next` reads before any write could prune it)."""
     s = _scalar(value)
     if not s:
         return None
@@ -1520,9 +1544,9 @@ def _parse_ts(value):
         s = s[:-1] + "+00:00"
     try:
         ts = datetime.fromisoformat(s)
-    except ValueError:
+        return ts if ts.tzinfo else ts.astimezone()
+    except (ValueError, OverflowError, OSError):
         return None
-    return ts if ts.tzinfo else ts.astimezone()
 
 
 # The engine's isoMinutes / wholeMinutes (task.workflow.js), ported byte for byte so the lead's own log
@@ -1717,7 +1741,8 @@ NOTE_LOCK_TIMEOUT = 30.0
 
 def _note_lock_dir() -> Path:
     """Where the note save locks (and the standing approval's spend lock) live: THREAD_NOTE_LOCK_DIR, else
-    XDG_STATE_HOME/thread/note-locks, else ~/.local/state/thread/note-locks; outside the vault so they never sync."""
+    XDG_STATE_HOME/thread/note-locks, else ~/.local/state/thread/note-locks; outside the vault so they never sync. It
+    also holds `next`'s trickle claim lock and Trickle claims file (TRICKLE_LOCK, TRICKLE_CLAIMS; _trickle_paths)."""
     absolute = lambda v: v if v and os.path.isabs(v) else None   # noqa: E731  a relative dir is ignored (the XDG rule)
     base = absolute(os.environ.get("THREAD_NOTE_LOCK_DIR")) or os.path.join(
         absolute(os.environ.get("XDG_STATE_HOME")) or os.path.join(os.path.expanduser("~"), ".local", "state"),
@@ -2181,7 +2206,9 @@ class _note_lock:
     (the `cp -p` clone aside, which takes no lock); the canary takes it inside its own lock, and nothing takes the
     canary's inside this one. With lock_path (and a label) it is another lock of the same kind: approve-gates
     --standing takes note locks (Note.save) inside the standing-spend lock (_spend_lock_path), and nothing takes the
-    spend lock inside a note lock or the canary's. No fcntl (Windows): no lock, the atomic replace alone."""
+    spend lock inside a note lock or the canary's. The trickle claim lock (TRICKLE_LOCK, p28-3) is outermost too: only
+    `next` takes it, and takes note locks (Note.save) and the Run record's flock inside it, never it inside another
+    lock. No fcntl (Windows): no lock, the atomic replace alone."""
 
     def __init__(self, path=None, lock_path=None, label="note lock"):
         self.lock_path = Path(lock_path) if lock_path is not None else _note_lock_path(path)
@@ -3558,6 +3585,15 @@ TRICKLE_PREFIX = "trickle:"                                    # a row held for 
 AWAY_CAP_KEY = "away_cap"
 AWAY_CAP_DEFAULT = 4      # the key absent, or any reading but fresh: twice the Mac's two Verify slots (verify-slot.py)
 AWAY_CAP_PREFIX = "away cap:"                                  # a row held for want of an Away-cap Slot
+# The Trickle claims (p28-3; execute away.md § The Trickle, *Trickle claims*): `next`'s own file and lock, beside the
+# note locks (_note_lock_dir). The lock is a file of its own: the claims file is replaced whole (no stable inode).
+TRICKLE_LOCK = "trickle.lock"
+TRICKLE_CLAIMS = "trickle-claims.json"
+TRICKLE_CLAIMS_VERSION = 1
+TRICKLE_CLAIM_TTL = timedelta(minutes=20)    # one heartbeat tick: a claim no § 4 stamp consumes lapses then
+TRICKLE_CLAIMS_MAX_BYTES = 256 * 1024
+TRICKLE_WARN = "WARN: trickle claims"                          # every claims stderr line's prefix
+TRICKLE_CLAIM_KEYS = ("tasksDir", "rollout", "slug", "at")
 # A lead's lease (p28-4; execute away.md § The Trickle): ~/.config/thread/leases/<rollout stem>.json under the home dir
 # at call time, {rollout, written_at, by}, rewritten by every `next` off --dry-run once its refusals pass and by every
 # record-entry. A rollout whose lease has lapsed leaves the Mac-wide count unless a room stop stands; a rollout with no
@@ -3893,50 +3929,201 @@ def _running_by_rollout(tasks_dir: Path, index, exclude=None, leases=None, lapse
     `exclude`, and has started (never_started over the index notes whose `rollout:` names it). Its n is those notes at
     `status: in_progress`, less the ones its own undecided RACE or UNVERIFIED holds (_race_holds): such a task never
     restarts, so it holds no Slot. Review and integrating notes never count (Integration holds no Slot), nor does a
-    serial rollout's Leg. Each n is _counted_running's, the count `status` reads for its own rollout too. Then the
-    lease (p28-4): a rollout with n > 0 whose lease reads lapsed (`leases`, a _Leases; by default one at the clock's
-    now) is left out, and put in `lapsed` instead when a dict is given (sorted in place); no lease file, an unreadable
-    one or a standing room stop still counts."""
+    serial rollout's Leg. Each n is _counted_running's, the count `status` reads for its own rollout too
+    (_counted_by_rollout's sets). Then the lease (p28-4): a rollout with n > 0 whose lease reads lapsed (`leases`, a
+    _Leases; by default one at the clock's now) is left out, and put in `lapsed` instead when a dict is given (sorted
+    in place); no lease file, an unreadable one or a standing room stop still counts."""
     this = exclude.resolve() if exclude is not None else None
     if leases is None:
         leases = _Leases(datetime.now().astimezone())
-    by_rollout = {}
-    for path, note in index.values():
-        target = (_wikilink_slug(note.get("rollout")) or "").lower()
-        if target:
-            by_rollout.setdefault(target, []).append((path, note))
     out, left = {}, {}
-    for path, note in index.values():
-        if path.parent != tasks_dir:
-            continue
-        n = _counted_running(note, by_rollout.get(path.stem.lower(), []))
-        if n > 0 and (this is None or path.resolve() != this):
+    for path, note, counted in _counted_by_rollout(tasks_dir, index).values():
+        if counted and (this is None or path.resolve() != this):
             if leases.counts(path.stem, note):
-                out[path.stem] = n
+                out[path.stem] = len(counted)
             else:
-                left[path.stem] = n
+                left[path.stem] = len(counted)
     if lapsed is not None:
         lapsed.clear()
         lapsed.update(sorted(left.items()))
     return dict(sorted(out.items()))
 
 
-def _counted_running(note, linked) -> int:
-    """The tasks a rollout note runs as the Mac-wide count reads them (_running_by_rollout, which checks the note
-    sits directly in `tasks_dir`): 0 unless it is tagged `rollout`, not done or dropped, parallel, carries no
-    `paused:` stamp and has started (never_started over `linked`, the notes whose `rollout:` names it); else its
-    `status: in_progress` notes less the ones its own undecided RACE or UNVERIFIED holds (_race_holds). Read by
-    _running_by_rollout for each rollout (_elsewhere_running's and mac_running's count) and by `status` for its own
-    (the Trickle line's `here`). The lease is never read here: each caller applies it (p28-4), _running_by_rollout to
-    every rollout with n > 0 and `status` to its own `here`."""
+def _counted_by_rollout(tasks_dir: Path, index) -> dict:
+    """{<stem, lowercased>: (path, Note, {<counted slug, lowercased>})} for every note directly in `tasks_dir` (never
+    under Archive/), each set _counted_tasks' over the index notes whose `rollout:` names that note (empty for a note
+    that is no countable rollout). `index` is one walk of `tasks_dir`. Read by _running_by_rollout for its counts and
+    by _trickle_claims_judge, which consumes a Trickle claim once its task is in its rollout's set. No lease is read
+    here (p28-4): _running_by_rollout applies it to the counts, and a claim is consumed whatever its rollout's lease."""
+    by_rollout = {}
+    for path, note in index.values():
+        target = (_wikilink_slug(note.get("rollout")) or "").lower()
+        if target:
+            by_rollout.setdefault(target, []).append((path, note))
+    return {path.stem.lower(): (path, note, set(_counted_tasks(note, by_rollout.get(path.stem.lower(), []))))
+            for path, note in index.values() if path.parent == tasks_dir}
+
+
+def _trickle_eligible(note) -> bool:
+    """A rollout note the Mac-wide count reads at all (_counted_tasks' first gate; the caller checks it sits directly
+    in `tasks_dir`): tagged `rollout`, not done or dropped, parallel, and carrying no `paused:` stamp."""
     if "rollout" not in _tags(note) or _status(note) in CLOSED_ROLLOUT_STATUSES:
-        return 0
-    if _shape(note) != "parallel" or _valued(note.get("paused")):
-        return 0
-    if never_started(note, linked)[0]:
-        return 0
+        return False
+    return _shape(note) == "parallel" and not _valued(note.get("paused"))
+
+
+def _counted_tasks(note, linked) -> list:
+    """The tasks a rollout note runs as the Mac-wide count reads them, one lowercased slug per counted note in
+    `linked` order: none unless it is _trickle_eligible and has started (never_started over `linked`, the notes whose
+    `rollout:` names it); else its `status: in_progress` notes less the ones its own undecided RACE or UNVERIFIED
+    holds (_race_holds)."""
+    if not _trickle_eligible(note) or never_started(note, linked)[0]:
+        return []
     held = _race_holds(note, linked)
-    return sum(1 for p, t in linked if _status(t) == "in_progress" and p.stem.lower() not in held)
+    return [p.stem.lower() for p, t in linked if _status(t) == "in_progress" and p.stem.lower() not in held]
+
+
+def _counted_running(note, linked) -> int:
+    """The number of tasks a rollout note runs as the Mac-wide count reads them (_counted_tasks). Read by `status` for
+    its own rollout (the Trickle line's `here`); every other rollout's n (_elsewhere_running's and mac_running's count)
+    is the same count, through _counted_by_rollout, which also checks the note sits directly in `tasks_dir`. The
+    lease is never read here: each caller applies it (p28-4), _running_by_rollout to every rollout with n > 0 and
+    `status` to its own `here`."""
+    return len(_counted_tasks(note, linked))
+
+
+# ---- the Trickle claims (p28-3; execute away.md § The Trickle, *Trickle claims*) -----------------------------------
+
+def _trickle_paths():
+    """(the trickle claim lock, the Trickle claims file): TRICKLE_LOCK and TRICKLE_CLAIMS in the note-lock dir
+    (_note_lock_dir), outside the vault, the one dir every lead on the Mac resolves alike."""
+    base = _note_lock_dir()
+    return base / TRICKLE_LOCK, base / TRICKLE_CLAIMS
+
+
+def _trickle_claims_read(path):
+    """The Trickle claims file, read whole: (entries, why, writable). Missing (no file, or no dir): ([], None, True),
+    silently. Unreadable (any other OSError, over TRICKLE_CLAIMS_MAX_BYTES, not UTF-8, not JSON, not an object, a
+    `version` that is no integer, or `claims` not a list): ([], why, True), so `next` warns and its next write
+    replaces it. Another integer version: ([], "version <v>", False), so `next` warns, reads it as none and never
+    writes it (a later writer's file). Else its `claims` list as read, every entry still unjudged."""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(TRICKLE_CLAIMS_MAX_BYTES + 1)
+    except FileNotFoundError:
+        return [], None, True
+    except OSError as e:
+        return [], f"cannot read it ({e.strerror or e})", True
+    if len(raw) > TRICKLE_CLAIMS_MAX_BYTES:
+        return [], f"over {TRICKLE_CLAIMS_MAX_BYTES // 1024} KiB", True
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        return [], "not UTF-8", True
+    except ValueError:
+        return [], "not JSON", True
+    if not isinstance(data, dict):
+        return [], "not a JSON object", True
+    version = data.get("version")
+    if type(version) is not int:
+        return [], "no integer version", True
+    if version != TRICKLE_CLAIMS_VERSION:
+        return [], f"version {version}", False
+    if not isinstance(data.get("claims"), list):
+        return [], "claims is not a list", True
+    return data["claims"], None, True
+
+
+def _trickle_claims_judge(entries, tasks_dir: Path, this_stem: str, walk, now, wall):
+    """(counted, kept): which Trickle claims count against this call and which the next write keeps (away.md § The
+    Trickle, *Trickle claims*). `walk` is the call's index of `tasks_dir`, `now` its clock (--now, else the real one)
+    and `wall` always the real clock. Rules, in order, on each entry R/S (its rollout, its task; stems compared
+    lowercased):
+      1. malformed (no object, a key missing or no non-empty string, an `at` _parse_ts reads as None, a naive one
+         that cannot be placed in local time included): dropped, never a crash no later write could prune;
+      2. another tasksDir: never counted, kept only while under TRICKLE_CLAIM_TTL old by `wall` (so a test's --now
+         never ages a real claim);
+      3. this rollout's own: dropped (this call's starts replace them); so is a repeat of an entry already judged;
+      4. TRICKLE_CLAIM_TTL old or older by `now` (or as far ahead of it): dropped;
+      5. R in the walk but outside the count (not directly in `tasks_dir`, or not _trickle_eligible): dropped;
+      6. R's counted set: _counted_by_rollout's for a present R, empty for an R the walk lacks (torn mid-edit, or
+         deleted), so a claim is never consumed through a note the walk could not read;
+      7. S in the walk: dropped when its `rollout:` names another rollout (carried) or it is neither queued nor
+         running (it left the queue another way), and consumed (dropped) once running and in R's counted set, the
+         note-based count now counting it; else counted and kept;
+      8. S not in the walk (deleted, or torn mid-edit): counted and kept.
+    `counted` is {<rollout>: n}: a present R under its walked stem (_elsewhere_running's key), an absent one under the
+    stem the claim recorded (stems equal when lowercased spelled as the first in sorted order). `kept` holds the four
+    keys only."""
+    here = os.path.realpath(str(tasks_dir))
+    this = this_stem.lower()
+    counted_by = _counted_by_rollout(tasks_dir, walk)
+    counted, absent, kept, seen = {}, {}, [], set()
+    for e in entries:
+        if not isinstance(e, dict) or not all(isinstance(e.get(k), str) and e.get(k) for k in TRICKLE_CLAIM_KEYS):
+            continue
+        at = _parse_ts(e["at"])
+        if at is None:
+            continue
+        e = {k: e[k] for k in TRICKLE_CLAIM_KEYS}
+        if e["tasksDir"] != here:
+            if abs(wall - at) < TRICKLE_CLAIM_TTL:
+                kept.append(e)
+            continue
+        r, s = e["rollout"].lower(), e["slug"].lower()
+        if r == this or (r, s) in seen or abs(now - at) >= TRICKLE_CLAIM_TTL:
+            continue
+        ro = walk.get(r)
+        if ro is not None and (ro[0].parent != tasks_dir or not _trickle_eligible(ro[1])):
+            continue
+        done = counted_by.get(r, (None, None, set()))[2] if ro is not None else set()
+        task = walk.get(s)
+        if task is not None:
+            if (_wikilink_slug(task[1].get("rollout")) or "").lower() != r:
+                continue
+            state = _queue_state(task[1])[0]
+            if state not in ("queued", "running") or (state == "running" and s in done):
+                continue
+        seen.add((r, s))
+        kept.append(e)
+        if ro is not None:
+            counted[ro[0].stem] = counted.get(ro[0].stem, 0) + 1
+        else:
+            absent.setdefault(r, []).append(e["rollout"])
+    for spellings in absent.values():
+        counted[min(spellings)] = len(spellings)
+    return counted, kept
+
+
+def _trickle_merge(notes, claims) -> dict:
+    """The count elsewhere `next` reads: the notes' (_elsewhere_running) plus the claims' (_trickle_claims_judge), per
+    rollout, n > 0 only, sorted."""
+    out = dict(notes)
+    for key, n in claims.items():
+        out[key] = out.get(key, 0) + n
+    return dict(sorted((k, n) for k, n in out.items() if n > 0))
+
+
+def _trickle_claims_write(path: Path, entries):
+    """Write the Trickle claims file whole: a temp file beside it (TRICKLE_CLAIMS.<pid>.tmp), fsynced, then renamed
+    over it, so no reader sees half a file. None, or why it could not (an OSError; nothing is left behind)."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"version": TRICKLE_CLAIMS_VERSION, "claims": entries}, f, indent=1)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError as e:
+        return str(e)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return None
 
 
 def _project(note):
@@ -4453,9 +4640,13 @@ def _on_merge_verdict(rollout_path: Path, rollout_note, ro_entry, ro_hold, rows,
 
 
 def cmd_next(args) -> int:
-    """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except for two writes to the rollout
-    note off --dry-run: a drained soft pause is stamped (`paused:`) here, and once the refusals pass the rollout start
-    stamp (`start: unattended`, _clear_start) is removed (`startCleared`); one call can make both. New starts are
+    """Which tasks start now (ADR 0030 decision 1). A function of the notes and the Trickle claims file (away.md § The
+    Trickle, *Trickle claims*), except for its writes off --dry-run: two to the rollout note (a drained soft pause is
+    stamped (`paused:`) here, and once the refusals pass the rollout start stamp (`start: unattended`, _clear_start) is
+    removed (`startCleared`); one call can make both) and the claims file, written under the trickle claim lock from a
+    fresh walk once the rollout note's save has succeeded: one claim per start, this rollout's earlier ones replaced.
+    A claims file it cannot read, a lock it cannot take or a write that fails prints one TRICKLE_WARN line and never
+    fails the call (the count then reads the file without the lock, and nothing is claimed). New starts are
     picked greedily by `priority:`, then least file overlap with what is in flight, then schedule rank, among the
     queued tasks ranked above the head Solo task (the first queued Solo task by rank whose dependencies are met,
     p17-2); that task holds every task ranked below it, whatever their
@@ -4480,9 +4671,10 @@ def cmd_next(args) -> int:
     0104; ADR 0049; execute away.md): once the refusals pass, the Away state file is read (_away_state; a stale or
     unreadable one prints one AWAY_WARN line on stderr) and every other started parallel Rollout's running tasks are
     counted (_elsewhere_running), but a rollout whose lead's lease has lapsed (_Leases; p28-4), which `trickle.lapsed`
-    names instead. Off --dry-run, right after the refusals, the call rewrites this rollout's own lease (_lease_write; a
-    failure prints one LEASE_WARN line). `slotLimit` is min(ceiling, max(0, cap - the count elsewhere)), the cap the
-    Trickle not Away and the Away cap Away. Starts and the head Solo's lone start stop at `slotLimit`, counting every
+    names instead, plus every other lead's live Trickle claims (_trickle_claims_judge), whatever that lead's lease.
+    Off --dry-run, right after the refusals, the call rewrites this rollout's own lease (_lease_write; a failure prints
+    one LEASE_WARN line). `slotLimit` is min(ceiling, max(0, cap - the count elsewhere)), the cap the Trickle not Away
+    and the Away cap Away. Starts and the head Solo's lone start stop at `slotLimit`, counting every
     in_progress row of this rollout, live or stalled, as the count elsewhere does; a restart stops at the ceiling only,
     since every other lead already counts the task it takes back. A running call is never stopped, so `slotsInUse` may
     exceed `slotLimit`. A row held for want of a Slot reads `ceiling: …` once this rollout fills its ceiling, else
@@ -4555,17 +4747,6 @@ def cmd_next(args) -> int:
     # history is read lazily, once, by the first start candidate that reaches the check or a due ran-past line.
     last = _LastStarts(_morning_toward(away, now), away["morning"], now,
                        lambda: _past_runs(_project(rollout_note), rollout_path, rollout_note, index, now))
-    # The count elsewhere, each other rollout's lease read at `now` (p28-4): one whose lease has lapsed holds no room
-    # and is named under `lapsed` instead.
-    lapsed = {}
-    elsewhere = _elsewhere_running(rollout_path, tasks_dir, index, _Leases(now), lapsed)
-    running_elsewhere = sum(elsewhere.values())
-    # One Mac-wide cap whose value depends on Away state: the Trickle while not Away, the Away cap while Away.
-    cap = _cap_in_force(away)["n"]
-    cap_prefix = AWAY_CAP_PREFIX if away["away"] else TRICKLE_PREFIX
-    slot_limit = min(ceiling, max(0, cap - running_elsewhere))
-    if heat["held"]:
-        slot_limit = 0
     # The PR hold (p30-3; vault-grammar § Hold until): the rollout's own hold_until, read once the refusals pass,
     # whenever the key is present (gh, memoised for this call). No key anywhere: gh is never called.
     root = _project_root(rollout_note)
@@ -4639,6 +4820,46 @@ def cmd_next(args) -> int:
                 task_held[r["slug"].lower()] = reason
             elif entry["state"] == "MERGED":
                 task_clears.append((r, h, entry))
+    # The Trickle claims (p28-3; away.md § The Trickle, *Trickle claims*), taken after every PR-hold gh call so the
+    # lock never spans gh. Off --dry-run `next` takes the machine-wide trickle claim lock (the outermost lock:
+    # Note.save's note locks and the Run record's flock are taken inside it, never the other way), walks --tasks-dir
+    # afresh and holds the lock to the claims write below. A lock it cannot take fails open: one TRICKLE_WARN line,
+    # the count without the lock, and this call's starts unclaimed. --dry-run takes no lock and reads the claims
+    # against its own walk. An exception in between ends the process, which drops the flock.
+    claim_lock_path, claims_path = _trickle_paths()
+    claim_lock, claiming = None, False
+    if args.dry_run:
+        walk = index
+    else:
+        claim_lock = _note_lock(lock_path=claim_lock_path, label="trickle claim lock")
+        try:
+            claim_lock.__enter__()
+            claiming = True
+        except OSError as e:
+            claim_lock = None
+            print(f"{TRICKLE_WARN} {claim_lock_path}: {e} — counted without the lock; this call's starts are not "
+                  "claimed", file=sys.stderr)
+        walk = _note_index(tasks_dir)
+    # The count elsewhere: the notes (_elsewhere_running, all that `status` and every progress line read) plus every
+    # other lead's live claims (_trickle_claims_judge), per rollout. Each other rollout's lease is read at `now` (p28-4):
+    # one whose lease has lapsed holds no room through its notes and is named under `lapsed` instead; its live claims
+    # still count.
+    lapsed = {}
+    notes_elsewhere = _elsewhere_running(rollout_path, tasks_dir, walk, _Leases(now), lapsed)
+    claims_read, claims_why, claims_writable = _trickle_claims_read(claims_path)
+    if claims_why:
+        print(f"{TRICKLE_WARN} {claims_path} unreadable: {claims_why} — read as none" if claims_writable else
+              f"{TRICKLE_WARN} {claims_path} {claims_why} — read as none, left for its writer", file=sys.stderr)
+    claimed, claims_kept = _trickle_claims_judge(claims_read, tasks_dir, rollout_path.stem, walk, now,
+                                                 datetime.now().astimezone())
+    elsewhere = _trickle_merge(notes_elsewhere, claimed)
+    running_elsewhere = sum(elsewhere.values())
+    # One Mac-wide cap whose value depends on Away state: the Trickle while not Away, the Away cap while Away.
+    cap = _cap_in_force(away)["n"]
+    cap_prefix = AWAY_CAP_PREFIX if away["away"] else TRICKLE_PREFIX
+    slot_limit = min(ceiling, max(0, cap - running_elsewhere))
+    if heat["held"]:
+        slot_limit = 0
     # slot_held: rows held for want of a Slot, at the ceiling or the Mac-wide cap (the Trickle, or Away the Away cap);
     # their reason is set below.
     start, restart, holds, slot_held = [], [], [], []
@@ -4777,6 +4998,26 @@ def cmd_next(args) -> int:
         start, restart = [], []
         used = len(live)
         holds = [(r, "git-env hold: /thread:repair") for r in stalled + queued]
+    # The claims write (p28-3), under the lock and only once the rollout note's save has succeeded (a failed one raised
+    # above, so nothing is claimed), after the main-red and whole-rollout git-env overrides, so it reads the final
+    # `start`: every kept entry plus one claim per start (the head Solo task's lone start included), replacing this
+    # rollout's earlier claims. `start` is [] under a pause, a rollout hold, the heat, a whole-rollout git-env hold (a
+    # bare checkout) or a main-red hold, which clears them; a lane git-env trip (ADR 0046) leaves it as it is, so its
+    # starts are claimed. Skipped when nothing changed and the file read cleanly, so a call that starts and finds
+    # nothing creates no file; a file of another version is never written. Then the lock goes, before the best-effort
+    # records below.
+    if claiming and claims_writable:
+        at = now.astimezone().isoformat(timespec="seconds")
+        here = os.path.realpath(str(tasks_dir))
+        fresh = {(e["tasksDir"], e["rollout"], e["slug"]): e for e in claims_kept + [
+            {"tasksDir": here, "rollout": rollout_path.stem, "slug": r["slug"], "at": at} for r in start]}
+        new_claims = [fresh[k] for k in sorted(fresh)]
+        if new_claims != claims_read or claims_why:
+            why = _trickle_claims_write(claims_path, new_claims)
+            if why:
+                print(f"{TRICKLE_WARN} {claims_path}: {why} — this call's starts are not claimed", file=sys.stderr)
+    if claim_lock is not None:
+        claim_lock.__exit__(None, None, None)
     # laneHold: what holds the Integration lane. One `git-env` entry per unacked trip's slug, in log order; then one
     # `race` entry per undecided RACE (rank order) that is not reverted, or whose revert the lead still owes (`revert`:
     # true, the lane's first work, execute § 4.5 step 1.4), or that was reverted with `main not re-verified`. A RACE
@@ -4900,8 +5141,9 @@ def cmd_next(args) -> int:
         "startCleared": start_cleared,
         "halt": halt,
         "awaitingSignOff": sign_off,
+        # The ETA counts notes only (p28-6; away.md § The Trickle), as `status` and every other progress line do.
         "progress": _progress_line(counts, _timeline(rows, counts, ceiling, now,
-                                                     _eta_width(ceiling, away, elsewhere))),
+                                                     _eta_width(ceiling, away, notes_elsewhere))),
     }
     print(json.dumps(out, indent=2))
     return 0
