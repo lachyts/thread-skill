@@ -4511,7 +4511,6 @@ ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair")       # record
 ENTRY_CAUSES = ("usage-limit", "dead-lead", "watchdog")                 # record-entry --cause
 OPEN_STOP_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog")  # a stop an entry resumes from
 CALL_KINDS = ("task", "revise", "integrate", "resume")                  # run-bound's `call`
-MAX_CALLS = 64
 # A line that is no sign of the lead's life: the night record (written at a later `next`), a suite-ended (an orphaned
 # suite can outlive its lead), a call-journal (folded at completion or by a Reflection, at fold time) and an inferred
 # stopped line (written by the entry that found it).
@@ -4571,11 +4570,11 @@ def _call_entry(task, run):
 
 
 def inflight_calls(lines, upto=None):
-    """The calls the record shows in flight at `upto` (an aware datetime; None: after the last line), at most MAX_CALLS
-    {task, runId?, call?}: the Slots, the lane and the run-bound lines replayed over the lines whose ts is at or before
-    `upto`, by run_record.py's pairing rules. Each open Slot gives its task's latest run-bound after its slot-taken (a
-    task, revise or resume call); the lane holder, when no Slot of its own is open, gives its latest integrate run-bound
-    after its lane-taken, and nothing without one (the lead's own Integration is no call)."""
+    """The calls the record shows in flight at `upto` (an aware datetime; None: after the last line), at most
+    run_record.py's MAX_CALLS {task, runId?, call?}: the Slots, the lane and the run-bound lines replayed over the lines
+    whose ts is at or before `upto`, by run_record.py's pairing rules. Each open Slot gives its task's latest run-bound
+    after its slot-taken (a task, revise or resume call); the lane holder, when no Slot of its own is open, gives its
+    latest integrate run-bound after its lane-taken, and nothing without one (the lead's own Integration is no call)."""
     slots, lane, lane_run = {}, None, None
     for d in lines:
         if upto is not None:
@@ -4609,7 +4608,7 @@ def inflight_calls(lines, upto=None):
     out = [_call_entry(task, run) for task, run in slots.items()]
     if lane is not None and lane_run is not None and lane not in slots:
         out.append(_call_entry(lane, lane_run))
-    return out[:MAX_CALLS]
+    return out[:_run_record().MAX_CALLS]
 
 
 def _pause_stands(note, lines):

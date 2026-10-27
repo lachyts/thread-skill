@@ -1075,9 +1075,7 @@ def cmd_verify(args):
 
 # ---- base-moved: why main moved (p29-10, ADR 0051) ---------------------------------------------------------------
 
-MAX_MOVERS = 20
-MAX_NON_INERT = 20
-FETCH_TIMEOUT = 60
+FETCH_TIMEOUT = 60   # the line's caps are run_record.py's: MAX_MOVERS, MAX_NON_INERT and MAX_GLOBS
 
 
 def _pr_number(value):
@@ -1087,9 +1085,9 @@ def _pr_number(value):
     return int(value)
 
 
-def _merged_prs(owner_repo):
+def _merged_prs():
     """[(rollout, task, pr)] for every `merged` line carrying a pr in every rollout's Run record (the reserved files
-    never read)."""
+    never read). Unscoped: _mover matches each pr, a URL on owner/name and a bare number on the PR index's task."""
     run_record = rr._run_record()
     try:
         base = run_record.events_dir()
@@ -1163,6 +1161,7 @@ def cmd_base_moved(args):
             return 0
         fields = {"repo": owner_repo or str(repo), "pr": args.pr, "base": args.base, "main": args.main}
         error, movers, total, inert = None, [], 0, None
+        run_record = rr._run_record()
         try:
             f = subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", "origin", args.default], capture_output=True,
                                text=True, env=ENV, timeout=FETCH_TIMEOUT)
@@ -1179,8 +1178,8 @@ def cmd_base_moved(args):
             else:
                 commits = out_of(p).split()
                 total = len(commits)
-                merged = _merged_prs(owner_repo)
-                for c in commits[:MAX_MOVERS]:
+                merged = _merged_prs()
+                for c in commits[:run_record.MAX_MOVERS]:
                     subject = out_of(git(repo, "log", "-1", "--format=%s", c))
                     movers.append(_mover(c, _pr_of_subject(subject), owner_repo, index, merged))
         if error is None:
@@ -1190,9 +1189,9 @@ def cmd_base_moved(args):
                 globs = list(res["inert_paths"]["value"])
                 pt = ip.path_test(str(repo), args.base, args.main, globs)
                 paths = pt["changed"]
-                fields.update(pathsTotal=len(paths), nonInert=pt["nonInert"][:MAX_NON_INERT])
+                fields.update(pathsTotal=len(paths), nonInert=pt["nonInert"][:run_record.MAX_NON_INERT])
                 if globs:
-                    fields["globs"] = globs[:64]
+                    fields["globs"] = globs[:run_record.MAX_GLOBS]
                 inert = bool(globs) and bool(paths) and not pt["nonInert"]
             except Exception as e:  # noqa: BLE001 — the settings or the test failed: null beside its error
                 error = f"inert test: {type(e).__name__}: {e}"
