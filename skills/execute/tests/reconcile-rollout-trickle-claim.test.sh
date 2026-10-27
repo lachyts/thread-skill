@@ -7,7 +7,7 @@
 # lock and writes nothing.
 #
 # Why each scenario pins its own lock dir ($L, R7): tests/run.sh shares one THREAD_NOTE_LOCK_DIR across every suite, and
-# every off---dry-run `next` prunes the claims of other tasks dirs by the real clock, so a claim this suite reads across
+# every `next` off --dry-run prunes the claims of other tasks dirs by the real clock, so a claim this suite reads across
 # calls must live in a dir no other suite (and no other scenario here) writes. The suite-wide export below is only the
 # backstop. HOME is pinned per scenario with no away file, so the Trickle is 2. Temp notes only.
 # Usage: bash reconcile-rollout-trickle-claim.test.sh   (exit 0 = pass)
