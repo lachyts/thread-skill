@@ -158,16 +158,17 @@ function check(skill) {
   }
 
   // launch-sites: the launch sequences a lead follows name § 4's check at the point it runs, before any stamp: step
-  // 1.2's seeded-revise launch and step 1.3 right after § 3's config, and the integrate call after `mark-integrating`,
-  // before its `startedAt` stamp and the canary arm.
+  // 1.2's seeded-revise launch right after § 3's config, step 1.3 after a restart's *Restart routing* (whether the check
+  // applies is routing's result: a resume is exempt), and the integrate call after `mark-integrating`, before its
+  // `startedAt` stamp and the canary arm.
   const CHECK = "§ 4's *Check verifySlot before the stamps*"
   const SEEDED = `A launch is: § 2.5, § 3's config, ${CHECK} (a missing or different \`args.verifySlot\` writes nothing and halts), stamp \`status: in_progress\``
-  const ST13 = `§ 2.5, § 3's config, ${CHECK} for a fresh call (a start, or the own call or seeded revise *Restart routing* resolves for a restart; a resume is exempt), for a restart resolve *Restart routing* (it writes nothing), stamp \`status: in_progress\``
+  const ST13 = `§ 2.5, § 3's config, for a restart resolve *Restart routing* (it writes nothing), then ${CHECK} for a fresh call (a start, or the own call or seeded revise that routing chose for a restart; a resume is exempt), stamp \`status: in_progress\``
   const INT = `${CHECK} runs after step 3's \`mark-integrating\`, before its \`startedAt\` stamp and the canary arm: a mismatch frees the lane and halts.`
   if (!seeded.includes(SEEDED) || !before(seeded, SEEDED, '`mark-started --tasks <slug>') ||
     !step13.includes(ST13) || !before(step13, ST13, 'mark-started --tasks <slug>') ||
     !integrateCall.includes(INT) || !before(integrateCall, INT, 'The canary arm (*Git-env canary*: `--kind integrate`) runs right before its launch') ||
-    !pre.includes("at the point each launch sequence names it: § 4.5 step 1.2's seeded-revise launch and step 1.3, each right after § 3's config, and the integrate call (step 3)")) {
+    !pre.includes("at the point each launch sequence names it: § 4.5 step 1.2's seeded-revise launch right after § 3's config, step 1.3 once a restart's *Restart routing* has chosen its call (a start's, right after § 3's config), and the integrate call (step 3)")) {
     fails.push('launch-sites')
   }
 
@@ -284,6 +285,12 @@ test('control: a launch sequence that no longer names the verifySlot check fails
     "A launch is: § 2.5, § 3's config, stamp"), 'launch-sites', 'seeded revise')
   only(edit(real, " § 4's *Check verifySlot before the stamps* runs after step 3's `mark-integrating`, before its `startedAt` stamp and the canary arm: a mismatch frees the lane and halts.", ''),
     'launch-sites', 'integrate call')
+})
+
+test('control: step 1.3 naming the verifySlot check before Restart routing resolves fails launch-sites', () => {
+  only(edit(real, "§ 2.5, § 3's config, for a restart resolve *Restart routing* (it writes nothing), then § 4's *Check verifySlot before the stamps* for a fresh call (a start, or the own call or seeded revise that routing chose for a restart; a resume is exempt), stamp",
+    "§ 2.5, § 3's config, § 4's *Check verifySlot before the stamps* for a fresh call (a start, or the own call or seeded revise that routing chose for a restart; a resume is exempt), for a restart resolve *Restart routing* (it writes nothing), stamp"),
+  'launch-sites', 'check before routing')
 })
 
 test('control: the free-lane bullet without the integrate halts fails free-lane', () => {
