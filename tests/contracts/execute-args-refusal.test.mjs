@@ -3,8 +3,9 @@
 // `thread:args-refused`, matched by contains, for a call or a resume of any kind: the canary check, the runId and any
 // handle dropped, an integrate call's lane freed with `free-lane … || true` while the note keeps `integrating:`, no
 // set-aside row, the error line printed, the halt, then a fresh call by *Restart routing* or step 1.4's `prepare`);
-// *Lost call*'s exclusion in its definition, its dead-call bullet and its git-env-hold bullet; § 3.7's fifth *Can no
-// longer resume* case; § 4's verifySlot check before the stamps (its halt, its integrate `free-lane`, the resume
+// *Lost call*'s exclusion in its definition, its dead-call bullet and its git-env-hold bullet; the lead's three
+// decision points for a call that comes back (step 2, the integrate call's return, § 5's resume), each sending an error
+// that contains the sentinel to *Args refusal* before its *Lost call* clause; § 3.7's fifth *Can no longer resume* case; § 4's verifySlot check before the stamps (its halt, its integrate `free-lane`, the resume
 // exemption); the *Run record*'s free-lane bullet; § 7's three halts; § 3's `verify-timeout` exit 4 and its shape
 // without `verifySlots`; and no "reads as a *Lost call*" left. The engine half (the sentinel on every refusal) is pinned
 // by skills/execute/tests/args-refusal.test.mjs.
@@ -22,6 +23,7 @@ const S3 = /^### 3\. /
 const S37 = /^### 3\.7\. /
 const S4 = /^### 4\. /
 const S45 = /^### 4\.5\. /
+const S5 = /^### 5\. /
 const S7 = /^### 7\. /
 
 // A bold-labelled paragraph inside a section: from its label line to the next bold label at column 0.
@@ -63,6 +65,8 @@ function check(skill) {
   const freeBullet = lineAt(s45raw, '- `free-lane --tasks <slug>`')
   const integrateCall = lineAt(s45raw, '   **The integrate call**')
   const slotsP = labelled(skill, S45, 'Verify slots')
+  const step2 = lineAt(s45raw, '2. **A task call returns.**')
+  const s5 = collapse(section(skill, S5) ?? '')
 
   // args-refusal: the paragraph sits right before *Lost call*; it covers every call kind and its resumes; it matches the
   // sentinel by contains; it is never a Lost call; the six steps in order (the check, the drops, the integrate
@@ -98,6 +102,22 @@ function check(skill) {
     !hold.includes(`An error that contains ${SENTINEL} is no *Lost call* under a hold either: *Args refusal* still drops its runId and frees an integrate call's lane`) ||
     !lost.includes('*Args refusal*')) {
     fails.push('lost-exclusion')
+  }
+
+  // routing-sites: the lead's three decision points for a call that comes back each send an error that contains the
+  // sentinel to *Args refusal* before their *Lost call* clause, so none resumes a refused call: step 2 (the check it ran
+  // first is the refusal's step (1), never run twice), the integrate call's return (whatever the check's exit; its
+  // step (3) frees the lane) and § 5's resume procedure (never resumed).
+  const ST2_AR = `An error that contains ${SENTINEL}: *Args refusal*, never a *Lost call*: the check this step ran first is its step (1), never run twice, and it halts the entry.`
+  const ST2_LOST = 'Any other error, no row, or a transient row after a usage limit: *Lost call*.'
+  const INT_AR = `An error that contains ${SENTINEL}, whatever the check's exit: *Args refusal*, never a *Lost call*: the check run first is its step (1), never run twice, its step (3) frees the lane while the note keeps \`integrating:\`, and it halts the entry.`
+  const INT_LOST = 'Any other error, or no row, after a check that exited 0: *Lost call*'
+  const S5_AR = `An error that contains ${SENTINEL} is an *Args refusal* (§ 4.5), never resumed: the engine refused the call's args before any dispatch, and the same args are refused again.`
+  const S5_LOST = 'If a call dies otherwise or its notification never arrives (§ 4.5 *Lost call*), re-run § 2.5'
+  if (!step2.includes(ST2_AR) || !before(step2, ST2_AR, ST2_LOST) || /An error, no row, or a transient row/.test(step2) ||
+    !integrateCall.includes(INT_AR) || !before(integrateCall, INT_AR, INT_LOST) || /An error, or no row, after a check/.test(integrateCall) ||
+    !s5.includes(S5_AR) || !before(s5, S5_AR, S5_LOST) || /If a call dies or its notification/.test(s5)) {
+    fails.push('routing-sites')
   }
 
   // cannot-resume: § 3.7 counts five cases, the fifth the engine's refusal of a resumed call's args, whose fresh call
@@ -155,13 +175,13 @@ function check(skill) {
   return [...new Set(fails)]
 }
 
-test('execute § 3, § 3.7, § 4, § 4.5 and § 7 hold every args-refusal rule', () => {
+test('execute § 3, § 3.7, § 4, § 4.5, § 5 and § 7 hold every args-refusal rule', () => {
   assert.deepEqual(check(real), [])
 })
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
-const RULES = ['args-refusal', 'lost-exclusion', 'cannot-resume', 'pre-check', 'free-lane', 'halts', 'verify-timeout', 'prose-sites']
+const RULES = ['args-refusal', 'lost-exclusion', 'routing-sites', 'cannot-resume', 'pre-check', 'free-lane', 'halts', 'verify-timeout', 'prose-sites']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -197,6 +217,15 @@ test('control: Lost call without its Args refusal exclusion fails lost-exclusion
     'lost-exclusion', 'dead-call bullet')
 })
 
+test('control: a decision point that sends every error to Lost call again fails routing-sites', () => {
+  only(edit(real, `An error that contains ${SENTINEL}: *Args refusal*, never a *Lost call*: the check this step ran first is its step (1), never run twice, and it halts the entry. Any other error, no row,`,
+    'An error, no row,'), 'routing-sites', 'step 2')
+  only(edit(real, `An error that contains ${SENTINEL}, whatever the check's exit: *Args refusal*, never a *Lost call*: the check run first is its step (1), never run twice, its step (3) frees the lane while the note keeps \`integrating:\`, and it halts the entry. Any other error, or no row, after a check`,
+    'An error, or no row, after a check'), 'routing-sites', 'integrate return')
+  only(edit(real, `An error that contains ${SENTINEL} is an *Args refusal* (§ 4.5), never resumed: the engine refused the call's args before any dispatch, and the same args are refused again. If a call dies otherwise or`,
+    'If a call dies or'), 'routing-sites', '§ 5')
+})
+
 test('control: Can no longer resume back on four cases fails cannot-resume', () => {
   only(edit(real, "Five cases: no handle (another session, or the record was lost), the script's sha differs, the script file is gone, the Workflow tool refuses the resume, or the engine refuses the resumed call's args (*Args refusal*, § 4.5: e.g. a call launched without `verifySlot` before 5.0.0, resumed on a refusing engine).",
     "Four cases: no handle (another session, or the record was lost), the script's sha differs, the script file is gone, or the Workflow tool refuses the resume."),
@@ -230,7 +259,7 @@ test('control: the prUrlError clause reading as a Lost call again fails prose-si
   only(edit(real, 'before dispatch (an *Args refusal*, which halts the entry);', 'before dispatch and the refusal reads as a *Lost call*;'), 'prose-sites', 'prUrlError')
 })
 
-test('the rules are all named (8) and each has a control', () => {
-  assert.equal(RULES.length, 8)
+test('the rules are all named (9) and each has a control', () => {
+  assert.equal(RULES.length, 9)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
