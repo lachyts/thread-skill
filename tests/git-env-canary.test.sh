@@ -228,17 +228,25 @@ for v in local tracked bare fg fg2x fg2l url; do
     local) code; want="holds commits not on origin" ;;
     tracked) echo dirty >> "$R/a.txt"; want="tracked changes" ;;
     bare) upwrap net; g -C "$R" config --local core.bare true; want="state check failed: core.bare true" ;;
-    fg|fg2x|fg2l)
+    fg|fg2l)
+      # A forged refspec keeps the fetch off the forged tracking ref: T (X) is neither ls-remote reading.
       g -C "$R" config remote.origin.fetch '+refs/heads/*:refs/remotes/elsewhere/*'
       L=$(cur origin/master); g -C "$R" checkout -q -b forge; code; X=$(cur forge); g -C "$R" checkout -q master
       g -C "$R" update-ref refs/remotes/origin/master "$X"
       [ "$v" = fg2l ] || g -C "$R" merge -q --ff-only "$X"
       want="origin/master $X after a fetch is neither ls-remote reading ($L, re-read $L)" ;;
+    fg2x)
+      # The refspec intact: the fetch overwrites the forged tracking ref (T == L), so the extra commit on R's master
+      # is caught by the ancestry step instead.
+      L=$(cur origin/master); g -C "$R" checkout -q -b forge; code; X=$(cur forge); g -C "$R" checkout -q master
+      g -C "$R" update-ref refs/remotes/origin/master "$X"; g -C "$R" merge -q --ff-only "$X"
+      want="refs/heads/master $X holds commits not on origin master ($L)" ;;
     url) g -C "$R" remote set-url origin "$S/nowhere.git"; want="ls-remote origin master exited" ;;
   esac
   chk A; ok "$rc|$(trips A)|$(misses A)|$(acks)" "$([ "$v" = bare ] && echo 3 || echo 0)|1|0|0" "bm-trip ($v): the miss's state check fails → a trip, no miss, no ack"
   has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "task: record not armed, and the state check failed: " "bm-trip ($v): … the trip line says so"
   has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "$want" "bm-trip ($v): … naming '$want'"
+  [ "$v" = fg2x ] && ok "$(cur origin/master)" "$L" "bm-trip (fg2x): … the fetch overwrote the forged tracking ref (T == L)"
   call; ok "$rc" "$([ "$v" = bare ] && echo 3 || echo 9)" "bm-trip ($v): check-all → $([ "$v" = bare ] && echo '3 (a bare checkout: the whole rollout)' || echo '9 (the lane)')"
   if [ "$v" = bare ]; then
     ok "$([ -e "$S/net.pids" ] && echo network || echo none)" none "bm-trip (bare): … no network call"
