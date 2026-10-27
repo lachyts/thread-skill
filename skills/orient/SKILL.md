@@ -483,8 +483,12 @@ handoff's closing line ends the turn.
   Said after the handoff, it is the handoff's withdrawal (handoff § Lifecycle).
 - **Start when ready** — on his word: stamp `start: unattended` as a top-level frontmatter line just below
   `status:` on the rollout note § 6 or § 7 wrote (`_shared/vault-grammar.md` § Rollout start stamp), then
-  end: nothing runs here and no handoff is made. Print the note, the `/thread:execute [[<rollout>]]`
-  line (still valid by hand) and one line: the Chorus Stage starts a lead in its Project root once
+  end: nothing runs here and no handoff is made. Said after the handoff, it first withdraws the launch, by
+  handoff § Lifecycle's `dismiss_task` rules, so no stamp ever sits beside a live launch: `dismissed`,
+  `already_dismissed` or `not_found` (or no card, off the Stage) → the launch doc is removed and its removal
+  landed, then the stamp; `already_started_by_stage` or `already_started` → no stamp, and it says a lead is
+  already running; `already_kept` → no stamp, and it says his Defer keeps the doc. With no stamp it ends
+  there. Once stamped, print the note, the `/thread:execute [[<rollout>]]` line (still valid by hand) and one line: the Chorus Stage starts a lead in its Project root once
   the note is runnable, and that lead's first `next` clears the stamp. It suits a run nobody will be
   there to start (the evening, a landing PR still queued). Outside a Chorus Stage nothing acts on the
   stamp, so it waits like Not yet. When he names the PR the start waits on (a grill's gating PR, say),

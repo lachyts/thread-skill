@@ -57,7 +57,7 @@ The consuming session's first instruction — carried in the prompt, and equally
 
 `thread:close` treats a pending doc as the thread's continuation: it refreshes the doc in place when later work has made it stale, and proposes no vault task for anything the doc carries (`close` § The handoff owns the continuation, ADR 0017).
 
-A **Rollout launch**'s doc (its front matter carries `launches:`; handoff **Rollout launch.**, ADR 0057) is no continuation: it briefs a rollout's lead, never this thread, so close's scan reads it as `launch`, never `pending`, and leaves it for its lead.
+A **Rollout launch**'s doc (its front matter carries `launches:`; handoff **Rollout launch.**, ADR 0057) is no continuation: it briefs a rollout's lead, never this thread, so close's scan reads it as `launch`, never `pending`, and leaves it for its lead. A launch doc no lead reads (his × on its card, a manual handoff he skipped) is stale once its rollout reads `closed`, or `started` with the doc 24 h old under the peer guard: close deletes it then (close step 2's **Stale launch.**).
 
 A **manual handoff** — the doc and prompt were produced but no native task was created (handoff § Fail closed) — is a complete handoff for this rule: the committed doc is the object Lachy tracks, and close's step-8 row shows it pending. What it lacks is a task, not a tracker.
 

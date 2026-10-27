@@ -735,7 +735,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note this session wrote and left with no lead. _Avoid_: execute offer.
 - **Start when ready** — the execute handoff's fourth move, on his word
   (orient § 9, schedule step 8): it stamps `start: unattended` on the rollout note just
-  written and ends, running nothing. The Chorus Stage starts the lead in the
+  written and ends, running nothing. Said after the handoff, it withdraws the
+  launch first, and stamps nothing when a lead already runs. The Chorus Stage starts the lead in the
   note's Project root, the **Rollout clone** (ADR 0042), once the note is runnable, and that lead's first `next`
   clears the stamp, so no second lead starts (vault grammar § Rollout start
   stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.

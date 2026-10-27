@@ -4,8 +4,9 @@
 #   P1-P10  `pickups --repo <path> --tasks <slugs> [--misfit <slug>=<why>]...`: the pool, its order, the Repo rule
 #           (counted aggregate only), the gate rule, misfits, the needed set and the extras' dependency closures under
 #           the cap of 5, the umbrella project, and its exit 2s, read-only and byte-equal on a rerun
-#   N1-N11  `unstarted --rollout <slug> [--handoffs <dir>]...`: closed, serial, started (approved_unrun, or a Run record
+#   N1-N12  `unstarted --rollout <slug> [--handoffs <dir>]...`: closed, serial, started (approved_unrun, or a Run record
 #           lead-entry), stamped, incomplete, launched (a handoff doc's `launches:`) or unstarted with its Project root
+#           (N12: close step 2's **Stale launch.** read of a launch doc's own `launches:`, with the peer guard)
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them), a stub HOME and the Run
 # record in temp. No vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -258,7 +259,7 @@ has "$(cat "$S.r1")" '"needed": ["n1"]' "P10: … and the run read the vault"
 ok "$(snap "$S/vault")|$(snap "$R")" "$before_v|$before_r" "P10: the vault and the repo are byte-equal after the runs"
 ok "$(find "$PC" -name __pycache__ | wc -l | tr -d ' ')" 0 "P10: no __pycache__ written"
 
-# ── N1-N11: unstarted ────────────────────────────────────────────────────────────────────────────────────────
+# ── N1-N12: unstarted ────────────────────────────────────────────────────────────────────────────────────────
 # mkro <slug> [frontmatter lines...] — a parallel rollout note in $T at $ST (default open); $BODY appended
 mkro() {
   local s="$1"; shift
@@ -341,6 +342,34 @@ ok "$out" "unstarted ro-w $R" "N11: with its launch doc withdrawn it reads unsta
 lead ro-w 2026-10-28T02:00:00.000Z
 un --rollout ro-w --handoffs "$HW"
 ok "$out" "started ro-w (a lead entered 2026-10-28T02:00:00.000Z)" "N11: … unless the withdrawn lead had entered"
+
+# N12: close step 2's **Stale launch.**: each pending launch doc's `launches:` value, passed as it stands with no
+# --handoffs, reads closed for a done or archived rollout (stale at once), started once a lead entered (stale only
+# when the peer guard prints delete: the doc 24 h or more old), and unstarted or stamped otherwise (left for its lead)
+HS="$S/handoffs-s"; mkdir -p "$HS" "$T/Archive/Rollouts"
+ST=done mkro ro-sd; mkro ro-sa; mv "$T/ro-sa.md" "$T/Archive/Rollouts/"; mkro ro-ss; mkro ro-sf; mkro ro-st 'start: unattended'
+lead ro-ss 2026-10-27T01:00:00.000Z
+for s in ro-sd ro-sa ro-ss ro-sf ro-st; do
+  printf -- '---\nthread: x\nwritten: 2026-10-26\nstatus: pending\nlaunches: "[[%s]]"\n---\nbody\n' "$s" > "$HS/$s.md"
+done
+# lv <doc> — the doc's front-matter `launches:` value as it stands (quotes and brackets kept)
+lv() { awk 'NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^launches:/{sub(/^launches:[ \t]*/, ""); print; exit}' "$1"; }
+ok "$(lv "$HS/ro-sd.md")" '"[[ro-sd]]"' "N12: the value is read from the front matter as it stands"
+un --rollout "$(lv "$HS/ro-sd.md")"
+ok "$out|$rc" "closed ro-sd (done)|0" "N12: a done rollout's launch doc reads closed (stale at once)"
+un --rollout "$(lv "$HS/ro-sa.md")"
+ok "$out" "closed ro-sa (archived)" "N12: an archived rollout's reads closed (stale at once)"
+un --rollout "$(lv "$HS/ro-ss.md")"
+ok "$out" "started ro-ss (a lead entered 2026-10-27T01:00:00.000Z)" "N12: a rollout a lead entered reads started"
+un --rollout "$(lv "$HS/ro-sf.md")"
+ok "$out" "unstarted ro-sf $R" "N12: with no --handoffs a fresh rollout reads unstarted, never its own launch (left for its lead)"
+un --rollout "$(lv "$HS/ro-st.md")"
+ok "$out" "stamped ro-st (start: unattended)" "N12: a stamped rollout reads stamped (left for its lead)"
+awk '/^# thread:peer-guard/{on=1; next} /^# end thread:peer-guard/{on=0} on' \
+  "$root/skills/_shared/handoff-lifecycle.md" > "$S.guard"
+cp "$HS/ro-ss.md" "$HS/ro-ss-fresh.md"; touch -t 202001010000 "$HS/ro-ss.md"
+ok "$(f="$HS/ro-ss.md" bash "$S.guard")" delete "N12: a started rollout's launch doc 24 h or more old: the peer guard prints delete (stale)"
+ok "$(f="$HS/ro-ss-fresh.md" bash "$S.guard")" "keep fresh" "N12: … and a fresh one keep fresh (left for its lead)"
 before_v=$(snap "$S/vault")
 un --rollout ro-fresh --handoffs "$HD"
 ok "$(snap "$S/vault")" "$before_v" "N: unstarted writes nothing"

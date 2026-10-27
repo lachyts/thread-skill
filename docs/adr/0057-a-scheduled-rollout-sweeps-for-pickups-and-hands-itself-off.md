@@ -34,7 +34,9 @@ orient-all fork, the chain and orient § 6's call never sweep.
 `skills/_shared/asking.md` § 1): when a session wrote a parallel rollout note, it prints one `Execute:` line and runs
 orient § 9's **Fresh session**, handoff's **Rollout launch.**, by default. A standalone schedule's step 8 runs the same
 move. Only his words choose Here, Not yet or Start when ready; said after the fact, "not yet" is the handoff's
-withdrawal (handoff § Lifecycle).
+withdrawal (handoff § Lifecycle), and "start when ready" runs that withdrawal before it stamps, by its `dismiss_task`
+rules: a card already started (`already_started_by_stage`, `already_started`) gets no stamp, so no stamp ever sits
+beside a live launch.
 
 **d3. One hold.** A refused ladder file holds the handoff (`Execute: held …; once it reads, say "hand it off"`): it is
 a settings file every call refuses at its start, the one kind of cause ADR 0048 lets hold a whole rollout. No other
@@ -45,10 +47,14 @@ aside, never the rollout.
 briefs the rollout's lead, never this thread: handoff skips its **Open captures.** and its **Thread state.** row,
 close's scan reads it as `launch` (never refreshed, never the Resume pointer, never suppressing a task proposal), and
 `next` never counts it, or the lead it started, as this thread continuing elsewhere. The launch is a dispatch, as a
-router's is, so the turn ends on handoff's own closing line.
+router's is, so the turn ends on handoff's own closing line. A launch doc ends when its lead consumes it, or as
+stale: close step 2's **Stale launch.** reads its rollout with `unstarted`, and step 7.2 deletes it once that reads
+`closed`, or `started` with the doc 24 h old under the peer guard, so a launch no lead reads (his × on its card, a
+manual handoff he skipped) never sits pending for good.
 
 **d5. Close names a rollout left unstarted.** Close step 2 checks each rollout note this session wrote. A handover in
-the transcript (handoff's output, a `relay_session` of `/thread:execute`, or Here) settles it; Not yet, a held line and
+the transcript (handoff's output, orient-all § 7's own `create_thread` or `relay_session` start, a `relay_session` of
+`/thread:execute`, or Here) settles it; Not yet, a held line and
 step 8's by-hand lines do not, and a handoff withdrawn later in the session is no handover (the latest of a note's
 handoffs and withdrawals decides). With no handover, `unfinished-rollout.py unstarted` reads the vault, the Run record
 and the scanned handoff docs; only `unstarted` prints the statement row `rollout not started: [[<slug>]]; say "hand it
@@ -86,7 +92,9 @@ later reaches only the task calls that start after it lands; a ladder fix ends "
   row.
 - The close row offers only "hand it off" (a Rollout launch), never "start when ready": nothing may stamp
   `start: unattended` after close.
-- Orient's and schedule's skill descriptions are left as they are in this task (§ Follow-ups).
+- A stale launch doc is deleted once its rollout reads `closed`, or `started` 24 h on; an `unstarted` one is kept,
+  since its lead may still start.
+- Orient's, schedule's and handoff's skill descriptions are left as they are in this task (§ Follow-ups).
 
 ## Considered options
 
@@ -122,7 +130,9 @@ later reaches only the task calls that start after it lands; a ladder fix ends "
 
 ## Follow-ups
 
-- A description trim for orient (its "offer to execute") and schedule (its Scope line, which omits the handoff). Both
-  descriptions now under-describe this change. The Makefile requires a scored eval baseline before any description
+- A description trim for orient (its "offer to execute") and schedule (its Scope line, which omits the handoff), and
+  for handoff, whose description still says "Trigger ONLY on … router dispatch (thread:next / thread:orient)" while
+  schedule step 8's **Execute handoff.** and close's "hand it off" row now dispatch it too. All three descriptions now
+  under-describe this change. The Makefile requires a scored eval baseline before any description
   changes (`make evals`, `--max-cost-usd 30`, a spend gate this task does not hold), and the trim must stay inside the
   7950 description ratchet. The lead files it at Integration from this section, as ADR 0054 did for p30-10.

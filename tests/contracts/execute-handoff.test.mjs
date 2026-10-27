@@ -11,21 +11,27 @@
 //       group with `/thread:repair`, and step 6's queue rationale naming each pickup.
 //   h5  step 8's **Execute handoff.** (Owner *gate*, the cite, ADR 0057, its `Execute:` line, orient § 9's Fresh
 //       session through **Rollout launch.**, the ladder hold, ADR 0048, "No other checklist holds it", the
-//       exclusions), the chain's item 9, orient-all's answer 14, and step 8's checklists worded for a lead that may
-//       start in this same turn (never "before executing" in step 8).
+//       exclusions), the chain's item 9, orient-all's answer 14, step 8's checklists worded for a lead that may
+//       start in this same turn (never "before executing" in step 8), and step 8's **Start when ready.** withdrawing
+//       a launch by handoff § Lifecycle's `dismiss_task` rules before it stamps (none beside a live launch).
 //   h6  orient § 9: its heading and anchor, decided and never asked, the Fresh session decided, the other moves on
-//       his word, the one hold, several notes, and no question tool.
+//       his word, the one hold, several notes, no question tool, and Start when ready withdrawing a launch said after
+//       the handoff; the vault grammar's Writers stamp only a note whose launch was never made or was withdrawn.
 //   h7  handoff's **Invocation gate.** names schedule step 8 and close's row; **Rollout launch.** carries
 //       `launches:`, skips Open captures and the Thread state row, and is a dispatch; the handoff-lifecycle's Front
 //       matter, While pending, Withdrawn and Thread state say the same.
-//   h8  close: the `launch` status, step 2's **Rollouts this session wrote.** (its evidence order, Not yet and the
-//       by-hand lines no handover, a withdrawal later in the session no handover, the latest deciding), the
-//       `unstarted` command, step 8's three rows, step 4's Resume clause, rule (3)'s statement, the edge cases, and
+//   h8  close: the `launch` status, step 2's **Stale launch.** (`unstarted` on each launch doc's `launches:`:
+//       `closed` stale at once, `started` stale under the peer guard's rule (b), anything else left) with 7.2's
+//       deletion and step 8's stale row, step 2's **Rollouts this session wrote.** (its evidence order, orient-all
+//       § 7's own `create_thread` or `relay_session` start a handover and its paste-ready prompt none, Not yet and
+//       the by-hand lines no handover, a withdrawal later in the session no handover, the latest deciding), the
+//       `unstarted` command, step 8's rows, step 4's Resume clause, rule (3)'s statement, the edge cases, and
 //       task-writer § 4b.
 //   h9  next step 1 never counts a Rollout launch as the thread continuing elsewhere.
 //   h10 "execute offer" survives only as CONTEXT.md **Execute handoff**'s `_Avoid_` in product files, and the
 //       **Execute handoff** and **Pickup sweep** entries exist.
-//   h11 ADR 0057's sections, decisions, Decided-for-him items and its description-trim follow-up; schedule's Scope and
+//   h11 ADR 0057's sections, decisions, Decided-for-him items and its description-trim follow-up (orient, schedule and
+//       handoff); schedule's Scope and
 //       Don'ts name `pickups`' read-only `git remote get-url origin` and the handoff.
 // One pure function, check(files), returns the failed rule names; every rule has a mutation control that fails it
 // alone. Phrase checks run on collapsed text; slices are taken before collapsing. Reads files only.
@@ -41,6 +47,7 @@ const ORIENT_ALL = 'skills/orient-all/SKILL.md'
 const HANDOFF = 'skills/handoff/SKILL.md'
 const LIFECYCLE = 'skills/_shared/handoff-lifecycle.md'
 const CLOSE = 'skills/close/SKILL.md'
+const GRAMMAR = 'skills/_shared/vault-grammar.md'
 const NEXT = 'skills/next/SKILL.md'
 const WRITER = 'skills/_shared/task-writer.md'
 const CONTEXT = 'CONTEXT.md'
@@ -146,6 +153,12 @@ function check(F) {
     'Fix: edit the named line of ~/.config/thread/ladder.toml; once it reads, say "hand it off" (or run execute by hand).',
     'The execute handoff below starts it; by hand instead, start a session in the Project root, then:'])
   never('h5', 'schedule step 8', s8, ['before executing', 'then execute.'])
+  need('h5', "schedule step 8's **Start when ready.**", para(s8, '**Start when ready.**'), [
+    'In the request it runs in place of the handoff, and after a held `Execute:` line nothing was launched, so it stamps at once',
+    "After the handoff, it first withdraws the launch, by handoff § Lifecycle's `dismiss_task` rules, so no stamp ever sits beside a live launch",
+    '`dismissed`, `already_dismissed` or `not_found` (or no card, off the Stage) → remove the launch doc and land its removal, then stamp',
+    '`already_started_by_stage` or `already_started` → stamp nothing, and say a lead is already running it',
+    '`already_kept` → stamp nothing, and say his Defer keeps the doc'])
 
   // h6: orient § 9.
   const o = F[ORIENT] ?? ''
@@ -160,6 +173,14 @@ function check(F) {
     'and only when that check exits 0; otherwise it stays Fresh session and says why', '- **Not yet** — on his word, or held',
     '- **Start when ready** — on his word:', 'No rollout written → no handoff'])
   never('h6', 'orient § 9', o9, ['AskUserQuestion', 'recommended option first', 'Offer it only then'])
+  need('h6', "orient § 9's Start when ready", slice(o9, /^- \*\*Start when ready\*\*/, /^\S/), [
+    "Said after the handoff, it first withdraws the launch, by handoff § Lifecycle's `dismiss_task` rules, so no stamp ever sits beside a live launch",
+    '`dismissed`, `already_dismissed` or `not_found` (or no card, off the Stage) → the launch doc is removed and its removal landed, then the stamp',
+    '`already_started_by_stage` or `already_started` → no stamp, and it says a lead is already running',
+    '`already_kept` → no stamp, and it says his Defer keeps the doc'])
+  const writers = slice(sec(F[GRAMMAR], /^## Rollout start stamp/), /^- \*\*Writers\*\*/, /^- \*\*/) ?? ''
+  need('h6', "the vault grammar's Writers", writers, ['on the rollout note just written and never started, whose launch was never made or was withdrawn first',
+    "a lead already running gets no stamp", "orient § 9's Start when ready move, on his word, and schedule step 8's **Start when ready.**"])
 
   // h7: handoff and the lifecycle.
   const h = F[HANDOFF] ?? ''
@@ -185,12 +206,25 @@ function check(F) {
   // h8: close and task-writer § 4b.
   const cl = F[CLOSE] ?? ''
   need('h8', 'close § The handoff owns the continuation', sec(cl, /^## The handoff owns the continuation/), [
-    "`launch` → a Rollout launch's doc", 'never refreshed, never the Resume pointer, never a reason to suppress a task proposal or the set-down, left for its lead'])
+    "`launch` → a Rollout launch's doc", 'never refreshed, never the Resume pointer, never a reason to suppress a task proposal or the set-down, left for its lead',
+    "once step 2's **Stale launch.** reads its rollout closed, or started with the doc 24 h old, step 7.2 deletes it as stale",
+    'never deleted by step 7.2 (a stale `launch` doc excepted'])
+  const stale = slice(cl, /^ {3}- \*\*Stale launch\.\*\*/, /^ {3}- \*\*/) ?? ''
+  need('h8', "close step 2's **Stale launch.**", stale, ["A `launch` doc has no end state but its lead's consumption",
+    'For each `launch` line the scan printed, whatever the doc\'s `thread:`',
+    'unfinished-rollout.py unstarted --rollout <its launches:>`, its front-matter value as it stands, with no `--handoffs`',
+    '`closed …` → stale, and step 7.2 deletes it as a consumed doc this session marked',
+    "`started …` → stale only when the peer guard allows as for a consumed doc this session did not mark (rule (b): it prints `delete`, the doc 24 h or more old, and no listed peer), else left for its lead",
+    'any other line → left for its lead', '(check failed: <first stderr line>)', 'It never blocks the close'])
+  need('h8', "close step 7.2's **Stale launch docs.**", cl, ["**Stale launch docs.** A `launch` doc step 2's **Stale launch.** read stale takes the same peer guard and the same deletion as a consumed doc",
+    "one read `closed` as a doc this session marked", "one read `started` as a doc it did not (`delete` and no listed peer)"])
   const rw = slice(cl, /^ {3}- \*\*Rollouts this session wrote\.\*\*/, /^3\. /) ?? ''
   const handed = C(rw).indexOf('1. **Handed over, by this transcript.**'), none = C(rw).indexOf('2. **No handover**')
   if (!(handed >= 0 && none > handed)) flag('h8', 'close step 2 does not check the transcript before the verb')
   need('h8', "close step 2's **Rollouts this session wrote.**", rw, ["schedule's `Queue for … written to [[<slug>]]`",
     'a compaction summary', 'a `relay_session` of `/thread:execute [[<slug>]]`',
+    "orient-all § 7's start of an execute item naming the note (its own `create_thread` result `Raised (task_id: …)`, which counts as started, or its `relay_session` of the item's prompt)",
+    "Orient-all § 7's `paste-ready prompt (no session started)` and its labelled manual hand-over are no handover either",
     "Not yet's line, a held `Execute:` line and step 8's by-hand `execute [[<slug>]]` lines are no handover",
     'A handoff withdrawn later in this session is no handover', '`dismissed`, `already_dismissed` or `not_found`',
     'the latest decides', '`already_started_by_stage`, `already_started` and `already_kept` are no withdrawal',
@@ -198,13 +232,15 @@ function check(F) {
     'It never blocks the close'])
   const s8c = cl.split('\n').find((l) => l.startsWith('8. **Print the "What landed" report')) ?? ''
   need('h8', 'close step 8', s8c, ['`handoff launch: <path> · launches [[<slug>]] · written <date> · left for its lead`',
+    '`handoff launch: <path> · stale (<line>) · deleted in <sha>`',
     '`rollout not started: [[<slug>]]; say "hand it off" to start its lead in a fresh session, or run /thread:execute [[<slug>]] in <root>`',
     '`rollout check failed: [[<slug>]] (<first stderr line>)`'])
   need('h8', 'close step 4', cl, ['a pointer, never a copy (a `launch` doc never counts)'])
   need('h8', "close step 9's rule (3)", cl, ['the research-landing offer and the rollout row included'])
   need('h8', 'close § Edge cases', sec(cl, /^## Edge cases/), ['**His "hand it off" on a `rollout not started:` row**', 'never close itself',
     "handoff's Invocation gate names this route", '**A rollout note this session wrote**',
-    'A note whose only handoff was withdrawn gets the row unless `unstarted` reads it as started'])
+    'A note whose only handoff was withdrawn gets the row unless `unstarted` reads it as started',
+    "**A `launch` doc no lead will read**", '`closed` deletes it at this close, `started` at the first close the peer guard allows'])
   need('h8', "task-writer § 4b's close form", F[WRITER], ["a Rollout launch's `launch` doc owns nothing"])
 
   // h9: next step 1.
@@ -236,6 +272,7 @@ function check(F) {
     'The handoff is decided (Owner *gate*), its one hold the ladder file', 'An umbrella project widens the pool',
     'A pickup a named task needs is asked in the Pre-flight round'])
   need('h11', 'ADR 0057 § Follow-ups', sec(adr, /^## Follow-ups/), ['A description trim for orient', 'and schedule',
+    'and for handoff, whose description still says "Trigger ONLY on … router dispatch (thread:next / thread:orient)"',
     'scored eval baseline', '`make evals`', '7950'])
   need('h11', 'schedule § Scope', sec(sch, /^## Scope/), ["step 1.2's `unfinished-rollout.py pickups` reads task notes and runs one read-only `git remote get-url origin`",
     "step 8's **Execute handoff.** runs `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md`"])
@@ -269,13 +306,22 @@ test('controls: each rule fails on its own known-bad shape', () => {
   only(swap(SCHEDULE, 'Clear each while it is still queued, or its call sets it aside for your sign-off',
     "Clear each before executing, or they'll refuse mid-dispatch"), 'h5', 'checklist before executing')
   only(swap(SCHEDULE, 'No other checklist holds it: a gate', 'Every checklist holds it: a gate'), 'h5', 'holds')
+  only(swap(SCHEDULE, "After the handoff, it first withdraws the launch, by handoff § Lifecycle's `dismiss_task` rules, so no stamp ever sits beside a live launch:",
+    'After the handoff, it stamps beside the launch:'), 'h5', 'start when ready beside a launch')
   only(swap(ORIENT, '- **Here** — on his word only:', '- **Here** — recommended when small:'), 'h6', 'here')
   only(swap(ORIENT, 'end with the execute handoff, decided and never asked', 'end with `AskUserQuestion`, recommended option first'), 'h6', 'asked')
+  only(swap(ORIENT, /`already_started_by_stage` or `already_started` → no stamp, and it says a lead is\n\s*already running;/,
+    '`already_started_by_stage` or `already_started` → the stamp all the same;'), 'h6', 'orient stamps beside a running lead')
+  only(swap(GRAMMAR, 'whose\n  launch was never made or was withdrawn first', 'whose\n  launch was made'), 'h6', 'grammar writers')
   only(swap(HANDOFF, ' or Lachy\'s\n"hand it off" on close\'s `rollout not started:` row dispatched', ''), 'h7', 'gate close row')
   only(swap(HANDOFF, '**Open captures.** and the **Thread state.** row are skipped', '**Open captures.** runs'), 'h7', 'skips')
   only(swap(CLOSE, "Not yet's line, a held `Execute:` line and step 8's by-hand `execute [[<slug>]]` lines are no handover. ", ''), 'h8', 'not yet')
   only(swap(CLOSE, /A handoff withdrawn later in this session is no handover[^]*?are no withdrawal\./, ''), 'h8', 'withdrawn')
+  only(swap(CLOSE, /^ {3}- \*\*Stale launch\.\*\*.*\n/m, ''), 'h8', 'stale launch gone')
+  only(swap(CLOSE, '`closed …` → stale, and step 7.2 deletes it', '`closed …` → left for its lead, and step 7.2 keeps it'), 'h8', 'closed kept')
+  only(swap(CLOSE, /orient-all § 7's start of an execute item naming the note \([^)]*\)[^)]*\), /, ''), 'h8', 'orient-all start')
   only(swap(NEXT, ' A Rollout launch never counts (handoff **Rollout launch.**): a doc whose front matter carries `launches:`, and the lead it started, run a rollout, never this thread.', ''), 'h9', 'next')
   only(swap(README, 'and ends with the execute handoff.', 'and ends with the execute offer.'), 'h10', 'old name')
   only(swap(ADR, /## Follow-ups\n[^]*$/, '## Follow-ups\n\nNone.\n'), 'h11', 'follow-ups')
+  only(swap(ADR, /, and\n {2}for handoff, whose description still says[^]*?dispatch it too\./, '.'), 'h11', 'handoff trim')
 })
