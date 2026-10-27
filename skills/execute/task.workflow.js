@@ -1828,7 +1828,11 @@ function refusedEcho(v) {
   let s
   try { s = JSON.stringify(v) } catch (e) { s = undefined }
   if (s === undefined) return typeof v
-  return s.length > 200 ? `${s.slice(0, 200)}… (${s.length} characters)` : s
+  return cutEcho(s, 200)
+}
+// An echo's text cut at `max` characters, marked `…` and its full length given; a shorter one as it is.
+function cutEcho(s, max) {
+  return s.length > max ? `${s.slice(0, max)}… (${s.length} characters)` : s
 }
 
 // args.ladder: '' when usable (or absent), else why not. A bad value is a lead bug: the orchestration
@@ -2029,10 +2033,15 @@ function transientImplBlock(extra) {
 // on ADR 0008 (implement() reads an undefined plan result as "no gate"). Only an integer >= 1 is a budget;
 // anything else fails CLOSED with a diagnosis naming the frontmatter field. Strings are rejected rather
 // than coerced: args built from YAML ints are numbers, so a string is itself a config error. The text is
-// kept free of double quotes because the lead copies it into a ROLLOUT-STATUS reason (Stop-hook regex).
+// kept free of double quotes because the lead copies it into a ROLLOUT-STATUS reason (Stop-hook regex). A bad value
+// is shown bounded (p32-1): cut at ROUND_BUDGET_ECHO characters as refusedEcho cuts (cutEcho), since integrationArgsError
+// throws this text as an args.integration refusal, the line § 4.5 *Args refusal* step (5) prints verbatim, and the
+// fixed text around it leaves the line under 400 characters only with a short echo.
 const ROUND_BUDGET_FIELDS = { maxPlanRounds: 'max_plan_rounds', maxReviewRounds: 'max_review_rounds' }
+const ROUND_BUDGET_ECHO = 60
 function roundBudgetDiagnosis(task, keys) {
-  const show = (v) => (typeof v === 'string' ? `'${v.replace(/"/g, '')}' (a string)` : String(v))
+  const cut = (v) => cutEcho(String(v).replace(/"/g, ''), ROUND_BUDGET_ECHO)
+  const show = (v) => (typeof v === 'string' ? `'${cut(v)}' (a string)` : cut(v))
   const bad = keys.filter((k) => !(Number.isInteger(task[k]) && task[k] >= 1))
   if (!bad.length) return ''
   return 'invalid round budget: ' + bad.map((k) => `${ROUND_BUDGET_FIELDS[k]} = ${show(task[k])}`).join(', ') +

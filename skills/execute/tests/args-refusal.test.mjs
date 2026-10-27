@@ -8,7 +8,7 @@
 // - a table of refused args, run through the whole script (runTask): each is refused with the sentinel and its own kind
 //   head right after it, with no agent() call and no log line, in a line under 400 characters: a refused value is
 //   echoed bounded (refusedEcho), so double-encoded args, one string of the whole args JSON, never flood the line the
-//   lead prints (a control puts the whole echo back);
+//   lead prints, and a bad round budget is shown cut the same way (cutEcho) (a control puts each whole echo back);
 // - a source check on the entry (from the orchestration marker to the integrate branch's first log line): every refusal
 //   head is in it, it holds no plain `throw new Error(` and exactly 12 `throw argsRefused(`. Its controls swap a late
 //   throw back to a plain Error (each must fail both the sentinel and the source check) and cut the end anchor (the
@@ -44,6 +44,7 @@ const taskArgs = (over = {}, taskOver = {}) => ({
 })
 const integrateArgs = (over = {}, iOver = {}, taskOver = {}) => taskArgs({ mode: 'integrate', integration: mkI(iOver), ...over }, taskOver)
 const omit = (o, k) => { const { [k]: _drop, ...rest } = o; return rest }
+const LONG_BUDGET = 'r'.repeat(5000)
 
 // [what, args, the kind head right after the prefix]
 const CASES = [
@@ -71,6 +72,9 @@ const CASES = [
     ]
   }),
   ['a bad integration', integrateArgs({}, { headSha: 'x' }), 'args.integration: headSha must be a 40-hex commit sha'],
+  // A long string round budget: roundBudgetDiagnosis shows it cut (cutEcho), as refusedEcho cuts, never whole.
+  ['a long string maxReviewRounds (integrate mode)', integrateArgs({}, {}, { maxReviewRounds: LONG_BUDGET }),
+    "args.integration: invalid round budget: max_review_rounds = 'rrrr"],
   ['integration without integrate mode', taskArgs({ integration: mkI() }), "args.integration: only with args.mode 'integrate'"],
   ['task.resume in integrate mode', integrateArgs({}, {}, { resume: mkResume() }), "args.task.resume: a seeded revise is its own call, never mode 'integrate'"],
   ['a bad task.resume in task mode', taskArgs({}, { resume: mkResume({ stage: 'implement' }) }), "args.task.resume: stage must be 'revise'"],
@@ -202,6 +206,17 @@ test('control: the top-level refusal echoing the whole value again fails the len
   const r = await runTask(longDoubleEncoded(), never, { source: v })
   assert.deepEqual(refusalFails(r, 'args must be one object, got string "{'), [])
   assert.ok(r.error.message.length > 40000, `unbounded message length ${r.error.message.length}`)
+})
+
+test('a long string round budget is cut and marked; control: its whole echo back fails the length bound', async () => {
+  const [what, args, head] = caseOf('a long string maxReviewRounds (integrate mode)')
+  const r = await runTask(args, never)
+  assert.ok(r.error.message.includes(`… (${LONG_BUDGET.length} characters)' (a string)`), `${what}: ${String(r.error.message).slice(0, 400)}`)
+  assert.ok(!r.error.message.includes('"'), `${what}: the diagnosis stays quote-free`)
+  const v = swap(src, "cutEcho(String(v).replace(/\"/g, ''), ROUND_BUDGET_ECHO)", "String(v).replace(/\"/g, '')")
+  const w = await runTask(args, never, { source: v })
+  assert.deepEqual(refusalFails(w, head), [])
+  assert.ok(w.error.message.length > LONG_BUDGET.length, `unbounded message length ${w.error.message.length}`)
 })
 
 test('control: the end anchor cut fails the source check, never an empty slice that passes', () => {
