@@ -26,6 +26,7 @@ unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR XDG_STATE_HOME
 export THREAD_EVENTS_DIR="$TMP/events"            # the Run record stays in temp; scen points it at the scenario's own dir
 export THREAD_NOTE_LOCK_DIR="$TMP/note-locks"     # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_GIT_ENV_DIR="$TMP/git-env"          # mark-started's canary arm (p26-3) keeps its records in temp
+export THREAD_HEAT_LEVEL=0                        # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 
 PR=https://github.com/o/r/pull
 A40=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; B40=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; C40=cccccccccccccccccccccccccccccccccccccccc
