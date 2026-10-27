@@ -33,7 +33,13 @@ partial; (3) ranAt == from (a landing steps one past the value the run ran at, n
 Reflection has already moved the key (a revert included); (5) the agreement is at least AGREE (3): run_record.py's
 Agreement rule, closed earlier Reflections' knob lines since the key's last move, each counted when it names a rollout
 not yet seen, plus this proposal when its rollout is new; lines from the Reflection whose auto line made the last move
-are that move's evidence and never count again. Each entry records `agreeing` (the proposal's own, score.py's count)
+are that move's evidence and never count again; (6) last, the load hold (p29-11, ADR 0051): a `parallel_ceiling` raise
+waits while this Reflection's Time-lost ledger is load-topped, `machine load tops the Time-lost ledger (<h> h of <total>
+h): a Parallel ceiling raise waits (ADR 0051)`, and fails closed with no ledger line, `no Time-lost ledger line for
+Reflection <id>: run reflect.py ledger first`. ADR 0051's "when the ledger puts load above it" is read as its Verify's
+"a load-topped ledger": load is the top of reflections.jsonl's `time-lost` line with `source: record` for this Reflection
+(load_hold(); an audit line is never read: its hours never move the hold). Lowers and round-cap raises are never held by
+load. Each entry records `agreeing` (the proposal's own, score.py's count)
 and `agreed` (the agreement). A held proposal prints `held <key>: <reason>` (`agreement <n> of 3`, say); with nothing
 eligible it exits 0 and writes nothing. The write is --pick's, below, with the same checks.
 
@@ -151,6 +157,7 @@ RS = _load("thread_rollout_settings", os.path.join(SHARED, "rollout-settings.py"
 SCORE = _load("thread_score", os.path.join(HERE, "score.py"))
 CLOSES = RR.CLOSES  # completion | supersede: the close that wrote a line (run_record.py's Close rule)
 AGREE = 3  # ADR 0037 d5: a knob lands once three Reflections agree (run_record.py's Agreement rule)
+LOAD_HELD = "machine load tops the Time-lost ledger"  # check (6)'s reason (reflect.py's span lists these as its holds)
 
 
 class Stop(Exception):
@@ -307,11 +314,37 @@ def agreement(scores, proposal, reflection, tunings, reflections):
     return agreeing + (0 if scores["rollout"] in seen else 1)
 
 
+def load_hold(proposal, reflection, reflections):
+    """Check (6)'s reason for a proposal, or None: a parallel_ceiling raise is held while this Reflection's `time-lost`
+    record line has `top: load` (ADR 0051's "a load-topped ledger"), and fails closed with no such line. Only `source:
+    record` lines are read, never an audit's."""
+    direction = proposal.get("direction")
+    if not isinstance(direction, int) or isinstance(direction, bool):
+        f, t = proposal.get("from"), proposal.get("to")
+        direction = (t > f) - (t < f) if isinstance(f, int) and isinstance(t, int) else 0
+    if proposal.get("key") != "parallel_ceiling" or direction <= 0:
+        return None
+    line = next((d for d in reflections if d.get("kind") == "time-lost" and d.get("source") == "record"
+                 and d.get("reflection") == reflection), None)
+    if line is None:
+        return "no Time-lost ledger line for Reflection %s: run reflect.py ledger first" % reflection
+    if line.get("top") != "load":
+        return None
+    h = line.get("hours") if isinstance(line.get("hours"), dict) else {}
+    nums = [v for v in h.values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    load = h.get("load") if isinstance(h.get("load"), (int, float)) else 0
+
+    def fmt(x):  # up to 3 places, no trailing zeros
+        return ("%.3f" % x).rstrip("0").rstrip(".")
+    return "%s (%s h of %s h): a Parallel ceiling raise waits (ADR 0051)" % (LOAD_HELD, fmt(load), fmt(sum(nums)))
+
+
 def auto_check(scores, proposal, reflection, tunings, reflections):
     """(ok, reason, agreed) for one of score.py's proposals under --auto: the first check that fails is the reason, in
     order (1) no trade and no caution, (2) no Guardrail breached and the window not partial, (3) ranAt == from, (4) no
-    auto line of this Reflection has moved the key yet (a revert included), (5) agreement >= AGREE. `agreed` is the
-    agreement once (5) is reached, else None. Pure: reflect.py's span calls it with the same reads."""
+    auto line of this Reflection has moved the key yet (a revert included), (5) agreement >= AGREE, (6) the load hold
+    (load_hold(): a ceiling raise waits on a load-topped Time-lost ledger, or on none). `agreed` is the agreement once (5)
+    is reached, else None. Pure: reflect.py's span calls it with the same reads, its ledger's record line appended."""
     if proposal.get("trade"):
         t = proposal["trade"]
         return False, "a trade (gains %s, costs %s): Lachy decides" % (
@@ -331,6 +364,9 @@ def auto_check(scores, proposal, reflection, tunings, reflections):
     n = agreement(scores, proposal, reflection, tunings, reflections)
     if n < AGREE:
         return False, "agreement %d of %d" % (n, AGREE), n
+    held = load_hold(proposal, reflection, reflections)
+    if held:
+        return False, held, n
     return True, None, n
 
 

@@ -412,8 +412,9 @@ test('span: laneTime prices the Integration lane by each log line\'s active figu
   }, '306 active of the 876-minute window, and the old line\'s 40 wall: the 9.5-hour stall is no lane time')
 })
 
-// p29-10 (ADR 0051): the time-lost ledger's lines are not read yet (score.py's LEDGER_KINDS), so a rollout whose only
-// in-window lines are ledger lines (a heartbeat's lead-entries, a stop) is not read this week; one with a real line is.
+// p29-10 (ADR 0051): the time-lost ledger's lines are never read as a rollout's (score.py's LEDGER_KINDS), so a rollout
+// whose only in-window lines are ledger lines (a heartbeat's lead-entries, a stop) is not read this week; one with a real
+// line is. p29-11: the Time-lost ledger still counts it.
 test('span: a rollout whose only in-window lines are ledger lines (p29-10) is not read', (t) => {
   const h = setup(t)
   const before = byTs(life('a', '2026-08-20T00:00:00Z', '2026-08-20T01:00:00Z', { lane: ['2026-08-20T01:00:00Z', '2026-08-20T01:10:00Z'] }))
@@ -428,6 +429,9 @@ test('span: a rollout whose only in-window lines are ledger lines (p29-10) is no
   const s = span(h)
   assert.equal(entryOf(s, 'ledger-only'), undefined, 'ledger lines alone never make a rollout read')
   assert.equal(entryOf(s, 'live-r')?.mode, 'read', 'a real in-window line does')
+  // p29-11: counted in the ledger, still not read: its open halt (no reason) runs to until on its live note
+  assert.ok(s.ledger.row.rollouts.stalls.some(([slug]) => slug === 'ledger-only'), JSON.stringify(s.ledger.row.rollouts))
+  assert.ok(s.ledger.row.byCause.stalls.halt > 0, JSON.stringify(s.ledger.row.byCause))
 })
 
 // p29-10: span drops the ledger's lines as it lists the records, so grades.py never sees them either: a task whose only
@@ -543,6 +547,7 @@ test('span: a repair line on until\'s date is read once, by the next span, repai
   assert.equal(entryOf(s2, 'old').mode, 'repairs-only')
   assert.deepEqual(reps(s2, 'old'), [['2026-09-12', ['o'], 'deferred']])
   assert.ok(!s2.flags.some((f) => /undated repair line/.test(f)), 'an unread rollout\'s undated line is not flagged weekly')
+  ok(h, ['ledger', '--span', path.join(h.out, 'span.json')]) // p29-11: the Time-lost ledger's line comes before close
   assert.match(ok(h, ['close', '--span', path.join(h.out, 'span.json')]).stdout, /^closed r-/)
   const line = rlines(h).filter((l) => l.kind === 'reflection').pop()
   assert.deepEqual([line.rollouts, line.escapesOnly, line.repairsOnly], [[], [], ['demo', 'old']])
@@ -650,8 +655,9 @@ test('span and close: breaches count once per (rollout, Guardrail) only for a fi
   assert.deepEqual([entryOf(s, 'slow').breached, entryOf(s, 'slow').breachCounts], [['throughput'], true])
   const tail = entryOf(s, 'tail')
   assert.deepEqual([tail.partial, tail.breached, tail.breachCounts], [true, ['throughput'], false])
+  ok(h, ['ledger', '--span', path.join(h.out, 'span.json')]) // p29-11: the Time-lost ledger's line comes before close
   ok(h, ['close', '--span', path.join(h.out, 'span.json')])
-  const [line] = rlines(h)
+  const [line] = rlines(h).filter((l) => l.kind === 'reflection')
   assert.deepEqual([line.counts.breaches, line.quiet], [1, false])
 })
 
@@ -1001,6 +1007,7 @@ test('knobs end to end: two agreeing earlier Reflections make the newest rollout
   assert.match(early.stderr, new RegExp(`knob ${kid} has no knob proposal line: run knobs\\n$`))
   const scores = [...new Set(s.knobs.land.map((k) => k.scores))]
   assert.equal(scores.length, 1)
+  ok(h, ['ledger', '--span', out]) // p29-11: tune.py --auto holds a ceiling raise until the ledger's line is in
   const r = tune(h, ['--scores', scores[0], '--auto', '--repo', s.knobs.land[0].root, '--reflection', s.reflection, '--config', config])
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /^applied parallel_ceiling 3 → 4 for o\/r: /m)
@@ -1038,10 +1045,11 @@ test('knobs end to end: an auto line a later finished run breaches at its to is 
   assert.equal(held.reason, 'a revert of parallel_ceiling comes first this Reflection')
   assert.equal(held.agreed, 3, 'the raise passed tune.py\'s own checks')
   const rv = s.knobs.revert[0]
+  const out = path.join(h.out, 'span.json')
+  ok(h, ['ledger', '--span', out]) // p29-11: the Time-lost ledger's line comes before tune.py and knobs
   const r = tune(h, ['--scores', rv.scores, '--revert', rv.tuning, '--repo', rv.root, '--reflection', s.reflection, '--config', config])
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /^applied parallel_ceiling 4 → 3 for o\/r: /m)
-  const out = path.join(h.out, 'span.json')
   ok(h, ['knobs', '--span', out])
   const mine = rlines(h).filter((l) => l.kind === 'proposal' && l.reflection === s.reflection)
   assert.equal(mine.find((l) => l.id === kid).held, 'a revert of parallel_ceiling comes first this Reflection')
@@ -1523,6 +1531,7 @@ test('the Verify week: one watch line per Watch, a rule line and the decision ta
   ok(h, watchArgs(out, ['week-a', 'week-b']))
   ok(h, bugArgs(h, out, { rollouts: ['week-a', 'week-b'], rule: 'execute § 4.5', shape: 'a hand-back loses its answer' }))
   ok(h, bugArgs(h, out, { rollouts: ['week-a', 'week-b'], rule: 'execute § 4.5', shape: 'a hand-back loses its answer' }))
+  ok(h, ['ledger', '--span', out]) // p29-11: step 13a, before tune.py and knobs
   const tune = spawnSync('python3', ['-B', path.join(root, 'skills', 'reflect', 'scripts', 'tune.py'), '--scores', s.knobs.held[0].scores, '--auto', '--repo', h.repo,
     '--reflection', s.reflection, '--config', config], { encoding: 'utf8', cwd: h.home, env: env(h) })
   assert.equal(tune.status, 0, tune.stderr)
