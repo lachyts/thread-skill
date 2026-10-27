@@ -50,7 +50,7 @@ Subcommands:
       comes first, then `<n> commit(s) in <TB>..<B> name no PR …` naming each unlisted commit).
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
-         [--slots N --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]]
+         [--slots N --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]] [--diff-base REV [--named-rerun CMD]]
       Run the env bootstrap, then the verifier, each `bash -c` in its own session (process group) in T,
       appending to O.log, under one deadline of S seconds. The exit code goes to O.rc, written LAST (tmp +
       rename); O.rc and O.log are removed first, so a missing O.rc means the run did not finish (red). A
@@ -85,6 +85,30 @@ Subcommands:
       "running"}) and again at the end ({v, id, sha, ended, rc, step, signal}: ended done | deadline | bootstrap
       | signal | noslot | heat; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
       by its fields, never by log text, and one that still reads `running` never finished.
+      --diff-base REV (the lead's Integration verify, `<mainSha>`, and the RACE re-verify, `<merge>^1`: the task's diff
+      is `git diff --name-only REV HEAD` in T) turns on the Flake check (ADR 0050, p29-9), in this same invocation, on
+      the same tree and sha, holding the same verify slot. It runs only after the verifier step itself returned
+      non-zero (never after a deadline, a bootstrap failure or a signal): the first run's failing ids
+      (rr._failing_ids, its `== verifier:` section only) are placed by rr.flake_verdict; no id (`unnamed`), the
+      parser's cap reached (`too-many`), an id in no test file (`unplaced`), an unreadable diff (`diff`) or an id whose
+      file the diff changes (`touched`) is red at once, as is a red with no --named-rerun (`no-named-rerun`).
+      Otherwise --named-rerun CMD (verify-timeout's namedRerun, holding `{tests}` exactly once, replaced by the ids,
+      each shlex-quoted) runs as `== named re-run: …` / `== named re-run rc N`, then, green, the verifier once more as
+      `== confirming run: …` / `== confirming run rc N`, each under the slot's guard with its own deadline: --timeout
+      from its start, capped at verify's own start + the harness bound (7200 s, THREAD_VERIFY_HARNESS_S shrinks it
+      in tests) - 600 s; less than a second left is red (`no-time`), nothing run. A red named re-run (`named-red`) or
+      confirming run (`confirm-red`) keeps its rc; a deadline is rc 124 (`timeout`); a green confirming run makes the
+      rc 0, each first-run id a Flake. O.rc is that final verdict. O.flake.json (removed first, tmp + rename, written
+      just before O.rc) records it whenever --diff-base was given and the verifier step started (never on noslot):
+      {v: 1, sha (T's HEAD, or --detach-at), diffBase, verdict: green | flake | red, why: "" | unnamed | unplaced |
+      too-many | touched | diff | no-named-rerun | named-red | confirm-red | timeout | no-time | signal, failing (the
+      first run's ids), touched, flakes, timeout: {run: first | named | confirm, seconds} | null}; a signal mid-run
+      leaves it red, why `signal`. reconcile-rollout.py record-verify reads it. --diff-base with --outcome, and a
+      --named-rerun with no --diff-base or without exactly one `{tests}`, are exit 2 with no rc file. A heat stop (the
+      Heat hold, above) in the named re-run or the confirming run is no verdict, as in the first run: the pass goes back
+      in line and the next reruns every step, the Flake check included, from a clean result and a fresh record; the
+      ids are always the last pass's first run's. With --rollout, a Flake ends its suite green, and a deadline in
+      either run ends it timeout (step verifier).
       --rollout NOTE [--slug SLUG] (p29-10, ADR 0051; --slug only with --rollout, else exit 2) records the suite in
       the rollout's Run record (the note's stem; the tasks dir is its parent): by completion with --outcome, race with
       --detach-at, else integration (with SLUG as its task; a completion suite has none), runner lead. suite-started
@@ -215,6 +239,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -451,7 +476,8 @@ def _load_note(path):
 
 
 def log_fields(line):
-    """One Integration log line as fields ('-' -> None), or None."""
+    """One Integration log line as fields ('-' -> None), or None. Read by key, never by position: a line from before
+    p29-13 has ten tokens and no `active=` (None here), a later one ends with it."""
     if not line:
         return None
     toks = line.split(" ")
@@ -460,7 +486,7 @@ def log_fields(line):
     for t in toks[2:]:
         k, _, v = t.partition("=")
         out[k] = None if v in ("", "-") else v
-    for k in ("path", "pr", "anchor", "head", "base", "wait", "duration", "triggers"):
+    for k in ("path", "pr", "anchor", "head", "base", "wait", "duration", "triggers", "active"):
         out.setdefault(k, None)
     return out
 
@@ -899,6 +925,48 @@ def _write_atomic(path, text):
     os.replace(tmp, path)
 
 
+# The Flake check (ADR 0050, p29-9): verify --diff-base. A red first run whose failing ids rr.flake_verdict places in
+# test files outside the task's diff re-runs them by name (--named-rerun), then confirms with one more verifier run on
+# the same tree, under the same slot and guard: green is a Flake. Any other red stays red, with no re-run.
+FLAKE_SUFFIX = ".flake.json"
+FLAKE_RUN_LABELS = {"named": "named re-run", "confirm": "confirming run"}   # the log's `== <label>:` sections
+FLAKE_RUN_WORDS = {run: "the " + label for run, label in FLAKE_RUN_LABELS.items()}
+HARNESS_ENV = "THREAD_VERIFY_HARNESS_S"   # tests only: shrinks the harness bound the Flake check's runs fit inside
+
+
+def _harness_s():
+    """The lead's harness bound on the background verify command (7200 s, rr.HARNESS_MAX_S); THREAD_VERIFY_HARNESS_S
+    (tests) may only shrink it."""
+    try:
+        v = float(os.environ.get(HARNESS_ENV) or rr.HARNESS_MAX_S)
+    except ValueError:
+        v = rr.HARNESS_MAX_S
+    return min(v, rr.HARNESS_MAX_S)
+
+
+def _diff_files(tree, base):
+    """The paths `git diff --name-only <base> HEAD` lists in the tree, or None when it cannot be read."""
+    p = git(tree, "diff", "--name-only", "--no-renames", base, "HEAD")
+    if p.returncode != 0:
+        return None
+    return {line for line in p.stdout.split("\n") if line}
+
+
+class _FlakeHeatStop(Exception):
+    """A heat stop (verify-slot.py contract 7) in the Flake check's named re-run or confirming run: no verdict, so
+    verify's pass goes back in line like a heat stop in the first run. `run` is named | confirm."""
+
+    def __init__(self, run):
+        super().__init__(run)
+        self.run = run
+
+
+def _flake_record(sha, base, verdict, why="", failing=(), touched=(), flakes=(), timeout=None):
+    """<out>.flake.json: {v, sha, diffBase, verdict: green | flake | red, why, failing, touched, flakes, timeout}."""
+    return {"v": 1, "sha": sha, "diffBase": base, "verdict": verdict, "why": why, "failing": list(failing),
+            "touched": list(touched), "flakes": list(flakes), "timeout": timeout}
+
+
 def _suite_record(args):
     """verify's suite in the Run record (p29-10, ADR 0051), or None with no --rollout: the rollout is the note's stem,
     the tasks dir its parent; by is completion with --outcome, race with --detach-at, else integration; runner lead."""
@@ -963,15 +1031,25 @@ def _suite_end(rec, rc, result, log_path, args):
 
 
 def cmd_verify(args):
+    verify_t0 = time.monotonic()   # verify's own start: the Flake check's runs end by it + the harness bound - the margin
     out = Path(os.path.expanduser(args.out))
     rc_path, log_path = Path(f"{out}.rc"), Path(f"{out}.log")
     outcome_path = Path(f"{out}{rr.VERIFY_OUTCOME_SUFFIX}") if args.outcome else None
+    flake_path = Path(f"{out}{FLAKE_SUFFIX}")
     out.parent.mkdir(parents=True, exist_ok=True)
-    for p in (rc_path, log_path, outcome_path):
+    for p in (rc_path, log_path, outcome_path, flake_path):
         if p:
             p.unlink(missing_ok=True)
     if args.timeout <= 0:
         raise EnvError("--timeout must be a positive number of seconds")
+    if args.diff_base is not None and args.outcome:
+        # The completion verify keeps ADR 0052's own rule: its attempt 2 is the re-run, and there is no task diff.
+        raise EnvError("--diff-base is refused with --outcome (the completion verify's Flake is its attempt 2)")
+    if args.named_rerun is not None:
+        if args.diff_base is None:
+            raise EnvError("--named-rerun needs --diff-base (the Flake check)")
+        if args.named_rerun.count(rr.NAMED_RERUN_SLOT) != 1:
+            raise EnvError(f"--named-rerun must hold {rr.NAMED_RERUN_SLOT} exactly once (where the failing tests go)")
     slotted = args.slots is not None
     if slotted != (args.slot_wait is not None):
         raise EnvError("--slots and --slot-wait go together (both, or neither)")
@@ -1003,6 +1081,11 @@ def cmd_verify(args):
     slot = None
     result = {"v": 1, "id": rr._run_id(datetime.now(), os.getpid()), "sha": args.detach_at,
               "ended": "running"}
+    # The Flake check's record, <out>.flake.json: written whenever --diff-base was given and the verifier step started
+    # (never on noslot); a signal mid-check leaves it red, why `signal`.
+    flake_on = args.diff_base is not None
+    flake = None
+    tree_sha = (args.detach_at or rev(str(tree), "HEAD")) if flake_on else ""
     try:
         for s in SIGNALS:   # inside the try, so a signal that lands at once still removes the tree
             signal.signal(s, _on_signal)
@@ -1023,8 +1106,9 @@ def cmd_verify(args):
             stopped = None         # the heat name of the last heat stop
             first = True
             while True:
-                # Each pass starts clean: no verdict, no step or signal, no live step, no slot.
+                # Each pass starts clean: no verdict, no step or signal, no live step, no slot, no Flake record.
                 rc = None
+                flake = None
                 result["ended"] = "running"
                 result.pop("step", None)
                 result.pop("signal", None)
@@ -1076,9 +1160,11 @@ def cmd_verify(args):
                                      reraise=(_Signalled,), written=rec["written"])
                 deadline = time.monotonic() + args.timeout
                 steps = ([("env_bootstrap", args.bootstrap)] if args.bootstrap else []) + [("verifier", args.verifier)]
-                heat_step = None
+                heat_step = heat_where = None
                 for name, cmd in steps:
                     note(f"== {name}: {cmd}")
+                    if name == "verifier" and flake_on:
+                        flake = _flake_record(tree_sha, args.diff_base, "red", "signal")   # until the check decides
                     got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot)
                     if got is VS.HEAT_STOPPED:
                         heat_step = name
@@ -1087,6 +1173,10 @@ def cmd_verify(args):
                         note(f"verify: timed out after {args.timeout:g}s during the {name}; killed its process group (rc 124)")
                         rc = 124
                         result.update(ended="deadline", step=name)
+                        if flake is not None:
+                            # A timeout names no failing test, so it is never a Flake: red, logged as load (ADR 0051).
+                            flake = _flake_record(tree_sha, args.diff_base, "red", "timeout",
+                                                  timeout={"run": "first", "seconds": max(1, int(round(args.timeout)))})
                         break
                     note(f"== {name} rc {got}")
                     if name == "env_bootstrap" and got != 0:
@@ -1099,11 +1189,23 @@ def cmd_verify(args):
                         # step that never starts (a raise) leaves no rc, which reads as red.
                         rc = got
                         result["ended"] = "done"
+                        if flake is not None:
+                            try:
+                                rc, flake = _flake_check(args, tree, tree_sha, log, log_path, note, slotted, slot, rc,
+                                                         verify_t0)
+                            except _FlakeHeatStop as h:
+                                # A heat stop in the named re-run or the confirming run is no verdict, as in the first
+                                # run: this pass goes back in line, and the next reruns every step from a clean result.
+                                heat_step, heat_where = name, FLAKE_RUN_LABELS[h.run]
+                            else:
+                                if flake["timeout"] is not None:
+                                    # A deadline in the named re-run or the confirming run: the suite ends timeout.
+                                    result.update(ended="deadline", step=name)
                 if heat_step is None:   # only a watched step (a slot held) is ever heat-stopped
                     break
                 stopped = VS.heat_name(_live["heat"])
-                note(f"verify: heat stop ({stopped}) during the {heat_step}: stopped its process group, no verdict; "
-                     "back in line")
+                note(f"verify: heat stop ({stopped}) during the {heat_where or heat_step}: stopped its process group, "
+                     "no verdict; back in line")
                 if rec is not None:
                     # p29-10: the heat-stopped pass's suite ends `heat` (no verdict, no rc) once its slot is released,
                     # with stops held for the write, so a stop meanwhile ends no suite twice; the next pass is a suite
@@ -1132,6 +1234,12 @@ def cmd_verify(args):
         if added:
             git(os.path.expanduser(args.repo), "worktree", "remove", "--force", "--force", str(tree))
             git(os.path.expanduser(args.repo), "worktree", "prune")
+        if flake is not None:
+            # Before the rc, which stays the last file written: a reader that sees the rc sees this run's record.
+            try:
+                _write_atomic(flake_path, json.dumps(flake, ensure_ascii=False) + "\n")
+            except OSError:
+                pass
         if rc is not None:
             if outcome_path:
                 # --outcome's result is the outcome file alone: no O.rc, the file heartbeat clause (4) acts on.
@@ -1149,6 +1257,66 @@ def cmd_verify(args):
     if rc == "heat":
         return VS.HEAT_EXIT
     return rc if isinstance(rc, int) and 0 <= rc <= 255 else 1
+
+
+def _flake_check(args, tree, sha, log, log_path, note, slotted, slot, rc, t0):
+    """The Flake check on a finished first run (ADR 0050): (the final rc, the flake record). Green (rc 0) is green. A
+    red reads its failing ids from the first run's log section (rr._failing_ids) and places them (rr.flake_verdict):
+    anything but `candidates` is red at once; else, with --named-rerun, the named re-run, then one confirming verifier
+    run, each under the slot and guard the first run held and its own deadline (_flake_deadline). The named re-run's
+    red keeps its rc, the confirming run's red its own; the confirming run's green makes the rc 0 and each first-run
+    id a Flake. A heat stop in either run raises _FlakeHeatStop: no verdict, and the caller's pass goes back in line.
+    The ids are the last pass's first run's: rr._failing_ids reads the log's last `== verifier:` section."""
+    base = args.diff_base
+    if rc == 0:
+        return 0, _flake_record(sha, base, "green")
+    with open(log_path, errors="replace") as fh:
+        ids = rr._failing_ids(fh)
+    diff = _diff_files(str(tree), base) if ids else set()
+    placed = rr.flake_verdict(ids, str(tree), diff)
+    verdict = placed["verdict"]
+
+    def red(why, code=rc, **kw):
+        return code, _flake_record(sha, base, "red", why, ids, placed["touched"], **kw)
+
+    if verdict != "candidates":
+        note(f"verify: Flake check: red at once ({verdict}): " + (", ".join(ids[:10]) or "no failing test named"))
+        return red(verdict)
+    if not args.named_rerun:
+        note("verify: Flake check: red (no --named-rerun, so the failing tests cannot be re-run by name)")
+        return red("no-named-rerun")
+    quoted = " ".join(shlex.quote(i) for i in ids)
+    for run, cmd in (("named", args.named_rerun.replace(rr.NAMED_RERUN_SLOT, quoted)), ("confirm", args.verifier)):
+        label = FLAKE_RUN_LABELS[run]
+        deadline = _flake_deadline(args, t0)
+        if deadline is None:
+            note(f"verify: Flake check: red (no harness time left for {FLAKE_RUN_WORDS[run]})")
+            return red("no-time")
+        started = time.monotonic()
+        note(f"== {label}: {cmd}")
+        got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot)
+        if got is VS.HEAT_STOPPED:
+            raise _FlakeHeatStop(run)
+        if got is TIMED_OUT:
+            secs = max(1, int(round(deadline - started)))
+            note(f"verify: timed out after {secs}s during {FLAKE_RUN_WORDS[run]}; killed its process group (rc 124)")
+            return red("timeout", 124, timeout={"run": run, "seconds": secs})
+        note(f"== {label} rc {got}")
+        if got != 0:
+            note(f"verify: Flake check: red ({FLAKE_RUN_WORDS[run]} failed again)")
+            return red("named-red" if run == "named" else "confirm-red", got)
+    note("verify: Flake check: green on the confirming run; a Flake: " + ", ".join(ids))
+    return 0, _flake_record(sha, base, "flake", "", ids, [], ids)
+
+
+def _flake_deadline(args, t0):
+    """A Flake-check run's deadline: --timeout from now, capped where the lead's harness bound (less its margin) ends,
+    counted from verify's own start; None when that leaves under a second."""
+    cap = t0 + _harness_s() - rr.VERIFY_HARNESS_MARGIN
+    now = time.monotonic()
+    if cap - now < 1:
+        return None
+    return min(now + args.timeout, cap)
 
 
 # ---- base-moved: why main moved (p29-10, ADR 0051) ---------------------------------------------------------------
@@ -1948,6 +2116,10 @@ def main(argv=None):
                     "`heat`, exit 76, when the Mac was too hot")
     vf.add_argument("--rollout", default=None, help="the rollout note: record the suite in its Run record (p29-10)")
     vf.add_argument("--slug", default=None, help="with --rollout: the task the suite is for (none for a completion suite)")
+    vf.add_argument("--diff-base", default=None, help="the Flake check (ADR 0050): the rev the task's diff is read from "
+                    "(git diff --name-only REV HEAD in the tree); <out>.flake.json records the verdict")
+    vf.add_argument("--named-rerun", default=None, help="with --diff-base: the repo's runner for named tests, holding "
+                    "{tests} exactly once (verify-timeout's namedRerun)")
 
     bm = sub.add_parser("base-moved", help="record why main moved at a merge-task exit-3 refusal (p29-10): exit 0 always")
     bm.add_argument("--repo", required=True)

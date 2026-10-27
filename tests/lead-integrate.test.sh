@@ -29,6 +29,14 @@
 #   no file or no --verifier re-runs   C34 the task's own diff adds a reader   C35 a step walks the tree   C36 a shared
 #   THREAD.md   C37 a refused rollouts.toml   C38 chained skips across merge-task's exit 3   C39 a cwd glob in a test
 #   C40 fail closed: a failing cat-file is an inert check error, route verify, exit 0.
+#   The Flake check (ADR 0050, p29-9): C41 an out-of-diff red cleared by its named re-run and a confirming run (a
+#   Flake, rc 0)   C42 a red named re-run   C43 a red confirming run   C44 a touched test   C45 one touched, one not
+#   C46 unnamed, unplaced, too many   C47 timeouts (the first run, the confirming run, no harness time left)   C48 the
+#   RACE form   C49 no --named-rerun, no --diff-base, a green run, an unreadable diff   C50 refusals   C51 ids with
+#   spaces and quotes, paths outside the tree   C52 the SKILL.md verify line with and without named_rerun, under bash
+#   and zsh -f   C53 TERM during the named re-run or the confirming run, unslotted and slotted: rc 143, why `signal`,
+#   the child gone, the slot free.   C54 with --rollout (p29-10): a Flake's suite ends green, a deadline in the confirming
+#   run ends it timeout.
 #   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
@@ -155,6 +163,12 @@ else:
     esc = lambda s: s.replace("'", "'\\''")
 if not boot:
     line = re.sub(r""" --bootstrap (['"])<env_bootstrap>\1""", "", line)
+# p29-9: <mainSha> is prepare's (MAIN_SHA, default HEAD) and <named_rerun> verify-timeout's namedRerun (NAMED_RERUN);
+# with none, the line drops --named-rerun as the skill says.
+named = os.environ.get("NAMED_RERUN", "")
+if not named:
+    line = line.replace(" --named-rerun '<named_rerun>'", "")
+line = line.replace("<mainSha>", os.environ.get("MAIN_SHA", "HEAD")).replace("<named_rerun>", esc(named))
 # <verify_timeout>, <verify_slots> and <slot_wait> are § 3's per-entry values (p14-2, p23-4); left literal, the shell
 # would read them as redirections.
 line = (line.replace("<tree>", tree).replace("<repoPath>", repo).replace("<slug>", slug)
@@ -309,6 +323,13 @@ g -C "$WT" pull -q --ff-only origin "$BR" 2>/dev/null
 addlog "$V/$SLUG.md" "2026-10-02T11:30+00:00 integrated path=integrator pr=5 anchor=$H0 head=$M1 base=$B0 wait=5 duration=3 triggers=shared-file"
 prep
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" 'd["prHead"]')|$(j "$J" 'd["anchor"]')" "merge|ii|$M1|$H0" "C6: main unmoved → case (ii), merge (M1, B0), anchor H0"
+ok "$(j "$J" '[d["record"][k] for k in ("duration", "triggers", "active")]')" '["3","shared-file",null]' \
+  "C6: a line from before p29-13 (ten tokens, no active=) still parses: active null, the rest as written"
+sed -i.bak "s/ triggers=shared-file$/ triggers=shared-file active=2/" "$V/$SLUG.md"
+prep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" '[d["record"][k] for k in ("duration", "triggers", "active")]')" \
+  'merge|ii|["3","shared-file","2"]' "C6: an 11-token line (active=, p29-13) backs case (ii) the same, its active read"
+sed -i.bak "s/ triggers=shared-file active=2$/ triggers=shared-file/" "$V/$SLUG.md"
 main m.txt "theirs" "theirs: m (#8)"; B1=$B
 prep
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" 'd["sharedFiles"]')|$(j "$J" 'd["trouble"]')" "verify|ii|[]|[]" "C6: main moved → verify; shared files over B0..B1 only (a.txt was integrated already)"
@@ -1449,6 +1470,253 @@ lacks "$(cat "$F/prep.err")" "Traceback" "C40: … no traceback on stderr"
 has "$(cat "$F/prep.err")" "WARN: inert check error: ProofError" "C40: … one WARN line names the error"
 ok "$(ikinds)|$(iline '[ls[0]["readers"], ls[0]["error"][:26]]')" '["inert-proof-failed"]|[[],"inert check error: ProofEr"]' "C40: … and an inert-proof-failed line with error and readers []"
 unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
+
+# ======== C41–C53: the Flake check (ADR 0050, p29-9) =======================================================
+# verify --diff-base REV [--named-rerun CMD]: a red first run whose failing tests are all named, placed in a test
+# file and outside `git diff --name-only REV HEAD` re-runs them by name, then confirms with one more verifier run on
+# the same tree: green is a Flake (rc 0, <out>.flake.json verdict flake), any other red is red. The fixture: a repo
+# whose base B holds tests/test_flaky.py, tests/test_touched.py, "tests/test sp.py" and src/x.py; the task commit T
+# changes src/x.py and tests/test_touched.py. v.sh is the verifier (run n prints v.<n>.out, sleeps v.<n>.sleep, exits
+# v.<n>.rc) and r.sh the named re-run (each call's argv to r.<n>.args, sleeps r.sleep, exits r.rc), both counting; a
+# sleep is their child, its pid in v.<n>.cpid or r.cpid.
+ffx() {
+  echo "== $1"
+  F="$tmp/$1"; mkdir -p "$F"; FR="$F/repo"
+  g init -q "$FR"; mkdir -p "$FR/tests" "$FR/src"
+  for f in tests/test_flaky.py tests/test_touched.py "tests/test sp.py" src/x.py; do printf 'base\n' > "$FR/$f"; done
+  g -C "$FR" add . && g -C "$FR" commit -q -m base; FB=$(git -C "$FR" rev-parse HEAD)
+  printf 'task\n' > "$FR/src/x.py"; printf 'task\n' > "$FR/tests/test_touched.py"
+  g -C "$FR" commit -q -am task; FT=$(git -C "$FR" rev-parse HEAD)
+  printf 'outside\n' > "$F/outside.py"
+  mkdir -p "$F/bin"
+  cat > "$F/bin/v.sh" <<'SH'
+d="$(dirname "$(dirname "$0")")"; n=$(( $(cat "$d/v.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/v.count"
+[ -f "$d/v.$n.out" ] && cat "$d/v.$n.out"
+[ -f "$d/v.$n.sleep" ] && { sleep "$(cat "$d/v.$n.sleep")" & echo $! > "$d/v.$n.cpid"; wait; }
+exit "$(cat "$d/v.$n.rc" 2>/dev/null || echo 0)"
+SH
+  cat > "$F/bin/r.sh" <<'SH'
+d="$(dirname "$(dirname "$0")")"; n=$(( $(cat "$d/r.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/r.count"
+for a in "$@"; do printf '%s\n' "$a"; done > "$d/r.$n.args"
+[ -f "$d/r.sleep" ] && { sleep "$(cat "$d/r.sleep")" & echo $! > "$d/r.cpid"; wait; }
+exit "$(cat "$d/r.rc" 2>/dev/null || echo 0)"
+SH
+  O="$F/out/v"; NR="bash $F/bin/r.sh {tests}"
+}
+red1() { printf '%s\n' "$@" > "$F/v.1.out"; echo 1 > "$F/v.1.rc"; }   # the first run fails, printing these lines
+vf() { python3 "$LI" verify --tree "$FR" --out "$O" --timeout "${VT:-60}" --verifier "bash $F/bin/v.sh" "$@" >/dev/null 2>"$F/vf.err"; vrc=$?; }
+fj() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); v=eval(sys.argv[2]); print(v if isinstance(v, str) else json.dumps(v, separators=(",", ":"), ensure_ascii=False))' "$O.flake.json" "$1" 2>/dev/null || echo "<no flake.json>"; }
+cnt() { cat "$F/$1.count" 2>/dev/null || echo 0; }
+rcof() { cat "$O.rc" 2>/dev/null || echo none; }
+
+# C41: one out-of-diff test fails, passes its named re-run, and the confirming run is green: a Flake, rc 0.
+ffx c41
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$vrc|$(rcof)" "0|0" "C41: a red on one out-of-diff test, green named re-run and confirming run → rc 0"
+ok "$(fj 'd["verdict"]')|$(fj 'd["why"]')|$(fj 'd["flakes"]')" 'flake||["tests/test_flaky.py::test_a"]' "C41: flake.json reads flake, the first-run id its Flake"
+ok "$(fj 'd["v"]')|$(fj 'd["sha"]')|$(fj 'd["diffBase"]')|$(fj 'd["failing"]')|$(fj 'd["touched"]')|$(fj 'd["timeout"]')" \
+  "1|$FT|$FB|[\"tests/test_flaky.py::test_a\"]|[]|null" "C41: … with the tree's sha, the diff base, the failing ids, none touched, no timeout"
+ok "$(cnt v)|$(cnt r)|$(cat "$F/r.1.args")" "2|1|tests/test_flaky.py::test_a" "C41: the verifier ran twice, the named re-run once with exactly that id"
+has "$(cat "$O.log")" "== named re-run: bash $F/bin/r.sh tests/test_flaky.py::test_a" "C41: the log names the named re-run"
+has "$(cat "$O.log")" "== named re-run rc 0" "C41: … and its rc"
+has "$(cat "$O.log")" "== confirming run: bash $F/bin/v.sh" "C41: … and the confirming run"
+has "$(cat "$O.log")" "== confirming run rc 0" "C41: … and its rc"
+
+# C42: the named re-run is red: red at once, its rc kept, no full run.
+ffx c42
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'; echo 4 > "$F/r.rc"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["verdict"]')|$(fj 'd["why"]')|$(fj 'd["flakes"]')" "4|1|1|red|named-red|[]" "C42: a red named re-run → red (its rc), no confirming run"
+
+# C43: the named re-run is green but the confirming run is red: red, its own rc.
+ffx c43
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'; printf 'FAILED tests/test_flaky.py::test_b\n' > "$F/v.2.out"; echo 2 > "$F/v.2.rc"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["verdict"]')|$(fj 'd["why"]')" "2|2|1|red|confirm-red" "C43: a green named re-run, then a red confirming run → red (its rc)"
+ok "$(fj 'd["failing"]')" '["tests/test_flaky.py::test_a"]' "C43: … failing names the first run's ids only"
+
+# C44: a failing test the diff touches: red, no re-run.
+ffx c44
+red1 'FAILED tests/test_touched.py::test_b - AssertionError'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["verdict"]')|$(fj 'd["why"]')|$(fj 'd["touched"]')" '1|1|0|red|touched|["tests/test_touched.py::test_b"]' "C44: a touched test → red, no re-run"
+
+# C45: one touched and one untouched: red, no re-run.
+ffx c45
+red1 'FAILED tests/test_flaky.py::test_a' 'FAILED tests/test_touched.py::test_b'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["why"]')" "1|1|0|touched" "C45: one touched, one untouched → red, no re-run"
+
+# C46: a red that names no test, one whose test cannot be placed, and one past the parser's cap: red, no re-run.
+ffx c46
+red1 'src/x.py:1:80: E501 line too long'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["why"]')|$(fj 'd["failing"]')" "1|1|0|unnamed|[]" "C46: a lint red names no test → red (unnamed), no re-run"
+ffx c46b
+red1 '✖ D14. x (12ms)'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt r)|$(fj 'd["why"]')|$(fj 'd["failing"]')" '1|0|unplaced|["D14. x"]' "C46: a spec name placed in no test file → red (unplaced), no re-run"
+ffx c46c
+for i in $(seq 1 55); do printf 'FAILED tests/test_flaky.py::test_%s\n' "$i"; done > "$F/v.1.out"; echo 1 > "$F/v.1.rc"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt r)|$(fj 'd["why"]')|$(fj 'len(d["failing"])')" "1|0|too-many|50" "C46: more failures than the parser's cap → red (too-many), no re-run"
+
+# C47: timeouts. The first run's deadline: rc 124, no re-run; the confirming run's: red; no harness time left: red.
+ffx c47
+echo 5 > "$F/v.1.sleep"
+VT=1 vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt r)|$(fj 'd["verdict"]')|$(fj 'd["why"]')|$(fj 'd["timeout"]')" '124|0|red|timeout|{"run":"first","seconds":1}' "C47: the first run's deadline → rc 124, red (timeout, first), no re-run"
+ffx c47b
+red1 'FAILED tests/test_flaky.py::test_a'; echo 5 > "$F/v.2.sleep"
+VT=2 vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["why"]')|$(fj 'd["timeout"]["run"]')|$(fj 'd["timeout"]["seconds"]')" "124|2|1|timeout|confirm|2" "C47: the confirming run's deadline → rc 124, red (timeout, confirm)"
+has "$(cat "$O.log")" "during the confirming run" "C47: … and the log names it"
+ffx c47c
+red1 'FAILED tests/test_flaky.py::test_a'
+THREAD_VERIFY_HARNESS_S=600 vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["why"]')|$(fj 'd["timeout"]')" "1|1|0|no-time|null" "C47: no harness time left → red (no-time), nothing re-run"
+
+# C48: the RACE form: the same check on the detached tree at the merge commit, the merged task's diff (H^1..H).
+ffx c48
+g -C "$FR" checkout -q -b task; g -C "$FR" checkout -q -B master "$FB"
+printf 'main\n' > "$FR/m.txt"; g -C "$FR" add m.txt; g -C "$FR" commit -q -m main
+g -C "$FR" merge -q --no-ff --no-edit task; FH=$(git -C "$FR" rev-parse HEAD)
+RT="$FR/.claude/worktrees/race-x"
+red1 'FAILED tests/test_flaky.py::test_a'
+python3 "$LI" verify --repo "$FR" --detach-at "$FH" --tree "$RT" --out "$O" --timeout 60 --verifier "bash $F/bin/v.sh" --diff-base "$FH^1" --named-rerun "$NR" >/dev/null 2>&1
+ok "$(rcof)|$(fj 'd["verdict"]')|$(fj 'd["sha"]')|$(cnt v)|$(cnt r)" "0|flake|$FH|2|1" "C48: a RACE re-verify's out-of-diff red cleared by its named re-run and confirming run → green, a Flake"
+ok "$([ -e "$RT" ] && echo left || echo removed)" removed "C48: … the race tree is removed"
+lacks "$(git -C "$FR" worktree list)" "race-x" "C48: … and unregistered"
+rm -f "$F"/v.* "$F"/r.*; red1 'FAILED tests/test_flaky.py::test_a'; echo 1 > "$F/r.rc"
+python3 "$LI" verify --repo "$FR" --detach-at "$FH" --tree "$RT" --out "$O" --timeout 60 --verifier "bash $F/bin/v.sh" --diff-base "$FH^1" --named-rerun "$NR" >/dev/null 2>&1
+ok "$(rcof)|$(fj 'd["why"]')|$([ -e "$RT" ] && echo left || echo removed)" "1|named-red|removed" "C48: a repeat red (the named re-run) stays red; the tree is removed"
+lacks "$(git -C "$FR" worktree list)" "race-x" "C48: … and pruned"
+rm -f "$F"/v.* "$F"/r.*; red1 'FAILED tests/test_touched.py::test_b'
+python3 "$LI" verify --repo "$FR" --detach-at "$FH" --tree "$RT" --out "$O" --timeout 60 --verifier "bash $F/bin/v.sh" --diff-base "$FH^1" --named-rerun "$NR" >/dev/null 2>&1
+ok "$(rcof)|$(fj 'd["why"]')|$(cnt r)" "1|touched|0" "C48: the merged task's own test is touched: red, no re-run"
+
+# C49: no --named-rerun: the check cannot re-run by name, so the red stays red.
+ffx c49
+red1 'FAILED tests/test_flaky.py::test_a'
+vf --diff-base "$FB"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["verdict"]')|$(fj 'd["why"]')" "1|1|0|red|no-named-rerun" "C49: no --named-rerun → red (no-named-rerun), no re-run"
+ffx c49b
+red1 'FAILED tests/test_flaky.py::test_a'
+vf
+ok "$(rcof)|$([ -e "$O.flake.json" ] && echo file || echo none)|$(cnt v)" "1|none|1" "C49: no --diff-base → red as before, no flake.json"
+ffx c49c
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["verdict"]')|$(cnt v)|$(cnt r)" "0|green|1|0" "C49: a green first run → flake.json green, nothing re-run"
+vf --diff-base "no-such-rev" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["verdict"]')" "0|green" "C49: … a green run never reads the diff"
+rm -f "$F"/v.* "$F"/r.*; red1 'FAILED tests/test_flaky.py::test_a'
+vf --diff-base "no-such-rev" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["why"]')|$(cnt r)" "1|diff|0" "C49: an unreadable diff base → red (diff), no re-run"
+
+# C50: refusals (exit 2, no rc file): --diff-base with --outcome, a --named-rerun without exactly one {tests}, or
+# without --diff-base.
+ffx c50
+for bad in "--diff-base $FB --outcome" "--diff-base $FB --named-rerun x" "--named-rerun {tests}"; do
+  vf $bad
+  ok "$vrc|$(rcof)" "2|none" "C50: $bad → exit 2, no rc"
+done
+vf --diff-base "$FB" --named-rerun "r {tests} {tests}"
+ok "$vrc|$(rcof)" "2|none" "C50: a --named-rerun with two {tests} → exit 2, no rc"
+
+# C51: ids with spaces and quotes reach the named re-run as single argv words; a ../ or absolute path outside the
+# tree is unplaced; an absolute path inside the tree is made relative.
+ffx c51
+Q='tests/test_flaky.py::test_q["it'"'"'s$x`y`;|&"]'
+red1 "not ok 1 - tests/test sp.py::test_s" "FAILED $Q"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["verdict"]')|$(cnt r)" "0|flake|1" "C51: a spaced and a quoted id → a Flake"
+ok "$(cat "$F/r.1.args")" "$(printf '%s\n%s' "tests/test sp.py::test_s" "$Q")" "C51: … each reaches the named re-run as one argv word, byte for byte"
+ffx c51b
+red1 'FAILED ../outside.py::test_o'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["why"]')|$(cnt r)" "1|unplaced|0" "C51: a ../ path outside the tree → unplaced"
+ffx c51c
+red1 "FAILED $F/outside.py::test_o"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["why"]')|$(cnt r)" "1|unplaced|0" "C51: an absolute path outside the tree → unplaced"
+ffx c51d
+red1 "FAILED $FR/tests/test_flaky.py::test_a" "FAILED tests::test_dir"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["why"]')" "1|unplaced" "C51: a directory is no test file → unplaced"
+ffx c51e
+red1 "FAILED $FR/tests/test_flaky.py::test_a"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["verdict"]')" "0|flake" "C51: an absolute path inside the tree is made relative and placed"
+
+# C52: the SKILL.md verify line, filled (<mainSha> and <named_rerun>; --named-rerun dropped when there is none), runs
+# under bash and zsh -f.
+ffx c52
+R0=${R:-}; R=$FR
+for sh in "${shells[@]}"; do
+  n=$(basename "${sh%% *}")
+  for nr in "$NR" ""; do
+    rm -rf "$FR/.claude/integration" "$F"/v.* "$F"/r.*; red1 'FAILED tests/test_flaky.py::test_a'
+    cmd=$(MAIN_SHA="$FB" NAMED_RERUN="$nr" verify_line "$FR" "$SLUG" "bash $F/bin/v.sh")
+    CLAUDE_PLUGIN_ROOT="$root" $sh -c "$cmd" >/dev/null 2>&1
+    O="$FR/.claude/integration/$SLUG"
+    if [ -n "$nr" ]; then
+      ok "$(rcof)|$(fj 'd["verdict"]')|$(cnt r)" "0|flake|1" "C52 $n: the filled verify line with named_rerun → the Flake check clears it"
+    else
+      ok "$(rcof)|$(fj 'd["why"]')|$(cnt r)" "1|no-named-rerun|0" "C52 $n: … with no named_rerun the line has no --named-rerun, and the red stays red"
+    fi
+  done
+done
+R=$R0
+
+# C53: a signal during the Flake check. TERM to verify while the named re-run (r.sh) sleeps, and while the confirming
+# run (v.sh's second call) sleeps, unslotted and slotted (--slots 1 --slot-wait 5): rc 143, flake.json red with why
+# `signal`, the sleeping child gone (verify kills the step's process group, through its guard when slotted), and the
+# verify slot free. Structural, as C17 is: the children sleep 3205 s+, so only verify's kill can end them.
+for arm in named confirm; do
+  for mode in unslotted slotted; do
+    ffx "c53-$arm-$mode"
+    red1 'FAILED tests/test_flaky.py::test_a'
+    if [ "$arm" = named ]; then echo "3205.$u" > "$F/r.sleep"; cp="$F/r.cpid"; else echo "3206.$u" > "$F/v.2.sleep"; cp="$F/v.2.cpid"; fi
+    SL=""; [ "$mode" = slotted ] && SL="--slots 1 --slot-wait 5"
+    python3 "$LI" verify --tree "$FR" --out "$O" --timeout 600 --verifier "bash $F/bin/v.sh" --diff-base "$FB" --named-rerun "$NR" $SL >/dev/null 2>&1 &
+    vp=$!
+    c53up() { test -s "$cp" || ! kill -0 "$vp"; }
+    within 300 c53up && test -s "$cp" && st=sleeping || st="not sleeping (verify ended, or 300 s passed)"
+    ok "$st" sleeping "C53 $arm $mode: the $arm run's child sleeps before the TERM"
+    if [ "$mode" = slotted ]; then
+      has "$(cat "$O.log")" "== verify slot 1 of 1 after" "C53 $arm $mode: … in the pool's only verify slot"
+      ok "$(vstate)" held "C53 $arm $mode: … held while it sleeps"
+    fi
+    kill -TERM "$vp" 2>/dev/null; wait "$vp"; vrc=$?
+    ok "$vrc|$(rcof)|$(fj 'd["verdict"]')|$(fj 'd["why"]')" "143|143|red|signal" "C53 $arm $mode: TERM mid-run → exit 143, rc 143, flake.json red, why signal"
+    ok "$(reaped "$(cat "$cp" 2>/dev/null)")" gone "C53 $arm $mode: … the sleeping child is gone"
+    has "$(cat "$O.log")" "stopped by signal 15; killed the process group (rc 143)" "C53 $arm $mode: … the log says so"
+    if [ "$arm" = named ]; then ok "$(cnt v)|$(cnt r)" "1|1" "C53 $arm $mode: … stopped in the named re-run, no confirming run"
+    else ok "$(cnt v)|$(cnt r)" "2|1" "C53 $arm $mode: … stopped in the confirming run"; fi
+    within 60 vfree && st=free || st="held after 60 s"
+    ok "$st" free "C53 $arm $mode: … and the verify slot is free"
+  done
+done
+ok "$(sleepers "sleep 320[56]\.$u")" 0 "C53: no Flake-check child survives"
+
+# C54 (p29-9 beside p29-10's suite record): --rollout with --diff-base. A Flake ends its one suite green, rc 0; a
+# deadline in the confirming run ends it timeout, its step the verifier, failing the first run's ids.
+fsq() {  # fsq <python expr over L, the suite record's lines>
+  python3 -c 'import json,sys; L=[json.loads(x) for x in open(sys.argv[1]) if x.strip()]; print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))' "$FEV/ro.jsonl" "$1" 2>/dev/null || echo none
+}
+ffx c54
+FEV="$F/events"; mkdir -p "$F/v" "$F/home"; : > "$F/v/ro.md"
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'
+HOME="$F/home" THREAD_EVENTS_DIR="$FEV" vf --diff-base "$FB" --named-rerun "$NR" --rollout "$F/v/ro.md" --slug t1
+ok "$(rcof)|$(fj 'd["verdict"]')|$(fsq '[[d["kind"], d.get("outcome"), d.get("rc"), "failing" in d] for d in L]')" \
+  '0|flake|[["suite-started",null,null,false],["suite-ended","green",0,false]]' "C54: --rollout: a Flake ends its one suite green, rc 0"
+ffx c54b
+FEV="$F/events"; mkdir -p "$F/v" "$F/home"; : > "$F/v/ro.md"
+red1 'FAILED tests/test_flaky.py::test_a'; echo 5 > "$F/v.2.sleep"
+HOME="$F/home" THREAD_EVENTS_DIR="$FEV" VT=2 vf --diff-base "$FB" --named-rerun "$NR" --rollout "$F/v/ro.md" --slug t1
+ok "$(rcof)|$(fj 'd["timeout"]["run"]')|$(fsq '[[d.get("outcome"), d.get("rc"), d.get("step"), d.get("timeout"), d.get("failing")] for d in L if d["kind"] == "suite-ended"]')" \
+  '124|confirm|[["timeout",124,"verifier",2,["tests/test_flaky.py::test_a"]]]' "C54: a deadline in the confirming run ends the suite timeout (step verifier), failing the first run's ids"
 
 # ======== S1–S8: verify --rollout records its suite in the Run record (p29-10, ADR 0051) ========================
 # by integration (with --slug), race (--detach-at) or completion (--outcome, no task), runner lead; suite-started after

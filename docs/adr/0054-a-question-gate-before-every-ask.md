@@ -79,11 +79,10 @@ Each row is one ask unit (a paragraph, list item or table row) in `skills/`, fou
 unit holds. Dispositions: `cited` (the ask stands and its unit cites `_shared/asking.md`), `listed` (a pointer at an
 ask another unit holds, whose Owner it shares: it cites `_shared/asking.md` too), `follow-up` (an ask the gate
 removes, left to the owner task named in Task and put in the Framing until it lands), `no ask` (the unit names an ask
-only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 78
-rows: 36 cited, 30 follow-up (p30-4 14, p30-5 1, p30-9 2, p30-10 13), 2 listed, 7 no ask, 3 designed out. That is
-form N2, built while p30-5 (PR #226) was not on main; once it lands, the next row becomes N1's three `cited` rows,
-p30-5 leaves § Follow-ups, and the count above reads 80 rows: 39 cited, 29 follow-up (p30-4 14, p30-9 2, p30-10 13),
-2 listed, 7 no ask, 3 designed out.
+only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 67
+rows: 40 cited, 15 follow-up (p30-9 2, p30-10 13), 2 listed, 7 no ask, 3 designed out. That is form N1:
+p30-5 (PR #226) is on main, its step 4 cited in three units. p30-4 (the approved queue) removed its 14 rows. Orient
+§ 3.5's Priorities card (p30-6, Chorus ADR 0110 d5) added one `cited` row.
 
 | File | § | Anchor | Owner | Disposition | Task |
 | --- | --- | --- | --- | --- | --- |
@@ -99,6 +98,7 @@ p30-5 leaves § Follow-ups, and the count above reads 80 rows: 39 cited, 29 foll
 | skills/open/SKILL.md | § Repo-thread lookup | `` list them as `<label> — <abs path>` and ask `` | *yours* | cited | — |
 | skills/orient/SKILL.md | § 1 | `` report its one `resolve-target:` line and ask in plain text for the target `` | *yours* | cited | — |
 | skills/orient/SKILL.md | § 1 | `` **`candidates` or `none`** → ask before any § 2 read `` | *yours* | cited | — |
+| skills/orient/SKILL.md | § 3.5 | `` in one `AskUserQuestion` call of four questions `` | *yours* | cited | — |
 | skills/orient/SKILL.md | § 6 | `` steer it with `AskUserQuestion` `` | *yours* | cited | — |
 | skills/orient/reshuffle.md | R3 | `` Ask Lachy only the questions he owns `` | *yours* | cited | — |
 | skills/orient/reshuffle.md | R4 | `` Print the final disposition table and get a y/n `` | *yours* (ADR 0036) | cited | — |
@@ -123,21 +123,9 @@ p30-5 leaves § Follow-ups, and the count above reads 80 rows: 39 cited, 29 foll
 | skills/schedule/SKILL.md | § 3.5 | `` Put each gate to the user in the confirm batch `` | *yours* | cited | — |
 | skills/schedule/SKILL.md | § 3.6 | `` **Ask ahead (ADR 0034) `` | *yours* | cited | — |
 | skills/status/SKILL.md | § 1 | `` **list the matches and ask which**: don't assume `` | *yours* | cited | — |
-| skills/schedule/SKILL.md | § 0 | `` if there is none, ask the user for the path `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 1 | `` Report the count and let the user confirm before proceeding `` | *gate* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 2.5 | `` ask the user to confirm or override before continuing `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 2.6 | `` ask the user for the known baseline failures `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 2.6 | `` offer to run the verifier once on a clean `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 2.7 | `` Otherwise ask the user (the common shapes `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 3 | `` surface them in the confirm batch (step 5) when the dependant `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 4.5 | `` **Confirm the result before writing.** `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 4.7 | `` Present the offers in the confirm batch `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 5 | `` A dependency cycle stays a Don't: surface it and ask `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 5 | `` Propose `solo: true` for a `queued` task `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § 8 | `` ask the user which it is `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § Serial path | `` **S4. Gates and confirm.** `` | *technical* | follow-up | p30-4 |
-| skills/schedule/SKILL.md | § Don'ts | `` surface and ask. (This is about *dependency* cycles `` | *technical* | follow-up | p30-4 |
-| skills/next/SKILL.md | § Process | `` **Offer the routes via `AskUserQuestion`** `` | *gate* | follow-up | p30-5 |
+| skills/next/SKILL.md | § Process | `` **An open question this session left** `` | *yours* (step 3 decides the rest) | cited | — |
+| skills/next/SKILL.md | § Process | `` **Decide the move, and say so in one line.** `` | *gate* | cited | — |
+| skills/next/SKILL.md | § Process | `` **The menu, when the move is not clear.** `` | *yours* | cited | — |
 | skills/orient/SKILL.md | § 9 | `` end with `AskUserQuestion`, recommended option first, one offer per parallel note `` | *gate* | follow-up | p30-9 |
 | skills/schedule/SKILL.md | § 8 | `` **Start when ready.** When Lachy answers a standalone run's summary `` | *gate* | follow-up | p30-9 |
 | skills/schedule/SKILL.md | § 0 | `` ask one AskUserQuestion, "Create the rollout clone `` | *technical* (ADR 0042 holds it) | follow-up | p30-10 |
@@ -171,19 +159,6 @@ p30-5 leaves § Follow-ups, and the count above reads 80 rows: 39 cited, 29 foll
 Each owner task removes its rows' asks (answering each as orient-all § 6 step 3 answers schedule's questions, listed
 as Decided for you) and deletes its rows; q5 fails a row whose ask is gone, so a landed task cannot leave one behind.
 
-- [[thread-skill-p30-4-merge-regenerate-and-start-in-one-chain]] (p30-4): 14 rows, schedule's standalone confirms
-  and technical asks: a queue he already approved is never confirmed again (Q54).
-- [[thread-skill-p30-5-next-decides-housekeeping]] (p30-5): 1 row, next's step-4 menu (PR #226). On landing it takes
-  form N1: the open-question bullet gains "(by its Owner, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1)"
-  after "step 3 settles", the step-4 lead ends "The gate: `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1.", and
-  the menu reads "Offer the routes via `AskUserQuestion`, in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`'s
-  Framing:", each clause on the same physical line as the text it joins; the next row becomes three `cited` rows in
-  `skills/next/SKILL.md` § Process: "**An open question this session left**", Owner `*yours* (step 3 decides the
-  rest)`, since step 3 decides every other kind and asks only his again; "**Decide the move, and say so in one
-  line.**", *gate*; "**The menu, when the move is not clear.**", *yours*. The § Sites count then reads as its
-  lead-in gives for N1, its "That is form N2 …" sentence becomes "That is form N1: p30-5 (PR #226) is on main, its
-  step 4 cited in three units.", and this bullet goes. The tests need no edit: question-gate's controls read the
-  count from the lead-in.
 - [[thread-skill-p30-9-schedule-ends-with-pickup-sweep-and-execute-handoff]] (p30-9): 2 rows, the execute offer at
   orient § 9 and schedule's **Start when ready.**
 - [[thread-skill-p30-10-the-asks-the-gate-leaves-standing]] (p30-10): 13 rows. Filed by the lead at this task's
@@ -218,6 +193,11 @@ as Decided for you) and deletes its rows; q5 fails a row whose ask is gone, so a
 - The two pointer units (open § save, orient § 1's re-ask) stay `listed`: each cites the gate, and shares the Owner
   of the ask it points at.
 - The rollout clone question is *technical*, kept a question by ADR 0042 until p30-10, never *yours*.
+- p30-4's standalone schedule applies the affine merges step 4.5 picks (its row 8) and stamps the Solo calls step 5
+  judges (row 11), each listed in step 8's Decided for you, where orient-all's answers 10 and 12 apply none: both are
+  technical calls the step already makes, so a listed call he can undo beats a confirm. Its rung offers go (row 9),
+  as orient-all's answer 11 has it, against ADR 0029's consequence that schedule offers a starting rung: a hard task
+  starts on the bottom rung and the engine climbs on evidence, and a rung he names is still stamped.
 - Next's form (N1 or N2) is read from the tree at build time.
 - Schedule's Scope line is left alone: its "writes to `~/repos/obsidian/Work/Tasks/`" covers the new write.
 

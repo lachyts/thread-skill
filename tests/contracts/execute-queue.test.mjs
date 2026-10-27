@@ -459,8 +459,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // paragraph says the wait never counts against the deadline and the guard ends a SIGKILLed verify's verifier; § 3
   // has the machine-wide `verify_slots` row and verify-timeout's exit-3 halt with its "does not clear" remedy; § 4
   // passes `verifySlot` (and a resume never adds it); the *Verify slots* paragraph names both Integration waiters (the
-  // lead's `lead-integrate.py verify` and the integrate call's `run --priority`), the guard and `status`; § 7 lists
-  // the three halts.
+  // lead's `lead-integrate.py verify` and the integrate call's `run --priority`), the guard and `status`, and (p31-3)
+  // that an agent waits for its verdict inside its turn with `verify-slot.py wait`; § 7 lists the three halts.
   {
     const SLOTS = '--slots <verify_slots> --slot-wait <slot_wait>'
     const vsRow = s3raw.split('\n').find((l) => l.startsWith('| `verify_slots` |')) ?? ''
@@ -486,6 +486,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
       !s4.includes('adding `defaultBranch` or `verifySlot` to a run that started without it changes prompt bytes') ||
       !vsP.includes("The lead's `lead-integrate.py verify` (the Integration verify and the RACE re-verify) and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode) register as Integration waiters") ||
       !vsP.includes('before the verify slot frees') || !vsP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status --slots <verify_slots>`') ||
+      !vsP.includes('verify-slot.py wait --log') || !vsP.includes('waits inside its turn') ||
       !s7.includes('`reason="RACE: no verify slot for the re-verify of [[slug]]"`') || !s7.includes('`reason="no verify slot for [[slug]] in 3 tries"`') ||
       !s7.includes('`reconcile-rollout.py verify-timeout` exits 3 at an entry (§ 3: `reason="rollout settings refused"`') ||
       !s7.includes('stamping a key does not clear it')) {
@@ -497,7 +498,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // plan`, read at that launch only (Restart routing's revise reuses step 1.2's) and passed verbatim. The integrate
   // call (step 3) carries no `plan`: its integrator reads the note's `## Approved plan` itself (p27-1), so § 4.5 names
   // `lead-integrate.py plan` once. No empty-plan literal is left; § 6 lists the row's `plan` (then p21-3's
-  // `reviewVerdicts`, the row's last key), reconcile's three outcomes and who reads the section back.
+  // `reviewVerdicts` and p29-9's `flakes`, the row's last key), reconcile's three outcomes and who reads the section back.
   const planHits = (section(skill, S45) ?? '').split('lead-integrate.py plan').length - 1
   const s6 = S(skill, S6)
   const VERBATIM = 'passed verbatim as the same JSON string, never retyped, summarised or truncated'
@@ -506,7 +507,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !st3.includes('trouble, landed, reviewHistory') || st3.includes('landed, plan') ||
     !st3.includes("It carries no `plan` (p27-1): the integrator reads the task note's `## Approved plan` itself") ||
     planHits !== 1 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
-    !s6.includes('gatedInputs, plan, reviewVerdicts }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
+    !s6.includes('gatedInputs, plan, reviewVerdicts, flakes }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
     !s6.includes('`""` removes that section') || !s6.includes('`null` or absent leaves it') ||
     !s6.includes("`lead-integrate.py plan` reads it back for §4.5 step 1.2's seeded revise")) {
     fails.push('approved-plan')
@@ -1020,7 +1021,7 @@ test('control: a double-quoted verifier on the verify line fails verify-bound', 
 })
 
 test('control: a double-quoted RACE re-verify fails verify-bound', () => {
-  only(sk("--bootstrap '<env_bootstrap>' --verifier '<verifier>'` in the background", '--bootstrap "<env_bootstrap>" --verifier "<verifier>"` in the background'),
+  only(sk("--bootstrap '<env_bootstrap>' --verifier '<verifier>' --diff-base '<the merge commit>^1'", '--bootstrap "<env_bootstrap>" --verifier "<verifier>" --diff-base \'<the merge commit>^1\''),
     'verify-bound', 'dq race')
 })
 
@@ -1155,6 +1156,11 @@ test('control: § 3 without the "does not clear" remedy fails verify-slots', () 
 
 test('control: a priority sentence without the integrator fails verify-slots', () => {
   only(sk(" and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode)", ''), 'verify-slots', 'no integrator')
+})
+
+test('control: Verify slots without the in-turn wait (p31-3) fails verify-slots', () => {
+  const p = real.skill.split('**An agent waits for its verdict** (p31-3)')[1].split(' **Every suite is recorded**')[0]
+  only(sk(' **An agent waits for its verdict** (p31-3)' + p, ''), 'verify-slots', 'no in-turn wait')
 })
 
 test('control: a verify_timeout check read as each task starts fails verify-timeout', () => {

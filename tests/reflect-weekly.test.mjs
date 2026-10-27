@@ -384,6 +384,34 @@ test('span: a missing note is scored by slug and flagged; without --fold the eve
   assert.deepEqual(listing(h.out).filter((f) => !/^(span\.json|orphan\.score\.json)$/.test(f)), [], 'span writes only under --out\'s dir')
 })
 
+// p29-13: the Integration lane's time comes from the rollout's task notes' ## Integration log lines, priced by each
+// line's active figure (active=: the wall less the stalls the Run record logs inside it), never by its wall duration=.
+test('span: laneTime prices the Integration lane by each log line\'s active figure, a stall never as lane work; a line from before p29-13 reads its wall; out-of-window and other rollouts\' lines are not read', (t) => {
+  const h = setup(t)
+  emitAll(h, 'demo', byTs([
+    ...life('stalled', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '15:40')] }),
+    ...life('old', W(6, '00:00'), W(6, '01:00'), { lane: [W(6, '01:00'), W(6, '01:45')] }),
+    ...life('moved', W(6, '02:00'), W(6, '03:00'), { lane: [W(6, '03:00'), W(6, '03:15')] }),
+    [W(6, '04:00'), 'lane-taken', 'unlogged', {}]]))
+  rolloutNote(h, 'demo')
+  const log = (lines) => `## Integration log\n\n${lines.join('\n')}\n`
+  const L = (at, rest) => `${at} integrated path=integrator pr=7 anchor=- head=- base=- wait=1 ${rest}`
+  taskNote(h, 'stalled', { fm: ['rollout: "[[demo]]"'], body: log([
+    L('2026-09-01T11:00+10:00', 'duration=30 triggers=- active=30'), // before since: another week's
+    L('2026-09-04T11:00+10:00', 'duration=876 triggers=conflict active=306'),
+    L('-', 'duration=5 triggers=- active=5')]) }) // no startedAt: never placed in a window
+  taskNote(h, 'old', { fm: ['rollout: "[[demo]]"'], archived: true, body: log([L('2026-09-06T11:00+10:00', 'duration=40 triggers=-')]) })
+  taskNote(h, 'moved', { fm: ['rollout: "[[other]]"'], body: log([L('2026-09-06T13:00+10:00', 'duration=10 triggers=- active=10')]) })
+  taskNote(h, 'unlogged', { fm: ['rollout: "[[demo]]"'] })
+  const lt = entryOf(span(h), 'demo').laneTime
+  assert.deepEqual(lt, {
+    integrations: 2, minutes: 346, wallMinutes: 916, stalledMinutes: 570, wallOnly: 1, unmeasured: 0,
+    lines: [
+      { task: 'stalled', startedAt: '2026-09-04T11:00+10:00', outcome: 'integrated', path: 'integrator', wall: 876, active: 306, lane: 306 },
+      { task: 'old', startedAt: '2026-09-06T11:00+10:00', outcome: 'integrated', path: 'integrator', wall: 40, active: null, lane: 40 }],
+  }, '306 active of the 876-minute window, and the old line\'s 40 wall: the 9.5-hour stall is no lane time')
+})
+
 // p29-10 (ADR 0051): the time-lost ledger's lines are never read as a rollout's (score.py's LEDGER_KINDS), so a rollout
 // whose only in-window lines are ledger lines (a heartbeat's lead-entries, a stop) is not read this week; one with a real
 // line is. p29-11: the Time-lost ledger still counts it.

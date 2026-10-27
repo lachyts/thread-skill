@@ -154,7 +154,7 @@ A Prompt that starts `[Reported back by Chorus from …` in the Session of a Leg
 
 ## Room stop
 
-A Chorus room signal (execute § Room stop, item 1) in a Leg: claim nothing new, finish the step in hand (a commit, a `leg.py` verb), and end the turn on `leg.py next --waiting "room stop: <text>"`'s `status_line` (`waiting reason="room stop: …"`). The Stage's re-send re-enters `/thread:execute`, and `begin` resumes this session's Leg silently. A review agent lost to the switch is re-dispatched once. The room stop writes nothing to the rollout note.
+A Chorus room signal (execute § Room stop, item 1, a spread's included) in a Leg: claim nothing new, finish the step in hand (a commit, a `leg.py` verb), and end the turn on `leg.py next --waiting "room stop: <text>"`'s `status_line` (`waiting reason="room stop: …"`). `<text>` opens as execute item 2's line does: `<Login> at its week's line`, `<Login> at its 5-hour line`, or for a spread `<Login> spreading its Rollouts (would reach its 5-hour line ~HH:MM)`, never `at its 5-hour line`. The Stage's re-send re-enters `/thread:execute`, and `begin` resumes this session's Leg silently. A review agent lost to the switch is re-dispatched once. The room stop writes nothing to the rollout note.
 
 ## Concurrency
 
