@@ -152,7 +152,9 @@ mkpr() {  # mkpr <n> <head>: GitHub's PR n (audit-fix/t5 into master) with its h
 }
 mt() { : > "$MT_STATE/gh.log"; out=$(PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$R" "$@" 2>&1); rc=$?; }
 rec() { python3 "$RR" reconcile --result - --tasks-dir "$V" --now "${2:-2026-10-02T12:00:00Z}" <<<"$1" >/dev/null; }
-nxt() { python3 "$RR" next --rollout "$V/ro.md" --tasks-dir "$V" --now 2026-10-02T12:30:00Z --running "$1" 2>/dev/null; }
+# next off --dry-run writes the lead's lease under HOME (p28-4): its own HOME, so no lease lands in run.sh's shared one.
+NEXT_HOME="$tmp/next-home"; mkdir -p "$NEXT_HOME"
+nxt() { HOME="$NEXT_HOME" python3 "$RR" next --rollout "$V/ro.md" --tasks-dir "$V" --now 2026-10-02T12:30:00Z --running "$1" 2>/dev/null; }
 inp() { python3 "$LI" inputs --note "$V/$1.md" "${@:2}"; }
 lastrun() { python3 - "$1" <<PY
 import importlib.util, sys

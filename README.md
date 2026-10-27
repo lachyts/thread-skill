@@ -111,7 +111,10 @@ included. To run a night at the Away cap without a writer, write the file by
 hand (`skills/execute/away.md` § Without a writer shows how); a hand-written
 file goes stale 24 h after its `written_at` (or at its `until`), and from then
 on each lead prints a `WARN: ~/.config/thread/away.json stale: …` line and the
-Mac is back at 2.
+Mac is back at 2. Each lead also keeps a lease, `~/.config/thread/leases/<rollout>.json`,
+rewritten at its every `next` and loop entry; a rollout whose lease has lapsed (45
+minutes after its last write, or after the Mac's latest boot or wake if later,
+unless a room stop stands) stops holding room in the count.
 
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through

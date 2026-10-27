@@ -143,7 +143,7 @@ function checkLedger(md) {
     collapse(s2).includes("from the engine root (§ 1.5's hand-over): before § 2.5, § 2.6, § 2.7, § 2.8, § 3's `verify_timeout` check and `check-all`"))
   const p = labelled(md, 'Run record.')
   need('entry-bullet', p.includes('- `record-entry --rollout <rollout-note> --by <by> [--cause <cause>]` (ADR 0051, p29-10): every loop entry runs it once, as its first write.') &&
-    p.includes("right after § 2's lineage, version and shape lines pass") && p.includes('It writes only the Run record, never the vault or git') &&
+    p.includes("right after § 2's lineage, version and shape lines pass") && p.includes("It writes only the Run record and the lead's lease (`skills/execute/away.md` § The Trickle), never the vault or git") &&
     p.includes("The heartbeat's lapse re-entry (clause (2) exit 4) runs it as the entry's first act; its stall re-entry (clause (7)) does not"))
   need('by-forms', [['his own `/thread:execute` or resume', 'lachy'], ['a `Chorus: ` Prompt (a start, a room resume or a re-send)', 'stage'],
     ['a `Chorus: ` Prompt naming a Watchdog recovery', 'watchdog'], ['a heartbeat tick or its re-entry', 'heartbeat'],
@@ -187,6 +187,8 @@ const ledgerControls = [
   ['entry-placement', (t) => t.replace("**The Run record's entry (ADR 0051, p29-10).**", '**The Run record.**')],
   ['entry-placement', (t) => t.replace("before § 2.5, § 2.6, § 2.7, § 2.8, § 3's `verify_timeout` check and `check-all`, so a write-nothing halt in any of them", 'after § 2.8, so a halt')],
   ['entry-bullet', (t) => t.replace('every loop entry runs it once, as its first write.', 'every loop entry runs it when convenient.')],
+  // p28-4: record-entry renews the lead's lease too, so the bullet names it beside the Run record.
+  ['entry-bullet', (t) => t.replace("It writes only the Run record and the lead's lease (`skills/execute/away.md` § The Trickle), never the vault or git: the stops", 'It writes only the Run record, never the vault or git: the stops')],
   ['by-forms', (t) => t.replace('| a heartbeat tick or its re-entry | `heartbeat` |', '| a heartbeat tick or its re-entry | `stage` |')],
   ['cause-forms', (t) => t.replace('| a usage-limit re-send | `usage-limit` |', '| a usage-limit re-send | `dead-lead` |')],
   ['no-hand-writes', (t) => t.replace('The lead adds nothing for a halt or a room stop', 'The lead writes a stop for each halt')],
