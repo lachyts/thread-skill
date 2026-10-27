@@ -402,6 +402,37 @@ test('span: a rollout whose only in-window lines are ledger lines (p29-10) is no
   assert.equal(entryOf(s, 'live-r')?.mode, 'read', 'a real in-window line does')
 })
 
+// p29-10: span drops the ledger's lines as it lists the records, so grades.py never sees them either: a task whose only
+// in-span record lines are ledger lines (a suite, why main moved) is no `record` dispatch, and the grades block is
+// byte-equal with or without them, whichever record carries them.
+test('span: the grades block is byte-equal with or without ledger lines (p29-10); a ledger line alone dispatches nothing', (t) => {
+  const h = setup(t)
+  const G = (task, ts, pass) => [ts, 'grade', task, { pass, digest: '0123456789ab', project: 'P', grade: 'Ready',
+    agentGrade: 'Ready', shape: 'parallel', size: 'S', decisions: 0, low: 0, held: false, gates: [] }, null]
+  const P1 = 'g-20260903T000000Z-000001'
+  emitAll(h, 'demo', byTs(life('a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
+  emitAll(h, null, [G('a', W(3, '00:00'), P1), G('c', W(3, '00:00'), P1)])
+  rolloutNote(h, 'demo')
+  taskNote(h, 'a', { status: 'done' })
+  taskNote(h, 'c', { status: 'done', fm: ['completed: 2026-09-05'] })
+  const before = span(h).grades
+  const suite = { suite: 's-0123456789abcdef', by: 'task', runner: 'agent' }
+  const ledger = [
+    [W(4, '05:00'), 'lead-entry', null, { by: 'heartbeat', session: 'A' }],
+    [W(4, '05:10'), 'stopped', null, { cause: 'halt', inferred: false, calls: [] }],
+    [W(4, '05:20'), 'suite-started', 'c', { ...suite, sha: 'a'.repeat(40), dirty: false }],
+    [W(4, '05:30'), 'suite-ended', 'c', { ...suite, outcome: 'green', seconds: 5 }],
+    [W(4, '05:40'), 'base-moved', 'c', { repo: 'o/r', pr: 9, base: 'b'.repeat(40), main: 'c'.repeat(40), inertOnly: false, moversTotal: 0, movers: [] }],
+  ]
+  emitAll(h, 'demo', ledger)
+  emitAll(h, 'ledger-only', ledger)
+  const s = span(h)
+  assert.equal(JSON.stringify(s.grades), JSON.stringify(before), 'the grades block is byte-equal')
+  assert.ok(!s.grades.episodes.some((e) => e.task === 'c'), JSON.stringify(s.grades.episodes))
+  assert.equal(s.grades.window.byGrade.Ready.byHand, 1, 'c, landed with no record line of its own, is by hand')
+  assert.equal(entryOf(s, 'ledger-only'), undefined, 'a record of ledger lines alone is never read')
+})
+
 test('span: close lines: a completed rollout\'s is read, a running one\'s null passes, a dropped or archived one with none is flagged; tunings.jsonl untouched', (t) => {
   const h = setup(t)
   for (const s of ['done-r', 'run-r', 'drop-r', 'arch-r']) emitAll(h, s, byTs(life(`${s}-t`, W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
@@ -570,6 +601,8 @@ test('span: two Project roots for one repo: the newest is read, flagged', (t) =>
   emitAll(h, 'r2', byTs(life('b', W(5, '00:00'), W(5, '01:00'), { lane: [W(5, '01:00'), W(5, '01:10')] })))
   rolloutNote(h, 'r1')
   rolloutNote(h, 'r2', { root: second })
+  // p29-10: a late ledger line (a heartbeat's lead-entry) in the older root's record never makes it the newest
+  emitAll(h, 'r1', [[W(6, '00:00'), 'lead-entry', null, { by: 'heartbeat', session: 'A' }]])
   const s = span(h)
   assert.ok(s.flags.some((f) => f.startsWith('repo o/r has 2 Project roots') && f.endsWith(`the newest, ${second}, is read`)), JSON.stringify(s.flags))
 })

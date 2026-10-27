@@ -47,7 +47,8 @@ date by the next Reflection, once the day is whole). An instant counts in [since
 span. The window: --until defaults to now, and a future --until is clamped to now and flagged; --since defaults to
 the last `reflection` line's until, else until - 7 days; since after until is exit 2. span mints the Reflection's id,
 r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in the events directory with a line in
-[since, until], and every `shape: serial` note directly under Work/Tasks or under Archive/Rollouts whose `## Leg log`
+[since, until] (the time-lost ledger's lines, score.py's LEDGER_KINDS, dropped as each record is listed: p29-11 reads
+them), and every `shape: serial` note directly under Work/Tasks or under Archive/Rollouts whose `## Leg log`
 has a line stamped in [since, until] (a chain records only Lachy's acts, so a hands-off one has no record line): the
 read rollouts. Each entry's shape is its note's (close-score.py's read: reconcile-rollout.py's Note and _shape;
 parallel with no note). For each:
@@ -775,7 +776,9 @@ class Span:
     # -- the records ----------------------------------------------------------------------------------------------
 
     def records(self, ev):
-        """{slug: [(ms, n, line)]} for every non-reserved record in the events directory."""
+        """{slug: [(ms, n, line)]} for every non-reserved record in the events directory, the time-lost ledger's lines
+        dropped (p29-10, score.py's LEDGER_KINDS): the one read every consumer shares (the in-window test, friction, the
+        Escapes sweep's newest root, grades.py's episodes), so none of them reads differently with or without one."""
         out = {}
         try:
             names = sorted(os.listdir(ev))
@@ -796,7 +799,7 @@ class Span:
                 continue
             if skipped:
                 self.flag("%s: %d line(s) did not parse: skipped" % (name, skipped))
-            out[name[:-6]] = lines
+            out[name[:-6]] = [x for x in lines if x[2].get("kind") not in SCORE.LEDGER_KINDS]
         return out
 
     # -- one read rollout -------------------------------------------------------------------------------------------
@@ -1500,8 +1503,7 @@ class Span:
         read, scores, entries = {}, {}, []
         for slug in sorted(records):
             lines = records[slug]
-            # A ledger line alone (p29-10, LEDGER_KINDS: a heartbeat's lead-entry, a stop) never makes a rollout read.
-            if not any(since <= t <= until and d.get("kind") not in SCORE.LEDGER_KINDS for t, _n, d in lines):
+            if not any(since <= t <= until for t, _n, _d in lines):
                 continue
             entry, sc = self.read_rollout(slug, lines, since, until, tunings_file)
             read[slug] = entry
