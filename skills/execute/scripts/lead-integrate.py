@@ -8,7 +8,7 @@ never force-pushes.
 
 Subcommands:
 
-  prepare --repo R --slug S --default D --note N [--tasks-dir T]
+  prepare --repo R --slug S --default D --note N [--tasks-dir T] [--verifier CMD [--bootstrap CMD]]
       Decide how one approved task integrates. Refuses (exit 1, nothing fetched or merged) a note with no
       `integrating:`: every route into execute § 4.5 step 3 runs mark-integrating first, so a skipped stamp
       stops here (p26-1). In order: fetch origin with --prune (retried once; failing
@@ -27,7 +27,21 @@ Subcommands:
       engine's message): a conflict records `conflictFiles`, aborts and routes `trouble ["conflict"]`; any
       other failure aborts and routes `trouble []`; success routes `verify` with `mergeCommit` (unpushed),
       `sharedFiles` (task files over B...H that main changed over TB..B, or record.base..B in case ii)
-      and `trouble` ["shared-file"] when there is one, else []. Always prints branch, worktreePath,
+      and `trouble` ["shared-file"] when there is one, else []. The Inert-path skip (ADR 0045, p29-3): with
+      --verifier given and no shared file, one inert check runs there, all of it inside one `try/except
+      Exception`: the lazy load of skills/_shared/scripts/inert-paths.py (never at module top, so a broken
+      inert-paths.py cannot break push, undo or verify), the repo's `inert_paths` (rollout-settings.py resolve()),
+      the path test on TB..B (record.base..B in case ii) and, only when every changed path is inert prose, the
+      Inert proof of the matched globs on M's tree with the verifier and bootstrap as steps and places --repo and
+      the task tree (inert-paths.py's header holds every rule). Held: route `skip` (mergeCommit M, trouble [],
+      the green run stands: push M and merge, no verifier) and a `verify-skipped` Run-record line. Failed: route
+      `verify` as today and an `inert-proof-failed` line with the readers. Any exception: no skip, `inert.why`
+      `inert check error: <Type>: <msg>` (at most 200 characters), route `verify` exactly as today, exit 0, one
+      stderr WARN line and no traceback, and an `inert-proof-failed` line with `error` and `readers: []`
+      (best-effort, through reconcile-rollout.py's _event, which never raises). `inert` is always printed:
+      {skip, why, globs, changed (at most 200), changedTotal, nonInert (at most 20), readers (at most 20)}; with
+      no --verifier, no repo table, an empty list or a refused rollouts.toml (a land.sh timeout included) it gives
+      no skip and a `why`. Always prints branch, worktreePath,
       prHead, anchor, taskBase, mainSha, case, route, trouble, reason, landed (one {prUrl, title,
       files, taskPath} per first-parent commit in TB..B whose subject ends ` (#N)` or starts
       `Merge pull request #N `), unlisted (one {sha, subject, files} per other first-parent commit in
@@ -55,12 +69,21 @@ Subcommands:
       the step's group when verify dies by any means, before the slot frees: so even a SIGKILL of verify, which
       leaves no rc (red), still ends the step. No slot within W: O.rc reads `noslot`, the log says `verify: no
       verify slot within Ws (held: …); verifier not run`, the exit is 75 and the race tree is still removed. An
-      unusable slots dir logs a WARN and runs the steps unslotted, still under the guard.
+      unusable slots dir logs a WARN and runs the steps unslotted, still under the guard, with no heat watch.
+      The Heat hold (verify-slot.py contract 7, estate ADR 0009 d5): at heavy or worse no slot is free (`verify:
+      waiting (heat: <name>)`); at trapping or sleeping a step that holds a slot (the bootstrap or the verifier) is
+      stopped through its guard, logged `verify: heat stop (<name>) during the <step>: stopped its process group, no
+      verdict; back in line`, its slot released, and verify goes back in line to rerun every step from the beginning,
+      each pass under a fresh S-second deadline and from a clean result. Every slot wait, heat hold and heat-stopped
+      run counts against W (the first pass always tries once, a re-queue only while W remains), so verify still ends
+      within W + S plus one kill grace. When W runs out on a heat hold or after a heat stop: O.rc reads `heat`, the log
+      says `verify: no verdict: the Mac was too hot (heat: <name>) within Ws; verifier not run to a verdict (rc
+      heat)`, the exit is 76: no verdict, never red. The log keeps every attempt.
       --outcome (reconcile-rollout.py completion-verify --run's, which runs verify as its child while it holds
       the attempt's lock, ADR 0052) changes one thing and nothing else. Its result is O.outcome.json, in
       place of O.rc, which it never writes: removed first, then written at the start ({v, id, sha, ended:
       "running"}) and again at the end ({v, id, sha, ended, rc, step, signal}: ended done | deadline | bootstrap
-      | signal | noslot; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
+      | signal | noslot | heat; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
       by its fields, never by log text, and one that still reads `running` never finished.
 
   push --repo R --slug S --head M
@@ -153,7 +176,8 @@ integrating:), 2 usage or environment, or the Engine snapshot guard (ADR 0043: p
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
 call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
 unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, plan, verify,
-push, undo and stamp are exempt), 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`). Stdlib only; `Note` and `_stamp` come from
+push, undo and stamp are exempt), 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`),
+76 verify's Heat hold outlasted the slot wait (O.rc `heat`). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
 (`git rev-parse --local-env-vars`) scrubbed. The engine copies (ANCHOR_RECIPE, the branch and tree names,
 the merge message, integrationMarker, parseIntegrationMarker, stageDiagnosis's escape, and inputs --row's
@@ -549,7 +573,8 @@ def cmd_prepare(args):
     out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
            "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [], "unlisted": [],
            "mergeCommit": "", "sharedFiles": [], "conflictFiles": [], "staleRefDeleted": None,
-           "abortedMerge": False, "stashed": "", "record": None, "note": ""}
+           "abortedMerge": False, "stashed": "", "record": None, "note": "",
+           "inert": _inert_off("no verify route: no verifier would run, so nothing to skip")}
 
     for attempt in (1, 2):
         p = git(repo, "fetch", "--prune", "--quiet", "origin")
@@ -622,9 +647,115 @@ def cmd_prepare(args):
     task_files = set(f for f in out_of(git(tree, "diff", "--name-only", f"{b}...{h}")).split("\n") if f)
     main_files = set(f for f in out_of(git(tree, "diff", "--name-only", base, b)).split("\n") if f)
     shared = sorted(task_files & main_files)
-    out.update(route="verify", mergeCommit=m, sharedFiles=shared, trouble=["shared-file"] if shared else [],
+    if not getattr(args, "verifier", None):
+        inert = _inert_off("no --verifier given: the verifier runs")
+    elif shared:
+        inert = _inert_off(f"{len(shared)} shared file(s) ({', '.join(shared[:3])}): the verifier runs")
+    else:
+        inert = _inert(args, repo, tree, base, b, m, note)
+    if inert["skip"]:
+        out.update(route="skip", mergeCommit=m, sharedFiles=[], trouble=[], inert=inert,
+                   reason=f"merged origin/{args.default} ({b[:12]}) into {br} as {m[:12]}; main moved only in Inert paths "
+                   "and the Inert proof held: the green run stands (ADR 0045): push it and merge, no verifier")
+        return out
+    out.update(route="verify", mergeCommit=m, sharedFiles=shared, trouble=["shared-file"] if shared else [], inert=inert,
                reason=f"merged origin/{args.default} ({b[:12]}) into {br}: run the verifier on {m[:12]}")
     return out
+
+
+# ---- the Inert-path skip (ADR 0045, p29-3) -------------------------------------------------------------------
+
+INERT_PATHS = 200
+INERT_READERS = 20
+
+
+def _inert_off(why):
+    return {"skip": False, "why": why, "globs": [], "changed": [], "changedTotal": 0, "nonInert": [], "readers": []}
+
+
+def _load_inert():
+    """skills/_shared/scripts/inert-paths.py, loaded lazily (engine guard's pattern): only prepare's inert check reads it."""
+    src = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "inert-paths.py"
+    spec = importlib.util.spec_from_file_location("thread_inert_paths", src)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _pick_readers(proof, failed, cap=INERT_READERS):
+    """At most `cap` readers, each failed glob's first before any glob's second."""
+    keys = ("glob", "path", "kind", "line", "text", "origin")
+    queues = [list(proof[g]["readers"]) for g in failed]
+    out = []
+    while len(out) < cap and any(queues):
+        for q in queues:
+            if q and len(out) < cap:
+                r = q.pop(0)
+                out.append({k: r[k] for k in keys if k in r})
+    return out
+
+
+def _inert_event(note, slug, kind, fields):
+    try:
+        rr._event(rr._note_rollout(note), kind, slug, fields)
+    except Exception:   # recording never breaks a verb
+        pass
+
+
+def _inert(args, repo, tree, base, b, m, note):
+    """prepare's inert check, failing closed: {skip, why, globs, changed, changedTotal, nonInert, readers}."""
+    out = _inert_off("")
+    paths, repo_id = [], str(repo)
+    try:
+        ip = _load_inert()
+        try:
+            res = ip.RS.resolve(repo=str(repo))
+        except ip.RS.SettingsError as e:
+            out["why"] = f"rollout settings refused ({e}): the verifier runs"
+            return out
+        repo_id = res.get("repo") or ip.RS._origin_slug(str(repo)) or str(repo)
+        globs = list(res["inert_paths"]["value"])
+        if not globs:
+            out["why"] = ("inert_paths is empty for this repo" if res["inert_paths"]["source"] == "file:repo" else
+                          "no inert_paths for this repo in rollouts.toml") + ": the verifier runs"
+            return out
+        pt = ip.path_test(str(repo), base, b, globs)
+        paths = pt["changed"]
+        out.update(globs=pt["globs"], changed=paths[:INERT_PATHS], changedTotal=len(paths),
+                   nonInert=pt["nonInert"][:INERT_READERS])
+        if pt["nonInert"]:
+            out["why"] = (f"{len(pt['nonInert'])} of {len(paths)} changed path(s) are not inert prose "
+                          f"({', '.join(pt['nonInert'][:3])}): the verifier runs")
+            return out
+        proof = ip.prove(str(repo), m, pt["globs"], [("verifier", args.verifier or ""), ("bootstrap", args.bootstrap or "")],
+                         places=[str(repo), str(tree)])
+        failed = [g for g in pt["globs"] if not proof[g]["held"]]
+        fields = {"repo": repo_id, "paths": paths[:INERT_PATHS], "pathsTotal": len(paths), "base": base, "main": b,
+                  "head": m, "globs": pt["globs"]}
+        if failed:
+            readers = _pick_readers(proof, failed)
+            first = readers[0] if readers else {"path": "?", "kind": "?"}
+            out.update(readers=readers, why=(f"the Inert proof failed for {', '.join(failed)}: {first['path']}"
+                                             + (f":{first['line']}" if first.get("line") else "")
+                                             + f" ({first['kind']}{', ' + first['origin'] if first.get('origin') else ''})"
+                                             + ": the verifier runs"))
+            _inert_event(note, args.slug, "inert-proof-failed", dict(fields, readers=readers, failed=failed))
+            return out
+        out.update(skip=True, why=f"main moved only in Inert paths ({len(paths)} path(s)) and the Inert proof held on "
+                                  f"{m[:12]} for {', '.join(pt['globs'])}: the green run stands, no verifier (ADR 0045)")
+        _inert_event(note, args.slug, "verify-skipped", fields)
+        return out
+    except Exception as e:  # fail closed: any error in the check means a re-run, never a crash of prepare
+        msg = f"inert check error: {type(e).__name__}: {e}".replace("\n", " ")[:200]
+        try:
+            print(f"lead-integrate prepare: WARN: {msg}: the verifier runs", file=sys.stderr)
+        except Exception:
+            pass
+        _inert_event(note, args.slug, "inert-proof-failed", {"repo": repo_id, "paths": paths[:INERT_PATHS],
+                                                             "pathsTotal": len(paths), "readers": [], "error": msg})
+        off = _inert_off(msg)
+        off.update(changed=paths[:INERT_PATHS], changedTotal=len(paths))
+        return off
 
 
 # ---- verify --------------------------------------------------------------------------------------------
@@ -640,7 +771,7 @@ class _Signalled(Exception):
         self.signum = signum
 
 
-_live = {"proc": None}
+_live = {"proc": None, "heat": None}   # the live step; "heat": the level a heat stop read (verify-slot.py, contract 7)
 
 
 def _on_signal(signum, _frame):
@@ -674,7 +805,8 @@ def _kill_group(proc):
 
 def _run_step(cmd, tree, log, deadline, guard=False, slot=None):
     if guard:
-        return _run_guarded(cmd, tree, log, deadline, slot)
+        # The Heat hold's stop watches a step only while a slot is held: unslotted (a SlotDirError) it runs unwatched.
+        return _run_guarded(cmd, tree, log, deadline, slot, heat=slot is not None)
     # The new group lives in its own session, so a signal that lands before `_live` holds it would leave it running
     # with no limit: hold SIGNALS until it does. The step itself starts with the caller's mask, not the held one.
     mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
@@ -695,20 +827,25 @@ def _run_step(cmd, tree, log, deadline, guard=False, slot=None):
             _live["proc"] = None
 
 
-def _run_guarded(cmd, tree, log, deadline, slot):
+def _run_guarded(cmd, tree, log, deadline, slot, heat=False):
     """A slotted step: `bash -c cmd` under verify-slot.py's guard, which shares the slot's lock and ends the step's
     group if verify dies by any means. Guarded holds SIGNALS across its spawn and records itself in `_live` inside
-    that window (on_spawn), as the unslotted step does. A deadline stops it through the guard: TIMED_OUT."""
+    that window (on_spawn), as the unslotted step does. A deadline stops it through the guard: TIMED_OUT. With
+    `heat`, the Heat hold's stop (verify-slot.py contract 7) watches it too: VS.HEAT_STOPPED, the level in
+    `_live["heat"]`."""
     g = VS.Guarded(["bash", "-c", cmd], hold=slot, on_spawn=lambda x: _live.__setitem__("proc", x), cwd=tree,
                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=ENV)
     try:
         if slot is not None:
             VS.write_holder(slot, {"pid": os.getpid(), "guard": g.pid, "group": g.group, "cwd": tree,
                                    "since": rr._stamp(datetime.now()), "kind": "verify"})
-        got = g.wait(timeout=max(0.0, deadline - time.monotonic()))
+        got = g.watch(timeout=max(0.0, deadline - time.monotonic()), heat=heat)
         if got is None:
             g.stop()
             return TIMED_OUT
+        if got is VS.HEAT_STOPPED:
+            _live["heat"] = g.heat
+            return VS.HEAT_STOPPED
         return got
     finally:
         if g.done():
@@ -780,30 +917,62 @@ def cmd_verify(args):
             _write_atomic(outcome_path, json.dumps(result) + "\n")
         with open(log_path, "ab", buffering=0) as log:
             note = lambda msg: log.write((msg + "\n").encode())  # noqa: E731
-            if slotted:
-                # The Integration priority (p23-4): wait for a verify slot BEFORE the deadline starts, so the wait
-                # never counts against --timeout. An unusable slots dir fails open: unslotted, still guarded.
-                try:
-                    slot = VS.acquire(args.slots, max_wait=args.slot_wait, priority=True, kind="verify",
-                                      on_wait=lambda m: note(f"verify: {m}"))
-                except VS.SlotDirError as e:
-                    note(f"verify: WARN {e}; running unslotted")
-                else:
-                    if slot is None:
-                        held = VS.held_by(args.slots) or "none read held"
-                        note(f"verify: no verify slot within {args.slot_wait:g}s (held: {held}); verifier not run")
-                        rc = "noslot"
-                        result["ended"] = "noslot"
+            # The Heat hold (verify-slot.py contract 7): a step a heat stop ended goes back in line and every step
+            # reruns from the beginning, under a fresh deadline. Every slot wait, heat hold and heat-stopped run counts
+            # against W (t0 is taken before the first acquire), and a pass starts only while W remains.
+            t0 = time.monotonic()
+            why = {"heat": None}   # acquire's: the level that held its last poll, or None
+            stopped = None         # the heat name of the last heat stop
+            first = True
+            while True:
+                # Each pass starts clean: no verdict, no step or signal, no live step, no slot.
+                rc = None
+                result["ended"] = "running"
+                result.pop("step", None)
+                result.pop("signal", None)
+                _live["proc"] = _live["heat"] = None
+                if slot is not None:
+                    slot.release()  # a close, never LOCK_UN (verify-slot.py's contract)
+                    slot = None
+                if slotted:
+                    # The Integration priority (p23-4): wait for a verify slot BEFORE the deadline starts, so the wait
+                    # never counts against --timeout. An unusable slots dir fails open: unslotted, still guarded, with
+                    # no heat watch, and that pass is the last. The first pass always tries (a W of 0: one try); a
+                    # re-queue only while W remains.
+                    budget = args.slot_wait - (0.0 if first else time.monotonic() - t0)
+                    tries, first = first or budget > 0, False
+                    try:
+                        slot = (VS.acquire(args.slots, max_wait=max(0.0, budget), priority=True, kind="verify", why=why,
+                                           on_wait=lambda m: note(f"verify: {m}")) if tries else None)
+                    except VS.SlotDirError as e:
+                        note(f"verify: WARN {e}; running unslotted")
                     else:
+                        if slot is None:
+                            if why["heat"] is not None or stopped is not None:
+                                name = VS.heat_name(why["heat"]) if why["heat"] is not None else stopped
+                                note(f"verify: no verdict: the Mac was too hot (heat: {name}) within "
+                                     f"{args.slot_wait:g}s; verifier not run to a verdict (rc heat)")
+                                rc = "heat"
+                                result["ended"] = "heat"
+                            else:
+                                held = VS.held_by(args.slots) or "none read held"
+                                note(f"verify: no verify slot within {args.slot_wait:g}s (held: {held}); "
+                                     "verifier not run")
+                                rc = "noslot"
+                                result["ended"] = "noslot"
+                            break
                         note(f"== verify slot {slot.index + 1} of {args.slots} after {slot.waited:.0f}s")
                         VS.write_holder(slot, {"pid": os.getpid(), "guard": None, "group": None, "cwd": str(tree),
                                                "since": rr._stamp(datetime.now()), "kind": "verify"})
-            if rc is None:
                 deadline = time.monotonic() + args.timeout
                 steps = ([("env_bootstrap", args.bootstrap)] if args.bootstrap else []) + [("verifier", args.verifier)]
+                heat_step = None
                 for name, cmd in steps:
                     note(f"== {name}: {cmd}")
                     got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot)
+                    if got is VS.HEAT_STOPPED:
+                        heat_step = name
+                        break
                     if got is TIMED_OUT:
                         note(f"verify: timed out after {args.timeout:g}s during the {name}; killed its process group (rc 124)")
                         rc = 124
@@ -820,6 +989,11 @@ def cmd_verify(args):
                         # step that never starts (a raise) leaves no rc, which reads as red.
                         rc = got
                         result["ended"] = "done"
+                if heat_step is None:   # only a watched step (a slot held) is ever heat-stopped
+                    break
+                stopped = VS.heat_name(_live["heat"])
+                note(f"verify: heat stop ({stopped}) during the {heat_step}: stopped its process group, no verdict; "
+                     "back in line")
     except _Signalled as s:
         if _live["proc"] is not None:
             _stop_live(_live["proc"])
@@ -848,6 +1022,8 @@ def cmd_verify(args):
     print(f"verify: rc={rc} (log {log_path})")
     if rc == "noslot":
         return 75
+    if rc == "heat":
+        return VS.HEAT_EXIT
     return rc if isinstance(rc, int) and 0 <= rc <= 255 else 1
 
 
@@ -1492,6 +1668,9 @@ def main(argv=None):
     pr.add_argument("--default", required=True, help="the repo's default branch (execute § 4's resolver)")
     pr.add_argument("--note", required=True, help="the task note's path")
     pr.add_argument("--tasks-dir", default=None, help="where landed PRs' task notes are looked up (default: the note's dir)")
+    pr.add_argument("--verifier", default=None, help="the rollout's verifier: given, prepare may route `skip` when main "
+                    "moved only in the repo's Inert paths and the Inert proof holds (ADR 0045)")
+    pr.add_argument("--bootstrap", default=None, help="the rollout's env_bootstrap, a step of the Inert proof too")
 
     vf = sub.add_parser("verify", help="run the env bootstrap and the verifier, bounded; the rc goes to <out>.rc")
     vf.add_argument("--tree", required=True)
@@ -1506,7 +1685,8 @@ def main(argv=None):
     vf.add_argument("--slots", default=None, type=int, help="the machine's verify slots (rollouts.toml verify_slots); "
                     "with --slot-wait, wait for one first (verify-slot.py, p23-4)")
     vf.add_argument("--slot-wait", default=None, type=float, help="seconds to wait for a verify slot (verify-timeout's "
-                    "slotWait); none in time is rc `noslot`, exit 75")
+                    "slotWait), heat holds and heat-stopped runs included; none in time is rc `noslot`, exit 75, or "
+                    "`heat`, exit 76, when the Mac was too hot")
 
     pu = sub.add_parser("push", help="a plain push of the tree's merge commit; the read-back must equal it")
     pu.add_argument("--repo", required=True)

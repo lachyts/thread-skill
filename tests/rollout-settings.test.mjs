@@ -47,8 +47,10 @@ const NOTIFY_BUILT_IN = { ntfy_topic: null }
 const UNSET = { ntfy_topic: { set: false, source: 'built-in' } }
 const SET = { ntfy_topic: { set: true, source: 'file:notify' } }
 const TABLES_LINE = 'rollouts.toml holds only a top-level schema and [defaults], [guardrails], [notify] and [repo."owner/name"] tables'
-// The JSON's top-level keys: the schema pair and the ignored keys (ADR 0043, p29-1) follow the three tables.
-const OUT_KEYS = ['path', 'file', 'repo', 'settings', 'guardrails', 'notify', 'schema', 'ignored']
+// The JSON's top-level keys: the repo's Inert paths (p29-3, ADR 0045) follow the three tables, then the schema pair and the
+// ignored keys (ADR 0043, p29-1).
+const OUT_KEYS = ['path', 'file', 'repo', 'settings', 'guardrails', 'notify', 'inert_paths', 'schema', 'ignored']
+const NO_INERT = { value: [], source: 'built-in' }
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 
 // ---- helpers ------------------------------------------------------------------------------------------
@@ -133,6 +135,7 @@ function assertAllBuiltIn(out) {
   for (const k of GUARDRAIL_KEYS) assert.deepEqual(out.guardrails[k], { value: GUARDRAILS_BUILT_IN[k], source: 'built-in' })
   // An absent [notify] table resolves to no topic: the needs-you push has no ntfy fallback.
   assert.deepEqual(out.notify, UNSET)
+  assert.deepEqual(out.inert_paths, NO_INERT)
 }
 
 // ---- R1: no file ----------------------------------------------------------------------------------------
@@ -286,8 +289,8 @@ const REFUSALS = [
   ['an unknown key in [defaults]', ['[defaults]', 'max_review_rounds = 3', 'paralel_ceiling = 3'], 3,
     /\[defaults\]: unknown key "paralel_ceiling"/],
   ['an unknown key in a repo table', ['[repo."o/r"]', 'max_rounds = 3'], 2, /\[repo\."o\/r"\]: unknown key "max_rounds"/],
-  ['an unknown key names all seven rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
-    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd, verify_slots\)/],
+  ['an unknown key names all eight rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
+    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd, verify_slots, inert_paths\)/],
   ['verify_slots = 0', ['[defaults]', 'verify_slots = 0'], 2, /\[defaults\] verify_slots must be an integer >= 1, got 0/],
   ['verify_slots = true', ['[defaults]', 'verify_slots = true'], 2, /verify_slots must be an integer >= 1, got a boolean/],
   ['verify_slots = 1.5', ['[defaults]', 'verify_slots = 1.5'], 2, /verify_slots must be an integer >= 1, got a float/],
@@ -628,14 +631,14 @@ test('K2 an absent schema reads as 1, and an unknown key is refused as ever', (t
   const home = tmpHome(t)
   writeSettings(home, ['[defaults]', 'parallel_ceiling = 2'])
   const out = resolves(home)
-  assert.deepEqual(out.schema, { file: 1, engine: 1 })
+  assert.deepEqual(out.schema, { file: 1, engine: 2 })
   assert.deepEqual(out.ignored, [])
   writeSettings(home, ['[defaults]', 'foo_bar = 2'])
   refused(home, { line: 2, reason: /\[defaults\]: unknown key "foo_bar" \(a rollout table holds/ })
   writeSettings(home, ['schema = 1', '[defaults]', 'foo_bar = 2'])
   refused(home, { line: 3, reason: /\[defaults\]: unknown key "foo_bar"/ })
   const none = resolves(tmpHome(t))
-  assert.deepEqual([none.file, none.schema, none.ignored], [false, { file: 1, engine: 1 }, []], 'no file: schema 1')
+  assert.deepEqual([none.file, none.schema, none.ignored], [false, { file: 1, engine: 2 }, []], 'no file: schema 1')
 })
 
 test('K3 a schema that is not an integer >= 1 is refused, a boolean included', (t) => {
@@ -648,11 +651,11 @@ test('K3 a schema that is not an integer >= 1 is refused, a boolean included', (
 
 test('K4 under a schema above SCHEMA an unknown key is ignored and listed, at every scope', (t) => {
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 2', '', '[defaults]', 'inert_paths = 3', 'parallel_ceiling = 3', '', '[guardrails]',
-    'away_hours = 2', '', '[notify]', 'chorus_topic = "x"', '', '[away]', 'cap = 1', '', '[repo."o/r"]', 'inert_paths = 1'])
+  writeSettings(home, ['schema = 3', '', '[defaults]', 'merge_train = 3', 'parallel_ceiling = 3', '', '[guardrails]',
+    'away_hours = 2', '', '[notify]', 'chorus_topic = "x"', '', '[away]', 'cap = 1', '', '[repo."o/r"]', 'merge_train = 1'])
   const out = resolves(home)
-  assert.deepEqual(out.ignored, ['away', 'defaults.inert_paths', 'guardrails.away_hours', 'notify.chorus_topic', 'repo."o/r".inert_paths'])
-  assert.deepEqual(out.schema, { file: 2, engine: 1 })
+  assert.deepEqual(out.ignored, ['away', 'defaults.merge_train', 'guardrails.away_hours', 'notify.chorus_topic', 'repo."o/r".merge_train'])
+  assert.deepEqual(out.schema, { file: 3, engine: 2 })
   expectValues(out, { parallel_ceiling: 3 }, { parallel_ceiling: 'file:defaults' })
   assert.deepEqual(out.notify, UNSET)
 })
@@ -661,22 +664,22 @@ test('K5 a near-miss by case or _/- is refused even under a newer schema', (t) =
   for (const [table, key] of [['defaults', 'Parallel_Ceiling'], ['defaults', 'parallel-ceiling'], ['guardrails', 'quotastalls'],
     ['notify', 'NTFY_TOPIC']]) {
     const home = tmpHome(t)
-    writeSettings(home, ['schema = 2', `[${table}]`, `${key} = 1`])
+    writeSettings(home, ['schema = 3', `[${table}]`, `${key} = 1`])
     refused(home, { line: 3, reason: new RegExp(`unknown key "${escapeRe(key)}".*a near-miss of`) })
   }
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 2', '[Defaults]', 'parallel_ceiling = 1'])
+  writeSettings(home, ['schema = 3', '[Defaults]', 'parallel_ceiling = 1'])
   refused(home, { line: 2, reason: /unknown top-level key "Defaults".*a near-miss of "defaults"/ })
 })
 
 test('K6 a near-miss within OSA distance 2 is refused; a key three edits away is ignored', (t) => {
-  for (const key of ['paralel_ceiling', 'parallel_cieling', 'max_iteratoins', 'max_review_round', 'verify_slot']) {
+  for (const key of ['paralel_ceiling', 'parallel_cieling', 'max_iteratoins', 'max_review_round', 'verify_slot', 'inert_path']) {
     const home = tmpHome(t)
-    writeSettings(home, ['schema = 2', '[defaults]', `${key} = 1`])
+    writeSettings(home, ['schema = 3', '[defaults]', `${key} = 1`])
     refused(home, { line: 3, reason: new RegExp(`unknown key "${key}".*a near-miss of`) })
   }
   const home = tmpHome(t)
-  writeSettings(home, ['schema = 2', '[defaults]', 'max_iter = 1'])
+  writeSettings(home, ['schema = 3', '[defaults]', 'max_iter = 1'])
   assert.deepEqual(resolves(home).ignored, ['defaults.max_iter'])
 })
 
@@ -715,9 +718,9 @@ test('K9 the JSON carries schema {file, engine} and ignored, in process too', (t
   writeSettings(home, ['schema = 3', '[defaults]', 'later_key = 1'])
   const out = resolves(home)
   assert.deepEqual(Object.keys(out), OUT_KEYS)
-  assert.deepEqual([out.schema, out.ignored], [{ file: 3, engine: 1 }, ['defaults.later_key']])
+  assert.deepEqual([out.schema, out.ignored], [{ file: 3, engine: 2 }, ['defaults.later_key']])
   const inp = resolvedInProcess(home)
-  assert.deepEqual([inp.schema, inp.ignored], [{ file: 3, engine: 1 }, ['defaults.later_key']])
+  assert.deepEqual([inp.schema, inp.ignored], [{ file: 3, engine: 2 }, ['defaults.later_key']])
 })
 
 // K10's failure message is the add-a-key recipe (rollout-settings.py's header), the writer rule included.
@@ -745,4 +748,104 @@ print(json.dumps({"one": sorted("%s.%s" % k for k, n in m.KEY_SCHEMA.items() if 
     "raises the file's `schema` line to that number in the same edit: tune.py does it", 'and so must a hand edit']) {
     assert.ok(header.includes(part), `rollout-settings.py's header recipe names: ${part}`)
   }
+})
+
+// ---- K11-K12: inert_paths, the first schema-2 key (p29-3, ADR 0045) --------------------------------------------------
+// A repo's Inert paths: a list of git pathspec globs in a [repo."o/r"] table only, resolved as its own top-level field
+// (never in `settings`), built-in []. A schema-1 file holding it is refused with the raise remedy; an older reader
+// (schema 1, patched in process as K7 is) ignores it under a schema-2 file, so that rollout always re-runs.
+
+test('K11 inert_paths in a repo table resolves as file:repo, outside settings; another repo and no table read built-in []', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 2', '', '[repo."o/r"]', 'parallel_ceiling = 3', 'inert_paths = ["THREAD.md", "docs/handoffs/**"]'])
+  const out = resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')])
+  assert.deepEqual(Object.keys(out), OUT_KEYS)
+  assert.deepEqual(out.inert_paths, { value: ['THREAD.md', 'docs/handoffs/**'], source: 'file:repo' })
+  assert.deepEqual(Object.keys(out.settings), SETTING_KEYS, 'inert_paths is never a settings key')
+  assert.deepEqual(out.schema, { file: 2, engine: 2 })
+  assert.deepEqual(resolvedInProcess(home, gitRepo(home, 'r2', 'https://github.com/o/r')).inert_paths.value, ['THREAD.md', 'docs/handoffs/**'])
+  assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'other', 'https://github.com/o/other')]).inert_paths, NO_INERT)
+  assert.deepEqual(resolves(home).inert_paths, NO_INERT, 'no --repo: built-in []')
+  writeSettings(home, ['schema = 2', '[repo."o/r"]', 'inert_paths = []'])
+  assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'r3', 'https://github.com/o/r')]).inert_paths, { value: [], source: 'file:repo' })
+})
+
+test('K11 inert_paths dotted and inline forms resolve like table form', (t) => {
+  for (const lines of [['schema = 2', 'repo."o/r".inert_paths = ["THREAD.md"]'], ['schema = 2', 'repo = { "o/r" = { inert_paths = ["THREAD.md"] } }']]) {
+    const home = tmpHome(t)
+    writeSettings(home, lines)
+    assert.deepEqual(resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')]).inert_paths,
+      { value: ['THREAD.md'], source: 'file:repo' }, lines.join(' | '))
+  }
+})
+
+const INERT_REFUSALS = [
+  ['under [defaults] (per repo)', ['schema = 2', '[defaults]', 'inert_paths = ["THREAD.md"]'], 3,
+    /inert_paths is per repo: set it under \[repo\."owner\/name"\]/],
+  ['in a schema-1 file (the raise remedy)', ['[repo."o/r"]', 'inert_paths = ["THREAD.md"]'], 2,
+    /rollout\.inert_paths is a schema-2 key but the file says schema = 1: raise the file's top-level `schema` line to 2 in the same edit/],
+  ['a string, not a list', ['schema = 2', '[repo."o/r"]', 'inert_paths = "THREAD.md"'], 3, /inert_paths must be a list of git pathspec globs, got a string/],
+  ['a number in the list', ['schema = 2', '[repo."o/r"]', 'inert_paths = [3]'], 3, /each glob must be a string, got 3/],
+  ['an empty glob', ['schema = 2', '[repo."o/r"]', 'inert_paths = [""]'], 3, /the glob "" is empty/],
+  ['a 201-character glob', ['schema = 2', '[repo."o/r"]', `inert_paths = ["${'a'.repeat(201)}"]`], 3, /is 201 characters \(at most 200\)/],
+  ['leading whitespace', ['schema = 2', '[repo."o/r"]', 'inert_paths = [" THREAD.md"]'], 3, /has leading or trailing whitespace/],
+  ['a control character', ['schema = 2', '[repo."o/r"]', 'inert_paths = ["a\\tb"]'], 3, /holds a control character/],
+  ['a backslash', ['schema = 2', '[repo."o/r"]', 'inert_paths = ["docs\\\\x.md"]'], 3, /holds a backslash/],
+  ['an absolute glob', ['schema = 2', '[repo."o/r"]', 'inert_paths = ["/THREAD.md"]'], 3, /starts with "\/"/],
+  ['pathspec magic', ['schema = 2', '[repo."o/r"]', 'inert_paths = [":(glob)THREAD.md"]'], 3, /starts with ":"/],
+  ['a negation', ['schema = 2', '[repo."o/r"]', 'inert_paths = ["!THREAD.md"]'], 3, /starts with "!"/],
+  ['an empty segment', ['schema = 2', '[repo."o/r"]', 'inert_paths = ["docs//x.md"]'], 3, /has an empty, \. or \.\. segment/],
+  ['a .. segment', ['schema = 2', '[repo."o/r"]', 'inert_paths = ["docs/../x.md"]'], 3, /has an empty, \. or \.\. segment/],
+  ['a . segment', ['schema = 2', '[repo."o/r"]', 'inert_paths = ["./THREAD.md"]'], 3, /has an empty, \. or \.\. segment/],
+  ['a trailing slash (the dir/** hint)', ['schema = 2', '[repo."o/r"]', 'inert_paths = ["docs/handoffs/"]'], 3, /ends in \/ \(write "docs\/handoffs\/\*\*"\)/],
+  ['a duplicate glob', ['schema = 2', '[repo."o/r"]', 'inert_paths = ["THREAD.md", "THREAD.md"]'], 3, /the glob "THREAD\.md" is listed twice/],
+  ['65 globs', ['schema = 2', '[repo."o/r"]', `inert_paths = [${Array.from({ length: 65 }, (_, i) => `"d${i}/**"`).join(', ')}]`], 3,
+    /holds 65 globs \(at most 64\)/],
+]
+
+for (const [name, lines, line, reason] of INERT_REFUSALS) {
+  test(`K11 refused: inert_paths ${name}`, (t) => {
+    const home = tmpHome(t)
+    writeSettings(home, lines)
+    refused(home, { line, reason })
+  })
+}
+
+test('K11 64 distinct globs are valid', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 2', '[repo."o/r"]', `inert_paths = [${Array.from({ length: 64 }, (_, i) => `"d${i}/**"`).join(', ')}]`])
+  assert.equal(resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')]).inert_paths.value.length, 64)
+})
+
+test('K12 an older reader (schema 1, patched) ignores repo."o/r".inert_paths under a schema-2 file and resolves the rest', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['schema = 2', '', '[defaults]', 'max_iterations = 2', '', '[repo."o/r"]', 'parallel_ceiling = 5',
+    'inert_paths = ["THREAD.md", "docs/handoffs/**"]'])
+  const older = 'm.SCHEMA = 1; del m.KEY_SCHEMA[("rollout", "inert_paths")]; m.REPO_ONLY = ()'
+  const r = inProcess(home, older)
+  assert.equal(r.status, 0, r.err)
+  assert.deepEqual(r.out.ignored, ['repo."o/r".inert_paths'])
+  assert.deepEqual(r.out.schema, { file: 2, engine: 1 })
+  assert.equal(r.out.settings.max_iterations.value, 2)
+  assert.deepEqual(r.out.inert_paths, NO_INERT, 'the older reader resolves no Inert paths: that rollout always re-runs')
+  // ...and a near-miss of a key it knows is still refused under the newer file.
+  writeSettings(home, ['schema = 2', '[repo."o/r"]', 'paralel_ceiling = 5'])
+  const typo = inProcess(home, older)
+  assert.equal(typo.status, 2)
+  assert.match(typo.err, /unknown key "paralel_ceiling".*a near-miss of/)
+})
+
+test('K12 raise_schema_lines raises, never lowers, keeps a comment, and refuses a form it will not edit', () => {
+  const r = spawnSync('python3', ['-B', '-c', `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+out = [m.raise_schema_lines(['# s', '[defaults]', 'x = 1'], 2, 1), m.raise_schema_lines(['schema = 1 # v', '', '[defaults]'], 2, 1),
+       m.raise_schema_lines(['schema = 3', '[defaults]'], 2, 3), m.raise_schema_lines(['[repo."o/r"]'], 2, 1)]
+try:
+    m.raise_schema_lines(['schema =   # no value', '[defaults]'], 2, 1); out.append('NO-RAISE')
+except m.SettingsError as e:
+    out.append(str(e))
+print(json.dumps(out))`, SCRIPT], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), [['schema = 2', '', '# s', '[defaults]', 'x = 1'], ['schema = 2 # v', '', '[defaults]'],
+    ['schema = 3', '[defaults]'], ['schema = 2', '', '[repo."o/r"]'], 'cannot read the top-level schema line (line 1): edit it by hand'])
 })

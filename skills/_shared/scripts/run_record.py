@@ -113,7 +113,10 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
 
   slot-taken      T  settings{parallel_ceiling (int >= 1), max_review_rounds?, max_iterations?,
                      max_plan_rounds? (ints >= 1), rung? (str)} (the effective values after per-task
-                     overrides); start? (start | restart | revise | hand-back | resume); carriedFrom? (slug)
+                     overrides); start? (start | restart | revise | hand-back | resume); carriedFrom? (slug);
+                     cap? {away (bool), n (int >= 1: the Mac-wide cap in force, the Away cap while Away, else the
+                     Trickle), file (fresh | missing | stale | unreadable: the Away state file's reading)} (exactly
+                     those keys; p29-8, ADR 0049: the cap the Slot started under, so a Reflection tunes it)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
   slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed); stamp? (call-end | fallback);
                      reconciledAt? (a UTC Z stamp). p29-12: reconcile's call-end stamp, under Reading the record
@@ -140,8 +143,10 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   hold-ended         hold (merge | git-env | race)
   idle-slots         reason (dependency | solo | pause-drain | queue-tail | awaiting-hand-back |
                      hold-merge | hold-git-env | hold-race | hold-trickle: a row waits on the machine-wide Trickle,
-                     execute away.md | hold-last-start: a row the last starts hold toward the Morning, p28-2);
-                     free (int >= 0); settings (as slot-taken)
+                     execute away.md | hold-away-cap: a row waits on the machine-wide Away cap, execute away.md |
+                     hold-last-start: a row the last starts hold toward the Morning, p28-2 | hold-pr: a row waits
+                     on a PR's hold_until, vault-grammar § Hold until | hold-heat: a row waits for the Mac to cool,
+                     the Heat hold, execute away.md § Heat); free (int >= 0); settings (as slot-taken)
   away-night         morning (a UTC Z stamp, to the second: M, the Morning the last starts looked toward while Away
                      ran to it). p28-2, the night record (execute away.md § The night record): reconcile-rollout.py
                      `next` writes one per (rollout, M) on a call off --dry-run while the last starts apply, so a
@@ -161,15 +166,28 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      >= 1: the raised max_review_rounds); quotaRetries? (int >= 1: quota_retries_used after a quota
                      retry). p16-4, ADR 0033: reconcile-rollout.py auto-retry, execute's automatic retry of a
                      set-aside task.
-  completion-verify  result (green | rerun | flake | red | noslot | unrun | stopped), rc, sha, attempt (int 1 or 2); log?,
+  completion-verify  result (green | rerun | flake | red | noslot | unrun | stopped | heat), rc, sha, attempt (int 1 or 2); log?,
                      followup?
                      (estate ADR 0009 d6: reconcile-rollout.py completion-verify, one line per run of a rollout's
                      completion_verifier on merged origin/<default> at its completion ceremony; rc the run's
-                     verbatim, 0-255, noslot or absent; rerun is attempt 1's red, re-run on the same sha; flake a
-                     green attempt 2 after it; noslot (no verify slot), unrun (verify never got going, the
-                     env_bootstrap never let the suite run, or a git-env trip fell inside the window) and stopped (a
-                     signal stop: a TaskStop, a hard pause, a room stop) no verdict, the attempt runs again; followup
+                     verbatim, 0-255, noslot, heat or absent; rerun is attempt 1's red, re-run on the same sha; flake
+                     a green attempt 2 after it; noslot (no verify slot), unrun (verify never got going, the
+                     env_bootstrap never let the suite run, or a git-env trip fell inside the window), stopped (a
+                     signal stop: a TaskStop, a hard pause, a room stop) and heat (the Mac was too hot to run the
+                     suite, the Heat hold) no verdict, the attempt runs again; followup
                      the fix task a final red filed; ADR 0052: completion-verify --run writes it).
+  verify-skipped  T  repo (the origin's owner/name, else the repo path), paths (at most 200 paths, the move's first),
+                     pathsTotal (int >= 0: every path the move changed); base?, main?, head? (the green run's base, the
+                     new main and the merge commit M that merges with no re-run), globs? (at most 64: the globs the
+                     proof held for). p29-3, ADR 0045: lead-integrate.py prepare's `skip`, written at the decision,
+                     before the push: main moved only in the repo's Inert paths and the Inert proof held on M's tree.
+  inert-proof-failed T repo, paths, pathsTotal (as verify-skipped), readers (at most 20 {glob, path, kind, line?, text?,
+                     origin?}: kind name | walk | link | tool | symlink | unprovable | submodule, line an int >= 0,
+                     text at most 120 characters, origin repo | cwd | path | input | open | depth; empty only beside an
+                     error); error? (at most 200 characters: the inert check raised, so no skip and nothing proved),
+                     base?, main?, head?, globs? (as verify-skipped), failed? (at most 64: the globs that failed). p29-3:
+                     prepare's path test passed but the proof found a reader, or the check itself failed (`error`), so
+                     the verifier runs as before.
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
@@ -320,6 +338,11 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   standing=true (the Standing approval); `handed-back` via=answer (the answer is the act) and via=descope (an
   automatic descope's re-entry); `auto-retry`. via=answer means a live answer of any block spent, `--answer`, or a
   fresh `(block -)` entry, not this block's answer only.
+- verify-skipped and inert-proof-failed (p29-3, ADR 0045): written by execute's lead-integrate.py prepare (through
+  reconcile-rollout.py's _event), read by skills/_shared/scripts/inert-paths.py `propose`'s drop rule across every
+  rollout's record for the repo (case ignored), in ts order: a verify-skipped line is a pass for each of its `globs`;
+  an inert-proof-failed line is a failure for each glob in `failed` (else each reader's glob) and a pass for the rest of
+  its `globs`; a line with an `error` is neither. score.py and reflect.py match kinds explicitly and read neither.
 - review-round: dedupe on (repo, doc) when doc is present, else on (repo, head, digest), keeping the latest line
   (p15-7's emitter is idempotent per (repo, doc)).
 - review-verdict: one line per verdict_key, (task, round, head) when the line carries a head, else (task, round,
@@ -467,6 +490,21 @@ def _settings(v):
 
 
 SETTINGS = _settings
+
+CAP_FILES = ("fresh", "missing", "stale", "unreadable")  # reconcile-rollout.py _away_state's readings
+
+
+def _cap(v):
+    """slot-taken's cap (p29-8): the Mac-wide cap in force at the Slot's start, {away, n, file} and nothing else."""
+    if not isinstance(v, dict) or set(v) != {"away", "n", "file"}:
+        return "an object of exactly away, n and file"
+    if _bool(v["away"]):
+        return "an object with away true or false"
+    if _int(1)(v["n"]):
+        return "an object with n an integer >= 1"
+    if v["file"] not in CAP_FILES:
+        return "an object with file one of %s" % ", ".join(CAP_FILES)
+    return None
 
 # ---- the tuning kind (skills/reflect/scripts/tune.py) -----------------------------------------------------
 
@@ -687,13 +725,61 @@ def _slug(v):
     return None if ok else "a slug ([a-z0-9][a-z0-9._-]*), not reserved"
 
 
+# ---- the Inert-path kinds (skills/execute/scripts/lead-integrate.py prepare; p29-3, ADR 0045) ----------------------
+
+READER_KINDS = ("name", "walk", "link", "tool", "symlink", "unprovable", "submodule")
+READER_ORIGINS = ("repo", "cwd", "path", "input", "open", "depth")
+READER_KEYS = ("glob", "path", "kind")
+READER_OPTIONAL = ("line", "text", "origin")
+MAX_READERS = 20
+MAX_PATHS = 200
+MAX_GLOBS = 64
+READER_TEXT = 120
+ERROR_MAX = 200
+
+
+def _readers(v):
+    if not isinstance(v, list) or len(v) > MAX_READERS:
+        return "a list of at most %d readers" % MAX_READERS
+    for r in v:
+        if not isinstance(r, dict) or not set(READER_KEYS) <= set(r) or set(r) - set(READER_KEYS + READER_OPTIONAL):
+            return "a list of objects with glob, path and kind (and line?, text?, origin? only)"
+        if _str(r["glob"]) or _str(r["path"]):
+            return "a list whose glob and path are non-empty strings"
+        if r["kind"] not in READER_KINDS:
+            return "a list whose kind is one of %s" % ", ".join(READER_KINDS)
+        if "line" in r and _int(0)(r["line"]):
+            return "a list whose line is an integer >= 0"
+        if "text" in r and (not isinstance(r["text"], str) or len(r["text"]) > READER_TEXT):
+            return "a list whose text is a string of at most %d characters" % READER_TEXT
+        if "origin" in r and r["origin"] not in READER_ORIGINS:
+            return "a list whose origin is one of %s" % ", ".join(READER_ORIGINS)
+    return None
+
+
+def _capped(n):
+    def check(v):
+        ok = isinstance(v, list) and len(v) <= n and all(isinstance(x, str) and x for x in v)
+        return None if ok else "a list of at most %d non-empty strings" % n
+    return check
+
+
+def _error(v):
+    return None if isinstance(v, str) and v.strip() and len(v) <= ERROR_MAX else \
+        "a non-empty string of at most %d characters" % ERROR_MAX
+
+
+INERT_FIELDS = {"repo": _str, "paths": _capped(MAX_PATHS), "pathsTotal": _int(0)}
+INERT_OPTIONAL = {"base": _str, "main": _str, "head": _str, "globs": _capped(MAX_GLOBS)}
+
 HOLDS = ("merge", "git-env", "race")
 # p29-12: reconcile-rollout.py's call-end stamp on the events of a row that ends a Slot (Reading the record).
 CALL_END = {"stamp": _enum("call-end", "fallback"), "reconciledAt": _stampz}
 # kind -> (task required, required fields, optional fields)
 KINDS = {
     "slot-taken": (True, {"settings": SETTINGS},
-                   {"start": _enum("start", "restart", "revise", "hand-back", "resume"), "carriedFrom": _str}),
+                   {"start": _enum("start", "restart", "revise", "hand-back", "resume"), "carriedFrom": _str,
+                    "cap": _cap}),
     "run-bound": (True, {"runId": _str, "journalDir": _str},
                   {"call": _enum("task", "revise", "integrate", "resume"), "resumedFrom": _str}),
     "slot-freed": (True, {"outcome": _enum("ready", "set-aside", "completed", "lost", "stopped", "failed")},
@@ -710,7 +796,8 @@ KINDS = {
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
     "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
-                                           "hold-merge", "hold-git-env", "hold-race", "hold-trickle", "hold-last-start"),
+                                           "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-heat", "hold-trickle",
+                                           "hold-away-cap", "hold-last-start"),
                            "free": _int(0), "settings": SETTINGS}, {}),
     # The night record (p28-2, Chorus ADR 0104's Consequences): reconcile-rollout.py `next` is its one writer.
     "away-night": (False, {"morning": _stampz}, {}),
@@ -722,8 +809,12 @@ KINDS = {
                           "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
                           "used": _int(0), "budget": _int(1)},
                    {"fingerprint": _str, "reviewRounds": _int(1), "quotaRetries": _int(1)}),
+    "verify-skipped": (True, dict(INERT_FIELDS), dict(INERT_OPTIONAL)),
+    "inert-proof-failed": (True, dict(INERT_FIELDS, readers=_readers),
+                           dict(INERT_OPTIONAL, error=_error, failed=_capped(MAX_GLOBS))),
     # result: reconcile-rollout.py's COMPLETION_RESULTS, in its order.
-    "completion-verify": (False, {"result": _enum("green", "flake", "red", "rerun", "noslot", "unrun", "stopped"),
+    "completion-verify": (False, {"result": _enum("green", "flake", "red", "rerun", "noslot", "unrun", "stopped",
+                                                  "heat"),
                                   "rc": _str, "sha": _str, "attempt": _int(1, 2)}, {"log": _str, "followup": _str}),
     "call-journal": (False, {"runId": _str, "status": _str},
                      {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),
@@ -886,6 +977,8 @@ def _check_fields(kind, fields):
         _check_proposal(fields)
     elif kind == "grade" and fields["low"] > fields["decisions"]:
         raise Refused("grade: low (%d) exceeds decisions (%d)" % (fields["low"], fields["decisions"]))
+    elif kind == "inert-proof-failed" and not fields["readers"] and "error" not in fields:
+        raise Refused("inert-proof-failed: readers is empty only beside an error (a failed proof names its reader)")
 
 
 def _check_tuning(f):

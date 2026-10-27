@@ -458,7 +458,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   or a **Solo** task and, by day, the **Trickle**, never a shared file
   (ADR 0030); Away, by the **Away cap** instead of the Trickle (ADR 0049),
   and, toward the Morning, the **Last starts**; and all of them by a bare
-  checkout's **Git-env hold** (ADR 0046). _Avoid_: batch (the session lane's).
+  checkout's **Git-env hold** (ADR 0046) and a hot Mac's **Heat hold**.
+  _Avoid_: batch (the session lane's).
 - **Slot** — one task's own run (a start, a restart or a seeded revise) in a
   Queue, held from its launch until its result is reconciled. Integration
   holds none. _Avoid_: worker, agent (a slot's run holds many agents).
@@ -491,6 +492,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   record** and keyed by that Morning, so a **Reflection** can tune the
   two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences).
   _Avoid_: night log.
+- **Heat hold** — while the Mac's thermal pressure reads heavy or worse, no
+  new Rollout task starts, Away included, and no **Verify slot** is free; at
+  trapping or sleeping a running slotted suite is stopped and put back in
+  line, to restart once the Mac cools (estate ADR 0009 d5; execute
+  `away.md` § Heat). A restart still waits on the ceiling alone, and the hold
+  never halts a rollout: a heat stop or a wait it outlasts is no verdict,
+  never red. _Avoid_: thermal throttle, cooldown (a retry's).
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
   (ADR 0030). Queued with its dependencies met, it holds every task whose row
@@ -512,9 +520,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
   order. _Avoid_: the lane (that is the step, not the line).
 - **Inert path** — a file a repo's verifier provably never reads, listed per
-  repo in the **Rollout settings** and re-proven at every skip: a `main` that
-  moved only in inert paths since a green run leaves that run standing, and
-  Integration re-runs nothing (ADR 0045). _Avoid_: doc-only, ignored path.
+  repo in the **Rollout settings** (`inert_paths`, git pathspec globs) and
+  re-proven on the tree being merged at every skip: a `main` that moved only
+  in inert paths, prose only (`.md .markdown .rst .adoc .org`, never
+  `.txt`), since a green run leaves that run standing, and Integration
+  re-runs nothing (ADR 0045). _Avoid_: doc-only, ignored path.
+- **Inert proof** — the static check that nothing in the tree being merged
+  reads a glob: no non-prose file or step names its deepest literal segment;
+  no walk (a copy or archive of the tree included) whose root is not
+  provably outside the repo (a path that is the repo, inside it or an
+  ancestor of it counts) covers it; no markdown tool, link parse, symlink
+  into the glob or submodule. It fails closed (ADR 0045): any error in it
+  means a re-run. skills/_shared/scripts/inert-paths.py's
+  header holds its rules. _Avoid_: the docs check.
 - **Integration conflict** — Integration's merge of the latest `main`
   conflicted and the integrator could not keep both intents, so it aborted
   the merge and pushed nothing (Vibe Kanban's 'rebase conflicts'). The note is
@@ -546,8 +564,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   deadline in the suite, files one fix task for the project, and the rollout
   completes either way, since its tasks merged green at their own Integration.
   A run with no verdict (no verify slot, verify never got going or was
-  stopped, the bootstrap never let the suite run) waits for the next tick,
-  and three in a row halt (a deliberate stop never counts). A git-env trip
+  stopped, the bootstrap never let the suite run, the Mac was too hot for
+  it) waits for the next tick, and three in a row halt (a deliberate stop
+  and a **Heat hold** never count). A git-env trip
   inside its window gives no verdict either: the rollout halts on the
   git-env trip, or, when the trip was already acked, waits like the rest. A parallel rollout's only, so far.
   A note with none completes as before. _Avoid_: final verify, post-merge suite.
@@ -671,6 +690,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   ack keeps running, but its run gives no verdict: a verify or an
   integrate call is done again, while a task call's work is taken as it
   stands (ADR 0053). _Avoid_: clear, reset.
+- **Hold until** — a PR hold the engine reads: a `hold_until: {pr:
+  <owner/repo>#<N>, merged: true}` frontmatter key. On a parallel rollout
+  note it holds every start and restart until that PR merges (live calls and
+  Integration carry on); on a task note it holds that task's new calls.
+  `next` reads the PR through gh, reports `holdUntil` and `halt: held`,
+  releases the hold on the merge and clears the key itself, so the lead
+  waits instead of asking; a CLOSED or unreadable hold is Lachy's to edit.
+  A supersede's `carry` copies a rollout's hold to its successor. A hold kept
+  as a sentence in the note is read by nothing (the 2026-10-25 audit's Q50;
+  `skills/_shared/vault-grammar.md` § Hold until). _Avoid_: a hold sentence.
 - **Bookkeeping miss** — a window the canary could not read (`record
   missing`, `record unreadable`, `record not armed`): it observed nothing, so
   it never trips. It is logged with the checkout's state, read there and
@@ -712,10 +741,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   then goes to Lachy, never to the Standing approval (ADR 0038).
   _Avoid_: budget, limit (the Standing approval's limit is another thing).
 - **Standing approval** — Lachy's one-off sign-off for every spend Gated input
-  whose **total exposure** is at most US$50: the cap summed across Logins,
-  a recurring cap counted per month, US$50 itself included. The limit is
+  whose **total exposure** is at most the operator's limit (US$200 on Lachy's
+  Mac): the cap summed across Logins, a recurring cap counted per month, the
+  limit itself included. It also holds a month line (ADR 0034's 2026-10-27
+  amendment; spend is never asked ahead): a gate passes only while this
+  calendar month's standing approvals, summed from every rollout note's
+  `## Needs-you log`, stay at most the operator's limit with it. The limit is
   the Rollout settings key `spend_approval_usd` (a task may carry its own,
-  an ask-ahead answer; built-in 0, which is off). Exposure counts every USD
+  a limit Lachy named; built-in 0, which is off). Exposure counts every USD
   amount the gate names; a shape it cannot price asks. Such a gate passes
   without him (`approve-gates --standing`, run by the lead) and is recorded
   in `## Approved gates` with `(approved <date> under the standing approval:
@@ -745,7 +778,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the push does not reach him), deduped on its line in the rollout note's
   `## Needs-you log`, the lead's push record; an item whose delivery failed
   on every channel is retried at most once more, at the next loop entry, then
-  deduped (ADR 0038). That log is never the task note's `## Needs you` (p16-3),
+  deduped (ADR 0038). The log also holds the Standing approval's
+  `signed under the standing approval:` lines, the month line's ledger, never
+  a push record. That log is never the task note's `## Needs you` (p16-3),
   which holds the question the engine stopped on; an item whose entry carries
   one shows it on its detail line. The lead never puts an item through the
   question tool while anything the session launched is in flight, and the
@@ -837,7 +872,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Stalled rollout** — a rollout with work it could do and nothing moving:
   its lead, session or Mac stopped, or a hold froze more than it threatens
   (ADR 0048). A wait that is meant is not a stall: a pause or Room stop
-  (status § Pauses, § Room stop), the Trickle or the Away cap, a cool-down.
+  (status § Pauses, § Room stop), the Trickle or the Away cap, the Heat
+  hold, a cool-down.
   Not a **Stalled chain** (a serial chain's). _Avoid_: stuck, hung, idle (a
   Slot can be idle in a moving rollout).
 - **Watchdog** — what acts on a Stalled rollout from outside its session,

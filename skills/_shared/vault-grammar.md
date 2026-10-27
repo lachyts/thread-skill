@@ -1,7 +1,7 @@
 # The vault grammar — phase and task names, statuses, in flight
 
 The one definition of how a vault note's filename places it in a phase and how its `status:` reads,
-and a rollout's start stamp.
+a rollout's start stamp, and a hold the engine can read.
 `reconcile-project.py`'s drift detector, execute's phase-close ceremony, orient § 2's sweep and the
 reshuffle's R1 all read the vault through it, so they classify the same note the same way (§ Readers
 lists every reader). A reader that needs a pattern or a set cites the section here instead of
@@ -71,6 +71,46 @@ no stamp; `started:` and `started_unattended:` are other keys.
   waits. And schedule's **Supersede prep**, which removes it from a prior it is about to supersede
   (and step 1's confirm names the clear).
 
+## Hold until
+
+A hold the engine honours is frontmatter, never a sentence in the note: no script reads a sentence, so a lead
+had to ask Lachy whether one still stood (the 2026-10-25 loop audit's Q50). The key is `hold_until`, read on
+the first top-level `hold_until:` line of the frontmatter, written `hold_until: {pr: lachyts/thread-skill#202,
+merged: true}`.
+
+- **Two scopes.** On a parallel rollout note it holds the whole queue (rollout scope): no task starts or
+  restarts until the PR merges, while live calls and Integration carry on. On a task note it holds that task's
+  new calls only (task scope): its start, restart or re-entry; its dependants wait on it as on any open
+  dependency.
+- **Parallel-only.** `reconcile-rollout.py next` refuses a `shape: serial` note before it reads one, and a
+  serial chain's Legs (execute `legs.md`) never read the key, so a serial note's `hold_until` is read by nothing
+  and is never written there.
+- **Two forms.** The flow form above, with an optional trailing ` # comment`, and the block form Obsidian
+  re-serialises it to: `hold_until:` followed by indented `pr:` and `merged:` lines.
+- **`pr`** is required: `owner/repo#N` (read through `https://github.com/owner/repo/pull/N`, since gh takes
+  no `owner/repo#N`), a PR URL, or a bare `N` or a quoted `"#N"`, read in the rollout's `Project root:` as
+  `resume` reads a bare `pr:`. An unquoted ` #N` is a YAML comment, so it reads as empty.
+- **`merged`** is optional and defaults to `true`; any other value is unreadable.
+- **Unreadable**: an unknown key, a repeated key, an empty value, `null`, a missing `pr`, a `pr` of no form
+  above, or a bare number with no Project root directory. It fails closed: it holds, waits on Lachy, makes no
+  gh call and never clears itself.
+- **Writers**: any agent, or Lachy, holding a note on a PR, as this key on the note it holds; the rollout
+  template's commented `# hold_until:` line shows the form. A hold is never a sentence in the note.
+- **Readers**: `reconcile-rollout.py next` (the lead's, execute § 4.5 step 1), which reads each hold's PR
+  with `gh pr view <url|N> --json state,mergedAt,url`: MERGED releases it; OPEN, or a gh error or timeout,
+  holds and waits on the merge, read again at the next call; CLOSED holds and waits on Lachy. It reports each
+  as `holdUntil`, and `halt: "held"` once nothing else moves. `reconcile-rollout.py status` (the parsed hold,
+  no gh call) and `/thread:status` (its § 2 and § 3, which read the PR's state live). And the Chorus Stage,
+  whose own reader (`src/stage/unattended.py` in the Chorus repo) copies this section; until it does, a lead
+  the Stage starts on a held rollout waits on the merge (execute § 4.5 step 1.5) rather than asking.
+- **Clearer**: `next`, off `--dry-run`, on MERGED: it removes the `hold_until:` line and its indented lines
+  only while they still read as it read them (a compare-and-swap under the note's lock, so a hold rewritten
+  meanwhile stays, and `next` reports it not cleared); a save that fails leaves the hold for the next call,
+  and the hold still releases for that call.
+- **Supersede**: a rollout-scope hold survives a supersede: `reconcile-rollout.py carry` (schedule step 6)
+  copies the prior's lines verbatim into the note that supersedes it. A task-scope hold rides on its task
+  note, which the carry never edits there.
+
 ## Readers
 
 - `skills/_shared/scripts/reconcile-project.py`: `PHASE_N`, `LANDED`, `ACTIVE`, `phase_key` and
@@ -96,6 +136,9 @@ no stamp; `started:` and `started_unattended:` are other keys.
   `p<PHASE_N>-<M>`, the phase matched literally.
 - `skills/execute/scripts/reconcile-rollout.py` `next`: `START_KEY` and `START_UNATTENDED` (the stamp
   above), read as `_scalar` reads a frontmatter value, and reported as `startUnattended`.
+- `skills/execute/scripts/reconcile-rollout.py` `next`, `status` and `carry`: `HOLD_KEY` (§ Hold until's
+  key) and `HOLD_UNTIL_PREFIX` (every hold reason's opening), parsed by `_hold_until`, the one reader of both
+  forms.
 - `skills/status/SKILL.md` § 1's **Start stamp** and § 4 action 13: the stamp above, read straight from the
   frontmatter.
 - `skills/_shared/scripts/estate-scan.py` (the estate scan): Landed and Active through `DEAD_STATUSES`,

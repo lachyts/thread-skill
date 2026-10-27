@@ -41,6 +41,7 @@ git config --global init.defaultBranch master; git config --global advice.detach
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$T/events}"   # the Run record (run_record.py) stays in temp
 export THREAD_NOTE_LOCK_DIR="$T/note-locks" THREAD_GIT_ENV_DIR="$T/git-env" THREAD_LEG_LOCK_DIR="$T/leg-locks"
 export THREAD_VERIFY_SLOTS_DIR="$T/verify-slots" TMPDIR="$T/tmp"
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 mkdir -p "$TMPDIR" "$T/bin"
 printf '#!/bin/sh\necho "gh $*" >> "%s/gh.log"\nexit 1\n' "$T" > "$T/bin/gh"; chmod +x "$T/bin/gh"
 export PATH="$T/bin:$PATH"
@@ -501,13 +502,13 @@ case " $(rec "$G4EV/g4.jsonl") " in *" g4-q "*) ok has none "G4: … and g4's re
 # ════ K1: the settings schema across versions ═══════════════════════════════════════════════════════════════════
 echo "== K1"
 mkdir -p "$HOME/.config/thread"
-printf 'schema = 2\n\n[defaults]\nfoo_bar = 3\nparallel_ceiling = 3\n' > "$HOME/.config/thread/rollouts.toml"
+printf 'schema = 3\n\n[defaults]\nfoo_bar = 3\nparallel_ceiling = 3\n' > "$HOME/.config/thread/rollouts.toml"
 py "$B" skills/_shared/scripts/rollout-settings.py
 ok "$rc|$(j 'd["ignored"]')|$(j 'd["schema"]')|$(j 'd["settings"]["parallel_ceiling"]["value"]')" \
-   '0|["defaults.foo_bar"]|{"file": 2, "engine": 1}|3' "K1: a schema-2 file's unknown key is ignored by the snapshot's reader"
+   '0|["defaults.foo_bar"]|{"file": 3, "engine": 2}|3' "K1: a schema-3 file's unknown key is ignored by the snapshot's reader"
 py "$B" skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout "$TASKS/r1.md"
 ok "$rc" 0 "K1: … verify-timeout on a stamped note runs (no exit 3)"
-printf 'schema = 2\n\n[defaults]\nparalel_ceiling = 3\n' > "$HOME/.config/thread/rollouts.toml"
+printf 'schema = 3\n\n[defaults]\nparalel_ceiling = 3\n' > "$HOME/.config/thread/rollouts.toml"
 py "$B" skills/_shared/scripts/rollout-settings.py
 ok "$rc" 2 "K1: … a near-miss typo is still refused"; has "$err" "paralel_ceiling" "K1: … naming it"
 rm -f "$HOME/.config/thread/rollouts.toml"

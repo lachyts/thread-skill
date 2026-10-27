@@ -35,7 +35,8 @@
 // re-entry, read through `inputs`' answerRecorded, and every hand-back spends it (needs-you). ADR 0035: repair records
 // every answer through `record-answer`, last, its form choosing who acts, a raise of any budget and a `pr:` through the
 // verb (answer-key), and the reason Lachy is shown or asked is `inputs`' `humanFix`, never `autoRetryWhy`
-// (human-fix-cited).
+// (human-fix-cited). p30-3: status reads each PR hold (`hold_until:`) with one `gh pr view`, headlines a held rollout
+// and never routes a hold to repair: the lead waits on its merge and `next` clears it (hold-until).
 import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -54,7 +55,8 @@ const UNFINISHED = path.join(root, 'skills', '_shared', 'scripts', 'unfinished-r
 // The Run record (run_record.py, ADR 0032) the scripts may append lands in temp, never ~/.local/state.
 const EVENTS = fs.mkdtempSync(path.join(os.tmpdir(), 'srq-events-'))
 after(() => fs.rmSync(EVENTS, { recursive: true, force: true }))
-const ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: process.env.THREAD_TEST_EVENTS_DIR || path.join(EVENTS, 'events') }
+// The Heat hold's reading (verify-slot.py heat_level) is pinned, so a hot Mac never flips `next`'s starts here.
+const ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: process.env.THREAD_TEST_EVENTS_DIR || path.join(EVENTS, 'events'), THREAD_HEAT_LEVEL: '0' }
 
 function py(script, args, input, env = ENV) {
   const r = spawnSync('python3', [script, ...args], { encoding: 'utf8', env, input })
@@ -120,11 +122,12 @@ process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 // so it reads the built-in ladder and the operator's file never reaches the assertions.
 const STATUS_ENV = { ...ENV, HOME: path.join(tmp, 'status-home') }
 // next reads the Away state file under HOME (p28-1, execute away.md): nextOf runs in a HOME of its own whose fresh Away
-// file gives each rollout its own ceiling at NOW, never the Trickle, whatever the scratch HOME holds.
+// file, its Away cap 99 never binding (p29-8), gives each rollout its own ceiling at NOW, never the Trickle or the Away
+// cap, whatever the scratch HOME holds.
 const NEXT_ENV = { ...ENV, HOME: path.join(tmp, 'next-home') }
 fs.mkdirSync(path.join(NEXT_ENV.HOME, '.config', 'thread'), { recursive: true })
 fs.writeFileSync(path.join(NEXT_ENV.HOME, '.config', 'thread', 'away.json'),
-  JSON.stringify({ away: true, until: '2099-01-01T00:00:00Z', morning: '09:00', trickle: 2, written_at: '2026-10-02T12:00:00Z' }))
+  JSON.stringify({ away: true, until: '2099-01-01T00:00:00Z', morning: '09:00', trickle: 2, away_cap: 99, written_at: '2026-10-02T12:00:00Z' }))
 
 function writeTask(dir, slug, fm, body = '') {
   fs.writeFileSync(path.join(dir, `${slug}.md`), ['---', 'tags: [task]', ...fm, '---', '', '## Notes', '', `body ${slug}`, ''].join('\n') + body)
@@ -1360,6 +1363,17 @@ function check({ status, repair, execute, fx }) {
   if (queuedRow != null && (!queuedRow.includes('the first queued task in rank order that carries `solo` and has no `waitingOn`') ||
     !queuedRow.includes('a Solo task with a `waitingOn` holds nothing'))) fails.push('queued-solo')
 
+  // hold-until (p30-3; vault-grammar § Hold until): status reads each PR hold `next` reads with one `gh pr view` (§ 3's
+  // budget), headlines a held rollout `HELD until <pr> merges`, and never routes a hold to repair: the lead waits on
+  // the merge and `next` clears it, and a CLOSED or unreadable one is Lachy's edit to the note.
+  const holdFlag = flag('Hold until:')
+  if (!s2.includes("`holdUntil` (the rollout's own PR hold, its `hold_until:` as parsed, `{pr, url, error}`") ||
+    !s3.includes('one `gh pr view <url|N> --json state,mergedAt,url` per PR hold whose `error` is null') ||
+    !holdFlag.includes('`HELD until <pr> merges (<state>)`') || !holdFlag.includes('`HOLD_UNTIL UNREADABLE: <why>`') ||
+    !holdFlag.includes('so status never routes a hold to `/thread:repair`') ||
+    !labelled(s4raw, 'Headline.').includes('`HELD until <pr> merges (<state>)` or `HOLD_UNTIL UNREADABLE: <why>` (the rollout\'s own `holdUntil`') ||
+    !collapse(sDonts).includes('clears a merged `hold_until`')) fails.push('hold-until')
+
   // ---- the automatic retry (p16-5, ADR 0033) ----
   const rDontsC = collapse(raw(repair, /^## Don'ts/))
   const row = (label) => clsRows.find((c) => c[0] === `**${label}**`) ?? []
@@ -1575,7 +1589,7 @@ test('status and repair hold every queue rule', () => {
 const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
   'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off',
   'signed-gate', 'no-wave', 'rung', 'descope', 'second-block', 'settings', 'queued-solo', 'auto-retry', 'retries', 'needs-you', 'answer-key',
-  'human-fix-cited']
+  'human-fix-cited', 'hold-until']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -2286,7 +2300,14 @@ test('control: needs you after at Integration fails first-match', () => {
   only({ repair: real.repair.replace(nyr + '\n', '').replace(atRow, atRow + '\n' + nyr) }, 'first-match', 'needs you late')
 })
 
-test('the rules are all named (35) and each has a control', () => {
-  assert.equal(RULES.length, 35)
+// hold-until (p30-3)
+test('control: a hold read off budget, a headline without it, or a hold routed to repair fails hold-until', () => {
+  only(st(';\n- one `gh pr view <url|N> --json state,mergedAt,url` per PR hold whose `error` is null', ';\n- one read per hold'), 'hold-until', 'no budget line')
+  only(st('`HELD until <pr> merges (<state>)` or `HOLD_UNTIL UNREADABLE: <why>` (the rollout\'s own', '(the rollout\'s own'), 'hold-until', 'no headline token')
+  only(st('so status never routes a hold to `/thread:repair`', 'so status routes a CLOSED hold to `/thread:repair`'), 'hold-until', 'a hold routed to repair')
+})
+
+test('the rules are all named (36) and each has a control', () => {
+  assert.equal(RULES.length, 36)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
