@@ -175,7 +175,9 @@ gated_inputs.py unloadable (loaded here only, never by `check` or `running`).
         [--handoffs <dir>]... [--tasks-dir <dir>]
 
 `unstarted` answers close step 2's **Rollouts this session wrote.** for a note with no unwithdrawn handover (ADR 0057
-d5): whether the rollout still needs its lead started. It reads the note (root-first, then under Archive/), its linked
+d5): whether the rollout still needs its lead started. Close step 2's **Stale launch.** also runs it, with no
+--handoffs, on each pending launch doc's `launches:` value: `closed`, or `started` with the doc 24 h old under the
+peer guard, makes that doc stale (ADR 0057 d4). It reads the note (root-first, then under Archive/), its linked
 tasks, the Run record (run_record.py's record_path for the slug; an unreadable record reads as none) and the `*.md`
 directly in each --handoffs dir; it writes nothing and runs no git. It prints one line, the first that applies:
   closed <slug> (<status>|archived)     the root note is `done` or `dropped`, or the note sits only under Archive/
