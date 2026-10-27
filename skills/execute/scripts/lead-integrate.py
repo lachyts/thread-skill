@@ -104,7 +104,11 @@ Subcommands:
       too-many | touched | diff | no-named-rerun | named-red | confirm-red | timeout | no-time | signal, failing (the
       first run's ids), touched, flakes, timeout: {run: first | named | confirm, seconds} | null}; a signal mid-run
       leaves it red, why `signal`. reconcile-rollout.py record-verify reads it. --diff-base with --outcome, and a
-      --named-rerun with no --diff-base or without exactly one `{tests}`, are exit 2 with no rc file.
+      --named-rerun with no --diff-base or without exactly one `{tests}`, are exit 2 with no rc file. A heat stop (the
+      Heat hold, above) in the named re-run or the confirming run is no verdict, as in the first run: the pass goes back
+      in line and the next reruns every step, the Flake check included, from a clean result and a fresh record; the
+      ids are always the last pass's first run's. With --rollout, a Flake ends its suite green, and a deadline in
+      either run ends it timeout (step verifier).
       --rollout NOTE [--slug SLUG] (p29-10, ADR 0051; --slug only with --rollout, else exit 2) records the suite in
       the rollout's Run record (the note's stem; the tasks dir is its parent): by completion with --outcome, race with
       --detach-at, else integration (with SLUG as its task; a completion suite has none), runner lead. suite-started
@@ -924,7 +928,8 @@ def _write_atomic(path, text):
 # test files outside the task's diff re-runs them by name (--named-rerun), then confirms with one more verifier run on
 # the same tree, under the same slot and guard: green is a Flake. Any other red stays red, with no re-run.
 FLAKE_SUFFIX = ".flake.json"
-FLAKE_RUN_WORDS = {"named": "the named re-run", "confirm": "the confirming run"}
+FLAKE_RUN_LABELS = {"named": "named re-run", "confirm": "confirming run"}   # the log's `== <label>:` sections
+FLAKE_RUN_WORDS = {run: "the " + label for run, label in FLAKE_RUN_LABELS.items()}
 HARNESS_ENV = "THREAD_VERIFY_HARNESS_S"   # tests only: shrinks the harness bound the Flake check's runs fit inside
 
 
@@ -944,6 +949,15 @@ def _diff_files(tree, base):
     if p.returncode != 0:
         return None
     return {line for line in p.stdout.split("\n") if line}
+
+
+class _FlakeHeatStop(Exception):
+    """A heat stop (verify-slot.py contract 7) in the Flake check's named re-run or confirming run: no verdict, so
+    verify's pass goes back in line like a heat stop in the first run. `run` is named | confirm."""
+
+    def __init__(self, run):
+        super().__init__(run)
+        self.run = run
 
 
 def _flake_record(sha, base, verdict, why="", failing=(), touched=(), flakes=(), timeout=None):
@@ -1091,8 +1105,9 @@ def cmd_verify(args):
             stopped = None         # the heat name of the last heat stop
             first = True
             while True:
-                # Each pass starts clean: no verdict, no step or signal, no live step, no slot.
+                # Each pass starts clean: no verdict, no step or signal, no live step, no slot, no Flake record.
                 rc = None
+                flake = None
                 result["ended"] = "running"
                 result.pop("step", None)
                 result.pop("signal", None)
@@ -1144,7 +1159,7 @@ def cmd_verify(args):
                                      reraise=(_Signalled,), written=rec["written"])
                 deadline = time.monotonic() + args.timeout
                 steps = ([("env_bootstrap", args.bootstrap)] if args.bootstrap else []) + [("verifier", args.verifier)]
-                heat_step = None
+                heat_step = heat_where = None
                 for name, cmd in steps:
                     note(f"== {name}: {cmd}")
                     if name == "verifier" and flake_on:
@@ -1174,13 +1189,22 @@ def cmd_verify(args):
                         rc = got
                         result["ended"] = "done"
                         if flake is not None:
-                            rc, flake = _flake_check(args, tree, tree_sha, log, log_path, note, slotted, slot, rc,
-                                                     verify_t0)
+                            try:
+                                rc, flake = _flake_check(args, tree, tree_sha, log, log_path, note, slotted, slot, rc,
+                                                         verify_t0)
+                            except _FlakeHeatStop as h:
+                                # A heat stop in the named re-run or the confirming run is no verdict, as in the first
+                                # run: this pass goes back in line, and the next reruns every step from a clean result.
+                                heat_step, heat_where = name, FLAKE_RUN_LABELS[h.run]
+                            else:
+                                if flake["timeout"] is not None:
+                                    # A deadline in the named re-run or the confirming run: the suite ends timeout.
+                                    result.update(ended="deadline", step=name)
                 if heat_step is None:   # only a watched step (a slot held) is ever heat-stopped
                     break
                 stopped = VS.heat_name(_live["heat"])
-                note(f"verify: heat stop ({stopped}) during the {heat_step}: stopped its process group, no verdict; "
-                     "back in line")
+                note(f"verify: heat stop ({stopped}) during the {heat_where or heat_step}: stopped its process group, "
+                     "no verdict; back in line")
                 if rec is not None:
                     # p29-10: the heat-stopped pass's suite ends `heat` (no verdict, no rc) once its slot is released,
                     # with stops held for the write, so a stop meanwhile ends no suite twice; the next pass is a suite
@@ -1240,7 +1264,8 @@ def _flake_check(args, tree, sha, log, log_path, note, slotted, slot, rc, t0):
     anything but `candidates` is red at once; else, with --named-rerun, the named re-run, then one confirming verifier
     run, each under the slot and guard the first run held and its own deadline (_flake_deadline). The named re-run's
     red keeps its rc, the confirming run's red its own; the confirming run's green makes the rc 0 and each first-run
-    id a Flake."""
+    id a Flake. A heat stop in either run raises _FlakeHeatStop: no verdict, and the caller's pass goes back in line.
+    The ids are the last pass's first run's: rr._failing_ids reads the log's last `== verifier:` section."""
     base = args.diff_base
     if rc == 0:
         return 0, _flake_record(sha, base, "green")
@@ -1260,8 +1285,8 @@ def _flake_check(args, tree, sha, log, log_path, note, slotted, slot, rc, t0):
         note("verify: Flake check: red (no --named-rerun, so the failing tests cannot be re-run by name)")
         return red("no-named-rerun")
     quoted = " ".join(shlex.quote(i) for i in ids)
-    for run, cmd, label in (("named", args.named_rerun.replace(rr.NAMED_RERUN_SLOT, quoted), "named re-run"),
-                            ("confirm", args.verifier, "confirming run")):
+    for run, cmd in (("named", args.named_rerun.replace(rr.NAMED_RERUN_SLOT, quoted)), ("confirm", args.verifier)):
+        label = FLAKE_RUN_LABELS[run]
         deadline = _flake_deadline(args, t0)
         if deadline is None:
             note(f"verify: Flake check: red (no harness time left for {FLAKE_RUN_WORDS[run]})")
@@ -1269,6 +1294,8 @@ def _flake_check(args, tree, sha, log, log_path, note, slotted, slot, rc, t0):
         started = time.monotonic()
         note(f"== {label}: {cmd}")
         got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot)
+        if got is VS.HEAT_STOPPED:
+            raise _FlakeHeatStop(run)
         if got is TIMED_OUT:
             secs = max(1, int(round(deadline - started)))
             note(f"verify: timed out after {secs}s during {FLAKE_RUN_WORDS[run]}; killed its process group (rc 124)")

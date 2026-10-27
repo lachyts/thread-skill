@@ -1,5 +1,6 @@
 // p29-9 (ADR 0050): a red that a named re-run and one confirming full run clear is a Flake. The scripts and the engine
-// are pinned by tests/lead-integrate.test.sh (C41-C53: the Flake check inside `lead-integrate.py verify --diff-base`),
+// are pinned by tests/lead-integrate.test.sh (C41-C53: the Flake check inside `lead-integrate.py verify --diff-base`;
+// C54 with p29-10's --rollout suite record), tests/verify-slot-heat.test.sh (L8: a heat stop in its named re-run),
 // skills/execute/tests/reconcile-rollout-flake.test.sh (record-verify, the row's `flakes`, the follow-ups),
 // tests/schedule-queue.test.sh (Q6: schedule's `named_rerun:` stamp read back by verify-timeout, the Flake check run),
 // skills/execute/tests/prompt-invariants.test.mjs (the agents' Flake check blocks), task-engine.test.mjs and

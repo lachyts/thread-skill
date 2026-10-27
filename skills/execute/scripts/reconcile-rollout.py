@@ -8850,26 +8850,30 @@ def _completion_halts(result, streak):
 
 def _failing_ids(lines, marker="== verifier:"):
     """Up to FAILING_IDS_MAX distinct failing-test ids read from the verify log's lines (an open file streams), in
-    order, from verify's `== verifier:` line to its `== verifier rc` line, so an env_bootstrap's own ERROR lines are
-    never read as tests, and neither are the Flake check's named re-run and confirming run that follow the first run
-    (lead-integrate.py verify --diff-base, ADR 0050); [] when none parse. marker=None reads from the first line (an
-    agent suite's captured output, verify-slot.py run)."""
+    order, from verify's last `== verifier:` line to its `== verifier rc` line, so an env_bootstrap's own ERROR lines
+    are never read as tests, nor a heat-stopped pass's run the Heat hold re-queued (lead-integrate.py verify: the log
+    keeps every pass, and only the last is the verdict), nor the Flake check's named re-run and confirming run that
+    follow the first run (lead-integrate.py verify --diff-base, ADR 0050); [] when none parse. marker=None reads from
+    the first line (an agent suite's captured output, verify-slot.py run)."""
     ids = []
-    started = marker is None
+    reading = marker is None
     for line in lines:
         line = line.rstrip("\n")
-        if not started:
-            started = line.startswith(marker)
+        if marker is not None and line.startswith(marker):
+            ids, reading = [], True   # a later pass's run (the Heat hold's re-queue): only the last one is read
+            continue
+        if not reading:
             continue
         if line.startswith("== verifier rc"):
-            break
+            reading = False   # the run ended; a later `== verifier:` (a re-queued pass) starts over
+            continue
+        if len(ids) >= FAILING_IDS_MAX:
+            continue
         for rx in FAILING_ID_RES:
             m = rx.match(line)
             if m and m.group(1) not in ids:
                 ids.append(m.group(1))
                 break
-        if len(ids) >= FAILING_IDS_MAX:
-            break
     return ids
 
 

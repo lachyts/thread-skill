@@ -17,6 +17,8 @@
 #   R8  --dry-run writes nothing, through either verb.
 #   R9  a follow-up another process created meanwhile is appended to, never overwritten.
 #   R10 a test id holding ]], backticks or | is written inside a code span.
+#   R11 _failing_ids reads the last pass's first run (the Heat hold's re-queue, p31-4): a heat-stopped pass's output and
+#       one before a Flake check's re-runs are dropped, the named re-run and the confirming run are never read.
 # Temp vault and repo only; no network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -249,6 +251,25 @@ rv proj-p29-1-a integration "$D/w.json"
 FUW=$(ls "$T" | grep followup-flake)
 has "$(cat "$T/$FUW")" "\`\` $WEIRD \`\`" "R10: a test id holding ]], | and backticks is written in a longer code span"
 ok "$(ev flake | python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["test"])')" "$WEIRD" "R10: … and recorded verbatim"
+
+# ---- R11 -----------------------------------------------------------------------------------------------------
+# A verify log the Heat hold re-queued twice: pass 1 heat-stopped mid-run (no rc line), pass 2 ran its first run and
+# was heat-stopped in the named re-run, pass 3's first run is the verdict, then its Flake check's runs.
+fids() { python3 - "$SCRIPT" "$1" <<'PY'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+print(json.dumps(rr._failing_ids(open(sys.argv[2])), separators=(",", ":")))
+PY
+}
+printf '%s\n' '== verifier: make test' 'FAILED tests/a.py::t1 - hot' 'verify: heat stop (trapping) during the verifier: stopped its process group, no verdict; back in line' \
+  '== verify slot 1 of 2 after 30s' '== verifier: make test' 'FAILED tests/b.py::t2 - x' '== verifier rc 1' '== named re-run: r tests/b.py::t2' \
+  'verify: heat stop (trapping) during the named re-run: stopped its process group, no verdict; back in line' \
+  '== verify slot 1 of 2 after 40s' '== verifier: make test' 'FAILED tests/c.py::t3 - x' 'FAILED tests/c.py::t4 - x' '== verifier rc 1' \
+  '== named re-run: r tests/c.py::t3 tests/c.py::t4' 'FAILED tests/d.py::t5 - x' '== named re-run rc 0' '== confirming run: make test' \
+  'FAILED tests/e.py::t6 - x' '== confirming run rc 1' > "$TMP/r11.log"
+ok "$(fids "$TMP/r11.log")" '["tests/c.py::t3","tests/c.py::t4"]' "R11: _failing_ids reads only the last pass's first run"
+printf '%s\n' '== env_bootstrap: b' 'FAILED tests/z.py::t0' '== env_bootstrap rc 0' '== verifier: make test' 'FAILED tests/c.py::t3 - x' > "$TMP/r11b.log"
+ok "$(fids "$TMP/r11b.log")" '["tests/c.py::t3"]' "R11: … never the env_bootstrap's lines, and a run with no rc line (a deadline) is read to the end"
 
 echo; [ "$fail" -eq 0 ] && echo "reconcile-rollout-flake: ALL PASS" || echo "reconcile-rollout-flake: SOME FAILED"
 exit "$fail"

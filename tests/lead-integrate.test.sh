@@ -35,7 +35,8 @@
 #   RACE form   C49 no --named-rerun, no --diff-base, a green run, an unreadable diff   C50 refusals   C51 ids with
 #   spaces and quotes, paths outside the tree   C52 the SKILL.md verify line with and without named_rerun, under bash
 #   and zsh -f   C53 TERM during the named re-run or the confirming run, unslotted and slotted: rc 143, why `signal`,
-#   the child gone, the slot free.
+#   the child gone, the slot free.   C54 with --rollout (p29-10): a Flake's suite ends green, a deadline in the confirming
+#   run ends it timeout.
 #   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
@@ -1691,6 +1692,24 @@ for arm in named confirm; do
   done
 done
 ok "$(sleepers "sleep 320[56]\.$u")" 0 "C53: no Flake-check child survives"
+
+# C54 (p29-9 beside p29-10's suite record): --rollout with --diff-base. A Flake ends its one suite green, rc 0; a
+# deadline in the confirming run ends it timeout, its step the verifier, failing the first run's ids.
+fsq() {  # fsq <python expr over L, the suite record's lines>
+  python3 -c 'import json,sys; L=[json.loads(x) for x in open(sys.argv[1]) if x.strip()]; print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))' "$FEV/ro.jsonl" "$1" 2>/dev/null || echo none
+}
+ffx c54
+FEV="$F/events"; mkdir -p "$F/v" "$F/home"; : > "$F/v/ro.md"
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'
+HOME="$F/home" THREAD_EVENTS_DIR="$FEV" vf --diff-base "$FB" --named-rerun "$NR" --rollout "$F/v/ro.md" --slug t1
+ok "$(rcof)|$(fj 'd["verdict"]')|$(fsq '[[d["kind"], d.get("outcome"), d.get("rc"), "failing" in d] for d in L]')" \
+  '0|flake|[["suite-started",null,null,false],["suite-ended","green",0,false]]' "C54: --rollout: a Flake ends its one suite green, rc 0"
+ffx c54b
+FEV="$F/events"; mkdir -p "$F/v" "$F/home"; : > "$F/v/ro.md"
+red1 'FAILED tests/test_flaky.py::test_a'; echo 5 > "$F/v.2.sleep"
+HOME="$F/home" THREAD_EVENTS_DIR="$FEV" VT=2 vf --diff-base "$FB" --named-rerun "$NR" --rollout "$F/v/ro.md" --slug t1
+ok "$(rcof)|$(fj 'd["timeout"]["run"]')|$(fsq '[[d.get("outcome"), d.get("rc"), d.get("step"), d.get("timeout"), d.get("failing")] for d in L if d["kind"] == "suite-ended"]')" \
+  '124|confirm|[["timeout",124,"verifier",2,["tests/test_flaky.py::test_a"]]]' "C54: a deadline in the confirming run ends the suite timeout (step verifier), failing the first run's ids"
 
 # ======== S1–S8: verify --rollout records its suite in the Run record (p29-10, ADR 0051) ========================
 # by integration (with --slug), race (--detach-at) or completion (--outcome, no task), runner lead; suite-started after
