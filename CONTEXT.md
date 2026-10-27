@@ -1000,7 +1000,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Time-lost ledger** — the hours each cause class cost (stalls by cause,
   usage limits, machine load, the Integration lane, Integration rework, plan
   blocks, named from the Run record's own values where one fits), summed by
-  a script across every rollout a weekly reading reads and trended week on
+  a script across every rollout a weekly reading reads (a serial chain's
+  aside: its Legs record no Slots or stops) and trended week on
   week; a class that tops it twice running opens a **Watch** on that class,
   and a load-topped ledger holds a Parallel ceiling raise (ADR 0051). Waits
   on Lachy (a gate, a question, a hand-back) are priced as stalls; only his

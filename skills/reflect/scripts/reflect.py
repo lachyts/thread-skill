@@ -163,7 +163,8 @@ parallel with no note). For each:
 - ledger (p29-11, ADR 0051): skills/reflect/scripts/ledger.py's block (its docstring holds the model: the classes, the
   precedence, the waits on Lachy, the baseline, the Watch and the Monthly audit's month rule) over every record, each read
   whole (its ledger lines merged back; a record --fold folded read again, so its journals are the fold's), live while its
-  rollout note is not archived and its status none of ledger.py's CLOSED: row (the `time-lost` record line `ledger`
+  rollout note is not archived and its status none of ledger.py's CLOSED, and left out (flagged) while that note, archived
+  or not, reads `shape: serial` (a chain's Legs record no Slots or stops): row (the `time-lost` record line `ledger`
   writes), ranking, previous, delta, weeks, streak, watch (the preview), baseline, holds (knobs' held items the load hold
   held), flags, and audit {due, month, since, until, recorded, sessions, intervalsFile}: recorded is the record's hours
   over the audit window, sessions the lead sessions its lead-entry lines name ({session, rollouts, first, last}), and
@@ -228,8 +229,9 @@ line's hours come from each entry's from .. to (the model never types a number),
 over found + recorded (shown, never acted on), month the reading's. Exit 2: the audit is due and neither --audit is given
 nor this Reflection has an audit line; --audit is given and none is due; ledger.py's audit_line() refuses it (the month,
 an unknown class or cause, an entry outside the audit window or overlapping a known interval of the same rollout and
-class, more than 24 entries or 10 gaps; text is folded and cut to 160 or 200 characters). It prints `ledger <rid>: top
-<class> (<h> h) of <total> h; <what> written`, or `exists ledger <rid>` when every line is in.
+class, more than 16 entries or 8 gaps, or a line over run_record's 16 KiB, `trim entries or their text`; text is folded
+and cut to 160 or 200 characters). It prints `ledger <rid>: top <class> (<h> h) of <total> h; <what> written`, or
+`exists ledger <rid>` when every line is in.
 
 knobs. Once, after step 14's tune.py calls (its lines are knob_lines(), which close re-reads): one `proposal` line per
 (Reflection, knob_key) over the read rollouts' score.py proposals (none for withheld entries, a light read or a rollout
@@ -243,7 +245,10 @@ line, id knob_key(repo, key, "revert:<rule>", -direction), with reverts and tuni
 before any is written (a refusal is exit 2, nothing written); then each (Reflection, id) not yet in reflections.jsonl is
 written.
 
-decide. Rule items are the recurring open Watches (their rollouts sorted and cut to 64 on the line and the item).
+decide. A span with a ledger block and no `time-lost` record line from this Reflection is exit 2, `run ledger`, nothing
+written (the vault untouched): the ledger's Watch and a Monthly audit's gaps reach the task only through ledger's lines,
+and a section once appended is never appended again, so a decide before ledger would leave close refusing for good.
+Rule items are the recurring open Watches (their rollouts sorted and cut to 64 on the line and the item).
 --decisions is a JSON object {<watch id>: {why, amends}}, `{}` when
 no Watch recurs; an entry naming a Watch that is not recurring, closed or unknown is exit 2; a recurring Watch it leaves
 out is still an item (why "not given"). Watches to confirm: the open Watches this Reflection sighted with one sighting,
@@ -327,8 +332,8 @@ values of the highest opus rung, with a stderr note when the top rung is not opu
 Exit codes: 0 done (exists and no-op answers included); 1 a file cannot be read or written (the events directory,
 tunings.jsonl, reflections.jsonl, --out, a note, a --tasks-dir that is no directory); 2 usage or a refusal (a path that
 exists, a watch call that leaves out a recorded rollout or names the ledger's rule, a raise on a closed or unknown Watch, a
-closed Reflection, a close before ledger, knobs or decide ran, knobs before ledger, a ledger whose audit is due and not
-given, or given and refused, a run_record refusal, a moot on a done, absent or untagged task, of an unlisted
+closed Reflection, a close before ledger, knobs or decide ran, knobs or decide before ledger, a ledger whose audit is due
+and not given, or given and refused, a run_record refusal, a moot on a done, absent or untagged task, of an unlisted
 trade or with no --why); 3 no tz data, or no tomllib for `rung` over a present ladder file.
 """
 from __future__ import annotations
@@ -878,6 +883,12 @@ class Span:
         if note is None or (note.parent.name == "Rollouts" and note.parent.parent.name == "Archive"):
             return False
         return str(status_of(note)).lower() not in LEDGER.CLOSED
+
+    def serial(self, slug):
+        """Whether a record is a serial chain's, for the Time-lost ledger (which leaves it out): its note (rollout_note(),
+        archived or not) reads `shape: serial`, as shape_of() reads it."""
+        note = self.vault.rollout_note(slug)
+        return note is not None and shape_of(note) == "serial"
 
     # -- one read rollout -------------------------------------------------------------------------------------------
 
@@ -1554,12 +1565,12 @@ class Span:
         """ledger.py's block over every record (each read whole, journals as --fold left them), with the Monthly audit's
         part: due, month and window always; recorded, the lead sessions and the intervals file only when it is due."""
         whole = self.whole(ev, records)
-        block = LEDGER.rows(whole, reflections, since, until, self.live, rid)
+        block = LEDGER.rows(whole, reflections, since, until, self.live, rid, serial=self.serial)
         due = LEDGER.audit_due(reflections, until)
         audit = dict(due, recorded=None, sessions=None, intervalsFile=None)
         if due["due"]:
             a_since = to_ms(due["since"], "the audit window's since")
-            ab = LEDGER.rows(whole, reflections, a_since, until, self.live, rid, intervals=True)
+            ab = LEDGER.rows(whole, reflections, a_since, until, self.live, rid, intervals=True, serial=self.serial)
             audit["recorded"] = ab["row"]["hours"]
             sessions = {}
             for slug, lines in sorted(whole.items()):
@@ -2216,6 +2227,11 @@ def cmd_decide(a):
     rid = span["reflection"]
     lines = read_reflections()
     refuse_closed(lines, rid)
+    # the ledger's Watch and the Monthly audit's gaps reach the task only through ledger's lines, and the section is
+    # appended once (its heading marks the visit): a decide before ledger would leave close refusing for good
+    if isinstance(span.get("ledger"), dict) and ledger_record(lines, rid) is None:
+        raise Stop("Reflection %s has no Time-lost ledger line: run ledger (its Watch and the Monthly audit's gaps reach "
+                   "the decision task through it): nothing written" % rid, 2)
     zone()
     until = _ts({"ts": span.get("until")})
     if until is None:

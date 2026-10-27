@@ -21,6 +21,9 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
                                            identities, p21-7: reflect.py writes them, tune.py reads them back)
     cadence(lines) -> (days, streak)       (the cadence rule, p21-8: reflect.py's close writes it, reflect-due.py
                                            reads it)
+    line_bytes(kind, fields, rollout=None, task=None) -> int   (the bytes emit would write for these fields now, on
+                                           this host, its newline included, MAX_LINE or not, no field checked: a writer
+                                           keeps a long line under MAX_LINE in its own words; p29-11, ledger.py's audit)
 
 Callers: in-process callers use the default strict=False, which never raises; shell callers append
 `|| true`. Recording must never break a rollout.
@@ -315,9 +318,10 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      TIME_LOST_CAUSES of its class; rollouts {class: at most 8 [slug, hours]}; other {cause: hours},
                      each cause in TIME_LOST_OTHER; events {name: an integer >= 0}; streak, record only, an integer >=
                      0; audit, required on an audit line and only there, {sources (1 to 8 {source, read, why?}), entries
-                     (at most 24 {class, cause, rollout, from, to, hours, what, evidence}), gaps (at most 10 {what,
-                     evidence})}; ranges and cites, baseline only, lists of at most 16 objects). No rollout, no task;
-                     lands in reflections.jsonl.
+                     (at most 16 {class, cause, rollout, from, to, hours, what, evidence}), gaps (at most 8 {what,
+                     evidence})}, the caps sized so a full audit of plain text fits the 16 KiB line (text JSON escapes
+                     can still overflow it, and ledger.py's audit_line() refuses that first); ranges and cites,
+                     baseline only, lists of at most 16 objects). No rollout, no task; lands in reflections.jsonl.
   base-moved      T  repo, pr, base, main (the refused integrated base and the live main merge-task read), inertOnly
                      (true | false | null: null only beside an error), moversTotal (an int >= 0), movers (at most 20
                      {sha, kind, rollout?, task?, pr?, source?}, oldest first: kind rollout | peer, source record |
@@ -803,8 +807,12 @@ TIME_LOST_OTHER = ("pause", "pause-drain", "dependency", "solo", "queue-tail", "
 TIME_LOST_SOURCES = ("record", "audit", "baseline")
 AUDIT_SOURCES = ("transcripts", "suite-logs", "pause-logs", "mac-history")
 MAX_TL_ROLLOUTS = 8        # contributors kept per class on a time-lost line
-MAX_AUDIT_ENTRIES = 24
-MAX_AUDIT_GAPS = 10
+# An audit line at its caps (16 entries and 8 gaps, every what, evidence and why at full length in plain ASCII, 64-character
+# rollout slugs, a 63-character host) is 14,150 bytes, under MAX_LINE; 24 and 10 were 19,674. Text JSON escapes (a quote,
+# a backslash, a non-ASCII character as \uXXXX) can still overflow it: ledger.py's audit_line() measures the line
+# (line_bytes) and refuses it in its own words. tests/reflect-ledger.test.mjs pins the maximal line through check().
+MAX_AUDIT_ENTRIES = 16
+MAX_AUDIT_GAPS = 8
 MAX_TL_LIST = 16           # a baseline's ranges and cites
 TL_WHAT = 160              # an audit entry's or gap's `what`, a source's `why`, a cite's `what`
 TL_EVIDENCE = 200          # an audit entry's or gap's `evidence`
@@ -1458,7 +1466,7 @@ def verdict_key(line):
     return (line.get("task"), line.get("round"), "digest", line.get("digest"))
 
 
-def _line(ts, host, rollout, task, kind, fields):
+def _encode(ts, host, rollout, task, kind, fields):
     obj = {"v": KIND_VERSIONS.get(kind, VERSION), "ts": ts, "host": host, "rollout": rollout, "task": task, "kind": kind}
     obj.update(fields)
     try:
@@ -1467,10 +1475,21 @@ def _line(ts, host, rollout, task, kind, fields):
         raise Refused("%s: %s" % (kind, e))
     except TypeError as e:
         raise Refused("%s: a field is not JSON: %s" % (kind, e))
-    data = (text + "\n").encode("ascii")
+    return (text + "\n").encode("ascii")
+
+
+def _line(ts, host, rollout, task, kind, fields):
+    data = _encode(ts, host, rollout, task, kind, fields)
     if len(data) > MAX_LINE:
         raise Refused("%s: the line is %d bytes, over the %d-byte limit" % (kind, len(data), MAX_LINE))
     return data
+
+
+def line_bytes(kind, fields, rollout=None, task=None):
+    """The bytes emit would write for `fields` now, on this host, its newline included, whether or not they pass MAX_LINE
+    (no field is checked; Refused only for a field that is no JSON). Every stamp is the same length, so the size holds at
+    any later emit on this host."""
+    return len(_encode(_stamp(None), _host(), rollout, task, kind, dict(fields or {})))
 
 
 # ---- writing ---------------------------------------------------------------------------------------------

@@ -249,7 +249,8 @@ const LEDGER_DEC = ['**A yes to a gap**', 'citing ADR 0051 d4', '**A no to a gap
 const LEDGER_CANNOT = ['does not price a suite slowed by load', 'The ledger\'s classes overlap across resources',
   'An open stop on a closed rollout', 'The baseline (the 2026-10-21 audit) gives coarse ranges', 'A `paused:` stamp left by mistake reads as Lachy\'s own pause',
   'A halt over several set-asides is classed by the first one moved', 'reads as `halt`: still a stall, but unsplit',
-  'never move the ledger\'s top, its Watch or the load hold', 'An audit\'s gaps never make a reading not quiet']
+  'never move the ledger\'s top, its Watch or the load hold', 'An audit\'s gaps never make a reading not quiet',
+  'A serial chain is left out of the Time-lost ledger', 'A rollout\'s time before its first engine line']
 
 // The weekly clauses that fail (w1..w18; w15 and w16 are p22-7's, w17 p25-4's, w18 p29-11's), [] when all hold.
 function weeklyFails(files) {

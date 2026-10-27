@@ -90,10 +90,10 @@ function py(h, script, expr, input = null) {
   return JSON.parse(r.stdout)
 }
 
-function rolloutNote(h, slug, { status = 'in_progress', archived = false } = {}) {
+function rolloutNote(h, slug, { status = 'in_progress', archived = false, shape = null } = {}) {
   const dir = archived ? path.join(h.tasks, 'Archive', 'Rollouts') : h.tasks
-  fs.writeFileSync(path.join(dir, `${slug}.md`), ['---', 'tags: [rollout]', `status: ${status}`, 'protocol_version: 5', '---', '',
-    `# ${slug}`, '', `Project root: \`${h.repo}\``, '', '## Notes', ''].join('\n'))
+  fs.writeFileSync(path.join(dir, `${slug}.md`), ['---', 'tags: [rollout]', `status: ${status}`, 'protocol_version: 5', ...(shape ? [`shape: ${shape}`] : []),
+    '---', '', `# ${slug}`, '', `Project root: \`${h.repo}\``, '', '## Notes', ''].join('\n'))
 }
 const done = (h, slug) => rolloutNote(h, slug, { status: 'done', archived: true })
 
@@ -273,14 +273,24 @@ const FIXTURE = {
     [T('08', '00:00'), 'stopped', null, { cause: 'halt', inferred: false, calls: [], reason: 'invalid round budget: max_plan_rounds on [[x]]' }],
     [T('08', '02:00'), 'lead-entry', null, { by: 'lachy', stop: 'halt' }],
   ],
+  // a live serial chain (its note `shape: serial`, in progress): Lachy's acts and a Leg's suite, no Slot or stop. Left out:
+  // 0 h, never 4+ days of stalls/unexplained from its first line to until
+  'l-serial': [
+    [T('07', '00:00'), 'gate-signed', 's1', { standing: false, gates: 1 }],
+    [T('07', '02:00'), 'suite-started', 's1', { ...suite(7, 'task', 'agent'), sha: SHA, dirty: false }],
+    [T('07', '02:30'), 'suite-ended', 's1', { ...suite(7, 'task', 'agent'), outcome: 'green', seconds: 1800, rc: 0 }],
+    [T('09', '00:00'), 'answer-recorded', 's1', { answerKind: 'needs-you', form: 'hand-back' }],
+  ],
 }
 const LSINCE = '2026-10-05T00:00:00.000Z'
 const LUNTIL = '2026-10-12T00:00:00.000Z'
+const SERIAL_LEFT_OUT = '[[l-serial]]: a serial chain (shape: serial): its Legs record no Slots or stops, so the ledger leaves it out'
 
 function fixture(h, over = {}) {
   for (const [slug, events] of Object.entries({ ...FIXTURE, ...over })) emitAll(h, slug, events)
   for (const slug of ['l-stops', 'l-lane', 'l-holds', 'l-caps', 'l-waits', 'l-remainder']) done(h, slug)
   rolloutNote(h, 'l-live') // in progress: live, its open stretch runs to until
+  rolloutNote(h, 'l-serial', { shape: 'serial' })
 }
 
 test('ledger.py parses as python 3.9', () => {
@@ -318,6 +328,9 @@ test('L1: the ledger sums fixture records across rollouts by class and cause, ra
   assert.match(flags, /\[\[l-live\]\]: the wait at 2026-10-11T21:00:00\.000Z: still waiting: \[\[g1\]\]'s needs-human set-aside/)
   assert.match(flags, /\[\[l-waits\]\]: a halt at 2026-10-06T15:00:00\.000Z whose reason no HALT_WAITS prefix matches/)
   assert.ok(!b.flags.some((f) => /l-waits.*the halt at 2026-10-06T01:00/.test(f)), 'a question over one set-aside is no mixed wait')
+  // the live serial chain is in none of the hours above, and flagged
+  assert.ok(b.flags.includes(SERIAL_LEFT_OUT), flags)
+  assert.ok(!CLASSES.some((c) => row.rollouts[c].some(([slug]) => slug === 'l-serial')) && !b.intervals.some((i) => i.rollout === 'l-serial'))
   // the leads the Monthly audit starts from
   assert.deepEqual(b.leads.filter((l) => l.kind !== 'pause').map((l) => [l.rollout, l.kind, l.hours]), [['l-remainder', 'lead-absent', 1.5], ['l-remainder', 'unexplained', 1]])
   // the record line it would write passes run_record
@@ -352,6 +365,32 @@ test('L1: a stop open across a window with no line in it is counted on a live ro
   done(h, 'l-open')
   const closed = ledgerCli(h, LSINCE, LUNTIL)
   assert.deepEqual([closed.row.hours, closed.row.top], [H0, null], 'archived: the stop ends at the last line, before the window')
+})
+
+test('L1 controls: a live serial chain and a superseding rollout not yet run price 0 h, flagged; re-shaped parallel, the chain prices from its first engine line; the carried rollout from its first Slot', (t) => {
+  const h = setup(t)
+  emitAll(h, 'l-serial', FIXTURE['l-serial'])
+  rolloutNote(h, 'l-serial', { shape: 'serial' })
+  // a supersede's carry, written at schedule time: the new rollout's note open, its record a carried line alone
+  emitAll(h, 'l-super', [[T('08', '00:00'), 'carried', 'u1', { from: 'l-old' }]])
+  rolloutNote(h, 'l-super', { status: 'open' })
+  const b = ledgerCli(h, LSINCE, LUNTIL)
+  assert.deepEqual([b.row.hours, b.row.top, b.intervals], [H0, null, []], JSON.stringify(b.row.byCause))
+  assert.ok(b.flags.includes(SERIAL_LEFT_OUT), b.flags.join('\n'))
+  assert.ok(b.flags.includes('[[l-super]]: no engine line yet (acts or carried lines alone): nothing priced'), b.flags.join('\n'))
+  // archived, the chain is still left out (a closed chain's record is no parallel rollout's either)
+  fs.rmSync(path.join(h.tasks, 'l-serial.md'))
+  rolloutNote(h, 'l-serial', { status: 'done', archived: true, shape: 'serial' })
+  assert.deepEqual(ledgerCli(h, LSINCE, LUNTIL).row.hours, H0)
+  // the controls: the same record under a parallel note is priced from its first engine line (the suite at 07 02:00, not
+  // the gate-signed at 00:00) to until, nothing running: 118 h of stalls; the carried rollout, once it takes a Slot
+  // (11 00:00 .. 01:00), from that Slot to until: 23 h, never from its carry on the 8th
+  fs.rmSync(path.join(h.tasks, 'Archive', 'Rollouts', 'l-serial.md'))
+  rolloutNote(h, 'l-serial')
+  emitAll(h, 'l-super', [[T('11', '00:00'), 'slot-taken', 'u1', S('start')], [T('11', '01:00'), 'slot-freed', 'u1', { outcome: 'ready' }]])
+  const c = ledgerCli(h, LSINCE, LUNTIL)
+  assert.deepEqual(c.row.rollouts.stalls, [['l-serial', 118], ['l-super', 23]], JSON.stringify(c.row.byCause))
+  assert.ok(c.flags.includes('[[l-serial]]: no slot-taken: its live span starts at its first engine line (a suite-started at 2026-10-07T02:00:00.000Z)'), c.flags.join('\n'))
 })
 
 test('HALT_WAITS: each prefix is a reason="<prefix> of execute\'s SKILL § 7; a renamed reason fails the pin', (t) => {
@@ -494,6 +533,16 @@ test('L4: an audit row between two readings never moves the top or the Watch; th
   }
 })
 
+test('L1 in span: a live serial chain read this week is left out of span\'s ledger too (Span.serial), flagged', (t) => {
+  const h = setup(t)
+  emitAll(h, 'l-serial', FIXTURE['l-serial'])
+  rolloutNote(h, 'l-serial', { shape: 'serial' })
+  const { s } = span(h, LSINCE, LUNTIL)
+  assert.equal(s.rollouts.find((e) => e.rollout === 'l-serial')?.shape, 'serial', 'the reading reads the chain')
+  assert.deepEqual([s.ledger.row.hours, s.ledger.row.top], [H0, null], JSON.stringify(s.ledger.row.byCause))
+  assert.ok(s.ledger.flags.includes(SERIAL_LEFT_OUT), s.ledger.flags.join('\n'))
+})
+
 // ---- L5: a load-topped ledger holds a proposed Parallel ceiling raise -------------------------------------------------
 
 function life(slug, from, to, lane, c) {
@@ -597,7 +646,8 @@ test('L6: October stands on the baseline; November\'s first reading audits from 
     /entry 1 \(2026-10-20T01:00:00\.000Z \.\. 2026-10-20T02:00:00\.000Z\) falls outside the audit window/)
   refused(h, ['ledger', '--span', nov.out, '--audit', writeJson(nov.dir, 'month.json', AUDIT_DOC([], undefined, '2026-10'))], /month '2026-10' is not this reading's 2026-11/)
   refused(h, ['ledger', '--span', nov.out, '--audit', writeJson(nov.dir, 'cause.json', AUDIT_DOC([entry({ cause: 'lunch' })]))], /entry 1: 'load' \/ 'lunch' is no class and cause/)
-  refused(h, ['ledger', '--span', nov.out, '--audit', writeJson(nov.dir, 'many.json', AUDIT_DOC(Array.from({ length: 25 }, () => entry({}))))], /at most 24 entries/)
+  refused(h, ['ledger', '--span', nov.out, '--audit', writeJson(nov.dir, 'many.json', AUDIT_DOC(Array.from({ length: 17 }, () => entry({}))))], /at most 16 entries/)
+  refused(h, ['ledger', '--span', nov.out, '--audit', writeJson(nov.dir, 'gaps.json', AUDIT_DOC([], Array.from({ length: 9 }, () => ({ what: 'w', evidence: 'e' }))))], /at most 8 gaps/)
   refused(h, ['ledger', '--span', oct.out, '--audit', writeJson(nov.dir, 'oct.json', AUDIT_DOC([], undefined, '2026-10'))], /no Monthly audit is due this reading/)
   const r = ok(h, ['ledger', '--span', nov.out, '--audit', writeJson(nov.dir, 'audit.json', AUDIT_DOC([entry({})]))])
   // the week itself (29 October to 5 November) lost nothing; the audit window's 2 h are October's
@@ -647,6 +697,33 @@ function handSpan(h, rid, { since, until, month, due = false, auditSince = since
 const MONTHS = [['r-20261105T000000Z-000011', '2026-10-21T13:00:00.000Z', '2026-11-05T02:00:00.000Z', '2026-11'],
   ['r-20261203T000000Z-000012', '2026-11-05T02:00:00.000Z', '2026-12-03T02:00:00.000Z', '2026-12'],
   ['r-20270107T000000Z-000013', '2026-12-03T02:00:00.000Z', '2027-01-07T02:00:00.000Z', '2027-01']]
+
+// An audit.json at every cap: 16 entries and 8 gaps, every what, evidence and why at full length in `ch`, 64-character
+// rollout slugs, the longest class and cause, all four sources unread.
+const MAX_AUDIT = (ch) => ({ month: '2026-11',
+  sources: ['transcripts', 'suite-logs', 'pause-logs', 'mac-history'].map((source) => ({ source, read: false, why: ch.repeat(160) })),
+  entries: Array.from({ length: 16 }, (_, i) => ({ class: 'plan-rejected', cause: 'plan-rejected', rollout: 'r'.repeat(64),
+    from: `2026-10-22T${String(i).padStart(2, '0')}:00:00Z`, to: `2026-10-22T${String(i).padStart(2, '0')}:30:00Z`, what: ch.repeat(160), evidence: ch.repeat(200) })),
+  gaps: Array.from({ length: 8 }, () => ({ what: ch.repeat(160), evidence: ch.repeat(200) })) })
+
+test('L6: a maximal audit line passes run_record.check; one that JSON escapes push past 16 KiB is refused by ledger (trim entries or their text), nothing written', (t) => {
+  const h = setup(t)
+  assert.deepEqual(py(h, RUN_RECORD, '[m.MAX_AUDIT_ENTRIES, m.MAX_AUDIT_GAPS, m.TL_WHAT, m.TL_EVIDENCE, m.MAX_LINE]'), [16, 8, 160, 200, 16384])
+  const [rid, since, until, month] = MONTHS[0]
+  const audit = { due: true, month, since, until, recorded: { ...H0, stalls: 1234.567, 'lane-bound': 98.765 } }
+  const [size, checked] = py(h, LEDGER, `(lambda f: [m.RR.line_bytes("time-lost", f), m.RR.check(None, "time-lost", None, f)])(m.audit_line(a["doc"], a["audit"], "${rid}", []))`,
+    { doc: MAX_AUDIT('x'), audit })
+  assert.ok(size > 13000 && size <= 16384, `the maximal plain line is ${size} bytes`)
+  assert.equal(checked, null, 'run_record.check passes it')
+  // end to end: the same caps in non-ASCII text are refused before anything is written; the plain one is written whole
+  const sp = handSpan(h, rid, { since, until, month, due: true })
+  refused(h, ['ledger', '--span', sp.out, '--audit', writeJson(sp.dir, 'wide.json', MAX_AUDIT('é'))],
+    /^reflect: the audit is refused: the audit line would be \d+ bytes, over the Run record's 16384-byte line limit \(16 entries, 8 gaps; a non-ASCII character takes 6 bytes or more\): trim entries or their text: nothing written\n$/)
+  ok(h, ['ledger', '--span', sp.out, '--audit', writeJson(sp.dir, 'audit.json', MAX_AUDIT('x'))])
+  const raw = fs.readFileSync(reflectionsFile(h), 'utf8').split('\n').find((l) => l.includes('"source":"audit"'))
+  const au = JSON.parse(raw)
+  assert.deepEqual([au.audit.entries.length, au.audit.gaps.length, Buffer.byteLength(raw) + 1 <= 16384], [16, 8, true])
+})
 
 test('L7: an audit with gaps and no rule item writes the decision task with its gap lines; close waits for decide; a re-run is byte-identical', (t) => {
   const h = setup(t)
@@ -710,12 +787,13 @@ test('L7: gaps never count against quiet: three gap-only readings move the caden
   assert.deepEqual([closeLine(h, rid).quiet, closeLine(h, rid).counts.newWatches], [false, 1])
 })
 
-test('L8: close and knobs refuse with run ledger; a re-run of ledger prints exists; --dry-run writes nothing', (t) => {
+test('L8: close, knobs and decide refuse with run ledger; a re-run of ledger prints exists; --dry-run writes nothing', (t) => {
   const h = setup(t)
   const rid = 'r-20260915T000000Z-000021'
   const sp = handSpan(h, rid, { since: '2026-09-08T00:00:00.000Z', until: '2026-09-15T00:00:00.000Z', month: '2026-09' })
   refused(h, ['close', '--span', sp.out], new RegExp(`^reflect: Reflection ${rid} is not closed: no Time-lost ledger line from this Reflection: run ledger\\n$`))
   refused(h, ['knobs', '--span', sp.out], new RegExp(`^reflect: Reflection ${rid} has no Time-lost ledger line: run ledger`))
+  refused(h, ['decide', '--span', sp.out, '--tasks-dir', h.tasks], new RegExp(`^reflect: Reflection ${rid} has no Time-lost ledger line: run ledger .*: nothing written\\n$`))
   const dry = ok(h, ['ledger', '--span', sp.out, '--dry-run'])
   assert.match(dry.stdout, /^would write time-lost: .*"source": "baseline"/m)
   assert.match(dry.stdout, /^dry run, nothing written: ledger r-20260915T000000Z-000021: no time lost of 0 h; baseline 2026-10, record written$/m)
@@ -729,4 +807,24 @@ test('L8: close and knobs refuse with run ledger; a re-run of ledger prints exis
   const old = writeJson(h.out, 'old.json', { reflection: 'r-20260922T000000Z-000022', since: '2026-09-15T00:00:00.000Z', until: '2026-09-22T00:00:00.000Z', rollouts: [] })
   refused(h, ['ledger', '--span', old], /has no ledger block \(a span from before p29-11\)/)
   ok(h, ['close', '--span', old])
+})
+
+// The order a decide before ledger broke: watch, decide (its section appended once, with the rule item), then ledger with
+// a gap, and close refused for good, since a re-run of decide finds the heading and appends nothing.
+test('L8: decide before ledger is refused with the vault untouched; in order, the rule item and the gap share the section and close passes', (t) => {
+  const h = setup(t)
+  const [rid, since, until, month] = MONTHS[0]
+  const sp = handSpan(h, rid, { since, until, month, due: true, rollouts: ['a', 'b'] })
+  ok(h, ['watch', '--span', sp.out, '--rollout', 'a', '--rollout', 'b', '--rule', 'orient § 5 grill', '--shape', 'a design fork asked mid-run', '--count', '2'])
+  const decide = ['decide', '--span', sp.out, '--decisions', writeJson(sp.dir, 'd.json', {}), '--tasks-dir', h.tasks, '--now', '2026-11-05T13:00+11:00']
+  const vault = () => fs.readdirSync(h.tasks).filter((f) => f.endsWith('.md'))
+  refused(h, decide, new RegExp(`^reflect: Reflection ${rid} has no Time-lost ledger line: run ledger \\(its Watch and the Monthly audit's gaps reach the decision task through it\\): nothing written\\n$`))
+  assert.deepEqual(vault(), [], 'no decision task written')
+  ok(h, ['ledger', '--span', sp.out, '--audit', writeJson(sp.dir, 'audit.json', AUDIT_DOC([]))])
+  ok(h, ['knobs', '--span', sp.out])
+  ok(h, decide)
+  const sec = section(fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-11-05.md'), 'utf8'), new RegExp(`^## Reflection ${rid}$`))
+  assert.match(sec, /^- [0-9a-f]{8}: rule orient § 5 grill;/m)
+  assert.match(sec, /^- gap 1 2026-11: a lead question writes no Run-record line; evidence /m)
+  ok(h, ['close', '--span', sp.out, '--tasks-dir', h.tasks])
 })

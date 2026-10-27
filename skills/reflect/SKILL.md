@@ -314,7 +314,8 @@ it a knob candidate (its entry's `shape` is `serial`, with the chain state in `c
 span is a new Reflection, with a new id.
 
 Its `ledger` block is the **Time-lost ledger** (ADR 0051; `skills/reflect/scripts/ledger.py`'s header holds the model):
-`row`, the hours each cause class cost this week across every rollout (stalls by cause, usage limits as `quota-bound`,
+`row`, the hours each cause class cost this week across every rollout but a serial chain (its Legs record no Slots or
+stops, so the ledger leaves it out, flagged) (stalls by cause, usage limits as `quota-bound`,
 machine load, the Integration lane as `lane-bound`, Integration rework, plan blocks as `plan-rejected`), its `top`,
 `byCause`, each class's top contributing `rollouts`, the unranked `other` (Lachy's own pause among them) and the
 `events`; `previous` and `delta` against the last week's row; `weeks`, the trend, the Monthly audits' rows among them;
@@ -347,10 +348,13 @@ sysctl -n kern.boottime
 It reconciles them against `ledger.audit.intervalsFile` (every interval the record priced, and the audit's leads), starting
 with its `unexplained` and `lead-absent` leads, and writes `/tmp/thread-reflect-week-<YYYY-MM-DD>/audit.json`: `month`;
 `sources`, each of `transcripts`, `suite-logs`, `pause-logs` and `mac-history` with `read` (and `why` when unread);
-`entries`, each a cost the record missed, `{class, cause, rollout, from, to, what, evidence}` (at most 24; the hours come
+`entries`, each a cost the record missed, `{class, cause, rollout, from, to, what, evidence}` (at most 16; the hours come
 from `from` .. `to`, never typed); and `gaps`, each a thing the Run record should have carried, `{what, evidence}` (at
-most 10). An entry never re-prices a stretch the record already priced in its class (step 13a refuses one that overlaps):
-name that as a gap. The audit adds no question of its own; its gaps reach Lachy through the decision task (step 15).
+most 8). Each `what` and `why` is cut at 160 characters and each `evidence` at 200, and the whole audit is one Run-record
+line of at most 16 KiB: plain ASCII text fits at every cap, but a non-ASCII character takes 6 bytes or more, so step 13a
+refuses a line over the limit (`trim entries or their text`). An entry never re-prices a stretch the record already
+priced in its class (step 13a refuses one that overlaps): name that as a gap. The audit adds no question of its own; its
+gaps reach Lachy through the decision task (step 15).
 
 ### 11. The reading
 
@@ -495,7 +499,8 @@ becomes a rule proposal at step 15, and Lachy's no closes it until two later rea
 `ledger <id>: top <class> (<h> h) of <total> h; <what> written`, or `exists ledger <id>` on a re-run. Exit 2 names what
 to fix and writes nothing: the audit is due and `--audit` was not given (run step 10a), `--audit` was given and none is
 due, or the audit is refused (another month, an unknown class or cause, an entry outside the window or one that
-overlaps an interval the record already priced in its class: name that as a gap instead).
+overlaps an interval the record already priced in its class: name that as a gap instead; more than 16 entries or 8
+gaps; or a line over the Run record's 16 KiB: trim entries or their text, then run it again).
 
 ### 14. Knobs
 
@@ -530,6 +535,8 @@ one entry per recurring Watch: why it matters, and the rule it would amend; with
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py decide --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --decisions /tmp/thread-reflect-week-<YYYY-MM-DD>/decisions.json
 ```
 
+It refuses (`run ledger`, exit 2, nothing written) while step 13a's `ledger` has not written this reading's row: the
+ledger's Watch and the audit's gaps reach the task only through its lines, and the task's section is written once.
 It writes a decision task only with a rule proposal or a held trade, or a Monthly audit that names a gap: a week with
 Watches to confirm alone writes none, and they wait (a task a held trade alone writes lists none). An audit's gaps come
 after the trades, in an audit part of their own: the hours it found and the record's by class, the sources read and
@@ -688,6 +695,11 @@ or `exists`). An item left open keeps the task open.
   load reads low and the load hold fires late; the Monthly audit reads the suite logs for it.
 - The ledger's classes overlap across resources: a stop holds the whole rollout while a hold holds the lane and a
   suite a verify slot, so the classes' hours are not one clock's, and a Mac-wide stop counts once per rollout.
+- A serial chain is left out of the Time-lost ledger, and flagged: its Legs record no Slots or stops (only Lachy's acts
+  and a Leg's suites), and its note stays open until its Leg's Complete, so its record cannot say when it ran or waited.
+  A chain's lost time shows only in its friction and its Leg log.
+- A rollout's time before its first engine line (a Slot, a hold, an idle-slots marker, a stop, a lead-entry or a suite)
+  is priced nowhere: a superseding rollout's carry and Lachy's acts before it ran start no live span.
 - An open stop on a closed rollout (archived, done or with no note) ends at its record's last line; on a live one it
   runs to the reading's end. Either way it is flagged.
 - The baseline (the 2026-10-21 audit) gives coarse ranges and a handful of named stalls, not a week-by-week row.

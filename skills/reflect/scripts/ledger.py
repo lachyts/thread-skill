@@ -9,8 +9,9 @@ score.py and run_record.py by path, reads only and writes nothing but --out. The
 
 It reads every <slug>.jsonl in run_record's events directory (the reserved files aside) and reflections.jsonl's
 `time-lost` and `watch` lines, and prints rows()'s block (stdout, or --out F). A rollout is live while its note
-(<tasks dir>/<slug>.md, default ~/repos/obsidian/Work/Tasks) is not archived and its status is none of CLOSED; span
-passes the same rule as its `live(slug)` callback, so this module reads no vault status itself.
+(<tasks dir>/<slug>.md, default ~/repos/obsidian/Work/Tasks) is not archived and its status is none of CLOSED, and
+serial while its note (there, else under <tasks dir>/Archive/Rollouts) says `shape: serial` (note_live and note_serial);
+span passes the same rules as its `live(slug)` and `serial(slug)` callbacks, so this module reads no vault itself.
 
 The model. The ledger prices the hours each cause class cost, ranked by cause, never by rollout.
 
@@ -23,10 +24,17 @@ The model. The ledger prices the hours each cause class cost, ranked by cause, n
   exactly as score.py does, so running time (run_iv), the Slots' active intervals and the lead-absent and never-finished
   gaps are the score's own; its union, intersect, subtract and total are reused, never copied. The LEDGER_KINDS lines are
   read beside them: stop_spans() (run_record's stop model) and the suites, paired by `suite`.
-- The live span runs from the record's first slot-taken (else its first line) to until while the rollout is live, else to
-  the record's last line (a call-journal, review-verdict or night-record line is never the last: each is written after
-  the fact), clipped to [since, until]. An interval still open at the record's last line runs to that end, until on a
-  live rollout, and is flagged either way (score.py's open-interval flags, and one per open stop).
+- Which records. A serial chain (`shape: serial`, ADR 0040; the `serial(slug)` callback) is left out whole, flagged when
+  it is live or has a line in the window: its Legs record no Slots and no stops (record-entry and the stop driver skip a
+  serial note), so its record holds Lachy's acts and a Leg's suites alone, while its note stays open until its Leg's
+  Complete, and a live span over it would price the chain's whole life as stalls/unexplained.
+- The live span runs from the record's first engine line (ENGINE_KINDS: a Slot, a lane, a hold, an idle-slots marker, a
+  stop, a lead-entry or a suite; never an act, a pause or a `carried` line, which a supersede's carry writes to the new
+  rollout's record at schedule time, before it runs) to until while the rollout is live, else to the record's last line
+  (a call-journal, review-verdict or night-record line is never the last: each is written after the fact), clipped to
+  [since, until]. A record with no engine line yet prices nothing (flagged when it has a line in the window). An
+  interval still open at the record's last line runs to that end, until on a live rollout, and is flagged either way
+  (score.py's open-interval flags, and one per open stop).
 - Pauses. Lachy's own pause (`paused` mode soft or hard .. `resumed`) is subtracted from every class and reported in
   `other` as `pause`. A sign-off pause is not his pause: run_record's catalogue and ADR 0034 make it the queue closed with
   only gates left, so it is priced as stalls/gate.
@@ -79,7 +87,7 @@ keyed by the record's own values where one fits:
 
 A suite runs from its suite-started to its suite-ended (or its seconds before a suite-ended with no start); one with no
 end is priced 0 and counted (`suite-unfinished`). Completion suites belong to no class. Which records are read: every
-record whose live span reaches the window, a stopped rollout with no line in the window included.
+record whose live span reaches the window, a stopped rollout with no line in the window included, a serial chain's aside.
 
 Ranking, top and streak. The ranking is by milliseconds, ties broken by TIME_LOST_CLASSES' order (a tie at the top is
 flagged); the top is the first class with hours above zero, else null; the streak is the run of consecutive `record`
@@ -111,9 +119,11 @@ leaves the next reading's month to audit, its window starting at the last audit'
 the same rule, and a second reading in a month is not due. recorded is rows() over the audit window (it may overlap the
 weekly rows inside it, harmless, since an audit row is never summed with a record row). audit_line() checks audit.json:
 the month; each entry's class and cause, rollout, from .. to inside the window and overlapping no known interval of the
-same rollout and class (overlaps()); the caps (MAX_AUDIT_ENTRIES, MAX_AUDIT_GAPS; text folded and cut). Each entry's hours
-come from its from .. to (audit_hours()): the model never types a number. Its gaps never count against a reading's
-`quiet` (run_record's cadence rule).
+same rollout and class (overlaps()); the caps (MAX_AUDIT_ENTRIES, MAX_AUDIT_GAPS; text folded and cut); and the line's
+own size (run_record's line_bytes(), as emit would write it here): one over MAX_LINE, which text JSON escapes can reach
+(a non-ASCII character takes 6 bytes or more), is refused, `trim entries or their text`, before anything is written. Each
+entry's hours come from its from .. to (audit_hours()): the model never types a number. Its gaps never count against a
+reading's `quiet` (run_record's cadence rule).
 
 Exit codes (the CLI): 0 written; 1 the events directory or --out cannot be read or written; 2 usage or a bad stamp; 3 no tz
 data (`python3 -m pip install tzdata`).
@@ -160,6 +170,10 @@ union, intersect, subtract, total, fmt, hours = SCORE.union, SCORE.intersect, SC
     SCORE.hours
 # Lines written after the fact, never a record's last line (score.py's pair keeps them out of last_t too).
 NOT_TAIL = ("call-journal", "review-verdict") + SCORE.NIGHT_KINDS
+# The lines the engine writes as it runs a rollout: the first starts its live span. Never an act (answer-recorded,
+# gate-signed, handed-back, race-decided), a pause, or a `carried` line, which a supersede's carry writes at schedule time.
+ENGINE_KINDS = ("slot-taken", "slot-freed", "run-bound", "lane-taken", "lane-freed", "hold-started", "hold-ended",
+                "idle-slots", "stopped", "lead-entry", "suite-started", "suite-ended")
 SENTINEL = "time-lost-span-end"
 
 # A halt's reason prefix (execute § 7's `reason="..."`, the stop driver's verbatim copy) -> its stalls cause; None is a
@@ -480,8 +494,14 @@ def measure(slug, lines, since, until, is_live):
     if not lines:
         return None
     base = [x for x in lines if x[2].get("kind") not in SCORE.LEDGER_KINDS]
-    first = next((t for t, _n, d in base if d.get("kind") == "slot-taken"), None)
-    start = first if first is not None else lines[0][0]
+    engine = next(((t, d.get("kind")) for t, _n, d in lines if d.get("kind") in ENGINE_KINDS), None)
+    if engine is None:  # acts or carried lines alone: the rollout has not run (a superseding one before its first Slot)
+        if not any(since <= t <= until for t, _n, _d in lines):
+            return None
+        m = Measure(slug)
+        m.flag("no engine line yet (acts or carried lines alone): nothing priced")
+        return m
+    start = engine[0]
     tail = [t for t, _n, d in lines if d.get("kind") not in NOT_TAIL]
     last = max(tail) if tail else lines[-1][0]
     lo, hi = max(since, start), (until if is_live else min(until, last))
@@ -644,8 +664,8 @@ def measure(slug, lines, since, until, is_live):
                 m.count("base-moved-inert")
         elif kind == "stopped":
             m.count("stopped")
-    if first is None and base:
-        m.flag("no slot-taken: its live span starts at its first line")
+    if not any(d.get("kind") == "slot-taken" for _t, _n, d in base):
+        m.flag("no slot-taken: its live span starts at its first engine line (a %s at %s)" % (engine[1], fmt(start)))
     if not any(d.get("kind") in ("stopped", "lead-entry", "suite-started", "suite-ended") for _t, _n, d in lines):
         m.flag("no stop, entry or suite lines (a record from before p29-10): its halts read unexplained")
     return m
@@ -653,12 +673,22 @@ def measure(slug, lines, since, until, is_live):
 
 # ---- the block --------------------------------------------------------------------------------------------------------
 
-def measure_all(records, since, until, live):
+SERIAL_LEFT_OUT = "a serial chain (shape: serial): its Legs record no Slots or stops, so the ledger leaves it out"
+
+
+def measure_all(records, since, until, live, serial=None):
     """{slug: Measure} for every record whose live span reaches [since, until] (ms). `records` is {slug: whole lines};
-    `live(slug)` says whether its rollout is live."""
+    `live(slug)` says whether its rollout is live, `serial(slug)` whether it is a serial chain (left out, flagged when it
+    is live or has a line in the window: a Measure holding the flag alone)."""
     out = {}
     for slug in sorted(records):
-        m = measure(slug, records[slug], since, until, bool(live(slug)))
+        lines = records[slug]
+        if serial is not None and serial(slug):
+            if lines and (live(slug) or any(since <= t <= until for t, _n, _d in lines)):
+                out[slug] = Measure(slug)
+                out[slug].flag(SERIAL_LEFT_OUT)
+            continue
+        m = measure(slug, lines, since, until, bool(live(slug)))
         if m is not None:
             out[slug] = m
     return out
@@ -746,11 +776,11 @@ def sighted(top, previous, lines):
         any(isinstance(d, dict) and d.get("kind") == "watch" and d.get("id") == wid for d in lines)
 
 
-def rows(records, ledger_lines, since, until, live, rid, intervals=False):
+def rows(records, ledger_lines, since, until, live, rid, intervals=False, serial=None):
     """The ledger block over [since, until] (ms) for Reflection `rid` (the module docstring's block). `ledger_lines` is
-    reflections.jsonl's lines (its time-lost and watch lines are read). With `intervals`, the block carries every priced
-    interval and the audit's leads too."""
-    per = measure_all(records, since, until, live)
+    reflections.jsonl's lines (its time-lost and watch lines are read); `live` and `serial` are measure_all()'s callbacks.
+    With `intervals`, the block carries every priced interval and the audit's leads too."""
+    per = measure_all(records, since, until, live, serial)
     ms = {c: 0 for c in CLASSES}
     by = {c: {} for c in CLASSES}
     other, events, contrib, flags = {}, {}, {c: [] for c in CLASSES}, []
@@ -936,9 +966,15 @@ def audit_line(doc, audit, rid, known):
     found = audit_hours(entries)
     recorded = {c: (audit.get("recorded") or {}).get(c, 0) for c in CLASSES}
     rank = sorted(CLASSES, key=lambda c: (-(found[c] + int(round(recorded[c] * HOUR))), CLASSES.index(c)))
-    return {"id": "tl-audit-%s" % rid[2:], "source": "audit", "reflection": rid, "since": audit["since"],
+    line = {"id": "tl-audit-%s" % rid[2:], "source": "audit", "reflection": rid, "since": audit["since"],
             "until": audit["until"], "month": audit["month"], "hours": {c: hours(found[c]) for c in CLASSES},
             "recorded": recorded, "rank": rank, "audit": {"sources": sources, "entries": entries, "gaps": out_gaps}}
+    size = RR.line_bytes("time-lost", line)
+    if size > RR.MAX_LINE:
+        raise ValueError("the audit line would be %d bytes, over the Run record's %d-byte line limit (%d entries, %d gaps; "
+                         "a non-ASCII character takes 6 bytes or more): trim entries or their text"
+                         % (size, RR.MAX_LINE, len(entries), len(out_gaps)))
+    return line
 
 
 # ---- the CLI ------------------------------------------------------------------------------------------------------------
@@ -969,14 +1005,14 @@ def read_jsonl(path):
     return out
 
 
-def note_status(path):
-    """A note's frontmatter `status:` (lowercased), or None."""
+def note_field(path, key):
+    """A note's frontmatter scalar `key:` (lowercased, quotes and an inline ` # comment` dropped), or None."""
     try:
         text = open(path, encoding="utf-8").read()
     except (OSError, UnicodeDecodeError):
         return None
     m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
-    s = re.search(r"^status:\s*['\"]?([^'\"\n#]+)", m.group(1), re.M) if m else None
+    s = re.search(r"^%s:\s*['\"]?([^'\"\n#]+)" % re.escape(key), m.group(1), re.M) if m else None
     return s.group(1).strip().lower() if s else None
 
 
@@ -984,7 +1020,16 @@ def note_live(tasks_dir, slug):
     """The CLI's live rule (span's own, read from the vault): the note directly under the tasks dir, not archived, its
     status none of CLOSED."""
     p = os.path.join(tasks_dir, "%s.md" % slug)
-    return os.path.isfile(p) and note_status(p) not in CLOSED
+    return os.path.isfile(p) and note_field(p, "status") not in CLOSED
+
+
+def note_serial(tasks_dir, slug):
+    """The CLI's serial rule (span's own): the note directly under the tasks dir, else under Archive/Rollouts (span's
+    rollout_note), says `shape: serial`."""
+    for p in (os.path.join(tasks_dir, "%s.md" % slug), os.path.join(tasks_dir, "Archive", "Rollouts", "%s.md" % slug)):
+        if os.path.isfile(p):
+            return note_field(p, "shape") == "serial"
+    return False
 
 
 class Parser(argparse.ArgumentParser):
@@ -1021,7 +1066,8 @@ def main(argv):
     except (OSError, ValueError) as e:
         sys.stderr.write("ledger: cannot read the events directory: %s\n" % e)
         return 1
-    block = rows(records, lines, since, until, lambda slug: note_live(tasks, slug), "r-cli", intervals=True)
+    block = rows(records, lines, since, until, lambda slug: note_live(tasks, slug), "r-cli", intervals=True,
+                 serial=lambda slug: note_serial(tasks, slug))
     text = json.dumps(block, indent=2, ensure_ascii=False) + "\n"
     if a.out:
         try:
