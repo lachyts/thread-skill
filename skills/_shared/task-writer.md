@@ -22,12 +22,14 @@ in this order:
    that project note. **More than one match** (a sibling project sharing the
    repo, or a monorepo with sub-project notes) → fall through to § 1.2–1.4
    among the matches: the one the active THREAD.md names, else the one the
-   conversation is scoped to, else `AskUserQuestion` offering those matches.
-   No match → § 1.2.
+   conversation is scoped to, else `AskUserQuestion` offering those matches
+   (Owner *yours*, by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`: asked only when the matches
+   differ in what he would want, else decided and the pick named). No match → § 1.2.
 2. **Active THREAD.md** names/implies a project → use it.
 3. **Conversation clearly scoped** to a known project → use it.
 4. **Still ambiguous** → ask via `AskUserQuestion` (offer the 2–3 most likely
-   project notes).
+   project notes; Owner *yours*, by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`: asked only
+   when they differ in what he would want, else decided and the pick named).
 5. **Genuinely project-less** → umbrella: `[[Vault]]` for vault/system work,
    `[[Personal admin]]` for life admin.
 

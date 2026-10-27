@@ -61,7 +61,9 @@ soft pause's stamp counts as running. A hold with no Slot open is a wait on Lach
   closing that task's Slot, lane and holds. A lane, hold or pause still open at the last line read ends there,
   flagged. The night record's lines (away-night, last-start-held, ran-past-morning: p28-2, NIGHT_KINDS) are not
   read: `next` writes a ran-past-morning line after the Morning it reads, so none is a task's last record line (an
-  untimed call's last activity) or the record's last line.
+  untimed call's last activity) or the record's last line. Nor are the time-lost ledger's (stopped, lead-entry,
+  suite-started, suite-ended, base-moved: p29-10, LEDGER_KINDS), dropped as each record is read, the scored one and
+  every other one read for load: a score is byte-equal with or without them, and p29-11 scores them.
 
 Headlines (ADR 0037 d1: two, and Lachy settles any trade between them; there is no tie-breaker):
 - Hands-off rate: the share of the window's landed tasks (distinct tasks with a `merged` line in [since, until])
@@ -261,6 +263,10 @@ ACT_KINDS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
 # The night record's kinds (p28-2, run_record.py; reconcile-rollout.py's NIGHT_KINDS): `next`'s reading of a Morning,
 # written at a later call, so never a task's call activity nor the record's last line (pair skips them).
 NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")
+# The time-lost ledger's kinds (p29-10, ADR 0051; run_record.py): stops, entries, suites and why main moved. Not scored
+# yet (p29-11 scores them): every line of these kinds is dropped as it is read, so a score is byte-equal with or without
+# them, and a late one never extends a record's live span.
+LEDGER_KINDS = ("stopped", "lead-entry", "suite-started", "suite-ended", "base-moved")
 ACT_NAMES = ("answer", "signOff", "retry", "mergeHold", "raceDecided")
 MERGE_HOLD_DETAIL = "a --gated or exit-7 hold: the record carries no reason"
 # The two headlines (ADR 0037 d1) and each proposal rule's declared effect: (serves, risks). A heuristic (the header).
@@ -1125,6 +1131,7 @@ class Score:
                 lines, skipped = read_lines(path)
             except OSError as e:
                 raise Unreadable("cannot read the run record %s: %s" % (path, e))
+            lines = [x for x in lines if x[2].get("kind") not in LEDGER_KINDS]
         if skipped:
             self.flag("%d record line(s) did not parse: skipped" % skipped)
         repo = a.repo_slug or (settings or {}).get("repo") or None
@@ -1688,6 +1695,7 @@ class Score:
             except OSError:
                 self.flag("load: %s cannot be read: skipped" % name)
                 continue
+            lines = [x for x in lines if x[2].get("kind") not in LEDGER_KINDS]
             mine = []
             for t, _n, d in lines:
                 if host is not None and d.get("host") != host:

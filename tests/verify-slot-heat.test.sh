@@ -12,6 +12,11 @@
 #   L4  trapping during the verifier: back in line, restart green   L5  … with --slot-wait 0: heat, one start
 #   L6  a heat stop in the env_bootstrap: a clean restart, the outcome file has no stale key   L7  a SlotDirError at the
 #   re-acquire: unslotted, unwatched, green.
+#   The Run record (p29-10, ADR 0051): HR1 a recorded `run` in a task tree, its output piped: a heat stop ends its suite
+#   heat (no rc) and the restart is a fresh suite, green   HR2 verify --rollout: the same for the lead's suite (its step
+#   named)   HR3 verify --rollout pinned heavy: only a suite-ended heat with its wait.
+#   The Flake check (p29-9, ADR 0050): L8 a heat stop in its named re-run: back in line, every step reruns, the Flake and
+#   the flake record the last pass's.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; the stub notifyutil reads the level
 # from <arm>/out and appends one line per read to <arm>/reads, so "N more reads" is the clock; every wait is a
 # `within <s>` poll whose bound only slows a real failure. Every background pid is recorded and stopped only by it.
@@ -324,6 +329,113 @@ tick; more 12; untick
 ok "$(alive "$(cat "$D/c.pid")" && echo alive || echo gone)" alive "L7: still trapping, the unslotted restart is never stopped"
 touch "$D/c.go"; wait "$W"; rc=$?
 ok "$rc|$(cat "$D/o.rc" 2>/dev/null)|$(grep -c 'heat stop' "$D/o.log")" "0|0|1" "L7: green: exit 0, O.rc 0, one heat stop"
+
+# ======== HR1–HR3: the Heat hold in the Run record (p29-10, ADR 0051; verify-slot.py contract items 7 and 8) ======
+# recq <events dir> <rollout> <python expr over L, its record lines>
+recq() {
+  python3 - "$1/$2.jsonl" "$3" <<'PY2'
+import json, sys
+try:
+    L = [json.loads(x) for x in open(sys.argv[1]).read().splitlines() if x.strip()]
+except FileNotFoundError:
+    L = []
+print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))
+PY2
+}
+# gitrepo <dir>: a git tree with one commit (tree_state reads its sha; a tree with none records nothing).
+gitrepo() { git -c init.defaultBranch=main init -q "$1" && git -C "$1" -c user.name=t -c user.email=t@t commit -q --allow-empty -m a; }
+PAIRS='[[d["kind"], d.get("outcome"), d.get("rc"), d.get("step")] for d in L]'
+IDS='[L[0]["suite"] == L[1]["suite"], L[2]["suite"] == L[3]["suite"], L[0]["suite"] != L[2]["suite"]]'
+
+# HR1: an agent's suite in a task tree (vault under HOME, t1 in_progress in r1), stdout and stderr to files: the pump.
+arm hr1
+VH="$D/home"; VT="$VH/repos/obsidian/Work/Tasks"; VEV="$D/events"; mkdir -p "$VT"
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 2\n---\n\n## Queue\n\n- [[t1]]\n' > "$VT/r1.md"
+printf -- '---\ntags: [task]\nstatus: in_progress\nowner: lead-1\nrollout: "[[r1]]"\n---\n\nt1\n' > "$VT/t1.md"
+gitrepo "$D/r"; git -C "$D/r" worktree add -q "$D/r/.claude/worktrees/t1" -b t1 >/dev/null 2>&1
+(cd "$D/r/.claude/worktrees/t1" && exec env -u THREAD_HEAT_LEVEL HOME="$VH" THREAD_EVENTS_DIR="$VEV" PATH="$tmp/bin:$PATH" HEAT_D="$D" \
+  python3 "$VS" run --slots 1 -- sh -c "echo out-line; $(hold_cmd)") > "$D/out.txt" 2> "$D/err" &
+W=$!; pids+=($W)
+started 1 || echo "FAIL - HR1: the suite did not start"
+level 3
+within 120 grepq 'waiting (heat: trapping)' "$D/err" || echo "FAIL - HR1: no heat stop and wait"
+ok "$(recq "$VEV" r1 "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,null]]' \
+  "HR1: the heat stop ends the suite heat, no rc, before the run waits for the heat"
+level 0
+started 2 || echo "FAIL - HR1: no restart"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc|$(grep -c out-line "$D/out.txt")" "0|2" "HR1: the restart is green, exit 0; both runs' output reached stdout through the pump"
+ok "$(recq "$VEV" r1 "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,null],["suite-started",null,null,null],["suite-ended","green",0,null]]' \
+  "HR1: the restart is a suite of its own: started, then green with rc 0"
+ok "$(recq "$VEV" r1 "$IDS")" '[true,true,true]' "HR1: each run pairs its own suite id"
+
+# HR2: the lead's Integration suite (verify --rollout --slug), trapping during the verifier.
+arm hr2
+gitrepo "$D/tree"; mkdir -p "$D/v"; : > "$D/v/ro.md"
+env -u THREAD_HEAT_LEVEL PATH="$tmp/bin:$PATH" HEAT_D="$D" THREAD_EVENTS_DIR="$D/events" python3 "$LI" verify --tree "$D/tree" --out "$D/o" \
+  --timeout 600 --slots 1 --slot-wait 600 --rollout "$D/v/ro.md" --slug t1 --verifier "$(vcmd)" > /dev/null 2>&1 &
+W=$!; pids+=($W)
+started 1 || echo "FAIL - HR2: the verifier did not start"
+level 3
+within 120 grepq 'verify: waiting (heat: trapping)' "$D/o.log" || echo "FAIL - HR2: no heat stop and wait"
+ok "$(recq "$D/events" ro "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,"verifier"]]' \
+  "HR2: the heat stop ends the lead's suite heat, no rc, its step the verifier"
+level 0
+started 2 || echo "FAIL - HR2: no restart"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc|$(cat "$D/o.rc" 2>/dev/null)" "0|0" "HR2: the restart is green: exit 0, O.rc 0"
+ok "$(recq "$D/events" ro "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,"verifier"],["suite-started",null,null,null],["suite-ended","green",0,null]]' \
+  "HR2: the re-queued pass is a suite of its own, green"
+ok "$(recq "$D/events" ro "$IDS + [L[0]['task'], L[0]['by'], L[0]['runner']]")" '[true,true,true,"t1","integration","lead"]' \
+  "HR2: each pass pairs its own suite id, by integration, runner lead"
+
+# HR3: pinned heavy for the whole --slot-wait: no suite starts; one suite-ended heat with its wait and no rc.
+arm hr3
+gitrepo "$D/tree"; mkdir -p "$D/v"; : > "$D/v/ro.md"
+THREAD_HEAT_LEVEL=2 THREAD_EVENTS_DIR="$D/events" python3 "$LI" verify --tree "$D/tree" --out "$D/o" --timeout 60 --slots 1 --slot-wait 1 \
+  --rollout "$D/v/ro.md" --slug t1 --verifier "touch '$D/ran'" > /dev/null 2>&1
+rc=$?
+ok "$rc|$(cat "$D/o.rc" 2>/dev/null)" "76|heat" "HR3: heavy for the whole --slot-wait: exit 76, rc heat"
+ok "$(recq "$D/events" ro '[[d["kind"], d["outcome"], d["seconds"], d["waited"] >= 0.9, "rc" in d] for d in L]')" '[["suite-ended","heat",0,true,false]]' \
+  "HR3: only a suite-ended heat, with its wait and no rc"
+
+# ======== L8: a heat stop in the Flake check's named re-run (p29-9 beside p31-4) ================================
+# verify --diff-base --rollout: the first run fails on an out-of-diff test and trapping lands during its named re-run: no
+# verdict, back in line, its suite ended heat (step verifier). The restart reruns every step from a clean result: its
+# first run fails another test, whose named re-run and confirming run are green, so the Flake is the last pass's only.
+arm l8
+gitrepo "$D/tree"; mkdir -p "$D/tree/tests" "$D/v"; : > "$D/v/ro.md"
+printf 'x\n' > "$D/tree/tests/test_a.py"; printf 'x\n' > "$D/tree/tests/test_b.py"
+git -C "$D/tree" add tests && git -C "$D/tree" -c user.name=t -c user.email=t@t commit -q -m tests
+L8B=$(git -C "$D/tree" rev-parse HEAD)
+cat > "$D/v.sh" <<'SH'
+d=$1; n=$(( $(cat "$d/v.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/v.count"
+case $n in 1) echo 'FAILED tests/test_a.py::t - boom'; exit 1;; 2) echo 'FAILED tests/test_b.py::t - boom'; exit 1;; esac
+exit 0
+SH
+cat > "$D/r.sh" <<'SH'
+d=$1; shift; n=$(( $(cat "$d/r.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/r.count"
+printf '%s\n' "$@" > "$d/r.$n.args"
+if [ "$n" = 1 ]; then echo x >> "$d/starts"; until [ -e "$d/r.go" ]; do sleep 0.1; done; fi
+exit 0
+SH
+env -u THREAD_HEAT_LEVEL PATH="$tmp/bin:$PATH" HEAT_D="$D" THREAD_EVENTS_DIR="$D/events" python3 "$LI" verify --tree "$D/tree" --out "$D/o" \
+  --timeout 600 --slots 1 --slot-wait 600 --rollout "$D/v/ro.md" --slug t1 --verifier "bash '$D/v.sh' '$D'" \
+  --diff-base "$L8B" --named-rerun "bash '$D/r.sh' '$D' {tests}" > /dev/null 2>&1 &
+W=$!; pids+=($W)
+started 1 || echo "FAIL - L8: the named re-run did not start"
+level 3
+within 120 grepq 'verify: heat stop (trapping) during the named re-run: stopped its process group, no verdict; back in line' "$D/o.log" && s=stopped || s="no heat stop in 120 s"
+ok "$s" stopped "L8: trapping during the named re-run: the heat stop is logged"
+within 120 grepq 'verify: waiting (heat: trapping)' "$D/o.log" || echo "FAIL - L8: no heat wait line"
+level 0
+wait "$W"; rc=$?
+ok "$rc|$(cat "$D/o.rc" 2>/dev/null)|$(count "$D/starts")|$(cat "$D/v.count")|$(cat "$D/r.count")|$(cat "$D/r.2.args")" "0|0|1|3|2|tests/test_b.py::t" \
+  "L8: the restart reruns every step: green, the verifier three times, the named re-run twice, the second for the new test"
+ok "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["verdict"], d["why"], d["failing"], d["flakes"])' "$D/o.flake.json")" \
+  "flake  ['tests/test_b.py::t'] ['tests/test_b.py::t']" "L8: the flake record is the last pass's: a Flake of its first run's test only"
+ok "$(recq "$D/events" ro "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,"verifier"],["suite-started",null,null,null],["suite-ended","green",0,null]]' \
+  "L8: the heat-stopped pass ends its suite heat (step verifier); the re-queued pass is a suite of its own, green"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot-heat: ALL PASS" || echo "verify-slot-heat: SOME FAILED"
 exit "$fail"

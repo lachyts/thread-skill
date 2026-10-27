@@ -51,10 +51,31 @@ through time, from attention to merged PRs. Terms only — no implementation.
   nothing records), **One call** (a single decision, offered with a
   recommendation), **Grill** (a few low-level decisions an agent with the
   project's thread, ADRs and code can recommend on), or **Orient** (the
-  decisions shape the project, so it needs a full-context session). A decision
-  the agent cannot recommend on with confidence raises the grade one step.
-  Each grade is kept in the Grade log (§ Run record and tuning).
+  decisions shape the project, so it needs a full-context session). Only
+  Lachy's own decisions count: a fork the grader settles with evidence, a
+  technical or priorities call, is ruled now and written as Decided for you,
+  never asked (ADR 0054). A decision of his the agent cannot recommend on with
+  confidence raises the grade one step. Each grade is kept in the Grade log
+  (§ Run record and tuning).
   _Avoid_: tier 1/2/3, traffic lights.
+- **Owner** — who a question belongs to, labelled before anything is asked
+  (`skills/_shared/asking.md` § 1): *yours* (intent, importance, robustness,
+  taste, an authorisation an ADR keeps as his), asked; *priorities* (his
+  stated priorities answer it) and *technical* (the code or research settles
+  it), decided and listed as Decided for you; *gate* (a process step such as
+  "next move?"), never asked. A gated input (ADR 0008) is always *yours*.
+  _Avoid_: question type.
+- **Decided for you** — a call an agent made for Lachy instead of asking,
+  one line with its reason, written where he reads it and can overturn it: a
+  task note's `## Decided for you (<date>)` section (never `## Decisions`,
+  which records his own answers), an ADR's Decided for him (overturnable)
+  list, or a report. It settles no gate and signs no gated input (ADR 0054).
+  _Avoid_: assumption, default.
+- **The Framing** — the shape of every question Lachy owns
+  (`skills/_shared/asking.md` § 3): plain words, the goal it ties to, what
+  each option gains and costs, the pick against his priorities, and a Note
+  invited ("What would make this wrong for you?"). Script-built rounds take
+  it from the grade's `goal` and `stakes` (ADR 0054 d8). _Avoid_: template.
 - **Pre-flight** — schedule's pass over a rollout's tasks before it is
   written: each task still to start gets its **Readiness grade**, One call
   and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
@@ -78,10 +99,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   order, the projects that need their own orient, and the Unpark offers
   (`skills/_shared/readiness-grade.md`). _Avoid_: backlog, priority list.
 - **Decision round** — the estate pass's questions, within the time budget
-  Lachy states. First the One-call round: pending sign-offs always, each
-  after its gates are shown verbatim, then One calls, then Unpark offers,
-  batched through AskUserQuestion. Then Grill rounds, in conversation, while
-  time remains. Each answer is written into its task's `## Decisions (asked
+  Lachy states: only his questions, each in the Framing. First the One-call
+  round: pending sign-offs always, each after its gates are shown verbatim,
+  then One calls, then Unpark offers, batched through AskUserQuestion. Then
+  Grill rounds, in conversation, while time remains. Each answer is written into its task's `## Decisions (asked
   ahead <date>)` (`skills/orient-all/SKILL.md`). Schedule's **Pre-flight**
   holds the same round for one rollout's tasks (ADR 0047). _Avoid_: triage
   round.
@@ -99,10 +120,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Thread** — a live agent conversation carrying working context. Ephemeral;
   dies with the session. (Deliberately overloaded with the file below — the
   plugin name trades on the overlap, but the two must never be confused in
-  skill prose.) In wording Lachy reads (a router's menu options and their
-  descriptions) the convention is user-facing: **session** names the live
-  conversation and **thread** the durable work its THREAD.md records, because
-  that is how he reads the word. Agent-facing prose keeps the two senses above.
+  skill prose.) In wording Lachy reads (a router's line, its menu options
+  and their descriptions) the convention is user-facing: **session** names
+  the live conversation and **thread** the durable work its THREAD.md
+  records, because that is how he reads the word. Agent-facing prose keeps
+  the two senses above.
 - **THREAD.md** — the durable state-of-play *file* a thread can be persisted
   into. A code project's thread is its **Repo thread**: the repo's own
   toplevel `<repo>/THREAD.md` under `~/repos`, found by `open`'s repo-thread
@@ -129,7 +151,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Route** — a decisive member (`stash`, `defer`, `handoff`, `close`) that
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
-  then dispatches to a route. A sibling, not a parent. Its *keep going* may
+  then dispatches to a route. A sibling, not a parent. "Next move?" is a gate
+  (Chorus ADR 0110): when its recommendation is clear, `next` decides it and says
+  so in one line, asking only when the pick turns on what only Lachy knows, and it
+  never drops an open confirm (a gate, technical or priorities question is
+  decided by the rule; his question, and any act the action policy reserves
+  for him, is carried). Its *keep going* may
   carry a **compact recommendation**, which only Lachy acts on: compact is a
   recommendation inside keep going, never a route. When the work already
   continues in another session it recommends **archive this session** instead,
@@ -177,8 +204,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   self-initiated because the context feels long; that recommendation belongs to
   `next`.
 - **Handoff doc** — the durable brief `thread:handoff`, its only writer, writes
-  on explicit fork intent only (Lachy's ask, or his pick from a router's menu;
-  never self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits
+  on explicit fork intent only (Lachy's ask, or a router's dispatch; never
+  self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits
   and lands (pushed, merge queued, never waited on) —
   `<home>` the unit directory: the project dir under `~/Projects/`, the
   workspace dir under `~/repos/workspaces/`, else the git toplevel.
@@ -549,10 +576,26 @@ through time, from attention to merged PRs. Terms only — no implementation.
   outside the task's diff, and passed when re-run by name and then when the
   full suite ran once more on the same tree: the verify counts green, and the
   Flake is logged and filed for its repo, never fixed inside the task
-  (ADR 0050). Never a known baseline failure (schedule § 2.6: a test already
+  (ADR 0050). "Outside the diff" is read by test file: the test is placed in
+  a test file the task's diff does not change (a RACE re-verify's diff is the
+  merged task's); a red that names no test, a test that cannot be placed in a
+  file, or one in the diff is red at once, with no re-run. The named re-run
+  comes first (any red again is red), then exactly one confirming full run.
+  Each Flake is a `flake` Run-record event and a line in the `## Flake log` of
+  one follow-up per (repo, test); a test logged as a Flake twice is the repo's
+  to fix. Never a known baseline failure (schedule § 2.6: a test already
   red on a clean `main`, which execute's green criterion already allows
   for), nor a remote CI step merge-task's `infra_flake_rerun` re-runs.
   _Avoid_: flaky failure, quarantined test.
+- **Named re-run** — the Flake check's first step: only a red's failing tests,
+  re-run alone by name on the same tree before the one confirming full run
+  (ADR 0050). At the lead's Integration verify and RACE re-verify it is the
+  rollout's `named_rerun:` command, `{tests}` replaced by the tests, which
+  schedule stamps from the project `CLAUDE.md`'s `Named re-run:` line; with no
+  `named_rerun:` the lead's red stays red. An agent (an implementer, a
+  reviser, an integrator) uses the repo's own test runner. It takes no verify
+  slot of its own and never counts as an iteration. _Avoid_: retry, targeted
+  run.
 - **Completion verifier** — a rollout note's optional `completion_verifier:`,
   the full suite of a project whose `verifier:` is its declared fast tier
   (estate ADR 0009 d6): the completion ceremony runs it once on merged main,
@@ -848,6 +891,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `pause_requested` flag (start nothing new, let what is running integrate
   and merge, exit paused; ADR 0030).
   Hard: stop now; worktrees keep the work. _Avoid_: suspend, halt, abort.
+- **Stop** — the run halting for a cause other than Lachy's **Pause**: a
+  usage limit, a dead lead, a Mac restart or sleep, a § 7 halt, a Watchdog
+  recovery. The Run record keeps each as its own kind, never a pause: logged
+  live when a process saw it begin, else inferred by the resume that finds
+  it, with the calls in flight at its start (ADR 0051). _Avoid_: pause, halt
+  (alone).
 - **Reinstate** — resuming a paused rollout: plain `execute` on the rollout
   note. No separate resume command. It moves the rollout onto a fresh
   **Engine snapshot** at origin's tip (ADR 0043); for a serial chain, which is
@@ -890,9 +939,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 - **Run record** — the append-only events a rollout's Slots and
   Integration lane leave as they run, with the settings in force at each
-  Slot start, written by scripts, never by a model (ADR 0032). _Avoid_:
-  telemetry, metrics, log (a task note's `## Integration log` is a
-  different thing).
+  Slot start, written by scripts, never by a model (ADR 0032). It also
+  carries every **Stop** and resume, every suite with the load around it,
+  and why main moved at each base-moved refusal: what the Time-lost ledger
+  needs (ADR 0051). _Avoid_: telemetry, metrics, log (a task note's
+  `## Integration log` is a different thing).
 - **Throughput** — merges per running hour, a Guardrail: a Tuning may not
   slow a run past its bound, since an overnight rollout must still finish by
   morning. Running time leaves out pauses, halts and waits on Lachy.
@@ -911,8 +962,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   its close, and reports each grade's hands-off share (of the work it sent
   that landed hands-off, bounced back to Lachy, was regraded or dropped;
   work done by hand or never dispatched is reported beside the rate). A
-  miss is traced to the grading rules and never tuned as a knob. _Avoid_:
-  grade history, calibration log.
+  miss is traced to the grading rules and never tuned as a knob. A line's
+  `decisions` and `low` count his decisions (owner yours) only since ADR 0054:
+  a decision ruled for him is never counted, so lines before ADR 0054 are not
+  comparable with lines after it. _Avoid_: grade history, calibration log.
 - **Quality** — the other headline: how few Escapes a rollout's landed work
   produces. _Avoid_: correctness, polish.
 - **Escape** — landed work that later needs a fix it should not have needed:

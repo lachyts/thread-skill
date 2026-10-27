@@ -378,6 +378,44 @@ test('(b) end appends room stop ended; a second end, or no section, writes nothi
   assert.equal(sb(['end', '--rollout', path.join(mk('b'), 'none.md')]).rc, 1)
 })
 
+test('(b) p29-10: begin records the stop in the Run record with its calls; already stands, a refusal and end record none', () => {
+  const ev = path.join(mk('ev'), 'events')
+  const env = { THREAD_EVENTS_DIR: ev }
+  const RRPY = path.join(here, '..', '..', '_shared', 'scripts', 'run_record.py')
+  const p = path.join(mk('b'), 'rs-ro.md')
+  fs.writeFileSync(p, ROLLOUT)
+  const file = path.join(ev, 'rs-ro.jsonl')
+  const rec = () => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [])
+  const emit = (task, kind, fields, ts) => {
+    const r = spawnSync('python3', [RRPY, 'emit', '--rollout', 'rs-ro', '--task', task, '--kind', kind, '--json', JSON.stringify(fields), '--ts', ts],
+      { encoding: 'utf8', env: baseEnv(env) })
+    assert.equal(r.status, 0, r.stderr)
+  }
+  const settings = { settings: { parallel_ceiling: 3 } }
+  emit('a', 'slot-taken', settings, '2026-10-26T09:00:00Z')
+  emit('a', 'run-bound', { runId: 'wf_a1', journalDir: '/j', call: 'task' }, '2026-10-26T09:00:01Z')
+  emit('b', 'slot-taken', settings, '2026-10-26T09:01:00Z')
+  emit('b', 'run-bound', { runId: 'wf_b1', journalDir: '/j', call: 'revise' }, '2026-10-26T09:01:01Z')
+  emit('c', 'slot-taken', settings, '2026-10-26T09:02:00Z')
+  emit('c', 'slot-freed', { outcome: 'ready' }, '2026-10-26T09:03:00Z')
+  const stops = () => rec().filter((d) => d.kind === 'stopped')
+  assert.equal(sb(['begin', '--rollout', p], { input: '\n', env }).rc, 2)
+  assert.equal(sb(['begin', '--rollout', p], { input: 'x at its week\'s line; [[proj-a]]\n', env }).rc, 2)
+  assert.deepEqual(stops(), [], 'a refusal records nothing')
+  const text = 'Lachy at its 5-hour line; stopping at a step boundary: wf_a1 a (task), wf_b1 b (revise); lane: none'
+  const r = sb(['begin', '--rollout', p], { input: `${text}\n`, env })
+  assert.equal(r.rc, 0, r.err)
+  assert.equal(r.err, '')
+  assert.match(r.out, STAMP)
+  const [s] = stops()
+  assert.deepEqual([s.cause, s.inferred, s.reason, s.calls, 'at' in s, s.task],
+    ['usage-limit', false, text, [{ task: 'a', runId: 'wf_a1', call: 'task' }, { task: 'b', runId: 'wf_b1', call: 'revise' }], false, null])
+  const n = rec().length
+  assert.match(sb(['begin', '--rollout', p], { input: 'again at its week\'s line\n', env }).out, /already stands/)
+  assert.equal(sb(['end', '--rollout', p], { env }).rc, 0)
+  assert.equal(rec().length, n, '"already stands" and end record nothing')
+})
+
 test('(b) stands reads the last room-stop line against its bound', () => {
   const log = (...lines) => note(ROLLOUT + '\n## Pause log\n\n' + lines.join('\n') + '\n')
   const S = '- 2026-10-14T10:00+00:00 room stop: x at its week\'s line'
