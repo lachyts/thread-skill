@@ -323,6 +323,13 @@ g -C "$WT" pull -q --ff-only origin "$BR" 2>/dev/null
 addlog "$V/$SLUG.md" "2026-10-02T11:30+00:00 integrated path=integrator pr=5 anchor=$H0 head=$M1 base=$B0 wait=5 duration=3 triggers=shared-file"
 prep
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" 'd["prHead"]')|$(j "$J" 'd["anchor"]')" "merge|ii|$M1|$H0" "C6: main unmoved → case (ii), merge (M1, B0), anchor H0"
+ok "$(j "$J" '[d["record"][k] for k in ("duration", "triggers", "active")]')" '["3","shared-file",null]' \
+  "C6: a line from before p29-13 (ten tokens, no active=) still parses: active null, the rest as written"
+sed -i.bak "s/ triggers=shared-file$/ triggers=shared-file active=2/" "$V/$SLUG.md"
+prep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" '[d["record"][k] for k in ("duration", "triggers", "active")]')" \
+  'merge|ii|["3","shared-file","2"]' "C6: an 11-token line (active=, p29-13) backs case (ii) the same, its active read"
+sed -i.bak "s/ triggers=shared-file active=2$/ triggers=shared-file/" "$V/$SLUG.md"
 main m.txt "theirs" "theirs: m (#8)"; B1=$B
 prep
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" 'd["sharedFiles"]')|$(j "$J" 'd["trouble"]')" "verify|ii|[]|[]" "C6: main moved → verify; shared files over B0..B1 only (a.txt was integrated already)"

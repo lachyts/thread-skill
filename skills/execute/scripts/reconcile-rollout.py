@@ -216,8 +216,11 @@ Subcommands:
               line to a `review` note with a `pr:` through _integration_log_line, from --started (the
               lead's `lead-integrate.py stamp` at the Integration's start), --anchor, --head and --base
               (40 hex each). wait = --started - `ready:`, duration = --now - --started, both in whole
-              minutes (_whole_minutes, the engine's wholeMinutes); triggers `-`. A re-run of the same
-              Integration (same --started and SHAs) is a no-op, even at a later --now. Changes no status,
+              minutes (_whole_minutes, the engine's wholeMinutes); triggers `-`; active the duration less
+              the stalls inside [--started, --now]: the stops the rollout's Run record logs and the Mac's
+              sleeps it does not hold yet (p29-13, _active_minutes; no call, so no journal is read). A
+              re-run of the same Integration (same --started and SHAs)
+              is a no-op, even at a later --now or after a later-inferred stop. Changes no status,
               rounds, `rung:`, `integrating:` or `ready:`. Refuses (exit 1, nothing written) a note
               that is not `review` with a `pr:`, a SHA that is not 40 hex and a --started that is not an
               ISO stamp.
@@ -930,17 +933,38 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   gate bounce    -> (any status) a row that is not gate-pending, or a gate-pending row with no bounce paragraph,
                     removes "## Gate bounce (awaiting sign-off)"; approve-gates' sign-off removes it too
   integration    -> (any status; a mode-'integrate' row's `integration` object) one bare line under
-                    "## Integration log", exactly 10 space-separated tokens:
+                    "## Integration log", exactly 11 space-separated tokens:
                       <startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha> wait=<n|->
-                      duration=<n|-> triggers=<list|->
+                      duration=<n|-> triggers=<list|-> active=<n|->
                     from metrics.startedAt (verbatim), outcome, path, the row's prUrl (its PR number; `pr=-`
                     when missing, empty or neither a GitHub PR URL nor `#7`/`7`), anchor.headSha, headSha,
                     baseSha (full SHAs), metrics.waitMinutes / durationMinutes (ints) and triggers
                     (comma-joined, in order). `-` stands for a missing value (None, '', [], a non-int minute
-                    count); whitespace inside a value becomes `_`. Dedupe: a line whose startedAt is set is
-                    skipped if an identical line appears anywhere in the section; a line whose startedAt is
-                    `-` is skipped only if it equals the section's last non-blank line. So a re-reconcile is
-                    byte-identical, and with startedAt so is a replay of an older row (two Integrations of
+                    count); whitespace inside a value becomes `_`. duration is the Integration's wall time;
+                    active (p29-13) its active time, the wall less the stalls inside the window from startedAt
+                    to metrics.finishedAt (startedAt + duration when finishedAt gives other minutes): the
+                    union of the rollout's Run-record stops whose calls stop with them (stop_spans: a usage
+                    limit, a dead lead, a Mac restart or sleep, a Watchdog recovery; a halt carries the calls
+                    on, so it is none), the Mac's sleeps the record does not hold yet (_unrecorded_sleeps:
+                    `next` writes a sleep only after the lead has reconciled the call, and an agent's
+                    durationMs holds the sleep, so this line reads them from the Mac itself, without writing)
+                    and, where no stop is logged inside it, the integrate call's journal gaps (each span of 30
+                    minutes or more no live agent of the call ran in, JOURNAL_GAP_MS). A resumed call's
+                    journal replays each agent that finished before the kill as a `cached: true` entry
+                    stamped at the resume with no durationMs: it places no time in this run, so it is skipped,
+                    and the gap before the first live agent holds the earlier run's work by the replayed
+                    agents as well as the stall and the attempts it killed (an overcount of the stall, never
+                    a stall counted as lane work). `-` with no startedAt or duration, when the Run record
+                    cannot be read (no `rollout:` on the note, an unreadable file), or when the journal it
+                    falls back to places no live agent at all (every one replayed: the stall cannot be
+                    placed, and active = wall would read as a stall-free Integration). It is appended last,
+                    so a line from before p29-13 (ten tokens, no active) still parses, and every reader reads
+                    tokens by key; log_minutes() is the lane-time readers' one parse (its lane: active, else
+                    the wall). Dedupe: a line whose
+                    startedAt is set is skipped if an identical line appears anywhere in the section; a line
+                    whose startedAt is `-` is skipped only if it equals the section's last non-blank line;
+                    both compare lines without their active= (_log_identity), the one value a later stop can
+                    move. So a re-reconcile is byte-identical, and with startedAt so is a replay of an older row (two Integrations of
                     one task started in the same minute with identical fields would collapse: negligible).
                     Until the lead passes startedAt, lines are told apart only by position: S, I, S' keeps
                     three lines, back-to-back identical lines collapse to one. Readers take the LAST line.
@@ -1898,7 +1922,9 @@ class Note:
         when an identical line (right-stripped) appears ANYWHERE in the section, so a re-reconcile and a
         replay of an older row are both no-ops; a line whose startedAt is `-` is skipped only when it
         equals the section's LAST non-blank line, so S, I, S' keeps three lines and the latest stays
-        truthful (back-to-back identical `-` lines collapse). Otherwise the line goes right after the
+        truthful (back-to-back identical `-` lines collapse). Under `## Integration log`, lines are compared
+        by _log_identity (without their `active=`, p29-13), so a later stop the Run record learns of never
+        writes the same Integration twice. Otherwise the line goes right after the
         section's last non-blank line, keeping one blank line after the heading and before any following
         `## ` section. Nothing already written is deleted or rewritten."""
         found = self._section_bounds(heading)
@@ -1907,11 +1933,12 @@ class Note:
             return
         lines, start, end = found
         filled = [i for i in range(start + 1, end) if lines[i].strip()]
-        kept = [lines[i].rstrip() for i in filled]
+        same = _log_identity if heading == INTEGRATION_LOG_SECTION else (lambda x: x)
+        kept = [same(lines[i].rstrip()) for i in filled]
         if line.split(" ", 1)[0] != "-":
-            if line in kept:
+            if same(line) in kept:
                 return
-        elif kept and kept[-1] == line:
+        elif kept and kept[-1] == same(line):
             return
         if not filled:
             # An empty section: its blank lines become one either side of the new line.
@@ -2063,7 +2090,7 @@ def history_block(history):
 
 def _log_field(value, minutes=False) -> str:
     """One Integration log value. None, '', [] (or a non-int, or bool, minute count) -> `-`; a list is
-    comma-joined in order; whitespace inside becomes `_`, so a line always has exactly 10 tokens. This
+    comma-joined in order; whitespace inside becomes `_`, so a line always has exactly 11 tokens. This
     guards the token count only: a value may still start with `#`, a backtick or `>`, which is why the
     line's one unprefixed token (startedAt) goes through _log_started instead."""
     if minutes:
@@ -2095,12 +2122,15 @@ def _log_pr(pr_url) -> str:
     return m.group(1) if m else "-"
 
 
-def _integration_log_line(task) -> str:
+def _integration_log_line(task, active=None) -> str:
     """The `## Integration log` line for a row carrying a dict `integration` (the engine's
     integrationResult): `<startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha>
-    wait=<n|-> duration=<n|-> triggers=<list|->`. startedAt is written verbatim when it is an ISO stamp
-    (else `-`, see _log_started), SHAs in full. The line carries no `now`, so a re-reconcile at another
-    time writes the same line."""
+    wait=<n|-> duration=<n|-> triggers=<list|-> active=<n|->`. startedAt is written verbatim when it is an
+    ISO stamp (else `-`, see _log_started), SHAs in full. duration is the Integration's wall time; active
+    (p29-13) the caller's _active_minutes, the wall less the stalls inside it, appended last so the ten
+    tokens before it keep their places and a line from before it (ten tokens) still reads. The line carries no
+    `now`, so a re-reconcile at another time writes the same line; the one value the Run record can still move
+    after the fact is active, which append_line's dedupe ignores (_log_identity)."""
     integ = task["integration"]
     metrics = integ.get("metrics") if isinstance(integ.get("metrics"), dict) else {}
     anchor = integ.get("anchor") if isinstance(integ.get("anchor"), dict) else {}
@@ -2115,7 +2145,30 @@ def _integration_log_line(task) -> str:
         "wait=" + _log_field(metrics.get("waitMinutes"), minutes=True),
         "duration=" + _log_field(metrics.get("durationMinutes"), minutes=True),
         "triggers=" + _log_field(integ.get("triggers")),
+        ACTIVE_TOKEN + _log_field(active, minutes=True),
     ])
+
+
+ACTIVE_TOKEN = "active="   # an Integration log line's last token (p29-13): the wall less the stalls inside it
+
+
+def _log_identity(line) -> str:
+    """An Integration log line with its `active=` token dropped: the line as append_line's dedupe compares it. active
+    is the one value read from the Run record, which a stop inferred after the reconcile can still move, so the same
+    Integration re-reconciled later (or a replay of a row whose line predates p29-13) is still the same line."""
+    return " ".join(t for t in line.split(" ") if not t.startswith(ACTIVE_TOKEN))
+
+
+def log_minutes(line) -> dict:
+    """An Integration log line's minutes, for every reader of Integration (lane) time (p29-13): {wall, active, lane},
+    each a whole number of minutes or None. wall is `duration=`, the Integration's wall time; active its `active=`, the
+    wall less the stalls inside it (_active_minutes); lane the active figure, else the wall: a
+    line from before p29-13 carries no `active=` and still reads, its wall (which can hold a stall) standing in. A
+    `-`, or anything but digits, reads None."""
+    t = _log_tokens(line)
+    wall, active = (int(v) if isinstance(v, str) and re.fullmatch(r"[0-9]+", v) else None
+                    for v in (t.get("duration"), t.get(ACTIVE_TOKEN[:-1])))
+    return {"wall": wall, "active": active, "lane": active if active is not None else wall}
 
 
 def _log_lines(note) -> list:
@@ -2993,7 +3046,13 @@ def cmd_reconcile(args) -> int:
         # record a cold lead, repair and the gate resume read). `integration: null` counts as absent.
         integration = task.get("integration")
         if isinstance(integration, dict):
-            note.append_line(INTEGRATION_LOG_SECTION, _integration_log_line(task))
+            # p29-13: its `active=`, the wall less the stalls inside the window: the rollout's Run record's stops and
+            # the Mac's sleeps the record does not hold yet (else the integrate call's journal gaps), read before this
+            # row's own events are written.
+            m = integration.get("metrics") if isinstance(integration.get("metrics"), dict) else {}
+            active = _active_minutes(rollout, slug, m.get("startedAt"), m.get("finishedAt"), m.get("durationMinutes"),
+                                     call=True, now=now)
+            note.append_line(INTEGRATION_LOG_SECTION, _integration_log_line(task, active))
         elif integration is not None:
             errors.append(f"{slug}: integration is not an object ({type(integration).__name__}) — "
                           "no Integration log line written")
@@ -4473,6 +4532,7 @@ def cmd_log_integration(args) -> int:
             print(f"ERROR: log-integration: {e}", file=sys.stderr)
         return 1
     started = args.started.strip()
+    ended = now.astimezone().isoformat(timespec="seconds")
     for slug, _path, note in _each_note(args):
         if _status(note) != "review" or not _pr(note):
             args._errors.append(f"{slug}: status is {_status(note) or 'none'!r}{'' if _pr(note) else ' with no pr:'}, "
@@ -4483,11 +4543,15 @@ def cmd_log_integration(args) -> int:
             "baseSha": args.base, "triggers": [],
             "metrics": {"startedAt": started,
                         "waitMinutes": _whole_minutes(_scalar(note.get("ready")), started),
-                        "durationMinutes": _whole_minutes(started, now.astimezone().isoformat(timespec="seconds"))},
+                        "durationMinutes": _whole_minutes(started, ended)},
         }}
-        line = _integration_log_line(row)
+        # p29-13: the lead's own Integration is no call, so only the stops its Run record logs and the Mac's sleeps it
+        # does not hold yet come off.
+        line = _integration_log_line(row, _active_minutes(_note_rollout(note), slug, started, ended,
+                                                          row["integration"]["metrics"]["durationMinutes"], call=False,
+                                                          now=now))
         # A re-run of the same Integration (same --started, same record) is a no-op even at a later --now:
-        # every token but the measured duration must match. append_line's own dedupe covers the rest.
+        # every token but the measured duration and active must match. append_line's own dedupe covers the rest.
         key = line.split(" ")[:8]
         logged = [l.split(" ") for l in _log_lines(note)]
         if not any(t[:8] == key for t in logged):
@@ -5621,6 +5685,207 @@ def _record_sleeps(rollout, note, now, args):
             _event(rollout, "stopped", None, _stop_fields("mac-sleep", s, lines, wake=w), args)
     except Exception:  # noqa: BLE001 — recording never breaks `next`
         return
+
+
+# ---- active Integration time (p29-13): an Integration log line's `active=` -------------------------------------------
+# An Integration's `duration=` is its wall time, so a usage-limit stall inside it reads as lane work (chorus-p80-1's
+# 876 minutes held about 9.5 h of them). `active=` is the wall less the stalls inside the window: the stops the Run
+# record logs, read by run_record.py's stop model (stop_spans), and the Mac's sleeps it does not hold yet
+# (_unrecorded_sleeps), with the integrate call's journal gaps where no stop is logged.
+
+# The stop causes during which the calls in flight do not run (run_record.py's stop model: a usage limit, a dead lead,
+# a Mac restart and a Watchdog recovery kill them, a sleep suspends them). A halt carries them on, so it is no stall.
+STALL_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "mac-sleep", "watchdog")
+STOP_ENDS = ("lead-entry", "paused")                            # a stop ends at the next of these, or a non-sleep stop
+STOP_FALLBACK_ENDS = ("slot-taken", "lane-taken", "run-bound")  # ... with none of those, at the next of these
+# A gap in the integrate call's journal shorter than this is the call's own launch or an agent hand-over (the stamp
+# floors to its minute), never a stall: score.py's GRACE, the quiet a call's Slot still counts as running.
+JOURNAL_GAP_MS = 30 * 60 * 1000
+
+
+def stop_spans(lines) -> list:
+    """Every `stopped` line of a Run record as {cause, start, end} (aware datetimes; end None while open),
+    read by run_record.py's stop model, its one copy. The lines are read in ts order, file order breaking ties (an
+    inferred line's ts is its write time, and its lead-entry follows it in the same write). A stop starts at its `at`,
+    else its ts. A mac-sleep ends at its `wake`. Any other stop ends at the first later line that is a lead-entry or a
+    paused line, or a stopped line that is no sleep (at that line's start); with none of those (a lead on a pre-p29-10
+    Engine snapshot writes no lead-entry) at the first later slot-taken, lane-taken or run-bound; else it stays open.
+    An end never precedes its start. Overlaps are kept: the sleep owns an overlap only for a reader that splits time by
+    cause, and a union (_span_ms) reads it once either way."""
+    seq = []
+    for i, d in enumerate(lines or ()):
+        ts = _rec_ts(d) if isinstance(d, dict) else None
+        if ts is not None:
+            seq.append((ts, i, d))
+    seq.sort(key=lambda x: (x[0], x[1]))
+
+    def start_of(ts, d):
+        return _away_stamp(d.get("at"))[0] or ts
+
+    out = []
+    for k, (ts, _i, d) in enumerate(seq):
+        if d.get("kind") != "stopped":
+            continue
+        cause, start = d.get("cause"), start_of(ts, d)
+        if cause == "mac-sleep":
+            end = _away_stamp(d.get("wake"))[0]
+        else:
+            end = fallback = None
+            for t2, _j, d2 in seq[k + 1:]:
+                kind = d2.get("kind")
+                if kind in STOP_ENDS:
+                    end = t2
+                    break
+                if kind == "stopped" and d2.get("cause") != "mac-sleep":
+                    end = start_of(t2, d2)
+                    break
+                if fallback is None and kind in STOP_FALLBACK_ENDS:
+                    fallback = t2
+            if end is None:
+                end = fallback
+        if end is not None and end < start:
+            end = start
+        out.append({"cause": cause, "start": start, "end": end})
+    return out
+
+
+def _union(spans, lo, hi) -> list:
+    """The union of `spans` [(start, end or None)] (epoch ms) inside [lo, hi], as sorted disjoint [a, b]; an open one
+    runs to hi."""
+    out = []
+    for a, b in sorted((max(a, lo), min(hi if b is None else b, hi)) for a, b in spans):
+        if b <= a:
+            continue
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+
+def _span_ms(spans, lo, hi) -> int:
+    """The milliseconds of the union of `spans` inside [lo, hi] (_union)."""
+    return sum(b - a for a, b in _union(spans, lo, hi))
+
+
+def _gaps(spans, lo, hi, least) -> list:
+    """The spans of [lo, hi] that `spans` leave uncovered, as [(a, b)], only those of at least `least`."""
+    gaps, at = [], lo
+    for a, b in _union(spans, lo, hi):
+        gaps.append((at, a))
+        at = b
+    gaps.append((at, hi))
+    return [(a, b) for a, b in gaps if b - a >= least]
+
+
+def _integrate_agents(lines, slug, lo, hi):
+    """[(start, end)] (epoch ms) of the agents the integrate call's Workflow journal places in its own run, None when
+    it cannot be read, and [] when it shows a resumed call whose agents were all replayed (so it places none). The call
+    is the task's latest `run-bound` with call integrate stamped inside [lo, hi] (a Lost-call resume binds the same
+    runId again); its journal <journalDir>/<runId>.json (fold-journals' path) must be an object naming that runId with
+    a terminal status. A workflow_agent entry of its workflowProgress marked `cached: true` is skipped: a resumed call
+    replays each agent that finished before the kill that way, stamped at the resume (its startedAt) with no
+    durationMs, so it places no time in this run. Every other (live) one must carry startedAt and durationMs (epoch ms,
+    ints >= 0), else the journal is refused (None): an agent it cannot place would read as a gap. A resumed call's
+    journal so places only its last run's live agents, and the time before the first of them (the stall, the attempts
+    it killed and the earlier run's work by the agents it replayed) reads as one gap: that run's work is counted as
+    stall, never a stall as lane work."""
+    key, bound = slug.lower(), None
+    for d in lines:
+        if d.get("kind") == "run-bound" and d.get("task") == key and d.get("call") == "integrate":
+            ts = _rec_ts(d)
+            if ts is not None and lo <= _ms(ts) <= hi:
+                bound = d
+    if bound is None:
+        return None
+    run_id, jdir = bound.get("runId"), bound.get("journalDir")
+    if not isinstance(run_id, str) or not RUN_ID_RE.fullmatch(run_id) or ".." in run_id or not isinstance(jdir, str):
+        return None
+    jdir = os.path.expanduser(jdir)
+    if not os.path.isabs(jdir):
+        return None
+    try:
+        with open(os.path.join(jdir, run_id + ".json"), "rb") as f:
+            journal = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(journal, dict) or journal.get("runId") != run_id or \
+            journal.get("status") not in _run_record().TERMINAL_STATUSES:
+        return None
+    progress = journal.get("workflowProgress")
+    agents = [a for a in progress if isinstance(a, dict) and a.get("type") == "workflow_agent"] \
+        if isinstance(progress, list) else []
+    out, replayed = [], 0
+    for a in agents:
+        if a.get("cached") is True:
+            replayed += 1
+            continue
+        st, dur = a.get("startedAt"), a.get("durationMs")
+        if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (st, dur)):
+            return None
+        out.append((st, st + dur))
+    if not out:
+        return [] if replayed else None
+    return out
+
+
+def _unrecorded_sleeps(lines, now, until) -> list:
+    """[(S, W)] (epoch ms): the Mac's sleeps its Run record does not name yet, read without writing (p29-13). The
+    record's sleep writers are `next` (_record_sleeps), which runs only after the lead has reconciled a returned call
+    or logged its own Integration (execute step 2, the Stop-hook driver's reconcile, integrate, merge, then `next`),
+    and record-entry, at the next loop entry or 20-minute heartbeat tick. So a sleep inside an Integration is usually
+    not in the record when its line is written, and an agent's durationMs holds the time the Mac slept, so no journal
+    gap shows it either. These are the reads _record_sleeps
+    makes: machine_times since the mark, the later of the last lead-entry and the latest recorded wake (with neither,
+    the record's first live line: a record-entry would read from there), kept by _evidence's window test. Unlike
+    _record_sleeps it reads through an open stop, a standing pause and a record with no lead-entry yet, which gate a
+    write, not whether the Mac slept. [] with no live line, when `until` (epoch ms, the window's end) is not after
+    the mark (a sleep the record does not name yet wakes after the mark, and the Mac was awake at it, so it starts
+    after it too: nothing to read), or when the Mac's last wake is not after the mark."""
+    st = _stop_state(lines)
+    marks = [t for t in (st["entry"], st["wake"]) if t is not None]
+    since = max(marks) if marks else (st["live"][0] if st["live"] else None)
+    if since is None or _ms(since) >= until:
+        return []
+    mt = machine_times(since, now)
+    if mt["wake"] is None or mt["wake"] <= since:
+        return []
+    return [(_ms(s), _ms(w)) for s, w in _evidence(st, mt, now)[1]]
+
+
+def _active_minutes(rollout, slug, started, ended, wall, call, now) -> "int | None":
+    """An Integration's `active=` (p29-13): its wall minutes (`duration=`) less the stalls inside its window, in whole
+    minutes, never more than the wall; None (`active=-`) when the wall or the start is missing, the Run record cannot
+    be read (no rollout, or an unreadable file), or the integrate call's journal is read and places no agent of its
+    own run (a resumed call that only replayed, see below). The window runs from `started` to `ended` (the integrate
+    row's finishedAt, the lead's --now) when that gives the wall's own minutes, else to started + wall. The stalls are
+    the union, inside it, of the STALL_CAUSES stops of stop_spans(), the Mac's sleeps the record does not name yet
+    (_unrecorded_sleeps, as of `now`: `next` writes them only after this line) and, where the record logs no such stop
+    inside it and `call` (an integrate call's row), the integrate call's journal gaps (_integrate_agents: the spans of
+    the window no live agent of the call ran in, each of at least JOURNAL_GAP_MS; a replayed, `cached`, agent places
+    none, so a resumed call's earlier run reads as stall). With none of them, nothing comes off. It reads the record as
+    it stands at the reconcile, before the row's own events."""
+    if not isinstance(wall, int) or isinstance(wall, bool) or wall < 0 or not rollout:
+        return None
+    s = _iso_minutes(started)
+    if s is None:
+        return None
+    lo = int(round(s * 60000))
+    e = _iso_minutes(ended) if _whole_minutes(started, ended) == wall else None
+    hi = int(round(e * 60000)) if e is not None else lo + wall * 60000
+    lines = _record_read(rollout)
+    if lines is None:
+        return None
+    stops = [(_ms(sp["start"]), None if sp["end"] is None else _ms(sp["end"]))
+             for sp in stop_spans(lines) if sp["cause"] in STALL_CAUSES]
+    spans = stops + _unrecorded_sleeps(lines, now, hi)
+    if call and _span_ms(stops, lo, hi) == 0:
+        agents = _integrate_agents(lines, slug, lo, hi)
+        if agents == []:
+            return None
+        if agents:
+            spans += _gaps(agents, lo, hi, JOURNAL_GAP_MS)
+    return min(wall, max(0, (hi - lo) - _span_ms(spans, lo, hi)) // 60000)
 
 
 def _latest_run(rollout, slug) -> dict:
