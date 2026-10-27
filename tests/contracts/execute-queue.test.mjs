@@ -468,8 +468,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // paragraph says the wait never counts against the deadline and the guard ends a SIGKILLed verify's verifier; § 3
   // has the machine-wide `verify_slots` row and verify-timeout's exit-3 halt with its "does not clear" remedy; § 4
   // passes `verifySlot` (and a resume never adds it); the *Verify slots* paragraph names both Integration waiters (the
-  // lead's `lead-integrate.py verify` and the integrate call's `run --priority`), the guard and `status`; § 7 lists
-  // the three halts.
+  // lead's `lead-integrate.py verify` and the integrate call's `run --priority`), the guard and `status`, and (p31-3)
+  // that an agent waits for its verdict inside its turn with `verify-slot.py wait`; § 7 lists the three halts.
   {
     const SLOTS = '--slots <verify_slots> --slot-wait <slot_wait>'
     const vsRow = s3raw.split('\n').find((l) => l.startsWith('| `verify_slots` |')) ?? ''
@@ -495,6 +495,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
       !s4.includes('adding `defaultBranch` or `verifySlot` to a run that started without it changes prompt bytes') ||
       !vsP.includes("The lead's `lead-integrate.py verify` (the Integration verify and the RACE re-verify) and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode) register as Integration waiters") ||
       !vsP.includes('before the verify slot frees') || !vsP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status --slots <verify_slots>`') ||
+      !vsP.includes('verify-slot.py wait --log') || !vsP.includes('waits inside its turn') ||
       !s7.includes('`reason="RACE: no verify slot for the re-verify of [[slug]]"`') || !s7.includes('`reason="no verify slot for [[slug]] in 3 tries"`') ||
       !s7.includes('`reconcile-rollout.py verify-timeout` exits 3 at an entry (§ 3: `reason="rollout settings refused"`') ||
       !s7.includes('stamping a key does not clear it')) {
@@ -1229,6 +1230,11 @@ test('control: § 3 without the "does not clear" remedy fails verify-slots', () 
 
 test('control: a priority sentence without the integrator fails verify-slots', () => {
   only(sk(" and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode)", ''), 'verify-slots', 'no integrator')
+})
+
+test('control: Verify slots without the in-turn wait (p31-3) fails verify-slots', () => {
+  const p = real.skill.split('**An agent waits for its verdict** (p31-3)')[1].split(' **Every suite is recorded**')[0]
+  only(sk(' **An agent waits for its verdict** (p31-3)' + p, ''), 'verify-slots', 'no in-turn wait')
 })
 
 test('control: a verify_timeout check read as each task starts fails verify-timeout', () => {

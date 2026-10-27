@@ -622,7 +622,7 @@ test('control: the needs-human question kept off the detail line or the push fai
 })
 
 test('control: (e) naming § 7\'s prose, or a red RACE re-verify in both (b) and (e), fails halt-act', () => {
-  only(edit(real, "`[[<rollout>]] halted (<YYYY-MM-DD>): <reason>: <act>`. `<reason>` is the halt's `reason=` text, and `<act>` is fixed by the halt, never taken from § 7's prose: `decide with /thread:repair [[<rollout>]]` for `git-env canary failed` (repair's step 3e shows the evidence), and `see /thread:status [[<rollout>]], fix it and re-invoke` for every other.",
+  only(edit(real, "`[[<rollout>]] halted (<YYYY-MM-DD>): <reason>: <act>`. `<reason>` is the halt's `reason=` text, and `<act>` is fixed by the halt, never taken from § 7's prose: `decide with /thread:repair [[<rollout>]]` for `git-env canary failed` (repair's step 3e shows the evidence), `/thread:execute [[<new>]]` for an approved queue's regenerate that stopped after step 7.5 (§ 4.5's **Approved queue** route, step 6: the new note is unstamped, and a re-invocation here ends `superseded`), and `see /thread:status [[<rollout>]], fix it and re-invoke` for every other.",
     '`[[<rollout>]] halted (<YYYY-MM-DD>): <the reason text>: <the command § 7 names for it>`.'), 'halt-act', 'the command § 7 names')
   only(edit(real, " A RACE revert that did not land (`next`'s `mainRed`; `RACE: the revert of [[<slug>]] did not land: …`, § 7) is this item, never (e), with `→ main red: the whole rollout is held until you decide`: its `## Race log` line keeps the task in `raceHold`, so it is one item with one push.", ''),
     'halt-act', 'red re-verify unplaced')

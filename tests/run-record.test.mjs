@@ -893,6 +893,88 @@ test('the weekly kinds are refused, exit 2 and nothing written, when malformed',
   emitOk(home, ['--kind', 'proposal', '--json', JSON.stringify({ ...knobLanded, landed: true, auto: true, tuning: 't-1' })], { env: EV(home) })
 })
 
+// ---- the Time-lost ledger's line (p29-11, ADR 0051): time-lost, and a watch's ledgerClass ----------------------------------
+
+const H6 = { stalls: 3.5, 'quota-bound': 0.5, load: 0, 'lane-bound': 1, rework: 0, 'plan-rejected': 0 }
+const TL = {
+  record: { id: 'tl-record-20261015T000000Z-abcdef', source: 'record', reflection: RID, since: '2026-10-08T13:00:00.000Z',
+    until: '2026-10-15T13:00:00.000Z', month: '2026-10', hours: H6, top: 'stalls', byCause: { stalls: { halt: 2, question: 1.5 }, 'quota-bound': { 'usage-limit': 0.5 } },
+    rollouts: { stalls: [['a', 3.5]], 'lane-bound': [['a', 1]] }, other: { pause: 1 }, events: { 'quota-stall': 1 }, streak: 1 },
+  audit: { id: 'tl-audit-20261105T000000Z-abcdef', source: 'audit', reflection: RID, since: '2026-10-21T13:00:00.000Z',
+    until: '2026-11-05T13:00:00.000Z', month: '2026-11', hours: H6, recorded: H6, rank: ['stalls', 'lane-bound', 'quota-bound', 'load', 'rework', 'plan-rejected'],
+    audit: { sources: [{ source: 'transcripts', read: true }, { source: 'mac-history', read: false, why: 'no pmset log kept' }],
+      entries: [{ class: 'stalls', cause: 'question', rollout: 'a', from: '2026-10-22T00:00:00.000Z', to: '2026-10-22T03:30:00.000Z', hours: 3.5, what: 'a lead question', evidence: 'session x' }],
+      gaps: [{ what: 'a lead question writes no line', evidence: 'session x 03:10' }] } },
+  baseline: { id: 'tl-baseline-2026-10', source: 'baseline', since: '2026-08-31T14:00:00.000Z', until: '2026-10-21T13:00:00.000Z', month: '2026-10',
+    ranges: [{ what: 'stalls', low: 150, high: 185 }], cites: [{ what: 'a spend gate', hours: 14 }] },
+}
+
+test('time-lost (p29-11) lands in reflections.jsonl as v 1, rollout and task null, for each source; a watch takes ledgerClass', (t) => {
+  const home = tmpHome(t)
+  for (const f of [TL.baseline, TL.record, TL.audit, { ...TL.record, id: 'tl-record-x', top: null }]) {
+    emitOk(home, ['--kind', 'time-lost', '--json', JSON.stringify(f)], { env: EV(home) })
+  }
+  const [wid] = ids(home)
+  const k = kinds(wid, 'x')
+  emitOk(home, ['--kind', 'watch', '--json', JSON.stringify({ ...k.watch, ledgerClass: 'load' })], { env: EV(home) })
+  assert.deepEqual(listing(ev(home)), ['reflections.jsonl'])
+  const all = lines(path.join(ev(home), 'reflections.jsonl'))
+  assert.deepEqual(all.map((l) => [l.v, l.rollout, l.task, l.kind, l.source ?? l.ledgerClass]), [[1, null, null, 'time-lost', 'baseline'],
+    [1, null, null, 'time-lost', 'record'], [1, null, null, 'time-lost', 'audit'], [1, null, null, 'time-lost', 'record'], [1, null, null, 'watch', 'load']])
+})
+
+test('time-lost is refused, exit 2 and nothing written, when malformed', (t) => {
+  const home = tmpHome(t)
+  const { month, ...auditNoMonth } = TL.audit
+  const { audit, ...auditNoBlock } = TL.audit
+  const [wid] = ids(home)
+  const k = kinds(wid, 'x')
+  const cases = [
+    ['an unknown cause in byCause', 'time-lost', { ...TL.record, byCause: { stalls: { overnight: 2 } } }],
+    ['a cause of another class', 'time-lost', { ...TL.record, byCause: { load: { halt: 2 } } }],
+    ['recorded on a record line', 'time-lost', { ...TL.record, recorded: H6 }],
+    ['top on an audit line', 'time-lost', { ...TL.audit, top: 'stalls' }],
+    ['a missing month on an audit line', 'time-lost', auditNoMonth],
+    ['an audit line with no audit block', 'time-lost', auditNoBlock],
+    ['a record line with no reflection', 'time-lost', (({ reflection, ...rest }) => rest)(TL.record)],
+    ['a record line with five classes', 'time-lost', { ...TL.record, hours: (({ rework, ...rest }) => rest)(H6) }],
+    ['a negative hour', 'time-lost', { ...TL.record, hours: { ...H6, load: -1 } }],
+    ['hours on a baseline line', 'time-lost', { ...TL.baseline, hours: H6 }],
+    ['an unknown source', 'time-lost', { ...TL.record, source: 'guess' }],
+    ['since after until', 'time-lost', { ...TL.record, since: '2026-10-16T00:00:00.000Z' }],
+    ['an id that is no tl- id', 'time-lost', { ...TL.record, id: 'r-1' }],
+    ['a top that is no class', 'time-lost', { ...TL.record, top: 'naps' }],
+    ['nine contributors', 'time-lost', { ...TL.record, rollouts: { stalls: Array.from({ length: 9 }, (_x, i) => [`r${i}`, 1]) } }],
+    ['an unknown other cause', 'time-lost', { ...TL.record, other: { lunch: 1 } }],
+    ['an audit source no one reads', 'time-lost', { ...TL.audit, audit: { ...TL.audit.audit, sources: [{ source: 'vibes', read: true }] } }],
+    ['eleven gaps', 'time-lost', { ...TL.audit, audit: { ...TL.audit.audit, gaps: Array.from({ length: 11 }, () => ({ what: 'w', evidence: 'e' })) } }],
+    ['an entry with a cause of another class', 'time-lost', { ...TL.audit, audit: { ...TL.audit.audit, entries: [{ ...TL.audit.audit.entries[0], cause: 'lane' }] } }],
+    ['a time-lost line with a rollout', 'time-lost', TL.record, ['--rollout', 'r']],
+    ['a watch ledgerClass that is no class', 'watch', { ...k.watch, ledgerClass: 'naps' }],
+  ]
+  for (const [name, kind, fields, extra = []] of cases) {
+    const r = cli(home, ['emit', ...extra, '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, name)
+    assert.deepEqual(listing(ev(home)), [], name)
+  }
+})
+
+test('the Time-lost ledger\'s classes and causes are the schema\'s one copy; the docstring names how a ledger Watch counts and that gaps never count against quiet', (t) => {
+  const home = tmpHome(t)
+  const r = api(home, 'print(json.dumps({"doc": m.__doc__, "classes": m.TIME_LOST_CLASSES, "causes": m.TIME_LOST_CAUSES, "kinds": m.REFLECTION_KINDS}))')
+  assert.equal(r.status, 0, r.stderr)
+  const { doc, classes, causes, kinds: rk } = JSON.parse(r.stdout)
+  assert.deepEqual(classes, ['stalls', 'quota-bound', 'load', 'lane-bound', 'rework', 'plan-rejected'])
+  assert.deepEqual(Object.keys(causes), classes)
+  assert.ok(rk.includes('time-lost'))
+  const flat = doc.replace(/\s+/g, ' ')
+  assert.ok(flat.includes('counts readings, not rollouts'), 'the Watch rule names the reading unit')
+  assert.ok(flat.includes('A Monthly audit\'s gaps (a `time-lost` audit line\'s) never count against `quiet`'), 'the cadence rule names the gaps')
+  assert.ok(flat.includes('reflect.py\'s Time-lost ledger (ledger.py) reads them; a score never does'))
+  assert.ok(!flat.includes('p29-11 scores them'))
+})
+
 test('check() refuses exactly what emit refuses, with the same message, and writes nothing', (t) => {
   const home = tmpHome(t)
   const [wid, kid] = ids(home)

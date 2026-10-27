@@ -73,7 +73,8 @@ and it reads trickle-bound (all of its time held), with Throughput null.
   read: `next` writes a ran-past-morning line after the Morning it reads, so none is a task's last record line (an
   untimed call's last activity) or the record's last line. Nor are the time-lost ledger's (stopped, lead-entry,
   suite-started, suite-ended, base-moved: p29-10, LEDGER_KINDS), dropped as each record is read, the scored one and
-  every other one read for load: a score is byte-equal with or without them, and p29-11 scores them.
+  every other one read for load: a score is byte-equal with or without them. reflect.py's Time-lost ledger (ledger.py,
+  p29-11) reads them; a score never does.
 
 Headlines (ADR 0037 d1: two, and Lachy settles any trade between them; there is no tie-breaker):
 - Hands-off rate: the share of the window's landed tasks (distinct tasks with a `merged` line in [since, until])
@@ -283,9 +284,9 @@ ACT_KINDS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
 # The night record's kinds (p28-2, run_record.py; reconcile-rollout.py's NIGHT_KINDS): `next`'s reading of a Morning,
 # written at a later call, so never a task's call activity nor the record's last line (pair skips them).
 NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")
-# The time-lost ledger's kinds (p29-10, ADR 0051; run_record.py): stops, entries, suites and why main moved. Not scored
-# yet (p29-11 scores them): every line of these kinds is dropped as it is read, so a score is byte-equal with or without
-# them, and a late one never extends a record's live span.
+# The time-lost ledger's kinds (p29-10, ADR 0051; run_record.py): stops, entries, suites and why main moved. Never scored:
+# every line of these kinds is dropped as it is read, so a score is byte-equal with or without them, and a late one never
+# extends a record's live span; reflect.py's Time-lost ledger (ledger.py, p29-11) reads them, a score never does.
 LEDGER_KINDS = ("stopped", "lead-entry", "suite-started", "suite-ended", "base-moved")
 ACT_NAMES = ("answer", "signOff", "retry", "mergeHold", "raceDecided")
 MERGE_HOLD_DETAIL = "a --gated or exit-7 hold: the record carries no reason"

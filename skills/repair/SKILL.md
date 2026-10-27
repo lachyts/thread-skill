@@ -96,7 +96,9 @@ version stop's `--regenerate` would only meet schedule's refusal again.
   unlanded tasks to N and died before schedule step 7.5 closed this note out. Never reinstate, resume or hand
   back here: the carried tasks are N's.
   - N never ran (its `incomplete` is non-null) → `/thread:schedule <project> --regenerate`: schedule § 0's
-    `interrupted` line finishes that supersede. Stop.
+    `interrupted` line finishes that supersede. Stop. On an approved queue (this note carries `on_merge:
+    regenerate` beside a rollout `hold_until`, `_shared/vault-grammar.md` § Approved queue) it is the chain's I8
+    window: `/thread:execute [[<this>]]` instead, whose route regenerates again under the chain. Stop.
   - N has run → finish step 7.5's close-out, **on Lachy's confirmation**, and only when status counts no
     running, integrating, awaiting-Integration, queued or set-aside task here (`carry` moved every such task;
     one still here would be stranded, so show it and stop). Run

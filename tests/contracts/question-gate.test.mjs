@@ -66,7 +66,8 @@ const RUNNABLE = /(?:\b(?:python3|bash|sh|node)\s+"?|=\s*"?)\$\{CLAUDE_PLUGIN_RO
 const ARGS = 'Ask Lachy only the questions he owns: intent, how important, how robust, who it is for, how it feels, and ' +
   'a credential or irreversible sign-off R3 (c) names (Owner yours). Ask each one at a time, in plain words, tied to ' +
   'the goal, with what each option gains and costs and your pick against his priorities, and end it with: what would ' +
-  'make this wrong for you? Walk every technical branch yourself from the repo\'s code, ADRs and CONTEXT.md, and never ' +
+  'make this wrong for you? Read the `## Priorities` card in <project note> first, when it has one: a call it answers ' +
+  'is priorities, and a detail it says he steers is his. Walk every technical branch yourself from the repo\'s code, ADRs and CONTEXT.md, and never ' +
   'ask it: show it in the grill as `Decided for you: <the fork> → <the call> (technical|priorities: <one reason>)`, ' +
   'which he can overturn there. An ADR you write ends with its Decided for him (overturnable) list. Finish with every ' +
   'Decided for you line, his overturns applied, under one `Decided for you` heading. The rule in full: § 5 of ' +

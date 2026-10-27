@@ -306,7 +306,7 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
   // schedule: the supersede runs check-all on the prior before the preview and the carry, says the evidence write
   // is intended, and retires the prior after the carry.
   if (!before(sch1, 'git-env-canary.py check-all --rollout ~/repos/obsidian/Work/Tasks/<prior>.md', 'carry --from ~/repos/obsidian/Work/Tasks/<prior>.md --dry-run') ||
-    !sch1.includes("This preview may append a trip line to the prior rollout note's `## Git-env log` before you confirm anything. That write is intended: it records evidence that a window changed. The decision to accept it stays with `/thread:repair`.") ||
+    !sch1.includes("This preview may append a trip line to the prior rollout note's `## Git-env log` before step 1 reports. That write is intended: it records evidence that a window changed. The decision to accept it stays with `/thread:repair`.") ||
     !sch6.includes('git-env-canary.py check-all --rollout ~/repos/obsidian/Work/Tasks/<prior-slug>.md') ||
     !sch6.includes('git-env-canary.py retire --rollout ~/repos/obsidian/Work/Tasks/<prior-slug>.md')) fails.push('schedule')
 

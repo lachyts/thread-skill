@@ -520,7 +520,8 @@ def _load_note(path):
 
 
 def log_fields(line):
-    """One Integration log line as fields ('-' -> None), or None."""
+    """One Integration log line as fields ('-' -> None), or None. Read by key, never by position: a line from before
+    p29-13 has ten tokens and no `active=` (None here), a later one ends with it."""
     if not line:
         return None
     toks = line.split(" ")
@@ -529,7 +530,7 @@ def log_fields(line):
     for t in toks[2:]:
         k, _, v = t.partition("=")
         out[k] = None if v in ("", "-") else v
-    for k in ("path", "pr", "anchor", "head", "base", "wait", "duration", "triggers"):
+    for k in ("path", "pr", "anchor", "head", "base", "wait", "duration", "triggers", "active"):
         out.setdefault(k, None)
     return out
 

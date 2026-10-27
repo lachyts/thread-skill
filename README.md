@@ -33,7 +33,7 @@ sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules parallel-shaped phases itself, steers the rest (a serial rollout for serial-shaped work, ADR 0040, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, asks a project's Priorities card once when its note has none (how robust, who it is for, what matters most, where Lachy steers), then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules parallel-shaped phases itself, steers the rest (a serial rollout for serial-shaped work, ADR 0040, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:orient-all` | where is my attention best placed? | The estate pass (ADR 0041): orient across every project at once. Scans the vault, grades and ranks all open work by agent work per minute of Lachy's attention, asks the sign-offs, One calls, Unpark offers and Grills that fit his stated time budget, writes each answer into its task, schedules the runs that are ready (forked `/thread:schedule` calls, batched so no two can name one note), then starts every execute, Leg 1, repair and child orient as a visible Chorus session, or prints paste-ready prompts off the Stage. Never reshapes a project; `--dry-run` writes nothing. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
@@ -157,9 +157,12 @@ half of a Reflection at each rollout's close (fold, settings, score,
 `tune.py --record-only --close`) and records one line per rollout through it
 (ADR 0037 d4). `skills/reflect/scripts/reflect.py` runs the weekly reading's
 script half and is the only writer of `reflections.jsonl` and of the bug and
-decision tasks. `skills/reflect/scripts/reflect-due.py` tells the daily sweep
-when the weekly reading is due: 7 days after the last one, 14 after three quiet
-Reflections in a row (ADR 0037 d4, d6). The Grade log (`grades.jsonl` beside the
+decision tasks, and keeps the Time-lost ledger (`skills/reflect/scripts/ledger.py`,
+ADR 0051: the hours each cause class cost across rollouts, and a Monthly audit).
+`skills/reflect/scripts/reflect-due.py` tells Chorus's weekly Runner, and the
+daily sweep as its fallback, when the weekly reading is due: the Thursday after
+the last one, or the Thursday after that once three Reflections in a row were
+quiet (ADR 0037 d4, d6; ADR 0051). The Grade log (`grades.jsonl` beside the
 Run record, ADR 0041) has one writer, `estate-dispatch.py log`, which keeps each
 estate pass's grades (a task whose note name is no slug, with spaces or
 capitals, is skipped and reported in its outcome line, and the rest are still
@@ -331,6 +334,8 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), orient's
   target resolution before it reads and its one learned `repos:` write (`orient-target.test.mjs`),
   orient's declared check, its gate and digest-bound advance (`orient-declared-check.test.mjs`),
+  orient's Priorities card, asked once when a project note has none and read by every later ask
+  (`orient-priorities-card.test.mjs`, Chorus ADR 0110 d5),
   orient's launch-model history (`orient-launch-model.test.mjs`), the three-way execution-fit test and
   orient's retired batches (`execution-fit-shapes.test.mjs`, ADR 0040), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
@@ -349,8 +354,12 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   the GIT_* scrub), `tests/reflect-weekly.test.mjs` (`reflect.py`'s weekly reading against throwaway records,
   vaults and repos: the span and its friction, close lines and the Escapes sweep, one line per Watch and per Tuning,
   the bug and decision tasks never written over, Lachy's recorded no, the close and the rung),
-  `tests/reflect-due.test.mjs` (`reflect-due.py` on fixture records: due at day 7 and not day 6, three quiet
-  Reflections to the 14-day cadence and a non-quiet one back to 7, and the cadence `close` writes),
+  `tests/reflect-due.test.mjs` (`reflect-due.py` on fixture records: due from Thursday 00:00 and not the Wednesday
+  before, after a Friday, Thursday or Wednesday close, three quiet Reflections to the fortnightly cadence and a non-quiet
+  one back, and the cadence `close` writes), `tests/reflect-ledger.test.mjs` (the Time-lost ledger: fixture records
+  summed by class and cause, the waits on Lachy as stalls, the trend from persisted rows, the baseline, the ledger's
+  Watch counted in readings, the load hold, the Monthly audit's month rule and window, its gaps in the decision task and
+  never against `quiet`),
   `tests/reflect-grades.test.mjs` (`grades.py` on fixture grade lines, records and notes: each grade's episode to the
   next grade or the close, dispatch by record or by link, foreseen sign-offs, every outcome and the hands-off rate's
   denominator, window against all, and Slot hours per size),
