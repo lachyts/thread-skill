@@ -3,7 +3,7 @@
 # `# thread:land` snippet and handoff's `# thread:handoff-land` snippet (cases 1–41), its own-branch mode
 # with close's `# thread:land-own` snippet (cases 42–70; 71–73b are close-out cases), and its read-only route mode,
 # `--route` (case 74, leg.py's Complete; case 75, its parity with a landing, which self-rollout-check.sh
-# --refresh-in-place's diverged remedy reads). Fixture repos talk to bare "servers" under $tmp/srv
+# --refresh-in-place's diverged remedy reads); case 76 is the own branch's review-round recorder (ADR 0055 d5). Fixture repos talk to bare "servers" under $tmp/srv
 # through a fake ssh that maps git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
@@ -13,7 +13,7 @@
 # wins, and a HANG_BOUND prefix, since its deadline is the bound), and a call that must return while a stub's
 # or hook's leftover child (also 120 s) lives asserts the same bound; every other call has the 15 s suite default,
 # room for a fake gh slowed by `make test`'s concurrent suites. Hermetic: HOME, the global git config and TMPDIR
-# are temp, and the caller's GIT_DIR & co. are unset. bash 3.2-compatible (macOS).
+# are temp, and the caller's GIT_DIR & co. and THREAD_REVIEW_ROUND are unset. bash 3.2-compatible (macOS).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -84,6 +84,7 @@ git config --global init.defaultBranch main
 git config --global advice.detachedHead false
 export LANDING_REGISTER="$tmp/register.md"
 export LAND_TIMEOUT=15 LAND_DEADLINE=300
+unset THREAD_REVIEW_ROUND  # the own branch's recorder: none (no ~/.agents in the temp HOME) but in case 76
 # HANG is a hang call's LAND_TIMEOUT (land() applies it). HANG_BOUND is its elapsed bound: the whole land.sh call,
 # whose other steps took 30-38 s on a host at load ~150 (p19-1), so it sits well above that and under a stub's 120 s.
 HANG=4 HANG_BOUND=90
@@ -1658,6 +1659,69 @@ out=$($LAND_SHELL "$LAND" --route 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "case 
 out=$($LAND_SHELL "$LAND" --route "" 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "case 75: an empty argument → usage exit 2"
 out=$($LAND_SHELL "$LAND" --route a b 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "case 75: an extra argument → usage exit 2"
 }  # end shard_10
+
+shard_11() {
+echo "== 76. own branch: --queue and --hold record the review rounds (ADR 0055 d5)"
+# rrstub <rc>: a recorder stub at $THREAD_REVIEW_ROUND that appends its argv, one line per call, to rr.py.args,
+# writes a line to each stream and exits <rc>. Exported for the whole shard, so qsetup's plain call runs with it.
+export THREAD_REVIEW_ROUND="$tmp/rr.py"
+rrstub() {
+  cat > "$tmp/rr.py" <<PY
+import sys
+with open(sys.argv[0] + ".args", "a") as f:
+    f.write(" ".join(sys.argv[1:]) + "\n")
+print("rr: to stdout")
+sys.stderr.write("rr: to stderr\n")
+sys.exit($1)
+PY
+  : > "$tmp/rr.py.args"
+}
+rrargs() { cat "$tmp/rr.py.args"; }
+want() { printf '%s\n' "--repo $real/w/$1 --base origin/master --branch-docs"; }
+rrstub 0; qsetup c76a
+ok "$(rrargs)" "" "case 76 plain: a plain call never runs the recorder"
+hasnt "$err" "review rounds" "case 76 plain: and says nothing of it"
+own GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 76 queue" 0 "queued https://github.com/o/c76a/pull/1"
+ok "$(rrargs)" "$(want c76a)" "case 76 queue: the recorder ran once, on the top, against origin/<d>, --branch-docs"
+has "$err" "land: recorded review rounds" "case 76 queue: land: recorded review rounds"
+has "$err" "rr: to stdout" "case 76 queue: the recorder's stdout reaches stderr"; has "$err" "rr: to stderr" "case 76 queue: …and its stderr"
+ok "$(printf '%s\n' "$err" | grep -E '^land: (head [0-9a-f]{40}$|recorded review rounds$|checks read )' | cut -d' ' -f2)" \
+   "$(printf '%s\n' head recorded checks)" "case 76 queue: recorded after the fetch, before the checks"
+rrstub 0; qsetup c76b; printf '%s\n' "a serious finding open at the budget" > "$tmp/diag76"
+own -- --hold -F "$tmp/diag76"
+ores "case 76 hold" 0 "held https://github.com/o/c76b/pull/1"
+ok "$(rrargs)" "$(want c76b)" "case 76 hold: the recorder ran once"
+has "$err" "land: recorded review rounds" "case 76 hold: land: recorded review rounds"
+own -- --queue --reviewed nosuchrev
+ores "case 76 stuck after the fetch" 1 "stuck: reviewed commit nosuchrev not found"
+ok "$(rrargs | grep -c .)" 2 "case 76 stuck after the fetch: still recorded, the result and exit code unchanged"
+ghreset; rrstub 0; mkrepo c76c; edit
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 76 close-out" 0 landed
+ok "$(rrargs)" "" "case 76 close-out: a close-out landing never runs the recorder"
+hasnt "$err" "review rounds" "case 76 close-out: and says nothing of it"
+rrstub 3; qsetup c76d
+own GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 76 failing recorder" 0 "queued https://github.com/o/c76d/pull/1"
+ok "$(rrargs)" "$(want c76d)" "case 76 failing recorder: it ran"
+has "$err" "land: review rounds not recorded (recorder exit 3)" "case 76 failing recorder: says why"
+hasnt "$err" "land: recorded review rounds" "case 76 failing recorder: never says recorded"
+own -- --hold -F "$tmp/diag76"
+ores "case 76 failing recorder, hold" 0 "held https://github.com/o/c76d/pull/1"
+rrstub 0; qsetup c76e
+own THREAD_REVIEW_ROUND="$tmp/nope.py" GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 76 missing recorder" 0 "queued https://github.com/o/c76e/pull/1"
+has "$err" "land: review rounds not recorded (no recorder at $tmp/nope.py)" "case 76 missing recorder: says why"
+own THREAD_REVIEW_ROUND="$tmp/nope.py" -- --hold -F "$tmp/diag76"
+ores "case 76 missing recorder, hold" 0 "held https://github.com/o/c76e/pull/1"
+ok "$(rrargs)" "" "case 76 missing recorder: the stub was never called"
+dflt=$HOME/.agents/skills/fresh-review/scripts/review-round.py
+mkdir -p "$(dirname "$dflt")"; cp "$tmp/rr.py" "$dflt"
+own THREAD_REVIEW_ROUND= -- --hold -F "$tmp/diag76"
+ores "case 76 default recorder" 0 "held https://github.com/o/c76e/pull/1"
+ok "$(cat "$dflt.args")" "$(want c76e)" "case 76 default recorder: an empty THREAD_REVIEW_ROUND runs ~/.agents' review-round.py"
+}  # end shard_11
 
 # ---- run this child's shard -------------------------------------------------------------------------------
 declare -F "shard_$shard" >/dev/null || { echo "FAIL - no shard_$shard"; exit 1; }

@@ -538,6 +538,31 @@ test('review-round lands in reviews.jsonl with rollout and task null', (t) => {
   assert.equal(l.kind, 'review-round')
 })
 
+// ADR 0055: the doc's status, its branch, the diff size and the disposition counts are optional, checked when given.
+test('review-round (ADR 0055): status, branch, size and disposition counts are accepted; bad values are refused', (t) => {
+  const home = tmpHome(t)
+  const base = { repo: 'thread-skill', head: 'abc1234', digest: 'd1', doc: 'docs/review/x.md', findings: 12 }
+  const full = { ...base, status: 'consumed', branch: 'feat/x', lines: 77, files: 3, blocking: 2, open: 1, filed: 8,
+    recurring: 3, reversal: 1, rejected: 2 }
+  emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify({ ...base, status: 'pending', lines: 0, files: 0 })], { env: EV(home) })
+  emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify(full)], { env: EV(home) })
+  const [a, b] = lines(path.join(ev(home), 'reviews.jsonl'))
+  assert.deepEqual([a.status, a.lines, a.files, 'blocking' in a], ['pending', 0, 0, false])
+  for (const k of Object.keys(full)) assert.deepEqual(b[k], full[k], k)
+  const BAD = [
+    ['status "done"', { status: 'done' }], ['status ""', { status: '' }], ['branch ""', { branch: '' }],
+    ['branch 3', { branch: 3 }], ['lines -1', { lines: -1 }], ['files 1.5', { files: 1.5 }],
+    ['blocking true', { blocking: true }], ['open "1"', { open: '1' }], ['filed -1', { filed: -1 }],
+    ['recurring null', { recurring: null }], ['reversal -2', { reversal: -2 }], ['rejected 0.5', { rejected: 0.5 }],
+  ]
+  for (const [label, bad] of BAD) {
+    const r = cli(home, ['emit', '--kind', 'review-round', '--json', JSON.stringify({ ...base, ...bad })], { env: EV(home) })
+    assert.equal(r.status, 2, `${label}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, label)
+  }
+  assert.equal(lines(path.join(ev(home), 'reviews.jsonl')).length, 2, 'no refused line was written')
+})
+
 // ---- the review-verdict kind (p21-3: reconcile-rollout.py's one line per judged master-review round) ----------
 
 test('review-verdict lands in <rollout>.jsonl with its task, with and without head', (t) => {
