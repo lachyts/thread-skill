@@ -8,7 +8,7 @@ is no env override). Stdlib only. It writes nothing and makes no network call. T
 of the file format:
 
     # ~/.config/thread/rollouts.toml
-    schema = 1                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+    schema = 2                   # optional, top-level, before the first table (ADR 0043): the file's schema version
 
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
@@ -16,8 +16,9 @@ of the file format:
     max_iterations = 3
     max_plan_rounds = 3
     auto_retries = 2             # execute's automatic retries of a set-aside task (p16-4, ADR 0033); 0 disables
-    spend_approval_usd = 50      # the standing approval (ADR 0034): a spend gate whose total exposure is at most
-                                 # this many US dollars passes without a person; 0 (the built-in) is off
+    spend_approval_usd = 200     # the standing approval (ADR 0034): a spend gate whose total exposure is at most
+                                 # this many US dollars passes without a person, and while the calendar month's
+                                 # standing approvals stay within it; 0 (the built-in) is off
     verify_slots = 2             # machine-wide (p23-4): at most this many verifier suites run at once across every
                                  # rollout on this machine (execute's verify-slot.py); [defaults] only
 
@@ -36,10 +37,23 @@ of the file format:
 
     [repo."lachyts/thread-skill"] # one repo, keyed by its GitHub origin's owner/name
     parallel_ceiling = 5
+    inert_paths = ["THREAD.md"]  # schema 2 (p29-3, ADR 0045): this repo's Inert paths; a repo table only
 
 The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` and `repo`. A repo table holds every rollout key but
 `verify_slots` (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries`, `spend_approval_usd` and
-`verify_slots`; MACHINE_ONLY: `verify_slots`, which is machine-wide and refused under a `[repo."o/r"]` label). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
+`verify_slots`; MACHINE_ONLY: `verify_slots`, which is machine-wide and refused under a `[repo."o/r"]` label), plus
+`inert_paths` (REPO_ONLY: refused under `[defaults]` with `inert_paths is per repo: set it under [repo."owner/name"]`).
+Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
+
+`inert_paths` (p29-3, ADR 0045; schema 2, the first key above schema 1) is the repo's Inert paths: a list of at most 64
+distinct git pathspec globs (matched as `:(glob)<glob>`), empty by default (built-in []), so a repo nobody has checked
+always re-runs its verifier. Each glob is refused when it is not a string, is empty or over 200 characters, has leading
+or trailing whitespace, holds a control character or a backslash, starts with `/`, `:` (pathspec magic) or `!`, has an
+empty, `.` or `..` segment, or ends in `/` (write `dir/**`). It is never stamped on a rollout and is no Tuning key: it
+lives only here, written by skills/_shared/scripts/inert-paths.py `record` and `drop` (schedule § 2.9), and read at each
+Integration by execute's `lead-integrate.py prepare`, which proves every glob again on the tree being merged. It is not
+in `settings`: resolve() reports it as its own top-level `inert_paths` (Output). An older reader (schema 1) ignores
+it under a schema-2 file (the schema rule below), so that rollout always re-runs.
 
 `[notify]` holds only `ntfy_topic` (NOTIFY_KEYS), machine-wide like `[guardrails]`: in `[defaults]` or a repo table it
 is an unknown key. Two scripts read it, both through the importable resolve(), in process: execute's
@@ -62,7 +76,11 @@ rollout-settings.py refuses it as an unknown top-level key, so install a P29+ re
 Adding a key (the recipe; tests/rollout-settings.test.mjs K10 fails with it): bump SCHEMA; register the key in
 KEY_SCHEMA at the new number; keep it no near-miss of any key registered at its scope (K8); and every writer that
 adds it to a file whose `schema` is lower raises the file's `schema` line to that number in the same edit: tune.py
-does it (raise_schema(), pinned by tests/reflect-tune.test.mjs KT1), and so must a hand edit.
+does it (raise_schema(), pinned by tests/reflect-tune.test.mjs KT1), and so must a hand edit. Both writers share
+raise_schema_lines() below. A writer that raises the schema runs the reader check or names why it need not: a
+pre-P29 reader refuses any top-level `schema` line and a schema-N reader any known key above N, and a refused file halts
+every rollout on the machine at its next `verify-timeout`, so inert-paths.py `record` asks each live rollout's engine
+root to read the new file first (its header); tune.py writes only schema-1 keys, so it never raises the line today.
 
 Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/name` by land.sh's slug rule
 (`[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+`, a name that is not all dots), never ending `.git`. It is
@@ -112,13 +130,14 @@ repo table exists and `--repo` was given, land.sh reads the origin; then the val
 Output. Exit 0 and one JSON line on stdout:
 
     {"path": "<expanded path>", "file": true|false, "repo": "<owner/name>"|null,
-     "schema": {"file": <the file's schema, 1 when absent or no file>, "engine": SCHEMA},
-     "ignored": ["<scope path of each ignored key>", ...],     # e.g. "defaults.foo", 'repo."o/r".foo', "away"
      "settings": {"parallel_ceiling": {"value": 4, "source": "built-in"}, "max_review_rounds": {...},
                   "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...},
                   "spend_approval_usd": {...}, "verify_slots": {...}},
      "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...},
-     "notify": {"ntfy_topic": {"set": true|false, "source": "file:notify"|"built-in"}}}
+     "notify": {"ntfy_topic": {"set": true|false, "source": "file:notify"|"built-in"}},
+     "inert_paths": {"value": ["<glob>", ...], "source": "file:repo"|"built-in"},   # built-in []
+     "schema": {"file": <the file's schema, 1 when absent or no file>, "engine": SCHEMA},
+     "ignored": ["<scope path of each ignored key>", ...]}     # e.g. "defaults.foo", 'repo."o/r".foo', "away"
 
 `notify` is redacted (redacted()): `set` says whether a topic resolved, and the topic itself is never printed, since
 schedule, execute, status and repair run this CLI in a transcript and the Reflection keeps its JSON in a scratch file.
@@ -135,9 +154,14 @@ and this python has none. On failure stdout is empty and stderr carries one line
 
 Importable: resolve(repo=None, path=None), redacted(out) (resolve()'s object as the CLI prints it), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
 run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`,
-`spend_approval_usd` and `verify_slots`: every key a `settings` object holds), MACHINE_ONLY, MINIMUM, GUARDRAIL_KEYS,
-NOTIFY_KEYS, NOTIFY_BUILT_IN, TOPIC_RE, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, near_miss(key, known), file_schema(doc),
-default_path(), SettingsError(reason, line=None, code=2, subject=None).
+`spend_approval_usd` and `verify_slots`: every key a `settings` object holds), MACHINE_ONLY, REPO_ONLY, MINIMUM,
+GUARDRAIL_KEYS, NOTIFY_KEYS, NOTIFY_BUILT_IN, TOPIC_RE, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
+glob_problem(glob), near_miss(key, known), file_schema(doc), load_tables(path) (the validated tables, None for no
+file), raise_schema_lines(lines, need, current) (the top-level `schema` raise both writers share: `lines` with the
+line raised to `need` when it is above `current`, never lowered; an existing top-level line is rewritten in place,
+keeping its comment; otherwise `schema = <need>` and a blank line go before the first table header, above the comment
+lines directly over it; a SettingsError for a `schema` line it will not edit), default_path(),
+SettingsError(reason, line=None, code=2, subject=None).
 """
 import argparse
 import importlib.util
@@ -161,6 +185,10 @@ SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots")
 # Machine-wide keys: valid under [defaults] only, refused in a [repo."o/r"] table (a verify slot is shared by every
 # rollout on the machine, whatever its repo).
 MACHINE_ONLY = ("verify_slots",)
+# Per-repo keys (p29-3): valid in a [repo."o/r"] table only, refused under [defaults], and kept out of `settings`
+# (resolve() reports each as its own top-level field). `inert_paths` is a repo's Inert paths (ADR 0045).
+REPO_ONLY = ("inert_paths",)
+MAX_INERT_GLOBS = 64
 BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2,
             "spend_approval_usd": 0, "verify_slots": 2}
 # The least valid value of each rollout key: a Tuning key is >= 1; `auto_retries: 0` disables automatic retries;
@@ -182,12 +210,13 @@ TABLES = ("defaults", "guardrails", "notify", "repo")
 TOP_KEYS = ("schema",) + TABLES
 # The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
 # registers every key it knows, by (scope, key), at the schema that introduced it. K10 freezes the schema-1 set.
-SCHEMA = 1
+SCHEMA = 2
 KEY_SCHEMA = {}
 KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
 KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS})
 KEY_SCHEMA.update({("guardrails", k): 1 for k in GUARDRAIL_KEYS})
 KEY_SCHEMA.update({("notify", k): 1 for k in NOTIFY_KEYS})
+KEY_SCHEMA[("rollout", "inert_paths")] = 2   # p29-3 (ADR 0045): the first schema-2 key
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.
@@ -395,6 +424,29 @@ def near_miss(key, known):
     return None
 
 
+def glob_problem(glob):
+    """Why `glob` is no valid Inert-paths glob (the header's rule), or None."""
+    if not isinstance(glob, str):
+        return "is not a string (got %s)" % _describe(glob)
+    if not glob:
+        return "is empty"
+    if len(glob) > 200:
+        return "is %d characters (at most 200)" % len(glob)
+    if glob != glob.strip():
+        return "has leading or trailing whitespace"
+    if any(ord(c) < 32 or ord(c) == 127 for c in glob):
+        return "holds a control character"
+    if "\\" in glob:
+        return "holds a backslash"
+    if glob[0] in "/:!":
+        return "starts with %s (a glob is repo-relative, with no pathspec magic or negation)" % json.dumps(glob[0])
+    if glob.endswith("/"):
+        return "ends in / (write %s)" % json.dumps(glob + "**")
+    if any(seg in ("", ".", "..") for seg in glob.split("/")):
+        return "has an empty, . or .. segment"
+    return None
+
+
 def file_schema(doc):
     """The file's top-level `schema` (1 when absent), or None when it is not an integer >= 1."""
     raw = (doc or {}).get("schema", 1)
@@ -446,13 +498,33 @@ def _validate(text, doc, path):
     def rollout_table(table, label, at):
         kept = {}
         for key, value in table.items():
-            if key not in SETTING_KEYS:
+            if key not in SETTING_KEYS + REPO_ONLY:
                 unknown("rollout", key, ".".join(json.dumps(a) if "/" in a else a for a in at + (key,)), at + (key,),
-                        "%s: unknown key %s (a rollout table holds %s)" % (label, json.dumps(key), ", ".join(SETTING_KEYS)))
+                        "%s: unknown key %s (a rollout table holds %s)" % (label, json.dumps(key),
+                                                                         ", ".join(SETTING_KEYS + REPO_ONLY)))
                 continue
             newer("rollout", key, at + (key,))
             if key in MACHINE_ONLY and at[0] == "repo":
                 refuse("%s %s is machine-wide: set it under [defaults]" % (label, key), at + (key,))
+            if key in REPO_ONLY:
+                if at[0] != "repo":
+                    refuse("%s is per repo: set it under [repo.\"owner/name\"]" % key, at + (key,))
+                if not isinstance(value, list):
+                    refuse("%s %s must be a list of git pathspec globs, got %s" % (label, key, _describe(value)),
+                           at + (key,))
+                if len(value) > MAX_INERT_GLOBS:
+                    refuse("%s %s holds %d globs (at most %d)" % (label, key, len(value), MAX_INERT_GLOBS), at + (key,))
+                for glob in value:
+                    if not isinstance(glob, str):
+                        refuse("%s %s: each glob must be a string, got %s" % (label, key, _describe(glob)), at + (key,))
+                    why = glob_problem(glob)
+                    if why:
+                        refuse("%s %s: the glob %s %s" % (label, key, json.dumps(glob), why), at + (key,))
+                if len(set(value)) != len(value):
+                    dup = next(g for g in value if value.count(g) > 1)
+                    refuse("%s %s: the glob %s is listed twice" % (label, key, json.dumps(dup)), at + (key,))
+                kept[key] = list(value)
+                continue
             if isinstance(value, bool) or not isinstance(value, int) or value < MINIMUM[key]:
                 refuse("%s %s must be an integer >= %d, got %s" % (label, key, MINIMUM[key], _describe(value)), at + (key,))
             kept[key] = value
@@ -528,6 +600,43 @@ def _validate(text, doc, path):
         seen[slug.lower()] = slug
         out["repo"][slug.lower()] = rollout_table(table, label, at)
     return out
+
+
+def load_tables(path):
+    """The validated tables of the file at `path` (_validate's dict), or None when there is no file. SettingsError."""
+    ladder = _ladder()
+    try:
+        read = ladder.read_toml(path)
+    except ladder.LadderError as e:
+        raise SettingsError(e.reason, line=e.line, code=e.code, subject=path)
+    return None if read is None else _validate(read[0], read[1], path)
+
+
+def _key_line_re(key):
+    return re.compile(r"^(\s*(?:%s|\"%s\"|'%s')\s*=\s*)([^\s#]+)(.*)$" % (key, key, key))
+
+
+def raise_schema_lines(lines, need, current):
+    """`lines` with the top-level `schema` raised to `need` when it is above `current` (the file's, else 1): the
+    header's rule. Never lowers it; a SettingsError for a schema line it will not edit."""
+    if need <= current:
+        return lines
+    first = next((i for i, line in enumerate(lines)
+                  if _AOT_RE.match(line.strip()) or _TABLE_RE.match(line.strip())), len(lines))
+    for i in range(first):
+        s = lines[i].strip()
+        if not s or s.startswith("#"):
+            continue
+        m = _KEY_RE.match(s)
+        if m and _segments(m.group(1)) == ("schema",):
+            mm = _key_line_re("schema").match(lines[i])
+            if not mm:
+                raise SettingsError("cannot read the top-level schema line (line %d): edit it by hand" % (i + 1))
+            return lines[:i] + [mm.group(1) + str(need) + mm.group(3)] + lines[i + 1:]
+    at = first
+    while at > 0 and lines[at - 1].strip().startswith("#"):
+        at -= 1   # the comment lines directly over the header stay with it
+    return lines[:at] + ["schema = %d" % need, ""] + lines[at:]
 
 
 def _git_env():
@@ -616,8 +725,11 @@ def resolve(repo=None, path=None):
             notify[key] = {"value": tables["notify"][key], "source": "file:notify"}
         else:
             notify[key] = {"value": NOTIFY_BUILT_IN[key], "source": "built-in"}
+    inert = ({"value": list(overrides["inert_paths"]), "source": "file:repo"} if "inert_paths" in overrides
+             else {"value": [], "source": "built-in"})
     return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails,
-            "notify": notify, "schema": {"file": tables["schema"], "engine": SCHEMA}, "ignored": list(tables["ignored"])}
+            "notify": notify, "inert_paths": inert, "schema": {"file": tables["schema"], "engine": SCHEMA},
+            "ignored": list(tables["ignored"])}
 
 
 def redacted(out):

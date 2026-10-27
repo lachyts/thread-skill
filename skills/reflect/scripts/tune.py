@@ -83,7 +83,8 @@ lock, so two closes racing on one rollout could both write (one lead closes a ro
 The edit works on the config's realpath (a symlink keeps its link), line by line: in the repo's
 `[repo."owner/name"]` table (matched ignoring case) it replaces the value and keeps a trailing comment, or
 inserts the key after the table's last key; with no table it appends `[repo."<scores.repo>"]` (a key set only
-under [defaults] still gets a repo entry: Tunings are per repo). The schema (raise_schema()): when a picked key's
+under [defaults] still gets a repo entry: Tunings are per repo). The schema (raise_schema(), a thin wrapper over
+rollout-settings.py's raise_schema_lines()): when a picked key's
 rollout-settings.py KEY_SCHEMA number is above the file's `schema` (its top-level line, else 1), the edit raises that
 line to it, never lowers it: an existing top-level `schema` line (before the first table header) is rewritten in
 place, keeping its comment; otherwise `schema = <N>` and a blank line go before the first table header (above the
@@ -92,7 +93,8 @@ refused (edit it by hand). With no newer key the text is exactly as before. The 
 backstop: an edit that forgets the raise does not validate, and nothing is written. No file, or a comment-only one, is created
 or appended to; a missing parent directory is created, and removed again when a failure leaves it empty. The
 result goes to a temp file in the same directory and must resolve with each picked key at its `to` from
-`file:repo`, every other key and Guardrail unchanged, and `[notify]` (ADR 0038 d3, machine-wide) unchanged too.
+`file:repo`, every other key and Guardrail unchanged, `[notify]` (ADR 0038 d3, machine-wide) unchanged too, and every
+repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `drop` are its only writers) unchanged.
 
 Write order: (1) every check above; (2) ONE `tuning` line carrying every pick, through
 run_record.emit(strict=True), its returned bool checked: one os.write, so tunings.jsonl gains the whole set
@@ -122,7 +124,6 @@ import difflib
 import importlib.util
 import json
 import os
-import re
 import secrets
 import stat
 import sys
@@ -402,31 +403,17 @@ def emit(scores, fields):
 
 # ---- the config edit ---------------------------------------------------------------------------------------
 
-def _key_line_re(key):
-    return re.compile(r"^(\s*(?:%s|\"%s\"|'%s')\s*=\s*)([^\s#]+)(.*)$" % (key, key, key))
+_key_line_re = RS._key_line_re
 
 
 def raise_schema(lines, need, current):
     """`lines` with the top-level `schema` raised to `need` when it is above `current` (the file's, else 1): the
-    module docstring's schema rule. Never lowers it; a Stop(2) for a schema line it will not edit."""
-    if need <= current:
-        return lines
-    first = next((i for i, line in enumerate(lines)
-                  if RS._AOT_RE.match(line.strip()) or RS._TABLE_RE.match(line.strip())), len(lines))
-    for i in range(first):
-        s = lines[i].strip()
-        if not s or s.startswith("#"):
-            continue
-        m = RS._KEY_RE.match(s)
-        if m and RS._segments(m.group(1)) == ("schema",):
-            mm = _key_line_re("schema").match(lines[i])
-            if not mm:
-                raise Stop("cannot read the top-level schema line (line %d): edit it by hand" % (i + 1), 2)
-            return lines[:i] + [mm.group(1) + str(need) + mm.group(3)] + lines[i + 1:]
-    at = first
-    while at > 0 and lines[at - 1].strip().startswith("#"):
-        at -= 1   # the comment lines directly over the header stay with it
-    return lines[:at] + ["schema = %d" % need, ""] + lines[at:]
+    module docstring's schema rule, through rollout-settings.py's raise_schema_lines() (the one copy both writers
+    share). Never lowers it; a Stop(2) for a schema line it will not edit."""
+    try:
+        return RS.raise_schema_lines(lines, need, current)
+    except RS.SettingsError as e:
+        raise Stop(str(e), 2)
 
 
 def edit_text(text, slug, picks, doc):
@@ -491,6 +478,16 @@ def edit_text(text, slug, picks, doc):
     need = max([RS.KEY_SCHEMA.get(("rollout", p["key"]), 1) for p in picks] or [1])
     lines = raise_schema(lines, need, RS.file_schema(doc or {}) or 1)
     return "\n".join(lines) + "\n"
+
+
+def _inert_paths(path):
+    """{repo key (lowered): its inert_paths} over every repo table of the file at `path` ({} for no file)."""
+    try:
+        tables = RS.load_tables(path)
+    except RS.SettingsError as e:
+        raise Stop("the edit does not validate (%s): nothing written" % e, 2)
+    return {slug: table["inert_paths"] for slug, table in ((tables or {}).get("repo") or {}).items()
+            if "inert_paths" in table}
 
 
 class Created:
@@ -662,6 +659,8 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
             raise Stop("the edit changes the Guardrails: nothing written", 2)
         if after["notify"] != before["notify"]:  # machine-wide (ADR 0038 d3): a Tuning never drops the ntfy topic
             raise Stop("the edit changes [notify]: nothing written", 2)
+        if _inert_paths(tmp) != _inert_paths(config):  # p29-3: a Tuning never touches any repo's Inert paths
+            raise Stop("the edit changes a repo's inert_paths: nothing written", 2)
         tid = new_id()
         fields = line_fields(scores, applied, tid, auto=auto)
         if dry_run:

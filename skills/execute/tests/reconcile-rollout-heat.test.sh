@@ -71,7 +71,7 @@ for lv in 0 1; do
 done
 ok "$(q "$(nx 0 ro-b --dry-run)" 'd["heat"]')" '{"level":0,"name":"nominal"}' "H0: heat is {level, name}: 0 nominal"
 ok "$(q "$(nx 1 ro-b --dry-run)" 'd["heat"]')" '{"level":1,"name":"moderate"}' "H0: … 1 moderate"
-ok "$(q "$(nx 0 ro-b --dry-run)" 'list(d).index("heat") == list(d).index("trickle") + 1')" 'true' "H0: heat comes right after trickle"
+ok "$(q "$(nx 0 ro-b --dry-run)" 'list(d).index("heat") == list(d).index("lastStarts") + 1')" 'true' "H0: heat comes right after lastStarts (which follows trickle)"
 
 # ── H1: heavy, not Away, with Trickle room: nothing starts ────────────────────────────────────────────────────
 scen h1-heavy

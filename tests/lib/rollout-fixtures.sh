@@ -11,12 +11,16 @@ prollout() {
   printf -- '---\ntags: [task]\nstatus: open\nrollout: "[[demo-rollout-2026-10-03]]"\nowner: lead\n---\n' > "$1/demo-task.md"
 }
 
-# away_file <home> <written_at> [away=true] [until=2099-01-01T00:00:00Z] [trickle=2] [morning=09:00]: the Away state
-# file (execute away.md § The state file) at <home>/.config/thread/away.json, for a `next` call whose HOME is <home>.
-# The defaults are a fresh Away file that never lapses, so a suite that needs each rollout's own parallel_ceiling
-# writes one with the written_at its `--now` reads as fresh (within 24 h before it, at most 5 minutes after).
+# away_file <home> <written_at> [away=true] [until=2099-01-01T00:00:00Z] [trickle=2] [morning=09:00] [away_cap=99]:
+# the Away state file (execute away.md § The state file) at <home>/.config/thread/away.json, for a `next` call whose
+# HOME is <home>. The defaults are a fresh Away file that never lapses and whose Away cap (p29-8, ADR 0049) never
+# binds, so a suite that needs each rollout's own parallel_ceiling writes one with the written_at its `--now` reads
+# as fresh (within 24 h before it, at most 5 minutes after); an away_cap of `-` leaves the key out (the built-in
+# default applies).
 away_file() {
+  local cap="${7:-99}" capkey=""
+  [ "$cap" = "-" ] || capkey=", \"away_cap\": $cap"
   mkdir -p "$1/.config/thread"
-  printf '{"away": %s, "until": "%s", "morning": "%s", "trickle": %s, "written_at": "%s"}\n' \
-    "${3:-true}" "${4:-2099-01-01T00:00:00Z}" "${6:-09:00}" "${5:-2}" "$2" > "$1/.config/thread/away.json"
+  printf '{"away": %s, "until": "%s", "morning": "%s", "trickle": %s%s, "written_at": "%s"}\n' \
+    "${3:-true}" "${4:-2099-01-01T00:00:00Z}" "${6:-09:00}" "${5:-2}" "$capkey" "$2" > "$1/.config/thread/away.json"
 }

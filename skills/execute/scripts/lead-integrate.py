@@ -8,7 +8,7 @@ never force-pushes.
 
 Subcommands:
 
-  prepare --repo R --slug S --default D --note N [--tasks-dir T]
+  prepare --repo R --slug S --default D --note N [--tasks-dir T] [--verifier CMD [--bootstrap CMD]]
       Decide how one approved task integrates. Refuses (exit 1, nothing fetched or merged) a note with no
       `integrating:`: every route into execute § 4.5 step 3 runs mark-integrating first, so a skipped stamp
       stops here (p26-1). In order: fetch origin with --prune (retried once; failing
@@ -27,7 +27,21 @@ Subcommands:
       engine's message): a conflict records `conflictFiles`, aborts and routes `trouble ["conflict"]`; any
       other failure aborts and routes `trouble []`; success routes `verify` with `mergeCommit` (unpushed),
       `sharedFiles` (task files over B...H that main changed over TB..B, or record.base..B in case ii)
-      and `trouble` ["shared-file"] when there is one, else []. Always prints branch, worktreePath,
+      and `trouble` ["shared-file"] when there is one, else []. The Inert-path skip (ADR 0045, p29-3): with
+      --verifier given and no shared file, one inert check runs there, all of it inside one `try/except
+      Exception`: the lazy load of skills/_shared/scripts/inert-paths.py (never at module top, so a broken
+      inert-paths.py cannot break push, undo or verify), the repo's `inert_paths` (rollout-settings.py resolve()),
+      the path test on TB..B (record.base..B in case ii) and, only when every changed path is inert prose, the
+      Inert proof of the matched globs on M's tree with the verifier and bootstrap as steps and places --repo and
+      the task tree (inert-paths.py's header holds every rule). Held: route `skip` (mergeCommit M, trouble [],
+      the green run stands: push M and merge, no verifier) and a `verify-skipped` Run-record line. Failed: route
+      `verify` as today and an `inert-proof-failed` line with the readers. Any exception: no skip, `inert.why`
+      `inert check error: <Type>: <msg>` (at most 200 characters), route `verify` exactly as today, exit 0, one
+      stderr WARN line and no traceback, and an `inert-proof-failed` line with `error` and `readers: []`
+      (best-effort, through reconcile-rollout.py's _event, which never raises). `inert` is always printed:
+      {skip, why, globs, changed (at most 200), changedTotal, nonInert (at most 20), readers (at most 20)}; with
+      no --verifier, no repo table, an empty list or a refused rollouts.toml (a land.sh timeout included) it gives
+      no skip and a `why`. Always prints branch, worktreePath,
       prHead, anchor, taskBase, mainSha, case, route, trouble, reason, landed (one {prUrl, title,
       files, taskPath} per first-parent commit in TB..B whose subject ends ` (#N)` or starts
       `Merge pull request #N `), unlisted (one {sha, subject, files} per other first-parent commit in
@@ -559,7 +573,8 @@ def cmd_prepare(args):
     out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
            "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [], "unlisted": [],
            "mergeCommit": "", "sharedFiles": [], "conflictFiles": [], "staleRefDeleted": None,
-           "abortedMerge": False, "stashed": "", "record": None, "note": ""}
+           "abortedMerge": False, "stashed": "", "record": None, "note": "",
+           "inert": _inert_off("no verify route: no verifier would run, so nothing to skip")}
 
     for attempt in (1, 2):
         p = git(repo, "fetch", "--prune", "--quiet", "origin")
@@ -632,9 +647,115 @@ def cmd_prepare(args):
     task_files = set(f for f in out_of(git(tree, "diff", "--name-only", f"{b}...{h}")).split("\n") if f)
     main_files = set(f for f in out_of(git(tree, "diff", "--name-only", base, b)).split("\n") if f)
     shared = sorted(task_files & main_files)
-    out.update(route="verify", mergeCommit=m, sharedFiles=shared, trouble=["shared-file"] if shared else [],
+    if not getattr(args, "verifier", None):
+        inert = _inert_off("no --verifier given: the verifier runs")
+    elif shared:
+        inert = _inert_off(f"{len(shared)} shared file(s) ({', '.join(shared[:3])}): the verifier runs")
+    else:
+        inert = _inert(args, repo, tree, base, b, m, note)
+    if inert["skip"]:
+        out.update(route="skip", mergeCommit=m, sharedFiles=[], trouble=[], inert=inert,
+                   reason=f"merged origin/{args.default} ({b[:12]}) into {br} as {m[:12]}; main moved only in Inert paths "
+                   "and the Inert proof held: the green run stands (ADR 0045): push it and merge, no verifier")
+        return out
+    out.update(route="verify", mergeCommit=m, sharedFiles=shared, trouble=["shared-file"] if shared else [], inert=inert,
                reason=f"merged origin/{args.default} ({b[:12]}) into {br}: run the verifier on {m[:12]}")
     return out
+
+
+# ---- the Inert-path skip (ADR 0045, p29-3) -------------------------------------------------------------------
+
+INERT_PATHS = 200
+INERT_READERS = 20
+
+
+def _inert_off(why):
+    return {"skip": False, "why": why, "globs": [], "changed": [], "changedTotal": 0, "nonInert": [], "readers": []}
+
+
+def _load_inert():
+    """skills/_shared/scripts/inert-paths.py, loaded lazily (engine guard's pattern): only prepare's inert check reads it."""
+    src = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "inert-paths.py"
+    spec = importlib.util.spec_from_file_location("thread_inert_paths", src)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _pick_readers(proof, failed, cap=INERT_READERS):
+    """At most `cap` readers, each failed glob's first before any glob's second."""
+    keys = ("glob", "path", "kind", "line", "text", "origin")
+    queues = [list(proof[g]["readers"]) for g in failed]
+    out = []
+    while len(out) < cap and any(queues):
+        for q in queues:
+            if q and len(out) < cap:
+                r = q.pop(0)
+                out.append({k: r[k] for k in keys if k in r})
+    return out
+
+
+def _inert_event(note, slug, kind, fields):
+    try:
+        rr._event(rr._note_rollout(note), kind, slug, fields)
+    except Exception:   # recording never breaks a verb
+        pass
+
+
+def _inert(args, repo, tree, base, b, m, note):
+    """prepare's inert check, failing closed: {skip, why, globs, changed, changedTotal, nonInert, readers}."""
+    out = _inert_off("")
+    paths, repo_id = [], str(repo)
+    try:
+        ip = _load_inert()
+        try:
+            res = ip.RS.resolve(repo=str(repo))
+        except ip.RS.SettingsError as e:
+            out["why"] = f"rollout settings refused ({e}): the verifier runs"
+            return out
+        repo_id = res.get("repo") or ip.RS._origin_slug(str(repo)) or str(repo)
+        globs = list(res["inert_paths"]["value"])
+        if not globs:
+            out["why"] = ("inert_paths is empty for this repo" if res["inert_paths"]["source"] == "file:repo" else
+                          "no inert_paths for this repo in rollouts.toml") + ": the verifier runs"
+            return out
+        pt = ip.path_test(str(repo), base, b, globs)
+        paths = pt["changed"]
+        out.update(globs=pt["globs"], changed=paths[:INERT_PATHS], changedTotal=len(paths),
+                   nonInert=pt["nonInert"][:INERT_READERS])
+        if pt["nonInert"]:
+            out["why"] = (f"{len(pt['nonInert'])} of {len(paths)} changed path(s) are not inert prose "
+                          f"({', '.join(pt['nonInert'][:3])}): the verifier runs")
+            return out
+        proof = ip.prove(str(repo), m, pt["globs"], [("verifier", args.verifier or ""), ("bootstrap", args.bootstrap or "")],
+                         places=[str(repo), str(tree)])
+        failed = [g for g in pt["globs"] if not proof[g]["held"]]
+        fields = {"repo": repo_id, "paths": paths[:INERT_PATHS], "pathsTotal": len(paths), "base": base, "main": b,
+                  "head": m, "globs": pt["globs"]}
+        if failed:
+            readers = _pick_readers(proof, failed)
+            first = readers[0] if readers else {"path": "?", "kind": "?"}
+            out.update(readers=readers, why=(f"the Inert proof failed for {', '.join(failed)}: {first['path']}"
+                                             + (f":{first['line']}" if first.get("line") else "")
+                                             + f" ({first['kind']}{', ' + first['origin'] if first.get('origin') else ''})"
+                                             + ": the verifier runs"))
+            _inert_event(note, args.slug, "inert-proof-failed", dict(fields, readers=readers, failed=failed))
+            return out
+        out.update(skip=True, why=f"main moved only in Inert paths ({len(paths)} path(s)) and the Inert proof held on "
+                                  f"{m[:12]} for {', '.join(pt['globs'])}: the green run stands, no verifier (ADR 0045)")
+        _inert_event(note, args.slug, "verify-skipped", fields)
+        return out
+    except Exception as e:  # fail closed: any error in the check means a re-run, never a crash of prepare
+        msg = f"inert check error: {type(e).__name__}: {e}".replace("\n", " ")[:200]
+        try:
+            print(f"lead-integrate prepare: WARN: {msg}: the verifier runs", file=sys.stderr)
+        except Exception:
+            pass
+        _inert_event(note, args.slug, "inert-proof-failed", {"repo": repo_id, "paths": paths[:INERT_PATHS],
+                                                             "pathsTotal": len(paths), "readers": [], "error": msg})
+        off = _inert_off(msg)
+        off.update(changed=paths[:INERT_PATHS], changedTotal=len(paths))
+        return off
 
 
 # ---- verify --------------------------------------------------------------------------------------------
@@ -1547,6 +1668,9 @@ def main(argv=None):
     pr.add_argument("--default", required=True, help="the repo's default branch (execute § 4's resolver)")
     pr.add_argument("--note", required=True, help="the task note's path")
     pr.add_argument("--tasks-dir", default=None, help="where landed PRs' task notes are looked up (default: the note's dir)")
+    pr.add_argument("--verifier", default=None, help="the rollout's verifier: given, prepare may route `skip` when main "
+                    "moved only in the repo's Inert paths and the Inert proof holds (ADR 0045)")
+    pr.add_argument("--bootstrap", default=None, help="the rollout's env_bootstrap, a step of the Inert proof too")
 
     vf = sub.add_parser("verify", help="run the env bootstrap and the verifier, bounded; the rc goes to <out>.rc")
     vf.add_argument("--tree", required=True)
