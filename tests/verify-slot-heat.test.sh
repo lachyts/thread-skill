@@ -15,6 +15,8 @@
 #   The Run record (p29-10, ADR 0051): HR1 a recorded `run` in a task tree, its output piped: a heat stop ends its suite
 #   heat (no rc) and the restart is a fresh suite, green   HR2 verify --rollout: the same for the lead's suite (its step
 #   named)   HR3 verify --rollout pinned heavy: only a suite-ended heat with its wait.
+#   The Flake check (p29-9, ADR 0050): L8 a heat stop in its named re-run: back in line, every step reruns, the Flake and
+#   the flake record the last pass's.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; the stub notifyutil reads the level
 # from <arm>/out and appends one line per read to <arm>/reads, so "N more reads" is the clock; every wait is a
 # `within <s>` poll whose bound only slows a real failure. Every background pid is recorded and stopped only by it.
@@ -396,6 +398,44 @@ rc=$?
 ok "$rc|$(cat "$D/o.rc" 2>/dev/null)" "76|heat" "HR3: heavy for the whole --slot-wait: exit 76, rc heat"
 ok "$(recq "$D/events" ro '[[d["kind"], d["outcome"], d["seconds"], d["waited"] >= 0.9, "rc" in d] for d in L]')" '[["suite-ended","heat",0,true,false]]' \
   "HR3: only a suite-ended heat, with its wait and no rc"
+
+# ======== L8: a heat stop in the Flake check's named re-run (p29-9 beside p31-4) ================================
+# verify --diff-base --rollout: the first run fails on an out-of-diff test and trapping lands during its named re-run: no
+# verdict, back in line, its suite ended heat (step verifier). The restart reruns every step from a clean result: its
+# first run fails another test, whose named re-run and confirming run are green, so the Flake is the last pass's only.
+arm l8
+gitrepo "$D/tree"; mkdir -p "$D/tree/tests" "$D/v"; : > "$D/v/ro.md"
+printf 'x\n' > "$D/tree/tests/test_a.py"; printf 'x\n' > "$D/tree/tests/test_b.py"
+git -C "$D/tree" add tests && git -C "$D/tree" -c user.name=t -c user.email=t@t commit -q -m tests
+L8B=$(git -C "$D/tree" rev-parse HEAD)
+cat > "$D/v.sh" <<'SH'
+d=$1; n=$(( $(cat "$d/v.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/v.count"
+case $n in 1) echo 'FAILED tests/test_a.py::t - boom'; exit 1;; 2) echo 'FAILED tests/test_b.py::t - boom'; exit 1;; esac
+exit 0
+SH
+cat > "$D/r.sh" <<'SH'
+d=$1; shift; n=$(( $(cat "$d/r.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/r.count"
+printf '%s\n' "$@" > "$d/r.$n.args"
+if [ "$n" = 1 ]; then echo x >> "$d/starts"; until [ -e "$d/r.go" ]; do sleep 0.1; done; fi
+exit 0
+SH
+env -u THREAD_HEAT_LEVEL PATH="$tmp/bin:$PATH" HEAT_D="$D" THREAD_EVENTS_DIR="$D/events" python3 "$LI" verify --tree "$D/tree" --out "$D/o" \
+  --timeout 600 --slots 1 --slot-wait 600 --rollout "$D/v/ro.md" --slug t1 --verifier "bash '$D/v.sh' '$D'" \
+  --diff-base "$L8B" --named-rerun "bash '$D/r.sh' '$D' {tests}" > /dev/null 2>&1 &
+W=$!; pids+=($W)
+started 1 || echo "FAIL - L8: the named re-run did not start"
+level 3
+within 120 grepq 'verify: heat stop (trapping) during the named re-run: stopped its process group, no verdict; back in line' "$D/o.log" && s=stopped || s="no heat stop in 120 s"
+ok "$s" stopped "L8: trapping during the named re-run: the heat stop is logged"
+within 120 grepq 'verify: waiting (heat: trapping)' "$D/o.log" || echo "FAIL - L8: no heat wait line"
+level 0
+wait "$W"; rc=$?
+ok "$rc|$(cat "$D/o.rc" 2>/dev/null)|$(count "$D/starts")|$(cat "$D/v.count")|$(cat "$D/r.count")|$(cat "$D/r.2.args")" "0|0|1|3|2|tests/test_b.py::t" \
+  "L8: the restart reruns every step: green, the verifier three times, the named re-run twice, the second for the new test"
+ok "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["verdict"], d["why"], d["failing"], d["flakes"])' "$D/o.flake.json")" \
+  "flake  ['tests/test_b.py::t'] ['tests/test_b.py::t']" "L8: the flake record is the last pass's: a Flake of its first run's test only"
+ok "$(recq "$D/events" ro "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,"verifier"],["suite-started",null,null,null],["suite-ended","green",0,null]]' \
+  "L8: the heat-stopped pass ends its suite heat (step verifier); the re-queued pass is a suite of its own, green"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot-heat: ALL PASS" || echo "verify-slot-heat: SOME FAILED"
 exit "$fail"

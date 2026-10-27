@@ -128,10 +128,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Thread** — a live agent conversation carrying working context. Ephemeral;
   dies with the session. (Deliberately overloaded with the file below — the
   plugin name trades on the overlap, but the two must never be confused in
-  skill prose.) In wording Lachy reads (a router's menu options and their
-  descriptions) the convention is user-facing: **session** names the live
-  conversation and **thread** the durable work its THREAD.md records, because
-  that is how he reads the word. Agent-facing prose keeps the two senses above.
+  skill prose.) In wording Lachy reads (a router's line, its menu options
+  and their descriptions) the convention is user-facing: **session** names
+  the live conversation and **thread** the durable work its THREAD.md
+  records, because that is how he reads the word. Agent-facing prose keeps
+  the two senses above.
 - **THREAD.md** — the durable state-of-play *file* a thread can be persisted
   into. A code project's thread is its **Repo thread**: the repo's own
   toplevel `<repo>/THREAD.md` under `~/repos`, found by `open`'s repo-thread
@@ -158,7 +159,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Route** — a decisive member (`stash`, `defer`, `handoff`, `close`) that
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
-  then dispatches to a route. A sibling, not a parent. Its *keep going* may
+  then dispatches to a route. A sibling, not a parent. "Next move?" is a gate
+  (Chorus ADR 0110): when its recommendation is clear, `next` decides it and says
+  so in one line, asking only when the pick turns on what only Lachy knows, and it
+  never drops an open confirm (a gate, technical or priorities question is
+  decided by the rule; his question, and any act the action policy reserves
+  for him, is carried). Its *keep going* may
   carry a **compact recommendation**, which only Lachy acts on: compact is a
   recommendation inside keep going, never a route. When the work already
   continues in another session it recommends **archive this session** instead,
@@ -206,8 +212,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   self-initiated because the context feels long; that recommendation belongs to
   `next`.
 - **Handoff doc** — the durable brief `thread:handoff`, its only writer, writes
-  on explicit fork intent only (Lachy's ask, or his pick from a router's menu;
-  never self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits
+  on explicit fork intent only (Lachy's ask, or a router's dispatch; never
+  self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits
   and lands (pushed, merge queued, never waited on) —
   `<home>` the unit directory: the project dir under `~/Projects/`, the
   workspace dir under `~/repos/workspaces/`, else the git toplevel.
@@ -578,10 +584,26 @@ through time, from attention to merged PRs. Terms only — no implementation.
   outside the task's diff, and passed when re-run by name and then when the
   full suite ran once more on the same tree: the verify counts green, and the
   Flake is logged and filed for its repo, never fixed inside the task
-  (ADR 0050). Never a known baseline failure (schedule § 2.6: a test already
+  (ADR 0050). "Outside the diff" is read by test file: the test is placed in
+  a test file the task's diff does not change (a RACE re-verify's diff is the
+  merged task's); a red that names no test, a test that cannot be placed in a
+  file, or one in the diff is red at once, with no re-run. The named re-run
+  comes first (any red again is red), then exactly one confirming full run.
+  Each Flake is a `flake` Run-record event and a line in the `## Flake log` of
+  one follow-up per (repo, test); a test logged as a Flake twice is the repo's
+  to fix. Never a known baseline failure (schedule § 2.6: a test already
   red on a clean `main`, which execute's green criterion already allows
   for), nor a remote CI step merge-task's `infra_flake_rerun` re-runs.
   _Avoid_: flaky failure, quarantined test.
+- **Named re-run** — the Flake check's first step: only a red's failing tests,
+  re-run alone by name on the same tree before the one confirming full run
+  (ADR 0050). At the lead's Integration verify and RACE re-verify it is the
+  rollout's `named_rerun:` command, `{tests}` replaced by the tests, which
+  schedule stamps from the project `CLAUDE.md`'s `Named re-run:` line; with no
+  `named_rerun:` the lead's red stays red. An agent (an implementer, a
+  reviser, an integrator) uses the repo's own test runner. It takes no verify
+  slot of its own and never counts as an iteration. _Avoid_: retry, targeted
+  run.
 - **Completion verifier** — a rollout note's optional `completion_verifier:`,
   the full suite of a project whose `verifier:` is its declared fast tier
   (estate ADR 0009 d6): the completion ceremony runs it once on merged main,
@@ -893,6 +915,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   agent's result line), and resumes every stopped call by `resumeFromRunId` on
   the Stage's re-send (Chorus ADR 0071; execute § Room stop). It stands from
   its `## Pause log` line to `room stop ended`, and it never stamps `paused:`.
+  A spread (Chorus ADR 0109) is one too, sent before the line: the Stage
+  moves the lead off a Login whose 5-hour window would not carry its
+  Rollouts, and the Pause-log line says `spreading its Rollouts`.
   _Avoid_: drain (Chorus's signal calls it "a drain, not a pause"; here the
   soft pause is the drain), pause, hard pause, handoff.
 - **Sign-off pause** — the pause execute's sign-off form stamps (`paused:`

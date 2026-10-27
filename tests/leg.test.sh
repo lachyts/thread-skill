@@ -163,6 +163,10 @@ SESS=s2 leg next --waiting "room stop: stopping calls at a step boundary"
 ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=5/7 running=1 state=waiting reason=\"room stop: stopping calls at a step boundary\"" \
    "L1: … and the room stop's"
 keepline; same "L1: next --waiting writes nothing"
+SESS=s2 leg next --waiting "room stop: L spreading its Rollouts (would reach its 5-hour line ~17:51)"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=5/7 running=1 state=waiting reason=\"room stop: L spreading its Rollouts (would reach its 5-hour line ~17:51)\"" \
+   "L1: … and a spread's, intact"
+same "L1: … a spread's writes nothing"
 SESS=s2 leg next; ok "$(q '"status_line" in d')" False "L1: a bare next prints no status line"
 SESS=s2 leg next --waiting " "; ok "$rc|$out" "2|" "L1: --waiting with no reason is a usage error"
 SESS=s2 leg done --task t6 --verify pass; ok "$rc" 0 "done t6"
