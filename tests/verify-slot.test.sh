@@ -19,7 +19,8 @@
 #   output still split   VR2 --priority   VR3 TERM ends it stopped, the slot free; a SIGKILL leaves no ended line
 #   VR4 no task tree or no note: no record, as today   VR5 a dirty tree   VR6 a green run names no failing   VR7 a
 #   TERM while suite-started walks the vault: never swallowed (76, no verdict: the suite never runs, no line, the slot
-#   free)   VR7b a TERM after the suite-started line, before the spawn: 76, a stopped line with no rc, the slot free.
+#   free)   VR7b a TERM after the suite-started line, before the spawn: 76, a stopped line with no rc, the slot free
+#   VR8 a bounded slot wait that runs out in a task tree (p32-1): 76, never run, no line, never an unslotted run.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound (60 to 300 s) only slows a real failure; a pid is "alive" only when `kill -0` succeeds AND its `ps`
 # state is not Z (an unreaped zombie runs nothing). Every background pid is recorded and stopped only by that pid.
@@ -527,6 +528,19 @@ ok "$([ -e "$D/vr7b.ran" ] && echo ran || echo never)" never "VR7b: the suite ne
 ok "$(recq '[[d["kind"], d.get("outcome"), "rc" in d] for d in L]')" '[["suite-started",null,false],["suite-ended","stopped",false]]' \
   "VR7b: a suite-started, then a suite-ended stopped with no rc"
 ok "$(slot_state 0 1)" free "VR7b: the slot is free"
+
+# VR8 (p32-1): the bounded slot wait on the recorded path, the one every agent suite takes (an agent always runs from a
+# task tree): with the slot held, `--slot-wait 1` runs out → 76 and its no-verdict line, the command never run, and no
+# line in the Run record (a wait that runs out never reaches suite-started). It never falls through to an unslotted run.
+: > "$VEV/r1.jsonl"
+hold h8 1
+vrun "$TREE" "$D/vr8.out" "$D/vr8.err" --slot-wait 1 -- touch "$D/vr8.ran"; rc=$?
+ok "$rc|$([ -e "$D/vr8.ran" ] && echo ran || echo never)" "76|never" "VR8: a task tree's run, --slot-wait 1 behind a held slot → 76, the command never ran"
+has "$(cat "$D/vr8.err")" "verify-slot: no verdict: no verify slot within 1s; exit 76" "VR8: … with its no-verdict line"
+ok "$(recq '[d["kind"] for d in L]')" '[]' "VR8: … and no line in the Run record"
+touch "$D/h8.go"; wait "$(w h8)"
+within 60 is_free 0 1 && s=free || s="still held after 60 s"
+ok "$s" free "VR8: once the holder is released, the slot is free"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot: ALL PASS" || echo "verify-slot: SOME FAILED"
 exit "$fail"

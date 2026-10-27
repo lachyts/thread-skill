@@ -16,8 +16,9 @@
 #   L6  a heat stop in the env_bootstrap: a clean restart, the outcome file has no stale key   L7  a SlotDirError at the
 #   re-acquire: unslotted, unwatched, green.
 #   The Run record (p29-10, ADR 0051): HR1 a recorded `run` in a task tree, its output piped: a heat stop ends its suite
-#   heat (no rc) and the restart is a fresh suite, green   HR2 verify --rollout: the same for the lead's suite (its step
-#   named)   HR3 verify --rollout pinned heavy: only a suite-ended heat with its wait.
+#   heat (no rc) and the restart is a fresh suite, green   HR1b R9 in a task tree (p32-1): a heat stop past `--slot-wait 1`
+#   ends the suite heat and makes no try, 76, no second suite   HR2 verify --rollout: the same as HR1 for the lead's
+#   suite (its step named)   HR3 verify --rollout pinned heavy: only a suite-ended heat with its wait.
 #   The Flake check (p29-9, ADR 0050): L8 a heat stop in its named re-run: back in line, every step reruns, the Flake and
 #   the flake record the last pass's.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; the stub notifyutil reads the level
@@ -411,6 +412,27 @@ ok "$rc|$(grep -c out-line "$D/out.txt")" "0|2" "HR1: the restart is green, exit
 ok "$(recq "$VEV" r1 "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,null],["suite-started",null,null,null],["suite-ended","green",0,null]]' \
   "HR1: the restart is a suite of its own: started, then green with rc 0"
 ok "$(recq "$VEV" r1 "$IDS")" '[true,true,true]' "HR1: each run pairs its own suite id"
+
+# HR1b (p32-1): R9's task-tree twin, the one total slot-wait deadline on the recorded path every agent suite takes. In
+# HR1's tree with `--slot-wait 1`, the suite runs past the wait (5 more stub reads), then a heat stop ends it heat; the
+# re-queue has no time left, so it makes no try: 76, one start, no second suite-started, no heat wait line after the stop.
+T1="$D/r/.claude/worktrees/t1"
+arm hr1b
+(cd "$T1" && exec env -u THREAD_HEAT_LEVEL HOME="$VH" THREAD_EVENTS_DIR="$D/events" PATH="$tmp/bin:$PATH" HEAT_D="$D" \
+  python3 "$VS" run --slots 1 --slot-wait 1 -- sh -c "$(hold_cmd)") > "$D/out.txt" 2> "$D/err" &
+W=$!; pids+=($W)
+started 1 || echo "FAIL - HR1b: the suite did not start"
+more 5
+level 3
+within 120 grepq 'heat stop (trapping)' "$D/err" || echo "FAIL - HR1b: no heat stop"
+within 120 gone "$W" || touch "$D/c.go"   # a restart (a fresh deadline, or a fall-through unslotted) holds on c.go
+wait "$W"; rc=$?
+ok "$rc|$(count "$D/starts")" "76|1" "HR1b: a heat stop past the 1 s wait in a task tree: exit 76, one start, no restart"
+has "$(cat "$D/err")" "verify-slot: no verdict: no verify slot within 1s (heat: trapping); exit 76" "HR1b: … its no-verdict line names the heat stop"
+ok "$(after_stop "$D/err")" 0 "HR1b: … and no heat wait line after the stop (no try with no time left)"
+ok "$(recq "$D/events" r1 "$PAIRS")" '[["suite-started",null,null,null],["suite-ended","heat",null,null]]' \
+  "HR1b: the record is the stopped suite only: started, then ended heat with no rc, and no second suite-started"
+ok "$(is_free && echo free || echo held)" free "HR1b: … the slot is free"
 
 # HR2: the lead's Integration suite (verify --rollout --slug), trapping during the verifier.
 arm hr2
