@@ -706,7 +706,7 @@ def _applied(v):
 # ---- the weekly reading's kinds (skills/reflect/scripts/reflect.py; p21-7, ADR 0037 d3-d5) --------------------
 
 # The kinds that land in reflections.jsonl: no rollout, no task (the Files rule).
-REFLECTION_KINDS = ("watch", "watch-raised", "proposal", "reflection", "time-lost")
+REFLECTION_KINDS = ("watch", "watch-raised", "proposal", "reflection", "time-lost", "attention")
 RULE_MAX = 120             # a Watch's rule and shape
 MAX_ROLLOUTS = 64          # a watch's or proposal's rollouts
 VIAS = ("recurring", "confirmed", "declined")
@@ -948,6 +948,129 @@ def _audit(v):
 def _objects(v):
     ok = isinstance(v, list) and len(v) <= MAX_TL_LIST and all(isinstance(x, dict) and x for x in v)
     return None if ok else "a list of at most %d non-empty objects" % MAX_TL_LIST
+
+
+# ---- the attention ledger's line (skills/reflect/scripts/attention.py, reflect.py `attention`; p30-7, ADR 0056) ---------
+# The Owners a reading labels each question with (skills/_shared/asking.md § 1; unknown is the reading's remainder), and
+# the two circling rules (W1 a work item, W2 a rollout). attention.py imports them.
+
+ATTENTION_OWNERS = ("yours", "priorities", "technical", "gate", "unknown")
+CIRCLING_RULES = ("W1", "W2")
+ATT_QUESTION_COUNTS = ("asked", "calls", "answered", "dismissed", "dropped", "open", "failed", "unparsed", "notes",
+                       "ownWords", "unlabelled")
+ATT_TRAIL_COUNTS = ("count", "rounds", "codeRounds", "simplifyRounds", "stopRounds", "stops", "stopsHanded", "findings",
+                    "regression", "engineStops")
+ATT_BY_REPO = 12           # repos named in questions.byRepo, `other` beside them
+ATT_LONGEST = 5            # questions.longest and trails.longest
+ATT_WAITS = 16
+ATT_CIRCLING = 32          # each of circling.W1 and circling.W2
+ATT_HANDED = 8             # a trail's handedAfterStop ids
+ATT_HEADER = 60            # a longest question's header
+ATT_LABEL = 120            # a trail's label
+
+
+def _count0(v):
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def _att_questions(v):
+    keys = set(ATT_QUESTION_COUNTS) | {"recommended", "hoursHeld", "longest", "byRepo", "byOwner", "hoursByOwner"}
+    if not isinstance(v, dict) or set(v) != keys:
+        return "an object of exactly %s" % ", ".join(sorted(keys))
+    for k in ATT_QUESTION_COUNTS:
+        if not _count0(v[k]):
+            return "an object with %s an integer >= 0" % k
+    rec = v["recommended"]
+    if not isinstance(rec, dict) or set(rec) != {"offered", "picked"} or not all(_count0(rec[k]) for k in rec) or \
+            rec["picked"] > rec["offered"]:
+        return "an object with recommended {offered, picked}, integers >= 0, picked <= offered"
+    if not _hours_num(v["hoursHeld"]):
+        return "an object with hoursHeld a finite number >= 0"
+    lo = v["longest"]
+    if not isinstance(lo, list) or len(lo) > ATT_LONGEST:
+        return "an object with longest a list of at most %d calls" % ATT_LONGEST
+    for x in lo:
+        if not isinstance(x, dict) or set(x) != {"call", "session", "repo", "header", "hours", "outcome"} or \
+                _str(x["call"]) or not isinstance(x["session"], str) or not isinstance(x["repo"], str) or \
+                not isinstance(x["header"], str) or len(x["header"]) > ATT_HEADER or not _hours_num(x["hours"]) or \
+                not isinstance(x["outcome"], str):
+            return "an object whose longest are {call, session, repo, header (at most %d characters), hours, outcome}" \
+                % ATT_HEADER
+    br = v["byRepo"]
+    if not isinstance(br, dict) or len([k for k in br if k != "other"]) > ATT_BY_REPO or \
+            not all(isinstance(k, str) and k and _count0(n) for k, n in br.items()):
+        return "an object with byRepo {repo: an integer >= 0}, at most %d repos and other" % ATT_BY_REPO
+    for k in ("byOwner", "hoursByOwner"):
+        o = v[k]
+        if not isinstance(o, dict) or set(o) != set(ATTENTION_OWNERS):
+            return "an object with %s keyed by exactly %s" % (k, ", ".join(ATTENTION_OWNERS))
+        if not all((_count0(n) if k == "byOwner" else _hours_num(n)) for n in o.values()):
+            return "an object with %s values %s" % (k, "integers >= 0" if k == "byOwner" else "finite numbers >= 0")
+    return None
+
+
+def _att_trails(v):
+    keys = set(ATT_TRAIL_COUNTS) | {"docsOnly", "longest"}
+    if not isinstance(v, dict) or set(v) != keys:
+        return "an object of exactly %s" % ", ".join(sorted(keys))
+    for k in ATT_TRAIL_COUNTS:
+        if not _count0(v[k]):
+            return "an object with %s an integer >= 0" % k
+    d = v["docsOnly"]
+    if not isinstance(d, dict) or set(d) != {"trails", "rounds"} or not all(_count0(d[k]) for k in d):
+        return "an object with docsOnly {trails, rounds}, integers >= 0"
+    lo = v["longest"]
+    if not isinstance(lo, list) or len(lo) > ATT_LONGEST:
+        return "an object with longest a list of at most %d trails" % ATT_LONGEST
+    for x in lo:
+        keys2 = {"label", "rounds", "stopRounds", "stops", "stopsHanded", "docsOnly", "handedAfterStop"}
+        if not isinstance(x, dict) or set(x) != keys2 or not isinstance(x["label"], str) or not x["label"] or \
+                len(x["label"]) > ATT_LABEL or not all(_count0(x[k]) for k in ("rounds", "stopRounds", "stops", "stopsHanded")) \
+                or _bool_or_null(x["docsOnly"]) or _capped(ATT_HANDED)(x["handedAfterStop"]):
+            return "an object whose longest are {label (at most %d characters), rounds, stopRounds, stops, stopsHanded, " \
+                "docsOnly, handedAfterStop (at most %d ids)}" % (ATT_LABEL, ATT_HANDED)
+    return None
+
+
+def _att_waits(v):
+    if not isinstance(v, list) or len(v) > ATT_WAITS:
+        return "a list of at most %d waits" % ATT_WAITS
+    keys = {"rollout", "ask", "scheduled", "started", "hours", "scheduleHours", "open"}
+    for w in v:
+        if not isinstance(w, dict) or set(w) != keys or _slug(w["rollout"]) or not _utcz(w["ask"]) or \
+                not all(w[k] is None or _utcz(w[k]) for k in ("scheduled", "started")) or not _hours_num(w["hours"]) or \
+                not (w["scheduleHours"] is None or _hours_num(w["scheduleHours"])) or _bool(w["open"]):
+            return "a list of {rollout (a slug), ask (a UTC Z stamp), scheduled and started (a stamp or null), hours, " \
+                "scheduleHours (finite numbers >= 0, the second or null), open (a bool)}"
+    return None
+
+
+def _att_circling(v):
+    if not isinstance(v, dict) or not set(v) <= set(CIRCLING_RULES):
+        return "an object keyed by %s only" % " and ".join(CIRCLING_RULES)
+    for rule, items in v.items():
+        if not isinstance(items, list) or len(items) > ATT_CIRCLING:
+            return "an object of at most %d items per rule" % ATT_CIRCLING
+        for x in items:
+            if not isinstance(x, dict) or not {"slug", "sessions", "questions"} <= set(x) or \
+                    set(x) - {"slug", "sessions", "questions", "hours"}:
+                return "an object whose items are {slug, sessions, questions, hours?}"
+            if _slug(x["slug"]) or not _count0(x["sessions"]) or not _count0(x["questions"]) or \
+                    ("hours" in x and not _hours_num(x["hours"])):
+                return "an object whose items carry a slug ([a-z0-9][a-z0-9._-]*, not reserved), sessions and questions " \
+                    "(integers >= 0) and hours (a finite number >= 0)"
+    return None
+
+
+def _check_attention(f):
+    """attention's cross-field rules: since <= until, and no more questions unlabelled than asked."""
+    if _z_time(f["since"]) > _z_time(f["until"]):
+        raise Refused("attention: since %s is after until %s" % (f["since"], f["until"]))
+    q = f["questions"]
+    if q["unlabelled"] > q["asked"]:
+        raise Refused("attention: unlabelled (%d) exceeds asked (%d)" % (q["unlabelled"], q["asked"]))
+    if sum(q["byOwner"].values()) != q["asked"]:
+        raise Refused("attention: byOwner sums to %d, not asked (%d)" % (sum(q["byOwner"].values()), q["asked"]))
 
 
 def _check_time_lost(f):
@@ -1232,7 +1355,7 @@ KINDS = {
                 "reflection": _rid, "reverts": _tid, "shape": _enum("serial")}),
     "watch": (False, {"id": _str, "rule": _short(RULE_MAX), "shape": _short(RULE_MAX),
                       "rollouts": _slugs(1, MAX_ROLLOUTS), "count": _int(1), "reflection": _rid},
-              {"ledgerClass": _enum(*TIME_LOST_CLASSES)}),
+              {"ledgerClass": _enum(*TIME_LOST_CLASSES), "circling": _enum(*CIRCLING_RULES)}),
     "watch-raised": (False, {"id": _str, "reflection": _rid, "via": _enum(*VIAS)}, {}),
     "proposal": (False, {"id": _str, "altitude": _enum(*ALTITUDES), "reflection": _rid,
                          "rollouts": _slugs(1, MAX_ROLLOUTS)},
@@ -1254,6 +1377,11 @@ KINDS = {
                   {"month": _month, "reflection": _rid, "hours": _six, "recorded": _six, "rank": _rank,
                    "top": _class_or_null, "byCause": _by_cause, "rollouts": _tl_rollouts, "other": _other,
                    "events": _events, "streak": _int(0), "audit": _audit, "ranges": _objects, "cites": _objects}),
+    # The attention ledger's line (p30-7, ADR 0056): one per Reflection (a changed re-run appends one; readers take the
+    # last), reflect.py `attention` its writer.
+    "attention": (False, {"reflection": _rid, "since": _stampz, "until": _stampz, "questions": _att_questions,
+                          "trails": _att_trails},
+                  {"waits": _att_waits, "circling": _att_circling}),
     # The time-lost ledger (p29-10, ADR 0051): stops and resumes, suites with the load around them, why main moved.
     "stopped": (False, {"cause": _enum(*STOP_CAUSES), "inferred": _bool, "calls": _calls},
                 {"at": _stampz, "boot": _stampz, "wake": _stampz, "reason": _short(REASON_MAX)}),
@@ -1388,6 +1516,8 @@ def _check_fields(kind, fields):
             raise Refused("watch: rule and shape are stored stripped")
         if fields["id"] != watch_id(fields["rule"], fields["shape"]):
             raise Refused("watch: id %r is not watch_id(rule, shape) %r" % (fields["id"], watch_id(fields["rule"], fields["shape"])))
+        if "ledgerClass" in fields and "circling" in fields:
+            raise Refused("watch: ledgerClass and circling are two writers' Watches: a line carries one")
     elif kind == "proposal":
         _check_proposal(fields)
     elif kind == "grade" and fields["low"] > fields["decisions"]:
@@ -1405,6 +1535,8 @@ def _check_fields(kind, fields):
         raise Refused("base-moved: inertOnly is null only beside an error (the inert test could not run)")
     elif kind == "time-lost":
         _check_time_lost(fields)
+    elif kind == "attention":
+        _check_attention(fields)
 
 
 def _check_tuning(f):
