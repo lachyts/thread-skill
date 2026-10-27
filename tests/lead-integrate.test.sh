@@ -1022,7 +1022,8 @@ ok "$(j "$IG" 'd["source"]')" row "C22: a note pr: URL matches with one trailing
 # The note's fallback prUrl is a PR URL the engine takes (prIdentityError), never a hand-written bare `#N`: one is
 # built on --repo's GitHub origin; with no --repo or no GitHub origin prUrl stays and prUrlError says why (the lead
 # sets the task aside at Integration on it, and step 1.2 launches no seeded revise on it, never a call the engine
-# would refuse as a Lost call). inputs' own prUrl and prUrlError, step 1.2's, are the same.
+# would refuse before dispatch, an *Args refusal* that halts the entry). inputs' own prUrl and prUrlError, step 1.2's,
+# are the same.
 g init -q "$F/gh"; git -C "$F/gh" remote add origin https://github.com/o/r.git
 g init -q "$F/local"; git -C "$F/local" remote add origin "$F/nowhere.git"
 irow proj-c
