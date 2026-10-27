@@ -392,14 +392,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Serial rollout** — a rollout run as a chain of **Legs**: visible,
   interactive sessions that each work tasks themselves, close, and hand the
   rest to a fresh successor. No task worktrees (leg.py's transient scratch
-  revert only), and no subagents but each task's clean-room review. One chain
+  revert, and the completion verify's detached verify tree outside the
+  checkout, only), and no subagents but each task's clean-room review. One chain
   per note (schedule § Serial path): its `surfaces:` claims the **Surface**s the
   chain writes, and each `## Queue` row names the launch its Leg opens in, so a
   launch change between two rows is a Leg boundary. execute runs its Legs
   (`skills/execute/legs.md`). A serial note is never paused: a Leg stops through
   `leg.py close --outcome stopped`. status reads it as a chain (`leg.py status`:
   its Legs, its chain state, a **Stalled chain**), repair restarts it, and its
-  Complete scores it into one close line (serial-score.py). _Avoid_: relay
+  Complete scores it into one close line (serial-score.py). Its Complete runs
+  a declared `completion_verifier:` on the chain checkout's HEAD (ADR 0055).
+  _Avoid_: relay
   (Chorus's word for sending a command to a session).
 - **Leg** — one session's part of a serial rollout (`skills/execute/legs.md`).
   In order: execute's git-env check, `leg.py begin`, the preflight (the
@@ -629,7 +632,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   it) waits for the next tick, and three in a row halt (a deliberate stop
   and a **Heat hold** never count). A git-env trip
   inside its window gives no verdict either: the rollout halts on the
-  git-env trip, or, when the trip was already acked, waits like the rest. A parallel rollout's only, so far.
+  git-env trip, or, when the trip was already acked, waits like the rest. A
+  serial chain's runs on its one checkout's HEAD, in a detached tree outside
+  the checkout, with no origin read and no git-env window (ADR 0055), and
+  completes either way too, since each task passed its own Leg verify.
   A note with none completes as before. _Avoid_: final verify, post-merge suite.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier suite
   runs in, shared by every rollout on the machine (p23-4,

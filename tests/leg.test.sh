@@ -2,7 +2,12 @@
 # skills/execute/scripts/leg.py: a serial rollout's Legs (ADR 0040, p24-3; skills/execute/legs.md).
 #   L1   two Legs (5 + 2) with a handoff, then Complete: post-items, a follow-on, dispositions, the Completion log,
 #        the archive and one vault commit; an Archive collision; next --waiting; file-followup after Complete reads
-#        the archived note and writes nothing into it; L1v the routed land follow-on and its controls
+#        the archived note and writes nothing into it; L1v the routed land follow-on and its controls; done's
+#        leg_head stamp (L1, L1v, L1h: each checkout's newest trailered commit of the task, never a peer's HEAD, [] when
+#        it committed nowhere, none with no leg_base)
+#   L1cv a serial chain's completion verify at Complete (ADR 0055): close refuses it undecided, writes its summary
+#        line, puts a red's fix task in the vault commit, refuses a bare YAML boolean, and leaves a note without the
+#        key byte-for-byte as before
 #   L2   a lost Leg: exit 3 for another session, --take-over inherits the claim, five fresh claims beside it, the
 #        same-session resume, CODEX_THREAD_ID, `unknown` never matching, --resume; L4c six smoke entries; L2b a Leg
 #        lost or stopped before its smoke test hands its unsmoked tasks on
@@ -46,6 +51,8 @@ git config --global init.defaultBranch master; git config --global advice.detach
 export LANDING_REGISTER="$TMP/register.md"; : > "$LANDING_REGISTER"
 export THREAD_LEG_LOCK_DIR="$TMP/locks" THREAD_EVENTS_DIR="$TMP/events" TMPDIR="$TMP/t"
 export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
+# L1cv's completion-verify --run: the machine's verify slots and the detached verify trees stay in temp (ADR 0055)
+export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots" THREAD_COMPLETION_TREE_DIR="$TMP/trees"
 mkdir -p "$TMPDIR" "$TMP/bin"
 # A fake gh and ssh: any call is logged and fails, so a test can assert no network was touched.
 printf '#!/bin/sh\necho "gh $*" >> "%s/net.log"\nexit 1\n' "$TMP" > "$TMP/bin/gh"
@@ -129,6 +136,7 @@ for t in t1 t2 t3 t4 t5; do
   finish "$t"
 done
 ok "$(fm t3 status)|$(fm t3 owner)|$(fm t3 leg)|$(fm t3 completed)" "done|leg-1|1|2026-10-20" "L1: done stamps status, leg and completed"
+ok "$(fm t3 leg_base)|$(fm t3 leg_head)" "[]|<none>" "L1: an ext: chain's task has no leg_base entry, so done stamps no leg_head"
 ok "$(fm t3 started)" "2026-10-20T10:00+00:00" "L1: claim stamped started:"
 leg next; ok "$(q 'd["action"]')|$(q 'd["reason"]')" "handoff|5 fresh claims" "L1: five fresh claims, then next is handoff"
 leg close --outcome handoff --cwd "$F"
@@ -276,6 +284,7 @@ work "$R" t3 c.txt "t3 work"
 mkdir -p "$R/docs/reviews"; printf -- '---\nstatus: pending\n---\nx\n' > "$R/docs/reviews/x.md"
 git -C "$R" add -A; git -C "$R" commit -qm "📝 docs(review): fresh-review findings"
 t3sha=$(git -C "$R" log --format=%H --grep 'Task: \[\[t3\]\]' -1)
+ok "$(fm t3 leg_head)" "[\"$R@$t3sha\"]" "L1v: done stamps leg_head, the task's own trailered commit in its checkout"
 leg close --outcome complete --cwd "$R" --reflection "$REFL"
 ok "$rc" 0 "L1v: complete"
 fu=$(q '[f for f in d["followups"] if "-land-chain-" in f][0]')
@@ -320,6 +329,81 @@ HOOK_CMD='git -C "$R" checkout -q --detach' landctl "L1v (g) a detached HEAD" "s
 has "$(cat "$T/demo-followup-land-chain-2026-10-20.md")" "check the landing route (detached HEAD), then open a PR from them, or push them" \
    "L1v (g): … its act starts by checking the landing route"
 ok "$(grep -c . "$TMP/net.log")" 0 "L1v: no gh or ssh call was made"
+unset CWD
+
+# ════ L1h: done's leg_head, the task's own newest trailered commit per checkout (ADR 0055) ═════════════════════════
+scen l1h
+R="$S/r"; mkrepo "$R" https://github.com/o/rh.git; export CWD="$R"
+mkro '' "t1~cc-r~$R~\`repo:$R\`" "t2~cc-r~$R~\`repo:$R\`"; mkt t1; NOVERIFY=1 mkt t2
+leg begin --cwd "$R"; ok "$rc" 0 "L1h: begin"
+leg claim --task t1; ok "$rc" 0 "L1h: claim t1"
+tcommit "$R" t1 c.txt "t1 work"; t1sha=$(git -C "$R" rev-parse HEAD); d=$(review "$R" HEAD)
+pcommit "$R" peer.txt p "chore: a peer's commit"
+leg done --task t1 --verify pass --review "$d" --cwd "$R"; ok "$rc" 0 "L1h: done t1 with a peer's commit on top"
+ok "$(fm t1 leg_head)" "[\"$R@$t1sha\"]" "L1h: leg_head is the task's own commit"
+hasnt "$(fm t1 leg_head)" "$(git -C "$R" rev-parse HEAD)" "L1h: … never HEAD at done (the peer's commit)"
+leg claim --task t2; ok "$rc" 0 "L1h: claim t2"
+leg done --task t2 --cwd "$R"; ok "$rc" 0 "L1h: done t2, which committed nothing"
+ok "$(fm t2 leg_base)|$(fm t2 leg_head)" "[\"$R@$(git -C "$R" rev-parse HEAD)\"]|[]" \
+   "L1h: a task with a leg_base that committed nowhere → leg_head: []"
+unset CWD
+
+# ════ L1cv: a serial chain's completion verify at Complete (ADR 0055) ═════════════════════════════════════════════════
+# cvchain <label> [completion_verifier value] — a one-task chain in $R (its one repo: surface), worked to done
+cvchain() {
+  local fm; R="$S/r"; mkrepo "$R" https://github.com/o/rcv.git; export CWD="$R"
+  fm=$(printf '  - "repo:%s"' "$R"); [ -z "${2:-}" ] || fm="$fm"$'\n'"completion_verifier: $2"
+  EXTRA_FM="$fm"$'\n' mkro '' "t9~cc-r~$R~\`repo:$R\`"; mkt t9
+  git -C "$V" add -A; git -C "$V" commit -qm vault
+  leg begin --cwd "$R"; ok "$rc" 0 "$1: begin"
+  work "$R" t9 c.txt "c $1"
+}
+# rcv [args]… — reconcile-rollout.py completion-verify on the chain's note → $out $err $rc
+rcv() {
+  out=$(python3 "$RR" completion-verify --rollout "$T/$RO.md" --tasks-dir "$T" --now "$NOW" "$@" 2>"$TMP/err"); rc=$?
+  err=$(cat "$TMP/err")
+}
+commit_files() { git -C "$V" show --name-status --no-renames --format= HEAD | sort -k2 | tr '\t\n' ' |'; }
+scen l1cv; cvchain "L1cv (i)" '"true"'
+snap; leg close --outcome complete --cwd "$R" --reflection "$REFL"
+ok "$rc" 1 "L1cv (i): complete before the completion verify → exit 1"
+has "$err" "the completion verify is not decided (run, attempt 1)" "L1cv (i): … it is not decided"; same "L1cv (i): the refused complete"
+rcv --run; ok "$rc|$(q 'd["result"]')" "0|green" "L1cv (i): completion-verify --run → green on the chain's checkout"
+sha=$(git -C "$R" rev-parse HEAD)
+leg close --outcome complete --cwd "$R" --reflection "$REFL"
+ok "$rc|$(q 'd["completionVerify"]["state"]')|$(q 'd["completionVerify"]["followup"]')" "0|green|None" "L1cv (i): then complete → exit 0"
+A="$T/Archive/Rollouts/$RO.md"
+has "$(sed -n '/^## Completion log/,$p' "$A")" "- Completion verify: green at ${sha:0:12} (\`true\`)" "L1cv (i): its summary is a Completion log line"
+has "$(cat "$A")" "## Completion verify log" "L1cv (i): … and the archived note keeps its Completion verify log"
+ok "$(git -C "$R" status --porcelain)|$(git -C "$R" worktree list | wc -l | tr -d ' ')" "|1" \
+   "L1cv (i): the chain's checkout: an empty porcelain, no worktree left"
+scen l1cv2; cvchain "L1cv (ii)" '"false"'
+rcv --run; ok "$(q 'd["result"]')" rerun "L1cv (ii): false → rerun"
+rcv --run; ok "$(q 'd["result"]')" red "L1cv (ii): … then red"
+sha=$(git -C "$R" rev-parse HEAD)
+leg close --outcome complete --cwd "$R" --reflection "$REFL"
+ok "$rc|$(q 'd["completionVerify"]["state"]')|$(q 'd["completionVerify"]["followup"]')" "0|red|completion-red-$RO" \
+   "L1cv (ii): a red still completes the chain, its fix task named"
+A="$T/Archive/Rollouts/$RO.md"
+has "$(sed -n '/^## Completion log/,$p' "$A")" "- Completion verify: red at ${sha:0:12} (rc 1, attempt 2); fix task [[completion-red-$RO]]" \
+   "L1cv (ii): the red summary names the fix task"
+has "$(commit_files)" "A Work/Tasks/completion-red-$RO.md|" "L1cv (ii): the fix task is in the vault commit"
+ok "$(ls "$T" | grep -c '^completion-red-')" 1 "L1cv (ii): exactly one fix task"
+scen l1cv3; cvchain "L1cv (iii)"
+rcv; ok "$rc|$out" '0|{"verifier": null, "state": "absent"}' "L1cv (iii): no completion_verifier: → the read says absent"
+leg close --outcome complete --cwd "$R" --reflection "$REFL"
+ok "$rc|$(q '"completionVerify" in d')" "0|False" "L1cv (iii): complete → exit 0, no completionVerify"
+fu=$(q '[f for f in d["followups"] if "-land-chain-" in f][0]')
+A="$T/Archive/Rollouts/$RO.md"
+hasnt "$(cat "$A")" "Completion verify" "L1cv (iii): … no Completion verify line and no log section"
+ok "$(commit_files)" "A Work/Tasks/Archive/Rollouts/$RO.md|A Work/Tasks/$fu.md|D Work/Tasks/$RO.md|" \
+   "L1cv (iii): the vault commit holds exactly the archived note, the land follow-on and the old path, as before"
+scen l1cv4; cvchain "L1cv (iv)" 'true'
+snap; leg close --outcome complete --cwd "$R" --reflection "$REFL"
+ok "$rc" 1 "L1cv (iv): a bare completion_verifier: true → complete exits 1"
+has "$err" "YAML boolean" "L1cv (iv): … naming the YAML boolean"; same "L1cv (iv): the refused complete"
+rcv; ok "$rc" 2 "L1cv (iv): … and the read refuses it (2)"
+ok "$(grep -c . "$TMP/net.log")" 0 "L1cv: no gh or ssh call was made"
 unset CWD
 
 # ════ L2: a lost Leg, take-over, resume ════════════════════════════════════════════════════════════════════════════

@@ -475,9 +475,10 @@ Subcommands:
               prints what it would record and writes nothing, the file included. Not exempt from the Engine snapshot
               guard.
 
-  completion-verify  The completion verify (estate ADR 0009 d6, Chorus ADR 0107 d1, ADR 0052; execute § 4.5 step 5):
-              a rollout whose note declares `completion_verifier: <cmd>` runs it once on merged origin/<default>
-              before the note reads done; a note with none keeps the ceremony as it was. The value (and
+  completion-verify  The completion verify (estate ADR 0009 d6, Chorus ADR 0107 d1, ADR 0052, ADR 0055; execute § 4.5
+              step 5, legs.md § Complete): a rollout whose note declares `completion_verifier: <cmd>` runs it once on
+              merged origin/<default>, a serial chain's on its checkout's HEAD (below), before the note reads done; a
+              note with none keeps the ceremony as it was. The value (and
               `env_bootstrap:`, read the same way): a quoted one is the text inside its quotes, then nothing but an
               optional ` # comment`; a bare one drops an inline ` # comment` (so a command holding ` #` is quoted);
               empty, a comment alone, `null` or `~` is none; a YAML boolean (`true`, `false`, `yes`, `no`, `on`,
@@ -488,20 +489,33 @@ Subcommands:
               from 1 to 6600 (absent, empty or a comment alone: 3600, the deadline the env_bootstrap and the full
               suite share, never verify_timeout's). Read mode, read-only: one JSON line. With none, {"verifier":
               null, "state": "absent"}. Otherwise {verifier, state, attempt, sha, repo, tree, out, streak, followup,
-              summary}: state `run` (no verdict yet: attempt 1, on a fresh origin/<default>, sha null), `rerun`
+              summary}: state `run` (no verdict yet: attempt 1, on a fresh origin/<default> or a serial chain's HEAD,
+              sha null), `rerun`
               (attempt 1 was red: attempt 2 on its sha), `in-flight` (a --run holds the attempt's lock, `<git common
               dir>/thread/completion-<rollout>-<n>.lock`, probed shared), or the decided `green`, `flake` or `red`.
-              repo is the note's `Project root:` (none: exit 1); tree and out the attempt's own
-              `<repo>/.claude/worktrees/completion-<rollout>-<n>` and
-              `<repo>/.claude/integration/completion-<rollout>-<n>`; streak the `noslot` and `unrun` lines at the
+              repo is the note's `Project root:` (none: exit 1), or a `shape: serial` note's one `repo:` surface
+              (serial-chains.py's grammar), which must be a git toplevel (`git -C <token> rev-parse --show-toplevel`
+              is the token: the test leg.py claim stamps a `leg_base` by; zero, several or not a toplevel: exit 1);
+              tree and out the attempt's own `<repo>/.claude/worktrees/completion-<rollout>-<n>` and
+              `<repo>/.claude/integration/completion-<rollout>-<n>`, a serial chain's outside its checkout's working
+              tree (ADR 0055): `<state>/thread/completion-trees/completion-<rollout>-<n>` (THREAD_COMPLETION_TREE_DIR
+              when absolute, else XDG_STATE_HOME's, else ~/.local/state's thread/completion-trees) and `<git common
+              dir>/thread/completion-<rollout>-<n>`, beside the lock; streak the `noslot` and `unrun` lines at the
               log's tail (a `stopped` or `heat` one skipped); followup the fix task's stem once red; summary the
               Completion log's one line once decided.
+              --wait [SECONDS] (read mode only: with --run, or a value outside 1 to 7000, exit 2; ADR 0055, a serial
+              Leg's, which has no heartbeat): while the state reads `in-flight` it reads the note and the lock again
+              every 2 s, up to SECONDS (default 7000, COMPLETION_WAIT_S: inside the background command's 7200000 ms
+              cap, and past any attempt's verify under ADR 0052's budget), then prints the read, `in-flight` still
+              at its deadline. It returns at once when nothing is in flight (and with no fcntl), writes, arms and
+              records nothing, and a signal ends it with no line; its exit 1 and 2 are the read's.
               --run owns one attempt end to end under that lock (retried for 2 s past a reader's probe), held for
               its whole life (the lead launches it in the background and reads again when it ends). Decided already,
               it runs nothing. Otherwise, under the lock it reads the note again, clears a dead run's tree, resolves
               origin's default branch (default-branch.sh; each origin read bounded by 120 s) and the sha (attempt 1:
               fetch `+refs/heads/<default>:refs/remotes/origin/<default>`, then that ref; attempt 2: the red run's),
-              arms the git-env canary (`--kind completion-verify --slug <rollout>`), runs `lead-integrate.py verify
+              arms the git-env canary (`--kind completion-verify --slug <rollout>`; a serial chain's --run reads no
+              origin and arms no canary, below), runs `lead-integrate.py verify
               --outcome --detach-at <sha>` as its child (inheriting the lock) (the machine's verify slots,
               `--timeout <completion_timeout>`, the slot wait max(60, 7200 - 600 - completion_timeout - the seconds
               --run has spent so far), the env_bootstrap), checks the window once, and classifies the run from
@@ -516,7 +530,15 @@ Subcommands:
               verify starts ends any origin read and exits 128+n at the next checkpoint with no line (the attempt
               runs again); one after verify ended on its own leaves its verdict standing. A git-env trip inside the
               window (its own check's exit 3, or its exit 4: one a loop-entry check-all caught and an ack re-armed
-              meanwhile, ADR 0053) makes it `unrun` whatever the rc. It
+              meanwhile, ADR 0053) makes it `unrun` whatever the rc. A serial chain's --run (ADR 0055): attempt 1's
+              sha is its checkout's HEAD as the run starts (it never pushes, so that is its merged main), attempt
+              2's the red run's; before anything runs, the HEAD guard checks that sha holds the chain's work: every
+              done linked task (the `rollout:` backlink, Archive included) with a `leg_base` in the checkout anchors
+              it with its `leg_head` there (leg.py done's stamp, the task's own newest trailered commit; none when
+              it committed nothing there, `[]`), or with that `leg_base` when it has no `leg_head:` key (done before
+              ADR 0055); each anchor must be an ancestor of the sha. No such task, or an anchor not in it, is exit 1
+              with its remedy (check out the branch, then leg.py clear-halt), nothing run or recorded. Its fix task
+              names the chain's checkout, never merged main or an Integration. It
               keeps the log as `<out>.<run id>.log`, files the fix task on a final red
               (`<tasks-dir>/completion-red-<rollout>.md`, open, priority high, `projects:` copied,
               `completion_red_of:` naming the rollout; the sha, the rc and why, the log and the failing ids read
@@ -529,7 +551,9 @@ Subcommands:
               attempt runs again, never counted. When it runs nothing it prints {ran: false, state, result, decided,
               attempt, streak, halt: false}. Exit 0: recorded, or nothing to run. Exit 1: nothing recorded (origin
               unread, a git dir it cannot read, refused rollout settings, a file it could not write, no fcntl, a sha
-              that is not 40-hex). 128+n: stopped by signal n before verify started, nothing recorded. Exit 2:
+              that is not 40-hex; a serial chain's HEAD that is no commit, or the HEAD guard's refusal; and, as the
+              read's, no `Project root:` or a serial note's `repo:` surface that is not exactly one git toplevel).
+              128+n: stopped by signal n before verify started, nothing recorded. Exit 2:
               refused (no `completion_verifier:`, an unreadable value). Exit 3: another --run holds the attempt.
               Exit 4: the canary's arm (nothing run) or check (recorded `unrun`) exited non-zero, but for the
               check's own exit 4 (an acked trip: recorded `unrun`, exit 0), its stderr passed through and its exit
@@ -9005,6 +9029,11 @@ COMPLETION_LINE_RE = re.compile(r"^- \S+ attempt (?P<n>[12]) at (?P<sha>[0-9a-f]
 # verify --outcome's result beside <out>; the attempt's lock is _attempt_lock's, in the git dir.
 ATTEMPT_LOCK_WAIT = 2.0      # seconds --run retries its lock, outlasting a reader's microsecond shared probe
 ORIGIN_TIMEOUT = 120         # seconds for each origin read before verify (ls-remote, fetch): a hang is a halt
+# read mode's --wait (ADR 0055): it fits inside the background command's 7200000 ms cap, and outlasts any attempt's
+# verify under ADR 0052's budget (the slot wait plus completion_timeout fit 7200 - 600, the 60 s floor aside), so a
+# lock still held at its end is a process to look at, never a suite still running.
+COMPLETION_WAIT_S = HARNESS_MAX_S - 200
+COMPLETION_WAIT_POLL = 2.0   # seconds between its reads; each probe holds a shared lock for microseconds
 VERIFY_OUTCOME_SUFFIX = ".outcome.json"
 VERIFY_OUTCOME_ENDED = ("running", "done", "deadline", "bootstrap", "signal", "noslot", "heat")  # lead-integrate.py's
 
@@ -9139,7 +9168,8 @@ def _completion_lines(note):
 
 def _completion_state(note):
     """(state, attempt, last, streak) from the note's parsed log lines (_completion_lines): `run` (no verdict yet: attempt 1 on a fresh
-    origin/<default>), `rerun` (attempt 1 was red: attempt 2 on its sha), or the decided `green`, `flake` or `red`.
+    origin/<default>, or a serial chain's checkout HEAD), `rerun` (attempt 1 was red: attempt 2 on its sha), or the
+    decided `green`, `flake` or `red`.
     A no-verdict line moves nothing. last: the deciding line, or None; streak: the COMPLETION_STREAK lines at the
     log's tail, every other no-verdict one (`stopped`, `heat`) skipped."""
     lines = _completion_lines(note)
@@ -9253,18 +9283,35 @@ def flake_verdict(ids, tree, diff_files):
     return {"verdict": verdict, "files": files, "touched": touched, "unplaced": unplaced}
 
 
-def _completion_paths(root, ro, attempt):
-    """(tree, out) for one attempt: its own detached tree and its own files."""
+def _completion_tree_dir() -> Path:
+    """Where a serial chain's detached verify trees live (ADR 0055), outside every working tree:
+    THREAD_COMPLETION_TREE_DIR when it is absolute, else XDG_STATE_HOME (absolute)/thread/completion-trees, else
+    ~/.local/state/thread/completion-trees; a relative value is ignored, as _note_lock_dir's rule reads."""
+    absolute = lambda v: v if v and os.path.isabs(v) else None   # noqa: E731  a relative dir is ignored (the XDG rule)
+    base = absolute(os.environ.get("THREAD_COMPLETION_TREE_DIR")) or os.path.join(
+        absolute(os.environ.get("XDG_STATE_HOME")) or os.path.join(os.path.expanduser("~"), ".local", "state"),
+        "thread", "completion-trees")
+    return Path(base)
+
+
+def _completion_paths(root, ro, attempt, serial=False):
+    """(tree, out) for one attempt: its own detached tree and its own files. A parallel rollout's sit in its Project
+    root, under `.claude/`. A serial chain's (ADR 0055) sit outside the in-place checkout's working tree, so a peer's
+    `git add -A` there never stages them: the tree under _completion_tree_dir, the out beside the attempt's lock in the
+    git common dir (None when that dir cannot be read: --run then refuses on the lock)."""
     # Built here, never through lead-integrate.py's worktree_dir: the read verb must not load it (it pulls in
     # verify-slot.py, which needs fcntl), so it still runs on the Windows machine.
+    if serial:
+        common = _git_common_dir(root)
+        return (str(_completion_tree_dir() / f"completion-{ro}-{attempt}"),
+                str(common / "thread" / f"completion-{ro}-{attempt}") if common else None)
     return (str(root / ".claude" / "worktrees" / f"completion-{ro}-{attempt}"),
             str(root / ".claude" / "integration" / f"completion-{ro}-{attempt}"))
 
 
-def _attempt_lock(root, ro, attempt):
-    """The attempt's lock file, `<git common dir>/thread/completion-<rollout>-<n>.lock`: inside the repo's git dir, so
-    an agent's `git clean` or `rm -rf .claude` in the shared checkout never deletes it under a live run. None when
-    the git dir cannot be read."""
+def _git_common_dir(root):
+    """The repo's git common dir as an absolute Path (`git rev-parse --path-format=absolute --git-common-dir`, bounded
+    by 60 s, git's env scrubbed), or None when it cannot be read."""
     try:
         p = subprocess.run(["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
                            capture_output=True, text=True, timeout=60,
@@ -9272,7 +9319,102 @@ def _attempt_lock(root, ro, attempt):
     except (OSError, subprocess.TimeoutExpired):
         return None
     d = p.stdout.strip()
-    return Path(d) / "thread" / f"completion-{ro}-{attempt}.lock" if p.returncode == 0 and d else None
+    return Path(d) if p.returncode == 0 and d else None
+
+
+def _attempt_lock(root, ro, attempt):
+    """The attempt's lock file, `<git common dir>/thread/completion-<rollout>-<n>.lock`: inside the repo's git dir, so
+    an agent's `git clean` or `rm -rf .claude` in the shared checkout never deletes it under a live run. None when
+    the git dir cannot be read."""
+    d = _git_common_dir(root)
+    return d / "thread" / f"completion-{ro}-{attempt}.lock" if d else None
+
+
+# ---- a serial chain's completion verify (ADR 0055) ---------------------------------------------------------------
+SERIAL_CHAINS_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "serial-chains.py"
+_SERIAL_CHAINS = None
+
+
+def _serial_chains():
+    """serial-chains.py, loaded on first use (the _run_record() pattern), for its surface grammar: read_surfaces and
+    parse_token. Its import has no side effects."""
+    global _SERIAL_CHAINS
+    if _SERIAL_CHAINS is None:
+        sys.dont_write_bytecode = True
+        spec = importlib.util.spec_from_file_location("thread_serial_chains", SERIAL_CHAINS_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SERIAL_CHAINS = mod
+    return _SERIAL_CHAINS
+
+
+def _serial_root(note):
+    """(root, None) for a serial note's completion verify: its one `repo:` surface, which must be a git toplevel
+    (`git -C <token> rev-parse --show-toplevel`, realpath'd, is the token's realpath: the test leg.py's claim stamps a
+    `leg_base` by); else (None, why)."""
+    sc = _serial_chains()
+    repos = []
+    for raw in sc.read_surfaces(note):
+        try:
+            kind, value = sc.parse_token(raw)
+        except ValueError:
+            continue
+        if kind == "repo" and value not in repos:
+            repos.append(value)
+    if len(repos) != 1:
+        return None, (f"a serial chain's completion verify runs on exactly one `repo:` surface, and {note.path.stem}'s "
+                      f"surfaces: holds {len(repos)}" + (f" ({', '.join(repos)})" if repos else ""))
+    tok = os.path.realpath(repos[0])
+    try:
+        p = subprocess.run(["git", "-C", tok, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                           timeout=60, env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")})
+        top = os.path.realpath(p.stdout.strip()) if p.returncode == 0 and p.stdout.strip() else None
+    except (OSError, subprocess.TimeoutExpired):
+        top = None
+    if top != tok:
+        return None, (f"repo:{repos[0]} is not a git toplevel (git -C {repos[0]} rev-parse --show-toplevel gives "
+                      f"{top or 'no checkout'}): a serial chain's completion verify runs on its checkout's toplevel")
+    return Path(tok), None
+
+
+def _leg_tops(note, key):
+    """[(top, sha)] from a task note's `leg_base:` or `leg_head:` list of `"<toplevel>@<sha>"` items (leg.py claim and
+    done): the one parser of both; an item that is not `<top>@<7-40 hex>` is skipped."""
+    out = []
+    for item in note.get_list(key):
+        top, sep, sha = item.rpartition("@")
+        if sep and top and re.fullmatch(r"[0-9a-f]{7,40}", sha):
+            out.append((top, sha))
+    return out
+
+
+def _chain_holds(li, root, sha, rollout_path, tasks_dir):
+    """None when the commit `sha` holds the serial chain's work in `root`, else why not (ADR 0055). Every done linked
+    task (the `rollout:` backlink, Archive included) with a `leg_base` entry for root anchors it: its `leg_head` entry
+    there (its own newest trailered commit; none when it committed nothing there, `leg_head: []`), or, with no
+    `leg_head:` key at all (a task done before ADR 0055), its `leg_base` entry. Each anchor must resolve and be an
+    ancestor of sha; none at all passes. No such task means root is not one of the chain's checkouts."""
+    root_s = str(root)
+    anchors, seen = [], False
+    for path, note in _linked_task_notes(rollout_path, tasks_dir):
+        if _status(note) != "done":
+            continue
+        bases = [s for t, s in _leg_tops(note, "leg_base") if t == root_s]
+        if not bases:
+            continue
+        seen = True
+        if note.get("leg_head") is not None:
+            anchors += [(path.stem, "leg_head", s) for t, s in _leg_tops(note, "leg_head") if t == root_s]
+        else:
+            anchors += [(path.stem, "leg_base", s) for s in bases]
+    if not seen:
+        return (f"{root} is not one of [[{rollout_path.stem}]]'s chain checkouts: no done task has a leg_base there")
+    for task, key, anchor in anchors:
+        full = li.rev(root, anchor)
+        if not full or li.git(root, "merge-base", "--is-ancestor", full, sha).returncode != 0:
+            return (f"HEAD of {root} ({sha[:12]}) does not hold the chain's commits: [[{task}]]'s {key} {anchor[:12]} "
+                    "is not in it")
+    return None
 
 
 def _attempt_running(lock) -> bool:
@@ -9315,17 +9457,26 @@ def _find_note(tasks_dir: Path, stem: str):
     return next(archive.rglob(f"{stem}.md"), None) if archive.is_dir() else None
 
 
-def _write_completion_red(path: Path, note, ro, verifier, sha, rc, why, log, ids, now):
+def _write_completion_red(path: Path, note, ro, verifier, sha, rc, why, log, ids, now, chain_root=None):
     """File the one fix task a red completion verify owes its project, in _new_task_fm's shape. Exclusive: an
-    existing file is never overwritten."""
+    existing file is never overwritten. A serial chain's (chain_root, its checkout: ADR 0055) names that checkout, never
+    merged main or an Integration, which a chain has neither of."""
+    if chain_root is None:
+        where = "on merged main"
+        said = (f"rc {rc}, {why}. Every task merged green at its own Integration: the break is one their fast tiers "
+                "did not reach.")
+        verify = f"**Verify:** `{verifier}` exits 0 on merged main."
+    else:
+        where = f"on the chain's checkout `{chain_root}`"
+        said = (f"rc {rc}, {why}. Each task passed its own Leg verify: the break is one their **Verify:** lines did "
+                "not reach.")
+        verify = f"**Verify:** `{verifier}` exits 0 on the chain's checkout."
     lines = [*_new_task_fm(note, now, "high", [f'completion_red_of: "[[{ro}]]"']), "",
              f"# Fix the red completion verifier after [[{ro}]]", "", "## Notes", "",
-             f"The completion verifier `{verifier}` was red on merged main at `{sha}` when [[{ro}]] completed: "
-             f"rc {rc}, {why}. Every task merged green at its own Integration: the break is one their fast tiers did "
-             "not reach.", "",
+             f"The completion verifier `{verifier}` was red {where} at `{sha}` when [[{ro}]] completed: {said}", "",
              f"- Log: `{log}`",
              "- Failing ids: " + (", ".join(f"`{i}`" for i in ids) if ids else "none read from the log; read it"), "",
-             f"**Verify:** `{verifier}` exits 0 on merged main."]
+             verify]
     with open(path, "x") as fh:
         fh.write("\n".join(lines) + "\n")
 
@@ -9376,9 +9527,10 @@ def _completion_not_ran(state, attempt, streak, **extra):
                           decided=state in COMPLETION_DECIDED, attempt=attempt, streak=streak, halt=False, **extra)))
 
 
-def _completion_run(args, path, ro, root, tasks_dir) -> int:
+def _completion_run(args, path, ro, root, tasks_dir, serial=False) -> int:
     """--run (ADR 0052): one attempt end to end, under the attempt's lock (_attempt_lock), held for this process's
-    life."""
+    life. serial (ADR 0055): a serial chain's, on its checkout's HEAD: no origin read and no git-env canary, and the
+    HEAD guard (_chain_holds) before anything runs."""
     started = time.monotonic()
     if fcntl is None:
         print("ERROR: completion-verify: --run needs fcntl (POSIX); nothing run", file=sys.stderr)
@@ -9388,9 +9540,9 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     if state in COMPLETION_DECIDED:
         _completion_not_ran(state, attempt, streak)
         return 0
-    tree, out = _completion_paths(root, ro, attempt)
+    tree, out = _completion_paths(root, ro, attempt, serial)
     lock_path = _attempt_lock(root, ro, attempt)
-    if lock_path is None:
+    if lock_path is None or out is None:
         print(f"ERROR: completion-verify: {root}'s git dir is unreadable; nothing run", file=sys.stderr)
         return 1
     try:
@@ -9474,28 +9626,48 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
             st.reading = None
         return p.returncode, out_.strip(), (err_ or out_).strip()
 
-    rc, default, why = origin(["bash", str(DEFAULT_BRANCH_SH), str(root)])
-    if st.sig is not None:
-        return 128 + st.sig   # a stop before verify: no line, the attempt runs again
-    if rc != 0 or not default:
-        print(f"ERROR: completion-verify: origin unread: {why}; nothing run", file=sys.stderr)
-        return 1
-    if attempt == 1:
-        rc, _o, why = origin(["git", "-C", str(root), "fetch", "--quiet", "origin",
-                                f"+refs/heads/{default}:refs/remotes/origin/{default}"])   # whatever the clone's refspec
-        sha = li.rev(root, f"refs/remotes/origin/{default}") if rc == 0 else ""
+    default = None
+    if serial:
+        # A serial chain never pushes: its "merged main" is its checkout's HEAD as this run starts (ADR 0055).
+        sha = li.rev(root, "HEAD") if attempt == 1 else last["sha"]
         if st.sig is not None:
             return 128 + st.sig
         if not sha:
-            print(f"ERROR: completion-verify: origin unread: {why or f'no origin/{default}'}; nothing run",
-                  file=sys.stderr)
+            print(f"ERROR: completion-verify: HEAD of {root} is no commit; nothing run", file=sys.stderr)
             return 1
     else:
-        sha = last["sha"]
+        rc, default, why = origin(["bash", str(DEFAULT_BRANCH_SH), str(root)])
+        if st.sig is not None:
+            return 128 + st.sig   # a stop before verify: no line, the attempt runs again
+        if rc != 0 or not default:
+            print(f"ERROR: completion-verify: origin unread: {why}; nothing run", file=sys.stderr)
+            return 1
+        if attempt == 1:
+            rc, _o, why = origin(["git", "-C", str(root), "fetch", "--quiet", "origin",
+                                  f"+refs/heads/{default}:refs/remotes/origin/{default}"])   # whatever the refspec
+            sha = li.rev(root, f"refs/remotes/origin/{default}") if rc == 0 else ""
+            if st.sig is not None:
+                return 128 + st.sig
+            if not sha:
+                print(f"ERROR: completion-verify: origin unread: {why or f'no origin/{default}'}; nothing run",
+                      file=sys.stderr)
+                return 1
+        else:
+            sha = last["sha"]
     if not SHA40_RE.fullmatch(sha or ""):
         print(f"ERROR: completion-verify: {sha} is no 40-hex commit name: a SHA-256 repository is not supported "
               "(verify's --detach-at is 40-hex engine-wide); nothing run", file=sys.stderr)
         return 1
+    if serial:
+        # The HEAD guard: the resolved sha, never the symbolic HEAD, must hold every done task's own commits here.
+        held = _chain_holds(li, root, sha, path, tasks_dir)
+        if st.sig is not None:
+            return 128 + st.sig
+        if held:
+            print(f"ERROR: completion-verify: {held}; check out the branch that holds them (git -C {root} checkout "
+                  "<branch>), then leg.py clear-halt; if their history was rewritten on purpose, run the suite by hand "
+                  f"and remove the note's {COMPLETION_VERIFIER_KEY}:; nothing run", file=sys.stderr)
+            return 1
     # Under the lock nothing else runs in this attempt: a tree left behind is a dead run's. Its worktree entry is
     # locked with that run's pid, so it is unlocked and pruned whether its directory survived or not (a locked entry
     # whose directory is gone would refuse every later `worktree add`).
@@ -9506,7 +9678,9 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     # The canary's own words go to stderr: --run's stdout is its one JSON line.
     if st.sig is not None:
         return 128 + st.sig
-    arm = _run_canary("arm", path, tasks_dir, root, default, ro, COMPLETION_KIND, stdout=sys.stderr, own_session=True)
+    # A serial chain arms no window (ADR 0055): its Legs work in the shared checkout, and the guard above is its check.
+    arm = 0 if serial else _run_canary("arm", path, tasks_dir, root, default, ro, COMPLETION_KIND, stdout=sys.stderr,
+                                       own_session=True)
     if st.sig is not None:
         return 128 + st.sig   # armed, never launched: the window closes by the owner rule or the next arm
     if arm != 0:
@@ -9549,8 +9723,8 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
             log_path.write_text(said)
         except OSError:
             pass
-    check = _run_canary("check", path, tasks_dir, root, default, ro, COMPLETION_KIND, stdout=sys.stderr,
-                        own_session=True)
+    check = 0 if serial else _run_canary("check", path, tasks_dir, root, default, ro, COMPLETION_KIND,
+                                         stdout=sys.stderr, own_session=True)
     note = Note(path)   # fresh: the canary may have written its log
     outcome = _read_outcome(outcome_path)
     if outcome is not None and outcome.get("sha") != sha:
@@ -9591,7 +9765,7 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
             os.replace(log_path, kept)
         if followup and _find_note(tasks_dir, red_stem) is None:
             _write_completion_red(tasks_dir / f"{red_stem}.md", note, ro, verifier, sha, rc_word, why, kept_name, ids,
-                                  now)
+                                  now, chain_root=root if serial else None)
             filed = tasks_dir / f"{red_stem}.md"   # only once this run wrote it: an existing one is never removed
         # The note read again right here, and saved under the note's lock (Note.save), so a Pause log line or an
         # ack written during the run is kept and a kill mid-write never truncates it.
@@ -9619,44 +9793,76 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
 
 
 def cmd_completion_verify(args) -> int:
-    """The completion verify (estate ADR 0009 d6, ADR 0052): a rollout whose note declares `completion_verifier:`
-    runs it once on merged origin/<default> at the completion ceremony (execute § 4.5 step 5). Read mode prints one
-    JSON line; --run owns one attempt end to end. The module docstring holds the rules."""
+    """The completion verify (estate ADR 0009 d6, ADR 0052, ADR 0055): a rollout whose note declares
+    `completion_verifier:` runs it once at its completion ceremony, on merged origin/<default> (execute § 4.5 step 5),
+    or a serial chain's checkout HEAD (legs.md § Complete). Read mode prints one JSON line, and with --wait first waits
+    while the attempt is in flight; --run owns one attempt end to end. The module docstring holds the rules."""
+    if args.wait is not None and args.run:
+        print("ERROR: completion-verify: --wait is read mode's, never with --run; nothing run", file=sys.stderr)
+        return 2
     path = Path(os.path.expanduser(args.rollout))
     if not path.is_file():
         print(f"ERROR: completion-verify: rollout note not found at {path}", file=sys.stderr)
         return 1
-    try:
-        note = Note(path)
-        verifier, _bootstrap, _timeout = _completion_config(note)
-    except ValueError as e:
-        print(f"ERROR: completion-verify: {e}", file=sys.stderr)
-        return 2 if isinstance(e, CompletionValueError) else 1
-    ro = path.stem
-    if not verifier:
+    deadline = None if args.wait is None else time.monotonic() + args.wait
+    while True:
+        try:
+            note = Note(path)
+            verifier, _bootstrap, _timeout = _completion_config(note)
+        except ValueError as e:
+            print(f"ERROR: completion-verify: {e}", file=sys.stderr)
+            return 2 if isinstance(e, CompletionValueError) else 1
+        ro = path.stem
+        if not verifier:
+            if args.run:
+                print(f"ERROR: completion-verify: {ro} declares no {COMPLETION_VERIFIER_KEY}:; nothing run",
+                      file=sys.stderr)
+                return 2
+            print(json.dumps({"verifier": None, "state": "absent"}))
+            return 0
+        serial = _shape(note) == SHAPES[1]
+        if serial:
+            root, why = _serial_root(note)
+            if root is None:
+                print(f"ERROR: completion-verify: {why}", file=sys.stderr)
+                return 1
+        else:
+            root = _project_root(note)
+            if root is None:
+                print(f"ERROR: completion-verify: {ro} has no `Project root:` line", file=sys.stderr)
+                return 1
+        tasks_dir = Path(os.path.expanduser(args.tasks_dir))
         if args.run:
-            print(f"ERROR: completion-verify: {ro} declares no {COMPLETION_VERIFIER_KEY}:; nothing run",
-                  file=sys.stderr)
-            return 2
-        print(json.dumps({"verifier": None, "state": "absent"}))
+            return _completion_run(args, path, ro, root, tasks_dir, serial)
+        state, attempt, last, streak = _completion_state(note)
+        tree, out = _completion_paths(root, ro, attempt, serial)
+        if state not in COMPLETION_DECIDED and _attempt_running(_attempt_lock(root, ro, attempt)):
+            state = "in-flight"
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if state == "in-flight" and remaining is not None and remaining > 0:
+            # --wait (ADR 0055): a serial Leg has no heartbeat, so this bounded, read-only wait is the notification
+            # of a --run no task of its own will end (one killed outright leaves its verify holding the lock). The
+            # note and the lock are read afresh each pass; nothing is written, armed or recorded.
+            time.sleep(min(COMPLETION_WAIT_POLL, remaining))
+            continue
+        found = _find_note(tasks_dir, f"{COMPLETION_RED_PREFIX}{ro}") if state == "red" else None
+        followup = found.stem if found else None
+        print(json.dumps({"verifier": verifier, "state": state, "attempt": attempt,
+                          "sha": last["sha"] if last else None, "repo": str(root), "tree": tree, "out": out,
+                          "streak": streak, "followup": followup,
+                          "summary": _completion_summary(state, last, verifier, followup)}))
         return 0
-    root = _project_root(note)
-    if root is None:
-        print(f"ERROR: completion-verify: {ro} has no `Project root:` line", file=sys.stderr)
-        return 1
-    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
-    if args.run:
-        return _completion_run(args, path, ro, root, tasks_dir)
-    state, attempt, last, streak = _completion_state(note)
-    tree, out = _completion_paths(root, ro, attempt)
-    if state not in COMPLETION_DECIDED and _attempt_running(_attempt_lock(root, ro, attempt)):
-        state = "in-flight"
-    found = _find_note(tasks_dir, f"{COMPLETION_RED_PREFIX}{ro}") if state == "red" else None
-    followup = found.stem if found else None
-    print(json.dumps({"verifier": verifier, "state": state, "attempt": attempt, "sha": last["sha"] if last else None,
-                      "repo": str(root), "tree": tree, "out": out, "streak": streak, "followup": followup,
-                      "summary": _completion_summary(state, last, verifier, followup)}))
-    return 0
+
+
+def _wait_seconds(v):
+    """--wait's value: an integer from 1 to COMPLETION_WAIT_S (argparse exits 2 on anything else)."""
+    try:
+        n = int(v)
+    except ValueError:
+        n = 0
+    if not 1 <= n <= COMPLETION_WAIT_S:
+        raise argparse.ArgumentTypeError(f"--wait takes whole seconds from 1 to {COMPLETION_WAIT_S}, not {v!r}")
+    return n
 
 
 # ---- CLI --------------------------------------------------------------------
@@ -9915,6 +10121,9 @@ def main() -> int:
     cv.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help + " (the fix task's home)")
     cv.add_argument("--run", action="store_true", help="run the current attempt: the canary arm, lead-integrate.py "
                                                        "verify --outcome, the check and the record")
+    cv.add_argument("--wait", nargs="?", const=COMPLETION_WAIT_S, type=_wait_seconds, default=None, metavar="SECONDS",
+                    help="read mode: wait while the attempt is in flight, up to SECONDS (default "
+                         f"{COMPLETION_WAIT_S}), then print the read; a serial Leg's, which has no heartbeat (ADR 0055)")
     cv.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the log line's stamp)")
     cv.set_defaults(func=cmd_completion_verify)
 

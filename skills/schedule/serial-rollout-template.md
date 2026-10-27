@@ -15,6 +15,9 @@ captured: {{DATE}}
 # saved as: <slug>-rollout-<YYYY-MM-DD>.md, named as schedule step 6 names every rollout note (one note per chain; a further chain takes the next -N). See schedule SKILL.md § Serial path.
 protocol_version: 5
 # engine_snapshot: "<path>" and engine_sha: <sha>   # ADR 0043: stamped by `engine-snapshot.py adopt` just below protocol_version:, never by hand
+# completion_verifier:   # optional (ADR 0055): the chain checkout's full suite, run once on its HEAD by the last Leg's Complete. Uncommented, quoted, by thread:schedule § Serial path S4/S5 with that checkout's CLAUDE.md `Completion verifier:` command
+# env_bootstrap:   # optional, only beside completion_verifier: the detached verify tree's setup. The tree sits outside the checkout, so set up here what the suite finds by walking up from it — thread:schedule § Serial path S4/S5
+# completion_timeout:   # optional (ADR 0052): seconds, 1 to 6600, for that run; absent: 3600
 shape: serial
 surfaces:
 {{SURFACES}}
@@ -48,7 +51,7 @@ The frontmatter's `surfaces:` is the union of the members' claims below. While t
 
 ## Post-rollout
 
-When every task is done, the last Leg runs the completion ceremony (the Complete section of execute's `legs.md`), in this order:
+When every task is done, the last Leg runs the completion ceremony (the Complete section of execute's `legs.md`). When this note declares `completion_verifier:`, the Leg first runs it once on the chain checkout's HEAD: its summary goes in the Completion log, and a red files one fix task without stopping the ceremony. Then, in this order:
 
 1. Close the phases this chain touched (`touched-phases`, then `reconcile-project.py --kinds phase --apply`), filing a `phase-close-followup-*` task on a failure.
 2. File each item below that is live work as a new open follow-on task in `Work/Tasks/`, and rewrite the item as a thin pointer to it; give every other item a disposition. The land-chain follow-on joins them when a chain checkout lands on origin and the chain's `Task:` commits are not on it yet. Never leave live work as checklist prose inside a done note.

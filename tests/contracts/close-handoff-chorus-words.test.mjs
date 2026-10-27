@@ -601,6 +601,8 @@ test('a Leg\'s turn ends read through the port as legs.md § Report says', () =>
     ['handoff, manual', closing(`${REPORT}\n${manual}`, `${bA}\n${line(5, 'halted', 'manual handoff: Leg 2 in cx-demo from /Users/lachlants/repos/tools/demo')}`),
       ['halted', cutOnAWord('manual handoff: Leg 2 in cx-demo from /Users/lachlants/repos/tools/demo', REASON_CHARS)]],
     ['Mid-Leg, review in flight', line(3, 'waiting', 'review in flight: [[t3]]'), ['nothing yet', '']],
+    // ADR 0055: a Complete Leg waiting on its completion verify's --run or --wait.
+    ['Complete, completion verify running', line(7, 'waiting', 'completion verify in flight'), ['nothing yet', '']],
     ['stuck', closing(REPORT, `${bA}\n${line(3, 'halted', 'awaiting you: 1 set aside')}`), ['halted', 'awaiting you: 1 set aside']],
   ]
   for (const [, text, want] of cases) assert.deepEqual(R(text).statusClose, want, text.slice(-160))

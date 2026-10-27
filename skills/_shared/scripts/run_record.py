@@ -170,7 +170,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   completion-verify  result (green | rerun | flake | red | noslot | unrun | stopped | heat), rc, sha, attempt (int 1 or 2); log?,
                      followup?
                      (estate ADR 0009 d6: reconcile-rollout.py completion-verify, one line per run of a rollout's
-                     completion_verifier on merged origin/<default> at its completion ceremony; rc the run's
+                     completion_verifier on merged origin/<default> at its completion ceremony (a serial chain's:
+                     its checkout's HEAD, ADR 0055); rc the run's
                      verbatim, 0-255, noslot, heat or absent; rerun is attempt 1's red, re-run on the same sha; flake
                      a green attempt 2 after it; noslot (no verify slot), unrun (verify never got going, the
                      env_bootstrap never let the suite run, or a git-env trip fell inside the window), stopped (a
