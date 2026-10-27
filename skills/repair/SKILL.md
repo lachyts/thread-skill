@@ -303,7 +303,9 @@ make (a gate, a § 3c escalation, a CLOSED PR, a missing branch or a missing `pr
 set-aside whose automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or `needsHuman` is
 set) or whose `humanFix` names another cause that is his (§ 2), or a descope the verb refused: § 3d's exit 3, recorded,
 its `humanFix` `decide scope or defer`), each in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`
-(Owner *yours*: a decision no agent can make). For a set-aside at its run or at Integration, in order:
+(Owner *yours*: a decision no agent can make; the *technical* pings this list still holds, a CLOSED PR, a missing
+branch and a defer chain among them, keep their own ADR 0054 § Sites rows until p30-10 designs them out). For a
+set-aside at its run or at Integration, in order:
 
 1. **Ask.** `AskUserQuestion` with the specific decision its block needs: quote the feedback and its `humanFix` (the
    act and the detail the script names, never a cause re-derived from the feedback), and offer the raise (§ 4) when

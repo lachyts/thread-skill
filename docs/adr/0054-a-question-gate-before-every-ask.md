@@ -61,8 +61,8 @@ decision of his, and queued unread it can build the wrong thing. Whether to deci
 **d7. The inventory.** § Sites below lists every ask unit in `skills/` with its Owner and disposition;
 `tests/contracts/question-gate.test.mjs` holds each anchor to exactly one unit, every ask unit (one naming
 AskUserQuestion, or one matching its plain-ask pattern) to exactly one row, and every `cited` or `listed` row's unit to
-the cite. The Grade log's `decisions` and `low`
-count only his decisions (owner yours) from this ADR on, so lines before it are not comparable with lines after it.
+the cite. The Grade log's `decisions` and `low` count only his decisions (owner yours) from this ADR on, so lines
+before it are not comparable with lines after it.
 
 **d8. The Framing in script-built rounds.** `estate-dispatch.py`'s `rounds` and `preflight` build the questions the
 leads pass on verbatim, so the grade carries their Framing: `goal` (one sentence tying the fork to the project's goal)
@@ -81,8 +81,9 @@ ask another unit holds, whose Owner it shares: it cites `_shared/asking.md` too)
 removes, left to the owner task named in Task and put in the Framing until it lands), `no ask` (the unit names an ask
 only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 78
 rows: 36 cited, 30 follow-up (p30-4 14, p30-5 1, p30-9 2, p30-10 13), 2 listed, 7 no ask, 3 designed out. That is
-form N2, built while p30-5 (PR #226) was not on main; once it lands, the next row becomes N1's three `cited` rows and
-p30-5 leaves § Follow-ups (80 rows: 39 cited, 29 follow-up).
+form N2, built while p30-5 (PR #226) was not on main; once it lands, the next row becomes N1's three `cited` rows,
+p30-5 leaves § Follow-ups, and the count above reads 80 rows: 39 cited, 29 follow-up (p30-4 14, p30-9 2, p30-10 13),
+2 listed, 7 no ask, 3 designed out.
 
 | File | § | Anchor | Owner | Disposition | Task |
 | --- | --- | --- | --- | --- | --- |
@@ -176,9 +177,11 @@ as Decided for you) and deletes its rows; q5 fails a row whose ask is gone, so a
   form N1: the open-question bullet gains "(by its Owner, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1)"
   after "step 3 settles", the step-4 lead ends "The gate: `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1.", and
   the menu reads "Offer the routes via `AskUserQuestion`, in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`'s
-  Framing:", each clause on the same physical line as the text it joins; the next row becomes three `cited` rows
-  ("**An open question this session left**", Owner as step 3 labels it; "**Decide the move, and say so in one
-  line.**", *gate*; "**The menu, when the move is not clear.**", *yours*).
+  Framing:", each clause on the same physical line as the text it joins; the next row becomes three `cited` rows in
+  `skills/next/SKILL.md` § Process: "**An open question this session left**", Owner `*yours* (step 3 decides the
+  rest)`, since step 3 decides every other kind and asks only his again; "**Decide the move, and say so in one
+  line.**", *gate*; "**The menu, when the move is not clear.**", *yours*. The § Sites count then reads as its
+  lead-in gives for N1.
 - [[thread-skill-p30-9-schedule-ends-with-pickup-sweep-and-execute-handoff]] (p30-9): 2 rows, the execute offer at
   orient § 9 and schedule's **Start when ready.**
 - [[thread-skill-p30-10-the-asks-the-gate-leaves-standing]] (p30-10): 13 rows. Filed by the lead at this task's
