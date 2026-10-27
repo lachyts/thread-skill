@@ -397,8 +397,9 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   questions and to status § 4's numbered actions.
 - **Question gate** — `tests/contracts/question-gate.test.mjs`: `skills/_shared/asking.md` (the Owners, Decided for
   you, the Framing), its cite in every prose unit that names AskUserQuestion, ADR 0054 § Sites holding one row per ask
-  unit (each anchor in exactly one unit, every follow-up row owned by a task in § Follow-ups, the counts), the grill
-  skills' pinned `args`, the readers of `## Decided for you` and the Framing of the script-built rounds.
+  unit (each anchor in exactly one unit, every ask that stands citing the gate, each `Owner` label its row's, every
+  follow-up row owned by a task in § Follow-ups, the counts), the grill skills' pinned `args`, the readers of
+  `## Decided for you` and the Framing of the script-built rounds.
 - **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos
   with a fixture check — undeclared, whole untruncated output and its digest, the advance on a matching digest
   and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal, even one that

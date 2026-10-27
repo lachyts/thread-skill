@@ -78,7 +78,8 @@ resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` 
   or area name, or stop, and end the turn. A typed answer (the plain-text one, or
   `AskUserQuestion`'s `Other`) is resolved again as an argument, and keeps the first answer's
   `learn_dir` (below).
-- **A stop.** When he stops a pick, re-ask as above without the stopped pick. A stopped pick from
+- **A stop.** When he stops a pick, re-ask as above without the stopped pick (its Owner labelled above,
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`). A stopped pick from
   a declared directory (rung `directory`) also names its declaring note, whose `repos:` sent the
   session there.
 - **A name or wikilink** (`/thread:orient Animately`, `[[Animately]]`, a sub-project note, an alias)

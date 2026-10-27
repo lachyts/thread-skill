@@ -16,11 +16,12 @@ estate side: ask him only his questions, in a Framing he can answer well, and li
 
 ## Decision
 
-**d1. One gate, cited at every ask.** `skills/_shared/asking.md` is the rule every verb follows before an
+**d1. One gate, cited at every ask that stands.** `skills/_shared/asking.md` is the rule every verb follows before an
 AskUserQuestion, a plain-text question, a grill question or a recommendation: label the Owner (*yours*, *priorities*,
 *technical* or *gate*); ask only *yours*, in the Framing (plain words, the goal, each option's gains and costs, the
-pick against his priorities, a Note invited); decide the rest and list it as Decided for you. Every ask site in
-`skills/` cites the file in its own paragraph or list item.
+pick against his priorities, a Note invited); decide the rest and list it as Decided for you. Every ask that stands in
+`skills/` (a `cited` or `listed` row of § Sites) cites the file in its own paragraph or list item; a `follow-up` ask is
+one its owner task removes.
 
 **d2. The grade carries an `owner` on each decision** (readiness-grade § Each decision; `estate-rank.py`):
 - a decision with no `owner` reads as *yours*, with a warning; an unknown value warns and reads as *yours*;
@@ -58,8 +59,9 @@ it is the roadmap (ADR 0036).
 decision of his, and queued unread it can build the wrong thing. Whether to decide it rather than ask is p30-10's.
 
 **d7. The inventory.** § Sites below lists every ask unit in `skills/` with its Owner and disposition;
-`tests/contracts/question-gate.test.mjs` holds each anchor to exactly one unit and every ask unit (one naming
-AskUserQuestion, or one matching its plain-ask pattern) to exactly one row. The Grade log's `decisions` and `low`
+`tests/contracts/question-gate.test.mjs` holds each anchor to exactly one unit, every ask unit (one naming
+AskUserQuestion, or one matching its plain-ask pattern) to exactly one row, and every `cited` or `listed` row's unit to
+the cite. The Grade log's `decisions` and `low`
 count only his decisions (owner yours) from this ADR on, so lines before it are not comparable with lines after it.
 
 **d8. The Framing in script-built rounds.** `estate-dispatch.py`'s `rounds` and `preflight` build the questions the
@@ -74,13 +76,13 @@ five Framing points each script-built question carries and why.
 ## Sites
 
 Each row is one ask unit (a paragraph, list item or table row) in `skills/`, found by its anchor, a phrase only that
-unit holds. Dispositions: `cited` (the ask stands and its unit cites `_shared/asking.md`), `listed` (an ask that
-stands, put in plain text and in the Framing), `follow-up` (an ask the gate removes, left to the owner task named in
-Task and put in the Framing until it lands), `no ask` (the unit names an ask only to forbid it) and `designed out`
-(this build removed it, so its anchor appears nowhere). The table holds 78 rows: 21 cited, 30 follow-up (p30-4 14,
-p30-5 1, p30-9 2, p30-10 13), 17 listed, 7 no ask, 3 designed out. That is form N2, built while p30-5 (PR #226) was
-not on main; once it lands, the next row becomes N1's three `cited` rows and p30-5 leaves § Follow-ups (80 rows: 24
-cited, 29 follow-up).
+unit holds. Dispositions: `cited` (the ask stands and its unit cites `_shared/asking.md`), `listed` (a pointer at an
+ask another unit holds, whose Owner it shares: it cites `_shared/asking.md` too), `follow-up` (an ask the gate
+removes, left to the owner task named in Task and put in the Framing until it lands), `no ask` (the unit names an ask
+only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 78
+rows: 36 cited, 30 follow-up (p30-4 14, p30-5 1, p30-9 2, p30-10 13), 2 listed, 7 no ask, 3 designed out. That is
+form N2, built while p30-5 (PR #226) was not on main; once it lands, the next row becomes N1's three `cited` rows and
+p30-5 leaves § Follow-ups (80 rows: 39 cited, 29 follow-up).
 
 | File | § | Anchor | Owner | Disposition | Task |
 | --- | --- | --- | --- | --- | --- |
@@ -89,6 +91,8 @@ cited, 29 follow-up).
 | skills/_shared/task-writer.md | § 1 | `` **Still ambiguous** → ask via `AskUserQuestion` `` | *yours* | cited | — |
 | skills/close/SKILL.md | § Identify the active thread | `` **Conversation explicitly references a thread by slug** `` | *yours* | cited | — |
 | skills/close/SKILL.md | § Process | `` collect approval via `AskUserQuestion` `` | *yours* (ADR 0011) | cited | — |
+| skills/execute/SKILL.md | § 1 | `` **list the matches and ask which** (the question tool only with nothing live `` | *yours* | cited | — |
+| skills/handoff/SKILL.md | § Handoff document | `` ask Lachy for an absolute directory `` | *yours* | cited | — |
 | skills/open/SKILL.md | § `/thread:open <slug>` | `` otherwise list labels and paths and ask `` | *yours* | cited | — |
 | skills/open/SKILL.md | § `/thread:open <slug>` | `` his answer is the go-ahead `` | *yours* | cited | — |
 | skills/open/SKILL.md | § Repo-thread lookup | `` list them as `<label> — <abs path>` and ask `` | *yours* | cited | — |
@@ -101,10 +105,23 @@ cited, 29 follow-up).
 | skills/orient-all/SKILL.md | § 4 | `` Pass each `rounds.asks[i]` to AskUserQuestion's `questions` verbatim `` | *yours* | cited | — |
 | skills/orient-all/SKILL.md | § 5 | `` put its `decisions[]` to Lachy one at a time `` | *yours* | cited | — |
 | skills/orient-all/SKILL.md | § 9 | `` each AskUserQuestion call's questions, then the grill list `` | *yours* | cited | — |
+| skills/reflect/SKILL.md | § 1 | `` Several matches for a loose name: list them and ask which `` | *yours* | cited | — |
+| skills/reflect/SKILL.md | § 5 | `` Then ask which proposals to apply `` | *yours* | cited | — |
+| skills/reflect/SKILL.md | § 7 | `` re-ask Lachy once and run the corrected `--pick` `` | *yours* | cited | — |
 | skills/repair/SKILL.md | § 3 | `` **Ask.** `AskUserQuestion` with the specific decision its block needs `` | *yours* | cited | — |
 | skills/repair/SKILL.md | § 3 | `` Then offer (`AskUserQuestion` `` | *yours* (ADR 0008) | cited | — |
+| skills/repair/SKILL.md | § 3 | `` Ping the user only here and for the other decisions no agent can `` | *yours* | cited | — |
+| skills/repair/SKILL.md | § 3 | `` Ask the question verbatim, quoting the latest feedback `` | *yours* (ADR 0033) | cited | — |
+| skills/repair/SKILL.md | § 3 | `` so Lachy decides with it on screen `` | *yours* | cited | — |
+| skills/repair/SKILL.md | § 3 | `` show it again and ask again `` | *yours* | cited | — |
 | skills/repair/SKILL.md | § 7 | `` `AskUserQuestion` quoting `setAside.summary` `` | *yours* | cited | — |
+| skills/repair/SKILL.md | § 7 | `` present each of its `setAside.gates` verbatim `` | *yours* (ADR 0008) | cited | — |
+| skills/repair/SKILL.md | § Don'ts | `` refuses a second block after a restart (exit 3): ask Lachy then `` | *yours* | cited | — |
 | skills/schedule/SKILL.md | § 1.5 | `` **The round.** Pass each `asks[i]` to AskUserQuestion's `` | *yours* | cited | — |
+| skills/schedule/SKILL.md | § 1.5 | `` An ungraded task's answer is never recorded `` | *yours* | cited | — |
+| skills/schedule/SKILL.md | § 3.5 | `` Put each gate to the user in the confirm batch `` | *yours* | cited | — |
+| skills/schedule/SKILL.md | § 3.6 | `` **Ask ahead (ADR 0034) `` | *yours* | cited | — |
+| skills/status/SKILL.md | § 1 | `` **list the matches and ask which**: don't assume `` | *yours* | cited | — |
 | skills/schedule/SKILL.md | § 0 | `` if there is none, ask the user for the path `` | *technical* | follow-up | p30-4 |
 | skills/schedule/SKILL.md | § 1 | `` Report the count and let the user confirm before proceeding `` | *gate* | follow-up | p30-4 |
 | skills/schedule/SKILL.md | § 2.5 | `` ask the user to confirm or override before continuing `` | *technical* | follow-up | p30-4 |
@@ -135,23 +152,8 @@ cited, 29 follow-up).
 | skills/repair/SKILL.md | § 7 | `` A dependant a Leg holds `` | *technical* | follow-up | p30-10 |
 | skills/repair/SKILL.md | § 7 | `` for each `leg_base` top of that task. Ask. `` | *technical* | follow-up | p30-10 |
 | skills/repair/SKILL.md | § 7 | `` an id the Stage does not show) → ask Lachy `` | *technical* | follow-up | p30-10 |
-| skills/execute/SKILL.md | § 1 | `` **list the matches and ask which** (the question tool only with nothing live `` | *yours* | listed | — |
-| skills/handoff/SKILL.md | § Handoff document | `` ask Lachy for an absolute directory `` | *yours* | listed | — |
 | skills/open/SKILL.md | § `/thread:open save` | `` Thread identification comes first and may ask `` | *yours* | listed | — |
 | skills/orient/SKILL.md | § 1 | `` When he stops a pick, re-ask as above without the stopped pick `` | *yours* | listed | — |
-| skills/reflect/SKILL.md | § 1 | `` Several matches for a loose name: list them and ask which `` | *yours* | listed | — |
-| skills/reflect/SKILL.md | § 5 | `` Then ask which proposals to apply `` | *yours* | listed | — |
-| skills/reflect/SKILL.md | § 7 | `` re-ask Lachy once and run the corrected `--pick` `` | *yours* | listed | — |
-| skills/repair/SKILL.md | § 3 | `` Ping the user only here and for the other decisions no agent can `` | *yours* | listed | — |
-| skills/repair/SKILL.md | § 3 | `` Ask the question verbatim, quoting the latest feedback `` | *yours* (ADR 0033) | listed | — |
-| skills/repair/SKILL.md | § 3 | `` so Lachy decides with it on screen `` | *yours* | listed | — |
-| skills/repair/SKILL.md | § 3 | `` show it again and ask again `` | *yours* | listed | — |
-| skills/repair/SKILL.md | § 7 | `` present each of its `setAside.gates` verbatim `` | *yours* (ADR 0008) | listed | — |
-| skills/repair/SKILL.md | § Don'ts | `` refuses a second block after a restart (exit 3): ask Lachy then `` | *yours* | listed | — |
-| skills/schedule/SKILL.md | § 1.5 | `` An ungraded task's answer is never recorded `` | *yours* | listed | — |
-| skills/schedule/SKILL.md | § 3.5 | `` Put each gate to the user in the confirm batch `` | *yours* | listed | — |
-| skills/schedule/SKILL.md | § 3.6 | `` **Ask ahead (ADR 0034) `` | *yours* | listed | — |
-| skills/status/SKILL.md | § 1 | `` **list the matches and ask which**: don't assume `` | *yours* | listed | — |
 | skills/execute/SKILL.md | § 6.5 | `` the lead never calls the question tool `` | *gate* | no ask | — |
 | skills/execute/SKILL.md | § Don'ts | `` Never call the question tool (`AskUserQuestion` `` | *gate* | no ask | — |
 | skills/execute/legs.md | § Needs you | `` A Leg never calls the question tool `` | *gate* | no ask | — |
@@ -201,12 +203,16 @@ as Decided for you) and deletes its rows; q5 fails a row whose ask is gone, so a
   count on an ungated task stays ruled.
 - `goal` and `stakes` are strict only on an explicit `owner: yours`, so a grade written before this ADR still ranks.
 - `NOTE_INVITE` ends every script-built question; sign-offs and Unpark offers carry no pick.
-- `record --by orient` is allowed only with `--owner` (reshuffle R5.2's write).
+- `record --by orient` is allowed only with `--owner` (reshuffle R5.2's write), and `--owner` refuses `--fork` and
+  `--recommended` (exit 2, nothing written).
 - The Grade log's `decisions` and `low`, and the leverage, count his decisions only.
 - Step 8's and R4's Decided for you lists stop at eight lines, the less sure first.
 - The preamble's text, and the ungraded question's reason.
 - The follow-up rows' owner tasks (p30-4, p30-5, p30-9, p30-10).
 - One anchor per ask unit, and the plain-ask pattern narrowed past "had to ask" and "used to ask" (narrative).
+- The two pointer units (open § save, orient § 1's re-ask) stay `listed`: each cites the gate, and shares the Owner
+  of the ask it points at.
+- The rollout clone question is *technical*, kept a question by ADR 0042 until p30-10, never *yours*.
 - Next's form (N1 or N2) is read from the tree at build time.
 - Schedule's Scope line is left alone: its "writes to `~/repos/obsidian/Work/Tasks/`" covers the new write.
 

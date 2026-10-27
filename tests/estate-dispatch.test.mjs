@@ -1457,9 +1457,12 @@ test('D22. the question gate: preflight and rounds ask only his decisions, in th
   assert.deepEqual(part.refused.map((x) => [x.slug, x.question]), [['r', 'Log format?']])
   assert.match(part.refused[0].why, /in flight/)
   assert.equal(part.written.length, 3)
-  // (e) record --owner writes one call; --fork never goes with it; --by orient only with it.
+  // (e) record --owner writes one call; --fork and --recommended never go with it, and write nothing; --by orient only
+  // with it.
   const rec = (more) => py(['record', '--task', 'c', '--question', 'Which way?', '--answer', 'left', '--today', TODAY, '--vault', VE, ...more])
   const c0 = read('c', VE)
+  refusal(rec(['--owner', 'technical', '--recommended', 'left', '--why', 'x.py:3 reads it']), /--owner takes no --recommended/)
+  assert.equal(read('c', VE), c0, 'a refused --owner --recommended writes nothing')
   const r1 = rec(['--owner', 'technical', '--why', 'x.py:3 reads it', '--by', 'orient'])
   assert.deepEqual([r1.status, r1.stdout, r1.stderr], [0, 'recorded Work/Tasks/c.md: Which way? → left\n', ''])
   assert.equal(read('c', VE),

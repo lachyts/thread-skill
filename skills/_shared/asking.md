@@ -10,7 +10,7 @@ Label each question before it is asked:
 
 | Owner | What it is | Action |
 | --- | --- | --- |
-| *yours* | intent, how important it is, how robust it must be, who it is for, how it feels, his taste or lived use, which thing he meant, and an authorisation an ADR keeps as his (ADR 0008's sign-offs, ADR 0011's vault tasks, ADR 0042's rollout clone until p30-10 lands) | Ask it, in the Framing (§ 3). |
+| *yours* | intent, how important it is, how robust it must be, who it is for, how it feels, his taste or lived use, which thing he meant, and an authorisation an ADR keeps as his (ADR 0008's sign-offs, ADR 0011's vault tasks) | Ask it, in the Framing (§ 3). |
 | *priorities* | a call his stated priorities, or the project's `## Priorities` card, already answer | Decide it and list it (§ 2). |
 | *technical* | a call the code, the data, the ADRs or research can settle | Research it, decide it and list it (§ 2). |
 | *gate* | a process step: "next move?", "archive?", a "write it?" he already approved, confirming a queue he approved, a review STOP, "shall I carry on?" | Never ask: design it out, or decide and say so in one line. |
@@ -21,6 +21,8 @@ Label each question before it is asked:
 - Spend under the standing approval is never asked (Chorus ADR 0108 d4): a fork about spend alone is *priorities*.
 - A review STOP or a design gap is never his by default: it goes to the agent that can resolve it.
 - An open `fork for Lachy` stays *yours* until he rules on it.
+- The rollout clone (schedule § 0) is a *technical* call that ADR 0042 keeps a question until p30-10 decides it: until
+  then it is asked, in the Framing.
 
 ## 2. Decided for you
 
@@ -61,8 +63,9 @@ autonomy over his time, so a recommendation against either carries its reason in
 
 ## 6. Where it applies
 
-- Every ask site in `skills/` cites this file, and ADR 0054 § Sites lists every ask with its Owner and what became of
-  it; `tests/contracts/question-gate.test.mjs` holds both to the tree.
+- ADR 0054 § Sites lists every ask unit in `skills/` with its Owner and what became of it, and every ask that stands
+  there (a `cited` or `listed` row) cites this file in its own paragraph or list item;
+  `tests/contracts/question-gate.test.mjs` holds both to the tree.
 - A `follow-up` row there is an ask its owner task removes; until it lands, the ask is put in the Framing.
 - **Script-built rounds.** `estate-dispatch.py`'s `rounds` and `preflight` build the questions that orient-all § 4
   and schedule § 1.5 pass on verbatim, so their Framing comes from the grade (readiness-grade § Each decision: a

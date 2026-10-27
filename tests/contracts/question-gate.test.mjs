@@ -3,8 +3,8 @@
 // you), and ADR 0054 § Sites lists every ask unit in skills/ with its Owner and disposition. Seven rules:
 //   q1  asking.md: at most 90 lines, `## 1.` to `## 6.`, the four Owners with their actions, Decided for you, the five
 //       Framing points and the Note's words, the recommendation's "hands work back" and "spends less for lower
-//       quality", the grill rule, ADR 0008, 0011 and 0042, the steering exception, a gated input never a gate, its
-//       sources, and no runnable plugin-root command.
+//       quality", the grill rule, ADR 0008, 0011 and 0042 (the rollout clone a *technical* call, never in the *yours*
+//       row), the steering exception, a gated input never a gate, its sources, and no runnable plugin-root command.
 //   q2  the cite: every prose unit of skills/**/*.md naming AskUserQuestion holds `_shared/asking.md`, unless it says
 //       "never call(s) the question tool" (exactly three units); a non-markdown file under skills/ or hooks/ naming
 //       AskUserQuestion names asking.md.
@@ -18,8 +18,10 @@
 //       Grade log's three definitions count his decisions only (owner yours, ADR 0054).
 //   q5  ADR 0054 § Sites and § Follow-ups: each row has six cells, a file that exists, a known Owner and disposition;
 //       every anchor but a designed-out one sits in exactly one unit of its file (a gone follow-up anchor says its
-//       task landed it), a cited row's unit holds the cite, a designed-out anchor appears nowhere; each follow-up row's
-//       task is in § Follow-ups with its row count, and the lead-in's counts are the table's.
+//       task landed it), every ask that stands (a cited or listed row) has its unit hold the cite, which is what
+//       ADR 0054 d1 and asking.md § 6 claim, an `Owner *x*` label in a unit is its row's Owner, a designed-out anchor
+//       appears nowhere; each follow-up row's task is in § Follow-ups with its row count, and the lead-in's counts are
+//       the table's.
 //   q6  one row per ask unit: every unit naming AskUserQuestion or matching PLAIN_ASK holds exactly one anchor of its
 //       own file's rows.
 //   q7  the Framing in script-built rounds: estate-dispatch.py's NOTE_INVITE is asking.md § 3's and orient-all § 5's
@@ -56,6 +58,8 @@ const EXEMPT = /\bnever calls? the question tool\b/i
 // A plain-text ask: these phrasings, never past-tense narrative ("a lead had to ask Lachy whether …").
 const PLAIN_ASK = /(?<!\b(?:had|used) to )\b(?:and ask|ask (?:which|him|lachy|the user|in plain text|once)|asks? lachy for|confirm with the user|offer to create)\b/i
 const DISPOSITIONS = ['cited', 'listed', 'no ask', 'follow-up', 'designed out']
+// The asks that stand: each unit cites the gate (ADR 0054 d1, asking.md § 6). A follow-up's owner task removes it.
+const STANDS = ['cited', 'listed']
 const OWNERS = ['yours', 'priorities', 'technical', 'gate']
 const RUNNABLE = /(?:\b(?:python3|bash|sh|node)\s+"?|=\s*"?)\$\{CLAUDE_PLUGIN_ROOT\}/
 // The grill skills' `args`, word for word (reshuffle R3): the only way the gate reaches a personal grill skill.
@@ -115,7 +119,10 @@ function q1(F) {
     if (!row(owner).includes(action)) out.push(`§ 1's *${owner}* row lacks "${action}"`)
   }
   need('§ 1', C(s1), ['ADR 0008', 'ADR 0011', 'ADR 0042', 'Chorus ADR 0110 d3', 'A gated input (ADR 0008) is never a *gate*',
-    'Chorus ADR 0108 d4', 'An open `fork for Lachy` stays *yours*'])
+    'Chorus ADR 0108 d4', 'An open `fork for Lachy` stays *yours*',
+    'The rollout clone (schedule § 0) is a *technical* call that ADR 0042 keeps a question'])
+  // One Owner for the rollout clone in all three places: schedule § 0 and its § Sites row say *technical* (q5 holds those).
+  if (/ADR 0042|rollout clone/.test(row('yours'))) out.push("§ 1's *yours* row names ADR 0042's rollout clone, a *technical* call")
   need('§ 2', C(sec(t, /^## 2\. /)), ['Decided for you: <the fork> → <the call> (<owner>: <reason>)', 'the less sure calls first'])
   need('§ 3', C(sec(t, /^## 3\. /)), ['**Plain words**', '**The goal**', '**Gains and costs**', '**The pick**', '**The Note**',
     'What would make this wrong for you?'])
@@ -247,7 +254,11 @@ function q5(F) {
       if (hits.length === 0) { out.push(`${where}: the ask is gone, so ${r.task} landed it: delete this row`); continue }
     }
     if (hits.length !== 1) { out.push(`${where}: the anchor is in ${hits.length} units, not 1; ${FIX}`); continue }
-    if (r.disposition === 'cited' && !hits[0].includes(CITE)) out.push(`${where}: a cited row whose unit does not cite ${CITE}`)
+    if (STANDS.includes(r.disposition) && !hits[0].includes(CITE)) {
+      out.push(`${where}: a ${r.disposition} row (an ask that stands) whose unit does not cite ${CITE}`)
+    }
+    const labels = [...hits[0].matchAll(/\bOwner \*(\w+)\*/g)].map((x) => x[1])
+    if (labels.some((o) => o !== r.owner)) out.push(`${where}: its unit labels Owner *${labels.join('*, *')}*, its row *${r.owner}*`)
   }
   for (const [task, f] of Object.entries(followUps)) {
     if (!perTask[task]) out.push(`§ Follow-ups names ${task}, which owns no row`)
@@ -369,9 +380,10 @@ test('the gate, its cites, its readers, ADR 0054 § Sites and the Framing agree 
   assert.deepEqual(r.fails, [], r.details.join('\n'))
 })
 
-test('control q1: asking.md over 90 lines, or without its "spends less for lower quality" reason, fails q1 alone', () => {
+test('control q1: asking.md over 90 lines, without its "spends less for lower quality" reason, or with the rollout clone back in the *yours* row, fails q1 alone', () => {
   only(swap(FILES, ASKING, '## 1. Label the Owner', `${'filler\n'.repeat(40)}\n## 1. Label the Owner`), CONSTS, ['q1'], 'long')
   only(swap(FILES, ASKING, 'spends less for lower quality', 'spends less'), CONSTS, ['q1'], 'reason')
+  only(swap(FILES, ASKING, "ADR 0011's vault tasks)", "ADR 0011's vault tasks, ADR 0042's rollout clone)"), CONSTS, ['q1'], 'clone yours')
 })
 
 test('control q2: an uncited ask fails q2; the exemption is exact and case-blind; a fourth exempt unit fails', () => {
@@ -401,22 +413,30 @@ test('control q4: the never-settles clause dropped, a preamble with a § 3.5 phr
   only(swap(FILES, CONTEXT, 'his decisions (owner yours', 'the decisions (owner any'), CONSTS, ['q4'], 'grade log')
 })
 
-test('control q5: a renamed anchor, an uncited cited row, an unlisted task, a designed-out ask still present, or a count off by one, fails q5', () => {
+test('control q5: a renamed anchor, an uncited cited or listed row, an unlisted task, a designed-out ask still present, a count off by one, or an Owner label against its row, fails q5', () => {
   only(swap(FILES, ADR, '`` ask the user which it is ``', '`` ask the user what it is ``'), CONSTS, ['q5', 'q6'], 'renamed')
   only(swap(FILES, 'skills/repair/SKILL.md', 'quoting `setAside.summary` (Owner *yours*, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`)',
     'quoting `setAside.summary` (Owner *yours*)'), CONSTS, ['q2', 'q5'], 'uncited')
   fails('q5', swap(FILES, ADR, '| follow-up | p30-9 |', '| follow-up | p30-77 |'), CONSTS, /p30-77 is not in § Follow-ups/, 'unlisted task')
   only(swap(FILES, 'skills/open/SKILL.md', '3. If not found → ask for the scope', '3. If not found → confirm with the user, ask for the scope'),
     CONSTS, ['q5'], 'designed out present')
-  only(swap(FILES, ADR, 'The table holds 78 rows: 21 cited', 'The table holds 78 rows: 22 cited'), CONSTS, ['q5'], 'count')
+  only(swap(FILES, ADR, '78\nrows: 36 cited', '78\nrows: 37 cited'), CONSTS, ['q5'], 'count')
+  // An ask that stands loses its cite: status § 1's cited ask, and a listed pointer (neither names AskUserQuestion, so
+  // q2 cannot see them).
+  only(swap(FILES, 'skills/status/SKILL.md', "don't assume (Owner *yours*: which rollout he means, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`).",
+    "don't assume."), CONSTS, ['q5'], 'status uncited')
+  only(swap(FILES, ORIENT, '(its Owner labelled above,\n  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`)', '(as above)'), CONSTS, ['q5'], 'listed uncited')
+  // One Owner per ask: schedule § 0's rollout clone labelled *yours* against its *technical* row.
+  only(swap(FILES, SCHEDULE, 'is Owner *technical*, kept a question by ADR 0042', 'is Owner *yours*, kept a question by ADR 0042'),
+    CONSTS, ['q5'], 'owner mismatch')
 })
 
 test('control q6: an uncovered "list them and ask which", a cited unit with no row, a unit with two anchors, and the past-tense narrative', () => {
-  const add = (text) => ({ ...FILES, 'skills/status/SKILL.md': `${FILES['skills/status/SKILL.md']}\n- Several notes: list them and ask which one.\n${text}` })
+  const add = (text) => ({ ...FILES, 'skills/status/SKILL.md': `${FILES['skills/status/SKILL.md']}\n- Several notes: list them and ask which one (Owner *yours*, \`_shared/asking.md\`).\n${text}` })
   only(add(''), CONSTS, ['q6'], 'no row')
-  const row = '| skills/status/SKILL.md | § 1 | `` list them and ask which one `` | *yours* | listed | — |'
+  const row = '| skills/status/SKILL.md | § 1 | `` list them and ask which one `` | *yours* | cited | — |'
   const withRow = swap(add(''), ADR, '| skills/status/SKILL.md |', `${row}\n| skills/status/SKILL.md |`)
-  only(swap(swap(withRow, ADR, 'The table holds 78 rows', 'The table holds 79 rows'), ADR, '17 listed', '18 listed'), CONSTS, [], 'with its row')
+  only(swap(swap(withRow, ADR, 'The table holds 78\nrows', 'The table holds 79\nrows'), ADR, '36 cited', '37 cited'), CONSTS, [], 'with its row')
   fails('q6', { ...FILES, 'skills/new/SKILL.md': '- Pick one (`AskUserQuestion`, `_shared/asking.md`).\n' }, CONSTS, /skills\/new\/SKILL\.md: an ask unit holds 0/, 'cited, no row')
   fails('q6', swap(FILES, 'skills/reflect/SKILL.md', 'Then ask which proposals to apply', 'Then ask which proposals to apply. Several matches for a loose name: list them and ask which'),
     CONSTS, /holds 2 § Sites anchors/, 'two anchors')

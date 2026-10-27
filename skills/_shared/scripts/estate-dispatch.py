@@ -207,9 +207,9 @@ record --task SLUG|PATH --question Q --answer A --recommended R [--fork F] [--by
   `<note>: <Q> → <A> [no-change]`, exit 0.
   --owner priorities|technical writes a call made for Lachy instead (ADR 0054 d3): the bullet
   `- <Q> → <A> (decided for you at /thread:<B>, <owner>: <W>)` (`: <W>` dropped with no --why) under DECIDED_HEADING
-  of the same date, a new section opening with DECIDED_PREAMBLE; never under DECISIONS_HEADING. It takes no
-  --recommended, and --fork with it exits 2 (an open fork stays his); --by orient (reshuffle R5.2) is allowed only
-  with --owner. The same refusals hold. Without --owner, --recommended is required.
+  of the same date, a new section opening with DECIDED_PREAMBLE; never under DECISIONS_HEADING. --recommended with
+  it exits 2 (the call is the answer), and so does --fork (an open fork stays his); --by orient (reshuffle R5.2) is
+  allowed only with --owner. The same refusals hold. Without --owner, --recommended is required.
 
 decided-for-you --rank R --tasks SLUG[,SLUG]... [--by B] [--superseding PRIOR] [--write] [--today D]: the calls the
   rank ruled for Lachy (each task row's decidedForYou[], the less sure first) for the named tasks, matched by
@@ -1436,6 +1436,9 @@ def record_core(M, vault, task, question, answer, today, by, recommended=None, f
 def cmd_record(args):
     if args.owner is not None and args.fork is not None:
         fail(2, "--fork is never a call made for Lachy: an open fork stays his (ADR 0054), so --owner takes no --fork")
+    if args.owner is not None and args.recommended is not None:
+        fail(2, "--recommended goes only with an answer: a call made for Lachy (--owner) is the call itself, "
+                "so --owner takes no --recommended")
     if args.owner is None and args.recommended is None:
         fail(2, "--recommended is required for an answer (only a call made for Lachy, --owner, goes without)")
     if args.owner is None and args.by not in RECORD_BY:
@@ -1453,7 +1456,7 @@ def cmd_record(args):
         fail(3, "no vault at %s" % vroot)
     try:
         _, line = record_core(M, M.NA.Vault(vroot), args.task, args.question, args.answer, args.today, args.by,
-                              recommended=None if args.owner else args.recommended, fork=args.fork, owner=args.owner,
+                              recommended=args.recommended, fork=args.fork, owner=args.owner,
                               why=args.why, superseding=args.superseding)
     except Refusal as e:
         fail(e.code, str(e))
