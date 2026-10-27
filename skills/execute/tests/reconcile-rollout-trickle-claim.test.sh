@@ -426,6 +426,24 @@ ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"]]')" '[{"ro-a":1},["b1"]]' \
 ok "$(lines)" 0 "C11: … with empty stderr"
 ok "$(claims all)" '[["/other/tasks","ro-y","y1"],["here","ro-b","b1"]]' \
   "C11: the file keeps only another dir's live entry and ro-b's new claim"
+# C11b: an `at` that parses but cannot be placed in local time (a naive 0001-01-01: its astimezone() raises) is
+# malformed, dropped like any other, never a crash that no later write could prune.
+scen c11b-at-out-of-range
+mkro ro-a 3; mkt a1 ro-a open; mkt a2 ro-a open
+mkro ro-b 3; mkt b1 ro-b open; mkt b2 ro-b open; mkt b3 ro-b open
+seed '[{"tasksDir": D, "rollout": "ro-a", "slug": "a2", "at": "0001-01-01T00:00:00"},
+       {"tasksDir": "/other/tasks", "rollout": "ro-x", "slug": "x1", "at": "0001-01-01T00:00:00"},
+       c(D, "ro-a", "a1", NOW)]'
+J=$(nx ro-b --dry-run); rc=$?
+ok "$rc" 0 "C11b: an out-of-range naive at: next --dry-run exits 0"
+ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"]]')" '[{"ro-a":1},["b1"]]' \
+  "C11b: … a1's claim still counts, the bad entry not at all"
+ok "$(lines)" 0 "C11b: … with empty stderr"
+J=$(nx ro-b); rc=$?
+ok "$rc" 0 "C11b: off --dry-run, exit 0"
+ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"]]')" '[{"ro-a":1},["b1"]]' "C11b: … the same count"
+ok "$(claims all)" '[["here","ro-a","a1"],["here","ro-b","b1"]]' \
+  "C11b: … and the write drops both bad entries, keeping a1's claim and ro-b's new one"
 
 # ── C12: a failed rollout-note save claims nothing ───────────────────────────────────────────────────────────────────
 scen c12-failed-save

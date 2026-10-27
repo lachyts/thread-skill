@@ -1508,7 +1508,10 @@ def _stamp(dt) -> str:
 
 def _parse_ts(value):
     """ISO timestamp from a frontmatter value or gh's mergedAt, or None. A trailing Z is parsed (Python
-    3.9's fromisoformat refuses it); naive values are assumed local time."""
+    3.9's fromisoformat refuses it); naive values are assumed local time. A naive value that cannot be placed in
+    local time (0001-01-01T00:00:00: its astimezone() raises ValueError, OverflowError or OSError, by zone and
+    platform) reads None like any other unparseable stamp, so one hand-typed or seeded stamp never crashes a caller
+    (p28-3: a Trickle claim's `at`, which `next` reads before any write could prune it)."""
     s = _scalar(value)
     if not s:
         return None
@@ -1516,9 +1519,9 @@ def _parse_ts(value):
         s = s[:-1] + "+00:00"
     try:
         ts = datetime.fromisoformat(s)
-    except ValueError:
+        return ts if ts.tzinfo else ts.astimezone()
+    except (ValueError, OverflowError, OSError):
         return None
-    return ts if ts.tzinfo else ts.astimezone()
 
 
 # The engine's isoMinutes / wholeMinutes (task.workflow.js), ported byte for byte so the lead's own log
@@ -3852,7 +3855,8 @@ def _trickle_claims_judge(entries, tasks_dir: Path, this_stem: str, walk, now, w
     Trickle, *Trickle claims*). `walk` is the call's index of `tasks_dir`, `now` its clock (--now, else the real one)
     and `wall` always the real clock. Rules, in order, on each entry R/S (its rollout, its task; stems compared
     lowercased):
-      1. malformed (no object, a key missing or no non-empty string, an unparseable `at`): dropped;
+      1. malformed (no object, a key missing or no non-empty string, an `at` _parse_ts reads as None, a naive one
+         that cannot be placed in local time included): dropped, never a crash no later write could prune;
       2. another tasksDir: never counted, kept only while under TRICKLE_CLAIM_TTL old by `wall` (so a test's --now
          never ages a real claim);
       3. this rollout's own: dropped (this call's starts replace them); so is a repeat of an entry already judged;
