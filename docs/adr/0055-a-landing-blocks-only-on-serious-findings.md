@@ -28,7 +28,7 @@ Human teams and AI review tools stop on a different condition: no open *blocking
 
    The rollout engine's judge already works this way: "Do not contradict guidance you gave in an earlier round"; a new objection rejects only if the new commits introduced it.
 4. **A budget of four code rounds, and only an open serious finding reaches Lachy.**
-   - **The budget.** If the fourth code round still has a blocking finding, the loop holds without fixing it, and the open findings go on a `Needs your call:` row. Four matches execute's built-in `max_review_rounds` and Self-Refine's cap.
+   - **The budget.** If any code round from the fourth on still has a blocking finding, the loop holds without fixing it, and the open findings go on a `Needs your call:` row. Four matches execute's built-in `max_review_rounds` and Self-Refine's cap.
    - **The ledger's regression stop no longer ends a landing.** It is the agent's to resolve: the next fix reverts to the root instead of patching a patch (fresh-review's "never a third patch"), and the next round reviews it. The budget bounds the loop instead.
    - **Unchanged:** the CI and Verify stops, and a finding that needs a product or design call.
    - **What reaches Lachy.** A merge is queued only after a clean round, so a landing reaches him only when a serious finding is still open at the budget, or for a decision no agent can make (Chorus ADR 0110).
@@ -36,7 +36,7 @@ Human teams and AI review tools stop on a different condition: no open *blocking
 
    **Every code round still reviews the whole branch.** With only serious findings blocking, a second full look is a second independent sample for serious bugs; about half of Snyk's LLM findings turned up in only one of five identical scans. The noise a full look re-raises can no longer hold the merge.
 
-   **The landing loop runs no `simplify` rounds**, because a cleanup is never blocking and could only be filed. **A full-cap round earns one more round, once.** A round that returns exactly its cap with no blocking finding is not yet clean, because its cut tail may hold one: the engine's ordering is a model's own severity judgement. The next code round is clean if it has no blocking finding, whatever its count. The old rule (one more round after every full-cap round) met a cell that fills its cap on most rounds, and it never stopped.
+   **The landing loop runs no `simplify` rounds**, because a cleanup is never blocking and could only be filed. **A full-cap round earns one more round, once.** A round that returns exactly its cap with no blocking finding is not yet clean, because its cut tail may hold one: the engine's ordering is a model's own severity judgement. The next code round is clean if it has no blocking finding, whatever its count. That round runs even past the fourth, because nothing serious is open. The old rule (one more round after every full-cap round) met a cell that fills its cap on most rounds, and it never stopped.
 5. **Every round is recorded, mechanically, and read weekly.**
    - land.sh's own-branch `--queue` and `--hold` record every review doc on the branch through fresh-review's `review-round.py`, so a landing cannot end unrecorded. fresh-review still records each doc when its findings arrive, and again when it is consumed.
    - The `review-round` line gains the doc's `status`, the `branch`, the diff size (`lines`, `files`), and the disposition counts: `blocking`, `open`, `filed`, `recurring`, `reversal` and `rejected`. These are parsed from a fixed `## Disposition` format.
