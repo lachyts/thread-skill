@@ -2,11 +2,11 @@
 # The approved queue (p30-4; skills/_shared/vault-grammar.md § Approved queue): `approve-queue` writes the hold, the
 # `on_merge: regenerate` beside it and the start stamp on Lachy's words; at the gating PR's merge `next` keeps the hold
 # standing and reports `halt: regenerate` with the members the route passes to /thread:schedule --regenerate, waits on
-# an Integration in flight or a standing room stop, and releases as a plain hold (one WARN line) once the queue has run
-# or has nothing of its own left. The Chorus Stage's room stops (step-boundary.py's lines, the one regex) are no run
+# an Integration in flight or a standing room stop, and releases as a plain hold (one WARN line, on_merge cleared with
+# the hold) once the queue has run or has nothing of its own left. The Chorus Stage's room stops (step-boundary.py's lines, the one regex) are no run
 # mark; Lachy's own pause is. `stamp-start` stamps the new note under the chain, `status` reports onMerge and chainStart,
 # and a superseded note's `next` ends quietly (halt superseded). Temp notes, a stub gh; no vault, no network.
-#   A0 approve-queue        A1-A2f the verdict (OPEN, MERGED, I8, nothing left, closed, a PR task, an Integration)
+#   A0 approve-queue        A1-A2g the verdict (OPEN, MERGED, I8, nothing left, closed, a PR task, an Integration, the clear)
 #   A3 the chain's script half and the superseded tail      A4-A4f pauses and room stops      A5 an unreadable on_merge
 #   A6 stamp-start's refusals      A7 status      A8 no on_merge and mixed case      A9 one room-stop regex
 # Usage: bash reconcile-rollout-approved-queue.test.sh   (exit 0 = pass)
@@ -119,12 +119,23 @@ ok "$(grep -A1 '^status:' "$D/ro.md")" "status: open
 start: unattended" "A0: start: unattended just below status:"
 cp "$D/ro.md" "$D/ro.once"
 out2=$(aq --rollout "$D/ro.md" --pr "$U/202"); rc=$?
-ok "$rc|$out2" "0|$out" "A0: a re-run (the PR as its URL) prints the same line"
+# The hold now stands before the run, and the note cannot say who wrote it, so the line never names it (R5).
+ok "$rc|$out2" "0|undo: remove on_merge and start: unattended from [[ro]] before o/r#202 merges, or pause [[ro]] once its lead runs" \
+  "A0: a re-run (the PR as its URL) names on_merge and the start stamp, never the hold now standing"
 cmp -s "$D/ro.md" "$D/ro.once"; ok "$?" 0 "A0: … and writes nothing"
 mkro ro "" 'started_unattended: 2026-10-02T09:00+00:00'
 ok "$(aq --rollout "$D/ro.md" --pr o/r#202)" "undo: remove hold_until and on_merge from [[ro]] before o/r#202 merges, or pause [[ro]] once its lead runs" \
   "A0: with started_unattended: valued the undo line leaves the start stamp out"
 ok "$(fm ro start)" "<none>" "A0: … and no start: is written"
+# His own hold (R5): a hold that stood before approve-queue ran is never named, so following the undo line keeps it.
+mkro ro "" "$OM"
+out=$(aq --rollout "$D/ro.md" --pr o/r#202 2>"$D/err"); rc=$?
+ok "$rc|$out|$(cat "$D/err")" "0|undo: remove on_merge and start: unattended from [[ro]] before o/r#202 merges, or pause [[ro]] once its lead runs|" \
+  "A0: his own hold: the undo line names on_merge and the start stamp only"
+ok "$(fm ro hold_until)|$(fm ro on_merge)|$(fm ro start)" "$OM|on_merge: regenerate|start: unattended" "A0: … his hold kept as written, on_merge and the stamp added"
+mkro ro "" "hold_until: {pr: $U/202}" 'started_unattended: 2026-10-02T09:00+00:00'
+ok "$(aq --rollout "$D/ro.md" --pr o/r#202)" "undo: remove on_merge from [[ro]] before $U/202 merges, or pause [[ro]] once its lead runs" \
+  "A0: … his own hold (as a URL) with started_unattended: valued: on_merge alone, his PR as he wrote it"
 # Room stops (R1): the Stage's lines are no run mark, ended or standing; a hard pause's line is.
 mkro ro ""; roomstop ro start 2026-10-02T10:00+00:00; roomstop ro ended 2026-10-02T11:00+00:00
 aq --rollout "$D/ro.md" --pr o/r#202 >/dev/null; ok "$?" 0 "A0: a note whose Pause log holds only an ended room stop is accepted"
@@ -141,25 +152,37 @@ mkro ro "" 'start: unattended' "$OM" 'on_merge: Regenerate'
 cp "$D/ro.md" "$D/ro.before"
 aq --rollout "$D/ro.md" --pr o/r#202 >/dev/null; ok "$?" 0 "A0: on_merge: Regenerate is neither refused"
 cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "A0: … nor rewritten"
-# The refusals: exit 1, one ERROR line, the note byte-identical.
-refusal() {  # refusal <label> <pr> — on the note as it stands
+# The refusals: exit 1, one ERROR line naming that case's own why, the note byte-identical. Each note is built fresh,
+# so no case is refused by an earlier case's mark.
+refusal() {  # refusal <label> <pr> <its message> — on the note as it stands
   cp "$D/ro.md" "$D/ro.before"
   aq --rollout "$D/ro.md" --pr "$2" >"$D/out" 2>"$D/err"; rc=$?
   ok "$rc|$(cat "$D/out")|$(grep -c '^ERROR: approve-queue: ' "$D/err")|$(grep -c . "$D/err")" "1||1|1" "A0: $1 is refused with one ERROR line"
+  has "$(cat "$D/err")" "ERROR: approve-queue: $3" "A0: … $1's own why"
   cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "A0: … $1 writes nothing"
 }
-mkro ro "" 'shape: serial'; refusal "a serial note" o/r#202
-mkro ro "" 'incomplete: true'; refusal "an incomplete note" o/r#202
-sed -i.bak 's/^status: open$/status: done/' "$D/ro.md"; refusal "a done note" o/r#202
-mkro ro "" 'superseded_by: "[[ro-2]]"'; refusal "a superseded note" o/r#202
-mkro ro "" 'paused: 2026-10-02T10:00+00:00'; refusal "a paused note" o/r#202
-mkro ro ""; mkt x-p29-1-a ro in_progress "$X" 'owner: lead-1'; refusal "a note whose task carries owner:" o/r#202
+mkro ro "" 'shape: serial'; refusal "a serial note" o/r#202 "ro: shape: serial: a serial rollout runs as Legs"
+mkro ro "" 'incomplete: true'; refusal "an incomplete note" o/r#202 "ro is incomplete: "
+mkro ro ""; sed -i.bak 's/^status: open$/status: done/' "$D/ro.md"
+refusal "a done note" o/r#202 "ro is done: a closed rollout runs nothing"
+mkro ro ""; sed -i.bak 's/^status: open$/status: dropped/' "$D/ro.md"
+refusal "a dropped note" o/r#202 "ro is dropped: a closed rollout runs nothing"
+mkro ro "" 'superseded_by: "[[ro-2]]"'; refusal "a superseded note" o/r#202 "ro is superseded by [[ro-2]]: approve that note instead"
+mkro ro "" 'paused: 2026-10-02T10:00+00:00'; refusal "a paused note" o/r#202 "ro is paused (or a pause is requested)"
+mkro ro "" 'pause_requested: true'; refusal "a pause-requested note" o/r#202 "ro is paused (or a pause is requested)"
+mkro ro ""; mkt x-p29-1-a ro in_progress "$X" 'owner: lead-1'
+refusal "a note whose task carries owner:" o/r#202 "ro: it has run (its task x-p29-1-a carries owner: lead-1)"
 mkt x-p29-1-a ro open "$X"
-refusal "--pr 7" 7
-refusal "--pr nonsense" nonsense
-mkro ro "" 'hold_until: {pr: o/r#303}'; refusal "a hold on another PR" o/r#202
-mkro ro "" 'hold_until: {pr: o/r#202, merged: false}'; refusal "an unreadable hold" o/r#202
-mkro ro "" 'on_merge: rebuild'; refusal "on_merge: rebuild" o/r#202
+refusal "--pr 7" 7 "--pr 7: name the PR as owner/repo#N or its URL"
+refusal "--pr nonsense" nonsense "--pr nonsense: name the PR as owner/repo#N or its URL"
+mkro ro "" 'hold_until: {pr: o/r#303}'
+refusal "a hold on another PR" o/r#202 "ro: its hold_until names o/r#303, not o/r#202: remove it first, or name its PR"
+# A bare number is read in the Project root, so it never matches --pr, and --pr takes no bare number: rewrite it (R5).
+mkro ro "" 'hold_until: {pr: 202}'
+refusal "a bare-number hold" o/r#202 "ro: its hold_until names 202, not o/r#202: rewrite it as owner/repo#N first, or remove it"
+mkro ro "" 'hold_until: {pr: o/r#202, merged: false}'
+refusal "an unreadable hold" o/r#202 "ro: its hold_until is unreadable (merged must be true): fix or remove it first"
+mkro ro "" 'on_merge: rebuild'; refusal "on_merge: rebuild" o/r#202 "ro: its on_merge: reads rebuild: on_merge must be regenerate"
 aq --rollout "$D/ro.md" >/dev/null 2>&1; ok "$?" 2 "A0: a missing --pr is a usage error (exit 2)"
 
 # ── A1: while the PR is OPEN an approved queue holds as any hold does ──────────────────────────────────────────────────
@@ -229,7 +252,7 @@ mkt x-p29-5-e - open "$X"
 prj "$U/202" MERGED
 J=$(nxt ro 2>"$D/err")
 ok "$(q "$J" '[d["halt"], d["onMerge"]["action"], d["onMerge"]["why"]]')" '["empty","released","nothing of its own left"]' "A2c: released, halt empty"
-ok "$(q "$J" "$ro_entry")|$(fm ro hold_until)" "[false,null,true]|<none>" "A2c: … the hold cleared"
+ok "$(q "$J" "$ro_entry")|$(fm ro hold_until)|$(fm ro on_merge)" "[false,null,true]|<none>|<none>" "A2c: … the hold cleared, on_merge with it"
 ok "$(cat "$D/err")" "WARN: on_merge: regenerate on ro not run: nothing of its own left: released as a plain hold" "A2c: … one WARN line"
 
 # ── A2d: a closed P is a plain release ────────────────────────────────────────────────────────────────────────────────
@@ -240,6 +263,41 @@ mkt x-p29-1-a ro open "$X"
 prj "$U/202" MERGED
 J=$(nxt ro 2>"$D/err")
 ok "$(q "$J" "[d['onMerge'], $ro_entry]")|$(cat "$D/err")" '[null,[false,null,true]]|' "A2d: status dropped: released and cleared, no onMerge, no WARN"
+ok "$(fm ro hold_until)|$(fm ro on_merge)" "<none>|<none>" "A2d: … on_merge cleared with the hold"
+
+# ── A2g (R4): a plain release takes on_merge with the hold, so a hold he adds by hand later is a plain hold ──────────────
+scen a2g
+mkro ro $'- [[x-p29-1-a]]' "${APPROVED[@]}" 'paused: 2026-10-02T10:00+00:00'
+mkt x-p29-1-a ro open "$X"
+prj "$U/202" MERGED
+nxt ro >/dev/null 2>&1
+ok "$(fm ro hold_until)|$(fm ro on_merge)" "<none>|<none>" "A2g: released (it has run): the hold and on_merge both gone"
+perl -0pi -e 's/^paused: .*\n//m; s/^status: open\n/status: open\nhold_until: {pr: o\/r#303}\n/m' "$D/ro.md"   # reinstated, a hold by hand
+prj "$U/303" MERGED
+J=$(nxt ro 2>"$D/err")
+ok "$(q "$J" '[d["onMerge"], d["halt"], d["start"]]')|$(cat "$D/err")" '[null,null,["x-p29-1-a"]]|' "A2g: … at the new PR's merge: a plain release that starts the queue, no verdict"
+# The one swap (Note.remove_block's also): the companion goes only with the hold, and only while it reads as read.
+cat > "$D/cas.py" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+p = Path(sys.argv[2]); base = p.read_text()
+def run(edit):
+    p.write_text(base)
+    n = m.Note(p)
+    n.remove_block(m.HOLD_KEY, n.fm_block(m.HOLD_KEY), also=[(m.ON_MERGE_KEY, n.fm_block(m.ON_MERGE_KEY))])
+    if edit:
+        p.write_text(edit(p.read_text()))   # another writer, between the read and the save
+    n.save()
+    t = p.read_text()
+    return f"{'hold_until:' in t}/{'on_merge:' in t}"
+print(run(None), run(lambda t: t.replace("o/r#202", "o/r#303")), run(lambda t: t.replace("on_merge: regenerate", "on_merge: Regenerate")),
+      run(lambda t: t.replace("status: open\n", "status: open\nfoo: bar\n")))
+PY
+mkro ro "" "${APPROVED[@]}"
+ok "$(python3 "$D/cas.py" "$SCRIPT" "$D/ro.md")" "False/False True/True False/True False/False" \
+  "A2g: both go; a rewritten hold keeps on_merge too; a rewritten on_merge stays; another key's write changes nothing"
 
 # ── A2f (R3.1): an Integration begun while the PR was open makes the verdict wait, never read as run ───────────────────
 scen a2f
@@ -319,7 +377,7 @@ for form in paused hard empty; do
   J=$(nxt ro 2>"$D/err")
   ok "$(q "$J" '[d["onMerge"]["action"], d["onMerge"]["why"], d["onMerge"]["detail"]]')" "[\"released\",\"it has run\",\"$why\"]" "A4: [$form] released: it has run"
   ok "$(cat "$D/err")" "WARN: on_merge: regenerate on ro not run: it has run ($why): released as a plain hold" "A4: [$form] … the WARN line"
-  ok "$(q "$J" "$ro_entry")|$(fm ro hold_until)" "[false,null,true]|<none>" "A4: [$form] … the hold cleared"
+  ok "$(q "$J" "$ro_entry")|$(fm ro hold_until)|$(fm ro on_merge)" "[false,null,true]|<none>|<none>" "A4: [$form] … the hold cleared, on_merge with it"
 done
 
 # ── A4b (R1): room stops that ended are no run mark: regenerate, no WARN, the hold kept ─────────────────────────────────

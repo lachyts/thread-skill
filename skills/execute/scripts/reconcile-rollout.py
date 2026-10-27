@@ -458,12 +458,15 @@ Subcommands:
               `on_merge: regenerate` right after it, and `start: unattended` below `status:` unless a valued
               `started_unattended:` stands; a key already at its value is not rewritten. Exit 0 prints one line, `undo:
               remove hold_until, on_merge and start: unattended from [[<note>]] before <pr> merges, or pause [[<note>]]
-              once its lead runs` (with no start stamp, `remove hold_until and on_merge`). Refuses (exit 1, one `ERROR:
+              once its lead runs` (with no start stamp, `remove hold_until and on_merge`); a hold that stood before the
+              run, his own or an earlier run's, is never named (`remove on_merge and start: unattended`, or `remove
+              on_merge`), so following the line never drops a hold he wrote. Refuses (exit 1, one `ERROR:
               approve-queue:` line, nothing written): a note not found, serial, incomplete, done or dropped, superseded,
               paused or pause-requested, one _approved_marks reads as run (room stops and an `integrating:` stamp never
               refuse: the verdict judges them at the merge), an unreadable --pr ("name the PR as owner/repo#N or its
-              URL"; no gh call), a standing hold on another PR (by canonical key) or an unreadable one, and an
-              `on_merge:` of another value. Exit 2 is usage.
+              URL"; no gh call), a standing hold on another PR (by canonical key: a bare-number hold, read in the
+              Project root, never matches, and is told "rewrite it as owner/repo#N first, or remove it") or an
+              unreadable one, and an `on_merge:` of another value. Exit 2 is usage.
 
   stamp-start  `--rollout <note>` (p30-4): schedule step 8 under the chain, after step 7.5, stamps `start: unattended`
               below `status:` on the note an approved queue's regenerate wrote (no write when it is already there) and
@@ -920,7 +923,9 @@ as run; with no linked member left after the project filter (_approved_members) 
 holds (`waits: regenerate`) and `halt` is "regenerate", with the members: this note's unlanded rows, a never-started
 successor's (an interrupted chain's), and the open siblings in their phases (schedule step 1's skip rule), each carrying
 the note's first project (_norm_project). While it holds nothing starts, restarts or newly integrates
-(`awaitingIntegration` is []), and the hold is never cleared. `carry` never copies `on_merge`.
+(`awaitingIntegration` is []), and the hold is never cleared. A plain release (the verdict's `released`, or a done or
+dropped note) clears the hold and its `on_merge:` lines in one compare-and-swap (Note.remove_block's `also`), so a hold
+added by hand later is a plain hold. `carry` never copies `on_merge`.
 
 
 Heat hold (estate ADR 0009 d5; the spec is skills/execute/away.md § Heat): `next` reads the Mac's thermal pressure once
@@ -1762,13 +1767,19 @@ class Note:
         return None if span is None else self._fm[span[0]:span[1]]
 
     @_journaled
-    def remove_block(self, key: str, expected):
+    def remove_block(self, key: str, expected, also=()):
         """Remove the `key:` block (fm_block) only while it still equals `expected`, the lines a caller read: a
-        compare-and-swap, so save()'s replay on a fresh read keeps a block another writer rewrote meanwhile."""
+        compare-and-swap, so save()'s replay on a fresh read keeps a block another writer rewrote meanwhile. Each
+        (key, lines) pair in `also` goes in the same swap, only once the first block went and only while it too still
+        reads as read: a block kept by the swap keeps its companions."""
         span = self._fm_span(key)
         if span is None or self._fm[span[0]:span[1]] != list(expected):
             return
         del self._fm[span[0]:span[1]]
+        for k, lines in also:
+            s = self._fm_span(k)
+            if s is not None and self._fm[s[0]:s[1]] == list(lines):
+                del self._fm[s[0]:s[1]]
         self.dirty = True
 
     @_journaled
@@ -3887,14 +3898,15 @@ def _resolve_holds(gh_bin, holds, memo):
     return out
 
 
-def _clear_hold(note, hold, label, dry_run) -> bool:
+def _clear_hold(note, hold, label, dry_run, also=()) -> bool:
     """`next`'s clear of a merged hold off --dry-run: Note.remove_block (a compare-and-swap) and the note's own save.
     True once saved with no `hold_until` left on the note: a hold another writer rewrote since the read stays (the
     swap's replay keeps it), so it reads False and the lead never reports a standing hold cleared. An OSError is one
-    stderr WARN line and False, and the hold still releases for this call (the next call retries the clear)."""
+    stderr WARN line and False, and the hold still releases for this call (the next call retries the clear). `also`:
+    the (key, lines) blocks that go with the hold in its swap (an approved queue's `on_merge:` on a plain release)."""
     if dry_run:
         return False
-    note.remove_block(HOLD_KEY, hold["lines"])
+    note.remove_block(HOLD_KEY, hold["lines"], also=also)
     try:
         note.save()
     except OSError as e:
@@ -4285,8 +4297,12 @@ def cmd_next(args) -> int:
     # A merged rollout hold is removed in a save of its own, after the start stamp's: that save still fails the call
     # (exit 1, the stamp left for the Stage), while a failed clear only warns and the hold still releases for this call.
     # An approved queue's verdict that keeps the hold standing (waits, regenerate, an unreadable on_merge) never clears it.
+    # A plain release of one (its verdict's `released`, or a done or dropped note) takes the `on_merge:` beside the hold
+    # in the same swap, so a hold Lachy adds by hand later is a plain hold, never this PR's approval judged at its merge.
     if ro_entry is not None and ro_entry["state"] == "MERGED" and not ro_entry["held"]:
-        ro_entry["cleared"] = _clear_hold(rollout_note, ro_hold, rollout_path.stem, args.dry_run)
+        om_lines = rollout_note.fm_block(ON_MERGE_KEY)
+        ro_entry["cleared"] = _clear_hold(rollout_note, ro_hold, rollout_path.stem, args.dry_run,
+                                          also=[(ON_MERGE_KEY, om_lines)] if om_lines is not None else [])
     for r, h, entry in task_clears:
         entry["cleared"] = _clear_hold(r["note"], h, r["slug"], args.dry_run)
 
@@ -8371,8 +8387,9 @@ def cmd_approve_queue(args) -> int:
     `on_merge: regenerate` and `start: unattended` in one locked save, and print the one undo line. Refuses (exit 1,
     one ERROR line, nothing written) a note that is not found, serial, incomplete, closed, superseded or paused, one
     _approved_marks reads as run (room stops and an `integrating:` stamp do not refuse: the verdict judges them at the
-    merge), an unreadable --pr, a standing hold on another PR or an unreadable one, and an `on_merge:` of another
-    value. A key already at its value is not rewritten."""
+    merge), an unreadable --pr, a standing hold on another PR (a bare-number one is told to become owner/repo#N) or an
+    unreadable one, and an `on_merge:` of another value. A key already at its value is not rewritten. The undo line
+    names `hold_until` only when this run wrote it."""
     def refuse(msg):
         print(f"ERROR: approve-queue: {msg}", file=sys.stderr)
         return 1
@@ -8411,7 +8428,10 @@ def cmd_approve_queue(args) -> int:
     if hold is not None and hold["error"] is not None:
         return refuse(f"{stem}: its {HOLD_KEY} is unreadable ({hold['error']}): fix or remove it first")
     if hold is not None and hold["key"] != key:
-        return refuse(f"{stem}: its {HOLD_KEY} names {hold['pr']}, not {pr}: remove it first, or name its PR")
+        # A bare number is read in the Project root, so it never matches a --pr, and --pr takes no bare number.
+        fix = "rewrite it as owner/repo#N first, or remove it" if isinstance(hold["key"], tuple) else \
+            "remove it first, or name its PR"
+        return refuse(f"{stem}: its {HOLD_KEY} names {hold['pr']}, not {pr}: {fix}")
     om = _on_merge(note)
     if om is not None and om["error"] is not None:
         return refuse(f"{stem}: its {ON_MERGE_KEY}: reads {om['value'] or '<empty>'}: {ON_MERGE_BAD}")
@@ -8427,7 +8447,10 @@ def cmd_approve_queue(args) -> int:
     except OSError as e:
         return refuse(f"{stem}: cannot write {path}: {e}; nothing written")
     shown = hold["pr"] if hold is not None else pr
-    keys = f"{HOLD_KEY}, {ON_MERGE_KEY} and {START_KEY}: {START_UNATTENDED}" if stamp else f"{HOLD_KEY} and {ON_MERGE_KEY}"
+    # A hold that stood before this run (his own, or an earlier run's: the note cannot say which) is never named, so
+    # following the line never drops a hold he wrote; removing on_merge (and the start stamp) undoes the approval.
+    named = ([] if hold is not None else [HOLD_KEY]) + [ON_MERGE_KEY] + ([f"{START_KEY}: {START_UNATTENDED}"] if stamp else [])
+    keys = f"{', '.join(named[:-1])} and {named[-1]}" if len(named) > 1 else named[0]
     print(f"undo: remove {keys} from [[{stem}]] before {shown} merges, or pause [[{stem}]] once its lead runs")
     return 0
 

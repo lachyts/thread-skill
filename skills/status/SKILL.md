@@ -320,9 +320,9 @@ takes none of them.
   drift: the lead waits on its merge and `next` releases and clears it itself, and a CLOSED or unreadable one is
   Lachy's edit to the note, so status never routes a hold to `/thread:repair`.
 - **Approved queue, unstamped:** a non-null `chainStart`: an approved queue's regenerate wrote this note and
-  closed `[[<prior>]]` out when `<pr>` merged, and its lead died before `stamp-start`, so the Chorus Stage will not
-  start it. Render `APPROVED QUEUE, UNSTAMPED: superseded [[<prior>]] when <pr> merged; start it by hand` (§ 4,
-  action 13). It reads only the vault, so it holds offline too.
+  closed `[[<prior>]]` out when `<pr>` merged, and its lead died, or its `stamp-start` stopped, before the start
+  stamp, so the Chorus Stage will not start it. Render `APPROVED QUEUE, UNSTAMPED: superseded [[<prior>]] when <pr>
+  merged; start it by hand` (§ 4, action 13). It reads only the vault, so it holds offline too.
 
 **Offline.** `--offline` skips this step: say the report is vault-only, and every resume or reinstate
 recommendation it makes carries the caveat "drift is invisible offline; re-run with the live check before
@@ -617,7 +617,7 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     start: the lead it starts waits on the merge (`HELD until <pr> merges`) and releases itself. An approved
     queue (§ 3's Hold until, a non-null `onMerge`) is started the same way, and its lead regenerates it at the
     merge. Under § 3's **Approved queue, unstamped:** flag → `/thread:execute [[<rollout>]]`: the chain that
-    wrote it died before its start stamp.
+    wrote it died or stopped before its start stamp.
 
 **A refused ladder.** The Ladder refused flag reorders nothing: whichever action matches, from 7 to 13, gets
 the fix first: "fix `<ladder.source>` (<ladder.error>) first: execute halts `ladder file refused` at each call's

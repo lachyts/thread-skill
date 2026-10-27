@@ -111,7 +111,8 @@ merged: true}`.
   meanwhile stays, and `next` reports it not cleared); a save that fails leaves the hold for the next call,
   and the hold still releases for that call. The one exception is an approved queue (§ Approved queue): its
   verdict at the merge keeps the hold standing while it waits or regenerates, and clears it only when it
-  releases as a plain hold.
+  releases as a plain hold, its `on_merge:` lines with it in the same compare-and-swap, so a hold added by hand
+  later is a plain hold.
 - **Supersede**: a rollout-scope hold survives a supersede: `reconcile-rollout.py carry` (schedule step 6)
   copies the prior's lines verbatim into the note that supersedes it. A task-scope hold rides on its task
   note, which the carry never edits there.
@@ -129,7 +130,9 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
   words naming the queue and its gating PR (execute § Invocation forms' `start [[<rollout>]] when <owner/repo>#<N>
   merges`, orient § 9's and schedule step 8's Start when ready). In one locked save it writes the hold, `on_merge:
   regenerate` right after it and `start: unattended` below `status:` (unless the Stage's `started_unattended:`
-  stands), and prints one undo line. It refuses a note that has run, his pause included, and writes nothing then.
+  stands), and prints one undo line. The line names `hold_until` only when this run wrote it, so following it never
+  drops a hold he wrote; a bare-number hold (`{pr: 202}`, read in the Project root) is refused with "rewrite it as
+  owner/repo#N first". It refuses a note that has run, his pause included, and writes nothing then.
   Lachy's own hand edit is the other writer; the template's commented `# on_merge:` line shows the form.
 - **Reader**: `reconcile-rollout.py next`, the verdict, once the hold reads MERGED: it keeps the hold standing and
   reports `halt: "regenerate"` with the members (`onMerge`), and execute § 4.5's **Approved queue** route runs
@@ -137,6 +140,11 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
   The members are this note's unlanded linked tasks, a successor's when an interrupted chain's carry already moved
   them, and the open siblings filed since in the same phases (schedule step 1's skip rule kept); the project filter
   keeps only those carrying this note's first project. With no linked member left it releases as a plain hold.
+- **Clearer**: `next`, on a plain release (the verdict's `released`: it has run, or nothing of its own is left; or
+  a done or dropped note): it removes the `on_merge:` line with the hold (§ Hold until's Clearer), in the hold's one
+  compare-and-swap, so a hold Lachy adds by hand later for another PR is a plain hold and never brings back an
+  approval he gave for this one. A hold rewritten meanwhile keeps its `on_merge:` too. A verdict that keeps the
+  hold standing (waits, regenerate, an unreadable value) clears neither.
 - **What counts as having run** (`_approved_marks`, the approved queue's own read): a room stop is no run mark. The
   Chorus Stage's room-stop lines (execute § Room stop; step-boundary.py's, one regex) are never Lachy's run, so a
   queue whose only marks are room stops, each one ended, reads as unrun to the verdict, to `approve-queue`, to
@@ -152,11 +160,14 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
   only `/thread:status` flags it; at the merge it holds and waits on Lachy (`waits: you`).
 - **`status`** reports `onMerge` ({value, error}) and `chainStart` ({prior, pr} on a chain's new note whose start
   was never stamped).
-- **The chain and its windows.** The lead dying before step 6 writes leaves the hold standing, and a re-entry runs
-  the chain again. Dying after the carry and before step 7.5 (the I8 window) leaves the prior linking nothing: its
-  `next` still reads `regenerate` with the successor's tasks, and execute § 2's lineage lets the run go on to
-  schedule's `interrupted` finish. Dying after step 7.5 and before `stamp-start` leaves the new note unstamped,
-  which `/thread:status` flags (`chainStart`). Two crashes in a row lose only the start intent: the new note runs
+- **The chain and its windows.** A crash or a stop before step 7.5 closes the prior out leaves the hold standing,
+  so a re-entry runs the chain again: before step 6 writes, from the start; after the carry (the I8 window) the
+  prior links nothing, but its `next` still reads `regenerate` with the successor's tasks, and execute § 2's lineage
+  lets the run go on to schedule's `interrupted` finish. Once step 7.5 has closed the prior out, a re-entry on it
+  ends `superseded` and never regenerates: a crash, or a stop (`stamp-start` exiting 1), before the new note is
+  stamped leaves it unstamped, which `/thread:status` flags (`chainStart`, its **Approved queue, unstamped:**
+  flag), and that stop halts with an (e) item whose act is `/thread:execute [[<new>]]` (execute § 4.5's
+  **Approved queue** route). Two crashes in a row lose only the start intent: the new note runs
   when he starts it. A late heartbeat tick on the closed prior ends at its clause (1), and `next` on a superseded
   note halts `superseded`.
 

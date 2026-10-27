@@ -753,8 +753,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the lead's route runs `/thread:schedule --regenerate` on its members under
   the chain, whose last act is `stamp-start` on the new note: no confirm, one
   undo line (the 2026-10-25 audit's Q54). His own pause still counts as a run
-  and releases it as a plain hold; a Room stop is no run mark for it.
-  `skills/_shared/vault-grammar.md` § Approved queue. _Avoid_:
+  and releases it as a plain hold, `on_merge` cleared with the hold; a Room
+  stop is no run mark for it. `skills/_shared/vault-grammar.md` § Approved
+  queue. _Avoid_:
   auto-regenerate, pre-approved rollout.
 - **Bookkeeping miss** — a window the canary could not read (`record
   missing`, `record unreadable`, `record not armed`): it observed nothing, so

@@ -9,6 +9,10 @@
 //                  in the foreground, `--regenerate --tasks <onMerge.members`, `Under the chain`, `stamp-start`,
 //                  `state=done` and the halt reason; no AskUserQuestion, no plain-text ask, and no `paused:` but its own
 //                  "writes no `paused:`" (R1's choice: the room stops are read through approved_unrun instead).
+//   stop-split     a schedule stop before step 7.5 leaves the hold (route step 5); one after it leaves the new note
+//                  unstamped, halts `written unstamped` with the (e) act `/thread:execute [[<new>]]` (route step 6, (e), § 7),
+//                  and the grammar's windows say a re-entry on the closed prior never regenerates.
+//   clearer        a plain release clears `on_merge:` with the hold: § Approved queue's **Clearer** and § Hold until's.
 //   step15         the halt guard routes `superseded` (ends `state=done`, never § 7) and `regenerate`, and its `held`
 //                  branch ends `waiting` on `waits: integration` or `waits: room-stop` (`approved queue waits:`).
 //   room-stop-7    § Room stop item 7 says a room stop is no run mark on an approved queue.
@@ -71,6 +75,22 @@ function check(f) {
     'reason="approved queue: regenerate stopped: <its stop line, double quotes as single>"', 'The route writes no `paused:`',
     '`approved_unrun`']) && !route.includes('AskUserQuestion') && !PLAIN_ASK.test(route) &&
     route.split('`paused:`').length === route.split('writes no `paused:`').length)
+
+  // stop-split
+  const kindE = C((f.execute.split('\n').find((l) => l.startsWith('- (e) '))) ?? '')
+  const s7x = C(section(f.execute, /^### 7\. /))
+  fail('stop-split', has(route, ['5. When schedule stopped before its step 7.5 closed this note out', 'The hold still stands, so a re-entry regenerates again',
+    "6. When it stopped after step 7.5", "a re-entry here ends at step 1.5's `superseded` and never regenerates",
+    'reason="approved queue: [[<new>]] written unstamped: <its stop line, double quotes as single>"',
+    'an (e) item whose act is `/thread:execute [[<new>]]`']) && !route.includes('When schedule stopped anywhere') &&
+    kindE.includes("`/thread:execute [[<new>]]` for an approved queue's regenerate that stopped after step 7.5") &&
+    s7x.includes('reason="approved queue: [[<new>]] written unstamped: <its stop line>"') &&
+    aq.includes('Once step 7.5 has closed the prior out, a re-entry on it ends `superseded` and never regenerates'))
+
+  // clearer
+  const hu = C(section(f.grammar, /^## Hold until$/))
+  fail('clearer', has(aq, ['**Clearer**', 'it removes the `on_merge:` line with the hold', 'is a plain hold and never brings back an approval']) &&
+    hu.includes('its `on_merge:` lines with it in the same compare-and-swap'))
 
   // step15
   const guard = C((s45.split('\n').find((l) => /^ {3}5\. \*\*Halt guard/.test(l))) ?? '')
@@ -161,9 +181,24 @@ test('control: a drifted key, or the room-stop rule dropped, fails grammar', () 
 
 test('control: the route deleting the heartbeat late, asking, or stamping paused: fails route', () => {
   only('execute', '2. `CronList`, then `CronDelete` this rollout\'s `ROLLOUT-HEARTBEAT`, before the schedule run. ', '2. ', 'route')
-  only('execute', '5. When schedule stopped anywhere: halt (§ 7)', '5. When schedule stopped anywhere: ask Lachy for a retry, else halt (§ 7)', 'route')
+  only('execute', 'The route writes no `paused:`: the Stage', 'The route asks Lachy for a retry. The route writes no `paused:`: the Stage', 'route')
   only('execute', 'The route writes no `paused:`: the Stage', 'The route stamps `paused:` on this note first. The route writes no `paused:`: the Stage', 'route')
   only('execute', '`Under the chain: [[<rollout>]], <pr> merged`', '`Under orient-all`', 'route')
+})
+
+test('control: a stop after step 7.5 read as regenerating again, or without its act, fails stop-split', () => {
+  only('execute', "this note is closed and superseded, so a re-entry here ends at step 1.5's `superseded` and never regenerates, and ",
+    'the hold still stands, so the next entry regenerates again, and ', 'stop-split')
+  only('execute', ' an (e) item whose act is `/thread:execute [[<new>]]` (§ 6.5).', ' an (e) item (§ 6.5).', 'stop-split')
+  only('execute', "`/thread:execute [[<new>]]` for an approved queue's regenerate that stopped after step 7.5", 'nothing', 'stop-split')
+  only('execute', '; after it, `reason="approved queue: [[<new>]] written unstamped: <its stop line>"`', '', 'stop-split')
+  only('grammar', 'Once step 7.5 has closed the prior out, a re-entry on it\n  ends `superseded` and never regenerates',
+    'Once step 7.5 has closed the prior out, a re-entry on it\n  regenerates again', 'stop-split')
+})
+
+test('control: a plain release that leaves on_merge behind fails clearer', () => {
+  only('grammar', '- **Clearer**: `next`, on a plain release', '- **Release**: `next`, on a plain release', 'clearer')
+  only('grammar', 'its `on_merge:` lines with it in the same compare-and-swap', 'and leaves its `on_merge:` lines', 'clearer')
 })
 
 test('control: a superseded halt that goes to § 7, or a held clause dropped, fails step15', () => {
