@@ -140,11 +140,17 @@ ok "$(q "$J" "$holds")" '{"c2":"ceiling: 1/1 slots in use"}' "H7: heavy with the
 # ── H8, H9: a git-env hold and a pause beat the heat ──────────────────────────────────────────────────────────
 scen h8-git-env
 one
-printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro-b.md"
+printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: core.bare false→true; repo /x\n' >> "$D/ro-b.md"
 J=$(nx 2 ro-b --running "" --dry-run)
-ok "$(q "$J" '[d["halt"], d["start"]]')" '["git-env",[]]' "H8: a git-env trip halts git-env, heat or not"
+ok "$(q "$J" '[d["halt"], d["start"]]')" '["git-env",[]]' "H8: a whole-rollout git-env trip (a bare checkout) halts git-env, heat or not"
 ok "$(q "$J" "$holds")" '{"b1":"git-env hold: /thread:repair","b2":"git-env hold: /thread:repair","b3":"git-env hold: /thread:repair"}' \
   "H8: every row reads the git-env hold, none the heat"
+scen h8b-lane
+one
+printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro-b.md"
+J=$(nx 2 ro-b --running "" --dry-run)
+ok "$(q "$J" '[d["halt"], [h["scope"] for h in d["gitEnvHold"]], sorted(set(h["reason"] for h in d["hold"]))]')" "[null,[\"lane\"],[\"$HOT\"]]" \
+  "H8: a lane trip (ADR 0046) holds no start: the heat names every hold, no halt"
 scen h9-pause
 mkro ro-b 4 'pause_requested: true'; mkt b0 ro-b in_progress 'owner: l'; mkt b1 ro-b open; mkt b2 ro-b open
 J=$(nx 2 ro-b --dry-run)

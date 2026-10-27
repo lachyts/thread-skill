@@ -91,6 +91,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   schedule step 8's "Checklist —" report blocks (called "Pre-flight —"
   before ADR 0047), nor a Leg's preflight.
   _Avoid_: preflight check, dry run.
+- **Pickup sweep** — schedule step 1.2, on a standalone parallel `--tasks` run
+  only (ADR 0057): before the **Pre-flight** it reads the same repo's other
+  open tasks on the named tasks' projects (`unfinished-rollout.py pickups`)
+  and joins those that fit, each one a named task needs (uncapped) and up to
+  five others, by priority, then phase. A misfit, a gate hit or a dependency it
+  cannot meet stays out, named; a task on another repo, or with no `## Launch`
+  **Repo:** line, is only counted. A whole-project reshuffle stays orient's.
+  _Avoid_: backlog scan.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
   a fortnight or when its ready work grows), or kill it (done and archived).
@@ -174,8 +182,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   unless told to steer it as it stands or just look. It schedules parallel-shaped
   work itself and, when Lachy steers Autonomous or Mixed, serial-shaped work as
   a serial rollout; it routes the rest by the execution-fit test and ends with the
-  **execute offer** (run the rollout in a fresh session, here, not yet, or
-  start when ready).
+  **execute handoff** (a fresh session by default; here, not yet or start when
+  ready on his word).
   Pointed at a single plan, design note or brain dump it runs a **scoped
   reshuffle** of that note alone. Absorbs the former `split` and `gather` verbs
   (ADR 0027).
@@ -517,6 +525,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suites do not contend, tuned from the Run record (ADR 0049). Each
   rollout's **Parallel ceiling** still bounds its own share. _Avoid_: night
   ceiling, global ceiling.
+- **Lease** — a lead's stamp that keeps its Rollout's running tasks in the
+  Mac-wide count (the **Trickle**, the **Away cap**), rewritten at its every
+  `next` and loop entry: it lapses 45 minutes after its last write, or after
+  the Mac's latest boot or wake if later, unless a room stop stands, and a
+  Rollout with no lease still counts (ADR 0049, amended). _Avoid_: heartbeat
+  file, lock.
+- **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
+  the **Away cap**) for a start it has picked but not yet stamped, so every
+  other lead counts it. The stamp consumes it, and it lapses after 20
+  minutes. _Avoid_: bare "claim" (a Leg's task claim and a **Surface** claim
+  use it).
 - **Last starts** — toward the Morning, a queued task starts only if its
   kind's usual length (the median of that kind's past runs in the project,
   its kind its note's `scope:`) ends it by the Morning's hour; with fewer than
@@ -551,7 +570,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Integration lane** — the one-at-a-time Integration step itself, held by one
   approved task at a time until it is released (a merge, a set-aside, a
   rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
-  to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue
+  to "the lane". A **Git-env hold** that is not a bare checkout, and an
+  undecided RACE, hold the lane only (`next`'s `laneHold`, ADR 0046): nothing
+  integrates or merges while task calls go on. Not a **Lane** (rollout vs session). _Avoid_: merge queue
   (Integration's gloss: the whole step, never the lane alone).
 - **Active Integration time** — an Integration's wall time less the **Stops**
   inside it that stop its calls (all but a halt, which carries them on): an
@@ -722,9 +743,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   It differs from unfinished both ways: it leaves out paused, never-started
   and protocol-3 rollouts, and keeps one whose every task merged but whose
   completion ceremony has not run. _Avoid_: active, in flight.
-- **Start when ready** — the execute offer's fourth answer (orient § 9,
-  schedule step 8): it stamps `start: unattended` on the rollout note just
-  written and ends, running nothing. The Chorus Stage starts the lead in the
+- **Execute handoff** — how a session that wrote a parallel rollout note ends
+  (orient § 9, schedule step 8; ADR 0057): decided and never asked, it hands
+  the note to a fresh session through handoff's **Rollout launch.**, whose doc
+  carries `launches:` and briefs the rollout's lead, never this thread. Only his
+  words choose here, not yet or start when ready instead, and only a refused
+  ladder file holds it. Close's `rollout not started:` row names it again for a
+  note this session wrote and left with no lead. _Avoid_: execute offer.
+- **Start when ready** — the execute handoff's fourth move, on his word
+  (orient § 9, schedule step 8): it stamps `start: unattended` on the rollout note just
+  written and ends, running nothing. Said after the handoff, it withdraws the
+  launch first, and stamps nothing when a lead already runs. The Chorus Stage starts the lead in the
   note's Project root, the **Rollout clone** (ADR 0042), once the note is runnable, and that lead's first `next`
   clears the stamp, so no second lead starts (vault grammar § Rollout start
   stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.
@@ -750,9 +779,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   revise never launches unarmed. _Avoid_: watch, session.
 - **Git-env hold** — the unacked trip lines on a rollout note's
   `## Git-env log`: while one stands, nothing integrates or merges and `carry`
-  refuses the rollout, while task calls keep starting and running; a bare
-  checkout holds the whole rollout (ADR 0046, ADR 0048). Only a **Git-env
-  ack** lifts it. _Avoid_: git-env halt (the lead's stop, not the hold).
+  refuses the rollout, while task calls keep starting and running (the
+  **Integration lane** held: `laneHold`, the canary's exit 9); a bare
+  checkout holds the whole rollout (each entry's `scope`; ADR 0046, ADR 0048).
+  Only a **Git-env ack** lifts it. _Avoid_: git-env halt (the lead's stop, not the hold).
 - **Git-env ack** — the recorded acceptance of the tripped windows, naming
   exactly the set shown and the ref shown (`--ref`). Lachy's, through
   `/thread:repair` (its git-env step, 3e), after an optional `restore`; never
@@ -785,9 +815,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   auto-regenerate, pre-approved rollout.
 - **Bookkeeping miss** — a window the canary could not read (`record
   missing`, `record unreadable`, `record not armed`): it observed nothing, so
-  it never trips. It is logged with the checkout's state, read there and
-  then, and only a failing state check trips (ADR 0046). _Avoid_: false
-  trip, automatic ack.
+  it never trips. It is logged (a `git-env miss` line) with the checkout's
+  state, read there and then (not bare, no tracked changes, `<default>` an
+  ancestor of origin's tip by `ls-remote` and by the tracking ref after a
+  fetch), holds nothing, and only a failing state check trips (ADR 0046).
+  _Avoid_: false trip, automatic ack.
+- **RACE revert** — a RACE whose re-verify stays red after the Flake check is
+  reverted on `main` through a revert PR merged only through merge-task
+  (`lead-integrate.py revert`; never a force-push), its task set aside for
+  Lachy. The lane frees only when `main`'s tree is restored, by tree or but
+  for proven Inert paths (ADR 0045); a revert that did not land holds the
+  whole rollout (main red, `next`'s `mainRed`) until Lachy decides (ADR
+  0046). _Avoid_: rollback, force-revert.
 - **Dependent closure** — the set of tasks transitively depending on a task
   via `depends-on:` / `blocked-by:` (schedule § 3) — the blast radius that
   must move together if it's deferred, and the tasks a set-aside task holds
@@ -1061,8 +1100,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Reflection. It becomes a rule proposal when a later rollout shows the same
   thing again, or at once when Lachy confirms it. Lachy's no closes it too:
   it comes back only when two later rollouts show it again. A Watch the
-  Time-lost ledger opens on a class counts readings instead of rollouts.
-  Knobs need no Watch. _Avoid_: candidate, hunch.
+  Time-lost ledger opens on a class, or the circling detector on its rule
+  (**Circling**), counts readings instead of rollouts. Knobs need no Watch.
+  _Avoid_: candidate, hunch.
 - **Time-lost ledger** — the hours each cause class cost (stalls by cause,
   usage limits, machine load, the Integration lane, Integration rework, plan
   blocks, named from the Run record's own values where one fits), summed by
@@ -1080,6 +1120,39 @@ through time, from attention to merged PRs. Terms only — no implementation.
   step of the month's first weekly reading, whatever its cadence, run beside
   the trace (ADR 0051). Its gaps go in the decision task and never change
   whether the reading is quiet. _Avoid_: retro, deep dive.
+- **Attention ledger** — what the weekly reading reads past the Run record
+  about Lachy's attention and the work that waits on it: the **Question
+  ledger**, the **Review trails**, each rollout's **Wait to start** and
+  **Circling**, read by a script from the session transcripts,
+  `reviews.jsonl`, read-only git and the vault, and kept as one `attention`
+  line per reading in `reflections.jsonl`, written by `reflect.py attention`
+  with the reading's Owner label for each question (ADR 0056). _Avoid_: loop
+  ledger; attention minutes; Review load (the estate pass's forecast of the
+  attention a rollout will take, above).
+- **Question ledger** — every question put to Lachy through the question
+  tool in a reading's window, read from the session transcripts' main chain:
+  its outcome (answered, dismissed, dropped or open; a call he never saw is
+  failed and never counted as asked), the recommended option and whether he
+  picked it, his own words or note, the hours it held work, and its Owner by
+  `skills/_shared/asking.md` § 1, labelled by the reading (an `unknown`
+  remainder never blocks the close). _Avoid_: ask log.
+- **Review trail** — one PR's run of /fresh-review rounds, keyed by its
+  landing merge, else its branch, else a run of rounds in one checkout: its
+  rounds, its **STOP entries** (each time the rounds enter the stop verdict),
+  the stops **handed to Lachy** (a question within 30 minutes of a stop
+  round from the same checkout), and whether the PR changed docs alone.
+  _Avoid_: review loop (the engine's convergence of plan, verify and review
+  rounds, above); chain (`review-ledger.py`'s, narrower).
+- **Wait to start** — a rollout's time from Lachy's ask (the earliest
+  `captured:` of the tasks its queue links) and from its scheduling (its own
+  `captured:`) to its first Slot. _Avoid_: lead time.
+- **Circling** — work touched and not merged: a work item (a task with
+  `phase:`, `pr:` or `rollout:`) three or more Sessions named while no
+  rollout held it, before its dispatch or once set aside (W1), or a rollout
+  open 48 hours with nothing merged (W2). Each opens a **Watch** counted in
+  readings; a reading's own Sessions never count as touches (ADR 0056).
+  _Avoid_: loop; stuck item; stall or **Stalled rollout** (one with nothing
+  moving; circling work moves without landing).
 - **Quiet Reflection** — one that finds no new Watch (one first seen in this
   reading; a declined one seen again is not new), no rule proposal, no
   bug and no Guardrail breach. Three in a row move the reading from weekly

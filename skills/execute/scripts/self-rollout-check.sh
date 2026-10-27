@@ -9,7 +9,7 @@
 #   --ensure <Local:>                     schedule § 0: the Project root, its clone made or refreshed
 #   --refresh <Project root>              execute § 2.7: fast-forward a clone root at an entry point
 #   --refresh-in-place <Project root>     merge-task.sh and the completion ceremony: fast-forward its twin
-#   --launch-check <Project root> <dir>   execute § 2.8, repair § 4 and orient § 9: the lead's launch directory
+#   --launch-check <Project root> <dir>   execute § 2.8, repair § 4, orient § 9 and schedule step 8: the lead's launch directory
 #   --in-place <path>                     is <path> inside a rollout clone, and what is its twin
 #   --list-dirs                           pushed-base.sh: the registry's directory sources
 #

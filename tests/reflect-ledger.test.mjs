@@ -436,6 +436,7 @@ function reading(h, k, { decide = true } = {}) {
   stallDay(h, `w${k}`, w.day)
   const sp = span(h, w.since, w.until)
   ok(h, ['ledger', '--span', sp.out])
+  ok(h, ['attention', '--span', sp.out]) // p30-7: step 13b, before decide and close
   if (decide) {
     const dec = path.join(sp.dir, 'decisions.json')
     fs.writeFileSync(dec, '{}')

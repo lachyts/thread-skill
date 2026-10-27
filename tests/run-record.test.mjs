@@ -960,6 +960,70 @@ test('time-lost is refused, exit 2 and nothing written, when malformed', (t) => 
   }
 })
 
+// ---- the attention ledger's line (p30-7, ADR 0056): attention, and a watch's circling ------------------------------------
+
+const OWN = { yours: 2, priorities: 1, technical: 3, gate: 0, unknown: 1 }
+const ATT = { reflection: RID, since: '2026-10-20T13:00:00.000Z', until: '2026-10-25T13:00:00.000Z',
+  questions: { asked: 7, calls: 6, answered: 5, dismissed: 1, dropped: 0, open: 1, failed: 1, unparsed: 0, notes: 1, ownWords: 1, unlabelled: 1,
+    recommended: { offered: 4, picked: 3 }, hoursHeld: 9.5,
+    longest: [{ call: 'toolu_1', session: 'abcdef12', repo: 'o/r', header: 'Next move', hours: 4, outcome: 'answered' }],
+    byRepo: { 'o/r': 6, other: 1 }, byOwner: OWN, hoursByOwner: { yours: 2, priorities: 1, technical: 6, gate: 0, unknown: 0.5 } },
+  trails: { count: 2, rounds: 7, codeRounds: 6, simplifyRounds: 1, stopRounds: 3, stops: 2, stopsHanded: 1, findings: 20, regression: 5, engineStops: 0,
+    docsOnly: { trails: 1, rounds: 2 }, longest: [{ label: '#211', rounds: 5, stopRounds: 3, stops: 1, stopsHanded: 1, docsOnly: false, handedAfterStop: ['toolu_9#0'] }] },
+  waits: [{ rollout: 'r', ask: '2026-10-20T13:00:00.000Z', scheduled: '2026-10-20T13:00:00.000Z', started: null, hours: 120, scheduleHours: 120, open: true }],
+  circling: { W1: [{ slug: 'a-task', sessions: 3, questions: 2 }], W2: [{ slug: 'r', sessions: 1, questions: 0, hours: 60 }] } }
+
+test('attention (p30-7) lands in reflections.jsonl as v 1, rollout and task null; a watch takes circling', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--kind', 'attention', '--json', JSON.stringify(ATT)], { env: EV(home) })
+  const { waits, circling, ...bare } = ATT
+  emitOk(home, ['--kind', 'attention', '--json', JSON.stringify(bare)], { env: EV(home) })
+  const [wid] = ids(home)
+  const k = kinds(wid, 'x')
+  for (const rule of ['W1', 'W2']) emitOk(home, ['--kind', 'watch', '--json', JSON.stringify({ ...k.watch, circling: rule })], { env: EV(home) })
+  assert.deepEqual(listing(ev(home)), ['reflections.jsonl'])
+  const all = lines(path.join(ev(home), 'reflections.jsonl'))
+  assert.deepEqual(all.map((l) => [l.v, l.rollout, l.task, l.kind, l.kind === 'watch' ? l.circling : Object.keys(l.circling ?? {})]), [[1, null, null, 'attention', ['W1', 'W2']], [1, null, null, 'attention', []],
+    [1, null, null, 'watch', 'W1'], [1, null, null, 'watch', 'W2']])
+})
+
+test('attention and a circling watch are refused, exit 2 and nothing written, when malformed', (t) => {
+  const home = tmpHome(t)
+  const [wid] = ids(home)
+  const k = kinds(wid, 'x')
+  const q = ATT.questions
+  const { trails, ...noTrails } = ATT
+  const cases = [
+    ['a missing trails', 'attention', noTrails],
+    ['an owner key outside the five', 'attention', { ...ATT, questions: { ...q, byOwner: { ...OWN, mine: 0 } } }],
+    ['an owner missing', 'attention', { ...ATT, questions: { ...q, byOwner: (({ gate, ...rest }) => rest)(OWN) } }],
+    ['a negative count', 'attention', { ...ATT, questions: { ...q, open: -1 } }],
+    ['more unlabelled than asked', 'attention', { ...ATT, questions: { ...q, unlabelled: 8 } }],
+    ['byOwner not summing to asked', 'attention', { ...ATT, questions: { ...q, byOwner: { ...OWN, yours: 5 } } }],
+    ['more picked than offered', 'attention', { ...ATT, questions: { ...q, recommended: { offered: 1, picked: 2 } } }],
+    ['a negative hour', 'attention', { ...ATT, questions: { ...q, hoursHeld: -1 } }],
+    ['a header over 60 characters', 'attention', { ...ATT, questions: { ...q, longest: [{ ...q.longest[0], header: 'h'.repeat(61) }] } }],
+    ['thirteen repos', 'attention', { ...ATT, questions: { ...q, byRepo: Object.fromEntries(Array.from({ length: 13 }, (_x, i) => [`r${i}`, 1])) } }],
+    ['six longest trails', 'attention', { ...ATT, trails: { ...ATT.trails, longest: Array.from({ length: 6 }, () => ATT.trails.longest[0]) } }],
+    ['nine handed ids', 'attention', { ...ATT, trails: { ...ATT.trails, longest: [{ ...ATT.trails.longest[0], handedAfterStop: Array.from({ length: 9 }, (_x, i) => `t${i}`) }] } }],
+    ['seventeen waits', 'attention', { ...ATT, waits: Array.from({ length: 17 }, () => ATT.waits[0]) }],
+    ['thirty-three W1 items', 'attention', { ...ATT, circling: { W1: Array.from({ length: 33 }, (_x, i) => ({ slug: `s${i}`, sessions: 3, questions: 0 })) } }],
+    ['a circling slug that is no slug', 'attention', { ...ATT, circling: { W2: [{ slug: 'Rollouts', sessions: 1, questions: 0, hours: 50 }] } }],
+    ['a reserved circling slug', 'attention', { ...ATT, circling: { W1: [{ slug: 'tunings', sessions: 3, questions: 0 }] } }],
+    ['readings on the line', 'attention', { ...ATT, circling: { ...ATT.circling, readings: ['abcdef12'] } }],
+    ['since after until', 'attention', { ...ATT, since: '2026-10-26T00:00:00.000Z' }],
+    ['an attention line with a rollout', 'attention', ATT, ['--rollout', 'r']],
+    ['a watch circling W3', 'watch', { ...k.watch, circling: 'W3' }],
+    ['a watch with circling and ledgerClass', 'watch', { ...k.watch, circling: 'W1', ledgerClass: 'load' }],
+  ]
+  for (const [name, kind, fields, extra = []] of cases) {
+    const r = cli(home, ['emit', ...extra, '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, name)
+    assert.deepEqual(listing(ev(home)), [], name)
+  }
+})
+
 test('the Time-lost ledger\'s classes and causes are the schema\'s one copy; the docstring names how a ledger Watch counts and that gaps never count against quiet', (t) => {
   const home = tmpHome(t)
   const r = api(home, 'print(json.dumps({"doc": m.__doc__, "classes": m.TIME_LOST_CLASSES, "causes": m.TIME_LOST_CAUSES, "kinds": m.REFLECTION_KINDS}))')
@@ -968,6 +1032,7 @@ test('the Time-lost ledger\'s classes and causes are the schema\'s one copy; the
   assert.deepEqual(classes, ['stalls', 'quota-bound', 'load', 'lane-bound', 'rework', 'plan-rejected'])
   assert.deepEqual(Object.keys(causes), classes)
   assert.ok(rk.includes('time-lost'))
+  assert.ok(rk.includes('attention'), 'p30-7: the attention line is a reflections.jsonl kind')
   const flat = doc.replace(/\s+/g, ' ')
   assert.ok(flat.includes('counts readings, not rollouts'), 'the Watch rule names the reading unit')
   assert.ok(flat.includes('A Monthly audit\'s gaps (a `time-lost` audit line\'s) never count against `quiet`'), 'the cadence rule names the gaps')

@@ -316,11 +316,22 @@ ok "$(fm ro hold_until)|$(cat "$D/err")" "$OM|" "A2f: … the hold kept, no WARN
 HOME="$EH" python3 "$SCRIPT" mark-done --tasks x-p29-2-b --tasks-dir "$D" --now "$NOW" >/dev/null
 J=$(nxt ro)
 ok "$(q "$J" '[d["halt"], d["onMerge"]["members"]]')" '["regenerate",["x-p29-1-a"]]' "A2f: once it merged: halt regenerate"
-# A RACE re-verify holds the lane on the task (race_held_lane): the verdict waits too.
+# A lane git-env trip (ADR 0046) halts first, as every git-env trip did: its log is no run mark, so the verdict still
+# regenerates, but the halt is git-env until Lachy's ack; once acked, it regenerates.
+A40=$(printf 'a%.0s' {1..40}); B40=$(printf 'b%.0s' {1..40})
+printf '\n## Git-env log\n\n- 2026-10-02T13:30:00+00:00 git-env trip [[x-p29-1-a]] task: refs/heads/master %s→%s; repo %s\n' \
+  "$A40" "$B40" "$D/repo" >> "$D/ro.md"
+J=$(nxt ro)
+ok "$(q "$J" '[d["halt"], d["onMerge"]["action"], d["laneHold"]]')" '["git-env","regenerate",[{"hold":"git-env","slug":"x-p29-1-a"}]]' \
+  "A2f: … a lane git-env trip halts git-env first"
+printf -- '- 2026-10-02T13:40:00+00:00 git-env ack [[x-p29-1-a]]: refs/heads/master at %s, core.bare false\n' "$B40" >> "$D/ro.md"
+ok "$(q "$(nxt ro)" '[d["halt"], d["laneHold"]]')" '["regenerate",[]]' "A2f: … once acked, halt regenerate again"
+# A RACE re-verify holds the lane on the task (race_held_lane): the verdict waits too. The undecided RACE is a
+# `laneHold` entry (ADR 0046), so `next` reports halt race; the lead acts on it only once its own lane is free.
 mkro ro $'- [[x-p29-1-a]]\n- [[x-p29-2-b]]\n\n## Race log\n\n- 2026-10-02T12:00+00:00 [[x-p29-2-b]] RACE: main moved under the merge' "${APPROVED[@]}"
 mkt x-p29-2-b ro review "$X" "pr: $U/5" 'integrating: 2026-10-02T11:00+00:00'
 J=$(nxt ro)
-ok "$(q "$J" "[d['halt'], $ro_entry, d['onMerge']['why']]")" '[null,[true,"integration",false],"an Integration in flight"]' "A2f: a RACE-held lane waits too"
+ok "$(q "$J" "[d['halt'], $ro_entry, d['onMerge']['why']]")" '["race",[true,"integration",false],"an Integration in flight"]' "A2f: a RACE-held lane waits too"
 # A stale integrating: (no Integration in flight: the stamp on a task that no longer reads review with a PR) has run.
 mkro ro $'- [[x-p29-1-a]]\n- [[x-p29-2-b]]' "${APPROVED[@]}"
 mkt x-p29-2-b ro blocked "$X" 'integrating: 2026-10-02T11:00+00:00'

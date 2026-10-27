@@ -224,9 +224,9 @@ ok "$(recq '[[r["reason"], r["free"]] for r in rows if r["kind"] == "idle-slots"
 scen l7b-git-env
 ro; mkt c1 ro open 'scope: cross-cutting'
 history; night
-printf '\n## Git-env log\n\n- 2026-10-03T07:00+00:00 git-env trip [[c1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro.md"
+printf '\n## Git-env log\n\n- 2026-10-03T07:00+00:00 git-env trip [[c1]] task: core.bare false→true; repo /x\n' >> "$D/ro.md"
 J=$(nx 2026-10-03T07:30:00Z)
-ok "$(q "$J" '[d["halt"], d["start"]]')" '["git-env",[]]' "L7: a git-env trip halts git-env"
+ok "$(q "$J" '[d["halt"], d["start"], [h["scope"] for h in d["gitEnvHold"]]]')" '["git-env",[],["rollout"]]' "L7: a whole-rollout git-env trip (a bare checkout) halts git-env"
 ok "$(q "$J" "$holds")" '{"c1":"git-env hold: /thread:repair"}' "L7: … replacing every hold"
 ok "$(count last-start-held)" 0 "L7: … so no last-start-held line is written"
 ok "$(count away-night)" 1 "L7: the night's marker is still written"

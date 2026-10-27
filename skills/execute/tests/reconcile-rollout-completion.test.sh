@@ -249,6 +249,7 @@ cv --run; ok "$rc|$(js result)" "0|green" "C8: a dead run's locked worktree entr
 # ── C9 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c9 "\"git -C '$TMP/c9/repo' -c user.email=t@t -c user.name=t commit -q --allow-empty -m moved\""
 cv --run; ok "$rc|$(js ran)|$(js result)|$(js decided)" "4|True|unrun|False" "C9: the shared checkout moved during the run → its own check trips: unrun, exit 4"
+ok "$(js canary_exit)" "9" "C9: … the check's exit 9 (a lane hold, ADR 0046) reads as a trip: canary_exit 9"
 has "$(grep ' -> unrun' "$RO")" "git-env" "C9: … the line says the verdict was never acted on"
 has "$err" "git-env" "C9: … the canary's stderr passed through"
 scen c9b "\"i=0; while [ ! -f $TMP/c9b.go ] && [ \$i -lt 600 ]; do sleep 0.1; i=\$((i + 1)); done\""
@@ -256,7 +257,7 @@ python3 "$SCRIPT" completion-verify --rollout "$RO" --tasks-dir "$D/tasks" --now
 bp=$!
 wait_for "$(integ)/completion-ro-rollout-2026-10-24-1.log" '^== verifier'
 g -C "$D/repo" commit -q --allow-empty -m moved; new=$(git -C "$D/repo" rev-parse master)
-python3 "$CANARY" check-all --rollout "$RO" --tasks-dir "$D/tasks" > /dev/null 2>&1; ok "$?" 3 "C9: a loop-entry check-all catches the trip"
+python3 "$CANARY" check-all --rollout "$RO" --tasks-dir "$D/tasks" > /dev/null 2>&1; ok "$?" 9 "C9: a loop-entry check-all catches the trip (9: the lane)"
 python3 "$CANARY" ack --rollout "$RO" --tasks-dir "$D/tasks" --repo "$D/repo" --default master --slugs ro-rollout-2026-10-24 --ref "$new" > /dev/null 2>&1
 ok "$?|$(window)" "0|armed" "C9: … and an ack re-arms the window while the run goes on"
 python3 - "$RO" <<'PY'
