@@ -7,7 +7,10 @@
 #   R0  the reading (the pin, notifyutil, fail-open)   R1  pinned heavy: never starts; a TERM exits 76   R2  heavy
 #   mid-run never stops a suite   R3  trapping mid-run stops it, back in line, restart once cool   R4  a TERM back in
 #   line exits 76   R5  a restarted suite's own red is the verdict   R6  the exit race (a unit harness on watch)
-#   R7  a SlotDirError at the re-acquire runs the restart unslotted and unwatched
+#   R7  a SlotDirError at the re-acquire runs the restart unslotted and unwatched   R8  pinned heavy with `--slot-wait 1`
+#   (and `=1`): no slot within it → 76, never started, its no-verdict line names the heat   R9  one total deadline across
+#   a heat stop (p32-1): a re-queue with no time left makes no try, so no heat wait line after the stop, 76; its control
+#   (`--slot-wait 600`) waits after the stop and restarts once cool
 #   L1  verify pinned heavy: rc heat, exit 76   L2  … with --outcome   L3  a held slot at nominal is still noslot
 #   L4  trapping during the verifier: back in line, restart green   L5  … with --slot-wait 0: heat, one start
 #   L6  a heat stop in the env_bootstrap: a clean restart, the outcome file has no stale key   L7  a SlotDirError at the
@@ -85,8 +88,9 @@ st() { python3 "$VS" status "$@"; }
 is_free() { [ "$(js "d['slots'][0]['state']" "$(st --slots 1)")" = free ]; }
 # HOLD: a command that records each start in <arm>/starts, its pid in <arm>/c.pid, and holds until <arm>/c.go.
 hold_cmd() { printf "echo x >> '%s/starts'; echo \$\$ > '%s/c.pid'; until [ -e '%s/c.go' ]; do sleep 0.1; done" "$D" "$D" "$D"; }
-# runbg <cmd…>: a `run --slots 1 -- sh -c <cmd>` in the background reading the stub; its pid in $W and pids.
-runbg() { env -u THREAD_HEAT_LEVEL PATH="$tmp/bin:$PATH" HEAT_D="$D" python3 "$VS" run --slots 1 -- sh -c "$1" > "$D/out.txt" 2> "$D/err" & W=$!; pids+=($W); }
+# runbg <cmd> [run flags…]: a `run --slots 1 [flags…] -- sh -c <cmd>` in the background reading the stub; its pid in $W
+# and pids.
+runbg() { local c="$1"; shift; env -u THREAD_HEAT_LEVEL PATH="$tmp/bin:$PATH" HEAT_D="$D" python3 "$VS" run --slots 1 "$@" -- sh -c "$c" > "$D/out.txt" 2> "$D/err" & W=$!; pids+=($W); }
 started() { within 120 atleast "$D/starts" "$1"; }
 # ticker: an unslotted run reads no heat, so R7 and L7 clock on a ticker of their own that runs the stub every 0.1 s:
 # 12 more reads are more than two of a watch's 0.5 s heat polls.
@@ -240,6 +244,45 @@ tick; more 12; untick
 ok "$(alive "$(cat "$D/c.pid")" && echo alive || echo gone)" alive "R7: still trapping, the unslotted restart is never stopped"
 touch "$D/c.go"; wait "$W"; rc=$?
 ok "$rc|$(count "$D/starts")|$(grep -c 'heat stop' "$D/err")" "0|2|1" "R7: exit 0, two starts, one heat stop"
+
+# ======== R8: pinned heavy with a bounded slot wait (p32-1) ===============================================
+arm r8
+for f in "--slot-wait 1" "--slot-wait=1"; do
+  : > "$D/err"
+  THREAD_HEAT_LEVEL=2 python3 "$VS" run --slots 1 $f -- sh -c "echo x >> '$D/starts'" > /dev/null 2> "$D/err"; rc=$?
+  ok "$rc|$(count "$D/starts")" "76|0" "R8 ($f): heavy for the whole wait: exit 76, the command never started"
+  ok "$(grep -c 'verify-slot: waiting (heat: heavy)' "$D/err")" 1 "R8 ($f): … one heat wait line"
+  has "$(cat "$D/err")" "verify-slot: no verdict: no verify slot within 1s (heat: heavy); exit 76" "R8 ($f): … then its no-verdict line naming the heat"
+done
+
+# ======== R9: one total deadline across a heat stop (p32-1) ================================================
+# The suite runs for more than the 1 s wait (5 more stub reads: at least 4 of watch's heat polls, 0.5 s apart), then a
+# heat stop puts it back in line with no time left: it makes no try, so it prints no heat wait line after the stop (a
+# deadline fresh per pass would print one at its first miss, since acquire says it before its max_wait return). No
+# timing upper bound: the line's absence tells the two apart, and the control below shows it is not vacuous.
+after_stop() { awk '/heat stop \(trapping\)/{s=1; next} s && /waiting \(heat: trapping\)/{n++} END{print n+0}' "$1"; }
+arm r9
+runbg "$(hold_cmd)" --slot-wait 1
+started 1 || echo "FAIL - R9: the command did not start"
+more 5
+level 3
+within 120 grepq 'heat stop (trapping)' "$D/err" || echo "FAIL - R9: no heat stop"
+wait "$W"; rc=$?
+ok "$rc|$(count "$D/starts")" "76|1" "R9: a heat stop past the 1 s wait: exit 76, one start, no restart"
+has "$(cat "$D/err")" "verify-slot: no verdict: no verify slot within 1s (heat: trapping); exit 76" "R9: … its no-verdict line names the heat stop"
+ok "$(after_stop "$D/err")" 0 "R9: … and no heat wait line after the stop (one total deadline: no try with no time left)"
+ok "$(is_free && echo free || echo held)" free "R9: … the slot is free"
+arm r9c
+runbg "$(hold_cmd)" --slot-wait 600
+started 1 || echo "FAIL - R9 control: the command did not start"
+more 5
+level 3
+within 120 grepq 'waiting (heat: trapping)' "$D/err" && s=waiting || s="no heat wait line in 120 s"
+ok "$s|$(after_stop "$D/err")" "waiting|1" "R9 control: with time left (--slot-wait 600) the re-queue waits, its heat wait line after the stop"
+level 0
+started 2 || echo "FAIL - R9 control: no restart"
+touch "$D/c.go"; wait "$W"; rc=$?
+ok "$rc|$(count "$D/starts")" "0|2" "R9 control: … and restarts once cool: exit 0, two starts"
 
 # ======== L1, L2: verify pinned heavy ======================================================================
 arm l1
