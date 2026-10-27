@@ -917,8 +917,10 @@ per call, right after the Away state (so a refused call reads neither), through 
 (_heat_module, _heat_state: THREAD_HEAT_LEVEL pins it; a module that will not load, as on Windows, or a failed reading
 reads 0, fail open). At heavy (2) or worse `slotLimit` is 0, Away included, so nothing new starts; a restart still waits
 on the ceiling alone. A row held for want of a Slot then reads `heat: the Mac is hot (<name>)` (HEAT_PREFIX) unless the
-ceiling is full (`ceiling:` first); no Slot is found, so the last starts never read it; a git-env hold, a pause and a
-standing rollout hold_until hold their rows themselves. A `heat:` hold never halts.
+ceiling is full (`ceiling:` first); no Slot is found, so the last starts never read it; a whole-rollout (bare) git-env
+hold or a main-red hold (cmd_next's `whole` / `main_red` override), a pause and a standing rollout hold_until hold their
+rows themselves, while a lane-only git-env trip holds no Slot, so the heat reads its rows as usual. A `heat:` hold
+never halts.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
