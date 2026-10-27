@@ -24,6 +24,7 @@ fs.mkdirSync(HOME)
 const PY_ENV = {
   ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1', HOME,
   THREAD_EVENTS_DIR: process.env.THREAD_TEST_EVENTS_DIR || path.join(SCRATCH, 'events'),
+  THREAD_HEAT_LEVEL: '0',   // the Heat hold's reading (verify-slot.py heat_level), pinned: a hot Mac never flips `next`
 }
 
 const SLUG = 'proj-fix-a'

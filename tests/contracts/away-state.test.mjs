@@ -31,6 +31,9 @@
 //               restarts and revises are exempt and that the hold never halts
 //   night-record (p28-2) § The night record names the code's NIGHT_KINDS, run_record.py's KINDS holds each, and
 //               reflect's score.py skips the same NIGHT_KINDS (a night line is never a task's call activity)
+//   heat        § Heat (p31-4, estate ADR 0009 d5) names the `heat: the Mac is hot (<name>)` reason the code builds from its
+//               HEAT_PREFIX, `slotLimit` 0 Away too, that it never halts, and the THREAD_HEAT_LEVEL pin; CONTEXT.md's
+//               **Stalled rollout** names the Heat hold among the meant waits, so a hot spell never reads as a stall
 // One function (checkAway) returns named failures, so the real files and each control (one mutation, exactly its
 // rule) run through identical logic. Reads files only.
 import { test } from 'node:test'
@@ -143,6 +146,12 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
     !trickleS.includes('`trickle.elsewhere` names the rollout') || !trickleS.includes('stamping it `paused:`') ||
     !trickleS.includes('takes it out of the count at once') || !trickleS.includes('A liveness signal')) fails.push('no-lead')
 
+  const heatS = collapse(h2(away, 'Heat'))
+  if (grab(code, /^HEAT_PREFIX = "([^"]*)"/m) !== 'heat:' || !code.includes('f"{HEAT_PREFIX} the Mac is hot ({heat[\'name\']})"') ||
+    !heatS.includes('`heat: the Mac is hot (<name>)`') || !heatS.includes('At heavy or worse `slotLimit` is 0') ||
+    !heatS.includes('It holds Away too') || !heatS.includes('**It never halts.** A row the heat holds could start once the Mac cools') || !heatS.includes('`THREAD_HEAT_LEVEL`') ||
+    !entry(context, 'Stalled rollout').includes('the Heat hold')) fails.push('heat')
+
   const writer = h2(away, 'Without a writer')
   if (!writer.includes('until = now.replace(hour=9, minute=0, second=0, microsecond=0)') ||
     !writer.includes('if until <= now:\n    until += datetime.timedelta(days=1)') ||
@@ -201,7 +210,7 @@ test('away.md, the code that reads the file and the hold-back prose agree', () =
 // ---- controls: each mutates one place and must fail with exactly its rule ---------------------------------------
 
 const RULES = ['keys', 'path', 'staleness', 'default', 'refresh', 'until', 'morning', 'serial', 'warn', 'hold-back', 'glossary',
-  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record']
+  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record', 'heat']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -340,7 +349,17 @@ test('control: a night kind the doc, the writer or score.py lacks fails night-re
     'night-record', 'dropped from score.py\'s NIGHT_KINDS')
 })
 
-test('the rules are all named (18) and each has a control', () => {
-  assert.equal(RULES.length, 18)
+test('control: a Heat hold the doc or the code says another way fails heat', () => {
+  only('code', 'HEAT_PREFIX = "heat:"', 'HEAT_PREFIX = "hot:"', 'heat', 'another prefix')
+  only('away', '`heat: the Mac is hot (<name>)`', '`heat: <name>`', 'heat', 'another reason')
+  only('away', 'At heavy or worse `slotLimit` is 0', 'At heavy or worse `slotLimit` is halved', 'heat', 'no slotLimit 0')
+  only('away', 'It holds Away too', 'Away lifts it', 'heat', 'Away lifts the hold')
+  only('away', '**It never halts.** A row the heat holds', '**It halts.** A row the heat holds', 'heat', 'a Heat hold halts')
+  only('away', '`THREAD_HEAT_LEVEL`, an integer from 0 to 4', 'An env var, an integer from 0 to 4', 'heat', 'no pin named')
+  only('context', 'the Trickle or the Away cap, the Heat\n  hold, a cool-down.', 'the Trickle or the Away cap, a cool-down.', 'heat', 'a hot spell reads as a stall')
+})
+
+test('the rules are all named (19) and each has a control', () => {
+  assert.equal(RULES.length, 19)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

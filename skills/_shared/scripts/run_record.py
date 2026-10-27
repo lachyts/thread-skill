@@ -143,7 +143,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      hold-merge | hold-git-env | hold-race | hold-trickle: a row waits on the machine-wide Trickle,
                      execute away.md | hold-away-cap: a row waits on the machine-wide Away cap, execute away.md |
                      hold-last-start: a row the last starts hold toward the Morning, p28-2 | hold-pr: a row waits
-                     on a PR's hold_until, vault-grammar § Hold until); free (int >= 0); settings (as slot-taken)
+                     on a PR's hold_until, vault-grammar § Hold until | hold-heat: a row waits for the Mac to cool,
+                     the Heat hold, execute away.md § Heat); free (int >= 0); settings (as slot-taken)
   away-night         morning (a UTC Z stamp, to the second: M, the Morning the last starts looked toward while Away
                      ran to it). p28-2, the night record (execute away.md § The night record): reconcile-rollout.py
                      `next` writes one per (rollout, M) on a call off --dry-run while the last starts apply, so a
@@ -163,14 +164,15 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      >= 1: the raised max_review_rounds); quotaRetries? (int >= 1: quota_retries_used after a quota
                      retry). p16-4, ADR 0033: reconcile-rollout.py auto-retry, execute's automatic retry of a
                      set-aside task.
-  completion-verify  result (green | rerun | flake | red | noslot | unrun | stopped), rc, sha, attempt (int 1 or 2); log?,
+  completion-verify  result (green | rerun | flake | red | noslot | unrun | stopped | heat), rc, sha, attempt (int 1 or 2); log?,
                      followup?
                      (estate ADR 0009 d6: reconcile-rollout.py completion-verify, one line per run of a rollout's
                      completion_verifier on merged origin/<default> at its completion ceremony; rc the run's
-                     verbatim, 0-255, noslot or absent; rerun is attempt 1's red, re-run on the same sha; flake a
-                     green attempt 2 after it; noslot (no verify slot), unrun (verify never got going, the
-                     env_bootstrap never let the suite run, or a git-env trip fell inside the window) and stopped (a
-                     signal stop: a TaskStop, a hard pause, a room stop) no verdict, the attempt runs again; followup
+                     verbatim, 0-255, noslot, heat or absent; rerun is attempt 1's red, re-run on the same sha; flake
+                     a green attempt 2 after it; noslot (no verify slot), unrun (verify never got going, the
+                     env_bootstrap never let the suite run, or a git-env trip fell inside the window), stopped (a
+                     signal stop: a TaskStop, a hard pause, a room stop) and heat (the Mac was too hot to run the
+                     suite, the Heat hold) no verdict, the attempt runs again; followup
                      the fix task a final red filed; ADR 0052: completion-verify --run writes it).
   verify-skipped  T  repo (the origin's owner/name, else the repo path), paths (at most 200 paths, the move's first),
                      pathsTotal (int >= 0: every path the move changed); base?, main?, head? (the green run's base, the
@@ -772,7 +774,7 @@ KINDS = {
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
     "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
-                                           "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-trickle",
+                                           "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-heat", "hold-trickle",
                                            "hold-away-cap", "hold-last-start"),
                            "free": _int(0), "settings": SETTINGS}, {}),
     # The night record (p28-2, Chorus ADR 0104's Consequences): reconcile-rollout.py `next` is its one writer.
@@ -789,7 +791,8 @@ KINDS = {
     "inert-proof-failed": (True, dict(INERT_FIELDS, readers=_readers),
                            dict(INERT_OPTIONAL, error=_error, failed=_capped(MAX_GLOBS))),
     # result: reconcile-rollout.py's COMPLETION_RESULTS, in its order.
-    "completion-verify": (False, {"result": _enum("green", "flake", "red", "rerun", "noslot", "unrun", "stopped"),
+    "completion-verify": (False, {"result": _enum("green", "flake", "red", "rerun", "noslot", "unrun", "stopped",
+                                                  "heat"),
                                   "rc": _str, "sha": _str, "attempt": _int(1, 2)}, {"log": _str, "followup": _str}),
     "call-journal": (False, {"runId": _str, "status": _str},
                      {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),

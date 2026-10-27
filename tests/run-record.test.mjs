@@ -316,6 +316,22 @@ test('the night record (p28-2): away-night, last-start-held and ran-past-morning
   assert.deepEqual([all[3].slotTakenAt, all[3].usualMinutes, all[4].history], ['2026-10-03T07:30:00.000Z', 25, 2])
 })
 
+test('idle-slots hold-heat and completion-verify heat (p31-4, the Heat hold) are accepted; an unknown value is still refused', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-heat', free: 3, settings: SETTINGS })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--kind', 'completion-verify', '--json',
+    JSON.stringify({ result: 'heat', rc: 'heat', sha: 'a'.repeat(40), attempt: 1 })], { env: EV(home) })
+  const ls = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([ls[0].reason, ls[0].free, ls[1].result, ls[1].rc], ['hold-heat', 3, 'heat', 'heat'])
+  for (const [kind, json] of [['idle-slots', { reason: 'heat', free: 3, settings: SETTINGS }],
+    ['completion-verify', { result: 'hot', rc: 'heat', sha: 'a'.repeat(40), attempt: 1 }]]) {
+    const r = cli(home, ['emit', '--rollout', 'r', '--kind', kind, '--json', JSON.stringify(json)], { env: EV(home) })
+    assert.equal(r.status, 2, `${kind}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+  }
+  assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, 2, 'the refused emits wrote nothing')
+})
+
 test('auto-retry (p16-4): a valid emit, and a quota retry with used 0 and its quotaRetries', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json',

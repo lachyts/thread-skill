@@ -720,6 +720,48 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !drvDoc.includes('or an Away-cap wait does (on the machine-wide Away cap while Lachy is Away, ADR 0049)') ||
     !drvBlock.includes('or an Away-cap wait does (on the Away cap, ')) fails.push('trickle')
 
+  // heat (p31-4, estate ADR 0009 d5): § 4.5's *The Heat hold* paragraph names slotLimit 0 Away included, the restart on
+  // the ceiling alone, the `heat:` reason that never halts, exit 76 as no verdict and its spec; step 1.2's revise held at
+  // heat is a Heat hold; step 1.5's heat clause waits with its reason=, never § 7, ahead of the Trickle's; step 1.6 ends
+  // the turn `waiting` on a `heat:` hold, its reason before the Trickle's; step 3 and the RACE procedure re-run on `heat`
+  // and never count it toward the third-`noslot` halt; step 5's completion verify lists `heat` as no verdict that never
+  // counts; *The background verify command* reads `heat` as no verdict with W covering the heat; *Verify slots* names the
+  // hold; § 5's Heartbeat paragraph covers the waiting turn and clause (7) reads a `heat:` reason as no hold (beside the
+  // pinned trickle parenthetical); § 6's waiting bullet and reason list, § 7's stuck bullet, § 8's Stop-hook paragraph
+  // and the driver's docstring and block reason name it.
+  {
+    const heatP = labelled(skill, 'The Heat hold (estate ADR 0009 d5).')
+    const st5 = step(skill, 5)
+    const vsP = labelled(skill, 'Verify slots')
+    const reasonL = collapse(s6raw.split('\n').find((l) => l.startsWith('`reason` appears only on')) ?? '')
+    if (!heatP.includes('`slotLimit` 0, Away included') || !heatP.includes('a restart still waits on the ceiling alone') ||
+      !heatP.includes('`heat: the Mac is hot (<name>)`') || !heatP.includes('a `heat:` hold never halts the rollout') ||
+      !heatP.includes('exit 76: no verdict, never red') || !heatP.includes('A running call is never stopped') ||
+      !heatP.includes('`skills/execute/away.md` § Heat holds the spec') ||
+      !trRev.includes('such a revise is a Heat hold instead, the same wait') ||
+      !trGuard.includes('is a Heat hold, and takes the place of the Trickle clause that follows') ||
+      !trGuard.includes('ends the turn `waiting` with `reason="heat: the Mac is hot (<heat.name>)"`, never § 7, whatever else is set aside') ||
+      !tr6.includes('A `heat:` hold (*The Heat hold*) ends the turn `waiting` the same way') ||
+      !tr6.includes("and it comes before the Trickle's, since a hot Mac holds every row the Trickle would") ||
+      !st3.includes('- `heat` (exit 76: the Mac was too hot for the whole `<slot_wait>`') ||
+      !st3.includes('a `heat` never counts toward the third-`noslot` halt, nor resets its count') ||
+      !raceLine.includes('`heat` (exit 76: the Mac was too hot for the whole `<slot_wait>`, *The Heat hold*: no verdict) → re-run the re-verify the same way with the lane held, never counted toward that halt') ||
+      !st5.includes('`heat`: the Mac was too hot to run the suite within the slot wait, a Heat hold') ||
+      !st5.includes('a `stopped` or `heat` one never counts') ||
+      !verifyP.includes('So is `heat` (exit 76, *The Heat hold*)') ||
+      !verifyP.includes('every slot wait, heat hold and heat-stopped run counts against `<slot_wait>`') ||
+      !vsP.includes('**The Heat hold:** at heavy no verify slot is free') ||
+      !hbPara.includes("A Heat hold's `waiting` turn (§4.5 step 1.6, *The Heat hold*) is covered the same way") ||
+      !hb7.includes('and a `heat:` reason no hold either (the Mac may have cooled)') ||
+      !waitingB.includes('or a Heat hold stands (§4.5 step 1.6, *The Heat hold*)') || !waitingB.includes("a Heat hold's (`heat: …`)") ||
+      !reasonL.includes('and on a Heat hold (§4.5 step 1.6)') ||
+      !(S(skill, S7) ?? '').includes('or on the Heat hold, the same wait') ||
+      !hookP.includes("a Heat hold's `waiting` included") ||
+      !drvDoc.includes('or a Heat hold stands (`heat: …`') || !drvBlock.includes('or a Heat hold stands (`heat: …`, the "')) {
+      fails.push('heat')
+    }
+  }
+
   // skip-path (ADR 0045, p29-3): step 3's prepare carries the verifier and bootstrap, single-quoted; a `skip` bullet after
   // set-aside re-checks (§ 2.5 then § 2.6), pushes M, logs (M, mainSha) and goes to step 4 with no verifier, a refused
   // push undoes and integrates with trouble []; the lead prints inert.why (an inert check error included); the exit-3 row
@@ -802,7 +844,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
-  'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts', 'hold']
+  'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts', 'hold', 'heat']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -1433,7 +1475,39 @@ test("control: the driver's docstring or block reason without the PR hold fails 
   only(drv('a PR hold waits on its merge (`next` reports `halt: held`, "\n            "with its reason=\\"held until …\\", §4.5 step 1.5) or ', 'or '), 'hold', 'block reason')
 })
 
-test('the rules are all named (39) and each has a control', () => {
-  assert.equal(RULES.length, 39)
+// heat (p31-4)
+test('control: the Heat hold missing at any one site fails heat', () => {
+  const p = real.skill.split('\n').find((l) => l.startsWith('**The Heat hold (estate ADR 0009 d5).**'))
+  only(sk(p + '\n\n', ''), 'heat', 'no Heat hold paragraph')
+  only(sk('`slotLimit` 0, Away included', '`slotLimit` 0 by day'), 'heat', 'heat not held Away')
+  only(sk('and a `heat:` hold never halts the rollout', 'and a `heat:` hold halts the rollout `stuck`'), 'heat', 'a Heat hold halts')
+  only(sk(' While `next` reports `heat` at heavy or worse (`slotLimit` 0, *The Heat hold*), such a revise is a Heat hold instead, the same wait.', ''),
+    'heat', 'step 1.2 without the heat-held revise')
+  only(sk('`reason="heat: the Mac is hot (<heat.name>)"`, never § 7, whatever else is set aside', '`reason="heat"`, then § 7'), 'heat', 'the guard halts on heat')
+  only(sk(' A `heat:` hold (*The Heat hold*) ends the turn `waiting` the same way,', ' A `heat:` hold (*The Heat hold*) halts the turn,'), 'heat', 'no heat wait in step 1.6')
+  only(sk("and it comes before the Trickle's, since a hot Mac holds every row the Trickle would", "and it comes after the Trickle's"), 'heat', 'the Trickle reason first')
+  only(sk('but a `heat` never counts toward the third-`noslot` halt, nor resets its count', 'and a `heat` counts toward the third-`noslot` halt'),
+    'heat', 'step 3 counts heat toward the halt')
+  only(sk(' → re-run the re-verify the same way with the lane held, never counted toward that halt nor resetting it', ' → halt'), 'heat', 'the RACE halts on heat')
+  only(sk("; `heat`: the Mac was too hot to run the suite within the slot wait, a Heat hold) leaves", ') leaves'), 'heat', 'step 5 without heat')
+  only(sk('a `stopped` or `heat` one never counts', 'a `stopped` one never counts'), 'heat', "step 5's halt counts heat")
+  only(sk('every slot wait, heat hold and heat-stopped run counts against `<slot_wait>`', 'the slot wait alone counts against `<slot_wait>`'),
+    'heat', 'W without the heat')
+  only(sk(' **The Heat hold:** at heavy no verify slot is free,', ' At heavy a verify slot is still free,'), 'heat', 'Verify slots without the hold')
+  only(sk(" A Heat hold's `waiting` turn (§4.5 step 1.6, *The Heat hold*) is covered the same way.", ''), 'heat', 'heartbeat paragraph without the Heat hold')
+  only(sk(', and a `heat:` reason no hold either (the Mac may have cooled)', ''), 'heat', 'clause (7) reads heat as a hold')
+  only(sk(' or a Heat hold stands (§4.5 step 1.6, *The Heat hold*),', ''), 'heat', "§ 6's waiting bullet without it")
+  only(sk(', and on a Heat hold (§4.5 step 1.6)', ''), 'heat', "§ 6's reason list without it")
+  only(sk(', or on the Heat hold, the same wait', ''), 'heat', "§ 7's stuck halts over a heat-held revise")
+  only(sk(", a Heat hold's `waiting` included", ''), 'heat', "§ 8's Stop-hook paragraph without it")
+})
+test("control: the driver's docstring or block reason without the Heat hold fails heat", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv(', or a Heat hold\n              stands (`heat: …`', ''), 'heat', 'docstring')
+  only(drv(' or a Heat hold stands (`heat: …`, the "\n            "same wait)', ''), 'heat', 'block reason')
+})
+
+test('the rules are all named (40) and each has a control', () => {
+  assert.equal(RULES.length, 40)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

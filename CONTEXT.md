@@ -458,7 +458,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   or a **Solo** task and, by day, the **Trickle**, never a shared file
   (ADR 0030); Away, by the **Away cap** instead of the Trickle (ADR 0049),
   and, toward the Morning, the **Last starts**; and all of them by a bare
-  checkout's **Git-env hold** (ADR 0046). _Avoid_: batch (the session lane's).
+  checkout's **Git-env hold** (ADR 0046) and a hot Mac's **Heat hold**.
+  _Avoid_: batch (the session lane's).
 - **Slot** — one task's own run (a start, a restart or a seeded revise) in a
   Queue, held from its launch until its result is reconciled. Integration
   holds none. _Avoid_: worker, agent (a slot's run holds many agents).
@@ -491,6 +492,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   record** and keyed by that Morning, so a **Reflection** can tune the
   two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences).
   _Avoid_: night log.
+- **Heat hold** — while the Mac's thermal pressure reads heavy or worse, no
+  new Rollout task starts, Away included, and no **Verify slot** is free; at
+  trapping or sleeping a running slotted suite is stopped and put back in
+  line, to restart once the Mac cools (estate ADR 0009 d5; execute
+  `away.md` § Heat). A restart still waits on the ceiling alone, and the hold
+  never halts a rollout: a heat stop or a wait it outlasts is no verdict,
+  never red. _Avoid_: thermal throttle, cooldown (a retry's).
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
   (ADR 0030). Queued with its dependencies met, it holds every task whose row
@@ -556,8 +564,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   deadline in the suite, files one fix task for the project, and the rollout
   completes either way, since its tasks merged green at their own Integration.
   A run with no verdict (no verify slot, verify never got going or was
-  stopped, the bootstrap never let the suite run) waits for the next tick,
-  and three in a row halt (a deliberate stop never counts). A git-env trip
+  stopped, the bootstrap never let the suite run, the Mac was too hot for
+  it) waits for the next tick, and three in a row halt (a deliberate stop
+  and a **Heat hold** never count). A git-env trip
   inside its window gives no verdict either: the rollout halts on the
   git-env trip, or, when the trip was already acked, waits like the rest. A parallel rollout's only, so far.
   A note with none completes as before. _Avoid_: final verify, post-merge suite.
@@ -863,7 +872,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Stalled rollout** — a rollout with work it could do and nothing moving:
   its lead, session or Mac stopped, or a hold froze more than it threatens
   (ADR 0048). A wait that is meant is not a stall: a pause or Room stop
-  (status § Pauses, § Room stop), the Trickle or the Away cap, a cool-down.
+  (status § Pauses, § Room stop), the Trickle or the Away cap, the Heat
+  hold, a cool-down.
   Not a **Stalled chain** (a serial chain's). _Avoid_: stuck, hung, idle (a
   Slot can be idle in a moving rollout).
 - **Watchdog** — what acts on a Stalled rollout from outside its session,

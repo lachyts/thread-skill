@@ -11,9 +11,10 @@ copy of the contract.
     python3 verify-slot.py run --slots N [--priority] -- CMD…     # the agents' wrapper (engine-rendered)
     python3 verify-slot.py status [--slots N]                      # the operator's view (JSON)
 
-Importable (lead-integrate.py's `verify --slots N --slot-wait S` loads it by importlib): slots_dir(),
-SlotDirError, acquire(), Slot, Guarded, kill_group(), write_holder(), held_by(), KILL_GRACE, REAP_WAIT,
-GUARD_POLL.
+Importable (lead-integrate.py's `verify --slots N --slot-wait S` loads it by importlib, and reconcile-rollout.py's
+`next` for the heat reading): slots_dir(), SlotDirError, acquire(), Slot, Guarded, kill_group(), write_holder(),
+held_by(), heat_level(), heat_name(), KILL_GRACE, REAP_WAIT, GUARD_POLL, HEAT_KEY, HEAT_NAMES, HEAT_HOLD, HEAT_STOP,
+HEAT_EXIT, HEAT_ENV, HEAT_POLL_FACTOR, HEAT_SETTLE, HEAT_STOPPED.
 
 The pool. `slot-0.lock` … `slot-(N-1).lock` in
 `${THREAD_VERIFY_SLOTS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/thread/verify-slots}` (run_record.py's
@@ -61,15 +62,36 @@ Contract.
    snapshot). An unusable slots dir fails open: `verify-slot: WARN <dir>: <err>; running unslotted`, and the
    command still runs under the guard. The `status` probe of a free slot holds it for microseconds, so an
    acquirer at that instant waits one more poll.
+7. The Heat hold (estate ADR 0009 d5). The reading is heat_level(): `notifyutil -g HEAT_KEY`, 0 nominal, 1
+   moderate, 2 heavy, 3 trapping, 4 sleeping, read fresh each time (never cached); THREAD_HEAT_LEVEL 0 to 4 pins it
+   (the tests' pin), any other value is ignored. At heavy (HEAT_HOLD) or worse no slot is free: every poll of
+   acquire() reads it first and tries no slot, a priority waiter keeping its waiter file, and the wait line is
+   `waiting (heat: <name>)`; max_wait still bounds the whole wait. At trapping or sleeping (HEAT_STOP) a running
+   slotted suite is stopped: Guarded.watch() reads the level every HEAT_POLL_FACTOR * the poll base and first gives
+   the guard HEAT_SETTLE to exit by itself, so a command that already ended keeps its own rc (green or red) and is
+   never rerun; only a guard still there is stopped (the guard's TERM, KILL_GRACE, KILL, reaped), its slot released
+   (a close), and the caller goes back in line, at the back, to restart from the beginning once the level is below
+   heavy. Heavy never stops a running suite. A heat stop is never red: `run` exits HEAT_EXIT (76) only when a stop
+   signal lands while it waits on the heat or is back in line after a heat stop, and lead-integrate.py's verify
+   reads `heat` (exit 76). Fails open, like an unusable slots dir: no notifyutil (Linux, CI), a non-zero exit, a
+   2 s timeout or output it cannot parse reads 0, and an unslotted run (a SlotDirError) has no heat watch.
+   Residuals: a command that exits after the settle check, inside the guard's last poll (at most one GUARD_POLL),
+   reads as heat-stopped and is rerun (no verdict, never red); a copy of this script from before the Heat hold
+   (another rollout's Engine snapshot, an older plugin install) shares the pool and still runs hot.
 
 `run --slots N [--priority] -- CMD…`: waits for a slot (`verify-slot: waiting for one of N verify slots (held
 by pid … in … since …[; K Integration waiter(s) ahead])` on stderr, repeated every 5 minutes; nothing when one
 is free at once; `verify-slot: slot k of N after Ns` once a wait ends), runs CMD under the guard and exits with
-its rc (128+n for a signal). Usage errors exit 2: `--slots` missing, 0, negative, a non-integer; no `--`; no
-CMD; an unknown flag. A command that cannot be started exits 127.
+its rc (128+n for a signal). While the Mac is hot it waits with `verify-slot: waiting (heat: <name>)` (contract 7);
+a heat stop prints `verify-slot: heat stop (<name>): ended the suite after Ns; no verdict, never red: back in line to
+restart from the beginning once the Mac cools`, and the exit is the last run's rc. A TERM, INT or HUP while it waits
+on the heat or is back in line after a heat stop exits 76 with `verify-slot: no verdict: stopped while the Mac was
+hot (heat: <name>); exit 76`: no verdict, never red. Usage errors exit 2: `--slots` missing, 0, negative, a
+non-integer; no `--`; no CMD; an unknown flag. A command that cannot be started exits 127.
 
 `status [--slots N]` reaps stale waiter files and prints {dir, slots: [{index, state: free|held, holder}],
-waiters: [{pid, cwd, since, kind}]}; without --slots it lists the slot files present. Stdlib only, POSIX.
+waiters: [{pid, cwd, since, kind}], heat: {level, name}}; without --slots it lists the slot files present. Stdlib
+only, POSIX.
 """
 
 import errno
@@ -78,6 +100,7 @@ import json
 import os
 import random
 import select
+import shutil
 import signal
 import subprocess
 import sys
@@ -94,6 +117,18 @@ DEFAULT_POLL = 1.0    # the poll base: priority every base + up to base/2; other
 SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 WAITER_TRIES = 3
 SCRIPT = os.path.abspath(__file__)
+
+# The Heat hold (estate ADR 0009 d5, contract 7): the Mac's thermal pressure, read fresh on every call.
+HEAT_KEY = "com.apple.system.thermalpressurelevel"
+HEAT_NAMES = ("nominal", "moderate", "heavy", "trapping", "sleeping")
+HEAT_HOLD = 2              # at this level or worse no slot is free
+HEAT_STOP = 3              # at this level or worse a running slotted suite is stopped and put back in line
+HEAT_EXIT = 76             # `run` stopped while the Mac was hot: no verdict, never red (75 is lead-integrate's noslot)
+HEAT_ENV = "THREAD_HEAT_LEVEL"   # an integer 0 to 4 pins the level (the tests' pin); any other value is ignored
+HEAT_POLL_FACTOR = 5       # a running suite's heat is read every HEAT_POLL_FACTOR * the poll base
+HEAT_SETTLE = 2 * GUARD_POLL     # at a stop reading, how long a guard that is already ending gets to exit by itself
+HEAT_STOPPED = object()    # Guarded.watch's result when it stopped the suite for the heat
+NOTIFYUTIL = "/usr/bin/notifyutil"   # the reading's tool when PATH has none
 
 
 class SlotDirError(Exception):
@@ -145,6 +180,33 @@ def _poll_base():
     except ValueError:
         return DEFAULT_POLL
     return v if v > 0 and v == v and v != float("inf") else DEFAULT_POLL
+
+
+def heat_level():
+    """The Mac's thermal pressure level, 0 to 4 (HEAT_NAMES), read fresh on every call, never cached. A
+    THREAD_HEAT_LEVEL of 0 to 4 pins it; any other value is ignored. Otherwise `notifyutil -g HEAT_KEY`'s last token,
+    clamped to 0..4. Fails open: no notifyutil, a non-zero exit, a timeout or output it cannot parse reads 0 (Linux,
+    CI)."""
+    pin = (os.environ.get(HEAT_ENV) or "").strip()
+    if pin in ("0", "1", "2", "3", "4"):
+        return int(pin)
+    try:
+        p = subprocess.run([shutil.which("notifyutil") or NOTIFYUTIL, "-g", HEAT_KEY], stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=2)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+    if p.returncode != 0:
+        return 0
+    try:
+        n = int((p.stdout or "").split()[-1])
+    except (IndexError, ValueError):
+        return 0
+    return max(0, min(len(HEAT_NAMES) - 1, n))
+
+
+def heat_name(n):
+    """The level's name (HEAT_NAMES), or the number itself when it is out of range."""
+    return HEAT_NAMES[n] if isinstance(n, int) and 0 <= n < len(HEAT_NAMES) else str(n)
 
 
 def _slot_path(d, k):
@@ -340,12 +402,16 @@ def _open_slot(d, k):
         raise SlotDirError(f"{d}: {e.strerror or e}")
 
 
-def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=False, kind="run"):
+def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=False, kind="run", why=None):
     """Wait for one of `slots` verify slots: a Slot, or None when max_wait seconds pass first (0: one try).
 
     on_wait(msg) gets `waiting for one of N verify slots (…)` at the first miss and every REMIND_EVERY seconds.
     A priority acquirer registers a waiter file while it waits; a non-priority one takes a slot only when it can
-    hold (live waiters + 1) at once. SlotDirError when the dir is unusable."""
+    hold (live waiters + 1) at once. SlotDirError when the dir is unusable (checked before any heat reading).
+    The Heat hold (contract 7): each poll reads heat_level() first; at HEAT_HOLD or worse it tries no slot (a miss),
+    and on_wait gets `waiting (heat: <name>)`, said at the first miss, whenever the holding reason changes (another
+    heat name, or a switch between heat and slots) and every REMIND_EVERY seconds. `why`, a dict the caller keeps,
+    gets "heat": the level each poll that heat held, else None. max_wait bounds the whole wait, heat included."""
     if not isinstance(slots, int) or isinstance(slots, bool) or slots < 1:
         raise ValueError(f"slots must be an integer >= 1, got {slots!r}")
     d = where or slots_dir()
@@ -357,7 +423,7 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
         raise SlotDirError(f"{d}: not a directory")
     base = poll if poll is not None and poll > 0 else _poll_base()
     start = time.monotonic()
-    told = None
+    told = told_reason = None
     wfd = wpath = None
     try:
         if priority:
@@ -370,43 +436,53 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
                       "waiting unregistered", file=sys.stderr)
         missed = False
         while True:
-            live = _scan_waiters(d)
-            ahead = 0 if priority else len(live)
-            need = 1 if priority else ahead + 1
+            level = heat_level()
+            hot = level >= HEAT_HOLD
+            if why is not None:
+                why["heat"] = level if hot else None
+            ahead = 0
             got, held = [], []
-            try:
-                for k in range(slots):
-                    fd = _open_slot(d, k)
-                    try:
-                        took = _flock_nb(fd)
-                    except OSError as e:
+            if not hot:
+                live = _scan_waiters(d)
+                ahead = 0 if priority else len(live)
+                need = 1 if priority else ahead + 1
+                try:
+                    for k in range(slots):
+                        fd = _open_slot(d, k)
+                        try:
+                            took = _flock_nb(fd)
+                        except OSError as e:
+                            os.close(fd)
+                            raise SlotDirError(f"{d}: {e.strerror or e}")
+                        if took:
+                            got.append((k, fd))
+                            if len(got) >= need:
+                                break
+                        else:
+                            os.close(fd)
+                            held.append(k)
+                    if len(got) >= need:
+                        k, fd = got.pop(0)
+                        os.ftruncate(fd, 0)
+                        return Slot(k, fd, time.monotonic() - start, _slot_path(d, k), missed)
+                finally:
+                    for _, fd in got:
                         os.close(fd)
-                        raise SlotDirError(f"{d}: {e.strerror or e}")
-                    if took:
-                        got.append((k, fd))
-                        if len(got) >= need:
-                            break
-                    else:
-                        os.close(fd)
-                        held.append(k)
-                if len(got) >= need:
-                    k, fd = got.pop(0)
-                    os.ftruncate(fd, 0)
-                    return Slot(k, fd, time.monotonic() - start, _slot_path(d, k), missed)
-            finally:
-                for _, fd in got:
-                    os.close(fd)
             missed = True
             now = time.monotonic()
             if max_wait is not None and now - start >= max_wait:
                 return None
-            if on_wait is not None and (told is None or now - told >= REMIND_EVERY):
-                names = "; ".join(_describe(_read_json(_slot_path(d, k))) for k in held)
-                why = [f"held by {names}"] if names else []
-                if ahead:
-                    why.append(f"{ahead} Integration waiter(s) ahead")
-                on_wait(f"waiting for one of {slots} verify slots ({'; '.join(why) or 'none free'})")
-                told = now
+            reason = f"heat: {heat_name(level)}" if hot else "slots"
+            if on_wait is not None and (told is None or reason != told_reason or now - told >= REMIND_EVERY):
+                if hot:
+                    on_wait(f"waiting ({reason})")
+                else:
+                    names = "; ".join(_describe(_read_json(_slot_path(d, k))) for k in held)
+                    held_why = [f"held by {names}"] if names else []
+                    if ahead:
+                        held_why.append(f"{ahead} Integration waiter(s) ahead")
+                    on_wait(f"waiting for one of {slots} verify slots ({'; '.join(held_why) or 'none free'})")
+                told, told_reason = now, reason
             step = base + random.uniform(0, base / 2) if priority else 2 * base + random.uniform(0, base)
             if max_wait is not None:
                 step = min(step, max(0.0, max_wait - (now - start)))
@@ -453,12 +529,14 @@ class Guarded:
     """CMD under a guard (`_guard`, its own session). `.pid` is the guard's pid; `.group` the command's pgid, or
     None when the guard died before reporting it. `hold` is a Slot whose fd the guard inherits (its own reference
     to the lock). Signals TERM/INT/HUP are held across the spawn (the child starts with the caller's mask), and
-    on_spawn(self) runs inside that window, so a caller that records the handle there never loses it."""
+    on_spawn(self) runs inside that window, so a caller that records the handle there never loses it. wait() waits;
+    watch() waits under the Heat hold's stop (contract 7)."""
 
     def __init__(self, argv, hold=None, on_spawn=None, **popen_kw):
         self.group = None
         self.proc = None
         self._death = None
+        self.heat = None   # the level a heat stop read (watch)
         death_r, death_w = os.pipe()
         rep_r, rep_w = os.pipe()
         fds = [death_r, rep_w]
@@ -524,6 +602,37 @@ class Guarded:
             return None
         self.close()
         return self._after(rc)
+
+    def watch(self, timeout=None, heat=True):
+        """wait(timeout) under the Heat hold's stop (contract 7): the command's rc exactly as wait() gives it, None when
+        `timeout` passes first (nothing stopped), or HEAT_STOPPED once it stopped the suite. Every HEAT_POLL_FACTOR *
+        the poll base it reads heat_level(); at HEAT_STOP or worse it first gives the guard HEAT_SETTLE to exit by
+        itself (a command that already ended: the guard reaps its child within one GUARD_POLL), and keeps that rc,
+        never calling stop(); only a guard still there is stopped (stop(): TERM, KILL_GRACE, KILL, reaped), with the
+        level kept in `.heat`. Heavy never stops a suite. heat=False is exactly wait(timeout)."""
+        if not heat:
+            return self.wait(timeout)
+        end = None if timeout is None else time.monotonic() + max(0.0, timeout)
+        while True:
+            step = HEAT_POLL_FACTOR * _poll_base()
+            if end is not None:
+                step = min(step, max(0.0, end - time.monotonic()))
+            try:
+                rc = self.proc.wait(step)
+            except subprocess.TimeoutExpired:
+                if end is not None and time.monotonic() >= end:
+                    return None
+                level = heat_level()
+                if level < HEAT_STOP:
+                    continue
+                try:
+                    rc = self.proc.wait(HEAT_SETTLE)
+                except subprocess.TimeoutExpired:
+                    self.heat = level
+                    self.stop()
+                    return HEAT_STOPPED
+            self.close()
+            return self._after(rc)
 
     def stop(self):
         """Close the death fd, then wait for the guard (bounded); a guard still there is SIGKILLed and the
@@ -654,33 +763,58 @@ def _parse_run(argv):
     raise _Usage("run: no -- before the command")
 
 
+def _say(msg):
+    print(f"verify-slot: {msg}", file=sys.stderr, flush=True)
+
+
 def cmd_run(argv):
     slots, prio, cmd = _parse_run(argv)
     for s in SIGNALS:
         signal.signal(s, _on_signal)
     box = {"g": None}
+    why = {"heat": None}   # acquire's: the level that held the last poll, or None
+    stopped = None         # the heat name of the last heat stop
     slot = None
     rc = None
     try:
-        try:
-            slot = acquire(slots, priority=prio, kind="run",
-                           on_wait=lambda m: print(f"verify-slot: {m}", file=sys.stderr, flush=True))
-        except SlotDirError as e:
-            print(f"verify-slot: WARN {e}; running unslotted", file=sys.stderr, flush=True)
+        # The Heat hold (contract 7): a heat stop releases the slot and goes back in line, at the back, to restart the
+        # command from the beginning once the Mac cools. Only the last run's rc is the exit.
+        while True:
+            try:
+                slot = acquire(slots, priority=prio, kind="run", why=why, on_wait=_say)
+            except SlotDirError as e:
+                _say(f"WARN {e}; running unslotted")
+                slot = None
+            if slot is not None and slot.queued:
+                _say(f"slot {slot.index + 1} of {slots} after {slot.waited:.0f}s")
+            t0 = time.monotonic()
+            g = Guarded(cmd, hold=slot, on_spawn=lambda x: box.__setitem__("g", x))
+            if slot is not None:
+                write_holder(slot, {"pid": os.getpid(), "guard": g.pid, "group": g.group, "cwd": os.getcwd(),
+                                    "since": _stamp(), "kind": "run"})
+            # Unslotted (a SlotDirError) there is no heat watch, so that run is the last.
+            rc = g.watch(heat=slot is not None)
+            if rc is not HEAT_STOPPED:
+                break
+            slot.release()
             slot = None
-        if slot is not None and slot.queued:
-            print(f"verify-slot: slot {slot.index + 1} of {slots} after {slot.waited:.0f}s", file=sys.stderr, flush=True)
-        g = Guarded(cmd, hold=slot, on_spawn=lambda x: box.__setitem__("g", x))
-        if slot is not None:
-            write_holder(slot, {"pid": os.getpid(), "guard": g.pid, "group": g.group, "cwd": os.getcwd(),
-                                "since": _stamp(), "kind": "run"})
-        rc = g.wait()
+            box["g"] = None
+            stopped = heat_name(g.heat)
+            _say(f"heat stop ({stopped}): ended the suite after {time.monotonic() - t0:.0f}s; no verdict, never red: "
+                 "back in line to restart from the beginning once the Mac cools")
     except _Signalled as s:
         for sig in SIGNALS:
             signal.signal(sig, signal.SIG_IGN)
         if box["g"] is not None:
             box["g"].stop()
-        rc = 128 + s.signum
+            rc = 128 + s.signum
+        elif why["heat"] is not None or stopped is not None:
+            # Stopped while held for the heat, or back in line after a heat stop: no verdict, never red.
+            name = heat_name(why["heat"]) if why["heat"] is not None else stopped
+            _say(f"no verdict: stopped while the Mac was hot (heat: {name}); exit {HEAT_EXIT}")
+            rc = HEAT_EXIT
+        else:
+            rc = 128 + s.signum
     except BaseException:
         # Close the death fd (the guard starts ending the suite) and re-raise without waiting: the guard's own
         # reference keeps the slot held until the suite is gone (contract 1).
@@ -730,7 +864,8 @@ def cmd_status(argv):
         state, holder = _probe(d, k)
         out.append({"index": k, "state": state, "holder": holder if state == "held" else None})
     ws = [{k: w.get(k) for k in ("pid", "cwd", "since", "kind")} for w in waiters]
-    print(json.dumps({"dir": d, "slots": out, "waiters": ws}))
+    level = heat_level()
+    print(json.dumps({"dir": d, "slots": out, "waiters": ws, "heat": {"level": level, "name": heat_name(level)}}))
     return 0
 
 
