@@ -22,6 +22,7 @@ const real = {
   exists: (p) => fs.existsSync(path.join(root, p)),
   template: read('skills/schedule/rollout-template.md'),
   driver: read('hooks/rollout-stop-driver.py'),
+  away: read('skills/execute/away.md'),
 }
 const DRIVER = path.join(root, 'hooks', 'rollout-stop-driver.py')
 
@@ -106,7 +107,7 @@ const BUDGET = 'Integrations run one at a time: each merges the latest `main` in
   'required checks + squash) per approved task, **sequentially**'
 
 // Named failures for execute's queue prose, its hook wiring and the driver path; [] means every rule holds.
-function checkExecute({ skill, hooksJson, exists, template, driver }) {
+function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   const fails = []
   const s2 = S(skill, S2)
   const s45 = S(skill, S45)
@@ -390,18 +391,26 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !s2.includes('print "supersede interrupted: `/thread:schedule <project> --regenerate`"') ||
     !s2.includes('print "close-out interrupted: `/thread:repair [[this]]`"')) fails.push('lineage')
 
-  // race-hold: step 1.1 halts on a RACE in raceHold once the lane is free; a cold resume's exit 3 is printed and
-  // the loop goes on (step 1.1 holds the task); § 7 names both stops; § 8's duplicate-free re-entry rests on it.
+  // race-hold (ADR 0046): an undecided RACE holds the Integration lane only (`laneHold`), never a start; step 1.4 runs a
+  // pending revert (`revert: true`) as the lane's first work and skips the lane for any other `race` entry; step 1.5
+  // halts on `next`'s `halt: race`; a cold resume's exit 3 is printed and the loop goes on; § 7 names the stops; § 8's
+  // duplicate-free re-entry rests on it.
   const s1 = subs[0]?.text ?? ''
+  const s14 = sub(/^If the lane is free, take `next`'s first `integrating` task/)?.text ?? ''
+  const s15 = subs.find((x) => x.text.startsWith('**Halt guard (last).**'))?.text ?? ''
   const coldR = labelled(skill, 'Cold resume.')
   const s7 = S(skill, S7)
   const s8 = S(skill, S8)
   const stuck7 = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: stuck`')) ?? '')
   const signOff7 = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: awaiting-sign-off`')) ?? '')
-  if (!s1.includes('`raceHold`') || !s1.includes('the lane is free') || !s1.includes('`reason="RACE undecided: [[<slug>]]"`') ||
+  if (!s1.includes('Every other hold reads `laneHold` and holds the Integration lane only (ADR 0046)') ||
+    !s1.includes('while starts, seeded revises and automatic retries go on') ||
     !s1.includes('An `UNVERIFIED` entry stays set aside like any other') ||
+    !s14.includes("Else a `race` entry with `revert: true` is the lane's first work") || !s14.includes('*The RACE revert* (step 4) from its `revert` step') ||
+    !s14.includes('Any other `race` entry skips this sub-step') ||
+    !s15.includes('`race` → § 7 with `reason="RACE undecided: [[<slug>]]"`') ||
     !coldR.includes('Exit 3 means `resume` held back an undecided RACE or UNVERIFIED') || !coldR.includes('print the lines and go on') ||
-    !s7.includes('`next` reports a `RACE` in `raceHold` while the lane is free') || !s7.includes('`reason="RACE undecided: [[task]]"`') ||
+    !s7.includes('`next` reports `halt: race` once the lane is free and nothing else moves') || !s7.includes('`reason="RACE undecided: [[task]]"`') ||
     // ADR 0034: the stuck bullet names an UNVERIFIED first and no gate reason; a gate alone is § 7's awaiting-sign-off stop.
     !stuck7.includes('`reason="UNVERIFIED undecided: [[task]]"`, checked first') || stuck7.includes('gated inputs await sign-off') ||
     !signOff7.includes('`reason="awaiting sign-off: [[task]]"`') ||
@@ -836,6 +845,52 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !drvDoc.includes('or a PR hold waits on its merge (`next` reports `halt: held`, reason="held until …", execute §4.5 step 1.5') ||
     !drvBlock.includes('a PR hold waits on its merge (`next` reports `halt: held`, ') ||
     !drvBlock.includes('with its reason=\\"held until …\\", §4.5 step 1.5)')) fails.push('hold')
+  // race-revert (ADR 0046): a RACE red after the Flake check is reverted on main through a revert PR merged only through
+  // merge-task. Four Race-log lines and no merge-task text; the guard's flags; the exit-2 and exit-8 carve-outs; `revert
+  // did not land:` only for revert's 1 or conflict, merge-task's 1 or 4 and a --gated decline; merge-task's 5 is landed;
+  // the tail's order, copied verbatim; Merge hold's revert release and heartbeat clause (6)'s route to it.
+  const rv = st4.includes('**The RACE revert**') ? st4.slice(st4.indexOf('**The RACE revert**')) : ''
+  const rvItem = (label) => { const i = rv.indexOf(label); if (i < 0) return ''; const j = rv.indexOf(' - **', i + label.length); return rv.slice(i, j < 0 ? undefined : j) }
+  const rv5 = rvItem('- **5** →')
+  const rvTail = rv.slice(rv.indexOf('3. **The landing tail**'), rv.indexOf('4. **Did not land.**'))
+  const rvNot = rv.slice(rv.indexOf('4. **Did not land.**'))
+  const hbLine = skill.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
+  if (!rv.includes("Its only `## Race log` lines are `revert started:`, `revert opened:`, `reverted on main:` and `revert did not land:`") ||
+    !rv.includes('No merge-task text is ever appended for a revert PR, its `RACE: PR #R merged as …` line included') ||
+    !rv.includes('(M the merge commit; never appended twice)') ||
+    !rv.includes('/scripts/lead-integrate.py revert --repo <repoPath> --slug <slug> --default <B> --merge <M> --note <task note> --rollout <rollout-note> --verifier \'<verifier>\' --bootstrap \'<env_bootstrap>\'`') ||
+    !rv.includes('never merges and never force-pushes') ||
+    !rvItem('- **2 whose stderr line starts `engine-snapshot:`**').includes('no line, no halt') ||
+    !rvItem('- **2, any other**').includes('the revert stays pending') || !rvItem('- **8** →').includes('the revert stays pending') ||
+    !rvItem('- **1, or route `conflict`**').includes('*Did not land*') || !rvItem('- **1 or 4**').includes('*Did not land*') ||
+    !rv5.includes('Its printed `RACE: PR #R merged as …` line is **not** appended to the `## Race log`') ||
+    !rv5.includes('`revert` again (route `reverted`), then *The landing tail*') || !rv5.includes('Never `revert did not land:`') ||
+    /\*Did not land\*|Append `- <now>/.test(rv5) || /\*Did not land\*/.test(rvItem('- **2, any other**')) ||
+    !rvTail.includes('in this order: append `tail.line` only when `raceLog.reverted` is null') ||
+    !(rvTail.indexOf('tail.line') < rvTail.indexOf('--hold race --state end') && rvTail.indexOf('--hold race --state end') < rvTail.indexOf('set-aside --note')) ||
+    !rvTail.includes('`tail.line` and `tail.reason` are copied verbatim') ||
+    !rvNot.includes("It is written only for `revert`'s exit 1 or route `conflict`, merge-task's 1 or 4 on the revert PR, and a `--gated` decline of it; never for an exit 2, an 8 or a merge-task 5") ||
+    !hold.includes('A revert PR\'s hold (its reason names `the revert of [[<slug>]]`') || !hold.includes('`lead-integrate.py revert` with the RACE revert\'s flags') ||
+    !hold.includes("never this session's pair or the `## Integration log`'s last line, which is the task's own merged PR") ||
+    !hold.includes('Exit 3 means its `revert` again, never `prepare`') ||
+    !hold.includes("Under `--gated` a decline is the revert's *Did not land*, with `merge declined at the --gated hold`, never a set-aside row") ||
+    !hbLine.includes("for a revert PR's hold (its reason names `the revert of [[<slug>]]`), *Merge hold*'s revert release")) {
+    fails.push('race-revert')
+  }
+
+  // main-red (ADR 0046): a revert that did not land holds the whole rollout at once and lastingly: step 1.1's mainRed
+  // halt, § 7's bullet, Did not land's lasting halt, Room stop item 9 and away.md's whole-rollout holds.
+  const s7m = collapse(skill.split('\n').find((l) => l.startsWith('- a RACE revert does not land, or `next` reports `mainRed`')) ?? '')
+  if (!s1.includes('Its `mainRed` is read second: while it is non-empty, halt at once (§ 7) with `reason="RACE: the revert of [[<slug>]] did not land: <why>"`') ||
+    !s1.includes('and launch nothing, whatever the lane or live calls say: no seeded revise, automatic retry, automatic descope or recorded-answer hand-back') ||
+    !s1.includes('Only his `RACE decided:` line, through `/thread:repair`, lifts it, so every entry halts here again until then') ||
+    !s7m.includes('a whole-rollout halt until Lachy\'s `RACE decided:` line') ||
+    !rvNot.includes('It is a whole-rollout halt, and a lasting one') ||
+    !collapse(skill).includes('That halt is a whole-rollout hold\'s, as is a `mainRed` halt, which resumes nothing either') ||
+    !(away ?? '').includes("A whole-rollout (bare) git-env hold, or a main-red hold (`next`'s `mainRed`, a RACE revert that did not land), replaces every hold") ||
+    !(away ?? '').includes('A whole-rollout git-env, main-red or pause hold writes none.')) {
+    fails.push('main-red')
+  }
   return [...new Set(fails)]
 }
 
@@ -849,7 +904,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
-  'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts', 'hold', 'heat']
+  'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts', 'hold', 'heat', 'race-revert', 'main-red']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -1090,9 +1145,28 @@ test('control: no close-out case in § 2 fails lineage', () => {
   only(sk('otherwise → print "close-out interrupted: `/thread:repair [[this]]`"', 'otherwise → proceed'), 'lineage', 'no close-out')
 })
 
-test('control: step 1.1 without the RACE halt fails race-hold', () => {
-  only(sk(' Its `raceHold` is read now: if it names a `RACE` task and the lane is free, halt (§ 7) with `reason="RACE undecided: [[<slug>]]"`.', ''),
-    'race-hold', 'no step 1.1 halt')
+test('control: step 1.5 without the race halt, or step 1.4 without its pending revert, fails race-hold', () => {
+  only(sk('`race` → § 7 with `reason="RACE undecided: [[<slug>]]"` (`laneHold`', '`race` → wait (`laneHold`'), 'race-hold', 'no step 1.5 halt')
+  only(sk(" Else a `race` entry with `revert: true` is the lane's first work,", ' Else'), 'race-hold', 'no pending revert')
+  only(sk(', while starts, seeded revises and automatic retries go on,', ', while nothing starts,'), 'race-hold', 'a RACE that holds every start')
+})
+
+test('control: a 5 that does not land, a 2 that does, the row first, the RACE line appended, or the Merge hold reverted, fails race-revert', () => {
+  const r5 = real.skill.split('\n').find((l) => l.startsWith('      - **5** →'))
+  only(sk(r5, '      - **5** → *Did not land*, with merge-task\'s text.'), 'race-revert', '5 → did not land')
+  only(sk("      - **2, any other** → § 7 with `reason=\"lead-integrate.py failed on [[slug]]\"`; no line, and the revert stays pending.",
+    '      - **2, any other** → *Did not land*, with its text.'), 'race-revert', '2 → did not land')
+  only(sk('in this order: append `tail.line` only when `raceLog.reverted` is null; then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hold --tasks <slug> --hold race --state end`; last, the set-aside row,',
+    'in this order: the set-aside row first; then append `tail.line` only when `raceLog.reverted` is null; then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hold --tasks <slug> --hold race --state end`; the row,'),
+    'race-revert', 'the row first')
+  only(sk('so merge-task is never re-called for PR #R. Its printed', 'so merge-task is never re-called for PR #R. Append `- <now> [[<slug>]] <the script\'s RACE line>`. Its printed'), 'race-revert', 'the RACE line appended')
+  only(sk("Under `--gated` a decline is the revert's *Did not land*, with `merge declined at the --gated hold`, never a set-aside row", 'Under `--gated` a decline sets the task aside'), 'race-revert', 'the decline sets it aside')
+  only(sk("never this session's pair or the `## Integration log`'s last line, which is the task's own merged PR", "the `## Integration log`'s last line"), 'race-revert', 'the task\'s pair')
+})
+
+test('control: a main-red halt once the lane is free, or one that still launches seeded revises, fails main-red', () => {
+  only(sk('Its `mainRed` is read second: while it is non-empty, halt at once (§ 7)', 'Its `mainRed` is read second: while it is non-empty, halt once the lane is free (§ 7)'), 'main-red', 'once the lane is free')
+  only(sk(' no seeded revise, automatic retry, automatic descope or recorded-answer hand-back;', ''), 'main-red', 'seeded revises launch')
 })
 
 test('control: a cold resume that halts on exit 3 fails race-hold', () => {
@@ -1512,7 +1586,7 @@ test("control: the driver's docstring or block reason without the Heat hold fail
   only(drv(' or a Heat hold stands (`heat: …`, the "\n            "same wait)', ''), 'heat', 'block reason')
 })
 
-test('the rules are all named (40) and each has a control', () => {
-  assert.equal(RULES.length, 40)
+test('the rules are all named (42) and each has a control', () => {
+  assert.equal(RULES.length, 42)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

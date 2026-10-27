@@ -24,17 +24,17 @@ const real = {
   reconcile: read('skills/execute/scripts/reconcile-rollout.py'),
 }
 
-// The three markers, from the one source.
+// The four markers, from the one source.
 const consts = (() => {
   const py = 'import importlib.util, json, sys\n' +
     'spec = importlib.util.spec_from_file_location("r", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n' +
-    'print(json.dumps([m.GIT_ENV_LOG_SECTION, m.GIT_ENV_TRIP_MARK, m.GIT_ENV_ACK_MARK]))\n'
+    'print(json.dumps([m.GIT_ENV_LOG_SECTION, m.GIT_ENV_TRIP_MARK, m.GIT_ENV_ACK_MARK, m.GIT_ENV_MISS_MARK]))\n'
   const r = spawnSync('python3', ['-c', py, path.join(root, 'skills/execute/scripts/reconcile-rollout.py')],
     { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
   assert.equal(r.status, 0, r.stderr)
   return JSON.parse(r.stdout)
 })()
-const [LOG, TRIP, ACK] = consts
+const [LOG, TRIP, ACK, MISS] = consts
 
 // § 3c item 5 as it stood before p14-6, plus p23-4's `noslot` reading: repair's § 3e carries the git-env reading, § 3c
 // is never edited for it.
@@ -138,11 +138,11 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
   const adrB = collapse((adr.split('\n- ').find((b) => b.startsWith('**A git-env canary watches the shared checkout')) ?? ''))
   const hb = execute.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
 
-  // marker-tie: the three markers (read from reconcile-rollout.py) reach every consumer, and the canary never
-  // carries a literal copy of any of them.
-  if (![LOG, TRIP, ACK].every((k) => can.includes(k)) || ![LOG, TRIP, ACK].every((k) => gflag.includes(k)) ||
-    !d3.includes(LOG) || !['ack --rollout', '--slugs', '--ref', 'restore --rollout', '--drop-local'].every((k) => d3.includes(k)) ||
-    !sch1.includes(LOG) || [LOG, TRIP, ACK].some((k) => canary.includes(k))) fails.push('marker-tie')
+  // marker-tie: the four markers (read from reconcile-rollout.py; the miss mark since ADR 0046) reach every consumer,
+  // and the canary never carries a literal copy of any of them.
+  if (![LOG, TRIP, ACK, MISS].every((k) => can.includes(k)) || ![LOG, TRIP, ACK, MISS].every((k) => gflag.includes(k)) ||
+    !d3.includes(LOG) || !d3.includes(MISS) || !['ack --rollout', '--slugs', '--ref', 'restore --rollout', '--drop-local'].every((k) => d3.includes(k)) ||
+    !sch1.includes(LOG) || [LOG, TRIP, ACK, MISS].some((k) => canary.includes(k))) fails.push('marker-tie')
 
   // arm-sites: an arm beside each launch (next to its shasum), in order where it matters. A fresh task call's arm is
   // its mark-started's (p26-3): step 1.2's seeded revise, step 1.3's start and restart and its room-stop resume each
@@ -172,7 +172,8 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !before(lost, 'When the resume returns a row, run the canary `check` for the resume\'s window first', 'Then reconcile the row it returns') ||
     !lost.includes('the row is still reconciled whatever the exit') || !lost.includes('act on no `integration.outcome`') ||
     !bullet(canRaw, 'Check sites:').includes('a *Lost call* resume that returns a row') ||
-    !bullet(canRaw, 'Check sites:').includes('trips `record not armed`')) fails.push('check-sites')
+    !bullet(canRaw, 'Check sites:').includes('is the Bookkeeping miss `record not armed`') ||
+    !bullet(canRaw, 'Check sites:').includes('it runs the state check and trips only when that fails')) fails.push('check-sites')
 
   // check-all-sites: every entry after verify_timeout; step 3 before mark-integrating; before every merge-task
   // launch (step 4, the hold release, the backoff, the two re-runs); completion before the sweep, retire before the move.
@@ -208,17 +209,19 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
 
   // step11-halt: step 1.1 halts at once on a hold and names what it never launches; Lost call writes nothing under it.
   const s11 = subs[0] ?? ''
-  if (!s11.includes('Its `gitEnvHold` comes first of all') || !s11.includes('whatever the lane or live calls say') ||
+  if (!s11.includes('Its `gitEnvHold` comes first of all: while an entry reads `scope: rollout`') || !s11.includes('whatever the lane or live calls say') ||
     !s11.includes('no *Lost call* `resumeFromRunId`') || !s11.includes('no § 3.7 signed-gate resume') || !s11.includes('no merge-task') ||
     !lost.includes('*Lost call* writes nothing and resumes nothing; after the ack the next entry\'s *Restart routing* handles it')) fails.push('step11-halt')
 
   // lane-free: the lane frees at every lane-holding site; undo first after a verify trip; the RACE path ends undecided.
   if (!lane.includes("*Lost call*'s `integrate` arm") || !lane.includes('`lead-integrate.py undo') ||
-    !lane.includes('step 1.1 halts `reason="RACE undecided: [[<slug>]]"`') || !lane.includes('frees the lane')) fails.push('lane-free')
+    !lane.includes('`next` reports `halt: race`, `reason="RACE undecided: [[<slug>]]"` (step 1.5)') || !lane.includes('frees the lane') ||
+    !lane.includes("the canary's exit 9 included, frees the lane")) fails.push('lane-free')
 
   // race-gitenv: the `git-env halt` phrase at every RACE site and every definition of the in-flight state.
   const exit5 = sentinel.slice(sentinel.indexOf('the hold route'))
   if (!race.includes('`- <now> [[<slug>]] re-verify not run: git-env halt`') ||
+    !race.includes('but on its exit 9, a lane hold, free the lane instead of halting') ||
     !race.includes('`- <now> [[<slug>]] re-verify stopped: git-env halt (rc <rc|absent>)`') ||
     !exit5.includes("<the script's RACE line>; re-verify not run: git-env halt") ||
     !before(inFlight, 'status cannot tell which, so say so.', 'carries `git-env halt`') ||
@@ -252,11 +255,13 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     /git-env trip/.test(rows['`failed:git-env:<any other rc>`'] ?? '') ||
     !backoff.includes('`# thread:git-env-backoff` snippet') ||
     !['0 → `mark-done`', '5 → the `## Race log` line only', '2/70 → halt', '`failed:git-env:<rc>` → halt by the exit rule', 'anything else does nothing'].every((k) => mr.includes(k)) ||
+    !mr.includes("A revert PR's result (*The RACE revert*) takes its own hold route: 2 or 70 → halt, with no `## Race log` line; `failed:git-env:<rc>` → the exit rule; every other code, 0, 5 and 6 included, does nothing, and the revert stays pending") ||
+    !donts.includes('never take a route under a git-env hold but 0/5/2/70 (a revert PR\'s: 2/70 only)') ||
     !donts.includes('never take a route under a git-env hold but 0/5/2/70')) fails.push('merge-result')
 
   // exit-rule: any non-zero exit halts with one of two reasons, in the paragraph and in § 7; never ack from execute.
   const ex = bullet(canRaw, 'The exit rule.')
-  if (!ex.includes('Any non-zero exit halts: exit 3 `reason="git-env trip: the shared checkout changed"`, anything else `reason="git-env canary failed"`') ||
+  if (!ex.includes('The canary\'s exit 9 is a lane hold, never a halt (the next bullet). Any other non-zero exit halts: exit 3 `reason="git-env trip: the shared checkout changed"`, anything else `reason="git-env canary failed"`') ||
     !s7.includes('`reason="git-env trip: the shared checkout changed"`') || !s7.includes('`reason="git-env canary failed"`') ||
     !donts.includes('never ack from execute') || !pz.includes("TaskStop'd calls keep their open git-env records")) fails.push('exit-rule')
 
@@ -293,8 +298,9 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !adr.includes('*(Amended 2026-10-19 by thread-skill-p26-1:')) fails.push('owner-refusal')
 
   // status: § 2 reads gitEnvHold, § 3 flags it (offline too), § 4's headline and action 7 route it to repair.
-  if (!status2.includes('plus `gitEnvHold`') || !gflag.includes('it holds offline too') ||
-    !status4.includes('`GIT-ENV HOLD: [[a]], [[b]]`') ||
+  if (!status2.includes('plus `gitEnvHold`') || !status2.includes('`mainRed`') || !gflag.includes('it holds offline too') ||
+    !status4.includes('`GIT-ENV HOLD: [[a]], [[b]]`') || !status4.includes('` — lane only`, or ` — whole rollout`') ||
+    !status4.includes('`MAIN RED: [[x]] (revert did not land)`') ||
     !status4.includes('An unacked git-env trip (§ 3\'s Git-env trip flag) is an open escalation too → `/thread:repair [[<rollout>]]`')) fails.push('status')
 
   // schedule: the supersede runs check-all on the prior before the preview and the carry, says the evidence write
@@ -331,6 +337,52 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !ctxWindow.includes('armed by `mark-started` itself') || !adr.includes('*(Amended 2026-10-20 by thread-skill-p26-3:') ||
     !rrDoc.includes('--arm-repo') || !rrDoc.includes('--arm-default')) fails.push('mark-started-arm')
 
+  // miss (ADR 0046): a Bookkeeping miss never trips by itself; the state check reads the checkout (not bare, no tracked
+  // changes, <B> an ancestor of origin's tip by ls-remote and by the tracking ref after a fetch, which equals a reading),
+  // logs one miss line and holds nothing; only a failing state check trips. Execute, the canary's own docstring and
+  // CONTEXT say so.
+  const missB = bullet(canRaw, 'A Bookkeeping miss')
+  const canDoc = canary.slice(0, canary.indexOf('\nimport argparse'))
+  const ctxMiss = collapse((context.split('\n- **').find((x) => x.startsWith('Bookkeeping miss**')) ?? ''))
+  if (!missB.includes('`record missing`, `record unreadable`, or `record not armed`') || !missB.includes('it never trips by itself') ||
+    !missB.includes('read both by `git ls-remote` and as `origin/<B>` after a fetch, which must equal one of the readings') ||
+    !missB.includes('untracked files such as `.claude/merge-task.status` are ignored') || !missB.includes('it holds nothing, and the window keeps its verify') ||
+    !missB.includes('`<reason>, and the state check failed: <failure>`') || !missB.includes('only Lachy\'s ack clears it') ||
+    !canDoc.includes('only a failing state check trips') || !canDoc.includes('T must equal L1') || !canDoc.includes('0.4 x the lock timeout in force') ||
+    !ctxMiss.includes('it never trips') || !ctxMiss.includes(`a \`${MISS}\` line`)) fails.push('miss')
+
+  // scope (ADR 0046): a bare checkout holds the whole rollout, any other trip the Integration lane only, while task
+  // calls go on; next's scope reads the bare line (GIT_ENV_BARE_RE), status and repair render the scope.
+  const tripB = bullet(canRaw, 'What a trip does.')
+  if (!tripB.includes('holds the whole rollout, since linked worktrees share the root\'s config') ||
+    !tripB.includes('Any other trip holds the lane: `next` lists it in `laneHold`, the canary exits 9 at every site but a task window\'s, and task calls go on') ||
+    !gflag.includes("by each entry's `scope`") || !d3.includes('a bare checkout (an entry with `scope: rollout`) holds the whole rollout') ||
+    !reconcile.includes('GIT_ENV_BARE_RE = re.compile(r"core\\.bare (?:false→)?true(?!→)")')) fails.push('scope')
+
+  // no-auto-ack (ADR 0046): every trip is Lachy's; execute never acks and the Companion may gather evidence and notify,
+  // never ack; the canary writes the ack mark only in cmd_ack.
+  const ackUses = canary.split('\n').map((l, i) => [l, i]).filter(([l]) => l.includes('RR.GIT_ENV_ACK_MARK'))
+  const ackFn = canary.indexOf('\ndef cmd_ack('), ackEnd = canary.indexOf('\ndef ', ackFn + 5)
+  const inAck = (i) => { const at = canary.split('\n').slice(0, i).join('\n').length; return at > ackFn && at < ackEnd }
+  if (!tripB.includes("Never ack from execute: every trip is Lachy's, and the Companion may gather its evidence and notify him (ADR 0048), never ack it") ||
+    !d3.includes('A Companion (ADR 0048) may gather this evidence and notify Lachy, never ack: every trip is his') ||
+    !ackUses.length || !ackUses.every(([, i]) => inAck(i))) fails.push('no-auto-ack')
+
+  // lane-exit (ADR 0046): the canary's exit 9 is a lane hold, never a halt, at every site that reads a canary exit.
+  const nine = bullet(canRaw, "The canary's exit 9 (a lane hold, ADR 0046).")
+  const coldR = labelled(execute, 'Cold resume.')
+  if (!nine.includes('It never halts') || !nine.includes('*The lane-free rule* frees the lane') || !nine.includes('A task window never sees 9') ||
+    !(rows['`failed:git-env:9`'] ?? '').includes('The lane is held') ||
+    !s7.includes('but for its exit 9 (a lane hold: no halt, the lane frees)') ||
+    !coldR.includes('has exited 0, or 9 (the canary\'s lane hold)') || !recheck.includes('but its exit 9 (a lane hold, ADR 0046) goes on')) fails.push('lane-exit')
+
+  // bare-restore (ADR 0046): a bare checkout's restore, `--bare-only` included, runs only once nothing of the rollout is
+  // in flight (the canary cannot see sessions, so the wait lives in repair).
+  if (!r1.includes('Its `--bare-only` form waits the same way') ||
+    !optB.includes('it runs only once no Workflow call or background Integration command of the rollout is in flight') ||
+    !rDonts.includes('never restore with anything in flight, `--bare-only` included') || /`--bare-only` aside/.test(rDonts) ||
+    !tripB.includes('the restore runs once none is in flight')) fails.push('bare-restore')
+
   // context-readme: the four terms and the script's README line.
   if (!['- **Git-env canary** —', '- **Window** —', '- **Git-env hold** —', '- **Git-env ack** —'].every((k) => context.includes(k)) ||
     !collapse(readme).includes("`skills/execute/scripts/git-env-canary.py` is the lead's git-env canary")) fails.push('context-readme')
@@ -345,7 +397,7 @@ test('the git-env canary holds at every site, consumer and record', () => {
 
 const RULES = ['marker-tie', 'arm-sites', 'check-sites', 'check-all-sites', 'integrate-check', 'prepare-cases', 'step11-halt',
   'lane-free', 'race-gitenv', 'race-followon', 'drop-guard', 'merge-result', 'exit-rule', 'no-verdict', 'owner-closeout', 'status', 'schedule',
-  'repair', 'adr', 'context-readme', 'owner-refusal', 'mark-started-arm']
+  'repair', 'adr', 'context-readme', 'owner-refusal', 'mark-started-arm', 'miss', 'scope', 'no-auto-ack', 'lane-exit', 'bare-restore']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -379,12 +431,43 @@ test('control: each arm site without its arm fails arm-sites', () => {
 test('control: a Lost call resume reconciled with no check, or a lenient re-check, fails check-sites', () => {
   only('execute', ' When the resume returns a row, run the canary `check` for the resume\'s window first (*Git-env canary*: the kind it armed, `task` or `integrate`); a non-zero exit halts, but the row is still reconciled whatever the exit. Then reconcile the row it returns,',
     ' Reconcile the row it returns,', 'check-sites', 'lost call resume')
-  only('execute', ' Check each window once: `check` on a closed window (a tombstone an earlier window of the same slug and kind left) trips `record not armed`, because the owner holds at its own check, so that window was never armed.', '', 'check-sites', 'record not armed')
+  only('execute', ' Check each window once: `check` on a closed window (a tombstone an earlier window of the same slug and kind left) is the Bookkeeping miss `record not armed`, because the owner holds at its own check, so that window was never armed: it runs the state check and trips only when that fails.', '', 'check-sites', 'record not armed')
 })
 
 test('control: step 2 reconciling before its check fails check-sites', () => {
   only('execute', '2. **A task call returns.** Run the canary `check` for its window first (*Git-env canary*: `--kind task`); a non-zero exit halts, but the row is still reconciled whatever the exit. Reconcile its row (§ 6),',
     '2. **A task call returns.** Reconcile its row (§ 6),', 'check-sites', 'step 2')
+})
+
+test('control: a revert PR routed like the task\'s under a hold fails merge-result', () => {
+  only('execute', "A revert PR's result (*The RACE revert*) takes its own hold route: 2 or 70 → halt, with no `## Race log` line; `failed:git-env:<rc>` → the exit rule; every other code, 0, 5 and 6 included, does nothing, and the revert stays pending",
+    "A revert PR's result takes the same hold route", 'merge-result', 'no revert-PR list')
+})
+
+test('control: a miss that trips by itself, or a state check with one reading, fails miss', () => {
+  only('execute', 'It observed nothing, so it never trips by itself:', 'It observed nothing, yet it trips:', 'miss', 'trips by itself')
+  only('execute', ', which must equal one of the readings (a forged', ' (a forged', 'miss', 'no T == L')
+})
+
+test('control: a lane trip that holds the whole rollout, or a scope the status flag ignores, fails scope', () => {
+  only('execute', 'Any other trip holds the lane: `next` lists it in `laneHold`,', 'Any other trip holds the whole rollout too: `next` lists it in `laneHold`,', 'scope', 'lane as whole')
+  only('status', "by each entry's `scope`", 'by the log', 'scope', 'status scope')
+})
+
+test('control: a Companion that acks, or an ack written outside cmd_ack, fails no-auto-ack', () => {
+  only('execute', ", and the Companion may gather its evidence and notify him (ADR 0048), never ack it", ', and the Companion acks it once the evidence is clean', 'no-auto-ack', 'companion acks')
+  only('canary', 'def cmd_retire(ctx, args):', 'def _auto(ctx):\n    return RR.GIT_ENV_ACK_MARK\n\n\ndef cmd_retire(ctx, args):', 'no-auto-ack', 'a second ack writer')
+})
+
+test('control: an exit 9 that halts, or no failed:git-env:9 row, fails lane-exit', () => {
+  only('execute', "It never halts and needs no question: the loop goes back to step 1,", 'It halts:', 'lane-exit', '9 halts')
+  const row = real.execute.split('\n').find((l) => l.startsWith('   | `failed:git-env:9` |'))
+  only('execute', row + '\n', '', 'lane-exit', 'no 9 row')
+})
+
+test('control: a bare-only restore exempted from the in-flight wait fails bare-restore', () => {
+  only('repair', 'never restore with anything in flight, `--bare-only` included,', 'never restore with anything in flight (`--bare-only` aside: it moves no ref),', 'bare-restore', 'the Don\'t exempts it')
+  only('repair', '; it runs only once no Workflow call or background Integration command of the rollout is in flight (a bare\n  checkout reaches every linked worktree, so running calls finish first)', '', 'bare-restore', '(b) runs it at once')
 })
 
 test('control: a merge hold release without check-all fails check-all-sites', () => {

@@ -23,7 +23,7 @@ characters; a bare failure reads `core.bare true`, never `core.bare false`). Wit
 The state check, local checks first and the network last:
   1. `rev-parse --is-bare-repository`: bare fails (`core.bare true`), no network;
   2. `git --no-optional-locks status --porcelain --untracked-files=no` is empty (untracked files such as
-     `.claude/merge-wave.status` are ignored): else `tracked changes`, no network;
+     `.claude/merge-task.status` are ignored): else `tracked changes`, no network;
   3. `_read_state` (still the only reader of the local refs): a missing `refs/heads/<B>` fails, no network;
   4. L1 = `git ls-remote --exit-code origin refs/heads/<B>`, never retried;
   5. `git -c gc.auto=0 fetch --quiet --no-tags --no-write-fetch-head origin refs/heads/<B>`, through the configured

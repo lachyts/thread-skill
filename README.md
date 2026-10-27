@@ -129,8 +129,13 @@ that ends a killed holder's suite before its verify slot frees;
 `verify-slot.py status` shows who holds each verify slot and who waits.
 `skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
 watches the shared checkout's default branch and bareness around every launch
-(a task call's window is armed by `reconcile-rollout.py mark-started` itself)
-and halts the queue on a change that is not a close-out (execute § 4.5).
+(a task call's window is armed by `reconcile-rollout.py mark-started` itself),
+logs a window it could not read with the checkout's state instead of tripping (a
+Bookkeeping miss), and holds what a change that is not a close-out threatens: the
+Integration lane, or the whole rollout for a bare checkout (execute § 4.5, ADR 0046).
+A RACE whose re-verify stays red after the Flake check is reverted on main through a
+revert PR that merges only through merge-task (`lead-integrate.py revert`; execute
+§ 4.5 *The RACE revert*).
 `skills/execute/scripts/step-boundary.py` is the lead's side of a Chorus room
 stop: it reads the Workflow journals to stop each call at a step boundary and
 records the stop on the rollout note (execute § Room stop), and in the Run record

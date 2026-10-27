@@ -540,7 +540,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Integration lane** — the one-at-a-time Integration step itself, held by one
   approved task at a time until it is released (a merge, a set-aside, a
   rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
-  to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue
+  to "the lane". A **Git-env hold** that is not a bare checkout, and an
+  undecided RACE, hold the lane only (`next`'s `laneHold`, ADR 0046): nothing
+  integrates or merges while task calls go on. Not a **Lane** (rollout vs session). _Avoid_: merge queue
   (Integration's gloss: the whole step, never the lane alone).
 - **Integration queue** — the approved tasks waiting for the Integration lane,
   in `next`'s order: a task a queued task depends on, directly or through a
@@ -723,9 +725,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   revise never launches unarmed. _Avoid_: watch, session.
 - **Git-env hold** — the unacked trip lines on a rollout note's
   `## Git-env log`: while one stands, nothing integrates or merges and `carry`
-  refuses the rollout, while task calls keep starting and running; a bare
-  checkout holds the whole rollout (ADR 0046, ADR 0048). Only a **Git-env
-  ack** lifts it. _Avoid_: git-env halt (the lead's stop, not the hold).
+  refuses the rollout, while task calls keep starting and running (the
+  **Integration lane** held: `laneHold`, the canary's exit 9); a bare
+  checkout holds the whole rollout (each entry's `scope`; ADR 0046, ADR 0048).
+  Only a **Git-env ack** lifts it. _Avoid_: git-env halt (the lead's stop, not the hold).
 - **Git-env ack** — the recorded acceptance of the tripped windows, naming
   exactly the set shown and the ref shown (`--ref`). Lachy's, through
   `/thread:repair` (its git-env step, 3e), after an optional `restore`; never
@@ -745,9 +748,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `skills/_shared/vault-grammar.md` § Hold until). _Avoid_: a hold sentence.
 - **Bookkeeping miss** — a window the canary could not read (`record
   missing`, `record unreadable`, `record not armed`): it observed nothing, so
-  it never trips. It is logged with the checkout's state, read there and
-  then, and only a failing state check trips (ADR 0046). _Avoid_: false
-  trip, automatic ack.
+  it never trips. It is logged (a `git-env miss` line) with the checkout's
+  state, read there and then (not bare, no tracked changes, `<default>` an
+  ancestor of origin's tip by `ls-remote` and by the tracking ref after a
+  fetch), holds nothing, and only a failing state check trips (ADR 0046).
+  _Avoid_: false trip, automatic ack.
+- **RACE revert** — a RACE whose re-verify stays red after the Flake check is
+  reverted on `main` through a revert PR merged only through merge-task
+  (`lead-integrate.py revert`; never a force-push), its task set aside for
+  Lachy. The lane frees only when `main`'s tree is restored, by tree or but
+  for proven Inert paths (ADR 0045); a revert that did not land holds the
+  whole rollout (main red, `next`'s `mainRed`) until Lachy decides (ADR
+  0046). _Avoid_: rollback, force-revert.
 - **Dependent closure** — the set of tasks transitively depending on a task
   via `depends-on:` / `blocked-by:` (schedule § 3) — the blast radius that
   must move together if it's deferred, and the tasks a set-aside task holds

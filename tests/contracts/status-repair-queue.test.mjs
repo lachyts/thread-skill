@@ -826,12 +826,13 @@ const real = { status: read('skills/status/SKILL.md'), repair: read('skills/repa
 
 const IN_COUNT = ['merged', 'integrating', 'awaiting-integration', 'running', 'queued', 'set-aside']
 const COUNT_KEY = { merged: 'merged', integrating: 'integrating', 'awaiting-integration': 'awaitingIntegration', running: 'running', queued: 'queued', 'set-aside': 'setAside' }
-// Repair § 2's classes, first-match in this order: a RACE re-verify in flight first (the lead's own procedure), then
+// Repair § 2's classes, first-match in this order: a RACE re-verify in flight first, then a RACE revert in flight (each
+// the lead's own procedure, ADR 0046), then
 // RACE and a PR-less merge ahead of merged-never-marked and at Integration (both also match a RACE / UNVERIFIED
 // task), PR CLOSED ahead of awaiting Integration, a plan-block after a descope ahead of the descopable one, and both
 // ahead of the automatic retry (a descope is judged first, as execute's step 1.2 judges it) and of the own run they
 // also match; the automatic retry and a `## Needs you` question ahead of at Integration and every class below it.
-const LABELS = ['RACE re-verify in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'live', 'PR CLOSED / branch missing',
+const LABELS = ['RACE re-verify in flight', 'RACE revert in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'live', 'PR CLOSED / branch missing',
   'awaiting Integration', 'queued', 'plan-blocked after a descope', 'plan-blocked, descopable', 'retry (automatic)', 'needs you', 'at Integration',
   'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
 const ROUTES = ['Stale anchor ref', 'The raise', 'A `merge-task:` own-run set-aside', 'A CLOSED PR or a missing branch', 'Recut', 'Leash', 'Hand-off']
@@ -1061,7 +1062,7 @@ function check({ status, repair, execute, fx }) {
     !labelled(r4raw, 'A `merge-task:` own-run set-aside', { item: true }).includes('it merges through case (ii) when main has not moved') ||
     fx.B.fails.length) fails.push('integration-only')
 
-  // stages: the 20 classes, each once, and § 4's per-stage routes.
+  // stages: the 21 classes, each once, and § 4's per-stage routes.
   if (JSON.stringify(clsRows.map((c) => c[0].slice(2, -2)).sort()) !== JSON.stringify([...LABELS].sort()) ||
     !ROUTES.every((l) => r4raw.split('\n').some((x) => x.startsWith(`- **${l}`))) ||
     !r4.includes('lead-integrate.py set-aside --note <task note> --kind integration')) fails.push('stages')
@@ -1124,7 +1125,9 @@ function check({ status, repair, execute, fx }) {
   // run, or has ended. Repair: an in-flight class does nothing and never asks; the RACE class excludes it; the
   // live-queue mode waits on it; § 3c shows the re-verify verdict. Fixture E: the RACE reads integrating, and
   // resume flips both it and an UNVERIFIED set-aside done.
-  const three = labelledRaw(s3raw, 'A RACE has three states.')
+  const three = labelledRaw(s3raw, 'A RACE has six states.')
+  const mainRedItem = labelled(s3raw, 'Main red:', { item: true })
+  const rrif = cls['RACE revert in flight'] ?? ''
   const inFlight = labelled(s3raw, 'In flight:', { item: true })
   const fallback = `the next step is \`/thread:repair [[<rollout>]]\` (action ${RUN.escalation}), never \`/thread:execute\``
   const rif = cls['RACE re-verify in flight'] ?? ''
@@ -1133,7 +1136,12 @@ function check({ status, repair, execute, fx }) {
   const liveByName = itemBy('a live queue')
   const drainByName = itemBy('`pause_requested`')
   if (!collapse(three).includes('`<repoPath>/.claude/integration/race-<slug>.rc`') ||
-    !before(three, '- **Decided:**', '- **In flight:**') || !before(three, '- **In flight:**', '- **Undecided:**') ||
+    !before(three, '- **Decided:**', '- **In flight:**') || !before(three, '- **In flight:**', '- **Revert in flight:**') ||
+    !before(three, '- **Revert in flight:**', '- **Main red:**') || !before(three, '- **Main red:**', '- **Reverted:**') ||
+    !before(three, '- **Reverted:**', '- **Undecided:**') ||
+    !mainRedItem.includes('say that the whole rollout is held') || !collapse(three).includes('Render `RACE revert in flight (PR #R)`') ||
+    !rrif.startsWith("status's revert in flight (status § 3)") || !rrif.includes("nothing: execute's RACE revert owns it") ||
+    !c3.includes('recording the decision releases every start') ||
     !['still reads `integrating` with an `owner:` whose session is not known to have ended', 'no `paused:` stamp stands',
       'its verdict file is absent or reads `0`', 'not drift', 'flag nothing', 'treat it as the live queue',
       'once that session shows the `RACE: …` halt or no run, or has ended'].every((k) => inFlight.includes(k)) ||
@@ -1863,6 +1871,13 @@ test('control: an in-flight class that escalates fails race-in-flight', () => {
 })
 test('control: § 3c without the re-verify verdict fails race-in-flight', () => {
   only(rp("5. for a RACE only, the lead's re-verify verdict, so Lachy decides with it on screen:", '5. for a RACE only:'), 'race-in-flight', 'verdict')
+})
+test('control: a Main red state that holds only the lane, or six states out of order, fails race-in-flight', () => {
+  only(st('flag it (RACE / UNVERIFIED, below), and say that the whole rollout is held:', 'flag it (RACE / UNVERIFIED, below), and say that the lane is held:'), 'race-in-flight', 'main red: the lane only')
+  const rr = lineWith(real.repair, '| **RACE revert in flight** |')
+  only(rp("nothing: execute's RACE revert owns it", 'escalate (§ 3c) at once'), 'race-in-flight', 'repair revert-in-flight class')
+  only(rp('so recording the decision releases every start', 'so recording the decision releases the lane'), 'race-in-flight', 'repair main red')
+  assert.ok(rr, 'control setup: the revert-in-flight row')
 })
 test('control: fixture E failing fails race-in-flight', () => {
   only({ fx: { ...real.fx, E: { fails: ['resume wrote the held proj-e-race'] } } }, 'race-in-flight', 'fixture E')

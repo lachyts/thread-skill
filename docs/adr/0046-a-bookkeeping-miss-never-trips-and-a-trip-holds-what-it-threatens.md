@@ -1,7 +1,7 @@
 # 0046 — A bookkeeping miss never trips, and a trip holds only what it threatens
 
 Date: 2026-10-21
-Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`, built by P29. Amends ADR 0030's git-env canary consequence and the Git-env hold.
+Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`. Built by p29-2 (2026-10-27). Amends ADR 0030's git-env canary consequence and the Git-env hold.
 
 ## Context
 
@@ -26,6 +26,23 @@ A git-env trip holds the whole queue (nothing starts, integrates or merges) unti
 - **Self-ack only, the hold still freezing everything:** rejected. A real trip at night would still idle every slot until morning.
 - **Lane-only hold, a false trip still tripping and waiting for Lachy:** rejected. It still loses the night's merges to a formality.
 - **Any trip kind acks itself on stronger evidence** (the trip line's own recorded state, the moved ref merged by merge-task): rejected in the re-grill. Both false trips of `chorus-rollout-2026-10-18` were Bookkeeping misses, and an observed change is rare enough to be worth a look.
+
+## How p29-2 built it
+
+- **The canary's exit 9.** `git-env-canary.py` reads each unacked trip's scope (reconcile-rollout.py's `_git_env_scope`: `rollout` when the line reads `core.bare false→true`, `core.bare true at arm` or a failed state check's `core.bare true`, else `lane`). A whole-rollout hold exits 3 at every verb; a lane hold exits 9 at every site but a task window's, whose `arm` arms (printing `LANE HOLD:` lines) and whose `check` exits 0, its trip logged and joining the unacked set. Execute reads 9 as the lane held, never a halt.
+- **The miss line.** A Bookkeeping miss runs the state check (not bare; no tracked changes; `<default>` an ancestor of origin's tip by `ls-remote` and by `origin/<default>` after a fetch through the configured refspec) and, passing, logs `git-env miss [[slug]] <kind>: <reason>; <each reading>; holds nothing; repo <R>`. `record missing` writes a closed `checked` tombstone carrying `miss`; `record not armed` leaves the tombstone untouched (its `ackedTrips` survive, ADR 0053); `record unreadable` becomes a tombstone its window's own check consumes. Failing, the trip line reads `<reason>, and the state check failed: <failure>`.
+- **The budget and T == L.** The network reads share one budget under the canary lock: min(`THREAD_GIT_ENV_STATE_TIMEOUT`, 12 s; 0.4 × the lock timeout), each call in its own process group, killed on its timeout and never retried; the fetch is retried once only on a ref lock. The tracking ref after the fetch must equal the first `ls-remote` reading, or a second one, so a forged tracking ref or refspec cannot pass and a peer's push between the reads does.
+- **`laneHold`.** `next` lists what holds the Integration lane: every unacked trip's slug, then each undecided RACE not reverted, or whose revert is pending (`revert: true`: started, not failed, `integrating:` standing), or reverted with `main not re-verified`. Starts, restarts, seeded revises and retries go on.
+- **`halt: race`.** Once nothing starts, restarts or runs and the lane does not move, a lane `git-env` entry halts `git-env` and a `race` entry with `revert: false` halts `race`, ahead of `paused` and every older verdict.
+- **`mainRed` and its at-once halt.** A RACE revert that did not land (`revert did not land:`) with no `RACE decided:` line holds every start (`main red: …`) and makes `halt` "race" at once, whatever runs, pauses or holds; execute's step 1.1 halts on it at every entry, ahead of every step-1.2 launch, until Lachy decides. It reads the rollout note alone, never the task note's status.
+- **`revert` and its guard.** `lead-integrate.py revert` checks its target in the vault before any fetch (the note holds the lane, the task's own merge-task RACE line names `--merge`, `revert started:` stands, no `revert did not land:`), then that GitHub reads the PR merged as M, then opens, finds or reads as landed a revert PR on `thread-revert/<slug>-<M12>`. It never merges, never force-pushes and never writes the vault.
+- **The four Race-log lines.** `revert started:`, `revert opened:`, `reverted on main:` and `revert did not land:` are the revert's only lines; merge-task's text, its `RACE:` line for the revert PR included, is never appended, and `revert`'s guard skips a RACE line for another PR.
+- **`restores`, with its Inert reuse.** The revert's result frees the lane only when it restores M^1's tree: exactly, or but for paths prepare's own Inert check proves (ADR 0045, re-proved on that result, its Run-record line with base M^1). Any other landing since M keeps the lane held, `main not re-verified`, for Lachy: no verifier has run on that `main`.
+- **Pending.** A revert stays pending until its landing tail's last write, the set-aside row that removes `integrating:`; step 1.4 resumes it on any entry.
+- **The tail's order.** The `reverted on main:` line (only when absent), then `hold race end`, then the set-aside row, `tail.line` and `tail.reason` copied verbatim.
+- **The exit-2 and exit-5 routes.** `revert`'s exit 2 with an `engine-snapshot:` line is re-run from the root it names, never a did-not-land; merge-task's exit 5 on a revert PR means it landed (`revert` routes `reverted`), never a did-not-land.
+- **The merge-hold revert clause.** A revert PR's merge hold is released through `revert` (#R's pair), never this session's pair or the Integration log's last line, and a `--gated` decline is the revert's did-not-land, never a set-aside row.
+- **The re-entry guards.** `resume`, `hand-back` and the automatic retry never re-enter a task whose `pr:` the revert reverted (reconcile-rollout.py `_reverted_pr`); a new `pr:` passes.
 
 ## Consequences
 

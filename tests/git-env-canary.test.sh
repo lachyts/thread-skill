@@ -195,8 +195,8 @@ arm A; chk A; push2
 chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "bm-behind: R behind origin after a peer push → 0, a miss (an ancestor of origin's tip)"
 scen bm-untracked
 mkt A in_progress
-arm A; chk A; mkdir -p "$R/.claude"; echo x > "$R/.claude/merge-wave.status"; echo y > "$R/stray.txt"
-chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "bm-untracked: an untracked .claude/merge-wave.status → 0, a miss"
+arm A; chk A; mkdir -p "$R/.claude"; echo x > "$R/.claude/merge-task.status"; echo y > "$R/stray.txt"
+chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "bm-untracked: an untracked .claude/merge-task.status (and a stray file) → 0, a miss"
 # bm-pp: a peer push between the ls-remote and the fetch: T is not L1, so ls-remote is read again and T matches it.
 scen bm-pp
 mkt A in_progress
