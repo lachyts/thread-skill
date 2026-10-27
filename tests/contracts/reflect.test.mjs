@@ -15,7 +15,11 @@
 // Lachy's no is recorded; a held trade reaches the decision task, once per (knob id, from), and a yes that cannot
 // apply is answered `moot` (p22-7, w16); step 15 names `{}` for a week with no recurring Watch (p22-7, w15); step 11
 // reads the Grade log's `grades` block against readiness-grade.md and never as a knob, step 17 reports the grade
-// accuracy, and § What the record cannot show names the constants with no measure (p25-4, w17); and the decision task
+// accuracy, and § What the record cannot show names the constants with no measure (p25-4, w17); the Time-lost ledger
+// (p29-11, ADR 0051, w18): Chorus's Runner starts the reading on Thursday and the sweep is the fallback, step 10a runs the
+// Monthly audit on the month's first reading whatever the cadence, step 13a writes the ledger before step 14, step 14
+// names the load hold, a gap is answered in § Deciding, a gap never counts against `quiet`, and § What the record cannot
+// show names what the ledger cannot price; and the decision task
 // stays out of schedule § 1, the reshuffle's R1 and orient § 7's serial rollout, listed by orient § 2 (the `weekly`
 // rule).
 //
@@ -226,10 +230,28 @@ const GRADE_S11 = ['Read `span.json`\'s `grades`', '`window.readyHandsOff`', '`$
   'never a knob: the grading constants are no operator setting']
 const GRADE_S17 = 'the grade accuracy (the Ready headline'
 const GRADE_CANNOT = ['`DECISION_MINUTES`', '`REVIEW_MINUTES`']
-const WEEKLY_ORDER = [/reflect\.py span /, /reflect\.py watch /, /reflect\.py bug /, /tune\.py\b.*--revert /, /tune\.py\b.*--auto /,
-  /reflect\.py knobs /, /reflect\.py decide /, /reflect\.py close /]
+const WEEKLY_ORDER = [/reflect\.py span /, /reflect\.py watch /, /reflect\.py bug /, /reflect\.py ledger /, /tune\.py\b.*--revert /,
+  /tune\.py\b.*--auto /, /reflect\.py knobs /, /reflect\.py decide /, /reflect\.py close /]
+// The Time-lost ledger (p29-11, w18): who starts the reading, the audit step and the ledger step, the load hold, a gap's
+// answer, gaps and quiet, and what the ledger cannot price.
+const LEDGER_START = ['What starts it is Chorus\'s weekly Runner first: on the Thursday Reflection Routine\'s morning',
+  'The daily sweep is the fallback, and starts it only when Chorus has not']
+const LEDGER_10A = ['a fortnightly cadence never skips it', 'before step 13a\'s ledger', 'never cut at a month boundary',
+  '`~/.claude*/projects/*/<session>.jsonl`', '`<Project root>/.claude/integration/*.log`', '`## Pause log`', 'the Mac\'s own history',
+  'Start it as a read-only subagent right after step 10, beside steps 11 to 13']
+const LEDGER_13A = ['Once, before step 14', 'with `--audit` exactly when step 10a ran', 'counted in readings']
+const LEDGER_S11 = 'is reported, never traced as friction'
+const LEDGER_S12 = 'Never make a Watch on a Time-lost ledger class by hand'
+const LEDGER_S14 = ['machine load tops the Time-lost ledger', 'Lowers and round caps are never held by load']
+const LEDGER_S15 = 'or a Monthly audit that names a gap'
+const LEDGER_QUIET = 'An audit\'s gaps never count against `quiet`: the audit runs at either cadence, and like a held trade a gap leaves the week quiet'
+const LEDGER_DEC = ['**A yes to a gap**', 'citing ADR 0051 d4', '**A no to a gap**', 'Its `- gap` line is the record once the task is done']
+const LEDGER_CANNOT = ['does not price a suite slowed by load', 'The ledger\'s classes overlap across resources',
+  'An open stop on a closed rollout', 'The baseline (the 2026-10-21 audit) gives coarse ranges', 'A `paused:` stamp left by mistake reads as Lachy\'s own pause',
+  'A halt over several set-asides is classed by the first one moved', 'reads as `halt`: still a stall, but unsplit',
+  'never move the ledger\'s top, its Watch or the load hold', 'An audit\'s gaps never make a reading not quiet']
 
-// The weekly clauses that fail (w1..w17; w15 and w16 are p22-7's, w17 p25-4's), [] when all hold.
+// The weekly clauses that fail (w1..w18; w15 and w16 are p22-7's, w17 p25-4's, w18 p29-11's), [] when all hold.
 function weeklyFails(files) {
   const s = files.skill
   const out = []
@@ -275,6 +297,15 @@ function weeklyFails(files) {
     !decFenced.some((l) => l.startsWith(`${PY}moot --task`))) out.push('w16')
   if (!GRADE_S11.every((n) => s11.includes(n)) || !collapse(sectionOf(s, /^### 17\. /)).includes(GRADE_S17) ||
     !GRADE_CANNOT.every((n) => cannot.includes(n))) out.push('w17')
+  const weeklyHead = collapse(head < 0 ? '' : lines.slice(head, lines.findIndex((l, k) => k > head && /^### 9\. /.test(l))).join('\n'))
+  const s10a = collapse(sectionOf(s, /^### 10a\. The Monthly audit$/))
+  const s13a = collapse(sectionOf(s, /^### 13a\. The Time-lost ledger$/))
+  if (!LEDGER_START.every((n) => weeklyHead.includes(n)) || !LEDGER_10A.every((n) => s10a.includes(n)) ||
+    !LEDGER_13A.every((n) => s13a.includes(n)) || !fencedLines(sectionOf(s, /^### 13a\. /)).some((l) => l.startsWith(`${PY}ledger --span`)) ||
+    !s11.includes(LEDGER_S11) || !collapse(sectionOf(s, /^### 12\. /)).includes(LEDGER_S12) ||
+    !LEDGER_S14.every((n) => collapse(sectionOf(s, /^### 14\. /)).includes(n)) || !s15.includes(LEDGER_S15) ||
+    !collapse(sectionOf(s, /^### 16\. /)).includes(LEDGER_QUIET) || !LEDGER_DEC.every((n) => dec.includes(n)) ||
+    !LEDGER_CANNOT.every((n) => cannot.includes(n))) out.push('w18')
   return out
 }
 
@@ -661,6 +692,32 @@ test('control: step 11 tracing grade accuracy as a knob or with no grades block,
   weekly('skill:block', cut('skill', 'Read `span.json`\'s `grades`', 'Read the grades'), 'w17')
   weekly('skill:s17', cut('skill', `${GRADE_S17}, each grade's rate in \`window\` and \`all\`, the \`bySize\` readout and each grade trace),`, ''), 'w17')
   weekly('skill:cannot', cut('skill', '(`DECISION_MINUTES`, `REVIEW_MINUTES`)', ''), 'w17')
+})
+
+test('control: the Time-lost ledger\'s starter, audit step, ledger step, load hold, gap answer, quiet rule or a cannot-show line dropped fails weekly (w18)', () => {
+  weekly('skill:runner', cut('skill', 'What starts it is Chorus\'s weekly Runner first:', 'What starts it is the daily sweep:'), 'w18')
+  weekly('skill:fallback', cut('skill', 'The daily sweep is the fallback, and starts it only when Chorus has not', 'The daily sweep starts it'), 'w18')
+  weekly('skill:10a', swap('skill', '### 10a. The Monthly audit', '### 10a. The audit'), 'w18')
+  weekly('skill:fortnightly', cut('skill', 'a fortnightly cadence never skips it', 'a fortnightly cadence may skip it'), 'w18')
+  weekly('skill:subagent', cut('skill', 'Start it as a read-only subagent right after step 10, beside steps 11 to 13', 'Run it after step 13'), 'w18')
+  for (const n of ['`~/.claude*/projects/*/<session>.jsonl`', '`<Project root>/.claude/integration/*.log`', '`## Pause log`']) weekly(`skill:${n}`, cut('skill', n, 'x'), 'w18')
+  weekly('skill:13a', swap('skill', '### 13a. The Time-lost ledger', '### 13a. The ledger'), 'w18')
+  weekly('skill:13a-audit', cut('skill', 'with `--audit` exactly when step 10a ran', 'with `--audit` when you like'), 'w18')
+  weekly('skill:readings', cut('skill', 'counted in readings, so', 'counted in rollouts, so'), 'w18')
+  weekly('skill:s11', cut('skill', LEDGER_S11, 'is traced as friction'), 'w18')
+  weekly('skill:s12', cut('skill', LEDGER_S12, 'Make a Watch on a ledger class'), 'w18')
+  weekly('skill:s14', cut('skill', 'Lowers and round caps are never held by load', 'Lowers are held too'), 'w18')
+  weekly('skill:s15', cut('skill', LEDGER_S15, 'or an audit'), 'w18')
+  weekly('skill:quiet', cut('skill', LEDGER_QUIET, 'An audit\'s gaps make a reading not quiet'), 'w18')
+  for (const n of LEDGER_DEC) weekly(`skill:${n}`, cut('skill', n, 'x'), 'w18')
+  for (const n of LEDGER_CANNOT) weekly(`skill:${n}`, cut('skill', n, 'x'), 'w18')
+})
+
+test('control: the ledger step after the knobs fails weekly (w1)', () => {
+  const ledger = real.skill.split('\n').find((l) => l.startsWith(`${PY}ledger `))
+  const knobs = real.skill.split('\n').find((l) => l.startsWith(`${PY}knobs `))
+  assert.ok(ledger && knobs, 'control setup')
+  weekly('skill', real.skill.replace(ledger, '\u0000').replace(knobs, ledger).replace('\u0000', knobs), 'w1')
 })
 
 test('control: § Deciding the decision task without --declined, its cycle close or its done rule, fails weekly (w14)', () => {

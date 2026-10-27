@@ -590,6 +590,13 @@ function writeReflections(home, rows) {
 const TWO_AGREE = [knobLine('2026-10-01T01:00:00.000Z', R0, ['a']), closeLine('2026-10-01T02:00:00.000Z', R0),
   knobLine('2026-10-02T01:00:00.000Z', R1, ['b']), closeLine('2026-10-02T02:00:00.000Z', R1)]
 const autoArgs = (scores, repo, reflection = RNOW) => ['--scores', scores, '--auto', '--repo', repo, '--reflection', reflection]
+// p29-11 (ADR 0051): a Reflection's Time-lost ledger line, which reflect.py `ledger` writes before step 14's --auto. Check
+// (6) holds a Parallel ceiling raise while it is load-topped, and with none at all.
+const H0 = { stalls: 0, 'quota-bound': 0, load: 0, 'lane-bound': 0, rework: 0, 'plan-rejected': 0 }
+const tlLine = (top, hours = {}, { reflection = RNOW, source = 'record' } = {}) => rline('2026-10-06T00:30:00.000Z', 'time-lost', {
+  id: `tl-${source}-${reflection.slice(2)}`, source, reflection, since: '2026-09-29T00:00:00.000Z', until: '2026-10-06T00:00:00.000Z',
+  hours: { ...H0, ...hours }, ...(source === 'record' ? { top } : { month: '2026-10', recorded: H0, rank: Object.keys(H0) }) })
+const TL_NOW = tlLine('stalls', { stalls: 10, load: 2 })
 
 // Held (exit 0): the reason printed, nothing written (no tunings line, the config byte-identical).
 function held(home, args, re, configBefore) {
@@ -605,7 +612,7 @@ test('--auto lands a knob three Reflections agree on: one auto line with reflect
   const home = tmpHome(t)
   const repo = gitRepo(home)
   writeToml(home, CONFIG)
-  writeReflections(home, TWO_AGREE)
+  writeReflections(home, [...TWO_AGREE, TL_NOW])
   const r = tune(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo))
   assert.equal(r.status, 0, r.stderr)
   const [l, ...rest] = lines(tuningsPath(home))
@@ -652,7 +659,7 @@ test('--auto: the key\'s last move (a pick, an auto landing or a revert) resets 
     const home = tmpHome(t)
     const repo = gitRepo(home)
     writeToml(home, CONFIG)
-    writeReflections(home, TWO_AGREE)
+    writeReflections(home, [...TWO_AGREE, TL_NOW])
     fs.writeFileSync(tuningsPath(home), tunings.map((x) => `${x}\n`).join(''))
     const r = tune(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo))
     assert.equal(r.status, 0, `${name}: ${r.stderr}`)
@@ -690,11 +697,55 @@ test('--auto holds a trade, a caution, a breach, a partial window, ranAt != from
   }
 })
 
+test('--auto holds a ceiling raise on a load-topped Time-lost ledger and with none; an audit line is never read (p29-11, ADR 0051)', (t) => {
+  const LOAD = /^held parallel_ceiling: machine load tops the Time-lost ledger \(12\.5 h of 20 h\): a Parallel ceiling raise waits \(ADR 0051\)$/m
+  const NONE = /^held parallel_ceiling: no Time-lost ledger line for Reflection r-20261006T000000Z-aaaaaa: run reflect\.py ledger first$/m
+  const cases = [
+    ['a load-topped ledger', [tlLine('load', { load: 12.5, stalls: 7.5 })], LOAD],
+    ['no ledger line: fails closed', [], NONE],
+    ['another Reflection\'s line only', [tlLine('stalls', { stalls: 3 }, { reflection: R1 })], NONE],
+    ['an audit line alone is no ledger line', [tlLine(null, { load: 40 }, { source: 'audit' })], NONE],
+  ]
+  for (const [name, rows, re] of cases) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    writeReflections(home, [...TWO_AGREE, ...rows])
+    held(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo), re, CONFIG)
+  }
+  // the control: the same week without the load on top lands; an audit line finding 40 h of load beside a stalls-topped
+  // record line lands too: audit lines are never read for the hold
+  for (const rows of [[TL_NOW], [tlLine(null, { load: 40 }, { source: 'audit' }), TL_NOW]]) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    writeReflections(home, [...TWO_AGREE, ...rows])
+    const r = tune(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo))
+    assert.equal(r.status, 0, r.stderr)
+    assert.match(r.stdout, /^applied parallel_ceiling 3 → 4 for o\/r: /m)
+  }
+})
+
+test('the load hold holds a ceiling raise only: a lower and a round-cap raise pass check (6) on a load-topped ledger', (t) => {
+  const home = tmpHome(t)
+  const body = ['import importlib.util, json, sys', 'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)', 'a = json.load(sys.stdin)',
+    'print(json.dumps([m.load_hold(p, a["rid"], a["lines"]) for p in a["props"]]))'].join('\n')
+  const lines = [JSON.parse(tlLine('load', { load: 12.5, stalls: 7.5 }))]
+  const props = [RAISE(), P('p2', 'parallel_ceiling', 4, 3, { rule: 'quota-bound-lower', direction: -1 }),
+    P('p3', 'max_review_rounds', 4, 5, { rule: 'review-rounds-raise', direction: 1 })]
+  const r = spawnSync('python3', ['-B', '-c', body, TUNE], { encoding: 'utf8', env: env(home), input: JSON.stringify({ rid: RNOW, lines, props }) })
+  assert.equal(r.status, 0, r.stderr)
+  const [raise, lower, cap] = JSON.parse(r.stdout)
+  assert.match(raise, /^machine load tops the Time-lost ledger/)
+  assert.deepEqual([lower, cap], [null, null])
+})
+
 test('--auto reads: torn lines skipped; an unreadable reflections.jsonl is exit 1; a closed --reflection is exit 2', { skip: process.getuid?.() === 0 && 'root ignores the mode' }, (t) => {
   const home = tmpHome(t)
   const repo = gitRepo(home)
   writeToml(home, CONFIG)
-  writeReflections(home, [...TWO_AGREE, '{"kind": "proposal", "id": "torn'])
+  writeReflections(home, [...TWO_AGREE, TL_NOW, '{"kind": "proposal", "id": "torn'])
   const scores = writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS })
   const ok = tune(home, [...autoArgs(scores, repo), '--dry-run'])
   assert.equal(ok.status, 0, ok.stderr)

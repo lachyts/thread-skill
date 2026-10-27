@@ -994,24 +994,31 @@ through time, from attention to merged PRs. Terms only — no implementation.
   propose a rule for: named, written to the record and carried into the next
   Reflection. It becomes a rule proposal when a later rollout shows the same
   thing again, or at once when Lachy confirms it. Lachy's no closes it too:
-  it comes back only when two later rollouts show it again. Knobs need no
-  Watch. _Avoid_: candidate, hunch.
+  it comes back only when two later rollouts show it again. A Watch the
+  Time-lost ledger opens on a class counts readings instead of rollouts.
+  Knobs need no Watch. _Avoid_: candidate, hunch.
 - **Time-lost ledger** — the hours each cause class cost (stalls by cause,
   usage limits, machine load, the Integration lane, Integration rework, plan
-  blocks, named from the Run record's own values where one fits), summed
-  across every rollout a weekly reading reads and trended week on week; a
-  class that tops it twice running opens a **Watch** on that class
-  (ADR 0051). Ranks causes, never rollouts. _Avoid_: time budget, cost
-  report.
+  blocks, named from the Run record's own values where one fits), summed by
+  a script across every rollout a weekly reading reads and trended week on
+  week; a class that tops it twice running opens a **Watch** on that class,
+  and a load-topped ledger holds a Parallel ceiling raise (ADR 0051). Waits
+  on Lachy (a gate, a question, a hand-back) are priced as stalls; only his
+  own pause is unranked. Its lines are `time-lost` lines in
+  `reflections.jsonl`, written by `reflect.py ledger`. Ranks causes, never
+  rollouts. _Avoid_: time budget, cost report.
 - **Monthly audit** — the pass once a month that reads past the Run record
   (transcripts, suite logs, pause logs, the Mac's history), writes into the
   Time-lost ledger and names what the record should have carried: an extra
-  step of the month's first weekly reading (ADR 0051). _Avoid_: retro, deep
-  dive.
+  step of the month's first weekly reading, whatever its cadence, run beside
+  the trace (ADR 0051). Its gaps go in the decision task and never change
+  whether the reading is quiet. _Avoid_: retro, deep dive.
 - **Quiet Reflection** — one that finds no new Watch (one first seen in this
   reading; a declined one seen again is not new), no rule proposal, no
   bug and no Guardrail breach. Three in a row move the reading from weekly
-  to fortnightly; one that is not quiet moves it back (ADR 0037).
+  to fortnightly; one that is not quiet moves it back (ADR 0037). The
+  reading falls due on the Thursday Reflection Routine's morning, made by
+  Chorus's weekly Runner (ADR 0051).
   _Avoid_: clean run, empty retro.
 - **Decision task** — the one open vault task tagged `decisions` that the
   weekly reading writes for the next morning when it has a rule proposal
