@@ -15,6 +15,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { root } from './lib/contract-text.mjs'
+import { REVERSED_WALK } from './lib/reversed-walk.mjs'
 
 const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'resolve-target.py')
 
@@ -307,6 +308,8 @@ test('links: a project, a plain note, an archived project, and a missing link th
   r = ok(['[[Experiments]]'])
   assert.equal(r.outcome, 'candidates')
   assert.deepEqual(r.candidates.map((c) => c.note), [EXP_IKEDA, EXP_RSLM])
+  assert.deepEqual(ok(['[[Experiments]]'], { pyFlags: REVERSED_WALK }).candidates.map((c) => c.note), [EXP_IKEDA, EXP_RSLM],
+    'whatever order the file system walks them')
 })
 
 test('in-vault paths: relative or absolute, a folder through its folder note, a missing note by name', () => {
