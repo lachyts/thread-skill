@@ -245,7 +245,6 @@ DISMISSED = ("[User dismissed", "The user doesn't want to proceed", "The user di
 DROPPED = ("the Turn ended", "[Tool call interrupted")
 FAILED = ("<tool_use_error>", "InputValidationError", "Tool permission request failed")
 ANSWERED = ("Your questions have been answered", "The user answered")
-OUTCOMES = ("answered", "dismissed", "dropped", "failed", "open", "unparsed")
 
 _TZ = []
 

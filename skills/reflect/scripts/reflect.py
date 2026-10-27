@@ -2179,7 +2179,7 @@ def cmd_attention(a):
     rid = span["reflection"]
     att = span.get("attention")
     if not isinstance(att, dict) or not isinstance((att.get("questions") or {}).get("items"), list) \
-            or not isinstance(att.get("trails"), dict):
+            or not isinstance((att.get("trails") or {}).get("counts"), dict):
         raise Stop("--span %s has no attention block (a span from before p30-7, or one whose attention read failed): "
                    "a new span is a new Reflection" % a.span, 2)
     lines = read_reflections()
