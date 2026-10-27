@@ -174,12 +174,13 @@ it): `{away, file, why, limit, awayCap, until, morning, elsewhere, lapsed, here,
 `missing`, `stale` or `unreadable` (`why` says how, null only when fresh; anything but fresh reads not Away at
 Trickle 2), `limit` the Trickle N, `awayCap` the Away cap, `until` the file's (fresh only), `elsewhere` `{<rollout>:
 n}` the other open, started, parallel rollouts' running tasks whose lead's lease has not lapsed, `lapsed` the same
-shape for those whose lease has (left out of the count, execute away.md § The Trickle), `here` this rollout's own as
-they count it (0 when paused, closed, never started, not directly in the tasks dir, or its own lease lapsed),
-`running` elsewhere plus here, and `lease` this rollout's own lead's lease (p28-4): `{state, writtenAt, lapsesAt}`,
-`state` `fresh`, `lapsed`, `room-stop` (lapsed, but a room stop stands, so it counts), `none` (no lease file: an older
-snapshot, still counted) or `unreadable` (still counted), `writtenAt` its last write and `lapsesAt` when it lapses (or
-lapsed), both UTC and null where they do not apply. Status writes no lease.
+shape for those whose lease has (left out of the count, `skills/execute/away.md` § The Trickle), `here` this
+rollout's own as they count it (0 when paused, closed, never started, not directly in the tasks dir, or its own
+lease lapsed), `running` elsewhere plus here, and `lease` this rollout's own lead's lease (p28-4):
+`{state, writtenAt, lapsesAt}`, `state` `fresh`, `lapsed`, `room-stop` (lapsed, but a room stop stands, so it
+counts), `none` (no lease file: an older snapshot, still counted) or `unreadable` (still counted), `writtenAt` its
+last write and `lapsesAt` when it lapses (or lapsed), both UTC and null where they do not apply. Status writes no
+lease.
 
 **Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
 rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
