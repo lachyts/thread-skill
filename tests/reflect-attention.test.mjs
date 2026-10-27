@@ -500,9 +500,18 @@ test('L4: a rollout\'s wait runs from the earliest captured: of its queue\'s tas
   rolloutNote(h, 'r-open', { captured: '2026-10-25', queue: [['t4', '—'], ['t-missing', '—']] })
   rolloutNote(h, 'r-serial', { captured: '2026-10-22', fm: ['protocol_version: 5', 'shape: serial'] })
   rolloutNote(h, 'r-old', { captured: '2026-10-01', status: 'done', archived: true, fm: ['protocol_version: 5', 'completed: 2026-10-05'] })
+  // a captured: no calendar holds reads as none, named, and never costs the block
+  taskNote(h, 't5', { captured: '2026-02-30' })
+  rolloutNote(h, 'r-badtask', { captured: '2026-10-23', queue: [['t5', '—']] })
+  rolloutNote(h, 'r-badown', { captured: '2026-13-01', queue: [['t2', '—']] })
   const b = block(h)
   const w = Object.fromEntries(b.attention.waits.map((x) => [x.rollout, x]))
-  assert.deepEqual(Object.keys(w).sort(), ['r-open', 'r-started'])
+  assert.deepEqual(Object.keys(w).sort(), ['r-badown', 'r-badtask', 'r-open', 'r-started'])
+  assert.deepEqual([w['r-badtask'].ask, w['r-badtask'].scheduled, w['r-badtask'].hours], [T(22, '13:00'), T(22, '13:00'), 72], 'the task\'s bad date: the note\'s own')
+  assert.deepEqual([w['r-badown'].ask, w['r-badown'].scheduled, w['r-badown'].scheduleHours], [T(19, '13:00'), null, null], 'the note\'s bad date: no scheduled')
+  for (const n of ['t5.md: captured: 2026-02-30', 'r-badown.md: captured: 2026-13-01']) {
+    assert.ok(b.attention.cannotShow.includes(`${n} is no calendar date: read as none`), JSON.stringify(b.attention.cannotShow))
+  }
   assert.deepEqual([w['r-started'].ask, w['r-started'].scheduled, w['r-started'].started, w['r-started'].hours, w['r-started'].scheduleHours, w['r-started'].open],
     [T(17, '13:00'), T(21, '13:00'), T(23, '00:00'), 131, 35, false], 'the Archive task\'s date wins; the carried row is skipped')
   assert.deepEqual([w['r-open'].ask, w['r-open'].started, w['r-open'].hours, w['r-open'].open], [T(24, '13:00'), null, 24, true], 'no linked date: the note\'s own')
@@ -637,6 +646,11 @@ test('L6: W2 lists an open rollout 48 hours in with no merge, a real rollout not
   rolloutNote(h, 'w2-plain', { status: 'open', fm: [] })
   rolloutNote(h, 'w2-sup-silent', { status: 'superseded', captured: '2026-10-20' })
   rolloutNote(h, 'w2-sup-next', { status: 'superseded', captured: '2026-10-20', fm: ['protocol_version: 5', 'superseded_by: "[[w2-next]]"'] })
+  // a captured: no calendar holds reads as none, named, and never costs the block
+  rolloutNote(h, 'w2-baddate', { captured: '2026-02-30' })
+  emitAll(h, 'w2-sup-bad', [line('k', T(21, '00:00'))])
+  rolloutNote(h, 'w2-sup-bad', { status: 'superseded', archived: true, fm: ['protocol_version: 5', 'superseded_by: "[[w2-next-bad]]"'] })
+  taskNote(h, 'w2-next-bad', { captured: '2026-02-30', fm: [] })
   const b = block(h)
   const w2 = b.attention.circling.W2
   assert.deepEqual(w2.map((x) => x.slug).sort(), ['w2-noted', 'w2-old', 'w2-paused', 'w2-queue', 'w2-superseded'])
@@ -647,6 +661,9 @@ test('L6: W2 lists an open rollout 48 hours in with no merge, a real rollout not
   assert.ok(cannot.includes('Big-Rollout.md: tagged rollout but not a rollout note (its name is no slug)'))
   assert.ok(cannot.includes('w2-plain.md: tagged rollout but not a rollout note (no protocol_version: and no ## Queue)'))
   assert.ok(!cannot.some((c) => /Rollouts\.md|w2-sup-/.test(c)), 'the hub and a closed note-only rollout are skipped silently')
+  assert.ok(cannot.includes('w2-baddate.md: captured: 2026-02-30 is no calendar date: read as none'), JSON.stringify(cannot))
+  assert.ok(cannot.includes('w2-baddate.md: a rollout note with no record and no captured: date: never a circling rollout'))
+  assert.ok(cannot.includes('w2-next-bad.md: captured: 2026-02-30 is no calendar date: read as none'), 'a superseding note\'s bad date')
   // the verb writes its line from that block, and the reading closes
   const sp = handSpan(h, RID(1), { attention: b.attention })
   const r = ok(h, ['attention', '--span', sp.out])

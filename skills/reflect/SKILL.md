@@ -798,6 +798,8 @@ or `exists`). An item left open keeps the task open.
 - A PR reviewed in a checkout whose heads reach no branch and no landing merge reads as a trail of its own (#211's
   rounds read as two trails).
 - A trail reaches back at most 28 days before the window: a PR reviewed over longer reads as its later rounds alone.
+- A `captured:` no calendar holds (2026-02-30) reads as none, named in cannotShow: a wait or a note-only rollout that
+  dates from it has none.
 - Docs-only is unknown after a landing with no merge commit (a fast-forward, or a squash whose branch is gone).
 - A touch means the note was named in a prompt or a tool call, not that work was done on it.
 - A work item needs `phase:`, `pr:` or `rollout:`: a task with none (chorus-the-companion-recovers-a-stalled-rollout)

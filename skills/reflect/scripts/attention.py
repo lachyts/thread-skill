@@ -108,7 +108,9 @@ Mode |`, a `[[slug|label]]` through find, a row whose Mode starts `carried (` sk
 rollout), else the rollout note's own `captured:`, counted from the start of its Melbourne day; scheduled: the note's
 `captured:`; started: the first slot-taken. hours and scheduleHours run from ask and scheduled to started (until while
 open, never below 0); open is no start by until. A serial chain has no Slot, so it has no row (cannotShow). A linked
-task with no note is flagged; with no date anywhere the row is skipped and flagged.
+task with no note is flagged; with no date anywhere the row is skipped and flagged. A `captured:` no calendar holds
+(2026-02-30), wherever it is read (a queue's task, a rollout note, a superseding note), reads as none and is named in
+cannotShow (captured_day()), never a fault that costs the block.
 
 rollout_end(), the first that matches: (1) its close line's stamp (tune.py's close_line); (2) its `completed:`; (3) the
 `captured:` of the note `superseded_by:` names; (4) a status in LEDGER.CLOSED: the record's last line (a note with no
@@ -390,9 +392,18 @@ def stamp_end(value):
     return to_ms(v)
 
 
-def captured_day(rec):
+def captured_day(rec, out, where):
+    """A note's `captured:` date, else None: none set, or one no calendar holds (2026-02-30), which is named in cannotShow
+    as `where` (its path from the tasks root), so day_start() and day_end() only ever see a real date."""
     v = rec.scalar("captured")[:10] if rec.fm is not None else ""
-    return v if DATE_RE.match(v) else None
+    if not DATE_RE.match(v):
+        return None
+    try:
+        datetime.date.fromisoformat(v)
+    except ValueError:
+        out.cannot_show("%s: captured: %s is no calendar date: read as none" % (where, v))
+        return None
+    return v
 
 
 # ---- the transcripts ---------------------------------------------------------------------------------------------------
@@ -1074,7 +1085,7 @@ def rollout_end(slug, rec, lines, close_line, notes, out):
         if sb:
             p = notes.note(sb)
             if p is not None:
-                day = captured_day(notes.rec(p))
+                day = captured_day(notes.rec(p), out, notes.rel(p))
                 if day:
                     return day_end(day)
         if rec.status in LEDGER.CLOSED and lines:
@@ -1186,10 +1197,10 @@ def waits(cands, whole, notes, since, until, close_line, out):
             if tp is None:
                 out.flag("wait of [[%s]]: its queue links [[%s]], which has no note" % (slug, t))
                 continue
-            d = captured_day(notes.rec(tp))
+            d = captured_day(notes.rec(tp), out, notes.rel(tp))
             if d:
                 days.append(d)
-        own = captured_day(rec)
+        own = captured_day(rec, out, notes.rel(p))
         ask = min(days) if days else own
         if ask is None:
             out.flag("wait of [[%s]]: no captured: date on it or its queue's tasks: no row" % slug)
@@ -1280,7 +1291,8 @@ def circling(tx, items, whole, cands, notes, since, until, mdate, close_line, ou
     _named(out, "its note carries no phase:, pr: or rollout: (no work item)", fails["keys"])
     w2 = []
     for slug, (p, rec, lines) in sorted(cands.items()):
-        start = lines[0][0] if lines else (day_start(captured_day(rec)) if captured_day(rec) else None)
+        day = None if lines else captured_day(rec, out, notes.rel(p))
+        start = lines[0][0] if lines else (day_start(day) if day else None)
         if start is None:
             out.cannot_show("%s: a rollout note with no record and no captured: date: never a circling rollout" % notes.rel(p))
             continue
