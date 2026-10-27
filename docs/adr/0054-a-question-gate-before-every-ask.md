@@ -181,7 +181,9 @@ as Decided for you) and deletes its rows; q5 fails a row whose ask is gone, so a
   `skills/next/SKILL.md` § Process: "**An open question this session left**", Owner `*yours* (step 3 decides the
   rest)`, since step 3 decides every other kind and asks only his again; "**Decide the move, and say so in one
   line.**", *gate*; "**The menu, when the move is not clear.**", *yours*. The § Sites count then reads as its
-  lead-in gives for N1.
+  lead-in gives for N1, its "That is form N2 …" sentence becomes "That is form N1: p30-5 (PR #226) is on main, its
+  step 4 cited in three units.", and this bullet goes. The tests need no edit: question-gate's controls read the
+  count from the lead-in.
 - [[thread-skill-p30-9-schedule-ends-with-pickup-sweep-and-execute-handoff]] (p30-9): 2 rows, the execute offer at
   orient § 9 and schedule's **Start when ready.**
 - [[thread-skill-p30-10-the-asks-the-gate-leaves-standing]] (p30-10): 13 rows. Filed by the lead at this task's
