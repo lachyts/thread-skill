@@ -11163,8 +11163,8 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
     if _pause_stands(note, lines)[0]:
         return done("waiting", "paused", "paused at user request")
     # 4. A room stop under its bound.
-    room = _last_room_line(note)
-    if _room_standing(room, now) == 0:
+    if _room_stop_state(note, now) == 0:
+        room = _last_room_line(note)
         until = _parse_ts(room[0]) + timedelta(hours=ROOM_STOP_BOUND_HOURS)
         return done("waiting", "room-stop", f"room stop since {room[0]}", _stamp(until))
     # 5. Never started.
