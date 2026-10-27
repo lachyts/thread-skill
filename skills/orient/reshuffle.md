@@ -184,16 +184,21 @@ edits propagate. Resolve the project's repo from the project note's `repos:` fro
   interview shape inline, by `_shared/asking.md` § 5.
 
 **Invoke it with these `args`**, the only way the gate reaches the skill, `<plugin root>` the root this file was read
-from. Keep every Decided for you line the grill shows: R4's footer counts them, R5.2 writes them into their tasks,
-and the report lists them.
+from and `<project note>` the target project note's absolute path (its `## Priorities` card is orient § 3.5's; a
+note with none, or a scoped target with no project note yet, passes `none`, and the grill reads the estate brief
+alone). Keep every Decided for you line
+the grill shows: R4's footer counts them, R5.2 writes them into their tasks, and the report lists them. A Note of his
+in the grill that corrects the card is written back into it the same day (orient § 3.5).
 
 > Ask Lachy only the questions he owns: intent, how important, how robust, who it is for, how it feels, and a
 > credential or irreversible sign-off R3 (c) names (Owner yours). Ask each one at a time, in plain words, tied to the
 > goal, with what each option gains and costs and your pick against his priorities, and end it with: what would make
-> this wrong for you? Walk every technical branch yourself from the repo's code, ADRs and CONTEXT.md, and never ask
-> it: show it in the grill as `Decided for you: <the fork> → <the call> (technical|priorities: <one reason>)`, which
-> he can overturn there. An ADR you write ends with its Decided for him (overturnable) list. Finish with every
-> Decided for you line, his overturns applied, under one `Decided for you` heading. The rule in full: § 5 of
+> this wrong for you? Read the `## Priorities` card in <project note> first, when it has one: a call it answers is
+> priorities, and a detail it says he steers is his. Walk every technical branch yourself from the repo's code, ADRs
+> and CONTEXT.md, and never ask it: show it in the grill as
+> `Decided for you: <the fork> → <the call> (technical|priorities: <one reason>)`, which he can overturn there. An
+> ADR you write ends with its Decided for him (overturnable) list. Finish with every Decided for you line, his
+> overturns applied, under one `Decided for you` heading. The rule in full: § 5 of
 > <plugin root>/skills/_shared/asking.md.
 
 ## R4. The gate

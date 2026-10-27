@@ -180,6 +180,11 @@ and Drift and the slots for each swept project.
   `undeclared` adds nothing. Any other status is its one `audit` line, and a non-zero exit its one
   `declared-check:` line: report it in § 3 and carry on, never a blocker. An area or scoped target
   runs no check.
+- **Priorities card** (Chorus ADR 0110 d5; CONTEXT.md **Priorities card**): each swept project note's
+  `## Priorities` section, read whole when it has one: how robust the work must be, who it is for, what matters most
+  and the technical details he steers himself. Every later ask in this orient reads it (§ 3.5's own aside): a call
+  it answers is *priorities*, decided and listed as Decided for you, and a detail it says he steers is *yours*
+  (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1). A project target whose note has none is what § 3.5 is for.
 - **Related projects**: projects the target's notes link or name, and projects linking the
   target, especially ones `status: parked` or being absorbed by it. Read their unstarted phases
   and loose tasks for overlap with the target's open work (the reshuffle may pull them in).
@@ -231,6 +236,54 @@ A situational report written for Lachy catching up, not a log:
   the project it belongs to, so the two never read as competing answers:
   the slot's own task → say they agree; a different item → name the slot and
   say why this beats it; a blank slot → say the recommendation would fill it.
+
+### 3.5. The Priorities card
+
+Asked once per project, so every later ask can be measured against it (Chorus ADR 0110 d5): when the target is a
+project and its note (§ 1's `note`) has no `## Priorities` heading, put the card to him after § 3's report and
+before anything else is asked or written, in one `AskUserQuestion` call of four questions, each in the Framing of
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 3 (Owner *yours*: how robust, who it is for and what matters most
+are his intent, and where he steers is his by Chorus ADR 0110 d3). Each question's options come from the audit (the
+project note, its thread, its ADRs and § 3's report), the recommended one first with its why, and each question ends
+with "What would make this wrong for you?". It is no question about the reshuffle, which still follows without one
+(§ 4):
+
+1. **How robust** — production-ready or lightweight: what a failure would cost, and so how much testing, review and
+   hardening the work gets.
+2. **Who it is for** — him alone, a named few, or the public: whose use the work is judged by.
+3. **What matters most** — the one quality the project trades the others for (quality over speed, say, or reach
+   over polish).
+4. **Where he steers** — the technical details he decides himself (GifLab's compression, for one), or none: a
+   technical call there comes to him in the Framing, and everywhere else it is decided for him and listed.
+
+**The write.** His answers go into the project note at once, as one `## Priorities` section inserted just before
+the note's first `## ` heading (at its end when it has none), nothing else in the note changed. Each line carries
+his pick in his own words, with his Note after it when he wrote one:
+
+```
+## Priorities
+
+- **How robust:** <his answer>
+- **Who it is for:** <his answer>
+- **What matters most:** <his answer>
+- **Where he steers:** <his answer, or "nowhere named: technical calls are decided for him">
+
+Asked at orient, <YYYY-MM-DD>. A Note that corrects a line is written back here the same day.
+```
+
+A question he leaves unanswered is written `not answered (<YYYY-MM-DD>): the estate brief stands in`, so the card
+exists and is never asked again. If he stops the whole ask, nothing is written, the orient carries on against the
+estate brief (`~/.agents/knowledge/how-lachy-decides.md`) and the next orient puts the card again. Report the
+write in one line with the note's `obsidian://` link.
+
+**Once.** A note with a `## Priorities` heading is never asked again, whole or in part: § 2 reads it, and he
+changes it by hand or through a Note. Look only, a dry run, an area target and a scoped target ask none and write
+none: an area's projects are asked at their own project orient, and a scoped target's project at its own. Steer
+only asks it, like a default run.
+
+**A Note corrects it.** A Note of his on any later ask in this orient (the grill, R4's gate, § 6's steer, § 9's
+offer) that corrects a line of the card is written back into it the same day: that line takes his words, followed
+by `(<YYYY-MM-DD>, from a Note)`, and the report says so in one line.
 
 ### 4. Reshuffle by default
 
@@ -446,7 +499,8 @@ given). It resolves, asks, reads and writes nothing.
   the slot write included — in Look only or dry runs.
 - **Don't reshuffle in-flight work.** Its scope, phase and body are frozen; only new members may
   join its phase (`reshuffle.md` R1).
-- **Don't write before the reshuffle's gate**, drift fixes and the learned `repos:` entry (§ 4) aside.
+- **Don't write before the reshuffle's gate**, drift fixes and the learned `repos:` entry (§ 4) aside, and the Priorities card (§ 3.5)
+  with the Notes that correct it.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, drift, shape, one recommendation, then the reshuffle (§ 4).
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s

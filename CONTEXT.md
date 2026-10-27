@@ -76,6 +76,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   each option gains and costs, the pick against his priorities, and a Note
   invited ("What would make this wrong for you?"). Script-built rounds take
   it from the grade's `goal` and `stakes` (ADR 0054 d8). _Avoid_: template.
+- **Priorities card** — a project note's `## Priorities` section: how robust
+  the work must be (production-ready or lightweight), who it is for, what
+  matters most, and the technical details Lachy steers himself. Orient asks it
+  once, at the first project orient that finds none (orient § 3.5), and every
+  later ask reads it: a call it answers is *priorities*, decided and listed; a
+  detail it says he steers is *yours*. A Note that corrects it is written back
+  the same day (Chorus ADR 0110 d5). _Avoid_: project brief (the estate brief is
+  `~/.agents/knowledge/how-lachy-decides.md`).
 - **Pre-flight** — schedule's pass over a rollout's tasks before it is
   written: each task still to start gets its **Readiness grade**, One call
   and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
