@@ -1219,14 +1219,21 @@ const preP29 = (p) => P29_9.reduce((x, [nw, od]) => x.split(nw).join(od), p)
 // The p29-9 pins (each the p29-9 base plus exactly the blocks; the base is the pin p31-1 recorded, or for the slotted
 // renders, integrator and slotted, the pin p31-4 recorded). Those two were re-pinned at p29-9's Integration with p31-4:
 // with p31-4's SLOT_TEXT sentence taken out (preHeat, below) they are the pins p29-9 recorded before p31-4 landed
-// (P29_PRE_HEAT), so each side's delta stays pinned on its own.
+// (P29_PRE_HEAT), so each side's delta stays pinned on its own. p31-3 re-pinned the same two (SLOT_TEXT's wait
+// sentence): with it swapped back (preWait, below) they are P31_3_PRE_WAIT, the pins before p31-3.
 const P29_PINS = {
-  integrator: 'f1520bdcee029f3f966c2e399225fe393af6573b6c57ef2a8e80eeeafecc9b60', // agentPrompts' 2 fixtures × baseline/none × slot/none
+  integrator: 'a35a99941d331033e7b8e27550d9c266a288d61b49d8099b7aee991ec4f7835d', // agentPrompts' 2 fixtures × baseline/none × slot/none (re-pinned by p31-3)
   r2: '83e62457a38eeb10f70f964a4679a67177027eaf81a021caae0877e512a7871a', // the unseeded round-2 reviser
   r3: '1309d674cedb9d955af05f895d6805b3e2cb03496dc24e7a8b663fb6a1a1f37e', // the unseeded round-3 reviser with the plan
   calls: '867dbc843c58399e743049254a4dc9631af1d8180a2158330eaf7e13cd548863', // three whole task-mode calls, unslotted
-  slotted: '9992fcd46d5958c6cb68e7d21f934be6389e248e985063c4dad38a106f443416', // the same calls as run, slotted
+  slotted: '04501a6217566365a82848b5895fe0491609dc88a6860797a0a59206e778f5b8', // the same calls as run, slotted (re-pinned by p31-3)
   rows: 'bc54de03bfb55e50cd8c6ead033b2da5c8ea789df8b0945c96ca54690a5398fb', // their rows, flakes included
+}
+// p31-3: the integrator and slotted pins as they stood before p31-3 swapped SLOT_TEXT's wait sentence (preWait reaches
+// them); P29_PINS.integrator and P29_PINS.slotted are re-pinned to the bytes that carry it. No other pin moved.
+const P31_3_PRE_WAIT = {
+  integrator: 'f1520bdcee029f3f966c2e399225fe393af6573b6c57ef2a8e80eeeafecc9b60', // P29_PINS.integrator before p31-3
+  slotted: '9992fcd46d5958c6cb68e7d21f934be6389e248e985063c4dad38a106f443416', // P29_PINS.slotted before p31-3
 }
 const P29_PRE_HEAT = {
   integrator: '640cb573dece267eca668e14e3e6649c726ed80ad79a8224f8735639494d7be9', // P29_PINS.integrator before p31-4
@@ -1299,7 +1306,32 @@ const preP31 = (p, slot) => p31Pairs(slot).reduce((x, [nw, od]) => x.split(nw).j
 const SLOT_HEAT = ' When the Mac is hot the wrapper holds or stops the suite and puts it back in line (`verify-slot: waiting (heat: …)`, ' +
   '`verify-slot: heat stop …`): only the final exit is the verdict, and an exit 76 with a `verify-slot: no verdict` line is no verdict, ' +
   'never red and never an iteration, so run it again.'
-const preHeat = (p) => p.split(SLOT_HEAT).join('')
+// p31-3 (a call waits for its verifier's verdict): SLOT_TEXT's "and wait for it." became the in-turn wait (the run's
+// first line names the exact wait command; the agent runs it in the foreground until the exit line). SLOT_WAIT is
+// [new, old] and preWait swaps it back. It is always the OUTERMOST swap: p31Pairs, preOneShot and preP29's pairs render
+// with the current engine, whose slotNote carries the new sentence, so the text is back to its pre-p31-3 bytes only
+// once every other swap is done. preHeat is already the outermost call at every site, so it applies preWait first and
+// every preHeat comparison reaches its pre-p31-3 pin unchanged; any other comparison against a pin recorded before
+// p31-3 that carries a slotted render and does not go through preHeat takes preWait as its outermost swap.
+const SLOT_WAIT = [
+  'Run it in the background with a long timeout (up to 7200000 ms). The first line of its output file (the file the harness names), ' +
+  '`verify-slot: run <pid> started; wait for its verdict with: …`, gives its pid and the exact wait command. Then wait inside your turn: ' +
+  'run that wait command in the foreground with a 600000 ms timeout, and again after each `verify-slot: still running …` line, ' +
+  'until it prints `verify-slot: exit <rc> (run <pid>)`, whose rc is the verdict. A wait cut by its own timeout is no verdict either: ' +
+  'run it again. Never end your turn or return while the run goes on, and never wait with a sleep or a monitor: the harness ends your ' +
+  'background run when you return, so an early return is no verdict and costs the task a retry.',
+  'Run it in the background with a long timeout (up to 7200000 ms) and wait for it.',
+]
+const preWait = (p) => p.split(SLOT_WAIT[0]).join(SLOT_WAIT[1])
+const preHeat = (p) => preWait(p).split(SLOT_HEAT).join('')
+// [] when SLOT_TEXT tells the agent to wait inside its turn with the run's own wait command; else what is missing.
+const waitFails = (t) => {
+  const out = ['wait command', '600000', '`verify-slot: exit <rc> (run <pid>)`', '`verify-slot: still running …`',
+    'A wait cut by its own timeout is no verdict', 'Never end your turn or return while the run goes on',
+    'never wait with a sleep or a monitor'].filter((x) => !t.includes(x))
+  if (t.includes('and wait for it')) out.push('no "and wait for it"')
+  return out
+}
 // The pairs no pinned call renders: the n=2 loops (a top-rung retry) and the one-shot (every pinned implementer runs
 // on the top rung: proj-fix-p's plan judge climbs it there). They stay in p31Pairs for any other render, and the
 // p31-1 block pins the one-shot against PRE_P31.oneShot; the pins block checks that every other pair renders.
@@ -1353,7 +1385,8 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
     for (const b of [undefined, B]) for (const s of [undefined, SLOT]) integ.push(...agentPrompts(E, argsOf(b, s, over)).integratorPrompt)
     ok(integ.length === 8 && shaAll(integ.map((p) => preHeat(preP29(p)))) === PRE_P31.integrator, `p31-1: integratorPrompt with the p29-9 block swapped out is its pre-p31-1 bytes (2 fixtures × baseline × slot; p31-4's SLOT_TEXT sentence taken out), touched ${JSON.stringify(touched)}`)
     ok(shaAll(integ.map(preHeat)) === P29_PRE_HEAT.integrator, `p29-9: integratorPrompt with p31-4's SLOT_TEXT sentence taken out is the p29-9 pin recorded before p31-4 landed, touched ${JSON.stringify(touched)}`)
-    ok(shaAll(integ) === P29_PINS.integrator, `p29-9: integratorPrompt is the p29-9 base plus the Flake check block (2 fixtures × baseline × slot; re-pinned at p29-9's Integration with p31-4), touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ.map(preWait)) === P31_3_PRE_WAIT.integrator, `p31-3: integratorPrompt with SLOT_TEXT's wait sentence swapped back is the pin recorded before p31-3, touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ) === P29_PINS.integrator, `p29-9: integratorPrompt is the p29-9 base plus the Flake check block (2 fixtures × baseline × slot; re-pinned at p29-9's Integration with p31-4, and by p31-3), touched ${JSON.stringify(touched)}`)
     ok(shaAll(agentPrompts(E, over).integrationReviewPrompt) === PRE_P31.integrationReview, `p31-1: integrationReviewPrompt is its pre-p31-1 bytes, touched ${JSON.stringify(touched)}`)
   }
   const loops = []
@@ -1364,6 +1397,11 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
   ok(shaAll(shots.map(preHeat)) === PRE_P31.oneShot, "p31-1: preOneShot (the swap-back literal) is the pre-p31-1 oneShotVerify, byte for byte (p31-4's SLOT_TEXT sentence taken out)")
   ok(E.SLOT_TEXT.endsWith(SLOT_HEAT) && times(E.SLOT_TEXT, SLOT_HEAT) === 1, "p31-4: SLOT_TEXT ends with the Heat hold's sentence, once, so preHeat takes out exactly it")
   ok(loops.some((l) => l.includes(SLOT_HEAT)) && shots.some((s) => s.includes(SLOT_HEAT)), 'p31-4: the sentence renders in the slotted loops and one-shots, so its swap is no no-op')
+  ok(times(E.SLOT_TEXT, SLOT_WAIT[0]) === 1, "p31-3: SLOT_TEXT holds the wait sentence once, so preWait swaps exactly it")
+  ok(loops.some((l) => l.includes(SLOT_WAIT[0])) && shots.some((s) => s.includes(SLOT_WAIT[0])), 'p31-3: the wait sentence renders in the slotted loops and one-shots, so its swap is no no-op')
+  // p31-3: an agent waits for its run's verdict inside its turn, with the run's own wait command, never by returning.
+  ok(JSON.stringify(waitFails(E.SLOT_TEXT)) === '[]', 'p31-3: SLOT_TEXT: the wait command in the foreground (600000 ms), again after each still-running line, until the exit line; a cut wait is no verdict; never return or sleep while the run goes on')
+  ok(waitFails(preWait(E.SLOT_TEXT)).length > 0, 'p31-3 control: the pre-p31-3 SLOT_TEXT ("and wait for it") fails the wait check')
   const aB = argsOf(B)
   ok(sha(E.baselineManifest(aB, true)) === PRE_P31.manifest, "p31-1: baselineManifest(a, true), the integrator's, is its pre-p31-1 bytes")
   ok(E.baselineManifest(aB) !== E.baselineManifest(aB, true) && times(E.baselineManifest(aB), MANIFEST_P31[0]) === 1 &&
@@ -1803,6 +1841,12 @@ Never run the verifier unless the task brief asks the review for the full suite;
 // the default-branch GOLDENs did not move. A deliberate resume-cache break, like p31-1's: every code-writing prompt and
 // both result schemas (IMPL_RESULT, INTEGRATE_RESULT gain `flakes`) changed; a resume re-passes its run's own
 // `scriptPath` (ADR 0043).
+// Re-pinned on purpose by p31-3 (a call waits for its verifier's verdict), the slotted calls hash and the integrator
+// pin: SLOT_TEXT's "and wait for it." became the in-turn wait. preWait (SLOT_WAIT, above) swaps it back, always as the
+// outermost swap (preHeat applies it first): the slotted calls with it swapped back hash to the pre-p31-3 slotted pin
+// (P31_3_PRE_WAIT), and every slotted base below reaches its old pin through preHeat or preWait. No unslotted pin
+// moved: unslot() takes the slot pieces out with the current engine's slotRule and slotNote. A deliberate resume-cache
+// break, like p31-4's: every slotted prompt changed; a resume re-passes its run's own `scriptPath` (ADR 0043).
 const P23_1 = [ // [new, old]
   ["   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") at column 0 per human authorisation the task\n                          needs: \"- spend: <what> — cap N USD\" (a hard cap is mandatory: ONE line whose Cap\n                          holds the whole spend, optionally with \"total\", a month, or \"per Login per month\n                          across K Logins\"), \"- credential: <what>\", \"- irreversible: <what>\"; or exactly\n                          \"None\". BULLETS ONLY — no prose or footnotes in this section: the engine reads only\n                          list lines, and anything else is rejected. How a spend splits (run counts, per-call\n                          limits, iterations) goes in sub-bullets nested two spaces under its gate: commentary\n                          the engine never prices, which the Cap must hold. A non-empty declaration pauses the\n                          task for human sign-off —\n                          ",
     "   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") per human authorisation the task needs:\n                          \"- spend: <what> — cap <amount>\" (a hard cap is mandatory), \"- credential: <what>\",\n                          \"- irreversible: <what>\"; or exactly \"None\". BULLETS ONLY — no prose, commentary,\n                          or footnotes in this section: the engine reads only list lines, and anything else\n                          is rejected. A non-empty declaration pauses the task for human sign-off —\n                          "], // planner
@@ -1901,6 +1945,7 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   const p29Calls = []
   const slottedP29Calls = []
   const slottedPreHeatCalls = []
+  const slottedPreWaitCalls = []
   const p29Rows = []
   const slottedP314Calls = []
   const logs = []
@@ -1915,7 +1960,8 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   ]) {
     const r = await runTask(args, scripted)
     slottedCalls.push(JSON.stringify(r.calls))
-    slottedP29Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP29(c.prompt) }))))
+    slottedP29Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preWait(preP29(c.prompt)) }))))
+    slottedPreWaitCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preWait(c.prompt) }))))
     slottedPreHeatCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(c.prompt) }))))
     slottedP31Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(preP31(preP29(c.prompt), PIN_SLOT)) }))))
     slottedP314Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(preP29(c.prompt)) }))))
@@ -1984,12 +2030,15 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   ok(sha(slottedP314Calls.join('\n')) === 'deac8755b9c27275aee06d51a3b45556d7e34b3b252047ec126e15ec3899f89d',
     "byte pin (p31-4 base, slotted): the slotted calls with the Flake check block swapped out and p31-4's SLOT_TEXT sentence taken out are the pre-p31-4 bytes (the p31-1 slotted pin)")
   ok(slottedCalls.some((c) => c.includes(JSON.stringify(SLOT_HEAT).slice(1, -1))), "p31-4: the SLOT_TEXT sentence renders in these slotted calls, so its swap is no no-op")
+  ok(slottedCalls.some((c) => c.includes(JSON.stringify(SLOT_WAIT[0]).slice(1, -1))), "p31-3: SLOT_TEXT's wait sentence renders in these slotted calls, so its swap is no no-op")
   ok(sha(slottedP29Calls.join('\n')) === 'c78f36f1259bc212b1a7b03b656cd30ab2a6f65af32c4b030cc67f3d479c9b75',
-    'byte pin (p29-9 base, slotted): the slotted calls with the Flake check block swapped out are the pre-p29-9 bytes (the p31-4 slotted pin)')
+    "byte pin (p29-9 base, slotted): the slotted calls with the Flake check block swapped out (and p31-3's wait sentence swapped back) are the pre-p29-9 bytes (the p31-4 slotted pin)")
+  ok(sha(slottedPreWaitCalls.join('\n')) === P31_3_PRE_WAIT.slotted,
+    "byte pin (p31-3 base, slotted): the slotted calls with SLOT_TEXT's wait sentence swapped back are the slotted pin recorded before p31-3")
   ok(sha(slottedPreHeatCalls.join('\n')) === P29_PRE_HEAT.slotted,
     "byte pin (p29-9 before p31-4, slotted): the slotted calls with p31-4's SLOT_TEXT sentence taken out are the p29-9 slotted pin recorded before p31-4 landed")
   ok(sha(slottedCalls.join('\n')) === P29_PINS.slotted,
-    'byte pin (estate ADR 0009 d4; re-pinned by p31-1, p31-4 and p29-9): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
+    'byte pin (estate ADR 0009 d4; re-pinned by p31-1, p31-4, p29-9 and p31-3): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
 }
 
 console.log()

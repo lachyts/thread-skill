@@ -9,6 +9,7 @@ suites run at once across every rollout on this machine; a further one waits for
 copy of the contract.
 
     python3 verify-slot.py run --slots N [--priority] -- CMD…     # the agents' wrapper (engine-rendered)
+    python3 verify-slot.py wait --log FILE [--pid P] [--for S]     # an agent's in-turn wait for a run's verdict
     python3 verify-slot.py status [--slots N]                      # the operator's view (JSON)
 
 Importable (lead-integrate.py's `verify --slots N --slot-wait S` loads it by importlib, and reconcile-rollout.py's
@@ -95,16 +96,43 @@ Contract.
    writes after `run` exits gets EPIPE, and output written while a stop ends the suite may be lost. Any other run (no
    task tree, no note, no `rollout:`) takes the path above unchanged. Recording failures are silent and never change
    the rc; a SIGKILL of `run` leaves a started line with no ended line.
+9. The wait (p31-3). An agent's suite outlives its harness's foreground Bash cap (600000 ms), so it runs `run` in the
+   background, and the harness blocks a long `sleep` and ends a background run when the agent's turn ends: an agent
+   that ends its turn to await the run returns with no verdict and its run is killed. So `run` frames its output, and
+   `wait` is the command that reports the verdict inside the agent's turn, never a pause. `run` prints first, on
+   stderr, `verify-slot: run <pid> started; wait for its verdict with: python3 '<this script>' wait --log '<path>'
+   --pid <pid>` (each word single-quoted, each ' written '\\''), and last, on every return, `verify-slot: exit <rc> (run
+   <pid>)`: a usage error (2), a stop (128+n; one that escapes cmd_run's handlers too) and an unexpected exception (its
+   traceback, then 1) included, with stops ignored while it is written; both lines are best effort and never change
+   the rc. The path is fd 2's when fd 2 is a regular file: F_GETPATH on macOS, /proc/self/fd/2 on Linux, each accepted
+   only when it stats to fd 2's own (st_dev, st_ino); else (a pipe, a TTY, /dev/null, an unlinked file) the
+   placeholder `<its output file>`, the file the harness names. `wait --log FILE [--pid P] [--for S]` reads FILE as it
+   grows (complete lines; the exit line matched at a line's end, so a suite whose last output had no newline still
+   gives it) for the run with --pid, else the first start line's (a nested run's lines name other pids and are
+   ignored), and prints, once, `verify-slot: wait up to <S>s for the verdict of run <pid> in <FILE>; …`. S is 1 to 590,
+   default 540, so one call fits the foreground cap. It exits with the run's rc once its exit line is there (and
+   prints that line); 75 at S while the run goes on (`verify-slot: still running after <S>s (run <pid>; last: <its last
+   verify-slot: line>): run this wait again`), or with no run named yet (`… no verify-slot: run line in <FILE> yet:
+   check the path …`); 76 when the pid is gone (ESRCH; EPERM is alive) and a final read finds no exit line
+   (`verify-slot: no verdict: run <pid> ended with no exit line (stopped or killed); exit 76`); 2 on a usage error (a
+   missing or unreadable FILE, a bad --for or --pid, an unknown flag); 128+n when a TERM, INT or HUP cuts it
+   (`verify-slot: wait cut by a signal after <N>s (run <pid>): no verdict; run this wait again`). A wait cut by its own
+   timeout or a signal is no verdict: run it again. It takes no slot, registers no waiter, never calls slots_dir(),
+   writes no Run record line and never signals the run. The printed line is authoritative where a code is ambiguous (a
+   suite whose own rc is 75 or 76, or 2). Residuals: a reused pid, and a run its parent has not reaped yet (a zombie),
+   read as alive until S, so they give 75, never a wrong verdict; a TERM between the start line and cmd_run's handlers
+   ends the run with no exit line, so 76.
 
-`run --slots N [--priority] -- CMD…`: waits for a slot (`verify-slot: waiting for one of N verify slots (held
-by pid … in … since …[; K Integration waiter(s) ahead])` on stderr, repeated every 5 minutes; nothing when one
-is free at once; `verify-slot: slot k of N after Ns` once a wait ends), runs CMD under the guard and exits with
-its rc (128+n for a signal). While the Mac is hot it waits with `verify-slot: waiting (heat: <name>)` (contract 7);
-a heat stop prints `verify-slot: heat stop (<name>): ended the suite after Ns; no verdict, never red: back in line to
-restart from the beginning once the Mac cools`, and the exit is the last run's rc. A TERM, INT or HUP while it waits
-on the heat or is back in line after a heat stop exits 76 with `verify-slot: no verdict: stopped while the Mac was
-hot (heat: <name>); exit 76`: no verdict, never red. Usage errors exit 2: `--slots` missing, 0, negative, a
-non-integer; no `--`; no CMD; an unknown flag. A command that cannot be started exits 127.
+`run --slots N [--priority] -- CMD…`: prints its start line (contract 9), then waits for a slot (`verify-slot: waiting
+for one of N verify slots (held by pid … in … since …[; K Integration waiter(s) ahead])` on stderr, repeated every 5
+minutes; no waiting line when one is free at once; `verify-slot: slot k of N after Ns` once a wait ends), runs CMD
+under the guard and exits with its rc (128+n for a signal), its exit line (contract 9) last. While the Mac is hot it
+waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat stop prints `verify-slot: heat stop (<name>):
+ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac cools`, and
+the exit is the last run's rc. A TERM, INT or HUP while it waits on the heat or is back in line after a heat stop
+exits 76 with `verify-slot: no verdict: stopped while the Mac was hot (heat: <name>); exit 76`: no verdict, never
+red. Usage errors exit 2: `--slots` missing, 0, negative, a non-integer; no `--`; no CMD; an unknown flag. A command
+that cannot be started exits 127.
 
 `status [--slots N]` reaps stale waiter files and prints {dir, slots: [{index, state: free|held, holder}],
 waiters: [{pid, cwd, since, kind}], heat: {level, name}}; without --slots it lists the slot files present. Stdlib
@@ -116,12 +144,15 @@ import fcntl
 import json
 import os
 import random
+import re
 import select
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
+import traceback
 from datetime import datetime
 
 sys.dont_write_bytecode = True
@@ -734,7 +765,8 @@ def _end(child):
 
 # ---- CLI ---------------------------------------------------------------------------------------------------------
 
-USAGE = "usage: verify-slot.py run --slots N [--priority] -- CMD… | status [--slots N]"
+USAGE = ("usage: verify-slot.py run --slots N [--priority] -- CMD… | wait --log FILE [--pid P] [--for S] | "
+         "status [--slots N]")
 
 
 class _Usage(Exception):
@@ -1117,6 +1149,239 @@ def cmd_status(argv):
     return 0
 
 
+# ---- the wait (p31-3, contract item 9) ---------------------------------------------------------------------------
+
+WAIT_FOR = 540          # seconds one `wait` call watches by default: a call fits the 600000 ms foreground cap
+WAIT_MAX = 590          # the largest --for
+WAIT_RUNNING = 75       # `wait`: the run still goes at the bound (or no run is named yet); run the wait again
+WAIT_GONE = HEAT_EXIT   # `wait`: the run ended with no exit line (stopped or killed): no verdict (76)
+WAIT_TAIL = 1 << 16     # the bytes of an unfinished last line `wait` keeps, so memory stays flat
+NO_PATH = "<its output file>"   # the start line's --log when fd 2's path cannot be proved
+START_RE = re.compile(r"verify-slot: run (\d+) started; wait for its verdict with:")
+EXIT_RE = re.compile(r"verify-slot: exit (\d{1,3}) \(run (\d+)\)\s*$")
+
+
+def _shq(s):
+    """One POSIX shell word, always single-quoted, each ' written '\\'' (the engine's shq)."""
+    return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+def _frame(msg):
+    """A `verify-slot:` line on stderr, best effort: a write that fails is dropped and never changes the rc."""
+    try:
+        print(f"verify-slot: {msg}", file=sys.stderr, flush=True)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def _quiet():
+    """SIG_IGN for every stop signal; a stop that lands while the handlers change is dropped (the call is ending)."""
+    for _ in range(len(SIGNALS) + 1):
+        try:
+            for s in SIGNALS:
+                signal.signal(s, signal.SIG_IGN)
+            return
+        except _Signalled:
+            continue
+
+
+def _stderr_path():
+    """fd 2's real path when fd 2 is a regular file that path still names (contract item 9), else None. The candidates
+    are F_GETPATH (macOS) and /proc/self/fd/2 (Linux); the first that is absolute and stats to fd 2's own (st_dev,
+    st_ino) is the path. A pipe, a TTY, /dev/null, an unlinked file (Linux's "(deleted)") or any error is None."""
+    try:
+        st = os.fstat(2)
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        cands = []
+        if hasattr(fcntl, "F_GETPATH"):
+            try:
+                cands.append(os.fsdecode(fcntl.fcntl(2, fcntl.F_GETPATH, bytes(1024)).split(b"\0", 1)[0]))
+            except OSError:
+                pass
+        try:
+            cands.append(os.readlink("/proc/self/fd/2"))
+        except OSError:
+            pass
+        for p in cands:
+            try:
+                if p and os.path.isabs(p):
+                    s = os.stat(p)
+                    if (s.st_dev, s.st_ino) == (st.st_dev, st.st_ino):
+                        return p
+            except (OSError, ValueError):
+                continue
+    except Exception:
+        return None
+    return None
+
+
+def _run_framed(argv):
+    """`run` framed (contract item 9): first a start line naming this run's pid and the exact `wait` command for its
+    verdict, then cmd_run, then an exit line on every return: a usage error (2), a stop that escapes cmd_run (128+n), a
+    SIGINT before cmd_run's handlers (130) or an unexpected exception (its traceback, then 1). A stop while a usage
+    message or a traceback is printed reads as that stop."""
+    pid = os.getpid()
+    _frame(f"run {pid} started; wait for its verdict with: python3 {_shq(SCRIPT)} wait --log "
+           f"{_shq(_stderr_path() or NO_PATH)} --pid {pid}")
+    rc = None
+    try:
+        try:
+            rc = cmd_run(argv)
+        except _Usage as e:
+            _frame(f"{e}\n{USAGE}")
+            rc = 2
+        except _Signalled:
+            raise
+        except KeyboardInterrupt:
+            rc = 130
+        except Exception:
+            try:
+                traceback.print_exc()
+            except (OSError, ValueError, AttributeError):
+                pass
+            rc = 1
+    except _Signalled as s:
+        if rc is None:
+            rc = 128 + s.signum
+    finally:
+        _quiet()
+        if rc is not None:
+            _frame(f"exit {rc} (run {pid})")
+    return rc
+
+
+def _int_in(v, lo, hi, name):
+    try:
+        n = int(v, 10)
+    except (TypeError, ValueError):
+        n = None
+    if n is None or str(v).strip() != v or n < lo or (hi is not None and n > hi):
+        span = f"from {lo} to {hi}" if hi is not None else f">= {lo}"
+        raise _Usage(f"wait: {name} must be an integer {span}, got {v!r}")
+    return n
+
+
+def _parse_wait(argv):
+    log, pid, bound, i = None, None, WAIT_FOR, 0
+    while i < len(argv):
+        a = argv[i]
+        name, eq, v = a.partition("=")
+        if name not in ("--log", "--pid", "--for"):
+            raise _Usage(f"wait: unknown argument {a!r}")
+        if eq:
+            i += 1
+        elif i + 1 < len(argv):
+            v = argv[i + 1]
+            i += 2
+        else:
+            raise _Usage(f"wait: {name} needs a value")
+        if name == "--log":
+            log = v
+        elif name == "--pid":
+            pid = _int_in(v, 1, None, "--pid")
+        else:
+            bound = _int_in(v, 1, WAIT_MAX, "--for")
+    if not log:
+        raise _Usage("wait: --log FILE is required")
+    return log, pid, bound
+
+
+def _alive(pid):
+    """True while pid exists (EPERM counts as alive; so does an unreaped zombie, a residual: contract item 9)."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OverflowError, ValueError):
+        return False
+    except OSError:
+        return True
+
+
+def cmd_wait(argv):
+    """`wait --log FILE [--pid P] [--for S]` (contract item 9): an agent's in-turn wait for a run's verdict. It reads
+    FILE as it grows, takes no slot, registers no waiter, writes no Run record line and never signals the run."""
+    log, want, bound = _parse_wait(argv)
+    try:
+        f = open(log, "rb")
+    except OSError as e:
+        raise _Usage(f"wait: cannot read {log}: {e.strerror or e}")
+    st = {"pid": want, "last": None, "tail": b""}
+
+    def see(line):
+        # The watched run: --pid, else the first start line's (a nested run's lines come after it and name other pids).
+        if st["pid"] is None:
+            m = START_RE.search(line)
+            if m and int(m.group(1)) >= 1:
+                st["pid"] = int(m.group(1))
+        at = line.find("verify-slot: ")
+        if at >= 0:
+            st["last"] = line[at:].strip()[:200]
+        m = EXIT_RE.search(line)
+        if m and st["pid"] is not None and int(m.group(2)) == st["pid"] and int(m.group(1)) <= 255:
+            return int(m.group(1))
+        return None
+
+    def scan(final=False):
+        # Complete lines only, read as the file grows; on the final read the unfinished last line too.
+        while True:
+            chunk = f.read(1 << 20)
+            if not chunk:
+                break
+            parts = (st["tail"] + chunk).split(b"\n")
+            st["tail"] = parts.pop()[-WAIT_TAIL:]
+            for raw in parts:
+                rc = see(raw.decode("utf-8", "replace"))
+                if rc is not None:
+                    return rc
+        if final and st["tail"]:
+            line, st["tail"] = st["tail"], b""
+            return see(line.decode("utf-8", "replace"))
+        return None
+
+    def run():
+        return f"run {st['pid']}" if st["pid"] is not None else "run (not started yet)"
+
+    t0 = time.monotonic()
+    try:
+        for s in SIGNALS:
+            signal.signal(s, _on_signal)
+        with f:
+            rc = scan()
+            _frame(f"wait up to {bound}s for the verdict of {run()} in {log}; give this call a timeout over {bound}s, "
+                   "and a call cut before a verdict line is no verdict: run it again")
+            base = _poll_base()
+            while True:
+                if rc is not None:
+                    _frame(f"exit {rc} (run {st['pid']})")
+                    return rc
+                if st["pid"] is not None and not _alive(st["pid"]):
+                    rc = scan(final=True)
+                    if rc is not None:
+                        continue
+                    _frame(f"no verdict: run {st['pid']} ended with no exit line (stopped or killed); exit {WAIT_GONE}")
+                    return WAIT_GONE
+                left = bound - (time.monotonic() - t0)
+                if left <= 0:
+                    if st["pid"] is None:
+                        _frame(f"after {bound}s, no verify-slot: run line in {log} yet: check the path, then run this "
+                               "wait again")
+                    else:
+                        _frame(f"still running after {bound}s ({run()}; last: {st['last'] or '(none)'}): run this wait "
+                               "again")
+                    return WAIT_RUNNING
+                time.sleep(min(base, left))
+                rc = scan()
+    except _Signalled as s:
+        _quiet()
+        _frame(f"wait cut by a signal after {time.monotonic() - t0:.0f}s ({run()}): no verdict; run this wait again")
+        return 128 + s.signum
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
     if not argv:
@@ -1125,7 +1390,9 @@ def main(argv=None):
     verb, rest = argv[0], argv[1:]
     try:
         if verb == "run":
-            return cmd_run(rest)
+            return _run_framed(rest)
+        if verb == "wait":
+            return cmd_wait(rest)
         if verb == "status":
             return cmd_status(rest)
         if verb == "_guard":
