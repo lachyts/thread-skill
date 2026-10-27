@@ -46,13 +46,27 @@ Subcommands:
               Refuses a serial rollout (`shape: serial`, ADR 0040) first, before its ceiling is read: exit 1, no
               stdout, one ERROR line, nothing written and `start:` kept: a serial rollout runs as Legs (execute
               legs.md, leg.py), never through next.
-              An unacked git-env trip (Git-env hold, below) is listed as `gitEnvHold` and makes `halt` "git-env",
-              ahead of every other verdict. `awaitingIntegration` is the Integration queue's order: a task a queued
+              An unacked git-env trip (Git-env hold, below) is listed as `gitEnvHold`, each with its `scope`: a
+              bare checkout's (`rollout`) holds every start and makes `halt` "git-env" at once, ahead of every other
+              verdict; any other trip holds the Integration lane only. `laneHold` (after `gitEnvHold`) is what holds
+              the lane: one {slug, hold: "git-env"} per unacked trip's slug, in log order, then one {slug, hold:
+              "race", revert} per undecided RACE in `raceHold`, in rank order, that is not reverted on main, or whose
+              revert the lead still owes (`revert: true`: started, not failed, its `integrating:` standing; the lane's
+              first work, execute § 4.5 step 1.4), or that was reverted with `main not re-verified` (Race holds,
+              below). `mainRed` (after `laneHold`, _main_red) is every RACE whose revert did not land that no `RACE
+              decided:` line lifts, [{slug, why, stamp}]: while it is non-empty nothing starts or restarts, every
+              stalled or queued task is held (`main red: the revert of [[<first>]] did not land: /thread:repair`) and
+              `halt` is "race" at once, whatever runs, pauses or holds; only a whole-rollout git-env hold outranks it
+              (its `git-env hold:` reasons win). `awaitingIntegration` is the Integration queue's order: a task a queued
               task depends on, directly or through a folded member (`merged_into:`), first, then the oldest
               `ready:`, then schedule order. Each `setAside` entry is {slug, status, setAsideAt}, plus `needsHuman`
-              (p16-3: the note's `## Needs you` question, normalised) only when the note holds one. `halt` is null
-              while anything starts, restarts, runs, awaits Integration or integrates; otherwise the first of
-              "git-env", "paused", "empty", "complete" (or "done"), "held", "awaiting-sign-off" and "stuck". With every
+              (p16-3: the note's `## Needs you` question, normalised) only when the note holds one. `halt` is
+              "git-env" under a whole-rollout git-env hold, else "race" while `mainRed` is non-empty; otherwise it is
+              null while anything starts, restarts or runs, or while the lane moves (`laneHold` empty and something
+              awaits Integration, integrates or holds the lane for a RACE re-verify; or a `race` entry reads `revert:
+              true` and no `git-env` entry stands); otherwise the first of "git-env" (a lane `git-env` entry), "race"
+              (a `race` entry with `revert: false`), "paused", "empty", "complete" (or "done"), "held",
+              "awaiting-sign-off" and "stuck". With every
               task merged, `halt` is "complete" (run the completion ceremony), or "done" when the ceremony already
               ran through its archive move (p19-14: the rollout note reads `status: done` and sits in
               `Archive/Rollouts/`), so no entry runs it twice (the lead's `done` route runs only its last step,
@@ -116,8 +130,9 @@ Subcommands:
               --repo <R> --default <B> --slug <slug> --kind task`, its stdout and stderr inherited (its `armed`,
               refusal and HOLD lines pass through); a non-zero arm (an OSError or a signal counts as 2) writes nothing
               for that note: no `started:`, no `integrating:` removal, no marker consumed, no slot-taken, and an
-              `ERROR: <slug>: the task window's arm exited <rc>; nothing written` line. Exit 3 when any arm exited 3
-              (a trip or a hold); else 2 (an arm failure or refusal, a missing or unpaired flag, the flags with no
+              `ERROR: <slug>: the task window's arm exited <rc>; nothing written` line. A task arm never exits 9: under
+              a lane hold (ADR 0046) it arms, printing its `LANE HOLD:` lines. Exit 3 when any arm exited 3
+              (a whole-rollout hold); else 2 (an arm failure or refusal, a missing or unpaired flag, the flags with no
               rollout note); else 1 (a refused note); else 0. --dry-run never runs the canary: it prints `<slug>:
               would arm the task window (dry-run)`, and the flag requirement still applies.
 
@@ -142,7 +157,8 @@ Subcommands:
               other note: gate-pending (approve-gates' job), done, review with a PR (awaiting Integration),
               a read-only review note, in_progress, open, and a note set aside at Integration with no `pr:`.
               A task an undecided RACE or UNVERIFIED holds (Race holds, below; read on the rollout its
-              `rollout:` names) is refused first, --dry-run included: exit 2, one ERROR line per held task
+              `rollout:` names), or whose `pr:` the RACE revert reverted on main (_reverted_pr), is refused
+              first, --dry-run included: exit 2, one ERROR line per held task
               naming it and `/thread:repair [[<rollout>]]`, and nothing written for any listed task.
               Feedback runs and the Integration log are never touched. The explicit re-entry (repair after
               Lachy answers, "retry [[task]]", the lead after a descope's exit 0) starts a fresh automatic-retry
@@ -225,7 +241,9 @@ Subcommands:
   resume      A task whose PR merged but whose note was never marked (p6-8): for each linked note that
               is not done, merged or dropped and carries `pr:`, ask gh for the PR's state and base. A PR
               MERGED into the repo's default branch flips the note to done with `merged:` from mergedAt.
-              Anything else (merged into another base, OPEN, CLOSED) is reported and left alone. A task an
+              Anything else (merged into another base, OPEN, CLOSED) is reported and left alone, and so is a
+              task whose `pr:` the RACE revert reverted on main (_reverted_pr: a `[no-change]` line, before any gh
+              call: re-land it through a new `pr:` or defer). A task an
               undecided RACE or UNVERIFIED holds (Race holds, below) is skipped before any gh call: one
               stderr `HOLD:` line names it and `/thread:repair`, the note is untouched, and the verb exits
               3 (which takes precedence over 1; ERROR lines still print).
@@ -234,7 +252,7 @@ Subcommands:
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
               pause_requested, pausedFor, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline,
-              trickle, ladder, gitEnvHold, holdUntil, tasks}; `trickle` (p28-6) is `next`'s trickle block read the same
+              trickle, ladder, gitEnvHold, mainRed, holdUntil, tasks}; `trickle` (p28-6) is `next`'s trickle block read the same
               way, silently (no WARN), plus `here`: {away, file, why, limit, awayCap, until, morning, elsewhere, here,
               running}, `here` this rollout's own count as another lead's count elsewhere reads it and `running`
               elsewhere plus here (Trickle and Away, below); `pausedFor` is the rollout's `paused_for` (`sign-off` under await-sign-off's
@@ -244,7 +262,8 @@ Subcommands:
               exits 1 on the same error; status still exits 0), else `ceilingError` is null; `ceilingCause`
               is what the error needs: `stamp` (the note's own value is invalid), `file` (rollouts.toml was
               refused), `root` (the Project root is gone or its origin unreadable) or `resolver`, else null;
-              `gitEnvHold` is the unacked git-env trips (Git-env hold, below), [] when none; `incomplete`
+              `gitEnvHold` is the unacked git-env trips (Git-env hold, below), each with its `scope`, [] when none;
+              `mainRed` is `next`'s (_main_red: the RACE reverts that did not land, undecided), [] when none; `incomplete`
               is why the rollout must not run as written (below), or null. `ladder` is {source, rungs (names,
               bottom first), error}: the local ladder file through ladder.py's load(); a refused file gives
               rungs [], source ladder.py's default_path() and error its reason, and status still exits 0.
@@ -530,7 +549,8 @@ Subcommands:
               refused (no `completion_verifier:`, an unreadable value). Exit 3: another --run holds the attempt.
               Exit 4: the canary's arm (nothing run) or check (recorded `unrun`) exited non-zero, but for the
               check's own exit 4 (an acked trip: recorded `unrun`, exit 0), its stderr passed through and its exit
-              in the line's canary_exit.
+              in the line's canary_exit; the check's exit 9 (a lane hold, ADR 0046) reads as 3 does: `unrun`, its
+              canary_exit 9.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`, and `paused_for`) from the rollout note. Run by /thread:execute's resume path
@@ -756,7 +776,8 @@ a round cap on); then by status: plan-rejected, review-rounds, approved-without-
 integrate row's set-aside by its diagnosis's first line (integration_block, p27-4): integration-conflict (an
 Integration conflict, `integration: conflict unresolved in …`), integration-red (`integration: verifier red: …`),
 else integration-set-aside; else blocked.
-idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
+idle-slots reason, first match ("queued" is queued and not starting this call): a whole-rollout gitEnvHold entry (a
+bare checkout; a lane trip holds no Slot) -> hold-git-env; mainRed (a RACE revert that did not land) -> hold-race;
 paused or pauseRequested -> pause-drain; any `heat:` hold (the Heat hold; only ever a queued row) -> hold-heat; any
 `trickle:` hold (only ever a queued row: a stalled row waits on the ceiling alone) -> hold-trickle, and any `away cap:`
 hold (the same, Away) -> hold-away-cap; any `last start:` hold (p28-2: a queued row or a head Solo the last starts hold
@@ -804,8 +825,19 @@ holds a combination nobody verified, and only Lachy's recorded decision releases
 task that has not landed as set-aside at `race` (so it never starts, restarts or integrates, and its
 dependants wait) and lists it under `raceHold`; one whose `integrating:` stamp stands (the lead's RACE
 re-verify holds the lane) still counts as integrating for the pause drain, the solo rule, the overlap and the
-halt verdict. `hand-back` refuses a held task (exit 2, nothing written). `status` reports the stored state,
-which status § 3 renders as a RACE itself. A verb that moves a task because its decision lifted the hold (`resume`
+halt verdict, while its lane hold (`laneHold`, below) says when the lane moves. `hand-back` refuses a held task (exit
+2, nothing written). `status` reports the stored state, which status § 3 renders as a RACE itself.
+The RACE revert (ADR 0046; execute § 4.5 *The RACE revert*): a RACE red after the Flake check is reverted on main
+through a revert PR that merges only through merge-task (lead-integrate.py `revert`). Its only Race log lines are
+`- <stamp> [[<slug>]] revert started: <M> …`, `revert opened: PR #R <url>`, `reverted on main: <sha> (revert PR #R of
+PR #N's merge <M12>; …)` and `revert did not land: <why>` (_race_reverts reads them, the latest of each kind winning).
+An undecided RACE holds the Integration lane only (`next`'s `laneHold`, never a start) until it is reverted with main's
+tree restored (by tree, or but for proven Inert paths) and its tail done: a revert started, not failed, whose
+`integrating:` still stands is pending (`revert: true`), and one reverted with `main not re-verified` keeps the lane
+held (`revert: false`). A revert that did not land is `mainRed` (_main_red): main is red, so the whole rollout is held
+until Lachy's `RACE decided:` line, whatever the task note's status. A note whose `pr:` the revert reverted
+(_reverted_pr: a `reverted on main:` line naming its slug and `PR #N's merge` with its PR number) never re-enters:
+`resume` leaves it (`[no-change]`), `hand-back` refuses it (exit 2) and the automatic retry names H7; a new `pr:` passes. A verb that moves a task because its decision lifted the hold (`resume`
 lands it, `hand-back` or `auto-retry` re-enters it) records that once, `race-decided` (_record_decision, p21-2): the
 human act a Reflection counts. The hold itself, opened on every merge-task exit 5 and ended by a green re-verify's
 mark-done, is no act. `defer` and `mark-done` never read the decision.
@@ -815,11 +847,15 @@ execute § 4.5 *Git-env canary*): the rollout note's `## Git-env log` (GIT_ENV_L
 tripped window, `- <stamp> git-env trip [[<slug>]] <kind>: <what changed>; repo <R>` (GIT_ENV_TRIP_MARK), written
 by the canary when the shared checkout's `refs/heads/<default>` or its bareness changed during a window, and one
 line per human ack, `- <stamp> git-env ack [[a]], [[b]]: refs/heads/<B> at <sha|absent>, core.bare false`
-(GIT_ENV_ACK_MARK), written only by the canary's `ack` (through /thread:repair). The hold is every trip line that
-no later ack line names (its wikilinks, read with WIKILINK_OPEN_RE), in log order, as {slug, kind, line}. While it
-is non-empty `next` starts and restarts nothing, holds every stalled or queued task with the reason
-`git-env hold: /thread:repair` and reports `halt: "git-env"` ahead of every other verdict; `status` reports it as
-`gitEnvHold`; and `carry` refuses the prior (exit 2, --dry-run included) with an ERROR line naming each held slug
+(GIT_ENV_ACK_MARK), written only by the canary's `ack` (through /thread:repair). A Bookkeeping miss whose state check
+passed is logged as `- <stamp> git-env miss [[<slug>]] <kind>: <reason>; <the checkout's state>; holds nothing; repo
+<R>` (GIT_ENV_MISS_MARK) and holds nothing (ADR 0046). The hold is every trip line that no later ack line names (its
+wikilinks, read with WIKILINK_OPEN_RE), in log order, as {slug, kind, line, scope}: `scope` is `rollout` when the line
+reads a bare checkout (GIT_ENV_BARE_RE: `core.bare false→true`, `core.bare true at arm`, a failed state check's
+`core.bare true`), else `lane`. While a `rollout` entry stands `next` starts and restarts nothing, holds every stalled
+or queued task with the reason `git-env hold: /thread:repair` and reports `halt: "git-env"` ahead of every other
+verdict; a `lane` entry holds only the Integration lane (`laneHold`), and `halt` is "git-env" once nothing else moves;
+`status` reports it as `gitEnvHold`; and `carry` refuses the prior (exit 2, --dry-run included) with an ERROR line naming each held slug
 and `/thread:repair [[<from>]]`. A `## Race log` line carrying `git-env halt` names its slug like any Race log line,
 so once the hold is acked the RACE hold applies unchanged.
 
@@ -2438,23 +2474,145 @@ def _race_holds(rollout_note, linked):
     return {k: (slug, kind) for k, (slug, kind, decided) in _race_marks(rollout_note, linked).items() if not decided}
 
 
+# ---- the RACE revert (ADR 0046; execute § 4.5 *The RACE revert*) --------------------------------------------
+# A RACE whose re-verify stays red after the Flake check is reverted on main through a revert PR that merges only
+# through merge-task (lead-integrate.py `revert`). Its only `## Race log` lines are these four, each naming the slug
+# with a wikilink right after the stamp; merge-task's own text, its `RACE:` line included, is never appended for a
+# revert PR.
+RACE_REVERT_STARTED_MARK = "revert started:"
+RACE_REVERT_OPENED_MARK = "revert opened:"
+RACE_REVERTED_MARK = "reverted on main:"
+RACE_REVERT_FAILED_MARK = "revert did not land:"
+RACE_REVERT_UNVERIFIED_MARK = "main not re-verified"
+# `next`'s hold reason for every stalled or queued task while a revert that did not land stands (`mainRed`).
+MAIN_RED_PREFIX = "main red:"
+# merge-task.sh's exit-5 line, as the RACE procedure appends it to the `## Race log` (merge-task.sh's VMSG).
+RACE_LINE_RE = re.compile(r"RACE: PR #(\d+) merged as ([0-9a-f]{40})")
+_REVERT_MARKS = (RACE_REVERT_STARTED_MARK, RACE_REVERT_OPENED_MARK, RACE_REVERTED_MARK, RACE_REVERT_FAILED_MARK)
+
+
+def _race_log_entries(rollout_note):
+    """[(stamp, slug, rest)] for every `## Race log` line whose first wikilink names a slug: `rest` is the text after
+    that wikilink, stripped. In log order."""
+    out = []
+    if rollout_note is None:
+        return out
+    for line in rollout_note.section_text(RACE_LOG_SECTION).split("\n"):
+        m = WIKILINK_OPEN_RE.search(line)
+        slug = (_wikilink_slug(m.group(1)) or "") if m else ""
+        if not slug:
+            continue
+        rest = line[m.end():]
+        rest = rest[rest.index("]]") + 2:] if "]]" in rest else rest
+        head = line.strip().lstrip("-").strip()
+        out.append((head.split(" ", 1)[0] if head else "", slug, rest.strip()))
+    return out
+
+
+def _race_reverts(rollout_note):
+    """{slug_lower: {slug, started, opened, reverted, unverified, failed, failedWhy, failedAt, prOf}} for every slug a
+    RACE revert line names in the rollout's `## Race log` (the latest line of each kind wins): `started` the merge M a
+    `revert started:` line names, `opened` the `revert opened:` text (`PR #R <url>`), `reverted` the sha a `reverted on
+    main:` line names, `unverified` that line reads `main not re-verified`, `prOf` the task PR number it names (`PR #N's
+    merge`), `failed` a `revert did not land:` line names the slug, with its reason (`failedWhy`) and stamp
+    (`failedAt`)."""
+    out = {}
+    for stamp, slug, rest in _race_log_entries(rollout_note):
+        mark = next((k for k in _REVERT_MARKS if rest.startswith(k)), None)
+        if mark is None:
+            continue
+        e = out.setdefault(slug.lower(), {"slug": slug, "started": None, "opened": None, "reverted": None,
+                                          "unverified": False, "failed": False, "failedWhy": None, "failedAt": None,
+                                          "prOf": None})
+        body = rest[len(mark):].strip()
+        if mark == RACE_REVERT_STARTED_MARK:
+            e["started"] = body.split(" ", 1)[0] if body else "?"
+        elif mark == RACE_REVERT_OPENED_MARK:
+            e["opened"] = body or "?"
+        elif mark == RACE_REVERTED_MARK:
+            e["reverted"] = body.split(" ", 1)[0] if body else "?"
+            e["unverified"] = RACE_REVERT_UNVERIFIED_MARK in body
+            pm = re.search(r"PR #(\d+)'s merge", body)
+            e["prOf"] = int(pm.group(1)) if pm else None
+        else:
+            e.update(failed=True, failedWhy=body, failedAt=stamp)
+    return out
+
+
+def _race_revert_pending(entry, in_race_held_lane):
+    """A RACE revert the lead still owes: started, not failed, and the task's `integrating:` still stands (the landing
+    tail's set-aside row, its last write, removes it), so a crash anywhere in the tail stays pending."""
+    return bool(entry and entry["started"]) and not entry["failed"] and bool(in_race_held_lane)
+
+
+def _pr_number(pr):
+    """The PR number a `pr:` value names (a PR URL or `#N`), else None."""
+    pr = _scalar(pr or "")
+    m = PR_URL_RE.match(pr) or PR_NUM_RE.match(pr)
+    return int(m.group(m.lastindex)) if m else None
+
+
+def _reverted_pr(rollout_note, note):
+    """True when the rollout's `## Race log` says the note's own `pr:` was reverted on main (a `reverted on main:` line
+    naming the note's slug whose `PR #N's merge` is the note's PR number): that merge must never re-enter (resume,
+    hand-back, the automatic retry). A new `pr:` (a re-land) passes."""
+    e = _race_reverts(rollout_note).get(note.path.stem.lower())
+    n = _pr_number(note.get("pr"))
+    return bool(e and e["reverted"] and n is not None and e["prOf"] == n)
+
+
+def _main_red(rollout_note):
+    """[{slug, why, stamp}] in `## Race log` order: each RACE whose revert did not land (a `revert did not land:` line)
+    that no `repair: [[<slug>]] RACE decided:` line in `## Notes` lifts. main is red, so the whole rollout is held until
+    Lachy decides. It reads the rollout note alone, never the task note's status: a task dropped or deferred by hand
+    does not make main green."""
+    if rollout_note is None:
+        return []
+    reverts = _race_reverts(rollout_note)
+    decided = {(_wikilink_slug(m.group(1)) or "").lower()
+               for m in RACE_DECIDED_RE.finditer(rollout_note.section_text(NOTES_SECTION))}
+    out, seen = [], set()
+    for _stamp_, slug, rest in _race_log_entries(rollout_note):
+        key = slug.lower()
+        if not rest.startswith(RACE_REVERT_FAILED_MARK) or key in seen or key in decided:
+            continue
+        seen.add(key)
+        e = reverts[key]
+        out.append({"slug": e["slug"], "why": e["failedWhy"], "stamp": e["failedAt"]})
+    return out
+
+
 # ---- the git-env hold (execute § 4.5 *Git-env canary*) ------------------------------------------------------
 
 GIT_ENV_LOG_SECTION = "## Git-env log"
 GIT_ENV_TRIP_MARK = "git-env trip"
 GIT_ENV_ACK_MARK = "git-env ack"
+# A Bookkeeping miss whose state check passed (ADR 0046): logged with the checkout's state, it holds nothing.
+GIT_ENV_MISS_MARK = "git-env miss"
+# A bare checkout holds the whole rollout (linked worktrees share the root's config): a trip line whose change reads
+# `core.bare false→true`, `core.bare true at arm`, or a failed state check's `core.bare true`. Every other trip holds the
+# Integration lane only.
+GIT_ENV_BARE_RE = re.compile(r"core\.bare (?:false→)?true(?!→)")
+
+
+def _git_env_scope(line):
+    """A trip line's scope (ADR 0046): `rollout` when it reads a bare checkout (GIT_ENV_BARE_RE), else `lane`."""
+    return "rollout" if GIT_ENV_BARE_RE.search(line or "") else "lane"
 
 
 def _git_env_hold(rollout_note):
-    """The unacked git-env trips (the module docstring's "Git-env hold"): an ordered [{slug, kind, line}] of the
+    """The unacked git-env trips (the module docstring's "Git-env hold"): an ordered [{slug, kind, line, scope}] of the
     `## Git-env log` trip lines that no later ack line names. A trip line's slug is the first wikilink after the
-    mark and its kind the word before the next `:`; an ack line names every wikilink it carries. A line with
-    neither mark is ignored. `rollout_note` None has no log, so no hold."""
+    mark and its kind the word before the next `:`; an ack line names every wikilink it carries; `scope` is
+    _git_env_scope's (`rollout` for a bare checkout, else `lane`). A miss line (GIT_ENV_MISS_MARK) holds nothing and a
+    line with neither mark is ignored. `rollout_note` None has no log, so no hold."""
     if rollout_note is None:
         return []
     trips = []
     for line in rollout_note.section_text(GIT_ENV_LOG_SECTION).split("\n"):
         line = line.rstrip()
+        if GIT_ENV_MISS_MARK in line:
+            continue
         if GIT_ENV_TRIP_MARK in line:
             rest = line[line.index(GIT_ENV_TRIP_MARK) + len(GIT_ENV_TRIP_MARK):]
             m = WIKILINK_OPEN_RE.search(rest)
@@ -2464,7 +2622,7 @@ def _git_env_hold(rollout_note):
             tail = rest[m.end():]
             tail = tail[tail.index("]]") + 2:] if "]]" in tail else tail
             km = re.match(r"\s*([A-Za-z-]+)\s*:", tail)
-            trips.append({"slug": slug, "kind": km.group(1) if km else "", "line": line})
+            trips.append({"slug": slug, "kind": km.group(1) if km else "", "line": line, "scope": _git_env_scope(line)})
         elif GIT_ENV_ACK_MARK in line:
             acked = {(_wikilink_slug(m.group(1)) or "").lower() for m in WIKILINK_OPEN_RE.finditer(line)}
             trips = [t for t in trips if t["slug"].lower() not in acked]
@@ -3743,14 +3901,20 @@ def cmd_next(args) -> int:
     wait on `ceiling:`), and starts only when nothing else has started. A task an undecided RACE or UNVERIFIED holds
     (_race_holds) and that has not landed is re-read as set-aside at `race`: it never starts, restarts or
     integrates, is never a seeded revise (those are set aside at `run`), and its dependants wait. One whose
-    `integrating:` stamp stands (the lead's RACE re-verify holds the lane on it) still counts as integrating
-    everywhere else: a soft pause is not stamped past it, a solo waits for it, its files count as in flight, and no
-    halt is reported while it stands. `raceHold` lists each, in rank order, with its kind; the counts and the
-    progress line are the re-read rows'. `awaitingIntegration` is the Integration queue's order: a task a queued
-    task depends on, directly or through a folded member (`merged_into:`), first, then the oldest `ready:`, then
-    schedule order (_lane_key). An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
-    while it stands nothing starts or restarts, every stalled or queued task is held (`git-env hold:
-    /thread:repair`) and `halt` is "git-env", ahead of every other verdict. The Trickle and the Away cap (Chorus ADR
+    `integrating:` stamp stands (the lead's RACE re-verify or revert holds the lane on it) still counts as integrating
+    everywhere else: a soft pause is not stamped past it, a solo waits for it and its files count as in flight.
+    `raceHold` lists each, in rank order, with its kind; the counts and the progress line are the re-read rows'.
+    `awaitingIntegration` is the Integration queue's order: a task a queued task depends on, directly or through a
+    folded member (`merged_into:`), first, then the oldest `ready:`, then schedule order (_lane_key). An unacked
+    git-env trip (_git_env_hold) is listed under `gitEnvHold` with its scope (ADR 0046): while a whole-rollout one
+    (a bare checkout) stands nothing starts or restarts, every stalled or queued task is held (`git-env hold:
+    /thread:repair`) and `halt` is "git-env", ahead of every other verdict; a lane one holds the Integration lane
+    only. `laneHold` lists what holds the lane (every unacked trip's slug, then each undecided RACE not reverted, or
+    whose revert is pending, `revert: true`, or reverted with `main not re-verified`), and `mainRed` the RACE reverts
+    that did not land (_main_red): while one stands nothing starts or restarts, every stalled or queued task is held
+    (`main red: …`) and `halt` is "race" at once. Once nothing starts, restarts or runs, no cap, last-start or heat
+    hold stands and the lane does not move, a lane `git-env` entry halts "git-env" and a `race` entry with `revert:
+    false` halts "race", ahead of the other verdicts. The Trickle and the Away cap (Chorus ADR
     0104; ADR 0049; execute away.md): once the refusals pass, the Away state file is read (_away_state; a stale or
     unreadable one prints one AWAY_WARN line on stderr) and every other started parallel Rollout's running tasks are
     counted (_elsewhere_running). `slotLimit` is min(ceiling, max(0, cap - the count elsewhere)), the cap the Trickle
@@ -3997,14 +4161,47 @@ def cmd_next(args) -> int:
     for r, h, entry in task_clears:
         entry["cleared"] = _clear_hold(r["note"], h, r["slug"], args.dry_run)
 
-    # An unacked git-env trip (execute § 4.5 *Git-env canary*) holds the whole queue until /thread:repair records
-    # Lachy's ack: nothing starts or restarts, every stalled or queued task is held, and the halt is "git-env",
-    # ahead of every other verdict (a live call or a held lane included: the lead halts at once).
+    # An unacked git-env trip (execute § 4.5 *Git-env canary*) holds what it threatens until /thread:repair records
+    # Lachy's ack (ADR 0046): a bare checkout (scope `rollout`, `whole`) holds the whole queue: nothing starts or
+    # restarts, every stalled or queued task is held, and the halt is "git-env", ahead of every other verdict (a live
+    # call or a held lane included: the lead halts at once). Any other trip holds the Integration lane only (laneHold).
     git_env = _git_env_hold(rollout_note)
-    if git_env:
+    whole = [t for t in git_env if t["scope"] == "rollout"]
+    # A RACE revert that did not land (mainRed): main is red and every new start would branch from it (ADR 0046), so
+    # nothing starts or restarts until Lachy's `RACE decided:` line; the whole-rollout git-env override below still wins.
+    main_red = _main_red(rollout_note)
+    if main_red:
+        start, restart = [], []
+        used = len(live)
+        holds = [(r, f"{MAIN_RED_PREFIX} the revert of [[{main_red[0]['slug']}]] did not land: /thread:repair")
+                 for r in stalled + queued]
+    if whole:
         start, restart = [], []
         used = len(live)
         holds = [(r, "git-env hold: /thread:repair") for r in stalled + queued]
+    # laneHold: what holds the Integration lane. One `git-env` entry per unacked trip's slug, in log order; then one
+    # `race` entry per undecided RACE (rank order) that is not reverted, or whose revert the lead still owes (`revert`:
+    # true, the lane's first work, execute § 4.5 step 1.4), or that was reverted with `main not re-verified`. A RACE
+    # reverted with main's tree restored, its tail done, frees the lane (it stays in raceHold for Lachy).
+    reverts = _race_reverts(rollout_note)
+    in_lane = {r["slug"].lower() for r in race_held_lane}
+    lane_hold, seen = [], set()
+    for t_ in git_env:
+        if t_["slug"].lower() not in seen:
+            seen.add(t_["slug"].lower())
+            lane_hold.append({"slug": t_["slug"], "hold": "git-env"})
+    for h in race_hold:
+        if h["kind"] != "RACE":
+            continue
+        e = reverts.get(h["slug"].lower())
+        pending = _race_revert_pending(e, h["slug"].lower() in in_lane)
+        if not (e and e["reverted"]) or pending or e["unverified"]:
+            lane_hold.append({"slug": h["slug"], "hold": "race", "revert": pending})
+    lane_git_env = any(e["hold"] == "git-env" for e in lane_hold)
+    # The lane moves while nothing holds it and something awaits Integration, integrates or holds it for a RACE
+    # re-verify, or while the lead owes a RACE revert and no git-env trip stands.
+    lane_moving = (not lane_hold and bool(awaiting or integrating or race_held_lane)) or \
+        (not lane_git_env and any(e.get("revert") for e in lane_hold))
     in_n = [r for r in rows if r["state"] not in OUTSIDE_N]
     counts = _counts(rows)
     halt = None
@@ -4018,11 +4215,17 @@ def cmd_next(args) -> int:
     last_start_held = any(why.startswith(LAST_START_PREFIX) for _, why in holds)
     # Nor does a row the Heat hold holds: it could start once the Mac cools.
     heat_held = any(why.startswith(HEAT_PREFIX) for _, why in holds)
-    if git_env:
+    if whole:
         halt = "git-env"
-    elif not start and not restart and not live and not awaiting and not integrating and not race_held_lane \
+    elif main_red:
+        halt = "race"   # at once: a revert that did not land holds the whole rollout, whatever runs, pauses or holds
+    elif not start and not restart and not live and not lane_moving \
             and not cap_held and not last_start_held and not heat_held:
-        if paused:
+        if lane_git_env:
+            halt = "git-env"
+        elif any(e["hold"] == "race" and not e["revert"] for e in lane_hold):
+            halt = "race"
+        elif paused:
             halt = "paused"
         elif not in_n:
             halt = "empty"
@@ -4044,9 +4247,9 @@ def cmd_next(args) -> int:
     # The Run record (p15-2): a reason marker for the idle Slots this call leaves (none at complete, done or empty).
     free = ceiling - (used + len(start))
     if free > 0 and halt not in ("complete", "done", "empty") and not args.dry_run:
-        reason = _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold,
+        reason = _idle_reason(whole, paused, pause_requested, holds, queued, start, race_hold,
                               by_state.get("set-aside", []), cap_held, last_start_held, ro_held, bool(task_held),
-                              heat_held=heat_held)
+                              heat_held=heat_held, main_red=main_red)
         _event(rollout_path.stem, "idle-slots", None,
                {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}, args)
     # The night record (Chorus ADR 0104's Consequences; execute away.md § The night record), after idle-slots.
@@ -4077,6 +4280,8 @@ def cmd_next(args) -> int:
         "setAside": [_set_aside_entry(r, task_held.get(r["slug"].lower())) for r in by_state.get("set-aside", [])],
         "raceHold": race_hold,
         "gitEnvHold": git_env,
+        "laneHold": lane_hold,
+        "mainRed": main_red,
         # The PR holds this call read (vault-grammar § Hold until): the rollout's first, then the tasks' in rank order.
         "holdUntil": hold_entries,
         "paused": paused,
@@ -4416,6 +4621,10 @@ def cmd_hand_back(args) -> int:
         mark = _race_marks(rollouts[ro.lower()], [(path, note)]).get(path.stem.lower())
         if mark and not mark[2]:
             held.append(_race_hold_line("hand-back", slug, mark[1], ro))
+        elif _reverted_pr(rollouts[ro.lower()], note):
+            # The RACE revert undid its merge on main: re-entering would integrate or land a reverted PR.
+            held.append(f"hand-back: [[{slug}]]: its merge was reverted on main: re-land it through a new pr: or defer "
+                        f"(/thread:repair [[{ro}]]); nothing written")
         elif mark:
             decided[slug] = mark[1]  # a decision lifted its hold: the move below records it (_record_decision)
     if held:
@@ -4542,6 +4751,11 @@ def cmd_resume(args) -> int:
         if slug.lower() in race:
             held.append(f"HOLD: [[{slug}]] {race[slug.lower()][1]} undecided: no \"repair: [[{slug}]] RACE decided:\" "
                         f"line on {rollout_path.stem}; /thread:repair [[{rollout_path.stem}]]")
+            continue
+        if _reverted_pr(rollout_note, note):
+            # Its merge was reverted on main (the RACE revert): MERGED on GitHub, but its change is not on main.
+            print(f"{slug}: its merge was reverted on main: re-land it through a new pr: or defer (/thread:repair) "
+                  "[no-change]")
             continue
         url, num = PR_URL_RE.match(pr), PR_NUM_RE.match(pr)
         if url:
@@ -4714,9 +4928,12 @@ def cmd_status(args) -> int:
         # {source, rungs, error}: the ladder status read (built-in, or the file's path); error non-null when the
         # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start).
         "ladder": ladder,
-        # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*): [] when none. Vault-only, so
-        # status § 3's Git-env trip flag holds offline too.
+        # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*), each with its `scope`: [] when
+        # none. Vault-only, so status § 3's Git-env trip flag holds offline too.
         "gitEnvHold": _git_env_hold(rollout_note),
+        # The RACE reverts that did not land and that no `RACE decided:` line lifts (_main_red): main is red, so the
+        # whole rollout is held (status § 3's Main red). Vault-only too.
+        "mainRed": _main_red(rollout_note),
         # The rollout's own hold_until (p30-3; vault-grammar § Hold until) as parsed, {pr, url, error}, or null. Only
         # `next` reads its PR (gh) and clears it, so /thread:status reads the state live itself (status § 3).
         "holdUntil": _hold_public(_hold_until(rollout_note, root)),
@@ -6369,15 +6586,18 @@ def _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings):
     return lines
 
 
-def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside, cap_held,
-                 last_start_held, pr_held=False, task_pr_held=False, heat_held=False) -> str:
-    """The idle-slots reason (the module docstring's table, first match). `cap_held`: this call holds a queued row on
-    the Mac-wide cap, "trickle" (`trickle:`) or "away-cap" (`away cap:`), else None (a stalled row waits only on the
-    ceiling); `last_start_held`: one on `last start:`. `pr_held`: the rollout's own hold_until stands (p30-3).
-    `task_pr_held`: a task's own hold_until stands, on a queued, stalled or set-aside (at run or a gate) row.
-    `heat_held`: one on `heat:` (the Heat hold, estate ADR 0009 d5), ahead of the Mac-wide cap."""
-    if git_env:
+def _idle_reason(whole, paused, pause_requested, holds, queued, start, race_hold, set_aside, cap_held,
+                 last_start_held, pr_held=False, task_pr_held=False, heat_held=False, main_red=()) -> str:
+    """The idle-slots reason (the module docstring's table, first match). `whole`: the whole-rollout git-env trips (a bare
+    checkout; a lane trip holds no Slot); `main_red`: `next`'s mainRed (a RACE revert that did not land). `cap_held`:
+    this call holds a queued row on the Mac-wide cap, "trickle" (`trickle:`) or "away-cap" (`away cap:`), else None (a
+    stalled row waits only on the ceiling); `last_start_held`: one on `last start:`. `pr_held`: the rollout's own
+    hold_until stands (p30-3). `task_pr_held`: a task's own hold_until stands, on a queued, stalled or set-aside (at
+    run or a gate) row. `heat_held`: one on `heat:` (the Heat hold, estate ADR 0009 d5), ahead of the Mac-wide cap."""
+    if whole:
         return "hold-git-env"
+    if main_red:
+        return "hold-race"
     if paused or pause_requested:
         return "pause-drain"
     if heat_held:
@@ -9302,11 +9522,12 @@ def _completion_run(args, path, ro, root, tasks_dir) -> int:
     if result == "rerun" and ids:
         # The Flake log (ADR 0050): attempt 1's failing ids, so a test that flakes again can be seen in the lines.
         why += "; failing " + ", ".join(ids[:10]) + (" …" if len(ids) > 10 else "")
-    if check not in (0, 3, 4):
+    if check not in (0, 3, 4, 9):
         result, why = "unrun", (f"the canary check failed (exit {check}), so its rc is never acted on, no verdict: "
                                 "the attempt re-runs")
     elif check != 0:
-        # 3, a trip that stands, or 4, one an ack re-armed meanwhile (ADR 0053): either way the rc is never acted on.
+        # 3, a trip that stands (9, a lane hold: ADR 0046), or 4, one an ack re-armed meanwhile (ADR 0053): either way
+        # the rc is never acted on.
         result, why = "unrun", ("a git-env trip fell inside its window (the shared checkout changed during the run), "
                                 "so its rc is never acted on, no verdict: the attempt re-runs")
     now = _now(args)

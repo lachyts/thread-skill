@@ -1800,7 +1800,9 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
       2. not set aside at its run or at Integration (running, queued, awaiting Integration, landed): null;
       3. a code-writing review note with no pr:: H11 `hand back or defer`, handBack true, label `(review, no PR)`;
       4. no rollout note: H2 `fix its rollout: or defer`;
-      5. an undecided RACE or UNVERIFIED: H3 `decide RACE` / `decide UNVERIFIED` (the hold's line);
+      5. an undecided RACE or UNVERIFIED: H3 `decide RACE` / `decide UNVERIFIED` (the hold's line); then a note whose
+         `pr:` the RACE revert reverted on main (reconcile-rollout.py _reverted_pr, ADR 0046): H7 `fix the note's pr: or
+         defer` (its latest `## Race log` line), handBack false: a re-land needs a new `pr:`;
       6. a `## Needs you` question: H4 `answer the question` (the question), its handBack that of the first cause
          below that refuses (7 skipped), true when none;
       7. a recorded answer (answerRecorded non-null): `answered for this block (<form>, <stamp>): <the cause's why>`,
@@ -1907,6 +1909,10 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
     if hold:
         return no(f"{hold[1]} undecided: only Lachy's RACE decided: line (through /thread:repair) releases it",
                   fix(f"decide {hold[1]}", _hold_line(rollout_note, path.stem, hold[1], note), False))
+    if rr._reverted_pr(rollout_note, note):
+        # The RACE revert undid this pr:'s merge on main (ADR 0046): re-entering would integrate or land a reverted PR.
+        return no("its merge was reverted on main: re-land it through a new pr: or defer",
+                  fix("fix the note's pr: or defer", _hold_line(rollout_note, path.stem, "RACE", note), False))
     question = rr.needs_human(note)
     if question and not skip_needs:
         below = _verdict(path, note, inp, rollout_note, now, None, skip_needs=True)
