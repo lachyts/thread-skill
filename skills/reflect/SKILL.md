@@ -367,7 +367,8 @@ trace may conclude). The Watch, its id and its recurring rule are Chorus's Refle
 recording Lachy's no (step 15's decision task, § Deciding the decision task) is this skill's own.
 
 **/fresh-review landings.** Read `span.json`'s `freshReview` (ADR 0055 d5) as reported, not traced: one entry per
-landing (a repo and branch) with a round in the window, every round it recorded counted. For each, its `rounds`
+landing (a repo and branch) with a round reviewed in the window, only those rounds counted: a landing reviewed
+across two weeks shows in each, and the default branch's entry never grows with the record. For each, its `rounds`
 (`codeRounds` of them code), `findings` and `blocking` per code round in order, `filed`, `open` at its last code round,
 `recurring` and `reversal`, its size (`lines`, `files`), and `blockingRate`. A null is unknown, never 0: a round
 recorded before ADR 0055, or one whose doc held no `## Disposition` yet. `codeRounds` counts every review round on
