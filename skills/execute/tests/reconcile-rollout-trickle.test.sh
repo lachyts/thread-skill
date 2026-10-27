@@ -376,8 +376,9 @@ J=$(nx ro-a --running "a1,a2")
 ok "$(q "$J" '[d["restart"], d["start"], d["running"], d["halt"]]')" '[[],[],["a1","a2"],null]' "T19: with both live, ro-a starts nothing more"
 
 # ── T20: a blocked row with the Trickle full reads stuck; the lead's halt guard waits on it ───────────────────────
-# `next` cannot tell a seeded revise (lead-integrate.py inputs' autoRevise) from any other block, so ro-c's only row,
-# c1 blocked at its run, reads `stuck` with slotLimit 0 and no hold. These are the values execute § 4.5 step 1.5's
+# A blocked task is no row of `next`'s, a seeded revise (lead-integrate.py inputs' autoRevise) included: `next` counts a
+# revise only in the fair share (p28-5; the share suite's F8 and F15). So ro-c, its only task c1 blocked at its run,
+# reads `stuck` with slotLimit 0 and no hold. These are the values execute § 4.5 step 1.5's
 # Trickle clause reads to end the turn `waiting` (reason="trickle: 2/2 tasks running on this Mac") instead of halting.
 scen t20-blocked-revise
 mkro ro-a 3; mkt a1 ro-a in_progress 'owner: lead-a'; mkt a2 ro-a in_progress 'owner: lead-a'

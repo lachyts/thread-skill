@@ -950,19 +950,22 @@ the moment one of its calls returns, while a lead waiting on it re-checks only a
 file also holds a `waiting` list beside `claims` (still version 1; an absent one reads [], one that is no list reads as
 none, silently, and the next write replaces it). Off --dry-run, in the claims write, `next` records this rollout
 waiting whenever its final holds include a row on `trickle:`, `away cap:` or `heat:` (so a hot spell keeps its place
-in line): one record {tasksDir, rollout, since, at, served, want} (TRICKLE_WAIT_KEYS), `since` carried from its own
-earlier record, `served` the call's now once it starts, else carried, else its latest `started:` stamp
-(_latest_started), else null, and `want` its waiting rows, Solo-aware, capped at its ceiling's room. Its earlier record
-is always replaced, and a call with nothing waiting (a pause, a hold, main red, a whole-rollout git-env hold, or
-everything started) removes it.
+in line), or a seeded revise execute § 4.5 step 1.2 launches (_seeded_revises: `inputs`' autoRevise, read as step 1.2
+reads it) waits on slotLimit: one record {tasksDir, rollout, since, at, served, want} (TRICKLE_WAIT_KEYS), `since`
+carried from its own earlier record, `served` the call's now once it starts, else the later of its own earlier
+record's and its latest `started:` stamp (_latest_started: so a start whose call wrote no record, under a lock it
+could not take, still counts), else null, and `want` its waiting rows, Solo-aware, plus the revises step 1.2 cannot
+launch, capped at its ceiling's room. Its earlier record is always replaced, and a call with nothing waiting (a pause,
+a hold, main red, a whole-rollout git-env hold, or everything started) removes it.
 _trickle_waiting_judge reads the list in this order: malformed records dropped silently; another tasksDir's kept by the
 wall clock and never counted; a record TRICKLE_WAIT_TTL old or older (or as far ahead) dropped, before the own record
 is read, so a lapsed one never carries its `since`; repeats, the latest `at` winning; this rollout's own taken out;
 one whose rollout note is present but outside the count dropped; one whose note is absent live until the TTL. Then,
 with free places on the Mac (cap - the count elsewhere - its own in_progress) and no heat, _fair_share gives them out
-one at a time among the live records and this rollout (its demand its startable rows within its ceiling), each to the
-lowest (held, served, since, stem), never served first, and slotLimit leaves out the places it keeps for the others
-(`trickle.kept`). A lock not taken, or a write that fails, records no waiting record either.
+one at a time among the live records and this rollout (its demand its startable rows plus its seeded revises, within
+its ceiling, so a rollout whose only work is a revise still gets a place in line), each to the lowest (held, served,
+since, stem), never served first, and slotLimit leaves out the places it keeps for the others (`trickle.kept`). A lock
+not taken, or a write that fails, records no waiting record either.
 
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
@@ -3958,8 +3961,36 @@ def _wait_ts(dt) -> str:
 
 def _latest_started(rows):
     """The latest `started:` stamp _parse_ts reads among a rollout's rows, or None (never served). The § 4 stamp's
-    first start wins, so a restart or a seeded revise never moves it (p28-5: a waiting record's `served` fallback)."""
+    first start wins, so a restart or a seeded revise never moves it (p28-5: a waiting record's `served` is the later of
+    this and its own earlier record's, so a start no record saw still counts)."""
     return max((t for t in (_parse_ts(r["started"]) for r in rows) if t is not None), default=None)
+
+
+def _seeded_revises(set_aside, task_held, rollout_note, root):
+    """The set-aside rows execute § 4.5 step 1.2 launches as a seeded revise, in rank order (p28-5: the fair share counts
+    them in this rollout's demand and its waiting record's `want`, away.md § The Trickle, *A fair share*). Each is read as
+    step 1.2 reads it: set aside at `run`, `blocked`, no task hold_until standing (`task_held`), lead-integrate.py's
+    `inputs` with autoRevise true under the max_review_rounds a call resolves (_resolved_cap: the task's, the rollout's,
+    then rollout-settings.py) and a pr: the engine takes (prUrlError empty, read against the Project root `root`, the
+    lead's `inputs --repo <repoPath>`), and no recorded answer (_answer_recorded). A row it cannot judge (lead-integrate.py
+    would not load, a round budget that does not resolve, any error reading it) is none: it contends as no revise does,
+    so the read fails open and never fails the call. The shape is read before the round budget, so a blocked row that
+    is no revise never resolves one."""
+    out = []
+    for r in sorted(set_aside, key=_rank):
+        if r["setAsideAt"] != "run" or r["status"] != "blocked" or r["slug"].lower() in task_held:
+            continue
+        try:
+            lead = _lead()
+            inp = lead.task_inputs(r["path"], r["note"], repo=str(root) if root is not None else None)
+            if not lead._revise_shaped(inp) or inp["prUrlError"]:
+                continue
+            k, _why = _resolved_cap(r["note"], rollout_note, "max_review_rounds")
+            if k is not None and inp["lastRound"] < k and _answer_recorded(r["note"]) is None:
+                out.append(r)
+        except Exception:  # noqa: BLE001 — the fair share's read only: a row it cannot judge is no revise
+            continue
+    return out
 
 
 def _trickle_waiting_judge(entries, tasks_dir: Path, this_stem: str, walk, now, wall):
@@ -4580,7 +4611,8 @@ def cmd_next(args) -> int:
     stamped (`paused:`) here, and once the refusals pass the rollout start stamp (`start: unattended`, _clear_start) is
     removed (`startCleared`); one call can make both) and the claims file, written under the trickle claim lock from a
     fresh walk once the rollout note's save has succeeded: one claim per start, and its waiting record (p28-5) while a
-    row waits on the Mac-wide cap or the heat, this rollout's earlier ones replaced.
+    row waits on the Mac-wide cap or the heat or a seeded revise waits on slotLimit, this rollout's earlier ones
+    replaced.
     A claims file it cannot read, a lock it cannot take or a write that fails prints one TRICKLE_WARN line and never
     fails the call (the count then reads the file without the lock, and nothing is claimed). New starts are
     picked greedily by `priority:`, then least file overlap with what is in flight, then schedule rank, among the
@@ -4615,9 +4647,10 @@ def cmd_next(args) -> int:
     `slotsInUse` may exceed `slotLimit`. A row held for want of a Slot reads `ceiling: …` once this rollout fills its
     ceiling, else `trickle: <trickle.running>/<Trickle> tasks running on this Mac` (not Away) or `away cap:
     <trickle.running>/<Away cap> tasks running on this Mac` (Away), either followed by `, <k> kept for [[<rollout>]],
-    …` while the fair share keeps places, and neither hold ever lets the rollout halt. Off --dry-run, the claims write
-    also records this rollout waiting while a row waits on the Mac-wide cap or the heat (the module docstring's "The
-    fair share"). The last starts (Chorus ADR
+    …` while the fair share keeps places, and neither hold ever lets the rollout halt. This rollout's demand in the
+    fair share counts the seeded revises step 1.2 launches (_seeded_revises), and off --dry-run the claims write also
+    records it waiting while a row waits on the Mac-wide cap or the heat, or such a revise waits on slotLimit (the module
+    docstring's "The fair share"). The last starts (Chorus ADR
     0104 d4; execute away.md): while Away runs to the Morning (_morning_toward), a start or a head Solo's lone start
     that has its Slot (under the Away cap's `slotLimit`) is held (`last start: …`, skipped, never a stop) when its
     kind's usual length would end it past the Morning, `lastStarts` reports it, a `last start:` hold never lets the
@@ -4754,6 +4787,12 @@ def cmd_next(args) -> int:
                 task_held[r["slug"].lower()] = reason
             elif entry["state"] == "MERGED":
                 task_clears.append((r, h, entry))
+    # The seeded revises step 1.2 launches (p28-5; _seeded_revises), which the fair share counts below: read here, before
+    # the trickle claim lock, so the lock never spans their git and settings reads. None under a pause or a standing
+    # rollout hold, where step 1.2 launches none; main red and a whole-rollout git-env hold (read below, where step 1.1
+    # halts first) clear them too.
+    revises = [] if (paused or pause_requested or ro_held) else \
+        _seeded_revises(by_state.get("set-aside", []), task_held, rollout_note, root)
     # The Trickle claims (p28-3; away.md § The Trickle, *Trickle claims*), taken after every PR-hold gh call so the
     # lock never spans gh. Off --dry-run `next` takes the machine-wide trickle claim lock (the outermost lock:
     # Note.save's note locks and the Run record's flock are taken inside it, never the other way), walks --tasks-dir
@@ -4814,11 +4853,13 @@ def cmd_next(args) -> int:
     # The fair share (p28-5; away.md § The Trickle, *A fair share*): the free places on the Mac go out one at a time
     # among the rollouts waiting on them (_fair_share), each to the one holding fewest, then served least recently,
     # then waiting longest, and slot_limit leaves out the places it keeps for the others. This rollout contends with
-    # `held` its own count and its `since` and `served` as its waiting record carries them (its own record's inside the
-    # TTL, else now and its latest `started:` stamp), the values every other lead reads in that record. Nothing is
-    # kept with no free place, under the heat (slot_limit is 0) or with no live record.
+    # `held` its own count and its `since` and `served` as its waiting record carries them, the values every other lead
+    # reads in that record: `since` its own record's inside the TTL, else now; `served` the later of its own record's
+    # and its latest `started:` stamp, so a start that no record saw (a call that could not take the lock writes none)
+    # still moves it. Nothing is kept with no free place, under the heat (slot_limit is 0) or with no live record.
     my_since = own_wait["since"] if own_wait else now
-    my_served = own_wait["served"] if own_wait else _latest_started(rows)
+    my_served = max((t for t in (own_wait and own_wait["served"], _latest_started(rows)) if t is not None),
+                    default=None)
     free_places = cap - running_elsewhere - mine
     held_by = {k.lower(): n for k, n in elsewhere.items()}
     waiters = [{"name": w["name"], "held": held_by.get(k, 0), "served": w["served"], "since": w["since"],
@@ -4835,6 +4876,8 @@ def cmd_next(args) -> int:
             return 0, kept_
         return min(ceiling, max(0, cap - running_elsewhere - sum(kept_.values()))), kept_
 
+    if main_red or whole:
+        revises = []  # step 1.1 halts on either before step 1.2 launches a revise
     started, solo_head = [], None
     if paused or pause_requested:
         slot_limit, kept = fair_limit(0)  # nothing of this rollout starts: every free place is the waiters'
@@ -4877,16 +4920,19 @@ def cmd_next(args) -> int:
         # task ranked below it, whatever their priority:, so priority and overlap order only the rows above it. A Solo
         # task its dependency holds is no candidate, so it holds nothing.
         solo_head = None if solo_started else min((r for r in candidates if r["solo"]), key=_rank, default=None)
-        # This rollout's demand in the fair share: what it could start now, within its ceiling. None under a started
-        # Solo task, a standing rollout hold, main red or a whole-rollout git-env hold (each clears this call's starts
-        # below); else the candidates above the head Solo task (all of them with none), or with none above it, the
-        # head Solo's lone start while nothing of this rollout is started.
+        # This rollout's demand in the fair share: what it could start now, within its ceiling. Its queued rows: none
+        # under a started Solo task, a standing rollout hold, main red or a whole-rollout git-env hold (each clears this
+        # call's starts below); else the candidates above the head Solo task (all of them with none), or with none above
+        # it, the head Solo's lone start while nothing of this rollout is started or owed a revise. Plus the seeded
+        # revises (read above, before the lock), under a started Solo task too (step 1.2 never reads Solo). A revise is
+        # no row of `next`'s, yet it takes a Slot under slotLimit like a start, so a rollout whose only work is a revise
+        # still gets a place in line.
         if solo_started or ro_held or main_red or whole:
             startable = 0
         else:
             above = [r for r in candidates if solo_head is None or r["rank"] < solo_head["rank"]]
-            startable = len(above) if above else int(solo_head is not None and not started)
-        slot_limit, kept = fair_limit(min(startable, max(0, ceiling - mine)))
+            startable = len(above) if above else int(solo_head is not None and not started and not revises)
+        slot_limit, kept = fair_limit(min(startable + len(revises), max(0, ceiling - mine)))
         if solo_started:
             holds += [(r, f"behind solo [[{solo_started['slug']}]]") for r in candidates]
         else:
@@ -4983,17 +5029,22 @@ def cmd_next(args) -> int:
     # cleanly, so a call that starts and finds nothing creates no file; a file of another version is never written.
     # Then the lock goes, before the best-effort records below.
     #
-    # This rollout's waiting record (p28-5; away.md § The Trickle, *A fair share*), from its final holds: one while a
-    # row waits on the Mac-wide cap or the heat (`trickle:`, `away cap:` or `heat:`; a heat row keeps the rollout's
-    # place in line through a hot spell), none under a pause, a rollout hold, main red or a whole-rollout git-env hold
-    # (their holds replace every Slot reason). `want` counts the waiting rows but the head Solo task's (that task's
-    # lone start alone counts 1, with nothing of this rollout in flight or started this call), capped at the room its
-    # ceiling leaves, ceiling - (mine + starts): exactly the room `next`'s start gate leaves. `served` is now once this
-    # call starts, else as the fair share read it; `since` carries. No record at want 0.
+    # This rollout's waiting record (p28-5; away.md § The Trickle, *A fair share*), from its final holds and its seeded
+    # revises: one while a row waits on the Mac-wide cap or the heat (`trickle:`, `away cap:` or `heat:`; a heat row
+    # keeps the rollout's place in line through a hot spell), or while a seeded revise waits on slotLimit; none under a
+    # pause, a rollout hold, main red or a whole-rollout git-env hold (their holds replace every Slot reason, and step
+    # 1.2 launches no revise). `want` counts the waiting rows but the head Solo task's (that task's lone start alone
+    # counts 1, with nothing of this rollout in flight, started this call or owed a revise, which step 1.2 launches
+    # first), plus the revises step 1.2 cannot launch (it launches one while slotsInUse plus those it launched is below
+    # slotLimit: rev_go), capped at the room its ceiling leaves, ceiling - (mine + starts + rev_go), so a row or a
+    # revise the ceiling holds is never waited for. `served` is now once this call starts, else as the fair share read
+    # it (a revise, like a restart, moves no `started:` stamp, so it never moves `served`); `since` carries. No record
+    # at want 0.
     waits = [r for r, why in holds if why.startswith((TRICKLE_PREFIX, AWAY_CAP_PREFIX, HEAT_PREFIX))]
-    want = sum(1 for r in waits if r is not solo_head) or \
-        int(solo_head in waits and not (live or restart or awaiting or integrating or race_held_lane or start))
-    want = min(want, max(0, ceiling - (mine + len(start))))
+    in_flight_or_owed = live or restart or awaiting or integrating or race_held_lane or start or revises
+    want = sum(1 for r in waits if r is not solo_head) or int(solo_head in waits and not in_flight_or_owed)
+    rev_go = min(len(revises), max(0, slot_limit - used))
+    want = min(want + len(revises) - rev_go, max(0, ceiling - (mine + len(start) + rev_go)))
     if claiming and claims_writable:
         at = now.astimezone().isoformat(timespec="seconds")
         here = os.path.realpath(str(tasks_dir))

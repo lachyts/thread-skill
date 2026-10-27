@@ -1466,7 +1466,7 @@ test('control: a restart held by the Trickle, or a Trickle-held revise that halt
   only(sk('within the ceiling like any restart, never held by the Trickle', 'within `slotLimit`'), 'trickle', 'an automatic retry held by the Trickle')
   only(sk(' A revise held only by `slotLimit`, below `ceiling`, is a Trickle wait: the halt guard (step 1.5) never halts on it (while Away, an Away-cap wait, the same).', ''),
     'trickle', 'step 1.2 without the pointer to the guard')
-  only(sk(', never § 7: the revise launches once the Mac has room', ', then § 7: the revise launches once the Mac has room'), 'trickle', 'the guard halts')
+  only(sk(', never § 7: `next` counts the revise in this rollout', ', then § 7: `next` counts the revise in this rollout'), 'trickle', 'the guard halts')
   const guard = real.skill.split('\n').find((l) => l.includes('**Halt guard (last).**'))
   const clause = guard.slice(guard.indexOf(' A `stuck` while step 1.2 held an `autoRevise: true`'))
   only(sk(clause, ''), 'trickle', 'no Trickle clause in the halt guard')

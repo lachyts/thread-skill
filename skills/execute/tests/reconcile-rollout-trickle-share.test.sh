@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # p28-5: the fair share (skills/execute/away.md § The Trickle, *A fair share*). Off --dry-run a lead whose final holds
-# include a waiting row (`trickle:`, `away cap:` or `heat:`) records its rollout as waiting in trickle-claims.json's
-# `waiting` list, under the trickle claim lock: {tasksDir, rollout, since, at, served, want}. Every lead's `next` then
+# include a waiting row (`trickle:`, `away cap:` or `heat:`), or whose seeded revise (execute § 4.5 step 1.2) waits on
+# slotLimit, records its rollout as waiting in trickle-claims.json's `waiting` list, under the trickle claim lock:
+# {tasksDir, rollout, since, at, served, want}. Every lead's `next` then
 # gives the free places on the Mac out one at a time, each to the contender with the fewest places held, then served
 # least recently (never served first), then waiting longest, and `slotLimit` leaves out the places it keeps for waiting
 # rollouts: a held row reads `…, <k> kept for [[<rollout>]]` and `trickle.kept` reports them. A record lives 30 minutes
@@ -60,6 +61,17 @@ mkt() {
 }
 # run1 <slug> <rollout> [started stamp] — a counted running task: in_progress, owner (the rollout started) and started.
 run1() { mkt "$1" "$2" in_progress "owner: lead-$2" "${3:-$ST}"; }
+# rev1 <slug> <rollout> <max_review_rounds> [frontmatter lines...] — a task Integration rejected, set aside for its seeded
+# revise (execute § 4.5 step 1.2): blocked at its run, its `## Blocker diagnosis` the engine's revise marker with one
+# Integration round, its Integration log's last line `rejected`, a PR URL and the round budget given (with 3,
+# lead-integrate.py inputs reads autoRevise true; with 1, its one round is spent). Served at 12:00 by its started: stamp.
+rev1() {
+  local s="$1" ro="$2" k="$3"; shift 3
+  mkt "$s" "$ro" blocked "owner: lead-$ro" 'started: 2026-10-02T12:00+00:00' 'pr: https://github.com/o/r/pull/7' \
+    "max_review_rounds: $k" "$@"
+  printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T13:40+00:00)\n\n%s\n\nRound 1 (Integration) rejection:\n- the merge dropped the retry guard\n\n<!-- run 1 end sha=0123456789ab -->\n\n## Integration log\n\n2026-10-02T13:30+00:00 rejected path=judge-only pr=7 anchor=- head=- base=- wait=- duration=- triggers=-\n' \
+    'revise: rejected at Integration re-review — revise on the branch, then re-integrate' >> "$D/$s.md"
+}
 # at <minutes> — NOW plus that many minutes (negative, fractional: seconds), as a --now value.
 at() { python3 -c 'import sys
 from datetime import datetime, timedelta
@@ -397,9 +409,9 @@ ok "$(waiting)" '[["ro-a",1,"14:05","13:00"]]' "F6 (TTL past): an own record 30:
 f6ttl future 'NOW + m(30)' None
 nx ro-a >/dev/null
 ok "$(waiting)" '[["ro-a",1,"14:05","13:00"]]' "F6 (TTL future): one 30:00 ahead is dropped the same way"
-f6ttl control 'NOW - m(30) + s(1)' '"2026-10-02T12:30:00+00:00"'
+f6ttl control 'NOW - m(30) + s(1)' '"2026-10-02T13:30:00+00:00"'
 nx ro-a >/dev/null
-ok "$(waiting)" '[["ro-a",1,"12:00","12:30"]]' "F6 (TTL control): one 29:59 old is read: since and served carry"
+ok "$(waiting)" '[["ro-a",1,"12:00","13:30"]]' "F6 (TTL control): one 29:59 old is read: since and served (13:30, after a1's 13:00) carry"
 
 # ── F7: failure handling ────────────────────────────────────────────────────────────────────────────────────────────
 scen f7-dry-run
@@ -452,13 +464,48 @@ nx ro-a >/dev/null
 ok "$(err)" "WARN: trickle claims $(CF) version 2 — read as none, left for its writer" "F7 (version 2): the version WARN"
 ok "$(sum1 "$(CF)")" "$before" "F7 (version 2): … and the file is left as it was"
 
-# ── F8: a caller with no candidates still leaves the kept place (a seeded revise's bound) ────────────────────────────
-scen f8-no-candidates
-mkro ro-c 2; mkt c1 ro-c blocked 'owner: lead-c'
-mkro ro-b 3; run1 b1 ro-b; mkt b2 ro-b open
-seedw '[]' '[w(D, "ro-b", NOW - m(5), NOW - m(1), "2026-10-02T13:00:00+00:00", 1)]'
+# ── F8: a seeded revise contends in the fair share; a blocked row that is no revise does not ─────────────────────────
+# f8 <name> <ro-b's served, a python expr>: ro-x runs x1 with no record (Mac 1/2); ro-b holds no place and waits for one
+# with that served; ro-c (ceiling 2) is made by the caller. One place is free.
+f8() {
+  scen "f8-$1"; mkro ro-x 3; run1 x1 ro-x; mkro ro-b 3; mkt b1 ro-b open
+  seedw '[]' "[w(D, 'ro-b', NOW - m(5), NOW - m(1), $2, 1)]"
+  mkro ro-c 2
+}
+f8 no-revise '"2026-10-02T13:00:00+00:00"'; mkt c1 ro-c blocked 'owner: lead-c'
 J=$(nx ro-c)
-ok "$(q "$J" "$share")" '[{"ro-b":1},0,[]]' "F8: ro-c, no candidate, free 1: slotLimit 0 and the place kept for ro-b"
+ok "$(q "$J" "$share")" '[{"ro-b":1},0,[]]' "F8: ro-c's only row blocked with no revise shape: it contends nothing, the place kept for ro-b"
+ok "$(waiting)" '[["ro-b",1,"14:00","13:00"]]' "F8: … and ro-c records nothing"
+f8 revise-first '"2026-10-02T13:00:00+00:00"'; rev1 c1 ro-c 3
+J=$(nx ro-c)
+ok "$(q "$J" "$share")" '[{},1,[]]' "F8 (revise): c1 owed a seeded revise is ro-c's demand: served 12:00 before ro-b's 13:00, it has the place"
+ok "$(q "$J" '[d["halt"], [e["slug"] for e in d["setAside"]]]')" '["stuck",["c1"]]' \
+  "F8 (revise): … still no row of next's (stuck: the lead's halt guard waits while step 1.2 launches it)"
+ok "$(waiting)" '[["ro-b",1,"14:00","13:00"]]' "F8 (revise): … the revise has its place, so ro-c records nothing"
+f8 revise-waits None; rev1 c1 ro-c 3
+J=$(nx ro-c)
+ok "$(q "$J" "$share")" '[{"ro-b":1},0,[]]' "F8 (revise waits): ro-b, never served, goes first: slotLimit 0"
+ok "$(waiting)" '[["ro-b",1,"14:00",null],["ro-c",1,"14:05","12:00"]]' \
+  "F8 (revise waits): … and ro-c records waiting for its revise (want 1, served 12:00 by c1's stamp)"
+f8 rounds-spent '"2026-10-02T13:00:00+00:00"'; rev1 c1 ro-c 1
+J=$(nx ro-c)
+ok "$(q "$J" "$share")" '[{"ro-b":1},0,[]]' "F8 (rounds spent): max_review_rounds 1 = lastRound: no seeded revise, ro-c contends nothing"
+ok "$(waiting)" '[["ro-b",1,"14:00","13:00"]]' "F8 (rounds spent): … and records nothing"
+f8 pause '"2026-10-02T13:00:00+00:00"'; rev1 c1 ro-c 3; setfm ro-c 'parallel_ceiling: 2' $'parallel_ceiling: 2\npause_requested: true'
+J=$(nx ro-c)
+ok "$(q "$J" "$share")" '[{"ro-b":1},0,[]]' "F8 (pause): under a pause request step 1.2 launches no revise: ro-c contends nothing"
+ok "$(waiting)" '[["ro-b",1,"14:00","13:00"]]' "F8 (pause): … and records nothing"
+f8 main-red '"2026-10-02T13:00:00+00:00"'; rev1 c1 ro-c 3
+printf '\n## Race log\n\n- 2026-10-02T10:00+00:00 [[c0]] revert did not land: conflict in a.py\n' >> "$D/ro-c.md"
+J=$(nx ro-c)
+ok "$(q "$J" "[d['halt'], $share]")" '["race",[{"ro-b":1},0,[]]]' "F8 (main red): step 1.1 halts before step 1.2: ro-c contends nothing"
+ok "$(waiting)" '[["ro-b",1,"14:00","13:00"]]' "F8 (main red): … and records nothing"
+scen f8-ceiling
+mkro ro-b 3; run1 b1 ro-b
+mkro ro-c 1; run1 c0 ro-c; rev1 c1 ro-c 3
+J=$(nx ro-c)
+ok "$(q "$J" '[d["slotLimit"], d["slotsInUse"], d["trickle"]["running"]]')" '[1,1,2]' "F8 (ceiling): ro-c (ceiling 1) runs c0: its revise waits on the ceiling"
+ok "$(nofile)" none "F8 (ceiling): … which is never waited for: no record (no file written)"
 
 # ── F9: the same share under the Away cap ───────────────────────────────────────────────────────────────────────────
 scen f9-away
@@ -558,5 +605,72 @@ seedw '[]' '[w(D, "ro-b", NOW - m(5), NOW - m(1), "2026-10-02T13:00:00+00:00", 1
 J=$(nx ro-a)
 ok "$(q "$J" "$share")" '[{"ro-b":1},1,[]]' "F14: ro-a, with no record, reads served 13:30 from a1's stamp: ro-b (13:00) goes first"
 ok "$(waiting)" '[["ro-a",1,"14:05","13:30"],["ro-b",1,"14:00","13:00"]]' "F14: … and ro-a records served 13:30"
+
+# ── F14b: a start no record saw still moves served (a call that could not take the lock writes none) ────────────────
+# ro-w recorded never served at 14:05, then started w1 at 14:07 in a call that could not take the trickle claim lock, so
+# no record was written. Its next record reads served 14:07 (its started: stamp, later than the carried null), so once
+# w1 lands, ro-v (served 13:00) goes first, where a carried null would keep ro-w first ahead of every served waiter.
+scen f14b-served-lock
+mkro ro-x 3; run1 x1 ro-x; run1 x2 ro-x
+mkro ro-v 3; mkt v1 ro-v open
+mkro ro-w 3; mkt w1 ro-w open; mkt w2 ro-w open; mkt w3 ro-w open
+seedw '[]' '[w(D, "ro-v", NOW - m(5), NOW - m(1), "2026-10-02T13:00:00+00:00", 1)]'
+nx ro-w >/dev/null
+ok "$(waiting)" '[["ro-v",1,"14:00","13:00"],["ro-w",3,"14:05",null]]' "F14b: ro-w at the Trickle records waiting, never served"
+stamp x1 review
+mkdir -p "$L"
+python3 -c 'import fcntl, sys, time
+fh = open(sys.argv[1], "a")
+fcntl.flock(fh, fcntl.LOCK_EX)
+open(sys.argv[2], "w").close()
+time.sleep(120)' "$L/trickle.lock" "$L/ready" &
+holder=$!; PIDS+=($holder)
+for _ in $(seq 100); do [ -e "$L/ready" ] && break; sleep 0.1; done
+J=$(THREAD_NOTE_LOCK_TIMEOUT=1 nx ro-w --now "$(at 2)")
+ok "$(q "$J" 'd["start"]')" '["w1"]' "F14b: x1 lands; ro-w, never served, starts w1 in a call that cannot take the lock"
+starts "$(err)" "WARN: trickle claims $L/trickle.lock: " "F14b: … the lock WARN"
+ok "$(waiting)" '[["ro-v",1,"14:00","13:00"],["ro-w",3,"14:05",null]]' "F14b: … so no record moves: ro-w's still reads null"
+kill "$holder"; wait "$holder" 2>/dev/null
+stamp w1 in_progress lead-ro-w 2026-10-02T14:07+00:00
+nx ro-w --now "$(at 5)" >/dev/null
+ok "$(waiting)" '[["ro-v",1,"14:00","13:00"],["ro-w",2,"14:05","14:07"]]' \
+  "F14b: ro-w's next record reads served 14:07, its w1 stamp, not the carried null"
+stamp w1 review
+J=$(nx ro-w --now "$(at 6)")
+ok "$(q "$J" "$share")" '[{"ro-v":1},0,[]]' "F14b: w1 lands: ro-v (served 13:00) goes first, ahead of ro-w (14:07)"
+
+# ── F15: a revise-only rollout gets in within the bound while two deep-queue rollouts refill (N = 2) ────────────────
+# ro-r's only work is r1's seeded revise; ro-w1 runs one task with a deep queue; ro-w2 has never started and waits with
+# a deep queue. Before p28-5's revise demand, ro-r wrote no record and kept nothing, so ro-w1 and ro-w2 took turns
+# refilling every freed place and ro-r's tick read slotLimit 0 for as long as either queue lasted.
+scen f15-revise
+mkro ro-r 2; rev1 r1 ro-r 3
+mkro ro-w1 2; run1 w1a ro-w1; for x in b c d e f; do mkt "w1$x" ro-w1 open; done
+mkro ro-w2 2; for x in a b c d e f; do mkt "w2$x" ro-w2 open; done
+seedw '[]' '[w(D, "ro-w2", NOW - m(5), NOW - m(1), None, 2)]'
+J=$(nx ro-r)
+ok "$(q "$J" "$share")" '[{"ro-w2":1},0,[]]' "F15: 14:05 ro-r: one place free, kept for never-served ro-w2"
+ok "$(q "$J" '[d["halt"], [e["slug"] for e in d["setAside"]]]')" '["stuck",["r1"]]' "F15: … r1 set aside, stuck (the lead's halt guard waits)"
+ok "$(waiting)" '[["ro-r",1,"14:05","12:00"],["ro-w2",2,"14:00",null]]' "F15: … and ro-r records waiting for its revise"
+J=$(nx ro-w2 --now "$(at 1)")
+ok "$(q "$J" 'd["start"]')" '["w2a"]' "F15: 14:06 ro-w2's tick starts w2a: the one freed place ro-r is passed over by (bound R - 1 = 2)"
+under "$J" 2 "F15: ro-w2's start"
+stamp w2a in_progress lead-ro-w2 2026-10-02T14:06+00:00
+stamp w1a review
+J=$(nx ro-w1 --now "$(at 5)")
+ok "$(q "$J" "$share")" '[{"ro-r":1},0,[]]' "F15: 14:10 w1a lands: ro-w1 (served 13:00) keeps the place for ro-r (12:00), no refill"
+ok "$(q "$J" 'd["hold"][0]["reason"]')" "\"trickle: 1/2 $T, 1 kept for [[ro-r]]\"" "F15: … its rows read the place kept for ro-r"
+J=$(nx ro-w2 --now "$(at 6)")
+ok "$(q "$J" "$share")" '[{"ro-r":1},1,[]]' "F15: 14:11 ro-w2 (holding 1) re-runs: the place stays kept for ro-r"
+J=$(nx ro-r --now "$(at 20)")
+ok "$(q "$J" "$share")" '[{},1,[]]' "F15: 14:25 ro-r's next tick: slotLimit 1, so step 1.2 launches r1's revise (15 minutes after the place freed)"
+ok "$(waiting)" '[["ro-w1",2,"14:10","13:00"],["ro-w2",1,"14:00","14:06"]]' "F15: … and ro-r's record goes (its revise has its place)"
+stamp r1 in_progress
+J=$(nx ro-r --now "$(at 20)" --running r1)
+ok "$(q "$J" '[d["running"], d["slotsInUse"]]')" '[["r1"],1]' "F15: the revise runs (step 1.2 re-runs next)"
+under "$J" 2 "F15: ro-r's revise"
+J=$(nx ro-w1 --now "$(at 21)")
+ok "$(q "$J" '[d["start"], d["trickle"]["running"]]')" '[[],2]' "F15: 14:26 ro-w1 finds the Mac at 2/2: nothing starts"
+under "$J" 2 "F15: ro-w1's next"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }
