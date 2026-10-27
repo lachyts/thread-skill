@@ -65,7 +65,8 @@ restarted):
       else `stuck`. A claimable row in another launch than the Leg's is a Leg boundary: `handoff`. A row whose
       dependency (depends-on/blocked-by) is not done is held `depends on [[d]] (<why>)`, and one whose done
       dependency has a not-done fix is held `depends on [[d]] (awaiting fix [[f]])`. --waiting adds the turn's
-      `status_line`, `state=waiting reason="<reason>"` (a review in flight, a room stop: legs.md § Report).
+      `status_line`, `state=waiting reason="<reason>"` (a review in flight, a room stop, a completion verify in
+      flight: legs.md § Complete and § Report).
   claim --task <t> [--inherit] [--gate <gate>]...
       Re-runs next under the lock: <t> must be what it proposes (with --inherit, an inherited `finish`). Stamps
       `status: in_progress`, `owner: leg-N`, `leg: N`, `started:` (the first wins), consumes `handed_back:` and
