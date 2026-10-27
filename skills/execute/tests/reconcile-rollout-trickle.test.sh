@@ -418,8 +418,9 @@ ok "$(q "$J" '[d["start"], d["restart"], d["slotsInUse"], d["slotLimit"], d["cei
   "A1: Away cap 4 with 4 running elsewhere: nothing starts, slotLimit 0 under the ceiling 4, no halt"
 ok "$(q "$J" "$holds")" "{\"x1\":\"$AC4\",\"x2\":\"$AC4\",\"x3\":\"$AC4\"}" "A1: every row is held on the Away cap"
 ok "$(q "$J" "$tka")" '[true,"fresh",2,4,{"ro-a":2,"ro-c":2},4]' "A1: trickle reports Away, the Trickle's N 2 and the Away cap 4"
-ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","running"]' \
-  "A1: awayCap follows limit, every other trickle key unchanged"
+# p28-5: the fair share's `kept` follows `running` as the block's last key.
+ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","running","kept"]' \
+  "A1: awayCap follows limit, every other trickle key unchanged (kept, p28-5, last)"
 ok "$(lines)" 0 "A1: a fresh file prints no WARN"
 
 # ── A2: partial room: starts fill up to the Away cap less the count elsewhere ────────────────────────────────────

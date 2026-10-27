@@ -84,18 +84,20 @@ Subcommands:
               UNVERIFIED) stays "stuck". `awaitingSignOff` lists W in rank order, [{slug, why: "gate-pending" |
               "depends on [[<unit>]]"}], and is [] for any other verdict.
               The Trickle and the Away cap (Chorus ADR 0104; ADR 0049; Trickle and Away, below): `slotLimit` (an
-              int) and `trickle` ({away, file, why, limit, awayCap, until, morning, elsewhere, running}) follow
-              `slotsInUse`; every other key, `ceiling` included, is unchanged. A start stops at the Mac-wide cap
-              (the Trickle N not Away, the Away cap A Away) less the tasks running in every other open Rollout on
-              the Mac and less this rollout's own in_progress tasks, live or stalled; a restart stops at the
-              ceiling only. A row held there reads `trickle: <running>/<N> tasks running on this Mac` (not Away)
-              or `away cap: <running>/<A> tasks running on this Mac` (Away), and while one is, `halt` stays null.
-              A stale or unreadable state file prints one `WARN: ~/.config/thread/away.json …` line on stderr,
-              --dry-run included. `trickle.elsewhere` and `running` count every other lead's live Trickle claims
-              too (p28-3; Trickle and Away, below): off --dry-run `next` writes this rollout's, one per start,
-              under the trickle claim lock. A claims file it cannot read (--dry-run included), a lock it cannot
-              take or a write that fails prints one `WARN: trickle claims …` line (TRICKLE_WARN) and never fails
-              the call.
+              int) and `trickle` ({away, file, why, limit, awayCap, until, morning, elsewhere, running, kept})
+              follow `slotsInUse`; every other key, `ceiling` included, is unchanged. A start stops at the Mac-wide
+              cap (the Trickle N not Away, the Away cap A Away) less the tasks running in every other open Rollout
+              on the Mac, less the places a fair share keeps for waiting rollouts (p28-5; `trickle.kept`), and less
+              this rollout's own in_progress tasks, live or stalled; a restart stops at the ceiling only. A row held
+              there reads `trickle: <running>/<N> tasks running on this Mac` (not Away) or `away cap: <running>/<A>
+              tasks running on this Mac` (Away), with `, <k> kept for [[<rollout>]], …` after either while a fair
+              share keeps places, and while one is, `halt` stays null. A stale or unreadable state file prints one
+              `WARN: ~/.config/thread/away.json …` line on stderr, --dry-run included. `trickle.elsewhere` and
+              `running` count every other lead's live Trickle claims too (p28-3; Trickle and Away, below): off
+              --dry-run `next` writes this rollout's, one per start, under the trickle claim lock. Off --dry-run
+              `next` also writes this rollout's waiting record under the same lock, in the same write (p28-5;
+              Trickle claims, below). A claims file it cannot read (--dry-run included), a lock it cannot take or a
+              write that fails prints one `WARN: trickle claims …` line (TRICKLE_WARN) and never fails the call.
               The last starts (Chorus ADR 0104 d4; The last starts and the night record, below): `lastStarts`
               ({morning, kinds}) follows `trickle`. While Away runs to the Morning, a start whose kind's usual
               length would end past it reads `last start: …` and is skipped, never a stop; a restart never does;
@@ -915,19 +917,20 @@ more than 5 minutes ahead) reads not Away at DEFAULT_TRICKLE with the Away cap a
 `trickle` and `away_cap` ignored; stale and unreadable print the AWAY_WARN line. Fresh, `away` and `trickle` are the
 file's, and the Away cap is its `away_cap`, else AWAY_CAP_DEFAULT lifted to `trickle` + 1 once the Trickle reaches it.
 One Mac-wide cap applies, its value by Away state, the Trickle not Away and the Away cap Away, and each rollout's
-ceiling still bounds its share: slotLimit = min(ceiling, max(0, cap - the count elsewhere)). The count elsewhere is
+ceiling still bounds its share: slotLimit = min(ceiling, max(0, cap - the count elsewhere - the places kept)), the
+places kept those a fair share keeps for waiting rollouts (p28-5; Trickle claims, below). The count elsewhere is
 one walk of --tasks-dir (off --dry-run a fresh one, _note_index, taken under the trickle claim lock below; under
 --dry-run the call's own, _scan's index) plus every other lead's live Trickle claims. In the walk (_elsewhere_running)
 each other rollout note directly in --tasks-dir, tagged `rollout`, not done or dropped, parallel, with no `paused:`
 stamp and started (never_started), counts its `status: in_progress` notes less the ones its own undecided RACE or
 UNVERIFIED holds. Serial rollouts, review and integrating notes never count. This rollout's own use is counted the same
-way, every in_progress row of its own, live or stalled, so a new start fits only while elsewhere + its own in_progress +
-this call's starts < the cap; a restart waits on the ceiling alone (no state leaves two respawned leads each waiting on
-the other's stalled notes). `status` and every progress line count notes only. Nothing here writes the file;
-mark-started reads it too, for slot-taken's `cap` (Run record, above), `status` for its `trickle` block, and every
-progress line (_progress_for, `next`, `status`) for the ETA's width (p28-6, _eta_width: the chunks still ahead at
-min(ceiling, max(1, cap - the count elsewhere)), the Heat hold aside); all of them read it silently, and only `next`
-prints the WARN.
+way, every in_progress row of its own, live or stalled, so a new start fits only while elsewhere + the places kept + its
+own in_progress + this call's starts < the cap; a restart waits on the ceiling alone (no state leaves two respawned
+leads each waiting on the other's stalled notes). `status` and every progress line count notes only. Nothing here
+writes the file; mark-started reads it too, for slot-taken's `cap` (Run record, above), `status` for its `trickle`
+block, and every progress line (_progress_for, `next`, `status`) for the ETA's width (p28-6, _eta_width: the chunks
+still ahead at min(ceiling, max(1, cap - the count elsewhere)), the Heat hold and the places kept aside); all of them
+read it silently, and only `next` prints the WARN.
 
 Trickle claims (p28-3; the spec is skills/execute/away.md § The Trickle, *Trickle claims*): two leads' `next` calls
 would otherwise both see the room one place leaves between one lead's `next` and its § 4 stamp. So off --dry-run, once
@@ -941,6 +944,25 @@ from its `at`; a missing or torn rollout or task note keeps it counting until th
 takes no lock, re-walks nothing and writes nothing. A lock it cannot take, a file it cannot read or a write that fails
 prints one TRICKLE_WARN line and fails open (the old window: one call's starts per lead), never a halt; a file of
 another version is read as none and never written.
+
+The fair share (p28-5; the spec is skills/execute/away.md § The Trickle, *A fair share*): a lead refills the Trickle
+the moment one of its calls returns, while a lead waiting on it re-checks only at its heartbeat's ticks, so the claims
+file also holds a `waiting` list beside `claims` (still version 1; an absent one reads [], one that is no list reads as
+none, silently, and the next write replaces it). Off --dry-run, in the claims write, `next` records this rollout
+waiting whenever its final holds include a row on `trickle:`, `away cap:` or `heat:` (so a hot spell keeps its place
+in line): one record {tasksDir, rollout, since, at, served, want} (TRICKLE_WAIT_KEYS), `since` carried from its own
+earlier record, `served` the call's now once it starts, else carried, else its latest `started:` stamp
+(_latest_started), else null, and `want` its waiting rows, Solo-aware, capped at its ceiling's room. Its earlier record
+is always replaced, and a call with nothing waiting (a pause, a hold, main red, a whole-rollout git-env hold, or
+everything started) removes it.
+_trickle_waiting_judge reads the list in this order: malformed records dropped silently; another tasksDir's kept by the
+wall clock and never counted; a record TRICKLE_WAIT_TTL old or older (or as far ahead) dropped, before the own record
+is read, so a lapsed one never carries its `since`; repeats, the latest `at` winning; this rollout's own taken out;
+one whose rollout note is present but outside the count dropped; one whose note is absent live until the TTL. Then,
+with free places on the Mac (cap - the count elsewhere - its own in_progress) and no heat, _fair_share gives them out
+one at a time among the live records and this rollout (its demand its startable rows within its ceiling), each to the
+lowest (held, served, since, stem), never served first, and slotLimit leaves out the places it keeps for the others
+(`trickle.kept`). A lock not taken, or a write that fails, records no waiting record either.
 
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
@@ -3128,8 +3150,9 @@ def _counts(rows):
 
 def _eta_width(ceiling, away, elsewhere):
     """(n, by): how many of this rollout's tasks run at once for the ETA (p28-6), the Trickle's limit (execute away.md's
-    slotLimit, min(ceiling, max(0, cap - the count elsewhere))) floored at 1 and without the Heat hold, which passes: a
-    full Mac still drains one at a time, and the ETA never divides by zero. `by` is "ceiling" when the ceiling binds,
+    slotLimit, min(ceiling, max(0, cap - the count elsewhere - the places kept))) floored at 1 and without the Heat hold
+    or a fair share's kept places (p28-5), which pass: a full Mac still drains one at a time, and the ETA never divides
+    by zero. `by` is "ceiling" when the ceiling binds,
     else "trickle" (not Away) or "away cap" (Away). `away` is _away_state's, `elsewhere` _elsewhere_running's. A ceiling
     of None (unresolved) gives (None, "ceiling"): _timeline then has no remaining."""
     if not ceiling:
@@ -3568,6 +3591,11 @@ TRICKLE_CLAIM_TTL = timedelta(minutes=20)    # one heartbeat tick: a claim no §
 TRICKLE_CLAIMS_MAX_BYTES = 256 * 1024
 TRICKLE_WARN = "WARN: trickle claims"                          # every claims stderr line's prefix
 TRICKLE_CLAIM_KEYS = ("tasksDir", "rollout", "slug", "at")
+# The fair share (p28-5; execute away.md § The Trickle, *A fair share*): the claims file's `waiting` list, one record
+# per rollout whose lead's `next` held a row on the Mac-wide cap or the heat, so every other lead keeps a freed place
+# for it in turn. A record no later write replaces lapses after TRICKLE_WAIT_TTL from its `at` (a gone lead).
+TRICKLE_WAIT_TTL = timedelta(minutes=30)
+TRICKLE_WAIT_KEYS = ("tasksDir", "rollout", "since", "at", "served", "want")
 # The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; execute away.md).
 LAST_START_PREFIX = "last start:"                              # a row held because it would run past the Morning
 LAST_START_FALLBACK = timedelta(hours=2)                       # a kind with no history starts nothing this close to it
@@ -3818,36 +3846,39 @@ def _trickle_paths():
 
 
 def _trickle_claims_read(path):
-    """The Trickle claims file, read whole: (entries, why, writable). Missing (no file, or no dir): ([], None, True),
-    silently. Unreadable (any other OSError, over TRICKLE_CLAIMS_MAX_BYTES, not UTF-8, not JSON, not an object, a
-    `version` that is no integer, or `claims` not a list): ([], why, True), so `next` warns and its next write
-    replaces it. Another integer version: ([], "version <v>", False), so `next` warns, reads it as none and never
-    writes it (a later writer's file). Else its `claims` list as read, every entry still unjudged."""
+    """The Trickle claims file, read whole: (claims, waiting, why, writable). Missing (no file, or no dir): ([], [],
+    None, True), silently. Unreadable (any other OSError, over TRICKLE_CLAIMS_MAX_BYTES, not UTF-8, not JSON, not an
+    object, a `version` that is no integer, or `claims` not a list): ([], [], why, True), so `next` warns and its next
+    write replaces it. Another integer version: ([], [], "version <v>", False), so `next` warns, reads it as none and
+    never writes it (a later writer's file). Else its `claims` list and its `waiting` list (p28-5) as read, every entry
+    still unjudged: an absent `waiting` (a file in p28-3's shape) reads [], and a present one that is no list reads
+    None, silently: judged as none, and unequal to any list, so the next write replaces it."""
     try:
         with open(path, "rb") as f:
             raw = f.read(TRICKLE_CLAIMS_MAX_BYTES + 1)
     except FileNotFoundError:
-        return [], None, True
+        return [], [], None, True
     except OSError as e:
-        return [], f"cannot read it ({e.strerror or e})", True
+        return [], [], f"cannot read it ({e.strerror or e})", True
     if len(raw) > TRICKLE_CLAIMS_MAX_BYTES:
-        return [], f"over {TRICKLE_CLAIMS_MAX_BYTES // 1024} KiB", True
+        return [], [], f"over {TRICKLE_CLAIMS_MAX_BYTES // 1024} KiB", True
     try:
         data = json.loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
-        return [], "not UTF-8", True
+        return [], [], "not UTF-8", True
     except ValueError:
-        return [], "not JSON", True
+        return [], [], "not JSON", True
     if not isinstance(data, dict):
-        return [], "not a JSON object", True
+        return [], [], "not a JSON object", True
     version = data.get("version")
     if type(version) is not int:
-        return [], "no integer version", True
+        return [], [], "no integer version", True
     if version != TRICKLE_CLAIMS_VERSION:
-        return [], f"version {version}", False
+        return [], [], f"version {version}", False
     if not isinstance(data.get("claims"), list):
-        return [], "claims is not a list", True
-    return data["claims"], None, True
+        return [], [], "claims is not a list", True
+    waiting = data.get("waiting", [])
+    return data["claims"], (waiting if isinstance(waiting, list) else None), None, True
 
 
 def _trickle_claims_judge(entries, tasks_dir: Path, this_stem: str, walk, now, wall):
@@ -3920,14 +3951,102 @@ def _trickle_merge(notes, claims) -> dict:
     return dict(sorted((k, n) for k, n in out.items() if n > 0))
 
 
-def _trickle_claims_write(path: Path, entries):
-    """Write the Trickle claims file whole: a temp file beside it (TRICKLE_CLAIMS.<pid>.tmp), fsynced, then renamed
-    over it, so no reader sees half a file. None, or why it could not (an OSError; nothing is left behind)."""
+def _wait_ts(dt) -> str:
+    """A waiting record's time (p28-5): local, to the second, with its offset, as a claim's `at` is written."""
+    return dt.astimezone().isoformat(timespec="seconds")
+
+
+def _latest_started(rows):
+    """The latest `started:` stamp _parse_ts reads among a rollout's rows, or None (never served). The § 4 stamp's
+    first start wins, so a restart or a seeded revise never moves it (p28-5: a waiting record's `served` fallback)."""
+    return max((t for t in (_parse_ts(r["started"]) for r in rows) if t is not None), default=None)
+
+
+def _trickle_waiting_judge(entries, tasks_dir: Path, this_stem: str, walk, now, wall):
+    """(live, kept, own): which waiting records (p28-5; away.md § The Trickle, *A fair share*) the fair share reads,
+    which the next write keeps, and this rollout's own. `walk` is the call's index of `tasks_dir`, `now` its clock
+    (--now, else the real one) and `wall` always the real clock. Rules, in order, on each record R (its rollout; stems
+    compared lowercased):
+      1. malformed: dropped silently, never a crash no later write could prune. That is: no object; a key of
+         TRICKLE_WAIT_KEYS missing; `tasksDir`, `rollout`, `since` or `at` no non-empty string; `since` or `at` that
+         _parse_ts reads as None (a naive one that cannot be placed in local time included); `served` neither null
+         nor such a string; `want` no int >= 1 (a bool is none); `since` or `served` after `at`;
+      2. another tasksDir: never counted, kept only while under TRICKLE_WAIT_TTL old by `wall` (so a test's --now
+         never ages a real record);
+      3. TRICKLE_WAIT_TTL old or older by `now`, or as far ahead of it: dropped. This runs before step 5, so a lapsed
+         or future own record is never read: its `since` and `served` are never carried forward;
+      4. repeats (one lowercased R): the latest `at` wins, and on equal `at` the first in file order;
+      5. this rollout's own: removed (this call's record replaces it) and returned as `own` {since, served}, the only
+         way a `since` or a `served` carries forward; `own` is None when no own record passed steps 1-4;
+      6. R in the walk but outside the count (not directly in `tasks_dir`, or not _trickle_eligible: paused, closed,
+         serial, untagged): dropped. A never-started rollout stays: a morning launch waits like any other;
+      7. R not in the walk (torn mid-edit, or deleted): live until the TTL, under the spelling it recorded.
+    `live` is {<R lowercased>: {name, since, served, want}}, `name` the walked note's stem when present, else the
+    recorded spelling, `since` and `served` aware datetimes (`served` None when never served). `kept` holds the six
+    keys only."""
+    here = os.path.realpath(str(tasks_dir))
+    this = this_stem.lower()
+    kept, best = [], {}
+    for i, e in enumerate(entries):
+        if not isinstance(e, dict) or not all(k in e for k in TRICKLE_WAIT_KEYS) or \
+                not all(isinstance(e[k], str) and e[k] for k in ("tasksDir", "rollout", "since", "at")):
+            continue
+        since, at, want = _parse_ts(e["since"]), _parse_ts(e["at"]), e["want"]
+        served = _parse_ts(e["served"]) if isinstance(e["served"], str) else None
+        if since is None or at is None or (e["served"] is not None and served is None) or \
+                type(want) is not int or want < 1 or since > at or (served is not None and served > at):
+            continue
+        e = {k: e[k] for k in TRICKLE_WAIT_KEYS}
+        if e["tasksDir"] != here:
+            if abs(wall - at) < TRICKLE_WAIT_TTL:
+                kept.append(e)
+            continue
+        if abs(now - at) >= TRICKLE_WAIT_TTL:
+            continue
+        key = e["rollout"].lower()
+        if key not in best or at > best[key][1]:
+            best[key] = (i, at, e, since, served, want)
+    live, own = {}, None
+    for key, (_i, _at, e, since, served, want) in sorted(best.items(), key=lambda kv: kv[1][0]):
+        if key == this:
+            own = {"since": since, "served": served}
+            continue
+        ro = walk.get(key)
+        if ro is not None and (ro[0].parent != tasks_dir or not _trickle_eligible(ro[1])):
+            continue
+        live[key] = {"name": ro[0].stem if ro is not None else e["rollout"], "since": since, "served": served,
+                     "want": want}
+        kept.append(e)
+    return live, kept, own
+
+
+def _fair_share(free: int, contenders, now) -> dict:
+    """{<name>: n}: how a fair share (p28-5; away.md § The Trickle, *A fair share*) gives `free` places out among
+    `contenders`, each {name, held, served, since, demand} (`served` None when never served). One place at a time, each
+    to the contender whose demand is still unmet with the lowest (held, served, since, name lowercased), a never-served
+    one first; the winner then holds one more and reads served `now` for the next place. Places no unmet demand takes
+    go to nobody. n > 0 only, sorted. Pure: cmd_next puts this rollout among the contenders and keeps for waiting
+    rollouts the places the others win."""
+    pool = [dict(c, got=0) for c in contenders]
+    for _ in range(max(0, free)):
+        unmet = [c for c in pool if c["got"] < c["demand"]]
+        if not unmet:
+            break
+        c = min(unmet, key=lambda c: (c["held"], (0,) if c["served"] is None else (1, c["served"]), c["since"],
+                                      c["name"].lower()))
+        c["got"], c["held"], c["served"] = c["got"] + 1, c["held"] + 1, now
+    return dict(sorted((c["name"], c["got"]) for c in pool if c["got"] > 0))
+
+
+def _trickle_claims_write(path: Path, claims, waiting):
+    """Write the Trickle claims file whole, {"version": 1, "claims": [...], "waiting": [...]}: a temp file beside it
+    (TRICKLE_CLAIMS.<pid>.tmp), fsynced, then renamed over it, so no reader sees half a file. None, or why it could not
+    (an OSError; nothing is left behind)."""
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"version": TRICKLE_CLAIMS_VERSION, "claims": entries}, f, indent=1)
+            json.dump({"version": TRICKLE_CLAIMS_VERSION, "claims": claims, "waiting": waiting}, f, indent=1)
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
@@ -4460,7 +4579,8 @@ def cmd_next(args) -> int:
     Trickle, *Trickle claims*), except for its writes off --dry-run: two to the rollout note (a drained soft pause is
     stamped (`paused:`) here, and once the refusals pass the rollout start stamp (`start: unattended`, _clear_start) is
     removed (`startCleared`); one call can make both) and the claims file, written under the trickle claim lock from a
-    fresh walk once the rollout note's save has succeeded: one claim per start, this rollout's earlier ones replaced.
+    fresh walk once the rollout note's save has succeeded: one claim per start, and its waiting record (p28-5) while a
+    row waits on the Mac-wide cap or the heat, this rollout's earlier ones replaced.
     A claims file it cannot read, a lock it cannot take or a write that fails prints one TRICKLE_WARN line and never
     fails the call (the count then reads the file without the lock, and nothing is claimed). New starts are
     picked greedily by `priority:`, then least file overlap with what is in flight, then schedule rank, among the
@@ -4487,13 +4607,17 @@ def cmd_next(args) -> int:
     0104; ADR 0049; execute away.md): once the refusals pass, the Away state file is read (_away_state; a stale or
     unreadable one prints one AWAY_WARN line on stderr) and every other started parallel Rollout's running tasks are
     counted (_elsewhere_running), plus every other lead's live Trickle claims (_trickle_claims_judge). `slotLimit` is
-    min(ceiling, max(0, cap - the count elsewhere)), the cap the Trickle not Away and the Away cap Away. Starts and the
-    head Solo's lone start stop at `slotLimit`, counting every
-    in_progress row of this rollout, live or stalled, as the count elsewhere does; a restart stops at the ceiling only,
-    since every other lead already counts the task it takes back. A running call is never stopped, so `slotsInUse` may
-    exceed `slotLimit`. A row held for want of a Slot reads `ceiling: …` once this rollout fills its ceiling, else
-    `trickle: <trickle.running>/<Trickle> tasks running on this Mac` (not Away) or `away cap: <trickle.running>/<Away
-    cap> tasks running on this Mac` (Away), and neither hold ever lets the rollout halt. The last starts (Chorus ADR
+    min(ceiling, max(0, cap - the count elsewhere - the places kept)), the cap the Trickle not Away and the Away cap
+    Away, the places kept those the fair share (_fair_share, p28-5) keeps for waiting rollouts
+    (_trickle_waiting_judge), which `trickle.kept` reports. Starts and the head Solo's lone start stop at `slotLimit`,
+    counting every in_progress row of this rollout, live or stalled, as the count elsewhere does; a restart stops at
+    the ceiling only, since every other lead already counts the task it takes back. A running call is never stopped, so
+    `slotsInUse` may exceed `slotLimit`. A row held for want of a Slot reads `ceiling: …` once this rollout fills its
+    ceiling, else `trickle: <trickle.running>/<Trickle> tasks running on this Mac` (not Away) or `away cap:
+    <trickle.running>/<Away cap> tasks running on this Mac` (Away), either followed by `, <k> kept for [[<rollout>]],
+    …` while the fair share keeps places, and neither hold ever lets the rollout halt. Off --dry-run, the claims write
+    also records this rollout waiting while a row waits on the Mac-wide cap or the heat (the module docstring's "The
+    fair share"). The last starts (Chorus ADR
     0104 d4; execute away.md): while Away runs to the Morning (_morning_toward), a start or a head Solo's lone start
     that has its Slot (under the Away cap's `slotLimit`) is held (`last start: …`, skipped, never a stop) when its
     kind's usual length would end it past the Morning, `lastStarts` reports it, a `last start:` hold never lets the
@@ -4653,20 +4777,21 @@ def cmd_next(args) -> int:
     # The count elsewhere: the notes (_elsewhere_running, all that `status` and every progress line read) plus every
     # other lead's live claims (_trickle_claims_judge), per rollout.
     notes_elsewhere = _elsewhere_running(rollout_path, tasks_dir, walk)
-    claims_read, claims_why, claims_writable = _trickle_claims_read(claims_path)
+    claims_read, waiting_raw, claims_why, claims_writable = _trickle_claims_read(claims_path)
     if claims_why:
         print(f"{TRICKLE_WARN} {claims_path} unreadable: {claims_why} — read as none" if claims_writable else
               f"{TRICKLE_WARN} {claims_path} {claims_why} — read as none, left for its writer", file=sys.stderr)
-    claimed, claims_kept = _trickle_claims_judge(claims_read, tasks_dir, rollout_path.stem, walk, now,
-                                                 datetime.now().astimezone())
+    wall = datetime.now().astimezone()
+    claimed, claims_kept = _trickle_claims_judge(claims_read, tasks_dir, rollout_path.stem, walk, now, wall)
+    # The waiting records (p28-5; away.md § The Trickle, *A fair share*): every other rollout's live one, the ones the
+    # next write keeps, and this rollout's own (its `since` and `served`, inside the TTL).
+    waiting_live, waiting_kept, own_wait = _trickle_waiting_judge(waiting_raw or [], tasks_dir, rollout_path.stem,
+                                                                  walk, now, wall)
     elsewhere = _trickle_merge(notes_elsewhere, claimed)
     running_elsewhere = sum(elsewhere.values())
     # One Mac-wide cap whose value depends on Away state: the Trickle while not Away, the Away cap while Away.
     cap = _cap_in_force(away)["n"]
     cap_prefix = AWAY_CAP_PREFIX if away["away"] else TRICKLE_PREFIX
-    slot_limit = min(ceiling, max(0, cap - running_elsewhere))
-    if heat["held"]:
-        slot_limit = 0
     # slot_held: rows held for want of a Slot, at the ceiling or the Mac-wide cap (the Trickle, or Away the Away cap);
     # their reason is set below.
     start, restart, holds, slot_held = [], [], [], []
@@ -4675,8 +4800,44 @@ def cmd_next(args) -> int:
     # stalled, as every other lead counts it (_elsewhere_running). A new start fits only while
     # mine + starts < slot_limit.
     mine = len(in_progress)
+    # Read once here, before the fair share, which needs them; each reads only the rollout note's logs, which nothing
+    # before their overrides (after the rollout note's save, below) writes. An unacked git-env trip (execute § 4.5
+    # *Git-env canary*) holds what it threatens until /thread:repair records Lachy's ack (ADR 0046): a bare checkout
+    # (scope `rollout`, `whole`) holds the whole queue: nothing starts or restarts, every stalled or queued task is
+    # held, and the halt is "git-env", ahead of every other verdict (a live call or a held lane included: the lead
+    # halts at once). Any other trip holds the Integration lane only (laneHold). A RACE revert that did not land
+    # (mainRed): main is red and every new start would branch from it (ADR 0046), so nothing starts or restarts until
+    # Lachy's `RACE decided:` line.
+    git_env = _git_env_hold(rollout_note)
+    whole = [t for t in git_env if t["scope"] == "rollout"]
+    main_red = _main_red(rollout_note)
+    # The fair share (p28-5; away.md § The Trickle, *A fair share*): the free places on the Mac go out one at a time
+    # among the rollouts waiting on them (_fair_share), each to the one holding fewest, then served least recently,
+    # then waiting longest, and slot_limit leaves out the places it keeps for the others. This rollout contends with
+    # `held` its own count and its `since` and `served` as its waiting record carries them (its own record's inside the
+    # TTL, else now and its latest `started:` stamp), the values every other lead reads in that record. Nothing is
+    # kept with no free place, under the heat (slot_limit is 0) or with no live record.
+    my_since = own_wait["since"] if own_wait else now
+    my_served = own_wait["served"] if own_wait else _latest_started(rows)
+    free_places = cap - running_elsewhere - mine
+    held_by = {k.lower(): n for k, n in elsewhere.items()}
+    waiters = [{"name": w["name"], "held": held_by.get(k, 0), "served": w["served"], "since": w["since"],
+                "demand": w["want"]} for k, w in waiting_live.items()]
 
+    def fair_limit(demand):
+        """(slot_limit, kept) for this call, its own demand `demand` (0 contends nothing)."""
+        kept_ = {}
+        if free_places > 0 and not heat["held"] and waiters:
+            me = [{"name": rollout_path.stem, "held": mine, "served": my_served, "since": my_since,
+                   "demand": demand}] if demand > 0 else []
+            kept_ = {n: k for n, k in _fair_share(free_places, waiters + me, now).items() if n != rollout_path.stem}
+        if heat["held"]:
+            return 0, kept_
+        return min(ceiling, max(0, cap - running_elsewhere - sum(kept_.values()))), kept_
+
+    started, solo_head = [], None
     if paused or pause_requested:
+        slot_limit, kept = fair_limit(0)  # nothing of this rollout starts: every free place is the waiters'
         # A soft pause drains (ADR 0030 decision 5): nothing new starts or restarts; once nothing runs,
         # awaits Integration or integrates (a held RACE re-verify included), the pause is stamped and the
         # request removed.
@@ -4712,15 +4873,25 @@ def cmd_next(args) -> int:
             else:
                 candidates.append(r)
         solo_started = next((r for r in sorted(started, key=_rank) if r["solo"]), None)
+        # The head Solo task (p17-2): the first queued Solo task by rank whose dependencies are met. It holds every
+        # task ranked below it, whatever their priority:, so priority and overlap order only the rows above it. A Solo
+        # task its dependency holds is no candidate, so it holds nothing.
+        solo_head = None if solo_started else min((r for r in candidates if r["solo"]), key=_rank, default=None)
+        # This rollout's demand in the fair share: what it could start now, within its ceiling. None under a started
+        # Solo task, a standing rollout hold, main red or a whole-rollout git-env hold (each clears this call's starts
+        # below); else the candidates above the head Solo task (all of them with none), or with none above it, the
+        # head Solo's lone start while nothing of this rollout is started.
+        if solo_started or ro_held or main_red or whole:
+            startable = 0
+        else:
+            above = [r for r in candidates if solo_head is None or r["rank"] < solo_head["rank"]]
+            startable = len(above) if above else int(solo_head is not None and not started)
+        slot_limit, kept = fair_limit(min(startable, max(0, ceiling - mine)))
         if solo_started:
             holds += [(r, f"behind solo [[{solo_started['slug']}]]") for r in candidates]
         else:
             in_flight = {f for r in started for f in r["files"]}
             remaining = list(candidates)
-            # The head Solo task (p17-2): the first queued Solo task by rank whose dependencies are met. It holds
-            # every task ranked below it, whatever their priority:, so priority and overlap order only the rows
-            # above it. A Solo task its dependency holds is no candidate, so it holds nothing.
-            solo_head = min((r for r in remaining if r["solo"]), key=_rank, default=None)
             while remaining:
                 above = [r for r in remaining if solo_head is None or r["rank"] < solo_head["rank"]]
                 best = (min(above, key=lambda r: (-r["weight"], _overlap(r["files"], in_flight), r["rank"]))
@@ -4761,9 +4932,13 @@ def cmd_next(args) -> int:
     # is hot, else the Mac-wide cap in force (`trickle:` not Away, `away cap:` Away), counted as `trickle.running` is
     # (no quotes, so it can ride a ROLLOUT-STATUS reason=). A stalled row is only ever held at the ceiling, which it
     # fills first.
+    # While the fair share keeps places (p28-5), the cap's reason names them: `, <k> kept for [[R1]], [[R2]]`, in
+    # `trickle.kept`'s order. The prefix never changes, so every reader of `trickle:` and `away cap:` reads it as
+    # before.
+    kept_for = (f", {sum(kept.values())} kept for " + ", ".join(f"[[{n}]]" for n in kept)) if kept else ""
     slot_why = (f"ceiling: {in_use}/{ceiling} slots in use" if in_use >= ceiling else
                 f"{HEAT_PREFIX} the Mac is hot ({heat['name']})" if heat["held"] else
-                f"{cap_prefix} {running_elsewhere + mine + len(start)}/{cap} tasks running on this Mac")
+                f"{cap_prefix} {running_elsewhere + mine + len(start)}/{cap} tasks running on this Mac{kept_for}")
     holds += [(r, slot_why) for r in slot_held]
     # A rollout hold that stands (vault-grammar § Hold until) holds the whole queue, after the pause (a pause wins) and
     # before the git-env override (git-env wins): nothing starts or restarts, and every stalled or queued task waits on
@@ -4787,15 +4962,8 @@ def cmd_next(args) -> int:
     for r, h, entry in task_clears:
         entry["cleared"] = _clear_hold(r["note"], h, r["slug"], args.dry_run)
 
-    # An unacked git-env trip (execute § 4.5 *Git-env canary*) holds what it threatens until /thread:repair records
-    # Lachy's ack (ADR 0046): a bare checkout (scope `rollout`, `whole`) holds the whole queue: nothing starts or
-    # restarts, every stalled or queued task is held, and the halt is "git-env", ahead of every other verdict (a live
-    # call or a held lane included: the lead halts at once). Any other trip holds the Integration lane only (laneHold).
-    git_env = _git_env_hold(rollout_note)
-    whole = [t for t in git_env if t["scope"] == "rollout"]
-    # A RACE revert that did not land (mainRed): main is red and every new start would branch from it (ADR 0046), so
-    # nothing starts or restarts until Lachy's `RACE decided:` line; the whole-rollout git-env override below still wins.
-    main_red = _main_red(rollout_note)
+    # The two overrides of git_env, whole and main_red (read above, before the fair share). A RACE revert that did not
+    # land (mainRed) holds every start and restart first; the whole-rollout git-env override below still wins.
     if main_red:
         start, restart = [], []
         used = len(live)
@@ -4810,17 +4978,34 @@ def cmd_next(args) -> int:
     # `start`: every kept entry plus one claim per start (the head Solo task's lone start included), replacing this
     # rollout's earlier claims. `start` is [] under a pause, a rollout hold, the heat, a whole-rollout git-env hold (a
     # bare checkout) or a main-red hold, which clears them; a lane git-env trip (ADR 0046) leaves it as it is, so its
-    # starts are claimed. Skipped when nothing changed and the file read cleanly, so a call that starts and finds
-    # nothing creates no file; a file of another version is never written. Then the lock goes, before the best-effort
-    # records below.
+    # starts are claimed. The same write carries the waiting list (p28-5): every record the judge kept, plus this
+    # rollout's own (below), always replacing its earlier one. Skipped when neither list changed and the file read
+    # cleanly, so a call that starts and finds nothing creates no file; a file of another version is never written.
+    # Then the lock goes, before the best-effort records below.
+    #
+    # This rollout's waiting record (p28-5; away.md § The Trickle, *A fair share*), from its final holds: one while a
+    # row waits on the Mac-wide cap or the heat (`trickle:`, `away cap:` or `heat:`; a heat row keeps the rollout's
+    # place in line through a hot spell), none under a pause, a rollout hold, main red or a whole-rollout git-env hold
+    # (their holds replace every Slot reason). `want` counts the waiting rows but the head Solo task's (that task's
+    # lone start alone counts 1, with nothing of this rollout in flight or started this call), capped at the room its
+    # ceiling leaves, ceiling - (mine + starts): exactly the room `next`'s start gate leaves. `served` is now once this
+    # call starts, else as the fair share read it; `since` carries. No record at want 0.
+    waits = [r for r, why in holds if why.startswith((TRICKLE_PREFIX, AWAY_CAP_PREFIX, HEAT_PREFIX))]
+    want = sum(1 for r in waits if r is not solo_head) or \
+        int(solo_head in waits and not (live or restart or awaiting or integrating or race_held_lane or start))
+    want = min(want, max(0, ceiling - (mine + len(start))))
     if claiming and claims_writable:
         at = now.astimezone().isoformat(timespec="seconds")
         here = os.path.realpath(str(tasks_dir))
         fresh = {(e["tasksDir"], e["rollout"], e["slug"]): e for e in claims_kept + [
             {"tasksDir": here, "rollout": rollout_path.stem, "slug": r["slug"], "at": at} for r in start]}
         new_claims = [fresh[k] for k in sorted(fresh)]
-        if new_claims != claims_read or claims_why:
-            why = _trickle_claims_write(claims_path, new_claims)
+        mine_wait = [{"tasksDir": here, "rollout": rollout_path.stem, "since": _wait_ts(my_since), "at": at,
+                      "served": _wait_ts(now) if start else (_wait_ts(my_served) if my_served else None),
+                      "want": want}] if want > 0 else []
+        new_waiting = sorted(waiting_kept + mine_wait, key=lambda e: (e["tasksDir"], e["rollout"].lower(), e["at"]))
+        if new_claims != claims_read or new_waiting != waiting_raw or claims_why:
+            why = _trickle_claims_write(claims_path, new_claims, new_waiting)
             if why:
                 print(f"{TRICKLE_WARN} {claims_path}: {why} — this call's starts are not claimed", file=sys.stderr)
     if claim_lock is not None:
@@ -4919,7 +5104,9 @@ def cmd_next(args) -> int:
                     "awayCap": away["awayCap"], "until": away["until"], "morning": away["morning"],
                     "elsewhere": elsewhere,
                     # The Mac-wide cap's count after this call: the count elsewhere plus this rollout's own use.
-                    "running": running_elsewhere + mine + len(start)},
+                    "running": running_elsewhere + mine + len(start),
+                    # The places the fair share keeps for waiting rollouts (p28-5): {<rollout>: n}, n > 0, sorted.
+                    "kept": kept},
         "lastStarts": last.output(),
         "heat": {"level": heat["level"], "name": heat["name"]},
         "start": slugs(start),
