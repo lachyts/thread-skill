@@ -598,8 +598,10 @@ echo "== verify-timeout (p14-2, p23-4: the rollout's Integration verify timeout 
 mkvt() {  # mkvt <frontmatter line or ''> -> $TMP/vt-rollout.md
   { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'; [ -n "$1" ] && printf '%s\n' "$1"; printf -- '---\n\n## Notes\n'; } > "$TMP/vt-rollout.md"
 }
-# verify-timeout's verifySlot.script: the absolute path of the script's sibling verify-slot.py.
+# verify-timeout's verifySlot.script: the absolute path of the script's sibling verify-slot.py. It must exist (p32-1): VSP is
+# worked out the way the script works it out, so a moved verify-slot.py would pass every vt_ok below unseen.
 VSP="$(cd "$(dirname "$SCRIPT")" && pwd -P)/verify-slot.py"
+[ -f "$VSP" ] && echo "ok   - verify-timeout: its sibling verify-slot.py exists ($VSP)" || { echo "FAIL - verify-timeout: no verify-slot.py at $VSP"; fail=1; }
 vt_ok() {  # vt_ok <label> <frontmatter line> <expected stdout> [HOME]
   mkvt "$2"; local before after got rc; before=$(shaof "$TMP/vt-rollout.md")
   got=$(HOME="${4:-$EH}" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>/dev/null); rc=$?
@@ -623,17 +625,17 @@ vt_refused() {  # vt_refused <label> <frontmatter line> <HOME> <file:line the er
   if [ "$rc" -eq 3 ] && [ -z "$got" ] && [ "$m" = y ] && [ "$(printf '%s\n' "$err" | wc -l | tr -d ' ')" = 1 ]; then echo "ok   - verify-timeout: $1"
   else echo "FAIL - verify-timeout: $1 (rc $rc, out '$got', err '$err')"; fail=1; fi
 }
-vt_ok "absent -> 1800, the harness maximum, slotWait 4800, verify_slots 2" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
-vt_ok "3600 -> slotWait 3000" 'verify_timeout: 3600' '{"verifyTimeout": 3600, "harnessTimeoutMs": 7200000, "slotWait": 3000, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
-vt_ok "6600 -> slotWait 60 (the floor)" 'verify_timeout: 6600' '{"verifyTimeout": 6600, "harnessTimeoutMs": 7200000, "slotWait": 60, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
-vt_ok "6540 -> slotWait 60" 'verify_timeout: 6540' '{"verifyTimeout": 6540, "harnessTimeoutMs": 7200000, "slotWait": 60, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
-vt_ok "1 is the floor -> slotWait 6599" 'verify_timeout: 1' '{"verifyTimeout": 1, "harnessTimeoutMs": 7200000, "slotWait": 6599, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
-vt_ok 'a quoted "1800"' 'verify_timeout: "1800"' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
-vt_ok "a trailing comment" 'verify_timeout: 1800 # note' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
-vt_ok "a commented-out key is absent" '# verify_timeout: 99' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "absent -> 1800, the harness maximum, slotWait 4800, verifySlot.slots 2" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "3600 -> slotWait 3000" 'verify_timeout: 3600' '{"verifyTimeout": 3600, "harnessTimeoutMs": 7200000, "slotWait": 3000, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "6600 -> slotWait 60 (the floor)" 'verify_timeout: 6600' '{"verifyTimeout": 6600, "harnessTimeoutMs": 7200000, "slotWait": 60, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "6540 -> slotWait 60" 'verify_timeout: 6540' '{"verifyTimeout": 6540, "harnessTimeoutMs": 7200000, "slotWait": 60, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "1 is the floor -> slotWait 6599" 'verify_timeout: 1' '{"verifyTimeout": 1, "harnessTimeoutMs": 7200000, "slotWait": 6599, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok 'a quoted "1800"' 'verify_timeout: "1800"' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "a trailing comment" 'verify_timeout: 1800 # note' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
+vt_ok "a commented-out key is absent" '# verify_timeout: 99' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlot": {"script": "'"$VSP"'", "slots": 2}}'
 VH="$TMP/vt-home"; mkdir -p "$VH/.config/thread"; printf '[defaults]\nverify_slots = 3\n' > "$VH/.config/thread/rollouts.toml"
-vt_ok "[defaults] verify_slots = 3 -> verifySlots 3" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 3, "verifySlot": {"script": "'"$VSP"'", "slots": 3}}' "$VH"
-vt_ok "a rollout note's verify_slots: is ignored (never stamped, never read)" 'verify_slots: 9' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 3, "verifySlot": {"script": "'"$VSP"'", "slots": 3}}' "$VH"
+vt_ok "[defaults] verify_slots = 3 -> verifySlot.slots 3" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlot": {"script": "'"$VSP"'", "slots": 3}}' "$VH"
+vt_ok "a rollout note's verify_slots: is ignored (never stamped, never read)" 'verify_slots: 9' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlot": {"script": "'"$VSP"'", "slots": 3}}' "$VH"
 BH="$TMP/vt-bad-home"; mkdir -p "$BH/.config/thread"; printf '# settings\n[defaults]\nverify_slots = 0\n' > "$BH/.config/thread/rollouts.toml"
 vt_refused "a refused rollouts.toml -> exit 3, naming its file and line" '' "$BH" "$BH/.config/thread/rollouts.toml:3"
 vt_refused "a stamped rollout is halted too (the whole file is validated)" 'verify_timeout: 1800' "$BH" "$BH/.config/thread/rollouts.toml:3"
@@ -651,7 +653,7 @@ vt_bad "a bad verify_timeout beside a refused file exits 1 (checked first)" 'ver
 # named_rerun (p29-9, ADR 0050): the lead's Flake check runs the repo's runner for named tests. verify-timeout prints
 # `namedRerun` only when the note sets it, so every line above stays byte-equal; a value without exactly one {tests},
 # or a form the command reader refuses, is exit 2 like a completion key's.
-VT0='{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}'
+VT0='{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlot": {"script": "'"$VSP"'", "slots": 2}'
 vt_ok "named_rerun (quoted) -> namedRerun" 'named_rerun: "scripts/test -n0 {tests}"' "$VT0"', "namedRerun": "scripts/test -n0 {tests}"}'
 vt_ok "named_rerun (bare, a trailing comment)" 'named_rerun: pytest -p no:randomly {tests} # by name' "$VT0"', "namedRerun": "pytest -p no:randomly {tests}"}'
 vt_ok "an empty named_rerun prints no key" 'named_rerun:' "$VT0}"
@@ -672,6 +674,30 @@ vt_named_bad "a YAML boolean -> exit 2" 'named_rerun: true'
 got=$(HOME="$EH" python3 "$SCRIPT" verify-timeout --rollout "$TMP/no-such-rollout.md" 2>"$TMP/vt.err"); rc=$?
 [ "$rc" -eq 1 ] && [ -z "$got" ] && grep -qF "ERROR: rollout note not found" "$TMP/vt.err" \
   && echo "ok   - verify-timeout: a missing note exits 1" || { echo "FAIL - verify-timeout: missing note (rc $rc)"; fail=1; }
+# p32-1: a plugin install without verify-slot.py is exit 4 (its own code, never a bad verify_timeout's 1), checked after
+# exit 3, so the lead halts at the entry with nothing stamped instead of passing a verifySlot.script that does not exist.
+# The script is loaded by importlib with VERIFY_SLOT_PY pointed at a path that does not exist.
+vt_absent() {  # vt_absent <frontmatter line> -> rc, with stdout in $TMP/vt4.out and stderr in $TMP/vt4.err
+  mkvt "$1"
+  HOME="$EH" python3 - "$SCRIPT" "$TMP/vt4-absent/verify-slot.py" "$TMP/vt-rollout.md" > "$TMP/vt4.out" 2> "$TMP/vt4.err" <<'PY'
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+rr.VERIFY_SLOT_PY = pathlib.Path(sys.argv[2])
+sys.argv = [sys.argv[1], "verify-timeout", "--rollout", sys.argv[3]]
+sys.exit(rr.main())
+PY
+}
+mkvt ''; s0=$(shaof "$TMP/vt-rollout.md")
+vt_absent ''; rc=$?
+got="$rc|$(cat "$TMP/vt4.err")|$(cat "$TMP/vt4.out")|$([ "$(shaof "$TMP/vt-rollout.md")" = "$s0" ] && echo same || echo changed)"
+want="4|ERROR: verify-timeout: $TMP/vt4-absent/verify-slot.py not found||same"
+[ "$got" = "$want" ] && echo "ok   - verify-timeout: verify-slot.py missing -> exit 4, one ERROR line naming the path, no stdout, the note untouched" \
+  || { echo "FAIL - verify-timeout: verify-slot.py missing: expected [$want] got [$got]"; fail=1; }
+vt_absent 'verify_timeout: 0'; rc=$?
+got="$rc|$(cat "$TMP/vt4.err")|$(cat "$TMP/vt4.out")"
+want="1|ERROR: verify_timeout must be an integer from 1 to 6600, got '0'|"
+[ "$got" = "$want" ] && echo "ok   - verify-timeout: a bad verify_timeout with verify-slot.py missing still exits 1 (checked first)" \
+  || { echo "FAIL - verify-timeout: a bad verify_timeout with verify-slot.py missing: expected [$want] got [$got]"; fail=1; }
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi

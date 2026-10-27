@@ -445,7 +445,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !raceLine.includes('`timeout: <harnessTimeoutMs>`') || /--timeout 1800\b/.test(skill) ||
     !verifyP.includes("(7200000, the harness maximum, from this entry's § 3 `verify_timeout` check") || /\b2400000\b/.test(skill) ||
     /\+ 600\) × 1000/.test(skill) ||
-    !vtP.includes('Exit 0 prints `{"verifyTimeout": <verify_timeout>, "harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlots": <verify_slots>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`') ||
+    !vtP.includes('Exit 0 prints `{"verifyTimeout": <verify_timeout>, "harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`') ||
     !timeoutGuard.includes('`timeout: <harnessTimeoutMs>` (7200000; their own `--slot-wait <slot_wait>` bounds the verify-slot wait and `--timeout <verify_timeout>` the verifier)') ||
     !recheck.includes("Every entry then runs § 3's `verify_timeout` check once, before anything it writes") ||
     !before(coldVT, VT, 'reconcile-rollout.py resume') || !before(reinstateVT, VT, 'clear-pause') || !before(pzReinstate, VT, 'clear-pause') ||
@@ -1129,7 +1129,7 @@ test('control: a verify paragraph back on (<verify_timeout> + 600) × 1000 fails
 })
 
 test('control: a verify-timeout JSON without slotWait fails verify-timeout', () => {
-  only(sk('"harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlots": <verify_slots>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`:', '"harnessTimeoutMs": <harnessTimeoutMs>}`:'),
+  only(sk('"harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`:', '"harnessTimeoutMs": <harnessTimeoutMs>}`:'),
     'verify-timeout', 'two keys')
 })
 
