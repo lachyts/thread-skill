@@ -76,6 +76,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   each option gains and costs, the pick against his priorities, and a Note
   invited ("What would make this wrong for you?"). Script-built rounds take
   it from the grade's `goal` and `stakes` (ADR 0054 d8). _Avoid_: template.
+- **Priorities card** — a project note's `## Priorities` section: how robust
+  the work must be (production-ready or lightweight), who it is for, what
+  matters most, and the technical details Lachy steers himself. Orient asks it
+  once, at the first project orient that finds none (orient § 3.5), and every
+  later ask reads it: a call it answers is *priorities*, decided and listed; a
+  detail it says he steers is *yours*. A Note that corrects it is written back
+  the same day (Chorus ADR 0110 d5). _Avoid_: project brief (the estate brief is
+  `~/.agents/knowledge/how-lachy-decides.md`).
 - **Pre-flight** — schedule's pass over a rollout's tasks before it is
   written: each task still to start gets its **Readiness grade**, One call
   and Grill tasks first get a **Decision round** with Lachy, and Orient tasks
@@ -542,6 +550,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
   to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue
   (Integration's gloss: the whole step, never the lane alone).
+- **Active Integration time** — an Integration's wall time less the **Stops**
+  inside it that stop its calls (all but a halt, which carries them on): an
+  `## Integration log` line's `active=`, beside its wall `duration=`. A Mac
+  sleep the Run record does not hold yet (its line comes at the next `next`)
+  is read from the Mac and comes off too. Where the Run record logs no stop
+  inside it, the integrate call's journal gaps come off as well; a resumed
+  call's replayed (`cached`) agents place no time, so its earlier run reads as
+  stall, and a journal that places no live agent writes `active=-`. A
+  Reflection prices the Integration lane by it, so a usage-limit stall is
+  never lane work (p29-13). _Avoid_: duration (that is wall time).
 - **Integration queue** — the approved tasks waiting for the Integration lane,
   in `next`'s order: a task a queued task depends on, directly or through a
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
@@ -620,8 +638,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   than piling on. Each slotted suite runs under a guard that ends a killed
   holder's suite before its verify slot frees. The Integration priority: the
   lead's Integration and RACE verifies, and the integrate call's own verifier
-  runs (`run --priority`), go before any task call's agent. Not a **Slot** (a
-  task's run in a Queue). _Avoid_: bare "slot", lock, semaphore.
+  runs (`run --priority`), go before any task call's agent. An agent waits for
+  its suite's verdict inside its turn (`verify-slot.py wait`, p31-3), never by
+  ending it. Not a **Slot** (a task's run in a Queue). _Avoid_: bare "slot",
+  lock, semaphore.
 - **Checkpoint** — one of the two moments per task where the full suite (the
   rollout's `verifier:`) runs: a code-writing agent's last check before it
   opens or updates its PR (the implementer's, and each reviser's), and

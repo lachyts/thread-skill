@@ -180,8 +180,9 @@ headlines first (ADR 0037 d1), then the Guardrails:
   rollout, so a later re-score can lower Quality.
 - **Guardrails**: **Throughput** first, against its bound: merges per running hour, the running hours against the
   allowance (`allowanceHours` for its `tasks`, `bound`), and whether it is breached; then every excluded span by kind
-  (`paused`, `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `lead-absent`, `never-finished`,
-  `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
+  (`paused`, `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `hold-trickle` / `hold-away-cap` /
+  `hold-heat` meant Mac-wide waits, never Lachy's (p28-6: the Trickle, the Away cap, the Heat hold), `lead-absent`,
+  `never-finished`, `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
   Reflection). Then tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
   stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so. Last,
   **Review churn** (`reviewChurn`, p21-3): its value, or "unknown" when no review round was recorded or no
@@ -195,7 +196,10 @@ headlines first (ADR 0037 d1), then the Guardrails:
 - **Load**: the overlapping rollouts on this machine, their span and the Slots each held open (`slotsOpen`). A
   rollout counts through this run while a Slot it took has no slot-freed, even when its long calls wrote nothing
   meanwhile; say so when its `load:` flag reads it live past its last line (a lost slot-freed overcounts it).
-- **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this".
+- **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this". Nor does a
+  trickle-bound one (p28-6: the Mac-wide cap, the Trickle or the Away cap, kept Slots free for at least half the
+  time, its no-Slot-open spans counted in, and held as much Slot time as any other idle reason): say "the Trickle
+  moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling.
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says
   3", so a jump such as 3 → 6 reads as one step past what the run proved. Then what it `serves` and `risks`. A
@@ -393,6 +397,14 @@ no operator setting. A grade trace's Watch names its episodes' `rollouts` (a `by
 episodes), which `watch` takes whether or not the span read them: a serial chain dispatched by link, or a regraded or
 dropped task whose rollout had no line this week. A trace whose episodes list no rollout (a `bySize` readout seen only
 in `all`) is reported, never made a Watch. An `ask` item's `grade` says what grade its task carried when it asked.
+
+**Integration lane time.** Read each read rollout's `laneTime` (p29-13): its Integrations started in the window, from
+its tasks' `## Integration log` lines. The lane's time is `minutes`, each line's active figure (`active=`: the wall less
+the stalls the Run record logged inside it, a usage limit, a dead lead, a Mac restart or sleep, a Watchdog recovery),
+never `wallMinutes`, the lines' `duration=`. Price the Integration lane by `minutes` alone: `stalledMinutes` is stall
+time, never lane work, and belongs with the stalls by cause. A non-zero `wallOnly` counts lines read by their wall,
+which can hold a stall (written before p29-13, or `active=-`: a resumed integrate call whose journal placed no live
+agent, say): say so beside the figure. Never read lane time off a `duration=` by hand.
 
 ### 12. Sightings
 

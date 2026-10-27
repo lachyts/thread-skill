@@ -57,9 +57,9 @@ const HEADLINE = { throughput: 0.857, runningHours: 7, merges: 6, tokensPerMerge
   handsOffRate: 0.8333, quality: null, reviewChurn: null }
 const P = (id, key, from, to, extra = {}) => ({ id, key, from, to, ranAt: from, ranAtCause: null, rule: `${key}-rule`, direction: Math.sign(to - from), evidence: `evidence for ${key}`, agreeing: 0, ...extra })
 
-function writeScores(home, { repo = 'o/r', proposals = [], withheld = [], headline = HEADLINE, window = WINDOW, guardrails, ranAt, rollout = 'demo-rollout' } = {}) {
+function writeScores(home, { repo = 'o/r', proposals = [], withheld = [], headline = HEADLINE, window = WINDOW, guardrails, ranAt, rollout = 'demo-rollout', binding = 'slot-bound' } = {}) {
   const p = path.join(home, 'score.json')
-  fs.writeFileSync(p, JSON.stringify({ rollout, repo, window, headline, binding: { constraint: 'slot-bound', why: 'x' }, proposals, withheld, flags: [],
+  fs.writeFileSync(p, JSON.stringify({ rollout, repo, window, headline, binding: { constraint: binding, why: 'x' }, proposals, withheld, flags: [],
     ...(guardrails ? { guardrails } : {}), ...(ranAt ? { ranAt } : {}) }))
   return p
 }
@@ -413,6 +413,14 @@ test('--record-only writes one line with applied [] and never reads the config (
   assert.deepEqual(l.scores, HEADLINE)
   assert.match(r.stdout, new RegExp(`^recorded ${l.id} in \\S+: no Tuning applied`))
   assert.equal(fs.readFileSync(bad, 'utf8'), '[defaults]\nparallel_ceiling = 0\n')
+})
+
+test('--record-only from a trickle-bound score (p28-6) keeps its binding on the tuning line', (t) => {
+  const home = tmpHome(t)
+  const r = tune(home, ['--scores', writeScores(home, { binding: 'trickle-bound' }), '--record-only'])
+  assert.equal(r.status, 0, r.stderr)
+  const [l] = lines(tuningsPath(home))
+  assert.equal(l.binding, 'trickle-bound')
 })
 
 test('--record-only from a stale seven-score headline (a v1 score.json) records the three new keys as null', (t) => {

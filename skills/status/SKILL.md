@@ -21,7 +21,9 @@ Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` (older undate
 still resolve, see step 1) + its linked task notes, and makes **read-only** `gh`/`git` calls against the
 target repo (plus, for a RACE task, a plain read of its local verdict file, § 3). § 2's status read also
 reads the operator's local ladder file (`~/.config/thread/ladder.toml`), and, for a rollout note with no
-`parallel_ceiling:`, the operator's rollout settings (`~/.config/thread/rollouts.toml`). Status itself runs
+`parallel_ceiling:`, the operator's rollout settings (`~/.config/thread/rollouts.toml`), and the Away state file
+(`~/.config/thread/away.json`, a read inside `reconcile-rollout.py status`, for § 4's Trickle line and the ETA's
+width; never through `next`). Status itself runs
 `rollout-settings.py` for a task whose `max_review_rounds` is absent at both levels (§ 2), and
 `lead-integrate.py inputs` resolves `auto_retries` the same way, inside its own read, for a set-aside task whose
 notes lack it. Either read of the settings file runs land.sh's `--origin-slug` read, and so one local
@@ -127,7 +129,7 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   until flag), `onMerge` (an approved queue's `on_merge:` as read, `{value, error}`, null on a note with no rollout
   hold or none: `_shared/vault-grammar.md` § Approved queue; § 3's Hold until flag), `chainStart` (`{prior, pr}`
   when this note is a chain's new note whose start was never stamped, else null; § 3's **Approved queue,
-  unstamped:** flag), `ceilingError` (why `ceiling` is null: an invalid
+  unstamped:** flag), `trickle` (the Mac-wide cap, § 4's Trickle line; below), `ceilingError` (why `ceiling` is null: an invalid
   `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise) and
   `ceilingCause` (what that error needs: `stamp`, `file`, `root` or `resolver`; null otherwise), both for § 3's
   Ceiling unresolved flag;
@@ -158,11 +160,19 @@ since is no drift, and under a refused file no task drifts.
 
 `timeline` is the progress/ETA block, computed from the per-task `started:` / `merged:` stamps: per-task
 `{ slug, started, merged, durationMinutes }` sorted by start, plus `elapsedLabel`, `avgTaskMinutes`,
-`remainingLabel` (always a `~… (rough)` figure: the mean task duration × the ceiling-sized chunks of running +
-queued tasks) and `complete`. The stamps are durable frontmatter, so it renders **without any workflow run
+`remainingLabel` (always a `~… (rough)` figure: the mean task duration × the chunks of running + queued tasks at
+the rollout's limit: its ceiling, or the Trickle's (the Away cap's) room left on this Mac, at least 1: `etaWidth`,
+`etaBy` `ceiling`, `trickle` or `away cap`) and `complete`. The stamps are durable frontmatter, so it renders **without any workflow run
 being alive**. `null` when no task has a `started:` stamp. `progress` is the one-line summary the lead
 relays, e.g. `progress: 2/6 merged, 1 running, 1 awaiting integration, 1 queued, 1 set aside — 2h elapsed,
 ~45m remaining (rough)`.
+
+`trickle` is the Mac-wide cap as `next` reads it (execute away.md), read silently (no WARN: only `next` prints
+it): `{away, file, why, limit, awayCap, until, morning, elsewhere, here, running}`. `file` is `fresh`, `missing`,
+`stale` or `unreadable` (`why` says how, null only when fresh; anything but fresh reads not Away at Trickle 2),
+`limit` the Trickle N, `awayCap` the Away cap, `until` the file's (fresh only), `elsewhere` `{<rollout>: n}` the
+other open, started, parallel rollouts' running tasks, `here` this rollout's own as they count it (0 when paused,
+closed, never started or not directly in the tasks dir) and `running` their sum.
 
 **Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
 rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
@@ -345,6 +355,14 @@ names, once), `HELD until <pr> merges (<state>)` or `HOLD_UNTIL UNREADABLE: <why
 
 **The engine line**, right under the headline, from § 1's resolve: `Engine: snapshot <sha12> (<a> ahead, <b> behind the Primary checkout at <head12>)` (its `sha`, `ahead`, `behind` and `primaryHead`: the counts are the snapshot's own, its commits the Primary's HEAD lacks and the Primary's commits it lacks, so a snapshot one commit behind a pulled Primary reads `0 ahead, 1 behind`), `Engine: Primary checkout (no snapshot)` for an unstamped note with a git Primary, or `Engine: plugin cache <root> (no snapshot)` with none (`primary` null).
 
+**The Trickle line**, right under the engine line, from `trickle` (execute away.md: one Mac-wide cap, its value by
+Away state). Not Away: `Trickle: not Away · N <limit> · <running>/<limit> tasks running on this Mac (<here> here[,
+<n> in [[<r>]]…]) · away.json <fresh until <until> | missing: the default | stale: <why>, read as not Away, Trickle
+2 | unreadable: <why>, read as not Away, Trickle 2>`. Away: `Trickle: Away until <until> · the Away cap <awayCap>
+holds (N <limit> by day) · <running>/<awayCap> tasks running on this Mac (…) · away.json fresh`. When `running`
+reaches the cap in force (`limit` not Away, `awayCap` Away) the count adds `: full, new starts wait (a meant wait,
+never stalled)`: a row held on `trickle:` or `away cap:` is the cap at work, never a blocker.
+
 **The queue-state table.** One group per in-count `queueState`, in this order, each task on one line:
 
 | `queueState` | Group | Each task shows |
@@ -441,7 +459,8 @@ merge hold is no item: the Review required flag routes it (action 10). A cooling
 `autoRetry: true` one (a `plan-blocked` one included: action 11 routes it).
 
 **Timing.** It comes from `timeline`, and the estimate is always rough: render it exactly as labelled
-(`~50m remaining (rough)`), never as a precise figure. With no merged task yet (`avgTaskMinutes` null) show
+(`~50m remaining (rough)`), never as a precise figure. Its chunks are the rollout's limit (`etaWidth`, by
+`etaBy`): by day under the Trickle that can be narrower than the ceiling. With no merged task yet (`avgTaskMinutes` null) show
 elapsed only; `complete: true` → show the total instead ("completed in 2h 10m"); `timeline: null` → no timing
 line at all.
 
@@ -491,6 +510,8 @@ is undecided, and the next step is `/thread:repair [[<rollout>]]` (action 7), ne
 
 ```
 [[proj-rollout-2026-10-01]] — progress: 1/12 merged, 1 running, 1 integrating, 1 awaiting integration, 1 queued, 7 set aside (1 at Integration) — 5h 5m elapsed, ~32m remaining (rough)
+Engine: snapshot 0123456789ab (0 ahead, 0 behind the Primary checkout at 0123456789ab)
+Trickle: not Away · N 2 · 2/2 tasks running on this Mac (1 here, 1 in [[other-rollout-2026-10-01]]): full, new starts wait (a meant wait, never stalled) · away.json fresh until 2026-10-02T18:00:00Z
 
 Merged (1)
   [[proj-merged]]           PR #1 (32m) · rung gone
