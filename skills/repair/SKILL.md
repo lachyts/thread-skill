@@ -302,11 +302,15 @@ which finishes it. A complete rollout whose note does not read done (its lead en
 make (a gate, a § 3c escalation, a CLOSED PR, a missing branch or a missing `pr:`, a close-out, a defer chain, a
 set-aside whose automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or `needsHuman` is
 set) or whose `humanFix` names another cause that is his (§ 2), or a descope the verb refused: § 3d's exit 3, recorded,
-its `humanFix` `decide scope or defer`). For a set-aside at its run or at Integration, in order:
+its `humanFix` `decide scope or defer`), each in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`
+(Owner *yours*: a decision no agent can make; the *technical* pings this list still holds, a CLOSED PR, a missing
+branch and a defer chain among them, keep their own ADR 0054 § Sites rows until p30-10 designs them out). For a
+set-aside at its run or at Integration, in order:
 
 1. **Ask.** `AskUserQuestion` with the specific decision its block needs: quote the feedback and its `humanFix` (the
    act and the detail the script names, never a cause re-derived from the feedback), and offer the raise (§ 4) when
-   `humanFix.raise` names a field, or for a revise re-entry with no round left.
+   `humanFix.raise` names a field, or for a revise re-entry with no round left. It is his (Owner *yours*), so put it
+   in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`.
 2. **Prerequisites first**, only where hand-back may run (§ 1): whatever his answer needs before a bare hand-back is
    all that is left. That is § 4's push and `gh pr reopen`, a recut's retire and relabel, a `merge-task:` relabel, a
    stale anchor ref's deletion, or § 5's defer (its `## Notes` line is then the record).
@@ -374,7 +378,8 @@ again, so the block that comes back after the hand-back, an identical one includ
 *The needs-you flow*, for any set-aside whose note holds a `## Needs you` question (status's `needsHuman`), at its
 run, at Integration or at a gate:
 
-1. Ask the question verbatim, quoting the latest feedback.
+1. Ask the question verbatim, quoting the latest feedback (Owner *yours*, ADR 0033: the Framing of
+   `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` goes around the question, never into its words).
 2. Do step 2's prerequisites, where hand-back may run.
 3. Record it: `record-answer --kind needs-you`, its ask the question, verbatim. The verb removes the `## Needs you`
    section in the same save, in every mode. Execute's verdict reads a non-empty `## Needs you` as open (`answer the
@@ -412,6 +417,7 @@ evidence.** For each one, show:
    never ran (no verify slot came in time); `heat` no verdict (the Mac was too hot, the Heat hold); absent: it
    never finished, which reads as red) with the tail of `race-<slug>.log` beside it. An UNVERIFIED task
    was never re-verified: say so.
+   The RACE call is his (Owner *yours*), put in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`.
 
 Then append a dated `## Notes` line to the rollout note (create the section if missing), e.g.
 `- <YYYY-MM-DD> repair: [[<slug>]] possible PR-less merge (PR #<n>, head audit-fix/<alias>, MERGED) escalated;
@@ -500,7 +506,8 @@ other (exit 2). Show the evidence first:
 8. `git -C R ls-remote --heads origin`.
 
 If a window is still in flight (a Workflow call or a background Integration command of the rollout), advise a
-hard pause first. Then offer (`AskUserQuestion`):
+hard pause first. Then offer (`AskUserQuestion`), in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`
+(Owner *yours*: dropping or keeping a commit on the default branch is his, ADR 0008):
 
 - **(a) Restore and ack**, only when no Workflow call or background Integration command of the rollout is in
   flight. When `origin/<B>..<B>` is non-empty, list those commits and mark each close-out-shaped one ("a
@@ -519,10 +526,11 @@ hard pause first. Then offer (`AskUserQuestion`):
 - **(c) Leave it:** the hold stands.
 
 If `ack` exits 3 (the unacked set, the ref or the bareness changed since it was shown), re-read the evidence,
-show it again and ask again. If `restore` exits 2 on its drop guard (B moved since it was shown), show the new
-list and ask again; restore clears core.bare before that guard, so a refused restore never leaves R bare and (b)
-stays open. Any other exit 2 names a validation failure: show it and stop. A dated `## Notes` line records
-the choice: `- <YYYY-MM-DD> repair: [[a]], [[b]] git-env trip, acked at <sha>: <restored | kept>` (or `left`).
+show it again and ask again (Owner *yours*, as the first offer, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`).
+If `restore` exits 2 on its drop guard (B moved since it was shown), show the new list and ask again; restore clears
+core.bare before that guard, so a refused restore never leaves R bare and (b) stays open. Any other exit 2 names a
+validation failure: show it and stop. A dated `## Notes` line records the choice:
+`- <YYYY-MM-DD> repair: [[a]], [[b]] git-env trip, acked at <sha>: <restored | kept>` (or `left`).
 
 **RACE follow-on.** After a successful ack, re-run status. For each slug now in `raceHold` whose `## Race log`
 carries a `git-env halt` line, first show this evidence:
@@ -713,10 +721,11 @@ The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever
 
 **(b) Set-asides, in any state.** For each row with `setAside`:
 
-- **A gate** (`setAside.status` gate-pending): present each of its `setAside.gates` verbatim. On his sign-off,
+- **A gate** (`setAside.status` gate-pending): present each of its `setAside.gates` verbatim (Owner *yours*: a sign-off
+  is his, ADR 0008; `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`). On his sign-off,
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <t> --rollout <rollout-note>`:
   the next Leg's claim re-enters it. If he declines it, Defer (below).
-- **A block** (blocked, review-blocked or plan-blocked): `AskUserQuestion` quoting `setAside.summary`, offering hand
+- **A block** (blocked, review-blocked or plan-blocked): `AskUserQuestion` quoting `setAside.summary` (Owner *yours*, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), offering hand
   back (with his guidance), defer, or leave it set aside.
   - Hand back: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-answer --tasks <t> --rollout <rollout-note> --kind decision --ask "<the ask, verbatim>" --answer "<his answer, verbatim>" --fingerprint <row.setAside.fingerprint> --form hand-back`,
     then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-back --tasks <t> --answer <the stamp record-answer printed>`.
@@ -803,7 +812,8 @@ record, and its Completion log is the last Leg's.
 - **Don't redo what a set-aside task already finished.** At Integration, retry Integration only; a recut is
   only on Lachy's explicit ask.
 - **Don't descope by hand, or twice.** `reconcile-rollout.py descope` (§ 3d) writes every record and refuses a
-  second block after a restart (exit 3): ask Lachy then (§ 3b), and never hand the task back on a refusal. A
+  second block after a restart (exit 3): ask Lachy then (§ 3b; Owner *yours*: scope or defer,
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), and never hand the task back on a refusal. A
   task plan-blocked again after an automatic descope is § 2's **plan-blocked after a descope**, never an own
   run handed back silently.
 - **Don't hand back what the lead retries.** A set-aside that `inputs` reads as `autoRetry: true`, or cooling

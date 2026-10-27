@@ -7,8 +7,8 @@ checklist step inside composition, not a new phase.
 1. **List the forks**, not the mechanics: scope choices, strategy trade-offs, "which approach"
    moments, anything matching grill-me's trigger signals (vague intent, an unscoped feature decision).
 2. **Decide each fork.** (a) **Resolvable** by the executing session from code or data: say so in
-   the prompt ("decide X from Y"). (b) **A genuine Lachy decision**: bake a gate line into the
-   prompt. The fork returns to Lachy via grill-me: the session reports the fork and its evidence,
+   the prompt ("decide X from Y"). (b) **A genuine Lachy decision** (Owner *yours*, `_shared/asking.md` § 1;
+   every other fork is (a)): bake a gate line into the prompt. The fork returns to Lachy via grill-me: the session reports the fork and its evidence,
    never resolves it downstream and never spawns a task for it.
 3. **No forks → no grill language at all**: no gate lines and no "decide X from Y" lines. Don't
    manufacture ceremony.

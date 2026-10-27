@@ -26,7 +26,7 @@
 //       exact `title` alone (sessions cuts it); row 8 needs plan.reinstate[] and canExecute; create_thread, the
 //       paste-ready prompts, orients last with the note line; its cites; and `start: unattended` only in the Don't.
 //   o8  § 9 asks nothing, writes only under $S, runs `plan --rounds --assume-answered` and `sessions` with no --wrote,
-//       runs no `estate-dispatch.py log`, and names every command it never runs.
+//       runs no `estate-dispatch.py log` and no `decided-for-you --write`, and names every command it never runs.
 //   o9  plugin-root.md, CONTEXT.md (**Decision round**, **Dispatch plan**), ADR 0041's p25-3 ruling and the README
 //       row name the skill.
 //   o10 status parity: estate-dispatch.py's STATUS_ACTIONS opens each of status § 4's thirteen numbered
@@ -223,10 +223,11 @@ function check(files, consts) {
     '--rounds "$S/rounds.json" --assume-answered', 'estate-dispatch.py sessions', 'with no `--wrote`'])
   const never = s9.slice(s9.indexOf('It never runs'))
   need('o8', '§ 9 never-runs', never, ['`record`', '`approve-gates`', '`estate-rank.py snooze`', '`unpark`', '`kill`',
-    'schedule fork', '`list_sessions`', '`read_session`', '`relay_session`', '`create_thread`'])
+    'schedule fork', '`list_sessions`', '`read_session`', '`relay_session`', '`create_thread`', '`decided-for-you --write`'])
   const dryCmds = s9.slice(0, s9.indexOf('It never runs'))
   if (/--wrote </.test(dryCmds)) flag('o8', 'the dry run passes --wrote')
   if (/estate-dispatch\.py log\b/.test(dryCmds)) flag('o8', 'the dry run logs the grades')
+  if (/decided-for-you[^`]*--write/.test(dryCmds)) flag('o8', 'the dry run writes the Decided for you calls')
 
   // o9: the docs that name the skill.
   need('o9', PLUGIN_ROOT, C(files[PLUGIN_ROOT]), ['orient-all → schedule (its forks), status, execute, repair or orient',

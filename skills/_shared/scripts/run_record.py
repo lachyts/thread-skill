@@ -260,12 +260,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      row, whose name is a slug (`log` skips and reports any other); pass a g- id and digest 12 lowercase
                      hex, both shared by the pass's lines; project the task's home; grade and agentGrade each one of
                      Ready | One call | Grill | Orient, the ranker's grade after the raise and the agent's own; shape
-                     parallel | serial | session; size S | M | L; decisions and low integers >= 0, the decision count
-                     and those of low confidence, low <= decisions; held a boolean, the task held by a dependency; gates
-                     a list of distinct gate kinds, spend | credential | irreversible, possibly empty; raised a
-                     non-empty list of distinct raise whys, decisions | confidence; rank an integer >= 1, absent for
-                     Orient; linked the scan row's rollout slug at grade time, never a reserved name). No rollout; lands
-                     in grades.jsonl.
+                     parallel | serial | session; size S | M | L; decisions and low integers >= 0, the count of his
+                     decisions (owner yours, ADR 0054: a decision ruled for him is never counted, so lines before ADR
+                     0054 are not comparable) and those of low confidence, low <= decisions; held a boolean, the task
+                     held by a dependency; gates a list of distinct gate kinds, spend | credential | irreversible,
+                     possibly empty; raised a non-empty list of distinct raise whys, decisions | confidence; rank an
+                     integer >= 1, absent for Orient; linked the scan row's rollout slug at grade time, never a reserved
+                     name). No rollout; lands in grades.jsonl.
   reflection         id, since, until, rollouts, escapesOnly, counts, quiet; decisionTask?, cadence?, repairsOnly?
                      (p21-7: the Reflection's one closing line; since and until UTC Z stamps; rollouts, escapesOnly
                      and repairsOnly lists of slugs: the rollouts read, those not read that hold an in-window

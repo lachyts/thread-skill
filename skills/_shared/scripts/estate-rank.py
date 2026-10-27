@@ -30,7 +30,8 @@ What it reuses. Loaded by path inside main(), so importing this file runs nothin
 constants that way): resolve-target.py (RT: dead_why), and through it next-action.py (RT.NA: Vault, resolve_project,
 Note with its edited and save, status_of, Refused, and the ODD_BREAKS, LOADER and yaml its edit reads by);
 estate-scan.py (ES: as_date, jsonable, STANDING_RANK, standing_of and still_to_start), so the estate pass keeps one
-frontmatter reader, one date reader, one status-to-standing rule and one statement of § In flight's exception.
+frontmatter reader, one date reader, one status-to-standing rule and one statement of § In flight's exception; and,
+for `rank` only, gated_inputs.py (GI: sweep, the sign-off backstop's word lists; load_gated, a load failure exit 3).
 
 The inputs:
 - The scan: estate-scan.py's schema 1. Read: tasks {slug, note, title, statusClass, inFlight, projects, due,
@@ -55,17 +56,32 @@ Validation. Invalid (listed with every error, never ranked): a grade outside GRA
 decision that is not an object, or has no non-empty `question` or `recommendation`, or whose `options` is missing, not
 a list, or not OPTIONS_MIN to OPTIONS_MAX distinct non-empty strings, or does not hold the recommendation (compared
 stripped and case-insensitively). A decision's optional `fork` (the open fork it answers, worded as its orient end
-line words it) is passed through when it is a non-empty string, and left out otherwise. Warned and kept: a missing or
-unknown `size` reads as M; a missing or unknown decision `confidence` as low; a malformed `deadline`, or one before
+line words it) is passed through when it is a non-empty string, and left out otherwise.
+
+The Owner (ADR 0054; readiness-grade.md § Each decision). Each decision's `owner`, stripped and case-folded, is one of
+OWNERS. Read as yours, each with a warning: no owner (its warning ends "asked without its goal and stakes" when it has
+not both); an unknown value; `gate` (never a task decision's owner); a non-yours owner on a decision with a `fork`; a
+`priorities` one at low (or missing) confidence. A `technical` one at low confidence is the executing session's
+(grill-fit 2(a)): warned and dropped, never ruled or counted. Then the sign-off backstop: on a task whose gates hold
+`credential` or `irreversible`, a ruled decision whose question, options, why, goal or stakes GI.sweep hits for one of
+those same kinds is read as yours, warned (ADR 0008). A decision's `goal` (a non-empty string) and `stakes` (one
+non-empty line per option, reordered with the options, the recommendation's first) are passed through when well formed;
+a malformed `stakes` is warned and read as none. Invalid as well: a decision whose grader wrote `owner: yours` without
+both (`decision <k>: a decision of his needs a goal and one stakes line per option`), and a One call or Grill with
+decisions but none of his (`<grade> needs at least one decision Lachy owns (owner yours)`). The split: `decisions`
+holds his, in the shape above with no `owner` key; `decidedForYou` holds the ruled ones, each with its `owner`, the
+less sure first (medium before high), then in grade order. Only his count anywhere below.
+
+Warned and kept: a missing or unknown `size` reads as M; a missing or unknown decision `confidence` as low; a malformed `deadline`, or one before
 today (an event already past cannot be met; the scan's overdue `due:` still counts), is dropped; a gate kind outside
 GATE_KINDS is dropped; a non-boolean `eyeCheck` reads as false; a `repo` on a task that is not parallel is ignored.
 
-The raise (readiness-grade.md § The raise): the decision count implies a grade (0 Ready, 1 One call, 2+ Grill) and the
-task takes the higher of that and the agent's grade (`why: "decisions"`); then any `low` decision raises it one step
-(`why: "confidence"`); Orient stays Orient.
+The raise (readiness-grade.md § The raise): the count of his decisions implies a grade (0 Ready, 1 One call, 2+ Grill)
+and the task takes the higher of that and the agent's grade (`why: "decisions"`); then any `low` decision of his raises
+it one step (`why: "confidence"`); Orient stays Orient. A ruled decision never raises.
 
-Figures: agentMinutes = SIZE_MINUTES[size]; decisionMinutes = DECISION_MINUTES[grade] per decision (0 for Ready and
-Orient); review {pr: 1 for a parallel task, signOff: 1 with any gate, eyeCheck: 1 when set, minutes}; attentionMinutes =
+Figures: agentMinutes = SIZE_MINUTES[size]; decisionMinutes = DECISION_MINUTES[grade] per decision of his (0 for Ready
+and Orient); review {pr: 1 for a parallel task, signOff: 1 with any gate, eyeCheck: 1 when set, minutes}; attentionMinutes =
 decision + review minutes, plus agentMinutes for a session task; leverage = agentMinutes / max(ATTENTION_FLOOR,
 attentionMinutes), sorted exact and printed to 2 places; deadline = the earlier of the scan row's `due` (ES.as_date)
 and the grade's `deadline.date`, with its source; dueSoon = deadline <= today + DUE_SOON_DAYS.
@@ -86,7 +102,8 @@ Output, one JSON object (schema 1; --compact for one line):
           offers, warnings},
   tasks[]     {slug, note, title, home, projects[], standing, grade, agentGrade, raised[] {from, to, why}, shape, repo,
                root, size, agentMinutes, decisions[] {question, recommendation, options[] (the recommendation first),
-               confidence, why, fork?}, decisionMinutes, review {pr, signOff, eyeCheck, minutes}, attentionMinutes,
+               confidence, why, fork?, goal?, stakes[]?} (his only), decidedForYou[] {question, recommendation,
+               options[], confidence, why, goal?, stakes[]?, owner (priorities | technical)}, decisionMinutes, review {pr, signOff, eyeCheck, minutes}, attentionMinutes,
                leverage, deadline {date, source: due|grader, why} | null, dueSoon, gates[], eyeCheck, why, dependsOn[],
                blockedBy[] {slug, why}, rank, run}: ranked in rank order, then Orient;
   runs[]      {id (<home>/<shape>/<root or ->), project, note, shape, root, rolloutRoot, why (repo unknown | no repo
@@ -143,6 +160,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 RESOLVE_TARGET_PY = os.path.join(HERE, "resolve-target.py")
 ESTATE_SCAN_PY = os.path.join(HERE, "estate-scan.py")
+GATED_INPUTS_PY = os.path.join(HERE, "gated_inputs.py")
 
 SCHEMA = 1
 SCAN_SCHEMA = 1
@@ -163,6 +181,7 @@ SNOOZE_DAYS = 14
 SNOOZE_KEYS = ("snoozed_until", "snoozed_ready")
 GATE_KINDS = ("spend", "credential", "irreversible")
 CONFIDENCE = ("high", "medium", "low")
+OWNERS = ("yours", "priorities", "technical", "gate")
 # Every `blockedBy` why, each named in readiness-grade.md § Dependencies.
 HOLD_WHYS = ("One call", "Grill", "Orient", "ungraded", "invalid", "hold", "unhomed", "parked", "held", "cycle")
 UNPARK_OPTIONS = ("unpark", "snooze", "kill")
@@ -204,6 +223,14 @@ def load_siblings():
     if RT.NA.yaml is None:
         fail(3, "PyYAML is required: python3 -m pip install pyyaml")
     return RT, ES
+
+
+def load_gated():
+    """gated_inputs.py (GI), for the sign-off backstop (validate()); a load failure exits 3, as for the others."""
+    try:
+        return _load("thread_gated_inputs", GATED_INPUTS_PY)
+    except Exception as e:
+        fail(3, "cannot load %s: %s" % (GATED_INPUTS_PY, e))
 
 
 # ---- values ------------------------------------------------------------------------------------------------------
@@ -285,8 +312,9 @@ def read_grades(path):
 # ---- the ranking ---------------------------------------------------------------------------------------------------
 
 class Ranker:
-    def __init__(self, RT, ES, scan, today, vault_root, grade_files, superseding=None):
+    def __init__(self, RT, ES, scan, today, vault_root, grade_files, superseding=None, GI=None):
         self.RT, self.ES, self.NA = RT, ES, RT.NA
+        self.GI = GI
         self.scan, self.today, self.vault_root = scan, today, vault_root
         self.grade_files = grade_files
         self.superseding = superseding
@@ -442,6 +470,42 @@ class Ranker:
         fork = text(d.get("fork"))
         if fork is not None:
             out["fork"] = fork
+        goal = text(d.get("goal"))
+        if goal is not None:
+            out["goal"] = goal
+        stakes = d.get("stakes")
+        if isinstance(stakes, list) and len(stakes) == len(labels) and all(text(x) is not None for x in stakes):
+            out["stakes"] = [text(x) for x in [stakes[pick]] + stakes[:pick] + stakes[pick + 1:]]
+        elif stakes is not None:
+            warns.append("%s %s: stakes is not one non-empty line per option; read as none" % (slug, at))
+        # The Owner (readiness-grade.md § Each decision; asking.md § 1). `_explicit` marks a grader's own `yours`, which
+        # needs its Framing; every other read as yours is a relabel, warned, and asked as built.
+        raw = d.get("owner")
+        owner = raw.strip().casefold() if isinstance(raw, str) else None
+        out["_explicit"] = owner == "yours"
+        tail = "" if goal is not None and "stakes" in out else "; asked without its goal and stakes"
+        if owner is None or owner == "":
+            warns.append("%s %s: no owner, read as yours%s" % (slug, at, tail))
+            owner = "yours"
+        elif owner not in OWNERS:
+            warns.append("%s %s: owner %s is not yours, priorities or technical; read as yours%s" % (slug, at, shown(raw), tail))
+            owner = "yours"
+        elif owner == "gate":
+            warns.append("%s %s: owner gate is never a task decision's owner (a process gate is no fork in the task's "
+                         "work); read as yours%s" % (slug, at, tail))
+            owner = "yours"
+        if owner != "yours" and fork is not None:
+            warns.append("%s %s: it answers an open fork, which stays Lachy's; owner %s read as yours%s"
+                         % (slug, at, owner, tail))
+            owner = "yours"
+        if owner != "yours" and level == "low":
+            if owner == "technical":
+                warns.append("%s %s: a technical decision at low confidence is left to the executing session "
+                             "(grill-fit 2(a)), never ruled; dropped" % (slug, at))
+                return None, []
+            warns.append("%s %s: a priorities decision at low confidence is his to make; read as yours%s" % (slug, at, tail))
+            owner = "yours"
+        out["owner"] = owner
         return out, []
 
     def validate(self, slug, e):
@@ -466,6 +530,7 @@ class Ranker:
                 out, more = self.decision(i, d, warns, slug)
                 errs += more
                 if out is not None:
+                    out["_k"] = i
                     decisions.append(out)
         if errs:
             return None, errs, []
@@ -497,6 +562,20 @@ class Ranker:
                 kinds.add(k)
             else:
                 warns.append("%s: gate %s is not one of %s; dropped" % (slug, shown(g), ", ".join(GATE_KINDS)))
+        self.backstop(slug, decisions, kinds, warns)
+        his = [d for d in decisions if d["owner"] == "yours"]
+        for d in his:
+            if d["_explicit"] and (d.get("goal") is None or "stakes" not in d):
+                errs.append("decision %d: a decision of his needs a `goal` and one `stakes` line per option (asking.md § 3)"
+                            % d["_k"])
+        if grade in DECISION_MINUTES and raw and not his:
+            errs.append("%s needs at least one decision Lachy owns (owner yours)" % grade)
+        if errs:
+            return None, errs, []
+        ruled = sorted((d for d in decisions if d["owner"] != "yours"),
+                       key=lambda d: (CONFIDENCE.index(d["confidence"]) * -1, d["_k"]))
+        decisions = [{k: v for k, v in d.items() if not k.startswith("_") and k != "owner"} for d in his]
+        decided = [{k: v for k, v in d.items() if not k.startswith("_")} for d in ruled]
         eye = e.get("eyeCheck")
         if eye is None:
             eye = False
@@ -526,8 +605,29 @@ class Ranker:
             raised.append({"from": final, "to": up, "why": "confidence"})
             final = up
         return {"agentGrade": grade, "grade": final, "raised": raised, "shape": shape, "repo": repo, "size": size,
-                "decisions": decisions, "graderDeadline": deadline, "gates": [k for k in GATE_KINDS if k in kinds],
-                "eyeCheck": eye, "why": text(e.get("why"))}, [], warns
+                "decisions": decisions, "decidedForYou": decided, "graderDeadline": deadline,
+                "gates": [k for k in GATE_KINDS if k in kinds], "eyeCheck": eye, "why": text(e.get("why"))}, [], warns
+
+    def backstop(self, slug, decisions, kinds, warns):
+        """ADR 0054 d2's sign-off backstop: a ruled decision on a task gated `credential` or `irreversible` whose text
+        (question, options, why, goal, stakes) the gate sweep hits for that same kind names his authorisation (ADR
+        0008), so it reads as yours. Only the kinds the task is gated by are read: a recall floor, never a verdict."""
+        gated = [k for k in ("credential", "irreversible") if k in kinds]
+        if not gated:
+            return
+        if self.GI is None:
+            self.GI = load_gated()
+        for d in decisions:
+            if d["owner"] == "yours":
+                continue
+            body = "\n".join([d["question"], *d["options"], d.get("why") or "", d.get("goal") or "", *d.get("stakes", [])])
+            hits = self.GI.sweep(body)
+            for kind in gated:
+                if hits.get(kind):
+                    warns.append('%s decision %d: names a %s input ("%s") on a task gated %s; read as yours (ADR 0008)'
+                                 % (slug, d["_k"], kind, hits[kind][0]["word"], kind))
+                    d["owner"] = "yours"
+                    break
 
     # ---- figures ---------------------------------------------------------------------------------------------------
 
@@ -552,7 +652,7 @@ class Ranker:
             "projects": list(t.get("projects") or []), "standing": self.standing(home),
             "grade": g["grade"], "agentGrade": g["agentGrade"], "raised": g["raised"], "shape": g["shape"],
             "repo": g["repo"], "root": None, "size": g["size"], "agentMinutes": agent, "decisions": g["decisions"],
-            "decisionMinutes": dmin, "review": review, "attentionMinutes": attention,
+            "decidedForYou": g["decidedForYou"], "decisionMinutes": dmin, "review": review, "attentionMinutes": attention,
             "leverage": None, "deadline": ({"date": deadline[0].isoformat(), "source": deadline[2], "why": deadline[3]}
                                            if deadline else None),
             "dueSoon": soon, "gates": g["gates"], "eyeCheck": g["eyeCheck"], "why": g["why"],
@@ -1024,12 +1124,13 @@ def main(argv):
     scan = read_scan(args.scan)
     grade_files = [(path, read_grades(path)) for path in args.grades]
     RT, ES = load_siblings()
+    GI = load_gated()
     today = args.today or ES.as_date(scan.get("today")) or datetime.date.today()
     vault = args.vault or text(scan.get("vault")) or VAULT_DEFAULT
     vroot = os.path.expanduser(vault)
     if not os.path.isdir(vroot):
         fail(3, "no vault at %s" % vroot)
-    out = Ranker(RT, ES, scan, today, vroot, grade_files, superseding=args.superseding).run()
+    out = Ranker(RT, ES, scan, today, vroot, grade_files, superseding=args.superseding, GI=GI).run()
     body = json.dumps(out, ensure_ascii=False, separators=(",", ":")) if args.compact else \
         json.dumps(out, ensure_ascii=False, indent=2)
     sys.stdout.buffer.write((body + "\n").encode("utf-8", "replace"))

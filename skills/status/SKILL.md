@@ -45,7 +45,7 @@ status of [[giflab-rollout]]               # natural language — same thing
 Resolve `[[<slug>]]` → `~/repos/obsidian/Work/Tasks/<slug>.md`, else `Work/Tasks/Archive/Rollouts/<slug>.md`: a
 rollout whose completion ceremony already ran (a serial chain's Complete moves its note there itself). The path it
 resolves is `<rollout-note>` in every read below. If several dated/ordinal notes match an ambiguous name (e.g.
-"today's giflab rollout"), **list the matches and ask which**: don't assume. Read the body's `Project root: \`<repoPath>\`` line: it's the repo for the live checks (a serial
+"today's giflab rollout"), **list the matches and ask which**: don't assume (Owner *yours*: which rollout he means, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`). Read the body's `Project root: \`<repoPath>\`` line: it's the repo for the live checks (a serial
 note has none: § 5).
 
 **Engine snapshot first (ADR 0043).** Whichever session runs it, status takes its scripts and prose from the rollout's own engine root (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/engine-snapshot.md`). This text's prose id: `$Id$` (git `ident`, engine-snapshot.md): pass its hex as `--prose-id`; when it shows no hex, pass none. Before any other read, run
