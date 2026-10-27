@@ -190,7 +190,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
                      (ints >= 0); verdict?; status? (pending | consumed: the doc as its findings arrived, or once
-                     they were dispositioned); branch?; lines?, files? (ints >= 0: the reviewed diff's size);
+                     they were dispositioned); branch?; lines?, files? (ints >= 0: the reviewed diff's size); reviewedAt? (UTC ms Z:
+                     when the round was reviewed, its doc's first commit; readers order rounds by it, never by ts);
                      blocking?, open?, filed?, recurring?, reversal?, rejected? (ints >= 0, ADR 0055's disposition
                      counts from the doc's `## Disposition`; blocking includes open). No rollout, no task; lands in
                      reviews.jsonl.
@@ -808,7 +809,7 @@ KINDS = {
     "review-round": (False, {"repo": _str, "head": _str, "digest": _str},
                      {"doc": _str, "mode": _str, "effort": _str, "findings": _int(0), "original": _int(0),
                       "regression": _int(0), "verdict": _str, "status": _enum("pending", "consumed"),
-                      "branch": _str, "lines": _int(0), "files": _int(0), "blocking": _int(0), "open": _int(0),
+                      "branch": _str, "lines": _int(0), "files": _int(0), "reviewedAt": _str, "blocking": _int(0), "open": _int(0),
                       "filed": _int(0), "recurring": _int(0), "reversal": _int(0), "rejected": _int(0)}),
     "review-verdict": (True, {"round": _int(1), "verdict": _enum("approve", "changes"), "findings": _int(0),
                               "original": _int(0), "regression": _int(0), "digest": _str},

@@ -605,7 +605,7 @@ test('span: freshReview reports each landing: rounds, findings and blocking per 
   const at = (ts) => new Date(ts).toISOString()
   assert.deepEqual(s.freshReview, [
     { repo: 'o/r', branch: 'feat/a', rounds: 3, codeRounds: 2, findings: [12, 10], blocking: [3, 1], filed: 21, recurring: 2,
-      reversal: 1, open: 1, regression: 3, lines: 420, files: 10, first: '2026-09-01T10:00:00.000Z', last: at(W(4, '03:00')),
+      reversal: 1, open: 1, regression: 3, lines: 420, files: 10, first: '2026-09-01T10:00:00.000Z', last: at(W(4, '02:00')),
       blockingRate: 0.18 },
     { repo: 'o/r', branch: null, rounds: 1, codeRounds: 1, findings: [6], blocking: [null], filed: null, recurring: null,
       reversal: null, open: null, regression: 2, lines: null, files: null, first: at(W(5, '00:00')), last: at(W(5, '00:00')),
@@ -620,11 +620,27 @@ test('span: freshReview reports each landing: rounds, findings and blocking per 
   assert.ok(s.cannotShow.includes('/fresh-review: 4 landing(s) reported, not traced to a rollout (reviews.jsonl names none)'),
     JSON.stringify(s.cannotShow))
   // The next window reads b1 by its later line alone (the latest per doc), and no other landing: none has a line in it.
+  // Its round time is still its arrival, W(6, '09:00'): a later line is a disposition, not a later round.
   const next = span(h, [], { since: '2026-09-10T00:00+10:00', until: '2026-09-11T00:00+10:00' })
   assert.deepEqual(next.freshReview, [
     { repo: 'o/r', branch: 'feat/b', rounds: 1, codeRounds: 1, findings: [4], blocking: [4], filed: null, recurring: null,
-      reversal: null, open: 4, regression: 0, lines: null, files: null, first: '2026-09-09T15:00:00.000Z',
-      last: '2026-09-09T15:00:00.000Z', blockingRate: 1 }], JSON.stringify(next.freshReview))
+      reversal: null, open: 4, regression: 0, lines: null, files: null, first: at(W(6, '09:00')),
+      last: at(W(6, '09:00')), blockingRate: 1 }], JSON.stringify(next.freshReview))
+})
+
+// land.sh's --branch-docs sweep records a landing's unrecorded docs at its end, out of round order and seconds apart:
+// rounds are ordered by reviewedAt (when each was reviewed), never by the line's own ts, so open is the last round's.
+test('span: freshReview orders a swept landing by reviewedAt, so open and first/last are the rounds\' own', (t) => {
+  const h = setup(t)
+  const rr = (ts, doc, fields) => [ts, 'review-round', null, { repo: 'o/r', head: 'abc1234', digest: 'd', doc: `docs/reviews/${doc}.md`, branch: 'feat/s', mode: 'code', status: 'consumed', ...fields }, null]
+  emitAll(h, null, [
+    rr(W(5, '12:01'), 'r2', { reviewedAt: W(3, '09:00'), findings: 9, blocking: 1, open: 1 }),
+    rr(W(5, '12:02'), 'r1', { reviewedAt: W(2, '09:00'), findings: 14, blocking: 2, open: 0 }),
+  ])
+  const at = (ts) => new Date(ts).toISOString()
+  const [e] = span(h).freshReview
+  assert.deepEqual([e.findings, e.blocking, e.open, e.first, e.last],
+    [[14, 9], [2, 1], 1, at(W(2, '09:00')), at(W(3, '09:00'))], JSON.stringify(e))
 })
 
 // ---- watch, raised and the Watch reader -----------------------------------------------------------------------------

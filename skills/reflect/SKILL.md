@@ -370,8 +370,10 @@ recording Lachy's no (step 15's decision task, § Deciding the decision task) is
 landing (a repo and branch) with a round in the window, every round it recorded counted. For each, its `rounds`
 (`codeRounds` of them code), `findings` and `blocking` per code round in order, `filed`, `open` at its last code round,
 `recurring` and `reversal`, its size (`lines`, `files`), and `blockingRate`. A null is unknown, never 0: a round
-recorded before ADR 0055, or one whose doc held no `## Disposition` yet. Name each landing that reached the budget
-(`codeRounds` of 4 or more, ADR 0055 d4), each whose last code round left `open` above 0, and each whose
+recorded before ADR 0055, or one whose doc held no `## Disposition` yet. `codeRounds` counts every review round on
+the branch, dev-time chains before the landing loop included, so it is review cost, never the landing's budget count
+(ADR 0055 d4): never name a landing as at its budget from it. Name each landing with many code rounds as review cost,
+each whose last code round left `open` above 0, and each whose
 `blockingRate` is 0 over two or more code rounds (the self-grading risk ADR 0055's Consequences name). The entry with
 `branch` null holds the repo's branchless rounds in the window: no landing.
 

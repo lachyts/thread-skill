@@ -160,12 +160,17 @@ parallel with no note). For each:
   line supersedes its pending one), grouped by (repo, branch). A line with no branch (one from before ADR 0055, say) is
   no landing: its repo's group, branch null, holds the branchless lines in [since, until] alone. A group with a line
   in [since, until] is kept, with all its lines: rounds (the lines), codeRounds (those whose mode is code or absent),
-  findings and blocking (one value per code round, in ts order, null where the line carries none), filed, recurring and
+  findings and blocking (one value per code round, in round order, null where the line carries none), filed, recurring and
   reversal (sums over the lines that carry each, null when none does), open (the last code round's, or null),
   regression (the sum, 0 when no line carries one), lines and files (the newest line's that carries each), first and
-  last (the group's earliest and latest ts) and blockingRate (Σblocking / Σfindings over the code rounds that carry
+  last (the group's earliest and latest round time) and blockingRate (Σblocking / Σfindings over the code rounds that carry
   both, to 2 places; null when none does or Σfindings is 0). Sorted by last. A branch name reused across landings, or a
-  chain on the default branch, reads as one entry. Reported, never traced: cannotShow says so when any is listed.
+  chain on the default branch, reads as one entry, and the group holds every review round on the branch, dev-time
+  chains before the landing loop included, so codeRounds is review cost on the branch, never the landing's budget
+  count. A round's time, which orders the group and gives first and last, is its latest line's reviewedAt (when the
+  round was reviewed), else its doc's earliest line's ts (its arrival emit): land.sh records a landing's unrecorded
+  docs at its end, so a line's own ts can be days after its round. Reported, never traced: cannotShow says so when
+  any is listed.
 span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), shape
 (parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
 reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[], and
@@ -1401,25 +1406,32 @@ class Span:
         except OSError as e:
             self.flag("reviews.jsonl cannot be read (%s): no /fresh-review landings" % e)
             return []
-        latest = {}
+        latest, arrived = {}, {}
         for t, n, d in lines:
             if d.get("kind") != "review-round" or t > until or not isinstance(d.get("repo"), str):
                 continue
             doc = d.get("doc")
             key = ("doc", d["repo"], doc) if isinstance(doc, str) and doc else ("head", d["repo"], d.get("head"), d.get("digest"))
             latest[key] = (t, n, d)
+            arrived.setdefault(key, t)  # read_lines is time-sorted: the first line is the doc's arrival
         groups = {}
-        for t, n, d in latest.values():
+        for key, (t, n, d) in latest.items():
             branch = d.get("branch") if isinstance(d.get("branch"), str) and d.get("branch") else None
             if branch is None and t < since:
                 continue  # a branchless line is no landing: its group holds the window's lines alone
-            groups.setdefault((d["repo"], branch), []).append((t, n, d))
+            at = arrived[key]
+            if isinstance(d.get("reviewedAt"), str):
+                try:
+                    at = SCORE.to_ms(d["reviewedAt"])
+                except Exception:
+                    pass
+            groups.setdefault((d["repo"], branch), []).append((at, n, d, t))
         out = []
         for (repo, branch), g in groups.items():
-            if not any(t >= since for t, _n, _d in g):
+            if not any(t >= since for _at, _n, _d, t in g):
                 continue
-            g.sort(key=lambda x: (x[0], x[1]))
-            ds = [d for _t, _n, d in g]
+            g.sort(key=lambda x: (x[0], x[1]))  # round order: reviewedAt, else arrival; never the line's own ts
+            ds = [d for _at, _n, d, _t in g]
             code = [d for d in ds if d.get("mode") in (None, "code")]
             rated = [(d["blocking"], d["findings"]) for d in code
                      if _count(d.get("blocking")) is not None and _count(d.get("findings")) is not None]
