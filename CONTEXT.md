@@ -514,6 +514,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suites do not contend, tuned from the Run record (ADR 0049). Each
   rollout's **Parallel ceiling** still bounds its own share. _Avoid_: night
   ceiling, global ceiling.
+- **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
+  the **Away cap**) for a start it has picked but not yet stamped, so every
+  other lead counts it. The stamp consumes it, and it lapses after 20
+  minutes. _Avoid_: bare "claim" (a Leg's task claim and a **Surface** claim
+  use it).
 - **Last starts** — toward the Morning, a queued task starts only if its
   kind's usual length (the median of that kind's past runs in the project,
   its kind its note's `scope:`) ends it by the Morning's hour; with fewer than

@@ -680,7 +680,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // a seeded revise step 1.2 held only for want of `slotLimit` into a Trickle wait, never § 7 (the round-1 false stuck),
   // and step 1.2's seeded revise names that clause. p29-8 (ADR 0049): while Away the Away cap takes the Trickle's place,
   // so the paragraph gives its slotLimit and its `away cap:` hold that never halts (a meant wait, never Stalled), and
-  // steps 1.5 and 1.6, clause (7), § 6, § 8 and the driver name the Away-cap wait beside the Trickle wait.
+  // steps 1.5 and 1.6, clause (7), § 6, § 8 and the driver name the Away-cap wait beside the Trickle wait. p28-3: the
+  // paragraph names the **Trickle claim** `next` takes for each start, and step 1.1 relays its `WARN: trickle claims` line.
   const trickleP = labelled(skill, 'The Trickle (Chorus ADR 0104).')
   const tr1 = subs[0]?.text ?? ''
   const tr6 = sub(/^End the turn `waiting`/)?.text ?? ''
@@ -697,6 +698,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !trickleP.includes('`WARN: ~/.config/thread/away.json …` line') || !trickleP.includes('The lead never reads or writes the file') ||
     !tr1.includes('A `WARN: ~/.config/thread/away.json` line on its stderr') ||
     !tr1.includes('is printed verbatim the first time this session sees that exact line') ||
+    !trickleP.includes('a **Trickle claim**') || !tr1.includes('A `WARN: trickle claims` line on its stderr') ||
     !tr6.includes('A `trickle:` hold (*The Trickle*) ends the turn `waiting` too') ||
     !tr6.includes('`reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`') ||
     !tr6.includes('a Trickle wait can stand with nothing of this rollout in flight') ||
@@ -1368,6 +1370,10 @@ test('control: § 4.5 without the Trickle at any one site fails trickle', () => 
   only(sk(', or `next` holds a task on the Trickle (§4.5 step 1.6) or step 1.2 holds a seeded revise on it (§4.5 step 1.5), or on the Away cap while Away; nothing to do until', '; nothing to do until'),
     'trickle', "§ 6's waiting bullet without it")
   only(sk(', a retry cool-down is pending, or a Trickle wait stands)', ', or a retry cool-down is pending)'), 'trickle', "§ 8's Stop-hook paragraph without it")
+  // p28-3: the Trickle claim and its WARN relay
+  only(sk(' (a **Trickle claim**)', ''), 'trickle', 'no Trickle claim named')
+  only(sk(' A `WARN: trickle claims` line on its stderr (`skills/execute/away.md` § The Trickle, *Trickle claims*) is relayed the same way.', ''),
+    'trickle', 'no claims WARN relay in step 1.1')
 })
 test('control: a restart held by the Trickle, or a Trickle-held revise that halts stuck, fails trickle', () => {
   only(sk(' A restart waits on the ceiling alone:', ' A restart waits on `slotLimit` too:'), 'trickle', 'a restart held by the Trickle')
