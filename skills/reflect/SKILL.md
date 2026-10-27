@@ -197,7 +197,7 @@ headlines first (ADR 0037 d1), then the Guardrails:
   meanwhile; say so when its `load:` flag reads it live past its last line (a lost slot-freed overcounts it).
 - **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this". Nor does a
   trickle-bound one (p28-6: the Mac-wide cap, the Trickle or the Away cap, kept Slots free for at least half the
-  time, its no-Slot-open spans counted in, and held more Slot time than any other idle reason): say "the Trickle
+  time, its no-Slot-open spans counted in, and held as much Slot time as any other idle reason): say "the Trickle
   moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling.
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says
