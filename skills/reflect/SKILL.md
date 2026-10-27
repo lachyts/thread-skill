@@ -361,10 +361,19 @@ lines that name the task; then its lines in the Run record (`mover` is the line 
 - When none of them says what moved it, name it as unexplained.
 
 Each item becomes a sighting (step 12), a bug (step 13), a knob (score.py's only: never invent one) or nothing,
-named with why. Read `freshReview` and `cannotShow` as reported, not traced. A `closed with no close line` flag is
+named with why. Read `cannotShow` as reported, not traced. A `closed with no close line` flag is
 reported, not traced: that rollout leaves no baseline (ADRs 0030, 0033, 0034, 0035 and 0037 bound what each
 trace may conclude). The Watch, its id and its recurring rule are Chorus's Reflection's, borrowed and never imported;
 recording Lachy's no (step 15's decision task, § Deciding the decision task) is this skill's own.
+
+**/fresh-review landings.** Read `span.json`'s `freshReview` (ADR 0055 d5) as reported, not traced: one entry per
+landing (a repo and branch) with a round in the window, every round it recorded counted. For each, its `rounds`
+(`codeRounds` of them code), `findings` and `blocking` per code round in order, `filed`, `open` at its last code round,
+`recurring` and `reversal`, its size (`lines`, `files`), and `blockingRate`. A null is unknown, never 0: a round
+recorded before ADR 0055, or one whose doc held no `## Disposition` yet. Name each landing that reached the budget
+(`codeRounds` of 4 or more, ADR 0055 d4), each whose last code round left `open` above 0, and each whose
+`blockingRate` is 0 over two or more code rounds (the self-grading risk ADR 0055's Consequences name). The entry with
+`branch` null holds the repo's branchless rounds in the window: no landing.
 
 **Grade accuracy.** Read `span.json`'s `grades`: the Grade log (p25-4, ADR 0041) joined to what followed each grade,
 scored over its own episode, which runs to the task's next grade or its close. Read the Ready headline
@@ -470,7 +479,9 @@ held trade no decision task lists for this Reflection): run the step its stderr 
 ### 17. Report, then tidy
 
 Report the rollouts read (and the escapes-only and repairs-only ones), each trace and what it became, the grade
-accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySize` readout and each grade trace), the
+accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySize` readout and each grade trace), each
+/fresh-review landing (`freshReview`: its repo and branch, rounds, findings and blocking per round, filed, open at the
+end, reversals, its size, and what step 11 named), the
 Watches written (and any `extended` line), the bugs filed or found, each knob landed, reverted or held with its reason, the
 decision task (or none), with each held trade it lists, found decided or skipped behind a revert, the close line's
 counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
@@ -550,8 +561,11 @@ or `exists`). An item left open keeps the task open.
   either only as a set-aside whose `movedBy` is `unrecorded`, and then its task note's `## Needs you`,
   `## Integration log` and `## Approved gates`, the rollout note's `## Notes` and its Run record lines (`mover`) say
   what moved it, or nothing does.
-- /fresh-review churn names no rollout (`reviews.jsonl` carries none): the weekly reading reports it (`freshReview`)
-  and traces none of it.
+- /fresh-review churn names no rollout (`reviews.jsonl` carries none): the weekly reading reports each landing
+  (`freshReview`, one entry per repo and branch) and traces none of it. A branch name reused for a later landing, or
+  a chain run on the default branch, reads as one landing; a round with no branch (one recorded before ADR 0055) reads
+  as no landing, and only in the window its line falls in. A round reaches `reviews.jsonl` only when fresh-review or
+  land.sh's own-branch `--queue` and `--hold` recorded it.
 - The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
   `cannotShow`), and dates an undated fixer by its mtime.
 - A serial chain's Escapes come from `fixes:` alone and are read only in a week span reads the chain (a line in its

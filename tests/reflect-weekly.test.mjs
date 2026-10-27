@@ -576,6 +576,57 @@ test('span and close: breaches count once per (rollout, Guardrail) only for a fi
   assert.deepEqual([line.counts.breaches, line.quiet], [1, false])
 })
 
+// ---- freshReview: one entry per landing (ADR 0055 d5) ------------------------------------------------------------
+
+// reviews.jsonl's review-round lines, deduped to the latest per (repo, doc), grouped by (repo, branch), each group
+// kept when a line of it is in the window and read whole; a branchless (pre-ADR 0055) line groups as (repo, null),
+// its in-window lines alone.
+test('span: freshReview reports each landing: rounds, findings and blocking per code round, filed, open, reversals, size; a pending doc counts once, as consumed', (t) => {
+  const h = setup(t)
+  const rr = (ts, doc, fields, repo = 'o/r') => [ts, 'review-round', null, { repo, head: 'abc1234', digest: 'd', doc: `docs/reviews/${doc}.md`, ...fields }, null]
+  const A = { branch: 'feat/a' }
+  emitAll(h, null, [
+    // landing A: a round before the window, a simplify round, and a2 recorded pending, then consumed
+    rr('2026-09-01T10:00:00Z', 'a1', { ...A, mode: 'code', status: 'consumed', findings: 12, blocking: 3, open: 0, filed: 9, recurring: 0, reversal: 0, rejected: 0, regression: 1, lines: 400, files: 9 }),
+    rr(W(4, '01:00'), 'a2', { ...A, mode: 'code', status: 'pending', findings: 10, lines: 420, files: 9 }),
+    rr(W(4, '02:00'), 'as', { ...A, mode: 'simplify', status: 'consumed', findings: 5, filed: 5 }),
+    rr(W(4, '03:00'), 'a2', { ...A, mode: 'code', status: 'consumed', findings: 10, blocking: 1, open: 1, filed: 7, recurring: 2, reversal: 1, rejected: 1, regression: 2, lines: 420, files: 10 }),
+    // landing B: no mode reads as a code round; its doc's line after until is not read
+    rr(W(6, '09:00'), 'b1', { branch: 'feat/b', status: 'consumed', findings: 4, blocking: 0, open: 0, filed: 4, lines: 30, files: 2 }),
+    rr('2026-09-09T15:00:00Z', 'b1', { branch: 'feat/b', status: 'consumed', findings: 4, blocking: 4, open: 4 }),
+    // the same branch name in another repo is another landing
+    rr(W(7, '00:00'), 'x1', { ...A, mode: 'code', status: 'pending', findings: 2 }, 'o/other'),
+    // a landing wholly outside the window, and legacy lines with no branch or disposition (one before the window)
+    rr('2026-08-30T00:00:00Z', 'c1', { branch: 'feat/old', mode: 'code', status: 'consumed', findings: 3, blocking: 1 }),
+    rr('2026-08-31T00:00:00Z', 'legacy-old', { mode: 'code', findings: 9, original: 9, regression: 0 }),
+    rr(W(5, '00:00'), 'legacy', { mode: 'code', findings: 6, original: 4, regression: 2 }),
+  ])
+  const s = span(h)
+  const at = (ts) => new Date(ts).toISOString()
+  assert.deepEqual(s.freshReview, [
+    { repo: 'o/r', branch: 'feat/a', rounds: 3, codeRounds: 2, findings: [12, 10], blocking: [3, 1], filed: 21, recurring: 2,
+      reversal: 1, open: 1, regression: 3, lines: 420, files: 10, first: '2026-09-01T10:00:00.000Z', last: at(W(4, '03:00')),
+      blockingRate: 0.18 },
+    { repo: 'o/r', branch: null, rounds: 1, codeRounds: 1, findings: [6], blocking: [null], filed: null, recurring: null,
+      reversal: null, open: null, regression: 2, lines: null, files: null, first: at(W(5, '00:00')), last: at(W(5, '00:00')),
+      blockingRate: null },
+    { repo: 'o/r', branch: 'feat/b', rounds: 1, codeRounds: 1, findings: [4], blocking: [0], filed: 4, recurring: null,
+      reversal: null, open: 0, regression: 0, lines: 30, files: 2, first: at(W(6, '09:00')), last: at(W(6, '09:00')),
+      blockingRate: 0 },
+    { repo: 'o/other', branch: 'feat/a', rounds: 1, codeRounds: 1, findings: [2], blocking: [null], filed: null, recurring: null,
+      reversal: null, open: null, regression: 0, lines: null, files: null, first: at(W(7, '00:00')), last: at(W(7, '00:00')),
+      blockingRate: null },
+  ], JSON.stringify(s.freshReview))
+  assert.ok(s.cannotShow.includes('/fresh-review: 4 landing(s) reported, not traced to a rollout (reviews.jsonl names none)'),
+    JSON.stringify(s.cannotShow))
+  // The next window reads b1 by its later line alone (the latest per doc), and no other landing: none has a line in it.
+  const next = span(h, [], { since: '2026-09-10T00:00+10:00', until: '2026-09-11T00:00+10:00' })
+  assert.deepEqual(next.freshReview, [
+    { repo: 'o/r', branch: 'feat/b', rounds: 1, codeRounds: 1, findings: [4], blocking: [4], filed: null, recurring: null,
+      reversal: null, open: 4, regression: 0, lines: null, files: null, first: '2026-09-09T15:00:00.000Z',
+      last: '2026-09-09T15:00:00.000Z', blockingRate: 1 }], JSON.stringify(next.freshReview))
+})
+
 // ---- watch, raised and the Watch reader -----------------------------------------------------------------------------
 
 const RULE = 'orient § 5 grill'
