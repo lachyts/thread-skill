@@ -280,3 +280,19 @@ test('W12. a merge-held rollout whose lead fell silent 2 h ago: one POST naming 
   assert.equal(posts(n).length, 1, r.stdout)
   assert.match(JSON.parse(posts(n)[0].body).message, /rollout stalled \(silent\), no life sign for 120m/)
 })
+
+test('W13. --stall-after is moving\'s own: its default STALL_AFTER_MIN and its bound STALL_AFTER_MAX, read from the module', async (t) => {
+  const s = scratch(t)
+  const rr = path.join(root, 'skills', 'execute', 'scripts', 'reconcile-rollout.py')
+  const [min, max] = JSON.parse(execFileSync(PY, ['-B', '-c', 'import importlib.util, json, sys; sys.dont_write_bytecode = True\n' +
+    'spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec)\n' +
+    'spec.loader.exec_module(m); print(json.dumps([m.STALL_AFTER_MIN, m.STALL_AFTER_MAX]))', rr], { env: s.env, encoding: 'utf8' }))
+  const help = await run(s, ['check', '--help'])
+  assert.match(help.stdout.replace(/\s+/g, ' '), new RegExp(`minutes \\(1 to ${max}, default ${min}\\)`))
+  const over = await run(s, ['check', '--tasks-dir', s.tasks, '--chorus-url', '', '--stall-after', String(max + 1)])
+  assert.equal(over.status, 2)
+  assert.equal(over.stderr.trim(), `ERROR: watchdog check: usage: --stall-after must be an integer from 1 to ${max}`)
+  const at = await run(s, ['check', '--tasks-dir', s.tasks, '--state', s.state, '--chorus-url', '', '--stall-after', String(max),
+    '--now', NOW, '--dry-run'])
+  assert.equal(at.status, 0, at.stderr)
+})

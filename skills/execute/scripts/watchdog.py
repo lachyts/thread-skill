@@ -2,7 +2,7 @@
 """watchdog.py — the Watchdog's launchd fallback (ADR 0048, p29-7; status SKILL.md § The Watchdog's reading).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py check [--tasks-dir D] [--state F]
-        [--stall-after 45] [--chorus-url http://127.0.0.1:4747/] [--ntfy-server URL] [--gh-bin gh] [--now ISO]
+        [--stall-after MIN] [--chorus-url http://127.0.0.1:4747/] [--ntfy-server URL] [--gh-bin gh] [--now ISO]
         [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist [--interval 600]
         [--label com.thread.watchdog] [--log ~/Library/Logs/thread-watchdog.log] [--chorus-url URL]
@@ -36,6 +36,8 @@ check, in order:
       exit 0 records the key, any other exit records nothing. A key is dropped only when its rollout reads moving,
       waiting or skip this run, or its note has left the tasks dir; a `recent: not read`, a lost look (moving's
       MovingError) or a note still there but no candidate keeps it.
+  --stall-after is moving's own: its default reconcile-rollout.py STALL_AFTER_MIN (45), its bound 1 to STALL_AFTER_MAX
+  (1440), both read from that module, so the fallback and the verb never disagree.
   --dry-run posts nothing and writes no state.
   Exit 0 whatever it finds; 1 when --tasks-dir cannot be read; 2 on usage.
 
@@ -189,13 +191,14 @@ def _notify(message, server):
 
 
 def cmd_check(args):
-    if not 1 <= args.stall_after <= 1440:
-        print("ERROR: watchdog check: usage: --stall-after must be an integer from 1 to 1440", file=sys.stderr)
+    rr = args.rr
+    if not 1 <= args.stall_after <= rr.STALL_AFTER_MAX:
+        print(f"ERROR: watchdog check: usage: --stall-after must be an integer from 1 to {rr.STALL_AFTER_MAX}",
+              file=sys.stderr)
         return 2
     if args.chorus_url and _stage_up(args.chorus_url):
         print("watchdog: Chorus is running (api/logins answered): the fallback stays silent")
         return 0
-    rr = _load_reconcile()
     now = rr._parse_ts(args.now) if args.now else datetime.now().astimezone()
     if now is None:
         print(f"ERROR: watchdog check: usage: --now {args.now!r} is not an ISO timestamp", file=sys.stderr)
@@ -276,6 +279,9 @@ def cmd_plist(args):
 
 
 def main(argv=None):
+    # The bounds and the default are moving's own (reconcile-rollout.py STALL_AFTER_MIN and STALL_AFTER_MAX), so the
+    # fallback and the verb never disagree on them.
+    rr = _load_reconcile()
     p = argparse.ArgumentParser(prog="watchdog.py", description="The Watchdog's launchd fallback (ADR 0048): notify "
                                 "once per stalled rollout while Chorus is not running.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -283,13 +289,14 @@ def main(argv=None):
     c.add_argument("--tasks-dir", default=None, help="task-note dir (default: the vault's Work/Tasks)")
     c.add_argument("--state", default=None, help="the state file (default ${XDG_STATE_HOME:-~/.local/state}/thread/"
                                                  "watchdog.json)")
-    c.add_argument("--stall-after", type=int, default=45, help="minutes (1 to 1440, default 45)")
+    c.add_argument("--stall-after", type=int, default=rr.STALL_AFTER_MIN,
+                   help=f"minutes (1 to {rr.STALL_AFTER_MAX}, default {rr.STALL_AFTER_MIN})")
     c.add_argument("--chorus-url", default=DEFAULT_CHORUS_URL, help="the Stage's URL ('' never probes)")
     c.add_argument("--ntfy-server", default=None, help="ntfy-push.py's --server")
     c.add_argument("--gh-bin", default="gh", help="the gh `next`'s PR-hold reads go through")
     c.add_argument("--now", default=None, help="the time to read against, ISO (default: now)")
     c.add_argument("--dry-run", action="store_true", help="post nothing and write no state")
-    c.set_defaults(func=cmd_check)
+    c.set_defaults(func=cmd_check, rr=rr)
     pl = sub.add_parser("plist", help="print the launchd job")
     pl.add_argument("--interval", type=int, default=DEFAULT_INTERVAL)
     pl.add_argument("--label", default=DEFAULT_LABEL)

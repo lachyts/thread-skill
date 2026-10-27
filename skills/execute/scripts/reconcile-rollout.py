@@ -748,9 +748,9 @@ Subcommands:
               6. `next --dry-run` in-process through _parser() (no --running: every in_progress note is live), its
                  stdout and stderr captured; exit 1 → waiting `you` (`next refused the rollout: <its ERROR line>`); an
                  exception → MovingError; halt superseded or done → skip.
-              7. The whole holds `next` reads live (LIVE_WHOLE_REASONS): a `gitEnvHold` entry with scope rollout →
-                 waiting `you`, `git-env trip: the shared checkout changed`; a non-empty `mainRed` → waiting `you`,
-                 `RACE: the revert of [[x]] did not land: <why>`.
+              7. The whole holds `next` reads live (their reasons built from LIVE_WHOLE_REASONS' prefixes): a
+                 `gitEnvHold` entry with scope rollout → waiting `you`, `git-env trip: the shared checkout changed`; a
+                 non-empty `mainRed` → waiting `you`, `RACE: the revert of [[x]] did not land: <why>`.
               8. W, the work the lead could act on now: `running` and `start` (and `restart`); the lane (laneHold
                  empty, no open ("merge", task) hold in the record on an integrating task, and something integrating
                  or awaiting Integration; or a `race` entry with `revert: true` and no `git-env` or `lane` entry; or
@@ -785,7 +785,8 @@ Subcommands:
                   reports `halt: paused` (a drained soft pause: one behind a lane verdict never drains while the note
                   keeps `integrating:`, so it falls to (c) and its ack is never hidden); (c) otherwise waiting `you`,
                   with H's reason, else `next`'s verdict worded as execute § 7 words it.
-              Which waits silence judges (SILENCE_JUDGED, bound to status's list by a contract test): `merge-hold` and
+              Which waits silence judges (SILENCE_JUDGED, bound to status's list by a contract test; moving_verdict
+              returns each through by_silence, which refuses a cause the list leaves out): `merge-hold` and
               `regenerating`, and every reading with work; `room-stop` by its 6 h bound; the waits of 12(b) by their
               own condition; never `paused`, `sign-off`, `not-started` or `you`. A wait the verdict fails to name
               changes only `waiting`'s cause, never moving or stalled.
@@ -11005,7 +11006,8 @@ STALL_AFTER_MIN = 45          # two missed 20-minute heartbeat ticks, and some s
 STALL_AFTER_MAX = 1440
 REGENERATE_STALL_MIN = 120    # the Approved-queue route's one foreground turn: one harness step, never its bound
 # The meant waits that silence ends: only the lead's own tick releases them (status § The Watchdog's reading, *Which
-# waits silence judges*, binds this list by a contract test).
+# waits silence judges*, binds this list by a contract test). moving_verdict returns each through its by_silence, which
+# refuses a cause not listed here, so the code cannot judge a wait by silence that the list (and status) leaves out.
 SILENCE_JUDGED = ("merge-hold", "regenerating")
 # Execute § 7's *Whole-rollout halts kept (ADR 0048)*, judged from the open halt H's reason (re.match): a halt that
 # holds the whole rollout on purpose, so work beside it waits on Lachy, never a stall. {rollout} is the rollout's stem,
@@ -11042,8 +11044,9 @@ WHOLE_HALT_PATTERNS = (
     r"approved queue: \[\[[^\]]+\]\] written unstamped:",
 )
 # The two kept halts `moving` reads live from `next` (step 7), never from H: a bare checkout's git-env trip and a RACE
-# revert that did not land.
+# revert that did not land. Step 7 builds its two reasons from these prefixes (a contract test binds them to § 7's).
 LIVE_WHOLE_REASONS = ("git-env trip:", "RACE: the revert of")
+LIVE_GIT_ENV, LIVE_MAIN_RED = LIVE_WHOLE_REASONS
 
 
 class MovingError(Exception):
@@ -11172,6 +11175,14 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
             return done("stalled", cause, f"no life sign for {out['ageMinutes']}m")
         return None
 
+    def by_silence(bound, cause, reason, until=None):
+        """A meant wait only the lead's own tick ends: the silence test at `bound`, else waiting `cause`. The cause must
+        be in SILENCE_JUDGED (the list status's *Which waits silence judges* is bound to); one that is not is a defect
+        in this function, never a reading."""
+        if cause not in SILENCE_JUDGED:
+            raise AssertionError(f"moving: {cause!r} is judged by silence but is not in SILENCE_JUDGED")
+        return silent(bound) or done("waiting", cause, reason, until)
+
     # 3. Pauses: a sign-off pause first (await-sign-off stamps paused: with it), then a stamped pause (his act).
     if _scalar(note.get(PAUSED_FOR_KEY)).lower() == SIGN_OFF:
         return done("waiting", "sign-off", f"paused for sign-off since {_scalar(note.get('paused')) or '?'}")
@@ -11195,12 +11206,12 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
     if nx.get("halt") in ("superseded", "done"):
         return done("skip", nx["halt"], f"{ro}: next reports halt {nx['halt']}")
     work["halt"] = nx.get("halt")
-    # 7. The whole holds `next` reads live.
+    # 7. The whole holds `next` reads live, their reasons built from LIVE_WHOLE_REASONS.
     if any(t.get("scope") == "rollout" for t in nx.get("gitEnvHold") or []):
-        return done("waiting", "you", "git-env trip: the shared checkout changed")
+        return done("waiting", "you", f"{LIVE_GIT_ENV} the shared checkout changed")
     if nx.get("mainRed"):
         first = nx["mainRed"][0]
-        return done("waiting", "you", f"RACE: the revert of [[{first['slug']}]] did not land: {first.get('why', '')}")
+        return done("waiting", "you", f"{LIVE_MAIN_RED} [[{first['slug']}]] did not land: {first.get('why', '')}")
     # 8. W, the work the lead could act on now.
     lane_hold = nx.get("laneHold") or []
     merge_open = {t for h, t in state["holds"] if h == "merge" and t}
@@ -11269,14 +11280,12 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
         if work["halt"] == "regenerate":
             # The Approved-queue route runs as one foreground turn with no life sign: its own bound, in place of
             # stall-after, whatever else is in W.
-            if last_live is not None and silence is not None and silence <= REGENERATE_STALL_MIN:
-                return done("waiting", "regenerating", "approved queue: regenerating",
-                            _stamp(base + timedelta(minutes=REGENERATE_STALL_MIN)))
-            return silent(REGENERATE_STALL_MIN) or done("waiting", "regenerating", "approved queue: regenerating")
+            until = _stamp(base + timedelta(minutes=REGENERATE_STALL_MIN)) if base is not None else None
+            return by_silence(REGENERATE_STALL_MIN, "regenerating", "approved queue: regenerating", until)
         return silent(stall_after) or done("moving", None, "work moves")
     # 12a. A wait only the lead's own tick ends: a merge hold, judged by silence.
     if merge_held:
-        return silent(stall_after) or done("waiting", "merge-hold", f"merge hold on [[{merge_held[0]}]]")
+        return by_silence(stall_after, "merge-hold", f"merge hold on [[{merge_held[0]}]]")
     # 12b. Waits judged by their own condition, in step 1.6's order.
     if work["coolDown"]:
         first = min(work["coolDown"], key=lambda c: _parse_ts(c["until"]))
