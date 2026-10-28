@@ -256,7 +256,28 @@ scen m13
 QUEUE="a b c q"; mkro "pause_requested: true"; running a; integrating b; setaside_infra c 2026-10-26T11:58:00Z; mkt q open
 entry 2026-10-26T09:00:00Z
 mkdir -p "$THREAD_NOTE_LOCK_DIR"
-snap() { find "$D" "$THREAD_NOTE_LOCK_DIR" -type f -print0 | sort -z | xargs -0 stat -f '%N %m %z' 2>/dev/null | shasum | cut -c1-16; }
+# snap: a portable walk (never BSD `stat -f`, which GNU stat reads as --file-system): each dir by path, each link by
+# target, each file by (path, mtime_ns, size, sha256 of its content), sorted, so a rewrite with the same size is seen.
+snap() {
+  python3 - "$D" "$THREAD_NOTE_LOCK_DIR" <<'PY'
+import hashlib, os, sys
+rows = []
+for top in sys.argv[1:]:
+    for dp, dns, fns in os.walk(top):
+        for n in dns:
+            p = os.path.join(dp, n)
+            rows.append(f"{'l' if os.path.islink(p) else 'd'} {p} {os.readlink(p) if os.path.islink(p) else ''}")
+        for n in fns:
+            p = os.path.join(dp, n)
+            if os.path.islink(p):
+                rows.append(f"l {p} {os.readlink(p)}")
+                continue
+            st = os.lstat(p)
+            with open(p, "rb") as f:
+                rows.append(f"f {p} {st.st_mtime_ns} {st.st_size} {hashlib.sha256(f.read()).hexdigest()}")
+print(hashlib.sha256("\n".join(sorted(rows)).encode()).hexdigest()[:16])
+PY
+}
 before=$(snap)
 mv >/dev/null; mv --stall-after 10 >/dev/null
 ok "$(snap)" "$before" "M13: every file under the tasks dir, the record dir, HOME and the lock dir unchanged"
