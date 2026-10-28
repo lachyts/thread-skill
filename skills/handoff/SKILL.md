@@ -174,7 +174,7 @@ The handoff's last step. It runs once all three of these hold:
 
 Then run `thread:next` once for this session, the parent: through the Skill tool, as `thread:next` with args `after-handoff <abs doc path>`. With no Skill tool (Codex), read `${CLAUDE_PLUGIN_ROOT}/skills/next/SKILL.md` and run its Process with that input, by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`. It is never re-implemented here (ADR 0002).
 
-The handed-off work counts as gone (next step 1, **After this session's own handoff**), so the output ends with exactly one move for this session: next's one line, or its menu only when the pick turns on what only Lachy knows, followed by next's own dispatch of that move. Several handoffs in one turn get one `next`, after the last. A dry run ends with this step too, described as next would run it. A handoff that close's **Wrong route?** sent here is no dispatch, so `next` runs.
+The handed-off work counts as gone (next step 1, **After this session's own handoff**), so the output ends with exactly one move for this session: next's one line, or its menu only when the pick turns on what only Lachy knows, followed by next's own dispatch of that move. Several handoffs in one turn get one `next`, after the last. A dry run ends with this step too, and still makes the call, since loading `next` writes nothing: only what its move would write is described, never done. A handoff that close's **Wrong route?** sent here is no dispatch, so `next` runs.
 
 **Skipped on a dispatch.**
 
