@@ -35,7 +35,8 @@ check, in order:
       /thread:status <slug> — <slug>: rollout stalled (<cause>), no life sign for <age>m`, cut to 200 characters; its
       exit 0 records the key, any other exit records nothing. A key is dropped only when its rollout reads moving,
       waiting or skip this run, or its note has left the tasks dir; a `recent: not read`, a lost look (moving's
-      MovingError) or a note still there but no candidate keeps it.
+      MovingError, or any other exception moving_verdict raises, printed `<slug> not read: <type>: <why>`; the other
+      rollouts are still read) or a note still there but no candidate keeps it.
   --stall-after is moving's own: its default reconcile-rollout.py STALL_AFTER_MIN (45), its bound 1 to STALL_AFTER_MAX
   (1440), both read from that module, so the fallback and the verb never disagree.
   --dry-run posts nothing and writes no state.
@@ -220,6 +221,9 @@ def cmd_check(args):
             v = rr.moving_verdict(path, tasks_dir, now, args.stall_after, args.gh_bin)
         except rr.MovingError as e:
             print(f"{slug} not read: {e} (a lost look, never a stall)")
+            continue
+        except Exception as e:  # noqa: BLE001 — a defect or an unforeseen note is a lost look for this rollout alone
+            print(f"{slug} not read: {type(e).__name__}: {e} (a lost look, never a stall)")
             continue
         if v["verdict"] != "stalled":
             print(f"{slug} {v['verdict']} {v.get('cause') or ''}".rstrip())

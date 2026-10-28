@@ -6,7 +6,8 @@
 // Hermetic: each case gets its own mkdtemp dir (HOME with `[notify] ntfy_topic`, the tasks dir, the Run record dir, the
 // note-lock dir, the state file), a node http server standing in for ntfy (and one for the Stage where a case needs it
 // up), and a closed port for a Stage that is down. The script runs through an async spawn, so the in-process servers
-// keep answering. Record mtimes are set with fs.utimesSync against a fixed --now.
+// keep answering. Record mtimes are set with fs.utimesSync against a fixed --now. W14 loads watchdog.py in process
+// (python3 -c) with a moving_verdict that raises for one rollout, so a defect there is a lost look, never the whole run.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -89,9 +90,10 @@ async function closedPort() {
   return `http://127.0.0.1:${port}/`
 }
 
-function run(s, args, { env } = {}) {
+// spawnPy runs python3 with `argv` (run: the script itself), async, so the in-process servers keep answering.
+function spawnPy(s, argv, { env } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(PY, ['-B', WD, ...args], { cwd: s.dir, env: env || s.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(PY, argv, { cwd: s.dir, env: env || s.env, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (d) => { stdout += d })
@@ -100,8 +102,10 @@ function run(s, args, { env } = {}) {
     child.on('close', (status) => resolve({ status, stdout, stderr }))
   })
 }
-const check = (s, chorus, n, extra = []) => run(s, ['check', '--tasks-dir', s.tasks, '--state', s.state, '--chorus-url', chorus,
-  '--ntfy-server', n.url.replace(/\/$/, ''), '--gh-bin', path.join(s.bin, 'gh'), '--now', NOW, ...extra])
+const run = (s, args, opts) => spawnPy(s, ['-B', WD, ...args], opts)
+const checkArgs = (s, chorus, n, extra = []) => ['check', '--tasks-dir', s.tasks, '--state', s.state, '--chorus-url', chorus,
+  '--ntfy-server', n.url.replace(/\/$/, ''), '--gh-bin', path.join(s.bin, 'gh'), '--now', NOW, ...extra]
+const check = (s, chorus, n, extra = []) => run(s, checkArgs(s, chorus, n, extra))
 const state = (s) => (fs.existsSync(s.state) ? JSON.parse(fs.readFileSync(s.state, 'utf8')) : null)
 const posts = (n) => n.seen.filter((r) => r.method === 'POST')
 
@@ -295,4 +299,35 @@ test('W13. --stall-after is moving\'s own: its default STALL_AFTER_MIN and its b
   const at = await run(s, ['check', '--tasks-dir', s.tasks, '--state', s.state, '--chorus-url', '', '--stall-after', String(max),
     '--now', NOW, '--dry-run'])
   assert.equal(at.status, 0, at.stderr)
+})
+
+test('W14. a rollout whose moving_verdict raises anything is a lost look: its key is kept and the others are still read and notified', async (t) => {
+  const s = scratch(t); const n = await ntfy(t); const chorus = await closedPort()
+  const BAD = 'aaa-rollout-2026-10-26'
+  stall(s)
+  stall(s, { ro: BAD, tasks: { b: ['status: in_progress', 'owner: lead'] } })
+  fs.mkdirSync(path.dirname(s.state), { recursive: true })
+  fs.writeFileSync(s.state, JSON.stringify({ v: 1, notified: { [BAD]: { lastEvent: 'x', at: NOW } } }) + '\n')
+  // watchdog.py in process, its moving_verdict raising for BAD alone (by_silence's AssertionError, say), else the real one.
+  const harness = [
+    'import importlib.util, sys',
+    'sys.dont_write_bytecode = True',
+    'spec = importlib.util.spec_from_file_location("wd", sys.argv[1]); wd = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(wd)',
+    'rr = wd._load_reconcile(); real = rr.moving_verdict',
+    'def raising(path, *a, **k):',
+    '    if path.stem == sys.argv[2]:',
+    '        raise AssertionError("moving: \'x\' is judged by silence but is not in SILENCE_JUDGED")',
+    '    return real(path, *a, **k)',
+    'rr.moving_verdict = raising',
+    'wd._load_reconcile = lambda: rr',
+    'sys.exit(wd.main(sys.argv[3:]))',
+  ].join('\n')
+  const r = await spawnPy(s, ['-B', '-c', harness, WD, BAD, ...checkArgs(s, chorus, n)])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, new RegExp(`${BAD} not read: AssertionError: .*\\(a lost look, never a stall\\)`))
+  assert.equal(posts(n).length, 1, r.stdout)
+  assert.match(JSON.parse(posts(n)[0].body).message, new RegExp(RO))
+  assert.deepEqual(Object.keys(state(s).notified).sort(), [BAD, RO])
+  assert.equal(state(s).notified[BAD].lastEvent, 'x')
 })
