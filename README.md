@@ -339,7 +339,7 @@ make evals           # behaviour evals: real model calls, a human step, never pa
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
 pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third
 of the cores' worth of background suites at once (at least 2; 4 on 12 cores), largest first, and node
-at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 4):
+at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 8):
 
 - **Syntax** — `bash -n` on every shell script, `ast.parse` on every Python script, and a real parse
   of every `*.workflow.js` (`tests/lib/check-workflow-parse.sh`: the body wrapped the way the Workflow

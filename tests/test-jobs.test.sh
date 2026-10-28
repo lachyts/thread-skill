@@ -60,7 +60,7 @@ has "$run" 'sh_tests=($(ls -S skills/execute/tests/*.test.sh tests/*.test.sh))' 
 ok "$(ls skills/execute/tests/*.test.sh tests/*.test.sh | grep -c '[[:space:]]')" 0 "no shell suite path holds whitespace (run.sh word-splits ls -S)"
 # CI pins the cap and keeps its job names (ADR 0025).
 ci=$(cat .github/workflows/test.yml)
-has "$ci" 'THREAD_TEST_JOBS: "4"' "CI pins THREAD_TEST_JOBS to 4"
+has "$ci" 'THREAD_TEST_JOBS: "8"' "CI pins THREAD_TEST_JOBS to 8"
 has "$ci" 'name: make test (${{ matrix.os }})' "CI keeps its job name (the required-check context)"
 has "$ci" 'os: [ubuntu-latest, macos-latest]' "CI keeps its matrix"
 
