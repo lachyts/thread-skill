@@ -709,6 +709,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !tr1.includes('A `WARN: ~/.config/thread/away.json` line on its stderr') ||
     !tr1.includes('is printed verbatim the first time this session sees that exact line') ||
     !trickleP.includes('a **Trickle claim**') || !tr1.includes('A `WARN: trickle claims` line on its stderr') ||
+    // p28-5: the fair share keeps a freed place for a waiting rollout, and slotLimit leaves it out
+    !trickleP.includes('A **fair share** keeps a freed place') ||
     !tr6.includes('A `trickle:` hold (*The Trickle*) ends the turn `waiting` too') ||
     !tr6.includes('`reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`') ||
     !tr6.includes('a Trickle wait can stand with nothing of this rollout in flight') ||
@@ -1451,6 +1453,8 @@ test('control: § 4.5 without the Trickle at any one site fails trickle', () => 
   only(sk(' (a **Trickle claim**)', ''), 'trickle', 'no Trickle claim named')
   only(sk(' A `WARN: trickle claims` line on its stderr (`skills/execute/away.md` § The Trickle, *Trickle claims*) is relayed the same way.', ''),
     'trickle', 'no claims WARN relay in step 1.1')
+  // p28-5: the fair share
+  only(sk(' A **fair share** keeps a freed place for the waiting rollout', ' A waiting rollout gets no freed place'), 'trickle', 'no fair share named')
 })
 test('control: a restart held by the Trickle, or a Trickle-held revise that halts stuck, fails trickle', () => {
   only(sk(' A restart waits on the ceiling alone:', ' A restart waits on `slotLimit` too:'), 'trickle', 'a restart held by the Trickle')
@@ -1459,7 +1463,7 @@ test('control: a restart held by the Trickle, or a Trickle-held revise that halt
   only(sk('within the ceiling like any restart, never held by the Trickle', 'within `slotLimit`'), 'trickle', 'an automatic retry held by the Trickle')
   only(sk(' A revise held only by `slotLimit`, below `ceiling`, is a Trickle wait: the halt guard (step 1.5) never halts on it (while Away, an Away-cap wait, the same).', ''),
     'trickle', 'step 1.2 without the pointer to the guard')
-  only(sk(', never § 7: the revise launches once the Mac has room', ', then § 7: the revise launches once the Mac has room'), 'trickle', 'the guard halts')
+  only(sk(', never § 7: `next` counts the revise in this rollout', ', then § 7: `next` counts the revise in this rollout'), 'trickle', 'the guard halts')
   const guard = real.skill.split('\n').find((l) => l.includes('**Halt guard (last).**'))
   const clause = guard.slice(guard.indexOf(' A `stuck` while step 1.2 held an `autoRevise: true`'))
   only(sk(clause, ''), 'trickle', 'no Trickle clause in the halt guard')
