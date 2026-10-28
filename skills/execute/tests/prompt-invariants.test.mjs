@@ -931,7 +931,9 @@ function agentPrompts(E, over = {}) {
 // removal ask. RM_RULE names the safe forms, and every builder renders it once, right after GIT_ENV_RULE.
 {
   const E = loadEngine(['GIT_ENV_RULE', 'RM_RULE', ...RULE_BUILDERS])
-  const prompts = agentPrompts(E)
+  // p32-1: the production (slotted) shape too, not only the unslotted byte-pin baseline.
+  const renders = [agentPrompts(E), agentPrompts(E, { verifySlot: VERIFY_SLOT })]
+  const prompts = renders[0]
   const FORMS = ['`rm -rf /tmp/x && mkdir -p /tmp/x`', '`mktemp -d`', '`rm -rf "$T"`', '${T:?}', '`rm -rf ./*`', '`$VAR/`', 'command substitution', 'bypass mode']
   const times = (hay, needle) => hay.split(needle).length - 1
   // [] when the rule and every prompt hold; else what failed.
@@ -949,7 +951,9 @@ function agentPrompts(E, over = {}) {
     return out
   }
   ok(Object.keys(prompts).length === 10, 'RM_RULE: the ten agent builders are covered')
-  ok(JSON.stringify(rmRuleFails(E.RM_RULE, E.GIT_ENV_RULE, prompts)) === '[]', 'RM_RULE: one line naming every safe and refused form, once in every prompt, right after GIT_ENV_RULE')
+  for (const [k, byName] of renders.entries()) {
+    ok(JSON.stringify(rmRuleFails(E.RM_RULE, E.GIT_ENV_RULE, byName)) === '[]', `RM_RULE (${k ? 'slotted' : 'unslotted'}): one line naming every safe and refused form, once in every prompt, right after GIT_ENV_RULE`)
+  }
   const stripped = { ...prompts, plannerPrompt: prompts.plannerPrompt.map((p) => p.replace('\n\n' + E.RM_RULE, '')) }
   ok(rmRuleFails(E.RM_RULE, E.GIT_ENV_RULE, stripped).length > 0, 'RM_RULE control: a prompt with RM_RULE stripped fails')
   const slashed = E.RM_RULE.replace('`rm -rf "$T"`', '`rm -rf "$T"/*`')
@@ -964,7 +968,9 @@ function agentPrompts(E, over = {}) {
 // once, right after RM_RULE.
 {
   const E = loadEngine(['RM_RULE', 'KILL_RULE', ...RULE_BUILDERS])
-  const prompts = agentPrompts(E)
+  // p32-1: the production (slotted) shape too, not only the unslotted byte-pin baseline.
+  const renders = [agentPrompts(E), agentPrompts(E, { verifySlot: VERIFY_SLOT })]
+  const prompts = renders[0]
   const NAMES = ['`pkill`', '`killall`', 'pgrep', 'pid', '`kill <pid>`', 'process group']
   const times = (hay, needle) => hay.split(needle).length - 1
   // [] when the rule and every prompt hold; else what failed.
@@ -982,7 +988,9 @@ function agentPrompts(E, over = {}) {
     return out
   }
   ok(Object.keys(prompts).length === 10, 'KILL_RULE: the ten agent builders are covered')
-  ok(JSON.stringify(killRuleFails(E.KILL_RULE, E.RM_RULE, prompts)) === '[]', 'KILL_RULE: one static line naming pkill, killall, pgrep and the pid, once in every prompt, right after RM_RULE')
+  for (const [k, byName] of renders.entries()) {
+    ok(JSON.stringify(killRuleFails(E.KILL_RULE, E.RM_RULE, byName)) === '[]', `KILL_RULE (${k ? 'slotted' : 'unslotted'}): one static line naming pkill, killall, pgrep and the pid, once in every prompt, right after RM_RULE`)
+  }
   const stripped = { ...prompts, integratorPrompt: prompts.integratorPrompt.map((p) => p.replace('\n\n' + E.KILL_RULE, '')) }
   ok(killRuleFails(E.KILL_RULE, E.RM_RULE, stripped).length > 0, 'KILL_RULE control: a prompt with KILL_RULE stripped fails')
   const lax = E.KILL_RULE.replace('`killall`, ', '')
@@ -1002,8 +1010,7 @@ function agentPrompts(E, over = {}) {
   const H = (c) => c.repeat(40)
   const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
   const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
-  const ar = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
-  const arB = { ...ar, knownBaselineFailures: ['t — env'] }
+  const ar0 = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
   const I = {
     prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
     landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }],
@@ -1011,23 +1018,26 @@ function agentPrompts(E, over = {}) {
     rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [] },
   }
   const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }
-  const climbed = E.rungState(tk, ar)
-  E.escalate(climbed, tk.slug, 'implement')
-  const states = [E.rungState(tk, ar), climbed]
   const hist = [{ round: 1, feedback: ['a'] }, { round: 2, feedback: ['b'] }]
-  const withRule = {
-    implementerPrompt: [...states.map((st) => E.implementerPrompt(tk, ar, st, '')), E.implementerPrompt({ ...tk, ignoreGate: true }, arB, climbed, 'prior attempt')],
-    approvedPlanImplementerPrompt: [...states.map((st) => E.approvedPlanImplementerPrompt(tk, 'PLAN', ar, st, '')), E.approvedPlanImplementerPrompt(tk, 'PLAN', arB, climbed, 'prior')],
-    readOnlyPrompt: [E.readOnlyPrompt(tk, ar, states[0], ''), E.readOnlyPrompt(tk, arB, climbed, 'prior')],
-    planJudgePrompt: [E.planJudgePrompt(tk, 'PLAN', ar)],
-    reviewJudgePrompt: [E.reviewJudgePrompt(tk, im, ar, []), E.reviewJudgePrompt(tk, im, ar, hist), E.reviewJudgePrompt(tk, im, arB, hist)],
-  }
-  const without = {
-    plannerPrompt: [E.plannerPrompt(tk, ar, states[0], '')],
-    planReviserPrompt: [E.planReviserPrompt(tk, 'PLAN', [{ round: 1, feedback: ['fix it'] }], 2, ar)],
-    reviserPrompt: [E.reviserPrompt(tk, im, hist.slice(0, 1), 2, ar, ''), E.reviserPrompt(tk, im, hist, 3, ar, 'PLAN', { history: hist, roundsUsed: 2 })],
-    integratorPrompt: [E.integratorPrompt(tk, ar, I)],
-    integrationReviewPrompt: [E.integrationReviewPrompt(tk, ar, I, J)],
+  // Every variant, rendered unslotted (the byte-pin baseline) and slotted (the production shape, p32-1).
+  const withRule = {}
+  const without = {}
+  const add = (into, k, ps) => { into[k] = [...(into[k] || []), ...ps] }
+  for (const ar of [ar0, { ...ar0, verifySlot: VERIFY_SLOT }]) {
+    const arB = { ...ar, knownBaselineFailures: ['t — env'] }
+    const climbed = E.rungState(tk, ar)
+    E.escalate(climbed, tk.slug, 'implement')
+    const states = [E.rungState(tk, ar), climbed]
+    add(withRule, 'implementerPrompt', [...states.map((st) => E.implementerPrompt(tk, ar, st, '')), E.implementerPrompt({ ...tk, ignoreGate: true }, arB, climbed, 'prior attempt')])
+    add(withRule, 'approvedPlanImplementerPrompt', [...states.map((st) => E.approvedPlanImplementerPrompt(tk, 'PLAN', ar, st, '')), E.approvedPlanImplementerPrompt(tk, 'PLAN', arB, climbed, 'prior')])
+    add(withRule, 'readOnlyPrompt', [E.readOnlyPrompt(tk, ar, states[0], ''), E.readOnlyPrompt(tk, arB, climbed, 'prior')])
+    add(withRule, 'planJudgePrompt', [E.planJudgePrompt(tk, 'PLAN', ar)])
+    add(withRule, 'reviewJudgePrompt', [E.reviewJudgePrompt(tk, im, ar, []), E.reviewJudgePrompt(tk, im, ar, hist), E.reviewJudgePrompt(tk, im, arB, hist)])
+    add(without, 'plannerPrompt', [E.plannerPrompt(tk, ar, states[0], '')])
+    add(without, 'planReviserPrompt', [E.planReviserPrompt(tk, 'PLAN', [{ round: 1, feedback: ['fix it'] }], 2, ar)])
+    add(without, 'reviserPrompt', [E.reviserPrompt(tk, im, hist.slice(0, 1), 2, ar, ''), E.reviserPrompt(tk, im, hist, 3, ar, 'PLAN', { history: hist, roundsUsed: 2 })])
+    add(without, 'integratorPrompt', [E.integratorPrompt(tk, ar, I)])
+    add(without, 'integrationReviewPrompt', [E.integrationReviewPrompt(tk, ar, I, J)])
   }
   const WORDS = ['value', 'design choice', 'out-of-band', 'never needsHuman', 'test failure', 'gated', '## Repair input', 'blocked=true', '"changes"']
   const times = (hay, needle) => hay.split(needle).length - 1
@@ -1078,7 +1088,7 @@ function agentPrompts(E, over = {}) {
 {
   const E = loadEngine(['KILL_RULE', 'SLOT_TEXT', 'GIT_ENV_SCRUB', 'shq', 'slotted', 'slotRule', 'scrubbed', 'verifySlotArgsError', ...RULE_BUILDERS])
   const V = `make test && echo "it's $HOME"`
-  const SLOT = { script: '/plugins/thread/1.0.0/skills/execute/scripts/verify-slot.py', slots: 2 }
+  const SLOT = VERIFY_SLOT   // tests/lib/engine.mjs's fixture (p32-1), never a literal copy
   const H = (c) => c.repeat(40)
   const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
   const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
@@ -1921,7 +1931,7 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
     { name: 'opus-xhigh', model: 'opus', effort: 'xhigh', judge: 'high', review: 'xhigh' },
   ] }
   const mkT = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: false, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, model: 'fable', rung: 'opus-xhigh', ...over })
-  const PIN_SLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
+  const PIN_SLOT = VERIFY_SLOT   // tests/lib/engine.mjs's fixture, the args.verifySlot every engine test passes (p32-1)
   const mkA = (task, over = {}) => ({ rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', ladder: LADDER, verifySlot: PIN_SLOT, task, ...over })
   const SL = loadEngine(['slotted', 'slotRule', 'slotNote', 'scrubbed'])
   const unslot = (p) => p.split(SL.slotRule('make test', PIN_SLOT)).join('').split(SL.slotNote(PIN_SLOT)).join('')

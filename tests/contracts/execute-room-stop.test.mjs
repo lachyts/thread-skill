@@ -292,7 +292,7 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
   // transient-routing: every reconcile site routes that row to Lost call before it reconciles.
   if (!lostDef.includes('or a transient row after a usage limit (*After a usage limit*, below)') ||
     !st2.includes('Reconcile its row (§ 6), except a row whose `blockerDiagnosis` contains `transient infrastructure failure` from a call launched before a usage limit this Session knows of: that row is never reconciled') ||
-    !st2.includes('it goes to *Lost call* (*After a usage limit*)') || !st2.includes('An error, no row, or a transient row after a usage limit: *Lost call*') ||
+    !st2.includes('it goes to *Lost call* (*After a usage limit*)') || !st2.includes('Any other error, no row, or a transient row after a usage limit: *Lost call*') ||
     !integ.includes('A transient row after a usage limit (its `blockerDiagnosis` contains `transient infrastructure failure`) is the exception, as at step 2: it is never reconciled, writes no `## Integration log` line, keeps `integrating:` and the lane held, and goes to *Lost call*') ||
     !s6.includes('One row is never reconciled: a transient row after a usage limit (its `blockerDiagnosis` contains `transient infrastructure failure`') ||
     !checkSites.includes('A transient row after a usage limit is checked there like any row but never reconciled')) fails.push('transient-routing')
@@ -361,7 +361,7 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
   if (!integ.includes(', and goes to *Lost call*, unless its check tripped (below)') ||
     !integ.includes('**A tripped check wins over *Lost call* and a room stop alike:** when the return reconciled no row (a transient row after a usage limit, an error, or no row), its runId is dropped too, so nothing resumes that call') ||
     !integ.includes("the lane frees while the note keeps `integrating:`. After the ack, step 1.4 takes the task through step 3's `prepare`") ||
-    !integ.includes('An error, or no row, after a check that exited 0: *Lost call*') ||
+    !integ.includes('Any other error, or no row, after a check that exited 0: *Lost call*') ||
     !laneFree.includes('At the integrate check, a return that reconciled no row (a transient row, an error, or no row) also drops its runId') ||
     !it(6).includes("An integrate call whose return's canary `check` tripped is never room-stopped: the trip wins (§ 4.5 step 3)") ||
     !lost.includes("it is room-stopped and keeps its handle (an integrate call whose return's canary `check` tripped excepted: step 3)") ||
@@ -727,7 +727,7 @@ test('control: a tripped integrate return kept for a Lost call resume, or the ol
   only(sk("its runId is dropped too, so nothing resumes that call (not *Lost call*, heartbeat clause (3) or step 1.4), and the lane frees while the note keeps `integrating:`. After the ack, step 1.4 takes the task through step 3's `prepare`",
     'it keeps its runId and the lane across the halt, and after the ack step 1.4 resumes it first, with no `prepare`'), 'integrate-trip', 'choice (a)')
   only(sk(', and goes to *Lost call*, unless its check tripped (below).', ', and goes to *Lost call*.'), 'integrate-trip', 'contradiction back')
-  only(sk('An error, or no row, after a check that exited 0: *Lost call*', 'An error, or no row: *Lost call*'), 'integrate-trip', 'error case unqualified')
+  only(sk('Any other error, or no row, after a check that exited 0: *Lost call*', 'Any other error, or no row: *Lost call*'), 'integrate-trip', 'error case unqualified')
   only(sk(" An integrate call whose return's canary `check` tripped is never room-stopped: the trip wins (§ 4.5 step 3).", ''), 'integrate-trip', 'item 6')
   only(sk(' At the integrate check, a return that reconciled no row (a transient row, an error, or no row) also drops its runId, so no *Lost call* resume ever races `prepare` for the lane (step 3).', ''),
     'integrate-trip', 'lane-free rule')

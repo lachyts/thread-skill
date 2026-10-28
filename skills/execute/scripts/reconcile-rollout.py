@@ -530,8 +530,8 @@ Subcommands:
 
   verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2, p23-4): given a rollout
               note, print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
-              max(60, 7200 - 600 - N), "verifySlots": V, "verifySlot": {"script": <abs verify-slot.py>,
-              "slots": V}} from its `verify_timeout` frontmatter (an integer
+              max(60, 7200 - 600 - N), "verifySlot": {"script": <abs verify-slot.py>, "slots": V}} from its
+              `verify_timeout` frontmatter (an integer
               from 1 to 6600; absent -> 1800; a quoted value or a trailing ` # comment` is read as
               `parallel_ceiling` is) and the machine's `verify_slots` (rollout-settings.py resolve(repo=None):
               rollouts.toml's [defaults], else the built-in 2; never read from the note). harnessTimeoutMs is
@@ -545,7 +545,9 @@ Subcommands:
               set, the line gains `"namedRerun": "<cmd>"` after `verifySlot`, absent or empty no key; a value it
               refuses is exit 2 like a completion key's. A refused
               rollouts.toml (the whole file is validated), a present one on a python with no tomllib, or a resolver
-              that will not load: `ERROR: rollout settings refused: <the resolver's line>`, exit 3, no stdout.
+              that will not load: `ERROR: rollout settings refused: <the resolver's line>`, exit 3, no stdout. No
+              verify-slot.py beside this script (p32-1, checked after exit 3): `ERROR: verify-timeout: <path> not
+              found`, exit 4, no stdout.
 
   record-verify  The lead's record of one Integration verify or RACE re-verify (ADR 0050, 0051; execute § 4.5 step 3
               and the RACE procedure), run only once that verify's canary check exited 0: `--rollout <note> --tasks
@@ -10627,11 +10629,12 @@ def cmd_await_sign_off(args) -> int:
 def cmd_verify_timeout(args) -> int:
     """The lead's per-entry check of the rollout's `verify_timeout` and the machine's `verify_slots` (execute § 3,
     p14-2, p23-4). Read-only. Valid: one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
-    max(60, 7200 - 600 - N), "verifySlots": V, "verifySlot": {"script": <this script's sibling verify-slot.py>,
-    "slots": V}}, exit 0: `verifySlot` is the engine's args.verifySlot, copied verbatim (execute § 4). A bad verify_timeout or no note: one ERROR line on stderr,
-    exit 1 (checked first). A completion key the completion verify's reader refuses (_completion_config): its ERROR
-    line, exit 2. A refused rollouts.toml: `ERROR: rollout settings refused: …`, exit 3. Either way the lead's entry
-    writes nothing."""
+    max(60, 7200 - 600 - N), "verifySlot": {"script": <this script's sibling verify-slot.py>, "slots": V}}, exit 0:
+    `verifySlot` is the engine's args.verifySlot, copied verbatim (execute § 4), and `verifySlot.slots` the machine's
+    verify_slots. A bad verify_timeout or no note: one ERROR line on stderr, exit 1 (checked first). A completion key
+    the completion verify's reader refuses (_completion_config): its ERROR line, exit 2. A refused rollouts.toml:
+    `ERROR: rollout settings refused: …`, exit 3. No sibling verify-slot.py (p32-1): `ERROR: verify-timeout: <path>
+    not found`, exit 4 (checked last). Either way the lead's entry writes nothing."""
     path = Path(os.path.expanduser(args.rollout))
     if not path.exists():
         print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
@@ -10657,8 +10660,13 @@ def cmd_verify_timeout(args) -> int:
     if err:
         print(f"ERROR: rollout settings refused: {err}", file=sys.stderr)
         return 3
+    # p32-1: the lead passes verifySlot.script to the engine verbatim, so a plugin install without its sibling
+    # verify-slot.py halts here, at the entry, with nothing stamped (gate-pricer's sibling check, its own code).
+    if not VERIFY_SLOT_PY.is_file():
+        print(f"ERROR: verify-timeout: {VERIFY_SLOT_PY} not found", file=sys.stderr)
+        return 4
     out = {"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000, "slotWait": _slot_wait(seconds),
-           "verifySlots": slots, "verifySlot": {"script": str(VERIFY_SLOT_PY), "slots": slots}}
+           "verifySlot": {"script": str(VERIFY_SLOT_PY), "slots": slots}}
     if named:
         out["namedRerun"] = named   # only when the note sets it, so a line for a note without it is unchanged
     print(json.dumps(out))
@@ -11455,8 +11463,11 @@ WHOLE_HALT_PATTERNS = (
     r"invalid verify_timeout on \[\[[^\]]+\]\]",
     r"completion verify: rollout note unreadable",
     r"rollout settings refused",
+    r"verify-slot\.py not found",
     r"invalid round budget: \S+ on \[\[{rollout}\]\]",
     r"lane hold not written on \[\[[^\]]+\]\]",
+    r"args\.verifySlot is not this entry's verify-timeout verifySlot",
+    r"engine refused the args of \[\[[^\]]+\]\]",
     r"ladder file refused",
     r"lead-integrate\.py failed on \[\[[^\]]+\]\]",
     r"merge-task\.sh exited \S+ on the revert of \[\[[^\]]+\]\]",
