@@ -899,9 +899,12 @@ stall's notice (the Stop hook's fresh halt line) can be delayed by up to the thr
 behind that mtime gate and notifies once per stall (keyed on the rollout and its `lastEvent`) through ntfy-push.py; it
 only notifies, and never writes the vault or a Run record. It first probes the Stage as Chorus's ctl.sh status does (GET
 `http://127.0.0.1:4747/api/logins`, 1 s), never through the Stage's host.lock, and stays silent on a 2xx. Lachy installs
-it once (README): its plist verb renders the job into `~/Library/LaunchAgents/com.thread.watchdog.plist`, then
-`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.thread.watchdog.plist` loads it (every 10 minutes; the
-job's `--gh-bin` is the `gh` found at render time).
+it once (README), from the installed plugin's root, never a rollout worktree or another checkout:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist > ~/Library/LaunchAgents/com.thread.watchdog.plist`
+renders the job, then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.thread.watchdog.plist` loads it
+(every 10 minutes; the job's `--gh-bin` is the `gh` found at render time). The job runs the script it was rendered from,
+so after each plugin update he re-renders it and re-bootstraps it (`launchctl bootout gui/$(id -u)/com.thread.watchdog`
+first), or it keeps reading rollouts with the old engine's `moving`; the plist verb names that script on stderr.
 
 ***The interim gap*.** Until [[chorus-the-companion-recovers-a-stalled-rollout]] lands, nothing consumes `moving` while
 the Stage is up. A 2xx on `api/logins` silences the fallback, so a stall then goes unnotified. The fallback's plist

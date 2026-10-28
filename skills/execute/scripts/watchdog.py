@@ -46,9 +46,13 @@ plist prints the launchd job (plistlib) on stdout: ProgramArguments [this python
 --gh-bin <shutil.which("gh")>], plus `--chorus-url <URL>` when that flag is given ('' included); with no gh on PATH,
 no --gh-bin and one WARN. EnvironmentVariables PATH is <gh's dir>:/usr/bin:/bin:/usr/sbin:/sbin, so `next`'s PR-hold
 reads find gh under launchd. StartInterval --interval (600), RunAtLoad, ProcessType Background, and --log for stdout
-and stderr. Installing it is Lachy's one-time step (README; status § The Watchdog's reading):
-`watchdog.py plist > ~/Library/LaunchAgents/com.thread.watchdog.plist`, then
-`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.thread.watchdog.plist`.
+and stderr. Installing it is Lachy's one-time step (README; status § The Watchdog's reading). Render it from the
+installed plugin's root, ${CLAUDE_PLUGIN_ROOT}, never a rollout worktree or another checkout: the job runs the script it
+was rendered from, so after each plugin update re-render it and re-bootstrap it
+(`launchctl bootout gui/$(id -u)/com.thread.watchdog`, then the two steps below). The verb names the script it baked
+in on stderr (`watchdog plist: the job runs <path>: …`, no WARN). The two steps:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist > ~/Library/LaunchAgents/com.thread.watchdog.plist`,
+then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.thread.watchdog.plist`.
 
 Stdlib only, python >= 3.9. It sets sys.dont_write_bytecode before it loads reconcile-rollout.py, so no __pycache__
 lands in the plugin directory.
@@ -278,6 +282,9 @@ def cmd_plist(args):
         "StandardOutPath": log,
         "StandardErrorPath": log,
     }
+    # Not a WARN: it makes a wrong root (a worktree, an old cache version) visible at render time.
+    print(f"watchdog plist: the job runs {argv[1]}: re-render it and re-bootstrap it after each plugin update",
+          file=sys.stderr)
     sys.stdout.write(plistlib.dumps(job).decode("utf-8"))
     return 0
 

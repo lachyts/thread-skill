@@ -150,9 +150,15 @@ single cause holds the whole queue: a cause that reaches every merge holds only
 the Integration lane (`reconcile-rollout.py lane-hold`, released by Lachy's ack,
 `lane-ack`, through `/thread:repair`). Chorus's Companion polls `moving`; when
 Chorus is not running, `skills/execute/scripts/watchdog.py` reads the same verdict
-and only notifies (ntfy), once per stall. Installing it is a one-time step:
-`python3 skills/execute/scripts/watchdog.py plist > ~/Library/LaunchAgents/com.thread.watchdog.plist`,
+and only notifies (ntfy), once per stall. Installing it is a one-time step, run
+from the installed plugin's root (`${CLAUDE_PLUGIN_ROOT}`, the root the release
+paragraph under § Tests describes; in a terminal, export it first), never a
+rollout worktree or another checkout:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist > ~/Library/LaunchAgents/com.thread.watchdog.plist`,
 then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.thread.watchdog.plist`.
+The job runs the script it was rendered from, so after each plugin update
+re-render it and re-bootstrap it (`launchctl bootout gui/$(id -u)/com.thread.watchdog`
+first).
 Until the Chorus task that consumes `moving` lands, a running Stage silences the
 fallback, so a stall then goes unnotified; `watchdog.py plist --chorus-url ''`
 installs a fallback that never probes, for the meantime.

@@ -198,12 +198,13 @@ test('W6. ntfy-push exit 4 (no topic): nothing recorded; once a topic is set, th
   assert.equal(posts(n).length, 1, r.stdout)
 })
 
-test('W7. plist: the job, its gh, its PATH and --chorus-url', async (t) => {
+test('W7. plist: the job, its gh, its PATH, --chorus-url and the script it names on stderr', async (t) => {
   const s = scratch(t)
   const parse = (xml) => JSON.parse(execFileSync(PY, ['-c', 'import json, plistlib, sys; print(json.dumps(plistlib.loads(sys.stdin.buffer.read())))'],
     { input: xml, encoding: 'utf8' }))
   let r = await run(s, ['plist'], { env: { ...s.env, PATH: `${s.bin}:/usr/bin:/bin` } })
   assert.equal(r.status, 0, r.stderr)
+  assert.ok(r.stderr.includes(`watchdog plist: the job runs ${WD}:`), `names the script it baked in: ${r.stderr}`)
   let job = parse(r.stdout)
   assert.deepEqual(job.ProgramArguments.slice(1), [WD, 'check', '--gh-bin', path.join(s.bin, 'gh')])
   assert.ok(path.isAbsolute(job.ProgramArguments[0]))

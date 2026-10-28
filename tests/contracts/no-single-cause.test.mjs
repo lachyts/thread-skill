@@ -21,7 +21,8 @@
 //   exit2         *lead-integrate's exit 2*: its routes in order, § 7's bullet, step 3's exit 2, the marker raised
 //                 twice, the no-flag clause at four sites
 //   watchdog      status § The Watchdog's reading: the verb, the verdicts, the bounds, the safety wording, *Which waits
-//                 silence judges* bound to SILENCE_JUDGED, the fallback's probe and *The interim gap*
+//                 silence judges* bound to SILENCE_JUDGED, the fallback's probe and *The interim gap*; README, status and
+//                 watchdog.py's docstring render the plist from ${CLAUDE_PLUGIN_ROOT} and re-render after each plugin update
 //   reason-table  its table covers every `reason="…"` of steps 1.5 and 1.6, *Merge hold*, *Lane hold*, *lead-integrate's
 //                 exit 2* and § Room stop item 8
 //   repair-adrs   repair § 3g writes `lane-ack`; ADR 0048 says how p29-7 built it; ADRs 0033 and 0030 are amended
@@ -39,6 +40,8 @@ const FILES = {
   adr48: read('docs/adr/0048-no-single-cause-holds-the-whole-queue.md'),
   adr33: read('docs/adr/0033-execute-retries-agent-fixable-set-asides.md'),
   adr30: read('docs/adr/0030-a-rollout-is-a-queue-that-integrates-at-merge.md'),
+  readme: read('README.md'),
+  wd: read('skills/execute/scripts/watchdog.py'),
 }
 const RULES = ['s7', 'kept', 'narrowed', 'lane-hold', 'needs-you', 'merge-task', 'task-scoped', 'moving-doc', 'wait-clauses',
   'exit2', 'watchdog', 'reason-table', 'repair-adrs']
@@ -208,6 +211,13 @@ function check(f) {
   // watchdog
   const wd = section(f.status, /^## The Watchdog's reading \(ADR 0048\)/, /^## Loopable/)
   const wdc = collapse(wd)
+  // The plist render: one root (the installed plugin's) in README, watchdog.py's docstring and status, each saying to
+  // re-render after a plugin update, since the job runs the script it was rendered from.
+  const RENDER = 'python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist'
+  const docAt = f.wd.indexOf('"""')
+  const wdDoc = docAt < 0 ? '' : collapse(f.wd.slice(docAt, f.wd.indexOf('"""', docAt + 3)))
+  const readme = collapse(f.readme)
+  const renders = [readme, wdDoc, wdc].every((txt) => txt.includes(RENDER) && txt.includes('after each plugin update'))
   const silenceJudged = pyTuple(f.rr, 'SILENCE_JUDGED')
   const group = (from, to) => collapse(section(wd, from, to))
   const bySilence = group(/^- judged by silence/, /^- judged by its own bound/)
@@ -229,7 +239,8 @@ function check(f) {
     !bySilence.includes('judged in place of stall-after whatever else runs beside it') ||
     !never.includes('A soft pause behind a lane verdict is not drained') ||
     !wdc.includes('***The interim gap*.**') || !wdc.includes('as Chorus\'s ctl.sh status does') ||
-    /takes? (the )?(Stage's )?host\.lock/.test(wdc))
+    /takes? (the )?(Stage's )?host\.lock/.test(wdc) ||
+    !renders || readme.includes('python3 skills/execute/scripts/watchdog.py plist'))
 
   // reason-table
   const table = wd.split('\n').filter((l) => l.startsWith('| ')).join('\n')
@@ -334,12 +345,13 @@ test('control: a lane-site exit 2 routed to § 7, or the marker clause dropped, 
   only('execute', ' (none when N is invalid, § 3; an exit 2: *lead-integrate\'s exit 2*)', '', 'exit2')
 })
 
-test('control: an absolute live-lead claim, a silence list off SILENCE_JUDGED, or no interim gap, fails watchdog', () => {
+test('control: an absolute live-lead claim, a silence list off SILENCE_JUDGED, no interim gap, or a root-less render, fails watchdog', () => {
   only('status', 'So `stalled` is a reason to look', 'So a live lead never reads `stalled`; it is a reason to look', 'watchdog')
   only('rr', 'SILENCE_JUDGED = ("merge-hold", "regenerating")', 'SILENCE_JUDGED = ("merge-hold",)', 'watchdog')
   only('status', '  - `merge-hold` (at `--stall-after`:', '  - `pr-hold`, and `merge-hold` (at `--stall-after`:', 'watchdog')
   only('status', '***The interim gap*.**', '**Meanwhile.**', 'watchdog')
   only('status', 'judged in place of stall-after whatever else runs beside it', 'judged beside stall-after', 'watchdog')
+  only('readme', 'python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist >', 'python3 skills/execute/scripts/watchdog.py plist >', 'watchdog')
 })
 
 test('control: a reason the table leaves out fails reason-table', () => {
