@@ -11,7 +11,7 @@
 //   1. the port: Chorus's readers, copied verbatim into JS (header below names each source line);
 //   2. port self-tests: Chorus's documented behaviour, so a bad port fails here before it judges skill text;
 //   3. the skill text read THROUGH the port: close's four banners, the paraphrase counter-example, the
-//      NOT-closed form, the step-8 statement offer, rule (3)'s question line, a lead's status line, open
+//      NOT-closed form, the step-8 statement offer and rollout row (ADR 0057), rule (3)'s question line, a lead's status line, open
 //      save's checkpoint line and handoff's closing line, each extracted from the skill files themselves;
 //   4. prose and order pins through check(files), which returns named failures, each with a mutation control:
 //      among them execute's `done` route, which still runs the thread close (the ceremony's last step, after the
@@ -203,6 +203,8 @@ const SAMPLE = {
   reason: 'a memory write was blocked and its redirect is unclear',
   pointer: 'THREAD.md § Research digest',
   'abs doc path': '/Users/lachlants/repos/tools/thread-skill/docs/handoffs/2026-10-17-chorus-words.md',
+  slug: 'thread-skill-rollout-2026-10-28',
+  root: '/Users/lachlants/repos/tools/thread-skill-rollout',
 }
 function fill(s) {
   return s.replace(/<([a-z ]+)>(?:\[, <\1>…\])?/g, (_, name) => {
@@ -217,6 +219,7 @@ const paraphrase = (t) => pick(STEP9(t), /\*"(This thread is closed:[^"]*)"\*/)
 const notClosed = (t) => pick(STEP9(t), /\*"(Thread NOT closed: [^"]*)"\*/)
 const questionLine = (t) => pick(STEP9(t), /`(Which way on the Needs your call row\(s\) above\?)`/)
 const offer = (t) => pick(STEP8(t), /`(research not landed: [^`]*)`/)
+const rolloutRow = (t) => pick(STEP8(t), /`(rollout not started: [^`]*)`/)
 const savedLine = (t) => pick(lineOf(t, '- In place of close') ?? '', /`(Thread saved[^`]*)`/)
 const handoffLine = (t) => (fencedBlocks(BUILD(t))[1] ?? []).map((l) => l.trim()).join(' ') || null
 
@@ -325,6 +328,16 @@ test('close step 8: the research-landing offer is a statement, so the close stil
   assert.equal(fastClose(t), 'closed')
   assert.equal(R(closing(`${REPORT}\nresearch not landed: ${SAMPLE.pointer}. Want me to land it?`, BANNER)).asks, true,
     'control: a question-form offer reads as asking')
+})
+
+test('close step 8: the rollout-not-started row (ADR 0057) is a statement, so the close still archives', () => {
+  const o = rolloutRow(real.close)
+  assert.ok(o, 'step 8 has no `rollout not started: …` statement row')
+  const t = closing(`${REPORT}\n${fill(o)}`, BANNER)
+  assert.equal(R(t).asks, false, `the row asks: ${o}`)
+  assert.equal(fastClose(t), 'closed')
+  assert.equal(R(closing(`${REPORT}\nrollout not started: [[${SAMPLE.slug}]]. Shall I hand it off to a fresh session?`, BANNER)).asks, true,
+    'control: a question-form row reads as asking')
 })
 
 test('close step 9 rule (3): a Needs-your-call row\'s question line keeps the Session; without it, it archives', () => {

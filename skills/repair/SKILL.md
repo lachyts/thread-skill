@@ -96,7 +96,9 @@ version stop's `--regenerate` would only meet schedule's refusal again.
   unlanded tasks to N and died before schedule step 7.5 closed this note out. Never reinstate, resume or hand
   back here: the carried tasks are N's.
   - N never ran (its `incomplete` is non-null) → `/thread:schedule <project> --regenerate`: schedule § 0's
-    `interrupted` line finishes that supersede. Stop.
+    `interrupted` line finishes that supersede. Stop. On an approved queue (this note carries `on_merge:
+    regenerate` beside a rollout `hold_until`, `_shared/vault-grammar.md` § Approved queue) it is the chain's I8
+    window: `/thread:execute [[<this>]]` instead, whose route regenerates again under the chain. Stop.
   - N has run → finish step 7.5's close-out, **on Lachy's confirmation**, and only when status counts no
     running, integrating, awaiting-Integration, queued or set-aside task here (`carry` moved every such task;
     one still here would be stranded, so show it and stop). Run
@@ -134,8 +136,9 @@ overwrites, because each is independent of the pause and the lead:
   its own records, and it re-baselines a live window rather than overwriting a note; a live verify, RACE or integrate
   window that tripped then checks exit 4, so its run gives no verdict and is done again, while a task window checks
   0 and its work is taken as it stands (ADR 0053). § 3e's `restore` is not an
-  every-mode write: it waits until nothing of the rollout is in flight. Its `--bare-only` form, which moves no
-  ref, runs with (b)'s ack.
+  every-mode write: it waits until nothing of the rollout is in flight. Its `--bare-only` form waits the same way:
+  it moves no ref, but a bare checkout reaches every linked worktree, so it runs before (b)'s ack only once nothing
+  of the rollout is in flight.
 
 **Lead-held notes.** § 3c's `pr:` write and § 3c's defer of a RACE / UNVERIFIED task whose merge Lachy decides
 does not stand write a task note a live call's reconcile would overwrite. They run only when no lead is live
@@ -180,7 +183,8 @@ each task a fresh call beside that resume: two calls per task.
   own.
 - It never runs `resume`, never enters the loop, and never writes a running or integrating note, because a
   live call's reconcile would overwrite it: the lead-held notes wait for the lead's end.
-- A RACE re-verify in flight (§ 2) is the lead's: report it and wait. It becomes a § 3c escalation only once
+- A RACE re-verify in flight (§ 2) is the lead's: report it and wait. So is a RACE revert in flight (§ 2): the
+  lead finishes it, and any entry's step 1.4 resumes it. It becomes a § 3c escalation only once
   its owner session shows the `RACE: …` halt or no run, or has ended. A git-env halt ends it too: a `## Race log`
   line naming it that carries `git-env halt`, or the owner session's `git-env trip…` / `git-env canary failed`
   halt, makes it a § 3c escalation (§ 3e hands it there).
@@ -188,7 +192,9 @@ each task a fresh call beside that resume: two calls per task.
 
 **No lead live.** No pause, and every owner session has ended (or shows no run there, under no room-stop
 headline, neither the standing `ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`): the
-full flow, § 3 to § 6, except that an undecided RACE / UNVERIFIED escalation holds every `resume` and the hand-off (§ 3c).
+full flow, § 3 to § 6, except that an undecided RACE / UNVERIFIED escalation holds § 3a's `resume` (§ 3c), and an
+undecided UNVERIFIED, a RACE revert that did not land or a bare git-env trip holds the hand-off too (§ 4); an
+undecided RACE or a lane-only git-env trip holds only the Integration lane, so the hand-off runs (ADR 0046).
 
 **Sent here by schedule's unfinished-rollout refusal.** Repair sorts out what is stuck; superseding stays
 schedule's `--regenerate`. A refusal line `<P> is named by the supersedes: of <N>, which has since run` is
@@ -205,15 +211,16 @@ per-task `needsHuman`, and the live PR state. Each unmerged task takes the **fir
 signal it matches. The order matters: a RACE task's PR is MERGED, and so is an UNVERIFIED one's, which is also set
 aside at Integration, so they match **merged, never marked** and **at Integration** further down too; the order
 escalates them before repair reaches for `resume` or `hand-back`, both of which hold back a held task themselves
-(§ 3c). A RACE re-verify in flight comes first of all: it is the lead's own procedure, so repair neither escalates
-it nor asks Lachy while the lead decides it. A plan-block is judged for a descope before the automatic retry, as
+(§ 3c). A RACE re-verify in flight comes first of all, then a RACE revert in flight: each is the lead's own
+procedure, so repair neither escalates it nor asks Lachy while the lead decides or finishes it. A plan-block is judged for a descope before the automatic retry, as
 execute's step 1.2 judges it, and **retry (automatic)** and **needs you** come before **at Integration** and every
 class below it.
 
 | Class | Signal | Action |
 |---|---|---|
-| **RACE re-verify in flight** | status's in-flight RACE (status § 3): a `## Race log` line names it, it still reads `integrating` with an `owner:` whose session is not known to have ended, no `paused:` stamp stands, and its verdict file is absent or reads `0` | nothing: execute's RACE procedure owns it (green → `mark-done`, red → its `RACE: …` halt); never escalate it or ask Lachy mid-re-verify. Once its owner session shows the `RACE: …` halt or no run, or has ended, it is **RACE**. So is one whose `## Race log` carries a `git-env halt` line naming it, or whose owner session shows a git-env halt (§ 3e hands it to § 3c) |
-| **RACE** | merge-task exit 5 (a `## Race log` line names it) and not in flight, or `UNVERIFIED:` in its set-aside reason, with no decision recorded (§ 3c) | escalate (§ 3c); never re-call merge-task; while it is undecided no `resume` runs at all (§ 3a, § 4's hand-off) |
+| **RACE re-verify in flight** | status's in-flight RACE (status § 3): a `## Race log` line names it, it still reads `integrating` with an `owner:` whose session is not known to have ended, no `paused:` stamp stands, and its verdict file is absent or reads `0` | nothing: execute's RACE procedure owns it (green → `mark-done`, red → its revert, the RACE revert); never escalate it or ask Lachy mid-re-verify. Once its owner session shows the `RACE: …` halt or no run, or has ended, it is **RACE**. So is one whose `## Race log` carries a `git-env halt` line naming it, or whose owner session shows a git-env halt (§ 3e hands it to § 3c) |
+| **RACE revert in flight** | status's revert in flight (status § 3): a `revert started:` line names it, no `revert did not land:` line does, and it still reads `integrating` | nothing: execute's RACE revert owns it (its revert PR merges through merge-task, then its landing tail sets the task aside); never escalate it, and never put it to Lachy mid-revert. Once it lands it is **RACE** (reverted); once a `revert did not land:` line names it, **RACE** (main red) |
+| **RACE** | merge-task exit 5 (a `## Race log` line names it) and not in flight, or `UNVERIFIED:` in its set-aside reason, with no decision recorded (§ 3c) | escalate (§ 3c); never re-call merge-task; while it is undecided § 3a's `resume` does not run, and § 4's hand-off still runs for an undecided RACE (its `resume` holds the RACE back and `next` holds only the lane), never for an undecided UNVERIFIED. A RACE whose revert did not land (status's Main red) holds the whole rollout, the hand-off included: § 3c first |
 | **PR-less merge** | status's "possible PR-less merge" flag | escalate with evidence (§ 3c) |
 | **merged into another base** | its PR is MERGED into a branch other than the default (status's flag) | escalate with evidence (§ 3c); never hand it back or defer it, and `resume` leaves it unchanged (it checks the base) |
 | **merged, never marked** | not done; its PR is MERGED into the default branch | `reconcile-rollout.py resume` (§ 3a) flips it done; never hand it back or defer it |
@@ -302,11 +309,15 @@ which finishes it. A complete rollout whose note does not read done (its lead en
 make (a gate, a § 3c escalation, a CLOSED PR, a missing branch or a missing `pr:`, a close-out, a defer chain, a
 set-aside whose automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or `needsHuman` is
 set) or whose `humanFix` names another cause that is his (§ 2), or a descope the verb refused: § 3d's exit 3, recorded,
-its `humanFix` `decide scope or defer`). For a set-aside at its run or at Integration, in order:
+its `humanFix` `decide scope or defer`), each in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`
+(Owner *yours*: a decision no agent can make; the *technical* pings this list still holds, a CLOSED PR, a missing
+branch and a defer chain among them, keep their own ADR 0054 § Sites rows until p30-10 designs them out). For a
+set-aside at its run or at Integration, in order:
 
 1. **Ask.** `AskUserQuestion` with the specific decision its block needs: quote the feedback and its `humanFix` (the
    act and the detail the script names, never a cause re-derived from the feedback), and offer the raise (§ 4) when
-   `humanFix.raise` names a field, or for a revise re-entry with no round left.
+   `humanFix.raise` names a field, or for a revise re-entry with no round left. It is his (Owner *yours*), so put it
+   in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`.
 2. **Prerequisites first**, only where hand-back may run (§ 1): whatever his answer needs before a bare hand-back is
    all that is left. That is § 4's push and `gh pr reopen`, a recut's retire and relabel, a `merge-task:` relabel, a
    stale anchor ref's deletion, or § 5's defer (its `## Notes` line is then the record).
@@ -374,7 +385,8 @@ again, so the block that comes back after the hand-back, an identical one includ
 *The needs-you flow*, for any set-aside whose note holds a `## Needs you` question (status's `needsHuman`), at its
 run, at Integration or at a gate:
 
-1. Ask the question verbatim, quoting the latest feedback.
+1. Ask the question verbatim, quoting the latest feedback (Owner *yours*, ADR 0033: the Framing of
+   `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` goes around the question, never into its words).
 2. Do step 2's prerequisites, where hand-back may run.
 3. Record it: `record-answer --kind needs-you`, its ask the question, verbatim. The verb removes the `## Needs you`
    section in the same save, in every mode. Execute's verdict reads a non-empty `## Needs you` as open (`answer the
@@ -412,6 +424,11 @@ evidence.** For each one, show:
    never ran (no verify slot came in time); `heat` no verdict (the Mac was too hot, the Heat hold); absent: it
    never finished, which reads as red) with the tail of `race-<slug>.log` beside it. An UNVERIFIED task
    was never re-verified: say so.
+   The RACE call is his (Owner *yours*), put in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`.
+6. for a RACE the lead reverted, or tried to (its `## Race log` `revert …` lines, execute § 4.5 *The RACE revert*):
+   the revert PR (#R from `revert opened:`, `gh pr view <R> --json state,mergeCommit,url`), the `reverted on main:`
+   line (the revert's sha, and `main back at …` or `main not re-verified: <k> commit(s) landed after …`), or the
+   `revert did not land:` line's reason (the conflict files, or the open revert PR).
 
 Then append a dated `## Notes` line to the rollout note (create the section if missing), e.g.
 `- <YYYY-MM-DD> repair: [[<slug>]] possible PR-less merge (PR #<n>, head audit-fix/<alias>, MERGED) escalated;
@@ -428,9 +445,11 @@ evidence shown; decision left to Lachy.` Repair never writes that task's `status
     the stamp, then repair).
 - **RACE / UNVERIFIED.** Never re-call merge-task: main's state is Lachy's call. Until a dated
   `- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>` line on the rollout note's
-  `## Notes` records it, the escalation is **undecided**: neither § 3a nor § 4's hand-off runs. Nothing but
-  the decision moves the task: `resume` skips it (exit 3), `hand-back` refuses it (exit 2), and execute halts
-  on a RACE once its lane is free and holds an UNVERIFIED task set aside. Once that line is written, `resume`
+  `## Notes` records it, the escalation is **undecided**: § 3a does not run, and § 4's hand-off runs only for an
+  undecided RACE (it holds only the Integration lane, ADR 0046), never for an undecided UNVERIFIED. Nothing but
+  the decision moves the task: `resume` skips it (exit 3), `hand-back` refuses it (exit 2), an undecided RACE
+  holds the Integration lane (execute's `next` halts `race` once nothing else moves, never holding a start) and an
+  UNVERIFIED task is held set aside. Once that line is written, `resume`
   flips the merged task done. The line is a rollout-note record, so repair writes it in every mode (§ 1),
   and a reinstate or a resume waits for it. If he decides the merge does not stand, defer the task (§ 5; its
   PR is merged, so the retire block's `gh pr close` is skipped) before recording it, so `resume` never reads
@@ -439,6 +458,15 @@ evidence shown; decision left to Lachy.` Repair never writes that task's `status
   the hold all wait for the lead's end. A later repair run with no lead live, or under a stamped pause,
   applies the recorded `defer pending` decision without asking again: the § 5 defer, then the `RACE decided:`
   line. Until then no `RACE decided:` line exists, so status still reads it as an open escalation.
+  A reverted RACE (a `reverted on main:` line names it) had its merge undone on `main`: `resume`, `hand-back`
+  and the automatic retry never re-enter its PR, so the decision is to defer it (§ 5) unless a new `pr:` re-lands it
+  (Lachy confirms the new PR's URL, written as for a PR-less merge; its own Integration then lands it). When its
+  line reads `main not re-verified`, say that the lane stays held until the decision.
+  **A revert that did not land** (a `revert did not land:` line names it; status's Main red): `main` is red, and
+  the whole rollout is held until the `RACE decided:` line (execute halts at once on every entry: nothing starts,
+  restarts or retries), so recording the decision releases every start. Show the conflict files or the open revert
+  PR from item 6. Lachy decides: land a revert (merge #R by hand, or resolve its conflict and merge it) before the
+  decision, or record that `main` stands as it is.
 - **Merged into another base.** `resume` leaves it unchanged, and repair never hands it back, defers it or
   re-calls merge-task for it: whether the work reached the default branch (the ancestry check above shows it)
   and what becomes of the task are Lachy's call. Escalate, record, and leave it.
@@ -483,12 +511,15 @@ count only in their own clause (split at `.`, `;`, `:`, a dash and `, and` / `, 
 one ("not optional") is none, and a part in a fenced code block always asks.
 
 **3e — a git-env trip → the evidence, then Lachy's ack.** Status's Git-env trip flag (`gitEnvHold` non-empty)
-means execute's canary saw the shared checkout change during a window, and the whole queue is held (execute § 4.5
-*Git-env canary*). R is the rollout's `Project root:` and B the branch the trip lines name: the canary refuses any
+means execute's canary saw the shared checkout change during a window, or a Bookkeeping miss's state check fail, and
+it holds what it threatens (ADR 0046; execute § 4.5 *Git-env canary*): a bare checkout (an entry with `scope:
+rollout`) holds the whole rollout; any other trip holds the Integration lane only, while task calls go on. R is the rollout's `Project root:` and B the branch the trip lines name: the canary refuses any
 other (exit 2). Show the evidence first:
 
-1. the unacked `## Git-env log` lines, verbatim. One culprit can trip several windows, and a `record missing`
-   trip on a call launched before the canary shipped is the upgrade case, not a culprit;
+1. the unacked `## Git-env log` lines, verbatim, with each entry's scope. One culprit can trip several windows, and a
+   `record missing` trip on a call launched before the canary shipped is the upgrade case, not a culprit. A
+   `…, and the state check failed: <failure>` trip is a Bookkeeping miss whose state check failed: its failure
+   names what to look at. A `git-env miss` line is no trip and needs no ack;
 2. `git -C R rev-parse --is-bare-repository`;
 3. `git -C R config --show-origin --show-scope --get-all core.bare`;
 4. `git -C R for-each-ref --format='%(objectname)' refs/heads/<B>`: the sha shown, which `--ref` and `--drop-local`
@@ -500,7 +531,9 @@ other (exit 2). Show the evidence first:
 8. `git -C R ls-remote --heads origin`.
 
 If a window is still in flight (a Workflow call or a background Integration command of the rollout), advise a
-hard pause first. Then offer (`AskUserQuestion`):
+hard pause first when a restore, (a) or (b)'s `--bare-only`, is needed: it runs only once nothing is in flight. Under
+a lane hold with no bare entry, task calls run on by design, and (b)'s ack needs no pause. Then offer (`AskUserQuestion`), in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`
+(Owner *yours*: dropping or keeping a commit on the default branch is his, ADR 0008):
 
 - **(a) Restore and ack**, only when no Workflow call or background Integration command of the rollout is in
   flight. When `origin/<B>..<B>` is non-empty, list those commits and mark each close-out-shaped one ("a
@@ -513,16 +546,22 @@ hard pause first. Then offer (`AskUserQuestion`):
 - **(b) Keep the commit and ack.** Whenever evidence item 2 reads `true`, first run
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py restore --rollout <rollout-note> --repo R --default B --bare-only`:
   it clears core.bare (the local and the worktree config) and moves no ref, because `ack` refuses while R reads
-  bare. Re-read and show items 2 and 4. Then `ack --rollout <rollout-note> --repo R --default B --slugs <exactly
+  bare; it runs only once no Workflow call or background Integration command of the rollout is in flight (a bare
+  checkout reaches every linked worktree, so running calls finish first). Re-read and show items 2 and 4. Then `ack --rollout <rollout-note> --repo R --default B --slugs <exactly
   the set shown> --ref <the sha shown>`, warning that execute § 2.7 halts the next `/thread:execute` entry (`local
   default branch is ahead of origin`) until the commit lands by PR or is dropped.
 - **(c) Leave it:** the hold stands.
 
+Bare and lane trips together are one decision: restore `--bare-only` once nothing is in flight, then one ack of the
+whole unacked set (the canary refuses a partial `--slugs`). A Companion (ADR 0048) may gather this evidence and
+notify Lachy, never ack: every trip is his.
+
 If `ack` exits 3 (the unacked set, the ref or the bareness changed since it was shown), re-read the evidence,
-show it again and ask again. If `restore` exits 2 on its drop guard (B moved since it was shown), show the new
-list and ask again; restore clears core.bare before that guard, so a refused restore never leaves R bare and (b)
-stays open. Any other exit 2 names a validation failure: show it and stop. A dated `## Notes` line records
-the choice: `- <YYYY-MM-DD> repair: [[a]], [[b]] git-env trip, acked at <sha>: <restored | kept>` (or `left`).
+show it again and ask again (Owner *yours*, as the first offer, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`).
+If `restore` exits 2 on its drop guard (B moved since it was shown), show the new list and ask again; restore clears
+core.bare before that guard, so a refused restore never leaves R bare and (b) stays open. Any other exit 2 names a
+validation failure: show it and stop. A dated `## Notes` line records the choice:
+`- <YYYY-MM-DD> repair: [[a]], [[b]] git-env trip, acked at <sha>: <restored | kept>` (or `left`).
 
 **RACE follow-on.** After a successful ack, re-run status. For each slug now in `raceHold` whose `## Race log`
 carries a `git-env halt` line, first show this evidence:
@@ -535,7 +574,8 @@ carries a `git-env halt` line, first show this evidence:
   lead never acted on it.
 
 This reading replaces § 3c item 5's halt-reason reading for this slug only. Then go straight to § 3c in this run:
-Lachy decides once, and § 4's hand-off waits for that decision, as § 3c already requires.
+Lachy decides once. Until he does, the RACE holds only the Integration lane, so § 4's hand-off runs as for any
+undecided RACE (§ 3c), the lane held until his `RACE decided:` line.
 
 **3f — a completion verify halt → diagnose, then the hand-off (execute § 4.5 step 5, ADR 0052).** Every task
 merged and the ceremony stopped at its completion verify: the last ROLLOUT-STATUS reason starts `completion verify`,
@@ -636,10 +676,15 @@ there is nothing to clear. Per stage:
   the verb (§ 3b) an identical re-block comes straight back to him. A task that blocks again in this run is surfaced
   with its new diagnosis and three offers: *more guidance and one more hand-back*, *defer it* (§ 5), or *leave it
   set aside*. Don't loop.
-- **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
-  undecided (§ 3c; report the hold and stop there), a git-env hold stands (§ 3e; report it and stop there) or
-  the ladder file is refused (§ 2; name the file and stop there), and never on a rollout whose ceremony already ran
-  (§ 3a's complete-rollout stop: report the repair and stop there): execute's queue loop, entered at its §4.5 resume
+- **Hand-off, when no lead is live and no pause stands**, and never while a whole-rollout hold stands: a
+  `gitEnvHold` entry with `scope: rollout` (a bare checkout; § 3e: report it and stop there), a non-empty `mainRed`
+  (a RACE revert that did not land; § 3c: report it and stop there) or an undecided UNVERIFIED escalation (§ 3c;
+  report the hold and stop there); never while the ladder file is refused (§ 2; name the file and stop there), and
+  never on a rollout whose ceremony already ran (§ 3a's complete-rollout stop: report the repair and stop there). A
+  hold on the Integration lane alone never stops it (ADR 0046): a git-env trip with `scope: lane` (§ 3e) or an
+  undecided RACE (§ 3c, its escalation shown) holds only the lane, while starts, seeded revises and automatic
+  retries go on, so report it (its slugs, and that the lane stays held until Lachy's ack or his `RACE decided:`
+  line) and hand off. The hand-off is execute's queue loop, entered at its §4.5 resume
   (*Cold resume*). First the launch-directory check, execute § 2.8's snippet (point at it; never copy it here):
   `self-rollout-check.sh --launch-check <Project root> <launch dir>`, the launch directory being this session's
   primary working directory as the harness reports it, never `pwd`. A lead's tools reset every `cd` outside it, so
@@ -648,11 +693,13 @@ there is nothing to clear. Per stage:
   stops repair at the diagnosis, with no hand-off: print its stderr verbatim and tell Lachy to start a session in
   the Project root and run `/thread:execute [[<rollout>]]` there. Then execute § 2.5 (then § 2.6), then execute
   § 3's `verify_timeout` check (a halt there
-  writes nothing), then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then
+  writes nothing), then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts, but its
+  exit 9, the lane hold, goes on), then
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (execute
   § Room stop: every loop entry ends a room stop, here one an ended owner session left, lapsed or not; with none standing
   it writes nothing, and a non-zero exit is printed and the hand-off goes on), then
-  `reconcile-rollout.py resume`, then the loop with
+  `reconcile-rollout.py resume` (its exit 3, an undecided RACE held back with one `HOLD:` line, is printed and the
+  hand-off goes on, as at execute's *Cold resume*), then the loop with
   `--running ""` (this session holds no task call, so a room-stopped call's handle is lost: execute § Room stop
   item 10). Execute's § 2.7 pushed-base gate (entry points only)
   does not run on this hand-off; the next `/thread:execute [[<rollout>]]` runs it. Under a live queue the
@@ -713,10 +760,11 @@ The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever
 
 **(b) Set-asides, in any state.** For each row with `setAside`:
 
-- **A gate** (`setAside.status` gate-pending): present each of its `setAside.gates` verbatim. On his sign-off,
+- **A gate** (`setAside.status` gate-pending): present each of its `setAside.gates` verbatim (Owner *yours*: a sign-off
+  is his, ADR 0008; `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`). On his sign-off,
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <t> --rollout <rollout-note>`:
   the next Leg's claim re-enters it. If he declines it, Defer (below).
-- **A block** (blocked, review-blocked or plan-blocked): `AskUserQuestion` quoting `setAside.summary`, offering hand
+- **A block** (blocked, review-blocked or plan-blocked): `AskUserQuestion` quoting `setAside.summary` (Owner *yours*, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), offering hand
   back (with his guidance), defer, or leave it set aside.
   - Hand back: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-answer --tasks <t> --rollout <rollout-note> --kind decision --ask "<the ask, verbatim>" --answer "<his answer, verbatim>" --fingerprint <row.setAside.fingerprint> --form hand-back`,
     then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-back --tasks <t> --answer <the stamp record-answer printed>`.
@@ -803,7 +851,8 @@ record, and its Completion log is the last Leg's.
 - **Don't redo what a set-aside task already finished.** At Integration, retry Integration only; a recut is
   only on Lachy's explicit ask.
 - **Don't descope by hand, or twice.** `reconcile-rollout.py descope` (§ 3d) writes every record and refuses a
-  second block after a restart (exit 3): ask Lachy then (§ 3b), and never hand the task back on a refusal. A
+  second block after a restart (exit 3): ask Lachy then (§ 3b; Owner *yours*: scope or defer,
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), and never hand the task back on a refusal. A
   task plan-blocked again after an automatic descope is § 2's **plan-blocked after a descope**, never an own
   run handed back silently.
 - **Don't hand back what the lead retries.** A set-aside that `inputs` reads as `autoRetry: true`, or cooling
@@ -820,16 +869,18 @@ record, and its Completion log is the last Leg's.
   never edit a key, and never hand back on an answer but through `hand-back --answer <stamp>`.
 - **Don't write a PR-less, RACE / UNVERIFIED or other-base task's `status:`**, and never re-call merge-task
   for a RACE.
-- **Don't run `resume` while a RACE / UNVERIFIED escalation is undecided.** Not in § 3a, not through § 4's
-  hand-off, and never send Lachy to a reinstate or a `/thread:execute` resume before its `RACE decided:` line
-  (§ 3c). The line itself is a rollout-note record, so no pause or live lead holds it back (§ 1).
+- **Don't run `resume` while a RACE / UNVERIFIED escalation is undecided, but through an undecided RACE's
+  hand-off.** Not in § 3a, not through § 4's hand-off for an undecided UNVERIFIED (an undecided RACE's hand-off
+  runs once § 3c has shown it: its `resume` holds the RACE back, exit 3, and `next` holds only the lane), and never
+  send Lachy to a reinstate or a `/thread:execute` resume before its `RACE decided:` line (§ 3c). The line itself is
+  a rollout-note record, so no pause or live lead holds it back (§ 1).
 - **Don't touch a signed task while its lead is live.** After `approve-gates`, its owner session holds the
   signed-gate handle (execute § 3.7): no hand-back, recut, defer, re-plan or `## Repair input` (§ 2).
 - **Don't ack a git-env trip unseen.** Never ack trips or a ref Lachy was not shown (`ack --slugs` is exactly the
-  set shown, `--ref` the sha shown), never restore with anything in flight (`--bare-only` aside: it moves no ref), and never pass `--drop-local` for
+  set shown, `--ref` the sha shown), never restore with anything in flight, `--bare-only` included, and never pass `--drop-local` for
   commits Lachy was not shown (§ 3e).
-- **Don't escalate a RACE re-verify in flight.** The lead decides it itself (§ 2). Asking Lachy before its
-  verdict exists invites a "stands" that a red re-verify then contradicts.
+- **Don't escalate a RACE re-verify or a RACE revert in flight.** The lead decides or finishes it itself (§ 2).
+  Asking Lachy before its verdict exists invites a "stands" that a red re-verify then contradicts.
 - **Don't hand a finished rollout back to execute.** A rollout whose note reads `status: done` or sits in
   `Archive/Rollouts/` had its ceremony: flip what `resume` finds, record it, and stop (§ 3a's complete-rollout stop).
   A hand-off would re-run the completion ceremony on it.

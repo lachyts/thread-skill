@@ -15,7 +15,16 @@
 // Lachy's no is recorded; a held trade reaches the decision task, once per (knob id, from), and a yes that cannot
 // apply is answered `moot` (p22-7, w16); step 15 names `{}` for a week with no recurring Watch (p22-7, w15); step 11
 // reads the Grade log's `grades` block against readiness-grade.md and never as a knob, step 17 reports the grade
-// accuracy, and § What the record cannot show names the constants with no measure (p25-4, w17); and the decision task
+// accuracy, and § What the record cannot show names the constants with no measure (p25-4, w17); the Time-lost ledger
+// (p29-11, ADR 0051, w18): Chorus's Runner starts the reading on Thursday and the sweep is the fallback, step 10a runs the
+// Monthly audit on the month's first reading whatever the cadence, step 13a writes the ledger before step 14, step 14
+// names the load hold, a gap is answered in § Deciding, a gap never counts against `quiet`, and § What the record cannot
+// show names what the ledger cannot price; the attention ledger (p30-7, w19): step 11 labels each question's Owner by
+// asking.md § 1 in batches, never blocking close (`--rest-unknown`), and traces each circling item from its `heldBy`; step
+// 12 makes no circling Watch by hand; step 13b runs the verb once, its one fenced line the only `reflect.py attention `
+// line of the weekly reading; steps 15 and 16 wait for it and say what a circling Watch's `amends` names and how it
+// counts toward `quiet`; § What the record cannot show names what it cannot read, the reading's own Sessions among them;
+// and the word "loop" stays out of it (reflection-loops.md's word); and the decision task
 // stays out of schedule § 1, the reshuffle's R1 and orient § 7's serial rollout, listed by orient § 2 (the `weekly`
 // rule).
 //
@@ -226,10 +235,47 @@ const GRADE_S11 = ['Read `span.json`\'s `grades`', '`window.readyHandsOff`', '`$
   'never a knob: the grading constants are no operator setting']
 const GRADE_S17 = 'the grade accuracy (the Ready headline'
 const GRADE_CANNOT = ['`DECISION_MINUTES`', '`REVIEW_MINUTES`']
-const WEEKLY_ORDER = [/reflect\.py span /, /reflect\.py watch /, /reflect\.py bug /, /tune\.py\b.*--revert /, /tune\.py\b.*--auto /,
-  /reflect\.py knobs /, /reflect\.py decide /, /reflect\.py close /]
+const WEEKLY_ORDER = [/reflect\.py span /, /reflect\.py watch /, /reflect\.py bug /, /reflect\.py ledger /, /reflect\.py attention /,
+  /tune\.py\b.*--revert /, /tune\.py\b.*--auto /, /reflect\.py knobs /, /reflect\.py decide /, /reflect\.py close /]
+// The Time-lost ledger (p29-11, w18): who starts the reading, the audit step and the ledger step, the load hold, a gap's
+// answer, gaps and quiet, and what the ledger cannot price.
+const LEDGER_START = ['What starts it is Chorus\'s weekly Runner first: on the Thursday Reflection Routine\'s morning',
+  'The daily sweep is the fallback, and starts it only when Chorus has not']
+const LEDGER_10A = ['a fortnightly cadence never skips it', 'before step 13a\'s ledger', 'never cut at a month boundary',
+  '`~/.claude*/projects/*/<session>.jsonl`', '`<Project root>/.claude/integration/*.log`', '`## Pause log`', 'the Mac\'s own history',
+  'Start it as a read-only subagent right after step 10, beside steps 11 to 13']
+const LEDGER_13A = ['Once, before step 14', 'with `--audit` exactly when step 10a ran', 'counted in readings']
+const LEDGER_S11 = 'is reported, never traced as friction'
+const LEDGER_S12 = 'Never make a Watch on a Time-lost ledger class by hand'
+const LEDGER_S14 = ['machine load tops the Time-lost ledger', 'Lowers and round caps are never held by load']
+const LEDGER_S15 = 'or a Monthly audit that names a gap'
+const LEDGER_QUIET = 'An audit\'s gaps never count against `quiet`: the audit runs at either cadence, and like a held trade a gap leaves the week quiet'
+const LEDGER_DEC = ['**A yes to a gap**', 'citing ADR 0051 d4', '**A no to a gap**', 'Its `- gap` line is the record once the task is done']
+const LEDGER_CANNOT = ['does not price a suite slowed by load', 'The ledger\'s classes overlap across resources',
+  'An open stop on a closed rollout', 'The baseline (the 2026-10-21 audit) gives coarse ranges', 'A `paused:` stamp left by mistake reads as Lachy\'s own pause',
+  'A halt over several set-asides is classed by the first one moved', 'reads as `halt`: still a stall, but unsplit',
+  'never move the ledger\'s top, its Watch or the load hold', 'An audit\'s gaps never make a reading not quiet',
+  'A serial chain is left out of the Time-lost ledger', 'A rollout\'s time before its first engine line']
 
-// The weekly clauses that fail (w1..w17; w15 and w16 are p22-7's, w17 p25-4's), [] when all hold.
+// The attention ledger (p30-7, w19): step 11's labels and trace, step 12's refusal, step 13b, steps 15 and 16, and what it
+// cannot show. No check names the ADR's number: a renumbered ADR changes no rule here.
+const ATT_S11 = ['Label each question\'s Owner by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1',
+  'Judge each question as it stood when it was put to him, never by his answer']
+const ATT_BATCH = ['in batches of at most 100 questions per subagent call', 'When labelling cannot finish, step 13b runs with `--rest-unknown`',
+  'close never waits on labels']
+const ATT_TRACE = 'Trace each `circling` item to what held it: a set-aside item starts at its `heldBy`'
+const ATT_S12 = 'Never make a Watch on a circling rule by hand'
+const ATT_13B = ['Once, after step 13a and before step 14', '`--rest-unknown`', 'a decided item (a yes or a no) never returns on its rule']
+const ATT_S15 = ['(`run attention`)', '`amends` names the hand-over rule step 11\'s trace reached for most of them', 'with no rule in common, `amends` is']
+const ATT_S16 = ['`attention` its line (`run attention`)', 'A circling Watch counts like any other Watch: its first-ever line makes the week not quiet']
+const ATT_CANNOT = ['reads the question tool\'s questions alone', 'The Owner is the reading\'s label (asking.md § 1), never his',
+  'A STOP handed to him is any question within 30 minutes', 'reads as a trail of its own', 'Docs-only is unknown after a landing with no merge commit',
+  'A touch means the note was named', 'A work item needs `phase:`, `pr:` or `rollout:`', 'A work item a rollout holds at until is never W1\'s that week',
+  'A Session that runs the reading (its span verb, a verb on its span file, or a score) is never a touch',
+  'A rollout note with no record is judged by its status now', 'A decided circling item never returns on its rule']
+const ATT_PARA = '**The attention ledger** (`span.json`\'s `attention`).'
+
+// The weekly clauses that fail (w1..w19; w15 and w16 are p22-7's, w17 p25-4's, w18 p29-11's, w19 p30-7's), [] when all hold.
 function weeklyFails(files) {
   const s = files.skill
   const out = []
@@ -275,6 +321,24 @@ function weeklyFails(files) {
     !decFenced.some((l) => l.startsWith(`${PY}moot --task`))) out.push('w16')
   if (!GRADE_S11.every((n) => s11.includes(n)) || !collapse(sectionOf(s, /^### 17\. /)).includes(GRADE_S17) ||
     !GRADE_CANNOT.every((n) => cannot.includes(n))) out.push('w17')
+  const weeklyHead = collapse(head < 0 ? '' : lines.slice(head, lines.findIndex((l, k) => k > head && /^### 9\. /.test(l))).join('\n'))
+  const s10a = collapse(sectionOf(s, /^### 10a\. The Monthly audit$/))
+  const s13a = collapse(sectionOf(s, /^### 13a\. The Time-lost ledger$/))
+  if (!LEDGER_START.every((n) => weeklyHead.includes(n)) || !LEDGER_10A.every((n) => s10a.includes(n)) ||
+    !LEDGER_13A.every((n) => s13a.includes(n)) || !fencedLines(sectionOf(s, /^### 13a\. /)).some((l) => l.startsWith(`${PY}ledger --span`)) ||
+    !s11.includes(LEDGER_S11) || !collapse(sectionOf(s, /^### 12\. /)).includes(LEDGER_S12) ||
+    !LEDGER_S14.every((n) => collapse(sectionOf(s, /^### 14\. /)).includes(n)) || !s15.includes(LEDGER_S15) ||
+    !collapse(sectionOf(s, /^### 16\. /)).includes(LEDGER_QUIET) || !LEDGER_DEC.every((n) => dec.includes(n)) ||
+    !LEDGER_CANNOT.every((n) => cannot.includes(n))) out.push('w18')
+  const s12 = collapse(sectionOf(s, /^### 12\. /))
+  const s13b = sectionOf(s, /^### 13b\. The attention ledger$/)
+  const para = s11.slice(s11.indexOf(ATT_PARA), s11.indexOf(ATT_PARA) < 0 ? 0 : undefined)
+  const attLines = head < 0 ? [] : lines.slice(head + 1).filter((l) => /reflect\.py attention /.test(l))
+  if (!ATT_S11.every((n) => s11.includes(n)) || !ATT_BATCH.every((n) => s11.includes(n)) || !s11.includes(ATT_TRACE) || !s12.includes(ATT_S12) ||
+    !ATT_13B.every((n) => collapse(s13b).includes(n)) || !fencedLines(s13b).some((l) => l.startsWith(`${PY}attention --span`) && l.includes(' --owners ')) ||
+    !ATT_S15.every((n) => s15.includes(n)) || !ATT_S16.every((n) => collapse(sectionOf(s, /^### 16\. /)).includes(n)) ||
+    !ATT_CANNOT.every((n) => cannot.includes(n)) || !para || /\bloops?\b/i.test(para) || /\bloops?\b/i.test(s13b) ||
+    attLines.length !== 1 || !attLines[0].startsWith(PY)) out.push('w19')
   return out
 }
 
@@ -661,6 +725,56 @@ test('control: step 11 tracing grade accuracy as a knob or with no grades block,
   weekly('skill:block', cut('skill', 'Read `span.json`\'s `grades`', 'Read the grades'), 'w17')
   weekly('skill:s17', cut('skill', `${GRADE_S17}, each grade's rate in \`window\` and \`all\`, the \`bySize\` readout and each grade trace),`, ''), 'w17')
   weekly('skill:cannot', cut('skill', '(`DECISION_MINUTES`, `REVIEW_MINUTES`)', ''), 'w17')
+})
+
+test('control: the Time-lost ledger\'s starter, audit step, ledger step, load hold, gap answer, quiet rule or a cannot-show line dropped fails weekly (w18)', () => {
+  weekly('skill:runner', cut('skill', 'What starts it is Chorus\'s weekly Runner first:', 'What starts it is the daily sweep:'), 'w18')
+  weekly('skill:fallback', cut('skill', 'The daily sweep is the fallback, and starts it only when Chorus has not', 'The daily sweep starts it'), 'w18')
+  weekly('skill:10a', swap('skill', '### 10a. The Monthly audit', '### 10a. The audit'), 'w18')
+  weekly('skill:fortnightly', cut('skill', 'a fortnightly cadence never skips it', 'a fortnightly cadence may skip it'), 'w18')
+  weekly('skill:subagent', cut('skill', 'Start it as a read-only subagent right after step 10, beside steps 11 to 13', 'Run it after step 13'), 'w18')
+  for (const n of ['`~/.claude*/projects/*/<session>.jsonl`', '`<Project root>/.claude/integration/*.log`', '`## Pause log`']) weekly(`skill:${n}`, cut('skill', n, 'x'), 'w18')
+  weekly('skill:13a', swap('skill', '### 13a. The Time-lost ledger', '### 13a. The ledger'), 'w18')
+  weekly('skill:13a-audit', cut('skill', 'with `--audit` exactly when step 10a ran', 'with `--audit` when you like'), 'w18')
+  weekly('skill:readings', cut('skill', 'counted in readings, so', 'counted in rollouts, so'), 'w18')
+  weekly('skill:s11', cut('skill', LEDGER_S11, 'is traced as friction'), 'w18')
+  weekly('skill:s12', cut('skill', LEDGER_S12, 'Make a Watch on a ledger class'), 'w18')
+  weekly('skill:s14', cut('skill', 'Lowers and round caps are never held by load', 'Lowers are held too'), 'w18')
+  weekly('skill:s15', cut('skill', LEDGER_S15, 'or an audit'), 'w18')
+  weekly('skill:quiet', cut('skill', LEDGER_QUIET, 'An audit\'s gaps make a reading not quiet'), 'w18')
+  for (const n of LEDGER_DEC) weekly(`skill:${n}`, cut('skill', n, 'x'), 'w18')
+  for (const n of LEDGER_CANNOT) weekly(`skill:${n}`, cut('skill', n, 'x'), 'w18')
+})
+
+test('control: the attention ledger\'s labels, trace, refusal, step 13b, gates, cannot-show lines or the word loop dropped in fails weekly (w19)', () => {
+  for (const n of [...ATT_S11, ...ATT_BATCH, ATT_TRACE, ATT_S12]) weekly(`skill:${n.slice(0, 30)}`, cut('skill', n, 'x'), 'w19')
+  weekly('skill:13b', swap('skill', '### 13b. The attention ledger', '### 13b. Attention'), 'w19')
+  for (const n of ['Once, after step 13a and before step 14', 'a decided item (a yes or a no) never returns on its rule']) weekly(`skill:${n.slice(0, 30)}`, cut('skill', n, 'x'), 'w19')
+  weekly('skill:owners', swap('skill', 'span.json --owners /tmp/thread-reflect-week-<YYYY-MM-DD>/owners.json', 'span.json'), 'w19')
+  for (const n of [...ATT_S15, ...ATT_S16, ...ATT_CANNOT]) weekly(`skill:${n.slice(0, 30)}`, cut('skill', n, 'x'), 'w19')
+  weekly('skill:loop-11', cut('skill', 'Read `trails` and `waits` as reported', 'Read `trails` and `waits` as the loop reported'), 'w19')
+  weekly('skill:loop-13b', cut('skill', 'for each circling rule with fresh items', 'for each circling loop with fresh items'), 'w19')
+})
+
+test('control: the attention fence before the ledger\'s or after the knobs\', or a prose line naming the verb in step 11, fails weekly (w1)', () => {
+  const lineOf = (re) => real.skill.split('\n').find((l) => re.test(l))
+  const att = lineOf(/^python3 \S+reflect\.py attention /)
+  const ledger = lineOf(/^python3 \S+reflect\.py ledger /)
+  const knobs = lineOf(/^python3 \S+reflect\.py knobs /)
+  assert.ok(att && ledger && knobs, 'control setup')
+  const swapLines = (a, b) => real.skill.replace(a, '\u0000').replace(b, a).replace('\u0000', b)
+  weekly('skill:ledger', swapLines(att, ledger), 'w1')
+  weekly('skill:knobs', swapLines(att, knobs), 'w1')
+  const prose = cut('skill', 'Read `trails` and `waits` as reported', 'Run `reflect.py attention --span` now. Read `trails` and `waits` as reported')
+  weekly('skill:prose', prose, 'w1')
+  assert.ok(weeklyFails({ ...real, skill: prose }).includes('w19'), 'the prose line fails w19 too')
+})
+
+test('control: the ledger step after the knobs fails weekly (w1)', () => {
+  const ledger = real.skill.split('\n').find((l) => l.startsWith(`${PY}ledger `))
+  const knobs = real.skill.split('\n').find((l) => l.startsWith(`${PY}knobs `))
+  assert.ok(ledger && knobs, 'control setup')
+  weekly('skill', real.skill.replace(ledger, '\u0000').replace(knobs, ledger).replace('\u0000', knobs), 'w1')
 })
 
 test('control: § Deciding the decision task without --declined, its cycle close or its done rule, fails weekly (w14)', () => {

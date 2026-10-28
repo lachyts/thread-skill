@@ -29,6 +29,27 @@
 #   no file or no --verifier re-runs   C34 the task's own diff adds a reader   C35 a step walks the tree   C36 a shared
 #   THREAD.md   C37 a refused rollouts.toml   C38 chained skips across merge-task's exit 3   C39 a cwd glob in a test
 #   C40 fail closed: a failing cat-file is an inert check error, route verify, exit 0.
+#   The Flake check (ADR 0050, p29-9): C41 an out-of-diff red cleared by its named re-run and a confirming run (a
+#   Flake, rc 0)   C42 a red named re-run   C43 a red confirming run   C44 a touched test   C45 one touched, one not
+#   C46 unnamed, unplaced, too many   C47 timeouts (the first run, the confirming run, no harness time left)   C48 the
+#   RACE form   C49 no --named-rerun, no --diff-base, a green run, an unreadable diff   C50 refusals   C51 ids with
+#   spaces and quotes, paths outside the tree   C52 the SKILL.md verify line with and without named_rerun, under bash
+#   and zsh -f   C53 TERM during the named re-run or the confirming run, unslotted and slotted: rc 143, why `signal`,
+#   the child gone, the slot free.   C54 with --rollout (p29-10): a Flake's suite ends green, a deadline in the confirming
+#   run ends it timeout.
+#   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
+#   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
+#   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
+#   path test, no task note, main unreadable).
+#   The RACE revert (ADR 0046, p29-2; lead-integrate.py revert): R1 route pr (the head on origin/master, M's files
+#   M^1's, the bodies say `This reverts commit M`, origin/master untouched, restores by tree)   R2 merge-task 0, then
+#   reverted   R3 a re-run before the merge reuses the branch and the PR, and after it reads the landed commit   R4 a
+#   peer push: the branch takes origin/master by a fast-forward merge, restores false   R4b a THREAD.md-only peer close-out
+#   restores by ADR 0045's Inert check (one verify-skipped line per check, base M^1), freeing the lane   R4c a source file
+#   beside it   R4d a refused rollouts.toml   R4e no --verifier   R5 a conflict   R6 the target guard's refusals (a)–(g)
+#   and a two-parent M   R6h another PR's RACE line under the slug is skipped   R7 origin unreachable (8)   R8 the tail
+#   through reconcile frees the lane   R9 a stale open revert PR, noop   R10 an Engine snapshot mismatch (2)   R11
+#   merge-task's exit 3 on the revert PR   R12 the crash tail   R13 merge-task's exit 5 on the revert PR.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0; the verify slots in a temp pool
 # (tests/lib/merge-task-env.sh exports THREAD_VERIFY_SLOTS_DIR).
 set -uo pipefail
@@ -40,6 +61,9 @@ export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
 tmp=$(cd "$(mktemp -d)" && pwd -P); trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
+# The note-lock dir, and so `next`'s Trickle claims beside it (p28-3), stays this suite's own: run.sh shares one across
+# every suite, and another suite's `next` would prune or count claims this one's calls leave.
+export THREAD_NOTE_LOCK_DIR="$tmp/note-locks"
 . tests/lib/merge-task-env.sh
 export THREAD_VERIFY_SLOT_POLL=0.1
 lacks() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
@@ -122,7 +146,9 @@ mkpr() {  # mkpr <n> <head>: GitHub's PR n (audit-fix/t5 into master) with its h
 }
 mt() { : > "$MT_STATE/gh.log"; out=$(PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$R" "$@" 2>&1); rc=$?; }
 rec() { python3 "$RR" reconcile --result - --tasks-dir "$V" --now "${2:-2026-10-02T12:00:00Z}" <<<"$1" >/dev/null; }
-nxt() { python3 "$RR" next --rollout "$V/ro.md" --tasks-dir "$V" --now 2026-10-02T12:30:00Z --running "$1" 2>/dev/null; }
+# next off --dry-run writes the lead's lease under HOME (p28-4): its own HOME, so no lease lands in run.sh's shared one.
+NEXT_HOME="$tmp/next-home"; mkdir -p "$NEXT_HOME"
+nxt() { HOME="$NEXT_HOME" python3 "$RR" next --rollout "$V/ro.md" --tasks-dir "$V" --now 2026-10-02T12:30:00Z --running "$1" 2>/dev/null; }
 inp() { python3 "$LI" inputs --note "$V/$1.md" "${@:2}"; }
 lastrun() { python3 - "$1" <<PY
 import importlib.util, sys
@@ -135,7 +161,7 @@ setaside_at() { python3 "$RR" status --rollout "$V/ro.md" --tasks-dir "$V" | pyt
 # bootstrap written as '\''): verify_line <tree> <slug> <verifier> [bootstrap]. VERIFY_FILL=dq fills them the
 # old way instead (double quotes, only " escaped): C15's control.
 verify_line() {
-  python3 - "$SKILL" "$R" "$@" <<'PY'
+  ROLLOUT_NOTE="$V/ro.md" python3 - "$SKILL" "$R" "$@" <<'PY'
 import os, re, sys
 skill, repo, tree, slug, verifier = sys.argv[1:6]
 boot = sys.argv[6] if len(sys.argv) > 6 else ""
@@ -151,9 +177,16 @@ else:
     esc = lambda s: s.replace("'", "'\\''")
 if not boot:
     line = re.sub(r""" --bootstrap (['"])<env_bootstrap>\1""", "", line)
+# p29-9: <mainSha> is prepare's (MAIN_SHA, default HEAD) and <named_rerun> verify-timeout's namedRerun (NAMED_RERUN);
+# with none, the line drops --named-rerun as the skill says.
+named = os.environ.get("NAMED_RERUN", "")
+if not named:
+    line = line.replace(" --named-rerun '<named_rerun>'", "")
+line = line.replace("<mainSha>", os.environ.get("MAIN_SHA", "HEAD")).replace("<named_rerun>", esc(named))
 # <verify_timeout>, <verify_slots> and <slot_wait> are § 3's per-entry values (p14-2, p23-4); left literal, the shell
 # would read them as redirections.
 line = (line.replace("<tree>", tree).replace("<repoPath>", repo).replace("<slug>", slug)
+        .replace("<rollout-note>", os.environ.get("ROLLOUT_NOTE", "<rollout-note>"))
         .replace("<verify_timeout>", os.environ.get("VERIFY_TIMEOUT", "1800"))
         .replace("<verify_slots>", os.environ.get("VERIFY_SLOTS", "2")).replace("<slot_wait>", os.environ.get("SLOT_WAIT", "60"))
         .replace("<env_bootstrap>", esc(boot)).replace("<verifier>", esc(verifier)))
@@ -304,6 +337,13 @@ g -C "$WT" pull -q --ff-only origin "$BR" 2>/dev/null
 addlog "$V/$SLUG.md" "2026-10-02T11:30+00:00 integrated path=integrator pr=5 anchor=$H0 head=$M1 base=$B0 wait=5 duration=3 triggers=shared-file"
 prep
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" 'd["prHead"]')|$(j "$J" 'd["anchor"]')" "merge|ii|$M1|$H0" "C6: main unmoved → case (ii), merge (M1, B0), anchor H0"
+ok "$(j "$J" '[d["record"][k] for k in ("duration", "triggers", "active")]')" '["3","shared-file",null]' \
+  "C6: a line from before p29-13 (ten tokens, no active=) still parses: active null, the rest as written"
+sed -i.bak "s/ triggers=shared-file$/ triggers=shared-file active=2/" "$V/$SLUG.md"
+prep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" '[d["record"][k] for k in ("duration", "triggers", "active")]')" \
+  'merge|ii|["3","shared-file","2"]' "C6: an 11-token line (active=, p29-13) backs case (ii) the same, its active read"
+sed -i.bak "s/ triggers=shared-file active=2$/ triggers=shared-file/" "$V/$SLUG.md"
 main m.txt "theirs" "theirs: m (#8)"; B1=$B
 prep
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" 'd["sharedFiles"]')|$(j "$J" 'd["trouble"]')" "verify|ii|[]|[]" "C6: main moved → verify; shared files over B0..B1 only (a.txt was integrated already)"
@@ -1443,6 +1483,621 @@ case "$(j "$J" 'd["inert"]["why"]')" in "inert check error: "*) ok y y "C40: …
 lacks "$(cat "$F/prep.err")" "Traceback" "C40: … no traceback on stderr"
 has "$(cat "$F/prep.err")" "WARN: inert check error: ProofError" "C40: … one WARN line names the error"
 ok "$(ikinds)|$(iline '[ls[0]["readers"], ls[0]["error"][:26]]')" '["inert-proof-failed"]|[[],"inert check error: ProofEr"]' "C40: … and an inert-proof-failed line with error and readers []"
+unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
+
+# ======== C41–C53: the Flake check (ADR 0050, p29-9) =======================================================
+# verify --diff-base REV [--named-rerun CMD]: a red first run whose failing tests are all named, placed in a test
+# file and outside `git diff --name-only REV HEAD` re-runs them by name, then confirms with one more verifier run on
+# the same tree: green is a Flake (rc 0, <out>.flake.json verdict flake), any other red is red. The fixture: a repo
+# whose base B holds tests/test_flaky.py, tests/test_touched.py, "tests/test sp.py" and src/x.py; the task commit T
+# changes src/x.py and tests/test_touched.py. v.sh is the verifier (run n prints v.<n>.out, sleeps v.<n>.sleep, exits
+# v.<n>.rc) and r.sh the named re-run (each call's argv to r.<n>.args, sleeps r.sleep, exits r.rc), both counting; a
+# sleep is their child, its pid in v.<n>.cpid or r.cpid.
+ffx() {
+  echo "== $1"
+  F="$tmp/$1"; mkdir -p "$F"; FR="$F/repo"
+  g init -q "$FR"; mkdir -p "$FR/tests" "$FR/src"
+  for f in tests/test_flaky.py tests/test_touched.py "tests/test sp.py" src/x.py; do printf 'base\n' > "$FR/$f"; done
+  g -C "$FR" add . && g -C "$FR" commit -q -m base; FB=$(git -C "$FR" rev-parse HEAD)
+  printf 'task\n' > "$FR/src/x.py"; printf 'task\n' > "$FR/tests/test_touched.py"
+  g -C "$FR" commit -q -am task; FT=$(git -C "$FR" rev-parse HEAD)
+  printf 'outside\n' > "$F/outside.py"
+  mkdir -p "$F/bin"
+  cat > "$F/bin/v.sh" <<'SH'
+d="$(dirname "$(dirname "$0")")"; n=$(( $(cat "$d/v.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/v.count"
+[ -f "$d/v.$n.out" ] && cat "$d/v.$n.out"
+[ -f "$d/v.$n.sleep" ] && { sleep "$(cat "$d/v.$n.sleep")" & echo $! > "$d/v.$n.cpid"; wait; }
+exit "$(cat "$d/v.$n.rc" 2>/dev/null || echo 0)"
+SH
+  cat > "$F/bin/r.sh" <<'SH'
+d="$(dirname "$(dirname "$0")")"; n=$(( $(cat "$d/r.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/r.count"
+for a in "$@"; do printf '%s\n' "$a"; done > "$d/r.$n.args"
+[ -f "$d/r.sleep" ] && { sleep "$(cat "$d/r.sleep")" & echo $! > "$d/r.cpid"; wait; }
+exit "$(cat "$d/r.rc" 2>/dev/null || echo 0)"
+SH
+  O="$F/out/v"; NR="bash $F/bin/r.sh {tests}"
+}
+red1() { printf '%s\n' "$@" > "$F/v.1.out"; echo 1 > "$F/v.1.rc"; }   # the first run fails, printing these lines
+vf() { python3 "$LI" verify --tree "$FR" --out "$O" --timeout "${VT:-60}" --verifier "bash $F/bin/v.sh" "$@" >/dev/null 2>"$F/vf.err"; vrc=$?; }
+fj() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); v=eval(sys.argv[2]); print(v if isinstance(v, str) else json.dumps(v, separators=(",", ":"), ensure_ascii=False))' "$O.flake.json" "$1" 2>/dev/null || echo "<no flake.json>"; }
+cnt() { cat "$F/$1.count" 2>/dev/null || echo 0; }
+rcof() { cat "$O.rc" 2>/dev/null || echo none; }
+
+# C41: one out-of-diff test fails, passes its named re-run, and the confirming run is green: a Flake, rc 0.
+ffx c41
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$vrc|$(rcof)" "0|0" "C41: a red on one out-of-diff test, green named re-run and confirming run → rc 0"
+ok "$(fj 'd["verdict"]')|$(fj 'd["why"]')|$(fj 'd["flakes"]')" 'flake||["tests/test_flaky.py::test_a"]' "C41: flake.json reads flake, the first-run id its Flake"
+ok "$(fj 'd["v"]')|$(fj 'd["sha"]')|$(fj 'd["diffBase"]')|$(fj 'd["failing"]')|$(fj 'd["touched"]')|$(fj 'd["timeout"]')" \
+  "1|$FT|$FB|[\"tests/test_flaky.py::test_a\"]|[]|null" "C41: … with the tree's sha, the diff base, the failing ids, none touched, no timeout"
+ok "$(cnt v)|$(cnt r)|$(cat "$F/r.1.args")" "2|1|tests/test_flaky.py::test_a" "C41: the verifier ran twice, the named re-run once with exactly that id"
+has "$(cat "$O.log")" "== named re-run: bash $F/bin/r.sh tests/test_flaky.py::test_a" "C41: the log names the named re-run"
+has "$(cat "$O.log")" "== named re-run rc 0" "C41: … and its rc"
+has "$(cat "$O.log")" "== confirming run: bash $F/bin/v.sh" "C41: … and the confirming run"
+has "$(cat "$O.log")" "== confirming run rc 0" "C41: … and its rc"
+
+# C42: the named re-run is red: red at once, its rc kept, no full run.
+ffx c42
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'; echo 4 > "$F/r.rc"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["verdict"]')|$(fj 'd["why"]')|$(fj 'd["flakes"]')" "4|1|1|red|named-red|[]" "C42: a red named re-run → red (its rc), no confirming run"
+
+# C43: the named re-run is green but the confirming run is red: red, its own rc.
+ffx c43
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'; printf 'FAILED tests/test_flaky.py::test_b\n' > "$F/v.2.out"; echo 2 > "$F/v.2.rc"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["verdict"]')|$(fj 'd["why"]')" "2|2|1|red|confirm-red" "C43: a green named re-run, then a red confirming run → red (its rc)"
+ok "$(fj 'd["failing"]')" '["tests/test_flaky.py::test_a"]' "C43: … failing names the first run's ids only"
+
+# C44: a failing test the diff touches: red, no re-run.
+ffx c44
+red1 'FAILED tests/test_touched.py::test_b - AssertionError'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["verdict"]')|$(fj 'd["why"]')|$(fj 'd["touched"]')" '1|1|0|red|touched|["tests/test_touched.py::test_b"]' "C44: a touched test → red, no re-run"
+
+# C45: one touched and one untouched: red, no re-run.
+ffx c45
+red1 'FAILED tests/test_flaky.py::test_a' 'FAILED tests/test_touched.py::test_b'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["why"]')" "1|1|0|touched" "C45: one touched, one untouched → red, no re-run"
+
+# C46: a red that names no test, one whose test cannot be placed, and one past the parser's cap: red, no re-run.
+ffx c46
+red1 'src/x.py:1:80: E501 line too long'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["why"]')|$(fj 'd["failing"]')" "1|1|0|unnamed|[]" "C46: a lint red names no test → red (unnamed), no re-run"
+ffx c46b
+red1 '✖ D14. x (12ms)'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt r)|$(fj 'd["why"]')|$(fj 'd["failing"]')" '1|0|unplaced|["D14. x"]' "C46: a spec name placed in no test file → red (unplaced), no re-run"
+ffx c46c
+for i in $(seq 1 55); do printf 'FAILED tests/test_flaky.py::test_%s\n' "$i"; done > "$F/v.1.out"; echo 1 > "$F/v.1.rc"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt r)|$(fj 'd["why"]')|$(fj 'len(d["failing"])')" "1|0|too-many|50" "C46: more failures than the parser's cap → red (too-many), no re-run"
+
+# C47: timeouts. The first run's deadline: rc 124, no re-run; the confirming run's: red; no harness time left: red.
+ffx c47
+echo 5 > "$F/v.1.sleep"
+VT=1 vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt r)|$(fj 'd["verdict"]')|$(fj 'd["why"]')|$(fj 'd["timeout"]')" '124|0|red|timeout|{"run":"first","seconds":1}' "C47: the first run's deadline → rc 124, red (timeout, first), no re-run"
+ffx c47b
+red1 'FAILED tests/test_flaky.py::test_a'; echo 5 > "$F/v.2.sleep"
+VT=2 vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["why"]')|$(fj 'd["timeout"]["run"]')|$(fj 'd["timeout"]["seconds"]')" "124|2|1|timeout|confirm|2" "C47: the confirming run's deadline → rc 124, red (timeout, confirm)"
+has "$(cat "$O.log")" "during the confirming run" "C47: … and the log names it"
+ffx c47c
+red1 'FAILED tests/test_flaky.py::test_a'
+THREAD_VERIFY_HARNESS_S=600 vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["why"]')|$(fj 'd["timeout"]')" "1|1|0|no-time|null" "C47: no harness time left → red (no-time), nothing re-run"
+
+# C48: the RACE form: the same check on the detached tree at the merge commit, the merged task's diff (H^1..H).
+ffx c48
+g -C "$FR" checkout -q -b task; g -C "$FR" checkout -q -B master "$FB"
+printf 'main\n' > "$FR/m.txt"; g -C "$FR" add m.txt; g -C "$FR" commit -q -m main
+g -C "$FR" merge -q --no-ff --no-edit task; FH=$(git -C "$FR" rev-parse HEAD)
+RT="$FR/.claude/worktrees/race-x"
+red1 'FAILED tests/test_flaky.py::test_a'
+python3 "$LI" verify --repo "$FR" --detach-at "$FH" --tree "$RT" --out "$O" --timeout 60 --verifier "bash $F/bin/v.sh" --diff-base "$FH^1" --named-rerun "$NR" >/dev/null 2>&1
+ok "$(rcof)|$(fj 'd["verdict"]')|$(fj 'd["sha"]')|$(cnt v)|$(cnt r)" "0|flake|$FH|2|1" "C48: a RACE re-verify's out-of-diff red cleared by its named re-run and confirming run → green, a Flake"
+ok "$([ -e "$RT" ] && echo left || echo removed)" removed "C48: … the race tree is removed"
+lacks "$(git -C "$FR" worktree list)" "race-x" "C48: … and unregistered"
+rm -f "$F"/v.* "$F"/r.*; red1 'FAILED tests/test_flaky.py::test_a'; echo 1 > "$F/r.rc"
+python3 "$LI" verify --repo "$FR" --detach-at "$FH" --tree "$RT" --out "$O" --timeout 60 --verifier "bash $F/bin/v.sh" --diff-base "$FH^1" --named-rerun "$NR" >/dev/null 2>&1
+ok "$(rcof)|$(fj 'd["why"]')|$([ -e "$RT" ] && echo left || echo removed)" "1|named-red|removed" "C48: a repeat red (the named re-run) stays red; the tree is removed"
+lacks "$(git -C "$FR" worktree list)" "race-x" "C48: … and pruned"
+rm -f "$F"/v.* "$F"/r.*; red1 'FAILED tests/test_touched.py::test_b'
+python3 "$LI" verify --repo "$FR" --detach-at "$FH" --tree "$RT" --out "$O" --timeout 60 --verifier "bash $F/bin/v.sh" --diff-base "$FH^1" --named-rerun "$NR" >/dev/null 2>&1
+ok "$(rcof)|$(fj 'd["why"]')|$(cnt r)" "1|touched|0" "C48: the merged task's own test is touched: red, no re-run"
+
+# C49: no --named-rerun: the check cannot re-run by name, so the red stays red.
+ffx c49
+red1 'FAILED tests/test_flaky.py::test_a'
+vf --diff-base "$FB"
+ok "$(rcof)|$(cnt v)|$(cnt r)|$(fj 'd["verdict"]')|$(fj 'd["why"]')" "1|1|0|red|no-named-rerun" "C49: no --named-rerun → red (no-named-rerun), no re-run"
+ffx c49b
+red1 'FAILED tests/test_flaky.py::test_a'
+vf
+ok "$(rcof)|$([ -e "$O.flake.json" ] && echo file || echo none)|$(cnt v)" "1|none|1" "C49: no --diff-base → red as before, no flake.json"
+ffx c49c
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["verdict"]')|$(cnt v)|$(cnt r)" "0|green|1|0" "C49: a green first run → flake.json green, nothing re-run"
+vf --diff-base "no-such-rev" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["verdict"]')" "0|green" "C49: … a green run never reads the diff"
+rm -f "$F"/v.* "$F"/r.*; red1 'FAILED tests/test_flaky.py::test_a'
+vf --diff-base "no-such-rev" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["why"]')|$(cnt r)" "1|diff|0" "C49: an unreadable diff base → red (diff), no re-run"
+
+# C50: refusals (exit 2, no rc file): --diff-base with --outcome, a --named-rerun without exactly one {tests}, or
+# without --diff-base.
+ffx c50
+for bad in "--diff-base $FB --outcome" "--diff-base $FB --named-rerun x" "--named-rerun {tests}"; do
+  vf $bad
+  ok "$vrc|$(rcof)" "2|none" "C50: $bad → exit 2, no rc"
+done
+vf --diff-base "$FB" --named-rerun "r {tests} {tests}"
+ok "$vrc|$(rcof)" "2|none" "C50: a --named-rerun with two {tests} → exit 2, no rc"
+
+# C51: ids with spaces and quotes reach the named re-run as single argv words; a ../ or absolute path outside the
+# tree is unplaced; an absolute path inside the tree is made relative.
+ffx c51
+Q='tests/test_flaky.py::test_q["it'"'"'s$x`y`;|&"]'
+red1 "not ok 1 - tests/test sp.py::test_s" "FAILED $Q"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["verdict"]')|$(cnt r)" "0|flake|1" "C51: a spaced and a quoted id → a Flake"
+ok "$(cat "$F/r.1.args")" "$(printf '%s\n%s' "tests/test sp.py::test_s" "$Q")" "C51: … each reaches the named re-run as one argv word, byte for byte"
+ffx c51b
+red1 'FAILED ../outside.py::test_o'
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["why"]')|$(cnt r)" "1|unplaced|0" "C51: a ../ path outside the tree → unplaced"
+ffx c51c
+red1 "FAILED $F/outside.py::test_o"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["why"]')|$(cnt r)" "1|unplaced|0" "C51: an absolute path outside the tree → unplaced"
+ffx c51d
+red1 "FAILED $FR/tests/test_flaky.py::test_a" "FAILED tests::test_dir"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["why"]')" "1|unplaced" "C51: a directory is no test file → unplaced"
+ffx c51e
+red1 "FAILED $FR/tests/test_flaky.py::test_a"
+vf --diff-base "$FB" --named-rerun "$NR"
+ok "$(rcof)|$(fj 'd["verdict"]')" "0|flake" "C51: an absolute path inside the tree is made relative and placed"
+
+# C52: the SKILL.md verify line, filled (<mainSha> and <named_rerun>; --named-rerun dropped when there is none), runs
+# under bash and zsh -f.
+ffx c52
+R0=${R:-}; R=$FR
+for sh in "${shells[@]}"; do
+  n=$(basename "${sh%% *}")
+  for nr in "$NR" ""; do
+    rm -rf "$FR/.claude/integration" "$F"/v.* "$F"/r.*; red1 'FAILED tests/test_flaky.py::test_a'
+    cmd=$(MAIN_SHA="$FB" NAMED_RERUN="$nr" verify_line "$FR" "$SLUG" "bash $F/bin/v.sh")
+    CLAUDE_PLUGIN_ROOT="$root" $sh -c "$cmd" >/dev/null 2>&1
+    O="$FR/.claude/integration/$SLUG"
+    if [ -n "$nr" ]; then
+      ok "$(rcof)|$(fj 'd["verdict"]')|$(cnt r)" "0|flake|1" "C52 $n: the filled verify line with named_rerun → the Flake check clears it"
+    else
+      ok "$(rcof)|$(fj 'd["why"]')|$(cnt r)" "1|no-named-rerun|0" "C52 $n: … with no named_rerun the line has no --named-rerun, and the red stays red"
+    fi
+  done
+done
+R=$R0
+
+# C53: a signal during the Flake check. TERM to verify while the named re-run (r.sh) sleeps, and while the confirming
+# run (v.sh's second call) sleeps, unslotted and slotted (--slots 1 --slot-wait 5): rc 143, flake.json red with why
+# `signal`, the sleeping child gone (verify kills the step's process group, through its guard when slotted), and the
+# verify slot free. Structural, as C17 is: the children sleep 3205 s+, so only verify's kill can end them.
+for arm in named confirm; do
+  for mode in unslotted slotted; do
+    ffx "c53-$arm-$mode"
+    red1 'FAILED tests/test_flaky.py::test_a'
+    if [ "$arm" = named ]; then echo "3205.$u" > "$F/r.sleep"; cp="$F/r.cpid"; else echo "3206.$u" > "$F/v.2.sleep"; cp="$F/v.2.cpid"; fi
+    SL=""; [ "$mode" = slotted ] && SL="--slots 1 --slot-wait 5"
+    python3 "$LI" verify --tree "$FR" --out "$O" --timeout 600 --verifier "bash $F/bin/v.sh" --diff-base "$FB" --named-rerun "$NR" $SL >/dev/null 2>&1 &
+    vp=$!
+    c53up() { test -s "$cp" || ! kill -0 "$vp"; }
+    within 300 c53up && test -s "$cp" && st=sleeping || st="not sleeping (verify ended, or 300 s passed)"
+    ok "$st" sleeping "C53 $arm $mode: the $arm run's child sleeps before the TERM"
+    if [ "$mode" = slotted ]; then
+      has "$(cat "$O.log")" "== verify slot 1 of 1 after" "C53 $arm $mode: … in the pool's only verify slot"
+      ok "$(vstate)" held "C53 $arm $mode: … held while it sleeps"
+    fi
+    kill -TERM "$vp" 2>/dev/null; wait "$vp"; vrc=$?
+    ok "$vrc|$(rcof)|$(fj 'd["verdict"]')|$(fj 'd["why"]')" "143|143|red|signal" "C53 $arm $mode: TERM mid-run → exit 143, rc 143, flake.json red, why signal"
+    ok "$(reaped "$(cat "$cp" 2>/dev/null)")" gone "C53 $arm $mode: … the sleeping child is gone"
+    has "$(cat "$O.log")" "stopped by signal 15; killed the process group (rc 143)" "C53 $arm $mode: … the log says so"
+    if [ "$arm" = named ]; then ok "$(cnt v)|$(cnt r)" "1|1" "C53 $arm $mode: … stopped in the named re-run, no confirming run"
+    else ok "$(cnt v)|$(cnt r)" "2|1" "C53 $arm $mode: … stopped in the confirming run"; fi
+    within 60 vfree && st=free || st="held after 60 s"
+    ok "$st" free "C53 $arm $mode: … and the verify slot is free"
+  done
+done
+ok "$(sleepers "sleep 320[56]\.$u")" 0 "C53: no Flake-check child survives"
+
+# C54 (p29-9 beside p29-10's suite record): --rollout with --diff-base. A Flake ends its one suite green, rc 0; a
+# deadline in the confirming run ends it timeout, its step the verifier, failing the first run's ids.
+fsq() {  # fsq <python expr over L, the suite record's lines>
+  python3 -c 'import json,sys; L=[json.loads(x) for x in open(sys.argv[1]) if x.strip()]; print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))' "$FEV/ro.jsonl" "$1" 2>/dev/null || echo none
+}
+ffx c54
+FEV="$F/events"; mkdir -p "$F/v" "$F/home"; : > "$F/v/ro.md"
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'
+HOME="$F/home" THREAD_EVENTS_DIR="$FEV" vf --diff-base "$FB" --named-rerun "$NR" --rollout "$F/v/ro.md" --slug t1
+ok "$(rcof)|$(fj 'd["verdict"]')|$(fsq '[[d["kind"], d.get("outcome"), d.get("rc"), "failing" in d] for d in L]')" \
+  '0|flake|[["suite-started",null,null,false],["suite-ended","green",0,false]]' "C54: --rollout: a Flake ends its one suite green, rc 0"
+ffx c54b
+FEV="$F/events"; mkdir -p "$F/v" "$F/home"; : > "$F/v/ro.md"
+red1 'FAILED tests/test_flaky.py::test_a'; echo 5 > "$F/v.2.sleep"
+HOME="$F/home" THREAD_EVENTS_DIR="$FEV" VT=2 vf --diff-base "$FB" --named-rerun "$NR" --rollout "$F/v/ro.md" --slug t1
+ok "$(rcof)|$(fj 'd["timeout"]["run"]')|$(fsq '[[d.get("outcome"), d.get("rc"), d.get("step"), d.get("timeout"), d.get("failing")] for d in L if d["kind"] == "suite-ended"]')" \
+  '124|confirm|[["timeout",124,"verifier",2,["tests/test_flaky.py::test_a"]]]' "C54: a deadline in the confirming run ends the suite timeout (step verifier), failing the first run's ids"
+
+# ======== S1–S8: verify --rollout records its suite in the Run record (p29-10, ADR 0051) ========================
+# by integration (with --slug), race (--detach-at) or completion (--outcome, no task), runner lead; suite-started after
+# the slot and before the deadline, suite-ended after the rc or outcome file. These cases read the record, so they keep
+# their own (THREAD_TEST_EVENTS_DIR does not apply); HOME is an empty dir (the Mac-wide count reads the note's vault).
+fx s1
+SEV="$F/events"; SH_HOME="$F/home"; mkdir -p "$SH_HOME"
+sv() {  # sv <out> [verify args…]: verify on the task tree with --rollout ro, the record in SEV; the exit in $rc
+  local o="$1"; shift
+  HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --tree "$WT" --out "$F/out/$o" --rollout "$V/ro.md" "$@" >/dev/null 2>&1; rc=$?
+}
+sq() {  # sq <python expr over L, the record's lines>
+  python3 - "$SEV/ro.jsonl" "$1" <<'PY2'
+import json, sys
+try:
+    L = [json.loads(x) for x in open(sys.argv[1]).read().splitlines() if x.strip()]
+except FileNotFoundError:
+    L = []
+print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))
+PY2
+}
+HEAD0=$(git -C "$WT" rev-parse HEAD)
+sv s1 --slug "$SLUG" --timeout 60 --verifier true
+ok "$rc|$(sq '[d["kind"] for d in L]')" '0|["suite-started","suite-ended"]' "S1: green: a suite-started and a suite-ended"
+ok "$(sq '[L[0]["task"], L[0]["by"], L[0]["runner"], L[0]["sha"], L[0]["dirty"], len(L[0]["load"]), L[0]["running"]]')" "[\"$SLUG\",\"integration\",\"lead\",\"$HEAD0\",false,3,0]" "S1: by integration, runner lead, the tree's sha, the load, the running count"
+ok "$(sq '[L[1]["suite"] == L[0]["suite"], L[1]["outcome"], L[1]["rc"], "failing" in L[1], "running" in L[1]]')" '[true,"green",0,false,true]' "S1: ended green, rc 0, no failing"
+: > "$SEV/ro.jsonl"
+sv s2 --slug "$SLUG" --timeout 60 --verifier 'echo "FAILED tests/b.py::u - boom"; exit 1'
+ok "$rc|$(sq '[L[1]["outcome"], L[1]["rc"], L[1]["failing"]]')" '1|["red",1,["tests/b.py::u"]]' "S2: red: its failing names, read from the log"
+: > "$SEV/ro.jsonl"
+sv s3 --slug "$SLUG" --timeout 2 --verifier "sleep 3181.$u"
+ok "$rc|$(sq '[L[1]["outcome"], L[1]["rc"], L[1]["timeout"], L[1]["step"], L[1]["failing"]]')" '124|["timeout",124,2,"verifier",[]]' "S3: timeout: its --timeout and step"
+: > "$SEV/ro.jsonl"
+RT="$R/.claude/worktrees/race-$SLUG"
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --repo "$R" --detach-at "$HEAD0" --tree "$RT" --out "$F/out/s4" --timeout 60 --rollout "$V/ro.md" --slug "$SLUG" --verifier true >/dev/null 2>&1
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --repo "$R" --detach-at "$HEAD0" --tree "$RT" --out "$F/out/s4c" --timeout 60 --outcome --rollout "$V/ro.md" --verifier true >/dev/null 2>&1
+ok "$(sq '[[d["kind"], d["by"], d["task"], d.get("outcome")] for d in L]')" "[[\"suite-started\",\"race\",\"$SLUG\",null],[\"suite-ended\",\"race\",\"$SLUG\",\"green\"],[\"suite-started\",\"completion\",null,null],[\"suite-ended\",\"completion\",null,\"green\"]]" "S4: --detach-at is a race suite; --outcome a completion suite with no task"
+: > "$SEV/ro.jsonl"
+VSL="$root/skills/execute/scripts/verify-slot.py"
+python3 "$VSL" run --slots 1 -- sh -c "echo \$\$ > '$F/s5.pid'; until [ -e '$F/s5.go' ]; do sleep 0.1; done" > /dev/null 2>&1 &
+hp=$!
+within 300 test -s "$F/s5.pid" || echo "FAIL - S5: the holder did not start within 300 s"
+sv s5 --slug "$SLUG" --timeout 60 --slots 1 --slot-wait 1 --verifier true
+touch "$F/s5.go"; wait "$hp"
+ok "$rc|$(sq '[[d["kind"], d["outcome"], d["seconds"], d["waited"] >= 1, "rc" in d] for d in L]')" '75|[["suite-ended","noslot",0,true,false]]' "S5: noslot: an ended line only, with its wait, no rc"
+rm -rf "$SEV"
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --tree "$WT" --out "$F/out/s6" --timeout 60 --verifier true >/dev/null 2>&1
+ok "$([ -e "$SEV" ] && echo written || echo none)" none "S6: no --rollout: no record"
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --tree "$WT" --out "$F/out/s6b" --timeout 60 --slug "$SLUG" --verifier true >/dev/null 2>&1
+ok "$?|$([ -e "$F/out/s6b.rc" ] && echo rc || echo none)" "2|none" "S6: --slug without --rollout is a usage error, no rc file"
+# S7: TERM to a slotted verify once its suite-started line is in: 143, the rc file first, then suite-ended stopped.
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --tree "$WT" --out "$F/out/s7" --timeout 600 --slots 1 --slot-wait 60 --rollout "$V/ro.md" --slug "$SLUG" --verifier "sleep 3182.$u" >/dev/null 2>&1 &
+vp=$!
+within 300 grep -q suite-started "$SEV/ro.jsonl" || echo "FAIL - S7: no suite-started within 300 s"
+kill -TERM "$vp"; wait "$vp"; rc=$?
+ok "$rc|$(cat "$F/out/s7.rc" 2>/dev/null)" "143|143" "S7: exit 143 and <out>.rc reads 143"
+ok "$(sq '[[d["kind"], d.get("outcome"), d.get("rc"), "running" in d, "failing" in d] for d in L]')" '[["suite-started",null,null,true,false],["suite-ended","stopped",143,false,false]]' "S7: suite-ended stopped, no running, no failing"
+within 60 nosleeper "sleep 3182\.$u"
+: > "$SEV/ro.jsonl"
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$LI" verify --tree "$WT" --out "$F/out/s7b" --timeout 600 --slots 1 --slot-wait 60 --outcome --rollout "$V/ro.md" --verifier "sleep 3183.$u" >/dev/null 2>&1 &
+vp=$!
+within 300 grep -q suite-started "$SEV/ro.jsonl" || echo "FAIL - S7b: no suite-started within 300 s"
+kill -TERM "$vp"; wait "$vp"
+ok "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["rc"], d["ended"])' "$F/out/s7b.outcome.json")" "143 signal" "S7b: --outcome: the outcome file carries rc 143 and ended signal"
+ok "$(sq '[d.get("outcome") for d in L]')" '[null,"stopped"]' "S7b: … and the suite ended stopped"
+within 60 nosleeper "sleep 3183\.$u"
+
+# S8: a TERM while suite-started walks the vault for its running count, a slot held: never swallowed by the count's
+# best effort. 143 and <out>.rc 143, the verifier never runs, no line (no green), the slot free.
+: > "$SEV/ro.jsonl"
+cat > "$F/s8.py" <<'PY2'
+import importlib.util, os, signal, sys
+spec = importlib.util.spec_from_file_location("lead_integrate", sys.argv[1])
+li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+walk = li.rr._note_index
+def index(tasks_dir):   # the TERM lands as suite-started walks the vault
+    os.kill(os.getpid(), signal.SIGTERM)
+    return walk(tasks_dir)
+li.rr._note_index = index
+sys.exit(li.main(sys.argv[2:]))
+PY2
+HOME="$SH_HOME" THREAD_EVENTS_DIR="$SEV" python3 "$F/s8.py" "$LI" verify --tree "$WT" --out "$F/out/s8" --timeout 60 --slots 1 --slot-wait 60 --rollout "$V/ro.md" --slug "$SLUG" --verifier "touch '$F/s8.ran'" >/dev/null 2>&1; rc=$?
+ok "$rc|$(cat "$F/out/s8.rc" 2>/dev/null)" "143|143" "S8: a TERM in suite-started's vault walk: exit 143 and <out>.rc reads 143"
+ok "$([ -e "$F/s8.ran" ] && echo ran || echo never)|$(sq '[d["kind"] for d in L]')" "never|[]" "S8: the verifier never ran, and no line was written"
+ok "$(python3 "$root/skills/execute/scripts/verify-slot.py" status --slots 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["slots"][0]["state"])')" free "S8: the slot is free"
+
+# ======== M1–M6: base-moved, why main moved at a merge-task exit 3 (p29-10, ADR 0051) ===========================
+# base-moved finds the task by its PR (the vault's pr:), fetches origin, classifies each first-parent commit base..main
+# (a rollout's merge from the Run records or its task note, else a peer's push) and runs the Inert path test.
+fx m1
+MEV="$F/events"; MH="$F/home"; mkdir -p "$MH"
+bm() {  # bm [args…]: base-moved for PR 5 with --base TB, the record in MEV, HOME an empty dir; its JSON in $J
+  J=$(HOME="$MH" THREAD_EVENTS_DIR="$MEV" python3 "$LI" base-moved --repo "$R" --pr "${PRN:-5}" --base "$TB" --main "$B" --default master --tasks-dir "$V" "$@" 2>"$F/bm.err"); rc=$?
+}
+mq() { python3 -c 'import json,sys; ls=[json.loads(l) for l in open(sys.argv[1])]; print(json.dumps(eval(sys.argv[2]), separators=(",", ":")))' "$MEV/ro.jsonl" "$1" 2>/dev/null || echo none; }
+HOME="$MH" THREAD_EVENTS_DIR="$MEV" python3 "$root/skills/_shared/scripts/run_record.py" emit --rollout other-ro --task other-t --kind merged --json '{"pr":"https://github.com/O/R/pull/9"}'
+printf -- '---\ntags: [task]\nstatus: done\nrollout: "[[r2]]"\npr: https://github.com/o/r/pull/11\n---\n\nnote-t\n' > "$V/note-t.md"
+main x.txt "x" "feat: x (#9)"; C1=$B
+main y.txt "y" "a peer's push"; C2=$B
+main z.txt "z" "fix: z (#11)"; C3=$B
+bm --refusal 1
+ok "$rc|$(j "$J" 'd["written"]')" "0|true" "M1: exit 0, one line written"
+ok "$(mq '[[l["kind"], l["task"], l["pr"], l["base"], l["main"], l["refusal"], l["moversTotal"]] for l in ls]')" "[[\"base-moved\",\"$SLUG\",5,\"$TB\",\"$C3\",1,3]]" "M1: one base-moved for the task, with its PR, base, main and refusal"
+ok "$(mq 'ls[0]["movers"]')" "[{\"sha\":\"$C1\",\"kind\":\"rollout\",\"pr\":9,\"rollout\":\"other-ro\",\"task\":\"other-t\",\"source\":\"record\"},{\"sha\":\"$C2\",\"kind\":\"peer\"},{\"sha\":\"$C3\",\"kind\":\"rollout\",\"pr\":11,\"rollout\":\"r2\",\"task\":\"note-t\",\"source\":\"note\"}]" \
+  "M1–M3: oldest first: a rollout's merge from the record (owner/name read ignoring case), a PR-less peer push, a rollout's merge from its task note"
+ok "$(mq '[ls[0]["inertOnly"], ls[0]["pathsTotal"], ls[0]["nonInert"], "error" in ls[0]]')" '[false,3,["x.txt","y.txt","z.txt"],false]' "M4: no inert_paths: inertOnly false, the paths named"
+# M2b: a bare-number merged line matches only by its task: #11's line under another task stays a note match.
+HOME="$MH" THREAD_EVENTS_DIR="$MEV" python3 "$root/skills/_shared/scripts/run_record.py" emit --rollout third-ro --task not-note-t --kind merged --json '{"pr":11}'
+HOME="$MH" THREAD_EVENTS_DIR="$MEV" python3 "$root/skills/_shared/scripts/run_record.py" emit --rollout fourth-ro --task note-t --kind merged --json '{"pr":"#11"}'
+bm
+ok "$(mq '[ls[-1]["movers"][2]["rollout"], ls[-1]["movers"][2]["source"], "refusal" in ls[-1]]')" '["fourth-ro","record",false]' "M2: a bare-number merged line counts only under the PR's own task"
+PRN=77 bm
+ok "$rc|$(j "$J" 'd["written"]')|$(mq 'len(ls)')" "0|false|2" "M5: no task note names the PR: nothing written"
+B=$(sha f) bm
+ok "$rc|$(mq '[ls[-1]["inertOnly"], ls[-1]["movers"], ls[-1]["moversTotal"], ls[-1]["error"][:24]]')" '0|[null,[],0,"main ffffffffffff is not"]' "M6: main not readable: null beside its error, movers []"
+ok "$(python3 "$LI" base-moved --repo "$R" --pr x --base "$TB" --main "$B" --default master >/dev/null 2>&1; echo $?)" 2 "M6: a bad --pr is a usage error"
+# M4: the Inert path test on the repo's inert_paths (an ssh GitHub origin, as C30's): only THREAD.md moved → true; a
+# source file beside it → false; a refused rollouts.toml → null beside its error.
+ifx m4 '["THREAD.md"]'
+MEV="$F/events"; MH="$IH"
+main THREAD.md "close-out" "docs(thread): close-out"
+bm
+ok "$(mq '[ls[0]["inertOnly"], ls[0]["globs"], ls[0]["nonInert"], ls[0]["movers"][0]["kind"]]')" '[true,["THREAD.md"],[],"peer"]' "M4: a THREAD.md-only move: inertOnly true"
+main src.py "print(1)" "feat: src"
+bm
+ok "$(mq '[ls[1]["inertOnly"], ls[1]["nonInert"], ls[1]["moversTotal"]]')" '[false,["src.py"],2]' "M4: a source file beside it: inertOnly false"
+printf '[repo."o/r"]\ninert_paths = ["THREAD.md"]\n' > "$IH/.config/thread/rollouts.toml"
+bm
+ok "$(mq '[ls[2]["inertOnly"], ls[2]["error"][:12], ls[2]["moversTotal"]]')" '[null,"inert test: ",2]' "M4: a refused rollouts.toml: inertOnly null beside its error"
+unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
+
+# ======== R1–R13: the RACE revert (lead-integrate.py revert, ADR 0046) ===========================================
+# A RACE red after the Flake check is reverted on main through a revert PR that merges only through merge-task. rvfx is
+# fx (or ifx, for the Inert cases R4b–R4e) plus M, the task's squash merge on origin's master (PR #5 MERGED as M), the
+# rollout's RACE line and `revert started: M`, and a queued proj-t6. srv refuses a non-fast-forward push, the fake gh's
+# squash takes the PR head's tree (squash.tree head) and a PR it opened follows its branch (headRefOid.live).
+RVH="$tmp/rv-home"; mkdir -p "$RVH"
+rvfx() {
+  if [ $# -gt 1 ]; then ifx "$1" "$2"; RVHOME="$IH"; else fx "$1"; RVHOME="$RVH"; fi
+  RVEV="$F/events"; mkdir -p "$RVEV"
+  git --git-dir "$MT_SRV" config receive.denyNonFastForwards true
+  g -C "$F/p" fetch -q origin; g -C "$F/p" checkout -q master
+  g -C "$F/p" merge -q --squash "origin/$BR" >/dev/null 2>&1; g -C "$F/p" commit -q -m "task t5 (#5)"; g -C "$F/p" push -q origin master
+  M=$(git -C "$F/p" rev-parse HEAD); B=$M
+  mkpr 5 "$H0"; echo MERGED > "$MT_STATE/pr/5/state"; echo "$M" > "$MT_STATE/pr/5/mergeCommit"
+  echo head > "$MT_STATE/squash.tree"
+  printf -- '- [[proj-t6]]\n' >> "$V/ro.md"
+  printf -- '---\ntags: [task]\nstatus: open\nrollout: "[[ro]]"\n---\n\nt6\n' > "$V/proj-t6.md"
+  printf '\n## Race log\n\n- 2026-10-02T12:00+00:00 [[%s]] RACE: PR #5 merged as %s on parent %s at head %s, not the integrated pair (head %s, base %s); origin/master holds an unverified combination; re-verify it\n- 2026-10-02T12:10+00:00 [[%s]] revert started: %s (re-verify rc 1, red after the Flake check)\n' \
+    "$SLUG" "$M" "$TB" "$H0" "$H0" "$TB" "$SLUG" "$M" >> "$V/ro.md"
+}
+rlog() { printf '%s\n' "$1" >> "$V/ro.md"; }   # one ## Race log line (the note's last section)
+subro() { python3 -c 'import sys; p, a, b = sys.argv[1:]; t = open(p).read(); open(p, "w").write(t.replace(a, b))' "$V/ro.md" "$1" "$2"; }
+rv() { : > "$MT_STATE/gh.log"; J=$(HOME="$RVHOME" THREAD_EVENTS_DIR="$RVEV" python3 "$LI" revert --repo "$R" --slug "$SLUG" --default master --merge "${RM:-$M}" --note "$V/$SLUG.md" --rollout "$V/ro.md" --gh-bin "$tmp/bin/gh" "$@" 2>"$F/rv.err"); rrc=$?; }
+srvm() { git --git-dir "$MT_SRV" rev-parse refs/heads/master; }
+srvrefs() { git --git-dir "$MT_SRV" for-each-ref --format='%(refname) %(objectname)' | tr '\n' ' '; }
+npc() { grep -c '^pr create' "$MT_STATE/gh.log"; }
+ngh() { grep -c . "$MT_STATE/gh.log"; }
+rmt() {  # rmt [head base]: merge-task on the revert PR, its pair from $J unless given; base.seq is what GitHub's ref read returns
+  local h="${1:-$(j "$J" 'd["head"]')}" b="${2:-$(j "$J" 'd["base"]')}"
+  [ -n "${KEEPSEQ:-}" ] || printf '%s\n' "$b" > "$MT_STATE/base.seq"
+  : > "$MT_STATE/gh.log"; out=$(PATH="$tmp/bin:$PATH" HOME="$RVHOME" THREAD_EVENTS_DIR="$RVEV" bash "$MT" "$R" "$RPR" "$h" "$b" 2>&1); rc=$?
+}
+rhold() { HOME="$RVHOME" THREAD_EVENTS_DIR="$RVEV" python3 "$RR" hold --tasks "$SLUG" --hold race --state "$1" --tasks-dir "$V"; }
+rrow() { printf '%s' "$(j "$J" 'd["tail"]["reason"]')" | python3 "$LI" set-aside --note "$V/$SLUG.md" --kind integration | THREAD_EVENTS_DIR="$RVEV" python3 "$RR" reconcile --result - --tasks-dir "$V" --now 2026-10-02T12:40:00Z >/dev/null; }
+tail_apply() {  # the landing tail, in its order: the line (only when raceLog.reverted is null), hold race end, the set-aside row
+  [ "$(j "$J" 'd["raceLog"]["reverted"]')" != null ] || rlog "$(j "$J" 'd["tail"]["line"]')"
+  rhold end >/dev/null; rrow
+}
+gone() { [ -e "$R/.claude/worktrees/revert-$SLUG" ] && echo kept || echo removed; }
+
+# R1: route pr. R3: a re-run before the merge reuses the branch and the PR. R2: merge-task 0, then reverted. R3: a re-run
+# after landing. R8: the tail through reconcile frees the lane, and next starts the next task.
+rvfx r1
+rv --verifier true
+ok "$rrc|$(j "$J" 'd["route"]')" "0|pr" "R1: a RACE red after the Flake check → route pr"
+H1=$(j "$J" 'd["head"]'); RPR=$(j "$J" 'd["pr"]')
+ok "$(git --git-dir "$MT_SRV" rev-list --parents -n 1 "$H1")" "$H1 $M" "R1: the revert head's parent is origin/master (M)"
+ok "$(git --git-dir "$MT_SRV" diff --quiet "$TB" "$H1" && echo same || echo differs)" same "R1: … and its files are M^1's"
+has "$(git --git-dir "$MT_SRV" log -1 --format=%B "$H1")" "This reverts commit $M." "R1: the commit body says This reverts commit M"
+has "$(cat "$MT_STATE/pr/$RPR/body")" "This reverts commit $M" "R1: … and so does the PR body"
+ok "$(srvm)" "$M" "R1: origin/master untouched (a revert merges only through merge-task)"
+ok "$(j "$J" '[d["raceLog"], d["restores"], d["restoresBy"], d["base"], d["branch"], d["landedAfter"], d["restoredTo"]]')" \
+  "[{\"opened\":null,\"reverted\":null},true,\"tree\",\"$M\",\"thread-revert/$SLUG-${M:0:12}\",0,\"$TB\"]" "R1: raceLog null, restores by tree, base M, its branch"
+ok "$(gone)" removed "R1: the revert tree removed"
+rlog "- 2026-10-02T12:11+00:00 [[$SLUG]] revert opened: PR #$RPR $(j "$J" 'd["url"]')"
+rv --verifier true
+ok "$rrc|$(j "$J" '[d["route"], d["pr"], d["head"], d["raceLog"]["opened"]]')|$(npc)" "0|[\"pr\",$RPR,\"$H1\",\"PR #$RPR https://github.com/o/r/pull/$RPR\"]|0" \
+  "R3: a re-run before the merge reuses the branch and the PR (no pr create), raceLog.opened read"
+rmt
+ok "$rc" 0 "R2: merge-task on the revert PR → 0"
+S=$(srvm)
+rv --verifier true
+ok "$rrc|$(j "$J" '[d["route"], d["revertCommit"], d["restores"], d["restoresBy"], d["landedAfter"], d["tail"]["unverified"]]')" "0|[\"reverted\",\"$S\",true,\"tree\",0,false]" \
+  "R2: revert again → reverted, its commit the PR's merge, main back at M^1's tree"
+has "$(j "$J" 'd["tail"]["line"]')" "[[$SLUG]] reverted on main: $S (revert PR #$RPR of PR #5's merge ${M:0:12}; main back at ${TB:0:12}'s tree); set aside for Lachy" "R2: tail.line"
+ok "$(j "$J" 'd["tail"]["reason"]')" "RACE: the re-verify was red after the Flake check; its merge ${M:0:12} is reverted on main by ${S:0:12}" "R2: tail.reason"
+rv --verifier true
+ok "$(j "$J" '[d["route"], d["revertCommit"]]')|$(npc)" "[\"reverted\",\"$S\"]|0" "R3: a re-run after landing → reverted, revertCommit the PR's mergeCommit"
+tail_apply
+ok "$(fm "$V/$SLUG.md" integrating)|$(grep -c 'reverted on main:' "$V/ro.md")" "<none>|1" "R8: the set-aside row removes integrating:; one reverted on main: line"
+has "$(cat "$RVEV/ro.jsonl")" '"lane-freed"' "R8: … lane-freed recorded"
+N=$(nxt "")
+ok "$(j "$N" '[d["laneHold"], d["start"], [h["slug"] for h in d["raceHold"]]]')" "[[],[\"proj-t6\"],[\"$SLUG\"]]" "R8: next: the lane free, proj-t6 starts, the RACE still in raceHold for Lachy"
+
+# R4: a peer push of src.py after the PR opened (no rollouts.toml): the branch takes origin/master by a merge, pushed as a
+# fast-forward; restores false.
+rvfx r4
+rv --verifier true; H1=$(j "$J" 'd["head"]'); RPR=$(j "$J" 'd["pr"]')
+main src.py "print(1)" "a peer's push"; X=$B
+rv --verifier true; H2=$(j "$J" 'd["head"]')
+ok "$rrc|$(j "$J" '[d["route"], d["pr"], d["base"]]')" "0|[\"pr\",$RPR,\"$X\"]" "R4: a peer push after the PR opened: revert again → the same PR on base X"
+ok "$(git --git-dir "$MT_SRV" rev-list --parents -n 1 "$H2")" "$H2 $H1 $X" "R4: … origin/master merged into the branch (H2 = H1 + X), a fast-forward push (no --force)"
+ok "$(j "$J" '[d["restores"], d["restoresBy"], d["landedAfter"]]')" "[false,null,1]" "R4: … restores false, landedAfter 1"
+has "$(j "$J" 'd["inert"]["why"]')" "no inert_paths for this repo" "R4: … inert.why"
+rmt; ok "$rc" 0 "R4: merge-task (H2, X) → 0"
+rv --verifier true
+ok "$(j "$J" '[d["route"], d["restores"], d["restoresBy"], d["tail"]["unverified"]]')" '["reverted",false,null,true]' "R4: revert → reverted, not restored"
+has "$(j "$J" 'd["tail"]["line"]')" "main not re-verified: 1 commit(s) landed after ${M:0:12}); set aside for Lachy" "R4: … tail.line: main not re-verified"
+has "$(j "$J" 'd["tail"]["reason"]')" "; main not re-verified: 1 commit(s) landed after ${M:0:12}" "R4: … and tail.reason"
+
+# R5: a conflict → route conflict, nothing pushed, the tree removed.
+rvfx r5
+main a.txt "$(printf 'A1 peer\na2\na3\na4\na5')" "a peer's edit of the task's line"
+refs0=$(srvrefs)
+rv
+ok "$rrc|$(j "$J" '[d["route"], d["conflictFiles"]]')" '0|["conflict",["a.txt"]]' "R5: reverting M conflicts → route conflict, the file named"
+ok "$(srvrefs)|$(npc)|$(gone)" "$refs0|0|removed" "R5: … nothing pushed, no PR, the tree removed"
+
+# R6: the target guard refuses (exit 1, no pr create, srv unchanged); (a)–(e) before any gh call. A two-parent M reverts with -m 1.
+rvfx r6
+cp "$V/ro.md" "$F/ro.keep"; cp "$V/$SLUG.md" "$F/t.keep"; refs0=$(srvrefs)
+refuse() {  # refuse <label> [rv args]
+  local l="$1"; shift; rv "$@"
+  ok "$rrc|$(npc)|$(srvrefs)" "1|0|$refs0" "R6 $l: refused (exit 1), no pr create, srv unchanged"
+}
+grep -v ' RACE: PR #5 merged as ' "$F/ro.keep" > "$V/ro.md"; refuse "(a) no RACE line"; ok "$(ngh)" 0 "R6 (a): … no gh call"
+cp "$F/ro.keep" "$V/ro.md"
+RM=$TB refuse "(b) an unrelated --merge"; ok "$(ngh)" 0 "R6 (b): … no gh call"
+grep -v '^integrating:' "$F/t.keep" > "$V/$SLUG.md"; refuse "(c) no integrating:"; ok "$(ngh)" 0 "R6 (c): … no gh call"
+cp "$F/t.keep" "$V/$SLUG.md"
+grep -v ' revert started: ' "$F/ro.keep" > "$V/ro.md"; refuse "(d) no revert started:"; ok "$(ngh)" 0 "R6 (d): … no gh call"
+cp "$F/ro.keep" "$V/ro.md"
+rlog "- 2026-10-02T12:20+00:00 [[$SLUG]] revert did not land: conflict in a.txt"; refuse "(e) a revert did not land: line"; ok "$(ngh)" 0 "R6 (e): … no gh call"
+cp "$F/ro.keep" "$V/ro.md"
+echo "$TB" > "$MT_STATE/pr/5/mergeCommit"; refuse "(f) PR #5's mergeCommit is not M"
+echo "$M" > "$MT_STATE/pr/5/mergeCommit"
+g -C "$R" checkout -q --detach; echo z > "$R/z.txt"; g -C "$R" add z.txt; g -C "$R" commit -q -m local; L=$(git -C "$R" rev-parse HEAD); g -C "$R" checkout -q master
+subro "$M" "$L"; echo "$L" > "$MT_STATE/pr/5/mergeCommit"
+RM=$L refuse "(g) M not on origin"
+has "$(cat "$F/rv.err")" "is not on origin/master" "R6 (g): … saying so"
+cp "$F/ro.keep" "$V/ro.md"; echo "$M" > "$MT_STATE/pr/5/mergeCommit"
+g -C "$F/p" checkout -q -b side "$M"; printf 'side\n' > "$F/p/side.txt"; g -C "$F/p" add side.txt; g -C "$F/p" commit -q -m side
+g -C "$F/p" checkout -q master; g -C "$F/p" merge -q --no-ff -m "Merge pull request #5 from o/side" side; g -C "$F/p" push -q origin master
+M2=$(git -C "$F/p" rev-parse HEAD); subro "$M" "$M2"; echo "$M2" > "$MT_STATE/pr/5/mergeCommit"
+RM=$M2 rv
+ok "$rrc|$(j "$J" 'd["route"]')|$(git --git-dir "$MT_SRV" diff --quiet "$M" "$(j "$J" 'd["head"]')" && echo same || echo differs)" "0|pr|same" "R6: a two-parent M is reverted with -m 1 (the head's files are its first parent's)"
+# R6h: a RACE line for another PR naming [[S]] (a lead's mistake) is skipped: the guard reads PR #5's.
+rvfx r6h
+rlog "- 2026-10-02T12:15+00:00 [[$SLUG]] RACE: PR #77 merged as $TB on parent $TB at head $TB, not the integrated pair"
+rv
+ok "$rrc|$(j "$J" 'd["route"]')" "0|pr" "R6h: another PR's RACE line under [[S]] → the guard still reads PR #5's line and passes"
+
+# R7: origin unreachable → 8, nothing opened.
+rvfx r7
+g -C "$R" remote set-url origin "$F/nowhere.git"
+rv
+ok "$rrc|$(npc)" "8|0" "R7: origin unreachable → exit 8 (retryable), nothing opened"
+
+# R9: a stale open revert PR, M undone by hand on main meanwhile → noop, the PR named in the tail.
+rvfx r9
+rv; RPR=$(j "$J" 'd["pr"]'); URL=$(j "$J" 'd["url"]')
+g -C "$F/p" revert --no-edit "$M" >/dev/null; g -C "$F/p" push -q origin master; HR=$(git -C "$F/p" rev-parse HEAD)
+rv
+ok "$rrc|$(j "$J" '[d["route"], d["openPr"]["number"], d["restores"], d["restoresBy"]]')" "0|[\"noop\",$RPR,true,\"tree\"]" "R9: M undone by hand on main → noop, the open revert PR named"
+has "$(j "$J" 'd["tail"]["line"]')" "reverted on main: $HR (no revert needed: PR #5's merge ${M:0:12}'s change is already gone from master; main back at ${TB:0:12}'s tree); stale revert PR #$RPR ($URL) is still open and must not merge: close it; set aside for Lachy" "R9: tail.line names the stale PR"
+has "$(j "$J" 'd["tail"]["reason"]')" "stale revert PR #$RPR ($URL) is still open and must not merge: close it" "R9: … and tail.reason"
+
+# R10: an Engine snapshot mismatch → exit 2 with its line, nothing fetched, no gh call, the notes byte-identical.
+rvfx r10
+python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("protocol_version: 5\n", "protocol_version: 5\nengine_snapshot: /nonexistent/thread-engine-snapshot\n", 1))' "$V/ro.md"
+main y.txt "y" "a peer's push"
+t0=$(cksum < "$V/$SLUG.md"); r0=$(cksum < "$V/ro.md"); o0=$(git -C "$R" rev-parse origin/master)
+rv
+ok "$rrc" 2 "R10: an Engine snapshot mismatch → exit 2"
+has "$(cat "$F/rv.err")" "engine-snapshot: " "R10: … its engine-snapshot: line"
+ok "$(ngh)|$(git -C "$R" rev-parse origin/master)|$(cksum < "$V/$SLUG.md")|$(cksum < "$V/ro.md")" "0|$o0|$t0|$r0" "R10: … nothing fetched, no gh call, the notes byte-identical"
+
+# R11: merge-task's exit 3 on the revert PR (a peer push) → revert again (H2 = H1 + X) → merge-task 0 → reverted.
+rvfx r11
+rv; H1=$(j "$J" 'd["head"]'); RPR=$(j "$J" 'd["pr"]')
+main x.txt "x" "a peer's push"; X=$B
+printf '%s\n' "$X" > "$MT_STATE/base.seq"; KEEPSEQ=1 rmt "$H1" "$M"
+ok "$rc" 3 "R11: merge-task on the revert PR after a peer push → exit 3 (base moved)"
+ok "$(cat "$RVEV/ro.jsonl" 2>/dev/null | grep -c '"base-moved"')|$(cat "$R/.claude/merge-task/$RPR.base-moved" 2>/dev/null)" "0|$M" "R11: … base-moved writes nothing (no task note names the revert PR); the counter appended"
+rv; H2=$(j "$J" 'd["head"]')
+ok "$(git --git-dir "$MT_SRV" rev-list --parents -n 1 "$H2")" "$H2 $H1 $X" "R11: revert again → H2 with parents H1 and X"
+rmt; ok "$rc" 0 "R11: merge-task (H2, X) → 0"
+rv; ok "$(j "$J" '[d["route"], d["restores"]]')" '["reverted",false]' "R11: revert → reverted, restores false (x.txt landed after M)"
+
+# R12: the crash tail: pending until the set-aside row; the re-run never appends the line twice; hold end is idempotent.
+rvfx r12
+rhold start >/dev/null
+rv; RPR=$(j "$J" 'd["pr"]'); rlog "- 2026-10-02T12:11+00:00 [[$SLUG]] revert opened: PR #$RPR $(j "$J" 'd["url"]')"
+rmt; ok "$rc" 0 "R12: merge-task on the revert PR → 0"
+N=$(nxt ""); ok "$(j "$N" 'd["laneHold"]')" "[{\"slug\":\"$SLUG\",\"hold\":\"race\",\"revert\":true}]" "R12: merged, the tail not run (a crash) → next: revert true"
+rv; rlog "$(j "$J" 'd["tail"]["line"]')"
+N=$(nxt ""); ok "$(j "$N" 'd["laneHold"][0]["revert"]')" true "R12: the line written, integrating: standing (a crash before hold end) → still pending"
+rv; ok "$(j "$J" '[d["route"], d["raceLog"]["reverted"] is not None]')" '["reverted",true]' "R12: the re-run reads the line (raceLog.reverted), so it is not appended again"
+o1=$(rhold end); o2=$(rhold end)
+ok "$o1|$o2" "$SLUG: hold-ended race [written]|$SLUG: hold-ended race [no-change]" "R12: hold race end twice → [written], then [no-change]"
+rrow
+N=$(nxt ""); ok "$(j "$N" 'd["laneHold"]')|$(grep -c 'reverted on main:' "$V/ro.md")" "[]|1" "R12: after the row the lane is free; one reverted on main: line"
+
+# R13: merge-task's exit 5 on the revert PR (GitHub squashed it onto X2): it is on main, so revert routes reverted; no
+# `revert did not land:` line, merge-task's RACE line is never appended, and the lane stays held (main not re-verified).
+rvfx r13
+printf -- '---\ntags: [task]\nstatus: done\nrollout: "[[ro]]"\n---\n\nt6\n' > "$V/proj-t6.md"
+rv; H1=$(j "$J" 'd["head"]'); RPR=$(j "$J" 'd["pr"]')
+main x2.txt "x2" "a peer's push"; X2=$B
+g clone -q "$MT_SRV" "$F/r13c" 2>/dev/null; g -C "$F/r13c" revert --no-edit "$M" >/dev/null; g -C "$F/r13c" push -q origin HEAD:refs/scratch/r13
+git -C "$F/r13c" rev-parse 'HEAD^{tree}' > "$MT_STATE/squash.tree"   # the real revert's tree on X2, its objects on srv
+echo "$X2" > "$MT_STATE/squash-parent"; printf '%s\n' "$M" > "$MT_STATE/base.seq"
+KEEPSEQ=1 rmt "$H1" "$M"
+ok "$rc" 5 "R13: GitHub squashed the revert onto X2 → merge-task exit 5"
+has "$out" "RACE: PR #$RPR merged as" "R13: … merge-task printed its RACE line"
+rv --verifier true
+ok "$(j "$J" '[d["route"], d["restores"], d["landedAfter"]]')" '["reverted",false,1]' "R13: revert → reverted (it is on main), restores false, landedAfter 1"
+tail_apply
+N=$(nxt "")
+ok "$(j "$N" '[d["laneHold"], d["halt"], d["mainRed"]]')" "[[{\"slug\":\"$SLUG\",\"hold\":\"race\",\"revert\":false}],\"race\",[]]" "R13: next keeps the lane held (main not re-verified) and halts race; mainRed []"
+ok "$(grep -c 'revert did not land:' "$V/ro.md")|$(grep -c "RACE: PR #$RPR" "$V/ro.md")" "0|0" "R13: no revert did not land: line, and no RACE: PR #R line"
+HOME="$RVHOME" python3 "$RR" resume --rollout "$V/ro.md" --tasks-dir "$V" --gh-bin "$tmp/bin/gh" >/dev/null 2>&1
+ok "$(fm "$V/$SLUG.md" status)" "status: blocked" "R13: resume never flips it"
+
+# R4b–R4e: restores by ADR 0045's Inert check (ifx: the ssh origin o/r, HOME's rollouts.toml, the Run record).
+rvfx r4b '["THREAD.md"]'
+main THREAD.md "a peer's close-out" "docs(thread): close-out"; X=$B
+rv --verifier true; RPR=$(j "$J" 'd["pr"]')
+ok "$rrc|$(j "$J" '[d["route"], d["restores"], d["restoresBy"]]')" '0|["pr",true,"inert"]' "R4b: a peer close-out in THREAD.md only → restores by inert on the head"
+rmt; ok "$rc" 0 "R4b: merge-task → 0"
+S=$(srvm)
+rv --verifier true
+ok "$(j "$J" '[d["route"], d["restores"], d["restoresBy"], d["tail"]["unverified"]]')" '["reverted",true,"inert",false]' "R4b: revert → reverted, restored but for Inert paths"
+has "$(j "$J" 'd["tail"]["line"]')" "main back at ${TB:0:12}'s tree but for Inert paths (1 path(s): THREAD.md))" "R4b: tail.line"
+ok "$(iline '[[l["kind"], l["base"], l["head"], l["main"], l["paths"]] for l in ls][-1]')" "[\"verify-skipped\",\"$TB\",\"$S\",\"$S\",[\"THREAD.md\"]]" "R4b: the Run record's verify-skipped line: base M^1, head and main the squash"
+ok "$(iline '[l["kind"] for l in ls if l["kind"] != "verify-skipped"]')" '[]' "R4b: … and no inert-proof-failed line"
+tail_apply
+N=$(nxt ""); ok "$(j "$N" '[d["laneHold"], d["start"]]')" '[[],["proj-t6"]]' "R4b: after the tail's row the lane is free and proj-t6 starts"
+rvfx r4c '["THREAD.md"]'
+printf -- '---\ntags: [task]\nstatus: done\nrollout: "[[ro]]"\n---\n\nt6\n' > "$V/proj-t6.md"
+main THREAD.md "close-out"; main src.py "print(1)"
+rv --verifier true; RPR=$(j "$J" 'd["pr"]')
+ok "$(j "$J" '[d["route"], d["restores"], d["restoresBy"], d["inert"]["nonInert"]]')" '["pr",false,null,["src.py"]]' "R4c: src.py beside THREAD.md → restores false, src.py non-inert"
+rmt; rv --verifier true; tail_apply
+N=$(nxt ""); ok "$(j "$N" '[d["laneHold"], d["halt"]]')" "[[{\"slug\":\"$SLUG\",\"hold\":\"race\",\"revert\":false}],\"race\"]" "R4c: … the lane stays held"
+rvfx r4d '["THREAD.md"]'
+printf '[repo."o/r"]\ninert_paths = ["THREAD.md"]\n' > "$IH/.config/thread/rollouts.toml"
+main THREAD.md "close-out"
+rv --verifier true
+ok "$rrc|$(j "$J" '[d["restores"], d["restoresBy"]]')" "0|[false,null]" "R4d: a refused rollouts.toml → restores false"
+has "$(j "$J" 'd["inert"]["why"]')" "rollout settings refused" "R4d: … inert.why names the refusal"
+rvfx r4e '["THREAD.md"]'
+main THREAD.md "close-out"
+rv
+ok "$(j "$J" '[d["restores"], d["inert"]["why"]]')" '[false,"no --verifier given: the verifier runs"]' "R4e: no --verifier → restores false, inert.why says so"
 unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"

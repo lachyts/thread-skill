@@ -34,6 +34,9 @@
 //                               judge and the four tree agents observe with touched tests (the verifier only when the
 //                               brief asks); args.touched pins how they are found; Integration's prompts are their
 //                               pre-p31-1 bytes, and the whole-call pins swap p31-1's fragments back (P31_1).
+//   - the Flake check (p29-9) → FLAKE_CHECK_TASK follows the verification block of every implementer, approved-plan
+//                               implementer and reviser, FLAKE_CHECK_INTEGRATION follows integrationVerify in the
+//                               integrator, once each and nowhere else; the whole-call pins swap them out (P29_9).
 // Evaluates only the pure-function region of the engine (before the orchestration that needs Workflow
 // globals) in a vm sandbox. Run: node tests/prompt-invariants.test.mjs   (exit 0 = pass)
 import fs from 'node:fs'
@@ -1206,6 +1209,36 @@ function agentPrompts(E, over = {}) {
 // suite). Integration is unchanged: PRE_P31 holds sha256 pins recorded on dc07aa5, BEFORE the p31-1
 // edit, of its two agents' prompts, the pre-p31-1 ralphLoop (now fullSuiteLoop, Integration's loop), the pre-p31-1
 // oneShotVerify (preOneShot below, the swap-back literal) and the integrator's manifest.
+// p29-9 (ADR 0050): the Flake check blocks, appended as `\n<block>` right after each code-writing prompt's verification
+// block and after integrationVerify in the integrator, never inside a loop renderer. P29_9 holds [new, old] (old ''),
+// applied BEFORE preP31: a prompt with the blocks swapped out is its pre-p29-9 bytes, which then chain to every older
+// base as before.
+const P29X = loadEngine(['FLAKE_CHECK_TASK', 'FLAKE_CHECK_INTEGRATION', 'flakeCheck', 'GIT_ENV_SCRUB', 'DIFF_FILES'])
+const P29_9 = [['\n' + P29X.FLAKE_CHECK_TASK, ''], ['\n' + P29X.FLAKE_CHECK_INTEGRATION, '']]
+const preP29 = (p) => P29_9.reduce((x, [nw, od]) => x.split(nw).join(od), p)
+// The p29-9 pins (each the p29-9 base plus exactly the blocks; the base is the pin p31-1 recorded, or for the slotted
+// renders, integrator and slotted, the pin p31-4 recorded). Those two were re-pinned at p29-9's Integration with p31-4:
+// with p31-4's SLOT_TEXT sentence taken out (preHeat, below) they are the pins p29-9 recorded before p31-4 landed
+// (P29_PRE_HEAT), so each side's delta stays pinned on its own. p31-3 re-pinned the same two (SLOT_TEXT's wait
+// sentence): with it swapped back (preWait, below) they are P31_3_PRE_WAIT, the pins before p31-3.
+const P29_PINS = {
+  integrator: 'a35a99941d331033e7b8e27550d9c266a288d61b49d8099b7aee991ec4f7835d', // agentPrompts' 2 fixtures × baseline/none × slot/none (re-pinned by p31-3)
+  r2: '83e62457a38eeb10f70f964a4679a67177027eaf81a021caae0877e512a7871a', // the unseeded round-2 reviser
+  r3: '1309d674cedb9d955af05f895d6805b3e2cb03496dc24e7a8b663fb6a1a1f37e', // the unseeded round-3 reviser with the plan
+  calls: '867dbc843c58399e743049254a4dc9631af1d8180a2158330eaf7e13cd548863', // three whole task-mode calls, unslotted
+  slotted: '04501a6217566365a82848b5895fe0491609dc88a6860797a0a59206e778f5b8', // the same calls as run, slotted (re-pinned by p31-3)
+  rows: 'bc54de03bfb55e50cd8c6ead033b2da5c8ea789df8b0945c96ca54690a5398fb', // their rows, flakes included
+}
+// p31-3: the integrator and slotted pins as they stood before p31-3 swapped SLOT_TEXT's wait sentence (preWait reaches
+// them); P29_PINS.integrator and P29_PINS.slotted are re-pinned to the bytes that carry it. No other pin moved.
+const P31_3_PRE_WAIT = {
+  integrator: 'f1520bdcee029f3f966c2e399225fe393af6573b6c57ef2a8e80eeeafecc9b60', // P29_PINS.integrator before p31-3
+  slotted: '9992fcd46d5958c6cb68e7d21f934be6389e248e985063c4dad38a106f443416', // P29_PINS.slotted before p31-3
+}
+const P29_PRE_HEAT = {
+  integrator: '640cb573dece267eca668e14e3e6649c726ed80ad79a8224f8735639494d7be9', // P29_PINS.integrator before p31-4
+  slotted: '66a3293284ce77d41a3826e0f9f24b6d0194a2096de8da090b1a01410c3ccfbd', // P29_PINS.slotted before p31-4
+}
 const PRE_P31 = {
   integrator: '5e13e60b47a68c76da50b467c1a84243b2d3ddedcb24af16d15374c27e71e4a8', // agentPrompts' 2 fixtures × baseline/none × slot/none
   integrationReview: '1fe90542e90840a835b0dbe3e790d8fb1a9cea047f666fd209a65bb8bae29398', // agentPrompts' 2 fixtures
@@ -1273,7 +1306,32 @@ const preP31 = (p, slot) => p31Pairs(slot).reduce((x, [nw, od]) => x.split(nw).j
 const SLOT_HEAT = ' When the Mac is hot the wrapper holds or stops the suite and puts it back in line (`verify-slot: waiting (heat: …)`, ' +
   '`verify-slot: heat stop …`): only the final exit is the verdict, and an exit 76 with a `verify-slot: no verdict` line is no verdict, ' +
   'never red and never an iteration, so run it again.'
-const preHeat = (p) => p.split(SLOT_HEAT).join('')
+// p31-3 (a call waits for its verifier's verdict): SLOT_TEXT's "and wait for it." became the in-turn wait (the run's
+// first line names the exact wait command; the agent runs it in the foreground until the exit line). SLOT_WAIT is
+// [new, old] and preWait swaps it back. It is always the OUTERMOST swap: p31Pairs, preOneShot and preP29's pairs render
+// with the current engine, whose slotNote carries the new sentence, so the text is back to its pre-p31-3 bytes only
+// once every other swap is done. preHeat is already the outermost call at every site, so it applies preWait first and
+// every preHeat comparison reaches its pre-p31-3 pin unchanged; any other comparison against a pin recorded before
+// p31-3 that carries a slotted render and does not go through preHeat takes preWait as its outermost swap.
+const SLOT_WAIT = [
+  'Run it in the background with a long timeout (up to 7200000 ms). The first line of its output file (the file the harness names), ' +
+  '`verify-slot: run <pid> started; wait for its verdict with: …`, gives its pid and the exact wait command. Then wait inside your turn: ' +
+  'run that wait command in the foreground with a 600000 ms timeout, and again after each `verify-slot: still running …` line, ' +
+  'until it prints `verify-slot: exit <rc> (run <pid>)`, whose rc is the verdict. A wait cut by its own timeout is no verdict either: ' +
+  'run it again. Never end your turn or return while the run goes on, and never wait with a sleep or a monitor: the harness ends your ' +
+  'background run when you return, so an early return is no verdict and costs the task a retry.',
+  'Run it in the background with a long timeout (up to 7200000 ms) and wait for it.',
+]
+const preWait = (p) => p.split(SLOT_WAIT[0]).join(SLOT_WAIT[1])
+const preHeat = (p) => preWait(p).split(SLOT_HEAT).join('')
+// [] when SLOT_TEXT tells the agent to wait inside its turn with the run's own wait command; else what is missing.
+const waitFails = (t) => {
+  const out = ['wait command', '600000', '`verify-slot: exit <rc> (run <pid>)`', '`verify-slot: still running …`',
+    'A wait cut by its own timeout is no verdict', 'Never end your turn or return while the run goes on',
+    'never wait with a sleep or a monitor'].filter((x) => !t.includes(x))
+  if (t.includes('and wait for it')) out.push('no "and wait for it"')
+  return out
+}
 // The pairs no pinned call renders: the n=2 loops (a top-rung retry) and the one-shot (every pinned implementer runs
 // on the top rung: proj-fix-p's plan judge climbs it there). They stay in p31Pairs for any other render, and the
 // p31-1 block pins the one-shot against PRE_P31.oneShot; the pins block checks that every other pair renders.
@@ -1325,7 +1383,10 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
     const over = touched === undefined ? {} : { touched }
     const integ = []
     for (const b of [undefined, B]) for (const s of [undefined, SLOT]) integ.push(...agentPrompts(E, argsOf(b, s, over)).integratorPrompt)
-    ok(integ.length === 8 && shaAll(integ.map(preHeat)) === PRE_P31.integrator, `p31-1: integratorPrompt is its pre-p31-1 bytes (2 fixtures × baseline × slot; p31-4's SLOT_TEXT sentence taken out), touched ${JSON.stringify(touched)}`)
+    ok(integ.length === 8 && shaAll(integ.map((p) => preHeat(preP29(p)))) === PRE_P31.integrator, `p31-1: integratorPrompt with the p29-9 block swapped out is its pre-p31-1 bytes (2 fixtures × baseline × slot; p31-4's SLOT_TEXT sentence taken out), touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ.map(preHeat)) === P29_PRE_HEAT.integrator, `p29-9: integratorPrompt with p31-4's SLOT_TEXT sentence taken out is the p29-9 pin recorded before p31-4 landed, touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ.map(preWait)) === P31_3_PRE_WAIT.integrator, `p31-3: integratorPrompt with SLOT_TEXT's wait sentence swapped back is the pin recorded before p31-3, touched ${JSON.stringify(touched)}`)
+    ok(shaAll(integ) === P29_PINS.integrator, `p29-9: integratorPrompt is the p29-9 base plus the Flake check block (2 fixtures × baseline × slot; re-pinned at p29-9's Integration with p31-4, and by p31-3), touched ${JSON.stringify(touched)}`)
     ok(shaAll(agentPrompts(E, over).integrationReviewPrompt) === PRE_P31.integrationReview, `p31-1: integrationReviewPrompt is its pre-p31-1 bytes, touched ${JSON.stringify(touched)}`)
   }
   const loops = []
@@ -1336,6 +1397,11 @@ const P31_MATRIX_ONLY = ['loop n=2', 'loop n=2 baseline', 'one-shot', 'one-shot 
   ok(shaAll(shots.map(preHeat)) === PRE_P31.oneShot, "p31-1: preOneShot (the swap-back literal) is the pre-p31-1 oneShotVerify, byte for byte (p31-4's SLOT_TEXT sentence taken out)")
   ok(E.SLOT_TEXT.endsWith(SLOT_HEAT) && times(E.SLOT_TEXT, SLOT_HEAT) === 1, "p31-4: SLOT_TEXT ends with the Heat hold's sentence, once, so preHeat takes out exactly it")
   ok(loops.some((l) => l.includes(SLOT_HEAT)) && shots.some((s) => s.includes(SLOT_HEAT)), 'p31-4: the sentence renders in the slotted loops and one-shots, so its swap is no no-op')
+  ok(times(E.SLOT_TEXT, SLOT_WAIT[0]) === 1, "p31-3: SLOT_TEXT holds the wait sentence once, so preWait swaps exactly it")
+  ok(loops.some((l) => l.includes(SLOT_WAIT[0])) && shots.some((s) => s.includes(SLOT_WAIT[0])), 'p31-3: the wait sentence renders in the slotted loops and one-shots, so its swap is no no-op')
+  // p31-3: an agent waits for its run's verdict inside its turn, with the run's own wait command, never by returning.
+  ok(JSON.stringify(waitFails(E.SLOT_TEXT)) === '[]', 'p31-3: SLOT_TEXT: the wait command in the foreground (600000 ms), again after each still-running line, until the exit line; a cut wait is no verdict; never return or sleep while the run goes on')
+  ok(waitFails(preWait(E.SLOT_TEXT)).length > 0, 'p31-3 control: the pre-p31-3 SLOT_TEXT ("and wait for it") fails the wait check')
   const aB = argsOf(B)
   ok(sha(E.baselineManifest(aB, true)) === PRE_P31.manifest, "p31-1: baselineManifest(a, true), the integrator's, is its pre-p31-1 bytes")
   ok(E.baselineManifest(aB) !== E.baselineManifest(aB, true) && times(E.baselineManifest(aB), MANIFEST_P31[0]) === 1 &&
@@ -1630,6 +1696,76 @@ Never run the verifier unless the task brief asks the review for the full suite;
   }
 }
 
+// ---- The Flake check (p29-9, ADR 0050) ----------------------------------------------------------------------------
+// FLAKE_CHECK_TASK renders exactly once in every implementer (bottom, climbed, top), approved-plan implementer and
+// reviser (unseeded and seeded), right after its verification block; FLAKE_CHECK_INTEGRATION once in the integrator,
+// right after integrationVerify. Neither renders in any other prompt. Both are static: no verifier line, no `run the
+// verifier`, `EXACTLY ONCE`, `ONE-SHOT`, `Max iterations` or `Touched tests`, one scrubbed git span, and both say never
+// fix a Flake. [] when every prompt holds; else what failed.
+{
+  const E = loadEngine(['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'reviewJudgePrompt', 'plannerPrompt',
+    'readOnlyPrompt', 'planJudgePrompt', 'planReviserPrompt', 'integratorPrompt', 'integrationReviewPrompt', 'verifyBlock', 'ralphLoop',
+    'integrationVerify', 'touchedOf', 'rungState', 'escalate', 'FLAKE_CHECK_TASK', 'FLAKE_CHECK_INTEGRATION', 'flakeCheck', 'GIT_ENV_SCRUB',
+    'DIFF_FILES', 'slotted'])
+  const TB = E.FLAKE_CHECK_TASK
+  const IB = E.FLAKE_CHECK_INTEGRATION
+  const times = (hay, needle) => hay.split(needle).length - 1
+  const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
+  const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
+  const hist = [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }]
+  const stAt = (rung, stages) => {
+    const st = E.rungState({ ...tk, rung }, {})
+    for (const s of stages) E.escalate(st, tk.slug, s)
+    return st
+  }
+  const ST = { bottom: stAt('opus-high', []), climbed: stAt('opus-high', ['implement']), top: stAt('opus-xhigh', ['implement']) }
+  const blockFails = (b) => {
+    const out = []
+    for (const s of ['run the verifier', 'EXACTLY ONCE', 'ONE-SHOT', 'Max iterations', 'Touched tests', '`touched:`', 'Keep running']) {
+      if (b.includes(s)) out.push(`no ${s}`)
+    }
+    if (/full verifier/i.test(b)) out.push('no full verifier')
+    const spans = [...b.matchAll(/`([^`\n]*)`/g)].map((m) => m[1]).filter((x) => /(^|[\s;&|(])git\s/.test(x))
+    if (spans.length !== 1 || !spans[0].startsWith(E.GIT_ENV_SCRUB)) out.push('one scrubbed git span')
+    if (!b.includes('Never fix a Flake inside this task')) out.push('never fix a Flake')
+    if (!b.includes('re-run only those named tests') || !b.includes('run the same verifier line above once more')) out.push('the named re-run, then one more run')
+    if (!b.includes('never count as an iteration or as a second one-shot try')) out.push('the re-runs are the try\'s own')
+    if (!b.includes('`flakes`')) out.push('returned in flakes')
+    return out
+  }
+  ok(JSON.stringify(blockFails(TB)) === '[]' && JSON.stringify(blockFails(IB)) === '[]', 'p29-9: both Flake check blocks are static, scrubbed, never a one-shot or loop marker, and say never fix a Flake')
+  ok(TB.includes(E.DIFF_FILES) && IB.includes("the merge step's `task file:` lines, plus every file your resolution and fix commits change") && TB === E.flakeCheck(E.DIFF_FILES),
+    'p29-9: the task block reads the diff as the code-writers\' files, the integration block as the merge step\'s task files and its own commits')
+  ok(JSON.stringify(blockFails(TB.replace('Never fix a Flake inside this task', 'Fix it'))) === '["never fix a Flake"]' &&
+    blockFails(TB + '\nrun the verifier ONE-SHOT').length === 2, 'p29-9 control: a block without the rule, or with a marker, fails')
+  for (const b of [undefined, ['t — env']]) for (const s of [undefined, VERIFY_SLOT]) {
+    const a = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r', ...(b ? { knownBaselineFailures: b } : {}), ...(s ? { verifySlot: s } : {}) }
+    const coders = [
+      ...['bottom', 'climbed', 'top'].flatMap((k) => [
+        [`implementerPrompt ${k}`, E.implementerPrompt(tk, a, ST[k], ''), E.verifyBlock(ST[k], 'make test', 3, b, s, '')],
+        [`approvedPlanImplementerPrompt ${k}`, E.approvedPlanImplementerPrompt(tk, 'PLAN', a, ST[k], ''), E.verifyBlock(ST[k], 'make test', 3, b, s, '')],
+      ]),
+      ['reviserPrompt r2', E.reviserPrompt(tk, im, hist.slice(0, 1), 2, a, ''), E.ralphLoop('make test', 3, b, s, '')],
+      ['reviserPrompt seeded', E.reviserPrompt(tk, im, hist, 3, a, '', { history: hist, roundsUsed: 2 }), E.ralphLoop('make test', 3, b, s, '')],
+    ]
+    const at = `baseline ${!!b}, slot ${!!s}`
+    ok(coders.every(([, p, v]) => times(p, TB) === 1 && times(p, v + '\n' + TB) === 1 && !p.includes(IB)),
+      `p29-9: every implementer, approved-plan implementer and reviser renders the task block once, right after its verification block (${at})`)
+    const I = { prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: 'a'.repeat(40), taskBase: 'b'.repeat(40), mainSha: 'c'.repeat(40),
+      trouble: ['red'], landed: [], reviewHistory: [], reviewRoundsUsed: 1, rung: { startRung: '', rung: '', climbs: [] } }
+    const ip = E.integratorPrompt({ ...tk, approvedGates: [] }, a, I)
+    ok(times(ip, IB) === 1 && times(ip, E.integrationVerify(tk, a) + '\n' + IB + '\nA verifier still red when the loop ends') === 1 && !ip.includes(TB),
+      `p29-9: the integrator renders the integration block once, right after integrationVerify (${at})`)
+    const J = { mergeCommit: 'd'.repeat(40), headSha: 'e'.repeat(40), baseSha: 'c'.repeat(40), triggers: ['conflict'], path: 'integrator' }
+    const others = [E.reviewJudgePrompt(tk, im, a, []), E.plannerPrompt(tk, a, ST.bottom, ''), E.readOnlyPrompt(tk, a, ST.bottom, ''),
+      E.planJudgePrompt(tk, 'PLAN', a), E.planReviserPrompt(tk, 'PLAN', hist.slice(0, 1), 2, a), E.integrationReviewPrompt(tk, a, I, J)]
+    ok(others.every((p) => !p.includes('Flake check') && !p.includes(TB) && !p.includes(IB)),
+      `p29-9: no planner, plan judge, plan reviser, investigator, review judge or Integration judge renders a Flake check (${at})`)
+    ok(ip.includes(E.slotted('make test', s ? { ...s, priority: true } : s)) && times(ip, E.slotted('make test', s ? { ...s, priority: true } : s)) === 1,
+      `p29-9: the integrator still renders its verifier line once (the block names it without rendering it) (${at})`)
+  }
+}
+
 // ---- Byte pins (p12-6): task mode renders exactly what it did before Integration existed ----------
 // Recorded on 3c396eb (the p12-5 engine) BEFORE the p12-6 edit. p12-6 factored taskTreeSetup's self-heal
 // and lock lines out (treeSelfHeal/treeLockLines, shared with branchTreeSetup), gave reviserPrompt a 7th
@@ -1693,6 +1829,24 @@ Never run the verifier unless the task brief asks the review for the full suite;
 // grep), observeTests names the before/after status diff (TREE_TIDY) instead of pointing at rule (iii), and the review
 // judge binds both its runs to its read rule (no usable tree: no tests at all, said in the feedback). Every changed
 // byte is inside a p31-1 fragment: the p31-1 base pins (4f524ab6…, 986d4024…, c3efcd93…, 97ff33a1…) did not move.
+// Re-pinned on purpose by p29-9 (ADR 0050, the Flake check), the reviser pins, the calls hash, the slotted calls hash and
+// the rows hash: FLAKE_CHECK_TASK follows each code-writing prompt's verification block, and every row carries `flakes`.
+// P29_9 (above) swaps the block out first: the revisers and the calls with it swapped out hash to the p31-1 pins
+// (7b6822e4…, 4ff225d5…, b82f1748…), the slotted calls to the p31-4 pin (c78f36f1…, which p31-4's preHeat takes on to
+// the p31-1 slotted pin deac8755…), and every older base chains on top of that; the rows with `flakes` deleted hash to
+// the p21-3 rows pin (0137cf70…). The integrator, which p31-1 left at its pre-p31-1 bytes, gains
+// FLAKE_CHECK_INTEGRATION after integrationVerify: with it swapped out, and p31-4's SLOT_TEXT sentence taken out, it is
+// still PRE_P31.integrator. The integrator and slotted pins were re-pinned at p29-9's Integration with p31-4 (both carry
+// its sentence); P29_PRE_HEAT keeps the pins p29-9 recorded before it, which preHeat reaches. taskTreeSetup and
+// the default-branch GOLDENs did not move. A deliberate resume-cache break, like p31-1's: every code-writing prompt and
+// both result schemas (IMPL_RESULT, INTEGRATE_RESULT gain `flakes`) changed; a resume re-passes its run's own
+// `scriptPath` (ADR 0043).
+// Re-pinned on purpose by p31-3 (a call waits for its verifier's verdict), the slotted calls hash and the integrator
+// pin: SLOT_TEXT's "and wait for it." became the in-turn wait. preWait (SLOT_WAIT, above) swaps it back, always as the
+// outermost swap (preHeat applies it first): the slotted calls with it swapped back hash to the pre-p31-3 slotted pin
+// (P31_3_PRE_WAIT), and every slotted base below reaches its old pin through preHeat or preWait. No unslotted pin
+// moved: unslot() takes the slot pieces out with the current engine's slotRule and slotNote. A deliberate resume-cache
+// break, like p31-4's: every slotted prompt changed; a resume re-passes its run's own `scriptPath` (ADR 0043).
 const P23_1 = [ // [new, old]
   ["   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") at column 0 per human authorisation the task\n                          needs: \"- spend: <what> — cap N USD\" (a hard cap is mandatory: ONE line whose Cap\n                          holds the whole spend, optionally with \"total\", a month, or \"per Login per month\n                          across K Logins\"), \"- credential: <what>\", \"- irreversible: <what>\"; or exactly\n                          \"None\". BULLETS ONLY — no prose or footnotes in this section: the engine reads only\n                          list lines, and anything else is rejected. How a spend splits (run counts, per-call\n                          limits, iterations) goes in sub-bullets nested two spaces under its gate: commentary\n                          the engine never prices, which the Cap must hold. A non-empty declaration pauses the\n                          task for human sign-off —\n                          ",
     "   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") per human authorisation the task needs:\n                          \"- spend: <what> — cap <amount>\" (a hard cap is mandatory), \"- credential: <what>\",\n                          \"- irreversible: <what>\"; or exactly \"None\". BULLETS ONLY — no prose, commentary,\n                          or footnotes in this section: the engine reads only list lines, and anything else\n                          is rejected. A non-empty declaration pauses the task for human sign-off —\n                          "], // planner
@@ -1721,12 +1875,18 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   const aR = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
   const h2 = [{ round: 1, feedback: ['a'] }, { round: 2, feedback: ['b'] }]
   const KILL = '\n\n' + loadEngine(['KILL_RULE']).KILL_RULE
-  const r2new = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
-  const r3new = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
+  const r2now = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
+  const r3now = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
+  ok(sha(r2now) === P29_PINS.r2, 'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p29-9: the p29-9 base below plus the Flake check block)')
+  ok(sha(r3now) === P29_PINS.r3, 'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p29-9)')
+  ok(preP29(r2now) !== r2now && preP29(r3now) !== r3now, 'p29-9: both revisers render the Flake check block, so the swap is no no-op')
+  // The p29-9 base: the revisers with the block swapped out are their pre-p29-9 bytes (the p31-1 pins).
+  const r2new = preP29(r2now)
+  const r3new = preP29(r3now)
   ok(sha(r2new) === '7b6822e41c7a117c865fc0522693bbffa61312e50a2e48456ea0599da54a5910',
-    'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p31-1: the p31-1 base below plus the touched-tests loop)')
+    'byte pin (p29-9 base): the round-2 reviser with the Flake check block swapped out is its pre-p29-9 bytes (the p31-1 pin)')
   ok(sha(r3new) === '4ff225d5259b81bfbe93f7fa61c59a5d67b2091bc34920697dc955fe6d7996d7',
-    'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p31-1)')
+    'byte pin (p29-9 base): the round-3 reviser with the Flake check block swapped out is its pre-p29-9 bytes (the p31-1 pin)')
   ok(preP31(r2new) !== r2new && preP31(r3new) !== r3new, 'p31-1: both revisers render a p31-1 fragment (the loop), so the swap is no no-op')
   // The p31-1 base: the revisers with p31-1's fragments swapped back are their pre-p31-1 bytes (the p23-1 pins), and
   // every older base below chains on top of it.
@@ -1782,6 +1942,11 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   const p23Calls = []
   const p31Calls = []
   const slottedP31Calls = []
+  const p29Calls = []
+  const slottedP29Calls = []
+  const slottedPreHeatCalls = []
+  const slottedPreWaitCalls = []
+  const p29Rows = []
   const slottedP314Calls = []
   const logs = []
   const baseCalls = []
@@ -1795,24 +1960,32 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
   ]) {
     const r = await runTask(args, scripted)
     slottedCalls.push(JSON.stringify(r.calls))
-    slottedP31Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(preP31(c.prompt, PIN_SLOT)) }))))
-    slottedP314Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(c.prompt) }))))
+    slottedP29Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preWait(preP29(c.prompt)) }))))
+    slottedPreWaitCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preWait(c.prompt) }))))
+    slottedPreHeatCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(c.prompt) }))))
+    slottedP31Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(preP31(preP29(c.prompt), PIN_SLOT)) }))))
+    slottedP314Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preHeat(preP29(c.prompt)) }))))
     ok(r.calls.length > 0 && r.calls.every((c) => !c.prompt.includes(SL.scrubbed('make test'))), `ADR 0009 d4: ${args.task.slug}: no prompt renders the bare verifier`)
     r.calls = r.calls.map((c) => ({ ...c, prompt: unslot(c.prompt) }))
     calls.push(JSON.stringify(r.calls))
+    p29Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP29(c.prompt) }))))
     rows.push(JSON.stringify({ result: r.result, err: r.error && String(r.error) }))
     logs.push(...r.logs)
-    // Every older base chains on top of the p31-1 one: the calls with p31-1's fragments swapped back.
-    const pre = r.calls.map((c) => ({ ...c, prompt: preP31(c.prompt) }))
+    // Every older base chains on top of the p29-9 one, then the p31-1 one: the calls with the Flake check block
+    // swapped out, then p31-1's fragments swapped back.
+    const pre = r.calls.map((c) => ({ ...c, prompt: preP31(preP29(c.prompt)) }))
     p31Calls.push(JSON.stringify(pre))
     p23Calls.push(JSON.stringify(pre.map((c) => ({ ...c, prompt: preP23(c.prompt) }))))
     baseCalls.push(JSON.stringify(pre.map((c) => ({ ...c, prompt: preP23(c.prompt).replace(KILL, '') }))))
     oldCalls.push(JSON.stringify(pre.map((c) => ({ ...c, prompt: preP23(c.prompt).replace(KILL, '').replace(RULE, '') }))))
+    const p29 = JSON.parse(JSON.stringify(r.result))
+    for (const row of p29.tasks) delete row.flakes
+    p29Rows.push(JSON.stringify({ result: p29, err: r.error && String(r.error) }))
     const base = JSON.parse(JSON.stringify(r.result))
-    for (const row of base.tasks) delete row.reviewVerdicts
+    for (const row of base.tasks) { delete row.reviewVerdicts; delete row.flakes }
     baseRows.push(JSON.stringify({ result: base, err: r.error && String(r.error) }))
     const old = JSON.parse(JSON.stringify(r.result))
-    for (const row of old.tasks) { delete row.needsHuman; delete row.reviewVerdicts }
+    for (const row of old.tasks) { delete row.needsHuman; delete row.reviewVerdicts; delete row.flakes }
     oldRows.push(JSON.stringify({ result: old, err: r.error && String(r.error) }))
     const [row] = r.result.tasks
     const want = row.scope === 'read-only' ? [] : [1, 2, 3].map((n) => ({
@@ -1834,8 +2007,11 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
     'byte pin (p23-1 base): the same calls with the ADR 0038 fragments swapped back are the pre-p23-1 bytes (the p18-1 calls pin)')
   ok(sha(p31Calls.join('\n')) === '4f524ab665ea21cfbacd5db589bcb09d63bb45d1f4420fbe82053dde19e680f0',
     'byte pin (p31-1 base): the same calls with the p31-1 fragments swapped back are the pre-p31-1 bytes (the p23-1 calls pin)')
-  ok(sha(calls.join('\n')) === 'b82f1748cd48dcbfbc737383ffd95e2b08f0aec066e36e3b7afe7ff1fd3adcaf',
-    'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p31-1: the p31-1 base above plus the touched-tests fragments)')
+  ok(sha(p29Calls.join('\n')) === 'b82f1748cd48dcbfbc737383ffd95e2b08f0aec066e36e3b7afe7ff1fd3adcaf',
+    'byte pin (p29-9 base): the same calls with the Flake check block swapped out are the pre-p29-9 bytes (the p31-1 calls pin)')
+  ok(calls.some((c) => c.includes(JSON.stringify(P29_9[0][0]).slice(1, -1))), 'p29-9: the task block renders in these calls, so its swap is no no-op')
+  ok(sha(calls.join('\n')) === P29_PINS.calls,
+    'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p29-9: the p29-9 base above plus the Flake check block)')
   // Each p31-1 pair these calls can render renders here, so its swap is no no-op; the matrix-only pairs render nowhere.
   for (const [slot, hay, which] of [[undefined, calls, 'unslotted'], [PIN_SLOT, slottedCalls, 'slotted']]) {
     for (const [nw, od, label] of p31Pairs(slot)) {
@@ -1844,16 +2020,25 @@ const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
       ok(P31_MATRIX_ONLY.includes(label) ? !seen : seen, `p31-1: the ${label} pair ${P31_MATRIX_ONLY.includes(label) ? 'is in no pinned call' : 'renders in these calls'} (${which}), so its swap is no no-op`)
     }
   }
-  ok(sha(rows.join('\n')) === '0137cf70ddf1d5131b4511462f43f1d639311e6b4ada4016af30a2269bd563d4',
-    'byte pin: three whole task-mode calls — every row, rung record and reviewVerdicts included (re-pinned by p21-3: the p21-3 base above plus reviewVerdicts)')
+  ok(sha(p29Rows.join('\n')) === '0137cf70ddf1d5131b4511462f43f1d639311e6b4ada4016af30a2269bd563d4',
+    'byte pin (p29-9 base): the same rows with flakes deleted are the pre-p29-9 rows (the p21-3 rows pin)')
+  ok(sha(rows.join('\n')) === P29_PINS.rows,
+    'byte pin: three whole task-mode calls — every row, rung record, reviewVerdicts and flakes included (re-pinned by p29-9: the p29-9 base above plus flakes)')
   ok(slottedCalls.join('\n') !== calls.join('\n'), 'ADR 0009 d4: the slot is in these calls, so taking it out is no no-op')
   ok(sha(slottedP31Calls.join('\n')) === '986d4024967d3b0c2cd38db5372fcf6637fb5102e2319c75d28444cba44a1f3c',
-    "byte pin (p31-1 base, slotted): the slotted calls with the p31-1 fragments and p31-4's SLOT_TEXT sentence swapped back are the pre-p31-1 bytes (the estate ADR 0009 d4 pin)")
+    "byte pin (p31-1 base, slotted): the slotted calls with the Flake check block swapped out, and the p31-1 fragments and p31-4's SLOT_TEXT sentence swapped back, are the pre-p31-1 bytes (the estate ADR 0009 d4 pin)")
   ok(sha(slottedP314Calls.join('\n')) === 'deac8755b9c27275aee06d51a3b45556d7e34b3b252047ec126e15ec3899f89d',
-    "byte pin (p31-4 base, slotted): the slotted calls with p31-4's SLOT_TEXT sentence taken out are the pre-p31-4 bytes (the p31-1 slotted pin)")
+    "byte pin (p31-4 base, slotted): the slotted calls with the Flake check block swapped out and p31-4's SLOT_TEXT sentence taken out are the pre-p31-4 bytes (the p31-1 slotted pin)")
   ok(slottedCalls.some((c) => c.includes(JSON.stringify(SLOT_HEAT).slice(1, -1))), "p31-4: the SLOT_TEXT sentence renders in these slotted calls, so its swap is no no-op")
-  ok(sha(slottedCalls.join('\n')) === 'c78f36f1259bc212b1a7b03b656cd30ab2a6f65af32c4b030cc67f3d479c9b75',
-    'byte pin (estate ADR 0009 d4; re-pinned by p31-1 and p31-4): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
+  ok(slottedCalls.some((c) => c.includes(JSON.stringify(SLOT_WAIT[0]).slice(1, -1))), "p31-3: SLOT_TEXT's wait sentence renders in these slotted calls, so its swap is no no-op")
+  ok(sha(slottedP29Calls.join('\n')) === 'c78f36f1259bc212b1a7b03b656cd30ab2a6f65af32c4b030cc67f3d479c9b75',
+    "byte pin (p29-9 base, slotted): the slotted calls with the Flake check block swapped out (and p31-3's wait sentence swapped back) are the pre-p29-9 bytes (the p31-4 slotted pin)")
+  ok(sha(slottedPreWaitCalls.join('\n')) === P31_3_PRE_WAIT.slotted,
+    "byte pin (p31-3 base, slotted): the slotted calls with SLOT_TEXT's wait sentence swapped back are the slotted pin recorded before p31-3")
+  ok(sha(slottedPreHeatCalls.join('\n')) === P29_PRE_HEAT.slotted,
+    "byte pin (p29-9 before p31-4, slotted): the slotted calls with p31-4's SLOT_TEXT sentence taken out are the p29-9 slotted pin recorded before p31-4 landed")
+  ok(sha(slottedCalls.join('\n')) === P29_PINS.slotted,
+    'byte pin (estate ADR 0009 d4; re-pinned by p31-1, p31-4, p29-9 and p31-3): the same three calls as run, slotted — the unslotted calls pin above plus exactly the slot pieces')
 }
 
 console.log()

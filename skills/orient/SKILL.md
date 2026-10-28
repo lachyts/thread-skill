@@ -12,13 +12,13 @@ Lachy's time, then reshuffles without asking (ADR 0036 d5): `--steer` routes the
 `--look` stops at the audit. A reshuffle re-sorts all the open work, grills what is unclear and writes
 the result at one gate (`reshuffle.md`). Orient then routes by the three-way execution-fit test:
 it schedules parallel-shaped phases itself, steers the serial-shaped and session-lane work (a
-serial rollout, a focus item, or both) and ends with the **execute offer**.
+serial rollout, a focus item, or both) and ends with the **execute handoff**.
 Pointed at a single plan, design note or brain dump, it runs a **scoped reshuffle** of that note
 alone.
 
 **Contains no route logic of its own** beyond the reshuffle: hands-on focus
 dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the task's own `## Launch` block);
-parallel- and serial-shaped work go to `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`; the execute offer runs
+parallel- and serial-shaped work go to `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`; the execute handoff runs
 `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` or `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md`,
 or stamps the note for the Stage. None is re-implemented here. The execution-fit test
 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane and shape, hard, not as a
@@ -66,17 +66,20 @@ resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` 
 
 - **Resolver failure.** If the resolver exits non-zero (2: a refused `--cwd` or a usage error; 3:
   no vault or no PyYAML), report its one `resolve-target:` line and ask in plain text for the
-  target, sweeping nothing before an answer. His answer goes to the resolver as an argument, and a
+  target (Owner *yours*: which project he means, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), sweeping nothing
+  before an answer. His answer goes to the resolver as an argument, and a
   second failure ends the orient with that line.
 - **`resolved`** → name the pick in one line and carry on:
   `Target: <name> (<kind>; <reason>) — say stop to change it`.
-- **`candidates` or `none`** → ask before any § 2 read: `AskUserQuestion` with the candidates, best
+- **`candidates` or `none`** → ask before any § 2 read (Owner *yours*: which project he means,
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`): `AskUserQuestion` with the candidates, best
   first, then `dir_anchor` when it is not already listed, up to four options. With one option, add
   `Stop — orient nothing`, because the tool needs two. With none, ask in plain text for a project
   or area name, or stop, and end the turn. A typed answer (the plain-text one, or
   `AskUserQuestion`'s `Other`) is resolved again as an argument, and keeps the first answer's
   `learn_dir` (below).
-- **A stop.** When he stops a pick, re-ask as above without the stopped pick. A stopped pick from
+- **A stop.** When he stops a pick, re-ask as above without the stopped pick (its Owner labelled above,
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`). A stopped pick from
   a declared directory (rung `directory`) also names its declaring note, whose `repos:` sent the
   session there.
 - **A name or wikilink** (`/thread:orient Animately`, `[[Animately]]`, a sub-project note, an alias)
@@ -177,6 +180,11 @@ and Drift and the slots for each swept project.
   `undeclared` adds nothing. Any other status is its one `audit` line, and a non-zero exit its one
   `declared-check:` line: report it in § 3 and carry on, never a blocker. An area or scoped target
   runs no check.
+- **Priorities card** (Chorus ADR 0110 d5; CONTEXT.md **Priorities card**): each swept project note's
+  `## Priorities` section, read whole when it has one: how robust the work must be, who it is for, what matters most
+  and the technical details he steers himself. Every later ask in this orient reads it (§ 3.5's own ask excepted): a
+  call it answers is *priorities*, decided and listed as Decided for you, and a detail it says he steers is *yours*
+  (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1). A project target whose note has none is what § 3.5 is for.
 - **Related projects**: projects the target's notes link or name, and projects linking the
   target, especially ones `status: parked` or being absorbed by it. Read their unstarted phases
   and loose tasks for overlap with the target's open work (the reshuffle may pull them in).
@@ -229,11 +237,63 @@ A situational report written for Lachy catching up, not a log:
   the slot's own task → say they agree; a different item → name the slot and
   say why this beats it; a blank slot → say the recommendation would fill it.
 
+### 3.5. The Priorities card
+
+Asked once per project, so every later ask can be measured against it (Chorus ADR 0110 d5): when the target is a
+project and its note (§ 1's `note`) has no `## Priorities` heading, put the card to him after § 3's report and
+before anything else is asked or written, in one `AskUserQuestion` call of four questions, each in the Framing of
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 3 (Owner *yours*: how robust, who it is for and what matters most
+are his intent, and where he steers is his by Chorus ADR 0110 d3). Each question's options come from the audit (the
+project note, its thread, its ADRs and § 3's report), the recommended one first with its why, and each question ends
+with "What would make this wrong for you?". It is no question about the reshuffle, which still follows without one
+(§ 4):
+
+1. **How robust** — production-ready or lightweight: what a failure would cost, and so how much testing, review and
+   hardening the work gets.
+2. **Who it is for** — him alone, a named few, or the public: whose use the work is judged by.
+3. **What matters most** — the one quality the project trades the others for (quality over speed, say, or reach
+   over polish).
+4. **Where he steers** — the technical details he decides himself (GifLab's compression, for one), or none: a
+   technical call there comes to him in the Framing, and everywhere else it is decided for him and listed.
+
+**The write.** His answers go into the project note at once, as one `## Priorities` section inserted just before
+the note's first `## ` heading (at its end when it has none), nothing else in the note changed. Each line carries
+his pick in his own words, with his Note after it when he wrote one:
+
+```
+## Priorities
+
+- **How robust:** <his answer>
+- **Who it is for:** <his answer>
+- **What matters most:** <his answer>
+- **Where he steers:** <his answer, or "nowhere named: technical calls are decided for him">
+
+Asked at orient, <YYYY-MM-DD>. A Note that corrects a line is written back here the same day.
+```
+
+A question he leaves unanswered is written `not answered (<YYYY-MM-DD>): the estate brief stands in`, so the card
+exists and is never asked again. If he stops the whole ask, nothing is written, the orient carries on against the
+estate brief (`~/.agents/knowledge/how-lachy-decides.md`) and the next orient puts the card again. Report the
+write in one line with the note's `obsidian://` link.
+
+**Once.** A note with a `## Priorities` heading is never asked again, whole or in part: § 2 reads it, and he
+changes it by hand or through a Note. An area target and a scoped target put no card and write no new one: an
+area's projects are asked at their own project orient, and a scoped target's project at its own. A card § 2 read
+for either still takes his Note that corrects it (below). Only Look only and a dry run write nothing: they put no
+card and write back no Note. Steer only asks it, like a default run.
+
+**A Note corrects it.** Whatever the target, a Note of his on any later ask in this orient (the grill, R4's gate,
+§ 6's steer) that corrects a line of a card this orient holds (one § 2 read, or the one just written
+above) is written back into that card at once, the same day: that line takes his words, followed by
+`(<YYYY-MM-DD>, from a Note)`, and the report says so in one line. A correction made in the grill is the one write
+the reshuffle makes before its gate (reshuffle R3), and it stands if he stops the grill or declines the gate.
+
 ### 4. Reshuffle by default
 
 No question (ADR 0036 d5): Lachy picked Reshuffle at every orient, so the audit flows straight into
-the reshuffle (§ 5), which writes nothing before its gate and whose grill he can stop at any
-question. The opt-outs come with the invocation (§ Invocation forms):
+the reshuffle (§ 5), which writes nothing before its gate but a Note's correction of a Priorities
+card (§ 3.5), and whose grill he can stop at any question. The opt-outs come with the invocation
+(§ Invocation forms):
 
 - **Steer only** (`--steer`, or "steer only" in the arguments) — no reshaping: route the open work
   as it stands (§ 6), e.g. to schedule a serial rollout.
@@ -319,10 +379,12 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
   merge engine.
 - **Serial-shaped and session-lane work → steer.** If any serial-shaped or session-lane work is
   left, steer it with `AskUserQuestion`, recommended option first (informed by the audit — e.g.
-  no serial-shaped cluster → recommend Hands-on):
+  no serial-shaped cluster → recommend Hands-on), in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`
+  (Owner *yours*: how he spends his time on the project). A Hands-on recommendation hands work back to him, so its
+  description says why: no serial-shaped cluster is left for a rollout to take:
   - **Autonomous** (offered only when a serial-shaped cluster exists) — schedule the serial-shaped
     clusters as a serial rollout (§ 7) while Lachy stays focused elsewhere. This answer IS the
-    scheduling authorisation: no per-cluster confirm follows. The execute offer (§ 9) follows any
+    scheduling authorisation: no per-cluster confirm follows. § 9's execute handoff follows any
     note written, and the session-lane work stays where the reshuffle put it.
   - **Hands-on** — he has time for this project: if the best-focus item has a THREAD.md or capture
     task, run `open`'s pickup logic; else follow the task note's `## Launch` / `## Resume prompt`.
@@ -391,34 +453,51 @@ stamps and orient run lines already in task notes are inert history: § 2 In fli
 them, though an end line with an open fork still counts (§ 2 Open forks). Old run directories under
 `.scratch/orient/` are left alone.
 
-### 9. The execute offer
+### 9. The execute handoff
 
-When § 6 or § 7 wrote a rollout note, end with `AskUserQuestion`, recommended option first, one
-offer per parallel note written; a serial note (`shape: serial`) gets no offer: name it, its chain,
-each row's launch and Leg 1's start line, and never stamp `start: unattended` on it:
+When § 6 or § 7 wrote a rollout note, end with the execute handoff, decided and never asked (Owner *gate*: the
+reshuffle routed the work to run, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1; ADR 0057). One handoff per
+parallel note written; a serial note (`shape: serial`) gets no handoff: name it, its chain, each row's launch and Leg
+1's start line, and never stamp `start: unattended` on it. For each parallel note, print
+`Execute: a fresh session runs [[<slug>]] from <root> (decided: you scheduled it to run; say "not yet" to withdraw the handoff)`
+(`<slug>` the note, `<root>` its Project root), then run **Fresh session** below, the decided move. Only his words
+choose another of the moves: Here, Not yet or Start when ready. The one hold is a refused ladder file (schedule's
+"Checklist — ladder refused" block: a settings file every call refuses, so no call could start; ADR 0048): then print
+`Execute: held (the ladder file is refused, so every call would halt at its start); once it reads, say "hand it off"`
+and hand nothing off. No other checklist holds it. With several notes, each gets its own handoff, and the last
+handoff's closing line ends the turn.
 
-- **Fresh session** (recommended after a reshuffle, which has filled this context) — run
+- **Fresh session** (the decided move: a reshuffle has filled this context, and the lead runs best fresh) — run
   `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with its usual home, never the Project root's
   default-branch checkout (handoff-home.sh reads a rollout clone as its in-place twin; a doc
   committed on the root would hold the lead's first § 2.7 entry until its landing merged), through
   handoff's **Rollout launch.**, and this continuation: start in the Project root, then
   `/thread:execute [[<rollout>]]`. The Project root is the rollout clone the note names (ADR 0042),
   and execute § 2.8 halts a lead launched anywhere else. Handoff creates the visible task where the
-  harness can, and labels it a manual handoff elsewhere.
-- **Here** — run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` on the rollout note in this
-  session, when the reshuffle was small and this session was launched in the Project root
-  (`bash "${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh" --launch-check <Project root> <this session's launch directory>`
-  exits 0). Offer it only then.
-- **Not yet** — name the rollout note and the `/thread:execute [[<rollout>]]` line, and stop.
-- **Start when ready** — stamp `start: unattended` as a top-level frontmatter line just below
+  harness can, and labels it a manual handoff elsewhere. Its doc carries `launches: <slug>`.
+- **Here** — on his word only: run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` on the rollout note
+  in this session, when this session was launched in the Project root
+  (`bash "${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh" --launch-check <Project root> <this session's launch directory>`),
+  and only when that check exits 0; otherwise it stays Fresh session and says why.
+- **Not yet** — on his word, or held: name the rollout note and the `/thread:execute [[<rollout>]]` line, and stop.
+  Said after the handoff, it is the handoff's withdrawal (handoff § Lifecycle).
+- **Start when ready** — on his word: stamp `start: unattended` as a top-level frontmatter line just below
   `status:` on the rollout note § 6 or § 7 wrote (`_shared/vault-grammar.md` § Rollout start stamp), then
-  end: nothing runs here and no handoff is made. Print the note, the `/thread:execute [[<rollout>]]`
-  line (still valid by hand) and one line: the Chorus Stage starts a lead in its Project root once
+  end: nothing runs here and no handoff is made. Said after the handoff, it first withdraws the launch, by
+  handoff § Lifecycle's `dismiss_task` rules, so no stamp ever sits beside a live launch: `dismissed`,
+  `already_dismissed` or `not_found` (or no card, off the Stage) → the launch doc is removed and its removal
+  landed, then the stamp; `already_started_by_stage` or `already_started` → no stamp, and it says a lead is
+  already running; `already_kept` → no stamp, and it says his Defer keeps the doc. With no stamp it ends
+  there. Once stamped, print the note, the `/thread:execute [[<rollout>]]` line (still valid by hand) and one line: the Chorus Stage starts a lead in its Project root once
   the note is runnable, and that lead's first `next` clears the stamp. It suits a run nobody will be
   there to start (the evening, a landing PR still queued). Outside a Chorus Stage nothing acts on the
-  stamp, so it waits like Not yet.
+  stamp, so it waits like Not yet. When he names the PR the start waits on (a grill's gating PR, say),
+  run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-queue --rollout <the note> --pr <owner/repo#N or its URL>`
+  in place of the bare stamp, from the note's engine root (`engine-snapshot.py resolve`), and print its undo line:
+  the note becomes an approved queue (`_shared/vault-grammar.md` § Approved queue), whose merge regenerates it and
+  starts the new note with no confirm.
 
-Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6 or
+Execute's own runtime gate still applies wherever it runs. No rollout written → no handoff; § 6 or
 § 7 names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker, or a surface
 overlap with a live chain).
 
@@ -440,12 +519,13 @@ given). It resolves, asks, reads and writes nothing.
   the slot write included — in Look only or dry runs.
 - **Don't reshuffle in-flight work.** Its scope, phase and body are frozen; only new members may
   join its phase (`reshuffle.md` R1).
-- **Don't write before the reshuffle's gate**, drift fixes and the learned `repos:` entry (§ 4) aside.
+- **Don't write before the reshuffle's gate**, drift fixes, the learned `repos:` entry (§ 4) and the
+  Priorities card with the Notes that correct it (§ 3.5) aside.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, drift, shape, one recommendation, then the reshuffle (§ 4).
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s
   logic; parallel- and serial-shaped work go to schedule (the execution-fit test
-  decides, hard); execute runs only through the execute offer.
+  decides, hard); execute runs only through the execute handoff.
 - **Don't put parallel-shaped work in a serial rollout**, and don't schedule a bare project run (always `--tasks`).
 - **Never a second unfinished parallel rollout per repo, never a serial chain over a live chain's
   surface, and never another rollout's lifecycle**: schedule

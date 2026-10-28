@@ -80,9 +80,10 @@ check "revised: the reached rung stamped on a landed task" "rung: opus-xhigh"   
 refute "revised: never a model stamp"            "model:"                             "$TMP/task-revised.md"
 refute "approved: an empty rung stamps nothing"  "rung:"                              "$TMP/task-approved.md"
 refute "approved: no model stamp"                "model:"                             "$TMP/task-approved.md"
-case "$out" in *"task-revised: status=review pr=https://github.com/o/r/pull/2 rung=opus-xhigh from=opus-high climbs=review:opus-high->opus-xhigh [written]"*) echo "ok   - revised: the line shows the rung, where it started and the climb" ;;
+# p29-12: a review row names its ready: stamp; these notes name no rollout, so no call end is read: the fallback.
+case "$out" in *"task-revised: status=review pr=https://github.com/o/r/pull/2 rung=opus-xhigh from=opus-high climbs=review:opus-high->opus-xhigh ready="*" (fallback) [written]"*) echo "ok   - revised: the line shows the rung, where it started and the climb" ;;
   *) echo "FAIL - revised: reconcile line (got: $out)"; fail=1 ;; esac
-case "$out" in *"task-approved: status=review pr=https://github.com/o/r/pull/1 [written]"*) echo "ok   - approved: no rung on the line" ;;
+case "$out" in *"task-approved: status=review pr=https://github.com/o/r/pull/1 ready="*" (fallback) [written]"*) echo "ok   - approved: no rung on the line" ;;
   *) echo "FAIL - approved: reconcile line (got: $out)"; fail=1 ;; esac
 
 check "review-blocked: status"          "status: review-blocked"                       "$TMP/task-reviewblocked.md"
@@ -647,6 +648,27 @@ vt_bad "null" 'verify_timeout: null' "'null'"
 vt_bad "empty" 'verify_timeout:' "''"
 vt_bad "abc" 'verify_timeout: abc' "'abc'"
 vt_bad "a bad verify_timeout beside a refused file exits 1 (checked first)" 'verify_timeout: 0' "'0'" "$BH"
+# named_rerun (p29-9, ADR 0050): the lead's Flake check runs the repo's runner for named tests. verify-timeout prints
+# `namedRerun` only when the note sets it, so every line above stays byte-equal; a value without exactly one {tests},
+# or a form the command reader refuses, is exit 2 like a completion key's.
+VT0='{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2, "verifySlot": {"script": "'"$VSP"'", "slots": 2}'
+vt_ok "named_rerun (quoted) -> namedRerun" 'named_rerun: "scripts/test -n0 {tests}"' "$VT0"', "namedRerun": "scripts/test -n0 {tests}"}'
+vt_ok "named_rerun (bare, a trailing comment)" 'named_rerun: pytest -p no:randomly {tests} # by name' "$VT0"', "namedRerun": "pytest -p no:randomly {tests}"}'
+vt_ok "an empty named_rerun prints no key" 'named_rerun:' "$VT0}"
+vt_ok "a commented-out named_rerun prints no key" '# named_rerun: "pytest {tests}"' "$VT0}"
+vt_named_bad() {  # vt_named_bad <label> <frontmatter line(s)>
+  mkvt "$2"; local got err rc
+  got=$(HOME="$EH" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>"$TMP/vt.err"); rc=$?
+  err=$(cat "$TMP/vt.err")
+  case "$err" in "ERROR: named_rerun: "*) m=y;; *) m=n;; esac
+  if [ "$rc" -eq 2 ] && [ -z "$got" ] && [ "$m" = y ]; then echo "ok   - verify-timeout: $1"
+  else echo "FAIL - verify-timeout: $1 (rc $rc, out '$got', err '$err')"; fail=1; fi
+}
+vt_named_bad "a named_rerun without {tests} -> exit 2" 'named_rerun: "pytest -x"'
+vt_named_bad "a named_rerun with {tests} twice -> exit 2" 'named_rerun: "pytest {tests} {tests}"'
+vt_named_bad "a YAML form -> exit 2" 'named_rerun: {tests}'
+vt_named_bad "a block scalar -> exit 2" "$(printf 'named_rerun: |\n  pytest {tests}')"
+vt_named_bad "a YAML boolean -> exit 2" 'named_rerun: true'
 got=$(HOME="$EH" python3 "$SCRIPT" verify-timeout --rollout "$TMP/no-such-rollout.md" 2>"$TMP/vt.err"); rc=$?
 [ "$rc" -eq 1 ] && [ -z "$got" ] && grep -qF "ERROR: rollout note not found" "$TMP/vt.err" \
   && echo "ok   - verify-timeout: a missing note exits 1" || { echo "FAIL - verify-timeout: missing note (rc $rc)"; fail=1; }

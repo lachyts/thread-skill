@@ -114,6 +114,11 @@ cv --run; ok "$rc|$(js ran)|$(js result)|$(js decided)|$(js halt)" "0|True|green
 cv; ok "$(js state)" "green" "C2: … decided"
 has "$(js summary)" "Completion verify: green at ${SHA:0:12}" "C2: … its Completion log summary"
 ok "$(log_lines)|$(records)" "1|green/1" "C2: one log line, one completion-verify record"
+suites() { cat "$THREAD_EVENTS_DIR"/ro-rollout-2026-10-24.jsonl 2>/dev/null | python3 -c '
+import json, sys
+print(json.dumps([[d["kind"], d["by"], d["runner"], d["task"], d.get("outcome"), d.get("sha")] for d in map(json.loads, sys.stdin)
+                  if d["kind"].startswith("suite-")], separators=(",", ":")))'; }
+ok "$(suites)" "[[\"suite-started\",\"completion\",\"lead\",null,null,\"$SHA\"],[\"suite-ended\",\"completion\",\"lead\",null,\"green\",\"$SHA\"]]" "C2: --run records the suite (p29-10): a pair by completion, runner lead, no task, the merged sha"
 has "$(grep ' -> green' "$RO")" "at $SHA rc 0" "C2: … the line names the merged sha and the rc"
 ok "$(ls "$(integ)" | grep -c '^completion-ro-rollout-2026-10-24-1\..*-[0-9]*\.log$')|$(ls "$(integ)" | grep -c '\.rc$\|\.outcome\.json$')" "1|0" "C2: the log kept under its run's name, no rc or outcome left"
 ok "$(red_exists)|$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')" "no|1" "C2: no fix task; the detached tree removed"
@@ -236,6 +241,7 @@ cv --run; ok "$rc|$(js result)" "0|green" "C8: a dead run's locked worktree entr
 # ── C9 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c9 "\"git -C '$TMP/c9/repo' -c user.email=t@t -c user.name=t commit -q --allow-empty -m moved\""
 cv --run; ok "$rc|$(js ran)|$(js result)|$(js decided)" "4|True|unrun|False" "C9: the shared checkout moved during the run → its own check trips: unrun, exit 4"
+ok "$(js canary_exit)" "9" "C9: … the check's exit 9 (a lane hold, ADR 0046) reads as a trip: canary_exit 9"
 has "$(grep ' -> unrun' "$RO")" "git-env" "C9: … the line says the verdict was never acted on"
 has "$err" "git-env" "C9: … the canary's stderr passed through"
 scen c9b "\"i=0; while [ ! -f $TMP/c9b.go ] && [ \$i -lt 600 ]; do sleep 0.1; i=\$((i + 1)); done\""
@@ -243,7 +249,7 @@ python3 "$SCRIPT" completion-verify --rollout "$RO" --tasks-dir "$D/tasks" --now
 bp=$!
 wait_for "$(integ)/completion-ro-rollout-2026-10-24-1.log" '^== verifier'
 g -C "$D/repo" commit -q --allow-empty -m moved; new=$(git -C "$D/repo" rev-parse master)
-python3 "$CANARY" check-all --rollout "$RO" --tasks-dir "$D/tasks" > /dev/null 2>&1; ok "$?" 3 "C9: a loop-entry check-all catches the trip"
+python3 "$CANARY" check-all --rollout "$RO" --tasks-dir "$D/tasks" > /dev/null 2>&1; ok "$?" 9 "C9: a loop-entry check-all catches the trip (9: the lane)"
 python3 "$CANARY" ack --rollout "$RO" --tasks-dir "$D/tasks" --repo "$D/repo" --default master --slugs ro-rollout-2026-10-24 --ref "$new" > /dev/null 2>&1
 ok "$?|$(window)" "0|armed" "C9: … and an ack re-arms the window while the run goes on"
 python3 - "$RO" <<'PY'

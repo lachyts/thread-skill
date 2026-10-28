@@ -23,9 +23,11 @@ max_plan_rounds: {{MAX_PLAN_ROUNDS}}  # 2 was insufficient for cross-cutting pla
 plan_approval: scope-gated  # off | scope-gated | required
 parallel_ceiling: {{PARALLEL_CEILING}}
 # hold_until: {pr: <owner/repo>#<N>, merged: true}  # optional, parallel rollouts only (next refuses a serial note before reading it): holds every start until that PR merges and clears itself on the merge (vault-grammar § Hold until); never a sentence in the note
+# on_merge: regenerate  # optional, beside hold_until: an approved queue (vault-grammar § Approved queue; approve-queue writes it); carry never copies it
 # env_bootstrap:   # optional: shell cmd thread:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — thread:schedule step 2.7
 # completion_verifier:   # optional (estate ADR 0009 d6): the full suite of a project whose verifier: is its declared fast tier, run once on merged main at the completion ceremony. Uncomment with the project CLAUDE.md's `Completion verifier:` command — thread:schedule step 2.5
 # completion_timeout:   # optional (ADR 0052): seconds, 1 to 6600, for the completion verifier's run; absent: 3600. Never verify_timeout, which bounds the fast tier
+# named_rerun: "<cmd with {tests}>"   # optional (ADR 0050): the repo's runner for named tests, {tests} exactly once (e.g. "scripts/test -n0 {tests}"); the lead's Flake check re-runs an out-of-diff red's failing tests with it before one confirming full run. Absent: the lead's Integration verify and RACE re-verify leave such a red red. Uncomment with the project CLAUDE.md's `Named re-run:` command — thread:schedule step 2.5
 # touched: "tests/test_{module}.py"   # optional (estate ADR 0009 d1): how an agent finds one changed module's tests, the touched tests it runs between Checkpoints; a quoted path pattern with {module}, never starting with -. Absent: the repo's CLAUDE.md/AGENTS.md Tests line when it runs one module's tests (a full-suite-only line falls through), else the test files importing the changed modules
 # No rollout cursor: progress lives on the task notes' started:/merged: stamps (ADR 0030; reconcile-rollout.py).
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when § 0 printed `supersede` (see SKILL.md steps 6 and 7.5)
@@ -47,7 +49,7 @@ execute [[{{ROLLOUT_SLUG}}]]                # continuous: the queue runs and mer
 execute [[{{ROLLOUT_SLUG}}]] --gated        # pause for a human before each merge
 ```
 
-*Start when ready*: `start: unattended` in this note's frontmatter (the execute offer writes it, never this template; `skills/_shared/vault-grammar.md` § Rollout start stamp). The Chorus Stage starts the lead once the note is runnable, and the lead's first `next` clears it.
+*Start when ready*: `start: unattended` in this note's frontmatter (the execute handoff's Start when ready writes it, never this template; `skills/_shared/vault-grammar.md` § Rollout start stamp). The Chorus Stage starts the lead once the note is runnable, and the lead's first `next` clears it.
 
 The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-layer convergence (plan-gate → Ralph-style agent-side verifier retry → master-side review-and-revise loop). The rollout-level defaults in this note's frontmatter (`verifier`, `max_iterations`, `max_review_rounds`, `plan_approval`, `max_plan_rounds`, `parallel_ceiling`) are inherited by every task; per-task overrides go in the task's own frontmatter.
 

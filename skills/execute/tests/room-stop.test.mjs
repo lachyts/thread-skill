@@ -1,7 +1,8 @@
 // A Chorus room stop, the lead's side (execute § Room stop; Chorus ADR 0071; p18-1): skills/execute/scripts/
-// step-boundary.py, executed. When the Stage says a Login is at its line, the lead stops each Workflow call the moment
-// its running agent's result is in the run's journal, records the stop on the rollout note's `## Pause log`, and
-// resumes every stopped call on the Stage's re-send. tests/contracts/execute-room-stop.test.mjs pins the prose.
+// step-boundary.py, executed. When the Stage says a Login is at its line, or would reach it (a spread,
+// Chorus ADR 0109), the lead stops each Workflow call the moment its running agent's result is in the run's journal,
+// records the stop on the rollout note's `## Pause log`, and resumes every stopped call on the Stage's re-send.
+// tests/contracts/execute-room-stop.test.mjs pins the prose.
 //
 // (a)  the journal model: open keys, the running agent, a stale key, labels, a torn line, a missing journal, usage;
 // (a2) the gap re-mark: a relaunch after a gap marks afresh, so a watch never stops an agent that started later;
@@ -334,6 +335,24 @@ test('(b) begin refuses a wikilink and writes nothing: a [[slug]] above ## Queue
   assert.equal(bare.rc, 0, 'the same line with the slug bare is recorded')
 })
 
+test("(b) a spread's line records and stands like a line's; a line signal after it writes nothing", () => {
+  const p = note()
+  const spread = 'L spreading its Rollouts (would reach its 5-hour line ~17:51); stopping at a step boundary: wf_x proj-a (task); lane: none'
+  const r = begin(p, spread + '\n')
+  assert.equal(r.rc, 0, r.err)
+  assert.match(r.out, STAMP)
+  assert.ok(r.out.trimEnd().endsWith(` room stop: ${spread}`), r.out)
+  assert.equal(stands(p).rc, 0, 'a spread room stop stands')
+  const t = fs.readFileSync(p, 'utf8')
+  const since = r.out.split(' ')[1]
+  const line = begin(p, 'L at its 5-hour line; stopping at a step boundary: wf_x proj-a (task); lane: none\n')
+  assert.deepEqual([line.rc, line.out], [0, `room stop already stands since ${since}\n`])
+  assert.equal(fs.readFileSync(p, 'utf8'), t, 'the line signal writes nothing: the spread stays the record')
+  const e = sb(['end', '--rollout', p])
+  assert.deepEqual([e.rc, e.out], [0, `room stop ended (stood since ${since})\n`])
+  assert.equal(stands(p).rc, 5)
+})
+
 test('(b) begin over a lapsed start line records a fresh one', () => {
   const p = note(ROLLOUT + '\n## Pause log\n\n- 2020-01-01T00:00+00:00 room stop: old\n')
   const r = begin(p, 'x at its week\'s line\n')
@@ -357,6 +376,44 @@ test('(b) end appends room stop ended; a second end, or no section, writes nothi
   assert.equal(sb(['end', '--rollout', bare]).out, 'no room stop stands\n')
   assert.equal(fs.readFileSync(bare, 'utf8'), ROLLOUT)
   assert.equal(sb(['end', '--rollout', path.join(mk('b'), 'none.md')]).rc, 1)
+})
+
+test('(b) p29-10: begin records the stop in the Run record with its calls; already stands, a refusal and end record none', () => {
+  const ev = path.join(mk('ev'), 'events')
+  const env = { THREAD_EVENTS_DIR: ev }
+  const RRPY = path.join(here, '..', '..', '_shared', 'scripts', 'run_record.py')
+  const p = path.join(mk('b'), 'rs-ro.md')
+  fs.writeFileSync(p, ROLLOUT)
+  const file = path.join(ev, 'rs-ro.jsonl')
+  const rec = () => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [])
+  const emit = (task, kind, fields, ts) => {
+    const r = spawnSync('python3', [RRPY, 'emit', '--rollout', 'rs-ro', '--task', task, '--kind', kind, '--json', JSON.stringify(fields), '--ts', ts],
+      { encoding: 'utf8', env: baseEnv(env) })
+    assert.equal(r.status, 0, r.stderr)
+  }
+  const settings = { settings: { parallel_ceiling: 3 } }
+  emit('a', 'slot-taken', settings, '2026-10-26T09:00:00Z')
+  emit('a', 'run-bound', { runId: 'wf_a1', journalDir: '/j', call: 'task' }, '2026-10-26T09:00:01Z')
+  emit('b', 'slot-taken', settings, '2026-10-26T09:01:00Z')
+  emit('b', 'run-bound', { runId: 'wf_b1', journalDir: '/j', call: 'revise' }, '2026-10-26T09:01:01Z')
+  emit('c', 'slot-taken', settings, '2026-10-26T09:02:00Z')
+  emit('c', 'slot-freed', { outcome: 'ready' }, '2026-10-26T09:03:00Z')
+  const stops = () => rec().filter((d) => d.kind === 'stopped')
+  assert.equal(sb(['begin', '--rollout', p], { input: '\n', env }).rc, 2)
+  assert.equal(sb(['begin', '--rollout', p], { input: 'x at its week\'s line; [[proj-a]]\n', env }).rc, 2)
+  assert.deepEqual(stops(), [], 'a refusal records nothing')
+  const text = 'Lachy at its 5-hour line; stopping at a step boundary: wf_a1 a (task), wf_b1 b (revise); lane: none'
+  const r = sb(['begin', '--rollout', p], { input: `${text}\n`, env })
+  assert.equal(r.rc, 0, r.err)
+  assert.equal(r.err, '')
+  assert.match(r.out, STAMP)
+  const [s] = stops()
+  assert.deepEqual([s.cause, s.inferred, s.reason, s.calls, 'at' in s, s.task],
+    ['usage-limit', false, text, [{ task: 'a', runId: 'wf_a1', call: 'task' }, { task: 'b', runId: 'wf_b1', call: 'revise' }], false, null])
+  const n = rec().length
+  assert.match(sb(['begin', '--rollout', p], { input: 'again at its week\'s line\n', env }).out, /already stands/)
+  assert.equal(sb(['end', '--rollout', p], { env }).rc, 0)
+  assert.equal(rec().length, n, '"already stands" and end record nothing')
 })
 
 test('(b) stands reads the last room-stop line against its bound', () => {

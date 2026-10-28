@@ -40,6 +40,24 @@ rollout's lead runs on its own Engine snapshot and prints the line from that
 version's prose. So the line's form only ever widens: a change that stops
 matching a line an older snapshot prints is a migration, never a silent rewrite.
 
+The halt's Run-record line (p29-10, ADR 0051; run_record.py's stop model). On
+`state=halted`, and only when the match came from the payload's
+`last_assistant_message` (never the transcript fallback, which can be old), the
+hook records the halt as `stopped` {cause: halt, inferred: false, reason (the
+line's reason="…", cut to 200 characters), calls (the Slots and lane the record
+shows in flight)} in the rollout's Run record. It resolves <tasks dir>/<slug>.md
+(reconcile-rollout.py's DEFAULT_TASKS_DIR, loaded lazily with stderr silenced)
+and records nothing when: there is no note; the note is `shape: serial` (Legs
+print halted lines, leg.py's status_line, but never run record-entry),
+superseded, done or dropped; a pause stands (_pause_stands: the note's `paused:`
+stamp or an open `paused` in the record, so a soft pause's drain and a sign-off
+halt are no stop); or the last stopped line after the last lead-entry is already
+a halt with the same reason. Recording never changes the hook's stdout or exit.
+Cross-version: the line is a new kind only, which every older reader ignores; a
+lead on an older Engine snapshot never writes the lead-entry that closes it,
+hence the same-reason dedupe (readers end it at the next slot-taken, lane-taken
+or run-bound).
+
 Blocking is bounded by a progress-aware cap: consecutive blocks without
 `merged` advancing release the stop and surface the stall to the user instead
 of spinning forever (`running` alone never counts as progress; the harness's own
@@ -62,6 +80,11 @@ STATUS_RE = re.compile(
     r"ROLLOUT-STATUS:\s+(?P<slug>\S+)\s+merged=(?P<k>\d+)/(?P<n>\d+)\s+running=(?P<r>\d+)"
     r"\s+state=(?P<state>running|waiting|halted|done)"
 )
+# The halted line's reason="…" (the Run record's halt reason, p29-10): read after STATUS_RE's match, never part of it.
+REASON_RE = re.compile(r'\s+reason="([^"]*)"')
+SLUG_FILE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+RECONCILE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills", "execute", "scripts",
+                            "reconcile-rollout.py")
 
 
 def state_dir():
@@ -131,6 +154,52 @@ def last_rollout_status(transcript_path):
     return None
 
 
+def _load_reconcile():
+    """reconcile-rollout.py, loaded on first use (only a halted line needs it); importing it has no side effects."""
+    import importlib.util
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("thread_reconcile_rollout", RECONCILE_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def record_halt(m):
+    """The halt's `stopped` line in the rollout's Run record (the module docstring's rules). Best-effort and silent:
+    stdout is never written, stderr is silenced, and nothing raises."""
+    saved = sys.stderr
+    try:
+        with open(os.devnull, "w") as quiet:
+            sys.stderr = quiet
+            slug = m["slug"]
+            if not SLUG_FILE_RE.match(slug):
+                return
+            rc = _load_reconcile()
+            path = rc.DEFAULT_TASKS_DIR / f"{slug}.md"
+            if not path.is_file():
+                return
+            note = rc.Note(path)
+            if rc._ledger_skip(note):
+                return
+            stem = path.stem
+            lines = rc._record_read(stem)
+            if lines is None or rc._pause_stands(note, lines)[0]:
+                return
+            r = REASON_RE.match(m.string, m.end())
+            reason = r.group(1).strip()[:200] if r else ""
+            open_stops = rc._stop_state(lines)["open"]   # the non-sleep stopped lines after the last lead-entry
+            if open_stops and open_stops[-1].get("cause") == "halt" and (open_stops[-1].get("reason") or "") == reason:
+                return
+            fields = {"cause": "halt", "inferred": False, "calls": rc.inflight_calls(lines)}
+            if reason:
+                fields["reason"] = reason
+            rc._event(stem, "stopped", None, fields)
+    except Exception:  # noqa: BLE001 — recording never changes the hook's decision
+        pass
+    finally:
+        sys.stderr = saved
+
+
 def debug(msg):
     path = os.environ.get("ROLLOUT_DRIVER_DEBUG")
     if path:
@@ -176,6 +245,8 @@ def main():
         return
 
     if state in ("halted", "done"):
+        if state == "halted" and isinstance(last_msg, str) and m.string is last_msg:
+            record_halt(m)
         driver = load_state(session_id)
         if slug in driver:
             del driver[slug]

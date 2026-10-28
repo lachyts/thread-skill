@@ -53,10 +53,11 @@ close-out) runs from that rollout's own `resolve` root: the Primary for an unsta
 So does a write to a rollout from a session that runs none: orient-all's Sign-off (§ 4) resolves the task's
 `rollout:` and runs `approve-gates --tasks <slug> --rollout <its note>` from the `root` that prints.
 
-Schedule's Pre-flight scripts (`estate-scan.py`, `estate-dispatch.py` `slices`, `preflight`, `record` and `log`,
-`estate-rank.py rank`) run from the session's own root: they are unguarded and write no rollout note, and `record`'s
-`## Decisions (asked ahead <date>)` bullet into a carried queued task is a form every engine reads as note text
-(ADR 0047 § Build rulings).
+Schedule's Pre-flight scripts (`estate-scan.py`, `estate-dispatch.py` `slices`, `preflight`, `record`,
+`decided-for-you` and `log`, `estate-rank.py rank`) run from the session's own root: they are unguarded and write no
+rollout note, and `record`'s `## Decisions (asked ahead <date>)` bullet and `decided-for-you`'s `## Decided for you
+(<date>)` bullet into a carried queued task are forms every engine reads as note text (ADR 0047 § Build rulings;
+ADR 0054).
 
 ## The refusal rule
 

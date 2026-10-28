@@ -6,9 +6,13 @@
 # and a stale or unreadable file prints one WARN line on stderr. The T-cases' Away files carry an Away cap of 99,
 # which never binds, so they read each Rollout's own ceiling as before. Every `next` call pins HOME to its scenario's own dir, so
 # the operator's file never reaches an assertion, and captures stdout and stderr apart. Temp notes only.
+# p28-4: a lead's lease (~/.config/thread/leases/<rollout>.json) keeps its Rollout in the count; one that has lapsed leaves
+# it (L-cases). Every lease a call writes lands in its scenario's $D/home, and THREAD_MACHINE_TIMES stands in for the
+# Mac's boot and wake, so nothing reads this machine's.
 # Usage: bash reconcile-rollout-trickle.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
+export THREAD_MACHINE_TIMES='{}'   # no boot or wake evidence unless a case gives it (the lease's lapse, p28-4)
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
@@ -73,6 +77,18 @@ two_rollouts() {
   mkro ro-b 4; mkt b1 ro-b in_progress 'owner: lead-b'; mkt b2 ro-b open; mkt b3 ro-b open
 }
 sums() { cksum "$D"/*.md | awk '{print $1 $2}' | tr '\n' ' '; }
+# lease <stem> <written_at>: the rollout's lease as a lead's call writes it (p28-4); lease_raw <stem> <text>: any text
+# there. Both under the scenario's own $D/home, where `nx` and `st` read it.
+LEASES=home/.config/thread/leases
+lease_raw() { mkdir -p "$D/$LEASES"; printf '%s' "$2" > "$D/$LEASES/$1.json"; }
+lease() { lease_raw "$1" "{\"rollout\": \"$1\", \"written_at\": \"$2\", \"by\": \"next\"}"; }
+# leased <stem>: the lease file's [rollout, written_at, by], or "none"
+leased() { python3 -c 'import json,sys
+try:
+    d = json.load(open(sys.argv[1]))
+except FileNotFoundError:
+    print("none"); sys.exit(0)
+print(json.dumps([d["rollout"], d["written_at"], d["by"]], separators=(",", ":")))' "$D/$LEASES/$1.json"; }
 
 # ── T1: two Rollouts with 3 running tasks and no file start nothing ────────────────────────────────────────────
 scen t1-no-file
@@ -185,8 +201,14 @@ ok "$(q "$J" '[d["start"], d["trickle"]["file"]]')" '[[],"missing"]' "T4: a dang
 ok "$(lines)" 0 "T4: a dangling symlink prints no WARN"
 rm -rf "$D/home/.config"; mkdir -p "$D/home"; : > "$D/home/.config"
 J=$(nx ro-b)
-ok "$(q "$J" '[d["start"], d["trickle"]["file"]]')" '[[],"missing"]' "T4: ~/.config a plain file reads missing"
-ok "$(lines)" 0 "T4: … with no WARN"
+ok "$(q "$J" '[d["start"], d["trickle"]["file"]]')" '[[],"missing"]' "T4: ~/.config a plain file reads missing (ro-a's lease reads none and counts)"
+# p28-4: the call off --dry-run cannot write ro-b's lease there, so it prints the lease's one warning line, exit 0 and
+# stdout still one JSON object; the away.json reader still warns nothing.
+ok "$(lines)" 1 "T4: … with exactly one stderr line"
+starts "$(err)" "lease: warning: cannot write ~/.config/thread/leases/ro-b.json: " "T4: … the lease's warning, naming the file"
+ok "$(grep -c '^WARN: ~/.config/thread/away.json' "$D/err")" 0 "T4: … and no away.json WARN"
+nx ro-b --dry-run >/dev/null
+ok "$(lines)" 0 "T4: … and --dry-run, which writes no lease, prints nothing"
 
 # ── T5: fresh, not Away, trickle 4 ──────────────────────────────────────────────────────────────────────────────
 scen t5-trickle-4
@@ -316,7 +338,12 @@ scen t15-git-env
 two_rollouts
 printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro-b.md"
 J=$(nx ro-b --running "")
-ok "$(q "$J" '[d["halt"], d["start"], d["restart"]]')" '["git-env",[],[]]' "T15: a git-env trip halts git-env"
+ok "$(q "$J" '[d["halt"], [h["scope"] for h in d["gitEnvHold"]], d["laneHold"], d["restart"]]')" '[null,["lane"],[{"hold":"git-env","slug":"b1"}],["b1"]]' "T15: a lane trip (ADR 0046) holds only the lane: b1 restarts, no halt"
+scen t15-bare
+two_rollouts
+printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: core.bare false→true; repo /x\n' >> "$D/ro-b.md"
+J=$(nx ro-b --running "")
+ok "$(q "$J" '[d["halt"], d["start"], d["restart"]]')" '["git-env",[],[]]' "T15: a whole-rollout git-env trip (a bare checkout) halts git-env"
 ok "$(q "$J" "$holds")" '{"b1":"git-env hold: /thread:repair","b2":"git-env hold: /thread:repair","b3":"git-env hold: /thread:repair"}' \
   "T15: every row is held on the git-env hold, none on the Trickle"
 scen t16-pause
@@ -413,8 +440,8 @@ ok "$(q "$J" '[d["start"], d["restart"], d["slotsInUse"], d["slotLimit"], d["cei
   "A1: Away cap 4 with 4 running elsewhere: nothing starts, slotLimit 0 under the ceiling 4, no halt"
 ok "$(q "$J" "$holds")" "{\"x1\":\"$AC4\",\"x2\":\"$AC4\",\"x3\":\"$AC4\"}" "A1: every row is held on the Away cap"
 ok "$(q "$J" "$tka")" '[true,"fresh",2,4,{"ro-a":2,"ro-c":2},4]' "A1: trickle reports Away, the Trickle's N 2 and the Away cap 4"
-ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","running"]' \
-  "A1: awayCap follows limit, every other trickle key unchanged"
+ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","lapsed","running"]' \
+  "A1: awayCap follows limit, lapsed (p28-4) follows elsewhere, every other trickle key unchanged"
 ok "$(lines)" 0 "A1: a fresh file prints no WARN"
 
 # ── A2: partial room: starts fill up to the Away cap less the count elsewhere ────────────────────────────────────
@@ -567,10 +594,10 @@ ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"], d["slotLimit"]]')" '[{},["
 scen a12-git-env
 by_two ro-a 2 ro-c 2
 mkro ro-b 4; mkt b1 ro-b in_progress 'owner: lead-b'; mkt b2 ro-b open; mkt b3 ro-b open
-printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro-b.md"
+printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[b1]] task: core.bare false→true; repo /x\n' >> "$D/ro-b.md"
 away_file "$D/home" "$HOUR_AGO" true "$TONIGHT" 2 09:00 4
 J=$(nx ro-b --running "")
-ok "$(q "$J" '[d["halt"], d["start"], d["restart"]]')" '["git-env",[],[]]' "A12: a git-env trip halts git-env"
+ok "$(q "$J" '[d["halt"], d["start"], d["restart"], [h["scope"] for h in d["gitEnvHold"]]]')" '["git-env",[],[],["rollout"]]' "A12: a whole-rollout git-env trip (a bare checkout) halts git-env"
 ok "$(q "$J" "$holds")" '{"b1":"git-env hold: /thread:repair","b2":"git-env hold: /thread:repair","b3":"git-env hold: /thread:repair"}' \
   "A12: every row is held on the git-env hold, none on the Away cap"
 scen a12b-pause
@@ -600,5 +627,232 @@ ok "$rc" 0 "A13: the live next on a paused rollout exits 0 with the key written"
 ok "$(lines)" 0 "A13: … with empty stderr"
 ok "$(q "$J" '[d["halt"], d["trickle"]["file"], d["trickle"]["away"], d["trickle"]["awayCap"]]')" '["paused","fresh",true,4]' \
   "A13: halt paused, the file fresh, its away_cap read and the unknown key ignored"
+
+# ── E1: the ETA by day uses the Trickle's limit (p28-6) ─────────────────────────────────────────────────────────
+# ro-a (ceiling 4): two tasks done in 60 min each, one running and two queued (3 pending); ro-b runs one elsewhere. The
+# remaining estimate is 60 x ceil(3 / width), width min(ceiling, max(1, cap - elsewhere)) (_eta_width).
+st() { HOME="$D/home" python3 "$SCRIPT" status --rollout "$D/$1.md" --tasks-dir "$D" --now "$NOW" 2>"$D/err"; }
+eta='[d["timeline"]["etaWidth"], d["timeline"]["etaBy"], d["timeline"]["remainingLabel"]]'
+scen e1-eta
+mkro ro-a 4
+for s in a1 a2; do mkt $s ro-a done 'started: 2026-10-02T10:00+00:00' 'merged: 2026-10-02T11:00+00:00'; done
+mkt a3 ro-a in_progress 'owner: lead-a' 'started: 2026-10-02T13:00+00:00'; mkt a4 ro-a open; mkt a5 ro-a open
+mkro ro-b 4; mkt b1 ro-b in_progress 'owner: lead-b'; mkt b2 ro-b open; mkt b3 ro-b open
+away_raw "$(mod 'd["away"] = False')"
+J=$(st ro-a)
+ok "$(q "$J" "$eta")" '[1,"trickle","~3h (rough)"]' "E1: not Away, Trickle 2 less ro-b's 1: width 1 by the Trickle, ~3h"
+has "$(q "$J" 'd["progress"]')" "~3h remaining (rough)" "E1: status's progress line reads ~3h"
+has "$(q "$(nx ro-a --dry-run)" 'd["progress"]')" "~3h remaining (rough)" "E1: next --dry-run's progress line reads ~3h too"
+out=$(HOME="$D/home" python3 "$SCRIPT" mark-started --tasks a4 --tasks-dir "$D" --now "$NOW" --rollout "$D/ro-a.md" 2>"$D/err"); rc=$?
+ok "$rc" 0 "E1: mark-started --rollout exits 0"
+has "$out" "progress: 2/5 merged, 1 running, 2 queued" "E1: mark-started prints its progress line"
+has "$out" "~3h remaining (rough)" "E1: … whose ETA reads the Trickle's width 1 too"
+away_raw "$BASE"
+ok "$(q "$(st ro-a)" "$eta")" '[4,"ceiling","~1h (rough)"]' "E1: control: Away, the Away cap 99 never binds: width 4 by the ceiling, ~1h"
+rm -f "$D/home/.config/thread/away.json"
+ok "$(q "$(st ro-a)" "$eta")" '[1,"trickle","~3h (rough)"]' "E1: control: no file reads Trickle 2: width 1 with ro-b's 1"
+fmline ro-b 'paused: 2026-10-02T14:00+00:00'
+ok "$(q "$(st ro-a)" "$eta")" '[2,"trickle","~2h (rough)"]' "E1: control: no file and nothing elsewhere: width 2 by the Trickle, ~2h"
+scen e1b-full
+mkro ro-a 4
+for s in a1 a2; do mkt $s ro-a done 'started: 2026-10-02T10:00+00:00' 'merged: 2026-10-02T11:00+00:00'; done
+mkt a3 ro-a in_progress 'owner: lead-a'; mkt a4 ro-a open; mkt a5 ro-a open
+mkro ro-b 4; for s in b1 b2 b3; do mkt $s ro-b in_progress 'owner: lead-b'; done
+away_raw "$(mod 'd["away"] = False')"
+ok "$(q "$(st ro-a)" "$eta")" '[1,"trickle","~3h (rough)"]' "E1: control: ro-b holds 3, past the Trickle's 2: the floor gives width 1, never a divide by zero"
+fmline ro-b 'paused: 2026-10-02T14:00+00:00'
+mkro ro-c 4; mkt c1 ro-c in_progress 'owner: lead-c'
+away_raw "$(mod 'd["away_cap"] = 3')"
+ok "$(q "$(st ro-a)" "$eta")" '[2,"away cap","~2h (rough)"]' "E1: control: Away, the Away cap 3 less ro-c's 1: width 2 by the Away cap, ~2h"
+
+# ── S1: status reports the Trickle from a fixture away.json (p28-6), read-only and never through next ────────────
+tks='[d["trickle"][k] for k in ("away", "file", "limit", "elsewhere", "here", "running")]'
+scen s1-status
+two_rollouts
+away_raw "$(mod 'd["away"] = False')"
+before=$(sums)
+J=$(st ro-b); rc=$?
+ok "$rc" 0 "S1: status exits 0"
+ok "$(q "$J" "$tks")" '[false,"fresh",2,{"ro-a":2},1,3]' "S1: not Away, fresh, Trickle 2, ro-a's 2 elsewhere, 1 here, 3 running"
+ok "$(q "$J" 'sorted(d["trickle"])')" '["away","awayCap","elsewhere","file","here","lapsed","lease","limit","morning","running","until","why"]' "S1: the trickle block's exact keys"
+ok "$(lines)" 0 "S1: … with empty stderr"
+away_raw "$BASE"
+J=$(st ro-b)
+ok "$(q "$J" '[d["trickle"][k] for k in ("away", "file", "awayCap", "until", "why")]')" '[true,"fresh",99,"2099-01-01T00:00:00Z",null]' \
+  "S1: Away: the Away cap and the file's until are reported"
+away_file "$D/home" "$HOUR_AGO" true 2026-10-02T14:04:00Z
+J=$(st ro-b)
+ok "$(q "$J" '[d["trickle"]["file"], bool(d["trickle"]["why"]), d["trickle"]["away"], d["trickle"]["limit"]]')" '["stale",true,false,2]' \
+  "S1: stale reads not Away at Trickle 2, why set"
+ok "$(lines)" 0 "S1: … and status prints no WARN (only next does)"
+away_raw '{"away": true,'
+J=$(st ro-b)
+ok "$(q "$J" '[d["trickle"]["file"], bool(d["trickle"]["why"]), d["trickle"]["limit"]]')" '["unreadable",true,2]' "S1: unreadable reads Trickle 2, why set"
+ok "$(lines)" 0 "S1: … with no WARN either"
+rm -f "$D/home/.config/thread/away.json"
+ok "$(q "$(st ro-b)" '[d["trickle"]["file"], d["trickle"]["limit"]]')" '["missing",2]' "S1: no file reads missing, Trickle 2"
+ok "$(sums)" "$before" "S1: status writes no note (a pure read)"
+fmline ro-b 'paused: 2026-10-02T14:00+00:00'
+ok "$(q "$(st ro-b)" '[d["trickle"]["here"], d["trickle"]["running"]]')" '[0,2]' "S1: a paused rollout counts 0 here, as others read it"
+
+# ════ A lead's lease (p28-4; execute away.md § The Trickle): a Rollout whose lease has lapsed holds no room ═══════════
+# A lease lapses 45 minutes after its last write, or after the Mac's latest boot or wake if later, unless a room stop
+# stands; no lease file, or an unreadable one, still counts. NOW is 14:05:00Z.
+el='[d["trickle"]["elsewhere"], d["trickle"]["lapsed"]]'
+# pause_log <rollout> <lines>: a `## Pause log` section at the note's end (after every mkt, so no queue line lands
+# under it); unlog <rollout>: the section removed.
+pause_log() { printf '\n## Pause log\n\n%s\n' "$2" >> "$D/$1.md"; }
+unlog() { python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); i = t.find("\n## Pause log"); open(p, "w").write(t if i < 0 else t[:i] + "\n")' "$D/$1.md"; }
+
+# ── L1: a fresh lease counts ────────────────────────────────────────────────────────────────────────────────────
+scen l1-fresh
+two_rollouts
+lease ro-a 2026-10-02T13:50:00Z
+J=$(nx ro-b)
+ok "$(q "$J" "[$el, d[\"start\"]]")" '[[{"ro-a":2},{}],[]]' "L1: ro-a's lease written 15 minutes ago is fresh: it counts, nothing starts"
+ok "$(q "$J" "$holds")" '{"b2":"trickle: 3/2 tasks running on this Mac","b3":"trickle: 3/2 tasks running on this Mac"}' \
+  "L1: b2 and b3 are held on the Trickle"
+
+# ── L2: a lapsed lease holds no room, and a queued task elsewhere starts ───────────────────────────────────────────
+scen l2-lapsed
+two_rollouts
+lease ro-a 2026-10-02T13:19:59Z
+J=$(nx ro-b)
+ok "$(q "$J" "[$el, d[\"start\"], d[\"slotLimit\"], d[\"trickle\"][\"running\"]]")" '[[{},{"ro-a":2}],["b2"],2,2]' \
+  "L2: ro-a's lease 45 min 1 s old has lapsed: it leaves the count (lapsed names it) and b2 starts"
+ok "$(q "$J" "$holds")" '{"b3":"trickle: 2/2 tasks running on this Mac"}' "L2: b3 is held on the Trickle"
+lease ro-a 2026-10-02T13:20:00Z
+J=$(nx ro-b --dry-run)
+ok "$(q "$J" "[$el, d[\"start\"]]")" '[[{"ro-a":2},{}],[]]' "L2: a lease exactly 45 minutes old still counts"
+
+# ── L3: the lead comes back: its next `next` or loop entry renews the lease, and it counts again ──────────────────
+lease ro-a 2026-10-02T13:19:59Z
+nx ro-a >/dev/null
+ok "$(leased ro-a)" '["ro-a","2026-10-02T14:05:00Z","next"]' "L3: ro-a's next (off --dry-run) rewrites its lease at now, by next"
+J=$(nx ro-b --dry-run)
+ok "$(q "$J" "$el")" '[{"ro-a":2},{}]' "L3: … so ro-a counts again"
+lease ro-a 2026-10-02T13:19:59Z
+out=$(HOME="$D/home" THREAD_EVENTS_DIR="$D/events" python3 "$SCRIPT" record-entry --rollout "$D/ro-a.md" --by heartbeat --now "$NOW" 2>"$D/err"); rc=$?
+ok "$rc" 0 "L3b: a heartbeat tick's record-entry exits 0"
+ok "$(leased ro-a)" '["ro-a","2026-10-02T14:05:00Z","entry"]' "L3b: … and rewrites the lease at now, by entry"
+ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{"ro-a":2},{}]' "L3b: … so ro-a counts again"
+
+# ── L4: a standing room stop keeps a lapsed lease ──────────────────────────────────────────────────────────────────
+scen l4-room-stop
+two_rollouts
+lease ro-a 2026-10-02T13:19:59Z
+pause_log ro-a '- 2026-10-02T12:05+00:00 room stop: lead-a at its 5-hour line; resumes at its reset'
+ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{"ro-a":2},{}]' "L4: a room stop 2 h old stands: ro-a's lapsed lease still counts"
+ok "$(q "$(st ro-a)" 'd["trickle"]["lease"]')" '{"lapsesAt":null,"state":"room-stop","writtenAt":"2026-10-02T13:19:59Z"}' \
+  "L4: status reads the lease held by the room stop, lapsesAt null"
+unlog ro-a; pause_log ro-a '- 2026-10-02T08:05+00:00 room stop: lead-a at its 5-hour line'
+ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{},{"ro-a":2}]' "L4: a room stop exactly 6 h old stands no more: the lease lapses"
+unlog ro-a; pause_log ro-a "$(printf -- '- 2026-10-02T12:05+00:00 room stop: lead-a at its 5-hour line\n- 2026-10-02T13:00+00:00 room stop ended')"
+ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{},{"ro-a":2}]' "L4: a room stop that ended keeps nothing: the lease lapses"
+ok "$(q "$(st ro-a)" 'd["trickle"]["lease"]["state"]')" '"lapsed"' "L4: … and status reads it lapsed"
+
+# ── L5: no lease, or an unreadable one, still counts ────────────────────────────────────────────────────────────────
+scen l5-none-or-unreadable
+two_rollouts
+ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{"ro-a":2},{}]' "L5: no lease file: ro-a counts (an older snapshot writes none)"
+ok "$(q "$(st ro-a)" 'd["trickle"]["lease"]')" '{"lapsesAt":null,"state":"none","writtenAt":null}' "L5: status reads it none"
+unreadable_lease() {  # unreadable_lease <label>: ro-a's lease is already written
+  ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{"ro-a":2},{}]' "L5 $1: ro-a still counts"
+  ok "$(q "$(st ro-a)" 'd["trickle"]["lease"]')" '{"lapsesAt":null,"state":"unreadable","writtenAt":null}' "L5 $1: status reads it unreadable"
+}
+lease_raw ro-a 'not json'; unreadable_lease "not JSON"
+lease_raw ro-a '[]'; unreadable_lease "a JSON array"
+lease_raw ro-a '{"rollout": "ro-a", "by": "next"}'; unreadable_lease "no written_at"
+lease_raw ro-a '{"rollout": "ro-a", "written_at": "2026-10-02T12:00:00", "by": "next"}'; unreadable_lease "a naive written_at"
+lease_raw ro-a '{"rollout": "ro-a", "written_at": 1, "by": "next"}'; unreadable_lease "a written_at that is no string"
+lease ro-a 2026-10-02T14:15:00Z; unreadable_lease "a written_at 10 minutes ahead"
+lease_raw ro-a "$(python3 -c 'import json; print(json.dumps({"rollout": "ro-a", "written_at": "2026-10-02T12:00:00Z", "pad": "x" * 5000}))')"
+unreadable_lease "over 4 KiB"
+printf '\377\376{}' > "$D/$LEASES/ro-a.json"; unreadable_lease "not UTF-8"
+rm -f "$D/$LEASES/ro-a.json"; mkdir -p "$D/$LEASES/ro-a.json"; unreadable_lease "a directory at the path"
+rm -rf "$D/$LEASES/ro-a.json"
+lease ro-a 2026-10-02T14:10:00Z
+ok "$(q "$(st ro-a)" 'd["trickle"]["lease"]["state"]')" '"fresh"' "L5: a written_at exactly 5 minutes ahead is still fresh"
+lease_raw ro-a '{"rollout": "ro-a", "written_at": "2026-10-02T13:19:59Z", "by": "next", "later": 1}'
+ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{},{"ro-a":2}]' "L5: extra keys are ignored: that lease reads, and lapses"
+
+# ── L6: a boot or a wake after the last write restarts the 45 minutes; a sleeping Mac lapses nobody ──────────────────
+scen l6-wake
+two_rollouts
+lease ro-a 2026-10-02T12:05:00Z
+mtimes() { THREAD_MACHINE_TIMES="$1" nx ro-b --dry-run; }
+ok "$(q "$(mtimes '{"wake":"2026-10-02T13:40:00Z"}')" "$el")" '[{"ro-a":2},{}]' "L6: a wake 25 minutes ago: ro-a counts"
+ok "$(q "$(mtimes '{"wake":"2026-10-02T13:15:00Z"}')" "$el")" '[{},{"ro-a":2}]' "L6: a wake 50 minutes ago: lapsed"
+ok "$(q "$(mtimes '{"boot":"2026-10-02T13:40:00Z"}')" "$el")" '[{"ro-a":2},{}]' "L6: a boot 25 minutes ago: ro-a counts"
+ok "$(q "$(mtimes '{"wake":"2026-10-02T11:00:00Z"}')" "$el")" '[{},{"ro-a":2}]' "L6: a wake before the last write is no excuse: lapsed"
+ok "$(q "$(mtimes '{"wake":"2026-10-02T14:30:00Z"}')" "$el")" '[{},{"ro-a":2}]' "L6: a wake after now is ignored: lapsed"
+J=$(THREAD_MACHINE_TIMES='{"wake":"2026-10-02T13:40:00Z"}' st ro-a)
+ok "$(q "$J" 'd["trickle"]["lease"]')" '{"lapsesAt":"2026-10-02T14:25:00Z","state":"fresh","writtenAt":"2026-10-02T12:05:00Z"}' \
+  "L6: status: fresh, lapsing 45 minutes after the wake"
+
+# ── L7: T19's respawn with both leases lapsed: both restart, neither starts into the other's room ─────────────────────
+scen l7-respawn-lapsed
+mkro ro-a 3; mkt a1 ro-a in_progress 'owner: lead-a'; mkt a2 ro-a in_progress 'owner: lead-a'; mkt a3 ro-a open
+mkro ro-b 3; mkt b1 ro-b in_progress 'owner: lead-b'; mkt b2 ro-b in_progress 'owner: lead-b'; mkt b3 ro-b open
+lease ro-a 2026-10-02T12:05:00Z; lease ro-b 2026-10-02T12:05:00Z
+J=$(nx ro-a --running "")
+ok "$(q "$J" '[d["restart"], d["start"], d["halt"], d["slotsInUse"], d["slotLimit"]]')" '[["a1","a2"],[],null,2,2]' \
+  "L7: ro-a restarts both its stalled tasks; slotLimit min(3, 2 - 0) with ro-b's lease lapsed"
+ok "$(q "$J" "$el")" '[{},{"ro-b":2}]' "L7: ro-b is out of the count, named under lapsed"
+ok "$(q "$J" "$holds")" '{"a3":"trickle: 2/2 tasks running on this Mac"}' "L7: a3 is held: ro-a's own two fill the Trickle"
+ok "$(leased ro-a)" '["ro-a","2026-10-02T14:05:00Z","next"]' "L7: ro-a's call renewed its lease"
+J=$(nx ro-b --running "")
+ok "$(q "$J" '[d["restart"], d["start"], d["halt"], d["slotLimit"]]')" '[["b1","b2"],[],null,0]' \
+  "L7: ro-b restarts both its stalled tasks too, with slotLimit 0"
+ok "$(q "$J" "$el")" '[{"ro-a":2},{}]' "L7: ro-a's renewed lease counts for ro-b"
+ok "$(q "$J" "$holds")" '{"b3":"trickle: 4/2 tasks running on this Mac"}' "L7: b3 is held on the Trickle"
+
+# ── L8: --dry-run and a refused call write no lease ────────────────────────────────────────────────────────────────
+scen l8-no-write
+two_rollouts
+mkro ro-z 0; mkt z1 ro-z open
+mkro ro-s 3 'shape: serial'; mkt s1 ro-s open
+mkro ro-u 3 'superseded_by: "[[ro-b]]"'; mkt u1 ro-u open
+nx ro-b --dry-run >/dev/null; rc=$?
+ok "$rc" 0 "L8: next --dry-run exits 0"
+nx ro-z >/dev/null; rc=$?
+ok "$rc" 1 "L8: parallel_ceiling 0 is refused"
+nx ro-s >/dev/null; rc=$?
+ok "$rc" 1 "L8: a serial note is refused"
+J=$(nx ro-u); rc=$?
+ok "$(q "$J" '[d["halt"]]')/$rc" '["superseded"]/0' "L8: a superseded note halts superseded, exit 0"
+ok "$(ls "$D/$LEASES" 2>/dev/null | wc -l | tr -d ' ')" 0 "L8: none of them wrote a lease"
+J=$(HOME="$D/no-home" python3 "$SCRIPT" next --rollout "$D/ro-b.md" --tasks-dir "$D" --now "$NOW" 2>"$D/err"); rc=$?
+ok "$rc/$(q "$J" 'd["rollout"]')/$(lines)" '0/"ro-b"/1' "L8: with no home dir, next still exits 0 with its JSON and one stderr line"
+ok "$(err)" "lease: warning: cannot write ~/.config/thread/leases/ro-b.json: no home directory" "L8: … the lease's warning"
+ok "$([ -e "$D/no-home" ] && echo made || echo none)" none "L8: … and it makes no home dir"
+
+# ── L9: status reports the lease, its own lapsed lease included, and writes nothing ──────────────────────────────────
+scen l9-status
+two_rollouts
+lease ro-a 2026-10-02T13:19:59Z
+before=$(sums); leases_before=$(cksum "$D/$LEASES"/*.json; ls -a "$D/$LEASES")
+J=$(st ro-a)
+ok "$(q "$J" '[d["trickle"][k] for k in ("here", "running", "elsewhere", "lapsed")]')" '[0,1,{"ro-b":1},{}]' \
+  "L9: ro-a's own lease lapsed: here 0, running 1 (ro-b's), nothing else lapsed"
+ok "$(q "$J" 'd["trickle"]["lease"]')" '{"lapsesAt":"2026-10-02T14:04:59Z","state":"lapsed","writtenAt":"2026-10-02T13:19:59Z"}' \
+  "L9: the lease block: lapsed, written 13:19:59, lapsed at 14:04:59"
+J=$(st ro-b)
+ok "$(q "$J" '[d["trickle"][k] for k in ("here", "running", "elsewhere", "lapsed")]')" '[1,1,{},{"ro-a":2}]' \
+  "L9: ro-b reads ro-a under lapsed, never elsewhere"
+ok "$(q "$J" 'd["trickle"]["lease"]')" '{"lapsesAt":null,"state":"none","writtenAt":null}' "L9: ro-b has no lease: none"
+ok "$(lines)" 0 "L9: … with empty stderr"
+ok "$(sums)" "$before" "L9: status writes no note"
+ok "$(cksum "$D/$LEASES"/*.json; ls -a "$D/$LEASES")" "$leases_before" "L9: … and no lease"
+
+# ── L10: the Away cap: a dead lead's lapsed lease frees its room, as A11's paused: stamp does ───────────────────────
+scen l10-away-cap
+mkro ro-dead 3; mkt g1 ro-dead in_progress 'owner: gone'; mkt g2 ro-dead in_progress 'owner: gone'; mkt g3 ro-dead in_progress 'owner: gone'
+mkro ro-x 4; mkt x1 ro-x open; mkt x2 ro-x open; mkt x3 ro-x open; mkt x4 ro-x open
+away_file "$D/home" "$HOUR_AGO" true "$TONIGHT" 2 09:00 4
+lease ro-dead 2026-10-02T12:05:00Z
+J=$(nx ro-x)
+ok "$(q "$J" "[$el, d[\"start\"], d[\"slotLimit\"]]")" '[[{},{"ro-dead":3}],["x1","x2","x3","x4"],4]' \
+  "L10: Away, ro-dead's lapsed lease leaves the count: ro-x fills to min(ceiling, Away cap)"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

@@ -33,7 +33,7 @@ sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules parallel-shaped phases itself, steers the rest (a serial rollout for serial-shaped work, ADR 0040, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, asks a project's Priorities card once when its note has none (how robust, who it is for, what matters most, where Lachy steers), then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules parallel-shaped phases itself, steers the rest (a serial rollout for serial-shaped work, ADR 0040, or a focus item via `open`), and ends with the execute handoff. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:orient-all` | where is my attention best placed? | The estate pass (ADR 0041): orient across every project at once. Scans the vault, grades and ranks all open work by agent work per minute of Lachy's attention, asks the sign-offs, One calls, Unpark offers and Grills that fit his stated time budget, writes each answer into its task, schedules the runs that are ready (forked `/thread:schedule` calls, batched so no two can name one note), then starts every execute, Leg 1, repair and child orient as a visible Chorus session, or prints paste-ready prompts off the Stage. Never reshapes a project; `--dry-run` writes nothing. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
@@ -46,11 +46,11 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 
 | Member | Role | What it does |
 |---|---|---|
-| `/thread:schedule` | planner | Orders the backlog into a queue (dependencies recorded in frontmatter, Solo for sweeping changes, affine same-file clusters folded into one unit) and refuses a second unfinished parallel rollout on a repo (`--regenerate` supersedes it, carrying its unlanded tasks); writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 5`). An all-serial set gets one `shape: serial` note per chain, refused while a live chain shares a surface. No minimum size — shape decides, not count. |
+| `/thread:schedule` | planner | Orders the backlog into a queue (dependencies recorded in frontmatter, Solo for sweeping changes, affine same-file clusters folded into one unit) and refuses a second unfinished parallel rollout on a repo (`--regenerate` supersedes it, carrying its unlanded tasks); writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 5`). An all-serial set gets one `shape: serial` note per chain, refused while a live chain shares a surface. No minimum size — shape decides, not count. A standalone `--tasks` run first sweeps the same repo's other open tasks for pickups, and every standalone parallel run ends by handing its note to a fresh session that runs `execute` (ADR 0057). |
 | `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg. |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. A serial chain reads as its Legs, its chain state and any stall (`leg.py status`). |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. A stalled serial chain gets its set-asides answered or deferred with their dependants, and its next Leg started as a new Session. |
-| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; by hand only the ones Lachy picks are applied, by the tune script, which records each by-hand Reflection in `tunings.jsonl`. The weekly reading (`--weekly`, ADR 0037 d3–d5) reads every rollout since the last one, traces the friction to its rules, keeps Watches in `reflections.jsonl`, files bugs and lands a knob three Reflections agree on, never a rule: a rule proposal, or a held trade (a knob that trades one headline against the other), waits in one decision task for Lachy. A serial chain is scored from its Leg log (`serial-score.py`) into one close line at its Complete, and the weekly reading scores it the same way, never as a knob candidate. |
+| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; by hand only the ones Lachy picks are applied, by the tune script, which records each by-hand Reflection in `tunings.jsonl`. The weekly reading (`--weekly`, ADR 0037 d3–d5) reads every rollout since the last one, traces the friction to its rules, keeps Watches in `reflections.jsonl`, files bugs and lands a knob three Reflections agree on, never a rule: a rule proposal, or a held trade (a knob that trades one headline against the other), waits in one decision task for Lachy. It keeps the Time-lost ledger (ADR 0051) and the attention ledger (ADR 0056): the questions put to Lachy by Owner, each PR's /fresh-review trail, each rollout's wait to start, and a Watch on work that circles without merging. A serial chain is scored from its Leg log (`serial-score.py`) into one close line at its Complete, and the weekly reading scores it the same way, never as a knob candidate. |
 
 ## Runtime support
 
@@ -111,7 +111,10 @@ included. To run a night at the Away cap without a writer, write the file by
 hand (`skills/execute/away.md` § Without a writer shows how); a hand-written
 file goes stale 24 h after its `written_at` (or at its `until`), and from then
 on each lead prints a `WARN: ~/.config/thread/away.json stale: …` line and the
-Mac is back at 2.
+Mac is back at 2. Each lead also keeps a lease, `~/.config/thread/leases/<rollout>.json`,
+rewritten at its every `next` and loop entry; a rollout whose lease has lapsed (45
+minutes after its last write, or after the Mac's latest boot or wake if later,
+unless a room stop stands) stops holding room in the count.
 
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through
@@ -129,13 +132,22 @@ that ends a killed holder's suite before its verify slot frees;
 `verify-slot.py status` shows who holds each verify slot and who waits.
 `skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
 watches the shared checkout's default branch and bareness around every launch
-(a task call's window is armed by `reconcile-rollout.py mark-started` itself)
-and halts the queue on a change that is not a close-out (execute § 4.5).
+(a task call's window is armed by `reconcile-rollout.py mark-started` itself),
+logs a window it could not read with the checkout's state instead of tripping (a
+Bookkeeping miss), and holds what a change that is not a close-out threatens: the
+Integration lane, or the whole rollout for a bare checkout (execute § 4.5, ADR 0046).
+A RACE whose re-verify stays red after the Flake check is reverted on main through a
+revert PR that merges only through merge-task (`lead-integrate.py revert`; execute
+§ 4.5 *The RACE revert*).
 `skills/execute/scripts/step-boundary.py` is the lead's side of a Chorus room
 stop: it reads the Workflow journals to stop each call at a step boundary and
-records the stop on the rollout note (execute § Room stop).
+records the stop on the rollout note (execute § Room stop), and in the Run record
+as a stop, as the Stop hook records each halt (ADR 0051).
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
-every emitter appends its events through it, and its header is the schema.
+every emitter appends its events through it, and its header is the schema. Its
+writers include the suites' (`verify-slot.py run`, `lead-integrate.py verify`),
+the lead's loop entries (`reconcile-rollout.py record-entry`) and why main moved
+(`lead-integrate.py base-moved`, which `merge-task.sh` calls at each exit 3).
 `skills/reflect/scripts/score.py` reads a record into a Reflection's scores and
 proposals (writing nothing), and `skills/reflect/scripts/escapes.py`, which it loads,
 reads the landed tasks' Escapes and Quality from the task notes' `fixes:` and the
@@ -148,9 +160,16 @@ half of a Reflection at each rollout's close (fold, settings, score,
 `tune.py --record-only --close`) and records one line per rollout through it
 (ADR 0037 d4). `skills/reflect/scripts/reflect.py` runs the weekly reading's
 script half and is the only writer of `reflections.jsonl` and of the bug and
-decision tasks. `skills/reflect/scripts/reflect-due.py` tells the daily sweep
-when the weekly reading is due: 7 days after the last one, 14 after three quiet
-Reflections in a row (ADR 0037 d4, d6). The Grade log (`grades.jsonl` beside the
+decision tasks, and keeps the Time-lost ledger (`skills/reflect/scripts/ledger.py`,
+ADR 0051: the hours each cause class cost across rollouts, and a Monthly audit) and
+the attention ledger (`skills/reflect/scripts/attention.py`, ADR 0056: the questions
+put to Lachy, read from the session transcripts and labelled by Owner, each PR's
+/fresh-review trail, each rollout's wait to start, and the circling detector's
+Watches).
+`skills/reflect/scripts/reflect-due.py` tells Chorus's weekly Runner, and the
+daily sweep as its fallback, when the weekly reading is due: the Thursday after
+the last one, or the Thursday after that once three Reflections in a row were
+quiet (ADR 0037 d4, d6; ADR 0051). The Grade log (`grades.jsonl` beside the
 Run record, ADR 0041) has one writer, `estate-dispatch.py log`, which keeps each
 estate pass's grades (a task whose note name is no slug, with spaces or
 capitals, is skipped and reported in its outcome line, and the rest are still
@@ -322,11 +341,14 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), orient's
   target resolution before it reads and its one learned `repos:` write (`orient-target.test.mjs`),
   orient's declared check, its gate and digest-bound advance (`orient-declared-check.test.mjs`),
+  orient's Priorities card, asked once when a project note has none and read by every later ask
+  (`orient-priorities-card.test.mjs`, Chorus ADR 0110 d5),
   orient's launch-model history (`orient-launch-model.test.mjs`), the three-way execution-fit test and
   orient's retired batches (`execution-fit-shapes.test.mjs`, ADR 0040), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
-  (`handoff-one-writer.test.mjs`), `next`'s archive-this-session move and its session/thread menu wording
-  (`next-archive-session.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
+  (`handoff-one-writer.test.mjs`), `next`'s archive-this-session move and its session/thread wording in the line and the menu
+  (`next-archive-session.test.mjs`), `next` deciding a clear move in one line and settling or carrying an
+  open confirm (`next-decides-housekeeping.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
 - **Reflection** — `tests/reflect-score.test.mjs` (`score.py` on synthetic records: running time and its
   exclusions, the Hands-off rate and its acts, Throughput's bound, the Slot-bound and lane-bound fixtures, each
@@ -339,8 +361,16 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   the GIT_* scrub), `tests/reflect-weekly.test.mjs` (`reflect.py`'s weekly reading against throwaway records,
   vaults and repos: the span and its friction, close lines and the Escapes sweep, one line per Watch and per Tuning,
   the bug and decision tasks never written over, Lachy's recorded no, the close and the rung),
-  `tests/reflect-due.test.mjs` (`reflect-due.py` on fixture records: due at day 7 and not day 6, three quiet
-  Reflections to the 14-day cadence and a non-quiet one back to 7, and the cadence `close` writes),
+  `tests/reflect-due.test.mjs` (`reflect-due.py` on fixture records: due from Thursday 00:00 and not the Wednesday
+  before, after a Friday, Thursday or Wednesday close, three quiet Reflections to the fortnightly cadence and a non-quiet
+  one back, and the cadence `close` writes), `tests/reflect-ledger.test.mjs` (the Time-lost ledger: fixture records
+  summed by class and cause, the waits on Lachy as stalls, the trend from persisted rows, the baseline, the ledger's
+  Watch counted in readings, the load hold, the Monthly audit's month rule and window, its gaps in the decision task and
+  never against `quiet`), `tests/reflect-attention.test.mjs` (the attention ledger: fixture transcripts read once per
+  question with each outcome and the hours held, `tally`, the owners file's refusals and its `unknown` remainder, Review
+  trails keyed by landing, branch or path run with their STOP entries and docs-only diffs, waits to start, both circling
+  rules with a reading's own Sessions left out, and their Watches counted in readings through decide, close and the
+  cadence),
   `tests/reflect-grades.test.mjs` (`grades.py` on fixture grade lines, records and notes: each grade's episode to the
   next grade or the close, dispatch by record or by link, foreseen sign-offs, every outcome and the hands-off rate's
   denominator, window against all, and Slot hours per size),
@@ -376,23 +406,34 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   out), dependency holds (each why, transitive holds, cycles), the Unpark offers and the snooze writer's round trip,
   its `--clear` and refusals and parity with the scan's standing, the `unpark` and `kill` writes (one save each, the
   snooze cleared with the status, an umbrella with a live sub-project refused, parity with the scan's parked set), a
-  decision's `fork` passed through, usage exits, byte-equal reruns and read-only runs;
-  `tests/contracts/readiness-grade.test.mjs` pins `skills/_shared/readiness-grade.md` to the script's constants and
-  its `--clear`, its hold reasons, gated_inputs.py's gate kinds, the thread homes, CONTEXT.md's terms and ADR 0041's
-  ruling.
+  decision's `fork` passed through, each decision's Owner (his decisions asked, counted and charged; technical and
+  priorities calls ruled into `decidedForYou`, a technical guess dropped, `gate`, an unknown owner, a fork and a
+  credential named on a credential-gated task read as his) with its `goal` and `stakes` (required with an explicit
+  `owner: yours`, reordered with the options), usage exits, byte-equal reruns and read-only runs;
+  `tests/contracts/readiness-grade.test.mjs` pins `skills/_shared/readiness-grade.md` to the script's constants (the
+  Owners included) and its `--clear`, its hold reasons, gated_inputs.py's gate kinds, the thread homes, the three kinds
+  of fork, CONTEXT.md's terms and ADR 0041's ruling.
 - **Estate dispatch** — `tests/estate-dispatch.test.mjs`: `estate-dispatch.py` over the real scan and rank of a
   fixture vault, with injected rollout summaries — `slices` (one file per home, never overwriting), `rounds` (the
   sign-offs asked only under no pause or the sign-off pause, their gates raw and as `approve-gates` signs them, the
-  cut to the budget, held decisions skipped, AskUserQuestion payloads with short labels and unique texts), `plan`
+  cut to the budget, held decisions skipped, AskUserQuestion payloads with short labels and unique texts, each
+  question ending with `NOTE_INVITE` and each option of his decisions described by its `stakes`), `plan`
   (decided, unheld members only, each with every dependency it needs scheduled and every why read against the final
   schedule, blockers, shared roots and parked runs waiting, batches that keep names that may meet apart, each live
   rollout's holds and the signed reinstate), `sessions` (written notes, the status allow-list
   behind the holds, orients last), `record` (the answer folded to one line into `## Decisions (asked ahead
-  <date>)`, the fork's ruling, every refusal byte-identical) and `log` (one grade line per graded task under one pass,
-  a rerun `exists`, a half-written pass completed, refusals that write nothing), usage exits, byte-equal reruns and
-  read-only runs;
+  <date>)`, the fork's ruling, every refusal byte-identical; `record --owner` a call made for Lachy into
+  `## Decided for you (<date>)`), `decided-for-you` (the ruled calls of the queued tasks, the owner split, read-only
+  without `--write`, a task gone in flight refused while the rest are written) and `log` (one grade line per graded
+  task under one pass, a rerun `exists`, a half-written pass completed, refusals that write nothing), usage exits,
+  byte-equal reruns and read-only runs;
   `tests/contracts/orient-all.test.mjs` pins `skills/orient-all/SKILL.md` to the script, to schedule's answered
   questions and to status § 4's numbered actions.
+- **Question gate** — `tests/contracts/question-gate.test.mjs`: `skills/_shared/asking.md` (the Owners, Decided for
+  you, the Framing), its cite in every prose unit that names AskUserQuestion, ADR 0054 § Sites holding one row per ask
+  unit (each anchor in exactly one unit, every ask that stands citing the gate, each `Owner` label its row's, every
+  follow-up row owned by a task in § Follow-ups, the counts), the grill skills' pinned `args`, the readers of
+  `## Decided for you` and the Framing of the script-built rounds.
 - **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos
   with a fixture check — undeclared, whole untruncated output and its digest, the advance on a matching digest
   and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal, even one that

@@ -205,11 +205,17 @@ ok "$(q "$J" "[d['start'], $holds]")" '[["x"],{"s":"hold until o/r#5 merges (OPE
 
 # ── H10: precedence: git-env beats a hold, a pause beats it, and complete beats a stale one ─────────────────────────
 scen h10-git
+mkro $'- [[a]]\n\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[a]] task: core.bare false→true; repo /x' 'hold_until: {pr: o/r#202}'
+mkt a open
+prj "$U/202" OPEN
+J=$(nxt)
+ok "$(q "$J" "[d['halt'], $holds]")" '["git-env",{"a":"git-env hold: /thread:repair"}]' "H10: a whole-rollout git-env trip plus a hold is git-env"
+scen h10-git-lane
 mkro $'- [[a]]\n\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[a]] task: refs/heads/main moved; repo /x' 'hold_until: {pr: o/r#202}'
 mkt a open
 prj "$U/202" OPEN
 J=$(nxt)
-ok "$(q "$J" "[d['halt'], $holds]")" '["git-env",{"a":"git-env hold: /thread:repair"}]' "H10: git-env plus a hold is git-env"
+ok "$(q "$J" "[d['halt'], [h['scope'] for h in d['gitEnvHold']], $holds]")" '["git-env",["lane"],{"a":"hold until o/r#202 merges (OPEN)"}]' "H10: a lane trip plus a hold: the hold keeps its reason, and with nothing moving the halt is git-env"
 scen h10-paused
 mkro $'- [[a]]\n- [[b]]' 'paused: 2026-10-02T10:00+00:00' 'hold_until: {pr: o/r#202}'
 mkt a open; mkt b open 'hold_until: {pr: o/r#5}'

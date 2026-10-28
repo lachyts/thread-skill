@@ -17,12 +17,14 @@
 //               decision (d2, d3, d4)
 //   restart     § The Trickle says a restart waits on the ceiling alone, never `slotLimit`, and that a new start counts
 //               every in_progress task of this rollout, live or stalled (the round-1 respawn deadlock)
-//   no-lead     § The Trickle says a parallel rollout with no lead holds the Trickle for nobody, and its remedy: the
-//               rollout named in `trickle.elsewhere`, a `paused:` stamp, a liveness signal left to a later task
+//   no-lead     (p28-4) § The Trickle's **A lead's lease.** says how a rollout with no lead stops holding the Trickle for
+//               nobody: the lease at the code's LEASE_DIR_REL, the one lapse phrase with the code's LEASE_LAPSE minutes
+//               (CONTEXT.md's **Lease** says the same), a standing room stop keeping it, a rollout with no lease file
+//               still counting with Lachy's `paused:` remedy, and the Codex `--gated` residual
 //   sample      § Without a writer's hand-written `until` is the next 09:00 strictly after now, never tomorrow's always
 //   away-cap    § Away (p29-8, ADR 0049) states the code's AWAY_CAP_DEFAULT and its lift above the Trickle, the
-//               AWAY_CAP_PREFIX hold line, that it never halts, the meant wait and a dead lead's room; run_record.py's
-//               idle-slots enum holds hold-away-cap
+//               AWAY_CAP_PREFIX hold line, that it never halts, the meant wait and a dead lead's room (held until its
+//               lease lapses, p28-4); run_record.py's idle-slots enum holds hold-away-cap
 //   older-reader  an engine snapshot from before p29-8 (ADR 0043) ignores `away_cap`: the live AWAY_KEYS equals the
 //               frozen p28-1 reader's (tests/fixtures/away-state/p28-1-reader.py), AWAY_CAP_KEY is never one of them,
 //               and away.md says an older snapshot ignores the key
@@ -34,6 +36,10 @@
 //   heat        § Heat (p31-4, estate ADR 0009 d5) names the `heat: the Mac is hot (<name>)` reason the code builds from its
 //               HEAT_PREFIX, `slotLimit` 0 Away too, that it never halts, and the THREAD_HEAT_LEVEL pin; CONTEXT.md's
 //               **Stalled rollout** names the Heat hold among the meant waits, so a hot spell never reads as a stall
+//   claim       § The Trickle's *Trickle claims* (p28-3) states the code's TRICKLE_CLAIM_TTL, names its TRICKLE_LOCK and
+//               TRICKLE_CLAIMS files and quotes its TRICKLE_WARN prefix, says the § 4 stamp consumes a claim, that a
+//               claim whose rollout note is missing from the walk still counts (it fails safe), and names the seeded-
+//               revise residual and its follow-up task; the old "a claim under a lock is a later task's" is gone
 // One function (checkAway) returns named failures, so the real files and each control (one mutation, exactly its
 // rule) run through identical logic. Reads files only.
 import { test } from 'node:test'
@@ -142,9 +148,16 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
   if (!trickleS.includes('**A restart waits on the ceiling alone.**') || !trickleS.includes('never by `slotLimit`') ||
     !trickleS.includes('counting every `in_progress` task of this rollout, live or stalled')) fails.push('restart')
 
-  if (!trickleS.includes('**A parallel rollout with no lead holds the Trickle for nobody.**') ||
-    !trickleS.includes('`trickle.elsewhere` names the rollout') || !trickleS.includes('stamping it `paused:`') ||
-    !trickleS.includes('takes it out of the count at once') || !trickleS.includes('A liveness signal')) fails.push('no-lead')
+  // no-lead (p28-4): the lease's path and its lapse are the code's, read from it, and the lapse is said in one phrase in
+  // § The Trickle and in CONTEXT.md's **Lease**, so a change on any side fails.
+  const leaseDir = grab(code, /^LEASE_DIR_REL = "([^"]*)"/m)
+  const lapseM = grab(code, /^LEASE_LAPSE = timedelta\(minutes=(\d+)\)/m)
+  const lapseIn = (s) => grab(s, /lapses (\d+) minutes after its last write, or after the Mac's latest boot or wake if later/)
+  if (!trickleS.includes("**A lead's lease.**") || !leaseDir || !trickleS.includes(`\`~/${leaseDir}/<rollout>.json\``) ||
+    !lapseM || lapseIn(trickleS) !== lapseM || lapseIn(entry(context, 'Lease')) !== lapseM ||
+    !trickleS.includes('A standing room stop keeps it') || !trickleS.includes('A rollout with no lease file still counts') ||
+    !trickleS.includes('stamping it `paused:`') || !trickleS.includes('takes it out of the count at once') ||
+    !trickleS.includes('a Codex session-driven `--gated` run')) fails.push('no-lead')
 
   const heatS = collapse(h2(away, 'Heat'))
   if (grab(code, /^HEAT_PREFIX = "([^"]*)"/m) !== 'heat:' || !code.includes('f"{HEAT_PREFIX} the Mac is hot ({heat[\'name\']})"') ||
@@ -164,7 +177,7 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
     !awayS.includes(`\`${capPrefix} <running>/<A> tasks running on this Mac\`, and it never halts`) ||
     !awayS.includes('a rollout the Away cap alone holds is a meant wait, never Stalled (ADR 0048)') ||
     !awayS.includes("the Run record's `idle-slots` reads `hold-away-cap`") ||
-    !awayS.includes('holds its Away-cap room until the Watchdog recovers it (ADR 0048) or Lachy pauses it') ||
+    !awayS.includes('holds its Away-cap room until its lease lapses, the Watchdog recovers it (ADR 0048) or Lachy pauses it') ||
     !awayS.includes('the Companion has no pause') ||
     !/"hold-away-cap"/.test(idleEnum)) fails.push('away-cap')
 
@@ -200,6 +213,29 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
     JSON.stringify(kindsOf(score)) !== JSON.stringify(nightKinds) ||
     nightKinds.some((k) => !nightS.includes(`- \`${k}\` `) || !(runRecord ?? '').includes(`    "${k}": (`))) fails.push('night-record')
 
+  // mac-holds (p28-6): score.py's MAC_HOLDS keys (the Mac-wide holds it scores as their own excluded kinds) hold the
+  // Trickle, the Away cap and the Heat hold, and each is a reason of run_record.py's idle-slots enum (hold-away-cap's
+  // place in the enum is the away-cap rule's, so each control fails one rule).
+  const macHolds = [...(grab(score ?? '', /^MAC_HOLDS = \{([\s\S]*?)^\}/m) ?? '').matchAll(/^ {4}"([^"]+)":/gm)].map((m) => m[1])
+  if (!['hold-trickle', 'hold-away-cap', 'hold-heat'].every((k) => macHolds.includes(k)) ||
+    macHolds.some((k) => k !== 'hold-away-cap' && !idleEnum.includes(`"${k}"`))) fails.push('mac-holds')
+
+  // claim (p28-3): the TTL, the two file names and the WARN prefix are the code's, read from it, so a change on either
+  // side fails.
+  const ttlM = grab(code, /^TRICKLE_CLAIM_TTL = timedelta\(minutes=(\d+)\)/m)
+  const lockFile = grab(code, /^TRICKLE_LOCK = "([^"]*)"/m)
+  const claimsFile = grab(code, /^TRICKLE_CLAIMS = "([^"]*)"/m)
+  const claimWarn = grab(code, /^TRICKLE_WARN = "([^"]*)"/m)
+  if (!ttlM || !lockFile || !claimsFile || !claimWarn ||
+    !trickleS.includes(`A claim lives ${ttlM} minutes from its \`at\``) ||
+    !trickleS.includes(`\`${lockFile}\``) || !trickleS.includes(`\`${claimsFile}\``) ||
+    !trickleS.includes(`\`${claimWarn} `) ||
+    !trickleS.includes("A claim is consumed by its task's § 4 stamp") ||
+    !trickleS.includes('and so does one whose rollout note is missing from the walk') ||
+    !trickleS.includes('up to the revises one step 1.2 launches') ||
+    !/\[\[thread-skill-p28-\d+-trickle-claim-a-seeded-revise\]\]/.test(trickleS) ||
+    trickleS.includes("A claim under a lock is a later task's.")) fails.push('claim')
+
   return fails
 }
 
@@ -210,7 +246,7 @@ test('away.md, the code that reads the file and the hold-back prose agree', () =
 // ---- controls: each mutates one place and must fail with exactly its rule ---------------------------------------
 
 const RULES = ['keys', 'path', 'staleness', 'default', 'refresh', 'until', 'morning', 'serial', 'warn', 'hold-back', 'glossary',
-  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record', 'heat']
+  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record', 'heat', 'mac-holds', 'claim']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -295,10 +331,18 @@ test('control: a restart bounded by slotLimit, or starts that skip stalled tasks
   only('away', 'counting every `in_progress` task of this rollout, live or stalled, as every other lead counts them',
     'counting its live tasks only', 'restart', 'stalled tasks uncounted')
 })
-test('control: no word on a lead-less rollout, or no remedy, fails no-lead', () => {
-  only('away', '**A parallel rollout with no lead holds the Trickle for nobody.**', '**Every lead is live.**', 'no-lead', 'no paragraph')
+test('control: no lease, another lapse or path, or no remedy for a lead-less rollout fails no-lead', () => {
+  only('away', "**A lead's lease.**", '**Every lead is live.**', 'no-lead', 'no paragraph')
+  only('away', '`~/.config/thread/leases/<rollout>.json` under the home dir', '`~/.config/thread/lease.json` under the home dir', 'no-lead', 'another path in the doc')
+  only('code', 'LEASE_DIR_REL = ".config/thread/leases"', 'LEASE_DIR_REL = ".local/state/thread/leases"', 'no-lead', 'another path in the code')
+  only('away', "A lease lapses 45 minutes after its last write, or after the Mac's latest boot or wake if later:", 'A lease lapses 45 minutes after its last write:', 'no-lead', 'no wake in the doc')
+  only('code', 'LEASE_LAPSE = timedelta(minutes=45)', 'LEASE_LAPSE = timedelta(minutes=30)', 'no-lead', 'a 30-minute lapse in the code alone')
+  only('context', "it lapses 45 minutes after its last write, or after\n  the Mac's latest boot or wake if later", 'it lapses after 45 minutes of the Mac awake', 'no-lead', 'another lapse phrase in CONTEXT.md')
+  only('away', 'A standing room stop keeps it', 'A room stop changes nothing', 'no-lead', 'no room stop')
+  only('away', 'A rollout with no lease file still counts', 'A rollout with no lease file leaves the count', 'no-lead', 'no lease file leaves the count')
   only('away', 'stamping it `paused:` (execute', 'leaving it (execute', 'no-lead', 'no paused: remedy')
-  only('away', 'A liveness signal (a lease the live lead refreshes, so a lapsed one stops counting) is a later task\'s.', '', 'no-lead', 'no follow-up')
+  only('away', 'takes it out of the count at once', 'takes it out of the count at its lapse', 'no-lead', 'not at once')
+  only('away', 'a Codex session-driven `--gated` run', 'a Codex run', 'no-lead', 'no Codex residual')
 })
 test("control: a hand-written until that is always tomorrow's 09:00 fails sample", () => {
   const w = h2(real.away, 'Without a writer')
@@ -314,7 +358,7 @@ test('control: § Away without its default, lift, hold, meant wait or dead-lead 
   only('away', ', and it never halts: a rollout', ', and it halts: a rollout', 'away-cap', 'it halts')
   only('away', 'a meant wait, never Stalled (ADR 0048)', 'Stalled (ADR 0048)', 'away-cap', 'Stalled')
   only('away', "and the Run record's `idle-slots` reads `hold-away-cap`", "and the Run record's `idle-slots` reads `hold-trickle`", 'away-cap', 'hold-trickle in the doc')
-  only('away', 'until the Watchdog recovers it (ADR 0048) or Lachy pauses it', 'until its lead returns', 'away-cap', 'no dead-lead remedy')
+  only('away', 'until its lease lapses, the Watchdog recovers it (ADR 0048) or Lachy pauses it', 'until its lead returns', 'away-cap', 'no dead-lead remedy')
   only('away', '; the Companion has no pause', '', 'away-cap', 'no word on the Companion')
   only('runRecord', '"hold-trickle",\n                                           "hold-away-cap", "hold-last-start"),',
     '"hold-trickle",\n                                           "hold-last-start"),', 'away-cap', 'the enum without hold-away-cap')
@@ -359,7 +403,27 @@ test('control: a Heat hold the doc or the code says another way fails heat', () 
   only('context', 'the Trickle or the Away cap, the Heat\n  hold, a cool-down.', 'the Trickle or the Away cap, a cool-down.', 'heat', 'a hot spell reads as a stall')
 })
 
-test('the rules are all named (19) and each has a control', () => {
-  assert.equal(RULES.length, 19)
+test('control: a Mac-wide hold score.py lacks, or one the idle-slots enum lacks, fails mac-holds', () => {
+  only('score', '    "hold-trickle": ("hold-trickle",', '    "hold-trickled": ("hold-trickle",', 'mac-holds', 'dropped from MAC_HOLDS')
+  only('runRecord', '"hold-trickle",\n', '"hold-trickles",\n', 'mac-holds', 'dropped from the idle-slots enum')
+})
+
+test('control: a Trickle claim the doc or the code says another way fails claim', () => {
+  only('code', 'TRICKLE_CLAIM_TTL = timedelta(minutes=20)', 'TRICKLE_CLAIM_TTL = timedelta(minutes=30)', 'claim', 'a 30-minute TTL in the code')
+  only('away', 'A claim lives 20 minutes from its `at`', 'A claim lives a while', 'claim', 'no TTL in the doc')
+  only('code', 'TRICKLE_LOCK = "trickle.lock"', 'TRICKLE_LOCK = "claims.lock"', 'claim', 'another lock file')
+  only('code', 'TRICKLE_CLAIMS = "trickle-claims.json"', 'TRICKLE_CLAIMS = "claims.json"', 'claim', 'another claims file')
+  only('code', 'TRICKLE_WARN = "WARN: trickle claims"', 'TRICKLE_WARN = "WARN: claims"', 'claim', 'another WARN prefix')
+  only('away', "A claim is consumed by its task's § 4 stamp", 'A claim is consumed by mark-started', 'claim', 'no stamp consumes it')
+  only('away', 'and so does one whose rollout note is missing from the walk', 'but one whose rollout note is missing from the walk does not',
+    'claim', 'a missing rollout note drops its claims')
+  only('away', 'up to the revises one step 1.2 launches', 'nothing more', 'claim', 'no seeded-revise residual')
+  only('away', '[[thread-skill-p28-8-trickle-claim-a-seeded-revise]]', 'a later task', 'claim', 'no follow-up link')
+  const p = real.away.split('\n').find((l) => l.startsWith('**Trickle claims.**'))
+  only('away', p, `${p} A claim under a lock is a later task's.`, 'claim', 'the old sentence back')
+})
+
+test('the rules are all named (21) and each has a control', () => {
+  assert.equal(RULES.length, 21)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

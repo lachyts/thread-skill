@@ -4,8 +4,10 @@ $MT_STATE/gh.log and serves only the calls merge-task.sh makes, from files under
 real bare repo standing in for GitHub's copy of origin: a squash merge is a real commit there, `commits/<oid>`
 reads its parents from it, and the script's own `git fetch` / `git ls-remote` hit it directly (no fake).
 
-Fidelity guards (rc 99): -q/--jq/--template on `pr view`, `repo view` or the api graphql, git/ref, compare
-and commits reads (merge-task reads whole objects); a non-numeric PR arg on `pr view|checks|merge`.
+Fidelity guards (rc 99): -q/--jq/--template on `pr view`, `pr list`, `pr create`, `repo view` or the api graphql,
+git/ref, compare and commits reads (merge-task and lead-integrate.py revert read whole objects); a non-numeric PR arg on
+`pr view|checks|merge`; `pr create` without --head, --base, --title and --body-file, or with a body file that is
+missing; `pr list` without --head, --state and --json.
 
 State (a missing file takes the default in brackets):
   default                 the default branch [master]          repo view; err.repo: its text, rc 1
@@ -13,6 +15,8 @@ State (a missing file takes the default in brackets):
                           autoMergeRequest (present ⇒ set, else null); mergeCommit (an oid, else null).
                           No pr/<N> dir ⇒ GraphQL "Could not resolve to a PullRequest", rc 1.
   pr/<N>/<field>.seq      one value per `pr view`, the last one sticky.
+  pr/<N>/headRefOid.live  present ⇒ headRefOid reads srv's refs/heads/<headRefName> live, as GitHub's PR head follows
+                          its branch (`pr create` writes it).
   pr/<N>/lag              N more pr views read OPEN with mergeCommit null after a merge (from merge.lag).
   pr/<N>/mergeCommit.lag  N more MERGED pr views read mergeCommit null.
   err.prview              its text on stderr, rc 1, for every pr view.
@@ -31,6 +35,15 @@ State (a missing file takes the default in brackets):
   merge.nosrv             the squash commit is made but srv's default branch is not moved.
   merge.lag <N>           see pr/<N>/lag.   merge.hook <sh>: run after a successful squash.
   squash-parent           the squash commit's parent [base.cur, else srv's default branch].
+  squash.tree             the squash commit's tree: `head` (the PR head's tree) or a 40-hex tree [the empty tree].
+
+Opt-in verbs for lead-integrate.py revert (no existing suite calls them):
+  pr create [-R o/r] --head <br> --base <b> --title <t> --body-file <f>
+                          PR max(100, the highest number + 1): OPEN, CLEAN, its head live on srv's <br> (which must
+                          exist), title and body kept; prints its URL. An OPEN PR on <br> already: GitHub's
+                          "already exists" text, rc 1.
+  pr list [-R o/r] --head <br> --state open|merged|closed|all --json <fields>
+                          a JSON array of the PRs on <br> in that state, newest first; mergeCommit {oid} or null.
   disable.fail            `pr merge --disable-auto` fails.
 """
 import json
@@ -124,6 +137,23 @@ def cur(d, name):  # the current value without popping a seq
     return rd(os.path.join(d, name), "")
 
 
+def head_of(d):
+    """A PR's head: srv's branch, live, when pr/<N>/headRefOid.live is present; else its stored value."""
+    if os.path.exists(os.path.join(d, "headRefOid.live")):
+        r = git("rev-parse", "--verify", "-q", "refs/heads/" + cur(d, "headRefName"))
+        return r.stdout.strip()
+    return cur(d, "headRefOid")
+
+
+def pr_dirs():
+    base = p("pr")
+    return sorted((int(n) for n in os.listdir(base) if n.isdigit()), reverse=True) if os.path.isdir(base) else []
+
+
+def opt(name):
+    return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else None
+
+
 def current_base():
     return rd(p("base.cur")) or (peek(p("base.seq")) if has("base.seq") else "") or \
         git("rev-parse", "refs/heads/" + DEFAULT).stdout.strip()
@@ -152,6 +182,8 @@ if args[:2] == ["pr", "view"]:
     for f in FIELDS:
         seq = os.path.join(d, f + ".seq")
         vals[f] = pop(seq) if (f in want and os.path.exists(seq)) else rd(os.path.join(d, f), "")
+    if os.path.exists(os.path.join(d, "headRefOid.live")):
+        vals["headRefOid"] = head_of(d)
     lag = int(rd(os.path.join(d, "lag"), "0") or "0")
     if vals["state"] == "MERGED" and lag > 0:
         wr(os.path.join(d, "lag"), str(lag - 1))
@@ -170,6 +202,54 @@ if args[:2] == ["pr", "view"]:
             out[f] = {"oid": v} if v else None
         else:
             out[f] = v
+    print(json.dumps(out))
+    sys.exit(0)
+
+# ---- pr create / pr list (lead-integrate.py revert) ------------------------------------------------------
+if args[:2] == ["pr", "create"]:
+    guard_jq("pr create")
+    head, base, title, body_file = opt("--head"), opt("--base"), opt("--title"), opt("--body-file")
+    if not (head and base and title and body_file) or not os.path.isfile(body_file):
+        die("fake gh: pr create needs --head, --base, --title and an existing --body-file", rc=99)
+    for n in pr_dirs():
+        d = p("pr", str(n))
+        if cur(d, "headRefName") == head and cur(d, "state") == "OPEN":
+            die('a pull request for branch "%s" into branch "%s" already exists:\nhttps://github.com/o/r/pull/%d'
+                % (head, base, n))
+    sha = git("rev-parse", "--verify", "-q", "refs/heads/" + head).stdout.strip()
+    if not sha:
+        die("pull request create failed: GraphQL: Head sha can't be blank, Head ref must be a branch (createPullRequest)")
+    n = max([99] + pr_dirs()) + 1
+    d = p("pr", str(n))
+    os.makedirs(d)
+    for f, v in (("state", "OPEN"), ("baseRefName", base), ("headRefName", head), ("headRefOid", sha),
+                 ("headRefOid.live", "1"), ("mergeStateStatus", "CLEAN"), ("url", "https://github.com/o/r/pull/%d" % n),
+                 ("title", title), ("body", rd(body_file, ""))):
+        wr(os.path.join(d, f), v)
+    print("https://github.com/o/r/pull/%d" % n)
+    sys.exit(0)
+if args[:2] == ["pr", "list"]:
+    guard_jq("pr list")
+    head, state, fields = opt("--head"), (opt("--state") or "").lower(), opt("--json")
+    if not head or state not in ("open", "merged", "closed", "all") or not fields:
+        die("fake gh: pr list needs --head, --state and --json", rc=99)
+    out = []
+    for n in pr_dirs():
+        d = p("pr", str(n))
+        if cur(d, "headRefName") != head or (state != "all" and cur(d, "state") != state.upper()):
+            continue
+        row = {}
+        for f in fields.split(","):
+            if f == "number":
+                row[f] = n
+            elif f == "mergeCommit":
+                v = cur(d, "mergeCommit")
+                row[f] = {"oid": v} if v else None
+            elif f == "headRefOid":
+                row[f] = head_of(d)
+            else:
+                row[f] = cur(d, f)
+        out.append(row)
     print(json.dumps(out))
     sys.exit(0)
 
@@ -213,7 +293,7 @@ if args[:2] == ["pr", "merge"]:
         rm(os.path.join(d, "headRefOid.seq"))
         wr(os.path.join(d, "headRefOid"), sha)
         git("update-ref", "refs/heads/" + cur(d, "headRefName"), sha)
-    state, mss, head = cur(d, "state"), cur(d, "mergeStateStatus"), cur(d, "headRefOid")
+    state, mss, head = cur(d, "state"), cur(d, "mergeStateStatus"), head_of(d)
     admin = "--admin" in args
     if state == "MERGED":
         die("! Pull request #%s was already merged" % n, rc=0)
@@ -236,6 +316,11 @@ if args[:2] == ["pr", "merge"]:
         sys.exit(0)
     parent = rd(p("squash-parent")) or current_base()
     tree = git("mktree", inp="").stdout.strip()
+    want_tree = rd(p("squash.tree"))
+    if want_tree == "head":
+        tree = git("rev-parse", head + "^{tree}").stdout.strip()
+    elif want_tree:
+        tree = want_tree
     r = git("commit-tree", tree, "-p", parent, "-m", "squash #" + n)
     if r.returncode != 0:
         die("fake gh: squash failed: " + r.stderr.strip(), rc=99)

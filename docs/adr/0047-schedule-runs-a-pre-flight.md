@@ -2,6 +2,9 @@
 
 Date: 2026-10-21
 Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`, built by P29. Brings ADR 0041's Readiness grade to `/thread:schedule`.
+*(Amended by ADR 0054, 2026-10-27: the round asks only his own decisions (owner `yours`), each in the Framing of
+`skills/_shared/asking.md`; after the final call `estate-dispatch.py decided-for-you --write` writes the calls the
+grade ruled for him into the queued tasks' `## Decided for you (<date>)`.)*
 
 ## Context
 

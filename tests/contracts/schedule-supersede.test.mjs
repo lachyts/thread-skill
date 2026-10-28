@@ -337,3 +337,26 @@ test('control: a step 6 that never copies the hold fails hold-carry', () => {
   assert.notEqual(cut, schedule, 'control is vacuous')
   assert.deepEqual(checkHoldCarry(cut), ['hold-carry'])
 })
+
+// ---- never-on-merge (p30-4; vault-grammar § Approved queue): carry copies an approved queue's hold, never its
+// `on_merge:`, so the new note keeps a plain hold its first `next` releases; step 6 and the template's line say so.
+function checkNeverOnMerge(text, tpl) {
+  const six = collapse(sectionOf(text, /^### 6\. /))
+  const line = tpl.split('\n').find((l) => l.startsWith('# on_merge:')) ?? ''
+  if (!six.includes("It never copies an approved queue's `on_merge:`") || !six.includes('the new note keeps a plain hold') ||
+    !line.includes('carry never copies it')) return ['never-on-merge']
+  return []
+}
+
+test("schedule step 6's carry never copies on_merge, and the template's line says so", () => {
+  assert.deepEqual(checkNeverOnMerge(schedule, template), [])
+})
+
+test('control: a step 6 or a template line that carries on_merge fails never-on-merge', () => {
+  const cut = schedule.replace("It never copies an approved queue's `on_merge:`", "It copies an approved queue's `on_merge:` too")
+  assert.notEqual(cut, schedule, 'control is vacuous')
+  assert.deepEqual(checkNeverOnMerge(cut, template), ['never-on-merge'])
+  const tcut = template.replace('carry never copies it', 'carry copies it')
+  assert.notEqual(tcut, template, 'control is vacuous')
+  assert.deepEqual(checkNeverOnMerge(schedule, tcut), ['never-on-merge'])
+})

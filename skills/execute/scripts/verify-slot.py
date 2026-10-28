@@ -9,6 +9,7 @@ suites run at once across every rollout on this machine; a further one waits for
 copy of the contract.
 
     python3 verify-slot.py run --slots N [--priority] -- CMD…     # the agents' wrapper (engine-rendered)
+    python3 verify-slot.py wait --log FILE [--pid P] [--for S]     # an agent's in-turn wait for a run's verdict
     python3 verify-slot.py status [--slots N]                      # the operator's view (JSON)
 
 Importable (lead-integrate.py's `verify --slots N --slot-wait S` loads it by importlib, and reconcile-rollout.py's
@@ -78,16 +79,60 @@ Contract.
    Residuals: a command that exits after the settle check, inside the guard's last poll (at most one GUARD_POLL),
    reads as heat-stopped and is rerun (no verdict, never red); a copy of this script from before the Heat hold
    (another rollout's Engine snapshot, an older plugin install) shares the pool and still runs hot.
+8. The Run record (p29-10, ADR 0051). A `run` whose real cwd lies under `<repo>/.claude/worktrees/<slug>` (the last
+   such part) and whose task note, reconcile-rollout.py's DEFAULT_TASKS_DIR/<slug>.md, names a rollout records the
+   suite in that rollout's Run record: suite-started (by task, or integration with --priority; runner agent; the
+   tree's sha, dirty and diff read before the slot wait, the load and the Mac-wide running count after it) and,
+   once the slot is released, suite-ended: green (rc 0), stopped (128+n, or a signal to `run`: no vault scan, no
+   output read), unrun (127), else red with the failing names read from the last 16 MiB of its output. Only
+   suite-started is written while the slot is held, before the command starts (its vault walk for the running
+   count, a fraction of a second); a stop signal in that walk ends the run 128+n with no line written. The Heat
+   hold (contract 7) holds here too: a heat stop ends that run's suite heat (no verdict, no rc), written once its
+   slot is released and with stops held for the write, and the restart once the Mac cools is a suite of its own,
+   with a fresh suite-started; a stop while held for the heat or back in line exits 76 and writes nothing more.
+   Unless fd 1 or fd 2 is a TTY, the guard's stdout and stderr then go through pipes: a pump forwards each chunk to
+   fd 1 or fd 2 within GUARD_POLL, keeps a copy in an unlinked temp file and reads the heat as Guarded.watch() does;
+   once the guard exits it drains what is ready for at most a second and never waits for EOF, so a leftover that
+   writes after `run` exits gets EPIPE, and output written while a stop ends the suite may be lost. Any other run (no
+   task tree, no note, no `rollout:`) takes the path above unchanged. Recording failures are silent and never change
+   the rc; a SIGKILL of `run` leaves a started line with no ended line.
+9. The wait (p31-3). An agent's suite outlives its harness's foreground Bash cap (600000 ms), so it runs `run` in the
+   background, and the harness blocks a long `sleep` and ends a background run when the agent's turn ends: an agent
+   that ends its turn to await the run returns with no verdict and its run is killed. So `run` frames its output, and
+   `wait` is the command that reports the verdict inside the agent's turn, never a pause. `run` prints first, on
+   stderr, `verify-slot: run <pid> started; wait for its verdict with: python3 '<this script>' wait --log '<path>'
+   --pid <pid>` (each word single-quoted, each ' written '\\''), and last, on every return, `verify-slot: exit <rc> (run
+   <pid>)`: a usage error (2), a stop (128+n; one that escapes cmd_run's handlers too) and an unexpected exception (its
+   traceback, then 1) included, with stops ignored while it is written; both lines are best effort and never change
+   the rc. The path is fd 2's when fd 2 is a regular file: F_GETPATH on macOS, /proc/self/fd/2 on Linux, each accepted
+   only when it stats to fd 2's own (st_dev, st_ino); else (a pipe, a TTY, /dev/null, an unlinked file) the
+   placeholder `<its output file>`, the file the harness names. `wait --log FILE [--pid P] [--for S]` reads FILE as it
+   grows (complete lines; the exit line matched at a line's end, so a suite whose last output had no newline still
+   gives it) for the run with --pid, else the first start line's (a nested run's lines name other pids and are
+   ignored), and prints, once, `verify-slot: wait up to <S>s for the verdict of run <pid> in <FILE>; …`. S is 1 to 590,
+   default 540, so one call fits the foreground cap. It exits with the run's rc once its exit line is there (and
+   prints that line); 75 at S while the run goes on (`verify-slot: still running after <S>s (run <pid>; last: <its last
+   verify-slot: line>): run this wait again`), or with no run named yet (`… no verify-slot: run line in <FILE> yet:
+   check the path …`); 76 when the pid is gone (ESRCH; EPERM is alive) and a final read finds no exit line
+   (`verify-slot: no verdict: run <pid> ended with no exit line (stopped or killed); exit 76`); 2 on a usage error (a
+   missing or unreadable FILE, a bad --for or --pid, an unknown flag); 128+n when a TERM, INT or HUP cuts it
+   (`verify-slot: wait cut by a signal after <N>s (run <pid>): no verdict; run this wait again`). A wait cut by its own
+   timeout or a signal is no verdict: run it again. It takes no slot, registers no waiter, never calls slots_dir(),
+   writes no Run record line and never signals the run. The printed line is authoritative where a code is ambiguous (a
+   suite whose own rc is 75 or 76, or 2). Residuals: a reused pid, and a run its parent has not reaped yet (a zombie),
+   read as alive until S, so they give 75, never a wrong verdict; a TERM between the start line and cmd_run's handlers
+   ends the run with no exit line, so 76.
 
-`run --slots N [--priority] -- CMD…`: waits for a slot (`verify-slot: waiting for one of N verify slots (held
-by pid … in … since …[; K Integration waiter(s) ahead])` on stderr, repeated every 5 minutes; nothing when one
-is free at once; `verify-slot: slot k of N after Ns` once a wait ends), runs CMD under the guard and exits with
-its rc (128+n for a signal). While the Mac is hot it waits with `verify-slot: waiting (heat: <name>)` (contract 7);
-a heat stop prints `verify-slot: heat stop (<name>): ended the suite after Ns; no verdict, never red: back in line to
-restart from the beginning once the Mac cools`, and the exit is the last run's rc. A TERM, INT or HUP while it waits
-on the heat or is back in line after a heat stop exits 76 with `verify-slot: no verdict: stopped while the Mac was
-hot (heat: <name>); exit 76`: no verdict, never red. Usage errors exit 2: `--slots` missing, 0, negative, a
-non-integer; no `--`; no CMD; an unknown flag. A command that cannot be started exits 127.
+`run --slots N [--priority] -- CMD…`: prints its start line (contract 9), then waits for a slot (`verify-slot: waiting
+for one of N verify slots (held by pid … in … since …[; K Integration waiter(s) ahead])` on stderr, repeated every 5
+minutes; no waiting line when one is free at once; `verify-slot: slot k of N after Ns` once a wait ends), runs CMD
+under the guard and exits with its rc (128+n for a signal), its exit line (contract 9) last. While the Mac is hot it
+waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat stop prints `verify-slot: heat stop (<name>):
+ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac cools`, and
+the exit is the last run's rc. A TERM, INT or HUP while it waits on the heat or is back in line after a heat stop
+exits 76 with `verify-slot: no verdict: stopped while the Mac was hot (heat: <name>); exit 76`: no verdict, never
+red. Usage errors exit 2: `--slots` missing, 0, negative, a non-integer; no `--`; no CMD; an unknown flag. A command
+that cannot be started exits 127.
 
 `status [--slots N]` reaps stale waiter files and prints {dir, slots: [{index, state: free|held, holder}],
 waiters: [{pid, cwd, since, kind}], heat: {level, name}}; without --slots it lists the slot files present. Stdlib
@@ -99,12 +144,15 @@ import fcntl
 import json
 import os
 import random
+import re
 import select
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
+import traceback
 from datetime import datetime
 
 sys.dont_write_bytecode = True
@@ -717,7 +765,8 @@ def _end(child):
 
 # ---- CLI ---------------------------------------------------------------------------------------------------------
 
-USAGE = "usage: verify-slot.py run --slots N [--priority] -- CMD… | status [--slots N]"
+USAGE = ("usage: verify-slot.py run --slots N [--priority] -- CMD… | wait --log FILE [--pid P] [--for S] | "
+         "status [--slots N]")
 
 
 class _Usage(Exception):
@@ -763,12 +812,53 @@ def _parse_run(argv):
     raise _Usage("run: no -- before the command")
 
 
+RECONCILE_PY = os.path.join(os.path.dirname(SCRIPT), "reconcile-rollout.py")
+WORKTREES = (".claude", "worktrees")
+CAPTURE_TAIL = 16 * 1024 * 1024   # the bytes of an agent suite's output its failing names are read from
+DRAIN_FOR = 1.0                   # seconds the pump drains what is ready once the guard exits; never waits for EOF
+
+
+def _load_reconcile():
+    """reconcile-rollout.py, loaded only for a suite in a task tree (step-boundary.py's _load_reconcile pattern)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("reconcile_rollout", RECONCILE_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _suite_owner():
+    """The task an agent's suite is for (contract item 8), or None: the last `/.claude/worktrees/<slug>` of the real cwd
+    names the task, and its note in reconcile-rollout.py's DEFAULT_TASKS_DIR names the rollout (`rollout:`). Silent:
+    any failure is no owner."""
+    try:
+        parts = os.path.realpath(os.getcwd()).split(os.sep)
+        at = [i for i in range(len(parts) - 2) if tuple(parts[i:i + 2]) == WORKTREES and parts[i + 2]]
+        if not at:
+            return None
+        i = at[-1]
+        slug, tree = parts[i + 2], os.sep.join(parts[:i + 3])
+        rr = _load_reconcile()
+        note = rr.DEFAULT_TASKS_DIR / f"{slug}.md"
+        if not note.is_file():
+            return None
+        rollout = rr._note_rollout(rr.Note(note))
+        if not rollout:
+            return None
+        return {"rr": rr, "rollout": rollout, "task": slug, "tree": tree, "tasks_dir": rr.DEFAULT_TASKS_DIR}
+    except Exception:
+        return None
+
+
 def _say(msg):
     print(f"verify-slot: {msg}", file=sys.stderr, flush=True)
 
 
 def cmd_run(argv):
     slots, prio, cmd = _parse_run(argv)
+    owner = _suite_owner()
+    if owner is not None:
+        return _run_recorded(slots, prio, cmd, owner)
     for s in SIGNALS:
         signal.signal(s, _on_signal)
     box = {"g": None}
@@ -827,6 +917,196 @@ def cmd_run(argv):
     return rc
 
 
+def _put(fd, data):
+    """Write all of `data` to fd; a closed reader (EPIPE) or any other error drops the rest."""
+    try:
+        while data:
+            data = data[os.write(fd, data):]
+    except OSError:
+        pass
+
+
+def _pump(g, capture, heat=False):
+    """Forward the guard's stdout and stderr, as they come, to fd 1 and fd 2, appending both to `capture`; once the guard
+    exits, drain what is ready for at most DRAIN_FOR seconds, never waiting for EOF (a leftover background process may
+    hold the pipes), close the pipes and return the command's rc as Guarded.wait does. With `heat`, the Heat hold's stop
+    as Guarded.watch() (contract 7): while the guard runs it reads heat_level() every HEAT_POLL_FACTOR * the poll base;
+    at HEAT_STOP or worse it gives the guard HEAT_SETTLE to exit by itself (that rc is kept), else stops it, keeps the
+    level in `g.heat` and returns HEAT_STOPPED."""
+    srcs = {g.proc.stdout.fileno(): 1, g.proc.stderr.fileno(): 2}
+    until = None
+    due = time.monotonic() + HEAT_POLL_FACTOR * _poll_base() if heat else None
+    stopped = False
+    while srcs:
+        if until is None and g.proc.poll() is not None:
+            until = time.monotonic() + DRAIN_FOR
+        if until is None and due is not None and time.monotonic() >= due:
+            due = time.monotonic() + HEAT_POLL_FACTOR * _poll_base()
+            level = heat_level()
+            if level >= HEAT_STOP:
+                try:
+                    g.proc.wait(HEAT_SETTLE)
+                except subprocess.TimeoutExpired:
+                    g.heat = level
+                    g.stop()
+                    stopped = True
+                    break
+                continue   # the guard ended by itself: drain, and its rc is the verdict
+        ready, _, _ = select.select(list(srcs), [], [], 0 if until is not None else GUARD_POLL)
+        for fd in ready:
+            try:
+                chunk = os.read(fd, 1 << 16)
+            except OSError:
+                chunk = b""
+            if not chunk:
+                del srcs[fd]
+                continue
+            _put(srcs[fd], chunk)
+            try:
+                capture.write(chunk)
+            except OSError:
+                pass
+        if until is not None and (not ready or time.monotonic() >= until):
+            break
+    rc = None if stopped else g.proc.wait()
+    for f in (g.proc.stdout, g.proc.stderr):
+        try:
+            f.close()
+        except OSError:
+            pass
+    if stopped:
+        return HEAT_STOPPED
+    g.close()
+    return g._after(rc)
+
+
+def _failing_from(rr, capture):
+    """The failing-test names in the last CAPTURE_TAIL bytes of an agent suite's captured output (reconcile-rollout.py
+    _failing_ids, from the first line), or None when nothing could be read."""
+    try:
+        capture.flush()
+        size = capture.seek(0, os.SEEK_END)
+        capture.seek(max(0, size - CAPTURE_TAIL))
+        return rr._failing_ids(capture.read().decode("utf-8", "replace").splitlines(), marker=None)
+    except (OSError, ValueError):
+        return None
+
+
+def _heat_run_ended(rr, owner, slot, suite, by, t0, written):
+    """A heat-stopped run in a task tree (contract items 7 and 8): its slot released (a close), then, when its started
+    line landed, its suite ended heat, no verdict and no rc, so the record never holds a slot. The caller holds stops
+    across it."""
+    slot.release()
+    if written.get("started"):
+        rr.suite_ended(owner["rollout"], owner["task"], suite, by, "agent", "heat", time.monotonic() - t0,
+                       tasks_dir=owner["tasks_dir"])
+
+
+def _run_recorded(slots, prio, cmd, owner):
+    """`run` for a suite in a task tree (contract item 8): the slotted run as cmd_run's, the Heat hold included, plus its
+    suite-started and suite-ended lines in the rollout's Run record, and, unless fd 1 or fd 2 is a TTY, its output
+    captured through a pump for the failing names. The tree's state is read before the slot wait; the load and the
+    running count after it, so suite-started (that vault walk included) is written with the slot held, before the
+    command starts. suite-ended is written once the slot is released, so its walk and the failing names never hold one;
+    a stop by signal skips the vault scan and the capture. A heat stop ends its run's suite heat, with stops held for the
+    write, and the restart once the Mac cools is a suite of its own. Recording never changes the rc, nor swallows a
+    stop: one in that walk is 128+n too (76 when the Mac was hot, as cmd_run's)."""
+    rr = owner["rr"]
+    for s in SIGNALS:
+        signal.signal(s, _on_signal)
+    box = {"g": None}
+    why = {"heat": None}   # acquire's: the level that held the last poll, or None
+    stopped = None         # the heat name of the last heat stop
+    slot = capture = None
+    rc = signalled = None
+    written, t0 = {}, None
+    suite, by = rr.new_suite_id(), ("integration" if prio else "task")
+    piped = not (os.isatty(1) or os.isatty(2))
+    try:
+        state = rr.tree_state(owner["tree"])   # the agent's tree is still while it waits for a slot
+        # The Heat hold (contract 7), as cmd_run's: a heat stop releases the slot and goes back in line, at the back, to
+        # restart the command from the beginning once the Mac cools. Only the last run's rc is the exit.
+        while True:
+            try:
+                slot = acquire(slots, priority=prio, kind="run", why=why, on_wait=_say)
+            except SlotDirError as e:
+                _say(f"WARN {e}; running unslotted")
+                slot = None
+            if slot is not None and slot.queued:
+                _say(f"slot {slot.index + 1} of {slots} after {slot.waited:.0f}s")
+            t0 = time.monotonic()   # before the write: a stop delivered as it ends still gets its end line
+            rr.suite_started(owner["rollout"], owner["task"], suite, by, "agent", state, tasks_dir=owner["tasks_dir"],
+                             waited=slot.waited if slot is not None else None, reraise=(_Signalled,), written=written)
+            if piped:
+                import tempfile
+                capture = tempfile.TemporaryFile()
+            g = Guarded(cmd, hold=slot, on_spawn=lambda x: box.__setitem__("g", x),
+                        **({"stdout": subprocess.PIPE, "stderr": subprocess.PIPE} if piped else {}))
+            if slot is not None:
+                write_holder(slot, {"pid": os.getpid(), "guard": g.pid, "group": g.group, "cwd": os.getcwd(),
+                                    "since": _stamp(), "kind": "run"})
+            # Unslotted (a SlotDirError) there is no heat watch, so that run is the last.
+            rc = _pump(g, capture, heat=slot is not None) if piped else g.watch(heat=slot is not None)
+            if rc is not HEAT_STOPPED:
+                break
+            stopped = heat_name(g.heat)
+            # With stops held, so a stop meanwhile ends no suite twice: the slot released, then the heat-stopped run's
+            # suite ended heat (_heat_run_ended); the restart is a fresh suite.
+            with rr._signals_held():
+                _say(f"heat stop ({stopped}): ended the suite after {time.monotonic() - t0:.0f}s; no verdict, never "
+                     "red: back in line to restart from the beginning once the Mac cools")
+                _heat_run_ended(rr, owner, slot, suite, by, t0, written)
+                slot = None
+                box["g"] = None
+                if capture is not None:
+                    capture.close()
+                    capture = None
+                suite, written, t0 = rr.new_suite_id(), {}, None
+    except _Signalled as s:
+        for sig in SIGNALS:
+            signal.signal(sig, signal.SIG_IGN)
+        signalled = True
+        if box["g"] is not None:
+            box["g"].stop()
+            rc = 128 + s.signum
+        elif why["heat"] is not None or stopped is not None:
+            # Stopped while held for the heat, or back in line after a heat stop: no verdict, never red.
+            name = heat_name(why["heat"]) if why["heat"] is not None else stopped
+            _say(f"no verdict: stopped while the Mac was hot (heat: {name}); exit {HEAT_EXIT}")
+            rc = HEAT_EXIT
+        else:
+            rc = 128 + s.signum
+    except BaseException:
+        if box["g"] is not None:
+            box["g"].close()
+        if capture is not None:
+            capture.close()
+        raise
+    finally:
+        if slot is not None:
+            slot.release()
+    try:
+        if written.get("started") and t0 is not None:
+            seconds = time.monotonic() - t0
+            common = (owner["rollout"], owner["task"], suite, by, "agent")
+            if signalled or rc > 128:
+                rr.suite_ended(*common, "stopped", seconds, tasks_dir=owner["tasks_dir"], scan=False, rc=rc)
+            else:
+                outcome = "green" if rc == 0 else "unrun" if rc == 127 else "red"
+                failing = _failing_from(rr, capture) if outcome == "red" and capture is not None else None
+                rr.suite_ended(*common, outcome, seconds, tasks_dir=owner["tasks_dir"], rc=rc, failing=failing)
+    except _Signalled:
+        pass   # a stop after the suite ended: the recording is abandoned and the exit stays the suite's rc
+    except Exception:
+        pass
+    finally:
+        for sig in SIGNALS:   # the suite and its record are done: a late stop changes nothing now
+            signal.signal(sig, signal.SIG_IGN)
+        if capture is not None:
+            capture.close()
+    return rc
+
+
 def cmd_status(argv):
     slots = None
     i = 0
@@ -869,6 +1149,239 @@ def cmd_status(argv):
     return 0
 
 
+# ---- the wait (p31-3, contract item 9) ---------------------------------------------------------------------------
+
+WAIT_FOR = 540          # seconds one `wait` call watches by default: a call fits the 600000 ms foreground cap
+WAIT_MAX = 590          # the largest --for
+WAIT_RUNNING = 75       # `wait`: the run still goes at the bound (or no run is named yet); run the wait again
+WAIT_GONE = HEAT_EXIT   # `wait`: the run ended with no exit line (stopped or killed): no verdict (76)
+WAIT_TAIL = 1 << 16     # the bytes of an unfinished last line `wait` keeps, so memory stays flat
+NO_PATH = "<its output file>"   # the start line's --log when fd 2's path cannot be proved
+START_RE = re.compile(r"verify-slot: run (\d+) started; wait for its verdict with:")
+EXIT_RE = re.compile(r"verify-slot: exit (\d{1,3}) \(run (\d+)\)\s*$")
+
+
+def _shq(s):
+    """One POSIX shell word, always single-quoted, each ' written '\\'' (the engine's shq)."""
+    return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+def _frame(msg):
+    """A `verify-slot:` line on stderr, best effort: a write that fails is dropped and never changes the rc."""
+    try:
+        print(f"verify-slot: {msg}", file=sys.stderr, flush=True)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def _quiet():
+    """SIG_IGN for every stop signal; a stop that lands while the handlers change is dropped (the call is ending)."""
+    for _ in range(len(SIGNALS) + 1):
+        try:
+            for s in SIGNALS:
+                signal.signal(s, signal.SIG_IGN)
+            return
+        except _Signalled:
+            continue
+
+
+def _stderr_path():
+    """fd 2's real path when fd 2 is a regular file that path still names (contract item 9), else None. The candidates
+    are F_GETPATH (macOS) and /proc/self/fd/2 (Linux); the first that is absolute and stats to fd 2's own (st_dev,
+    st_ino) is the path. A pipe, a TTY, /dev/null, an unlinked file (Linux's "(deleted)") or any error is None."""
+    try:
+        st = os.fstat(2)
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        cands = []
+        if hasattr(fcntl, "F_GETPATH"):
+            try:
+                cands.append(os.fsdecode(fcntl.fcntl(2, fcntl.F_GETPATH, bytes(1024)).split(b"\0", 1)[0]))
+            except OSError:
+                pass
+        try:
+            cands.append(os.readlink("/proc/self/fd/2"))
+        except OSError:
+            pass
+        for p in cands:
+            try:
+                if p and os.path.isabs(p):
+                    s = os.stat(p)
+                    if (s.st_dev, s.st_ino) == (st.st_dev, st.st_ino):
+                        return p
+            except (OSError, ValueError):
+                continue
+    except Exception:
+        return None
+    return None
+
+
+def _run_framed(argv):
+    """`run` framed (contract item 9): first a start line naming this run's pid and the exact `wait` command for its
+    verdict, then cmd_run, then an exit line on every return: a usage error (2), a stop that escapes cmd_run (128+n), a
+    SIGINT before cmd_run's handlers (130) or an unexpected exception (its traceback, then 1). A stop while a usage
+    message or a traceback is printed reads as that stop."""
+    pid = os.getpid()
+    _frame(f"run {pid} started; wait for its verdict with: python3 {_shq(SCRIPT)} wait --log "
+           f"{_shq(_stderr_path() or NO_PATH)} --pid {pid}")
+    rc = None
+    try:
+        try:
+            rc = cmd_run(argv)
+        except _Usage as e:
+            _frame(f"{e}\n{USAGE}")
+            rc = 2
+        except _Signalled:
+            raise
+        except KeyboardInterrupt:
+            rc = 130
+        except Exception:
+            try:
+                traceback.print_exc()
+            except (OSError, ValueError, AttributeError):
+                pass
+            rc = 1
+    except _Signalled as s:
+        if rc is None:
+            rc = 128 + s.signum
+    finally:
+        _quiet()
+        if rc is not None:
+            _frame(f"exit {rc} (run {pid})")
+    return rc
+
+
+def _int_in(v, lo, hi, name):
+    try:
+        n = int(v, 10)
+    except (TypeError, ValueError):
+        n = None
+    if n is None or str(v).strip() != v or n < lo or (hi is not None and n > hi):
+        span = f"from {lo} to {hi}" if hi is not None else f">= {lo}"
+        raise _Usage(f"wait: {name} must be an integer {span}, got {v!r}")
+    return n
+
+
+def _parse_wait(argv):
+    log, pid, bound, i = None, None, WAIT_FOR, 0
+    while i < len(argv):
+        a = argv[i]
+        name, eq, v = a.partition("=")
+        if name not in ("--log", "--pid", "--for"):
+            raise _Usage(f"wait: unknown argument {a!r}")
+        if eq:
+            i += 1
+        elif i + 1 < len(argv):
+            v = argv[i + 1]
+            i += 2
+        else:
+            raise _Usage(f"wait: {name} needs a value")
+        if name == "--log":
+            log = v
+        elif name == "--pid":
+            pid = _int_in(v, 1, None, "--pid")
+        else:
+            bound = _int_in(v, 1, WAIT_MAX, "--for")
+    if not log:
+        raise _Usage("wait: --log FILE is required")
+    return log, pid, bound
+
+
+def _alive(pid):
+    """True while pid exists (EPERM counts as alive; so does an unreaped zombie, a residual: contract item 9)."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OverflowError, ValueError):
+        return False
+    except OSError:
+        return True
+
+
+def cmd_wait(argv):
+    """`wait --log FILE [--pid P] [--for S]` (contract item 9): an agent's in-turn wait for a run's verdict. It reads
+    FILE as it grows, takes no slot, registers no waiter, writes no Run record line and never signals the run."""
+    log, want, bound = _parse_wait(argv)
+    try:
+        f = open(log, "rb")
+    except OSError as e:
+        raise _Usage(f"wait: cannot read {log}: {e.strerror or e}")
+    st = {"pid": want, "last": None, "tail": b""}
+
+    def see(line):
+        # The watched run: --pid, else the first start line's (a nested run's lines come after it and name other pids).
+        if st["pid"] is None:
+            m = START_RE.search(line)
+            if m and int(m.group(1)) >= 1:
+                st["pid"] = int(m.group(1))
+        at = line.find("verify-slot: ")
+        if at >= 0:
+            st["last"] = line[at:].strip()[:200]
+        m = EXIT_RE.search(line)
+        if m and st["pid"] is not None and int(m.group(2)) == st["pid"] and int(m.group(1)) <= 255:
+            return int(m.group(1))
+        return None
+
+    def scan(final=False):
+        # Complete lines only, read as the file grows; on the final read the unfinished last line too.
+        while True:
+            chunk = f.read(1 << 20)
+            if not chunk:
+                break
+            parts = (st["tail"] + chunk).split(b"\n")
+            st["tail"] = parts.pop()[-WAIT_TAIL:]
+            for raw in parts:
+                rc = see(raw.decode("utf-8", "replace"))
+                if rc is not None:
+                    return rc
+        if final and st["tail"]:
+            line, st["tail"] = st["tail"], b""
+            return see(line.decode("utf-8", "replace"))
+        return None
+
+    def run():
+        return f"run {st['pid']}" if st["pid"] is not None else "run (not started yet)"
+
+    t0 = time.monotonic()
+    try:
+        for s in SIGNALS:
+            signal.signal(s, _on_signal)
+        with f:
+            rc = scan()
+            _frame(f"wait up to {bound}s for the verdict of {run()} in {log}; give this call a timeout over {bound}s, "
+                   "and a call cut before a verdict line is no verdict: run it again")
+            base = _poll_base()
+            while True:
+                if rc is not None:
+                    _frame(f"exit {rc} (run {st['pid']})")
+                    return rc
+                if st["pid"] is not None and not _alive(st["pid"]):
+                    rc = scan(final=True)
+                    if rc is not None:
+                        continue
+                    _frame(f"no verdict: run {st['pid']} ended with no exit line (stopped or killed); exit {WAIT_GONE}")
+                    return WAIT_GONE
+                left = bound - (time.monotonic() - t0)
+                if left <= 0:
+                    if st["pid"] is None:
+                        _frame(f"after {bound}s, no verify-slot: run line in {log} yet: check the path, then run this "
+                               "wait again")
+                    else:
+                        _frame(f"still running after {bound}s ({run()}; last: {st['last'] or '(none)'}): run this wait "
+                               "again")
+                    return WAIT_RUNNING
+                time.sleep(min(base, left))
+                rc = scan()
+    except _Signalled as s:
+        _quiet()
+        _frame(f"wait cut by a signal after {time.monotonic() - t0:.0f}s ({run()}): no verdict; run this wait again")
+        return 128 + s.signum
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
     if not argv:
@@ -877,7 +1390,9 @@ def main(argv=None):
     verb, rest = argv[0], argv[1:]
     try:
         if verb == "run":
-            return cmd_run(rest)
+            return _run_framed(rest)
+        if verb == "wait":
+            return cmd_wait(rest)
         if verb == "status":
             return cmd_status(rest)
         if verb == "_guard":
