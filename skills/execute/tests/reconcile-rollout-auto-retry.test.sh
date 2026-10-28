@@ -35,6 +35,7 @@ export HOME="$TMP/home"; mkdir -p "$HOME"
 unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR XDG_STATE_HOME
 export THREAD_EVENTS_DIR="$TMP/events"   # the Run record (run_record.py, ADR 0032); each scenario points it at its own dir
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 NOW=2026-10-03T09:00:00Z
 PR=https://github.com/o/r/pull/5
 REVISE='revise: rejected at Integration re-review — revise on the branch, then re-integrate'
@@ -543,6 +544,20 @@ has "$out" "blocked->review" "A9: stdout: blocked->review"
 ok "$(j "$(nxt "")" 'd["awaitingIntegration"]')" "[\"$A\"]" "A9: next lists it awaiting Integration"
 ok "$(since "$M")" "ready:$A auto-retry:$A" "A9: a ready event, then auto-retry"
 ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"]]')" '["integrate","integration","agent"]' "A9: stage integrate, setAsideAt integration"
+
+# ── A9b (p29-7, ADR 0048): the lead's own Integration set-asides that are the environment's read infra ──────────────
+for reason in "prepare: origin unreachable three times: fatal: unable to access 'https://github.com/o/r/'" \
+              "merge-task signalled twice (143): the run ended on SIGTERM"; do
+  scen a9b
+  mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+  lead "$A" integration "$reason"
+  ok "$(j "$(INOW=2026-10-03T08:05:00Z inp "$A")" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"]]')" \
+    '["infra",false,"2026-10-03T08:15+00:00"]' "A9b: ${reason%%:*}… → infra, cooling 15 minutes (INFRA_LEAD_OPENINGS)"
+done
+scen a9b-exit8
+mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+lead "$A" integration "merge-task exit 8 three times: retryable: cannot read PR #5 (HTTP 502)"
+ok "$(j "$(inp "$A")" 'd["autoRetryClass"]')" 'agent' "A9b: merge-task exit 8 three times stays agent (ADR 0033's tested contract)"
 
 # ── A10: infra blocks: a short cool-down, no same-fingerprint stop; the budget still bounds them ───────────────
 scen a10-transient

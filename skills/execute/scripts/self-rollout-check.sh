@@ -9,7 +9,7 @@
 #   --ensure <Local:>                     schedule § 0: the Project root, its clone made or refreshed
 #   --refresh <Project root>              execute § 2.7: fast-forward a clone root at an entry point
 #   --refresh-in-place <Project root>     merge-task.sh and the completion ceremony: fast-forward its twin
-#   --launch-check <Project root> <dir>   execute § 2.8, repair § 4 and orient § 9: the lead's launch directory
+#   --launch-check <Project root> <dir>   execute § 2.8, repair § 4, orient § 9 and schedule step 8: the lead's launch directory
 #   --in-place <path>                     is <path> inside a rollout clone, and what is its twin
 #   --list-dirs                           pushed-base.sh: the registry's directory sources
 #
@@ -90,7 +90,8 @@
 #
 # ---- --refresh-in-place <Project root>: the in-place twin gets the rollout's merges (merge-task.sh after every
 # merge; the completion ceremony once, after its `status: done` stamp). Nothing for a root `--in-place` does not
-# name. A twin that is the plugin's primary checkout while a rollout runs is held (primary-hold.sh, ADR 0031).
+# name. A twin that is the plugin's primary checkout while a rollout with no Engine snapshot runs is held
+# (primary-hold.sh, ADR 0031; run from a snapshot, the hold reads the snapshot's Primary, ADR 0043).
 # Otherwise it fetches origin/<default> in the twin (land.sh's ssh and prompt rule) and runs only
 # `git merge --ff-only --no-autostash`: never a merge commit, a rebase or an autostash, never during an operation.
 # One stdout line, `in-place: <twin> …`, or nothing:

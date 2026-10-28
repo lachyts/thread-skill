@@ -5,7 +5,7 @@
 // rollout-clone order (ADR 0042: the remote, gh and register checks, then `--resolve`, the ask, `--ensure`, whose
 // output is the Project root, then pushed-base and unfinished-rollout) with step 1's Re-root guard, the
 // carry preview in step 1, a release gate's drop decided before step 6 (or, at step 8, taken out with its
-// row), Solo and dependency proposals for queued tasks only (step 5), step 6's Advance/Cancel-only naming,
+// row), Solo and dependency proposals for queued tasks only (step 5), step 6's advance-only naming (p30-4: a taken name advances, never asked),
 // a note born `incomplete: true` (the template) that only step 7's last write clears, and orient leaving
 // the rule to schedule. Schedule speaks rungs, never tiers (ADR 0029, p13-3): § 4.7 offers a starting rung read
 // from ladder.py and never lowers one, step 1's carry preview lists its `restamp` lines and stops on a refusal
@@ -39,6 +39,7 @@ const s = (text, re) => collapse(section(text, re) ?? '')
 const S0 = /^### 0\./
 const S47 = /^### 4\.7\. /
 const S28 = /^### 2\.8\. /
+const S29 = /^### 2\.9\. /
 const S1 = /^### 1\. /
 const S3 = /^### 3\. /
 const S35 = /^### 3\.5\. /
@@ -212,10 +213,10 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
   // line that clears it, and skips a note only when its Rollout run line names this rollout, flagging one that names
   // another (a carried task's line for the superseded rollout) so it is rewritten. A `## Launch` repo of another
   // repository is no capture shape: it goes back to § 0's misfit rule, dropped and never cleared. The block is read
-  // up to the next pre-flight block, so another block's wording can't stand in for its own.
+  // up to the next checklist block, so another block's wording can't stand in for its own.
   const s8c = section(schedule, S8) ?? ''
-  const capAt = s8c.indexOf('**Pre-flight — capture-shaped notes.**')
-  const capEnd = s8c.indexOf('**Pre-flight — ', capAt + 1)
+  const capAt = s8c.indexOf('**Checklist — capture-shaped notes.**')
+  const capEnd = s8c.indexOf('**Checklist — ', capAt + 1)
   const cap = capAt < 0 ? '' : collapse(s8c.slice(capAt, capEnd < 0 ? undefined : capEnd))
   const capS = sentences(cap)
   if (capAt < 0 || !closeTemplateLine(taskWriter).includes('mark the capture done') ||
@@ -229,11 +230,11 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
     fails.push('capture-preflight')
   }
 
-  // Step 6 offers Advance or Cancel only, every time: each **Overwrite** it names is a "never".
+  // Step 6 advances, every time (p30-4: no Advance/Cancel prompt): each **Overwrite** it names is a "never".
   const s6 = s(schedule, S6)
-  if (!/only \*\*Advance\*\* or \*\*Cancel\*\*, never \*\*Overwrite\*\*/.test(s6) ||
+  if (!/When today's name is taken, advance: write the next free ordinal, never \*\*Overwrite\*\*/.test(s6) ||
     [...s6.matchAll(/\*\*Overwrite\*\*/g)].some((m) => !/never $/.test(s6.slice(Math.max(0, m.index - 6), m.index)))) {
-    fails.push('step6-advance-cancel')
+    fails.push('step6-advance')
   }
 
   // Step 5: Solo and dependency proposals are for queued tasks only (step 7 writes nothing to a started one).
@@ -249,34 +250,34 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
   if (manifests.some((m) => /parallel-safe waves|clusters tasks into|wave structure/i.test(m)) ||
     !(manifests[2] ?? '').includes('`protocol_version: 5`')) fails.push('manifests')
 
-  // starting-rung: § 4.7 reads the rung names from ladder.py and offers `rung: <name>`; step 7 stamps `rung:` and
-  // has no bullet adding a `model: fable` or an `effort:`.
+  // starting-rung: § 4.7 reads the rung names from ladder.py and offers none (p30-4): a hard task starts on the bottom
+  // rung, named; step 7 stamps a `rung:` Lachy named and has no bullet adding a `model: fable` or an `effort:`.
   const s47 = s(schedule, S47)
-  if (!s47.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py`') || !s47.includes('Offer `rung: <name>` only for a task in the `queued` state') ||
-    !s47.includes('The default offer is the rung just above the bottom') || !s7.includes('add `rung: <name>`') ||
+  if (!s47.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py`') || !s47.includes('No rung is offered and none is stamped by default') ||
+    !s47.includes('starts on the bottom rung all the same') || !s7.includes('add `rung: <name>`') ||
     /add `model: fable`|add `effort:/.test(s7)) fails.push('starting-rung')
 
   // rung-no-lower: no offer for a task with a `rung:` or a `restamp … rung=<name>` preview line; it shows as kept and
   // changes only on Lachy's explicit naming.
-  const noLower = sentences(s47).find((x) => x.includes('It makes no offer for a task that already has a non-empty `rung:`')) ?? ''
+  const noLower = sentences(s47).find((x) => x.includes('It stamps nothing over a task that already has a non-empty `rung:`')) ?? ''
   if (!s47.includes('**§ 4.7 never lowers a rung.**') || !noLower.includes('`restamp <slug> rung=<name>`') ||
     !s47.includes('`<slug>: rung <name> (kept)`') || !s47.includes('Only Lachy explicitly naming a different listed rung changes it') ||
-    !s47.includes('no default and no batch "y" ever writes a lower rung over it')) fails.push('rung-no-lower')
+    !s47.includes('no default ever writes a lower rung over it')) fails.push('rung-no-lower')
 
   // ladder-refused-preflight: under a refused ladder, step 7 still drops the drop-only keys but leaves a top-mapping
   // legacy stamp for execute's compat read; step 8's block shows ladder.py's stderr and the left-in-place tasks.
   const s8 = section(schedule, S8) ?? ''
-  const pre = s8.slice(s8.indexOf('**Pre-flight — ladder refused.**'))
+  const pre = s8.slice(s8.indexOf('**Checklist — ladder refused.**'))
   if (!s7.includes('When `ladder.py` refused at schedule time, still remove the drop-only keys') ||
     !s7.includes('leave a top-mapping legacy stamp in place, unmapped') || !s7.includes("execute's compat read") ||
-    s8.indexOf('**Pre-flight — ladder refused.**') < 0 || !collapse(pre).includes('show its stderr line verbatim') ||
+    s8.indexOf('**Checklist — ladder refused.**') < 0 || !collapse(pre).includes('show its stderr line verbatim') ||
     !pre.includes("— model: fable left for execute's compat read")) fails.push('ladder-refused-preflight')
 
   // legacy-left-preflight: an unrecognised legacy value step 7 leaves on a non-carried candidate is listed in step 8's
   // own block, one line per value in carry's `WARN:` format.
-  const left = s8.slice(s8.indexOf('**Pre-flight — legacy values left in place.**'))
-  if (!s7.includes('leave an unrecognised value in place, listing it in step 8\'s "Pre-flight — legacy values left in place" block') ||
-    s8.indexOf('**Pre-flight — legacy values left in place.**') < 0 ||
+  const left = s8.slice(s8.indexOf('**Checklist — legacy values left in place.**'))
+  if (!s7.includes('leave an unrecognised value in place, listing it in step 8\'s "Checklist — legacy values left in place" block') ||
+    s8.indexOf('**Checklist — legacy values left in place.**') < 0 ||
     !left.includes('WARN: schedule: task-w: effort: banana unrecognised, left in place')) fails.push('legacy-left-preflight')
 
   // no-tier: the skill and the template speak no tier: none of the tier words, no "step-up", no `model:` in the
@@ -316,18 +317,18 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
     !s(schedule, S8).includes('Settings: parallel_ceiling <n> (<source>), max_review_rounds <n> (<source>)')) fails.push('rollout-settings')
 
   // order-hints (p17-2): an order the prior rollout kept only in prose reaches the confirm batch. Step 1's preview
-  // describes carry's `order <slug-a>,<slug-b>[,…]: <clause>` lines and its confirm lists them; step 3 reads each
+  // describes carry's `order <slug-a>,<slug-b>[,…]: <clause>` lines and its report lists them; step 3 reads each
   // clause into a `depends-on:` proposal for a `queued` dependant; step 7 writes the confirmed ones.
   const s7dep = s7.split(/ - /).find((x) => x.includes('append `depends-on:` entries')) ?? ''
   if (!s1.includes('`order <slug-a>,<slug-b>') ||
-    !sentences(s1).some((x) => x.includes('The confirm lists') && x.includes('`order` lines')) ||
+    !sentences(s1).some((x) => x.includes('The report lists') && x.includes('`order` lines')) ||
     !sentences(s(schedule, S3)).some((x) => x.includes('`order`') && x.includes('`depends-on:`') && x.includes('`queued`')) ||
     !s7dep.includes('`order` lines')) fails.push('order-hints')
 
   // interrupted-order (p17-2): § 0's interrupted finish runs the only real carry that reads <prior>'s prose (the
-  // re-check previews from <new>), so its `order` lines are kept for step 1's confirm and step 3.
+  // re-check previews from <new>), so its `order` lines are kept for step 1's report and step 3.
   const finishCarry = s0.indexOf('reconcile-rollout.py carry --from')
-  const kept = sentences(s0).find((x) => x.includes('`order` lines') && x.includes("step 1's confirm")) ?? ''
+  const kept = sentences(s0).find((x) => x.includes('`order` lines') && x.includes("step 1's report")) ?? ''
   if (finishCarry < 0 || !kept || s0.indexOf(kept) < finishCarry) fails.push('interrupted-order')
 
   // solo-rank (p17-2): a queued Solo task whose dependencies are met holds every task whose row is below it,
@@ -335,6 +336,18 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
   if (!sentences(s(schedule, S5)).some((x) => x.includes('Solo task') && x.includes('holds every task whose row is below it') &&
     x.includes('whatever their `priority:`')) ||
     !collapse(template).includes('holds every task whose row is below it, whatever its `priority:`')) fails.push('solo-rank')
+
+  // inert-paths (ADR 0045, p29-3): § 2.9 proposes Inert paths with inert-paths.py propose (the verifier and bootstrap
+  // single-quoted), drops what the drop rule names (an `error` line neutral), records only on Lachy's yes, prints and goes
+  // on at record's exit 1 (the reader check never blocks), never passes --force, and the serial path skips it.
+  const s29 = s(schedule, S29)
+  const recordAt = s29.indexOf('inert-paths.py record --repo')
+  if (!s29.includes("inert-paths.py propose --repo <§ 0's resolved repo path> --tree origin/<default> --verifier '<verifier>' --bootstrap '<env_bootstrap>'") ||
+    recordAt < 0 || s29.lastIndexOf('On yes:', recordAt) < 0 || !s29.includes('On no, nothing') ||
+    !s29.includes('inert-paths.py drop --repo') || !s29.includes('a line with an `error` (the check itself failed) is neither a failure nor a pass') ||
+    !s29.includes('It never blocks the schedule') || !s29.includes('never passes `--force`') ||
+    !s29.includes('name the refusing rollout in the confirm batch') ||
+    !collapse(schedule).includes('Steps 2, 2.5–2.9, 4, 4.5, 4.7 and Solo are skipped on this path')) fails.push('inert-paths')
 
   // Orient leaves the one-per-repo rule to schedule § 0: it reads no rollout state itself.
   const o6 = s(orient, /^### 6\./)
@@ -506,7 +519,7 @@ test('control: § 3.5 keeping a quote-only match as a gate fails gate-quote-only
 })
 
 test('control: step 8 without the capture block, or task-writer rewording its close line, fails capture-preflight', () => {
-  only({ schedule: edit(real.schedule, S8, '**Pre-flight — capture-shaped notes.**', '**Pre-flight — other notes.**') },
+  only({ schedule: edit(real.schedule, S8, '**Checklist — capture-shaped notes.**', '**Checklist — other notes.**') },
     ['capture-preflight'], 'no block')
   // Only the template line changes: § 5's prose still names the phrase, so a § 5-wide match would pass this.
   const reworded = edit(real.taskWriter, null, 'First: you now own this work — mark the capture done:', 'First: you now own this work — close the capture:')
@@ -537,12 +550,15 @@ test('control: step 1 without the carry preview fails', () => {
   only({ schedule: edit(real.schedule, S1, '<prior>.md --dry-run`', '<prior>.md`') }, ['step1-carry-preview'], 'no dry run')
 })
 
-test('control: step 6 that offers Overwrite fails, even beside an Advance/Cancel-only supersede', () => {
-  only({ schedule: edit(real.schedule, S6, 'offer only **Advance** or **Cancel**, never **Overwrite**',
-    'offer **Overwrite**, **Advance** or **Cancel**') }, ['step6-advance-cancel'], 'overwrite offered')
-  only({ schedule: edit(real.schedule, S6, 'When today\'s name is taken, offer only',
-    'To replace a note you just wrote in error, offer **Overwrite** (replace the same-day note). When this run supersedes, offer only') },
-  ['step6-advance-cancel'], 'the old same-day Overwrite branch')
+test('control: step 6 that offers Overwrite, or asks again, fails step6-advance', () => {
+  only({ schedule: edit(real.schedule, S6, 'advance: write the next free ordinal, never **Overwrite**',
+    'offer **Overwrite**, **Advance** or **Cancel**') }, ['step6-advance'], 'overwrite offered')
+  only({ schedule: edit(real.schedule, S6, 'When today\'s name is taken, advance',
+    'To replace a note you just wrote in error, offer **Overwrite** (replace the same-day note). When today\'s name is taken, advance') },
+  ['step6-advance'], 'the old same-day Overwrite branch')
+  only({ schedule: edit(real.schedule, S6, 'When today\'s name is taken, advance: write the next free ordinal, never **Overwrite**.',
+    'When today\'s name is taken, offer only **Advance** or **Cancel**, never **Overwrite**: Advance writes the next free ordinal.') },
+  ['step6-advance'], 'the old Advance/Cancel prompt')
 })
 
 test('control: a description that drops the queue fails', () => {
@@ -567,19 +583,19 @@ test('control: step 7 that stamps model: fable again fails starting-rung', () =>
 })
 
 test('control: § 4.7 without its never-lower sentence fails rung-no-lower', () => {
-  only({ schedule: edit(real.schedule, S47, "It makes no offer for a task that already has a non-empty `rung:`, for one step 1's preview lists as " +
-    '`restamp <slug> rung=<name>` (a name, not `-` or `kept`: carry writes that rung), or for a non-carried candidate whose legacy stamps map ' +
+  only({ schedule: edit(real.schedule, S47, "It stamps nothing over a task that already has a non-empty `rung:`, one step 1's preview lists as " +
+    '`restamp <slug> rung=<name>` (a name, not `-` or `kept`: carry writes that rung), or a non-carried candidate whose legacy stamps map ' +
     'to the top rung (step 7). ', '') }, ['rung-no-lower'], 'no sentence')
 })
 
 test('control: step 8 without the ladder-refused block fails ladder-refused-preflight', () => {
-  only({ schedule: edit(real.schedule, S8, '**Pre-flight — ladder refused.**', '**Pre-flight — other.**') }, ['ladder-refused-preflight'], 'no block')
+  only({ schedule: edit(real.schedule, S8, '**Checklist — ladder refused.**', '**Checklist — other.**') }, ['ladder-refused-preflight'], 'no block')
 })
 
 test('control: step 7 naming no block for an unrecognised value fails legacy-left-preflight', () => {
-  only({ schedule: edit(real.schedule, S7, 'listing it in step 8\'s "Pre-flight — legacy values left in place" block', "naming it in step 8's summary") },
+  only({ schedule: edit(real.schedule, S7, 'listing it in step 8\'s "Checklist — legacy values left in place" block', "naming it in step 8's summary") },
     ['legacy-left-preflight'], 'dangling reference')
-  only({ schedule: edit(real.schedule, S8, '**Pre-flight — legacy values left in place.**', '**Pre-flight — other values.**') },
+  only({ schedule: edit(real.schedule, S8, '**Checklist — legacy values left in place.**', '**Checklist — other values.**') },
     ['legacy-left-preflight'], 'no block')
 })
 
@@ -628,10 +644,19 @@ test('control: step 3 without its order-line bullet fails order-hints', () => {
 })
 
 test("control: § 0's interrupted finish dropping its order lines fails interrupted-order", () => {
-  only({ schedule: edit(real.schedule, S0, "keep them for step 1's confirm and step 3", 'ignore them') }, ['interrupted-order'], 'dropped')
+  only({ schedule: edit(real.schedule, S0, "keep them for step 1's report and step 3", 'ignore them') }, ['interrupted-order'], 'dropped')
 })
 
 test('control: a template that lets priority jump a Solo task fails solo-rank', () => {
   only({ template: real.template.replace('holds every task whose row is below it, whatever its `priority:`',
     'holds every task whose row is below it and whose `priority:` is no higher') }, ['solo-rank'], 'template')
+})
+
+// inert-paths (ADR 0045, p29-3)
+test('control: § 2.9 recording with no yes, blocking on record, counting an error line, or run on the serial path fails inert-paths', () => {
+  only({ schedule: edit(real.schedule, S29, 'On yes: `python3', 'Then `python3') }, ['inert-paths'], 'record with no yes')
+  only({ schedule: edit(real.schedule, S29, 'It never blocks the schedule, and this skill', 'It halts the schedule, and this skill') }, ['inert-paths'], 'record blocks')
+  only({ schedule: edit(real.schedule, S29, '; a line with an `error` (the check itself failed) is neither a failure nor a pass', '') }, ['inert-paths'], 'error lines counted')
+  only({ schedule: edit(real.schedule, null, 'Steps 2, 2.5–2.9, 4', 'Steps 2, 2.5–2.8, 4') }, ['inert-paths'], 'serial runs § 2.9')
+  only({ schedule: edit(real.schedule, S29, ", name the refusing rollout in the confirm batch,", ',') }, ['inert-paths'], 'no refusing rollout named')
 })

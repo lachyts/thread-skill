@@ -5,8 +5,12 @@ target's open work, sorts it, grills what is unclear, and writes the result at o
 the machinery of the retired `split` and `gather` verbs (ADR 0027): roadmap forming and renames,
 decomposition and task writing.
 
+**Plugin root.** This file is read as a file, never rendered: run its commands by
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 **Write surface.** `~/repos/obsidian/Work/Tasks/`, `~/repos/obsidian/Work/Phases/`, the target
-project note and, for pull-ins, the source project's phase and task notes (the moved notes
+project note, a swept project note's `## Priorities` card when a Note of his corrects it
+(R3, orient § 3.5) and, for pull-ins, the source project's phase and task notes (the moved notes
 themselves, pointer lines, and retiring a phase the move emptied). When R3 grills **with
 docs**, the interview also writes `CONTEXT.md` + `docs/adr/` in the **resolved project repo**
 (never committed here: orient § 6 holds scheduling until they land). Nothing else outside the
@@ -140,20 +144,26 @@ phase, tasks depending only on those the next, and so on).
 
 ## R3. Grill the unclear
 
-A full-depth interview, one question at a time, recommended answer first, resolving:
+An interview of Lachy's questions only (Owner *yours*, `_shared/asking.md` § 5), one at a time, each in the Framing,
+recommendation first, inviting a Note. For (b), an item's goal and intent are his; its runnable prompt, verify line and
+mechanics are written by the reshuffle and shown as Decided for you. An open fork stays his whatever its kind.
+Resolving:
 
-- **(a) roadmap meaning** — phase names, ordering, membership, moves, drops, unbundles, re-homes
-  and pull-ins. The human decides; the reshuffle never invents a phase silently or force-phases a
-  misfit.
+- **(a) roadmap meaning** — what a phase means and what matters most are his. Its ordering, its
+  membership by the files the items touch and its naming are decided by the reshuffle and shown as
+  Decided for you; moves, drops, unbundles, re-homes and pull-ins are proposed in R4's table, where
+  he can overturn any. The reshuffle never invents a phase silently or force-phases a misfit.
 - **(b) per-item speccing** — every unclear item gets its decisions grilled into a real body (goal,
   runnable prompt, verify line, the shape `add-task.md` prescribes). An unbundled task quotes its
   slice of the brain dump verbatim as **His words**.
-- **(c) gates asked ahead** (ADR 0034) — a task the gated-input sweep flags (a hit of schedule
-  § 3.6's `gated_inputs.py sweep` that its dismissal rule keeps) gets § 3.6's ask-ahead question in
-  the grill, clear item or not: for spend, up to what total exposure in USD (summed
-  across Logins, a recurring cap counted per month), against the standing approval
-  (`spend_approval_usd`, e.g. 50 USD, or off at the built-in 0); for a credential or irreversible
-  gate, a sign-off now or none. Asked here, it is not asked again at schedule.
+- **(c) gates ahead** (ADR 0034) — a task the gated-input sweep flags (a hit of schedule § 3.6's
+  `gated_inputs.py sweep` that its dismissal rule keeps), clear item or not:
+  a spend smell is recorded, never grilled (Chorus ADR 0108 d4), so R5.2 writes its recorded
+  Planner line, schedule stamps it, and the standing approval (`spend_approval_usd`, e.g. 200 USD a
+  gate and a month, or off at the built-in 0) signs its gate mid-run; a limit Lachy names
+  unprompted is recorded too. A credential or irreversible gate still gets § 3.6's ask-ahead
+  question in the grill: a sign-off now or none. Asked or recorded here, it is not asked again at
+  schedule.
 
 Clear items are not grilled; they go straight to the gate. Grill cluster by cluster, highest value
 first (the cluster holding orient's recommendation leads). **Lachy can stop at any point**: what is
@@ -165,16 +175,41 @@ edits propagate. Resolve the project's repo from the project note's `repos:` fro
 
 - **Repo root has `CONTEXT.md` (or `CONTEXT-MAP.md`)** → invoke **`grill-with-docs`** (Skill tool),
   with doc writes directed at **that repo**, not the session CWD.
-- **Repo resolves but has no `CONTEXT.md`** → ask once, up front: "start a `CONTEXT.md` for
-  `<repo>`?" Yes → `grill-with-docs`; no → `grill-me`.
+- **Repo resolves but has no `CONTEXT.md`** → `grill-with-docs` too, which starts one lazily at the
+  first term the grill fixes; shown as Decided for you (technical: the repo is code, so its terms are
+  worth keeping).
 - **No resolvable repo** (vault-only project) → **`grill-me`**.
-- Several `repos:` entries: prefer the one with `CONTEXT.md`; still ambiguous → ask.
+- Several `repos:` entries: prefer the one with `CONTEXT.md`; with none or several, the repo the
+  items' files live in, else the first `repos:` entry, shown as Decided for you.
 - **Neither skill installed** (this plugin is public; those skills are personal) → run the same
-  interview shape inline.
+  interview shape inline, by `_shared/asking.md` § 5.
+
+**Invoke it with these `args`**, the only way the gate reaches the skill, `<plugin root>` the root this file was read
+from and `<project note>` the absolute path of the project note whose `## Priorities` card (orient § 3.5) the grill
+reads: a project target's own note; a scoped target's resolved project note (§ Scoped targets); and for an area
+target, the note of the project whose cluster is being grilled, one per grill invocation. A note with no card, or a
+scoped target with no project note yet, passes `none`, and the grill reads the estate brief alone. Keep every Decided
+for you line the grill shows: R4's footer counts them, R5.2 writes them into their tasks, and the report lists them. A
+Note of his in the grill that corrects the card is written back into it at once, the same day (orient § 3.5): it is
+the one write the reshuffle makes before R4's gate, and it stands if he stops the grill or declines the gate.
+
+> Ask Lachy only the questions he owns: intent, how important, how robust, who it is for, how it feels, and a
+> credential or irreversible sign-off R3 (c) names (Owner yours). Ask each one at a time, in plain words, tied to the
+> goal, with what each option gains and costs and your pick against his priorities, and end it with: what would make
+> this wrong for you? Read the `## Priorities` card in <project note> first, when it has one: a call it answers is
+> priorities, and a detail it says he steers is his. Walk every technical branch yourself from the repo's code, ADRs
+> and CONTEXT.md, and never ask it: show it in the grill as
+> `Decided for you: <the fork> → <the call> (technical|priorities: <one reason>)`, which he can overturn there. An
+> ADR you write ends with its Decided for him (overturnable) list. Finish with every Decided for you line, his
+> overturns applied, under one `Decided for you` heading. The rule in full: § 5 of
+> <plugin root>/skills/_shared/asking.md.
 
 ## R4. The gate
 
-Print the final disposition table and get a y/n (or adjustments) **before writing any file**:
+Print the final disposition table and get a y/n (or adjustments) **before writing any file**, a Note's correction of a
+Priorities card that R3 already wrote back aside (orient § 3.5). **Owner *yours***
+(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1): the table is the roadmap (ADR 0036), so it is asked in the
+Framing, with the phases' goal and what each disposition gains and costs:
 
 ```
 phases to create (pN — name) | old filename → new filename | joins existing phase? | body respecced? | unbundled / moved / merged / dropped / re-homed / pulled in | misfits (stay loose)
@@ -184,6 +219,9 @@ A scoped target adds a **source-disposition footer**, e.g.
 `source: focus-app-p3-capture-tasknotes → phase note (legacy task-tagged: retag [phase] + move to Work/Phases/)`.
 Lachy may merge, split, rename, re-phase or drop rows; re-render until approved. This is where
 granularity is corrected cheaply: nothing exists yet.
+
+The grill's Decided for you lines add a **decided-for-you footer**, at most 8 lines, the less sure first:
+`decided for you: <n> (<fork> → <call>; …; the rest in each task note)`. He may overturn any of them here.
 
 A declared check with entries (§ Declared check) adds a **declared-check footer**:
 `declared check: <N> entries → <dispositions>; advance after the writes` when every entry has a
@@ -209,6 +247,10 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      the cwd, `Depends on [[...]]` links and the 1–2 line goal; the runnable prompt in the
      `## Resume prompt` block when the task qualifies for launch context, else as a fenced block
      under `## Notes`; and a closing `**Verify:**` line.
+   - **The grill's Decided for you lines** (R3), on any task R5.2 writes, once its note exists, each through
+     `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --owner <technical|priorities> --question <fork> --answer <call> --why <reason> --by orient`,
+     which writes it under the task's `## Decided for you (<date>)`, never `## Decisions`. A refusal is reported,
+     never written by hand.
    - **Phased or moved tasks** are renamed and stamped. The body gets the grilled spec when R3
      respecced it; a clear item's body is unchanged apart from backlink rewrites. A legacy `wave:` is
      removed, and a `rollout:` stamp left by a retired rollout (R1 found it not in flight) is
@@ -222,11 +264,12 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4's: never a phase, a rollout or planned
      follow-on work.
    - Don't set `rollout:` or `scope:`: schedule stamps them (`scope:` inferred from `touches:`).
-   - **Answers from R3 (c)** are written exactly as schedule step 7 does: `spend_approval_usd: <N>`
-     (whole US dollars) when the spend answer is above the standing approval; for any spend amount,
-     the `## Decisions (asked ahead <date>)` section with the same two lines (its Spend line, naming
-     `/thread:orient` where schedule's names `/thread:schedule`, and its Planner line asking for one
-     line whose Cap is one priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`, with its
+   - **Records from R3 (c)** are written exactly as schedule step 7 does: for a spend smell, the
+     `## Decisions (recorded <date>)` section holding the Planner line alone; for a limit Lachy
+     named, `spend_approval_usd: <N>` (whole US dollars) when it is above the standing approval and,
+     for any amount, the `## Decisions (asked ahead <date>)` section with the same two lines (its
+     Spend line, naming `/thread:orient` where schedule's names `/thread:schedule`, and its Planner
+     line asking for one line whose Cap is one priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`, with its
      split in sub-bullets nested under the gate, ADR 0038); and a credential or irreversible sign-off's `## Approved gates` bullet,
      `- <kind>: <his words> (approved <date>, asked ahead at orient)`.
 3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one
@@ -268,7 +311,8 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
    one line; never a blocker.
 
 **Report**: phases as clickable `obsidian://` links, renames, the other dispositions, surfacing
-status, misfits, out-of-vault links to fix, and what the grill left unresolved. Orient § 6 routes
+status, misfits, out-of-vault links to fix, what the grill left unresolved, and its Decided for you list (the less
+sure first, at most 8 lines, the rest in the task notes). Orient § 6 routes
 from here.
 
 ## Don'ts
@@ -278,8 +322,8 @@ The rules above are the contract; these are the ones most easily broken.
 - **Don't touch frozen items** (in flight, possibly landed, thread captures, decision tasks) beyond
   adding new members to an in-flight phase.
 - **Don't renumber.** Existing phases and ordinals are immutable, and an ordinal is never reused.
-- **Don't write before the R4 gate**, and don't rename without the basename check and the
-  backlink rewrite.
+- **Don't write before the R4 gate**, a Note's correction of a Priorities card (R3) aside, and
+  don't rename without the basename check and the backlink rewrite.
 - **Don't advance a declared check** except through `advance --expect <digest>` after R4 passed
   every entry; never run its `--advance` by hand.
 - **Don't copy the grill skills' instructions inline**: invoke `grill-with-docs` / `grill-me` by

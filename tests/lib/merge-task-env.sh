@@ -11,6 +11,8 @@ export MERGE_TASK_CHECK_INTERVAL=0 MERGE_TASK_STATE_INTERVAL=0 MERGE_TASK_CONFIR
 unset MERGE_TASK_REINTEGRATE_MAX
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$tmp/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_VERIFY_SLOTS_DIR="$tmp/verify-slots"  # the verify slots (verify-slot.py, p23-4): a temp pool, never the machine's
+# The Heat hold's reading (verify-slot.py heat_level), pinned: never the Mac's real heat.
+export THREAD_HEAT_LEVEL=0
 MT="$root/skills/execute/scripts/merge-task.sh"
 gt() { git -c user.name=t -c user.email=t@t "$@"; }
 gc() { gt -C "$tmp/repo" "$@"; }

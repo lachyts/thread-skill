@@ -14,6 +14,7 @@ due:
 captured: {{DATE}}
 # saved as: <slug>-rollout-<YYYY-MM-DD>.md, named as schedule step 6 names every rollout note (one note per chain; a further chain takes the next -N). See schedule SKILL.md § Serial path.
 protocol_version: 5
+# engine_snapshot: "<path>" and engine_sha: <sha>   # ADR 0043: stamped by `engine-snapshot.py adopt` just below protocol_version:, never by hand
 shape: serial
 surfaces:
 {{SURFACES}}
@@ -27,7 +28,7 @@ Serial-rollout plan for one chain of `[[{{PROJECT_NAME}}]]` tasks (ADR 0040): Le
 
 ## How to execute
 
-Legs run this chain (execute's legs.md). Leg 1 opens in row 1's launch (its alias, from its folder) and runs `/thread:execute [[<this note>]]`. Each Leg works only rows of the launch it opened in, so a launch change between two rows is a Leg boundary: it claims up to five tasks, one at a time, closes, and hands the rest to a fresh Leg, whose brief is this note's `## Leg log`. This note takes no execute offer and no start stamp, and it is never paused: a Leg stops through `leg.py close --outcome stopped`. To give its surfaces back before it runs, stamp it `status: dropped`; its tasks are then free for a later `/thread:schedule`.
+Legs run this chain (execute's legs.md). Leg 1 opens in row 1's launch (its alias, from its folder) and runs `/thread:execute [[<this note>]]`. Each Leg works only rows of the launch it opened in, so a launch change between two rows is a Leg boundary: it claims up to five tasks, one at a time, closes, and hands the rest to a fresh Leg, whose brief is this note's `## Leg log`. This note takes no execute handoff and no start stamp, and it is never paused: a Leg stops through `leg.py close --outcome stopped`. To give its surfaces back before it runs, stamp it `status: dropped`; its tasks are then free for a later `/thread:schedule`.
 
 ## Queue
 
@@ -54,7 +55,7 @@ When every task is done, the last Leg runs the completion ceremony (the Complete
 3. Score the chain: run `close-score.py --rollout <this note> --close completion`, and keep its one line as the reflection; a failed score never stops the ceremony.
 4. Mark this rollout `status: done` and stamp `completed: <YYYY-MM-DD>` in the frontmatter.
 5. Append a `## Completion log`: each Leg, the tasks it finished and set aside, the disposition of each item below, and the reflection.
-6. Move this note to `Work/Tasks/Archive/Rollouts/`, never overwriting a same-named note there, and commit it by pathspec.
+6. Move this note to `Work/Tasks/Archive/Rollouts/`, never overwriting a same-named note there, and commit it by pathspec. Then run `engine-snapshot.py retire` (engine-snapshot.md § Retirement).
 7. Run `/thread:close`.
 
 Rollout-specific items go here:

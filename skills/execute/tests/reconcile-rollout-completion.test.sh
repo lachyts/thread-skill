@@ -13,7 +13,7 @@
 #       env_bootstrap is `unrun`; a bad completion_timeout is refused; a fix task already in the Archive is not
 #       refiled.
 #   C6  the halt streak: the third no-verdict run in a row halts, the fourth does not (the streak restarts at a halt),
-#       the sixth does; a `stopped` line never counts.
+#       the sixth does; a `stopped` or `heat` line never counts.
 #   C7  a run in flight holds the attempt's lock: the read says in-flight, a second --run exits 3 and writes nothing;
 #       TERMed, the run records its own `stopped` and removes its tree.
 #   C8  a --run killed outright leaves its verify holding the lock until it ends, then a free lock and no line: the
@@ -23,7 +23,8 @@
 #   C10 origin unread is exit 1 with nothing armed or written; a fix task that cannot be written on a final red is
 #       exit 1 with no line, so the attempt runs again.
 #   C11 the value: absent forms, kept comments, refused forms; env_bootstrap is read the same way.
-#   C12 the outcome classes (verify's outcome file alone, never its log's text).
+#   C12 the outcome classes (verify's outcome file alone, never its log's text); verify's `heat` outcome is read and
+#       its log line parses (p31-4, the Heat hold).
 #   C13 a verify with no --outcome (Integration, RACE) writes no outcome file; its --detach-at tree is pid-locked
 #       like --outcome's, so the daily sweep's reaper never removes a RACE re-verify's tree mid-run, and removed.
 #   C14 reconcile-rollout.py loads where fcntl does not (the Windows machine): a read verb still runs.
@@ -40,6 +41,7 @@ trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="$TMP/events"  # this suite reads the Run record: each scenario keeps its own dir (scen)
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots"
+export THREAD_HEAT_LEVEL=0                  # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 export HOME="$TMP/home"; mkdir -p "$HOME"   # an empty HOME: rollout-settings.py resolves the built-ins
 NOW=2026-10-24T09:00:00Z
 g() { git -c user.email=t@t -c user.name=t -c init.defaultBranch=master -c commit.gpgsign=false "$@"; }
@@ -112,6 +114,11 @@ cv --run; ok "$rc|$(js ran)|$(js result)|$(js decided)|$(js halt)" "0|True|green
 cv; ok "$(js state)" "green" "C2: … decided"
 has "$(js summary)" "Completion verify: green at ${SHA:0:12}" "C2: … its Completion log summary"
 ok "$(log_lines)|$(records)" "1|green/1" "C2: one log line, one completion-verify record"
+suites() { cat "$THREAD_EVENTS_DIR"/ro-rollout-2026-10-24.jsonl 2>/dev/null | python3 -c '
+import json, sys
+print(json.dumps([[d["kind"], d["by"], d["runner"], d["task"], d.get("outcome"), d.get("sha")] for d in map(json.loads, sys.stdin)
+                  if d["kind"].startswith("suite-")], separators=(",", ":")))'; }
+ok "$(suites)" "[[\"suite-started\",\"completion\",\"lead\",null,null,\"$SHA\"],[\"suite-ended\",\"completion\",\"lead\",null,\"green\",\"$SHA\"]]" "C2: --run records the suite (p29-10): a pair by completion, runner lead, no task, the merged sha"
 has "$(grep ' -> green' "$RO")" "at $SHA rc 0" "C2: … the line names the merged sha and the rc"
 ok "$(ls "$(integ)" | grep -c '^completion-ro-rollout-2026-10-24-1\..*-[0-9]*\.log$')|$(ls "$(integ)" | grep -c '\.rc$\|\.outcome\.json$')" "1|0" "C2: the log kept under its run's name, no rc or outcome left"
 ok "$(red_exists)|$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')" "no|1" "C2: no fix task; the detached tree removed"
@@ -180,6 +187,9 @@ cv --run; ok "$(js result)|$(js streak)|$(js halt)" "unrun|3|True" "C6: the thir
 cv --run; ok "$(js streak)|$(js halt)" "4|False" "C6: the next one after the halt → no halt (the streak restarts)"
 cv --run; cv --run; ok "$(js streak)|$(js halt)" "6|True" "C6: the third since the halt → halt again"
 ok "$(red_exists)" "no" "C6: … none of them files a fix task"
+scen c6h '"true"'
+seed noslot heat noslot
+cv; ok "$(js state)|$(js streak)" "run|2" "C6: a heat line (the Heat hold) is skipped like a stopped one → streak 2"
 
 # ── C7 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c7 '"sleep 30"'
@@ -231,6 +241,7 @@ cv --run; ok "$rc|$(js result)" "0|green" "C8: a dead run's locked worktree entr
 # ── C9 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c9 "\"git -C '$TMP/c9/repo' -c user.email=t@t -c user.name=t commit -q --allow-empty -m moved\""
 cv --run; ok "$rc|$(js ran)|$(js result)|$(js decided)" "4|True|unrun|False" "C9: the shared checkout moved during the run → its own check trips: unrun, exit 4"
+ok "$(js canary_exit)" "9" "C9: … the check's exit 9 (a lane hold, ADR 0046) reads as a trip: canary_exit 9"
 has "$(grep ' -> unrun' "$RO")" "git-env" "C9: … the line says the verdict was never acted on"
 has "$err" "git-env" "C9: … the canary's stderr passed through"
 scen c9b "\"i=0; while [ ! -f $TMP/c9b.go ] && [ \$i -lt 600 ]; do sleep 0.1; i=\$((i + 1)); done\""
@@ -238,7 +249,7 @@ python3 "$SCRIPT" completion-verify --rollout "$RO" --tasks-dir "$D/tasks" --now
 bp=$!
 wait_for "$(integ)/completion-ro-rollout-2026-10-24-1.log" '^== verifier'
 g -C "$D/repo" commit -q --allow-empty -m moved; new=$(git -C "$D/repo" rev-parse master)
-python3 "$CANARY" check-all --rollout "$RO" --tasks-dir "$D/tasks" > /dev/null 2>&1; ok "$?" 3 "C9: a loop-entry check-all catches the trip"
+python3 "$CANARY" check-all --rollout "$RO" --tasks-dir "$D/tasks" > /dev/null 2>&1; ok "$?" 9 "C9: a loop-entry check-all catches the trip (9: the lane)"
 python3 "$CANARY" ack --rollout "$RO" --tasks-dir "$D/tasks" --repo "$D/repo" --default master --slugs ro-rollout-2026-10-24 --ref "$new" > /dev/null 2>&1
 ok "$?|$(window)" "0|armed" "C9: … and an ack re-arms the window while the run goes on"
 python3 - "$RO" <<'PY'
@@ -412,6 +423,7 @@ import importlib.util, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rr)
 cases = [({"ended": "running"}, 1, "unrun"), ({"ended": "noslot", "rc": "noslot"}, 1, "noslot"),
+         ({"ended": "heat", "rc": "heat"}, 1, "heat"),
          ({"ended": "signal", "rc": 143, "signal": 15}, 1, "stopped"), ({"ended": "bootstrap", "rc": 1}, 1, "unrun"),
          ({"ended": "deadline", "rc": 124, "step": "env_bootstrap"}, 1, "unrun"),
          ({"ended": "deadline", "rc": 124, "step": "verifier"}, 1, "red"), ({"ended": "done", "rc": 124}, 1, "rerun"),
@@ -419,7 +431,17 @@ cases = [({"ended": "running"}, 1, "unrun"), ({"ended": "noslot", "rc": "noslot"
          ({"ended": "done", "rc": 1}, 2, "red"), (None, 1, "unrun")]
 bad = [(o, n, want, got) for o, n, want in cases if (got := rr._classify_completion(o, n)[0]) != want]
 print("ok   - C12: each outcome class (a verifier's own rc 124 is an ordinary red)" if not bad else f"FAIL - C12: {bad}")
-sys.exit(1 if bad else 0)
+# verify's `heat` outcome file is read (never None, which classifies `unrun` and counts toward the halt)
+import json, os, tempfile
+with tempfile.TemporaryDirectory() as d:
+    p = os.path.join(d, "o" + rr.VERIFY_OUTCOME_SUFFIX)
+    open(p, "w").write(json.dumps({"v": 1, "id": "20261027T000000-1", "sha": None, "ended": "heat", "rc": "heat"}))
+    got = rr._read_outcome(rr.Path(p))
+    heat_ok = got is not None and rr._classify_completion(got, 1)[0] == "heat"
+print("ok   - C12: verify's heat outcome file reads heat, never unrun" if heat_ok else f"FAIL - C12: heat outcome read {got}")
+line = "- 2026-10-24T08:00+00:00 attempt 1 at " + "a" * 40 + " rc heat -> heat: x (run r; log -)"
+print("ok   - C12: a heat log line parses" if rr.COMPLETION_LINE_RE.match(line) else "FAIL - C12: a heat log line does not parse")
+sys.exit(1 if bad or not heat_ok or not rr.COMPLETION_LINE_RE.match(line) else 0)
 PY
 [ $? -eq 0 ] || fail=1
 

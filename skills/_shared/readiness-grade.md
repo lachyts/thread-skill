@@ -5,8 +5,9 @@ gives each of its open tasks a **Readiness grade**, and `estate-rank.py` ranks t
 slate**: candidate runs with their **Review load**, the decision rounds, the projects that need their own orient, and
 the **Unpark offer** for each parked project with ready work. Scripts scan, the model decides: the grade is the
 model's half, and everything after it is the script's. This file is the grading agents' brief and the ranking's prose
-contract; the script's docstring holds its output schema. The lead that runs both is `orient-all`
-(`${CLAUDE_PLUGIN_ROOT}/skills/orient-all/SKILL.md`).
+contract; the script's docstring holds its output schema. Two leads run both: `orient-all`
+(`${CLAUDE_PLUGIN_ROOT}/skills/orient-all/SKILL.md`), and schedule's Pre-flight (schedule § 1.5, ADR 0047), which grades
+one rollout's tasks before its note is written.
 
 **Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
@@ -18,7 +19,9 @@ there, whatever else it links. Every other open task is skipped with the first r
 
 - `unhomed`: no live project;
 - `in flight`: in progress, in review, or in a live rollout (`_shared/vault-grammar.md` § In flight). In-flight work
-  is never graded or routed again;
+  is never graded or routed again. At schedule's Pre-flight on a supersede, a carried task still queued (status
+  `open`, its `rollout:` naming the rollout being superseded) is gradeable (`--superseding`, ADR 0047); one that has
+  started stays `in flight`;
 - `hold`: any other status.
 
 ## The grading agents
@@ -30,8 +33,8 @@ The lead runs one read-only agent per home project with gradeable tasks, side by
 - this file.
 
 Each agent returns one JSON object (§ Output). The lead saves each answer to a scratch file and runs the ranker over
-all of them (§ The ranking). An answer that does not parse, or a task the ranker lists in `invalid[]`, gets one
-re-ask that names its errors; anything still invalid after that is shown as ungraded, never guessed. The agent
+all of them (§ The ranking). An answer that does not parse, or a task the ranker lists in `invalid[]` (a decision of
+his without `goal` or `stakes` among the causes), gets one re-ask that names its errors; anything still invalid after that is shown as ungraded, never guessed. The agent
 writes nothing: no vault edit, no repo or git write, no fetch, and it asks Lachy nothing.
 
 ## What the agent reads
@@ -48,6 +51,8 @@ writes nothing: no vault edit, no repo or git write, no fetch, and it asks Lachy
     the project's own folder, `~/Projects/<Area>/<Project>/` named like the project note (never under `_archive`).
     Only when neither finds one has the project no thread, and the grade rests on the rest of this list.
 - The home repo's `docs/adr/` and `CONTEXT.md`, when there is a home repo.
+- The home project note's `## Priorities` card, when it has one: his stated priorities, which settle a `priorities`
+  decision, and the details he steers, which stay his.
 - Each task note in full, and the notes its `depends-on:` names.
 - The code each task names.
 - The gate sweep, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py sweep <note>...`: its hits
@@ -63,11 +68,22 @@ One grade per task, as CONTEXT.md **Readiness grade** words it:
 - **Grill**: a few low-level decisions, each with a recommendation drawn from the project's thread, ADRs and code.
 - **Orient**: the decisions shape the project, so it needs a full-context session of its own.
 
-What counts as a decision is defined elsewhere, and used as it stands. A decision is a fork in the sense of
-`${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` steps 1 and 2: a fork the executing session can resolve from code
-or data (grill-fit.md step 2(a)) is not a decision, and a genuine Lachy decision (step 2(b)) is one. A fork that an
-orient end line names as `fork for Lachy` and that is still open (orient § 2 Open forks; grill-fit.md § How a fork
-comes back) is a decision. One that an `orient ruling:` line, a `## Decisions` section or an ADR has ruled on is not.
+What counts as a fork is defined elsewhere, and used as it stands: a fork in the sense of
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` steps 1 and 2. Each fork is one of three kinds (ADR 0054), and each
+decision carries its `owner` (§ Each decision):
+
+1. *His*: a genuine Lachy decision (grill-fit.md step 2(b)), Owner `yours`, or a detail his `## Priorities` card says
+   he steers. It is a decision: asked, counted and charged.
+2. *Ruled now*: a fork the grader settles itself, Owner `technical` or `priorities`, at `high` or `medium` confidence,
+   with its evidence in `why`. It is written as a decision with its `owner`, never asked, counted or charged: the
+   ranker lists it in `decidedForYou`, and schedule writes it into the task note as Decided for you.
+3. *The session's*: a fork the executing session can resolve from code or data (grill-fit.md step 2(a)), "decide X
+   from Y", and a `technical` one the grader can only guess at (`low`). It is not a decision, and is not listed.
+
+A fork that an orient end line names as `fork for Lachy` and that is still open (orient § 2 Open forks; grill-fit.md
+§ How a fork comes back) is his. One that an `orient ruling:` line, a `## Decisions` section, a `## Decided for you`
+section or an ADR has ruled on is not a decision. A plan may overturn a Decided for you bullet on code evidence, and
+says why.
 
 ## Shape
 
@@ -82,33 +98,48 @@ and the run carries it. A `parallel` task names its `repo`, one of the project's
 
 Every decision, in every grade, carries:
 
-- `question`: the fork, in one line Lachy can answer.
+- `question`: the fork, in one line Lachy can answer, in plain words with no jargon.
 - `options`: required, 2 to 4 distinct short labels, the answers Lachy would choose between.
 - `recommendation`: always given, and always one of the options; when unsure, the best guess, with `confidence: low`.
 - `confidence`: `high`, `medium` or `low`.
-- `why`: the evidence for the recommendation (a file and line, an ADR, a thread line).
+- `why`: the evidence for the recommendation (a file and line, an ADR, a thread line), and the pick measured against
+  his priorities (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 4).
+- `owner`: `yours`, `priorities` or `technical` (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1); missing reads
+  as `yours`. `gate` is never a task decision's owner: a process gate is no fork in the task's work, so a grade's
+  `gate` warns and reads as `yours`. A decision about a credential, an irreversible step (an external publish
+  included) or any sign-off (ADR 0008) is `yours`, never `technical` or `priorities`; a fork about spend alone is
+  `priorities` (Chorus ADR 0108 d4: spend is never asked), its gate in `gates[]`.
+- `goal` (a decision of his): one plain sentence on how the fork ties to the project's goal.
+- `stakes` (a decision of his): one plain line per option, in the options' order, saying what that option gains and
+  costs (quality, robustness, his time, speed).
 - `fork`: optional. When the decision answers an open fork (§ The grade), the fork worded exactly as its orient end
-  line words it, so the answer is recorded as that fork's ruling too.
+  line words it, so the answer is recorded as that fork's ruling too. Such a decision is `yours`.
 
-The ranker checks each one and puts the recommendation first among the options, in the option's own spelling, so the
-lead always has labels to ask with. orient-all asks the One calls through AskUserQuestion with the first option marked
-as recommended, and the Grills in conversation, in the same shape. orient-all asks a label over 40 characters behind a
-short numbered label, its full text in the option's description: keep labels short.
+Both `goal` and `stakes` are required with `owner: yours`; a decision with no `owner` reads as yours and is asked
+without them, with a warning.
+
+The ranker checks each one and puts the recommendation first among the options, in the option's own spelling (its
+`stakes` line with it), so the lead always has labels to ask with. orient-all asks the One calls (only his) through
+AskUserQuestion, each in the Framing the grade carries (its `goal`, each option's `stakes`, the recommendation and its
+why, and the Note: `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 3 and § 6), and the Grills in conversation, in
+the same shape. orient-all asks a label over 40 characters behind a short numbered label, its full text in the
+option's description: keep labels short.
 
 ## The raise
 
 ADR 0041: when the agent cannot recommend with confidence, the task's grade goes up. The ranker applies it in two
 steps, over the order Ready, One call, Grill, Orient:
 
-1. **Decisions.** The decision count implies a grade (0 is Ready, 1 is One call, 2 or more is Grill), and the task
-   takes the higher of that and the agent's grade.
-2. **Confidence.** If any decision's confidence is `low` (or missing), the grade rises one step. Orient stays Orient.
+1. **Decisions.** The count of his decisions (owner `yours`) implies a grade (0 is Ready, 1 is One call, 2 or more is
+   Grill), and the task takes the higher of that and the agent's grade. A decision ruled for him counts for nothing.
+2. **Confidence.** If any decision of his has confidence `low` (or missing), the grade rises one step. Orient stays
+   Orient.
 
-So a Ready task with one `low` decision becomes One call, then Grill. A One call or a Grill with no decision at all is
-invalid, never raised: there would be nothing to ask. The output keeps the agent's grade (`agentGrade`), the result
+So a Ready task with one `low` decision of his becomes One call, then Grill. A One call or a Grill with no decision of
+his (owner `yours`) is invalid, never lowered: a task whose every decision is ruled is graded Ready. The output keeps the agent's grade (`agentGrade`), the result
 (`grade`) and each step (`raised[]`), which the Grade log keeps (CONTEXT.md **Grade log**: `estate-dispatch.py log`
 writes it, `skills/reflect/scripts/grades.py` reads it against outcomes). A doubt that a task is Ready is written as the
-decision it may hide, with `confidence: low`.
+decision of his it may hide, owner `yours`, `confidence: low`.
 
 ## Size, deadlines and review
 
@@ -144,7 +175,10 @@ One object per project, holding every gradeable task of the project once:
           "options": ["<label>", "<label>"],
           "recommendation": "<one of the options>",
           "confidence": "high | medium | low",
-          "why": "<the evidence>",
+          "why": "<the evidence, and the pick against his priorities>",
+          "owner": "yours | priorities | technical",
+          "goal": "<a decision of his: how the fork ties to the project's goal>",
+          "stakes": ["<a decision of his: what each option gains and costs, one line per option>"],
           "fork": "<optional: the open fork it answers, as its orient end line words it>"
         }
       ],
@@ -157,8 +191,9 @@ One object per project, holding every gradeable task of the project once:
 }
 ```
 
-Leave `repo` off a task that is not parallel, `deadline` off when there is none, and `fork` off a decision that
-answers no open fork; `decisions` is `[]` for a Ready task. Grades are read case-insensitively, with `-` and `_` as spaces (`one-call` is One call), and always written
+Leave `repo` off a task that is not parallel, `deadline` off when there is none, `fork` off a decision that
+answers no open fork, and `goal` and `stakes` off a ruled decision (owner `technical` or `priorities`); `decisions` is
+`[]` for a Ready task with nothing to rule. Grades are read case-insensitively, with `-` and `_` as spaces (`one-call` is One call), and always written
 back in the canonical spelling.
 
 ## Dependencies
@@ -220,8 +255,10 @@ unparked, by an offer or by hand, the next pass lists its Orient tasks.
 **Leverage** is agent work per minute of Lachy's attention: `SIZE_MINUTES[size]` over the larger of
 `ATTENTION_FLOOR` and the attention minutes. Attention is deciding plus reviewing: `DECISION_MINUTES[grade]` per
 decision (none for Ready), plus the Review load at `REVIEW_MINUTES` per item (a parallel task's PR, a sign-off when it
-has gates, an eye-check when `eyeCheck` is set). A session task adds its whole agent time, since Lachy is there
-throughout.
+has gates, an eye-check when `eyeCheck` is set). A gate of any kind costs the sign-off, `spend` included: the ranker
+sees a gate's kind, never its price, the standing approval's limit or the month line, so a spend gate the standing
+approval would sign is still charged (ADR 0034's 2026-10-27 amendment, residual (x)). A session task adds its whole
+agent time, since Lachy is there throughout.
 
 **Runs.** The candidate runs group the ranked parallel and serial tasks by home, shape and root:
 
@@ -261,6 +298,7 @@ the fortnight have no measure in the record (reflect § What the record cannot s
 | `SNOOZE_KEYS` | `["snoozed_until", "snoozed_ready"]` | the snooze record's keys |
 | `GATE_KINDS` | `["spend", "credential", "irreversible"]` | the gate kinds, gated_inputs.py's sweep keys |
 | `CONFIDENCE` | `["high", "medium", "low"]` | the confidence levels |
+| `OWNERS` | `["yours", "priorities", "technical", "gate"]` | asking.md § 1's Owners, `gate` read as `yours` on a decision |
 
 **Failures.** Exit 2 is a refusal with one `estate-rank:` line (a scan or grades file that is not JSON, a scan schema
 other than 1): fix the input and run it again. Exit 3 is no vault, no PyYAML, or a sibling script that will not

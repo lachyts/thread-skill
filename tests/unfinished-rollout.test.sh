@@ -2,21 +2,30 @@
 # At most one unfinished rollout per repo (schedule § 0; ADR 0027, ADR 0030 decision 1 and its migration
 # consequence), and the supersede that carries a rollout's unlanded tasks into its successor:
 #   C1-C27  skills/_shared/scripts/unfinished-rollout.py check: none / supersede / interrupted / file / refuse
+#   C28-C29 an approved queue (p30-4; vault-grammar § Approved queue) whose only marks are the Chorus Stage's ended room
+#           stops reads as never started (reconcile-rollout.py approved_unrun): superseded, and paired as an interrupted
+#           supersede; a standing room stop, a hard pause's line, no on_merge or no hold_until still refuse
 #   U1-U3   a rollout awaiting sign-off (ADR 0034: `paused_for: sign-off`) is unfinished, and its refusal names the
 #           sign-off path (another project's) or the sign-off path beside --regenerate (this project's)
 #   K1-K5   skills/execute/scripts/reconcile-rollout.py carry: preview, refusals, per-field writes, re-runs, and
 #           the refusal of a prior that holds an undecided RACE or UNVERIFIED
 #   K5b     carry refuses a prior that holds an unacked git-env trip until its ack line (p14-6)
+#   K5c     carry refuses a prior that holds an unacked Lane hold until `lane-ack` (p29-7, ADR 0048)
 #   K6      carry maps each carried task's legacy stamps to a rung (ADR 0029 consequences): the `restamp`
 #           lines, the ladder's top rung, a refused ladder file, and a re-run
 #   K7      carry prints an `order` line per clause of the prior's prose that orders two carried tasks (p17-2),
 #           and again on a re-run while the prior is open (its tasks already on the new note), never once it closed
+#   K8      carry previews and copies the prior's rollout-scope `hold_until` (p30-3): verbatim, once, a different
+#           one on the new note kept with a WARN
+#   K9      carry takes an approved queue whose only marks are ended room stops (p30-4, approved_unrun); a plain
+#           one, a standing room stop or a pause_requested still refuse
 #   M1-M12  a protocol-3 wave rollout in flight with `review` PRs migrates: check -> resume -> carry preview ->
 #           write -> carry -> step 7 -> close-out (stamps, then the move), crash windows included.
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
 #           refused by `next`, reported by `status` and the check, until a completed supersede closes it.
 #   I8      § 0's interrupted finish after step 6's carry already ran still prints the prior's `order` lines (p17-2)
-#   R1-R4   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031)
+#   R1-R6   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031), never a snapshotted rollout (R5, ADR 0043),
+#           never an approved queue whose only marks are ended room stops (R6, p30-4)
 #   S1-S13  shapes (ADR 0040, p24-2): the parallel check skips serial notes and refuses a run on a place a live serial
 #           chain writes, before any supersede (S2c), never a clone root beside an in-place chain (S13, ADR 0042); the serial check (`--shape serial --surface <token>...`) refuses a
 #           chain over a live chain's surface or an unfinished parallel rollout's Project root, supersedes nothing,
@@ -42,8 +51,9 @@ TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
-# Its one fresh Away file (p28-1, execute away.md) runs each rollout to its own ceiling, never the Trickle; nx reads the
-# real clock (no --now), so the file is written now and stays fresh for the suite's run.
+# Its one fresh Away file (p28-1, execute away.md), its Away cap 99 never binding (p29-8), runs each rollout to its own
+# ceiling, never the Trickle or the Away cap; nx reads the real clock (no --now), so the file is written now and stays
+# fresh for the suite's run.
 EH="$TMP/settings-home"; mkdir -p "$EH"; away_file "$EH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
@@ -469,6 +479,42 @@ chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "refuse ro-q|3" "C27 control: once it has run it is an ordinary running rollout"
 hasnt "$err" "is incomplete" "C27 control: … never judged incomplete"
 
+# ── C28-C29: an approved queue whose only marks are the Stage's ended room stops (p30-4; approved_unrun) ──
+# The Chorus Stage's room stops (step-boundary.py's lines under `## Pause log`) are no run mark on an approved queue
+# (`on_merge: regenerate` beside a rollout hold_until), so its regenerate supersedes it, as schedule's Under the chain.
+# runs it. Anywhere else a room stop still counts, and so does a standing one or a hard pause's line.
+RS_ENDED=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none\n- 2026-10-01T11:00+00:00 room stop ended'
+RS_STANDS=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none'
+RS_HARD=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none\n- 2026-10-01T11:00+00:00 room stop ended\n- 2026-10-01T12:00+00:00 hard pause: runs none'
+AQ_HOLD='hold_until: {pr: o/r#202, merged: true}'; AQ_ON='on_merge: regenerate'
+scen c28
+BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
+mkt t1.md $P open
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "supersede $P|0" "C28: an approved queue whose only marks are ended room stops is superseded"
+BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse $P|3" "C28 control: the same note with no on_merge has run"
+has "$err" "has run and is not paused (it has a ## Pause log section)" "C28 control: … with its remedy"
+BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_ON"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse $P|3" "C28 control: … and with no hold_until"
+BODY="$RS_STANDS" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse $P|3" "C28 control: a room stop that still stands refuses"
+has "$err" "a room stop stands since 2026-10-01T10:00+00:00" "C28 control: … naming the standing room stop"
+BODY="$RS_HARD" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse $P|3" "C28 control: a hard pause's Pause log line refuses"
+has "$err" "it has a ## Pause log line that is no room stop" "C28 control: … naming it"
+
+scen c29
+BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\"" "$AQ_HOLD"
+mkt t1.md $N open
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "interrupted $P $N|0" "C29: the I8 pair: the approved P with ended room stops and its N -> interrupted"
+
 # ── S1-S12: shapes (ADR 0040) ─────────────────────────────────────────────────────────────────────────
 # mkser <path under $T> [frontmatter lines...] — a serial rollout note (`shape: serial`, no Project root) at status
 # $ST (default open); its surfaces: come among the frontmatter lines
@@ -773,6 +819,32 @@ carry --from "$T/$P.md" --to "$T/$N.md"
 ok "$rc" 0 "K5b: with the git-env ack line, it carries"
 ok "$(fm g1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5b: … both unlanded tasks"
 
+# ── K5c: carry refuses a prior that holds an unacked Lane hold until lane-ack (p29-7, ADR 0048) ──────────────────
+# The carry strips `integrating:` and never copies the `## Lane log`, so the held task would integrate unacked.
+scen k5c
+BODY=$'## Lane log\n\n- 2026-09-30T09:50+00:00 lane hold [[a1]] merge-task-abort: ERROR: merge-task aborted (70): set -u' \
+  mkro $P.md "$R" "$DEMO" "$PAUSED"
+mkt a1.md $P review 'pr: https://github.com/demo/repo/pull/7' 'integrating: 2026-09-30T09:40+00:00'
+mkt q1.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc" 2 "K5c: carry --dry-run refuses a prior holding an unacked Lane hold"
+ok "$err" "ERROR: carry: --from $P holds an unacked Lane hold: [[a1]]: record Lachy's ack first with /thread:repair [[$P]]" \
+  "K5c: … its one ERROR line names the held task and /thread:repair"
+ok "$out" "" "K5c: … no carry line"
+ok "$(sums)" "$before" "K5c: … writing nothing"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(sums)" "2|$before" "K5c: carry refuses it for real too, writing nothing"
+ok "$(fm a1.md integrating)|$(fm a1.md rollout)" "integrating: 2026-09-30T09:40+00:00|rollout: \"[[$P]]\"" \
+  "K5c: … the held task keeps integrating: and its rollout"
+python3 "$RR" lane-ack --rollout "$T/$P.md" --tasks a1 --fix "rebuilt merge-task's bash" --tasks-dir "$T" \
+  --now 2026-09-30T10:05:00Z > "$S.ack" 2>&1
+ok "$?|$(cat "$S.ack")" "0|a1: lane ack [written]" "K5c: (lane-ack records Lachy's ack)"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc" 0 "K5c: after lane-ack, it carries"
+ok "$(fm a1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5c: … both unlanded tasks"
+
 # ── K6: carry maps the legacy stamps of each carried task to a rung ──────────────────────────────────
 TIER_KEY=tier_"capped"   # the stale cap stamp's key, quoted in two parts so this file stays out of the Verify grep
 scen k6
@@ -941,6 +1013,94 @@ closeout $P $N
 carry --from "$T/Archive/Rollouts/$P.md" --to "$T/$N.md"
 ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(printf '%s\n' "$out" | grep -c '^order ')" "0|[no-change]|0" \
   "K7: a closed P (done, superseded_by N: its step 7 confirmed them) re-runs with no order line"
+
+# ── K8: carry copies a standing rollout-scope hold_until into the new note (p30-3; vault-grammar § Hold until) ──
+# A hold kept only as prose was lost in the 10-21 → 10-26 regenerate (Q50). The preview names the prior's hold with the
+# parser `next` reads it by, and the carry copies its lines verbatim (the block form with its continuation lines) after
+# `parallel_ceiling:`, else after `status:`; an identical hold already on the new note changes nothing, and a different
+# one is kept with a WARN. The prior is never written. A prior with no hold changes nothing: K1-K7 above are that case.
+scen k8
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: true}  # the engine fix lands first'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" 'parallel_ceiling: 2' "supersedes: \"[[$P]]\""
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc|$out" "0|carry a queued
+hold_until pr=o/r#202 merged=true
+(dry-run)" "K8: the preview prints the hold_until line after the carry lines, before the trailer"
+ok "$(sums)" "$before" "K8: … and writes nothing"
+pp=$(sum1 $P.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | grep '^hold_until ')|$(printf '%s\n' "$out" | tail -1)" "0|hold_until pr=o/r#202 merged=true|[written: 2]" \
+  "K8: carry prints it again and writes the task and the new note"
+ok "$(grep -A1 '^parallel_ceiling:' "$T/$N.md" | tail -1)" "hold_until: {pr: o/r#202, merged: true}  # the engine fix lands first" \
+  "K8: … the line copied verbatim, right after parallel_ceiling:"
+ok "$(grep -c '^hold_until:' "$T/$N.md")" 1 "K8: … once"
+ok "$(sum1 $P.md)" "$pp" "K8: … and the prior is never written"
+before=$(sums)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$err" "0|[no-change]|" "K8: an interrupted re-run copies nothing again, with no WARN"
+ok "$(sums)" "$before" "K8: … writing nothing"
+
+scen k8-block
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until:' '  pr: "#202"' '  merged: true'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --dry-run
+ok "$(printf '%s\n' "$out" | grep '^hold_until ')" "hold_until pr=#202 merged=true" "K8: the block form's preview line"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(sed -n '/^status:/,/^protocol_version:/p' "$T/$N.md")" '0|status: open
+hold_until:
+  pr: "#202"
+  merged: true
+protocol_version: 5' "K8: … copied with its continuation lines, after status: when there is no parallel_ceiling:"
+
+scen k8-unreadable
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: false}'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | grep '^hold_until ')|$(fm $N.md hold_until)" \
+  "0|hold_until unreadable: merged must be true|hold_until: {pr: o/r#202, merged: false}" "K8: an unreadable hold is named and copied verbatim, so it still fails closed"
+
+scen k8-same
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: true}'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\"" 'hold_until: {pr: o/r#202, merged: true}'
+pn=$(sum1 $N.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$err|$(sum1 $N.md)" "0|[written: 1]||$pn" "K8: an identical hold already on the new note changes nothing there"
+
+scen k8-differs
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: true}'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\"" 'hold_until: {pr: o/r#303}'
+pn=$(sum1 $N.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(sum1 $N.md)" "0|[written: 1]|$pn" "K8: a different hold on the new note is kept"
+ok "$err" "WARN: carry: hold_until on $N differs from $P's; $N's kept" "K8: … with one WARN line"
+
+# ── K9: carry takes an approved queue whose only marks are ended room stops (p30-4; approved_unrun) ─────────
+scen k9
+BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(fm a.md rollout)|$(fm $N.md on_merge)" "0|rollout: \"[[$N]]\"|<none>" "K9: carry takes it (the hold copied, never on_merge)"
+ok "$(fm $N.md hold_until)" "$AQ_HOLD" "K9: … its hold copied"
+for form in plain stands requested; do
+  case "$form" in
+    plain) BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" ;;
+    stands) BODY="$RS_STANDS" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON" ;;
+    requested) BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON" 'pause_requested: true' ;;
+  esac
+  mkt a.md $P open; mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+  before=$(sums)
+  carry --from "$T/$P.md" --to "$T/$N.md"
+  ok "$rc" 2 "K9 control [$form]: refused"
+  has "$err" "has run and is not paused" "K9 control [$form]: … has run and is not paused"
+  ok "$(sums)" "$before" "K9 control [$form]: … nothing written"
+done
 
 # ── M1-M12: a protocol-3 wave rollout in flight, with review PRs, migrates ────────────────────────────
 scen m
@@ -1225,6 +1385,20 @@ run
 has "$out" "running ro-ceremony" "R3: every task done but its completion ceremony not run: still running"
 run --tasks-dir "$S/nowhere"
 ok "$rc|$out" "0|none" "R4: a missing tasks dir (no vault) → none"
+# R5 (ADR 0043): a rollout on its Engine snapshot never runs on the primary checkout, so it holds nothing
+mkro ro-snap.md "$R" 'engine_snapshot: "~/repos/tools/plug-snapshots/0123456789ab"' "engine_sha: $(printf '0%.0s' $(seq 40))"
+mkt t-snap.md ro-snap open "owner: lead"
+run
+hasnt "$out" "ro-snap" "R5: a started rollout stamped engine_snapshot: is never running"
+has "$out" "running ro-live" "R5: … an unsnapshotted one still is"
+
+# R6 (p30-4): an approved queue whose only marks are the Stage's ended room stops has run nothing, so it holds nothing;
+# a plain rollout with the same room stops has run, and still does
+BODY="$RS_ENDED" mkro ro-aq.md "$R" "$AQ_HOLD" "$AQ_ON"; mkt t-aq.md ro-aq open
+BODY="$RS_ENDED" mkro ro-rs.md "$R" "$AQ_HOLD"; mkt t-rs.md ro-rs open
+run
+hasnt "$out" "ro-aq" "R6: an approved queue with only ended room stops is not running"
+has "$out" "running ro-rs" "R6: … a plain one with the same room stops is"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

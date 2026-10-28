@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""git-env-canary.py — the lead's git-env canary: did the shared checkout change during a window? (p14-6)
+"""git-env-canary.py — the lead's git-env canary: did the shared checkout change during a window? (p14-6, ADR 0046)
 
 The lead session (execute § 4.5 *Git-env canary*) opens a **window** around every launch that can run agents or a
 verifier against the rollout's shared checkout R (its `Project root:`): a task call, a seeded revise, an integrate
@@ -8,46 +8,87 @@ start, a restart, a seeded revise or a room-stopped call's resume) is armed by `
 --arm-repo <R> --arm-default <B>` itself (p26-3), which runs `arm` before any write and passes its exit code through;
 the lead runs `arm` directly for the rest. `arm` records R's `refs/heads/<B>` and its effective bareness before the
 launch; `check` compares them when the window ends. A change that is not benign appends a trip line to the rollout
-note's GIT_ENV_LOG_SECTION, which holds the queue (reconcile-rollout.py's `_git_env_hold`: `next` halts "git-env",
-`carry` refuses) until a human acks it through /thread:repair (`ack`). Nothing here retries, restores or acks on its
-own. Stdlib only, POSIX only (fcntl), like every script in this repo.
+note's GIT_ENV_LOG_SECTION, which holds what it threatens (reconcile-rollout.py's `_git_env_hold`, each entry with its
+`scope`) until a human acks it through /thread:repair (`ack`): a bare checkout (`core.bare` flipped, `core.bare true at
+arm`, or a failed state check's `core.bare true`) holds the whole rollout (`next` halts "git-env" at once, exit 3); any
+other trip holds the Integration lane only (`next` lists it under `laneHold`, task calls go on, exit 9 at every site
+but a task window's). `carry` refuses either. Nothing here retries, restores or acks on its own. Stdlib only, POSIX
+only (fcntl), like every script in this repo.
+
+A **Bookkeeping miss** (ADR 0046) is a window the canary could not read: `record missing`, `record unreadable` or
+`record not armed`. It observed nothing, so it never trips by itself: the canary runs the **state check** there and
+then (once per verb call, cached), and only a failing state check trips (the trip line reads `<reason>, and the state
+check failed: <failure>`, the failure sanitised: `;` -> `,`, the arrow -> `->`, newlines collapsed, at most 200
+characters; a bare failure reads `core.bare true`, never `core.bare false`). With no repo known it trips as before.
+The state check, local checks first and the network last:
+  1. `rev-parse --is-bare-repository`: bare fails (`core.bare true`), no network;
+  2. `git --no-optional-locks status --porcelain --untracked-files=no` is empty (untracked files such as
+     `.claude/merge-task.status` are ignored): else `tracked changes`, no network;
+  3. `_read_state` (still the only reader of the local refs): a missing `refs/heads/<B>` fails, no network;
+  4. L1 = `git ls-remote --exit-code origin refs/heads/<B>`, never retried;
+  5. `git -c gc.auto=0 fetch --quiet --no-tags --no-write-fetch-head origin refs/heads/<B>`, through the configured
+     refspec (so a forged refspec or tracking ref stays visible); retried once, after 1 s, only when its stderr
+     reads a ref lock (`cannot lock ref` or `Unable to create '….lock'`) and at least 2 s of the budget remain;
+  6. `_read_state` again (bare, B and T, origin/<B>);
+  7. T must equal L1; else L2 = a second ls-remote, and T must equal L2 (a peer's push between the reads passes); L is
+     the reading T matched;
+  8. `merge-base --is-ancestor B L`: no commit on B is missing from origin.
+Steps 4, 5 and 7 share one budget: min(THREAD_GIT_ENV_STATE_TIMEOUT, default 12 s; 0.4 x the lock timeout in force),
+so a verb waiting on the lock always gets it in time. Each network call runs in its own process group
+(`start_new_session`, stdin closed, GIT_TERMINAL_PROMPT=0, GCM_INTERACTIVE=never) with only the time left; a timeout
+kills its group (`<step> timed out after <n>s`) and is never retried; less than 1 s left fails (`no time left for
+<step>`); any git error or missing ref fails closed. A passing state check logs one miss line (GIT_ENV_MISS_MARK,
+imported) and holds nothing: `record missing` writes a closed `checked` tombstone carrying `miss`; `record not armed`
+leaves the tombstone untouched, so its `ackedTrips` survive; `record unreadable` becomes a closed `checked` tombstone
+with `miss: "record unreadable"` and `missChecked: false`, which that window's own later check consumes. That check
+reads the state check there and then too (cached, so free when its own pass logged the miss), never an earlier verb's:
+passing, it writes no second line; failing (a change since a `check-all` logged the miss), the window trips
+(`record unreadable, and the state check failed: <failure>`).
 
 Verbs (every verb takes --rollout <note>; every verb but `restore` takes --tasks-dir <dir>, default
 reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
 
   arm --repo R --default B --slug S --kind task|integrate|verify|race-verify|completion-verify [--resume]
         Runs the common pass (below), then writes this window's open `armed` record, with the ref of the pass's
-        single state read, only when the pass exits 0. --resume (a *Lost call* or § 5 resume of the same run)
+        single state read, only when the pass allows it. --resume (a *Lost call* or § 5 resume of the same run)
         keeps the `ackedTrips` of that window's record, open or closed by the check that sent the row to Lost
         call; a new run's arm over an earlier window nobody checked (a room stop's stopped verify) starts with none. R bare at arm is itself a trip (`core.bare true at arm`;
-        no record). Under a hold it exits 3 and writes no record. A retired rollout: exit 2, nothing created.
+        no record; exit 3). A task window under a lane hold arms (exit 0), printing one `LANE HOLD:` stderr line per
+        unacked trip: task worktrees are cut from origin, never from R's local ref. Under a whole-rollout hold it exits
+        3, and any other kind under a lane hold exits 9, writing no record. A retired rollout: exit 2, nothing created.
         Refuses (exit 2, nothing written: no record, no log line, no pass) a window whose owner does not hold
         (the owner rule below), its stderr naming the missing stamp (§ 4's `status: in_progress` for a task
         window, right for mark-started's arm and a direct one alike; `mark-integrating` for the rest), so a
-        skipped stamp stops at the arm, never as a later `record not armed` trip (p26-1). A task call's arm is
+        skipped stamp stops at the arm, never as a later `record not armed` miss (p26-1). A task call's arm is
         run by `reconcile-rollout.py mark-started --arm-repo/--arm-default` (p26-3), as a subprocess before any
         write of its own, which passes this exit code through (a non-zero arm writes nothing for that note).
   check --repo R --default B --slug S --kind K
         Runs the pass, then closes this window's record: `armed` and clean -> a `checked` tombstone; tripped
         (now or by an earlier verb) -> `closed: true`, no second trip line; a closed tripped record -> unchanged.
-        An `armed` window that carries an acked trip (`ackedTrips`, below) closes `checked` and exits 4, its run
-        no verdict (ADR 0053), naming each acked trip on stdout; a task window exits 0 instead, naming them too,
-        since a task call's work is taken as it stands; a trip or hold that still stands exits 3 either way.
-        A missing record trips `record missing`, an unreadable one `record unreadable`, and a closed `checked` or
-        `acked` tombstone `record not armed`: the owner holds at its own check, so a tombstone left by an earlier
-        window with the same slug and kind (a revise, a restart or a resume) means this window was never armed,
-        and a check that passed it as clean would let a commit made with no window open go unseen.
+        A missing record is the Bookkeeping miss `record missing`, a closed `checked` or `acked` tombstone `record
+        not armed` (the owner holds at its own check, so a tombstone left by an earlier window with the same slug
+        and kind means this window was never armed), and an unreadable record `record unreadable` (the pass turns
+        it into a tombstone this check consumes, reading the state check again at this check, so a change since an
+        earlier verb logged the miss trips here): each runs the state check above. A task window exits 3 only for a
+        whole-rollout hold, else 0: its work is taken as it stands (its agent worked in its own tree cut from
+        origin), and its stdout names any acked trip, any logged miss and any lane hold; a trip it saw is logged and
+        joins the unacked set. Every other kind exits 3 for a whole-rollout hold, else 9 for a lane hold, else 4
+        when its run gives no verdict (ADR 0053: an `armed` window that carries an acked trip, `ackedTrips`, below;
+        or a passing miss whose tombstone carries `ackedTrips`, reads `acked`, or was `record unreadable`), naming
+        each on stdout, else 0 (a clean miss on any other window keeps its verify: the state check showed the
+        checkout unharmed).
   check-all
-        The pass alone (R and B from the records). No records: 0, or 3 under a hold.
+        The pass alone (R and B from the records): 3 under a whole-rollout hold, else 9 under a lane hold, else 0.
+        No records: the hold alone decides.
   ack --repo R --default B --slugs a,b --ref <sha|absent>
         Runs the pass, re-reads the note and the state once more, and refuses (exit 3, nothing more written)
         unless --slugs is exactly the unacked set (the hold's slugs plus every record still `tripped`), R is not
         bare and refs/heads/B is --ref. Nothing to ack: exit 1. Otherwise every open window whose owner still
         holds is re-baselined to `armed` on that read, a tripped one keeping its trip line in `ackedTrips` so its
         own check still reports it (ADR 0053), every other tripped or orphaned record becomes an `acked`
-        tombstone, and one ack line is appended and confirmed.
+        tombstone, and one ack line is appended and confirmed. The only writer of the ack mark.
   retire
-        check-all (a non-zero exit is returned, nothing deleted), then writes `<dir>/<stem>.retired` and deletes
+        check-all (a non-zero exit, 3 or 9, is returned, nothing deleted), then writes `<dir>/<stem>.retired` and deletes
         `<dir>/<stem>/`, keeping `<dir>/<stem>.lock`.
   restore --repo R --default B [--drop-local <sha> | --bare-only]
         Lock-free; reads the note only to validate, writes only git state. First, before and independently of
@@ -59,13 +100,15 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
         on origin unless --drop-local names B's current sha (each such commit listed, the close-out ones marked),
         or while HEAD is on a deleted B; then moves B to origin's B (`reset --keep` when HEAD is on B, else a
         guarded `update-ref`). A drop prints the old sha and the `git branch git-env-rescue-<stamp> <sha>` that
-        recovers it.
+        recovers it. It has no in-flight guard of its own (the canary cannot see sessions): /thread:repair § 3e
+        runs it, `--bare-only` included, only once nothing of the rollout is in flight.
 
-The common pass (`arm`, `check`, `check-all`, `ack`), under the lock: (1) re-log every `tripped` record whose
-trip line is missing from the log; (2) read the state once and compare every `armed` record with it: a
-difference marks the record `tripped` (left open while its owner holds), appends its trip line and re-reads the
-note to confirm it; a clean record whose owner no longer holds is closed `checked`; (3) exit 3 if the note holds
-an unacked trip or any record reads `tripped`, else 0.
+The common pass (`arm`, `check`, `check-all`, `ack`), under the lock: (0) turn every unreadable record into a
+Bookkeeping miss (the state check above); (1) re-log every `tripped` record whose trip line is missing from the log;
+(2) read the state once and compare every `armed` record with it: a difference marks the record `tripped` (left open
+while its owner holds), appends its trip line and re-reads the note to confirm it; a clean record whose owner no
+longer holds is closed `checked`; (3) exit 3 if any unacked trip (the note's hold or a record still `tripped`) reads a
+bare checkout (reconcile-rollout.py's `_git_env_scope`: `rollout`), else 9 if any stands (`lane`), else 0.
 
 Owner rule: an `armed` window can only be open while its vault owner holds: kind `task` while the task note's queue
 state is `running`; `integrate`, `verify` and `race-verify` while the note holds the Integration lane
@@ -98,27 +141,37 @@ default and every unacked `refs/heads/<B>` trip line's branch. `check-all` and `
 
 Records live outside the repo: ${THREAD_GIT_ENV_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/thread/git-env}/
 <rollout-stem>/<slug>.<kind>.json, {v, slug, kind, repo, default, ref, bare, state, closed, armedAt, trip,
-ackedTrips (optional: the trip lines an ack re-baselined this window past)}, so an
+ackedTrips (optional: the trip lines an ack re-baselined this window past), miss and missChecked (optional: a
+Bookkeeping miss's tombstone)}, so an
 agent's `git clean` or `rm -rf .claude` in the shared checkout never reaches them. Every verb but `restore` holds
 `<dir>/<rollout-stem>.lock` (fcntl.flock; 30 s, or THREAD_GIT_ENV_LOCK_TIMEOUT seconds; a timeout is exit 2).
 Every git call runs with git's own --local-env-vars list (GIT_DIR, GIT_CONFIG_PARAMETERS, …) and the
 GIT_CONFIG_KEY_*/VALUE_* channels scrubbed.
 
-Line formats (the markers and the section heading are reconcile-rollout.py's GIT_ENV_TRIP_MARK, GIT_ENV_ACK_MARK
-and GIT_ENV_LOG_SECTION, imported, never copied):
-  - <stamp> <GIT_ENV_TRIP_MARK> [[<slug>]] <kind>: <refs/heads/B old→new | core.bare false→true | record missing |
-    record unreadable | record not armed | core.bare true at arm>; repo <R>
+Line formats (the markers and the section heading are reconcile-rollout.py's GIT_ENV_TRIP_MARK, GIT_ENV_ACK_MARK,
+GIT_ENV_MISS_MARK and GIT_ENV_LOG_SECTION, imported, never copied):
+  - <stamp> <GIT_ENV_TRIP_MARK> [[<slug>]] <kind>: <refs/heads/B old→new | core.bare false→true | core.bare true at arm |
+    <record missing | record unreadable | record not armed>, and the state check failed: <failure> | <the miss
+    reason> (no repo known)>; repo <R>
+  - <stamp> <GIT_ENV_MISS_MARK> [[<slug>]] <kind>: <the miss reason>; refs/heads/<B> at <sha>; ls-remote origin <B>
+    <L1>[, re-read <L2>]; origin/<B> <T> after a fetch; <B> on origin; no tracked changes; core.bare false; holds
+    nothing; repo <R>
   - <stamp> <GIT_ENV_ACK_MARK> [[a]], [[b]]: refs/heads/B at <sha|absent>, core.bare false
 
 Run record (p15-2, ADR 0032): every append to the log reads the hold (reconcile-rollout.py's _git_env_hold) before
 and after; an empty -> non-empty edge (a trip opens it) records `hold-started hold=git-env` and a non-empty -> empty
 edge (the ack) `hold-ended hold=git-env`, rollout the note's stem and task null, through reconcile-rollout.py's
-_event: best-effort, never changing an exit.
+_event: best-effort, never changing an exit. A miss line opens nothing.
 
-Exit codes: 0 clean, 3 a trip or a hold, 4 (check only, never a task window) clean but a trip inside this window
-was acked, so the window's run gives no verdict (ADR 0053), 1 nothing to ack, 2 a failure, a usage or a validation
-error. The lead treats every non-zero exit but 4 as a halt; on 4 it runs the window's verdict again (execute § 4.5's
-exit rule).
+Exit codes: 0 clean (or a task window taken as it stands, or a passing miss), 3 a whole-rollout hold (a bare
+checkout), 9 a lane hold (any other unacked trip; never a task window's arm or check), 4 (check only, never a task
+window) clean but this window's run gives no verdict (ADR 0053), 1 nothing to ack, 2 a failure, a usage or a
+validation error. The lead treats 3 and 2 as a halt, 9 as the lane held (no halt: task calls go on), and on 4 runs the
+window's verdict again (execute § 4.5's exit rule). An exit 2 whose stderr line starts `engine-snapshot: ` is the
+Engine snapshot guard (ADR 0043): every verb first asks engine-snapshot.py's guard(), loaded from this tree, and a
+rollout stamped with another snapshot (or a live one whose snapshot is unusable) is refused before the lock, with
+nothing written: re-run the same command from the root that line names (skills/_shared/engine-snapshot.md), never a
+halt.
 """
 
 import argparse
@@ -128,14 +181,22 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 KINDS = ("task", "integrate", "verify", "race-verify", "completion-verify")
 LOCK_TIMEOUT = 30.0
+# The state check's network budget (ADR 0046): THREAD_GIT_ENV_STATE_TIMEOUT seconds (default 12), capped at STATE_SHARE
+# of the lock timeout in force, so a verb waiting on the lock never times out behind a slow origin.
+STATE_TIMEOUT = 12.0
+STATE_SHARE = 0.4
+# A concurrent fetch's ref lock: the state check's fetch is retried once on it, never on a timeout.
+REF_LOCK_RE = re.compile(r"cannot lock ref|Unable to create '.*\.lock'")
 
 
 def _load_reconcile():
@@ -321,6 +382,200 @@ def _compare(rec, state):
     return None if anc.returncode == 0 else reason
 
 
+# ---- the state check (a Bookkeeping miss, ADR 0046) -----------------------------------------------------------
+
+def _lock_timeout():
+    """The lock timeout in force: THREAD_GIT_ENV_LOCK_TIMEOUT seconds, else LOCK_TIMEOUT."""
+    try:
+        return float(os.environ.get("THREAD_GIT_ENV_LOCK_TIMEOUT") or LOCK_TIMEOUT)
+    except ValueError:
+        return LOCK_TIMEOUT
+
+
+def _state_budget():
+    """The state check's network budget: min(THREAD_GIT_ENV_STATE_TIMEOUT or STATE_TIMEOUT, STATE_SHARE x the lock
+    timeout in force), never negative."""
+    try:
+        own = float(os.environ.get("THREAD_GIT_ENV_STATE_TIMEOUT") or STATE_TIMEOUT)
+    except ValueError:
+        own = STATE_TIMEOUT
+    return max(0.0, min(own, STATE_SHARE * _lock_timeout()))
+
+
+def _last(text):
+    """A git failure in one line: its first `fatal:` or `error:` line (git explains below it), else its last line."""
+    lines = (text or "").strip().splitlines()
+    return next((ln for ln in lines if ln.startswith(("fatal:", "error:"))), lines[-1] if lines else "")
+
+
+def _sanitise(text):
+    """A state-check failure as it may sit inside a trip line: `;` -> `,`, the arrow -> `->`, newlines collapsed (so no
+    `; repo ` and no `old→new` a reader could take for the line's own fields), at most 200 characters."""
+    s = " ".join((text or "").replace(";", ",").replace("→", "->").split())
+    return s[:200]
+
+
+class _Budget:
+    def __init__(self, seconds):
+        self.end = time.monotonic() + seconds
+
+    def left(self):
+        return self.end - time.monotonic()
+
+
+def _net(repo, budget, step, *args):
+    """One network git call of the state check, in its own process group with only the budget's time left:
+    (result, None), or (None, why) on no time left, a start failure or a timeout (its group killed)."""
+    left = budget.left()
+    if left < 1.0:
+        return None, f"no time left for {step}"
+    env = dict(_env(), GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
+    try:
+        proc = subprocess.Popen(["git", "-C", str(repo), *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
+    except OSError as e:
+        return None, f"{step}: {e}"
+    try:
+        out, err = proc.communicate(timeout=left)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:   # a grandchild outside the group still holds a pipe
+            for fh in (proc.stdout, proc.stderr):
+                try:
+                    fh.close()
+                except OSError:
+                    pass
+            proc.wait()
+        return None, f"{step} timed out after {left:.0f}s"
+    return SimpleNamespace(returncode=proc.returncode, stdout=out, stderr=err), None
+
+
+def _ls_remote(repo, branch, budget, step):
+    """(sha, None) for origin's refs/heads/<B> read with ls-remote, or (None, why)."""
+    ref = f"refs/heads/{branch}"
+    p, why = _net(repo, budget, step, "ls-remote", "--exit-code", "origin", ref)
+    if why:
+        return None, why
+    if p.returncode == 2:
+        return None, f"{step}: origin has no {ref}"
+    if p.returncode != 0:
+        return None, f"{step} exited {p.returncode}: {_last(p.stderr or p.stdout)}"
+    lines = [ln for ln in (p.stdout or "").splitlines() if ln.strip()]
+    parts = lines[0].split("\t") if len(lines) == 1 else []
+    if len(parts) != 2 or parts[1].strip() != ref or not re.fullmatch(r"[0-9a-f]{40,64}", parts[0].strip()):
+        return None, f"{step} does not read as exactly {ref}: {' | '.join(lines)}"
+    return parts[0].strip(), None
+
+
+def _state_check_run(repo, branch):
+    """The state check (the module docstring's eight steps): {ok, failure, ref, l1, l2, t}."""
+    res = {"ok": False, "failure": "", "ref": None, "l1": None, "l2": None, "t": None}
+
+    def fail(why):
+        res["failure"] = why
+        return res
+
+    p = _git(repo, "rev-parse", "--is-bare-repository")
+    out = (p.stdout or "").strip()
+    if p.returncode != 0 or out not in ("true", "false"):
+        return fail(f"cannot read the bareness: {_last(p.stderr or out)}")
+    if out == "true":
+        return fail("core.bare true")
+    p = _git(repo, "--no-optional-locks", "status", "--porcelain", "--untracked-files=no")
+    if p.returncode != 0:
+        return fail(f"git status exited {p.returncode}: {_last(p.stderr)}")
+    if (p.stdout or "").strip():
+        return fail("tracked changes")
+    try:
+        bare, ref, _t = _read_state(repo, branch)
+    except CanaryError as e:
+        return fail(str(e))
+    if bare:
+        return fail("core.bare true")
+    if ref is None:
+        return fail(f"refs/heads/{branch} absent")
+    res["ref"] = ref
+    budget = _Budget(_state_budget())
+    l1, why = _ls_remote(repo, branch, budget, f"ls-remote origin {branch}")
+    if why:
+        return fail(why)
+    res["l1"] = l1
+    step = f"fetch origin {branch}"
+    for attempt in (1, 2):
+        p, why = _net(repo, budget, step, "-c", "gc.auto=0", "fetch", "--quiet", "--no-tags", "--no-write-fetch-head",
+                      "origin", f"refs/heads/{branch}")
+        if why:
+            return fail(why)
+        if p.returncode == 0:
+            break
+        if attempt == 1 and REF_LOCK_RE.search(p.stderr or "") and budget.left() >= 2.0:
+            time.sleep(1.0)
+            continue
+        return fail(f"{step} exited {p.returncode}: {_last(p.stderr)}")
+    try:
+        bare, ref, t = _read_state(repo, branch)
+    except CanaryError as e:
+        return fail(str(e))
+    if bare:
+        return fail("core.bare true")
+    if ref is None:
+        return fail(f"refs/heads/{branch} absent")
+    res.update(ref=ref, t=t)
+    if t is None:
+        return fail(f"origin/{branch} absent after a fetch")
+    if t == l1:
+        tip = l1
+    else:
+        l2, why = _ls_remote(repo, branch, budget, f"ls-remote origin {branch} (re-read)")
+        if why:
+            return fail(why)
+        res["l2"] = l2
+        if t != l2:
+            return fail(f"origin/{branch} {t} after a fetch is neither ls-remote reading ({l1}, re-read {l2})")
+        tip = l2
+    anc = _git(repo, "merge-base", "--is-ancestor", ref, tip)
+    if anc.returncode == 1:
+        return fail(f"refs/heads/{branch} {ref} holds commits not on origin {branch} ({tip})")
+    if anc.returncode != 0:
+        return fail(f"git merge-base --is-ancestor exited {anc.returncode}: {_last(anc.stderr)}")
+    res["ok"] = True
+    return res
+
+
+def _state_check(ctx, repo, branch):
+    """The state check for (repo, branch), run once per verb call (cached on the Ctx)."""
+    key = (repo, branch)
+    if ctx._state_check is None or ctx._state_check[0] != key:
+        ctx._state_check = (key, _state_check_run(repo, branch))
+    return ctx._state_check[1]
+
+
+def _miss_line(slug, kind, reason, branch, sc, repo):
+    reads = f"ls-remote origin {branch} {sc['l1']}" + (f", re-read {sc['l2']}" if sc["l2"] else "")
+    return (f"- {_stamp()} {RR.GIT_ENV_MISS_MARK} [[{slug}]] {kind}: {reason}; refs/heads/{branch} at {sc['ref']}; "
+            f"{reads}; origin/{branch} {sc['t']} after a fetch; {branch} on origin; no tracked changes; core.bare false; "
+            f"holds nothing; repo {repo}")
+
+
+def _miss(ctx, rec, reason, repo, branch):
+    """A Bookkeeping miss on `rec` (a window record, in memory): the state check decides. Passing, the miss line to log
+    (the caller shapes the tombstone); failing, or with no repo known, `rec` is tripped (closed) and None comes back."""
+    if not repo or not branch:
+        _tripped(rec, reason, repo or "?", True)
+        return None
+    sc = _state_check(ctx, repo, branch)
+    if not sc["ok"]:
+        _tripped(rec, f"{reason}, and the state check failed: {_sanitise(sc['failure'])}", repo, True)
+        return None
+    rec["ref"] = sc["ref"]
+    return _miss_line(rec["slug"], rec["kind"], reason, branch, sc, repo)
+
+
 # ---- the rollout's records ------------------------------------------------------------------------------------
 
 class Ctx:
@@ -344,6 +599,7 @@ class Ctx:
         self.default = None
         self._index = None
         self._lock = None
+        self._state_check = None   # ((repo, branch), result): the state check runs once per verb call
 
     # -- the note
     def note(self):
@@ -390,10 +646,7 @@ class Ctx:
             fh = open(self.lock_path, "a")
         except OSError as e:
             raise CanaryError(f"cannot open the lock {self.lock_path}: {e}")
-        try:
-            timeout = float(os.environ.get("THREAD_GIT_ENV_LOCK_TIMEOUT") or LOCK_TIMEOUT)
-        except ValueError:
-            timeout = LOCK_TIMEOUT
+        timeout = _lock_timeout()
         deadline = time.monotonic() + timeout
         while True:
             try:
@@ -433,7 +686,8 @@ class Ctx:
                       and isinstance(rec.get("repo"), str) and isinstance(rec.get("default"), str)
                       and (rec.get("state") != "tripped" or isinstance((rec.get("trip") or {}).get("line"), str))
                       and isinstance(rec.get("ackedTrips", []), list)
-                      and all(isinstance(x, str) for x in rec.get("ackedTrips", [])))
+                      and all(isinstance(x, str) for x in rec.get("ackedTrips", []))
+                      and isinstance(rec.get("miss", ""), str) and isinstance(rec.get("missChecked", False), bool))
             except (OSError, ValueError):
                 ok, rec = False, None
             if not ok:
@@ -496,17 +750,37 @@ def _record_target(ctx, recs):
     return next(iter(pairs)) if pairs else (None, None)
 
 
+def _hold_scope(ctx, recs):
+    """What the unacked trips hold (ADR 0046): "rollout" when any reads a bare checkout (reconcile-rollout.py's
+    _git_env_scope), else "lane" when any stands, else None. The trips are the note's hold plus every record still
+    `tripped` (a line a read-only note could not take yet)."""
+    lines = [h["line"] for h in ctx.hold()]
+    lines += [r["trip"]["line"] for r in recs if r.get("state") == "tripped" and (r.get("trip") or {}).get("line")]
+    if not lines:
+        return None
+    return "rollout" if any(RR._git_env_scope(ln) == "rollout" for ln in lines) else "lane"
+
+
+SCOPE_RC = {None: 0, "lane": 9, "rollout": 3}
+
+
 def _pass(ctx, want_state=False):
-    """The common pass. Returns (rc, state, records): rc 3 on a hold or any tripped record, else 0."""
+    """The common pass. Returns (rc, state, records): rc 3 under a whole-rollout hold, 9 under a lane hold, else 0."""
     recs = ctx.records()
     repo, branch = _record_target(ctx, recs)
-    # Unreadable records trip (closed: their window cannot be known).
+    # (0) An unreadable record is a Bookkeeping miss (ADR 0046): the state check decides. Passing, it becomes a closed
+    # `checked` tombstone its own window's check consumes; failing (or with no repo known) it trips, closed.
+    misses = []
     for rec in recs:
         if rec.get("unreadable"):
             rec.update(v=1, repo=repo or "", default=branch or "", ref=None, bare=False, armedAt=None)
-            _tripped(rec, "record unreadable", repo or "?", True)
             rec.pop("unreadable", None)
+            line = _miss(ctx, rec, "record unreadable", repo, branch)
+            if line:
+                rec.update(state="checked", closed=True, trip=None, miss="record unreadable", missChecked=False)
+                misses.append(line)
             ctx.save(rec)
+    ctx.append(misses)
     # (1) re-log every tripped record whose line is missing.
     present = set(ctx.log_lines())
     ctx.append([r["trip"]["line"] for r in recs if r["state"] == "tripped" and r["trip"]["line"] not in present])
@@ -527,18 +801,28 @@ def _pass(ctx, want_state=False):
             rec.update(state="checked", closed=True)
             ctx.save(rec)
     ctx.append(lines)
-    # (3) the exit.
-    rc = 3 if ctx.hold() or any(r["state"] == "tripped" for r in recs) else 0
-    return rc, state, recs
+    # (3) the exit, by what the unacked trips hold.
+    return SCOPE_RC[_hold_scope(ctx, recs)], state, recs
 
 
 def _report(ctx, rc):
     if rc == 3:
         for t in ctx.hold():
             print(f"HOLD: {t['line']}", file=sys.stderr)
-        print(f"git-env: the shared checkout changed during a window: /thread:repair [[{ctx.stem}]] shows the "
-              "evidence and records the ack (never acked from execute)", file=sys.stderr)
+        print(f"git-env: the shared checkout changed during a window (a bare checkout holds the whole rollout): "
+              f"/thread:repair [[{ctx.stem}]] shows the evidence and records the ack (never acked from execute)",
+              file=sys.stderr)
+    elif rc == 9:
+        _lane_lines(ctx)
+        print(f"git-env: the shared checkout changed during a window: the Integration lane is held (task calls go on) "
+              f"until /thread:repair [[{ctx.stem}]] shows the evidence and records the ack (never acked from execute)",
+              file=sys.stderr)
     return rc
+
+
+def _lane_lines(ctx):
+    for t in ctx.hold():
+        print(f"LANE HOLD: {t['line']}", file=sys.stderr)
 
 
 # ---- validation -------------------------------------------------------------------------------------------------
@@ -608,8 +892,12 @@ def cmd_arm(ctx, args):
     if bare:
         ctx.append([_trip_line(args.slug, args.kind, "core.bare true at arm", ctx.repo)])
         return _report(ctx, 3)
-    if rc != 0:
+    # A lane hold (ADR 0046) holds only the Integration lane: a task window arms (its worktree is cut from origin,
+    # never from R's local ref); every other kind is lane work and arms nothing. A whole-rollout hold arms nothing.
+    if rc == 3 or (rc == 9 and args.kind != "task"):
         return _report(ctx, rc)
+    if rc == 9:
+        _lane_lines(ctx)
     rec = {"v": 1, "slug": args.slug, "kind": args.kind, "repo": ctx.repo, "default": ctx.default, "ref": ref,
            "bare": False, "state": "armed", "closed": False, "armedAt": _stamp(), "trip": None}
     # A resume's arm over its own still-open window (a Lost call, § 5: --resume) keeps the window's acked trips (ADR
@@ -627,47 +915,83 @@ def cmd_arm(ctx, args):
 
 def cmd_check(ctx, args):
     _validate(ctx, args.repo, args.default)
-    acked = []
-    rc, _state, recs = _pass(ctx)
+    acked, missed, void = [], None, False
+    _rc, _state, recs = _pass(ctx)
     own = next((r for r in recs if r["slug"] == args.slug and r["kind"] == args.kind), None)
+    base = {"v": 1, "slug": args.slug, "kind": args.kind, "repo": ctx.repo, "default": ctx.default, "ref": None,
+            "bare": False, "armedAt": None}
     if own is None:
-        rec = {"v": 1, "slug": args.slug, "kind": args.kind, "repo": ctx.repo, "default": ctx.default, "ref": None,
-               "bare": False, "armedAt": None}
-        _tripped(rec, "record missing", ctx.repo, True)
+        # A Bookkeeping miss (ADR 0046): the state check decides; passing, a closed `checked` tombstone carries it.
+        rec = dict(base)
+        line = _miss(ctx, rec, "record missing", ctx.repo, ctx.default)
+        if line:
+            rec.update(state="checked", closed=True, trip=None, miss="record missing")
+            missed = "record missing"
         ctx.save(rec)
-        ctx.append([rec["trip"]["line"]])
+        ctx.append([line or rec["trip"]["line"]])
     elif own["state"] == "armed":
         own.update(state="checked", closed=True)
         ctx.save(own)
         acked = own.get("ackedTrips") or []
+        void = bool(acked)
     elif own["state"] == "tripped" and not own["closed"]:
         own["closed"] = True
         ctx.save(own)
+    elif own["state"] == "checked" and own.get("miss") == "record unreadable" and own.get("missChecked") is False:
+        # The pass logged this window's own unreadable record as a miss just now (or an earlier verb did): consume
+        # it. The state check is read there and then, at this check (cached: free when this check's own pass ran it),
+        # never taken from an earlier verb's pass, so a change since that miss trips here. Passing: no second line,
+        # and the window could not be read, so its run gives no verdict. Failing: the window trips, closed.
+        own["missChecked"] = True
+        sc = _state_check(ctx, ctx.repo, ctx.default)
+        if sc["ok"]:
+            ctx.save(own)
+            missed, acked, void = "record unreadable", own.get("ackedTrips") or [], True
+        else:
+            _tripped(own, f"record unreadable, and the state check failed: {_sanitise(sc['failure'])}", ctx.repo, True)
+            ctx.save(own)
+            ctx.append([own["trip"]["line"]])
     elif own["state"] in ("checked", "acked"):
-        # A tombstone of an earlier window: this one was never armed (fail closed, never a silent 0).
-        rec = {"v": 1, "slug": args.slug, "kind": args.kind, "repo": ctx.repo, "default": ctx.default,
-               "ref": own.get("ref"), "bare": False, "armedAt": None}
-        _tripped(rec, "record not armed", ctx.repo, True)
-        ctx.save(rec)
-        ctx.append([rec["trip"]["line"]])
-    rc = 3 if ctx.hold() or any(r["state"] == "tripped" for r in ctx.records()) else 0
-    if rc == 0 and acked and args.kind == "task":
-        # ADR 0053: a task call's work is taken as it stands (its agent worked in its own tree cut from origin).
-        print(f"checked [[{args.slug}]] task: clean, taken as it stands; a trip inside this window was acked "
-              "(ADR 0053): " + "; ".join(acked))
+        # A tombstone of an earlier window: this one was never armed. A Bookkeeping miss: the state check decides,
+        # and a passing one leaves the tombstone untouched, so its `ackedTrips` survive (ADR 0053).
+        rec = dict(base, ref=own.get("ref"))
+        line = _miss(ctx, rec, "record not armed", ctx.repo, ctx.default)
+        if line:
+            missed, acked = "record not armed", own.get("ackedTrips") or []
+            void = bool(acked) or own["state"] == "acked" or own.get("miss") == "record unreadable"
+            ctx.append([line])
+        else:
+            ctx.save(rec)
+            ctx.append([rec["trip"]["line"]])
+    scope = _hold_scope(ctx, ctx.records())
+    said = ([f"a Bookkeeping miss ({missed}) was logged with the checkout's state"] if missed else []) + \
+        ([f"a trip inside this window was acked (ADR 0053): {'; '.join(acked)}"] if acked else []) + \
+        ([f"the Integration lane is held by {len(ctx.hold())} unacked trip(s) (/thread:repair)"] if scope == "lane" else [])
+    if scope == "rollout":
+        return _report(ctx, 3)
+    if args.kind == "task":
+        # A task call's work is taken as it stands (its agent worked in its own tree cut from origin): ADR 0053, and
+        # ADR 0046's lane hold, which never holds a task call.
+        if scope == "lane":
+            _lane_lines(ctx)
+        print(f"checked [[{args.slug}]] task: " + ("; ".join(["clean, taken as it stands"] + said) if not
+              any(r.get("state") == "tripped" and r["slug"] == args.slug and r["kind"] == "task" for r in ctx.records())
+              else "; ".join(["taken as it stands (this window tripped: logged, it joins the unacked set)"] + said)))
         return 0
-    if rc == 0 and acked:
-        # ADR 0053: the ack re-baselined this window mid-run, so the checkout changed under its run.
-        print(f"checked [[{args.slug}]] {args.kind}: no verdict, a trip inside this window was acked (ADR 0053; "
-              "execute § 4.5's exit rule says what this kind does with it): " + "; ".join(acked))
+    if scope == "lane":
+        return _report(ctx, 9)
+    if void:
+        # ADR 0053: the ack re-baselined this window mid-run, or the window could not be read, so its run gives no
+        # verdict.
+        print(f"checked [[{args.slug}]] {args.kind}: no verdict ({'; '.join(said) or 'its window could not be read'}; "
+              "execute § 4.5's exit rule says what this kind does with it)")
         return 4
-    if rc == 0:
-        print(f"checked [[{args.slug}]] {args.kind}: clean")
-    return _report(ctx, rc)
+    print(f"checked [[{args.slug}]] {args.kind}: clean" + (f"; {'; '.join(said)}" if said else ""))
+    return 0
 
 
 def cmd_check_all(ctx, _args):
-    rc, _state, recs = _pass(ctx)
+    rc, _state, recs = _pass(ctx)   # 3 > 9 > 0
     if rc == 0:
         print(f"check-all {ctx.stem}: clean ({sum(1 for r in recs if r['state'] == 'armed')} window(s) open)")
     return _report(ctx, rc)
@@ -812,6 +1136,19 @@ class _Parser(argparse.ArgumentParser):
         raise CanaryError(f"usage: {message}")
 
 
+def _engine_guard(note):
+    """engine-snapshot.py's guard() for the note, loaded from this tree (ADR 0043): its refusal line, else None."""
+    try:
+        sys.dont_write_bytecode = True
+        src = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "engine-snapshot.py"
+        spec = importlib.util.spec_from_file_location("thread_engine_snapshot", src)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # only positive evidence refuses
+        return None
+    return mod.guard(note, src.parent.parent.parent.parent, "skills/execute/scripts/git-env-canary.py")
+
+
 def main(argv=None):
     ap = _Parser(prog="git-env-canary.py", description="the lead's git-env canary (execute § 4.5)")
     sub = ap.add_subparsers(dest="verb", required=True, parser_class=_Parser)
@@ -837,6 +1174,10 @@ def main(argv=None):
     try:
         args = ap.parse_args(argv)
         ctx = Ctx(args)
+        refusal = _engine_guard(ctx.rollout)
+        if refusal:   # ADR 0043: a stamped rollout's canary runs on its own Engine snapshot; nothing written
+            print(refusal, file=sys.stderr)
+            return 2
         if args.verb != "restore":
             ctx.lock()
         return VERBS[args.verb](ctx, args)

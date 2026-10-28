@@ -15,9 +15,10 @@
 //       <decision.options[0]> and [--fork <decision.fork>], `--fork` exactly when the decision carries one; and
 //       DECISIONS_HEADING and RULING_LINE are schedule step 7's heading and orient § 5's ruling line (a python child
 //       loads them).
-//   o5  § 4's Unpark and sign-off writes: estate-rank.py unpark, snooze --ready and kill, and approve-gates --tasks.
+//   o5  § 4's Unpark and sign-off writes: estate-rank.py unpark, snooze --ready and kill, and approve-gates --tasks,
+//       run from the task's rollout's engine root (`engine-snapshot.py resolve`, ADR 0043), never this session's.
 //   o6  § 6 runs `plan`, forks `/thread:schedule <entry.args>` with the projectSlug line, one batch at a time, and
-//       answers schedule's questions in exactly 15 items, § 0's clone question (ADR 0042) with the No, since no fork
+//       answers schedule's questions in exactly 16 items, § 0's clone question (ADR 0042) with the No, since no fork
 //       holds Lachy's yes; schedule's **Under orient-all.** paragraph cites orient-all § 6 and routes nothing, S1 and S4
 //       name orient-all, and nothing pairs orient-all with --regenerate.
 //   o7  § 7 runs `sessions` with --wrote and --status and starts exactly items[]; its table's numbers; the Session
@@ -25,7 +26,7 @@
 //       exact `title` alone (sessions cuts it); row 8 needs plan.reinstate[] and canExecute; create_thread, the
 //       paste-ready prompts, orients last with the note line; its cites; and `start: unattended` only in the Don't.
 //   o8  § 9 asks nothing, writes only under $S, runs `plan --rounds --assume-answered` and `sessions` with no --wrote,
-//       runs no `estate-dispatch.py log`, and names every command it never runs.
+//       runs no `estate-dispatch.py log` and no `decided-for-you --write`, and names every command it never runs.
 //   o9  plugin-root.md, CONTEXT.md (**Decision round**, **Dispatch plan**), ADR 0041's p25-3 ruling and the README
 //       row name the skill.
 //   o10 status parity: estate-dispatch.py's STATUS_ACTIONS opens each of status § 4's thirteen numbered
@@ -174,14 +175,15 @@ function check(files, consts) {
 
   // o5: the Unpark and sign-off writes.
   need('o5', '§ 4', s4, ['estate-rank.py unpark <note>', 'estate-rank.py snooze <note> --ready', 'estate-rank.py kill <note>',
-    'reconcile-rollout.py approve-gates --tasks <slug>'])
+    'reconcile-rollout.py approve-gates --tasks <slug>', "engine-snapshot.py resolve --rollout <the index entry's rollout>",
+    '`python3 <root>/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <slug> --rollout <rollout-note>`'])
 
   // o6: the schedule forks and their answers.
   need('o6', '§ 6', s6, ['estate-dispatch.py plan', '/thread:schedule <entry.args>', 'name the note with slug <entry.projectSlug>',
     'never two batches at once'])
   const answers = slice(s6raw, /^3\. \*\*Schedule's questions, answered\.\*\*/, /^4\. /) ?? ''
   const items = answers.split('\n').filter((l) => /^ {3}\d+\. /.test(l)).map((l) => Number(l.trim().split('.')[0]))
-  if (JSON.stringify(items) !== JSON.stringify(Array.from({ length: 15 }, (_, i) => i + 1))) flag('o6', `the answers are numbered ${JSON.stringify(items)}`)
+  if (JSON.stringify(items) !== JSON.stringify(Array.from({ length: 16 }, (_, i) => i + 1))) flag('o6', `the answers are numbered ${JSON.stringify(items)}`)
   need('o6', "§ 6's answers", C(answers), ['routes nothing', '`none`', 'Advance', 'kebab', '`projectSlug`', '`plan_approval: required`',
     "§ 0's clone question (exit 4)", 'the fork takes the No'])
   const schedule = files[SCHEDULE] ?? ''
@@ -221,10 +223,11 @@ function check(files, consts) {
     '--rounds "$S/rounds.json" --assume-answered', 'estate-dispatch.py sessions', 'with no `--wrote`'])
   const never = s9.slice(s9.indexOf('It never runs'))
   need('o8', '§ 9 never-runs', never, ['`record`', '`approve-gates`', '`estate-rank.py snooze`', '`unpark`', '`kill`',
-    'schedule fork', '`list_sessions`', '`read_session`', '`relay_session`', '`create_thread`'])
+    'schedule fork', '`list_sessions`', '`read_session`', '`relay_session`', '`create_thread`', '`decided-for-you --write`'])
   const dryCmds = s9.slice(0, s9.indexOf('It never runs'))
   if (/--wrote </.test(dryCmds)) flag('o8', 'the dry run passes --wrote')
   if (/estate-dispatch\.py log\b/.test(dryCmds)) flag('o8', 'the dry run logs the grades')
+  if (/decided-for-you[^`]*--write/.test(dryCmds)) flag('o8', 'the dry run writes the Decided for you calls')
 
   // o9: the docs that name the skill.
   need('o9', PLUGIN_ROOT, C(files[PLUGIN_ROOT]), ['orient-all → schedule (its forks), status, execute, repair or orient',
@@ -307,11 +310,13 @@ test('control o4: a decision heading that drifts from schedule step 7, a Grill r
     CONSTS, ['o4'], 'one-call question')
 })
 
-test('control o5: the kill write gone fails o5 alone', () => {
+test('control o5: the kill write gone, or a sign-off run from the session root, fails o5 alone', () => {
   only(swap(FILES, SKILL, 'estate-rank.py kill <note>', 'by hand'), CONSTS, ['o5'], 'kill')
+  only(swap(FILES, SKILL, '`python3 <root>/skills/execute/scripts/reconcile-rollout.py approve-gates',
+    '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates'), CONSTS, ['o5'], 'session root')
 })
 
-test('control o6: a sixteenth answer, a fork that makes the clone, or schedule routing for orient-all, fails o6 alone', () => {
+test('control o6: a seventeenth answer, a fork that makes the clone, or schedule routing for orient-all, fails o6 alone', () => {
   only(swap(FILES, SKILL, '   15. Serial S1 and S4', '   15. Nothing else.\n   16. Serial S1 and S4'), CONSTS, ['o6'], 'count')
   only(swap(FILES, SKILL, 'the fork takes the No', 'the fork takes the Yes'), CONSTS, ['o6'], 'clone')
   only(swap(FILES, SCHEDULE, 'It routes nothing: § 0\'s session-lane routing', 'It routes the misfits: § 0\'s session-lane routing'),

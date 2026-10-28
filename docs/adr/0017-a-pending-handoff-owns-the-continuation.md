@@ -33,6 +33,8 @@ only writer of a handoff doc, on explicit fork intent only. The hook references 
 § Decision, § Rejected and § Consequences are history — no hook-forced handoff exists any
 more — and the body-section list is the skill's own.)*
 *(Amended by ADR 0039, 2026-10-18: the repo-thread lookup reaches depth 4, skips _archive, and matches by slug or directory name.)*
+*(Amended by ADR 0057, 2026-10-28: a Rollout launch's doc, marked `launches:` in its front matter, briefs a rollout's
+lead and is no continuation of the thread; close's scan reads it as `launch`.)*
 
 ## Context
 

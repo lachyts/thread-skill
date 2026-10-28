@@ -23,7 +23,8 @@
 #     name the reset that drops the local copies once landed. Ahead commits whose content is already on
 #     origin/<b> (no file they touch differs: a squash or cherry-picked PR) are a note naming that reset;
 #     ahead commits touching only THREAD.md are a note. An ahead set touching no file blocks. A reset that
-#     would move the primary checkout while a rollout runs on it says to wait (primary-hold.sh, ADR 0031).
+#     would move the primary checkout while an unsnapshotted rollout runs on it says to wait (primary-hold.sh,
+#     ADR 0031; ADR 0043: a rollout on its Engine snapshot holds nothing).
 #   Clone-rooted (ADR 0042) — when <repoPath>'s toplevel is a rollout clone (`self-rollout-check.sh --in-place`
 #     names its twin: every rollout scheduled after P26, and every self-rollout), the root keeps the rule above and
 #     every other member is a peer: the in-place checkout, the primary checkout of a self-rollout among them. A

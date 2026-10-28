@@ -45,6 +45,7 @@ git config --global user.name t; git config --global user.email t@t.invalid
 git config --global init.defaultBranch master; git config --global advice.detachedHead false
 export LANDING_REGISTER="$TMP/register.md"; : > "$LANDING_REGISTER"
 export THREAD_LEG_LOCK_DIR="$TMP/locks" THREAD_EVENTS_DIR="$TMP/events" TMPDIR="$TMP/t"
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 mkdir -p "$TMPDIR" "$TMP/bin"
 # A fake gh and ssh: any call is logged and fails, so a test can assert no network was touched.
 printf '#!/bin/sh\necho "gh $*" >> "%s/net.log"\nexit 1\n' "$TMP" > "$TMP/bin/gh"
@@ -162,6 +163,10 @@ SESS=s2 leg next --waiting "room stop: stopping calls at a step boundary"
 ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=5/7 running=1 state=waiting reason=\"room stop: stopping calls at a step boundary\"" \
    "L1: … and the room stop's"
 keepline; same "L1: next --waiting writes nothing"
+SESS=s2 leg next --waiting "room stop: L spreading its Rollouts (would reach its 5-hour line ~17:51)"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=5/7 running=1 state=waiting reason=\"room stop: L spreading its Rollouts (would reach its 5-hour line ~17:51)\"" \
+   "L1: … and a spread's, intact"
+same "L1: … a spread's writes nothing"
 SESS=s2 leg next; ok "$(q '"status_line" in d')" False "L1: a bare next prints no status line"
 SESS=s2 leg next --waiting " "; ok "$rc|$out" "2|" "L1: --waiting with no reason is a usage error"
 SESS=s2 leg done --task t6 --verify pass; ok "$rc" 0 "done t6"

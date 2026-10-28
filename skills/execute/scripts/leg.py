@@ -16,8 +16,12 @@ clock otherwise) · --session <id> (default CLAUDE_CODE_SESSION_ID, then CODEX_T
 --harness claude|codex (default: codex under CODEX_THREAD_ID alone, else claude) · --dry-run (compute and print,
 write nothing, take no lock).
 
-Output: one JSON line on stdout for every exit but a usage error. Exit codes: 0 ok · 1 refusal (nothing written) ·
-2 usage (stdout empty, one `leg:` line on stderr) · 3 a stand (an unclosed Leg of another session, a standing halt,
+Output: one JSON line on stdout for every exit but a usage error and the Engine snapshot guard. Exit codes: 0 ok · 1
+refusal (nothing written) · 2 usage (stdout empty, one `leg:` line on stderr), or the Engine snapshot guard (ADR 0043:
+every verb but status first asks engine-snapshot.py's guard(), loaded from this tree; a note stamped with another
+usable snapshot than this plugin root, or a live note whose snapshot is unusable, prints its `engine-snapshot: ` line,
+stdout empty, nothing written: re-run from the root it names; an archived note whose snapshot is gone passes, so
+file-followup after Complete still runs) · 3 a stand (an unclosed Leg of another session, a standing halt,
 a revert that would conflict or a dirty path to revert; nothing written) · 4 wrong launch (nothing written) · 5 the
 rollout's lock was held past its timeout (nothing written). A refusal's JSON carries `exit`, `error` and, from
 begin, the `status_line` its turn ends on. Every git call runs with git's repo-local env vars removed (`git rev-parse
@@ -2357,6 +2361,15 @@ def cmd_restarted(ctx, a):
 
 # ---- main -----------------------------------------------------------------------------------------------------------
 
+def engine_guard(note):
+    """engine-snapshot.py's guard() for the note, loaded from this tree (ADR 0043): its refusal line, else None."""
+    try:
+        mod = _load("thread_engine_snapshot", PLUGIN / "skills" / "_shared" / "scripts" / "engine-snapshot.py")
+    except Usage:   # only positive evidence refuses
+        return None
+    return mod.guard(note, PLUGIN, "skills/execute/scripts/leg.py")
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         raise Usage(message)
@@ -2456,6 +2469,11 @@ def main(argv=None) -> int:
         rr = _load("reconcile_rollout", RR_SRC)
         sc = _load("serial_chains", SC_SRC)
         ctx = Ctx(args)
+        if verb != "status":
+            refusal = engine_guard(ctx.rollout)
+            if refusal:   # ADR 0043: a stamped chain's Legs run on its Engine snapshot; nothing written
+                print(refusal, file=sys.stderr)
+                return 2
         if ctx.archived and verb in ARCHIVE_REFUSED:
             raise Refuse(1, f"{ctx.slug} is complete and archived ({ctx.rollout}): only file-followup writes after "
                             "Complete, and it writes nothing into the archived note")

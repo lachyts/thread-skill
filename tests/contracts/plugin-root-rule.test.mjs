@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { readIf, walk, textFiles, fencedBlocks, collapse, slice, skillCount, FENCE } from '../lib/contract-text.mjs'
+import { readIf, walk, textFiles, fencedBlocks, collapse, slice, skillCount, proseUnits } from '../lib/contract-text.mjs'
 
 const RULE = 'skills/_shared/plugin-root.md'
 const CITE = '${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md'
@@ -93,22 +93,6 @@ const FAILURE_CAUSE = new RegExp([
   /\bmissing script\b/,
   /\.(?:sh|py|js|mjs)`? (?:is |was )?not found\b/,
 ].map((r) => r.source).join('|'), 'i')
-const UNIT_START = /^\s*(?:[-*+]|\d+\.)\s|^\s*\||^#/
-function proseUnits(text) {
-  const units = []
-  let cur = []
-  let inFence = false
-  const flush = () => { if (cur.length) units.push(collapse(cur.join(' ')).trim()); cur = [] }
-  for (const l of text.split('\n')) {
-    if (FENCE.test(l)) { flush(); inFence = !inFence; continue }
-    if (inFence) continue
-    if (!l.trim()) { flush(); continue }
-    if (UNIT_START.test(l)) flush()
-    cur.push(l)
-  }
-  flush()
-  return units
-}
 const uncited = (text) => proseUnits(text).filter((u) => FAILURE_CAUSE.test(u) && !u.includes('plugin-root.md'))
 
 test('control: the failure-cause scan flags an uncited cause per unit, and passes fences and cited units', () => {

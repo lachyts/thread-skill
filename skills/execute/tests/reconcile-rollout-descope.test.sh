@@ -328,6 +328,15 @@ scen f3-decisions
 base
 printf '\n## Decisions (gather 2026-10-01)\n\n- the resume filter changes stay in this task\n' >> "$D/$A.md"
 before=$(snap); own; asks "F3 --owner, the part under ## Decisions"
+# Its control: a `## Decided for you` section is an agent's call (ADR 0054), never a recorded human decision, and no
+# brief text either (BRIEF_EXCLUDE), so the same part descopes and its pointer lands in ## Notes.
+scen f3-decided-for-you
+base
+printf '\n## Decided for you (2026-10-27)\n\nCalls made for Lachy, never asked (ADR 0054): each stands unless the code shows it wrong.\n\n- Keep the resume filter changes here? → yes (decided for you at /thread:schedule, technical: x.py:3)\n' >> "$D/$A.md"
+own
+ok "$rc" 0 "F3 control: --owner, the part under ## Decided for you descopes (exit 0)"
+has "$out" "[written]" "F3 control: [written]"
+has "$(sec "$A" '## Notes' | grep -F "$POINTER")" "the resume filter changes" "F3 control: the pointer lands in ## Notes"
 scen f3-repair-input
 base
 printf '\n## Repair input\n\n- keep the resume filter changes here\n' >> "$D/$A.md"
