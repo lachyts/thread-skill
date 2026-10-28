@@ -60,7 +60,7 @@ The router for the undecided moment. A sibling of the decisive routes, not their
 ## Don't
 
 - Don't recommend more than one move. The whole point is answering the question, not restating the options.
-- Don't pad the summary — headline + top open question, then the line (or, when the move is not clear, the menu).
+- Don't pad the summary — headline + top open question (none after this session's own handoff, step 2), then the line (or, when the move is not clear, the menu).
 - Don't re-implement any route inline. Dispatch means running the sibling skill's logic as written.
 - Don't run `/compact`, `/rewind` or `/clear` yourself, don't keep working after printing a `/compact` line, and don't offer compact as a route.
 - Don't invoke this router when the user was already decisive — "stash this" is `thread:stash`, not a `next` conversation.

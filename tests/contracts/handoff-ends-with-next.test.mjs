@@ -11,8 +11,8 @@
 //     it sits, is no second move) and none on ending or archiving this session;
 //   - next step 1 counts the handed-off work as its consumer's, never this session's keep-going step, while the
 //     detection bullet above it still settles where the thread lives; after the handoff next prints no step-2
-//     summary and asks nothing outside its menu (step 2 says so too); step 5 names the skip; plugin-root.md lists
-//     handoff → next; README and CONTEXT say so;
+//     summary and asks nothing outside its menu (step 2 and § Don't say so too); step 5 names the skip;
+//     plugin-root.md lists handoff → next; README and CONTEXT say so;
 //   - eval cases: a handoff that ends on one move for this session, a handoff that next dispatched with no second
 //     next, and the two older handoff cases regraded (the trace now holds the doc) or given the longer turn budget.
 //
@@ -160,6 +160,7 @@ function fails(F) {
     'it prints only its one line, or the menu when the pick is his, with no question outside that menu',
   ])
   need('N5', lineOf(stripFront(F[NEXT]), /^2\. \*\*Summarise/), ["None after this session's own handoff (step 1)"])
+  need('N5', lineOf(stripFront(F[NEXT]), "- Don't pad the summary"), ["headline + top open question (none after this session's own handoff, step 2)"])
 
   // N6 — next step 5 names the skip, so a dispatched handoff never runs next again.
   need('N6', lineOf(F[NEXT], /^5\. \*\*Dispatch\.\*\*/), ['with handoff § Next for this session skipped'])
@@ -277,6 +278,7 @@ test('controls: N5 to N8, next, plugin-root, README and CONTEXT', () => {
   only('N5:summary', swap(NEXT, "After this session's own handoff, next prints no step-2 summary and no open question", 'After this session\'s own handoff, next prints its step-2 summary'), ['N5'])
   only('N5:question', swap(NEXT, ', with no question outside that menu', ''), ['N5'])
   only('N5:step2', swap(NEXT, " None after this session's own handoff (step 1), whose output already said where the work is.", ''), ['N5'])
+  only('N5:dont', swap(NEXT, " (none after this session's own handoff, step 2)", ''), ['N5'])
   only('N6', swap(NEXT, ", with handoff § Next for this session skipped (this step already decided this session's move)", ''), ['N6'])
   only('N7', swap(PLUGIN_ROOT, '; handoff → next,', '; handoff,'), ['N7'])
   only('N8:readme', swap(README, ' Then it runs `/thread:next` once for this session, unless `next` or a Rollout launch dispatched it.', ''), ['N8'])
