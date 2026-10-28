@@ -213,9 +213,15 @@ test('W7. plist: the job, its gh, its PATH, --chorus-url and the script it names
   assert.equal(job.ProcessType, 'Background')
   assert.equal(job.EnvironmentVariables.PATH.split(':')[0], s.bin)
   assert.equal(job.Label, 'com.thread.watchdog')
-  r = await run(s, ['plist'], { env: { ...s.env, PATH: '/usr/bin:/bin' } })
+  // No gh on PATH: a fresh empty dir, never /usr/bin:/bin (GitHub's Ubuntu image ships /usr/bin/gh). `run` spawns the
+  // absolute PY, so the PATH needs nothing in it.
+  const ghless = path.join(s.dir, 'ghless')
+  fs.mkdirSync(ghless)
+  r = await run(s, ['plist'], { env: { ...s.env, PATH: ghless } })
+  assert.equal(r.status, 0, r.stderr)
   job = parse(r.stdout)
   assert.deepEqual(job.ProgramArguments.slice(1), [WD, 'check'])
+  assert.deepEqual(job.EnvironmentVariables.PATH.split(':'), ['/usr/bin', '/bin', '/usr/sbin', '/sbin'])
   assert.equal(r.stderr.split('\n').filter((l) => l.startsWith('WARN')).length, 1)
   r = await run(s, ['plist', '--chorus-url', ''], { env: { ...s.env, PATH: `${s.bin}:/usr/bin:/bin` } })
   job = parse(r.stdout)
