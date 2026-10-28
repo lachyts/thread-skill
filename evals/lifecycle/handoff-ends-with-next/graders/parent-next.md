@@ -19,7 +19,8 @@ Not graded, neither required nor penalised:
 FAIL if any of these:
 
 - It gives no move for this session, or marks more than one option recommended.
-- It recommends archiving this session, or says another session holds the thread or has started. This is a manual handoff, so no successor was started.
+- It recommends archiving this session, says this session can be ended or archived, or says another session holds the thread or has started. This is a manual handoff, so no successor was started.
+- Outside a menu of moves, thread:next's part of the message (everything after the paste-ready prompt, or the whole message when the handoff came in an earlier one) asks Lachy a question, for example an open question in a summary of where the work is. The handoff doc's and the prompt's own content do not count.
 - It recommends or runs close while the README fix is still to do.
 - The move comes before the handoff doc and prompt, or between them.
 - It claims a new session or task was created.

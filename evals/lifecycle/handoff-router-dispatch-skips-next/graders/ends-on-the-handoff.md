@@ -19,4 +19,5 @@ FAIL if any of these:
 - It puts the choice of move to Lachy as a question or a menu.
 - After the handoff's output it recommends a further move for this session (keep going, stash, defer, close or archive), beyond that overturn note.
 - It claims a new session or task was created.
+- It says this session can be ended or archived, or that the thread already continues in another session (for example "the thread now continues in the fresh session, and you can end this one"). This is a manual handoff: nobody has opened its prompt yet, so no other session holds the thread.
 - It states that files were actually written or committed.
