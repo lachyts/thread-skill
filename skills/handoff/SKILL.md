@@ -156,7 +156,7 @@ Keep it tight — the doc carries the depth; the prompt carries the momentum.
 
 When native task creation succeeds, seed the new task with the prompt (the doc path travels inside it) and launch it in the `Run from:` directory (§ Success contract: on Chorus, `create_thread`'s `cwd`), then report the created task and, in Codex Desktop, emit the required directive. When native task creation is unavailable, print the prompt and the absolute path of the handoff doc so the user can open a new task manually.
 
-When `create_thread` on Chorus returned `Raised (task_id: …)` (§ Success contract, step 2), the Stage starts the next Session from the card at once, so the closing words never ask Lachy to start or open it: end the handoff's own output on this line (shown fenced below, printed bare as close's banners are), with nothing after it but § Next for this session, and no question anywhere in the handoff's own output:
+When `create_thread` on Chorus returned `Raised (task_id: …)` (§ Success contract, step 2), the Stage starts the next Session from the card at once, so the closing words never ask Lachy to start or open it: end the handoff's own output on this line (shown fenced below, printed bare as close's banners are), with nothing after it but § Next for this session, and no question anywhere in the handoff's own output; `next`, run after it, asks none outside its menu (next step 1, **After this session's own handoff**):
 
 ```
 **Handed off. The next Session is starting on the Stage from <abs doc path>; if it could not start, its card says why and waits as an offer.**
@@ -178,8 +178,8 @@ The handed-off work counts as gone (next step 1, **After this session's own hand
 
 **Skipped on a dispatch.**
 
-- When next's step 5 dispatched this handoff, that step already decided this session's move.
-- Every **Rollout launch.** is a dispatch, as a router's is (ADR 0057): schedule step 8's **Execute handoff.**, orient § 9's **Fresh session**, and his "hand it off" on close's `rollout not started:` row. Its turn ends on handoff's own closing line, or its labelled manual handoff.
+- When next's step 5 dispatched this handoff, that step already decided this session's move. Its turn ends on handoff's own output (the closing line, the directive, or the labelled manual handoff), with no word after it on this session's move and none anywhere on ending or archiving this session: only Lachy archives a session (next step 5), and a manual handoff's prompt that nobody has opened is no work carrying on elsewhere (next step 1).
+- Every **Rollout launch.** is a dispatch, as a router's is (ADR 0057): schedule step 8's **Execute handoff.**, orient § 9's **Fresh session**, and his "hand it off" on close's `rollout not started:` row. Its turn ends the same way, on handoff's own output.
 
 It is also skipped on the **Failure path.**, which writes no doc and waits on a directory from Lachy. A withdrawal (**Lifecycle.**) is its own act, and no `next` follows it.
 

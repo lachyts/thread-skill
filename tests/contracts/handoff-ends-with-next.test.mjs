@@ -6,9 +6,11 @@
 //     the task is created (or the run labelled a manual handoff) and the handoff's own output has ended; through the
 //     Skill (args `after-handoff <abs doc path>`) or a read of next's SKILL.md, never re-implemented (ADR 0002);
 //   - it is skipped on a dispatch: next's own step 5 ran the handoff, or the handoff is a Rollout launch (ADR 0057);
-//     and on the resolver's failure path and a withdrawal;
+//     and on the resolver's failure path and a withdrawal. A dispatch's turn ends on handoff's own output, with no
+//     word after it on this session's move and none on ending or archiving this session;
 //   - next step 1 counts the handed-off work as its consumer's, never this session's keep-going step, while the
-//     detection bullet above it still settles where the thread lives; step 5 names the skip; plugin-root.md lists
+//     detection bullet above it still settles where the thread lives; after the handoff next prints no step-2
+//     summary and asks nothing outside its menu (step 2 says so too); step 5 names the skip; plugin-root.md lists
 //     handoff → next; README and CONTEXT say so;
 //   - eval cases: a handoff that ends on one move for this session, a handoff that next dispatched with no second
 //     next, and the two older handoff cases regraded (the trace now holds the doc) or given the longer turn budget.
@@ -118,10 +120,16 @@ function fails(F) {
   ])
 
   // N3 — skipped on a dispatch: next's own step 5 and every Rollout launch; and on the failure path and a withdrawal.
+  // A dispatch's turn ends on handoff's own output and never says this session can be ended or archived: on the
+  // Stage, Chorus's close leg reads "can be ended because its work carries on elsewhere" as *closed*, which archives
+  // the Session, and a manual handoff's unopened prompt is no work carrying on elsewhere (next step 1).
   need('N3', slice(sec, SKIPPED, null), [
     "next's step 5", '**Rollout launch.**',
     "schedule step 8's **Execute handoff.**", "orient § 9's **Fresh session**",
     "close's `rollout not started:` row", 'ADR 0057',
+    "Its turn ends on handoff's own output (the closing line, the directive, or the labelled manual handoff)",
+    "with no word after it on this session's move", 'none anywhere on ending or archiving this session',
+    'only Lachy archives a session', "Its turn ends the same way, on handoff's own output",
     '**Failure path.**', '**Lifecycle.**',
   ])
 
@@ -130,7 +138,9 @@ function fails(F) {
   need('N4', slice(section(h, /^## Success contract/) ?? '', /^5\. /, /^\S/), ['§ Next for this session follows it'])
   need('N4', slice(h, /^\*\*Rollout launch\.\*\*/, /^\*\*Split launch\.\*\*/), ['(§ Next for this session is skipped)'])
 
-  // N5 — next step 1: the bullet directly after the detection bullet counts the handed-off work as gone.
+  // N5 — next step 1: the bullet directly after the detection bullet counts the handed-off work as gone, and after
+  // the handoff next prints no step-2 summary and no question outside its menu (on the Stage the Turn's last message
+  // is next's, and Chorus's close leg reads a '?' anywhere in it as *question*); step 2 says it has no summary then.
   const s1 = (slice(stripFront(F[NEXT]), /^1\. \*\*Read the situation/, /^2\. /) ?? '').split('\n')
   const iDetect = s1.findIndex((l) => DETECT.test(l))
   const after = iDetect >= 0 ? s1[iDetect + 1] ?? '' : ''
@@ -141,7 +151,10 @@ function fails(F) {
     "step 3's **While another session holds the thread.** rule and step 4's archive line govern, residual work or not",
     'Only a manual handoff', 'close § The handoff owns the continuation',
     ', which the fresh session will build on',
+    "After this session's own handoff, next prints no step-2 summary and no open question",
+    'it prints only its one line, or the menu when the pick is his, with no question outside that menu',
   ])
+  need('N5', lineOf(stripFront(F[NEXT]), /^2\. \*\*Summarise/), ["None after this session's own handoff (step 1)"])
 
   // N6 — next step 5 names the skip, so a dispatched handoff never runs next again.
   need('N6', lineOf(F[NEXT], /^5\. \*\*Dispatch\.\*\*/), ['with handoff § Next for this session skipped'])
@@ -235,6 +248,10 @@ test('controls: N1 to N4, handoff\'s own text', () => {
   only('N3:router', swap(HANDOFF, "When next's step 5 dispatched this handoff", 'When a router dispatched this handoff'), ['N3'])
   only('N3:orient', swap(HANDOFF, "orient § 9's **Fresh session**, ", ''), ['N3'])
   only('N3:failure', swap(HANDOFF, 'skipped on the **Failure path.**', 'skipped when the resolver fails'), ['N3'])
+  // the dispatched turn free to tell Lachy he can end this session (invocation 6, run 2: "you can end this one")
+  only('N3:archive', swap(HANDOFF, ' and none anywhere on ending or archiving this session', ''), ['N3'])
+  only('N3:ends', swap(HANDOFF, "Its turn ends on handoff's own output (the closing line, the directive, or the labelled manual handoff)", "Its turn ends"), ['N3'])
+  only('N3:launch', swap(HANDOFF, "Its turn ends the same way, on handoff's own output.", "Its turn ends on handoff's own closing line."), ['N3'])
   only('N4:build', swap(HANDOFF, ' but § Next for this session', ''), ['N4'])
   only('N4:contract', swap(HANDOFF, ', and § Next for this session follows it', ''), ['N4'])
   only('N4:launch', swap(HANDOFF, ' (§ Next for this session is skipped)', ''), ['N4'])
@@ -248,6 +265,10 @@ test('controls: N5 to N8, next, plugin-root, README and CONTEXT', () => {
   only('N5:govern', swap(NEXT, ', residual work or not', ''), ['N5'])
   only('N5:manual', swap(NEXT, 'Only a manual handoff', 'A handoff'), ['N5'])
   only('N5:branch', swap(NEXT, ', which the fresh session will build on', ''), ['N5'])
+  // step 2's summary and its open question back after the handoff: on the Stage the Turn would end asking
+  only('N5:summary', swap(NEXT, "After this session's own handoff, next prints no step-2 summary and no open question", 'After this session\'s own handoff, next prints its step-2 summary'), ['N5'])
+  only('N5:question', swap(NEXT, ', with no question outside that menu', ''), ['N5'])
+  only('N5:step2', swap(NEXT, " None after this session's own handoff (step 1), whose output already said where the work is.", ''), ['N5'])
   only('N6', swap(NEXT, ", with handoff § Next for this session skipped (this step already decided this session's move)", ''), ['N6'])
   only('N7', swap(PLUGIN_ROOT, '; handoff → next,', '; handoff,'), ['N7'])
   only('N8:readme', swap(README, ' Then it runs `/thread:next` once for this session, unless `next` or a Rollout launch dispatched it.', ''), ['N8'])

@@ -6,20 +6,24 @@
 // Stage takes it out before it reads, and at `state=done` reads *closed* by the same rule. A handoff on the
 // Stage starts its next Session at once (ADR 0089 d1), so its closing words say so and never ask Lachy to
 // start it. A handoff then runs `next` for this session, the parent (handoff § Next for this session), after its
-// closing line: on the Stage the Turn's last message ends on next's line, menu or dispatch, never on the handoff
-// line. The handoff line is still checked as the last line of the handoff's own output, never reading closed or
-// asking, and next's archive line after it reads neither closed nor asking.
+// closing line, so on the Stage the Turn's last message is next's. The port reads two fixed template lines only:
+// the handoff line, then next step 4's archive line (its archive part and close part) after it, which together read
+// neither closed nor asking. What else next prints there is model-written text the port cannot read, so a prose pin
+// in check() (`next:after-handoff`) holds next's rule that after this session's own handoff it prints no step-2
+// summary or open question and asks nothing outside its menu: Chorus's close leg reads a closing message that
+// asks anything, anywhere in it, as *question*.
 //
 // Four layers, reading files only (nothing is written anywhere):
 //   1. the port: Chorus's readers, copied verbatim into JS (header below names each source line);
 //   2. port self-tests: Chorus's documented behaviour, so a bad port fails here before it judges skill text;
 //   3. the skill text read THROUGH the port: close's four banners, the paraphrase counter-example, the
 //      NOT-closed form, the step-8 statement offer and rollout row (ADR 0057), rule (3)'s question line, a lead's status line, open
-//      save's checkpoint line and handoff's closing line, then that line followed by next's archive line, each
-//      extracted from the skill files themselves;
+//      save's checkpoint line and handoff's closing line, then that line followed by next step 4's archive line
+//      (two fixed lines), each extracted from the skill files themselves;
 //   4. prose and order pins through check(files), which returns named failures, each with a mutation control:
 //      among them execute's `done` route, which still runs the thread close (the ceremony's last step, after the
-//      archive commit that makes `next` read `done`), and handoff's closing line, printed only on a raised card.
+//      archive commit that makes `next` read `done`), handoff's closing line, printed only on a raised card, and
+//      next's after-handoff run, which prints no step-2 summary or open question.
 // A fifth, optional layer cross-checks the port against the real Python when CHORUS_SRC names Chorus's src/
 // (`CHORUS_SRC=~/repos/tools/chorus/src node --test <this file>`); tests/run.sh never sets it, so it skips.
 import { test } from 'node:test'
@@ -385,7 +389,8 @@ test('handoff § Build: the closing line says the next Session is starting and n
   for (const bad of ['Start it', 'open it']) assert.ok(!l.includes(bad), `the handoff line says ${bad}`)
 })
 
-test('handoff then next: on a raised card the Turn ends on next\'s archive line, which never asks', () => {
+// The two fixed lines only: next's own words around its archive line are pinned as prose (`next:after-handoff`).
+test('handoff then next: the handoff line, then next step 4\'s archive line, reads neither closed nor asking', () => {
   const l = handoffLine(real.handoff)
   const a = archivePart(real.next)
   const c = closePart(real.next)
@@ -446,6 +451,10 @@ const RULES = [
   'Chorus ADR 0089 d2',
 ]
 const OFFER = '`research not landed: <pointer>; say "land it" to file it`, never as a question (step 9, rule (3))'
+const AFTER_HANDOFF = [
+  "After this session's own handoff, next prints no step-2 summary and no open question",
+  'it prints only its one line, or the menu when the pick is his, with no question outside that menu',
+]
 const LIFE = [
   'On the Stage', '`dismiss_task`', '`already_started_by_stage`', '`not_found`', 'from its own row',
   'once he says it is stopped, or that he wants the doc gone', 'Chorus ADR 0089 § Amended 2026-10-15',
@@ -522,6 +531,11 @@ function check(files) {
   if (!has(lineOf(h, '**Lifecycle.**') ?? '', LIFE)) fails.push('handoff:lifecycle')
   if (!collapse(section(files.lifecycle, /^## Withdrawn/) ?? '').includes('keeps its brief')) fails.push('lifecycle:withdrawn')
   if (!(lineOf(files.next, /^5\. \*\*Dispatch\.\*\*/) ?? '').includes('(plus the native task in Codex Desktop or a Chorus Session)')) fails.push('next')
+  // after this session's own handoff, next prints no step-2 summary or open question, so the Turn asks nothing
+  // outside next's menu; handoff § Build points at that rule
+  const afterHandoff = lineOf(files.next, /^\s*- \*\*After this session's own handoff\*\*/) ?? ''
+  if (!has(afterHandoff, AFTER_HANDOFF) || !has(BUILD(h), ["`next`, run after it, asks none outside its menu (next step 1, **After this session's own handoff**)"]))
+    fails.push('next:after-handoff')
   return fails
 }
 
@@ -607,6 +621,10 @@ test('controls: template, handoff, lifecycle and next pins fail on their own mut
   only('handoff:next:order', { ...real, handoff: moved.replace('## Build the handoff prompt\n', `${real.handoff.slice(i, j)}## Build the handoff prompt\n`) }, ['handoff:next'])
   only('lifecycle', swap('lifecycle', 'keeps its brief', 'loses its brief'), ['lifecycle:withdrawn'])
   only('next', swap('next', '(plus the native task in Codex Desktop or a Chorus Session)', '(plus the native task in Codex Desktop)'), ['next'])
+  // step 2's summary and its open question back after the handoff, or the menu no longer the only place it asks
+  only('next:after-handoff', swap('next', "After this session's own handoff, next prints no step-2 summary and no open question", "After this session's own handoff, next prints its step-2 summary"), ['next:after-handoff'])
+  only('next:after-handoff:menu', swap('next', ', with no question outside that menu', ''), ['next:after-handoff'])
+  only('next:after-handoff:build', swap('handoff', "; `next`, run after it, asks none outside its menu (next step 1, **After this session's own handoff**)", ''), ['next:after-handoff'])
 })
 
 // ---- 5. Optional drift check against the real Python ---------------------------------------------------
