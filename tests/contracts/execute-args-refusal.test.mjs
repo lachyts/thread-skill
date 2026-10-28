@@ -8,7 +8,9 @@
 // that contains the sentinel to *Args refusal* before its *Lost call* clause; § Room stop item 6 and *Lost call*'s
 // room-stop bullet, each excluding such an error from room-stopped; § 3.7's fifth *Can no longer resume* case; § 4's
 // verifySlot check before the stamps (its halt, its integrate `free-lane`, the resume exemption) and the three launch
-// sequences that name it (step 1.2's seeded revise, step 1.3, the integrate call); the *Run record*'s free-lane bullet; § 7's three halts; § 3's `verify-timeout` exit 4 and its shape
+// sequences that name it (step 1.2's seeded revise, step 1.3, the integrate call); the *Run record*'s free-lane bullet; § 7's three halts,
+// each listed under ADR 0048's *Whole-rollout halts kept* and matched by reconcile-rollout.py's WHOLE_HALT_PATTERNS (so the
+// Watchdog's `moving` reads it as a wait on Lachy, never `stalled`); § 3's `verify-timeout` exit 4 and its shape
 // without `verifySlots`; and no "reads as a *Lost call*" left. The engine half (the sentinel on every refusal) is pinned
 // by skills/execute/tests/args-refusal.test.mjs.
 //
@@ -20,6 +22,7 @@ import assert from 'node:assert/strict'
 import { collapse, read, section } from '../lib/contract-text.mjs'
 
 const real = read('skills/execute/SKILL.md')
+const realRr = read('skills/execute/scripts/reconcile-rollout.py')
 
 const S3 = /^### 3\. /
 const S37 = /^### 3\.7\. /
@@ -46,9 +49,23 @@ const SENTINEL = '`thread:args-refused`'
 const FREE = '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py free-lane --tasks <slug> || true`'
 const HALT = 'reason="engine refused the args of [[<slug>]]"'
 const PRE_HALT = 'reason="args.verifySlot is not this entry\'s verify-timeout verifySlot"'
+// § 7's three p32-1 halts as *Whole-rollout halts kept* words each, and the reason a halt's Run-record line carries.
+const KEPT = [
+  ['reason="verify-slot.py not found"', 'verify-slot.py not found'],
+  [PRE_HALT, "args.verifySlot is not this entry's verify-timeout verifySlot"],
+  ['reason="engine refused the args of [[task]]"', 'engine refused the args of [[p32-1-some-task]]'],
+]
+// reconcile-rollout.py's WHOLE_HALT_PATTERNS as anchored RegExps ({rollout} formatted with a stem), as `moving` matches.
+function wholeHalts(rr) {
+  const lines = rr.split('\n')
+  const i = lines.findIndex((l) => l.startsWith('WHOLE_HALT_PATTERNS = ('))
+  if (i < 0) return []
+  const j = lines.findIndex((l, k) => k > i && l === ')')
+  return [...lines.slice(i + 1, j).join('\n').matchAll(/r"((?:[^"\\]|\\.)*)"/g)].map((m) => new RegExp('^' + m[1].replace('{rollout}', 'ro')))
+}
 
 // Named failures; [] means every rule holds.
-function check(skill) {
+function check(skill, rr = realRr) {
   const fails = []
   const s45raw = section(skill, S45) ?? ''
   const ar = labelled(skill, S45, 'Args refusal (p32-1).')
@@ -186,6 +203,15 @@ function check(skill) {
     fails.push('halts')
   }
 
+  // kept: each of the three is a whole-rollout halt by design (a missing script every entry repeats, a lead bug in the
+  // args § 4 builds for every call), so ADR 0048 lists it under § 7's *Whole-rollout halts kept* and WHOLE_HALT_PATTERNS
+  // matches its reason; without both, `moving` reads the halt beside pending work as `stalled`.
+  const keptEvery = lineAt(section(skill, S7), '- *Threatens every task*')
+  const pats = wholeHalts(rr)
+  if (KEPT.some(([text, said]) => !keptEvery.includes('`' + text + '`') || !pats.some((p) => p.test(said)))) {
+    fails.push('kept')
+  }
+
   // verify-timeout: § 3's exit 4 (its ERROR line, the write-nothing halt, the order of the exits) and the printed shape,
   // with no `verifySlots` left anywhere in SKILL.md.
   if (!s3.includes('`ERROR: verify-timeout: <path> not found`') || !s3.includes('reason="verify-slot.py not found"') ||
@@ -212,16 +238,16 @@ test('execute § 3, § 3.7, § 4, § 4.5, § 5 and § 7 hold every args-refusal 
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
-const RULES = ['args-refusal', 'lost-exclusion', 'routing-sites', 'room-stop', 'cannot-resume', 'pre-check', 'launch-sites', 'free-lane', 'halts', 'verify-timeout', 'prose-sites']
+const RULES = ['args-refusal', 'lost-exclusion', 'routing-sites', 'room-stop', 'cannot-resume', 'pre-check', 'launch-sites', 'free-lane', 'halts', 'kept', 'verify-timeout', 'prose-sites']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
   return text.replace(from, to)
 }
-const only = (skill, rule, label) => {
+const only = (skill, rule, label, rr = realRr) => {
   CONTROLLED.add(rule)
-  assert.deepEqual(check(skill), [rule], label)
+  assert.deepEqual(check(skill, rr), [rule], label)
 }
 
 test('control: Args refusal without its integrate free-lane fails args-refusal', () => {
@@ -302,6 +328,13 @@ test('control: § 7 without verify-timeout exit 4 fails halts', () => {
   only(edit(real, b, ''), 'halts', 'no exit 4')
 })
 
+test('control: a p32-1 halt left off the kept list, or no pattern matching it, fails kept', () => {
+  only(edit(real, ', `reason="verify-slot.py not found"` (§ 3);', ' (§ 3);'), 'kept', 'verify-slot.py not found unlisted')
+  only(edit(real, ' and `reason="engine refused the args of [[task]]"` (§ 4.5 *Args refusal*)', ''), 'kept', 'Args refusal unlisted')
+  only(real, 'kept', 'no pattern for the pre-check halt',
+    edit(realRr, '    r"args\\.verifySlot is not this entry\'s verify-timeout verifySlot",\n', ''))
+})
+
 test('control: verifySlots back in the printed shape fails verify-timeout', () => {
   only(edit(real, '"slotWait": <slot_wait>, "verifySlot": {', '"slotWait": <slot_wait>, "verifySlots": <verify_slots>, "verifySlot": {'), 'verify-timeout', 'verifySlots')
 })
@@ -310,7 +343,7 @@ test('control: the prUrlError clause reading as a Lost call again fails prose-si
   only(edit(real, 'before dispatch (an *Args refusal*, which halts the entry);', 'before dispatch and the refusal reads as a *Lost call*;'), 'prose-sites', 'prUrlError')
 })
 
-test('the rules are all named (11) and each has a control', () => {
-  assert.equal(RULES.length, 11)
+test('the rules are all named (12) and each has a control', () => {
+  assert.equal(RULES.length, 12)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
