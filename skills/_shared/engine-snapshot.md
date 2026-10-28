@@ -65,10 +65,10 @@ The guarded scripts refuse a wrong root: exit 2, nothing written, and one stderr
 names the root to re-run from. They are:
 
 - `reconcile-rollout.py`, every verb but `status`, `fold-journals` and `moving`: it asks about the note `--rollout` (carry:
-  `--from`) names, and the rollout each `--tasks` slug's note (and, for `reconcile`, each result row's) names in its
-  `rollout:`, so a task-keyed verb with `--rollout` left off (`reconcile`, `hand-back`, `mark-started`,
-  `mark-integrating`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`, `defer`, `approve-gates`,
-  `lane-hold`, `lane-ack`) is guarded too;
+  `--from`) names, which `lane-hold` and `lane-ack` always take, and the rollout each `--tasks` slug's note (and, for
+  `reconcile`, each result row's) names in its `rollout:`, so a task-keyed verb with `--rollout` left off (`reconcile`,
+  `hand-back`, `mark-started`, `mark-integrating`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`,
+  `defer`, `approve-gates`) is guarded too;
 - `git-env-canary.py`, `step-boundary.py begin` and `end`, `leg.py` but `status`, `close-score.py`,
   `lead-integrate.py prepare` and `set-aside`, and `merge-task.sh` through `guard-pr`.
 

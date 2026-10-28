@@ -1296,11 +1296,11 @@ already written is ever deleted.
 
 The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md). Every verb but `status`, `fold-journals` and
 `moving` first asks engine-snapshot.py, loaded from this tree, about each rollout the call acts on: guard() on the note its
---rollout (carry: its --from) names, and guard_task() on each --tasks slug's note and, for `reconcile`, each result
-row's task note (the rollout its `rollout:` names), so a task-keyed verb run with --rollout left off (hand-back,
-mark-started, mark-integrating, mark-done, log-integration, bind-run, free-lane, hold, defer, approve-gates,
-lane-hold, lane-ack, reconcile) is guarded too. When one names another usable snapshot than this plugin root, or a live note's snapshot is
-unusable, it prints the guard's `engine-snapshot: ` line on stderr, writes nothing and exits 2. Re-run the same
+--rollout (carry: its --from) names (lane-hold and lane-ack require it), and guard_task() on each --tasks slug's note
+and, for `reconcile`, each result row's task note (the rollout its `rollout:` names), so a task-keyed verb run with
+--rollout left off (hand-back, mark-started, mark-integrating, mark-done, log-integration, bind-run, free-lane, hold,
+defer, approve-gates, reconcile) is guarded too. When one names another usable snapshot than this plugin root, or a live
+note's snapshot is unusable, it prints the guard's `engine-snapshot: ` line on stderr, writes nothing and exits 2. Re-run the same
 command from the root the line names. An unstamped note, an archived one whose snapshot is gone, and a task note
 that names no rollout (or one not found), pass from any root. The three exemptions run from any root: `status` writes
 nothing (/thread:status and the estate scan read every rollout with it), `moving` writes nothing either and is the
