@@ -632,7 +632,7 @@ QUEUE="a"; mkro "paused: 2026-10-26T09:00+00:00"; mkt a open "owner: lead"
 ok "$(j "$(nx)" '[d["start"], d["halt"]]')" '[[],"paused"]' "N8: nothing starts, halt paused"
 
 # ── N9: the wait clauses' inputs: a lane verdict beside a cooling retry ─────────────────────────────────────────
-n9() {  # n9 <name> <setup: lane|race|gitenv>
+n9() {  # n9 <name> <setup: lane|race|gitenv> <next's halt>
   scen "n9-$1"
   QUEUE="a b"; mkro; integrating a
   case "$2" in
@@ -650,8 +650,8 @@ n9() {  # n9 <name> <setup: lane|race|gitenv>
   ok "$(j "$(INOW=2026-10-26T08:05:00Z inp b)" '[d["autoRetry"], d["autoRetryClass"], d["autoRetryAfter"], d["humanFix"]]')" \
     '[false,"infra","2026-10-26T08:15+00:00",null]' "N9 $1: inputs on b: a cool-down (clause (i)'s facts)"
   entry 2026-10-26T08:04:00Z
-  ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["until"]]')" '["waiting","cool-down","2026-10-26T08:15+00:00"]' "N9 $1: moving → cool-down"
-  ok "$(python3 -c 'import json,sys; print(sum(1 for x in open(sys.argv[1]) if json.loads(x).get("cause") == "halt"))' "$THREAD_EVENTS_DIR/$RO.jsonl")" 0 "N9 $1: no halt recorded"
+  ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["until"], d["work"]["halt"]]')" "[\"waiting\",\"cool-down\",\"2026-10-26T08:15+00:00\",\"$3\"]" \
+    "N9 $1: moving → cool-down while next's halt is $3 (12b before 12c)"
   MNOW=2026-10-26T08:20:00Z
   I=$(INOW=$MNOW inp b)
   ok "$(j "$I" 'd["autoRetry"]')" true "N9 $1: at T0+20 → autoRetry"
@@ -663,9 +663,9 @@ n9() {  # n9 <name> <setup: lane|race|gitenv>
   ok "$(vc)" '["moving",null]' "N9 $1: moving with a fresh lead-entry"
   unset MNOW
 }
-n9 lane lane
-n9 race race
-n9 gitenv gitenv
+n9 lane lane lane
+n9 race race race
+n9 gitenv gitenv git-env
 scen n9-prhold
 QUEUE="a c"; mkro; integrating a; mkt c open "owner: lead" "hold_until: {pr: o/r#77, merged: true}"
 lh a merge-task-abort "merge-task exited 70"
