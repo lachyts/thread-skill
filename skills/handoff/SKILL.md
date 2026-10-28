@@ -47,7 +47,7 @@ A handoff is complete only when all of these are true:
    - `::created-thread{threadId="..."}` for a created task, or
    - `::created-thread{clientThreadId="..."}` for queued worktree setup.
 
-   On Chorus no directive is emitted: its result says Chorus raised the card itself, and a `::created-thread` token would land in the message as literal text; the output ends on § Build the handoff prompt's closing line instead.
+   On Chorus no directive is emitted: its result says Chorus raised the card itself, and a `::created-thread` token would land in the message as literal text; the handoff's own output ends on § Build the handoff prompt's closing line instead, and § Next for this session follows it.
 
 Search specifically for the host-native task tools before acting: `create_thread`, `wait_threads`, `read_thread`, `send_message_to_thread`, and related tools. Do not confuse them with third-party tools whose names also contain “thread”, such as Twist or email connectors.
 
@@ -80,7 +80,7 @@ Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` fo
 
 **Consumer home.** When the consumer will launch somewhere other than this session's launch directory — the work moves to another repo, this repo is about to be deleted or moved, or **Split launch.** below sends it to the project's repo — resolve with `--dir <consumer launch dir>` (plus `--shared` for a shared thread), then write the doc there and hand it to landing with `home` set to that home (§ Commit it): land.sh resolves the repo that holds it. `Run from:` (**Shape.**) is that consumer launch directory, and `create_thread`'s `cwd` moves with it (§ Success contract). The prompt names the doc's absolute path, and the producer's later `thread:close` still finds the doc through the THREAD.md Resume pointer.
 
-**Rollout launch.** A continuation that runs `/thread:execute` on a parallel rollout (orient § 9's Fresh session, or schedule step 8's **Execute handoff.**, or his "hand it off" on close's `rollout not started:` row) launches in the rollout's Project root, the rollout clone its note names (ADR 0042): execute § 2.8 halts a lead launched anywhere else. So `Run from:` and `create_thread`'s `cwd` are the Project root, and `<home>` is handoff-home.sh's as ever: the resolver reads a rollout clone as its in-place twin (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Home, rule 0), so a session in the clone writes and lands the doc in its twin's home, never on the clone's default branch, which only merge-task moves and where a doc would hold the lead's own first § 2.7 entry until its landing merged. The prompt names the doc's absolute path, so the consumer reads and marks the twin's copy. This case runs before **Split launch.**, which then prints `placement: split launch skipped — rollout launch` and changes nothing. Its front matter adds `launches: <rollout slug>` (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Front matter). **Open captures.** and the **Thread state.** row are skipped, because the doc briefs the rollout's lead and never this thread: close's scan reads it as `launch`, never this thread's continuation, and `next` never counts it or the lead it starts as this thread continuing elsewhere. The launch is a dispatch, as a router's is (ADR 0057): the turn ends on handoff's own closing line, or its labelled manual handoff, and nothing after it runs `next` for this session.
+**Rollout launch.** A continuation that runs `/thread:execute` on a parallel rollout (orient § 9's Fresh session, or schedule step 8's **Execute handoff.**, or his "hand it off" on close's `rollout not started:` row) launches in the rollout's Project root, the rollout clone its note names (ADR 0042): execute § 2.8 halts a lead launched anywhere else. So `Run from:` and `create_thread`'s `cwd` are the Project root, and `<home>` is handoff-home.sh's as ever: the resolver reads a rollout clone as its in-place twin (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Home, rule 0), so a session in the clone writes and lands the doc in its twin's home, never on the clone's default branch, which only merge-task moves and where a doc would hold the lead's own first § 2.7 entry until its landing merged. The prompt names the doc's absolute path, so the consumer reads and marks the twin's copy. This case runs before **Split launch.**, which then prints `placement: split launch skipped — rollout launch` and changes nothing. Its front matter adds `launches: <rollout slug>` (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Front matter). **Open captures.** and the **Thread state.** row are skipped, because the doc briefs the rollout's lead and never this thread: close's scan reads it as `launch`, never this thread's continuation, and `next` never counts it or the lead it starts as this thread continuing elsewhere. The launch is a dispatch, as a router's is (ADR 0057): the turn ends on handoff's own closing line, or its labelled manual handoff, and nothing after it runs `next` for this session (§ Next for this session is skipped).
 
 **Split launch.** Before resolving `<home>`, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py" home --dir "$PWD"`. It prints nothing (the launch directory is not a `~/Projects` folder whose project's thread home is a repo) → no change. When it prints `<repo>` (ADR 0039 d6), the active thread's physical path decides the case:
 
@@ -156,13 +156,32 @@ Keep it tight — the doc carries the depth; the prompt carries the momentum.
 
 When native task creation succeeds, seed the new task with the prompt (the doc path travels inside it) and launch it in the `Run from:` directory (§ Success contract: on Chorus, `create_thread`'s `cwd`), then report the created task and, in Codex Desktop, emit the required directive. When native task creation is unavailable, print the prompt and the absolute path of the handoff doc so the user can open a new task manually.
 
-When `create_thread` on Chorus returned `Raised (task_id: …)` (§ Success contract, step 2), the Stage starts the next Session from the card at once, so the closing words never ask Lachy to start or open it: end the handoff's output on this line (shown fenced below, printed bare as close's banners are), with nothing after it and no question anywhere in the output:
+When `create_thread` on Chorus returned `Raised (task_id: …)` (§ Success contract, step 2), the Stage starts the next Session from the card at once, so the closing words never ask Lachy to start or open it: end the handoff's own output on this line (shown fenced below, printed bare as close's banners are), with nothing after it but § Next for this session, and no question anywhere in the handoff's own output:
 
 ```
 **Handed off. The next Session is starting on the Stage from <abs doc path>; if it could not start, its card says why and waits as an offer.**
 ```
 
 Any other result (an error, such as a prompt over Chorus's length cap) or no `create_thread` at all raised no card, so no Session is starting: that is § Fail closed, which never prints this line.
+
+## Next for this session
+
+The handoff's last step. It runs once all three of these hold:
+
+- the doc has been handed to landing (§ Commit it, whatever its landing row);
+- the new task is created (§ Success contract), or the run is labelled a manual handoff (§ Fail closed, § Other hosts);
+- the handoff's own output has ended: on Chorus that is § Build the handoff prompt's closing line, and in Codex Desktop it ends after the `::created-thread` directive.
+
+Then run `thread:next` once for this session, the parent: through the Skill tool, as `thread:next` with args `after-handoff <abs doc path>`. With no Skill tool (Codex), read `${CLAUDE_PLUGIN_ROOT}/skills/next/SKILL.md` and run its Process with that input, by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`. It is never re-implemented here (ADR 0002).
+
+The handed-off work counts as gone (next step 1, **After this session's own handoff**), so the output ends with exactly one move for this session: next's one line, or its menu only when the pick turns on what only Lachy knows, followed by next's own dispatch of that move. Several handoffs in one turn get one `next`, after the last. A dry run ends with this step too, described as next would run it. A handoff that close's **Wrong route?** sent here is no dispatch, so `next` runs.
+
+**Skipped on a dispatch.**
+
+- When next's step 5 dispatched this handoff, that step already decided this session's move.
+- Every **Rollout launch.** is a dispatch, as a router's is (ADR 0057): schedule step 8's **Execute handoff.**, orient § 9's **Fresh session**, and his "hand it off" on close's `rollout not started:` row. Its turn ends on handoff's own closing line, or its labelled manual handoff.
+
+It is also skipped on the **Failure path.**, which writes no doc and waits on a directory from Lachy. A withdrawal (**Lifecycle.**) is its own act, and no `next` follows it.
 
 ## Other hosts
 
