@@ -6,8 +6,9 @@
 //     the task is created (or the run labelled a manual handoff) and the handoff's own output has ended; through the
 //     Skill (args `after-handoff <abs doc path>`) or a read of next's SKILL.md, never re-implemented (ADR 0002);
 //   - it is skipped on a dispatch: next's own step 5 ran the handoff, or the handoff is a Rollout launch (ADR 0057);
-//     and on the resolver's failure path and a withdrawal. A dispatch's turn ends on handoff's own output, with no
-//     word after it on this session's move and none on ending or archiving this session;
+//     and on the resolver's failure path and a withdrawal. A dispatch's turn ends on handoff's own output, with
+//     nothing after it that recommends, offers or asks about a move for this session (next's overturn note, wherever
+//     it sits, is no second move) and none on ending or archiving this session;
 //   - next step 1 counts the handed-off work as its consumer's, never this session's keep-going step, while the
 //     detection bullet above it still settles where the thread lives; after the handoff next prints no step-2
 //     summary and asks nothing outside its menu (step 2 says so too); step 5 names the skip; plugin-root.md lists
@@ -122,13 +123,17 @@ function fails(F) {
   // N3 — skipped on a dispatch: next's own step 5 and every Rollout launch; and on the failure path and a withdrawal.
   // A dispatch's turn ends on handoff's own output and never says this session can be ended or archived: on the
   // Stage, Chorus's close leg reads "can be ended because its work carries on elsewhere" as *closed*, which archives
-  // the Session, and a manual handoff's unopened prompt is no work carrying on elsewhere (next step 1).
+  // the Session, and a manual handoff's unopened prompt is no work carrying on elsewhere (next step 1). Its test is the
+  // router case's grader's (ends-on-the-handoff.md): nothing after the output recommends, offers or asks about a
+  // move, and next's overturn note, wherever it sits, is no second move (the eval record's B2 ruling).
   need('N3', slice(sec, SKIPPED, null), [
     "next's step 5", '**Rollout launch.**',
     "schedule step 8's **Execute handoff.**", "orient § 9's **Fresh session**",
     "close's `rollout not started:` row", 'ADR 0057',
     "Its turn ends on handoff's own output (the closing line, the directive, or the labelled manual handoff)",
-    "with no word after it on this session's move", 'none anywhere on ending or archiving this session',
+    'with nothing after it that recommends, offers or asks about a move for this session',
+    'none anywhere on ending or archiving this session',
+    "The note on how Lachy can overturn next's decision (next step 4's **The line.**) is no second move, wherever it sits",
     'only Lachy archives a session', "Its turn ends the same way, on handoff's own output",
     '**Failure path.**', '**Lifecycle.**',
   ])
@@ -252,6 +257,9 @@ test('controls: N1 to N4, handoff\'s own text', () => {
   only('N3:archive', swap(HANDOFF, ' and none anywhere on ending or archiving this session', ''), ['N3'])
   only('N3:ends', swap(HANDOFF, "Its turn ends on handoff's own output (the closing line, the directive, or the labelled manual handoff)", "Its turn ends"), ['N3'])
   only('N3:launch', swap(HANDOFF, "Its turn ends the same way, on handoff's own output.", "Its turn ends on handoff's own closing line."), ['N3'])
+  // b18d0e7's stricter words back: they forbid the overturn note the router case's grader passes
+  only('N3:word', swap(HANDOFF, 'with nothing after it that recommends, offers or asks about a move for this session', "with no word after it on this session's move"), ['N3'])
+  only('N3:overturn', swap(HANDOFF, " The note on how Lachy can overturn next's decision (next step 4's **The line.**) is no second move, wherever it sits: it restates that one decision.", ''), ['N3'])
   only('N4:build', swap(HANDOFF, ' but § Next for this session', ''), ['N4'])
   only('N4:contract', swap(HANDOFF, ', and § Next for this session follows it', ''), ['N4'])
   only('N4:launch', swap(HANDOFF, ' (§ Next for this session is skipped)', ''), ['N4'])

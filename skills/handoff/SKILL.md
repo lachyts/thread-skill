@@ -178,7 +178,7 @@ The handed-off work counts as gone (next step 1, **After this session's own hand
 
 **Skipped on a dispatch.**
 
-- When next's step 5 dispatched this handoff, that step already decided this session's move. Its turn ends on handoff's own output (the closing line, the directive, or the labelled manual handoff), with no word after it on this session's move and none anywhere on ending or archiving this session: only Lachy archives a session (next step 5), and a manual handoff's prompt that nobody has opened is no work carrying on elsewhere (next step 1).
+- When next's step 5 dispatched this handoff, that step already decided this session's move. Its turn ends on handoff's own output (the closing line, the directive, or the labelled manual handoff), with nothing after it that recommends, offers or asks about a move for this session and none anywhere on ending or archiving this session: only Lachy archives a session (next step 5), and a manual handoff's prompt that nobody has opened is no work carrying on elsewhere (next step 1). The note on how Lachy can overturn next's decision (next step 4's **The line.**) is no second move, wherever it sits: it restates that one decision.
 - Every **Rollout launch.** is a dispatch, as a router's is (ADR 0057): schedule step 8's **Execute handoff.**, orient § 9's **Fresh session**, and his "hand it off" on close's `rollout not started:` row. Its turn ends the same way, on handoff's own output.
 
 It is also skipped on the **Failure path.**, which writes no doc and waits on a directory from Lachy. A withdrawal (**Lifecycle.**) is its own act, and no `next` follows it.
