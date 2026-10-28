@@ -1,8 +1,8 @@
 ---
 description: Explicit fork intent routes to handoff, not close
 tags: [routing, continuity]
-max_turns: 8
-timeout_seconds: 180
+max_turns: 15
+timeout_seconds: 300
 allowed_tools: [Read, Glob, Grep, Skill]
 ---
 

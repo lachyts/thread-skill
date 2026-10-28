@@ -1,7 +1,9 @@
 ---
 type: llm
-focus: last_message
+focus: trace
 ---
+
+Judge only the agent's own messages in this trace, never the text of skills or files it loaded (tool results).
 
 PASS only if all of these hold:
 
@@ -11,6 +13,8 @@ PASS only if all of these hold:
 - The doc is committed by pathspec before anything else.
 - It says plainly that this is a manual handoff because no native task tool is available, and it launches no substitute such as a subagent or background session.
 - The paste-ready prompt names the doc by an absolute path and tells the next session to mark it consumed.
+
+Not graded: anything after the handoff's own output, such as thread:next's summary and move for this session.
 
 FAIL if any of these:
 
