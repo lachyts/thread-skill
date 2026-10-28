@@ -55,11 +55,12 @@
 # It never commits, never forces, never rebases and never deletes <B>; <B> moves only forward (a fast-forward
 # to origin/<B>, or a merge commit over update-branch's merges, made in a scratch worktree). One call:
 # preflight (the checkout must be on <B>) · route (S2) · <B> is not the default · fetch origin/<d> and
-# origin/<B> (`land: base <sha>`, `land: head <sha>`) · push.default upstream|tracking is stuck · nothing
-# ahead is `landed` · push access · the newest same-repo PR headed <B> (another author's: not landed; closed
-# unmerged: stuck; merged with HEAD in its head: landed) · auto-merge switched off on every call but --queue
-# · --queue only: every commit after --reviewed touches docs/reviews/ alone · push <B> to itself · open and
-# label the `landing` PR · then the action:
+# origin/<B> (`land: base <sha>`, `land: head <sha>`) · --queue and --hold only: record the review rounds
+# (below) · push.default upstream|tracking is stuck · nothing ahead is `landed` · push access · the newest
+# same-repo PR headed <B> (another author's: not landed; closed unmerged: stuck; merged with HEAD in its
+# head: landed) · auto-merge switched off on every call but --queue · --queue only: every commit after
+# --reviewed touches docs/reviews/ alone · push <B> to itself · open and label the `landing` PR · then the
+# action:
 #   plain    point <B>'s upstream at origin/<d> (the review base), print `land: upstream origin/<d> (was …)`
 #            and the tree line, `land: tree dirty: <paths>` or `land: digest <diff6>` (fresh-review's
 #            Step 1 digest, byte for byte); result `pr open <url>`
@@ -75,6 +76,12 @@
 #            merge` with no merge call; green is a direct merge, `landed`.
 # Every own-branch result but usage errors, preflight errors and the plain call's `pr open` ends by pointing
 # <B>'s upstream back at origin/<B> (`land: upstream origin/<B> (was origin/<d>)`), when it is at origin/<d>.
+# The review rounds (ADR 0058 d5): --queue and --hold, never a plain call, run fresh-review's recorder once,
+# right after the fetch, so every one that gets that far leaves each review doc on <B> recorded in
+# reviews.jsonl: `python3 <rr> --repo <top> --base origin/<d> --branch-docs` under `bounded`, <rr> being
+# $THREAD_REVIEW_ROUND, else ~/.agents/skills/fresh-review/scripts/review-round.py. Its stdout and stderr go to
+# land.sh's stderr, then `land: recorded review rounds`, or `land: review rounds not recorded (<why>)`: no
+# recorder at <rr>, recorder exit <rc>, timed out, or deadline. It never changes the result line or exit code.
 # Results: pr open <url> · held <url> · queued <url> · queued: needs merge <url> · ci failed: … · landed ·
 # not landed: <reason> · stuck: <reason>. Exit 0 but stuck (1) and usage (2).
 #
@@ -897,6 +904,23 @@ scratch_merge() (
   exit 0
 )
 
+# own_rounds: --queue's and --hold's one run of fresh-review's review-round recorder (the header's review rounds).
+# Its outcome is a stderr line only: always returns 0.
+own_rounds() {
+  local rr=${THREAD_REVIEW_ROUND:-$HOME/.agents/skills/fresh-review/scripts/review-round.py} rc
+  if [ ! -f "$rr" ] || [ ! -r "$rr" ]; then
+    echo "land: review rounds not recorded (no recorder at $rr)"; return 0
+  fi
+  bounded python3 "$rr" --repo "$top" --base "origin/$d" --branch-docs >&2; rc=$?
+  case $rc in
+    0) echo "land: recorded review rounds" ;;
+    124) echo "land: review rounds not recorded (deadline)" ;;
+    142) echo "land: review rounds not recorded (timed out)" ;;
+    *) echo "land: review rounds not recorded (recorder exit $rc)" ;;
+  esac
+  return 0
+}
+
 # subjects <rev>…: the first three commit subjects, `; `-joined, with (+N more).
 subjects() {
   local c s= i=0
@@ -994,6 +1018,7 @@ own_main() {
   fi
   echo "land: base $(git rev-parse "$od")"
   echo "land: head $(git rev-parse HEAD)"
+  [ -n "$act" ] && own_rounds
 
   # ---- O5. A bare `git push` must never send <B> to <d> while the review base is origin/<d> ---------------
   m=$(git config push.default)

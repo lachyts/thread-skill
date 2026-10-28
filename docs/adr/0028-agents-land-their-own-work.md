@@ -3,6 +3,7 @@
 Date: 2026-09-29
 Status: accepted, shipped in 2.11.0 (amends ADR 0011's close guardrail "never touch a branch"; absorbs task p5-4)
 *(Amended 2026-09-29, after p11-3's plan failed review twice: landing queues the merge and finishes; nothing waits for it. §§ 5–7 below are the amended text.)*
+*(Amended 2026-10-27 by ADR 0058: § 2's clean review means no **blocking** finding, and the rest are filed in a follow-up task; § 3's "no round cap" is replaced by a budget of four code rounds, and the ledger's regression stop no longer ends a landing. §§ 2–3 below keep their original text.)*
 
 ## Context
 

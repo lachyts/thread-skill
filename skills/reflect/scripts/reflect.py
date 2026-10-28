@@ -189,11 +189,31 @@ parallel with no note). For each:
   included), the session transcripts and reviews.jsonl with read-only git. Its flags (prefixed `attention: `) and
   cannotShow join span's; it writes nothing to stderr, and any fault is the flag `attention: read failed (...)` and a
   null block, never a stop. The Owner of each question is the reading's label, never span's.
+- freshReview (ADR 0058 d5): one entry per landing. reviews.jsonl's review-round lines up to until, deduped as
+  run_record's reader rule says (the latest line per (repo, doc), else per (repo, head, digest), so a doc's consumed
+  line supersedes its pending one). A round counts in the window it was reviewed in, and in no other: its round
+  time (below) in [since, until]. The window's rounds are grouped by (repo, branch); a line with no branch (one from
+  before ADR 0058, say) is no landing, and goes to its repo's group with branch null. Each group is an entry: rounds
+  (its rounds), codeRounds (those whose mode is code or absent),
+  findings and blocking (one value per code round, in round order, null where the line carries none), filed, recurring and
+  reversal (sums over the lines that carry each, null when none does), open (the last code round's, or null),
+  regression (the sum, 0 when no line carries one), lines and files (the newest line's that carries each), first and
+  last (the group's earliest and latest round time) and blockingRate (Σblocking / Σfindings over the code rounds that carry
+  both, to 2 places; null when none does or Σfindings is 0). Sorted by last. A landing reviewed across two windows
+  shows its rounds in each; within a window, a branch name reused across landings, or a chain on the default branch,
+  reads as one entry, never a span that grows with the record (keeping a group whole once any line fell in the window
+  folded every round ever recorded on `master` into one entry, every week). The entry holds every review round on the
+  branch in the window, dev-time chains included, so codeRounds is review cost, never the landing's budget count. A
+  round's time, which windows it, orders the group and gives first and last, is its latest line's reviewedAt (when the
+  round was reviewed), else its doc's earliest line's ts (its arrival emit): land.sh records a landing's unrecorded
+  docs at its end, so a line's own ts can be days after its round. Reported, never traced: cannotShow says so when
+  any is listed.
 span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), shape
 (parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
 reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[],
-laneTime, and chain on a read serial one}], freshReview[] (/fresh-review
-rounds in the window with regression > 0, reported only: reviews.jsonl names no rollout), watches[] (every open Watch:
+laneTime, and chain on a read serial one}], freshReview[{repo, branch, rounds, codeRounds, findings[], blocking[],
+filed, recurring, reversal, open, regression, lines, files, first, last, blockingRate}] (each /fresh-review landing with a
+round reviewed in the window, reported only: reviews.jsonl names no rollout), watches[] (every open Watch:
 rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring, stale, new, declinedBefore, lastSeen),
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
 ledger (above), attention (above), cannotShow[], flags[]}. stderr gets one summary line.
@@ -826,6 +846,22 @@ def _ts(d):
         return SCORE.to_ms(d.get("ts"))
     except Exception:
         return None
+
+
+def _count(v):
+    """A review-round count (an int >= 0, never a bool), else None: unknown."""
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+
+
+def _known(rows, k):
+    """The known counts of key k over rows, in their order."""
+    return [v for v in (_count(d.get(k)) for d in rows) if v is not None]
+
+
+def _total(rows, k):
+    """The sum of key k's known counts over rows, or None when no row carries one."""
+    vs = _known(rows, k)
+    return sum(vs) if vs else None
 
 
 # ---- span ------------------------------------------------------------------------------------------------------
@@ -1539,32 +1575,59 @@ class Span:
             out[("review", doc)] = (fmt(t) if t is not None else None, False)
         return out
 
-    # -- /fresh-review churn (reported only) --------------------------------------------------------------------------
+    # -- /fresh-review landings (reported only, ADR 0058 d5) ----------------------------------------------------------
 
     def fresh_review(self, ev, since, until):
+        """span.json's freshReview: one entry per landing (the module docstring's freshReview rule)."""
         path = os.path.join(ev, RR.REVIEWS + ".jsonl")
         if not os.path.exists(path):
             return []
         try:
             lines, _s = SCORE.read_lines(path)
         except OSError as e:
-            self.flag("reviews.jsonl cannot be read (%s): no /fresh-review churn" % e)
+            self.flag("reviews.jsonl cannot be read (%s): no /fresh-review landings" % e)
             return []
-        latest = {}
-        for t, _n, d in lines:
+        latest, arrived = {}, {}
+        for t, n, d in lines:
             if d.get("kind") != "review-round" or t > until or not isinstance(d.get("repo"), str):
                 continue
             doc = d.get("doc")
             key = ("doc", d["repo"], doc) if isinstance(doc, str) and doc else ("head", d["repo"], d.get("head"), d.get("digest"))
-            latest[key] = (t, d)
+            latest[key] = (t, n, d)
+            arrived.setdefault(key, t)  # read_lines is time-sorted: the first line is the doc's arrival
+        groups = {}
+        for key, (t, n, d) in latest.items():
+            branch = d.get("branch") if isinstance(d.get("branch"), str) and d.get("branch") else None
+            at = arrived[key]
+            if isinstance(d.get("reviewedAt"), str):
+                try:
+                    at = SCORE.to_ms(d["reviewedAt"])
+                except Exception:
+                    pass
+            if not since <= at <= until:
+                continue  # a round belongs to the window it was reviewed in, never to every later one
+            groups.setdefault((d["repo"], branch), []).append((at, n, d))
         out = []
-        for t, d in sorted(latest.values(), key=lambda x: x[0]):
-            if since <= t <= until and isinstance(d.get("regression"), int) and d["regression"] > 0:
-                out.append({"repo": d["repo"], "doc": d.get("doc"), "head": d.get("head"), "at": fmt(t),
-                            "findings": d.get("findings"), "regression": d["regression"]})
+        for (repo, branch), g in groups.items():
+            g.sort(key=lambda x: (x[0], x[1]))  # round order: reviewedAt, else arrival; never the line's own ts
+            ds = [d for _at, _n, d in g]
+            code = [d for d in ds if d.get("mode") in (None, "code")]
+            rated = [(d["blocking"], d["findings"]) for d in code
+                     if _count(d.get("blocking")) is not None and _count(d.get("findings")) is not None]
+            found = sum(f for _b, f in rated)
+            out.append({"repo": repo, "branch": branch, "rounds": len(ds), "codeRounds": len(code),
+                        "findings": [_count(d.get("findings")) for d in code],
+                        "blocking": [_count(d.get("blocking")) for d in code],
+                        "filed": _total(ds, "filed"), "recurring": _total(ds, "recurring"),
+                        "reversal": _total(ds, "reversal"), "open": _count(code[-1].get("open")) if code else None,
+                        "regression": _total(ds, "regression") or 0,
+                        "lines": (_known(ds, "lines") or [None])[-1], "files": (_known(ds, "files") or [None])[-1],
+                        "first": fmt(g[0][0]), "last": fmt(g[-1][0]),
+                        "blockingRate": round(sum(b for b, _f in rated) / found, 2) if found else None})
+        out.sort(key=lambda e: (e["last"], e["repo"], e["branch"] or ""))
         if out:
-            self.cannot_show("/fresh-review churn: %d round(s) with regression findings, reported, not traced to a "
-                             "rollout (reviews.jsonl names none)" % len(out))
+            self.cannot_show("/fresh-review: %d landing(s) reported, not traced to a rollout (reviews.jsonl names none)"
+                             % len(out))
         return out
 
     # -- knobs ------------------------------------------------------------------------------------------------------

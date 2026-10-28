@@ -446,10 +446,22 @@ lines that name the task; then its lines in the Run record (`mover` is the line 
 - When none of them says what moved it, name it as unexplained.
 
 Each item becomes a sighting (step 12), a bug (step 13), a knob (score.py's only: never invent one) or nothing,
-named with why. Read `freshReview` and `cannotShow` as reported, not traced. A `closed with no close line` flag is
+named with why. Read `cannotShow` as reported, not traced. A `closed with no close line` flag is
 reported, not traced: that rollout leaves no baseline (ADRs 0030, 0033, 0034, 0035 and 0037 bound what each
 trace may conclude). The Watch, its id and its recurring rule are Chorus's Reflection's, borrowed and never imported;
 recording Lachy's no (step 15's decision task, § Deciding the decision task) is this skill's own.
+
+**/fresh-review landings.** Read `span.json`'s `freshReview` (ADR 0058 d5) as reported, not traced: one entry per
+landing (a repo and branch) with a round reviewed in the window, only those rounds counted: a landing reviewed
+across two weeks shows in each, and the default branch's entry never grows with the record. For each, its `rounds`
+(`codeRounds` of them code), `findings` and `blocking` per code round in order, `filed`, `open` at its last code round,
+`recurring` and `reversal`, its size (`lines`, `files`), and `blockingRate`. A null is unknown, never 0: a round
+recorded before ADR 0058, or one whose doc held no `## Disposition` yet. `codeRounds` counts every review round on
+the branch, dev-time chains before the landing loop included, so it is review cost, never the landing's budget count
+(ADR 0058 d4): never name a landing as at its budget from it. Name each landing with many code rounds as review cost,
+each whose last code round left `open` above 0, and each whose
+`blockingRate` is 0 over two or more code rounds (the self-grading risk ADR 0058's Consequences name). The entry with
+`branch` null holds the repo's branchless rounds in the window: no landing.
 
 **The Time-lost ledger** (`span.json`'s `ledger`) is reported, never traced as friction: a script sums its hours, so
 no part of it becomes a sighting, a bug or a knob of yours. Read its `row` top class first, then the other classes in
@@ -640,7 +652,9 @@ reading leaves the week quiet.
 ### 17. Report, then tidy
 
 Report the rollouts read (and the escapes-only and repairs-only ones), each trace and what it became, the grade
-accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySize` readout and each grade trace), the
+accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySize` readout and each grade trace), each
+/fresh-review landing (`freshReview`: its repo and branch, rounds, findings and blocking per round, filed, open at the
+end, reversals, its size, and what step 11 named), the
 Watches written (and any `extended` line), the bugs filed or found, the Time-lost ledger (its top class and hours, each
 class against last week, the trend, any Watch it opened, any ceiling raise it held), the Monthly audit's row when one
 ran (its hours found against the record's, the sources it could not read) and each gap it named, each knob landed,
@@ -729,8 +743,11 @@ or `exists`). An item left open keeps the task open.
   either only as a set-aside whose `movedBy` is `unrecorded`, and then its task note's `## Needs you`,
   `## Integration log` and `## Approved gates`, the rollout note's `## Notes` and its Run record lines (`mover`) say
   what moved it, or nothing does.
-- /fresh-review churn names no rollout (`reviews.jsonl` carries none): the weekly reading reports it (`freshReview`)
-  and traces none of it.
+- /fresh-review churn names no rollout (`reviews.jsonl` carries none): the weekly reading reports each landing
+  (`freshReview`, one entry per repo and branch) and traces none of it. A branch name reused for a later landing, or
+  a chain run on the default branch, reads as one landing; a round with no branch (one recorded before ADR 0058) reads
+  as no landing, and only in the window its line falls in. A round reaches `reviews.jsonl` only when fresh-review or
+  land.sh's own-branch `--queue` and `--hold` recorded it.
 - The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
   `cannotShow`), and dates an undated fixer by its mtime.
 - A serial chain's Escapes come from `fixes:` alone and are read only in a week span reads the chain (a line in its
