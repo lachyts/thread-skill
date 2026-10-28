@@ -1,17 +1,20 @@
 # Behaviour evals — 2026-10-28, a handoff ends by running next for this session (p27-5)
 
 Claude Code 2.1.311 (`claudeVersion` in every `run.json`). The skills under test are those of the task branch
-`audit-fix/skill-p27-5-handoff-ends-with-next`, cut from origin/master `eecb90e`, at three commits:
+`audit-fix/skill-p27-5-handoff-ends-with-next`, cut from origin/master `eecb90e`, at four commits:
 
 - `d1b47f5`: the feature and its tests, as first committed;
 - `faa4d37`: that, plus the B1 fix to handoff § Next for this session (Decision, below);
 - `35e4aba`: that, plus the B2 change to one grader of `handoff-router-dispatch-skips-next`. The skill text is
   byte-identical to `faa4d37`, and the case run on it (invocation 5) does not use that grader.
+- `fcaf386`: that, plus the first version of this record. The skill and eval text is byte-identical to `35e4aba`;
+  invocation 6 scored the amended grader on it.
 
 Each sandbox loaded `thread` 5.0.0 from the task worktree, the only thread plugin. The case and the judge ran on the
 `opus` alias. The kept traces record the case model as `claude-opus-5-5`, in the init event and on every assistant
-message; the CLI does not capture the judge's resolved id. Total spend $7.80 against the task's approved 15 USD
-cap (`## Approved gates`, 2026-10-28).
+message; the CLI does not capture the judge's resolved id. Total spend $9.06 under two approved gates
+(`## Approved gates`, both 2026-10-28): $7.80 for invocations 1 to 5 against the first gate's 15 USD cap, and
+$1.26 for invocation 6 against the second gate's 3 USD cap.
 
 Every invocation went through `make evals`, so the recipe line's locks (`--ablation none --model opus --judge-model
 opus --no-publish`) came last and held. Everything below was passed in `EVAL_ARGS` on the command line, and no file
@@ -19,6 +22,7 @@ in the tree gained a flag:
 
 - `--case <name> --runs <R> --max-cost-usd 5`: the CLI keeps a repeated option's last value, so these replace the
   recipe's `--runs 1 --max-cost-usd 30` defaults. `--case` takes one glob, so each case had its own invocation.
+  Invocation 6 passed `--max-cost-usd 3`, its gate's cap.
 - `--trust-plugin`: an agent's `claude plugin eval` is refused in an untrusted directory without it. The precedents
   are `2026-10-15-reflect-routing.md` (p21-1) and `2026-10-17-handoff-manual-dry-run.md` (p19-11).
   `FORBIDDEN_FLAGS` in `tests/contracts/evals-structure.test.mjs` checks only the Makefile's `EVAL_ARGS ?=` default.
@@ -36,10 +40,12 @@ in the tree gained a flag:
 | 3 | 2026-10-28 00:57 | `faa4d37` | `handoff-manual-dry-run` | 3 | 79 s | $3.50 |
 | 4 | 2026-10-28 00:58 | `faa4d37` | `handoff-fork-now` | 1 | 15 s | $0.20 |
 | 5 | 2026-10-28 01:14 | `35e4aba` | `handoff-ends-with-next` (the reserve re-run) | 3 | 54 s | $1.43 |
+| 6 | 2026-10-28 11:54 | `fcaf386` | `handoff-router-dispatch-skips-next` (the second gate) | 3 | 43 s | $1.26 |
 
-Before each invocation the running total plus that invocation's estimate stayed under the cap: the largest
-estimate, before invocation 3, was $3.90 (the plan's figure for the trace judge) on a total of $2.66. Every run
-ended with `error: null` and `skippedPaidGraders: false`, and no invocation was `partial`.
+Before each of invocations 1 to 5 the running total plus that invocation's estimate stayed under the first cap:
+the largest estimate, before invocation 3, was $3.90 (the plan's figure for the trace judge) on a total of $2.66.
+Invocation 6 ran alone under the second gate, estimated at $1.30 (invocation 2's cost) against its 3 USD cap. Every
+run ended with `error: null` and `skippedPaidGraders: false`, and no invocation was `partial`.
 
 **Order.** The plan's order was invocations 1 to 4, then one decision. Invocation 1 showed a reply that broke a
 shipped rule (B1, below), so the fix (`faa4d37`) landed before invocations 2 to 4. They therefore measure the final
@@ -134,10 +140,41 @@ what's left here is your README install-section fix (Python 3.9). The JSON write
 Run 3 printed the handoff in a message of its own before the `thread:next` call, so its last message is next's
 alone: one move, keep going on the README fix.
 
+### `handoff-router-dispatch-skips-next`, invocation 6, the second gate (`fcaf386`): 1.00, pass rate 1
+
+| run | sandbox | score | turns | messages | cost (judge) | routes-to-next | not-close | ends-on-the-handoff |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `e-zpBbp1` | 1.00 | 6 | 14 | $0.39 ($0.07) | 1 call | 0 calls | PASS PASS PASS |
+| 2 | `e-78TWoD` | 1.00 | 5 | 12 | $0.47 ($0.12) | 1 call | 0 calls | PASS PASS PASS |
+| 3 | `e-bmP5K0` | 1.00 | 5 | 12 | $0.39 ($0.05) | 1 call | 0 calls | PASS PASS PASS |
+
+Run 1: `Skill(thread:next)` → `Read(skills/handoff/SKILL.md)` → `Grep(handoff-lifecycle.md)` →
+`Read(handoff-lifecycle.md)`. Runs 2 and 3: `Skill(thread:next)` → `Read(skills/handoff/SKILL.md)` →
+`Read(handoff-lifecycle.md)`. Each `thread:next` call's args carried only a dry-run note, never `after-handoff`. No
+run called `thread:next` a second time or ran `close`. Each last message decided handoff in one line with no
+question ("Next move: handoff, because the next phase is unrelated, its spec is ready to run, and this session's
+context is full of CSV debugging", run 1), then showed a `status: pending` doc under `docs/handoffs/` and the
+paste-ready prompt, and said no new session was opened: "manual handoff" in runs 1 and 2, "it can't open the new
+session for you. You'd open it yourself and paste this" in run 3. No last message holds a question mark outside a
+code block.
+
+How each ends, after the prompt:
+
+- Run 1: "The router's usual follow-up step for this session is skipped because the router itself sent this
+  handoff. This session's work ends here."
+- Run 2: "That's the end of the handoff. The thread now continues in the fresh session, and you can end this one."
+  "End this session" is next step 4's off-Stage wording for the archive part, and next step 1 does not count a
+  manual handoff's unopened prompt as the thread continuing elsewhere. All three votes passed it: it follows a
+  router-dispatched handoff, with nothing left in the session and no move marked recommended.
+- Run 3: on a note that `<spec path>` and `<toplevel>` are placeholders. Its overturn note ("Say "close" instead if
+  you'd rather just log this session into the thread and stop") sits in the decided line, before the doc.
+
 ## Decision
 
-Not A-clean after the reserve, so the task is set aside for Lachy (plan step 6): the Verify is unmet until the
-router case is re-scored on its amended grader, and that re-run is spend the approved gate does not cover.
+A-clean (plan step 6, **(A) Record only.**), after invocation 6 under the second gate: both new cases and
+`handoff-manual-dry-run` score 1.00 over 3 runs on the final skill text (invocations 5, 6 and 3),
+`handoff-fork-now` scores 1.00 under its `max_turns`, and every run has `error: null` and
+`skippedPaidGraders: false`, with nothing partial. No skill or grader text changed after invocation 6.
 
 - **B1, `faa4d37`: handoff § Next for this session.** Invocation 1 broke the plan's "next missing after a dry run"
   rule. The shipped sentence "A dry run ends with this step too, described as next would run it" read as "describe
@@ -150,30 +187,30 @@ router case is re-scored on its amended grader, and that re-run is spend the app
   step was skipped (handoff § Next for this session, **Skipped on a dispatch.**; next step 5). The grader read next's
   overturn note, which next step 4's **The line.** puts in every decided line ("What it leaves behind, so he can
   overturn it"), as a second move once it was repeated after the prompt. The grader now lists that note under Not
-  graded, wherever it sits, and its FAIL bullet counts a further move beyond it. This amendment is unscored.
+  graded, wherever it sits, and its FAIL bullet counts a further move beyond it. Invocation 6 scored it: 1.00 over
+  3 runs, every vote PASS.
 - **The reserve went to `handoff-ends-with-next`.** It is the case the B1 fix affected and the Verify's first half,
-  and it scored 1.00 over 3 runs. The gate allows one reserve re-run of one case, so the router case was not
-  re-run.
-
-**What would finish the Verify:** one more invocation, `make evals EVAL_ARGS="--case
-handoff-router-dispatch-skips-next --runs 3 --concurrency 3 --max-cost-usd 5 --trust-plugin --keep-temp
---output-dir <scratch>/inv6 --report <scratch>/inv6/report.html --json <scratch>/inv6/run.json"`, on the branch's
-head. Its estimate is about $1.30, as invocation 2 cost. It needs its own spend sign-off (ADR 0008).
+  and it scored 1.00 over 3 runs. The first gate allows one reserve re-run of one case, so the router case waited
+  for the second gate (one invocation at `--runs 3`, cap 3 USD), signed 2026-10-28, and scored 1.00 there
+  (invocation 6). That gate holds no reserve, and none was needed.
 
 ## Status
 
-- **Measured, not proven stable.** Three runs per case, one invocation each (two for `handoff-ends-with-next`), one
-  configuration.
+- **Measured, not proven stable.** Three runs per case, one scored invocation each on the final skill text (the
+  two cases measured twice were re-run after a change: B1 for `handoff-ends-with-next`, B2 for the router case),
+  one configuration.
 - **The Verify's first half, measured:** an explicit handoff ends with exactly one `next` move for this session,
   1.00 over 3 runs on the final text (invocation 5), and `handoff-manual-dry-run` showed the same handoff → next
   shape in 3 of 3 runs.
-- **The Verify's second half, measured in tool calls but not scored clean:** a handoff that `next` dispatched ran no
-  second `next` in 3 of 3 runs (`routes-to-next` 1 call each), but the case scored 0.78 on its pre-amendment grader.
+- **The Verify's second half, measured:** a handoff that `next` dispatched runs no second `next`, 1.00 over 3 runs
+  on the amended grader (invocation 6), and `routes-to-next` counted 1 call in all six router-case runs
+  (invocations 2 and 6).
 - **`make test`** passed on `d1b47f5`. On `faa4d37`, every suite passed, and the run failed only its "run wrote
-  nothing into the checkout" check: the B2 grader edit was made in the worktree while that run was going. The final
-  `make test` on the branch head ran with the tree untouched.
-- **Tidy:** the thirteen kept sandboxes (`/private/tmp/e-HHfMbT`, `e-jXpTJh`, `e-ALrk0V`, `e-2Voo4c`, `e-Yj3oDv`,
-  `e-YrJEJ2`, `e-glmGiE`, `e-xV1Hyi`, `e-UpoA88`, `e-WEjciJ`, `e-MPuvIR`, `e-89FzFy`, `e-QCwfcf`) were removed by
-  their literal paths after the reading, then the scratch directory. `evals/results/` did not exist before or after
-  the invocations, and `git status --porcelain --ignored` was empty before them and unchanged by them, apart from
-  this record.
+  nothing into the checkout" check: the B2 grader edit was made in the worktree while that run was going. On
+  `fcaf386` it passed with the tree untouched, before invocation 6: 2601 tests, 2600 passed and 1 skipped (the
+  optional CHORUS_SRC cross-check).
+- **Tidy:** the sixteen kept sandboxes (`/private/tmp/e-HHfMbT`, `e-jXpTJh`, `e-ALrk0V`, `e-2Voo4c`, `e-Yj3oDv`,
+  `e-YrJEJ2`, `e-glmGiE`, `e-xV1Hyi`, `e-UpoA88`, `e-WEjciJ`, `e-MPuvIR`, `e-89FzFy`, `e-QCwfcf`, `e-zpBbp1`,
+  `e-78TWoD`, `e-bmP5K0`) were removed by their literal paths after the reading, then each scratch directory.
+  `evals/results/` did not exist before or after the invocations, and `git status --porcelain --ignored` was empty
+  before them and unchanged by them, apart from this record.
