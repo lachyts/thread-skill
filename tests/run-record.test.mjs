@@ -538,8 +538,8 @@ test('review-round lands in reviews.jsonl with rollout and task null', (t) => {
   assert.equal(l.kind, 'review-round')
 })
 
-// ADR 0055: the doc's status, its branch, the diff size and the disposition counts are optional, checked when given.
-test('review-round (ADR 0055): status, branch, size and disposition counts are accepted; bad values are refused', (t) => {
+// ADR 0058: the doc's status, its branch, the diff size and the disposition counts are optional, checked when given.
+test('review-round (ADR 0058): status, branch, size and disposition counts are accepted; bad values are refused', (t) => {
   const home = tmpHome(t)
   const base = { repo: 'thread-skill', head: 'abc1234', digest: 'd1', doc: 'docs/review/x.md', findings: 12 }
   const full = { ...base, status: 'consumed', branch: 'feat/x', lines: 77, files: 3, blocking: 2, open: 1, filed: 8,

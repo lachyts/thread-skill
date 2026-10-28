@@ -192,7 +192,7 @@ reported), Cisco study details beyond SmartBear's page.
 ## Ruling and what was built (2026-10-27)
 
 Lachy ruled on proposal 1: **serious only**. "Land when no serious finding is open, and wait for my
-call only when one is." The rest were technical calls, built as ADR 0055. Three of them differ
+call only when one is." The rest were technical calls, built as ADR 0058. Three of them differ
 from the proposals above, and each is listed here so it can be overturned:
 
 - **Every round still reviews the whole branch** (proposal 2 said fix range only). With only

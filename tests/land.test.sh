@@ -3,7 +3,7 @@
 # `# thread:land` snippet and handoff's `# thread:handoff-land` snippet (cases 1–41), its own-branch mode
 # with close's `# thread:land-own` snippet (cases 42–70; 71–73b are close-out cases), and its read-only route mode,
 # `--route` (case 74, leg.py's Complete; case 75, its parity with a landing, which self-rollout-check.sh
-# --refresh-in-place's diverged remedy reads); case 76 is the own branch's review-round recorder (ADR 0055 d5). Fixture repos talk to bare "servers" under $tmp/srv
+# --refresh-in-place's diverged remedy reads); case 76 is the own branch's review-round recorder (ADR 0058 d5). Fixture repos talk to bare "servers" under $tmp/srv
 # through a fake ssh that maps git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
@@ -1661,7 +1661,7 @@ out=$($LAND_SHELL "$LAND" --route a b 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "c
 }  # end shard_10
 
 shard_11() {
-echo "== 76. own branch: --queue and --hold record the review rounds (ADR 0055 d5)"
+echo "== 76. own branch: --queue and --hold record the review rounds (ADR 0058 d5)"
 # rrstub <rc>: a recorder stub at $THREAD_REVIEW_ROUND that appends its argv, one line per call, to rr.py.args,
 # writes a line to each stream and exits <rc>. Exported for the whole shard, so qsetup's plain call runs with it.
 export THREAD_REVIEW_ROUND="$tmp/rr.py"

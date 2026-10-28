@@ -576,10 +576,10 @@ test('span and close: breaches count once per (rollout, Guardrail) only for a fi
   assert.deepEqual([line.counts.breaches, line.quiet], [1, false])
 })
 
-// ---- freshReview: one entry per landing (ADR 0055 d5) ------------------------------------------------------------
+// ---- freshReview: one entry per landing (ADR 0058 d5) ------------------------------------------------------------
 
 // reviews.jsonl's review-round lines, deduped to the latest per (repo, doc), grouped by (repo, branch), each group
-// kept when a line of it is in the window and read whole; a branchless (pre-ADR 0055) line groups as (repo, null),
+// kept when a line of it is in the window and read whole; a branchless (pre-ADR 0058) line groups as (repo, null),
 // its in-window lines alone.
 test('span: freshReview reports each landing: rounds, findings and blocking per code round, filed, open, reversals, size; a pending doc counts once, as consumed', (t) => {
   const h = setup(t)

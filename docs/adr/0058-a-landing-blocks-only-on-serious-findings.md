@@ -1,4 +1,4 @@
-# 0055 — A landing blocks only on serious findings
+# 0058 — A landing blocks only on serious findings
 
 Date: 2026-10-27
 Status: accepted. Ruled with Lachy after the review-convergence audit (`docs/audits/2026-10-27-review-convergence.md`): he picked "serious only" as the bar an agent's own branch must clear before its merge is queued, and "wait for my call only when a serious finding is open". The rest are technical calls, decided and listed here. Amends ADR 0028 Decisions 2 and 3; widens close's "don't create tasks unsolicited" guardrail by one case.

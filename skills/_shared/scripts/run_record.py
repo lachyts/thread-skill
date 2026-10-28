@@ -192,7 +192,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      (ints >= 0); verdict?; status? (pending | consumed: the doc as its findings arrived, or once
                      they were dispositioned); branch?; lines?, files? (ints >= 0: the reviewed diff's size); reviewedAt? (UTC ms Z:
                      when the round was reviewed, its doc's first commit; readers order rounds by it, never by ts);
-                     blocking?, open?, filed?, recurring?, reversal?, rejected? (ints >= 0, ADR 0055's disposition
+                     blocking?, open?, filed?, recurring?, reversal?, rejected? (ints >= 0, ADR 0058's disposition
                      counts from the doc's `## Disposition`; blocking includes open). No rollout, no task; lands in
                      reviews.jsonl.
   review-verdict  T  round (int >= 1), verdict (approve | changes), findings, original, regression (ints >= 0;
@@ -330,7 +330,7 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   an inert-proof-failed line is a failure for each glob in `failed` (else each reader's glob) and a pass for the rest of
   its `globs`; a line with an `error` is neither. score.py and reflect.py match kinds explicitly and read neither.
 - review-round: dedupe on (repo, doc) when doc is present, else on (repo, head, digest), keeping the latest line
-  (p15-7's emitter is idempotent per (repo, doc, status) since ADR 0055, so a doc can carry a pending line and
+  (p15-7's emitter is idempotent per (repo, doc, status) since ADR 0058, so a doc can carry a pending line and
   then a consumed one, and the latest wins).
 - review-verdict: one line per verdict_key, (task, round, head) when the line carries a head, else (task, round,
   digest). Keep the first line per key. The writer (reconcile) skips an entry whose key the record already holds,
@@ -374,7 +374,7 @@ Mirror contract (p15-7). The fresh-review ledger writes review-round lines witho
 It must keep to: the directory chain above (the override, then XDG_STATE_HOME, then the home default);
 the line format and common keys above, with rollout and task null; one O_APPEND write of the whole line,
 at most 16 KiB, no lock. Idempotency is the emitter's job: one event per review doc and status written
-(pending as its findings arrive, consumed once they are dispositioned; ADR 0055), checked by its own `doc`
+(pending as its findings arrive, consumed once they are dispositioned; ADR 0058), checked by its own `doc`
 and `status` keys. land.sh's own-branch --queue and --hold re-run the emitter over every doc on the branch,
 so a landing never ends unrecorded. This writer never dedupes or locks review-round; readers dedupe as above,
 keeping the latest line per (repo, doc).

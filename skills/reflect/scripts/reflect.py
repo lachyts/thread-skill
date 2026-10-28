@@ -155,11 +155,11 @@ parallel with no note). For each:
   rollout of its repo that passes tune.py's revert_check), land[] (the proposals of a repo's newest non-partial read
   rollout that pass tune.py's auto_check, over the same reflections.jsonl read and the same agreement as tune.py, and
   whose key no revert[] item names) and held[] (the rest, each with its reason).
-- freshReview (ADR 0055 d5): one entry per landing. reviews.jsonl's review-round lines up to until, deduped as
+- freshReview (ADR 0058 d5): one entry per landing. reviews.jsonl's review-round lines up to until, deduped as
   run_record's reader rule says (the latest line per (repo, doc), else per (repo, head, digest), so a doc's consumed
   line supersedes its pending one). A round counts in the window it was reviewed in, and in no other: its round
   time (below) in [since, until]. The window's rounds are grouped by (repo, branch); a line with no branch (one from
-  before ADR 0055, say) is no landing, and goes to its repo's group with branch null. Each group is an entry: rounds
+  before ADR 0058, say) is no landing, and goes to its repo's group with branch null. Each group is an entry: rounds
   (its rounds), codeRounds (those whose mode is code or absent),
   findings and blocking (one value per code round, in round order, null where the line carries none), filed, recurring and
   reversal (sums over the lines that carry each, null when none does), open (the last code round's, or null),
@@ -1397,7 +1397,7 @@ class Span:
             out[("review", doc)] = (fmt(t) if t is not None else None, False)
         return out
 
-    # -- /fresh-review landings (reported only, ADR 0055 d5) ----------------------------------------------------------
+    # -- /fresh-review landings (reported only, ADR 0058 d5) ----------------------------------------------------------
 
     def fresh_review(self, ev, since, until):
         """span.json's freshReview: one entry per landing (the module docstring's freshReview rule)."""

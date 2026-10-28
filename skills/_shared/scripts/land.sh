@@ -76,7 +76,7 @@
 #            merge` with no merge call; green is a direct merge, `landed`.
 # Every own-branch result but usage errors, preflight errors and the plain call's `pr open` ends by pointing
 # <B>'s upstream back at origin/<B> (`land: upstream origin/<B> (was origin/<d>)`), when it is at origin/<d>.
-# The review rounds (ADR 0055 d5): --queue and --hold, never a plain call, run fresh-review's recorder once,
+# The review rounds (ADR 0058 d5): --queue and --hold, never a plain call, run fresh-review's recorder once,
 # right after the fetch, so every one that gets that far leaves each review doc on <B> recorded in
 # reviews.jsonl: `python3 <rr> --repo <top> --base origin/<d> --branch-docs` under `bounded`, <rr> being
 # $THREAD_REVIEW_ROUND, else ~/.agents/skills/fresh-review/scripts/review-round.py. Its stdout and stderr go to

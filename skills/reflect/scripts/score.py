@@ -1379,7 +1379,7 @@ class Score:
         """reviews.jsonl's review-round lines (p15-7's /fresh-review rounds): read up to --until, deduped on (repo, doc),
         else (repo, head, digest), the latest kept, windowed by the round's time, and counted only when their repo
         is this score's (an owner/name ignoring case, or a path whose GitHub origin is). The round's time is the kept
-        line's reviewedAt (ADR 0055 d5), else the key's earliest line's ts (its arrival emit), never the kept line's
+        line's reviewedAt (ADR 0058 d5), else the key's earliest line's ts (its arrival emit), never the kept line's
         own ts: a doc's consumed line, or land.sh's sweep at a landing's end, can fall in a later window than its round,
         which then counted twice or in the wrong window."""
         out = {"rounds": 0, "findings": 0, "original": 0, "regression": 0, "unclassified": 0, "unattributed": 0}

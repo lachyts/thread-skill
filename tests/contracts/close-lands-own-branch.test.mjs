@@ -2,7 +2,7 @@
 // branch by exact name (§ The own branch, ADR 0026 condition 1's test), then sub-step 7.9 runs § Land the own
 // branch: land.sh's own-branch mode through the `# thread:land-own` snippet (tests/land.test.sh cases 42–70
 // run it), an inline /fresh-review loop at the xhigh floor with a budget of four code rounds, and the merge
-// queued only after a clean round, one with no blocking finding (ADR 0055). The loop stops only on its three
+// queued only after a clean round, one with no blocking finding (ADR 0058). The loop stops only on its three
 // conditions and then holds the PR open with the diagnosis; nothing waits for CI or the merge, and the banner waits for the review loop only. Reads files
 // only; a missing file or section is a named assertion failure, never a crash at load.
 import { test } from 'node:test'
@@ -11,7 +11,7 @@ import { readIf, slice, section, assertHas, lineOf, fencedBlocks, collapse } fro
 
 const CLOSE = 'skills/close/SKILL.md'
 const ADR = 'docs/adr/0028-agents-land-their-own-work.md'
-const ADR55 = 'docs/adr/0055-a-landing-blocks-only-on-serious-findings.md'
+const ADR58 = 'docs/adr/0058-a-landing-blocks-only-on-serious-findings.md'
 const text = () => readIf(CLOSE)
 const OWN = () => section(text(), /^## The own branch$/)
 const SEC = () => section(text(), /^### Land the own branch$/)
@@ -118,7 +118,7 @@ test('never clean: the clean-round conditions, and what can never count', () => 
     'a `simplify` round never counts as clean',
     'every dispatch follows a plain call that printed `land: digest`',
     'The loop runs no `simplify` round: a cleanup is never blocking, so in a landing it could only be filed',
-    'the whole branch, every round (ADR 0055, Decision 4)',
+    'the whole branch, every round (ADR 0058, Decision 4)',
   ])
 })
 
@@ -188,12 +188,12 @@ test('the loop re-runs Verify after fixes, before the next dispatch; ci failed g
   assert.ok(qv >= 0 && qv === pos(sec, /run loop step 7 first/), 'the queue-time Verify is not in the Queue paragraph')
 })
 
-test('#### The stop rule: the three ADR 0055 conditions, keys, infra, max, and the hold', () => {
+test('#### The stop rule: the three ADR 0058 conditions, keys, infra, max, and the hold', () => {
   const stop = STOP()
   const c = collapse(stop ?? '')
   assertHas(c, '#### The stop rule', [
     'It stops only on a blocking finding still open when the budget is spent, the same check failing the same way twice after effort has risen to `max`, or a decision for Lachy.',
-    'The loop has a budget of four code rounds (ADR 0055, Decision 4',
+    'The loop has a budget of four code rounds (ADR 0058, Decision 4',
     'The key is the `ci failed:` line without its URL: check name, conclusion and title.',
     'Only `failure` conclusions reach the key: `cancelled`, `timed_out`, `startup_failure`, `action_required`, `stale` and a status `error` are infrastructure, which never count and never raise effort.',
     'The second failure with one key raises effort to `max`, and effort never lowers.',
@@ -220,10 +220,10 @@ test('#### The stop rule: the three ADR 0055 conditions, keys, infra, max, and t
   ])
   const adr = collapse(readIf(ADR) ?? '')
   assert.ok(adr.includes(ADR_STOP), 'the ADR 0028 § 3 wording has changed')
-  assert.ok(adr.includes('Amended 2026-10-27 by ADR 0055'), 'ADR 0028 does not point at its ADR 0055 amendment')
-  const adr55 = collapse(readIf(ADR55) ?? '')
+  assert.ok(adr.includes('Amended 2026-10-27 by ADR 0058'), 'ADR 0028 does not point at its ADR 0058 amendment')
+  const adr55 = collapse(readIf(ADR58) ?? '')
   for (const s of ['A budget of four code rounds', "The ledger's regression stop no longer ends a landing", 'A clean round is a code round with no blocking finding'])
-    assert.ok(adr55.includes(s), `ADR 0055 lacks: ${s}`)
+    assert.ok(adr55.includes(s), `ADR 0058 lacks: ${s}`)
 })
 
 test('mid-loop auto-merge is off, and nothing waits for CI', () => {

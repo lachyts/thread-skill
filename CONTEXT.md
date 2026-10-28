@@ -224,7 +224,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a security hole on any path it ships, or the named test failing. Only a blocking finding
   holds an own-branch landing; the rest are filed in its follow-up task, and
   a clean round is one with none, unless it returned exactly its cap, which
-  earns one more code round first (ADR 0055). The session grades it, never
+  earns one more code round first (ADR 0058). The session grades it, never
   the reviewer. _Avoid_: accepted finding, must-fix, high (the reviewer
   grades no severity).
 - **Close-out PR** — the pull request carrying close's own bookkeeping

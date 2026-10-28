@@ -366,16 +366,16 @@ reported, not traced: that rollout leaves no baseline (ADRs 0030, 0033, 0034, 00
 trace may conclude). The Watch, its id and its recurring rule are Chorus's Reflection's, borrowed and never imported;
 recording Lachy's no (step 15's decision task, § Deciding the decision task) is this skill's own.
 
-**/fresh-review landings.** Read `span.json`'s `freshReview` (ADR 0055 d5) as reported, not traced: one entry per
+**/fresh-review landings.** Read `span.json`'s `freshReview` (ADR 0058 d5) as reported, not traced: one entry per
 landing (a repo and branch) with a round reviewed in the window, only those rounds counted: a landing reviewed
 across two weeks shows in each, and the default branch's entry never grows with the record. For each, its `rounds`
 (`codeRounds` of them code), `findings` and `blocking` per code round in order, `filed`, `open` at its last code round,
 `recurring` and `reversal`, its size (`lines`, `files`), and `blockingRate`. A null is unknown, never 0: a round
-recorded before ADR 0055, or one whose doc held no `## Disposition` yet. `codeRounds` counts every review round on
+recorded before ADR 0058, or one whose doc held no `## Disposition` yet. `codeRounds` counts every review round on
 the branch, dev-time chains before the landing loop included, so it is review cost, never the landing's budget count
-(ADR 0055 d4): never name a landing as at its budget from it. Name each landing with many code rounds as review cost,
+(ADR 0058 d4): never name a landing as at its budget from it. Name each landing with many code rounds as review cost,
 each whose last code round left `open` above 0, and each whose
-`blockingRate` is 0 over two or more code rounds (the self-grading risk ADR 0055's Consequences name). The entry with
+`blockingRate` is 0 over two or more code rounds (the self-grading risk ADR 0058's Consequences name). The entry with
 `branch` null holds the repo's branchless rounds in the window: no landing.
 
 **Grade accuracy.** Read `span.json`'s `grades`: the Grade log (p25-4, ADR 0041) joined to what followed each grade,
@@ -566,7 +566,7 @@ or `exists`). An item left open keeps the task open.
   what moved it, or nothing does.
 - /fresh-review churn names no rollout (`reviews.jsonl` carries none): the weekly reading reports each landing
   (`freshReview`, one entry per repo and branch) and traces none of it. A branch name reused for a later landing, or
-  a chain run on the default branch, reads as one landing; a round with no branch (one recorded before ADR 0055) reads
+  a chain run on the default branch, reads as one landing; a round with no branch (one recorded before ADR 0058) reads
   as no landing, and only in the window its line falls in. A round reaches `reviews.jsonl` only when fresh-review or
   land.sh's own-branch `--queue` and `--hold` recorded it.
 - The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
