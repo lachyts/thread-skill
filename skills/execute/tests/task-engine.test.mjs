@@ -258,7 +258,7 @@ test('an invalid review budget fails closed per task with no dispatch', async ()
 test('static: the engine is task-shaped (the retired script is queue-only.test.mjs (d))', () => {
   const src = fs.readFileSync(enginePath, 'utf8')
   // The only a.waves read is the refusal guard.
-  assert.deepEqual(src.match(/\ba\.waves\b[^\n]*/g), ["a.waves !== undefined) throw new Error('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')"])
+  assert.deepEqual(src.match(/\ba\.waves\b[^\n]*/g), ["a.waves !== undefined) throw argsRefused('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')"])
   assert.ok(!/concurrency/.test(src), 'no concurrency')
   assert.ok(!/\bchunk\(/.test(src), 'no chunk(')
   assert.ok(!/\bpipeline\(/.test(src), 'no pipeline(')

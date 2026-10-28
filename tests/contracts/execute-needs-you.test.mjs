@@ -214,7 +214,7 @@ function checkNeedsYou(skill, context = realContext) {
     !items.includes('`[[<slug>]] UNVERIFIED undecided: decide with /thread:repair [[<rollout>]]`') ||
     !kindC.includes('every `setAside` entry at its run or at Integration whose `lead-integrate.py inputs`') ||
     !kindC.includes('reports a non-null `humanFix`') ||
-    !kindC.includes('A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (e)') ||
+    !kindC.includes('A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (c) too, through its `humanFix` H12 (ADR 0048: no halt).') ||
     !kindC.includes("A null `humanFix` is the lead's own re-entry") ||
     /It includes:|plan-blocked with `max_plan_rounds` spent|blocked at its run with `autoRevise/.test(kindC) ||
     !items.includes('`[[<slug>]] gated: awaiting merge approval for [[<slug>]] (PR #N)`') ||
@@ -281,7 +281,7 @@ function checkNeedsYou(skill, context = realContext) {
   // trip); `_schedule_positions` reads its links but the first link wins; no item carries a log mark.
   if (!log.includes("created on first use at the note's end, below `## Queue`") || !log.includes('appended inside that section') ||
     !['`## Race log`', '`## Notes`', '`## Git-env log`', '`_schedule_positions`', 'first link wins'].every((k) => log.includes(k)) ||
-    !items.includes('ever carries the log marks `git-env trip`, `git-env ack` or `RACE decided:`')) {
+    !items.includes('ever carries the log marks `git-env trip`, `git-env ack`, `lane hold`, `lane ack` or `RACE decided:`')) {
     fails.push('log-placement')
   }
 
@@ -443,6 +443,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
     [engine, "blockerDiagnosis: 'workflow stage threw — see /workflows'", 'taskResult\'s fallback'],
     [reconcile, 'CALL_FAILED_PREFIX = "workflow call failed:"', 'the lead\'s dead-call row'],
     [real, 'reason `merge-task: <its message>`', 'the lead\'s exit-1 row'],
+    [real, "reason `invalid round budget: <field> on [[<task>]] must be an integer >= 1, got '<raw>'`", 'the lead\'s task-level budget row (§ 3, ADR 0048)'],
     [leadIntegrate, '"prUrl": pr_url, "prUrlError": pr_url_error,', '`inputs`\' prUrlError'],
     [leadIntegrate, '"lastIntegration": last, "resumeAt": resume_at,', '`inputs`\' resumeAt'],
     [real, 'A non-empty `prUrlError` (the note\'s `pr:` gives no PR URL the engine takes, step 3) launches nothing', 'step 1.2\'s prUrlError hold'],
@@ -450,10 +451,10 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
       'step 3\'s prUrlError set-aside'],
   ]
   for (const [src, text, what] of written) assert.ok(src.includes(text), `${what}: ${text} is no longer written`)
-  // Each opening is _raise_field's: the six own-run openings in NO_BUDGET_OPENINGS, the plan budget's in PLAN_BUDGET_OPENINGS.
+  // Each opening is _raise_field's: the seven own-run openings in NO_BUDGET_OPENINGS, the plan budget's in PLAN_BUDGET_OPENINGS.
   const tuple = (name) => JSON.parse('[' + ((leadIntegrate.match(new RegExp(`^${name} = \\(([^)]*)\\)`, 'm')) ?? [])[1] ?? '').replace(/\s+/g, ' ').replace(/,\s*$/, '') + ']')
   assert.deepEqual(tuple('NO_BUDGET_OPENINGS'), ['workflow call failed:', 'merge-task:', 'transient infrastructure failure', 'plan-divergence:',
-    'agent returned neither verified nor blocked', 'workflow stage threw'], 'NO_BUDGET_OPENINGS lists the six own-run openings')
+    'agent returned neither verified nor blocked', 'workflow stage threw', 'invalid round budget:'], 'NO_BUDGET_OPENINGS lists the seven own-run openings')
   assert.deepEqual(tuple('PLAN_BUDGET_OPENINGS'), ['plan not approved after', 'plan round budget exhausted'], 'PLAN_BUDGET_OPENINGS')
 })
 
@@ -549,7 +550,7 @@ test('control: an item kind dropped, or (c) re-deriving its causes, fails kinds'
   only(edit(real, ", except a RACE whose re-verify this session still runs: a green one lands it with no decision)", ')'),
     'kinds', 'a RACE pushed while its re-verify runs')
   only(edit(real, 'reports a non-null `humanFix`. The script', 'reports `autoRetry: false`. The script'), 'kinds', 'membership by autoRetry')
-  only(edit(real, ' A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (e), § 3\'s round-budget halt.', ''),
+  only(edit(real, ' A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (c) too, through its `humanFix` H12 (ADR 0048: no halt).', ''),
     'kinds', 'a, b and e unplaced')
   only(edit(real, 'skips it and logs nothing.\n', 'skips it and logs nothing. It includes:\n  - plan-blocked with `max_plan_rounds` spent;\n'),
     'kinds', 'the old includes list back')
@@ -601,7 +602,7 @@ test('control: an ask outside § 6.5, or an inexact exemption, fails no-other-as
 test('control: a log at the note\'s top, or items carrying a log mark, fails log-placement', () => {
   only(edit(real, "created on first use at the note's end, below `## Queue`", "created on first use at the note's top, below `## Queue`"),
     'log-placement', 'at the top')
-  only(edit(real, 'No item text ever carries the log marks `git-env trip`, `git-env ack` or `RACE decided:`, so the git-env trip halt\'s reason is written `the shared checkout changed`. ', ''),
+  only(edit(real, 'No item text ever carries the log marks `git-env trip`, `git-env ack`, `lane hold`, `lane ack` or `RACE decided:`, so the git-env trip halt\'s reason is written `the shared checkout changed`. ', ''),
     'log-placement', 'no marks sentence')
 })
 

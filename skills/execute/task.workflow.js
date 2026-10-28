@@ -31,7 +31,7 @@ export const meta = {
 //                                    //   rungs: [{ name, model, effort, judge, review }, …] }, bottom first.
 //                                    //   Fixed for the call: a resume re-passes its call's own ladder, so an
 //                                    //   edit reaches a task at its next call. Validated (ladderArgsError)
-//                                    //   before any dispatch, in both modes. Absent ⇒ the built-in ladder (a
+//                                    //   before any dispatch (argsRefused), in both modes. Absent ⇒ the built-in ladder (a
 //                                    //   Lost-call resume of a call from before 3.0.0); that call's retired
 //                                    //   tier-ceiling and judge-pin args are ignored, never an error.
 //   knownBaselineFailures : string[],// optional; "test_id — reason" lines for tests already red on a
@@ -60,7 +60,8 @@ export const meta = {
 //                                    //   review judge carry slotRule after KILL_RULE; and the integrate call's line carries
 //                                    //   `--priority` (engine-only: verifySlotArgsError refuses any key but script
 //                                    //   and slots, so no lead can give a task call the Integration priority).
-//                                    //   Absent/null is refused before any dispatch, in both modes (estate ADR
+//                                    //   Absent/null is refused before any dispatch (argsRefused: the sentinel
+//                                    //   thread:args-refused, execute § 4.5 *Args refusal*), in both modes (estate ADR
 //                                    //   0009 d4: no lead passed it while it was optional). A resume re-passes
 //                                    //   its call's own args on its own version-keyed engine, so a call launched
 //                                    //   without it, on an engine that took it as optional, resumes there.
@@ -90,7 +91,7 @@ export const meta = {
 //                                    //   as absent, never an error.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
-//                                    //   any dispatch, as is a missing, null or array `task`.
+//                                    //   any dispatch (argsRefused), as is a missing, null or array `task`.
 //       slug            : string,    // task note basename, e.g. "giflab-fix-coalesce"
 //       taskPath        : string,    // absolute path to the task note
 //       scope           : "single-file" | "cross-cutting" | "read-only",
@@ -135,7 +136,7 @@ export const meta = {
 //                                    //   note), then the unchanged judge loop.
 //                                    //   No round left ⇒ review-blocked with no dispatch. A seeded call that
 //                                    //   stops blocked writes REVISE_MARKER + `revise stopped: <why>` + the
-//                                    //   history. Validated (resumeArgsError) before any dispatch: the history
+//                                    //   history. Validated (resumeArgsError) before any dispatch (argsRefused): the history
 //                                    //   strictly ascending with at least one round that has feedback, its
 //                                    //   last round = reviewRoundsUsed, branch/worktreePath the computed ones,
 //                                    //   never a read-only task. A round with empty feedback (reviewLoop
@@ -145,9 +146,9 @@ export const meta = {
 //   mode        : string,            // optional (p12-6); absent or 'task' ⇒ the task's own call, unchanged
 //                                    //   (byte-identical prompts, labels and row). 'integrate' ⇒ Integration's
 //                                    //   trouble path (ADR 0030 decision 3) with args.integration. Any other
-//                                    //   value throws before dispatch.
+//                                    //   value is refused before dispatch (argsRefused).
 //   integration : object,            // mode 'integrate' only; validated (integrationArgsError) before any
-//                                    //   dispatch — a bad value is a lead bug, not a task block:
+//                                    //   dispatch (argsRefused) — a bad value is a lead bug, not a task block:
 //       prUrl, branch, worktreePath  //   the task's PR; branch = audit-fix/<alias>, worktreePath = the task tree.
 //       headSha         : string,    // the ANCHOR (40-hex) — always ANCHOR_RECIPE's output, never "the
 //                                    //   approved head" by assumption (see the lead contract below).
@@ -435,17 +436,20 @@ const RM_RULE = 'Removing files (hard rule, the 2026-10-01 stall): remove a scra
 const KILL_RULE = 'Stopping processes (hard rule, the 2026-10-04 incident): stop only a process you started yourself, by the pid or process group you recorded when you started it (`kill <pid>`, `kill -- -<pgid>`). Never stop one by name or pattern (`pkill`, `killall`, `kill $(pgrep ...)`): the lead, other agents and other sessions run the same verifier on this machine, and an implementer whose `pkill -n` on the verifier pattern killed the Integration verify of the lead is why this rule exists.'
 
 // Verify slots (p23-4, Chorus ADR 0098 d6): at ceiling 4 every agent's verifier is a full suite, and on 2026-10-17
-// uncapped suites from several sessions drove one machine to load 66 and lost a merge to a load flake. With
-// args.verifySlot set (required since estate ADR 0009 d4; the renderers below still take it absent, for the
-// tests), every verifier line the engine renders goes through scripts/verify-slot.py, which holds
-// one of the machine's `verify_slots` slots for the suite's life and ends the suite (its guard) if the wrapper is
-// killed. shq quotes one POSIX word ('…', each ' written '\''), so the verifier reaches `bash -c` byte for byte.
+// uncapped suites from several sessions drove one machine to load 66 and lost a merge to a load flake. args.verifySlot
+// is required (estate ADR 0009 d4: the entry refuses a call without it, an *Args refusal*), so every verifier line the
+// engine renders goes through scripts/verify-slot.py, which holds one of the machine's `verify_slots` slots for the
+// suite's life and ends the suite (its guard) if the wrapper is killed. The renderers' unslotted branches (slotted()'s
+// scrubbed() and the `slot ? … : ''` fragments below) are dead outside the tests: they are kept only as the byte-pin
+// baseline (prompt-invariants' unslot() and the PRE_P31 pins compare each slotted prompt with its unslotted bytes plus
+// exactly the slot pieces), so no prompt byte changed when the slot became required (p32-1).
+// shq quotes one POSIX word ('…', each ' written '\''), so the verifier reaches `bash -c` byte for byte.
 function shq(s) {
   return `'${String(s).replace(/'/g, "'\\''")}'`
 }
 
-// The verifier line an agent runs: scrubbed() when slot is absent (byte-identical); else the scrub, then the
-// wrapper, with `--priority` only from integrationVerify (the serial lane's own agent verifier).
+// The verifier line an agent runs: the scrub, then the wrapper, with `--priority` only from integrationVerify (the
+// serial lane's own agent verifier); scrubbed() when slot is absent, the tests' byte-pin baseline only (above).
 function slotted(verifier, slot) {
   if (!slot) return scrubbed(verifier)
   return `${GIT_ENV_SCRUB} python3 ${shq(slot.script)} run --slots ${slot.slots}${slot.priority ? ' --priority' : ''} -- bash -c ${shq(verifier)}`
@@ -1577,7 +1581,7 @@ const BRANCH_NAME = /^(?!-)(?!\/)(?!.*\/\/)(?!.*\.\.)(?!\.)(?!.*\/\.)(?!.*\.lock
 function defaultBranch(a) {
   const b = a.defaultBranch || 'main'
   if (typeof b !== 'string' || !BRANCH_NAME.test(b)) {
-    throw new Error(`defaultBranch: refusing ${JSON.stringify(b)} — not a valid branch name`)
+    throw new Error(`defaultBranch: refusing ${refusedEcho(b)} — not a valid branch name`)
   }
   return b
 }
@@ -1805,24 +1809,50 @@ function rungName(s) {
   return typeof s === 'string' && LADDER_NAME.test(s) && !LADDER_YAML_WORDS.includes(s)
 }
 
+// The args refusal (p32-1, execute § 4.5 *Args refusal*). Every refusal the entry makes before any dispatch (args
+// that are not JSON or not one object, a bad defaultBranch, the pre-p12-5 shape, task, mode, ladder, verifySlot, integration or
+// task.resume) is thrown as argsRefused(why): its message starts with ARGS_REFUSED, so a notification the runtime wraps
+// (`Error: …`) or cuts still carries it, and the lead matches it by contains. Such a call dispatched nothing and the
+// same args are refused again, so the lead never reads it as a *Lost call* (a resume, a dead-call set-aside, an
+// automatic retry): it drops the runId and halts the entry once. A throw after dispatch is caught into a row instead.
+const ARGS_REFUSED = 'thread:args-refused'
+function argsRefused(why) {
+  return new Error(`${ARGS_REFUSED}: ${why}`)
+}
+
+// A refused value, as a refusal or a refusing log line echoes it (p32-1): its JSON, exactly as JSON.stringify writes
+// it up to 200 characters; a longer one is cut there, marked `…` and its full length given, so one bad value never
+// floods the line the lead prints verbatim (§ 4.5 *Args refusal* step (5)). A value JSON cannot write (undefined)
+// echoes as its type.
+function refusedEcho(v) {
+  let s
+  try { s = JSON.stringify(v) } catch (e) { s = undefined }
+  if (s === undefined) return typeof v
+  return cutEcho(s, 200)
+}
+// An echo's text cut at `max` characters, marked `…` and its full length given; a shorter one as it is.
+function cutEcho(s, max) {
+  return s.length > max ? `${s.slice(0, max)}… (${s.length} characters)` : s
+}
+
 // args.ladder: '' when usable (or absent), else why not. A bad value is a lead bug: the orchestration
-// throws before any dispatch, in both modes.
+// refuses it before any dispatch (argsRefused), in both modes.
 function ladderArgsError(l) {
   if (l === undefined || l === null) return ''
-  if (!l || typeof l !== 'object' || Array.isArray(l)) return `must be one object { source, rungs }, got ${JSON.stringify(l)}`
-  if (typeof l.source !== 'string' || !l.source) return `source must be a non-empty string, got ${JSON.stringify(l.source)}`
+  if (!l || typeof l !== 'object' || Array.isArray(l)) return `must be one object { source, rungs }, got ${refusedEcho(l)}`
+  if (typeof l.source !== 'string' || !l.source) return `source must be a non-empty string, got ${refusedEcho(l.source)}`
   if (!Array.isArray(l.rungs) || !l.rungs.length) return 'rungs must be a non-empty array, bottom rung first'
   const seen = []
   for (let i = 0; i < l.rungs.length; i++) {
     const r = l.rungs[i]
     const at = `rung ${i + 1}`
     if (!r || typeof r !== 'object' || Array.isArray(r)) return `${at} must be an object { name, model, effort, judge, review }`
-    if (!rungName(r.name)) return `${at}: name ${JSON.stringify(r.name)} must be lowercase [a-z][a-z0-9._-]* and not a YAML word`
-    if (seen.includes(r.name)) return `${at}: duplicate name ${JSON.stringify(r.name)}`
+    if (!rungName(r.name)) return `${at}: name ${refusedEcho(r.name)} must be lowercase [a-z][a-z0-9._-]* and not a YAML word`
+    if (seen.includes(r.name)) return `${at}: duplicate name ${refusedEcho(r.name)}`
     seen.push(r.name)
-    if (!LADDER_MODELS.includes(r.model)) return `${at} (${r.name}): unknown model ${JSON.stringify(r.model)} (known: ${LADDER_MODELS.join(', ')})`
+    if (!LADDER_MODELS.includes(r.model)) return `${at} (${r.name}): unknown model ${refusedEcho(r.model)} (known: ${LADDER_MODELS.join(', ')})`
     for (const k of ['effort', 'judge', 'review']) {
-      if (!LADDER_EFFORTS.includes(r[k])) return `${at} (${r.name}): ${k} ${JSON.stringify(r[k])} is not one of ${LADDER_EFFORTS.join(', ')}`
+      if (!LADDER_EFFORTS.includes(r[k])) return `${at} (${r.name}): ${k} ${refusedEcho(r[k])} is not one of ${LADDER_EFFORTS.join(', ')}`
     }
   }
   return ''
@@ -1831,17 +1861,17 @@ function ladderArgsError(l) {
 // args.verifySlot (p23-4): '' when usable, else why not. Required (estate ADR 0009 d4): absent or null is refused.
 // Exactly { script, slots }: the absolute, single-line path of verify-slot.py (never under a bare /skills/, an
 // unexported plugin root) and an integer >= 1. Any other key (`priority` included: only integrationVerify sets
-// it, on its own copy) is a lead bug, refused before any dispatch in both modes.
+// it, on its own copy) is a lead bug, refused before any dispatch in both modes (argsRefused, execute § 4.5 *Args refusal*).
 function verifySlotArgsError(v) {
   if (v === undefined || v === null) return `is required (estate ADR 0009 d4): pass this entry's verify-timeout verifySlot, verbatim (execute § 4)`
-  if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${JSON.stringify(v)}`
+  if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${refusedEcho(v)}`
   const keys = Object.keys(v).sort()
-  if (keys.length !== 2 || keys[0] !== 'script' || keys[1] !== 'slots') return `must hold exactly script and slots, got keys ${JSON.stringify(Object.keys(v))}`
-  if (typeof v.script === 'string' && v.script.startsWith('/skills/')) return `script ${JSON.stringify(v.script)} sits under a bare /skills/: CLAUDE_PLUGIN_ROOT was empty (re-run by plugin-root.md rule 4)`
+  if (keys.length !== 2 || keys[0] !== 'script' || keys[1] !== 'slots') return `must hold exactly script and slots, got keys ${refusedEcho(Object.keys(v))}`
+  if (typeof v.script === 'string' && v.script.startsWith('/skills/')) return `script ${refusedEcho(v.script)} sits under a bare /skills/: CLAUDE_PLUGIN_ROOT was empty (re-run by plugin-root.md rule 4)`
   if (typeof v.script !== 'string' || !v.script.startsWith('/') || /[\r\n]/.test(v.script) || v.script.split('/').pop() !== 'verify-slot.py') {
-    return `script must be the absolute, single-line path of verify-slot.py, got ${JSON.stringify(v.script)}`
+    return `script must be the absolute, single-line path of verify-slot.py, got ${refusedEcho(v.script)}`
   }
-  if (!Number.isInteger(v.slots) || v.slots < 1) return `slots must be an integer >= 1, got ${JSON.stringify(v.slots)}`
+  if (!Number.isInteger(v.slots) || v.slots < 1) return `slots must be an integer >= 1, got ${refusedEcho(v.slots)}`
   return ''
 }
 
@@ -2003,10 +2033,15 @@ function transientImplBlock(extra) {
 // on ADR 0008 (implement() reads an undefined plan result as "no gate"). Only an integer >= 1 is a budget;
 // anything else fails CLOSED with a diagnosis naming the frontmatter field. Strings are rejected rather
 // than coerced: args built from YAML ints are numbers, so a string is itself a config error. The text is
-// kept free of double quotes because the lead copies it into a ROLLOUT-STATUS reason (Stop-hook regex).
+// kept free of double quotes because the lead copies it into a ROLLOUT-STATUS reason (Stop-hook regex). A bad value
+// is shown bounded (p32-1): cut at ROUND_BUDGET_ECHO characters as refusedEcho cuts (cutEcho), since integrationArgsError
+// throws this text as an args.integration refusal, the line § 4.5 *Args refusal* step (5) prints verbatim, and the
+// fixed text around it leaves the line under 400 characters only with a short echo.
 const ROUND_BUDGET_FIELDS = { maxPlanRounds: 'max_plan_rounds', maxReviewRounds: 'max_review_rounds' }
+const ROUND_BUDGET_ECHO = 60
 function roundBudgetDiagnosis(task, keys) {
-  const show = (v) => (typeof v === 'string' ? `'${v.replace(/"/g, '')}' (a string)` : String(v))
+  const cut = (v) => cutEcho(String(v).replace(/"/g, ''), ROUND_BUDGET_ECHO)
+  const show = (v) => (typeof v === 'string' ? `'${cut(v)}' (a string)` : cut(v))
   const bad = keys.filter((k) => !(Number.isInteger(task[k]) && task[k] >= 1))
   if (!bad.length) return ''
   return 'invalid round budget: ' + bad.map((k) => `${ROUND_BUDGET_FIELDS[k]} = ${show(task[k])}`).join(', ') +
@@ -2677,11 +2712,11 @@ function prIdentityError(a, o) {
   if (typeof t.slug !== 'string' || !t.slug) return 'task.slug must be a non-empty string'
   if (typeof a.repoPath !== 'string' || !a.repoPath) return 'repoPath must be a non-empty string'
   if (t.scope === 'read-only') return 'a read-only task has no PR to integrate or revise'
-  if (typeof o.prUrl !== 'string' || !PR_URL.test(o.prUrl)) return `prUrl must be a PR URL (…/pull/<n>), got ${JSON.stringify(o.prUrl)}`
+  if (typeof o.prUrl !== 'string' || !PR_URL.test(o.prUrl)) return `prUrl must be a PR URL (…/pull/<n>), got ${refusedEcho(o.prUrl)}`
   const br = `audit-fix/${shortAlias(t.slug)}`
-  if (o.branch !== br) return `branch must be ${br}, got ${JSON.stringify(o.branch)}`
+  if (o.branch !== br) return `branch must be ${br}, got ${refusedEcho(o.branch)}`
   const wt = worktreeDir(a.repoPath, t.slug)
-  if (o.worktreePath !== wt) return `worktreePath must be ${wt}, got ${JSON.stringify(o.worktreePath)}`
+  if (o.worktreePath !== wt) return `worktreePath must be ${wt}, got ${refusedEcho(o.worktreePath)}`
   return ''
 }
 
@@ -2695,11 +2730,11 @@ function prIdentityError(a, o) {
 //   Lost-call resume of an old integrate call), which reads as neutral: Integration runs on the top rung
 //   anyway, so the old record decides nothing.
 function rungRecordError(g) {
-  if (!isObj(g)) return `must be one object { startRung, rung, climbs }, got ${JSON.stringify(g)}`
+  if (!isObj(g)) return `must be one object { startRung, rung, climbs }, got ${refusedEcho(g)}`
   if ('model' in g) {
     if (!['opus', 'fable'].includes(g.model) || typeof g.escalated !== 'boolean' || typeof g.escalatedAt !== 'string' ||
       typeof g.tierCapped !== 'boolean' || typeof g.tierCappedAt !== 'string') {
-      return `a pre-3.0.0 tier record must be { model: opus|fable, escalated: boolean, escalatedAt: string, tierCapped: boolean, tierCappedAt: string }, got ${JSON.stringify(g)}`
+      return `a pre-3.0.0 tier record must be { model: opus|fable, escalated: boolean, escalatedAt: string, tierCapped: boolean, tierCappedAt: string }, got ${refusedEcho(g)}`
     }
     return ''
   }
@@ -2707,7 +2742,7 @@ function rungRecordError(g) {
   const name = (v) => v === '' || rungName(v)
   if (keys !== 'climbs,rung,startRung' || !name(g.startRung) || !name(g.rung) || !Array.isArray(g.climbs) ||
     g.climbs.some((c) => !isObj(c) || Object.keys(c).sort().join(',') !== 'from,stage,to' || !STAGES.includes(c.stage) || !rungName(c.from) || !rungName(c.to))) {
-    return `must be { startRung, rung, climbs } (rung names or '', climbs [{ stage: ${STAGES.join('|')}, from, to }]), got ${JSON.stringify(g)}`
+    return `must be { startRung, rung, climbs } (rung names or '', climbs [{ stage: ${STAGES.join('|')}, from, to }]), got ${refusedEcho(g)}`
   }
   return ''
 }
@@ -2727,25 +2762,25 @@ function integrationArgsError(a) {
   if (!isObj(I)) return 'must be one object'
   const id = prIdentityError(a, I)
   if (id) return id
-  if (!(Number.isInteger(t.maxIterations) && t.maxIterations >= 1)) return `task.maxIterations must be an integer >= 1, got ${JSON.stringify(t.maxIterations)}`
+  if (!(Number.isInteger(t.maxIterations) && t.maxIterations >= 1)) return `task.maxIterations must be an integer >= 1, got ${refusedEcho(t.maxIterations)}`
   const budget = roundBudgetDiagnosis(t, ['maxReviewRounds'])
   if (budget) return budget
-  for (const k of ['headSha', 'taskBase', 'mainSha']) if (!isSha(I[k])) return `${k} must be a 40-hex commit sha, got ${JSON.stringify(I[k])}`
+  for (const k of ['headSha', 'taskBase', 'mainSha']) if (!isSha(I[k])) return `${k} must be a 40-hex commit sha, got ${refusedEcho(I[k])}`
   if (!Array.isArray(I.trouble) || I.trouble.some((x) => !INTEGRATION_TROUBLE.includes(x)) || new Set(I.trouble).size !== I.trouble.length) {
-    return `trouble must be a deduplicated subset of ${INTEGRATION_TROUBLE.join('|')}, got ${JSON.stringify(I.trouble)}`
+    return `trouble must be a deduplicated subset of ${INTEGRATION_TROUBLE.join('|')}, got ${refusedEcho(I.trouble)}`
   }
   if (!Array.isArray(I.landed)) return 'landed must be an array'
   for (const p of I.landed) {
     if (!isObj(p) || typeof p.prUrl !== 'string' || !PR_URL.test(p.prUrl) || typeof p.title !== 'string' ||
       typeof p.taskPath !== 'string' || !Array.isArray(p.files) || p.files.some((f) => typeof f !== 'string')) {
-      return `landed entries must be { prUrl, title, files: string[], taskPath }, got ${JSON.stringify(p)}`
+      return `landed entries must be { prUrl, title, files: string[], taskPath }, got ${refusedEcho(p)}`
     }
   }
   const he = historyError(I.reviewHistory, true)
   if (he) return 'reviewHistory ' + he
   const last = I.reviewHistory.length ? I.reviewHistory[I.reviewHistory.length - 1].round : 0
   if (!(Number.isInteger(I.reviewRoundsUsed) && I.reviewRoundsUsed >= 1 && I.reviewRoundsUsed >= last)) {
-    return `reviewRoundsUsed must be an integer >= 1 and >= the history's last round (${last}), got ${JSON.stringify(I.reviewRoundsUsed)}`
+    return `reviewRoundsUsed must be an integer >= 1 and >= the history's last round (${last}), got ${refusedEcho(I.reviewRoundsUsed)}`
   }
   const rungBad = rungRecordError(I.rung)
   if (rungBad) return 'rung ' + rungBad
@@ -2766,13 +2801,13 @@ function integrationArgsError(a) {
 function resumeArgsError(a) {
   const R = a.task.resume
   if (!isObj(R)) return 'must be one object'
-  if (R.stage !== 'revise') return `stage must be 'revise', got ${JSON.stringify(R.stage)}`
+  if (R.stage !== 'revise') return `stage must be 'revise', got ${refusedEcho(R.stage)}`
   const id = prIdentityError(a, R)
   if (id) return id
   const he = historyError(R.reviewHistory, false)
   if (he) return 'reviewHistory ' + he
   const last = R.reviewHistory[R.reviewHistory.length - 1].round
-  if (R.reviewRoundsUsed !== last) return `reviewRoundsUsed must equal the history's last round (${last}), got ${JSON.stringify(R.reviewRoundsUsed)}`
+  if (R.reviewRoundsUsed !== last) return `reviewRoundsUsed must equal the history's last round (${last}), got ${refusedEcho(R.reviewRoundsUsed)}`
   if (typeof R.plan !== 'string') return 'plan must be a string'
   return ''
 }
@@ -3382,29 +3417,48 @@ function integrationResult(task, out, a, trace) {
 
 // ---- Orchestration: one task per call; the lead holds the calls (ADR 0030) ---
 
+// Every refusal below is thrown before any dispatch through argsRefused (p32-1): its message starts with the sentinel
+// `thread:args-refused`, which execute § 4.5 *Args refusal* matches by contains, so the lead halts the entry once
+// (the runId dropped, an integrate call's lane freed) instead of resuming, setting aside or retrying a call that
+// dispatched nothing and would be refused again. Each message keeps its own text after the sentinel.
 // The Workflow tool passes `args` to a scriptPath workflow JSON-stringified, not as a live
 // object (confirmed empirically: the script sees `typeof args === 'string'`). Parse defensively
-// so the engine works whether args arrives as a string or an object.
-const a = typeof args === 'string' ? JSON.parse(args) : args
-defaultBranch(a)   // fail the run before any dispatch on an unusable args.defaultBranch
+// so the engine works whether args arrives as a string or an object; args that are not JSON, or not one
+// object (undefined, null, a number, an array), are refused here rather than dying in a TypeError below.
+// The refusal names the value's kind, then its bounded echo (refusedEcho): args the lead stringified before the
+// tool stringified them again parse to one string, the whole args JSON, which echoed in full ran to 50,658 characters.
+let a
+try {
+  a = typeof args === 'string' ? JSON.parse(args) : args
+} catch (e) {
+  throw argsRefused('args: not JSON: ' + e.message)
+}
+if (!a || typeof a !== 'object' || Array.isArray(a)) {
+  const kind = a === null ? 'null' : Array.isArray(a) ? 'array' : typeof a
+  const shown = a === null || a === undefined ? '' : ' ' + refusedEcho(a)
+  throw argsRefused('args must be one object, got ' + kind + shown + (kind === 'string' ? ' — args JSON-stringified twice: pass one object' : ''))
+}
+// Fail the run before any dispatch on an unusable args.defaultBranch (its own message after the sentinel).
+try { defaultBranch(a) } catch (e) { throw argsRefused(e.message) }
 // Refuse the pre-p12-5 `waves` args shape before any dispatch: a lead on a stale SKILL.md, or a resume of a
 // pre-rename run, must fail loudly here rather than converge nothing. Recovery is a re-dispatch.
-if (a.waves !== undefined) throw new Error('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')
-if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw new Error('args.task must be one task object')
+if (a.waves !== undefined) throw argsRefused('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')
+if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw argsRefused('args.task must be one task object')
 // args.mode (p12-6): absent or 'task' runs the task's own call; 'integrate' runs Integration's trouble
 // path. Bad Integration or seeded-revise args are lead bugs, refused before any dispatch.
 const mode = a.mode === undefined ? 'task' : a.mode
-if (mode !== 'task' && mode !== 'integrate') throw new Error(`args.mode: refusing ${JSON.stringify(a.mode)} — 'task' (the default) or 'integrate'`)
+if (mode !== 'task' && mode !== 'integrate') throw argsRefused(`args.mode: refusing ${refusedEcho(a.mode)} — 'task' (the default) or 'integrate'`)
 // args.ladder (ADR 0029 decision 6): the ladder.py JSON the lead resolved at this call's start. A malformed
 // one is a lead bug, refused before any dispatch in both modes; an absent one is the built-in ladder.
 const badLadder = ladderArgsError(a.ladder)
-if (badLadder) throw new Error('args.ladder: ' + badLadder)
+if (badLadder) throw argsRefused('args.ladder: ' + badLadder)
 // args.verifySlot (p23-4): the machine's verify slots. A malformed or absent one is a lead bug, refused here
 // (estate ADR 0009 d4): from 14 to 21 Oct 2026 no lead passed it, so 917 full Chorus suites ran
 // unslotted, up to 7 at once, and the Mac froze from heat. A resume replays its run's own version-keyed engine, so a
-// call launched on an engine that took it as optional (before 5.0.0) resumes there unchanged.
+// call launched on an engine that took it as optional (before 5.0.0) resumes there unchanged; one resumed on a
+// refusing engine is an *Args refusal*, and its next call is a fresh one (execute § 3.7 *Can no longer resume*).
 const badSlot = verifySlotArgsError(a.verifySlot)
-if (badSlot) throw new Error('args.verifySlot: ' + badSlot)
+if (badSlot) throw argsRefused('args.verifySlot: ' + badSlot)
 // Printed at every call, so a run's log names the ladder it ran on (a path, or built-in).
 function logLadder() {
   const L = ladderOf(a)
@@ -3414,14 +3468,14 @@ function logLadder() {
 }
 if (mode === 'integrate') {
   const bad = integrationArgsError(a)
-  if (bad) throw new Error('args.integration: ' + bad)
-  if (a.task.resume !== undefined) throw new Error("args.task.resume: a seeded revise is its own call, never mode 'integrate'")
+  if (bad) throw argsRefused('args.integration: ' + bad)
+  if (a.task.resume !== undefined) throw argsRefused("args.task.resume: a seeded revise is its own call, never mode 'integrate'")
 } else if (a.integration !== undefined) {
-  throw new Error("args.integration: only with args.mode 'integrate'")
+  throw argsRefused("args.integration: only with args.mode 'integrate'")
 }
 if (mode === 'task' && a.task.resume !== undefined) {
   const bad = resumeArgsError(a)
-  if (bad) throw new Error('args.task.resume: ' + bad)
+  if (bad) throw argsRefused('args.task.resume: ' + bad)
 }
 
 if (mode === 'integrate') {
@@ -3452,14 +3506,14 @@ if (a.progress) log(a.progress)
 // args.gatePricer (ADR 0038): a value pricerOf refuses reads as absent. The plan judge's pricing check is advisory
 // (approve-gates --standing still prices fail-closed), so a bad value is logged once and never throws.
 if (a.gatePricer !== undefined && a.gatePricer !== null && a.gatePricer !== '' && !pricerOf(a)) {
-  log(`gatePricer: refusing ${JSON.stringify(a.gatePricer)} — the plan judge's pricing check is off for this call (ADR 0038)`)
+  log(`gatePricer: refusing ${refusedEcho(a.gatePricer)} — the plan judge's pricing check is off for this call (ADR 0038)`)
 }
 // args.touched (p31-1, estate ADR 0009 d1): a value touchedOf refuses reads as absent, so the prompts fall back to
 // the repo's own Tests line, then its imports. Logged once and never thrown, like gatePricer: the pattern only
 // steers how an agent finds the touched tests, and the Checkpoints still run the full suite. Integrate mode never
 // reads it (its prompts are unchanged), so it is checked here, in task mode only.
 if (a.touched !== undefined && a.touched !== null && a.touched !== '' && !touchedOf(a)) {
-  log(`touched: refusing ${JSON.stringify(a.touched)} — the rollout's touched-tests pattern is off for this call (estate ADR 0009 d1)`)
+  log(`touched: refusing ${refusedEcho(a.touched)} — the rollout's touched-tests pattern is off for this call (estate ADR 0009 d1)`)
 }
 
 // A seeded revise uses its validated history with the empty rounds dropped (liveHistory); any other task

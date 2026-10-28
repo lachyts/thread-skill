@@ -40,6 +40,10 @@
 //               TRICKLE_CLAIMS files and quotes its TRICKLE_WARN prefix, says the § 4 stamp consumes a claim, that a
 //               claim whose rollout note is missing from the walk still counts (it fails safe), and names the seeded-
 //               revise residual and its follow-up task; the old "a claim under a lock is a later task's" is gone
+//   fair-share  (p28-5) § The Trickle's *A fair share* states the code's TRICKLE_WAIT_TTL and the allocation order
+//               (fewest held, then served least recently), *The limit* names the places kept, *The hold* their
+//               `kept for` suffix (the code builds `kept for [[<rollout>]]`), and it links the sooner re-check's
+//               follow-up task; the old "A fair share or a first start is a later task's" is gone
 // One function (checkAway) returns named failures, so the real files and each control (one mutation, exactly its
 // rule) run through identical logic. Reads files only.
 import { test } from 'node:test'
@@ -236,6 +240,18 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
     !/\[\[thread-skill-p28-\d+-trickle-claim-a-seeded-revise\]\]/.test(trickleS) ||
     trickleS.includes("A claim under a lock is a later task's.")) fails.push('claim')
 
+  // fair-share (p28-5): the record's TTL is the code's, read from it, so a change on either side fails; the allocation
+  // order, the limit's and the hold's wording, and the follow-up link are the doc's.
+  const waitM = grab(code, /^TRICKLE_WAIT_TTL = timedelta\(minutes=(\d+)\)/m)
+  const keptFor = 'kept for " + ", ".join(f"[[{n}]]" for n in kept)'   // the builder of the hold's suffix
+  if (!waitM || !code.includes(keptFor) ||
+    !trickleS.includes(`A waiting record lives ${waitM} minutes from its \`at\``) ||
+    !trickleS.includes('fewest, then was served least recently') ||
+    !trickleS.includes('less the places kept for waiting rollouts') ||
+    !trickleS.includes('`, <k> kept for [[<rollout>]]') ||
+    !/\[\[thread-skill-p28-\d+-trickle-a-waiting-lead-re-checks-sooner\]\]/.test(trickleS) ||
+    trickleS.includes("A fair share or a first start is a later task's.")) fails.push('fair-share')
+
   return fails
 }
 
@@ -246,7 +262,8 @@ test('away.md, the code that reads the file and the hold-back prose agree', () =
 // ---- controls: each mutates one place and must fail with exactly its rule ---------------------------------------
 
 const RULES = ['keys', 'path', 'staleness', 'default', 'refresh', 'until', 'morning', 'serial', 'warn', 'hold-back', 'glossary',
-  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record', 'heat', 'mac-holds', 'claim']
+  'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record', 'heat', 'mac-holds', 'claim',
+  'fair-share']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -400,7 +417,7 @@ test('control: a Heat hold the doc or the code says another way fails heat', () 
   only('away', 'It holds Away too', 'Away lifts it', 'heat', 'Away lifts the hold')
   only('away', '**It never halts.** A row the heat holds', '**It halts.** A row the heat holds', 'heat', 'a Heat hold halts')
   only('away', '`THREAD_HEAT_LEVEL`, an integer from 0 to 4', 'An env var, an integer from 0 to 4', 'heat', 'no pin named')
-  only('context', 'the Trickle or the Away cap, the Heat\n  hold, a cool-down.', 'the Trickle or the Away cap, a cool-down.', 'heat', 'a hot spell reads as a stall')
+  only('context', 'the Trickle or the Away cap, the Heat hold, a cool-down.', 'the Trickle or the Away cap, a cool-down.', 'heat', 'a hot spell reads as a stall')
 })
 
 test('control: a Mac-wide hold score.py lacks, or one the idle-slots enum lacks, fails mac-holds', () => {
@@ -423,7 +440,20 @@ test('control: a Trickle claim the doc or the code says another way fails claim'
   only('away', p, `${p} A claim under a lock is a later task's.`, 'claim', 'the old sentence back')
 })
 
-test('the rules are all named (21) and each has a control', () => {
-  assert.equal(RULES.length, 21)
+test('control: a fair share the doc or the code says another way fails fair-share', () => {
+  only('code', 'TRICKLE_WAIT_TTL = timedelta(minutes=30)', 'TRICKLE_WAIT_TTL = timedelta(minutes=20)', 'fair-share', 'a 20-minute TTL in the code')
+  only('away', 'A waiting record lives 30 minutes from its `at`', 'A waiting record lives a while', 'fair-share', 'no TTL in the doc')
+  only('away', 'fewest, then was served least recently', 'fewest', 'fair-share', 'no allocation order')
+  only('away', 'less the count elsewhere, less the places kept for waiting rollouts, less this rollout',
+    'less the count elsewhere, less this rollout', 'fair-share', 'the old room sentence back in The limit')
+  only('away', 'either reads on with `, <k> kept for [[<rollout>]], …`', 'either reads on as before', 'fair-share', 'no suffix in The hold')
+  only('code', 'kept for " + ", ".join(f"[[{n}]]" for n in kept)', 'kept for " + ", ".join(kept)', 'fair-share', 'no suffix in the code')
+  only('away', '[[thread-skill-p28-9-trickle-a-waiting-lead-re-checks-sooner]]', 'a later task', 'fair-share', 'no follow-up link')
+  const p = real.away.split('\n').find((l) => l.startsWith('**A morning launch still starts**'))
+  only('away', p, `${p} A fair share or a first start is a later task's.`, 'fair-share', 'the old sentence back')
+})
+
+test('the rules are all named (22) and each has a control', () => {
+  assert.equal(RULES.length, 22)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

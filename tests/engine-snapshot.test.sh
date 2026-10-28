@@ -394,6 +394,9 @@ keep() { local n; for n in "$@"; do cp "$TASKS/$n.md" "$T/before.$n"; done; }
 keep g1 gt1 sg1
 py "$P" skills/execute/scripts/reconcile-rollout.py clear-pause --rollout "$TASKS/g1.md" --tasks-dir "$TASKS"; refused "reconcile-rollout clear-pause" g1
 py "$P" skills/execute/scripts/reconcile-rollout.py carry --from "$TASKS/g1.md" --dry-run --tasks-dir "$TASKS"; refused "reconcile-rollout carry --from" g1
+# lane-hold and lane-ack require --rollout: the guard asks about the note it names (and the --tasks slug's rollout)
+py "$P" skills/execute/scripts/reconcile-rollout.py lane-hold --rollout "$TASKS/g1.md" --tasks gt1 --cause merge-task-abort --tasks-dir "$TASKS"; refused "reconcile-rollout lane-hold --rollout" g1 gt1
+py "$P" skills/execute/scripts/reconcile-rollout.py lane-ack --rollout "$TASKS/g1.md" --tasks gt1 --fix "fixed" --tasks-dir "$TASKS"; refused "reconcile-rollout lane-ack --rollout" g1
 # the task-keyed verbs with --rollout left off: the guard asks about each --tasks slug's rollout (and reconcile's rows')
 evsum() { find "$THREAD_EVENTS_DIR" -type f -exec cksum {} + 2>/dev/null | sort; }
 ev0=$(evsum)

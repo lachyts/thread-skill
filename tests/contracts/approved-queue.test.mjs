@@ -251,7 +251,7 @@ test('control: ADR 0054 without the rows 8 and 11 departure fails adr', () => {
 })
 
 test('control: a verb in GUARD_EXEMPT fails guard', () => {
-  only('rr', 'GUARD_EXEMPT = ("status", "fold-journals")', 'GUARD_EXEMPT = ("status", "fold-journals", "approve-queue")', 'guard')
+  only('rr', 'GUARD_EXEMPT = ("status", "fold-journals", "moving")', 'GUARD_EXEMPT = ("status", "fold-journals", "moving", "approve-queue")', 'guard')
 })
 
 test('control: unfinished-rollout.py without approved_unrun in RR_NAMES fails rr-names', () => {

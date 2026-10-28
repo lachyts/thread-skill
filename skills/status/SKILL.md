@@ -29,7 +29,9 @@ only when a lease would lapse, the Mac's kern.boottime and kern.waketime (a read
 `lead-integrate.py inputs` resolves `auto_retries` the same way, inside its own read, for a set-aside task whose
 notes lack it. Either read of the settings file runs land.sh's `--origin-slug` read, and so one local
 `git remote get-url origin` in the Project root, when the file holds a repo table: no network. It also runs
-execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*). On a
+execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*), and
+`reconcile-rollout.py moving`, the Watchdog's reading (§ 2's *Moving*; § The Watchdog's reading), which runs `next`'s
+dry run in-process and writes nothing. On a
 `shape: serial` note its one read is `leg.py status` (§ 5): the note's `## Leg log`, its Queue and its task notes,
 read with no lock, no network and no `gh` or `git` call. § 1's `engine-snapshot.py resolve` reads the note's stamps and makes read-only git calls (rev-parse, status, rev-list) in its Engine snapshot and the Primary checkout (ADR 0043). Writes nothing. Obsidian + GitHub read access only.
 
@@ -125,7 +127,8 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   execute → *Pausing + reinstating a rollout*), `pausedFor` (`sign-off` under execute § 4.5 step 5's sign-off
   pause, ADR 0034: the run finished everything else and only gates wait on Lachy; null otherwise), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
   included), `progress`, `timeline` and `ladder`, plus `gitEnvHold` (the unacked git-env trips, each
-  `{slug, kind, line, scope}`, `scope` `rollout` for a bare checkout, else `lane`; § 3's Git-env trip flag), `mainRed`
+  `{slug, kind, line, scope}`, `scope` `rollout` for a bare checkout, else `lane`; § 3's Git-env trip flag), `laneLog`
+  (the unacked Lane holds, each `{slug, cause, stamp, line}`, execute § 4.5 *Lane hold*; § 3's Lane hold flag), `mainRed`
   (`{slug, why, stamp}` per RACE whose revert did not land and that no `RACE decided:` line lifts; § 3's Main red), `holdUntil` (the rollout's own PR hold, its `hold_until:`
   as parsed, `{pr, url, error}`, null when it has none: `_shared/vault-grammar.md` § Hold until; § 3's Hold
   until flag), `onMerge` (an approved queue's `on_merge:` as read, `{value, error}`, null on a note with no rollout
@@ -183,7 +186,8 @@ last write and `lapsesAt` when it lapses (or lapsed), both UTC and null where th
 lease. `elsewhere` and `running` count notes only, never `next`'s Trickle claims (`skills/execute/away.md` § The
 Trickle, *Trickle claims*), so they can trail `next`'s count by up to 20 minutes of unstamped claims (a claim's
 life): while another lead's starts are claimed but not yet stamped, `status` shows room on the Mac that `next` still
-holds as `trickle: N/N`.
+holds as `trickle: N/N`. Nor do they read the fair share (`skills/execute/away.md` § The Trickle, *A fair
+share*): `status` counts notes only, so a place `next` keeps for a waiting rollout shows as room.
 
 **Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
 rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
@@ -196,6 +200,18 @@ It writes nothing. Exit 0: a room stop stands, and stdout names its stamp (`room
 exit 4: it has lapsed (`room stop since <stamp> has lapsed: …`, at or past its 6 h bound); exit 5: none stands.
 Exit 1 or 2 renders `room stop unreadable: <its stderr line>` under the headline and reads as none. § 4's
 *Room stop* renders it.
+
+**Moving.** One more read-only call, once per report: the Watchdog's reading (§ The Watchdog's reading):
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py moving --rollout <rollout-note>
+```
+
+It writes nothing (no note, no event, no lock, no claims file), and runs `next --dry-run` in-process, so its PR-hold
+reads are `gh pr view` calls (§ 3's budget). Under `--offline` it runs only when no `hold_until` stands (§ 2's
+`holdUntil` null and no task row's); otherwise it prints `Moving: not read offline (a PR hold stands)`. Its exit 1 (a
+lost look: the note, the Run record or `next` unreadable) renders `Moving: not read: <its ERROR line>`, never a stall.
+§ 4's *Moving line* renders it.
 
 **Re-entry inputs.** One read-only, local call per task whose `queueState` is `running`, `integrating`,
 `awaiting-integration` or `set-aside`, plus any other unmerged task that has `started` and no `pr`:
@@ -218,7 +234,7 @@ one act that moves a block only Lachy may move ({act, detail, handBack, label, r
 never re-derives a cause; it ignores K. `answerRecorded` is the live answer to the task's current block ({stamp, kind,
 form, line}), the one read status shares with execute and repair. `autoRetryWhy` is read only by § 4's count rule
 (`auto_retries unresolved`), never as Lachy's reason. A non-empty `autoRetryError` flags
-"invalid round budget: <it>" on the task (execute § 3's round-budget halt). `lastIntegration` is the `## Integration log`'s LAST
+"invalid round budget: <it>" on the task (H12: a set-aside only Lachy moves, execute § 6.5 (c)). `lastIntegration` is the `## Integration log`'s LAST
 line as fields, never a search or a count: null when the note has no log, and a field is null where the line
 has `-`. If `inputs` exits 2 (an unreadable note), render "inputs failed: <stderr>" for that task and carry
 on.
@@ -240,7 +256,8 @@ nothing more:
   and only when a task with `started` has no `pr`;
 - one `gh pr view <url|N> --json state,mergedAt,url` per PR hold whose `error` is null, carried by the rollout
   (§ 2's top-level `holdUntil`) or by a queued, running or set-aside (at its run or at a gate) task (its row's
-  `holdUntil`), the holds `next` reads: its `url` as written, or a bare `N` run in the Project root.
+  `holdUntil`), the holds `next` reads: its `url` as written, or a bare `N` run in the Project root;
+- and one more `gh pr view` per readable PR hold: § 2's *Moving* reads `next`'s own, in-process.
 
 **A RACE has six states.** Merge-task's exit 5 means the PR merged, but as a combination nobody
 verified. Execute's RACE procedure (execute § 4.5) appends the `## Race log` line first, then re-verifies the
@@ -350,6 +367,14 @@ takes none of them, nor does a RACE revert in flight.
   (`lane`) holds the Integration lane only (`next`'s `laneHold`, the canary's exit 9), while task calls go on.
   `carry` refuses the rollout under either until `/thread:repair` (its git-env step, 3e) shows the evidence and records
   Lachy's ack. It reads only the vault, so it holds offline too.
+- **Lane hold:** `laneLog` is non-empty: a cause that reaches every merge (execute § 4.5 *Lane hold*, ADR 0048:
+  merge-task's abort or its environment exit 2, a `lead-integrate.py` exit 2 on the task holding the lane, the
+  Integration verify's third `noslot`) holds the Integration lane only, never the whole rollout, until Lachy's ack. Render
+  each line verbatim. While it stands nothing in the lane runs, a pending RACE revert included, and task calls go on;
+  `next` reports `halt: "lane"` once nothing else moves. `carry` refuses the rollout while it stands (the carry strips
+  `integrating:` and never copies the `## Lane log`, so the held task would integrate unacked). Route it to
+  `/thread:repair [[<rollout>]]` (its lane-hold step, 3g, shows the evidence and records his ack, `lane-ack`). It reads
+  only the vault, so it holds offline too.
 - **Hold until:** a non-null `holdUntil`, the rollout's or a task's (`_shared/vault-grammar.md` § Hold until),
   read with the `gh pr view` above. Render `HELD until <pr> merges (<state>)` while the PR reads OPEN (or the
   read fails: `(state unread: <its line>)`), `HELD until <pr> merges (CLOSED): remove or fix hold_until on [[<note>]]`
@@ -371,7 +396,7 @@ takes none of them, nor does a RACE revert in flight.
 recommendation it makes carries the caveat "drift is invisible offline; re-run with the live check before
 resuming". It skips the live reads only: the RACE / UNVERIFIED, Rung drift and Ladder refused flags still
 render, from § 2's data and the local files. The Ceiling unresolved and Rollout settings refused flags render
-offline too, from the same local reads. The Git-env trip flag reads only the vault, so it renders
+offline too, from the same local reads. The Git-env trip and Lane hold flags read only the vault, so they render
 offline too, and so does the Hold until flag, its state unchecked.
 
 ### 4. Render the situational report
@@ -381,7 +406,9 @@ offline too, and so does the Hold until flag, its state unchecked.
 `pause pending (draining)`, `ROOM STOP since <stamp>: awaiting the Stage's resume` or
 `room stop since <stamp> lapsed: the owner's heartbeat re-enters` (§ 2's *Room stop*, exit 0 or 4),
 `INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
-names, once, then ` — lane only`, or ` — whole rollout` when an entry reads `scope: rollout`), `MAIN RED: [[x]]
+names, once, then ` — lane only`, or ` — whole rollout` when an entry reads `scope: rollout`), `LANE HOLD: [[a]]
+(<cause>)` (each `laneLog` entry, § 3's Lane hold flag; shown under a stamped pause too, since the ack is still owed),
+`MAIN RED: [[x]]
 (revert did not land)` (each `mainRed` slug: § 3's Main red), `HELD until <pr> merges (<state>)` or `HOLD_UNTIL UNREADABLE: <why>` (the rollout's own
 `holdUntil`, § 3's Hold until flag: the lead waits on the merge and releases itself), `ENGINE SNAPSHOT UNUSABLE: <why>` (§ 1) or the lineage (`supersedes [[<prior>]]`,
 `superseded by [[<successor>]]`, or § 1's reverse lineage: `superseded by [[N]], close-out interrupted` or
@@ -399,6 +426,12 @@ never stalled)`: a row held on `trickle:` or `away cap:` is the cap at work, nev
 appends, in this order: `· not counted (lease lapsed): <n> in [[<r>]]…` when `lapsed` is non-empty; `· this lead's
 lease lapsed at <lapsesAt>: its in_progress tasks hold no room` when `lease.state` is `lapsed`; `· lease held by the
 room stop` when it is `room-stop`. A fresh, absent or unreadable lease adds nothing.
+
+**The Moving line**, right under the Trickle line, from § 2's *Moving*: `Moving: <verdict> <cause> (<ageMinutes>m since
+the last life sign)` (no cause for `moving`; `no life sign` when `ageMinutes` is null), then ` · until <until>` when it
+carries one, and its `reason` on an indented `→` line for `stalled` and `waiting you`. `Moving: not read: …` and
+`Moving: not read offline (a PR hold stands)` render as they are. A `stalled` reading is a reason to look (§ The
+Watchdog's reading), never by itself a recommendation to resume.
 
 **The queue-state table.** One group per in-count `queueState`, in this order, each task on one line:
 
@@ -620,7 +653,9 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    open escalation: the lead decides it itself, so it waits under 9 or 10, and nobody asks Lachy mid-re-verify.
    Nor is a RACE revert in flight (§ 3): the lead finishes it, so it waits the same way.
    An unacked git-env trip (§ 3's Git-env trip flag) is an open escalation too → `/thread:repair [[<rollout>]]`,
-   ahead of every reinstate or resume: only its § 3e ack, on Lachy's word, lifts the hold.
+   ahead of every reinstate or resume: only its § 3e ack, on Lachy's word, lifts the hold. So is an unacked Lane hold
+   (§ 3's Lane hold flag) → `/thread:repair [[<rollout>]]`: only its lane-hold step's ack (3g, `lane-ack`), on Lachy's word, releases
+   the lane; it holds only the lane, so it never blocks repair's hand-off.
 8. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add
    `/thread:repair [[<rollout>]]`, which under a pause only records escalations and decisions and defers: it
    never hands back. With `pausedFor: sign-off` → "sign off each waiting gate (or /thread:repair to defer),
@@ -772,6 +807,110 @@ The order is the precedence, as § 4's is: a lineage or an incomplete note stops
 restart, and a Session that may still be live (a pending or started restart, an open Leg, a started hand-over) is
 checked before anything starts another, so two Legs never run one chain.
 
+## The Watchdog's reading (ADR 0048)
+
+A dead lead, a dead session, a Mac restart and a usage limit hold nothing: they simply stop. The Watchdog notices a
+rollout with work it could do and nothing moving, from outside the rollout's session. It has two layers: this repo
+ships the reading, and Chorus's Companion polls it and recovers (resuming the lead, a Login with headroom, a cold
+resume, `/thread:repair`: Recoveries and Logins are Chorus's). When Chorus is not running, a launchd job reads the same
+verdict and only notifies Lachy.
+
+**The verb.** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py moving --rollout <rollout-note>
+[--tasks-dir D] [--now ISO] [--stall-after MIN] [--gh-bin gh]` prints one compact JSON line, `{rollout, verdict, cause,
+reason, lastEvent, ageMinutes, stallAfter, until, work: {running, lane, start, halt, reentry, coolDown, capHeld}}`. It is
+read-only and guard-exempt (any root reads any rollout), writes no bytecode, and exits 0 for any verdict, 1 for a lost
+look (`ERROR: moving: <why> (a lost look, never a stall)`: the note, the Run record or `next` unreadable), 2 on usage
+(`--stall-after` outside 1 to 1440). Its algorithm's one copy is reconcile-rollout.py's module docstring (`moving`).
+- `moving`: work the lead could act on now (a running task, a start, a moving Integration lane, a re-entry step 1.2
+  would take, `halt: complete`) and a life sign within `--stall-after`. The lane the lead holds for a RACE re-verify, or
+  its landing tail, is work too (the Run record's open lane on the undecided RACE's task): a re-verify in flight never
+  halts on its own task, so a live one reads `moving` and a dead lead's reads `stalled`. The third `noslot`'s
+  `free-lane` closes it, and the RACE left to Lachy then reads `you`.
+- `stalled`, its cause `silent` (no life sign within the bound), `mac-restart` (a boot came after the last life sign),
+  `usage-limit` (a usage-limit stop is open: a room stop past its 6 h bound included) or `halt` (an open halt holds
+  more than it threatens: work appeared beside a halt that is not on execute § 7's *Whole-rollout halts kept*).
+- `waiting`, its cause the meant wait: `sign-off`, `paused`, `room-stop`, `not-started`, `merge-hold`,
+  `regenerating`, `cool-down`, `heat`, `away-cap`, `trickle`, `last-start`, `approved-queue`, `pr-hold`, or `you`
+  (Lachy's: a kept whole halt, an end-of-run verdict, `next` refusing the rollout).
+- `skip`: a serial, superseded, done, dropped or archived rollout.
+
+`lastEvent` is the last life sign (every heartbeat tick's `lead-entry` and every verb the lead runs), `ageMinutes` the
+minutes since it; the silence is measured from the latest of it, the Mac's last wake and its last boot. The default
+`--stall-after` is **45** minutes: two missed 20-minute heartbeat ticks and some slack. It is a lead's lease's lapse
+(`skills/execute/away.md` § The Trickle, *A lead's lease*; reconcile-rollout.py's STALL_AFTER_MIN reads LEASE_LAPSE),
+and both count from the latest of the last sign, the Mac's wake and its boot. Under `halt: regenerate` the bound
+is **120** minutes from the last life sign instead (the Approved-queue route's one foreground turn writes none).
+
+***Which waits silence judges*:**
+- judged by silence, because the lead's own heartbeat is what ends them:
+  - every reading with work (`moving` turns `stalled` past the bound);
+  - `merge-hold` (at `--stall-after`: heartbeat clause (6) or his go-ahead releases it, and `next` cannot see an
+    approval, so a dead lead's merge hold is a stall);
+  - `regenerating`: 120 min from the last life sign, judged in place of stall-after whatever else runs beside it, so a
+    dead lead under a regenerate is caught at 120 min, never 45;
+- judged by its own bound: `room-stop`, 6 h from its stamp, then by silence as `usage-limit`;
+- judged by a condition `next` or the clock reads live, never by silence: `cool-down`, `heat`, `away-cap`, `trickle` (a
+  cap-held seeded revise included), `last-start`, `approved-queue`, `pr-hold`. Once the condition clears, the work it
+  held joins the reading and silence judges it;
+- never judged by silence, because it is his act or no lead runs:
+  - `paused`: a stamped pause, or a soft pause `next` reads as drained (`halt: paused`). A soft pause behind a lane
+    verdict is not drained (the note keeps `integrating:`) and reads `you` with the lane's reason, so the ack owed is
+    never hidden; under a stamped pause the `LANE HOLD` headline carries it;
+  - `sign-off`;
+  - `not-started`;
+  - `you` (after a halt the heartbeat is deleted).
+
+**What `stalled` means, and what it never licenses.** A lead whose life signs come at most `--stall-after` apart never
+reads `stalled` through silence: a Claude lead idling at `waiting`, a merge hold included, writes a `lead-entry` on
+every 20-minute heartbeat tick. Under `halt: regenerate` it reads `regenerating` only while the Approved-queue route's
+single foreground turn ends within 120 min of the last life sign; 120 min is one harness step, not a bound on the
+route. What does not hold: the route past 120 min, a lead blocked on an open question, and a Codex session-driven
+`--gated` run (no heartbeat; its verify and merge-task run in the foreground): each reads `stalled` against a live
+session. So `stalled` is a reason to look, never by itself a reason to start a second lead. The Companion first
+confirms that the Session has no running Turn and is not waiting on the listener (Chorus `list_sessions`); the launchd
+fallback only notifies, and status starts nothing. A meant wait the verdict fails to name changes only `waiting`'s
+cause, never `moving` or `stalled`.
+
+**Reason → verdict.** Each `reason="…"` execute's halt guard and turn end write (execute § 4.5 steps 1.5 and 1.6, its
+wait clauses included, *Merge hold*, *Lane hold*, *lead-integrate's exit 2* and § Room stop item 8), and what `moving`
+reads beside it:
+
+| Execute's reason | `moving` |
+|---|---|
+| `<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>` | `waiting cool-down`, `until` the earliest |
+| `heat: the Mac is hot (<heat.name>)` | `waiting heat` |
+| `trickle: <trickle.running>/<trickle.limit> tasks running on this Mac` | `waiting trickle` |
+| `away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac` | `waiting away-cap` |
+| `last start: held until the Morning at <trickle.morning>` | `waiting last-start` |
+| `held until <pr> merges` | `waiting pr-hold` |
+| `approved queue waits: <onMerge.why>` | `waiting approved-queue` |
+| `gated: awaiting merge approval for [[slug]] (PR #N)`, `review required: approve PR #N (<url>)` (*Merge hold*'s `<hold reason>`) | `waiting merge-hold`, judged by silence |
+| `room stop: stopping calls at a step boundary`, `room stop: nothing mid-step, awaiting the Stage resume` | `waiting room-stop` |
+| `lane held: the shared checkout changed`, `lane held: RACE undecided: [[slug]]`, `lane held: <cause> on [[<slug>]]` (other work moves, the lead's own RACE re-verify or its landing tail included) | `moving`, judged by silence |
+| `paused at user request` | `waiting paused` |
+| `superseded by [[<supersededBy>]]` | `skip` |
+| `RACE undecided: [[<slug>]]`, `lane held: <cause> on [[<slug>]]`, `git-env trip: the shared checkout changed` (a lane trip), `hold_until needs you on [[<note>]]: <pr> closed unmerged`, `hold_until needs you on [[<note>]]: unreadable`, `the rollout links no task` (end-of-run verdicts) | `waiting you`; `stalled halt` once work appears beside it |
+| lead-integrate.py failed on [[slug]], lane hold not written on [[<slug>]]: <its ERROR line> (kept whole) | `waiting you`, work or none |
+
+**Polling.** The suggested Companion poll is every 5 minutes; the cadence is Chorus's. A poller may skip a rollout whose
+Run record changed within the threshold, as the fallback does: a silence stall is never held back by that, but a halt
+stall's notice (the Stop hook's fresh halt line) can be delayed by up to the threshold.
+
+**The launchd fallback.** `skills/execute/scripts/watchdog.py`, its check verb, reads every rollout in the tasks dir
+behind that mtime gate and notifies once per stall (keyed on the rollout and its `lastEvent`) through ntfy-push.py; it
+only notifies, and never writes the vault or a Run record. It first probes the Stage as Chorus's ctl.sh status does (GET
+`http://127.0.0.1:4747/api/logins`, 1 s), never through the Stage's host.lock, and stays silent on a 2xx. Lachy installs
+it once (README), from the installed plugin's root, never a rollout worktree or another checkout:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist > ~/Library/LaunchAgents/com.thread.watchdog.plist`
+renders the job, then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.thread.watchdog.plist` loads it
+(every 10 minutes; the job's `--gh-bin` is the `gh` found at render time). The job runs the script it was rendered from,
+so after each plugin update he re-renders it and re-bootstraps it (`launchctl bootout gui/$(id -u)/com.thread.watchdog`
+first), or it keeps reading rollouts with the old engine's `moving`; the plist verb names that script on stderr.
+
+***The interim gap*.** Until [[chorus-the-companion-recovers-a-stalled-rollout]] lands, nothing consumes `moving` while
+the Stage is up. A 2xx on `api/logins` silences the fallback, so a stall then goes unnotified. The fallback's plist
+verb with `--chorus-url ''` installs one that never probes, for the meantime.
+
 ## Loopable
 
 Status is read-only, so it's safe to run under the built-in `/loop` as a rollout watchdog:
@@ -779,7 +918,8 @@ Status is read-only, so it's safe to run under the built-in `/loop` as a rollout
 early instead of days later. When a looped status finds the rollout `done`/archived, say so and stop the loop
 (a dynamic loop ends by not rescheduling; a fixed loop needs `/loop stop`): don't keep polling a finished
 rollout. The loop watches and recommends; it never triggers `/thread:repair` or `/thread:execute` on its own.
-See execute's §8 (*Unattended driving*) for the full pattern set.
+See execute's §8 (*Unattended driving*) for the full pattern set. A watchdog that must catch a stall from outside the
+session reads `reconcile-rollout.py moving` instead (§ The Watchdog's reading).
 
 ## Don'ts
 
@@ -791,7 +931,8 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
   `hold_until` and clears a
   `start: unattended` stamp), `resume`,
   `hand-back` or any other, and never `step-boundary.py begin` or `step-boundary.py end`;
-  `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `leg.py status` (§ 5, a serial
+  `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `reconcile-rollout.py moving` (§ 2's
+  *Moving*, `next`'s dry run in-process: it writes nothing), `leg.py status` (§ 5, a serial
   note's one read), `lead-integrate.py inputs` and `rollout-settings.py`
   (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides
   the `land.sh --origin-slug` that `rollout-settings.py` runs itself). Never `lead-integrate.py prepare`,
@@ -799,7 +940,8 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
   or `update-ref`: of `gh` and `git`, only § 3's reads.
 - **Respect the § 3 budget.** One `worktree list`, one local `remote get-url` (plus the local one
   `rollout-settings.py` makes per resolve when rollouts.toml holds a repo table, § 2), one `gh pr view` per PR'd task
-  that has not landed, one `gh pr view` per readable PR hold `next` would read, at most one guarded default-branch
+  that has not landed, one `gh pr view` per readable PR hold `next` would read (and one more for § 2's *Moving*),
+  at most one guarded default-branch
   read and at most one guarded `gh pr list`. Status is
   a glance; keep it cheap.
 - **Don't parse the `## Queue` table** for the task list: use the `status` subcommand's glob-by-backlink (it
