@@ -545,6 +545,20 @@ ok "$(j "$(nxt "")" 'd["awaitingIntegration"]')" "[\"$A\"]" "A9: next lists it a
 ok "$(since "$M")" "ready:$A auto-retry:$A" "A9: a ready event, then auto-retry"
 ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"]]')" '["integrate","integration","agent"]' "A9: stage integrate, setAsideAt integration"
 
+# ── A9b (p29-7, ADR 0048): the lead's own Integration set-asides that are the environment's read infra ──────────────
+for reason in "prepare: origin unreachable three times: fatal: unable to access 'https://github.com/o/r/'" \
+              "merge-task signalled twice (143): the run ended on SIGTERM"; do
+  scen a9b
+  mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+  lead "$A" integration "$reason"
+  ok "$(j "$(INOW=2026-10-03T08:05:00Z inp "$A")" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"]]')" \
+    '["infra",false,"2026-10-03T08:15+00:00"]' "A9b: ${reason%%:*}… → infra, cooling 15 minutes (INFRA_LEAD_OPENINGS)"
+done
+scen a9b-exit8
+mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+lead "$A" integration "merge-task exit 8 three times: retryable: cannot read PR #5 (HTTP 502)"
+ok "$(j "$(inp "$A")" 'd["autoRetryClass"]')" 'agent' "A9b: merge-task exit 8 three times stays agent (ADR 0033's tested contract)"
+
 # ── A10: infra blocks: a short cool-down, no same-fingerprint stop; the budget still bounds them ───────────────
 scen a10-transient
 mkro; mkt "$A" open; mkt "$B" open

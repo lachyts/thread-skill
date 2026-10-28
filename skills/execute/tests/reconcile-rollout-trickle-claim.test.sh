@@ -405,7 +405,14 @@ J=$(nx ro-a --gh-bin "$D/bin/gh"); ok "$(q "$J" '[d["halt"], d["start"]]')" '["h
 c10_after c-hold
 c10 d-heat
 J=$(THREAD_HEAT_LEVEL=3 nx ro-a); ok "$(q "$J" '[d["heat"]["level"], d["start"]]')" '[3,[]]' "C10 (d-heat): a hot Mac starts nothing"
-c10_after d-heat
+# p28-5 (the fair share, away.md § The Trickle, *A fair share*): a heat-held rollout records itself waiting, so ro-a
+# keeps its place in line through the hot spell. Its claims still go; but ro-b, cool again and level with ro-a (never
+# served, waiting since the same now), yields the second place to ro-a on the stem.
+ok "$(claims)" '[]' "C10 (d-heat): ro-a's call leaves no ro-a entry"
+J=$(nx ro-b); ok "$(q "$J" '[d["start"], d["trickle"]["kept"]]')" '[["b1"],{"ro-a":1}]' \
+  "C10 (d-heat): … so ro-b starts b1 and keeps the second place for ro-a"
+ok "$(q "$J" "$holds")" '{"b2":"trickle: 1/2 tasks running on this Mac, 1 kept for [[ro-a]]","b3":"trickle: 1/2 tasks running on this Mac, 1 kept for [[ro-a]]"}' \
+  "C10 (d-heat): … b2 and b3 read the place kept for ro-a"
 c10 e-main-red
 printf '\n## Race log\n\n- 2026-10-02T10:00+00:00 [[a3]] revert did not land: conflict in a.py\n' >> "$D/ro-a.md"
 J=$(nx ro-a)

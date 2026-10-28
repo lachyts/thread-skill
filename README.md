@@ -143,6 +143,25 @@ revert PR that merges only through merge-task (`lead-integrate.py revert`; execu
 stop: it reads the Workflow journals to stop each call at a step boundary and
 records the stop on the rollout note (execute § Room stop), and in the Run record
 as a stop, as the Stop hook records each halt (ADR 0051).
+`reconcile-rollout.py moving` is the Watchdog's reading (ADR 0048; status
+§ The Watchdog's reading): one read-only JSON line saying whether a rollout is
+moving, stalled, or in a meant wait and which, from its Run record and notes. No
+single cause holds the whole queue: a cause that reaches every merge holds only
+the Integration lane (`reconcile-rollout.py lane-hold`, released by Lachy's ack,
+`lane-ack`, through `/thread:repair`). Chorus's Companion polls `moving`; when
+Chorus is not running, `skills/execute/scripts/watchdog.py` reads the same verdict
+and only notifies (ntfy), once per stall. Installing it is a one-time step, run
+from the installed plugin's root (`${CLAUDE_PLUGIN_ROOT}`, the root the release
+paragraph under § Tests describes; in a terminal, export it first), never a
+rollout worktree or another checkout:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/watchdog.py plist > ~/Library/LaunchAgents/com.thread.watchdog.plist`,
+then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.thread.watchdog.plist`.
+The job runs the script it was rendered from, so after each plugin update
+re-render it and re-bootstrap it (`launchctl bootout gui/$(id -u)/com.thread.watchdog`
+first).
+Until the Chorus task that consumes `moving` lands, a running Stage silences the
+fallback, so a stall then goes unnotified; `watchdog.py plist --chorus-url ''`
+installs a fallback that never probes, for the meantime.
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
 every emitter appends its events through it, and its header is the schema. Its
 writers include the suites' (`verify-slot.py run`, `lead-integrate.py verify`),

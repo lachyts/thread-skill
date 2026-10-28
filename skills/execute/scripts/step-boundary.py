@@ -339,13 +339,9 @@ def _last_room_line(note):
 
 
 def _standing(last, now, hours):
-    """0 under the bound, 4 at or past it (or an unparseable stamp), 5 with no start line last."""
-    if last is None or last[1] == "ended":
-        return 5
-    ts = RR._parse_ts(last[0])
-    if ts is None or now - ts >= timedelta(hours=hours):
-        return 4
-    return 0
+    """0 under the bound, 4 at or past it (or an unparseable stamp), 5 with no start line last: reconcile-rollout.py's
+    _room_standing, the rule's one copy (p29-7)."""
+    return RR._room_standing(last, now, timedelta(hours=hours))
 
 
 def cmd_begin(args):

@@ -5,16 +5,22 @@
 #   V1  rc and stdout pass through, no waiting line   V2  the cap: at most N of eight runs (six `run`, two lead
 #   verifies) at once, all eight ran   V3  a wrapper SIGKILLed while its TERM-ignoring command runs: the waiter
 #   behind it sees no overlap   V4  a command's background leftover holds no slot and is not killed   V5  TERM to
-#   `run` (holding, or waiting with --priority)   V6  usage   V7  the dir chain; an unusable dir fails open
+#   `run` (holding: 143; waiting with --priority: 76, no verdict, p32-1)   V6  usage   V7  the dir chain; an unusable
+#   dir fails open
 #   V8  status   V9a the lead's verify goes before a waiting agent   V9b so does `run --priority`   V10 stale
 #   waiter files are reaped, a locked one is not   V11 a lead verify SIGKILLed while waiting leaves a stale waiter
 #   file, reaped next   V12 a kill of the wrapper's whole process group   V13 the guard SIGKILLed alone   V14
 #   release is a close (a co-holder keeps the slot)   V15 a failure injected after the spawn: the slot stays held
-#   until the suite's group is gone   V16 no code calls fcntl.LOCK_UN; the header's close-only contract. The Run record
+#   until the suite's group is gone   V16 no code calls fcntl.LOCK_UN; the header's close-only contract   V17 the
+#   bounded slot wait (p32-1): `--slot-wait S` (or `=S`) runs out → 76 and a no-verdict line, the command never run;
+#   `--slot-wait 0` is one try, and a free slot is still taken   V18 a bad `--slot-wait` is usage (exit 2)   V19 with
+#   no `--slot-wait`, `run` waits RUN_SLOT_WAIT (4800 s), reconcile-rollout.py's _slot_wait at the default 1800. The Run record
 #   (p29-10, contract item 8): VR1 a suite in a task tree records its start and end (sha, load, count, failing), its
 #   output still split   VR2 --priority   VR3 TERM ends it stopped, the slot free; a SIGKILL leaves no ended line
 #   VR4 no task tree or no note: no record, as today   VR5 a dirty tree   VR6 a green run names no failing   VR7 a
-#   TERM while suite-started walks the vault: never swallowed (143, the suite never runs, no line, the slot free).
+#   TERM while suite-started walks the vault: never swallowed (76, no verdict: the suite never runs, no line, the slot
+#   free)   VR7b a TERM after the suite-started line, before the spawn: 76, a stopped line with no rc, the slot free
+#   VR8 a bounded slot wait that runs out in a task tree (p32-1): 76, never run, no line, never an unslotted run.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound (60 to 300 s) only slows a real failure; a pid is "alive" only when `kill -0` succeeds AND its `ps`
 # state is not Z (an unreaped zombie runs nothing). Every background pid is recorded and stopped only by that pid.
@@ -158,12 +164,13 @@ p=$!; pids+=($p)
 within 300 has_waiter && s=registered || s="no waiter file in 300 s"
 ok "$s" registered "V5: a waiting run --priority registers a waiter file"
 kill -TERM "$p"; wait "$p"; rc=$?
-ok "$rc|$([ -e "$D/t3.ran" ] && echo ran || echo never)|$(nwaiters)" "143|never|0" "V5: TERM to it while waiting → 143, the command never ran, no waiter file left"
+ok "$rc|$([ -e "$D/t3.ran" ] && echo ran || echo never)|$(nwaiters)" "76|never|0" "V5: TERM to it while waiting → 76 (no verdict, never red), the command never ran, no waiter file left"
+has "$(cat "$D/t3.err")" "verify-slot: no verdict: stopped before the suite started; exit 76" "V5: … with its no-verdict line"
 touch "$D/t2.go"; wait "$(w t2)"
 
 # ======== V6: usage ========================================================================================
 pool v6
-for a in "--slots 0 -- true" "--slots -1 -- true" "--slots abc -- true" "--slots 1.5 -- true" "--slots 1 true" \
+for a in "--slots 0 -- true" "--slots -1 -- true" "--slots abc -- true" "--slots 1.5 -- true" "--slots +1 -- true" "--slots 1_0 -- true" "--slots 1 true" \
          "--slots 1 --" "--priority -- true" "--slots 1 --prio -- true" "-- true"; do
   python3 "$VS" run $a > /dev/null 2>&1; ok "$?" 2 "V6: run $a → exit 2"
 done
@@ -345,6 +352,54 @@ ok "$s" free "V15: … and the slot is free afterwards"
 ok "$(grep -rn 'fcntl\.LOCK_UN' skills hooks)" "" "V16: no script calls fcntl.LOCK_UN (a release is a close)"
 has "$(sed -n '1,/^"""$/p' "$VS")" "Release closes the fd and never calls LOCK_UN" "V16: verify-slot.py's header states the close-only contract"
 
+# ======== V17: the bounded slot wait (p32-1) =================================================================
+# An agent's `run` bounds its own slot wait (RUN_SLOT_WAIT, 4800 s, by default): once it runs out, no verdict (76), the
+# command never run. `--slot-wait 0` is one try, as lead-integrate.py's `verify --slot-wait 0`.
+pool v17
+hold h 1
+python3 "$VS" run --slots 1 --slot-wait 1 -- touch "$D/a.ran" > /dev/null 2> "$D/a.err"; rc=$?
+ok "$rc|$([ -e "$D/a.ran" ] && echo ran || echo never)" "76|never" "V17: --slot-wait 1 behind a held slot → 76, the command never ran"
+has "$(cat "$D/a.err")" "verify-slot: no verdict: no verify slot within 1s; exit 76" "V17: … with its no-verdict line"
+ok "$(awk '/waiting for one of 1 verify slots/{a=NR} /no verdict: no verify slot within 1s/{b=NR} END{print (a && b && a < b) ? "y" : "n"}' "$D/a.err")" y \
+  "V17: … after its waiting line"
+python3 "$VS" run --slots 1 --slot-wait=1 --priority -- touch "$D/b.ran" > /dev/null 2> "$D/b.err"; rc=$?
+ok "$rc|$([ -e "$D/b.ran" ] && echo ran || echo never)|$(nwaiters)" "76|never|0" "V17: --slot-wait=1 --priority → 76, never ran, no waiter file left"
+has "$(cat "$D/b.err")" "verify-slot: no verdict: no verify slot within 1s; exit 76" "V17: … with its no-verdict line"
+python3 "$VS" run --slots 1 --slot-wait 0 -- touch "$D/c.ran" > /dev/null 2> "$D/c.err"; rc=$?
+ok "$rc|$([ -e "$D/c.ran" ] && echo ran || echo never)|$(grep -c 'waiting' "$D/c.err")" "76|never|0" "V17: --slot-wait 0 behind a held slot → 76 at once, never ran, no waiting line"
+has "$(cat "$D/c.err")" "verify-slot: no verdict: no verify slot within 0s; exit 76" "V17: … with its no-verdict line"
+touch "$D/h.go"; wait "$(w h)"
+python3 "$VS" run --slots 1 --slot-wait 0 -- sh -c 'exit 3' 2> "$D/d.err"; rc=$?
+ok "$rc|$(grep -c 'no verdict' "$D/d.err")" "3|0" "V17: --slot-wait 0 with the slot free: one try takes it, the command's rc (3) passes through"
+
+# ======== V18: --slot-wait usage =============================================================================
+pool v18
+# Only ASCII digits (p32-1): int() alone would take a sign, an underscore and a non-ASCII digit.
+for v in -1 abc 1.5 ' 2' '2 ' '' -- +1 1_0 '٣'; do
+  python3 "$VS" run --slots 1 --slot-wait "$v" -- touch "$D/ran" > /dev/null 2>&1; rc=$?
+  ok "$rc|$([ -e "$D/ran" ] && echo ran || echo never)" "2|never" "V18: run --slot-wait '$v' → exit 2"
+done
+for a in --slot-wait= --slot-wait=-1 --slot-wait=x --slot-wait=+1 --slot-wait=1_0; do
+  python3 "$VS" run --slots 1 "$a" -- touch "$D/ran" > /dev/null 2>&1; ok "$?" 2 "V18: run $a → exit 2"
+done
+python3 "$VS" run --slots 1 --slot-wait > /dev/null 2>&1; ok "$?" 2 "V18: run --slot-wait with no value → exit 2"
+
+# ======== V19: run's default slot wait (p32-1) ================================================================
+# The engine renders no `--slot-wait`, so RUN_SLOT_WAIT is an agent's whole bound. `run` with none waits 4800 s, which
+# is the lead's `slotWait` at the default `verify_timeout` (reconcile-rollout.py's _slot_wait(1800)), so the documented
+# tie cannot drift. Loaded by importlib (-B: no bytecode beside either script); _parse_run returns (slots, prio, cmd, wait).
+got=$(python3 -B - "$VS" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1])
+vs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vs)
+rr = vs._load_reconcile()
+wait = vs._parse_run(["--slots", "1", "--", "true"])[3]
+print(f"{wait}|{rr._slot_wait(1800)}|{rr._slot_wait(rr.DEFAULT_VERIFY_TIMEOUT)}|{vs.RUN_SLOT_WAIT}")
+PY
+)
+ok "$got" "4800|4800|4800|4800" "V19: run with no --slot-wait waits 4800 s, the lead's slotWait at the default verify_timeout (1800)"
+
 # ======== VR1–VR6: a suite in a task tree records itself in the Run record (contract item 8; p29-10) ===============
 # A git project R with its task tree at R/.claude/worktrees/t1, and a vault (under VH, the HOME these runs use) where t1
 # is in_progress in r1, a started parallel rollout: so its suites land in r1's record, with a Mac-wide count of 1.
@@ -443,10 +498,49 @@ vs._load_reconcile = stopped_in_the_walk
 sys.exit(vs.main(["run", "--slots", "1", "--"] + sys.argv[2:]))
 PY2
 (cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" exec python3 "$D/vr7.py" "$VS" sh -c "touch '$D/vr7.ran'") > "$D/vr7.out" 2> "$D/vr7.err"; rc=$?
-ok "$rc" 143 "VR7: a TERM in suite-started's vault walk: exit 143, never swallowed"
+ok "$rc" 76 "VR7: a TERM in suite-started's vault walk: exit 76 (no verdict), never swallowed"
+has "$(cat "$D/vr7.err")" "verify-slot: no verdict: stopped before the suite started; exit 76" "VR7: … with its no-verdict line"
 ok "$([ -e "$D/vr7.ran" ] && echo ran || echo never)" never "VR7: the suite never ran"
 ok "$(recq '[d["kind"] for d in L]')" '[]' "VR7: no line: no suite-started, no green suite-ended"
 ok "$(slot_state 0 1)" free "VR7: the slot is free"
+
+# VR7b (p32-1): the stop lands after suite-started is written and before the guard spawns the suite (Guarded's own
+# __init__ sends it): no verdict (76), and the started line gets its ended line, `stopped` with no rc (the suite never ran).
+: > "$VEV/r1.jsonl"
+cat > "$D/vr7b.py" <<'PY2'
+import importlib.util, os, signal, sys, time
+spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1])
+vs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vs)
+Real = vs.Guarded
+class StoppedFirst(Real):
+    def __init__(self, *a, **k):   # the TERM lands before the spawn; the sleep is where the stop is raised
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(30)
+        super().__init__(*a, **k)
+vs.Guarded = StoppedFirst
+sys.exit(vs.main(["run", "--slots", "1", "--"] + sys.argv[2:]))
+PY2
+(cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" exec python3 "$D/vr7b.py" "$VS" sh -c "touch '$D/vr7b.ran'") > "$D/vr7b.out" 2> "$D/vr7b.err"; rc=$?
+ok "$rc" 76 "VR7b: a TERM after suite-started, before the spawn: exit 76 (no verdict)"
+has "$(cat "$D/vr7b.err")" "verify-slot: no verdict: stopped before the suite started; exit 76" "VR7b: … with its no-verdict line"
+ok "$([ -e "$D/vr7b.ran" ] && echo ran || echo never)" never "VR7b: the suite never ran"
+ok "$(recq '[[d["kind"], d.get("outcome"), "rc" in d] for d in L]')" '[["suite-started",null,false],["suite-ended","stopped",false]]' \
+  "VR7b: a suite-started, then a suite-ended stopped with no rc"
+ok "$(slot_state 0 1)" free "VR7b: the slot is free"
+
+# VR8 (p32-1): the bounded slot wait on the recorded path, the one every agent suite takes (an agent always runs from a
+# task tree): with the slot held, `--slot-wait 1` runs out → 76 and its no-verdict line, the command never run, and no
+# line in the Run record (a wait that runs out never reaches suite-started). It never falls through to an unslotted run.
+: > "$VEV/r1.jsonl"
+hold h8 1
+vrun "$TREE" "$D/vr8.out" "$D/vr8.err" --slot-wait 1 -- touch "$D/vr8.ran"; rc=$?
+ok "$rc|$([ -e "$D/vr8.ran" ] && echo ran || echo never)" "76|never" "VR8: a task tree's run, --slot-wait 1 behind a held slot → 76, the command never ran"
+has "$(cat "$D/vr8.err")" "verify-slot: no verdict: no verify slot within 1s; exit 76" "VR8: … with its no-verdict line"
+ok "$(recq '[d["kind"] for d in L]')" '[]' "VR8: … and no line in the Run record"
+touch "$D/h8.go"; wait "$(w h8)"
+within 60 is_free 0 1 && s=free || s="still held after 60 s"
+ok "$s" free "VR8: once the holder is released, the slot is free"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot: ALL PASS" || echo "verify-slot: SOME FAILED"
 exit "$fail"
