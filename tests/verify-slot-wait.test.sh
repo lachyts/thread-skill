@@ -201,7 +201,7 @@ has "$(cat "$D/w")" "verify-slot: no verdict: run $p ended with no exit line (st
 # ======== W6: usage; no start line yet ========================================================================
 pool w6
 printf 'some output\n' > "$D/E"
-for a in "--log $D/absent" "" "--log" "--log $D/E --for 0" "--log $D/E --for 591" "--log $D/E --for x" "--log $D/E --for 1.5" \
+for a in "--log $D/absent" "" "--log" "--log $D/E --for 0" "--log $D/E --for 591" "--log $D/E --for x" "--log $D/E --for 1.5" "--log $D/E --for +5" "--log $D/E --pid 1_0" \
          "--log $D/E --pid 0" "--log $D/E --pid x" "--log $D/E --pid" "--log $D/E --bogus" "--log $D"; do
   python3 "$VS" wait $a > "$D/u" 2>&1; rc=$?
   ok "$rc|$(grep -c '^verify-slot: wait: ' "$D/u")|$(grep -c '^usage: verify-slot.py run' "$D/u")" "2|1|1" "W6: wait $a → exit 2, its why and the usage"

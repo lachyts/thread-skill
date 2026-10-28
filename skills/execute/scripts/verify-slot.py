@@ -8,7 +8,7 @@ unbounded they pile onto one machine (2026-10-17: load 66 on 12 cores, and a mer
 suites run at once across every rollout on this machine; a further one waits for a slot. This header is the one
 copy of the contract.
 
-    python3 verify-slot.py run --slots N [--priority] -- CMD…     # the agents' wrapper (engine-rendered)
+    python3 verify-slot.py run --slots N [--priority] [--slot-wait S] -- CMD…   # the agents' wrapper (engine-rendered)
     python3 verify-slot.py wait --log FILE [--pid P] [--for S]     # an agent's in-turn wait for a run's verdict
     python3 verify-slot.py status [--slots N]                      # the operator's view (JSON)
 
@@ -49,7 +49,10 @@ Contract.
    every stop (a signal, a SIGKILL, a group or session kill, a harness timeout) takes the guard's one kill
    path, and `run` exits 128+n once the guard is done. A guard SIGKILLed alone leaves the command running: the
    wrapper then kills the reported group itself (TERM; KILL_GRACE; KILL; polled until it is gone, bounded by
-   REAP_WAIT) before it releases, and exits 128+9.
+   REAP_WAIT) before it releases, and exits 128+9. A stop before the guard spawned the suite (in the slot wait, or
+   between the slot and the spawn) has no suite to end, so it is no verdict, never red (p32-1): `run` exits HEAT_EXIT
+   (76) with `verify-slot: no verdict: stopped before the suite started; exit 76` (while it waits on the heat or is
+   back in line after a heat stop, contract 7's line instead). Only a stop once the suite is spawned is 128+n.
 5. The Integration priority. lead-integrate.py's `verify` (the lead's Integration verify and RACE re-verify)
    and `run --priority` (the integrate call's own verifier, rendered only by the engine's integrate mode)
    register a waiter file (`waiter-<pid>-<rand>.wait`, held LOCK_EX while they wait: liveness is the flock,
@@ -72,9 +75,13 @@ Contract.
    the guard HEAT_SETTLE to exit by itself, so a command that already ended keeps its own rc (green or red) and is
    never rerun; only a guard still there is stopped (the guard's TERM, KILL_GRACE, KILL, reaped), its slot released
    (a close), and the caller goes back in line, at the back, to restart from the beginning once the level is below
-   heavy. Heavy never stops a running suite. A heat stop is never red: `run` exits HEAT_EXIT (76) only when a stop
-   signal lands while it waits on the heat or is back in line after a heat stop, and lead-integrate.py's verify
-   reads `heat` (exit 76). Fails open, like an unusable slots dir: no notifyutil (Linux, CI), a non-zero exit, a
+   heavy. Heavy never stops a running suite. A heat stop is never red: `run` exits HEAT_EXIT (76), no verdict, when
+   a stop signal lands before the suite starts (contract 4: while it waits on the heat or is back in line after a
+   heat stop, `verify-slot: no verdict: stopped while the Mac was hot (heat: <name>); exit 76`), or when its slot wait
+   runs out (`--slot-wait`, p32-1: `verify-slot: no verdict: no verify slot within <S>s[ (heat: <name>)]; exit 76`,
+   the name the heat that held its last poll, else its last heat stop's), and lead-integrate.py's verify reads `heat`
+   (exit 76). Its slot wait is one deadline across heat restarts: a re-queue after a heat stop tries only while time
+   is left, and with none left makes no try. Fails open, like an unusable slots dir: no notifyutil (Linux, CI), a non-zero exit, a
    2 s timeout or output it cannot parse reads 0, and an unslotted run (a SlotDirError) has no heat watch.
    Residuals: a command that exits after the settle check, inside the guard's last poll (at most one GUARD_POLL),
    reads as heat-stopped and is rerun (no verdict, never red); a copy of this script from before the Heat hold
@@ -86,10 +93,13 @@ Contract.
    once the slot is released, suite-ended: green (rc 0), stopped (128+n, or a signal to `run`: no vault scan, no
    output read), unrun (127), else red with the failing names read from the last 16 MiB of its output. Only
    suite-started is written while the slot is held, before the command starts (its vault walk for the running
-   count, a fraction of a second); a stop signal in that walk ends the run 128+n with no line written. The Heat
+   count, a fraction of a second); a stop signal in that walk ends the run 76 (no verdict: the suite never started,
+   contract 4) with no line written, and one after the started line is written but before the spawn ends it 76 too,
+   with a suite-ended stopped that carries no rc (p32-1: the suite never ran). The Heat
    hold (contract 7) holds here too: a heat stop ends that run's suite heat (no verdict, no rc), written once its
    slot is released and with stops held for the write, and the restart once the Mac cools is a suite of its own,
-   with a fresh suite-started; a stop while held for the heat or back in line exits 76 and writes nothing more.
+   with a fresh suite-started; a stop while held for the heat or back in line exits 76 and writes nothing more, and
+   so does a slot wait that runs out (no slot, no suite-started).
    Unless fd 1 or fd 2 is a TTY, the guard's stdout and stderr then go through pipes: a pump forwards each chunk to
    fd 1 or fd 2 within GUARD_POLL, keeps a copy in an unlinked temp file and reads the heat as Guarded.watch() does;
    once the guard exits it drains what is ready for at most a second and never waits for EOF, so a leftover that
@@ -102,9 +112,9 @@ Contract.
    `wait` is the command that reports the verdict inside the agent's turn, never a pause. `run` prints first, on
    stderr, `verify-slot: run <pid> started; wait for its verdict with: python3 '<this script>' wait --log '<path>'
    --pid <pid>` (each word single-quoted, each ' written '\\''), and last, on every return, `verify-slot: exit <rc> (run
-   <pid>)`: a usage error (2), a stop (128+n; one that escapes cmd_run's handlers too) and an unexpected exception (its
-   traceback, then 1) included, with stops ignored while it is written; both lines are best effort and never change
-   the rc. The path is fd 2's when fd 2 is a regular file: F_GETPATH on macOS, /proc/self/fd/2 on Linux, each accepted
+   <pid>)`: a usage error (2), a stop (128+n; one that escapes cmd_run's handlers too), a no verdict (76, its
+   `verify-slot: no verdict` line before it) and an unexpected exception (its traceback, then 1) included, with stops
+   ignored while it is written; both lines are best effort and never change the rc. The path is fd 2's when fd 2 is a regular file: F_GETPATH on macOS, /proc/self/fd/2 on Linux, each accepted
    only when it stats to fd 2's own (st_dev, st_ino); else (a pipe, a TTY, /dev/null, an unlinked file) the
    placeholder `<its output file>`, the file the harness names. `wait --log FILE [--pid P] [--for S]` reads FILE as it
    grows (complete lines; the exit line matched at a line's end, so a suite whose last output had no newline still
@@ -115,7 +125,7 @@ Contract.
    verify-slot: line>): run this wait again`), or with no run named yet (`… no verify-slot: run line in <FILE> yet:
    check the path …`); 76 when the pid is gone (ESRCH; EPERM is alive) and a final read finds no exit line
    (`verify-slot: no verdict: run <pid> ended with no exit line (stopped or killed); exit 76`); 2 on a usage error (a
-   missing or unreadable FILE, a bad --for or --pid, an unknown flag); 128+n when a TERM, INT or HUP cuts it
+   missing or unreadable FILE, a bad --for or --pid, anything but ASCII digits included, an unknown flag); 128+n when a TERM, INT or HUP cuts it
    (`verify-slot: wait cut by a signal after <N>s (run <pid>): no verdict; run this wait again`). A wait cut by its own
    timeout or a signal is no verdict: run it again. It takes no slot, registers no waiter, never calls slots_dir(),
    writes no Run record line and never signals the run. The printed line is authoritative where a code is ambiguous (a
@@ -123,16 +133,24 @@ Contract.
    read as alive until S, so they give 75, never a wrong verdict; a TERM between the start line and cmd_run's handlers
    ends the run with no exit line, so 76.
 
-`run --slots N [--priority] -- CMD…`: prints its start line (contract 9), then waits for a slot (`verify-slot: waiting
-for one of N verify slots (held by pid … in … since …[; K Integration waiter(s) ahead])` on stderr, repeated every 5
-minutes; no waiting line when one is free at once; `verify-slot: slot k of N after Ns` once a wait ends), runs CMD
-under the guard and exits with its rc (128+n for a signal), its exit line (contract 9) last. While the Mac is hot it
-waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat stop prints `verify-slot: heat stop (<name>):
-ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac cools`, and
-the exit is the last run's rc. A TERM, INT or HUP while it waits on the heat or is back in line after a heat stop
-exits 76 with `verify-slot: no verdict: stopped while the Mac was hot (heat: <name>); exit 76`: no verdict, never
-red. Usage errors exit 2: `--slots` missing, 0, negative, a non-integer; no `--`; no CMD; an unknown flag. A command
-that cannot be started exits 127.
+`run --slots N [--priority] [--slot-wait S] -- CMD…`: prints its start line (contract 9), then waits for a slot
+(`verify-slot: waiting for one of N verify slots (held by pid … in … since …[; K Integration waiter(s) ahead])` on
+stderr, repeated every 5 minutes; no waiting line when one is free at once; `verify-slot: slot k of N after Ns` once a
+wait ends), runs CMD under the guard and exits with its rc (128+n for a signal), its exit line (contract 9) last. While
+the Mac is hot it waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat stop prints `verify-slot: heat
+stop (<name>): ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac
+cools`, and the exit is the last run's rc. The slot wait is bounded (p32-1): `--slot-wait S` (or `--slot-wait=S`), an
+integer >= 0 in seconds, written in ASCII digits only, default RUN_SLOT_WAIT, 4800: the lead's `slotWait` at the default `verify_timeout` of 1800 s,
+max(60, 7200 - 600 - 1800), so an agent's wait fits its harness maximum as the lead's verify does; a constant, never
+a rollout's own `verify_timeout`, and the engine renders no `--slot-wait`. S is one deadline for the whole run: every
+slot wait, heat hold and heat-stopped run counts against it; the first pass always tries (0: one try, and a free slot
+is still taken), a re-queue after a heat stop only while time is left. Once it runs out the command never ran (or
+never restarted): `verify-slot: no verdict: no verify slot within <S>s[ (heat: <name>)]; exit 76`, no verdict, never
+red. A TERM, INT or HUP before the suite starts exits 76 too, no verdict, never red: `verify-slot: no verdict: stopped
+while the Mac was hot (heat: <name>); exit 76` while it waits on the heat or is back in line after a heat stop, else
+`verify-slot: no verdict: stopped before the suite started; exit 76` (contract 4). Usage errors exit 2: `--slots`
+missing, 0, or anything but ASCII digits; `--slot-wait` with no value or anything but ASCII digits (each refuses a
+sign, `+1` included, an underscore such as `1_0`, whitespace and a non-ASCII digit); no `--`; no CMD; an unknown flag. A command that cannot be started exits 127.
 
 `status [--slots N]` reaps stale waiter files and prints {dir, slots: [{index, state: free|held, holder}],
 waiters: [{pid, cwd, since, kind}], heat: {level, name}}; without --slots it lists the slot files present. Stdlib
@@ -171,12 +189,18 @@ HEAT_KEY = "com.apple.system.thermalpressurelevel"
 HEAT_NAMES = ("nominal", "moderate", "heavy", "trapping", "sleeping")
 HEAT_HOLD = 2              # at this level or worse no slot is free
 HEAT_STOP = 3              # at this level or worse a running slotted suite is stopped and put back in line
-HEAT_EXIT = 76             # `run` stopped while the Mac was hot: no verdict, never red (75 is lead-integrate's noslot)
+HEAT_EXIT = 76             # `run`'s no verdict, never red (75 is lead-integrate's noslot): a stop before the suite
+                           # started (the Mac hot or not) or a slot wait that ran out (contract items 4 and 7)
 HEAT_ENV = "THREAD_HEAT_LEVEL"   # an integer 0 to 4 pins the level (the tests' pin); any other value is ignored
 HEAT_POLL_FACTOR = 5       # a running suite's heat is read every HEAT_POLL_FACTOR * the poll base
 HEAT_SETTLE = 2 * GUARD_POLL     # at a stop reading, how long a guard that is already ending gets to exit by itself
 HEAT_STOPPED = object()    # Guarded.watch's result when it stopped the suite for the heat
 NOTIFYUTIL = "/usr/bin/notifyutil"   # the reading's tool when PATH has none
+# `run`'s own bound on its slot wait (p32-1), `--slot-wait`'s default: the lead's `slotWait` at the default
+# `verify_timeout` of 1800 s, max(60, 7200 - 600 - 1800), so an agent's wait, its suite and the margin fit the harness
+# maximum as the lead's verify does. A constant: never read from a rollout's own `verify_timeout`, and the engine
+# renders no `--slot-wait`, so its prompt bytes are unchanged. Heat holds and heat restarts count against it.
+RUN_SLOT_WAIT = 4800
 
 
 class SlotDirError(Exception):
@@ -765,26 +789,39 @@ def _end(child):
 
 # ---- CLI ---------------------------------------------------------------------------------------------------------
 
-USAGE = ("usage: verify-slot.py run --slots N [--priority] -- CMD… | wait --log FILE [--pid P] [--for S] | "
-         "status [--slots N]")
+USAGE = ("usage: verify-slot.py run --slots N [--priority] [--slot-wait S] -- CMD… | wait --log FILE [--pid P] "
+         "[--for S] | status [--slots N]")
 
 
 class _Usage(Exception):
     pass
 
 
+def _digits(v):
+    """A flag's integer value, written in ASCII digits only, else None (p32-1). int() alone also takes a sign (`+5`),
+    an underscore (`1_000`), surrounding whitespace and non-ASCII digits, none of which the usage contract allows."""
+    if not isinstance(v, str) or not v.isascii() or not v.isdigit():
+        return None
+    return int(v, 10)
+
+
 def _positive_int(v):
-    try:
-        n = int(v, 10)
-    except (TypeError, ValueError):
-        raise _Usage(f"--slots must be an integer >= 1, got {v!r}")
-    if n < 1 or str(v).strip() != v:
+    n = _digits(v)
+    if n is None or n < 1:
         raise _Usage(f"--slots must be an integer >= 1, got {v!r}")
     return n
 
 
+def _slot_wait_arg(v):
+    """`run --slot-wait S` (p32-1): an integer >= 0 in seconds (0: one try), in ASCII digits only; else usage."""
+    n = _digits(v)
+    if n is None:
+        raise _Usage(f"run: --slot-wait must be an integer >= 0 (seconds), got {v!r}")
+    return n
+
+
 def _parse_run(argv):
-    slots, prio, i = None, False, 0
+    slots, prio, wait, i = None, False, RUN_SLOT_WAIT, 0
     while i < len(argv):
         a = argv[i]
         if a == "--":
@@ -793,7 +830,7 @@ def _parse_run(argv):
                 raise _Usage("run: no command after --")
             if slots is None:
                 raise _Usage("run: --slots N is required")
-            return slots, prio, cmd
+            return slots, prio, cmd, wait
         if a == "--slots":
             if i + 1 >= len(argv):
                 raise _Usage("run: --slots needs a value")
@@ -806,6 +843,16 @@ def _parse_run(argv):
             continue
         if a == "--priority":
             prio = True
+            i += 1
+            continue
+        if a == "--slot-wait":
+            if i + 1 >= len(argv):
+                raise _Usage("run: --slot-wait needs a value")
+            wait = _slot_wait_arg(argv[i + 1])
+            i += 2
+            continue
+        if a.startswith("--slot-wait="):
+            wait = _slot_wait_arg(a[len("--slot-wait="):])
             i += 1
             continue
         raise _Usage(f"run: unknown argument {a!r}")
@@ -854,11 +901,31 @@ def _say(msg):
     print(f"verify-slot: {msg}", file=sys.stderr, flush=True)
 
 
+def _acquire_within(slots, prio, why, wait, t_end, first):
+    """acquire() under `run`'s one slot-wait deadline (p32-1; lead-integrate.py verify's rule): the first pass always
+    tries, with max_wait=wait (0: one try); a re-queue after a heat stop tries only while time is left before t_end, and
+    with no time left makes no try at all (no waiting line). A Slot, or None when none came in time; a SlotDirError
+    passes through."""
+    left = wait if first else t_end - time.monotonic()
+    if not first and left <= 0:
+        return None
+    return acquire(slots, max_wait=max(0.0, left), priority=prio, kind="run", why=why, on_wait=_say)
+
+
+def _no_slot(wait, why, stopped):
+    """A slot wait that ran out (p32-1): its no-verdict line, naming the heat that held its last poll, else its last heat
+    stop's; HEAT_EXIT, no verdict and never red."""
+    name = heat_name(why["heat"]) if why["heat"] is not None else stopped
+    heat = f" (heat: {name})" if name else ""
+    _say(f"no verdict: no verify slot within {wait}s{heat}; exit {HEAT_EXIT}")
+    return HEAT_EXIT
+
+
 def cmd_run(argv):
-    slots, prio, cmd = _parse_run(argv)
+    slots, prio, cmd, wait = _parse_run(argv)
     owner = _suite_owner()
     if owner is not None:
-        return _run_recorded(slots, prio, cmd, owner)
+        return _run_recorded(slots, prio, cmd, owner, wait)
     for s in SIGNALS:
         signal.signal(s, _on_signal)
     box = {"g": None}
@@ -868,13 +935,20 @@ def cmd_run(argv):
     rc = None
     try:
         # The Heat hold (contract 7): a heat stop releases the slot and goes back in line, at the back, to restart the
-        # command from the beginning once the Mac cools. Only the last run's rc is the exit.
+        # command from the beginning once the Mac cools. Only the last run's rc is the exit. One slot-wait deadline
+        # bounds every pass's wait (p32-1): once it runs out, no verdict (76).
+        t_end, first = time.monotonic() + wait, True
         while True:
             try:
-                slot = acquire(slots, priority=prio, kind="run", why=why, on_wait=_say)
+                slot = _acquire_within(slots, prio, why, wait, t_end, first)
             except SlotDirError as e:
                 _say(f"WARN {e}; running unslotted")
                 slot = None
+            else:
+                if slot is None:
+                    rc = _no_slot(wait, why, stopped)
+                    break
+            first = False
             if slot is not None and slot.queued:
                 _say(f"slot {slot.index + 1} of {slots} after {slot.waited:.0f}s")
             t0 = time.monotonic()
@@ -904,7 +978,10 @@ def cmd_run(argv):
             _say(f"no verdict: stopped while the Mac was hot (heat: {name}); exit {HEAT_EXIT}")
             rc = HEAT_EXIT
         else:
-            rc = 128 + s.signum
+            # Stopped before the guard spawned the suite (in the slot wait, or between the slot and the spawn): nothing
+            # ran, so no verdict, never red (p32-1, contract 4). A stop once the suite is spawned stays 128+n.
+            _say(f"no verdict: stopped before the suite started; exit {HEAT_EXIT}")
+            rc = HEAT_EXIT
     except BaseException:
         # Close the death fd (the guard starts ending the suite) and re-raise without waiting: the guard's own
         # reference keeps the slot held until the suite is gone (contract 1).
@@ -1002,7 +1079,7 @@ def _heat_run_ended(rr, owner, slot, suite, by, t0, written):
                        tasks_dir=owner["tasks_dir"])
 
 
-def _run_recorded(slots, prio, cmd, owner):
+def _run_recorded(slots, prio, cmd, owner, wait=RUN_SLOT_WAIT):
     """`run` for a suite in a task tree (contract item 8): the slotted run as cmd_run's, the Heat hold included, plus its
     suite-started and suite-ended lines in the rollout's Run record, and, unless fd 1 or fd 2 is a TTY, its output
     captured through a pump for the failing names. The tree's state is read before the slot wait; the load and the
@@ -1010,7 +1087,8 @@ def _run_recorded(slots, prio, cmd, owner):
     command starts. suite-ended is written once the slot is released, so its walk and the failing names never hold one;
     a stop by signal skips the vault scan and the capture. A heat stop ends its run's suite heat, with stops held for the
     write, and the restart once the Mac cools is a suite of its own. Recording never changes the rc, nor swallows a
-    stop: one in that walk is 128+n too (76 when the Mac was hot, as cmd_run's)."""
+    stop: one in that walk, or after the started line and before the spawn, is no verdict (76, as cmd_run's), and the
+    latter's suite ends stopped with no rc (the suite never ran). A slot wait that runs out (p32-1) writes no line."""
     rr = owner["rr"]
     for s in SIGNALS:
         signal.signal(s, _on_signal)
@@ -1019,19 +1097,27 @@ def _run_recorded(slots, prio, cmd, owner):
     stopped = None         # the heat name of the last heat stop
     slot = capture = None
     rc = signalled = None
+    unspawned = False      # a stop before the guard spawned the suite: its suite-ended carries no rc
     written, t0 = {}, None
     suite, by = rr.new_suite_id(), ("integration" if prio else "task")
     piped = not (os.isatty(1) or os.isatty(2))
     try:
         state = rr.tree_state(owner["tree"])   # the agent's tree is still while it waits for a slot
         # The Heat hold (contract 7), as cmd_run's: a heat stop releases the slot and goes back in line, at the back, to
-        # restart the command from the beginning once the Mac cools. Only the last run's rc is the exit.
+        # restart the command from the beginning once the Mac cools. Only the last run's rc is the exit. One slot-wait
+        # deadline bounds every pass's wait (p32-1), as cmd_run's: once it runs out, no verdict (76) and no line.
+        t_end, first = time.monotonic() + wait, True
         while True:
             try:
-                slot = acquire(slots, priority=prio, kind="run", why=why, on_wait=_say)
+                slot = _acquire_within(slots, prio, why, wait, t_end, first)
             except SlotDirError as e:
                 _say(f"WARN {e}; running unslotted")
                 slot = None
+            else:
+                if slot is None:
+                    rc = _no_slot(wait, why, stopped)
+                    break
+            first = False
             if slot is not None and slot.queued:
                 _say(f"slot {slot.index + 1} of {slots} after {slot.waited:.0f}s")
             t0 = time.monotonic()   # before the write: a stop delivered as it ends still gets its end line
@@ -1066,6 +1152,7 @@ def _run_recorded(slots, prio, cmd, owner):
         for sig in SIGNALS:
             signal.signal(sig, signal.SIG_IGN)
         signalled = True
+        unspawned = box["g"] is None
         if box["g"] is not None:
             box["g"].stop()
             rc = 128 + s.signum
@@ -1075,7 +1162,9 @@ def _run_recorded(slots, prio, cmd, owner):
             _say(f"no verdict: stopped while the Mac was hot (heat: {name}); exit {HEAT_EXIT}")
             rc = HEAT_EXIT
         else:
-            rc = 128 + s.signum
+            # Stopped before the guard spawned the suite (cmd_run's, p32-1): no verdict, never red.
+            _say(f"no verdict: stopped before the suite started; exit {HEAT_EXIT}")
+            rc = HEAT_EXIT
     except BaseException:
         if box["g"] is not None:
             box["g"].close()
@@ -1090,7 +1179,9 @@ def _run_recorded(slots, prio, cmd, owner):
             seconds = time.monotonic() - t0
             common = (owner["rollout"], owner["task"], suite, by, "agent")
             if signalled or rc > 128:
-                rr.suite_ended(*common, "stopped", seconds, tasks_dir=owner["tasks_dir"], scan=False, rc=rc)
+                # A stop before the spawn (after the started line) ran no suite, so its line carries no rc (p32-1).
+                rr.suite_ended(*common, "stopped", seconds, tasks_dir=owner["tasks_dir"], scan=False,
+                               rc=None if unspawned else rc)
             else:
                 outcome = "green" if rc == 0 else "unrun" if rc == 127 else "red"
                 failing = _failing_from(rr, capture) if outcome == "red" and capture is not None else None
@@ -1252,11 +1343,8 @@ def _run_framed(argv):
 
 
 def _int_in(v, lo, hi, name):
-    try:
-        n = int(v, 10)
-    except (TypeError, ValueError):
-        n = None
-    if n is None or str(v).strip() != v or n < lo or (hi is not None and n > hi):
+    n = _digits(v)
+    if n is None or n < lo or (hi is not None and n > hi):
         span = f"from {lo} to {hi}" if hi is not None else f">= {lo}"
         raise _Usage(f"wait: {name} must be an integer {span}, got {v!r}")
     return n

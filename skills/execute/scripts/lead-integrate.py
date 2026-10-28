@@ -216,7 +216,7 @@ Subcommands:
       --repo's GitHub origin (owner/repo), and a trailing / is dropped. prUrlError (top level, and the
       integrate record's when it falls back to the note) is "" when prUrl is one, else why not and the fix
       (no pr:, another form, a bare number with no --repo or no GitHub origin): the lead launches nothing on
-      it (a call it launched would fail the engine's args check, which reads as a Lost call).
+      it (a call it launched would fail the engine's args check, an Args refusal: execute § 4.5).
       Then the automatic retry's verdict (p16-4, ADR 0033; auto_retry_verdict, its rules in order), which every
       caller gets and `reconcile-rollout.py auto-retry` re-runs before it writes: autoRetry, autoRetryWhy (the
       first rule that refused, "" on true), autoRetryError (an `auto_retries`, `max_review_rounds`, `max_iterations`
