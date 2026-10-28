@@ -92,9 +92,9 @@ function checkStanding(f) {
     fails.push('step12')
   }
 
-  // halt-guard: awaiting-sign-off goes to step 5's form; only an UNVERIFIED stops a cool-down; a gate never does.
+  // halt-guard: awaiting-sign-off goes to step 5's form; nothing set aside stops a cool-down (ADR 0048); a gate never does.
   if (!guard.includes("`awaiting-sign-off` → step 5's *Completion awaiting sign-off* form") ||
-    !guard.includes('and no UNVERIFIED task among the set-aside entries, ends the turn `waiting`') ||
+    !guard.includes('(a quota or infra cool-down) ends the turn `waiting`') ||
     !guard.includes('A gate-pending task never stops a cool-down') || guard.includes('gated inputs await sign-off')) {
     fails.push('halt-guard')
   }

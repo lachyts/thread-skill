@@ -41,6 +41,10 @@
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
 #   path test, no task note, main unreadable).
+#   prepare's task-scoped failures (ADR 0048, p29-7): C55 a merge in progress its tree cannot abort   C55b tracked changes
+#   it cannot stash   C55c an orphan PR branch (no merge-base)   C55d a missing origin/<default> stays exit 2   C55e a held
+#   <ref>.lock on a stale anchor ref. C56 the `task note unreadable:` marker on every note-read failure (inputs, plan,
+#   set-aside) and on nothing else (C56c usage, an empty reason, a refused --max-review-rounds; C56d git not runnable).
 #   The RACE revert (ADR 0046, p29-2; lead-integrate.py revert): R1 route pr (the head on origin/master, M's files
 #   M^1's, the bodies say `This reverts commit M`, origin/master untouched, restores by tree)   R2 merge-task 0, then
 #   reverted   R3 a re-run before the merge reuses the branch and the PR, and after it reads the landed commit   R4 a
@@ -2099,6 +2103,64 @@ main THREAD.md "close-out"
 rv
 ok "$(j "$J" '[d["restores"], d["inert"]["why"]]')" '[false,"no --verifier given: the verifier runs"]' "R4e: no --verifier → restores false, inert.why says so"
 unset SRV LOG_SSH GIT_SSH_COMMAND GIT_SSH_VARIANT
+
+# ======== C55: prepare's task-scoped failures set the task aside, exit 0 (ADR 0048, p29-7) ===================
+# Each is that one task's (its tree, its anchor, its anchor ref): route `set-aside` with the text as reason, so the
+# lead sets it aside and the Integration lane runs on. The environment's own failures stay exit 2 (the Lane hold).
+fx c55
+GD=$(git -C "$WT" rev-parse --absolute-git-dir)
+printf '%s\n' "$H0" > "$GD/MERGE_HEAD"; : > "$GD/index.lock"
+prep
+ok "$prc|$(j "$J" 'd["route"]')" "0|set-aside" "C55: a merge in progress its tree cannot abort (index.lock held) → exit 0, set-aside"
+has "$(j "$J" 'd["reason"]')" "could not abort the merge left in progress in $WT" "C55: … the reason names it"
+rm -f "$GD/MERGE_HEAD"
+fx c55b
+GD=$(git -C "$WT" rev-parse --absolute-git-dir)
+printf 'edit\n' >> "$WT/t.txt"; : > "$GD/index.lock"
+prep
+ok "$prc|$(j "$J" 'd["route"]')" "0|set-aside" "C55b: tracked changes it cannot stash → exit 0, set-aside"
+has "$(j "$J" 'd["reason"]')" "tracked changes in $WT could not be stashed" "C55b: … named"
+rm -f "$GD/index.lock"
+fx c55c
+g -C "$F/p" checkout -q --orphan orphan; printf 'o\n' > "$F/p/o.txt"; g -C "$F/p" add -A; g -C "$F/p" commit -q -m orphan
+g -C "$F/p" push -q -f origin "orphan:$BR"; g -C "$F/p" checkout -q -f master
+prep
+ok "$prc|$(j "$J" 'd["route"]')" "0|set-aside" "C55c: an orphan PR branch → exit 0, set-aside"
+has "$(j "$J" 'd["reason"]')" "no merge-base of the anchor" "C55c: … no merge-base"
+fx c55d
+J=$(python3 "$LI" prepare --repo "$R" --slug "$SLUG" --default nosuch --note "$V/$SLUG.md" 2>"$F/prep.err"); prc=$?
+ok "$prc" 2 "C55d: a missing origin/<default> is still exit 2 (the environment: a Lane hold)"
+has "$(cat "$F/prep.err")" "origin/nosuch does not exist" "C55d: … named"
+fx c55e
+X=$(git -C "$R" commit-tree "$(git -C "$R" rev-parse "$TB^{tree}")" -m dangling)
+git -C "$R" update-ref "refs/integration-anchor/$BR" "$X"
+mkdir -p "$(dirname "$R/.git/refs/integration-anchor/$BR")"; : > "$R/.git/refs/integration-anchor/$BR.lock"
+prep
+ok "$prc|$(j "$J" 'd["route"]')" "0|set-aside" "C55e: a held <ref>.lock → exit 0, set-aside"
+has "$(j "$J" 'd["reason"]')" "could not delete the stale anchor ref refs/integration-anchor/$BR" "C55e: … named"
+rm -f "$R/.git/refs/integration-anchor/$BR.lock"
+
+# ======== C56: every note-read failure carries `task note unreadable:`; nothing else does (p29-7) ===========
+# execute § 4.5 *lead-integrate's exit 2* reads that one marker: a note race on a task that holds no lane is that task's
+# alone; any other exit 2 there (usage, an empty reason, a refused --max-review-rounds, git not runnable) stays whole.
+fx c56
+E=$(python3 "$LI" inputs --note "$V/missing.md" 2>&1 >/dev/null); rc=$?
+ok "$rc" 2 "C56: inputs on a missing note → exit 2"
+has "$E" "lead-integrate inputs: task note unreadable: not found at" "C56: … with the marker"
+printf 'no frontmatter\n' > "$V/bad.md"
+E=$(python3 "$LI" plan --note "$V/bad.md" 2>&1 >/dev/null); rc=$?
+ok "$rc" 2 "C56b: plan on an unparseable note → exit 2"; has "$E" "lead-integrate plan: task note unreadable:" "C56b: … with the marker"
+E=$(printf 'why\n' | python3 "$LI" set-aside --note "$V/bad.md" --kind own 2>&1 >/dev/null); rc=$?
+ok "$rc" 2 "C56b: set-aside --kind own on an unparseable note → exit 2"; has "$E" "lead-integrate set-aside: task note unreadable:" "C56b: … with the marker"
+E=$(printf '' | python3 "$LI" set-aside --note "$V/$SLUG.md" --kind own 2>&1 >/dev/null); rc=$?
+ok "$rc" 2 "C56c: set-aside with an empty reason → exit 2"; lacks "$E" "task note unreadable:" "C56c: … no marker"
+E=$(python3 "$LI" inputs --note "$V/$SLUG.md" --max-review-rounds 0 2>&1 >/dev/null); rc=$?
+ok "$rc" 2 "C56c: inputs --max-review-rounds 0 → exit 2"; lacks "$E" "task note unreadable:" "C56c: … no marker"
+E=$(python3 "$LI" push --repo "$R" --slug "$SLUG" --head xyz 2>&1 >/dev/null); rc=$?
+ok "$rc" 2 "C56c: push --head xyz (argparse) → exit 2"; lacks "$E" "task note unreadable:" "C56c: … no marker"
+NOGIT="$F/nogit"; mkdir -p "$NOGIT"; ln -sf "$(command -v python3)" "$NOGIT/python3"
+E=$(PATH="$NOGIT" "$(command -v python3)" "$LI" push --repo "$R" --slug "$SLUG" --head "$H0" 2>&1 >/dev/null); rc=$?
+ok "$rc" 2 "C56d: push under a PATH with no git → exit 2"; has "$E" "lead-integrate push: git not runnable:" "C56d: … git not runnable"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"

@@ -574,9 +574,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Integration lane** — the one-at-a-time Integration step itself, held by one
   approved task at a time until it is released (a merge, a set-aside, a
   rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
-  to "the lane". A **Git-env hold** that is not a bare checkout, and an
-  undecided RACE, hold the lane only (`next`'s `laneHold`, ADR 0046): nothing
-  integrates or merges while task calls go on. Not a **Lane** (rollout vs session). _Avoid_: merge queue
+  to "the lane". A **Git-env hold** that is not a bare checkout, an
+  undecided RACE and a **Lane hold** hold the lane only (`next`'s `laneHold`,
+  ADR 0046, ADR 0048): nothing integrates or merges while task calls go on. Not a **Lane** (rollout vs session). _Avoid_: merge queue
   (Integration's gloss: the whole step, never the lane alone).
 - **Active Integration time** — an Integration's wall time less the **Stops**
   inside it that stop its calls (all but a halt, which carries them on): an
@@ -787,6 +787,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   **Integration lane** held: `laneHold`, the canary's exit 9); a bare
   checkout holds the whole rollout (each entry's `scope`; ADR 0046, ADR 0048).
   Only a **Git-env ack** lifts it. _Avoid_: git-env halt (the lead's stop, not the hold).
+- **Lane hold** — a cause that reaches every merge (merge-task's abort or its
+  environment exit 2, a `lead-integrate.py` exit 2 on the task holding the
+  lane, the Integration verify's third `noslot`) held on the **Integration
+  lane** alone: one `## Lane log` line (`lane-hold`), read by `next` as a
+  `lane` entry in `laneHold`, so nothing integrates or merges and `carry`
+  refuses the rollout while task calls go on, and `halt: lane` once nothing
+  else moves (ADR 0048). Only Lachy's ack,
+  through `/thread:repair` (its lane-hold step, 3g, `lane-ack`), releases it.
+  _Avoid_: lane halt (the lead's stop, not the hold).
 - **Git-env ack** — the recorded acceptance of the tripped windows, naming
   exactly the set shown and the ref shown (`--ref`). Lachy's, through
   `/thread:repair` (its git-env step, 3e), after an optional `restore`; never
@@ -966,7 +975,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (ADR 0004). _Avoid_: orchestrator, controller, wrapper.
 - **Situational report** — the read-only output of `status`: cursor, per-task
   queue state (ADR 0030), blockers, drift flags, whether the rollout is moving
-  (the reading a **Watchdog** acts on, ADR 0048), one recommended next action.
+  (its Moving line, `reconcile-rollout.py moving`: the reading a **Watchdog**
+  acts on, ADR 0048), one recommended next action.
   _Avoid_: dashboard, summary, snapshot.
 - **Repair bridge** — the path by which a blocked task is fixed and re-landed
   while the engine keeps sole merge authority. _Avoid_: handoff, recovery.
@@ -1007,14 +1017,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: stuck, gate hold.
 - **Stalled rollout** — a rollout with work it could do and nothing moving:
   its lead, session or Mac stopped, or a hold froze more than it threatens
-  (ADR 0048). A wait that is meant is not a stall: a pause or Room stop
-  (status § Pauses, § Room stop), the Trickle or the Away cap, the Heat
-  hold, a cool-down.
+  (ADR 0048): a recorded halt narrower than the work beside it. A wait that is
+  meant is not a stall: a pause or Room stop (status § Pauses, § Room stop),
+  the Trickle or the Away cap, the Heat hold, a cool-down. But a wait only the
+  lead's own heartbeat ends (a merge hold) is a stall once its life signs stop.
   Not a **Stalled chain** (a serial chain's). _Avoid_: stuck, hung, idle (a
   Slot can be idle in a moving rollout).
 - **Watchdog** — what acts on a Stalled rollout from outside its session,
-  reading it from the **Situational report**: Chorus's Companion, or a
-  launchd fallback that only notifies when Chorus is not running (ADR 0048).
+  reading it from the **Situational report** (`reconcile-rollout.py moving`):
+  Chorus's Companion, or a launchd fallback (`watchdog.py`) that only notifies
+  when Chorus is not running (ADR 0048). Its `stalled` is a reason to look,
+  never by itself a reason to start a second lead.
   Never the rollout's own heartbeat, which stops with its session, nor a
   looped `/thread:status` (status § Loopable), which only recommends.
   _Avoid_: monitor, heartbeat.

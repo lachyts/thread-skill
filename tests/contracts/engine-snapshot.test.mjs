@@ -104,8 +104,10 @@ function check(t) {
   // execute-pointers: every exit-2 route a guard can take points at the re-run rule.
   const s7 = collapse(section(ex, /^### 7\. /) ?? '')
   const PTR = 'starts `engine-snapshot:`'
-  if (!s45.includes(`except an exit 2 whose stderr line ${PTR}`) || !s45.includes(`| 2 | Halt, unless its stderr line ${PTR}`) ||
-    !s7.includes('an exit 2 whose stderr line starts `engine-snapshot:` is no halt') || !s7.includes('(but an `engine-snapshot:` stderr line, a wrong root')) {
+  if (!s45.includes(`except an exit 2 whose stderr line ${PTR}`) || !s45.includes(`| 2 | When its stderr line ${PTR}`) ||
+    !s45.includes(`Any \`lead-integrate.py\` exit 2 whose stderr line ${PTR} is re-run once from the root it names`) ||
+    !s7.includes('an exit 2 whose stderr line starts `engine-snapshot:` is no halt') ||
+    !s7.includes('exits 2 with neither an `engine-snapshot:` nor a `task note unreadable:` line')) {
     fail('execute-pointers')
   }
 
@@ -121,7 +123,7 @@ function check(t) {
   // the Leg close's re-resolve.
   const refusal = collapse(section(t.doc, /^## The refusal rule/) ?? '')
   const another = collapse(section(t.doc, /^## Another rollout's commands/) ?? '')
-  if (!refusal.includes('`reconcile-rollout.py`, every verb but `status` and `fold-journals`') ||
+  if (!refusal.includes('`reconcile-rollout.py`, every verb but `status`, `fold-journals` and `moving`') ||
     !refusal.includes('a task-keyed verb with `--rollout` left off') || !another.includes("orient-all's Sign-off")) fail('doc')
   if (!t.doc.includes('`${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`') ||
     !doc.includes('The plugin root counts only when it is the toplevel of its own work tree') ||
@@ -246,8 +248,8 @@ test('control: the refusal rule naming only --rollout verbs fails doc', () => {
 })
 
 test('control: a merge-task exit 2 that always halts fails execute-pointers', () => {
-  only(edit('execute', '| 2 | Halt, unless its stderr line starts `engine-snapshot:` (a wrong root, § 1.5): re-run the same call once from the root it names |',
-    '| 2 | Halt |'), 'execute-pointers', 'step 4 table')
+  only(edit('execute', '| 2 | When its stderr line starts `engine-snapshot:` (a wrong root, § 1.5): re-run the same call once from the root it names.',
+    '| 2 | Halt.'), 'execute-pointers', 'step 4 table')
 })
 
 test('control: § 1.5 without the sign-off sentence fails sign-off', () => {

@@ -417,7 +417,7 @@ test('control: a Heat hold the doc or the code says another way fails heat', () 
   only('away', 'It holds Away too', 'Away lifts it', 'heat', 'Away lifts the hold')
   only('away', '**It never halts.** A row the heat holds', '**It halts.** A row the heat holds', 'heat', 'a Heat hold halts')
   only('away', '`THREAD_HEAT_LEVEL`, an integer from 0 to 4', 'An env var, an integer from 0 to 4', 'heat', 'no pin named')
-  only('context', 'the Trickle or the Away cap, the Heat\n  hold, a cool-down.', 'the Trickle or the Away cap, a cool-down.', 'heat', 'a hot spell reads as a stall')
+  only('context', 'the Trickle or the Away cap, the Heat hold, a cool-down.', 'the Trickle or the Away cap, a cool-down.', 'heat', 'a hot spell reads as a stall')
 })
 
 test('control: a Mac-wide hold score.py lacks, or one the idle-slots enum lacks, fails mac-holds', () => {
