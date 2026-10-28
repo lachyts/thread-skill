@@ -329,7 +329,8 @@ test('control: § 7 without verify-timeout exit 4 fails halts', () => {
 })
 
 test('control: a p32-1 halt left off the kept list, or no pattern matching it, fails kept', () => {
-  only(edit(real, ', `reason="verify-slot.py not found"` (§ 3);', ' (§ 3);'), 'kept', 'verify-slot.py not found unlisted')
+  only(edit(real, ' `reason="verify-slot.py not found"` (§ 3: the plugin install every entry runs from;', ' (§ 3: the plugin install every entry runs from;'),
+    'kept', 'verify-slot.py not found unlisted')
   only(edit(real, ' and `reason="engine refused the args of [[task]]"` (§ 4.5 *Args refusal*)', ''), 'kept', 'Args refusal unlisted')
   only(real, 'kept', 'no pattern for the pre-check halt',
     edit(realRr, '    r"args\\.verifySlot is not this entry\'s verify-timeout verifySlot",\n', ''))
