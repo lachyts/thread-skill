@@ -871,7 +871,8 @@ fallback only notifies, and status starts nothing. A meant wait the verdict fail
 cause, never `moving` or `stalled`.
 
 **Reason → verdict.** Each `reason="…"` execute's halt guard and turn end write (execute § 4.5 steps 1.5 and 1.6, its
-wait clauses included, *Merge hold*, *lead-integrate's exit 2* and § Room stop item 8), and what `moving` reads beside it:
+wait clauses included, *Merge hold*, *Lane hold*, *lead-integrate's exit 2* and § Room stop item 8), and what `moving`
+reads beside it:
 
 | Execute's reason | `moving` |
 |---|---|
@@ -888,7 +889,7 @@ wait clauses included, *Merge hold*, *lead-integrate's exit 2* and § Room stop 
 | `paused at user request` | `waiting paused` |
 | `superseded by [[<supersededBy>]]` | `skip` |
 | `RACE undecided: [[<slug>]]`, `lane held: <cause> on [[<slug>]]`, `git-env trip: the shared checkout changed` (a lane trip), `hold_until needs you on [[<note>]]: <pr> closed unmerged`, `hold_until needs you on [[<note>]]: unreadable`, `the rollout links no task` (end-of-run verdicts) | `waiting you`; `stalled halt` once work appears beside it |
-| lead-integrate.py failed on [[slug]] (kept whole) | `waiting you`, work or none |
+| lead-integrate.py failed on [[slug]], lane hold not written on [[<slug>]]: <its ERROR line> (kept whole) | `waiting you`, work or none |
 
 **Polling.** The suggested Companion poll is every 5 minutes; the cadence is Chorus's. A poller may skip a rollout whose
 Run record changed within the threshold, as the fallback does: a silence stall is never held back by that, but a halt

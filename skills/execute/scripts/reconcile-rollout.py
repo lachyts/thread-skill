@@ -11218,6 +11218,7 @@ WHOLE_HALT_PATTERNS = (
     r"completion verify: rollout note unreadable",
     r"rollout settings refused",
     r"invalid round budget: \S+ on \[\[{rollout}\]\]",
+    r"lane hold not written on \[\[[^\]]+\]\]",
     r"ladder file refused",
     r"lead-integrate\.py failed on \[\[[^\]]+\]\]",
     r"merge-task\.sh exited \S+ on the revert of \[\[[^\]]+\]\]",

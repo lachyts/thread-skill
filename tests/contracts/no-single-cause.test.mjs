@@ -8,7 +8,8 @@
 //                 and prefix matches a kept reason
 //   narrowed      each narrowed site routes to a Set aside, a Lane hold or the Race log, never § 7
 //   lane-hold     the *Lane hold* paragraph: its four causes, its one write, no free-lane, the session's own lane freed
-//                 too, carry's refusal, the unreadable note, the soft pause; no `prepare-env` anywhere
+//                 too, carry's refusal, the unreadable note, the soft pause, its own failure's route (an `engine-snapshot:`
+//                 re-run, else § 7 kept whole); no `prepare-env` anywhere
 //   needs-you     § 6.5 (c) carries `autoRetryError`, and (h) exists
 //   merge-task    merge-task.sh's exit-2 header has three cases, and exactly four `merge-task args:` exits
 //   task-scoped   lead-integrate.py raises TaskScoped at exactly the six task-scoped texts
@@ -21,8 +22,8 @@
 //                 twice, the no-flag clause at four sites
 //   watchdog      status § The Watchdog's reading: the verb, the verdicts, the bounds, the safety wording, *Which waits
 //                 silence judges* bound to SILENCE_JUDGED, the fallback's probe and *The interim gap*
-//   reason-table  its table covers every `reason="…"` of steps 1.5 and 1.6, *Merge hold*, *lead-integrate's exit 2*
-//                 and § Room stop item 8
+//   reason-table  its table covers every `reason="…"` of steps 1.5 and 1.6, *Merge hold*, *Lane hold*, *lead-integrate's
+//                 exit 2* and § Room stop item 8
 //   repair-adrs   repair § 3g writes `lane-ack`; ADR 0048 says how p29-7 built it; ADRs 0033 and 0030 are amended
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -139,6 +140,9 @@ function check(f) {
     !laneP.includes('`carry` refuses the rollout until then') ||
     !laneP.includes('one that cannot (`lead-integrate.py`\'s `task note unreadable:`) is out of `next`\'s scan, so the task shows only through `laneHold` and § 6.5 (h)') ||
     !laneP.includes('A `pause_requested` behind a lane verdict never drains, because the note keeps `integrating:`. Step 1.2 is skipped, so no wait clause holds, and the lane arm goes to § 7 `lane held:`. After the ack the held task integrates (a soft pause lets Integration carry on), and the pause drains after it.') ||
+    !laneP.includes('*When `lane-hold` itself fails*') ||
+    !laneP.includes('a stderr line starting `engine-snapshot:` → re-run it from the root it names (§ 1.5); any other non-zero exit') ||
+    !laneP.includes('→ § 7 with `reason="lane hold not written on [[<slug>]]: <its ERROR line>"`, kept whole: the rollout note every task shares cannot carry the hold.') ||
     prepareEnv)
 
   // needs-you
@@ -231,7 +235,7 @@ function check(f) {
   const table = wd.split('\n').filter((l) => l.startsWith('| ')).join('\n')
   const roomP = collapse(section(ex, /^## Room stop/, /^## Don'ts/).split('\n').find((l) => /^8\. /.test(l)) ?? '')
   const mergeHold = collapse(line(ex, '**Merge hold**'))
-  const sources = [...reasons(s15), ...reasons(waitP), ...reasons(s16), ...reasons(mergeHold), ...reasons(exit2P), ...reasons(roomP)]
+  const sources = [...reasons(s15), ...reasons(waitP), ...reasons(s16), ...reasons(mergeHold), ...reasons(exit2P), ...reasons(laneP), ...reasons(roomP)]
   fail('reason-table', sources.length < 20 || !sources.every((r) => table.includes(r)))
 
   // repair-adrs
@@ -252,6 +256,13 @@ test('the real tree holds every rule', () => {
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
 const CONTROLLED = new Set()
+// The *Lane hold* paragraph's own failure route, whole (execute § 4.5), which its control drops.
+const LANE_HOLD_FAILS = ' *When `lane-hold` itself fails*, no line lands, the lane stays held and the task keeps `integrating:`, so the next ' +
+  'turn\'s step 1.4 would take it again and re-run the failing command (row 70\'s abort repeats): a stderr line starting ' +
+  '`engine-snapshot:` → re-run it from the root it names (§ 1.5); any other non-zero exit (its exit 1: the rollout note ' +
+  'unreadable or its save failed, the line missing on re-read, the task another rollout\'s, or an unreadable task note the ' +
+  '`## Queue` does not link; its usage exit 2) → § 7 with `reason="lane hold not written on [[<slug>]]: <its ERROR line>"`, ' +
+  'kept whole: the rollout note every task shares cannot carry the hold.'
 function only(key, from, to, rule) {
   assert.equal(FILES[key].split(from).length, 2, `control setup: ${from.slice(0, 80)} must occur exactly once in ${key}`)
   assert.deepEqual(check({ ...FILES, [key]: FILES[key].replace(from, () => to) }), [rule])
@@ -276,13 +287,14 @@ test('control: a narrowed site routed back to § 7 fails narrowed', () => {
     'a third failure halts, reason `prepare: origin unreachable three times', 'narrowed')
 })
 
-test('control: the Lane hold paragraph without a cause, its no-free-lane rule or its soft-pause sentence, or a prepare-env, fails lane-hold', () => {
+test('control: the Lane hold paragraph without a cause, its no-free-lane rule, its soft-pause sentence or its own failure\'s route, or a prepare-env, fails lane-hold', () => {
   only('execute', '`verify-noslot` (the Integration verify\'s third consecutive `noslot`, step 3)', 'a verify slot (step 3)', 'lane-hold')
   only('execute', 'so no `free-lane` follows it', 'then `free-lane`', 'lane-hold')
   only('execute', '; on its exit 0 the lead frees the lane (this session\'s state) too, as *The lane-free rule* does,', ',', 'lane-hold')
   only('execute', ', and `carry` refuses the rollout until then', '', 'lane-hold')
   only('execute', 'and the pause drains after it. Its release', 'and the pause never drains. Its release', 'lane-hold')
   only('rr', '"integrate-env", "verify-noslot")', '"prepare' + '-env", "verify-noslot")', 'lane-hold')
+  only('execute', LANE_HOLD_FAILS, '', 'lane-hold')
 })
 
 test('control: (c) reading autoRetryError as a halt, or no (h), fails needs-you', () => {

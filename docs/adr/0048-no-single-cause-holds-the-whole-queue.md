@@ -39,9 +39,10 @@ From September to 21 October about 150 to 185 hours of rollout time went to stal
   Trickle, the Away cap, the Heat hold, the last starts, a PR hold) by its own condition.
 - **The Lane hold.** merge-task's abort (70) and its environment exit 2, every `lead-integrate.py` exit 2 on the task
   that holds the lane, and the Integration verify's third `noslot` write one `## Lane log` line (`lane-hold`), which
-  `next` reads into `laneHold` and halts `lane` on once nothing else moves; only Lachy's ack through `/thread:repair`
-  (`lane-ack`) releases it, and until then `carry` refuses the rollout, since a carry strips `integrating:` and never
-  copies the `## Lane log`.
+  `next` reads into `laneHold` and halts `lane` on once nothing else moves; a `lane-hold` that cannot write halts the
+  whole rollout (`lane hold not written on [[…]]`), since the rollout note every task shares cannot carry it; only
+  Lachy's ack through `/thread:repair` (`lane-ack`) releases it, and until then `carry` refuses the rollout, since a
+  carry strips `integrating:` and never copies the `## Lane log`.
 - **The wait clauses.** Execute § 4.5 step 1.5 reads a cool-down, a cap-held seeded revise and (for the lane arms) a
   `waits: merge` PR hold before a lane verdict, `stuck` or a task-scope hold goes to § 7: a wait `next` cannot see
   never becomes a halt.

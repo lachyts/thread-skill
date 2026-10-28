@@ -501,6 +501,26 @@ ok "$(cat "$D/$RO.md")" "$before" "N1b: … nothing written"
 printf -- '---\ntags: [task]\nstatus: review\nrollout: "[[other-rollout]]"\n---\n' > "$D/zz.md"
 lh zz integrate-env "x"; ok "$rc" 1 "N1b: another rollout's task → exit 1"
 
+# ── N1c: a lane-hold that cannot write: no line, the lane held, the task still integrating, and the route's kept halt
+# reads `you` (execute § 4.5 *Lane hold*: its own failure → § 7, kept whole) ────────────────────────────────────────
+scen n1c
+QUEUE="a c"; mkro; integrating a; mkt c open
+em lane-taken a '{}' 2026-10-26T08:00:00Z
+chmod 444 "$D/$RO.md"; before=$(cat "$D/$RO.md")
+lh a merge-task-abort "merge-task exited 70"
+chmod 644 "$D/$RO.md"
+ok "$rc" 1 "N1c: lane-hold on a read-only rollout note → exit 1"
+has "$out" "ERROR: lane-hold: cannot write " "N1c: … its ERROR line"
+ok "$(cat "$D/$RO.md")" "$before" "N1c: … no Lane-log line lands"
+ok "$(evs lane-freed)" '[]' "N1c: … the lane is not freed"
+ok "$(j "$(nx)" 'd["laneHold"]')" '[]' "N1c: next reads no hold"
+ok "$(grep -c '^integrating:' "$D/a.md")" 1 "N1c: … a keeps integrating:"
+entry 2026-10-26T11:58:00Z
+reason="lane hold not written on [[a]]: $(printf '%s\n' "$out" | head -n 1)"
+halted "${reason:0:200}" 2026-10-26T11:59:00Z   # the Stop hook records the reason cut to 200 characters
+ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["reason"].startswith("lane hold not written on [[a]]: ERROR: lane-hold: ")]')" \
+  '["waiting","you",true]' "N1c: the route's kept halt with c startable → waiting you, never stalled halt"
+
 # ── N2: the lead's Integration set-asides: infra and agent classes, the lane free ───────────────────────────────
 n2() {  # n2 <name> <reason> <class>
   scen "n2-$1"
