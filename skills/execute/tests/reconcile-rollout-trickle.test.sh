@@ -398,8 +398,9 @@ J=$(nx ro-a --running "a1,a2")
 ok "$(q "$J" '[d["restart"], d["start"], d["running"], d["halt"]]')" '[[],[],["a1","a2"],null]' "T19: with both live, ro-a starts nothing more"
 
 # ── T20: a blocked row with the Trickle full reads stuck; the lead's halt guard waits on it ───────────────────────
-# `next` cannot tell a seeded revise (lead-integrate.py inputs' autoRevise) from any other block, so ro-c's only row,
-# c1 blocked at its run, reads `stuck` with slotLimit 0 and no hold. These are the values execute § 4.5 step 1.5's
+# A blocked task is no row of `next`'s, a seeded revise (lead-integrate.py inputs' autoRevise) included: `next` counts a
+# revise only in the fair share (p28-5; the share suite's F8 and F15). So ro-c, its only task c1 blocked at its run,
+# reads `stuck` with slotLimit 0 and no hold. These are the values execute § 4.5 step 1.5's
 # Trickle clause reads to end the turn `waiting` (reason="trickle: 2/2 tasks running on this Mac") instead of halting.
 scen t20-blocked-revise
 mkro ro-a 3; mkt a1 ro-a in_progress 'owner: lead-a'; mkt a2 ro-a in_progress 'owner: lead-a'
@@ -440,8 +441,9 @@ ok "$(q "$J" '[d["start"], d["restart"], d["slotsInUse"], d["slotLimit"], d["cei
   "A1: Away cap 4 with 4 running elsewhere: nothing starts, slotLimit 0 under the ceiling 4, no halt"
 ok "$(q "$J" "$holds")" "{\"x1\":\"$AC4\",\"x2\":\"$AC4\",\"x3\":\"$AC4\"}" "A1: every row is held on the Away cap"
 ok "$(q "$J" "$tka")" '[true,"fresh",2,4,{"ro-a":2,"ro-c":2},4]' "A1: trickle reports Away, the Trickle's N 2 and the Away cap 4"
-ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","lapsed","running"]' \
-  "A1: awayCap follows limit, lapsed (p28-4) follows elsewhere, every other trickle key unchanged"
+# p28-4: lapsed follows elsewhere; p28-5: the fair share's `kept` follows `running` as the block's last key.
+ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","lapsed","running","kept"]' \
+  "A1: awayCap follows limit, lapsed (p28-4) follows elsewhere, every other trickle key unchanged (kept, p28-5, last)"
 ok "$(lines)" 0 "A1: a fresh file prints no WARN"
 
 # ── A2: partial room: starts fill up to the Away cap less the count elsewhere ────────────────────────────────────

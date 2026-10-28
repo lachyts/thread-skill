@@ -35,8 +35,11 @@
 #      one whose snapshot is unusable: engine-snapshot.py guard-pr's `engine-snapshot: ` line, so the lead
 #      re-runs this same call from the root that line names, never a halt). Every one is before any
 #      GitHub call.
-#                                                                        counter UNTOUCHED  lead: halt the
-#                                                                                          rollout for a human
+#                                                                        counter UNTOUCHED  lead, by its stderr
+#      line (ADR 0048, p29-7): `engine-snapshot:` → re-run from the root it names; `ERROR: merge-task args:` (a
+#      SHA not 40-hex, a <pr> it cannot parse, a URL in another repo: this task's own arguments) → set this task
+#      aside at its own run; anything else (the environment) → hold the Integration lane for a human (execute
+#      § 4.5 *Lane hold*). A revert PR's 2 still halts the rollout (it protects main).
 #   3  BASE MOVED: origin/<default> ≠ the integrated base. Nothing merged. Each newly counted refusal (the cap's
 #      4th included, never "this base was already counted") records why main moved in the task's Run record
 #      (lead-integrate.py base-moved, p29-10: the movers base..main and whether only Inert paths moved).
@@ -79,10 +82,12 @@
 #   70  Abort: the run ended outside `finish` and the signal traps, i.e. a defect such as a `set -u` abort.
 #      bash 3.2 exits those with 1, or (an unset name inside `$((…))`) with the last command's status, often
 #      0, which would read as "merged"; the EXIT trap turns every such exit into 70. Sentinel `failed:abort`.
-#                                                                        counter UNTOUCHED  lead: halt the
-#                                                                                          rollout for a human
-#                                                                                          (a re-run aborts
-#                                                                                          again)
+#                                                                        counter UNTOUCHED  lead: hold the
+#                                                                                          Integration lane
+#                                                                                          for a human (a
+#                                                                                          re-run aborts
+#                                                                                          again; ADR 0048)
+#      A revert PR's 70 still halts the rollout (it protects main).
 #   143 130 129  A signal: TERM, INT, HUP (their traps). Sentinel `failed:<rc>`.
 #                                                                        counter UNTOUCHED  lead: re-run
 #                                                                                          (idempotent)
@@ -641,8 +646,10 @@ if [ "$IS_REPO" != 1 ]; then
 fi
 
 sha_re='^[0-9a-f]{40}$'
-[[ $IHEAD =~ $sha_re ]] || finish 2 "ERROR: integrated head '$IHEAD' is not a 40-hex SHA"
-[[ $IBASE =~ $sha_re ]] || finish 2 "ERROR: integrated base '$IBASE' is not a 40-hex SHA"
+# The four task-argument exits print `merge-task args:` (p29-7): execute sets that one task aside at its own run,
+# while every other exit 2 (the environment) holds the Integration lane.
+[[ $IHEAD =~ $sha_re ]] || finish 2 "ERROR: merge-task args: integrated head '$IHEAD' is not a 40-hex SHA"
+[[ $IBASE =~ $sha_re ]] || finish 2 "ERROR: merge-task args: integrated base '$IBASE' is not a 40-hex SHA"
 for t in gh git python3; do
   command -v "$t" >/dev/null 2>&1 || finish 2 "ERROR: $t not found on PATH"
 done
@@ -672,10 +679,10 @@ if [[ $PR_ARG =~ $num_re ]]; then
 elif [[ $PR_ARG =~ $url_re ]]; then
   u_slug="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"; PR_NUM=${BASH_REMATCH[3]}
   if [ "$(printf '%s' "$u_slug" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$OWNER/$REPO" | tr '[:upper:]' '[:lower:]')" ]; then
-    finish 2 "ERROR: PR URL $PR_ARG is in $u_slug, but origin is $OWNER/$REPO"
+    finish 2 "ERROR: merge-task args: PR URL $PR_ARG is in $u_slug, but origin is $OWNER/$REPO"
   fi
 else
-  finish 2 "ERROR: cannot parse a PR number from '$PR_ARG' (a positive number or a https://github.com/<o>/<r>/pull/<N> URL)"
+  finish 2 "ERROR: merge-task args: cannot parse a PR number from '$PR_ARG' (a positive number or a https://github.com/<o>/<r>/pull/<N> URL)"
 fi
 PR=$PR_NUM
 

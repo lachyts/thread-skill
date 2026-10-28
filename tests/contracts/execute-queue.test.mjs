@@ -403,7 +403,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   const s8 = S(skill, S8)
   const stuck7 = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: stuck`')) ?? '')
   const signOff7 = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: awaiting-sign-off`')) ?? '')
-  if (!s1.includes('Every other hold reads `laneHold` and holds the Integration lane only (ADR 0046)') ||
+  if (!s1.includes('Every other hold reads `laneHold` and holds the Integration lane only (ADR 0046, ADR 0048)') ||
     !s1.includes('while starts, seeded revises and automatic retries go on') ||
     !s1.includes('An `UNVERIFIED` entry stays set aside like any other') ||
     !s14.includes("Else a `race` entry with `revert: true` is the lane's first work") || !s14.includes('*The RACE revert* (step 4) from its `revert` step') ||
@@ -484,9 +484,9 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
       !verifyP.includes('only a SIGKILL leaves no rc, which reads as red; its guard still ends the verifier') ||
       !verifyP.includes('Any rc but 0 is red, except `noslot` (exit 75: no verify slot within `<slot_wait>`, the verifier never ran), which is no verdict') ||
       !st3.includes('`noslot` (exit 75: no verify slot came within `<slot_wait>`; the verifier never ran, so this is no verdict, never red): M stays unpushed and the lane held. After the canary `check`, re-arm (`--kind verify`) and re-run *The background verify command*.') ||
-      !st3.includes('A third consecutive `noslot` on this verify: `undo`, then halt with `reason="no verify slot for [[slug]] in 3 tries"`') ||
+      !st3.includes('A third consecutive `noslot` on this verify: `undo`, then the *Lane hold* (`--cause verify-noslot`') || st3.includes('reason="no verify slot for [[slug]] in 3 tries"') ||
       !raceLine.includes('`noslot` (no verify slot came within `<slot_wait>`: the verifier never ran, no verdict) → re-run the re-verify with the lane held') ||
-      !raceLine.includes('a third consecutive `noslot` halts with `reason="RACE: no verify slot for the re-verify of [[slug]]"`') ||
+      !raceLine.includes('a third consecutive `noslot` appends `- <now> [[<slug>]] re-verify not run: no verify slot in 3 tries; the RACE waits for you` to the `## Race log`, then `free-lane --tasks <slug>`: no halt') ||
       !vsRow.startsWith('| `verify_slots` | `2` | machine-wide; `[defaults]` only') || !vsRow.includes('never stamped on a rollout note') ||
       !vsRow.includes('read by `verify-timeout`') || !vsRow.includes('becomes `--slots`') || !vsRow.includes('`args.verifySlot.slots`') ||
       !exit3.includes('reason="rollout settings refused"') || !exit3.includes('The lead writes nothing') ||
@@ -496,7 +496,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
       !vsP.includes("The lead's `lead-integrate.py verify` (the Integration verify and the RACE re-verify) and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode) register as Integration waiters") ||
       !vsP.includes('before the verify slot frees') || !vsP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status --slots <verify_slots>`') ||
       !vsP.includes('verify-slot.py wait --log') || !vsP.includes('waits inside its turn') ||
-      !s7.includes('`reason="RACE: no verify slot for the re-verify of [[slug]]"`') || !s7.includes('`reason="no verify slot for [[slug]] in 3 tries"`') ||
+      !s7.includes("the Integration verify's third `noslot` (step 3, `verify-noslot`)") || !s7.includes("the RACE re-verify's third `noslot` (the RACE procedure") ||
+      s7.includes('`reason="RACE: no verify slot for the re-verify of [[slug]]"`') || s7.includes('`reason="no verify slot for [[slug]] in 3 tries"`') ||
       !s7.includes('`reconcile-rollout.py verify-timeout` exits 3 at an entry (§ 3: `reason="rollout settings refused"`') ||
       !s7.includes('stamping a key does not clear it')) {
       fails.push('verify-slots')
@@ -570,7 +571,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
 
   // auto-retry (p16-4, ADR 0033): step 1.2's **Automatic retry** shares sub-step 2's line after *Automatic descope*, so it
   // runs before the halt guard (halt-guard pins that order). Skipped under a pause; it reads `inputs … --repo`, halts on
-  // `autoRetryError` (§ 3's round-budget halt), acts only on `autoRetry: true`, runs the guarded verb with the two
+  // `autoRetryError` (no halt: H12, a § 6.5 (c) item, ADR 0048), acts only on `autoRetry: true`, runs the guarded verb with the two
   // assertions copied from that read (never resolved by hand), skips a plan-blocked key whose descope exited 3, notes an
   // `autoRetryAfter` and re-runs `next`. The halt guard ends a quota or infra cool-down `waiting` with its reason, which
   // § 6 allows on `waiting`, but only while no UNVERIFIED task is set aside: with one, the `stuck` goes to § 7 (its
@@ -590,17 +591,16 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   if (!s2t.includes('**Automatic retry (p16-4, ADR 0033).**') || !before(s2t, '**Automatic descope', '**Automatic retry') ||
     !ar.includes('Skip it when `paused` or `pauseRequested` is set') ||
     !ar.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --repo <repoPath>`') ||
-    !ar.includes("Its `autoRetryError` is § 3's round-budget halt") || !ar.includes('Act only on `autoRetry: true`') ||
+    !ar.includes("Its `autoRetryError` (an invalid round-budget stamp) is no halt: the task stays set aside, a (c) item through its `humanFix` H12 (ADR 0048).") || !ar.includes('Act only on `autoRetry: true`') ||
     !ar.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py auto-retry --tasks <slug> --rollout <rollout-note> --auto-retries <inputs.autoRetryBudget.autoRetries.value> --fingerprint <inputs.fingerprint>`') ||
     !ar.includes('both values copied from that `inputs`, never resolved by hand') ||
     !ar.includes('skipping a `plan-blocked` key whose descope exited 3 this session') ||
     !ar.includes('Note any `autoRetryAfter` (a quota or infra cool-down), with its `autoRetryClass`, for the halt guard') ||
     !ar.includes('each of its retries first waits a short cool-down, 15, then 60, then 240 minutes') ||
     !ar.includes('If any retry ran, re-run `next --running <the live slugs>`') ||
-    !guard.includes('A `stuck` while step 1.2 found an `autoRetryAfter` (a quota or infra cool-down), and no UNVERIFIED task among the set-aside entries, ends the turn `waiting` with `reason="<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>"`') ||
-    !guard.includes('With an UNVERIFIED task among them, a cool-down holds nothing back: the `stuck` goes to § 7 as usual') ||
+    !guard.includes('A `stuck` while step 1.2 found an `autoRetryAfter` (a quota or infra cool-down) ends the turn `waiting` with `reason="<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>"`') ||
+    !guard.includes('An UNVERIFIED task among them never stops a cool-down (ADR 0048, amending ADR 0033): its (b) item is still pushed from that turn (§ 6.5), and once nothing cools the `stuck` goes to § 7 with its `UNVERIFIED undecided` reason.') ||
     !guard.includes('A gate-pending task never stops a cool-down') ||
-    !guard.includes("with the item in the report's `Needs you:` block, § 6.5)") ||
     !s6all.includes('`reason` appears only on `halted`, on a hold and on a retry cool-down') ||
     !arRow.includes('resolved by `lead-integrate.py inputs` and `reconcile-rollout.py auto-retry` themselves (built-in `2`)') ||
     !arRow.includes('not passed to the engine') || !arRow.includes('`0` disables every automatic retry') ||
@@ -609,7 +609,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !s6all.includes('"[[task-q]] → auto-retry 1/2 (plan; feedback <sha>); restarting"') || !s6all.includes('Auto-retried: [[task-q]]') ||
     !s6all.includes('The `Auto-retried:` line lists every automatic retry this rollout has recorded (its `## Notes` `auto-retry:` lines)') ||
     !arLog.includes('the automatic retries copied from its `auto-retry:` lines') ||
-    !arStuck.includes("acted on only once step 1.2's *Automatic retry* re-entered nothing and found no cool-down, or found one with an UNVERIFIED task set aside") ||
+    !arStuck.includes("acted on only once step 1.2's *Automatic retry* re-entered nothing and step 1.5's *wait clauses* find no wait (no cool-down, whatever else is set aside, an UNVERIFIED task included") ||
     !never.includes("The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*)") ||
     !never.includes('a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair') ||
     !donts.includes('Never auto-retry unless `inputs` reports `autoRetry: true`, never pass a budget you resolved yourself') ||
@@ -709,6 +709,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !tr1.includes('A `WARN: ~/.config/thread/away.json` line on its stderr') ||
     !tr1.includes('is printed verbatim the first time this session sees that exact line') ||
     !trickleP.includes('a **Trickle claim**') || !tr1.includes('A `WARN: trickle claims` line on its stderr') ||
+    // p28-5: the fair share keeps a freed place for a waiting rollout, and slotLimit leaves it out
+    !trickleP.includes('A **fair share** keeps a freed place') ||
     !tr6.includes('A `trickle:` hold (*The Trickle*) ends the turn `waiting` too') ||
     !tr6.includes('`reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`') ||
     !tr6.includes('a Trickle wait can stand with nothing of this rollout in flight') ||
@@ -724,7 +726,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !trGuard.includes('A `stuck` while step 1.2 held an `autoRevise: true` seeded revise only for want of `slotLimit`') ||
     !trGuard.includes('ends the turn `waiting` with `reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`, never § 7') ||
     !trGuard.includes("Like `next`'s own `trickle:` hold, it waits whatever else is set aside") ||
-    !(S(skill, S7) ?? '').includes('and never while step 1.2 holds a seeded revise on the Trickle, a Trickle wait (§4.5 step 1.5)') ||
+    !(S(skill, S7) ?? '').includes('and no seeded revise held on the Trickle, a Trickle wait') ||
     // the Away cap (p29-8)
     !trickleP.includes('`min(ceiling, max(0, A − that count))` while Away') ||
     !trickleP.includes('While Away the same row reads `away cap: <running>/<A> tasks running on this Mac`, and an `away cap:` hold never halts the rollout either') ||
@@ -762,7 +764,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
       !tr6.includes("and it comes before the Trickle's, since a hot Mac holds every row the Trickle would") ||
       !st3.includes('- `heat` (exit 76: the Mac was too hot for the whole `<slot_wait>`') ||
       !st3.includes('a `heat` never counts toward the third-`noslot` halt, nor resets its count') ||
-      !raceLine.includes('`heat` (exit 76: the Mac was too hot for the whole `<slot_wait>`, *The Heat hold*: no verdict) → re-run the re-verify the same way with the lane held, never counted toward that halt') ||
+      !raceLine.includes('`heat` (exit 76: the Mac was too hot for the whole `<slot_wait>`, *The Heat hold*: no verdict) → re-run the re-verify the same way with the lane held, never counted toward those three') ||
       !st5.includes('`heat`: the Mac was too hot to run the suite within the slot wait, a Heat hold') ||
       !st5.includes('a `stopped` or `heat` one never counts') ||
       !verifyP.includes('So is `heat` (exit 76, *The Heat hold*)') ||
@@ -1220,9 +1222,9 @@ test('control: a noslot read as green fails verify-slots', () => {
     'read it as green): push as on rc 0.'), 'verify-slots', 'noslot green')
 })
 
-test('control: step 3 without the third-noslot halt fails verify-slots', () => {
-  only(sk(' A third consecutive `noslot` on this verify: `undo`, then halt with `reason="no verify slot for [[slug]] in 3 tries"` (a verify slot held that long is a hung holder: `verify-slot.py status` names it).', ''),
-    'verify-slots', 'no third-noslot halt')
+test('control: step 3 without the third-noslot Lane hold fails verify-slots', () => {
+  only(sk(" A third consecutive `noslot` on this verify: `undo`, then the *Lane hold* (`--cause verify-noslot`, the verify log's `no verify slot` line the evidence; ADR 0048: a verify slot held that long is a hung holder that reaches every merge, and `verify-slot.py status` names it), never a halt.", ''),
+    'verify-slots', 'no third-noslot Lane hold')
 })
 
 test('control: § 3 without the "does not clear" remedy fails verify-slots', () => {
@@ -1352,20 +1354,17 @@ test('control: an Automatic retry before the Automatic descope fails auto-retry'
   const retry = l.slice(l.indexOf(' **Automatic retry'))
   only(sk(l, l.replace(desc, '\u0000').replace(retry, '').replace('\u0000', retry.trim() + ' ' + desc)), 'auto-retry', 'retry first')
 })
-test('control: an Automatic retry without the autoRetryError halt fails auto-retry', () => {
-  only(sk(" Its `autoRetryError` is § 3's round-budget halt.", ''), 'auto-retry', 'no error halt')
+test('control: an Automatic retry without the autoRetryError (c) item fails auto-retry', () => {
+  only(sk(" Its `autoRetryError` (an invalid round-budget stamp) is no halt: the task stays set aside, a (c) item through its `humanFix` H12 (ADR 0048).", ''), 'auto-retry', 'no error item')
 })
 test('control: an Automatic retry that re-judges a descope refusal fails auto-retry', () => {
   only(sk(', skipping a `plan-blocked` key whose descope exited 3 this session', ''), 'auto-retry', 'descope exit 3')
 })
 test('control: a cool-down that halts fails auto-retry', () => {
-  only(sk('set-aside entries, ends the turn `waiting` with `reason="<autoRetryClass> cool-down', 'set-aside entries, halts with `reason="<autoRetryClass> cool-down'), 'auto-retry', 'cool-down halts')
-})
-test('control: a cool-down that waits over an UNVERIFIED task fails auto-retry', () => {
-  only(sk(', and no UNVERIFIED task among the set-aside entries,', ''), 'auto-retry', 'cool-down hides an UNVERIFIED')
+  only(sk('(a quota or infra cool-down) ends the turn `waiting` with `reason="<autoRetryClass> cool-down', '(a quota or infra cool-down) halts with `reason="<autoRetryClass> cool-down'), 'auto-retry', 'cool-down halts')
 })
 test("control: a cool-down that never routes an UNVERIFIED to § 7 fails auto-retry", () => {
-  only(sk(" With an UNVERIFIED task among them, a cool-down holds nothing back: the `stuck` goes to § 7 as usual (its `UNVERIFIED undecided` reason, with the item in the report's `Needs you:` block, § 6.5), since a human is needed anyway, and the cooling task retries at the re-invocation after it.", ''),
+  only(sk(" An UNVERIFIED task among them never stops a cool-down (ADR 0048, amending ADR 0033): its (b) item is still pushed from that turn (§ 6.5), and once nothing cools the `stuck` goes to § 7 with its `UNVERIFIED undecided` reason.", ''),
     'auto-retry', 'no § 7 route')
 })
 test('control: a gate-pending task that stops a cool-down fails auto-retry', () => {
@@ -1390,7 +1389,7 @@ test('control: a Completion log that drops the auto-retry lines fails auto-retry
   only(sk(' the automatic retries copied from its `auto-retry:` lines (task, count, stage, feedback sha, any raise),', ''), 'auto-retry', 'no log copy')
 })
 test('control: a § 7 stuck halt that ignores the retries fails auto-retry', () => {
-  only(sk(", acted on only once step 1.2's *Automatic retry* re-entered nothing and found no cool-down, or found one with an UNVERIFIED task set aside, which a cool-down never holds back, §4.5 step 1.5", ''), 'auto-retry', 'stuck early')
+  only(sk(" and step 1.5's *wait clauses* find no wait (no cool-down, whatever else is set aside, an UNVERIFIED task included,", ' ('), 'auto-retry', 'stuck early')
 })
 test('control: § 8 without the auto-retry sentence fails auto-retry', () => {
   only(sk(" The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*), a guarded deterministic verb with its own budget: a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair.", ''),
@@ -1454,6 +1453,8 @@ test('control: § 4.5 without the Trickle at any one site fails trickle', () => 
   only(sk(' (a **Trickle claim**)', ''), 'trickle', 'no Trickle claim named')
   only(sk(' A `WARN: trickle claims` line on its stderr (`skills/execute/away.md` § The Trickle, *Trickle claims*) is relayed the same way.', ''),
     'trickle', 'no claims WARN relay in step 1.1')
+  // p28-5: the fair share
+  only(sk(' A **fair share** keeps a freed place for the waiting rollout', ' A waiting rollout gets no freed place'), 'trickle', 'no fair share named')
 })
 test('control: a restart held by the Trickle, or a Trickle-held revise that halts stuck, fails trickle', () => {
   only(sk(' A restart waits on the ceiling alone:', ' A restart waits on `slotLimit` too:'), 'trickle', 'a restart held by the Trickle')
@@ -1462,13 +1463,13 @@ test('control: a restart held by the Trickle, or a Trickle-held revise that halt
   only(sk('within the ceiling like any restart, never held by the Trickle', 'within `slotLimit`'), 'trickle', 'an automatic retry held by the Trickle')
   only(sk(' A revise held only by `slotLimit`, below `ceiling`, is a Trickle wait: the halt guard (step 1.5) never halts on it (while Away, an Away-cap wait, the same).', ''),
     'trickle', 'step 1.2 without the pointer to the guard')
-  only(sk(', never § 7: the revise launches once the Mac has room', ', then § 7: the revise launches once the Mac has room'), 'trickle', 'the guard halts')
+  only(sk(', never § 7: `next` counts the revise in this rollout', ', then § 7: `next` counts the revise in this rollout'), 'trickle', 'the guard halts')
   const guard = real.skill.split('\n').find((l) => l.includes('**Halt guard (last).**'))
   const clause = guard.slice(guard.indexOf(' A `stuck` while step 1.2 held an `autoRevise: true`'))
   only(sk(clause, ''), 'trickle', 'no Trickle clause in the halt guard')
   only(sk("Like `next`'s own `trickle:` hold, it waits whatever else is set aside", 'It waits unless an UNVERIFIED task is set aside'),
     'trickle', 'an UNVERIFIED task halts the Trickle wait')
-  only(sk(', and never while step 1.2 holds a seeded revise on the Trickle, a Trickle wait (§4.5 step 1.5)', ''), 'trickle', "§ 7's stuck halts over a Trickle-held revise")
+  only(sk(', and no seeded revise held on the Trickle, a Trickle wait', ''), 'trickle', "§ 7's stuck halts over a Trickle-held revise")
 })
 test('control: § 4.5 without the Away cap at any one site fails trickle', () => {
   only(sk(', `min(ceiling, max(0, A − that count))` while Away', ''), 'trickle', 'no Away-cap slotLimit')
@@ -1579,7 +1580,7 @@ test('control: the Heat hold missing at any one site fails heat', () => {
   only(sk("and it comes before the Trickle's, since a hot Mac holds every row the Trickle would", "and it comes after the Trickle's"), 'heat', 'the Trickle reason first')
   only(sk('but a `heat` never counts toward the third-`noslot` halt, nor resets its count', 'and a `heat` counts toward the third-`noslot` halt'),
     'heat', 'step 3 counts heat toward the halt')
-  only(sk(' → re-run the re-verify the same way with the lane held, never counted toward that halt nor resetting it', ' → halt'), 'heat', 'the RACE halts on heat')
+  only(sk(' → re-run the re-verify the same way with the lane held, never counted toward those three nor resetting them', ' → halt'), 'heat', 'the RACE halts on heat')
   only(sk("; `heat`: the Mac was too hot to run the suite within the slot wait, a Heat hold) leaves", ') leaves'), 'heat', 'step 5 without heat')
   only(sk('a `stopped` or `heat` one never counts', 'a `stopped` one never counts'), 'heat', "step 5's halt counts heat")
   only(sk('every slot wait, heat hold and heat-stopped run counts against `<slot_wait>`', 'the slot wait alone counts against `<slot_wait>`'),
