@@ -48,6 +48,10 @@ Subcommands:
       TB..B: pushed without a PR, skipped from landed, which it never empties) and note ("" or why: when
       origin is not a github.com remote and the task's pr: is not a PR URL, landed is [] and that reason
       comes first, then `<n> commit(s) in <TB>..<B> name no PR …` naming each unlisted commit).
+      Exit 2 is usage, the Engine snapshot guard, or the environment (git, the repo, origin/<default>, the task note:
+      execute's Lane hold). A failure that threatens only this task (ADR 0048, p29-7: ANCHOR_RECIPE gave no anchor, a
+      merge in progress its tree cannot abort, tracked changes it cannot stash, a stale anchor ref it cannot delete or
+      that stays stale, no merge-base of the anchor) routes `set-aside` with its text as `reason`, exit 0.
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
          [--slots N --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]] [--diff-base REV [--named-rerun CMD]]
@@ -215,9 +219,9 @@ Subcommands:
       it (a call it launched would fail the engine's args check, which reads as a Lost call).
       Then the automatic retry's verdict (p16-4, ADR 0033; auto_retry_verdict, its rules in order), which every
       caller gets and `reconcile-rollout.py auto-retry` re-runs before it writes: autoRetry, autoRetryWhy (the
-      first rule that refused, "" on true), autoRetryError (an `auto_retries` or `max_review_rounds` stamp that is
-      not a valid integer: execute § 3's halt, kept under a `## Needs you` question or a recorded answer; else
-      null), autoRetryClass (agent | infra | quota, for a note set
+      first rule that refused, "" on true), autoRetryError (an `auto_retries`, `max_review_rounds`, `max_iterations`
+      or `max_plan_rounds` stamp that is not a valid integer: H12, a (c) item, never a halt (ADR 0048), kept under a
+      `## Needs you` question or a recorded answer; else null), autoRetryClass (agent | infra | quota, for a note set
       aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds}, each
       {value, source}, resolved task -> rollout -> rollouts.toml -> built-in by reconcile-rollout.py
       _retry_budget; null until it resolves), autoRetriesUsed and quotaRetriesUsed (the note's counters, 0 when
@@ -261,8 +265,9 @@ Subcommands:
       Now, in reconcile's `_stamp` form (the integrate call's startedAt, log-integration's --started).
 
 Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo, prepare without
-integrating:, revert's guard), 2 usage or environment, or the Engine snapshot guard (ADR 0043: prepare, set-aside and
-revert first ask
+integrating:, revert's guard), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
+execute § 4.5 *lead-integrate's exit 2* routes each exit 2 by verb and site), or the Engine snapshot guard (ADR 0043:
+prepare, set-aside and revert first ask
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
 call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
 unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, plan, verify,
@@ -465,6 +470,11 @@ class EnvError(Exception):
     """Exit 2: usage or environment."""
 
 
+class TaskScoped(Exception):
+    """A prepare failure that threatens only this task (ADR 0048, p29-7): its anchor, its worktree or its anchor ref.
+    cmd_prepare routes it `set-aside` with its text, exit 0, so the lead sets the task aside and the lane runs on."""
+
+
 class Retryable(Exception):
     """Exit 8: nothing decided; retry after a backoff."""
 
@@ -509,14 +519,20 @@ def emit(obj):
     print(json.dumps(obj, indent=2, ensure_ascii=False))
 
 
+# The fixed prefix of every note-read failure (p29-7): main() prints it as `lead-integrate <verb>: task note unreadable:
+# …`, the one marker execute § 4.5 *lead-integrate's exit 2* reads to keep a note race on a task that holds no lane to
+# that task alone.
+NOTE_UNREADABLE = "task note unreadable:"
+
+
 def _load_note(path):
     p = Path(os.path.expanduser(path))
     if not p.is_file():
-        raise EnvError(f"task note not found at {p}")
+        raise EnvError(f"{NOTE_UNREADABLE} not found at {p}")
     try:
         return p, rr.Note(p)
     except ValueError as e:
-        raise EnvError(str(e))
+        raise EnvError(f"{NOTE_UNREADABLE} {e}")
 
 
 def log_fields(line):
@@ -547,7 +563,7 @@ def _anchor(repo, br, default, head):
                        env={**ENV, "WT": str(repo), "BR": br, "D": f"origin/{default}", "H": head})
     m = re.fullmatch(r"(anchor|stale-ref) ([0-9a-f]{40})", p.stdout.strip())
     if p.returncode != 0 or not m:
-        raise EnvError(f"ANCHOR_RECIPE gave no anchor for {br} at {head}: {p.stdout.strip() or why(p)}")
+        raise TaskScoped(f"ANCHOR_RECIPE gave no anchor for {br} at {head}: {p.stdout.strip() or why(p)}")
     return m.group(1), m.group(2)
 
 
@@ -626,13 +642,13 @@ def _clean_tree(tree):
     if rev(tree, "MERGE_HEAD"):
         p = git(tree, "merge", "--abort")
         if p.returncode != 0:
-            raise EnvError(f"could not abort the merge left in progress in {tree}: {why(p)}")
+            raise TaskScoped(f"could not abort the merge left in progress in {tree}: {why(p)}")
         aborted = True
     if out_of(git(tree, "status", "--porcelain", "--untracked-files=no")):
         stashed = f"integration leftovers {rev(tree, 'HEAD')}"
         p = git(tree, "stash", "push", "--quiet", "-m", stashed)
         if p.returncode != 0 or out_of(git(tree, "status", "--porcelain", "--untracked-files=no")):
-            raise EnvError(f"tracked changes in {tree} could not be stashed: {why(p)}")
+            raise TaskScoped(f"tracked changes in {tree} could not be stashed: {why(p)}")
     return aborted, stashed
 
 
@@ -677,7 +693,17 @@ def cmd_prepare(args):
            "mergeCommit": "", "sharedFiles": [], "conflictFiles": [], "staleRefDeleted": None,
            "abortedMerge": False, "stashed": "", "record": None, "note": "",
            "inert": _inert_off("no verify route: no verifier would run, so nothing to skip")}
+    try:
+        return _prepare_route(args, repo, note, tasks_dir, br, tree, out)
+    except TaskScoped as e:
+        # A failure that threatens only this task (its anchor, its worktree, its anchor ref): set aside, exit 0, so
+        # the lane runs on (ADR 0048). The environment's own failures stay exit 2, the lead's Lane hold.
+        out.update(route="set-aside", reason=str(e))
+        return out
 
+
+def _prepare_route(args, repo, note, tasks_dir, br, tree, out):
+    """cmd_prepare's route, once the note is read and `out` is built; a TaskScoped it raises routes `set-aside`."""
     for attempt in (1, 2):
         p = git(repo, "fetch", "--prune", "--quiet", "origin")
         if p.returncode == 0:
@@ -697,14 +723,14 @@ def cmd_prepare(args):
     if kind == "stale-ref":
         p = git(repo, "update-ref", "-d", f"refs/integration-anchor/{br}", a)
         if p.returncode != 0:
-            raise EnvError(f"could not delete the stale anchor ref refs/integration-anchor/{br} {a}: {why(p)}")
+            raise TaskScoped(f"could not delete the stale anchor ref refs/integration-anchor/{br} {a}: {why(p)}")
         out["staleRefDeleted"] = a
         kind, a = _anchor(repo, br, args.default, h)
         if kind != "anchor":
-            raise EnvError(f"the anchor ref for {br} is still stale after its deletion ({a})")
+            raise TaskScoped(f"the anchor ref for {br} is still stale after its deletion ({a})")
     tb = out_of(git(repo, "merge-base", a, b))
     if not re.fullmatch(r"[0-9a-f]{40}", tb):
-        raise EnvError(f"no merge-base of the anchor {a} and origin/{args.default}")
+        raise TaskScoped(f"no merge-base of the anchor {a} and origin/{args.default}")
     out.update(anchor=a, taskBase=tb)
     landed, unlisted, note_why = _landed(repo, tb, b, _owner_repo(repo, note), tasks_dir)
     out.update(landed=landed, unlisted=unlisted, note=note_why)
@@ -2054,10 +2080,11 @@ HUMAN_FIX_ACTS = (
     "fix the round budget",                            # H12 an invalid budget stamp
 )
 # The fixed openings the engine, its prompts and the lead write for a code-writing task's own run. None of them spends a
-# budget (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks), so a run that
-# starts with one never raises max_iterations: only the implementer's or reviser's own paragraph does.
+# budget (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks, the lead's own
+# invalid round-budget row, execute § 3), so a run that starts with one never raises max_iterations: only the
+# implementer's or reviser's own paragraph does.
 NO_BUDGET_OPENINGS = ("workflow call failed:", "merge-task:", "transient infrastructure failure", "plan-divergence:",
-                      "agent returned neither verified nor blocked", "workflow stage threw")
+                      "agent returned neither verified nor blocked", "workflow stage threw", "invalid round budget:")
 PLAN_BUDGET_OPENINGS = ("plan not approved after", "plan round budget exhausted")
 
 
@@ -2150,7 +2177,7 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          `awaiting repair` answer is always H0; a `left` answer keeps its cause's fix, its detail prefixed `left on
          your answer of <stamp>` (H10 when the cause's fix is null). So an answered block is never retried. Both 6 and
          7 keep the cause's `autoRetryError` and `autoRetryClass` (_keep_cause_flags), so an invalid budget stamp is
-         still execute § 3's halt under a question or an answer;
+         still flagged under a question or an answer;
       8. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): H5 `decide scope or defer`;
       9. a refused descope recorded for this block (_descope_refusal, never while `descope_armed:` stands: the armed
          descope's hand-back is its way back): H5 with the record as its detail;
@@ -2162,7 +2189,9 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          Integration): H7 `fix the note's pr: or defer`, handBack false (the fix changes the note first);
      13. prepare's `the PR branch is gone`: H8 `restore, recut or defer`;
      14. a `--gated` decline; 15. a merge-task exit-1 text outside MERGE_TASK_FIXABLE: H9 or H10 (_raise_field gives none);
-     16. an invalid budget stamp: `autoRetryError` (execute § 3's halt), H12 `fix the round budget`;
+     16. an invalid budget stamp (any of the four keys, re-read live: _retry_budget's error, else
+         reconcile-rollout.py _round_budget_error): `autoRetryError`, H12 `fix the round budget`, handBack false; once
+         the stamp reads valid it falls through;
      17. an unresolvable budget: H9 or H10;
      18. `auto_retries: 0`; 19. no feedback fingerprint; 20. malformed counters; 21. a malformed `auto_retry_at`;
      22. a quota block past its 5 free retries; 23. an agent or infra block past its budget; 24. an agent block whose
@@ -2196,8 +2225,8 @@ def cause_fix(path, note, inp, rollout_note, now):
 
 def _keep_cause_flags(out, cause):
     """Carry the cause's `autoRetryError` and `autoRetryClass` into a verdict that refuses above it (a `## Needs you`
-    question, a recorded answer): an invalid budget stamp stays execute § 3's round-budget halt and status's "invalid
-    round budget" flag (execute § 6.5 (e)) whatever answers or asks the block."""
+    question, a recorded answer): an invalid budget stamp stays status's "invalid round budget" flag and H12's (c) item
+    (execute § 6.5 (c)) whatever answers or asks the block."""
     out.update(autoRetryError=cause["autoRetryError"], autoRetryClass=cause["autoRetryClass"])
 
 
@@ -2304,9 +2333,13 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
     if status == "blocked" and kind == "own" and first.lower().startswith("merge-task") and \
             not any(f in reason for f in rr.MERGE_TASK_FIXABLE):
         return spent(f"merge-task needs a human: {first}")
-    if budget["error"]:
-        out["autoRetryError"] = budget["error"]
-        return no(f"invalid round budget: {budget['error']}", fix("fix the round budget", budget["error"], False))
+    # Cause 16 (ADR 0048): an invalid round-budget stamp, re-read live on every call, so once Lachy fixes the stamp the
+    # verdict falls through to the lead's own retry or to H10. All four keys: the two _retry_budget resolves, then
+    # max_iterations and max_plan_rounds (_round_budget_error).
+    bad = budget["error"] or rr._round_budget_error(note, rollout_note)
+    if bad:
+        out["autoRetryError"] = bad
+        return no(f"invalid round budget: {bad}", fix("fix the round budget", bad, False))
     if budget["unresolved"]:
         return spent(f"auto_retries unresolved: {budget['unresolved']}")
     out["autoRetryBudget"] = {"autoRetries": budget["autoRetries"], "maxReviewRounds": budget["maxReviewRounds"]}

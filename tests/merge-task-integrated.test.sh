@@ -30,13 +30,17 @@ ok "$rc" 2 "1. five args exits 2"; ok "$(sent)" "failed:2" "1. five args after a
 mkdir -p "$tmp/plain/.claude"; printf 'ok\n' > "$tmp/plain/.claude/merge-task.status"
 out=$(PATH="$tmp/bin:$PATH" bash "$MT" "$tmp/plain" 6 "$I" "$B" 2>&1); rc=$?
 ok "$rc" 2 "1. not a repo exits 2"; has "$out" "is not a git repo" "1. says it is not a git repo"
+case "$out" in *"merge-task args:"*) ok y n "1. not a repo is the environment, never merge-task args: (p29-7)";; *) ok y y "1. not a repo is the environment, never merge-task args: (p29-7)";; esac
 ok "$(cat "$tmp/plain/.claude/merge-task.status")" "failed:2" "1. not a repo: an earlier ok there is replaced by failed:2"
 run 5 "zz${I#??}" "$B"; ok "$rc" 2 "1. a non-hex head exits 2"; ok "$(glog)" "" "1. non-hex head: zero gh calls"
+has "$out" "ERROR: merge-task args: integrated head" "1. a non-hex head is the task's own argument: merge-task args: (p29-7)"
 run 5 "$I" "${B:0:12}"; ok "$rc" 2 "1. a short base exits 2"; ok "$(glog)" "" "1. short base: zero gh calls"
+has "$out" "ERROR: merge-task args: integrated base" "1. a short base: merge-task args:"
 ok "$(sent)" "failed:2" "1. a SHA exit 2 writes failed:2"
 seed 5 "$B"
 run "https://github.com/x/y/pull/5" "$I" "$B"
 ok "$rc" 2 "1. a foreign-repo URL exits 2"; has "$out" "PR URL https://github.com/x/y/pull/5 is in x/y, but origin is o/r" "1. names both repos"
+has "$out" "ERROR: merge-task args: PR URL" "1. a foreign-repo URL: merge-task args:"
 ok "$(sent)" "failed:2" "1. foreign URL: failed:2"; ok "$(glog)" "" "1. foreign URL: zero gh calls"
 ok "$(ctr 5)" "$B" "1. foreign URL: the counter is byte-unchanged"
 for a in https://github.com/o/r/issues/5 05 0 5x https://www.github.com/o/r/pull/5; do
@@ -44,6 +48,7 @@ for a in https://github.com/o/r/issues/5 05 0 5x https://www.github.com/o/r/pull
   ok "$rc" 2 "1. '$a' exits 2"; ok "$(glog)" "" "1. '$a': zero gh calls"
 done
 has "$out" "cannot parse a PR number from" "1. says it cannot parse the PR"
+has "$out" "ERROR: merge-task args: cannot parse" "1. an unparseable PR: merge-task args:"
 ok "$(ctr 5)" "$B" "1. the counter is still byte-unchanged"
 
 # 2. a clean CLEAN merge, called with a case-different URL with a /files suffix
