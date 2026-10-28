@@ -183,7 +183,8 @@ last write and `lapsesAt` when it lapses (or lapsed), both UTC and null where th
 lease. `elsewhere` and `running` count notes only, never `next`'s Trickle claims (`skills/execute/away.md` § The
 Trickle, *Trickle claims*), so they can trail `next`'s count by up to 20 minutes of unstamped claims (a claim's
 life): while another lead's starts are claimed but not yet stamped, `status` shows room on the Mac that `next` still
-holds as `trickle: N/N`.
+holds as `trickle: N/N`. Nor do they read the fair share (`skills/execute/away.md` § The Trickle, *A fair
+share*): `status` counts notes only, so a place `next` keeps for a waiting rollout shows as room.
 
 **Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
 rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
