@@ -1475,8 +1475,11 @@ class Score:
 
     def fresh_review_rounds(self, since, until, base, repo):
         """reviews.jsonl's review-round lines (p15-7's /fresh-review rounds): read up to --until, deduped on (repo, doc),
-        else (repo, head, digest), the latest kept, windowed by the kept line's ts, and counted only when their repo
-        is this score's (an owner/name ignoring case, or a path whose GitHub origin is)."""
+        else (repo, head, digest), the latest kept, windowed by the round's time, and counted only when their repo
+        is this score's (an owner/name ignoring case, or a path whose GitHub origin is). The round's time is the kept
+        line's reviewedAt (ADR 0058 d5), else the key's earliest line's ts (its arrival emit), never the kept line's
+        own ts: a doc's consumed line, or land.sh's sweep at a landing's end, can fall in a later window than its round,
+        which then counted twice or in the wrong window."""
         out = {"rounds": 0, "findings": 0, "original": 0, "regression": 0, "unclassified": 0, "unattributed": 0}
         path = os.path.join(base, RR.REVIEWS + ".jsonl")
         if not os.path.exists(path):
@@ -1486,7 +1489,7 @@ class Score:
         except OSError as e:
             self.flag("review churn: reviews.jsonl cannot be read (%s): no /fresh-review rounds" % e)
             return out
-        latest = {}
+        latest, arrived = {}, {}
         for t, _n, d in lines:  # time order, then file order: the last one per key is the latest
             if d.get("kind") != "review-round" or t > until or not isinstance(d.get("repo"), str):
                 continue
@@ -1494,9 +1497,16 @@ class Score:
             key = ("doc", d["repo"], doc) if isinstance(doc, str) and doc else \
                 ("head", d["repo"], d.get("head"), d.get("digest"))
             latest[key] = (t, d)
+            arrived.setdefault(key, t)
         uncounted = 0
-        for t, d in latest.values():
-            if not since <= t <= until:
+        for key, (t, d) in latest.items():
+            at = arrived[key]
+            if isinstance(d.get("reviewedAt"), str):
+                try:
+                    at = to_ms(d["reviewedAt"])
+                except Exception:
+                    pass
+            if not since <= at <= until:
                 continue
             mine = self._review_repo(d["repo"], repo)
             if mine is None:

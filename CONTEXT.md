@@ -214,11 +214,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Stash** — dispose dormant, no date. "Not my focus, lock it in."
 - **Defer** — dispose onto a specific day (`scheduled:`). "Tomorrow's problem."
 - **Handoff** — fork the working context to a fresh agent *now*; work continues
-  immediately, this session ends. Always produces a **handoff doc** (below) and
-  a paste-ready prompt; in Codex Desktop or a Chorus Session also a visible native
-  task. Model-invocable on explicit fork intent (or router dispatch) only — never
-  self-initiated because the context feels long; that recommendation belongs to
-  `next`.
+  immediately there, and this session then runs `next` for its own move
+  (skipped when `next` or a Rollout launch dispatched the handoff). Always
+  produces a **handoff doc** (below) and a paste-ready prompt; in Codex Desktop
+  or a Chorus Session also a visible native task. Model-invocable on explicit
+  fork intent (or router dispatch) only — never self-initiated because the
+  context feels long; that recommendation belongs to `next`.
 - **Handoff doc** — the durable brief `thread:handoff`, its only writer, writes
   on explicit fork intent only (Lachy's ask, or a router's dispatch; never
   self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits
@@ -262,6 +263,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Own branch** — the feature branch whose work this session did. Close may
   push, review and merge it; a branch close can't prove is its own is only
   reported. _Avoid_: current branch (it may be another session's), my branch.
+- **Blocking finding** — a review finding whose failure scenario is a crash,
+  hang or wrong result on a path the branch ships for normal use, data loss or
+  a security hole on any path it ships, or the named test failing. Only a blocking finding
+  holds an own-branch landing; the rest are filed in its follow-up task, and
+  a clean round is one with none, unless it returned exactly its cap, which
+  earns one more code round first (ADR 0058). The session grades it, never
+  the reviewer. _Avoid_: accepted finding, must-fix, high (the reviewer
+  grades no severity).
 - **Close-out PR** — the pull request carrying close's own bookkeeping
   (THREAD.md, handoff-doc refreshes and deletions). Its merge is queued at
   close and happens on green, with no review. _Avoid_: docs PR, thread PR.
