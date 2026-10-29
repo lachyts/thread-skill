@@ -10,6 +10,8 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-10-29: [[thread-skill-rollout-2026-10-26]] is complete: 31 of 32 tasks merged, archived.** P27 and P32 are closed; P28–P31 stay open. [[thread-skill-p31-2-test-rules-and-test-delta]] was deferred to the backlog because it depends on [[agent-stable-p2-3-writing-lean-tests-skill]] (outside the rollout, still open). CI: the macOS `make test` job kept hitting its 25-minute limit with no test failing, so PR #247 raised `timeout-minutes` to 40 and kept `THREAD_TEST_JOBS` at 4 (8 made the 3-vCPU runner slower). Follow-ups filed: [[thread-skill-ubuntu-flaky-tests]], [[thread-skill-followup-p32-3-chorus-boundary-prompt]], [[thread-skill-followup-p31-4-chorus-adr-0104-amendment]], [[thread-skill-followup-reflect-rollout-2026-10-26]].
+
 **2026-10-29: a landing blocks only on serious findings (ADR 0058), and every review round is recorded and read weekly.** The review-convergence audit (`docs/audits/2026-10-27-review-convergence.md`) found that no Claude review round since 2026-09-15 had returned zero findings (0 of 452), so "no accepted finding" was never reachable; narcissus-avp PR #65 ran 16 rounds.
 - **Lachy's ruling:** land when no serious finding is open, and wait for his call only when one is.
 - **The rule:** a finding blocks only for a crash, hang or wrong result in normal use, data loss or a security hole on any path, or the named test failing; the rest are filed in one follow-up task per landing. The budget is four code rounds, and a full-cap round with no blocking finding earns one more. The ledger's STOP is the agent's to resolve.
@@ -803,6 +805,8 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **An integrate call's `headSha` is `prepare`'s `anchor`, never the PR head** (2026-10-29). When the PR head carries agent merge commits, `prepare` reports "neither clean case" with `anchor` ≠ `prHead`; passing `prHead` makes the merge step STOP ("anchor carries a merge") or the judge refuse ("anchor mismatch"), and burns an auto-retry. Build the args from `prepare`'s JSON by script, never by hand. The same goes for a fresh call after a signed gate: pass `task.approvedGates` from the note, or the plan re-asks the same gate.
+- **macOS CI runner speed varies about 2x** (2026-10-29): a passing `make test` took 14 min, slow runners over 25. `THREAD_TEST_JOBS` above 4 overloads the 3-vCPU runner and makes it slower; the job now has `timeout-minutes: 40` (PR #247).
 - **`Note._set_body_lines` raises outside a journaled edit (#213).** A body edit computed from the note itself goes through `@_journaled` (a module function taking the note first) or `Note.apply(fn, …)`, so `Note.save` can re-apply it over a concurrent writer. A direct `_fm`/`_body` assignment is caught at save, which refuses rather than drop it.
 - **Note save locks live in `~/.local/state/thread/note-locks`, one per note directory.** Every engine suite exports `THREAD_NOTE_LOCK_DIR` into its temp dir beside `THREAD_EVENTS_DIR`; a new suite that saves notes must too, or direct runs leak lock files into the real state dir (44 did on 2026-10-24).
 
@@ -1075,6 +1079,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-10-29 (rollout 2026-10-26 complete):** no rollout runs on this repo. Next candidates: the four follow-ups above, `/thread:reflect [[thread-skill-rollout-2026-10-26]]`, and a fresh schedule for P28–P31's open tasks (p31-2 once [[agent-stable-p2-3-writing-lean-tests-skill]] lands).
+
 **From 2026-10-29 (ADR 0058):** check PR #231 merged (`gh pr view 231`); if it is behind again, the daily lander retries it, or run `gh api -X PUT repos/lachyts/thread-skill/pulls/231/update-branch`. Then remove the worktree `~/repos/tools/thread-skill-wt-review-bar`. The live checkout runs the old close rules until the running rollout ends and it fast-forwards. Follow-ups: [[thread-skill-review-bar-follow-ups]], [[fresh-review-review-bar-follow-ups]], [[thread-skill-unwatched-readings-in-review]]; p30-2 keeps its second bullet.
 
 **From 2026-10-25 (verify-and-canary follow-ups merged, #213):** done. Items 5 and 3 of that task were not built: re-file them if wanted. p29-2 builds on #213's canary `check` and `Note.save`.
@@ -1093,6 +1099,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
+- 2026-10-29 (close, rollout lead from 2026-10-26): drove [[thread-skill-rollout-2026-10-26]] to completion (31/32 merged, p31-2 deferred); ran repair hand-backs on Lachy's answers, signed p27-5's gates (US$15 + US$3), fixed the macOS CI timeout (PR #247: timeout-minutes 40), ran the completion ceremony. My slips: twice passed the PR head instead of `prepare`'s anchor as an integrate `headSha`, and once restarted a signed-gate task without `approvedGates`; both now in Known quirks.
 - 2026-10-29 (close, from 2026-10-27): audited the non-converging review loop (PR #65 and 114 estate loops), researched practice, Lachy ruled serious-only; built ADR 0058 across close, land.sh, run_record, reflect and fresh-review; 5 review rounds per repo under the new rule; agents-config #5/#6 merged, thread-skill #231 queued. Found: forked review engines read `docs/reviews/` despite the prompt (filed).
 - 2026-10-26 (close, from 2026-10-24): grilled the verify-and-canary follow-ups (items 1, 2, 6, 4; ADR 0053), built them test-first, ran 4 fresh-review rounds (ledger STOP at 3, round 4 on Lachy's word), merged #213 with CI green; task done. My slip: direct test runs leaked 44 lock files into the real state dir, cleaned and fixed.
 - 2026-10-24 (close, from 2026-10-22): led `[[thread-skill-rollout-2026-10-21]]` as far as its gates and halted with nothing written, because #202 was still open (the note's own hold). #202 has since merged, but the note still holds the old six tasks, and this Stage session runs in a worktree that § 2.8 refuses, so the regenerate and execute go to a session in the clone. Filed [[chorus-rollout-lead-starts-in-project-root]].
