@@ -115,7 +115,8 @@ state is `running`; `integrate`, `verify` and `race-verify` while the note holds
 (reconcile-rollout.py `_holds_lane`: `review` with a `pr:` and `integrating:`, or a current `integrated`
 Integration-log line, the window an integrate call's reconciled row leaves before step 4's RACE re-verify);
 `completion-verify` (estate ADR 0009 d6: the ceremony's run of the rollout's `completion_verifier`, its slug the
-rollout's own stem) while the rollout note is not done, so its check comes before the ceremony's `status: done`. A note
+rollout's own stem; a parallel rollout's only: a serial chain's completion verify arms no window, ADR 0055) while the
+rollout note is not done, so its check comes before the ceremony's `status: done`. A note
 missing from an existing tasks dir counts as holding (fail-closed), with a stderr WARN. An orphan is compared once
 and closed. `arm` refuses a window whose owner does not hold.
 

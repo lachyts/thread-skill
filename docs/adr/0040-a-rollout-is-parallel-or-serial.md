@@ -18,6 +18,8 @@ Until now, the rollout lane ran only work that converges on one repo, lands as a
   3. runs the close ritual;
   4. hands the rest to a fresh successor through the Stage. Outside Chorus, it prints a paste-ready prompt instead.
 
+  Amended by ADR 0055: a Complete Leg's completion verify adds one detached verify tree outside the checkout, under `<state>/thread/completion-trees/`, removed when its run ends. It is not a task worktree, so the ruling above stands.
+
 **The execution-fit test becomes three-way.**
 - **Parallel-shaped:** the old "rollout-shaped" test. Runs as a parallel rollout.
 - **Serial-shaped:** unattended, but no PR per task, a shared surface, or an external tool or profile the lead lacks. Runs as a serial rollout. The P24 plan review settled how to read this (§ Build-grill rulings): a shared surface counts only alongside another failure, and an external publish is serial-shaped.
