@@ -19,9 +19,10 @@ and the guard exited 2.
 
 Whenever the command comes from a plugin file you read rather than the skill that was rendered for you:
 
-- a router or caller following a sibling's SKILL.md: `next` → stash, defer, handoff or close; `open save` →
-  close; close → open's Repo-thread lookup; orient → schedule, execute, handoff or open; repair → execute's
-  queue loop; orient-all → schedule (its forks), status, execute, repair or orient;
+- a router or caller following a sibling's SKILL.md: `next` → stash, defer, handoff or close; handoff → next,
+  from its last step; `open save` → close; close → open's Repo-thread lookup; orient → schedule, execute,
+  handoff or open; repair → execute's queue loop; orient-all → schedule (its forks), status, execute, repair or
+  orient;
 - a `_shared` spec or a skill's reference file: `task-writer.md` (stash, defer, handoff, close),
   `execution-fit.md` (schedule, execute, orient), `handoff-lifecycle.md`, `process-scan.md`,
   `readiness-grade.md` (orient-all), `orient/reshuffle.md`;
