@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """step-boundary.py — the lead's side of a Chorus room stop (execute § Room stop; Chorus ADR 0071).
 
-When the Chorus Stage says a Session's Login is at its week's or 5-hour line, the lead starts nothing, stops each
-Workflow call the moment its running agent's result is in the run's journal, reports that nothing is mid-step, and
-resumes every stopped call on the Stage's re-send. The engine (task.workflow.js) has no shell to read a flag, so
-the lead watches the journals with this script, and records the stop on the rollout note's `## Pause log`, where a
-compaction cannot lose it. A room stop is never a Pause: it writes no `paused:` stamp.
+When the Chorus Stage says a Session's Login is at its week's or 5-hour line, or would reach its 5-hour line (a
+spread, Chorus ADR 0109), the lead starts nothing, stops each Workflow call the moment its running agent's result
+is in the run's journal, reports that nothing is mid-step, and resumes every stopped call on the Stage's re-send.
+The engine (task.workflow.js) has no shell to read a flag, so the lead watches the journals with this script, and
+records the stop on the rollout note's `## Pause log`, where a compaction cannot lose it. A room stop is never a
+Pause: it writes no `paused:` stamp.
 
 Verbs:
 
@@ -33,12 +34,18 @@ Verbs:
           multi-line text exits 2 and writes nothing, and so does text holding `[[`: slugs go in bare, because
           reconcile-rollout.py's _schedule_positions ranks the first wikilink on ANY list line, so one on a
           `## Pause log` line above `## Queue` would reorder the queue. This verb is the room-stop line's only
-          writer, so the rule is enforced here, not only in execute's prose.
+          writer, so the rule is enforced here, not only in execute's prose. Once it wrote the line (never on "already
+          stands" or a refusal), it records the stop in the rollout's Run record (p29-10, ADR 0051): `stopped` {cause:
+          usage-limit, inferred: false, calls (reconcile-rollout.py inflight_calls: the Slots and lane the record shows
+          in flight), reason (the text, cut to 200 characters)}, best-effort: a record that cannot be read or written
+          changes no output and no exit. The entry after the Stage's re-send (reconcile-rollout.py record-entry) is the
+          resume's lead-entry.
 
   end     --rollout <note>
           When a room stop stands (the last room-stop line is a start line, lapsed or not), append
           `- <stamp> room stop ended` inside `## Pause log` and print `room stop ended (stood since <stamp>)`;
-          otherwise print `no room stop stands` and write nothing. Exit 0 either way.
+          otherwise print `no room stop stands` and write nothing. Exit 0 either way. It records no Run-record event:
+          the entry's record-entry is the resume.
 
   stands  --rollout <note> [--hours 6] [--now <ISO>]   (read-only)
           The last `## Pause log` line matching `^- (\\S+) room stop(: | ended\\b)` decides: a start line under
@@ -68,7 +75,9 @@ runId (BIND_RUN_ID_RE) with no `..`.
 
 Exit codes: 0 ok; 1 no journals root, an unreadable state file, or an unreadable or unwritable note; 2 usage (a
 bad runId, `mark` with no --run, a --hours or --interval that is not positive, empty or multi-line `begin` text,
-`begin` text holding `[[`);
+`begin` text holding `[[`; and the Engine snapshot guard, ADR 0043: `begin` and `end` on a rollout stamped with another
+snapshot than this plugin root, or a live one whose snapshot is unusable, print engine-snapshot.py's
+`engine-snapshot: ` line and write nothing, so re-run from the root it names; `stands` is a reader and exempt);
 3 `watch` timed out; 4 `stands` found a room stop at or past its bound, or one whose stamp does not parse;
 5 `stands` found no room stop standing.
 """
@@ -101,8 +110,13 @@ def _load_reconcile():
 RR = _load_reconcile()
 
 PAUSE_LOG = "## Pause log"
-ROOM_LINE = re.compile(r"^- (\S+) room stop(: | ended\b)")
-BOUND_HOURS = 6.0
+# The room-stop line's one source is reconcile-rollout.py's ROOM_STOP_LINE_RE (p30-4), which its _approved_marks reads
+# too (an approved queue's room stops are no run mark): this module loads that one, never a copy, and since p28-4 reads
+# the lines only through RR._last_room_stop (_last_room_line), the reader a lead's lease shares.
+ROOM_LINE = RR.ROOM_STOP_LINE_RE
+# The bound's one source is reconcile-rollout.py's ROOM_STOP_BOUND (p28-4), which a lead's lease reads too (a standing
+# room stop keeps a lapsed lease): `stands` defaults to it.
+BOUND_HOURS = RR.ROOM_STOP_BOUND.total_seconds() / 3600
 STEP_TYPES = ("started", "result", "failed")
 
 
@@ -319,23 +333,15 @@ def _save_note(note, verb):
 
 
 def _last_room_line(note):
-    """(stamp, 'start' | 'ended') for the last room-stop line of `## Pause log`, or None."""
-    last = None
-    for line in note.section_text(PAUSE_LOG).split("\n"):
-        m = ROOM_LINE.match(line.strip())
-        if m:
-            last = (m.group(1), "start" if m.group(2) == ": " else "ended")
-    return last
+    """(stamp, 'start' | 'ended') for the last room-stop line of `## Pause log`, or None: reconcile-rollout.py's
+    _last_room_stop, the one reader (a lead's lease reads it too, p28-4)."""
+    return RR._last_room_stop(note)
 
 
 def _standing(last, now, hours):
-    """0 under the bound, 4 at or past it (or an unparseable stamp), 5 with no start line last."""
-    if last is None or last[1] == "ended":
-        return 5
-    ts = RR._parse_ts(last[0])
-    if ts is None or now - ts >= timedelta(hours=hours):
-        return 4
-    return 0
+    """0 under the bound, 4 at or past it (or an unparseable stamp), 5 with no start line last: reconcile-rollout.py's
+    _room_standing, the rule's one copy (p29-7)."""
+    return RR._room_standing(last, now, timedelta(hours=hours))
 
 
 def cmd_begin(args):
@@ -357,8 +363,21 @@ def cmd_begin(args):
     line = f"- {RR._stamp(_now())} room stop: {text.strip()}"
     note.append_line(PAUSE_LOG, line)
     _save_note(note, "begin")
+    _record_room_stop(args.rollout, text.strip())
     print(line)
     return 0
+
+
+def _record_room_stop(rollout, text):
+    """The room stop's Run-record line (p29-10, ADR 0051; run_record.py's stop model): stopped {cause: usage-limit,
+    inferred: false, calls, reason}. Best-effort: it never raises and prints only run_record's own warning."""
+    try:
+        stem = Path(os.path.expanduser(rollout)).stem
+        lines = RR._record_read(stem) or []
+        RR._event(stem, "stopped", None, {"cause": "usage-limit", "inferred": False, "calls": RR.inflight_calls(lines),
+                                          "reason": text[:200]})
+    except Exception:  # noqa: BLE001 — recording never breaks the stop
+        pass
 
 
 def cmd_end(args):
@@ -396,6 +415,20 @@ def cmd_stands(args):
 VERBS = {"mark": cmd_mark, "watch": cmd_watch, "begin": cmd_begin, "end": cmd_end, "stands": cmd_stands}
 
 
+def _engine_guard(note):
+    """engine-snapshot.py's guard() for the note, loaded from this tree (ADR 0043): its refusal line, else None."""
+    try:
+        sys.dont_write_bytecode = True
+        src = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "_shared", "scripts",
+                           "engine-snapshot.py")
+        spec = importlib.util.spec_from_file_location("thread_engine_snapshot", src)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # only positive evidence refuses
+        return None
+    return mod.guard(note, mod.ROOT, "skills/execute/scripts/step-boundary.py")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="step-boundary.py", description="The lead's side of a Chorus room stop "
                                 "(execute § Room stop): stop each Workflow call at a step boundary, and record the "
@@ -418,6 +451,11 @@ def main(argv=None):
             s.add_argument("--hours", type=float, default=BOUND_HOURS)
             s.add_argument("--now")
     args = p.parse_args(argv)
+    if args.verb in ("begin", "end"):
+        refusal = _engine_guard(args.rollout)
+        if refusal:   # ADR 0043: the room-stop line is written from the rollout's own Engine snapshot
+            print(refusal, file=sys.stderr)
+            return 2
     try:
         return VERBS[args.verb](args)
     except Fail as e:

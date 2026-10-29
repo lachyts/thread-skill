@@ -308,6 +308,29 @@ I=$(inp "$A" --repo "$D/root" --max-review-rounds 4)
 ok "$(j "$I" 'd["autoRetryWhy"]')|$(hf "$I")" "autoRevise: step 1.2's seeded revise owns it|[\"fix the note's pr: or defer\",false,null]" "H7: the autoRevise form, handBack false"
 setfm "$A" pr "$PR"
 ok "$(hf "$(inp "$A" --repo "$D/root" --max-review-rounds 4)")" null "H7 control: without prUrlError the autoRevise form is null"
+# H7r (ADR 0046): a decided RACE whose merge the RACE revert reverted on main never re-enters: H7, a re-land needs a
+# new pr:. Undecided, the RACE decision (H3) comes first.
+scen h7-reverted
+mkro; mkt "$B" open
+mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"
+lead "$A" integration "RACE: the re-verify was red after the Flake check; its merge ffffffffffff is reverted on main by eeeeeeeeeeee"
+F40=$(printf 'f%.0s' {1..40}); E40=$(printf 'e%.0s' {1..40})
+{ printf '\n## Race log\n\n'
+  printf -- "- 2026-10-03T07:10+00:00 [[%s]] RACE: PR #5 merged as %s on parent %s at head %s, not the integrated pair\n" "$A" "$F40" "$C40" "$B40"
+  printf -- "- 2026-10-03T07:20+00:00 [[%s]] revert started: %s (re-verify rc 1, red after the Flake check)\n" "$A" "$F40"
+  printf -- "- 2026-10-03T07:40+00:00 [[%s]] reverted on main: %s (revert PR #6 of PR #5's merge ffffffffffff; main back at cccccccccccc's tree); set aside for Lachy\n" "$A" "$E40"
+} >> "$D/$RO.md"
+I=$(inp "$A")
+ok "$(hf "$I")" '["decide RACE",false,null]' "H7r: undecided, the RACE decision comes first (H3)"
+python3 -c 'import sys
+p, a = sys.argv[1:]
+t = open(p).read()
+open(p, "w").write(t.replace("## Notes\n\n", "## Notes\n\n- 2026-10-03 repair: [[%s]] RACE decided: re-land it\n" % a, 1))' "$D/$RO.md" "$A"
+I=$(inp "$A")
+ok "$(j "$I" 'd["autoRetryWhy"]')|$(hf "$I")" "its merge was reverted on main: re-land it through a new pr: or defer|[\"fix the note's pr: or defer\",false,null]" "H7r: decided and reverted → H7, handBack false"
+has "$(fix "$I" detail)" "reverted on main: " "H7r: … its detail the reverted line"
+setfm "$A" pr https://github.com/o/r/pull/7
+hasnt "$(j "$(inp "$A")" 'd["autoRetryWhy"]')" "reverted on main" "H7r: a new pr: (a re-land) is no longer refused for the revert"
 
 scen h8
 mkro; mkt "$B" open
@@ -390,7 +413,7 @@ ra "$A" --kind decision --ask "fix the budget?" --answer "leave it" --fingerprin
 ok "$rc" 0 "H12 answered: (a left answer)"
 I=$(inp "$A")
 ok "$(j "$I" 'd["autoRetryError"]')|$(j "$I" 'd["autoRetryClass"]')|$(j "$I" 'd["answerRecorded"]["form"]')" "$ERR|$CLS|left" \
-  "H12 answered: the answer keeps the cause's autoRetryError and autoRetryClass (execute § 3's halt, status's flag)"
+  "H12 answered: the answer keeps the cause's autoRetryError and autoRetryClass (H12, status's flag)"
 ok "$(fix "$I" act)" "fix the round budget" "H12 answered: the left answer keeps H12's act"
 before=$(snap); ar "$A"
 ok "$rc|$(snap)" "1|$before" "H12 answered: auto-retry exits 1, nothing written"
@@ -401,6 +424,27 @@ mkt "$A" open "auto_retries: -1"; planblock "$A" "$FA" 2026-10-03T08:00:00Z "{\"
 I=$(inp "$A")
 ok "$(hf "$I")" '["answer the question",false,null]' "H12 under a question: H4, its handBack H12's (false)"
 has "$(j "$I" 'd["autoRetryError"]')" "auto_retries on [[$A]] must be an integer >= 0" "H12 under a question: autoRetryError kept"
+
+# H12b (p29-7, ADR 0048): max_iterations and max_plan_rounds are read live too, so a fixed stamp clears H12
+scen h12b
+mkro; mkt "$B" open
+mkt "$A" open "max_iterations: 0"; planblock "$A" "$FA"
+I=$(inp "$A")
+ok "$(hf "$I")" '["fix the round budget",false,null]' "H12b: an invalid max_iterations stamp → H12"
+has "$(j "$I" 'd["autoRetryError"]')" "max_iterations on [[$A]] must be an integer >= 1, got '0'" "H12b: … naming it"
+setfm "$A" max_iterations 3
+ok "$(j "$(inp "$A")" '[d["autoRetryError"], d["humanFix"]]')" '[null,null]' "H12b: once fixed, not H12 (the lead's own retry)"
+setfm "$A" max_plan_rounds '"3"'
+ok "$(hf "$(inp "$A")")" '["fix the round budget",false,null]' "H12b: a quoted max_plan_rounds → H12"
+# H12c: the lead's own `invalid round budget:` row (execute § 3's task-level budget), fixed, with auto_retries 0 → H10.
+# Driven from a queued (`open`) note, as § 3 runs it: no `status: in_progress` stamp and no mark-started precede the row.
+scen h12c
+mkro; mkt "$B" open
+mkt "$A" open "max_plan_rounds: 0" "auto_retries: 0"
+lead "$A" own "invalid round budget: max_plan_rounds on [[$A]] must be an integer >= 1, got '0'"
+ok "$(hf "$(inp "$A")")" '["fix the round budget",false,null]' "H12c: the own-run row reads H12 while the stamp is invalid"
+setfm "$A" max_plan_rounds 3
+ok "$(hf "$(inp "$A")")" '["hand back or defer",true,null]' "H12c: fixed with auto_retries 0 → H10, no raise (NO_BUDGET_OPENINGS)"
 
 # the null cases: the way back is the lead's own
 scen null

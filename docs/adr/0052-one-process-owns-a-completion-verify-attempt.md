@@ -1,7 +1,7 @@
 # 0052 — One process owns a completion verify attempt
 
 Date: 2026-10-24
-Status: accepted. Ruled with Lachy in the completion verifier grill, after the build on `chorus/build-thread-skill-s-completion-verifier-tonight` hit the fresh-review STOP rule twice (rounds 3 and 6).
+Status: accepted. Ruled with Lachy in the completion verifier grill, after the build on `chorus/build-thread-skill-s-completion-verifier-tonight` hit the fresh-review STOP rule twice (rounds 3 and 6). Extended to serial chains by ADR 0055.
 
 ## Context
 

@@ -3,7 +3,8 @@
 // Ten rules, one pure function, check(files), over { relPath: text }:
 //   t1  the templates: the parallel template says `shape: parallel`; the serial one says `shape: serial`,
 //       `protocol_version: 5`, `incomplete: true` and `surfaces:` + `{{SURFACES}}`, holds none of the parallel
-//       engine's keys, and its `## Queue` holds `{{CHAIN_TABLE}}`, whose SKILL bullet names the four-column header,
+//       engine's keys (the completion verifier's three commented lines aside, ADR 0055, which it must hold), and its
+//       `## Queue` holds `{{CHAIN_TABLE}}`, whose SKILL bullet names the four-column header,
 //       a Task cell with step 6's `<short-alias>` (never the launch alias) and the Leg boundary
 //       (schedule-queue.test.mjs and execution-fit-shapes.test.mjs keep the retired words out of it, as of every
 //       schedule file);
@@ -11,13 +12,16 @@
 //       contract helpers' section() read as before), and no product file still holds p24-1's interim stop;
 //   t3  the Serial path's steps name serial-chains.py, the serial check with `--surface`, ruling (c)'s session lane,
 //       one note per chain from serial-rollout-template.md, rollout-settings.py with its single-repo `--repo` rule,
-//       the stamps S6 never writes, the stamp it removes last, no execute offer and no `start: unattended`, and
-//       body-read surfaces only for members that declare none; and the Don'ts let S6's last write remove
+//       the stamps S6 never writes, the stamp it removes last, no execute handoff and no `start: unattended`, and
+//       body-read surfaces only for members that declare none; the completion verifier (ADR 0055): S4 stores it only
+//       for exactly one `repo:` token that is a git toplevel, by its `git -C <token> rev-parse --show-toplevel`, S5
+//       stamps it and checks the note with `verify-timeout`, and Scope and the Don'ts' no-git line name S4's probe
+//       (Scope S5's check too); and the Don'ts let S6's last write remove
 //       `incomplete: true` beside step 7's, a stamp left on a serial note ending only by `status: dropped`;
 //   t4  § 0's first check span is the parallel one, with `--shape parallel` and `--regenerate`, and a supersede
 //       never crosses shapes; § 0, S3 and ADR 0040 say a clone root never overlaps an in-place chain (ADR 0042);
 //   t5  execute § 2's shape line, orient § 6's § 0 stop naming a live serial chain on the repo and its
-//       `status: dropped` remedy, orient § 7's one note per chain, orient § 9's no-offer sentence for a serial
+//       `status: dropped` remedy, orient § 7's one note per chain, orient § 9's no-handoff sentence for a serial
 //       note, and the vault grammar's parallel-only Writers clause;
 //   t6  CONTEXT.md's **Rollout**, **Shape**, **Serial rollout**, **Unfinished rollout**, **Surface** (a `## Launch`
 //       path at `/` or the home directory never claimed) and **Incomplete rollout** entries (a serial note's stamp
@@ -101,8 +105,13 @@ function check(files) {
   for (const re of [/^shape: serial$/m, /^protocol_version: 5$/m, /^incomplete: true\b/m, /^surfaces:\n\{\{SURFACES\}\}$/m]) {
     if (!re.test(sfm)) flag('t1', `${SERIAL} frontmatter does not match ${re}`)
   }
+  // The completion verifier's own lines (ADR 0055) are a serial chain's too: stripped first, then every parallel key banned.
+  const serialKeys = (files[SERIAL] ?? '').replace(/completion[_ ]verifier/gi, '')
   for (const k of ['Project root:', 'verifier', 'parallel_ceiling', 'max_', 'plan_approval', 'start:']) {
-    if ((files[SERIAL] ?? '').includes(k)) flag('t1', `${SERIAL} holds ${k}`)
+    if (serialKeys.includes(k)) flag('t1', `${SERIAL} holds ${k}`)
+  }
+  for (const re of [/^# completion_verifier: .*ADR 0055/m, /^# env_bootstrap: /m, /^# completion_timeout: .*ADR 0052/m]) {
+    if (!re.test(sfm)) flag('t1', `${SERIAL} frontmatter does not match ${re}`)
   }
   if (!(section(files[SERIAL], /^## Queue$/) ?? '').includes('{{CHAIN_TABLE}}')) flag('t1', `${SERIAL} ## Queue has no {{CHAIN_TABLE}}`)
   const chainBullet = schedule.split('\n').find((l) => l.startsWith('- `{{CHAIN_TABLE}}` — ')) ?? ''
@@ -136,7 +145,20 @@ function check(files) {
   if (!sentences(s6).some((x) => /\bremove\b/i.test(x) && x.includes('`incomplete: true`') && x.includes('last write'))) {
     flag('t3', 'S6 does not remove incomplete: true as its last write')
   }
-  need('t3', 'S7', para(serialPath, '**S7. Summary.**'), ['no execute offer, no `start: unattended`'])
+  need('t3', 'S7', para(serialPath, '**S7. Summary.**'), ['no execute handoff, no `start: unattended`'])
+  // The completion verifier (ADR 0055): S4's stamping rule and probe, S5's stamp and check, Scope and the no-git line.
+  need('t3', 'S4', para(serialPath, '**S4. '), ['when the chain holds exactly one `repo:` token and that token is a git toplevel',
+    '`git -C <token> rev-parse --show-toplevel` prints the token itself',
+    'or one that is not a git toplevel stores nothing'])
+  const s5 = C(slice(serialPath, /^\*\*S5\. /, /^\*\*S6\. /))
+  need('t3', 'S5', s5, ['- The `# completion_verifier:` line — when S4 stored', '- The `# env_bootstrap:` line',
+    '`python3 <snapshot>/skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout <the note>`',
+    'Any non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`'])
+  const scope = C(section(schedule, /^## Scope$/) ?? '')
+  need('t3', `${SCHEDULE} § Scope`, scope, ["a read-only `git -C <token> rev-parse --show-toplevel` and a read of that checkout's `CLAUDE.md`",
+    'its S5 runs `reconcile-rollout.py verify-timeout` on a note it stamped `completion_verifier:`'])
+  const noGit = schedule.split('\n').find((l) => l.startsWith("- Don't run `git` operations")) ?? ''
+  need('t3', `${SCHEDULE} Don't on git`, C(noGit), ["§ Serial path S4's `git -C <token> rev-parse --show-toplevel`, read-only (listed under Scope)"])
   const dont = schedule.split('\n').find((l) => l.startsWith('- Never remove `incomplete: true`')) ?? ''
   need('t3', `${SCHEDULE} Don't on incomplete: true`, C(dont), ["except as step 7's (or § Serial path S6's) last write",
     'and one on a serial note, which a supersede never takes, ends only by `status: dropped`'])
@@ -164,7 +186,7 @@ function check(files) {
     '`status: dropped` on a never-started serial chain\'s note', 'or run that chain'])
   need('t5', `${ORIENT} § 7`, C(section(files[ORIENT], /^### 7\./)), ['one serial rollout note per chain'])
   need('t5', `${ORIENT} § 9`, C(section(files[ORIENT], /^### 9\./)), [
-    'one offer per parallel note written; a serial note (`shape: serial`) gets no offer: name it, its chain, each row\'s launch and Leg 1\'s start line, and never stamp `start: unattended` on it',
+    'One handoff per parallel note written; a serial note (`shape: serial`) gets no handoff: name it, its chain, each row\'s launch and Leg 1\'s start line, and never stamp `start: unattended` on it',
   ])
   const writers = C(slice(files[GRAMMAR], /^- \*\*Writers\*\*/, /^- \*\*Readers\*\*/))
   need('t5', `${GRAMMAR} Writers`, writers, ['on a parallel note only (the Stage starts a lead in a note\'s Project root; a serial note has none)'])
@@ -272,8 +294,8 @@ test('control: an S4 that always passes --repo fails t3', () => {
     ['t3'], 'S4 repo')
 })
 
-test('control: an S7 that makes an execute offer fails t3', () => {
-  only(swap(SCHEDULE, 'no execute offer, no `start: unattended`', 'then the execute offer'), ['t3'], 'S7 offer')
+test('control: an S7 that makes an execute handoff fails t3', () => {
+  only(swap(SCHEDULE, 'no execute handoff, no `start: unattended`', 'then the execute handoff'), ['t3'], 'S7 handoff')
 })
 
 test('control: a Don\'t that lets only step 7 remove incomplete: true fails t3', () => {
@@ -365,4 +387,28 @@ test('control: a repair incomplete stop without the serial remedy fails t10', ()
 
 test('control: a description back on "a second unfinished rollout" fails t9', () => {
   only(swap(SCHEDULE, 'refuses a second unfinished parallel rollout', 'refuses a second unfinished rollout'), ['t9'], 'description')
+})
+
+test('control: a serial template carrying a bare verifier: fails t1', () => {
+  only(swap(SERIAL, '\nshape: serial\n', '\nverifier: make test\nshape: serial\n'), ['t1'], 'verifier')
+})
+
+test('control: a serial template without its # completion_verifier: line fails t1', () => {
+  const line = real[SERIAL].split('\n').find((l) => l.startsWith('# completion_verifier:'))
+  assert.ok(line, 'control setup: the # completion_verifier: line')
+  only(swap(SERIAL, `${line}\n`, ''), ['t1'], 'no completion_verifier line')
+})
+
+test('control: an S4 that stamps any directory, not a git toplevel, fails t3', () => {
+  only(swap(SCHEDULE, 'when the chain holds exactly one `repo:` token and that token is a\ngit toplevel', 'when the chain holds exactly one `repo:` token and that token is a\ndirectory'),
+    ['t3'], 'S4 toplevel')
+})
+
+test('control: a Don\'ts no-git line without S4\'s probe fails t3', () => {
+  only(swap(SCHEDULE, " § Serial path S4's `git -C <token> rev-parse --show-toplevel`, read-only (listed under Scope),", ''), ['t3'], 'no-git S4')
+})
+
+test('control: an S5 that never checks the stamped note fails t3', () => {
+  only(swap(SCHEDULE, '`python3 <snapshot>/skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout <the note>`', 'nothing'),
+    ['t3'], 'S5 check')
 })

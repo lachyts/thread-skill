@@ -2,6 +2,7 @@
 
 Date: 2026-10-21
 Status: accepted. Ruled with Lachy in the re-grill of PR #202 (ADR 0048's audit). Overturns Chorus ADR 0104 decision 3 ("Away, every Rollout to its own ceiling"); the Trickle by day (its decision 2) stands.
+*(Amended 2026-10-28 by thread-skill-p28-4: a rollout whose lead's lease has lapsed (it lapses 45 minutes after its last write, or after the Mac's latest boot or wake if later, unless a room stop stands) leaves the count; a rollout with no lease, an older snapshot, still holds its room until the Watchdog recovers it or Lachy pauses it.)*
 
 ## Context
 

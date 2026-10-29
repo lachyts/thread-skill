@@ -5,6 +5,8 @@ tier's quota is gone; a capped tier is terminal and runs the full Ralph loop.)*
 *(Amended by ADR 0029, 2026-09-30: escalation climbs one rung of the operator's ladder, once per
 stage, in place of one opus→fable flip per task; the built-in ladder is two Opus rungs and names no
 Fable, and a task's `rung:` replaces the `model: fable` stamp and step-up.)*
+*(Amended by estate ADR 0009 d1, p31-1: the single run is the touched tests once, then the verifier once
+when they are green.)*
 
 An `opus` task gets exactly one un-iterated pass at each convergence layer — one plan, one
 implementation with a single verifier run, one judged PR round. The first evidence of hardness

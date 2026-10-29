@@ -425,7 +425,7 @@ test('L9 the engine\'s LADDER_EFFORTS and BUILT_IN_LADDER equal ladder.py\'s, an
 // The rung-name rule is written three times: ladder.py's NAME_RE and YAML_WORDS (the loader), the engine's
 // LADDER_NAME and LADDER_YAML_WORDS (args.ladder's check, before any dispatch) and reconcile-rollout.py's
 // is_rung_name (the `rung:` stamp, and lead-integrate.py inputs' rung record). If the loader ever accepted a
-// name the engine refuses, every Workflow call would throw before dispatch and read as a Lost call; if
+// name the engine refuses, every Workflow call would throw before dispatch, an *Args refusal* that halts the entry; if
 // reconcile refused one, a climb would never be stamped. So the same names go to all three, through their
 // real entry points: ladder.py's load() on a one-rung file, the engine's ladderArgsError() on a one-rung
 // args.ladder, and reconcile's is_rung_name().
