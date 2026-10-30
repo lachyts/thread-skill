@@ -2,6 +2,9 @@
 
 Date: 2026-10-19
 Status: proposed. Grilled with Lachy on 2026-10-19, after a hand-run audit on 2026-10-18 started eight new rollouts in about an hour. To be built as P25, after P24.
+*(Amended by ADR 0054, 2026-10-27: the decision round asks only his own decisions (owner `yours`), in the Framing of
+`skills/_shared/asking.md`, and only those count toward the grade, the raise, the decision minutes and the Grade log;
+the calls the grade rules for him go to the task note's `## Decided for you (<date>)`, never asked.)*
 
 ## Context
 

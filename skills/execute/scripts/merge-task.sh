@@ -30,12 +30,24 @@
 #   2  Usage or environment: bad arg count; a SHA not 40-hex; <pr> neither a positive number nor a
 #      github.com/<o>/<r>/pull/<N> URL; a URL whose <o>/<r> is not origin's; gh, git or python3 missing;
 #      not a repo; no origin; a MERGE_TASK_* override that is not a non-negative integer (at most 9
-#      digits); the counter cannot be persisted. Every one is before any GitHub call.
-#                                                                        counter UNTOUCHED  lead: halt the
-#                                                                                          rollout for a human
-#   3  BASE MOVED: origin/<default> ≠ the integrated base. Nothing merged.
+#      digits); the counter cannot be persisted; the Engine snapshot guard (ADR 0043: a live task note
+#      names the PR and its rollout runs on another Engine snapshot than this script's root, or a live
+#      one whose snapshot is unusable: engine-snapshot.py guard-pr's `engine-snapshot: ` line, so the lead
+#      re-runs this same call from the root that line names, never a halt). Every one is before any
+#      GitHub call.
+#                                                                        counter UNTOUCHED  lead, by its stderr
+#      line (ADR 0048, p29-7): `engine-snapshot:` → re-run from the root it names; `ERROR: merge-task args:` (a
+#      SHA not 40-hex, a <pr> it cannot parse, a URL in another repo: this task's own arguments) → set this task
+#      aside at its own run; anything else (the environment) → hold the Integration lane for a human (execute
+#      § 4.5 *Lane hold*). A revert PR's 2 still halts the rollout (it protects main).
+#   3  BASE MOVED: origin/<default> ≠ the integrated base. Nothing merged. Each newly counted refusal (the cap's
+#      4th included, never "this base was already counted") records why main moved in the task's Run record
+#      (lead-integrate.py base-moved, p29-10: the movers base..main and whether only Inert paths moved).
 #                                                                        counter appended   lead: re-integrate
 #                                                                                          on the same anchor
+#      (the lead's `lead-integrate.py prepare` may then route `skip`: when main moved only in the repo's Inert
+#      paths and the Inert proof holds on the new merge, the green run stands and no verifier re-runs, ADR 0045;
+#      the cap below still counts each base move)
 #   4  Set aside AT Integration. Prints `set-aside reason: integration: <why>` on stdout and stderr:
 #      (a) the cap: `integration: base moved before the merge 4 times in a row after 3 re-integrations
 #      (bases …)`; (b) `integration: head moved after Integration (PR head <h>, origin <b> at <r>, integrated
@@ -70,10 +82,12 @@
 #   70  Abort: the run ended outside `finish` and the signal traps, i.e. a defect such as a `set -u` abort.
 #      bash 3.2 exits those with 1, or (an unset name inside `$((…))`) with the last command's status, often
 #      0, which would read as "merged"; the EXIT trap turns every such exit into 70. Sentinel `failed:abort`.
-#                                                                        counter UNTOUCHED  lead: halt the
-#                                                                                          rollout for a human
-#                                                                                          (a re-run aborts
-#                                                                                          again)
+#                                                                        counter UNTOUCHED  lead: hold the
+#                                                                                          Integration lane
+#                                                                                          for a human (a
+#                                                                                          re-run aborts
+#                                                                                          again; ADR 0048)
+#      A revert PR's 70 still halts the rollout (it protects main).
 #   143 130 129  A signal: TERM, INT, HUP (their traps). Sentinel `failed:<rc>`.
 #                                                                        counter UNTOUCHED  lead: re-run
 #                                                                                          (idempotent)
@@ -632,8 +646,10 @@ if [ "$IS_REPO" != 1 ]; then
 fi
 
 sha_re='^[0-9a-f]{40}$'
-[[ $IHEAD =~ $sha_re ]] || finish 2 "ERROR: integrated head '$IHEAD' is not a 40-hex SHA"
-[[ $IBASE =~ $sha_re ]] || finish 2 "ERROR: integrated base '$IBASE' is not a 40-hex SHA"
+# The four task-argument exits print `merge-task args:` (p29-7): execute sets that one task aside at its own run,
+# while every other exit 2 (the environment) holds the Integration lane.
+[[ $IHEAD =~ $sha_re ]] || finish 2 "ERROR: merge-task args: integrated head '$IHEAD' is not a 40-hex SHA"
+[[ $IBASE =~ $sha_re ]] || finish 2 "ERROR: merge-task args: integrated base '$IBASE' is not a 40-hex SHA"
 for t in gh git python3; do
   command -v "$t" >/dev/null 2>&1 || finish 2 "ERROR: $t not found on PATH"
 done
@@ -663,12 +679,29 @@ if [[ $PR_ARG =~ $num_re ]]; then
 elif [[ $PR_ARG =~ $url_re ]]; then
   u_slug="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"; PR_NUM=${BASH_REMATCH[3]}
   if [ "$(printf '%s' "$u_slug" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$OWNER/$REPO" | tr '[:upper:]' '[:lower:]')" ]; then
-    finish 2 "ERROR: PR URL $PR_ARG is in $u_slug, but origin is $OWNER/$REPO"
+    finish 2 "ERROR: merge-task args: PR URL $PR_ARG is in $u_slug, but origin is $OWNER/$REPO"
   fi
 else
-  finish 2 "ERROR: cannot parse a PR number from '$PR_ARG' (a positive number or a https://github.com/<o>/<r>/pull/<N> URL)"
+  finish 2 "ERROR: merge-task args: cannot parse a PR number from '$PR_ARG' (a positive number or a https://github.com/<o>/<r>/pull/<N> URL)"
 fi
 PR=$PR_NUM
+
+# The Engine snapshot guard (ADR 0043; skills/_shared/engine-snapshot.md): a PR that a live task note names, whose
+# rollout runs on an Engine snapshot, merges only from that snapshot's copy of this script. engine-snapshot.py
+# guard-pr (this tree's) exits 2 with its `engine-snapshot: ` line for a wrong root: that is this script's exit 2,
+# before any GitHub call or counter. Any other failure of the guard is a WARN, and the merge goes on.
+ES_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../_shared/scripts/engine-snapshot.py"
+# Why main moved (p29-10, ADR 0051): record_base_moved's Run-record line, through lead-integrate.py base-moved.
+LI_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lead-integrate.py"
+ES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
+gp_err=$(python3 "$ES_PY" guard-pr --pr-url "https://github.com/$OWNER/$REPO/pull/$PR" --root "$ES_ROOT" \
+  --script skills/execute/scripts/merge-task.sh 2>&1 >/dev/null); gp_rc=$?
+if [ "$gp_rc" != 0 ]; then
+  case "$gp_err" in
+    engine-snapshot:*) [ "$gp_rc" = 2 ] && finish 2 "$gp_err" ;;
+  esac
+  echo "WARN: engine-snapshot.py guard-pr exited $gp_rc (${gp_err%%$'\n'*}): merging without the Engine snapshot guard" >&2
+fi
 
 # Cap pre-flight: an unpersistable counter fails closed (2) before any GitHub call.
 CDIR="$REPO_PATH/.claude/merge-task"
@@ -854,6 +887,10 @@ record_base_moved() {  # record_base_moved <live> — the cap, inline before exi
     finish 2 "ERROR: cannot persist the base-moved counter $COUNTER — nothing merged (the re-integration cap fails closed)."
   fi
   n=$(sort -u "$COUNTER" | grep -c .)
+  # The Run record's base-moved line (p29-10): what moved main and whether only Inert paths, once per newly counted
+  # refusal (the cap's included), best-effort: its output is dropped and it never changes this exit.
+  python3 "$LI_PY" base-moved --repo "$REPO_PATH" --pr "$PR" --base "$IBASE" --main "$live" --default "$BASE" \
+    --refusal "$n" >/dev/null 2>&1 || true
   if [ "$n" -gt "$REINTEGRATE_MAX" ]; then
     bases=$(sort -u "$COUNTER" | tr '\n' ' ' | sed 's/ $//')
     set_aside "base moved before the merge $n times in a row after $REINTEGRATE_MAX re-integrations (bases $bases)"

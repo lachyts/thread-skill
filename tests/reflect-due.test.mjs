@@ -1,7 +1,8 @@
-// skills/reflect/scripts/reflect-due.py — is the weekly Reflection due (p21-8, ADR 0037 d4 and d6)? Due once the
-// cadence's days (7, or 14 on the relaxed cadence) have passed, in Melbourne dates, since the last `reflection`
-// line's until; the cadence is run_record's cadence rule over the `reflection` lines' quiet flags (three quiet in a
-// row: 14; any that is not quiet: back to 7). reflect.py's close writes the cadence it moved to on its own line.
+// skills/reflect/scripts/reflect-due.py — is the weekly Reflection due (p21-8, ADR 0037 d4 and d6)? Due on the Thursday
+// Reflection Routine's morning (p29-11, ADR 0051): the first Thursday after the Melbourne date of the last `reflection`
+// line's until, plus 7 days on the relaxed cadence; the cadence is run_record's cadence rule over the `reflection`
+// lines' quiet flags (three quiet in a row: 14; any that is not quiet: back to 7). reflect.py's close writes the cadence
+// it moved to on its own line.
 //
 // Hermetic: each case gets its own mkdtemp HOME and THREAD_EVENTS_DIR, TZ pinned to Melbourne, and an env built
 // from scratch. The fixture record's lines go through run_record.emit, so they are lines run_record accepts.
@@ -60,7 +61,7 @@ test('no Reflection yet: due at once, cadence 7', (t) => {
   assert.deepEqual(r.out, { due: true, cadence: 7, quietStreak: 0, last: null, lastUntil: null, today: '2026-09-10', dueOn: null, days: null })
 })
 
-test('weekly: due at day 7, not at day 6, by Melbourne dates whatever the hour', (t) => {
+test('weekly: a Thursday close is due the next Thursday (day 7), not at day 6, by Melbourne dates whatever the hour', (t) => {
   const h = setup(t)
   reflections(h, [{ n: 1, until: UNTIL, quiet: false }])
   const six = due(h, '2026-09-16T23:59+10:00')
@@ -77,9 +78,9 @@ test('the quiet streak: three quiet Reflections in a row move the cadence to 14;
   const h = setup(t)
   const at = (d) => `2026-09-${String(d).padStart(2, '0')}T22:00:00.000Z`
   reflections(h, [{ n: 1, until: at(1), quiet: false }, { n: 2, until: at(2), quiet: true }, { n: 3, until: at(3), quiet: true }])
-  // two quiet in a row: still weekly (until 2026-09-04 Melbourne -> due 2026-09-11)
+  // two quiet in a row: still weekly (until 2026-09-04 Melbourne, a Friday -> due Thursday 2026-09-10)
   let r = due(h, '2026-09-11T06:00+10:00')
-  assert.deepEqual([r.status, r.out.cadence, r.out.quietStreak, r.out.dueOn], [0, 7, 2, '2026-09-11'])
+  assert.deepEqual([r.status, r.out.cadence, r.out.quietStreak, r.out.dueOn], [0, 7, 2, '2026-09-10'])
   reflections(h, [{ n: 4, until: UNTIL, quiet: true }])
   r = due(h, '2026-09-17T06:00+10:00')
   assert.deepEqual([r.status, r.out.cadence, r.out.quietStreak, r.out.days, r.out.dueOn], [4, 14, 3, 7, '2026-09-24'])
@@ -95,6 +96,47 @@ test('the quiet streak: three quiet Reflections in a row move the cadence to 14;
   reflections(h, [{ n: 6, until: '2026-10-07T22:00:00.000Z', quiet: false }])
   r = due(h, '2026-10-15T06:00+10:00')
   assert.deepEqual([r.status, r.out.cadence, r.out.quietStreak, r.out.dueOn], [0, 7, 0, '2026-10-15'])
+})
+
+// p29-11 (ADR 0051): due on the Thursday Routine's morning, not seven days after the last. 2026-10-22 and 2026-10-29
+// are Thursdays (AEDT, +11:00, from 4 October).
+test('Thursday: not due on Wednesday 23:59, due from Thursday 00:00; Friday, Thursday and Wednesday closes', (t) => {
+  const cases = [
+    // [the last until, its Melbourne weekday, dueOn, days from L to dueOn]
+    ['2026-10-16T02:00:00.000Z', 'Friday', '2026-10-22', 6],
+    ['2026-10-15T02:00:00.000Z', 'Thursday', '2026-10-22', 7],
+    ['2026-10-21T02:00:00.000Z', 'Wednesday', '2026-10-22', 1],
+  ]
+  for (const [until, day, dueOn, days] of cases) {
+    const h = setup(t)
+    reflections(h, [{ n: 1, until, quiet: false }])
+    const wed = due(h, '2026-10-21T23:59+11:00')
+    assert.equal(wed.out.dueOn, dueOn, day)
+    if (day !== 'Wednesday') {
+      assert.deepEqual([wed.status, wed.out.due], [4, false], `${day}: not due on Wednesday 23:59`)
+    }
+    for (const now of ['2026-10-22T00:00+11:00', '2026-10-22T06:00+11:00']) {
+      const r = due(h, now)
+      assert.deepEqual([r.status, r.out.due, r.out.dueOn], [0, true, dueOn], `${day}: due at ${now}`)
+    }
+    const at = due(h, `${dueOn}T06:00+11:00`)
+    assert.equal(at.out.days, days, `${day}: ${days} day(s) after the close`)
+  }
+  // a Wednesday close is due the next day, so even at 23:59 that Wednesday it is not yet
+  const h = setup(t)
+  reflections(h, [{ n: 1, until: '2026-10-21T02:00:00.000Z', quiet: false }])
+  assert.equal(due(h, '2026-10-21T23:59+11:00').status, 4)
+  assert.equal(due(h, '2026-11-05T06:00+11:00').status, 0, 'overdue stays due')
+})
+
+test('Thursday, fortnightly: three quiet closes, the last on a Friday, fall due 13 days later', (t) => {
+  const h = setup(t)
+  reflections(h, [{ n: 1, until: '2026-10-01T02:00:00.000Z', quiet: true }, { n: 2, until: '2026-10-08T02:00:00.000Z', quiet: true },
+    { n: 3, until: '2026-10-16T02:00:00.000Z', quiet: true }])
+  const r = due(h, '2026-10-28T06:00+11:00')
+  assert.deepEqual([r.status, r.out.cadence, r.out.dueOn], [4, 14, '2026-10-29'])
+  const s = due(h, '2026-10-29T00:00+11:00')
+  assert.deepEqual([s.status, s.out.days], [0, 13])
 })
 
 test('the rule, not a written cadence, decides: a line written with cadence 14 after one quiet Reflection reads 7', (t) => {

@@ -17,7 +17,8 @@ Reads. The chain through `leg.py status` (skills/execute/scripts/leg.py, the Leg
 the chain's definitions), run as `sys.executable leg.py status --rollout <note> --tasks-dir <dir>` with stdin closed,
 git's repo-local variables (`git rev-parse --local-env-vars`) dropped from the env and a LEG_CAP s timeout. The Run
 record `<events dir>/<slug>.jsonl` (run_record.py's directory chain) through score.py's read_lines: a serial chain
-records only the acts Lachy's verbs write there (approve-gates, record-answer, hand-back, defer). The task notes under
+records only the acts Lachy's verbs write there (approve-gates, record-answer, hand-back, defer), plus its completion
+verify's completion-verify and suite lines (ADR 0055), which are no act (ACT_KINDS passes them by). The task notes under
 --tasks-dir, Archive included, for `fixes:` (escapes.py).
 
 Times. Every Leg-log stamp (minute precision, with the offset it was written in) goes through score.py's to_ms and

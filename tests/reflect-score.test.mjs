@@ -205,6 +205,165 @@ test('slot-bound: running time leaves out the pause and the hold, and the ceilin
   signsHold(out)
 })
 
+// ---- 1b. a run the Trickle held (p28-6) ----------------------------------------------------------------------
+
+// Ceiling 4. a runs 00:00-02:00 with a hold-trickle marker (free 3) at 00:00; no Slot is open 02:00-03:00, the lead
+// re-checking at each tick (markers at 02:00, 02:20, 02:40, free 4); b runs 03:00-05:00 with a marker at 03:00.
+// `reason` swaps every marker's reason; `drop` leaves out the 02:20 and 02:40 ticks.
+function trickleHeld({ reason = 'hold-trickle', drop = false } = {}) {
+  const mark = (hm, free) => [at(hm), 'idle-slots', null, { reason, free, settings: S(4) }]
+  return byTs([
+    ...life('a', { from: at('00:00'), to: at('02:00'), c: 4 }),
+    ...life('b', { from: at('03:00'), to: at('05:00'), c: 4 }),
+    mark('00:00', 3), mark('02:00', 4), ...(drop ? [] : [mark('02:20', 4), mark('02:40', 4)]), mark('03:00', 3),
+  ])
+}
+
+// `next`'s idle-slots marker at every 20-min tick in [from, to), minutes after 00:00, while a Slot is free.
+const hmOf = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+function ticks(from, to, reason, free, c) {
+  const out = []
+  for (let m = from; m < to; m += 20) out.push([at(hmOf(m)), 'idle-slots', null, { reason, free, settings: S(c) }])
+  return out
+}
+
+test('trickle-bound: no-Slot-open time held by the Trickle scores as hold-trickle and binds', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', trickleHeld())
+  const out = scored(home, ['--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
+  assert.deepEqual(out.runningTime.excludedHours, { 'hold-trickle': 1 })
+  assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [['hold-trickle', Z(at('02:00')), Z(at('03:00'))]])
+  assert.match(out.runningTime.excluded[0].why, /Trickle.*not Lachy's/)
+  assert.equal(out.runningTime.hours, 4)
+  assert.equal(out.slots.idleHours['hold-trickle'], 12, '3 free Slots x 4 running h')
+  assert.equal(out.binding.constraint, 'trickle-bound')
+  assert.equal(out.binding.why, 'the Mac-wide cap kept Slots free 100% of the time (running time plus 1 h with no Slot open; Slot time it held: the Trickle 16 h, the Away cap 0 h)')
+  assert.ok(has(out.flags, /^trickle-bound: no rollout key moves this \(the Trickle is the Mac-wide cap in ~\/\.config\/thread\/away\.json\)$/))
+  assert.ok(has(out.flags, /^throughput: read under the Mac-wide cap \(trickle-bound\): .* not at the ceiling 4$/))
+  assert.deepEqual(out.proposals, [], 'no slot-bound raise')
+  assert.deepEqual(out.withheld, [])
+  assert.equal(out.thresholds.trickleBound, 0.5)
+  assert.equal(out.thresholds.holdMarkerSpanMinutes, 40)
+})
+
+// A day run the Trickle held with its Slots open at the Trickle's room, every tick marking hold-trickle: the cap left
+// (ceiling - Trickle) of the ceiling free, so against Slot capacity it held only 33%, 40% (with a queue tail) and 25%.
+// Read by time, as slot-bound's full share, it kept a Slot free 100%, 80% and 100% of the run.
+test('trickle-bound: a day run the Trickle held with Slots open binds, read by time and not by Slot capacity', (t) => {
+  const two = (to, c) => [...life('a', { from: at('00:00'), to: at('04:00'), c }), ...life('b', { from: at('00:00'), to: at(to), c })]
+  const cases = [
+    { name: 'ceiling 3 at Trickle 2', c: 3, until: '04:00', ev: [...two('04:00', 3), ...ticks(0, 240, 'hold-trickle', 1, 3)],
+      idle: { 'hold-trickle': 4 }, capacity: 12, share: 100, trickle: 4 },
+    { name: 'ceiling 4 at Trickle 2, then a one-hour queue tail', c: 4, until: '05:00',
+      ev: [...two('05:00', 4), ...ticks(0, 240, 'hold-trickle', 2, 4), ...ticks(240, 300, 'queue-tail', 3, 4)],
+      idle: { 'hold-trickle': 8, 'queue-tail': 3 }, capacity: 20, share: 80, trickle: 8 },
+    { name: 'ceiling 4 at a Trickle of 3', c: 4, until: '04:00',
+      ev: [...two('04:00', 4), ...life('c', { from: at('00:00'), to: at('04:00'), c: 4 }), ...ticks(0, 240, 'hold-trickle', 1, 4)],
+      idle: { 'hold-trickle': 4 }, capacity: 16, share: 100, trickle: 4 },
+  ]
+  for (const k of cases) {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs(k.ev))
+    const out = scored(home, ['--until', at(k.until), '--settings', writeSettings(home, { parallel_ceiling: k.c })])
+    assert.deepEqual(out.runningTime.excluded, [], `${k.name}: a Slot open throughout`)
+    assert.deepEqual(out.slots.idleHours, k.idle, k.name)
+    assert.equal(out.slots.capacityHours, k.capacity, k.name)
+    assert.equal(out.binding.constraint, 'trickle-bound', k.name)
+    assert.equal(out.binding.why, `the Mac-wide cap kept Slots free ${k.share}% of the time (running time plus 0 h with no Slot open; Slot time it held: the Trickle ${k.trickle} h, the Away cap 0 h)`, k.name)
+    assert.deepEqual(out.proposals, [], `${k.name}: no rollout key moves it`)
+  }
+})
+
+test('trickle-bound controls: a marker labels 40 min at most; dependency markers are no Trickle; the Away cap binds, Heat does not', (t) => {
+  const settings = (home) => ['--until', at('05:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })]
+  {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', trickleHeld({ drop: true }))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [
+      ['hold-trickle', Z(at('02:00')), Z(at('02:40'))], ['idle', Z(at('02:40')), Z(at('03:00'))]], 'a silent lead past the span reads idle')
+  }
+  {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', trickleHeld({ reason: 'dependency' }))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excludedHours, { idle: 1 })
+    assert.equal(out.binding.constraint, 'dependency-bound')
+  }
+  {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', trickleHeld({ reason: 'hold-away-cap' }))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excludedHours, { 'hold-away-cap': 1 })
+    assert.equal(out.binding.constraint, 'trickle-bound')
+    assert.match(out.binding.why, /^the Mac-wide cap kept Slots free 100% of the time \(running time plus 1 h with no Slot open; Slot time it held: the Trickle 0 h, the Away cap 16 h\)$/)
+  }
+  {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', trickleHeld({ reason: 'hold-heat' }))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excludedHours, { 'hold-heat': 1 })
+    assert.match(out.runningTime.excluded[0].why, /Heat hold/)
+    assert.notEqual(out.binding.constraint, 'trickle-bound')
+    assert.ok(!has(out.flags, /^trickle-bound/))
+  }
+  {
+    // the head of a no-Slot stretch before its first Mac-wide marker (within the span) takes that marker's label
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs([
+      ...life('a', { from: at('00:00'), to: at('02:00'), c: 4 }),
+      ...life('b', { from: at('03:00'), to: at('05:00'), c: 4 }),
+      [at('02:10'), 'idle-slots', null, { reason: 'hold-trickle', free: 4, settings: S(4) }],
+      [at('02:30'), 'idle-slots', null, { reason: 'hold-trickle', free: 4, settings: S(4) }],
+    ]))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [
+      ['hold-trickle', Z(at('02:00')), Z(at('03:00'))]], 'back-filled from the stretch start, the last marker spanning to b')
+  }
+  for (const [before, want] of [
+    // ... unless another reason is in force there: the queue-tail marked at 01:00 still holds when a stops at 02:00,
+    // so only the hold-trickle marker's own span reads as the Trickle (and adds nothing to its held time)
+    ['queue-tail', [['idle', Z(at('02:00')), Z(at('02:30'))], ['hold-trickle', Z(at('02:30')), Z(at('03:00'))]]],
+    // ... while the same Mac-wide reason in force there back-fills
+    ['hold-trickle', [['hold-trickle', Z(at('02:00')), Z(at('03:00'))]]],
+  ]) {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs([
+      ...life('a', { from: at('00:00'), to: at('02:00'), c: 4 }),
+      ...life('b', { from: at('03:00'), to: at('05:00'), c: 4 }),
+      [at('01:00'), 'idle-slots', null, { reason: before, free: 3, settings: S(4) }],
+      [at('02:30'), 'idle-slots', null, { reason: 'hold-trickle', free: 4, settings: S(4) }],
+    ]))
+    const out = scored(home, settings(home))
+    assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), want, `${before} in force at the stop`)
+  }
+  {
+    // the cap kept a Slot free half the time (three Slots at a Trickle of 3, 00:00-03:00, of 6 h), but the dependency
+    // waits after it left 9 Slot-hours idle to the cap's 3: the larger reason binds, never the Trickle
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs([
+      ...['a', 'b', 'c'].flatMap((s) => life(s, { from: at('00:00'), to: at('03:00'), c: 4 })),
+      ...life('d', { from: at('03:00'), to: at('06:00'), c: 4 }),
+      ...ticks(0, 180, 'hold-trickle', 1, 4), ...ticks(180, 360, 'dependency', 3, 4),
+    ]))
+    const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
+    assert.deepEqual(out.slots.idleHours, { dependency: 9, 'hold-trickle': 3 })
+    assert.equal(out.binding.constraint, 'dependency-bound')
+    assert.ok(!has(out.flags, /^trickle-bound/))
+  }
+  {
+    // a run the Trickle held with no Slot ever open: the window starts at its first line, nothing runs, and the cap
+    // held all of its time
+    const home = tmpHome(t)
+    emitAll(home, 'demo', ticks(0, 60, 'hold-trickle', 4, 4))
+    const out = scored(home, ['--until', at('01:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
+    assert.equal(out.runningTime.hours, 0)
+    assert.deepEqual(out.runningTime.excludedHours, { 'hold-trickle': 1 })
+    assert.equal(out.throughput, null)
+    assert.equal(out.binding.constraint, 'trickle-bound')
+  }
+})
+
 // ---- 2. a lane-bound run ------------------------------------------------------------------------------------
 
 // Ceiling 4. Six tasks, each holding the lane 1.5 h back to back from 01:00 to 10:00; the ready -> lane waits climb
@@ -710,6 +869,90 @@ test('an act stamped while an untimed call is open never extends its Slot', (t) 
   assert.equal(out.window.activeEnd, Z(at('00:30')))
 })
 
+// p28-2: the night record is `next`'s reading of a Morning after the fact. A dead lead's Slot (s1, taken at 07:30, its
+// call wf_1 with no journal) still open at the 09:00 Morning gets a ran-past-morning line at the next lead's 12:00
+// call (execute away.md § The night record): that line, the night's marker and a held line are no activity of the
+// call, so its never-finished cap, the running time and Throughput read as they do with no night line at all.
+test('a night-record line never extends an untimed call\'s Slot (p28-2)', (t) => {
+  const slot = [
+    [at('07:30'), 'slot-taken', 's1', { settings: S(2) }],
+    [at('07:30'), 'run-bound', 's1', { runId: 'wf_1', journalDir: '/nonexistent' }],
+  ]
+  const night = [
+    [at('07:00'), 'away-night', null, { morning: at('09:00') }],
+    [at('07:30'), 'last-start-held', 'c1', { morning: at('09:00'), scope: 'cross-cutting', history: 3, usualMinutes: 110 }],
+    [at('12:00'), 'ran-past-morning', 's1', { morning: at('09:00'), slotTakenAt: '2026-10-05T07:30:00.000Z', scope: 'single-file', history: 3, usualMinutes: 25 }],
+  ]
+  const run = (events) => {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs(events))
+    return scored(home, ['--since', at('07:30'), '--until', at('14:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })])
+  }
+  const bare = run(slot)
+  const out = run([...slot, ...night])
+  for (const o of [bare, out]) {
+    assert.equal(o.runningTime.hours, 0.5, 'the Slot ends at its last activity (07:30) + 30 min, not at 12:30')
+    assert.equal(o.window.activeEnd, Z(at('08:00')))
+    assert.ok(has(o.flags, new RegExp(`^call wf_1 never finished: capped at last activity \\+ 30 min \\(${Z(at('08:00')).replace(/\./g, '\\.')}\\)$`)))
+    assert.equal(o.guardrails.throughput.breached, false, '0.5 running h against one task\'s 1.5 h allowance')
+  }
+  assert.deepEqual(out.guardrails.throughput, bare.guardrails.throughput, 'Throughput reads as with no night line')
+  const flags = (o) => o.flags.map((f) => f.replace(/reflect-score-[^/]+/g, 'HOME')) // each run its own temp HOME
+  assert.deepEqual(flags(out), flags(bare), 'and so does every flag')
+})
+
+// p29-10 (ADR 0051): the time-lost ledger's kinds (stopped, lead-entry, suite-started, suite-ended, base-moved) are not
+// scored yet (p29-11 scores them). Interleaved anywhere, a task's suites inside an untimed call's Slot and a halt after
+// the record's last line included, they leave every score, flag and window byte-equal; and a concurrent record whose
+// only late lines are ledger lines (a heartbeat's entries, a halt) never reads as live past its last real line.
+const ledgerScore = (t, events, others = []) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs(events))
+  for (const [slug, evs] of others) emitAll(home, slug, byTs(evs))
+  const out = scored(home, ['--until', D(5, '14:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
+  return JSON.parse(JSON.stringify(out).replace(/reflect-score-[^/"]+/g, 'HOME'))
+}
+const SUITE_ID = (n) => `s-${String(n).padStart(16, '0')}`
+test('the ledger kinds (p29-10) are skipped: a record scores byte-equal with or without them', (t) => {
+  const untimed = [
+    [at('07:00'), 'slot-taken', 'g', { settings: S(3) }],
+    [at('07:00'), 'run-bound', 'g', { runId: 'wf_g', journalDir: '/nonexistent' }],
+  ]
+  const ledger = [
+    [at('00:00'), 'lead-entry', null, { by: 'stage', session: 'A' }],
+    [at('00:20'), 'lead-entry', null, { by: 'heartbeat', session: 'A' }],
+    [at('01:00'), 'suite-started', 'a', { suite: SUITE_ID(1), by: 'task', runner: 'agent', sha: 'a'.repeat(40), dirty: false, load: [1, 2, 3], running: 3 }],
+    [at('01:30'), 'suite-ended', 'a', { suite: SUITE_ID(1), by: 'task', runner: 'agent', outcome: 'red', seconds: 1800, rc: 1, failing: ['t::x'] }],
+    [at('05:10'), 'base-moved', 'f', { repo: 'o/r', pr: 7, base: 'b'.repeat(40), main: 'c'.repeat(40), inertOnly: false, moversTotal: 0, movers: [] }],
+    [at('06:10'), 'stopped', null, { cause: 'mac-sleep', inferred: true, at: at('06:05'), wake: at('06:08'), calls: [] }],
+    [at('07:40'), 'suite-started', 'g', { suite: SUITE_ID(2), by: 'task', runner: 'agent', sha: 'd'.repeat(40), dirty: true, diff: 'abcdef012345' }],
+    [at('08:10'), 'suite-ended', 'g', { suite: SUITE_ID(2), by: 'task', runner: 'agent', outcome: 'green', seconds: 1800, rc: 0 }],
+    [at('09:30'), 'stopped', null, { cause: 'dead-lead', inferred: true, at: at('09:00'), calls: [{ task: 'g', runId: 'wf_g', call: 'task' }] }],
+    [at('09:30'), 'lead-entry', null, { by: 'stage', session: 'B', stop: 'dead-lead' }],
+    [at('13:00'), 'stopped', null, { cause: 'halt', inferred: false, calls: [], reason: 'stuck' }],
+  ]
+  const bare = ledgerScore(t, [...slotBound(), ...untimed])
+  const out = ledgerScore(t, [...slotBound(), ...untimed, ...ledger])
+  assert.deepEqual(out, bare)
+  assert.ok(has(out.flags, /^call wf_g never finished: capped at last activity \+ 30 min/), 'g\'s suites never extend its untimed call')
+})
+
+test('ledger-only late lines (p29-10) never extend a concurrent record\'s live span', (t) => {
+  const other = [
+    [at('00:00'), 'slot-taken', 'o1', { settings: S(2) }],
+    [at('00:00'), 'run-bound', 'o1', { runId: 'wf_o1', journalDir: '/nonexistent' }],
+    [at('01:00'), 'slot-freed', 'o1', { outcome: 'set-aside' }],
+  ]
+  const late = [
+    [at('03:00'), 'lead-entry', null, { by: 'heartbeat' }],
+    [at('05:00'), 'lead-entry', null, { by: 'heartbeat' }],
+    [at('06:00'), 'stopped', null, { cause: 'halt', inferred: false, calls: [] }],
+  ]
+  const bare = ledgerScore(t, slotBound(), [['other', other]])
+  const out = ledgerScore(t, slotBound(), [['other', [...other, ...late]]])
+  assert.deepEqual(out, bare)
+})
+
 test('Throughput counts the tasks whose Slot or lane holding overlaps a mid-run window (a --since split)', (t) => {
   const home = tmpHome(t)
   emitAll(home, 'demo', slotBound())
@@ -894,6 +1137,40 @@ test('a dead lead: a terminal call with its Slot left open is excluded past the 
   const gap = out.runningTime.excluded.find((e) => e.kind === 'lead-absent')
   assert.deepEqual([gap.start, gap.end], [Z(at('02:30')), Z(at('09:00'))])
   assert.ok(has(out.flags, /^lead absent: \[\[a\]\]'s call wf_a ended at/))
+})
+
+// p29-12: reconcile stamps a Slot-ending row's events at its call's own end (here 02:00) and carries the moment the
+// lead turned to it as reconciledAt (09:00). The Slot reads to that release, so the dead-lead reading above holds
+// unchanged; the ready line at the call's end makes the lane wait the true one.
+test('a slot-freed stamped at its call\'s end reads to its reconciledAt: lead absent as before, the true lane wait', (t) => {
+  const home = tmpHome(t)
+  const late = { stamp: 'call-end', reconciledAt: Z(at('09:00')) }
+  emitAll(home, 'demo', byTs([
+    [at('00:00'), 'slot-taken', 'a', { settings: S(2), start: 'start' }],
+    [at('00:00'), 'run-bound', 'a', { runId: 'wf_a', journalDir: '/nonexistent/workflows', call: 'task' }],
+    [at('02:00'), 'slot-freed', 'a', { outcome: 'ready', ...late }],
+    [at('02:00'), 'ready', 'a', { pr: 7, ...late }],
+    [at('09:00'), 'call-journal', null, { runId: 'wf_a', status: 'completed', mode: 'task', startTime: ms(at('00:00')), durationMs: 2 * 3600e3, tokens: 100000 }],
+    [at('09:00'), 'lane-taken', 'a', {}],
+    [at('09:10'), 'lane-freed', 'a', { release: 'merge', path: 'lead', triggers: [], conflict: false }],
+    [at('09:10'), 'merged', 'a', { pr: 7 }],
+  ]))
+  const out = scored(home, ['--until', at('09:10')])
+  assert.equal(out.runningTime.hours, 2.667, 'as the dead-lead case: 00:00-02:30 and the 10-min Integration')
+  const gap = out.runningTime.excluded.find((e) => e.kind === 'lead-absent')
+  assert.deepEqual([gap.start, gap.end], [Z(at('02:30')), Z(at('09:00'))])
+  assert.ok(has(out.flags, /^lead absent: \[\[a\]\]'s call wf_a ended at/))
+  assert.deepEqual(out.lane.waitsMinutes, [420], 'the wait for the lane runs from the call\'s end, not the lead\'s turn')
+  // Control: the same record with no reconciledAt reads the Slot as freed at the call's end, with no lead absence.
+  const home2 = tmpHome(t)
+  emitAll(home2, 'demo', byTs([
+    [at('00:00'), 'slot-taken', 'a', { settings: S(2), start: 'start' }],
+    [at('00:00'), 'run-bound', 'a', { runId: 'wf_a', journalDir: '/nonexistent/workflows', call: 'task' }],
+    [at('02:00'), 'slot-freed', 'a', { outcome: 'ready' }],
+    [at('09:00'), 'call-journal', null, { runId: 'wf_a', status: 'completed', mode: 'task', startTime: ms(at('00:00')), durationMs: 2 * 3600e3, tokens: 100000 }],
+  ]))
+  const out2 = scored(home2, ['--until', at('09:10')])
+  assert.ok(!out2.runningTime.excluded.some((e) => e.kind === 'lead-absent'), 'no reconciledAt: no lead-absent gap')
 })
 
 // fold-journals stamps a call-journal line with the fold time (here 12:00), so a split at 06:00 must still read it.
@@ -1156,6 +1433,8 @@ test('(d) review churn: /fresh-review rounds are attributed by repo (owner/name 
     rr(at('00:50'), { repo: path.join(clone, '.claude', 'worktrees', 'gone'), head: 'h4', digest: 'g4', ...c(2, 1, 0) }), // a deleted worktree
     rr(at('01:00'), { repo: 'o/other', head: 'h5', digest: 'g5', ...c(9, 0, 9) }), // another repo
     rr(at('01:01'), { repo: other, head: 'h6', digest: 'g6', ...c(9, 0, 9) }), // another repo by path
+    // swept into the window at a landing's end, but reviewed long before it: its round is not this window's
+    rr(at('01:10'), { repo: 'O/R', head: 'h7', digest: 'g7', doc: 'docs/reviews/old.md', reviewedAt: '2026-01-01T00:00:00.000Z', ...c(8, 0, 8) }),
   ])
   // a.md's latest (4: 3 original, 1 regression), b.md and c.md (2 regression each), the clone (1 original) and the
   // deleted worktree (2: 1 original, 1 unclassified); o/other and the other clone are another repo's

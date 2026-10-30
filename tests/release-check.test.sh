@@ -81,12 +81,16 @@ has "$out" "manifest contract (same version) failed" "(f) names the manifest con
 git -C "$tree" checkout -- .claude-plugin/marketplace.json; rm -f "$tree/.claude-plugin/marketplace.json.bak"
 
 # (g) malformed skill front matter: node's real assertion, never a false version-mismatch claim
+# Restored from a saved copy, never `git checkout --`: skills/status/SKILL.md carries git's `ident` attribute (ADR 0043,
+# .gitattributes), so a checkout rewrites its `$Id$` marker to `$Id: <blob> $` whenever the working copy held another
+# form (a bare marker, or a stale id after an edit), and the tree would then differ from the cache built from it.
+cp -p "$tree/skills/status/SKILL.md" "$tmp/status-SKILL.md"
 printf -- '---\nname status\n---\n' > "$tree/skills/status/SKILL.md"
 run_rc; ok "$(nz "$rc")" nonzero "(g) malformed front matter exits non-zero"
 has "$out" "unparseable frontmatter" "(g) shows the contract's own assertion"
 ok "$(printf %s "$out" | grep -c 'versions disagree')" 0 "(g) makes no version-mismatch claim"
 ok "$(printf %s "$out" | grep -c 'FAIL - plugin.json')" 0 "(g) no plugin.json != marketplace.json line"
-git -C "$tree" checkout -- skills/status/SKILL.md
+cp -p "$tmp/status-SKILL.md" "$tree/skills/status/SKILL.md"
 
 # (h) `make evals` output in the tree: refused first, count plus top-level entries, never nested files
 ts=20260925T000000Z

@@ -11,8 +11,8 @@
 //       test file (tests/**, skills/*/tests/**).
 //   s3  orient § 6 steers serial-shaped and session-lane work, Autonomous and Mixed schedule a serial rollout
 //       (§ 7, one schedule call per project, one serial rollout note per chain) and Mixed keeps its handed item out
-//       of it; § 9 offers on a parallel note § 6 or § 7 wrote, makes no offer on a serial note (Leg 1 starts by hand), and
-//       names a surface overlap among its no-offer reasons; §§ 8 and 10 are retired tombstones, and `--debrief`
+//       of it; § 9 hands off a parallel note § 6 or § 7 wrote, makes no handoff for a serial note (Leg 1 starts by hand),
+//       and names a surface overlap among its no-handoff reasons; §§ 8 and 10 are retired tombstones, and `--debrief`
 //       stops at the top of § 1, before the resolver, and appears nowhere else but § 10 and the invocation forms;
 //       the description drops the fan-out trigger and `--debrief`; and none of the batch machinery survives.
 //   s4  the vault grammar's In flight drops the `dispatched:` stamp and the start claim; CONTEXT.md retires the
@@ -168,7 +168,7 @@ function check(files) {
   ])
   const s9 = C(section(orient, /^### 9\./))
   need('s3', `${ORIENT} § 9`, s9, ['When § 6 or § 7 wrote a rollout note',
-    'a serial note (`shape: serial`) gets no offer: name it, its chain, each row\'s launch and Leg 1\'s start line, and never stamp `start: unattended` on it'])
+    'a serial note (`shape: serial`) gets no handoff: name it, its chain, each row\'s launch and Leg 1\'s start line, and never stamp `start: unattended` on it'])
   need('s3', `${ORIENT} § 9 closing line`, sentences(s9).find((x) => x.startsWith('No rollout written')) ?? '', ['a surface overlap with a live chain'])
   for (const n of ['8', '10']) {
     if (!olines.some((l) => new RegExp(`^### ${n}\\. .*\\(retired\\)$`).test(l))) flag('s3', `${ORIENT} § ${n} heading does not end (retired)`)
@@ -418,9 +418,9 @@ test('control: an orient § 7 that writes one note per project fails s3', () => 
   only(swapIn(ORIENT, /^### 7\./, /^### 8\./, 'one serial rollout note per chain', 'one note per project'), ['s3'], '§ 7 note per chain')
 })
 
-test('control: an orient § 9 that offers on a serial note fails s3', () => {
-  only(swap(ORIENT, 'a serial note (`shape: serial`) gets no offer: name it',
-    'a serial note (`shape: serial`) gets the same offer: name it'), ['s3'], '§ 9 serial offer')
+test('control: an orient § 9 that hands off a serial note fails s3', () => {
+  only(swap(ORIENT, 'a serial note (`shape: serial`) gets no handoff: name it',
+    'a serial note (`shape: serial`) gets the same handoff: name it'), ['s3'], '§ 9 serial handoff')
 })
 
 test('control: an orient § 9 closing line without the surface overlap fails s3', () => {

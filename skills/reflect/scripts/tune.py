@@ -3,7 +3,8 @@
 its own (ADR 0037 d5), and record each (p15-5, ADR 0032).
 
 python >= 3.8, stdlib only (score.py, which it loads, keeps the same floor). The only writer of rollouts.toml and of
-tunings.jsonl. Three callers (ADR 0037 d4-d5): skills/reflect/SKILL.md step 7 runs it exactly once per by-hand
+tunings.jsonl. An edit that adds a key above the file's `schema` raises its top-level `schema` line in the same edit
+(rollout-settings.py's header, ADR 0043): raise_schema(), below. Three callers (ADR 0037 d4-d5): skills/reflect/SKILL.md step 7 runs it exactly once per by-hand
 Reflection that reached its scores; skills/reflect/scripts/close-score.py runs `--record-only --close <kind>` once at
 each rollout's close (its completion ceremony, or its supersede); and SKILL.md step 14 (the weekly reading) runs
 `--revert` then `--auto`, zero or more times per repo:
@@ -32,7 +33,13 @@ partial; (3) ranAt == from (a landing steps one past the value the run ran at, n
 Reflection has already moved the key (a revert included); (5) the agreement is at least AGREE (3): run_record.py's
 Agreement rule, closed earlier Reflections' knob lines since the key's last move, each counted when it names a rollout
 not yet seen, plus this proposal when its rollout is new; lines from the Reflection whose auto line made the last move
-are that move's evidence and never count again. Each entry records `agreeing` (the proposal's own, score.py's count)
+are that move's evidence and never count again; (6) last, the load hold (p29-11, ADR 0051): a `parallel_ceiling` raise
+waits while this Reflection's Time-lost ledger is load-topped, `machine load tops the Time-lost ledger (<h> h of <total>
+h): a Parallel ceiling raise waits (ADR 0051)`, and fails closed with no ledger line, `no Time-lost ledger line for
+Reflection <id>: run reflect.py ledger first`. ADR 0051's "when the ledger puts load above it" is read as its Verify's
+"a load-topped ledger": load is the top of reflections.jsonl's `time-lost` line with `source: record` for this Reflection
+(load_hold(); an audit line is never read: its hours never move the hold). Lowers and round-cap raises are never held by
+load. Each entry records `agreeing` (the proposal's own, score.py's count)
 and `agreed` (the agreement). A held proposal prints `held <key>: <reason>` (`agreement <n> of 3`, say); with nothing
 eligible it exits 0 and writes nothing. The write is --pick's, below, with the same checks.
 
@@ -82,10 +89,18 @@ lock, so two closes racing on one rollout could both write (one lead closes a ro
 The edit works on the config's realpath (a symlink keeps its link), line by line: in the repo's
 `[repo."owner/name"]` table (matched ignoring case) it replaces the value and keeps a trailing comment, or
 inserts the key after the table's last key; with no table it appends `[repo."<scores.repo>"]` (a key set only
-under [defaults] still gets a repo entry: Tunings are per repo). No file, or a comment-only one, is created
+under [defaults] still gets a repo entry: Tunings are per repo). The schema (raise_schema(), a thin wrapper over
+rollout-settings.py's raise_schema_lines()): when a picked key's
+rollout-settings.py KEY_SCHEMA number is above the file's `schema` (its top-level line, else 1), the edit raises that
+line to it, never lowers it: an existing top-level `schema` line (before the first table header) is rewritten in
+place, keeping its comment; otherwise `schema = <N>` and a blank line go before the first table header (above the
+comment lines directly over it), or before the appended repo block; a `schema` line in a form it will not edit is
+refused (edit it by hand). With no newer key the text is exactly as before. The post-edit validation below is the
+backstop: an edit that forgets the raise does not validate, and nothing is written. No file, or a comment-only one, is created
 or appended to; a missing parent directory is created, and removed again when a failure leaves it empty. The
 result goes to a temp file in the same directory and must resolve with each picked key at its `to` from
-`file:repo`, every other key and Guardrail unchanged, and `[notify]` (ADR 0038 d3, machine-wide) unchanged too.
+`file:repo`, every other key and Guardrail unchanged, `[notify]` (ADR 0038 d3, machine-wide) unchanged too, and every
+repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `drop` are its only writers) unchanged.
 
 Write order: (1) every check above; (2) ONE `tuning` line carrying every pick, through
 run_record.emit(strict=True), its returned bool checked: one os.write, so tunings.jsonl gains the whole set
@@ -115,7 +130,6 @@ import difflib
 import importlib.util
 import json
 import os
-import re
 import secrets
 import stat
 import sys
@@ -143,6 +157,7 @@ RS = _load("thread_rollout_settings", os.path.join(SHARED, "rollout-settings.py"
 SCORE = _load("thread_score", os.path.join(HERE, "score.py"))
 CLOSES = RR.CLOSES  # completion | supersede: the close that wrote a line (run_record.py's Close rule)
 AGREE = 3  # ADR 0037 d5: a knob lands once three Reflections agree (run_record.py's Agreement rule)
+LOAD_HELD = "machine load tops the Time-lost ledger"  # check (6)'s reason (reflect.py's span lists these as its holds)
 
 
 class Stop(Exception):
@@ -299,11 +314,37 @@ def agreement(scores, proposal, reflection, tunings, reflections):
     return agreeing + (0 if scores["rollout"] in seen else 1)
 
 
+def load_hold(proposal, reflection, reflections):
+    """Check (6)'s reason for a proposal, or None: a parallel_ceiling raise is held while this Reflection's `time-lost`
+    record line has `top: load` (ADR 0051's "a load-topped ledger"), and fails closed with no such line. Only `source:
+    record` lines are read, never an audit's."""
+    direction = proposal.get("direction")
+    if not isinstance(direction, int) or isinstance(direction, bool):
+        f, t = proposal.get("from"), proposal.get("to")
+        direction = (t > f) - (t < f) if isinstance(f, int) and isinstance(t, int) else 0
+    if proposal.get("key") != "parallel_ceiling" or direction <= 0:
+        return None
+    line = next((d for d in reflections if d.get("kind") == "time-lost" and d.get("source") == "record"
+                 and d.get("reflection") == reflection), None)
+    if line is None:
+        return "no Time-lost ledger line for Reflection %s: run reflect.py ledger first" % reflection
+    if line.get("top") != "load":
+        return None
+    h = line.get("hours") if isinstance(line.get("hours"), dict) else {}
+    nums = [v for v in h.values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    load = h.get("load") if isinstance(h.get("load"), (int, float)) else 0
+
+    def fmt(x):  # up to 3 places, no trailing zeros
+        return ("%.3f" % x).rstrip("0").rstrip(".")
+    return "%s (%s h of %s h): a Parallel ceiling raise waits (ADR 0051)" % (LOAD_HELD, fmt(load), fmt(sum(nums)))
+
+
 def auto_check(scores, proposal, reflection, tunings, reflections):
     """(ok, reason, agreed) for one of score.py's proposals under --auto: the first check that fails is the reason, in
     order (1) no trade and no caution, (2) no Guardrail breached and the window not partial, (3) ranAt == from, (4) no
-    auto line of this Reflection has moved the key yet (a revert included), (5) agreement >= AGREE. `agreed` is the
-    agreement once (5) is reached, else None. Pure: reflect.py's span calls it with the same reads."""
+    auto line of this Reflection has moved the key yet (a revert included), (5) agreement >= AGREE, (6) the load hold
+    (load_hold(): a ceiling raise waits on a load-topped Time-lost ledger, or on none). `agreed` is the agreement once (5)
+    is reached, else None. Pure: reflect.py's span calls it with the same reads, its ledger's record line appended."""
     if proposal.get("trade"):
         t = proposal["trade"]
         return False, "a trade (gains %s, costs %s): Lachy decides" % (
@@ -323,6 +364,9 @@ def auto_check(scores, proposal, reflection, tunings, reflections):
     n = agreement(scores, proposal, reflection, tunings, reflections)
     if n < AGREE:
         return False, "agreement %d of %d" % (n, AGREE), n
+    held = load_hold(proposal, reflection, reflections)
+    if held:
+        return False, held, n
     return True, None, n
 
 
@@ -395,12 +439,22 @@ def emit(scores, fields):
 
 # ---- the config edit ---------------------------------------------------------------------------------------
 
-def _key_line_re(key):
-    return re.compile(r"^(\s*(?:%s|\"%s\"|'%s')\s*=\s*)([^\s#]+)(.*)$" % (key, key, key))
+_key_line_re = RS._key_line_re
+
+
+def raise_schema(lines, need, current):
+    """`lines` with the top-level `schema` raised to `need` when it is above `current` (the file's, else 1): the
+    module docstring's schema rule, through rollout-settings.py's raise_schema_lines() (the one copy both writers
+    share). Never lowers it; a Stop(2) for a schema line it will not edit."""
+    try:
+        return RS.raise_schema_lines(lines, need, current)
+    except RS.SettingsError as e:
+        raise Stop(str(e), 2)
 
 
 def edit_text(text, slug, picks, doc):
-    """The config text with each pick's key set to its `to` in [repo."<slug>"] (a Stop(2) for a form it won't edit)."""
+    """The config text with each pick's key set to its `to` in [repo."<slug>"] (a Stop(2) for a form it won't edit),
+    and the file's `schema` raised for a newer key (raise_schema)."""
     lines = text.split("\n") if text else []
     trailing = bool(lines) and lines[-1] == ""
     if trailing:
@@ -457,7 +511,19 @@ def edit_text(text, slug, picks, doc):
             lines.append("")
         lines.append("[repo.%s]" % json.dumps(slug))
         lines.extend("%s = %d" % (p["key"], p["to"]) for p in picks)
+    need = max([RS.KEY_SCHEMA.get(("rollout", p["key"]), 1) for p in picks] or [1])
+    lines = raise_schema(lines, need, RS.file_schema(doc or {}) or 1)
     return "\n".join(lines) + "\n"
+
+
+def _inert_paths(path):
+    """{repo key (lowered): its inert_paths} over every repo table of the file at `path` ({} for no file)."""
+    try:
+        tables = RS.load_tables(path)
+    except RS.SettingsError as e:
+        raise Stop("the edit does not validate (%s): nothing written" % e, 2)
+    return {slug: table["inert_paths"] for slug, table in ((tables or {}).get("repo") or {}).items()
+            if "inert_paths" in table}
 
 
 class Created:
@@ -629,6 +695,8 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
             raise Stop("the edit changes the Guardrails: nothing written", 2)
         if after["notify"] != before["notify"]:  # machine-wide (ADR 0038 d3): a Tuning never drops the ntfy topic
             raise Stop("the edit changes [notify]: nothing written", 2)
+        if _inert_paths(tmp) != _inert_paths(config):  # p29-3: a Tuning never touches any repo's Inert paths
+            raise Stop("the edit changes a repo's inert_paths: nothing written", 2)
         tid = new_id()
         fields = line_fields(scores, applied, tid, auto=auto)
         if dry_run:

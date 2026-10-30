@@ -16,21 +16,26 @@
 //   e7  the close order (leg.py close before create_thread → pushes → /thread:close with the hand-over between 7 and
 //       8 → handed → banner → ROLLOUT-STATUS), step 1's outcomes without a bare `complete` (it needs --reflection: §
 //       Complete step 4), the lock and exit 5's retry-once, no question tool;
-//   e8  the docs: CONTEXT's **Leg** and **Serial rollout** entries, ADR 0040's Decision line and its new bullet, the
-//       README row;
+//   e8  the docs: CONTEXT's **Leg** and **Serial rollout** entries (the completion verify's detached verify tree
+//       among its worktrees), execute § Scope's Legs sentence (that tree under `<state>/thread/completion-trees/`, not
+//       a task worktree), ADR 0040's Decision line, its new bullet and its ADR 0055 amendment, the README row;
 //   e9  close § Under a Leg: each rule (a follow-on after Complete filed with no pointer among them), placed after ##
 //       Edge cases, no fence and no retired close:asks phrase, and the four appended pointers after their pinned
 //       sentences;
 //   e10 Complete: legs.md § Complete's five steps in order (phases, items, the score through close-score.py, close
 //       with its --reflection, /thread:close) with the routed land follow-on, and the serial template's Post-rollout in
-//       the same order (its seven steps).
+//       the same order (its seven steps); the completion verify before step 1 (ADR 0055): the read, `--run` and
+//       `--wait` launches, the in-flight rule, the waiting line, its four halt reasons with the read's exit 1 or 2
+//       mapped to `rollout note unreadable`, no origin read and no git-env canary; step 4's "not decided" refusal and
+//       its summary line; line 7's `completion-verify --run` exception; the template's `completion_verifier:` preface;
+//       execute § 3's row citing ADR 0055; and no product file still saying the serial chain does not run it.
 // Each rule has a mutation control that must fail with exactly that rule. Phrase checks run on collapsed text. Reads
 // files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { collapse, root, section, slice, read } from '../lib/contract-text.mjs'
+import { collapse, proseUnits, root, section, slice, read } from '../lib/contract-text.mjs'
 
 const FILES = {
   legs: 'skills/execute/legs.md',
@@ -63,6 +68,8 @@ function productTree() {
 }
 const tree = productTree()
 const INTERIM = ['no Leg runner', 'until execute runs Legs', 'until Legs ship', '(p24-3)']
+// The words of the serial chain that did not run its completion verifier (ADR 0055 retired them).
+const NOT_YET = ['does not run it yet', "A parallel rollout's only"]
 
 const C = (s) => (s == null ? '' : collapse(s))
 // A legs.md `## ` section, up to the next `## ` heading.
@@ -86,6 +93,7 @@ const TABLE = [
   '|---|---|---|---|',
   '| Mid-Leg, review in flight | `waiting reason="review in flight: [[t]]"` | *nothing yet* | allow |',
   '| Room stop | `waiting reason="room stop: …"` | *nothing yet* | allow |',
+  '| Complete, completion verify running | `waiting reason="completion verify in flight"` | *nothing yet* | allow |',
   '| handoff, successor started | `done reason="handed off to Leg <N+1>"` after the banner | *closed*: reports to the origin, archives | allow |',
   '| handoff, manual | `halted reason="manual handoff: Leg <N+1> in <alias> from <folder>"` | demand | allow |',
   '| complete | `done` after the banner | *closed*: the final report | allow |',
@@ -192,8 +200,11 @@ function check(f, product = tree) {
   need('e8', 'CONTEXT **Leg**', entry(f.context, 'Leg'), ['`leg.py begin`', 'the preflight', 'the smoke test',
     'up to five fresh claims', 'never closing mid-task', 'commit-only', 'reports to the origin'])
   need('e8', 'CONTEXT **Serial rollout**', entry(f.context, 'Serial rollout'), ['No task worktrees', 'execute runs its Legs',
-    'A serial note is never paused'])
-  need('e8', 'ADR 0040', f.adr, ["with no task worktrees (a Leg's scratch revert aside, § Build-grill rulings)",
+    'A serial note is never paused', "the completion verify's detached verify tree outside the checkout"])
+  const scopeLegs = C(section(f.execute, /^## Scope$/) ?? '')
+  need('e8', 'execute § Scope', scopeLegs, ["A serial rollout's Legs (`legs.md`) write its task notes",
+    'for a detached verify tree under `<state>/thread/completion-trees/` (not a task worktree)'])
+  need('e8', 'ADR 0040', f.adr, ["with no task worktrees (a Leg's scratch revert aside, § Build-grill rulings)", 'Amended by ADR 0055',
     '**How a Leg runs** (the p24-3 plan, 2026-10-19)', '`verifies:`', 'refines the ruling\'s "`fixes:` that task"',
     '`land.sh --route`', 'A serial note is never paused'])
   need('e8', 'README /thread:execute row', (f.readme ?? '').split('\n').find((l) => l.startsWith('| `/thread:execute`')) ?? '',
@@ -224,6 +235,36 @@ function check(f, product = tree) {
   if (cp.length !== 5 || want.some((re, k) => !re.test(cp[k] ?? ''))) flag('e10', 'legs.md § Complete\'s steps are not phases, items, score, close, /thread:close')
   need('e10', 'legs.md § Complete step 4', cp[3] ?? '', ['`land.sh --route`', 'On `landable <d>`',
     "the chain's commits are only its `Task:`-trailered ones", 'On `not landed: <reason>` it files nothing'])
+  // The completion verify (ADR 0055): the block before step 1, its launches, halts and exit mapping.
+  const cpText = sec(legs, 'Complete')
+  const pre = cpText.split('\n').slice(0, Math.max(0, cpText.split('\n').findIndex((l) => /^1\. /.test(l)))).join('\n')
+  const RR = '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py completion-verify --rollout <rollout note>'
+  need('e10', 'legs.md § Complete\'s completion verify', pre, ['**The completion verify (ADR 0055).**', `${RR}\``,
+    `${RR} --run\``, `${RR} --wait\``, 'a `--run` or `--wait` this session launched is still running',
+    '`leg.py next --waiting "completion verify in flight"`\'s `status_line`', 'no origin read and no git-env canary',
+    '"completion verify: no verdict in three runs"', '"completion verify failed:', '"completion verify: rollout note unreadable"',
+    '"completion verify: in flight past its deadline"', "the read's exit 1 or 2"])
+  const bullets = proseUnits(pre)
+  const inflight = bullets.find((u) => u.startsWith('- `in-flight` →')) ?? ''
+  if (!inflight.includes(`${RR} --wait\``)) flag('e10', 'the in-flight bullet does not launch --wait')
+  const unreadable = bullets.find((u) => u.includes('"completion verify: rollout note unreadable"')) ?? ''
+  if (!unreadable.includes("the read's exit 1 or 2")) flag('e10', "the read's exit 1 is not mapped to rollout note unreadable")
+  for (const u of bullets) {
+    if (u.includes('"completion verify failed:') && /the read's exit 1\b/.test(u)) flag('e10', "the read's exit 1 is mapped to failed")
+  }
+  need('e10', 'legs.md § Complete step 4', cp[3] ?? '', ['refuses a completion verify that is not decided ("not decided"',
+    "a decided one's `summary` is a Completion log line", "a red's fix task goes in the vault commit"])
+  need('e10', 'legs.md line 7', legs.split('\n').find((l) => l.startsWith('Every vault and git write a Leg makes')) ?? '',
+    ["except § Complete's own commands", '`reconcile-rollout.py completion-verify --run` writes the `## Completion verify log` line',
+      'its read and `--wait` write nothing'])
+  need('e10', 'the serial template § Post-rollout', section(f.template, /^## Post-rollout/) ?? '',
+    ['When this note declares `completion_verifier:`, the Leg first runs it once on the chain checkout\'s HEAD'])
+  const cvRow = (f.execute ?? '').split('\n').find((l) => l.startsWith('| `completion_verifier` |')) ?? ''
+  need('e10', 'execute § 3\'s completion_verifier row', cvRow, ['`skills/execute/legs.md` § Complete, ADR 0055',
+    'with no origin read and no git-env canary'])
+  for (const [rel, text] of Object.entries({ ...product, [FILES.legs]: legs, [FILES.execute]: f.execute })) {
+    for (const w of NOT_YET) if (C(text).includes(w)) flag('e10', `${rel} still holds ${w}`)
+  }
   const tp = items(section(f.template, /^## Post-rollout/))
   const tw = [/phases/, /follow-on.*land-chain follow-on/, /`close-score\.py --rollout <this note> --close completion`/, /`status: done`/,
     /`## Completion log`/, /Archive\/Rollouts\/.*commit it/, /`\/thread:close`/]
@@ -305,7 +346,7 @@ test('control: a Leg that may call the question tool fails e7', () => {
   only('legs', '- Never call the question tool in a Leg:', '- Call the question tool when unsure:', ['e7'], 'question')
 })
 test('control: a Serial rollout entry back on "No worktrees" fails e8', () => {
-  only('context', 'No task worktrees (leg.py\'s transient scratch\n  revert only)', 'No worktrees', ['e8'], 'worktrees')
+  only('context', 'No task worktrees (leg.py\'s transient scratch\n  revert, and', 'No worktrees (leg.py\'s transient scratch\n  revert, and', ['e8'], 'worktrees')
 })
 test('control: a README row without Legs fails e8', () => {
   only('readme', ' A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg.', '', ['e8'], 'readme')
@@ -349,5 +390,36 @@ test('control: a template Post-rollout with its phases step last fails e10', () 
   assert.ok(i >= 0 && j > i, 'control setup: the template\'s steps 1 and 6')
   const moved = [...lines.slice(0, i), ...lines.slice(i + 1, j + 1), lines[i], ...lines.slice(j + 1)].join('\n')
   const { fails } = check({ ...real, template: moved })
+  assert.deepEqual(fails, ['e10'])
+})
+
+test('control: § Scope\'s Legs sentence without the completion verify\'s tree fails e8', () => {
+  only('execute', ' for a detached verify tree under `<state>/thread/completion-trees/` (not a task worktree)', '', ['e8'], 'scope tree')
+})
+test('control: the read\'s exit 1 mapped to failed fails e10', () => {
+  only('legs', '  - 1 → § Close `--outcome halt --reason "completion verify failed:', '  - 1, or the read\'s exit 1 → § Close `--outcome halt --reason "completion verify failed:',
+    ['e10'], 'read exit 1')
+})
+test('control: a completion verify with no --run launch fails e10', () => {
+  only('legs', '- `run` or `rerun` → launch `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py completion-verify --rollout <rollout note> --run` in the background',
+    '- `run` or `rerun` → run the suite by hand', ['e10'], 'no --run')
+})
+test('control: the in-flight bullet without its --wait launch fails e10', () => {
+  only('legs', 'launch `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py completion-verify --rollout <rollout note> --wait` in the background with `timeout: 7200000`. Either way, end',
+    'launch nothing either. Either way, end', ['e10'], 'no --wait')
+})
+test('control: the in-flight-past-its-deadline halt removed fails e10', () => {
+  only('legs', 'still `in-flight` → § Close `--outcome halt --reason "completion verify: in flight past its deadline"`',
+    'still `in-flight` → launch the wait again', ['e10'], 'past its deadline')
+})
+test('control: § Complete step 4 without the completion verify refusal fails e10', () => {
+  only('legs', 'it also refuses a completion verify that is not decided ("not decided": run the block above first) and a value its reader refuses; ',
+    'it also ', ['e10'], 'step 4 refusal')
+})
+test('control: line 7 without the completion-verify exception fails e10', () => {
+  only('legs', ', except § Complete\'s own commands:', ', with no exception:', ['e10'], 'line 7')
+})
+test('control: "does not run it yet" re-added fails e10', () => {
+  const { fails } = check(real, { ...tree, 'skills/orient/SKILL.md': `${tree['skills/orient/SKILL.md']}\nA serial chain's Complete does not run it yet.\n` })
   assert.deepEqual(fails, ['e10'])
 })

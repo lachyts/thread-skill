@@ -14,6 +14,7 @@ due:
 captured: {{DATE}}
 # saved as: <slug>-rollout-<YYYY-MM-DD>.md — always dated (a 2nd same-day rollout gets a -N suffix); legacy undated <slug>-rollout notes keep their names, the rollout readers resolve both. See schedule SKILL.md step 6.
 protocol_version: 5
+# engine_snapshot: "<path>" and engine_sha: <sha>   # ADR 0043: stamped by `engine-snapshot.py adopt` just below protocol_version:, never by hand
 shape: parallel  # ADR 0040: parallel | serial; a note with no shape: reads as parallel
 verifier: {{VERIFIER}}
 max_iterations: {{MAX_ITERATIONS}}
@@ -21,9 +22,13 @@ max_review_rounds: {{MAX_REVIEW_ROUNDS}}
 max_plan_rounds: {{MAX_PLAN_ROUNDS}}  # 2 was insufficient for cross-cutting plan-gates; 3-with-accumulated-feedback converges (thread:execute item 1)
 plan_approval: scope-gated  # off | scope-gated | required
 parallel_ceiling: {{PARALLEL_CEILING}}
+# hold_until: {pr: <owner/repo>#<N>, merged: true}  # optional, parallel rollouts only (next refuses a serial note before reading it): holds every start until that PR merges and clears itself on the merge (vault-grammar § Hold until); never a sentence in the note
+# on_merge: regenerate  # optional, beside hold_until: an approved queue (vault-grammar § Approved queue; approve-queue writes it); carry never copies it
 # env_bootstrap:   # optional: shell cmd thread:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — thread:schedule step 2.7
 # completion_verifier:   # optional (estate ADR 0009 d6): the full suite of a project whose verifier: is its declared fast tier, run once on merged main at the completion ceremony. Uncomment with the project CLAUDE.md's `Completion verifier:` command — thread:schedule step 2.5
 # completion_timeout:   # optional (ADR 0052): seconds, 1 to 6600, for the completion verifier's run; absent: 3600. Never verify_timeout, which bounds the fast tier
+# named_rerun: "<cmd with {tests}>"   # optional (ADR 0050): the repo's runner for named tests, {tests} exactly once (e.g. "scripts/test -n0 {tests}"); the lead's Flake check re-runs an out-of-diff red's failing tests with it before one confirming full run. Absent: the lead's Integration verify and RACE re-verify leave such a red red. Uncomment with the project CLAUDE.md's `Named re-run:` command — thread:schedule step 2.5
+# touched: "tests/test_{module}.py"   # optional (estate ADR 0009 d1): how an agent finds one changed module's tests, the touched tests it runs between Checkpoints; a quoted path pattern with {module}, never starting with -. Absent: the repo's CLAUDE.md/AGENTS.md Tests line when it runs one module's tests (a full-suite-only line falls through), else the test files importing the changed modules
 # No rollout cursor: progress lives on the task notes' started:/merged: stamps (ADR 0030; reconcile-rollout.py).
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when § 0 printed `supersede` (see SKILL.md steps 6 and 7.5)
 ---
@@ -44,7 +49,7 @@ execute [[{{ROLLOUT_SLUG}}]]                # continuous: the queue runs and mer
 execute [[{{ROLLOUT_SLUG}}]] --gated        # pause for a human before each merge
 ```
 
-*Start when ready*: `start: unattended` in this note's frontmatter (the execute offer writes it, never this template; `skills/_shared/vault-grammar.md` § Rollout start stamp). The Chorus Stage starts the lead once the note is runnable, and the lead's first `next` clears it.
+*Start when ready*: `start: unattended` in this note's frontmatter (the execute handoff's Start when ready writes it, never this template; `skills/_shared/vault-grammar.md` § Rollout start stamp). The Chorus Stage starts the lead once the note is runnable, and the lead's first `next` clears it.
 
 The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-layer convergence (plan-gate → Ralph-style agent-side verifier retry → master-side review-and-revise loop). The rollout-level defaults in this note's frontmatter (`verifier`, `max_iterations`, `max_review_rounds`, `plan_approval`, `max_plan_rounds`, `parallel_ceiling`) are inherited by every task; per-task overrides go in the task's own frontmatter.
 
@@ -52,7 +57,7 @@ The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-
 
 ## Queue
 
-Tasks run in parallel up to `parallel_ceiling`, each branching from the `main` of its start; only a dependency (`depends-on:`/`blocked-by:`), a Solo task or, by day, the Trickle (the machine-wide count of running Rollout tasks while Lachy is not Away, Chorus ADR 0104; execute `away.md`) holds one back, never a shared file. Every approved task goes through Integration (the latest `main` merged in, the verifier re-run) before its merge. When a slot frees, the next task is chosen by `priority:`, then least file overlap with what is running (`## File-sets`), then its row order here: the row is the task's schedule rank. A queued Solo task whose dependencies are met holds every task whose row is below it, whatever its `priority:`.
+Tasks run in parallel up to `parallel_ceiling`, each branching from the `main` of its start; only a dependency (`depends-on:`/`blocked-by:`), a Solo task or, by day, the Trickle (the machine-wide count of running Rollout tasks while Lachy is not Away, Chorus ADR 0104; execute `away.md`) holds one back (while Lachy is Away, the Away cap does in the Trickle's place, ADR 0049; toward the Morning while Away, the last starts too), never a shared file. Every approved task goes through Integration (the latest `main` merged in, the verifier re-run) before its merge. When a slot frees, the next task is chosen by `priority:`, then least file overlap with what is running (`## File-sets`), then its row order here: the row is the task's schedule rank. A queued Solo task whose dependencies are met holds every task whose row is below it, whatever its `priority:`.
 
 The table's **Mode** column reads `solo` for a Solo task (nothing new starts beside it until it merges or is set aside), `sequential-merged (one agent/PR)` for a unit `/thread:schedule` folded from an affine same-file cluster (one agent works its sub-tasks in sequence on one branch/PR), `carried (<queue state>)` for a task carried from the rollout this one supersedes, and `—` for every other task.
 
@@ -102,7 +107,7 @@ When every task has merged, run the **completion ceremony** (`/thread:execute` p
 3. File any follow-on work (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/` and rewrite the items below as thin pointers to them. Never leave live work as checklist prose inside a done note — the moment `status: done` lands, every Bases view filters this note out and the work goes invisible.
 4. Append a `## Completion log`: dispatch dates, tasks → PRs (links + merge dates), convergence stats (plan/review rounds per task), phase closure, the disposition of each post-rollout item, and the Reflection line `Reflection: <close-score's line>; the weekly Reflection reads it`, from execute §4.5 step 5's `close-score.py --rollout <rollout-note> --close completion`, run first with the Bash tool's `timeout: 600000` (one `tunings.jsonl` line, no prompt; a re-run prints `already recorded`; a non-zero exit is logged and the ceremony goes on). Then offer it in chat: `Reflection: /thread:reflect [[<rollout-slug>]]`.
 5. Record here why any associated thread stays open; otherwise step 7 closes it, last.
-6. Move this note to `Work/Tasks/Archive/Rollouts/` (`git mv` when `git ls-files --error-unmatch` finds it tracked, else a plain `mv`: a rollout note is usually untracked, and `git mv` refuses one) and commit the moved note by pathspec, naming the old path too only when it was tracked, and likewise the old Archive path of a follow-on moved back out with `git mv`. A move never overwrites: a same-named note already in `Archive/Rollouts/` halts the move and is reported (never `mv -n`, which exits 0 when it skips). Obsidian wikilinks resolve by filename, so `[[<slug>]]` references and the task notes' `rollout:` backlinks survive the move.
+6. Move this note to `Work/Tasks/Archive/Rollouts/` (`git mv` when `git ls-files --error-unmatch` finds it tracked, else a plain `mv`: a rollout note is usually untracked, and `git mv` refuses one) and commit the moved note by pathspec, naming the old path too only when it was tracked, and likewise the old Archive path of a follow-on moved back out with `git mv`. A move never overwrites: a same-named note already in `Archive/Rollouts/` halts the move and is reported (never `mv -n`, which exits 0 when it skips). Obsidian wikilinks resolve by filename, so `[[<slug>]]` references and the task notes' `rollout:` backlinks survive the move. Then run `engine-snapshot.py retire` (engine-snapshot.md § Retirement).
 7. Close out any associated thread (run `/thread:close`), last, after step 6's move and commit: close's banner, then the lead's `ROLLOUT-STATUS:` line, end the session's last message (close step 9, rule (2)).
 
 Rollout-specific items (audit re-runs etc.) go here:

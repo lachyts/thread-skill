@@ -4,10 +4,14 @@
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py <verb> --rollout <note> [common flags] [verb flags]
 
 A serial rollout (`shape: serial`) runs as a chain of Legs: visible sessions that each work tasks themselves, close
-and hand the rest to a fresh successor. This helper does every vault and git write a Leg makes, so a Leg never
-hand-edits frontmatter. Stdlib only, python >= 3.9, POSIX (fcntl). It loads reconcile-rollout.py as a module (Note,
-_scan, _queue_state, _dep_status, incomplete, _stamp, PHASED_STEM_RE, _norm_gate, _fm_block), as serial-chains.py
-and unfinished-rollout.py do, and serial-chains.py for norm_origin.
+and hand the rest to a fresh successor. This helper does every vault and git write a Leg makes but legs.md §
+Complete's own commands (its phase close, `reconcile-project.py --apply`, and its completion verify,
+`reconcile-rollout.py completion-verify --run`, ADR 0055), so a Leg never hand-edits frontmatter. Stdlib only,
+python >= 3.9, POSIX (fcntl). It loads reconcile-rollout.py as a module (Note, _scan, _queue_state, _dep_status,
+incomplete, _stamp, PHASED_STEM_RE, _norm_gate, _fm_block; _leg_tops, the one parser of `leg_base:` and `leg_head:`;
+and the completion verify's _completion_config, _completion_state, _completion_summary, _find_note,
+COMPLETION_DECIDED, COMPLETION_RED_PREFIX and CompletionValueError), as serial-chains.py and unfinished-rollout.py
+do, and serial-chains.py for norm_origin.
 
 Common flags: --rollout <path, or a slug under --tasks-dir; once that note is gone, its `Archive/Rollouts/` copy,
 which every writing verb but file-followup refuses (exit 1)> · --tasks-dir (default <vault>/Work/Tasks) · --vault
@@ -16,8 +20,12 @@ clock otherwise) · --session <id> (default CLAUDE_CODE_SESSION_ID, then CODEX_T
 --harness claude|codex (default: codex under CODEX_THREAD_ID alone, else claude) · --dry-run (compute and print,
 write nothing, take no lock).
 
-Output: one JSON line on stdout for every exit but a usage error. Exit codes: 0 ok · 1 refusal (nothing written) ·
-2 usage (stdout empty, one `leg:` line on stderr) · 3 a stand (an unclosed Leg of another session, a standing halt,
+Output: one JSON line on stdout for every exit but a usage error and the Engine snapshot guard. Exit codes: 0 ok · 1
+refusal (nothing written) · 2 usage (stdout empty, one `leg:` line on stderr), or the Engine snapshot guard (ADR 0043:
+every verb but status first asks engine-snapshot.py's guard(), loaded from this tree; a note stamped with another
+usable snapshot than this plugin root, or a live note whose snapshot is unusable, prints its `engine-snapshot: ` line,
+stdout empty, nothing written: re-run from the root it names; an archived note whose snapshot is gone passes, so
+file-followup after Complete still runs) · 3 a stand (an unclosed Leg of another session, a standing halt,
 a revert that would conflict or a dirty path to revert; nothing written) · 4 wrong launch (nothing written) · 5 the
 rollout's lock was held past its timeout (nothing written). A refusal's JSON carries `exit`, `error` and, from
 begin, the `status_line` its turn ends on. Every git call runs with git's repo-local env vars removed (`git rev-parse
@@ -57,7 +65,8 @@ restarted):
       else `stuck`. A claimable row in another launch than the Leg's is a Leg boundary: `handoff`. A row whose
       dependency (depends-on/blocked-by) is not done is held `depends on [[d]] (<why>)`, and one whose done
       dependency has a not-done fix is held `depends on [[d]] (awaiting fix [[f]])`. --waiting adds the turn's
-      `status_line`, `state=waiting reason="<reason>"` (a review in flight, a room stop: legs.md § Report).
+      `status_line`, `state=waiting reason="<reason>"` (a review in flight, a room stop, a completion verify in
+      flight: legs.md § Complete and § Report).
   claim --task <t> [--inherit] [--gate <gate>]...
       Re-runs next under the lock: <t> must be what it proposes (with --inherit, an inherited `finish`). Stamps
       `status: in_progress`, `owner: leg-N`, `leg: N`, `started:` (the first wins), consumes `handed_back:` and
@@ -88,7 +97,11 @@ restarted):
       line; and, for each `leg_base` checkout with trailered commits, that checkout is the cwd's and a --review doc
       whose front matter has `repo:` that toplevel, `mode: code`, `effort:` xhigh or max, `status: consumed`, and a
       `head:` that descends from the leg_base sha, is an ancestor of HEAD and holds a trailered commit. Stamps
-      `status: done`, `completed:`, `leg: N`, `reviewed:` (the docs), keeps `leg_base`; logs `done`.
+      `status: done`, `completed:`, `leg: N`, `reviewed:` (the docs), keeps `leg_base`, and, when the task has a
+      `leg_base` entry, `leg_head: ["<toplevel>@<sha40>", …]` after it (ADR 0055): per checkout, the task's own newest
+      `Task:`-trailered commit (change's last commit there, never HEAD, which may be a peer's), a checkout where it
+      committed nothing (or whose range could not be listed) left out, so `[]` when it committed nowhere; no key with
+      no `leg_base` entry. A serial chain's completion verify anchors its HEAD guard on it. Logs `done`.
   set-aside --task <t> --reason <text> [--kind block|gate] [--status blocked|review-blocked|plan-blocked]
             [--revert] [--gate <gate>]...
       Removes `owner:`. gate: `status: gate-pending` and `## Gated inputs (awaiting sign-off)` (no revert). block:
@@ -119,18 +132,24 @@ restarted):
       close line and prints `progress`, `commit_only` (the cwd's toplevel and every chain checkout: each `leg_base`
       top), `needs_you`, `handover` {title, prompt, tldr, cwd, harness} (handoff only) and `status_line` (every
       outcome but handoff). complete refuses first an Archive name collision and a Post-rollout item with neither a
-      pointer nor a --disposition; before the lock it asks land.sh's own route for each chain checkout (`land.sh
+      pointer nor a --disposition, then (ADR 0055) a `completion_verifier:`, `env_bootstrap:` or `completion_timeout:`
+      the completion verify's reader refuses (`completion verify: <why>: fix the note`) and a declared completion
+      verify that is not decided (`the completion verify is not decided (<state>, attempt <n>)`: legs.md § Complete
+      runs it first); before the lock it asks land.sh's own route for each chain checkout (`land.sh
       --route -- <top>`, 60 s): on `landable <d>` it lists the chain's `Task:`-trailered commits that the local
       `refs/remotes/origin/<d>` lacks (no fetch) and, when there are any, files
       `<project>-followup-land-chain-<YYYY-MM-DD>[-<k>]` (act: open a PR from them, or push them; ADR 0028 automates
       only close-out commits); on `not landed: <reason>` it files nothing; on `stuck: <reason>`, a failure or a
       timeout it files the follow-on with every chain commit there and the act prefixed `check the landing route
       (<reason>), then`. Then `status: done`, `completed:`, a `## Completion log` (a line per Leg: launch, begun–closed,
-      done and set aside; each --log-line; `Post-rollout items:` with each disposition; a `Chain commits:` line per
+      done and set aside; the decided completion verify's `Completion verify: …` summary when the note declares
+      `completion_verifier:`; each --log-line; `Post-rollout items:` with each disposition; a `Chain commits:` line per
       checkout or `Chain commits: none`; `Reflection: <--reflection>`), the move to
       `Archive/Rollouts/` (a git move when `git ls-files --error-unmatch` finds the note, else a rename), and one
       vault commit by pathspec (the archived note,
-      the follow-ons this Leg filed, each --also path, the old path when tracked). A failed commit is
+      the follow-ons this Leg filed, a red completion verify's `completion-red-<rollout>.md` when it sits in the tasks
+      root, each --also path, the old path when tracked); with the key declared it prints `completionVerify` {state,
+      summary, followup}, and without it the bytes, the pathspec and the JSON are as before. A failed commit is
       `committed: false`, exit 0: the daily sweep commits it.
   handed --started <id> | --manual <why>
       Logs `hand-over: started <id>` or `hand-over: manual (<why>)` on this session's Leg closed with a handoff, and
@@ -740,12 +759,9 @@ def parse_legs(log):
 
 
 def leg_base(note):
-    out = []
-    for item in note.get_list("leg_base"):
-        top, sep, sha = item.rpartition("@")
-        if sep and top and re.fullmatch(r"[0-9a-f]{7,40}", sha):
-            out.append((top, sha))
-    return out
+    """[(top, sha)] from the task's `leg_base:` (claim's stamp), through reconcile-rollout.py's one parser of it and of
+    done's `leg_head:` (_leg_tops), which a serial chain's completion verify reads (ADR 0055)."""
+    return rr._leg_tops(note, "leg_base")
 
 
 def verify_line(note):
@@ -1494,6 +1510,12 @@ def cmd_done(ctx, a):
         note.set("leg", str(n), after=("owner",))
         if reviewed:
             note.set("reviewed", "[" + ", ".join(f'"{d}"' for d in reviewed) + "]", after=("leg",))
+        if leg_base(note):
+            # ADR 0055: per checkout, the task's own newest trailered commit (commits_for lists base..HEAD oldest
+            # first), never HEAD, which may be a peer's commit; [] when it committed nowhere. The completion verify's
+            # HEAD guard anchors on it.
+            heads = [f"{t['top']}@{t['commits'][-1]['sha']}" for t in tops if t["commits"] and not t.get("error")]
+            note.set("leg_head", "[" + ", ".join(f'"{h}"' for h in heads) + "]", after=("leg_base",))
         save(ctx, note)
         tail = f"; reviewed {', '.join(reviewed)}" if reviewed else ""
         if not ctx.dry:
@@ -1850,6 +1872,7 @@ def cmd_close(ctx, a):
             if lacking:
                 raise Refuse(1, f"Post-rollout item(s) {', '.join(map(str, lacking))} have neither a follow-on pointer "
                                 "nor a --disposition: nothing written")
+            completion_gate(chain)
             line = "closed: chain complete"
         elif outcome == "stuck":
             k = sum(1 for r in chain.rows if r.state == "set-aside")
@@ -1877,8 +1900,38 @@ def cmd_close(ctx, a):
         return out
 
 
+def completion_gate(chain):
+    """complete's refusal (ADR 0055): a `completion_verifier:` its reader refuses, or one whose completion verify is not
+    decided (green, flake or red), is exit 1 with nothing written."""
+    try:
+        verifier, _bootstrap, _timeout = rr._completion_config(chain.note)
+    except rr.CompletionValueError as e:
+        raise Refuse(1, f"completion verify: {e}: fix the note; nothing written")
+    if verifier:
+        state, attempt, _last, _streak = rr._completion_state(chain.note)
+        if state not in rr.COMPLETION_DECIDED:
+            raise Refuse(1, f"the completion verify is not decided ({state}, attempt {attempt}): run legs.md § "
+                            "Complete's completion verify first, or remove the note's completion_verifier: to "
+                            "complete without it; nothing written")
+
+
+def completion_of(ctx, chain):
+    """The decided completion verify as {state, summary, followup} and the fix task's path to commit (a red's, in the
+    tasks root), or (None, None) when the note declares no `completion_verifier:` (completion_gate passed first)."""
+    verifier, _bootstrap, _timeout = rr._completion_config(chain.note)
+    if not verifier:
+        return None, None
+    state, _attempt, last, _streak = rr._completion_state(chain.note)
+    found = rr._find_note(ctx.tasks, f"{rr.COMPLETION_RED_PREFIX}{ctx.slug}") if state == "red" else None
+    followup = found.stem if found else None
+    commit = found if found is not None and found.parent == ctx.tasks else None
+    return {"state": state, "summary": rr._completion_summary(state, last, verifier, followup),
+            "followup": followup}, commit
+
+
 def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
     n = leg["n"]
+    completion, red_path = completion_of(ctx, chain)
     written, chain_lines, followups = [], [], []
     need = [(top, kind, detail, commits) for top, kind, detail, commits in plans if commits and kind != "deferred"]
     land_name = None
@@ -1923,6 +1976,8 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
         if e["n"] == n and e["kind"] == "follow-on" and e["slug"] and e["slug"] not in followups:
             followups.append(e["slug"])
     content = leg_summary(parse_log(chain.note), n, ctx)
+    if completion:
+        content.append(f"- {completion['summary']}")
     content += [f"- {l.strip()}" if not l.strip().startswith("- ") else l.strip() for l in a.log_line]
     content.append("- Post-rollout items: " + ("; ".join(disp) if disp else "none"))
     if chain_lines:
@@ -1934,6 +1989,8 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
     prog = chain.progress(n)
     out.update(progress=prog, needs_you=[], followups=followups,
                status_line=status_line(ctx.slug, prog, "done"), dryRun=ctx.dry)
+    if completion:
+        out["completionVerify"] = completion
     if ctx.dry:
         out.update(archived=None, committed=False)
         return out
@@ -1949,6 +2006,7 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
         os.rename(ctx.rollout, dest)
         tracked = False
     paths = [str(dest)] + [str(ctx.tasks / f"{f}.md") for f in followups if (ctx.tasks / f"{f}.md").exists()]
+    paths += [str(red_path)] if red_path is not None and red_path.exists() else []
     paths += [str(Path(os.path.expanduser(p)).resolve()) for p in a.also]
     committed = False
     if toplevel(str(vault)):
@@ -2357,6 +2415,15 @@ def cmd_restarted(ctx, a):
 
 # ---- main -----------------------------------------------------------------------------------------------------------
 
+def engine_guard(note):
+    """engine-snapshot.py's guard() for the note, loaded from this tree (ADR 0043): its refusal line, else None."""
+    try:
+        mod = _load("thread_engine_snapshot", PLUGIN / "skills" / "_shared" / "scripts" / "engine-snapshot.py")
+    except Usage:   # only positive evidence refuses
+        return None
+    return mod.guard(note, PLUGIN, "skills/execute/scripts/leg.py")
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         raise Usage(message)
@@ -2456,6 +2523,11 @@ def main(argv=None) -> int:
         rr = _load("reconcile_rollout", RR_SRC)
         sc = _load("serial_chains", SC_SRC)
         ctx = Ctx(args)
+        if verb != "status":
+            refusal = engine_guard(ctx.rollout)
+            if refusal:   # ADR 0043: a stamped chain's Legs run on its Engine snapshot; nothing written
+                print(refusal, file=sys.stderr)
+                return 2
         if ctx.archived and verb in ARCHIVE_REFUSED:
             raise Refuse(1, f"{ctx.slug} is complete and archived ({ctx.rollout}): only file-followup writes after "
                             "Complete, and it writes nothing into the archived note")

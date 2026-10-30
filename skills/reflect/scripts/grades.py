@@ -13,9 +13,10 @@ CLI is for tests and by-hand reads, and prints {grades, flags, cannotShow}:
 Work/Tasks (default ~/repos/obsidian/Work/Tasks). The CLI loads reflect.py inside main() for its Vault, date_in and
 record listing; this module's own load never loads reflect.py, so the two never import each other in a cycle.
 
-Reads: grades.jsonl in the events directory (run_record's GRADE_LOG: one `grade` line per task each estate pass
-grades, written only by skills/_shared/scripts/estate-dispatch.py `log`), every Run record there (span's listing:
-each <slug>.jsonl but run_record's RESERVED files), and each graded task's note through reflect.py's Vault.find
+Reads: grades.jsonl in the events directory (run_record's GRADE_LOG: one `grade` line per task each estate pass or
+schedule Pre-flight grades, written only by skills/_shared/scripts/estate-dispatch.py `log`), every Run record there (span's listing:
+each <slug>.jsonl but run_record's RESERVED files, with the time-lost ledger's lines dropped: p29-10, score.py's
+LEDGER_KINDS), and each graded task's note through reflect.py's Vault.find
 (Work/Tasks, then anywhere under it, Archive included).
 
 What it reuses, loaded by path and never copied: run_record.py (RR: GRADE_LOG, LINK_RE, normalise_slug, Refused);

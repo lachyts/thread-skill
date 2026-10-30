@@ -6,9 +6,15 @@ set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRIVER="$HERE/../../../hooks/rollout-stop-driver.py"
+RRPY="$HERE/../../_shared/scripts/run_record.py"
 TMP="$(mktemp -d)"
 export ROLLOUT_DRIVER_STATE_DIR="$TMP/state"
 unset ROLLOUT_DRIVER_DEBUG
+# p29-10: a halted line is recorded in the rollout's Run record, its note resolved in the vault under HOME: both temp.
+export HOME="$TMP/home" PYTHONDONTWRITEBYTECODE=1 THREAD_MACHINE_TIMES='{}'
+export THREAD_EVENTS_DIR="$TMP/events"
+export THREAD_NOTE_LOCK_DIR="$TMP/note-locks"
+VAULT="$HOME/repos/obsidian/Work/Tasks"; mkdir -p "$VAULT"
 FAILURES=0
 
 ok()   { echo "ok   - $1"; }
@@ -56,6 +62,11 @@ T="$TMP/t2c.jsonl"
 assistant_line 'ROLLOUT-STATUS: demo merged=1/3 running=0 state=waiting reason="trickle: 3/2 tasks running on this Mac"' > "$T"
 run_driver "$T" s2c
 [ -z "$OUT" ] && ok "waiting on a Trickle wait allows stop" || fail "Trickle wait: expected empty, got: $OUT"
+# p28-2: a last-starts wait (execute §4.5 step 1.6) is a waiting turn too.
+T="$TMP/t2d.jsonl"
+assistant_line 'ROLLOUT-STATUS: demo merged=1/3 running=0 state=waiting reason="last start: held until the Morning at 09:00"' > "$T"
+run_driver "$T" s2d
+[ -z "$OUT" ] && ok "waiting on a last-starts wait allows stop" || fail "last-starts wait: expected empty, got: $OUT"
 
 # --- 3. state=running → block, naming the next steps of the queue loop ---
 T="$TMP/t3.jsonl"
@@ -63,7 +74,7 @@ assistant_line "ROLLOUT-STATUS: demo merged=1/3 running=1 state=running" > "$T"
 run_driver "$T" s3
 echo "$OUT" | grep -q '"decision": "block"' && ok "running: blocks stop" || fail "running: expected block, got: $OUT"
 echo "$OUT" | grep -q 'ROLLOUT-DRIVER: \[\[demo\]\]' && ok "running: reason names the rollout" || fail "running: reason missing slug: $OUT"
-for w in "merged 1/3" "reconcile" "Integration" "merge-task.sh" "next" "Trickle" "Do not end the turn while state=running"; do
+for w in "merged 1/3" "reconcile" "Integration" "merge-task.sh" "next" "Trickle" "last start" "Do not end the turn while state=running"; do
   echo "$OUT" | grep -qF "$w" && ok "running: reason names $w" || fail "running: reason lacks [$w]: $OUT"
 done
 echo "$OUT" | grep -q "cursor" && fail "running: reason still names a cursor: $OUT" || ok "running: no cursor in the reason"
@@ -165,6 +176,56 @@ T="$TMP/t14.jsonl"
 assistant_line "ROLLOUT-STATUS: demo2 merged=0/4 running=2 state=running" > "$T"
 run_driver_msg "task 1 merged, all good" "$T" s14
 echo "$OUT" | grep -q '"decision": "block"' && ok "forgetting net: transcript running still blocks" || fail "forgetting net: expected block, got: $OUT"
+
+# --- 15. p29-10: a halted line from the payload records the halt in the Run record ---
+# mkro <stem> [frontmatter lines…]: a rollout note in the vault; halts <stem>: how many halt lines its record holds
+mkro() {
+  local s=$1; shift
+  { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n## Queue\n\n'; } > "$VAULT/$s.md"
+}
+halts() { python3 -c 'import json,sys
+try: L = [json.loads(x) for x in open(sys.argv[1]) if x.strip()]
+except FileNotFoundError: L = []
+print(sum(d.get("kind") == "stopped" and d.get("cause") == "halt" for d in L))' "$THREAD_EVENTS_DIR/$1.jsonl"; }
+halted() { printf 'ROLLOUT-STATUS: %s merged=0/2 running=1 state=halted reason="%s"' "$1" "$2"; }
+T="$TMP/t15.jsonl"; : > "$T"
+mkro hr
+python3 "$RRPY" emit --rollout hr --kind lead-entry --json '{"by":"stage"}' --ts 2026-10-26T10:00:00Z
+python3 "$RRPY" emit --rollout hr --task a --kind slot-taken --json '{"settings":{"parallel_ceiling":2}}' --ts 2026-10-26T10:01:00Z
+run_driver_msg "$(halted hr "RACE undecided: [[hr-a]]")" "$T" s15
+[ -z "$OUT" ] && ok "halt record: stdout unchanged (empty)" || fail "halt record: stdout changed: $OUT"
+[ "$(halts hr)" = 1 ] && ok "halt record: one stopped halt" || fail "halt record: expected 1 halt, got $(halts hr)"
+python3 -c 'import json,sys
+d = [json.loads(x) for x in open(sys.argv[1])][-1]
+ok = d["kind"] == "stopped" and d["inferred"] is False and d["reason"] == "RACE undecided: [[hr-a]]" and d["calls"] == [{"task": "a"}]
+sys.exit(0 if ok else 1)' "$THREAD_EVENTS_DIR/hr.jsonl" && ok "halt record: live, with its reason and the calls in flight" || fail "halt record: fields: $(tail -1 "$THREAD_EVENTS_DIR/hr.jsonl")"
+run_driver_msg "$(halted hr "RACE undecided: [[hr-a]]")" "$T" s15
+[ "$(halts hr)" = 1 ] && ok "halt record: the same reason again writes none" || fail "halt record: a duplicate halt was written"
+run_driver_msg "$(halted hr "rollout settings refused")" "$T" s15
+[ "$(halts hr)" = 2 ] && ok "halt record: a new reason is a new halt" || fail "halt record: expected 2 halts, got $(halts hr)"
+mkro hp "paused: 2026-10-26T10:30+00:00"
+run_driver_msg "$(halted hp "paused at user request")" "$T" s15
+[ "$(halts hp)" = 0 ] && ok "halt record: none while the note's paused: stands" || fail "halt record: a halt under a pause stamp"
+mkro hq
+python3 "$RRPY" emit --rollout hq --kind paused --json '{"mode":"soft"}' --ts 2026-10-26T10:30:00Z
+run_driver_msg "$(halted hq "paused at user request")" "$T" s15
+[ "$(halts hq)" = 0 ] && ok "halt record: none while the record's pause is open (no stamp)" || fail "halt record: a halt under an open record pause"
+mkro hs "shape: serial"
+run_driver_msg "ROLLOUT-STATUS: hs merged=1/3 running=0 state=halted reason=\"leg stopped: the chain's next task is blocked\"" "$T" s15
+[ "$(halts hs)" = 0 ] && ok "halt record: none for a serial rollout's Leg" || fail "halt record: a Leg's halt was recorded"
+run_driver_msg "$(halted nonote "x")" "$T" s15
+[ ! -e "$THREAD_EVENTS_DIR/nonote.jsonl" ] && ok "halt record: none with no note" || fail "halt record: a record for a note that does not exist"
+mkro hf
+T="$TMP/t15f.jsonl"
+assistant_line "$(halted hf "an old halt")" > "$T"
+run_driver "$T" s15f
+[ "$(halts hf)" = 0 ] && ok "halt record: none from the transcript fallback" || fail "halt record: the transcript fallback recorded a halt"
+mkro hu
+OUT_OK="$(python3 -c 'import json,sys; print(json.dumps({"last_assistant_message": sys.argv[1], "session_id": "s15u"}))' "$(halted hu "x")" \
+  | THREAD_EVENTS_DIR="$VAULT/hu.md/events" python3 "$DRIVER" 2>"$TMP/hu.err")"; rc=$?
+[ "$rc" = 0 ] && [ -z "$OUT_OK" ] && [ ! -s "$TMP/hu.err" ] && ok "halt record: an unwritable record changes no output" || fail "halt record: rc=$rc out=[$OUT_OK] err=[$(cat "$TMP/hu.err")]"
 
 rm -rf "$TMP"
 if [ "$FAILURES" -eq 0 ]; then echo; echo "ALL PASS"; else echo; echo "$FAILURES FAILURE(S)"; exit 1; fi

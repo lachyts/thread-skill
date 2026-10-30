@@ -5,7 +5,9 @@
 # arguments into every positional `$N` in a SKILL.md body, awk's `$0` included (p5-2).
 #
 # Inputs from the environment, each defaulting to empty: slug, shared, pointer.
-# stdout: `<status> <path>` lines only · stderr: `# scanned <dir>` and `handoff-scan:` notes.
+# stdout: `<status> <path>` lines only, <status> one of pending, launch (a pending doc whose front matter carries a
+# non-empty `launches:`: a Rollout launch's, never this thread's continuation; ADR 0057), consumed, legacy (no
+# `status:`) or unknown(<value>) · stderr: `# scanned <dir>` and `handoff-scan:` notes.
 # Exit 0, or 2 when the <home> resolver is missing or prints nothing (then stdout is empty).
 # Always run as `bash "<path>"`. bash 3.2-compatible (macOS).
 : "${slug:=}" "${shared:=}" "${pointer:=}"
@@ -16,9 +18,10 @@ shd="$(bash "$hh" --shared-root)" || shd=''
 if [ -z "$home" ] || [ -z "$shd" ]; then echo "handoff-scan: no <home> (resolver failed)" >&2; exit 2; fi
 thr() { awk '{ sub(/\r$/, "") } NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^thread:/{sub(/^thread:[ \t]*/, ""); print; exit}' "$1" | tr -d "\"'\r" | sed 's/[[:space:]]*$//'; }
 mine() { if [ -n "$slug" ] && [ "$(dirname "$1")" = "$shd/docs/handoffs" ] && [ "$(thr "$1")" != "$slug" ]; then return 1; fi; }
+lch() { awk '{ sub(/\r$/, "") } NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^launches:/{sub(/^launches:[ \t]*/, ""); print; exit}' "$1" | tr -d "\"'\r" | sed 's/[[:space:]]*$//'; }
 cls() {
   s="$(awk '{ sub(/\r$/, "") } NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^status:/{print $2; exit}' "$1" | tr -d "\"'\r" | tr '[:upper:]' '[:lower:]')"
-  case "$s" in pending|consumed) ;; "") s=legacy ;; *) s="unknown($s)" ;; esac
+  case "$s" in pending) if [ -n "$(lch "$1")" ]; then s=launch; fi ;; consumed) ;; "") s=legacy ;; *) s="unknown($s)" ;; esac
   echo "$s $1"
 }
 scan_one() {
