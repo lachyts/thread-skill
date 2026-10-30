@@ -213,7 +213,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      they were dispositioned); branch?; lines?, files? (ints >= 0: the reviewed diff's size); reviewedAt? (UTC ms Z:
                      when the round was reviewed, its doc's first commit; readers order rounds by it, never by ts);
                      blocking?, open?, filed?, recurring?, reversal?, rejected? (ints >= 0, ADR 0058's disposition
-                     counts from the doc's `## Disposition`; blocking includes open). No rollout, no task; lands in
+                     counts from the doc's `## Disposition`; blocking includes open); unconfirmed? (int >= 0,
+                     fresh-review ADR 0001: candidates its checker could not reproduce, filed, never blocking; with
+                     the ledger's STOP rule retired, new lines carry no verdict). No rollout, no task; lands in
                      reviews.jsonl.
   review-verdict  T  round (int >= 1), verdict (approve | changes), findings, original, regression (ints >= 0;
                      original + regression <= findings, the rest unclassified), digest (verdict_digest of the
@@ -1373,7 +1375,8 @@ KINDS = {
                      {"doc": _str, "mode": _str, "effort": _str, "findings": _int(0), "original": _int(0),
                       "regression": _int(0), "verdict": _str, "status": _enum("pending", "consumed"),
                       "branch": _str, "lines": _int(0), "files": _int(0), "reviewedAt": _str, "blocking": _int(0), "open": _int(0),
-                      "filed": _int(0), "recurring": _int(0), "reversal": _int(0), "rejected": _int(0)}),
+                      "filed": _int(0), "recurring": _int(0), "reversal": _int(0), "rejected": _int(0),
+                      "unconfirmed": _int(0)}),
     "review-verdict": (True, {"round": _int(1), "verdict": _enum("approve", "changes"), "findings": _int(0),
                               "original": _int(0), "regression": _int(0), "digest": _str},
                        {"head": _str, **CALL_END}),
