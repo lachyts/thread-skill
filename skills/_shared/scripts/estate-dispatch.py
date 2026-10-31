@@ -41,8 +41,8 @@ write nothing and are byte-deterministic for the same inputs. No subprocess, no 
 any sibling loads). Exit 0 when done; 1 when `log` cannot write a line (run_record's warning above it; orient-all § 8
 and schedule step 8 report it as a caveat); 2 on a usage error or a refusal (one `estate-dispatch:` stderr line,
 nothing written): an unknown verb or flag, a scan, rank or plan that is not JSON or whose `schema` is not 1, a
-negative budget, a bad --status or --wrote, an --open naming no pick entry, an existing slice file, every record refusal, an empty
-decided-for-you --tasks, a grade line whose field
+negative budget, a bad --status or --wrote, an --open naming no pick entry, an existing slice file, every record
+refusal, an empty decided-for-you --tasks, a grade line whose field
 run_record refuses (a task whose name is no slug is skipped, never refused), and preflight's own refusals (an empty
 --tasks; a --kept, --decided or --dep slug outside --tasks; a --dep not given as A=B); 3 when the vault, PyYAML or a
 sibling script is missing.
@@ -1151,7 +1151,7 @@ class Plan:
         self.unparked = set(unparked)
         self.signed = set(signed)
         self.status = status
-        self._clear, self._deps, self._index = {}, {}, None
+        self._clear, self._deps, self._index, self._vault = {}, {}, None, None
         self.open = {}  # the scan's tasks (open: not landed, not archived) by lower-case slug, the first one kept
         for t in self.scan["tasks"]:
             if isinstance(t, dict) and isinstance(t.get("slug"), str):
@@ -1161,6 +1161,12 @@ class Plan:
         if self._index is None:
             self._index = TaskIndex(self.M.RR, Path(self.vroot) / self.M.NA.TASKS_DIR)
         return self._index
+
+    def vault(self):
+        """The vault's NA.Vault, built once: the owners read and rollout_home resolve through it."""
+        if self._vault is None:
+            self._vault = self.M.NA.Vault(self.vroot)
+        return self._vault
 
     def deps(self, slug):
         """[(dependency, why)], in dependsOn[] order: each dependency that would hold the task's rollout row, read as
@@ -1420,7 +1426,7 @@ class Plan:
         of its own whose --status action gives an execute or repair item), and every small project with an Orient task
         (the rank's orient[], parked homes out). A small project's counts are its Orient tasks alone: the pass asks and
         schedules the rest of its work."""
-        waits = waiting_on(self.M, self.rank, self.scan, self.M.NA.Vault(self.vroot))
+        waits = waiting_on(self.M, self.rank, self.scan, self.vault())
         rows = {r["slug"]: r for r in rollouts}
         oriented = {o.get("note"): o for o in self.rank["orient"] if isinstance(o, dict)}
         captured = {}
@@ -1491,11 +1497,11 @@ class Plan:
                               "notes": notes + [None]}}
 
     def rollouts(self):
-        RR, ER, NA = self.M.RR, self.M.ER, self.M.NA
+        RR, ER = self.M.RR, self.M.ER
         rows = [r for r in self.scan["rollouts"] if isinstance(r, dict)]
         named = {ER.slug_key(r["supersedes"]) for r in rows if r.get("supersedes")}
         owners = {}
-        vault = NA.Vault(self.vroot)
+        vault = self.vault()
         for t in self.scan["tasks"]:
             if isinstance(t, dict) and t.get("rollout") and isinstance(t.get("note"), str):
                 owner = vault.note(os.path.join(*t["note"].split("/"))).get("owner")
