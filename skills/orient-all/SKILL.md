@@ -234,12 +234,15 @@ rounds. A Grill task is decided only when every one of its decisions is answered
       carries no `leads the Rollout` part is a candidate when its name is the item's title or contains the rollout
       slug, other than `Repair:` ones. A `leads a Rollout` line names no slug, so its Session is one of these.
       For example, the item for `demo-rollout-2026-10-26` finds `Demo rollout`, whose line carries
-      `leads the Rollout demo-rollout-2026-10-26`; with no such line it finds `Execute: demo-rollout-2026-10-26`.
+      `leads the Rollout demo-rollout-2026-10-26`, and, that Session at rest, the pass relays the item's prompt into
+      `Demo rollout` by its id and raises no card; with no such line it finds `Execute: demo-rollout-2026-10-26`.
       No other Session ever holds an orient or repair item: a running lead in the project holds neither (repair's
       live-queue mode runs beside a lead).
    3. A candidate that is running, waiting, failed, or at rest with background work running: start nothing for the
-      item, and name the Session and its state. Two Sessions whose lines name the slug: start nothing for the item,
-      and name both by id. Two leads of one rollout are Lachy's to settle, and Chorus answers that slug AMBIGUOUS.
+      item, and name the Session by its id, with its state, since a lead's name `<Project> rollout` is shared by the
+      project's other leads. Two or more Sessions whose lines name the slug: start nothing for the item, and name
+      every one by id. Two or more leads of one rollout are Lachy's to settle, and Chorus answers that slug AMBIGUOUS
+      whatever their number.
    4. A candidate at rest with nothing running: a roster candidate needs no read, its line being the Stage's own
       reading. An execute or Leg candidate the names found, not named exactly the item's title, gets one
       `read_session` first, asking only whether it is that rollout's lead or Leg; if not, it is no candidate. Each
@@ -280,7 +283,8 @@ One message of statements, no question:
 - each fork's Decided for you block (schedule step 8), the calls ruled for Lachy, and any it could not write;
 - the fit disagreements: the task, the grader's shape, schedule's outcome;
 - the sessions raised (title → task id: the Stage starts it unless its card says why it waits), relayed (title → the
-  Session's name and id), or held with the Session's state, two roster leads named by id, or the prompts printed;
+  Session's name and id), or held (title → the Session's name, id and state; for two or more roster leads, every one
+  named by id), or the prompts printed;
 - `left[]`: each rollout with its action, its status line and its hold. For action 12 add "check the owner session
   `<owner tag>`, then `/thread:execute [[<rollout>]]`", the tag from `plan.rollouts[].owners`; for a plain pause,
   "paused by you: the reinstate is yours";

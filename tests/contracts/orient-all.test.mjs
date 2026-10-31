@@ -38,9 +38,10 @@
 //   o12 the roster (p34-7): an execute or Leg item's candidates are the Sessions whose `list_sessions` line carries
 //       `leads the Rollout <rollout>` as one of its parts, wherever it stands, its slug equal to the item's rollout
 //       exactly (case aside, never a prefix), whatever the Session's name; the names count only when no line names
-//       the slug (`leads a Rollout` names none), after the roster; a roster candidate is relayed by id, unread; two
-//       roster leads start nothing; a led rollout never gets `create_thread`, and a raise is reported as raised, never
-//       counted as started (§ 7, § 8 and the Don't), with the `Demo rollout` worked example.
+//       the slug (`leads a Rollout` names none), after the roster; a roster candidate is relayed by id, unread; a busy
+//       candidate is held and named by its id; two or more roster leads start nothing, each named by id; a led rollout
+//       never gets `create_thread`, and a raise is reported as raised, never counted as started (§ 7, § 8 and the
+//       Don't), with the `Demo rollout` worked example, relayed into by its id with no card raised.
 // One pure function, check(files, consts), returns the failing rules; every control mutates one place and fails exactly
 // its rule. Reads files only (the python child imports estate-dispatch.py, which runs nothing at import).
 import { test } from 'node:test'
@@ -277,10 +278,13 @@ function check(files, consts) {
     'exactly, case aside, never as a prefix or a part', '`demo-rollout-2026-10-26-2` is no candidate', 'chorus-p89-1',
     "whatever the Session's name, a `Repair:` one included", 'Only when no line names the slug',
     'A `leads a Rollout` line names no slug', 'contains the rollout slug', 'a roster candidate needs no read', 'by its id',
-    'Two Sessions whose lines name the slug', 'never gets `create_thread`', 'is reported as raised, never counted as started',
-    '`unstarted` line', '`Demo rollout`', '`leads the Rollout demo-rollout-2026-10-26`', '`Execute: demo-rollout-2026-10-26`'])
-  const roster = s7.indexOf('leads the Rollout')
-  const names = s7.indexOf('contains the rollout slug')
+    'name the Session by its id, with its state', 'Two or more Sessions whose lines name the slug', 'name every one by id',
+    'never gets `create_thread`', 'is reported as raised, never counted as started', '`unstarted` line', '`Demo rollout`',
+    '`leads the Rollout demo-rollout-2026-10-26`', "relays the item's prompt into `Demo rollout` by its id and raises no card",
+    '`Execute: demo-rollout-2026-10-26`'])
+  // Each anchor is a phrase only its own rule holds: the name rule also says `leads the Rollout`.
+  const roster = s7.indexOf('carries `leads the Rollout <rollout>` as one of its')
+  const names = s7.indexOf("is a candidate when its name is the item's title")
   if (!(roster >= 0 && names >= 0 && roster < names)) flag('o12', `the roster (${roster}) does not come before the names (${names})`)
   if (/line ends `?·? ?leads the Rollout/.test(s7)) flag('o12', 'the roster part is matched by where the line ends')
   if (/counts as started/.test(s7)) flag('o12', 'a raise counts as started')
@@ -288,7 +292,8 @@ function check(files, consts) {
   if (/other than `Repair:` ones/.test(namesCount < 0 ? s7 : s7.slice(0, namesCount))) {
     flag('o12', 'the `Repair:` exclusion reaches the roster rule')
   }
-  need('o12', '§ 8', s8, ['raised (title → task id', 'its card says why it waits'])
+  need('o12', '§ 8', s8, ['raised (title → task id', 'its card says why it waits', "held (title → the Session's name, id and state",
+    'for two or more roster leads, every one named by id'])
   need('o12', "the Don't", dont, ['no `create_thread` for a rollout a Session on the Stage leads by the roster'])
 
   return { fails: [...fails].sort(), details }
@@ -386,17 +391,27 @@ test('control o10: status rules 9 and 10 swapped, or a map that starts on 12, fa
 
 // § 7 step 4.2's worked example, as the file wraps it.
 const EXAMPLE = 'For example, the item for `demo-rollout-2026-10-26` finds `Demo rollout`, whose line carries\n' +
-  '      `leads the Rollout demo-rollout-2026-10-26`; with no such line it finds `Execute: demo-rollout-2026-10-26`.'
-test('control o12: a lead found by name alone or by where its line ends, a loose slug match, the names beside the roster, `leads a Rollout` unsaid, a roster Repair excluded, a led rollout raised, a raise counted as started, or the worked example gone fails o12 alone', () => {
+  "      `leads the Rollout demo-rollout-2026-10-26`, and, that Session at rest, the pass relays the item's prompt into\n" +
+  '      `Demo rollout` by its id and raises no card; with no such line it finds `Execute: demo-rollout-2026-10-26`.'
+// § 7 step 4.2's name-rule sentences, as the file wraps them, and the roster sentence they follow.
+const NAMES = 'Only when no line names the slug, the names count, for Sessions named before chorus-p89-1. A Session whose line\n' +
+  "      carries no `leads the Rollout` part is a candidate when its name is the item's title or contains the rollout\n" +
+  '      slug, other than `Repair:` ones. A `leads a Rollout` line names no slug, so its Session is one of these.\n      '
+const ROSTER = "An execute or Leg item's candidates are the Sessions whose `list_sessions` line"
+test('control o12: a lead found by name alone or by where its line ends, a loose slug match, the names beside or ahead of the roster, `leads a Rollout` unsaid, a roster Repair excluded, a busy or doubled lead unnamed by id, a led rollout raised, a raise counted as started, or the worked example gone fails o12 alone', () => {
   only(swap(FILES, SKILL, 'carries `leads the Rollout <rollout>` as one of its ` · `-separated parts', "name is the item's title"),
     CONSTS, ['o12'], 'by name')
   only(swap(FILES, SKILL, 'carries `leads the Rollout <rollout>` as one of its ` · `-separated parts, wherever it stands (a relay line may follow it)',
     'ends `· leads the Rollout <rollout>`'), CONSTS, ['o12'], 'line ends')
   only(swap(FILES, SKILL, 'exactly, case aside, never as a prefix or a part', 'case aside'), CONSTS, ['o12'], 'loose slug')
   only(swap(FILES, SKILL, 'Only when no line names the slug, the names count', 'Beside it, the names count'), CONSTS, ['o12'], 'names beside')
+  only(swap(swap(FILES, SKILL, NAMES, ''), SKILL, ROSTER, NAMES.trimEnd() + ' ' + ROSTER), CONSTS, ['o12'], 'names ahead')
   only(swap(FILES, SKILL, 'A `leads a Rollout` line names no slug, so its Session is one of these.', ''), CONSTS, ['o12'], 'leads a Rollout')
   only(swap(FILES, SKILL, "whatever the Session's name, a `Repair:` one included", 'other than `Repair:` ones'), CONSTS, ['o12'], 'roster Repair')
   only(swap(FILES, SKILL, '; a rollout a Session on the Stage leads by the roster never gets `create_thread`', ''), CONSTS, ['o12'], 'led raised')
   only(swap(FILES, SKILL, 'is reported as raised, never counted as started', 'counts as started'), CONSTS, ['o12'], 'raise started')
   only(swap(FILES, SKILL, EXAMPLE, ''), CONSTS, ['o12'], 'example')
+  only(swap(FILES, SKILL, 'name the Session by its id, with its state', 'name the Session and its state'), CONSTS, ['o12'], 'busy by name')
+  only(swap(FILES, SKILL, 'Two or more Sessions whose lines name the slug: start nothing for the item, and name\n      every one by id',
+    'Two Sessions whose lines name the slug: start nothing for the item, and name\n      both by id'), CONSTS, ['o12'], 'exactly two')
 })
