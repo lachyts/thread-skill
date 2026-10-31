@@ -6,7 +6,9 @@ description: 'Orient across every project at once: the estate pass. Scans the va
 # /thread:orient-all — the estate pass
 
 Orient at estate altitude (ADR 0041; CONTEXT.md **Estate pass**): one look across every project in the vault that
-asks Lachy only what he must decide, within the minutes he gives it, then puts the ready work in motion. Scripts
+sweeps up the work needing little of Lachy's thinking. A small project's quick calls are asked, within the minutes he
+gives it, and its ready work is put in motion; a big project (CONTEXT.md **Big project**, ADR 0061) keeps its own
+session, and reaches him only through the pick list at the end (§ 7), which starts only what he ticks. Scripts
 scan, the model decides: the scan, the ranking, the cut to the budget, the dispatch plan and every write are script
 verbs; this session grades (through agents), reads status (through agents), asks, and matches the sessions to start
 against the Stage's.
@@ -67,7 +69,8 @@ asks: its budget is `--budget`, else 30. The budget is his (Owner *yours*: his t
    one file per home project with gradeable tasks.
 4. In one message, start every agent, each read-only:
    - one grading agent per slice file. Its brief is `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`
-     § The grading agents, the slice file's path, and "return only the § Output JSON";
+     § The grading agents, the slice file's path, and "return only the § Output JSON". A big project's slice is
+     graded too, for the pick list's counts and the Grade log only: none of its decisions reaches this pass's rounds;
    - one status agent per rollout in the scan's `rollouts[]`. Its brief: "run `/thread:status [[<rollout>]]` and
      return four things, writing nothing: its Recommended action line verbatim; the number (1–13) of the status § 4
      **Recommended action** rule that matched; the command that line names; and its Needs you lines".
@@ -77,9 +80,10 @@ asks: its budget is `--budget`, else 30. The budget is his (Owner *yours*: his t
 6. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan "$S/scan.json" --grades <each grades file> --compact > "$S/rank.json"`.
 7. Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank "$S/rank.json" --scan "$S/scan.json"`:
    one line per graded task into the Grade log (CONTEXT.md **Grade log**), which the weekly Reflection reads against
-   what followed each grade. A task whose note name is no slug (spaces or capitals) is skipped, named on stderr and
-   counted in the outcome line (`; <k> skipped (not a slug): …`), and the rest are logged. A skip or a non-zero exit
-   is a § 8 caveat, and the pass goes on.
+   what followed each grade. A titled note (spaces, capitals, an em dash) is logged under a key made from its name,
+   the name kept beside it; only a name with no key (no ASCII letter or digit, or another graded task's key) is skipped,
+   named on stderr and counted in the outcome line (`; <k> skipped (no key): …`), and the rest are logged. A skip or a
+   non-zero exit is a § 8 caveat, and the pass goes on.
 
 ### 3. The Ranked slate
 
@@ -91,9 +95,11 @@ Print a glance, short lines, not a wall:
 - `top[]`, each with its grade, shape, leverage and any deadline;
 - each live rollout, with its status agent's Recommended action line and action number;
 - the runs, with their Review load;
-- the projects graded Orient, which get their own orient session whatever the budget;
+- `rounds.ownSession[]`: what waits on each big project's own session (its ready work, its One calls, Grills and
+  Orient tasks, its sign-offs, a held Unpark offer), none of it asked here; the pick list comes at the end (§ 7);
 - the Unpark offers;
-- the warnings, and the ungraded and invalid tasks.
+- the warnings, and the ungraded and invalid tasks; `rounds.warnings[]` names each `orient:` key the scan could not
+  read.
 
 The glance ends with each asked sign-off (`signOffs[]` with `ask: true`), immediately before § 4's first call:
 
@@ -111,6 +117,11 @@ question text to its item, and each picked label to its full option text (`texts
 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1): a sign-off is his authorisation (ADR 0008), a One call his by
 the grade (the grade ruled every other decision), and an Unpark offer his standing call; each question carries the
 Framing from the grade (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 6).
+
+A big project's One calls, Grills, sign-offs and Unpark offer never reach this round (ADR 0061): `rounds` leaves them
+out, uncharged (a sign-off's `why` is `own session`, unless an unread status, a pause or a drain holds it first, as it
+would a small project's), and § 8 names each as waiting on that project's own session. A small task that waits on a
+big project's task is left out the same way, in `skipped[]` with its `ownSession`.
 
 Act on each answer as it lands:
 
@@ -135,7 +146,7 @@ Act on each answer as it lands:
   - kill: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py kill <note>`.
 
 An answer that defers or drops the work, rather than picking an option, is still recorded, and the task is not
-decided. Sign-offs are always asked, whatever the budget.
+decided. Sign-offs are always asked, whatever the budget, a big project's aside.
 
 ### 5. Grill rounds
 
@@ -150,7 +161,10 @@ rounds. A Grill task is decided only when every one of its decisions is answered
 
 ### 6. Schedule
 
-1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py plan --rank "$S/rank.json" --scan "$S/scan.json" --decided <each decided slug> --unparked <each note unparked> --signed <each slug signed> > "$S/plan.json"`.
+1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py plan --rank "$S/rank.json" --scan "$S/scan.json" --decided <each decided slug> --unparked <each note unparked> --signed <each slug signed> --status <rollout>=<N> > "$S/plan.json"`,
+   one `--status` per status agent's action number (an unread one left out), as § 7 passes them: the pick list counts
+   a big project's live-rollout item it holds. A big project's run waits `own session` (ADR 0061): nothing of it is
+   scheduled here, and `plan.pick[]` carries it to § 7.
 2. Give each `plan.schedule[]` entry one forked subagent, whose prompt is `/thread:schedule <entry.args>`, then the
    line `Under orient-all § 6: name the note with slug <entry.projectSlug>; root <entry.root>; Pre-flight: rank $S/rank.json, scan $S/scan.json, decided <each decided slug among entry.members, or none>.`
    Run batch 1's
@@ -200,10 +214,25 @@ rounds. A Grill task is decided only when every one of its decisions is answered
 
 ### 7. Start
 
-1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> --status <rollout>=<N> > "$S/sessions.json"`,
+**The pick list first.** Print `plan.pick[]`, ranked, one line each (its name, big or small, and its counts), then,
+unless it is empty, pass `plan.pickAsk` to AskUserQuestion's `questions` verbatim, whatever the budget (a budget of 0
+and a Grill "stop" included): one multiSelect question of the top 3 projects and `Not now` (Owner *yours*: where his
+attention goes, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 6). `Not now`, no tick or a typed "none" opens
+nothing.
+
+Each ticked label goes to `sessions` as `--open <label>`, and his typed words go verbatim as `--typed <his words>`:
+`sessions` matches them against `plan.pick[]`, any project on it included, and words that match nothing come back in
+`unmatched[]` for § 8. Only a ticked project starts: its orient session, and its live rollouts' allow-list items. A
+ticked big project also starts `/thread:repair [[<rollout>]]` for each live rollout whose pending sign-offs a repair
+can ask (no drain, and no pause but the sign-off pause), even where status gives it no item (an unsigned gate under
+the sign-off pause reads action 8): `/thread:orient` has no sign-off step, and repair § 1 runs `approve-gates`. A
+ticked label opens its own option alone; two projects of one name are each linked by the note's path and numbered.
+
+1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> --status <rollout>=<N> [--open <label>]... [--typed <his words>] > "$S/sessions.json"`,
    one `--status` per status agent's action number; an unread one is left out. It returns `items[]`, already in
    start order (execute and Leg items, then repair, then orient last), and `left[]`: every live rollout that gets no
-   item, with its action and its holds. Start exactly `items[]`, never another.
+   item, with its action and its holds (a big project's one not ticked is held `own session`, with the item it would
+   get). Start exactly `items[]`, never another.
 2. **The allow-list.** `sessions` applies it; the table is here for the reader, and its numbers are status § 4's
    **Recommended action** rules:
 
@@ -224,17 +253,38 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    2. **Candidates, by item kind.** An orient item's only candidates are Sessions named exactly the item's `title`,
       and a repair item's only Sessions named exactly its `title`: the name `create_thread` was given, `Orient: <project>`
       or `Repair: <rollout>` as `sessions` cuts it to 60 characters with `…`, so a long name never matches its uncut
-      form. An execute or Leg item's are the Sessions whose name is the item's title or contains the rollout slug,
-      other than `Repair:` ones. No other Session ever holds an orient or repair item: a running lead in the project
-      holds neither (repair's live-queue mode runs beside a lead).
+      form. An execute or Leg item's candidates are the Sessions whose `list_sessions` line
+      carries `leads the Rollout <rollout>` as one of its ` · `-separated parts, wherever it stands (a relay line may follow it).
+      That part's slug, the whole word after `leads the Rollout`, equals the item's `rollout` (the note stem)
+      exactly, case aside, never as a prefix or a part. A line naming `demo-rollout-2026-10-26-2` is no candidate for
+      `demo-rollout-2026-10-26` (chorus-p89-1, Chorus ADR 0077 as amended 2026-10-27).
+      A roster line makes its Session a candidate whatever the Session's name, a `Repair:` one included.
+      Only when no line names the slug, the names count, for Sessions named before chorus-p89-1. A Session whose line
+      carries no `leads the Rollout` part is a candidate when its name is the item's title or contains the rollout
+      slug, other than `Repair:` ones. A `leads a Rollout` line names no slug, so its Session is one of these.
+      For example, the item for `demo-rollout-2026-10-26` finds `Demo rollout`, whose line carries
+      `leads the Rollout demo-rollout-2026-10-26`, and, that Session at rest, the pass relays the item's prompt into
+      `Demo rollout` by its id and raises no card; with no such line it finds `Execute: demo-rollout-2026-10-26`.
+      No other Session ever holds an orient or repair item: a running lead in the project holds neither (repair's
+      live-queue mode runs beside a lead).
    3. A candidate that is running, waiting, failed, or at rest with background work running: start nothing for the
-      item, and name the Session and its state.
-   4. A candidate at rest with nothing running: an execute or Leg candidate not named exactly the item's title gets
-      one `read_session` first, asking only whether it is that rollout's lead or Leg; if not, it is no candidate. Each
-      Session is read at most once in the pass. Every candidate left (an orient or repair one, an execute or Leg one
-      named exactly the item's title, or one the read confirmed) gets `relay_session` with the item's prompt.
-   5. No candidate: `create_thread` with the item's `title`, `prompt`, `tldr` and `cwd`. A `Raised (task_id: …)`
-      result counts as started; an error becomes a manual prompt.
+      item, and name the Session by its id, with its state, since a lead's name `<Project> rollout` is shared by the
+      project's other leads. Two or more Sessions whose lines name the slug: start nothing for the item, and name
+      every one by id. Two or more leads of one rollout are Lachy's to settle, and Chorus answers that slug AMBIGUOUS
+      whatever their number.
+   4. A candidate at rest with nothing running: a roster candidate needs no read, its line being the Stage's own
+      reading. An execute or Leg candidate the names found, not named exactly the item's title, gets one
+      `read_session` first, asking only whether it is that rollout's lead or Leg; if not, it is no candidate. Each
+      Session is read at most once in the pass. Every candidate left (an orient or repair one, a roster one, an
+      execute or Leg one named exactly the item's title, or one the read confirmed) gets `relay_session` with the
+      item's prompt, the Session named by its id: a lead is named `<Project> rollout`, a name the project's other
+      leads share.
+   5. No candidate: `create_thread` with the item's `title`, `prompt`, `tldr` and `cwd`.
+      An execute or Leg item for a rollout a Session on the Stage leads by the roster never gets `create_thread`;
+      a repair item beside its lead still does. A `Raised (task_id: …)` result
+      is reported as raised, never counted as started: the Stage starts the card unless it holds it. A held card stays
+      open as Lachy's offer, its `unstarted` line saying why (`"<name>" leads this Rollout on the Stage: …` when a lead
+      appeared after the list, or another of the Stage's holds). An error becomes a manual prompt.
    6. With `create_thread` but no `list_sessions`, only the items for notes this pass wrote are started; every other
       item becomes a paste-ready prompt.
 5. **Off the Stage**: one fenced block per item, in `items[]` order: `cd <cwd>` (for a Leg, `<alias> from <folder>`),
@@ -243,7 +293,10 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    labelled manual hand-over.
 
 Child orients start after every execute, so a lead's first `next` has marked its note started before an orient could
-see it, and the orient prompt's second line names the note this pass wrote for that project.
+see it, and the orient prompt's second line names the note this pass wrote for that project. Only a project ticked on
+the pick list gets one, its prompt's last line saying so: a big project's that its One calls and Grills are asked
+there and its rollout scheduled there, after one line per sign-off repair started beside it, naming the gates and
+leaving them to it; a small project's only that it was ticked for its Orient tasks.
 
 ### 8. Report
 
@@ -262,11 +315,21 @@ One message of statements, no question:
 - each schedule's note, or its stop line;
 - each fork's Decided for you block (schedule step 8), the calls ruled for Lachy, and any it could not write;
 - the fit disagreements: the task, the grader's shape, schedule's outcome;
-- the sessions started (title → task id), relayed, or held with the Session's state, or the prompts printed;
+- the sessions raised (title → task id: the Stage starts it unless its card says why it waits), relayed (title → the
+  Session's name and id), or held (title → the Session's name, id and state; for two or more roster leads, every one
+  named by id), or the prompts printed;
 - `left[]`: each rollout with its action, its status line and its hold. For action 12 add "check the owner session
   `<owner tag>`, then `/thread:execute [[<rollout>]]`", the tag from `plan.rollouts[].owners`; for a plain pause,
   "paused by you: the reinstate is yours";
 - the waiting runs, each with its why;
+- the pick list: each project opened, each offered and not ticked, the candidates past the top 3 (the rest of
+  `plan.pick[]`), and `sessions.unmatched[]` as "not on the pick list: <words>";
+- each big project's waiting work (`rounds.ownSession[]`) as "waits on [[<project>]]'s own session";
+- each sign-off held `own session`: "waits on [[<project>]]'s own session: tick it on the next pass's pick list,
+  which starts `/thread:repair [[<rollout>]]` to ask it, or run that yourself";
+- each `left[]` row held `own session`, with its item's command (`/thread:execute [[<rollout>]]` or
+  `/thread:repair [[<rollout>]]`);
+- each `skipped[]` small task with an `ownSession`, as "waits on [[<slug>]] in [[<project>]]'s own session";
 - the held and undecided members, each held one with its `blockedBy` whys (a `dependency scheduled late` one goes
   next pass; a `dependency dropped` or `dependency not found` one goes only once its `depends-on:` link changes);
 - the session-lane work, listed and never started;
@@ -278,26 +341,29 @@ with no tool call and no question.
 ### 9. Dry run
 
 Runs §§ 2–3 (not § 2 step 7) with the budget, then
-`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py plan --rank "$S/rank.json" --scan "$S/scan.json" --rounds "$S/rounds.json" --assume-answered > "$S/plan.json"`
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py plan --rank "$S/rank.json" --scan "$S/scan.json" --rounds "$S/rounds.json" --assume-answered --status <rollout>=<N> > "$S/plan.json"`
 and `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan "$S/plan.json" --status <rollout>=<N>`,
-with no `--wrote`. It assumes every in-budget decision answered, nothing signed and nothing unparked. Then
+with no `--wrote`. It assumes every in-budget decision answered, nothing signed, nothing unparked and nothing ticked
+on the pick list, so `sessions` gets no `--open` or `--typed`. Then
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py decided-for-you --rank "$S/rank.json" --tasks <every plan.schedule[] member>`,
 with no `--write`, lists the calls the forks would write.
 
 It prints the slate (§ 3's glance), the decision batch (each AskUserQuestion call's questions, then the grill list,
 each in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), the Decided for you list and the dispatch
 plan: each batch's schedule args with the execute or Leg 1 each would start, then each item with its cwd and prompt,
-and `left[]`.
+and `left[]`, then the pick list (`plan.pick[]` and `plan.pickAsk`, printed, never asked).
 
-It asks nothing, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `decided-for-you --write`, `approve-gates`,
+It asks nothing, the pick list included, and writes only under `$S`. It never runs `record`, `estate-dispatch.py log`, `decided-for-you --write`, `approve-gates`,
 `estate-rank.py snooze`, `unpark` or `kill`, a schedule fork, `list_sessions`, `read_session`, `relay_session` or
 `create_thread`.
 
 ## Don't
 
-- Reshape a project: Orient-graded work goes to its own orient session.
+- Reshape a project, or ask, schedule or start anything of a big project's (ADR 0061) unless it was ticked on the pick
+  list: Orient-graded work goes to its own orient session, once ticked.
 - Start, relay or move a live rollout other than through `sessions`' items: never on status actions 1–5, 9, 10 or 12,
-  nor on a plain `paused:`. Never start a second lead.
+  nor on a plain `paused:`. Never start a second lead: no `create_thread` for an execute or Leg item for a rollout
+  a Session on the Stage leads by the roster.
 - Relay into a Session the list shows running, waiting, failed or busy with background work, or read a Session for
   its state.
 - Let any Session but one named exactly the orient item's `title` hold a child orient.
@@ -306,5 +372,5 @@ It asks nothing, and writes only under `$S`. It never runs `record`, `estate-dis
 - Schedule a run that waits, run two batches at once, route a fork's misfits, or run its follow-up line.
 - Supersede anything: no `--regenerate`.
 - Write `start: unattended`.
-- Ask past the budget, sign-offs aside.
+- Ask past the budget, sign-offs and the pick list aside.
 - Call the question tool from a fork or an agent.

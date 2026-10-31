@@ -202,7 +202,11 @@ lane, so the hand-off runs (ADR 0046, ADR 0048).
 **Sent here by schedule's unfinished-rollout refusal.** Repair sorts out what is stuck; superseding stays
 schedule's `--regenerate`. A refusal line `<P> is named by the supersedes: of <N>, which has since run` is
 the **Close-out interrupted** stop above: run `/thread:repair [[<P>]]`, and on Lachy's confirmation it closes
-P out, so schedule's check no longer counts P.
+P out, so schedule's check no longer counts P. A stuck serial chain (ADR 0060) holds only its unlanded rows' surfaces,
+and a parallel rollout awaiting sign-off or halted on its set-asides holds no Project root against serial chains. So a
+refusal that names one of them is about a place its waiting rows still hold. Resolving those rows (§ 7 (b), or § 3 to
+§ 6 for a parallel one) is what frees it, and a place it released never refuses: schedule's `WARN: … released …` line
+says so.
 
 ### 2. Classify each unmerged task
 
@@ -806,6 +810,10 @@ The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever
     The task reads claimable, and the next Leg's claim re-enters it with his answer as its latest `## Repair input`
     (`skills/execute/legs.md` § The task loop).
   - Leave: it stays set aside, and nothing more is asked this run.
+
+  After a hand-back or a sign-off the chain is no longer stuck, so it reclaims its whole claim for new schedules, and
+  the next Leg's `begin` re-checks what it writes (ADR 0060). A place another chain took while this one was stuck
+  makes that Leg wait its turn: (e)'s `surface held by` blocker.
 - **Defer, dependency-aware** (§ 5's steps 1 and 3): read the row's `dependants` from `leg.py status`: its
   depends-on and blocked-by closure, transitive, through `merged_into:` tombstones, read the way next holds a
   dependency.
@@ -844,6 +852,10 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
    - `restart Leg N (<how>)` → only with `--replace` in step 2, after its own check: for `started` (its id is
      `restarted.started`), `list_sessions` shows that id gone; for `pending` or `manual`, Lachy says it never started.
      With `restart.takeOver`, (d)'s evidence for Leg K too, and the prompt is the take-over form.
+   - `surface held by [[B]] (<token>)` → never restart (ADR 0060): the chain waits its turn. Another chain, scheduled
+     on a place this one released while it was stuck, holds a place the next Leg writes, and its `begin` would only
+     stand at exit 3. Report it, with `/thread:status [[B]]`, and stop. Re-run this repair, or `/thread:execute`, once
+     [[B]] lands its rows there. `surface re-check failed: <line>` → report the line, and stop.
    - null → by `chain`: stalled; awaiting-successor with no hand-over line, or a manual one Lachy says he has not
      pasted; stopped, on his word; completable, not-started or ready, on his ask.
    - Anything else → report it, and stop.
