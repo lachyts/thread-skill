@@ -112,7 +112,7 @@ run_in "$D/F" --slots 0 -- true; rc=$?
 ok "$rc" 2 "W1c: run --slots 0 → exit 2"
 p=$(startpid "$D/F")
 ok "$([ -n "$p" ] && head -1 "$D/F" | grep -c '^verify-slot: run .* started; wait for its verdict with: ')" 1 "W1c: the start line first"
-ok "$(grep -c '^usage: verify-slot.py run --slots N' "$D/F")" 1 "W1c: then the usage text"
+ok "$(grep -c '^usage: verify-slot.py run \[--slots N\]' "$D/F")" 1 "W1c: then the usage text"
 ok "$(tail -1 "$D/F")" "verify-slot: exit 2 (run $p)" "W1c: the exit line last"
 
 # ======== W1d: the Run-record path ============================================================================

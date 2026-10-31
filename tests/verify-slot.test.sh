@@ -5,22 +5,23 @@
 #   V1  rc and stdout pass through, no waiting line   V2  the cap: at most N of eight runs (six `run`, two lead
 #   verifies) at once, all eight ran   V3  a wrapper SIGKILLed while its TERM-ignoring command runs: the waiter
 #   behind it sees no overlap   V4  a command's background leftover holds no slot and is not killed   V5  TERM to
-#   `run` (holding: 143; waiting with --priority: 76, no verdict, p32-1)   V6  usage   V7  the dir chain; an unusable
-#   dir fails open
+#   `run` (holding: 143; waiting with --priority: 76, no verdict, p32-1)   V6  usage (a missing --slots is none, p34-1:
+#   rollouts.toml's verify_slots)   V7  the dir chain; an unusable dir fails open
 #   V8  status   V9a the lead's verify goes before a waiting agent   V9b so does `run --priority`   V10 stale
 #   waiter files are reaped, a locked one is not   V11 a lead verify SIGKILLed while waiting leaves a stale waiter
 #   file, reaped next   V12 a kill of the wrapper's whole process group   V13 the guard SIGKILLed alone   V14
 #   release is a close (a co-holder keeps the slot)   V15 a failure injected after the spawn: the slot stays held
 #   until the suite's group is gone   V16 no code calls fcntl.LOCK_UN; the header's close-only contract   V17 the
 #   bounded slot wait (p32-1): `--slot-wait S` (or `=S`) runs out → 76 and a no-verdict line, the command never run;
-#   `--slot-wait 0` is one try, and a free slot is still taken   V18 a bad `--slot-wait` is usage (exit 2)   V19 with
+#   `--slot-wait 0` is one try, and a free slot is still taken while nobody is in line   V18 a bad `--slot-wait` is usage (exit 2)   V19 with
 #   no `--slot-wait`, `run` waits RUN_SLOT_WAIT (4800 s), reconcile-rollout.py's _slot_wait at the default 1800. The Run record
 #   (p29-10, contract item 8): VR1 a suite in a task tree records its start and end (sha, load, count, failing), its
 #   output still split   VR2 --priority   VR3 TERM ends it stopped, the slot free; a SIGKILL leaves no ended line
 #   VR4 no task tree or no note: no record, as today   VR5 a dirty tree   VR6 a green run names no failing   VR7 a
 #   TERM while suite-started walks the vault: never swallowed (76, no verdict: the suite never runs, no line, the slot
 #   free)   VR7b a TERM after the suite-started line, before the spawn: 76, a stopped line with no rc, the slot free
-#   VR8 a bounded slot wait that runs out in a task tree (p32-1): 76, never run, no line, never an unslotted run.
+#   VR8 a bounded slot wait that runs out in a task tree (p32-1): 76, never run, no line, never an unslotted run
+#   VR9 a TERM while a task tree's `run` with no --slots resolves its slot count (p34-1): 76, no line, the slot free.
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound (60 to 300 s) only slows a real failure; a pid is "alive" only when `kill -0` succeeds AND its `ps`
 # state is not Z (an unreaped zombie runs nothing). Every background pid is recorded and stopped only by that pid.
@@ -171,10 +172,15 @@ touch "$D/t2.go"; wait "$(w t2)"
 # ======== V6: usage ========================================================================================
 pool v6
 for a in "--slots 0 -- true" "--slots -1 -- true" "--slots abc -- true" "--slots 1.5 -- true" "--slots +1 -- true" "--slots 1_0 -- true" "--slots 1 true" \
-         "--slots 1 --" "--priority -- true" "--slots 1 --prio -- true" "-- true"; do
+         "--slots 1 --" "--slots 1 --prio -- true"; do
   python3 "$VS" run $a > /dev/null 2>&1; ok "$?" 2 "V6: run $a → exit 2"
 done
 python3 "$VS" > /dev/null 2>&1; ok "$?" 2 "V6: no verb → exit 2"
+mkdir -p "$D/h"   # an empty HOME: no rollouts.toml, so a missing --slots is the built-in 2 (p34-1)
+HOME="$D/h" python3 "$VS" run -- true 2> "$D/nos.err"; rc=$?
+ok "$rc|$(grep -c WARN "$D/nos.err")" "0|0" "V6: run -- true (no --slots) → 0, its slots from rollouts.toml (none here: the built-in)"
+HOME="$D/h" python3 "$VS" run --priority -- true; rc=$?
+ok "$rc|$(nwaiters)" "0|0" "V6: run --priority -- true (no --slots) → 0, no waiter file left"
 python3 "$VS" run --slots 1 --priority -- true; rc=$?
 ok "$rc|$(nwaiters)" "0|0" "V6: run --slots 1 --priority -- true → 0, no waiter file left"
 ok "$(python3 "$VS" run --slots 1 -- sh -c 'echo "$1"' sh --priority)" "--priority" "V6: a --priority after -- reaches the command"
@@ -183,7 +189,7 @@ ok "$(python3 "$VS" run --slots 1 -- sh -c 'echo "$1"' sh --priority)" "--priori
 pool v7
 mkdir -p "$D/h"
 dirof() { python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])'; }
-ok "$(THREAD_VERIFY_SLOTS_DIR="$D/ov" python3 "$VS" status | dirof)" "$D/ov" "V7: THREAD_VERIFY_SLOTS_DIR wins"
+ok "$(THREAD_VERIFY_SLOTS_DIR="$D/ov" HOME="$D/h" python3 "$VS" status | dirof)" "$D/ov" "V7: THREAD_VERIFY_SLOTS_DIR wins"
 ok "$(THREAD_VERIFY_SLOTS_DIR= XDG_STATE_HOME="$D/xdg" HOME="$D/h" python3 "$VS" status | dirof)" "$D/xdg/thread/verify-slots" "V7: an empty override is unset; then XDG_STATE_HOME"
 ok "$(THREAD_VERIFY_SLOTS_DIR= XDG_STATE_HOME=rel HOME="$D/h" python3 "$VS" status | dirof)" "$D/h/.local/state/thread/verify-slots" "V7: a relative XDG_STATE_HOME is ignored"
 ok "$(env -u THREAD_VERIFY_SLOTS_DIR -u XDG_STATE_HOME HOME="$D/h" python3 "$VS" status | dirof)" "$D/h/.local/state/thread/verify-slots" "V7: else HOME/.local/state"
@@ -354,7 +360,8 @@ has "$(sed -n '1,/^"""$/p' "$VS")" "Release closes the fd and never calls LOCK_U
 
 # ======== V17: the bounded slot wait (p32-1) =================================================================
 # An agent's `run` bounds its own slot wait (RUN_SLOT_WAIT, 4800 s, by default): once it runs out, no verdict (76), the
-# command never run. `--slot-wait 0` is one try, as lead-integrate.py's `verify --slot-wait 0`.
+# command never run. `--slot-wait 0` is one try, as lead-integrate.py's `verify --slot-wait 0`, and takes a free slot while
+# nobody is in line.
 pool v17
 hold h 1
 python3 "$VS" run --slots 1 --slot-wait 1 -- touch "$D/a.ran" > /dev/null 2> "$D/a.err"; rc=$?
@@ -541,6 +548,49 @@ ok "$(recq '[d["kind"] for d in L]')" '[]' "VR8: … and no line in the Run reco
 touch "$D/h8.go"; wait "$(w h8)"
 within 60 is_free 0 1 && s=free || s="still held after 60 s"
 ok "$s" free "VR8: once the holder is released, the slot is free"
+
+# VR9 (p34-1): the slot count resolved on the recorded path, inside its handlers. A task tree's `run` with no --slots reads
+# rollouts.toml (verify_slots = 3 under VH) on a python with no tomllib (blocked), so its resolver candidate runs: slowpy,
+# which never answers. A TERM then is no verdict (76), the candidate killed and reaped, no line, the slot free.
+: > "$VEV/r1.jsonl"
+mkdir -p "$VH/.config/thread"; printf '[defaults]\nverify_slots = 3\n' > "$VH/.config/thread/rollouts.toml"
+printf '#!/bin/sh\necho $$ > "$SLOWPID"\nexec sleep 300\n' > "$D/slowpy"; chmod +x "$D/slowpy"
+cat > "$D/vr9.py" <<'PY2'
+import importlib.util, sys
+class NoToml:   # this python reads as one with no tomllib (python 3.9's /usr/bin/python3)
+    def find_spec(self, name, path=None, target=None):
+        if name == "tomllib":
+            raise ModuleNotFoundError("No module named 'tomllib' (blocked by the test)", name=name)
+        return None
+sys.meta_path.insert(0, NoToml())
+sys.modules.pop("tomllib", None)
+spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1])
+vs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vs)
+vs.RESOLVE_TIMEOUT = 120
+recorded = vs._run_recorded
+def mark(*a, **k):   # proves the Run-record path was taken
+    open(sys.argv[2], "w").close()
+    return recorded(*a, **k)
+vs._run_recorded = mark
+sys.exit(vs.main(["run", "--", "sh", "-c", "touch " + sys.argv[3]]))
+PY2
+(cd "$TREE" && HOME="$VH" THREAD_EVENTS_DIR="$VEV" THREAD_TOML_PYTHONS="$D/slowpy" SLOWPID="$D/vr9.slow" \
+  exec python3 "$D/vr9.py" "$VS" "$D/vr9.recorded" "$D/vr9.ran") > "$D/vr9.out" 2> "$D/vr9.err" &
+vp=$!; pids+=($vp)
+within 30 nonempty "$D/vr9.slow" && s=started || s="slowpy never started in 30 s"
+ok "$s" started "VR9: a task tree's run with no --slots, no tomllib: its resolver candidate (slowpy) started"
+kill -TERM "$vp"; wait "$vp"; rc=$?
+ok "$rc" 76 "VR9: a TERM while it resolves → 76 (no verdict)"
+ok "$(grep '^verify-slot: ' "$D/vr9.err" | tail -2)" "verify-slot: no verdict: stopped before the suite started; exit 76
+verify-slot: exit 76 (run $vp)" "VR9: … its no-verdict line, then its exit line"
+ok "$([ -e "$D/vr9.recorded" ] && echo recorded || echo plain)|$([ -e "$D/vr9.ran" ] && echo ran || echo never)" "recorded|never" \
+  "VR9: … on the Run-record path, the suite never ran"
+ok "$(recq '[d["kind"] for d in L]')" '[]' "VR9: … and no line in the Run record"
+within 30 gone "$(cat "$D/vr9.slow")" && s=gone || s="slowpy alive after 30 s"
+ok "$s" gone "VR9: … the resolver child is gone"
+ok "$(slot_state 0 1)" free "VR9: … the slot is free"
+rm -f "$VH/.config/thread/rollouts.toml"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot: ALL PASS" || echo "verify-slot: SOME FAILED"
 exit "$fail"
