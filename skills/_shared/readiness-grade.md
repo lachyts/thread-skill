@@ -36,8 +36,8 @@ The lead runs one read-only agent per home project with gradeable tasks, side by
 Each agent returns one JSON object (§ Output). The lead saves each answer to a scratch file and runs the ranker over
 all of them (§ The ranking). A big project's tasks (CONTEXT.md **Big project**, ADR 0060) are graded the same way, for
 the pick list's counts and the Grade log only: their decisions wait for that project's own session, where schedule's
-Pre-flight (schedule § 1.5) puts them to Lachy. An answer that does not parse, or a task the ranker lists in `invalid[]` (a decision of
-his without `goal` or `stakes` among the causes), gets one re-ask that names its errors; anything still invalid after that is shown as ungraded, never guessed. The agent
+Pre-flight (schedule § 1.5) puts them to Lachy. An answer that does not parse, or a task the ranker lists in
+`invalid[]` (a decision of his without `goal` or `stakes` among the causes), gets one re-ask that names its errors; anything still invalid after that is shown as ungraded, never guessed. The agent
 writes nothing: no vault edit, no repo or git write, no fetch, and it asks Lachy nothing.
 
 ## What the agent reads
@@ -254,8 +254,8 @@ script's docstring). It writes nothing.
 6. **Home name, then slug**, so the order is total and a rerun is byte-equal.
 
 Orient tasks have no rank. They follow the ranked tasks, by home and slug, and `orient[]` lists them by project, each
-offered on orient-all's pick list (`estate-dispatch.py plan`'s `pick[]`, ADR 0060), started only when ticked. A parked project is never listed there: its Orient tasks
-stay in `tasks[]` and wait on its Unpark offer, as its One calls and Grills do (**decisions[]** below), so the pass
+offered on orient-all's pick list (`estate-dispatch.py plan`'s `pick[]`, ADR 0060), started only when ticked. A parked
+project is never listed there: its Orient tasks stay in `tasks[]` and wait on its Unpark offer, as its One calls and Grills do (**decisions[]** below), so the pass
 starts no session on a shelved project. A parked project with no Ready work gets no offer and stays shelved; once
 unparked, by an offer or by hand, the next pass lists its Orient tasks.
 
