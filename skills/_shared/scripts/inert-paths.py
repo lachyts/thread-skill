@@ -157,7 +157,8 @@ are treated as recursive. The walk's name filter (a pattern's last segment, find
 --include, a comprehension's `.endswith(...)`) must be absent or able to match the glob: for a literal-file glob it
 must match its name; otherwise it must be able to match a prose name, so a filter that selects only a non-prose
 extension (`*.py`, `.endswith(".tmp")`) does not cover. A brace filter expands to at most BRACE_CAP (64) alternatives in
-bash's order; a filter with more can match anything (fail closed).
+the recursive expander's order (bash's for flat groups; nested groups, `{a}` and `{}` differ); a filter with more can
+match anything (fail closed).
 
 Narrowings (each in ADR 0045's amendment, for Escape matching against a `verify-skipped` line): (i) the call-site
 chase with the binding rules above; (ii) HOME-open; (iii) static text: a name assembled at run time, or a walk reached
@@ -387,14 +388,19 @@ def tokens(glob):
 _BRACE_RE = re.compile(r"\{([^{}]*)\}")
 
 
-def _brace(pat):
-    """bash's brace expansion of a name filter, in bash's order, capped while it expands: (patterns, truncated).
+def _brace(pat, stop_at_cut=False):
+    """Brace expansion of a name filter, capped while it expands: (patterns, truncated).
 
-    Breadth-first: each round replaces, in place, every pattern's leftmost innermost `{…}` by its alternatives (so the
-    leftmost group is outermost, nested groups expand innermost first and duplicates stay), and a round stops appending
-    once the list passes BRACE_CAP and cuts it there. Every pattern expands to at least one result, so the first
-    BRACE_CAP results are always the full expansion's first BRACE_CAP; the cost is BRACE_CAP per round, never
-    2 ** groups. `truncated` is true only when something was dropped (a full expansion of exactly BRACE_CAP is not)."""
+    The order is the recursive expander's (each pattern's leftmost innermost `{…}` first), which is bash's for flat
+    groups only: nested `{a,{b,c}}` gives a, b, a, c where bash gives a, b, c, and `{a}` and `{}` expand here where bash
+    keeps them literal. Breadth-first: each round replaces, in place, every pattern's leftmost innermost `{…}` by its
+    alternatives (so the leftmost group is outermost, nested groups expand innermost first and duplicates stay), and a
+    round stops appending once the list passes BRACE_CAP and cuts it there. Every pattern expands to at least one
+    result, so the first BRACE_CAP results are always the recursive expander's first BRACE_CAP; the cost is BRACE_CAP
+    per round, never 2 ** groups. `truncated` is true only when something was dropped (a full expansion of exactly
+    BRACE_CAP is not). A cut is final, since no later round can shrink the expansion, so `stop_at_cut` returns at the
+    first cut with the patterns only partly expanded, for a caller that fails closed on `truncated` (_filter_ok); an
+    untruncated result is the same either way."""
     pats, truncated = [pat], False
     while True:
         nxt, grew = [], False
@@ -413,7 +419,7 @@ def _brace(pat):
                 truncated = True
                 break
         pats = nxt
-        if not grew:
+        if not grew or (truncated and stop_at_cut):
             return pats, truncated
 
 
@@ -431,7 +437,7 @@ def _filter_ok(filt, glob):
             elif not s or any(e.endswith(s) or s.endswith(e) for e in PROSE_EXT):
                 return True
             continue
-        pats, truncated = _brace(val)
+        pats, truncated = _brace(val, stop_at_cut=True)
         if truncated:
             return True   # fail closed: a dropped alternative may be the glob's name
         for p in pats:

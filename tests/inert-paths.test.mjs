@@ -416,10 +416,11 @@ test('_brace of a 70-group filter returns at once', (t) => {
   assert.ok(got.s < 1, `_brace took ${got.s} s`)
 })
 
-test('_brace keeps the first 64 of the full expansion, in bash order, and says when it dropped any', (t) => {
+test("_brace keeps the first 64 of the full expansion, in the recursive expander's order (bash's for flat groups), and says when it dropped any", (t) => {
   const many = (n) => '{' + Array.from({ length: n }, (_, i) => `y${i}`).join(',') + '}.md'
   const pats = ['x{a,b}{c,d}{e,f}', '{a,{b,c}}', '{a}', '{}', 'a{b,c', '{a,b}'.repeat(6), '{a,b}'.repeat(7), many(65), many(64)]
-  // An uncapped copy of the recursive expander _brace replaced: the reference order.
+  // An uncapped copy of the recursive expander _brace replaced: the reference order. It is bash's for flat groups only:
+  // nested '{a,{b,c}}' gives a, b, a, c (bash: a, b, c), and '{a}' and '{}' expand (bash keeps them literal).
   const got = inProcess(tmpHome(t), [
     'import re',
     'def ref(pat):',
@@ -448,6 +449,34 @@ test('_brace keeps the first 64 of the full expansion, in bash order, and says w
   assert.deepEqual([got[2].pats, got[3].pats, got[4].pats], [['a'], [''], ['a{b,c']])
 })
 
+test('_brace with stop_at_cut returns at the first cut with the same verdict, and _filter_ok uses it', (t) => {
+  const pats = ['x{a,b}{c,d}{e,f}', '{a,{b,c}}', '{a}', 'a{b,c', '{a,b}'.repeat(6), '{a,b}'.repeat(7), '{a,b}'.repeat(4000) + '.md']
+  const got = inProcess(tmpHome(t), [
+    'res, br = [], m._BRACE_RE.search',
+    'for p in json.loads(sys.argv[2]):',
+    '    full, cut = m._brace(p), m._brace(p, stop_at_cut=True)',
+    '    res.append({"truncated": [full[1], cut[1]], "same": full[0] == cut[0], "n": len(cut[0]),',
+    '                "braces": [any(br(q) for q in full[0]), any(br(q) for q in cut[0])]})',
+    'calls, orig = [], m._brace',
+    'def spy(pat, stop_at_cut=False):',
+    '    calls.append(stop_at_cut)',
+    '    return orig(pat, stop_at_cut)',
+    'm._brace = spy',
+    'ok = m._filter_ok([("glob", "{a,b}" * 4000 + ".md")], "THREAD.md")',
+    'print(json.dumps({"res": res, "ok": ok, "calls": calls}))',
+  ].join('\n'), { args: [JSON.stringify(pats)] })
+  got.res.forEach((r, i) => {
+    assert.equal(r.truncated[1], r.truncated[0], `${pats[i].slice(0, 40)}: the same verdict`)
+    if (!r.truncated[0]) assert.ok(r.same, `${pats[i]}: an untruncated result is the same either way`)
+  })
+  assert.deepEqual(got.res.map((r) => r.truncated[0]), [false, false, false, false, false, true, true])
+  // The 4000-group filter: the full call expands every group, stop_at_cut leaves the rest unexpanded after the cut.
+  assert.equal(got.res[6].n, 64)
+  assert.deepEqual(got.res[6].braces, [false, true])
+  // _filter_ok fails closed on the cut, through stop_at_cut.
+  assert.deepEqual([got.ok, got.calls], [true, [true]])
+})
+
 test('a brace filter past the cap fails closed: its 65th alternative is a missed reader', (t) => {
   const alts = (n) => Array.from({ length: n }, (_, i) => `x${i}`).join(',')
   // (a) THREAD is alternative #65, one past the cap: before p34-2 the cut dropped it and THREAD.md held, a missed reader.
@@ -459,6 +488,18 @@ test('a brace filter past the cap fails closed: its 65th alternative is a missed
   // (c) control: THREAD is alternative #64, inside the cap, so it is matched (before p34-2 too).
   fx = fixture(t, { 'tests/t.sh': `#!/bin/sh\nfind . -name '{${alts(63)},THREAD}.md'\n` }, { home: tmpHome(t) })
   fails(prove(fx, ['THREAD.md']), 'THREAD.md', { kind: 'walk', origin: 'cwd', path: 'tests/t.sh' }, '#64 inside the cap')
+  // (d) negative control for (b): exactly 64 alternatives, none THREAD.md, not truncated, so the filter cannot match and
+  // THREAD.md holds. A brace filter is not a reader merely for having braces.
+  fx = fixture(t, { 'tests/t.sh': `#!/bin/sh\nfind . -name '${'{a,b}'.repeat(6)}.md'\n` }, { home: tmpHome(t) })
+  let res = prove(fx, ['THREAD.md'])
+  holds(res, 'THREAD.md', '64 alternatives, none THREAD.md')
+  assert.equal(res['THREAD.md'].readersTotal, 0)
+  // (e) the same filter with one more group: 128 alternatives, truncated, none THREAD.md. The cap is the only difference
+  // from (d), and it alone makes the walk a reader.
+  fx = fixture(t, { 'tests/t.sh': `#!/bin/sh\nfind . -name '${'{a,b}'.repeat(7)}.md'\n` }, { home: tmpHome(t) })
+  res = prove(fx, ['THREAD.md'])
+  fails(res, 'THREAD.md', { kind: 'walk', origin: 'cwd', path: 'tests/t.sh' }, '128 alternatives, truncated, none THREAD.md')
+  assert.equal(res['THREAD.md'].readersTotal, 1)
 })
 
 test('a 70-group brace filter in a repo file: prove returns and the walk is a reader', (t) => {
