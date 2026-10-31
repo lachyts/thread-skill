@@ -54,7 +54,7 @@ Subcommands:
       that stays stale, no merge-base of the anchor) routes `set-aside` with its text as `reason`, exit 0.
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
-         [--slots N --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]] [--diff-base REV [--named-rerun CMD]]
+         [[--slots N] --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]] [--diff-base REV [--named-rerun CMD]]
       Run the env bootstrap, then the verifier, each `bash -c` in its own session (process group) in T,
       appending to O.log, under one deadline of S seconds. The exit code goes to O.rc, written LAST (tmp +
       rename); O.rc and O.log are removed first, so a missing O.rc means the run did not finish (red). A
@@ -65,9 +65,11 @@ Subcommands:
       (refusing an existing path), locks it with `pid <this process's pid>` so the daily sweep's reaper leaves
       it alone, and removes it (`worktree remove --force --force`) whatever the verdict: the RACE re-verify. Only the verifier's rc is a verdict: a green bootstrap sets none, so a verifier step that never
       starts leaves no O.rc (red), never the bootstrap's 0.
-      --slots N --slot-wait W (given together or not at all; one alone is exit 2 with no rc file) first waits,
-      up to W seconds, for one of the machine's N verify slots (verify-slot.py, p23-4), as an Integration waiter
-      (the priority: agents' runs wait while it does), logging `verify: waiting for one of N verify slots (…)`
+      --slots N --slot-wait W (a lone --slots is exit 2 with no rc file; a lone --slot-wait W takes N from rollouts.toml
+      `verify_slots`, p34-1: verify-slot.py's configured_slots(), read inside verify's handlers, so a stop there is rc
+      128+n, and on any failure the built-in 2 with `verify: WARN <why>; using the built-in 2 verify slots` in the log)
+      first waits, up to W seconds, for one of the machine's N verify slots (verify-slot.py, p23-4), as an Integration
+      waiter (the priority: agents' runs wait while it does), logging `verify: waiting for one of N verify slots (…)`
       and then `== verify slot k of N after Ns`. Only then does the S-second deadline start: the slot wait never
       counts against it. Each step then runs under verify-slot.py's guard, which shares the slot's lock and ends
       the step's group when verify dies by any means, before the slot frees: so even a SIGKILL of verify, which
@@ -1120,10 +1122,10 @@ def cmd_verify(args):
             raise EnvError("--named-rerun needs --diff-base (the Flake check)")
         if args.named_rerun.count(rr.NAMED_RERUN_SLOT) != 1:
             raise EnvError(f"--named-rerun must hold {rr.NAMED_RERUN_SLOT} exactly once (where the failing tests go)")
-    slotted = args.slots is not None
-    if slotted != (args.slot_wait is not None):
-        raise EnvError("--slots and --slot-wait go together (both, or neither)")
-    if slotted and args.slots < 1:
+    slotted = args.slots is not None or args.slot_wait is not None
+    if args.slots is not None and args.slot_wait is None:
+        raise EnvError("--slots needs --slot-wait (a lone --slot-wait takes its slots from rollouts.toml)")
+    if args.slots is not None and args.slots < 1:
         raise EnvError("--slots must be an integer >= 1")
     if slotted and args.slot_wait < 0:
         raise EnvError("--slot-wait must be a number of seconds >= 0")
@@ -1168,6 +1170,13 @@ def cmd_verify(args):
             _write_atomic(outcome_path, json.dumps(result) + "\n")
         with open(log_path, "ab", buffering=0) as log:
             note = lambda msg: log.write((msg + "\n").encode())  # noqa: E731
+            if slotted and args.slots is None:
+                # p34-1: a lone --slot-wait takes N from rollouts.toml `verify_slots`, read here, inside the handlers: a
+                # stop takes the signal path below (its resolver child killed and reaped), and the read never counts
+                # against W. Any other failure is the built-in 2, logged.
+                args.slots, _source, warn = VS.configured_slots(reraise=(_Signalled,))
+                if warn:
+                    note(f"verify: WARN {warn}; using the built-in {args.slots} verify slots")
             # The Heat hold (verify-slot.py contract 7): a step a heat stop ended goes back in line and every step
             # reruns from the beginning, under a fresh deadline. Every slot wait, heat hold and heat-stopped run counts
             # against W (t0 is taken before the first acquire), and a pass starts only while W remains.
@@ -2488,7 +2497,8 @@ def main(argv=None):
     vf.add_argument("--outcome", action="store_true",
                     help="completion-verify --run's: write <out>.outcome.json (its structured result) in place of <out>.rc")
     vf.add_argument("--slots", default=None, type=int, help="the machine's verify slots (rollouts.toml verify_slots); "
-                    "with --slot-wait, wait for one first (verify-slot.py, p23-4)")
+                    "with --slot-wait, wait for one first (verify-slot.py, p23-4); a lone --slot-wait reads it from "
+                    "rollouts.toml (p34-1), else the built-in 2 with a WARN in the log")
     vf.add_argument("--slot-wait", default=None, type=float, help="seconds to wait for a verify slot (verify-timeout's "
                     "slotWait), heat holds and heat-stopped runs included; none in time is rc `noslot`, exit 75, or "
                     "`heat`, exit 76, when the Mac was too hot")

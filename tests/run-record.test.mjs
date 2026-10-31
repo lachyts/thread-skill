@@ -647,6 +647,7 @@ test('the docstring carries the review-verdict and review-round reader rules and
   const doc = JSON.parse(r.stdout).replace(/\s+/g, ' ')
   assert.match(doc, /- review-verdict: one line per verdict_key, \(task, round, head\) when the line carries a head, else \(task, round, digest\)\. Keep the first line per key\. The writer \(reconcile\) skips an entry whose key the record already holds/)
   assert.match(doc, /- review-round: dedupe on \(repo, doc\) when doc is present, else on \(repo, head, digest\), keeping the latest line/)
+  assert.match(doc, /unconfirmed\? \(int >= 0, fresh-review ADR 0001: candidates its checker could not reproduce, never blocking; counted apart from filed, which excludes them, so each finding sits in one count;/)
   assert.match(doc, /an Integration re-review rejection uses a review round but writes no line, so `round` skips it \(r1, r2, r4\)/)
   assert.match(doc, /verdict_digest\(verdict, feedback\) -> str/)
   assert.match(doc, /verdict_key\(line\) -> tuple/)
@@ -1440,6 +1441,25 @@ test('a call-journal fold whose lock stays busy past 5 s warns, exits 0 and writ
       } catch (e) { reject(e) }
     })
   })
+})
+
+// ADR 0001 (fresh-review): the checker's unconfirmed count rides beside the disposition counts, and the line no
+// longer needs a verdict now the ledger's STOP rule is retired.
+test('review-round (fresh-review ADR 0001): unconfirmed is accepted with no verdict; bad values are refused', (t) => {
+  const home = tmpHome(t)
+  const base = { repo: 'thread-skill', head: 'abc1234', digest: 'd1', doc: 'docs/review/x.md', findings: 9 }
+  const line = { ...base, status: 'consumed', blocking: 1, open: 0, filed: 5, unconfirmed: 3 }
+  emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify(line)], { env: EV(home) })
+  const [a] = lines(path.join(ev(home), 'reviews.jsonl'))
+  assert.equal(a.unconfirmed, 3)
+  assert.equal('verdict' in a, false)
+  for (const [label, bad] of [['unconfirmed -1', { unconfirmed: -1 }], ['unconfirmed 1.5', { unconfirmed: 1.5 }],
+    ['unconfirmed "2"', { unconfirmed: '2' }], ['unconfirmed null', { unconfirmed: null }]]) {
+    const r = cli(home, ['emit', '--kind', 'review-round', '--json', JSON.stringify({ ...base, ...bad })], { env: EV(home) })
+    assert.equal(r.status, 2, `${label}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, label)
+  }
+  assert.equal(lines(path.join(ev(home), 'reviews.jsonl')).length, 1, 'no refused line was written')
 })
 
 // ---- 8. review-round is not deduped ---------------------------------------------------------------------------
