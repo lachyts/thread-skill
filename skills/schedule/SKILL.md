@@ -155,7 +155,8 @@ with a task not yet merged), and none on a place a live serial chain writes: the
 parallel run whose root overlaps a surface of an unfinished serial chain, since that chain owns it,
 and a supersede never crosses shapes. A clone root never overlaps a chain on the in-place checkout, so the
 two coexist as peers (ADR 0042, intended); the refusal still fires for a chain that claims
-`repo:<clone>`, and for a rollout rooted in place before ADR 0042.
+`repo:<clone>`, and for a rollout rooted in place before ADR 0042. Nor does a checkout nested inside
+another by path (a separate repo with its own index) overlap a chain on the outer one (p33-3).
 A rollout awaiting sign-off (`paused_for: sign-off`, execute § 4.5 step 5's form: only gates wait on Lachy) is unfinished too: the refusal names its waiting tasks and the
 sign-off path (sign off, then `/thread:execute`, or `/thread:repair` to defer them), and `--regenerate` on
 this project's rollout carries them forward still gate-pending. The check prints exactly one stdout line:

@@ -10,8 +10,9 @@
 /thread:schedule § 0 runs the parallel check last, after the remote, landing-register, self-rollout and pushed-base
 checks, and acts on the one line it prints; § Serial path S3 runs the serial check once per chain. Stdlib only,
 python >= 3.9. No network. Git runs only as `git rev-parse --local-env-vars` (to scrub repo-local env vars such as a
-hook's GIT_DIR, landing-register.py's rule) and `git -C <path> remote get-url origin`. It writes nothing. The
-surface grammar (parse_token, overlaps, read_surfaces) and norm_origin are serial-chains.py's, loaded by `check`
+hook's GIT_DIR, landing-register.py's rule), `git -C <path> remote get-url origin` and, in `check`, `git -C <dir>
+rev-parse --show-toplevel` for the nested-checkout rule (below). It writes nothing. The
+surface grammar (parse_token, overlaps, read_surfaces), norm_origin and the Git reader are serial-chains.py's, loaded by `check`
 and `pickups` (never by `running`, primary-hold.sh's verb, which loads only reconcile-rollout.py).
 
 Terms (CONTEXT.md). A LIVE rollout note sits directly in the tasks dir (location only, as
@@ -65,7 +66,10 @@ Surfaces. Comparison is literal, on canonical tokens (serial-chains.py's grammar
 serial note's `surfaces:` are compared as written; --repo and each parallel candidate's Project root go through
 `os.path.realpath`, then the vault mapping (at or under the vault root: `vault` or `vault:<rel>`), else become
 `repo:<realpath>`. The vault root is the tasks dir's grandparent, used only when the tasks dir ends in
-`Work/Tasks`. Overlap is serial-chains.py's `overlaps`. A serial note with no `surfaces:`, or with a token
+`Work/Tasks`. Overlap is serial-chains.py's `overlaps`, with its nested-checkout rule (p33-3): two `repo:` tokens
+that meet only by containment are disjoint when both sit in git checkouts and the inner one's toplevel is not the
+outer one's (a separate checkout nested by path, read from each path's nearest existing directory with `git rev-parse
+--show-toplevel`); an outer path in no checkout still covers everything beneath it. A serial note with no `surfaces:`, or with a token
 parse_token refuses, reads as `any`, with `WARN: <slug>: <why>: read as any`.
 
 Outcomes (parallel, the default), the first that applies:
@@ -102,7 +106,7 @@ ignored`. Hits are every unfinished serial note (any project) with a surface ove
 every parallel candidate (root-level, unfinished, not complete, any project) whose Project root's token overlaps
 one (a missing Project root WARNs as above and is not counted). Hits -> `refuse <sorted>`, exit 3, one stderr line
 each naming the note, its project, its state, the overlapping pair and its remedy; none -> `none`, exit 0. It reads
-notes only: no git.
+notes, and runs git only for the nested-checkout rule.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py running [--tasks-dir <dir>]
 
@@ -212,7 +216,7 @@ TEMPLATE = Path(__file__).resolve().parent.parent.parent / "schedule/rollout-tem
 RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikilink_slug", "_scalar", "_status",
             "_valued", "never_started", "approved_unrun", "incomplete", "_shape", "SHAPES", "_priority",
             "PRIORITY_WEIGHTS", "_dep_entries", "_fold_unit", "_dep_status", "_live_rollout", "_start_unattended")
-SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin")
+SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
 RUN_RECORD_NAMES = ("record_path",)
 CLOSED = {"done", "dropped"}
@@ -586,9 +590,10 @@ def cmd_check(args, rr) -> int:
     # 2b. A live serial chain owns the places it writes (ADR 0040): a parallel run on one is refused, before any
     # supersede (a supersede never crosses shapes).
     repo_tok = path_token(repo, vault)
+    top = SC.Git().checkout
     owners = {}
     for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned):
-        hit = next((tok for tok in s["tokens"] if SC.overlaps(repo_tok, tok)), None)
+        hit = next((tok for tok in s["tokens"] if SC.overlaps(repo_tok, tok, top)), None)
         if hit is not None:
             owners[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) is a serial chain that writes "
                                  f"{SC.fmt_token(hit)} and owns that place (ADR 0040): {serial_remedy(s)}")
@@ -638,14 +643,15 @@ def cmd_check(args, rr) -> int:
 
 def check_serial(args, rr, tasks_dir, surfaces, vault, warns, warned) -> int:
     """Serial mode: the chain's tokens against every live serial note and every unfinished parallel rollout's root.
-    It supersedes nothing and runs no git."""
+    It supersedes nothing; its only git is the nested-checkout read (serial-chains.py's Git.checkout)."""
     if args.regenerate:
         warns.append("WARN: a serial run supersedes nothing (ADR 0040, p24-2): --regenerate ignored")
     mine = run_projects(rr, args, tasks_dir, warns)
     notes = list(rollout_notes(rr, tasks_dir, archive=False))
+    top = SC.Git().checkout
     hits = {}
     for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned):
-        pairs = SC.overlap_pairs(surfaces, s["tokens"])
+        pairs = SC.overlap_pairs(surfaces, s["tokens"], top)
         if pairs:
             a, b = pairs[0]
             hits[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) is a live serial chain whose surface "
@@ -663,7 +669,7 @@ def check_serial(args, rr, tasks_dir, surfaces, vault, warns, warned) -> int:
             warns.append(f"WARN: {c['slug']}: no Project root line: not counted")
             continue
         rtok = path_token(root, vault)
-        a = next((x for x in surfaces if SC.overlaps(x, rtok)), None)
+        a = next((x for x in surfaces if SC.overlaps(x, rtok, top)), None)
         if a is not None:
             hits[c["slug"]] = (f"[[{c['slug']}]] ({c['label']}; {state_line(c)}) is an unfinished parallel rollout "
                                f"whose Project root {root} ({SC.fmt_token(rtok)}) overlaps this chain's "

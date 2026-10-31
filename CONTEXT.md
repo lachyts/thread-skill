@@ -452,7 +452,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Surface** — a place a serial chain writes, written as a token in a serial
   note's `surfaces:` (and in a task's own, optional `surfaces:`). Five kinds:
   `repo:<absolute path>` (a filesystem place; overlaps on equality or
-  containment at a `/`, case-folded), `vault:<path>` (vault-relative; overlaps
+  containment at a `/`, case-folded, save across a checkout nested inside
+  another by path, a separate repo with its own index), `vault:<path>` (vault-relative; overlaps
   on a segment-boundary prefix), `vault` (the whole vault; overlaps every vault
   token), `ext:<name>` (an external system such as a CMS or DNS zone;
   case-folded equality) and `any` (overlaps every token). Kinds never overlap

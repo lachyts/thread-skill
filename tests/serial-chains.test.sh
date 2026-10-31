@@ -14,7 +14,8 @@
 #        derived claims; a fenced path no such command names, a comment, a Read item, a declared member, a second
 #        project's `Local:` and a backticked `Local:` with no path claim nothing; a `## Launch` path that is `/` or
 #        the home directory is never claimed (a WARN for an undeclared member)
-#   P3   the overlap grammar (pure), symlinks, clones, a comma inside a token, sibling subdirectories, a malformed token
+#   P3   the overlap grammar (pure), symlinks, clones, a checkout nested inside another (p33-3), a comma inside a
+#        token, sibling subdirectories, a malformed token
 #   P4   ruling (c): a member on a checkout of lachyts/thread-skill (a `## Launch` `--add-dir` or `cd` path, declared
 #        or not, its surface, its launch folder, its project's `Local:` or `repos:`) goes to the session lane
 #   P5   launch: by_alias then plain_aliases, the null, missing and unknown refusals, the project's `launch:`, the
@@ -304,6 +305,14 @@ plan --tasks s1,s2
 ok "$(mem s1 surfaces)|$(j "$chains")" "[\"repo:$G\"]|[[\"s1\",\"s2\"]]" "P3: a symlinked repo: equals its target"
 plan --tasks s2,s3
 ok "$(j "$chains")" '[["s2"],["s3"]]' "P3: two clones of one origin are disjoint"
+GN="$G/nested"; mkrepo "$GN" https://github.com/demo/nested.git   # a separate checkout nested inside G by path (p33-3)
+mkt sx1 "surfaces: [\"repo:$G\"]"; mkt sx2 "surfaces: [\"repo:$GN\"]"; mkt sx3 "surfaces: [\"repo:$G/sub/a\"]"
+plan --tasks sx1,sx2
+ok "$(mem sx2 surfaces)|$(j "$chains")" "[\"repo:$GN\"]|[[\"sx1\"],[\"sx2\"]]" "P3: a checkout nested inside another by path is its own repo: two chains"
+plan --tasks sx2,sx3
+ok "$(j "$chains")" '[["sx2"],["sx3"]]' "P3: … a path in the outer checkout and the nested checkout too"
+plan --tasks sx1,sx3
+ok "$(j "$chains")" '[["sx1","sx3"]]' "P3 control: a path inside the outer checkout still widens to it: one chain"
 mkt q1 'surfaces:' '  - "vault:Work/A, B"'; mkt q2 'surfaces: ["vault:Work/A, B/x"]'
 plan --tasks q1,q2
 ok "$(mem q1 surfaces)|$(mem q2 surfaces)|$(j "$chains")" '["vault:Work/A, B"]|["vault:Work/A, B/x"]|[["q1","q2"]]' "P3: a comma inside a declared token stays one token, and overlaps"
