@@ -34,7 +34,7 @@ sessions.
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
 | `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, asks a project's Priorities card once when its note has none (how robust, who it is for, what matters most, where Lachy steers), then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules parallel-shaped phases itself, steers the rest (a serial rollout for serial-shaped work, ADR 0040, or a focus item via `open`), and ends with the execute handoff. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
-| `/thread:orient-all` | where is my attention best placed? | The estate pass (ADR 0041): orient across every project at once. Scans the vault, grades and ranks all open work by agent work per minute of Lachy's attention, asks the sign-offs, One calls, Unpark offers and Grills that fit his stated time budget, writes each answer into its task, schedules the runs that are ready (forked `/thread:schedule` calls, batched so no two can name one note), then starts every execute, Leg 1, repair and child orient as a visible Chorus session, or prints paste-ready prompts off the Stage. Never reshapes a project; `--dry-run` writes nothing. |
+| `/thread:orient-all` | where is my attention best placed? | The estate pass (ADR 0041, ADR 0061): orient across every project at once, sweeping up the work that needs little of Lachy's thinking. Scans the vault, grades and ranks all open work by agent work per minute of Lachy's attention, asks a small project's sign-offs, One calls, Unpark offers and Grills that fit his stated time budget, writes each answer into its task, schedules the small projects' runs that are ready (forked `/thread:schedule` calls, batched so no two can name one note), then starts every execute, Leg 1 and repair as a visible Chorus session, or prints paste-ready prompts off the Stage. A big project keeps its own session: it reaches him only through one pick list at the end, and only the projects he ticks start their orient. Never reshapes a project; `--dry-run` writes nothing. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop or a Chorus Session also create a fresh visible task seeded with it (a sidebar task in Codex Desktop); elsewhere label it a manual handoff. Then it runs `/thread:next` once for this session, unless `next` or a Rollout launch dispatched it. |
@@ -420,8 +420,10 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   `@AGENTS.md` import, a `Tests:` line) and a live rollout's `verifier:` (given only to the repo whose toplevel its
   Project root is, never to a parent repo), phase members by filename prefix, content already on origin, live
   rollouts' status with pending sign-offs, BatchMode, `--offline`, the group-killing timeout and absolute deadline
-  (and SIGTERM), an unreadable Tasks note, the env scrub when its probe fails, read-only runs, byte-equal reruns and
-  parity with `pushed-base.sh` on copies of the fixtures.
+  (and SIGTERM), an unreadable Tasks note, the env scrub when its probe fails, read-only runs, byte-equal reruns,
+  parity with `pushed-base.sh` on copies of the fixtures, and each project row's `ownSession` (ADR 0061: the `orient:`
+  key wins, else a declared repo holding its own design record, `CONTEXT.md` and an ADR; an unreadable key named in
+  `invalid`; plain reads, so a `--deadline 0` run gives the same rows).
 - **Estate rank** — `tests/estate-rank.test.mjs`: `estate-rank.py` over the real scan of a fixture vault and
   hand-written grades files — every graded task's grade, shape and recommended answers, validation that lists every
   error and never guesses (a grader deadline already past dropped), the raise, the ranking key (a due-soon task above a
@@ -445,7 +447,12 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   (decided, unheld members only, each with every dependency it needs scheduled and every why read against the final
   schedule, blockers, shared roots and parked runs waiting, batches that keep names that may meet apart, each live
   rollout's holds and the signed reinstate), `sessions` (written notes, the status allow-list
-  behind the holds, orients last), `record` (the answer folded to one line into `## Decisions (asked ahead
+  behind the holds, orients last), the big projects (ADR 0061: `rounds` asks none of their decisions, sign-offs or
+  Unpark offers and lists them in `ownSession[]`, with `warnings[]` for an unreadable `orient:` key; `plan` waits their
+  runs `own session` and keeps their tasks out of `sessionLane[]`, and ranks `pick[]`, asked as `pickAsk`, two
+  projects of one name numbered and linked by path; `sessions` holds their items until `--open` or `--typed` ticks
+  them, unmatched words in `unmatched[]`, an opened one's repair asking its pending sign-offs, and a small project's
+  orient line naming only its Orient tasks), `record` (the answer folded to one line into `## Decisions (asked ahead
   <date>)`, the fork's ruling, every refusal byte-identical; `record --owner` a call made for Lachy into
   `## Decided for you (<date>)`), `decided-for-you` (the ruled calls of the queued tasks, the owner split, read-only
   without `--write`, a task gone in flight refused while the rest are written) and `log` (one grade line per graded
