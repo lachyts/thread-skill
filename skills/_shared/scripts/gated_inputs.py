@@ -137,11 +137,19 @@ nothing and makes no network call.
      is not a key for Supabase project <ref>"). <file> is the class's file as declared.
    - `bootstrap_refreshes(cmd, file)` -> {"ok", "why"}: the rollout's `env_bootstrap` copies `file` into the task tree
      with a plain, unconditional `cp`, so the implementer's re-run after a sign-off brings in the file's current keys.
-     Tokenised by shlex (posix, punctuation_chars, whitespace_split; a ValueError: "the rollout's env_bootstrap is not
-     one shell command"); simple commands split at tokens made only of `&|;()`; a token holding `<` or `>` is a
-     redirection, and its target and a bare fd digit before it are no operands. The file's forms: its expanded path,
-     its declared form and, for a `~/` file, `$HOME/…` and `${HOME}/…`, each an exact word (`.env.local.bak` never
-     counts). No command names it: "the rollout's env_bootstrap does not provide <file>". Every command that names it
+     Tokenised by _shell_tokens as the shell reads it (an unclosed quote or a trailing backslash: "the rollout's
+     env_bootstrap is not one shell command"): quotes and backslashes removed; an unquoted operator is its own token
+     whatever touches it (`)&&cp` is `)`, `&&`, `cp`), longest first, and a newline separates as `;` does; a `#`
+     that starts a word comments to the line's end. Simple commands split at operators made only of `&|;()`; any
+     other operator is a redirection, and its target and a bare fd digit before it are no operands. A word counts as
+     what the shell passes: a `~` that starts it unquoted (before `/` or its end) and a `$HOME` or `${HOME}` outside
+     single quotes read as HOME, and nothing else expands. A command names the file when one of its words equals the
+     file's `~`-expanded path exactly (`.env.local.bak` never counts), so `cp ~/x` serves a class that declares
+     `/Users/<me>/x`, and the reverse. A quoted `~` or a single-quoted `$HOME` never names it: the shell copies a
+     path that does not exist and, under `|| true`, the stale copy stays. With no command naming it, a word that
+     spells the file so (`"~/…"`, `'$HOME/…'`) gives "the rollout's env_bootstrap may not refresh <file> into the
+     task tree: it names the file with a quoted ~ or a single-quoted $HOME, which the shell never expands", and
+     otherwise "the rollout's env_bootstrap does not provide <file>". Every command that names it
      must pass, each failure prefixed "the rollout's env_bootstrap may not refresh <file> into the task tree: ": its
      first word is `cp` ("it names the file outside a plain cp"); no option before `--` is `--no-clobber`,
      `--interactive`, `--update[=…]` or a single-dash cluster holding n, u or i ("its cp skips an existing copy (-n,
@@ -164,7 +172,6 @@ import binascii
 import json
 import os
 import re
-import shlex
 import stat
 import sys
 from decimal import Decimal, ROUND_HALF_UP
@@ -638,45 +645,137 @@ def _no(why):
     return {"ok": False, "why": why}
 
 
+SHELL_OPS = ("&>>", "<<-", "&&", "||", ";;", "<<", ">>", "<&", ">&", "<>", ">|", "&>", "&", "|", ";", "(", ")", "<", ">")
+SHELL_NAME_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
+
+
+def _shell_tokens(cmd):
+    """The env_bootstrap's tokens as the shell reads them (module docstring, 4: bootstrap_refreshes): [(kind, text,
+    value)], kind "op" for an unquoted operator (SHELL_OPS, longest first; a newline reads as `;`) and "word" for a
+    word. A word's text is its quotes removed; its value is what the shell passes for it: also a `~` that starts it
+    unquoted, before `/`, a blank, an operator or the end, and a `$HOME` or `${HOME}` outside single quotes, each
+    expanded to HOME. A `#` that starts a word comments to the line's end. Raises ValueError on an unclosed quote or a
+    trailing backslash."""
+    home, toks, n, i = os.path.expanduser("~"), [], len(cmd), 0
+    text, value, started = [], [], False
+
+    def home_len(j):   # the length of a `$HOME` or `${HOME}` at j, else 0
+        if cmd.startswith("${HOME}", j):
+            return 7
+        return 5 if cmd.startswith("$HOME", j) and (j + 5 >= n or cmd[j + 5] not in SHELL_NAME_CHARS) else 0
+
+    def put(t, v=None):
+        text.append(t)
+        value.append(t if v is None else v)
+
+    while i < n:
+        c = cmd[i]
+        if c == "\\":
+            if i + 1 >= n:
+                raise ValueError("a trailing backslash")
+            if cmd[i + 1] != "\n":   # a backslash-newline joins the lines
+                put(cmd[i + 1])
+                started = True
+            i += 2
+        elif c == "'":
+            j = cmd.find("'", i + 1)
+            if j < 0:
+                raise ValueError("no closing quotation")
+            put(cmd[i + 1:j])
+            started, i = True, j + 1
+        elif c == '"':
+            started, i = True, i + 1
+            while True:
+                if i >= n:
+                    raise ValueError("no closing quotation")
+                c = cmd[i]
+                if c == '"':
+                    i += 1
+                    break
+                if c == "\\" and i + 1 < n and cmd[i + 1] in '$`"\\\n':
+                    if cmd[i + 1] != "\n":
+                        put(cmd[i + 1])
+                    i += 2
+                elif c == "$" and home_len(i):
+                    put(cmd[i:i + home_len(i)], home)
+                    i += home_len(i)
+                else:
+                    put(c)
+                    i += 1
+        elif c == "$" and home_len(i):
+            put(cmd[i:i + home_len(i)], home)
+            started, i = True, i + home_len(i)
+        elif c == "~" and not started and (i + 1 >= n or cmd[i + 1] == "/" or cmd[i + 1].isspace()
+                                           or cmd[i + 1] in "&|;()<>"):
+            put("~", home)
+            started, i = True, i + 1
+        elif c == "#" and not started:
+            j = cmd.find("\n", i)
+            i = n if j < 0 else j
+        elif c.isspace() or c in "&|;()<>":
+            if started:
+                toks.append(("word", "".join(text), "".join(value)))
+                text, value, started = [], [], False
+            if c == "\n":
+                toks.append(("op", ";", ";"))
+                i += 1
+            elif c.isspace():
+                i += 1
+            else:
+                op = next(o for o in SHELL_OPS if cmd.startswith(o, i))
+                toks.append(("op", op, op))
+                i += len(op)
+        else:
+            put(c)
+            started, i = True, i + 1
+    if started:
+        toks.append(("word", "".join(text), "".join(value)))
+    return toks
+
+
 def bootstrap_refreshes(cmd, file):
     """{"ok", "why"}: the rollout's env_bootstrap copies `file` with a plain, unconditional cp (module docstring, 4)."""
     if not cmd:
         return _no(f"the rollout's env_bootstrap does not provide {file}")
     try:
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
-        lex.whitespace_split = True
-        tokens = list(lex)
+        tokens = _shell_tokens(cmd)
     except ValueError:
         return _no("the rollout's env_bootstrap is not one shell command")
-    forms = {file, os.path.expanduser(file)}
-    if file.startswith("~/"):
-        forms |= {"$HOME/" + file[2:], "${HOME}/" + file[2:]}
-    # Simple commands: (words, the separator tokens before it), each redirection, its target and a bare fd digit before
-    # it dropped (none of them is an operand).
-    commands, words, seps, target = [], [], [], False
-    for tok in tokens:
-        if tok and all(c in "&|;()" for c in tok):
+    path = os.path.expanduser(file)
+    home = os.path.expanduser("~").rstrip("/")
+    spellings = {path}
+    if home and path.startswith(home + "/"):
+        rest = path[len(home) + 1:]
+        spellings |= {"~/" + rest, "$HOME/" + rest, "${HOME}/" + rest}
+    # Simple commands: (words, the separator operators before it), each redirection, its target and a bare fd digit
+    # before it dropped (none of them is an operand). A word is its value: what the shell passes.
+    commands, words, seps, target, quoted = [], [], [], False, False
+    for kind, text, value in tokens:
+        if kind == "op" and all(c in "&|;()" for c in value):
             if words:
                 commands.append((words, seps))
                 words, seps = [], []
-            seps.append(tok)
+            seps.append(value)
             target = False
             continue
         if target:
             target = False
             continue
-        if "<" in tok or ">" in tok:
+        if kind == "op":   # a redirection: its target is the next word
             if words and words[-1].isdigit():
                 words.pop()
-            target = all(c in "<>&|" for c in tok)   # an operator alone: its target is the next token
+            target = True
             continue
-        words.append(tok)
+        quoted = quoted or (value != path and text in spellings)
+        words.append(value)
     if words:
         commands.append((words, seps))
-    named = [n for n, (w, _s) in enumerate(commands) if forms & set(w)]
-    if not named:
-        return _no(f"the rollout's env_bootstrap does not provide {file}")
     pre = f"the rollout's env_bootstrap may not refresh {file} into the task tree: "
+    named = [n for n, (w, _s) in enumerate(commands) if path in w]
+    if not named:
+        if quoted:
+            return _no(pre + "it names the file with a quoted ~ or a single-quoted $HOME, which the shell never expands")
+        return _no(f"the rollout's env_bootstrap does not provide {file}")
     for n in named:
         w, seps = commands[n]
         if w[0] != "cp":
@@ -691,7 +790,7 @@ def bootstrap_refreshes(cmd, file):
                     return _no(pre + "its cp skips an existing copy (-n, -u or -i)")
             else:
                 operands.append(word)
-        if operands and operands[-1] in forms:
+        if operands and operands[-1] == path:
             return _no(pre + "its cp writes the file instead of reading it")
         # Joined by && or || (through any parenthesis) to a test, directly or along the chain before it.
         k = n

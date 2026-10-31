@@ -72,7 +72,10 @@ be caught at the stop, before any build.
 4. **The bootstrap refresh, and the mechanism it relies on.** The proof reads the source file, never the task tree's
    copy, so the copy must be refreshed from it. `bootstrap_refreshes` requires the rollout's `env_bootstrap` to copy
    the declared file with a plain, unconditional `cp`: not a guarded copy (`[ -f … ] ||`, `test -f … &&`), not
-   `-n`, `-u` or `-i`, not the file as the destination, not `ln`, `rsync` or an `if` block. The refresh mechanism
+   `-n`, `-u` or `-i`, not the file as the destination, not `ln`, `rsync` or an `if` block. Its words are read as the
+   shell passes them: `~/…`, `$HOME/…` and `${HOME}/…` name the declared file whichever form the class declares, and
+   a quoted `~` or a single-quoted `$HOME` never does (the shell copies a path that does not exist and, under
+   p8-1's `2>/dev/null || true`, the stale copy stays), so it asks. The refresh mechanism
    exists already: `worktreeSetup` in task.workflow.js renders `envBootstrapStep` after the worktree arms and the
    toplevel check, so it runs on a reused tree too, and `branchTreeSetup(…, true)` does the same for the seeded
    reviser and the integrator. After a sign-off, the resumed call replays the plan gate from its cache and dispatches

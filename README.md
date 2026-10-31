@@ -103,8 +103,9 @@ edit, run `python3 skills/_shared/scripts/rollout-settings.py --repo <clone>` to
 check it reads. Any other form (a `[repo."o/r".test_credentials]` sub-table, a
 dotted key, a value over several lines) refuses the whole file, which halts every
 schema-3 rollout at its next entry. The rollout's `env_bootstrap` must copy that
-file into the task tree with a plain `cp` (no `[ -f … ] ||`, no `-n`), so a key
-you add later reaches the next build. The gate is signed only when each key it
+file into the task tree with a plain `cp` (no `[ -f … ] ||`, no `-n`, no quoted
+`~` or single-quoted `$HOME`, which the shell never expands), so a key you add
+later reaches the next build. The gate is signed only when each key it
 names is in the file with its declared prefix or project; a missing key reaches
 you at the stop, by name. The class is its own switch, independent of
 `spend_approval_usd`: it signs at the built-in 0 too.

@@ -89,10 +89,10 @@ for req in json.loads(sys.argv[3]):
             out.append({"error": str(e)})
 print(json.dumps(out))
 `
-function py(reqs) {
+function py(reqs, env = {}) {
   const r = spawnSync('python3', ['-I', '-B', '-c', DRIVER, MODULE, RECONCILE, JSON.stringify(reqs)], {
     encoding: 'utf8',
-    env: { ...process.env, THREAD_EVENTS_DIR: EVENTS },
+    env: { ...process.env, THREAD_EVENTS_DIR: EVENTS, ...env },
   })
   assert.equal(r.status, 0, r.stderr)
   return JSON.parse(r.stdout)
@@ -745,16 +745,35 @@ test('the value proof: missing keys all named, a wrong prefix, and every JWT edg
 
 // ---- the bootstrap refresh (ADR 0062 d4) ----------------------------------------------------------------------------
 
+// HOME is pinned to /Users/lachlants, so F and T name one file on every runner: a word counts as what the shell passes, so
+// `~/`, `$HOME/` and `${HOME}/` serve a class declaring F and the reverse, while a quoted `~` or a single-quoted `$HOME`
+// (which the shell never expands: under p8-1's `|| true` the copy fails silently and the stale copy stays) asks.
 test('bootstrap_refreshes: a plain cp of the file passes (p8-1\'s verbatim line, ~/, $HOME, ${HOME}, cp -v); every other shape asks', () => {
+  const HOME = { HOME: '/Users/lachlants' }
   const F = '/Users/lachlants/repos/animately/optimizer/.env.local'
   const T = '~/repos/animately/optimizer/.env.local'
   const P8_1 = `yarn install --immutable && git submodule update --init library && (cp ${F} .env.local 2>/dev/null || true)`
   const okCases = [[P8_1, F], [`cp ${T} .env.local`, T], ['cp $HOME/repos/animately/optimizer/.env.local .env.local', T],
-    ['cp "${HOME}/repos/animately/optimizer/.env.local" .env.local', T], [`cp -v ${F} .env.local`, F], [`yarn install; cp -- ${F} ./.env.local`, F]]
-  assert.deepEqual(py(okCases.map(([cmd, file]) => ({ op: 'bootstrap', cmd, file }))), okCases.map(() => ({ ok: true, why: '' })), 'accepted')
+    ['cp "${HOME}/repos/animately/optimizer/.env.local" .env.local', T], [`cp -v ${F} .env.local`, F], [`yarn install; cp -- ${F} ./.env.local`, F],
+    [`cp ${T} .env.local`, F], [`cp ${F} .env.local`, T], ['cp "$HOME"/repos/animately/optimizer/.env.local .env.local', F],
+    [`test -f .env.example\ncp ${F} .env.local`, F], [`cp ${F} \\\n  .env.local`, F]]
+  assert.deepEqual(py(okCases.map(([cmd, file]) => ({ op: 'bootstrap', cmd, file })), HOME), okCases.map(() => ({ ok: true, why: '' })), 'accepted')
   const PRE = `the rollout's env_bootstrap may not refresh ${F} into the task tree: `
   const NONE = `the rollout's env_bootstrap does not provide ${F}`
+  const QUOTED = (file) => `the rollout's env_bootstrap may not refresh ${file} into the task tree: it names the file with a quoted ~ or a single-quoted $HOME, which the shell never expands`
+  const refusedT = [
+    [`cp "${T}" .env.local`, QUOTED(T)],
+    ["cp '$HOME/repos/animately/optimizer/.env.local' .env.local", QUOTED(T)],
+    ["cp '${HOME}/repos/animately/optimizer/.env.local' .env.local", QUOTED(T)],
+    [`cp \\${T} .env.local`, QUOTED(T)],
+    ['cp $HOMEDIR/repos/animately/optimizer/.env.local .env.local', `the rollout's env_bootstrap does not provide ${T}`],
+  ]
+  const gotT = py(refusedT.map(([cmd]) => ({ op: 'bootstrap', cmd, file: T })), HOME)
+  refusedT.forEach(([cmd, why], i) => assert.deepEqual(gotT[i], { ok: false, why }, cmd))
   const refused = [
+    [`cp "${T}" .env.local`, QUOTED(F)],
+    [`(test -f .env.example)&&cp ${F} .env.local`, PRE + 'its copy runs only after a test'],
+    [`test -f .env.example &&\ncp ${F} .env.local`, PRE + 'its copy runs only after a test'],
     ['', NONE],
     [`cp ${F}.bak .env.local`, NONE],
     [`yarn install # cp ${F} .env.local`, NONE],
@@ -773,7 +792,7 @@ test('bootstrap_refreshes: a plain cp of the file passes (p8-1\'s verbatim line,
     [`if true; then cp ${F} .env.local; fi`, PRE + 'it names the file outside a plain cp'],
     [`cp '${F} .env.local`, "the rollout's env_bootstrap is not one shell command"],
   ]
-  const got = py(refused.map(([cmd]) => ({ op: 'bootstrap', cmd, file: F })))
+  const got = py(refused.map(([cmd]) => ({ op: 'bootstrap', cmd, file: F })), HOME)
   refused.forEach(([cmd, why], i) => assert.deepEqual(got[i], { ok: false, why }, cmd))
 })
 
