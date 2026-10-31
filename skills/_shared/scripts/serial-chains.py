@@ -346,7 +346,7 @@ def plugin_origin() -> str:
         die(f"cannot read the plugin's repository from {PLUGIN_JSON}: {e}: ruling (c) cannot be checked")
 
 
-# ---- git (claim and the ruling-(c) read only) -------------------------------------------------------
+# ---- git (claim, the nested-checkout reads and the ruling-(c) read; only Git is exported) --------
 
 class Git:
     """Read-only git calls with the repo-local env vars scrubbed, cached per directory."""

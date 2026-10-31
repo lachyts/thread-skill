@@ -11,9 +11,9 @@
 checks, and acts on the one line it prints; § Serial path S3 runs the serial check once per chain. Stdlib only,
 python >= 3.9. No network. Git runs only as `git rev-parse --local-env-vars` (to scrub repo-local env vars such as a
 hook's GIT_DIR, landing-register.py's rule), `git -C <path> remote get-url origin` and, in `check`, `git -C <dir>
-rev-parse --show-toplevel` for the nested-checkout rule (below). It writes nothing. The
-surface grammar (parse_token, overlaps, read_surfaces), norm_origin and the Git reader are serial-chains.py's, loaded by `check`
-and `pickups` (never by `running`, primary-hold.sh's verb, which loads only reconcile-rollout.py).
+rev-parse --show-toplevel` for the nested-checkout rule (below). It writes nothing. The surface grammar (parse_token,
+overlaps, read_surfaces), norm_origin and the Git reader are serial-chains.py's, loaded by `check` and `pickups`
+(never by `running`, primary-hold.sh's verb, which loads only reconcile-rollout.py).
 
 Terms (CONTEXT.md). A LIVE rollout note sits directly in the tasks dir (location only, as
 reconcile-project.py and /thread:close read it). An UNFINISHED rollout is narrower: a live rollout that is
@@ -62,15 +62,15 @@ note is skipped before the same-repo test, so it never WARNs `no Project root li
 shapes. Serial notes are the root-level ones neither `done` nor `dropped` (serial_notes), with the same never-started,
 incomplete and complete reads; a complete one is dropped with the ceremony WARN below.
 
-Surfaces. Comparison is literal, on canonical tokens (serial-chains.py's grammar): the `--surface` values and each
-serial note's `surfaces:` are compared as written; --repo and each parallel candidate's Project root go through
-`os.path.realpath`, then the vault mapping (at or under the vault root: `vault` or `vault:<rel>`), else become
-`repo:<realpath>`. The vault root is the tasks dir's grandparent, used only when the tasks dir ends in
-`Work/Tasks`. Overlap is serial-chains.py's `overlaps`, with its nested-checkout rule (p33-3): two `repo:` tokens
-that meet only by containment are disjoint when both sit in git checkouts and the inner one's toplevel is not the
-outer one's (a separate checkout nested by path, read from each path's nearest existing directory with `git rev-parse
---show-toplevel`); an outer path in no checkout still covers everything beneath it. A serial note with no `surfaces:`, or with a token
-parse_token refuses, reads as `any`, with `WARN: <slug>: <why>: read as any`.
+Surfaces. Comparison is on canonical tokens (serial-chains.py's grammar) and literal, save its nested-checkout rule
+below: the `--surface` values and each serial note's `surfaces:` are compared as written; --repo and each parallel
+candidate's Project root go through `os.path.realpath`, then the vault mapping (at or under the vault root: `vault`
+or `vault:<rel>`), else become `repo:<realpath>`. The vault root is the tasks dir's grandparent, used only when the
+tasks dir ends in `Work/Tasks`. Overlap is serial-chains.py's `overlaps`, with its nested-checkout rule (p33-3): two
+`repo:` tokens that meet only by containment are disjoint when both sit in git checkouts and the inner one's toplevel
+is not the outer one's (a separate checkout nested by path, read from each path's nearest existing directory with
+`git rev-parse --show-toplevel`); an outer path in no checkout still covers everything beneath it. A serial note with
+no `surfaces:`, or with a token parse_token refuses, reads as `any`, with `WARN: <slug>: <why>: read as any`.
 
 Outcomes (parallel, the default), the first that applies:
   1. A misfiled superseded note -> `file <slug> <path relative to the tasks dir>` (the first by slug), exit 0.

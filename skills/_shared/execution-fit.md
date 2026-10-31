@@ -295,7 +295,8 @@ of the set first surfaces when the next entry halts on it.
 **Unfinished rollout.** A repo holds at most one unfinished parallel rollout: one directly in `Work/Tasks/`,
 neither `done` nor `dropped`, with a task not yet merged; and none on a place a live serial chain writes
 (ADR 0040). Surfaces compare `repo:<realpath>` literally, so a rollout rooted in its clone and a chain on
-the in-place checkout coexist as peers (ADR 0042). schedule § 0 runs
+the in-place checkout coexist as peers (ADR 0042); the one exception, a separate checkout nested inside
+another by path, never meets the outer one either (p33-3). schedule § 0 runs
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check` against the resolved repo path last,
 after the pushed-base check, and its one stdout line decides: see schedule § 0 for each outcome (`none`,
 `supersede`, `file`, `interrupted`, `refuse`) and its remedy. A running or never-superseded rollout on the
