@@ -1442,6 +1442,25 @@ test('a call-journal fold whose lock stays busy past 5 s warns, exits 0 and writ
   })
 })
 
+// ADR 0001 (fresh-review): the checker's unconfirmed count rides beside the disposition counts, and the line no
+// longer needs a verdict now the ledger's STOP rule is retired.
+test('review-round (fresh-review ADR 0001): unconfirmed is accepted with no verdict; bad values are refused', (t) => {
+  const home = tmpHome(t)
+  const base = { repo: 'thread-skill', head: 'abc1234', digest: 'd1', doc: 'docs/review/x.md', findings: 9 }
+  const line = { ...base, status: 'consumed', blocking: 1, open: 0, filed: 5, unconfirmed: 3 }
+  emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify(line)], { env: EV(home) })
+  const [a] = lines(path.join(ev(home), 'reviews.jsonl'))
+  assert.equal(a.unconfirmed, 3)
+  assert.equal('verdict' in a, false)
+  for (const [label, bad] of [['unconfirmed -1', { unconfirmed: -1 }], ['unconfirmed 1.5', { unconfirmed: 1.5 }],
+    ['unconfirmed "2"', { unconfirmed: '2' }], ['unconfirmed null', { unconfirmed: null }]]) {
+    const r = cli(home, ['emit', '--kind', 'review-round', '--json', JSON.stringify({ ...base, ...bad })], { env: EV(home) })
+    assert.equal(r.status, 2, `${label}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, label)
+  }
+  assert.equal(lines(path.join(ev(home), 'reviews.jsonl')).length, 1, 'no refused line was written')
+})
+
 // ---- 8. review-round is not deduped ---------------------------------------------------------------------------
 
 test('review-round is never deduped by the writer: idempotency is the emitter\'s job', (t) => {
