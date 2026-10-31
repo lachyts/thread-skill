@@ -676,7 +676,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `scripts/verify-slot.py`): the lead's Integration and RACE verifies and every
   agent's engine-rendered verifier take one, and a further suite waits rather
   than piling on. Each slotted suite runs under a guard that ends a killed
-  holder's suite before its verify slot frees. The Integration priority: the
+  holder's suite before its verify slot frees, and a command in a verify slot
+  sees `VERIFY_SLOT_HELD=1` (p34-1), so a suite it starts never queues for a
+  second one. The Integration priority: the
   lead's Integration and RACE verifies, and the integrate call's own verifier
   runs (`run --priority`), go before any task call's agent. An agent waits for
   its suite's verdict inside its turn (`verify-slot.py wait`, p31-3), never by

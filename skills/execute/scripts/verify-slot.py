@@ -15,7 +15,7 @@ copy of the contract.
 Importable (lead-integrate.py's `verify --slots N --slot-wait S` loads it by importlib, and reconcile-rollout.py's
 `next` for the heat reading): slots_dir(), SlotDirError, acquire(), Slot, Guarded, kill_group(), write_holder(),
 held_by(), heat_level(), heat_name(), KILL_GRACE, REAP_WAIT, GUARD_POLL, HEAT_KEY, HEAT_NAMES, HEAT_HOLD, HEAT_STOP,
-HEAT_EXIT, HEAT_ENV, HEAT_POLL_FACTOR, HEAT_SETTLE, HEAT_STOPPED.
+HEAT_EXIT, HEAT_ENV, HEAT_POLL_FACTOR, HEAT_SETTLE, HEAT_STOPPED, HELD_ENV.
 
 The pool. `slot-0.lock` … `slot-(N-1).lock` in
 `${THREAD_VERIFY_SLOTS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/thread/verify-slots}` (run_record.py's
@@ -37,7 +37,10 @@ Contract.
 3. The guard. Every slotted command runs under a guard: a small python process (`_guard`) in its own session,
    so a kill of the caller's process group or session never reaches it. It starts isolated (`python3 -I`, p34-1): it
    ignores PYTHONPATH, PYTHONHOME and the user site, so a command's own python environment (a shadowing json.py)
-   never stops it, and the command still gets that environment unchanged. The guard starts the command in a
+   never stops it, and the command still gets that environment unchanged, plus the marker: a command run in a held
+   slot sees HELD_ENV (`VERIFY_SLOT_HELD=1`, p34-1), so a full suite it starts, even one reparented out of its process
+   tree (daemonised, tmux), can tell it already holds one and never queues for a second; a caller's own value passes
+   through, and an unslotted (fail-open) run sets none. The guard starts the command in a
    session of its own (its own process group, pgid = its pid), reports that pgid on a pipe, and watches a
    death pipe whose write end only the caller holds. On EOF (the caller exited, was killed by any means, or
    closed it to stop the run) or a TERM/INT/HUP to the guard, it ends the command's group: killpg(TERM),
@@ -184,6 +187,7 @@ REMIND_EVERY = 300    # seconds between waiting lines
 DEFAULT_POLL = 1.0    # the poll base: priority every base + up to base/2; others every 2 * base + up to base
 SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 WAITER_TRIES = 3
+HELD_ENV = "VERIFY_SLOT_HELD"   # the marker (p34-1): "1" in the environment of a command run in a held slot
 SCRIPT = os.path.abspath(__file__)
 
 # The Heat hold (estate ADR 0009 d5, contract 7): the Mac's thermal pressure, read fresh on every call.
@@ -602,9 +606,10 @@ def kill_group(pgid, grace=KILL_GRACE):
 class Guarded:
     """CMD under a guard (`_guard`, its own session). `.pid` is the guard's pid; `.group` the command's pgid, or
     None when the guard died before reporting it. `hold` is a Slot whose fd the guard inherits (its own reference
-    to the lock). Signals TERM/INT/HUP are held across the spawn (the child starts with the caller's mask), and
-    on_spawn(self) runs inside that window, so a caller that records the handle there never loses it. wait() waits;
-    watch() waits under the Heat hold's stop (contract 7)."""
+    to the lock), and with it held the command sees HELD_ENV=1 (the marker, contract 3). Signals TERM/INT/HUP are held
+    across the spawn (the child starts with the caller's mask), and on_spawn(self) runs inside that window, so a caller
+    that records the handle there never loses it. wait() waits; watch() waits under the Heat hold's stop (contract
+    7)."""
 
     def __init__(self, argv, hold=None, on_spawn=None, **popen_kw):
         self.group = None
@@ -616,8 +621,13 @@ class Guarded:
         fds = [death_r, rep_w]
         if hold is not None and hold.fd is not None:
             fds.append(hold.fd)
-        # Isolated (-I): the guard ignores PYTHONPATH, PYTHONHOME and the user site (it imports only the stdlib), and its
-        # own environment, which the command inherits, is left as the caller's.
+            # The marker (p34-1): the guard's environment, which the command inherits, gains HELD_ENV. A new dict, so a
+            # caller's env is never mutated; every Guarded caller (cmd_run, _run_recorded, lead-integrate.py's
+            # _run_guarded) gets it here, on each heat-stop restart too.
+            base = os.environ if popen_kw.get("env") is None else popen_kw["env"]
+            popen_kw["env"] = {**base, HELD_ENV: "1"}
+        # Isolated (-I): the guard ignores PYTHONPATH, PYTHONHOME and the user site (it imports only the stdlib), and
+        # its own environment, which the command inherits, is left as the caller's.
         cmd = [sys.executable or "python3", "-I", SCRIPT, "_guard", str(death_r), str(rep_w), "--", *argv]
         mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
         try:

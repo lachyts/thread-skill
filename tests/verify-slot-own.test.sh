@@ -3,15 +3,21 @@
 # the `run` and `status` paragraphs).
 #   O1  the guard starts isolated (`-I`): a shadowing json.py on PYTHONPATH, or a bogus PYTHONHOME, no longer stops
 #       `run`, and the command still gets both
+#   O2  the marker: a command in a held slot sees VERIFY_SLOT_HELD=1, a reparented one too, and so does
+#       lead-integrate.py's slotted step; an unslotted (fail-open) run does not
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound only slows a real failure. Every background pid is recorded and stopped only by that pid.
 # Hermetic: every pool lives under mktemp (THREAD_VERIFY_SLOTS_DIR), the Run record too.
+# The gate's own slot marker is unset at top level, so a suite run inside a slot reads as one that is not.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd -P)
 . tests/lib/assert.sh
 unset $(git rev-parse --local-env-vars)
 export PYTHONDONTWRITEBYTECODE=1
+# The gate and the lead's Integration verify run this whole suite inside a verify slot, so its marker is set here.
+unset VERIFY_SLOT_HELD
+ok "${VERIFY_SLOT_HELD-unset}" unset "O2-0: the marker starts unset here, even when the suite runs inside a slot"
 
 tmp=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
 tmp=$(cd "$tmp" && pwd -P)
@@ -64,6 +70,30 @@ PP=$D/shadow" "O1a: a shadowing json.py on PYTHONPATH no longer stops run (rc 0)
 lacks "$(cat "$D/a.err")" "Traceback" "O1a: … no traceback"
 out=$(PYTHONHOME="$D/bogus" python3 -I "$VS" run --slots 1 -- sh -c 'echo "PH=$PYTHONHOME"' 2> "$D/b.err"); rc=$?
 ok "$rc|$out" "0|PH=$D/bogus" "O1b: a bogus PYTHONHOME no longer stops run (rc 0), and the command keeps it"
+
+# ======== O2: the marker =======================================================================================
+LI="$root/skills/execute/scripts/lead-integrate.py"
+pool o2
+out=$(python3 "$VS" run --slots 1 -- sh -c 'echo "${VERIFY_SLOT_HELD-unset}"' 2> "$D/a.err"); rc=$?
+ok "$rc|$out" "0|1" "O2a: a command run in a held slot sees VERIFY_SLOT_HELD=1"
+: > "$D/file"
+out=$(THREAD_VERIFY_SLOTS_DIR="$D/file/slots" python3 "$VS" run --slots 1 -- sh -c 'echo "${VERIFY_SLOT_HELD-unset}"' 2> "$D/b.err"); rc=$?
+ok "$rc|$out" "0|unset" "O2b: an unslotted (fail-open) run holds no slot, so its command gets no marker"
+has "$(cat "$D/b.err")" "running unslotted" "O2b: … behind its WARN"
+python3 "$VS" run --slots 1 -- sh -c '( sh -c '"'"'sleep 0.3; echo "${VERIFY_SLOT_HELD-unset}" > "$1"'"'"' sh "$0" & ); exit 0' "$D/bg" \
+  > /dev/null 2> "$D/c.err"; rc=$?
+ok "$rc" 0 "O2c: a command that leaves a reparented background child exits 0"
+within 30 nonempty "$D/bg" && s=$(cat "$D/bg") || s="no file in 30 s"
+ok "$s" 1 "O2c: … and the reparented child still sees VERIFY_SLOT_HELD=1"
+mkdir -p "$D/tree"
+python3 "$LI" verify --tree "$D/tree" --out "$D/li" --timeout 60 --slots 1 --slot-wait 60 \
+  --verifier 'echo "H=${VERIFY_SLOT_HELD-unset}"' > /dev/null 2>&1; rc=$?
+ok "$rc|$(cat "$D/li.rc" 2>/dev/null)" "0|0" "O2d: lead-integrate.py verify --slots 1 --slot-wait 60 is green"
+has "$(cat "$D/li.log")" "H=1" "O2d: … and its slotted verifier sees VERIFY_SLOT_HELD=1"
+THREAD_VERIFY_SLOTS_DIR="$D/file/slots" python3 "$LI" verify --tree "$D/tree" --out "$D/lu" --timeout 60 --slots 1 --slot-wait 60 \
+  --verifier 'echo "H=${VERIFY_SLOT_HELD-unset}"' > /dev/null 2>&1; rc=$?
+ok "$rc|$(cat "$D/lu.rc" 2>/dev/null)" "0|0" "O2d: unslotted (an unusable slots dir), verify is still green"
+has "$(cat "$D/lu.log")" "H=unset" "O2d: … and its step gets no marker"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot-own: ALL PASS" || echo "verify-slot-own: SOME FAILED"
 exit "$fail"

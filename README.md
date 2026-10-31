@@ -128,7 +128,8 @@ inputs and the lead's own set-aside rows).
 at most `verify_slots` verifier suites run at once across every rollout on the
 machine (the lead's Integration and RACE verifies, and every agent's
 engine-rendered verifier), a further one waits, and each runs under a guard
-that ends a killed holder's suite before its verify slot frees;
+that ends a killed holder's suite before its verify slot frees (a command in a
+verify slot sees `VERIFY_SLOT_HELD=1`);
 `verify-slot.py status` shows who holds each verify slot and who waits.
 `skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
 watches the shared checkout's default branch and bareness around every launch
