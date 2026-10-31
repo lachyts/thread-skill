@@ -19,7 +19,8 @@
 #   a commit pushed without a PR (`unlisted`), and C11 also pins inputs --row's ports of historyError,
 #   rungRecordError and PR_URL. The verify slots (p23-4, verify-slot.py): C24 the slot wait is excluded from the
 #   deadline   C25 no slot within --slot-wait → rc `noslot`, exit 75, the verifier never ran, the race tree removed
-#   C26 TERM during the wait   C27 a lone --slots or --slot-wait   C28 a SIGKILL of verify: its guard ends the
+#   C26 TERM during the wait   C27 a lone --slots (exit 2), a lone --slot-wait (its N from rollouts.toml verify_slots,
+#   p34-1; a refused file: the built-in 2 with a WARN)   C28 a SIGKILL of verify: its guard ends the
 #   step and frees the slot, no rc   C17s C17's deadline and TERM arms slotted   C23s C23's TRAP and LATE arms
 #   slotted (the LATE signal lands while the guard starts). C29 prepare refuses a note with no integrating: (exit 1,
 #   nothing fetched, deleted, stashed or merged)   C29b the 2026-10-19 slip: merge-task's exit 3 after an integrate
@@ -1221,11 +1222,20 @@ ok "$st" waiting "C26: the waiting verify registers as an Integration waiter"
 kill -TERM "$vp"; wait "$vp"
 ok "$(cat "$F/out/c26.rc" 2>/dev/null)|$([ -e "$T/.c26-ran" ] && echo ran || echo never)|$(vwaiters)" "143|never|0" "C26: TERM during the wait → rc 143, the verifier never ran, no waiter file left"
 touch "$F/h25.go"; wait "$(cat "$F/h25.w")"
-# C27: --slots and --slot-wait go together.
+# C27: a lone --slots is refused; a lone --slot-wait takes its N from rollouts.toml verify_slots (p34-1).
 python3 "$LI" verify --tree "$T" --out "$F/out/c27a" --timeout 60 --slots 1 --verifier true > /dev/null 2>&1
 ok "$?|$([ -e "$F/out/c27a.rc" ] && echo rc || echo none)" "2|none" "C27: a lone --slots → exit 2, no rc file"
-python3 "$LI" verify --tree "$T" --out "$F/out/c27b" --timeout 60 --slot-wait 60 --verifier true > /dev/null 2>&1
-ok "$?|$([ -e "$F/out/c27b.rc" ] && echo rc || echo none)" "2|none" "C27: a lone --slot-wait → exit 2, no rc file"
+mkdir -p "$F/h27/.config/thread"; printf '[defaults]\nverify_slots = 3\n' > "$F/h27/.config/thread/rollouts.toml"
+HOME="$F/h27" python3 "$LI" verify --tree "$T" --out "$F/out/c27b" --timeout 60 --slot-wait 60 --verifier true > /dev/null 2>&1
+ok "$?|$(cat "$F/out/c27b.rc" 2>/dev/null)" "0|0" "C27b: a lone --slot-wait under verify_slots = 3 → exit 0, rc 0"
+has "$(cat "$F/out/c27b.log")" "== verify slot 1 of 3 after" "C27b: … its N from rollouts.toml (one of 3)"
+lacks "$(cat "$F/out/c27b.log")" "WARN" "C27b: … with no WARN"
+mkdir -p "$F/h27c/.config/thread"; printf '[defaults]\nverify_slots = 0\n' > "$F/h27c/.config/thread/rollouts.toml"
+HOME="$F/h27c" python3 "$LI" verify --tree "$T" --out "$F/out/c27c" --timeout 60 --slot-wait 60 --verifier true > /dev/null 2>&1
+ok "$?|$(cat "$F/out/c27c.rc" 2>/dev/null)" "0|0" "C27c: a lone --slot-wait under a refused rollouts.toml (verify_slots = 0) → exit 0, rc 0"
+has "$(cat "$F/out/c27c.log")" "verify: WARN rollout-settings: $F/h27c/.config/thread/rollouts.toml:2: " "C27c: … a WARN naming the file and line"
+has "$(cat "$F/out/c27c.log")" "; using the built-in 2 verify slots" "C27c: … and the built-in 2 it uses"
+has "$(cat "$F/out/c27c.log")" "== verify slot 1 of 2 after" "C27c: … one of 2"
 # C28: a SIGKILL of verify while its step runs: the guard ends the step and frees the slot; no rc (red).
 rm -f "$T/vpid"
 python3 "$LI" verify --tree "$T" --out "$F/out/c28" --timeout 600 --slots 1 --slot-wait 600 --verifier "echo \$\$ > vpid; exec sleep 3193.$u" > /dev/null 2>&1 &
@@ -1277,7 +1287,7 @@ spec.loader.exec_module(li)
 class Late(subprocess.Popen):
     def __init__(self, args, *a, **k):
         super().__init__(args, *a, **k)
-        if len(args) > 2 and args[2] == "_guard":
+        if "_guard" in args[:4]:   # the guard argv: python -I SCRIPT _guard …
             pid = os.path.join(k.get("cwd") or ".", "pid")
             end = time.monotonic() + 300
             while time.monotonic() < end:

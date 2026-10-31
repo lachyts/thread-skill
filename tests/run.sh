@@ -57,6 +57,9 @@ mkdir -p "$scratch/transcripts"; export THREAD_TRANSCRIPTS_DIR="$scratch/transcr
 # The machine's verify slots (verify-slot.py, p23-4) stay in temp too: each suite that reaches a pool exports its
 # own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
 export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
+# The gate and the lead's Integration verify run this whole suite inside a verify slot, whose command sees
+# VERIFY_SLOT_HELD=1 (verify-slot.py, p34-1): unset, so no suite reads its own runs as already inside a slot.
+unset VERIFY_SLOT_HELD
 # The Mac's own evidence of a stop (reconcile-rollout.py machine_times: kern.boottime, kern.waketime, `pmset -g log`,
 # p29-10) is never read under test: `{}` is no boot and no sleep, so no suite infers a stop from this Mac's history.
 # Each suite that tests the stops sets its own.

@@ -5,17 +5,18 @@ A rollout at ceiling 4 runs up to four task calls, each with its own verifier, b
 verify and RACE re-verify; other rollouts on the machine run theirs too. Each verifier is a full suite, so
 unbounded they pile onto one machine (2026-10-17: load 66 on 12 cores, and a merge lost to a load flake). A
 **verify slot** bounds that: at most `verify_slots` (rollouts.toml, `[defaults]` only, built-in 2) slotted
-suites run at once across every rollout on this machine; a further one waits for a slot. This header is the one
-copy of the contract.
+suites run at once across every rollout on this machine; a further one waits for a slot. `run` and `status` read that
+count themselves when given no --slots (p34-1). This header is the one copy of the contract.
 
-    python3 verify-slot.py run --slots N [--priority] [--slot-wait S] -- CMD…   # the agents' wrapper (engine-rendered)
+    python3 verify-slot.py run [--slots N] [--priority] [--slot-wait S] -- CMD…   # the agents' wrapper (rendered)
     python3 verify-slot.py wait --log FILE [--pid P] [--for S]     # an agent's in-turn wait for a run's verdict
     python3 verify-slot.py status [--slots N]                      # the operator's view (JSON)
 
 Importable (lead-integrate.py's `verify --slots N --slot-wait S` loads it by importlib, and reconcile-rollout.py's
 `next` for the heat reading): slots_dir(), SlotDirError, acquire(), Slot, Guarded, kill_group(), write_holder(),
 held_by(), heat_level(), heat_name(), KILL_GRACE, REAP_WAIT, GUARD_POLL, HEAT_KEY, HEAT_NAMES, HEAT_HOLD, HEAT_STOP,
-HEAT_EXIT, HEAT_ENV, HEAT_POLL_FACTOR, HEAT_SETTLE, HEAT_STOPPED.
+HEAT_EXIT, HEAT_ENV, HEAT_POLL_FACTOR, HEAT_SETTLE, HEAT_STOPPED, HELD_ENV, configured_slots(), SETTINGS_PY,
+RESOLVE_TIMEOUT, TOML_PYTHONS, TOML_ENV, BUILT_IN_SLOTS, QUEUE_FRESH_MIN, QUEUE_FRESH_POLLS, HEAD_AGE.
 
 The pool. `slot-0.lock` … `slot-(N-1).lock` in
 `${THREAD_VERIFY_SLOTS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/thread/verify-slots}` (run_record.py's
@@ -35,7 +36,12 @@ Contract.
 2. There is no staleness timer. A slot frees when the last holder of its lock's open file description exits
    or closes it; the kernel drops the lock of a process that dies by any means.
 3. The guard. Every slotted command runs under a guard: a small python process (`_guard`) in its own session,
-   so a kill of the caller's process group or session never reaches it. The guard starts the command in a
+   so a kill of the caller's process group or session never reaches it. It starts isolated (`python3 -I`, p34-1): it
+   ignores PYTHONPATH, PYTHONHOME and the user site, so a command's own python environment (a shadowing json.py)
+   never stops it, and the command still gets that environment unchanged, plus the marker: a command run in a held
+   slot sees HELD_ENV (`VERIFY_SLOT_HELD=1`, p34-1), so a full suite it starts, even one reparented out of its process
+   tree (daemonised, tmux), can tell it already holds one and never queues for a second; a caller's own value passes
+   through, and an unslotted (fail-open) run sets none. The guard starts the command in a
    session of its own (its own process group, pgid = its pid), reports that pgid on a pipe, and watches a
    death pipe whose write end only the caller holds. On EOF (the caller exited, was killed by any means, or
    closed it to stop the run) or a TERM/INT/HUP to the guard, it ends the command's group: killpg(TERM),
@@ -53,19 +59,50 @@ Contract.
    between the slot and the spawn) has no suite to end, so it is no verdict, never red (p32-1): `run` exits HEAT_EXIT
    (76) with `verify-slot: no verdict: stopped before the suite started; exit 76` (while it waits on the heat or is
    back in line after a heat stop, contract 7's line instead). Only a stop once the suite is spawned is 128+n.
-5. The Integration priority. lead-integrate.py's `verify` (the lead's Integration verify and RACE re-verify)
-   and `run --priority` (the integrate call's own verifier, rendered only by the engine's integrate mode)
-   register a waiter file (`waiter-<pid>-<rand>.wait`, held LOCK_EX while they wait: liveness is the flock,
-   never a pid). A non-priority acquirer takes a slot only when it can hold (live waiters + 1) free slots at
-   once, keeps one and closes the rest; priority acquirers ignore the count and compete by polling. Every
-   poll, and `status`, reaps a `waiter-*.wait` or `.waiter-*.tmp` it can flock LOCK_NB (the inode re-checked
-   against the path before the unlink).
+5. The order. The Integration priority first: lead-integrate.py's `verify` (the lead's Integration verify and RACE
+   re-verify) and `run --priority` (the integrate call's own verifier, rendered only by the engine's integrate mode)
+   register a waiter file (`waiter-<pid>-<rand>.wait`, held LOCK_EX while they wait: liveness is the flock, never a
+   pid); priority acquirers ignore every count and compete by polling. Then the line (p34-1): every other acquirer
+   waits in arrival order. Its first try registers nothing and counts every awake entry in line as ahead; only after
+   a miss whose deadline is not yet up does it join the line, `queue-<pid>-<rand>.wait` (written as
+   `.queue-<pid>-<rand>.tmp` and renamed, held LOCK_EX while it waits), its record {pid, cwd, since, kind, seq:
+   time.time_ns(), poll: its poll base}, so `--slot-wait 0` and an uncontended run write no file; a registration that
+   loses WAITER_TRIES races, or cannot be written, waits unregistered with a WARN. Its place is (seq, name), an
+   unreadable record first. A non-priority acquirer takes a slot only when it can hold (live Integration waiters +
+   awake runs ahead of it in line + 1) free slots at once, keeps one and closes the rest. The heartbeat: every poll,
+   hot or not, touches its entry (os.utime on the held fd); an entry untouched for max(QUEUE_FRESH_MIN,
+   QUEUE_FRESH_POLLS x its record's poll) seconds, 10 x the poll base (10 s at the default 1 s; 5 s minimum), is
+   asleep (a stopped or stalled waiter): nobody counts it, nobody reaps it while its flock is held, and once it
+   touches again it counts at its old place. The entry is dropped when acquire() returns, so a heat-stop re-queue (a
+   new acquire()) goes to the back. Every poll, and `status`, reaps a `waiter-*.wait` or `.waiter-*.tmp` it can flock
+   LOCK_NB; each ordinary (non-priority) poll that is not heat-held, and `status`, reap a `queue-*.wait` or
+   `.queue-*.tmp` the same way (each inode re-checked against the path before the unlink). A line entry is read by
+   _probe_entry, on the fd it opened: fstat for the mtime and pread for the record, accepted only while os.stat(path)
+   still names that (st_dev, st_ino), so a name dropped and recreated between the open and the check is skipped for
+   that scan, never misread. Priority acquirers ignore the line, and the old `waiter-` scan is unchanged, so a copy
+   from before the line neither counts nor reaps a `queue-` file. The age bound (it bounds the rule, not the wait): a
+   non-priority acquirer with no awake run ahead of it in line (its unregistered first try included) is the head, and
+   once it has been the head for HEAD_AGE (900 s; heat holds count, and an entry ahead that wakes resets the clock) it
+   needs one free slot, as an Integration waiter does, and polls at their cadence, keeping its line entry and writing
+   no waiter file; it says so once, `verify-slot: at the head of the line for 900s: now waiting beside the Integration
+   waiters`, at the poll where it ages and before that poll's try, and its later waiting lines name only the holders.
+   While Integration demand alone fills the pool it still waits, as an Integration verify would; and only the head
+   ages, so an Integration waiter faces at most one extra peer from the line.
 6. Residuals. A slots dir deleted while held, or a different HOME or XDG chain, makes a separate pool. A
    process the suite itself moves into another session or group escapes the guard's kill, as it escapes a
    harness kill today, and so does a suite whose guard and wrapper are SIGKILLed together (a tree kill by pid
    snapshot). An unusable slots dir fails open: `verify-slot: WARN <dir>: <err>; running unslotted`, and the
    command still runs under the guard. The `status` probe of a free slot holds it for microseconds, so an
-   acquirer at that instant waits one more poll.
+   acquirer at that instant waits one more poll. A refused or unreadable rollouts.toml (or a resolver that fails) gives
+   a `run` or `status` with no --slots, or lead-integrate.py's lone --slot-wait, the built-in 2 with a WARN, never an
+   error: a typo'd file quietly caps hand runs at 2 (the engine always passes --slots, and its `verify-timeout` still
+   halts on a refused file). Only the guard starts isolated: `run` itself, started without `-I` (as the engine does),
+   can still be stopped by its caller's PYTHONPATH. The line (contract 5): a copy of this script from before it neither
+   writes, counts nor reaps `queue-` files, so its run can go ahead of the line (slot locking is unchanged); an older
+   entry with a smaller `--slots N` can hold back a younger one with a larger N (inefficient, never a deadlock); a
+   stopped Integration waiter still costs one slot (old copies never touch their waiter files, so the asleep rule is the
+   line's alone); and a waiter stalled past its window, or a wall-clock step, can misorder the line: its order only,
+   never an overlap.
 7. The Heat hold (estate ADR 0009 d5). The reading is heat_level(): `notifyutil -g HEAT_KEY`, 0 nominal, 1
    moderate, 2 heavy, 3 trapping, 4 sleeping, read fresh each time (never cached); THREAD_HEAT_LEVEL 0 to 4 pins it
    (the tests' pin), any other value is ignored. At heavy (HEAT_HOLD) or worse no slot is free: every poll of
@@ -133,28 +170,44 @@ Contract.
    read as alive until S, so they give 75, never a wrong verdict; a TERM between the start line and cmd_run's handlers
    ends the run with no exit line, so 76.
 
-`run --slots N [--priority] [--slot-wait S] -- CMD…`: prints its start line (contract 9), then waits for a slot
-(`verify-slot: waiting for one of N verify slots (held by pid … in … since …[; K Integration waiter(s) ahead])` on
-stderr, repeated every 5 minutes; no waiting line when one is free at once; `verify-slot: slot k of N after Ns` once a
-wait ends), runs CMD under the guard and exits with its rc (128+n for a signal), its exit line (contract 9) last. While
-the Mac is hot it waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat stop prints `verify-slot: heat
-stop (<name>): ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac
+`run [--slots N] [--priority] [--slot-wait S] -- CMD…`: prints its start line (contract 9), then waits for a slot, in
+line behind the Integration waiters and the runs that came first (contract 5): `verify-slot: waiting for one of N verify
+slots (held by pid … in … since …[; K Integration waiter(s) ahead][; M run(s) ahead in line])` on stderr, repeated every
+5 minutes (no waiting line when one is free at once; `verify-slot: at the head of the line for <HEAD_AGE>s: now waiting
+beside the Integration waiters` once, when its age bound starts; `verify-slot: slot k of N after Ns` once a wait ends),
+runs CMD under the guard and exits with its rc (128+n for a signal), its exit line (contract 9) last. While the Mac is
+hot it waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat stop prints `verify-slot: heat stop
+(<name>): ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac
 cools`, and the exit is the last run's rc. The slot wait is bounded (p32-1): `--slot-wait S` (or `--slot-wait=S`), an
-integer >= 0 in seconds, written in ASCII digits only, default RUN_SLOT_WAIT, 4800: the lead's `slotWait` at the default `verify_timeout` of 1800 s,
-max(60, 7200 - 600 - 1800), so an agent's wait fits its harness maximum as the lead's verify does; a constant, never
-a rollout's own `verify_timeout`, and the engine renders no `--slot-wait`. S is one deadline for the whole run: every
-slot wait, heat hold and heat-stopped run counts against it; the first pass always tries (0: one try, and a free slot
-is still taken), a re-queue after a heat stop only while time is left. Once it runs out the command never ran (or
-never restarted): `verify-slot: no verdict: no verify slot within <S>s[ (heat: <name>)]; exit 76`, no verdict, never
-red. A TERM, INT or HUP before the suite starts exits 76 too, no verdict, never red: `verify-slot: no verdict: stopped
-while the Mac was hot (heat: <name>); exit 76` while it waits on the heat or is back in line after a heat stop, else
-`verify-slot: no verdict: stopped before the suite started; exit 76` (contract 4). Usage errors exit 2: `--slots`
-missing, 0, or anything but ASCII digits; `--slot-wait` with no value or anything but ASCII digits (each refuses a
-sign, `+1` included, an underscore such as `1_0`, whitespace and a non-ASCII digit); no `--`; no CMD; an unknown flag. A command that cannot be started exits 127.
+integer >= 0 in seconds, written in ASCII digits only, default RUN_SLOT_WAIT, 4800: the lead's `slotWait` at the default
+`verify_timeout` of 1800 s, max(60, 7200 - 600 - 1800), so an agent's wait fits its harness maximum as the lead's verify
+does; a constant, never a rollout's own `verify_timeout`, and the engine renders no `--slot-wait`. S is one deadline for
+the whole run: every slot wait, heat hold and heat-stopped run counts against it; the first pass always tries (0: one
+try, which takes a free slot only when no awake run is ahead in line), a re-queue after a heat stop only while time is
+left. Once it runs out the command never ran (or never restarted): `verify-slot: no verdict: no verify slot within <S>s[
+(heat: <name>)]; exit 76`, no verdict, never red. A TERM, INT or HUP before the suite starts exits 76 too, no verdict,
+never red: `verify-slot: no verdict: stopped while the Mac was hot (heat: <name>); exit 76` while it waits on the heat
+or is back in line after a heat stop, else `verify-slot: no verdict: stopped before the suite started; exit 76`
+(contract 4). Usage errors exit 2: `--slots` 0 or anything but ASCII digits; `--slot-wait` with no value or anything but
+ASCII digits (each refuses a sign, `+1` included, an underscore such as `1_0`, whitespace and a non-ASCII digit); no
+`--`; no CMD; an unknown flag. A command that cannot be started exits 127. With no `--slots`, N is rollouts.toml's
+`verify_slots` (p34-1, configured_slots(): rollout-settings.py's resolve(repo=None), so `[defaults]`, then its built-in
+2), read inside `run`'s handlers before the slot wait's deadline starts: a TERM, INT or HUP there is `stopped before the
+suite started`, 76, with its resolver child killed and reaped, and the read never counts against `--slot-wait`. On a
+python with no tomllib (python 3.9's /usr/bin/python3) a present file is read through rollout-settings.py's CLI
+(`<python> -I -B rollout-settings.py`), each candidate in turn under one RESOLVE_TIMEOUT (3 s) deadline:
+THREAD_TOML_PYTHONS's os.pathsep list, verbatim, when it is set (even empty), else PATH's python3 then TOML_PYTHONS,
+each once by realpath, this python itself skipped; one that will not start, times out or exits 3 passes to the next. Any
+failure but a stop (a refused file, named with its line; no candidate that can read it; a rollout-settings.py that will
+not load; an answer with no integer `verify_slots` >= 1) is the built-in BUILT_IN_SLOTS (2) behind `verify-slot: WARN
+<why>; using the built-in 2 verify slots`, never an error.
 
-`status [--slots N]` reaps stale waiter files and prints {dir, slots: [{index, state: free|held, holder}],
-waiters: [{pid, cwd, since, kind}], heat: {level, name}}; without --slots it lists the slot files present. Stdlib
-only, POSIX.
+`status [--slots N]` reaps stale waiter and line files and prints {dir, slots: [{index, state: free|held, holder}],
+waiters: [{pid, cwd, since, kind}], queue: [{pid, cwd, since, kind, asleep}] (the line, first in line first),
+verify_slots: {value, source}, heat: {level, name}}. With --slots N it lists slots 0
+to N-1, source `--slots`; without, N is read as `run` reads it (its WARN on stderr, and status still exits 0; source
+`file:defaults`, `built-in` or `fallback`) and it lists slots 0 to N-1 and any other slot file present. Stdlib only,
+POSIX.
 """
 
 import errno
@@ -182,6 +235,10 @@ REMIND_EVERY = 300    # seconds between waiting lines
 DEFAULT_POLL = 1.0    # the poll base: priority every base + up to base/2; others every 2 * base + up to base
 SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 WAITER_TRIES = 3
+QUEUE_FRESH_MIN = 5.0      # the line (p34-1): an entry untouched max(this, QUEUE_FRESH_POLLS * its poll) s is asleep
+QUEUE_FRESH_POLLS = 10
+HEAD_AGE = 900             # the line's age bound (p34-1): the head this long waits beside the Integration waiters
+HELD_ENV = "VERIFY_SLOT_HELD"   # the marker (p34-1): "1" in the environment of a command run in a held slot
 SCRIPT = os.path.abspath(__file__)
 
 # The Heat hold (estate ADR 0009 d5, contract 7): the Mac's thermal pressure, read fresh on every call.
@@ -201,6 +258,16 @@ NOTIFYUTIL = "/usr/bin/notifyutil"   # the reading's tool when PATH has none
 # maximum as the lead's verify does. A constant: never read from a rollout's own `verify_timeout`, and the engine
 # renders no `--slot-wait`, so its prompt bytes are unchanged. Heat holds and heat restarts count against it.
 RUN_SLOT_WAIT = 4800
+# Its own slots (p34-1): `run` and `status` with no --slots, and lead-integrate.py's lone --slot-wait, read
+# rollouts.toml `verify_slots` through rollout-settings.py's resolve(repo=None) (configured_slots()): in process, else,
+# for a present file on a python with no tomllib, through that script's CLI under the first candidate python that can
+# read it, all of them under one RESOLVE_TIMEOUT deadline. Any failure but a stop is BUILT_IN_SLOTS with a WARN.
+SETTINGS_PY = os.path.normpath(os.path.join(os.path.dirname(SCRIPT), "..", "..", "_shared", "scripts",
+                                            "rollout-settings.py"))
+RESOLVE_TIMEOUT = 3.0      # seconds for every CLI candidate together (one deadline)
+TOML_PYTHONS = ("/opt/homebrew/bin/python3", "/usr/local/bin/python3")   # after PATH's python3, the default list
+TOML_ENV = "THREAD_TOML_PYTHONS"   # set (even empty): its os.pathsep entries are the candidates, verbatim
+BUILT_IN_SLOTS = 2         # the only fallback: rollout-settings.py's BUILT_IN["verify_slots"] (pinned by a test)
 
 
 class SlotDirError(Exception):
@@ -281,6 +348,98 @@ def heat_name(n):
     return HEAT_NAMES[n] if isinstance(n, int) and 0 <= n < len(HEAT_NAMES) else str(n)
 
 
+# ---- its own slots (p34-1) -------------------------------------------------------------------------------------
+
+def _toml_pythons():
+    """The resolver CLI's candidates: TOML_ENV's os.pathsep entries verbatim when it is set, even to empty (empty
+    entries dropped, no dedupe, no self-skip); else PATH's python3, then TOML_PYTHONS, each once by realpath, any that
+    is this python (by realpath) skipped, since it already has no tomllib."""
+    raw = os.environ.get(TOML_ENV)
+    if raw is not None:
+        return [p for p in raw.split(os.pathsep) if p]
+    me = os.path.realpath(sys.executable) if sys.executable else None
+    out, seen = [], set()
+    for p in (shutil.which("python3"), *TOML_PYTHONS):
+        if not p:
+            continue
+        real = os.path.realpath(p)
+        if real == me or real in seen:
+            continue
+        seen.add(real)
+        out.append(p)
+    return out
+
+
+def _slots_value(obj, whence):
+    """(value, source) of `settings.verify_slots` in a resolve() object: its value an int >= 1 (never a bool); else
+    ValueError naming `whence`."""
+    try:
+        v = obj["settings"]["verify_slots"]
+    except (KeyError, TypeError, IndexError):
+        v = None
+    n = v.get("value") if isinstance(v, dict) else None
+    if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+        raise ValueError(f"{whence} gave no usable settings.verify_slots")
+    return n, str(v.get("source"))
+
+
+def _load_settings():
+    """rollout-settings.py (SETTINGS_PY) as a module; raises when it will not load."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("thread_rollout_settings", SETTINGS_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _resolve_slots():
+    """configured_slots()'s work, which may raise anything: (n, source, warn). In process first; a present file on a
+    python with no tomllib (SettingsError code 3) is read through rollout-settings.py's CLI under each of
+    _toml_pythons() in turn, within one RESOLVE_TIMEOUT: exit 0 is its answer, exit 2 a refusal (its last stderr line
+    the warn), and exit 3, another exit, a candidate that will not start or one that times out passes to the next."""
+    rs = _load_settings()
+    try:
+        out = rs.resolve(repo=None)
+    except rs.SettingsError as e:
+        if e.code != 3:
+            return BUILT_IN_SLOTS, "fallback", f"rollout-settings: {e}"   # a refusal: it names the file and line
+        path = e.subject or rs.default_path()
+    else:
+        return (*_slots_value(out, "rollout-settings"), None)
+    end = time.monotonic() + RESOLVE_TIMEOUT
+    tried = []
+    for py in _toml_pythons():
+        left = end - time.monotonic()
+        if left <= 0:
+            break
+        tried.append(py)
+        try:
+            p = subprocess.run([py, "-I", "-B", SETTINGS_PY], stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, timeout=left)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if p.returncode == 0:
+            return (*_slots_value(json.loads(p.stdout), py), None)
+        if p.returncode == 2:
+            last = [line.strip() for line in (p.stderr or "").splitlines() if line.strip()]
+            return BUILT_IN_SLOTS, "fallback", last[-1] if last else f"{py} {SETTINGS_PY}: exit 2"
+    return BUILT_IN_SLOTS, "fallback", f"no python >= 3.11 could read {path} (tried: {', '.join(tried) or 'none'})"
+
+
+def configured_slots(reraise=()):
+    """The machine's verify slots for a caller given no count (p34-1): (n, source, warn). n is rollouts.toml's
+    `verify_slots` (source `file:defaults`) or rollout-settings.py's built-in (`built-in`), with warn None; on any
+    failure (a refused file, no python that can read it, a resolver that will not load or answers in the wrong shape)
+    BUILT_IN_SLOTS, `fallback` and warn the reason, never an error. `reraise` holds the caller's stop types (its signal
+    handlers' exception), which pass straight through: a subprocess.run cut by one kills and reaps its child first."""
+    try:
+        return _resolve_slots()
+    except reraise:
+        raise
+    except Exception as e:
+        return BUILT_IN_SLOTS, "fallback", f"cannot read verify_slots ({type(e).__name__}: {e})"
+
+
 def _slot_path(d, k):
     return os.path.join(d, f"slot-{k}.lock")
 
@@ -356,10 +515,11 @@ def _scan_waiters(d):
     return live
 
 
-def _register_waiter(d, kind):
-    """(fd, path) of this process's live waiter file, or (None, None) after WAITER_TRIES lost races."""
+def _register_waiter(d, kind, prefix="waiter", extra=None):
+    """(fd, path) of this process's live waiter file (`<prefix>-<pid>-<rand>.wait`, written as `.<…>.tmp` and renamed,
+    held LOCK_EX), or (None, None) after WAITER_TRIES lost races. `extra` adds keys to its record."""
     for _ in range(WAITER_TRIES):
-        name = f"waiter-{os.getpid()}-{random.getrandbits(32):08x}"
+        name = f"{prefix}-{os.getpid()}-{random.getrandbits(32):08x}"
         tmp = os.path.join(d, f".{name}.tmp")
         final = os.path.join(d, f"{name}.wait")
         try:
@@ -368,7 +528,7 @@ def _register_waiter(d, kind):
             continue
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
-            rec = {"pid": os.getpid(), "cwd": os.getcwd(), "since": _stamp(), "kind": kind}
+            rec = {"pid": os.getpid(), "cwd": os.getcwd(), "since": _stamp(), "kind": kind, **(extra or {})}
             os.write(fd, (json.dumps(rec) + "\n").encode())
             os.rename(tmp, final)
             return fd, final
@@ -396,6 +556,108 @@ def _drop_waiter(fd, path):
             os.close(fd)
         except OSError:
             pass
+
+
+# ---- the line: ordinary waiters in arrival order (p34-1, contract 5) -------------------------------------------
+
+def _parse_record(raw):
+    """A record's JSON object from its bytes, or None when it holds none."""
+    try:
+        rec = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def _probe_entry(path):
+    """(st, raw) of a live line entry, both from the inode its name points to at this moment: st its fd's fstat (the
+    mtime is its heartbeat), raw its record read by pread on that same fd. None when the name is gone, no longer names
+    that inode by the time it is checked (dropped or replaced: the next scan reads the new one), or is stale: nobody
+    holds its flock, and then it is unlinked (the inode re-checked against the path first, as _reap_one does)."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return None
+    try:
+        if _flock_nb(fd):
+            try:
+                st, cur = os.fstat(fd), os.stat(path)
+                if (st.st_dev, st.st_ino) == (cur.st_dev, cur.st_ino):
+                    os.unlink(path)
+            except OSError:
+                pass
+            return None
+        st = os.fstat(fd)
+        cur = os.stat(path)
+        if (cur.st_dev, cur.st_ino) != (st.st_dev, st.st_ino):
+            return None
+        return st, os.pread(fd, 65536, 0)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def _line_key(entry):
+    """An entry's place in the line: by (seq, name), an unreadable record (no integer seq) first."""
+    seq = entry.get("seq")
+    if isinstance(seq, bool) or not isinstance(seq, int):
+        return (0, 0, entry["name"])
+    return (1, seq, entry["name"])
+
+
+def _scan_queue(d):
+    """The line: each live `queue-*.wait` entry as {its record…, name, asleep}, in line order (_line_key), each read by
+    _probe_entry, which reaps a stale one; a stale `.queue-*.tmp` is reaped too, and a live one (a registration under
+    way) is not yet in line. An entry is asleep when its mtime is older than max(QUEUE_FRESH_MIN, QUEUE_FRESH_POLLS *
+    its record's poll, DEFAULT_POLL when that is no positive finite number)."""
+    line = []
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return line
+    for name in sorted(names):
+        path = os.path.join(d, name)
+        if name.startswith("queue-") and name.endswith(".wait"):
+            got = _probe_entry(path)
+            if got is None:
+                continue
+            st, raw = got
+            entry = _parse_record(raw) or {"pid": None, "cwd": None, "since": None, "kind": None}
+            poll = entry.get("poll")
+            if isinstance(poll, bool) or not isinstance(poll, (int, float)) or not 0 < poll < float("inf"):
+                poll = DEFAULT_POLL
+            entry["name"] = name
+            entry["asleep"] = time.time() - st.st_mtime > max(QUEUE_FRESH_MIN, QUEUE_FRESH_POLLS * poll)
+            line.append(entry)
+        elif name.startswith(".queue-") and name.endswith(".tmp"):
+            _probe_entry(path)
+    line.sort(key=_line_key)
+    return line
+
+
+def _ahead_in_line(line, place):
+    """How many awake entries are ahead in line of `place` (this waiter's own _line_key), or every awake one when it has
+    no place yet (its first try, or a registration that lost its races)."""
+    return sum(1 for e in line if not e["asleep"] and (place is None or _line_key(e) < place))
+
+
+def _join_line(d, kind, base):
+    """(fd, path, place) of this waiter's own line entry, joined after its first miss: `queue-<pid>-<rand>.wait`, held
+    LOCK_EX, its record's seq (time.time_ns()) its place and poll (its poll base) the asleep rule's clock. A
+    registration that loses WAITER_TRIES races, or cannot be written, waits unregistered (None, None, None) with a
+    WARN."""
+    seq = time.time_ns()
+    try:
+        fd, path = _register_waiter(d, kind, prefix="queue", extra={"seq": seq, "poll": base})
+        why = f"lost {WAITER_TRIES} races"
+    except OSError as e:
+        fd = path = None
+        why = e.strerror or str(e)
+    if fd is None:
+        print(f"verify-slot: WARN {d}: could not join the line ({why}); waiting unregistered", file=sys.stderr)
+        return None, None, None
+    return fd, path, (1, seq, os.path.basename(path))
 
 
 # ---- slots ----------------------------------------------------------------------------------------------------
@@ -474,12 +736,20 @@ def _open_slot(d, k):
         raise SlotDirError(f"{d}: {e.strerror or e}")
 
 
-def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=False, kind="run", why=None):
-    """Wait for one of `slots` verify slots: a Slot, or None when max_wait seconds pass first (0: one try).
+def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=False, kind="run", why=None,
+            head_age=HEAD_AGE):
+    """Wait for one of `slots` verify slots: a Slot, or None when max_wait seconds pass first (0: one try, which takes
+    a free slot only when no awake run is ahead in line).
 
     on_wait(msg) gets `waiting for one of N verify slots (…)` at the first miss and every REMIND_EVERY seconds.
-    A priority acquirer registers a waiter file while it waits; a non-priority one takes a slot only when it can
-    hold (live waiters + 1) at once. SlotDirError when the dir is unusable (checked before any heat reading).
+    A priority acquirer registers a waiter file while it waits; a non-priority one joins the line after its first miss
+    (contract 5) and takes a slot only when it can hold (live Integration waiters + awake runs ahead of it in line + 1)
+    at once, or one once it has been at the head of the line for head_age. head_age (HEAD_AGE, 900 s) is the age
+    bound: from the first poll with no awake run ahead (its unregistered first try included; an entry ahead that wakes
+    resets it, and heat holds count), the head then needs one free slot and polls at the priority cadence, keeping its
+    line entry and writing no waiter file; on_wait gets `at the head of the line for <head_age>s: now waiting beside
+    the Integration waiters` at the poll where it ages, before that poll's try, and its later waiting lines name only
+    the holders. SlotDirError when the dir is unusable (checked before any heat reading).
     The Heat hold (contract 7): each poll reads heat_level() first; at HEAT_HOLD or worse it tries no slot (a miss),
     and on_wait gets `waiting (heat: <name>)`, said at the first miss, whenever the holding reason changes (another
     heat name, or a switch between heat and slots) and every REMIND_EVERY seconds. `why`, a dict the caller keeps,
@@ -497,6 +767,9 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
     start = time.monotonic()
     told = told_reason = None
     wfd = wpath = None
+    qfd = qpath = place = None   # a non-priority waiter's own line entry and its place (p34-1), after its first miss
+    joined = False
+    head_since, aged = None, False   # the age bound: since when it has been the head; whether it has aged
     try:
         if priority:
             try:
@@ -508,16 +781,33 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
                       "waiting unregistered", file=sys.stderr)
         missed = False
         while True:
+            if qfd is not None:
+                try:
+                    os.utime(qfd)   # the heartbeat (contract 5): every poll, hot or not
+                except OSError:
+                    pass
             level = heat_level()
             hot = level >= HEAT_HOLD
             if why is not None:
                 why["heat"] = level if hot else None
-            ahead = 0
+            ahead = inline = 0
             got, held = [], []
             if not hot:
                 live = _scan_waiters(d)
-                ahead = 0 if priority else len(live)
-                need = 1 if priority else ahead + 1
+                if priority:
+                    need = 1
+                else:
+                    ahead = len(live)
+                    inline = _ahead_in_line(_scan_queue(d), place)
+                    if inline:
+                        head_since = None   # an entry ahead (a sleeper that woke included) resets the clock
+                    elif head_since is None:
+                        head_since = time.monotonic()
+                    was, aged = aged, head_since is not None and time.monotonic() - head_since >= head_age
+                    if aged and not was and on_wait is not None:
+                        on_wait(f"at the head of the line for {head_age:.0f}s: now waiting beside the Integration "
+                                "waiters")
+                    need = 1 if aged else ahead + inline + 1
                 try:
                     for k in range(slots):
                         fd = _open_slot(d, k)
@@ -544,6 +834,9 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
             now = time.monotonic()
             if max_wait is not None and now - start >= max_wait:
                 return None
+            if not priority and not joined:
+                joined = True
+                qfd, qpath, place = _join_line(d, kind, base)
             reason = f"heat: {heat_name(level)}" if hot else "slots"
             if on_wait is not None and (told is None or reason != told_reason or now - told >= REMIND_EVERY):
                 if hot:
@@ -551,16 +844,19 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
                 else:
                     names = "; ".join(_describe(_read_json(_slot_path(d, k))) for k in held)
                     held_why = [f"held by {names}"] if names else []
-                    if ahead:
+                    if ahead and not aged:   # an aged head waits beside them: only the holders are named
                         held_why.append(f"{ahead} Integration waiter(s) ahead")
+                    if inline:
+                        held_why.append(f"{inline} run(s) ahead in line")
                     on_wait(f"waiting for one of {slots} verify slots ({'; '.join(held_why) or 'none free'})")
                 told, told_reason = now, reason
-            step = base + random.uniform(0, base / 2) if priority else 2 * base + random.uniform(0, base)
+            step = base + random.uniform(0, base / 2) if priority or aged else 2 * base + random.uniform(0, base)
             if max_wait is not None:
                 step = min(step, max(0.0, max_wait - (now - start)))
             time.sleep(step)
     finally:
         _drop_waiter(wfd, wpath)
+        _drop_waiter(qfd, qpath)
 
 
 # ---- the guard --------------------------------------------------------------------------------------------------
@@ -600,9 +896,10 @@ def kill_group(pgid, grace=KILL_GRACE):
 class Guarded:
     """CMD under a guard (`_guard`, its own session). `.pid` is the guard's pid; `.group` the command's pgid, or
     None when the guard died before reporting it. `hold` is a Slot whose fd the guard inherits (its own reference
-    to the lock). Signals TERM/INT/HUP are held across the spawn (the child starts with the caller's mask), and
-    on_spawn(self) runs inside that window, so a caller that records the handle there never loses it. wait() waits;
-    watch() waits under the Heat hold's stop (contract 7)."""
+    to the lock), and with it held the command sees HELD_ENV=1 (the marker, contract 3). Signals TERM/INT/HUP are held
+    across the spawn (the child starts with the caller's mask), and on_spawn(self) runs inside that window, so a caller
+    that records the handle there never loses it. wait() waits; watch() waits under the Heat hold's stop (contract
+    7)."""
 
     def __init__(self, argv, hold=None, on_spawn=None, **popen_kw):
         self.group = None
@@ -614,7 +911,14 @@ class Guarded:
         fds = [death_r, rep_w]
         if hold is not None and hold.fd is not None:
             fds.append(hold.fd)
-        cmd = [sys.executable or "python3", SCRIPT, "_guard", str(death_r), str(rep_w), "--", *argv]
+            # The marker (p34-1): the guard's environment, which the command inherits, gains HELD_ENV. A new dict, so a
+            # caller's env is never mutated; every Guarded caller (cmd_run, _run_recorded, lead-integrate.py's
+            # _run_guarded) gets it here, on each heat-stop restart too.
+            base = os.environ if popen_kw.get("env") is None else popen_kw["env"]
+            popen_kw["env"] = {**base, HELD_ENV: "1"}
+        # Isolated (-I): the guard ignores PYTHONPATH, PYTHONHOME and the user site (it imports only the stdlib), and
+        # its own environment, which the command inherits, is left as the caller's.
+        cmd = [sys.executable or "python3", "-I", SCRIPT, "_guard", str(death_r), str(rep_w), "--", *argv]
         mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
         try:
             try:
@@ -789,7 +1093,7 @@ def _end(child):
 
 # ---- CLI ---------------------------------------------------------------------------------------------------------
 
-USAGE = ("usage: verify-slot.py run --slots N [--priority] [--slot-wait S] -- CMD… | wait --log FILE [--pid P] "
+USAGE = ("usage: verify-slot.py run [--slots N] [--priority] [--slot-wait S] -- CMD… | wait --log FILE [--pid P] "
          "[--for S] | status [--slots N]")
 
 
@@ -813,7 +1117,8 @@ def _positive_int(v):
 
 
 def _slot_wait_arg(v):
-    """`run --slot-wait S` (p32-1): an integer >= 0 in seconds (0: one try), in ASCII digits only; else usage."""
+    """`run --slot-wait S` (p32-1): an integer >= 0 in seconds (0: one try, which takes a free slot only when no awake
+    run is ahead in line), in ASCII digits only; else usage."""
     n = _digits(v)
     if n is None:
         raise _Usage(f"run: --slot-wait must be an integer >= 0 (seconds), got {v!r}")
@@ -828,9 +1133,7 @@ def _parse_run(argv):
             cmd = argv[i + 1:]
             if not cmd:
                 raise _Usage("run: no command after --")
-            if slots is None:
-                raise _Usage("run: --slots N is required")
-            return slots, prio, cmd, wait
+            return slots, prio, cmd, wait   # slots None: rollouts.toml's (configured_slots(), inside run's handlers)
         if a == "--slots":
             if i + 1 >= len(argv):
                 raise _Usage("run: --slots needs a value")
@@ -901,11 +1204,20 @@ def _say(msg):
     print(f"verify-slot: {msg}", file=sys.stderr, flush=True)
 
 
+def _default_slots():
+    """`run`'s count when no --slots is given (p34-1): configured_slots() with the caller's stop passed through (run
+    calls it inside its handlers, before its slot wait starts), and a WARN on stderr when it falls back."""
+    n, _source, warn = configured_slots(reraise=(_Signalled,))
+    if warn:
+        _say(f"WARN {warn}; using the built-in {n} verify slots")
+    return n
+
+
 def _acquire_within(slots, prio, why, wait, t_end, first):
     """acquire() under `run`'s one slot-wait deadline (p32-1; lead-integrate.py verify's rule): the first pass always
-    tries, with max_wait=wait (0: one try); a re-queue after a heat stop tries only while time is left before t_end, and
-    with no time left makes no try at all (no waiting line). A Slot, or None when none came in time; a SlotDirError
-    passes through."""
+    tries, with max_wait=wait (0: one try, which takes a free slot only when no awake run is ahead in line); a re-queue
+    after a heat stop tries only while time is left before t_end, and with no time left makes no try at all (no
+    waiting line). A Slot, or None when none came in time; a SlotDirError passes through."""
     left = wait if first else t_end - time.monotonic()
     if not first and left <= 0:
         return None
@@ -934,6 +1246,8 @@ def cmd_run(argv):
     slot = None
     rc = None
     try:
+        if slots is None:
+            slots = _default_slots()   # inside the handlers: a stop here is 76, before the slot wait's deadline starts
         # The Heat hold (contract 7): a heat stop releases the slot and goes back in line, at the back, to restart the
         # command from the beginning once the Mac cools. Only the last run's rc is the exit. One slot-wait deadline
         # bounds every pass's wait (p32-1): once it runs out, no verdict (76).
@@ -1102,6 +1416,8 @@ def _run_recorded(slots, prio, cmd, owner, wait=RUN_SLOT_WAIT):
     suite, by = rr.new_suite_id(), ("integration" if prio else "task")
     piped = not (os.isatty(1) or os.isatty(2))
     try:
+        if slots is None:
+            slots = _default_slots()   # inside the handlers, as cmd_run's: a stop here is 76 and writes no line
         state = rr.tree_state(owner["tree"])   # the agent's tree is still while it waits for a slot
         # The Heat hold (contract 7), as cmd_run's: a heat stop releases the slot and goes back in line, at the back, to
         # restart the command from the beginning once the Mac cools. Only the last run's rc is the exit. One slot-wait
@@ -1218,16 +1534,24 @@ def cmd_status(argv):
     if os.path.exists(d) and not os.path.isdir(d):
         print(f"verify-slot: {d}: not a directory", file=sys.stderr)
         return 2
+    if slots is None:
+        # p34-1: rollouts.toml's count, as `run` reads it (no handlers here: a stop ends status, and a resolver child
+        # finishes its short run on its own); a fallback WARNs and status still exits 0.
+        n, source, warn = configured_slots()
+        if warn:
+            print(f"verify-slot: WARN {warn}; using the built-in {n} verify slots", file=sys.stderr)
+    else:
+        n, source = slots, "--slots"
     waiters = _scan_waiters(d)
     if slots is None:
-        idx = []
+        present = set()
         try:
             for name in os.listdir(d):
                 if name.startswith("slot-") and name.endswith(".lock") and name[5:-5].isdigit():
-                    idx.append(int(name[5:-5]))
+                    present.add(int(name[5:-5]))
         except OSError:
             pass
-        indexes = sorted(idx)
+        indexes = sorted(set(range(n)) | present)   # a slot file above N (a smaller verify_slots) still shows
     else:
         indexes = list(range(slots))
     out = []
@@ -1235,8 +1559,11 @@ def cmd_status(argv):
         state, holder = _probe(d, k)
         out.append({"index": k, "state": state, "holder": holder if state == "held" else None})
     ws = [{k: w.get(k) for k in ("pid", "cwd", "since", "kind")} for w in waiters]
+    line = [{**{k: e.get(k) for k in ("pid", "cwd", "since", "kind")}, "asleep": e["asleep"]} for e in _scan_queue(d)]
     level = heat_level()
-    print(json.dumps({"dir": d, "slots": out, "waiters": ws, "heat": {"level": level, "name": heat_name(level)}}))
+    print(json.dumps({"dir": d, "slots": out, "waiters": ws, "queue": line,
+                      "verify_slots": {"value": n, "source": source},
+                      "heat": {"level": level, "name": heat_name(level)}}))
     return 0
 
 
