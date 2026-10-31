@@ -1168,13 +1168,6 @@ def cmd_verify(args):
     flake_on = args.diff_base is not None
     flake = None
     tree_sha = (args.detach_at or rev(str(tree), "HEAD")) if flake_on else ""
-    # The verify base (p34-3, ADR 0060): every step sees --diff-base resolved to its sha in T as THREAD_VERIFY_BASE, so a
-    # fast tier's reach reads the task's diff even after origin/<default> moved (the RACE: merge-task refreshed it to
-    # hold the merge). Without --diff-base, or when it does not resolve, the steps never see it, whatever the caller's.
-    step_env = {k: v for k, v in ENV.items() if k != VERIFY_BASE_ENV}
-    verify_base = rev(str(tree), args.diff_base) if flake_on else ""
-    if verify_base:
-        step_env[VERIFY_BASE_ENV] = verify_base
     try:
         for s in SIGNALS:   # inside the try, so a signal that lands at once still removes the tree
             signal.signal(s, _on_signal)
@@ -1183,6 +1176,15 @@ def cmd_verify(args):
             # tree locked by a live pid, so a RACE re-verify's tree is never removed under its suite. Inside the try,
             # so the finally's `remove --force --force` takes a tree a stop left locked.
             git(os.path.expanduser(args.repo), "worktree", "lock", "--reason", f"pid {os.getpid()}", str(tree))
+        # The verify base (p34-3, ADR 0060): every step sees --diff-base resolved to its sha in T as THREAD_VERIFY_BASE,
+        # so a fast tier's reach reads the task's diff even after origin/<default> moved (the RACE: merge-task refreshed
+        # it to hold the merge). Without --diff-base, or when it does not resolve, the steps never see it, whatever the
+        # caller's. Resolved once, before the Heat-hold loop, and inside the handlers: its rev-parse runs after
+        # --detach-at's `worktree add`, so a stop that lands during it still takes the finally and removes the tree.
+        step_env = {k: v for k, v in ENV.items() if k != VERIFY_BASE_ENV}
+        verify_base = rev(str(tree), args.diff_base) if flake_on else ""
+        if verify_base:
+            step_env[VERIFY_BASE_ENV] = verify_base
         if outcome_path:
             _write_atomic(outcome_path, json.dumps(result) + "\n")
         with open(log_path, "ab", buffering=0) as log:

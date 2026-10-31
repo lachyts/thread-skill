@@ -2,8 +2,8 @@
 // THREAD_VERIFY_BASE, so a fast tier's reach reads the task's diff even after merge-task refreshed origin/<default> (the
 // RACE re-verify). The script is pinned by tests/lead-integrate.test.sh C57. This file pins the prose a lead and a
 // project author follow:
-// - execute SKILL.md § 4.5 names THREAD_VERIFY_BASE in *The Flake check* paragraph (*The verify base*) and in the RACE
-//   procedure, with `<the merge commit>^1`;
+// - execute SKILL.md § 4.5 names THREAD_VERIFY_BASE in *The Flake check* paragraph (*The verify base*), with the
+//   unresolvable base's case (left unset, a WARN), and in the RACE procedure, with `<the merge commit>^1`;
 // - schedule SKILL.md's completion verifier paragraph tells project authors to read it;
 // - CONTEXT.md has a **Verify base** entry;
 // - docs/adr/0060 exists;
@@ -44,7 +44,8 @@ function check(f) {
   const flake = s45.slice(s45.indexOf('**The Flake check** (`--diff-base`'), s45.indexOf('**Verify slots'))
   const race = s45.slice(s45.indexOf('**RACE procedure**'), s45.indexOf('5. **Completion.**'))
   need('skill-verify', flake.includes('**The verify base** (ADR 0060') && flake.includes(`sees \`${VAR}\`, the diff base's sha`) &&
-    flake.includes('a verify without `--diff-base` (the completion verify) never sets it'))
+    flake.includes('a verify without `--diff-base` (the completion verify) never sets it') &&
+    flake.includes('A `--diff-base` that does not resolve in the tree leaves it unset too, with one `verify: WARN'))
   need('skill-race', race.includes(`The re-verify's steps see \`${VAR}=<the merge commit>^1\``) &&
     race.includes('`origin/<default>` never moves for it'))
   const sch = collapse(f.schedule.split('\n').find((l) => l.startsWith('**The completion verifier (estate ADR 0009 d6).**')) ?? '')
@@ -75,6 +76,10 @@ test('control: § 4.5 without the verify base fails skill-verify', () => {
 
 test('control: a completion verify that sets it fails skill-verify', () => {
   only(edit('skill', 'a verify without `--diff-base` (the completion verify) never sets it', 'every verify sets it'), 'skill-verify', 'completion sets it')
+})
+
+test('control: § 4.5 without the unresolvable base\'s case fails skill-verify', () => {
+  only(edit('skill', 'A `--diff-base` that does not resolve in the tree leaves it unset too', 'A `--diff-base` that does not resolve is an error'), 'skill-verify', 'no unresolvable case')
 })
 
 test('control: a RACE procedure without the variable fails skill-race', () => {
