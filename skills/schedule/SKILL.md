@@ -157,8 +157,8 @@ and a supersede never crosses shapes. A chain holds its whole `surfaces:`, but a
 unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces (ADR 0060): a root
 that overlaps only a place a stuck chain released gives a `WARN: … released …` line instead of a
 refusal, and that chain reclaims the place on resume and then waits its turn while this rollout holds it.
-A clone root never overlaps a chain on the in-place checkout, so the two coexist as peers (ADR 0042,
-intended); the refusal still fires for a chain that claims
+A clone root never overlaps a chain on the in-place checkout, so the
+two coexist as peers (ADR 0042, intended); the refusal still fires for a chain that claims
 `repo:<clone>`, and for a rollout rooted in place before ADR 0042.
 A rollout awaiting sign-off (`paused_for: sign-off`, execute § 4.5 step 5's form: only gates wait on Lachy) is unfinished too: the refusal names its waiting tasks and the
 sign-off path (sign off, then `/thread:execute`, or `/thread:repair` to defer them), and `--regenerate` on
