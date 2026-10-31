@@ -73,6 +73,9 @@ VERIFY_SLOT_JSON=$([ -n "$ENGINE_URL" ] && node --input-type=module -e "import {
 export VERIFY_SLOT_JSON
 . tests/lib/assert.sh
 unset $(git rev-parse --local-env-vars)
+# The slot marker (verify-slot.py, p34-1): C57b reads VERIFY_SLOT_HELD to see its steps ran guarded, so a suite run
+# inside a slot never lends its own marker to an unguarded step.
+unset VERIFY_SLOT_HELD
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
