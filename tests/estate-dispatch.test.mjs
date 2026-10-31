@@ -231,6 +231,9 @@ const LONG60 = 'Keep the flat-file store and migrate it in a second pass now'
 const REC40 = 'Ship the lab rig on the old firmware now'
 // The Framing's Note (asking.md § 3), the last words of every question rounds and preflight build (ADR 0054 d8).
 const INVITE = 'What would make this wrong for you?'
+// The orient prompt's last line for a project ticked on the pick list (PICK_LINE, ADR 0060).
+const PICKED = (counts) => `Ticked on orient-all's pick list on ${TODAY} (${counts}): this project keeps its own session, so its ` +
+  'decisions are asked here and its rollout is scheduled here.'
 assert.equal(LONG60.length, 60)
 assert.equal(REC40.length, 40)
 const D = (question, recommendation, options, extra = {}) =>
@@ -882,6 +885,14 @@ test('D13. usage: a bad verb, flag (log\'s included), input, budget, status or w
   refusal(sessions(PLAN_FILE(), ['--status', 'clean-rollout-2026-10-19=14']), /1 to 13/)
   refusal(sessions(PLAN_FILE(), ['--status', 'clean-rollout-2026-10-19=0']), /1 to 13/)
   refusal(sessions(PLAN_FILE(), ['--status', 'unknown=6']), /rollout of the plan/)
+  refusal(plan(['--status', 'bad']), /rollout of the scan/)
+  refusal(plan(['--status', 'clean-rollout-2026-10-19=14']), /1 to 13/)
+  refusal(sessions(PLAN_FILE(), ['--open', 'Nope']), /--open Nope: no project on the plan's pick list/)
+  const noPick = keep('plan-no-pick.json', JSON.stringify({ ...ok(PLAN()), pick: [], pickAsk: [], pickIndex: null }))
+  refusal(sessions(noPick, ['--open', 'Act']), /--open Act: no project on the plan's pick list/)
+  const unpicked = { ...ok(PLAN()) }
+  delete unpicked.pick
+  refusal(sessions(keep('plan-unpicked.json', JSON.stringify(unpicked))), /has no pick list/)
   refusal(sessions(PLAN_FILE(), ['--wrote', path.join(V, 'Work', 'Projects', 'Act.md')]), /directly in/)
   refusal(sessions(PLAN_FILE(), ['--wrote', path.join(TASKS, 'Archive', 'Rollouts', 'arch-rollout-2026-10-01.md')]), /directly in/)
   refusal(py(['record', '--task', 'rec-new', '--question', 'Q', '--answer', 'A', '--recommended', 'A', '--today', 'soon', '--vault', V]), /--today/)
@@ -901,7 +912,7 @@ test('D14. read-only and determinism: rounds, plan and sessions write nothing in
   const runs = [
     () => rounds(30),
     () => plan(['--decided', 'act-call', '--unparked', 'ParkA', '--signed', 'gate-so']),
-    () => sessions(SIGNED_FILE(), ['--wrote', WROTE_PAR, '--wrote', WROTE_SER, '--status', 'clean-rollout-2026-10-19=13']),
+    () => sessions(SIGNED_FILE(), ['--wrote', WROTE_PAR, '--wrote', WROTE_SER, '--status', 'clean-rollout-2026-10-19=13', '--open', 'Act']),
     () => py(['decided-for-you', '--rank', RANK_FILE, '--tasks', 'act-a,act-call,grl-a']),
   ]
   for (const run of runs) {
@@ -991,18 +1002,22 @@ test('D15. acceptance: sessions starts written notes, live rollouts only on the 
   const bare = ok(sessions(PLAN_FILE()))
   assert.deepEqual(bare.left.map((x) => [x.action, x.why]).filter(([a]) => a !== null), [])
   assert.equal(bare.left.length, ok(PLAN()).rollouts.length)
-  // Order: written notes, live executes, repairs, orients last.
+  // Order: written notes, live executes, repairs, orients last. Act and Bo are small projects with an Orient task, so
+  // each is on the pick list and gets its orient only when ticked (ADR 0060).
+  assert.ok(!bare.items.some((x) => x.kind === 'orient'), 'no orient starts unticked')
   const all = ok(sessions(SIGNED_FILE(), ['--wrote', WROTE_PAR, '--wrote', WROTE_SER, '--status', 'signoff-rollout-2026-10-19=8',
-    '--status', `${CLEAN}=11`, '--status', 'live-rollout-2026-10-19=7']))
+    '--status', `${CLEAN}=11`, '--status', 'live-rollout-2026-10-19=7', '--open', 'Act', '--open', 'Bo']))
   assert.deepEqual(all.items.map((x) => [x.kind, x.rollout ?? x.project]), [
     ['execute', 'wrote-par-rollout-2026-10-20'], ['leg', 'wrote-ser-rollout-2026-10-20'],
     ['execute', 'signoff-rollout-2026-10-19'], ['repair', CLEAN], ['repair', 'live-rollout-2026-10-19'],
     ['orient', 'Act'], ['orient', 'Bo']])
   const act = all.items.find((x) => x.kind === 'orient' && x.project === 'Act')
   assert.equal(act.prompt, `/thread:orient [[Act]]\norient-all wrote [[wrote-par-rollout-2026-10-20]] for this project on ${TODAY} ` +
-    'and is starting its execute; leave that rollout to it, its tasks are in flight.')
-  assert.equal(all.items.find((x) => x.project === 'Bo').prompt, '/thread:orient [[Bo]]')
-  assert.equal(ok(sessions(PLAN_FILE())).items.find((x) => x.project === 'Act').prompt, '/thread:orient [[Act]]')
+    `and is starting its execute; leave that rollout to it, its tasks are in flight.\n${PICKED('1 Orient task')}`)
+  assert.equal(act.why, 'ticked on the pick list')
+  assert.equal(all.items.find((x) => x.project === 'Bo').prompt, `/thread:orient [[Bo]]\n${PICKED('1 Orient task')}`)
+  assert.equal(ok(sessions(PLAN_FILE(), ['--open', 'Act'])).items.find((x) => x.project === 'Act').prompt,
+    `/thread:orient [[Act]]\n${PICKED('1 Orient task')}`)
   for (const x of all.items) {
     assert.ok(x.title.length <= 60, x.title)
     assert.ok(x.tldr && !x.tldr.includes('/'), `a tldr with no paths: ${x.tldr}`)
@@ -1489,4 +1504,196 @@ test('D22. the question gate: preflight and rounds ask only his decisions, in th
   assert.deepEqual(rd.grill.map((x) => [x.slug, x.decisions.map((d) => [d.question, d.goal, d.stakes])]),
     [['g', [['Who reads it?', WHO.goal, WHO.stakes]]]])
   assert.deepEqual(snap(VF), VF_BEFORE, 'only the copies were written')
+})
+
+// ---- The big-project fixture (D23; ADR 0060) ----------------------------------------------------------------------
+// Its own vault VB, scanned with --deadline 0 like V, its three rollout summaries injected into a copy, ranked for real.
+// Big (orient: own) has serial big-ready (Ready), big-call (One call), big-grill (Grill, two decisions) and big-orient
+// (Orient), and a live rollout whose big-gated sign-off is pending. BigDue is big by its design record (HOME/repos/bigrec
+// holds CONTEXT.md and docs/adr/0001-x.md), with one Ready task due within DUE_SOON_DAYS. BigPark is big by key and
+// parked, with one Ready task. BigSo is big by key, with only a live rollout holding a pending sign-off; Items and Bits
+// big by key, with only a clean live rollout that `--status =13` gives an execute item. Small holds small-a (Ready),
+// small-call (One call), small-ask (One call, depends on big-ready), small-held (One call, depends on big-call) and
+// small-dep (Ready, depends on big-ready); SmallOr one Orient task captured 2026-10-01; Odd an `orient: maybe` key.
+const VB = path.join(S, 'vb')
+const VB_TASKS = path.join(VB, 'Work', 'Tasks')
+const PB = (name, status, rest = '') => write(path.join(VB, 'Work', 'Projects', `${name}.md`),
+  fm(`tags:\n  - project\nstatus: ${status}${rest}`))
+const TB = (slug, status, project, rest = '', body = '') => write(path.join(VB_TASKS, `${slug}.md`),
+  fm(`tags:\n  - task\nstatus: ${status}${links('projects', [project])}${rest}`, `\n# Task ${slug}\n${body}`))
+PB('Big', 'active', '\norient: own')
+PB('BigDue', 'active', '\nrepos:\n  - ~/repos/bigrec')
+PB('BigPark', 'parked', '\norient: own')
+PB('BigSo', 'active', '\norient: own')
+PB('Items and Bits', 'active', '\norient: own')
+PB('Small', 'active')
+PB('SmallOr', 'active')
+PB('Odd', 'active', '\norient: maybe')
+for (const f of ['CONTEXT.md', 'docs/adr/0001-x.md']) write(path.join(ROOT('bigrec'), f), '# x\n')
+for (const s of ['big-ready', 'big-call', 'big-grill', 'big-orient']) TB(s, 'open', 'Big')
+TB('bigdue-a', 'open', 'BigDue', '\ndue: 2026-10-25')
+TB('bigpark-a', 'open', 'BigPark')
+TB('small-a', 'open', 'Small')
+TB('small-call', 'open', 'Small')
+TB('small-ask', 'open', 'Small', links('depends-on', ['big-ready']))
+TB('small-held', 'open', 'Small', links('depends-on', ['big-call']))
+TB('small-dep', 'open', 'Small', links('depends-on', ['big-ready']))
+TB('small-orient', 'open', 'SmallOr', '\ncaptured: 2026-10-01')
+const BIG_RO = 'big-rollout-2026-10-19'
+const SO_RO = 'bigso-rollout-2026-10-19'
+const IB_RO = 'items-rollout-2026-10-19'
+for (const [slug, project] of [[BIG_RO, 'Big'], [SO_RO, 'BigSo'], [IB_RO, 'Items and Bits']]) {
+  write(path.join(VB_TASKS, `${slug}.md`), fm(`tags:\n  - rollout\nstatus: open\nprotocol_version: 5\nprojects:\n  - "[[${project}]]"`,
+    `\n# Rollout ${slug}\n\nProject root: \`${path.join(S, `root-${slug.split('-')[0]}`)}\`\n`))
+}
+TB('big-gated', 'gate-pending', 'Big', `\nrollout: "[[${BIG_RO}]]"`, '\n## Gated inputs (awaiting sign-off)\n\n- spend: a big spend — cap 5 USD\n')
+TB('bigso-gate', 'gate-pending', 'BigSo', `\nrollout: "[[${SO_RO}]]"`, '\n## Gated inputs (awaiting sign-off)\n\n- irreversible: publish it\n')
+const vbScanRun = spawnSync('python3', [SCAN, '--vault', VB, '--today', TODAY, '--deadline', '0'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+const VB_SUMMARIES = { [BIG_RO]: SUM({ setAside: [aside('big-gated')], pendingSignOffs: ['big-gated'] }),
+  [SO_RO]: SUM({ setAside: [aside('bigso-gate')], pendingSignOffs: ['bigso-gate'] }), [IB_RO]: SUM() }
+let VB_RAW = null
+try { VB_RAW = JSON.parse(vbScanRun.stdout) } catch { /* D23 names it */ }
+const vbInjected = (raw) => {
+  const s = structuredClone(raw)
+  for (const r of s.rollouts) if (r.slug in VB_SUMMARIES) { r.summary = VB_SUMMARIES[r.slug]; r.error = null }
+  return s
+}
+const VB_SCAN = path.join(S, 'vb-run', 'scan.json')
+if (VB_RAW) write(VB_SCAN, JSON.stringify(vbInjected(VB_RAW)))
+const VB_GRADES = path.join(S, 'vb-run', 'grades-01.json')
+write(VB_GRADES, JSON.stringify([
+  { project: 'Big', tasks: [R('big-ready', 'serial'), G('big-call', 'One call', 'serial', { decisions: one('Big way?') }),
+    G('big-grill', 'Grill', 'serial', { decisions: [D('Big schema?', 'flat', ['flat', 'nested']), D('Big cache?', 'none', ['none', 'lru'])] }),
+    G('big-orient', 'Orient', 'serial')] },
+  { project: 'BigDue', tasks: [R('bigdue-a', 'serial')] },
+  { project: 'BigPark', tasks: [R('bigpark-a', 'serial')] },
+  { project: 'Small', tasks: [R('small-a', 'serial'), G('small-call', 'One call', 'serial', { decisions: one('Small way?') }),
+    G('small-ask', 'One call', 'serial', { decisions: one('Ask way?') }), G('small-held', 'One call', 'serial', { decisions: one('Held way?') }),
+    R('small-dep', 'serial')] },
+  { project: 'SmallOr', tasks: [G('small-orient', 'Orient', 'serial')] },
+], null, 2) + '\n')
+const VB_RANK = path.join(S, 'vb-run', 'rank.json')
+const vbRankRun = VB_RAW ? spawnSync('python3', [RANK, 'rank', '--scan', VB_SCAN, '--today', TODAY, '--grades', VB_GRADES],
+  { encoding: 'utf8', cwd: S, env, timeout: 60000 }) : null
+if (vbRankRun?.status === 0) write(VB_RANK, vbRankRun.stdout)
+const VB_BEFORE = snap(VB)
+
+// ---- D23. Big projects keep their own sessions; one pick list at the end ------------------------------------------
+test('D23. big projects: nothing of theirs asked, scheduled or started; one pick list, ranked, ticks open them', () => {
+  assert.equal(vbScanRun.status, 0, vbScanRun.stderr)
+  assert.equal(vbRankRun?.status, 0, vbRankRun?.stderr)
+  const sc = vbInjected(VB_RAW)
+  const own = (name) => sc.projects.find((p) => p.name === name).ownSession
+  assert.deepEqual([own('Big'), own('BigDue'), own('Small'), own('Odd')], [{ own: true, by: 'key', repo: null },
+    { own: true, by: 'design record', repo: '~/repos/bigrec' }, { own: false, by: null, repo: null },
+    { own: false, by: null, repo: null, invalid: 'maybe' }])
+  const rk = JSON.parse(vbRankRun.stdout)
+  assert.deepEqual(rk.tasks.find((t) => t.slug === 'small-held').blockedBy, [{ slug: 'big-call', why: 'One call' }])
+  assert.deepEqual(rk.tasks.find((t) => t.slug === 'small-ask').blockedBy, [], 'a Ready big dependency holds nothing in the rank')
+  const BIG = ['big-ready', 'big-call', 'big-grill', 'big-orient', 'bigdue-a', 'bigpark-a']
+  const vbRounds = (budget) => py(['rounds', '--rank', VB_RANK, '--scan', VB_SCAN, '--budget', String(budget)])
+  const vbPlan = (more = [], rankFile = VB_RANK, scanFile = VB_SCAN) => py(['plan', '--rank', rankFile, '--scan', scanFile, ...more])
+
+  // rounds: only the small project's own One call is asked; a big project's sign-offs, One calls, Grills and Unpark offer
+  // wait on its own session, uncharged; a small decision on a big project's task is skipped, naming it.
+  const r = ok(vbRounds(60))
+  const qs = r.asks.flat()
+  assert.deepEqual(r.index.map((x) => [x.kind, x.slug]), [['one-call', 'small-call']])
+  for (const q of qs) assert.ok(q.question.endsWith(` ${INVITE}`), q.question)
+  assert.deepEqual(r.signOffs.map((x) => [x.slug, x.ask, x.why]), [['big-gated', false, 'own session'], ['bigso-gate', false, 'own session']])
+  assert.deepEqual([r.minutes.signOffs, r.oneCalls.map((x) => x.slug), r.grill, r.unpark], [0, ['small-call'], [], []])
+  assert.ok(!qs.some((q) => q.question.includes('[[BigPark]]')), 'no Unpark question for a big project')
+  assert.deepEqual(r.skipped.map((x) => [x.kind, x.slug, x.ownSession]), [['one-call', 'small-ask', { project: 'Big', slug: 'big-ready' }],
+    ['one-call', 'small-held', { project: 'Big', slug: 'big-call' }]])
+  assert.deepEqual(r.ownSession, [
+    { project: 'Big', note: 'Work/Projects/Big.md', by: 'key', repo: null, ready: 1, oneCalls: 1, grills: 1, decisions: 3, orient: 1, signOffs: 1, unpark: false },
+    { project: 'BigDue', note: 'Work/Projects/BigDue.md', by: 'design record', repo: '~/repos/bigrec', ready: 1, oneCalls: 0, grills: 0, decisions: 0, orient: 0, signOffs: 0, unpark: false },
+    { project: 'BigSo', note: 'Work/Projects/BigSo.md', by: 'key', repo: null, ready: 0, oneCalls: 0, grills: 0, decisions: 0, orient: 0, signOffs: 1, unpark: false },
+    { project: 'BigPark', note: 'Work/Projects/BigPark.md', by: 'key', repo: null, ready: 1, oneCalls: 0, grills: 0, decisions: 0, orient: 0, signOffs: 0, unpark: true }])
+  assert.deepEqual(r.warnings, ['[[Odd]] (Work/Projects/Odd.md): orient: "maybe" is neither own nor sweep, so its design record decides: small'])
+  assert.ok(r.top.length > 0 && !r.top.some((t) => BIG.includes(t.slug)), JSON.stringify(r.top.map((t) => t.slug)))
+  assert.deepEqual(r.live.map((x) => [x.slug, x.project, x.ownSession]), [[BIG_RO, 'Big', true], [SO_RO, 'BigSo', true], [IB_RO, 'Items and Bits', true]])
+  // Budget 0 asks the same sign-offs (none) and still never asks a big one.
+  assert.deepEqual(ok(vbRounds(0)).signOffs.filter((x) => x.ask), [])
+
+  // plan: every big run waits `own session`, checked before parked; nothing big is held, undecided or session lane; a
+  // small dependant of a big task is held, its dependency not scheduled.
+  const pl = ok(vbPlan(['--status', `${IB_RO}=13`]))
+  const waitBy = (project) => pl.waiting.find((w) => w.project === project)
+  for (const project of ['Big', 'BigDue', 'BigPark']) assert.equal(waitBy(project)?.why.kind, 'own session', project)
+  assert.deepEqual(waitBy('Big').members, rk.tasks.filter((t) => ['big-ready', 'big-call', 'big-grill'].includes(t.slug)).map((t) => t.slug),
+    'every slug of the run, in rank order')
+  assert.deepEqual(pl.held.find((x) => x.slug === 'small-dep')?.blockedBy, [{ slug: 'big-ready', why: 'dependency not scheduled' }])
+  for (const k of ['held', 'undecided', 'sessionLane']) assert.ok(!pl[k].some((x) => BIG.includes(x.slug)), `${k}: ${JSON.stringify(pl[k])}`)
+  assert.ok(!pl.schedule.some((e) => e.members.some((m) => BIG.includes(m))))
+  assert.deepEqual(pl.schedule.map((e) => [e.project, e.members]), [['Small', ['small-a']]])
+  assert.deepEqual(pl.rollouts.map((x) => [x.slug, x.project, x.ownSession]), [[BIG_RO, 'Big', true], [SO_RO, 'BigSo', true], [IB_RO, 'Items and Bits', true]])
+  // By hand, a big task decided or its gate signed still schedules nothing of it.
+  const forced = ok(vbPlan(['--decided', 'big-call', '--signed', 'big-gated', '--unparked', 'BigPark']))
+  assert.ok(!forced.schedule.some((e) => e.members.some((m) => BIG.includes(m))))
+  assert.equal(forced.waiting.find((w) => w.project === 'BigPark').why.kind, 'own session')
+  // The pick list: parked last, due soon first, then weight, the ready count, the oldest captured, then name.
+  assert.deepEqual(pl.pick.map((e) => e.name), ['BigDue', 'Big', 'SmallOr', 'BigSo', 'Items and Bits', 'BigPark'])
+  const pk = Object.fromEntries(pl.pick.map((e) => [e.name, e]))
+  assert.deepEqual(pk.Big, { name: 'Big', note: 'Work/Projects/Big.md', own: true, by: 'key', parked: false, crowned: false, dueSoon: false,
+    deadline: null, ready: 1, decisions: 3, orient: 1, signOffs: 1, heldItems: 0, weight: 6, oldest: null, rollouts: [BIG_RO] })
+  assert.deepEqual([pk.BigDue.dueSoon, pk.BigDue.deadline, pk.BigDue.by], [true, '2026-10-25', 'design record'])
+  assert.deepEqual([pk.SmallOr.own, pk.SmallOr.orient, pk.SmallOr.weight, pk.SmallOr.oldest, pk.SmallOr.rollouts], [false, 1, 1, '2026-10-01', []])
+  assert.deepEqual([pk['Items and Bits'].heldItems, pk.BigSo.signOffs, pk.BigPark.parked], [1, 1, true])
+  assert.equal(ok(vbPlan()).pick.find((e) => e.name === 'Items and Bits'), undefined, 'with no --status, no held item: no candidate')
+  // pickAsk: one multiSelect question, the top three and `Not now`, its text ending with the Note.
+  assert.equal(pl.pickAsk.length, 1)
+  const [pq] = pl.pickAsk
+  assert.deepEqual([pq.multiSelect, pq.header], [true, 'Open'])
+  assert.ok(pq.header.length <= 12)
+  assert.ok(pq.question.endsWith(` ${INVITE}`), pq.question)
+  assert.deepEqual(pq.options.map((o) => o.label), ['BigDue', 'Big', 'SmallOr', 'Not now'])
+  for (const o of pq.options) assert.ok(o.label.length <= 40 && o.description.length > 0, JSON.stringify(o))
+  for (const [i, name] of ['BigDue', 'Big', 'SmallOr'].entries()) assert.ok(pq.options[i].description.startsWith(`[[${name}]]`), pq.options[i].description)
+  assert.match(pq.options[1].description, /1 ready task, 3 waiting decisions, 1 Orient task, 1 pending sign-off/)
+  assert.deepEqual(pl.pickIndex, { question: pq.question, labels: ['BigDue', 'Big', 'SmallOr', 'Not now'], names: ['BigDue', 'Big', 'SmallOr', null],
+    notes: ['Work/Projects/BigDue.md', 'Work/Projects/Big.md', 'Work/Projects/SmallOr.md', null] })
+  // Every project small: only the Orient projects are candidates (Big by its big-orient), so three options; with only
+  // SmallOr's left, one candidate and `Not now`; with no Orient task anywhere, nothing is asked.
+  const allSmall = structuredClone(sc)
+  for (const p of allSmall.projects) p.ownSession = { own: false, by: null, repo: null }
+  const smallScan = keep('vb-scan-small.json', JSON.stringify(allSmall))
+  const ps = ok(vbPlan([], VB_RANK, smallScan))
+  assert.deepEqual(ps.pick.map((e) => e.name), ['SmallOr', 'Big'])
+  assert.deepEqual(ps.pickAsk[0].options.map((o) => o.label), ['SmallOr', 'Big', 'Not now'])
+  const rkOne = { ...rk, orient: rk.orient.filter((o) => o.project === 'SmallOr') }
+  const p1 = ok(vbPlan([], keep('vb-rank-one.json', JSON.stringify(rkOne)), smallScan))
+  assert.deepEqual(p1.pickAsk[0].options.map((o) => o.label), ['SmallOr', 'Not now'])
+  const p0 = ok(vbPlan([], keep('vb-rank-none.json', JSON.stringify({ ...rk, orient: [] })), smallScan))
+  assert.deepEqual([p0.pick, p0.pickAsk, p0.pickIndex], [[], [], null])
+
+  // sessions: no tick, no orient and no big item; a tick opens its orient (last) and its held item; typed words match.
+  const pf = keep('vb-plan.json', JSON.stringify(pl))
+  const ses = (more) => py(['sessions', '--plan', pf, '--status', `${IB_RO}=13`, ...more])
+  const none = ok(ses([]))
+  assert.deepEqual(none.items, [])
+  assert.deepEqual(none.left.find((x) => x.rollout === IB_RO), { rollout: IB_RO, action: 13, holds: [], why: 'own session: open it from the pick list', held: 'execute' })
+  assert.deepEqual(none.unmatched, [])
+  const ib = ok(ses(['--open', 'items and bits']))
+  assert.deepEqual(ib.items.map((x) => [x.kind, x.rollout ?? x.project]), [['execute', IB_RO], ['orient', 'Items and Bits']])
+  const ibo = ib.items[1]
+  assert.deepEqual(ibo.prompt.split('\n'), ['/thread:orient [[Items and Bits]]', PICKED('1 held rollout item')])
+  assert.deepEqual([ibo.why, ibo.title, ibo.note], ['ticked on the pick list', 'Orient: Items and Bits', 'Work/Projects/Items and Bits.md'])
+  assert.ok(!ibo.tldr.includes('/'))
+  assert.ok(!ib.left.some((x) => x.rollout === IB_RO))
+  assert.deepEqual(ok(ses(['--open', 'bigdue'])).items.map((x) => x.project), ['BigDue'], 'case-blind')
+  assert.deepEqual(ok(ses(['--open', '[[Work/Projects/SmallOr.md]]', '--open', 'Not now'])).items.map((x) => x.project), ['SmallOr'])
+  const typed = ok(ses(['--typed', 'items and bits, bigdue and nope']))
+  assert.deepEqual(typed.items.map((x) => [x.kind, x.rollout ?? x.project]), [['execute', IB_RO], ['orient', 'BigDue'], ['orient', 'Items and Bits']])
+  assert.deepEqual(typed.unmatched, ['nope'])
+  const tNone = ok(ses(['--typed', 'none']))
+  assert.deepEqual([tNone.items, tNone.unmatched], [[], []])
+  refusal(ses(['--open', 'Nope']), /--open Nope/)
+  // Reruns are byte-equal, and VB is untouched.
+  for (const run of [() => vbRounds(30), () => vbPlan(['--status', `${IB_RO}=13`]), () => ses(['--typed', 'big, nope'])]) {
+    const a = run()
+    assert.equal(a.status, 0, a.stderr)
+    assert.equal(run().stdout, a.stdout)
+  }
+  assert.deepEqual(snap(VB), VB_BEFORE, 'the vault is untouched')
 })
