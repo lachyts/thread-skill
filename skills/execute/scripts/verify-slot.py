@@ -71,22 +71,23 @@ Contract.
    unreadable record first. A non-priority acquirer takes a slot only when it can hold (live Integration waiters +
    awake runs ahead of it in line + 1) free slots at once, keeps one and closes the rest. The heartbeat: every poll,
    hot or not, touches its entry (os.utime on the held fd); an entry untouched for max(QUEUE_FRESH_MIN,
-   QUEUE_FRESH_POLLS x its record's poll) seconds (5 s; 10 polls) is asleep (a stopped or stalled waiter): nobody
-   counts it, nobody reaps it while its flock is held, and once it touches again it counts at its old place. The
-   entry is dropped when acquire() returns, so a heat-stop re-queue (a new acquire()) goes to the back. Every poll,
-   and `status`, reaps a `waiter-*.wait`, `.waiter-*.tmp`, `queue-*.wait` or `.queue-*.tmp` it can flock LOCK_NB (the
-   inode re-checked against the path before the unlink). A line entry is read by _probe_entry, on the fd it opened:
-   fstat for the mtime and pread for the record, accepted only while os.stat(path) still names that (st_dev, st_ino),
-   so a name dropped and recreated between the open and the check is skipped for that scan, never misread. Priority
-   acquirers ignore the line, and the old `waiter-` scan is unchanged, so a copy from before the line neither counts
-   nor reaps a `queue-` file. The age bound (it bounds the rule, not the wait): a non-priority acquirer with no awake
-   run ahead of it in line (its unregistered first try included) is the head, and once it has been the head for
-   HEAD_AGE (900 s; heat holds count, and an entry ahead that wakes resets the clock) it needs one free slot, as an
-   Integration waiter does, and polls at their cadence, keeping its line entry and writing no waiter file; it says so
-   once, `verify-slot: at the head of the line for 900s: now waiting beside the Integration waiters`, at the poll
-   where it ages and before that poll's try, and its later waiting lines name only the holders. While Integration
-   demand alone fills the pool it still waits, as an Integration verify would; and only the head ages, so an
-   Integration waiter faces at most one extra peer from the line.
+   QUEUE_FRESH_POLLS x its record's poll) seconds, 10 x the poll base (10 s at the default 1 s; 5 s minimum), is
+   asleep (a stopped or stalled waiter): nobody counts it, nobody reaps it while its flock is held, and once it
+   touches again it counts at its old place. The entry is dropped when acquire() returns, so a heat-stop re-queue (a
+   new acquire()) goes to the back. Every poll, and `status`, reaps a `waiter-*.wait` or `.waiter-*.tmp` it can flock
+   LOCK_NB; each ordinary (non-priority) poll that is not heat-held, and `status`, reap a `queue-*.wait` or
+   `.queue-*.tmp` the same way (each inode re-checked against the path before the unlink). A line entry is read by
+   _probe_entry, on the fd it opened: fstat for the mtime and pread for the record, accepted only while os.stat(path)
+   still names that (st_dev, st_ino), so a name dropped and recreated between the open and the check is skipped for
+   that scan, never misread. Priority acquirers ignore the line, and the old `waiter-` scan is unchanged, so a copy
+   from before the line neither counts nor reaps a `queue-` file. The age bound (it bounds the rule, not the wait): a
+   non-priority acquirer with no awake run ahead of it in line (its unregistered first try included) is the head, and
+   once it has been the head for HEAD_AGE (900 s; heat holds count, and an entry ahead that wakes resets the clock) it
+   needs one free slot, as an Integration waiter does, and polls at their cadence, keeping its line entry and writing
+   no waiter file; it says so once, `verify-slot: at the head of the line for 900s: now waiting beside the Integration
+   waiters`, at the poll where it ages and before that poll's try, and its later waiting lines name only the holders.
+   While Integration demand alone fills the pool it still waits, as an Integration verify would; and only the head
+   ages, so an Integration waiter faces at most one extra peer from the line.
 6. Residuals. A slots dir deleted while held, or a different HOME or XDG chain, makes a separate pool. A
    process the suite itself moves into another session or group escapes the guard's kill, as it escapes a
    harness kill today, and so does a suite whose guard and wrapper are SIGKILLed together (a tree kill by pid
