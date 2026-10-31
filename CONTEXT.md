@@ -33,12 +33,35 @@ through time, from attention to merged PRs. Terms only — no implementation.
 ## Estate (all projects)
 
 - **Estate pass** — orient at estate altitude, run by `orient-all`: one look
-  across every project in the vault that puts ready work in motion. It grades open work, batches
-  Lachy's decisions, starts rollouts, and sends any project that needs real
-  design thinking to its own orient. It never reshapes a project itself.
-  `orient` is the same act at project altitude; a project graded **Orient**
-  gets its own `orient` session. _Avoid_: rally, global orient, portfolio
-  review, triage (alone).
+  across every project in the vault that sweeps up the work needing little of
+  Lachy's thinking and puts it in motion (ADR 0060). It grades open work,
+  batches a **Small project**'s decisions, starts its rollouts, and offers
+  any project that needs real design thinking, and every **Big project**, on
+  the **Pick list**. It never reshapes a project itself. `orient` is the same
+  act at project altitude; a project ticked on the pick list gets its own
+  `orient` session. _Avoid_: rally, global orient, portfolio review, triage
+  (alone).
+- **Big project** — a project with its own design record, which keeps its own
+  session (ADR 0060): the estate pass grades its work but asks none of its
+  decisions, schedules none of its rollouts and starts none of its work
+  unless Lachy ticks it on the **Pick list**; its own orient session asks and
+  schedules them, and a repair started beside it asks its pending sign-offs
+  (orient has no sign-off step). The test (`estate-scan.py`'s `ownSession`): the project
+  note's `orient:` key, `own` or `sweep`, wins; else a declared repo holding a
+  `CONTEXT.md` file and a `docs/adr/` directory with an ADR in it. A bare
+  THREAD.md is no signal. _Avoid_: large project, main project.
+- **Small project** — every project that is not a **Big project**: list-style
+  work (admin, a queue, an apartment, contacts) whose quick calls the estate
+  pass asks and whose ready work it schedules and starts. Anything needing his
+  hands, money or a message still waits for his yes. _Avoid_: side project.
+- **Pick list** — the estate pass's one question at its end (orient-all § 7,
+  ADR 0060): every **Big project** with idle ready work, decisions, sign-offs
+  or a held rollout item waiting on its own session, and every small project
+  with an Orient task, ranked by what waits on it, the top three asked beside
+  `Not now`. Lachy ticks which to open, or types any name on it; only those
+  start, each orienting and scheduling in its own session, a big project's
+  pending sign-offs asked by a repair started beside it. _Avoid_:
+  shortlist.
 - **Estate scan** — the estate pass's deterministic first pass
   (`skills/_shared/scripts/estate-scan.py`), with no model calls: every
   project not done, parked ones marked; its open tasks; its repos and their
@@ -112,10 +135,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   included) above everything else; then crowned projects; then leverage.
   Grouped into candidate runs with their Review load, work held by an open
   dependency set apart, beside the One call and Grill decisions in asking
-  order, the projects that need their own orient, and the Unpark offers
+  order, the **Pick list**'s candidates, and the Unpark offers
   (`skills/_shared/readiness-grade.md`). _Avoid_: backlog, priority list.
 - **Decision round** — the estate pass's questions, within the time budget
-  Lachy states: only his questions, each in the Framing. First the One-call
+  Lachy states: only his questions, each in the Framing, and only a **Small
+  project**'s (a big project's sign-offs, One calls, Grills and Unpark offer
+  wait on its own session, ADR 0060). First the One-call
   round: pending sign-offs always, each after its gates are shown verbatim,
   then One calls, then Unpark offers, batched through AskUserQuestion. Then
   Grill rounds, in conversation, while time remains. Each answer is written into its task's `## Decisions (asked
@@ -128,8 +153,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   same pass (one held only because its dependency was scheduled late goes
   next pass), in batches; then one visible session per new parallel
   execute and serial Leg 1, per live rollout that status sends to a ceremony,
-  a start, a signed reinstate or a repair, and per child orient (paste-ready
-  prompts off the Stage). _Avoid_: launch list.
+  a start, a signed reinstate or a repair, and per child orient of a project
+  ticked on the **Pick list** (paste-ready prompts off the Stage); nothing of a
+  **Big project** unticked. _Avoid_: launch list.
 
 ## Continuity (threads and attention)
 
