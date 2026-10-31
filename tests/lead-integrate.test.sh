@@ -37,7 +37,7 @@
 #   spaces and quotes, paths outside the tree   C52 the SKILL.md verify line with and without named_rerun, under bash
 #   and zsh -f   C53 TERM during the named re-run or the confirming run, unslotted and slotted: rc 143, why `signal`,
 #   the child gone, the slot free.   C54 with --rollout (p29-10): a Flake's suite ends green, a deadline in the confirming
-#   run ends it timeout.   C57 (p34-3, ADR 0060) verify names its diff base to every step as THREAD_VERIFY_BASE: C57a the
+#   run ends it timeout.   C57 (p34-3, ADR 0062) verify names its diff base to every step as THREAD_VERIFY_BASE: C57a the
 #   RACE re-verify reaches from the merge commit's first parent though origin/master holds the merge   C57b the
 #   Integration form, every step, a symbolic base resolved   C57c unset without --diff-base (--outcome, --detach-at too)
 #   C57a-c each also run slotted, as both lead call sites do (every step a guarded one)   C57d an unresolvable base:
@@ -1761,7 +1761,7 @@ HOME="$F/home" THREAD_EVENTS_DIR="$FEV" VT=2 vf --diff-base "$FB" --named-rerun 
 ok "$(rcof)|$(fj 'd["timeout"]["run"]')|$(fsq '[[d.get("outcome"), d.get("rc"), d.get("step"), d.get("timeout"), d.get("failing")] for d in L if d["kind"] == "suite-ended"]')" \
   '124|confirm|[["timeout",124,"verifier",2,["tests/test_flaky.py::test_a"]]]' "C54: a deadline in the confirming run ends the suite timeout (step verifier), failing the first run's ids"
 
-# ======== C57: verify names its diff base to every step as THREAD_VERIFY_BASE (p34-3, ADR 0060) ==================
+# ======== C57: verify names its diff base to every step as THREAD_VERIFY_BASE (p34-3, ADR 0062) ==================
 # With --diff-base REV every step (env_bootstrap, verifier, the Flake check's named re-run and confirming run) sees
 # THREAD_VERIFY_BASE = REV resolved to its sha in the tree, unslotted and slotted (both lead call sites pass --slots and
 # --slot-wait, so production runs every step under verify-slot.py's guard); without it the variable is removed from the

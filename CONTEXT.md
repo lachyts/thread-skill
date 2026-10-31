@@ -702,7 +702,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   sha: `<mainSha>` at Integration and the merge commit's first parent at a
   RACE re-verify; it is never set at completion. A project whose verifier is
   a fast tier with a reach reads it as its base, so the reach is the task's
-  diff even after merge-task refreshed `origin/<default>` (ADR 0060).
+  diff even after merge-task refreshed `origin/<default>` (ADR 0062).
   _Avoid_: reach base, origin/main.
 - **Completion verifier** — a rollout note's optional `completion_verifier:`,
   the full suite of a project whose `verifier:` is its declared fast tier

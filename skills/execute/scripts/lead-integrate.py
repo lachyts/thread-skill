@@ -109,7 +109,7 @@ Subcommands:
       {v: 1, sha (T's HEAD, or --detach-at), diffBase, verdict: green | flake | red, why: "" | unnamed | unplaced |
       too-many | touched | diff | no-named-rerun | named-red | confirm-red | timeout | no-time | signal, failing (the
       first run's ids), touched, flakes, timeout: {run: first | named | confirm, seconds} | null}; a signal mid-run
-      leaves it red, why `signal`. reconcile-rollout.py record-verify reads it. The verify base (p34-3, ADR 0060): with
+      leaves it red, why `signal`. reconcile-rollout.py record-verify reads it. The verify base (p34-3, ADR 0062): with
       --diff-base every step, env_bootstrap, verifier, named re-run and confirming run on every Heat-hold pass, runs with
       THREAD_VERIFY_BASE=<REV resolved to its 40-hex sha in T>, so a project's fast tier whose reach reads it as its base
       reaches the task's diff even after origin/<default> moved (at the RACE merge-task has refreshed it to hold the
@@ -501,7 +501,7 @@ def _scrubbed_env():
 
 
 ENV = _scrubbed_env()
-# verify's diff base, named to every step it runs (p34-3, ADR 0060): set to --diff-base resolved to its sha, removed from
+# verify's diff base, named to every step it runs (p34-3, ADR 0062): set to --diff-base resolved to its sha, removed from
 # the steps' env otherwise. Only the steps' env: git calls here run with ENV as it is.
 VERIFY_BASE_ENV = "THREAD_VERIFY_BASE"
 
@@ -1176,7 +1176,7 @@ def cmd_verify(args):
             # tree locked by a live pid, so a RACE re-verify's tree is never removed under its suite. Inside the try,
             # so the finally's `remove --force --force` takes a tree a stop left locked.
             git(os.path.expanduser(args.repo), "worktree", "lock", "--reason", f"pid {os.getpid()}", str(tree))
-        # The verify base (p34-3, ADR 0060): every step sees --diff-base resolved to its sha in T as THREAD_VERIFY_BASE,
+        # The verify base (p34-3, ADR 0062): every step sees --diff-base resolved to its sha in T as THREAD_VERIFY_BASE,
         # so a fast tier's reach reads the task's diff even after origin/<default> moved (the RACE: merge-task refreshed
         # it to hold the merge). Without --diff-base, or when it does not resolve, the steps never see it, whatever the
         # caller's. Resolved once, before the Heat-hold loop, and inside the handlers: its rev-parse runs after
@@ -1367,7 +1367,7 @@ def _flake_check(args, tree, sha, log, log_path, note, slotted, slot, rc, t0, en
     red keeps its rc, the confirming run's red its own; the confirming run's green makes the rc 0 and each first-run
     id a Flake. A heat stop in either run raises _FlakeHeatStop: no verdict, and the caller's pass goes back in line.
     The ids are the last pass's first run's: rr._failing_ids reads the log's last `== verifier:` section. Both runs get
-    `env`, the first run's step env, so they see the same THREAD_VERIFY_BASE and reach the same set (ADR 0060)."""
+    `env`, the first run's step env, so they see the same THREAD_VERIFY_BASE and reach the same set (ADR 0062)."""
     base = args.diff_base
     if rc == 0:
         return 0, _flake_record(sha, base, "green")
@@ -2528,7 +2528,7 @@ def main(argv=None):
     vf.add_argument("--slug", default=None, help="with --rollout: the task the suite is for (none for a completion suite)")
     vf.add_argument("--diff-base", default=None, help="the Flake check (ADR 0050): the rev the task's diff is read from "
                     "(git diff --name-only REV HEAD in the tree); <out>.flake.json records the verdict. Every step sees REV resolved "
-                    "to its sha as THREAD_VERIFY_BASE, a fast tier's reach base (ADR 0060); without it the steps never see it")
+                    "to its sha as THREAD_VERIFY_BASE, a fast tier's reach base (ADR 0062); without it the steps never see it")
     vf.add_argument("--named-rerun", default=None, help="with --diff-base: the repo's runner for named tests, holding "
                     "{tests} exactly once (verify-timeout's namedRerun)")
 

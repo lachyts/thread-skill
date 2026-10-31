@@ -1,4 +1,4 @@
-// p34-3 (ADR 0060): `lead-integrate.py verify --diff-base REV` names REV, resolved to its sha, to every step it runs as
+// p34-3 (ADR 0062): `lead-integrate.py verify --diff-base REV` names REV, resolved to its sha, to every step it runs as
 // THREAD_VERIFY_BASE, so a fast tier's reach reads the task's diff even after merge-task refreshed origin/<default> (the
 // RACE re-verify). The script is pinned by tests/lead-integrate.test.sh C57. This file pins the prose a lead and a
 // project author follow:
@@ -6,7 +6,7 @@
 //   unresolvable base's case (left unset, a WARN), and in the RACE procedure, with `<the merge commit>^1`;
 // - schedule SKILL.md's completion verifier paragraph tells project authors to read it;
 // - CONTEXT.md has a **Verify base** entry;
-// - docs/adr/0060 exists;
+// - docs/adr/0062 exists;
 // - tests/run.sh unsets it at top level, so an inner suite never inherits the outer verify's base.
 // One pure function, check(files), over { key: text }: the real files and the controls run through it, and each
 // control mutates one real file in memory and must fail with exactly its rule. Reads files only.
@@ -21,7 +21,7 @@ const FILES = {
   context: 'CONTEXT.md',
   run: 'tests/run.sh',
 }
-const ADR = 'docs/adr/0060-verify-names-its-diff-base.md'
+const ADR = 'docs/adr/0062-verify-names-its-diff-base.md'
 const real = { ...Object.fromEntries(Object.entries(FILES).map(([k, p]) => [k, read(p)])), adr: readIf(ADR) }
 
 // The CONTEXT.md glossary entry that starts with `head`, up to the next entry, heading or blank line.
@@ -43,7 +43,7 @@ function check(f) {
   const s45 = collapse(section(f.skill, /^### 4\.5\. /) ?? '')
   const flake = s45.slice(s45.indexOf('**The Flake check** (`--diff-base`'), s45.indexOf('**Verify slots'))
   const race = s45.slice(s45.indexOf('**RACE procedure**'), s45.indexOf('5. **Completion.**'))
-  need('skill-verify', flake.includes('**The verify base** (ADR 0060') && flake.includes(`sees \`${VAR}\`, the diff base's sha`) &&
+  need('skill-verify', flake.includes('**The verify base** (ADR 0062') && flake.includes(`sees \`${VAR}\`, the diff base's sha`) &&
     flake.includes('a verify without `--diff-base` (the completion verify) never sets it') &&
     flake.includes('A `--diff-base` that does not resolve in the tree leaves it unset too, with one `verify: WARN'))
   need('skill-race', race.includes(`The re-verify's steps see \`${VAR}=<the merge commit>^1\``) &&
@@ -52,12 +52,12 @@ function check(f) {
   need('schedule', sch.includes(`a fast tier with a reach should take its base from \`${VAR}\` when it is set`))
   const vb = entry(f.context, '- **Verify base** —')
   need('context', vb.includes(`\`${VAR}\``) && vb.includes('never set at completion'))
-  need('adr', (f.adr ?? '').startsWith('# 0060 — Verify names its diff base') && (f.adr ?? '').includes(VAR))
+  need('adr', (f.adr ?? '').startsWith('# 0062 — Verify names its diff base') && (f.adr ?? '').includes(VAR))
   need('run-sh-unset', f.run.split('\n').includes(`unset ${VAR}`))
   return bad
 }
 
-test('the verify base (p34-3, ADR 0060): § 4.5, the RACE procedure, schedule, CONTEXT.md, the ADR, run.sh', () => {
+test('the verify base (p34-3, ADR 0062): § 4.5, the RACE procedure, schedule, CONTEXT.md, the ADR, run.sh', () => {
   assert.deepEqual(check(real), [])
 })
 
@@ -98,7 +98,7 @@ test('control: CONTEXT.md without a Verify base entry fails context', () => {
   only(edit('context', '- **Verify base** —', '- **Verify floor** —'), 'context', 'no entry')
 })
 
-test('control: no ADR 0060 fails adr', () => {
+test('control: no ADR 0062 fails adr', () => {
   only({ ...real, adr: null }, 'adr', 'no adr')
 })
 

@@ -1,4 +1,4 @@
-# 0060 — Verify names its diff base
+# 0062 — Verify names its diff base
 
 Date: 2026-10-31
 Status: accepted. Built in thread-skill-p34-3 (Phase 34 · Task 3, `thread-skill-p34-3-the-race-re-verify-reaches-from-the-merge-parent`); its plan chose shape 1 of the task note's two.
