@@ -310,6 +310,28 @@ test('open is pending, outside the rate; a missing note is unknown, in all only 
   assert.ok(out.cannotShow.some((c) => c.includes('DECISION_MINUTES')), 'the gaps are named')
 })
 
+test('a titled note (p34-6): its grade line, keyed by title_key with the name as its note, finds the note again, root or Archive', (t) => {
+  const h = setup(t)
+  const DASHED = 'Layout broken — library panel stays open'
+  const SPACED = 'Return the Adidas item'
+  const GONE = 'Fix I rig stream'
+  emitAll(h, [
+    grade(h, 'layout-broken-library-panel-stays-open', W(3, '00:00'), { linked: 'old-rollout', note: DASHED }),
+    grade(h, 'return-the-adidas-item', W(3, '00:00'), { linked: 'old-rollout', note: SPACED }),
+    grade(h, 'fix-i-rig-stream', W(3, '00:00'), { note: GONE }),
+  ])
+  note(h, DASHED, { status: 'done', rollout: 'Serial-Rollout-2026-09-04', completed: '2026-09-05' })
+  note(h, SPACED, { status: 'dropped', rollout: 'Serial-Rollout-2026-09-04', completed: '2026-09-06' })
+  fs.renameSync(path.join(h.tasks, `${SPACED}.md`), path.join(h.tasks, 'Archive', '2026', `${SPACED}.md`))
+  const out = grades(h)
+  const dashed = one(out, 'layout-broken-library-panel-stays-open')
+  assert.deepEqual([dashed.note, dashed.outcome, dashed.dispatchedBy, dashed.end.by], [DASHED, 'hands-off', 'link', 'note'])
+  const spaced = one(out, 'return-the-adidas-item')
+  assert.deepEqual([spaced.note, spaced.outcome, spaced.end.date], [SPACED, 'dropped', '2026-09-06'])
+  assert.ok(out.flags.includes(`[[${GONE}]]: no task note: its latest grade (Ready) reads unknown`), JSON.stringify(out.flags))
+  assert.equal(out.grades.all.byGrade.Ready.unknown, 1)
+})
+
 test('byAgentGrade sets a confidence-raised task apart from its raised grade', (t) => {
   const h = setup(t)
   emitAll(h, [grade(h, 'rz', W(3, '00:00'), { grade: 'One call', agentGrade: 'Ready', decisions: 1, low: 1, raised: ['confidence'] }),

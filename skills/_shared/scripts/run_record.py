@@ -15,6 +15,8 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
     events_dir(env=None) -> str            record_path(rollout, env=None) -> str
     normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG,
                                            RESERVED
+    title_key(name) -> str                 (a titled note's Grade-log key, p34-6: estate-dispatch.py `log` keys by it,
+                                           and a grade line's `note` is checked against it)
     verdict_digest(verdict, feedback) -> str    verdict_key(line) -> tuple   (review-verdict's identity, p21-3:
                                            the writer, reconcile-rollout.py, and the reader, score.py, share them)
     watch_id(rule, shape) -> str           knob_key(repo, key, rule, direction) -> str   (the weekly reading's
@@ -72,9 +74,10 @@ schedule § 1.5 on every run that grades, all but an orient-all fork, whose esta
 skills/reflect/scripts/grades.py its one reader (the weekly reading's grade accuracy, joined to outcomes at read
 time). A schedule run that regrades a task the estate pass graded ends that estate episode as `regraded`, normally
 undispatched and so outside the rate; a Pre-flight grade's `held` counts holds on dependencies outside the rollout
-too. A grade line carries no rollout, and a task:
-a graded task whose name normalise_slug refuses (a vault note named with spaces or capitals) has no line, `log` skips
-it and reports it.
+too. A grade line carries no rollout, and a task: a graded task whose name normalise_slug refuses (a vault note
+titled with spaces, capitals or punctuation, as quick captures are) is keyed by title_key(name) and carries its exact
+name as `note` (p34-6), so grades.py finds the note again; `log` skips and reports only a name with no key (no letter
+or digit, or a key another graded task of the pass holds).
 
 reflections.jsonl holds the weekly reading's lines (skills/reflect/scripts/reflect.py is its only writer, and tune.py
 reads it for the agreement, the load hold and to refuse a closed Reflection): a `watch` line per (Reflection, Watch), a
@@ -285,8 +288,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      only, on a landed knob or a filed bug; held only on an unlanded knob; landed only on a knob and
                      filed only on a bug). No rollout, no task; lands in reflections.jsonl.
   grade           T  pass, digest, project, grade, agentGrade, shape, size, decisions, low, held, gates; raised?, rank?,
-                     linked? (p25-4, ADR 0041: one line per task an estate pass grades, from estate-rank.py's tasks[]
-                     row, whose name is a slug (`log` skips and reports any other); pass a g- id and digest 12 lowercase
+                     linked?, note? (p25-4, ADR 0041: one line per task an estate pass grades, from estate-rank.py's
+                     tasks[] row; note (p34-6) only for a titled note, its exact name: no path separator, not a slug
+                     itself, and title_key(note) the task; pass a g- id and digest 12 lowercase
                      hex, both shared by the pass's lines; project the task's home; grade and agentGrade each one of
                      Ready | One call | Grill | Orient, the ranker's grade after the raise and the agent's own; shape
                      parallel | serial | session; size S | M | L; decisions and low integers >= 0, the count of his
@@ -561,6 +565,7 @@ import re
 import socket
 import sys
 import time
+import unicodedata
 
 try:
     import fcntl
@@ -580,6 +585,8 @@ GRADE_LOG = "grades"
 # record files that are no rollout's: refused as a rollout slug or a carried `from`
 RESERVED = (REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG)
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
+# title_key's one separator: every run of characters outside a slug's letters, digits, dots and underscores (p34-6)
+TITLE_SEP_RE = re.compile(r"[^a-z0-9._]+")
 # One accepted --ts shape on every python (fromisoformat widened in 3.11): date, time, fraction, offset.
 STAMP_RE = re.compile(r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d)(?::(\d\d)(?:[.,](\d+))?)?"
                       r"(?:([Zz])|([+-])(\d\d)(?::?(\d\d))?)?", re.ASCII)
@@ -1406,7 +1413,7 @@ KINDS = {
                      "grade": _enum(*GRADE_NAMES), "agentGrade": _enum(*GRADE_NAMES), "shape": _enum(*GRADE_SHAPES),
                      "size": _enum(*GRADE_SIZES), "decisions": _int(0), "low": _int(0), "held": _bool,
                      "gates": _distinct_of(GRADE_GATES, True)},
-              {"raised": _distinct_of(RAISE_WHYS, False), "rank": _int(1), "linked": _slug}),
+              {"raised": _distinct_of(RAISE_WHYS, False), "rank": _int(1), "linked": _slug, "note": _str}),
     "reflection": (False, {"id": _rid, "since": _stampz, "until": _stampz, "rollouts": _slugs(0, 4096),
                            "escapesOnly": _slugs(0, 4096), "counts": _counts, "quiet": _bool},
                    {"decisionTask": _str, "cadence": _cadence, "repairsOnly": _slugs(1, 4096)}),
@@ -1463,6 +1470,39 @@ def normalise_slug(value, what="slug"):
     if not SLUG_RE.fullmatch(s):
         raise Refused("%s %r is not a slug ([a-z0-9][a-z0-9._-]*)" % (what, value))
     return s
+
+
+def title_key(name):
+    """The Grade log's key for a note name normalise_slug refuses (a vault note titled with spaces, capitals or
+    punctuation, p34-6): casefolded, its accents dropped (NFKD), each run of characters outside [a-z0-9._] one hyphen,
+    then its leading non-alphanumerics and trailing `-`, `.` and `_` cut. `Layout broken — library panel stays open`
+    -> `layout-broken-library-panel-stays-open`. Refused when no letter or digit is left."""
+    if not isinstance(name, str):
+        raise Refused("note must be a string")
+    s = unicodedata.normalize("NFKD", name.strip().casefold())
+    s = TITLE_SEP_RE.sub("-", "".join(c for c in s if not unicodedata.combining(c)))
+    s = re.sub(r"^[^a-z0-9]+", "", s).rstrip("-._")
+    if not SLUG_RE.fullmatch(s):
+        raise Refused("note %r has no letter or digit to key it by" % name)
+    return s
+
+
+def _check_note(note, task):
+    """A grade line's `note`: the exact name of a titled note, which title_key keys as the line's task."""
+    if "/" in note or "\\" in note:
+        raise Refused("grade: note %r must be a note name, not a path" % note)
+    try:
+        normalise_slug(note)
+    except Refused:
+        pass
+    else:
+        raise Refused("grade: note %r is a slug already: the task keys it, with no note" % note)
+    try:
+        key = title_key(note)
+    except Refused as e:
+        raise Refused("grade: %s" % e)
+    if key != task:
+        raise Refused("grade: note %r keys as %r, not the task %r (title_key)" % (note, key, task))
 
 
 def _home(env):
@@ -1811,6 +1851,8 @@ def _prepare(rollout, kind, task, fields, ts):
         fields["from"], fields["to"] = old, rollout
         targets = [old, rollout]
     _check_fields(kind, fields)
+    if kind == "grade" and "note" in fields:
+        _check_note(fields["note"], task)
     stamp, host = _stamp(ts), _host()
     out = []
     for r in targets:

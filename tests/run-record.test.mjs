@@ -1178,6 +1178,46 @@ test('grade refusals (p25-4): exit 2, one line and nothing written', (t) => {
   }
 })
 
+test('title_key (p34-6): a titled note name keys a grade line, the name kept as its note; a name with no letter or digit is refused', (t) => {
+  const home = tmpHome(t)
+  const keys = api(home, [
+    'out = {}',
+    'for n in ["Layout broken \\u2014 library panel stays open", "Return the Adidas item", "Fix I rig stream",',
+    '          "  Caf\\u00e9 au lait: v2.5 notes (draft).  ", "Stra\\u00dfe & co", "--Hello  --  World--"]:',
+    '    out[n] = m.title_key(n)',
+    'for n in ["\\u2014", "\\U0001f389", "  ", ""]:',
+    '    try:',
+    '        m.title_key(n); out[n] = None',
+    '    except m.Refused as e:',
+    '        out[n] = "refused: " + str(e)',
+    'print(json.dumps(out))'].join('\n'))
+  assert.equal(keys.status, 0, keys.stderr)
+  const k = JSON.parse(keys.stdout)
+  assert.equal(k['Layout broken — library panel stays open'], 'layout-broken-library-panel-stays-open')
+  assert.equal(k['Return the Adidas item'], 'return-the-adidas-item')
+  assert.equal(k['Fix I rig stream'], 'fix-i-rig-stream')
+  assert.equal(k['  Café au lait: v2.5 notes (draft).  '], 'cafe-au-lait-v2.5-notes-draft')
+  assert.equal(k['Straße & co'], 'strasse-co')
+  assert.equal(k['--Hello  --  World--'], 'hello-world')
+  for (const n of ['—', '🎉', '  ', '']) assert.match(k[n], /^refused: .*no letter or digit/, JSON.stringify(n))
+  // A grade line for a titled note: the key as its task, the exact name as its note.
+  const NAME = 'Layout broken — library panel stays open'
+  emitOk(home, ['--task', 'layout-broken-library-panel-stays-open', '--kind', 'grade', '--json', JSON.stringify({ ...GRADE, note: NAME })],
+    { env: EV(home) })
+  const raw = fs.readFileSync(path.join(ev(home), 'grades.jsonl'), 'utf8')
+  assert.ok(/^[\x00-\x7f]*$/.test(raw), 'the line stays ASCII')
+  const [a] = lines(path.join(ev(home), 'grades.jsonl'))
+  assert.deepEqual([a.task, a.note], ['layout-broken-library-panel-stays-open', NAME])
+  // A note that is not its task's name, a note that is a slug already, or one holding a path: refused, nothing written.
+  for (const [why, task, note] of [['another task', 'something-else', NAME], ['a slug needs no note', 'fix-it', 'fix-it'],
+    ['a capitalised slug needs no note', 'fix-it', 'Fix-It'], ['a path', 'dir-a-b', 'Dir/A b'], ['an empty note', 't', '']]) {
+    const r = cli(home, ['emit', '--task', task, '--kind', 'grade', '--json', JSON.stringify({ ...GRADE, note })], { env: EV(home) })
+    assert.equal(r.status, 2, `${why}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: grade: .*note.*\n$/, why)
+  }
+  assert.equal(lines(path.join(ev(home), 'grades.jsonl')).length, 1)
+})
+
 // ---- the Inert-path kinds (p29-3, ADR 0045): lead-integrate.py prepare's skip and its failed proof ---------------------
 const SKIP = { repo: 'o/r', paths: ['THREAD.md'], pathsTotal: 1, base: 'b'.repeat(40), main: 'c'.repeat(40), head: 'd'.repeat(40), globs: ['THREAD.md'] }
 const READER = { glob: 'THREAD.md', path: 'tests/t.sh', kind: 'name', line: 3, text: 'cat THREAD.md' }
