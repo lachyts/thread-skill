@@ -250,11 +250,12 @@ rounds. A Grill task is decided only when every one of its decisions is answered
       execute or Leg one named exactly the item's title, or one the read confirmed) gets `relay_session` with the
       item's prompt, the Session named by its id: a lead is named `<Project> rollout`, a name the project's other
       leads share.
-   5. No candidate: `create_thread` with the item's `title`, `prompt`, `tldr` and
-      `cwd`; a rollout a Session on the Stage leads by the roster never gets `create_thread`. A `Raised (task_id: …)`
-      result is reported as raised, never counted as started: the Stage starts the card unless it holds it. A held
-      card stays open as Lachy's offer, its `unstarted` line saying why (`"<name>" leads this Rollout on the Stage: …`
-      when a lead appeared after the list, or another of the Stage's holds). An error becomes a manual prompt.
+   5. No candidate: `create_thread` with the item's `title`, `prompt`, `tldr` and `cwd`.
+      An execute or Leg item for a rollout a Session on the Stage leads by the roster never gets `create_thread`;
+      a repair item beside its lead still does. A `Raised (task_id: …)` result
+      is reported as raised, never counted as started: the Stage starts the card unless it holds it. A held card stays
+      open as Lachy's offer, its `unstarted` line saying why (`"<name>" leads this Rollout on the Stage: …` when a lead
+      appeared after the list, or another of the Stage's holds). An error becomes a manual prompt.
    6. With `create_thread` but no `list_sessions`, only the items for notes this pass wrote are started; every other
       item becomes a paste-ready prompt.
 5. **Off the Stage**: one fenced block per item, in `items[]` order: `cd <cwd>` (for a Leg, `<alias> from <folder>`),
@@ -319,8 +320,8 @@ It asks nothing, and writes only under `$S`. It never runs `record`, `estate-dis
 
 - Reshape a project: Orient-graded work goes to its own orient session.
 - Start, relay or move a live rollout other than through `sessions`' items: never on status actions 1–5, 9, 10 or 12,
-  nor on a plain `paused:`. Never start a second lead: no `create_thread` for a rollout a Session on the Stage leads
-  by the roster.
+  nor on a plain `paused:`. Never start a second lead: no `create_thread` for an execute or Leg item for a rollout
+  a Session on the Stage leads by the roster.
 - Relay into a Session the list shows running, waiting, failed or busy with background work, or read a Session for
   its state.
 - Let any Session but one named exactly the orient item's `title` hold a child orient.
