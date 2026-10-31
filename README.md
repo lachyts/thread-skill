@@ -272,7 +272,7 @@ reading loads to join each grade to what followed it.
   retirement line and stops (orient § 10): drop `--debrief` from any saved
   prompt or macro. `dispatched:` stamps already in task notes are inert
   history.
-- **Every parallel rollout runs from its rollout clone (#108, ADR 0042).**
+- **Every parallel rollout runs from its rollout clone (#188, ADR 0042).**
   Schedule § 0 resolves every repo to `<toplevel>-rollout`, a second full
   clone beside its toplevel, and makes it on the first rollout after Lachy's
   yes (`self-rollout-check.sh --ensure`), so peer sessions committing in the
@@ -334,6 +334,9 @@ reading loads to join each grade to what followed it.
   scheduled (or `--regenerate`d) rollout, not one already written. A task's
   own frontmatter still overrides `max_iterations`, `max_review_rounds` and
   `max_plan_rounds`.
+- **Schedule picks the rollout root (#108).** When the Project root is the
+  live directory-source plugin checkout, schedule uses the separate
+  `<repoPath>-rollout` clone, or refuses with the fix.
 
 ## Install
 
@@ -509,7 +512,9 @@ matches the tree. It also fails on cache files the tree doesn't track (`.DS_Stor
 on the released commit, right after the plugin update. It refuses first while `evals/results/` holds
 `make evals` output: record what you need in `docs/evals/`, then clear it before the plugin update,
 since the `./` source would copy it into the cache. If a copy already reached the cache, the refusal
-names the `evals/results` dir to delete there. A directory-source install (or `--plugin-dir`) runs live from its
+names the `evals/results` dir to delete there. A `make evals` run also leaves its kept sandboxes outside
+the tree (each result's `tracePath`), which neither the refusal nor the cache sees: once the record has
+read them, remove them by their literal paths, as the Makefile's evals note says. A directory-source install (or `--plugin-dir`) runs live from its
 checkout instead, the **primary checkout**, which never moves while a rollout runs on it (ADR 0031).
 
 ## Coexistence with Orca
