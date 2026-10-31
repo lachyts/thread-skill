@@ -1473,6 +1473,29 @@ test('(e) review churn: one verdict_key dedupe feeds both the sums and rounds pe
   assert.deepEqual([w.reviewChurn.engine.rounds, w.reviewChurn.engine.findings, w.reviewChurn.engine.roundsPerLandedTask], [2, 5, 2])
 })
 
+// p34-5 F15: a round first recorded in the window but reviewed before it (land.sh's sweep of a skipped arrival emit)
+// counts in no window (a round belongs to the window it was reviewed in, Lachy's 2026-10-28 ruling), and is flagged
+// when it is this score's repo's: never another repo's or an unattributed one. Its reviewedAt may sit on its pending
+// line alone: the reader fills it from the newest line of the doc that carries one.
+test('(e2) review churn: a round first recorded in the window but reviewed before it is counted in no window and flagged', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs(life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] })))
+  const c = (findings, original, regression) => ({ findings, original, regression })
+  emitAll(home, 'x', [
+    rr(at('00:30'), { repo: 'o/r', head: 'h1', digest: 'g1', doc: 'docs/reviews/swept.md', reviewedAt: '2026-01-01T00:00:00.000Z', ...c(4, 4, 0) }),
+    rr(at('00:40'), { repo: 'o/other', head: 'h2', digest: 'g2', doc: 'docs/reviews/other.md', reviewedAt: '2026-01-01T00:00:00.000Z', ...c(3, 3, 0) }),
+    rr(at('00:50'), { repo: 'o/r', head: 'h3', digest: 'g3', doc: 'docs/reviews/f.md', status: 'pending', reviewedAt: '2026-01-02T00:00:00.000Z', ...c(2, 2, 0) }),
+    rr(at('01:00'), { repo: 'o/r', head: 'h3', digest: 'g3', doc: 'docs/reviews/f.md', status: 'consumed', ...c(2, 1, 1) }),
+  ])
+  const late = /^review churn: (\d+) \/fresh-review round\(s\) first recorded in this window but reviewed before it: counted in no window$/
+  const mine = scored(home, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.deepEqual(mine.reviewChurn.freshReview, { rounds: 0, findings: 0, original: 0, regression: 0, unclassified: 0, unattributed: 0 })
+  assert.deepEqual(mine.flags.filter((f) => late.test(f)).map((f) => f.match(late)[1]), ['2'], JSON.stringify(mine.flags))
+  const none = scored(home, ['--until', at('06:00')])
+  assert.deepEqual(none.reviewChurn.freshReview.unattributed, 0, 'a late round is never unattributed')
+  assert.ok(!has(none.flags, late), 'an unattributed late round is never counted')
+})
+
 // A Slot-bound run (saturated(3)) whose t1 review rounds churned 50%.
 const churned = () => byTs([...saturated(3), rv(at('01:00'), 't1', 1, 'changes', 2, 1, 1)])
 
