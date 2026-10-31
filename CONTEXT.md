@@ -45,7 +45,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   session (ADR 0060): the estate pass grades its work but asks none of its
   decisions, schedules none of its rollouts and starts none of its work
   unless Lachy ticks it on the **Pick list**; its own orient session asks and
-  schedules them. The test (`estate-scan.py`'s `ownSession`): the project
+  schedules them, and a repair started beside it asks its pending sign-offs
+  (orient has no sign-off step). The test (`estate-scan.py`'s `ownSession`): the project
   note's `orient:` key, `own` or `sweep`, wins; else a declared repo holding a
   `CONTEXT.md` file and a `docs/adr/` directory with an ADR in it. A bare
   THREAD.md is no signal. _Avoid_: large project, main project.
@@ -58,7 +59,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   or a held rollout item waiting on its own session, and every small project
   with an Orient task, ranked by what waits on it, the top three asked beside
   `Not now`. Lachy ticks which to open, or types any name on it; only those
-  start, each orienting and scheduling in its own session. _Avoid_:
+  start, each orienting and scheduling in its own session, a big project's
+  pending sign-offs asked by a repair started beside it. _Avoid_:
   shortlist.
 - **Estate scan** — the estate pass's deterministic first pass
   (`skills/_shared/scripts/estate-scan.py`), with no model calls: every

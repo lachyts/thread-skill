@@ -54,22 +54,34 @@ Lachy's, as he settled them on 2026-10-29:
 - **The pick list is built by `plan` and asked at the end (orient-all § 7).** Its candidates: every big project with
   any of Ready unheld tasks, his decisions waiting (One call and Grill `decisions[]`), Orient tasks, pending sign-offs
   on its live rollouts, or a held live-rollout item (a live rollout of its own whose status action would give an
-  execute or repair item); and every small project with an Orient-graded task (the rank's `orient[]`, parked homes
+  execute or repair item, or whose pending sign-offs the repair below asks); and every small project with an
+  Orient-graded task (the rank's `orient[]`, parked homes
   out). A small project's counts are its Orient tasks alone, since the pass asks and schedules the rest of its work.
 - **The ranking key**: parked last; due soon first (any of its tasks within `DUE_SOON_DAYS`), the earliest deadline
   first; crowned first; weight, highest first (ready + decisions + orient + sign-offs + held items); then the ready
   count; then the oldest `captured` among its counted tasks (none last); then name and note.
-- **The question**: one AskUserQuestion multiSelect question of the top `PICK_MAX` = 3 projects and the fixed
-  `Not now`, the whole ranked list printed just before it. His typed words may name any candidate, beyond the top 3
+- **The question**: one AskUserQuestion multiSelect question of the top `PICK_MAX` = 3 projects and the fixed `Not now`,
+  the whole ranked list printed just before it. Each option says what opening it starts: a big project's orient session
+  (its One calls and Grills, its rollout), its held rollout items, and the repair that asks its sign-offs; a small
+  project's orient session. Two projects of one name (two `SEO.md` in different folders) are each linked by the note's
+  path, in the option, the orient prompt and the session title, and every one of their labels is numbered, the first
+  included; a ticked label opens its own option alone. His typed words may name any candidate, beyond the top 3
   included; words that match nothing are reported, never an error. Three plus `Not now` is AskUserQuestion's four
   options; whether it accepts an empty selection is unverified, which `Not now` covers.
 - **It is asked whatever the budget**, a budget of 0 and a Grill "stop" included, as sign-offs are. A dry run prints
   it and never asks it.
 - **Big projects are still graded**, for the pick list's counts and the Grade log only. The pass asks none of their
   One calls, Grills, Unpark offers or sign-offs.
-- **Their sign-offs wait**, `ask: false` with why `own session`, charged no minutes. Each is named in the report with
-  its way out: tick the project on the next pass's pick list, or run `/thread:repair [[<rollout>]]`, which asks it.
+- **Their sign-offs wait**, `ask: false` with why `own session` (after the unread, paused and draining reasons, which
+  hold a small project's too), charged no minutes. `/thread:orient` has no sign-off step: repair § 1 runs
+  `approve-gates`. So opening the project also starts `/thread:repair [[<rollout>]]` for each live rollout of its own
+  whose pending sign-offs a repair can ask (no drain, and no pause but the sign-off pause), even where the status
+  action gives no item: an unsigned gate under the sign-off pause reads action 8, which the allow-list gives nothing.
+  The orient prompt names that repair and leaves the gates to it. Each waiting sign-off is named in the report with its
+  way out: tick the project on the next pass's pick list, which starts that repair, or run it yourself.
 - **Their live rollouts get no execute or repair item** unless the project is ticked.
+- **A ticked small project's orient prompt** says only that it was ticked for its Orient tasks: the pass asks and
+  schedules the rest of its work, so a big project's own-session line would be wrong there.
 - **A parked big project gets no Unpark offer.** It sits on the pick list, ranked last.
 - **A small task that depends on a big project's open, not-in-flight task** is skipped in the rounds (not asked),
   naming the project and the task, and held in the plan (`dependency not scheduled`).
@@ -105,10 +117,11 @@ Lachy's, as he settled them on 2026-10-29:
 - The vault schema doc (`~/repos/workspaces/_shared/knowledge/obsidian-schema.md` § Project) gains the `orient:` bullet
   in that repo, after this build; nothing reads the doc, so the pass does not wait on it.
 - `estate-scan.py` (`ownSession`), `estate-dispatch.py` (`rounds.ownSession[]` and `warnings[]`, `plan --status`,
-  `pick[]`, `pickAsk` and `pickIndex`, `sessions --open`, `--typed` and `unmatched[]`), `skills/orient-all/SKILL.md`
+  `pick[]`, `pickAsk` and `pickIndex`, `sessions --open`, `--typed` and `unmatched[]`, and an opened big project's
+  sign-off repair), `skills/orient-all/SKILL.md`
   §§ 2-4 and 6-9, `skills/_shared/readiness-grade.md`, `skills/_shared/asking.md` § 6, ADR 0054 § Sites, CONTEXT.md
   (**Big project**, **Small project**, **Pick list**) and the README carry it. `tests/estate-scan.test.mjs` 19,
   `tests/estate-dispatch.test.mjs` D23 and `tests/contracts/orient-all.test.mjs` o12 pin it.
 - A running big rollout's gated task waits longer than it did: its sign-off and its execute or repair item hold until
-  he ticks the project or runs repair himself. The wait is visible: the project becomes a pick-list candidate, and
-  the report names the repair command.
+  he ticks the project, which starts the repair that asks the sign-off, or runs repair himself. The wait is visible:
+  the project becomes a pick-list candidate, and the report names the repair command.

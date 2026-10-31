@@ -118,8 +118,9 @@ the grade (the grade ruled every other decision), and an Unpark offer his standi
 Framing from the grade (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 6).
 
 A big project's One calls, Grills, sign-offs and Unpark offer never reach this round (ADR 0060): `rounds` leaves them
-out, uncharged (a sign-off's `why` is `own session`), and § 8 names each as waiting on that project's own session. A
-small task that waits on a big project's task is left out the same way, in `skipped[]` with its `ownSession`.
+out, uncharged (a sign-off's `why` is `own session`, unless an unread status, a pause or a drain holds it first, as it
+would a small project's), and § 8 names each as waiting on that project's own session. A small task that waits on a
+big project's task is left out the same way, in `skipped[]` with its `ownSession`.
 
 Act on each answer as it lands:
 
@@ -220,7 +221,11 @@ nothing.
 
 Each ticked label goes to `sessions` as `--open <label>`, and his typed words go verbatim as `--typed <his words>`:
 `sessions` matches them against `plan.pick[]`, any project on it included, and words that match nothing come back in
-`unmatched[]` for § 8. Only a ticked project starts: its orient session, and its live rollouts' allow-list items.
+`unmatched[]` for § 8. Only a ticked project starts: its orient session, and its live rollouts' allow-list items. A
+ticked big project also starts `/thread:repair [[<rollout>]]` for each live rollout whose pending sign-offs a repair
+can ask (no drain, and no pause but the sign-off pause), even where status gives it no item (an unsigned gate under
+the sign-off pause reads action 8): `/thread:orient` has no sign-off step, and repair § 1 runs `approve-gates`. A
+ticked label opens its own option alone; two projects of one name are each linked by the note's path and numbered.
 
 1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan "$S/plan.json" --wrote <each note a fork wrote, in plan order> --status <rollout>=<N> [--open <label>]... [--typed <his words>] > "$S/sessions.json"`,
    one `--status` per status agent's action number; an unread one is left out. It returns `items[]`, already in
@@ -267,7 +272,9 @@ Each ticked label goes to `sessions` as `--open <label>`, and his typed words go
 
 Child orients start after every execute, so a lead's first `next` has marked its note started before an orient could
 see it, and the orient prompt's second line names the note this pass wrote for that project. Only a project ticked on
-the pick list gets one, its prompt's last line saying so.
+the pick list gets one, its prompt's last line saying so: a big project's that its One calls and Grills are asked
+there and its rollout scheduled there, after one line per sign-off repair started beside it, naming the gates and
+leaving them to it; a small project's only that it was ticked for its Orient tasks.
 
 ### 8. Report
 
@@ -294,8 +301,8 @@ One message of statements, no question:
 - the pick list: each project opened, each offered and not ticked, the candidates past the top 3 (the rest of
   `plan.pick[]`), and `sessions.unmatched[]` as "not on the pick list: <words>";
 - each big project's waiting work (`rounds.ownSession[]`) as "waits on [[<project>]]'s own session";
-- each sign-off held `own session`: "tick [[<project>]] on the next pass's pick list, or run
-  `/thread:repair [[<rollout>]]`, which asks it";
+- each sign-off held `own session`: "waits on [[<project>]]'s own session: tick it on the next pass's pick list,
+  which starts `/thread:repair [[<rollout>]]` to ask it, or run that yourself";
 - each `left[]` row held `own session`, with its item's command (`/thread:execute [[<rollout>]]` or
   `/thread:repair [[<rollout>]]`);
 - each `skipped[]` small task with an `ownSession`, as "waits on [[<slug>]] in [[<project>]]'s own session";

@@ -78,7 +78,7 @@ autonomy over his time, so a recommendation against either carries its reason in
 | Ungraded | fixed text | none: nobody could read the task | fixed descriptions | `Leave it out`, with its reason | yes |
 | Sign-off | its gates, verbatim (ADR 0008) | none | what each answer signs | none: the authorisation is his (ADR 0008) | yes |
 | Unpark | the project's why | its why | each answer described | none: parking is his standing call (ADR 0041) | yes |
-| Pick list | each project and what waits on it | none: each project's own session holds its goal | what opening it starts (its orient session, its held rollout items) | none: where his attention goes is his (ADR 0060) | yes |
+| Pick list | each project and what waits on it | none: each project's own session holds its goal | what opening it starts (its orient session, its held rollout items, the repair that asks its sign-offs) | none: where his attention goes is his (ADR 0060) | yes |
 
 Sources: Chorus ADR 0110 (ask him only his questions), ADR 0054 (this gate in the plugin) and the estate brief,
 `~/.agents/knowledge/how-lachy-decides.md`.

@@ -53,9 +53,10 @@ home's name, as the ranker maps a home; a row with none reads small), a rollout 
 `projects[]` link, resolved as a link by NA.Vault.resolve_project, to its scan row by note, else by name). A big
 project keeps its own session: rounds asks none of its One calls, Grills, sign-offs or Unpark offer, plan schedules
 none of its runs, and sessions starts none of its live rollouts' items, unless Lachy ticks it on orient-all § 7's pick
-list (plan's pick[] and pickAsk, sessions' --open and --typed). Its tasks are still graded and logged, for the pick
-list's counts and the Grade log, and preflight, record, decided-for-you and log are unchanged, so schedule's Pre-flight
-inside a big project's own session asks its decisions there.
+list (plan's pick[] and pickAsk, sessions' --open and --typed); ticked, a live rollout of its own whose pending
+sign-offs a repair can ask (sign_off_repair) gets that repair even where status gives no item (own_item). Its tasks
+are still graded and logged, for the pick list's counts and the Grade log, and preflight, record, decided-for-you and
+log are unchanged, so schedule's Pre-flight inside a big project's own session asks its decisions there.
 
 What it reuses. Loaded by path inside main(), so importing this file runs nothing (the contract tests read its
 constants that way): estate-rank.py (ER: Ranker's index, the gradeable rule; slug_key; DECISION_MINUTES and
@@ -86,9 +87,11 @@ rounds --rank R --scan S --budget N [--top K=15] [--vault V]: the decision round
   bullet mark stripped (the lines `reconcile-rollout.py approve-gates` signs, sub-bullets included); bounced is
   has_heading(RR.GATE_BOUNCE_SECTION) and bounce that section's text. ask is true unless why is `status unread` (a
   null summary), `paused` (a stamped pause other than pausedFor sign-off), `draining` (pause_requested) or `needs you`
-  (its setAside entry carries needsHuman): repair § 1 runs approve-gates under no other pause; first of all, `own
-  session` when the rollout's home (rollout_home) is big, which waits on that project's own session and is charged
-  nothing. Every asked sign-off is asked whatever the budget, and charged first at REVIEW_MINUTES.signOff each.
+  (its setAside entry carries needsHuman): repair § 1 runs approve-gates under no other pause. After the unread, paused
+  and draining checks, and in place of `needs you` (repair asks a Needs-you question too), `own session` when the
+  rollout's home (rollout_home) is big: it waits on that project's own session, where opening the project starts the
+  repair that asks it (sessions, own_item), and is charged nothing. Every asked sign-off is asked whatever the budget,
+  and charged first at REVIEW_MINUTES.signOff each.
   The cut, in order, after the sign-offs: the rank's One calls (decisions[] round one-call, in order) at
   DECISION_MINUTES['One call'] per decision; the offered Unpark rows at the One-call minute each; the Grills at their
   rank `minutes`. The first item that does not fit the minutes left stops the cut: it and everything after it go to
@@ -168,8 +171,8 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   in rank order, each take the lowest batch from 1 holding no entry whose keys meet theirs; serial entries each take a
   batch of their own after the last parallel one, in rank order. Listed by batch, then rank.
   rollouts[]: one per scan rollout, {slug, note, project (its home's name, rollout_home, or null), ownSession (its home
-  is big), shape, projectRoot, pausedFor, owners? (the `owner:` tags of its open tasks), holds[], canExecute,
-  canRepair, reinstate}. holds, in this order: superseded (supersededBy), lineage
+  is big), shape, projectRoot, pausedFor, pendingSignOffs[] (its summary's), owners? (the `owner:` tags of its open
+  tasks), holds[], canExecute, canRepair, reinstate}. holds, in this order: superseded (supersededBy), lineage
   (another live rollout's supersedes names it), version (protocol_version not 5), incomplete, serial (status § 5
   reads a chain by its own S rules, which STATUS_ACTIONS never maps), paused, draining (pause_requested), live queue
   (running + integrating > 0), start stamp (RR._start_unattended: the Stage starts it), status unread (a null
@@ -177,16 +180,20 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   with paused the only hold. canRepair: none of superseded, lineage, version, serial and status unread.
   The pick list (orient-all § 7, ADR 0060): pick[] holds every big project with anything waiting on its own session,
   counted as rounds' ownSession[] counts it (ready, decisions, orient, signOffs) plus heldItems (each live rollout of
-  its own whose --status action live_item gives an execute or repair item), and every small project in the rank's
-  orient[] (parked homes out), whose counts are its Orient tasks alone. weight is ready + decisions + orient + signOffs
-  + heldItems; an entry with none is left out. Ranked: parked last; dueSoon (any of its counted tasks) first, the
-  earliest deadline first; crowned (standing crowned) first; weight, highest first; then the ready count; then the
-  oldest `captured` among its counted tasks (none last); then name, then note. pickAsk is AskUserQuestion's
-  `questions` for it: [] with no entry, else one question {question (PICK_QUESTION, then NOTE_INVITE), header
-  HEADERS["pick"], multiSelect true, options[]}: the top PICK_MAX entries, each labelled by label_for (a label taken
-  twice, or a none word, gets its `k. ` prefix), its description opening `[[<name>]]: ` with its non-zero counts and
-  what opening it starts, then PICK_NONE. pickIndex {question, labels[], names[] (null for PICK_NONE), notes[]} maps
-  each label back, or null with no entry. No recommendation: where his attention goes is his.
+  its own whose --status action own_item gives an execute or repair item: live_item's, else a repair for its pending
+  sign-offs when sign_off_repair holds; signOffRepairs[] names the repairs that ask them), and every small project in
+  the rank's orient[] (parked homes out), whose counts are its Orient tasks alone. weight is ready + decisions + orient
+  + signOffs + heldItems; an entry with none is left out. Ranked: parked last; dueSoon (any of its counted tasks) first,
+  the earliest deadline first; crowned (standing crowned) first; weight, highest first; then the ready count; then the
+  oldest `captured` among its counted tasks (none last); then name, then note. pickAsk is AskUserQuestion's `questions`
+  for it: [] with no entry, else one question {question (PICK_QUESTION, then NOTE_INVITE), header HEADERS["pick"],
+  multiSelect true, options[]}: the top PICK_MAX entries, each labelled by label_for, its description opening
+  `[[<link>]]: ` with its non-zero counts and what opening it starts (a big project's orient session, its held rollout
+  items, and the repair that asks its sign-offs), then PICK_NONE. link is the name, or, for a twin (an entry whose name
+  another entry shares under pick_fold: two SEO.md in different folders), its note's path less `.md`. A twin's label
+  carries its `k. ` prefix, every twin's, the first included, as does a none word or a label taken. pickIndex {question,
+  labels[], names[] (null for PICK_NONE), notes[]} maps each label back, or null with no entry. No recommendation: where
+  his attention goes is his.
   Output: {schema, vault, today, schedule[], waiting[] {run, project, note, shape, root, rolloutRoot, members[], why},
   rollouts[], reinstate[], orient[] {name, note, area[]} (the rank's, whatever the budget; informational: an orient
   starts only from the pick list), held[] {slug, run, grade,
@@ -195,7 +202,8 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   `dependency not found` for each that never lands, or, when none of those is left, {slug, why: `dependency scheduled
   late`} for each it was held on)}, undecided[] {slug, run, grade}, sessionLane[] {slug, home, grade} (small homes
   only), pick[] {name, note, own, by, parked, crowned, dueSoon, deadline, ready, decisions, orient, signOffs, heldItems,
-  weight, oldest, rollouts[] (its live rollouts' slugs; [] for a small project)}, pickAsk[], pickIndex}.
+  weight, oldest, rollouts[] (its live rollouts' slugs; [] for a small project), signOffRepairs[], link}, pickAsk[],
+  pickIndex}.
 
 sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL]... [--typed TEXT]...: the sessions
   to start, in start order. STATUS_ACTIONS maps
@@ -208,17 +216,20 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL
   canExecute, a reinstate only with reinstate and canExecute (so a sign-off pause that every gate signed but another
   hold stands on, serial, a start stamp or a drain, gets none), a repair only with canRepair (live_item); every live
   rollout that gets no item goes to left[] {rollout, action (null: status unread), holds[], why}. A big project's
-  rollout (its plan row's ownSession) whose item its project was not opened for goes to left[] too, why OWN_HELD and
-  held: execute | repair.
-  The pick list's answers. --open: each label ticked on it (orient-all § 7), matched by pick_match against plan.pick[]
-  (its name, note, note stem or pickIndex label, casefolded and NFKD-normalised, whitespace collapsed, wrapping
-  quotes, `[[ ]]` and a trailing `.md` dropped); PICK_NONE or a NONE_WORDS answer opens nothing, and any other that
+  rollout (its plan row's ownSession) takes own_item, so a pending sign-off a repair can ask gets one; one whose item
+  its project was not opened for goes to left[] too, why OWN_HELD and held: execute | repair.
+  The pick list's answers. --open: each label ticked on it (orient-all § 7), matched by pick_hits against plan.pick[]
+  under pick_fold (casefolded and NFKD-normalised, whitespace collapsed, wrapping quotes, `[[ ]]` and a trailing `.md`
+  dropped): a pickIndex label first, which opens its own option alone, else pick_match (its name, link, note or note
+  stem; a name two entries share opens both); PICK_NONE or a NONE_WORDS answer opens nothing, and any other that
   matches no entry is exit 2. --typed: his typed words, split on `,`, `;` and line breaks; each piece is tried whole,
   and only then split on " and " (so "Morning and Weekly Commands" still matches); a none word opens nothing, a match
   opens its project, and the rest are listed in unmatched[], in order, never an exit 2. An opened project's live
   rollouts get their allow-list items.
-  Orient items: one per opened pick entry, in pick order, prompt `/thread:orient [[<name>]]`, with one more line per
-  --wrote note whose `projects:` resolves to that project, naming it, and PICK_LINE last, its counts. Order: the
+  Orient items: one per opened pick entry, in pick order, prompt `/thread:orient [[<link>]]`, with one more line per
+  --wrote note whose `projects:` resolves to that project, naming it, one SIGN_OFF_LINE per repair item of its own
+  that asks pending sign-offs, and last PICK_LINE with its counts (a big project) or PICK_LINE_SMALL (a small one,
+  ticked for its Orient tasks). Its title is `Orient: <link>`. Order: the
   written-note items (in --wrote order), the live execute items by slug, the repair items by slug, the orient items
   last. A title over TITLE_MAX is cut to TITLE_MAX - 1 chars plus "…".
   Output: {schema, today, items[] {kind (execute | leg | repair | orient), rollout | project, note, title, cwd, alias?,
@@ -374,9 +385,15 @@ NONE_WORDS = ("none", "not now", "nothing", "no", "neither", "skip")
 PICK_QUESTION = ("Which projects should open their own session now? Each one orients there, asks its own decisions and "
                  "schedules its own rollout; the whole ranked list is printed above, and you can type any project on it.")
 PICK_NONE_DESCRIPTION = "Opens nothing: each project waits for the next pass's pick list"
-# The orient prompt's last line for a project ticked on the pick list.
-PICK_LINE = ("Ticked on orient-all's pick list on {date} ({counts}): this project keeps its own session, so its decisions "
-             "are asked here and its rollout is scheduled here.")
+# The orient prompt's last line for a project ticked on the pick list: a big project's (its counts), else a small
+# project's, ticked for its Orient tasks alone (the pass asks and schedules the rest of its work).
+PICK_LINE = ("Ticked on orient-all's pick list on {date} ({counts}): this project keeps its own session, so its One "
+             "calls and Grills are asked here and its rollout is scheduled here.")
+PICK_LINE_SMALL = "Ticked on orient-all's pick list on {date} for its {orient}."
+# An opened big project's orient prompt line for each repair item it starts to ask a live rollout's pending sign-offs
+# (own_item): repair § 1 runs approve-gates, which no orient session does.
+SIGN_OFF_LINE = ("orient-all is starting /thread:repair [[{rollout}]] beside this session, which asks its pending "
+                 "sign-offs ({gates}); leave those to it.")
 
 # schedule step 7's ask-ahead heading and orient § 5's ruling line (tests/contracts/orient-all.test.mjs o4).
 DECISIONS_HEADING = "## Decisions (asked ahead {date})"
@@ -577,7 +594,7 @@ def own_of(scan, name):
     return dict(o, own=o.get("own") is True) if isinstance(o, dict) else dict(SMALL)
 
 
-def rollout_home(M, vault, scan, row):
+def rollout_home(vault, scan, row):
     """The scan project row a rollout belongs to: its first `projects[]` link, resolved as a link
     (NA.Vault.resolve_project), matched to a scan row by note, else by name; None when it names no live project."""
     links = [x for x in row.get("projects") or [] if isinstance(x, str) and x.strip()]
@@ -648,6 +665,25 @@ def live_item(r, n):
     return None, why
 
 
+def sign_off_repair(r):
+    """True when a repair can ask the plan row r's pending sign-offs: it has some, canRepair, and no drain or pause
+    but the sign-off pause holds it (repair runs approve-gates under no other pause; rounds' sign-off rule)."""
+    holds = r.get("holds") or []
+    return bool(r.get("pendingSignOffs")) and bool(r.get("canRepair")) and "draining" not in holds \
+        and ("paused" not in holds or r.get("pausedFor") == "sign-off")
+
+
+def own_item(r, n):
+    """(kind, why): what a big project's live rollout r gets at status action n once Lachy opens the project (ADR
+    0060): live_item's item, else a repair when sign_off_repair holds, since only repair asks its sign-offs there (a
+    sign-off-paused rollout with an unsigned gate reads action 8, which live_item gives nothing)."""
+    kind, why = live_item(r, n)
+    if kind is None and sign_off_repair(r):
+        return "repair", "status action %d: %s waiting on its own session, which repair asks" % (
+            n, plural(len(r["pendingSignOffs"]), "pending sign-off"))
+    return kind, why
+
+
 def waiting_on(M, rank, scan, vault):
     """{note: w}, one per scan project row: what of its open work the pass sees. w is {ready (graded Ready, no
     blockedBy), oneCalls, grills, decisions (his, over its One calls and Grills), orient, signOffs (pending on its live
@@ -673,7 +709,7 @@ def waiting_on(M, rank, scan, vault):
         elif grade == "Orient":
             w["orient"] += 1
     for r in sorted((x for x in scan["rollouts"] if isinstance(x, dict)), key=lambda x: str(x.get("slug"))):
-        p = rollout_home(M, vault, scan, r)
+        p = rollout_home(vault, scan, r)
         if p is not None and p.get("note") in out:
             out[p["note"]]["rollouts"].append(r)
             out[p["note"]]["signOffs"] += len(pending_slugs(M, scan, r))
@@ -708,13 +744,22 @@ def pick_fold(word):
     return " ".join(s.rstrip(".!?").split())
 
 
-def pick_match(entry, label, word):
-    """True when `word` names the pick entry: its name, its note, its note's stem or its option label, under
-    pick_fold."""
+def pick_match(entry, word):
+    """True when `word` names the pick entry: its name, its link, its note or its note's stem, under pick_fold."""
     w = pick_fold(word)
     note = entry.get("note") or ""
-    names = (entry.get("name"), note, note.rsplit("/", 1)[-1], label)
+    names = (entry.get("name"), entry.get("link"), note, note.rsplit("/", 1)[-1])
     return bool(w) and any(isinstance(x, str) and pick_fold(x) == w for x in names)
+
+
+def pick_hits(pick, labels, word):
+    """The pick entries `word` opens: the one whose option label (pickIndex: {label: note}) it is, under pick_fold,
+    before any other reading, so a ticked label opens only its own option; else every entry pick_match names."""
+    w = pick_fold(word)
+    note = next((n for lb, n in labels.items() if w and pick_fold(lb) == w), None)
+    if note is not None:
+        return [e for e in pick if e["note"] == note]
+    return [e for e in pick if pick_match(e, word)]
 
 
 def none_word(word):
@@ -786,12 +831,15 @@ def cmd_slices(args):
 
 # ---- rounds ------------------------------------------------------------------------------------------------------
 
-def label_for(k, full, recommended):
-    """(label, shortened): the option's label, at most LABEL_MAX chars with the suffix counted."""
+def label_for(k, full, recommended, numbered=False):
+    """(label, shortened): the option's label, at most LABEL_MAX chars with the suffix counted; numbered, it carries
+    its `k. ` prefix even when it fits (the pick list's twins)."""
     suffix = RECOMMENDED if recommended else ""
-    if len(full) + len(suffix) <= LABEL_MAX:
-        return full + suffix, False
     prefix = "%d. " % k
+    if len(full) + len(suffix) <= LABEL_MAX and not numbered:
+        return full + suffix, False
+    if numbered and len(prefix) + len(full) + len(suffix) <= LABEL_MAX:
+        return prefix + full + suffix, False
     room = LABEL_MAX - len(prefix) - len(ELLIPSIS) - len(suffix)
     words, cut = full.split(), ""
     for w in words:
@@ -899,7 +947,7 @@ class Rounds:
             slugs = pending_slugs(self.M, self.scan, r)
             needs = {e.get("slug") for e in (s.get("setAside") or [])
                      if isinstance(e, dict) and e.get("needsHuman")} if isinstance(s, dict) else set()
-            own = is_own(rollout_home(self.M, self.vault, self.scan, r))
+            own = is_own(rollout_home(self.vault, self.scan, r))
             for slug in slugs:
                 rel = self.task_note(slug)
                 text, gates, bounced, bounce = "", [], False, ""
@@ -912,14 +960,14 @@ class Rounds:
                     bounce = note.section_text(RR.GATE_BOUNCE_SECTION) if bounced else ""
                 except (OSError, ValueError, UnicodeDecodeError):
                     pass
-                if own:  # a big project's sign-off waits on its own session (ADR 0060)
-                    why = OWN_SESSION
-                elif not isinstance(s, dict):
+                if not isinstance(s, dict):
                     why = "status unread"
                 elif s.get("paused") and s.get("pausedFor") != "sign-off":
                     why = "paused"
                 elif s.get("pause_requested"):
                     why = "draining"
+                elif own:  # a big project's sign-off waits on its own session, whose repair asks it (ADR 0060)
+                    why = OWN_SESSION
                 elif slug in needs:
                     why = "needs you"
                 else:
@@ -934,7 +982,7 @@ class Rounds:
         for r in sorted((x for x in self.scan["rollouts"] if isinstance(x, dict)), key=lambda x: str(x.get("slug"))):
             s = r.get("summary") if isinstance(r.get("summary"), dict) else None
             counts = (s or {}).get("counts") or {}
-            home = rollout_home(self.M, self.vault, self.scan, r)
+            home = rollout_home(self.vault, self.scan, r)
             out.append({"slug": r.get("slug"), "note": r.get("note"), "project": (home or {}).get("name"),
                         "ownSession": is_own(home), "shape": r.get("shape"),
                         "progress": (s or {}).get("progress"), "paused": (s or {}).get("paused"),
@@ -1442,16 +1490,22 @@ class Plan:
             big = is_own(p)
             if big:
                 tasks = w["tasks"]
-                held = sum(1 for r in w["rollouts"] if r.get("slug") in self.status and r.get("slug") in rows
-                           and live_item(rows[r["slug"]], self.status[r["slug"]])[0])
+                items = {}  # each live rollout of its own that opening it starts an item for (own_item)
+                for r in w["rollouts"]:
+                    slug = r.get("slug")
+                    kind = own_item(rows[slug], self.status[slug])[0] \
+                        if slug in self.status and slug in rows else None
+                    if kind:
+                        items[slug] = kind
                 counts = {"ready": w["ready"], "decisions": w["decisions"], "orient": w["orient"],
-                          "signOffs": w["signOffs"], "heldItems": held}
+                          "signOffs": w["signOffs"], "heldItems": len(items)}
                 mine = [r.get("slug") for r in w["rollouts"]]
+                asks = [s for s, kind in items.items() if kind == "repair" and sign_off_repair(rows[s])]
             elif p["note"] in oriented:
                 slugs = set(oriented[p["note"]].get("tasks") or [])
                 tasks = [t for t in w["tasks"] if t.get("slug") in slugs]
                 counts = {"ready": 0, "decisions": 0, "orient": len(tasks), "signOffs": 0, "heldItems": 0}
-                mine = []
+                mine, asks = [], []
             else:
                 continue
             weight = sum(counts.values())
@@ -1464,11 +1518,19 @@ class Plan:
                  "parked": bool(p.get("parked")), "crowned": p.get("standing") == "crowned",
                  "dueSoon": any(t.get("dueSoon") for t in tasks), "deadline": dates[0] if dates else None}
             e.update(counts)
-            e.update(weight=weight, oldest=olds[0] if olds else None, rollouts=mine)
+            e.update(weight=weight, oldest=olds[0] if olds else None, rollouts=mine, signOffRepairs=asks)
             entries.append(e)
         entries.sort(key=lambda e: (e["parked"], not e["dueSoon"], (e["deadline"] or "") if e["dueSoon"] else "",
                                     not e["crowned"], -e["weight"], -e["ready"], e["oldest"] is None, e["oldest"] or "",
                                     str(e["name"]), e["note"]))
+        # Two notes of one name (two SEO.md in different folders): each is linked by its note's path, which names
+        # it alone, in its option, its orient prompt and its session's title.
+        folds = {}
+        for e in entries:
+            folds[pick_fold(e["name"])] = folds.get(pick_fold(e["name"]), 0) + 1
+        for e in entries:
+            twin = folds[pick_fold(e["name"])] > 1 and e["note"].lower().endswith(".md")
+            e["link"] = e["note"][:-3] if twin else e["name"]
         return entries
 
     @staticmethod
@@ -1479,14 +1541,22 @@ class Plan:
             return {"pickAsk": [], "pickIndex": None}
         opts, labels, names, notes = [], [], [], []
         for k, e in enumerate(pick[:PICK_MAX], 1):
+            link = e.get("link") or e["name"]
             label = label_for(k, e["name"], False)[0]
-            if label in labels or none_word(label):
-                label = label_for(k, "%d. %s" % (k, e["name"]), False)[0]
-            starts = "its orient session, where these are asked and its rollout is scheduled"
-            if e["heldItems"]:
-                starts += ", and its %s" % plural(e["heldItems"], "held rollout item")
+            # A name another entry shares (a twin: its link is its note's path) is numbered, every one of them, the
+            # first included; so is a none word, and any label already taken.
+            if link != e["name"] or none_word(label) or pick_fold(label) in {pick_fold(x) for x in labels}:
+                label = label_for(k, e["name"], False, numbered=True)[0]
+            if e["own"]:
+                starts = "its orient session, which asks its One calls and Grills and schedules its rollout"
+                if e["heldItems"]:
+                    starts += ", and its %s" % plural(e["heldItems"], "held rollout item")
+                if e.get("signOffRepairs"):
+                    starts += ". Its pending sign-offs are asked by the repair it starts"
+            else:
+                starts = "its orient session"
             opts.append({"label": label, "description": "[[%s]]: %s. Opening it starts %s." % (
-                e["name"], counts_text(e), starts if e["own"] else "its orient session")})
+                link, counts_text(e), starts)})
             labels.append(label)
             names.append(e["name"])
             notes.append(e["note"])
@@ -1541,10 +1611,10 @@ class Plan:
             holds = [h for h in HOLDS if h in holds]
             pending = [x for x in (s or {}).get("pendingSignOffs") or [] if isinstance(x, str)]
             reinstate = bool(s and s.get("awaitingSignOff") and all(p in self.signed for p in pending))
-            home = rollout_home(self.M, vault, self.scan, r)
+            home = rollout_home(vault, self.scan, r)
             row = {"slug": r.get("slug"), "note": r.get("note"), "project": (home or {}).get("name"),
                    "ownSession": is_own(home), "shape": shape, "projectRoot": r.get("projectRoot"),
-                   "pausedFor": (s or {}).get("pausedFor")}
+                   "pausedFor": (s or {}).get("pausedFor"), "pendingSignOffs": pending}
             mine = owners.get(ER.slug_key(r.get("slug") or ""))
             if mine:
                 row["owners"] = sorted(mine)
@@ -1598,8 +1668,9 @@ def cmd_sessions(args):
     status = parse_status(args.status, rollouts, "plan")
     pick = [e for e in plan["pick"] if isinstance(e, dict) and isinstance(e.get("note"), str)]
     pidx = plan.get("pickIndex") if isinstance(plan.get("pickIndex"), dict) else {}
-    label_of = {n: lb for lb, n in zip(pidx.get("labels") or [], pidx.get("notes") or []) if isinstance(n, str)}
-    hits = lambda word: [e for e in pick if pick_match(e, label_of.get(e["note"]), word)]  # noqa: E731
+    labels = {lb: n for lb, n in zip(pidx.get("labels") or [], pidx.get("notes") or [])
+              if isinstance(lb, str) and isinstance(n, str)}
+    hits = lambda word: pick_hits(pick, labels, word)  # noqa: E731
     opened, unmatched = set(), []
     for raw in args.open or []:  # each label ticked on the pick list
         if none_word(raw):
@@ -1661,16 +1732,18 @@ def cmd_sessions(args):
                           "cwd": cwd, "prompt": "/thread:execute [[%s]]" % slug,
                           "tldr": "Runs the parallel rollout orient-all scheduled this pass, to the end.",
                           "manual": cwd is None, "why": "written this pass"})
-    executes, repairs, left = [], [], []
+    executes, repairs, left, asking = [], [], [], set()
     for slug in sorted(rollouts):
         r = rollouts[slug]
         n = status.get(slug)
         if n is None:
             left.append({"rollout": slug, "action": None, "holds": r.get("holds") or [], "why": "status unread"})
             continue
-        kind, why = live_item(r, n)
+        big = r.get("ownSession") is True
+        # A big project's rollout also gets a repair for its pending sign-offs (own_item): only repair asks them.
+        kind, why = own_item(r, n) if big else live_item(r, n)
         root = os.path.expanduser(r["projectRoot"]) if r.get("projectRoot") else None
-        if kind and r.get("ownSession") is True and slug not in opened_rollouts:
+        if kind and big and slug not in opened_rollouts:
             # A big project's item waits until he ticks the project on the pick list (ADR 0060).
             left.append({"rollout": slug, "action": n, "holds": r.get("holds") or [], "why": OWN_HELD, "held": kind})
         elif kind == "execute":
@@ -1680,9 +1753,13 @@ def cmd_sessions(args):
                              "tldr": "Moves a live rollout on, as its status report recommends.",
                              "manual": root is None, "why": why})
         elif kind == "repair":
+            if big and sign_off_repair(r):  # this repair asks its sign-offs (repair § 1), whatever sent it
+                asking.add(slug)
+            only = STATUS_ACTIONS[n][0] != "repair"  # sent by its sign-offs alone (own_item), not by status
             repairs.append({"kind": "repair", "rollout": slug, "note": r.get("note"),
                             "title": titled("Repair: %s" % slug), "cwd": root, "prompt": "/thread:repair [[%s]]" % slug,
-                            "tldr": "Sorts out a live rollout that status says needs repair.",
+                            "tldr": "Asks a live rollout's pending sign-offs, held for its project's own session."
+                            if only else "Sorts out a live rollout that status says needs repair.",
                             "manual": False, "why": why})
         else:
             left.append({"rollout": slug, "action": n, "holds": r.get("holds") or [], "why": why})
@@ -1697,13 +1774,21 @@ def cmd_sessions(args):
     for e in pick:  # only the projects ticked on the pick list, in its order
         if e["note"] not in opened or not isinstance(e.get("name"), str):
             continue
-        lines = ["/thread:orient [[%s]]" % e["name"]]
+        link = e.get("link") if isinstance(e.get("link"), str) else e["name"]
+        lines = ["/thread:orient [[%s]]" % link]
         for slug in projects.get(e["note"], []):
             lines.append("orient-all wrote [[%s]] for this project on %s and is starting its execute; leave that "
                          "rollout to it, its tasks are in flight." % (slug, today))
-        lines.append(PICK_LINE.format(date=today, counts=counts_text(e)))
+        for slug in e.get("rollouts") or []:
+            if slug in asking:
+                lines.append(SIGN_OFF_LINE.format(rollout=slug, gates=", ".join(
+                    "[[%s]]" % g for g in rollouts[slug]["pendingSignOffs"])))
+        if e.get("own") is True:
+            lines.append(PICK_LINE.format(date=today, counts=counts_text(e)))
+        else:
+            lines.append(PICK_LINE_SMALL.format(date=today, orient=plural(e.get("orient") or 0, "Orient task")))
         orients.append({"kind": "orient", "project": e["name"], "note": e["note"],
-                        "title": titled("Orient: %s" % e["name"]), "prompt": "\n".join(lines),
+                        "title": titled("Orient: %s" % link), "prompt": "\n".join(lines),
                         "tldr": "Orients this project in its own session: ticked on the pick list, it asks its own "
                                 "decisions and schedules its own rollout.",
                         "manual": False, "why": "ticked on the pick list"})
