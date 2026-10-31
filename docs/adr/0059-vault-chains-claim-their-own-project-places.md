@@ -54,7 +54,7 @@ The same rollout's two-repo row also showed the third path. It opened from the v
 
 - Vault chains in different project places no longer overlap, so `unfinished-rollout.py check --shape serial` lets them schedule side by side. Two chains in one project place still refuse.
 - **Limits.**
-  - A legacy note (e.g. `contacts-admin-rollout-2026-10-29`, `surfaces: vault`) is not re-derived. It blocks every vault chain until it is done, dropped (p33-2's stuck-release work) or narrowed by hand.
+  - A legacy note (e.g. `contacts-admin-rollout-2026-10-29`, `surfaces: vault`) is not re-derived. It blocks every vault chain until it is done, dropped or narrowed by hand. Amended by ADR 0060 (p33-2): while it is stuck it holds only its unlanded rows' cells, but a legacy row's own cell is `vault`, so its stuck row still holds the whole vault.
   - A project renamed, moved to another area or archived between two schedules gives disjoint tokens, so two chains on it would not meet.
   - An area note read as a folder note (`AI/AI.md`, `Life (area)/Life (area).md`) claims its whole area. This is conservative.
   - A `|` in a project path would break the serial note's Queue cell. QuickAdd strips only `/` from names.
