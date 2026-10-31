@@ -1662,22 +1662,24 @@ out=$($LAND_SHELL "$LAND" --route a b 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "c
 
 shard_11() {
 echo "== 76. own branch: --queue and --hold record the review rounds (ADR 0058 d5)"
-# rrstub <rc>: a recorder stub at $THREAD_REVIEW_ROUND that appends its argv, one line per call, to rr.py.args,
-# writes a line to each stream and exits <rc>. Exported for the whole shard, so qsetup's plain call runs with it.
+# rrstub <rc> [<stderr line> [<sleep s>]]: a recorder stub at $THREAD_REVIEW_ROUND that appends its argv, one line
+# per call, to rr.py.args, sleeps <sleep s> (default 0), writes a line to each stream (stderr: <stderr line>,
+# default `rr: to stderr`) and exits <rc>. Exported for the whole shard, so qsetup's plain call runs with it.
 export THREAD_REVIEW_ROUND="$tmp/rr.py"
 rrstub() {
   cat > "$tmp/rr.py" <<PY
-import sys
+import sys, time
 with open(sys.argv[0] + ".args", "a") as f:
     f.write(" ".join(sys.argv[1:]) + "\n")
+time.sleep(${3:-0})
 print("rr: to stdout")
-sys.stderr.write("rr: to stderr\n")
+sys.stderr.write("${2:-rr: to stderr}\n")
 sys.exit($1)
 PY
   : > "$tmp/rr.py.args"
 }
 rrargs() { cat "$tmp/rr.py.args"; }
-want() { printf '%s\n' "--repo $real/w/$1 --base origin/master --branch-docs"; }
+want() { printf '%s\n' "--repo $real/w/$1 --base refs/remotes/origin/master --branch-docs"; }
 rrstub 0; qsetup c76a
 ok "$(rrargs)" "" "case 76 plain: a plain call never runs the recorder"
 hasnt "$err" "review rounds" "case 76 plain: and says nothing of it"
@@ -1687,7 +1689,7 @@ ok "$(rrargs)" "$(want c76a)" "case 76 queue: the recorder ran once, on the top,
 has "$err" "land: recorded review rounds" "case 76 queue: land: recorded review rounds"
 has "$err" "rr: to stdout" "case 76 queue: the recorder's stdout reaches stderr"; has "$err" "rr: to stderr" "case 76 queue: …and its stderr"
 ok "$(printf '%s\n' "$err" | grep -E '^land: (head [0-9a-f]{40}$|recorded review rounds$|checks read )' | cut -d' ' -f2)" \
-   "$(printf '%s\n' head recorded checks)" "case 76 queue: recorded after the fetch, before the checks"
+   "$(printf '%s\n' head checks recorded)" "case 76 queue: recorded after the checks line, at the end"
 rrstub 0; qsetup c76b; printf '%s\n' "a serious finding open at the budget" > "$tmp/diag76"
 own -- --hold -F "$tmp/diag76"
 ores "case 76 hold" 0 "held https://github.com/o/c76b/pull/1"
@@ -1721,6 +1723,52 @@ mkdir -p "$(dirname "$dflt")"; cp "$tmp/rr.py" "$dflt"
 own THREAD_REVIEW_ROUND= -- --hold -F "$tmp/diag76"
 ores "case 76 default recorder" 0 "held https://github.com/o/c76e/pull/1"
 ok "$(cat "$dflt.args")" "$(want c76e)" "case 76 default recorder: an empty THREAD_REVIEW_ROUND runs ~/.agents' review-round.py"
+rm -f "$dflt" "$dflt.args"
+# (a) A fetch that fails still records: own_finish runs the recorder on every --queue/--hold past preflight.
+rrstub 0; qsetup c76f
+own FAKE_SSH=fail -- --hold -F "$tmp/diag76"
+ores "case 76 fetch fails, hold" 1 "stuck: cannot fetch origin/master: fake-ssh: …"
+ok "$(rrargs)" "$(want c76f)" "case 76 fetch fails, hold: the recorder still ran once, with the full ref"
+has "$err" "land: recorded review rounds" "case 76 fetch fails, hold: land: recorded review rounds"
+own FAKE_SSH=fail -- --queue --reviewed "$R"
+ores "case 76 fetch fails, queue" 1 "stuck: cannot fetch origin/master: fake-ssh: …"
+ok "$(rrargs)" "$(printf '%s\n' "$(want c76f)" "$(want c76f)")" "case 76 fetch fails, queue: the recorder ran once more, with the full ref"
+# (a2) No origin/<d> to diff against: nothing recorded, and never the false `none on <B>`.
+rrstub 0; qsetup c76g; git -C "$W" update-ref -d refs/remotes/origin/master
+own FAKE_SSH=fail -- --hold -F "$tmp/diag76"
+ores "case 76 no origin/master" 1 "stuck: cannot fetch origin/master: fake-ssh: …"
+has "$err" "land: review rounds not recorded (no origin/master)" "case 76 no origin/master: says why"
+hasnt "$err" "none on" "case 76 no origin/master: never says none on <B>"
+ok "$(rrargs)" "" "case 76 no origin/master: the stub was never called"
+# (b) A recorder past LAND_RECORD_TIMEOUT is killed; the result and exit code are unchanged.
+rrstub 0 "rr: to stderr" 5; qsetup c76h
+own LAND_RECORD_TIMEOUT=1 -- --hold -F "$tmp/diag76"
+ores "case 76 recorder timed out" 0 "held https://github.com/o/c76h/pull/1"
+has "$err" "land: review rounds not recorded (timed out)" "case 76 recorder timed out: says so"
+hasnt "$err" "land: recorded review rounds" "case 76 recorder timed out: never says recorded"
+# (c) LAND_DEADLINE never applies to the recorder: a deadline stuck still records.
+rrstub 0; qsetup c76i
+own LAND_DEADLINE=0 -- --hold -F "$tmp/diag76"
+ores "case 76 deadline" 1 "stuck: deadline passed before fetch"
+ok "$(rrargs)" "$(want c76i)" "case 76 deadline: the recorder still ran once"
+has "$err" "land: recorded review rounds" "case 76 deadline: land: recorded review rounds"
+# (d) A recorder that exits 0 with a per-doc warning has not recorded everything.
+rrstub 0 "review-round: warning: x"; qsetup c76j
+own -- --hold -F "$tmp/diag76"
+ores "case 76 recorder warning" 0 "held https://github.com/o/c76j/pull/1"
+has "$err" "land: review rounds not all recorded (review-round: warning: x)" "case 76 recorder warning: names the warning"
+hasnt "$err" "land: recorded review rounds" "case 76 recorder warning: never says recorded"
+# (e) A branch with no docs/reviews/ commit: nothing to record, the recorder never runs.
+rrstub 0; ghreset; mkbranch c76k; own --
+own -- --hold -F "$tmp/diag76"
+ores "case 76 no review docs" 0 "held https://github.com/o/c76k/pull/1"
+has "$err" "land: review rounds: none on $OB" "case 76 no review docs: says none on <B>"
+ok "$(rrargs)" "" "case 76 no review docs: the stub was never called"
+# (f) A local branch named origin/master never wins: the recorder gets the full remote-tracking ref.
+rrstub 0; qsetup c76l; git -C "$W" branch origin/master "$R"
+own -- --hold -F "$tmp/diag76"
+ores "case 76 local origin/master" 0 "held https://github.com/o/c76l/pull/1"
+ok "$(rrargs)" "$(want c76l)" "case 76 local origin/master: the stub's argv carries refs/remotes/origin/master"
 }  # end shard_11
 
 # ---- run this child's shard -------------------------------------------------------------------------------
