@@ -933,7 +933,10 @@ its tasks for a later run). Tokens compare literally (`repo:<realpath>`), so a c
 never overlaps a parallel rollout rooted in its rollout clone: the two coexist as peers (ADR 0042, intended), while a
 chain that claims `repo:<clone>`, or a parallel rollout rooted in place before ADR 0042, still refuses. Quote each
 `--surface` token as one shell word, since a vault path holds spaces:
-`--surface "vault:Work/Projects/Life (area)/Contacts admin.md"`. Carry `WARN:` lines to S7.
+`--surface "vault:Work/Projects/Life (area)/Contacts admin.md"`. Carry `WARN:` lines to S7. A stuck chain (every
+unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces, and a parallel rollout awaiting
+sign-off or halted on its set-asides holds no Project root against a chain (ADR 0060): a `WARN: … released …` line names
+what this chain may now use beside it. That rollout reclaims the place on resume and then waits its turn.
 
 **S3.5. Pre-flight.** It runs step 1.5 over S2's chain members, the session-lane ones left out; nothing is kept and
 nothing is superseded on this path, so there is no `--kept` and no `--superseding`. Under orient's § 7 too it asks its
@@ -990,8 +993,8 @@ the Pre-flight line and its left-out tasks, as step 8 lists them (Orient → `/t
 → waiting on your answer, ungraded, `depends on [[x]]`), its Decided for you block, the session-lane members, the WARNs and the gated checklist (§ 3.5's kept gates, § 3.6's expected-to-gate lines,
 credential or irreversible ask-ahead and dismissals, as step 8 lists them). Then one line: "Leg 1 opens in row 1's launch and runs `/thread:execute [[<note>]]`;
 no execute handoff, no `start: unattended` (the Stage's unattended start needs a Project root); until it finishes or
-is dropped (`status: dropped`) it holds its surfaces, so a parallel run on a checkout it claims, or another chain
-over them, is refused".
+is dropped (`status: dropped`) it holds its surfaces (while it is stuck, only its unlanded rows', ADR 0060), so a
+parallel run on a checkout it claims, or another chain over them, is refused".
 
 ## Execution lives in `/thread:execute`
 

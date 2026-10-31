@@ -475,7 +475,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   or external system it writes but names nowhere: declare `surfaces:` for
   those. A `## Launch` path that is `/` or the home directory is never
   claimed (it would contain every repo; a WARN names it). Two checkouts of one
-  origin are two surfaces. _Avoid_: footprint, file-set.
+  origin are two surfaces. A stuck chain holds only its unlanded rows'
+  surfaces (**Unfinished rollout**, ADR 0060). _Avoid_: footprint, file-set.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -488,7 +489,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   writes is refused, and so is a serial chain whose **Surface** overlaps a live
   chain's or an unfinished parallel rollout's Project root (schedule § Serial
   path). Vault chains in different project places never overlap, so they run
-  side by side (ADR 0059). It is narrower than live: a superseded note stamped
+  side by side (ADR 0059). What an unfinished rollout holds narrows while it
+  waits on Lachy (ADR 0060). A stuck chain (no Leg open, nothing claimable:
+  every unlanded row set aside or held behind one) holds only its unlanded
+  rows' surfaces, and releases the rest, its done rows' included. A parallel
+  rollout awaiting sign-off, or halted with nothing able to start, holds no
+  Project root against serial chains, though it is still its repo's one
+  unfinished parallel rollout. Each reclaims its whole claim on resume, and
+  waits its turn for a place another rollout took meanwhile: whoever released
+  a place yields it. It is narrower than live: a superseded note stamped
   done but not yet moved is live but not unfinished, and so is a rollout whose
   every task merged before its completion ceremony ran. `--regenerate`
   supersedes this project's unfinished rollout when it is paused or never

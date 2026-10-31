@@ -1,0 +1,44 @@
+# 0060 — A stuck rollout holds only what it waits on
+
+Date: 2026-10-31
+Status: accepted. Ruled with Lachy on 2026-10-30 (the grill behind `thread-skill-p33-2-a-stuck-rollout-releases-all-but-its-stuck-task`, Phase 33 · Task 2): when a rollout stops to wait on him, it keeps only the surfaces its waiting task touches and releases the rest, so other projects carry on; when he resolves it, it reclaims what it needs, or waits its turn if another rollout holds it. The technical calls below were decided for him in that task's plan. Amends ADR 0040 (*a live chain owns the places it writes*), ADR 0048 (the kept whole-rollout halts) and ADR 0059 (its Limits).
+
+## Context
+
+`contacts-admin-rollout-2026-10-29` finished four of its five rows, set the fifth aside at 12:10 (`chain stuck: 1 set aside`) and kept its whole claim. Nothing else could use the vault or `~/repos/workspaces` until a `/thread:repair` decision. A stuck chain is unfinished, and until now an unfinished chain owned every surface it ever claimed (ADR 0040). A parallel rollout waiting on a sign-off (ADR 0034), or halted with nothing able to start, held its whole Project root the same way. Lachy:
+
+> I want to be working with Rollouts more and more. Is there a way that we can be designing this so that we can have the different projects running side by side? Is there a switch in the system to be able to fix this in a more solid way.
+
+## Decision
+
+1. **What a stuck chain is.** A serial chain releases surfaces only when `leg.py status` reads its chain state as `stuck` and no Queue row is `running`. `stuck` means no Leg is open; no stall, hand-over, restart or halt stands; the chain is not completable; and nothing is claimable, so every unlanded row is set aside (blocked, review-blocked, plan-blocked or gate-pending) or held behind one. leg.py stays the single source of chain state: its `hold_of` is the one copy, and `unfinished-rollout.py` loads it in-process rather than re-deriving it. Every other state holds the note's whole `surfaces:`, as before.
+
+2. **What a stuck chain still holds.** It keeps the tokens in the Queue `Surfaces` cell of every counted row that is not done: set-aside rows, rows held behind them, and rows whose note is missing. It also keeps any `surfaces:` token that appears in no row's cell (a hand edit, kept to be conservative). Everything else is released, including done rows still on the next Leg's smoke list. Without that, the motivating case would release nothing, because Leg 1 finished rows 1 to 4 and all of them still wait on Leg 2's smoke test. Deferred and folded rows are outside the count, so they are released. The hold fails closed to the whole claim, with a WARN, when the Queue has no rows or an unlanded row's cell is empty or holds a token `parse_token` refuses. A note with no Queue table reads whole.
+
+3. **Reclaim on resume, and why there is no deadlock.** Once Lachy resolves the chain (a hand-back or a sign-off), it reads `ready` again, so new schedules see its whole claim: it reclaims. Before the next Leg writes anything, `leg.py begin` re-checks the Leg's write set. This runs on a fresh Leg or a take-over, never on a silent resume or `--resume`. The write set is its unlanded rows' surfaces plus the surfaces of the rows on its smoke list, since a failed smoke files a fix row on its target's surfaces, which may now be someone else's. The re-check compares that write set against two things:
+   - other unfinished serial notes' unlanded-row tokens, in any state: never their whole claim, and never their smoke rows;
+   - unfinished parallel rollouts' Project roots, counted only when the rollout is not released, not paused and has no open halt in its Run record.
+
+   On any hit `begin` exits 3 (a stand, nothing written), and the chain waits its turn. `leg.py status` names the same hit as the restart's blocker (`surface held by [[B]] (<token>)`), and `/thread:repair` never restarts over it. Comparing against whole claims would deadlock. A, once resolved, holds its whole claim, so B, which was scheduled on A's released place, would wait on A, while A waits on B for the smoke row B now holds. The asymmetric rule makes whoever released a place yield it. B was scheduled against A's held set, which contains A's unlanded rows, so B never waits on A.
+
+4. **Parallel release.** An unfinished parallel rollout is released when nothing is running, integrating or awaiting Integration, at least one task is set aside, and either (a) it is awaiting sign-off (`paused_for: sign-off`, ADR 0034), or (b) it is not paused and its Run record's last open stop is a `halt` whose reason starts `nothing can start` (execute § 7's stuck halt, recorded by the Stop hook). An unreadable Run record counts as not released (fail closed). A hand pause, a pending pause, an UNVERIFIED or any other halt, and a task running or in Integration all hold the root.
+
+5. **What a released parallel rollout gives up.** It stops holding its Project root against serial chains: the serial check's parallel hits. It still counts as the repo's one unfinished parallel rollout against a second parallel run, for two reasons. A second parallel rollout on that repo would run from the same rollout clone (ADR 0042), beside the stuck one's worktrees and canary. And p33-4 is the planned change that lets two projects' parallel rollouts share a repo, each in its own clone. So § 0's outcomes 3, 4 and 5 and the supersede are unchanged. When a released parallel rollout resumes, execute re-checks at every entry into its § 4.5 loop: `unfinished-rollout.py check --shape parallel --repo <repoPath> --resume <slug>`, against the other serial notes' unlanded tokens only. Its exit 3 is a designed whole-rollout halt, `reason="surface held: [[<chain>]] writes <token>"`, with nothing stamped. Lachy re-invokes once that chain finishes. Every task writes the root, so the halt is kept whole (ADR 0048). Under rule 3's holder rule a halted parallel rollout is never a holder, so the chain it waits on never waits on it.
+
+`unfinished-rollout.py hold --rollout <slug>` prints what one rollout holds, for either shape, and `/thread:status` shows it: a serial chain's Hold block (§ 5) and a waiting parallel rollout's Hold line (§ 4).
+
+## Considered options
+
+- **Release only the set-aside rows' surfaces, keeping done rows held until smoke-tested:** rejected. Leg 1 finished every row but the stuck one, and all of them wait on Leg 2's smoke test, so the motivating case would release nothing.
+- **Reclaim the whole claim on resume and compare whole claims:** rejected for the deadlock in rule 3.
+- **A recorded release stamp on the note** (`released: <tokens>`): rejected. It is a second copy of the chain state, written by whom and cleared when? The hold is read from the chain state every time, so it can never go stale.
+- **Release a parallel rollout's repo to a second parallel run too:** left to p33-4. Two parallel rollouts on one repo would share one rollout clone today.
+
+## Consequences
+
+- `leg.py status` prints `hold`, and its restart may be blocked by `surface held by [[B]] (<token>)`. `leg.py begin` re-checks before it writes. `unfinished-rollout.py check` reads a stuck chain's hold (the serial check and the parallel check's 2b), WARNs naming what a stuck chain released, gains `--resume <slug>`, and adds the `hold` verb. `unfinished-rollout.py` now loads `leg.py`, so a broken `leg.py` makes `check` exit 2 whenever an unfinished serial note exists (fail closed). There is no recursion: `hold_of` never spawns.
+- Execute § 4.5's *Surface re-check* and § 7's kept halt, legs.md § Begin's surface stand, status § 4 and § 5, repair § 7, schedule S3 and S7, the serial template's legend and CONTEXT.md **Unfinished rollout** carry the rule. `tests/unfinished-rollout.test.sh` X1–X12, `tests/leg.test.sh` L14 and `tests/contracts/stuck-release.test.mjs` pin it.
+- **Limits.**
+  - A legacy all-`vault` note such as `contacts-admin-rollout-2026-10-29` still holds `vault` through its stuck row, because that row's own cell is `vault`. Narrow it by hand, drop it, or resolve the row.
+  - A rare race (R3). A has released a place, B has claimed it, and both chains' smoke tests on that place fail at the same time: both file fix rows there, and their next begins wait on each other. It needs two near-simultaneous smoke failures on a place A had already given up. `/thread:repair` resolves it, and it is accepted, as ADR 0059 accepts the same-note collision.
+  - A halt from the parallel re-check is a designed stop that nobody resumes automatically when the chain finishes: Lachy re-invokes.

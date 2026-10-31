@@ -24,6 +24,9 @@
 #   L13  status (read-only, no lock): the chain states, the stall, the restart and its blockers, set-asides, per-Leg
 #        lists, a take-over's lastAt, dependants and the defer closure, a terminal chain with no restart, next or
 #        smoke list (L13g, L13o); restarted: its checks, in order
+#   L14  the hold (ADR 0060): live and ready hold the whole claim, stuck only its set-aside row's surface; begin's
+#        surface re-check is exit 3 (nothing written, --dry-run too) while another chain's unlanded row holds a smoke
+#        row's surface, and status's restart names it as its blocker
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -1024,6 +1027,44 @@ $line"; fi
   fi
 done
 
+# ════ L14: the hold and the surface re-check (ADR 0060, p33-2) ═════════════════════════════════════════════════════
+scen l14
+VA='`vault:Work/Projects/A`'; VB='`vault:Work/Projects/B`'
+mkro '' "t1~cc-demo~$F~$VA" "t2~cc-demo~$F~$VB"; mkt t1; mkt t2
+subst "$T/$RO.md" '  - "ext:x"' $'  - "vault:Work/Projects/A"\n  - "vault:Work/Projects/B"'
+leg begin --cwd "$F"; finish t1; leg claim --task t2
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["hold"]["held"]')" "live|whole|['vault:Work/Projects/A', 'vault:Work/Projects/B']" \
+   "L14: a live chain holds its whole claim"
+leg set-aside --task t2 --reason "blocked on a missing key"; leg close --outcome stuck
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["hold"]["held"]')|$(q 'd["hold"]["released"]')" \
+   "stuck|stuck|['vault:Work/Projects/B']|['vault:Work/Projects/A']" "L14: a stuck chain holds only its set-aside row's surface"
+ok "$(q 'd["hold"]["rows"]')" "[{'slug': 't2', 'state': 'set-aside', 'surfaces': ['vault:Work/Projects/B']}]" "L14: … naming the row"
+python3 "$RR" hand-back --tasks t2 --tasks-dir "$T" > "$TMP/hb" 2>&1
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["restart"]["blockedBy"]')" "ready|whole|None" \
+   "L14: handed back, the chain reads ready and reclaims its whole claim; nothing blocks Leg 2"
+# Another chain, scheduled on vault:Work/Projects/A while this one was stuck
+B=other-rollout-2026-10-21
+{ printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\nprojects:\n  - "[[Other]]"\n'
+  printf -- 'surfaces:\n  - "vault:Work/Projects/A"\n---\n\n## Notes\n\nA chain.\n\n## Queue\n\n| # | Task | Launch | Surfaces |\n|---|---|---|---|\n'
+  printf -- '| 1 | [[u1\\|u1]] | `cc-demo` from `%s` | `vault:Work/Projects/A` |\n' "$F"; } > "$T/$B.md"
+printf -- '---\ntags: [task]\nstatus: open\nrollout: "[[%s]]"\n---\n\n## Notes\n\nDo u1.\n' "$B" > "$T/u1.md"
+leg status
+ok "$(q 'd["restart"]["blockedBy"]')" "surface held by [[$B]] (vault:Work/Projects/A)" \
+   "L14: status: Leg 2's restart is blocked by the chain that now holds its smoke row's surface"
+snap; SESS=s2 leg begin --cwd "$F" --dry-run
+ok "$rc|$(q 'd["exit"]')" "3|3" "L14: begin --dry-run runs the re-check too: exit 3"; same "L14: --dry-run"
+snap; SESS=s2 leg begin --cwd "$F"
+ok "$rc|$(q 'd["held"]')" "3|[{'rollout': '$B', 'token': 'vault:Work/Projects/A'}]" "L14: begin is exit 3, naming what holds it"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=1/2 running=0 state=halted reason=\"surface held: [[$B]] holds vault:Work/Projects/A\"" \
+   "L14: … its status line"
+has "$(q 'd["error"]')" "this chain waits its turn" "L14: … and its error says it waits its turn"
+same "L14: a held begin writes nothing"
+subst "$T/$B.md" 'status: open' 'status: dropped'
+SESS=s2 leg begin --cwd "$F"
+ok "$rc|$(q 'd["leg"]')|$(q '[x["task"] for x in d["smoke"]]')" "0|2|['t1']" "L14: once that chain is dropped, Leg 2 begins"
 echo
 if [ "$fail" -eq 0 ]; then echo "leg.test.sh: ALL PASS"; else echo "leg.test.sh: FAILED"; fi
 exit "$fail"
