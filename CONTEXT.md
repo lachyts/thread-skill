@@ -413,7 +413,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   checkout, only), and no subagents but each task's clean-room review. One chain
   per note (schedule § Serial path): its `surfaces:` claims the **Surface**s the
   chain writes, and each `## Queue` row names the launch its Leg opens in, so a
-  launch change between two rows is a Leg boundary. execute runs its Legs
+  launch change between two rows is a Leg boundary. A row that writes a
+  checkout never opens in the vault, and an alias-less row writing two
+  checkouts is refused (ADR 0059), since a Leg finishes only its own
+  checkout's commits. execute runs its Legs
   (`skills/execute/legs.md`). A serial note is never paused: a Leg stops through
   `leg.py close --outcome stopped`. status reads it as a chain (`leg.py status`:
   its Legs, its chain state, a **Stalled chain**), repair restarts it, and its
@@ -461,7 +464,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   declared `surfaces:` (its whole claim), else derived from its launch folder,
   its `## Launch` paths (a launch command's `--add-dir` and `cd` paths among
   them, fenced or not) and its first project's `Local:`; a surface added at
-  schedule unions in; with no source, `vault` alone (the default, with a
+  schedule unions in. A member whose path is the vault root, or that has no
+  other claim, claims its first project's place (a folder note's folder, else
+  the note and the folder it would become) and its own task note, never the
+  whole vault; a path under `Work/Tasks` is bookkeeping, never a claim (ADR
+  0059). With no project and no path, `vault` alone (the default, with a
   WARN). The guarantee and its limit: a member claims what it names, never
   its launch profile's other Working roots (a workspace launcher's
   `add_dirs`), another project's `Local:` or a project's `repos:`, nor a repo
@@ -480,11 +487,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in the same check: a parallel run on a place an unfinished serial chain
   writes is refused, and so is a serial chain whose **Surface** overlaps a live
   chain's or an unfinished parallel rollout's Project root (schedule § Serial
-  path). It is narrower than live: a superseded note stamped done but not yet
-  moved is live but not unfinished, and so is a rollout whose every task merged
-  before its completion ceremony ran. `--regenerate` supersedes this project's
-  unfinished rollout when it is paused or never started. _Avoid_: live (for
-  this meaning), active, open.
+  path). Vault chains in different project places never overlap, so they run
+  side by side (ADR 0059). It is narrower than live: a superseded note stamped
+  done but not yet moved is live but not unfinished, and so is a rollout whose
+  every task merged before its completion ceremony ran. `--regenerate`
+  supersedes this project's unfinished rollout when it is paused or never
+  started. _Avoid_: live (for this meaning), active, open.
 - **Supersede** — a new rollout taking over an unfinished one: every unlanded
   task carries over (a `review` task with an open PR awaits Integration, an
   open one is queued, a running or set-aside one keeps its state), and merged

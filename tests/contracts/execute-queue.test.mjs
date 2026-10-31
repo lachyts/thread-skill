@@ -785,10 +785,12 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // skip-path (ADR 0045, p29-3): step 3's prepare carries the verifier and bootstrap, single-quoted; a `skip` bullet after
   // set-aside re-checks (§ 2.5 then § 2.6), pushes M, logs (M, mainSha) and goes to step 4 with no verifier, a refused
   // push undoes and integrates with trouble []; the lead prints inert.why (an inert check error included); the exit-3 row
-  // names the skip and § 3's verifier row the prepare flag.
+  // names the skip and § 3's verifier row the prepare flag. prepare runs with the Bash tool's 600000 ms timeout, so the
+  // default 120 s one never cuts its Inert proof (PROOF_BUDGET_S, 180 s; p34-2).
   const skipB = st3.slice(st3.indexOf('**`skip`**'), st3.indexOf('**exit 8**'))
   const verifierRow = (section(skill, S3) ?? '').split('\n').find((l) => l.startsWith('| `verifier` |')) ?? ''
   if (!st3.includes("lead-integrate.py prepare --repo <repoPath> --slug <slug> --default <defaultBranch> --note <task note> --verifier '<verifier>' --bootstrap '<env_bootstrap>'") ||
+    !st3.includes("run `prepare` with the Bash tool's `timeout: 600000`") ||
     st3.indexOf('**`set-aside`**') < 0 || st3.indexOf('**`skip`**') < st3.indexOf('**`set-aside`**') ||
     !skipB.includes('no verifier runs') || !before(skipB, 'Re-run § 2.5', 'then § 2.6') ||
     !before(skipB, 'then § 2.6', 'lead-integrate.py push --repo <repoPath> --slug <slug> --head M') ||
@@ -1510,6 +1512,8 @@ test('control: step 3 without the skip bullet, its order, its undo or its why pr
   const bullet = real.skill.split('\n').find((l) => l.startsWith('   - **`skip`**'))
   only(sk(bullet + '\n', ''), 'skip-path', 'no skip bullet')
   only(sk(" --verifier '<verifier>' --bootstrap '<env_bootstrap>'` (§ 3's", "` (§ 3's"), 'skip-path', 'prepare without the verifier')
+  only(sk("; run `prepare` with the Bash tool's `timeout: 600000`: its Inert proof may run up to PROOF_BUDGET_S (180 s), and that deadline ends it first, so it always prints its JSON", ''),
+    'skip-path', 'prepare with the default Bash timeout')
   only(sk('Re-run § 2.5, then § 2.6 (the push re-check, *Landing-register re-check*), then `python3',
     'Then `python3'), 'skip-path', 'no re-check before the push')
   only(sk('Push refused (exit 1): `undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, then the integrate call with `trouble []`.',
