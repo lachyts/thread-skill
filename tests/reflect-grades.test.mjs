@@ -332,6 +332,28 @@ test('a titled note (p34-6): its grade line, keyed by title_key with the name as
   assert.equal(out.grades.all.byGrade.Ready.unknown, 1)
 })
 
+test('a titled note renamed to its key (p34-6): only the latest grade line names the note, and a gone name is tried as the task', (t) => {
+  const h = setup(t)
+  // Renamed before its latest grade: the older line's note is not used, so the note is found at its key.
+  const RENAMED = 'Order the Brace'
+  // Renamed after its latest grade: that line's note is gone, so the note is looked up by the task.
+  const LATER = 'Tune the Rig'
+  emitAll(h, [
+    grade(h, 'order-the-brace', W(3, '00:00'), { linked: 'old-rollout', note: RENAMED }),
+    grade(h, 'order-the-brace', W(4, '00:00'), { linked: 'old-rollout' }),
+    grade(h, 'tune-the-rig', W(3, '00:00'), { linked: 'old-rollout', note: LATER }),
+  ])
+  note(h, 'order-the-brace', { status: 'done', rollout: 'Serial-Rollout-2026-09-04', completed: '2026-09-05' })
+  note(h, 'tune-the-rig', { status: 'dropped', rollout: 'Serial-Rollout-2026-09-04', completed: '2026-09-06' })
+  const out = grades(h)
+  const renamed = one(out, 'order-the-brace')
+  assert.deepEqual([renamed.note, renamed.outcome, renamed.dispatchedBy, renamed.end.date], [undefined, 'hands-off', 'link', '2026-09-05'])
+  const later = one(out, 'tune-the-rig')
+  assert.deepEqual([later.note, later.outcome, later.end.date], [undefined, 'dropped', '2026-09-06'])
+  assert.deepEqual(out.flags.filter((f) => /brace|rig/i.test(f)), [], 'neither reads unknown')
+  assert.equal(out.grades.all.byGrade.Ready.unknown, 0)
+})
+
 test('byAgentGrade sets a confidence-raised task apart from its raised grade', (t) => {
   const h = setup(t)
   emitAll(h, [grade(h, 'rz', W(3, '00:00'), { grade: 'One call', agentGrade: 'Ready', decisions: 1, low: 1, raised: ['confidence'] }),

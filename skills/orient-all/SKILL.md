@@ -78,7 +78,7 @@ asks: its budget is `--budget`, else 30. The budget is his (Owner *yours*: his t
 7. Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank "$S/rank.json" --scan "$S/scan.json"`:
    one line per graded task into the Grade log (CONTEXT.md **Grade log**), which the weekly Reflection reads against
    what followed each grade. A titled note (spaces, capitals, an em dash) is logged under a key made from its name,
-   the name kept beside it; only a name with no key (no letter or digit, or another graded task's key) is skipped,
+   the name kept beside it; only a name with no key (no ASCII letter or digit, or another graded task's key) is skipped,
    named on stderr and counted in the outcome line (`; <k> skipped (no key): …`), and the rest are logged. A skip or a
    non-zero exit is a § 8 caveat, and the pass goes on.
 

@@ -76,8 +76,8 @@ time). A schedule run that regrades a task the estate pass graded ends that esta
 undispatched and so outside the rate; a Pre-flight grade's `held` counts holds on dependencies outside the rollout
 too. A grade line carries no rollout, and a task: a graded task whose name normalise_slug refuses (a vault note
 titled with spaces, capitals or punctuation, as quick captures are) is keyed by title_key(name) and carries its exact
-name as `note` (p34-6), so grades.py finds the note again; `log` skips and reports only a name with no key (no letter
-or digit, or a key another graded task of the pass holds).
+name as `note` (p34-6), so grades.py finds the note again; `log` skips and reports only a name with no key (no ASCII
+letter or digit, or a key another graded task of the pass holds).
 
 reflections.jsonl holds the weekly reading's lines (skills/reflect/scripts/reflect.py is its only writer, and tune.py
 reads it for the agreement, the load hold and to refuse a closed Reflection): a `watch` line per (Reflection, Watch), a
@@ -289,8 +289,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      filed only on a bug). No rollout, no task; lands in reflections.jsonl.
   grade           T  pass, digest, project, grade, agentGrade, shape, size, decisions, low, held, gates; raised?, rank?,
                      linked?, note? (p25-4, ADR 0041: one line per task an estate pass grades, from estate-rank.py's
-                     tasks[] row; note (p34-6) only for a titled note, its exact name: no path separator, not a slug
-                     itself, and title_key(note) the task; pass a g- id and digest 12 lowercase
+                     tasks[] row; note (p34-6) only for a titled note, its exact name: no `/`, not a slug itself,
+                     and title_key(note) the task; pass a g- id and digest 12 lowercase
                      hex, both shared by the pass's lines; project the task's home; grade and agentGrade each one of
                      Ready | One call | Grill | Orient, the ranker's grade after the raise and the agent's own; shape
                      parallel | serial | session; size S | M | L; decisions and low integers >= 0, the count of his
@@ -1474,22 +1474,26 @@ def normalise_slug(value, what="slug"):
 
 def title_key(name):
     """The Grade log's key for a note name normalise_slug refuses (a vault note titled with spaces, capitals or
-    punctuation, p34-6): casefolded, its accents dropped (NFKD), each run of characters outside [a-z0-9._] one hyphen,
-    then its leading non-alphanumerics and trailing `-`, `.` and `_` cut. `Layout broken — library panel stays open`
-    -> `layout-broken-library-panel-stays-open`. Refused when no letter or digit is left."""
+    punctuation, p34-6): NFKD-folded (so a compatibility capital such as `𝐁` is a `B`), then casefolded, its accents
+    dropped and its apostrophes (`'` and `’`) deleted, as estate-dispatch.py's project_slug deletes them; each run of
+    characters outside [a-z0-9._] one hyphen, then its leading non-alphanumerics and trailing `-`, `.` and `_` cut.
+    `Layout broken — library panel stays open` -> `layout-broken-library-panel-stays-open`, `Don't forget Lachy’s kit`
+    -> `dont-forget-lachys-kit`. Refused when no ASCII letter or digit is left (a name in another script, `修复`). The
+    rule is fixed: grades.py groups lines by this key, so changing it would split one note's history in two."""
     if not isinstance(name, str):
         raise Refused("note must be a string")
-    s = unicodedata.normalize("NFKD", name.strip().casefold())
-    s = TITLE_SEP_RE.sub("-", "".join(c for c in s if not unicodedata.combining(c)))
-    s = re.sub(r"^[^a-z0-9]+", "", s).rstrip("-._")
+    s = unicodedata.normalize("NFKD", name.strip()).casefold()
+    s = "".join(c for c in s if not unicodedata.combining(c) and c not in "'\u2019")
+    s = re.sub(r"^[^a-z0-9]+", "", TITLE_SEP_RE.sub("-", s)).rstrip("-._")
     if not SLUG_RE.fullmatch(s):
-        raise Refused("note %r has no letter or digit to key it by" % name)
+        raise Refused("note %r has no ASCII letter or digit to key it by" % name)
     return s
 
 
 def _check_note(note, task):
-    """A grade line's `note`: the exact name of a titled note, which title_key keys as the line's task."""
-    if "/" in note or "\\" in note:
+    """A grade line's `note`: the exact name of a titled note, which title_key keys as the line's task. Only `/` is a
+    path separator here (a vault note on macOS may hold a `\\`, and estate-scan's slug_of keeps it)."""
+    if "/" in note:
         raise Refused("grade: note %r must be a note name, not a path" % note)
     try:
         normalise_slug(note)

@@ -184,12 +184,13 @@ log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; 
   a fresh mktemp per pass, so two passes never share a digest, and a rerun of one pass keeps it. The key (p34-6): a
   slug is normalise_slug's; estate-scan's slug is the raw file stem, so a titled vault note (spaces, capitals, an em
   dash: a quick capture's) is keyed by run_record's title_key and its line carries the exact name as `note`, which
-  grades.py looks the note up by. A slug-named task holds its key first, so a titled name whose key another graded task
-  of the pass holds, or a name with no letter or digit, has no key and is skipped: one `estate-dispatch: skipped
-  <slug>: <why>` stderr line each, and the rest are still logged. Every other line passes run_record's check before any
-  is written. A (digest, task) already in grades.jsonl is skipped: with
-  every task there it prints `exists <pass> (<n> grade(s))`; with some, it writes the rest under that pass's id and
-  ts, printing `completed <pass>: <k> more`, so a pass whose write stopped part-way is completed by a rerun; else
+  grades.py looks the note up by. A slug-named task holds its key first, whatever the rank order, and a titled name
+  holds its key next, in rank order, so a titled name whose key another graded task of the pass holds, or a name with
+  no ASCII letter or digit, has no key and is skipped: one `estate-dispatch: skipped <slug>: <why>` stderr line each,
+  and the rest are still logged. Every other line passes run_record's check before any is written. A (digest, task)
+  already in grades.jsonl is skipped: with every task there it prints `exists <pass> (<n> grade(s))`; with some, it
+  writes the rest under that pass's id and ts, printing `completed <pass>: <k> more`, so a pass whose write stopped
+  part-way is completed by a rerun; else
   `logged <n> grade(s), pass <id>`. Any of the three ends `; <k> skipped (no key): <slug>, ...` when a task was
   skipped (orient-all § 8 reports it as a caveat). --dry-run prints each line (`would log grade <task>: <fields>`) and
   that outcome after `dry run, nothing written: `, and writes nothing. A torn grades.jsonl line is skipped, and a log

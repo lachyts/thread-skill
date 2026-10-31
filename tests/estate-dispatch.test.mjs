@@ -1089,11 +1089,13 @@ test('D16. log: one grade line per graded task, Orient included, under one pass;
   assert.deepEqual(['linked' in by2['crown-b'], 'linked' in by2['act-a']], [false, false])
   // A titled note (estate-scan's slug is the raw file stem, so a vault note named with spaces, capitals or an em dash)
   // is logged under run_record's title_key, its exact name kept as `note` (p34-6). Only a name with no key is skipped
-  // and named, never a refusal: one with no letter or digit, or a titled name whose key is another graded task's.
+  // and named, never a refusal: one with no ASCII letter or digit, or a titled name whose key is another graded task's.
+  // A backslash is legal in a macOS note name and slug_of keeps it: it keys like any other separator and is logged.
   const VAULT_NAME = 'Autorun next command after handoff'
   const DASHED = 'Layout broken — library panel stays open'
+  const SLASHED = 'Fix C:\\Users path'
   const rk3 = structuredClone(rk)
-  rk3.tasks.splice(1, 0, { ...structuredClone(rk.tasks[0]), slug: VAULT_NAME }, { ...structuredClone(rk.tasks[0]), slug: DASHED })
+  rk3.tasks.splice(1, 0, ...[VAULT_NAME, DASHED, SLASHED].map((slug) => ({ ...structuredClone(rk.tasks[0]), slug })))
   const EV5 = evOf('vault-name')
   const rank3 = keep('rank-vault-name.json', JSON.stringify(rk3))
   const named = log(rank3, SCAN_FILE, EV5)
@@ -1101,25 +1103,38 @@ test('D16. log: one grade line per graded task, Orient included, under one pass;
   assert.equal(named.stderr, '')
   const kept5 = linesOf(EV5)
   assert.match(named.stdout, new RegExp(`^logged ${rk3.tasks.length} grade\\(s\\), pass ${PASS.source}\\n$`))
-  const keyOf = { [VAULT_NAME]: 'autorun-next-command-after-handoff', [DASHED]: 'layout-broken-library-panel-stays-open' }
+  const keyOf = { [VAULT_NAME]: 'autorun-next-command-after-handoff', [DASHED]: 'layout-broken-library-panel-stays-open',
+    [SLASHED]: 'fix-c-users-path' }
   assert.deepEqual(kept5.map((l) => l.task), rk3.tasks.map((t) => keyOf[t.slug] ?? t.slug.toLowerCase()), 'every task logged, in rank order')
   assert.deepEqual(kept5.map((l) => l.note), rk3.tasks.map((t) => (keyOf[t.slug] ? t.slug : undefined)), 'a note only for a titled name')
   const named2 = log(rank3, SCAN_FILE, EV5)
   assert.equal(named2.status, 0, named2.stderr)
   assert.equal(named2.stdout, `exists ${kept5[0].pass} (${rk3.tasks.length} grade(s))\n`)
   assert.equal(linesOf(EV5).length, rk3.tasks.length, 'the rerun writes nothing')
-  // A name with no letter or digit, and a titled name whose key a slug-named task of the pass holds: skipped and named.
+  // Skipped and named: a name with no ASCII letter or digit; a titled name whose key a slug-named task of the pass holds,
+  // even ranked before that task (a slug-named task holds its key first, whatever the rank order); and of two titled
+  // names with one key, the later in rank order.
   const NOKEY = '!!!'
-  const CLASH = rk.tasks[2].slug.replace(/-/g, ' ').toUpperCase()
+  const TWIN = rk.tasks[2].slug
+  const CLASH = TWIN.replace(/-/g, ' ').toUpperCase()
+  const [TITLED, TITLED_TWIN] = ['Fix I rig stream', 'Fix I-rig stream']
   const rk7 = structuredClone(rk3)
-  rk7.tasks.push({ ...structuredClone(rk.tasks[0]), slug: NOKEY }, { ...structuredClone(rk.tasks[0]), slug: CLASH })
+  const as = (slug) => ({ ...structuredClone(rk.tasks[0]), slug })
+  rk7.tasks.unshift(as(CLASH))
+  rk7.tasks.push(as(TITLED), as(NOKEY), as(TITLED_TWIN))
+  assert.ok(rk7.tasks.findIndex((x) => x.slug === CLASH) < rk7.tasks.findIndex((x) => x.slug === TWIN), 'the clash ranks first')
   const EV7 = evOf('vault-name-skips')
   const skips = log(keep('rank-vault-name-skips.json', JSON.stringify(rk7)), SCAN_FILE, EV7)
   assert.equal(skips.status, 0, skips.stderr)
-  assert.equal(skips.stderr, `estate-dispatch: skipped ${NOKEY}: note '${NOKEY}' has no letter or digit to key it by\n`
-    + `estate-dispatch: skipped ${CLASH}: its key '${rk.tasks[2].slug.toLowerCase()}' is another graded task's\n`)
-  assert.match(skips.stdout, new RegExp(`^logged ${rk3.tasks.length} grade\\(s\\), pass ${PASS.source}; 2 skipped \\(no key\\): ${NOKEY}, ${CLASH}\\n$`))
-  assert.deepEqual(linesOf(EV7).map((l) => l.task), kept5.map((l) => l.task), 'the rest are logged')
+  assert.equal(skips.stderr, `estate-dispatch: skipped ${CLASH}: its key '${TWIN.toLowerCase()}' is another graded task's\n`
+    + `estate-dispatch: skipped ${NOKEY}: note '${NOKEY}' has no ASCII letter or digit to key it by\n`
+    + `estate-dispatch: skipped ${TITLED_TWIN}: its key 'fix-i-rig-stream' is another graded task's\n`)
+  assert.equal(skips.stdout.replace(PASS, '<pass>'),
+    `logged ${rk3.tasks.length + 1} grade(s), pass <pass>; 3 skipped (no key): ${CLASH}, ${NOKEY}, ${TITLED_TWIN}\n`)
+  const kept7 = linesOf(EV7)
+  assert.deepEqual(kept7.map((l) => l.task), [...kept5.map((l) => l.task), 'fix-i-rig-stream'], 'the rest are logged')
+  assert.deepEqual([kept7.find((l) => l.task === TWIN.toLowerCase()).note, kept7.at(-1).note], [undefined, TITLED],
+    'the slug-named task keeps its key, the first titled name its own')
   // A refused field still refuses the whole pass, a skipped name beside it or not.
   const rk4 = structuredClone(rk3)
   rk4.tasks[0].grade = 'Maybe'

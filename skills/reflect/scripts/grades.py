@@ -18,7 +18,8 @@ schedule Pre-flight grades, written only by skills/_shared/scripts/estate-dispat
 each <slug>.jsonl but run_record's RESERVED files, with the time-lost ledger's lines dropped: p29-10, score.py's
 LEDGER_KINDS), and each graded task's note through reflect.py's Vault.find
 (Work/Tasks, then anywhere under it, Archive included), by its latest grade line's `note` when it has one (a titled
-note's exact name, keyed by run_record's title_key, p34-6), else by its task.
+note's exact name, keyed by run_record's title_key, p34-6), else by its task; a titled name that is gone is tried as
+its task too (the note renamed to its key since).
 
 What it reuses, loaded by path and never copied: run_record.py (RR: GRADE_LOG, LINK_RE, normalise_slug, Refused);
 score.py (SCORE: read_lines, human_act, ACT_KINDS, ACT_NAMES, MERGE_HOLD_DETAIL, to_ms, fmt, HOUR, intersect, total and
@@ -253,11 +254,18 @@ def link_of(value):
 
 def note_name(task, gl):
     """The note a task's grade lines name: the latest line's `note` (a titled note's exact name, p34-6), else the task
-    itself, its slug."""
-    for _t, _n, d in reversed(gl):
-        if isinstance(d.get("note"), str) and d["note"]:
-            return d["note"]
-    return task
+    itself, its slug. An older line's note is never used: a titled note since renamed to its key is graded with none."""
+    n = gl[-1][2].get("note") if gl else None
+    return n if isinstance(n, str) and n else task
+
+
+def find_note(find, task, gl):
+    """(name, Rec, why): the task's note read, and the name it was looked up by: note_name's, else the task itself when
+    that titled name is gone and the task is there (the note renamed to its key since its latest grade)."""
+    name = note_name(task, gl)
+    if name != task and find(name) is None and find(task) is not None:
+        name = task
+    return (name,) + read_note(find, name)
 
 
 def read_note(find, task):
@@ -449,8 +457,7 @@ def accuracy(log, records, find, date_in, day_of, since, until):
     eps = []
     for task in sorted(wanted):
         gl = [x for x in log.by_task[task] if x[0] <= until]
-        name = note_name(task, gl)
-        note, why = read_note(find, name)
+        name, note, why = find_note(find, task, gl)
         for i, (t, _n, g) in enumerate(gl):
             nxt = gl[i + 1] if i + 1 < len(gl) else None
             e = episode(task, t, g, nxt, note, idx, since, until, date_in, until_day)
