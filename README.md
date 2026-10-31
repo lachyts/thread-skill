@@ -194,10 +194,12 @@ daily sweep as its fallback, when the weekly reading is due: the Thursday after
 the last one, or the Thursday after that once three Reflections in a row were
 quiet (ADR 0037 d4, d6; ADR 0051). The Grade log (`grades.jsonl` beside the
 Run record, ADR 0041) has one writer, `estate-dispatch.py log`, which keeps each
-estate pass's grades (a task whose note name is no slug, with spaces or
-capitals, is skipped and reported in its outcome line, and the rest are still
-logged), and one reader, `skills/reflect/scripts/grades.py`, which the weekly
-reading loads to join each grade to what followed it.
+estate pass's grades (a titled note, with spaces or capitals, is keyed by its
+name made a slug and keeps its exact name beside it; only a name with no key,
+with no ASCII letter or digit or with a key another graded task holds, is
+skipped and reported in its outcome line), and one reader,
+`skills/reflect/scripts/grades.py`, which the weekly reading loads to join each
+grade to what followed it.
 
 ## Design
 
