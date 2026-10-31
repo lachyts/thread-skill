@@ -475,7 +475,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   or external system it writes but names nowhere: declare `surfaces:` for
   those. A `## Launch` path that is `/` or the home directory is never
   claimed (it would contain every repo; a WARN names it). Two checkouts of one
-  origin are two surfaces. _Avoid_: footprint, file-set.
+  origin are two surfaces, and containment parts across a checkout nested
+  inside another by path (a separate repo with its own index), unless the outer
+  path is in no checkout. _Avoid_: footprint, file-set.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
