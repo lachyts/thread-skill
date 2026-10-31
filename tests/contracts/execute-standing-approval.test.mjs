@@ -19,8 +19,9 @@
 // checks in order, the class its own switch, the refresh on a reused tree, the missing-key ASK, a Leg never signing one);
 // schedule § 3.6's recorded-never-asked paragraph with its two re-sweep sentences (a hit inside the recorded Planner line
 // is dismissed and listed; a task holding the line is recorded, never asked) and the serial-path sentence, and § 7's
-// test-credential Planner line; reshuffle R3's recorded clause with the same two sentences and R5.2's record;
-// asking.md's bullet, execution-fit's ruling (a) qualifier, CONTEXT.md's entry, ADR 0008's amendment and the README.
+// test-credential Planner line, and its Under the chain item 7 with orient-all's item 9 (the twin lists that give a
+// credential hit § 3.6 records its Planner line with no ask-ahead); reshuffle R3's recorded clause with the same two
+// sentences and R5.2's record; asking.md's bullet, execution-fit's ruling (a) qualifier, CONTEXT.md's entry, ADR 0008's amendment and the README.
 //
 // Same shape as execute-signed-gate.test.mjs: every rule lives in one function, checkStanding(files), returning named
 // failures, so the real text and the controls run through identical logic; each control mutates the real text in one
@@ -40,6 +41,7 @@ const real = {
   context: read('CONTEXT.md'),
   execfit: read('skills/_shared/execution-fit.md'),
   asking: read('skills/_shared/asking.md'),
+  orientAll: read('skills/orient-all/SKILL.md'),
   adr0008: read('docs/adr/0008-a-declared-gate-always-pauses-for-a-human.md'),
 }
 
@@ -239,6 +241,8 @@ function checkStanding(f) {
     !s36.includes('**A declared test credential is recorded, never asked** (ADR 0062).') || !s36.includes(SENT_A) || !s36.includes(SENT_B) ||
     !s36.includes('On § Serial path every credential keeps the ask-ahead: a Leg resolves no class.') ||
     !sch7raw.split('\n').some((l) => l.startsWith('- Planner: word each test-credential gate')) ||
+    !collapse(f.schedule).includes("a spend hit, or a credential hit § 3.6 records in the repo's test-credential class, gets its Planner line as on every run") ||
+    !collapse(f.orientAll).includes("and a spend hit, or a credential hit § 3.6 records in the repo's test-credential class (ADR 0062), also gets its step 7 `## Decisions (recorded <date>)` Planner line") ||
     !r3.includes("A credential hit whose context names only test-mode or staging use of keys the repo's declared class holds is recorded, never grilled (ADR 0062)") ||
     !r3.includes(SENT_A) || !r3.includes(SENT_B) ||
     !r5.includes("the test-credential Planner line (schedule step 7's, ADR 0062)") ||
@@ -372,6 +376,8 @@ test('control: each test-credential pin, removed in one place, fails test-creden
   only('schedule', ' On § Serial path every credential keeps the ask-ahead: a Leg resolves no class.', '', TC, '§ 3.6: no serial sentence')
   const l = real.schedule.split('\n').find((x) => x.startsWith('- Planner: word each test-credential gate'))
   only('schedule', l + '\n', '', TC, '§ 7: no test-credential Planner line')
+  only('schedule', ", or a credential hit § 3.6 records in the repo's test-credential\n   class, gets its Planner line", ' gets its Planner line', TC, 'Under the chain 7: spend alone')
+  only('orientAll', "a spend hit, or a credential hit § 3.6 records in the repo's test-credential class (ADR 0062), also gets", 'a spend hit also gets', TC, 'orient-all 9: spend alone')
   only('reshuffle', 'is recorded, never grilled (ADR 0062)', 'is grilled ahead (ADR 0062)', TC, 'R3: grilled')
   only('reshuffle', 'A hit inside the recorded\n  test-credential Planner line is dismissed', 'A hit inside the recorded\n  test-credential Planner line is asked', TC, 'R3: no sentence (a)')
   only('reshuffle', 'A task that already holds that line is recorded, never\n  asked.', 'A task that already holds that line is asked again.', TC, 'R3: no sentence (b)')
