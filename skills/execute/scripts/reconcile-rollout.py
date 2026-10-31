@@ -672,7 +672,8 @@ Subcommands:
               `paused_for: sign-off` prints `[no-change]`; another standing pause (a hard pause's `paused:`) is
               exit 1. A sign-off pause is a `paused:` like any other: never-started reads it as started, the
               primary hold releases (unfinished-rollout.py running), and the repo keeps it as its one unfinished
-              rollout until signed or deferred.
+              parallel rollout until signed or deferred; it no longer holds its Project root against serial chains
+              while it waits (ADR 0060: unfinished-rollout.py's parallel_hold).
 
   approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0008): move the bullets
               under "## Gated inputs (awaiting sign-off)" into "## Approved gates" with a sign-off
@@ -6255,7 +6256,8 @@ def cmd_status(args) -> int:
         "paused": _scalar(paused) or None,
         "pause_requested": _truthy_flag(rollout_note.get("pause_requested")),
         # What the pause waits for: "sign-off" under await-sign-off's pause (ADR 0034: only gates wait on Lachy, and the
-        # repo keeps this as its one unfinished rollout until they are signed or deferred), else null.
+        # repo keeps this as its one unfinished parallel rollout until they are signed or deferred, though it holds no
+        # Project root against serial chains meanwhile, ADR 0060), else null.
         "pausedFor": _scalar(rollout_note.get(PAUSED_FOR_KEY)) or None,
         # Why the rollout must not run as written (`next` refuses it), or null: see "Incomplete".
         "incomplete": incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index) or None,
@@ -11786,6 +11788,8 @@ WHOLE_HALT_PATTERNS = (
     r"hold_until needs you on \[\[{rollout}\]\]",
     r"approved queue: regenerate stopped:",
     r"approved queue: \[\[[^\]]+\]\] written unstamped:",
+    r"surface held: \[\[[^\]]+\]\] writes \S+",
+    r"surface re-check failed",
 )
 # The two kept halts `moving` reads live from `next` (step 7), never from H: a bare checkout's git-env trip and a RACE
 # revert that did not land. Step 7 builds its two reasons from these prefixes (a contract test binds them to § 7's).

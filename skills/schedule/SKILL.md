@@ -151,9 +151,13 @@ Pushed-base and unfinished-rollout run after `--ensure` because both need the re
 unfinished-rollout check compares `repo:<realpath>` literally (and exits 2 on a missing path), and a
 toplevel standing in for it would hold the rollout to the in-place checkout's own commits. A repo holds
 at most one unfinished parallel rollout (one directly in `Work/Tasks/`, neither `done` nor `dropped`,
-with a task not yet merged), and none on a place a live serial chain writes: the check refuses a
-parallel run whose root overlaps a surface of an unfinished serial chain, since that chain owns it,
-and a supersede never crosses shapes. A clone root never overlaps a chain on the in-place checkout, so the
+with a task not yet merged), and none on a place a live serial chain holds: the check refuses a
+parallel run whose root overlaps what an unfinished serial chain holds, since that chain owns it,
+and a supersede never crosses shapes. A chain holds its whole `surfaces:`, but a stuck one (every
+unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces (ADR 0060): a root
+that overlaps only a place a stuck chain released gives a `WARN: … released …` line instead of a
+refusal, and that chain reclaims the place on resume and then waits its turn while this rollout holds it.
+A clone root never overlaps a chain on the in-place checkout, so the
 two coexist as peers (ADR 0042, intended); the refusal still fires for a chain that claims
 `repo:<clone>`, and for a rollout rooted in place before ADR 0042. Nor does a checkout nested inside
 another by path (a separate repo with its own index) overlap a chain on the outer one (p33-3).
@@ -947,7 +951,10 @@ peers (ADR 0042, intended), while a chain that claims `repo:<clone>`, or a paral
 ADR 0042, still refuses. Nor does a chain on an outer checkout overlap a parallel root, or a chain, in a separate
 checkout nested inside it by path, a separate repo with its own index (p33-3); but a path-only claim on a directory
 in no checkout still covers every checkout beneath it. Quote each `--surface` token as one shell word, since a vault
-path holds spaces: `--surface "vault:Work/Projects/Life (area)/Contacts admin.md"`. Carry `WARN:` lines to S7.
+path holds spaces: `--surface "vault:Work/Projects/Life (area)/Contacts admin.md"`. Carry `WARN:` lines to S7. A stuck
+chain (every unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces, and a parallel rollout
+awaiting sign-off or halted on its set-asides holds no Project root against a chain (ADR 0060): a `WARN: … released …`
+line names what this chain may now use beside it. That rollout reclaims the place on resume and then waits its turn.
 
 **S3.5. Pre-flight.** It runs step 1.5 over S2's chain members, the session-lane ones left out; nothing is kept and
 nothing is superseded on this path, so there is no `--kept` and no `--superseding`. Under orient's § 7 too it asks its
@@ -1004,8 +1011,8 @@ the Pre-flight line and its left-out tasks, as step 8 lists them (Orient → `/t
 → waiting on your answer, ungraded, `depends on [[x]]`), its Decided for you block, the session-lane members, the WARNs and the gated checklist (§ 3.5's kept gates, § 3.6's expected-to-gate lines,
 credential or irreversible ask-ahead and dismissals, as step 8 lists them). Then one line: "Leg 1 opens in row 1's launch and runs `/thread:execute [[<note>]]`;
 no execute handoff, no `start: unattended` (the Stage's unattended start needs a Project root); until it finishes or
-is dropped (`status: dropped`) it holds its surfaces, so a parallel run on a checkout it claims, or another chain
-over them, is refused".
+is dropped (`status: dropped`) it holds its surfaces (while it is stuck, only its unlanded rows', ADR 0060), so a
+parallel run on a checkout it claims, or another chain over them, is refused".
 
 ## Execution lives in `/thread:execute`
 
