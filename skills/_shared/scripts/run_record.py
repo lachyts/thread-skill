@@ -213,7 +213,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      they were dispositioned); branch?; lines?, files? (ints >= 0: the reviewed diff's size); reviewedAt? (UTC ms Z:
                      when the round was reviewed, its doc's first commit; readers order rounds by it, never by ts);
                      blocking?, open?, filed?, recurring?, reversal?, rejected? (ints >= 0, ADR 0058's disposition
-                     counts from the doc's `## Disposition`; blocking includes open); unconfirmed? (int >= 0,
+                     counts from the doc's `## Disposition`; blocking includes open, so open <= blocking when both are
+                     given); unconfirmed? (int >= 0,
                      fresh-review ADR 0001: candidates its checker could not reproduce, never blocking; counted
                      apart from filed, which excludes them, so each finding sits in one count; with the ledger's
                      STOP rule retired, new lines carry no verdict). No rollout, no task; lands in
@@ -440,7 +441,9 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   its `globs`; a line with an `error` is neither. score.py and reflect.py match kinds explicitly and read neither.
 - review-round: dedupe on (repo, doc) when doc is present, else on (repo, head, digest), keeping the latest line
   (p15-7's emitter is idempotent per (repo, doc, status) since ADR 0058, so a doc can carry a pending line and
-  then a consumed one, and the latest wins).
+  then a consumed one, and the latest wins). Readers take a key's branch and reviewedAt from its newest line that
+  carries each when the latest lacks it, and time a round by its reviewedAt (a UTC Z stamp), else its first line's
+  ts; score.py's read_review_rounds is the one reader.
 - review-verdict: one line per verdict_key, (task, round, head) when the line carries a head, else (task, round,
   digest). Keep the first line per key. The writer (reconcile) skips an entry whose key the record already holds,
   so a signed-gate or Lost-call resume's replayed rounds are written once; readers apply the same key, so a
@@ -531,9 +534,9 @@ It must keep to: the directory chain above (the override, then XDG_STATE_HOME, t
 the line format and common keys above, with rollout and task null; one O_APPEND write of the whole line,
 at most 16 KiB, no lock. Idempotency is the emitter's job: one event per review doc and status written
 (pending as its findings arrive, consumed once they are dispositioned; ADR 0058), checked by its own `doc`
-and `status` keys. land.sh's own-branch --queue and --hold re-run the emitter over every doc on the branch,
-so a landing never ends unrecorded. This writer never dedupes or locks review-round; readers dedupe as above,
-keeping the latest line per (repo, doc).
+and `status` keys. land.sh's own-branch mode re-runs the emitter over every doc on the branch at the end of
+every --queue and --hold, whatever its result (a plain call never does, nor a session ended mid-loop). This
+writer never dedupes or locks review-round; readers dedupe as above, keeping the latest line per (repo, doc).
 
 Writing: os.makedirs, then os.open(O_WRONLY | O_APPEND | O_CREAT, 0o644) and ONE os.write of the whole
 line, so concurrent emitters on a local filesystem never interleave a line (not promised on network or
@@ -1375,7 +1378,7 @@ KINDS = {
     "review-round": (False, {"repo": _str, "head": _str, "digest": _str},
                      {"doc": _str, "mode": _str, "effort": _str, "findings": _int(0), "original": _int(0),
                       "regression": _int(0), "verdict": _str, "status": _enum("pending", "consumed"),
-                      "branch": _str, "lines": _int(0), "files": _int(0), "reviewedAt": _str, "blocking": _int(0), "open": _int(0),
+                      "branch": _str, "lines": _int(0), "files": _int(0), "reviewedAt": _stampz, "blocking": _int(0), "open": _int(0),
                       "filed": _int(0), "recurring": _int(0), "reversal": _int(0), "rejected": _int(0),
                       "unconfirmed": _int(0)}),
     "review-verdict": (True, {"round": _int(1), "verdict": _enum("approve", "changes"), "findings": _int(0),
@@ -1547,6 +1550,8 @@ def _check_fields(kind, fields):
     if kind == "review-verdict" and fields["original"] + fields["regression"] > fields["findings"]:
         raise Refused("review-verdict: original + regression (%d + %d) exceed findings (%d)"
                       % (fields["original"], fields["regression"], fields["findings"]))
+    if kind == "review-round" and "open" in fields and "blocking" in fields and fields["open"] > fields["blocking"]:
+        raise Refused("review-round: open (%d) exceeds blocking (%d)" % (fields["open"], fields["blocking"]))
     if kind == "tuning":
         _check_tuning(fields)
     elif kind == "watch":
