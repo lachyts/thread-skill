@@ -151,10 +151,14 @@ Pushed-base and unfinished-rollout run after `--ensure` because both need the re
 unfinished-rollout check compares `repo:<realpath>` literally (and exits 2 on a missing path), and a
 toplevel standing in for it would hold the rollout to the in-place checkout's own commits. A repo holds
 at most one unfinished parallel rollout (one directly in `Work/Tasks/`, neither `done` nor `dropped`,
-with a task not yet merged), and none on a place a live serial chain writes: the check refuses a
-parallel run whose root overlaps a surface of an unfinished serial chain, since that chain owns it,
-and a supersede never crosses shapes. A clone root never overlaps a chain on the in-place checkout, so the
-two coexist as peers (ADR 0042, intended); the refusal still fires for a chain that claims
+with a task not yet merged), and none on a place a live serial chain holds: the check refuses a
+parallel run whose root overlaps what an unfinished serial chain holds, since that chain owns it,
+and a supersede never crosses shapes. A chain holds its whole `surfaces:`, but a stuck one (every
+unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces (ADR 0060): a root
+that overlaps only a place a stuck chain released gives a `WARN: … released …` line instead of a
+refusal, and that chain reclaims the place on resume and then waits its turn while this rollout holds it.
+A clone root never overlaps a chain on the in-place checkout, so the two coexist as peers (ADR 0042,
+intended); the refusal still fires for a chain that claims
 `repo:<clone>`, and for a rollout rooted in place before ADR 0042.
 A rollout awaiting sign-off (`paused_for: sign-off`, execute § 4.5 step 5's form: only gates wait on Lachy) is unfinished too: the refusal names its waiting tasks and the
 sign-off path (sign off, then `/thread:execute`, or `/thread:repair` to defer them), and `--regenerate` on

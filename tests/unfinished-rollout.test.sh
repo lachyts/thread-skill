@@ -30,12 +30,15 @@
 #           chain writes, before any supersede (S2c), never a clone root beside an in-place chain (S13, ADR 0042); the serial check (`--shape serial --surface <token>...`) refuses a
 #           chain over a live chain's surface or an unfinished parallel rollout's Project root, supersedes nothing,
 #           and names whose note it is in each remedy; tokens compare literally (realpath and the vault mapping only)
-#   X1-X12  a stuck rollout holds only what it waits on (ADR 0060, p33-2): a stuck chain's done rows' surfaces are
+#   X1-X14  a stuck rollout holds only what it waits on (ADR 0060, p33-2): a stuck chain's done rows' surfaces are
 #           released (X1) while its set-aside and held rows' stay held (X2, X6, X7), and every other chain state, an
 #           empty or malformed unlanded cell, holds the whole claim (X3-X5); the parallel check's 2b reads the same
 #           hold (X8); a resuming chain waits its turn on the chain scheduled on its released place, never the
 #           reverse (X9); a parallel rollout awaiting sign-off or halted on its set-asides releases its root to serial
-#           chains only (X10, D5); the `hold` verb (X11); a resuming parallel rollout (X12)
+#           chains only (X10, D5); the `hold` verb (X11); a resuming parallel rollout (X12); a chain whose
+#           `surfaces:` reads as any holds only its unlanded rows' cells against a resume (X13); a resuming chain against a
+#           parallel rollout's root: held while a call is in flight, paused or halted included, never by one idle and
+#           paused or halted (X14)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them) and a stub gh.
@@ -697,7 +700,7 @@ mkser ser.md "$DEMO" "surfaces: [\"repo:$S/repo-rollout\"]"
 chk --repo "$S/repo-rollout" --project Demo
 ok "$out|$rc" "refuse ser|3" "S13: --repo <clone> against a chain that claims repo:<clone> → refuse"
 
-# ── X1-X12: a stuck rollout holds only what it waits on (ADR 0060, p33-2) ─────────────────────────────
+# ── X1-X14: a stuck rollout holds only what it waits on (ADR 0060, p33-2) ─────────────────────────────
 # mkchain <slug> <projects line> <row>... — a serial note with a `## Queue` table (a row is
 # `<task>~<status>~<Surfaces cell>[~<frontmatter line, \n for a newline>]`), its surfaces: the union of the cells' tokens
 # (or $SURF's list lines), a `## Leg log` ($LOG; default Leg 1 began, then closed `chain stuck: 1 set aside`; `-`: no
@@ -766,6 +769,14 @@ SURF=$'  - "vault:Work/Projects/A"\n  - "vault:Work/Projects/B"' \
 chs --surface vault:Work/Projects/A --project Other
 ok "$out|$rc" "refuse ca|3" "X5: … and so does a malformed one"
 has "$err" "WARN: ca: chain stuck, but row [[t5]]'s Surfaces cell" "X5: … with the WARN"
+stuck5 ca blocked t6~in_progress~"$VC"~'owner: lachy'
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "refuse ca|3" "X5: a stuck chain with a row in progress (owned by hand, never claimable) holds its whole claim"
+has "$err" "WARN: ca: chain stuck, but [[t6]] reads in progress: it holds its whole claim" "X5: … with the WARN"
+SURF=$'  - "vault:Work/Projects/A"' mkchain ca "$DEMO"
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "refuse ca|3" "X5: a stuck chain whose ## Queue has no rows holds its whole claim"
+has "$err" "WARN: ca: chain stuck, but its ## Queue has no rows: it holds its whole claim" "X5: … with the WARN"
 scen x6
 stuck5 ca blocked t6~open~"$VC"~'depends-on:\n  - "[[t5]]"'
 chs --surface vault:Work/Projects/C --project Other
@@ -868,6 +879,51 @@ has "$err" "holds \`repo:$R\` for an unlanded row, which this rollout writes as 
 mkchain cq "$DEMO" q1~done~"\`repo:$R\`" q2~blocked~'`ext:cms`'
 chk --resume p --repo "$R"
 ok "$out|$rc" "none|0" "X12: … and passes when only the chain's done rows cover it"
+scen x13
+mkro p.md "$R" "$OTHER"; mkt pt1.md p open 'owner: lead'
+mkrepo "$S/other" https://github.com/demo/other.git
+SURF='  - "rep:/x/other"' LOG=- mkchain cz "$DEMO" z1~open~"\`repo:$S/other\`"
+chk --resume p --repo "$R"
+ok "$out|$rc" "none|0" "X13: a chain whose surfaces: reads as any (a typo) holds only its unlanded rows' cells against a resume"
+has "$err" "WARN: cz: surfaces: rep:/x/other is not a surface token" "X13: … with its read-as-any WARN"
+hasnt "$err" "holds \`any\`" "X13: … and never says it holds any for an unlanded row"
+LOG=- mkchain cb "$OTHER" u1~open~'`ext:cms`'
+chs --resume cb --surface ext:cms
+ok "$out|$rc" "none|0" "X13: … nor against a resuming chain on another place"
+chk --repo "$R" --project Other
+ok "$out|$rc" "refuse cz|3" "X13: a new schedule still meets it as any"
+SURF='  - "rep:/x/other"' LOG=- mkchain cz "$DEMO" z1~open~'`bogus:x`'
+chk --resume p --repo "$R"
+ok "$out|$rc" "refuse cz|3" "X13: … and so does a resume once its unlanded row's cell is malformed too (fail closed)"
+has "$err" "[[cz]] (Demo; never started) holds \`any\` for an unlanded row" "X13: … naming any"
+scen x14
+EV0=$THREAD_EVENTS_DIR; export THREAD_EVENTS_DIR="$S/events"
+LOG=- mkchain ca "$DEMO" a1~open~"\`repo:$R\`"
+mkro p.md "$R" "$OTHER"; mkt pt1.md p in_progress 'owner: lead'; mkt pt2.md p open
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14: a resuming chain refuses while a running parallel rollout holds its root"
+has "$err" "[[p]] (Other; " "X14: … naming it"
+has "$err" "holds \`repo:$R\`, its Project root, which this chain writes as \`repo:$R\` (ADR 0060): [[ca]] waits its turn" "X14: … and the waits-its-turn line"
+mkt pt1.md p open
+halt_rec "surface held: [[ca]] writes repo:$R"
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "none|0" "X14: halted by its own surface re-check with nothing in flight, it is no holder (no deadlock, ADR 0060 d5)"
+mkro p.md "$R" "$OTHER" "$PAUSED"
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "none|0" "X14: paused with nothing in flight, it is no holder"
+mkt pt1.md p in_progress 'owner: lead'
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14: paused with a task still in progress (the pause's drain), it holds its root"
+mkro p.md "$R" "$OTHER" 'pause_requested: true'
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14: … and so does a pending pause"
+mkro p.md "$R" "$OTHER"
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14: halted with a call still in flight (execute § 7), it holds its root"
+mkt pt1.md p review 'owner: lead' 'pr: https://github.com/demo/repo/pull/1' 'integrating: 2026-10-30T10:10+00:00'
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14: … and in Integration too"
+export THREAD_EVENTS_DIR="$EV0"
 
 # ── K1-K4: carry ──────────────────────────────────────────────────────────────────────────────────────
 scen k

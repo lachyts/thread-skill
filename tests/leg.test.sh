@@ -26,7 +26,8 @@
 #        smoke list (L13g, L13o); restarted: its checks, in order
 #   L14  the hold (ADR 0060): live and ready hold the whole claim, stuck only its set-aside row's surface; begin's
 #        surface re-check is exit 3 (nothing written, --dry-run too) while another chain's unlanded row holds a smoke
-#        row's surface, and status's restart names it as its blocker
+#        row's surface, and status's restart names it as its blocker; a re-check that fails is exit 3 too and status's
+#        blocker (L14f); a stuck chain with a row in progress, or no Queue rows, holds its whole claim with a warn (L14h)
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -1065,6 +1066,45 @@ same "L14: a held begin writes nothing"
 subst "$T/$B.md" 'status: open' 'status: dropped'
 SESS=s2 leg begin --cwd "$F"
 ok "$rc|$(q 'd["leg"]')|$(q '[x["task"] for x in d["smoke"]]')" "0|2|['t1']" "L14: once that chain is dropped, Leg 2 begins"
+# The re-check fails closed: a --rollout outside --tasks-dir gives a --resume naming no note there, so the check exits 2
+scen l14f
+mkro '' "t1~cc-demo~$F~$VA" "t2~cc-demo~$F~$VB"; mkt t1; mkt t2
+AWAY="$S/away"; mkdir -p "$AWAY"; mv "$T/$RO.md" "$AWAY/$RO.md"
+legaway() { out=$(cd "$F" && python3 "$LEG" "$@" --rollout "$AWAY/$RO.md" --tasks-dir "$T" --vault "$V" --now "$NOW" \
+                  --session s1 2>"$TMP/err"); rc=$?; err=$(cat "$TMP/err"); }
+cp "$AWAY/$RO.md" "$TMP/snap"; cp "$T/t1.md" "$TMP/snap-t1"
+legaway begin --cwd "$F"
+ok "$rc|$(q 'd["exit"]')" "3|3" "L14f: a surface re-check that fails is exit 3 (fail closed)"
+has "$(q 'd["error"]')" "surface re-check failed: unfinished-rollout: --resume $RO: no rollout note at " \
+   "L14f: … its error names the check's own line (capped at 160 characters)"
+ok "$(q 'd["error"].startswith("surface re-check failed: ")')" True "L14f: … and starts with surface re-check failed:"
+has "$(q 'd["status_line"]')" "state=halted reason=\"surface re-check failed: unfinished-rollout: --resume $RO" "L14f: … its status line"
+cmp -s "$AWAY/$RO.md" "$TMP/snap"; ok "$?" 0 "L14f: the rollout note is byte-identical"
+cmp -s "$T/t1.md" "$TMP/snap-t1"; ok "$?" 0 "L14f: … and so is the first row's task: nothing written"
+legaway status
+ok "$rc|$(q 'd["chain"]')" "0|not-started" "L14f: status reads the chain"
+ok "$(q 'd["restart"]["blockedBy"].startswith("surface re-check failed: unfinished-rollout: --resume ")')" True \
+   "L14f: … and its restart's blocker is the failed re-check"
+# hold_of fails closed to the whole claim, with its warn, on a stuck chain it cannot narrow safely
+scen l14h
+VC='`vault:Work/Projects/C`'
+mkro '' "t1~cc-demo~$F~$VA" "t2~cc-demo~$F~$VB" "t3~cc-demo~$F~$VC"; mkt t1; mkt t2; mkt t3
+subst "$T/$RO.md" '  - "ext:x"' $'  - "vault:Work/Projects/A"\n  - "vault:Work/Projects/B"\n  - "vault:Work/Projects/C"'
+leg begin --cwd "$F"; finish t1; leg claim --task t2; leg set-aside --task t2 --reason "blocked on a missing key"
+subst "$T/t3.md" 'status: open' $'status: in_progress\nowner: lachy'
+leg close --outcome stuck
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["hold"]["held"]')|$(q 'd["hold"]["released"]')" \
+   "stuck|whole|['vault:Work/Projects/A', 'vault:Work/Projects/B', 'vault:Work/Projects/C']|[]" \
+   "L14h: a stuck chain with a row in progress (owned by hand) holds its whole claim"
+ok "$(q 'd["hold"]["warn"]')" "chain stuck, but [[t3]] reads in progress: it holds its whole claim" "L14h: … with its warn"
+mkro ''
+subst "$T/$RO.md" '  - "ext:x"' '  - "vault:Work/Projects/A"'
+printf -- '\n## Leg log\n\n- 2026-10-20T09:00+00:00 Leg 1 began: leg-1 session s1 in cc-demo from %s\n- 2026-10-20T09:30+00:00 Leg 1 closed: chain stuck: 0 set aside\n' "$F" >> "$T/$RO.md"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["hold"]["held"]')|$(q 'd["hold"]["unlanded"]')" \
+   "stuck|whole|['vault:Work/Projects/A']|['vault:Work/Projects/A']" "L14h: a stuck chain whose ## Queue has no rows holds its whole claim"
+ok "$(q 'd["hold"]["warn"]')" "chain stuck, but its ## Queue has no rows: it holds its whole claim" "L14h: … with its warn"
 echo
 if [ "$fail" -eq 0 ]; then echo "leg.test.sh: ALL PASS"; else echo "leg.test.sh: FAILED"; fi
 exit "$fail"

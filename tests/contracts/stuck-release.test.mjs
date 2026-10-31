@@ -1,18 +1,21 @@
 // A stuck rollout holds only what it waits on (ADR 0060, p33-2). The behaviour is pinned by tests/unfinished-rollout.test.sh
-// X1-X12 and tests/leg.test.sh L14; this pins the prose each reader follows, one rule per piece:
+// X1-X14 and tests/leg.test.sh L14; this pins the prose each reader follows, one rule per piece:
 //   context   CONTEXT.md **Unfinished rollout** says a stuck chain holds only its unlanded rows' surfaces, a waiting
 //             parallel rollout holds no Project root against serial chains, and each reclaims on resume and waits its
 //             turn; **Surface** points at it
 //   adr       ADR 0060 exists, accepted, with its five decisions, the deadlock argument and its Limits; ADRs 0040, 0048
 //             and 0059 each carry an "Amended by ADR 0060" line
-//   execute   execute § 4.5's *Surface re-check (ADR 0060)* paragraph: every loop entry, after record-entry, the check's
-//             --resume form, exit 3 and exit 2 halting; § 7 lists the halt and *Whole-rollout halts kept* keeps it
+//   execute   execute § 4.5's *Surface re-check (ADR 0060)* paragraph: every loop entry, right after the canary's
+//             check-all and still before resume, clear-pause, next or any stamp (the *Landing-register re-check* names it
+//             next), the check's --resume form, exit 3 and exit 2 halting; § 7 lists the halt and *Whole-rollout halts
+//             kept* keeps it
 //   legs      legs.md § Begin's exit 3 names the surface stand: push it once, end on its status_line, no create_thread
 //   status    status § 5's **Hold** block, S12's "holds only", the restart's `surface held by` blocker and § 4's Hold
 //             line from `unfinished-rollout.py hold`
 //   repair    repair § 7 (e) step 1's `surface held by` branch (never restart), (b)'s reclaim note and the refusal
 //             section's released case
-//   schedule  schedule S3's stuck-chain note and S7's amended closing line, and the serial template's legend
+//   schedule  schedule § 0's parallel-path prose (a chain's hold, a stuck chain's released place a WARN, not a refusal),
+//             S3's stuck-chain note and S7's amended closing line, and the serial template's legend
 // check() returns named failures, so the real text and each control run through identical logic. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -65,9 +68,11 @@ function check(f) {
   // execute
   const ex = f.execute.split('\n')
   const recheck = collapse(ex.find((l) => l.startsWith('**Surface re-check (ADR 0060).**')) ?? '')
+  const landing = collapse(ex.find((l) => l.startsWith('**Landing-register re-check.**')) ?? '')
   const s7raw = section(f.execute, /^### 7\. /, /^### 8\. /)
   const kept = collapse(section(s7raw, /^\*\*Whole-rollout halts kept \(ADR 0048\)\.\*\*/, /^The end-of-run verdicts/))
-  fail('execute', !all(recheck, ['Every entry into this loop', 'right after `record-entry`',
+  fail('execute', !landing.includes("goes on. The *Surface re-check* below comes next.") ||
+    !all(recheck, ['Every entry into this loop', "right after the canary's `check-all`", 'still before `resume`, `clear-pause`, `next` or any stamp',
     'unfinished-rollout.py check --shape parallel --repo <repoPath> --resume <rollout-slug>', "unlanded rows' surfaces, never a chain's whole claim",
     'Exit 3 (`refuse <chains>`)', 'halt with `reason="surface held: [[<chain>]] writes <token>"` (§ 7)', 'Exit 2: print its line and halt with `reason="surface re-check failed"`']) ||
     !collapse(s7raw).includes('- the *Surface re-check* (§ 4.5) finds a serial chain') ||
@@ -95,7 +100,11 @@ function check(f) {
 
   // schedule
   const sched = collapse(f.schedule)
-  fail('schedule', !sched.includes("A stuck chain (every unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces") ||
+  const s0 = collapse(section(f.schedule, /^Pushed-base and unfinished-rollout run after/, /^- `none` → go on\./))
+  fail('schedule', !all(s0, ['the check refuses a parallel run whose root overlaps what an unfinished serial chain holds',
+    "a stuck one (every unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces (ADR 0060)",
+    'a root that overlaps only a place a stuck chain released gives a `WARN: … released …` line instead of a refusal']) ||
+    s0.includes('a surface of an unfinished serial chain') || !sched.includes("A stuck chain (every unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces") ||
     !sched.includes("it holds its surfaces (while it is stuck, only its unlanded rows', ADR 0060)") ||
     !f.template.includes("(while it is stuck, only its unlanded rows' surfaces: ADR 0060)"))
   return fails
@@ -122,7 +131,8 @@ test('control: ADR 0060 proposed, or an amended ADR without its line, fails adr'
 })
 
 test('control: execute without the re-check or its kept halt fails execute', () => {
-  only('execute', 'right after `record-entry` (*Run record*)', 'at the end of the entry', 'execute')
+  only('execute', "right after the canary's `check-all`", 'right after `record-entry`', 'execute')
+  only('execute', 'goes on. The *Surface re-check* below comes next.', 'goes on.', 'execute')
   only('execute', '; `reason="surface held: [[<chain>]] writes <token>"` and `reason="surface re-check failed"` (§ 4.5 *Surface re-check*', '; (§ 4.5 *Surface re-check*', 'execute')
 })
 
@@ -137,6 +147,11 @@ test('control: status without its Hold block or Hold line fails status', () => {
 
 test('control: repair restarting over a held surface fails repair', () => {
   only('repair', '→ never restart (ADR 0060): the chain waits its turn.', '→ restart it.', 'repair')
+})
+
+test('control: schedule § 0 refusing on a stuck chain\'s whole claim fails schedule', () => {
+  only('schedule', 'that overlaps only a place a stuck chain released gives', 'that overlaps a place a stuck chain claims gives', 'schedule')
+  only('schedule', 'whose root overlaps what an unfinished serial chain holds', 'whose root overlaps a surface of an unfinished serial chain', 'schedule')
 })
 
 test('control: schedule S7 claiming the whole surfaces fails schedule', () => {

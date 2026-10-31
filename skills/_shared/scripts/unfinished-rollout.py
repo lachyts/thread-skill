@@ -17,8 +17,8 @@ hook's GIT_DIR, landing-register.py's rule) and `git -C <path> remote get-url or
 surface grammar (parse_token, overlaps, read_surfaces) and norm_origin are serial-chains.py's, loaded by `check`
 and `pickups` (never by `running`, primary-hold.sh's verb, which loads only reconcile-rollout.py). What a serial chain
 holds is leg.py's hold_of (ADR 0060), loaded as a module (Chain, chain_read, hold_of, Refuse; its rr and sc set to this
-script's) once `check` or `hold` reads the first unfinished serial note with readable surfaces, so a parallel-only
-estate never loads it.
+script's) once `check` or `hold` reads the first unfinished serial note (one whose `surfaces:` reads as any included),
+so a parallel-only estate never loads it.
 
 Terms (CONTEXT.md). A LIVE rollout note sits directly in the tasks dir (location only, as
 reconcile-project.py and /thread:close read it). An UNFINISHED rollout is narrower: a live rollout that is
@@ -84,7 +84,9 @@ serial note's `surfaces:` (or a stuck chain's Queue cells, ADR 0060) are compare
 `os.path.realpath`, then the vault mapping (at or under the vault root: `vault` or `vault:<rel>`), else become
 `repo:<realpath>`. The vault root is the tasks dir's grandparent, used only when the tasks dir ends in
 `Work/Tasks`. Overlap is serial-chains.py's `overlaps`. A serial note with no `surfaces:`, or with a token
-parse_token refuses, reads as `any`, with `WARN: <slug>: <why>: read as any`.
+parse_token refuses, reads as `any` (its whole hold, scope `whole`), with `WARN: <slug>: <why>: read as any`; a
+`--resume` still compares against its unlanded rows' own cells, `any` only when one of those cells is empty or
+malformed too.
 
 Outcomes (parallel, the default), the first that applies:
   1. A misfiled superseded note -> `file <slug> <path relative to the tasks dir>` (the first by slug), exit 0.
@@ -130,7 +132,9 @@ Resume mode (`--resume <slug>`, ADR 0060 d3; leg.py begin and status, and execut
 resuming rollout writes, as --surface tokens (serial: leg.py's write_set) or --repo's token (parallel), against what
 the others hold for it: every other unfinished serial note's unlanded rows' surfaces, in any state (never its whole
 claim, never its smoke rows), and for a serial resume every unfinished, not complete parallel rollout's Project root
-that is not released, not paused and has no open halt in its Run record. The named note itself is skipped, and
+unless parallel_hold reads it released, or idle (nothing running, integrating or awaiting Integration) and paused
+(`paused:` or `pause_requested`) or with an open halt in its Run record: a call still in flight after a halt or in a
+pause's drain writes the root, so a rollout with one holds it. The named note itself is skipped, and
 --project/--tasks are optional (they only set `mine`). Hits -> `refuse <sorted>`, exit 3, one stderr line each:
 `[[<s>]] (<label>; <state>) holds `<token>` for an unlanded row, which this chain|rollout writes as `<token>` (ADR
 0060): [[<slug>]] waits its turn: …` (a parallel holder: `… holds `<token>`, its Project root, …`); leg.py reads the
@@ -503,16 +507,21 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
             tokens = [("any", "")]
         c.update(claim=tokens, tokens=tokens, unlanded=tokens, released=[], scope="whole",
                  why=f"{bad}: read as any, it holds everything" if bad else "")
-        if not bad:
-            hold, why = chain_hold(rr, path, tasks_dir)
-            if hold is None:
-                c["why"] = f"its chain is unreadable ({why}): it holds its whole claim"
-                warns.append(f"WARN: {c['slug']}: {c['why']}")
-            else:
-                if hold["warn"]:
-                    warns.append(f"WARN: {c['slug']}: {hold['warn']}")
-                parse = lambda xs: [SC.parse_token(x) for x in xs]  # noqa: E731
-                c.update(unlanded=parse(hold["unlanded"]), scope=hold["scope"], why=hold["why"])
+        # The hold is read even when `surfaces:` reads as any: a schedule still meets `any` (tokens, scope whole), but a
+        # --resume compares against the unlanded rows' own cells (hold_of reads them apart from the claim, and falls
+        # back to the whole claim, `any` here, only on a bad cell), so one hand-edited note never halts every rollout.
+        hold, why = chain_hold(rr, path, tasks_dir)
+        if hold is None:
+            unreadable = f"its chain is unreadable ({why}): it holds its whole claim"
+            c["why"] = c["why"] or unreadable
+            warns.append(f"WARN: {c['slug']}: {unreadable}")
+        else:
+            if hold["warn"]:
+                warns.append(f"WARN: {c['slug']}: {hold['warn']}")
+            parse = lambda xs: [SC.parse_token(x) for x in xs]  # noqa: E731
+            c["unlanded"] = parse(hold["unlanded"])
+            if not bad:
+                c.update(scope=hold["scope"], why=hold["why"])
                 if hold["scope"] == "stuck":
                     c.update(tokens=parse(hold["held"]), released=parse(hold["released"]))
         out.append(c)
@@ -527,9 +536,11 @@ def released_warn(s, claimed) -> str:
 
 def parallel_hold(rr, path, note, linked):
     """ADR 0060 d4: whether an unfinished parallel rollout holds its Project root against serial chains. {released,
-    why, paused, halt, unreadable}: released when nothing is running, integrating or awaiting Integration, a task is
-    set aside, and it awaits sign-off (`paused_for: sign-off`), or it is not paused and its Run record's last open stop
-    is a halt whose reason starts `nothing can start` (execute § 7's stuck halt). An unreadable record is not released."""
+    why, paused, halt, unreadable, busy}: released when nothing is running, integrating or awaiting Integration, a task
+    is set aside, and it awaits sign-off (`paused_for: sign-off`), or it is not paused and its Run record's last open
+    stop is a halt whose reason starts `nothing can start` (execute § 7's stuck halt). An unreadable record is not
+    released. `busy` counts its tasks running, integrating or awaiting Integration: a call in flight still writes the
+    root after a halt or during a pause's drain (check_resume reads it)."""
     states = [rr._queue_state(t)[0] for _, t in linked]
     stamped = rr._valued(note.get("paused"))
     paused = stamped or rr._truthy_flag(note.get("pause_requested"))
@@ -540,8 +551,8 @@ def parallel_hold(rr, path, note, linked):
         stops = rr._stop_state(lines)["open"]
         if stops and stops[-1].get("cause") == "halt":
             halt = str(stops[-1].get("reason") or "")
-    out = {"released": False, "why": "", "paused": paused, "halt": halt, "unreadable": lines is None}
     busy = sum(st in ("running", "integrating", "awaiting-integration") for st in states)
+    out = {"released": False, "why": "", "paused": paused, "halt": halt, "unreadable": lines is None, "busy": busy}
     if busy:
         out["why"] = f"{busy} task(s) running or in Integration"
     elif "set-aside" not in states:
@@ -829,7 +840,7 @@ def check_resume(args, rr, tasks_dir, toks, vault, warns, warned) -> int:
     """`--resume <slug>` (ADR 0060 d3): what a resuming rollout writes (a serial chain's write set, or a parallel
     rollout's root), against what the others hold for it: every other unfinished serial note's unlanded rows'
     surfaces, in any state (never its whole claim or its smoke rows), and, for a serial resume, every unfinished
-    parallel rollout's root that is not released, not paused and has no open halt. Whoever released a place yields it,
+    parallel rollout's root unless it is released, or idle and paused or halted. Whoever released a place yields it,
     so the chain scheduled on it never waits on the one that released it. It runs no git."""
     me = rr._wikilink_slug(args.resume) or args.resume.strip()
     if not me or not (tasks_dir / f"{me}.md").is_file():
@@ -861,7 +872,10 @@ def check_resume(args, rr, tasks_dir, toks, vault, warns, warned) -> int:
             if a is None:
                 continue
             ph = parallel_hold(rr, path, note, rr._scan(path, tasks_dir)[0])
-            if ph["released"] or ph["paused"] or ph["halt"] is not None:
+            # Skipped only while it writes nothing: released, or idle and paused or halted (one halted by its own entry
+            # re-check launched nothing, so the chain it waits on never waits on it). A call still in flight after a
+            # halt, or in a pause's drain, writes the root, so a rollout with one holds it.
+            if ph["released"] or (ph["busy"] == 0 and (ph["paused"] or ph["halt"] is not None)):
                 continue
             hits[c["slug"]] = (f"[[{c['slug']}]] ({c['label']}; {state_line(c)}) holds `{SC.fmt_token(rtok)}`, its "
                                f"Project root, which this chain writes as `{SC.fmt_token(a)}` (ADR 0060): [[{me}]] waits "
