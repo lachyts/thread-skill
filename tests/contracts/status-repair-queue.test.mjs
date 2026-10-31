@@ -853,7 +853,8 @@ const ANCHOR = 'update-ref -d refs/integration-anchor/<inputs.branch> <X>'
 // watchdog.py plist (p29-7, status § The Watchdog's reading): Lachy's one-time install render, named with its root; it
 // prints the launchd job on stdout and writes nothing itself.
 const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr view', 'gh pr list', 'git worktree list', 'git remote get-url',
-  'default-branch.sh', 'step-boundary.py stands', 'leg.py status', 'engine-snapshot.py resolve', 'reconcile-rollout.py moving', 'watchdog.py plist']
+  'default-branch.sh', 'step-boundary.py stands', 'leg.py status', 'engine-snapshot.py resolve', 'reconcile-rollout.py moving', 'watchdog.py plist',
+  'unfinished-rollout.py hold']   // § 4's Hold line (ADR 0060): read-only, one JSON line
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
 const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep
 const UNLANDED = 'queued, running, awaiting-integration, integrating or set-aside'
