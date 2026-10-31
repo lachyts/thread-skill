@@ -5,17 +5,18 @@ A rollout at ceiling 4 runs up to four task calls, each with its own verifier, b
 verify and RACE re-verify; other rollouts on the machine run theirs too. Each verifier is a full suite, so
 unbounded they pile onto one machine (2026-10-17: load 66 on 12 cores, and a merge lost to a load flake). A
 **verify slot** bounds that: at most `verify_slots` (rollouts.toml, `[defaults]` only, built-in 2) slotted
-suites run at once across every rollout on this machine; a further one waits for a slot. This header is the one
-copy of the contract.
+suites run at once across every rollout on this machine; a further one waits for a slot. `run` and `status` read that
+count themselves when given no --slots (p34-1). This header is the one copy of the contract.
 
-    python3 verify-slot.py run --slots N [--priority] [--slot-wait S] -- CMD…   # the agents' wrapper (engine-rendered)
+    python3 verify-slot.py run [--slots N] [--priority] [--slot-wait S] -- CMD…   # the agents' wrapper (rendered)
     python3 verify-slot.py wait --log FILE [--pid P] [--for S]     # an agent's in-turn wait for a run's verdict
     python3 verify-slot.py status [--slots N]                      # the operator's view (JSON)
 
 Importable (lead-integrate.py's `verify --slots N --slot-wait S` loads it by importlib, and reconcile-rollout.py's
 `next` for the heat reading): slots_dir(), SlotDirError, acquire(), Slot, Guarded, kill_group(), write_holder(),
 held_by(), heat_level(), heat_name(), KILL_GRACE, REAP_WAIT, GUARD_POLL, HEAT_KEY, HEAT_NAMES, HEAT_HOLD, HEAT_STOP,
-HEAT_EXIT, HEAT_ENV, HEAT_POLL_FACTOR, HEAT_SETTLE, HEAT_STOPPED, HELD_ENV.
+HEAT_EXIT, HEAT_ENV, HEAT_POLL_FACTOR, HEAT_SETTLE, HEAT_STOPPED, HELD_ENV, configured_slots(), SETTINGS_PY,
+RESOLVE_TIMEOUT, TOML_PYTHONS, TOML_ENV, BUILT_IN_SLOTS.
 
 The pool. `slot-0.lock` … `slot-(N-1).lock` in
 `${THREAD_VERIFY_SLOTS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/thread/verify-slots}` (run_record.py's
@@ -70,7 +71,11 @@ Contract.
    harness kill today, and so does a suite whose guard and wrapper are SIGKILLed together (a tree kill by pid
    snapshot). An unusable slots dir fails open: `verify-slot: WARN <dir>: <err>; running unslotted`, and the
    command still runs under the guard. The `status` probe of a free slot holds it for microseconds, so an
-   acquirer at that instant waits one more poll.
+   acquirer at that instant waits one more poll. A refused or unreadable rollouts.toml (or a resolver that fails) gives
+   a `run` or `status` with no --slots, or lead-integrate.py's lone --slot-wait, the built-in 2 with a WARN, never an
+   error: a typo'd file quietly caps hand runs at 2 (the engine always passes --slots, and its `verify-timeout` still
+   halts on a refused file). Only the guard starts isolated: `run` itself, started without `-I` (as the engine does),
+   can still be stopped by its caller's PYTHONPATH.
 7. The Heat hold (estate ADR 0009 d5). The reading is heat_level(): `notifyutil -g HEAT_KEY`, 0 nominal, 1
    moderate, 2 heavy, 3 trapping, 4 sleeping, read fresh each time (never cached); THREAD_HEAT_LEVEL 0 to 4 pins it
    (the tests' pin), any other value is ignored. At heavy (HEAT_HOLD) or worse no slot is free: every poll of
@@ -138,7 +143,7 @@ Contract.
    read as alive until S, so they give 75, never a wrong verdict; a TERM between the start line and cmd_run's handlers
    ends the run with no exit line, so 76.
 
-`run --slots N [--priority] [--slot-wait S] -- CMD…`: prints its start line (contract 9), then waits for a slot
+`run [--slots N] [--priority] [--slot-wait S] -- CMD…`: prints its start line (contract 9), then waits for a slot
 (`verify-slot: waiting for one of N verify slots (held by pid … in … since …[; K Integration waiter(s) ahead])` on
 stderr, repeated every 5 minutes; no waiting line when one is free at once; `verify-slot: slot k of N after Ns` once a
 wait ends), runs CMD under the guard and exits with its rc (128+n for a signal), its exit line (contract 9) last. While
@@ -154,12 +159,25 @@ never restarted): `verify-slot: no verdict: no verify slot within <S>s[ (heat: <
 red. A TERM, INT or HUP before the suite starts exits 76 too, no verdict, never red: `verify-slot: no verdict: stopped
 while the Mac was hot (heat: <name>); exit 76` while it waits on the heat or is back in line after a heat stop, else
 `verify-slot: no verdict: stopped before the suite started; exit 76` (contract 4). Usage errors exit 2: `--slots`
-missing, 0, or anything but ASCII digits; `--slot-wait` with no value or anything but ASCII digits (each refuses a
-sign, `+1` included, an underscore such as `1_0`, whitespace and a non-ASCII digit); no `--`; no CMD; an unknown flag. A command that cannot be started exits 127.
+0 or anything but ASCII digits; `--slot-wait` with no value or anything but ASCII digits (each refuses a sign, `+1`
+included, an underscore such as `1_0`, whitespace and a non-ASCII digit); no `--`; no CMD; an unknown flag. A command
+that cannot be started exits 127. With no `--slots`, N is rollouts.toml's `verify_slots` (p34-1, configured_slots():
+rollout-settings.py's resolve(repo=None), so `[defaults]`, then its built-in 2), read inside `run`'s handlers before
+the slot wait's deadline starts: a TERM, INT or HUP there is `stopped before the suite started`, 76, with its resolver
+child killed and reaped, and the read never counts against `--slot-wait`. On a python with no tomllib (python 3.9's
+/usr/bin/python3) a present file is read through rollout-settings.py's CLI (`<python> -I -B rollout-settings.py`),
+each candidate in turn under one RESOLVE_TIMEOUT (3 s) deadline: THREAD_TOML_PYTHONS's os.pathsep list, verbatim, when
+it is set (even empty), else PATH's python3 then TOML_PYTHONS, each once by realpath, this python itself skipped; one
+that will not start, times out or exits 3 passes to the next. Any failure but a stop (a refused file, named with its
+line; no candidate that can read it; a rollout-settings.py that will not load; an answer with no integer
+`verify_slots` >= 1) is the built-in BUILT_IN_SLOTS (2) behind `verify-slot: WARN <why>; using the built-in 2 verify
+slots`, never an error.
 
 `status [--slots N]` reaps stale waiter files and prints {dir, slots: [{index, state: free|held, holder}],
-waiters: [{pid, cwd, since, kind}], heat: {level, name}}; without --slots it lists the slot files present. Stdlib
-only, POSIX.
+waiters: [{pid, cwd, since, kind}], verify_slots: {value, source}, heat: {level, name}}. With --slots N it lists slots 0
+to N-1, source `--slots`; without, N is read as `run` reads it (its WARN on stderr, and status still exits 0; source
+`file:defaults`, `built-in` or `fallback`) and it lists slots 0 to N-1 and any other slot file present. Stdlib only,
+POSIX.
 """
 
 import errno
@@ -207,6 +225,16 @@ NOTIFYUTIL = "/usr/bin/notifyutil"   # the reading's tool when PATH has none
 # maximum as the lead's verify does. A constant: never read from a rollout's own `verify_timeout`, and the engine
 # renders no `--slot-wait`, so its prompt bytes are unchanged. Heat holds and heat restarts count against it.
 RUN_SLOT_WAIT = 4800
+# Its own slots (p34-1): `run` and `status` with no --slots, and lead-integrate.py's lone --slot-wait, read
+# rollouts.toml `verify_slots` through rollout-settings.py's resolve(repo=None) (configured_slots()): in process, else,
+# for a present file on a python with no tomllib, through that script's CLI under the first candidate python that can
+# read it, all of them under one RESOLVE_TIMEOUT deadline. Any failure but a stop is BUILT_IN_SLOTS with a WARN.
+SETTINGS_PY = os.path.normpath(os.path.join(os.path.dirname(SCRIPT), "..", "..", "_shared", "scripts",
+                                            "rollout-settings.py"))
+RESOLVE_TIMEOUT = 3.0      # seconds for every CLI candidate together (one deadline)
+TOML_PYTHONS = ("/opt/homebrew/bin/python3", "/usr/local/bin/python3")   # after PATH's python3, the default list
+TOML_ENV = "THREAD_TOML_PYTHONS"   # set (even empty): its os.pathsep entries are the candidates, verbatim
+BUILT_IN_SLOTS = 2         # the only fallback: rollout-settings.py's BUILT_IN["verify_slots"] (pinned by a test)
 
 
 class SlotDirError(Exception):
@@ -285,6 +313,98 @@ def heat_level():
 def heat_name(n):
     """The level's name (HEAT_NAMES), or the number itself when it is out of range."""
     return HEAT_NAMES[n] if isinstance(n, int) and 0 <= n < len(HEAT_NAMES) else str(n)
+
+
+# ---- its own slots (p34-1) -------------------------------------------------------------------------------------
+
+def _toml_pythons():
+    """The resolver CLI's candidates: TOML_ENV's os.pathsep entries verbatim when it is set, even to empty (empty
+    entries dropped, no dedupe, no self-skip); else PATH's python3, then TOML_PYTHONS, each once by realpath, any that
+    is this python (by realpath) skipped, since it already has no tomllib."""
+    raw = os.environ.get(TOML_ENV)
+    if raw is not None:
+        return [p for p in raw.split(os.pathsep) if p]
+    me = os.path.realpath(sys.executable) if sys.executable else None
+    out, seen = [], set()
+    for p in (shutil.which("python3"), *TOML_PYTHONS):
+        if not p:
+            continue
+        real = os.path.realpath(p)
+        if real == me or real in seen:
+            continue
+        seen.add(real)
+        out.append(p)
+    return out
+
+
+def _slots_value(obj, whence):
+    """(value, source) of `settings.verify_slots` in a resolve() object: its value an int >= 1 (never a bool); else
+    ValueError naming `whence`."""
+    try:
+        v = obj["settings"]["verify_slots"]
+    except (KeyError, TypeError, IndexError):
+        v = None
+    n = v.get("value") if isinstance(v, dict) else None
+    if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+        raise ValueError(f"{whence} gave no usable settings.verify_slots")
+    return n, str(v.get("source"))
+
+
+def _load_settings():
+    """rollout-settings.py (SETTINGS_PY) as a module; raises when it will not load."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("thread_rollout_settings", SETTINGS_PY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _resolve_slots():
+    """configured_slots()'s work, which may raise anything: (n, source, warn). In process first; a present file on a
+    python with no tomllib (SettingsError code 3) is read through rollout-settings.py's CLI under each of
+    _toml_pythons() in turn, within one RESOLVE_TIMEOUT: exit 0 is its answer, exit 2 a refusal (its last stderr line
+    the warn), and exit 3, another exit, a candidate that will not start or one that times out passes to the next."""
+    rs = _load_settings()
+    try:
+        out = rs.resolve(repo=None)
+    except rs.SettingsError as e:
+        if e.code != 3:
+            return BUILT_IN_SLOTS, "fallback", f"rollout-settings: {e}"   # a refusal: it names the file and line
+        path = e.subject or rs.default_path()
+    else:
+        return (*_slots_value(out, "rollout-settings"), None)
+    end = time.monotonic() + RESOLVE_TIMEOUT
+    tried = []
+    for py in _toml_pythons():
+        left = end - time.monotonic()
+        if left <= 0:
+            break
+        tried.append(py)
+        try:
+            p = subprocess.run([py, "-I", "-B", SETTINGS_PY], stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, timeout=left)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if p.returncode == 0:
+            return (*_slots_value(json.loads(p.stdout), py), None)
+        if p.returncode == 2:
+            last = [line.strip() for line in (p.stderr or "").splitlines() if line.strip()]
+            return BUILT_IN_SLOTS, "fallback", last[-1] if last else f"{py} {SETTINGS_PY}: exit 2"
+    return BUILT_IN_SLOTS, "fallback", f"no python >= 3.11 could read {path} (tried: {', '.join(tried) or 'none'})"
+
+
+def configured_slots(reraise=()):
+    """The machine's verify slots for a caller given no count (p34-1): (n, source, warn). n is rollouts.toml's
+    `verify_slots` (source `file:defaults`) or rollout-settings.py's built-in (`built-in`), with warn None; on any
+    failure (a refused file, no python that can read it, a resolver that will not load or answers in the wrong shape)
+    BUILT_IN_SLOTS, `fallback` and warn the reason, never an error. `reraise` holds the caller's stop types (its signal
+    handlers' exception), which pass straight through: a subprocess.run cut by one kills and reaps its child first."""
+    try:
+        return _resolve_slots()
+    except reraise:
+        raise
+    except Exception as e:
+        return BUILT_IN_SLOTS, "fallback", f"cannot read verify_slots ({type(e).__name__}: {e})"
 
 
 def _slot_path(d, k):
@@ -803,7 +923,7 @@ def _end(child):
 
 # ---- CLI ---------------------------------------------------------------------------------------------------------
 
-USAGE = ("usage: verify-slot.py run --slots N [--priority] [--slot-wait S] -- CMD… | wait --log FILE [--pid P] "
+USAGE = ("usage: verify-slot.py run [--slots N] [--priority] [--slot-wait S] -- CMD… | wait --log FILE [--pid P] "
          "[--for S] | status [--slots N]")
 
 
@@ -842,9 +962,7 @@ def _parse_run(argv):
             cmd = argv[i + 1:]
             if not cmd:
                 raise _Usage("run: no command after --")
-            if slots is None:
-                raise _Usage("run: --slots N is required")
-            return slots, prio, cmd, wait
+            return slots, prio, cmd, wait   # slots None: rollouts.toml's (configured_slots(), inside run's handlers)
         if a == "--slots":
             if i + 1 >= len(argv):
                 raise _Usage("run: --slots needs a value")
@@ -915,6 +1033,15 @@ def _say(msg):
     print(f"verify-slot: {msg}", file=sys.stderr, flush=True)
 
 
+def _default_slots():
+    """`run`'s count when no --slots is given (p34-1): configured_slots() with the caller's stop passed through (run
+    calls it inside its handlers, before its slot wait starts), and a WARN on stderr when it falls back."""
+    n, _source, warn = configured_slots(reraise=(_Signalled,))
+    if warn:
+        _say(f"WARN {warn}; using the built-in {n} verify slots")
+    return n
+
+
 def _acquire_within(slots, prio, why, wait, t_end, first):
     """acquire() under `run`'s one slot-wait deadline (p32-1; lead-integrate.py verify's rule): the first pass always
     tries, with max_wait=wait (0: one try); a re-queue after a heat stop tries only while time is left before t_end, and
@@ -948,6 +1075,8 @@ def cmd_run(argv):
     slot = None
     rc = None
     try:
+        if slots is None:
+            slots = _default_slots()   # inside the handlers: a stop here is 76, before the slot wait's deadline starts
         # The Heat hold (contract 7): a heat stop releases the slot and goes back in line, at the back, to restart the
         # command from the beginning once the Mac cools. Only the last run's rc is the exit. One slot-wait deadline
         # bounds every pass's wait (p32-1): once it runs out, no verdict (76).
@@ -1116,6 +1245,8 @@ def _run_recorded(slots, prio, cmd, owner, wait=RUN_SLOT_WAIT):
     suite, by = rr.new_suite_id(), ("integration" if prio else "task")
     piped = not (os.isatty(1) or os.isatty(2))
     try:
+        if slots is None:
+            slots = _default_slots()   # inside the handlers, as cmd_run's: a stop here is 76 and writes no line
         state = rr.tree_state(owner["tree"])   # the agent's tree is still while it waits for a slot
         # The Heat hold (contract 7), as cmd_run's: a heat stop releases the slot and goes back in line, at the back, to
         # restart the command from the beginning once the Mac cools. Only the last run's rc is the exit. One slot-wait
@@ -1232,16 +1363,24 @@ def cmd_status(argv):
     if os.path.exists(d) and not os.path.isdir(d):
         print(f"verify-slot: {d}: not a directory", file=sys.stderr)
         return 2
+    if slots is None:
+        # p34-1: rollouts.toml's count, as `run` reads it (no handlers here: a stop ends status, and a resolver child
+        # finishes its short run on its own); a fallback WARNs and status still exits 0.
+        n, source, warn = configured_slots()
+        if warn:
+            print(f"verify-slot: WARN {warn}; using the built-in {n} verify slots", file=sys.stderr)
+    else:
+        n, source = slots, "--slots"
     waiters = _scan_waiters(d)
     if slots is None:
-        idx = []
+        present = set()
         try:
             for name in os.listdir(d):
                 if name.startswith("slot-") and name.endswith(".lock") and name[5:-5].isdigit():
-                    idx.append(int(name[5:-5]))
+                    present.add(int(name[5:-5]))
         except OSError:
             pass
-        indexes = sorted(idx)
+        indexes = sorted(set(range(n)) | present)   # a slot file above N (a smaller verify_slots) still shows
     else:
         indexes = list(range(slots))
     out = []
@@ -1250,7 +1389,8 @@ def cmd_status(argv):
         out.append({"index": k, "state": state, "holder": holder if state == "held" else None})
     ws = [{k: w.get(k) for k in ("pid", "cwd", "since", "kind")} for w in waiters]
     level = heat_level()
-    print(json.dumps({"dir": d, "slots": out, "waiters": ws, "heat": {"level": level, "name": heat_name(level)}}))
+    print(json.dumps({"dir": d, "slots": out, "waiters": ws, "verify_slots": {"value": n, "source": source},
+                      "heat": {"level": level, "name": heat_name(level)}}))
     return 0
 
 
