@@ -69,8 +69,7 @@ Subcommands:
       `verify_slots`, p34-1: verify-slot.py's configured_slots(), read inside verify's handlers, so a stop there is rc
       128+n, and on any failure the built-in 2 with `verify: WARN <why>; using the built-in 2 verify slots` in the log)
       first waits, up to W seconds, for one of the machine's N verify slots (verify-slot.py, p23-4), as an Integration
-      waiter
-      (the priority: agents' runs wait while it does), logging `verify: waiting for one of N verify slots (…)`
+      waiter (the priority: agents' runs wait while it does), logging `verify: waiting for one of N verify slots (…)`
       and then `== verify slot k of N after Ns`. Only then does the S-second deadline start: the slot wait never
       counts against it. Each step then runs under verify-slot.py's guard, which shares the slot's lock and ends
       the step's group when verify dies by any means, before the slot frees: so even a SIGKILL of verify, which
