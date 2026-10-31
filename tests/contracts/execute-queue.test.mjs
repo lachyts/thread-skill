@@ -494,6 +494,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
       !s4.includes('"verifySlot": { "script": "<verify-timeout verifySlot.script>", "slots": 2 }') ||
       !s4.includes('adding `defaultBranch` or `verifySlot` to a run that started without it changes prompt bytes') ||
       !vsP.includes("The lead's `lead-integrate.py verify` (the Integration verify and the RACE re-verify) and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode) register as Integration waiters") ||
+      !vsP.includes('a run that has been at the head of the line for 15 minutes, which then waits beside them') ||
       !vsP.includes('before the verify slot frees') || !vsP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status --slots <verify_slots>`') ||
       !vsP.includes('verify-slot.py wait --log') || !vsP.includes('waits inside its turn') ||
       !s7.includes("the Integration verify's third `noslot` (step 3, `verify-noslot`)") || !s7.includes("the RACE re-verify's third `noslot` (the RACE procedure") ||
@@ -1234,6 +1235,11 @@ test('control: § 3 without the "does not clear" remedy fails verify-slots', () 
 
 test('control: a priority sentence without the integrator fails verify-slots', () => {
   only(sk(" and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode)", ''), 'verify-slots', 'no integrator')
+})
+
+test("control: the Integration priority without the head of the line's exception (p34-1) fails verify-slots", () => {
+  only(sk(', except a run that has been at the head of the line for 15 minutes, which then waits beside them (`verify-slot.py` contract 5)', ''),
+    'verify-slots', 'no head-of-line exception')
 })
 
 test('control: Verify slots without the in-turn wait (p31-3) fails verify-slots', () => {

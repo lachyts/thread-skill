@@ -681,10 +681,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   frees, and a command in a verify slot sees `VERIFY_SLOT_HELD=1` (p34-1), so
   a suite it starts never queues for a second one. The Integration priority:
   the lead's Integration and RACE verifies, and the integrate call's own
-  verifier runs (`run --priority`), go before any task call's agent, and other
-  runs wait in arrival order (p34-1). An agent waits for its suite's verdict
-  inside its turn (`verify-slot.py wait`, p31-3), never by ending it. Not a
-  **Slot** (a task's run in a Queue). _Avoid_: bare "slot", lock, semaphore.
+  verifier runs (`run --priority`), go before any task call's agent, except a
+  run at the head of the line for 15 minutes, which then waits beside them,
+  and other runs wait in arrival order (p34-1). An agent waits for its suite's
+  verdict inside its turn (`verify-slot.py wait`, p31-3), never by ending it.
+  Not a **Slot** (a task's run in a Queue). _Avoid_: bare "slot", lock,
+  semaphore.
 - **Checkpoint** — one of the two moments per task where the full suite (the
   rollout's `verifier:`) runs: a code-writing agent's last check before it
   opens or updates its PR (the implementer's, and each reviser's), and

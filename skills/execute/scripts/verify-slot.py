@@ -16,7 +16,7 @@ Importable (lead-integrate.py's `verify --slots N --slot-wait S` loads it by imp
 `next` for the heat reading): slots_dir(), SlotDirError, acquire(), Slot, Guarded, kill_group(), write_holder(),
 held_by(), heat_level(), heat_name(), KILL_GRACE, REAP_WAIT, GUARD_POLL, HEAT_KEY, HEAT_NAMES, HEAT_HOLD, HEAT_STOP,
 HEAT_EXIT, HEAT_ENV, HEAT_POLL_FACTOR, HEAT_SETTLE, HEAT_STOPPED, HELD_ENV, configured_slots(), SETTINGS_PY,
-RESOLVE_TIMEOUT, TOML_PYTHONS, TOML_ENV, BUILT_IN_SLOTS, QUEUE_FRESH_MIN, QUEUE_FRESH_POLLS.
+RESOLVE_TIMEOUT, TOML_PYTHONS, TOML_ENV, BUILT_IN_SLOTS, QUEUE_FRESH_MIN, QUEUE_FRESH_POLLS, HEAD_AGE.
 
 The pool. `slot-0.lock` … `slot-(N-1).lock` in
 `${THREAD_VERIFY_SLOTS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/thread/verify-slots}` (run_record.py's
@@ -79,7 +79,14 @@ Contract.
    fstat for the mtime and pread for the record, accepted only while os.stat(path) still names that (st_dev, st_ino),
    so a name dropped and recreated between the open and the check is skipped for that scan, never misread. Priority
    acquirers ignore the line, and the old `waiter-` scan is unchanged, so a copy from before the line neither counts
-   nor reaps a `queue-` file.
+   nor reaps a `queue-` file. The age bound (it bounds the rule, not the wait): a non-priority acquirer with no awake
+   run ahead of it in line (its unregistered first try included) is the head, and once it has been the head for
+   HEAD_AGE (900 s; heat holds count, and an entry ahead that wakes resets the clock) it needs one free slot, as an
+   Integration waiter does, and polls at their cadence, keeping its line entry and writing no waiter file; it says so
+   once, `verify-slot: at the head of the line for 900s: now waiting beside the Integration waiters`, at the poll
+   where it ages and before that poll's try, and its later waiting lines name only the holders. While Integration
+   demand alone fills the pool it still waits, as an Integration verify would; and only the head ages, so an
+   Integration waiter faces at most one extra peer from the line.
 6. Residuals. A slots dir deleted while held, or a different HOME or XDG chain, makes a separate pool. A
    process the suite itself moves into another session or group escapes the guard's kill, as it escapes a
    harness kill today, and so does a suite whose guard and wrapper are SIGKILLed together (a tree kill by pid
@@ -165,12 +172,13 @@ Contract.
 `run [--slots N] [--priority] [--slot-wait S] -- CMD…`: prints its start line (contract 9), then waits for a slot, in
 line behind the Integration waiters and the runs that came first (contract 5): `verify-slot: waiting for one of N verify
 slots (held by pid … in … since …[; K Integration waiter(s) ahead][; M run(s) ahead in line])` on stderr, repeated every
-5 minutes (no waiting line when one is free at once; `verify-slot: slot k of N after Ns` once a wait ends), runs CMD
-under the guard and exits with its rc (128+n for a signal), its exit line (contract 9) last. While the Mac is hot it
-waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat stop prints `verify-slot: heat stop (<name>):
-ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac cools`, and the
-exit is the last run's rc. The slot wait is bounded (p32-1): `--slot-wait S` (or `--slot-wait=S`), an integer >= 0 in
-seconds, written in ASCII digits only, default RUN_SLOT_WAIT, 4800: the lead's `slotWait` at the default
+5 minutes (no waiting line when one is free at once; `verify-slot: at the head of the line for <HEAD_AGE>s: now waiting
+beside the Integration waiters` once, when its age bound starts; `verify-slot: slot k of N after Ns` once a wait ends),
+runs CMD under the guard and exits with its rc (128+n for a signal), its exit line (contract 9) last. While the Mac is
+hot it waits with `verify-slot: waiting (heat: <name>)` (contract 7); a heat stop prints `verify-slot: heat stop
+(<name>): ended the suite after Ns; no verdict, never red: back in line to restart from the beginning once the Mac
+cools`, and the exit is the last run's rc. The slot wait is bounded (p32-1): `--slot-wait S` (or `--slot-wait=S`), an
+integer >= 0 in seconds, written in ASCII digits only, default RUN_SLOT_WAIT, 4800: the lead's `slotWait` at the default
 `verify_timeout` of 1800 s, max(60, 7200 - 600 - 1800), so an agent's wait fits its harness maximum as the lead's verify
 does; a constant, never a rollout's own `verify_timeout`, and the engine renders no `--slot-wait`. S is one deadline for
 the whole run: every slot wait, heat hold and heat-stopped run counts against it; the first pass always tries (0: one
@@ -228,6 +236,7 @@ SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 WAITER_TRIES = 3
 QUEUE_FRESH_MIN = 5.0      # the line (p34-1): an entry untouched max(this, QUEUE_FRESH_POLLS * its poll) s is asleep
 QUEUE_FRESH_POLLS = 10
+HEAD_AGE = 900             # the line's age bound (p34-1): the head this long waits beside the Integration waiters
 HELD_ENV = "VERIFY_SLOT_HELD"   # the marker (p34-1): "1" in the environment of a command run in a held slot
 SCRIPT = os.path.abspath(__file__)
 
@@ -726,14 +735,20 @@ def _open_slot(d, k):
         raise SlotDirError(f"{d}: {e.strerror or e}")
 
 
-def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=False, kind="run", why=None):
+def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=False, kind="run", why=None,
+            head_age=HEAD_AGE):
     """Wait for one of `slots` verify slots: a Slot, or None when max_wait seconds pass first (0: one try, which takes
     a free slot only when no awake run is ahead in line).
 
     on_wait(msg) gets `waiting for one of N verify slots (…)` at the first miss and every REMIND_EVERY seconds.
     A priority acquirer registers a waiter file while it waits; a non-priority one joins the line after its first miss
     (contract 5) and takes a slot only when it can hold (live Integration waiters + awake runs ahead of it in line + 1)
-    at once. SlotDirError when the dir is unusable (checked before any heat reading).
+    at once, or one once it has been at the head of the line for head_age. head_age (HEAD_AGE, 900 s) is the age
+    bound: from the first poll with no awake run ahead (its unregistered first try included; an entry ahead that wakes
+    resets it, and heat holds count), the head then needs one free slot and polls at the priority cadence, keeping its
+    line entry and writing no waiter file; on_wait gets `at the head of the line for <head_age>s: now waiting beside
+    the Integration waiters` at the poll where it ages, before that poll's try, and its later waiting lines name only
+    the holders. SlotDirError when the dir is unusable (checked before any heat reading).
     The Heat hold (contract 7): each poll reads heat_level() first; at HEAT_HOLD or worse it tries no slot (a miss),
     and on_wait gets `waiting (heat: <name>)`, said at the first miss, whenever the holding reason changes (another
     heat name, or a switch between heat and slots) and every REMIND_EVERY seconds. `why`, a dict the caller keeps,
@@ -753,6 +768,7 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
     wfd = wpath = None
     qfd = qpath = place = None   # a non-priority waiter's own line entry and its place (p34-1), after its first miss
     joined = False
+    head_since, aged = None, False   # the age bound: since when it has been the head; whether it has aged
     try:
         if priority:
             try:
@@ -782,7 +798,15 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
                 else:
                     ahead = len(live)
                     inline = _ahead_in_line(_scan_queue(d), place)
-                    need = ahead + inline + 1
+                    if inline:
+                        head_since = None   # an entry ahead (a sleeper that woke included) resets the clock
+                    elif head_since is None:
+                        head_since = time.monotonic()
+                    was, aged = aged, head_since is not None and time.monotonic() - head_since >= head_age
+                    if aged and not was and on_wait is not None:
+                        on_wait(f"at the head of the line for {head_age:.0f}s: now waiting beside the Integration "
+                                "waiters")
+                    need = 1 if aged else ahead + inline + 1
                 try:
                     for k in range(slots):
                         fd = _open_slot(d, k)
@@ -819,13 +843,13 @@ def acquire(slots, max_wait=None, where=None, poll=None, on_wait=None, priority=
                 else:
                     names = "; ".join(_describe(_read_json(_slot_path(d, k))) for k in held)
                     held_why = [f"held by {names}"] if names else []
-                    if ahead:
+                    if ahead and not aged:   # an aged head waits beside them: only the holders are named
                         held_why.append(f"{ahead} Integration waiter(s) ahead")
                     if inline:
                         held_why.append(f"{inline} run(s) ahead in line")
                     on_wait(f"waiting for one of {slots} verify slots ({'; '.join(held_why) or 'none free'})")
                 told, told_reason = now, reason
-            step = base + random.uniform(0, base / 2) if priority else 2 * base + random.uniform(0, base)
+            step = base + random.uniform(0, base / 2) if priority or aged else 2 * base + random.uniform(0, base)
             if max_wait is not None:
                 step = min(step, max(0.0, max_wait - (now - start)))
             time.sleep(step)

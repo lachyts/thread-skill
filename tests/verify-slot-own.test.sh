@@ -14,6 +14,7 @@
 #       reaped; an asleep one (a stopped waiter) is passed over and kept, and back in its place once it wakes;
 #       _probe_entry reads a name only while it names the inode it opened
 #   O5  status lists the line, oldest first, with asleep flags, and reaps stale entries
+#   O7  the head's age bound: a run at the head of the line for head_age waits beside the Integration waiters
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound only slows a real failure. Every background pid is recorded and stopped only by that pid.
 # Hermetic: every pool lives under mktemp (THREAD_VERIFY_SLOTS_DIR), the Run record too.
@@ -431,6 +432,23 @@ ok "$(js "[(q['pid'], q['asleep']) for q in d['queue']]" "$J")" "[($(w q3), True
 ok "$(js "sorted(d['queue'][0])" "$J")" "['asleep', 'cwd', 'kind', 'pid', 'since']" "O5: … each entry {pid, cwd, since, kind, asleep}"
 ok "$(count '99999|99998')" 0 "O5: … and reaps a stale queue-*.wait and .queue-*.tmp"
 touch "$D/q5.go" "$D/q3.go"; wait "$(w q5)"; wait "$(w q3)"
+
+# ======== O7: the head's age bound ==============================================================================
+cat > "$tmp/o7.py" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1]); vs = importlib.util.module_from_spec(spec); spec.loader.exec_module(vs)
+msgs = []
+s = vs.acquire(1, max_wait=float(sys.argv[4]), where=sys.argv[2], poll=0.1, on_wait=msgs.append, head_age=float(sys.argv[3]))
+print("slot" if s is not None else "none", [m for m in msgs if "head of the line" in m])
+PY
+pool o7
+entry iw "waiter-1-i.wait" - still
+ok "$(python3 -B "$tmp/o7.py" "$VS" "$SL" 1.0 60)" "slot ['at the head of the line for 1s: now waiting beside the Integration waiters']" \
+  "O7a: at the head of the line for head_age, a run takes a free slot beside a live Integration waiter, and says so"
+ok "$(python3 -B "$tmp/o7.py" "$VS" "$SL" 600 2)" "none []" "O7b: … not before head_age (none within max_wait, no such line)"
+entry q7 "queue-1-seven.wait" 1 touch
+ok "$(python3 -B "$tmp/o7.py" "$VS" "$SL" 0.5 2)" "none []" "O7c: behind an awake run in line it is no head, so it never ages"
+touch "$D/iw.go" "$D/q7.go"; wait "$(w iw)"; wait "$(w q7)"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot-own: ALL PASS" || echo "verify-slot-own: SOME FAILED"
 exit "$fail"
