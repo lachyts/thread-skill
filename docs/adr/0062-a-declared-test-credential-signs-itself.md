@@ -87,9 +87,12 @@ be caught at the stop, before any build.
    judge never bounced never resolves the spend limit, so a declared class signs at the built-in 0 too. The limit
    resolves lazily, at a slug's first gate that is not such a credential gate, or at the first gate of a bounced note,
    which keeps today's path. A refused `spend_approval_usd:` stamp therefore errors only a slug that holds a spend,
-   irreversible or bounced gate. A covered credential gate gets no ledger read, month line, Needs-you line or spend
-   lock. Its annotation is `(approved <date> under the standing approval: test credential K1, K2 present in <file>,
-   class from <source>)`, which GATE_ANNOT_RE and the engine's normalizeGate strip like any sign-off.
+   irreversible or bounced gate. Likewise the class resolves only for a credential gate that passes the reading's
+   class-independent steps (decision 2): a gate no class could ever sign asks with its why, so a refused
+   rollouts.toml never turns that ASK into an error. A covered credential gate gets no ledger read, month line,
+   Needs-you line or spend lock. Its annotation is `(approved <date> under the standing approval: test credential K1,
+   K2 present in <file>, class from <source>)`, which GATE_ANNOT_RE and the engine's normalizeGate strip like any
+   sign-off.
 
 6. **Recorded, never asked, at schedule and orient.** When the class is set, schedule § 3.6 and orient's reshuffle
    R3 (c) record a credential hit whose context names only test-mode or staging use of declared keys: `plan_approval:

@@ -29,8 +29,9 @@
 #          `test_credentials` class declares their keys, its file holds them with their declared prefix or Supabase
 #          project, and the rollout's verbatim env_bootstrap refreshes that file with a plain cp; a live or production
 #          gate, a wrong or missing value, a guarded or reversed copy, no class (another repo, a serial Leg) and a
-#          bounce all ask; a refused class form exits 1; a spend gate beside one still logs alone; a bad spend stamp
-#          errors only a slug that resolves the limit. No value from the file is ever printed or written.
+#          bounce all ask; a refused class form exits 1, but a gate the reading's class-independent steps refuse
+#          still asks without resolving it; a spend gate beside one still logs alone; a bad spend stamp errors only a
+#          slug that resolves the limit. No value from the file is ever printed or written.
 #   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
 #          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
 #          refused rollouts.toml. It writes nothing.
@@ -654,6 +655,20 @@ HH="$HSUB" sa a
 ok "$rc|$(cat "$D/a.md")" "1|$before" "S10e: a refused class form (the sub-table) exits 1, nothing written"
 has "$out" "ERROR: a: rollout settings refused: " "S10e: … the ERROR names the refusal"
 has "$out" "test_credentials must be one line in that table" "S10e: … and its remedy"
+# A gate no class could ever sign asks at the reading's class-independent steps and never resolves the class (ADR 0062
+# d2): under the same refused file S3's deny-word gate asks (exit 3), and beside it a task stamp still signs its spend.
+mkt c gate-pending; gate c "$CRED"
+before=$(cat "$D/c.md")
+HH="$HSUB" sa c
+ok "$rc|$(cat "$D/c.md")" "3|$before" "S10e: a deny-word gate under the refused class form asks (exit 3), nothing written"
+has "$out" "ASK: c: $CRED: deny word: API key" "S10e: … at its deny word"
+hasnt "$out" "rollout settings refused" "S10e: … and never resolves the class"
+mkt d gate-pending 'spend_approval_usd: 50'; gate d "$CRED" "$PROBE"
+HH="$HSUB" sa d
+ok "$rc" 3 "S10e: a task stamp under the refused class form: the spend gate signs, the deny-word gate asks (exit 3)"
+ok "$(section d '## Approved gates')" "- $PROBE (approved $DATE under the standing approval: total exposure US\$9, limit US\$50 from task)" "S10e: … the probe signed from the task stamp"
+ok "$(section d '## Gated inputs (awaiting sign-off)')" "- $CRED" "S10e: … the credential still pending"
+has "$out" "ASK: d: $CRED: deny word: API key" "S10e: … at its deny word"
 
 # S10f: beside a spend gate (HCS: limit 200): one save signs both, and only the spend gate logs a Needs-you line; an
 # irreversible gate still asks

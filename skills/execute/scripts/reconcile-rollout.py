@@ -702,8 +702,10 @@ Subcommands:
               credential gates alone never reads it (a bad stamp errors only a slug that holds a spend,
               irreversible or bounced gate). A credential gate on a note the plan judge never bounced (ADR 0062)
               is covered iff gated_inputs.credential_reading() reads it as the repo's declared test credential
-              (rollouts.toml's `test_credentials`, read through _resolved_settings once per call: a refused file
-              is exit 1 for each slug that needs it, nothing written; no Project root, as on every serial note,
+              (its class-independent steps first, with no class: any why but NO_CLASS_WHY is the gate's ASK, and
+              the class is never resolved for it; then rollouts.toml's `test_credentials`, read through
+              _resolved_settings once per call: a refused file is exit 1 for each slug that needs it, nothing
+              written; no Project root, as on every serial note,
               or no repo table is no class, so it asks), the rollout's `env_bootstrap` copies the declared file
               with a plain cp (bootstrap_refreshes(); a value the frontmatter reader refuses asks with its
               words), and each key it names is in that file with its declared prefix or Supabase project
@@ -10395,7 +10397,8 @@ def _month_why(month, total, limit, gi):
 
 class _CredentialContext:
     """The repo's test-credential class and the rollout's env_bootstrap for one approve-gates --standing call (ADR
-    0062), resolved lazily, once: only a credential gate on an unbounced note asks for it. get() -> {error, cls,
+    0062), resolved lazily, once: only a credential gate on an unbounced note that passes the reading's
+    class-independent steps (credential_reading with no class gives NO_CLASS_WHY) asks for it. get() -> {error, cls,
     source, boot, boot_err}: error is `rollout settings refused: <the resolver's words>` (exit 1 for each slug that
     needs it, nothing written for it); otherwise cls is rollouts.toml's `test_credentials` value (None with no class:
     no Project root, as on every serial note, no repo table, or no GitHub origin), and boot the rollout's
@@ -10504,6 +10507,12 @@ def _approve_standing(args) -> int:
             for g in gates:
                 if not bounced and gi.gate_kind(g) == "credential":
                     # ADR 0062: a declared test credential, proved present in its file; it never reads the limit.
+                    # The reading's class-independent steps run first (d2): a gate no class could ever sign asks
+                    # with its why and never resolves the class, so a refused rollouts.toml never errors it.
+                    pre = gi.credential_reading(g, None)
+                    if pre["why"] != gi.NO_CLASS_WHY:
+                        left.append((g, pre["why"]))
+                        continue
                     ctx = creds.get()
                     if ctx["error"]:
                         slug_err = ctx["error"]
