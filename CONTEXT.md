@@ -659,6 +659,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   reviser, an integrator) uses the repo's own test runner. It takes no verify
   slot of its own and never counts as an iteration. _Avoid_: retry, targeted
   run.
+- **Verify base** — the `--diff-base` commit that `lead-integrate.py verify`
+  exports to every step it runs (the env bootstrap, the verifier, the named
+  re-run and the confirming run) as `THREAD_VERIFY_BASE`, resolved to its
+  sha: `<mainSha>` at Integration and the merge commit's first parent at a
+  RACE re-verify; it is never set at completion. A project whose verifier is
+  a fast tier with a reach reads it as its base, so the reach is the task's
+  diff even after merge-task refreshed `origin/<default>` (ADR 0060).
+  _Avoid_: reach base, origin/main.
 - **Completion verifier** — a rollout note's optional `completion_verifier:`,
   the full suite of a project whose `verifier:` is its declared fast tier
   (estate ADR 0009 d6): the completion ceremony runs it once on merged main,
