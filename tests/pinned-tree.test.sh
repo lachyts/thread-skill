@@ -3,17 +3,33 @@
 # (taskTreeSetup), run under bash AND zsh (the Bash tool's shell on macOS) against a fixture origin.
 # tests/pinned-tree.test.mjs pins the prompt text; this runs the commands. Every case checks what the tree
 # is left on (branch or detached, which commit), what the setup printed, and the reaper lock it wrote.
-# Hermetic: every repo lives under mktemp, the global git config is /dev/null, identity is passed per
-# command, and the caller's GIT_DIR & co. are unset first.
+# Hermetic: every repo lives under mktemp, the global git config is a file there that holds only the gc and
+# maintenance keys below, identity is passed per command, and the caller's GIT_DIR & co. are unset first.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
 unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR, GIT_CONFIG_PARAMETERS, …)
-export GIT_CONFIG_GLOBAL=/dev/null
 root=$(pwd -P)
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+# No detached git process outlives a step (p34-4). Every fetch and commit here otherwise leaves a detached
+# `git maintenance run --auto` behind on the shared fixture repo, 66 per run. Suspected, never reproduced, in
+# the 2026-10-27 ubuntu red of 6b (run 40562776119, git 2.55): the planner's create arm made no tree. On git
+# 2.55 and 2.56 those runs do no task in these small repos, so this is defensive, not a proven fix; 6b's
+# "the planner creates the tree" line prints the setup's own output, so the next red names its cause. A file,
+# not GIT_CONFIG_COUNT/GIT_CONFIG_PARAMETERS: the rendered setups' own `unset $(git rev-parse --local-env-vars)`
+# drops those, and keeps GIT_CONFIG_GLOBAL. Only gc and maintenance keys: no identity, no repo path (case 9).
+printf '[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n\tautoDetach = false\n' > "$tmp/gitconfig"
+export GIT_CONFIG_GLOBAL="$tmp/gitconfig"
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master "$@"; }
+
+# The config holds: a fetch starts no `git maintenance run`. Control: the same fetch under /dev/null does
+# (in the foreground, so the control leaves nothing behind either).
+g init -q --bare "$tmp/m.git"; g clone -q "$tmp/m.git" "$tmp/m" 2>/dev/null
+GIT_TRACE2_EVENT="$tmp/m.on" git -C "$tmp/m" fetch -q origin
+GIT_CONFIG_GLOBAL=/dev/null GIT_TRACE2_EVENT="$tmp/m.off" git -C "$tmp/m" -c maintenance.autoDetach=false fetch -q origin
+ok "$(grep -c '"maintenance","run"' "$tmp/m.on")|$( [ "$(grep -c '"maintenance","run"' "$tmp/m.off")" -gt 0 ] && echo started)" \
+  "0|started" "the hermetic config: a fetch starts no maintenance run (and one does without it)"
 
 # ---- shells: bash always; zsh mandatory on macOS, else run when installed and SKIP visibly --------------
 shells=("$(command -v bash)")
@@ -130,9 +146,12 @@ suite() {
   ok "$(git -C "$ro" symbolic-ref -q HEAD || echo detached)|$(git -C "$ro" rev-parse HEAD)" "detached|$tip" "$n 6: … refreshed to the new tip, still detached"
 
   # 6b. plan-gated read-only: the planner's tree is the one the judge and investigator reuse
-  local rog="$R/.claude/worktrees/proj-task-rog" count
-  run "$(render "$R" refresh read-only proj-task-rog)"
+  local rog="$R/.claude/worktrees/proj-task-rog" count plan_out
+  before=$(git -C "$R" worktree list --porcelain | grep -c '^worktree ')
+  run "$(render "$R" refresh read-only proj-task-rog)"; plan_out=$out
   count=$(git -C "$R" worktree list --porcelain | grep -c '^worktree ')
+  # The 2026-10-27 ubuntu red (run 40562776119) was this create failing, not the judge moving the tree: say why.
+  ok "$(toplevel)|$count" "$rog|$((before + 1))" "$n 6b: the planner creates the tree (setup said: $(printf '%s' "$plan_out" | tr '\n' '|'))"
   advance c6b
   run "$(render "$R" judge read-only proj-task-rog)"
   ok "$(git -C "$rog" rev-parse HEAD)" "$(git -C "$d/pusher" rev-parse HEAD~1)" "$n 6b: the judge reuses the planner's tree without moving it"
