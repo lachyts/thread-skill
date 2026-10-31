@@ -127,7 +127,8 @@ inputs and the lead's own set-aside rows).
 `skills/execute/scripts/verify-slot.py` holds the machine's verify slots (p23-4):
 at most `verify_slots` verifier suites run at once across every rollout on the
 machine (the lead's Integration and RACE verifies, and every agent's
-engine-rendered verifier), a further one waits, and each runs under a guard
+engine-rendered verifier), a further one waits (the lead's first, the rest in
+arrival order), and each runs under a guard
 that ends a killed holder's suite before its verify slot frees (a command in a
 verify slot sees `VERIFY_SLOT_HELD=1`);
 `verify-slot.py status` shows who holds each verify slot and who waits. With no

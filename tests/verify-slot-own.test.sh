@@ -10,6 +10,10 @@
 #       python that can read it, a load failure or a CLI answer of the wrong shape is the built-in 2 with a WARN, never
 #       rc 1; a TERM while `run` resolves is 76, no verdict, its resolver child gone
 #   O6b lead-integrate.py's lone --slot-wait: a TERM while it resolves is rc 143, its resolver child gone
+#   O4  the line: ordinary runs take a freed slot in arrival order, after the Integration waiters; a stale entry is
+#       reaped; an asleep one (a stopped waiter) is passed over and kept, and back in its place once it wakes;
+#       _probe_entry reads a name only while it names the inode it opened
+#   O5  status lists the line, oldest first, with asleep flags, and reaps stale entries
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound only slows a real failure. Every background pid is recorded and stopped only by that pid.
 # Hermetic: every pool lives under mktemp (THREAD_VERIFY_SLOTS_DIR), the Run record too.
@@ -284,6 +288,149 @@ has "$(cat "$D/o.log" 2>/dev/null)" "verify: stopped by signal 15" "O6b: … its
 ok "$([ -e "$D/ran" ] && echo ran || echo never)" never "O6b: … the verifier never ran"
 within 30 gone "$(cat "$D/slow")" && s=gone || s="slowpy alive after 30 s"
 ok "$s" gone "O6b: … and the resolver child is gone"
+
+# ======== O4: the line =========================================================================================
+nqueue() { count '^queue-.*\.wait$'; }
+nwaiters() { count '^waiter-.*\.wait$'; }
+queued() { [ "$(nqueue)" -ge "$1" ]; }
+has_waiter() { [ "$(nwaiters)" -ge 1 ]; }
+# entry <name> <file in SL> <seq|-> <touch|stale|still>: a live line or waiter entry held LOCK_EX until <name>.go, its
+# record {pid, cwd, since, kind, poll 0.1[, seq]}; touch: its mtime refreshed every 0.2 s (an awake waiter); stale: set
+# 60 s back once and never touched (a stopped one); still: never touched.
+cat > "$tmp/entry.py" <<'PY'
+import fcntl, json, os, sys, time
+path, go, seq, mode = sys.argv[1:5]
+os.makedirs(os.path.dirname(path), exist_ok=True)
+fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+fcntl.flock(fd, fcntl.LOCK_EX)
+rec = {"pid": os.getpid(), "cwd": os.path.dirname(go), "since": "2026-01-01T00:00:00+00:00", "kind": "run", "poll": 0.1}
+if seq != "-":
+    rec["seq"] = int(seq)
+os.ftruncate(fd, 0)
+os.pwrite(fd, (json.dumps(rec) + "\n").encode(), 0)
+if mode == "stale":
+    t = time.time() - 60
+    os.utime(fd, (t, t))
+open(go + ".ready", "w").close()
+while not os.path.exists(go):
+    if mode == "touch":
+        os.utime(fd)
+    time.sleep(0.2)
+PY
+entry() {
+  python3 "$tmp/entry.py" "$SL/$2" "$D/$1.go" "$3" "$4" > /dev/null 2>&1 &
+  echo $! > "$D/$1.w"; pids+=($!)
+  within 300 exists "$D/$1.go.ready" || echo "FAIL - $1: the entry helper did not start within 300 s"
+}
+pool o4a
+entry qa "queue-1-a.wait" 1 touch
+python3 "$VS" run --slots 1 --slot-wait 2 -- touch "$D/a.ran" > /dev/null 2> "$D/a.err"; rc=$?
+ok "$rc|$([ -e "$D/a.ran" ] && echo ran || echo never)" "76|never" "O4a: a free slot with an awake run ahead in line: --slot-wait 2 → 76, never ran"
+has "$(cat "$D/a.err")" "verify-slot: no verdict: no verify slot within 2s; exit 76" "O4a: … its no-verdict line"
+has "$(cat "$D/a.err")" "1 run(s) ahead in line" "O4a: … its waiting line names the run ahead"
+ok "$(nqueue)" 1 "O4a: … and its own entry is gone (only the helper's is left)"
+touch "$D/qa.go"; wait "$(w qa)"
+
+pool o4b
+mkdir -p "$SL"; printf '{"pid": 99999, "seq": 1}\n' > "$SL/queue-99999-x.wait"; : > "$SL/.queue-99998-y.tmp"
+python3 "$VS" run --slots 1 --slot-wait 2 -- true 2> "$D/b.err"; rc=$?
+ok "$rc|$(grep -c waiting "$D/b.err")" "0|0" "O4b: a stale line entry (nobody holds it) holds no run off"
+ok "$(count queue)" 0 "O4b: … the stale .wait and .tmp are reaped"
+
+pool o4c
+hold h 1
+python3 "$VS" run --slots 1 -- sh -c "echo A >> '$D/order'; until [ -e '$D/A.go' ]; do sleep 0.1; done" > /dev/null 2> "$D/A.err" &
+echo $! > "$D/A.w"; pids+=($!)
+within 300 queued 1 || echo "FAIL - O4c: A never joined the line"
+python3 "$VS" run --slots 1 -- sh -c "echo B >> '$D/order'" > /dev/null 2> "$D/B.err" &
+echo $! > "$D/B.w"; pids+=($!)
+within 300 queued 2 || echo "FAIL - O4c: B never joined the line"
+touch "$D/h.go"
+within 300 nonempty "$D/order" && s=$(head -1 "$D/order") || s="nobody ran in 300 s"
+ok "$s" A "O4c: the freed slot goes to A, first in line"
+has "$(cat "$D/B.err")" "1 run(s) ahead in line" "O4c: … B's waiting line names the run ahead of it"
+touch "$D/A.go"
+wait "$(w A)"; wait "$(w B)"; wait "$(w h)"
+ok "$(tr '\n' ' ' < "$D/order")" "A B " "O4c: A, then B"
+ok "$(nqueue)" 0 "O4c: no line entry left"
+
+pool o4d
+hold h 1
+python3 "$VS" run --slots 1 -- sh -c "echo A >> '$D/order'" > /dev/null 2> "$D/A.err" &
+echo $! > "$D/A.w"; pids+=($!)
+within 300 queued 1 || echo "FAIL - O4d: A never joined the line"
+python3 "$VS" run --slots 1 --priority -- sh -c "echo P >> '$D/order'" > /dev/null 2> "$D/P.err" &
+echo $! > "$D/P.w"; pids+=($!)
+within 300 has_waiter || echo "FAIL - O4d: P never registered"
+touch "$D/h.go"
+wait "$(w P)"; wait "$(w A)"; wait "$(w h)"
+ok "$(tr '\n' ' ' < "$D/order")" "P A " "O4d: a --priority run takes the freed slot before the line"
+
+pool o4e
+entry qe "queue-1-e.wait" 1 stale
+python3 "$VS" run --slots 1 --slot-wait 20 -- true 2> "$D/e.err"; rc=$?
+ok "$rc" 0 "O4e: an asleep entry ahead (not touched for 60 s) is passed over: rc 0"
+J=$(python3 "$VS" status --slots 1)
+ok "$(js "[(q['pid'], q['asleep']) for q in d['queue']]" "$J")" "[($(w qe), True)]" "O4e: … status lists it asleep"
+ok "$([ -e "$SL/queue-1-e.wait" ] && echo kept || echo reaped)" kept "O4e: … and it is not reaped (its flock is held)"
+touch "$D/qe.go"; wait "$(w qe)"
+
+pool o4f
+hold h 1
+python3 "$VS" run --slots 1 -- sh -c "echo A >> '$D/order'" > /dev/null 2> "$D/A.err" &
+ap=$!; echo "$ap" > "$D/A.w"; pids+=($ap)
+within 300 queued 1 || echo "FAIL - O4f: A never joined the line"
+kill -STOP "$ap"; stopped+=($ap)
+touch "$D/h.go"; wait "$(w h)"
+python3 "$VS" run --slots 1 --slot-wait 120 -- sh -c "echo C >> '$D/order'" > /dev/null 2> "$D/C.err" &
+cp=$!; pids+=($cp)
+within 60 gone "$cp" && s=done || s="C still waiting after 60 s"
+ok "$s" done "O4f: a stopped run ahead in line goes asleep and C takes the slot"
+wait "$cp"; ok "$?" 0 "O4f: … C exits 0"
+kill -CONT "$ap"
+wait "$ap"; ok "$?" 0 "O4f: once A wakes it takes its place again and runs: rc 0"
+ok "$(tr '\n' ' ' < "$D/order")" "C A " "O4f: C, then A"
+
+pool o4g
+python3 "$VS" run --slots 1 -- true 2> /dev/null
+L0=$(ls -A "$SL")
+python3 "$VS" run --slots 1 -- true 2> "$D/g.err"
+ok "$(ls -A "$SL")|$(grep -c waiting "$D/g.err")" "$L0|0" "O4g: an uncontended run leaves the slots dir as it found it (no line entry)"
+
+pool o4h
+entry qh "queue-1-h.wait" 5 touch
+got=$(python3 -B - "$VS" "$SL/queue-1-h.wait" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1]); vs = importlib.util.module_from_spec(spec); spec.loader.exec_module(vs)
+path = sys.argv[2]
+before = "read" if vs._probe_entry(path) is not None else "skipped"
+real = os.stat
+def swap(p, *a, **k):   # the name is reaped and recreated (a new inode) between the probe's open and its stat
+    os.stat = real
+    os.unlink(path)
+    with open(path, "w") as f:
+        f.write('{"pid": 1, "seq": 99}\n')
+    os.utime(path, (1, 1))
+    return real(p, *a, **k)
+os.stat = swap
+got = vs._probe_entry(path)
+os.stat = real
+print(before, "read" if got is not None else "skipped", "kept" if os.path.exists(path) else "gone")
+PY
+)
+ok "$got" "read skipped kept" "O4h: _probe_entry reads a held entry, and skips a name replaced between its open and its stat"
+touch "$D/qh.go"; wait "$(w qh)"
+
+# ======== O5: status lists the line ============================================================================
+pool o5
+entry q5 "queue-1-five.wait" 5 touch
+entry q3 "queue-1-three.wait" 3 stale
+mkdir -p "$SL"; printf '{"pid": 99999, "seq": 1}\n' > "$SL/queue-99999-x.wait"; : > "$SL/.queue-99998-y.tmp"
+J=$(python3 "$VS" status --slots 1)
+ok "$(js "[(q['pid'], q['asleep']) for q in d['queue']]" "$J")" "[($(w q3), True), ($(w q5), False)]" "O5: status lists the line oldest first, with asleep flags"
+ok "$(js "sorted(d['queue'][0])" "$J")" "['asleep', 'cwd', 'kind', 'pid', 'since']" "O5: … each entry {pid, cwd, since, kind, asleep}"
+ok "$(count '99999|99998')" 0 "O5: … and reaps a stale queue-*.wait and .queue-*.tmp"
+touch "$D/q5.go" "$D/q3.go"; wait "$(w q5)"; wait "$(w q3)"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot-own: ALL PASS" || echo "verify-slot-own: SOME FAILED"
 exit "$fail"

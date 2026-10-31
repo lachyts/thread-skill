@@ -13,7 +13,7 @@
 #   release is a close (a co-holder keeps the slot)   V15 a failure injected after the spawn: the slot stays held
 #   until the suite's group is gone   V16 no code calls fcntl.LOCK_UN; the header's close-only contract   V17 the
 #   bounded slot wait (p32-1): `--slot-wait S` (or `=S`) runs out → 76 and a no-verdict line, the command never run;
-#   `--slot-wait 0` is one try, and a free slot is still taken   V18 a bad `--slot-wait` is usage (exit 2)   V19 with
+#   `--slot-wait 0` is one try, and a free slot is still taken while nobody is in line   V18 a bad `--slot-wait` is usage (exit 2)   V19 with
 #   no `--slot-wait`, `run` waits RUN_SLOT_WAIT (4800 s), reconcile-rollout.py's _slot_wait at the default 1800. The Run record
 #   (p29-10, contract item 8): VR1 a suite in a task tree records its start and end (sha, load, count, failing), its
 #   output still split   VR2 --priority   VR3 TERM ends it stopped, the slot free; a SIGKILL leaves no ended line
@@ -360,7 +360,8 @@ has "$(sed -n '1,/^"""$/p' "$VS")" "Release closes the fd and never calls LOCK_U
 
 # ======== V17: the bounded slot wait (p32-1) =================================================================
 # An agent's `run` bounds its own slot wait (RUN_SLOT_WAIT, 4800 s, by default): once it runs out, no verdict (76), the
-# command never run. `--slot-wait 0` is one try, as lead-integrate.py's `verify --slot-wait 0`.
+# command never run. `--slot-wait 0` is one try, as lead-integrate.py's `verify --slot-wait 0`, and takes a free slot while
+# nobody is in line.
 pool v17
 hold h 1
 python3 "$VS" run --slots 1 --slot-wait 1 -- touch "$D/a.ran" > /dev/null 2> "$D/a.err"; rc=$?
