@@ -96,8 +96,8 @@
 # overall, default 450). The review-round recorder runs after them, under LAND_RECORD_TIMEOUT alone: 450 + 60
 # leaves close's 600 s Bash timeout 90 s for the local work. The body runs in a subshell whose fd 1 is
 # stderr, so no child — a hook that daemonizes, git's own maintenance — can ever hold the caller's stdout;
-# git's auto-gc and auto-maintenance are switched off for every git call here. bash 3.2-compatible (macOS); deliberately no
-# `set -u`/`set -e`: every rc is checked, and every array expansion is guarded.
+# git's auto-gc and auto-maintenance are switched off for every git call here. bash 3.2-compatible (macOS);
+# deliberately no `set -u`/`set -e`: every rc is checked, and every array expansion is guarded.
 set -o pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
