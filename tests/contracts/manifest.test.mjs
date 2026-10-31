@@ -84,12 +84,39 @@ test('the manifests name both rollout shapes (ADR 0040)', () => {
   assert.deepEqual(shapeMisses(plugin, market), [])
 })
 
-test('control: a plugin.json description that drops serial fails the shapes check', () => {
-  const plugin = JSON.parse(read('.claude-plugin/plugin.json'))
-  const market = JSON.parse(read('.claude-plugin/marketplace.json'))
-  const dropped = { ...plugin, description: plugin.description.replace(/serial/gi, 'queued') }
-  assert.deepEqual(shapeMisses(dropped, market), ['plugin.json description lacks serial'])
-})
+// One control per description shapeMisses reads, so each of its three checks is shown to catch a removal.
+const SHAPE_CONTROLS = [
+  {
+    name: 'a plugin.json description that drops serial',
+    drop: (plugin, market) => [{ ...plugin, description: plugin.description.replace(/serial/gi, 'queued') }, market],
+    want: ['plugin.json description lacks serial'],
+  },
+  {
+    name: 'a marketplace.json description that drops parallel',
+    drop: (plugin, market) => [plugin, { ...market, description: market.description.replace(/parallel/gi, 'batched') }],
+    want: ['marketplace.json description lacks parallel'],
+  },
+  {
+    name: 'a marketplace.json plugins entry that drops Legs',
+    drop: (plugin, market) => [
+      plugin,
+      {
+        ...market,
+        plugins: market.plugins.map((p) =>
+          p.name === plugin.name ? { ...p, description: p.description.replace(/\bLegs\b/g, 'steps') } : p),
+      },
+    ],
+    want: ['marketplace.json plugins entry "thread" lacks Legs'],
+  },
+]
+
+for (const { name, drop, want } of SHAPE_CONTROLS) {
+  test(`control: ${name} fails the shapes check`, () => {
+    const plugin = JSON.parse(read('.claude-plugin/plugin.json'))
+    const market = JSON.parse(read('.claude-plugin/marketplace.json'))
+    assert.deepEqual(shapeMisses(...drop(plugin, market)), want)
+  })
+}
 
 test('every skill directory has a SKILL.md whose name is the directory', () => {
   assert.ok(skills.length > 0, 'found no skills')
