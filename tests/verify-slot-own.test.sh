@@ -12,9 +12,11 @@
 #   O6b lead-integrate.py's lone --slot-wait: a TERM while it resolves is rc 143, its resolver child gone
 #   O4  the line: ordinary runs take a freed slot in arrival order, after the Integration waiters; a stale entry is
 #       reaped; an asleep one (a stopped waiter) is passed over and kept, and back in its place once it wakes;
-#       _probe_entry reads a name only while it names the inode it opened
+#       _probe_entry reads a name only while it names the inode it opened; a live waiter's heartbeat keeps its place
+#       past the asleep window
 #   O5  status lists the line, oldest first, with asleep flags, and reaps stale entries
-#   O7  the head's age bound: a run at the head of the line for head_age waits beside the Integration waiters
+#   O7  the head's age bound: a run at the head of the line for head_age waits beside the Integration waiters; an
+#       asleep entry ahead counts for nothing, and one that wakes resets the clock
 # Structural, never a stopwatch (p22-1): holders hold until a `.go` file appears; every wait is a `within <s>` poll
 # whose bound only slows a real failure. Every background pid is recorded and stopped only by that pid.
 # Hermetic: every pool lives under mktemp (THREAD_VERIFY_SLOTS_DIR), the Run record too.
@@ -295,12 +297,14 @@ nqueue() { count '^queue-.*\.wait$'; }
 nwaiters() { count '^waiter-.*\.wait$'; }
 queued() { [ "$(nqueue)" -ge "$1" ]; }
 has_waiter() { [ "$(nwaiters)" -ge 1 ]; }
-# entry <name> <file in SL> <seq|-> <touch|stale|still>: a live line or waiter entry held LOCK_EX until <name>.go, its
-# record {pid, cwd, since, kind, poll 0.1[, seq]}; touch: its mtime refreshed every 0.2 s (an awake waiter); stale: set
-# 60 s back once and never touched (a stopped one); still: never touched.
+# entry <name> <file in SL> <seq|-> <touch|stale|still|wake>: a live line or waiter entry held LOCK_EX until <name>.go,
+# its record {pid, cwd, since, kind, poll 0.1[, seq]}; touch: its mtime refreshed every 0.2 s (an awake waiter); stale:
+# set 60 s back once and never touched (a stopped one); still: never touched; wake: set 60 s back once, then touched
+# every 0.2 s once <name>.wake exists (a stopped waiter that wakes).
 cat > "$tmp/entry.py" <<'PY'
 import fcntl, json, os, sys, time
 path, go, seq, mode = sys.argv[1:5]
+wake = os.path.splitext(go)[0] + ".wake"
 os.makedirs(os.path.dirname(path), exist_ok=True)
 fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
 fcntl.flock(fd, fcntl.LOCK_EX)
@@ -309,12 +313,12 @@ if seq != "-":
     rec["seq"] = int(seq)
 os.ftruncate(fd, 0)
 os.pwrite(fd, (json.dumps(rec) + "\n").encode(), 0)
-if mode == "stale":
+if mode in ("stale", "wake"):
     t = time.time() - 60
     os.utime(fd, (t, t))
 open(go + ".ready", "w").close()
 while not os.path.exists(go):
-    if mode == "touch":
+    if mode == "touch" or (mode == "wake" and os.path.exists(wake)):
         os.utime(fd)
     time.sleep(0.2)
 PY
@@ -422,6 +426,25 @@ PY
 ok "$got" "read skipped kept" "O4h: _probe_entry reads a held entry, and skips a name replaced between its open and its stat"
 touch "$D/qh.go"; wait "$(w qh)"
 
+# O4i: the heartbeat. Every other O4 waiter waits less than QUEUE_FRESH_MIN; here a real waiter's entry is set 60 s back
+# from outside, as if it had waited that long, and only its own touch on each poll brings it back awake.
+pool o4i
+hold h 1
+python3 "$VS" run --slots 1 -- touch "$D/i.ran" > /dev/null 2> "$D/i.err" &
+ip=$!; echo "$ip" > "$D/i.w"; pids+=($ip)
+within 300 queued 1 || echo "FAIL - O4i: the waiter never joined the line"
+qi=$(ls -d "$SL"/queue-*.wait 2>/dev/null | head -1)
+python3 -c 'import os, sys, time; t = time.time() - 60; os.utime(sys.argv[1], (t, t))' "$qi"
+ok "$?" 0 "O4i: a live waiter's line entry, its mtime set 60 s back from outside the waiter"
+awake_in_line() { [ "$(js "[q['asleep'] for q in d['queue'] if q['pid'] == $1]" "$(python3 "$VS" status --slots 1)")" = "[False]" ]; }
+within 30 awake_in_line "$ip" && s=awake || s="still asleep after 30 s"
+ok "$s" awake "O4i: … its heartbeat touches it on its next poll: status reads it awake again"
+python3 "$VS" run --slots 1 --slot-wait 2 -- touch "$D/l.ran" > /dev/null 2> "$D/l.err"; rc=$?
+ok "$rc|$([ -e "$D/l.ran" ] && echo ran || echo never)" "76|never" "O4i: … a later run --slot-wait 2 still waits behind it: 76, never ran"
+has "$(cat "$D/l.err")" "1 run(s) ahead in line" "O4i: … its waiting line names the run ahead"
+touch "$D/h.go"; wait "$(w h)"
+wait "$ip"; ok "$?|$([ -e "$D/i.ran" ] && echo ran || echo never)" "0|ran" "O4i: … and the waiter then takes the freed slot and runs: rc 0"
+
 # ======== O5: status lists the line ============================================================================
 pool o5
 entry q5 "queue-1-five.wait" 5 touch
@@ -434,12 +457,35 @@ ok "$(count '99999|99998')" 0 "O5: … and reaps a stale queue-*.wait and .queue
 touch "$D/q5.go" "$D/q3.go"; wait "$(w q5)"; wait "$(w q3)"
 
 # ======== O7: the head's age bound ==============================================================================
+# o7.py VS SL HEAD_AGE MAX_WAIT [ENTRY WAKE]: acquire(1) with that head_age and max_wait; prints slot|none and its
+# `head of the line` lines. With ENTRY and WAKE: at its first waiting line (its first miss, in the poll that started the
+# head's clock) it creates WAKE and waits there until ENTRY's helper has touched it, so the next poll reads it awake
+# however long that took (the age check runs only in a poll, after its scan); it also prints the runs ahead its polls
+# counted, each change once.
 cat > "$tmp/o7.py" <<'PY'
-import importlib.util, sys
+import importlib.util, os, sys, time
 spec = importlib.util.spec_from_file_location("verify_slot", sys.argv[1]); vs = importlib.util.module_from_spec(spec); spec.loader.exec_module(vs)
-msgs = []
-s = vs.acquire(1, max_wait=float(sys.argv[4]), where=sys.argv[2], poll=0.1, on_wait=msgs.append, head_age=float(sys.argv[3]))
-print("slot" if s is not None else "none", [m for m in msgs if "head of the line" in m])
+msgs, seen, wake = [], [], sys.argv[5:7]
+if wake:
+    real = vs._ahead_in_line
+    def spy(line, place):
+        n = real(line, place)
+        if not seen or seen[-1] != n:
+            seen.append(n)
+        return n
+    vs._ahead_in_line = spy
+def on_wait(m):
+    msgs.append(m)
+    if wake and not os.path.exists(wake[1]):
+        open(wake[1], "w").close()
+        end = time.monotonic() + 60
+        while time.time() - os.stat(wake[0]).st_mtime > 2:
+            if time.monotonic() > end:
+                seen.append("never woke")
+                break
+            time.sleep(0.01)
+s = vs.acquire(1, max_wait=float(sys.argv[4]), where=sys.argv[2], poll=0.1, on_wait=on_wait, head_age=float(sys.argv[3]))
+print("slot" if s is not None else "none", [m for m in msgs if "head of the line" in m], *([seen] if wake else []))
 PY
 pool o7
 entry iw "waiter-1-i.wait" - still
@@ -449,6 +495,16 @@ ok "$(python3 -B "$tmp/o7.py" "$VS" "$SL" 600 2)" "none []" "O7b: … not before
 entry q7 "queue-1-seven.wait" 1 touch
 ok "$(python3 -B "$tmp/o7.py" "$VS" "$SL" 0.5 2)" "none []" "O7c: behind an awake run in line it is no head, so it never ages"
 touch "$D/iw.go" "$D/q7.go"; wait "$(w iw)"; wait "$(w q7)"
+
+pool o7d
+entry iw "waiter-1-i.wait" - still
+entry qs "queue-1-s.wait" 1 stale
+ok "$(python3 -B "$tmp/o7.py" "$VS" "$SL" 1.0 60)" "slot ['at the head of the line for 1s: now waiting beside the Integration waiters']" \
+  "O7d: an asleep entry ahead counts for nothing: the run is the head, and it ages"
+entry qw "queue-2-w.wait" 2 wake
+ok "$(python3 -B "$tmp/o7.py" "$VS" "$SL" 1.0 3 "$SL/queue-2-w.wait" "$D/qw.wake")" "none [] [0, 1]" \
+  "O7e: an entry ahead that wakes resets the clock: the head (0 ahead) sees it wake (1 ahead) and never ages within max_wait"
+touch "$D/iw.go" "$D/qs.go" "$D/qw.go"; wait "$(w iw)"; wait "$(w qs)"; wait "$(w qw)"
 
 echo; [ "$fail" -eq 0 ] && echo "verify-slot-own: ALL PASS" || echo "verify-slot-own: SOME FAILED"
 exit "$fail"
