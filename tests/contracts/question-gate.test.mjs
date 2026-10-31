@@ -26,7 +26,7 @@
 //       own file's rows.
 //   q7  the Framing in script-built rounds: estate-dispatch.py's NOTE_INVITE is asking.md § 3's and orient-all § 5's
 //       Note; asking.md § 6's table rows each kind against the five points (a sign-off's, an Unpark offer's and the pick
-//       list's pick none, by ADR 0008, ADR 0041 and ADR 0060); readiness-grade § Each decision requires `goal` and `stakes` with
+//       list's pick none, by ADR 0008, ADR 0041 and ADR 0061); readiness-grade § Each decision requires `goal` and `stakes` with
 //       `owner: yours`; orient-all § 4 and schedule's **The round.** say the questions carry the grade's Framing.
 // One pure function per rule over a files map, so every control mutates one place; a python child loads
 // estate-dispatch.py, gated_inputs.py and reflect.py's ASKED_AHEAD_RE (by its source line). Reads files only.
@@ -310,7 +310,7 @@ function q7(F, K) {
   const row = (kind) => (s6.split('\n').find((l) => l.startsWith(`| ${kind}`)) ?? '').split('|').slice(1, -1).map((c) => c.trim())
   for (const kind of ['One call', 'Ungraded', 'Sign-off', 'Unpark', 'Pick list']) if (row(kind).length !== 6) out.push(`asking.md § 6's table has no ${kind} row of six cells`)
   if (!row('One call')[2]?.includes('`goal`') || !row('One call')[3]?.includes('`stakes`')) out.push("asking.md § 6's One call row does not take `goal` and `stakes`")
-  for (const [kind, adr] of [['Sign-off', 'ADR 0008'], ['Unpark', 'ADR 0041'], ['Pick list', 'ADR 0060']]) {
+  for (const [kind, adr] of [['Sign-off', 'ADR 0008'], ['Unpark', 'ADR 0041'], ['Pick list', 'ADR 0061']]) {
     const pick = row(kind)[4] ?? ''
     if (!pick.startsWith('none') || !pick.includes(adr)) out.push(`asking.md § 6's ${kind} pick is not none by ${adr}: ${pick}`)
   }
@@ -468,6 +468,6 @@ test('control q7: asking.md without the Note, orient-all § 5 without `stakes`, 
   only(swap(FILES, ASKING, 'end with "What would make this wrong for you?"', 'end with a question'), CONSTS, ['q1', 'q7'], 'invite')
   only(swap(FILES, ORIENT_ALL, '`stakes`, the recommendation first', 'the recommendation first'), CONSTS, ['q7'], 'stakes')
   only(swap(FILES, ASKING, '| Sign-off |', '| Signing |'), CONSTS, ['q7'], 'sign-off row')
-  only(swap(FILES, ASKING, '| none: where his attention goes is his (ADR 0060) |', '| the top project, recommended |'), CONSTS, ['q7'], 'pick list pick')
+  only(swap(FILES, ASKING, '| none: where his attention goes is his (ADR 0061) |', '| the top project, recommended |'), CONSTS, ['q7'], 'pick list pick')
   only(swap(FILES, ASKING, '| Pick list |', '| Picks |'), CONSTS, ['q7'], 'pick list row')
 })

@@ -19,6 +19,11 @@
 // - a node test that binds reconcile-rollout.py (with a 'next' or 'completion-verify' literal), lead-integrate.py
 //   (with 'verify') or verify-slot.py with path.join and spawns python3, bash or sh passes THREAD_HEAT_LEVEL as an env
 //   key, whether or not its env spreads process.env (the backstop is missing when it runs alone).
+// The slot marker (p34-1): a command verify-slot.py runs in a held slot sees VERIFY_SLOT_HELD=1, and the gate and the
+// lead's Integration verify run the whole suite inside one. So the marker never leaks into an arm:
+// - tests/run.sh unsets it, one top-level line;
+// - a shell suite that names VERIFY_SLOT_HELD on a non-comment line unsets it itself, one top-level line (it may run
+//   alone, inside a slot), and tests/verify-slot-own.test.sh is among them.
 // A heuristic, like tests/contracts/run-record-hermetic.test.mjs (copied in shape): a comment never counts.
 // Pure matchers, so the real tree and the controls run through the same code. Reads files only.
 import { test } from 'node:test'
@@ -49,6 +54,11 @@ export const shellHeat = (text) => {
     (/lead-integrate/.test(c) && /\bverify\s+--/.test(c)) || (/completion-verify/.test(c) && /--run\b/.test(c))
 }
 export const shellHeatPinned = (text) => HEAT_PIN.test(text) || SH_SOURCES_PIN.test(text)
+
+// The slot marker's unset: one top-level line (never indented, so never inside a function), other names allowed before it.
+const HELD_UNSET = /^unset (?:\S+ )*VERIFY_SLOT_HELD(?:\s|$)/m
+export const shellNamesHeld = (text) => /\bVERIFY_SLOT_HELD\b/.test(code(text))
+export const shellUnsetsHeld = (text) => HELD_UNSET.test(text)
 
 // ---- node ----------------------------------------------------------------------------------------------------
 
@@ -127,6 +137,18 @@ test('the Heat hold (p31-4): every node test that spawns next, verify or verify-
   assert.deepEqual(bad, [], "pass THREAD_HEAT_LEVEL: '0' in the spawn env")
 })
 
+test('the slot marker (p34-1): tests/run.sh unsets VERIFY_SLOT_HELD, one top-level line', () => {
+  assert.match(read('tests/run.sh'), /^unset VERIFY_SLOT_HELD$/m, 'tests/run.sh: unset VERIFY_SLOT_HELD')
+})
+
+test('the slot marker (p34-1): every shell suite that names VERIFY_SLOT_HELD unsets it at top level', () => {
+  const naming = shellFiles().filter((f) => shellNamesHeld(read(f)))
+  // Not vacuous: the suite that tests the marker is seen.
+  assert.ok(naming.includes('tests/verify-slot-own.test.sh'), 'tests/verify-slot-own.test.sh is seen as naming the marker')
+  const bad = naming.filter((f) => !shellUnsetsHeld(read(f)))
+  assert.deepEqual(bad, [], 'unset VERIFY_SLOT_HELD, one top-level line')
+})
+
 // ---- controls ------------------------------------------------------------------------------------------------
 
 test('control: the shell matchers', () => {
@@ -175,4 +197,14 @@ test('control: the heat matchers', () => {
   assert.ok(nodeHeatPinned("{ ...process.env, THREAD_HEAT_LEVEL: '0' }"))
   assert.ok(!nodeHeatPinned('{ ...process.env, THREAD_EVENTS_DIR: d }'), 'a node env missing the key')
   assert.ok(!nodeHeatPinned('// THREAD_HEAT_LEVEL is set by run.sh'), 'a comment')
+})
+
+test('control: the slot marker matchers (p34-1)', () => {
+  assert.ok(shellUnsetsHeld('unset VERIFY_SLOT_HELD\n'))
+  assert.ok(shellUnsetsHeld('unset THREAD_TOML_PYTHONS VERIFY_SLOT_HELD   # the gate runs this suite in a slot\n'))
+  assert.ok(!shellUnsetsHeld('# unset VERIFY_SLOT_HELD\n'), 'a commented unset')
+  assert.ok(!shellUnsetsHeld('  unset VERIFY_SLOT_HELD\n'), 'an indented unset (inside a function) is no top-level line')
+  assert.ok(!shellUnsetsHeld('unset VERIFY_SLOT_HELD_X\n'), 'another name')
+  assert.ok(shellNamesHeld('out=$(sh -c \'echo "${VERIFY_SLOT_HELD-unset}"\')\n'))
+  assert.ok(!shellNamesHeld('# a command in a slot sees VERIFY_SLOT_HELD=1\n'), 'a mention only in prose (a comment)')
 })

@@ -335,7 +335,7 @@ const PHASE_TASKS = { 'phase-lab-p1-1-a': ['open', 1], 'phase-lab-p1-2-b': ['ope
   'phase-lab-plugin-p1-1-g': ['open', 1], 't-phase-key-only': ['open', 1] }
 for (const [slug, [status, n]] of Object.entries(PHASE_TASKS)) T4(`${slug}.md`, task(status, ['Phase Lab'], `\nphase: ${n}`))
 
-// ---- Vault V5: the big-project test (ADR 0060), each project's ownSession ----------------------------------------
+// ---- Vault V5: the big-project test (ADR 0061), each project's ownSession ----------------------------------------
 // The design-record dirs are plain directories under HOME/repos (no git), made before case 9's snapshot. rel-design sits
 // under the scan's cwd S, so a relative `repos:` entry would find it if the test ever read relative paths.
 const V5 = path.join(S, 'v5')
@@ -995,7 +995,7 @@ print(json.dumps({"got": [m.still_to_start(st, link, sup) for st, link, sup in r
   assert.deepEqual(drift, [], "estate-scan's _link_key and estate-rank's slug_key fold every value alike")
 })
 
-// ---- 19. ownSession: the big-project test (ADR 0060) ----------------------------------------------------------------
+// ---- 19. ownSession: the big-project test (ADR 0061) ----------------------------------------------------------------
 // The key wins, read stripped and case-blind; else the first declared repo, in declared order, that is absolute after
 // expanduser, a directory, and holds a CONTEXT.md file and a docs/adr/ directory with a `*.md` file. Pure reads, so the
 // --deadline 0 run reads it too and the project rows stay equal (7c's form).

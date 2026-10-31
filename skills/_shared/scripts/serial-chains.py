@@ -14,7 +14,11 @@ launch-folders file and its own tree's `.claude-plugin/plugin.json`; it never re
 
 Surfaces (CONTEXT.md **Surface**). A surface is a place a chain writes, as a canonical token of one of five kinds:
   repo:<absolute path>  a filesystem place: overlaps on equality or containment at a `/` boundary, case-folded
-                        (APFS); two checkouts of one origin are disjoint (the rollout clone is its own checkout).
+                        (APFS); two checkouts of one origin are disjoint (the rollout clone is its own checkout),
+                        and so is a checkout nested inside another by path (a separate repo with its own index, as
+                        `~/Projects` holds its own Narcissus clone): containment parts when both paths sit in git
+                        checkouts and the inner one's toplevel is not the outer one's (p33-3). An outer path in no
+                        checkout still covers every checkout beneath it.
   vault:<path>          a path relative to the vault root: overlaps on a case-folded prefix at a segment boundary.
   vault                 the whole vault: overlaps every vault token. Only a member that names no project and no
                         path claims it unasked, or one that writes it as a literal token (ADR 0059).
@@ -111,8 +115,10 @@ one `serial-chains:` line: no --tasks, a task note not found, a malformed --surf
 unloadable, or plugin.json unreadable (ruling (c) cannot be checked, so the plan fails closed).
 
 The pure helpers (parse_token, fmt_token, overlaps, overlap_pairs, read_surfaces, norm_origin) touch neither the
-filesystem nor git; unfinished-rollout.py imports them. claim and the ruling-(c) origin read are the only code that
-runs git, and neither is exported. Importing this file has no side effects.
+filesystem nor git; unfinished-rollout.py imports them. overlaps and overlap_pairs take an optional toplevel resolver
+(Git.checkout) for the nested-checkout rule, and are purely textual without one. claim, the grouping's nested-checkout
+read and the ruling-(c) origin read are the only code that runs git; of it, only the Git class is exported, for
+unfinished-rollout.py's own nested-checkout read. Importing this file has no side effects.
 """
 import argparse
 import importlib.util
@@ -187,8 +193,22 @@ def _within(x: str, y: str) -> bool:
     return x == y or x.startswith(y + "/") or y.startswith(x + "/")
 
 
-def overlaps(a, b) -> bool:
-    """Whether two tokens (strings or (kind, value) pairs) name a shared place, by the rules in the header."""
+def _nested_apart(va: str, vb: str, toplevel) -> bool:
+    """Two repo: values, one strictly inside the other: apart when both sit in git checkouts and the inner one's is not
+    the outer one's (a separate checkout nested by path, with its own index). toplevel maps a path to its checkout's
+    toplevel, or None (in no checkout); an outer path in no checkout covers everything beneath it, so it never parts."""
+    xf, yf = va.casefold(), vb.casefold()
+    if xf == yf:
+        return False
+    outer, inner = (va, vb) if xf == "/" or yf.startswith(xf + "/") else (vb, va)
+    to, ti = toplevel(outer), toplevel(inner)
+    return bool(to and ti) and to.casefold() != ti.casefold()
+
+
+def overlaps(a, b, toplevel=None) -> bool:
+    """Whether two tokens (strings or (kind, value) pairs) name a shared place, by the rules in the header. With a
+    toplevel resolver (Git.checkout), two repo: tokens that meet only by containment across nested checkouts are
+    disjoint; without one, the comparison is purely textual."""
     (ka, va), (kb, vb) = _tok(a), _tok(b)
     if ka == "any" or kb == "any":
         return True
@@ -199,12 +219,14 @@ def overlaps(a, b) -> bool:
         return x == y
     if ka == "vault":
         return not x or not y or _within(x, y)
-    return x == "/" or y == "/" or _within(x, y)
+    if not (x == "/" or y == "/" or _within(x, y)):
+        return False
+    return toplevel is None or not _nested_apart(va, vb, toplevel)
 
 
-def overlap_pairs(A, B):
-    """Every (a, b) with a from A and b from B that overlap, in order."""
-    return [(a, b) for a in A for b in B if overlaps(a, b)]
+def overlap_pairs(A, B, toplevel=None):
+    """Every (a, b) with a from A and b from B that overlap, in order (toplevel as overlaps takes it)."""
+    return [(a, b) for a in A for b in B if overlaps(a, b, toplevel)]
 
 
 def _item_value(raw: str) -> str:
@@ -324,7 +346,7 @@ def plugin_origin() -> str:
         die(f"cannot read the plugin's repository from {PLUGIN_JSON}: {e}: ruling (c) cannot be checked")
 
 
-# ---- git (claim and the ruling-(c) read only) -------------------------------------------------------
+# ---- git (claim, the nested-checkout reads and the ruling-(c) read; only Git is exported) --------
 
 class Git:
     """Read-only git calls with the repo-local env vars scrubbed, cached per directory."""
@@ -353,6 +375,17 @@ class Git:
             top = self._run(d, "rev-parse", "--show-toplevel")
             self._top[d] = os.path.realpath(top) if top else None
         return self._top[d]
+
+    def checkout(self, path):
+        """The toplevel of the checkout a path is in, read from its nearest existing directory, or None: the
+        resolver overlaps takes to part two repo: tokens nested across separate checkouts."""
+        d = os.path.normpath(path)
+        while not os.path.isdir(d):
+            parent = os.path.dirname(d)
+            if parent == d:
+                return None
+            d = parent
+        return self.toplevel(d)
 
     def origin(self, d):
         if d not in self._origin:
@@ -896,7 +929,7 @@ def cmd_plan(args) -> int:
 
     for i, a in enumerate(chained):
         for b in chained[i + 1:]:
-            if overlap_pairs(info[a]["surfaces"], info[b]["surfaces"]):
+            if overlap_pairs(info[a]["surfaces"], info[b]["surfaces"], git.checkout):
                 union(a, b)
     in_deps, ext = {}, {}
     for s in chained:

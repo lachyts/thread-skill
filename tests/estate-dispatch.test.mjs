@@ -231,7 +231,7 @@ const LONG60 = 'Keep the flat-file store and migrate it in a second pass now'
 const REC40 = 'Ship the lab rig on the old firmware now'
 // The Framing's Note (asking.md § 3), the last words of every question rounds and preflight build (ADR 0054 d8).
 const INVITE = 'What would make this wrong for you?'
-// The orient prompt's last line for a project ticked on the pick list (ADR 0060): a big project's (PICK_LINE, its
+// The orient prompt's last line for a project ticked on the pick list (ADR 0061): a big project's (PICK_LINE, its
 // counts), and a small project's (PICK_LINE_SMALL), ticked for its Orient tasks alone.
 const PICKED = (counts) => `Ticked on orient-all's pick list on ${TODAY} (${counts}): this project keeps its own session, so its ` +
   'One calls and Grills are asked here and its rollout is scheduled here.'
@@ -1009,7 +1009,7 @@ test('D15. acceptance: sessions starts written notes, live rollouts only on the 
   assert.deepEqual(bare.left.map((x) => [x.action, x.why]).filter(([a]) => a !== null), [])
   assert.equal(bare.left.length, ok(PLAN()).rollouts.length)
   // Order: written notes, live executes, repairs, orients last. Act and Bo are small projects with an Orient task, so
-  // each is on the pick list and gets its orient only when ticked (ADR 0060).
+  // each is on the pick list and gets its orient only when ticked (ADR 0061).
   assert.ok(!bare.items.some((x) => x.kind === 'orient'), 'no orient starts unticked')
   const all = ok(sessions(SIGNED_FILE(), ['--wrote', WROTE_PAR, '--wrote', WROTE_SER, '--status', 'signoff-rollout-2026-10-19=8',
     '--status', `${CLEAN}=11`, '--status', 'live-rollout-2026-10-19=7', '--open', 'Act', '--open', 'Bo']))
@@ -1512,7 +1512,7 @@ test('D22. the question gate: preflight and rounds ask only his decisions, in th
   assert.deepEqual(snap(VF), VF_BEFORE, 'only the copies were written')
 })
 
-// ---- The big-project fixture (D23; ADR 0060) ----------------------------------------------------------------------
+// ---- The big-project fixture (D23; ADR 0061) ----------------------------------------------------------------------
 // Its own vault VB, scanned with --deadline 0 like V, its three rollout summaries injected into a copy, ranked for real.
 // Big (orient: own) has serial big-ready (Ready), big-call (One call), big-grill (Grill, two decisions) and big-orient
 // (Orient), and a live rollout whose big-gated sign-off is pending. BigDue is big by its design record (HOME/repos/bigrec

@@ -433,6 +433,13 @@ carries one, and its `reason` on an indented `→` line for `stalled` and `waiti
 `Moving: not read offline (a PR hold stands)` render as they are. A `stalled` reading is a reason to look (§ The
 Watchdog's reading), never by itself a recommendation to resume.
 
+**The Hold line** (ADR 0060), right under the Moving line, only for a rollout awaiting sign-off or halted: run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py hold --rollout <rollout-slug>` (read-only;
+its one JSON line `{rollout, shape, scope, why, held, released}`). Scope `released`: `Hold: released <released> to
+serial chains (<why>)`: a chain may be scheduled on the root while it waits, and on resume execute's *Surface re-check*
+makes it wait its turn for that chain; it is still the repo's one unfinished parallel rollout. Scope `whole`: `Hold:
+holds <held> (<why>)`. Exit 2: `Hold: not read: <its line>`.
+
 **The queue-state table.** One group per in-count `queueState`, in this order, each task on one line:
 
 | `queueState` | Group | Each task shows |
@@ -771,7 +778,14 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
 - **Stall.** When `stall` is set: each claimed task with its owner and its Leg's outcome, then `stall.why`.
 - **Restart.** When `restart` is set: `Leg <restart.leg>` in `restart.launch` (or "any launch, from
   `restart.cwd`" when `restart.anyLaunch`), its `task`, "take-over" when `restart.takeOver`, and "blocked by
-  `<restart.blockedBy>`" when set. Its `prompt` is printed, fenced, only where an action below hands it to Lachy.
+  `<restart.blockedBy>`" when set. A `surface held by [[<B>]] (<token>)` blocker (ADR 0060) reads "waits its turn:
+  [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
+  Its `prompt` is printed, fenced, only where an action below hands it to Lachy.
+- **Hold** (ADR 0060), from `hold`. Scope `stuck`: `Holds only <held>` with the `rows` that hold them (each `[[slug]]`
+  with its `state`), then `Released <released>` when it is not empty: other chains and parallel runs may use those
+  places now. On resume the chain reclaims them, and waits its turn for any that another rollout took meanwhile. Scope
+  `whole`: `Holds its whole claim (<held>)`, plus `hold.why` when `hold.warn` is set (a stuck chain that failed closed).
+  No block for a terminal chain.
 
 A terminal chain (`complete`, `dropped`, `superseded` or `incomplete`: `begin` refuses each) has no Leg to act next,
 so leg.py prints it no `restart`, no `next` and an empty `smoke`: its report has no Restart and no Smoke list.
@@ -801,7 +815,10 @@ so leg.py prints it no `restart`, no `next` and an empty `smoke`: its report has
   inherits it, so its needs-you item's `/thread:repair` would start the same Leg.
 - S11 `stalled` → `/thread:repair [[<rollout>]]`.
 - S12 `stuck` → `/thread:repair [[<rollout>]]`: sign each gate, hand back a block, or defer it with its dependants.
-- S13 `not-started` or `ready` → `/thread:execute [[<rollout>]]` as `restart.launch`.
+  Meanwhile it holds only the surfaces its Hold block lists (ADR 0060), so other rollouts carry on beside it.
+- S13 `not-started` or `ready` → `/thread:execute [[<rollout>]]` as `restart.launch`; with `restart.blockedBy`
+  `surface held by [[<B>]] (<token>)`, the chain waits its turn: wait for [[<B>]] to land its rows there
+  (`/thread:status [[<B>]]`), then run it.
 
 The order is the precedence, as § 4's is: a lineage or an incomplete note stops everything, a halt comes before any
 restart, and a Session that may still be live (a pending or started restart, an open Leg, a started hand-over) is

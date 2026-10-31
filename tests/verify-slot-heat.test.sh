@@ -150,7 +150,7 @@ kill -TERM "$W"; wait "$W"; rc=$?
 ok "$rc|$(count "$D/starts")" "76|0" "R1: a TERM while heat-held exits 76, the command never run"
 has "$(cat "$D/err")" "verify-slot: no verdict: stopped while the Mac was hot (heat: heavy); exit 76" "R1: … with its no-verdict line"
 ok "$(grep -c 'waiting (heat: heavy)' "$D/err")" 1 "R1: the heat line is said once while the reason holds"
-J=$(python3 "$VS" status)
+J=$(python3 "$VS" status --slots 1)
 ok "$(js "d['heat']" "$J")" "{'level': 0, 'name': 'nominal'}" "R1: status's heat key follows the reading (pinned 0)"
 
 # ======== R2: heavy mid-run never stops a suite ===========================================================

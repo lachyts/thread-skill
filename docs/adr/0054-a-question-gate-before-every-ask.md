@@ -84,7 +84,7 @@ rows: 43 cited, 13 follow-up (p30-10 13), 2 listed, 7 no ask, 3 designed out. Th
 p30-5 (PR #226) is on main, its step 4 cited in three units. p30-4 (the approved queue) removed its 14 rows. Orient
 § 3.5's Priorities card (p30-6, Chorus ADR 0110 d5) added one `cited` row. p30-9 (ADR 0057) removed its 2 rows and
 added orient § 9's cited *gate* row: the execute handoff, decided and never asked. p29-7 (ADR 0048) added repair
-§ 3g's cited row: Lachy's ack of a Lane hold. p35-1 (ADR 0060) added orient-all § 7's cited row: the pick list.
+§ 3g's cited row: Lachy's ack of a Lane hold. p35-1 (ADR 0061) added orient-all § 7's cited row: the pick list.
 
 | File | § | Anchor | Owner | Disposition | Task |
 | --- | --- | --- | --- | --- | --- |

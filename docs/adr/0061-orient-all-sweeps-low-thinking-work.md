@@ -1,4 +1,4 @@
-# 0060 — orient-all sweeps low-thinking work; big projects keep their own sessions
+# 0061 — orient-all sweeps low-thinking work; big projects keep their own sessions
 
 Date: 2026-10-31
 Status: accepted. Grilled with Lachy on 2026-10-29, mid `/thread:orient-all`; written for the vault task

@@ -25,6 +25,7 @@ From September to 21 October about 150 to 185 hours of rollout time went to stal
 ## Consequences
 
 - Every whole-rollout halt in execute must justify itself against the first bullet, or narrow.
+- Amended by ADR 0060: the kept halts gain `surface held: [[<chain>]] writes <token>` and `surface re-check failed` (execute § 4.5's *Surface re-check*). A parallel rollout that released its Project root while it waited finds a chain on it on resume, and every task writes that root, so it halts whole until the chain lands its rows there.
 - Every stop and every resume lands in the Run record, whatever caused it, so a Reflection can price it (ADR 0051).
 - Which Login a recovered lead moves to, and how rollouts spread across Logins, stay Chorus's (its Login-spread task); thread-skill decides nothing about Logins.
 

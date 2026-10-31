@@ -3,7 +3,7 @@
 The estate pass's second step (ADR 0041; CONTEXT.md § Estate). After the Estate scan, one grading agent per project
 gives each of its open tasks a **Readiness grade**, and `estate-rank.py` ranks the graded work into the **Ranked
 slate**: candidate runs with their **Review load**, the decision rounds, the projects that need their own orient
-(offered on orient-all's pick list, `estate-dispatch.py plan`'s `pick[]`, ADR 0060, started only when ticked), and
+(offered on orient-all's pick list, `estate-dispatch.py plan`'s `pick[]`, ADR 0061, started only when ticked), and
 the **Unpark offer** for each parked project with ready work. Scripts scan, the model decides: the grade is the
 model's half, and everything after it is the script's. This file is the grading agents' brief and the ranking's prose
 contract; the script's docstring holds its output schema. Two leads run both: `orient-all`
@@ -34,7 +34,7 @@ The lead runs one read-only agent per home project with gradeable tasks, side by
 - this file.
 
 Each agent returns one JSON object (§ Output). The lead saves each answer to a scratch file and runs the ranker over
-all of them (§ The ranking). A big project's tasks (CONTEXT.md **Big project**, ADR 0060) are graded the same way, for
+all of them (§ The ranking). A big project's tasks (CONTEXT.md **Big project**, ADR 0061) are graded the same way, for
 the pick list's counts and the Grade log only: their decisions wait for that project's own session, where schedule's
 Pre-flight (schedule § 1.5) puts them to Lachy. An answer that does not parse, or a task the ranker lists in
 `invalid[]` (a decision of his without `goal` or `stakes` among the causes), gets one re-ask that names its errors; anything still invalid after that is shown as ungraded, never guessed. The agent
@@ -115,7 +115,7 @@ Every decision, in every grade, carries:
   included) or any sign-off (ADR 0008) is `yours`, never `technical` or `priorities`; a fork about spend alone is
   `priorities` (Chorus ADR 0108 d4: spend is never asked), its gate in `gates[]`. A fork the code, the ADRs, the
   data or research could settle is `technical` whatever the confidence, never `yours`: at low confidence it is the
-  session's (§ The grade, kind 3). On 2026-10-29, 18 of 25 small-project One calls were technical (ADR 0060).
+  session's (§ The grade, kind 3). On 2026-10-29, 18 of 25 small-project One calls were technical (ADR 0061).
 - `goal` (a decision of his): one plain sentence on how the fork ties to the project's goal.
 - `stakes` (a decision of his): one plain line per option, in the options' order, saying what that option gains and
   costs (quality, robustness, his time, speed).
@@ -254,7 +254,7 @@ script's docstring). It writes nothing.
 6. **Home name, then slug**, so the order is total and a rerun is byte-equal.
 
 Orient tasks have no rank. They follow the ranked tasks, by home and slug, and `orient[]` lists them by project, each
-offered on orient-all's pick list (`estate-dispatch.py plan`'s `pick[]`, ADR 0060), started only when ticked. A parked
+offered on orient-all's pick list (`estate-dispatch.py plan`'s `pick[]`, ADR 0061), started only when ticked. A parked
 project is never listed there: its Orient tasks stay in `tasks[]` and wait on its Unpark offer, as its One calls and Grills do (**decisions[]** below), so the pass
 starts no session on a shelved project. A parked project with no Ready work gets no offer and stays shelved; once
 unparked, by an offer or by hand, the next pass lists its Orient tasks.

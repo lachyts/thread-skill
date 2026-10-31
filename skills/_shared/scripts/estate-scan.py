@@ -32,7 +32,7 @@ unfinished-rollout.py check and reconcile-rollout.py status. Restated, each cite
 The vault (pure Python, never under the deadline):
 - Projects: notes under Work/Projects outside Archive/, tagged `project`, with RT.dead_why None (not the `archived`
   tag, not status done/merged/dropped, not `done: true` or "true").
-- Own session (ADR 0060; CONTEXT.md **Big project**): each project row's ownSession. The note's `orient:` key, own or
+- Own session (ADR 0061; CONTEXT.md **Big project**): each project row's ownSession. The note's `orient:` key, own or
   sweep (read stripped and case-blind), wins; else a declared repo path qualifies when it is absolute after
   expanduser (probe_repo's rule), a directory, with a CONTEXT.md file and a docs/adr/ directory holding at least one
   `*.md` file (any case), read with plain os calls (an OSError reads false), never a probe, so --deadline 0 reads it
@@ -207,7 +207,7 @@ LOCAL_REPO_ENV = frozenset({
 LINK_WHY = (("not a project note (", "not a project"), ("ambiguous (", "ambiguous"), ("area note (", "area note"),
             ("no closed frontmatter (", "project unreadable"), ("frontmatter does not parse (", "project unreadable"),
             ("frontmatter is not a mapping (", "project unreadable"), ("unreadable (", "project unreadable"))
-# A big project's test (ADR 0060; CONTEXT.md **Big project**): the project note's `orient:` key, own or sweep, else a
+# A big project's test (ADR 0061; CONTEXT.md **Big project**): the project note's `orient:` key, own or sweep, else a
 # declared repo holding its own design record, a CONTEXT.md file and a docs/adr/ directory with a `*.md` file.
 ORIENT_KEYS = ("own", "sweep")
 DESIGN_CONTEXT = "CONTEXT.md"
@@ -343,7 +343,7 @@ def design_record(declared):
 
 
 def own_session(value, repos):
-    """A project's ownSession (ADR 0060): {own, by, repo, invalid?}. A valid `orient:` key (own or sweep, read
+    """A project's ownSession (ADR 0061): {own, by, repo, invalid?}. A valid `orient:` key (own or sweep, read
     stripped and case-blind) wins, `by: "key"`; else the first declared repo, in declared order, holding its own design
     record makes it big, `by: "design record"`, `repo` as written; else it is small, `by` and `repo` null. A non-empty
     `orient:` value that is neither key is kept as `invalid` (its JSON form), and the derived test decides."""

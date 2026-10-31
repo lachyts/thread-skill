@@ -47,7 +47,7 @@ run_record refuses (a task whose name is no slug is skipped, never refused), and
 --tasks; a --kept, --decided or --dep slug outside --tasks; a --dep not given as A=B); 3 when the vault, PyYAML or a
 sibling script is missing.
 
-Big projects (ADR 0060; CONTEXT.md **Big project**). estate-scan.py's project rows carry ownSession {own, by, repo,
+Big projects (ADR 0061; CONTEXT.md **Big project**). estate-scan.py's project rows carry ownSession {own, by, repo,
 invalid?}. A project is big when its row's own is true; a task is homed big through own_of (the first scan row of its
 home's name, as the ranker maps a home; a row with none reads small), a rollout through rollout_home (its first
 `projects[]` link, resolved as a link by NA.Vault.resolve_project, to its scan row by note, else by name). A big
@@ -178,7 +178,7 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   (running + integrating > 0), start stamp (RR._start_unattended: the Stage starts it), status unread (a null
   summary). reinstate: awaitingSignOff with every pending sign-off in --signed. canExecute: no hold, or reinstate
   with paused the only hold. canRepair: none of superseded, lineage, version, serial and status unread.
-  The pick list (orient-all § 7, ADR 0060): pick[] holds every big project with anything waiting on its own session,
+  The pick list (orient-all § 7, ADR 0061): pick[] holds every big project with anything waiting on its own session,
   counted as rounds' ownSession[] counts it (ready, decisions, orient, signOffs) plus heldItems (each live rollout of
   its own whose --status action own_item gives an execute or repair item: live_item's, else a repair for its pending
   sign-offs when sign_off_repair holds; signOffRepairs[] names the repairs that ask them), and every small project in
@@ -373,7 +373,7 @@ TOP_DEFAULT = 15
 TITLE_MAX = 60  # create_thread's title (skills/execute/legs.md § Hand over)
 KILL_NAMES_MAX = 8
 
-# A big project keeps its own session (ADR 0060; CONTEXT.md **Big project**): estate-scan.py's ownSession says which.
+# A big project keeps its own session (ADR 0061; CONTEXT.md **Big project**): estate-scan.py's ownSession says which.
 # Nothing of one is asked, scheduled or started here unless Lachy ticks it on orient-all § 7's pick list, one
 # AskUserQuestion multiSelect question of the top PICK_MAX projects and PICK_NONE (AskUserQuestion's four options).
 OWN_SESSION = "own session"
@@ -578,7 +578,7 @@ def is_five(v):
     return (isinstance(v, int) and not isinstance(v, bool) and v == 5) or (isinstance(v, str) and v.strip() == "5")
 
 
-# ---- big projects and the pick list (ADR 0060) -------------------------------------------------------------------
+# ---- big projects and the pick list (ADR 0061) -------------------------------------------------------------------
 
 def is_own(row):
     """True when a scan project row is a big project: its ownSession's `own` is true."""
@@ -675,7 +675,7 @@ def sign_off_repair(r):
 
 def own_item(r, n):
     """(kind, why): what a big project's live rollout r gets at status action n once Lachy opens the project (ADR
-    0060): live_item's item, else a repair when sign_off_repair holds, since only repair asks its sign-offs there (a
+    0061): live_item's item, else a repair when sign_off_repair holds, since only repair asks its sign-offs there (a
     sign-off-paused rollout with an unsigned gate reads action 8, which live_item gives nothing)."""
     kind, why = live_item(r, n)
     if kind is None and sign_off_repair(r):
@@ -897,7 +897,7 @@ class Rounds:
     def big_dep(self, slug):
         """{project, slug} of the first big project's task a decision task waits on: a rank hold whose dependency is
         homed big, else a dependsOn link matched (ER.slug_key) to an open scan task, not in flight, homed big; or
-        None. Such a task waits on that project's own session (ADR 0060), so this round never asks it."""
+        None. Such a task waits on that project's own session (ADR 0061), so this round never asks it."""
         row = self.rows.get(slug) or {}
         for h in row.get("blockedBy") or []:
             home = self.home_of(h.get("slug"))
@@ -966,7 +966,7 @@ class Rounds:
                     why = "paused"
                 elif s.get("pause_requested"):
                     why = "draining"
-                elif own:  # a big project's sign-off waits on its own session, whose repair asks it (ADR 0060)
+                elif own:  # a big project's sign-off waits on its own session, whose repair asks it (ADR 0061)
                     why = OWN_SESSION
                 elif slug in needs:
                     why = "needs you"
@@ -1065,7 +1065,7 @@ class Rounds:
                 "ownSession": self.own_session(), "warnings": self.warnings()}
 
     def parked_big(self, u):
-        """True for an Unpark row of a big project: no offer here, it sits last on the pick list (ADR 0060)."""
+        """True for an Unpark row of a big project: no offer here, it sits last on the pick list (ADR 0061)."""
         row = next((p for p in self.scan["projects"] if isinstance(p, dict) and p.get("note") == u.get("note")), None)
         return is_own(row) if row is not None else self.big(u.get("project"))
 
@@ -1243,7 +1243,7 @@ class Plan:
         return out
 
     def big_task(self, slug):
-        """True when the task is homed in a big project (ADR 0060): its rank row's home, else its open scan row's."""
+        """True when the task is homed in a big project (ADR 0061): its rank row's home, else its open scan row's."""
         row = self.rows.get(slug)
         t = self.open.get(str(slug or "").lower())
         home = row.get("home") if row is not None else ((t.get("projects") or [None])[0] if t else None)
@@ -1306,7 +1306,7 @@ class Plan:
             unparked = parked and (run.get("project") in self.unparked or run.get("note") in self.unparked)
             members, lost = [], []
             if own_of(self.scan, run.get("project"))["own"]:
-                # A big project's run waits on its own session (ADR 0060): every member listed, none held or
+                # A big project's run waits on its own session (ADR 0061): every member listed, none held or
                 # undecided here, and it never takes a root.
                 runs.append((order, run, False, slugs, [], True, True))
                 continue
@@ -1347,7 +1347,7 @@ class Plan:
                 gone.add(s)
             why = None
             if big:
-                why = {"kind": OWN_SESSION, "detail": "a big project (ADR 0060): its own session schedules its work; "
+                why = {"kind": OWN_SESSION, "detail": "a big project (ADR 0061): its own session schedules its work; "
                        "tick it on the pick list to open it"}
             elif still_parked:
                 why = {"kind": "parked", "detail": "the project is parked: its Unpark offer decides"}
@@ -1469,7 +1469,7 @@ class Plan:
         return out
 
     def pick(self, rollouts):
-        """orient-all § 7's pick list (ADR 0060), ranked: every big project with anything waiting on its own session
+        """orient-all § 7's pick list (ADR 0061), ranked: every big project with anything waiting on its own session
         (Ready unheld work, his decisions, Orient tasks, pending sign-offs, or a held live-rollout item: a live rollout
         of its own whose --status action gives an execute or repair item), and every small project with an Orient task
         (the rank's orient[], parked homes out). A small project's counts are its Orient tasks alone: the pass asks and
@@ -1744,7 +1744,7 @@ def cmd_sessions(args):
         kind, why = own_item(r, n) if big else live_item(r, n)
         root = os.path.expanduser(r["projectRoot"]) if r.get("projectRoot") else None
         if kind and big and slug not in opened_rollouts:
-            # A big project's item waits until he ticks the project on the pick list (ADR 0060).
+            # A big project's item waits until he ticks the project on the pick list (ADR 0061).
             left.append({"rollout": slug, "action": n, "holds": r.get("holds") or [], "why": OWN_HELD, "held": kind})
         elif kind == "execute":
             executes.append({"kind": "execute", "rollout": slug, "note": r.get("note"),

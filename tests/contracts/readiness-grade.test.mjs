@@ -17,7 +17,7 @@
 //       and orient § 2 Open forks rather than restating either, and draws its three kinds of fork with their `owner`;
 //       § Each decision's `owner` keeps `gate`, a credential, an irreversible step and any sign-off off the ruled kinds
 //       (ADR 0008), spend alone `priorities` (Chorus ADR 0108 d4), with `goal` and `stakes`, and a fork the code or
-//       research settles `technical` whatever the confidence (ADR 0060); § The grade makes a decision he could answer
+//       research settles `technical` whatever the confidence (ADR 0061); § The grade makes a decision he could answer
 //       only with the project's design in view Orient, never a One call; § What the agent reads cites CONTEXT.md
 //       **Thread home** with all three homes (the repo, the ~/Projects folder, _shared/threads) and open's
 //       § Repo-thread lookup, so a project with no code repo still has its thread read.

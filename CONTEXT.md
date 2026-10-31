@@ -34,7 +34,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 - **Estate pass** — orient at estate altitude, run by `orient-all`: one look
   across every project in the vault that sweeps up the work needing little of
-  Lachy's thinking and puts it in motion (ADR 0060). It grades open work,
+  Lachy's thinking and puts it in motion (ADR 0061). It grades open work,
   batches a **Small project**'s decisions, starts its rollouts, and offers
   any project that needs real design thinking, and every **Big project**, on
   the **Pick list**. It never reshapes a project itself. `orient` is the same
@@ -42,7 +42,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `orient` session. _Avoid_: rally, global orient, portfolio review, triage
   (alone).
 - **Big project** — a project with its own design record, which keeps its own
-  session (ADR 0060): the estate pass grades its work but asks none of its
+  session (ADR 0061): the estate pass grades its work but asks none of its
   decisions, schedules none of its rollouts and starts none of its work
   unless Lachy ticks it on the **Pick list**; its own orient session asks and
   schedules them, and a repair started beside it asks its pending sign-offs
@@ -55,7 +55,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   pass asks and whose ready work it schedules and starts. Anything needing his
   hands, money or a message still waits for his yes. _Avoid_: side project.
 - **Pick list** — the estate pass's one question at its end (orient-all § 7,
-  ADR 0060): every **Big project** with idle ready work, decisions, sign-offs
+  ADR 0061): every **Big project** with idle ready work, decisions, sign-offs
   or a held rollout item waiting on its own session, and every small project
   with an Orient task, ranked by what waits on it, the top three asked beside
   `Not now`. Lachy ticks which to open, or types any name on it; only those
@@ -140,7 +140,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Decision round** — the estate pass's questions, within the time budget
   Lachy states: only his questions, each in the Framing, and only a **Small
   project**'s (a big project's sign-offs, One calls, Grills and Unpark offer
-  wait on its own session, ADR 0060). First the One-call
+  wait on its own session, ADR 0061). First the One-call
   round: pending sign-offs always, each after its gates are shown verbatim,
   then One calls, then Unpark offers, batched through AskUserQuestion. Then
   Grill rounds, in conversation, while time remains. Each answer is written into its task's `## Decisions (asked
@@ -501,7 +501,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   or external system it writes but names nowhere: declare `surfaces:` for
   those. A `## Launch` path that is `/` or the home directory is never
   claimed (it would contain every repo; a WARN names it). Two checkouts of one
-  origin are two surfaces. _Avoid_: footprint, file-set.
+  origin are two surfaces, and containment parts across a checkout nested
+  inside another by path (a separate repo with its own index), unless the outer
+  path is in no checkout. A stuck chain holds only its unlanded rows'
+  surfaces (**Unfinished rollout**, ADR 0060). _Avoid_: footprint, file-set.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -514,7 +517,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   writes is refused, and so is a serial chain whose **Surface** overlaps a live
   chain's or an unfinished parallel rollout's Project root (schedule § Serial
   path). Vault chains in different project places never overlap, so they run
-  side by side (ADR 0059). It is narrower than live: a superseded note stamped
+  side by side (ADR 0059). What an unfinished rollout holds narrows while it
+  waits on Lachy (ADR 0060). A stuck chain (no Leg open, nothing claimable:
+  every unlanded row set aside or held behind one) holds only its unlanded
+  rows' surfaces, and releases the rest, its done rows' included. A parallel
+  rollout awaiting sign-off, or halted with nothing able to start, holds no
+  Project root against serial chains, though it is still its repo's one
+  unfinished parallel rollout. Each reclaims its whole claim on resume, and
+  waits its turn for a place another rollout took meanwhile: whoever released
+  a place yields it. It is narrower than live: a superseded note stamped
   done but not yet moved is live but not unfinished, and so is a rollout whose
   every task merged before its completion ceremony ran. `--regenerate`
   supersedes this project's unfinished rollout when it is paused or never
@@ -705,17 +716,22 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the checkout, with no origin read and no git-env window (ADR 0055), and
   completes either way too, since each task passed its own Leg verify.
   A note with none completes as before. _Avoid_: final verify, post-merge suite.
-- **Verify slot** — one of the machine's `verify_slots` places a verifier suite
-  runs in, shared by every rollout on the machine (p23-4,
-  `scripts/verify-slot.py`): the lead's Integration and RACE verifies and every
-  agent's engine-rendered verifier take one, and a further suite waits rather
-  than piling on. Each slotted suite runs under a guard that ends a killed
-  holder's suite before its verify slot frees. The Integration priority: the
-  lead's Integration and RACE verifies, and the integrate call's own verifier
-  runs (`run --priority`), go before any task call's agent. An agent waits for
-  its suite's verdict inside its turn (`verify-slot.py wait`, p31-3), never by
-  ending it. Not a **Slot** (a task's run in a Queue). _Avoid_: bare "slot",
-  lock, semaphore.
+- **Verify slot** — one of the machine's `verify_slots` places a verifier
+  suite runs in, shared by every rollout on the machine (p23-4,
+  `scripts/verify-slot.py`): the lead's Integration and RACE verifies and
+  every agent's engine-rendered verifier take one, and a further suite waits
+  rather than piling on; `run` and `status` with no `--slots` read
+  `verify_slots` from rollouts.toml themselves (p34-1). Each slotted suite
+  runs under a guard that ends a killed holder's suite before its verify slot
+  frees, and a command in a verify slot sees `VERIFY_SLOT_HELD=1` (p34-1), so
+  a suite it starts never queues for a second one. The Integration priority:
+  the lead's Integration and RACE verifies, and the integrate call's own
+  verifier runs (`run --priority`), go before any task call's agent, except a
+  run at the head of the line for 15 minutes, which then waits beside them,
+  and other runs wait in arrival order (p34-1). An agent waits for its suite's
+  verdict inside its turn (`verify-slot.py wait`, p31-3), never by ending it.
+  Not a **Slot** (a task's run in a Queue). _Avoid_: bare "slot", lock,
+  semaphore.
 - **Checkpoint** — one of the two moments per task where the full suite (the
   rollout's `verifier:`) runs: a code-writing agent's last check before it
   opens or updates its PR (the implementer's, and each reviser's), and
