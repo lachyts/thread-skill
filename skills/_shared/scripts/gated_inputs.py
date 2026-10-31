@@ -126,7 +126,7 @@ nothing and makes no network call.
      getattr(os, ..., 0), so a FIFO swapped in after the check never blocks); fstat S_ISREG, else the same why; at
      most MAX_ENV_BYTES + 1 bytes read in a loop, and above MAX_ENV_BYTES (1 MiB) "<path> is over 1 MiB"; the fd
      closed in `finally`; not UTF-8 "<path> is not UTF-8"; any OSError "cannot read <path>". The dotenv parse: CR
-     dropped; blank and `#` lines skipped; an optional `export `, then `NAME\s*=\s*VALUE`; a quoted value is its
+     dropped; blank and `#` lines skipped; an optional `export `, then `NAME\\s*=\\s*VALUE`; a quoted value is its
      inside (an unclosed quote reads as absent); an unquoted value has ` #…` dropped and is stripped; the last
      assignment wins; an empty value reads as absent.
    - `env_proof(cls, names)` -> {"ok", "why"}: every missing name listed ("<NAME> is not set in <file>", joined by

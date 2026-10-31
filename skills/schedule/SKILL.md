@@ -702,13 +702,13 @@ The ask-ahead section is exactly:
 - Planner: word each spend gate as one line whose Cap is one priceable total, its period and count (in the cap's own unit) inside the cap clause, e.g. `spend: <what> — cap 50 USD per Login per month across 3 Logins`; the Cap is the task's whole ceiling, so price per-item spend into the total (never "every push" or "each image"); put how it splits (run counts, per-call limits, iterations) in sub-bullets nested under the gate, which the Cap must hold, and keep other counts, `per`/`each` words, bare numbers and words that widen the cap (`plus` tax, fees or overage, `soft`, `to start`) off the gate's own line (ADR 0038). A cap the standing approval cannot price is asked mid-run.
 ```
 
-The recorded section is the same block with `recorded` in place of `asked ahead` in its heading and its Planner line alone.
+The recorded section is the same block with `recorded` in place of `asked ahead` in its heading and its Planner line alone. The `## Decisions` prefix makes either a recorded decision (descope asks before touching it) and keeps it out of the brief; the planner reads the note in full, so its Planner line shapes the gate the standing approval prices; the `(recorded <date>)` heading, unlike `(asked ahead …)`, tells Reflection nothing was asked.
 
 The test-credential recorded line is exactly (ADR 0061; `<the declared keys>` is step 2.8's class, each key with its prefix or project):
 
 ```
 - Planner: word each test-credential gate as one line: the mode, then only keys this repo declares in its test_credentials, each with its declared prefix or project, e.g. `credential: test-mode <NAME> (<prefix>) in the task tree's .env.local` or `credential: staging <NAME> (project <ref>) in the task tree's .env.local`, the keys from <the declared keys>; keep secret, token, API key, access, password, live, prod and production off that line as words (a declared name such as STRIPE_SECRET is fine), so the standing approval can read it (ADR 0061). Any other credential is its own `credential:` line and reaches Lachy mid-run.
-``` The `## Decisions` prefix makes either a recorded decision (descope asks before touching it) and keeps it out of the brief; the planner reads the note in full, so its Planner line shapes the gate the standing approval prices; the `(recorded <date>)` heading, unlike `(asked ahead …)`, tells Reflection nothing was asked.
+```
 
 A carried task that has started (any queue state but `queued` in step 1's preview) keeps the frontmatter `carry` left it: step 7 writes nothing to it. A carried `queued` task is stamped like any other, unless § 1.5 or step 5's cycle rule left it out (step 6's `defer` unlinked it).
 
