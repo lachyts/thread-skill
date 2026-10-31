@@ -339,10 +339,12 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
 
   // inert-paths (ADR 0045, p29-3): § 2.9 proposes Inert paths with inert-paths.py propose (the verifier and bootstrap
   // single-quoted), drops what the drop rule names (an `error` line neutral), records only on Lachy's yes, prints and goes
-  // on at record's exit 1 (the reader check never blocks), never passes --force, and the serial path skips it.
+  // on at record's exit 1 (the reader check never blocks), never passes --force, and the serial path skips it. propose
+  // and record run with the Bash tool's 600000 ms timeout, past the proof's own deadline (PROOF_BUDGET_S, 180 s; p34-2).
   const s29 = s(schedule, S29)
   const recordAt = s29.indexOf('inert-paths.py record --repo')
   if (!s29.includes("inert-paths.py propose --repo <§ 0's resolved repo path> --tree origin/<default> --verifier '<verifier>' --bootstrap '<env_bootstrap>'") ||
+    !s29.includes("run it, and `record` below, with the Bash tool's `timeout: 600000`") ||
     recordAt < 0 || s29.lastIndexOf('On yes:', recordAt) < 0 || !s29.includes('On no, nothing') ||
     !s29.includes('inert-paths.py drop --repo') || !s29.includes('a line with an `error` (the check itself failed) is neither a failure nor a pass') ||
     !s29.includes('It never blocks the schedule') || !s29.includes('never passes `--force`') ||
@@ -659,4 +661,6 @@ test('control: § 2.9 recording with no yes, blocking on record, counting an err
   only({ schedule: edit(real.schedule, S29, '; a line with an `error` (the check itself failed) is neither a failure nor a pass', '') }, ['inert-paths'], 'error lines counted')
   only({ schedule: edit(real.schedule, null, 'Steps 2, 2.5–2.9, 4', 'Steps 2, 2.5–2.8, 4') }, ['inert-paths'], 'serial runs § 2.9')
   only({ schedule: edit(real.schedule, S29, ", name the refusing rollout in the confirm batch,", ',') }, ['inert-paths'], 'no refusing rollout named')
+  only({ schedule: edit(real.schedule, S29, "; run it, and `record` below, with the Bash tool's `timeout: 600000`: the proof's own deadline (PROOF_BUDGET_S, 180 s) ends it first", '') },
+    ['inert-paths'], 'propose and record with the default Bash timeout')
 })

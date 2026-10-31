@@ -59,9 +59,11 @@ function fixture(t, files = {}, { home = tmpHome(t), worktree = true, origin = '
   return { home, repo }
 }
 
-function cli(home, args, { env = {}, cwd = home } = {}) {
-  const r = spawnSync('python3', ['-B', SCRIPT, ...args], { encoding: 'utf8', cwd, env: baseEnv(home, env) })
-  return { status: r.status, stdout: r.stdout, stderr: r.stderr }
+// `timeout` (ms, default none) kills the spawn when it runs past it, so a proof that never returns fails its test
+// (`signal` set) instead of hanging the suite.
+function cli(home, args, { env = {}, cwd = home, timeout } = {}) {
+  const r = spawnSync('python3', ['-B', SCRIPT, ...args], { encoding: 'utf8', cwd, env: baseEnv(home, env), ...(timeout ? { timeout } : {}) })
+  return { status: r.status, signal: r.signal, stdout: r.stdout, stderr: r.stderr }
 }
 
 function prove(fx, globs, { verifier = 'true', bootstrap = '', tree = 'HEAD', env = {} } = {}) {
@@ -174,6 +176,43 @@ test('past PROOF_BUDGET_S every glob is unprovable: proof budget exceeded', (t) 
     { args: [fx.repo] })
   fails(out, 'THREAD.md', { kind: 'unprovable', text: 'proof budget exceeded' })
 })
+
+// p34-2: the deadline is checked inside a file's work too (per logical shell line, per shell item, per view), so one
+// big file cannot outrun it. The body counts calls to one module function and moves the clock past the deadline at the
+// 50th: the proof must stop at that call (50, or 51 when the flip lands just after a check). Only the module-local
+// clock `m._now` is patched: Tree's ls-tree and cat-file and _worktrees run before it flips, on the real clock, and
+// stdlib time.monotonic (which _git's communicate(timeout=…) and subprocess read) is never touched. The exact verdict
+// and the status-0 assert keep a ProofError (a git TimeoutExpired, say) from passing for the budget.
+const DEADLINE_BODY = (fn) => [
+  'n = 0',
+  `real = m.${fn}`,
+  'def counted(*a, **k):',
+  '    global n',
+  '    n += 1',
+  '    return real(*a, **k)',
+  `m.${fn} = counted`,
+  'm._now = lambda: 0.0 if n < 50 else 1e12',
+  'out = m.prove(sys.argv[2], "HEAD", ["THREAD.md"], [("verifier", "true")])',
+  'print(json.dumps({"out": out, "n": n}))',
+].join('\n')
+
+const MANY_SH = "#!/bin/sh\n" + "find tests -name '*.py'\n".repeat(300)
+const MANY_PY = 'import subprocess\n' + 'subprocess.run(["find", "tests", "-name", "*.py"])\n'.repeat(300)
+const DEADLINE_CASES = [
+  ['per logical line in a shell file (shell_items)', { 'tests/many.sh': MANY_SH }, 'shell_items'],
+  ['per view of a shell file (_shell_walks)', { 'tests/many.sh': MANY_SH }, '_shell_walks'],
+  ["per shell item of a Python file's argv lists (_shell_walks)", { 'tests/many.py': MANY_PY }, '_shell_walks'],
+]
+
+for (const [name, files, fn] of DEADLINE_CASES) {
+  test(`the deadline is checked inside a file: ${name}`, (t) => {
+    const fx = fixture(t, files)
+    const got = inProcess(fx.home, DEADLINE_BODY(fn), { args: [fx.repo] })
+    assert.equal(got.out['THREAD.md'].readersTotal, 1, JSON.stringify(got.out))
+    assert.deepEqual(got.out['THREAD.md'].readers, [{ glob: 'THREAD.md', path: '-', kind: 'unprovable', text: 'proof budget exceeded' }])
+    assert.ok(got.n >= 50 && got.n <= 51, `the proof stopped at the 50th ${fn} call, not the ${got.n}th`)
+  })
+}
 
 test('a gitlink fails every glob; a symlink into a glob is a reader', (t) => {
   const fx = fixture(t)
@@ -359,6 +398,119 @@ for (const [name, files] of WALK_HOLDS) {
     holds(prove(fixture(t, files), ['THREAD.md']), 'THREAD.md')
   })
 }
+
+// ---- brace filters (p34-2): BRACE_CAP during expansion, and a truncated filter fails closed --------------------------------
+
+const GROUPS70 = '{a,b}'.repeat(70)
+
+test('_brace of a 70-group filter returns at once', (t) => {
+  // The alarm ends a _brace that never returns (2^70 before the fix), so this test goes red instead of hanging.
+  const got = inProcess(tmpHome(t), [
+    'import signal, time', 'signal.alarm(10)', 't0 = time.monotonic()',
+    'pats, truncated = m._brace(sys.argv[2])',
+    'print(json.dumps({"n": len(pats), "truncated": truncated, "s": time.monotonic() - t0, "first": pats[0]}))',
+  ].join('\n'), { args: [GROUPS70 + '*.md'] })
+  assert.equal(got.n, 64)
+  assert.equal(got.truncated, true)
+  assert.equal(got.first, 'a'.repeat(70) + '*.md')
+  assert.ok(got.s < 1, `_brace took ${got.s} s`)
+})
+
+test("_brace keeps the first 64 of the full expansion, in the recursive expander's order (bash's for flat groups), and says when it dropped any", (t) => {
+  const many = (n) => '{' + Array.from({ length: n }, (_, i) => `y${i}`).join(',') + '}.md'
+  const pats = ['x{a,b}{c,d}{e,f}', '{a,{b,c}}', '{a}', '{}', 'a{b,c', '{a,b}'.repeat(6), '{a,b}'.repeat(7), many(65), many(64)]
+  // An uncapped copy of the recursive expander _brace replaced: the reference order. It is bash's for flat groups only:
+  // nested '{a,{b,c}}' gives a, b, a, c (bash: a, b, c), and '{a}' and '{}' expand (bash keeps them literal).
+  const got = inProcess(tmpHome(t), [
+    'import re',
+    'def ref(pat):',
+    '    g = re.search(r"\\{([^{}]*)\\}", pat)',
+    '    if not g:',
+    '        return [pat]',
+    '    out = []',
+    '    for alt in g.group(1).split(","):',
+    '        out.extend(ref(pat[:g.start()] + alt + pat[g.end():]))',
+    '    return out',
+    'res = []',
+    'for p in json.loads(sys.argv[2]):',
+    '    want = ref(p)',
+    '    pats, truncated = m._brace(p)',
+    '    res.append({"same": pats == want[:64], "truncated": truncated, "over": len(want) > 64, "n": len(pats), "pats": pats[:4]})',
+    'print(json.dumps(res))',
+  ].join('\n'), { args: [JSON.stringify(pats)] })
+  got.forEach((r, i) => {
+    assert.ok(r.same, `${pats[i]}: the first 64 of the full expansion`)
+    assert.equal(r.truncated, r.over, `${pats[i]}: truncated only when something was dropped`)
+  })
+  assert.deepEqual(got.map((r) => r.n), [8, 4, 1, 1, 1, 64, 64, 64, 64])
+  assert.deepEqual(got.map((r) => r.truncated), [false, false, false, false, false, false, true, true, false])
+  assert.deepEqual(got[0].pats, ['xace', 'xacf', 'xade', 'xadf'])
+  assert.deepEqual(got[1].pats, ['a', 'b', 'a', 'c'])
+  assert.deepEqual([got[2].pats, got[3].pats, got[4].pats], [['a'], [''], ['a{b,c']])
+})
+
+test('_brace with stop_at_cut returns at the first cut with the same verdict, and _filter_ok uses it', (t) => {
+  const pats = ['x{a,b}{c,d}{e,f}', '{a,{b,c}}', '{a}', 'a{b,c', '{a,b}'.repeat(6), '{a,b}'.repeat(7), '{a,b}'.repeat(4000) + '.md']
+  const got = inProcess(tmpHome(t), [
+    'res, br = [], m._BRACE_RE.search',
+    'for p in json.loads(sys.argv[2]):',
+    '    full, cut = m._brace(p), m._brace(p, stop_at_cut=True)',
+    '    res.append({"truncated": [full[1], cut[1]], "same": full[0] == cut[0], "n": len(cut[0]),',
+    '                "braces": [any(br(q) for q in full[0]), any(br(q) for q in cut[0])]})',
+    'calls, orig = [], m._brace',
+    'def spy(pat, stop_at_cut=False):',
+    '    calls.append(stop_at_cut)',
+    '    return orig(pat, stop_at_cut)',
+    'm._brace = spy',
+    'ok = m._filter_ok([("glob", "{a,b}" * 4000 + ".md")], "THREAD.md")',
+    'print(json.dumps({"res": res, "ok": ok, "calls": calls}))',
+  ].join('\n'), { args: [JSON.stringify(pats)] })
+  got.res.forEach((r, i) => {
+    assert.equal(r.truncated[1], r.truncated[0], `${pats[i].slice(0, 40)}: the same verdict`)
+    if (!r.truncated[0]) assert.ok(r.same, `${pats[i]}: an untruncated result is the same either way`)
+  })
+  assert.deepEqual(got.res.map((r) => r.truncated[0]), [false, false, false, false, false, true, true])
+  // The 4000-group filter: the full call expands every group, stop_at_cut leaves the rest unexpanded after the cut.
+  assert.equal(got.res[6].n, 64)
+  assert.deepEqual(got.res[6].braces, [false, true])
+  // _filter_ok fails closed on the cut, through stop_at_cut.
+  assert.deepEqual([got.ok, got.calls], [true, [true]])
+})
+
+test('a brace filter past the cap fails closed: its 65th alternative is a missed reader', (t) => {
+  const alts = (n) => Array.from({ length: n }, (_, i) => `x${i}`).join(',')
+  // (a) THREAD is alternative #65, one past the cap: before p34-2 the cut dropped it and THREAD.md held, a missed reader.
+  let fx = fixture(t, { 'tests/t.sh': `#!/bin/sh\nfind . -name '{${alts(64)},THREAD}.md'\n` })
+  fails(prove(fx, ['THREAD.md']), 'THREAD.md', { kind: 'walk', origin: 'cwd', path: 'tests/t.sh' }, '#65 past the cap')
+  // (b) truncation alone makes the filter able to match: none of its 256 alternatives is THREAD.md.
+  fx = fixture(t, { 'tests/t.sh': `#!/bin/sh\nfind . -name '${'{a,b}'.repeat(7)}{x,THREAD}.md'\n` }, { home: tmpHome(t) })
+  fails(prove(fx, ['THREAD.md']), 'THREAD.md', { kind: 'walk', origin: 'cwd', path: 'tests/t.sh' }, 'truncated, no THREAD.md')
+  // (c) control: THREAD is alternative #64, inside the cap, so it is matched (before p34-2 too).
+  fx = fixture(t, { 'tests/t.sh': `#!/bin/sh\nfind . -name '{${alts(63)},THREAD}.md'\n` }, { home: tmpHome(t) })
+  fails(prove(fx, ['THREAD.md']), 'THREAD.md', { kind: 'walk', origin: 'cwd', path: 'tests/t.sh' }, '#64 inside the cap')
+  // (d) negative control for (b): exactly 64 alternatives, none THREAD.md, not truncated, so the filter cannot match and
+  // THREAD.md holds. A brace filter is not a reader merely for having braces.
+  fx = fixture(t, { 'tests/t.sh': `#!/bin/sh\nfind . -name '${'{a,b}'.repeat(6)}.md'\n` }, { home: tmpHome(t) })
+  let res = prove(fx, ['THREAD.md'])
+  holds(res, 'THREAD.md', '64 alternatives, none THREAD.md')
+  assert.equal(res['THREAD.md'].readersTotal, 0)
+  // (e) the same filter with one more group: 128 alternatives, truncated, none THREAD.md. The cap is the only difference
+  // from (d), and it alone makes the walk a reader.
+  fx = fixture(t, { 'tests/t.sh': `#!/bin/sh\nfind . -name '${'{a,b}'.repeat(7)}.md'\n` }, { home: tmpHome(t) })
+  res = prove(fx, ['THREAD.md'])
+  fails(res, 'THREAD.md', { kind: 'walk', origin: 'cwd', path: 'tests/t.sh' }, '128 alternatives, truncated, none THREAD.md')
+  assert.equal(res['THREAD.md'].readersTotal, 1)
+})
+
+test('a 70-group brace filter in a repo file: prove returns and the walk is a reader', (t) => {
+  const fx = fixture(t, { 'tests/t.sh': `#!/bin/sh\nfind . -name '${GROUPS70}*.md'\n` })
+  // Before p34-2 this proof never returned: the 30 s kill turns that into a red test, not a hang.
+  const r = cli(fx.home, ['prove', '--repo', fx.repo, '--tree', 'HEAD', '--verifier', 'true', '--glob', 'THREAD.md'], { timeout: 30000 })
+  assert.equal(r.signal, null, 'the proof returned')
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, '')
+  fails(JSON.parse(r.stdout).globs, 'THREAD.md', { kind: 'walk', origin: 'cwd', path: 'tests/t.sh' })
+})
 
 // ---- ancestors of the repo (round 3): every absolute value is compared with the places ----------------------------------
 
