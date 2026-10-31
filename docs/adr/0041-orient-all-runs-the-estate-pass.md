@@ -5,6 +5,9 @@ Status: proposed. Grilled with Lachy on 2026-10-19, after a hand-run audit on 20
 *(Amended by ADR 0054, 2026-10-27: the decision round asks only his own decisions (owner `yours`), in the Framing of
 `skills/_shared/asking.md`, and only those count toward the grade, the raise, the decision minutes and the Grade log;
 the calls the grade rules for him go to the task note's `## Decided for you (<date>)`, never asked.)*
+*(Amended by ADR 0061, 2026-10-31: Decision item 3 and "It starts everything itself" now read through it. A big project
+keeps its own session, so the pass asks, schedules and starts nothing of one unless Lachy ticks it on the pick list at
+the end of the pass, and an Orient-graded project's child orient starts only when ticked there.)*
 
 ## Context
 
@@ -72,7 +75,9 @@ Rulings made while P25 is built. No build grill ran for P25, so each bullet is a
   - *Kill is Mark done*: `done: true` and `completed:`, as the vault's own Mark done writes it.
   - *Live rollouts get sessions only on status's actions 6, 7, 8 (a sign-off signed in this pass, and no other hold), 11 and 13*, behind the plan's holds, and never on 9, 10, 12 or a plain pause, so no second lead is ever started.
   - *Child orients are held only by a Session named exactly the orient item's title* (`Orient: <project>`, cut as `create_thread` was given it), start after every execute, and name the note the pass wrote for their project.
+  - *Execute and Leg items are found by the roster's slug* (p34-7, 2026-10-31): a Session whose `list_sessions` line carries `leads the Rollout <slug>`, that slug equal to the item's rollout exactly (case aside, never a prefix), is the item's candidate whatever its name, and is relayed by id, unread; the old names count only when no line names the slug, and only for a Session whose line names no slug (`leads a Rollout` included); a led rollout's execute or Leg item never gets `create_thread` (a repair item beside its lead still does), and a raise is reported as raised, never counted as started (chorus-p89-1, Chorus ADR 0077 as amended 2026-10-27).
   - *Session-lane work is listed, never started.*
+- **Which projects the pass sweeps** (the p35-1 plan, 2026-10-31; ADR 0061 is canonical): a big project keeps its own session, and every child orient starts from the pick list, only when ticked.
 - **How grades are logged and joined** (the p25-4 plan, 2026-10-20; `skills/reflect/scripts/grades.py` is canonical). Interpretations of the Decision's grade log, for Lachy to confirm:
   - *Logged after the rank.* `estate-dispatch.py log` writes one line per graded task per pass, Orient included, into `grades.jsonl` beside the Run record, right after `estate-rank.py rank`; a dry run never logs. A task whose note name is no slug (a titled note: spaces, capitals, an em dash) is logged under run_record's `title_key` of its name, and the line's `note` field keeps the exact name so the reader finds the note again; only a name with no key (no ASCII letter or digit, or a key another graded task of the pass holds) is skipped and reported as a caveat, and the rest of the pass is logged (amended by the p34-6 plan, 2026-11-01: before it, such a task had no line).
   - *Joined at read time.* No close path writes anything: the weekly reading joins each grade to the Run record and the task's note when it reads them.

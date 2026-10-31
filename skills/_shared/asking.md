@@ -69,7 +69,8 @@ autonomy over his time, so a recommendation against either carries its reason in
 - A `follow-up` row there is an ask its owner task removes; until it lands, the ask is put in the Framing.
 - **Script-built rounds.** `estate-dispatch.py`'s `rounds` and `preflight` build the questions that orient-all § 4
   and schedule § 1.5 pass on verbatim, so their Framing comes from the grade (readiness-grade § Each decision: a
-  decision's `goal` and its `stakes`, one line per option). Each kind, against the five points:
+  decision's `goal` and its `stakes`, one line per option); its `plan` builds orient-all § 7's pick list. Each kind,
+  against the five points:
 
 | Kind | Plain words | Goal | Gains and costs | Pick | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -77,6 +78,7 @@ autonomy over his time, so a recommendation against either carries its reason in
 | Ungraded | fixed text | none: nobody could read the task | fixed descriptions | `Leave it out`, with its reason | yes |
 | Sign-off | its gates, verbatim (ADR 0008) | none | what each answer signs | none: the authorisation is his (ADR 0008) | yes |
 | Unpark | the project's why | its why | each answer described | none: parking is his standing call (ADR 0041) | yes |
+| Pick list | each project and what waits on it | none: each project's own session holds its goal | what opening it starts (its orient session, its held rollout items, the repair that asks its sign-offs) | none: where his attention goes is his (ADR 0061) | yes |
 
 Sources: Chorus ADR 0110 (ask him only his questions), ADR 0054 (this gate in the plugin) and the estate brief,
 `~/.agents/knowledge/how-lachy-decides.md`.

@@ -34,7 +34,8 @@
 #       the tree lives, seen from inside the run, and THREAD_COMPLETION_TREE_DIR's rule; C15c the serial fix task's
 #       words; C15d the HEAD guard (a detached HEAD, the leg_base fallback, a foreign checkout, a task that committed
 #       nowhere, a peer's rewritten tip above the task's own commit and its control); C15e --wait (a holder waited
-#       out, the deadline, a real --run, nothing in flight, its refusals, and it writes nothing).
+#       out, the deadline, a real --run, nothing in flight, its refusals, and it writes nothing; (g) a --run that
+#       records and frees its lock between a read's note read and its probe, in-process with scripted probes).
 # Temp repos and notes only; no vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -630,6 +631,42 @@ wait_for "$D/repo/.git/thread/completion-ro-rollout-2026-10-24-1.log" '^== verif
 cv; ok "$(js state)" "in-flight" "C15e (c): a real --run in flight → in-flight"
 cv --wait 60; ok "$rc|$(js state)|$(js attempt)" "0|green|1" "C15e (c): --wait over it → green: the note read again once the lock frees"
 wait "$bp"; ok "$?|$(records)" "0|green/1" "C15e (c): … the --run's own record, one"
+# probe_plan <plan> [read args…] — a read in-process (the C10f and C12 way) whose attempt-lock probes follow <plan>,
+# one comma-separated step per probe: `held` reads as a --run holding the lock; `record` writes a green line under
+# `## Completion verify log`, as a --run that ended between the read's note read and its probe left it, then probes
+# for real; `free` (and every probe past the plan) probes for real. rc, out and err as cv fills them.
+probe_plan() {
+  python3 - "$SCRIPT" "$RO" "$D/tasks" "$NOW" "$SHA" "$@" > "$D/out" 2> "$D/err" <<'PY'
+import importlib.util, sys
+script, ro, tasks, now, sha, plan, *extra = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("rr", script); rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+rr.COMPLETION_WAIT_POLL = 0.05
+steps, real = plan.split(","), rr._attempt_running
+def probe(lock):
+    step = steps.pop(0) if steps else "free"
+    if step == "held":
+        return True
+    if step == "record":
+        t = open(ro).read()
+        if "## Completion verify log" not in t:
+            t = t.rstrip("\n") + "\n\n## Completion verify log\n\n"
+        open(ro, "w").write(t + f"- 2026-10-24T09:00+00:00 attempt 1 at {sha} rc 0 -> green: passed (run r1; log -)\n")
+    return real(lock)
+rr._attempt_running = probe
+sys.argv = [script, "completion-verify", "--rollout", ro, "--tasks-dir", tasks, "--now", now, *extra]
+sys.exit(rr.main())
+PY
+  rc=$?; out=$(cat "$D/out"); err=$(cat "$D/err")
+}
+sscen c15e4; probe_plan record --wait 5
+ok "$rc|$(js state)|$(js attempt)" "0|green|1" "C15e (g): a --run records and frees its lock between --wait's note read and its probe → green, never the stale run"
+sscen c15e5; probe_plan record
+ok "$rc|$(js state)|$(js attempt)" "0|green|1" "C15e (g): … the plain read the same"
+sscen c15e6; probe_plan free,held,record --wait 5
+ok "$rc|$(js state)|$(js attempt)" "0|green|1" "C15e (g): a free probe, then a --run takes the lock and records in the gap → green: a held probe unsettles the read"
+sscen c15e7; probe_plan free
+ok "$rc|$(js state)|$(js attempt)" "0|run|1" "C15e (g): nothing ran → run: the read stands"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-completion: ALL PASS"; else echo "reconcile-rollout-completion: FAILED"; fi

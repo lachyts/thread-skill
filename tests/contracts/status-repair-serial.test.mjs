@@ -80,7 +80,7 @@ function item(text, start) {
 const S_STATES = [['complete'], ['dropped', 'superseded'], ['incomplete'], ['paused'], ['halted'], ['restarting'], ['live'],
   ['awaiting-successor'], ['completable'], ['stopped'], ['stalled'], ['stuck'], ['not-started', 'ready']]
 const BLOCKERS = [/^`halt` → never: \(c\) first\.$/, /^`open Leg K \(session <id>\)` → /, /^`handover started <X>` → /, /^`restart Leg N \(<how>\)` → /,
-  /^null → by `chain`: /, /^Anything else → report it, and stop\.$/]
+  /^`surface held by \[\[B\]\] \(<token>\)` → never restart \(ADR 0060\)/, /^null → by `chain`: /, /^Anything else → report it, and stop\.$/]
 const LEG_VERBS = ['begin', 'claim', 'done', 'close', 'set-aside', 'smoke', 'file-fix', 'handed', 'file-followup']
 
 function check(f) {
@@ -163,7 +163,7 @@ function check(f) {
     'the take-over form (`restart.takeOver`)'])
 
   if (bullets.length !== BLOCKERS.length || BLOCKERS.some((re, k) => !re.test(bullets[k] ?? ''))) {
-    flag('r-restart', `(e) step 1's blockers are not halt, open Leg, handover, restart, null, else: ${bullets.map((x) => x.slice(0, 30)).join(' | ')}`)
+    flag('r-restart', `(e) step 1's blockers are not halt, open Leg, handover, restart, surface held, null, else: ${bullets.map((x) => x.slice(0, 30)).join(' | ')}`)
   }
   const ho = bullets.find((x) => x.startsWith('`handover started <X>`')) ?? ''
   const rs = bullets.find((x) => x.startsWith('`restart Leg N (<how>)`')) ?? ''
