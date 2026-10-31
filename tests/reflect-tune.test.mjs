@@ -971,3 +971,52 @@ test('KT2 control: an edit that drops another repo\'s inert_paths is refused, no
   assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
   assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
 })
+
+// ---- KT3: a Tuning never touches a repo's test-credential class (ADR 0061) ------------------------------------------------
+// test_credentials (schema 3) is the operator's alone and lives as ONE line in its repo table: the line-by-line edit keeps
+// it byte-identical and inserts after it, an edit whose result changes any repo's class is refused with nothing written
+// (the control patches edit_text, as KT2's does), and the sub-table form is refused before any edit.
+const KT3_CLASS = 'test_credentials = { file = "/x/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }  # test mode only'
+
+test('KT3 (a) a pick beside the one-line class keeps it byte-identical; the insert lands after it', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = `schema = 3\n\n[repo."o/r"]\nmax_iterations = 3\n${KT3_CLASS}\n`
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), `${config}parallel_ceiling = 5\n`)
+  const after = resolved(home, repo)
+  assert.deepEqual([after.settings.parallel_ceiling, after.test_credentials.source, after.test_credentials.value.keys.map((k) => k.name)],
+    [{ value: 5, source: 'file:repo' }, 'file:repo', ['STRIPE_SECRET', 'SUPABASE_SERVICE_ROLE_KEY']])
+})
+
+test('KT3 (b) control: an edit that rewrites another repo\'s class is refused, nothing written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = `schema = 3\n\n[repo."o/r"]\nparallel_ceiling = 4\n\n[repo."o/other"]\n${KT3_CLASS}\n`
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const harness = ['import importlib.util, sys', 'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+    'tune = importlib.util.module_from_spec(spec); spec.loader.exec_module(tune)', 'edit = tune.edit_text',
+    'tune.edit_text = lambda *a: edit(*a).replace(\'file = "/x/.env.local"\', \'file = "/y/.env.local"\')', 'sys.exit(tune.main(sys.argv[2:]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', harness, TUNE, '--scores', scores, '--pick', 'p1', '--repo', repo], { encoding: 'utf8', cwd: home, env: env(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.equal(r.stderr, "tune: the edit changes a repo's test_credentials: nothing written\n")
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+})
+
+test('KT3 (c) the sub-table form is refused with its remedy, nothing written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = 'schema = 3\n\n[repo."o/r"]\nparallel_ceiling = 4\n\n[repo."o/r".test_credentials]\nfile = "/x/.env.local"\nkeys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }]\n'
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /test_credentials must be one line in that table: test_credentials = \{ file = "…", keys = \[ … \] \}/)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+})

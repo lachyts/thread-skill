@@ -8,7 +8,7 @@ is no env override). Stdlib only. It writes nothing and makes no network call. T
 of the file format:
 
     # ~/.config/thread/rollouts.toml
-    schema = 2                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+    schema = 3                   # optional, top-level, before the first table (ADR 0043): the file's schema version
 
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
@@ -39,11 +39,16 @@ of the file format:
     parallel_ceiling = 5
     inert_paths = ["THREAD.md"]  # schema 2 (p29-3, ADR 0045): this repo's Inert paths; a repo table only
 
+    [repo."Animately/optimizer"]  # schema 3 (ADR 0061): the repo's test-credential class, ONE line in its repo table
+    test_credentials = { file = "~/repos/animately/optimizer/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }
+
 The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` and `repo`. A repo table holds every rollout key but
 `verify_slots` (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries`, `spend_approval_usd` and
 `verify_slots`; MACHINE_ONLY: `verify_slots`, which is machine-wide and refused under a `[repo."o/r"]` label), plus
-`inert_paths` (REPO_ONLY: refused under `[defaults]` with `inert_paths is per repo: set it under [repo."owner/name"]`).
-Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
+`inert_paths` and `test_credentials` (REPO_ONLY: each refused under `[defaults]` with `<key> is per repo: set it under
+[repo."owner/name"]`). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table
+form, with one exception: `test_credentials` is read only as ONE line inside its `[repo."o/r"]` table (below), because
+inert-paths.py and reflect's tune.py edit this file line by line and treat any other form as a hand edit they refuse.
 
 `inert_paths` (p29-3, ADR 0045; schema 2, the first key above schema 1) is the repo's Inert paths: a list of at most 64
 distinct git pathspec globs (matched as `:(glob)<glob>`), empty by default (built-in []), so a repo nobody has checked
@@ -54,6 +59,27 @@ lives only here, written by skills/_shared/scripts/inert-paths.py `record` and `
 Integration by execute's `lead-integrate.py prepare`, which proves every glob again on the tree being merged. It is not
 in `settings`: resolve() reports it as its own top-level `inert_paths` (Output). An older reader (schema 1) ignores
 it under a schema-2 file (the schema rule below), so that rollout always re-runs.
+
+`test_credentials` (ADR 0061; schema 3) is the repo's test-credential class: the test-mode and staging keys a credential
+gate may name and still be signed by execute's standing approval (`reconcile-rollout.py approve-gates --standing`),
+once each key is proved present in `file`. It is one inline table on ONE line inside `[repo."o/r"]`:
+`test_credentials = { file = "<path>", keys = [{ name = "<NAME>", prefix = "<prefix>" }, { name = "<NAME>",
+supabase_project = "<ref>" }, …] }`, a trailing comment allowed. Every other form is refused at its line with that
+remedy (`[repo."o/r"] test_credentials must be one line in that table: …`): the `[repo."o/r".test_credentials]`
+sub-table, the dotted forms (top-level or in-table), `repo = {…}` and a value that spans lines. The value
+(credential_problem(), the first failure wins; a refused value is described, never echoed) holds exactly `file` and
+`keys`; `file` is a string starting `/` or `~/`, at most 300 characters, with no control character and no `(` or `)`
+(the annotation that names it ends at a `)`); `keys` is a list of 1 to MAX_CREDENTIAL_KEYS (32) tables, each holding
+exactly `name` and one of `prefix` or `supabase_project`; a `name` is an upper-snake env name (CRED_NAME_RE, at least
+one `_`) with no LIVE or PROD segment (LIVE_PROD_SEGMENT_RE: a live or production key is never in the class), and no
+name twice; a `prefix` is 3 to 40 of A-Z, a-z, 0-9 and `_` (CRED_PREFIX_RE), holds `test` or `sandbox` and no `live`
+or `prod`, in any case; a `supabase_project` is a Supabase project ref, 20 lowercase letters (SUPABASE_REF_RE). It is
+operator-only: no automated writer adds or changes it (a rollout or task stamp would let an agent widen its own
+approval), inert-paths.py's `mine`/`others` check refuses an edit whose result resolves another repo table, and
+tune.py refuses an edit that changes any repo's `test_credentials`. It is not in `settings`: resolve() reports it as
+its own top-level `test_credentials` (Output), null with no class. A schema-2 reader ignores it under a schema-3 file
+(the schema rule below), so that rollout asks every credential gate, as before. It is its own switch, independent of
+`spend_approval_usd`: a declared class signs at the built-in 0 too.
 
 `[notify]` holds only `ntfy_topic` (NOTIFY_KEYS), machine-wide like `[guardrails]`: in `[defaults]` or a repo table it
 is an unknown key. Two scripts read it, both through the importable resolve(), in process: execute's
@@ -113,6 +139,7 @@ schema rule above):
 - a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys and `verify_slots`, 0 for
   `auto_retries` and `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
 - a MACHINE_ONLY key (`verify_slots`) in a `[repo."o/r"]` table;
+- a `test_credentials` in any form but one line in its repo table, or a value credential_problem() refuses (ADR 0061);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
 - a `notify` that is not a table, an unknown key under it, or an `ntfy_topic` that is not an ntfy topic (a string of
@@ -136,12 +163,17 @@ Output. Exit 0 and one JSON line on stdout:
      "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...},
      "notify": {"ntfy_topic": {"set": true|false, "source": "file:notify"|"built-in"}},
      "inert_paths": {"value": ["<glob>", ...], "source": "file:repo"|"built-in"},   # built-in []
+     "test_credentials": {"value": {"file": "<path>", "keys": [{"name": "<NAME>", "prefix": "<p>"}
+                                    | {"name": "<NAME>", "supabase_project": "<ref>"}, ...]} | null,
+                          "source": "file:repo"|"built-in"},                        # built-in null: no class
      "schema": {"file": <the file's schema, 1 when absent or no file>, "engine": SCHEMA},
      "ignored": ["<scope path of each ignored key>", ...]}     # e.g. "defaults.foo", 'repo."o/r".foo', "away"
 
 `notify` is redacted (redacted()): `set` says whether a topic resolved, and the topic itself is never printed, since
 schedule, execute, status and repair run this CLI in a transcript and the Reflection keeps its JSON in a scratch file.
 resolve() returns the same object with `"value": "<topic>"|null` in place of `set`, for the in-process readers above.
+`test_credentials` is printed whole: key names, prefixes, project refs and a path are no secrets (no value is ever read
+here; the standing approval reads the file itself).
 
 `repo` is the origin's owner/name as land.sh printed it (case kept), or null when no repo table could apply:
 no `--repo`, no file, no repo table, or no GitHub origin (no repo, no origin, another host: land.sh exit 4).
@@ -156,7 +188,8 @@ Importable: resolve(repo=None, path=None), redacted(out) (resolve()'s object as 
 run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`,
 `spend_approval_usd` and `verify_slots`: every key a `settings` object holds), MACHINE_ONLY, REPO_ONLY, MINIMUM,
 GUARDRAIL_KEYS, NOTIFY_KEYS, NOTIFY_BUILT_IN, TOPIC_RE, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
-glob_problem(glob), near_miss(key, known), file_schema(doc), load_tables(path) (the validated tables, None for no
+MAX_CREDENTIAL_KEYS, glob_problem(glob), credential_problem(value) (why a test_credentials value is refused, or None),
+near_miss(key, known), file_schema(doc), load_tables(path) (the validated tables, None for no
 file), raise_schema_lines(lines, need, current) (the top-level `schema` raise both writers share: `lines` with the
 line raised to `need` when it is above `current`, never lowered; an existing top-level line is rewritten in place,
 keeping its comment; otherwise `schema = <need>` and a blank line go before the first table header, above the comment
@@ -186,9 +219,17 @@ SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots")
 # rollout on the machine, whatever its repo).
 MACHINE_ONLY = ("verify_slots",)
 # Per-repo keys (p29-3): valid in a [repo."o/r"] table only, refused under [defaults], and kept out of `settings`
-# (resolve() reports each as its own top-level field). `inert_paths` is a repo's Inert paths (ADR 0045).
-REPO_ONLY = ("inert_paths",)
+# (resolve() reports each as its own top-level field). `inert_paths` is a repo's Inert paths (ADR 0045);
+# `test_credentials` its test-credential class (ADR 0061), one line in its table.
+REPO_ONLY = ("inert_paths", "test_credentials")
 MAX_INERT_GLOBS = 64
+# test_credentials (ADR 0061): at most 32 keys; a name is an upper-snake env name with at least one `_`; a prefix is 3 to
+# 40 word characters; a Supabase project ref is 20 lowercase letters. A name with a LIVE or PROD segment is refused.
+MAX_CREDENTIAL_KEYS = 32
+CRED_NAME_RE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\Z")
+CRED_PREFIX_RE = re.compile(r"[A-Za-z0-9_]{3,40}\Z")
+SUPABASE_REF_RE = re.compile(r"[a-z]{20}\Z")
+LIVE_PROD_SEGMENT_RE = re.compile(r"(?:^|_)(?:LIVE|PROD)")
 BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2,
             "spend_approval_usd": 0, "verify_slots": 2}
 # The least valid value of each rollout key: a Tuning key is >= 1; `auto_retries: 0` disables automatic retries;
@@ -210,13 +251,14 @@ TABLES = ("defaults", "guardrails", "notify", "repo")
 TOP_KEYS = ("schema",) + TABLES
 # The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
 # registers every key it knows, by (scope, key), at the schema that introduced it. K10 freezes the schema-1 set.
-SCHEMA = 2
+SCHEMA = 3
 KEY_SCHEMA = {}
 KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
 KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS})
 KEY_SCHEMA.update({("guardrails", k): 1 for k in GUARDRAIL_KEYS})
 KEY_SCHEMA.update({("notify", k): 1 for k in NOTIFY_KEYS})
 KEY_SCHEMA[("rollout", "inert_paths")] = 2   # p29-3 (ADR 0045): the first schema-2 key
+KEY_SCHEMA[("rollout", "test_credentials")] = 3   # ADR 0061: the first schema-3 key
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.
@@ -284,6 +326,9 @@ class _Lines:
     their `{` opens on (line_of's nearest recorded prefix). Only a line that starts outside every value is
     read as a header or a key; the rest of each line is scanned as TOML values, as _Index scans it, so
     strings and comments count for nothing and multi-line strings and arrays carry over to the next line.
+    `one_line` maps a key path to its line only for a single-segment key under a two-segment table header
+    (`[repo."o/r"]`) whose value closes on that same line (no bracket or multi-line string left open after the
+    scan): the one form `test_credentials` is read in (ADR 0061). `lines` and `line_of` are unchanged by it.
 
     Why a copy and not a share (unlike read_toml): _Index's value scan carries the ladder's own hooks inside
     its loop (the `rung = [` array and each inline rung's `{` line, which its refusals cite), and its records
@@ -295,6 +340,7 @@ class _Lines:
 
     def __init__(self, text):
         self.lines = {}
+        self.one_line = {}
         self._table = ()
         self._string = None
         self._brackets = []
@@ -323,8 +369,12 @@ class _Lines:
                 return
             m = _KEY_RE.match(s)
             if m:
-                self._record(self._table + _segments(m.group(1)), n)
-                s = s[m.end():]
+                segs = _segments(m.group(1))
+                self._record(self._table + segs, n)
+                self._scan(s[m.end():])
+                if len(self._table) == 2 and len(segs) == 1 and self._string is None and not self._brackets:
+                    self.one_line[self._table + segs] = n
+                return
         self._scan(s)
 
     def _scan(self, s):
@@ -447,6 +497,75 @@ def glob_problem(glob):
     return None
 
 
+def credential_problem(value):
+    """Why a `test_credentials` value is no valid test-credential class (the header's rules, the first failure wins), or
+    None. A refused value is described, never echoed."""
+    if not isinstance(value, dict):
+        return "must be an inline table { file = \"…\", keys = [ … ] }, got %s" % _describe(value)
+    for key in value:
+        if key not in ("file", "keys"):
+            return "holds an unknown key %s (it holds exactly file and keys)" % json.dumps(key)
+    for key in ("file", "keys"):
+        if key not in value:
+            return "has no %s (it holds exactly file and keys)" % key
+    path = value["file"]
+    if not isinstance(path, str):
+        return "file must be a string, got %s" % _describe(path)
+    if not (path.startswith("/") or path.startswith("~/")):
+        return "file must be an absolute path (starting / or ~/)"
+    if len(path) > 300:
+        return "file is %d characters (at most 300)" % len(path)
+    if any(ord(c) < 32 or ord(c) == 127 for c in path):
+        return "file holds a control character"
+    if "(" in path or ")" in path:
+        return "file holds a ( or ) (the approval's annotation names it and ends at a ))"
+    keys = value["keys"]
+    if not isinstance(keys, list):
+        return "keys must be a list of 1 to %d tables, got %s" % (MAX_CREDENTIAL_KEYS, _describe(keys))
+    if not keys:
+        return "keys is empty (it lists 1 to %d keys)" % MAX_CREDENTIAL_KEYS
+    if len(keys) > MAX_CREDENTIAL_KEYS:
+        return "keys holds %d entries (at most %d)" % (len(keys), MAX_CREDENTIAL_KEYS)
+    names = set()
+    for n, entry in enumerate(keys, 1):
+        where = "keys entry %d" % n
+        if not isinstance(entry, dict):
+            return "%s must be a table { name = \"…\", prefix = \"…\" }, got %s" % (where, _describe(entry))
+        for key in entry:
+            if key not in ("name", "prefix", "supabase_project"):
+                return "%s holds an unknown key %s (it holds name and one of prefix or supabase_project)" % (
+                    where, json.dumps(key))
+        if "name" not in entry:
+            return "%s has no name" % where
+        if ("prefix" in entry) == ("supabase_project" in entry):
+            return "%s must hold exactly one of prefix or supabase_project" % where
+        name = entry["name"]
+        if not isinstance(name, str) or not CRED_NAME_RE.match(name):
+            return ("%s: name must be an upper-snake env name (A-Z, 0-9 and _, with at least one _), got %s"
+                    % (where, _describe(name) if not isinstance(name, str) else "a string of another form"))
+        if LIVE_PROD_SEGMENT_RE.search(name):
+            return "%s: name holds a LIVE or PROD segment (a live or production key is never a test credential)" % where
+        if name in names:
+            return "%s: its name is listed twice" % where
+        names.add(name)
+        if "prefix" in entry:
+            prefix = entry["prefix"]
+            if not isinstance(prefix, str) or not CRED_PREFIX_RE.match(prefix):
+                return ("%s: prefix must be 3 to 40 of A-Z, a-z, 0-9 and _, got %s"
+                        % (where, _describe(prefix) if not isinstance(prefix, str) else "a string of another form"))
+            low = prefix.lower()
+            if "live" in low or "prod" in low:
+                return "%s: prefix holds live or prod (a live or production key is never a test credential)" % where
+            if "test" not in low and "sandbox" not in low:
+                return "%s: prefix holds no test or sandbox (a test credential's prefix says it is one)" % where
+        else:
+            ref = entry["supabase_project"]
+            if not isinstance(ref, str) or not SUPABASE_REF_RE.match(ref):
+                return ("%s: supabase_project must be a Supabase project ref (20 lowercase letters), got %s"
+                        % (where, _describe(ref) if not isinstance(ref, str) else "a string of another form"))
+    return None
+
+
 def file_schema(doc):
     """The file's top-level `schema` (1 when absent), or None when it is not an integer >= 1."""
     raw = (doc or {}).get("schema", 1)
@@ -509,6 +628,19 @@ def _validate(text, doc, path):
             if key in REPO_ONLY:
                 if at[0] != "repo":
                     refuse("%s is per repo: set it under [repo.\"owner/name\"]" % key, at + (key,))
+                if key == "test_credentials":
+                    # ADR 0061: one line in its repo table, the only form inert-paths.py and tune.py edit around.
+                    if at + (key,) not in idx.one_line:
+                        refuse("%s test_credentials must be one line in that table: test_credentials = { file = \"…\", "
+                               "keys = [ … ] } (inert-paths.py and tune.py edit this file line by line)" % label,
+                               at + (key,))
+                    why = credential_problem(value)
+                    if why:
+                        refuse("%s test_credentials: %s" % (label, why), at + (key,))
+                    kept[key] = {"file": value["file"],
+                                 "keys": [{k: entry[k] for k in ("name", "prefix", "supabase_project") if k in entry}
+                                          for entry in value["keys"]]}
+                    continue
                 if not isinstance(value, list):
                     refuse("%s %s must be a list of git pathspec globs, got %s" % (label, key, _describe(value)),
                            at + (key,))
@@ -727,9 +859,12 @@ def resolve(repo=None, path=None):
             notify[key] = {"value": NOTIFY_BUILT_IN[key], "source": "built-in"}
     inert = ({"value": list(overrides["inert_paths"]), "source": "file:repo"} if "inert_paths" in overrides
              else {"value": [], "source": "built-in"})
+    creds = overrides.get("test_credentials")
+    creds = ({"value": {"file": creds["file"], "keys": [dict(k) for k in creds["keys"]]}, "source": "file:repo"}
+             if creds is not None else {"value": None, "source": "built-in"})
     return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails,
-            "notify": notify, "inert_paths": inert, "schema": {"file": tables["schema"], "engine": SCHEMA},
-            "ignored": list(tables["ignored"])}
+            "notify": notify, "inert_paths": inert, "test_credentials": creds,
+            "schema": {"file": tables["schema"], "engine": SCHEMA}, "ignored": list(tables["ignored"])}
 
 
 def redacted(out):

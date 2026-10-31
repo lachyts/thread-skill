@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""gated_inputs.py — the gated-input sweep and the standing approval's exposure reading (ADR 0008, ADR 0034).
+"""gated_inputs.py — the gated-input sweep and the standing approval's readings (ADR 0008, ADR 0034, ADR 0061).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py sweep <note>...
     python3 -I ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py exposure - <<'EOF'
     <one gate>
     EOF
 
-The single home of two readings of free text. Stdlib only; it writes nothing and makes no network call.
+The single home of the readings of free text (and the one env-file read) the gate path needs. Stdlib only; it writes
+nothing and makes no network call.
 
 1. The sweep (schedule § 3.6; orient reshuffle R3 through it). `sweep(text)` finds every hit of the SPEND,
    CREDENTIAL and IRREVERSIBLE lists in a task note's body. A word matches case-insensitively where a word starts
@@ -90,12 +91,81 @@ The single home of two readings of free text. Stdlib only; it writes nothing and
    `(approved `, holds no `)` and goes last on the line, so the engine's normalizeGate and reconcile-rollout.py's
    GATE_ANNOT_RE strip it and the gate still matches its declaration.
 
+4. The test-credential reading (ADR 0061): a credential gate the standing approval may sign, because it names only
+   keys of the repo's declared test-credential class (rollout-settings.py's `test_credentials`, `cls` below: {file,
+   keys: [{name, prefix | supabase_project}]}, or None) and each is present, with its declared form, in the declared
+   file, which the rollout's `env_bootstrap` copies into the task tree with a plain `cp`. Every why is fixed text that
+   names a key, a token of the gate, a prefix, a ref or the file, never a value from the file or an exception's text.
+   - `gate_kind(gate)`: a list marker stripped, the text before the first `:`, lower-cased ("" with no colon).
+     exposure()'s rule 1 reads it.
+   - `credential_reading(gate, cls)` -> {"names": [...] | None, "why"}: fail closed, the first failure wins, the rules
+     reading only the text after the first `:`. The class-independent steps run first, so a gate no class could ever
+     sign says why:
+       1. The kind is `credential` ("not a credential gate").
+       2. The deny rules, case-insensitive; the first match in text order (the longest at one place) gives `deny word:
+          <the match through the end of its letters, a leading _ dropped>`: (a) `live` or `prod` at a word start or
+          after `_` (DENY_LIVE_PROD_RE: `sk_live_`, `STRIPE_LIVE_KEY`, `SUPABASE_PROD_KEY`, `Production`, `livemode`);
+          (b) the IRREVERSIBLE list; (c) DENY_NOUNS at a word start (password, passphrase, private key, ssh, oauth,
+          api key, access key, access, token, secret, 1password, keychain, cookie).
+       3. A mode word (MODE_RE): `test`, `test-mode`, `testmode`, `staging` or `sandbox` at a word start, not followed
+          by a letter or digit ("no test-mode, staging or sandbox word").
+       4. The class is set ("no test-credential class for this repo (set test_credentials in its
+          [repo."owner/name"] table in ~/.config/thread/rollouts.toml)").
+       5. Every upper-snake env token (ENV_TOKEN_RE) is a declared name ("<TOKEN> is not a declared test
+          credential"), and there is at least one ("it names no declared test credential").
+       6. Every prefix token (PREFIX_TOKEN_RE: lower-case word characters ending `_`, e.g. `sk_test_`) is the declared
+          prefix of a key it names ("<token> is not the declared prefix of a key it names").
+       7. Every bare token of exactly 20 lowercase letters (REF_TOKEN_RE) is the declared `supabase_project` of a key
+          it names ("<token> is not the declared Supabase project of a key it names").
+     names are the env tokens in text order, each once. The deny list is a reject list, not a whitelist (as
+     exposure()'s leftover is): a second credential named in prose with no env token or deny word (`the GitHub PAT`)
+     passes; the annotation names only the proved keys and the file, and any other use is a review failure (ADR 0061
+     residual i). Known false asks, pinned: Stripe's own "API keys" and "secret key", `STRIPE_PRODUCT_ID`, "lives".
+   - `read_env(path)` -> ({name: value}, None) or (None, why): `~` expanded; os.path.isfile, else "<path> is not a
+     regular file" and it is never opened; os.open with O_RDONLY|O_NONBLOCK|O_NOCTTY|O_CLOEXEC (each flag through
+     getattr(os, ..., 0), so a FIFO swapped in after the check never blocks); fstat S_ISREG, else the same why; at
+     most MAX_ENV_BYTES + 1 bytes read in a loop, and above MAX_ENV_BYTES (1 MiB) "<path> is over 1 MiB"; the fd
+     closed in `finally`; not UTF-8 "<path> is not UTF-8"; any OSError "cannot read <path>". The dotenv parse: CR
+     dropped; blank and `#` lines skipped; an optional `export `, then `NAME\s*=\s*VALUE`; a quoted value is its
+     inside (an unclosed quote reads as absent); an unquoted value has ` #…` dropped and is stripped; the last
+     assignment wins; an empty value reads as absent.
+   - `env_proof(cls, names)` -> {"ok", "why"}: every missing name listed ("<NAME> is not set in <file>", joined by
+     `; `); then each key in turn: a prefix key's value starts with its prefix ("<NAME> in <file> does not start with
+     <prefix>"); a supabase key's value is a three-part JWT whose base64url payload is a JSON object ("<NAME> in
+     <file> is not a legacy JWT service key, so its project cannot be proved": Supabase's newer `sb_secret_` keys
+     carry no project ref, so a project on them always asks) whose `ref` is the declared project ("<NAME> in <file>
+     is not a key for Supabase project <ref>"). <file> is the class's file as declared.
+   - `bootstrap_refreshes(cmd, file)` -> {"ok", "why"}: the rollout's `env_bootstrap` copies `file` into the task tree
+     with a plain, unconditional `cp`, so the implementer's re-run after a sign-off brings in the file's current keys.
+     Tokenised by shlex (posix, punctuation_chars, whitespace_split; a ValueError: "the rollout's env_bootstrap is not
+     one shell command"); simple commands split at tokens made only of `&|;()`; a token holding `<` or `>` is a
+     redirection, and its target and a bare fd digit before it are no operands. The file's forms: its expanded path,
+     its declared form and, for a `~/` file, `$HOME/…` and `${HOME}/…`, each an exact word (`.env.local.bak` never
+     counts). No command names it: "the rollout's env_bootstrap does not provide <file>". Every command that names it
+     must pass, each failure prefixed "the rollout's env_bootstrap may not refresh <file> into the task tree: ": its
+     first word is `cp` ("it names the file outside a plain cp"); no option before `--` is `--no-clobber`,
+     `--interactive`, `--update[=…]` or a single-dash cluster holding n, u or i ("its cp skips an existing copy (-n,
+     -u or -i)"); the file is not its last operand ("its cp writes the file instead of reading it"); and when `&&` or
+     `||` (through any `(` or `)`) join it to the command before, that command, and each one before it along the
+     same `&&`/`||` chain, does not start with `[`, `[[` or `test` ("its copy runs only after a test").
+   - `credential_covered(gate, cls, bootstrap)` -> {"covered", "names", "why"}: credential_reading, then
+     bootstrap_refreshes, then env_proof.
+   - `credential_annotation(date, names, file, source)`: the `## Approved gates` suffix, `(approved <date> under the
+     standing approval: test credential K1, K2 present in <file>, class from <source>)`, the file as declared; it
+     raises ValueError on a `)` in any part, as annotation() does.
+
 Importable (reconcile-rollout.py loads it with importlib, beside rollout-settings.py): sweep, hits, body_of, SPEND,
-OLD_SPEND, CREDENTIAL, IRREVERSIBLE, UNIT_NOUNS, PERIOD_ADVERBS, exposure, covered, annotation, format_usd.
+OLD_SPEND, CREDENTIAL, IRREVERSIBLE, UNIT_NOUNS, PERIOD_ADVERBS, exposure, covered, annotation, format_usd, gate_kind,
+credential_reading, read_env, env_proof, bootstrap_refreshes, credential_covered, credential_annotation, MAX_ENV_BYTES,
+DENY_NOUNS.
 """
+import base64
+import binascii
 import json
 import os
 import re
+import shlex
+import stat
 import sys
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -341,8 +411,7 @@ def _clause(clause):
 def exposure(gate):
     """{"usd": Decimal | None, "why": str} for one declared gate (the module docstring's rules 1-9)."""
     gate = re.sub(r"^\s*[-*]\s+", "", str(gate or "")).strip()
-    kind = gate.split(":", 1)[0].strip().lower() if ":" in gate else ""
-    if kind != "spend":
+    if gate_kind(gate) != "spend":
         return _none("not a spend gate")
     tokens = _tokens(gate)
     by_start = {t[0]: t for t in tokens}
@@ -408,6 +477,251 @@ def annotation(date, usd, limit, source):
             f"limit US${format_usd(limit)} from {source})")
     if text.count(")") != 1:
         raise ValueError(f"an annotation part holds a ')': {date!r}, {source!r}")
+    return text
+
+
+# ---- the test-credential reading (ADR 0061) ---------------------------------------------------------------------
+
+def gate_kind(gate):
+    """The gate's kind: a list marker stripped, the text before the first `:`, lower-cased ("" with no colon)."""
+    gate = re.sub(r"^\s*[-*]\s+", "", str(gate or "")).strip()
+    return gate.split(":", 1)[0].strip().lower() if ":" in gate else ""
+
+
+DENY_LIVE_PROD_RE = re.compile(r"(?:(?<![A-Za-z0-9_])|_)(?:live|prod)[A-Za-z]*", re.I)
+DENY_NOUNS = ("password", "passphrase", "private key", "ssh", "oauth", "api key", "access key", "access", "token",
+              "secret", "1password", "keychain", "cookie")
+DENY_RES = (DENY_LIVE_PROD_RE,) + tuple(
+    re.compile(WS + r"\s+".join(re.escape(p) for p in phrase.split(" ")) + r"[A-Za-z]*", re.I)
+    for phrase in tuple(w for w, _r, _p in IRREVERSIBLE) + DENY_NOUNS)
+MODE_RE = re.compile(WS + r"(?:test-mode|testmode|test|staging|sandbox)(?![A-Za-z0-9])", re.I)
+ENV_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![A-Za-z0-9_])")
+PREFIX_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])[a-z][a-z0-9]*(?:_[a-z0-9]+)*_(?![A-Za-z0-9_])")
+REF_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])[a-z]{20}(?![A-Za-z0-9_])")
+NO_CLASS_WHY = ("no test-credential class for this repo (set test_credentials in its [repo.\"owner/name\"] table in "
+                "~/.config/thread/rollouts.toml)")
+MAX_ENV_BYTES = 1 << 20
+ENV_LINE_RE = re.compile(r"(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\Z")
+
+
+def _cred_none(why):
+    return {"names": None, "why": why}
+
+
+def credential_reading(gate, cls):
+    """{"names": [...] | None, "why"}: the test-credential reading of one gate (module docstring, 4)."""
+    gate = re.sub(r"^\s*[-*]\s+", "", str(gate or "")).strip()
+    if gate_kind(gate) != "credential":
+        return _cred_none("not a credential gate")
+    text = gate.split(":", 1)[1]
+    found = []
+    for regex in DENY_RES:
+        found += [(m.start(), -len(m.group(0)), m.group(0)) for m in regex.finditer(text)]
+    if found:
+        word = re.sub(r"\s+", " ", min(found)[2]).lstrip("_")
+        return _cred_none(f"deny word: {word}")
+    if not MODE_RE.search(text):
+        return _cred_none("no test-mode, staging or sandbox word")
+    if not cls:
+        return _cred_none(NO_CLASS_WHY)
+    declared = {k["name"]: k for k in cls["keys"]}
+    names = []
+    for m in ENV_TOKEN_RE.finditer(text):
+        if m.group(0) not in declared:
+            return _cred_none(f"{m.group(0)} is not a declared test credential")
+        if m.group(0) not in names:
+            names.append(m.group(0))
+    if not names:
+        return _cred_none("it names no declared test credential")
+    prefixes = {declared[n]["prefix"] for n in names if "prefix" in declared[n]}
+    for m in PREFIX_TOKEN_RE.finditer(text):
+        if m.group(0) not in prefixes:
+            return _cred_none(f"{m.group(0)} is not the declared prefix of a key it names")
+    refs = {declared[n]["supabase_project"] for n in names if "supabase_project" in declared[n]}
+    for m in REF_TOKEN_RE.finditer(text):
+        if m.group(0) not in refs:
+            return _cred_none(f"{m.group(0)} is not the declared Supabase project of a key it names")
+    return {"names": names, "why": ""}
+
+
+def _parse_env(text):
+    """{name: value} from a dotenv text (module docstring, 4: read_env)."""
+    out = {}
+    for line in text.replace("\r", "").split("\n"):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        m = ENV_LINE_RE.match(s)
+        if not m:
+            continue
+        raw = m.group(2)
+        if raw[:1] in ("'", '"'):
+            end = raw.find(raw[0], 1)
+            out[m.group(1)] = None if end < 0 else raw[1:end]
+        else:
+            out[m.group(1)] = re.split(r"\s#", raw, maxsplit=1)[0].strip()
+    return {k: v for k, v in out.items() if v}
+
+
+def read_env(path):
+    """({name: value}, None) or (None, why): the declared env file, read safely (module docstring, 4)."""
+    real = os.path.expanduser(path)
+    if not os.path.isfile(real):
+        return None, f"{path} is not a regular file"
+    flags = os.O_RDONLY
+    for flag in ("O_NONBLOCK", "O_NOCTTY", "O_CLOEXEC"):
+        flags |= getattr(os, flag, 0)
+    fd, chunks, size = None, [], 0
+    try:
+        fd = os.open(real, flags)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None, f"{path} is not a regular file"
+        while size <= MAX_ENV_BYTES:
+            chunk = os.read(fd, MAX_ENV_BYTES + 1 - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+    except OSError:
+        return None, f"cannot read {path}"
+    finally:
+        if fd is not None:
+            os.close(fd)
+    if size > MAX_ENV_BYTES:
+        return None, f"{path} is over 1 MiB"
+    try:
+        text = b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError:
+        return None, f"{path} is not UTF-8"
+    return _parse_env(text), None
+
+
+def _jwt_payload(value):
+    """A three-part JWT's payload as a dict, or None (no JWT, bad base64url, or a payload that is no JSON object)."""
+    parts = value.split(".")
+    if len(parts) != 3 or not all(re.fullmatch(r"[A-Za-z0-9_-]+", p) for p in parts):
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)).decode("utf-8"))
+    except (binascii.Error, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def env_proof(cls, names):
+    """{"ok", "why"}: each named key present in the class's file with its declared form (module docstring, 4)."""
+    env, why = read_env(cls["file"])
+    if why:
+        return {"ok": False, "why": why}
+    path = cls["file"]
+    declared = {k["name"]: k for k in cls["keys"]}
+    missing = [n for n in names if n not in env]
+    if missing:
+        return {"ok": False, "why": "; ".join(f"{n} is not set in {path}" for n in missing)}
+    for n in names:
+        key = declared.get(n)
+        if key is None:
+            return {"ok": False, "why": f"{n} is not a declared test credential"}
+        if "prefix" in key:
+            if not env[n].startswith(key["prefix"]):
+                return {"ok": False, "why": f"{n} in {path} does not start with {key['prefix']}"}
+            continue
+        payload = _jwt_payload(env[n])
+        if payload is None:
+            return {"ok": False, "why": f"{n} in {path} is not a legacy JWT service key, so its project cannot be proved"}
+        if payload.get("ref") != key["supabase_project"]:
+            return {"ok": False, "why": f"{n} in {path} is not a key for Supabase project {key['supabase_project']}"}
+    return {"ok": True, "why": ""}
+
+
+def _no(why):
+    return {"ok": False, "why": why}
+
+
+def bootstrap_refreshes(cmd, file):
+    """{"ok", "why"}: the rollout's env_bootstrap copies `file` with a plain, unconditional cp (module docstring, 4)."""
+    if not cmd:
+        return _no(f"the rollout's env_bootstrap does not provide {file}")
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        tokens = list(lex)
+    except ValueError:
+        return _no("the rollout's env_bootstrap is not one shell command")
+    forms = {file, os.path.expanduser(file)}
+    if file.startswith("~/"):
+        forms |= {"$HOME/" + file[2:], "${HOME}/" + file[2:]}
+    # Simple commands: (words, the separator tokens before it), each redirection, its target and a bare fd digit before
+    # it dropped (none of them is an operand).
+    commands, words, seps, target = [], [], [], False
+    for tok in tokens:
+        if tok and all(c in "&|;()" for c in tok):
+            if words:
+                commands.append((words, seps))
+                words, seps = [], []
+            seps.append(tok)
+            target = False
+            continue
+        if target:
+            target = False
+            continue
+        if "<" in tok or ">" in tok:
+            if words and words[-1].isdigit():
+                words.pop()
+            target = all(c in "<>&|" for c in tok)   # an operator alone: its target is the next token
+            continue
+        words.append(tok)
+    if words:
+        commands.append((words, seps))
+    named = [n for n, (w, _s) in enumerate(commands) if forms & set(w)]
+    if not named:
+        return _no(f"the rollout's env_bootstrap does not provide {file}")
+    pre = f"the rollout's env_bootstrap may not refresh {file} into the task tree: "
+    for n in named:
+        w, seps = commands[n]
+        if w[0] != "cp":
+            return _no(pre + "it names the file outside a plain cp")
+        operands, opts_done = [], False
+        for word in w[1:]:
+            if not opts_done and word == "--":
+                opts_done = True
+            elif not opts_done and word.startswith("-") and word != "-":
+                if (word in ("--no-clobber", "--interactive", "--update") or word.startswith("--update=")
+                        or (not word.startswith("--") and set(word[1:]) & set("nui"))):
+                    return _no(pre + "its cp skips an existing copy (-n, -u or -i)")
+            else:
+                operands.append(word)
+        if operands and operands[-1] in forms:
+            return _no(pre + "its cp writes the file instead of reading it")
+        # Joined by && or || (through any parenthesis) to a test, directly or along the chain before it.
+        k = n
+        while k > 0 and any(sep in ("&&", "||") for sep in commands[k][1]):
+            k -= 1
+            if commands[k][0][0] in ("[", "[[", "test"):
+                return _no(pre + "its copy runs only after a test")
+    return {"ok": True, "why": ""}
+
+
+def credential_covered(gate, cls, bootstrap):
+    """{"covered", "names", "why"}: credential_reading, then bootstrap_refreshes, then env_proof (module docstring,
+    4); covered only when all three pass."""
+    reading = credential_reading(gate, cls)
+    if reading["names"] is None:
+        return {"covered": False, "names": None, "why": reading["why"]}
+    for check in (lambda: bootstrap_refreshes(bootstrap, cls["file"]), lambda: env_proof(cls, reading["names"])):
+        r = check()
+        if not r["ok"]:
+            return {"covered": False, "names": reading["names"], "why": r["why"]}
+    return {"covered": True, "names": reading["names"], "why": ""}
+
+
+def credential_annotation(date, names, file, source):
+    """The standing approval's `## Approved gates` suffix for a declared test credential (module docstring, 4). Raises
+    ValueError on a `)` in any part: the engine's normalizeGate strips only an annotation with none."""
+    text = (f"(approved {date} under the standing approval: test credential {', '.join(names)} present in {file}, "
+            f"class from {source})")
+    if text.count(")") != 1:
+        raise ValueError(f"an annotation part holds a ')': {date!r}, {file!r}, {source!r}")
     return text
 
 

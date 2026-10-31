@@ -300,6 +300,42 @@ test('S-plan: a plan-gated stop resumes on the signed plan — the implementer r
   assert.equal(B.row.planRoundsUsed, 1)
 })
 
+// ADR 0061 d4: a declared test credential is proved in the source env file, never the task tree's copy, so the copy must
+// be refreshed after a sign-off. The mechanism: the resumed call's implementer enters its tree through worktreeSetup,
+// which renders env_bootstrap after the worktree arms and the toplevel check, so it runs on a REUSED tree too (the
+// planner made it), and its plain `cp` brings in a key Lachy added to the source after the missing-key ASK.
+// p8-1's rollout's env_bootstrap, verbatim (smart-slider-rollout-2026-10-28; its `# from …` comment is the reader's).
+const P8_1_BOOT = 'yarn install --immutable && git submodule update --init library && (cp /Users/lachlants/repos/animately/optimizer/.env.local .env.local 2>/dev/null || true)'
+// The bootstrap line sits straight after the toplevel check, which follows the arms' closing `fi`: on every arm.
+function bootstrapAfterArms(prompt, boot) {
+  const lines = prompt.split('\n')
+  const top = lines.findIndex((l) => l.startsWith('  git rev-parse --show-toplevel   # MUST print "$WT"') && l.endsWith("STOP if it doesn't"))
+  if (top < 1) return false
+  return /\bfi$/.test(lines[top - 1]) && lines[top + 1] === `  ${boot}   # one-time env bootstrap from the rollout (env_bootstrap): establish interpreter + deps` &&
+    lines.filter((l) => l.includes(boot)).length === 1
+}
+
+test('S-plan-env (ADR 0061 d4): after a sign-off the implementer re-runs env_bootstrap in its tree, on a reused tree too', async () => {
+  const script = {
+    [`plan:${SLUG}`]: plan(PLAN_G),
+    [`plan-judge:${SLUG} r1`]: approve,
+    [`implement:${SLUG}`]: green(`implement:${SLUG}`),
+    [`review:${SLUG} r1`]: approve,
+  }
+  const { tail } = await resumeAfterSignOff({ ...mkArgs({ planGate: true }), envBootstrap: P8_1_BOOT }, script, `implement:${SLUG}`)
+  assert.equal(tail[0].label, `implement:${SLUG}`)
+  assert.ok(bootstrapAfterArms(tail[0].prompt, P8_1_BOOT), "the resumed implementer's setup runs the bootstrap after the arms' fi and the toplevel check")
+  // control: the same prompt with the bootstrap moved inside the fresh arm (so a reused tree would skip it) fails the check
+  const lines = tail[0].prompt.split('\n')
+  const bootLine = lines.findIndex((l) => l.startsWith(`  ${P8_1_BOOT}`))
+  const fresh = lines.findIndex((l) => l.startsWith('  else ') && l.endsWith('fi'))
+  assert.ok(bootLine > 0 && fresh > 0, 'control setup: the bootstrap line and the fresh arm')
+  const moved = [...lines]
+  moved.splice(bootLine, 1)
+  moved[fresh] = moved[fresh].replace(/; fi$/, ` && ${P8_1_BOOT}; fi`)
+  assert.equal(bootstrapAfterArms(moved.join('\n'), P8_1_BOOT), false, 'control: inside the fresh arm, a reused tree never refreshes')
+})
+
 test('S-plan-r2: a gate declared on a revised plan — the revise and the climb sit inside the prefix', async () => {
   const script = {
     [`plan:${SLUG}`]: plan(PLAN_NONE),

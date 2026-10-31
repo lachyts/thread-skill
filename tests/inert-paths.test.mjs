@@ -727,6 +727,51 @@ test('record refuses a dotted or multi-line inert_paths form: edit it by hand', 
   }
 })
 
+// ADR 0061: a repo's test-credential class is ONE line in its repo table, which the line-by-line edit keeps byte-identical
+// and inserts after; an edit whose result changes it is refused by the `mine` check; any other form refuses the file.
+const IP_CLASS = 'test_credentials = { file = "/x/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }] }  # test mode only'
+
+test('record beside the one-line test_credentials class keeps it byte-identical and inserts after it', (t) => {
+  const fx = fixture(t)
+  fs.mkdirSync(tasksDir(fx.home))
+  const before = `schema = 3\n\n[repo."o/fx"]\nparallel_ceiling = 3\n${IP_CLASS}\n`
+  write(path.dirname(settingsPath(fx.home)), { 'rollouts.toml': before })
+  const r = cli(fx.home, ['record', '--repo', fx.repo, '--glob', 'THREAD.md', '--verifier', 'true', '--tasks-dir', tasksDir(fx.home)])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(settingsPath(fx.home), 'utf8'), `${before}inert_paths = ["THREAD.md"]\n`)
+})
+
+test('record control: an edit that alters the class is refused by the mine check, nothing written', (t) => {
+  const fx = fixture(t)
+  fs.mkdirSync(tasksDir(fx.home))
+  const before = `schema = 3\n\n[repo."o/fx"]\n${IP_CLASS}\n`
+  write(path.dirname(settingsPath(fx.home)), { 'rollouts.toml': before })
+  const code = ['import importlib.util, sys', 'spec = importlib.util.spec_from_file_location("ip", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)', 'edit = m.edit_inert',
+    'm.edit_inert = lambda *a: edit(*a).replace(\'file = "/x/.env.local"\', \'file = "/y/.env.local"\')',
+    'sys.exit(m.main(sys.argv[2:]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', code, SCRIPT, 'record', '--repo', fx.repo, '--glob', 'THREAD.md', '--verifier', 'true',
+    '--tasks-dir', tasksDir(fx.home)], { encoding: 'utf8', cwd: fx.home, env: baseEnv(fx.home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.equal(r.stderr, 'inert-paths: the edit resolves another result than intended: nothing written\n')
+  assert.equal(fs.readFileSync(settingsPath(fx.home), 'utf8'), before, 'byte-identical')
+})
+
+test('record refuses a file holding the class as a sub-table or over several lines: exit 2, byte-identical', (t) => {
+  const fx = fixture(t)
+  fs.mkdirSync(tasksDir(fx.home))
+  for (const body of [
+    'schema = 3\n\n[repo."o/fx"]\nparallel_ceiling = 3\n\n[repo."o/fx".test_credentials]\nfile = "/x/.env.local"\nkeys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }]\n',
+    'schema = 3\n\n[repo."o/fx"]\ntest_credentials = { file = "/x/.env.local", keys = [\n  { name = "STRIPE_SECRET", prefix = "sk_test_" }] }\n',
+  ]) {
+    write(path.dirname(settingsPath(fx.home)), { 'rollouts.toml': body })
+    const r = cli(fx.home, ['record', '--repo', fx.repo, '--glob', 'THREAD.md', '--verifier', 'true', '--tasks-dir', tasksDir(fx.home)])
+    assert.equal(r.status, 2, r.stderr)
+    assert.match(r.stderr, /test_credentials must be one line in that table/)
+    assert.equal(fs.readFileSync(settingsPath(fx.home), 'utf8'), body, 'byte-identical')
+  }
+})
+
 // The reader check (round 2): a fixture plugin repo P with commit 1 (a pre-P29 rollout-settings.py stub that refuses a
 // top-level schema line) and commit 2 (a copy of the real scripts). The Primary P sits at commit 1; record runs from a
 // linked worktree W at commit 2, with a live rollout note in --tasks-dir.
