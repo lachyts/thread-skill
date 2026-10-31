@@ -416,8 +416,10 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   `@AGENTS.md` import, a `Tests:` line) and a live rollout's `verifier:` (given only to the repo whose toplevel its
   Project root is, never to a parent repo), phase members by filename prefix, content already on origin, live
   rollouts' status with pending sign-offs, BatchMode, `--offline`, the group-killing timeout and absolute deadline
-  (and SIGTERM), an unreadable Tasks note, the env scrub when its probe fails, read-only runs, byte-equal reruns and
-  parity with `pushed-base.sh` on copies of the fixtures.
+  (and SIGTERM), an unreadable Tasks note, the env scrub when its probe fails, read-only runs, byte-equal reruns,
+  parity with `pushed-base.sh` on copies of the fixtures, and each project row's `ownSession` (ADR 0060: the `orient:`
+  key wins, else a declared repo holding its own design record, `CONTEXT.md` and an ADR; an unreadable key named in
+  `invalid`; plain reads, so a `--deadline 0` run gives the same rows).
 - **Estate rank** — `tests/estate-rank.test.mjs`: `estate-rank.py` over the real scan of a fixture vault and
   hand-written grades files — every graded task's grade, shape and recommended answers, validation that lists every
   error and never guesses (a grader deadline already past dropped), the raise, the ranking key (a due-soon task above a
@@ -441,7 +443,12 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   (decided, unheld members only, each with every dependency it needs scheduled and every why read against the final
   schedule, blockers, shared roots and parked runs waiting, batches that keep names that may meet apart, each live
   rollout's holds and the signed reinstate), `sessions` (written notes, the status allow-list
-  behind the holds, orients last), `record` (the answer folded to one line into `## Decisions (asked ahead
+  behind the holds, orients last), the big projects (ADR 0060: `rounds` asks none of their decisions, sign-offs or
+  Unpark offers and lists them in `ownSession[]`, with `warnings[]` for an unreadable `orient:` key; `plan` waits their
+  runs `own session` and keeps their tasks out of `sessionLane[]`, and ranks `pick[]`, asked as `pickAsk`, two
+  projects of one name numbered and linked by path; `sessions` holds their items until `--open` or `--typed` ticks
+  them, unmatched words in `unmatched[]`, an opened one's repair asking its pending sign-offs, and a small project's
+  orient line naming only its Orient tasks), `record` (the answer folded to one line into `## Decisions (asked ahead
   <date>)`, the fork's ruling, every refusal byte-identical; `record --owner` a call made for Lachy into
   `## Decided for you (<date>)`), `decided-for-you` (the ruled calls of the queued tasks, the owner split, read-only
   without `--write`, a task gone in flight refused while the rest are written) and `log` (one grade line per graded
