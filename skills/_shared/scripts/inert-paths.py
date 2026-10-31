@@ -36,8 +36,10 @@ fails closed: anything it cannot read reads as a reader. A glob holds only when 
   scanned (every .txt among them), plus the verifier and bootstrap texts as steps (`<verifier>`, `<bootstrap>`), which
   run at the tree root. A blob holding a NUL byte is binary: the name rule reads it, nothing else does (it has no lines
   of code).
-- unprovable: a glob with no literal segment (`**`, `*.md`) is never proved; past PROOF_BUDGET_S (60 s, a deadline
-  check, no signals) every glob fails as unprovable with "proof budget exceeded".
+- unprovable: a glob with no literal segment (`**`, `*.md`) is never proved; past PROOF_BUDGET_S (180 s, a deadline
+  check read through `_now()`, no signals) every glob fails as unprovable with "proof budget exceeded". The deadline is
+  checked per file, per logical shell line, per shell item and view, per resolved expression and per walk; a single
+  giant line still runs `shell_items` once, with no check inside it.
 - submodule: a gitlink anywhere in the tree fails every glob (its contents cannot be read).
 - symlink: a tracked symlink whose target resolves into the glob (a link to a matching file, to a directory at or
   above the glob's literal directory, or below a directory glob's; a target outside the repo is compared with the
@@ -154,7 +156,9 @@ directory glob also when D is a prefix of S. An unknown segment covers everythin
 are treated as recursive. The walk's name filter (a pattern's last segment, find's -name/-iname/-path, rg -g/-t, grep
 --include, a comprehension's `.endswith(...)`) must be absent or able to match the glob: for a literal-file glob it
 must match its name; otherwise it must be able to match a prose name, so a filter that selects only a non-prose
-extension (`*.py`, `.endswith(".tmp")`) does not cover.
+extension (`*.py`, `.endswith(".tmp")`) does not cover. A brace filter expands to at most BRACE_CAP (64) alternatives in
+the recursive expander's order (bash's for flat groups; nested groups, `{a}` and `{}` differ); a filter with more can
+match anything (fail closed).
 
 Narrowings (each in ADR 0045's amendment, for Escape matching against a `verify-skipped` line): (i) the call-site
 chase with the binding rules above; (ii) HOME-open; (iii) static text: a name assembled at run time, or a walk reached
@@ -238,7 +242,8 @@ RR = _load("thread_run_record", "run_record.py")
 
 PROSE_EXT = (".md", ".markdown", ".rst", ".adoc", ".org")   # never .txt: pytest collects test*.txt, and a .txt is often data
 CANDIDATES = ("THREAD.md", "docs/handoffs/**", "docs/reviews/**")
-PROOF_BUDGET_S = 60
+PROOF_BUDGET_S = 180
+BRACE_CAP = 64
 DROP_AFTER = 3
 DEPTH = 8
 GIT_TIMEOUT = 120
@@ -267,6 +272,12 @@ class ProofError(Exception):
 
 class _Budget(Exception):
     pass
+
+
+def _now():
+    """The proof's clock: every deadline read goes through this one module-local name, so a test can move the proof's
+    clock without touching the process's time.monotonic (which _git's communicate(timeout=…) and subprocess read)."""
+    return time.monotonic()
 
 
 # ---- git ------------------------------------------------------------------------------------------------------------
@@ -374,14 +385,42 @@ def tokens(glob):
     return out
 
 
-def _brace(pat):
-    m = re.search(r"\{([^{}]*)\}", pat)
-    if not m:
-        return [pat]
-    out = []
-    for alt in m.group(1).split(","):
-        out.extend(_brace(pat[:m.start()] + alt + pat[m.end():]))
-    return out[:64]
+_BRACE_RE = re.compile(r"\{([^{}]*)\}")
+
+
+def _brace(pat, stop_at_cut=False):
+    """Brace expansion of a name filter, capped while it expands: (patterns, truncated).
+
+    The order is the recursive expander's (each pattern's leftmost innermost `{…}` first), which is bash's for flat
+    groups only: nested `{a,{b,c}}` gives a, b, a, c where bash gives a, b, c, and `{a}` and `{}` expand here where bash
+    keeps them literal. Breadth-first: each round replaces, in place, every pattern's leftmost innermost `{…}` by its
+    alternatives (so the leftmost group is outermost, nested groups expand innermost first and duplicates stay), and a
+    round stops appending once the list passes BRACE_CAP and cuts it there. Every pattern expands to at least one
+    result, so the first BRACE_CAP results are always the recursive expander's first BRACE_CAP; the cost is BRACE_CAP
+    per round, never 2 ** groups. `truncated` is true only when something was dropped (a full expansion of exactly
+    BRACE_CAP is not). A cut is final, since no later round can shrink the expansion, so `stop_at_cut` returns at the
+    first cut with the patterns only partly expanded, for a caller that fails closed on `truncated` (_filter_ok); an
+    untruncated result is the same either way."""
+    pats, truncated = [pat], False
+    while True:
+        nxt, grew = [], False
+        for p in pats:
+            m = _BRACE_RE.search(p)
+            if not m:
+                nxt.append(p)
+            else:
+                grew = True
+                for alt in m.group(1).split(","):
+                    nxt.append(p[:m.start()] + alt + p[m.end():])
+                    if len(nxt) > BRACE_CAP:
+                        break
+            if len(nxt) > BRACE_CAP:
+                del nxt[BRACE_CAP:]
+                truncated = True
+                break
+        pats = nxt
+        if not grew or (truncated and stop_at_cut):
+            return pats, truncated
 
 
 def _filter_ok(filt, glob):
@@ -398,7 +437,10 @@ def _filter_ok(filt, glob):
             elif not s or any(e.endswith(s) or s.endswith(e) for e in PROSE_EXT):
                 return True
             continue
-        for p in _brace(val):
+        pats, truncated = _brace(val, stop_at_cut=True)
+        if truncated:
+            return True   # fail closed: a dropped alternative may be the glob's name
+        for p in pats:
             if f is not None:
                 if fnmatch.fnmatchcase(f.lower(), p.lower()):
                     return True
@@ -1864,6 +1906,7 @@ class LineFile:
             if not SHELL_HINT.search(s) and not re.search(r"[A-Za-z_]\w*=|\bread\b", s) and \
                     not (lang in ("sh", "make") and "*" in s):
                 continue
+            self.ix.tick()
             items = shell_items([("t", s)], self.sf.lang)
             self.views.append((start, items))
             self._shell_bindings(start, items)
@@ -2193,7 +2236,7 @@ class Index:
             f.lx = LineFile(f, self)
 
     def tick(self):
-        if time.monotonic() > self.deadline:
+        if _now() > self.deadline:
             raise _Budget()
 
     def add_site(self, site):
@@ -3349,7 +3392,7 @@ def prove(repo, tree, globs, steps=(), places=None):
     """The header's Inert proof of each glob on `tree`: {glob: {held, readers, readersTotal}}. ProofError on git."""
     repo = os.path.abspath(os.path.expanduser(str(repo)))
     globs = list(dict.fromkeys(globs))
-    start = time.monotonic()
+    start = _now()
     deadline = start + PROOF_BUDGET_S
     readers = {g: [] for g in globs}
     t = Tree(repo, tree)
@@ -3392,7 +3435,7 @@ def _prove(t, repo, globs, steps, places, readers, deadline):
     name_res = {g: re.compile(r"(?<![A-Za-z0-9])(?:%s)(?![A-Za-z0-9])" % "|".join(re.escape(x) for x in tokens(g)),
                               re.I) for g in globs}
     for f in files:
-        if time.monotonic() > deadline:
+        if _now() > deadline:
             raise _Budget()
         for g in globs:
             m = name_res[g].search(f.text)
@@ -3438,6 +3481,7 @@ def _prove(t, repo, globs, steps, places, readers, deadline):
         if f.py is not None:
             walks.extend(_py_walks(f, res))
             for line, segs, scope in f.py.shell:
+                ix.tick()
                 ctx = (f, scope, line)
                 items = segs[1] if isinstance(segs, tuple) and segs[0] == "argv" else shell_items(segs, "sh",
                                                                                                argv_quoted=True)
@@ -3446,6 +3490,7 @@ def _prove(t, repo, globs, steps, places, readers, deadline):
             walks.extend(_line_walks(f, res))
             mode = "shell" if f.lang in ("sh", "make") else ("code" if f.lang in ("py", "js", "swift") else None)
             for line, items in f.lx.views:
+                ix.tick()
                 walks.extend(_shell_walks(f, items, line, (f, None, line), f.step,
                                           mode if line not in f.lx.heredoc else None))
     for w in walks:
