@@ -1,5 +1,5 @@
 // A stuck rollout holds only what it waits on (ADR 0060, p33-2). The behaviour is pinned by tests/unfinished-rollout.test.sh
-// X1-X14 and tests/leg.test.sh L14; this pins the prose each reader follows, one rule per piece:
+// X1-X15 and tests/leg.test.sh L14; this pins the prose each reader follows, one rule per piece:
 //   context   CONTEXT.md **Unfinished rollout** says a stuck chain holds only its unlanded rows' surfaces, a waiting
 //             parallel rollout holds no Project root against serial chains, and each reclaims on resume and waits its
 //             turn; **Surface** points at it

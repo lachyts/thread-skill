@@ -31,7 +31,7 @@
 #           chain over a live chain's surface or an unfinished parallel rollout's Project root, supersedes nothing,
 #           and names whose note it is in each remedy; tokens compare literally (realpath and the vault mapping only),
 #           save a checkout nested inside another by path, a separate repo, which never meets the outer one (S14, p33-3)
-#   X1-X14  a stuck rollout holds only what it waits on (ADR 0060, p33-2): a stuck chain's done rows' surfaces are
+#   X1-X15  a stuck rollout holds only what it waits on (ADR 0060, p33-2): a stuck chain's done rows' surfaces are
 #           released (X1) while its set-aside and held rows' stay held (X2, X6, X7), and every other chain state, an
 #           empty or malformed unlanded cell, holds the whole claim (X3-X5); the parallel check's 2b reads the same
 #           hold (X8); a resuming chain waits its turn on the chain scheduled on its released place, never the
@@ -39,7 +39,7 @@
 #           chains only (X10, D5); the `hold` verb (X11); a resuming parallel rollout (X12); a chain whose
 #           `surfaces:` reads as any holds only its unlanded rows' cells against a resume (X13); a resuming chain against a
 #           parallel rollout's root: held while a call is in flight, paused or halted included, never by one idle and
-#           paused or halted (X14)
+#           paused or halted (X14); the release WARNs and both --resume reads keep the nested-checkout rule (X15, p33-3)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them) and a stub gh.
@@ -730,7 +730,7 @@ mkser ser.md "$OTHER" "surfaces: [\"repo:$S\"]"
 chs --surface "repo:$M/nested" --project Demo
 ok "$out|$rc" "refuse ser|3" "S14 control: a path-only claim on a directory in no checkout still covers a checkout beneath it"
 
-# ── X1-X14: a stuck rollout holds only what it waits on (ADR 0060, p33-2) ─────────────────────────────
+# ── X1-X15: a stuck rollout holds only what it waits on (ADR 0060, p33-2) ─────────────────────────────
 # mkchain <slug> <projects line> <row>... — a serial note with a `## Queue` table (a row is
 # `<task>~<status>~<Surfaces cell>[~<frontmatter line, \n for a newline>]`), its surfaces: the union of the cells' tokens
 # (or $SURF's list lines), a `## Leg log` ($LOG; default Leg 1 began, then closed `chain stuck: 1 set aside`; `-`: no
@@ -954,6 +954,38 @@ mkt pt1.md p review 'owner: lead' 'pr: https://github.com/demo/repo/pull/1' 'int
 chs --resume ca --surface "repo:$R"
 ok "$out|$rc" "refuse p|3" "X14: … and in Integration too"
 export THREAD_EVENTS_DIR="$EV0"
+# X15 (p33-3 beside ADR 0060): the release WARNs and both --resume reads keep the nested-checkout rule, as the schedule
+# checks do: a checkout nested inside another by path is its own repo, so it never meets a hold or a release on the
+# outer one, while a path inside the outer checkout itself still does.
+scen x15
+M="$S/mono"; mkrepo "$M" https://github.com/demo/mono.git; mkrepo "$M/nested" https://github.com/demo/nested.git
+mkdir -p "$M/sub"
+mkchain cq "$DEMO" q1~done~"\`repo:$M\`" q2~blocked~'`ext:cms`'
+chk --repo "$M/nested" --project Other
+ok "$out|$rc" "none|0" "X15: a parallel run on a checkout nested in a stuck chain's released place → none"
+hasnt "$err" "released repo:$M," "X15: … with no released WARN: the nested checkout is a separate repo"
+chs --surface "repo:$M/nested" --project Other
+ok "$out|$rc" "none|0" "X15: a chain on the nested checkout → none"
+hasnt "$err" "released repo:$M," "X15: … with no released WARN either"
+chk --repo "$M/sub" --project Other
+ok "$out|$rc" "none|0" "X15 control: a parallel run inside the outer checkout itself → none"
+has "$err" "released repo:$M, which this run claims" "X15 control: … with the released WARN"
+mkro p.md "$M/nested" "$OTHER"; mkt pt1.md p open 'owner: lead'
+LOG=- mkchain cq "$DEMO" q1~open~"\`repo:$M\`"
+chk --resume p --repo "$M/nested"
+ok "$out|$rc" "none|0" "X15: a resuming parallel rollout in the nested checkout never waits on a chain's unlanded row on the outer one"
+mkro p.md "$M/sub" "$OTHER"
+chk --resume p --repo "$M/sub"
+ok "$out|$rc" "refuse cq|3" "X15 control: … one rooted inside the outer checkout itself waits its turn"
+rm "$T/cq.md"
+LOG=- mkchain ca "$DEMO" a1~open~"\`repo:$M\`"
+mkro p.md "$M/nested" "$OTHER"; mkt pt1.md p in_progress 'owner: lead'
+chs --resume ca --surface "repo:$M"
+ok "$out|$rc" "none|0" "X15: a resuming chain on the outer checkout never waits on a running parallel rollout in the nested one"
+mkro p.md "$M/sub" "$OTHER"
+chs --resume ca --surface "repo:$M"
+ok "$out|$rc" "refuse p|3" "X15 control: … one rooted inside the outer checkout itself holds it"
+
 # ── K1-K4: carry ──────────────────────────────────────────────────────────────────────────────────────
 scen k
 mkro $P.md "$R" "$DEMO" "$PAUSED"
