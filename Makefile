@@ -65,8 +65,8 @@ release-check:
 #      - --no-publish: the HTML report stays local.
 #      - --keep-temp: every run keeps its sandbox, so a record can read each run's trace: the case
 #        model's resolved id and the loaded plugins (its init event), and the run's turns, which explain
-#        a miss. The results hold each judge grader's vote tally (a grader passes a run on at least 2 of
-#        its 3 PASS votes) but no rationale and no judge model id, so no trace confirms the judge's
+#        a miss. The results hold each judge grader's vote tally (a grader passes a run when at least 2
+#        of its 3 votes are PASS) but no rationale and no judge model id, so no trace confirms the judge's
 #        model. A boolean has no off switch, so it sits with the locks.
 #        docs/evals/2026-10-28-handoff-ends-with-next.md passed it through this recipe on Claude Code
 #        2.1.311 and read sixteen kept sandboxes, each loading thread 5.0.0.
