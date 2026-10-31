@@ -452,31 +452,32 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Surface** — a place a serial chain writes, written as a token in a serial
   note's `surfaces:` (and in a task's own, optional `surfaces:`). Five kinds:
   `repo:<absolute path>` (a filesystem place; overlaps on equality or
-  containment at a `/`, case-folded; a checkout nested inside another by path
-  is a separate repo with its own index and never meets the outer one),
-  `vault:<path>` (vault-relative; overlaps on a segment-boundary prefix),
-  `vault` (the whole vault; overlaps every vault token), `ext:<name>` (an
-  external system such as a CMS or DNS zone; case-folded equality) and `any`
-  (overlaps every token). Kinds never overlap one another, save `any`. A path
-  becomes a token by `serial-chains.py`'s claim: the vault is a note space, so
-  a path in it claims `vault:<rel>`; every path inside a git checkout widens to
-  that checkout's toplevel, declared or derived, since its index and HEAD are
-  what Legs share; a path in no checkout is claimed path-only. A member's
-  surfaces are, in order: its declared `surfaces:` (its whole claim), else
-  derived from its launch folder, its `## Launch` paths (a launch command's
-  `--add-dir` and `cd` paths among them, fenced or not) and its first project's
-  `Local:`; a surface added at schedule unions in. A member whose path is the
-  vault root, or that has no other claim, claims its first project's place (a
-  folder note's folder, else the note and the folder it would become) and its
-  own task note, never the whole vault; a path under `Work/Tasks` is
-  bookkeeping, never a claim (ADR 0059). With no project and no path, `vault`
-  alone (the default, with a WARN). The guarantee and its limit: a member
-  claims what it names, never its launch profile's other Working roots (a
-  workspace launcher's `add_dirs`), another project's `Local:` or a project's
-  `repos:`, nor a repo or external system it writes but names nowhere: declare
-  `surfaces:` for those. A `## Launch` path that is `/` or the home directory
-  is never claimed (it would contain every repo; a WARN names it). Two
-  checkouts of one origin are two surfaces. _Avoid_: footprint, file-set.
+  containment at a `/`, case-folded), `vault:<path>` (vault-relative; overlaps
+  on a segment-boundary prefix), `vault` (the whole vault; overlaps every vault
+  token), `ext:<name>` (an external system such as a CMS or DNS zone;
+  case-folded equality) and `any` (overlaps every token). Kinds never overlap
+  one another, save `any`. A path becomes a token by `serial-chains.py`'s
+  claim: the vault is a note space, so a path in it claims `vault:<rel>`;
+  every path inside a git checkout widens to that checkout's toplevel,
+  declared or derived, since its index and HEAD are what Legs share; a path in
+  no checkout is claimed path-only. A member's surfaces are, in order: its
+  declared `surfaces:` (its whole claim), else derived from its launch folder,
+  its `## Launch` paths (a launch command's `--add-dir` and `cd` paths among
+  them, fenced or not) and its first project's `Local:`; a surface added at
+  schedule unions in. A member whose path is the vault root, or that has no
+  other claim, claims its first project's place (a folder note's folder, else
+  the note and the folder it would become) and its own task note, never the
+  whole vault; a path under `Work/Tasks` is bookkeeping, never a claim (ADR
+  0059). With no project and no path, `vault` alone (the default, with a
+  WARN). The guarantee and its limit: a member claims what it names, never
+  its launch profile's other Working roots (a workspace launcher's
+  `add_dirs`), another project's `Local:` or a project's `repos:`, nor a repo
+  or external system it writes but names nowhere: declare `surfaces:` for
+  those. A `## Launch` path that is `/` or the home directory is never
+  claimed (it would contain every repo; a WARN names it). Two checkouts of one
+  origin are two surfaces, and containment parts across a checkout nested
+  inside another by path (a separate repo with its own index), unless the outer
+  path is in no checkout. _Avoid_: footprint, file-set.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
