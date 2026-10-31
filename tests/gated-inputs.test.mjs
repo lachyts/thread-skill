@@ -16,7 +16,7 @@
 // - the sweep: p18-7's verbatim capture flags spend (and so did the old list: the 2026-10-10 miss was by eye), the new
 //   words flag where the old list is silent, and the currency amount marker never flags a shell variable while the old
 //   literal `$` does;
-// - the test-credential reading (ADR 0061): each step's why, in order (the class-independent steps first); p8-1's two
+// - the test-credential reading (ADR 0062): each step's why, in order (the class-independent steps first); p8-1's two
 //   gates, p8-2's and p8-3's staging gate (verbatim) read their keys; the deny cases, the known false asks and the
 //   accepted residuals (a second credential in prose, the GitHub PAT: the annotation names only the proved keys);
 //   schedule's test-credential Planner examples read their keys (the guidance is coupled to the reader);
@@ -537,7 +537,7 @@ test('ADR 0038 pipeline: sub-bullets are commentary, the one gate prices 24 thro
   }
 })
 
-// ---- the test-credential reading (ADR 0061) -----------------------------------------------------------------------
+// ---- the test-credential reading (ADR 0062) -----------------------------------------------------------------------
 // p8-1's two gates, verbatim from Archive/smart-slider-p8-1-credit-packs-on-the-slider.md (the ` (approved …)` stripped);
 // p8-2's and p8-3's staging gates, verbatim from smart-slider-rollout-2026-10-28's task notes.
 const P8_1_G1 = "credential: Stripe test-mode keys STRIPE_SECRET (sk_test_) and STRIPE_PUBLISHABLE_KEY (pk_test_) in the task tree's .env.local"
@@ -614,7 +614,7 @@ test('the order: a gate no class could sign says its own why, with or without a 
   assert.deepEqual(reading("credential: Stripe live keys STRIPE_SECRET (sk_live_)", null), { names: null, why: 'deny word: live' })
 })
 
-test('known false asks (ADR 0061 residual ii): Stripe\'s own "API keys" and "secret key", STRIPE_PRODUCT_ID, "lives"', () => {
+test('known false asks (ADR 0062 residual ii): Stripe\'s own "API keys" and "secret key", STRIPE_PRODUCT_ID, "lives"', () => {
   const cases = [
     ['credential: test-mode STRIPE_PRODUCT_ID', 'deny word: PRODUCT'],
     ["credential: Stripe test-mode API keys STRIPE_SECRET (sk_test_) in the task tree's .env.local", 'deny word: API keys'],
@@ -649,7 +649,7 @@ test("schedule's test-credential Planner examples read their keys (the guidance 
   assert.deepEqual(reading(filled[0].replace('test-mode', 'test-mode API keys')), { names: null, why: 'deny word: API keys' }, 'control')
 })
 
-// ---- the env file and the value proof (ADR 0061) --------------------------------------------------------------------
+// ---- the env file and the value proof (ADR 0062) --------------------------------------------------------------------
 
 // One driver run under a 10 s deadline: a read that blocked (a FIFO opened without O_NONBLOCK) fails the test, never the suite.
 function pyT(reqs) {
@@ -743,7 +743,7 @@ test('the value proof: missing keys all named, a wrong prefix, and every JWT edg
   assert.ok(!JSON.stringify([missing, wrong]).includes('FAKE'), 'no value in the missing or prefix whys')
 })
 
-// ---- the bootstrap refresh (ADR 0061 d4) ----------------------------------------------------------------------------
+// ---- the bootstrap refresh (ADR 0062 d4) ----------------------------------------------------------------------------
 
 test('bootstrap_refreshes: a plain cp of the file passes (p8-1\'s verbatim line, ~/, $HOME, ${HOME}, cp -v); every other shape asks', () => {
   const F = '/Users/lachlants/repos/animately/optimizer/.env.local'

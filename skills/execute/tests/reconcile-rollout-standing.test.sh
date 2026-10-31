@@ -24,7 +24,7 @@
 #          sections, undated notes and task notes never count; an unreadable dated note or an unlistable directory
 #          asks; a held standing-spend lock exits 1, while a slug that needs no month read still asks; a task stamp is
 #          its own line.
-#   S10    a declared test credential signs itself (ADR 0061, p34-8): p8-1's two verbatim credential gates
+#   S10    a declared test credential signs itself (ADR 0062, p34-8): p8-1's two verbatim credential gates
 #          (smart-slider-rollout-2026-10-28) are signed at the built-in 0 spend limit when the repo's one-line
 #          `test_credentials` class declares their keys, its file holds them with their declared prefix or Supabase
 #          project, and the rollout's verbatim env_bootstrap refreshes that file with a plain cp; a live or production
@@ -136,7 +136,7 @@ ORDER=$'- [[a]]\n- [[b]]' mkro
 before=$(cat "$D/a.md" "$D/b.md")
 sa a,b
 ok "$rc" 3 "S3: exit 3"
-has "$out" "ASK: a: $CRED: deny word: API key" "S3: a credential outside the test-credential class never passes (ADR 0061: its deny word)"
+has "$out" "ASK: a: $CRED: deny word: API key" "S3: a credential outside the test-credential class never passes (ADR 0062: its deny word)"
 has "$out" "ASK: b: $SEVENTY: total exposure US\$70 is over" "S3: US\$40 plus US\$30 is 70, over 50"
 ok "$(cat "$D/a.md" "$D/b.md")" "$before" "S3: both notes untouched"
 
@@ -515,7 +515,7 @@ ok "$rc" 3 "S9j: a later call's US\$10 is past the month line: exit 3"
 has "$out" "ASK: b: $P10: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9j: … at US\$210, each note still counted once"
 ok "$(cat "$D/b.md" "$D/$X.md")" "$before" "S9j: b.md and the rollout note byte-identical across the call"
 
-# ── S10: a declared test credential signs itself (ADR 0061, p34-8) ─────────────────────────────────────────────────
+# ── S10: a declared test credential signs itself (ADR 0062, p34-8) ─────────────────────────────────────────────────
 # The Verify: p8-1's two gates, verbatim from Archive/smart-slider-p8-1-credit-packs-on-the-slider.md, and its rollout's
 # env_bootstrap, verbatim (its `# from …` comment included) with the source path swapped for $SRC. The class lives in
 # the home's rollouts.toml (HC: schema 3 and the one-line class, NO spend_approval_usd anywhere, so the limit is the

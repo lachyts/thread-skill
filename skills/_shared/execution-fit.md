@@ -50,7 +50,7 @@ first outcome that holds wins:
 - (a) **An external publish is serial-shaped**, never parallel-shaped, even in one repo with a PR
   per task. It is an irreversible or credential gate: the gate sets the task aside for Lachy's
   sign-off while the chain goes on, and never passes the standing approval (ADR 0008, ADR 0034;
-  execute § 3.7), whose one credential class, a repo's declared test credential (ADR 0061), a
+  execute § 3.7), whose one credential class, a repo's declared test credential (ADR 0062), a
   publish never uses. A publish that needs him in the conversation is conversation-gated, so it is
   session lane.
 - (b) A measurement window or delayed verification **waits on a date**, so it is session lane.

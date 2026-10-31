@@ -89,7 +89,7 @@ pass it with that gate. Spend is never asked ahead of a run.
 and schedule's gated-input sweep.
 
 A credential gate for a repo's test-mode or staging keys signs itself too, once
-the repo declares them (ADR 0061). Write the class as ONE line in the repo's
+the repo declares them (ADR 0062). Write the class as ONE line in the repo's
 table, with `schema = 3` at the top of the file:
 
 ```toml

@@ -727,7 +727,7 @@ test('record refuses a dotted or multi-line inert_paths form: edit it by hand', 
   }
 })
 
-// ADR 0061: a repo's test-credential class is ONE line in its repo table, which the line-by-line edit keeps byte-identical
+// ADR 0062: a repo's test-credential class is ONE line in its repo table, which the line-by-line edit keeps byte-identical
 // and inserts after; an edit whose result changes it is refused by the `mine` check; any other form refuses the file.
 const IP_CLASS = 'test_credentials = { file = "/x/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }] }  # test mode only'
 

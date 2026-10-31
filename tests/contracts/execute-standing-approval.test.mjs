@@ -15,7 +15,7 @@
 // recorded), § 7's `## Decisions (asked ahead <date>)` section for a named limit, its `## Decisions (recorded <date>)`
 // Planner line for every other spend hit, the sanctioned exceptions, and § 0's sign-off sentence. In orient's
 // reshuffle.md: R3's gates ahead (a spend smell recorded, never grilled) and R5.2's records. Status recommendation
-// 8's sign-off clause, README and CONTEXT.md. The test-credential rule (ADR 0061): § 3.7's *Test credentials* paragraph (its
+// 8's sign-off clause, README and CONTEXT.md. The test-credential rule (ADR 0062): § 3.7's *Test credentials* paragraph (its
 // checks in order, the class its own switch, the refresh on a reused tree, the missing-key ASK, a Leg never signing one);
 // schedule § 3.6's recorded-never-asked paragraph with its two re-sweep sentences (a hit inside the recorded Planner line
 // is dismissed and listed; a task holding the line is recorded, never asked) and the serial-path sentence, and § 7's
@@ -137,7 +137,7 @@ function checkStanding(f) {
   // credential only as a declared test credential, a gate it cannot price asks, the month line summed from the log's standing lines, and spend never asked
   // ahead; the sign-off flow says a covered gate never reaches Lachy.
   if (!standing.includes('**total exposure**') || !standing.includes("it records the total exposure as the task's ceiling, never a target") ||
-    !standing.includes('Irreversible gates never pass under it; a credential gate passes only as a declared test credential (ADR 0061') ||
+    !standing.includes('Irreversible gates never pass under it; a credential gate passes only as a declared test credential (ADR 0062') ||
     !standing.includes('a gate it cannot price asks') ||
     !standing.includes('`(approved <date> under the standing approval: …)`') ||
     !standing.includes("this calendar month's standing-approved spend") || !standing.includes('`signed under the standing approval:`') ||
@@ -224,8 +224,8 @@ function checkStanding(f) {
     !collapse(f.context).includes('the Rollout settings key `spend_approval_usd`')) {
     fails.push('docs')
   }
-  // test-credential (ADR 0061): a declared test credential signs itself at the stop, recorded and never asked ahead.
-  const tc = labelled(f.execute, S37, 'Test credentials (ADR 0061).')
+  // test-credential (ADR 0062): a declared test credential signs itself at the stop, recorded and never asked ahead.
+  const tc = labelled(f.execute, S37, 'Test credentials (ADR 0062).')
   const SENT_A = 'A hit inside the recorded test-credential Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the recorded test-credential Planner line)`.'
   const SENT_B = 'A task that already holds that line is recorded, never asked.'
   if (!tc.includes("the reading's class-independent steps") || !before(tc, "the reading's class-independent steps", 'the class is set') ||
@@ -236,16 +236,16 @@ function checkStanding(f) {
     !tc.includes('re-runs `env_bootstrap` in the task tree before it builds, on a reused tree too') ||
     !tc.includes('A key missing from the file is an `ASK:` naming it at the stop') ||
     !tc.includes('A Leg never signs one') ||
-    !s36.includes('**A declared test credential is recorded, never asked** (ADR 0061).') || !s36.includes(SENT_A) || !s36.includes(SENT_B) ||
+    !s36.includes('**A declared test credential is recorded, never asked** (ADR 0062).') || !s36.includes(SENT_A) || !s36.includes(SENT_B) ||
     !s36.includes('On § Serial path every credential keeps the ask-ahead: a Leg resolves no class.') ||
     !sch7raw.split('\n').some((l) => l.startsWith('- Planner: word each test-credential gate')) ||
-    !r3.includes("A credential hit whose context names only test-mode or staging use of keys the repo's declared class holds is recorded, never grilled (ADR 0061)") ||
+    !r3.includes("A credential hit whose context names only test-mode or staging use of keys the repo's declared class holds is recorded, never grilled (ADR 0062)") ||
     !r3.includes(SENT_A) || !r3.includes(SENT_B) ||
-    !r5.includes("the test-credential Planner line (schedule step 7's, ADR 0061)") ||
-    !collapse(f.asking).includes("A credential in its repo's declared test-credential class is never asked ahead (ADR 0061)") ||
-    !collapse(f.execfit).includes("a repo's declared test credential (ADR 0061)") ||
+    !r5.includes("the test-credential Planner line (schedule step 7's, ADR 0062)") ||
+    !collapse(f.asking).includes("A credential in its repo's declared test-credential class is never asked ahead (ADR 0062)") ||
+    !collapse(f.execfit).includes("a repo's declared test credential (ADR 0062)") ||
     !f.context.includes('**Test credential**') ||
-    !f.adr0008.includes('Amended by ADR 0061') ||
+    !f.adr0008.includes('Amended by ADR 0062') ||
     !collapse(f.readme).includes('The class is its own switch, independent of `spend_approval_usd`')) {
     fails.push('test-credential')
   }
@@ -366,20 +366,20 @@ test('control: each test-credential pin, removed in one place, fails test-creden
   only('execute', 'A key missing from the file is an `ASK:` naming it at the stop', 'A missing key is signed anyway at the stop', TC, '§ 3.7: no missing-key ask')
   only('execute', ' A Leg never signs one:', ' A Leg may sign one:', TC, '§ 3.7: a Leg signs one')
   only('execute', "the rollout's `env_bootstrap` refreshes the declared file into the task tree with a plain, unconditional `cp`; ", '', TC, '§ 3.7: no refresh check')
-  only('schedule', '**A declared test credential is recorded, never asked** (ADR 0061).', '**A declared test credential is asked ahead** (ADR 0061).', TC, '§ 3.6: asked ahead')
+  only('schedule', '**A declared test credential is recorded, never asked** (ADR 0062).', '**A declared test credential is asked ahead** (ADR 0062).', TC, '§ 3.6: asked ahead')
   only('schedule', ' A hit inside the recorded test-credential Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the recorded test-credential Planner line)`.', '', TC, '§ 3.6: no sentence (a)')
   only('schedule', ' A task that already holds that line is recorded, never asked.', '', TC, '§ 3.6: no sentence (b)')
   only('schedule', ' On § Serial path every credential keeps the ask-ahead: a Leg resolves no class.', '', TC, '§ 3.6: no serial sentence')
   const l = real.schedule.split('\n').find((x) => x.startsWith('- Planner: word each test-credential gate'))
   only('schedule', l + '\n', '', TC, '§ 7: no test-credential Planner line')
-  only('reshuffle', 'is recorded, never grilled (ADR 0061)', 'is grilled ahead (ADR 0061)', TC, 'R3: grilled')
+  only('reshuffle', 'is recorded, never grilled (ADR 0062)', 'is grilled ahead (ADR 0062)', TC, 'R3: grilled')
   only('reshuffle', 'A hit inside the recorded\n  test-credential Planner line is dismissed', 'A hit inside the recorded\n  test-credential Planner line is asked', TC, 'R3: no sentence (a)')
   only('reshuffle', 'A task that already holds that line is recorded, never\n  asked.', 'A task that already holds that line is asked again.', TC, 'R3: no sentence (b)')
-  only('reshuffle', "the test-credential Planner line (schedule step 7's, ADR 0061)", 'nothing', TC, 'R5: no record')
-  only('asking', "- A credential in its repo's declared test-credential class is never asked ahead (ADR 0061): the standing approval signs it at the stop, or asks then.\n", '', TC, 'asking.md: no bullet')
-  only('execfit', "a repo's declared test credential (ADR 0061)", 'none', TC, 'execution-fit: no qualifier')
+  only('reshuffle', "the test-credential Planner line (schedule step 7's, ADR 0062)", 'nothing', TC, 'R5: no record')
+  only('asking', "- A credential in its repo's declared test-credential class is never asked ahead (ADR 0062): the standing approval signs it at the stop, or asks then.\n", '', TC, 'asking.md: no bullet')
+  only('execfit', "a repo's declared test credential (ADR 0062)", 'none', TC, 'execution-fit: no qualifier')
   only('context', '- **Test credential** —', '- **Safe key** —', TC, 'CONTEXT.md: no entry')
-  only('adr0008', 'Amended by ADR 0061', 'Amended by a later ADR', TC, 'ADR 0008: no amendment')
+  only('adr0008', 'Amended by ADR 0062', 'Amended by a later ADR', TC, 'ADR 0008: no amendment')
   only('readme', 'The class is its own switch, independent of\n`spend_approval_usd`', 'The class needs\n`spend_approval_usd`', TC, 'README: no own switch')
 })
 

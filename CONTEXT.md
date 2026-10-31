@@ -948,7 +948,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in `## Approved gates` with `(approved <date> under the standing approval:
   total exposure …)`, the task's ceiling, never a target; irreversible gates
   never pass under it (ADR 0034), and a credential gate only as a declared
-  Test credential (ADR 0061), nor does any gate on a plan the plan judge
+  Test credential (ADR 0062), nor does any gate on a plan the plan judge
   bounced (ADR 0038).
   _Avoid_: spend envelope, auto-approve limit.
 - **Test credential** — a test-mode, staging or sandbox key a repo declares in
@@ -959,7 +959,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   with a test-mode word and no live, production or secret word, signs itself
   under the Standing approval once each key is proved present in that file
   and the rollout's `env_bootstrap` copies the file with a plain `cp`
-  (ADR 0061); a key missing from it is asked at the stop. The class is its
+  (ADR 0062); a key missing from it is asked at the stop. The class is its
   own switch, at any spend limit, and only Lachy writes it. Schedule and
   orient record such a credential, never ask it ahead; a Leg never signs one.
   _Avoid_: safe key, dev key.

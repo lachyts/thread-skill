@@ -164,7 +164,7 @@ Resolving:
   Planner line, schedule stamps it, and the standing approval (`spend_approval_usd`, e.g. 200 USD a
   gate and a month, or off at the built-in 0) signs its gate mid-run; a limit Lachy names
   unprompted is recorded too. A credential hit whose context names only test-mode or staging use
-  of keys the repo's declared class holds is recorded, never grilled (ADR 0061): R5.2 writes the
+  of keys the repo's declared class holds is recorded, never grilled (ADR 0062): R5.2 writes the
   test-credential Planner line, and the standing approval signs its gate at the stop when its keys
   are in the class's file. The class is read once from `python3
   ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py --repo <the resolved repo>`'s
@@ -281,7 +281,7 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      Spend line, naming `/thread:orient` where schedule's names `/thread:schedule`, and its Planner
      line asking for one line whose Cap is one priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`, with its
      split in sub-bullets nested under the gate, ADR 0038); for a credential recorded in the repo's
-     test-credential class, the test-credential Planner line (schedule step 7's, ADR 0061) in the
+     test-credential class, the test-credential Planner line (schedule step 7's, ADR 0062) in the
      `## Decisions (recorded <date>)` section; and a credential or irreversible sign-off's `## Approved gates` bullet,
      `- <kind>: <his words> (approved <date>, asked ahead at orient)`.
 3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one

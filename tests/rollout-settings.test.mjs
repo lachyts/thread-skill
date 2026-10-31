@@ -47,7 +47,7 @@ const NOTIFY_BUILT_IN = { ntfy_topic: null }
 const UNSET = { ntfy_topic: { set: false, source: 'built-in' } }
 const SET = { ntfy_topic: { set: true, source: 'file:notify' } }
 const TABLES_LINE = 'rollouts.toml holds only a top-level schema and [defaults], [guardrails], [notify] and [repo."owner/name"] tables'
-// The JSON's top-level keys: the repo's Inert paths (p29-3, ADR 0045) and its test-credential class (ADR 0061) follow the
+// The JSON's top-level keys: the repo's Inert paths (p29-3, ADR 0045) and its test-credential class (ADR 0062) follow the
 // three tables, then the schema pair and the ignored keys (ADR 0043, p29-1).
 const OUT_KEYS = ['path', 'file', 'repo', 'settings', 'guardrails', 'notify', 'inert_paths', 'test_credentials', 'schema', 'ignored']
 const NO_INERT = { value: [], source: 'built-in' }
@@ -852,7 +852,7 @@ print(json.dumps(out))`, SCRIPT], { encoding: 'utf8', env: { ...process.env, PYT
     ['schema = 3', '[defaults]'], ['schema = 2', '', '[repo."o/r"]'], 'cannot read the top-level schema line (line 1): edit it by hand'])
 })
 
-// ---- K13-K14: test_credentials, the first schema-3 key (ADR 0061) ------------------------------------------------------
+// ---- K13-K14: test_credentials, the first schema-3 key (ADR 0062) ------------------------------------------------------
 // A repo's test-credential class: ONE inline-table line inside its [repo."o/r"] table (the line-by-line writers, inert-paths.py
 // and tune.py, keep it byte-identical), resolved as its own top-level field, null by default. Every other form is refused at
 // its line with the remedy, and so is any value credential_problem() refuses, described, never echoed.
