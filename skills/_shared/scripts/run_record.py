@@ -214,8 +214,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      when the round was reviewed, its doc's first commit; readers order rounds by it, never by ts);
                      blocking?, open?, filed?, recurring?, reversal?, rejected? (ints >= 0, ADR 0058's disposition
                      counts from the doc's `## Disposition`; blocking includes open); unconfirmed? (int >= 0,
-                     fresh-review ADR 0001: candidates its checker could not reproduce, filed, never blocking; with
-                     the ledger's STOP rule retired, new lines carry no verdict). No rollout, no task; lands in
+                     fresh-review ADR 0001: candidates its checker could not reproduce, never blocking; counted
+                     apart from filed, which excludes them, so each finding sits in one count; with the ledger's
+                     STOP rule retired, new lines carry no verdict). No rollout, no task; lands in
                      reviews.jsonl.
   review-verdict  T  round (int >= 1), verdict (approve | changes), findings, original, regression (ints >= 0;
                      original + regression <= findings, the rest unclassified), digest (verdict_digest of the

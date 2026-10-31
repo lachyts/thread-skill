@@ -647,6 +647,7 @@ test('the docstring carries the review-verdict and review-round reader rules and
   const doc = JSON.parse(r.stdout).replace(/\s+/g, ' ')
   assert.match(doc, /- review-verdict: one line per verdict_key, \(task, round, head\) when the line carries a head, else \(task, round, digest\)\. Keep the first line per key\. The writer \(reconcile\) skips an entry whose key the record already holds/)
   assert.match(doc, /- review-round: dedupe on \(repo, doc\) when doc is present, else on \(repo, head, digest\), keeping the latest line/)
+  assert.match(doc, /unconfirmed\? \(int >= 0, fresh-review ADR 0001: candidates its checker could not reproduce, never blocking; counted apart from filed, which excludes them, so each finding sits in one count;/)
   assert.match(doc, /an Integration re-review rejection uses a review round but writes no line, so `round` skips it \(r1, r2, r4\)/)
   assert.match(doc, /verdict_digest\(verdict, feedback\) -> str/)
   assert.match(doc, /verdict_key\(line\) -> tuple/)
