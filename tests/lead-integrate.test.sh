@@ -1277,7 +1277,7 @@ spec.loader.exec_module(li)
 class Late(subprocess.Popen):
     def __init__(self, args, *a, **k):
         super().__init__(args, *a, **k)
-        if len(args) > 2 and args[2] == "_guard":
+        if "_guard" in args[:4]:   # the guard argv: python -I SCRIPT _guard …
             pid = os.path.join(k.get("cwd") or ".", "pid")
             end = time.monotonic() + 300
             while time.monotonic() < end:

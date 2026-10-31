@@ -35,7 +35,9 @@ Contract.
 2. There is no staleness timer. A slot frees when the last holder of its lock's open file description exits
    or closes it; the kernel drops the lock of a process that dies by any means.
 3. The guard. Every slotted command runs under a guard: a small python process (`_guard`) in its own session,
-   so a kill of the caller's process group or session never reaches it. The guard starts the command in a
+   so a kill of the caller's process group or session never reaches it. It starts isolated (`python3 -I`, p34-1): it
+   ignores PYTHONPATH, PYTHONHOME and the user site, so a command's own python environment (a shadowing json.py)
+   never stops it, and the command still gets that environment unchanged. The guard starts the command in a
    session of its own (its own process group, pgid = its pid), reports that pgid on a pipe, and watches a
    death pipe whose write end only the caller holds. On EOF (the caller exited, was killed by any means, or
    closed it to stop the run) or a TERM/INT/HUP to the guard, it ends the command's group: killpg(TERM),
@@ -614,7 +616,9 @@ class Guarded:
         fds = [death_r, rep_w]
         if hold is not None and hold.fd is not None:
             fds.append(hold.fd)
-        cmd = [sys.executable or "python3", SCRIPT, "_guard", str(death_r), str(rep_w), "--", *argv]
+        # Isolated (-I): the guard ignores PYTHONPATH, PYTHONHOME and the user site (it imports only the stdlib), and its
+        # own environment, which the command inherits, is left as the caller's.
+        cmd = [sys.executable or "python3", "-I", SCRIPT, "_guard", str(death_r), str(rep_w), "--", *argv]
         mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
         try:
             try:
