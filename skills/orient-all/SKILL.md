@@ -224,17 +224,38 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    2. **Candidates, by item kind.** An orient item's only candidates are Sessions named exactly the item's `title`,
       and a repair item's only Sessions named exactly its `title`: the name `create_thread` was given, `Orient: <project>`
       or `Repair: <rollout>` as `sessions` cuts it to 60 characters with `…`, so a long name never matches its uncut
-      form. An execute or Leg item's are the Sessions whose name is the item's title or contains the rollout slug,
-      other than `Repair:` ones. No other Session ever holds an orient or repair item: a running lead in the project
-      holds neither (repair's live-queue mode runs beside a lead).
+      form. An execute or Leg item's candidates are the Sessions whose `list_sessions` line
+      carries `leads the Rollout <rollout>` as one of its ` · `-separated parts, wherever it stands (a relay line may follow it).
+      That part's slug, the whole word after `leads the Rollout`, equals the item's `rollout` (the note stem)
+      exactly, case aside, never as a prefix or a part. A line naming `demo-rollout-2026-10-26-2` is no candidate for
+      `demo-rollout-2026-10-26` (chorus-p89-1, Chorus ADR 0077 as amended 2026-10-27).
+      A roster line makes its Session a candidate whatever the Session's name, a `Repair:` one included.
+      Only when no line names the slug, the names count, for Sessions named before chorus-p89-1. A Session whose line
+      carries no `leads the Rollout` part is a candidate when its name is the item's title or contains the rollout
+      slug, other than `Repair:` ones. A `leads a Rollout` line names no slug, so its Session is one of these.
+      For example, the item for `demo-rollout-2026-10-26` finds `Demo rollout`, whose line carries
+      `leads the Rollout demo-rollout-2026-10-26`, and, that Session at rest, the pass relays the item's prompt into
+      `Demo rollout` by its id and raises no card; with no such line it finds `Execute: demo-rollout-2026-10-26`.
+      No other Session ever holds an orient or repair item: a running lead in the project holds neither (repair's
+      live-queue mode runs beside a lead).
    3. A candidate that is running, waiting, failed, or at rest with background work running: start nothing for the
-      item, and name the Session and its state.
-   4. A candidate at rest with nothing running: an execute or Leg candidate not named exactly the item's title gets
-      one `read_session` first, asking only whether it is that rollout's lead or Leg; if not, it is no candidate. Each
-      Session is read at most once in the pass. Every candidate left (an orient or repair one, an execute or Leg one
-      named exactly the item's title, or one the read confirmed) gets `relay_session` with the item's prompt.
-   5. No candidate: `create_thread` with the item's `title`, `prompt`, `tldr` and `cwd`. A `Raised (task_id: …)`
-      result counts as started; an error becomes a manual prompt.
+      item, and name the Session by its id, with its state, since a lead's name `<Project> rollout` is shared by the
+      project's other leads. Two or more Sessions whose lines name the slug: start nothing for the item, and name
+      every one by id. Two or more leads of one rollout are Lachy's to settle, and Chorus answers that slug AMBIGUOUS
+      whatever their number.
+   4. A candidate at rest with nothing running: a roster candidate needs no read, its line being the Stage's own
+      reading. An execute or Leg candidate the names found, not named exactly the item's title, gets one
+      `read_session` first, asking only whether it is that rollout's lead or Leg; if not, it is no candidate. Each
+      Session is read at most once in the pass. Every candidate left (an orient or repair one, a roster one, an
+      execute or Leg one named exactly the item's title, or one the read confirmed) gets `relay_session` with the
+      item's prompt, the Session named by its id: a lead is named `<Project> rollout`, a name the project's other
+      leads share.
+   5. No candidate: `create_thread` with the item's `title`, `prompt`, `tldr` and `cwd`.
+      An execute or Leg item for a rollout a Session on the Stage leads by the roster never gets `create_thread`;
+      a repair item beside its lead still does. A `Raised (task_id: …)` result
+      is reported as raised, never counted as started: the Stage starts the card unless it holds it. A held card stays
+      open as Lachy's offer, its `unstarted` line saying why (`"<name>" leads this Rollout on the Stage: …` when a lead
+      appeared after the list, or another of the Stage's holds). An error becomes a manual prompt.
    6. With `create_thread` but no `list_sessions`, only the items for notes this pass wrote are started; every other
       item becomes a paste-ready prompt.
 5. **Off the Stage**: one fenced block per item, in `items[]` order: `cd <cwd>` (for a Leg, `<alias> from <folder>`),
@@ -262,7 +283,9 @@ One message of statements, no question:
 - each schedule's note, or its stop line;
 - each fork's Decided for you block (schedule step 8), the calls ruled for Lachy, and any it could not write;
 - the fit disagreements: the task, the grader's shape, schedule's outcome;
-- the sessions started (title → task id), relayed, or held with the Session's state, or the prompts printed;
+- the sessions raised (title → task id: the Stage starts it unless its card says why it waits), relayed (title → the
+  Session's name and id), or held (title → the Session's name, id and state; for two or more roster leads, every one
+  named by id), or the prompts printed;
 - `left[]`: each rollout with its action, its status line and its hold. For action 12 add "check the owner session
   `<owner tag>`, then `/thread:execute [[<rollout>]]`", the tag from `plan.rollouts[].owners`; for a plain pause,
   "paused by you: the reinstate is yours";
@@ -297,7 +320,8 @@ It asks nothing, and writes only under `$S`. It never runs `record`, `estate-dis
 
 - Reshape a project: Orient-graded work goes to its own orient session.
 - Start, relay or move a live rollout other than through `sessions`' items: never on status actions 1–5, 9, 10 or 12,
-  nor on a plain `paused:`. Never start a second lead.
+  nor on a plain `paused:`. Never start a second lead: no `create_thread` for an execute or Leg item for a rollout
+  a Session on the Stage leads by the roster.
 - Relay into a Session the list shows running, waiting, failed or busy with background work, or read a Session for
   its state.
 - Let any Session but one named exactly the orient item's `title` hold a child orient.

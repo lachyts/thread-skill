@@ -159,7 +159,8 @@ that overlaps only a place a stuck chain released gives a `WARN: … released �
 refusal, and that chain reclaims the place on resume and then waits its turn while this rollout holds it.
 A clone root never overlaps a chain on the in-place checkout, so the
 two coexist as peers (ADR 0042, intended); the refusal still fires for a chain that claims
-`repo:<clone>`, and for a rollout rooted in place before ADR 0042.
+`repo:<clone>`, and for a rollout rooted in place before ADR 0042. Nor does a checkout nested inside
+another by path (a separate repo with its own index) overlap a chain on the outer one (p33-3).
 A rollout awaiting sign-off (`paused_for: sign-off`, execute § 4.5 step 5's form: only gates wait on Lachy) is unfinished too: the refusal names its waiting tasks and the
 sign-off path (sign off, then `/thread:execute`, or `/thread:repair` to defer them), and `--regenerate` on
 this project's rollout carries them forward still gate-pending. The check prints exactly one stdout line:
@@ -933,14 +934,16 @@ run has it, which only WARNs: a serial run supersedes nothing). Every chain is c
 `none` → go on. Any refusal (`refuse …`, exit 3) or exit 2 stops the whole run before anything is written, and
 every refusal's stderr goes in one report: each line names the live chain or unfinished parallel rollout, its
 project and state, the overlapping pair and its remedy (a never-started chain's is `status: dropped`, which frees
-its tasks for a later run). Tokens compare literally (`repo:<realpath>`), so a chain on a repo's in-place checkout
-never overlaps a parallel rollout rooted in its rollout clone: the two coexist as peers (ADR 0042, intended), while a
-chain that claims `repo:<clone>`, or a parallel rollout rooted in place before ADR 0042, still refuses. Quote each
-`--surface` token as one shell word, since a vault path holds spaces:
-`--surface "vault:Work/Projects/Life (area)/Contacts admin.md"`. Carry `WARN:` lines to S7. A stuck chain (every
-unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces, and a parallel rollout awaiting
-sign-off or halted on its set-asides holds no Project root against a chain (ADR 0060): a `WARN: … released …` line names
-what this chain may now use beside it. That rollout reclaims the place on resume and then waits its turn.
+its tasks for a later run). Tokens compare literally (`repo:<realpath>`), save across nested checkouts (below), so a
+chain on a repo's in-place checkout never overlaps a parallel rollout rooted in its rollout clone: the two coexist as
+peers (ADR 0042, intended), while a chain that claims `repo:<clone>`, or a parallel rollout rooted in place before
+ADR 0042, still refuses. Nor does a chain on an outer checkout overlap a parallel root, or a chain, in a separate
+checkout nested inside it by path, a separate repo with its own index (p33-3); but a path-only claim on a directory
+in no checkout still covers every checkout beneath it. Quote each `--surface` token as one shell word, since a vault
+path holds spaces: `--surface "vault:Work/Projects/Life (area)/Contacts admin.md"`. Carry `WARN:` lines to S7. A stuck
+chain (every unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces, and a parallel rollout
+awaiting sign-off or halted on its set-asides holds no Project root against a chain (ADR 0060): a `WARN: … released …`
+line names what this chain may now use beside it. That rollout reclaims the place on resume and then waits its turn.
 
 **S3.5. Pre-flight.** It runs step 1.5 over S2's chain members, the session-lane ones left out; nothing is kept and
 nothing is superseded on this path, so there is no `--kept` and no `--superseding`. Under orient's § 7 too it asks its

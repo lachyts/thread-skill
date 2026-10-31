@@ -595,8 +595,12 @@ Subcommands:
               Leg's, which has no heartbeat): while the state reads `in-flight` it reads the note and the lock again
               every 2 s, up to SECONDS (default 7000, COMPLETION_WAIT_S: inside the background command's 7200000 ms
               cap, and past any attempt's verify under ADR 0052's budget), then prints the read, `in-flight` still
-              at its deadline. It returns at once when nothing is in flight (and with no fcntl), writes, arms and
-              records nothing, and a signal ends it with no line; its exit 1 and 2 are the read's.
+              at its deadline. Any read, with --wait or without, prints a note read after a free probe of the
+              attempt's lock: --run writes its line under that lock and frees it only as it exits, so a probe that
+              finds it free reads the note once more, and a run that ended between the note read and the probe
+              prints as its line, never as the state before it. It returns at once when nothing is in flight (and
+              with no fcntl), writes, arms and records nothing, and a signal ends it with no line; its exit 1 and 2
+              are the read's.
               --run owns one attempt end to end under that lock (retried for 2 s past a reader's probe), held for
               its whole life (the lead launches it in the background and reads again when it ends). Decided already,
               it runs nothing. Otherwise, under the lock it reads the note again, clears a dead run's tree, resolves
@@ -11578,6 +11582,7 @@ def cmd_completion_verify(args) -> int:
         print(f"ERROR: completion-verify: rollout note not found at {path}", file=sys.stderr)
         return 1
     deadline = None if args.wait is None else time.monotonic() + args.wait
+    settled = None   # the (state, attempt) a note read after a free probe of that attempt's lock last gave
     while True:
         try:
             note = Note(path)
@@ -11609,8 +11614,14 @@ def cmd_completion_verify(args) -> int:
             return _completion_run(args, path, ro, root, tasks_dir, serial)
         state, attempt, last, streak = _completion_state(note)
         tree, out = _completion_paths(root, ro, attempt, serial)
-        if state not in COMPLETION_DECIDED and _attempt_running(_attempt_lock(root, ro, attempt)):
-            state = "in-flight"
+        if state not in COMPLETION_DECIDED:
+            if _attempt_running(_attempt_lock(root, ro, attempt)):
+                state, settled = "in-flight", None   # a run holds it: its line may yet land, so no read is settled
+            elif settled != (state, attempt):
+                # A --run records its line under the attempt's lock and frees it only as it exits, so a note read
+                # before a free probe may predate the line of a run that ended in between: read it once more.
+                settled = (state, attempt)
+                continue
         remaining = None if deadline is None else deadline - time.monotonic()
         if state == "in-flight" and remaining is not None and remaining > 0:
             # --wait (ADR 0055): a serial Leg has no heartbeat, so this bounded, read-only wait is the notification

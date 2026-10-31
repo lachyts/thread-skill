@@ -223,7 +223,7 @@ function check(F) {
   if (!(handed >= 0 && none > handed)) flag('h8', 'close step 2 does not check the transcript before the verb')
   need('h8', "close step 2's **Rollouts this session wrote.**", rw, ["schedule's `Queue for … written to [[<slug>]]`",
     'a compaction summary', 'a `relay_session` of `/thread:execute [[<slug>]]`',
-    "orient-all § 7's start of an execute item naming the note (its own `create_thread` result `Raised (task_id: …)`, which counts as started, or its `relay_session` of the item's prompt)",
+    "orient-all § 7's start of an execute item naming the note (its own `create_thread` result `Raised (task_id: …)`, which counts as handed over even while its card waits, or its `relay_session` of the item's prompt)",
     "Orient-all § 7's `paste-ready prompt (no session started)` and its labelled manual hand-over are no handover either",
     "Not yet's line, a held `Execute:` line and step 8's by-hand `execute [[<slug>]]` lines are no handover",
     'A handoff withdrawn later in this session is no handover', '`dismissed`, `already_dismissed` or `not_found`',

@@ -26,10 +26,11 @@
 #   I8      § 0's interrupted finish after step 6's carry already ran still prints the prior's `order` lines (p17-2)
 #   R1-R6   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031), never a snapshotted rollout (R5, ADR 0043),
 #           never an approved queue whose only marks are ended room stops (R6, p30-4)
-#   S1-S13  shapes (ADR 0040, p24-2): the parallel check skips serial notes and refuses a run on a place a live serial
+#   S1-S14  shapes (ADR 0040, p24-2): the parallel check skips serial notes and refuses a run on a place a live serial
 #           chain writes, before any supersede (S2c), never a clone root beside an in-place chain (S13, ADR 0042); the serial check (`--shape serial --surface <token>...`) refuses a
 #           chain over a live chain's surface or an unfinished parallel rollout's Project root, supersedes nothing,
-#           and names whose note it is in each remedy; tokens compare literally (realpath and the vault mapping only)
+#           and names whose note it is in each remedy; tokens compare literally (realpath and the vault mapping only),
+#           save a checkout nested inside another by path, a separate repo, which never meets the outer one (S14, p33-3)
 #   X1-X14  a stuck rollout holds only what it waits on (ADR 0060, p33-2): a stuck chain's done rows' surfaces are
 #           released (X1) while its set-aside and held rows' stay held (X2, X6, X7), and every other chain state, an
 #           empty or malformed unlanded cell, holds the whole claim (X3-X5); the parallel check's 2b reads the same
@@ -524,7 +525,7 @@ mkt t1.md $N open
 chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "interrupted $P $N|0" "C29: the I8 pair: the approved P with ended room stops and its N -> interrupted"
 
-# ── S1-S12: shapes (ADR 0040) ─────────────────────────────────────────────────────────────────────────
+# ── S1-S14: shapes (ADR 0040) ─────────────────────────────────────────────────────────────────────────
 # mkser <path under $T> [frontmatter lines...] — a serial rollout note (`shape: serial`, no Project root) at status
 # $ST (default open); its surfaces: come among the frontmatter lines
 mkser() {
@@ -699,6 +700,35 @@ ok "$out|$rc" "refuse ser|3" "S13: --repo <in-place> against the same chain → 
 mkser ser.md "$DEMO" "surfaces: [\"repo:$S/repo-rollout\"]"
 chk --repo "$S/repo-rollout" --project Demo
 ok "$out|$rc" "refuse ser|3" "S13: --repo <clone> against a chain that claims repo:<clone> → refuse"
+
+# S14 (p33-3): a checkout nested inside another by path (the ~/Projects monorepo holding its own Narcissus clone) is a
+# separate repo with its own index, so a chain on the outer checkout and a rollout rooted in the nested one are
+# disjoint; a path inside the outer checkout itself, or a nested checkout under a directory in no checkout (a path-only
+# claim covers everything beneath it), still overlaps.
+scen s14
+M="$S/mono"; mkrepo "$M" https://github.com/demo/mono.git; mkrepo "$M/nested" https://github.com/demo/nested.git
+mkdir -p "$M/sub" "$M/nested/deep"
+mkro ro-n.md "$M/nested" "$OTHER"
+chs --surface "repo:$M" --project Demo
+ok "$out|$rc" "none|0" "S14: a serial chain on repo:<outer> against a parallel rollout rooted in a nested checkout → none"
+chs --surface "repo:$M/nested/deep" --project Demo
+ok "$out|$rc" "refuse ro-n|3" "S14 control: a path inside the nested checkout still meets its root"
+mkro ro-n.md "$M/sub" "$OTHER"
+chs --surface "repo:$M" --project Demo
+ok "$out|$rc" "refuse ro-n|3" "S14 control: a root inside the outer checkout itself still refuses"
+rm "$T/ro-n.md"
+mkser ser.md "$OTHER" "surfaces: [\"repo:$M\"]"
+chk --repo "$M/nested" --project Demo
+ok "$out|$rc" "none|0" "S14: --repo <nested checkout> against a serial chain on repo:<outer> → none"
+chk --repo "$M/sub" --project Demo
+ok "$out|$rc" "refuse ser|3" "S14 control: --repo inside the outer checkout against the same chain → refuse"
+chs --surface "repo:$M/nested" --project Demo
+ok "$out|$rc" "none|0" "S14: a chain on the nested checkout against a live chain on repo:<outer> → none"
+chs --surface "repo:$M/nested-not-yet/x" --project Demo
+ok "$out|$rc" "refuse ser|3" "S14 control: a path not there yet inside the outer checkout reads as the outer one's"
+mkser ser.md "$OTHER" "surfaces: [\"repo:$S\"]"
+chs --surface "repo:$M/nested" --project Demo
+ok "$out|$rc" "refuse ser|3" "S14 control: a path-only claim on a directory in no checkout still covers a checkout beneath it"
 
 # ── X1-X14: a stuck rollout holds only what it waits on (ADR 0060, p33-2) ─────────────────────────────
 # mkchain <slug> <projects line> <row>... — a serial note with a `## Queue` table (a row is
@@ -924,7 +954,6 @@ mkt pt1.md p review 'owner: lead' 'pr: https://github.com/demo/repo/pull/1' 'int
 chs --resume ca --surface "repo:$R"
 ok "$out|$rc" "refuse p|3" "X14: … and in Integration too"
 export THREAD_EVENTS_DIR="$EV0"
-
 # ── K1-K4: carry ──────────────────────────────────────────────────────────────────────────────────────
 scen k
 mkro $P.md "$R" "$DEMO" "$PAUSED"
