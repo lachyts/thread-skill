@@ -889,12 +889,18 @@ the launch its Leg opens in, and the chain's surfaces. Chains whose surfaces are
 that writes a repo checkout owns that checkout. A member claims its launch folder, each path its `## Launch` names
 (its launch commands' `--add-dir` and `cd` paths among them, fenced or not), each `Local:` path of its first
 project and each surface added for it, or exactly what it declares in `surfaces:`, and every claimed path inside a
-git checkout widens to that checkout's toplevel. It never claims its launch profile's other Working roots (a
-workspace launcher's `add_dirs`), another project's `Local:`, a project's `repos:`, nor a repo or external system
-it writes but names nowhere: those are outside schedule's sight, which is why the default's WARN says to declare
-`surfaces:` for them (`serial-chains.py`'s header is the one statement of the surface grammar). Nor does it claim a
-`## Launch` path that is `/` or the home directory (a bare `cd ~` or `--add-dir ~`), which would contain every
-repo: a WARN names it.
+git checkout widens to that checkout's toplevel. In the vault, a member whose path is the vault root, or that has
+no other claim, claims its first project's place (a folder note's folder, else the note and the folder it would
+become) and its own task note, never the whole vault, so vault chains in different project places run side by
+side; a path under `Work/Tasks` (task and rollout notes, the engine's bookkeeping) is never a claim, and only a
+member with no project to narrow to claims bare `vault`, with a WARN (ADR 0059). It never claims its launch
+profile's other Working roots (a workspace launcher's `add_dirs`), another project's `Local:`, a project's
+`repos:`, nor a repo or external system it writes but names nowhere: those are outside schedule's sight, which is
+why the default's WARN says to declare `surfaces:` for them (`serial-chains.py`'s header is the one statement of
+the surface grammar). Nor does it claim a `## Launch` path that is `/` or the home directory (a bare `cd ~` or
+`--add-dir ~`), which would contain every repo: a WARN names it. A code row's Leg finishes only commits in its own
+checkout, so an alias-less row with one checkout opens from it, and an alias-less row writing two checkouts, or one
+whose launch opens in the vault while it writes a checkout, is refused (ADR 0059); a session-lane member never is.
 
 **S1. Discover.** Step 1's filters and skip rules pick the members (or take the `--tasks` set): a task already
 linked to a live rollout of either shape is skipped and named, and so is a decision task. Session-lane misfits are
@@ -906,8 +912,12 @@ or orient-all § 6 nothing is asked.
 It prints one JSON line: `chains` (each with its `tasks` in order, its `surfaces`, its `members` with each one's
 `surfaces`, `source`, `added` and `launch`, and its `externalDeps`), `sessionLane` and `warns`. Pass a path the
 agent reads in a member's body (outside `## Launch`) as `--surface <slug>=<path>` only for a member with no
-declared `surfaces:`: a declaration is the member's whole claim. Exit 3 (an unknown, null or missing launch
-folder, a missing launch-folders file an alias needs, a dependency cycle, a malformed declared token) or exit 2
+declared `surfaces:`: a declaration is the member's whole claim. For a vault write read in a member's body, pass
+the narrowest vault path it names, never the vault root, `vault` or a path under `Work/Tasks`: an added vault-root
+path narrows to the member's project place with a WARN, an added `Work/Tasks` path is dropped with a WARN, and only
+the literal token `vault` claims the whole vault. Exit 3 (an unknown, null or missing launch folder, a missing
+launch-folders file an alias needs, a dependency cycle, a malformed declared token, a code row whose Leg would open
+outside the checkout it writes: an alias-less row writing two checkouts, or a vault launch writing one) or exit 2
 stops the run before anything is written: print its stderr verbatim. Name each `sessionLane` member, with its
 `why`, as ruling (c)'s session lane (no serial self-rollouts, the fit doc's **Rulings**) and leave it unstamped.
 Carry the `warns` to the confirm and to S7.
@@ -921,8 +931,9 @@ every refusal's stderr goes in one report: each line names the live chain or unf
 project and state, the overlapping pair and its remedy (a never-started chain's is `status: dropped`, which frees
 its tasks for a later run). Tokens compare literally (`repo:<realpath>`), so a chain on a repo's in-place checkout
 never overlaps a parallel rollout rooted in its rollout clone: the two coexist as peers (ADR 0042, intended), while a
-chain that claims `repo:<clone>`, or a parallel rollout rooted in place before ADR 0042, still refuses. Carry `WARN:`
-lines to S7.
+chain that claims `repo:<clone>`, or a parallel rollout rooted in place before ADR 0042, still refuses. Quote each
+`--surface` token as one shell word, since a vault path holds spaces:
+`--surface "vault:Work/Projects/Life (area)/Contacts admin.md"`. Carry `WARN:` lines to S7.
 
 **S3.5. Pre-flight.** It runs step 1.5 over S2's chain members, the session-lane ones left out; nothing is kept and
 nothing is superseded on this path, so there is no `--kept` and no `--superseding`. Under orient's § 7 too it asks its

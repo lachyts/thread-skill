@@ -8,7 +8,8 @@
 #        the vault, a path in no checkout, --surface (always unions in), the added-only member, an empty `surfaces:`
 #   P2b  a launch folder or path inside a checkout widens to its toplevel, declared or derived; workspace launchers
 #        share one checkout, so their members form one chain with a launch per row (their markers are never read)
-#   P2c  the default (the vault only) and its stated limit; a declared `any`
+#   P2c  the default (the vault only, for a member naming no project and no path) and its stated limit; a declared
+#        `any`
 #   P2d  launch commands (`--add-dir` and a leading `cd`, fenced or in a span) and the first project's `Local:` are
 #        derived claims; a fenced path no such command names, a comment, a Read item, a declared member, a second
 #        project's `Local:` and a backticked `Local:` with no path claim nothing; a `## Launch` path that is `/` or
@@ -17,7 +18,12 @@
 #   P4   ruling (c): a member on a checkout of lachyts/thread-skill (a `## Launch` `--add-dir` or `cd` path, declared
 #        or not, its surface, its launch folder, its project's `Local:` or `repos:`) goes to the session lane
 #   P5   launch: by_alias then plain_aliases, the null, missing and unknown refusals, the project's `launch:`, the
-#        alias-less member (from its one repo, its project's `Local:` included), a missing launch-folders file
+#        alias-less member (from its one repo, its project's `Local:` included; refused when it writes two
+#        checkouts), a missing launch-folders file
+#   P7   vault chains claim their own project places (ADR 0059): a vault-root launch or path narrows to the first
+#        project's place (a folder note's folder, else the note and its would-be folder) and the member's own task
+#        note; Work/Tasks is bookkeeping; the whole-vault fallbacks; --surface adds; a code row never opens where its
+#        Leg cannot finish it (ruling (c) first); the serial check lets two project places run side by side
 #   P6   exit 2
 # Temp vaults, temp git repos with literal origin URLs (only `git rev-parse` and `git remote get-url` read them).
 # No vault, no network. bash 3.2-compatible (macOS).
@@ -122,7 +128,7 @@ scen p2
 LAUNCH="- **Repo:** \`$G\`" mkt d1
 LAUNCH="- **Repo:** \`$G\` — branch off \`main\`, one PR." mkt d2
 LAUNCH="- **Repos:** \`$G\`,
-  \`$H\`" mkt d3
+  \`$H\`" mkt d3 'launch: cc-g'   # an alias-less row writing two checkouts is refused (P7)
 LAUNCH="- **Launch:** \`claude\` from \`$G\`" mkt d4
 LAUNCH="\`cc-x\` — cwd \`$G/sub\`" mkt d5
 LAUNCH="- **Repo:** \`$G/sub/file.txt\`" mkt d6
@@ -268,13 +274,13 @@ plan --tasks k2
 ok "$(mem k2 surfaces)" '["ext:k"]' "P2d control: a declared member never claims its project's Local:"
 mkt k3 'projects: ["[[Bare]]", "[[HProj]]"]'
 plan --tasks k3
-ok "$(mem k3 surfaces)|$(mem k3 source)" '["vault"]|"default"' "P2d control: a second project's Local: is not claimed"
+ok "$(mem k3 surfaces)|$(mem k3 source)" '["vault:Work/Projects/Area/Bare","vault:Work/Projects/Area/Bare.md","vault:Work/Tasks/k3.md"]|"derived"' "P2d control: a second project's Local: is not claimed (the first project's place is, P7)"
 mkt k4 'projects: ["[[NProj]]"]'
 plan --tasks k4
 ok "$(mem k4 surfaces)" "[\"repo:$N/b\"]" "P2d: a Local: in no checkout is claimed path-only"
 mkt k5 'projects: ["[[NoLocal]]"]'
 plan --tasks k5
-ok "$(mem k5 surfaces)" '["vault"]' "P2d control: a backticked \`Local:\` that names no path claims nothing"
+ok "$(mem k5 surfaces)" '["vault:Work/Projects/Area/NoLocal","vault:Work/Projects/Area/NoLocal.md","vault:Work/Tasks/k5.md"]' "P2d control: a backticked \`Local:\` that names no path claims nothing (its project's place only, P7)"
 LAUNCH="- **Repo:** \`$H\`" mkt k6
 plan --tasks k6,k1
 ok "$(j "$chains")" '[["k1","k6"]]' "P2d: a member writing \$H shares a chain with one whose project's Local: is \$H"
@@ -385,9 +391,12 @@ mkt l7 'projects: ["[[LProj]]"]'
 plan --tasks l7
 ok "$(mem l7 launch)|$(mem l7 surfaces)" "{\"alias\":\"cc-g\",\"folder\":\"$G\"}|[\"repo:$G\"]" "P5: the project's launch: applies when the task has none"
 mkt l8 "surfaces: [\"repo:$G\"]"; mkt l9 'surfaces: ["ext:x"]'; mkt l10 "surfaces: [\"repo:$G\", \"repo:$H\"]"
-plan --tasks l8,l9,l10
+plan --tasks l8,l9
 ok "$(mem l8 launch)" "{\"alias\":\"claude\",\"folder\":\"$G\"}" "P5: an alias-less row opens claude from its single repo"
-ok "$(mem l9 launch)|$(mem l10 launch)" "{\"alias\":\"claude\",\"folder\":\"$V\"}|{\"alias\":\"claude\",\"folder\":\"$V\"}" "P5: … or from the vault root with zero or several repos"
+ok "$(mem l9 launch)" "{\"alias\":\"claude\",\"folder\":\"$V\"}" "P5: … or from the vault root with zero repos"
+plan --tasks l10
+ok "$rc|$out" "3|" "P5: an alias-less row writing two checkouts exits 3 (its Leg could finish only one)"
+has "$err" "REFUSE: l10: it writes the checkouts $G, $H and has no launch alias" "P5: … naming them"
 PBODY="Local: \`$H\`" mkp HLocal
 mkt l11 'projects: ["[[HLocal]]"]'
 plan --tasks l11
@@ -399,7 +408,157 @@ LFX="$TMP/none.json" plan --tasks l9
 ok "$rc|$(j "$chains")" '0|[["l9"]]' "P5: with no alias it exits 0"
 has "$(j 'd["warns"]')" "$TMP/none.json is missing or unreadable" "P5: … with a WARN"
 
-# ── P6: exit 2 ────────────────────────────────────────────────────────────────────────────────────────
+# ── P7: vault chains claim their own project places (ADR 0059) ───────────────────────────────────────
+scen p7
+mkrepo "$V" https://github.com/demo/obsidian.git   # the vault is a checkout, as ~/repos/obsidian is
+# mkpp <path under Work/Projects> [frontmatter lines...] — a project note anywhere under Work/Projects; $PBODY is its body
+mkpp() {
+  local f="$V/Work/Projects/$1"; shift
+  mkdir -p "$(dirname "$f")"
+  { printf -- '---\ntags: [project]\n'
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n%s\n' "${PBODY:-}"; } > "$f"
+}
+mkpp "Life (area)/Contacts admin.md"; mkpp "Life (area)/Obsidian Vault.md"   # flat siblings in one area folder
+mkpp "Art/Narc/Narc.md"; mkpp "Art/Narc/Narc sub.md"                          # a folder note and a project inside it
+PBODY="Local: \`$TS\`" mkpp "Code/TSProj7.md"
+ln -s "$V" "$S/vlink"
+LFX7="$S/lf.json"
+cat > "$LFX7" <<EOF
+{"schema_version": 1, "by_alias": {},
+ "plain_aliases": {"cc-v": "$V", "cc-vl": "$S/vlink", "cc-vc": "$S/VAULT", "cc-g": "$G"}}
+EOF
+UR="$root/skills/_shared/scripts/unfinished-rollout.py"
+# chk7 <chain index> [check args...] — the serial check over that chain of the last plan's surfaces -> $cout, $crc, $cerr
+chk7() {
+  local i="$1" t; shift
+  local sv=()
+  while IFS= read -r t; do [ -n "$t" ] && sv+=(--surface "$t"); done <<EOF
+$(printf '%s' "$out" | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)["chains"][int(sys.argv[1])]["surfaces"]))' "$i")
+EOF
+  python3 "$UR" check --tasks-dir "$T" --shape serial ${sv[@]+"${sv[@]}"} "$@" > "$S.cout" 2> "$S.cerr"; crc=$?
+  cout=$(cat "$S.cout"); cerr=$(cat "$S.cerr")
+}
+CA='"vault:Work/Projects/Life (area)/Contacts admin","vault:Work/Projects/Life (area)/Contacts admin.md"'
+OV='"vault:Work/Projects/Life (area)/Obsidian Vault","vault:Work/Projects/Life (area)/Obsidian Vault.md"'
+# 1. A member with only a project claims that project's place and its own task note, never the whole vault.
+mkt a1 'projects: ["[[Contacts admin]]"]'
+LFX="$LFX7" plan --tasks a1
+ok "$rc|$(mem a1 surfaces)|$(mem a1 source)|$(mem a1 launch)|$(j 'd["warns"]')" "0|[$CA,\"vault:Work/Tasks/a1.md\"]|\"derived\"|{\"alias\":\"claude\",\"folder\":\"$V\"}|[]" "P7: a flat project's member claims its note, its would-be folder and its own task note (derived, no WARN)"
+# 2. A launch from the vault root (an alias, a symlinked alias, a ## Launch path) narrows the same way.
+mkt a2 'projects: ["[[Contacts admin]]"]' 'launch: cc-v'
+mkt a3 'projects: ["[[Contacts admin]]"]' 'launch: cc-vl'
+LAUNCH="- **Repo:** \`$V\`" mkt b1 'projects: ["[[Obsidian Vault]]"]'
+for x in "a2 $CA" "a3 $CA" "b1 $OV"; do
+  m="${x%% *}"; want="${x#* }"
+  LFX="$LFX7" plan --tasks "$m"
+  ok "$rc|$(mem "$m" surfaces)" "0|[$want,\"vault:Work/Tasks/$m.md\"]" "P7: $m, launched at the vault root, claims its project's place and its own note"
+  hasnt "$(mem "$m" surfaces)" '"vault"' "P7: … never the whole vault"
+  hasnt "$(j 'd["warns"]')" "no surface declared" "P7: … with no default WARN"
+  hasnt "$(j 'd["warns"]')" "is the vault root" "P7: … and no root-hit WARN"
+done
+LFX="$LFX7" plan --tasks a2
+ok "$(mem a2 launch)" "{\"alias\":\"cc-v\",\"folder\":\"$V\"}" "P7: a2 keeps its vault launch"
+if [ -d "$S/VAULT" ]; then   # a case-insensitive volume (APFS): a case-variant alias is the vault root too
+  mkt a4 'projects: ["[[Contacts admin]]"]' 'launch: cc-vc'
+  LFX="$LFX7" plan --tasks a4
+  ok "$rc|$(mem a4 surfaces)" "0|[$CA,\"vault:Work/Tasks/a4.md\"]" "P7: a case-variant vault alias narrows the same way"
+else
+  echo "skip - P7: a case-variant vault alias (case-sensitive volume)"
+fi
+# 3. Two projects in one area folder are two chains; one project is one chain.
+mkt c1 'projects: ["[[Contacts admin]]"]' 'launch: cc-v'
+LFX="$LFX7" plan --tasks a1,b1
+ok "$rc|$(j "$chains")" '0|[["a1"],["b1"]]' "P7: members of sibling flat projects in one area folder form two chains"
+LFX="$LFX7" plan --tasks a1,c1
+ok "$(j "$chains")" '[["a1","c1"]]' "P7: two members of one project form one chain"
+# 4. The Verify line, end to end: chain A live, a chain in another project schedules beside it, one in A's refuses.
+LFX="$LFX7" plan --tasks a1
+{ printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\nprojects: ["[[Contacts admin]]"]\nsurfaces:\n'
+  printf '%s' "$out" | python3 -c 'import json,sys; [print("  - \"%s\"" % t) for t in json.load(sys.stdin)["chains"][0]["surfaces"]]'
+  printf -- '---\n\n## Notes\n\nChain A.\n'; } > "$T/ca-rollout-2026-10-31.md"
+mkt b2 'projects: ["[[Obsidian Vault]]"]' 'launch: cc-v'
+LFX="$LFX7" plan --tasks b1,b2
+ok "$rc|$(j "$chains")" '0|[["b1","b2"]]' "P7: two Obsidian Vault members form one chain"
+chk7 0 --tasks b1,b2
+ok "$cout|$crc" "none|0" "P7: … and the serial check lets it schedule beside the live Contacts admin chain"
+LFX="$LFX7" plan --tasks c1
+chk7 0 --tasks c1
+ok "$cout|$crc" "refuse ca-rollout-2026-10-31|3" "P7: a second chain in the Contacts admin project still refuses"
+# 5. The fallbacks: no project and no path, a vault-root path with no project, a project with no note.
+mkt n1
+LFX="$LFX7" plan --tasks n1
+ok "$(mem n1 surfaces)|$(mem n1 source)" '["vault"]|"default"' "P7: a member naming no project and no path claims the whole vault (default)"
+has "$(j 'd["warns"]')" "n1: no surface declared or derived: it claims only the vault; declare \`surfaces:\` for any repo or external system it writes" "P7: … with the default WARN, verbatim"
+chk7 0 --tasks n1
+ok "$cout|$crc" "refuse ca-rollout-2026-10-31|3" "P7: … and its check refuses beside chain A"
+LAUNCH="- **Repo:** \`$V\`" mkt n2
+LFX="$LFX7" plan --tasks n2
+ok "$(mem n2 surfaces)|$(mem n2 source)" '["vault"]|"derived"' "P7: a vault-root path with no project claims the whole vault (derived)"
+has "$(j 'd["warns"]')" "n2: its ## Launch path $V is the vault root and it names no project: it claims the whole vault" "P7: … with the root-hit WARN"
+hasnt "$(j 'd["warns"]')" "no surface declared" "P7: … and not the default one"
+mkt m1 'projects: ["[[Ghost]]"]'
+LFX="$LFX7" plan --tasks m1
+ok "$(mem m1 surfaces)|$(mem m1 source)" '["vault"]|"default"' "P7: a first project with no note claims the whole vault (default)"
+has "$(j 'd["warns"]')" "m1: no surface declared or derived" "P7: … with the default WARN"
+has "$(j 'd["warns"]')" "m1: its first project [[Ghost]] has no note under Work/Projects: its vault claim cannot narrow to it" "P7: … and one naming the missing project"
+# 6. A folder note claims its folder, so a project inside it shares the chain.
+mkt e1 'projects: ["[[Narc]]"]'; mkt e2 'projects: ["[[Narc sub]]"]'
+LFX="$LFX7" plan --tasks e1
+ok "$(mem e1 surfaces)" '["vault:Work/Projects/Art/Narc","vault:Work/Tasks/e1.md"]' "P7: a folder note's member claims the folder"
+LFX="$LFX7" plan --tasks e1,e2
+ok "$(j "$chains")" '[["e1","e2"]]' "P7: … so a project inside it shares the chain"
+# 7. Bookkeeping: a task or rollout note under Work/Tasks is never a claim.
+printf -- '---\ntags: [task, rollout]\nstatus: done\n---\n' > "$T/some-rollout.md"   # a rollout note the row names
+LAUNCH="- **Notes:** \`$V/Work/Tasks/some-rollout.md\`" mkt k1 'projects: ["[[Contacts admin]]"]'
+LFX="$LFX7" plan --tasks k1
+ok "$(mem k1 surfaces)|$(mem k1 source)" "[$CA,\"vault:Work/Tasks/k1.md\"]|\"derived\"" "P7: a ## Launch path under Work/Tasks is bookkeeping, never a claim"
+hasnt "$out" "some-rollout" "P7: … named nowhere in the plan"
+# 8. --surface adds: the vault root narrows, a literal vault is kept, a path under Work/Tasks is dropped.
+LFX="$LFX7" plan --tasks a1 --surface "a1=$V"
+ok "$(mem a1 surfaces)|$(mem a1 added)" "[$CA,\"vault:Work/Tasks/a1.md\"]|[]" "P7: an added vault-root path narrows to the project's place"
+has "$(j 'd["warns"]')" "a1: --surface $V is the vault root: it claims its first project's place and its own task note instead" "P7: … with a WARN"
+LFX="$LFX7" plan --tasks a1 --surface a1=vault
+ok "$(mem a1 surfaces)|$(mem a1 added)" '["vault"]|["vault"]' "P7: an added literal vault token is kept as written"
+LFX="$LFX7" plan --tasks a1 --surface "a1=$V/Work/Tasks"
+ok "$(mem a1 surfaces)|$(mem a1 added)" "[$CA,\"vault:Work/Tasks/a1.md\"]|[]" "P7: an added path under Work/Tasks is dropped"
+has "$(j 'd["warns"]')" "a1: --surface $V/Work/Tasks is under Work/Tasks: task and rollout notes are bookkeeping, never a claim (ADR 0059)" "P7: … with a WARN"
+# 9. A code row never opens where its Leg cannot finish it.
+LAUNCH="- **Repos:** \`$G\`, \`$H\`" mkt r1
+LFX="$LFX7" plan --tasks r1
+ok "$rc|$out" "3|" "P7: an alias-less row writing two checkouts exits 3"
+has "$err" "REFUSE: r1: it writes the checkouts $G, $H and has no launch alias: leg.py done finishes only commits in the Leg's own checkout" "P7: … naming both and why"
+LAUNCH="- **Repo:** \`$G\`" mkt r2 'launch: cc-v'
+LFX="$LFX7" plan --tasks r2
+ok "$rc|$out" "3|" "P7: a vault launch writing a checkout exits 3"
+has "$err" "REFUSE: r2: its launch cc-v opens in $V, inside the vault, but it writes the checkout $G" "P7: … naming the launch and the checkout"
+LAUNCH="- **Repo:** \`$G\`" mkt r3 'launch: cc-vl'
+LFX="$LFX7" plan --tasks r3
+ok "$rc" 3 "P7: … and so does a symlinked vault launch"
+has "$err" "REFUSE: r3: its launch cc-vl opens in $S/vlink, inside the vault" "P7: … caught through its realpath"
+if [ -d "$S/VAULT" ]; then
+  LAUNCH="- **Repo:** \`$G\`" mkt r5 'launch: cc-vc'
+  LFX="$LFX7" plan --tasks r5
+  ok "$rc" 3 "P7: … and a case-variant vault launch"
+else
+  echo "skip - P7: a case-variant vault launch (case-sensitive volume)"
+fi
+LAUNCH="- **Repos:** \`$G\`, \`$N\`" mkt r4
+LFX="$LFX7" plan --tasks r4
+ok "$rc|$(mem r4 launch)" "0|{\"alias\":\"claude\",\"folder\":\"$G\"}" "P7: an alias-less row with one checkout and a path-only place opens from the checkout"
+# 10. Ruling (c) comes first: a session-lane member is never refused for its launch.
+LAUNCH="- **Repos:** \`$TS\`, \`$G\`" mkt t1
+mkt t2 'launch: cc-v' 'projects: ["[[TSProj7]]"]'
+LFX="$LFX7" plan --tasks a1,t1,t2
+ok "$rc|$(j "$chains")|$(j '[s["slug"] for s in d["sessionLane"]]')" '0|[["a1"]]|["t1","t2"]' "P7: two code rows of thread-skill go to the session lane, unrefused"
+# 11. The stated limit: a legacy whole-vault chain still refuses every vault chain until it is done or dropped.
+{ printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\nsurfaces: ["vault"]\n'
+  printf -- '---\n\n## Notes\n\nA legacy chain.\n'; } > "$T/legacy-rollout.md"
+LFX="$LFX7" plan --tasks b1
+chk7 0 --tasks b1
+ok "$cout|$crc" "refuse legacy-rollout|3" "P7: a legacy note claiming the whole vault still refuses (the stated limit)"
+
+# ── P6: exit 2────────────────────────────────────────────────────────────────────────────────────────
 scen p6
 mkt a 'surfaces: ["ext:a"]'
 usage() {  # usage <label> <python3 args...>
