@@ -259,6 +259,45 @@ grade to what followed it.
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
+## Upgrading to 5.0.0
+
+5.0.0 breaks anyone running rollouts:
+
+- **Orient's batches retire for the three-way execution-fit test (ADR 0040).**
+  Parallel-shaped work rolls out as a parallel rollout, serial-shaped work an
+  agent can still finish unattended as a serial rollout that runs as Legs, and
+  work that needs Lachy present or waits on a date as scoped sessions. Orient
+  spawns no child agents (orient § 8): under Autonomous or Mixed steering it
+  schedules serial-shaped work as `shape: serial` rollout notes (orient § 7)
+  and makes no execute handoff for them (orient § 9), so start each note's
+  Leg 1 by hand. `/thread:orient <target> --debrief` now only prints a
+  retirement line and stops (orient § 10): drop `--debrief` from any saved
+  prompt or macro. `dispatched:` stamps already in task notes are inert
+  history.
+- **Every parallel rollout runs from its rollout clone (#188, ADR 0042).**
+  Schedule § 0 resolves every repo to `<toplevel>-rollout`, a second full
+  clone beside its toplevel, and makes it on the first rollout after Lachy's
+  yes (`self-rollout-check.sh --ensure`), so peer sessions committing in the
+  in-place checkout never trip a rollout's windows. The lead launches in the
+  clone (execute § 2.8), merge-task fast-forwards the in-place checkout after
+  each merge, and a clone's THREAD.md copy is never a thread. A rollout
+  scheduled before then keeps its root; `--regenerate` re-roots it.
+- **The engine refuses a call without `args.verifySlot` (estate ADR 0009 d4).**
+  The lead copies it verbatim from the `verifySlot` object (`script` and
+  `slots`) that `verify-timeout` prints at each loop entry (execute § 3), so
+  every agent's verifier waits for a machine-wide verify slot. A Workflow call
+  launched before 5.0.0 carries no `verifySlot`: resuming it on the 5.0.0
+  engine is an *Args refusal*, and the task takes a fresh call instead
+  (execute's *Can no longer resume*). A running lead keeps the engine it
+  loaded, so restart it after the plugin update. `verify_slots` (built-in 2)
+  is machine-wide: set it under `[defaults]` only (a `[repo."owner/name"]`
+  table that sets it is refused); it is never stamped, and execute's
+  `verify-timeout` reads it, validating the whole file, at each loop entry. So
+  install first: write a new key only once the installed plugin knows it,
+  because a refused file now halts every rollout on the machine at its next
+  entry, stamped or not. Stamping a key on the rollout note does not clear
+  that halt; only fixing the file at the line its stderr names does.
+
 ## Upgrading to 4.0.0
 
 4.0.0 renames one verb and changes one record:
@@ -296,22 +335,10 @@ grade to what followed it.
   execute reads the note first, so an edit to the file reaches the next
   scheduled (or `--regenerate`d) rollout, not one already written. A task's
   own frontmatter still overrides `max_iterations`, `max_review_rounds` and
-  `max_plan_rounds`. `verify_slots` (built-in 2) is machine-wide: set it under
-  `[defaults]` only (a `[repo."owner/name"]` table that sets it is refused); it
-  is never stamped, and execute's `verify-timeout` reads it, validating the
-  whole file, at each loop entry. So install first: write a new key only once
-  the installed plugin knows it, because a refused file now halts every
-  rollout on the machine at its next entry, stamped or not. Stamping a key on
-  the rollout note does not clear that halt; only fixing the file at the line
-  its stderr names does.
-- **Every parallel rollout runs from its rollout clone (#108, ADR 0042).**
-  Schedule § 0 resolves every repo to `<toplevel>-rollout`, a second full
-  clone beside its toplevel, and makes it on the first rollout after Lachy's
-  yes (`self-rollout-check.sh --ensure`), so peer sessions committing in the
-  in-place checkout never trip a rollout's windows. The lead launches in the
-  clone (execute § 2.8), merge-task fast-forwards the in-place checkout after
-  each merge, and a clone's THREAD.md copy is never a thread. A rollout
-  scheduled before then keeps its root; `--regenerate` re-roots it.
+  `max_plan_rounds`.
+- **Schedule picks the rollout root (#108).** When the Project root is the
+  live directory-source plugin checkout, schedule uses the separate
+  `<repoPath>-rollout` clone, or refuses with the fix.
 
 ## Install
 
@@ -494,7 +521,9 @@ matches the tree. It also fails on cache files the tree doesn't track (`.DS_Stor
 on the released commit, right after the plugin update. It refuses first while `evals/results/` holds
 `make evals` output: record what you need in `docs/evals/`, then clear it before the plugin update,
 since the `./` source would copy it into the cache. If a copy already reached the cache, the refusal
-names the `evals/results` dir to delete there. A directory-source install (or `--plugin-dir`) runs live from its
+names the `evals/results` dir to delete there. A `make evals` run also leaves its kept sandboxes outside
+the tree (each result's `tracePath`), which neither the refusal nor the cache sees: once the record has
+read them, remove them by their literal paths, as the Makefile's evals note says. A directory-source install (or `--plugin-dir`) runs live from its
 checkout instead, the **primary checkout**, which never moves while a rollout runs on it (ADR 0031).
 
 ## Coexistence with Orca
