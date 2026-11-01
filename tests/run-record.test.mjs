@@ -581,21 +581,30 @@ test('review-round (ADR 0058): status, branch, size and disposition counts are a
     recurring: 3, reversal: 1, rejected: 2 }
   emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify({ ...base, status: 'pending', lines: 0, files: 0 })], { env: EV(home) })
   emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify(full)], { env: EV(home) })
-  const [a, b] = lines(path.join(ev(home), 'reviews.jsonl'))
+  // p34-5: open may equal blocking (every blocking finding still open), and reviewedAt is a UTC Z stamp.
+  const atCap = { ...base, blocking: 2, open: 2, reviewedAt: '2026-10-01T00:00:00.000Z' }
+  emitOk(home, ['--kind', 'review-round', '--json', JSON.stringify(atCap)], { env: EV(home) })
+  const [a, b, c] = lines(path.join(ev(home), 'reviews.jsonl'))
   assert.deepEqual([a.status, a.lines, a.files, 'blocking' in a], ['pending', 0, 0, false])
   for (const k of Object.keys(full)) assert.deepEqual(b[k], full[k], k)
+  assert.deepEqual([c.blocking, c.open, c.reviewedAt], [2, 2, '2026-10-01T00:00:00.000Z'])
   const BAD = [
     ['status "done"', { status: 'done' }], ['status ""', { status: '' }], ['branch ""', { branch: '' }],
     ['branch 3', { branch: 3 }], ['lines -1', { lines: -1 }], ['files 1.5', { files: 1.5 }],
     ['blocking true', { blocking: true }], ['open "1"', { open: '1' }], ['filed -1', { filed: -1 }],
     ['recurring null', { recurring: null }], ['reversal -2', { reversal: -2 }], ['rejected 0.5', { rejected: 0.5 }],
+    ['reviewedAt "yesterday"', { reviewedAt: 'yesterday' }],
+    ['reviewedAt with an offset', { reviewedAt: '2026-10-01T00:00:00+10:00' }],
+    ['open over blocking', { blocking: 1, open: 2 }],
   ]
   for (const [label, bad] of BAD) {
     const r = cli(home, ['emit', '--kind', 'review-round', '--json', JSON.stringify({ ...base, ...bad })], { env: EV(home) })
     assert.equal(r.status, 2, `${label}: ${r.stderr}`)
     assert.match(r.stderr, /^run_record: refused: \S.*\n$/, label)
   }
-  assert.equal(lines(path.join(ev(home), 'reviews.jsonl')).length, 2, 'no refused line was written')
+  const over = cli(home, ['emit', '--kind', 'review-round', '--json', JSON.stringify({ ...base, blocking: 1, open: 2 })], { env: EV(home) })
+  assert.match(over.stderr, /review-round: open \(2\) exceeds blocking \(1\)/)
+  assert.equal(lines(path.join(ev(home), 'reviews.jsonl')).length, 3, 'no refused line was written')
 })
 
 // ---- the review-verdict kind (p21-3: reconcile-rollout.py's one line per judged master-review round) ----------

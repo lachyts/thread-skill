@@ -292,9 +292,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Blocking finding** — a review finding whose failure scenario is a crash,
   hang or wrong result on a path the branch ships for normal use, data loss or
   a security hole on any path it ships, or the named test failing. Only a blocking finding
-  holds an own-branch landing; the rest are filed in its follow-up task, and
-  a clean round is one with none, unless it returned exactly its cap, which
-  earns one more code round first (ADR 0058). The session grades it, never
+  holds an own-branch landing; the rest are filed in its follow-up task or
+  rejected with a reason (a recurring one adds nothing), and a clean round is
+  one with none, unless it returned its cap or more, which earns one more code
+  round first (ADR 0058). The session grades it, never
   the reviewer. _Avoid_: accepted finding, must-fix, high (the reviewer
   grades no severity).
 - **Close-out PR** — the pull request carrying close's own bookkeeping

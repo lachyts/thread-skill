@@ -41,6 +41,7 @@ Human teams and AI review tools stop on a different condition: no open *blocking
    - land.sh's own-branch `--queue` and `--hold` record every review doc on the branch through fresh-review's `review-round.py`, so a landing cannot end unrecorded. fresh-review still records each doc when its findings arrive, and again when it is consumed.
    - The `review-round` line gains the doc's `status`, the `branch`, the diff size (`lines`, `files`), and the disposition counts: `blocking`, `open`, `filed`, `recurring`, `reversal` and `rejected`. These are parsed from a fixed `## Disposition` format.
    - The weekly Reflection's `freshReview` reports each landing: rounds, findings and blocking per round, filed, open and reversals. Until now it reported only rounds with regressions.
+   *(Corrected 2026-11-01, p34-5: the sweep runs at the end of every `--queue` and `--hold`, whatever its result; a landing that ends on a plain call, or a session ended mid-loop, waits for fresh-review's own emits or the next `--queue`/`--hold`.)*
 
 ## Considered options
 
