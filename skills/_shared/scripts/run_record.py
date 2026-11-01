@@ -15,6 +15,8 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
     events_dir(env=None) -> str            record_path(rollout, env=None) -> str
     normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG,
                                            RESERVED
+    title_key(name) -> str                 (a titled note's Grade-log key, p34-6: estate-dispatch.py `log` keys by it,
+                                           and a grade line's `note` is checked against it)
     verdict_digest(verdict, feedback) -> str    verdict_key(line) -> tuple   (review-verdict's identity, p21-3:
                                            the writer, reconcile-rollout.py, and the reader, score.py, share them)
     watch_id(rule, shape) -> str           knob_key(repo, key, rule, direction) -> str   (the weekly reading's
@@ -72,9 +74,10 @@ schedule § 1.5 on every run that grades, all but an orient-all fork, whose esta
 skills/reflect/scripts/grades.py its one reader (the weekly reading's grade accuracy, joined to outcomes at read
 time). A schedule run that regrades a task the estate pass graded ends that estate episode as `regraded`, normally
 undispatched and so outside the rate; a Pre-flight grade's `held` counts holds on dependencies outside the rollout
-too. A grade line carries no rollout, and a task:
-a graded task whose name normalise_slug refuses (a vault note named with spaces or capitals) has no line, `log` skips
-it and reports it.
+too. A grade line carries no rollout, and a task: a graded task whose name normalise_slug refuses (a vault note
+titled with spaces, capitals or punctuation, as quick captures are) is keyed by title_key(name) and carries its exact
+name as `note` (p34-6), so grades.py finds the note again; `log` skips and reports only a name with no key (no ASCII
+letter or digit, or a key another graded task of the pass holds).
 
 reflections.jsonl holds the weekly reading's lines (skills/reflect/scripts/reflect.py is its only writer, and tune.py
 reads it for the agreement, the load hold and to refuse a closed Reflection): a `watch` line per (Reflection, Watch), a
@@ -213,7 +216,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      they were dispositioned); branch?; lines?, files? (ints >= 0: the reviewed diff's size); reviewedAt? (UTC ms Z:
                      when the round was reviewed, its doc's first commit; readers order rounds by it, never by ts);
                      blocking?, open?, filed?, recurring?, reversal?, rejected? (ints >= 0, ADR 0058's disposition
-                     counts from the doc's `## Disposition`; blocking includes open); unconfirmed? (int >= 0,
+                     counts from the doc's `## Disposition`; blocking includes open, so open <= blocking when both are
+                     given); unconfirmed? (int >= 0,
                      fresh-review ADR 0001: candidates its checker could not reproduce, never blocking; counted
                      apart from filed, which excludes them, so each finding sits in one count; with the ledger's
                      STOP rule retired, new lines carry no verdict). No rollout, no task; lands in
@@ -285,8 +289,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      only, on a landed knob or a filed bug; held only on an unlanded knob; landed only on a knob and
                      filed only on a bug). No rollout, no task; lands in reflections.jsonl.
   grade           T  pass, digest, project, grade, agentGrade, shape, size, decisions, low, held, gates; raised?, rank?,
-                     linked? (p25-4, ADR 0041: one line per task an estate pass grades, from estate-rank.py's tasks[]
-                     row, whose name is a slug (`log` skips and reports any other); pass a g- id and digest 12 lowercase
+                     linked?, note? (p25-4, ADR 0041: one line per task an estate pass grades, from estate-rank.py's
+                     tasks[] row; note (p34-6) only for a titled note, its exact name: no `/`, not a slug itself,
+                     and title_key(note) the task; pass a g- id and digest 12 lowercase
                      hex, both shared by the pass's lines; project the task's home; grade and agentGrade each one of
                      Ready | One call | Grill | Orient, the ranker's grade after the raise and the agent's own; shape
                      parallel | serial | session; size S | M | L; decisions and low integers >= 0, the count of his
@@ -440,7 +445,9 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   its `globs`; a line with an `error` is neither. score.py and reflect.py match kinds explicitly and read neither.
 - review-round: dedupe on (repo, doc) when doc is present, else on (repo, head, digest), keeping the latest line
   (p15-7's emitter is idempotent per (repo, doc, status) since ADR 0058, so a doc can carry a pending line and
-  then a consumed one, and the latest wins).
+  then a consumed one, and the latest wins). Readers take a key's branch and reviewedAt from its newest line that
+  carries each when the latest lacks it, and time a round by its reviewedAt (a UTC Z stamp), else its first line's
+  ts; score.py's read_review_rounds is the one reader.
 - review-verdict: one line per verdict_key, (task, round, head) when the line carries a head, else (task, round,
   digest). Keep the first line per key. The writer (reconcile) skips an entry whose key the record already holds,
   so a signed-gate or Lost-call resume's replayed rounds are written once; readers apply the same key, so a
@@ -531,9 +538,9 @@ It must keep to: the directory chain above (the override, then XDG_STATE_HOME, t
 the line format and common keys above, with rollout and task null; one O_APPEND write of the whole line,
 at most 16 KiB, no lock. Idempotency is the emitter's job: one event per review doc and status written
 (pending as its findings arrive, consumed once they are dispositioned; ADR 0058), checked by its own `doc`
-and `status` keys. land.sh's own-branch --queue and --hold re-run the emitter over every doc on the branch,
-so a landing never ends unrecorded. This writer never dedupes or locks review-round; readers dedupe as above,
-keeping the latest line per (repo, doc).
+and `status` keys. land.sh's own-branch mode re-runs the emitter over every doc on the branch at the end of
+every --queue and --hold, whatever its result (a plain call never does, nor a session ended mid-loop). This
+writer never dedupes or locks review-round; readers dedupe as above, keeping the latest line per (repo, doc).
 
 Writing: os.makedirs, then os.open(O_WRONLY | O_APPEND | O_CREAT, 0o644) and ONE os.write of the whole
 line, so concurrent emitters on a local filesystem never interleave a line (not promised on network or
@@ -561,6 +568,7 @@ import re
 import socket
 import sys
 import time
+import unicodedata
 
 try:
     import fcntl
@@ -580,6 +588,8 @@ GRADE_LOG = "grades"
 # record files that are no rollout's: refused as a rollout slug or a carried `from`
 RESERVED = (REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG)
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
+# title_key's one separator: every run of characters outside a slug's letters, digits, dots and underscores (p34-6)
+TITLE_SEP_RE = re.compile(r"[^a-z0-9._]+")
 # One accepted --ts shape on every python (fromisoformat widened in 3.11): date, time, fraction, offset.
 STAMP_RE = re.compile(r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d)(?::(\d\d)(?:[.,](\d+))?)?"
                       r"(?:([Zz])|([+-])(\d\d)(?::?(\d\d))?)?", re.ASCII)
@@ -1375,7 +1385,7 @@ KINDS = {
     "review-round": (False, {"repo": _str, "head": _str, "digest": _str},
                      {"doc": _str, "mode": _str, "effort": _str, "findings": _int(0), "original": _int(0),
                       "regression": _int(0), "verdict": _str, "status": _enum("pending", "consumed"),
-                      "branch": _str, "lines": _int(0), "files": _int(0), "reviewedAt": _str, "blocking": _int(0), "open": _int(0),
+                      "branch": _str, "lines": _int(0), "files": _int(0), "reviewedAt": _stampz, "blocking": _int(0), "open": _int(0),
                       "filed": _int(0), "recurring": _int(0), "reversal": _int(0), "rejected": _int(0),
                       "unconfirmed": _int(0)}),
     "review-verdict": (True, {"round": _int(1), "verdict": _enum("approve", "changes"), "findings": _int(0),
@@ -1406,7 +1416,7 @@ KINDS = {
                      "grade": _enum(*GRADE_NAMES), "agentGrade": _enum(*GRADE_NAMES), "shape": _enum(*GRADE_SHAPES),
                      "size": _enum(*GRADE_SIZES), "decisions": _int(0), "low": _int(0), "held": _bool,
                      "gates": _distinct_of(GRADE_GATES, True)},
-              {"raised": _distinct_of(RAISE_WHYS, False), "rank": _int(1), "linked": _slug}),
+              {"raised": _distinct_of(RAISE_WHYS, False), "rank": _int(1), "linked": _slug, "note": _str}),
     "reflection": (False, {"id": _rid, "since": _stampz, "until": _stampz, "rollouts": _slugs(0, 4096),
                            "escapesOnly": _slugs(0, 4096), "counts": _counts, "quiet": _bool},
                    {"decisionTask": _str, "cadence": _cadence, "repairsOnly": _slugs(1, 4096)}),
@@ -1463,6 +1473,43 @@ def normalise_slug(value, what="slug"):
     if not SLUG_RE.fullmatch(s):
         raise Refused("%s %r is not a slug ([a-z0-9][a-z0-9._-]*)" % (what, value))
     return s
+
+
+def title_key(name):
+    """The Grade log's key for a note name normalise_slug refuses (a vault note titled with spaces, capitals or
+    punctuation, p34-6): NFKD-folded (so a compatibility capital such as `𝐁` is a `B`), then casefolded, its accents
+    dropped and its apostrophes (`'` and `’`) deleted, as estate-dispatch.py's project_slug deletes them; each run of
+    characters outside [a-z0-9._] one hyphen, then its leading non-alphanumerics and trailing `-`, `.` and `_` cut.
+    `Layout broken — library panel stays open` -> `layout-broken-library-panel-stays-open`, `Don't forget Lachy’s kit`
+    -> `dont-forget-lachys-kit`. Refused when no ASCII letter or digit is left (a name in another script, `修复`). The
+    rule is fixed: grades.py groups lines by this key, so changing it would split one note's history in two."""
+    if not isinstance(name, str):
+        raise Refused("note must be a string")
+    s = unicodedata.normalize("NFKD", name.strip()).casefold()
+    s = "".join(c for c in s if not unicodedata.combining(c) and c not in "'\u2019")
+    s = re.sub(r"^[^a-z0-9]+", "", TITLE_SEP_RE.sub("-", s)).rstrip("-._")
+    if not SLUG_RE.fullmatch(s):
+        raise Refused("note %r has no ASCII letter or digit to key it by" % name)
+    return s
+
+
+def _check_note(note, task):
+    """A grade line's `note`: the exact name of a titled note, which title_key keys as the line's task. Only `/` is a
+    path separator here (a vault note on macOS may hold a `\\`, and estate-scan's slug_of keeps it)."""
+    if "/" in note:
+        raise Refused("grade: note %r must be a note name, not a path" % note)
+    try:
+        normalise_slug(note)
+    except Refused:
+        pass
+    else:
+        raise Refused("grade: note %r is a slug already: the task keys it, with no note" % note)
+    try:
+        key = title_key(note)
+    except Refused as e:
+        raise Refused("grade: %s" % e)
+    if key != task:
+        raise Refused("grade: note %r keys as %r, not the task %r (title_key)" % (note, key, task))
 
 
 def _home(env):
@@ -1547,6 +1594,8 @@ def _check_fields(kind, fields):
     if kind == "review-verdict" and fields["original"] + fields["regression"] > fields["findings"]:
         raise Refused("review-verdict: original + regression (%d + %d) exceed findings (%d)"
                       % (fields["original"], fields["regression"], fields["findings"]))
+    if kind == "review-round" and "open" in fields and "blocking" in fields and fields["open"] > fields["blocking"]:
+        raise Refused("review-round: open (%d) exceeds blocking (%d)" % (fields["open"], fields["blocking"]))
     if kind == "tuning":
         _check_tuning(fields)
     elif kind == "watch":
@@ -1811,6 +1860,8 @@ def _prepare(rollout, kind, task, fields, ts):
         fields["from"], fields["to"] = old, rollout
         targets = [old, rollout]
     _check_fields(kind, fields)
+    if kind == "grade" and "note" in fields:
+        _check_note(fields["note"], task)
     stamp, host = _stamp(ts), _host()
     out = []
     for r in targets:

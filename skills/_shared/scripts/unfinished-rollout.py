@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
 """unfinished-rollout.py — at most one unfinished parallel rollout per repo; serial chains limited by surfaces
-(schedule § 0 and § Serial path; ADR 0027, ADR 0030, ADR 0040).
+(schedule § 0 and § Serial path; ADR 0027, ADR 0030, ADR 0040, ADR 0060).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check [--shape parallel] --repo <path>
         (--project <name> | --tasks <slug,...>) [--regenerate] [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --shape serial --surface <token>...
         (--project <name> | --tasks <slug,...>) [--regenerate] [--tasks-dir <dir>]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check [--shape parallel|serial]
+        --resume <slug> (--repo <path> | --surface <token>...) [--project <name> | --tasks <slug,...>] [--tasks-dir <dir>]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py hold --rollout <slug> [--tasks-dir <dir>]
 
 /thread:schedule § 0 runs the parallel check last, after the remote, landing-register, self-rollout and pushed-base
 checks, and acts on the one line it prints; § Serial path S3 runs the serial check once per chain. Stdlib only,
 python >= 3.9. No network. Git runs only as `git rev-parse --local-env-vars` (to scrub repo-local env vars such as a
-hook's GIT_DIR, landing-register.py's rule) and `git -C <path> remote get-url origin`. It writes nothing. The
-surface grammar (parse_token, overlaps, read_surfaces) and norm_origin are serial-chains.py's, loaded by `check`
-and `pickups` (never by `running`, primary-hold.sh's verb, which loads only reconcile-rollout.py).
+hook's GIT_DIR, landing-register.py's rule), `git -C <path> remote get-url origin` and, in `check`, `git -C <dir>
+rev-parse --show-toplevel` for the nested-checkout rule (below). It writes nothing. The surface grammar (parse_token,
+overlaps, read_surfaces), norm_origin and the Git reader are serial-chains.py's, loaded by `check`, `hold` and
+`pickups` (never by `running`, primary-hold.sh's verb, which loads only reconcile-rollout.py). What a serial chain
+holds is leg.py's hold_of (ADR 0060), loaded as a module (Chain, chain_read, hold_of, Refuse; its rr and sc set to this
+script's) once `check` or `hold` reads the first unfinished serial note (one whose `surfaces:` reads as any included),
+so a parallel-only estate never loads it.
 
 Terms (CONTEXT.md). A LIVE rollout note sits directly in the tasks dir (location only, as
 reconcile-project.py and /thread:close read it). An UNFINISHED rollout is narrower: a live rollout that is
@@ -36,6 +43,18 @@ Rules.
 - Never started: reconcile-rollout.py's never_started (only execute's own marks), widened for an approved queue whose
   only marks are the Stage's ended room stops (reconcile-rollout.py's approved_unrun; vault-grammar § Approved queue).
 - Eligible: this project's, and paused (`paused:`) or never started.
+- What a serial note holds (ADR 0060 d1, d2; leg.py's header, *The hold*): its whole `surfaces:`, but while leg.py
+  reads its chain state as `stuck` only its unlanded rows' Queue `Surfaces` cells (set-aside rows, rows held behind
+  them, a missing note's row) plus any `surfaces:` token no row's cell names; the rest, done rows on the next Leg's
+  smoke list included, is released. A stuck chain whose Queue has no rows, an unlanded row's cell empty or malformed,
+  or a row in progress, holds its whole claim with `WARN: <slug>: chain stuck, but <why>: it holds its whole claim`; a
+  chain leg.py cannot read, `WARN: <slug>: its chain is unreadable (<why>): it holds its whole claim`. Its unlanded
+  rows' cells in any state (the whole claim on those same failures) are what a `--resume` compares against.
+- Released (a parallel rollout, ADR 0060 d4, parallel_hold): nothing running, integrating or awaiting Integration, a
+  task set aside, and either `paused_for: sign-off`, or not paused (`paused:` or `pause_requested`) and its Run
+  record's (rr._record_read) last open stop (rr._stop_state's `open`) a `halt` whose reason starts `nothing can start`.
+  An unreadable record is not released. A released rollout holds no Project root against serial chains; against a
+  second parallel run it is still the repo's one unfinished rollout (ADR 0060 d5).
 - Awaiting sign-off (ADR 0034): paused with `paused_for: sign-off` (reconcile-rollout.py await-sign-off: the
   run finished everything else and closed, and only gates wait on Lachy). It is a `paused:` like any other
   (eligible, released by `running`); its state reads `awaiting sign-off since <stamp>: [[a]], [[b]]`, the
@@ -61,12 +80,18 @@ note is skipped before the same-repo test, so it never WARNs `no Project root li
 shapes. Serial notes are the root-level ones neither `done` nor `dropped` (serial_notes), with the same never-started,
 incomplete and complete reads; a complete one is dropped with the ceremony WARN below.
 
-Surfaces. Comparison is literal, on canonical tokens (serial-chains.py's grammar): the `--surface` values and each
-serial note's `surfaces:` are compared as written; --repo and each parallel candidate's Project root go through
-`os.path.realpath`, then the vault mapping (at or under the vault root: `vault` or `vault:<rel>`), else become
-`repo:<realpath>`. The vault root is the tasks dir's grandparent, used only when the tasks dir ends in
-`Work/Tasks`. Overlap is serial-chains.py's `overlaps`. A serial note with no `surfaces:`, or with a token
-parse_token refuses, reads as `any`, with `WARN: <slug>: <why>: read as any`.
+Surfaces. Comparison is on canonical tokens (serial-chains.py's grammar) and literal, save its nested-checkout rule
+below: the `--surface` values and each serial note's `surfaces:` (or a stuck chain's Queue cells, ADR 0060) are
+compared as written; --repo and each parallel candidate's Project root go through `os.path.realpath`, then the vault
+mapping (at or under the vault root: `vault` or `vault:<rel>`), else become `repo:<realpath>`. The vault root is the
+tasks dir's grandparent, used only when the tasks dir ends in `Work/Tasks`. Overlap is serial-chains.py's `overlaps`,
+with its nested-checkout rule (p33-3), in every mode (`--resume` and the released WARNs included): two `repo:` tokens
+that meet only by containment are disjoint when both sit in git checkouts and the inner one's toplevel is not the
+outer one's (a separate checkout nested by path, read from each path's nearest existing directory with `git rev-parse
+--show-toplevel`); an outer path in no checkout still covers everything beneath it. A serial note with no
+`surfaces:`, or with a token parse_token refuses, reads as `any` (its whole hold, scope `whole`), with `WARN: <slug>:
+<why>: read as any`; a `--resume` still compares against its unlanded rows' own cells, `any` only when one of those
+cells is empty or malformed too.
 
 Outcomes (parallel, the default), the first that applies:
   1. A misfiled superseded note -> `file <slug> <path relative to the tasks dir>` (the first by slug), exit 0.
@@ -74,7 +99,9 @@ Outcomes (parallel, the default), the first that applies:
      ran (status <s>): run its ## Post-rollout steps — not counted as unfinished`, except a candidate in an
      interrupted pair or named by another candidate's `supersedes:` (never dropped, no ceremony WARN). The
      rest is U.
-  2b. Unfinished serial notes whose surfaces overlap --repo's token (a live chain owns the places it writes) ->
+  2b. Unfinished serial notes whose hold (above: a stuck chain's unlanded rows only) overlaps --repo's token (a live
+     chain owns the places it writes; one that overlaps only what a stuck chain released WARNs `WARN: [[s]] (<label>;
+     <why>) released <token>, which this run claims: …` and is no hit) ->
      `refuse <their slugs, sorted>`, exit 3, one stderr line each: `[[s]] (<label>; <state>) is a serial chain that
      writes <token> and owns that place (ADR 0040): <remedy>`. The remedy names whose note it is: never started,
      run it (`/thread:execute [[slug]]` from its first row's launch) or stamp it `status: dropped`, which frees its
@@ -100,9 +127,33 @@ Serial mode (`--shape serial`, one call per chain, its tokens as repeatable `--s
 `interrupted` outcome; with --regenerate, `WARN: a serial run supersedes nothing (ADR 0040, p24-2): --regenerate
 ignored`. Hits are every unfinished serial note (any project) with a surface overlapping a --surface token, and
 every parallel candidate (root-level, unfinished, not complete, any project) whose Project root's token overlaps
-one (a missing Project root WARNs as above and is not counted). Hits -> `refuse <sorted>`, exit 3, one stderr line
-each naming the note, its project, its state, the overlapping pair and its remedy; none -> `none`, exit 0. It reads
-notes only: no git.
+one (a missing Project root WARNs as above and is not counted). A serial note is a hit through its hold (above), and a
+stuck one that overlaps only through what it released WARNs as 2b does; a released parallel rollout is no hit, with
+`WARN: [[x]] (<label>; <why>) is released (ADR 0060): …`. Hits -> `refuse <sorted>`, exit 3, one stderr line each naming
+the note, its project, its state, the overlapping pair and its remedy; none -> `none`, exit 0. It reads notes (and a
+parallel candidate's Run record), and runs git only for the nested-checkout rule.
+
+Resume mode (`--resume <slug>`, ADR 0060 d3; leg.py begin and status, and execute § 4.5's *Surface re-check*): what a
+resuming rollout writes, as --surface tokens (serial: leg.py's write_set) or --repo's token (parallel), against what
+the others hold for it: every other unfinished serial note's unlanded rows' surfaces, in any state (never its whole
+claim, never its smoke rows), and for a serial resume every unfinished, not complete parallel rollout's Project root
+unless parallel_hold reads it released, or idle (nothing running, integrating or awaiting Integration) and paused
+(`paused:` or `pause_requested`) or with an open halt in its Run record: a call still in flight after a halt or in a
+pause's drain writes the root, so a rollout with one holds it. The named note itself is skipped, and
+--project/--tasks are optional (they only set `mine`). Hits -> `refuse <sorted>`, exit 3, one stderr line each:
+`[[<s>]] (<label>; <state>) holds `<token>` for an unlanded row, which this chain|rollout writes as `<token>` (ADR
+0060): [[<slug>]] waits its turn: …` (a parallel holder: `… holds `<token>`, its Project root, …`); leg.py reads the
+first. None -> `none`, exit 0. No `file`, `supersede` or `interrupted` outcome, and --regenerate WARNs and is ignored.
+Whoever released a place yields it, so a chain scheduled on a stuck chain's released place never waits on that chain.
+Like the serial check, it runs git only for the nested-checkout rule.
+
+    hold --rollout <slug> [--tasks-dir <dir>]
+
+`hold` (read-only, for /thread:status § 4 and § 5): one JSON line, keys in this order: {"rollout", "shape", "scope",
+"why", "held", "released"}, tokens in canonical text. Serial: scope `whole` or `stuck`, the hold above. Parallel: scope
+`released` (held [], released [its root's token]) or `whole` (held [its root's token]), why parallel_hold's. A done or
+dropped note, a complete one, or a parallel one with no Project root: scope `none`, held []. WARN lines go to stderr.
+Exit 2 (no stdout, one `unfinished-rollout:` line): no note at `<tasks dir>/<slug>.md`, or a script unloadable.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py running [--tasks-dir <dir>]
 
@@ -119,8 +170,9 @@ Output (check). stdout is exactly one line on exit 0 and 3: `none` | `supersede 
 note is root-only, so `<tasks dir>/<slug>.md` is exact. `WARN:` lines go only to stderr and never change
 stdout or the exit code. Exit 2 prints no stdout and one `unfinished-rollout:` stderr line: a missing or
 non-directory --repo, --repo with serial or --surface with parallel, no --surface with serial, a --surface token
-parse_token refuses, neither or both of --project/--tasks, a --tasks note not found, a missing tasks dir, or
-reconcile-rollout.py or serial-chains.py unloadable.
+parse_token refuses, neither or both of --project/--tasks (both, with --resume), a --tasks note not found, a --resume
+naming no note directly in the tasks dir, a missing tasks dir, or reconcile-rollout.py, serial-chains.py or (once an
+unfinished serial note is read) leg.py unloadable.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py pickups --repo <path> --tasks <slug,...>
         [--misfit <slug>=<why>]... [--tasks-dir <dir>]
@@ -202,22 +254,27 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 DEFAULT_TASKS_DIR = Path(os.path.expanduser("~/repos/obsidian/Work/Tasks"))
 RR_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/reconcile-rollout.py"
 SC_SRC = Path(__file__).resolve().parent / "serial-chains.py"
 GI_SRC = Path(__file__).resolve().parent / "gated_inputs.py"
 RUN_RECORD_SRC = Path(__file__).resolve().parent / "run_record.py"
+LEG_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/leg.py"
 TEMPLATE = Path(__file__).resolve().parent.parent.parent / "schedule/rollout-template.md"
 RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikilink_slug", "_scalar", "_status",
             "_valued", "never_started", "approved_unrun", "incomplete", "_shape", "SHAPES", "_priority",
-            "PRIORITY_WEIGHTS", "_dep_entries", "_fold_unit", "_dep_status", "_live_rollout", "_start_unattended")
-SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin")
+            "PRIORITY_WEIGHTS", "_dep_entries", "_fold_unit", "_dep_status", "_live_rollout", "_start_unattended",
+            "_record_read", "_stop_state", "_truthy_flag")
+SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
 RUN_RECORD_NAMES = ("record_path",)
+LEG_NAMES = ("Chain", "chain_read", "hold_of", "Refuse")
 CLOSED = {"done", "dropped"}
 PICKUP_CAP = 5
 SC = None   # serial-chains.py, loaded by cmd_check and cmd_pickups (load_sc)
+LEG = None  # leg.py, loaded once the first unfinished serial note is read (load_leg)
 
 
 def die(msg):
@@ -258,6 +315,16 @@ def load_sc():
     if SC is None:
         SC = load_module("serial_chains", SC_SRC, SC_NAMES, "skills/_shared/scripts/serial-chains.py")
     return SC
+
+
+def load_leg(rr):
+    """leg.py as a module (ADR 0060: a chain's hold is leg.py's hold_of, its one copy), sharing this script's
+    reconcile-rollout.py and serial-chains.py. Loaded only once an unfinished serial note is read."""
+    global LEG
+    if LEG is None:
+        LEG = load_module("thread_leg", LEG_SRC, LEG_NAMES, "skills/execute/scripts/leg.py")
+        LEG.rr, LEG.sc = rr, load_sc()
+    return LEG
 
 
 # ---- git ---------------------------------------------------------------------------------------
@@ -401,12 +468,31 @@ def ceremony_warn(c) -> str:
             f"{c['status']}): run its ## Post-rollout steps — not counted as unfinished")
 
 
-def serial_notes(rr, notes, tasks_dir, warns, mine, warned):
+def chain_hold(rr, path, tasks_dir):
+    """leg.py's hold_of for one serial note, in-process (ADR 0060): (hold, None), or (None, <why>) when leg.py cannot
+    read the chain."""
+    leg = load_leg(rr)
+    ctx = SimpleNamespace(rollout=path, tasks=tasks_dir, vault=tasks_dir.parent.parent, slug=path.stem, archived=False)
+    try:
+        chain = leg.Chain(ctx)
+        return leg.hold_of(chain, leg.chain_read(ctx, chain)), None
+    except leg.Refuse as e:
+        return None, e.msg
+    except Exception as e:  # noqa: BLE001 — any unreadable chain fails closed to its whole claim
+        return None, f"{type(e).__name__}: {e}"
+
+
+def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
     """The unfinished serial notes: root-level, `shape: serial`, neither done nor dropped, not complete (a complete
-    one is dropped with the ceremony WARN), each with its state and its surfaces as tokens."""
+    one is dropped with the ceremony WARN), each with its state, its whole claim (`claim`), what it holds (`tokens`:
+    the whole claim, or a stuck chain's unlanded rows' surfaces, ADR 0060), what a stuck one released (`released`),
+    its unlanded rows' surfaces in any state (`unlanded`) and the hold's `scope`. `skip` names a note left out (a
+    resuming chain's own)."""
     out = []
     for path, note, where in notes:
         if where != "root" or rr._status(note) in CLOSED or shape_of(rr, path.stem, note, warns, warned) != "serial":
+            continue
+        if skip is not None and path.stem.lower() == skip.lower():
             continue
         c = note_state(rr, path, note, tasks_dir, mine)
         if c["complete"]:
@@ -425,8 +511,68 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned):
         if bad:
             warns.append(f"WARN: {c['slug']}: {bad}: read as any")
             tokens = [("any", "")]
-        c["tokens"] = tokens
+        c.update(claim=tokens, tokens=tokens, unlanded=tokens, released=[], scope="whole",
+                 why=f"{bad}: read as any, it holds everything" if bad else "")
+        # The hold is read even when `surfaces:` reads as any: a schedule still meets `any` (tokens, scope whole), but a
+        # --resume compares against the unlanded rows' own cells (hold_of reads them apart from the claim, and falls
+        # back to the whole claim, `any` here, only on a bad cell), so one hand-edited note never halts every rollout.
+        hold, why = chain_hold(rr, path, tasks_dir)
+        if hold is None:
+            unreadable = f"its chain is unreadable ({why}): it holds its whole claim"
+            c["why"] = c["why"] or unreadable
+            warns.append(f"WARN: {c['slug']}: {unreadable}")
+        else:
+            if hold["warn"]:
+                warns.append(f"WARN: {c['slug']}: {hold['warn']}")
+            parse = lambda xs: [SC.parse_token(x) for x in xs]  # noqa: E731
+            c["unlanded"] = parse(hold["unlanded"])
+            if not bad:
+                c.update(scope=hold["scope"], why=hold["why"])
+                if hold["scope"] == "stuck":
+                    c.update(tokens=parse(hold["held"]), released=parse(hold["released"]))
         out.append(c)
+    return out
+
+
+def released_warn(s, claimed) -> str:
+    """A stuck chain released what this run claims (ADR 0060)."""
+    return (f"WARN: [[{s['slug']}]] ({s['label']}; {s['why']}) released {SC.fmt_token(claimed)}, which this run "
+            "claims: it reclaims it on resume and then waits its turn while this run holds it")
+
+
+def parallel_hold(rr, path, note, linked):
+    """ADR 0060 d4: whether an unfinished parallel rollout holds its Project root against serial chains. {released,
+    why, paused, halt, unreadable, busy}: released when nothing is running, integrating or awaiting Integration, a task
+    is set aside, and it awaits sign-off (`paused_for: sign-off`), or it is not paused and its Run record's last open
+    stop is a halt whose reason starts `nothing can start` (execute § 7's stuck halt). An unreadable record is not
+    released. `busy` counts its tasks running, integrating or awaiting Integration: a call in flight still writes the
+    root after a halt or during a pause's drain (check_resume reads it)."""
+    states = [rr._queue_state(t)[0] for _, t in linked]
+    stamped = rr._valued(note.get("paused"))
+    paused = stamped or rr._truthy_flag(note.get("pause_requested"))
+    sign_off = stamped and rr._scalar(note.get("paused_for")).lower() == "sign-off"
+    lines = rr._record_read(path.stem)
+    halt = None
+    if lines is not None:
+        stops = rr._stop_state(lines)["open"]
+        if stops and stops[-1].get("cause") == "halt":
+            halt = str(stops[-1].get("reason") or "")
+    busy = sum(st in ("running", "integrating", "awaiting-integration") for st in states)
+    out = {"released": False, "why": "", "paused": paused, "halt": halt, "unreadable": lines is None, "busy": busy}
+    if busy:
+        out["why"] = f"{busy} task(s) running or in Integration"
+    elif "set-aside" not in states:
+        out["why"] = "no task set aside"
+    elif sign_off:
+        out.update(released=True, why="awaiting sign-off")
+    elif paused:
+        out["why"] = "paused"
+    elif lines is None:
+        out["why"] = "its Run record is unreadable"
+    elif halt is not None and halt.startswith("nothing can start"):
+        out.update(released=True, why=f"halted: {halt}")
+    else:
+        out["why"] = "not halted on its set-asides"
     return out
 
 
@@ -483,7 +629,10 @@ def cmd_check(args, rr) -> int:
         repo = Path(os.path.expanduser(args.repo))
         if not repo.is_dir():
             die(f"--repo {args.repo}: not a directory")
-    if (args.project is None) == (args.tasks is None):
+    if args.resume is not None:
+        if args.project is not None and args.tasks is not None:
+            die("pass at most one of --project and --tasks")
+    elif (args.project is None) == (args.tasks is None):
         die("pass exactly one of --project and --tasks")
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     if not tasks_dir.is_dir():
@@ -498,6 +647,9 @@ def cmd_check(args, rr) -> int:
 
     warns, warned = [], set()
     vault = vault_root(tasks_dir)
+    if args.resume is not None:
+        return check_resume(args, rr, tasks_dir, surfaces if serial else [path_token(repo, vault)], vault, warns,
+                            warned)
     if serial:
         return check_serial(args, rr, tasks_dir, surfaces, vault, warns, warned)
     env = git_env()
@@ -586,12 +738,17 @@ def cmd_check(args, rr) -> int:
     # 2b. A live serial chain owns the places it writes (ADR 0040): a parallel run on one is refused, before any
     # supersede (a supersede never crosses shapes).
     repo_tok = path_token(repo, vault)
+    top = SC.Git().checkout
     owners = {}
     for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned):
-        hit = next((tok for tok in s["tokens"] if SC.overlaps(repo_tok, tok)), None)
+        hit = next((tok for tok in s["tokens"] if SC.overlaps(repo_tok, tok, top)), None)
         if hit is not None:
             owners[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) is a serial chain that writes "
                                  f"{SC.fmt_token(hit)} and owns that place (ADR 0040): {serial_remedy(s)}")
+            continue
+        freed = next((tok for tok in s["released"] if SC.overlaps(repo_tok, tok, top)), None)
+        if freed is not None:
+            warns.append(released_warn(s, freed))
     if owners:
         keys = sorted(owners, key=str.lower)
         return finish(warns, "refuse " + ",".join(keys), 3, [owners[k] for k in keys])
@@ -637,20 +794,26 @@ def cmd_check(args, rr) -> int:
 
 
 def check_serial(args, rr, tasks_dir, surfaces, vault, warns, warned) -> int:
-    """Serial mode: the chain's tokens against every live serial note and every unfinished parallel rollout's root.
-    It supersedes nothing and runs no git."""
+    """Serial mode: the chain's tokens against what every live serial note holds and every unfinished parallel rollout's
+    root (ADR 0060: a stuck chain holds only its unlanded rows' surfaces; a released parallel rollout holds no root). It
+    supersedes nothing; its only git is the nested-checkout read (serial-chains.py's Git.checkout)."""
     if args.regenerate:
         warns.append("WARN: a serial run supersedes nothing (ADR 0040, p24-2): --regenerate ignored")
     mine = run_projects(rr, args, tasks_dir, warns)
     notes = list(rollout_notes(rr, tasks_dir, archive=False))
+    top = SC.Git().checkout
     hits = {}
     for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned):
-        pairs = SC.overlap_pairs(surfaces, s["tokens"])
+        pairs = SC.overlap_pairs(surfaces, s["tokens"], top)
         if pairs:
             a, b = pairs[0]
             hits[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) is a live serial chain whose surface "
                                f"{SC.fmt_token(b)} overlaps this chain's {SC.fmt_token(a)} (ADR 0040: a chain owns the "
                                f"places it writes): {serial_remedy(s)}")
+            continue
+        freed = SC.overlap_pairs(surfaces, s["released"], top)
+        if freed:
+            warns.append(released_warn(s, freed[0][1]))
     for path, note, _ in notes:
         if rr._status(note) in CLOSED or shape_of(rr, path.stem, note, warns, warned) == "serial":
             continue
@@ -663,11 +826,70 @@ def check_serial(args, rr, tasks_dir, surfaces, vault, warns, warned) -> int:
             warns.append(f"WARN: {c['slug']}: no Project root line: not counted")
             continue
         rtok = path_token(root, vault)
-        a = next((x for x in surfaces if SC.overlaps(x, rtok)), None)
-        if a is not None:
-            hits[c["slug"]] = (f"[[{c['slug']}]] ({c['label']}; {state_line(c)}) is an unfinished parallel rollout "
-                               f"whose Project root {root} ({SC.fmt_token(rtok)}) overlaps this chain's "
-                               f"{SC.fmt_token(a)}: wait for it to finish, or /thread:status then /thread:repair")
+        a = next((x for x in surfaces if SC.overlaps(x, rtok, top)), None)
+        if a is None:
+            continue
+        ph = parallel_hold(rr, path, note, rr._scan(path, tasks_dir)[0])
+        if ph["released"]:
+            warns.append(f"WARN: [[{c['slug']}]] ({c['label']}; {ph['why']}) is released (ADR 0060): it holds no "
+                         f"Project root against serial chains while it waits on you, so this chain may write "
+                         f"{SC.fmt_token(rtok)}; on resume it waits its turn while this chain holds it")
+            continue
+        hits[c["slug"]] = (f"[[{c['slug']}]] ({c['label']}; {state_line(c)}) is an unfinished parallel rollout "
+                           f"whose Project root {root} ({SC.fmt_token(rtok)}) overlaps this chain's "
+                           f"{SC.fmt_token(a)}: wait for it to finish, or /thread:status then /thread:repair")
+    if hits:
+        keys = sorted(hits, key=str.lower)
+        return finish(warns, "refuse " + ",".join(keys), 3, [hits[k] for k in keys])
+    return finish(warns, "none", 0)
+
+
+def check_resume(args, rr, tasks_dir, toks, vault, warns, warned) -> int:
+    """`--resume <slug>` (ADR 0060 d3): what a resuming rollout writes (a serial chain's write set, or a parallel
+    rollout's root), against what the others hold for it: every other unfinished serial note's unlanded rows'
+    surfaces, in any state (never its whole claim or its smoke rows), and, for a serial resume, every unfinished
+    parallel rollout's root unless it is released, or idle and paused or halted. Whoever released a place yields it,
+    so the chain scheduled on it never waits on the one that released it. Its only git is the nested-checkout read
+    (serial-chains.py's Git.checkout), as the schedule-time checks compare."""
+    me = rr._wikilink_slug(args.resume) or args.resume.strip()
+    if not me or not (tasks_dir / f"{me}.md").is_file():
+        die(f"--resume {args.resume}: no rollout note at {tasks_dir / (me + '.md')}")
+    if args.regenerate:
+        warns.append("WARN: --resume re-checks a resuming rollout and supersedes nothing: --regenerate ignored")
+    mine = run_projects(rr, args, tasks_dir, warns) if (args.project is not None or args.tasks is not None) else set()
+    what = "chain" if args.shape == "serial" else "rollout"
+    notes = list(rollout_notes(rr, tasks_dir, archive=False))
+    top = SC.Git().checkout
+    hits = {}
+    for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me):
+        pairs = SC.overlap_pairs(toks, s["unlanded"], top)
+        if pairs:
+            a, b = pairs[0]
+            hits[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) holds `{SC.fmt_token(b)}` for an unlanded "
+                               f"row, which this {what} writes as `{SC.fmt_token(a)}` (ADR 0060): [[{me}]] waits its "
+                               f"turn: re-run once [[{s['slug']}]] lands its rows there ({serial_remedy(s)})")
+    if args.shape == "serial":
+        for path, note, _ in notes:
+            if path.stem.lower() == me.lower() or rr._status(note) in CLOSED or \
+                    shape_of(rr, path.stem, note, warns, warned) == "serial":
+                continue
+            c = note_state(rr, path, note, tasks_dir, mine)
+            root = rr._project_root(note)
+            if c["complete"] or root is None:
+                continue
+            rtok = path_token(root, vault)
+            a = next((x for x in toks if SC.overlaps(x, rtok, top)), None)
+            if a is None:
+                continue
+            ph = parallel_hold(rr, path, note, rr._scan(path, tasks_dir)[0])
+            # Skipped only while it writes nothing: released, or idle and paused or halted (one halted by its own entry
+            # re-check launched nothing, so the chain it waits on never waits on it). A call still in flight after a
+            # halt, or in a pause's drain, writes the root, so a rollout with one holds it.
+            if ph["released"] or (ph["busy"] == 0 and (ph["paused"] or ph["halt"] is not None)):
+                continue
+            hits[c["slug"]] = (f"[[{c['slug']}]] ({c['label']}; {state_line(c)}) holds `{SC.fmt_token(rtok)}`, its "
+                               f"Project root, which this chain writes as `{SC.fmt_token(a)}` (ADR 0060): [[{me}]] waits "
+                               f"its turn: re-run once [[{c['slug']}]] finishes or stops (/thread:status [[{c['slug']}]])")
     if hits:
         keys = sorted(hits, key=str.lower)
         return finish(warns, "refuse " + ",".join(keys), 3, [hits[k] for k in keys])
@@ -719,6 +941,53 @@ def remedy(x) -> str:
                 f"defer them, then /thread:execute [[{s}]] closes it")
     return (f"unfinished rollout [[{s}]] is another project's ({x['label']}; {x['state']}): at most one unfinished "
             "rollout per repo: wait for it to finish, or /thread:status then /thread:repair")
+
+
+def cmd_hold(args, rr) -> int:
+    """What one rollout holds against the others (ADR 0060), for /thread:status: one JSON line."""
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    slug = rr._wikilink_slug(args.rollout) or args.rollout.strip()
+    path = tasks_dir / f"{slug}.md"
+    if not slug or not tasks_dir.is_dir() or not path.is_file():
+        die(f"--rollout {args.rollout}: no rollout note at {path}")
+    try:
+        note = rr.Note(path)
+    except (ValueError, OSError) as e:
+        die(f"--rollout {slug}: {e}")
+    load_sc()
+    warns, shape, status = [], rr._shape(note), rr._status(note)
+    out = {"rollout": path.stem, "shape": shape, "scope": "none", "why": "", "held": [], "released": []}
+    fmt = lambda toks: [SC.fmt_token(t) for t in toks]  # noqa: E731
+    if status in CLOSED:
+        out["why"] = f"{status}: it holds nothing"
+    elif shape == "serial":
+        found = serial_notes(rr, [(path, note, "root")], tasks_dir, warns, set(), set())
+        if not found:
+            out["why"] = "every task done (its completion ceremony never ran): it holds nothing"
+        else:
+            c = found[0]
+            out.update(scope=c["scope"], why=c["why"], held=fmt(c["tokens"]), released=fmt(c["released"]))
+    else:
+        root = rr._project_root(note)
+        linked = rr._scan(path, tasks_dir)[0]
+        counts = rr._counts([dict(zip(("state", "setAsideAt"), rr._queue_state(t))) for _, t in linked])
+        if root is None:
+            out["why"] = "no Project root line: it holds nothing"
+        elif counts["total"] >= 1 and counts["merged"] == counts["total"]:
+            out["why"] = "every task merged (its completion ceremony never ran): it holds nothing"
+        else:
+            rtok = SC.fmt_token(path_token(root, vault_root(tasks_dir)))
+            ph = parallel_hold(rr, path, note, linked)
+            if ph["released"]:
+                out.update(scope="released", released=[rtok],
+                           why=f"{ph['why']}: it holds no Project root against serial chains, and is still this "
+                               "repo's one unfinished parallel rollout")
+            else:
+                out.update(scope="whole", held=[rtok], why=f"{ph['why']}: it holds its Project root")
+    for w in warns:
+        print(w, file=sys.stderr)
+    print(json.dumps(out, ensure_ascii=False))
+    return 0
 
 
 def cmd_running(args, rr) -> int:
@@ -1108,7 +1377,12 @@ def main() -> int:
     c.add_argument("--project", default=None, help="the project schedule targets (a name or [[wikilink]])")
     c.add_argument("--tasks", default=None, help="comma-separated task slugs (a --tasks run): their shared projects")
     c.add_argument("--regenerate", action="store_true", help="this run may supersede (schedule --regenerate)")
+    c.add_argument("--resume", default=None,
+                   help="a resuming rollout's slug (ADR 0060): its writes against what the others hold for it")
     c.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
+    h = sub.add_parser("hold", help="what one rollout holds against the others (ADR 0060): one JSON line")
+    h.add_argument("--rollout", required=True, help="the rollout note's slug (or [[wikilink]])")
+    h.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     r = sub.add_parser("running", help="print the rollouts that may have a lead running on the primary checkout")
     r.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     k = sub.add_parser("pickups", help="the Pickup sweep (schedule § 1.2): open tasks on this repo that may join")
@@ -1124,7 +1398,8 @@ def main() -> int:
     u.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     args = p.parse_args()
     rr = load_rr()
-    verbs = {"running": cmd_running, "check": cmd_check, "pickups": cmd_pickups, "unstarted": cmd_unstarted}
+    verbs = {"running": cmd_running, "check": cmd_check, "pickups": cmd_pickups, "unstarted": cmd_unstarted,
+             "hold": cmd_hold}
     return verbs[args.cmd](args, rr)
 
 
