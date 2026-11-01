@@ -151,11 +151,16 @@ Pushed-base and unfinished-rollout run after `--ensure` because both need the re
 unfinished-rollout check compares `repo:<realpath>` literally (and exits 2 on a missing path), and a
 toplevel standing in for it would hold the rollout to the in-place checkout's own commits. A repo holds
 at most one unfinished parallel rollout (one directly in `Work/Tasks/`, neither `done` nor `dropped`,
-with a task not yet merged), and none on a place a live serial chain writes: the check refuses a
-parallel run whose root overlaps a surface of an unfinished serial chain, since that chain owns it,
-and a supersede never crosses shapes. A clone root never overlaps a chain on the in-place checkout, so the
+with a task not yet merged), and none on a place a live serial chain holds: the check refuses a
+parallel run whose root overlaps what an unfinished serial chain holds, since that chain owns it,
+and a supersede never crosses shapes. A chain holds its whole `surfaces:`, but a stuck one (every
+unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces (ADR 0060): a root
+that overlaps only a place a stuck chain released gives a `WARN: … released …` line instead of a
+refusal, and that chain reclaims the place on resume and then waits its turn while this rollout holds it.
+A clone root never overlaps a chain on the in-place checkout, so the
 two coexist as peers (ADR 0042, intended); the refusal still fires for a chain that claims
-`repo:<clone>`, and for a rollout rooted in place before ADR 0042.
+`repo:<clone>`, and for a rollout rooted in place before ADR 0042. Nor does a checkout nested inside
+another by path (a separate repo with its own index) overlap a chain on the outer one (p33-3).
 A rollout awaiting sign-off (`paused_for: sign-off`, execute § 4.5 step 5's form: only gates wait on Lachy) is unfinished too: the refusal names its waiting tasks and the
 sign-off path (sign off, then `/thread:execute`, or `/thread:repair` to defer them), and `--regenerate` on
 this project's rollout carries them forward still gate-pending. The check prints exactly one stdout line:
@@ -440,7 +445,7 @@ Resolve the rollout-level default verifier — the shell command(s) `/thread:exe
 
 Print the detected command and use it. Store it for step 6.
 
-**The completion verifier (estate ADR 0009 d6).** A project that declares a **fast tier** for Integration names its full suite beside it: a `Completion verifier: \`<cmd>\`` line in its `CLAUDE.md` (the fast tier is then its `Verifier:`). Found → the rollout runs that suite once on merged main at its completion ceremony (execute § 4.5 step 5): print it beside the verifier, and store it for step 6, where it uncomments the template's `completion_verifier:` line. None → leave the line commented out: the ceremony then runs as it did before the key existed. Never derive one from a project that declares no fast tier: its `verifier:` already is its full suite, at every Integration. A `shape: serial` note gets it from § Serial path S4 instead, and its Complete Leg runs it on the chain checkout's HEAD (ADR 0055).
+**The completion verifier (estate ADR 0009 d6).** A project that declares a **fast tier** for Integration names its full suite beside it: a `Completion verifier: \`<cmd>\`` line in its `CLAUDE.md` (the fast tier is then its `Verifier:`). Found → the rollout runs that suite once on merged main at its completion ceremony (execute § 4.5 step 5): print it beside the verifier, and store it for step 6, where it uncomments the template's `completion_verifier:` line. None → leave the line commented out: the ceremony then runs as it did before the key existed. Never derive one from a project that declares no fast tier: its `verifier:` already is its full suite, at every Integration. A `shape: serial` note gets it from § Serial path S4 instead, and its Complete Leg runs it on the chain checkout's HEAD (ADR 0055). For project authors: a fast tier with a reach should take its base from `THREAD_VERIFY_BASE` when it is set (execute § 4.5, *The verify base*, ADR 0062); otherwise a RACE re-verify reaches an empty diff and runs the fast tier alone.
 
 **The named re-run (ADR 0050, p29-9).** A project whose test runner can run single tests by name declares that form in its `CLAUDE.md`: a `Named re-run: \`<cmd>\`` line, the command holding `{tests}` exactly once, where the failing tests go, each shell-quoted (e.g. `` Named re-run: `scripts/test -n0 {tests}` ``, or a pytest suite's `` Named re-run: `python -m pytest {tests}` ``). Found → print it beside the verifier, and store it for step 6, where it uncomments the template's `named_rerun:` line: the lead's Integration verify and RACE re-verify pass it as `--named-rerun` (execute § 3's `named_rerun` row), so their Flake check re-runs an out-of-diff red's failing tests with it before one confirming full run, and a red those clear reads green. Check it here by the lead's own reader's rules (`reconcile-rollout.py`'s `_named_rerun`, which `verify-timeout` runs at every entry): one line, `{tests}` exactly once, and a command step 6 can stamp quoted (never one holding a `'` and a `"` or a `\`). A line that fails them is named in step 8 with why and never stored: the run goes on without it (fix the line in the project's `CLAUDE.md`, then `--regenerate`). Stamped, the lead's `verify-timeout` would refuse it at every entry (exit 2), halting the rollout before any work runs. None → leave the line commented out: those verifies then leave such a red red (the engine's agents use the repo's own runner either way). Never derive one from the verifier: a runner's named-test form is the project's to declare. A `shape: serial` note never carries it: a Leg runs no Integration (execute `legs.md`).
 
@@ -929,11 +934,16 @@ run has it, which only WARNs: a serial run supersedes nothing). Every chain is c
 `none` → go on. Any refusal (`refuse …`, exit 3) or exit 2 stops the whole run before anything is written, and
 every refusal's stderr goes in one report: each line names the live chain or unfinished parallel rollout, its
 project and state, the overlapping pair and its remedy (a never-started chain's is `status: dropped`, which frees
-its tasks for a later run). Tokens compare literally (`repo:<realpath>`), so a chain on a repo's in-place checkout
-never overlaps a parallel rollout rooted in its rollout clone: the two coexist as peers (ADR 0042, intended), while a
-chain that claims `repo:<clone>`, or a parallel rollout rooted in place before ADR 0042, still refuses. Quote each
-`--surface` token as one shell word, since a vault path holds spaces:
-`--surface "vault:Work/Projects/Life (area)/Contacts admin.md"`. Carry `WARN:` lines to S7.
+its tasks for a later run). Tokens compare literally (`repo:<realpath>`), save across nested checkouts (below), so a
+chain on a repo's in-place checkout never overlaps a parallel rollout rooted in its rollout clone: the two coexist as
+peers (ADR 0042, intended), while a chain that claims `repo:<clone>`, or a parallel rollout rooted in place before
+ADR 0042, still refuses. Nor does a chain on an outer checkout overlap a parallel root, or a chain, in a separate
+checkout nested inside it by path, a separate repo with its own index (p33-3); but a path-only claim on a directory
+in no checkout still covers every checkout beneath it. Quote each `--surface` token as one shell word, since a vault
+path holds spaces: `--surface "vault:Work/Projects/Life (area)/Contacts admin.md"`. Carry `WARN:` lines to S7. A stuck
+chain (every unlanded row set aside, or held behind one) holds only its unlanded rows' surfaces, and a parallel rollout
+awaiting sign-off or halted on its set-asides holds no Project root against a chain (ADR 0060): a `WARN: … released …`
+line names what this chain may now use beside it. That rollout reclaims the place on resume and then waits its turn.
 
 **S3.5. Pre-flight.** It runs step 1.5 over S2's chain members, the session-lane ones left out; nothing is kept and
 nothing is superseded on this path, so there is no `--kept` and no `--superseding`. Under orient's § 7 too it asks its
@@ -990,8 +1000,8 @@ the Pre-flight line and its left-out tasks, as step 8 lists them (Orient → `/t
 → waiting on your answer, ungraded, `depends on [[x]]`), its Decided for you block, the session-lane members, the WARNs and the gated checklist (§ 3.5's kept gates, § 3.6's expected-to-gate lines,
 credential or irreversible ask-ahead and dismissals, as step 8 lists them). Then one line: "Leg 1 opens in row 1's launch and runs `/thread:execute [[<note>]]`;
 no execute handoff, no `start: unattended` (the Stage's unattended start needs a Project root); until it finishes or
-is dropped (`status: dropped`) it holds its surfaces, so a parallel run on a checkout it claims, or another chain
-over them, is refused".
+is dropped (`status: dropped`) it holds its surfaces (while it is stuck, only its unlanded rows', ADR 0060), so a
+parallel run on a checkout it claims, or another chain over them, is refused".
 
 ## Execution lives in `/thread:execute`
 
