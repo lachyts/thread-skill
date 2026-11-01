@@ -37,7 +37,12 @@
 #   spaces and quotes, paths outside the tree   C52 the SKILL.md verify line with and without named_rerun, under bash
 #   and zsh -f   C53 TERM during the named re-run or the confirming run, unslotted and slotted: rc 143, why `signal`,
 #   the child gone, the slot free.   C54 with --rollout (p29-10): a Flake's suite ends green, a deadline in the confirming
-#   run ends it timeout.
+#   run ends it timeout.   C57 (p34-3, ADR 0062) verify names its diff base to every step as THREAD_VERIFY_BASE: C57a the
+#   RACE re-verify reaches from the merge commit's first parent though origin/master holds the merge   C57b the
+#   Integration form, every step, a symbolic base resolved   C57c unset without --diff-base (--outcome, --detach-at too)
+#   C57a-c each also run slotted, as both lead call sites do (every step a guarded one)   C57d an unresolvable base:
+#   unset, a WARN, the verdict unchanged   C57e a project with no reach is byte-identical   C57f a TERM while the base
+#   resolves still removes the race tree.
 #   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
@@ -68,6 +73,9 @@ VERIFY_SLOT_JSON=$([ -n "$ENGINE_URL" ] && node --input-type=module -e "import {
 export VERIFY_SLOT_JSON
 . tests/lib/assert.sh
 unset $(git rev-parse --local-env-vars)
+# The slot marker (verify-slot.py, p34-1): C57b reads VERIFY_SLOT_HELD to see its steps ran guarded, so a suite run
+# inside a slot never lends its own marker to an unguarded step.
+unset VERIFY_SLOT_HELD
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
@@ -1752,6 +1760,171 @@ red1 'FAILED tests/test_flaky.py::test_a'; echo 5 > "$F/v.2.sleep"
 HOME="$F/home" THREAD_EVENTS_DIR="$FEV" VT=2 vf --diff-base "$FB" --named-rerun "$NR" --rollout "$F/v/ro.md" --slug t1
 ok "$(rcof)|$(fj 'd["timeout"]["run"]')|$(fsq '[[d.get("outcome"), d.get("rc"), d.get("step"), d.get("timeout"), d.get("failing")] for d in L if d["kind"] == "suite-ended"]')" \
   '124|confirm|[["timeout",124,"verifier",2,["tests/test_flaky.py::test_a"]]]' "C54: a deadline in the confirming run ends the suite timeout (step verifier), failing the first run's ids"
+
+# ======== C57: verify names its diff base to every step as THREAD_VERIFY_BASE (p34-3, ADR 0062) ==================
+# With --diff-base REV every step (env_bootstrap, verifier, the Flake check's named re-run and confirming run) sees
+# THREAD_VERIFY_BASE = REV resolved to its sha in the tree, unslotted and slotted (both lead call sites pass --slots and
+# --slot-wait, so production runs every step under verify-slot.py's guard); without it the variable is removed from the
+# steps' env. A
+# fast tier's reach reads it as its base, so a RACE re-verify reaches the merged task's diff though merge-task has
+# already refreshed origin/<default> to hold the merge. rfx's repo: src/x.py, tests/fast.sh (always green),
+# tests/slow_x.sh (FAILED tests/slow_x.sh::test_x when src/x.py holds `broken`); bin/reach.sh is the verifier: its
+# base is ${THREAD_VERIFY_BASE:-origin/master}, it runs the fast test always and the slow one only when
+# `git diff --name-only base...HEAD` names src/, and it records ${THREAD_VERIFY_BASE-unset} in seen.<n>.
+rfx() {
+  echo "== $1"
+  F="$tmp/$1"; mkdir -p "$F/bin"; FR="$F/repo"; O="$F/out/v"
+  g init -q "$FR"; mkdir -p "$FR/tests" "$FR/src"
+  printf 'ok\n' > "$FR/src/x.py"
+  printf 'echo fast ok\n' > "$FR/tests/fast.sh"
+  cat > "$FR/tests/slow_x.sh" <<'SH'
+if grep -q broken src/x.py; then echo "FAILED tests/slow_x.sh::test_x - AssertionError"; exit 1; fi
+echo slow ok
+SH
+  g -C "$FR" add . && g -C "$FR" commit -q -m base; FB=$(git -C "$FR" rev-parse HEAD)
+  g -C "$FR" checkout -q -b task; printf 'broken\n' > "$FR/src/x.py"; g -C "$FR" commit -q -am task
+  g -C "$FR" checkout -q master; g -C "$FR" merge -q --no-ff --no-edit task; FH=$(git -C "$FR" rev-parse HEAD)
+  g -C "$FR" update-ref refs/remotes/origin/master "$FH"   # merge-task's refresh on every MERGED path, exit 5 included
+  cat > "$F/bin/reach.sh" <<'SH'
+d="$(dirname "$(dirname "$0")")"; n=$(( $(cat "$d/seen.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/seen.count"
+printf '%s\n' "${THREAD_VERIFY_BASE-unset}" > "$d/seen.$n"
+base=${THREAD_VERIFY_BASE:-origin/master}
+changed=$(git diff --name-only "$base"...HEAD) || exit 3
+bash tests/fast.sh || exit 1
+case "$changed" in *src/*) bash tests/slow_x.sh || exit 1;; esac
+exit 0
+SH
+  RT="$FR/.claude/worktrees/race-x"
+}
+seen() { cat "$F/seen.${1:-1}" 2>/dev/null || echo none; }
+race() { python3 "$LI" verify --repo "$FR" --detach-at "$FH" --tree "$RT" --out "$O" --timeout 60 --verifier "bash $F/bin/reach.sh" "$@" >/dev/null 2>"$F/race.err"; vrc=$?; }
+
+# C57a: the task note's Verify fixture as a RACE: the reach from the merge commit's first parent runs the slow test the
+# merged task breaks, though origin/master already holds the merge.
+rfx c57a
+race --diff-base "$FH^1"
+ok "$vrc|$(rcof)" "1|1" "C57a: a RACE re-verify reaches the merged task's diff from <merge>^1 → red (rc 1)"
+has "$(cat "$O.log")" "FAILED tests/slow_x.sh::test_x" "C57a: … the slow test the task reaches ran and failed"
+ok "$(seen)" "$(git -C "$FR" rev-parse "$FH^1")" "C57a: … the verifier saw THREAD_VERIFY_BASE = the merge commit's first parent, resolved"
+ok "$(fj 'd["verdict"]')|$(fj 'd["why"]')" "red|no-named-rerun" "C57a: … flake.json red (no-named-rerun)"
+ok "$(git -C "$FR" rev-parse refs/remotes/origin/master)" "$FH" "C57a: … origin/master never moved for it"
+ok "$([ -e "$RT" ] && echo left || echo removed)" removed "C57a: … the race tree is removed"
+rm -f "$F"/seen.*
+race --diff-base "$FH^1" --named-rerun "bash tests/slow_x.sh {tests}"
+ok "$(rcof)|$(fj 'd["why"]')|$(cat "$F/seen.count")" "1|named-red|1" "C57a: a named re-run that runs the slow test for real → red (named-red), no confirming run"
+ok "$([ -e "$RT" ] && echo left || echo removed)" removed "C57a: … the race tree is removed"
+# Slotted, as the lead's RACE re-verify always runs (`--slots <verify_slots> --slot-wait <slot_wait>`): the verifier is
+# a guarded step (verify-slot.py's Guarded, its own env), so this pins the step env on that path too.
+rm -f "$F"/seen.*
+race --diff-base "$FH^1" --slots 1 --slot-wait 5
+ok "$vrc|$(rcof)|$(seen)" "1|1|$(git -C "$FR" rev-parse "$FH^1")" "C57a: slotted, the guarded verifier saw THREAD_VERIFY_BASE = the merge commit's first parent, resolved → red (rc 1)"
+has "$(cat "$O.log")" "== verify slot 1 of 1 after" "C57a: … in the pool's only verify slot"
+has "$(cat "$O.log")" "FAILED tests/slow_x.sh::test_x" "C57a: … the slow test the task reaches ran and failed"
+ok "$([ -e "$RT" ] && echo left || echo removed)" removed "C57a: … the race tree is removed"
+rm -f "$F"/seen.*
+race
+ok "$(rcof)|$(seen)" "0|unset" "C57a: the same RACE with no --diff-base reaches the refreshed origin/master: empty, green, the variable unset"
+
+# C57b: the Integration form (a non-detached tree), every step: the bootstrap, the first run, the named re-run and the
+# confirming run all see the diff base's sha; a symbolic --diff-base is exported resolved, never raw.
+ffx c57b
+cat > "$F/bin/e.sh" <<'SH'
+printf '%s %s\n' "$2" "${THREAD_VERIFY_BASE-unset}" >> "$1"
+SH
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'
+EL="$F/env.log"; E="bash $F/bin/e.sh $EL"
+python3 "$LI" verify --tree "$FR" --out "$O" --timeout 60 --bootstrap "$E bootstrap" --verifier "$E verifier; bash $F/bin/v.sh" \
+  --diff-base "$FB" --named-rerun "$E named; bash $F/bin/r.sh {tests}" >/dev/null 2>&1
+ok "$(rcof)|$(fj 'd["verdict"]')" "0|flake" "C57b: a Flake on the Integration form → rc 0"
+ok "$(cat "$EL")" "$(printf 'bootstrap %s\nverifier %s\nnamed %s\nverifier %s' "$FB" "$FB" "$FB" "$FB")" \
+  "C57b: … the bootstrap, the first run, the named re-run and the confirming run each saw THREAD_VERIFY_BASE = the base's sha"
+rm -f "$EL" "$F"/v.* "$F"/r.*
+python3 "$LI" verify --tree "$FR" --out "$O" --timeout 60 --verifier "$E verifier" --diff-base "HEAD~1" >/dev/null 2>&1
+ok "$(rcof)|$(cat "$EL")" "0|verifier $FB" "C57b: --diff-base HEAD~1 is exported resolved to its 40-hex sha"
+# Slotted, as the lead's Integration verify always runs: every step is a guarded one (VERIFY_SLOT_HELD=1, verify-slot.py
+# contract 3, shows the guard ran it), and each still sees the base's sha.
+rm -f "$EL" "$F"/v.* "$F"/r.*
+cat > "$F/bin/eh.sh" <<'SH'
+printf '%s %s %s\n' "$2" "${THREAD_VERIFY_BASE-unset}" "${VERIFY_SLOT_HELD-unset}" >> "$1"
+SH
+EH="bash $F/bin/eh.sh $EL"
+red1 'FAILED tests/test_flaky.py::test_a - AssertionError'
+python3 "$LI" verify --tree "$FR" --out "$O" --timeout 60 --slots 1 --slot-wait 5 --bootstrap "$EH bootstrap" \
+  --verifier "$EH verifier; bash $F/bin/v.sh" --diff-base "$FB" --named-rerun "$EH named; bash $F/bin/r.sh {tests}" >/dev/null 2>&1
+ok "$(rcof)|$(fj 'd["verdict"]')" "0|flake" "C57b: slotted (--slots 1 --slot-wait 5), a Flake on the Integration form → rc 0"
+has "$(cat "$O.log")" "== verify slot 1 of 1 after" "C57b: … in the pool's only verify slot"
+ok "$(cat "$EL")" "$(printf 'bootstrap %s 1\nverifier %s 1\nnamed %s 1\nverifier %s 1' "$FB" "$FB" "$FB" "$FB")" \
+  "C57b: … each guarded step, the bootstrap, the first run, the named re-run and the confirming run, saw THREAD_VERIFY_BASE = the base's sha"
+
+# C57c: without --diff-base the variable is removed from every step's env, whatever the caller's: the plain verify,
+# the completion form (--outcome) and a detached verify.
+ffx c57c
+cat > "$F/bin/e.sh" <<'SH'
+printf '%s %s\n' "$2" "${THREAD_VERIFY_BASE-unset}" >> "$1"
+SH
+EL="$F/env.log"; E="bash $F/bin/e.sh $EL"
+THREAD_VERIFY_BASE=bogus python3 "$LI" verify --tree "$FR" --out "$O" --timeout 60 --bootstrap "$E bootstrap" --verifier "$E verifier" >/dev/null 2>&1
+ok "$(rcof)|$(cat "$EL")" "0|$(printf 'bootstrap unset\nverifier unset')" "C57c: no --diff-base → the steps see THREAD_VERIFY_BASE unset, the caller's bogus value removed"
+rm -f "$EL"
+THREAD_VERIFY_BASE=bogus python3 "$LI" verify --tree "$FR" --out "$O" --timeout 60 --slots 1 --slot-wait 5 --bootstrap "$E bootstrap" --verifier "$E verifier" >/dev/null 2>&1
+ok "$(rcof)|$(cat "$EL")" "0|$(printf 'bootstrap unset\nverifier unset')" "C57c: … slotted (guarded steps) too: the caller's bogus value removed"
+has "$(cat "$O.log")" "== verify slot 1 of 1 after" "C57c: … in the pool's only verify slot"
+rm -f "$EL"
+THREAD_VERIFY_BASE=bogus python3 "$LI" verify --tree "$FR" --out "$O" --timeout 60 --verifier "$E completion" --outcome >/dev/null 2>&1
+ok "$(cat "$EL")" "completion unset" "C57c: --outcome (the completion verify) → unset"
+rm -f "$EL"
+THREAD_VERIFY_BASE=bogus python3 "$LI" verify --repo "$FR" --detach-at "$FT" --tree "$F/race" --out "$O" --timeout 60 --verifier "$E detached" >/dev/null 2>&1
+ok "$(rcof)|$(cat "$EL")|$([ -e "$F/race" ] && echo left || echo removed)" "0|detached unset|removed" "C57c: --detach-at without --diff-base → unset"
+
+# C57d: an unresolvable --diff-base: the variable is not set, one WARN line, the verdict unchanged (C49 pins `diff`).
+ffx c57d
+cat > "$F/bin/e.sh" <<'SH'
+printf '%s %s\n' "$2" "${THREAD_VERIFY_BASE-unset}" >> "$1"
+SH
+EL="$F/env.log"; E="bash $F/bin/e.sh $EL"
+THREAD_VERIFY_BASE=bogus python3 "$LI" verify --tree "$FR" --out "$O" --timeout 60 --verifier "$E verifier" --diff-base no-such-rev >/dev/null 2>&1
+ok "$(rcof)|$(fj 'd["verdict"]')|$(cat "$EL")" "0|green|verifier unset" "C57d: --diff-base no-such-rev → green stays green, the variable unset"
+has "$(cat "$O.log")" "verify: WARN --diff-base no-such-rev does not resolve in the tree; THREAD_VERIFY_BASE not set" "C57d: … one WARN line in the log"
+rm -f "$EL"; red1 'FAILED tests/test_flaky.py::test_a'
+python3 "$LI" verify --tree "$FR" --out "$O" --timeout 60 --verifier "$E verifier; bash $F/bin/v.sh" --diff-base no-such-rev >/dev/null 2>&1
+ok "$(rcof)|$(fj 'd["why"]')|$(cat "$EL")" "1|diff|verifier unset" "C57d: … a red one still reads why: diff"
+
+# C57e: a project with no reach is byte-identical: its whole log is the verifier's two lines, with or without a
+# resolvable --diff-base.
+exact() { python3 -c 'import sys; print(repr(open(sys.argv[1]).read()))' "$1" 2>/dev/null || echo none; }   # the file's bytes, newlines kept
+ffx c57e
+python3 "$LI" verify --tree "$FR" --out "$O" --timeout 60 --verifier "true" >/dev/null 2>&1
+ok "$(rcof)|$(exact "$O.log")" "0|'== verifier: true\\n== verifier rc 0\\n'" "C57e: no --diff-base → the log is exactly the verifier's two lines"
+python3 "$LI" verify --tree "$FR" --out "$O" --timeout 60 --verifier "true" --diff-base "$FB" >/dev/null 2>&1
+ok "$(rcof)|$(exact "$O.log")" "0|'== verifier: true\\n== verifier rc 0\\n'" "C57e: a resolvable --diff-base adds no log line"
+
+# C57f: a stop that lands while the verify base resolves. Its rev-parse runs after --detach-at's `worktree add`, so it
+# sits inside the handlers: a TERM there (a hard pause's TaskStop) still takes the finally and removes the race tree, and
+# the next RACE re-verify is never refused with `already exists`. EARLY wraps rev so the resolution of --diff-base sends
+# verify its own TERM; the verifier never runs.
+EARLY='
+import importlib.util, os, signal, sys
+spec = importlib.util.spec_from_file_location("lead_integrate", sys.argv[1])
+li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+base, real = sys.argv[2], li.rev
+def rev(cwd, ref):
+    got = real(cwd, ref)
+    if ref == base:   # the verify base, resolved in the detached tree
+        os.kill(os.getpid(), signal.SIGTERM)
+    return got
+li.rev = rev
+sys.exit(li.main(sys.argv[3:]))
+'
+rfx c57f
+python3 -B -c "$EARLY" "$LI" "$FH^1" verify --repo "$FR" --detach-at "$FH" --tree "$RT" --out "$O" --timeout 60 \
+  --verifier "bash $F/bin/reach.sh" --diff-base "$FH^1" >/dev/null 2>&1; vrc=$?
+ok "$vrc|$(rcof)|$(seen)" "143|143|none" "C57f: TERM while the verify base resolves → exit 143, rc 143, the verifier never ran"
+has "$(cat "$O.log" 2>/dev/null)" "stopped by signal 15" "C57f: … the log says so"
+ok "$([ -e "$RT" ] && echo left || echo removed)|$(git -C "$FR" worktree list --porcelain | grep -c "race-x" || true)" "removed|0" \
+  "C57f: … the race tree is removed and unregistered"
+race --diff-base "$FH^1"
+ok "$vrc|$(rcof)|$(seen)" "1|1|$(git -C "$FR" rev-parse "$FH^1")" "C57f: … so the next RACE re-verify on the same tree runs (no \`already exists\`): red, the base seen"
 
 # ======== S1–S8: verify --rollout records its suite in the Run record (p29-10, ADR 0051) ========================
 # by integration (with --slug), race (--detach-at) or completion (--outcome, no task), runner lead; suite-started after

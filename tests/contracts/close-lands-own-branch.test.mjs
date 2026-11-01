@@ -142,7 +142,12 @@ test('the review docs: consumed, deleted in one docs/reviews/-only commit before
     'The ledger still reads deleted docs from git history',
     "stands in for fresh-review's close-out-commit deletion, because 7.2 runs before the loop",
     'A session ended mid-loop leaves its docs pending on `<B>`',
+    '`--queue` and `--hold` record every review doc on `<B>` in the Run record at the end of the call, whatever its result',
+    '`land: recorded review rounds`, `land: review rounds not all recorded (…)`, `land: review rounds: none on <B>` or `land: review rounds not recorded (…)`',
+    "A loop that ends on a later plain call's `stuck:` or `not landed:`, or a session that ends mid-loop, has only fresh-review's own arrival and consume emits until the next `--queue` or `--hold` on `<B>`.",
   ])
+  // p34-5 F4: the sweep runs only on --queue and --hold, so no landing is promised a full record
+  for (const bad of ['never ends unrecorded', 'cannot end unrecorded']) assert.ok(!text().includes(bad), `close says "${bad}"`)
   const del = pos(sec, /every doc this loop wrote is deleted in one/)
   assert.ok(del >= 0 && del < pos(sec, /act='--queue'/), "the deletion rule does not come before act='--queue'")
 })
@@ -201,7 +206,18 @@ test('#### The stop rule: the three ADR 0058 conditions, keys, infra, max, and t
     'A `ci failed` counts at `max` only on a round that really ran at `max`, and failures from rounds below `max` never count towards it.',
     STOP_VERIFY_MAX,
     'Before a `max` dispatch, and when a red Verify run raises effort to `max`, run `printenv CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`.',
-    '**A decision for Lachy.** A blocking finding whose fix needs a product or design call or an ADR change (a non-blocking one is filed, its question with it); a red Verify run whose failure also happens on `origin/<default>` or shows no cause in `<B>`;',
+    '**A decision for Lachy.** A blocking finding whose fix needs a product or design call or an ADR change (a non-blocking one is filed, its question with it); a blocking finding whose fix lies outside the task (work outside `<B>`), which neither widens `<B>` nor waits for the budget stop; a red Verify run whose failure also happens on `origin/<default>` or shows no cause in `<B>`;',
+    // p34-5 F1: a stop after a graded round leaves that round dispositioned and consumed, so its open findings are recorded
+    'A stop after a graded round (the budget stop, a decision for Lachy) first writes that round\'s `## Disposition`, its blocking findings under `Blocking, open:` and the rest as graded, and marks its doc `status: consumed`, in a `docs/reviews/`-only commit, before the deletion commit and `--hold`.',
+    // p34-5 F7: the budget is the landing's, counted from git, so a resumed loop never starts again at round 1
+    '**Counting.** The four are the landing\'s code rounds, not the session\'s.',
+    '`gh pr view <url> --json createdAt -q .createdAt`',
+    "`git log --full-history --diff-filter=A --no-renames --since='<createdAt>' -p --format= origin/<default>..HEAD -- docs/reviews/ | grep -c '^+mode: code$'`",
+    'The session\'s first round is that count + 1, so 1 for a PR this session opened.',
+    '`--since-as-filter`',
+    'The count carries across a hold: a resumed loop past its fourth round holds again on its next blocking round.',
+    // p34-5 F24: an over-cap round is a full-cap round, never clean
+    'a full-cap round (one at or over its cap)',
     'A `ci failed` belongs to the round whose clean `head:` it read, and a red Verify run to the round whose fixes it ran.',
     'A check with no title prints `(failure)`, so its key is the name and conclusion alone.',
     'A red Verify run (loop step 7) counts the same way, keyed `verify <command>: <first failing test or error line>`.',
@@ -257,9 +273,11 @@ test('the # thread:land-own fence: one land.sh call, last, and no push, gh, forc
 })
 
 test('step 8: the own-branch rows, verbatim', () => {
+  assert.ok(!(STEP8() ?? '').includes('the held row carries the same size'), 'step 8 still points the held row at the clean round\'s size')
   assertHas(STEP8(), 'step 8', [
     '`landing <top> <branch>: <result line> · review: <N> round(s) at <level>, clean · <L> lines/<F> files[ · filed: [[<task>]] (<M>)][ · ci: <K> red run(s) fixed]`',
-    '`landing <top> <branch>: held <url> · review: <N> round(s) at <level>, stopped (<stop>)`',
+    '`landing <top> <branch>: held <url> · review: <N> round(s) at <level>, stopped (<stop>)[ · <L> lines/<F> files][ · filed: [[<task>]] (<M>)]`',
+    "its size taken the same way at the last reviewed round's `head:`, and omitted when no round was reviewed (a dirty-tree stop)",
     '`serious finding open after <N> rounds`', '`ci <name> (failure: <title>) failed twice at max`', '`needs your call`', '`max unavailable`',
     '`uncommitted changes outside <branch>`',
     '`Needs your call: <branch> PR <url> — <finding or precondition>`',
@@ -293,6 +311,7 @@ test('placement, guardrails, edges and the Auto-execute line', () => {
   ])
   assertHas(EDGES(), '§ Edge cases', [
     '`git branch --set-upstream-to origin/<B> <B>`', '**A session ended mid-loop',
+    "§ The stop rule's **Counting**",
     'the close-out landing pushes nothing', 'never fetched into or fast-forwarded',
     "When that branch is the own branch, § Land the own branch pushes it, the close-out commit included",
     '**A dirty tree on the own branch**', '**A `ci failed` with no cause in `<B>`**', '`not landed: not the cwd checkout`',
@@ -300,9 +319,12 @@ test('placement, guardrails, edges and the Auto-execute line', () => {
     'its condition 2 fails at step 4',
   ])
   const desc = lineOf(t, 'description:')
-  assertHas(desc, 'the description', ["lands the session''s own branch: `/fresh-review` inline, fixes, merge queued only after a clean round (§ Land the own branch)"])
+  assertHas(desc, 'the description', ["lands the session''s own branch: `/fresh-review` inline, fixes, merge queued only after a clean round (§ Land the own branch)",
+    'it proposes new vault tasks but files review follow-ups itself'])
+  assert.ok(!desc.includes('vault tasks are the only proposal'), 'the description says vault tasks are the only proposal')
   assertHas(lineOf(t, '- **Auto-execute, no asking**'), 'the Auto-execute line', [
     "lands the session's own branch: `/fresh-review` inline, fixes, merge queued only after a clean round", 'step 7.1',
+    "the landing's follow-up task for its filed findings (**Filing**, ADR 0058)",
   ])
   assertHas(collapse(slice(t, /^## Why this exists/, /^## /) ?? ''), '§ Why this exists', ['land its close-out and its own branch'])
 })

@@ -292,9 +292,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Blocking finding** — a review finding whose failure scenario is a crash,
   hang or wrong result on a path the branch ships for normal use, data loss or
   a security hole on any path it ships, or the named test failing. Only a blocking finding
-  holds an own-branch landing; the rest are filed in its follow-up task, and
-  a clean round is one with none, unless it returned exactly its cap, which
-  earns one more code round first (ADR 0058). The session grades it, never
+  holds an own-branch landing; the rest are filed in its follow-up task or
+  rejected with a reason (a recurring one adds nothing), and a clean round is
+  one with none, unless it returned its cap or more, which earns one more code
+  round first (ADR 0058). The session grades it, never
   the reviewer. _Avoid_: accepted finding, must-fix, high (the reviewer
   grades no severity).
 - **Close-out PR** — the pull request carrying close's own bookkeeping
@@ -696,6 +697,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   reviser, an integrator) uses the repo's own test runner. It takes no verify
   slot of its own and never counts as an iteration. _Avoid_: retry, targeted
   run.
+- **Verify base** — the `--diff-base` commit that `lead-integrate.py verify`
+  exports to every step it runs (the env bootstrap, the verifier, the named
+  re-run and the confirming run) as `THREAD_VERIFY_BASE`, resolved to its
+  sha: `<mainSha>` at Integration and the merge commit's first parent at a
+  RACE re-verify; it is never set at completion. A project whose verifier is
+  a fast tier with a reach reads it as its base, so the reach is the task's
+  diff even after merge-task refreshed `origin/<default>` (ADR 0062).
+  _Avoid_: reach base, origin/main.
 - **Completion verifier** — a rollout note's optional `completion_verifier:`,
   the full suite of a project whose `verifier:` is its declared fast tier
   (estate ADR 0009 d6): the completion ceremony runs it once on merged main,

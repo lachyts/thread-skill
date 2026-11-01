@@ -109,7 +109,14 @@ Subcommands:
       {v: 1, sha (T's HEAD, or --detach-at), diffBase, verdict: green | flake | red, why: "" | unnamed | unplaced |
       too-many | touched | diff | no-named-rerun | named-red | confirm-red | timeout | no-time | signal, failing (the
       first run's ids), touched, flakes, timeout: {run: first | named | confirm, seconds} | null}; a signal mid-run
-      leaves it red, why `signal`. reconcile-rollout.py record-verify reads it. --diff-base with --outcome, and a
+      leaves it red, why `signal`. reconcile-rollout.py record-verify reads it. The verify base (p34-3, ADR 0062): with
+      --diff-base every step, env_bootstrap, verifier, named re-run and confirming run on every Heat-hold pass, runs with
+      THREAD_VERIFY_BASE=<REV resolved to its 40-hex sha in T>, so a project's fast tier whose reach reads it as its base
+      reaches the task's diff even after origin/<default> moved (at the RACE merge-task has refreshed it to hold the
+      merge; origin/<default> never moves for this). Without --diff-base (the completion verify, --outcome, included) the
+      variable is removed from the steps' env whatever the caller's; a REV that does not resolve leaves it unset and logs
+      `verify: WARN --diff-base REV does not resolve in the tree; THREAD_VERIFY_BASE not set`, the verdict unchanged. A
+      project that never reads it runs byte-identically. --diff-base with --outcome, and a
       --named-rerun with no --diff-base or without exactly one `{tests}`, are exit 2 with no rc file. A heat stop (the
       Heat hold, above) in the named re-run or the confirming run is no verdict, as in the first run: the pass goes back
       in line and the next reruns every step, the Flake check included, from a clean result and a fresh record; the
@@ -494,6 +501,9 @@ def _scrubbed_env():
 
 
 ENV = _scrubbed_env()
+# verify's diff base, named to every step it runs (p34-3, ADR 0062): set to --diff-base resolved to its sha, removed from
+# the steps' env otherwise. Only the steps' env: git calls here run with ENV as it is.
+VERIFY_BASE_ENV = "THREAD_VERIFY_BASE"
 
 
 def git(cwd, *argv):
@@ -933,16 +943,16 @@ def _kill_group(proc):
         pass
 
 
-def _run_step(cmd, tree, log, deadline, guard=False, slot=None):
+def _run_step(cmd, tree, log, deadline, guard=False, slot=None, env=None):
     if guard:
         # The Heat hold's stop watches a step only while a slot is held: unslotted (a SlotDirError) it runs unwatched.
-        return _run_guarded(cmd, tree, log, deadline, slot, heat=slot is not None)
+        return _run_guarded(cmd, tree, log, deadline, slot, heat=slot is not None, env=env)
     # The new group lives in its own session, so a signal that lands before `_live` holds it would leave it running
     # with no limit: hold SIGNALS until it does. The step itself starts with the caller's mask, not the held one.
     mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
     try:
         proc = subprocess.Popen(["bash", "-c", cmd], cwd=tree, stdin=subprocess.DEVNULL, stdout=log,
-                                stderr=subprocess.STDOUT, start_new_session=True, env=ENV,
+                                stderr=subprocess.STDOUT, start_new_session=True, env=env or ENV,
                                 preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_SETMASK, mask))
         _live["proc"] = proc
     finally:
@@ -957,14 +967,14 @@ def _run_step(cmd, tree, log, deadline, guard=False, slot=None):
             _live["proc"] = None
 
 
-def _run_guarded(cmd, tree, log, deadline, slot, heat=False):
+def _run_guarded(cmd, tree, log, deadline, slot, heat=False, env=None):
     """A slotted step: `bash -c cmd` under verify-slot.py's guard, which shares the slot's lock and ends the step's
     group if verify dies by any means. Guarded holds SIGNALS across its spawn and records itself in `_live` inside
     that window (on_spawn), as the unslotted step does. A deadline stops it through the guard: TIMED_OUT. With
     `heat`, the Heat hold's stop (verify-slot.py contract 7) watches it too: VS.HEAT_STOPPED, the level in
     `_live["heat"]`."""
     g = VS.Guarded(["bash", "-c", cmd], hold=slot, on_spawn=lambda x: _live.__setitem__("proc", x), cwd=tree,
-                   stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=ENV)
+                   stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env or ENV)
     try:
         if slot is not None:
             VS.write_holder(slot, {"pid": os.getpid(), "guard": g.pid, "group": g.group, "cwd": tree,
@@ -1166,6 +1176,15 @@ def cmd_verify(args):
             # tree locked by a live pid, so a RACE re-verify's tree is never removed under its suite. Inside the try,
             # so the finally's `remove --force --force` takes a tree a stop left locked.
             git(os.path.expanduser(args.repo), "worktree", "lock", "--reason", f"pid {os.getpid()}", str(tree))
+        # The verify base (p34-3, ADR 0062): every step sees --diff-base resolved to its sha in T as THREAD_VERIFY_BASE,
+        # so a fast tier's reach reads the task's diff even after origin/<default> moved (the RACE: merge-task refreshed
+        # it to hold the merge). Without --diff-base, or when it does not resolve, the steps never see it, whatever the
+        # caller's. Resolved once, before the Heat-hold loop, and inside the handlers: its rev-parse runs after
+        # --detach-at's `worktree add`, so a stop that lands during it still takes the finally and removes the tree.
+        step_env = {k: v for k, v in ENV.items() if k != VERIFY_BASE_ENV}
+        verify_base = rev(str(tree), args.diff_base) if flake_on else ""
+        if verify_base:
+            step_env[VERIFY_BASE_ENV] = verify_base
         if outcome_path:
             _write_atomic(outcome_path, json.dumps(result) + "\n")
         with open(log_path, "ab", buffering=0) as log:
@@ -1177,6 +1196,8 @@ def cmd_verify(args):
                 args.slots, _source, warn = VS.configured_slots(reraise=(_Signalled,))
                 if warn:
                     note(f"verify: WARN {warn}; using the built-in {args.slots} verify slots")
+            if flake_on and not verify_base:
+                note(f"verify: WARN --diff-base {args.diff_base} does not resolve in the tree; {VERIFY_BASE_ENV} not set")
             # The Heat hold (verify-slot.py contract 7): a step a heat stop ended goes back in line and every step
             # reruns from the beginning, under a fresh deadline. Every slot wait, heat hold and heat-stopped run counts
             # against W (t0 is taken before the first acquire), and a pass starts only while W remains.
@@ -1244,7 +1265,7 @@ def cmd_verify(args):
                     note(f"== {name}: {cmd}")
                     if name == "verifier" and flake_on:
                         flake = _flake_record(tree_sha, args.diff_base, "red", "signal")   # until the check decides
-                    got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot)
+                    got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot, env=step_env)
                     if got is VS.HEAT_STOPPED:
                         heat_step = name
                         break
@@ -1271,7 +1292,7 @@ def cmd_verify(args):
                         if flake is not None:
                             try:
                                 rc, flake = _flake_check(args, tree, tree_sha, log, log_path, note, slotted, slot, rc,
-                                                         verify_t0)
+                                                         verify_t0, step_env)
                             except _FlakeHeatStop as h:
                                 # A heat stop in the named re-run or the confirming run is no verdict, as in the first
                                 # run: this pass goes back in line, and the next reruns every step from a clean result.
@@ -1338,14 +1359,15 @@ def cmd_verify(args):
     return rc if isinstance(rc, int) and 0 <= rc <= 255 else 1
 
 
-def _flake_check(args, tree, sha, log, log_path, note, slotted, slot, rc, t0):
+def _flake_check(args, tree, sha, log, log_path, note, slotted, slot, rc, t0, env=None):
     """The Flake check on a finished first run (ADR 0050): (the final rc, the flake record). Green (rc 0) is green. A
     red reads its failing ids from the first run's log section (rr._failing_ids) and places them (rr.flake_verdict):
     anything but `candidates` is red at once; else, with --named-rerun, the named re-run, then one confirming verifier
     run, each under the slot and guard the first run held and its own deadline (_flake_deadline). The named re-run's
     red keeps its rc, the confirming run's red its own; the confirming run's green makes the rc 0 and each first-run
     id a Flake. A heat stop in either run raises _FlakeHeatStop: no verdict, and the caller's pass goes back in line.
-    The ids are the last pass's first run's: rr._failing_ids reads the log's last `== verifier:` section."""
+    The ids are the last pass's first run's: rr._failing_ids reads the log's last `== verifier:` section. Both runs get
+    `env`, the first run's step env, so they see the same THREAD_VERIFY_BASE and reach the same set (ADR 0062)."""
     base = args.diff_base
     if rc == 0:
         return 0, _flake_record(sha, base, "green")
@@ -1373,7 +1395,7 @@ def _flake_check(args, tree, sha, log, log_path, note, slotted, slot, rc, t0):
             return red("no-time")
         started = time.monotonic()
         note(f"== {label}: {cmd}")
-        got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot)
+        got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot, env=env)
         if got is VS.HEAT_STOPPED:
             raise _FlakeHeatStop(run)
         if got is TIMED_OUT:
@@ -2505,7 +2527,8 @@ def main(argv=None):
     vf.add_argument("--rollout", default=None, help="the rollout note: record the suite in its Run record (p29-10)")
     vf.add_argument("--slug", default=None, help="with --rollout: the task the suite is for (none for a completion suite)")
     vf.add_argument("--diff-base", default=None, help="the Flake check (ADR 0050): the rev the task's diff is read from "
-                    "(git diff --name-only REV HEAD in the tree); <out>.flake.json records the verdict")
+                    "(git diff --name-only REV HEAD in the tree); <out>.flake.json records the verdict. Every step sees REV resolved "
+                    "to its sha as THREAD_VERIFY_BASE, a fast tier's reach base (ADR 0062); without it the steps never see it")
     vf.add_argument("--named-rerun", default=None, help="with --diff-base: the repo's runner for named tests, holding "
                     "{tests} exactly once (verify-timeout's namedRerun)")
 

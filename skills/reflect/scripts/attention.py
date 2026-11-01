@@ -12,8 +12,9 @@ import each other in a cycle:
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/attention.py tally --span F [--owners F] --session P [...]
 
 What it reuses, loaded by path and never copied: run_record.py (RR: SLUG_RE, RESERVED, watch_id, ATTENTION_OWNERS, the
-schema of the `attention` line), score.py (SCORE: read_lines, to_ms, fmt), reconcile-project.py (RP: Rec, LANDED),
-escapes.py (ESC: GIT_TIMEOUT, MERGE_PR_RE) and ledger.py (LEDGER: CLOSED, its closed rollout statuses; never its rows).
+schema of the `attention` line), score.py (SCORE: read_lines, read_review_rounds, to_ms, fmt), reconcile-project.py
+(RP: Rec, LANDED), escapes.py (ESC: GIT_TIMEOUT, MERGE_PR_RE) and ledger.py (LEDGER: CLOSED, its closed rollout
+statuses; never its rows).
 reflect.py passes the rest as callbacks, so each rule stays stated once: the Run record read whole (Span.whole), the vault's
 find and index (Vault: Work/Tasks, then anywhere under it, Archive included), a quiet origin (land.sh --origin-slug,
 cached), git_env(), tune.py's close_line over tunings.jsonl, and mdate (an instant's Melbourne date).
@@ -68,11 +69,13 @@ asked questions the map leaves out, counted as `unknown`. The Owner is the readi
 module's: span leaves it out, and `reflect.py attention --owners` brings it in.
 
 Review trails. The /fresh-review rounds in reviews.jsonl (run_record's REVIEWS), its `review-round` lines stamped at or
-before until, deduplicated by run_record's reader rule: the latest line per (repo, doc) when doc is set, else per (repo,
-head, digest) (a local copy: score.py's fresh_review_rounds and reflect.py's Span.fresh_review keep their own, and a
-shared reader, once one lands, replaces all three). A round's time is its `reviewedAt`, else the first line of its key;
-a round whose time is before since - TRAIL_DAYS is never keyed, so the git reads and the transcripts' floor stay
-bounded as the file grows (a trail reaches back at most that far).
+before until, deduplicated by run_record's reader rule through score.py's read_review_rounds, the one copy, shared with
+score.py's fresh_review_rounds and reflect.py's Span.fresh_review: the latest line per (repo, doc) when doc is set, else
+per (repo, head, digest), its branch taken from the key's newest line that carries one when the latest lacks it (a
+doc's consumed line can lack its pending line's). A round's time is its `reviewedAt` when that is a UTC Z stamp (filled
+the same way), else its key's first line's ts (its arrival); a round whose time is before since - TRAIL_DAYS is never
+keyed, so the git reads and the transcripts' floor stay bounded as the file grows (a trail reaches back at most that
+far).
 Each round's checkout (its `repo`) resolves to a main repo: an existing path through `git rev-parse --path-format=absolute --git-common-dir`; a gone path
 holding `/.claude/worktrees/`, the part before it; another gone path `<parent>/<base>`, the longest sibling
 `<parent>/<name>` with `<base>` starting `<name>-` whose repo holds the head's object; else none (cannotShow, for a
@@ -894,8 +897,9 @@ class Repos:
 
 
 def review_rounds(ev, lo, until, out):
-    """The /fresh-review rounds whose lines are stamped at or before until, deduplicated (the module docstring), each
-    with its time at or after lo (since - TRAIL_DAYS: an older round is never keyed), oldest first."""
+    """The /fresh-review rounds whose lines are stamped at or before until, deduplicated by score.py's read_review_rounds
+    (the module docstring), each with its time in [lo, until] (lo is since - TRAIL_DAYS: an older round is never keyed),
+    oldest first."""
     path = os.path.join(ev, RR.REVIEWS + ".jsonl")
     if not os.path.exists(path):
         return []
@@ -906,24 +910,16 @@ def review_rounds(ev, lo, until, out):
         return []
     if skipped:
         out.flag("reviews.jsonl: %d line(s) did not parse: skipped" % skipped)
-    latest, first = {}, {}
-    for t, n, d in lines:
-        if d.get("kind") != "review-round" or t > until or not isinstance(d.get("repo"), str) or not d["repo"]:
-            continue
-        doc = d.get("doc")
-        key = ("doc", d["repo"], doc) if isinstance(doc, str) and doc else ("head", d["repo"], d.get("head"), d.get("digest"))
-        first.setdefault(key, t)
-        latest[key] = d
     rounds = []
-    for key, d in latest.items():
-        at = to_ms(d.get("reviewedAt"))
+    kept, _late = SCORE.read_review_rounds(lines, lo, until)  # a late round is before lo: the trails never reach it
+    for r in kept:
+        d = r["line"]
         rounds.append({"repo": d["repo"].rstrip("/") or d["repo"], "head": d.get("head") if isinstance(d.get("head"), str) else "",
                        "branch": d.get("branch") if isinstance(d.get("branch"), str) and d.get("branch") else None,
                        "mode": d.get("mode"), "verdict": d.get("verdict"),
                        "findings": d.get("findings") if isinstance(d.get("findings"), int) else 0,
                        "regression": d.get("regression") if isinstance(d.get("regression"), int) else 0,
-                       "at": at if at is not None else first[key]})
-    rounds = [r for r in rounds if r["at"] >= lo]
+                       "at": r["at"]})
     rounds.sort(key=lambda r: (r["at"], r["repo"], r["head"]))
     return rounds
 

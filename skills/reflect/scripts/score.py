@@ -144,13 +144,16 @@ review_churn_pct x Σfindings, never from the rounded value (11 of 20 is at a 55
   a `merged` line in the window, read-only ones out); null with none, and a landed task with no round is flagged.
   Engine rounds are reviewLoop's REVIEW_VERDICT rounds only; an Integration re-review rejection uses a review round
   but writes no review-verdict line, so rounds per landed task counts master-review rounds only and `round` can skip.
-- /fresh-review rounds: reviews.jsonl's review-round lines (p15-7) read up to --until, deduped on (repo, doc), else
-  (repo, head, digest), the latest kept, then windowed by the kept line's ts. A line counts only when its repo is
+- /fresh-review rounds: reviews.jsonl's review-round lines (p15-7) read through read_review_rounds, the one copy of
+  run_record's reader rule (shared with reflect.py's Span.fresh_review and attention.py's Review trails): read up to
+  --until, deduped on (repo, doc), else (repo, head, digest), the latest kept with its branch and reviewedAt filled
+  from the key's newest line carrying each, then windowed by the round's time: its reviewedAt (a UTC Z stamp), else
+  its key's first line's ts. A line counts only when its repo is
   this score's repo (--repo-slug, else --settings' `repo`): an owner/name matched ignoring case, or an absolute path
   whose GitHub origin is (rollout-settings.py's _origin_slug, cached per path; a deleted worktree resolves through
   its nearest existing ancestor). With no repo identity, or a path with no readable origin, it is `unattributed`,
   flagged and not counted. A missing file is no rounds; a line without valid counts is a round outside the sums,
-  flagged.
+  flagged. A round first recorded in the window but reviewed before it counts in no window; this repo's are flagged.
 
 Binding, the first that holds: quota-bound (quota stalls >= QUOTA_STALLS); lane-bound (lane busy >=
 LANE_BOUND_BUSY of running time, or the waits climbing: the last third's mean over WAIT_CLIMB_RATIO times the
@@ -508,6 +511,59 @@ def read_lines(path):
                 skipped += 1
     out.sort(key=lambda x: (x[0], x[1]))
     return out, skipped
+
+
+def read_review_rounds(lines, since, until):
+    """run_record's review-round reader rule, the one copy: Score.fresh_review_rounds, reflect.py's Span.fresh_review and
+    attention.py's Review trails all read through it. `lines` is read_lines' [(ms, n, dict)] (time, then file order).
+
+    It reads the review-round lines stamped at or before until whose repo is a non-empty string, and dedupes them to the
+    latest line per (repo, doc) when doc is a non-empty string, else per (repo, head, digest). Each key's line is a copy
+    of its latest, with its branch (a non-empty string) and reviewedAt (a UTC Z stamp) taken from the key's newest line
+    that carries each when the latest lacks it: a doc's consumed line can lack what its pending line carried. A round's
+    arrival is its key's earliest line's ts; its time `at` is that reviewedAt when it is a UTC Z stamp (when the round
+    was reviewed), else its arrival, never the latest line's own ts.
+
+    Returns (rounds, late). rounds: the keys whose at is in [since, until], each {"line", "at", "arrival", "n"} (n the
+    latest line's file index), sorted by (at, n). late: the keys whose arrival is in [since, until] but whose at is
+    before since, in the same shape and order: a round first recorded after its window closed (land.sh's sweep of a
+    skipped arrival emit). A round counts in the window it was reviewed in and no other (Lachy's 2026-10-28 ruling), so
+    a late round counts in no window: readers name it, never re-window it by its arrival."""
+    keys = {}
+    for t, n, d in lines:
+        if d.get("kind") != "review-round" or t > until or RR._str(d.get("repo")):
+            continue
+        doc = d.get("doc")
+        key = ("doc", d["repo"], doc) if isinstance(doc, str) and doc else ("head", d["repo"], d.get("head"), d.get("digest"))
+        k = keys.get(key)
+        if k is None:
+            k = keys[key] = {"arrival": t, "branch": None, "reviewedAt": None}
+        k["d"], k["n"] = d, n
+        if not RR._str(d.get("branch")):
+            k["branch"] = d["branch"]
+        if RR._utcz(d.get("reviewedAt")):
+            k["reviewedAt"] = d["reviewedAt"]
+    rounds, late = [], []
+    for k in keys.values():
+        line = dict(k["d"])
+        if RR._str(line.get("branch")) and k["branch"] is not None:
+            line["branch"] = k["branch"]
+        if not RR._utcz(line.get("reviewedAt")) and k["reviewedAt"] is not None:
+            line["reviewedAt"] = k["reviewedAt"]
+        at = k["arrival"]
+        if RR._utcz(line.get("reviewedAt")):
+            try:
+                at = to_ms(line["reviewedAt"])
+            except Exception:  # a Z stamp no calendar holds: its arrival
+                pass
+        r = {"line": line, "at": at, "arrival": k["arrival"], "n": k["n"]}
+        if since <= at <= until:
+            rounds.append(r)
+        elif at < since <= k["arrival"] <= until:
+            late.append(r)
+    rounds.sort(key=lambda r: (r["at"], r["n"]))
+    late.sort(key=lambda r: (r["at"], r["n"]))
+    return rounds, late
 
 
 def _settings_value(settings, key):
@@ -1474,12 +1530,16 @@ class Score:
         acc["unclassified"] += f - o - r
 
     def fresh_review_rounds(self, since, until, base, repo):
-        """reviews.jsonl's review-round lines (p15-7's /fresh-review rounds): read up to --until, deduped on (repo, doc),
-        else (repo, head, digest), the latest kept, windowed by the round's time, and counted only when their repo
-        is this score's (an owner/name ignoring case, or a path whose GitHub origin is). The round's time is the kept
-        line's reviewedAt (ADR 0058 d5), else the key's earliest line's ts (its arrival emit), never the kept line's
-        own ts: a doc's consumed line, or land.sh's sweep at a landing's end, can fall in a later window than its round,
-        which then counted twice or in the wrong window."""
+        """reviews.jsonl's review-round lines (p15-7's /fresh-review rounds), read through read_review_rounds (run_record's
+        reader rule, the one copy: read up to --until, the latest line per (repo, doc), else (repo, head, digest), its
+        branch and reviewedAt filled from the key's newest line carrying each), windowed by the round's time, and
+        counted only when their repo is this score's (an owner/name ignoring case, or a path whose GitHub origin is).
+        The round's time is its reviewedAt (ADR 0058 d5, a UTC Z stamp), else the key's earliest line's ts (its arrival
+        emit), never the kept line's own ts: a doc's consumed line, or land.sh's sweep at a landing's end, can fall in a
+        later window than its round, which then counted twice or in the wrong window. A round first recorded in this
+        window but reviewed before it counts in no window: when it is this repo's (never another's or an unattributed
+        one), the flag `review churn: <n> /fresh-review round(s) first recorded in this window but reviewed before it:
+        counted in no window` names it."""
         out = {"rounds": 0, "findings": 0, "original": 0, "regression": 0, "unclassified": 0, "unattributed": 0}
         path = os.path.join(base, RR.REVIEWS + ".jsonl")
         if not os.path.exists(path):
@@ -1489,25 +1549,10 @@ class Score:
         except OSError as e:
             self.flag("review churn: reviews.jsonl cannot be read (%s): no /fresh-review rounds" % e)
             return out
-        latest, arrived = {}, {}
-        for t, _n, d in lines:  # time order, then file order: the last one per key is the latest
-            if d.get("kind") != "review-round" or t > until or not isinstance(d.get("repo"), str):
-                continue
-            doc = d.get("doc")
-            key = ("doc", d["repo"], doc) if isinstance(doc, str) and doc else \
-                ("head", d["repo"], d.get("head"), d.get("digest"))
-            latest[key] = (t, d)
-            arrived.setdefault(key, t)
+        rounds, late = read_review_rounds(lines, since, until)
         uncounted = 0
-        for key, (t, d) in latest.items():
-            at = arrived[key]
-            if isinstance(d.get("reviewedAt"), str):
-                try:
-                    at = to_ms(d["reviewedAt"])
-                except Exception:
-                    pass
-            if not since <= at <= until:
-                continue
+        for r in rounds:
+            d = r["line"]
             mine = self._review_repo(d["repo"], repo)
             if mine is None:
                 out["unattributed"] += 1
@@ -1526,6 +1571,10 @@ class Score:
         if uncounted:
             self.flag("review churn: %d /fresh-review round(s) carry no findings/original/regression counts: counted "
                       "as rounds, not in the churn" % uncounted)
+        swept = len([r for r in late if self._review_repo(r["line"]["repo"], repo) is True])
+        if swept:
+            self.flag("review churn: %d /fresh-review round(s) first recorded in this window but reviewed before it: "
+                      "counted in no window" % swept)
         return out
 
     def _review_repo(self, line_repo, repo):
