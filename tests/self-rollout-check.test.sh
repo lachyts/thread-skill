@@ -34,8 +34,10 @@ else echo "SKIP - zsh arm: zsh not installed on this $(uname) runner"; fi
 awk '/^# thread:self-rollout-check/{on=1; next} /^# end thread:self-rollout-check/{on=0} on' "$ef" > "$tmp/raw.sh"
 ok "$(grep -c '^R="<repoPath>"$' "$tmp/raw.sh")" 1 "the self-rollout snippet is found in execution-fit.md, with its <repoPath> placeholder"
 ok "$(grep -c '^M="<mode>"$' "$tmp/raw.sh")" 1 "… and its <mode> placeholder"
+ok "$(grep -c '^S="<clone-slug>"$' "$tmp/raw.sh")" 1 "… and its <clone-slug> placeholder (ADR 0064: the clone verb's slug, empty for the default clone)"
+ok "$(grep -c 'bash "$sc" $M "$R" $S$' "$tmp/raw.sh")" 1 "… run as bash \"\$sc\" \$M \"\$R\" \$S (\$M and \$S unquoted: both empty for execute § 2.6)"
 ok "$(grep -cE '\$[0-9]' "$tmp/raw.sh")" 0 "the snippet holds no positional \$N (skill arguments substitute into them)"
-snip=$(sed -e 's/^R="<repoPath>"$/R="$1"/' -e 's/^M="<mode>"$/M="$2"/' "$tmp/raw.sh")
+snip=$(sed -e 's/^R="<repoPath>"$/R="$1"/' -e 's/^M="<mode>"$/M="$2"/' -e 's/^S="<clone-slug>"$/S="$3"/' "$tmp/raw.sh")
 snip_f="$tmp/snippet.sh"; printf '%s\n' "$snip" > "$snip_f"
 
 # ---- fixtures -------------------------------------------------------------------------------------------
@@ -61,7 +63,7 @@ EOF
 for sh in "${shells[@]}"; do
   n=$(basename "${sh%% *}")
   # run <repoPath> [VAR=val …]: rc in $rc, stderr in $err
-  run() { local r="$1"; shift; env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" "$@" $sh "$snip_f" "$r" "" >/dev/null 2>"$tmp/err"; rc=$?; err=$(cat "$tmp/err"); }
+  run() { local r="$1"; shift; env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" "$@" $sh "$snip_f" "$r" "" "" >/dev/null 2>"$tmp/err"; rc=$?; err=$(cat "$tmp/err"); }
 
   write_reg "$home/repos/plug" "$tmp/other"
   run "$home/repos/plug"; ok "$rc" 3 "$n: repoPath is a directory-source checkout → 3"
@@ -149,7 +151,7 @@ write_reg "$live" "$tmp/other"
 # script that let inherited env override -C would answer for the decoy and wrongly pass the rejections.
 decoy="$tmp/decoy"; mk "$decoy" "https://github.com/owner/live.git"
 # res <sh> <Local:> [VAR=val …]: rc in $rc, stdout in $out, stderr in $err
-res() { local sh="$1" r="$2"; shift 2; out=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" GIT_DIR="$decoy/.git" GIT_WORK_TREE="$decoy" "$@" $sh "$snip_f" "$r" --resolve 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err"); }
+res() { local sh="$1" r="$2"; shift 2; out=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" GIT_DIR="$decoy/.git" GIT_WORK_TREE="$decoy" "$@" $sh "$snip_f" "$r" --resolve "${SLUG:-}" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err"); }
 # no <reason> <label> [<clone>]: exit 3, nothing on stdout, the clone's reason line on stderr
 no() {
   ok "$rc|$out" "3|" "$2 → 3, nothing printed"
@@ -266,7 +268,13 @@ usage() { env GIT_DIR="$decoy/.git" bash skills/execute/scripts/self-rollout-che
 for m in --resolve --ensure --refresh --refresh-in-place --in-place; do
   ok "$(usage $m)" 2 "$m with no path → usage error 2"
   ok "$(usage $m "")" 2 "$m with an empty path → usage error 2"
+done
+for m in --refresh --refresh-in-place --in-place; do
   ok "$(usage $m a b)" 2 "$m with an extra argument → usage error 2"
+done
+for m in --resolve --ensure; do  # ADR 0064: an optional <slug> third; a fourth is usage
+  ok "$(usage $m a b c)" 2 "$m with an argument past its <slug> → usage error 2"
+  ok "$(usage $m "" demo)" 2 "$m with an empty path and a slug → usage error 2"
 done
 ok "$(usage --launch-check a)" 2 "--launch-check with one path → usage error 2"
 ok "$(usage --launch-check a "")" 2 "--launch-check with an empty launch dir → usage error 2"
@@ -280,6 +288,8 @@ if [ -n "$zsh_bin" ]; then
   res "$zsh_bin -f" "$live"; ok "$rc|$out" "3|" "zsh: resolve with a plain directory at the clone's place → 3"
   has "$err" "$sib is not a usable rollout clone: it is not the top of a git work tree" "zsh: … with the reason line"
   res "$zsh_bin -f" "$live" CLAUDE_PLUGIN_ROOT="$tmp/noplugin"; ok "$rc|$out" "2|" "zsh: resolve with the script missing → 2"
+  SLUG=demo res "$zsh_bin -f" "$live"; ok "$rc|$out" "4|$live-demo-rollout" "zsh: resolve with S=demo → 4 and <T>-demo-rollout (ADR 0064)"
+  SLUG=demo res "$bash_sh" "$live"; ok "$rc|$out" "4|$live-demo-rollout" "bash: … the same"
   rm -rf "$sib"
 fi
 
@@ -541,6 +551,85 @@ mk "$ws2-rollout" "https://github.com/o/ws2.git"
 ip "$ws2-rollout"; ok "$rc|$out" "1|" "in-place: a worktree as the sibling → 1"
 ip "$tmp/nowhere"; ok "$rc|$out" "1|" "in-place: a missing path → 1"
 ip "$tmp/other"; ok "$rc|$out" "1|" "in-place: outside git → 1"
+
+# 10. ADR 0064: a second project's clone `<T>-<slug>-rollout`, and the twin walk (S-R1 to S-R8). `--in-place` walks from
+# the clone's name: `<S>` (today's rule), then trailing `-<part>` dropped one at a time, skipping every later name that
+# ends in -rollout (another clone), to the first main checkout of the same owner/name. `--resolve` and `--ensure` take an
+# optional <slug>: C is `<T>-<slug>-rollout`, refused (exit 3) when `<T>-<slug>` is a checkout or the walk from C's name
+# would land on another checkout than T.
+# sr3 <mode> <path> <slug> [VAR=val …]: the script directly, with a slug; rc, out, err
+sr3() { local m="$1" p="$2" sl="$3"; shift 3; out=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" $SSHENV "$@" bash "$sc" "$m" "$p" "$sl" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err"); }
+w1="$home/repos/sr1"; mk "$w1" "https://github.com/o/sr1.git"; mk "$w1-demo-rollout" "git@github.com:O/sr1.git"
+ip "$w1-demo-rollout"; ok "$rc|$out" "0|$w1" "S-R1: --in-place on <S>-demo-rollout (no <S>-demo) → <S>"
+mkdir -p "$w1/a" "$w1-demo-rollout/a"
+ip "$w1-demo-rollout/a"; ok "$rc|$out" "0|$w1/a" "S-R1: … a sub-path maps to the twin's sub-path"
+w2="$home/repos/sr2"; mk "$w2" "https://github.com/o/sr2.git"; mk "$w2-x" "https://github.com/o/elsewhere.git"
+mk "$w2-x-rollout" "https://github.com/o/sr2.git"
+ip "$w2-x-rollout"; ok "$rc|$out" "0|$w2" "S-R2: <S>-x-rollout whose <S>-x is another origin's repo → <S>"
+mk "$w2-y" "https://github.com/o/sr2.git"; mk "$w2-y-rollout" "https://github.com/o/sr2.git"
+ip "$w2-y-rollout"; ok "$rc|$out" "0|$w2-y" "S-R2 control: a same-origin <S>-y is the first candidate, today's rule → <S>-y"
+mk "$home/repos/foo-bar-rollout" "https://github.com/o/foo.git"
+ip "$home/repos/foo-bar-rollout"; ok "$rc|$out" "1|" "S-R3: foo-bar-rollout with no twin at foo-bar or foo → 1"
+mk "$home/repos/foo" "https://github.com/o/other.git"
+ip "$home/repos/foo-bar-rollout"; ok "$rc|$out" "1|" "S-R3: … nor with foo another origin's → 1"
+# S-R7: the walk skips a later candidate that ends in -rollout (a clone, never a twin)
+w7="$home/repos/sr7"; mk "$w7" "https://github.com/o/sr7.git"; mk "$w7-rollout" "https://github.com/o/sr7.git"
+mk "$w7-rollout-x-rollout" "https://github.com/o/sr7.git"
+ip "$w7-rollout-x-rollout"; ok "$rc|$out" "0|$w7" "S-R7: <T>-rollout-x-rollout with D present → <T> (D ends in -rollout, so it is skipped)"
+ip "$w7-rollout"; ok "$rc|$out" "0|$w7" "S-R7: … and D itself still reads as <T>'s clone"
+
+# S-R4: --resolve and --ensure with a slug, offline against a bare server
+srv o/sr4; w4="$home/repos/sr4"; cl o/sr4 "$w4"
+sr3 --resolve "$w4" demo; ok "$rc|$out" "4|$w4-demo-rollout" "S-R4: --resolve <L> demo, no clone → 4, naming <T>-demo-rollout"
+has "$err" "no rollout clone at $w4-demo-rollout yet" "S-R4: … stderr names the would-be clone"
+ok "$([ -e "$w4-demo-rollout" ] && echo made || echo absent)" absent "S-R4: … and --resolve makes nothing"
+sr3 --ensure "$w4" demo; ok "$rc|$out" "0|$w4-demo-rollout" "S-R4: --ensure <L> demo makes it"
+has "$err" "cloned git@github.com:o/sr4.git into $w4-demo-rollout" "S-R4: … says it cloned"
+sr3 --ensure "$w4" demo; ok "$rc|$out" "0|$w4-demo-rollout" "S-R4: run again → the same clone, reused"
+lacks "$err" "cloned" "S-R4: … nothing cloned the second time"
+sr3 --resolve "$w4" demo; ok "$rc|$out|$err" "0|$w4-demo-rollout|" "S-R4: --resolve now names the usable clone, silently"
+ip "$w4-demo-rollout"; ok "$rc|$out" "0|$w4" "S-R4: … whose in-place twin is <T>"
+sr --resolve "$w4"; ok "$rc|$out" "4|$w4-rollout" "S-R4: with no slug the default clone is unchanged"
+sr3 --resolve "$w4-demo-rollout" other; ok "$rc|$out" "0|$w4-demo-rollout" "S-R4: Local: itself a clone → itself, the slug ignored"
+has "$err" "note: $w4-demo-rollout is itself a rollout clone" "S-R4: … with a note"
+# S-R5: a slug that is not [a-z0-9][a-z0-9-]*, `rollout`, or ending in -rollout is usage
+for sl in x-rollout rollout Bad_Slug -x ''; do
+  for m in --resolve --ensure; do
+    sr3 $m "$w4" "$sl"; ok "$rc|$out" "2|" "S-R5: $m <L> '$sl' → usage error 2"
+  done
+done
+ok "$([ -e "$w4-x-rollout" ] || [ -e "$w4-rollout" ] && echo made || echo absent)" absent "S-R5: … and nothing is cloned"
+# S-R6: <T>-<slug> is a checkout (another origin, or none): C is its own clone's name → 3 (a), before any clone
+mk "$w4-elsewhere" "https://github.com/o/elsewhere.git"
+for m in --resolve --ensure; do
+  sr3 $m "$w4" elsewhere; ok "$rc|$out" "3|" "S-R6: $m <L> elsewhere with <T>-elsewhere another origin's → 3"
+  has "$err" "$w4-elsewhere-rollout is not a usable rollout clone: $w4-elsewhere is a checkout (origin o/elsewhere), so $w4-elsewhere-rollout is its own rollout clone's name" "S-R6: $m … the collision line"
+  has "$err" "this project takes no clone of its own beside $w4: its rollout waits for $w4-rollout" "S-R6: $m … and the remedy"
+done
+g init -q "$w4-bare"
+for m in --resolve --ensure; do
+  sr3 $m "$w4" bare; ok "$rc|$out" "3|" "S-R6: $m <L> bare with <T>-bare a git init with no origin → 3"
+  has "$err" "$w4-bare is a checkout (no origin)" "S-R6: $m … naming no origin"
+done
+ok "$([ -e "$w4-elsewhere-rollout" ] || [ -e "$w4-bare-rollout" ] && echo made || echo absent)" absent "S-R6: … no clone created"
+# S-R7 (resolve): a slug starting rollout- is allowed: the walk from <T>-rollout-x-rollout skips D and lands on <T>
+srv o/sr7b; w7b="$home/repos/sr7b"; cl o/sr7b "$w7b"; cl o/sr7b "$w7b-rollout"
+sr3 --resolve "$w7b" rollout-x; ok "$rc|$out" "4|$w7b-rollout-x-rollout" "S-R7: --resolve <L> rollout-x with D present → 4"
+# S-R8: a same-origin <T>-x intercepts the walk from <T>-x-demo-rollout → 3 (b), naming <T>-x
+cl o/sr4 "$w4-x"
+for m in --resolve --ensure; do
+  sr3 $m "$w4" x-demo; ok "$rc|$out" "3|" "S-R8: $m <L> x-demo with a same-origin <T>-x → 3"
+  has "$err" "$w4-x-demo-rollout is not a usable rollout clone: it would read as $w4-x's rollout clone, not $w4's ($w4-x is another checkout of o/sr4)" "S-R8: $m … naming <T>-x"
+done
+ok "$([ -e "$w4-x-demo-rollout" ] && echo made || echo absent)" absent "S-R8: … no clone created"
+# --refresh-in-place and --launch-check from a -demo-rollout clone
+srv o/r9; r9="$home/repos/r9"; cl o/r9 "$r9"; cl o/r9 "$r9-demo-rollout"
+sr --refresh-in-place "$r9-demo-rollout"; ok "$rc|$out" "0|in-place: $r9 already at origin/master" "S-R: --refresh-in-place from a -demo-rollout clone moves its twin <T>"
+push o/r9 c.txt three
+sr --refresh-in-place "$r9-demo-rollout"; has "$out" "in-place: $r9 fast-forwarded to origin/master" "S-R: … fast-forwarded"
+mkdir -p "$r9-demo-rollout/sub"
+lc "$r9-demo-rollout/sub" "$r9-demo-rollout"; ok "$rc|$err" "0|" "S-R: --launch-check at a -demo-rollout clone's toplevel → 0"
+lc "$r9-demo-rollout/sub" "$r9"; ok "$rc" 3 "S-R: … at its in-place twin → 3"
 
 # ---- execute § 2.8: the launch-directory gate's snippet, verbatim, under bash and zsh -----------------------
 ex=skills/execute/SKILL.md
