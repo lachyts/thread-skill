@@ -137,9 +137,11 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      Integration, `integration: verifier red: …`); setAsideAt? (run | integration | gate); stamp?;
                      reconciledAt? (as slot-freed)
   lane-taken      T  (no fields)
-  lane-freed      T  release (merge | set-aside | reject | halt); path?; triggers? (list of str);
-                     conflict? (bool: `conflict` in triggers — a conflict Integration resolved, or, p27-4, an
-                     unresolved Integration conflict that set the task aside)
+  lane-freed      T  release (merge | set-aside | reject | halt | origin: mark-integrating's origin-lane refusal, ADR
+                     0064, the lead yielding its lane to another rollout's Integration on the same origin); path?;
+                     triggers? (list of str); conflict? (bool: `conflict` in triggers — a conflict Integration
+                     resolved, or, p27-4, an unresolved Integration conflict that set the task aside); origin? (str:
+                     the <owner>/<name> yielded on, with release origin)
   merged          T  pr?; readOnly? (bool); stamp?; reconciledAt? (as slot-freed)
   paused             mode (soft | hard | sign-off: reconcile-rollout.py await-sign-off, the queue left only gates for
                      Lachy and closed, ADR 0034)
@@ -378,7 +380,10 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   resumed. A slot-taken while that task's Slot is open is the same Slot and keeps the first `start` (a
   Lost-call restart's `resume`, a restart after a dead lead). A slot-freed or lane-freed with nothing open
   for that task is ignored. A lane-taken while the same task holds the lane is the same holding; while
-  another task holds it, that holding ends there, flagged as unrecorded. A hold-started while that (hold,
+  another task holds it, that holding ends there, flagged as unrecorded. A lane-freed release=origin (ADR 0064)
+  ends a holding like any other; the same task's next lane-taken, with no merged, set-aside or from-file
+  carried line for it between, continues that Integration (score.py counts one Integration across its origin
+  yields, and the gap holds no lane). A hold-started while that (hold,
   task) is open is the same hold. A lane-freed also closes the task's open merge hold. A paused while paused
   is the same pause; a resumed with no pause is ignored. A `carried` line in the from-file (its `rollout`
   equals its `from`) closes that task's Slot, lane and holds there. Anything still open at the record's last
@@ -1335,8 +1340,8 @@ KINDS = {
     "set-aside": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate", "gate"),
                          "reasonClass": _str}, {"setAsideAt": _enum("run", "integration", "gate"), **CALL_END}),
     "lane-taken": (True, {}, {}),
-    "lane-freed": (True, {"release": _enum("merge", "set-aside", "reject", "halt")},
-                   {"path": _str, "triggers": _strlist, "conflict": _bool}),
+    "lane-freed": (True, {"release": _enum("merge", "set-aside", "reject", "halt", "origin")},
+                   {"path": _str, "triggers": _strlist, "conflict": _bool, "origin": _str}),
     "merged": (True, {}, {"pr": _pr, "readOnly": _bool, **CALL_END}),
     "paused": (False, {"mode": _enum("soft", "hard", "sign-off")}, {}),
     "resumed": (False, {}, {}),
