@@ -39,7 +39,7 @@ of the file format:
     parallel_ceiling = 5
     inert_paths = ["THREAD.md"]  # schema 2 (p29-3, ADR 0045): this repo's Inert paths; a repo table only
 
-    [repo."Animately/optimizer"]  # schema 3 (ADR 0062): the repo's test-credential class, ONE line in its repo table
+    [repo."Animately/optimizer"]  # schema 3 (ADR 0063): the repo's test-credential class, ONE line in its repo table
     test_credentials = { file = "~/repos/animately/optimizer/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }
 
 The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` and `repo`. A repo table holds every rollout key but
@@ -60,7 +60,7 @@ Integration by execute's `lead-integrate.py prepare`, which proves every glob ag
 in `settings`: resolve() reports it as its own top-level `inert_paths` (Output). An older reader (schema 1) ignores
 it under a schema-2 file (the schema rule below), so that rollout always re-runs.
 
-`test_credentials` (ADR 0062; schema 3) is the repo's test-credential class: the test-mode and staging keys a credential
+`test_credentials` (ADR 0063; schema 3) is the repo's test-credential class: the test-mode and staging keys a credential
 gate may name and still be signed by execute's standing approval (`reconcile-rollout.py approve-gates --standing`),
 once each key is proved present in `file`. It is one inline table on ONE line inside `[repo."o/r"]`:
 `test_credentials = { file = "<path>", keys = [{ name = "<NAME>", prefix = "<prefix>" }, { name = "<NAME>",
@@ -139,7 +139,7 @@ schema rule above):
 - a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys and `verify_slots`, 0 for
   `auto_retries` and `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
 - a MACHINE_ONLY key (`verify_slots`) in a `[repo."o/r"]` table;
-- a `test_credentials` in any form but one line in its repo table, or a value credential_problem() refuses (ADR 0062);
+- a `test_credentials` in any form but one line in its repo table, or a value credential_problem() refuses (ADR 0063);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
 - a `notify` that is not a table, an unknown key under it, or an `ntfy_topic` that is not an ntfy topic (a string of
@@ -220,10 +220,10 @@ SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots")
 MACHINE_ONLY = ("verify_slots",)
 # Per-repo keys (p29-3): valid in a [repo."o/r"] table only, refused under [defaults], and kept out of `settings`
 # (resolve() reports each as its own top-level field). `inert_paths` is a repo's Inert paths (ADR 0045);
-# `test_credentials` its test-credential class (ADR 0062), one line in its table.
+# `test_credentials` its test-credential class (ADR 0063), one line in its table.
 REPO_ONLY = ("inert_paths", "test_credentials")
 MAX_INERT_GLOBS = 64
-# test_credentials (ADR 0062): at most 32 keys; a name is an upper-snake env name with at least one `_`; a prefix is 3 to
+# test_credentials (ADR 0063): at most 32 keys; a name is an upper-snake env name with at least one `_`; a prefix is 3 to
 # 40 word characters; a Supabase project ref is 20 lowercase letters. A name with a LIVE or PROD segment is refused.
 MAX_CREDENTIAL_KEYS = 32
 CRED_NAME_RE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\Z")
@@ -258,7 +258,7 @@ KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS})
 KEY_SCHEMA.update({("guardrails", k): 1 for k in GUARDRAIL_KEYS})
 KEY_SCHEMA.update({("notify", k): 1 for k in NOTIFY_KEYS})
 KEY_SCHEMA[("rollout", "inert_paths")] = 2   # p29-3 (ADR 0045): the first schema-2 key
-KEY_SCHEMA[("rollout", "test_credentials")] = 3   # ADR 0062: the first schema-3 key
+KEY_SCHEMA[("rollout", "test_credentials")] = 3   # ADR 0063: the first schema-3 key
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.
@@ -328,7 +328,7 @@ class _Lines:
     strings and comments count for nothing and multi-line strings and arrays carry over to the next line.
     `one_line` maps a key path to its line only for a single-segment key under a two-segment table header
     (`[repo."o/r"]`) whose value closes on that same line (no bracket or multi-line string left open after the
-    scan): the one form `test_credentials` is read in (ADR 0062). `lines` and `line_of` are unchanged by it.
+    scan): the one form `test_credentials` is read in (ADR 0063). `lines` and `line_of` are unchanged by it.
 
     Why a copy and not a share (unlike read_toml): _Index's value scan carries the ladder's own hooks inside
     its loop (the `rung = [` array and each inline rung's `{` line, which its refusals cite), and its records
@@ -629,7 +629,7 @@ def _validate(text, doc, path):
                 if at[0] != "repo":
                     refuse("%s is per repo: set it under [repo.\"owner/name\"]" % key, at + (key,))
                 if key == "test_credentials":
-                    # ADR 0062: one line in its repo table, the only form inert-paths.py and tune.py edit around.
+                    # ADR 0063: one line in its repo table, the only form inert-paths.py and tune.py edit around.
                     if at + (key,) not in idx.one_line:
                         refuse("%s test_credentials must be one line in that table: test_credentials = { file = \"…\", "
                                "keys = [ … ] } (inert-paths.py and tune.py edit this file line by line)" % label,

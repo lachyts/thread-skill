@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gated_inputs.py — the gated-input sweep and the standing approval's readings (ADR 0008, ADR 0034, ADR 0062).
+"""gated_inputs.py — the gated-input sweep and the standing approval's readings (ADR 0008, ADR 0034, ADR 0063).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py sweep <note>...
     python3 -I ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py exposure - <<'EOF'
@@ -91,7 +91,7 @@ nothing and makes no network call.
    `(approved `, holds no `)` and goes last on the line, so the engine's normalizeGate and reconcile-rollout.py's
    GATE_ANNOT_RE strip it and the gate still matches its declaration.
 
-4. The test-credential reading (ADR 0062): a credential gate the standing approval may sign, because it names only
+4. The test-credential reading (ADR 0063): a credential gate the standing approval may sign, because it names only
    keys of the repo's declared test-credential class (rollout-settings.py's `test_credentials`, `cls` below: {file,
    keys: [{name, prefix | supabase_project}]}, or None) and each is present, with its declared form, in the declared
    file, which the rollout's `env_bootstrap` copies into the task tree with a plain `cp`. Every why is fixed text that
@@ -119,7 +119,7 @@ nothing and makes no network call.
           it names ("<token> is not the declared Supabase project of a key it names").
      names are the env tokens in text order, each once. The deny list is a reject list, not a whitelist (as
      exposure()'s leftover is): a second credential named in prose with no env token or deny word (`the GitHub PAT`)
-     passes; the annotation names only the proved keys and the file, and any other use is a review failure (ADR 0062
+     passes; the annotation names only the proved keys and the file, and any other use is a review failure (ADR 0063
      residual i). Known false asks, pinned: Stripe's own "API keys" and "secret key", `STRIPE_PRODUCT_ID`, "lives".
    - `read_env(path)` -> ({name: value}, None) or (None, why): `~` expanded; os.path.isfile, else "<path> is not a
      regular file" and it is never opened; os.open with O_RDONLY|O_NONBLOCK|O_NOCTTY|O_CLOEXEC (each flag through
@@ -487,7 +487,7 @@ def annotation(date, usd, limit, source):
     return text
 
 
-# ---- the test-credential reading (ADR 0062) ---------------------------------------------------------------------
+# ---- the test-credential reading (ADR 0063) ---------------------------------------------------------------------
 
 def gate_kind(gate):
     """The gate's kind: a list marker stripped, the text before the first `:`, lower-cased ("" with no colon)."""

@@ -101,7 +101,7 @@ or appended to; a missing parent directory is created, and removed again when a 
 result goes to a temp file in the same directory and must resolve with each picked key at its `to` from
 `file:repo`, every other key and Guardrail unchanged, `[notify]` (ADR 0038 d3, machine-wide) unchanged too, and every
 repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `drop` are its only writers) and
-every repo's `test_credentials` (ADR 0062: the operator's alone, no automated writer) unchanged.
+every repo's `test_credentials` (ADR 0063: the operator's alone, no automated writer) unchanged.
 
 Write order: (1) every check above; (2) ONE `tuning` line carrying every pick, through
 run_record.emit(strict=True), its returned bool checked: one os.write, so tunings.jsonl gains the whole set
@@ -696,7 +696,7 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
             raise Stop("the edit changes the Guardrails: nothing written", 2)
         if after["notify"] != before["notify"]:  # machine-wide (ADR 0038 d3): a Tuning never drops the ntfy topic
             raise Stop("the edit changes [notify]: nothing written", 2)
-        # p29-3 (ADR 0045) and ADR 0062: a Tuning never touches any repo's Inert paths or test-credential class.
+        # p29-3 (ADR 0045) and ADR 0063: a Tuning never touches any repo's Inert paths or test-credential class.
         for key in ("inert_paths", "test_credentials"):
             if _repo_tables(tmp, key) != _repo_tables(config, key):
                 raise Stop("the edit changes a repo's %s: nothing written" % key, 2)

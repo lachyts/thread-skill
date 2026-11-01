@@ -1,4 +1,4 @@
-# 0062 — A declared test credential signs itself
+# 0063 — A declared test credential signs itself
 
 Date: 2026-11-01
 Status: accepted (implemented by p34-8, `thread-skill-p34-8-standing-approval-for-test-credentials`; amends ADR 0034

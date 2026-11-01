@@ -300,7 +300,7 @@ test('S-plan: a plan-gated stop resumes on the signed plan — the implementer r
   assert.equal(B.row.planRoundsUsed, 1)
 })
 
-// ADR 0062 d4: a declared test credential is proved in the source env file, never the task tree's copy, so the copy must
+// ADR 0063 d4: a declared test credential is proved in the source env file, never the task tree's copy, so the copy must
 // be refreshed after a sign-off. The mechanism: the resumed call's implementer enters its tree through worktreeSetup,
 // which renders env_bootstrap after the worktree arms and the toplevel check, so it runs on a REUSED tree too (the
 // planner made it), and its plain `cp` brings in a key Lachy added to the source after the missing-key ASK.
@@ -315,7 +315,7 @@ function bootstrapAfterArms(prompt, boot) {
     lines.filter((l) => l.includes(boot)).length === 1
 }
 
-test('S-plan-env (ADR 0062 d4): after a sign-off the implementer re-runs env_bootstrap in its tree, on a reused tree too', async () => {
+test('S-plan-env (ADR 0063 d4): after a sign-off the implementer re-runs env_bootstrap in its tree, on a reused tree too', async () => {
   const script = {
     [`plan:${SLUG}`]: plan(PLAN_G),
     [`plan-judge:${SLUG} r1`]: approve,

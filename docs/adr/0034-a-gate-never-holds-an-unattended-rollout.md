@@ -9,7 +9,7 @@ in sub-bullets; the planner is taught it and the plan judge enforces it; the pri
 needs-you push falls back to ntfy.)*
 *(Amended 2026-10-27 by p30-8, § Amendment below: spend is never asked ahead; the standing approval's limit is also a
 calendar-month line.)*
-*(Amended 2026-11-01 by ADR 0062: decisions 1 and 2 no longer hold for a credential gate that reads as its repo's
+*(Amended 2026-11-01 by ADR 0063: decisions 1 and 2 no longer hold for a credential gate that reads as its repo's
 declared test credential, proved present in its declared file: the standing approval signs it, at any spend limit, and
 schedule and orient record it instead of asking it ahead. Irreversible gates, and every other credential, are
 unchanged.)*

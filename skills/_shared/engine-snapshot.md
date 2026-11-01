@@ -135,7 +135,7 @@ reads). `rollouts.toml` carries a top-level `schema`: an older reader ignores a 
 refuses a typo, and every writer that adds a newer key raises the line (rollout-settings.py's header). `inert_paths`
 (p29-3, ADR 0045) is the first schema-2 key: an older snapshot ignores it and re-runs its verifier, and inert-paths.py's
 `record` refuses to raise the line while a live rollout's engine root cannot read the new file. `test_credentials` (ADR
-0062) is the first schema-3 key: an older snapshot ignores it, so its rollouts ask every credential gate as before. The plugin's
+0063) is the first schema-3 key: an older snapshot ignores it, so its rollouts ask every credential gate as before. The plugin's
 hooks run from the Primary checkout, not a snapshot, so the Stop-hook driver's `STATUS_RE` and the `ROLLOUT-STATUS`
 line it parses are a cross-version contract (hooks/rollout-stop-driver.py). The stamps themselves are read only by
 `resolve`, the guards, `unfinished-rollout.py running` (ADR 0031's hold, now only for an unsnapshotted rollout) and

@@ -972,7 +972,7 @@ test('KT2 control: an edit that drops another repo\'s inert_paths is refused, no
   assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
 })
 
-// ---- KT3: a Tuning never touches a repo's test-credential class (ADR 0062) ------------------------------------------------
+// ---- KT3: a Tuning never touches a repo's test-credential class (ADR 0063) ------------------------------------------------
 // test_credentials (schema 3) is the operator's alone and lives as ONE line in its repo table: the line-by-line edit keeps
 // it byte-identical and inserts after it, an edit whose result changes any repo's class is refused with nothing written
 // (the control patches edit_text, as KT2's does), and the sub-table form is refused before any edit.
