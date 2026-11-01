@@ -2,25 +2,44 @@
 # At most one unfinished rollout per repo (schedule § 0; ADR 0027, ADR 0030 decision 1 and its migration
 # consequence), and the supersede that carries a rollout's unlanded tasks into its successor:
 #   C1-C27  skills/_shared/scripts/unfinished-rollout.py check: none / supersede / interrupted / file / refuse
+#   C28-C29 an approved queue (p30-4; vault-grammar § Approved queue) whose only marks are the Chorus Stage's ended room
+#           stops reads as never started (reconcile-rollout.py approved_unrun): superseded, and paired as an interrupted
+#           supersede; a standing room stop, a hard pause's line, no on_merge or no hold_until still refuse
 #   U1-U3   a rollout awaiting sign-off (ADR 0034: `paused_for: sign-off`) is unfinished, and its refusal names the
 #           sign-off path (another project's) or the sign-off path beside --regenerate (this project's)
 #   K1-K5   skills/execute/scripts/reconcile-rollout.py carry: preview, refusals, per-field writes, re-runs, and
 #           the refusal of a prior that holds an undecided RACE or UNVERIFIED
 #   K5b     carry refuses a prior that holds an unacked git-env trip until its ack line (p14-6)
+#   K5c     carry refuses a prior that holds an unacked Lane hold until `lane-ack` (p29-7, ADR 0048)
 #   K6      carry maps each carried task's legacy stamps to a rung (ADR 0029 consequences): the `restamp`
 #           lines, the ladder's top rung, a refused ladder file, and a re-run
 #   K7      carry prints an `order` line per clause of the prior's prose that orders two carried tasks (p17-2),
 #           and again on a re-run while the prior is open (its tasks already on the new note), never once it closed
+#   K8      carry previews and copies the prior's rollout-scope `hold_until` (p30-3): verbatim, once, a different
+#           one on the new note kept with a WARN
+#   K9      carry takes an approved queue whose only marks are ended room stops (p30-4, approved_unrun); a plain
+#           one, a standing room stop or a pause_requested still refuse
 #   M1-M12  a protocol-3 wave rollout in flight with `review` PRs migrates: check -> resume -> carry preview ->
 #           write -> carry -> step 7 -> close-out (stamps, then the move), crash windows included.
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
 #           refused by `next`, reported by `status` and the check, until a completed supersede closes it.
 #   I8      § 0's interrupted finish after step 6's carry already ran still prints the prior's `order` lines (p17-2)
-#   R1-R4   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031)
-#   S1-S13  shapes (ADR 0040, p24-2): the parallel check skips serial notes and refuses a run on a place a live serial
+#   R1-R6   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031), never a snapshotted rollout (R5, ADR 0043),
+#           never an approved queue whose only marks are ended room stops (R6, p30-4)
+#   S1-S14  shapes (ADR 0040, p24-2): the parallel check skips serial notes and refuses a run on a place a live serial
 #           chain writes, before any supersede (S2c), never a clone root beside an in-place chain (S13, ADR 0042); the serial check (`--shape serial --surface <token>...`) refuses a
 #           chain over a live chain's surface or an unfinished parallel rollout's Project root, supersedes nothing,
-#           and names whose note it is in each remedy; tokens compare literally (realpath and the vault mapping only)
+#           and names whose note it is in each remedy; tokens compare literally (realpath and the vault mapping only),
+#           save a checkout nested inside another by path, a separate repo, which never meets the outer one (S14, p33-3)
+#   X1-X15  a stuck rollout holds only what it waits on (ADR 0060, p33-2): a stuck chain's done rows' surfaces are
+#           released (X1) while its set-aside and held rows' stay held (X2, X6, X7), and every other chain state, an
+#           empty or malformed unlanded cell, holds the whole claim (X3-X5); the parallel check's 2b reads the same
+#           hold (X8); a resuming chain waits its turn on the chain scheduled on its released place, never the
+#           reverse (X9); a parallel rollout awaiting sign-off or halted on its set-asides releases its root to serial
+#           chains only (X10, D5); the `hold` verb (X11); a resuming parallel rollout (X12); a chain whose
+#           `surfaces:` reads as any holds only its unlanded rows' cells against a resume (X13); a resuming chain against a
+#           parallel rollout's root: held while a call is in flight, paused or halted included, never by one idle and
+#           paused or halted (X14); the release WARNs and both --resume reads keep the nested-checkout rule (X15, p33-3)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them) and a stub gh.
@@ -42,8 +61,9 @@ TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
-# Its one fresh Away file (p28-1, execute away.md) runs each rollout to its own ceiling, never the Trickle; nx reads the
-# real clock (no --now), so the file is written now and stays fresh for the suite's run.
+# Its one fresh Away file (p28-1, execute away.md), its Away cap 99 never binding (p29-8), runs each rollout to its own
+# ceiling, never the Trickle or the Away cap; nx reads the real clock (no --now), so the file is written now and stays
+# fresh for the suite's run.
 EH="$TMP/settings-home"; mkdir -p "$EH"; away_file "$EH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
@@ -469,7 +489,43 @@ chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "refuse ro-q|3" "C27 control: once it has run it is an ordinary running rollout"
 hasnt "$err" "is incomplete" "C27 control: … never judged incomplete"
 
-# ── S1-S12: shapes (ADR 0040) ─────────────────────────────────────────────────────────────────────────
+# ── C28-C29: an approved queue whose only marks are the Stage's ended room stops (p30-4; approved_unrun) ──
+# The Chorus Stage's room stops (step-boundary.py's lines under `## Pause log`) are no run mark on an approved queue
+# (`on_merge: regenerate` beside a rollout hold_until), so its regenerate supersedes it, as schedule's Under the chain.
+# runs it. Anywhere else a room stop still counts, and so does a standing one or a hard pause's line.
+RS_ENDED=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none\n- 2026-10-01T11:00+00:00 room stop ended'
+RS_STANDS=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none'
+RS_HARD=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none\n- 2026-10-01T11:00+00:00 room stop ended\n- 2026-10-01T12:00+00:00 hard pause: runs none'
+AQ_HOLD='hold_until: {pr: o/r#202, merged: true}'; AQ_ON='on_merge: regenerate'
+scen c28
+BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
+mkt t1.md $P open
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "supersede $P|0" "C28: an approved queue whose only marks are ended room stops is superseded"
+BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse $P|3" "C28 control: the same note with no on_merge has run"
+has "$err" "has run and is not paused (it has a ## Pause log section)" "C28 control: … with its remedy"
+BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_ON"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse $P|3" "C28 control: … and with no hold_until"
+BODY="$RS_STANDS" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse $P|3" "C28 control: a room stop that still stands refuses"
+has "$err" "a room stop stands since 2026-10-01T10:00+00:00" "C28 control: … naming the standing room stop"
+BODY="$RS_HARD" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse $P|3" "C28 control: a hard pause's Pause log line refuses"
+has "$err" "it has a ## Pause log line that is no room stop" "C28 control: … naming it"
+
+scen c29
+BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\"" "$AQ_HOLD"
+mkt t1.md $N open
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "interrupted $P $N|0" "C29: the I8 pair: the approved P with ended room stops and its N -> interrupted"
+
+# ── S1-S14: shapes (ADR 0040) ─────────────────────────────────────────────────────────────────────────
 # mkser <path under $T> [frontmatter lines...] — a serial rollout note (`shape: serial`, no Project root) at status
 # $ST (default open); its surfaces: come among the frontmatter lines
 mkser() {
@@ -645,6 +701,291 @@ mkser ser.md "$DEMO" "surfaces: [\"repo:$S/repo-rollout\"]"
 chk --repo "$S/repo-rollout" --project Demo
 ok "$out|$rc" "refuse ser|3" "S13: --repo <clone> against a chain that claims repo:<clone> → refuse"
 
+# S14 (p33-3): a checkout nested inside another by path (the ~/Projects monorepo holding its own Narcissus clone) is a
+# separate repo with its own index, so a chain on the outer checkout and a rollout rooted in the nested one are
+# disjoint; a path inside the outer checkout itself, or a nested checkout under a directory in no checkout (a path-only
+# claim covers everything beneath it), still overlaps.
+scen s14
+M="$S/mono"; mkrepo "$M" https://github.com/demo/mono.git; mkrepo "$M/nested" https://github.com/demo/nested.git
+mkdir -p "$M/sub" "$M/nested/deep"
+mkro ro-n.md "$M/nested" "$OTHER"
+chs --surface "repo:$M" --project Demo
+ok "$out|$rc" "none|0" "S14: a serial chain on repo:<outer> against a parallel rollout rooted in a nested checkout → none"
+chs --surface "repo:$M/nested/deep" --project Demo
+ok "$out|$rc" "refuse ro-n|3" "S14 control: a path inside the nested checkout still meets its root"
+mkro ro-n.md "$M/sub" "$OTHER"
+chs --surface "repo:$M" --project Demo
+ok "$out|$rc" "refuse ro-n|3" "S14 control: a root inside the outer checkout itself still refuses"
+rm "$T/ro-n.md"
+mkser ser.md "$OTHER" "surfaces: [\"repo:$M\"]"
+chk --repo "$M/nested" --project Demo
+ok "$out|$rc" "none|0" "S14: --repo <nested checkout> against a serial chain on repo:<outer> → none"
+chk --repo "$M/sub" --project Demo
+ok "$out|$rc" "refuse ser|3" "S14 control: --repo inside the outer checkout against the same chain → refuse"
+chs --surface "repo:$M/nested" --project Demo
+ok "$out|$rc" "none|0" "S14: a chain on the nested checkout against a live chain on repo:<outer> → none"
+chs --surface "repo:$M/nested-not-yet/x" --project Demo
+ok "$out|$rc" "refuse ser|3" "S14 control: a path not there yet inside the outer checkout reads as the outer one's"
+mkser ser.md "$OTHER" "surfaces: [\"repo:$S\"]"
+chs --surface "repo:$M/nested" --project Demo
+ok "$out|$rc" "refuse ser|3" "S14 control: a path-only claim on a directory in no checkout still covers a checkout beneath it"
+
+# ── X1-X15: a stuck rollout holds only what it waits on (ADR 0060, p33-2) ─────────────────────────────
+# mkchain <slug> <projects line> <row>... — a serial note with a `## Queue` table (a row is
+# `<task>~<status>~<Surfaces cell>[~<frontmatter line, \n for a newline>]`), its surfaces: the union of the cells' tokens
+# (or $SURF's list lines), a `## Leg log` ($LOG; default Leg 1 began, then closed `chain stuck: 1 set aside`; `-`: no
+# Leg log, never started) and one task note per row (its status, rollout:, and leg: 1 when done)
+mkchain() {
+  python3 - "$T" "$@" <<'PY'
+import os, re, sys
+T, slug, proj, *rows = sys.argv[1:]
+log = os.environ.get("LOG", "- 2026-10-29T10:00+00:00 Leg 1 began: leg-1 session s in cc-x from /x\n"
+                            "- 2026-10-29T12:10+00:00 Leg 1 closed: chain stuck: 1 set aside")
+toks, lines = [], []
+for i, r in enumerate(rows, 1):
+    t, st, cell, *extra = r.split("~")
+    toks += [x for x in re.findall(r"`([^`]+)`", cell) if x not in toks]
+    lines.append(f"| {i} | [[{t}\\|{t}]] | `cc-x` from `/x` | {cell} |")
+    fm = [f"status: {st}", f'rollout: "[[{slug}]]"'] + (["leg: 1"] if st == "done" else [])
+    fm += [e.replace("\\n", "\n") for e in extra]
+    open(f"{T}/{t}.md", "w").write("---\ntags: [task]\n" + "\n".join(fm) + "\n---\n\n## Notes\n\nbody\n")
+surf = os.environ.get("SURF")
+surf = surf if surf is not None else "\n".join(f'  - "{x}"' for x in toks)
+text = (f"---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\n{proj}\nsurfaces:\n{surf}\n---\n\n"
+        "## Notes\n\nA chain.\n\n## Queue\n\n| # | Task | Launch | Surfaces |\n|---|---|---|---|\n" + "\n".join(lines) + "\n")
+if log != "-":
+    text += f"\n## Leg log\n\n{log}\n"
+open(f"{T}/{slug}.md", "w").write(text)
+PY
+}
+VA='`vault:Work/Projects/A`'; VB='`vault:Work/Projects/B`'; VC='`vault:Work/Projects/C`'
+# stuck5 <slug> [t5's status] [more rows...] — contacts-admin's shape: four rows done on A, the fifth set aside on B
+stuck5() { local s=$1 st=${2:-blocked}; shift; [ $# -gt 0 ] && shift
+  mkchain "$s" "$DEMO" t1~done~"$VA" t2~done~"$VA" t3~done~"$VA" t4~done~"$VA" t5~"$st"~"$VB" "$@"; }
+STUCKWHY="Demo; chain stuck (1 set aside): it holds only its unlanded rows' surfaces (ADR 0060)"
+
+scen x1
+stuck5 ca
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "none|0" "X1: a chain whose last unlanded row is set aside releases its done rows' surface: a chain on it schedules"
+has "$err" "WARN: [[ca]] ($STUCKWHY) released vault:Work/Projects/A, which this run claims" "X1: … with the release WARN"
+chs --surface vault:Work/Projects/A/sub.md --project Other
+ok "$out|$rc" "none|0" "X1: … a place inside the released one too"
+scen x2
+stuck5 ca
+chs --surface vault:Work/Projects/B --project Other
+ok "$out|$rc" "refuse ca|3" "X2: the set-aside row's own surface still refuses"
+has "$err" "[[ca]] (Demo; has run: " "X2: … naming the stuck chain"
+has "$err" "is a live serial chain whose surface vault:Work/Projects/B overlaps this chain's vault:Work/Projects/B" "X2: … and the held pair"
+chs --surface vault:Work/Projects --project Other
+ok "$out|$rc" "refuse ca|3" "X2: a token containing the held one refuses"
+scen x3
+stuck5 ca in_progress
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "refuse ca|3" "X3: control: t5 handed back (claimable), the chain reads ready and holds its whole claim"
+hasnt "$err" "released" "X3: … no release WARN"
+scen x4
+LOG="- 2026-10-29T10:00+00:00 Leg 1 began: leg-1 session s in cc-x from /x" stuck5 ca
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "refuse ca|3" "X4: a Leg open (live) holds the whole claim"
+scen x5
+SURF=$'  - "vault:Work/Projects/A"\n  - "vault:Work/Projects/B"' \
+  mkchain ca "$DEMO" t1~done~"$VA" t2~done~"$VA" t5~blocked~""
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "refuse ca|3" "X5: an unlanded row with an empty Surfaces cell fails closed to the whole claim"
+has "$err" "WARN: ca: chain stuck, but row [[t5]]'s Surfaces cell is empty or holds a token parse_token refuses: it holds its whole claim" "X5: … with a WARN"
+SURF=$'  - "vault:Work/Projects/A"\n  - "vault:Work/Projects/B"' \
+  mkchain ca "$DEMO" t1~done~"$VA" t2~done~"$VA" t5~blocked~'`bogus:x`'
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "refuse ca|3" "X5: … and so does a malformed one"
+has "$err" "WARN: ca: chain stuck, but row [[t5]]'s Surfaces cell" "X5: … with the WARN"
+stuck5 ca blocked t6~in_progress~"$VC"~'owner: lachy'
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "refuse ca|3" "X5: a stuck chain with a row in progress (owned by hand, never claimable) holds its whole claim"
+has "$err" "WARN: ca: chain stuck, but [[t6]] reads in progress: it holds its whole claim" "X5: … with the WARN"
+SURF=$'  - "vault:Work/Projects/A"' mkchain ca "$DEMO"
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "refuse ca|3" "X5: a stuck chain whose ## Queue has no rows holds its whole claim"
+has "$err" "WARN: ca: chain stuck, but its ## Queue has no rows: it holds its whole claim" "X5: … with the WARN"
+scen x6
+stuck5 ca blocked t6~open~"$VC"~'depends-on:\n  - "[[t5]]"'
+chs --surface vault:Work/Projects/C --project Other
+ok "$out|$rc" "refuse ca|3" "X6: a queued row held behind the set-aside row keeps its surface"
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "none|0" "X6: … the done rows' surface is still released"
+scen x7
+stuck5 ca gate-pending
+chs --surface vault:Work/Projects/A --project Other
+ok "$out|$rc" "none|0" "X7: a gate-pending row counts as set aside: the rest is released"
+chs --surface vault:Work/Projects/B --project Other
+ok "$out|$rc" "refuse ca|3" "X7: … its own surface refuses"
+scen x8
+mkrepo "$S/r1" https://github.com/demo/r1.git
+mkchain ca "$DEMO" t1~done~"\`repo:$S/r1\`" t2~done~"\`repo:$S/r1\`" t5~blocked~"\`repo:$R\`"
+chk --repo "$S/r1" --project Other
+ok "$out|$rc" "none|0" "X8: a parallel run on a repo only a stuck chain's done rows claim: none (2b)"
+has "$err" "WARN: [[ca]] (Demo; chain stuck (1 set aside)" "X8: … with the release WARN"
+chk --repo "$R" --project Other
+ok "$out|$rc" "refuse ca|3" "X8: … on the set-aside row's repo: refuse"
+has "$err" "[[ca]] (Demo; has run: " "X8: … naming the chain"
+scen x9
+stuck5 ca
+LOG=- mkchain cb "$OTHER" u1~open~"$VA"
+chs --resume ca --surface vault:Work/Projects/A --surface vault:Work/Projects/B
+ok "$out|$rc" "refuse cb|3" "X9: resuming the stuck chain while another holds its smoke row's surface refuses"
+has "$err" "[[cb]] (Other; never started) holds \`vault:Work/Projects/A\` for an unlanded row, which this chain writes as \`vault:Work/Projects/A\` (ADR 0060): [[ca]] waits its turn: re-run once [[cb]] lands its rows there" "X9: … with the waits-its-turn remedy line"
+chs --resume cb --surface vault:Work/Projects/A
+ok "$out|$rc" "none|0" "X9: the chain scheduled on the released place resumes against ca's unlanded rows: none (no deadlock)"
+chs --resume ca --surface vault:Work/Projects/B
+ok "$out|$rc" "none|0" "X9: … and ca's set-aside row's own surface is no one else's"
+mkt u1.md cb done
+chs --resume ca --surface vault:Work/Projects/A --surface vault:Work/Projects/B
+ok "$out|$rc" "none|0" "X9: once cb is done, ca resumes"
+uerr2() { python3 "$CHECK" check --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; ok "$rc|$(cat "$S.out")" "2|" "X9: $label exits 2"; }
+label="--resume naming no note" uerr2 --shape serial --resume nosuch --surface ext:x
+has "$(cat "$S.err")" "unfinished-rollout: --resume nosuch: no rollout note" "X9: … naming it"
+scen x10
+EV0=$THREAD_EVENTS_DIR; export THREAD_EVENTS_DIR="$S/events"
+em() { python3 "$root/skills/_shared/scripts/run_record.py" emit --rollout "$1" --kind "$2" --json "$3" --ts "$4" > /dev/null || { echo "FAIL - emit $2"; fail=1; }; }
+halt_rec() { rm -rf "$S/events"; em p lead-entry '{"by":"heartbeat","session":"S"}' 2026-10-30T10:00:00Z
+  em p stopped "{\"cause\":\"halt\",\"inferred\":false,\"calls\":[],\"reason\":\"$1\"}" 2026-10-30T10:05:00Z; }
+mkro p.md "$R" "$OTHER" "$PAUSED" 'paused_for: sign-off'; mkt pt1.md p gate-pending; mkt pt2.md p done
+chs --surface "repo:$R" --project Demo
+ok "$out|$rc" "none|0" "X10: a parallel rollout awaiting sign-off holds no Project root against a serial chain"
+has "$err" "WARN: [[p]] (Other; awaiting sign-off) is released (ADR 0060)" "X10: … with a WARN"
+chk --repo "$R" --project Demo
+ok "$out|$rc" "refuse p|3" "X10: … the parallel check still counts it as the repo's one unfinished parallel rollout (D5)"
+mkro p.md "$R" "$OTHER"; mkt pt1.md p blocked 'owner: lead'
+halt_rec "nothing can start: 1 set aside"
+chs --surface "repo:$R" --project Demo
+ok "$out|$rc" "none|0" "X10: halted on its set-asides (the Run record's open halt): released"
+has "$err" "WARN: [[p]] (Other; halted: nothing can start: 1 set aside) is released (ADR 0060)" "X10: … with a WARN"
+chk --repo "$R" --project Demo
+ok "$out|$rc" "refuse p|3" "X10: … still refused by the parallel check (D5)"
+mkt pt3.md p in_progress 'owner: lead'
+chs --surface "repo:$R" --project Demo
+ok "$out|$rc" "refuse p|3" "X10: a task running: it holds its root"
+rm "$T/pt3.md"
+mkro p.md "$R" "$OTHER" "$PAUSED"
+chs --surface "repo:$R" --project Demo
+ok "$out|$rc" "refuse p|3" "X10: paused by hand: it holds its root"
+mkro p.md "$R" "$OTHER"
+halt_rec "UNVERIFIED undecided: [[pt1]]"
+chs --surface "repo:$R" --project Demo
+ok "$out|$rc" "refuse p|3" "X10: an UNVERIFIED halt holds its root"
+rm -rf "$S/events"; mkdir -p "$S/events/p.jsonl"
+chs --surface "repo:$R" --project Demo
+ok "$out|$rc" "refuse p|3" "X10: an unreadable Run record holds its root (fail closed)"
+export THREAD_EVENTS_DIR="$EV0"
+scen x11
+hv() { python3 "$CHECK" hold --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); }
+jv() { python3 -c 'import json, sys; d = json.loads(sys.argv[1]); print(eval(sys.argv[2]))' "$out" "$1"; }
+stuck5 ca
+hv --rollout ca
+ok "$rc|$(jv '[d["rollout"], d["shape"], d["scope"], d["held"], d["released"]]')" \
+   "0|['ca', 'serial', 'stuck', ['vault:Work/Projects/B'], ['vault:Work/Projects/A']]" "X11: hold: a stuck chain holds its set-aside row's surface and lists what it released"
+has "$(jv 'd["why"]')" "it holds only its unlanded rows' surfaces" "X11: … and why"
+ok "$(jv 'list(d)')" "['rollout', 'shape', 'scope', 'why', 'held', 'released']" "X11: … its keys, in order"
+stuck5 ca in_progress
+hv --rollout "[[ca]]"
+ok "$(jv '[d["scope"], d["held"], d["released"]]')" "['whole', ['vault:Work/Projects/A', 'vault:Work/Projects/B'], []]" "X11: a ready chain holds its whole claim"
+mkro p.md "$R" "$OTHER" "$PAUSED" 'paused_for: sign-off'; mkt pt1.md p gate-pending
+hv --rollout p
+ok "$(jv '[d["shape"], d["scope"], d["held"], d["released"]]')" "['parallel', 'released', [], ['repo:$R']]" "X11: a parallel rollout awaiting sign-off releases its root"
+mkt pt2.md p in_progress 'owner: lead'
+hv --rollout p
+ok "$(jv '[d["scope"], d["held"], d["released"]]')" "['whole', ['repo:$R'], []]" "X11: … one with a running task holds it"
+ST=done mkro pd.md "$R" "$OTHER"
+hv --rollout pd
+ok "$(jv '[d["scope"], d["held"]]')" "['none', []]" "X11: a done note holds nothing"
+hv --rollout nosuch
+ok "$rc|$out" "2|" "X11: a note not found exits 2"
+scen x12
+mkro p.md "$R" "$OTHER"; mkt pt1.md p open 'owner: lead'
+LOG=- mkchain cq "$DEMO" q1~open~"\`repo:$R\`"
+chk --resume p --repo "$R"
+ok "$out|$rc" "refuse cq|3" "X12: a resuming parallel rollout refuses while a chain's unlanded row holds its root"
+has "$err" "holds \`repo:$R\` for an unlanded row, which this rollout writes as \`repo:$R\` (ADR 0060): [[p]] waits its turn" "X12: … waits its turn"
+mkchain cq "$DEMO" q1~done~"\`repo:$R\`" q2~blocked~'`ext:cms`'
+chk --resume p --repo "$R"
+ok "$out|$rc" "none|0" "X12: … and passes when only the chain's done rows cover it"
+scen x13
+mkro p.md "$R" "$OTHER"; mkt pt1.md p open 'owner: lead'
+mkrepo "$S/other" https://github.com/demo/other.git
+SURF='  - "rep:/x/other"' LOG=- mkchain cz "$DEMO" z1~open~"\`repo:$S/other\`"
+chk --resume p --repo "$R"
+ok "$out|$rc" "none|0" "X13: a chain whose surfaces: reads as any (a typo) holds only its unlanded rows' cells against a resume"
+has "$err" "WARN: cz: surfaces: rep:/x/other is not a surface token" "X13: … with its read-as-any WARN"
+hasnt "$err" "holds \`any\`" "X13: … and never says it holds any for an unlanded row"
+LOG=- mkchain cb "$OTHER" u1~open~'`ext:cms`'
+chs --resume cb --surface ext:cms
+ok "$out|$rc" "none|0" "X13: … nor against a resuming chain on another place"
+chk --repo "$R" --project Other
+ok "$out|$rc" "refuse cz|3" "X13: a new schedule still meets it as any"
+SURF='  - "rep:/x/other"' LOG=- mkchain cz "$DEMO" z1~open~'`bogus:x`'
+chk --resume p --repo "$R"
+ok "$out|$rc" "refuse cz|3" "X13: … and so does a resume once its unlanded row's cell is malformed too (fail closed)"
+has "$err" "[[cz]] (Demo; never started) holds \`any\` for an unlanded row" "X13: … naming any"
+scen x14
+EV0=$THREAD_EVENTS_DIR; export THREAD_EVENTS_DIR="$S/events"
+LOG=- mkchain ca "$DEMO" a1~open~"\`repo:$R\`"
+mkro p.md "$R" "$OTHER"; mkt pt1.md p in_progress 'owner: lead'; mkt pt2.md p open
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14: a resuming chain refuses while a running parallel rollout holds its root"
+has "$err" "[[p]] (Other; " "X14: … naming it"
+has "$err" "holds \`repo:$R\`, its Project root, which this chain writes as \`repo:$R\` (ADR 0060): [[ca]] waits its turn" "X14: … and the waits-its-turn line"
+mkt pt1.md p open
+halt_rec "surface held: [[ca]] writes repo:$R"
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "none|0" "X14: halted by its own surface re-check with nothing in flight, it is no holder (no deadlock, ADR 0060 d5)"
+mkro p.md "$R" "$OTHER" "$PAUSED"
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "none|0" "X14: paused with nothing in flight, it is no holder"
+mkt pt1.md p in_progress 'owner: lead'
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14: paused with a task still in progress (the pause's drain), it holds its root"
+mkro p.md "$R" "$OTHER" 'pause_requested: true'
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14: … and so does a pending pause"
+mkro p.md "$R" "$OTHER"
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14: halted with a call still in flight (execute § 7), it holds its root"
+mkt pt1.md p review 'owner: lead' 'pr: https://github.com/demo/repo/pull/1' 'integrating: 2026-10-30T10:10+00:00'
+chs --resume ca --surface "repo:$R"
+ok "$out|$rc" "refuse p|3" "X14: … and in Integration too"
+export THREAD_EVENTS_DIR="$EV0"
+# X15 (p33-3 beside ADR 0060): the release WARNs and both --resume reads keep the nested-checkout rule, as the schedule
+# checks do: a checkout nested inside another by path is its own repo, so it never meets a hold or a release on the
+# outer one, while a path inside the outer checkout itself still does.
+scen x15
+M="$S/mono"; mkrepo "$M" https://github.com/demo/mono.git; mkrepo "$M/nested" https://github.com/demo/nested.git
+mkdir -p "$M/sub"
+mkchain cq "$DEMO" q1~done~"\`repo:$M\`" q2~blocked~'`ext:cms`'
+chk --repo "$M/nested" --project Other
+ok "$out|$rc" "none|0" "X15: a parallel run on a checkout nested in a stuck chain's released place → none"
+hasnt "$err" "released repo:$M," "X15: … with no released WARN: the nested checkout is a separate repo"
+chs --surface "repo:$M/nested" --project Other
+ok "$out|$rc" "none|0" "X15: a chain on the nested checkout → none"
+hasnt "$err" "released repo:$M," "X15: … with no released WARN either"
+chk --repo "$M/sub" --project Other
+ok "$out|$rc" "none|0" "X15 control: a parallel run inside the outer checkout itself → none"
+has "$err" "released repo:$M, which this run claims" "X15 control: … with the released WARN"
+mkro p.md "$M/nested" "$OTHER"; mkt pt1.md p open 'owner: lead'
+LOG=- mkchain cq "$DEMO" q1~open~"\`repo:$M\`"
+chk --resume p --repo "$M/nested"
+ok "$out|$rc" "none|0" "X15: a resuming parallel rollout in the nested checkout never waits on a chain's unlanded row on the outer one"
+mkro p.md "$M/sub" "$OTHER"
+chk --resume p --repo "$M/sub"
+ok "$out|$rc" "refuse cq|3" "X15 control: … one rooted inside the outer checkout itself waits its turn"
+rm "$T/cq.md"
+LOG=- mkchain ca "$DEMO" a1~open~"\`repo:$M\`"
+mkro p.md "$M/nested" "$OTHER"; mkt pt1.md p in_progress 'owner: lead'
+chs --resume ca --surface "repo:$M"
+ok "$out|$rc" "none|0" "X15: a resuming chain on the outer checkout never waits on a running parallel rollout in the nested one"
+mkro p.md "$M/sub" "$OTHER"
+chs --resume ca --surface "repo:$M"
+ok "$out|$rc" "refuse p|3" "X15 control: … one rooted inside the outer checkout itself holds it"
+
 # ── K1-K4: carry ──────────────────────────────────────────────────────────────────────────────────────
 scen k
 mkro $P.md "$R" "$DEMO" "$PAUSED"
@@ -772,6 +1113,32 @@ printf -- '- 2026-09-30T10:05:00+00:00 git-env ack [[g1]]: refs/heads/main at bb
 carry --from "$T/$P.md" --to "$T/$N.md"
 ok "$rc" 0 "K5b: with the git-env ack line, it carries"
 ok "$(fm g1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5b: … both unlanded tasks"
+
+# ── K5c: carry refuses a prior that holds an unacked Lane hold until lane-ack (p29-7, ADR 0048) ──────────────────
+# The carry strips `integrating:` and never copies the `## Lane log`, so the held task would integrate unacked.
+scen k5c
+BODY=$'## Lane log\n\n- 2026-09-30T09:50+00:00 lane hold [[a1]] merge-task-abort: ERROR: merge-task aborted (70): set -u' \
+  mkro $P.md "$R" "$DEMO" "$PAUSED"
+mkt a1.md $P review 'pr: https://github.com/demo/repo/pull/7' 'integrating: 2026-09-30T09:40+00:00'
+mkt q1.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc" 2 "K5c: carry --dry-run refuses a prior holding an unacked Lane hold"
+ok "$err" "ERROR: carry: --from $P holds an unacked Lane hold: [[a1]]: record Lachy's ack first with /thread:repair [[$P]]" \
+  "K5c: … its one ERROR line names the held task and /thread:repair"
+ok "$out" "" "K5c: … no carry line"
+ok "$(sums)" "$before" "K5c: … writing nothing"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(sums)" "2|$before" "K5c: carry refuses it for real too, writing nothing"
+ok "$(fm a1.md integrating)|$(fm a1.md rollout)" "integrating: 2026-09-30T09:40+00:00|rollout: \"[[$P]]\"" \
+  "K5c: … the held task keeps integrating: and its rollout"
+python3 "$RR" lane-ack --rollout "$T/$P.md" --tasks a1 --fix "rebuilt merge-task's bash" --tasks-dir "$T" \
+  --now 2026-09-30T10:05:00Z > "$S.ack" 2>&1
+ok "$?|$(cat "$S.ack")" "0|a1: lane ack [written]" "K5c: (lane-ack records Lachy's ack)"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc" 0 "K5c: after lane-ack, it carries"
+ok "$(fm a1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5c: … both unlanded tasks"
 
 # ── K6: carry maps the legacy stamps of each carried task to a rung ──────────────────────────────────
 TIER_KEY=tier_"capped"   # the stale cap stamp's key, quoted in two parts so this file stays out of the Verify grep
@@ -941,6 +1308,94 @@ closeout $P $N
 carry --from "$T/Archive/Rollouts/$P.md" --to "$T/$N.md"
 ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(printf '%s\n' "$out" | grep -c '^order ')" "0|[no-change]|0" \
   "K7: a closed P (done, superseded_by N: its step 7 confirmed them) re-runs with no order line"
+
+# ── K8: carry copies a standing rollout-scope hold_until into the new note (p30-3; vault-grammar § Hold until) ──
+# A hold kept only as prose was lost in the 10-21 → 10-26 regenerate (Q50). The preview names the prior's hold with the
+# parser `next` reads it by, and the carry copies its lines verbatim (the block form with its continuation lines) after
+# `parallel_ceiling:`, else after `status:`; an identical hold already on the new note changes nothing, and a different
+# one is kept with a WARN. The prior is never written. A prior with no hold changes nothing: K1-K7 above are that case.
+scen k8
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: true}  # the engine fix lands first'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" 'parallel_ceiling: 2' "supersedes: \"[[$P]]\""
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc|$out" "0|carry a queued
+hold_until pr=o/r#202 merged=true
+(dry-run)" "K8: the preview prints the hold_until line after the carry lines, before the trailer"
+ok "$(sums)" "$before" "K8: … and writes nothing"
+pp=$(sum1 $P.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | grep '^hold_until ')|$(printf '%s\n' "$out" | tail -1)" "0|hold_until pr=o/r#202 merged=true|[written: 2]" \
+  "K8: carry prints it again and writes the task and the new note"
+ok "$(grep -A1 '^parallel_ceiling:' "$T/$N.md" | tail -1)" "hold_until: {pr: o/r#202, merged: true}  # the engine fix lands first" \
+  "K8: … the line copied verbatim, right after parallel_ceiling:"
+ok "$(grep -c '^hold_until:' "$T/$N.md")" 1 "K8: … once"
+ok "$(sum1 $P.md)" "$pp" "K8: … and the prior is never written"
+before=$(sums)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$err" "0|[no-change]|" "K8: an interrupted re-run copies nothing again, with no WARN"
+ok "$(sums)" "$before" "K8: … writing nothing"
+
+scen k8-block
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until:' '  pr: "#202"' '  merged: true'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --dry-run
+ok "$(printf '%s\n' "$out" | grep '^hold_until ')" "hold_until pr=#202 merged=true" "K8: the block form's preview line"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(sed -n '/^status:/,/^protocol_version:/p' "$T/$N.md")" '0|status: open
+hold_until:
+  pr: "#202"
+  merged: true
+protocol_version: 5' "K8: … copied with its continuation lines, after status: when there is no parallel_ceiling:"
+
+scen k8-unreadable
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: false}'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | grep '^hold_until ')|$(fm $N.md hold_until)" \
+  "0|hold_until unreadable: merged must be true|hold_until: {pr: o/r#202, merged: false}" "K8: an unreadable hold is named and copied verbatim, so it still fails closed"
+
+scen k8-same
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: true}'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\"" 'hold_until: {pr: o/r#202, merged: true}'
+pn=$(sum1 $N.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$err|$(sum1 $N.md)" "0|[written: 1]||$pn" "K8: an identical hold already on the new note changes nothing there"
+
+scen k8-differs
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until: {pr: o/r#202, merged: true}'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\"" 'hold_until: {pr: o/r#303}'
+pn=$(sum1 $N.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(sum1 $N.md)" "0|[written: 1]|$pn" "K8: a different hold on the new note is kept"
+ok "$err" "WARN: carry: hold_until on $N differs from $P's; $N's kept" "K8: … with one WARN line"
+
+# ── K9: carry takes an approved queue whose only marks are ended room stops (p30-4; approved_unrun) ─────────
+scen k9
+BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(fm a.md rollout)|$(fm $N.md on_merge)" "0|rollout: \"[[$N]]\"|<none>" "K9: carry takes it (the hold copied, never on_merge)"
+ok "$(fm $N.md hold_until)" "$AQ_HOLD" "K9: … its hold copied"
+for form in plain stands requested; do
+  case "$form" in
+    plain) BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" ;;
+    stands) BODY="$RS_STANDS" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON" ;;
+    requested) BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON" 'pause_requested: true' ;;
+  esac
+  mkt a.md $P open; mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+  before=$(sums)
+  carry --from "$T/$P.md" --to "$T/$N.md"
+  ok "$rc" 2 "K9 control [$form]: refused"
+  has "$err" "has run and is not paused" "K9 control [$form]: … has run and is not paused"
+  ok "$(sums)" "$before" "K9 control [$form]: … nothing written"
+done
 
 # ── M1-M12: a protocol-3 wave rollout in flight, with review PRs, migrates ────────────────────────────
 scen m
@@ -1225,6 +1680,20 @@ run
 has "$out" "running ro-ceremony" "R3: every task done but its completion ceremony not run: still running"
 run --tasks-dir "$S/nowhere"
 ok "$rc|$out" "0|none" "R4: a missing tasks dir (no vault) → none"
+# R5 (ADR 0043): a rollout on its Engine snapshot never runs on the primary checkout, so it holds nothing
+mkro ro-snap.md "$R" 'engine_snapshot: "~/repos/tools/plug-snapshots/0123456789ab"' "engine_sha: $(printf '0%.0s' $(seq 40))"
+mkt t-snap.md ro-snap open "owner: lead"
+run
+hasnt "$out" "ro-snap" "R5: a started rollout stamped engine_snapshot: is never running"
+has "$out" "running ro-live" "R5: … an unsnapshotted one still is"
+
+# R6 (p30-4): an approved queue whose only marks are the Stage's ended room stops has run nothing, so it holds nothing;
+# a plain rollout with the same room stops has run, and still does
+BODY="$RS_ENDED" mkro ro-aq.md "$R" "$AQ_HOLD" "$AQ_ON"; mkt t-aq.md ro-aq open
+BODY="$RS_ENDED" mkro ro-rs.md "$R" "$AQ_HOLD"; mkt t-rs.md ro-rs open
+run
+hasnt "$out" "ro-aq" "R6: an approved queue with only ended room stops is not running"
+has "$out" "running ro-rs" "R6: … a plain one with the same room stops is"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

@@ -383,7 +383,7 @@ test('a malformed args.ladder is refused before any dispatch, in both modes', as
   for (const [what, ladder] of bad) {
     for (const args of [mkArgs(mkTask('proj-bad'), { ladder }), integrateArgs(mkI(), { ladder })]) {
       const r = await run(args, {})
-      assert.match(String(r.error && r.error.message), /^args\.ladder: /, `${args.mode || 'task'}: ${what}`)
+      assert.match(String(r.error && r.error.message), /^thread:args-refused: args\.ladder: /, `${args.mode || 'task'}: ${what}`)
       assert.equal(r.calls.length, 0, what)
     }
   }
@@ -447,7 +447,7 @@ test('integrate: a neutral record and a legacy tier record both pass and give a 
   ]
   for (const rung of bad) {
     const r = await run(integrateArgs(mkI({ rung })), integrateScript)
-    assert.match(String(r.error && r.error.message), /^args\.integration: rung /, JSON.stringify(rung))
+    assert.match(String(r.error && r.error.message), /^thread:args-refused: args\.integration: rung /, JSON.stringify(rung))
     assert.equal(r.calls.length, 0)
   }
 })

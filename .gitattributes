@@ -1,2 +1,8 @@
 # Shell scripts run under bash on every host; CRLF endings break them in Git Bash.
 *.sh text eol=lf
+# The prose id (ADR 0043; skills/_shared/engine-snapshot.md): a checkout expands each file's one `$Id$` marker to its
+# blob id, so a rollout's lead can tell whether the text it is following is its Engine snapshot's own.
+skills/schedule/SKILL.md ident
+skills/execute/SKILL.md ident
+skills/status/SKILL.md ident
+skills/repair/SKILL.md ident

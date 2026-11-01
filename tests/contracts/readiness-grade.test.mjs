@@ -14,7 +14,11 @@
 //       and ADR 0041 § Build rulings names the order and the doc.
 //   c6  § Shape cites execution-fit.md read with every decision answered; § The raise states both steps; § Each decision
 //       requires 2 to 4 options with the recommendation one of them; § The grade cites grill-fit.md steps 2(a) and 2(b)
-//       and orient § 2 Open forks rather than restating either; § What the agent reads cites CONTEXT.md
+//       and orient § 2 Open forks rather than restating either, and draws its three kinds of fork with their `owner`;
+//       § Each decision's `owner` keeps `gate`, a credential, an irreversible step and any sign-off off the ruled kinds
+//       (ADR 0008), spend alone `priorities` (Chorus ADR 0108 d4), with `goal` and `stakes`, and a fork the code or
+//       research settles `technical` whatever the confidence (ADR 0061); § The grade makes a decision he could answer
+//       only with the project's design in view Orient, never a One call; § What the agent reads cites CONTEXT.md
 //       **Thread home** with all three homes (the repo, the ~/Projects folder, _shared/threads) and open's
 //       § Repo-thread lookup, so a project with no code repo still has its thread read.
 //   c7  CONTEXT.md has **Ranked slate**, and **Readiness grade** says low confidence raises the grade (no scan-only
@@ -43,7 +47,7 @@ const ADR = 'docs/adr/0041-orient-all-runs-the-estate-pass.md'
 const HEADINGS = ['Gradeable tasks', 'The grading agents', 'What the agent reads', 'The grade', 'Shape', 'Each decision',
   'The raise', 'Size, deadlines and review', 'Output', 'Dependencies', 'The ranking', 'The Unpark offer']
 const CONSTANTS = ['GRADES', 'SHAPES', 'SIZE_MINUTES', 'DECISION_MINUTES', 'REVIEW_MINUTES', 'ATTENTION_FLOOR', 'OPTIONS_MIN',
-  'OPTIONS_MAX', 'DUE_SOON_DAYS', 'SNOOZE_DAYS', 'SNOOZE_KEYS', 'GATE_KINDS', 'CONFIDENCE']
+  'OPTIONS_MAX', 'DUE_SOON_DAYS', 'SNOOZE_DAYS', 'SNOOZE_KEYS', 'GATE_KINDS', 'CONFIDENCE', 'OWNERS']
 // The ranking key, in order: each numbered item's bold lead.
 const KEY = [/^Parked homes last/, /^Due soon first/, /^Crowned homes first/, /^Leverage/, /^Home standing/, /^Home name, then slug/]
 
@@ -151,9 +155,13 @@ function check(files, consts) {
   need('c6', '§ Shape', C(sec(doc, 'Shape')), ['execution-fit.md', 'already answered', 'ruling (c)'])
   need('c6', '§ The raise', C(sec(doc, 'The raise')), ['0 is Ready, 1 is One call, 2 or more is Grill', /`low`[^.]*rises one step/,
     'Orient stays Orient'])
-  need('c6', '§ Each decision', C(sec(doc, 'Each decision')), [/`options`[^.]*required[^.]*2 to 4/, /recommendation[^.]*one of the options/])
+  need('c6', '§ Each decision', C(sec(doc, 'Each decision')), [/`options`[^.]*required[^.]*2 to 4/, /recommendation[^.]*one of the options/,
+    "`gate` is never a task decision's owner", 'any sign-off (ADR 0008) is `yours`, never `technical` or `priorities`',
+    'Chorus ADR 0108 d4', '- `goal`', '- `stakes`', '- `owner`',
+    'research could settle is `technical` whatever the confidence, never `yours`'])
   const grade = C(sec(doc, 'The grade'))
-  need('c6', '§ The grade', grade, ['grill-fit.md', 'step 2(a)', 'step 2(b)', 'orient § 2 Open forks'])
+  need('c6', '§ The grade', grade, ['grill-fit.md', 'step 2(a)', 'step 2(b)', 'orient § 2 Open forks', '*His*', '*Ruled now*',
+    "*The session's*", '`owner`', "only with the project's design in view (its ADRs, CONTEXT.md, its thread) makes the task Orient, never a One call"])
   for (const own of ['**Resolvable**', 'bake a gate line', 'List the forks']) {
     if (grade.includes(own)) flag('c6', `§ The grade restates grill-fit.md ("${own}")`)
   }
@@ -230,9 +238,15 @@ test('control c5: the crowned: date reading, or the ADR ruling gone, fails c5 al
   only(swap(FILES, ADR, 'How the slate ranks', 'How it ranks'), CONSTS, ['c5'], 'c5 adr')
 })
 
-test('control c6: a dropped grill-fit citation, or a thread home the reading list drops, fails c6 alone', () => {
+test('control c6: a dropped grill-fit citation, a thread home the reading list drops, a release ruled, `gate` an owner, a technical call kept by confidence, or a design-in-view call left a One call, fails c6 alone', () => {
   only(swap(FILES, DOC, 'step 2(b)', 'its second half'), CONSTS, ['c6'], 'c6')
+  only(swap(FILES, DOC, 'any sign-off (ADR 0008) is `yours`', 'a release (ADR 0008) is `yours`'), CONSTS, ['c6'], 'c6 sign-off')
+  only(swap(FILES, DOC, "`gate` is never a task decision's owner: a process gate is no fork in the task's work, so a grade's\n  `gate` warns and reads as `yours`. ", ''),
+    CONSTS, ['c6'], 'c6 gate')
   only(swap(FILES, DOC, '`~/Projects/<Area>/<Project>/THREAD.md`', 'its folder thread'), CONSTS, ['c6'], 'c6 thread home')
+  only(swap(FILES, DOC, '`technical` whatever the confidence', '`technical` at high confidence'), CONSTS, ['c6'], 'c6 technical')
+  only(swap(FILES, DOC, "design in view (its ADRs, CONTEXT.md, its thread) makes the task Orient", 'design in view is a One call'),
+    CONSTS, ['c6'], 'c6 design in view')
 })
 
 test('control c7: CONTEXT.md without **Ranked slate** fails c7 alone', () => {

@@ -8,6 +8,8 @@ clean-room reviews of its earlier drafts)
 not-sent that reached nobody (notifications turned off, nowhere to send it, however the tool words it), so Lachy at
 the terminal is the one not-sent that counts as pushed and skips the fallback. `rollout-settings.py`'s CLI prints only
 whether a topic is set: on ntfy.sh a topic is its own read and publish credential.)*
+*(Amended 2026-10-27 by p30-8: d2's schedule and orient Planner line is now written on every spend-smell task, recorded
+under `## Decisions (recorded <date>)` and never asked; ADR 0034's 2026-10-27 amendment.)*
 
 ## Context
 

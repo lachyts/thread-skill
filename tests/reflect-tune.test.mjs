@@ -57,9 +57,9 @@ const HEADLINE = { throughput: 0.857, runningHours: 7, merges: 6, tokensPerMerge
   handsOffRate: 0.8333, quality: null, reviewChurn: null }
 const P = (id, key, from, to, extra = {}) => ({ id, key, from, to, ranAt: from, ranAtCause: null, rule: `${key}-rule`, direction: Math.sign(to - from), evidence: `evidence for ${key}`, agreeing: 0, ...extra })
 
-function writeScores(home, { repo = 'o/r', proposals = [], withheld = [], headline = HEADLINE, window = WINDOW, guardrails, ranAt, rollout = 'demo-rollout' } = {}) {
+function writeScores(home, { repo = 'o/r', proposals = [], withheld = [], headline = HEADLINE, window = WINDOW, guardrails, ranAt, rollout = 'demo-rollout', binding = 'slot-bound' } = {}) {
   const p = path.join(home, 'score.json')
-  fs.writeFileSync(p, JSON.stringify({ rollout, repo, window, headline, binding: { constraint: 'slot-bound', why: 'x' }, proposals, withheld, flags: [],
+  fs.writeFileSync(p, JSON.stringify({ rollout, repo, window, headline, binding: { constraint: binding, why: 'x' }, proposals, withheld, flags: [],
     ...(guardrails ? { guardrails } : {}), ...(ranAt ? { ranAt } : {}) }))
   return p
 }
@@ -415,6 +415,14 @@ test('--record-only writes one line with applied [] and never reads the config (
   assert.equal(fs.readFileSync(bad, 'utf8'), '[defaults]\nparallel_ceiling = 0\n')
 })
 
+test('--record-only from a trickle-bound score (p28-6) keeps its binding on the tuning line', (t) => {
+  const home = tmpHome(t)
+  const r = tune(home, ['--scores', writeScores(home, { binding: 'trickle-bound' }), '--record-only'])
+  assert.equal(r.status, 0, r.stderr)
+  const [l] = lines(tuningsPath(home))
+  assert.equal(l.binding, 'trickle-bound')
+})
+
 test('--record-only from a stale seven-score headline (a v1 score.json) records the three new keys as null', (t) => {
   const home = tmpHome(t)
   const { handsOffRate, quality, reviewChurn, ...seven } = HEADLINE
@@ -590,6 +598,13 @@ function writeReflections(home, rows) {
 const TWO_AGREE = [knobLine('2026-10-01T01:00:00.000Z', R0, ['a']), closeLine('2026-10-01T02:00:00.000Z', R0),
   knobLine('2026-10-02T01:00:00.000Z', R1, ['b']), closeLine('2026-10-02T02:00:00.000Z', R1)]
 const autoArgs = (scores, repo, reflection = RNOW) => ['--scores', scores, '--auto', '--repo', repo, '--reflection', reflection]
+// p29-11 (ADR 0051): a Reflection's Time-lost ledger line, which reflect.py `ledger` writes before step 14's --auto. Check
+// (6) holds a Parallel ceiling raise while it is load-topped, and with none at all.
+const H0 = { stalls: 0, 'quota-bound': 0, load: 0, 'lane-bound': 0, rework: 0, 'plan-rejected': 0 }
+const tlLine = (top, hours = {}, { reflection = RNOW, source = 'record' } = {}) => rline('2026-10-06T00:30:00.000Z', 'time-lost', {
+  id: `tl-${source}-${reflection.slice(2)}`, source, reflection, since: '2026-09-29T00:00:00.000Z', until: '2026-10-06T00:00:00.000Z',
+  hours: { ...H0, ...hours }, ...(source === 'record' ? { top } : { month: '2026-10', recorded: H0, rank: Object.keys(H0) }) })
+const TL_NOW = tlLine('stalls', { stalls: 10, load: 2 })
 
 // Held (exit 0): the reason printed, nothing written (no tunings line, the config byte-identical).
 function held(home, args, re, configBefore) {
@@ -605,7 +620,7 @@ test('--auto lands a knob three Reflections agree on: one auto line with reflect
   const home = tmpHome(t)
   const repo = gitRepo(home)
   writeToml(home, CONFIG)
-  writeReflections(home, TWO_AGREE)
+  writeReflections(home, [...TWO_AGREE, TL_NOW])
   const r = tune(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo))
   assert.equal(r.status, 0, r.stderr)
   const [l, ...rest] = lines(tuningsPath(home))
@@ -652,7 +667,7 @@ test('--auto: the key\'s last move (a pick, an auto landing or a revert) resets 
     const home = tmpHome(t)
     const repo = gitRepo(home)
     writeToml(home, CONFIG)
-    writeReflections(home, TWO_AGREE)
+    writeReflections(home, [...TWO_AGREE, TL_NOW])
     fs.writeFileSync(tuningsPath(home), tunings.map((x) => `${x}\n`).join(''))
     const r = tune(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo))
     assert.equal(r.status, 0, `${name}: ${r.stderr}`)
@@ -690,11 +705,55 @@ test('--auto holds a trade, a caution, a breach, a partial window, ranAt != from
   }
 })
 
+test('--auto holds a ceiling raise on a load-topped Time-lost ledger and with none; an audit line is never read (p29-11, ADR 0051)', (t) => {
+  const LOAD = /^held parallel_ceiling: machine load tops the Time-lost ledger \(12\.5 h of 20 h\): a Parallel ceiling raise waits \(ADR 0051\)$/m
+  const NONE = /^held parallel_ceiling: no Time-lost ledger line for Reflection r-20261006T000000Z-aaaaaa: run reflect\.py ledger first$/m
+  const cases = [
+    ['a load-topped ledger', [tlLine('load', { load: 12.5, stalls: 7.5 })], LOAD],
+    ['no ledger line: fails closed', [], NONE],
+    ['another Reflection\'s line only', [tlLine('stalls', { stalls: 3 }, { reflection: R1 })], NONE],
+    ['an audit line alone is no ledger line', [tlLine(null, { load: 40 }, { source: 'audit' })], NONE],
+  ]
+  for (const [name, rows, re] of cases) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    writeReflections(home, [...TWO_AGREE, ...rows])
+    held(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo), re, CONFIG)
+  }
+  // the control: the same week without the load on top lands; an audit line finding 40 h of load beside a stalls-topped
+  // record line lands too: audit lines are never read for the hold
+  for (const rows of [[TL_NOW], [tlLine(null, { load: 40 }, { source: 'audit' }), TL_NOW]]) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    writeReflections(home, [...TWO_AGREE, ...rows])
+    const r = tune(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo))
+    assert.equal(r.status, 0, r.stderr)
+    assert.match(r.stdout, /^applied parallel_ceiling 3 → 4 for o\/r: /m)
+  }
+})
+
+test('the load hold holds a ceiling raise only: a lower and a round-cap raise pass check (6) on a load-topped ledger', (t) => {
+  const home = tmpHome(t)
+  const body = ['import importlib.util, json, sys', 'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)', 'a = json.load(sys.stdin)',
+    'print(json.dumps([m.load_hold(p, a["rid"], a["lines"]) for p in a["props"]]))'].join('\n')
+  const lines = [JSON.parse(tlLine('load', { load: 12.5, stalls: 7.5 }))]
+  const props = [RAISE(), P('p2', 'parallel_ceiling', 4, 3, { rule: 'quota-bound-lower', direction: -1 }),
+    P('p3', 'max_review_rounds', 4, 5, { rule: 'review-rounds-raise', direction: 1 })]
+  const r = spawnSync('python3', ['-B', '-c', body, TUNE], { encoding: 'utf8', env: env(home), input: JSON.stringify({ rid: RNOW, lines, props }) })
+  assert.equal(r.status, 0, r.stderr)
+  const [raise, lower, cap] = JSON.parse(r.stdout)
+  assert.match(raise, /^machine load tops the Time-lost ledger/)
+  assert.deepEqual([lower, cap], [null, null])
+})
+
 test('--auto reads: torn lines skipped; an unreadable reflections.jsonl is exit 1; a closed --reflection is exit 2', { skip: process.getuid?.() === 0 && 'root ignores the mode' }, (t) => {
   const home = tmpHome(t)
   const repo = gitRepo(home)
   writeToml(home, CONFIG)
-  writeReflections(home, [...TWO_AGREE, '{"kind": "proposal", "id": "torn'])
+  writeReflections(home, [...TWO_AGREE, TL_NOW, '{"kind": "proposal", "id": "torn'])
   const scores = writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS })
   const ok = tune(home, [...autoArgs(scores, repo), '--dry-run'])
   assert.equal(ok.status, 0, ok.stderr)
@@ -804,4 +863,160 @@ test('tune.py and the score.py it loads parse as python 3.8', () => {
     const r = spawnSync('python3', ['-B', '-c', 'import ast, sys\nast.parse(open(sys.argv[1]).read(), sys.argv[1], feature_version=(3, 8))', script], { encoding: 'utf8' })
     assert.equal(r.status, 0, `${path.basename(script)}: ${r.stderr}`)
   }
+})
+
+// ---- KT1: the writer raises the file's schema (ADR 0043, p29-1) ----------------------------------------------------
+// rollout-settings.py's add-a-key recipe: any writer that adds a key above the file's `schema` raises the file's top-level
+// `schema` line in the same edit. tune.py does it through raise_schema(); patched in process here (the file's harness
+// pattern), so the repo-scope parallel_ceiling reads as a schema-2 key.
+const KT_PATCH = [
+  'import importlib.util, sys',
+  'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+  'tune = importlib.util.module_from_spec(spec); spec.loader.exec_module(tune)',
+  'tune.RS.SCHEMA = 2; tune.RS.KEY_SCHEMA[("rollout", "parallel_ceiling")] = 2',
+]
+function ktTune(home, scores, repo, { identity = false } = {}) {
+  const harness = [...KT_PATCH, ...(identity ? ['tune.raise_schema = lambda lines, *a: lines'] : []), 'sys.exit(tune.main(sys.argv[2:]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', harness, TUNE, '--scores', scores, '--pick', 'p1', '--repo', repo], { encoding: 'utf8', cwd: home, env: env(home) })
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr }
+}
+function ktResolves(home, repo) {
+  const r = spawnSync('python3', ['-B', '-c', [...KT_PATCH, 'import json', 'print(json.dumps(tune.RS.resolve(repo=sys.argv[2])))'].join('\n'), TUNE, repo],
+    { encoding: 'utf8', cwd: home, env: env(home) })
+  assert.equal(r.status, 0, r.stderr)
+  return JSON.parse(r.stdout)
+}
+
+test('KT1 (a) a newer key into a file with no schema line: schema = 2 goes before the first table header', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, '# operator settings\n[defaults]\nmax_iterations = 3\n')
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = ktTune(home, scores, repo)
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'),
+    'schema = 2\n\n# operator settings\n[defaults]\nmax_iterations = 3\n\n[repo."o/r"]\nparallel_ceiling = 5\n')
+  assert.equal(lines(tuningsPath(home)).length, 1, 'one tuning line')
+  const after = ktResolves(home, repo)
+  assert.deepEqual([after.schema.file, after.settings.parallel_ceiling], [2, { value: 5, source: 'file:repo' }])
+})
+
+test('KT1 (b) an existing schema = 1 line is rewritten in place; (c) a higher one is left as it is', (t) => {
+  for (const [given, want] of [['schema = 1   # the file\'s version', 'schema = 2   # the file\'s version'], ['schema = 3', 'schema = 3']]) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, `${given}\n\n[defaults]\nmax_iterations = 3\n`)
+    const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+    const r = ktTune(home, scores, repo)
+    assert.equal(r.status, 0, r.stderr)
+    const text = fs.readFileSync(tomlPath(home), 'utf8')
+    assert.equal(text, `${want}\n\n[defaults]\nmax_iterations = 3\n\n[repo."o/r"]\nparallel_ceiling = 5\n`, given)
+    assert.equal(text.match(/^schema\b/gm).length, 1, `${given}: no second schema line`)
+  }
+})
+
+test('KT1 (d) control: a writer that forgets the raise does not validate, and nothing is written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = '[defaults]\nmax_iterations = 3\n'
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = ktTune(home, scores, repo, { identity: true })
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /^tune: the edit does not validate \(.*rollout\.parallel_ceiling is a schema-2 key but the file says schema = 1.*\): nothing written\n$/)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+})
+
+test('KT1 (e) with no newer key, no schema line is ever added', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, '[defaults]\nmax_iterations = 3\n')
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), '[defaults]\nmax_iterations = 3\n\n[repo."o/r"]\nparallel_ceiling = 5\n')
+})
+
+// ---- KT2: a Tuning never touches a repo's Inert paths (p29-3, ADR 0045) -------------------------------------------------
+// inert_paths (schema 2) is written only by schedule's inert-paths.py record and drop: a Tuning keeps it, and an edit
+// whose result changes any repo's inert_paths is refused with nothing written.
+
+test('KT2 a Tuning keeps inert_paths: the line stays, the schema stays 2, and it resolves as before', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = 'schema = 2\n\n[repo."o/r"]\nparallel_ceiling = 4\ninert_paths = ["THREAD.md", "docs/handoffs/**"]\n\n[repo."o/other"]\ninert_paths = ["THREAD.md"]\n'
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config.replace('parallel_ceiling = 4', 'parallel_ceiling = 5'))
+  const after = resolved(home, repo)
+  assert.deepEqual([after.settings.parallel_ceiling, after.inert_paths], [{ value: 5, source: 'file:repo' },
+    { value: ['THREAD.md', 'docs/handoffs/**'], source: 'file:repo' }])
+})
+
+test('KT2 control: an edit that drops another repo\'s inert_paths is refused, nothing written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = 'schema = 2\n\n[repo."o/r"]\nparallel_ceiling = 4\n\n[repo."o/other"]\ninert_paths = ["THREAD.md"]\n'
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const harness = ['import importlib.util, sys', 'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+    'tune = importlib.util.module_from_spec(spec); spec.loader.exec_module(tune)', 'edit = tune.edit_text',
+    'tune.edit_text = lambda *a: edit(*a).replace(\'inert_paths = ["THREAD.md"]\\n\', "")', 'sys.exit(tune.main(sys.argv[2:]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', harness, TUNE, '--scores', scores, '--pick', 'p1', '--repo', repo], { encoding: 'utf8', cwd: home, env: env(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.equal(r.stderr, "tune: the edit changes a repo's inert_paths: nothing written\n")
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+})
+
+// ---- KT3: a Tuning never touches a repo's test-credential class (ADR 0063) ------------------------------------------------
+// test_credentials (schema 3) is the operator's alone and lives as ONE line in its repo table: the line-by-line edit keeps
+// it byte-identical and inserts after it, an edit whose result changes any repo's class is refused with nothing written
+// (the control patches edit_text, as KT2's does), and the sub-table form is refused before any edit.
+const KT3_CLASS = 'test_credentials = { file = "/x/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }  # test mode only'
+
+test('KT3 (a) a pick beside the one-line class keeps it byte-identical; the insert lands after it', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = `schema = 3\n\n[repo."o/r"]\nmax_iterations = 3\n${KT3_CLASS}\n`
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), `${config}parallel_ceiling = 5\n`)
+  const after = resolved(home, repo)
+  assert.deepEqual([after.settings.parallel_ceiling, after.test_credentials.source, after.test_credentials.value.keys.map((k) => k.name)],
+    [{ value: 5, source: 'file:repo' }, 'file:repo', ['STRIPE_SECRET', 'SUPABASE_SERVICE_ROLE_KEY']])
+})
+
+test('KT3 (b) control: an edit that rewrites another repo\'s class is refused, nothing written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = `schema = 3\n\n[repo."o/r"]\nparallel_ceiling = 4\n\n[repo."o/other"]\n${KT3_CLASS}\n`
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const harness = ['import importlib.util, sys', 'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+    'tune = importlib.util.module_from_spec(spec); spec.loader.exec_module(tune)', 'edit = tune.edit_text',
+    'tune.edit_text = lambda *a: edit(*a).replace(\'file = "/x/.env.local"\', \'file = "/y/.env.local"\')', 'sys.exit(tune.main(sys.argv[2:]))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', harness, TUNE, '--scores', scores, '--pick', 'p1', '--repo', repo], { encoding: 'utf8', cwd: home, env: env(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.equal(r.stderr, "tune: the edit changes a repo's test_credentials: nothing written\n")
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+})
+
+test('KT3 (c) the sub-table form is refused with its remedy, nothing written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = 'schema = 3\n\n[repo."o/r"]\nparallel_ceiling = 4\n\n[repo."o/r".test_credentials]\nfile = "/x/.env.local"\nkeys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }]\n'
+  writeToml(home, config)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /test_credentials must be one line in that table: test_credentials = \{ file = "…", keys = \[ … \] \}/)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config, 'the config is byte-identical')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
 })

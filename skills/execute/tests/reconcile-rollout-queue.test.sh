@@ -71,8 +71,9 @@ PY
 fm() { grep -m1 "^$2:" "$D/$1.md" || echo "<none>"; }   # fm <slug> <key> — the frontmatter line
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
-# The dir holds one fresh Away file (p28-1, execute away.md), so each rollout runs to its own ceiling, never the Trickle
-# (reconcile-rollout-trickle.test.sh pins that): Away from the day's start, it never lapses at any --now used here.
+# The dir holds one fresh Away file (p28-1, execute away.md) whose Away cap (99, p29-8) never binds, so each rollout runs
+# to its own ceiling, never the Trickle or the Away cap (reconcile-rollout-trickle.test.sh pins those): Away from the
+# day's start, it never lapses at any --now used here.
 EH="$TMP/settings-home"; mkdir -p "$EH"; away_file "$EH" 2026-10-02T00:00:00Z
 nxt() { HOME="$EH" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
 # status reads the operator's ladder file (its `ladder` key, each task's rungDrift): HOME is pinned to an empty
@@ -215,12 +216,16 @@ ok "$rc" 0 "settings: mark-started --rollout exits 0"
 has "$out" "progress: 2/5 merged, 1 running, 2 queued" "settings: … and prints its progress line"
 has "$out" "~3h remaining (rough)" "settings: mark-started's ~remaining uses the repo table's ceiling 1"
 # Control: the same notes, read through status's progress line (the same _progress_line), move with the ceiling:
-# the repo table's 1 again, then [defaults]' 2 with the repo table gone, then the built-in 4 with no file.
+# the repo table's 1 again, then [defaults]' 2 with the repo table gone, then the built-in 4 with no file. A fresh Away
+# file whose Away cap (99) never binds keeps the ETA at the ceiling's width (p28-6: the ETA reads the Trickle's limit).
+away_file "$D/home" 2026-10-02T00:00:00Z
 has "$(q "$(rst)" 'd["progress"]')" "~3h remaining (rough)" "settings: control: the repo table's 1 gives ~3h"
 rs_toml '[defaults]' 'parallel_ceiling = 2'
 has "$(q "$(rst)" 'd["progress"]')" "~2h remaining (rough)" "settings: control: [defaults]' 2 gives ~2h"
 rm -f "$D/home/.config/thread/rollouts.toml"
 has "$(q "$(rst)" 'd["progress"]')" "~1h remaining (rough)" "settings: control: no rollouts.toml (built-in 4) gives ~1h"
+rm -f "$D/home/.config/thread/away.json"
+has "$(q "$(rst)" 'd["progress"]')" "~2h remaining (rough)" "settings: control: no away.json reads the Trickle's 2 under the built-in 4: ~2h"
 scen settings-refused
 mkro "$five"; rs_toml '# operator settings' '[defaults]' 'parallel_ceiling = 0'
 mkt a open; mkt b open
@@ -602,15 +607,15 @@ mkt s-x dropped
 J=$(st "" 2026-10-02T12:00:00Z)
 ok "$(q "$J" 'd["counts"]')" '{"awaitingIntegration":1,"folded":1,"integrating":0,"merged":2,"other":1,"queued":1,"running":1,"setAside":1,"setAsideAtIntegration":0,"total":6}' "status: counts"
 ok "$(q "$J" 'd["progress"]')" '"progress: 2/6 merged, 1 running, 1 awaiting integration, 1 queued, 1 set aside — 2h elapsed, ~45m remaining (rough)"' "status: exact progress line"
-ok "$(q "$J" 'd["timeline"]')" '{"avgTaskMinutes":45.0,"complete":false,"durationsUsed":2,"elapsedLabel":"2h","elapsedMinutes":120,"firstStarted":"2026-10-02T10:00+00:00","lastMerged":"2026-10-02T11:15+00:00","remainingEstimateMinutes":45,"remainingLabel":"~45m (rough)","tasks":[{"durationMinutes":30,"merged":"2026-10-02T10:30+00:00","slug":"s-a","started":"2026-10-02T10:00+00:00"},{"durationMinutes":60,"merged":"2026-10-02T11:15+00:00","slug":"s-b","started":"2026-10-02T10:15+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-d","started":"2026-10-02T10:20+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-e","started":"2026-10-02T10:40+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-c","started":"2026-10-02T11:00+00:00"}]}' "status: exact timeline"
+ok "$(q "$J" 'd["timeline"]')" '{"avgTaskMinutes":45.0,"complete":false,"durationsUsed":2,"elapsedLabel":"2h","elapsedMinutes":120,"etaBy":"trickle","etaWidth":2,"firstStarted":"2026-10-02T10:00+00:00","lastMerged":"2026-10-02T11:15+00:00","remainingEstimateMinutes":45,"remainingLabel":"~45m (rough)","tasks":[{"durationMinutes":30,"merged":"2026-10-02T10:30+00:00","slug":"s-a","started":"2026-10-02T10:00+00:00"},{"durationMinutes":60,"merged":"2026-10-02T11:15+00:00","slug":"s-b","started":"2026-10-02T10:15+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-d","started":"2026-10-02T10:20+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-e","started":"2026-10-02T10:40+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-c","started":"2026-10-02T11:00+00:00"}]}' "status: exact timeline"
 ok "$(q "$J" '[t["slug"] for t in d["tasks"]]')" '["s-a","s-b","s-c","s-d","s-e","s-f","s-t","s-x"]' "status: tasks sorted by schedule rank"
 ok "$(q "$J" '{t["slug"]: [t["queueState"], t["setAsideAt"]] for t in d["tasks"]}')" '{"s-a":["merged",null],"s-b":["merged",null],"s-c":["running",null],"s-d":["awaiting-integration",null],"s-e":["set-aside","run"],"s-f":["queued",null],"s-t":["folded",null],"s-x":["other",null]}' "status: queue states"
-ok "$(q "$J" '[t for t in d["tasks"] if t["slug"] == "s-f"][0]')" '{"blockerSummary":"","integrating":null,"merged":null,"pr":null,"priority":"normal","queueState":"queued","rung":null,"rungDrift":"","setAsideAt":null,"slug":"s-f","solo":true,"started":null,"status":"open","waitingOn":["depends on [[s-e]] (blocked)"]}' "status: a queued task's row"
+ok "$(q "$J" '[t for t in d["tasks"] if t["slug"] == "s-f"][0]')" '{"blockerSummary":"","holdUntil":null,"integrating":null,"merged":null,"pr":null,"priority":"normal","queueState":"queued","rung":null,"rungDrift":"","setAsideAt":null,"slug":"s-f","solo":true,"started":null,"status":"open","waitingOn":["depends on [[s-e]] (blocked)"]}' "status: a queued task's row"
 ok "$(q "$J" '[[t["blockerSummary"], t["priority"]] for t in d["tasks"] if t["slug"] == "s-e"][0]')" '["verifier red: flaky fixture","high"]' "status: blockerSummary is the latest run"
 ok "$(q "$J" 'sorted(set(k for t in d["tasks"] for k in t))')" \
-  '["blockerSummary","integrating","merged","pr","priority","queueState","rung","rungDrift","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key)"
+  '["blockerSummary","holdUntil","integrating","merged","pr","priority","queueState","rung","rungDrift","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key; holdUntil, p30-3)"
 ok "$(q "$J" 'sorted(d)')" \
-  '["ceiling","ceilingCause","ceilingError","counts","gitEnvHold","incomplete","ladder","pause_requested","paused","pausedFor","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError and ceilingCause, p15-4; pausedFor, ADR 0034)"
+  '["ceiling","ceilingCause","ceilingError","chainStart","counts","gitEnvHold","holdUntil","incomplete","ladder","laneLog","mainRed","onMerge","pause_requested","paused","pausedFor","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline","trickle"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError and ceilingCause, p15-4; pausedFor, ADR 0034; holdUntil, p30-3; onMerge and chainStart, p30-4; trickle, p28-6; mainRed, p29-2; laneLog, p29-7)"
 setkey s-d integrating 2026-10-02T11:50+00:00
 printf '\n### Run 2 (2026-10-02T11:30+00:00)\n\nIntegration: conflict in a.py\n\n<!-- run 2 end sha=111111111111 -->\n' >> "$D/s-e.md"
 J=$(st "" 2026-10-02T12:00:00Z)
@@ -757,7 +762,7 @@ ok "$(q "$J" '[d["integrating"], d["awaitingIntegration"], d["start"], d["restar
 ok "$(q "$J" 'd["setAside"]')" '[{"setAsideAt":"race","slug":"h-race","status":"review"},{"setAsideAt":"race","slug":"h-unv","status":"blocked"},{"setAsideAt":"integration","slug":"h-old","status":"blocked"}]' "next: both held tasks are set aside at race; an older UNVERIFIED stays at integration"
 ok "$(q "$J" 'd["raceHold"]')" '[{"kind":"RACE","slug":"h-race"},{"kind":"UNVERIFIED","slug":"h-unv"}]' "next: raceHold in rank order with its kind"
 ok "$(q "$J" "$holds")" '{"h-dep":"depends on [[h-race]] (review)"}' "next: the dependant waits on the held task"
-ok "$(q "$J" 'd["halt"]')" 'null' "next: no halt while the held RACE's integrating: stands (its re-verify holds the lane)"
+ok "$(q "$J" '[d["halt"], d["laneHold"]]')" '["race",[{"hold":"race","revert":false,"slug":"h-race"}]]' "next: the undecided RACE holds the lane (laneHold, revert false), and nothing else moves → halt race"
 J=$(st)
 ok "$(q "$J" '{t["slug"]: [t["queueState"], t["setAsideAt"]] for t in d["tasks"] if t["slug"] in ("h-race", "h-unv")}')" '{"h-race":["integrating",null],"h-unv":["set-aside","integration"]}' "status: reports the stored state (status § 3 renders the RACE)"
 # The held RACE whose integrating: stands is still in flight: the lead's re-verify holds the lane on it. A soft
@@ -765,11 +770,11 @@ ok "$(q "$J" '{t["slug"]: [t["queueState"], t["setAsideAt"]] for t in d["tasks"]
 # and a solo waits for it; nothing else is in flight here.
 setkey ro pause_requested true
 J=$(nxt --running "")
-ok "$(q "$J" '[d["pausedNow"], d["paused"], d["pauseRequested"], d["halt"]]')" '[false,null,true,null]' "next: a soft pause does not drain past a held RACE that carries integrating:"
+ok "$(q "$J" '[d["pausedNow"], d["paused"], d["pauseRequested"], d["halt"]]')" '[false,null,true,"race"]' "next: a soft pause does not drain past a held RACE that carries integrating: (the halt is race)"
 ok "$(fm ro paused)|$(fm ro pause_requested)" "<none>|pause_requested: true" "next: … and writes no paused: stamp"
 delkey h-race integrating
 J=$(nxt --running "" --dry-run)
-ok "$(q "$J" '[d["pausedNow"], d["halt"]]')" '[true,"paused"]' "next: once its integrating: is gone, the drain completes (dry-run)"
+ok "$(q "$J" '[d["pausedNow"], d["halt"]]')" '[true,"race"]' "next: once its integrating: is gone, the drain completes (dry-run); race outranks paused"
 setkey h-race integrating 2026-10-02T13:30+00:00
 delkey ro pause_requested
 mkt h-solo open 'solo: true'
@@ -812,10 +817,12 @@ ok "$(fm h-unv status)" "status: done" "resume: the decided UNVERIFIED flips don
 J=$(nxt --running "")
 ok "$(q "$J" 'd["raceHold"]')" '[]' "next: no raceHold once both are decided"
 
-# ── the git-env hold (p14-6; execute § 4.5 *Git-env canary*) ─────────────────────────────────────────────────────
-# An unacked `git-env trip` line on the rollout's `## Git-env log` holds the whole queue: nothing starts or restarts,
-# every stalled or queued task is held, and `halt` is "git-env" ahead of every other verdict, an integrating lane
-# and an awaiting task included. A later `git-env ack` line naming the slug lifts it; a subset ack leaves the rest.
+# ── the git-env hold (p14-6, ADR 0046; execute § 4.5 *Git-env canary*) ────────────────────────────────────────────
+# An unacked `git-env trip` line on the rollout's `## Git-env log` holds what it threatens. A bare checkout (`core.bare
+# false→true`, `core.bare true at arm`, a failed state check's `core.bare true`) holds the whole queue: nothing starts or
+# restarts, every stalled or queued task is held, and `halt` is "git-env" ahead of every other verdict. Any other trip
+# holds the Integration lane only (`laneHold`): starts and restarts go on, and `halt` is "git-env" once nothing else
+# moves. A later `git-env ack` line naming the slug lifts it; a subset ack leaves the rest. A miss line holds nothing.
 gelog() {  # gelog <line> — append one line under ## Git-env log (created when absent)
   python3 - "$D/ro.md" "$1" <<'PY2'
 import sys
@@ -836,20 +843,21 @@ mkt g-run in_progress
 mkt g-stall in_progress
 gelog "$(TRIP 30 g-int integrate)"
 J=$(nxt --running g-run)
-ok "$(q "$J" '[d["halt"], d["start"], d["restart"], [h["slug"] for h in d["gitEnvHold"]], [h["kind"] for h in d["gitEnvHold"]]]')" '["git-env",[],[],["g-int"],["integrate"]]' \
-  "git-env: an unacked trip with an integrating lane and an awaiting task → halt git-env, nothing starts or restarts"
-ok "$(q "$J" "$holds")" '{"g-q":"git-env hold: /thread:repair","g-stall":"git-env hold: /thread:repair"}' "git-env: … every stalled or queued task held with the git-env reason"
-ok "$(q "$(st)" '[h["slug"] for h in d["gitEnvHold"]]')" '["g-int"]' "git-env: status carries gitEnvHold"
+ok "$(q "$J" '[d["halt"], d["start"], d["restart"], [h["slug"] for h in d["gitEnvHold"]], [h["kind"] for h in d["gitEnvHold"]], [h["scope"] for h in d["gitEnvHold"]]]')" '[null,["g-q"],["g-stall"],["g-int"],["integrate"],["lane"]]' \
+  "git-env: a refs/heads trip (lane scope) → g-q starts and g-stall restarts, no halt while g-run runs"
+ok "$(q "$J" '[d["laneHold"], d["integrating"], d["awaitingIntegration"]]')" '[[{"hold":"git-env","slug":"g-int"}],["g-int"],["g-await"]]' "git-env: … laneHold names g-int: the lane is held"
+ok "$(q "$J" "$holds")" '{}' "git-env: … no git-env hold reasons"
+ok "$(q "$(st)" '[[h["slug"], h["scope"]] for h in d["gitEnvHold"]]')" '[["g-int","lane"]]' "git-env: status carries gitEnvHold with its scope"
 gelog "$(TRIP 31 g-run task)"
 gelog '- 2026-10-02T13:40:00+00:00 git-env ack [[g-int]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
 J=$(nxt --running g-run)
-ok "$(q "$J" '[d["halt"], [h["slug"] for h in d["gitEnvHold"]]]')" '["git-env",["g-run"]]' "git-env: a subset ack → the rest still held"
+ok "$(q "$J" '[d["halt"], [h["slug"] for h in d["gitEnvHold"]], d["laneHold"]]')" '[null,["g-run"],[{"hold":"git-env","slug":"g-run"}]]' "git-env: a subset ack → the rest still held"
 gelog '- 2026-10-02T13:41:00+00:00 git-env ack [[G-Run|alias]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
 J=$(nxt --running g-run)
 ok "$(q "$J" '[d["halt"], d["gitEnvHold"], d["start"], d["restart"]]')" '[null,[],["g-q"],["g-stall"]]' "git-env: acked (an alias, any case) → no hold, and the queue starts again"
 ok "$(q "$(st)" 'd["gitEnvHold"]')" '[]' "git-env: … status gitEnvHold []"
 gelog "$(TRIP 50 g-int verify)"
-ok "$(q "$(nxt --running g-run)" '[d["halt"], [h["slug"] for h in d["gitEnvHold"]]]')" '["git-env",["g-int"]]' "git-env: a trip after an ack naming the slug holds again"
+ok "$(q "$(nxt --running g-run)" '[d["halt"], [h["slug"] for h in d["gitEnvHold"]]]')" '[null,["g-int"]]' "git-env: a trip after an ack naming the slug holds again (no halt while g-run runs)"
 
 # The RACE path: a git-env halt at a RACE site writes a `git-env halt` Race log line beside the RACE line. Under
 # the trip, the halt is git-env; once acked, the task is an undecided RACE (named once), out of integrating and start.
@@ -859,7 +867,7 @@ mkt x review 'pr: https://github.com/o/r/pull/9' 'integrating: 2026-10-02T13:10+
 mkt y open
 gelog "$(TRIP 24 x race-verify)"
 J=$(nxt --running "")
-ok "$(q "$J" '[d["halt"], [h["kind"] for h in d["gitEnvHold"]]]')" '["git-env",["race-verify"]]' "git-env RACE: an unacked race-verify trip → halt git-env"
+ok "$(q "$J" '[d["halt"], [h["kind"] for h in d["gitEnvHold"]]]')" '[null,["race-verify"]]' "git-env RACE: an unacked race-verify trip (a lane hold) → y starts, no halt"
 gelog '- 2026-10-02T13:45:00+00:00 git-env ack [[x]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
 J=$(nxt --running "")
 ok "$(q "$J" '[d["gitEnvHold"], d["raceHold"], "x" in d["integrating"], "x" in d["start"], d["halt"] == "git-env"]')" \
@@ -877,9 +885,174 @@ print(json.dumps({"rolloutSlug":"ro","tasks":[{"slug":"gi","scope":"cross-cuttin
   "metrics":{"startedAt":"2026-10-02T10:00+00:00","waitMinutes":60,"durationMinutes":5}}}]}))' \
   | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "$NOW" > /dev/null
 ok "$(fm gi integrating)|$(grep -c ' integrated path=integrator ' "$D/gi.md")" "<none>|1" "git-env integrate: the row reconciles under the trip (integrating: removed, its Integration log line written)"
-ok "$(q "$(nxt --running "")" 'd["halt"]')" '"git-env"' "git-env integrate: … next still halts git-env"
+ok "$(q "$(nxt --running "")" '[d["halt"], d["awaitingIntegration"], d["laneHold"]]')" '["git-env",["gi"],[{"hold":"git-env","slug":"gi"}]]' "git-env integrate: … next halts git-env once only lane work is left"
 gelog '- 2026-10-02T13:45:00+00:00 git-env ack [[gi]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
 ok "$(q "$(nxt --running "")" '[d["halt"], d["awaitingIntegration"]]')" '[null,["gi"]]' "git-env integrate: after the ack it awaits Integration"
+
+# ── git-env scope (ADR 0046): a bare checkout holds the whole rollout, any other trip the lane ───────────────────────
+LINE() { printf -- '- 2026-10-02T13:%s:00+00:00 git-env trip [[%s]] %s: %s; repo %s' "$1" "$2" "$3" "$4" "$D/repo"; }
+scen ge-scope
+mkro $'- [[s-a]]\n- [[s-b]]\n- [[s-q]]'
+mkt s-a review 'pr: https://github.com/o/r/pull/1'
+mkt s-b done
+mkt s-q done
+gelog "$(TRIP 30 s-a integrate)"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["halt"], d["start"], d["awaitingIntegration"], d["laneHold"]]')" '["git-env",[],["s-a"],[{"hold":"git-env","slug":"s-a"}]]' "ge-scope: only lane work left under a lane trip → halt git-env, never complete"
+gelog '- 2026-10-02T13:31:00+00:00 git-env ack [[s-a]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
+gelog "$(LINE 32 s-a task 'record not armed, and the state check failed: refs/heads/master aaa holds commits not on origin master (bbb)')"
+gelog "$(LINE 33 s-a task 'record not armed')"
+gelog "$(LINE 34 s-b task 'core.bare false→true')"
+gelog "$(LINE 35 s-q task 'core.bare true at arm')"
+gelog "$(LINE 36 s-q verify 'record missing, and the state check failed: core.bare true')"
+gelog "$(LINE 37 s-q task 'core.bare true→false')"
+ok "$(q "$(st)" '[h["scope"] for h in d["gitEnvHold"]]')" '["lane","lane","rollout","rollout","rollout","lane"]' "ge-scope: a failed state check and an old record not armed read lane; core.bare false→true, true at arm and a failed check's core.bare true read rollout; true→false reads lane"
+scen ge-whole
+mkro $'- [[w-a]]\n- [[w-q]]'
+mkt w-a review 'pr: https://github.com/o/r/pull/1'
+mkt w-q open
+gelog "$(TRIP 30 w-a integrate)"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["halt"], d["start"]]')" '[null,["w-q"]]' "ge-whole: a lane trip → w-q starts"
+gelog "$(LINE 31 w-a task 'core.bare false→true')"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["halt"], d["start"], d["restart"]]')" '["git-env",[],[]]' "ge-whole: a bare trip beside it → the whole rollout: halt git-env, nothing starts"
+ok "$(q "$J" "$holds")" '{"w-q":"git-env hold: /thread:repair"}' "ge-whole: … the queued task held with the git-env reason"
+gelog '- 2026-10-02T13:40:00+00:00 git-env ack [[w-a]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
+J=$(nxt --running "")
+ok "$(q "$J" '[d["halt"], d["gitEnvHold"], d["laneHold"], d["start"]]')" '[null,[],[],["w-q"]]' "ge-whole: one ack naming both lines → no hold"
+gelog "$(TRIP 50 w-a integrate)"
+ok "$(q "$(nxt --running "")" '[d["halt"], d["start"], [h["scope"] for h in d["gitEnvHold"]]]')" '[null,["w-q"],["lane"]]' "ge-whole: a later lane line → the lane again"
+scen ge-miss
+mkro $'- [[m-a]]'
+mkt m-a open
+gelog "- 2026-10-02T13:30:00+00:00 git-env miss [[m-a]] task: record not armed; refs/heads/master at $(printf 'a%.0s' {1..40}); ls-remote origin master $(printf 'a%.0s' {1..40}); origin/master $(printf 'a%.0s' {1..40}) after a fetch; master on origin; no tracked changes; core.bare false; holds nothing; repo $D/repo"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["gitEnvHold"], d["laneHold"], d["start"], d["halt"]]')" '[[],[],["m-a"],null]' "ge-miss: a miss line alone holds nothing"
+
+# ── a RACE holds the Integration lane, never the whole rollout (ADR 0046) ──────────────────────────────────────────
+M9=$(printf 'f%.0s' {1..40})
+RLOG=$'\n\n## Race log\n\n- 2026-10-02T13:20+00:00 [[x]] RACE: PR #9 merged as '"$M9"' on parent ccc at head aaa, not the integrated pair (head aaa, base ccc); origin/master holds an unverified combination; re-verify it'
+racelog() {  # racelog <line…> — append lines under ## Race log
+  python3 - "$D/ro.md" "$@" <<'PY2'
+import sys
+p, lines = sys.argv[1], sys.argv[2:]
+t = open(p).read()
+head, sep, rest = t.partition("\n## Race log\n\n")
+i = rest.find("\n## ")
+block, tail = (rest, "") if i < 0 else (rest[:i], rest[i:])
+block = block.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
+open(p, "w").write(head + sep + block + tail)
+PY2
+}
+LI="$HERE/../scripts/lead-integrate.py"
+setaside() { printf '%s' "$2" | python3 "$LI" set-aside --note "$D/$1.md" --kind integration | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "$NOW" > /dev/null; }
+scen race-lane
+mkro $'- [[x]]\n- [[y]]\n- [[z]]'"$RLOG"
+mkt x review 'pr: https://github.com/o/r/pull/9' 'integrating: 2026-10-02T13:10+00:00'
+mkt y open
+mkt z review 'pr: https://github.com/o/r/pull/10'
+J=$(nxt --running "")
+ok "$(q "$J" '[d["start"], d["laneHold"], d["halt"], d["mainRed"]]')" '[["y"],[{"hold":"race","revert":false,"slug":"x"}],null,[]]' "race-lane: an undecided RACE → y starts, laneHold names x (revert false)"
+setkey y status done
+J=$(nxt --running "")
+ok "$(q "$J" '[d["start"], d["awaitingIntegration"], d["halt"]]')" '[[],["z"],"race"]' "race-lane: … once nothing else moves (z awaits behind the held lane) → halt race"
+racelog "- 2026-10-02T13:40+00:00 [[x]] revert started: $M9 (re-verify rc 1, red after the Flake check)"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["laneHold"], d["halt"]]')" '[[{"hold":"race","revert":true,"slug":"x"}],null]' "race-lane: a pending revert → revert true, the lane moves (no halt)"
+gelog "$(TRIP 41 z integrate)"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["laneHold"], d["halt"]]')" '[[{"hold":"git-env","slug":"z"},{"hold":"race","revert":true,"slug":"x"}],"git-env"]' "race-lane: … plus a lane trip → halt git-env once nothing moves"
+# revert-tail: the landing tail's line, then the set-aside row. Pending until the row removes integrating:.
+scen revert-tail
+mkro $'- [[x]]\n- [[z]]'"$RLOG" 'pause_requested: true'
+mkt x review 'pr: https://github.com/o/r/pull/9' 'integrating: 2026-10-02T13:10+00:00'
+mkt z review 'pr: https://github.com/o/r/pull/10'
+racelog "- 2026-10-02T13:40+00:00 [[x]] revert started: $M9 (re-verify rc 1, red after the Flake check)" \
+  "- 2026-10-02T13:41+00:00 [[x]] revert opened: PR #11 https://github.com/o/r/pull/11" \
+  "- 2026-10-02T13:50+00:00 [[x]] reverted on main: $(printf 'e%.0s' {1..40}) (revert PR #11 of PR #9's merge ffffffffffff; main back at cccccccccccc's tree); set aside for Lachy"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["laneHold"], d["halt"], d["pausedNow"]]')" '[[{"hold":"race","revert":true,"slug":"x"}],null,false]' "revert-tail: the line written, integrating: still standing → revert true (pending), no halt, the soft pause not drained"
+setaside x "RACE: the re-verify was red after the Flake check; its merge ffffffffffff is reverted on main by eeeeeeeeeeee"
+J=$(nxt --running "")
+ok "$(fm x integrating)|$(q "$J" '[d["laneHold"], d["raceHold"], d["awaitingIntegration"], d["halt"]]')" '<none>|[[],[{"kind":"RACE","slug":"x"}],["z"],null]' "revert-tail: after the real set-aside row → x leaves laneHold (still in raceHold), z awaits, no halt"
+scen revert-unverified
+mkro $'- [[x]]\n- [[z]]'"$RLOG"
+mkt x review 'pr: https://github.com/o/r/pull/9' 'integrating: 2026-10-02T13:10+00:00'
+mkt z review 'pr: https://github.com/o/r/pull/10'
+racelog "- 2026-10-02T13:40+00:00 [[x]] revert started: $M9 (re-verify rc 1, red after the Flake check)" \
+  "- 2026-10-02T13:50+00:00 [[x]] reverted on main: $(printf 'e%.0s' {1..40}) (revert PR #11 of PR #9's merge ffffffffffff; main not re-verified: 1 commit(s) landed after ffffffffffff); set aside for Lachy"
+setaside x "RACE: the re-verify was red after the Flake check; its merge ffffffffffff is reverted on main by eeeeeeeeeeee; main not re-verified: 1 commit(s) landed after ffffffffffff"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["laneHold"], d["awaitingIntegration"], d["halt"]]')" '[[{"hold":"race","revert":false,"slug":"x"}],["z"],"race"]' "revert-unverified: main not re-verified → the lane stays held (revert false), z does not move, halt race"
+scen revert-restored
+mkro $'- [[x]]\n- [[z]]'"$RLOG"
+mkt x review 'pr: https://github.com/o/r/pull/9' 'integrating: 2026-10-02T13:10+00:00'
+mkt z done 'pr: https://github.com/o/r/pull/10'
+racelog "- 2026-10-02T13:40+00:00 [[x]] revert started: $M9 (re-verify rc 1, red after the Flake check)" \
+  "- 2026-10-02T13:50+00:00 [[x]] reverted on main: $(printf 'e%.0s' {1..40}) (revert PR #11 of PR #9's merge ffffffffffff; main back at cccccccccccc's tree); set aside for Lachy"
+setaside x "RACE: the re-verify was red after the Flake check; its merge ffffffffffff is reverted on main by eeeeeeeeeeee"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["laneHold"], d["raceHold"], d["halt"]]')" '[[],[{"kind":"RACE","slug":"x"}],"stuck"]' "revert-restored: a reverted, restored RACE with nothing left → stuck (the decision is Lachy's)"
+# main-red: a revert that did not land holds the whole rollout at once, until Lachy's RACE decided: line.
+scen main-red
+mkro $'- [[x]]\n- [[y]]\n- [[s]]\n- [[l]]'"$RLOG"
+mkt x review 'pr: https://github.com/o/r/pull/9' 'integrating: 2026-10-02T13:10+00:00'
+mkt y open
+mkt s in_progress
+mkt l in_progress
+racelog "- 2026-10-02T13:40+00:00 [[x]] revert started: $M9 (re-verify rc 1, red after the Flake check)" \
+  "- 2026-10-02T13:45+00:00 [[x]] revert did not land: conflict in a.py"
+J=$(nxt --running l)
+ok "$(q "$J" '[d["start"], d["restart"]]')" '[[],[]]' "main-red: a queued and a stalled task, nothing starts or restarts"
+ok "$(q "$J" '[h["reason"][:46] for h in d["hold"]]')" '["main red: the revert of [[x]] did not land: /t","main red: the revert of [[x]] did not land: /t"]' "main-red: … y and s held with the main red reason"
+ok "$(q "$J" '[[m["slug"], m["why"], m["stamp"]] for m in d["mainRed"]]')" '[["x","conflict in a.py","2026-10-02T13:45+00:00"]]' "main-red: mainRed names x and why"
+ok "$(q "$J" '[d["laneHold"], d["halt"], d["running"]]')" '[[{"hold":"race","revert":false,"slug":"x"}],"race",["l"]]' "main-red: laneHold x (revert false), halt race at once with l live"
+ok "$(q "$(st)" '[m["slug"] for m in d["mainRed"]]')" '["x"]' "main-red: status carries mainRed"
+setkey ro paused 2026-10-02T13:50+00:00
+ok "$(q "$(nxt --running l)" 'd["halt"]')" '"race"' "main-red: … under paused: the halt is still race"
+delkey ro paused
+gelog "$(LINE 46 x task 'core.bare false→true')"
+J=$(nxt --running l)
+ok "$(q "$J" '[d["halt"], sorted(set(h["reason"] for h in d["hold"]))]')" '["git-env",["git-env hold: /thread:repair"]]' "main-red: … a bare trip beside it → halt git-env, every hold git-env"
+gelog '- 2026-10-02T13:47:00+00:00 git-env ack [[x]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
+setkey x status dropped
+J=$(nxt --running l)
+ok "$(q "$J" '[[m["slug"] for m in d["mainRed"]], d["start"], d["halt"]]')" '[["x"],[],"race"]' "main-red: x dropped by hand → mainRed still x, nothing starts"
+setkey x status review
+notes_line '- 2026-10-02 repair: [[x]] RACE decided: keep main as it stands'
+J=$(nxt --running l)
+ok "$(q "$J" '[d["mainRed"], d["start"], d["restart"]]')" '[[],["y"],["s"]]' "main-red: Lachy's RACE decided: line → mainRed [], y starts, s restarts"
+# The guards: a decided, reverted RACE never re-enters through resume or hand-back; a new merged pr: passes both.
+scen revert-guards
+mkdir -p "$D/bin"
+cat > "$D/bin/gh" <<'EOG'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr view") printf '{"state":"MERGED","mergedAt":"2026-10-02T13:55:00Z","baseRefName":"main","url":"%s"}\n' "$3" ;;
+  "repo view") echo main ;;
+  *) exit 2 ;;
+esac
+EOG
+chmod +x "$D/bin/gh"
+mkro $'- [[x]]'"$RLOG"
+mkt x blocked 'pr: https://github.com/o/r/pull/9'
+printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T13:55+00:00)\n\nintegration: RACE: the re-verify was red after the Flake check; its merge ffffffffffff is reverted on main by eeeeeeeeeeee\n\n<!-- run 1 end sha=000000000000 -->\n' >> "$D/x.md"
+racelog "- 2026-10-02T13:40+00:00 [[x]] revert started: $M9 (re-verify rc 1, red after the Flake check)" \
+  "- 2026-10-02T13:50+00:00 [[x]] reverted on main: $(printf 'e%.0s' {1..40}) (revert PR #11 of PR #9's merge ffffffffffff; main back at cccccccccccc's tree); set aside for Lachy"
+notes_line '- 2026-10-02 repair: [[x]] RACE decided: re-land it'
+x0=$(cksum < "$D/x.md")
+out=$(HOME="$EH" python3 "$SCRIPT" resume --rollout "$D/ro.md" --tasks-dir "$D" --gh-bin "$D/bin/gh" --now "$NOW" 2>"$D/err"); rc=$?
+ok "$rc|$(fm x status)|$(cksum < "$D/x.md")" "0|status: blocked|$x0" "revert-guards: resume leaves a decided, reverted RACE alone"
+has "$out" "x: its merge was reverted on main: re-land it through a new pr: or defer (/thread:repair) [no-change]" "revert-guards: … saying why"
+out=$(python3 "$SCRIPT" hand-back --tasks x --tasks-dir "$D" --now "$NOW" 2>"$D/err"); rc=$?
+ok "$rc|$(grep -c '^ERROR: ' "$D/err")|$(cksum < "$D/x.md")" "2|1|$x0" "revert-guards: hand-back refuses it (exit 2, one ERROR, nothing written)"
+has "$(cat "$D/err")" "its merge was reverted on main" "revert-guards: … naming the revert"
+setkey x pr https://github.com/o/r/pull/12
+out=$(python3 "$SCRIPT" hand-back --tasks x --tasks-dir "$D" --now "$NOW" 2>"$D/err"); rc=$?
+ok "$rc|$(fm x status)" "0|status: review" "revert-guards: a new pr: (a re-land) passes hand-back"
+out=$(HOME="$EH" python3 "$SCRIPT" resume --rollout "$D/ro.md" --tasks-dir "$D" --gh-bin "$D/bin/gh" --now "$NOW" 2>"$D/err"); rc=$?
+ok "$rc|$(fm x status)" "0|status: done" "revert-guards: … and resume lands the new merged pr:"
 
 # ── the Integration queue's order (p17-1) ─────────────────────────────────────────────────────────
 # `awaitingIntegration` lists a task a queued task depends on (depends-on or blocked-by) first, then the oldest

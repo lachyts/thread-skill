@@ -191,7 +191,7 @@ test('x6: a rejection on the last round reads back as review-blocked, its histor
     assert.equal(r.integration.outcome, 'rejected', 'the live row says Integration; the note alone does not (the Integration log does)')
     reconcile(d, res)
     // The record the engine header's review-blocked seeded-resume rule reads: the latest log line is `rejected`.
-    assert.deepEqual(logLines(d), [LINE('-', 'rejected', `head=${sha('d')} base=${sha('c')} wait=- duration=- triggers=conflict`)])
+    assert.deepEqual(logLines(d), [LINE('-', 'rejected', `head=${sha('d')} base=${sha('c')} wait=- duration=- triggers=conflict active=-`)])
     const note = fs.readFileSync(path.join(d, `${SLUG}.md`), 'utf8')
     const from = note.slice(note.indexOf('## Review-blocked feedback'))
     const next = from.indexOf('\n## ')
@@ -235,7 +235,8 @@ test('x7: an integrated row writes its exact log line; readyAt round-trips from 
   const d = vault('')
   try {
     reconcile(d, await integrated(mkI({ readyAt: '2026-10-02T13:00+00:00', startedAt: T1 })))
-    assert.deepEqual(logLines(d), [LINE(T1, 'integrated', `head=${sha('d')} base=${sha('c')} wait=20 duration=45 triggers=conflict`)])
+    assert.deepEqual(logLines(d), [LINE(T1, 'integrated', `head=${sha('d')} base=${sha('c')} wait=20 duration=45 triggers=conflict active=45`)],
+      'no stop in its Run record: active (p29-13) equals the wall duration')
     assert.equal(fm(d, 'status'), 'review')
     assert.equal(fm(d, 'ready'), undefined, 'an Integration row never stamps ready:')
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
@@ -258,11 +259,11 @@ test('x8: a rejected and a set-aside row each append one line; the x2 sequence e
   const d = vault('')
   try {
     reconcile(d, await rejected())
-    assert.deepEqual(logLines(d), [LINE('-', 'rejected', `head=${sha('d')} base=${sha('c')} wait=- duration=- triggers=conflict`)])
+    assert.deepEqual(logLines(d), [LINE('-', 'rejected', `head=${sha('d')} base=${sha('c')} wait=- duration=- triggers=conflict active=-`)])
     reconcile(d, await setAside())
     const lines = logLines(d)
     assert.equal(lines.length, 2)
-    assert.equal(lines[1], LINE('-', 'set-aside', 'head=- base=- wait=- duration=- triggers=-'))
+    assert.equal(lines[1], LINE('-', 'set-aside', 'head=- base=- wait=- duration=- triggers=- active=-'))
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
 

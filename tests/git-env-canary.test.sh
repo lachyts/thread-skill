@@ -2,7 +2,10 @@
 # p14-6, executed: skills/execute/scripts/git-env-canary.py, the lead's git-env canary (execute § 4.5 *Git-env
 # canary*). A window is armed before a launch and checked when it ends; a change to the shared checkout's
 # refs/heads/<default> or its bareness that is not a close-out is logged on the rollout note's `## Git-env log` and
-# holds the queue until a human ack (repair § 3e). tests/contracts/git-env-canary.test.mjs pins the prose. The pc
+# holds what it threatens until a human ack (repair § 3e, ADR 0046): a bare checkout the whole rollout (exit 3), any
+# other trip the Integration lane (exit 9 at every site but a task window's, which takes its work as it stands, 0).
+# A Bookkeeping miss (record missing, unreadable, not armed) runs the state check and trips only when it fails (the
+# bm cases). tests/contracts/git-env-canary.test.mjs pins the prose. The pc
 # cases pin a rollout clone beside its in-place twin (ADR 0042): only the clone is armed, and only its own move trips.
 #
 # Hermetic: every repo lives under mktemp with a local bare repo as its only remote; the vault (rollout note + task
@@ -27,6 +30,7 @@ trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 EH="$TMP/settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master -c commit.gpgsign=false "$@"; }
 
 S=""; O=""; R=""; V=""; RO=""; C2=""
@@ -83,6 +87,8 @@ recp() { printf '%s/ro/%s.%s.json' "$THREAD_GIT_ENV_DIR" "$1" "${2:-task}"; }
 # recf <slug> <kind> <field> — one record field as JSON ("<none>" when the record is absent)
 recf() { local p; p=$(recp "$1" "$2"); [ -f "$p" ] || { echo "<none>"; return; }; python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get(sys.argv[2])))' "$p" "$3"; }
 trips() { grep -c "git-env trip \[\[$1\]\]" "$RO"; }
+misses() { grep -c "git-env miss \[\[$1\]\]" "$RO"; }
+lacks() { case "$1" in *"$2"*) ok "[$1]" "no '$2'" "$3";; *) ok y y "$3";; esac; }
 acks() { grep -c 'git-env ack' "$RO"; }
 cur() { git -C "$R" rev-parse "${1:-master}"; }
 code() { echo "$RANDOM$RANDOM" >> "$R/${1:-code.txt}"; g -C "$R" add -A; g -C "$R" commit -q -m code; }
@@ -121,16 +127,16 @@ ok "$(recf A task state)|$(recf A task closed)|$(recf A task ref)" "\"armed\"|fa
 chk A; ok "$rc" 0 "a: check on an unchanged repo → 0"
 ok "$(recf A task state)|$(recf A task closed)" '"checked"|true' "a: … the record is a checked tombstone"
 ok "$(grep -c 'git-env' "$RO")" 0 "a: … and the note carries no git-env line"
-chk A; ok "$rc" 3 "a: a repeated check of the closed window → 3 (its tombstone is not this window's arm)"
-has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "task: record not armed" "a: … logged as record not armed"
+chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "a: a repeated check of the closed window, on a clean clone → 0, no trip (a Bookkeeping miss, ADR 0046)"
+has "$(grep 'git-env miss \[\[A\]\]' "$RO")" "task: record not armed; refs/heads/master at" "a: … logged as a record not armed miss with the checkout's state"
 # a2: the skipped arm. A revise, restart or resume of the same task that never armed must not pass on the last
 # window's tombstone: a code commit made with no window open would otherwise go unseen.
 scen a2
 mkt A in_progress
 arm A; chk A; ok "$rc" 0 "a2: arm A, check A → 0"
 code
-chk A; ok "$rc|$(trips A)" "3|1" "a2: a code commit with no new arm, then check A → 3, one trip line"
-has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "task: record not armed" "a2: … logged as record not armed"
+chk A; ok "$rc|$(trips A)" "0|1" "a2: a code commit with no new arm, then check A → 0 (a task window), one trip line"
+has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "task: record not armed, and the state check failed: refs/heads/master" "a2: … logged as record not armed with the failed state check"
 ok "$(recf A task state)|$(recf A task closed)" '"tripped"|true' "a2: … the record reads tripped and closed"
 ackc A "$(cur)"; ok "$rc" 0 "a2: … which the ack clears"
 arm A; chk A; ok "$rc" 0 "a2: a fresh arm, then its check → 0"
@@ -138,13 +144,226 @@ arm A; chk A; ok "$rc" 0 "a2: a fresh arm, then its check → 0"
 scen a3
 mkt A in_progress
 arm A; code; chk A; ackc A "$(cur)"; ok "$(recf A task state)" '"acked"' "a3: a trip on a closed window, acked → acked"
-chk A; ok "$rc|$(trips A)" "3|2" "a3: check A on the acked tombstone with no new arm → 3, a second trip line"
+chk A; ok "$rc|$(trips A)" "0|2" "a3: check A on the acked tombstone with no new arm (the commit still local) → 0, a second trip line"
+
+# ── bm: a Bookkeeping miss runs the state check (ADR 0046) ─────────────────────────────────────────────────────
+# A window the canary could not read (record missing, unreadable, not armed) observed nothing: the check reads the
+# checkout's state there and then (R's master an ancestor of origin's tip by ls-remote and by origin/master after a
+# fetch, T equal to a reading; no tracked changes; not bare). Passing, it logs a miss line and holds nothing; failing,
+# it trips, and only Lachy's ack clears it.
+# upwrap <name> [body]: an upload-pack wrapper for R's origin; it logs each invocation's pid to $S/<name>.pids.
+upwrap() {
+  cat > "$S/$1.sh" <<EOW
+#!/usr/bin/env bash
+echo \$\$ >> "$S/$1.pids"
+n=\$(cat "$S/$1.n" 2>/dev/null || echo 0); echo \$((n+1)) > "$S/$1.n"
+${2:-}
+exec git upload-pack "\$@"
+EOW
+  chmod +x "$S/$1.sh"; g -C "$R" config remote.origin.uploadpack "$S/$1.sh"
+}
+# bm-a: the 2026-10-19 false trip: a window checked twice with no second arm, on a clean clone.
+for k in task verify; do
+  scen "bm-a-$k"
+  if [ "$k" = task ]; then mkt A in_progress; else mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-19T10:00+00:00'; fi
+  arm A "$k"; chk A "$k"; chk A "$k"
+  ok "$rc|$(trips A)|$(acks)|$(misses A)" "0|0|0|1" "bm-a ($k): arm, check, check again on a clean clone → 0, no trip, no ack, one miss line"
+  m=$(grep 'git-env miss \[\[A\]\]' "$RO")
+  for want in "$k: record not armed;" "refs/heads/master at $(cur);" "ls-remote origin master $(cur origin/master);" "origin/master $(cur origin/master) after a fetch;" "master on origin;" "no tracked changes;" "core.bare false;" "holds nothing; repo $R"; do
+    has "$m" "$want" "bm-a ($k): … the miss line names '$want'"
+  done
+  call; ok "$rc" 0 "bm-a ($k): … check-all → 0"
+done
+scen bm-missing
+mkt A in_progress
+chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "bm-missing: a check with no record on a clean clone → 0, one miss line"
+has "$(grep 'git-env miss' "$RO")" "task: record missing;" "bm-missing: … logged as record missing"
+call; ok "$rc" 0 "bm-missing: … check-all → 0"
+scen bm-unread
+mkt A in_progress; mkt I review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-19T10:00+00:00'
+arm A; echo '{not json' > "$(recp A)"
+chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "bm-unread: a task window's unreadable record → 0, one miss line"
+arm I verify; echo '{not json' > "$(recp I verify)"
+chk I verify; ok "$rc|$(trips I)|$(misses I)" "4|0|1" "bm-unread: a verify window's unreadable record → 4 (no verdict), one miss line"
+has "$out" "checked [[I]] verify: no verdict" "bm-unread: … no verdict"
+arm I verify; echo '{x' > "$(recp I verify)"; sleep 1   # a second apart, so this miss line is not the last one's twin
+call; ok "$rc|$(misses I)|$(recf I verify missChecked)" "0|2|false" "bm-unread: a check-all logs the window's miss (its tombstone unconsumed)"
+chk I verify; ok "$rc|$(misses I)|$(recf I verify missChecked)" "4|2|true" "bm-unread: … the window's own check consumes it: 4, no second line"
+# bm-unread-late: the window's own check reads the state there and then, never the earlier check-all's: a local
+# commit after the check-all logged the miss trips the window at its own check, so the re-run's arm never baselines
+# on it. (A's closed window gives check-all its repo: with none known the miss trips at once.)
+scen bm-unread-late
+mkt A in_progress; mkt I review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-19T10:00+00:00'
+arm A; chk A
+arm I verify; echo '{not json' > "$(recp I verify)"
+call; ok "$rc|$(misses I)|$(trips I)|$(recf I verify missChecked)" "0|1|0|false" "bm-unread-late: check-all logs the unreadable record's miss (its tombstone unconsumed)"
+code; X=$(cur)
+chk I verify; ok "$rc|$(misses I)|$(trips I)" "9|1|1" "bm-unread-late: … a local commit, then the window's own check → 9 (the lane), a trip, no second miss"
+has "$(grep 'git-env trip \[\[I\]\]' "$RO")" "verify: record unreadable, and the state check failed: refs/heads/master $X holds commits not on origin master" "bm-unread-late: … the trip line names the failed state check"
+ok "$(recf I verify state)|$(recf I verify closed)|$(recf I verify missChecked)" '"tripped"|true|true' "bm-unread-late: … the record reads tripped, closed and consumed"
+arm I verify; ok "$rc|$(recf I verify state)" '9|"tripped"' "bm-unread-late: … the re-run's arm → 9, nothing baselined on the local commit"
+chk I verify; ok "$rc|$(trips I)" "9|1" "bm-unread-late: … a repeated check of the tripped window → 9, no second trip line"
+scen bm-behind
+mkt A in_progress
+arm A; chk A; push2
+chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "bm-behind: R behind origin after a peer push → 0, a miss (an ancestor of origin's tip)"
+scen bm-untracked
+mkt A in_progress
+arm A; chk A; mkdir -p "$R/.claude"; echo x > "$R/.claude/merge-task.status"; echo y > "$R/stray.txt"
+chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "bm-untracked: an untracked .claude/merge-task.status (and a stray file) → 0, a miss"
+# bm-pp: a peer push between the ls-remote and the fetch: T is not L1, so ls-remote is read again and T matches it.
+scen bm-pp
+mkt A in_progress
+arm A; chk A; l1=$(cur origin/master)
+upwrap pp "if [ \"\$n\" = 1 ]; then unset \$(git rev-parse --local-env-vars); git -C '$C2' fetch -q origin; git -C '$C2' reset -q --hard origin/master; echo p >> '$C2/pp.txt'; git -C '$C2' add -A; git -c user.name=t -c user.email=t@t -C '$C2' commit -q -m pp; git -C '$C2' push -q origin master; fi"
+chk A; l2=$(git -C "$O" rev-parse master)
+ok "$rc|$(trips A)|$(misses A)" "0|0|1" "bm-pp: a peer push between the reads → 0, a miss"
+has "$(grep 'git-env miss' "$RO")" "ls-remote origin master $l1, re-read $l2; origin/master $l2 after a fetch" "bm-pp: … naming both readings"
+# bm-trip: a miss whose state check fails trips, and only an ack clears it.
+for v in local tracked bare fg fg2x fg2l url; do
+  scen "bm-trip-$v"
+  mkt A in_progress
+  arm A; chk A
+  case $v in
+    local) code; want="holds commits not on origin" ;;
+    tracked) echo dirty >> "$R/a.txt"; want="tracked changes" ;;
+    bare) upwrap net; g -C "$R" config --local core.bare true; want="state check failed: core.bare true" ;;
+    fg|fg2l)
+      # A forged refspec keeps the fetch off the forged tracking ref: T (X) is neither ls-remote reading.
+      g -C "$R" config remote.origin.fetch '+refs/heads/*:refs/remotes/elsewhere/*'
+      L=$(cur origin/master); g -C "$R" checkout -q -b forge; code; X=$(cur forge); g -C "$R" checkout -q master
+      g -C "$R" update-ref refs/remotes/origin/master "$X"
+      [ "$v" = fg2l ] || g -C "$R" merge -q --ff-only "$X"
+      want="origin/master $X after a fetch is neither ls-remote reading ($L, re-read $L)" ;;
+    fg2x)
+      # The refspec intact: the fetch overwrites the forged tracking ref (T == L), so the extra commit on R's master
+      # is caught by the ancestry step instead.
+      L=$(cur origin/master); g -C "$R" checkout -q -b forge; code; X=$(cur forge); g -C "$R" checkout -q master
+      g -C "$R" update-ref refs/remotes/origin/master "$X"; g -C "$R" merge -q --ff-only "$X"
+      want="refs/heads/master $X holds commits not on origin master ($L)" ;;
+    url) g -C "$R" remote set-url origin "$S/nowhere.git"; want="ls-remote origin master exited" ;;
+  esac
+  chk A; ok "$rc|$(trips A)|$(misses A)|$(acks)" "$([ "$v" = bare ] && echo 3 || echo 0)|1|0|0" "bm-trip ($v): the miss's state check fails → a trip, no miss, no ack"
+  has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "task: record not armed, and the state check failed: " "bm-trip ($v): … the trip line says so"
+  has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "$want" "bm-trip ($v): … naming '$want'"
+  [ "$v" = fg2x ] && ok "$(cur origin/master)" "$L" "bm-trip (fg2x): … the fetch overwrote the forged tracking ref (T == L)"
+  call; ok "$rc" "$([ "$v" = bare ] && echo 3 || echo 9)" "bm-trip ($v): check-all → $([ "$v" = bare ] && echo '3 (a bare checkout: the whole rollout)' || echo '9 (the lane)')"
+  if [ "$v" = bare ]; then
+    ok "$([ -e "$S/net.pids" ] && echo network || echo none)" none "bm-trip (bare): … no network call"
+    has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "core.bare true; repo" "bm-trip (bare): … the line reads core.bare true, never core.bare false"
+    rst --bare-only
+  fi
+  ackc A "$(cur)"; ok "$rc|$(acks)" "0|1" "bm-trip ($v): … only the ack clears it"
+  call; ok "$rc" 0 "bm-trip ($v): … check-all → 0"
+done
+# The budget: one network budget, min(STATE_TIMEOUT, 0.4 x the lock timeout), each call in its own process group.
+for b in slow slow2 cap; do
+  scen "bm-$b"
+  mkt A in_progress; mkt B in_progress; mkt C in_progress
+  arm A; chk A; arm B; chk B
+  upwrap "$b" 'sleep 60 & echo $! >> "'"$S/$b"'.pids"; wait'
+  case $b in
+    slow) ST=2 LT=8 ;;
+    slow2) ST=2 LT=6 ;;
+    cap) ST=30 LT=5 ;;
+  esac
+  if [ "$b" = cap ]; then
+    t0=$(date +%s); THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT chk A; t1=$(date +%s)
+    ok "$rc|$(( t1 - t0 <= 4 ))" "0|1" "bm-cap: STATE_TIMEOUT=30 under LOCK_TIMEOUT=5 → the miss ends within 4 s (0.4 x the lock timeout)"
+    has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "ls-remote origin master timed out after 2s" "bm-cap: … its ls-remote timed out after 2 s"
+  else
+    THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT python3 "$CAN" check --rollout "$RO" --tasks-dir "$V" --repo "$R" --default master --slug A --kind task > "$S/a.out" 2> "$S/a.err" & pa=$!
+    pb=""
+    if [ "$b" = slow2 ]; then
+      THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT python3 "$CAN" check --rollout "$RO" --tasks-dir "$V" --repo "$R" --default master --slug B --kind task > "$S/b.out" 2> "$S/b.err" & pb=$!
+    fi
+    await "$pa" test -s "$S/$b.pids"
+    t0=$(date +%s); THREAD_GIT_ENV_STATE_TIMEOUT=$ST THREAD_GIT_ENV_LOCK_TIMEOUT=$LT arm C; t1=$(date +%s)
+    ok "$rc|$(recf C task state)" '0|"armed"' "bm-$b: a concurrent task arm C behind the slow miss(es) (LOCK_TIMEOUT=$LT) → 0, armed"
+    ok "$(( t1 - t0 <= 6 ))" 1 "bm-$b: … within 6 s"
+    lacks "$err" "waiting for the lock" "bm-$b: … with no lock-timeout line"
+    wait "$pa"; ra=$?; rb=0; [ -z "$pb" ] || { wait "$pb"; rb=$?; }
+    ok "$ra|$rb" "0|0" "bm-$b: the slow miss's own check(s) → 0 (task windows)"
+    has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "record not armed, and the state check failed: ls-remote origin master timed out after 2s" "bm-$b: … A trips: its ls-remote timed out after 2 s"
+    [ "$b" = slow2 ] && has "$(grep 'git-env trip \[\[B\]\]' "$RO")" "timed out after 2s" "bm-slow2: … and B the same"
+  fi
+  sleep 0.2; alive=0
+  while read -r pid; do kill -0 "$pid" 2>/dev/null && alive=$((alive + 1)); done < "$S/$b.pids"
+  ok "$alive" 0 "bm-$b: … every wrapper process is gone (its group killed)"
+  g -C "$R" config --unset remote.origin.uploadpack
+  call; ok "$rc" 9 "bm-$b: check-all → 9 (the lane)"
+done
+# bm-lk: a concurrent fetch's ref lock: one retry after 1 s passes a lock that is gone by then; a lock that stays trips.
+scen bm-lk
+mkt A in_progress
+LK="$R/.git/refs/remotes/origin/master.lock"
+arm A; chk A; push2; mkdir -p "$(dirname "$LK")"; : > "$LK"
+upwrap lk "[ \"\$n\" = 2 ] && rm -f '$LK'"
+chk A; ok "$rc|$(trips A)|$(misses A)|$(cat "$S/lk.n")" "0|0|1|3" "bm-lk: a ref lock gone before the retry → the fetch's one retry passes (three upload-packs), a miss"
+g -C "$R" config --unset remote.origin.uploadpack
+arm A; chk A; push2; : > "$LK"
+chk A; rm -f "$LK"
+ok "$rc|$(trips A)" "0|1" "bm-lk: a ref lock that stays → a trip"
+has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "cannot lock ref" "bm-lk: … naming cannot lock ref"
+# nv-miss (ADR 0053): a passing miss on a window whose tombstone carries an acked trip gives no verdict either.
+scen nv-miss
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'; mkt T in_progress
+arm A verify; arm T; old=$(cur); code; call; ok "$rc" 9 "nv-miss: a commit mid-window trips both windows (9)"
+g -C "$R" push -q origin master
+ackc A,T "$(cur)"; ok "$rc" 0 "nv-miss: the commit pushed, the ack re-baselines both"
+chk A verify; ok "$rc|$(misses A)" "4|0" "nv-miss: the verify window's check → 4"
+chk A verify; ok "$rc|$(misses A)|$(trips A)" "4|1|1" "nv-miss: … a second check (record not armed) → 4 again, a miss line, no second trip"
+has "$out" "refs/heads/master ${old}→" "nv-miss: … naming the acked trip"
+chk T; ok "$rc" 0 "nv-miss: the task window's check → 0"
+chk T; ok "$rc|$(misses T)" "0|1" "nv-miss: … its second check (a miss) → 0"
+has "$out" "checked [[T]] task: clean, taken as it stands" "nv-miss: … taken as it stands"
+has "$out" "refs/heads/master ${old}→" "nv-miss: … naming the acked trip"
+
+# ── sc: a trip holds what it threatens (ADR 0046) ──────────────────────────────────────────────────────────────
+scen sc-lane
+mkt A in_progress; mkt B in_progress; mkt I review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-19T10:00+00:00'
+arm A; code
+chk A; ok "$rc|$(trips A)" "0|1" "sc-lane: the default branch moved → a task check 0, logged"
+call; ok "$rc" 9 "sc-lane: check-all → 9"
+arm B; ok "$rc|$(recf B task state)" '0|"armed"' "sc-lane: a task arm B → 0, armed"
+arm I integrate; ok "$rc|$(recf I integrate state)" '9|<none>' "sc-lane: arm I integrate → 9, nothing armed"
+has "$err" "LANE HOLD: " "sc-lane: … naming the lane hold"
+code; chk B; ok "$rc|$(trips B)" "0|1" "sc-lane: B's window sees a second move → 0, its trip joins the unacked set"
+ackc A "$(cur)"; ok "$rc" 3 "sc-lane: ack A alone → 3 (the set is A, B)"
+ackc A,B "$(cur)"; ok "$rc" 0 "sc-lane: ack A,B → 0"
+call; ok "$rc" 0 "sc-lane: … check-all → 0"
+scen sc-bare
+mkt A in_progress; mkt B in_progress
+arm A; g -C "$R" config --local core.bare true
+chk A; ok "$rc" 3 "sc-bare: a bare flip → a task check 3 (the whole rollout)"
+arm B; ok "$rc|$(recf B task state)" "3|<none>" "sc-bare: a task arm under it → 3, nothing armed"
+scen sc-atarm
+mkt A in_progress
+g -C "$R" config --local core.bare true
+arm A; ok "$rc|$(recf A task state)" "3|<none>" "sc-atarm: core.bare true at arm → 3, nothing armed"
+has "$(grep 'git-env trip' "$RO")" "task: core.bare true at arm" "sc-atarm: … the line"
+call; ok "$rc" 3 "sc-atarm: … check-all → 3"
+# bl: a lane trip and a bare trip together hold the whole rollout; restore --bare-only, then one ack of every slug.
+scen bl
+mkt A in_progress; mkt C in_progress
+arm A; code; chk A
+call; ok "$rc" 9 "bl: (1) a lane trip → 9"
+arm C; g -C "$R" config --local core.bare true
+chk C; ok "$rc" 3 "bl: (2) a bare trip on top → 3"
+call; ok "$rc" 3 "bl: … check-all 3"
+ackc A,C "$(cur)"; ok "$rc" 3 "bl: (3) ack A,C while R reads bare → 3"
+ackc A "$(cur)"; ok "$rc" 3 "bl: (4) ack A alone → 3 (the set is A, C)"
+rst --bare-only; ok "$rc" 0 "bl: (5) restore --bare-only → 0"
+call; ok "$rc" 3 "bl: … check-all still 3 (C's bare trip stands until the ack)"
+ackc A,C "$(cur)"; ok "$rc" 0 "bl: (6) one ack of A,C → 0"
+call; ok "$rc" 0 "bl: … check-all → 0"
+arm A; code; call; ok "$rc" 9 "bl: (7) a later lane trip → 9"
 
 # ── b: a code commit on local master trips ───────────────────────────────────────────────────────────────────
 scen b
 mkt A in_progress
 arm A; old=$(cur); code; new=$(cur)
-chk A; ok "$rc" 3 "b: a code commit on local master between arm and check → 3"
+chk A; ok "$rc" 0 "b: a code commit on local master between arm and check → 0 (a task window: its work stands)"
 ok "$(trips A)" 1 "b: … one trip line logged"
 has "$(grep 'git-env trip' "$RO")" "task: refs/heads/master ${old}→${new}; repo $R" "b: … naming the kind, old→new and the repo"
 ok "$(recf A task state)|$(recf A task closed)" '"tripped"|true' "b: … the record reads tripped and closed"
@@ -159,8 +378,8 @@ evs() { [ -f "$EVR/ro.jsonl" ] && python3 -c 'import json,sys; print(" ".join("%
 THREAD_EVENTS_DIR="$EVR" arm A; THREAD_EVENTS_DIR="$EVR" chk A
 ok "$(evs)" "<none>" "rr: a clean window records nothing"
 THREAD_EVENTS_DIR="$EVR" arm A; code
-THREAD_EVENTS_DIR="$EVR" chk A; ok "$rc|$(evs)" "3|hold-started:git-env:None" "rr: the trip opens the hold → hold-started git-env, task null"
-THREAD_EVENTS_DIR="$EVR" call; ok "$rc|$(evs)" "3|hold-started:git-env:None" "rr: check-all under the hold records nothing more"
+THREAD_EVENTS_DIR="$EVR" chk A; ok "$rc|$(evs)" "0|hold-started:git-env:None" "rr: the trip opens the hold → hold-started git-env, task null"
+THREAD_EVENTS_DIR="$EVR" call; ok "$rc|$(evs)" "9|hold-started:git-env:None" "rr: check-all under the (lane) hold → 9, records nothing more"
 THREAD_EVENTS_DIR="$EVR" ackc A "$(cur)"
 ok "$rc|$(evs)" "0|hold-started:git-env:None hold-ended:git-env:None" "rr: the ack empties it → hold-ended git-env"
 
@@ -182,7 +401,7 @@ mkt A in_progress
 arm A; push2; ff
 chk A; ok "$rc" 0 "d: a push from a second clone, then fetch + merge --ff-only in R → 0"
 arm A; code
-chk A; ok "$rc" 3 "d2: a code commit not on origin → 3"
+chk A; ok "$rc|$(trips A)" "0|1" "d2: a code commit not on origin → a trip line (the task check 0)"
 scen d3
 mkt A in_progress
 arm A
@@ -211,23 +430,23 @@ arm A4; push2; g -C "$R" fetch -q origin; g -C "$R" rebase -q origin/master
 chk A4; ok "$rc" 0 "r4: S11's shape (a local close-out rebased onto a moved origin) → 0"
 g -C "$R" push -q origin master
 arm A5; echo t2 >> "$R/THREAD.md"; mkdir -p "$R/src"; echo x > "$R/src/x.py"; g -C "$R" add -A; g -C "$R" commit -q -m mixed
-chk A5; ok "$rc" 3 "r5: THREAD.md plus src/x.py → 3"
+chk A5; ok "$rc|$(trips A5)" "0|1" "r5: THREAD.md plus src/x.py → a trip"
 scen r6
 mkt A in_progress
-arm A; cpath docs/handoffs/sub/x.md; chk A; ok "$rc" 3 "r6: a nested docs/handoffs/sub/x.md → 3"
+arm A; cpath docs/handoffs/sub/x.md; chk A; ok "$rc|$(trips A)" "0|1" "r6: a nested docs/handoffs/sub/x.md → a trip"
 scen r7
 mkt A in_progress
 g -C "$R" checkout -q -b side; cpath THREAD.md; g -C "$R" checkout -q master
 arm A; cpath docs/handoffs/w.md; g -C "$R" merge -q --no-ff -m merge side
-chk A; ok "$rc" 3 "r7: a local merge commit (close-out paths only) → 3 (stricter than S9)"
+chk A; ok "$rc|$(trips A)" "0|1" "r7: a local merge commit (close-out paths only) → a trip (stricter than S9)"
 scen r8
 mkt A in_progress
 arm A; g -C "$R" reset -q --hard HEAD~1
-chk A; ok "$rc" 3 "r8: local master reset behind origin → 3"
+chk A; ok "$rc|$(trips A)" "0|1" "r8: local master reset behind origin → a trip"
 scen r10
 mkt A in_progress
 arm A; g -C "$R" commit -q --allow-empty -m empty
-chk A; ok "$rc" 3 "r10: commit --allow-empty → 3 (stricter than S9)"
+chk A; ok "$rc|$(trips A)" "0|1" "r10: commit --allow-empty → a trip (stricter than S9)"
 scen r11
 mkt A in_progress
 mkdir -p "$R/docs/reviews/sub"; echo r > "$R/docs/reviews/r.md"; echo n > "$R/docs/reviews/sub/n.md"
@@ -236,15 +455,15 @@ arm A; g -C "$R" rm -q docs/reviews/r.md; g -C "$R" commit -q -m "close-out: dro
 chk A; ok "$rc" 0 "r11: deleting docs/reviews/r.md (land.sh's review-doc deletion), then THREAD.md → 0"
 scen r12
 mkt A in_progress
-arm A; cpath docs/reviews/new.md; chk A; ok "$rc" 3 "r12: adding docs/reviews/new.md → 3"
+arm A; cpath docs/reviews/new.md; chk A; ok "$rc|$(trips A)" "0|1" "r12: adding docs/reviews/new.md → a trip"
 scen r13
 mkt A in_progress
 mkdir -p "$R/docs/reviews"; echo r > "$R/docs/reviews/r.md"; g -C "$R" add -A; g -C "$R" commit -q -m "review doc"; g -C "$R" push -q origin master
-arm A; cpath docs/reviews/r.md; chk A; ok "$rc" 3 "r13: modifying docs/reviews/r.md → 3"
+arm A; cpath docs/reviews/r.md; chk A; ok "$rc|$(trips A)" "0|1" "r13: modifying docs/reviews/r.md → a trip"
 scen r14
 mkt A in_progress
 mkdir -p "$R/docs/reviews/sub"; echo n > "$R/docs/reviews/sub/n.md"; g -C "$R" add -A; g -C "$R" commit -q -m "nested review doc"; g -C "$R" push -q origin master
-arm A; g -C "$R" rm -q docs/reviews/sub/n.md; g -C "$R" commit -q -m "nested delete"; chk A; ok "$rc" 3 "r14: deleting a nested docs/reviews/sub/n.md → 3"
+arm A; g -C "$R" rm -q docs/reviews/sub/n.md; g -C "$R" commit -q -m "nested delete"; chk A; ok "$rc|$(trips A)" "0|1" "r14: deleting a nested docs/reviews/sub/n.md → a trip"
 # r9: the python port against land.sh's own function, extracted by sed.
 sed -n '/^closeout_shaped() {/,/^}/p' "$LAND" > "$TMP/closeout.sh"
 ok "$(grep -c 'closeout_shaped' "$TMP/closeout.sh")" 1 "r9: land.sh's closeout_shaped extracted"
@@ -379,10 +598,10 @@ ok "$u4" ok "u4: for-each-ref appears only inside _read_state"
 scen e
 mkt A in_progress; mkt B in_progress
 arm A; arm B; code
-chk A; ok "$rc" 3 "e: check A after one code commit → 3"
+chk A; ok "$rc" 0 "e: check A after one code commit → 0 (a task window; the lane is held)"
 ok "$(trips A)|$(trips B)" "1|1" "e: … both windows' lines logged once"
 ok "$(recf A task state)|$(recf A task closed)|$(recf B task state)|$(recf B task closed)" '"tripped"|true|"tripped"|false' "e: … A tripped/closed, B tripped/open"
-chk B; ok "$rc" 3 "e: check B → 3"
+chk B; ok "$rc" 0 "e: check B → 0"
 ok "$(grep -c 'git-env trip' "$RO")" 2 "e: … the log line count unchanged"
 before=$(cksum < "$RO")
 ackc A "$(cur)"; ok "$rc" 3 "e: ack --slugs A (B unacked) → 3"
@@ -397,18 +616,19 @@ scen e2
 mkt A in_progress; mkt B in_progress; mkt C in_progress
 arm A; arm B; arm C
 rm -f "$THREAD_GIT_ENV_DIR/ro/A.task.json"
-chk A; ok "$rc" 3 "e2: A's record deleted → check A 3"
-has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "task: record missing" "e2: … logged as record missing"
+chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "e2: A's record deleted, the clone clean → check A 0, a miss and no trip"
+has "$(grep 'git-env miss \[\[A\]\]' "$RO")" "task: record missing; refs/heads/master at" "e2: … logged as record missing with the checkout's state"
+ok "$(recf A task state)|$(recf A task closed)|$(recf A task miss)" '"checked"|true|"record missing"' "e2: … a closed checked tombstone carrying the miss"
 ok "$(recf B task state)|$(recf C task state)" '"armed"|"armed"' "e2: … B and C stay armed"
-chk C; ok "$rc" 3 "e2: a clean check C under the hold → 3"
-ok "$(recf C task state)" '"checked"' "e2: … still writes C's tombstone"
+chk C; ok "$rc" 0 "e2: a clean check C → 0 (the miss holds nothing)"
+ok "$(recf C task state)" '"checked"' "e2: … C's tombstone"
 code
-chk B; ok "$rc" 3 "e2: a code commit, then check B → 3"
+chk B; ok "$rc" 0 "e2: a code commit, then check B → 0 (a task window)"
 ok "$(trips B)|$(recf B task closed)" "1|true" "e2: … B's line logged and B closed"
 before=$(cksum < "$RO")
-ackc A "$(cur)"; ok "$rc" 3 "e2: ack --slugs A → 3"
+ackc A,B "$(cur)"; ok "$rc" 3 "e2: ack --slugs A,B → 3 (A only missed: it is not in the unacked set)"
 ok "$(cksum < "$RO")" "$before" "e2: … writing nothing"
-ackc A,B "$(cur)"; ok "$rc" 0 "e2: ack --slugs A,B → 0"
+ackc B "$(cur)"; ok "$rc" 0 "e2: ack --slugs B → 0"
 
 # ── e3: a stale ref ──────────────────────────────────────────────────────────────────────────────────────────
 scen e3
@@ -430,24 +650,24 @@ ok "$(recf A task state)|$(recf B task state)" '"tripped"|"tripped"' "e4: … bo
 scen e4b
 mkt A in_progress; mkt B in_progress
 arm A; arm B; rm -f "$THREAD_GIT_ENV_DIR/ro/A.task.json"
-chk A; ok "$rc" 3 "e4b: A's record deleted → check A 3"
+chk A; ok "$rc|$(misses A)" "0|1" "e4b: A's record deleted → check A 0, a miss"
 code
 ackc A "$(cur)"; ok "$rc" 3 "e4b: a code commit, then ack --slugs A → 3"
 ok "$(trips B)|$(recf B task state)|$(recf B task closed)" '1|"tripped"|false' "e4b: … its pass logs B, tripped/open"
-ackc A,B "$(cur)"; ok "$rc" 0 "e4b: ack --slugs A,B → 0"
+ackc B "$(cur)"; ok "$rc" 0 "e4b: ack --slugs B → 0"
 ok "$(recf B task state)|$(recf B task ref)" "\"armed\"|\"$(cur)\"" "e4b: … B re-baselined to the acked ref"
 
 # ── e5: an own record already tripped ────────────────────────────────────────────────────────────────────────
 scen e5
 mkt A in_progress; mkt B in_progress
 arm A; arm B; code
-call; ok "$rc" 3 "e5: check-all after a code commit → 3"
+call; ok "$rc" 9 "e5: check-all after a code commit → 9 (the lane held)"
 ok "$(recf A task closed)|$(recf B task closed)" "false|false" "e5: … both tripped and open"
 tripA=$(recf A task trip); code
-chk A; ok "$rc" 3 "e5: a second commit, then check A → 3"
+chk A; ok "$rc" 0 "e5: a second commit, then check A → 0"
 ok "$(grep -c 'git-env trip' "$RO")|$(recf A task closed)|$(recf A task trip)" "2|true|$tripA" "e5: … no new line, A closed, its trip unchanged"
 dellog 'git-env trip [[A]]'
-chk B; ok "$rc" 3 "e5: A's line deleted by hand, then check B → 3"
+chk B; ok "$rc" 0 "e5: A's line deleted by hand, then check B → 0"
 ok "$(trips A)|$(recf B task closed)" "1|true" "e5: … A's line re-logged once and B closed"
 
 # ── f: fails closed ──────────────────────────────────────────────────────────────────────────────────────────
@@ -460,15 +680,16 @@ mkdir -p "$S/locked"; chmod 555 "$S/locked"
 THREAD_GIT_ENV_DIR="$S/locked/state" arm A; ok "$rc" 2 "f: an unwritable records dir → arm 2"
 chmod 755 "$S/locked"
 arm A; echo '{not json' > "$(recp A)"
-chk A; ok "$rc" 3 "f: a corrupt record → check 3"
-has "$(grep 'git-env trip' "$RO")" "record unreadable" "f: … logged as record unreadable"
+chk A; ok "$rc|$(trips A)|$(misses A)" "0|0|1" "f: a corrupt record, the clone clean → check 0, one miss line, no trip"
+has "$(grep 'git-env miss' "$RO")" "task: record unreadable; refs/heads/master at" "f: … logged as record unreadable with the checkout's state"
+ok "$(recf A task state)|$(recf A task miss)|$(recf A task missChecked)" '"checked"|"record unreadable"|true' "f: … its own check consumed the tombstone"
 scen f2
 mkt A in_progress
 arm A; code; chmod 444 "$RO"
 chk A; ok "$rc" 2 "f: a read-only note → check 2"
 ok "$(recf A task state)" '"tripped"' "f: … the record is left tripped"
 chmod 644 "$RO"
-call; ok "$rc" 3 "f: once the note is writable, check-all → 3"
+call; ok "$rc" 9 "f: once the note is writable, check-all → 9"
 ok "$(trips A)" 1 "f: … and re-logs the line"
 python3 "$CAN" > /dev/null 2>&1; ok "$?" 2 "f: no verb → 2"
 can arm --repo "$R" --default master --kind task; ok "$rc" 2 "f: arm without --slug → 2"
@@ -498,9 +719,11 @@ can ack --repo "$R" --default main --slugs A --ref "$(cur)"; ok "$rc" 2 "v6: tri
 # ── g: the hold outlives the records ─────────────────────────────────────────────────────────────────────────
 scen g
 mkt A in_progress; mkt C in_progress
-arm A; rm -f "$(recp A)"; chk A
-call; ok "$rc" 3 "g: the only record tripped; check-all → 3"
-arm C; ok "$rc|$(recf C task state)" "3|<none>" "g: arm C under the hold → 3, no record written"
+arm A; code; rm -f "$(recp A)"; chk A
+has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "task: record missing, and the state check failed: refs/heads/master" "g: a deleted record with a local commit → a failed state check trips"
+call; ok "$rc" 9 "g: the only record tripped (a lane hold); check-all → 9"
+arm C; ok "$rc|$(recf C task state)" '0|"armed"' "g: a task arm C under the lane hold → 0, armed (task calls go on)"
+has "$err" "LANE HOLD: " "g: … naming the lane hold on stderr"
 PR="$S/plugin"; mkdir -p "$PR/skills/execute/scripts" "$R/.claude"
 ln -s "$CAN" "$PR/skills/execute/scripts/git-env-canary.py"
 printf '#!/usr/bin/env bash\ntouch "%s/stub-ran"\n' "$S" > "$PR/skills/execute/scripts/merge-task.sh"; chmod +x "$PR/skills/execute/scripts/merge-task.sh"
@@ -513,8 +736,24 @@ t = open(src).read().replace("<repoPath>", repo).replace("<rollout-note>", ro).r
 open(dst, "w").write(t)
 PY
 CLAUDE_PLUGIN_ROOT="$PR" bash "$S/backoff.sh" > /dev/null 2>&1; brc=$?
+ok "$brc|$([ -e "$S/stub-ran" ] && echo ran || echo not-run)|$(cat "$R/.claude/merge-task.status" 2>/dev/null)" "9|not-run|failed:git-env:9" \
+  "g: the backoff under a lane hold never runs merge-task.sh and leaves failed:git-env:9 (the lane-hold row)"
+# g3: the same under a bare checkout's hold: failed:git-env:3 (the trip row).
+scen g3
+mkt A in_progress
+PR="$S/plugin"; mkdir -p "$PR/skills/execute/scripts" "$R/.claude"
+ln -s "$CAN" "$PR/skills/execute/scripts/git-env-canary.py"
+printf '#!/usr/bin/env bash\ntouch "%s/stub-ran"\n' "$S" > "$PR/skills/execute/scripts/merge-task.sh"; chmod +x "$PR/skills/execute/scripts/merge-task.sh"
+python3 - "$TMP/g/backoff.tpl" "$S/backoff.sh" "$R" "$RO --tasks-dir $V" <<'PY2'
+import sys
+src, dst, repo, ro = sys.argv[1:]
+t = open(src).read().replace("<repoPath>", repo).replace("<rollout-note>", ro).replace("<the same four args>", "a b c d").replace("sleep 60", "sleep 0")
+open(dst, "w").write(t)
+PY2
+arm A; g -C "$R" config --local core.bare true; call; ok "$rc" 3 "g3: a bare flip → check-all 3"
+CLAUDE_PLUGIN_ROOT="$PR" bash "$S/backoff.sh" > /dev/null 2>&1; brc=$?
 ok "$brc|$([ -e "$S/stub-ran" ] && echo ran || echo not-run)|$(cat "$R/.claude/merge-task.status" 2>/dev/null)" "3|not-run|failed:git-env:3" \
-  "g: the backoff under a hold never runs merge-task.sh and leaves failed:git-env:3 (the trip row)"
+  "g3: the backoff under a whole-rollout hold never runs merge-task.sh and leaves failed:git-env:3 (the trip row)"
 # g2: a check-all that fails for another reason (a lock timeout, exit 2) records its own exit, so step 4 routes it
 # to `git-env canary failed`, never to the trip reason.
 scen g2
@@ -536,6 +775,7 @@ ok "$brc|$([ -e "$S/stub-ran" ] && echo ran || echo not-run)|$(cat "$R/.claude/m
 rows=$(grep -E '^   \| `failed:git-env:' "$SKILL")
 has "$rows" '`failed:git-env:3` | Halt with `reason="git-env trip: the shared checkout changed"`' "g2: step 4 routes failed:git-env:3 to the trip reason"
 has "$rows" '`failed:git-env:<any other rc>` | Halt with `reason="git-env canary failed"`' "g2: … and any other rc to git-env canary failed"
+has "$rows" '`failed:git-env:9` | The lane is held' "g2: … and failed:git-env:9 to the lane hold, no halt"
 
 # ── h: concurrency ───────────────────────────────────────────────────────────────────────────────────────────
 scen h
@@ -544,11 +784,11 @@ arm A; arm B; code
 python3 "$CAN" check --rollout "$RO" --tasks-dir "$V" --repo "$R" --default master --slug A --kind task > /dev/null 2>&1 & pa=$!
 python3 "$CAN" check --rollout "$RO" --tasks-dir "$V" --repo "$R" --default master --slug B --kind task > /dev/null 2>&1 & pb=$!
 wait "$pa"; ra=$?; wait "$pb"; rb=$?
-ok "$ra|$rb" "3|3" "h: two concurrent checks each exit 3"
+ok "$ra|$rb" "0|0" "h: two concurrent checks each exit 0 (task windows)"
 ok "$(trips A)|$(trips B)" "1|1" "h: … each line appears once"
 ok "$(recf A task state)$(recf A task closed)|$(recf B task state)$(recf B task closed)" '"tripped"true|"tripped"true' "h: … both records tripped and closed"
 dellog 'git-env trip [[B]]'
-call; ok "$rc|$(trips B)" "3|1" "h: a trip line deleted by hand is re-appended once by the next check-all"
+call; ok "$rc|$(trips B)" "9|1" "h: a trip line deleted by hand is re-appended once by the next check-all"
 
 # ── i: ack refuses while bare; restore clears bare at both levels ────────────────────────────────────────────
 scen i
@@ -625,7 +865,7 @@ ok "$?|$(git -C "$S/decoy" rev-parse HEAD)" "0|$dh" "k: … its check is clean a
 scen l
 mkt A in_progress
 arm A; code
-can retire; ok "$rc|$(trips A)" "3|1" "l: a leftover differing record → retire's check-all 3, the trip logged"
+can retire; ok "$rc|$(trips A)" "9|1" "l: a leftover differing record → retire's check-all 9, the trip logged"
 ok "$([ -d "$THREAD_GIT_ENV_DIR/ro" ] && echo kept)" kept "l: … nothing deleted"
 scen l2
 mkt A in_progress
@@ -638,7 +878,7 @@ ok "$([ -d "$THREAD_GIT_ENV_DIR/ro" ] && echo dir || echo gone)|$([ -f "$THREAD_
 scen n
 mkt A in_progress; mkt B in_progress
 arm A; code
-arm B; ok "$rc|$(trips A)|$(recf B task state)" "3|1|<none>" "n: A armed, the ref moves, arm B → 3, A's trip logged, no B record"
+arm B; ok "$rc|$(trips A)|$(recf B task state)" '0|1|"armed"' "n: A armed, the ref moves, arm B → A's trip logged, B armed (a task arm under a lane hold)"
 
 # ── q: closed windows ────────────────────────────────────────────────────────────────────────────────────────
 scen q1
@@ -653,7 +893,7 @@ code; call; ok "$rc" 0 "q2: … a later commit → 0"
 scen q3
 mkt A in_progress
 arm A; code; setst A blocked
-call; ok "$rc|$(recf A task state)|$(recf A task closed)" '3|"tripped"|true' "q3: the commit first, then the orphan → 3 (compared once)"
+call; ok "$rc|$(recf A task state)|$(recf A task closed)" '9|"tripped"|true' "q3: the commit first, then the orphan → 9 (compared once)"
 scen q4
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-03T10:00+00:00'
 arm A integrate
@@ -678,14 +918,14 @@ chk B; ok "$rc" 0 "q5: … and B's later check → 0: a task window takes its ac
 scen rs1
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
 arm A verify; code
-call; ok "$rc|$(recf A verify state)|$(recf A verify closed)" '3|"tripped"|false' "rs1: the stop's window trips at the entry check-all, still open (the owner holds)"
+call; ok "$rc|$(recf A verify state)|$(recf A verify closed)" '9|"tripped"|false' "rs1: the stop's window trips at the entry check-all, still open (the owner holds)"
 ackc A "$(cur)"; ok "$rc|$(recf A verify state)|$(recf A verify closed)" '0|"armed"|false' "rs1: … an ack while the owner holds re-baselines it"
 chk A verify; ok "$rc|$(trips A)" "4|1" "rs1: … and a check after it → 4, no second trip line"
 has "$out" "checked [[A]] verify: no verdict" "rs1: … no verdict, never clean"
 scen rs2
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
 arm A verify; code
-call; ok "$rc|$(recf A verify state)" '3|"tripped"' "rs2: the stop's window trips at the entry check-all"
+call; ok "$rc|$(recf A verify state)" '9|"tripped"' "rs2: the stop's window trips at the entry check-all"
 python3 - "$V/A.md" <<'PY'
 import sys
 p = sys.argv[1]
@@ -693,8 +933,8 @@ t = open(p).read()
 open(p, "w").write("".join(l for l in t.splitlines(True) if not l.startswith("integrating:")))
 PY
 ackc A "$(cur)"; ok "$rc|$(recf A verify state)" '0|"acked"' "rs2: integrating: removed before the ack → the record is an acked tombstone"
-chk A verify; ok "$rc|$(trips A)" "3|2" "rs2: … a check on it → 3, a second trip line"
-has "$(grep 'git-env trip \[\[A\]\]' "$RO" | tail -n 1)" "verify: record not armed" "rs2: … logged as record not armed"
+chk A verify; ok "$rc|$(trips A)" "9|2" "rs2: … a check on it, the commit still local → 9, a second trip line"
+has "$(grep 'git-env trip \[\[A\]\]' "$RO" | tail -n 1)" "verify: record not armed, and the state check failed" "rs2: … logged as record not armed with the failed state check"
 
 # ── nv: a window acked mid-run gives no verdict (ADR 0053) ────────────────────────────────────────────────────
 # The lead halts on a trip while a verify runs on in the background; Lachy acks; the resumed lead reads the rc and
@@ -703,7 +943,7 @@ for k in verify race-verify integrate; do
   scen "nv-$k"
   mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
   arm A "$k"; old=$(cur); code
-  call; ok "$rc|$(recf A "$k" state)" '3|"tripped"' "nv-$k: a commit mid-window trips at a check-all, the window still open"
+  call; ok "$rc|$(recf A "$k" state)" '9|"tripped"' "nv-$k: a commit mid-window trips at a check-all (9), the window still open"
   ackc A "$(cur)"; ok "$rc|$(recf A "$k" state)" '0|"armed"' "nv-$k: … the ack re-baselines it"
   chk A "$k"; ok "$rc|$(trips A)" "4|1" "nv-$k: … its check → 4, no second trip line"
   has "$out" "checked [[A]] $k: no verdict" "nv-$k: … no verdict"
@@ -743,7 +983,7 @@ call; ok "$rc" 0 "nv-open: check-all with the acked window still open → 0"
 scen nv-3
 mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
 arm A verify; code; call; ackc A "$(cur)"; code
-chk A verify; ok "$rc|$(trips A)" "3|2" "nv-3: an acked trip, then a second commit before the check → 3 (a standing trip wins over 4)"
+chk A verify; ok "$rc|$(trips A)" "9|2" "nv-3: an acked trip, then a second commit before the check → 9 (a standing trip wins over 4)"
 
 # ── s: --tasks-dir ───────────────────────────────────────────────────────────────────────────────────────────
 scen s
@@ -870,7 +1110,7 @@ scen w6
 mkt A in_progress; mkt B open
 arm A; code
 arm B task; ok "$rc|$(trips A)|$(recf A task state)|$(recf B task state)" '2|0|"armed"|<none>' "w6: A armed, the ref moves, arm B (not running) → 2, A's window untouched"
-call; ok "$rc|$(trips A)" "3|1" "w6: … the next check-all trips A"
+call; ok "$rc|$(trips A)" "9|1" "w6: … the next check-all trips A"
 
 # w7: the completion verify's window (estate ADR 0009 d6) is the rollout's own: its slug is the rollout's stem, and
 # its owner holds while the rollout note is not done, so its check comes before the ceremony's `status: done`.
@@ -881,7 +1121,7 @@ has "$err" "the rollout's own ([[ro]])" "w7: … stderr names the rollout's own 
 arm ro completion-verify; ok "$rc|$(recf ro completion-verify state)" '0|"armed"' "w7: arm completion-verify on the open rollout → 0, armed"
 chk ro completion-verify; ok "$rc|$(recf ro completion-verify state)|$(trips ro)" '0|"checked"|0' "w7: … its clean check → 0, a checked tombstone"
 arm ro completion-verify; code
-chk ro completion-verify; ok "$rc|$(trips ro)" "3|1" "w7: re-armed (attempt 2), the ref moves → its check trips the rollout"
+chk ro completion-verify; ok "$rc|$(trips ro)" "9|1" "w7: re-armed (attempt 2), the ref moves → its check trips (9: the lane held)"
 scen w7b
 setst ro done   # the rollout note is $V/ro.md
 arm ro completion-verify; ok "$rc|$(recf ro completion-verify state)" "2|<none>" "w7b: a done rollout opens no completion-verify window → 2"
@@ -924,14 +1164,21 @@ has "$err" "stamp status: in_progress (execute § 4) first" "m2: … naming the 
 ok "$(printf '%s\n' "$err" | grep -c 'run reconcile-rollout.py mark-started')" 0 "m2: … never 'run mark-started first' out of mark-started itself"
 has "$err" "ERROR: A: the task window's arm exited 2; nothing written" "m2: … and mark-started's own line"
 ok "$(cksum < "$V/A.md")|$(recf A task state)|$(slots)" "$a0|<none>|0" "m2: … A.md byte-identical (gates_signed: kept, no started:), no record, no slot-taken"
-# m3: under a git-env hold the arm exits 3 and mark-started writes nothing.
+# m3: under a lane hold the task arm arms and mark-started writes (ADR 0046: task calls go on).
 scen m3
 mkt A in_progress; mkt B in_progress
-arm A; code; call; ok "$rc|$(trips A)" "3|1" "m3: A armed, a code commit, check-all → 3 (the hold)"
+arm A; code; call; ok "$rc|$(trips A)" "9|1" "m3: A armed, a code commit, check-all → 9 (a lane hold)"
+msa B
+ok "$rc|$(recf B task state)|$(started B)" '0|"armed"|1' "m3: under the lane hold, mark-started B with the flags → 0, B armed and stamped"
+has "$err" "LANE HOLD: " "m3: … the canary's LANE HOLD line passes through"
+# m3b: under a bare checkout's hold the arm exits 3 and mark-started writes nothing.
+scen m3b
+mkt A in_progress; mkt B in_progress
+arm A; g -C "$R" config --local core.bare true; call; ok "$rc|$(trips A)" "3|1" "m3b: A armed, a bare flip, check-all → 3 (the whole rollout)"
 b0=$(cksum < "$V/B.md")
 msa B
-ok "$rc|$(cksum < "$V/B.md")|$(recf B task state)" "3|$b0|<none>" "m3: under the hold, mark-started B with the flags → 3, B.md unchanged, no B record"
-has "$err" "ERROR: B: the task window's arm exited 3; nothing written" "m3: … naming the arm's exit"
+ok "$rc|$(cksum < "$V/B.md")|$(recf B task state)" "3|$b0|<none>" "m3b: under the bare hold, mark-started B with the flags → 3, B.md unchanged, no B record"
+has "$err" "ERROR: B: the task window's arm exited 3; nothing written" "m3b: … naming the arm's exit"
 # m4: R bare at the arm is the canary's own trip.
 scen m4
 mkt A in_progress
@@ -948,7 +1195,7 @@ ok "$r1|$r2|$rc|$(trips A)" "0|0|0|0" "m5: mark-started's arm, a resume's own ar
 scen m5b
 mkt A in_progress
 msa A; r1=$rc; code; arm A
-ok "$r1|$rc|$(trips A)" "0|3|1" "m5b: mark-started's arm, a code commit, then the resume's own arm → 3, one trip line"
+ok "$r1|$rc|$(trips A)" "0|0|1" "m5b: mark-started's arm, a code commit, then the resume's own arm → one trip line (a task arm under a lane hold arms)"
 # m6: --dry-run never runs the canary; the flag requirement still applies.
 scen m6
 mkt A in_progress
@@ -1032,13 +1279,20 @@ for variant in ref bare; do
   printf -- '- [[Q]]\n' >> "$RO"
   arm A
   if [ "$variant" = ref ]; then code; else g -C "$R" config --local core.bare true; fi
-  chk A; ok "$rc" 3 "o ($variant): the culprit acts; check A → 3"
+  chk A
   nx=$(HOME="$EH" python3 "$RR" next --rollout "$RO" --tasks-dir "$V" --running A)
-  ok "$(printf '%s' "$nx" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["halt"], d["start"], d["restart"], [t["slug"] for t in d["gitEnvHold"]])')" \
-    "git-env [] [] ['A']" "o ($variant): next → halt git-env, start/restart []"
+  if [ "$variant" = ref ]; then
+    ok "$rc" 0 "o ($variant): the culprit acts; check A → 0 (a task window)"
+    ok "$(printf '%s' "$nx" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["halt"], d["start"], d["restart"], [(t["slug"], t["scope"]) for t in d["gitEnvHold"]], d["laneHold"])')" \
+      "None ['Q'] [] [('A', 'lane')] [{'slug': 'A', 'hold': 'git-env'}]" "o ($variant): next → Q starts, the lane held"
+  else
+    ok "$rc" 3 "o ($variant): the culprit acts; check A → 3"
+    ok "$(printf '%s' "$nx" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["halt"], d["start"], d["restart"], [t["slug"] for t in d["gitEnvHold"]])')" \
+      "git-env [] [] ['A']" "o ($variant): next → halt git-env, start/restart []"
+  fi
   rm -f "$S/merged"
   python3 "$CAN" check-all --rollout "$RO" --tasks-dir "$V" > /dev/null 2>&1 && touch "$S/merged"
-  ok "$([ -e "$S/merged" ] && echo merged || echo held)" held "o ($variant): the pre-merge check-all → 3, so the merge never runs"
+  ok "$([ -e "$S/merged" ] && echo merged || echo held)" held "o ($variant): the pre-merge check-all is non-zero (9 or 3), so the merge never runs"
 done
 
 # ── pc: the rollout clone and its in-place twin (ADR 0042), invariant pins ──────────────────────────────────────
@@ -1074,7 +1328,7 @@ chk A; ok "$rc|$(recf A task state)" '0|"checked"' "pc1b: a push from R during i
 pcscen pc2
 mkt A in_progress
 arm A; code
-chk A; ok "$rc|$(trips A)" "3|1" "pc2: R's own non-benign commit during its window → a trip"
+chk A; ok "$rc|$(trips A)" "0|1" "pc2: R's own non-benign commit during its window → a trip"
 pcscen pc3
 mkt A in_progress
 can arm --repo "$IP" --default master --slug A --kind task

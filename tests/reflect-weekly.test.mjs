@@ -384,6 +384,87 @@ test('span: a missing note is scored by slug and flagged; without --fold the eve
   assert.deepEqual(listing(h.out).filter((f) => !/^(span\.json|orphan\.score\.json)$/.test(f)), [], 'span writes only under --out\'s dir')
 })
 
+// p29-13: the Integration lane's time comes from the rollout's task notes' ## Integration log lines, priced by each
+// line's active figure (active=: the wall less the stalls the Run record logs inside it), never by its wall duration=.
+test('span: laneTime prices the Integration lane by each log line\'s active figure, a stall never as lane work; a line from before p29-13 reads its wall; out-of-window and other rollouts\' lines are not read', (t) => {
+  const h = setup(t)
+  emitAll(h, 'demo', byTs([
+    ...life('stalled', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '15:40')] }),
+    ...life('old', W(6, '00:00'), W(6, '01:00'), { lane: [W(6, '01:00'), W(6, '01:45')] }),
+    ...life('moved', W(6, '02:00'), W(6, '03:00'), { lane: [W(6, '03:00'), W(6, '03:15')] }),
+    [W(6, '04:00'), 'lane-taken', 'unlogged', {}]]))
+  rolloutNote(h, 'demo')
+  const log = (lines) => `## Integration log\n\n${lines.join('\n')}\n`
+  const L = (at, rest) => `${at} integrated path=integrator pr=7 anchor=- head=- base=- wait=1 ${rest}`
+  taskNote(h, 'stalled', { fm: ['rollout: "[[demo]]"'], body: log([
+    L('2026-09-01T11:00+10:00', 'duration=30 triggers=- active=30'), // before since: another week's
+    L('2026-09-04T11:00+10:00', 'duration=876 triggers=conflict active=306'),
+    L('-', 'duration=5 triggers=- active=5')]) }) // no startedAt: never placed in a window
+  taskNote(h, 'old', { fm: ['rollout: "[[demo]]"'], archived: true, body: log([L('2026-09-06T11:00+10:00', 'duration=40 triggers=-')]) })
+  taskNote(h, 'moved', { fm: ['rollout: "[[other]]"'], body: log([L('2026-09-06T13:00+10:00', 'duration=10 triggers=- active=10')]) })
+  taskNote(h, 'unlogged', { fm: ['rollout: "[[demo]]"'] })
+  const lt = entryOf(span(h), 'demo').laneTime
+  assert.deepEqual(lt, {
+    integrations: 2, minutes: 346, wallMinutes: 916, stalledMinutes: 570, wallOnly: 1, unmeasured: 0,
+    lines: [
+      { task: 'stalled', startedAt: '2026-09-04T11:00+10:00', outcome: 'integrated', path: 'integrator', wall: 876, active: 306, lane: 306 },
+      { task: 'old', startedAt: '2026-09-06T11:00+10:00', outcome: 'integrated', path: 'integrator', wall: 40, active: null, lane: 40 }],
+  }, '306 active of the 876-minute window, and the old line\'s 40 wall: the 9.5-hour stall is no lane time')
+})
+
+// p29-10 (ADR 0051): the time-lost ledger's lines are never read as a rollout's (score.py's LEDGER_KINDS), so a rollout
+// whose only in-window lines are ledger lines (a heartbeat's lead-entries, a stop) is not read this week; one with a real
+// line is. p29-11: the Time-lost ledger still counts it.
+test('span: a rollout whose only in-window lines are ledger lines (p29-10) is not read', (t) => {
+  const h = setup(t)
+  const before = byTs(life('a', '2026-08-20T00:00:00Z', '2026-08-20T01:00:00Z', { lane: ['2026-08-20T01:00:00Z', '2026-08-20T01:10:00Z'] }))
+  emitAll(h, 'ledger-only', [...before,
+    [W(4, '00:00'), 'lead-entry', null, { by: 'heartbeat' }],
+    [W(4, '00:20'), 'stopped', null, { cause: 'halt', inferred: false, calls: [] }],
+    [W(4, '00:30'), 'suite-ended', 'a', { suite: 's-0000000000000001', by: 'task', runner: 'agent', outcome: 'green', seconds: 5 }]])
+  emitAll(h, 'live-r', [...byTs(life('b', '2026-08-20T00:00:00Z', '2026-08-20T01:00:00Z')), [W(4, '00:00'), 'idle-slots', null,
+    { reason: 'queue-tail', free: 1, settings: { parallel_ceiling: 2 } }]])
+  rolloutNote(h, 'ledger-only')
+  rolloutNote(h, 'live-r')
+  const s = span(h)
+  assert.equal(entryOf(s, 'ledger-only'), undefined, 'ledger lines alone never make a rollout read')
+  assert.equal(entryOf(s, 'live-r')?.mode, 'read', 'a real in-window line does')
+  // p29-11: counted in the ledger, still not read: its open halt (no reason) runs to until on its live note
+  assert.ok(s.ledger.row.rollouts.stalls.some(([slug]) => slug === 'ledger-only'), JSON.stringify(s.ledger.row.rollouts))
+  assert.ok(s.ledger.row.byCause.stalls.halt > 0, JSON.stringify(s.ledger.row.byCause))
+})
+
+// p29-10: span drops the ledger's lines as it lists the records, so grades.py never sees them either: a task whose only
+// in-span record lines are ledger lines (a suite, why main moved) is no `record` dispatch, and the grades block is
+// byte-equal with or without them, whichever record carries them.
+test('span: the grades block is byte-equal with or without ledger lines (p29-10); a ledger line alone dispatches nothing', (t) => {
+  const h = setup(t)
+  const G = (task, ts, pass) => [ts, 'grade', task, { pass, digest: '0123456789ab', project: 'P', grade: 'Ready',
+    agentGrade: 'Ready', shape: 'parallel', size: 'S', decisions: 0, low: 0, held: false, gates: [] }, null]
+  const P1 = 'g-20260903T000000Z-000001'
+  emitAll(h, 'demo', byTs(life('a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
+  emitAll(h, null, [G('a', W(3, '00:00'), P1), G('c', W(3, '00:00'), P1)])
+  rolloutNote(h, 'demo')
+  taskNote(h, 'a', { status: 'done' })
+  taskNote(h, 'c', { status: 'done', fm: ['completed: 2026-09-05'] })
+  const before = span(h).grades
+  const suite = { suite: 's-0123456789abcdef', by: 'task', runner: 'agent' }
+  const ledger = [
+    [W(4, '05:00'), 'lead-entry', null, { by: 'heartbeat', session: 'A' }],
+    [W(4, '05:10'), 'stopped', null, { cause: 'halt', inferred: false, calls: [] }],
+    [W(4, '05:20'), 'suite-started', 'c', { ...suite, sha: 'a'.repeat(40), dirty: false }],
+    [W(4, '05:30'), 'suite-ended', 'c', { ...suite, outcome: 'green', seconds: 5 }],
+    [W(4, '05:40'), 'base-moved', 'c', { repo: 'o/r', pr: 9, base: 'b'.repeat(40), main: 'c'.repeat(40), inertOnly: false, moversTotal: 0, movers: [] }],
+  ]
+  emitAll(h, 'demo', ledger)
+  emitAll(h, 'ledger-only', ledger)
+  const s = span(h)
+  assert.equal(JSON.stringify(s.grades), JSON.stringify(before), 'the grades block is byte-equal')
+  assert.ok(!s.grades.episodes.some((e) => e.task === 'c'), JSON.stringify(s.grades.episodes))
+  assert.equal(s.grades.window.byGrade.Ready.byHand, 1, 'c, landed with no record line of its own, is by hand')
+  assert.equal(entryOf(s, 'ledger-only'), undefined, 'a record of ledger lines alone is never read')
+})
+
 test('span: close lines: a completed rollout\'s is read, a running one\'s null passes, a dropped or archived one with none is flagged; tunings.jsonl untouched', (t) => {
   const h = setup(t)
   for (const s of ['done-r', 'run-r', 'drop-r', 'arch-r']) emitAll(h, s, byTs(life(`${s}-t`, W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
@@ -466,6 +547,8 @@ test('span: a repair line on until\'s date is read once, by the next span, repai
   assert.equal(entryOf(s2, 'old').mode, 'repairs-only')
   assert.deepEqual(reps(s2, 'old'), [['2026-09-12', ['o'], 'deferred']])
   assert.ok(!s2.flags.some((f) => /undated repair line/.test(f)), 'an unread rollout\'s undated line is not flagged weekly')
+  ok(h, ['ledger', '--span', path.join(h.out, 'span.json')]) // p29-11: the Time-lost ledger's line comes before close
+  ok(h, ['attention', '--span', path.join(h.out, 'span.json')]) // p30-7: the attention line comes before close
   assert.match(ok(h, ['close', '--span', path.join(h.out, 'span.json')]).stdout, /^closed r-/)
   const line = rlines(h).filter((l) => l.kind === 'reflection').pop()
   assert.deepEqual([line.rollouts, line.escapesOnly, line.repairsOnly], [[], [], ['demo', 'old']])
@@ -552,6 +635,8 @@ test('span: two Project roots for one repo: the newest is read, flagged', (t) =>
   emitAll(h, 'r2', byTs(life('b', W(5, '00:00'), W(5, '01:00'), { lane: [W(5, '01:00'), W(5, '01:10')] })))
   rolloutNote(h, 'r1')
   rolloutNote(h, 'r2', { root: second })
+  // p29-10: a late ledger line (a heartbeat's lead-entry) in the older root's record never makes it the newest
+  emitAll(h, 'r1', [[W(6, '00:00'), 'lead-entry', null, { by: 'heartbeat', session: 'A' }]])
   const s = span(h)
   assert.ok(s.flags.some((f) => f.startsWith('repo o/r has 2 Project roots') && f.endsWith(`the newest, ${second}, is read`)), JSON.stringify(s.flags))
 })
@@ -571,9 +656,140 @@ test('span and close: breaches count once per (rollout, Guardrail) only for a fi
   assert.deepEqual([entryOf(s, 'slow').breached, entryOf(s, 'slow').breachCounts], [['throughput'], true])
   const tail = entryOf(s, 'tail')
   assert.deepEqual([tail.partial, tail.breached, tail.breachCounts], [true, ['throughput'], false])
+  ok(h, ['ledger', '--span', path.join(h.out, 'span.json')]) // p29-11: the Time-lost ledger's line comes before close
+  ok(h, ['attention', '--span', path.join(h.out, 'span.json')]) // p30-7: the attention line comes before close
   ok(h, ['close', '--span', path.join(h.out, 'span.json')])
-  const [line] = rlines(h)
+  const [line] = rlines(h).filter((l) => l.kind === 'reflection')
   assert.deepEqual([line.counts.breaches, line.quiet], [1, false])
+})
+
+// ---- freshReview: one entry per landing (ADR 0058 d5) ------------------------------------------------------------
+
+// reviews.jsonl's review-round lines, deduped to the latest per (repo, doc), grouped by (repo, branch), each group
+// kept when a line of it is in the window and read whole; a branchless (pre-ADR 0058) line groups as (repo, null),
+// its in-window lines alone.
+test('span: freshReview reports each landing: rounds, findings and blocking per code round, filed, open, reversals, size; a pending doc counts once, as consumed', (t) => {
+  const h = setup(t)
+  const rr = (ts, doc, fields, repo = 'o/r') => [ts, 'review-round', null, { repo, head: 'abc1234', digest: 'd', doc: `docs/reviews/${doc}.md`, ...fields }, null]
+  const A = { branch: 'feat/a' }
+  emitAll(h, null, [
+    // landing A: a round reviewed before the window (not this window's), a simplify round, and a2 pending, then consumed
+    rr('2026-09-01T10:00:00Z', 'a1', { ...A, mode: 'code', status: 'consumed', findings: 12, blocking: 3, open: 0, filed: 9, recurring: 0, reversal: 0, rejected: 0, regression: 1, lines: 400, files: 9 }),
+    rr(W(4, '01:00'), 'a2', { ...A, mode: 'code', status: 'pending', findings: 10, lines: 420, files: 9 }),
+    rr(W(4, '02:00'), 'as', { ...A, mode: 'simplify', status: 'consumed', findings: 5, filed: 5 }),
+    rr(W(4, '03:00'), 'a2', { ...A, mode: 'code', status: 'consumed', findings: 10, blocking: 1, open: 1, filed: 7, recurring: 2, reversal: 1, rejected: 1, regression: 2, lines: 420, files: 10 }),
+    // landing B: no mode reads as a code round; its doc's line after until is not read
+    rr(W(6, '09:00'), 'b1', { branch: 'feat/b', status: 'consumed', findings: 4, blocking: 0, open: 0, filed: 4, lines: 30, files: 2 }),
+    rr('2026-09-09T15:00:00Z', 'b1', { branch: 'feat/b', status: 'consumed', findings: 4, blocking: 4, open: 4 }),
+    // the same branch name in another repo is another landing
+    rr(W(7, '00:00'), 'x1', { ...A, mode: 'code', status: 'pending', findings: 2 }, 'o/other'),
+    // a landing wholly outside the window, and legacy lines with no branch or disposition (one before the window)
+    rr('2026-08-30T00:00:00Z', 'c1', { branch: 'feat/old', mode: 'code', status: 'consumed', findings: 3, blocking: 1 }),
+    rr('2026-08-31T00:00:00Z', 'legacy-old', { mode: 'code', findings: 9, original: 9, regression: 0 }),
+    rr(W(5, '00:00'), 'legacy', { mode: 'code', findings: 6, original: 4, regression: 2 }),
+  ])
+  const s = span(h)
+  const at = (ts) => new Date(ts).toISOString()
+  // regression is null where no line carries one (unknown, never 0); gradedRounds are the code rounds carrying both
+  // blocking and findings, the ones blockingRate reads
+  assert.deepEqual(s.freshReview, [
+    { repo: 'o/r', branch: 'feat/a', rounds: 2, codeRounds: 1, gradedRounds: 1, findings: [10], blocking: [1], filed: 12,
+      recurring: 2, reversal: 1, rejected: 1, open: 1, regression: 2, lines: 420, files: 10, first: at(W(4, '01:00')),
+      last: at(W(4, '02:00')), blockingRate: 0.1 },
+    { repo: 'o/r', branch: null, rounds: 1, codeRounds: 1, gradedRounds: 0, findings: [6], blocking: [null], filed: null,
+      recurring: null, reversal: null, rejected: null, open: null, regression: 2, lines: null, files: null,
+      first: at(W(5, '00:00')), last: at(W(5, '00:00')), blockingRate: null },
+    { repo: 'o/r', branch: 'feat/b', rounds: 1, codeRounds: 1, gradedRounds: 1, findings: [4], blocking: [0], filed: 4,
+      recurring: null, reversal: null, rejected: null, open: 0, regression: null, lines: 30, files: 2,
+      first: at(W(6, '09:00')), last: at(W(6, '09:00')), blockingRate: 0 },
+    { repo: 'o/other', branch: 'feat/a', rounds: 1, codeRounds: 1, gradedRounds: 0, findings: [2], blocking: [null],
+      filed: null, recurring: null, reversal: null, rejected: null, open: null, regression: null, lines: null, files: null,
+      first: at(W(7, '00:00')), last: at(W(7, '00:00')), blockingRate: null },
+  ], JSON.stringify(s.freshReview))
+  // the branch-null group is no landing: three landings, not four
+  assert.ok(s.cannotShow.includes('/fresh-review: 3 landing(s) reported, not traced to a rollout (reviews.jsonl names none)'),
+    JSON.stringify(s.cannotShow))
+  // The next window holds b1's later line, but its round was reviewed at W(6, '09:00'), in this window: a later line is
+  // a disposition, not a later round, so the next window reports nothing.
+  const next = span(h, [], { since: '2026-09-10T00:00+10:00', until: '2026-09-11T00:00+10:00' })
+  assert.deepEqual(next.freshReview, [], JSON.stringify(next.freshReview))
+})
+
+// The shape c6f5bb9/ba8597 #6 found: a report that sums over a span wider than its window, which nothing automated
+// reads, so nothing else catches it. Every round an entry holds was reviewed inside the window, so the default
+// branch's entry (fresh-review chains on master record branch master) never grows with the record.
+test('span: freshReview holds only rounds reviewed in the window, so the default branch\'s entry never folds in the record', (t) => {
+  const h = setup(t)
+  const rr = (ts, doc, fields) => [ts, 'review-round', null, { repo: 'o/r', head: 'abc1234', digest: 'd', doc: `docs/reviews/${doc}.md`, branch: 'master', mode: 'code', status: 'consumed', ...fields }, null]
+  emitAll(h, null, [
+    rr('2026-06-01T00:00:00Z', 'm-june', { findings: 15, blocking: 4, open: 0 }),                              // months back
+    rr(W(4, '00:00'), 'm-swept', { reviewedAt: '2026-07-01T00:00:00.000Z', findings: 9, blocking: 2, open: 0 }), // swept now, reviewed then
+    rr(W(5, '00:00'), 'm-now', { findings: 6, blocking: 1, open: 0 }),
+  ])
+  const at = (ts) => new Date(ts).toISOString()
+  const s = span(h)
+  assert.deepEqual(s.freshReview.map((e) => [e.branch, e.rounds, e.findings, e.first, e.last]),
+    [['master', 1, [6], at(W(5, '00:00')), at(W(5, '00:00'))]], JSON.stringify(s.freshReview))
+  for (const e of s.freshReview) assert.ok(e.first >= at(W(3, '00:00')) || e.first >= s.since, `entry starts before the window: ${e.first}`)
+  // m-swept arrived in this window but was reviewed in July: counted in no window, and named here, its arrival week
+  assert.ok(s.cannotShow.includes('/fresh-review: 1 round(s) first recorded in this window but reviewed before it: counted in no window'),
+    JSON.stringify(s.cannotShow))
+})
+
+// p34-5 F11: a doc's consumed line can lack the branch (or reviewedAt) its pending line carried; the round keeps its
+// landing, taking each from the newest line of its doc that carries it.
+test('span: freshReview keeps a round in its landing when its consumed line lacks the branch its pending line carried', (t) => {
+  const h = setup(t)
+  const rr = (ts, doc, fields) => [ts, 'review-round', null, { repo: 'o/r', head: 'abc1234', digest: 'd', doc: `docs/reviews/${doc}.md`, mode: 'code', ...fields }, null]
+  emitAll(h, null, [
+    rr(W(4, '01:00'), 'f1', { branch: 'feat/f', status: 'pending', findings: 3 }),
+    rr(W(4, '02:00'), 'f1', { status: 'consumed', findings: 3, blocking: 1, open: 0, filed: 2 }),
+  ])
+  const at = (ts) => new Date(ts).toISOString()
+  assert.deepEqual(span(h).freshReview.map((e) => [e.branch, e.rounds, e.blocking, e.filed, e.first]),
+    [['feat/f', 1, [1], 2, at(W(4, '01:00'))]])
+})
+
+// p34-5 F16: a loop continued in a worktree is one landing: an absolute path groups by its origin's owner/name.
+test('span: freshReview groups by repo identity, so worktree paths and an owner/name line are one landing', (t) => {
+  const h = setup(t)
+  const [wa, wb] = ['wt-a', 'wt-b'].map((n) => {
+    const p = path.join(h.home, n)
+    fs.mkdirSync(p)
+    git(h, ['init', '-q'], p)
+    git(h, ['remote', 'add', 'origin', 'git@github.com:o/r.git'], p)
+    return p
+  })
+  const rr = (ts, doc, repo) => [ts, 'review-round', null, { repo, head: 'abc1234', digest: 'd', doc: `docs/reviews/${doc}.md`, branch: 'feat/w', mode: 'code', status: 'consumed', findings: 2, blocking: 0, open: 0 }, null]
+  emitAll(h, null, [rr(W(4, '01:00'), 'w1', wa), rr(W(4, '02:00'), 'w2', wb), rr(W(4, '03:00'), 'w3', 'O/R')])
+  const s = span(h)
+  assert.deepEqual(s.freshReview.map((e) => [e.repo, e.branch, e.rounds, e.gradedRounds]), [['o/r', 'feat/w', 3, 3]], JSON.stringify(s.freshReview))
+  assert.ok(s.cannotShow.includes('/fresh-review: 1 landing(s) reported, not traced to a rollout (reviews.jsonl names none)'),
+    JSON.stringify(s.cannotShow))
+})
+
+// p34-5 F28: lines with no branch are reported as their repo's branch-null group, never counted as a landing.
+test('span: freshReview\'s branch-null group is reported but never counted as a landing', (t) => {
+  const h = setup(t)
+  emitAll(h, null, [[W(5, '00:00'), 'review-round', null, { repo: 'o/r', head: 'abc1234', digest: 'd', doc: 'docs/reviews/l.md', mode: 'code', findings: 6 }, null]])
+  const s = span(h)
+  assert.deepEqual(s.freshReview.map((e) => [e.repo, e.branch, e.rounds]), [['o/r', null, 1]])
+  assert.ok(!s.cannotShow.some((c) => /landing\(s\) reported/.test(c)), JSON.stringify(s.cannotShow))
+})
+
+// land.sh's --branch-docs sweep records a landing's unrecorded docs at its end, out of round order and seconds apart:
+// rounds are ordered by reviewedAt (when each was reviewed), never by the line's own ts, so open is the last round's.
+test('span: freshReview orders a swept landing by reviewedAt, so open and first/last are the rounds\' own', (t) => {
+  const h = setup(t)
+  const rr = (ts, doc, fields) => [ts, 'review-round', null, { repo: 'o/r', head: 'abc1234', digest: 'd', doc: `docs/reviews/${doc}.md`, branch: 'feat/s', mode: 'code', status: 'consumed', ...fields }, null]
+  emitAll(h, null, [
+    rr(W(5, '12:01'), 'r2', { reviewedAt: W(3, '09:00'), findings: 9, blocking: 1, open: 1 }),
+    rr(W(5, '12:02'), 'r1', { reviewedAt: W(3, '08:00'), findings: 14, blocking: 2, open: 0 }),
+  ])
+  const at = (ts) => new Date(ts).toISOString()
+  const [e] = span(h).freshReview
+  assert.deepEqual([e.findings, e.blocking, e.open, e.first, e.last],
+    [[14, 9], [2, 1], 1, at(W(3, '08:00')), at(W(3, '09:00'))], JSON.stringify(e))
 })
 
 // ---- watch, raised and the Watch reader -----------------------------------------------------------------------------
@@ -922,6 +1138,8 @@ test('knobs end to end: two agreeing earlier Reflections make the newest rollout
   assert.match(early.stderr, new RegExp(`knob ${kid} has no knob proposal line: run knobs\\n$`))
   const scores = [...new Set(s.knobs.land.map((k) => k.scores))]
   assert.equal(scores.length, 1)
+  ok(h, ['ledger', '--span', out]) // p29-11: tune.py --auto holds a ceiling raise until the ledger's line is in
+  ok(h, ['attention', '--span', out]) // p30-7: step 13b, before decide and close
   const r = tune(h, ['--scores', scores[0], '--auto', '--repo', s.knobs.land[0].root, '--reflection', s.reflection, '--config', config])
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /^applied parallel_ceiling 3 → 4 for o\/r: /m)
@@ -959,10 +1177,12 @@ test('knobs end to end: an auto line a later finished run breaches at its to is 
   assert.equal(held.reason, 'a revert of parallel_ceiling comes first this Reflection')
   assert.equal(held.agreed, 3, 'the raise passed tune.py\'s own checks')
   const rv = s.knobs.revert[0]
+  const out = path.join(h.out, 'span.json')
+  ok(h, ['ledger', '--span', out]) // p29-11: the Time-lost ledger's line comes before tune.py and knobs
+  ok(h, ['attention', '--span', out]) // p30-7: step 13b, before decide and close
   const r = tune(h, ['--scores', rv.scores, '--revert', rv.tuning, '--repo', rv.root, '--reflection', s.reflection, '--config', config])
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /^applied parallel_ceiling 4 → 3 for o\/r: /m)
-  const out = path.join(h.out, 'span.json')
   ok(h, ['knobs', '--span', out])
   const mine = rlines(h).filter((l) => l.kind === 'proposal' && l.reflection === s.reflection)
   assert.equal(mine.find((l) => l.id === kid).held, 'a revert of parallel_ceiling comes first this Reflection')
@@ -1444,6 +1664,8 @@ test('the Verify week: one watch line per Watch, a rule line and the decision ta
   ok(h, watchArgs(out, ['week-a', 'week-b']))
   ok(h, bugArgs(h, out, { rollouts: ['week-a', 'week-b'], rule: 'execute § 4.5', shape: 'a hand-back loses its answer' }))
   ok(h, bugArgs(h, out, { rollouts: ['week-a', 'week-b'], rule: 'execute § 4.5', shape: 'a hand-back loses its answer' }))
+  ok(h, ['ledger', '--span', out]) // p29-11: step 13a, before tune.py and knobs
+  ok(h, ['attention', '--span', out]) // p30-7: step 13b, before decide and close
   const tune = spawnSync('python3', ['-B', path.join(root, 'skills', 'reflect', 'scripts', 'tune.py'), '--scores', s.knobs.held[0].scores, '--auto', '--repo', h.repo,
     '--reflection', s.reflection, '--config', config], { encoding: 'utf8', cwd: h.home, env: env(h) })
   assert.equal(tune.status, 0, tune.stderr)

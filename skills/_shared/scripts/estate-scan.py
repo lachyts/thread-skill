@@ -21,7 +21,9 @@ reconcile-rollout.py for its PROJECT_ROOT_RE; reconcile-project.py for its PHASE
 REVIEW_STATUSES, pinned to the doc by tests/contracts/vault-grammar.test.mjs. In flight is § In flight, stated once in
 three module-level helpers that estate-dispatch.py's `record` loads too: first_link (a `rollout:` value's first link),
 link_live (it resolves to a note directly in Work/Tasks) and in_flight (live, `in_progress` or Review, on a status
-already read by status_of); a phase's members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as
+already read by status_of), with its one exception, still_to_start (a carried task still queued, open and linked to
+the rollout being superseded: schedule's Pre-flight grades it, ADR 0047), loaded by estate-rank.py and `record` too;
+a phase's members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as
 children, never copied: self-rollout-check.sh --resolve, land.sh --origin-slug, landing-register.py check,
 unfinished-rollout.py check and reconcile-rollout.py status. Restated, each cited: schedule § 2.5's verifier detection
 (SKILL.md prose, nothing to import), and pushed-base.sh's ahead classification (execution-fit.md § Dispatch blockers,
@@ -30,6 +32,11 @@ unfinished-rollout.py check and reconcile-rollout.py status. Restated, each cite
 The vault (pure Python, never under the deadline):
 - Projects: notes under Work/Projects outside Archive/, tagged `project`, with RT.dead_why None (not the `archived`
   tag, not status done/merged/dropped, not `done: true` or "true").
+- Own session (ADR 0061; CONTEXT.md **Big project**): each project row's ownSession. The note's `orient:` key, own or
+  sweep (read stripped and case-blind), wins; else a declared repo path qualifies when it is absolute after
+  expanduser (probe_repo's rule), a directory, with a CONTEXT.md file and a docs/adr/ directory holding at least one
+  `*.md` file (any case), read with plain os calls (an OSError reads false), never a probe, so --deadline 0 reads it
+  too and the rows stay equal.
 - Tasks: notes directly in Work/Tasks tagged `task`, neither `rollout` nor `phase`, not landed, not `archived`.
 - Rollouts: notes directly in Work/Tasks tagged `rollout` (CONTEXT.md **Live rollout**: live by location).
 - Phases: notes directly in Work/Phases tagged `phase`, not landed, not `archived`. A phase's openTasks counts the
@@ -108,7 +115,9 @@ Output, one JSON object (schema 1; --compact for one line):
   vaultErrors[] {kind: unreadable-tasks-notes | no-tasks-dir, notes[], skips[]},
   projects[]  {name, note, status (raw), standing: crowned|active|queued|parked|other|none, parked, crowned, lane,
                area[], aliases[], nextTask {result: live|blank|dead:<reason>, task, next_action}, repos[] (as
-               declared), tasks[] (slugs), openTasks, phases[] {slug, note, status, phase (its `phase:` as
+               declared), ownSession {own, by: key|design record|null, repo (the first qualifying declared path, as
+               written, else null), invalid? (a non-empty `orient:` value that is neither key, as JSON: the derived
+               test decides)}, tasks[] (slugs), openTasks, phases[] {slug, note, status, phase (its `phase:` as
                written), openTasks (by filename prefix; null with none)}, rollouts[],
                nextDue (the earliest due on or after today), overdue}
                ordered crowned, active, queued, parked, other, none, then by name, then by note;
@@ -198,6 +207,11 @@ LOCAL_REPO_ENV = frozenset({
 LINK_WHY = (("not a project note (", "not a project"), ("ambiguous (", "ambiguous"), ("area note (", "area note"),
             ("no closed frontmatter (", "project unreadable"), ("frontmatter does not parse (", "project unreadable"),
             ("frontmatter is not a mapping (", "project unreadable"), ("unreadable (", "project unreadable"))
+# A big project's test (ADR 0061; CONTEXT.md **Big project**): the project note's `orient:` key, own or sweep, else a
+# declared repo holding its own design record, a CONTEXT.md file and a docs/adr/ directory with a `*.md` file.
+ORIENT_KEYS = ("own", "sweep")
+DESIGN_CONTEXT = "CONTEXT.md"
+DESIGN_ADR = os.path.join("docs", "adr")
 
 
 def fail(code, reason):
@@ -287,6 +301,61 @@ def in_flight(status, live):
     """vault-grammar.md § In flight for a task: its rollout link is live, or its status (as NA.status_of reads it, so
     `in-progress` is `in_progress`) is in_progress or Review."""
     return live or status == "in_progress" or status in REVIEW_STATUSES
+
+
+def _link_key(link):
+    """A link or a note path as the lower-case basename it names, estate-rank.py's slug_key fold written here (that
+    script loads this one): `[[`/`]]`, an `|alias`, a `#heading` and the path cut, `.md` dropped. The two must fold
+    every value alike (still_to_start's matches against preflight's): tests/estate-scan.test.mjs 18 pins them."""
+    s = str(link).strip()
+    if s.startswith("[[") and s.endswith("]]"):
+        s = s[2:-2]
+    s = s.split("|")[0].split("#")[0].strip().replace("\\", "/").rstrip("/")
+    s = s.rsplit("/", 1)[-1]
+    if s.lower().endswith(".md"):
+        s = s[:-3]
+    return s.strip().lower()
+
+
+def still_to_start(status, link, superseding):
+    """The one exception to § In flight, at schedule's Pre-flight on a supersede (schedule § 1.5, ADR 0047): a carried
+    task still queued, its status (as NA.status_of reads it) `open` and its `rollout:` naming the rollout being
+    superseded. A task that has started (in_progress, Review, any other status) is still in flight."""
+    if not superseding or status != "open" or not link:
+        return False
+    key = _link_key(link)
+    return bool(key) and key == _link_key(superseding)
+
+
+def design_record(declared):
+    """True when a declared repo path holds its own design record: absolute after expanduser (probe_repo's rule), a
+    directory, with a CONTEXT.md file and a docs/adr/ directory holding at least one file named `*.md` (any case).
+    Pure reads, never a probe; one that fails (OSError) reads false."""
+    try:
+        path = os.path.expanduser(declared)
+        if not os.path.isabs(path) or not os.path.isdir(path) or not os.path.isfile(os.path.join(path, DESIGN_CONTEXT)):
+            return False
+        adr = os.path.join(path, DESIGN_ADR)
+        return os.path.isdir(adr) and any(name.lower().endswith(".md") and os.path.isfile(os.path.join(adr, name))
+                                          for name in os.listdir(adr))
+    except OSError:
+        return False
+
+
+def own_session(value, repos):
+    """A project's ownSession (ADR 0061): {own, by, repo, invalid?}. A valid `orient:` key (own or sweep, read
+    stripped and case-blind) wins, `by: "key"`; else the first declared repo, in declared order, holding its own design
+    record makes it big, `by: "design record"`, `repo` as written; else it is small, `by` and `repo` null. A non-empty
+    `orient:` value that is neither key is kept as `invalid` (its JSON form), and the derived test decides."""
+    empty = value is None or (isinstance(value, str) and not value.strip()) or (isinstance(value, (list, dict)) and not value)
+    key = value.strip().lower() if isinstance(value, str) else None
+    if key in ORIENT_KEYS:
+        return {"own": key == "own", "by": "key", "repo": None}
+    repo = next((r for r in repos if design_record(r)), None)
+    out = {"own": repo is not None, "by": "design record" if repo else None, "repo": repo}
+    if not empty:
+        out["invalid"] = jsonable(value)
+    return out
 
 
 def link_why(raw):
@@ -594,6 +663,7 @@ class Scan:
                     continue
                 standing = standing_of(NA.status_of(note))
                 slot = NA.read_slots(self.vault, [rel])[0]
+                repos = [x.strip() for x in NA.as_list(note.get("repos")) if isinstance(x, str) and x.strip()]
                 rows[rel] = {
                     "name": slug_of(rel), "note": slash(rel), "status": jsonable(note.get("status")),
                     "standing": standing, "parked": standing == "parked", "crowned": jsonable(note.get("crowned")),
@@ -603,7 +673,7 @@ class Scan:
                     "nextTask": ({"result": slot["result"], "task": slot["task"], "next_action": slot["next_action"]}
                                  if slot["kind"] == "slot" else
                                  {"result": "skip:%s" % slot["result"], "task": None, "next_action": None}),
-                    "repos": [x.strip() for x in NA.as_list(note.get("repos")) if isinstance(x, str) and x.strip()],
+                    "repos": repos, "ownSession": own_session(note.get("orient"), repos),
                     "tasks": [], "openTasks": 0, "phases": [], "rollouts": [], "nextDue": None, "overdue": 0,
                 }
         return rows

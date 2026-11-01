@@ -13,7 +13,7 @@
 #       env_bootstrap is `unrun`; a bad completion_timeout is refused; a fix task already in the Archive is not
 #       refiled.
 #   C6  the halt streak: the third no-verdict run in a row halts, the fourth does not (the streak restarts at a halt),
-#       the sixth does; a `stopped` line never counts.
+#       the sixth does; a `stopped` or `heat` line never counts.
 #   C7  a run in flight holds the attempt's lock: the read says in-flight, a second --run exits 3 and writes nothing;
 #       TERMed, the run records its own `stopped` and removes its tree.
 #   C8  a --run killed outright leaves its verify holding the lock until it ends, then a free lock and no line: the
@@ -23,10 +23,19 @@
 #   C10 origin unread is exit 1 with nothing armed or written; a fix task that cannot be written on a final red is
 #       exit 1 with no line, so the attempt runs again.
 #   C11 the value: absent forms, kept comments, refused forms; env_bootstrap is read the same way.
-#   C12 the outcome classes (verify's outcome file alone, never its log's text).
+#   C12 the outcome classes (verify's outcome file alone, never its log's text); verify's `heat` outcome is read and
+#       its log line parses (p31-4, the Heat hold).
 #   C13 a verify with no --outcome (Integration, RACE) writes no outcome file; its --detach-at tree is pid-locked
 #       like --outcome's, so the daily sweep's reaper never removes a RACE re-verify's tree mid-run, and removed.
 #   C14 reconcile-rollout.py loads where fcntl does not (the Windows machine): a read verb still runs.
+#   C15 a serial chain (ADR 0055), on a checkout with no origin at all: C15a the read (its one repo: surface, the tree
+#       under the state dir, the out under the git dir) and a green run on HEAD, no canary, nothing in the working
+#       tree; the read's refusals (no repo: token, two, a plain directory, a subdirectory of a checkout); C15b where
+#       the tree lives, seen from inside the run, and THREAD_COMPLETION_TREE_DIR's rule; C15c the serial fix task's
+#       words; C15d the HEAD guard (a detached HEAD, the leg_base fallback, a foreign checkout, a task that committed
+#       nowhere, a peer's rewritten tip above the task's own commit and its control); C15e --wait (a holder waited
+#       out, the deadline, a real --run, nothing in flight, its refusals, and it writes nothing; (g) a --run that
+#       records and frees its lock between a read's note read and its probe, in-process with scripted probes).
 # Temp repos and notes only; no vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -40,6 +49,8 @@ trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="$TMP/events"  # this suite reads the Run record: each scenario keeps its own dir (scen)
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
 export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots"
+export THREAD_COMPLETION_TREE_DIR="$TMP/trees"   # a serial chain's detached verify trees (ADR 0055) stay in temp
+export THREAD_HEAT_LEVEL=0                  # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 export HOME="$TMP/home"; mkdir -p "$HOME"   # an empty HOME: rollout-settings.py resolves the built-ins
 NOW=2026-10-24T09:00:00Z
 g() { git -c user.email=t@t -c user.name=t -c init.defaultBranch=master -c commit.gpgsign=false "$@"; }
@@ -112,6 +123,11 @@ cv --run; ok "$rc|$(js ran)|$(js result)|$(js decided)|$(js halt)" "0|True|green
 cv; ok "$(js state)" "green" "C2: … decided"
 has "$(js summary)" "Completion verify: green at ${SHA:0:12}" "C2: … its Completion log summary"
 ok "$(log_lines)|$(records)" "1|green/1" "C2: one log line, one completion-verify record"
+suites() { cat "$THREAD_EVENTS_DIR"/ro-rollout-2026-10-24.jsonl 2>/dev/null | python3 -c '
+import json, sys
+print(json.dumps([[d["kind"], d["by"], d["runner"], d["task"], d.get("outcome"), d.get("sha")] for d in map(json.loads, sys.stdin)
+                  if d["kind"].startswith("suite-")], separators=(",", ":")))'; }
+ok "$(suites)" "[[\"suite-started\",\"completion\",\"lead\",null,null,\"$SHA\"],[\"suite-ended\",\"completion\",\"lead\",null,\"green\",\"$SHA\"]]" "C2: --run records the suite (p29-10): a pair by completion, runner lead, no task, the merged sha"
 has "$(grep ' -> green' "$RO")" "at $SHA rc 0" "C2: … the line names the merged sha and the rc"
 ok "$(ls "$(integ)" | grep -c '^completion-ro-rollout-2026-10-24-1\..*-[0-9]*\.log$')|$(ls "$(integ)" | grep -c '\.rc$\|\.outcome\.json$')" "1|0" "C2: the log kept under its run's name, no rc or outcome left"
 ok "$(red_exists)|$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')" "no|1" "C2: no fix task; the detached tree removed"
@@ -180,6 +196,9 @@ cv --run; ok "$(js result)|$(js streak)|$(js halt)" "unrun|3|True" "C6: the thir
 cv --run; ok "$(js streak)|$(js halt)" "4|False" "C6: the next one after the halt → no halt (the streak restarts)"
 cv --run; cv --run; ok "$(js streak)|$(js halt)" "6|True" "C6: the third since the halt → halt again"
 ok "$(red_exists)" "no" "C6: … none of them files a fix task"
+scen c6h '"true"'
+seed noslot heat noslot
+cv; ok "$(js state)|$(js streak)" "run|2" "C6: a heat line (the Heat hold) is skipped like a stopped one → streak 2"
 
 # ── C7 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c7 '"sleep 30"'
@@ -231,6 +250,7 @@ cv --run; ok "$rc|$(js result)" "0|green" "C8: a dead run's locked worktree entr
 # ── C9 ────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen c9 "\"git -C '$TMP/c9/repo' -c user.email=t@t -c user.name=t commit -q --allow-empty -m moved\""
 cv --run; ok "$rc|$(js ran)|$(js result)|$(js decided)" "4|True|unrun|False" "C9: the shared checkout moved during the run → its own check trips: unrun, exit 4"
+ok "$(js canary_exit)" "9" "C9: … the check's exit 9 (a lane hold, ADR 0046) reads as a trip: canary_exit 9"
 has "$(grep ' -> unrun' "$RO")" "git-env" "C9: … the line says the verdict was never acted on"
 has "$err" "git-env" "C9: … the canary's stderr passed through"
 scen c9b "\"i=0; while [ ! -f $TMP/c9b.go ] && [ \$i -lt 600 ]; do sleep 0.1; i=\$((i + 1)); done\""
@@ -238,7 +258,7 @@ python3 "$SCRIPT" completion-verify --rollout "$RO" --tasks-dir "$D/tasks" --now
 bp=$!
 wait_for "$(integ)/completion-ro-rollout-2026-10-24-1.log" '^== verifier'
 g -C "$D/repo" commit -q --allow-empty -m moved; new=$(git -C "$D/repo" rev-parse master)
-python3 "$CANARY" check-all --rollout "$RO" --tasks-dir "$D/tasks" > /dev/null 2>&1; ok "$?" 3 "C9: a loop-entry check-all catches the trip"
+python3 "$CANARY" check-all --rollout "$RO" --tasks-dir "$D/tasks" > /dev/null 2>&1; ok "$?" 9 "C9: a loop-entry check-all catches the trip (9: the lane)"
 python3 "$CANARY" ack --rollout "$RO" --tasks-dir "$D/tasks" --repo "$D/repo" --default master --slugs ro-rollout-2026-10-24 --ref "$new" > /dev/null 2>&1
 ok "$?|$(window)" "0|armed" "C9: … and an ack re-arms the window while the run goes on"
 python3 - "$RO" <<'PY'
@@ -412,6 +432,7 @@ import importlib.util, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rr)
 cases = [({"ended": "running"}, 1, "unrun"), ({"ended": "noslot", "rc": "noslot"}, 1, "noslot"),
+         ({"ended": "heat", "rc": "heat"}, 1, "heat"),
          ({"ended": "signal", "rc": 143, "signal": 15}, 1, "stopped"), ({"ended": "bootstrap", "rc": 1}, 1, "unrun"),
          ({"ended": "deadline", "rc": 124, "step": "env_bootstrap"}, 1, "unrun"),
          ({"ended": "deadline", "rc": 124, "step": "verifier"}, 1, "red"), ({"ended": "done", "rc": 124}, 1, "rerun"),
@@ -419,7 +440,17 @@ cases = [({"ended": "running"}, 1, "unrun"), ({"ended": "noslot", "rc": "noslot"
          ({"ended": "done", "rc": 1}, 2, "red"), (None, 1, "unrun")]
 bad = [(o, n, want, got) for o, n, want in cases if (got := rr._classify_completion(o, n)[0]) != want]
 print("ok   - C12: each outcome class (a verifier's own rc 124 is an ordinary red)" if not bad else f"FAIL - C12: {bad}")
-sys.exit(1 if bad else 0)
+# verify's `heat` outcome file is read (never None, which classifies `unrun` and counts toward the halt)
+import json, os, tempfile
+with tempfile.TemporaryDirectory() as d:
+    p = os.path.join(d, "o" + rr.VERIFY_OUTCOME_SUFFIX)
+    open(p, "w").write(json.dumps({"v": 1, "id": "20261027T000000-1", "sha": None, "ended": "heat", "rc": "heat"}))
+    got = rr._read_outcome(rr.Path(p))
+    heat_ok = got is not None and rr._classify_completion(got, 1)[0] == "heat"
+print("ok   - C12: verify's heat outcome file reads heat, never unrun" if heat_ok else f"FAIL - C12: heat outcome read {got}")
+line = "- 2026-10-24T08:00+00:00 attempt 1 at " + "a" * 40 + " rc heat -> heat: x (run r; log -)"
+print("ok   - C12: a heat log line parses" if rr.COMPLETION_LINE_RE.match(line) else "FAIL - C12: a heat log line does not parse")
+sys.exit(1 if bad or not heat_ok or not rr.COMPLETION_LINE_RE.match(line) else 0)
 PY
 [ $? -eq 0 ] || fail=1
 
@@ -446,6 +477,196 @@ sys.argv = [script, "completion-verify", "--rollout", ro, "--tasks-dir", tasks]
 exec(compile(open(script).read(), script, "exec"), {"__name__": "__main__", "__file__": script})
 PY
 ok "$rc|$(js state)" "0|run" "C14: with no fcntl, reconcile-rollout.py still loads and a read verb runs"
+
+# ── C15 (ADR 0055): a serial chain runs its completion verifier on its checkout's HEAD ──────────────────────────
+# sscen <name> [completion_verifier value | -] [extra frontmatter line…] — a serial chain's in-place checkout with NO
+# origin remote (any origin read would fail) and its note: `shape: serial`, the checkout as its one repo: surface beside
+# the vault (SURF, when set, is the whole surfaces block), and one linked done task a whose trailered commit is HEAD
+# ($SHA), stamped as leg.py done stamps it: leg_base the commit before ($BASE), leg_head its own commit.
+sscen() {
+  D="$TMP/$1"; mkdir -p "$D/tasks"; RO="$D/tasks/ro-rollout-2026-10-24.md"; export THREAD_EVENTS_DIR="$D/events"
+  export THREAD_GIT_ENV_DIR="$D/git-env"
+  g init -q "$D/repo"; echo a > "$D/repo/a.txt"; g -C "$D/repo" add -A; g -C "$D/repo" commit -q -m init
+  BASE=$(git -C "$D/repo" rev-parse HEAD)
+  echo b > "$D/repo/b.txt"; g -C "$D/repo" add -A; g -C "$D/repo" commit -q -m "feat: a" -m "Task: [[a]]"
+  SHA=$(git -C "$D/repo" rev-parse HEAD)
+  local name="$1" v=${2:-'"true"'}; shift; [ $# -gt 0 ] && shift
+  { printf -- '---\ntags: [task, rollout]\nstatus: open\nprojects:\n  - "[[Demo]]"\nprotocol_version: 5\nshape: serial\n'
+    [ "$v" = "-" ] || printf 'completion_verifier: %s\n' "$v"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf 'surfaces:\n%s\n---\n\n## Notes\n\nA serial chain.\n\n## Queue\n\n- [[a]]\n' \
+      "${SURF-$(printf '  - "repo:%s"\n  - "vault"' "$D/repo")}"; } > "$RO"
+  { printf -- '---\ntags: [task]\nstatus: done\nprojects:\n  - "[[Demo]]"\nrollout: "[[ro-rollout-2026-10-24]]"\n'
+    printf 'leg_base: ["%s@%s"]\nleg_head: ["%s@%s"]\n' "$D/repo" "$BASE" "$D/repo" "$SHA"
+    printf -- '---\n\n## Notes\n\nDo a.\n'; } > "$D/tasks/a.md"
+  echo "== $name"
+}
+# seta <frontmatter line>… — task a's leg_base and leg_head lines, replaced by these
+seta() {
+  python3 - "$D/tasks/a.md" "$@" <<'PY'
+import re, sys
+p, *lines = sys.argv[1:]
+t = re.sub(r"^leg_(?:base|head):.*\n", "", open(p).read(), flags=re.M)
+open(p, "w").write(t.replace("status: done\n", "status: done\n" + "".join(l + "\n" for l in lines), 1))
+PY
+}
+ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+strees() { ls "$TMP/trees" 2>/dev/null | wc -l | tr -d ' '; }
+slogs() { ls "$D/repo/.git/thread" 2>/dev/null | grep -c '\.log$'; }
+
+sscen c15a
+cv; ok "$rc|$(js state)|$(js attempt)|$(js sha)|$(js repo)" "0|run|1|null|$D/repo" "C15a: a serial note's read → run, attempt 1, its one repo: surface"
+ok "$(js tree)|$(js out)" "$TMP/trees/completion-ro-rollout-2026-10-24-1|$D/repo/.git/thread/completion-ro-rollout-2026-10-24-1" \
+   "C15a: … its tree under the state dir, its out under the git dir: neither in the working tree"
+cv --run; ok "$rc|$(js ran)|$(js result)|$(js decided)" "0|True|green|True" "C15a: --run → green, on a checkout with no origin at all"
+has "$(sed -n '/^## Completion verify log/,$p' "$RO")" "attempt 1 at $SHA rc 0 -> green" "C15a: … on the checkout's HEAD, its line in the Completion verify log"
+ok "$(records)" "green/1" "C15a: one completion-verify record"
+ok "$(suites)" "[[\"suite-started\",\"completion\",\"lead\",null,null,\"$SHA\"],[\"suite-ended\",\"completion\",\"lead\",null,\"green\",\"$SHA\"]]" "C15a: … and the suites pair, by completion, on HEAD's sha"
+ok "$(ls -A "$THREAD_GIT_ENV_DIR" 2>/dev/null | wc -l | tr -d ' ')" "0" "C15a: no git-env canary armed or checked"
+ok "$(ls "$D/repo/.git/thread" | grep -c '^completion-ro-rollout-2026-10-24-1\..*-[0-9]*\.log$')" "1" "C15a: the log kept under the git dir"
+ok "$(git -C "$D/repo" worktree list | wc -l | tr -d ' ')|$(test -e "$D/repo/.claude" && echo claude)|$(git -C "$D/repo" status --porcelain)|$(strees)" \
+   "1|||0" "C15a: the tree removed; no .claude, nothing in the checkout's porcelain"
+r0=$(cksum < "$RO")
+cv --run; ok "$rc|$(js ran)|$(js result)|$(cksum < "$RO")|$(records)" "0|False|green|$r0|green/1" "C15a: a second --run runs nothing and writes nothing"
+mkdir -p "$TMP/c15-plain"
+for c in "c15r1|exactly one|  - \"vault\"" \
+         "c15r2|exactly one|  - \"repo:$TMP/c15r2/repo\"
+  - \"repo:$TMP/c15-plain\"" \
+         "c15r3|git toplevel|  - \"repo:$TMP/c15-plain\"" \
+         "c15r4|git toplevel|  - \"repo:$TMP/c15r4/repo/sub\""; do
+  n=${c%%|*}; rest=${c#*|}; want=${rest%%|*}; SURF=${rest#*|}
+  sscen "$n"; unset SURF
+  mkdir -p "$D/repo/sub"
+  before=$(cksum < "$RO")
+  cv; ok "$rc|$out|$(cksum < "$RO")" "1||$before" "C15a: $n's surfaces → the read refuses (1), the note byte-identical"
+  has "$err" "$want" "C15a: … saying $want"
+  cv --run; ok "$rc|$(cksum < "$RO")|$(records)" "1|$before|" "C15a: … and --run runs nothing"
+done
+
+sscen c15b "\"pwd -P > $TMP/c15b.pwd; git -C '$TMP/c15b/repo' status --porcelain > $TMP/c15b.porc; ls -A '$TMP/c15b/repo' > $TMP/c15b.ls\""
+cv --run; ok "$rc|$(js result)" "0|green" "C15b: a probe verifier runs green"
+ok "$(cat "$TMP/c15b.pwd")" "$TMP/trees/completion-ro-rollout-2026-10-24-1" "C15b: during the run, the suite's cwd is the tree under the state dir"
+ok "$(cat "$TMP/c15b.porc")|$(grep -c '^\.claude$' "$TMP/c15b.ls")" "|0" "C15b: … while the checkout's porcelain is empty and it holds no .claude"
+t=$(unset THREAD_COMPLETION_TREE_DIR; export XDG_STATE_HOME="$TMP/xdg"; cv; js tree)
+ok "$t" "$TMP/xdg/thread/completion-trees/completion-ro-rollout-2026-10-24-1" "C15b: THREAD_COMPLETION_TREE_DIR unset → XDG_STATE_HOME/thread/completion-trees"
+t=$(export THREAD_COMPLETION_TREE_DIR=rel/trees XDG_STATE_HOME="$TMP/xdg"; cv; js tree)
+ok "$t" "$TMP/xdg/thread/completion-trees/completion-ro-rollout-2026-10-24-1" "C15b: a relative THREAD_COMPLETION_TREE_DIR is ignored"
+t=$(unset THREAD_COMPLETION_TREE_DIR XDG_STATE_HOME; cv; js tree)
+ok "$t" "$HOME/.local/state/thread/completion-trees/completion-ro-rollout-2026-10-24-1" "C15b: … neither set → ~/.local/state/thread/completion-trees"
+
+sscen c15c '"false"'
+cv --run; ok "$(js result)|$(js attempt)" "rerun|1" "C15c: false → rerun on attempt 1"
+cv --run --now 2026-10-24T09:40:00Z; ok "$(js result)|$(js followup)" "red|completion-red-ro-rollout-2026-10-24" "C15c: … red on attempt 2, the fix task named"
+has "$(grep 'attempt 2' "$RO")" "at $SHA" "C15c: … on the same sha"
+ok "$(ls "$D/tasks" | grep -c '^completion-red-')" "1" "C15c: exactly one fix task"
+F=$(cat "$(red)")
+has "$F" "was red on the chain's checkout \`$D/repo\` at \`$SHA\` when [[ro-rollout-2026-10-24]] completed" "C15c: the fix task names the chain's checkout and the sha"
+has "$F" "Each task passed its own Leg verify" "C15c: … each task's own Leg verify"
+has "$F" '**Verify:** `false` exits 0 on the chain'"'"'s checkout.' "C15c: … and its Verify line"
+hasnt "$F" "Integration" "C15c: … never an Integration"
+hasnt "$F" "merged main" "C15c: … never merged main"
+
+sscen c15d
+g -C "$D/repo" checkout -q --detach "$BASE"
+before=$(cksum < "$RO")
+cv --run; ok "$rc|$out|$(cksum < "$RO")|$(records)|$(strees)|$(slogs)" "1||$before||0|0" \
+   "C15d (a): HEAD off the chain's work → 1: nothing run, recorded or left (no tree, no log)"
+has "$err" "does not hold the chain's commits: [[a]]'s leg_head ${SHA:0:12} is not in it" "C15d (a): … naming the task and its leg_head"
+has "$err" "git -C $D/repo checkout <branch>), then leg.py clear-halt" "C15d (a): … with the remedy"
+sscen c15d2; seta "leg_base: [\"$D/repo@$BASE\"]"
+cv --run; ok "$rc|$(js result)" "0|green" "C15d (b): a task done before leg_head (leg_base only), held by HEAD → its leg_base anchors: green"
+sscen c15d2b; seta "leg_base: [\"$D/repo@$SHA\"]"
+g -C "$D/repo" checkout -q --orphan other; g -C "$D/repo" commit -q -m unrelated
+cv --run; ok "$rc|$(records)" "1|" "C15d (b): … and that leg_base is checked: an unrelated HEAD → 1"
+has "$err" "[[a]]'s leg_base ${SHA:0:12} is not in it" "C15d (b): … naming the leg_base"
+sscen c15d3; seta "leg_base: [\"$TMP/elsewhere@$BASE\"]" "leg_head: [\"$TMP/elsewhere@$SHA\"]"
+cv --run; ok "$rc|$(records)" "1|" "C15d (c): no done task has a leg_base in the repo: surface → 1"
+has "$err" "$D/repo is not one of [[ro-rollout-2026-10-24]]'s chain checkouts" "C15d (c): … saying so"
+sscen c15d4; seta "leg_base: [\"$D/repo@$BASE\"]" "leg_head: []"
+g -C "$D/repo" reset -q --hard "$BASE"; echo p > "$D/repo/p.txt"; g -C "$D/repo" add -A; g -C "$D/repo" commit -q -m peer
+cv --run; ok "$rc|$(js result)" "0|green" "C15d (d): a task that committed nowhere (leg_head: []) is no anchor: green on a HEAD past its base"
+# peer <scen>: a peer commit P on the task's commit, then the peer rewrites its tip (reset to the task's commit, P')
+peer() {
+  sscen "$1"
+  echo p > "$D/repo/p.txt"; g -C "$D/repo" add -A; g -C "$D/repo" commit -q -m "peer P"; P=$(git -C "$D/repo" rev-parse HEAD)
+  g -C "$D/repo" reset -q --hard "$SHA"; echo q > "$D/repo/p.txt"; g -C "$D/repo" add -A; g -C "$D/repo" commit -q -m "peer P'"
+}
+peer c15d5
+cv --run; ok "$rc|$(js result)" "0|green" "C15d (e): a peer rewrote its tip above the task's commit → the task's own commit is in HEAD: green"
+peer c15d6; seta "leg_base: [\"$D/repo@$BASE\"]" "leg_head: [\"$D/repo@$P\"]"
+cv --run; ok "$rc|$(records)" "1|" "C15d (e): control: anchored on the peer's old tip (HEAD at done) → 1, a false refusal"
+
+sscen c15e
+lock="$D/repo/.git/thread/completion-ro-rollout-2026-10-24-1.lock"; mkdir -p "$D/repo/.git/thread"
+# hold <secs>: a background holder of the attempt's lock (pid in $hp), up once it touches $D/held
+hold() {
+  rm -f "$D/held"
+  python3 - "$lock" "$D/held" "$1" <<'PY' &
+import fcntl, sys, time
+lock, ready, secs = sys.argv[1], sys.argv[2], float(sys.argv[3])
+fh = open(lock, "a"); fcntl.flock(fh, fcntl.LOCK_EX); open(ready, "w").close(); time.sleep(secs)
+PY
+  hp=$!
+  for _ in $(seq 1 100); do [ -e "$D/held" ] && break; sleep 0.1; done
+}
+before=$(cksum < "$RO")
+hold 3
+cv; ok "$(js state)" "in-flight" "C15e (a): a holder of the attempt's lock → the read says in-flight"
+t0=$(ms); cv --wait 30; t1=$(ms); wait "$hp"
+ok "$rc|$(js state)|$(js attempt)" "0|run|1" "C15e (a): --wait 30 waits the holder out, then prints the read"
+ok "$([ $((t1 - t0)) -ge 1000 ] && echo waited)" "waited" "C15e (a): … having waited ($((t1 - t0)) ms)"
+hold 20
+t0=$(ms); cv --wait 1; t1=$(ms); kill "$hp" 2>/dev/null; wait "$hp" 2>/dev/null
+ok "$rc|$(js state)|$([ $((t1 - t0)) -lt 10000 ] && echo bounded)" "0|in-flight|bounded" "C15e (b): still held at its deadline → in-flight, exit 0 ($((t1 - t0)) ms)"
+t0=$(ms); cv --wait; t1=$(ms)
+ok "$rc|$(js state)|$([ $((t1 - t0)) -lt 5000 ] && echo prompt)" "0|run|prompt" "C15e (d): nothing in flight → --wait (7000 s) returns at once with the plain read"
+for a in "--wait 30 --run" "--wait 0" "--wait 7001" "--wait x"; do
+  cv $a; ok "$rc|$out|$(cksum < "$RO")" "2||$before" "C15e (e): $a → 2, nothing written"
+done
+ok "$(cksum < "$RO")|$(records)|$(strees)|$(slogs)" "$before||0|0" "C15e (f): --wait wrote nothing: the note byte-identical, no record, no tree, no log"
+sscen c15e3 '"sleep 2"'
+python3 "$SCRIPT" completion-verify --rollout "$RO" --tasks-dir "$D/tasks" --now "$NOW" --run > "$D/bg.out" 2> "$D/bg.err" &
+bp=$!
+wait_for "$D/repo/.git/thread/completion-ro-rollout-2026-10-24-1.log" '^== verifier'
+cv; ok "$(js state)" "in-flight" "C15e (c): a real --run in flight → in-flight"
+cv --wait 60; ok "$rc|$(js state)|$(js attempt)" "0|green|1" "C15e (c): --wait over it → green: the note read again once the lock frees"
+wait "$bp"; ok "$?|$(records)" "0|green/1" "C15e (c): … the --run's own record, one"
+# probe_plan <plan> [read args…] — a read in-process (the C10f and C12 way) whose attempt-lock probes follow <plan>,
+# one comma-separated step per probe: `held` reads as a --run holding the lock; `record` writes a green line under
+# `## Completion verify log`, as a --run that ended between the read's note read and its probe left it, then probes
+# for real; `free` (and every probe past the plan) probes for real. rc, out and err as cv fills them.
+probe_plan() {
+  python3 - "$SCRIPT" "$RO" "$D/tasks" "$NOW" "$SHA" "$@" > "$D/out" 2> "$D/err" <<'PY'
+import importlib.util, sys
+script, ro, tasks, now, sha, plan, *extra = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("rr", script); rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+rr.COMPLETION_WAIT_POLL = 0.05
+steps, real = plan.split(","), rr._attempt_running
+def probe(lock):
+    step = steps.pop(0) if steps else "free"
+    if step == "held":
+        return True
+    if step == "record":
+        t = open(ro).read()
+        if "## Completion verify log" not in t:
+            t = t.rstrip("\n") + "\n\n## Completion verify log\n\n"
+        open(ro, "w").write(t + f"- 2026-10-24T09:00+00:00 attempt 1 at {sha} rc 0 -> green: passed (run r1; log -)\n")
+    return real(lock)
+rr._attempt_running = probe
+sys.argv = [script, "completion-verify", "--rollout", ro, "--tasks-dir", tasks, "--now", now, *extra]
+sys.exit(rr.main())
+PY
+  rc=$?; out=$(cat "$D/out"); err=$(cat "$D/err")
+}
+sscen c15e4; probe_plan record --wait 5
+ok "$rc|$(js state)|$(js attempt)" "0|green|1" "C15e (g): a --run records and frees its lock between --wait's note read and its probe → green, never the stale run"
+sscen c15e5; probe_plan record
+ok "$rc|$(js state)|$(js attempt)" "0|green|1" "C15e (g): … the plain read the same"
+sscen c15e6; probe_plan free,held,record --wait 5
+ok "$rc|$(js state)|$(js attempt)" "0|green|1" "C15e (g): a free probe, then a --run takes the lock and records in the gap → green: a held probe unsettles the read"
+sscen c15e7; probe_plan free
+ok "$rc|$(js state)|$(js attempt)" "0|run|1" "C15e (g): nothing ran → run: the read stands"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-completion: ALL PASS"; else echo "reconcile-rollout-completion: FAILED"; fi

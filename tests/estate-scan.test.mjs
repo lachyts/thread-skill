@@ -335,6 +335,35 @@ const PHASE_TASKS = { 'phase-lab-p1-1-a': ['open', 1], 'phase-lab-p1-2-b': ['ope
   'phase-lab-plugin-p1-1-g': ['open', 1], 't-phase-key-only': ['open', 1] }
 for (const [slug, [status, n]] of Object.entries(PHASE_TASKS)) T4(`${slug}.md`, task(status, ['Phase Lab'], `\nphase: ${n}`))
 
+// ---- Vault V5: the big-project test (ADR 0061), each project's ownSession ----------------------------------------
+// The design-record dirs are plain directories under HOME/repos (no git), made before case 9's snapshot. rel-design sits
+// under the scan's cwd S, so a relative `repos:` entry would find it if the test ever read relative paths.
+const V5 = path.join(S, 'v5')
+const P5 = (name, rest) => write(path.join(V5, 'Work', 'Projects', `${name}.md`), project('active', rest))
+const DESIGN = { 'design-full': ['CONTEXT.md', 'docs/adr/0001-x.md'], 'design-plain': ['README.md'],
+  'design-ctx': ['CONTEXT.md'], 'design-emptyadr': ['CONTEXT.md', 'docs/adr/'], 'design-txtadr': ['CONTEXT.md', 'docs/adr/README.txt'],
+  'design-ctxdir': ['CONTEXT.md/', 'docs/adr/0001-x.md'] }
+for (const [name, files] of Object.entries(DESIGN)) {
+  for (const f of files) f.endsWith('/') ? mkdir(path.join(R(name), f)) : write(path.join(R(name), f), '# x\n')
+}
+for (const f of ['CONTEXT.md', 'docs/adr/0001-x.md']) write(path.join(S, 'rel-design', f), '# x\n')
+const repos5 = (...names) => `\nrepos:${names.map((n) => `\n  - ${n}`).join('')}`
+P5('Key Own', '\norient: own')
+P5('Key Upper', '\norient: " OWN "')
+P5('Key Sweep', `\norient: sweep${repos5('~/repos/design-full')}`)
+P5('Design Full', repos5('~/repos/design-full'))
+P5('Two Repos', repos5('~/repos/design-plain', '~/repos/design-full'))
+P5('Context Only', repos5('~/repos/design-ctx'))
+P5('Empty Adr', repos5('~/repos/design-emptyadr'))
+P5('Txt Adr', repos5('~/repos/design-txtadr'))
+P5('Ctx Dir', repos5('~/repos/design-ctxdir'))
+P5('Missing Repo', repos5('~/repos/design-missing'))
+P5('Rel Repo', repos5('rel-design'))
+P5('Key Maybe', `\norient: maybe${repos5('~/repos/design-full')}`)
+P5('Key List', '\norient:\n  - own')
+P5('Key Blank', '\norient: ""')
+mkdir(path.join(V5, 'Work', 'Tasks'))
+
 // ---- Running the scan ------------------------------------------------------------------------------------------
 const env = { ...base }
 for (const name of ['GIT_SSH_COMMAND', 'GIT_SSH', 'CLAUDE_PLUGIN_ROOT', 'PYTHONDONTWRITEBYTECODE']) delete env[name]
@@ -913,4 +942,91 @@ test("17. clones: a clone's own ahead set keeps the strict rule; a stale clone l
   assert.deepEqual(st.unchecked, [])
   assert.deepEqual(st.unpushed.map((u) => [u.clone, u.ahead]), [[R('ST-rollout'), 0], [R('ST'), 0]])
   assert.deepEqual(st.verifier, { command: 'make test', source: 'Makefile' })
+})
+
+// ---- 18. still_to_start: the Pre-flight's exception to § In flight -------------------------------------------------
+// schedule § 1.5 (ADR 0047) grades a carried task still queued on a supersede: open, its `rollout:` naming the rollout
+// being superseded. still_to_start reads the status as NA.status_of does and folds the link and the prior with
+// _link_key, which must stay estate-rank's slug_key byte for byte: rank, slices and record read still_to_start, and
+// preflight matches candidates by slug_key, so the two folds may never drift apart. Both are loaded by path; importing
+// either script runs nothing and writes no bytecode.
+test('18. still_to_start: open and linked to the rollout being superseded, under the slug fold; anything else is not', () => {
+  const PY = `
+import importlib.util, json, sys
+sys.dont_write_bytecode = True
+def load(name, path):
+    s = importlib.util.spec_from_file_location(name, path)
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m
+m, er = load("thread_estate_scan", sys.argv[1]), load("thread_estate_rank", sys.argv[2])
+rows = json.loads(sys.argv[3])
+folds = [v for _, link, sup in rows for v in (link, sup)] + json.loads(sys.argv[4])
+print(json.dumps({"got": [m.still_to_start(st, link, sup) for st, link, sup in rows],
+                  "drift": [[v, m._link_key(v), er.slug_key(v)] for v in folds if m._link_key(v) != er.slug_key(v)]}))
+`
+  const rows = [
+    ['open', 'prior', 'prior', true],
+    ['open', 'Work/Tasks/Prior.md', 'prior', true],
+    ['open', '[[Work/Tasks/Prior.md|x]]', 'prior', true],
+    ['open', 'PRIOR', 'prior', true],
+    ['open', 'prior', '[[prior]]', true],
+    ['open', 'prior', '~/repos/obsidian/Work/Tasks/prior.md', true],
+    ['open', 'prior#Queue', 'Prior', true],
+    ['in_progress', 'prior', 'prior', false],
+    ['review', 'prior', 'prior', false],
+    ['', 'prior', 'prior', false],
+    [null, 'prior', 'prior', false],
+    ['open', 'prior', '', false],
+    ['open', 'prior', null, false],
+    ['open', 'other', 'prior', false],
+    ['open', 'prior-2', 'prior', false],
+    ['open', '', 'prior', false],
+    ['open', null, 'prior', false],
+  ]
+  // More values for the fold alone: a backslash path, padding, an empty link, a heading and alias together.
+  const extra = ['Work\\Tasks\\Prior.MD', '  [[ prior ]]  ', '[[]]', '[[Prior#Queue|q]]', 'a/b/', '.md', 'x.md.md']
+  const RANK = path.join(root, 'skills', '_shared', 'scripts', 'estate-rank.py')
+  const r = spawnSync('python3', ['-c', PY, SCRIPT, RANK, JSON.stringify(rows.map((x) => x.slice(0, 3))), JSON.stringify(extra)],
+    { encoding: 'utf8', env: { ...base, PYTHONDONTWRITEBYTECODE: '1' } })
+  assert.equal(r.status, 0, r.stderr)
+  const { got, drift } = JSON.parse(r.stdout)
+  rows.forEach((row, i) => assert.equal(got[i], row[3], JSON.stringify(row)))
+  assert.deepEqual(drift, [], "estate-scan's _link_key and estate-rank's slug_key fold every value alike")
+})
+
+// ---- 19. ownSession: the big-project test (ADR 0061) ----------------------------------------------------------------
+// The key wins, read stripped and case-blind; else the first declared repo, in declared order, that is absolute after
+// expanduser, a directory, and holds a CONTEXT.md file and a docs/adr/ directory with a `*.md` file. Pure reads, so the
+// --deadline 0 run reads it too and the project rows stay equal (7c's form).
+test('19. ownSession: the orient: key wins, else a declared repo with its own design record; reads, never a probe', () => {
+  const j = ok(scan(V5))
+  const own = (name) => proj(j, name).ownSession
+  const SMALL = { own: false, by: null, repo: null }
+  const want = {
+    'Key Own': { own: true, by: 'key', repo: null },
+    'Key Upper': { own: true, by: 'key', repo: null },
+    'Key Sweep': { own: false, by: 'key', repo: null },
+    'Design Full': { own: true, by: 'design record', repo: '~/repos/design-full' },
+    'Two Repos': { own: true, by: 'design record', repo: '~/repos/design-full' },
+    'Context Only': SMALL,
+    'Empty Adr': SMALL,
+    'Txt Adr': SMALL,
+    'Ctx Dir': SMALL,
+    'Missing Repo': SMALL,
+    'Rel Repo': SMALL,
+    'Key Maybe': { own: true, by: 'design record', repo: '~/repos/design-full', invalid: 'maybe' },
+    'Key List': { ...SMALL, invalid: ['own'] },
+    'Key Blank': SMALL,
+  }
+  for (const [name, o] of Object.entries(want)) assert.deepEqual(own(name), o, name)
+  assert.equal(j.projects.length, Object.keys(want).length)
+  assert.ok(fs.existsSync(path.join(S, 'rel-design', 'docs', 'adr', '0001-x.md')), 'the relative repo would qualify if read from the cwd')
+  // --deadline 0 starts no subprocess, and the project rows (ownSession with them) are the online run's.
+  fs.rmSync(path.join(S, 'git-called'), { force: true })
+  const zero = ok(scan(V5, ['--deadline', '0'], { PATH: `${path.join(S, 'shim')}:${env.PATH}` }))
+  assert.ok(!fs.existsSync(path.join(S, 'git-called')), 'git never ran')
+  assert.deepEqual(zero.projects, j.projects)
+  // Every V1 project is small by the derived test, so its rows gain only that field.
+  for (const p of ok(online()).projects) assert.deepEqual(p.ownSession, SMALL, p.name)
 })

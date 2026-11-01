@@ -35,7 +35,7 @@ const PRODUCT = [
   { id: 'P1', file: 'skills/execute/SKILL.md', re: /^\*\*A wave number is refused\.\*\*/, max: 1, why: 'refusal' },
   { id: 'P2', file: 'skills/execute/task.workflow.js', re: /`waves` \(the pre-p12-5 shape\)/, max: 1, why: 'refusal (the args doc)' },
   { id: 'P3', file: 'skills/execute/task.workflow.js', re: /pre-p12-5 `waves` args shape/, max: 1, why: 'refusal (the guard comment)' },
-  { id: 'P4', file: 'skills/execute/task.workflow.js', re: /a\.waves !== undefined\) throw new Error\('task\.workflow\.js takes one args\.task, not args\.waves/, max: 1, why: 'refusal (the guard)' },
+  { id: 'P4', file: 'skills/execute/task.workflow.js', re: /a\.waves !== undefined\) throw argsRefused\('task\.workflow\.js takes one args\.task, not args\.waves/, max: 1, why: 'refusal (the guard, p32-1: through argsRefused)' },
   { id: 'P5', file: 'skills/execute/scripts/reconcile-rollout.py', re: /legacy `wave:`/, max: 3, why: 'migration (defer and carry docstrings, defer\'s printed line)' },
   { id: 'P6', file: 'skills/execute/scripts/reconcile-rollout.py', re: /"wave"/, max: 2, why: 'migration (defer\'s and carry\'s key tuples)' },
   { id: 'P7', file: 'skills/schedule/SKILL.md', re: /legacy `wave:`/, max: 5, why: 'migration (tombstones, carry, step 7, Verification)' },
@@ -60,6 +60,7 @@ const TESTS = [
   { id: 'T8', file: 'tests/contracts/status-repair-queue.test.mjs', count: 10, why: 'enforcement' },
   { id: 'T9', file: 'tests/fixtures/reconcile/vault/Work/Tasks/Archive/Rollouts/demo-rollout-2026-01-10.md', count: 1, why: 'legacy fixture (an archived Completion log)' },
   { id: 'T10', file: 'tests/contracts/close-handoff-chorus-words.test.mjs', count: 5, why: 'port (Chorus summarise.py\'s lead-line readers: their names in the header, WAVE_STATUS, the drift check\'s Python call)' },
+  { id: 'T11', file: 'skills/execute/tests/args-refusal.test.mjs', count: 2, why: 'refusal (p32-1: the pre-p12-5 shape refused with the sentinel, and its head in the entry\'s source check)' },
 ]
 
 const SKILL_TESTS = /^skills\/[^/]+\/tests\//

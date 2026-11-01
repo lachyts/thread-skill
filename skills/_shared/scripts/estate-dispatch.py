@@ -5,46 +5,81 @@ Scripts scan, the model decides: estate-scan.py lists the estate, the grading ag
 it, and this script does the rest that needs no judgement. It cuts the decision round to Lachy's budget and builds
 its AskUserQuestion payloads (`rounds`), works out which runs go once the answers are in (`plan`), which sessions
 start and with what (`sessions`), and writes each answer into its task note (`record`); `slices` cuts the scan into
-the grading agents' inputs, and `log` keeps the pass's grades in the Grade log. skills/orient-all/SKILL.md is its one
-caller, and this docstring is the only copy of the output schemas. python >= 3.9 with PyYAML (`log` needs none).
-Called as:
+the grading agents' inputs, and `log` keeps the pass's grades in the Grade log. `preflight` is schedule's Pre-flight
+split (ADR 0047): which candidates queue, which leave with their Dependent closure, and the decision round for one
+rollout's tasks. `decided-for-you` writes the calls a grade ruled for Lachy, never asked (ADR 0054), into the tasks a
+schedule run queues. Two callers: skills/orient-all/SKILL.md, and skills/schedule/SKILL.md § 1.5 (and its serial
+path's S3.5), which runs `slices`, `log`, `preflight`, `record` (`record --by schedule`) and `decided-for-you --by
+schedule --write`, and under orient-all only `preflight` and `decided-for-you --by orient-all --write`; orient's
+reshuffle R5.2 runs `record --owner --by orient`. This docstring is the only copy of the output schemas. python >= 3.9 with PyYAML (`log` and `preflight`
+need none). Called as:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py slices --scan FILE --dir DIR
+        [--tasks SLUG[,SLUG]]... [--superseding PRIOR]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rounds --rank FILE --scan FILE --budget N
         [--top K] [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py plan --rank FILE --scan FILE
-        [--decided SLUG]... [--unparked NOTE]... [--signed SLUG]... [--rounds FILE --assume-answered] [--vault PATH]
+        [--decided SLUG]... [--unparked NOTE]... [--signed SLUG]... [--status SLUG=N]...
+        [--rounds FILE --assume-answered] [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py sessions --plan FILE [--wrote PATH]...
-        [--status SLUG=N]... [--vault PATH]
+        [--status SLUG=N]... [--open NAME|NOTE|LABEL]... [--typed TEXT]... [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task SLUG|PATH --question Q
-        --answer A --recommended R [--fork F] [--today YYYY-MM-DD] [--vault PATH]
+        --answer A (--recommended R [--fork F] | --owner priorities|technical [--why W]) [--by orient-all|schedule]
+        [--superseding PRIOR] [--today YYYY-MM-DD] [--vault PATH]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py decided-for-you --rank FILE
+        --tasks SLUG[,SLUG]... [--by orient-all|schedule] [--superseding PRIOR] [--write] [--today YYYY-MM-DD]
+        [--vault PATH]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank FILE --scan FILE [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank FILE --scan FILE
+        --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...
 
 Defaults: rounds, plan and sessions take the vault from the scan's (or the plan's) `vault`; record takes
-~/repos/obsidian and the local date. Only `slices` (its own files under --dir), `record` (one task note) and `log`
-(grades.jsonl, through run_record) write; rounds, plan and sessions write nothing and are byte-deterministic for the
-same inputs. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before any sibling loads). Exit 0
-when done; 1 when `log` cannot write a line (run_record's warning above it; orient-all § 8 reports it as a caveat); 2
-on a usage error or a refusal (one `estate-dispatch:` stderr line, nothing written): an unknown verb or flag, a scan,
-rank or plan that is not JSON or whose `schema` is not 1, a negative budget, a bad --status or --wrote, an existing
-slice file, every record refusal and a grade line whose field run_record refuses (a task whose name is no slug is
-skipped, never refused); 3 when the vault, PyYAML or a sibling script is missing.
+~/repos/obsidian and the local date, decided-for-you ~/repos/obsidian and the rank's `today`. Only `slices` (its own
+files under --dir), `record` (one task note), `decided-for-you --write` (the task notes it names) and `log`
+(grades.jsonl, through run_record) write; rounds, plan, sessions, preflight and decided-for-you without --write
+write nothing and are byte-deterministic for the same inputs. No subprocess, no network, no bytecode (sys.dont_write_bytecode is set before
+any sibling loads). Exit 0 when done; 1 when `log` cannot write a line (run_record's warning above it; orient-all § 8
+and schedule step 8 report it as a caveat); 2 on a usage error or a refusal (one `estate-dispatch:` stderr line,
+nothing written): an unknown verb or flag, a scan, rank or plan that is not JSON or whose `schema` is not 1, a
+negative budget, a bad --status or --wrote, an --open naming no pick entry, an existing slice file, every record
+refusal, an empty decided-for-you --tasks, a grade line whose field
+run_record refuses (a task whose name has no key is skipped, never refused), and preflight's own refusals (an empty
+--tasks; a --kept, --decided or --dep slug outside --tasks; a --dep not given as A=B); 3 when the vault, PyYAML or a
+sibling script is missing.
+
+Big projects (ADR 0061; CONTEXT.md **Big project**). estate-scan.py's project rows carry ownSession {own, by, repo,
+invalid?}. A project is big when its row's own is true; a task is homed big through own_of (the first scan row of its
+home's name, as the ranker maps a home; a row with none reads small), a rollout through rollout_home (its first
+`projects[]` link, resolved as a link by NA.Vault.resolve_project, to its scan row by note, else by name). A big
+project keeps its own session: rounds asks none of its One calls, Grills, sign-offs or Unpark offer, plan schedules
+none of its runs, and sessions starts none of its live rollouts' items, unless Lachy ticks it on orient-all § 7's pick
+list (plan's pick[] and pickAsk, sessions' --open and --typed); ticked, a live rollout of its own whose pending
+sign-offs a repair can ask (sign_off_repair) gets that repair even where status gives no item (own_item). Its tasks
+are still graded and logged, for the pick list's counts and the Grade log, and preflight, record, decided-for-you and
+log are unchanged, so schedule's Pre-flight inside a big project's own session asks its decisions there.
 
 What it reuses. Loaded by path inside main(), so importing this file runs nothing (the contract tests read its
 constants that way): estate-rank.py (ER: Ranker's index, the gradeable rule; slug_key; DECISION_MINUTES and
 REVIEW_MINUTES), and through ER.load_siblings resolve-target.py's next-action.py (NA: Vault, Note, status_of,
 OPEN_STATUSES, links_in, tags_of) and estate-scan.py (ES: first_link, link_live and in_flight, vault-grammar.md
-§ In flight stated once); reconcile-rollout.py (RR: Note, GATE_PENDING_SECTION, GATE_BOUNCE_SECTION,
+§ In flight stated once, and still_to_start, its one exception); `preflight` loads ER alone, for slug_key;
+reconcile-rollout.py (RR: Note, GATE_PENDING_SECTION, GATE_BOUNCE_SECTION,
 PROJECT_ROOT_RE, _shape and _start_unattended, the start stamp's reader; _dep_status and _fold_unit, the dependency
 rule a rollout row waits on); and, for `sessions` only, leg.py (LEG:
 split_cells, LAUNCH_RE, LINK_RE and QUEUE, the serial Queue's row grammar); and, for `log` only, run_record.py (RRec:
-check, emit, events_dir, normalise_slug, GRADE_LOG and RESERVED: the Grade log's one writer is run_record itself).
+check, emit, events_dir, normalise_slug, title_key, GRADE_LOG and RESERVED: the Grade log's one writer is run_record
+itself).
 
-slices --scan F --dir D: one file per home project with gradeable tasks (ER's rule: statusClass active, not in flight,
-a live first project), `D/<NN>-<kebab name>.json`, NN from 01 in the scan's project order, holding {project (the scan
-row), tasks[] (its gradeable scan task rows), repos[] (the scan repo rows whose declared paths meet the project's
-`repos:`), today}. It creates D; any target file that already exists is exit 2 with nothing written. Prints
-{homes[] {project, note, file, tasks}, gradeable, skipped}.
+slices --scan F --dir D [--tasks SLUG[,SLUG]]... [--superseding PRIOR]: one file per home project with gradeable tasks
+(ER's rule: statusClass active, not in flight, a live first project), `D/<NN>-<kebab name>.json`, NN from 01 in the
+scan's project order, holding {project (the scan row), tasks[] (its gradeable scan task rows), repos[] (the scan repo
+rows whose declared paths meet the project's `repos:`), today}. It creates D; any target file that already exists is
+exit 2 with nothing written. Prints {homes[] {project, note, file, tasks}, gradeable, skipped}. --tasks (schedule
+§ 1.5's graded set) keeps only the named tasks that are gradeable, matched by ER.slug_key, so a home with none gets
+no file, and adds notGradeable[] {slug, why}, in the order named: each named task that is not gradeable, why the
+Ranker's skip reason (`unhomed`, `in flight`, `hold`) or `not in the scan`. --superseding passes the prior to the
+Ranker, so a carried task still queued is gradeable (ER's Gradeable exception). gradeable and skipped count the whole
+scan either way. With neither flag (orient-all § 2) the output is as it always was.
 
 rounds --rank R --scan S --budget N [--top K=15] [--vault V]: the decision round, cut to N minutes.
   Sign-offs: each scan rollout summary's `pendingSignOffs` (with a null summary, the scan's open tasks at status
@@ -53,37 +88,55 @@ rounds --rank R --scan S --budget N [--top K=15] [--vault V]: the decision round
   bullet mark stripped (the lines `reconcile-rollout.py approve-gates` signs, sub-bullets included); bounced is
   has_heading(RR.GATE_BOUNCE_SECTION) and bounce that section's text. ask is true unless why is `status unread` (a
   null summary), `paused` (a stamped pause other than pausedFor sign-off), `draining` (pause_requested) or `needs you`
-  (its setAside entry carries needsHuman): repair § 1 runs approve-gates under no other pause. Every asked sign-off is
-  asked whatever the budget, and charged first at REVIEW_MINUTES.signOff each.
+  (its setAside entry carries needsHuman): repair § 1 runs approve-gates under no other pause. After the unread, paused
+  and draining checks, and in place of `needs you` (repair asks a Needs-you question too), `own session` when the
+  rollout's home (rollout_home) is big: it waits on that project's own session, where opening the project starts the
+  repair that asks it (sessions, own_item), and is charged nothing. Every asked sign-off is asked whatever the budget,
+  and charged first at REVIEW_MINUTES.signOff each.
   The cut, in order, after the sign-offs: the rank's One calls (decisions[] round one-call, in order) at
   DECISION_MINUTES['One call'] per decision; the offered Unpark rows at the One-call minute each; the Grills at their
   rank `minutes`. The first item that does not fit the minutes left stops the cut: it and everything after it go to
-  later[]. A decision task whose holds this pass can never clear (a `blockedBy` why other than One call, Grill and
-  held, followed through `held` dependencies with a memo and a cycle guard) goes to skipped[], charged nothing.
+  later[]. A big project's One calls and Grills are never staged, and a big parked project's Unpark row is never
+  offered (it sits last on plan's pick list). A small decision task that waits on a big project's task (a rank hold
+  whose dependency is homed big, or a dependsOn link matched by ER.slug_key to an open scan task, not in flight, homed
+  big) goes to skipped[] with ownSession {project, slug}, the first such, charged nothing. A decision task whose holds
+  this pass can never clear (a `blockedBy` why other than One call, Grill and held, followed through `held`
+  dependencies with a memo and a cycle guard; a hold on a big project's task never clears) goes to skipped[], charged
+  nothing.
   Payloads: up to QUESTIONS_MAX questions per AskUserQuestion call, sign-offs first, then One calls, then Unpark offers;
   each {question, header (HEADERS, at most 12 chars), multiSelect: false, options[] {label, description}}. Every
   question opens with `[[slug]]` or `[[project]]`, so every text is unique. A label is at most LABEL_MAX chars, "
   (Recommended)" counted: a longer option is asked as `<k>. <leading words>…` (k its 1-based place, so labels stay
   distinct), its description opening with the full text. A One call's options are the decision's, the recommendation
-  first and marked " (Recommended)", its description the grader's why; a sign-off's are `Sign off` (its description
-  lists exactly the gates[] it signs) and `Not now`; an Unpark offer's are unpark, snooze and kill (the kill names the
-  project's open tasks). Sign-offs and Unpark offers carry no recommendation.
+  first and marked " (Recommended)", described by framing(): with the decision's `stakes` (one line per option, ADR
+  0054 d8), each option's stakes line, the recommended one's ending " Recommended: <why>"; without, the grader's why
+  on the recommendation and the bare label on the rest. A One call's text is `[[slug]] <question>`, then its `goal`
+  when it has one, then NOTE_INVITE; a sign-off's are `Sign off` (its description lists exactly the gates[] it signs)
+  and `Not now`; an Unpark offer's are unpark, snooze and kill (the kill names the project's open tasks). Every
+  question ends with NOTE_INVITE; sign-offs and Unpark offers carry no recommendation (the authorisation is his, ADR
+  0008; parking is his standing call, ADR 0041).
   Output: {schema, today, budget, top[] {rank, slug, home, grade, shape, size, leverage, dueSoon, deadline, review,
-  blockedBy}, live[] {slug, note, shape, progress, paused, pausedFor, pauseRequested, awaitingSignOff, live,
-  pendingSignOffs[], error}, signOffs[], oneCalls[] {slug, home, minutes, decision, blockedBy}, unpark[] (the rank's
-  rows, offered and in budget), grill[] {slug, home, minutes, decisions[], blockedBy}, later[] {kind, slug|project,
-  minutes}, skipped[] {kind, slug, blockedBy}, asks[][] (AskUserQuestion's `questions`, one array per call), index[]
+  blockedBy} (small homes' ranked tasks only), live[] {slug, note, project (its home's name, or null), ownSession (its
+  home is big), shape, progress, paused, pausedFor, pauseRequested, awaitingSignOff, live, pendingSignOffs[], error},
+  signOffs[], oneCalls[] {slug, home, minutes, decision, blockedBy}, unpark[] (the rank's rows, offered and in budget),
+  grill[] {slug, home, minutes, decisions[], blockedBy}, later[] {kind, slug|project, minutes}, skipped[] {kind, slug,
+  blockedBy, ownSession? {project, slug}}, asks[][] (AskUserQuestion's `questions`, one array per call), index[]
   {question, kind (sign-off | one-call | unpark), slug|project, note, labels[], texts[] (each label's full text),
   recommended (texts[0] for a One call, else null), fork?, bounced?}, minutes {signOffs, oneCalls, unpark, grill, used,
-  budget}}.
+  budget}, ownSession[] {project, note, by, repo, ready (graded Ready, unheld), oneCalls, grills, decisions (his, over
+  its One calls and Grills), orient, signOffs (pending on its live rollouts), unpark (an offered Unpark row held back)}
+  (one per big project with any of them, in scan order: what waits on its own session), warnings[] (one line per
+  project whose `orient:` key is neither own nor sweep, naming what its design record made it)}.
 
-plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG]... [--rounds F --assume-answered]:
-  what the pass schedules and starts once the answers are in.
+plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG]... [--status SLUG=N]...
+  [--rounds F --assume-answered]: what the pass schedules and starts once the answers are in. --status is sessions'
+  (each status agent's action number, SLUG a scan rollout, N 1 to 13, else exit 2), read only for the pick list's
+  held items.
   Decided: a task graded Ready, or named by --decided; with --assume-answered, also every oneCalls[] and grill[] slug
   in F (the dry run's reading: every in-budget decision answered). A member is scheduled when it is decided and every
   hold on it clears: a One call or Grill hold when the dependency is decided and clear, a `held` hold when the
   dependency is clear, a `parked` hold when the dependency's home is in --unparked (by name or note) and it is clear;
-  no other hold ever clears (memo and cycle guard).
+  no other hold ever clears (memo and cycle guard), nor any hold whose dependency is homed big.
   The dependencies. reconcile-rollout's _dep_status holds a rollout row until each dependency lands, so a member is
   scheduled only with every dependency it needs scheduled too. A rank dependsOn[] link is matched as the ranker
   matches it (ER.slug_key) to an open scan task, else read through RR._dep_status and RR._fold_unit over the vault's
@@ -91,6 +144,10 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   satisfied; an open one not in flight (a merged tombstone's unit too) is needed; one that left the scan without
   landing (status dropped, an `archived` tag, the Archive folder) holds the member as `dependency dropped`, and a link
   to no task note as `dependency not found`, since nothing ever lands them.
+  A big project's run waits first of all, why {kind: own session}: its members are every slug of the run in rank
+  order, none of them held or undecided here, and it never takes a root, so the pre-hold below holds a small member
+  that needs one of its tasks (worded `dependency not scheduled`). --decided, --unparked or --signed naming a big task
+  or project changes nothing of it.
   A run is scheduled when it has members left; it is parallel with a root, or serial; its repo row has no blocker
   (`unchecked` passes: schedule § 0 is the gate); it is not parked, unless unparked here (then only its Ready, unheld
   members go); and it is the best-ranked parallel run on its root (keyed on rolloutRoot when set, else root). Before
@@ -104,7 +161,8 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   next pass. Every other run waits, with why {kind: parked | nothing decided | repo unknown | no repo declared |
   blocker | same root | dependency not scheduled | dependency scheduled late, detail}; the last two are a run whose
   every member the dependencies took, worded from the final schedule: `dependency not scheduled` naming only the
-  dependencies no entry holds, else `dependency scheduled late` naming the ones a later round scheduled.
+  dependencies no entry holds, else `dependency scheduled late` naming the ones a later round scheduled; the why kinds
+  also include `own session` (above).
   Schedule entries: {run, project, note, projectSlug, batchKeys[], shape, root, rolloutRoot, members[], args
   ("--tasks a,b,c", never --regenerate), batch, review {pr, signOff, eyeCheck, minutes}}. projectSlug is the name
   NFKD-folded to ASCII and lower-cased, apostrophes (' and ’) deleted, every other run outside [a-z0-9] made a `-`, the
@@ -113,21 +171,43 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   note, and schedule step 6's naming (glob, then write) is not atomic, so they never share a batch. Parallel entries,
   in rank order, each take the lowest batch from 1 holding no entry whose keys meet theirs; serial entries each take a
   batch of their own after the last parallel one, in rank order. Listed by batch, then rank.
-  rollouts[]: one per scan rollout, {slug, note, shape, projectRoot, pausedFor, owners? (the `owner:` tags of its open
+  rollouts[]: one per scan rollout, {slug, note, project (its home's name, rollout_home, or null), ownSession (its home
+  is big), shape, projectRoot, pausedFor, pendingSignOffs[] (its summary's), owners? (the `owner:` tags of its open
   tasks), holds[], canExecute, canRepair, reinstate}. holds, in this order: superseded (supersededBy), lineage
   (another live rollout's supersedes names it), version (protocol_version not 5), incomplete, serial (status § 5
   reads a chain by its own S rules, which STATUS_ACTIONS never maps), paused, draining (pause_requested), live queue
   (running + integrating > 0), start stamp (RR._start_unattended: the Stage starts it), status unread (a null
   summary). reinstate: awaitingSignOff with every pending sign-off in --signed. canExecute: no hold, or reinstate
   with paused the only hold. canRepair: none of superseded, lineage, version, serial and status unread.
+  The pick list (orient-all § 7, ADR 0061): pick[] holds every big project with anything waiting on its own session,
+  counted as rounds' ownSession[] counts it (ready, decisions, orient, signOffs) plus heldItems (each live rollout of
+  its own whose --status action own_item gives an execute or repair item: live_item's, else a repair for its pending
+  sign-offs when sign_off_repair holds; signOffRepairs[] names the repairs that ask them), and every small project in
+  the rank's orient[] (parked homes out), whose counts are its Orient tasks alone. weight is ready + decisions + orient
+  + signOffs + heldItems; an entry with none is left out. Ranked: parked last; dueSoon (any of its counted tasks) first,
+  the earliest deadline first; crowned (standing crowned) first; weight, highest first; then the ready count; then the
+  oldest `captured` among its counted tasks (none last); then name, then note. pickAsk is AskUserQuestion's `questions`
+  for it: [] with no entry, else one question {question (PICK_QUESTION, then NOTE_INVITE), header HEADERS["pick"],
+  multiSelect true, options[]}: the top PICK_MAX entries, each labelled by label_for, its description opening
+  `[[<link>]]: ` with its non-zero counts and what opening it starts (a big project's orient session, its held rollout
+  items, and the repair that asks its sign-offs), then PICK_NONE. link is the name, or, for a twin (an entry whose name
+  another entry shares under pick_fold: two SEO.md in different folders), its note's path less `.md`. A twin's label
+  carries its `k. ` prefix, every twin's, the first included, as does a none word or a label taken. pickIndex {question,
+  labels[], names[] (null for PICK_NONE), notes[]} maps each label back, or null with no entry. No recommendation: where
+  his attention goes is his.
   Output: {schema, vault, today, schedule[], waiting[] {run, project, note, shape, root, rolloutRoot, members[], why},
-  rollouts[], reinstate[], orient[] {name, note, area[]} (the rank's, whatever the budget), held[] {slug, run, grade,
+  rollouts[], reinstate[], orient[] {name, note, area[]} (the rank's, whatever the budget; informational: an orient
+  starts only from the pick list), held[] {slug, run, grade,
   blockedBy (the rank holds that stand, then, for a member the dependencies took, read against the final schedule:
   {slug, why: `dependency not scheduled`} for each needed dependency no entry holds, `dependency dropped` or
   `dependency not found` for each that never lands, or, when none of those is left, {slug, why: `dependency scheduled
-  late`} for each it was held on)}, undecided[] {slug, run, grade}, sessionLane[] {slug, home, grade}}.
+  late`} for each it was held on)}, undecided[] {slug, run, grade}, sessionLane[] {slug, home, grade} (small homes
+  only), pick[] {name, note, own, by, parked, crowned, dueSoon, deadline, ready, decisions, orient, signOffs, heldItems,
+  weight, oldest, rollouts[] (its live rollouts' slugs; [] for a small project), signOffRepairs[], link}, pickAsk[],
+  pickIndex}.
 
-sessions --plan P [--wrote PATH]... [--status SLUG=N]...: the sessions to start, in start order. STATUS_ACTIONS maps
+sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL]... [--typed TEXT]...: the sessions
+  to start, in start order. STATUS_ACTIONS maps
   each status § 4 **Recommended action** rule (its number, as a status agent reports it) to the item it may start:
   6 and 13 an execute, 8 a reinstate, 7 and 11 a repair, every other number none (o10 pins the table to the rules).
   --wrote: each note a § 6 schedule fork wrote, directly in the vault's Work/Tasks (else exit 2). A parallel one
@@ -135,46 +215,114 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]...: the sessions to start,
   its `## Queue` row 1's launch folder, manual when its alias starts `cx-` (legs.md § Hand over).
   --status SLUG=N: SLUG one of plan.rollouts[], N an integer 1 to 13 (else exit 2). An execute item only with
   canExecute, a reinstate only with reinstate and canExecute (so a sign-off pause that every gate signed but another
-  hold stands on, serial, a start stamp or a drain, gets none), a repair only with canRepair; every live rollout that
-  gets no item goes to left[] {rollout, action (null: status unread), holds[], why}.
-  Orient items: one per plan.orient[], prompt `/thread:orient [[<name>]]`, with one more line per --wrote note whose
-  `projects:` resolves to that project, naming it. Order: the written-note items (in --wrote order), the live
-  execute items by slug, the repair items by slug, the orient items last. A title over TITLE_MAX is cut to
-  TITLE_MAX - 1 chars plus "…".
+  hold stands on, serial, a start stamp or a drain, gets none), a repair only with canRepair (live_item); every live
+  rollout that gets no item goes to left[] {rollout, action (null: status unread), holds[], why}. A big project's
+  rollout (its plan row's ownSession) takes own_item, so a pending sign-off a repair can ask gets one; one whose item
+  its project was not opened for goes to left[] too, why OWN_HELD and held: execute | repair.
+  The pick list's answers. --open: each label ticked on it (orient-all § 7), matched by pick_hits against plan.pick[]
+  under pick_fold (casefolded and NFKD-normalised, whitespace collapsed, wrapping quotes, `[[ ]]` and a trailing `.md`
+  dropped): a pickIndex label first, which opens its own option alone, else pick_match (its name, link, note or note
+  stem; a name two entries share opens both); PICK_NONE or a NONE_WORDS answer opens nothing, and any other that
+  matches no entry is exit 2. --typed: his typed words, split on `,`, `;` and line breaks; each piece is tried whole,
+  and only then split on " and " (so "Morning and Weekly Commands" still matches); a none word opens nothing, a match
+  opens its project, and the rest are listed in unmatched[], in order, never an exit 2. An opened project's live
+  rollouts get their allow-list items.
+  Orient items: one per opened pick entry, in pick order, prompt `/thread:orient [[<link>]]`, with one more line per
+  --wrote note whose `projects:` resolves to that project, naming it, one SIGN_OFF_LINE per repair item of its own
+  that asks pending sign-offs, and last PICK_LINE with its counts (a big project) or PICK_LINE_SMALL (a small one,
+  ticked for its Orient tasks). Its title is `Orient: <link>`. Order: the
+  written-note items (in --wrote order), the live execute items by slug, the repair items by slug, the orient items
+  last. A title over TITLE_MAX is cut to TITLE_MAX - 1 chars plus "…".
   Output: {schema, today, items[] {kind (execute | leg | repair | orient), rollout | project, note, title, cwd, alias?,
-  prompt, tldr, manual, why}, left[]}.
+  prompt, tldr, manual, why}, left[] {rollout, action, holds[], why, held?}, unmatched[]}.
 
-log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md **Grade log**), orient-all
-  § 2 step 7, never on a dry run. One run_record `grade` line per rank tasks[] entry, Orient included, in rank order:
-  task its slug (run_record's normalise_slug), project its home, grade, agentGrade, shape and size; decisions the
-  count of its decisions[] and low those whose confidence is low; held true when its blockedBy[] is non-empty; gates
+log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md **Grade log**), at
+  orient-all § 2 step 7 (never on a dry run) and at schedule § 1.5 on every run that grades (all but an orient-all
+  fork, whose estate pass logged them). One run_record `grade` line per rank tasks[] entry, Orient included, in rank order:
+  task its key (grade_key below), project its home, grade, agentGrade, shape and size; decisions the
+  count of its decisions[], his decisions only (owner yours, ADR 0054: a decision ruled for him, in decidedForYou[], is
+  never counted, so lines before ADR 0054 are not comparable), and low those whose confidence is low; held true when its blockedBy[] is non-empty; gates
   its gates[]; raised the `why` of each raised[] step, when there is one; rank when it is not null; linked the scan
   row's `rollout`, through run_record's normalise_slug, when it is a slug and not a reserved name. The pass shares one
   minted id, g-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>, and one ts, and its digest is the first 12 hex of sha1 over the rank
   file's realpath, the rank's `today` and the sorted (slug, grade, agentGrade, shape, size) tuples: orient-all's $S is
-  a fresh mktemp per pass, so two passes never share a digest, and a rerun of one pass keeps it. A task whose slug
-  normalise_slug refuses (estate-scan's slug is the raw file stem, so a vault note named with spaces or capitals) is
-  skipped: one `estate-dispatch: skipped <slug>: <why>` stderr line each, and the rest are still logged. Every other
-  line passes run_record's check before any is written. A (digest, task) already in grades.jsonl is skipped: with
-  every task there it prints `exists <pass> (<n> grade(s))`; with some, it writes the rest under that pass's id and
-  ts, printing `completed <pass>: <k> more`, so a pass whose write stopped part-way is completed by a rerun; else
-  `logged <n> grade(s), pass <id>`. Any of the three ends `; <k> skipped (not a slug): <slug>, ...` when a task was
+  a fresh mktemp per pass, so two passes never share a digest, and a rerun of one pass keeps it. The key (p34-6): a
+  slug is normalise_slug's; estate-scan's slug is the raw file stem, so a titled vault note (spaces, capitals, an em
+  dash: a quick capture's) is keyed by run_record's title_key and its line carries the exact name as `note`, which
+  grades.py looks the note up by. A slug-named task holds its key first, whatever the rank order, and a titled name
+  holds its key next, in rank order, so a titled name whose key another graded task of the pass holds, or a name with
+  no ASCII letter or digit, has no key and is skipped: one `estate-dispatch: skipped <slug>: <why>` stderr line each,
+  and the rest are still logged. Every other line passes run_record's check before any is written. A (digest, task)
+  already in grades.jsonl is skipped: with every task there it prints `exists <pass> (<n> grade(s))`; with some, it
+  writes the rest under that pass's id and ts, printing `completed <pass>: <k> more`, so a pass whose write stopped
+  part-way is completed by a rerun; else
+  `logged <n> grade(s), pass <id>`. Any of the three ends `; <k> skipped (no key): <slug>, ...` when a task was
   skipped (orient-all § 8 reports it as a caveat). --dry-run prints each line (`would log grade <task>: <fields>`) and
   that outcome after `dry run, nothing written: `, and writes nothing. A torn grades.jsonl line is skipped, and a log
   that cannot be read counts as empty.
 
-record --task SLUG|PATH --question Q --answer A --recommended R [--fork F] [--today D]: one answer into its task. Q, A,
-  R and F have every whitespace run (newlines included) folded to one space, and Q loses a leading link to its own
-  task (`[[<slug>]] `, as a rounds index text opens; ER.slug_key compares), so the note never links to itself and a
-  rerun with the bare question is [no-change]. Refused (exit 2, the file byte-identical): no such task note directly
+record --task SLUG|PATH --question Q --answer A --recommended R [--fork F] [--by B] [--superseding PRIOR] [--today D]:
+  one answer into its task. Q, A, R and F have every whitespace run (newlines included) folded to one space, and Q
+  loses a leading link to its own task (`[[<slug>]] `, as a rounds or preflight index text opens; ER.slug_key
+  compares), so the note never links to itself and a rerun with the bare question is [no-change]. Refused (exit 2, the file byte-identical): no such task note directly
   in Work/Tasks, a note that is not a `task`, a status outside Active (NA.status_of not in NA.OPEN_STATUSES), a task
-  in flight (ES.in_flight over ES.link_live of its `rollout:`), a value empty after the fold (Q after its link is cut
-  too), and a --fork that the latest `orient end:` line in its `## Notes` does not name as `fork for Lachy: F`. The
-  bullet `- <Q> → <A> (asked at /thread:orient-all; recommended: <R>)` extends in place the section DECISIONS_HEADING
-  of the same date (after its last line, before the next `## ` heading outside a fence), else opens that section at
-  the note's end (schedule step 7's form). --fork also appends RULING_LINE (orient § 5's) as the last `## Notes`
+  in flight (ES.in_flight over ES.link_live of its `rollout:`), unless --superseding names the prior and
+  ES.still_to_start holds (schedule § 1.5's carried task still queued: open, its `rollout:` that prior; one that has
+  started is still refused), a value empty after the fold (Q after its link is cut too), and a --fork that the latest
+  `orient end:` line in its `## Notes` does not name as `fork for Lachy: F`. The bullet `- <Q> → <A> (asked at
+  /thread:<B>; recommended: <R>)`, B the --by caller (orient-all, the default, or schedule), extends in place the
+  section DECISIONS_HEADING of the same date (after its last line, before the next `## ` heading outside a fence),
+  else opens that section at the note's end (schedule step 7's form). --fork also appends RULING_LINE (orient § 5's) as the last `## Notes`
   line. One in-place write (the inode kept), printing `recorded <note>: <Q> → <A>`; nothing to add prints
   `<note>: <Q> → <A> [no-change]`, exit 0.
+  --owner priorities|technical writes a call made for Lachy instead (ADR 0054 d3): the bullet
+  `- <Q> → <A> (decided for you at /thread:<B>, <owner>: <W>)` (`: <W>` dropped with no --why) under DECIDED_HEADING
+  of the same date, a new section opening with DECIDED_PREAMBLE; never under DECISIONS_HEADING. --recommended with
+  it exits 2 (the call is the answer), and so does --fork (an open fork stays his); --by orient (reshuffle R5.2) is
+  allowed only with --owner. The same refusals hold. Without --owner, --recommended is required.
+
+decided-for-you --rank R --tasks SLUG[,SLUG]... [--by B] [--superseding PRIOR] [--write] [--today D]: the calls the
+  rank ruled for Lachy (each task row's decidedForYou[], the less sure first) for the named tasks, matched by
+  ER.slug_key, in --tasks order and then the rank's. Output: {schema, today, items[] {slug, note, question, answer
+  (the recommendation), options[], owner, confidence, why}, skipped[] {slug, why: not in the rank}, written[] {slug,
+  question}, unchanged[], refused[] {slug, question, why}}. Read-only without --write. With --write, each item goes
+  through record's core with --owner (its own owner) and --by B: a refusal (a task in flight since the scan, say) is
+  listed in refused[] and the rest are still written, exit 0; a rerun is all unchanged. Exit 2 on a usage error, a
+  rank that is not JSON or not schema 1, or an empty --tasks; 3 when --write finds no vault or no PyYAML.
+
+preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...: schedule
+  § 1.5's split of its candidates (ADR 0047). It reads only the two files. --tasks is every candidate, deduplicated
+  by ER.slug_key in first-seen order (a scan task is shown by its scan slug); --kept, --decided and --dep (each
+  repeatable, --kept and --decided also comma-joined) must name candidates. Each candidate, in order:
+  - kept (a carried task that has started): in, `kept`, never graded or asked;
+  - graded Ready (the rank's tasks[]): in, `ready`;
+  - One call or Grill: in when decided (`decided`), else out (`undecided`);
+  - Orient: out (`orient`, with its `home`), decided or not;
+  - not graded (the rank's invalid[], ungraded[] or skipped[], or no scan row): ungraded, its reason `invalid: <the
+    errors>`, the rank's why (`no grade`, a skip reason) or `not in the scan`, with STATUS_OUTSIDE in place of a skip
+    reason `in flight` or `hold` when the scan row's statusClass is `hold` (its own status is the cause: a carried
+    task at an empty status, which carry queues but ES.still_to_start does not); in when decided (`queued as it
+    stands`), else out (`ungraded`).
+  The Dependent closure, in two steps. The edges are each candidate's scan `dependsOn`, matched by ER.slug_key among
+  the candidates, and each --dep (A depends on B). A kept candidate never leaves; one whose dependency is out gives
+  one warnings[] line naming them. First what leaves whatever Lachy answers: every candidate that depends on an
+  Orient one, directly or through others, leaves as `dependency` (Ready, decided, undecided or ungraded alike), via
+  its first dependency in that closure. Then a candidate still in leaves, to a fixpoint, when a dependency is out:
+  `dependency`, via the first such dependency.
+  The round: one question per AskUserQuestion call, each candidate still out undecided or ungraded after the closure,
+  so never a task already out through an Orient dependency, which leaves whatever the answer: the One calls in rank
+  order (`[[slug]] <question>`), then each Grill's decisions in rank order (`[[slug]] (k/n) <question>`), each text
+  followed by its `goal` when it has one and NOTE_INVITE (framing(), as rounds), then the ungraded in --tasks order
+  (`[[slug]] could not be graded (<reason>): leave it out of this rollout, or queue it as it stands? <NOTE_INVITE>`,
+  UNGRADED_OPTIONS, `Leave it out` recommended, its description and UNGRADED_WHY saying why over his autonomy). Only
+  his decisions are asked: the rank's decisions[] hold only those (ADR 0054). Options are built as rounds builds them
+  (label_for, the recommendation first and marked, framing()'s descriptions); HEADERS gives each header. An ungraded answer is never recorded (schedule § 1.5).
+  Output: {schema, today, counts {candidates, graded, ready, oneCall, grill, orient, ungraded, kept, decided, in, out}
+  (graded, the grades and ungraded over the candidates not kept), tasks[] {slug, grade, decided, in, why, via?,
+  reason?}, queue[] (the slugs in, in --tasks order), out[] {slug, grade, why, via?, reason?, home?, note?}, asks[][]
+  (one question each), index[] {question, kind (one-call | grill | ungraded), slug, note, decision {question,
+  options[], recommendation, why?, fork?} (an ungraded one's synthesised from UNGRADED_QUESTION), labels[], texts[],
+  recommended (texts[0]), k?, n?, fork?}, warnings[]}.
 """
 import argparse
 import datetime
@@ -204,21 +352,67 @@ VAULT_DEFAULT = "~/repos/obsidian"
 ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 FENCE = re.compile(r"^\s*(```|~~~)")
 
-# AskUserQuestion's shape, as far as this script builds it (orient-all § Risks: assumed, not read from the tool).
+# AskUserQuestion's shape, as far as this script builds it (orient-all § Risks: assumed, not read from the tool); who is
+# asked and how: `skills/_shared/asking.md`.
 QUESTIONS_MAX = 4
 LABEL_MAX = 40
 RECOMMENDED = " (Recommended)"
 ELLIPSIS = "…"
-HEADERS = {"sign-off": "Sign-off", "one-call": "One call", "unpark": "Unpark"}
+HEADERS = {"sign-off": "Sign-off", "one-call": "One call", "unpark": "Unpark", "grill": "Grill", "ungraded": "Ungraded",
+           "pick": "Open"}
+# The Framing's Note (asking.md § 3): the last words of every question this script builds (ADR 0054 d8).
+NOTE_INVITE = "What would make this wrong for you?"
+# schedule § 1.5's question for a task the grading could not grade (its options, the recommendation first).
+UNGRADED_OPTIONS = ("Leave it out", "Queue it as it stands")
+UNGRADED_QUESTION = "could not be graded ({why}): leave it out of this rollout, or queue it as it stands?"
+UNGRADED_DESCRIPTIONS = ("Leaves it out of this rollout, with every task that depends on it; the next schedule grades it "
+                         "again. Recommended over autonomy because nobody could read it for a decision of yours: queued "
+                         "unread, it can build the wrong thing, which costs you more than one schedule's wait",
+                         "Queues it ungraded: it runs this rollout without you, and an open decision it hides is met at "
+                         "its start, by its plan")
+UNGRADED_WHY = ("nobody could read it for a decision of yours; queued unread it can build the wrong thing, and quality "
+                "over speed outweighs one schedule's wait")
+STATUS_OUTSIDE = "status outside Active"  # an ungraded candidate's reason when its own status is the cause
 SIGN_OFF_OPTIONS = ("Sign off", "Not now")
 TOP_DEFAULT = 15
 TITLE_MAX = 60  # create_thread's title (skills/execute/legs.md § Hand over)
 KILL_NAMES_MAX = 8
 
+# A big project keeps its own session (ADR 0061; CONTEXT.md **Big project**): estate-scan.py's ownSession says which.
+# Nothing of one is asked, scheduled or started here unless Lachy ticks it on orient-all § 7's pick list, one
+# AskUserQuestion multiSelect question of the top PICK_MAX projects and PICK_NONE (AskUserQuestion's four options).
+OWN_SESSION = "own session"
+OWN_HELD = "own session: open it from the pick list"
+SMALL = {"own": False, "by": None, "repo": None}
+PICK_MAX = 3
+PICK_NONE = "Not now"
+NONE_WORDS = ("none", "not now", "nothing", "no", "neither", "skip")
+PICK_QUESTION = ("Which projects should open their own session now? Each one orients there, asks its own decisions and "
+                 "schedules its own rollout; the whole ranked list is printed above, and you can type any project on it.")
+PICK_NONE_DESCRIPTION = "Opens nothing: each project waits for the next pass's pick list"
+# The orient prompt's last line for a project ticked on the pick list: a big project's (its counts), else a small
+# project's, ticked for its Orient tasks alone (the pass asks and schedules the rest of its work).
+PICK_LINE = ("Ticked on orient-all's pick list on {date} ({counts}): this project keeps its own session, so its One "
+             "calls and Grills are asked here and its rollout is scheduled here.")
+PICK_LINE_SMALL = "Ticked on orient-all's pick list on {date} for its {orient}."
+# An opened big project's orient prompt line for each repair item it starts to ask a live rollout's pending sign-offs
+# (own_item): repair § 1 runs approve-gates, which no orient session does.
+SIGN_OFF_LINE = ("orient-all is starting /thread:repair [[{rollout}]] beside this session, which asks its pending "
+                 "sign-offs ({gates}); leave those to it.")
+
 # schedule step 7's ask-ahead heading and orient § 5's ruling line (tests/contracts/orient-all.test.mjs o4).
 DECISIONS_HEADING = "## Decisions (asked ahead {date})"
 RULING_LINE = "- {stamp} orient ruling: {fork} → {answer}"
-DECISION_BULLET = "- {question} → {answer} (asked at /thread:orient-all; recommended: {recommended})"
+DECISION_BULLET = "- {question} → {answer} (asked at /thread:{by}; recommended: {recommended})"
+RECORD_BY = ("orient-all", "schedule")
+# A call made for Lachy, never asked (ADR 0054 d3): its own heading, never `## Decisions`, so no reader of a recorded
+# human decision takes it for one (tests/contracts/question-gate.test.mjs q4).
+DECIDED_HEADING = "## Decided for you ({date})"
+DECIDED_PREAMBLE = ("Calls made for Lachy, never asked (ADR 0054): each stands unless the code shows it wrong, a plan that "
+                    "departs from one says why, and none signs a gated input (ADR 0008); he can overturn any here.")
+DECIDED_BULLET = "- {question} → {answer} (decided for you at /thread:{by}, {owner}: {why})"
+DECIDED_OWNERS = ("priorities", "technical")
+DECIDED_BY = RECORD_BY + ("orient",)
 NOTES_HEADING = "## Notes"
 END_MARK = " orient end: "
 FORK_MARK = "fork for Lachy: "
@@ -389,17 +583,227 @@ def is_five(v):
     return (isinstance(v, int) and not isinstance(v, bool) and v == 5) or (isinstance(v, str) and v.strip() == "5")
 
 
+# ---- big projects and the pick list (ADR 0061) -------------------------------------------------------------------
+
+def is_own(row):
+    """True when a scan project row is a big project: its ownSession's `own` is true."""
+    o = (row or {}).get("ownSession")
+    return isinstance(o, dict) and o.get("own") is True
+
+
+def own_of(scan, name):
+    """The ownSession of the project named `name`, read from the first scan row of that name (as the ranker maps a
+    home); no row, or a row with none, reads small (SMALL)."""
+    row = next((p for p in scan["projects"] if isinstance(p, dict) and p.get("name") == name), None)
+    o = (row or {}).get("ownSession")
+    return dict(o, own=o.get("own") is True) if isinstance(o, dict) else dict(SMALL)
+
+
+def rollout_home(vault, scan, row):
+    """The scan project row a rollout belongs to: its first `projects[]` link, resolved as a link
+    (NA.Vault.resolve_project), matched to a scan row by note, else by name; None when it names no live project."""
+    links = [x for x in row.get("projects") or [] if isinstance(x, str) and x.strip()]
+    if not links:
+        return None
+    rows = [p for p in scan["projects"] if isinstance(p, dict)]
+    rel, _ = vault.resolve_project(links[0], link=True)
+    if rel:
+        hit = next((p for p in rows if p.get("note") == rel.replace(os.sep, "/")), None)
+        if hit is not None:
+            return hit
+    name = links[0].strip().replace("\\", "/").rsplit("/", 1)[-1]
+    name = name[:-3] if name.lower().endswith(".md") else name
+    return next((p for p in rows if p.get("name") == name), None)
+
+
+def pending_slugs(M, scan, row):
+    """A rollout's pending sign-offs: its scan summary's `pendingSignOffs`, or with a null summary the scan's open tasks
+    at status RR.GATE_PENDING_STATUS whose `rollout:` names it."""
+    s = row.get("summary")
+    if isinstance(s, dict):
+        return [x for x in (s.get("pendingSignOffs") or []) if isinstance(x, str)]
+    ER, RR = M.ER, M.RR
+    key, gate = ER.slug_key(row.get("slug") or ""), status_key(RR.GATE_PENDING_STATUS)
+    return sorted(t["slug"] for t in scan["tasks"] if isinstance(t, dict) and status_key(t.get("status")) == gate
+                  and t.get("rollout") and ER.slug_key(t["rollout"]) == key)
+
+
+def parse_status(raws, slugs, what):
+    """{slug: N} from each `--status SLUG=N`: SLUG one of `slugs` (the rollouts of the plan or the scan, `what`), N an
+    integer 1 to 13, status § 4's **Recommended action** number; anything else is exit 2."""
+    status = {}
+    for raw in raws or []:
+        slug, sep, n = raw.partition("=")
+        if not sep or slug not in slugs:
+            fail(2, "--status %s: name a rollout of the %s as SLUG=N" % (raw, what))
+        if not re.fullmatch(r"\d+", n.strip()) or not 1 <= int(n) <= 13:
+            fail(2, "--status %s: N is the status § 4 action number, 1 to 13" % raw)
+        status[slug] = int(n)
+    return status
+
+
+def live_item(r, n):
+    """(kind, why): what a live rollout gets at status § 4 action n through the allow-list (STATUS_ACTIONS), behind the
+    plan's holds on its row r. `execute` for 6 and 13 with canExecute, and for 8 (the reinstate) with reinstate and
+    canExecute too; `repair` for 7 and 11 with canRepair; else None, with why it gets nothing."""
+    kind, words = STATUS_ACTIONS[n]
+    # canExecute is every hold clear, but for the sign-off pause when every gate is signed (reinstate): so a
+    # reinstate needs both, and a sign-off pause with any other hold (serial, a start stamp, a drain) gets nothing.
+    if kind in ("execute", "reinstate") and r.get("canExecute") and (kind == "execute" or r.get("reinstate")):
+        return "execute", ("status action 8: the sign-off pause, every gate signed this pass" if kind == "reinstate"
+                           else "status action %d: %s" % (n, words))
+    if kind == "repair" and r.get("canRepair"):
+        return "repair", "status action %d: %s" % (n, words)
+    if kind is None:
+        why = "status action %d (%s) starts nothing from here" % (n, words)
+    elif kind == "reinstate" and r.get("reinstate"):
+        why = "status action 8 (%s): every gate signed, but held by %s" % (
+            words, ", ".join(h for h in r.get("holds") or [] if h != "paused") or "nothing")
+    elif kind == "reinstate" and r.get("pausedFor") == "sign-off":
+        why = "status action 8 (%s): a gate is still unsigned, so the sign-off pause holds" % words
+    elif kind == "reinstate" and "paused" in (r.get("holds") or []):
+        why = "status action 8 (%s): paused by you: the reinstate is yours" % words
+    elif kind == "reinstate":
+        why = "status action 8 (%s), but the plan reads no sign-off pause to reinstate" % words
+    else:
+        why = "status action %d (%s) held by %s" % (n, words, ", ".join(r.get("holds") or []) or "nothing")
+    return None, why
+
+
+def sign_off_repair(r):
+    """True when a repair can ask the plan row r's pending sign-offs: it has some, canRepair, and no drain or pause
+    but the sign-off pause holds it (repair runs approve-gates under no other pause; rounds' sign-off rule)."""
+    holds = r.get("holds") or []
+    return bool(r.get("pendingSignOffs")) and bool(r.get("canRepair")) and "draining" not in holds \
+        and ("paused" not in holds or r.get("pausedFor") == "sign-off")
+
+
+def own_item(r, n):
+    """(kind, why): what a big project's live rollout r gets at status action n once Lachy opens the project (ADR
+    0061): live_item's item, else a repair when sign_off_repair holds, since only repair asks its sign-offs there (a
+    sign-off-paused rollout with an unsigned gate reads action 8, which live_item gives nothing)."""
+    kind, why = live_item(r, n)
+    if kind is None and sign_off_repair(r):
+        return "repair", "status action %d: %s waiting on its own session, which repair asks" % (
+            n, plural(len(r["pendingSignOffs"]), "pending sign-off"))
+    return kind, why
+
+
+def waiting_on(M, rank, scan, vault):
+    """{note: w}, one per scan project row: what of its open work the pass sees. w is {ready (graded Ready, no
+    blockedBy), oneCalls, grills, decisions (his, over its One calls and Grills), orient, signOffs (pending on its live
+    rollouts, pending_slugs), tasks[] (its rank rows), rollouts[] (its scan rollout rows)}. A task is homed by its rank
+    `home`, the first scan row of that name (the ranker's mapping); a rollout by rollout_home."""
+    first, out = {}, {}
+    for p in scan["projects"]:
+        if isinstance(p, dict) and isinstance(p.get("note"), str):
+            first.setdefault(p.get("name"), p)
+            out[p["note"]] = {"ready": 0, "oneCalls": 0, "grills": 0, "decisions": 0, "orient": 0, "signOffs": 0,
+                              "tasks": [], "rollouts": []}
+    for t in rank["tasks"]:
+        p = first.get(t.get("home")) if isinstance(t, dict) else None
+        if p is None:
+            continue
+        w, grade = out[p["note"]], t.get("grade")
+        w["tasks"].append(t)
+        if grade == "Ready" and not t.get("blockedBy"):
+            w["ready"] += 1
+        elif grade in ("One call", "Grill"):
+            w["oneCalls" if grade == "One call" else "grills"] += 1
+            w["decisions"] += len(t.get("decisions") or [])
+        elif grade == "Orient":
+            w["orient"] += 1
+    for r in sorted((x for x in scan["rollouts"] if isinstance(x, dict)), key=lambda x: str(x.get("slug"))):
+        p = rollout_home(vault, scan, r)
+        if p is not None and p.get("note") in out:
+            out[p["note"]]["rollouts"].append(r)
+            out[p["note"]]["signOffs"] += len(pending_slugs(M, scan, r))
+    return out
+
+
+def plural(n, word):
+    return "%d %s%s" % (n, word, "" if n == 1 else "s")
+
+
+def counts_text(e):
+    """A pick entry's non-zero counts, in one phrase."""
+    parts = [plural(e.get(k) or 0, word) for k, word in (("ready", "ready task"), ("decisions", "waiting decision"),
+                                                         ("orient", "Orient task"), ("signOffs", "pending sign-off"),
+                                                         ("heldItems", "held rollout item")) if e.get(k)]
+    return ", ".join(parts) or "nothing counted"
+
+
+def pick_fold(word):
+    """A pick-list name as pick_match compares it: NFKD-normalised and case-folded, whitespace collapsed, wrapping
+    quotes and `[[ ]]` dropped, then a trailing `.md` and trailing sentence marks."""
+    s = " ".join(unicodedata.normalize("NFKD", str(word or "")).casefold().split())
+    while True:
+        t = s.strip().strip("\"'`“”‘’").strip()
+        if t.startswith("[[") and t.endswith("]]"):
+            t = t[2:-2].strip()
+        if t == s:
+            break
+        s = t
+    if s.endswith(".md"):
+        s = s[:-3]
+    return " ".join(s.rstrip(".!?").split())
+
+
+def pick_match(entry, word):
+    """True when `word` names the pick entry: its name, its link, its note or its note's stem, under pick_fold."""
+    w = pick_fold(word)
+    note = entry.get("note") or ""
+    names = (entry.get("name"), entry.get("link"), note, note.rsplit("/", 1)[-1])
+    return bool(w) and any(isinstance(x, str) and pick_fold(x) == w for x in names)
+
+
+def pick_hits(pick, labels, word):
+    """The pick entries `word` opens: the one whose option label (pickIndex: {label: note}) it is, under pick_fold,
+    before any other reading, so a ticked label opens only its own option; else every entry pick_match names."""
+    w = pick_fold(word)
+    note = next((n for lb, n in labels.items() if w and pick_fold(lb) == w), None)
+    if note is not None:
+        return [e for e in pick if e["note"] == note]
+    return [e for e in pick if pick_match(e, word)]
+
+
+def none_word(word):
+    """True for a typed or ticked answer that opens nothing: PICK_NONE or one of NONE_WORDS."""
+    return pick_fold(word) in {pick_fold(x) for x in NONE_WORDS + (PICK_NONE,)}
+
+
 # ---- slices ------------------------------------------------------------------------------------------------------
+
+def split_slugs(values):
+    """Each repeated SLUG[,SLUG] value as one list of stripped, non-empty slugs, in the order given."""
+    return [s.strip() for v in values or [] for s in v.split(",") if s.strip()]
+
 
 def cmd_slices(args):
     scan = read_scan(args.scan)
     M = Mods()
     today = scan.get("today")
-    ranker = M.ER.Ranker(M.RT, M.ES, scan, None, None, [])
+    ranker = M.ER.Ranker(M.RT, M.ES, scan, None, None, [], superseding=args.superseding)
     ranker.index()
+    wanted, not_gradeable = None, []
+    if args.tasks:  # schedule § 1.5's graded set: only these, and why each named task that is not gradeable is not
+        wanted, seen = set(), set()
+        for raw in split_slugs(args.tasks):
+            key = M.ER.slug_key(raw)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            slug = ranker.lower.get(key)
+            if slug is None:
+                not_gradeable.append({"slug": raw, "why": "not in the scan"})
+            elif slug not in ranker.home:
+                not_gradeable.append({"slug": slug, "why": ranker.skip[slug]})
+            else:
+                wanted.add(slug)
     by_home = {}
     for slug in sorted(ranker.home):
-        by_home.setdefault(ranker.home[slug]["name"], []).append(slug)
+        if wanted is None or slug in wanted:
+            by_home.setdefault(ranker.home[slug]["name"], []).append(slug)
     plan, n = [], 0
     for p in scan["projects"]:
         if not isinstance(p, dict) or p.get("name") not in by_home or ranker.projects.get(p["name"]) is not p:
@@ -422,19 +826,25 @@ def cmd_slices(args):
                 fh.write(json.dumps(body, ensure_ascii=False, indent=2) + "\n")
     except OSError as e:
         fail(2, "cannot write the slices under %s: %s" % (d, e))
-    emit({"homes": [{"project": b["project"]["name"], "note": b["project"].get("note"), "file": os.path.join(d, f),
-                     "tasks": [t["slug"] for t in b["tasks"]]} for f, b in plan],
-          "gradeable": len(ranker.home), "skipped": len(ranker.skip)})
+    out = {"homes": [{"project": b["project"]["name"], "note": b["project"].get("note"), "file": os.path.join(d, f),
+                      "tasks": [t["slug"] for t in b["tasks"]]} for f, b in plan],
+           "gradeable": len(ranker.home), "skipped": len(ranker.skip)}
+    if wanted is not None:
+        out["notGradeable"] = not_gradeable
+    emit(out)
 
 
 # ---- rounds ------------------------------------------------------------------------------------------------------
 
-def label_for(k, full, recommended):
-    """(label, shortened): the option's label, at most LABEL_MAX chars with the suffix counted."""
+def label_for(k, full, recommended, numbered=False):
+    """(label, shortened): the option's label, at most LABEL_MAX chars with the suffix counted; numbered, it carries
+    its `k. ` prefix even when it fits (the pick list's twins)."""
     suffix = RECOMMENDED if recommended else ""
-    if len(full) + len(suffix) <= LABEL_MAX:
-        return full + suffix, False
     prefix = "%d. " % k
+    if len(full) + len(suffix) <= LABEL_MAX and not numbered:
+        return full + suffix, False
+    if numbered and len(prefix) + len(full) + len(suffix) <= LABEL_MAX:
+        return prefix + full + suffix, False
     room = LABEL_MAX - len(prefix) - len(ELLIPSIS) - len(suffix)
     words, cut = full.split(), ""
     for w in words:
@@ -447,14 +857,66 @@ def label_for(k, full, recommended):
     return prefix + cut + ELLIPSIS + suffix, True
 
 
+def framing(d):
+    """(suffix, descriptions): a rank decision's Framing (asking.md § 3, ADR 0054 d8). The suffix follows the question
+    text: its `goal`, when it has one, then NOTE_INVITE. The descriptions, one per option in the decision's order (the
+    recommendation first): with `stakes` (one non-empty line per option, as estate-rank.py passes it), each option's
+    stakes line, the recommended one's ending " Recommended: <why>"; without, the why on the recommendation and nothing
+    on the rest (Rounds.options shows a bare label then)."""
+    fulls = list(d.get("options") or [])
+    why = d.get("why") or "the grader's recommendation"
+    stakes = d.get("stakes")
+    if isinstance(stakes, list) and fulls and len(stakes) == len(fulls) and \
+            all(isinstance(x, str) and x.strip() for x in stakes):
+        descs = [stakes[0].strip() + " Recommended: " + why] + [x.strip() for x in stakes[1:]]
+    else:
+        descs = [why] + ["" for _ in fulls[1:]]
+    goal = d.get("goal")
+    suffix = (" " + goal.strip() if isinstance(goal, str) and goal.strip() else "") + " " + NOTE_INVITE
+    return suffix, descs
+
+
 class Rounds:
     def __init__(self, M, rank, scan, vroot, budget, top):
         self.M, self.rank, self.scan, self.vroot = M, rank, scan, vroot
         self.budget, self.top = budget, top
         self.rows = {t["slug"]: t for t in rank["tasks"] if isinstance(t, dict) and isinstance(t.get("slug"), str)}
         self._clear = {}
+        self.vault = M.NA.Vault(vroot)
+        self.open = {}  # the scan's open tasks by lower-case slug, the first one kept
+        for t in scan["tasks"]:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                self.open.setdefault(t["slug"].lower(), t)
 
-    # A hold this pass can clear: One call or Grill (asked in this round), or held by such a chain.
+    def home_of(self, slug):
+        """A task's home: its rank row's, else its open scan row's first live project."""
+        row = self.rows.get(slug)
+        if row is not None:
+            return row.get("home")
+        t = self.open.get(str(slug or "").lower())
+        return (t.get("projects") or [None])[0] if t else None
+
+    def big(self, name):
+        return own_of(self.scan, name)["own"]
+
+    def big_dep(self, slug):
+        """{project, slug} of the first big project's task a decision task waits on: a rank hold whose dependency is
+        homed big, else a dependsOn link matched (ER.slug_key) to an open scan task, not in flight, homed big; or
+        None. Such a task waits on that project's own session (ADR 0061), so this round never asks it."""
+        row = self.rows.get(slug) or {}
+        for h in row.get("blockedBy") or []:
+            home = self.home_of(h.get("slug"))
+            if home is not None and self.big(home):
+                return {"project": home, "slug": h.get("slug")}
+        for link in row.get("dependsOn") or []:
+            t = self.open.get(self.M.ER.slug_key(link))
+            home = (t.get("projects") or [None])[0] if t else None
+            if t and not t.get("inFlight") and home is not None and self.big(home):
+                return {"project": home, "slug": t["slug"]}
+        return None
+
+    # A hold this pass can clear: One call or Grill (asked in this round), or held by such a chain; never a hold on a
+    # big project's task, whose decisions wait on its own session.
     def clears(self, slug, visiting):
         if slug in self._clear:
             return self._clear[slug]
@@ -464,6 +926,10 @@ class Rounds:
         ok = True
         for h in (self.rows.get(slug) or {}).get("blockedBy") or []:
             why = h.get("why")
+            home = self.home_of(h.get("slug"))
+            if home is not None and self.big(home):
+                ok = False
+                break
             if why in ("One call", "Grill"):
                 continue
             if why == "held" and self.clears(h.get("slug"), visiting):
@@ -479,20 +945,14 @@ class Rounds:
         return row.get("note") if row and isinstance(row.get("note"), str) else "Work/Tasks/%s.md" % slug
 
     def sign_offs(self):
-        RR, ER = self.M.RR, self.M.ER
+        RR = self.M.RR
         out = []
         for r in sorted((x for x in self.scan["rollouts"] if isinstance(x, dict)), key=lambda x: str(x.get("slug"))):
             s = r.get("summary")
-            if isinstance(s, dict):
-                slugs = [x for x in (s.get("pendingSignOffs") or []) if isinstance(x, str)]
-                needs = {e.get("slug") for e in (s.get("setAside") or [])
-                         if isinstance(e, dict) and e.get("needsHuman")}
-            else:
-                key, gate = ER.slug_key(r.get("slug") or ""), status_key(RR.GATE_PENDING_STATUS)
-                slugs = sorted(t["slug"] for t in self.scan["tasks"] if isinstance(t, dict)
-                               and status_key(t.get("status")) == gate
-                               and t.get("rollout") and ER.slug_key(t["rollout"]) == key)
-                needs = set()
+            slugs = pending_slugs(self.M, self.scan, r)
+            needs = {e.get("slug") for e in (s.get("setAside") or [])
+                     if isinstance(e, dict) and e.get("needsHuman")} if isinstance(s, dict) else set()
+            own = is_own(rollout_home(self.vault, self.scan, r))
             for slug in slugs:
                 rel = self.task_note(slug)
                 text, gates, bounced, bounce = "", [], False, ""
@@ -511,6 +971,8 @@ class Rounds:
                     why = "paused"
                 elif s.get("pause_requested"):
                     why = "draining"
+                elif own:  # a big project's sign-off waits on its own session, whose repair asks it (ADR 0061)
+                    why = OWN_SESSION
                 elif slug in needs:
                     why = "needs you"
                 else:
@@ -525,7 +987,9 @@ class Rounds:
         for r in sorted((x for x in self.scan["rollouts"] if isinstance(x, dict)), key=lambda x: str(x.get("slug"))):
             s = r.get("summary") if isinstance(r.get("summary"), dict) else None
             counts = (s or {}).get("counts") or {}
-            out.append({"slug": r.get("slug"), "note": r.get("note"), "shape": r.get("shape"),
+            home = rollout_home(self.vault, self.scan, r)
+            out.append({"slug": r.get("slug"), "note": r.get("note"), "project": (home or {}).get("name"),
+                        "ownSession": is_own(home), "shape": r.get("shape"),
                         "progress": (s or {}).get("progress"), "paused": (s or {}).get("paused"),
                         "pausedFor": (s or {}).get("pausedFor"),
                         "pauseRequested": bool((s or {}).get("pause_requested")),
@@ -543,19 +1007,24 @@ class Rounds:
         one_min = ER.DECISION_MINUTES["One call"]
         stages = []
         for d in self.rank["decisions"]:
-            if not isinstance(d, dict):
+            if not isinstance(d, dict) or self.big(d.get("home")):  # a big project's own session asks them
                 continue
             kind = "one-call" if d.get("round") == "one-call" else "grill"
             mins = one_min * len(d.get("decisions") or []) if kind == "one-call" else d.get("minutes") or 0
             stages.append((0 if kind == "one-call" else 2, kind, d, mins))
         for u in self.rank["unpark"]:
-            if isinstance(u, dict) and u.get("offer"):
+            if isinstance(u, dict) and u.get("offer") and not self.parked_big(u):
                 stages.append((1, "unpark", u, one_min))
         stages.sort(key=lambda x: x[0])  # stable: rank order inside each stage
         one_calls, unpark, grill, later, skipped = [], [], [], [], []
         mins = {"one-call": 0, "unpark": 0, "grill": 0}
         stopped = False
         for _, kind, item, m in stages:
+            hold = self.big_dep(item["slug"]) if kind != "unpark" else None
+            if hold is not None:
+                skipped.append({"kind": kind, "slug": item["slug"], "blockedBy": item.get("blockedBy") or [],
+                                "ownSession": hold})
+                continue
             if kind != "unpark" and not self.clears(item["slug"], set()):
                 skipped.append({"kind": kind, "slug": item["slug"], "blockedBy": item.get("blockedBy") or []})
                 continue
@@ -590,13 +1059,47 @@ class Rounds:
                 "shape": t.get("shape"), "size": t.get("size"), "leverage": t.get("leverage"),
                 "dueSoon": t.get("dueSoon"), "deadline": t.get("deadline"), "review": t.get("review"),
                 "blockedBy": t.get("blockedBy") or []}
-               for t in self.rank["tasks"] if isinstance(t, dict) and t.get("rank") is not None][:self.top]
+               for t in self.rank["tasks"] if isinstance(t, dict) and t.get("rank") is not None
+               and not self.big(t.get("home"))][:self.top]
         used = so_min + mins["one-call"] + mins["unpark"] + mins["grill"]
         return {"schema": SCHEMA, "today": self.rank.get("today") or today_of(self.scan), "budget": self.budget,
                 "top": top, "live": self.live(), "signOffs": sign, "oneCalls": one_calls, "unpark": unpark,
                 "grill": grill, "later": later, "skipped": skipped, "asks": asks, "index": index,
                 "minutes": {"signOffs": so_min, "oneCalls": mins["one-call"], "unpark": mins["unpark"],
-                            "grill": mins["grill"], "used": used, "budget": self.budget}}
+                            "grill": mins["grill"], "used": used, "budget": self.budget},
+                "ownSession": self.own_session(), "warnings": self.warnings()}
+
+    def parked_big(self, u):
+        """True for an Unpark row of a big project: no offer here, it sits last on the pick list (ADR 0061)."""
+        row = next((p for p in self.scan["projects"] if isinstance(p, dict) and p.get("note") == u.get("note")), None)
+        return is_own(row) if row is not None else self.big(u.get("project"))
+
+    def own_session(self):
+        """One row per big project with anything waiting on its own session, in scan order."""
+        waits = waiting_on(self.M, self.rank, self.scan, self.vault)
+        offers = {u.get("note"): bool(u.get("offer")) for u in self.rank["unpark"] if isinstance(u, dict)}
+        out = []
+        for p in self.scan["projects"]:
+            if not is_own(p) or p.get("note") not in waits:
+                continue
+            w, o = waits[p["note"]], p["ownSession"]
+            row = {"project": p.get("name"), "note": p["note"], "by": o.get("by"), "repo": o.get("repo")}
+            row.update({k: w[k] for k in ("ready", "oneCalls", "grills", "decisions", "orient", "signOffs")})
+            row["unpark"] = offers.get(p["note"], False)
+            if any(row[k] for k in ("ready", "oneCalls", "grills", "orient", "signOffs", "unpark")):
+                out.append(row)
+        return out
+
+    def warnings(self):
+        """One line per project whose `orient:` key is neither own nor sweep: its design record decides."""
+        out = []
+        for p in self.scan["projects"]:
+            o = p.get("ownSession") if isinstance(p, dict) else None
+            if isinstance(o, dict) and "invalid" in o:
+                out.append("[[%s]] (%s): orient: %s is neither own nor sweep, so its design record decides: %s" % (
+                    p.get("name"), p.get("note"), json.dumps(o["invalid"], ensure_ascii=False),
+                    "big" if o.get("own") is True else "small"))
+        return out
 
     @staticmethod
     def options(fulls, descriptions, recommend):
@@ -616,6 +1119,7 @@ class Rounds:
         if so["bounced"]:
             text += (" The plan judge bounced this plan (ADR 0038): its feedback is under %s."
                      % self.M.RR.GATE_BOUNCE_SECTION)
+        text += " " + NOTE_INVITE  # no pick: the authorisation is his (ADR 0008)
         descs = ["Signs exactly: " + " · ".join(so["gates"]), "Leaves it set aside; nothing is written"]
         opts, labels = self.options(SIGN_OFF_OPTIONS, descs, False)
         questions.append({"question": text, "header": HEADERS["sign-off"], "multiSelect": False, "options": opts})
@@ -626,9 +1130,8 @@ class Rounds:
     def one_call_q(self, oc, questions, index):
         d = oc["decision"] or {}
         fulls = [o for o in d.get("options") or []]
-        text = "[[%s]] %s" % (oc["slug"], d.get("question") or "")
-        why = d.get("why") or "the grader's recommendation"
-        descs = [why] + ["" for _ in fulls[1:]]
+        suffix, descs = framing(d)
+        text = "[[%s]] %s%s" % (oc["slug"], d.get("question") or "", suffix)
         opts, labels = self.options(fulls, descs, True)
         row = self.rows.get(oc["slug"]) or {}
         questions.append({"question": text, "header": HEADERS["one-call"], "multiSelect": False, "options": opts})
@@ -645,8 +1148,9 @@ class Rounds:
         names = ", ".join(open_tasks[:KILL_NAMES_MAX]) + (
             " and %d more" % (n - KILL_NAMES_MAX) if n > KILL_NAMES_MAX else "")
         sw = u.get("snoozeWrite") or {}
-        text = "[[%s]]: %s. Unpark, snooze or kill it?" % (
-            u["project"], u.get("why") or "parked with %d ready task%s" % (ready, "" if ready == 1 else "s"))
+        text = "[[%s]]: %s. Unpark, snooze or kill it? %s" % (
+            u["project"], u.get("why") or "parked with %d ready task%s" % (ready, "" if ready == 1 else "s"),
+            NOTE_INVITE)  # no pick: parking is his standing call (ADR 0041)
         descs = ["status: queued; its Ready, unheld work starts this pass",
                  "asked again after %s, or sooner if its Ready work grows past %s"
                  % (sw.get("snoozed_until"), sw.get("snoozed_ready")),
@@ -693,13 +1197,14 @@ class TaskIndex:
 
 
 class Plan:
-    def __init__(self, M, rank, scan, vroot, decided, unparked, signed):
+    def __init__(self, M, rank, scan, vroot, decided, unparked, signed, status):
         self.M, self.rank, self.scan, self.vroot = M, rank, scan, vroot
         self.rows = {t["slug"]: t for t in rank["tasks"] if isinstance(t, dict) and isinstance(t.get("slug"), str)}
         self.decided = {s for s, t in self.rows.items() if t.get("grade") == "Ready"} | set(decided)
         self.unparked = set(unparked)
         self.signed = set(signed)
-        self._clear, self._deps, self._index = {}, {}, None
+        self.status = status
+        self._clear, self._deps, self._index, self._vault = {}, {}, None, None
         self.open = {}  # the scan's tasks (open: not landed, not archived) by lower-case slug, the first one kept
         for t in self.scan["tasks"]:
             if isinstance(t, dict) and isinstance(t.get("slug"), str):
@@ -709,6 +1214,12 @@ class Plan:
         if self._index is None:
             self._index = TaskIndex(self.M.RR, Path(self.vroot) / self.M.NA.TASKS_DIR)
         return self._index
+
+    def vault(self):
+        """The vault's NA.Vault, built once: the owners read and rollout_home resolve through it."""
+        if self._vault is None:
+            self._vault = self.M.NA.Vault(self.vroot)
+        return self._vault
 
     def deps(self, slug):
         """[(dependency, why)], in dependsOn[] order: each dependency that would hold the task's rollout row, read as
@@ -736,6 +1247,13 @@ class Plan:
         self._deps[slug] = out
         return out
 
+    def big_task(self, slug):
+        """True when the task is homed in a big project (ADR 0061): its rank row's home, else its open scan row's."""
+        row = self.rows.get(slug)
+        t = self.open.get(str(slug or "").lower())
+        home = row.get("home") if row is not None else ((t.get("projects") or [None])[0] if t else None)
+        return home is not None and own_of(self.scan, home)["own"]
+
     def home_unparked(self, slug):
         t = self.rows.get(slug) or {}
         note = next((r.get("note") for r in self.rank["runs"] if slug in (r.get("ready") or [])
@@ -752,7 +1270,9 @@ class Plan:
         ok = True
         for h in (self.rows.get(slug) or {}).get("blockedBy") or []:
             d, why = h.get("slug"), h.get("why")
-            if why in ("One call", "Grill"):
+            if self.big_task(d):  # a big project's own session schedules it, never this pass
+                good = False
+            elif why in ("One call", "Grill"):
                 good = d in self.decided and self.clear(d, visiting)
             elif why == "held":
                 good = self.clear(d, visiting)
@@ -769,6 +1289,8 @@ class Plan:
 
     def clear_one(self, h):
         d, why = h.get("slug"), h.get("why")
+        if self.big_task(d):
+            return False
         if why in ("One call", "Grill"):
             return d in self.decided and self.clear(d, set())
         if why == "held":
@@ -788,6 +1310,11 @@ class Plan:
             parked = bool(run.get("parked"))
             unparked = parked and (run.get("project") in self.unparked or run.get("note") in self.unparked)
             members, lost = [], []
+            if own_of(self.scan, run.get("project"))["own"]:
+                # A big project's run waits on its own session (ADR 0061): every member listed, none held or
+                # undecided here, and it never takes a root.
+                runs.append((order, run, False, slugs, [], True, True))
+                continue
             for s in slugs:
                 t = self.rows.get(s) or {}
                 if s in late:  # only ever a former member, so decided with every rank hold clear
@@ -806,17 +1333,17 @@ class Plan:
             # A run that waits whatever the root contest decides: parked, rootless or blocked.
             fixed = (parked and not unparked) or (run.get("shape") == "parallel" and not run.get("root")) \
                 or bool(run.get("blockers"))
-            runs.append((order, run, parked and not unparked, members, lost, fixed))
+            runs.append((order, run, parked and not unparked, members, lost, fixed, False))
         # The pre-hold, before any root is contested: a member whose dependency can never go this pass, whatever the
         # contest decides, is held, transitively. Only a member of a run the contest can schedule may go.
-        pool = {s for _, _, _, members, _, fixed in runs if not fixed for s in members}
+        pool = {s for _, _, _, members, _, fixed, _ in runs if not fixed for s in members}
         while True:
             out = {s for s in pool if any(why != DEP_UNSCHEDULED or d not in pool for d, why in self.deps(s))}
             if not out:
                 break
             pool -= out
         entries, waiting, roots, gone = [], [], {}, set()
-        for order, run, still_parked, members, lost, fixed in runs:
+        for order, run, still_parked, members, lost, fixed, big in runs:
             if not fixed:
                 lost = lost + [s for s in members if s not in pool]
                 members = [s for s in members if s in pool]
@@ -824,7 +1351,10 @@ class Plan:
                 held[s] = self.rows.get(s) or {}
                 gone.add(s)
             why = None
-            if still_parked:
+            if big:
+                why = {"kind": OWN_SESSION, "detail": "a big project (ADR 0061): its own session schedules its work; "
+                       "tick it on the pick list to open it"}
+            elif still_parked:
                 why = {"kind": "parked", "detail": "the project is parked: its Unpark offer decides"}
             elif not members and lost:
                 why = {"kind": DEP_UNSCHEDULED, "detail": None}  # worded by run() from the final schedule
@@ -917,6 +1447,7 @@ class Plan:
                  "args", "batch", "review")
         schedule = [{k: e[k] for k in order} for e in entries]
         rollouts = self.rollouts()
+        pick = self.pick(rollouts)
         projects = {p.get("note"): p for p in self.scan["projects"] if isinstance(p, dict)}
         orient = [{"name": o.get("project"), "note": o.get("note"), "area": list((projects.get(o.get("note")) or {})
                    .get("area") or [])} for o in self.rank["orient"] if isinstance(o, dict)]
@@ -924,7 +1455,7 @@ class Plan:
         for r in self.rank["runs"]:
             for s in (r.get("ready") or []) + (r.get("waiting") or []) + (r.get("blocked") or []):
                 run_of[s] = r.get("id")
-        return {
+        out = {
             "schema": SCHEMA, "vault": self.vroot, "today": self.rank.get("today") or today_of(self.scan),
             "schedule": schedule, "waiting": waiting, "rollouts": rollouts,
             "reinstate": [r["slug"] for r in rollouts if r["reinstate"]], "orient": orient,
@@ -935,15 +1466,117 @@ class Plan:
                           for s, t in sorted(undecided.items())],
             "sessionLane": [{"slug": t["slug"], "home": t.get("home"), "grade": t.get("grade")}
                             for t in sorted(self.rows.values(), key=lambda t: t["slug"])
-                            if t.get("shape") == "session" and t.get("grade") != "Orient"],
+                            if t.get("shape") == "session" and t.get("grade") != "Orient"
+                            and not own_of(self.scan, t.get("home"))["own"]],
+            "pick": pick,
         }
+        out.update(self.pick_ask(pick))
+        return out
+
+    def pick(self, rollouts):
+        """orient-all § 7's pick list (ADR 0061), ranked: every big project with anything waiting on its own session
+        (Ready unheld work, his decisions, Orient tasks, pending sign-offs, or a held live-rollout item: a live rollout
+        of its own whose --status action gives an execute or repair item), and every small project with an Orient task
+        (the rank's orient[], parked homes out). A small project's counts are its Orient tasks alone: the pass asks and
+        schedules the rest of its work."""
+        waits = waiting_on(self.M, self.rank, self.scan, self.vault())
+        rows = {r["slug"]: r for r in rollouts}
+        oriented = {o.get("note"): o for o in self.rank["orient"] if isinstance(o, dict)}
+        captured = {}
+        for t in self.scan["tasks"]:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                c = str(t.get("captured") or "")[:10]
+                captured.setdefault(t["slug"], c if ISO_DATE.fullmatch(c) else None)
+        entries = []
+        for p in self.scan["projects"]:
+            w = waits.get(p.get("note")) if isinstance(p, dict) else None
+            if w is None:
+                continue
+            big = is_own(p)
+            if big:
+                tasks = w["tasks"]
+                items = {}  # each live rollout of its own that opening it starts an item for (own_item)
+                for r in w["rollouts"]:
+                    slug = r.get("slug")
+                    kind = own_item(rows[slug], self.status[slug])[0] \
+                        if slug in self.status and slug in rows else None
+                    if kind:
+                        items[slug] = kind
+                counts = {"ready": w["ready"], "decisions": w["decisions"], "orient": w["orient"],
+                          "signOffs": w["signOffs"], "heldItems": len(items)}
+                mine = [r.get("slug") for r in w["rollouts"]]
+                asks = [s for s, kind in items.items() if kind == "repair" and sign_off_repair(rows[s])]
+            elif p["note"] in oriented:
+                slugs = set(oriented[p["note"]].get("tasks") or [])
+                tasks = [t for t in w["tasks"] if t.get("slug") in slugs]
+                counts = {"ready": 0, "decisions": 0, "orient": len(tasks), "signOffs": 0, "heldItems": 0}
+                mine, asks = [], []
+            else:
+                continue
+            weight = sum(counts.values())
+            if not weight:
+                continue
+            dates = sorted((t.get("deadline") or {}).get("date") for t in tasks
+                           if isinstance(t.get("deadline"), dict) and isinstance(t["deadline"].get("date"), str))
+            olds = sorted(c for c in (captured.get(t.get("slug")) for t in tasks) if c)
+            e = {"name": p.get("name"), "note": p["note"], "own": big, "by": (p.get("ownSession") or {}).get("by"),
+                 "parked": bool(p.get("parked")), "crowned": p.get("standing") == "crowned",
+                 "dueSoon": any(t.get("dueSoon") for t in tasks), "deadline": dates[0] if dates else None}
+            e.update(counts)
+            e.update(weight=weight, oldest=olds[0] if olds else None, rollouts=mine, signOffRepairs=asks)
+            entries.append(e)
+        entries.sort(key=lambda e: (e["parked"], not e["dueSoon"], (e["deadline"] or "") if e["dueSoon"] else "",
+                                    not e["crowned"], -e["weight"], -e["ready"], e["oldest"] is None, e["oldest"] or "",
+                                    str(e["name"]), e["note"]))
+        # Two notes of one name (two SEO.md in different folders): each is linked by its note's path, which names
+        # it alone, in its option, its orient prompt and its session's title.
+        folds = {}
+        for e in entries:
+            folds[pick_fold(e["name"])] = folds.get(pick_fold(e["name"]), 0) + 1
+        for e in entries:
+            twin = folds[pick_fold(e["name"])] > 1 and e["note"].lower().endswith(".md")
+            e["link"] = e["note"][:-3] if twin else e["name"]
+        return entries
+
+    @staticmethod
+    def pick_ask(pick):
+        """{pickAsk, pickIndex}: the pick list as one AskUserQuestion `questions` array of one multiSelect question,
+        the top PICK_MAX entries and PICK_NONE; with no entry, pickAsk is [] and pickIndex null."""
+        if not pick:
+            return {"pickAsk": [], "pickIndex": None}
+        opts, labels, names, notes = [], [], [], []
+        for k, e in enumerate(pick[:PICK_MAX], 1):
+            link = e.get("link") or e["name"]
+            label = label_for(k, e["name"], False)[0]
+            # A name another entry shares (a twin: its link is its note's path) is numbered, every one of them, the
+            # first included; so is a none word, and any label already taken.
+            if link != e["name"] or none_word(label) or pick_fold(label) in {pick_fold(x) for x in labels}:
+                label = label_for(k, e["name"], False, numbered=True)[0]
+            if e["own"]:
+                starts = "its orient session, which asks its One calls and Grills and schedules its rollout"
+                if e["heldItems"]:
+                    starts += ", and its %s" % plural(e["heldItems"], "held rollout item")
+                if e.get("signOffRepairs"):
+                    starts += ". Its pending sign-offs are asked by the repair it starts"
+            else:
+                starts = "its orient session"
+            opts.append({"label": label, "description": "[[%s]]: %s. Opening it starts %s." % (
+                link, counts_text(e), starts)})
+            labels.append(label)
+            names.append(e["name"])
+            notes.append(e["note"])
+        opts.append({"label": PICK_NONE, "description": PICK_NONE_DESCRIPTION})
+        text = "%s %s" % (PICK_QUESTION, NOTE_INVITE)
+        return {"pickAsk": [{"question": text, "header": HEADERS["pick"], "multiSelect": True, "options": opts}],
+                "pickIndex": {"question": text, "labels": labels + [PICK_NONE], "names": names + [None],
+                              "notes": notes + [None]}}
 
     def rollouts(self):
-        RR, ER, NA = self.M.RR, self.M.ER, self.M.NA
+        RR, ER = self.M.RR, self.M.ER
         rows = [r for r in self.scan["rollouts"] if isinstance(r, dict)]
         named = {ER.slug_key(r["supersedes"]) for r in rows if r.get("supersedes")}
         owners = {}
-        vault = NA.Vault(self.vroot)
+        vault = self.vault()
         for t in self.scan["tasks"]:
             if isinstance(t, dict) and t.get("rollout") and isinstance(t.get("note"), str):
                 owner = vault.note(os.path.join(*t["note"].split("/"))).get("owner")
@@ -983,8 +1616,10 @@ class Plan:
             holds = [h for h in HOLDS if h in holds]
             pending = [x for x in (s or {}).get("pendingSignOffs") or [] if isinstance(x, str)]
             reinstate = bool(s and s.get("awaitingSignOff") and all(p in self.signed for p in pending))
-            row = {"slug": r.get("slug"), "note": r.get("note"), "shape": shape, "projectRoot": r.get("projectRoot"),
-                   "pausedFor": (s or {}).get("pausedFor")}
+            home = rollout_home(vault, self.scan, r)
+            row = {"slug": r.get("slug"), "note": r.get("note"), "project": (home or {}).get("name"),
+                   "ownSession": is_own(home), "shape": shape, "projectRoot": r.get("projectRoot"),
+                   "pausedFor": (s or {}).get("pausedFor"), "pendingSignOffs": pending}
             mine = owners.get(ER.slug_key(r.get("slug") or ""))
             if mine:
                 row["owners"] = sorted(mine)
@@ -1005,9 +1640,10 @@ def cmd_plan(args):
         r = read_json(args.rounds, "rounds", SCHEMA)
         decided += [x.get("slug") for x in (r.get("oneCalls") or []) + (r.get("grill") or [])
                     if isinstance(x, dict) and isinstance(x.get("slug"), str)]
+    status = parse_status(args.status, {r.get("slug") for r in scan["rollouts"] if isinstance(r, dict)}, "scan")
     M = Mods()
     vroot = vault_root(args.vault, scan)
-    emit(Plan(M, rank, scan, vroot, decided, args.unparked or [], args.signed or []).run())
+    emit(Plan(M, rank, scan, vroot, decided, args.unparked or [], args.signed or [], status).run())
 
 
 # ---- sessions ----------------------------------------------------------------------------------------------------
@@ -1030,18 +1666,41 @@ def queue_row1(M, note):
 
 def cmd_sessions(args):
     plan = read_json(args.plan, "plan", PLAN_SCHEMA)
-    for key in ("rollouts", "orient", "schedule"):
+    for key in ("rollouts", "orient", "schedule", "pick"):
         if not isinstance(plan.get(key), list):
             fail(2, "the plan %s has no %s list" % (args.plan, key))
     rollouts = {r["slug"]: r for r in plan["rollouts"] if isinstance(r, dict) and isinstance(r.get("slug"), str)}
-    status = {}
-    for raw in args.status or []:
-        slug, sep, n = raw.partition("=")
-        if not sep or slug not in rollouts:
-            fail(2, "--status %s: name a rollout of the plan as SLUG=N" % raw)
-        if not re.fullmatch(r"\d+", n.strip()) or not 1 <= int(n) <= 13:
-            fail(2, "--status %s: N is the status § 4 action number, 1 to 13" % raw)
-        status[slug] = int(n)
+    status = parse_status(args.status, rollouts, "plan")
+    pick = [e for e in plan["pick"] if isinstance(e, dict) and isinstance(e.get("note"), str)]
+    pidx = plan.get("pickIndex") if isinstance(plan.get("pickIndex"), dict) else {}
+    labels = {lb: n for lb, n in zip(pidx.get("labels") or [], pidx.get("notes") or [])
+              if isinstance(lb, str) and isinstance(n, str)}
+    hits = lambda word: pick_hits(pick, labels, word)  # noqa: E731
+    opened, unmatched = set(), []
+    for raw in args.open or []:  # each label ticked on the pick list
+        if none_word(raw):
+            continue
+        got = hits(raw)
+        if not got:
+            fail(2, "--open %s: no project on the plan's pick list is named so" % raw)
+        opened |= {e["note"] for e in got}
+    for raw in args.typed or []:  # his typed words: each piece whole first, then split on " and "
+        for piece in (x.strip() for x in re.split(r"[,;\r\n]+", raw)):
+            if not piece or none_word(piece):
+                continue
+            got = hits(piece)
+            if got:
+                opened |= {e["note"] for e in got}
+                continue
+            for part in (x.strip() for x in re.split(r"\s+and\s+", piece, flags=re.I)):
+                if not part or none_word(part):
+                    continue
+                got = hits(part)
+                if got:
+                    opened |= {e["note"] for e in got}
+                elif part not in unmatched:
+                    unmatched.append(part)
+    opened_rollouts = {r for e in pick if e["note"] in opened for r in e.get("rollouts") or []}
     M = Mods(leg=True)
     RR, NA = M.RR, M.NA
     vroot = vault_root(args.vault, plan)
@@ -1078,44 +1737,36 @@ def cmd_sessions(args):
                           "cwd": cwd, "prompt": "/thread:execute [[%s]]" % slug,
                           "tldr": "Runs the parallel rollout orient-all scheduled this pass, to the end.",
                           "manual": cwd is None, "why": "written this pass"})
-    executes, repairs, left = [], [], []
+    executes, repairs, left, asking = [], [], [], set()
     for slug in sorted(rollouts):
         r = rollouts[slug]
         n = status.get(slug)
         if n is None:
             left.append({"rollout": slug, "action": None, "holds": r.get("holds") or [], "why": "status unread"})
             continue
-        kind, words = STATUS_ACTIONS[n]
+        big = r.get("ownSession") is True
+        # A big project's rollout also gets a repair for its pending sign-offs (own_item): only repair asks them.
+        kind, why = own_item(r, n) if big else live_item(r, n)
         root = os.path.expanduser(r["projectRoot"]) if r.get("projectRoot") else None
-        # canExecute is every hold clear, but for the sign-off pause when every gate is signed (reinstate): so a
-        # reinstate needs both, and a sign-off pause with any other hold (serial, a start stamp, a drain) gets nothing.
-        if kind in ("execute", "reinstate") and r.get("canExecute") and (kind == "execute" or r.get("reinstate")):
-            why = ("status action 8: the sign-off pause, every gate signed this pass" if kind == "reinstate"
-                   else "status action %d: %s" % (n, words))
+        if kind and big and slug not in opened_rollouts:
+            # A big project's item waits until he ticks the project on the pick list (ADR 0061).
+            left.append({"rollout": slug, "action": n, "holds": r.get("holds") or [], "why": OWN_HELD, "held": kind})
+        elif kind == "execute":
             executes.append({"kind": "execute", "rollout": slug, "note": r.get("note"),
                              "title": titled("Execute: %s" % slug), "cwd": root,
                              "prompt": "/thread:execute [[%s]]" % slug,
                              "tldr": "Moves a live rollout on, as its status report recommends.",
                              "manual": root is None, "why": why})
-        elif kind == "repair" and r.get("canRepair"):
+        elif kind == "repair":
+            if big and sign_off_repair(r):  # this repair asks its sign-offs (repair § 1), whatever sent it
+                asking.add(slug)
+            only = STATUS_ACTIONS[n][0] != "repair"  # sent by its sign-offs alone (own_item), not by status
             repairs.append({"kind": "repair", "rollout": slug, "note": r.get("note"),
                             "title": titled("Repair: %s" % slug), "cwd": root, "prompt": "/thread:repair [[%s]]" % slug,
-                            "tldr": "Sorts out a live rollout that status says needs repair.",
-                            "manual": False, "why": "status action %d: %s" % (n, words)})
+                            "tldr": "Asks a live rollout's pending sign-offs, held for its project's own session."
+                            if only else "Sorts out a live rollout that status says needs repair.",
+                            "manual": False, "why": why})
         else:
-            if kind is None:
-                why = "status action %d (%s) starts nothing from here" % (n, words)
-            elif kind == "reinstate" and r.get("reinstate"):
-                why = "status action 8 (%s): every gate signed, but held by %s" % (
-                    words, ", ".join(h for h in r.get("holds") or [] if h != "paused") or "nothing")
-            elif kind == "reinstate" and r.get("pausedFor") == "sign-off":
-                why = "status action 8 (%s): a gate is still unsigned, so the sign-off pause holds" % words
-            elif kind == "reinstate" and "paused" in (r.get("holds") or []):
-                why = "status action 8 (%s): paused by you: the reinstate is yours" % words
-            elif kind == "reinstate":
-                why = "status action 8 (%s), but the plan reads no sign-off pause to reinstate" % words
-            else:
-                why = "status action %d (%s) held by %s" % (n, words, ", ".join(r.get("holds") or []) or "nothing")
             left.append({"rollout": slug, "action": n, "holds": r.get("holds") or [], "why": why})
     orients = []
     projects = {}
@@ -1125,18 +1776,29 @@ def cmd_sessions(args):
             prel, why = vault.resolve_project(link, link=True)
             if prel:
                 projects.setdefault(prel.replace(os.sep, "/"), []).append(os.path.basename(full)[:-3])
-    for o in plan["orient"]:
-        if not isinstance(o, dict) or not isinstance(o.get("name"), str):
+    for e in pick:  # only the projects ticked on the pick list, in its order
+        if e["note"] not in opened or not isinstance(e.get("name"), str):
             continue
-        lines = ["/thread:orient [[%s]]" % o["name"]]
-        for slug in projects.get(o.get("note"), []):
+        link = e.get("link") if isinstance(e.get("link"), str) else e["name"]
+        lines = ["/thread:orient [[%s]]" % link]
+        for slug in projects.get(e["note"], []):
             lines.append("orient-all wrote [[%s]] for this project on %s and is starting its execute; leave that "
                          "rollout to it, its tasks are in flight." % (slug, today))
-        orients.append({"kind": "orient", "project": o["name"], "note": o.get("note"),
-                        "title": titled("Orient: %s" % o["name"]), "prompt": "\n".join(lines),
-                        "tldr": "Orients this project: its open work needs decisions that shape it.",
-                        "manual": False, "why": "graded Orient"})
-    emit({"schema": SCHEMA, "today": today, "items": items + executes + repairs + orients, "left": left})
+        for slug in e.get("rollouts") or []:
+            if slug in asking:
+                lines.append(SIGN_OFF_LINE.format(rollout=slug, gates=", ".join(
+                    "[[%s]]" % g for g in rollouts[slug]["pendingSignOffs"])))
+        if e.get("own") is True:
+            lines.append(PICK_LINE.format(date=today, counts=counts_text(e)))
+        else:
+            lines.append(PICK_LINE_SMALL.format(date=today, orient=plural(e.get("orient") or 0, "Orient task")))
+        orients.append({"kind": "orient", "project": e["name"], "note": e["note"],
+                        "title": titled("Orient: %s" % link), "prompt": "\n".join(lines),
+                        "tldr": "Orients this project in its own session: ticked on the pick list, it asks its own "
+                                "decisions and schedules its own rollout.",
+                        "manual": False, "why": "ticked on the pick list"})
+    emit({"schema": SCHEMA, "today": today, "items": items + executes + repairs + orients, "left": left,
+          "unmatched": unmatched})
 
 
 # ---- record ------------------------------------------------------------------------------------------------------
@@ -1198,37 +1860,53 @@ def latest_end_forks(lines, span):
     return hit, forks
 
 
-def cmd_record(args):
-    q, a, rec = fold(args.question), fold(args.answer), fold(args.recommended)
-    fork = fold(args.fork) if args.fork is not None else None
+class Refusal(Exception):
+    """A record refusal: its exit code and its one `estate-dispatch:` line (nothing written)."""
+
+    def __init__(self, code, reason):
+        super().__init__(reason)
+        self.code = code
+
+
+def decided_bullet(q, a, by, owner, why):
+    """DECIDED_BULLET, its `: {why}` dropped when there is no why."""
+    form = DECIDED_BULLET if why else DECIDED_BULLET.replace(": {why}", "")
+    return form.format(question=q, answer=a, by=by, owner=owner, why=why or "")
+
+
+def record_core(M, vault, task, question, answer, today, by, recommended=None, fork=None, owner=None, why=None,
+                superseding=None):
+    """(status, line): one answer, or with `owner` one call made for Lachy, into its task note (the module docstring's
+    record paragraph). status is `recorded` or `no-change`, line what `record` prints. Raises Refusal on every record
+    refusal, the file byte-identical. Shared by `record` and `decided-for-you --write`."""
+    NA, ES = M.NA, M.ES
+    q, a = fold(question), fold(answer)
+    rec = fold(recommended) if recommended is not None else None
+    fork = fold(fork) if fork is not None else None
+    why = fold(why) if why is not None else None
     for flag, v in (("--question", q), ("--answer", a), ("--recommended", rec), ("--fork", fork)):
         if v == "":
-            fail(2, "%s is empty" % flag)
-    M = Mods()
-    NA, ES = M.NA, M.ES
-    vroot = os.path.expanduser(args.vault)
-    if not os.path.isdir(vroot):
-        fail(3, "no vault at %s" % vroot)
-    vault = NA.Vault(vroot)
+            raise Refusal(2, "%s is empty" % flag)
     try:
-        rel = vault.resolve_task(args.task)
+        rel = vault.resolve_task(task)
     except NA.Refused as e:
-        fail(2, str(e))
+        raise Refusal(2, str(e))
     shown = rel.replace(os.sep, "/")
     q = without_self_link(q, os.path.basename(rel)[:-3], M.ER.slug_key)
     if q == "":
-        fail(2, "--question is empty once its leading [[%s]] is stripped" % os.path.basename(rel)[:-3])
+        raise Refusal(2, "--question is empty once its leading [[%s]] is stripped" % os.path.basename(rel)[:-3])
     note = NA.Note.load(os.path.join(vault.root, rel))
     if note.fm is None:
-        fail(2, "%s: %s" % (shown, note.error))
+        raise Refusal(2, "%s: %s" % (shown, note.error))
     if "task" not in NA.tags_of(note):
-        fail(2, "%s is not a task note" % shown)
+        raise Refusal(2, "%s is not a task note" % shown)
     st = NA.status_of(note)
     if st not in NA.OPEN_STATUSES:
-        fail(2, "%s is at status %s, not Active; a decision is written only into Active work" % (shown, st or "none"))
-    if ES.in_flight(st, ES.link_live(NA, vault, ES.first_link(NA, note.get("rollout")))):
-        fail(2, "%s is in flight (vault-grammar.md § In flight); its run owns the note, so the answer is not written"
-             % shown)
+        raise Refusal(2, "%s is at status %s, not Active; a decision is written only into Active work" % (shown, st or "none"))
+    link = ES.first_link(NA, note.get("rollout"))
+    if ES.in_flight(st, ES.link_live(NA, vault, link)) and not ES.still_to_start(st, link, superseding):
+        raise Refusal(2, "%s is in flight (vault-grammar.md § In flight); its run owns the note, so the answer is not "
+                         "written" % shown)
     lines = list(note.lines)
     first = note.span[1] + 1
     notes = section_span(lines, first, NOTES_HEADING)
@@ -1236,16 +1914,21 @@ def cmd_record(args):
     if fork is not None:
         end_at, forks = latest_end_forks(lines, notes) if notes else (None, [])
         if fork not in forks:
-            fail(2, "%s: its latest orient end line names no `fork for Lachy: %s`" % (shown, fork))
+            raise Refusal(2, "%s: its latest orient end line names no `fork for Lachy: %s`" % (shown, fork))
         tail = " orient ruling: %s → %s" % (fork, a)
         ruled = any(ln.rstrip("\r\n").endswith(tail) for ln in lines[end_at + 1:notes[1]])
-    bullet = DECISION_BULLET.format(question=q, answer=a, recommended=rec)
-    heading = DECISIONS_HEADING.format(date=args.today.isoformat())
+    if owner is not None:  # a call made for Lachy (ADR 0054 d3): its own heading and preamble, never ## Decisions
+        bullet = decided_bullet(q, a, by, owner, why)
+        heading = DECIDED_HEADING.format(date=today.isoformat())
+        opening = heading + "\n\n" + DECIDED_PREAMBLE + "\n\n" + bullet + "\n"
+    else:
+        bullet = DECISION_BULLET.format(question=q, answer=a, recommended=rec, by=by)
+        heading = DECISIONS_HEADING.format(date=today.isoformat())
+        opening = heading + "\n\n" + bullet + "\n"
     span = section_span(lines, first, heading)
     has = span is not None and any(lines[i].rstrip("\r\n") == bullet for i in range(span[0] + 1, span[1]))
     if has and (fork is None or ruled):
-        sys.stdout.write("%s: %s → %s [no-change]\n" % (shown, q, a))
-        return
+        return "no-change", "%s: %s → %s [no-change]" % (shown, q, a)
     if fork is not None and not ruled:
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         lines = insert_last(lines, notes, RULING_LINE.format(stamp=stamp, fork=fork, answer=a))
@@ -1259,12 +1942,96 @@ def cmd_record(args):
                 text += "\n"
             if text and not text.endswith("\n\n"):
                 text += "\n"
-            lines = NA.split_lines(text + heading + "\n\n" + bullet + "\n")
+            lines = NA.split_lines(text + opening)
     try:
         note.save("".join(lines))
     except OSError as e:
-        fail(2, "cannot write %s: %s" % (shown, e))
-    sys.stdout.write("recorded %s: %s → %s\n" % (shown, q, a))
+        raise Refusal(2, "cannot write %s: %s" % (shown, e))
+    return "recorded", "recorded %s: %s → %s" % (shown, q, a)
+
+
+def cmd_record(args):
+    if args.owner is not None and args.fork is not None:
+        fail(2, "--fork is never a call made for Lachy: an open fork stays his (ADR 0054), so --owner takes no --fork")
+    if args.owner is not None and args.recommended is not None:
+        fail(2, "--recommended goes only with an answer: a call made for Lachy (--owner) is the call itself, "
+                "so --owner takes no --recommended")
+    if args.owner is None and args.recommended is None:
+        fail(2, "--recommended is required for an answer (only a call made for Lachy, --owner, goes without)")
+    if args.owner is None and args.by not in RECORD_BY:
+        fail(2, "--by %s writes only a call made for Lachy (--owner); an answer is recorded --by %s"
+             % (args.by, " or ".join(RECORD_BY)))
+    if args.owner is None and args.why is not None:
+        fail(2, "--why goes only with --owner")
+    for flag, v in (("--question", args.question), ("--answer", args.answer), ("--recommended", args.recommended),
+                    ("--fork", args.fork)):
+        if v is not None and fold(v) == "":
+            fail(2, "%s is empty" % flag)
+    M = Mods()
+    vroot = os.path.expanduser(args.vault)
+    if not os.path.isdir(vroot):
+        fail(3, "no vault at %s" % vroot)
+    try:
+        _, line = record_core(M, M.NA.Vault(vroot), args.task, args.question, args.answer, args.today, args.by,
+                              recommended=args.recommended, fork=args.fork, owner=args.owner,
+                              why=args.why, superseding=args.superseding)
+    except Refusal as e:
+        fail(e.code, str(e))
+    sys.stdout.write(line + "\n")
+
+
+# ---- decided-for-you ---------------------------------------------------------------------------------------------
+
+def cmd_decided(args):
+    rank = read_rank(args.rank)
+    ER = load("thread_estate_rank", ESTATE_RANK_PY)
+    slugs = split_slugs(args.tasks)
+    if not slugs:
+        fail(2, "--tasks names no task")
+    if args.today is None:
+        raw = rank.get("today")
+        args.today = datetime.date.fromisoformat(raw) if isinstance(raw, str) and ISO_DATE.fullmatch(raw) \
+            else datetime.date.today()
+    rows = {}
+    for t in rank["tasks"]:
+        if isinstance(t, dict) and isinstance(t.get("slug"), str):
+            rows.setdefault(ER.slug_key(t["slug"]), t)
+    items, skipped, seen = [], [], set()
+    for raw in slugs:
+        k = ER.slug_key(raw)
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        row = rows.get(k)
+        if row is None:
+            skipped.append({"slug": raw, "why": "not in the rank"})
+            continue
+        for d in row.get("decidedForYou") or []:
+            if not isinstance(d, dict):
+                continue
+            items.append({"slug": row["slug"], "note": row.get("note"), "question": d.get("question"),
+                          "answer": d.get("recommendation"), "options": list(d.get("options") or []),
+                          "owner": d.get("owner"), "confidence": d.get("confidence"), "why": d.get("why")})
+    out = {"schema": SCHEMA, "today": args.today.isoformat(), "items": items, "skipped": skipped, "written": [],
+           "unchanged": [], "refused": []}
+    if args.write:
+        M = Mods()
+        vroot = os.path.expanduser(args.vault)
+        if not os.path.isdir(vroot):
+            fail(3, "no vault at %s" % vroot)
+        vault = M.NA.Vault(vroot)
+        for it in items:
+            try:
+                if it["owner"] not in DECIDED_OWNERS:
+                    raise Refusal(2, "owner %s is not one a call made for Lachy carries (%s)"
+                                  % (json.dumps(it["owner"]), ", ".join(DECIDED_OWNERS)))
+                status, _ = record_core(M, vault, it["slug"], it["question"] or "", it["answer"] or "", args.today,
+                                        args.by, owner=it["owner"], why=it["why"], superseding=args.superseding)
+            except Refusal as e:
+                out["refused"].append({"slug": it["slug"], "question": it["question"], "why": str(e)})
+                continue
+            out["written" if status == "recorded" else "unchanged"].append({"slug": it["slug"], "question": it["question"]})
+    emit(out)
 
 
 # ---- log -------------------------------------------------------------------------------------------------------
@@ -1294,6 +2061,15 @@ def grade_fields(RRec, t, row, pass_id, digest):
         if slug and slug not in RRec.RESERVED:
             f["linked"] = slug
     return f
+
+
+def grade_key(RRec, name):
+    """(task, note): a rank task's Grade-log key. Its slug and no note (run_record's normalise_slug), else, for a titled
+    vault note, title_key's key and the exact name kept as the line's note (p34-6). Refused when the name has no key."""
+    try:
+        return RRec.normalise_slug(name, "task"), None
+    except RRec.Refused:
+        return RRec.title_key(name), name
 
 
 def logged(RRec):
@@ -1336,16 +2112,30 @@ def cmd_log(args):
     ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (now.microsecond // 1000)
     if have:  # complete the pass already begun: its id and ts
         pass_id, ts = sorted(have.values(), key=lambda x: (str(x[1]), str(x[0])))[0]
-    lines, skipped, kept = [], [], 0
+    keyed = []
     for t in tasks:
-        try:  # a vault note named with spaces or capitals has no slug the Run record can key: skipped, never a refusal
-            task = RRec.normalise_slug(t["slug"], "task")
+        try:
+            keyed.append((t,) + grade_key(RRec, t["slug"]) + (None,))
         except RRec.Refused as e:
+            keyed.append((t, None, None, str(e)))
+    # A slug-named task holds its key first; a titled name whose key is already held is skipped, so two notes never
+    # share one task's episodes.
+    held = {task for _t, task, note, why in keyed if why is None and note is None}
+    lines, skipped, kept = [], [], 0
+    for t, task, note, why in keyed:
+        if why is None and note is not None:
+            if task in held:
+                why = "its key %r is another graded task's" % task
+            else:
+                held.add(task)
+        if why is not None:  # a name with no key of its own: skipped and named, never a refusal
             skipped.append(t["slug"])
-            sys.stderr.write("estate-dispatch: skipped %s: %s\n" % (t["slug"], e))
+            sys.stderr.write("estate-dispatch: skipped %s: %s\n" % (t["slug"], why))
             continue
         kept += 1
         fields = grade_fields(RRec, t, rows.get(t["slug"].lower()), pass_id, digest)
+        if note is not None:
+            fields["note"] = note
         try:
             RRec.check(None, "grade", task, fields, ts=ts)
         except RRec.Refused as e:
@@ -1359,7 +2149,7 @@ def cmd_log(args):
     else:
         outcome = "logged %d grade(s), pass %s" % (len(lines), pass_id)
     if skipped:
-        outcome += "; %d skipped (not a slug): %s" % (len(skipped), ", ".join(skipped))
+        outcome += "; %d skipped (no key): %s" % (len(skipped), ", ".join(skipped))
     if args.dry_run:
         for task, fields in lines:
             print("would log grade %s: %s" % (task, json.dumps(fields, ensure_ascii=False, sort_keys=True)))
@@ -1372,6 +2162,215 @@ def cmd_log(args):
     print(outcome)
 
 
+# ---- preflight ---------------------------------------------------------------------------------------------------
+
+def decision_of(d):
+    """A rank decision as the index carries it: question, options (the recommendation first), recommendation, and its
+    why and fork when it has them."""
+    out = {"question": d.get("question"), "options": list(d.get("options") or []), "recommendation": d.get("recommendation")}
+    for k in ("why", "fork"):
+        if d.get(k):
+            out[k] = d[k]
+    return out
+
+
+class Preflight:
+    """schedule § 1.5's split of its candidates (the module docstring's preflight paragraph). Reads the rank and the
+    scan only; ER is loaded for slug_key alone."""
+
+    def __init__(self, ER, rank, scan, tasks, kept, decided, deps):
+        self.ER, self.rank, self.scan = ER, rank, scan
+        key = ER.slug_key
+        self.rows = {}  # the rank's graded tasks by key, in rank order
+        for t in rank["tasks"]:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                self.rows.setdefault(key(t["slug"]), t)
+        self.scanned = {}
+        for t in scan["tasks"]:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                self.scanned.setdefault(key(t["slug"]), t)
+        self.listed = {}  # the rank's other lists: the why of a task it could not grade
+        for t in rank.get("invalid") or []:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                errs = [e for e in t.get("errors") or [] if isinstance(e, str)]
+                self.listed.setdefault(key(t["slug"]), "invalid: " + ("; ".join(errs) or "no reason given"))
+        for t in rank.get("ungraded") or []:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                self.listed.setdefault(key(t["slug"]), t.get("why") or "no grade")
+        for t in rank.get("skipped") or []:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                self.listed.setdefault(key(t["slug"]), t.get("why") or "skipped")
+        self.order, self.shown = [], {}  # the candidates' keys in first-seen order, and each one's slug as shown
+        for raw in tasks:
+            k = key(raw)
+            if k and k not in self.shown:
+                self.order.append(k)
+                row = self.scanned.get(k) or self.rows.get(k)
+                self.shown[k] = row["slug"] if row else raw
+        if not self.order:
+            fail(2, "--tasks names no task")
+
+        def inside(flag, raw):
+            k = key(raw)
+            if k not in self.shown:
+                fail(2, "%s %s is not one of --tasks" % (flag, raw))
+            return k
+        self.kept = {inside("--kept", s) for s in kept}
+        self.decided = {inside("--decided", s) for s in decided}
+        self.edges = {k: [] for k in self.order}
+        for k in self.order:
+            for link in (self.scanned.get(k) or {}).get("dependsOn") or []:
+                d = key(link)
+                if d in self.shown and d != k and d not in self.edges[k]:
+                    self.edges[k].append(d)
+        for raw in deps:
+            a, sep, b = raw.partition("=")
+            if not sep or not a.strip() or not b.strip():
+                fail(2, "--dep %s: give it as <dependant>=<dependency>" % raw)
+            ka, kb = key(a), key(b)
+            if ka not in self.shown or kb not in self.shown:
+                fail(2, "--dep %s: both tasks must be among --tasks" % raw)
+            if ka != kb and kb not in self.edges[ka]:
+                self.edges[ka].append(kb)
+
+    def note_of(self, k):
+        row = self.scanned.get(k) or self.rows.get(k) or {}
+        return row.get("note") if isinstance(row.get("note"), str) else None
+
+    def reason(self, k):
+        """Why a candidate could not be graded: the rank's why, else `no grade` or `not in the scan`. A task whose own
+        status is outside Active (its scan statusClass `hold`) is skipped by the ranker as `hold`, or as `in flight`
+        when its `rollout:` is live: a carried task at an empty status, which carry queues but ES.still_to_start does
+        not, as it reads `open` alone. Either way the real cause is its status, so it is named STATUS_OUTSIDE."""
+        row = self.scanned.get(k)
+        why = self.listed.get(k) or ("no grade" if row else "not in the scan")
+        if why in ("in flight", "hold") and row and row.get("statusClass") == "hold":
+            return STATUS_OUTSIDE
+        return why
+
+    def closure(self, seed):
+        """seed and, to a fixpoint, every candidate not kept with a dependency in it (a kept task never leaves)."""
+        out = set(seed)
+        while True:
+            more = {k for k in self.order if k not in out and k not in self.kept and any(d in out for d in self.edges[k])}
+            if not more:
+                return out
+            out |= more
+
+    def via(self, k, out):
+        """The first of k's dependencies in out, as shown."""
+        return self.shown[next(d for d in self.edges[k] if d in out)]
+
+    def run(self):
+        entry = {}
+        for k in self.order:
+            row = self.rows.get(k)
+            grade = row.get("grade") if row else None
+            e = {"slug": self.shown[k], "grade": grade, "decided": k in self.decided}
+            if k in self.kept:
+                e.update({"in": True, "why": "kept"})
+            elif grade == "Ready":
+                e.update({"in": True, "why": "ready"})
+            elif grade in ("One call", "Grill"):
+                e.update({"in": k in self.decided, "why": "decided" if k in self.decided else "undecided"})
+            elif grade == "Orient":
+                e.update({"in": False, "why": "orient", "home": row.get("home")})
+            else:
+                reason = self.reason(k)
+                e.update({"in": k in self.decided, "why": "queued as it stands" if k in self.decided else "ungraded",
+                          "reason": reason})
+            entry[k] = e
+        # The Dependent closure, in two steps. First what leaves whatever Lachy answers: the Orient candidates and
+        # every task that depends on one, directly or through another, whatever its grade or answer. Those are out as
+        # `dependency` before the round is built, so none of them is asked.
+        fixed = self.closure(k for k in self.order if entry[k]["why"] == "orient")
+        for k in self.order:
+            if k in fixed and entry[k]["why"] != "orient":
+                entry[k].update({"in": False, "why": "dependency", "via": self.via(k, fixed)})
+        # Then the rest: a task that is in leaves when a dependency is out (one undecided or ungraded included).
+        out = self.closure(k for k in self.order if not entry[k]["in"])
+        for k in self.order:
+            if k in out and entry[k]["in"]:
+                entry[k].update({"in": False, "why": "dependency", "via": self.via(k, out)})
+        warnings = []
+        for k in self.order:
+            if k in self.kept:
+                gone = [self.shown[d] for d in self.edges[k] if d in out]
+                if gone:
+                    warnings.append("[[%s]] keeps its place (a carried task that has started) but depends on %s, which "
+                                    "this rollout leaves out" % (self.shown[k], ", ".join("[[%s]]" % g for g in gone)))
+        questions, index = [], []
+        asked = [k for k in self.order if not entry[k]["in"] and entry[k]["why"] == "undecided"]
+        pos = {k: i for i, k in enumerate(self.rows)}
+        ranked = sorted(asked, key=lambda k: pos[k])
+        for k in (x for x in ranked if entry[x]["grade"] == "One call"):
+            self.one_call(k, questions, index)
+        for k in (x for x in ranked if entry[x]["grade"] == "Grill"):
+            self.grill(k, questions, index)
+        for k in self.order:
+            if not entry[k]["in"] and entry[k]["why"] == "ungraded":
+                self.ungraded(k, entry[k]["reason"], questions, index)
+        tasks, queue, left = [], [], []
+        for k in self.order:
+            e = entry[k]
+            tasks.append({x: e[x] for x in ("slug", "grade", "decided", "in", "why", "via", "reason") if x in e})
+            if e["in"]:
+                queue.append(e["slug"])
+                continue
+            o = {x: e[x] for x in ("slug", "grade", "why", "via", "reason", "home") if x in e}
+            if self.note_of(k):
+                o["note"] = self.note_of(k)
+            left.append(o)
+        graded = [k for k in self.order if k not in self.kept and entry[k]["grade"]]
+        n = lambda g: sum(1 for k in graded if entry[k]["grade"] == g)  # noqa: E731
+        counts = {"candidates": len(self.order), "graded": len(graded), "ready": n("Ready"), "oneCall": n("One call"),
+                  "grill": n("Grill"), "orient": n("Orient"),
+                  "ungraded": sum(1 for k in self.order if k not in self.kept and not entry[k]["grade"]),
+                  "kept": len(self.kept), "decided": sum(1 for k in self.order if entry[k]["decided"]),
+                  "in": len(queue), "out": len(left)}
+        return {"schema": SCHEMA, "today": self.rank.get("today") or today_of(self.scan), "counts": counts,
+                "tasks": tasks, "queue": queue, "out": left, "asks": [[q] for q in questions], "index": index,
+                "warnings": warnings}
+
+    def ask(self, k, kind, text, fulls, descs, decision, questions, index, extra=None):
+        opts, labels = Rounds.options(fulls, descs, True)
+        questions.append({"question": text, "header": HEADERS[kind], "multiSelect": False, "options": opts})
+        e = {"question": text, "kind": kind, "slug": self.shown[k], "note": self.note_of(k), "decision": decision,
+             "labels": labels, "texts": list(fulls), "recommended": fulls[0] if fulls else None}
+        e.update(extra or {})
+        if decision.get("fork"):
+            e["fork"] = decision["fork"]
+        index.append(e)
+
+    def one_call(self, k, questions, index):
+        raw = (self.rows[k].get("decisions") or [{}])[0]
+        d = decision_of(raw)
+        suffix, descs = framing(raw)
+        self.ask(k, "one-call", "[[%s]] %s%s" % (self.shown[k], d["question"] or "", suffix), d["options"], descs, d,
+                 questions, index)
+
+    def grill(self, k, questions, index):
+        raws = [d for d in self.rows[k].get("decisions") or [] if isinstance(d, dict)]
+        for i, raw in enumerate(raws, 1):
+            d = decision_of(raw)
+            suffix, descs = framing(raw)
+            self.ask(k, "grill", "[[%s]] (%d/%d) %s%s" % (self.shown[k], i, len(raws), d["question"] or "", suffix),
+                     d["options"], descs, d, questions, index, {"k": i, "n": len(raws)})
+
+    def ungraded(self, k, why, questions, index):
+        q = UNGRADED_QUESTION.format(why=why)
+        d = {"question": q, "options": list(UNGRADED_OPTIONS), "recommendation": UNGRADED_OPTIONS[0], "why": UNGRADED_WHY}
+        self.ask(k, "ungraded", "[[%s]] %s %s" % (self.shown[k], q, NOTE_INVITE), UNGRADED_OPTIONS, UNGRADED_DESCRIPTIONS,
+                 d, questions, index)
+
+
+def cmd_preflight(args):
+    rank, scan = read_rank(args.rank), read_scan(args.scan)
+    ER = load("thread_estate_rank", ESTATE_RANK_PY)
+    emit(Preflight(ER, rank, scan, split_slugs(args.tasks), split_slugs(args.kept), split_slugs(args.decided),
+                   [d for d in args.dep or []]).run())
+
+
 # ---- main --------------------------------------------------------------------------------------------------------
 
 def parse(argv):
@@ -1381,6 +2380,8 @@ def parse(argv):
     s = sub.add_parser("slices", allow_abbrev=False)
     s.add_argument("--scan", required=True)
     s.add_argument("--dir", required=True)
+    s.add_argument("--tasks", action="append", default=[])
+    s.add_argument("--superseding")
     r = sub.add_parser("rounds", allow_abbrev=False)
     r.add_argument("--rank", required=True)
     r.add_argument("--scan", required=True)
@@ -1395,27 +2396,49 @@ def parse(argv):
     pl.add_argument("--signed", action="append", default=[])
     pl.add_argument("--rounds")
     pl.add_argument("--assume-answered", action="store_true")
+    pl.add_argument("--status", action="append", default=[])
     pl.add_argument("--vault")
     se = sub.add_parser("sessions", allow_abbrev=False)
     se.add_argument("--plan", required=True)
     se.add_argument("--wrote", action="append", default=[])
     se.add_argument("--status", action="append", default=[])
+    se.add_argument("--open", action="append", default=[])
+    se.add_argument("--typed", action="append", default=[])
     se.add_argument("--vault")
     rc = sub.add_parser("record", allow_abbrev=False)
     rc.add_argument("--task", required=True)
     rc.add_argument("--question", required=True)
     rc.add_argument("--answer", required=True)
-    rc.add_argument("--recommended", required=True)
+    rc.add_argument("--recommended")
     rc.add_argument("--fork")
+    rc.add_argument("--owner", choices=DECIDED_OWNERS)
+    rc.add_argument("--why")
     rc.add_argument("--today")
     rc.add_argument("--vault", default=VAULT_DEFAULT)
+    rc.add_argument("--by", choices=DECIDED_BY, default=RECORD_BY[0])
+    rc.add_argument("--superseding")
+    dy = sub.add_parser("decided-for-you", allow_abbrev=False)
+    dy.add_argument("--rank", required=True)
+    dy.add_argument("--tasks", action="append", required=True)
+    dy.add_argument("--by", choices=RECORD_BY, default=RECORD_BY[0])
+    dy.add_argument("--superseding")
+    dy.add_argument("--write", action="store_true")
+    dy.add_argument("--today")
+    dy.add_argument("--vault", default=VAULT_DEFAULT)
     lg = sub.add_parser("log", allow_abbrev=False)
     lg.add_argument("--rank", required=True)
     lg.add_argument("--scan", required=True)
     lg.add_argument("--dry-run", action="store_true")
+    pf = sub.add_parser("preflight", allow_abbrev=False)
+    pf.add_argument("--rank", required=True)
+    pf.add_argument("--scan", required=True)
+    pf.add_argument("--tasks", action="append", required=True)
+    pf.add_argument("--kept", action="append", default=[])
+    pf.add_argument("--decided", action="append", default=[])
+    pf.add_argument("--dep", action="append", default=[])
     args = p.parse_args(argv)
     if not args.verb:
-        fail(2, "a verb is required: slices | rounds | plan | sessions | record | log")
+        fail(2, "a verb is required: slices | rounds | plan | sessions | record | decided-for-you | log | preflight")
     if args.verb == "rounds":
         for flag in ("budget", "top"):
             v = getattr(args, flag)
@@ -1425,11 +2448,13 @@ def parse(argv):
             setattr(args, flag, int(v.strip()))
     if args.verb == "record":
         args.today = parse_date(args.today, "--today") if args.today else datetime.date.today()
+    if args.verb == "decided-for-you" and args.today is not None:
+        args.today = parse_date(args.today, "--today")
     return args
 
 
 VERBS = {"slices": cmd_slices, "rounds": cmd_rounds, "plan": cmd_plan, "sessions": cmd_sessions, "record": cmd_record,
-         "log": cmd_log}
+         "decided-for-you": cmd_decided, "log": cmd_log, "preflight": cmd_preflight}
 
 
 def main(argv):

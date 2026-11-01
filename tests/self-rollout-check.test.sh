@@ -447,6 +447,20 @@ ok "$(git -C "$rh" rev-parse HEAD)" "$held" "in-place: … unmoved"
 sed -i.bak 's/^status: open$/status: done/' "$home/repos/obsidian/Work/Tasks/demo-rollout-2026-10-03.md"; rm -f "$home/repos/obsidian/Work/Tasks/"*.bak
 SC="$rh/skills/execute/scripts/self-rollout-check.sh" sr --refresh-in-place "$rh-rollout"
 has "$out" "in-place: $rh fast-forwarded to origin/master" "in-place: … stamped done → fast-forwarded"
+# ADR 0043: an Engine snapshot (a detached linked worktree of the primary) is never the twin, and its own copy of this
+# script holds the primary only for a running rollout with no engine_snapshot: stamp.
+snap="$home/repos/rh-snapshots/$(git -C "$rh" rev-parse --short=12 HEAD)"
+git -C "$rh" worktree add -q --detach "$snap" HEAD; git -C "$rh" worktree lock --reason "thread Engine snapshot (ADR 0043)" "$snap"
+sr --in-place "$snap"; ok "$rc|$out" "1|" "in-place: a snapshot directory is never a rollout clone's twin"
+push o/rh c.txt 2; held=$(git -C "$rh" rev-parse HEAD)
+prollout "$home/repos/obsidian/Work/Tasks"
+SC="$snap/skills/execute/scripts/self-rollout-check.sh" sr --refresh-in-place "$rh-rollout"
+ok "$out" "in-place: $rh held: [[demo-rollout-2026-10-03]] running on it (ADR 0031)" "in-place: run from a snapshot, an unsnapshotted running rollout holds its primary"
+ok "$(git -C "$rh" rev-parse HEAD)" "$held" "in-place: … unmoved"
+prollout "$home/repos/obsidian/Work/Tasks" "engine_snapshot: \"$snap\""
+SC="$snap/skills/execute/scripts/self-rollout-check.sh" sr --refresh-in-place "$rh-rollout"
+has "$out" "in-place: $rh fast-forwarded to origin/master" "in-place: … a snapshotted running rollout holds nothing: fast-forwarded"
+git -C "$rh" worktree unlock "$snap"; git -C "$rh" worktree remove --force "$snap"
 rm -rf "$home/repos/obsidian"
 # Diverged, route-aware: never a merge commit, never moved, exit 0 (R4-3)
 # diverge <twin>: one local-only commit in the twin, and origin one ahead of it

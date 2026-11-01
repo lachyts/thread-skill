@@ -50,7 +50,8 @@ first outcome that holds wins:
 - (a) **An external publish is serial-shaped**, never parallel-shaped, even in one repo with a PR
   per task. It is an irreversible or credential gate: the gate sets the task aside for Lachy's
   sign-off while the chain goes on, and never passes the standing approval (ADR 0008, ADR 0034;
-  execute § 3.7). A publish that needs him in the conversation is conversation-gated, so it is
+  execute § 3.7), whose one credential class, a repo's declared test credential (ADR 0063), a
+  publish never uses. A publish that needs him in the conversation is conversation-gated, so it is
   session lane.
 - (b) A measurement window or delayed verification **waits on a date**, so it is session lane.
 - (c) **No serial self-rollouts.** Serial-shaped work for the plugin's own repo (any checkout of
@@ -294,8 +295,9 @@ of the set first surfaces when the next entry halts on it.
 
 **Unfinished rollout.** A repo holds at most one unfinished parallel rollout: one directly in `Work/Tasks/`,
 neither `done` nor `dropped`, with a task not yet merged; and none on a place a live serial chain writes
-(ADR 0040). Surfaces compare `repo:<realpath>` literally, so a rollout rooted in its clone and a chain on
-the in-place checkout coexist as peers (ADR 0042). schedule § 0 runs
+(ADR 0040; a stuck chain holds only its unlanded rows' surfaces, ADR 0060). Surfaces compare `repo:<realpath>` literally, so a rollout rooted in its clone and a chain on
+the in-place checkout coexist as peers (ADR 0042); the one exception, a separate checkout nested inside
+another by path, never meets the outer one either (p33-3). schedule § 0 runs
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check` against the resolved repo path last,
 after the pushed-base check, and its one stdout line decides: see schedule § 0 for each outcome (`none`,
 `supersede`, `file`, `interrupted`, `refuse`) and its remedy. A running or never-superseded rollout on the
