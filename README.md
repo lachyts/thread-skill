@@ -88,6 +88,28 @@ pass it with that gate. Spend is never asked ahead of a run.
 `skills/_shared/scripts/gated_inputs.py` holds the exposure reading it applies
 and schedule's gated-input sweep.
 
+A credential gate for a repo's test-mode or staging keys signs itself too, once
+the repo declares them (ADR 0063). Write the class as ONE line in the repo's
+table, with `schema = 3` at the top of the file:
+
+```toml
+[repo."Animately/optimizer"]
+test_credentials = { file = "~/repos/animately/optimizer/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }
+```
+
+Write it only after installing a release that knows the key: an older snapshot
+(schema 2) ignores it, and a pre-P29 reader refuses any `schema` line. After the
+edit, run `python3 skills/_shared/scripts/rollout-settings.py --repo <clone>` to
+check it reads. Any other form (a `[repo."o/r".test_credentials]` sub-table, a
+dotted key, a value over several lines) refuses the whole file, which halts every
+schema-3 rollout at its next entry. The rollout's `env_bootstrap` must copy that
+file into the task tree with a plain `cp` (no `[ -f … ] ||`, no `-n`, no quoted
+`~` or single-quoted `$HOME`, which the shell never expands), so a key you add
+later reaches the next build. The gate is signed only when each key it
+names is in the file with its declared prefix or project; a missing key reaches
+you at the stop, by name. The class is its own switch, independent of
+`spend_approval_usd`: it signs at the built-in 0 too.
+
 A needs-you push that does not reach you (any "not sent" but you at the
 terminal, such as Remote Control inactive or notifications turned off, a
 push-tool error, or no push tool at all, as in Codex) falls back to ntfy once

@@ -18,7 +18,9 @@ vault: out-of-vault backlinks are reported, not rewritten (R5.3). Never git/gh. 
 `rollout:` or `scope:`: orient § 6 hands parallel-shaped phases to schedule, and § 7 serial-shaped
 ones under Autonomous or Mixed; schedule owns them. After the gate, a declared check's own
 `--advance` moves its record (§ Declared check): the check writes it and owns how it lands, so
-orient still runs no git.
+orient still runs no git. R3 (c) reads the repo's test-credential class through `rollout-settings.py
+--repo`, which writes nothing (its one git call is a read-only `git remote get-url origin` inside the
+script).
 
 ## Scoped targets
 
@@ -161,7 +163,15 @@ Resolving:
   a spend smell is recorded, never grilled (Chorus ADR 0108 d4), so R5.2 writes its recorded
   Planner line, schedule stamps it, and the standing approval (`spend_approval_usd`, e.g. 200 USD a
   gate and a month, or off at the built-in 0) signs its gate mid-run; a limit Lachy names
-  unprompted is recorded too. A credential or irreversible gate still gets § 3.6's ask-ahead
+  unprompted is recorded too. A credential hit whose context names only test-mode or staging use
+  of keys the repo's declared class holds is recorded, never grilled (ADR 0063): R5.2 writes the
+  test-credential Planner line, and the standing approval signs its gate at the stop when its keys
+  are in the class's file. The class is read once from `python3
+  ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py --repo <the resolved repo>`'s
+  `test_credentials`; a non-zero exit, or no class, keeps the ask. A hit inside the recorded
+  test-credential Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the
+  recorded test-credential Planner line)`. A task that already holds that line is recorded, never
+  asked. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
   question in the grill: a sign-off now or none. Asked or recorded here, it is not asked again at
   schedule.
 
@@ -270,7 +280,9 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      for any amount, the `## Decisions (asked ahead <date>)` section with the same two lines (its
      Spend line, naming `/thread:orient` where schedule's names `/thread:schedule`, and its Planner
      line asking for one line whose Cap is one priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`, with its
-     split in sub-bullets nested under the gate, ADR 0038); and a credential or irreversible sign-off's `## Approved gates` bullet,
+     split in sub-bullets nested under the gate, ADR 0038); for a credential recorded in the repo's
+     test-credential class, the test-credential Planner line (schedule step 7's, ADR 0063) in the
+     `## Decisions (recorded <date>)` section; and a credential or irreversible sign-off's `## Approved gates` bullet,
      `- <kind>: <his words> (approved <date>, asked ahead at orient)`.
 3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one
    listing. Then write all the old slugs to a file and find the files that mention any of them
