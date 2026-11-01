@@ -25,8 +25,8 @@
 //   q6  one row per ask unit: every unit naming AskUserQuestion or matching PLAIN_ASK holds exactly one anchor of its
 //       own file's rows.
 //   q7  the Framing in script-built rounds: estate-dispatch.py's NOTE_INVITE is asking.md § 3's and orient-all § 5's
-//       Note; asking.md § 6's table rows each kind against the five points (a sign-off's and an Unpark offer's pick
-//       none, by ADR 0008 and ADR 0041); readiness-grade § Each decision requires `goal` and `stakes` with
+//       Note; asking.md § 6's table rows each kind against the five points (a sign-off's, an Unpark offer's and the pick
+//       list's pick none, by ADR 0008, ADR 0041 and ADR 0061); readiness-grade § Each decision requires `goal` and `stakes` with
 //       `owner: yours`; orient-all § 4 and schedule's **The round.** say the questions carry the grade's Framing.
 // One pure function per rule over a files map, so every control mutates one place; a python child loads
 // estate-dispatch.py, gated_inputs.py and reflect.py's ASKED_AHEAD_RE (by its source line). Reads files only.
@@ -308,13 +308,13 @@ function q7(F, K) {
   for (const p of ['`goal`', '`stakes`', 'the recommendation first with its why', '_shared/asking.md` § 3']) if (!s5.includes(p)) out.push(`orient-all § 5 lacks ${p}`)
   const s6 = sec(F[ASKING], /^## 6\. /)
   const row = (kind) => (s6.split('\n').find((l) => l.startsWith(`| ${kind}`)) ?? '').split('|').slice(1, -1).map((c) => c.trim())
-  for (const kind of ['One call', 'Ungraded', 'Sign-off', 'Unpark']) if (row(kind).length !== 6) out.push(`asking.md § 6's table has no ${kind} row of six cells`)
+  for (const kind of ['One call', 'Ungraded', 'Sign-off', 'Unpark', 'Pick list']) if (row(kind).length !== 6) out.push(`asking.md § 6's table has no ${kind} row of six cells`)
   if (!row('One call')[2]?.includes('`goal`') || !row('One call')[3]?.includes('`stakes`')) out.push("asking.md § 6's One call row does not take `goal` and `stakes`")
-  for (const [kind, adr] of [['Sign-off', 'ADR 0008'], ['Unpark', 'ADR 0041']]) {
+  for (const [kind, adr] of [['Sign-off', 'ADR 0008'], ['Unpark', 'ADR 0041'], ['Pick list', 'ADR 0061']]) {
     const pick = row(kind)[4] ?? ''
     if (!pick.startsWith('none') || !pick.includes(adr)) out.push(`asking.md § 6's ${kind} pick is not none by ${adr}: ${pick}`)
   }
-  for (const kind of ['One call', 'Ungraded', 'Sign-off', 'Unpark']) if (row(kind)[5] !== 'yes') out.push(`asking.md § 6's ${kind} row carries no Note`)
+  for (const kind of ['One call', 'Ungraded', 'Sign-off', 'Unpark', 'Pick list']) if (row(kind)[5] !== 'yes') out.push(`asking.md § 6's ${kind} row carries no Note`)
   const each = C(sec(F[GRADE], /^## Each decision$/))
   for (const p of ['`goal`', '`stakes`', 'required with `owner: yours`']) if (!each.includes(p)) out.push(`readiness-grade § Each decision lacks ${p}`)
   if (!C(sec(F[ORIENT_ALL], /^### 4\. /)).includes('carries the Framing from the grade')) out.push('orient-all § 4 does not carry the Framing from the grade')
@@ -464,8 +464,10 @@ test('control q6: an uncovered "list them and ask which", a cited unit with no r
   assert.equal(PLAIN_ASK.test('ask Lachy whether one still stands'), true, 'an ask')
 })
 
-test('control q7: asking.md without the Note, orient-all § 5 without `stakes`, or the table without its Sign-off row, fails q7 alone', () => {
+test('control q7: asking.md without the Note, orient-all § 5 without `stakes`, the table without its Sign-off or Pick list row, or a pick list that recommends, fails q7 alone', () => {
   only(swap(FILES, ASKING, 'end with "What would make this wrong for you?"', 'end with a question'), CONSTS, ['q1', 'q7'], 'invite')
   only(swap(FILES, ORIENT_ALL, '`stakes`, the recommendation first', 'the recommendation first'), CONSTS, ['q7'], 'stakes')
   only(swap(FILES, ASKING, '| Sign-off |', '| Signing |'), CONSTS, ['q7'], 'sign-off row')
+  only(swap(FILES, ASKING, '| none: where his attention goes is his (ADR 0061) |', '| the top project, recommended |'), CONSTS, ['q7'], 'pick list pick')
+  only(swap(FILES, ASKING, '| Pick list |', '| Picks |'), CONSTS, ['q7'], 'pick list row')
 })

@@ -33,12 +33,35 @@ through time, from attention to merged PRs. Terms only — no implementation.
 ## Estate (all projects)
 
 - **Estate pass** — orient at estate altitude, run by `orient-all`: one look
-  across every project in the vault that puts ready work in motion. It grades open work, batches
-  Lachy's decisions, starts rollouts, and sends any project that needs real
-  design thinking to its own orient. It never reshapes a project itself.
-  `orient` is the same act at project altitude; a project graded **Orient**
-  gets its own `orient` session. _Avoid_: rally, global orient, portfolio
-  review, triage (alone).
+  across every project in the vault that sweeps up the work needing little of
+  Lachy's thinking and puts it in motion (ADR 0061). It grades open work,
+  batches a **Small project**'s decisions, starts its rollouts, and offers
+  any project that needs real design thinking, and every **Big project**, on
+  the **Pick list**. It never reshapes a project itself. `orient` is the same
+  act at project altitude; a project ticked on the pick list gets its own
+  `orient` session. _Avoid_: rally, global orient, portfolio review, triage
+  (alone).
+- **Big project** — a project with its own design record, which keeps its own
+  session (ADR 0061): the estate pass grades its work but asks none of its
+  decisions, schedules none of its rollouts and starts none of its work
+  unless Lachy ticks it on the **Pick list**; its own orient session asks and
+  schedules them, and a repair started beside it asks its pending sign-offs
+  (orient has no sign-off step). The test (`estate-scan.py`'s `ownSession`): the project
+  note's `orient:` key, `own` or `sweep`, wins; else a declared repo holding a
+  `CONTEXT.md` file and a `docs/adr/` directory with an ADR in it. A bare
+  THREAD.md is no signal. _Avoid_: large project, main project.
+- **Small project** — every project that is not a **Big project**: list-style
+  work (admin, a queue, an apartment, contacts) whose quick calls the estate
+  pass asks and whose ready work it schedules and starts. Anything needing his
+  hands, money or a message still waits for his yes. _Avoid_: side project.
+- **Pick list** — the estate pass's one question at its end (orient-all § 7,
+  ADR 0061): every **Big project** with idle ready work, decisions, sign-offs
+  or a held rollout item waiting on its own session, and every small project
+  with an Orient task, ranked by what waits on it, the top three asked beside
+  `Not now`. Lachy ticks which to open, or types any name on it; only those
+  start, each orienting and scheduling in its own session, a big project's
+  pending sign-offs asked by a repair started beside it. _Avoid_:
+  shortlist.
 - **Estate scan** — the estate pass's deterministic first pass
   (`skills/_shared/scripts/estate-scan.py`), with no model calls: every
   project not done, parked ones marked; its open tasks; its repos and their
@@ -112,10 +135,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   included) above everything else; then crowned projects; then leverage.
   Grouped into candidate runs with their Review load, work held by an open
   dependency set apart, beside the One call and Grill decisions in asking
-  order, the projects that need their own orient, and the Unpark offers
+  order, the **Pick list**'s candidates, and the Unpark offers
   (`skills/_shared/readiness-grade.md`). _Avoid_: backlog, priority list.
 - **Decision round** — the estate pass's questions, within the time budget
-  Lachy states: only his questions, each in the Framing. First the One-call
+  Lachy states: only his questions, each in the Framing, and only a **Small
+  project**'s (a big project's sign-offs, One calls, Grills and Unpark offer
+  wait on its own session, ADR 0061). First the One-call
   round: pending sign-offs always, each after its gates are shown verbatim,
   then One calls, then Unpark offers, batched through AskUserQuestion. Then
   Grill rounds, in conversation, while time remains. Each answer is written into its task's `## Decisions (asked
@@ -128,8 +153,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   same pass (one held only because its dependency was scheduled late goes
   next pass), in batches; then one visible session per new parallel
   execute and serial Leg 1, per live rollout that status sends to a ceremony,
-  a start, a signed reinstate or a repair, and per child orient (paste-ready
-  prompts off the Stage). _Avoid_: launch list.
+  a start, a signed reinstate or a repair, and per child orient of a project
+  ticked on the **Pick list** (paste-ready prompts off the Stage); nothing of a
+  **Big project** unticked. _Avoid_: launch list.
 
 ## Continuity (threads and attention)
 
@@ -478,7 +504,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   claimed (it would contain every repo; a WARN names it). Two checkouts of one
   origin are two surfaces, and containment parts across a checkout nested
   inside another by path (a separate repo with its own index), unless the outer
-  path is in no checkout. _Avoid_: footprint, file-set.
+  path is in no checkout. A stuck chain holds only its unlanded rows'
+  surfaces (**Unfinished rollout**, ADR 0060). _Avoid_: footprint, file-set.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -491,7 +518,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   writes is refused, and so is a serial chain whose **Surface** overlaps a live
   chain's or an unfinished parallel rollout's Project root (schedule § Serial
   path). Vault chains in different project places never overlap, so they run
-  side by side (ADR 0059). It is narrower than live: a superseded note stamped
+  side by side (ADR 0059). What an unfinished rollout holds narrows while it
+  waits on Lachy (ADR 0060). A stuck chain (no Leg open, nothing claimable:
+  every unlanded row set aside or held behind one) holds only its unlanded
+  rows' surfaces, and releases the rest, its done rows' included. A parallel
+  rollout awaiting sign-off, or halted with nothing able to start, holds no
+  Project root against serial chains, though it is still its repo's one
+  unfinished parallel rollout. Each reclaims its whole claim on resume, and
+  waits its turn for a place another rollout took meanwhile: whoever released
+  a place yields it. It is narrower than live: a superseded note stamped
   done but not yet moved is live but not unfinished, and so is a rollout whose
   every task merged before its completion ceremony ran. `--regenerate`
   supersedes this project's unfinished rollout when it is paused or never
@@ -662,6 +697,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   reviser, an integrator) uses the repo's own test runner. It takes no verify
   slot of its own and never counts as an iteration. _Avoid_: retry, targeted
   run.
+- **Verify base** — the `--diff-base` commit that `lead-integrate.py verify`
+  exports to every step it runs (the env bootstrap, the verifier, the named
+  re-run and the confirming run) as `THREAD_VERIFY_BASE`, resolved to its
+  sha: `<mainSha>` at Integration and the merge commit's first parent at a
+  RACE re-verify; it is never set at completion. A project whose verifier is
+  a fast tier with a reach reads it as its base, so the reach is the task's
+  diff even after merge-task refreshed `origin/<default>` (ADR 0062).
+  _Avoid_: reach base, origin/main.
 - **Completion verifier** — a rollout note's optional `completion_verifier:`,
   the full suite of a project whose `verifier:` is its declared fast tier
   (estate ADR 0009 d6): the completion ceremony runs it once on merged main,

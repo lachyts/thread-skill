@@ -3,17 +3,39 @@
 # (taskTreeSetup), run under bash AND zsh (the Bash tool's shell on macOS) against a fixture origin.
 # tests/pinned-tree.test.mjs pins the prompt text; this runs the commands. Every case checks what the tree
 # is left on (branch or detached, which commit), what the setup printed, and the reaper lock it wrote.
-# Hermetic: every repo lives under mktemp, the global git config is /dev/null, identity is passed per
-# command, and the caller's GIT_DIR & co. are unset first.
+# Hermetic: every repo lives under mktemp, no system git config is read and the global one is a file there that
+# holds only the gc and maintenance keys below, identity is passed per command, and the caller's GIT_DIR & co.
+# are unset first.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
 unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR, GIT_CONFIG_PARAMETERS, …)
-export GIT_CONFIG_GLOBAL=/dev/null
 root=$(pwd -P)
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+# No detached git process outlives a step (p34-4). Every fetch and commit here otherwise leaves a detached
+# `git maintenance run --auto` behind on the shared fixture repo, 66 per run. Suspected, never reproduced, in
+# the suite's three ubuntu reds, all in the bash arm on git 2.55 and all at a read-only create step (the
+# `fetch && worktree add --detach` arm), never at a code-writing one: 13 (read-only), 2026-10-17, run
+# 39003375142, no locked tree; 12, 2026-10-18, run 39123113577, the bootstrap never ran; 6b, 2026-10-27, run
+# 40562776119, no new worktree. Three data points, cause unconfirmed: on git 2.55 and 2.56 those detached runs
+# do no task in these small repos, so this config is defensive, not a proven fix. Every create step now checks
+# created() (in suite), which prints the setup's own output under a red, so the next one names its cause.
+# A file, not GIT_CONFIG_COUNT/GIT_CONFIG_PARAMETERS: the rendered setups' own `unset $(git rev-parse
+# --local-env-vars)` drops those, and keeps GIT_CONFIG_GLOBAL and GIT_CONFIG_NOSYSTEM. Only gc and maintenance
+# keys: no identity, no repo path (case 9). No system config either: a host's maintenance.auto=false there
+# would fail the control below and pass the check beside it for the wrong reason.
+printf '[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n\tautoDetach = false\n' > "$tmp/gitconfig"
+export GIT_CONFIG_GLOBAL="$tmp/gitconfig" GIT_CONFIG_NOSYSTEM=1
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master "$@"; }
+
+# The config holds: a fetch starts no `git maintenance run`. Control: the same fetch under /dev/null does
+# (in the foreground, so the control leaves nothing behind either).
+g init -q --bare "$tmp/m.git"; g clone -q "$tmp/m.git" "$tmp/m" 2>/dev/null
+GIT_TRACE2_EVENT="$tmp/m.on" git -C "$tmp/m" fetch -q origin
+GIT_CONFIG_GLOBAL=/dev/null GIT_TRACE2_EVENT="$tmp/m.off" git -C "$tmp/m" -c maintenance.autoDetach=false fetch -q origin
+ok "$(grep -c '"maintenance","run"' "$tmp/m.on")|$( [ "$(grep -c '"maintenance","run"' "$tmp/m.off")" -gt 0 ] && echo started)" \
+  "0|started" "the hermetic config: a fetch starts no maintenance run (and one does without it)"
 
 # ---- shells: bash always; zsh mandatory on macOS, else run when installed and SKIP visibly --------------
 shells=("$(command -v bash)")
@@ -41,15 +63,26 @@ render() {
 }
 
 suite() {
-  local sh="$1" n d R out tip wt head before pid
+  local sh="$1" n d R out tip wt head before pid pre
   n=$(basename "${sh%% *}"); d="$tmp/$n"; mkdir -p "$d"
   # run <script> [VAR=val …]: run a rendered setup from outside the repo, as a direct child of this
-  # shell (so its $PPID is this test's live pid); output in $out. runat <dir> <script> runs it from <dir>.
-  runat() { local at="$1" s="$2"; cd "$at" && $sh -c "$s" > "$d/out" 2>&1; cd "$root"; out=$(cat "$d/out"); }
-  run() { local s="$1"; shift; cd "$d" && env "$@" $sh -c "$s" > "$d/out" 2>&1; cd "$root"; out=$(cat "$d/out"); }
+  # shell (so its $PPID is this test's live pid); output in $out, and the repo's worktree count just
+  # before it in $pre. runat <dir> <script> runs it from <dir>.
+  runat() { local at="$1" s="$2"; pre=$(trees); cd "$at" && $sh -c "$s" > "$d/out" 2>&1; cd "$root"; out=$(cat "$d/out"); }
+  run() { local s="$1"; shift; pre=$(trees); cd "$d" && env "$@" $sh -c "$s" > "$d/out" 2>&1; cd "$root"; out=$(cat "$d/out"); }
   advance() { echo "$1" > "$d/pusher/$1.txt"; g -C "$d/pusher" add "$1.txt"; g -C "$d/pusher" commit -q -m "$1"; g -C "$d/pusher" push -q origin master; tip=$(git -C "$d/pusher" rev-parse HEAD); }
   toplevel() { printf '%s\n' "$out" | tail -1; }
+  trees() { git -C "$R" worktree list --porcelain | grep -c '^worktree '; }
   lockpid() { grep -oE 'pid [0-9]+' "$R/.git/worktrees/$1/locked" 2>/dev/null | grep -oE '[0-9]+' | head -1; }
+  # created <wt> <label> [grown]: the setup just run cut the tree <wt>. Its toplevel line printed <wt>, and the
+  # repo holds <grown> (default 1) more worktrees than before it. Called after every create step: the three
+  # ubuntu reds (p34-4, see the gitconfig above) were create steps that went wrong and the log never said why,
+  # so on a red the setup's own output, git's message included, follows the FAIL line. The name stays fixed.
+  created() {
+    local got="$(toplevel)|$(trees)" want="$1|$((pre + ${3:-1}))"
+    ok "$got" "$want" "$n $2: the setup cuts the tree (toplevel line, worktree count)"
+    [ "$got" = "$want" ] || printf '%s\n' "$out" | sed 's/^/    setup said: /'
+  }
 
   g init -q --bare "$d/o.git"
   g clone -q "$d/o.git" "$d/pusher" 2>/dev/null
@@ -59,7 +92,7 @@ suite() {
 
   # 1. the code-writing planner creates the branch tree at origin's tip, locked with a live pid
   wt="$R/.claude/worktrees/proj-task-a"
-  run "$(render "$R" refresh cross-cutting proj-task-a)"
+  run "$(render "$R" refresh cross-cutting proj-task-a)"; created "$wt" 1
   ok "$(git -C "$wt" symbolic-ref -q HEAD)" refs/heads/audit-fix/task-a "$n 1: the planner puts the tree on audit-fix/<alias>"
   ok "$(git -C "$wt" rev-parse HEAD)" "$tip" "$n 1: … at origin's tip"
   ok "$(toplevel)" "$wt" "$n 1: the toplevel line prints the tree"
@@ -122,7 +155,7 @@ suite() {
 
   # 6. the ungated investigator creates a detached tree at the tip; a re-run after origin advances moves it
   local ro="$R/.claude/worktrees/proj-task-ro"
-  run "$(render "$R" refresh read-only proj-task-ro)"
+  run "$(render "$R" refresh read-only proj-task-ro)"; created "$ro" 6
   ok "$(git -C "$ro" symbolic-ref -q HEAD || echo detached)|$(git -C "$ro" rev-parse HEAD)" "detached|$tip" "$n 6: read-only → detached tree at the tip"
   ok "$(lockpid proj-task-ro)" "$$" "$n 6: … locked too"
   advance c6
@@ -131,13 +164,13 @@ suite() {
 
   # 6b. plan-gated read-only: the planner's tree is the one the judge and investigator reuse
   local rog="$R/.claude/worktrees/proj-task-rog" count
-  run "$(render "$R" refresh read-only proj-task-rog)"
-  count=$(git -C "$R" worktree list --porcelain | grep -c '^worktree ')
+  run "$(render "$R" refresh read-only proj-task-rog)"; created "$rog" 6b
+  count=$(trees)
   advance c6b
   run "$(render "$R" judge read-only proj-task-rog)"
   ok "$(git -C "$rog" rev-parse HEAD)" "$(git -C "$d/pusher" rev-parse HEAD~1)" "$n 6b: the judge reuses the planner's tree without moving it"
   run "$(render "$R" refresh read-only proj-task-rog)"
-  ok "$(git -C "$R" worktree list --porcelain | grep -c '^worktree ')" "$count" "$n 6b: the investigator adds no second tree"
+  ok "$(trees)" "$count" "$n 6b: the investigator adds no second tree"
   ok "$(git -C "$rog" symbolic-ref -q HEAD || echo detached)|$(git -C "$rog" rev-parse HEAD)" "detached|$tip" "$n 6b: … and refreshes the same detached tree"
 
   # 6c. read-only → code-writing: the planner attaches the detached tree to audit-fix/<alias>
@@ -146,7 +179,7 @@ suite() {
 
   # 6d. … when audit-fix/<alias> already exists: that branch is checked out, its commits kept
   local rd="$R/.claude/worktrees/proj-task-rd" own
-  run "$(render "$R" refresh read-only proj-task-rd)"
+  run "$(render "$R" refresh read-only proj-task-rd)"; created "$rd" 6d
   own=$(g -C "$R" commit-tree -p origin/master -m own "origin/master^{tree}")
   git -C "$R" branch audit-fix/task-rd "$own"
   run "$(render "$R" refresh cross-cutting proj-task-rd)"
@@ -155,7 +188,7 @@ suite() {
 
   # 6e. code-writing → read-only: a branch tree stays on its branch and is fast-forwarded, never detached
   local ce="$R/.claude/worktrees/proj-task-ce"
-  run "$(render "$R" refresh cross-cutting proj-task-ce)"
+  run "$(render "$R" refresh cross-cutting proj-task-ce)"; created "$ce" 6e
   advance c6e
   run "$(render "$R" refresh read-only proj-task-ce)"
   ok "$(git -C "$ce" symbolic-ref -q HEAD || echo detached)|$(git -C "$ce" rev-parse HEAD)" "refs/heads/audit-fix/task-ce|$tip" "$n 6e: code → read-only: still on its branch, fast-forwarded"
@@ -173,7 +206,7 @@ suite() {
   git -C "$R" worktree remove -f "$wt" >/dev/null 2>&1; ok "$([ -d "$wt" ] && echo kept)" kept "$n 7b: a single -f refuses the locked tree"
   git -C "$R" worktree remove -f -f "$wt"; git -C "$R" branch -q -D audit-fix/task-a
   advance c7b
-  run "$(render "$R" judge cross-cutting proj-task-a)"
+  run "$(render "$R" judge cross-cutting proj-task-a)"; created "$wt" 7b
   ok "$(git -C "$wt" rev-parse HEAD)" "$tip" "$n 7b: the judge recreates the tree at the new tip"
   has "$out" "tree base: $tip" "$n 7b: … and its tree base is the new tip"
   ok "$([ "$tip" != "$case1" ] && echo differs)" differs "$n 7b: … which differs from the planner's case-1 base"
@@ -193,8 +226,8 @@ suite() {
   g -C "$d/decoy" commit -q --allow-empty -m decoy && g -C "$d/decoy" push -q origin master
   snap() { git -C "$d/decoy" for-each-ref; echo "bare=$(git -C "$d/decoy" config --get core.bare)"; cat "$d/decoy/.git/config"; git -C "$d/decoy" worktree list --porcelain; ls "$d/decoy/.git/worktrees" 2>/dev/null; echo "-- remote"; git -C "$d/decoy-remote.git" for-each-ref; }
   before=$(snap)
-  run "$(render "$R" refresh cross-cutting proj-task-env)" GIT_DIR="$d/decoy/.git"
-  run "$(render "$R" refresh read-only proj-task-envro)" GIT_DIR="$d/decoy/.git" GIT_WORK_TREE="$d/decoy"
+  run "$(render "$R" refresh cross-cutting proj-task-env)" GIT_DIR="$d/decoy/.git"; created "$R/.claude/worktrees/proj-task-env" "9 (cross-cutting)"
+  run "$(render "$R" refresh read-only proj-task-envro)" GIT_DIR="$d/decoy/.git" GIT_WORK_TREE="$d/decoy"; created "$R/.claude/worktrees/proj-task-envro" "9 (read-only)"
   ok "$(snap)" "$before" "$n 9: the decoy and its remote are unchanged"
   ok "$(git -C "$R/.claude/worktrees/proj-task-env" symbolic-ref -q HEAD)" refs/heads/audit-fix/task-env "$n 9: … and the tree landed under repoPath"
 
@@ -205,7 +238,7 @@ suite() {
 
   # 12. the env bootstrap runs in the task tree, last, after tree base:
   local bs="$R/.claude/worktrees/proj-task-bs"
-  runat "$R" "$(render "$R" refresh read-only proj-task-bs 'touch BOOTSTRAP')"
+  runat "$R" "$(render "$R" refresh read-only proj-task-bs 'touch BOOTSTRAP')"; created "$bs" 12
   ok "$([ -e "$bs/BOOTSTRAP" ] && echo yes)|$([ -e "$R/BOOTSTRAP" ] && echo leaked)" "yes|" "$n 12: a created tree runs the bootstrap inside it"
   rm -f "$bs/BOOTSTRAP"
 
@@ -228,11 +261,12 @@ suite() {
   # 13. a locked tree deleted by hand (rm -rf, no worktree remove) is recovered by re-running the setup
   for sc in read-only cross-cutting; do
     local hw="$R/.claude/worktrees/proj-task-rm-$sc"
-    run "$(render "$R" refresh "$sc" "proj-task-rm-$sc")"
+    run "$(render "$R" refresh "$sc" "proj-task-rm-$sc")"; created "$hw" "13 ($sc)"
     ok "$(lockpid "proj-task-rm-$sc")" "$$" "$n 13 ($sc): the tree is locked"
     rm -rf "$hw"
     out=$(git -C "$R" worktree add --detach "$hw" origin/master 2>&1); has "$out" "missing but locked" "$n 13 ($sc): … a bare worktree add now fails (the hazard)"
-    run "$(render "$R" refresh "$sc" "proj-task-rm-$sc")"
+    # the setup prunes the missing entry before it cuts the tree again, so the count is unchanged
+    run "$(render "$R" refresh "$sc" "proj-task-rm-$sc")"; created "$hw" "13 ($sc), re-run" 0
     ok "$(toplevel)|$(git -C "$hw" rev-parse HEAD)" "$hw|$tip" "$n 13 ($sc): re-running the setup recreates it at the tip"
     ok "$(lockpid "proj-task-rm-$sc")" "$$" "$n 13 ($sc): … locked again"
   done

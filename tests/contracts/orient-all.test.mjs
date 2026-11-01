@@ -1,7 +1,7 @@
 // The estate pass's lead (p25-3; ADR 0041): skills/orient-all/SKILL.md runs estate-scan.py, the grading and status
 // agents, estate-rank.py and estate-dispatch.py, asks the decision round, forks the schedules and starts the sessions.
 // Its script half is tests/estate-dispatch.test.mjs; this file pins the prose to the scripts, to the siblings it cites,
-// and to the docs that name it. Twelve rules:
+// and to the docs that name it. Thirteen rules:
 //   o1  the headings, in order, and none of the retired or forbidden words.
 //   o2  § 2 runs estate-scan.py, `estate-dispatch.py slices` and `estate-rank.py rank`, cites readiness-grade.md
 //       § The grading agents, and briefs the status agents to run /thread:status and return the number of the status
@@ -27,8 +27,8 @@
 //       paste-ready prompts, orients last with the note line; its cites; and `start: unattended` only in the Don't.
 //   o8  § 9 asks nothing, writes only under $S, runs `plan --rounds --assume-answered` and `sessions` with no --wrote,
 //       runs no `estate-dispatch.py log` and no `decided-for-you --write`, and names every command it never runs.
-//   o9  plugin-root.md, CONTEXT.md (**Decision round**, **Dispatch plan**), ADR 0041's p25-3 ruling and the README
-//       row name the skill.
+//   o9  plugin-root.md, CONTEXT.md (**Decision round**, **Dispatch plan**, **Big project**, **Small project**, **Pick
+//       list**), ADR 0041's p25-3 ruling and the README row name the skill.
 //   o10 status parity: estate-dispatch.py's STATUS_ACTIONS opens each of status § 4's thirteen numbered
 //       **Recommended action** rules, the set that starts something is exactly {6, 7, 8, 11, 13}, and § 7's table
 //       names the same numbers.
@@ -44,6 +44,12 @@
 //       never gets `create_thread`, a bar held to those items, so a repair item beside its lead still gets its card;
 //       and a raise is reported as raised, never counted as started (§ 7, § 8 and the Don't), with the `Demo rollout`
 //       worked example, relayed into by its id with no card raised.
+//   o13 the pick list (p35-1; ADR 0061): § 7 opens, before step 1, with **The pick list first.**, which passes
+//       `plan.pickAsk` whatever the budget, offering the top PICK_MAX and PICK_NONE (a python child loads both); step 1
+//       passes `--open` and `--typed`; § 6 passes `plan --status`; § 4 and the Don't hold a big project's own-session
+//       hold, the Don't asking past the budget only for sign-offs and the pick list; § 8 reports `unmatched[]` and
+//       names `/thread:repair [[<rollout>]]`; § 9 prints `pickAsk`, never asked, and its commands pass no `--open` or
+//       `--typed`; and ADR 0061 exists and the skill cites it.
 // One pure function, check(files, consts), returns the failing rules; every control mutates one place and fails exactly
 // its rule. Reads files only (the python child imports estate-dispatch.py, which runs nothing at import).
 import { test } from 'node:test'
@@ -59,6 +65,7 @@ const ORIENT = 'skills/orient/SKILL.md'
 const PLUGIN_ROOT = 'skills/_shared/plugin-root.md'
 const CONTEXT = 'CONTEXT.md'
 const ADR = 'docs/adr/0041-orient-all-runs-the-estate-pass.md'
+const ADR61 = 'docs/adr/0061-orient-all-sweeps-low-thinking-work.md'
 const README = 'README.md'
 const SCRIPT = 'skills/_shared/scripts/estate-dispatch.py'
 
@@ -78,7 +85,8 @@ s = importlib.util.spec_from_file_location("thread_estate_dispatch", sys.argv[1]
 m = importlib.util.module_from_spec(s)
 s.loader.exec_module(m)
 print(json.dumps({"STATUS_ACTIONS": {str(k): list(v) for k, v in m.STATUS_ACTIONS.items()},
-                  "DECISIONS_HEADING": m.DECISIONS_HEADING, "RULING_LINE": m.RULING_LINE, "LABEL_MAX": m.LABEL_MAX}))
+                  "DECISIONS_HEADING": m.DECISIONS_HEADING, "RULING_LINE": m.RULING_LINE, "LABEL_MAX": m.LABEL_MAX,
+                  "PICK_MAX": m.PICK_MAX, "PICK_NONE": m.PICK_NONE}))
 `
 function constants() {
   const r = spawnSync('python3', ['-c', PY, path.join(root, SCRIPT)], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
@@ -243,7 +251,7 @@ function check(files, consts) {
   need('o9', PLUGIN_ROOT, C(files[PLUGIN_ROOT]), ['orient-all → schedule (its forks), status, execute, repair or orient',
     '`readiness-grade.md` (orient-all)'])
   const context = files[CONTEXT] ?? ''
-  for (const term of ['Decision round', 'Dispatch plan']) {
+  for (const term of ['Decision round', 'Dispatch plan', 'Big project', 'Small project', 'Pick list']) {
     need('o9', `CONTEXT.md **${term}**`, C(slice(context, new RegExp(`^- \\*\\*${term}\\*\\*`), /^(- \*\*|#)/)), ['estate pass'])
   }
   need('o9', `${ADR} § Build rulings`, C(section(files[ADR], /^## Build rulings$/)), ['How the pass asks and starts work',
@@ -309,10 +317,30 @@ function check(files, consts) {
     }
   }
 
+  // o13: the pick list (ADR 0061).
+  const pickPara = C((s7raw.split(/\n\s*\n/).find((p) => p.startsWith('**The pick list first.**')) ?? ''))
+  const pickAt = s7raw.indexOf('**The pick list first.**')
+  const step1At = s7raw.search(/^1\. Run /m)
+  if (pickAt < 0 || step1At < 0 || pickAt > step1At) flag('o13', '§ 7 does not open with **The pick list first.** before step 1')
+  need('o13', "§ 7's pick paragraph", pickPara, ['`plan.pickAsk`', 'whatever the budget', `\`${consts.PICK_NONE}\``,
+    `the top ${consts.PICK_MAX} projects`, 'multiSelect'])
+  need('o13', '§ 7 step 1', C(slice(s7raw, /^1\. Run /, /^2\. /) ?? ''), ['--open <label>', '--typed <his words>'])
+  need('o13', '§ 6', s6, ['--status <rollout>=<N>', '`own session`'])
+  need('o13', '§ 4', s4, ["A big project's One calls, Grills, sign-offs and Unpark offer never reach this round", '`own session`',
+    "Sign-offs are always asked, whatever the budget, a big project's aside"])
+  need('o13', "the Don't", dont, ["anything of a big project's (ADR 0061) unless it was ticked on the pick list",
+    'Ask past the budget, sign-offs and the pick list aside'])
+  need('o13', '§ 8', s8, ['`/thread:repair [[<rollout>]]`', '`sessions.unmatched[]`', "waits on [[<project>]]'s own session"])
+  need('o13', '§ 9', s9, ['`plan.pickAsk`', 'never asked', 'It asks nothing, the pick list included'])
+  const dry = s9.slice(0, s9.indexOf('It never runs'))
+  if (/--(?:open|typed) </.test(dry)) flag('o13', 'the dry run passes --open or --typed')
+  if (!files[ADR61]) flag('o13', `${ADR61} is missing`)
+  if (!all.includes('ADR 0061')) flag('o13', 'the skill does not cite ADR 0061')
+
   return { fails: [...fails].sort(), details }
 }
 
-const FILES = Object.fromEntries([SKILL, SCHEDULE, STATUS, ORIENT, PLUGIN_ROOT, CONTEXT, ADR, README].map((f) => [f, readIf(f)]))
+const FILES = Object.fromEntries([SKILL, SCHEDULE, STATUS, ORIENT, PLUGIN_ROOT, CONTEXT, ADR, ADR61, README].map((f) => [f, readIf(f)]))
 const CONSTS = constants()
 
 // Mutate one place: `from` must be present, so a control never passes vacuously.
@@ -325,7 +353,7 @@ const only = (files, consts, rules, what) => {
   assert.deepEqual(r.fails, rules, `${what}: ${r.details.join('\n')}`)
 }
 
-test('the skill, its scripts, schedule, status and the docs agree (o1-o12)', () => {
+test('the skill, its scripts, schedule, status and the docs agree (o1-o13)', () => {
   const r = check(FILES, CONSTS)
   assert.deepEqual(r.fails, [], r.details.join('\n'))
 })
@@ -383,8 +411,21 @@ test('control o8: a dry run that relays, or one that logs the grades, fails o8 a
     CONSTS, ['o8'], 'log')
 })
 
-test('control o9: CONTEXT.md without **Dispatch plan** fails o9 alone', () => {
+test('control o9: CONTEXT.md without **Dispatch plan** or **Pick list** fails o9 alone', () => {
   only(swap(FILES, CONTEXT, '- **Dispatch plan**', '- **Launch list**'), CONSTS, ['o9'], 'context')
+  only(swap(FILES, CONTEXT, '- **Pick list**', '- **Shortlist**'), CONSTS, ['o9'], 'pick list term')
+})
+
+test('control o13: the pick list asked within the budget, a step 1 without --typed, the Don\'t letting it past the budget unnamed, a dry run that ticks, a drifted PICK_MAX or the ADR gone, fails o13 alone', () => {
+  only(swap(FILES, SKILL, 'verbatim, whatever the budget (a budget of 0', 'verbatim, within the budget (a budget of 0'), CONSTS, ['o13'], 'budget')
+  only(swap(FILES, SKILL, ' [--typed <his words>] > "$S/sessions.json"', ' > "$S/sessions.json"'), CONSTS, ['o13'], 'typed')
+  only(swap(FILES, SKILL, '- Ask past the budget, sign-offs and the pick list aside.', '- Ask past the budget, sign-offs aside.'), CONSTS, ['o13'], 'dont')
+  only(swap(FILES, SKILL, 'sessions --plan "$S/plan.json" --status <rollout>=<N>`,\nwith no `--wrote`.',
+    'sessions --plan "$S/plan.json" --status <rollout>=<N> --open <label>`,\nwith no `--wrote`.'), CONSTS, ['o13'], 'dry run ticks')
+  only(FILES, { ...CONSTS, PICK_MAX: 4 }, ['o13'], 'PICK_MAX')
+  only({ ...FILES, [ADR61]: null }, CONSTS, ['o13'], 'adr')
+  only(swap(FILES, SKILL, 'A big project\'s One calls, Grills, sign-offs and Unpark offer never reach this round',
+    'A big project\'s One calls are asked here'), CONSTS, ['o13'], '§ 4 hold')
 })
 
 test('control o11: the log run with no dry-run guard, the dry run naming no log, or CONTEXT.md without **Grade log** fails o11 alone', () => {
