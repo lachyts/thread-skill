@@ -334,6 +334,18 @@ test('a bounce on a merge hold alone counts in mergeHoldOnly', (t) => {
   assert.deepEqual([out.grades.window.byGrade.Ready.mergeHoldOnly, out.grades.window.byGrade.Ready.byKind.mergeHold], [1, 1])
 })
 
+test('H1 (ADR 0064): an origin yield\'s gap is no lane holding: laneHours counts only the two holdings', (t) => {
+  const h = setup(t)
+  const L = line('r12')
+  emitAll(h, [grade(h, 'oy', W(3, '00:00')), L(W(3, '09:00'), 'slot-taken', 'oy', SETTINGS), L(W(3, '10:00'), 'slot-freed', 'oy', { outcome: 'ready' }),
+    L(W(3, '10:00'), 'ready', 'oy', { pr: 7 }), L(W(3, '10:00'), 'lane-taken', 'oy'), L(W(3, '10:20'), 'lane-freed', 'oy', { release: 'origin', origin: 'o/r' }),
+    L(W(3, '10:50'), 'lane-taken', 'oy'), L(W(3, '11:00'), 'lane-freed', 'oy', { release: 'merge', conflict: true }),
+    L(W(3, '11:00'), 'merged', 'oy', { pr: 7 })])
+  note(h, 'oy', { status: 'done' })
+  const out = grades(h)
+  assert.deepEqual([one(out, 'oy').slotHours, one(out, 'oy').laneHours], [1, 0.5], '10:00-10:20 and 10:50-11:00: the 30-minute gap is excluded')
+})
+
 test('bySize: a 45-minute Slot and a 10-minute lane against the S estimate; a serial landing is untimed', (t) => {
   const h = setup(t)
   const L = line('r11')

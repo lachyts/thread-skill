@@ -142,7 +142,9 @@ parallel with no note). For each:
   churn     a review-verdict line in the window with regression > 0.
 - The Escapes sweep (ADR 0037 d4). Every record's `merged` lines, of any age, are folded per rollout by score.py's
   landed_from(), and each rollout maps to its repo through its note's Project root (the newest existing root per repo
-  is used; a repo with several is flagged). A task landed in two records is credited to the later, flagged. Per repo,
+  is used; a repo whose roots fall in two or more families is flagged: a family is a root's in-place twin,
+  `self-rollout-check.sh --in-place`, else the root, so a default clone and a second project's clone of the same
+  checkout, ADR 0064, are one family and raise no flag). A task landed in two records is credited to the later, flagged. Per repo,
   one escapes.py score() over the union reads the evidence (fixes:, reverts, review findings). Each piece gets an at:
   a fixer note's captured: (else its mtime, flagged "undated fixer"), a revert's committer date, a review doc's
   newest add or modify commit (else its mtime). A record with no resolvable note or root, and a repo with no origin,
@@ -170,7 +172,10 @@ parallel with no note). For each:
   rollout of its repo that passes tune.py's revert_check), land[] (the proposals of a repo's newest non-partial read
   rollout that pass tune.py's auto_check, over the same reflections.jsonl read, the ledger's record line appended (so a
   load-topped ledger holds a ceiling raise here as tune.py --auto will), and the same agreement as tune.py, and whose key
-  no revert[] item names) and held[] (the rest, each with its reason).
+  no revert[] item names) and held[] (the rest, each with its reason). The repo's newest rollout lands alone even when two
+  projects' rollouts share the repo (ADR 0064), on purpose: rollouts.toml's knobs are one table per origin, shared by
+  both projects, so landing from two rollouts' proposals in one Reflection could move one key both ways; knob_lines
+  records every proposer, and tune.py's auto_check counts the older rollout's proposal toward agreement at the next.
 - ledger (p29-11, ADR 0051): skills/reflect/scripts/ledger.py's block (its docstring holds the model: the classes, the
   precedence, the waits on Lachy, the baseline, the Watch and the Monthly audit's month rule) over every record, each read
   whole (its ledger lines merged back; a record --fold folded read again, so its journals are the fold's), live while its
@@ -421,6 +426,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.dirname(os.path.dirname(HERE))
 SHARED = os.path.join(SKILLS, "_shared", "scripts")
 RECONCILE_PY = os.path.join(SKILLS, "execute", "scripts", "reconcile-rollout.py")
+SELF_ROLLOUT_SH = os.path.join(SKILLS, "execute", "scripts", "self-rollout-check.sh")
 SCORE_PY = os.path.join(HERE, "score.py")
 SERIAL_PY = os.path.join(HERE, "serial-score.py")
 RESOLVE_DAY_PY = os.path.join(SHARED, "resolve-day.py")
@@ -873,6 +879,7 @@ class Span:
         self.vault = Vault(a.tasks_dir)
         self.out_dir = os.path.dirname(os.path.abspath(expand(a.out)))
         self.origins = {}
+        self.families = {}  # the Escapes sweep's Project-root families (ADR 0064): root -> its in-place twin, or itself
         self.genv = git_env()
         self.grade_log = None  # grades.py's Log, read once in run()
         self.ledger_lines = {}  # {slug: the record's LEDGER_KINDS lines}, kept by records() for the Time-lost ledger
@@ -897,6 +904,22 @@ class Span:
                 self.flag("%s: no origin read (%s)" % (root, e))
                 self.origins[root] = None
         return self.origins[root]
+
+    def family(self, root):
+        """A Project root's family for the Escapes sweep (ADR 0064): its in-place twin (`self-rollout-check.sh --in-place`,
+        memoised) when the root is in a rollout clone, else the root itself. A repo's default clone and a second project's
+        clone of it are one family, so they raise no `Project roots` flag between them."""
+        if root not in self.families:
+            fam = root
+            try:
+                p = subprocess.run(["bash", SELF_ROLLOUT_SH, "--in-place", root], capture_output=True, text=True,
+                                   timeout=60, stdin=subprocess.DEVNULL)
+                if p.returncode == 0 and p.stdout.strip():
+                    fam = p.stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                pass
+            self.families[root] = fam
+        return self.families[root]
 
     def quiet_origin(self, root):
         """A directory's origin (owner/name) for the attention ledger, or None: a cwd with no origin is no fault."""
@@ -1493,7 +1516,7 @@ class Span:
             r = repos[key]
             roots = sorted(r["roots"], key=lambda x: r["roots"][x])
             root = roots[-1]
-            if len(roots) > 1:
+            if len({self.family(x) for x in roots}) > 1:  # ADR 0064: two projects' clones of one checkout are one family
                 self.flag("repo %s has %d Project roots (%s): the newest, %s, is read" % (r["slug"], len(roots),
                                                                                          ", ".join(roots), root))
             landed = {task: info for task, (_s, info, _a) in r["landed"].items()}
@@ -1680,6 +1703,8 @@ class Span:
                     item["agreed"] = agreed
                     if ok and (repo, p["key"]) in reverting:
                         ok, reason = False, "a revert of %s comes first this Reflection" % p["key"]
+                    # Kept per repo on purpose with two projects' rollouts on it (ADR 0064): one knob table per origin,
+                    # so one rollout's proposals land per Reflection; the older one's count toward agreement next time.
                     if ok and e is not newest:
                         ok, reason = False, "not the repo's newest rollout ([[%s]] is)" % newest["rollout"]
                     if ok:

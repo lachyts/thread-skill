@@ -68,7 +68,12 @@ and it reads trickle-bound (all of its time held), with Throughput null.
     a non-terminal call with no durationMs.
 - Pairing follows run_record.py's reader rules: one Slot per task, the same lane holding, a hold per (hold,
   task), a pause until resumed, a lane-freed closing the task's merge hold, a `carried` line in its from-file
-  closing that task's Slot, lane and holds. A lane, hold or pause still open at the last line read ends there,
+  closing that task's Slot, lane and holds. An origin yield (ADR 0064: lane-freed release=origin, the lead yielding
+  its lane to another rollout's Integration on the same origin) ends its holding like any lane-freed; the same task's
+  next lane-taken, with no merged, set-aside or from-file carried line for it after that end, opens a continuation
+  (`cont`, carrying `first`, its Integration's first holding), and the gap between them is an origin wait
+  (origin_waits, (end, start, task)): no lane busy time. A yield whose re-take never came ends at the yield and still
+  counts one Integration. A lane, hold or pause still open at the last line read ends there,
   flagged. The night record's lines (away-night, last-start-held, ran-past-morning: p28-2, NIGHT_KINDS) are not
   read: `next` writes a ran-past-morning line after the Morning it reads, so none is a task's last record line (an
   untimed call's last activity) or the record's last line. Nor are the time-lost ledger's (stopped, lead-entry,
@@ -107,7 +112,8 @@ function over the settings on slot-taken and idle-slots (`ceilingSteps` lists it
 in use at or above the ceiling in force. Idle Slot time is labelled by its idle-slots markers (the first
 marker labels its idle span from the start, a change of reason splits it, and a stop or full Slots ends the span and
 its reason), else "unexplained". Lane: busy share, Integrations (lane holdings started in
-the window) and each ready -> lane-taken wait. Guardrails: Throughput first (ADR 0037 d1: no longer a headline,
+the window that continue no origin yield: one Integration across its yields, ADR 0064) and each ready -> lane-taken
+wait; conflicts and the integrator path are read once per Integration, from its last holding. Guardrails: Throughput first (ADR 0037 d1: no longer a headline,
 bounded so an overnight run still finishes by morning): breached when running time exceeds `[guardrails]
 hours_per_task` (built-in 1.5, a heuristic) times the tasks whose Slot or lane holding overlaps [since, until] (at
 least 1: running time counts lane-only stretches, so a task that only integrates in the window, a supersede's carried
@@ -604,6 +610,13 @@ class Score:
         """Walk the record's lines up to `until` with run_record's reader rules."""
         self.slots, open_slot = [], {}
         self.holdings, lane = [], None
+        # ADR 0064: each task's latest holding, and whether a merged, set-aside or from-file carried line came after
+        # its end (so the next holding starts a new Integration)
+        self.origin_waits, latest, broke = [], {}, {}
+
+        def ends_integration(task):
+            if task in latest and latest[task]["end"] is not None:
+                broke[task] = True
         self.holds, open_holds = [], {}
         self.pauses, pause = [], None
         self.steps, self.markers, self.merges, self.readies = [], [], [], []
@@ -659,6 +672,7 @@ class Score:
                 s["end"], s["outcome"] = t, d.get("outcome")
                 s["release"] = _release(t, d)
             elif kind == "carried" and task and d.get("rollout") == d.get("from"):
+                ends_integration(task)
                 if task in open_slot:
                     s = open_slot.pop(task)
                     s["end"], s["outcome"] = t, "carried"
@@ -675,6 +689,12 @@ class Score:
                     lane = None
                 if lane is None:
                     lane = {"task": task, "start": t, "end": None, "release": None, "conflict": False, "path": None}
+                    prev = latest.get(task)
+                    if prev is not None and prev["release"] == "origin" and prev["end"] is not None and \
+                            not broke.get(task):
+                        lane.update(cont=True, first=prev.get("first", prev))
+                        self.origin_waits.append((prev["end"], t, task))
+                    latest[task], broke[task] = lane, False
                     self.holdings.append(lane)
             elif kind == "lane-freed" and task:
                 if lane is not None and lane["task"] == task:
@@ -703,6 +723,7 @@ class Score:
             elif kind == "idle-slots":
                 self.markers.append((t, d.get("reason")))
             elif kind == "merged" and task:
+                ends_integration(task)
                 self.merges.append((t, task))
                 self.merge_lines.append((t, task, d.get("pr"), d.get("readOnly") is True))
                 if d.get("readOnly") is True:
@@ -710,6 +731,7 @@ class Score:
             elif kind == "ready" and task:
                 self.readies.append((t, task))
             elif kind == "set-aside" and task:
+                ends_integration(task)
                 self.set_asides.append((t, task, d.get("reasonClass")))
             elif kind == "quota-stall":
                 self.stalls.append(t)
@@ -1049,7 +1071,13 @@ class Score:
     def lane_score(self, since, until):
         rt = self.run_ms
         busy = total(intersect(self.lane_iv, self.run_iv))
-        started = [h for h in self.holdings if since <= h["start"] <= until]
+        # One Integration per holding that continues no origin yield (ADR 0064); its conflict and path are its last
+        # holding's, the one its re-takes end on.
+        started = [h for h in self.holdings if not h.get("cont") and since <= h["start"] <= until]
+        last_of = {id(h): h for h in started}
+        for h in self.holdings:
+            if h.get("cont") and id(h["first"]) in last_of:
+                last_of[id(h["first"])] = h
         waits = []
         for t, task in self.readies:
             if not since <= t <= until:
@@ -1064,7 +1092,7 @@ class Score:
             first = round(sum(waits[:third]) / third, 1)
             last = round(sum(waits[-third:]) / third, 1)
             climbing = last > WAIT_CLIMB_RATIO * first and last >= WAIT_CLIMB_MIN
-        freed = [h for h in started if h["end"] is not None]
+        freed = [last_of[id(h)] for h in started if last_of[id(h)]["end"] is not None]
         self.integrations = len(started)
         self.lane_metrics = {
             "busyShare": round(busy / rt, 4) if rt else None,

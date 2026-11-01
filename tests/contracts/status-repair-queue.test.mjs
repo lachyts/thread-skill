@@ -2361,3 +2361,74 @@ test('the rules are all named (36) and each has a control', () => {
   assert.equal(RULES.length, 36)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
+
+// ---- ADR 0064 (p33-4, D14): a task that yielded the origin lane reads as waiting on it ---------------------------------
+// Fixture O1: a rollout whose one task is `review` + `pr:` + `integrating:`, its Run record ending lane-taken then
+// lane-freed release=origin origin=o/r: status gives that row originWait {origin, since}. Controls: a record ending
+// lane-taken, an awaiting-Integration row and an unreadable record give no key. The prose pins (status's Integrating row
+// and § 2's list, repair's **origin lane wait** class before **live**) run through one rule function, each with a
+// one-place control that must fail.
+const RECORD = path.join(root, 'skills', '_shared', 'scripts', 'run_record.py')
+function buildO(name, { lines = [], integrating = true, unreadable = false } = {}) {
+  const d = path.join(tmp, `O-${name}`)
+  const ev = path.join(tmp, `O-${name}-events`)
+  fs.mkdirSync(d)
+  fs.mkdirSync(ev)
+  const R = 'oproj-rollout-2026-10-01'
+  writeRollout(d, R, ['oproj-y'])
+  writeTask(d, 'oproj-y', ['status: review', 'scope: cross-cutting', `rollout: "[[${R}]]"`, `pr: ${prOf(5)}`, 'ready: 2026-10-02T13:00+00:00',
+    ...(integrating ? ['integrating: 2026-10-02T13:40+00:00'] : [])])
+  for (const [kind, fields, ts] of lines) {
+    must(RECORD, ['emit', '--rollout', R, '--kind', kind, '--task', 'oproj-y', '--json', JSON.stringify(fields), '--ts', ts], undefined, { ...ENV, THREAD_EVENTS_DIR: ev })
+  }
+  if (unreadable) fs.mkdirSync(path.join(ev, `${R}.jsonl`), { recursive: true })
+  const out = JSON.parse(must(RECONCILE, ['status', '--rollout', path.join(d, `${R}.md`), '--tasks-dir', d, '--now', NOW], undefined,
+    { ...STATUS_ENV, THREAD_EVENTS_DIR: ev }))
+  return out.tasks.find((t) => t.slug === 'oproj-y')
+}
+const TAKEN = ['lane-taken', {}, '2026-10-02T13:40:00Z']
+const YIELD = ['lane-freed', { release: 'origin', origin: 'o/r' }, '2026-10-02T13:55:00Z']
+
+test('fixture O1: an integrating task whose record ends lane-freed release=origin carries originWait', () => {
+  const row = buildO('yield', { lines: [TAKEN, YIELD] })
+  assert.equal(row.queueState, 'integrating')
+  assert.deepEqual(row.originWait, { origin: 'o/r', since: '2026-10-02T13:55:00.000Z' })
+})
+test('fixture O1 controls: a record ending lane-taken, an awaiting-Integration row and an unreadable record give no originWait', () => {
+  assert.ok(!('originWait' in buildO('taken', { lines: [YIELD, TAKEN] })), 'its last lane line is lane-taken')
+  const awaiting = buildO('awaiting', { lines: [TAKEN, YIELD], integrating: false })
+  assert.equal(awaiting.queueState, 'awaiting-integration')
+  assert.ok(!('originWait' in awaiting), 'an awaiting-Integration row')
+  assert.ok(!('originWait' in buildO('unreadable', { unreadable: true })), 'an unreadable record')
+})
+
+const ORIGIN_WORDS = 'waiting on the origin lane (<origin>) since <since>'
+function originRule({ status, repair }) {
+  const fails = []
+  const intRow = lineWith(status, '| `integrating` | **Integrating** |')
+  if (!intRow.includes(`with \`originWait\`: \`${ORIGIN_WORDS}\` in place of the time in the lane`)) fails.push('status-row')
+  if (!collapse(section(status, /^### 2\. Gather the vault state/) || '').includes('also carries `originWait`')) fails.push('status-keys')
+  const rows = repair.split('\n').filter((l) => l.startsWith('| **'))
+  const ow = rows.findIndex((l) => l.startsWith('| **origin lane wait** |'))
+  const live = rows.findIndex((l) => l.startsWith('| **live** |'))
+  if (ow < 0 || live < 0 || ow > live) fails.push('repair-order')
+  else if (!rows[ow].includes(`\`${ORIGIN_WORDS}\``) || !rows[ow].includes('Never a hand-back or a set-aside')) fails.push('repair-row')
+  return fails
+}
+test('status and repair read a yielded task as waiting on the origin lane (ADR 0064)', () => {
+  assert.deepEqual(originRule(real), [])
+})
+test('control: the Integrating row without the origin wait fails status-row', () => {
+  assert.deepEqual(originRule({ ...real, ...st(`with \`originWait\`: \`${ORIGIN_WORDS}\``, 'with `originWait`: the time in the lane') }), ['status-row'])
+})
+test('control: § 2\'s list without originWait fails status-keys', () => {
+  assert.deepEqual(originRule({ ...real, ...st('also carries `originWait`', 'also carries `originLane`') }), ['status-keys'])
+})
+test('control: the origin lane wait class after live fails repair-order', () => {
+  const owRow = lineWith(real.repair, '| **origin lane wait** |')
+  const liveRow = lineWith(real.repair, '| **live** |')
+  assert.deepEqual(originRule({ ...real, repair: real.repair.replace(owRow + '\n', '').replace(liveRow, liveRow + '\n' + owRow) }), ['repair-order'])
+})
+test('control: the origin lane wait row that hands back fails repair-row', () => {
+  assert.deepEqual(originRule({ ...real, ...rp('Never a hand-back or a set-aside: it lost no work', 'hand it back') }), ['repair-row'])
+})

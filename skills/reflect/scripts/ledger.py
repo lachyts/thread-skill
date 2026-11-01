@@ -76,8 +76,10 @@ keyed by the record's own values where one fits:
 - load: not-running stretches labelled hold-heat; each suite's verify-slot `waited` (slot-wait: the wait before its
   suite-started, or before a noslot or heat suite-ended that never started); and the run of a suite that ended heat or
   timeout (heat, timeout).
-- lane-bound: the lane holdings, less every stall span of the rollout (stops, the sign-off pause, holds), pauses and the
-  rework suites.
+- lane-bound: the lane holdings and the origin waits between them (score.py's origin_waits, ADR 0064: a task's lead
+  yielded its lane to another rollout's Integration on the same origin, then took it again: the rollout's Integration
+  waited on the origin's one lane, never a stall), less every stall span of the rollout (stops, the sign-off pause,
+  holds), pauses and the rework suites.
 - rework: every race suite's run, and every integration suite after the task's first in its record (its first is never
   rework, even when it ran before since); base-moved lines are counted as events, with their inertOnly.
 - plan-rejected: for each plan-rejected set-aside, the time from the task's latest slot-taken at or before it to the
@@ -599,7 +601,9 @@ def measure(slug, lines, since, until, is_live):
         if su["start"] is not None and su["end"] is None and since <= su["start"] <= until:
             m.count("suite-unfinished")
     # the lane, less every stall span, pauses and rework
-    holdings = union([(h["start"], h["end"]) for h in sc.holdings])
+    # ADR 0064: an origin yield's gap is lane time too (the rollout waited on the origin's one lane), so it is priced here
+    # and subtracted from the remainder with the holdings, never read as stalls or unexplained
+    holdings = union([(h["start"], h["end"]) for h in sc.holdings] + [(a, b) for a, b, _t in sc.origin_waits])
     m.add("lane-bound", "lane", subtract(clean(holdings), taken + union(rework)))
     # plan-rejected: the Slot hours of a plan thrown away
     takes = [(t, d.get("task")) for t, _n, d in base if d.get("kind") == "slot-taken"]

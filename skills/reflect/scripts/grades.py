@@ -71,7 +71,8 @@ instant and no date (flagged), counts in `all` only. `pending` counts the open o
 
 Slot hours (bySize, per grade size, over the landed dispatched episodes): slotHours is the time T's Slots (Score.pair's
 slot-taken .. slot-freed, from every record; an open one to --until) cover inside the episode's span, laneHours the same
-for its lane holdings, each in hours to 3 places. An episode with a Slot there is `timed`, and the median and mean of
+for its lane holdings, each in hours to 3 places (an origin yield's gap, ADR 0064, is no holding: the task held no lane
+while another rollout's Integration did, so it stays out). An episode with a Slot there is `timed`, and the median and mean of
 each sit beside estimateHours = SIZE_MINUTES[size] / 60; the rest are `untimed` (a serial chain's, a session's or work
 done by hand). Slot hours include the lead's set-up and in-Slot waits, so they are an upper bound on agent time.
 

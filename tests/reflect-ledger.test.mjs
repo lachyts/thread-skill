@@ -337,6 +337,36 @@ test('L1: the ledger sums fixture records across rollouts by class and cause, ra
   py(h, RUN_RECORD, 'm.check(None, "time-lost", None, dict(a, reflection="r-x", id="tl-record-x")) or True', row)
 })
 
+// G1 (ADR 0064): an origin yield's gap is lane-bound/lane, never stalls. x runs a Slot 01:00-02:00, integrates from 02:00,
+// yields the origin lane at 02:20 (lane-freed release=origin), takes it again at 02:50 and merges at 03:00. Control: the
+// same lane hours as two tasks with no yield leave the gap outside the lane, as today.
+function yieldRecord(gap) {
+  const base = [[T('06', '01:00'), 'slot-taken', 'x', S('start')], [T('06', '01:00'), 'run-bound', 'x', { runId: 'w-x', journalDir: '/j', call: 'task' }],
+    [T('06', '02:00'), 'slot-freed', 'x', { outcome: 'ready' }], [T('06', '02:00'), 'ready', 'x', { pr: 1 }]]
+  if (gap === 'origin') {
+    return [...base, [T('06', '02:00'), 'lane-taken', 'x', {}], [T('06', '02:20'), 'lane-freed', 'x', { release: 'origin', origin: 'o/r' }],
+      [T('06', '02:50'), 'lane-taken', 'x', {}], [T('06', '03:00'), 'lane-freed', 'x', { release: 'merge', path: 'lead', triggers: [], conflict: false }],
+      [T('06', '03:00'), 'merged', 'x', { pr: 1 }]]
+  }
+  return [...base, [T('06', '02:00'), 'lane-taken', 'x', {}], [T('06', '02:20'), 'lane-freed', 'x', { release: 'merge', path: 'lead', triggers: [], conflict: false }],
+    [T('06', '02:20'), 'merged', 'x', { pr: 1 }], [T('06', '02:50'), 'lane-taken', 'y', {}],
+    [T('06', '03:00'), 'lane-freed', 'y', { release: 'merge', path: 'lead', triggers: [], conflict: false }], [T('06', '03:00'), 'merged', 'y', { pr: 2 }]]
+}
+
+test('G1: an origin yield\'s gap is priced lane-bound/lane, so stalls/unexplained stays 0; with no yield the gap is no lane time', (t) => {
+  const h = setup(t)
+  emitAll(h, 'g-yield', yieldRecord('origin'))
+  done(h, 'g-yield')
+  const b = ledgerCli(h, LSINCE, LUNTIL)
+  assert.equal(b.row.byCause['lane-bound']?.lane, 1, 'the holdings (30 min) and the yield\'s gap (30 min): one hour of lane')
+  assert.equal(b.row.byCause.stalls?.unexplained ?? 0, 0, 'the gap never reads as stalls/unexplained')
+  const c = setup(t)
+  emitAll(c, 'g-plain', yieldRecord('plain'))
+  done(c, 'g-plain')
+  const bc = ledgerCli(c, LSINCE, LUNTIL)
+  assert.equal(bc.row.byCause['lane-bound']?.lane, 0.5, 'control: two separate tasks hold the lane 30 minutes between them')
+})
+
 test('L1 controls: a sign-off pause re-moded hard moves its 2 h to other; a quota cool-down re-classed infra moves to stalls', (t) => {
   const h = setup(t)
   fixture(h, { 'l-caps': FIXTURE['l-caps'].map((e) => (e[1] === 'paused' ? [e[0], 'paused', null, { mode: 'hard' }] : e)) })

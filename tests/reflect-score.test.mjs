@@ -989,6 +989,71 @@ test('Throughput: lane-only landed tasks (a supersede\'s carried ones) earn thei
     'the Guardrails, in score.py GUARDRAILS\' order (the weigh() test pins that tuple)')
 })
 
+// ---- ADR 0064: an origin yield is a pause inside one Integration (R1-R4) -------------------------------------------
+// x runs a Slot 09:00-10:00 (ready at 10:00) and integrates from 10:00; at 10:20 its lead yields the origin lane to
+// another rollout's Integration (lane-freed release=origin), takes it again at 10:50, and merges at 11:00 with a
+// resolved conflict. The yield's 30 minutes hold no lane.
+function originYield({ first = { release: 'origin', origin: 'o/r' }, between = [] } = {}) {
+  return byTs([
+    ...life('x', { from: at('09:00'), to: at('10:00'), c: 2 }),
+    [at('10:00'), 'lane-taken', 'x', {}],
+    [at('10:20'), 'lane-freed', 'x', first],
+    ...between,
+    [at('10:50'), 'lane-taken', 'x', {}],
+    [at('11:00'), 'lane-freed', 'x', { release: 'merge', path: 'integrator', triggers: ['conflict'], conflict: true }],
+    [at('11:00'), 'merged', 'x', { pr: 7 }],
+  ])
+}
+
+test('R1: an origin yield and its re-take are one Integration; the gap is no lane busy time', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', originYield())
+  const out = scored(home, ['--until', at('12:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })])
+  assert.equal(out.lane.integrations, 1, 'one Integration across the yield')
+  assert.equal(out.lane.conflicts, 1, 'its conflict, from its last holding')
+  assert.equal(out.lane.integratorPath, 1, '… and its integrator path')
+  assert.equal(out.headline.conflictRate, 1, 'conflict rate 1.0 (one conflicting Integration of one)')
+  assert.equal(out.lane.busyHours, 0.5, '10:00-10:20 and 10:50-11:00: the 30-minute gap held no lane')
+  assert.deepEqual(out.lane.waitsMinutes, [0], 'ready -> the first holding, at 10:00')
+})
+
+test('R2 (control): a set-aside release, its set-aside line and a hand-back between: two Integrations', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', originYield({
+    first: { release: 'set-aside', path: 'lead', triggers: [], conflict: false },
+    between: [[at('10:20'), 'set-aside', 'x', { stage: 'integrate', reasonClass: 'merge-task', setAsideAt: 'integration' }],
+      [at('10:40'), 'handed-back', 'x', { via: 'retry', arm: 'integration' }]],
+  }))
+  const out = scored(home, ['--until', at('12:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })])
+  assert.equal(out.lane.integrations, 2)
+})
+
+test('R3: an origin yield, then a from-file carried line: each record counts its own Integration', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([
+    ...life('x', { from: at('09:00'), to: at('10:00'), c: 2 }),
+    [at('10:00'), 'lane-taken', 'x', {}],
+    [at('10:20'), 'lane-freed', 'x', { release: 'origin', origin: 'o/r' }],
+  ]))
+  emitAll(home, 'demo2', byTs([
+    [at('10:30'), 'carried', 'x', { from: 'demo' }],
+    [at('10:50'), 'lane-taken', 'x', {}],
+    [at('11:00'), 'lane-freed', 'x', { release: 'merge', path: 'lead', triggers: [], conflict: false }],
+    [at('11:00'), 'merged', 'x', { pr: 7 }],
+  ]))
+  const a = scored(home, ['--until', at('12:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })], { rollout: 'demo' })
+  const b = scored(home, ['--until', at('12:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })], { rollout: 'demo2' })
+  assert.deepEqual([a.lane.integrations, b.lane.integrations], [1, 1], 'the carrying rollout counts its own, from its own first holding')
+})
+
+test('R4: an Integration begun before --since that continues inside the window counts 0 there, its conflict too', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', originYield())
+  const out = scored(home, ['--since', at('10:30'), '--until', at('12:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })])
+  assert.equal(out.lane.integrations, 0)
+  assert.equal(out.lane.conflicts, 0, 'the continuation\'s conflict is not counted')
+})
+
 test('weigh(): a trade only when both headlines it names are scored', () => {
   const body = [
     'import importlib.util, json, sys',

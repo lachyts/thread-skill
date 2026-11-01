@@ -641,6 +641,22 @@ test('span: two Project roots for one repo: the newest is read, flagged', (t) =>
   assert.ok(s.flags.some((f) => f.startsWith('repo o/r has 2 Project roots') && f.endsWith(`the newest, ${second}, is read`)), JSON.stringify(s.flags))
 })
 
+test('span: a repo\'s default clone and a second project\'s clone (ADR 0064) are one family: no Project roots flag', (t) => {
+  const h = setup(t)
+  const d = path.join(h.home, 'repo-rollout'); const b = path.join(h.home, 'repo-b-rollout')
+  for (const c of [d, b]) {
+    fs.mkdirSync(c)
+    execFileSync(REAL_GIT, ['init', '-q', c])
+    execFileSync(REAL_GIT, ['-C', c, 'remote', 'add', 'origin', 'git@github.com:o/r.git'])
+  }
+  emitAll(h, 'r1', byTs(life('a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
+  emitAll(h, 'r2', byTs(life('b', W(5, '00:00'), W(5, '01:00'), { lane: [W(5, '01:00'), W(5, '01:10')] })))
+  rolloutNote(h, 'r1', { root: d })
+  rolloutNote(h, 'r2', { root: b })
+  const s = span(h)
+  assert.ok(!s.flags.some((f) => f.includes('Project roots')), JSON.stringify(s.flags))
+})
+
 // Running time over 1.5 h for one task breaches Throughput. A breach counts only in a read, non-partial rollout whose
 // run ends in the window.
 test('span and close: breaches count once per (rollout, Guardrail) only for a finished in-window run; a partial one is reported, not counted', (t) => {
