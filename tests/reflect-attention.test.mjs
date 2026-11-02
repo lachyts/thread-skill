@@ -456,6 +456,24 @@ function branchCheckout(h, name) {
   return [wt, s1]
 }
 
+// p34-5: the trails read through score.py's read_review_rounds, the one copy of run_record's reader rule: a doc's
+// consumed line with no branch keeps its pending line's, and a round is timed by a UTC Z reviewedAt only.
+test('L3: a round takes its branch from the newest line of its doc that carries one, and is timed by a UTC Z reviewedAt, else its arrival', (t) => {
+  const h = setup(t)
+  const [wq, s1] = branchCheckout(h, 'wtq')
+  emitAll(h, null, [
+    round(h, T(24, '01:00'), wq, s1, { branch: 'feat/q', doc: 'docs/reviews/q.md', extra: { status: 'pending' } }),
+    round(h, T(24, '02:00'), wq, s1, { doc: 'docs/reviews/q.md', extra: { status: 'consumed' } }),
+  ])
+  // fresh-review's ledger writes its lines itself (run_record's mirror contract): one with an offset reviewedAt
+  fs.appendFileSync(path.join(h.ev, 'reviews.jsonl'), `${JSON.stringify({ v: 1, ts: T(24, '20:00'), host: 'h', rollout: null, task: null,
+    kind: 'review-round', repo: wq, head: s1, digest: 'n00001', doc: 'docs/reviews/n.md', mode: 'code', effort: 'xhigh', findings: 1,
+    original: 1, regression: 0, verdict: 'continue', branch: 'feat/n', reviewedAt: '2026-10-24T18:00:00+00:00' })}\n`)
+  const items = block(h).attention.trails.items
+  assert.deepEqual(items.map((x) => [x.label, x.key, x.rounds, x.first]),
+    [['feat/q', 'branch', 1, T(24, '01:00')], ['feat/n', 'branch', 1, T(24, '20:00')]], JSON.stringify(items))
+})
+
 test('L3: the transcripts\' floor is the first round of a trail read: a round in no trail read never moves it, one before the window in a trail read does, and none older than 28 days before the window is keyed', (t) => {
   // A: an old round on a gone repo, its trail with no round in the window, and a round 50 days back on the branch of a
   // trail read. A transcript last written between the old round and the floor (until - 14 days) is never read, so its

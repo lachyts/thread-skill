@@ -80,9 +80,10 @@ asks: its budget is `--budget`, else 30. The budget is his (Owner *yours*: his t
 6. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan "$S/scan.json" --grades <each grades file> --compact > "$S/rank.json"`.
 7. Unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank "$S/rank.json" --scan "$S/scan.json"`:
    one line per graded task into the Grade log (CONTEXT.md **Grade log**), which the weekly Reflection reads against
-   what followed each grade. A task whose note name is no slug (spaces or capitals) is skipped, named on stderr and
-   counted in the outcome line (`; <k> skipped (not a slug): …`), and the rest are logged. A skip or a non-zero exit
-   is a § 8 caveat, and the pass goes on.
+   what followed each grade. A titled note (spaces, capitals, an em dash) is logged under a key made from its name,
+   the name kept beside it; only a name with no key (no ASCII letter or digit, or another graded task's key) is skipped,
+   named on stderr and counted in the outcome line (`; <k> skipped (no key): …`), and the rest are logged. A skip or a
+   non-zero exit is a § 8 caveat, and the pass goes on.
 
 ### 3. The Ranked slate
 
@@ -196,7 +197,8 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    8. schedule § 3.5's gates: a match that a recorded `## Decisions` answer settles is dismissed. Any other match drops
       its task from this rollout: named, unstamped, never `ignore_gate`.
    9. schedule § 3.6's sweep: every undismissed hit is stamped `plan_approval: required`, with no ask-ahead (ADR 0034),
-      and a spend hit also gets step 7's `## Decisions (recorded <date>)` Planner line.
+      and a spend hit, or a credential hit § 3.6 records in the repo's test-credential class (ADR 0063), also gets
+      its step 7 `## Decisions (recorded <date>)` Planner line.
    10. Step 4.5's affine merges: none; the candidates are named.
    11. Step 4.7's rung offers: none.
    12. Step 5's Solo: none stamped; the proposals are named.

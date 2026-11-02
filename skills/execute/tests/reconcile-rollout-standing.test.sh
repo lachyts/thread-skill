@@ -24,6 +24,14 @@
 #          sections, undated notes and task notes never count; an unreadable dated note or an unlistable directory
 #          asks; a held standing-spend lock exits 1, while a slug that needs no month read still asks; a task stamp is
 #          its own line.
+#   S10    a declared test credential signs itself (ADR 0063, p34-8): p8-1's two verbatim credential gates
+#          (smart-slider-rollout-2026-10-28) are signed at the built-in 0 spend limit when the repo's one-line
+#          `test_credentials` class declares their keys, its file holds them with their declared prefix or Supabase
+#          project, and the rollout's verbatim env_bootstrap refreshes that file with a plain cp; a live or production
+#          gate, a wrong or missing value, a guarded or reversed copy, no class (another repo, a serial Leg) and a
+#          bounce all ask; a refused class form exits 1, but a gate the reading's class-independent steps refuse
+#          still asks without resolving it; a spend gate beside one still logs alone; a bad spend stamp errors only a
+#          slug that resolves the limit. No value from the file is ever printed or written.
 #   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
 #          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
 #          refused rollouts.toml. It writes nothing.
@@ -129,7 +137,7 @@ ORDER=$'- [[a]]\n- [[b]]' mkro
 before=$(cat "$D/a.md" "$D/b.md")
 sa a,b
 ok "$rc" 3 "S3: exit 3"
-has "$out" "ASK: a: $CRED: not a spend gate" "S3: a credential gate never passes"
+has "$out" "ASK: a: $CRED: deny word: API key" "S3: a credential outside the test-credential class never passes (ADR 0063: its deny word)"
 has "$out" "ASK: b: $SEVENTY: total exposure US\$70 is over" "S3: US\$40 plus US\$30 is 70, over 50"
 ok "$(cat "$D/a.md" "$D/b.md")" "$before" "S3: both notes untouched"
 
@@ -507,6 +515,213 @@ RONOTE="$XP" HH="$H200" sa b
 ok "$rc" 3 "S9j: a later call's US\$10 is past the month line: exit 3"
 has "$out" "ASK: b: $P10: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9j: … at US\$210, each note still counted once"
 ok "$(cat "$D/b.md" "$D/$X.md")" "$before" "S9j: b.md and the rollout note byte-identical across the call"
+
+# ── S10: a declared test credential signs itself (ADR 0063, p34-8) ─────────────────────────────────────────────────
+# The Verify: p8-1's two gates, verbatim from Archive/smart-slider-p8-1-credit-packs-on-the-slider.md, and its rollout's
+# env_bootstrap, verbatim (its `# from …` comment included) with the source path swapped for $SRC. The class lives in
+# the home's rollouts.toml (HC: schema 3 and the one-line class, NO spend_approval_usd anywhere, so the limit is the
+# built-in 0; HCS adds `[defaults] spend_approval_usd = 200`). Each scenario's repo is a git clone whose origin is
+# Animately/optimizer. The values are fakes; none may reach stdout, stderr or a note.
+G1="credential: Stripe test-mode keys STRIPE_SECRET (sk_test_) and STRIPE_PUBLISHABLE_KEY (pk_test_) in the task tree's .env.local"
+G2="credential: staging Supabase SUPABASE_SERVICE_ROLE_KEY (project geyyptxqiovujgbiecsp) in the task tree's .env.local"
+mkdir -p "$TMP/s10"
+SRC="$TMP/s10/source.env.local"
+jwt() { python3 -c 'import base64, json, sys
+b = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+print("%s.%s.%s" % (b({"alg": "HS256", "typ": "JWT"}), b({"iss": "supabase", "ref": sys.argv[1], "role": "service_role"}), "c2lnRkFLRQ"))' "$1"; }
+JWT=$(jwt geyyptxqiovujgbiecsp)
+JWT_OTHER=$(jwt abcdefghijklmnopqrst)
+srcok() { printf '%s\n' '# staging and Stripe test mode only' 'ENVIRONMENT=staging' 'STRIPE_SECRET=sk_test_FAKE51secretvalue' \
+  'export STRIPE_PUBLISHABLE_KEY="pk_test_FAKE51publishable"' "SUPABASE_SERVICE_ROLE_KEY=$JWT" > "$SRC"; }
+srcok
+CLASS="test_credentials = { file = \"$SRC\", keys = [{ name = \"STRIPE_SECRET\", prefix = \"sk_test_\" }, { name = \"STRIPE_PUBLISHABLE_KEY\", prefix = \"pk_test_\" }, { name = \"SUPABASE_SERVICE_ROLE_KEY\", supabase_project = \"geyyptxqiovujgbiecsp\" }] }"
+HC="$TMP/home-class"; mkdir -p "$HC/.config/thread"
+printf 'schema = 3\n\n[repo."Animately/optimizer"]\n%s   # Stripe test mode and staging Supabase only\n' "$CLASS" > "$HC/.config/thread/rollouts.toml"
+HCS="$TMP/home-class-spend"; mkdir -p "$HCS/.config/thread"
+printf 'schema = 3\n\n[defaults]\nspend_approval_usd = 200\n\n[repo."Animately/optimizer"]\n%s\n' "$CLASS" > "$HCS/.config/thread/rollouts.toml"
+BOOT="env_bootstrap: yarn install --immutable && git submodule update --init library && (cp $SRC .env.local 2>/dev/null || true)  # from smart-slider-rollout-2026-10-18"
+ANN1="(approved $DATE under the standing approval: test credential STRIPE_SECRET, STRIPE_PUBLISHABLE_KEY present in $SRC, class from file:repo)"
+ANN2="(approved $DATE under the standing approval: test credential SUPABASE_SERVICE_ROLE_KEY present in $SRC, class from file:repo)"
+OFF="no test-credential class for this repo (set test_credentials in its [repo.\"owner/name\"] table in ~/.config/thread/rollouts.toml)"
+REFRESH="the rollout's env_bootstrap may not refresh $SRC into the task tree:"
+s10() {  # s10 <name> [origin] — a scenario whose repo is a git clone with that GitHub origin (default Animately/optimizer)
+  scen "$1"
+  ( unset $(git rev-parse --local-env-vars 2>/dev/null)
+    git init -q "$D/repo" && git -C "$D/repo" remote add origin "https://github.com/${2:-Animately/optimizer}" )
+}
+novalue() {  # novalue <text> <label> — no fake value from $SRC appears
+  hasnt "$1" "FAKE" "$2: no prefix-key value printed or written"
+  hasnt "$1" "$JWT" "$2: … nor the service key"
+}
+
+# S10a: the Verify, at the built-in 0 spend limit
+s10 s10a
+mkro "$BOOT"; mkt a gate-pending; gate a "$G1" "$G2"
+HH="$HC" sa a
+ok "$rc" 0 "S10a: p8-1's two credential gates are signed at the built-in 0 limit: exit 0"
+ok "$(section a '## Approved gates')" "- $G1 $ANN1
+- $G2 $ANN2" "S10a: both in ## Approved gates with the credential annotation"
+ok "$(fm a status)|$(fm a gates_signed)" "status: in_progress|gates_signed: 2026-10-14T09:00+00:00" "S10a: it flips to in_progress with gates_signed:"
+has "$out" "a: gate approved under the standing approval: $G1 (test credential STRIPE_SECRET, STRIPE_PUBLISHABLE_KEY present in $SRC, file:repo) [written]" "S10a: the approval line names the keys, the file and the source"
+has "$out" "a: every gate signed under the standing approval -> status in_progress" "S10a: … and the route"
+hasnt "$out" "ASK:" "S10a: nothing asks"
+novalue "$out$(cat "$D/a.md" "$D/ro.md")" "S10a"
+hasnt "$(cat "$D/ro.md")" 'signed under the standing approval: US$' "S10a: no month line is logged for a credential"
+ok "$(section ro '## Needs-you log')" "" "S10a: no Needs-you log line"
+ok "$(events | tail -1 | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["kind"], d["task"], d["standing"], d["gates"])')" "gate-signed a True 2" "S10a: the event is gate-signed, standing, 2 gates"
+sa a
+ok "$rc|$(echo "$out" | grep -c '\[no-change\]')" "0|1" "S10a: a re-run on the signed note is [no-change]"
+
+# S10b: a live Stripe gate asks at the deny word; a live key under the test gate asks at the proof
+s10 s10b
+G1L="credential: Stripe live keys STRIPE_SECRET (sk_live_) and STRIPE_PUBLISHABLE_KEY (pk_live_) in the task tree's .env.local"
+mkro "$BOOT"; mkt a gate-pending; gate a "$G1L"
+before=$(cat "$D/a.md" "$D/ro.md")
+HH="$HC" sa a
+ok "$rc|$(cat "$D/a.md" "$D/ro.md")" "3|$before" "S10b: the sk_live_ gate asks (exit 3), nothing written"
+has "$out" "ASK: a: $G1L: deny word: live" "S10b: … at its deny word"
+printf '%s\n' 'STRIPE_SECRET=sk_live_FAKE51livevalue' 'STRIPE_PUBLISHABLE_KEY=pk_test_FAKE51publishable' "SUPABASE_SERVICE_ROLE_KEY=$JWT" > "$SRC"
+mkt b gate-pending; gate b "$G1"
+before=$(cat "$D/b.md")
+HH="$HC" sa b
+ok "$rc|$(cat "$D/b.md")" "3|$before" "S10b: the test gate with an sk_live_ value in the file asks, nothing written"
+has "$out" "ASK: b: $G1: STRIPE_SECRET in $SRC does not start with sk_test_" "S10b: … the proof names the key, the file and the prefix"
+novalue "$out" "S10b"
+srcok
+
+# S10c: the production Supabase project asks at its deny word; a wrong or unprovable service key asks at the proof
+s10 s10c
+G2P="credential: production Supabase SUPABASE_SERVICE_ROLE_KEY (project abcdefghijklmnopqrst) in the task tree's .env.local"
+mkro "$BOOT"; mkt a gate-pending; gate a "$G2P"
+before=$(cat "$D/a.md")
+HH="$HC" sa a
+ok "$rc|$(cat "$D/a.md")" "3|$before" "S10c: the production project asks (exit 3), nothing written"
+has "$out" "ASK: a: $G2P: deny word: production" "S10c: … at its deny word"
+mkt b gate-pending; gate b "$G2"
+before=$(cat "$D/b.md")
+printf '%s\n' "SUPABASE_SERVICE_ROLE_KEY=$JWT_OTHER" > "$SRC"
+HH="$HC" sa b
+ok "$rc|$(cat "$D/b.md")" "3|$before" "S10c: a service key for another project asks, nothing written"
+has "$out" "ASK: b: $G2: SUPABASE_SERVICE_ROLE_KEY in $SRC is not a key for Supabase project geyyptxqiovujgbiecsp" "S10c: … naming the declared project"
+printf '%s\n' 'SUPABASE_SERVICE_ROLE_KEY=sb_secret_FAKE51newformat' > "$SRC"
+HH="$HC" sa b
+ok "$rc|$(cat "$D/b.md")" "3|$before" "S10c: a new-format sb_secret_ key asks, nothing written"
+has "$out" "ASK: b: $G2: SUPABASE_SERVICE_ROLE_KEY in $SRC is not a legacy JWT service key, so its project cannot be proved" "S10c: … its project cannot be proved"
+hasnt "$out" "$JWT_OTHER" "S10c: the other project's key is never printed"
+novalue "$out" "S10c"
+srcok
+
+# S10d: p8-1's real failure: approved but absent. The file holds none of the three keys, so each gate asks at the stop,
+# naming every missing key; once the keys are added to the source a re-run signs both (the remedy)
+s10 s10d
+mkro "$BOOT"; mkt a gate-pending; gate a "$G1" "$G2"
+printf '%s\n' 'ENVIRONMENT=staging' 'SUPABASE_URL=https://geyyptxqiovujgbiecsp.supabase.co' 'SUPABASE_ANON_KEY=anon-FAKE' > "$SRC"
+before=$(cat "$D/a.md" "$D/ro.md")
+HH="$HC" sa a
+ok "$rc" 3 "S10d: keys absent from the file: exit 3"
+has "$out" "ASK: a: $G1: STRIPE_SECRET is not set in $SRC; STRIPE_PUBLISHABLE_KEY is not set in $SRC" "S10d: the Stripe gate names both missing keys"
+has "$out" "ASK: a: $G2: SUPABASE_SERVICE_ROLE_KEY is not set in $SRC" "S10d: the Supabase gate names its missing key"
+ok "$(cat "$D/a.md" "$D/ro.md")" "$before" "S10d: the notes are byte-identical"
+srcok
+HH="$HC" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S10d: the keys added to the source, a re-run signs both"
+
+# S10e: the bootstrap must refresh the file with a plain cp; no class asks; a refused class form exits 1
+s10 s10e
+mkt a gate-pending; gate a "$G1"
+e10() {  # e10 <frontmatter line|-> <label> <expected why> — the ASK for $G1 under that rollout frontmatter, nothing written
+  if [ "$1" = "-" ]; then mkro; else mkro "$1"; fi
+  local b; b=$(cat "$D/a.md")
+  HH="${HH10:-$HC}" sa a
+  ok "$rc|$(cat "$D/a.md")" "3|$b" "S10e: $2: exit 3, nothing written"
+  has "$out" "ASK: a: $G1: $3" "S10e: $2: the ASK says why"
+}
+e10 - "no env_bootstrap" "the rollout's env_bootstrap does not provide $SRC"
+e10 "env_bootstrap: yarn install && cp $TMP/s10/other.env.local .env.local" "a bootstrap that copies another file" "the rollout's env_bootstrap does not provide $SRC"
+e10 "env_bootstrap: '[ -f .env.local ] || cp $SRC .env.local'" "a copy guarded by a test" "$REFRESH its copy runs only after a test"
+e10 "env_bootstrap: cp -n $SRC .env.local" "cp -n" "$REFRESH its cp skips an existing copy (-n, -u or -i)"
+e10 "env_bootstrap: cp .env.local $SRC" "a reversed copy" "$REFRESH its cp writes the file instead of reading it"
+e10 "env_bootstrap: ln -s $SRC .env.local" "a symlink" "$REFRESH it names the file outside a plain cp"
+e10 "env_bootstrap: \"cp \\\"$SRC\\\" .env.local\"" "a value the frontmatter reader refuses" "env_bootstrap: "
+HOTHER="$TMP/home-class-other"; mkdir -p "$HOTHER/.config/thread"
+printf 'schema = 3\n\n[repo."o/other"]\n%s\n' "$CLASS" > "$HOTHER/.config/thread/rollouts.toml"
+HH10="$HOTHER" e10 "$BOOT" "a class for another repo only" "$OFF"
+HH10="$H50" e10 "$BOOT" "no repo table" "$OFF"
+HSUB="$TMP/home-class-subtable"; mkdir -p "$HSUB/.config/thread"
+printf 'schema = 3\n\n[repo."Animately/optimizer".test_credentials]\nfile = "%s"\nkeys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }]\n' "$SRC" > "$HSUB/.config/thread/rollouts.toml"
+mkro "$BOOT"
+before=$(cat "$D/a.md")
+HH="$HSUB" sa a
+ok "$rc|$(cat "$D/a.md")" "1|$before" "S10e: a refused class form (the sub-table) exits 1, nothing written"
+has "$out" "ERROR: a: rollout settings refused: " "S10e: … the ERROR names the refusal"
+has "$out" "test_credentials must be one line in that table" "S10e: … and its remedy"
+# A gate no class could ever sign asks at the reading's class-independent steps and never resolves the class (ADR 0063
+# d2): under the same refused file S3's deny-word gate asks (exit 3), and beside it a task stamp still signs its spend.
+mkt c gate-pending; gate c "$CRED"
+before=$(cat "$D/c.md")
+HH="$HSUB" sa c
+ok "$rc|$(cat "$D/c.md")" "3|$before" "S10e: a deny-word gate under the refused class form asks (exit 3), nothing written"
+has "$out" "ASK: c: $CRED: deny word: API key" "S10e: … at its deny word"
+hasnt "$out" "rollout settings refused" "S10e: … and never resolves the class"
+mkt d gate-pending 'spend_approval_usd: 50'; gate d "$CRED" "$PROBE"
+HH="$HSUB" sa d
+ok "$rc" 3 "S10e: a task stamp under the refused class form: the spend gate signs, the deny-word gate asks (exit 3)"
+ok "$(section d '## Approved gates')" "- $PROBE (approved $DATE under the standing approval: total exposure US\$9, limit US\$50 from task)" "S10e: … the probe signed from the task stamp"
+ok "$(section d '## Gated inputs (awaiting sign-off)')" "- $CRED" "S10e: … the credential still pending"
+has "$out" "ASK: d: $CRED: deny word: API key" "S10e: … at its deny word"
+
+# S10f: beside a spend gate (HCS: limit 200): one save signs both, and only the spend gate logs a Needs-you line; an
+# irreversible gate still asks
+s10 s10f
+mkro "$BOOT"; mkt a gate-pending; gate a "$PROBE" "$G1"
+HH="$HCS" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S10f: the probe and the Stripe gate are both signed: exit 0, in_progress"
+ok "$(section a '## Approved gates')" "- $PROBE (approved $DATE under the standing approval: total exposure US\$9, limit US\$200 from file:defaults)
+- $G1 $ANN1" "S10f: each with its own annotation"
+ok "$(section ro '## Needs-you log')" "$(logl a 9 9 "$PROBE")" "S10f: one Needs-you log line, the spend gate's"
+has "$out" "a: gate approved under the standing approval: $PROBE (exposure US\$9 of US\$200, file:defaults)" "S10f: the spend line is unchanged"
+ok "$(events | tail -1 | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["kind"], d["standing"], d["gates"])')" "gate-signed True 2" "S10f: one gate-signed event for both"
+IRR='irreversible: wipe the staging bucket once the test passes'
+mkt b gate-pending; gate b "$IRR"
+before=$(cat "$D/b.md")
+HH="$HCS" sa b
+ok "$rc|$(cat "$D/b.md")" "3|$before" "S10f: an irreversible gate still asks, nothing written"
+has "$out" "ASK: b: $IRR: not a spend gate" "S10f: … not a spend gate"
+
+# S10g: a bounced note asks, unchanged; --dry-run writes nothing
+s10 s10g
+mkro "$BOOT"; mkt a gate-pending; gate a "$G1" "$G2"
+printf '\n%s\n\nbounced by the plan judge (ADR 0038): it still read these gates as unpriceable after one bounce\n' "$BOUNCE_H" >> "$D/a.md"
+before=$(cat "$D/a.md")
+HH="$HC" sa a
+ok "$rc|$(cat "$D/a.md")" "3|$before" "S10g: a bounced note's credential gates ask (exit 3), nothing written"
+has "$out" "ASK: a: $G1: the plan judge bounced this plan (ADR 0038; its feedback is under $BOUNCE_H), so the standing approval signs none of its gates; the pricer reads: not a spend gate" "S10g: … with the bounce why, unchanged"
+mkt b gate-pending; gate b "$G1" "$G2"
+before=$(cat "$D/b.md" "$D/ro.md"); ev=$(events | wc -l | tr -d ' ')
+HH="$HC" sa b --dry-run
+ok "$rc|$(cat "$D/b.md" "$D/ro.md")" "0|$before" "S10g: --dry-run exits 0 and writes nothing"
+has "$out" "b: gate approved under the standing approval: $G1 (test credential STRIPE_SECRET, STRIPE_PUBLISHABLE_KEY present in $SRC, file:repo) (dry-run)" "S10g: … and says so"
+
+# S10h: a Leg: a serial note has no Project root, so no class resolves and the gate asks
+s10 s10h
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\n%s\n---\n\n## Queue\n\n- [[a]]\n' "$BOOT" > "$D/ro.md"
+mkt a gate-pending; gate a "$G1"
+before=$(cat "$D/a.md")
+HH="$HC" sa a
+ok "$rc|$(cat "$D/a.md")" "3|$before" "S10h: on a serial note the credential asks (exit 3), nothing written"
+has "$out" "ASK: a: $G1: $OFF" "S10h: … no class (a Leg never signs one)"
+
+# S10i: the class is its own switch: a bad spend stamp errors only a slug that resolves the limit
+s10 s10i
+ORDER=$'- [[h]]\n- [[i]]' mkro "$BOOT"
+mkt h gate-pending 'spend_approval_usd: fifty'; gate h "$G1" "$G2"
+HH="$HC" sa h
+ok "$rc|$(fm h status)" "0|status: in_progress" "S10i: a bad spend stamp beside credential gates alone: both signed, exit 0"
+mkt i gate-pending 'spend_approval_usd: fifty'; gate i "$PROBE" "$G1"
+before=$(cat "$D/i.md")
+HH="$HC" sa i
+ok "$rc|$(cat "$D/i.md")" "1|$before" "S10i: beside a spend gate the same stamp exits 1, the note byte-identical"
+has "$out" "spend_approval_usd on [[i]] must be an integer >= 0" "S10i: … naming the stamp"
 
 # ── G1-G4: gate-pricer, the plan judge's pricer path for one call (ADR 0038) ─────────────────────────
 GI="$(cd "$HERE/../../_shared/scripts" && pwd -P)/gated_inputs.py"

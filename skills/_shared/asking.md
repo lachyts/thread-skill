@@ -19,6 +19,7 @@ Label each question before it is asked:
 - The steering exception (Chorus ADR 0110 d3): a detail he has said he steers is *yours*, whatever its kind.
 - A gated input (ADR 0008) is never a *gate*: a credential, an irreversible step or a sign-off is *yours*.
 - Spend under the standing approval is never asked (Chorus ADR 0108 d4): a fork about spend alone is *priorities*.
+- A credential in its repo's declared test-credential class is never asked ahead (ADR 0063): the standing approval signs it at the stop, or asks then.
 - A review STOP or a design gap is never his by default: it goes to the agent that can resolve it.
 - An open `fork for Lachy` stays *yours* until he rules on it.
 - The rollout clone (schedule § 0) is a *technical* call that ADR 0042 keeps a question until p30-10 decides it: until

@@ -43,7 +43,7 @@ and schedule step 8 report it as a caveat); 2 on a usage error or a refusal (one
 nothing written): an unknown verb or flag, a scan, rank or plan that is not JSON or whose `schema` is not 1, a
 negative budget, a bad --status or --wrote, an --open naming no pick entry, an existing slice file, every record
 refusal, an empty decided-for-you --tasks, a grade line whose field
-run_record refuses (a task whose name is no slug is skipped, never refused), and preflight's own refusals (an empty
+run_record refuses (a task whose name has no key is skipped, never refused), and preflight's own refusals (an empty
 --tasks; a --kept, --decided or --dep slug outside --tasks; a --dep not given as A=B); 3 when the vault, PyYAML or a
 sibling script is missing.
 
@@ -67,7 +67,8 @@ reconcile-rollout.py (RR: Note, GATE_PENDING_SECTION, GATE_BOUNCE_SECTION,
 PROJECT_ROOT_RE, _shape and _start_unattended, the start stamp's reader; _dep_status and _fold_unit, the dependency
 rule a rollout row waits on); and, for `sessions` only, leg.py (LEG:
 split_cells, LAUNCH_RE, LINK_RE and QUEUE, the serial Queue's row grammar); and, for `log` only, run_record.py (RRec:
-check, emit, events_dir, normalise_slug, GRADE_LOG and RESERVED: the Grade log's one writer is run_record itself).
+check, emit, events_dir, normalise_slug, title_key, GRADE_LOG and RESERVED: the Grade log's one writer is run_record
+itself).
 
 slices --scan F --dir D [--tasks SLUG[,SLUG]]... [--superseding PRIOR]: one file per home project with gradeable tasks
 (ER's rule: statusClass active, not in flight, a live first project), `D/<NN>-<kebab name>.json`, NN from 01 in the
@@ -243,20 +244,24 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL
 log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md **Grade log**), at
   orient-all § 2 step 7 (never on a dry run) and at schedule § 1.5 on every run that grades (all but an orient-all
   fork, whose estate pass logged them). One run_record `grade` line per rank tasks[] entry, Orient included, in rank order:
-  task its slug (run_record's normalise_slug), project its home, grade, agentGrade, shape and size; decisions the
+  task its key (grade_key below), project its home, grade, agentGrade, shape and size; decisions the
   count of its decisions[], his decisions only (owner yours, ADR 0054: a decision ruled for him, in decidedForYou[], is
   never counted, so lines before ADR 0054 are not comparable), and low those whose confidence is low; held true when its blockedBy[] is non-empty; gates
   its gates[]; raised the `why` of each raised[] step, when there is one; rank when it is not null; linked the scan
   row's `rollout`, through run_record's normalise_slug, when it is a slug and not a reserved name. The pass shares one
   minted id, g-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>, and one ts, and its digest is the first 12 hex of sha1 over the rank
   file's realpath, the rank's `today` and the sorted (slug, grade, agentGrade, shape, size) tuples: orient-all's $S is
-  a fresh mktemp per pass, so two passes never share a digest, and a rerun of one pass keeps it. A task whose slug
-  normalise_slug refuses (estate-scan's slug is the raw file stem, so a vault note named with spaces or capitals) is
-  skipped: one `estate-dispatch: skipped <slug>: <why>` stderr line each, and the rest are still logged. Every other
-  line passes run_record's check before any is written. A (digest, task) already in grades.jsonl is skipped: with
-  every task there it prints `exists <pass> (<n> grade(s))`; with some, it writes the rest under that pass's id and
-  ts, printing `completed <pass>: <k> more`, so a pass whose write stopped part-way is completed by a rerun; else
-  `logged <n> grade(s), pass <id>`. Any of the three ends `; <k> skipped (not a slug): <slug>, ...` when a task was
+  a fresh mktemp per pass, so two passes never share a digest, and a rerun of one pass keeps it. The key (p34-6): a
+  slug is normalise_slug's; estate-scan's slug is the raw file stem, so a titled vault note (spaces, capitals, an em
+  dash: a quick capture's) is keyed by run_record's title_key and its line carries the exact name as `note`, which
+  grades.py looks the note up by. A slug-named task holds its key first, whatever the rank order, and a titled name
+  holds its key next, in rank order, so a titled name whose key another graded task of the pass holds, or a name with
+  no ASCII letter or digit, has no key and is skipped: one `estate-dispatch: skipped <slug>: <why>` stderr line each,
+  and the rest are still logged. Every other line passes run_record's check before any is written. A (digest, task)
+  already in grades.jsonl is skipped: with every task there it prints `exists <pass> (<n> grade(s))`; with some, it
+  writes the rest under that pass's id and ts, printing `completed <pass>: <k> more`, so a pass whose write stopped
+  part-way is completed by a rerun; else
+  `logged <n> grade(s), pass <id>`. Any of the three ends `; <k> skipped (no key): <slug>, ...` when a task was
   skipped (orient-all § 8 reports it as a caveat). --dry-run prints each line (`would log grade <task>: <fields>`) and
   that outcome after `dry run, nothing written: `, and writes nothing. A torn grades.jsonl line is skipped, and a log
   that cannot be read counts as empty.
@@ -2074,6 +2079,15 @@ def grade_fields(RRec, t, row, pass_id, digest):
     return f
 
 
+def grade_key(RRec, name):
+    """(task, note): a rank task's Grade-log key. Its slug and no note (run_record's normalise_slug), else, for a titled
+    vault note, title_key's key and the exact name kept as the line's note (p34-6). Refused when the name has no key."""
+    try:
+        return RRec.normalise_slug(name, "task"), None
+    except RRec.Refused:
+        return RRec.title_key(name), name
+
+
 def logged(RRec):
     """{digest: {task: (pass, ts)}} of the grade lines already in grades.jsonl; a torn line is skipped, and a log that
     cannot be read (or an events dir that cannot be resolved) reads as empty."""
@@ -2114,16 +2128,30 @@ def cmd_log(args):
     ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (now.microsecond // 1000)
     if have:  # complete the pass already begun: its id and ts
         pass_id, ts = sorted(have.values(), key=lambda x: (str(x[1]), str(x[0])))[0]
-    lines, skipped, kept = [], [], 0
+    keyed = []
     for t in tasks:
-        try:  # a vault note named with spaces or capitals has no slug the Run record can key: skipped, never a refusal
-            task = RRec.normalise_slug(t["slug"], "task")
+        try:
+            keyed.append((t,) + grade_key(RRec, t["slug"]) + (None,))
         except RRec.Refused as e:
+            keyed.append((t, None, None, str(e)))
+    # A slug-named task holds its key first; a titled name whose key is already held is skipped, so two notes never
+    # share one task's episodes.
+    held = {task for _t, task, note, why in keyed if why is None and note is None}
+    lines, skipped, kept = [], [], 0
+    for t, task, note, why in keyed:
+        if why is None and note is not None:
+            if task in held:
+                why = "its key %r is another graded task's" % task
+            else:
+                held.add(task)
+        if why is not None:  # a name with no key of its own: skipped and named, never a refusal
             skipped.append(t["slug"])
-            sys.stderr.write("estate-dispatch: skipped %s: %s\n" % (t["slug"], e))
+            sys.stderr.write("estate-dispatch: skipped %s: %s\n" % (t["slug"], why))
             continue
         kept += 1
         fields = grade_fields(RRec, t, rows.get(t["slug"].lower()), pass_id, digest)
+        if note is not None:
+            fields["note"] = note
         try:
             RRec.check(None, "grade", task, fields, ts=ts)
         except RRec.Refused as e:
@@ -2137,7 +2165,7 @@ def cmd_log(args):
     else:
         outcome = "logged %d grade(s), pass %s" % (len(lines), pass_id)
     if skipped:
-        outcome += "; %d skipped (not a slug): %s" % (len(skipped), ", ".join(skipped))
+        outcome += "; %d skipped (no key): %s" % (len(skipped), ", ".join(skipped))
     if args.dry_run:
         for task, fields in lines:
             print("would log grade %s: %s" % (task, json.dumps(fields, ensure_ascii=False, sort_keys=True)))

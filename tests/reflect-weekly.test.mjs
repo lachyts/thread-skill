@@ -706,21 +706,24 @@ test('span: freshReview reports each landing: rounds, findings and blocking per 
   ])
   const s = span(h)
   const at = (ts) => new Date(ts).toISOString()
+  // regression is null where no line carries one (unknown, never 0); gradedRounds are the code rounds carrying both
+  // blocking and findings, the ones blockingRate reads
   assert.deepEqual(s.freshReview, [
-    { repo: 'o/r', branch: 'feat/a', rounds: 2, codeRounds: 1, findings: [10], blocking: [1], filed: 12, recurring: 2,
-      reversal: 1, open: 1, regression: 2, lines: 420, files: 10, first: at(W(4, '01:00')), last: at(W(4, '02:00')),
-      blockingRate: 0.1 },
-    { repo: 'o/r', branch: null, rounds: 1, codeRounds: 1, findings: [6], blocking: [null], filed: null, recurring: null,
-      reversal: null, open: null, regression: 2, lines: null, files: null, first: at(W(5, '00:00')), last: at(W(5, '00:00')),
-      blockingRate: null },
-    { repo: 'o/r', branch: 'feat/b', rounds: 1, codeRounds: 1, findings: [4], blocking: [0], filed: 4, recurring: null,
-      reversal: null, open: 0, regression: 0, lines: 30, files: 2, first: at(W(6, '09:00')), last: at(W(6, '09:00')),
-      blockingRate: 0 },
-    { repo: 'o/other', branch: 'feat/a', rounds: 1, codeRounds: 1, findings: [2], blocking: [null], filed: null, recurring: null,
-      reversal: null, open: null, regression: 0, lines: null, files: null, first: at(W(7, '00:00')), last: at(W(7, '00:00')),
-      blockingRate: null },
+    { repo: 'o/r', branch: 'feat/a', rounds: 2, codeRounds: 1, gradedRounds: 1, findings: [10], blocking: [1], filed: 12,
+      recurring: 2, reversal: 1, rejected: 1, open: 1, regression: 2, lines: 420, files: 10, first: at(W(4, '01:00')),
+      last: at(W(4, '02:00')), blockingRate: 0.1 },
+    { repo: 'o/r', branch: null, rounds: 1, codeRounds: 1, gradedRounds: 0, findings: [6], blocking: [null], filed: null,
+      recurring: null, reversal: null, rejected: null, open: null, regression: 2, lines: null, files: null,
+      first: at(W(5, '00:00')), last: at(W(5, '00:00')), blockingRate: null },
+    { repo: 'o/r', branch: 'feat/b', rounds: 1, codeRounds: 1, gradedRounds: 1, findings: [4], blocking: [0], filed: 4,
+      recurring: null, reversal: null, rejected: null, open: 0, regression: null, lines: 30, files: 2,
+      first: at(W(6, '09:00')), last: at(W(6, '09:00')), blockingRate: 0 },
+    { repo: 'o/other', branch: 'feat/a', rounds: 1, codeRounds: 1, gradedRounds: 0, findings: [2], blocking: [null],
+      filed: null, recurring: null, reversal: null, rejected: null, open: null, regression: null, lines: null, files: null,
+      first: at(W(7, '00:00')), last: at(W(7, '00:00')), blockingRate: null },
   ], JSON.stringify(s.freshReview))
-  assert.ok(s.cannotShow.includes('/fresh-review: 4 landing(s) reported, not traced to a rollout (reviews.jsonl names none)'),
+  // the branch-null group is no landing: three landings, not four
+  assert.ok(s.cannotShow.includes('/fresh-review: 3 landing(s) reported, not traced to a rollout (reviews.jsonl names none)'),
     JSON.stringify(s.cannotShow))
   // The next window holds b1's later line, but its round was reviewed at W(6, '09:00'), in this window: a later line is
   // a disposition, not a later round, so the next window reports nothing.
@@ -744,6 +747,50 @@ test('span: freshReview holds only rounds reviewed in the window, so the default
   assert.deepEqual(s.freshReview.map((e) => [e.branch, e.rounds, e.findings, e.first, e.last]),
     [['master', 1, [6], at(W(5, '00:00')), at(W(5, '00:00'))]], JSON.stringify(s.freshReview))
   for (const e of s.freshReview) assert.ok(e.first >= at(W(3, '00:00')) || e.first >= s.since, `entry starts before the window: ${e.first}`)
+  // m-swept arrived in this window but was reviewed in July: counted in no window, and named here, its arrival week
+  assert.ok(s.cannotShow.includes('/fresh-review: 1 round(s) first recorded in this window but reviewed before it: counted in no window'),
+    JSON.stringify(s.cannotShow))
+})
+
+// p34-5 F11: a doc's consumed line can lack the branch (or reviewedAt) its pending line carried; the round keeps its
+// landing, taking each from the newest line of its doc that carries it.
+test('span: freshReview keeps a round in its landing when its consumed line lacks the branch its pending line carried', (t) => {
+  const h = setup(t)
+  const rr = (ts, doc, fields) => [ts, 'review-round', null, { repo: 'o/r', head: 'abc1234', digest: 'd', doc: `docs/reviews/${doc}.md`, mode: 'code', ...fields }, null]
+  emitAll(h, null, [
+    rr(W(4, '01:00'), 'f1', { branch: 'feat/f', status: 'pending', findings: 3 }),
+    rr(W(4, '02:00'), 'f1', { status: 'consumed', findings: 3, blocking: 1, open: 0, filed: 2 }),
+  ])
+  const at = (ts) => new Date(ts).toISOString()
+  assert.deepEqual(span(h).freshReview.map((e) => [e.branch, e.rounds, e.blocking, e.filed, e.first]),
+    [['feat/f', 1, [1], 2, at(W(4, '01:00'))]])
+})
+
+// p34-5 F16: a loop continued in a worktree is one landing: an absolute path groups by its origin's owner/name.
+test('span: freshReview groups by repo identity, so worktree paths and an owner/name line are one landing', (t) => {
+  const h = setup(t)
+  const [wa, wb] = ['wt-a', 'wt-b'].map((n) => {
+    const p = path.join(h.home, n)
+    fs.mkdirSync(p)
+    git(h, ['init', '-q'], p)
+    git(h, ['remote', 'add', 'origin', 'git@github.com:o/r.git'], p)
+    return p
+  })
+  const rr = (ts, doc, repo) => [ts, 'review-round', null, { repo, head: 'abc1234', digest: 'd', doc: `docs/reviews/${doc}.md`, branch: 'feat/w', mode: 'code', status: 'consumed', findings: 2, blocking: 0, open: 0 }, null]
+  emitAll(h, null, [rr(W(4, '01:00'), 'w1', wa), rr(W(4, '02:00'), 'w2', wb), rr(W(4, '03:00'), 'w3', 'O/R')])
+  const s = span(h)
+  assert.deepEqual(s.freshReview.map((e) => [e.repo, e.branch, e.rounds, e.gradedRounds]), [['o/r', 'feat/w', 3, 3]], JSON.stringify(s.freshReview))
+  assert.ok(s.cannotShow.includes('/fresh-review: 1 landing(s) reported, not traced to a rollout (reviews.jsonl names none)'),
+    JSON.stringify(s.cannotShow))
+})
+
+// p34-5 F28: lines with no branch are reported as their repo's branch-null group, never counted as a landing.
+test('span: freshReview\'s branch-null group is reported but never counted as a landing', (t) => {
+  const h = setup(t)
+  emitAll(h, null, [[W(5, '00:00'), 'review-round', null, { repo: 'o/r', head: 'abc1234', digest: 'd', doc: 'docs/reviews/l.md', mode: 'code', findings: 6 }, null]])
+  const s = span(h)
+  assert.deepEqual(s.freshReview.map((e) => [e.repo, e.branch, e.rounds]), [['o/r', null, 1]])
+  assert.ok(!s.cannotShow.some((c) => /landing\(s\) reported/.test(c)), JSON.stringify(s.cannotShow))
 })
 
 // land.sh's --branch-docs sweep records a landing's unrecorded docs at its end, out of round order and seconds apart:

@@ -61,6 +61,63 @@ test('both manifests carry the same version', () => {
   assert.equal(entry.version, plugin.version)
 })
 
+// The 700-char cap above is the skill listing's, and the manifests are not in that listing, so this
+// check is shape only: a rollout is parallel or serial, and a serial rollout runs as Legs (ADR 0040).
+function shapeMisses(plugin, market) {
+  const misses = []
+  const need = (label, text, terms) => {
+    for (const [name, re] of terms) if (!re.test(text ?? '')) misses.push(`${label} lacks ${name}`)
+  }
+  const PARALLEL = ['parallel', /\bparallel\b/i]
+  const SERIAL = ['serial', /\bserial\b/i]
+  const LEGS = ['Legs', /\bLegs\b/]
+  need('plugin.json description', plugin.description, [PARALLEL, SERIAL, LEGS])
+  need('marketplace.json description', market.description, [PARALLEL, SERIAL])
+  const entry = market.plugins.find((p) => p.name === plugin.name)
+  need(`marketplace.json plugins entry "${plugin.name}"`, entry?.description, [PARALLEL, SERIAL, LEGS])
+  return misses
+}
+
+test('the manifests name both rollout shapes (ADR 0040)', () => {
+  const plugin = JSON.parse(read('.claude-plugin/plugin.json'))
+  const market = JSON.parse(read('.claude-plugin/marketplace.json'))
+  assert.deepEqual(shapeMisses(plugin, market), [])
+})
+
+// One control per description shapeMisses reads, so each of its three checks is shown to catch a removal.
+const SHAPE_CONTROLS = [
+  {
+    name: 'a plugin.json description that drops serial',
+    drop: (plugin, market) => [{ ...plugin, description: plugin.description.replace(/serial/gi, 'queued') }, market],
+    want: ['plugin.json description lacks serial'],
+  },
+  {
+    name: 'a marketplace.json description that drops parallel',
+    drop: (plugin, market) => [plugin, { ...market, description: market.description.replace(/parallel/gi, 'batched') }],
+    want: ['marketplace.json description lacks parallel'],
+  },
+  {
+    name: 'a marketplace.json plugins entry that drops Legs',
+    drop: (plugin, market) => [
+      plugin,
+      {
+        ...market,
+        plugins: market.plugins.map((p) =>
+          p.name === plugin.name ? { ...p, description: p.description.replace(/\bLegs\b/g, 'steps') } : p),
+      },
+    ],
+    want: ['marketplace.json plugins entry "thread" lacks Legs'],
+  },
+]
+
+for (const { name, drop, want } of SHAPE_CONTROLS) {
+  test(`control: ${name} fails the shapes check`, () => {
+    const plugin = JSON.parse(read('.claude-plugin/plugin.json'))
+    const market = JSON.parse(read('.claude-plugin/marketplace.json'))
+    assert.deepEqual(shapeMisses(...drop(plugin, market)), want)
+  })
+}
+
 test('every skill directory has a SKILL.md whose name is the directory', () => {
   assert.ok(skills.length > 0, 'found no skills')
   for (const { dir, fm } of skills) assert.equal(fm.name, dir, `skills/${dir}: name "${fm.name}"`)

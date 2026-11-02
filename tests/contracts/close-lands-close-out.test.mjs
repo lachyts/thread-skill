@@ -25,7 +25,10 @@ const BANNER_C = '**Thread closed. Safe to end this session, but work is NOT que
 const BANNER_D = '**Thread closed. Safe to end this session, but the review loop stopped on <branch>[, <branch>…]: its PR stays open with the diagnosis, see its landing row.**'
 
 test('description and Auto-execute name the landing; Auto-execute keeps step 7.1', () => {
-  assertHas(lineOf(text(), 'description:'), 'the description', ['lands its own close-out commits', '`landing` PR', 'auto-merge', 'never waiting', 'ADR 0028'])
+  // p34-5 F25: the parenthesis shrank to "(pushed, or a queued `landing` PR; ADR 0028)" to fit the follow-up-task
+  // clause under the description cap; "Landing does not wait" stays in the body's Rules
+  assertHas(lineOf(text(), 'description:'), 'the description', ['lands its own close-out commits', 'a queued `landing` PR', 'ADR 0028'])
+  assertHas(text(), 'close', ['Landing does not wait.'])
   const auto = lineOf(text(), '- **Auto-execute, no asking**')
   assertHas(auto, 'the Auto-execute line', ['**Land the close-outs**', 'ADR 0028', 'step 7.1'])
 })

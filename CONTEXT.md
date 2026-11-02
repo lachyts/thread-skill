@@ -292,9 +292,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Blocking finding** — a review finding whose failure scenario is a crash,
   hang or wrong result on a path the branch ships for normal use, data loss or
   a security hole on any path it ships, or the named test failing. Only a blocking finding
-  holds an own-branch landing; the rest are filed in its follow-up task, and
-  a clean round is one with none, unless it returned exactly its cap, which
-  earns one more code round first (ADR 0058). The session grades it, never
+  holds an own-branch landing; the rest are filed in its follow-up task or
+  rejected with a reason (a recurring one adds nothing), and a clean round is
+  one with none, unless it returned its cap or more, which earns one more code
+  round first (ADR 0058). The session grades it, never
   the reviewer. _Avoid_: accepted finding, must-fix, high (the reviewer
   grades no severity).
 - **Close-out PR** — the pull request carrying close's own bookkeeping
@@ -711,6 +712,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   reviser, an integrator) uses the repo's own test runner. It takes no verify
   slot of its own and never counts as an iteration. _Avoid_: retry, targeted
   run.
+- **Verify base** — the `--diff-base` commit that `lead-integrate.py verify`
+  exports to every step it runs (the env bootstrap, the verifier, the named
+  re-run and the confirming run) as `THREAD_VERIFY_BASE`, resolved to its
+  sha: `<mainSha>` at Integration and the merge commit's first parent at a
+  RACE re-verify; it is never set at completion. A project whose verifier is
+  a fast tier with a reach reads it as its base, so the reach is the task's
+  diff even after merge-task refreshed `origin/<default>` (ADR 0062).
+  _Avoid_: reach base, origin/main.
 - **Completion verifier** — a rollout note's optional `completion_verifier:`,
   the full suite of a project whose `verifier:` is its declared fast tier
   (estate ADR 0009 d6): the completion ceremony runs it once on merged main,
@@ -963,10 +972,23 @@ through time, from attention to merged PRs. Terms only — no implementation.
   amount the gate names; a shape it cannot price asks. Such a gate passes
   without him (`approve-gates --standing`, run by the lead) and is recorded
   in `## Approved gates` with `(approved <date> under the standing approval:
-  total exposure …)`, the task's ceiling, never a target; credential and
-  irreversible gates never pass under it (ADR 0034), nor does any gate on a
-  plan the plan judge bounced (ADR 0038).
+  total exposure …)`, the task's ceiling, never a target; irreversible gates
+  never pass under it (ADR 0034), and a credential gate only as a declared
+  Test credential (ADR 0063), nor does any gate on a plan the plan judge
+  bounced (ADR 0038).
   _Avoid_: spend envelope, auto-approve limit.
+- **Test credential** — a test-mode, staging or sandbox key a repo declares in
+  its test-credential class: the Rollout settings key `test_credentials`, one
+  line in its `[repo."owner/name"]` table of `~/.config/thread/rollouts.toml`
+  (schema 3), naming a file and each key's name with its prefix (`sk_test_`)
+  or Supabase project. A credential Gated input that names only such keys,
+  with a test-mode word and no live, production or secret word, signs itself
+  under the Standing approval once each key is proved present in that file
+  and the rollout's `env_bootstrap` copies the file with a plain `cp`
+  (ADR 0063); a key missing from it is asked at the stop. The class is its
+  own switch, at any spend limit, and only Lachy writes it. Schedule and
+  orient record such a credential, never ask it ahead; a Leg never signs one.
+  _Avoid_: safe key, dev key.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no
   PR), with its detail: `lead-integrate.py inputs`' `humanFix` ({act, detail,

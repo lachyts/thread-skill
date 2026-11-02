@@ -88,6 +88,28 @@ pass it with that gate. Spend is never asked ahead of a run.
 `skills/_shared/scripts/gated_inputs.py` holds the exposure reading it applies
 and schedule's gated-input sweep.
 
+A credential gate for a repo's test-mode or staging keys signs itself too, once
+the repo declares them (ADR 0063). Write the class as ONE line in the repo's
+table, with `schema = 3` at the top of the file:
+
+```toml
+[repo."Animately/optimizer"]
+test_credentials = { file = "~/repos/animately/optimizer/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }
+```
+
+Write it only after installing a release that knows the key: an older snapshot
+(schema 2) ignores it, and a pre-P29 reader refuses any `schema` line. After the
+edit, run `python3 skills/_shared/scripts/rollout-settings.py --repo <clone>` to
+check it reads. Any other form (a `[repo."o/r".test_credentials]` sub-table, a
+dotted key, a value over several lines) refuses the whole file, which halts every
+schema-3 rollout at its next entry. The rollout's `env_bootstrap` must copy that
+file into the task tree with a plain `cp` (no `[ -f … ] ||`, no `-n`, no quoted
+`~` or single-quoted `$HOME`, which the shell never expands), so a key you add
+later reaches the next build. The gate is signed only when each key it
+names is in the file with its declared prefix or project; a missing key reaches
+you at the stop, by name. The class is its own switch, independent of
+`spend_approval_usd`: it signs at the built-in 0 too.
+
 A needs-you push that does not reach you (any "not sent" but you at the
 terminal, such as Remote Control inactive or notifications turned off, a
 push-tool error, or no push tool at all, as in Codex) falls back to ntfy once
@@ -194,10 +216,12 @@ daily sweep as its fallback, when the weekly reading is due: the Thursday after
 the last one, or the Thursday after that once three Reflections in a row were
 quiet (ADR 0037 d4, d6; ADR 0051). The Grade log (`grades.jsonl` beside the
 Run record, ADR 0041) has one writer, `estate-dispatch.py log`, which keeps each
-estate pass's grades (a task whose note name is no slug, with spaces or
-capitals, is skipped and reported in its outcome line, and the rest are still
-logged), and one reader, `skills/reflect/scripts/grades.py`, which the weekly
-reading loads to join each grade to what followed it.
+estate pass's grades (a titled note, with spaces or capitals, is keyed by its
+name made a slug and keeps its exact name beside it; only a name with no key,
+with no ASCII letter or digit or with a key another graded task holds, is
+skipped and reported in its outcome line), and one reader,
+`skills/reflect/scripts/grades.py`, which the weekly reading loads to join each
+grade to what followed it.
 
 ## Design
 
@@ -257,6 +281,45 @@ reading loads to join each grade to what followed it.
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
+## Upgrading to 5.0.0
+
+5.0.0 breaks anyone running rollouts:
+
+- **Orient's batches retire for the three-way execution-fit test (ADR 0040).**
+  Parallel-shaped work rolls out as a parallel rollout, serial-shaped work an
+  agent can still finish unattended as a serial rollout that runs as Legs, and
+  work that needs Lachy present or waits on a date as scoped sessions. Orient
+  spawns no child agents (orient § 8): under Autonomous or Mixed steering it
+  schedules serial-shaped work as `shape: serial` rollout notes (orient § 7)
+  and makes no execute handoff for them (orient § 9), so start each note's
+  Leg 1 by hand. `/thread:orient <target> --debrief` now only prints a
+  retirement line and stops (orient § 10): drop `--debrief` from any saved
+  prompt or macro. `dispatched:` stamps already in task notes are inert
+  history.
+- **Every parallel rollout runs from its rollout clone (#188, ADR 0042).**
+  Schedule § 0 resolves every repo to `<toplevel>-rollout`, a second full
+  clone beside its toplevel, and makes it on the first rollout after Lachy's
+  yes (`self-rollout-check.sh --ensure`), so peer sessions committing in the
+  in-place checkout never trip a rollout's windows. The lead launches in the
+  clone (execute § 2.8), merge-task fast-forwards the in-place checkout after
+  each merge, and a clone's THREAD.md copy is never a thread. A rollout
+  scheduled before then keeps its root; `--regenerate` re-roots it.
+- **The engine refuses a call without `args.verifySlot` (estate ADR 0009 d4).**
+  The lead copies it verbatim from the `verifySlot` object (`script` and
+  `slots`) that `verify-timeout` prints at each loop entry (execute § 3), so
+  every agent's verifier waits for a machine-wide verify slot. A Workflow call
+  launched before 5.0.0 carries no `verifySlot`: resuming it on the 5.0.0
+  engine is an *Args refusal*, and the task takes a fresh call instead
+  (execute's *Can no longer resume*). A running lead keeps the engine it
+  loaded, so restart it after the plugin update. `verify_slots` (built-in 2)
+  is machine-wide: set it under `[defaults]` only (a `[repo."owner/name"]`
+  table that sets it is refused); it is never stamped, and execute's
+  `verify-timeout` reads it, validating the whole file, at each loop entry. So
+  install first: write a new key only once the installed plugin knows it,
+  because a refused file now halts every rollout on the machine at its next
+  entry, stamped or not. Stamping a key on the rollout note does not clear
+  that halt; only fixing the file at the line its stderr names does.
+
 ## Upgrading to 4.0.0
 
 4.0.0 renames one verb and changes one record:
@@ -294,22 +357,10 @@ reading loads to join each grade to what followed it.
   execute reads the note first, so an edit to the file reaches the next
   scheduled (or `--regenerate`d) rollout, not one already written. A task's
   own frontmatter still overrides `max_iterations`, `max_review_rounds` and
-  `max_plan_rounds`. `verify_slots` (built-in 2) is machine-wide: set it under
-  `[defaults]` only (a `[repo."owner/name"]` table that sets it is refused); it
-  is never stamped, and execute's `verify-timeout` reads it, validating the
-  whole file, at each loop entry. So install first: write a new key only once
-  the installed plugin knows it, because a refused file now halts every
-  rollout on the machine at its next entry, stamped or not. Stamping a key on
-  the rollout note does not clear that halt; only fixing the file at the line
-  its stderr names does.
-- **Every parallel rollout runs from its rollout clone (#108, ADR 0042).**
-  Schedule § 0 resolves every repo to `<toplevel>-rollout`, a second full
-  clone beside its toplevel, and makes it on the first rollout after Lachy's
-  yes (`self-rollout-check.sh --ensure`), so peer sessions committing in the
-  in-place checkout never trip a rollout's windows. The lead launches in the
-  clone (execute § 2.8), merge-task fast-forwards the in-place checkout after
-  each merge, and a clone's THREAD.md copy is never a thread. A rollout
-  scheduled before then keeps its root; `--regenerate` re-roots it.
+  `max_plan_rounds`.
+- **Schedule picks the rollout root (#108).** When the Project root is the
+  live directory-source plugin checkout, schedule uses the separate
+  `<repoPath>-rollout` clone, or refuses with the fix.
 
 ## Install
 
@@ -492,7 +543,9 @@ matches the tree. It also fails on cache files the tree doesn't track (`.DS_Stor
 on the released commit, right after the plugin update. It refuses first while `evals/results/` holds
 `make evals` output: record what you need in `docs/evals/`, then clear it before the plugin update,
 since the `./` source would copy it into the cache. If a copy already reached the cache, the refusal
-names the `evals/results` dir to delete there. A directory-source install (or `--plugin-dir`) runs live from its
+names the `evals/results` dir to delete there. A `make evals` run also leaves its kept sandboxes outside
+the tree (each result's `tracePath`), which neither the refusal nor the cache sees: once the record has
+read them, remove them by their literal paths, as the Makefile's evals note says. A directory-source install (or `--plugin-dir`) runs live from its
 checkout instead, the **primary checkout**, which never moves while a rollout runs on it (ADR 0031).
 
 ## Coexistence with Orca

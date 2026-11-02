@@ -2,6 +2,8 @@
 
 *(Amended by ADR 0034, 2026-10-13: a gate sets its task aside, never the rollout, and a spend gate
 within Lachy's standing approval passes without him.)*
+*(Amended by ADR 0063, 2026-11-01: a credential gate that reads as its repo's declared test credential, present in its
+declared file, passes without him too.)*
 
 Every implementer plan must carry a **Gated inputs** section declaring any human authorisation the
 task will need — API spend with a cap, credentials, or an irreversible action — or an explicit

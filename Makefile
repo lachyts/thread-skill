@@ -63,12 +63,21 @@ release-check:
 #        (docs/evals/2026-10-15-release-3-1.md), but that run changed both together, so the misses are
 #        not explained.
 #      - --no-publish: the HTML report stays local.
+#      - --keep-temp: every run keeps its sandbox, so a record can read each run's trace: the case
+#        model's resolved id and the loaded plugins (its init event), and the run's turns, which explain
+#        a miss. The results hold each judge grader's vote tally (a grader passes a run when at least 2
+#        of its 3 votes are PASS) but no rationale and no judge model id, so no trace confirms the judge's
+#        model. A boolean has no off switch, so it sits with the locks.
+#        docs/evals/2026-10-28-handoff-ends-with-next.md passed it through this recipe on Claude Code
+#        2.1.311 and read sixteen kept sandboxes, each loading thread 5.0.0.
 #   tests/contracts/evals-structure.test.mjs holds the evals recipe to exactly this one line.
 # - Record a scored baseline in docs/evals/ before changing any skill description.
 # - Results land in the git-ignored evals/results/<timestamp>/. Record what you need in docs/evals/, then
 #   clear it before `claude plugin update`: the `./` directory source copies ignored files into the
 #   version cache. `make release-check` refuses while it holds output, and its stray check fails on any
-#   copy that reached the cache.
+#   copy that reached the cache. The kept sandboxes land outside the tree (/private/tmp/e-<id> in the
+#   records so far, each result's `tracePath`), so neither release-check nor the plugin cache sees them:
+#   remove them by their literal paths once the record has read them.
 EVAL_ARGS ?=
 evals:
-	claude plugin eval . --runs 1 --max-cost-usd 30 --threshold 0 $(EVAL_ARGS) --ablation none --model opus --judge-model opus --no-publish
+	claude plugin eval . --runs 1 --max-cost-usd 30 --threshold 0 $(EVAL_ARGS) --ablation none --model opus --judge-model opus --no-publish --keep-temp
