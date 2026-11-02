@@ -30,9 +30,10 @@
 #   (a non-default checkout may need one ls-remote to learn the default when origin/HEAD is unset).
 #   Unprotected default branch → push it (a diverged origin: one rebase in a scratch worktree, then the
 #   branch moves by a two-tree read-tree, which keeps non-overlapping local changes exactly).
-#   The primary checkout (the checkout this plugin runs from, live) never moves while a rollout runs on it
-#   (ADR 0031): S4 skips its fast-forward, and a diverged unprotected origin gets the rebased tip pushed
-#   without moving the branch. A protected landing is unaffected: its PR merges on GitHub.
+#   The primary checkout (the checkout this plugin runs from, live) never moves while a rollout with no
+#   Engine snapshot runs on it (ADR 0031, narrowed by ADR 0043: a snapshotted rollout never runs on it): S4
+#   skips its fast-forward, and a diverged unprotected origin gets the rebased tip pushed without moving the
+#   branch. A protected landing is unaffected: its PR merges on GitHub.
 #   Protected → push HEAD unchanged to close/<cdate>-<slug>-<sha12>, open the PR over REST, label it
 #   `landing`, queue `gh pr merge --auto --merge`, and update-branch once when origin/<d> moved on.
 #   route_class is the local half (swept, then the register), shared by S2 and O2, so a landing, route mode (which
@@ -54,11 +55,12 @@
 # It never commits, never forces, never rebases and never deletes <B>; <B> moves only forward (a fast-forward
 # to origin/<B>, or a merge commit over update-branch's merges, made in a scratch worktree). One call:
 # preflight (the checkout must be on <B>) · route (S2) · <B> is not the default · fetch origin/<d> and
-# origin/<B> (`land: base <sha>`, `land: head <sha>`) · push.default upstream|tracking is stuck · nothing
-# ahead is `landed` · push access · the newest same-repo PR headed <B> (another author's: not landed; closed
-# unmerged: stuck; merged with HEAD in its head: landed) · auto-merge switched off on every call but --queue
-# · --queue only: every commit after --reviewed touches docs/reviews/ alone · push <B> to itself · open and
-# label the `landing` PR · then the action:
+# origin/<B> (`land: base <sha>`, `land: head <sha>`) · --queue and --hold only: record the review rounds
+# (below) · push.default upstream|tracking is stuck · nothing ahead is `landed` · push access · the newest
+# same-repo PR headed <B> (another author's: not landed; closed unmerged: stuck; merged with HEAD in its
+# head: landed) · auto-merge switched off on every call but --queue · --queue only: every commit after
+# --reviewed touches docs/reviews/ alone · push <B> to itself · open and label the `landing` PR · then the
+# action:
 #   plain    point <B>'s upstream at origin/<d> (the review base), print `land: upstream origin/<d> (was …)`
 #            and the tree line, `land: tree dirty: <paths>` or `land: digest <diff6>` (fresh-review's
 #            Step 1 digest, byte for byte); result `pr open <url>`
@@ -74,14 +76,28 @@
 #            merge` with no merge call; green is a direct merge, `landed`.
 # Every own-branch result but usage errors, preflight errors and the plain call's `pr open` ends by pointing
 # <B>'s upstream back at origin/<B> (`land: upstream origin/<B> (was origin/<d>)`), when it is at origin/<d>.
+# The review rounds (ADR 0058 d5): every --queue and --hold that gets past preflight, never a plain call, runs
+# fresh-review's recorder once, from own_finish at the end of the call, whatever its result (a stuck fetch, a
+# deadline, a merge), so each review doc on <B> is recorded in reviews.jsonl: `python3 <rr> --repo <top> --base
+# refs/remotes/origin/<d> --branch-docs` (the full ref, so a local branch named origin/<d> never wins), <rr>
+# being $THREAD_REVIEW_ROUND, else ~/.agents/skills/fresh-review/scripts/review-round.py. It is local work, so
+# it runs outside `bounded` and the deadline, under its own LAND_RECORD_TIMEOUT (seconds, default 60). It is
+# skipped, with a stderr line, when there is nothing to record against: `land: review rounds not recorded (no
+# default branch)`, `(on <d>, the default branch)`, `(no origin/<d>)`, `land: review rounds: none on <B>` (no
+# commit in origin/<d>..HEAD touches docs/reviews/; the recorder's own re-scan of recorded docs is its own),
+# or `(no recorder at <rr>)`. Its stdout and stderr go to land.sh's stderr, then `land: recorded review
+# rounds`, `land: review rounds not all recorded (<its first review-round: warning: line>)` when it exited 0
+# with a warning, or `land: review rounds not recorded (<why>)`: timed out, or recorder exit <rc>. It never
+# changes the result line or exit code.
 # Results: pr open <url> · held <url> · queued <url> · queued: needs merge <url> · ci failed: … · landed ·
 # not landed: <reason> · stuck: <reason>. Exit 0 but stuck (1) and usage (2).
 #
 # Every network call runs under `bounded` (LAND_TIMEOUT seconds each, default 30; LAND_DEADLINE seconds
-# overall, default 450). The body runs in a subshell whose fd 1 is stderr, so no child — a hook that
-# daemonizes, git's own maintenance — can ever hold the caller's stdout; git's auto-gc and
-# auto-maintenance are switched off for every git call here. bash 3.2-compatible (macOS); deliberately no
-# `set -u`/`set -e`: every rc is checked, and every array expansion is guarded.
+# overall, default 450). The review-round recorder runs after them, under LAND_RECORD_TIMEOUT alone: 450 + 60
+# leaves close's 600 s Bash timeout 90 s for the local work. The body runs in a subshell whose fd 1 is
+# stderr, so no child — a hook that daemonizes, git's own maintenance — can ever hold the caller's stdout;
+# git's auto-gc and auto-maintenance are switched off for every git call here. bash 3.2-compatible (macOS);
+# deliberately no `set -u`/`set -e`: every rc is checked, and every array expansion is guarded.
 set -o pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -281,7 +297,9 @@ main() {
   SECONDS=0
   [[ ${LAND_TIMEOUT:-} =~ ^[1-9][0-9]*$ ]] || LAND_TIMEOUT=30
   [[ ${LAND_DEADLINE:-} =~ ^[0-9]+$ ]] || LAND_DEADLINE=450
+  [[ ${LAND_RECORD_TIMEOUT:-} =~ ^[1-9][0-9]*$ ]] || LAND_RECORD_TIMEOUT=60
   LAND_TIMEOUT=$((10#$LAND_TIMEOUT)); LAND_DEADLINE=$((10#$LAND_DEADLINE))
+  LAND_RECORD_TIMEOUT=$((10#$LAND_RECORD_TIMEOUT))
 
   if [ "${1:-}" = --own-branch ]; then shift; own_main "$@"; exit 1; fi
 
@@ -807,9 +825,11 @@ try:
 except Exception:
     sys.exit(2)'
 
-# own_finish <line> <rc>: the one way out once preflight passed. Restores <B>'s upstream first.
+# own_finish <line> <rc>: the one way out once preflight passed. Restores <B>'s upstream first, then a --queue
+# or --hold records its review rounds (own_rounds), whatever the result.
 own_finish() {
   [ -n "$own_restore" ] && restore_upstream
+  [ -n "$act" ] && own_rounds
   result "$1"; exit "$2"
 }
 
@@ -895,6 +915,35 @@ scratch_merge() (
   git -C "$wt" rev-parse HEAD > "$tmpd/merged" || exit 3
   exit 0
 )
+
+# own_rounds: --queue's and --hold's one run of fresh-review's review-round recorder (the header's review rounds),
+# from own_finish. It never reads $od (set only after O3): it works the base out itself. Local work only, so
+# never `bounded`: its own LAND_RECORD_TIMEOUT, outside LAND_DEADLINE. Its outcome is a stderr line only:
+# always returns 0.
+own_rounds() {
+  local rr=${THREAD_REVIEW_ROUND:-$HOME/.agents/skills/fresh-review/scripts/review-round.py} rb rc w
+  [ -n "$d" ] || { echo "land: review rounds not recorded (no default branch)"; return 0; }
+  [ "$B" != "$d" ] || { echo "land: review rounds not recorded (on $d, the default branch)"; return 0; }
+  rb="refs/remotes/origin/$d"
+  git rev-parse -q --verify "$rb^{commit}" >/dev/null || { echo "land: review rounds not recorded (no origin/$d)"; return 0; }
+  # The recorder walks with --full-history; so does this check. A failing rev-list leaves it to the recorder.
+  if w=$(git rev-list -n 1 --full-history "$rb..HEAD" -- docs/reviews/ 2>/dev/null) && [ -z "$w" ]; then
+    echo "land: review rounds: none on $B"; return 0
+  fi
+  if [ ! -f "$rr" ] || [ ! -r "$rr" ]; then
+    echo "land: review rounds not recorded (no recorder at $rr)"; return 0
+  fi
+  perl -e "$LAND_BOUNDED_PL" "$LAND_RECORD_TIMEOUT" python3 "$rr" --repo "$top" --base "$rb" --branch-docs </dev/null 2>"$tmpd/rr.err"; rc=$?
+  cat "$tmpd/rr.err"
+  case $rc in
+    0)
+      w=$(grep -m 1 '^review-round: warning:' "$tmpd/rr.err" | cut -c1-200)
+      if [ -n "$w" ]; then echo "land: review rounds not all recorded ($w)"; else echo "land: recorded review rounds"; fi ;;
+    142) echo "land: review rounds not recorded (timed out)" ;;
+    *) echo "land: review rounds not recorded (recorder exit $rc)" ;;
+  esac
+  return 0
+}
 
 # subjects <rev>…: the first three commit subjects, `; `-joined, with (+N more).
 subjects() {

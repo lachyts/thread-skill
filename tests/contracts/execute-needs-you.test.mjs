@@ -14,7 +14,8 @@
 // loop entry, where that log lives in the rollout note, the turn
 // ending `waiting`, the report's `Needs you:` block, the answers' existing routes, § 3.7's and § 7's sign-off,
 // the § 8 guardrail and the Don't, CONTEXT.md's glossary entry, and no other ask site outside § 6.5, § 8 and the
-// Don'ts but the exact exemptions below.
+// Don'ts but the exact exemptions below. p30-3 adds (f): a PR hold (`next`'s `holdUntil`) that waits on Lachy, an item
+// on every turn whatever the halt, never also (e).
 //
 // A separate file from execute-queue.test.mjs (p12-9's rule count stays its own), the same shape as
 // execute-signed-gate.test.mjs: every rule lives in one function, checkNeedsYou(skill, context), that returns
@@ -113,6 +114,8 @@ function checkNeedsYou(skill, context = realContext) {
   const kindB = kind(items, '- (b) **An undecided RACE or UNVERIFIED**')
   const kindC = kind(items, '- (c) **A set-aside only a person moves on**')
   const kindE = kind(items, '- (e) **Any other § 7 halt**')
+  const kindG = kind(items, '- (g) **An unacked git-env trip**')
+  const kindF = kind(items, '- (f) **A PR hold that waits on Lachy**')
   const s37 = collapse(section(skill, S37) ?? '')
   const s45raw = section(skill, S45) ?? ''
   const s6raw = section(skill, S6) ?? ''
@@ -211,7 +214,7 @@ function checkNeedsYou(skill, context = realContext) {
     !items.includes('`[[<slug>]] UNVERIFIED undecided: decide with /thread:repair [[<rollout>]]`') ||
     !kindC.includes('every `setAside` entry at its run or at Integration whose `lead-integrate.py inputs`') ||
     !kindC.includes('reports a non-null `humanFix`') ||
-    !kindC.includes('A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (e)') ||
+    !kindC.includes('A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (c) too, through its `humanFix` H12 (ADR 0048: no halt).') ||
     !kindC.includes("A null `humanFix` is the lead's own re-entry") ||
     /It includes:|plan-blocked with `max_plan_rounds` spent|blocked at its run with `autoRevise/.test(kindC) ||
     !items.includes('`[[<slug>]] gated: awaiting merge approval for [[<slug>]] (PR #N)`') ||
@@ -278,7 +281,7 @@ function checkNeedsYou(skill, context = realContext) {
   // trip); `_schedule_positions` reads its links but the first link wins; no item carries a log mark.
   if (!log.includes("created on first use at the note's end, below `## Queue`") || !log.includes('appended inside that section') ||
     !['`## Race log`', '`## Notes`', '`## Git-env log`', '`_schedule_positions`', 'first link wins'].every((k) => log.includes(k)) ||
-    !items.includes('ever carries the log marks `git-env trip`, `git-env ack` or `RACE decided:`')) {
+    !items.includes('ever carries the log marks `git-env trip`, `git-env ack`, `lane hold`, `lane ack` or `RACE decided:`')) {
     fails.push('log-placement')
   }
 
@@ -313,10 +316,11 @@ function checkNeedsYou(skill, context = realContext) {
   // a red RACE re-verify's halt is (b), never also (e), so it is one item with one push.
   if (!kindE.includes('`[[<rollout>]] halted (<YYYY-MM-DD>): <reason>: <act>`') ||
     !kindE.includes("never taken from § 7's prose") ||
-    !kindE.includes('`decide with /thread:repair [[<rollout>]]` for a git-env halt') ||
+    !kindE.includes('`decide with /thread:repair [[<rollout>]]` for `git-env canary failed`') ||
+    !kindE.includes("not a git-env trip's halt, which is (g)") ||
     !kindE.includes('`see /thread:status [[<rollout>]], fix it and re-invoke` for every other') ||
     !kindE.includes("the red re-verify's included, which is (b)") || kindE.includes('the command § 7 names') ||
-    !kindB.includes("A red RACE re-verify's halt (`RACE: origin/<default> fails the verifier`, § 7) is this item, never (e)")) {
+    !kindB.includes("A RACE revert that did not land (`next`'s `mainRed`; `RACE: the revert of [[<slug>]] did not land: …`, § 7) is this item, never (e), with `→ main red: the whole rollout is held until you decide`")) {
     fails.push('halt-act')
   }
 
@@ -356,6 +360,35 @@ function checkNeedsYou(skill, context = realContext) {
     !kindC.includes('so *Push once* skips it and logs nothing') ||
     !push.includes('- **A `left` answer** ((c)): never pushed and never logged, whatever its text; the report still lists it.')) {
     fails.push('answered-items')
+  }
+
+  // hold-until (p30-3; vault-grammar § Hold until): every `holdUntil` entry that holds and waits on Lachy (a CLOSED PR,
+  // an unreadable hold) is an (f) item on every turn, whatever the halt, with fixed item text and act, so the dedupe
+  // holds; § 6.5's lead-in derives it from `next`'s `holdUntil`, step 1.1 names it, (e) excludes the hold_until halt (one
+  // item, one push), and (c)'s null-humanFix entries wait for the release under a PR hold, as for the reinstate under a
+  // pause.
+  const step11 = collapse(s45raw.split('\n').find((l) => /^ {3}1\. Run `python3/.test(l)) ?? '')
+  if (!kindF.includes('every `holdUntil` entry with `held: true` and `waits: you`, on every turn, whatever the halt') ||
+    !kindF.includes('`[[<note>]] hold_until needs you: <pr> closed unmerged` for a CLOSED PR') ||
+    !kindF.includes('`[[<note>]] hold_until needs you: unreadable` for an unreadable hold') ||
+    !kindF.includes('A step 1.5 halt on it is this item, never (e), so it is one item with one push') ||
+    !kindF.includes('Act `remove or fix hold_until on [[<note>]]`') ||
+    !items.includes("this turn's `next` output (its `setAside` entries, `raceHold` and `holdUntil`;") ||
+    !kindE.includes('not a hold_until halt, which is (f)') ||
+    !kindC.includes('and under a PR hold (step 1.2) it waits for the release') ||
+    !step11.includes('is an (f) needs-you item on this turn (§ 6.5), whatever the halt')) {
+    fails.push('hold-until')
+  }
+
+  // git-env-item (ADR 0046): an unacked git-env trip is an item of its own on every turn, whatever the halt (a lane hold
+  // need never halt), keyed by the stamp of the hold's first unacked trip line, so a trip after an ack is a new item; a
+  // git-env trip's halt is this item, never (e), and no item carries the trip mark.
+  if (!kindG.includes("while `gitEnvHold` is non-empty, on every turn, whatever the halt") ||
+    !kindG.includes("`[[<rollout>]] the shared checkout changed (<the stamp of the hold's first unacked trip line>): decide with /thread:repair [[<rollout>]]`") ||
+    !kindG.includes('The stamp keys it: a trip after an ack is a new item, pushed again') ||
+    !kindG.includes("A git-env trip's halt (§ 7) is this item, never (e)") ||
+    !kindG.includes('Act `decide with /thread:repair [[<rollout>]]`')) {
+    fails.push('git-env-item')
   }
 
   // glossary: CONTEXT.md defines the term, with its block, its log, § 6.5 and an Avoid list, so later tasks reuse it,
@@ -401,7 +434,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
       'the reviser\'s needs-human exit'],
     [engine, "needsHuman: status === 'review' ? '' : askOf(norm),", 'the row\'s needsHuman'],
     [reconcile, 'entry["needsHuman"] = ask', '`next`\'s setAside entry key'],
-    [reconcile, '"setAside": [_set_aside_entry(r) for r in by_state.get("set-aside", [])]', '`next`\'s setAside entries'],
+    [reconcile, '"setAside": [_set_aside_entry(r, task_held.get(r["slug"].lower())) for r in by_state.get("set-aside", [])]', '`next`\'s setAside entries'],
     [engine, "'plan not approved after '", 'plan-loop budget run out'],
     [engine, '`plan round budget exhausted without a verdict', 'plan-loop guard'],
     [engine, "'transient infrastructure failure — ", 'TRANSIENT_DIAGNOSIS'],
@@ -410,6 +443,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
     [engine, "blockerDiagnosis: 'workflow stage threw — see /workflows'", 'taskResult\'s fallback'],
     [reconcile, 'CALL_FAILED_PREFIX = "workflow call failed:"', 'the lead\'s dead-call row'],
     [real, 'reason `merge-task: <its message>`', 'the lead\'s exit-1 row'],
+    [real, "reason `invalid round budget: <field> on [[<task>]] must be an integer >= 1, got '<raw>'`", 'the lead\'s task-level budget row (§ 3, ADR 0048)'],
     [leadIntegrate, '"prUrl": pr_url, "prUrlError": pr_url_error,', '`inputs`\' prUrlError'],
     [leadIntegrate, '"lastIntegration": last, "resumeAt": resume_at,', '`inputs`\' resumeAt'],
     [real, 'A non-empty `prUrlError` (the note\'s `pr:` gives no PR URL the engine takes, step 3) launches nothing', 'step 1.2\'s prUrlError hold'],
@@ -417,10 +451,10 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
       'step 3\'s prUrlError set-aside'],
   ]
   for (const [src, text, what] of written) assert.ok(src.includes(text), `${what}: ${text} is no longer written`)
-  // Each opening is _raise_field's: the six own-run openings in NO_BUDGET_OPENINGS, the plan budget's in PLAN_BUDGET_OPENINGS.
+  // Each opening is _raise_field's: the seven own-run openings in NO_BUDGET_OPENINGS, the plan budget's in PLAN_BUDGET_OPENINGS.
   const tuple = (name) => JSON.parse('[' + ((leadIntegrate.match(new RegExp(`^${name} = \\(([^)]*)\\)`, 'm')) ?? [])[1] ?? '').replace(/\s+/g, ' ').replace(/,\s*$/, '') + ']')
   assert.deepEqual(tuple('NO_BUDGET_OPENINGS'), ['workflow call failed:', 'merge-task:', 'transient infrastructure failure', 'plan-divergence:',
-    'agent returned neither verified nor blocked', 'workflow stage threw'], 'NO_BUDGET_OPENINGS lists the six own-run openings')
+    'agent returned neither verified nor blocked', 'workflow stage threw', 'invalid round budget:'], 'NO_BUDGET_OPENINGS lists the seven own-run openings')
   assert.deepEqual(tuple('PLAN_BUDGET_OPENINGS'), ['plan not approved after', 'plan round budget exhausted'], 'PLAN_BUDGET_OPENINGS')
 })
 
@@ -428,7 +462,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
 
 const RULES = ['no-ask-in-flight', 'push-dedupe', 'ntfy-fallback', 'not-sent', 'push-retry', 'kinds', 'turn-waiting', 'report-block', 'sign-off',
   'guardrails', 'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers',
-  'answered-items', 'glossary']
+  'answered-items', 'glossary', 'hold-until', 'git-env-item']
 const CONTROLLED = new Set()
 
 // Replaces the one occurrence of `from`; a control whose target is missing or ambiguous fails its setup.
@@ -516,7 +550,7 @@ test('control: an item kind dropped, or (c) re-deriving its causes, fails kinds'
   only(edit(real, ", except a RACE whose re-verify this session still runs: a green one lands it with no decision)", ')'),
     'kinds', 'a RACE pushed while its re-verify runs')
   only(edit(real, 'reports a non-null `humanFix`. The script', 'reports `autoRetry: false`. The script'), 'kinds', 'membership by autoRetry')
-  only(edit(real, ' A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (e), § 3\'s round-budget halt.', ''),
+  only(edit(real, ' A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (c) too, through its `humanFix` H12 (ADR 0048: no halt).', ''),
     'kinds', 'a, b and e unplaced')
   only(edit(real, 'skips it and logs nothing.\n', 'skips it and logs nothing. It includes:\n  - plan-blocked with `max_plan_rounds` spent;\n'),
     'kinds', 'the old includes list back')
@@ -568,7 +602,7 @@ test('control: an ask outside § 6.5, or an inexact exemption, fails no-other-as
 test('control: a log at the note\'s top, or items carrying a log mark, fails log-placement', () => {
   only(edit(real, "created on first use at the note's end, below `## Queue`", "created on first use at the note's top, below `## Queue`"),
     'log-placement', 'at the top')
-  only(edit(real, 'No item text ever carries the log marks `git-env trip`, `git-env ack` or `RACE decided:`, so the git-env trip halt\'s reason is written `the shared checkout changed`. ', ''),
+  only(edit(real, 'No item text ever carries the log marks `git-env trip`, `git-env ack`, `lane hold`, `lane ack` or `RACE decided:`, so the git-env trip halt\'s reason is written `the shared checkout changed`. ', ''),
     'log-placement', 'no marks sentence')
 })
 
@@ -589,9 +623,9 @@ test('control: the needs-human question kept off the detail line or the push fai
 })
 
 test('control: (e) naming § 7\'s prose, or a red RACE re-verify in both (b) and (e), fails halt-act', () => {
-  only(edit(real, "`[[<rollout>]] halted (<YYYY-MM-DD>): <reason>: <act>`. `<reason>` is the halt's `reason=` text, and `<act>` is fixed by the halt, never taken from § 7's prose: `decide with /thread:repair [[<rollout>]]` for a git-env halt (the trip or `git-env canary failed`: repair's step 3e shows the evidence and records the ack), and `see /thread:status [[<rollout>]], fix it and re-invoke` for every other.",
+  only(edit(real, "`[[<rollout>]] halted (<YYYY-MM-DD>): <reason>: <act>`. `<reason>` is the halt's `reason=` text, and `<act>` is fixed by the halt, never taken from § 7's prose: `decide with /thread:repair [[<rollout>]]` for `git-env canary failed` (repair's step 3e shows the evidence), `/thread:execute [[<new>]]` for an approved queue's regenerate that stopped after step 7.5 (§ 4.5's **Approved queue** route, step 6: the new note is unstamped, and a re-invocation here ends `superseded`), and `see /thread:status [[<rollout>]], fix it and re-invoke` for every other.",
     '`[[<rollout>]] halted (<YYYY-MM-DD>): <the reason text>: <the command § 7 names for it>`.'), 'halt-act', 'the command § 7 names')
-  only(edit(real, " A red RACE re-verify's halt (`RACE: origin/<default> fails the verifier`, § 7) is this item, never (e): its `## Race log` line keeps the task in `raceHold`, so it is one item with one push.", ''),
+  only(edit(real, " A RACE revert that did not land (`next`'s `mainRed`; `RACE: the revert of [[<slug>]] did not land: …`, § 7) is this item, never (e), with `→ main red: the whole rollout is held until you decide`: its `## Race log` line keeps the task in `raceHold`, so it is one item with one push.", ''),
     'halt-act', 'red re-verify unplaced')
 })
 
@@ -627,7 +661,24 @@ test('control: CONTEXT.md without the entry, or without its Avoid list, fails gl
   only(real, 'glossary', 'the bounded retry removed', edit(realContext, 'retried at most once more, at the next loop entry', 'retried'))
 })
 
-test('the rules are all named (19) and each has a control', () => {
-  assert.equal(RULES.length, 19)
+test('control: (g) keyed by no stamp, or its halt read as (e), fails git-env-item', () => {
+  only(edit(real, "the shared checkout changed (<the stamp of the hold's first unacked trip line>): decide with", 'the shared checkout changed: decide with'),
+    'git-env-item', 'no stamp')
+  only(edit(real, " A git-env trip's halt (§ 7) is this item, never (e).", ''), 'git-env-item', 'the halt unplaced')
+})
+
+test('control: (f) without its item, its every-turn rule or its act, or its sites without it, fails hold-until', () => {
+  only(edit(real, '`[[<note>]] hold_until needs you: <pr> closed unmerged` for a CLOSED PR, or', 'a CLOSED PR, or'), 'hold-until', 'no CLOSED item text')
+  only(edit(real, 'and `waits: you`, on every turn, whatever the halt:', 'and `waits: you`, at a halt:'), 'hold-until', 'only at a halt')
+  only(edit(real, 'Act `remove or fix hold_until on [[<note>]]`', 'Act `see /thread:status`'), 'hold-until', 'another act')
+  only(edit(real, ' A step 1.5 halt on it is this item, never (e), so it is one item with one push.', ''), 'hold-until', 'also (e)')
+  only(edit(real, '(its `setAside` entries, `raceHold` and `holdUntil`;', '(its `setAside` entries and `raceHold`;'), 'hold-until', 'lead-in without holdUntil')
+  only(edit(real, '; not a hold_until halt, which is (f)', ''), 'hold-until', '(e) without its exclusion')
+  only(edit(real, ', and under a PR hold (step 1.2) it waits for the release', ''), 'hold-until', '(c) without the release')
+  only(edit(real, 'is an (f) needs-you item on this turn (§ 6.5), whatever the halt', 'is reported'), 'hold-until', 'step 1.1 without (f)')
+})
+
+test('the rules are all named (21) and each has a control', () => {
+  assert.equal(RULES.length, 21)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

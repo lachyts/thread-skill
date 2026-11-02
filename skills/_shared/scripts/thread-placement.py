@@ -16,16 +16,18 @@ A <note> is a live project or area note (resolve-target's index), by vault path 
 
 The walks. The repo tier mirrors open's § Repo-thread lookup exactly: every entry below realpath ~/repos at depth <= 4
 (no pruning, no symlink followed), minus the lookup's five path tests (`*/.claude/*`, `$r/obsidian/*`,
-`$r/workspaces/*`, `$r/workspaces-rollout/*`, `*/_archive/*`); THREAD.md is a repo thread, any other THREAD*.md a
+`$r/workspaces/*`, `$r/workspaces-*rollout/*` (workspaces' rollout clones, a second project's
+`workspaces-<project>-rollout` among them, ADR 0064), `*/_archive/*`); THREAD.md is a repo thread, any other THREAD*.md a
 misnamed one. The ~/Projects tier mirrors the lookup's ~/Projects walk (depth <= 5, `_archive`, `.claude`, `.git` and
 `node_modules` pruned). Both drop a file whose git toplevel is a rollout clone (ADR 0042: named `<S>-rollout`, beside a
-same-origin main checkout `<S>`; `self-rollout-check.sh --in-place`, asked once per `*-rollout` toplevel), whose
+same-origin main checkout on its twin walk, `<S>` first; `self-rollout-check.sh --in-place`, asked once per `*-rollout` toplevel), whose
 THREAD*.md is a copy of its twin's, never a thread: the lookup's `rc` test. The workspaces tier is every THREAD*.md
 below ~/repos/workspaces at depth <= 4, `_shared`, `.claude`, `.git`, `node_modules` and `_archive` pruned.
 
 A qualifying repo (ADR 0039 d1) is a main checkout (its `.git` a directory; a linked worktree, a submodule or a
 --separate-git-dir checkout has a `.git` file) one to three directories below ~/repos, outside obsidian, workspaces,
-workspaces-rollout, `.claude`, `_archive`, `node_modules` and dot-dirs. A note's thread home is its first qualifying `repos:` entry.
+workspaces' rollout clones (`workspaces-rollout`, `workspaces-<project>-rollout`: WORKSPACES_CLONE), `.claude`, `_archive`,
+`node_modules` and dot-dirs. A note's thread home is its first qualifying `repos:` entry.
 
 The thread identity of a repo-tier file f is `<home repo>/<f below its git toplevel>`: the home repo is f's main
 checkout (a linked worktree reads as it) when a live note declares it, else the one declared qualifying repo sharing
@@ -74,6 +76,7 @@ import fnmatch
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -85,6 +88,9 @@ KINDS = ("split-home", "misnamed", "undeclared", "no-slug", "behind", "side-bran
 GIT_TIMEOUT = 30
 PROJECTS_PRUNE = frozenset({"_archive", ".claude", ".git", "node_modules"})
 WORKSPACES_PRUNE = frozenset({"_shared", ".claude", ".git", "node_modules", "_archive"})
+# workspaces' rollout clones at depth 0 below ~/repos: `workspaces-rollout`, and a second project's
+# `workspaces-<project>-rollout` (ADR 0064)
+WORKSPACES_CLONE = re.compile(r"^workspaces(-[a-z0-9-]+)?-rollout$")
 ORIGIN = "refs/remotes/origin/"
 HEADS = "refs/heads/"
 
@@ -253,7 +259,7 @@ class Estate:
                 for e in entries:
                     if e.name.startswith(".") or e.name in ("_archive", "node_modules"):
                         continue
-                    if depth == 0 and e.name in ("obsidian", "workspaces", "workspaces-rollout"):
+                    if depth == 0 and (e.name in ("obsidian", "workspaces") or WORKSPACES_CLONE.match(e.name)):
                         continue
                     try:
                         if not e.is_dir(follow_symlinks=False):
@@ -427,7 +433,7 @@ class Audit:
             if not is_thread_file(name):
                 continue
             if ("/.claude/" in p or "/_archive/" in p or p.startswith(r + "/obsidian/") or p.startswith(r + "/workspaces/")
-                    or p.startswith(r + "/workspaces-rollout/")):
+                    or fnmatch.fnmatchcase(p, r + "/workspaces-*rollout/*")):
                 continue
             if self.est.clone_copy(p):
                 continue

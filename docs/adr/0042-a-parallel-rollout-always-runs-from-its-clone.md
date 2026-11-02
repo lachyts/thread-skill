@@ -2,6 +2,8 @@
 
 Date: 2026-10-19
 Status: accepted. Ruled with Lachy in the 2026-10-19 `/thread:orient Thread Skill` reshuffle grill, built by P26 (p26-2, `thread-skill-p26-2-every-rollout-runs-from-its-clone`, whose approved plan settled the review questions against code). This record keeps to the decision; the mechanics live in the files below.
+*(Amended by ADR 0064, 2026-11-02: one clone per (repo, project): a second project's parallel rollout on the repo runs
+from its own `<toplevel>-<slug>-rollout`, and `--in-place` finds its twin by a walk over names.)*
 
 ## Context
 

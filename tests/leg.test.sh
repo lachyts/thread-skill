@@ -2,7 +2,12 @@
 # skills/execute/scripts/leg.py: a serial rollout's Legs (ADR 0040, p24-3; skills/execute/legs.md).
 #   L1   two Legs (5 + 2) with a handoff, then Complete: post-items, a follow-on, dispositions, the Completion log,
 #        the archive and one vault commit; an Archive collision; next --waiting; file-followup after Complete reads
-#        the archived note and writes nothing into it; L1v the routed land follow-on and its controls
+#        the archived note and writes nothing into it; L1v the routed land follow-on and its controls; done's
+#        leg_head stamp (L1, L1v, L1h: each checkout's newest trailered commit of the task, never a peer's HEAD, [] when
+#        it committed nowhere, none with no leg_base)
+#   L1cv a serial chain's completion verify at Complete (ADR 0055): close refuses it undecided, writes its summary
+#        line, puts a red's fix task in the vault commit, refuses a bare YAML boolean, and leaves a note without the
+#        key byte-for-byte as before
 #   L2   a lost Leg: exit 3 for another session, --take-over inherits the claim, five fresh claims beside it, the
 #        same-session resume, CODEX_THREAD_ID, `unknown` never matching, --resume; L4c six smoke entries; L2b a Leg
 #        lost or stopped before its smoke test hands its unsmoked tasks on
@@ -19,6 +24,10 @@
 #   L13  status (read-only, no lock): the chain states, the stall, the restart and its blockers, set-asides, per-Leg
 #        lists, a take-over's lastAt, dependants and the defer closure, a terminal chain with no restart, next or
 #        smoke list (L13g, L13o); restarted: its checks, in order
+#   L14  the hold (ADR 0060): live and ready hold the whole claim, stuck only its set-aside row's surface; begin's
+#        surface re-check is exit 3 (nothing written, --dry-run too) while another chain's unlanded row holds a smoke
+#        row's surface, and status's restart names it as its blocker; a re-check that fails is exit 3 too and status's
+#        blocker (L14f); a stuck chain with a row in progress, or no Queue rows, holds its whole claim with a warn (L14h)
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -45,6 +54,9 @@ git config --global user.name t; git config --global user.email t@t.invalid
 git config --global init.defaultBranch master; git config --global advice.detachedHead false
 export LANDING_REGISTER="$TMP/register.md"; : > "$LANDING_REGISTER"
 export THREAD_LEG_LOCK_DIR="$TMP/locks" THREAD_EVENTS_DIR="$TMP/events" TMPDIR="$TMP/t"
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
+# L1cv's completion-verify --run: the machine's verify slots and the detached verify trees stay in temp (ADR 0055)
+export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots" THREAD_COMPLETION_TREE_DIR="$TMP/trees"
 mkdir -p "$TMPDIR" "$TMP/bin"
 # A fake gh and ssh: any call is logged and fails, so a test can assert no network was touched.
 printf '#!/bin/sh\necho "gh $*" >> "%s/net.log"\nexit 1\n' "$TMP" > "$TMP/bin/gh"
@@ -128,6 +140,7 @@ for t in t1 t2 t3 t4 t5; do
   finish "$t"
 done
 ok "$(fm t3 status)|$(fm t3 owner)|$(fm t3 leg)|$(fm t3 completed)" "done|leg-1|1|2026-10-20" "L1: done stamps status, leg and completed"
+ok "$(fm t3 leg_base)|$(fm t3 leg_head)" "[]|<none>" "L1: an ext: chain's task has no leg_base entry, so done stamps no leg_head"
 ok "$(fm t3 started)" "2026-10-20T10:00+00:00" "L1: claim stamped started:"
 leg next; ok "$(q 'd["action"]')|$(q 'd["reason"]')" "handoff|5 fresh claims" "L1: five fresh claims, then next is handoff"
 leg close --outcome handoff --cwd "$F"
@@ -162,6 +175,10 @@ SESS=s2 leg next --waiting "room stop: stopping calls at a step boundary"
 ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=5/7 running=1 state=waiting reason=\"room stop: stopping calls at a step boundary\"" \
    "L1: … and the room stop's"
 keepline; same "L1: next --waiting writes nothing"
+SESS=s2 leg next --waiting "room stop: L spreading its Rollouts (would reach its 5-hour line ~17:51)"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=5/7 running=1 state=waiting reason=\"room stop: L spreading its Rollouts (would reach its 5-hour line ~17:51)\"" \
+   "L1: … and a spread's, intact"
+same "L1: … a spread's writes nothing"
 SESS=s2 leg next; ok "$(q '"status_line" in d')" False "L1: a bare next prints no status line"
 SESS=s2 leg next --waiting " "; ok "$rc|$out" "2|" "L1: --waiting with no reason is a usage error"
 SESS=s2 leg done --task t6 --verify pass; ok "$rc" 0 "done t6"
@@ -271,6 +288,7 @@ work "$R" t3 c.txt "t3 work"
 mkdir -p "$R/docs/reviews"; printf -- '---\nstatus: pending\n---\nx\n' > "$R/docs/reviews/x.md"
 git -C "$R" add -A; git -C "$R" commit -qm "📝 docs(review): fresh-review findings"
 t3sha=$(git -C "$R" log --format=%H --grep 'Task: \[\[t3\]\]' -1)
+ok "$(fm t3 leg_head)" "[\"$R@$t3sha\"]" "L1v: done stamps leg_head, the task's own trailered commit in its checkout"
 leg close --outcome complete --cwd "$R" --reflection "$REFL"
 ok "$rc" 0 "L1v: complete"
 fu=$(q '[f for f in d["followups"] if "-land-chain-" in f][0]')
@@ -315,6 +333,81 @@ HOOK_CMD='git -C "$R" checkout -q --detach' landctl "L1v (g) a detached HEAD" "s
 has "$(cat "$T/demo-followup-land-chain-2026-10-20.md")" "check the landing route (detached HEAD), then open a PR from them, or push them" \
    "L1v (g): … its act starts by checking the landing route"
 ok "$(grep -c . "$TMP/net.log")" 0 "L1v: no gh or ssh call was made"
+unset CWD
+
+# ════ L1h: done's leg_head, the task's own newest trailered commit per checkout (ADR 0055) ═════════════════════════
+scen l1h
+R="$S/r"; mkrepo "$R" https://github.com/o/rh.git; export CWD="$R"
+mkro '' "t1~cc-r~$R~\`repo:$R\`" "t2~cc-r~$R~\`repo:$R\`"; mkt t1; NOVERIFY=1 mkt t2
+leg begin --cwd "$R"; ok "$rc" 0 "L1h: begin"
+leg claim --task t1; ok "$rc" 0 "L1h: claim t1"
+tcommit "$R" t1 c.txt "t1 work"; t1sha=$(git -C "$R" rev-parse HEAD); d=$(review "$R" HEAD)
+pcommit "$R" peer.txt p "chore: a peer's commit"
+leg done --task t1 --verify pass --review "$d" --cwd "$R"; ok "$rc" 0 "L1h: done t1 with a peer's commit on top"
+ok "$(fm t1 leg_head)" "[\"$R@$t1sha\"]" "L1h: leg_head is the task's own commit"
+hasnt "$(fm t1 leg_head)" "$(git -C "$R" rev-parse HEAD)" "L1h: … never HEAD at done (the peer's commit)"
+leg claim --task t2; ok "$rc" 0 "L1h: claim t2"
+leg done --task t2 --cwd "$R"; ok "$rc" 0 "L1h: done t2, which committed nothing"
+ok "$(fm t2 leg_base)|$(fm t2 leg_head)" "[\"$R@$(git -C "$R" rev-parse HEAD)\"]|[]" \
+   "L1h: a task with a leg_base that committed nowhere → leg_head: []"
+unset CWD
+
+# ════ L1cv: a serial chain's completion verify at Complete (ADR 0055) ═════════════════════════════════════════════════
+# cvchain <label> [completion_verifier value] — a one-task chain in $R (its one repo: surface), worked to done
+cvchain() {
+  local fm; R="$S/r"; mkrepo "$R" https://github.com/o/rcv.git; export CWD="$R"
+  fm=$(printf '  - "repo:%s"' "$R"); [ -z "${2:-}" ] || fm="$fm"$'\n'"completion_verifier: $2"
+  EXTRA_FM="$fm"$'\n' mkro '' "t9~cc-r~$R~\`repo:$R\`"; mkt t9
+  git -C "$V" add -A; git -C "$V" commit -qm vault
+  leg begin --cwd "$R"; ok "$rc" 0 "$1: begin"
+  work "$R" t9 c.txt "c $1"
+}
+# rcv [args]… — reconcile-rollout.py completion-verify on the chain's note → $out $err $rc
+rcv() {
+  out=$(python3 "$RR" completion-verify --rollout "$T/$RO.md" --tasks-dir "$T" --now "$NOW" "$@" 2>"$TMP/err"); rc=$?
+  err=$(cat "$TMP/err")
+}
+commit_files() { git -C "$V" show --name-status --no-renames --format= HEAD | sort -k2 | tr '\t\n' ' |'; }
+scen l1cv; cvchain "L1cv (i)" '"true"'
+snap; leg close --outcome complete --cwd "$R" --reflection "$REFL"
+ok "$rc" 1 "L1cv (i): complete before the completion verify → exit 1"
+has "$err" "the completion verify is not decided (run, attempt 1)" "L1cv (i): … it is not decided"; same "L1cv (i): the refused complete"
+rcv --run; ok "$rc|$(q 'd["result"]')" "0|green" "L1cv (i): completion-verify --run → green on the chain's checkout"
+sha=$(git -C "$R" rev-parse HEAD)
+leg close --outcome complete --cwd "$R" --reflection "$REFL"
+ok "$rc|$(q 'd["completionVerify"]["state"]')|$(q 'd["completionVerify"]["followup"]')" "0|green|None" "L1cv (i): then complete → exit 0"
+A="$T/Archive/Rollouts/$RO.md"
+has "$(sed -n '/^## Completion log/,$p' "$A")" "- Completion verify: green at ${sha:0:12} (\`true\`)" "L1cv (i): its summary is a Completion log line"
+has "$(cat "$A")" "## Completion verify log" "L1cv (i): … and the archived note keeps its Completion verify log"
+ok "$(git -C "$R" status --porcelain)|$(git -C "$R" worktree list | wc -l | tr -d ' ')" "|1" \
+   "L1cv (i): the chain's checkout: an empty porcelain, no worktree left"
+scen l1cv2; cvchain "L1cv (ii)" '"false"'
+rcv --run; ok "$(q 'd["result"]')" rerun "L1cv (ii): false → rerun"
+rcv --run; ok "$(q 'd["result"]')" red "L1cv (ii): … then red"
+sha=$(git -C "$R" rev-parse HEAD)
+leg close --outcome complete --cwd "$R" --reflection "$REFL"
+ok "$rc|$(q 'd["completionVerify"]["state"]')|$(q 'd["completionVerify"]["followup"]')" "0|red|completion-red-$RO" \
+   "L1cv (ii): a red still completes the chain, its fix task named"
+A="$T/Archive/Rollouts/$RO.md"
+has "$(sed -n '/^## Completion log/,$p' "$A")" "- Completion verify: red at ${sha:0:12} (rc 1, attempt 2); fix task [[completion-red-$RO]]" \
+   "L1cv (ii): the red summary names the fix task"
+has "$(commit_files)" "A Work/Tasks/completion-red-$RO.md|" "L1cv (ii): the fix task is in the vault commit"
+ok "$(ls "$T" | grep -c '^completion-red-')" 1 "L1cv (ii): exactly one fix task"
+scen l1cv3; cvchain "L1cv (iii)"
+rcv; ok "$rc|$out" '0|{"verifier": null, "state": "absent"}' "L1cv (iii): no completion_verifier: → the read says absent"
+leg close --outcome complete --cwd "$R" --reflection "$REFL"
+ok "$rc|$(q '"completionVerify" in d')" "0|False" "L1cv (iii): complete → exit 0, no completionVerify"
+fu=$(q '[f for f in d["followups"] if "-land-chain-" in f][0]')
+A="$T/Archive/Rollouts/$RO.md"
+hasnt "$(cat "$A")" "Completion verify" "L1cv (iii): … no Completion verify line and no log section"
+ok "$(commit_files)" "A Work/Tasks/Archive/Rollouts/$RO.md|A Work/Tasks/$fu.md|D Work/Tasks/$RO.md|" \
+   "L1cv (iii): the vault commit holds exactly the archived note, the land follow-on and the old path, as before"
+scen l1cv4; cvchain "L1cv (iv)" 'true'
+snap; leg close --outcome complete --cwd "$R" --reflection "$REFL"
+ok "$rc" 1 "L1cv (iv): a bare completion_verifier: true → complete exits 1"
+has "$err" "YAML boolean" "L1cv (iv): … naming the YAML boolean"; same "L1cv (iv): the refused complete"
+rcv; ok "$rc" 2 "L1cv (iv): … and the read refuses it (2)"
+ok "$(grep -c . "$TMP/net.log")" 0 "L1cv: no gh or ssh call was made"
 unset CWD
 
 # ════ L2: a lost Leg, take-over, resume ════════════════════════════════════════════════════════════════════════════
@@ -935,6 +1028,83 @@ $line"; fi
   fi
 done
 
+# ════ L14: the hold and the surface re-check (ADR 0060, p33-2) ═════════════════════════════════════════════════════
+scen l14
+VA='`vault:Work/Projects/A`'; VB='`vault:Work/Projects/B`'
+mkro '' "t1~cc-demo~$F~$VA" "t2~cc-demo~$F~$VB"; mkt t1; mkt t2
+subst "$T/$RO.md" '  - "ext:x"' $'  - "vault:Work/Projects/A"\n  - "vault:Work/Projects/B"'
+leg begin --cwd "$F"; finish t1; leg claim --task t2
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["hold"]["held"]')" "live|whole|['vault:Work/Projects/A', 'vault:Work/Projects/B']" \
+   "L14: a live chain holds its whole claim"
+leg set-aside --task t2 --reason "blocked on a missing key"; leg close --outcome stuck
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["hold"]["held"]')|$(q 'd["hold"]["released"]')" \
+   "stuck|stuck|['vault:Work/Projects/B']|['vault:Work/Projects/A']" "L14: a stuck chain holds only its set-aside row's surface"
+ok "$(q 'd["hold"]["rows"]')" "[{'slug': 't2', 'state': 'set-aside', 'surfaces': ['vault:Work/Projects/B']}]" "L14: … naming the row"
+python3 "$RR" hand-back --tasks t2 --tasks-dir "$T" > "$TMP/hb" 2>&1
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["restart"]["blockedBy"]')" "ready|whole|None" \
+   "L14: handed back, the chain reads ready and reclaims its whole claim; nothing blocks Leg 2"
+# Another chain, scheduled on vault:Work/Projects/A while this one was stuck
+B=other-rollout-2026-10-21
+{ printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\nprojects:\n  - "[[Other]]"\n'
+  printf -- 'surfaces:\n  - "vault:Work/Projects/A"\n---\n\n## Notes\n\nA chain.\n\n## Queue\n\n| # | Task | Launch | Surfaces |\n|---|---|---|---|\n'
+  printf -- '| 1 | [[u1\\|u1]] | `cc-demo` from `%s` | `vault:Work/Projects/A` |\n' "$F"; } > "$T/$B.md"
+printf -- '---\ntags: [task]\nstatus: open\nrollout: "[[%s]]"\n---\n\n## Notes\n\nDo u1.\n' "$B" > "$T/u1.md"
+leg status
+ok "$(q 'd["restart"]["blockedBy"]')" "surface held by [[$B]] (vault:Work/Projects/A)" \
+   "L14: status: Leg 2's restart is blocked by the chain that now holds its smoke row's surface"
+snap; SESS=s2 leg begin --cwd "$F" --dry-run
+ok "$rc|$(q 'd["exit"]')" "3|3" "L14: begin --dry-run runs the re-check too: exit 3"; same "L14: --dry-run"
+snap; SESS=s2 leg begin --cwd "$F"
+ok "$rc|$(q 'd["held"]')" "3|[{'rollout': '$B', 'token': 'vault:Work/Projects/A'}]" "L14: begin is exit 3, naming what holds it"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=1/2 running=0 state=halted reason=\"surface held: [[$B]] holds vault:Work/Projects/A\"" \
+   "L14: … its status line"
+has "$(q 'd["error"]')" "this chain waits its turn" "L14: … and its error says it waits its turn"
+same "L14: a held begin writes nothing"
+subst "$T/$B.md" 'status: open' 'status: dropped'
+SESS=s2 leg begin --cwd "$F"
+ok "$rc|$(q 'd["leg"]')|$(q '[x["task"] for x in d["smoke"]]')" "0|2|['t1']" "L14: once that chain is dropped, Leg 2 begins"
+# The re-check fails closed: a --rollout outside --tasks-dir gives a --resume naming no note there, so the check exits 2
+scen l14f
+mkro '' "t1~cc-demo~$F~$VA" "t2~cc-demo~$F~$VB"; mkt t1; mkt t2
+AWAY="$S/away"; mkdir -p "$AWAY"; mv "$T/$RO.md" "$AWAY/$RO.md"
+legaway() { out=$(cd "$F" && python3 "$LEG" "$@" --rollout "$AWAY/$RO.md" --tasks-dir "$T" --vault "$V" --now "$NOW" \
+                  --session s1 2>"$TMP/err"); rc=$?; err=$(cat "$TMP/err"); }
+cp "$AWAY/$RO.md" "$TMP/snap"; cp "$T/t1.md" "$TMP/snap-t1"
+legaway begin --cwd "$F"
+ok "$rc|$(q 'd["exit"]')" "3|3" "L14f: a surface re-check that fails is exit 3 (fail closed)"
+has "$(q 'd["error"]')" "surface re-check failed: unfinished-rollout: --resume $RO: no rollout note at " \
+   "L14f: … its error names the check's own line (capped at 160 characters)"
+ok "$(q 'd["error"].startswith("surface re-check failed: ")')" True "L14f: … and starts with surface re-check failed:"
+has "$(q 'd["status_line"]')" "state=halted reason=\"surface re-check failed: unfinished-rollout: --resume $RO" "L14f: … its status line"
+cmp -s "$AWAY/$RO.md" "$TMP/snap"; ok "$?" 0 "L14f: the rollout note is byte-identical"
+cmp -s "$T/t1.md" "$TMP/snap-t1"; ok "$?" 0 "L14f: … and so is the first row's task: nothing written"
+legaway status
+ok "$rc|$(q 'd["chain"]')" "0|not-started" "L14f: status reads the chain"
+ok "$(q 'd["restart"]["blockedBy"].startswith("surface re-check failed: unfinished-rollout: --resume ")')" True \
+   "L14f: … and its restart's blocker is the failed re-check"
+# hold_of fails closed to the whole claim, with its warn, on a stuck chain it cannot narrow safely
+scen l14h
+VC='`vault:Work/Projects/C`'
+mkro '' "t1~cc-demo~$F~$VA" "t2~cc-demo~$F~$VB" "t3~cc-demo~$F~$VC"; mkt t1; mkt t2; mkt t3
+subst "$T/$RO.md" '  - "ext:x"' $'  - "vault:Work/Projects/A"\n  - "vault:Work/Projects/B"\n  - "vault:Work/Projects/C"'
+leg begin --cwd "$F"; finish t1; leg claim --task t2; leg set-aside --task t2 --reason "blocked on a missing key"
+subst "$T/t3.md" 'status: open' $'status: in_progress\nowner: lachy'
+leg close --outcome stuck
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["hold"]["held"]')|$(q 'd["hold"]["released"]')" \
+   "stuck|whole|['vault:Work/Projects/A', 'vault:Work/Projects/B', 'vault:Work/Projects/C']|[]" \
+   "L14h: a stuck chain with a row in progress (owned by hand) holds its whole claim"
+ok "$(q 'd["hold"]["warn"]')" "chain stuck, but [[t3]] reads in progress: it holds its whole claim" "L14h: … with its warn"
+mkro ''
+subst "$T/$RO.md" '  - "ext:x"' '  - "vault:Work/Projects/A"'
+printf -- '\n## Leg log\n\n- 2026-10-20T09:00+00:00 Leg 1 began: leg-1 session s1 in cc-demo from %s\n- 2026-10-20T09:30+00:00 Leg 1 closed: chain stuck: 0 set aside\n' "$F" >> "$T/$RO.md"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["hold"]["held"]')|$(q 'd["hold"]["unlanded"]')" \
+   "stuck|whole|['vault:Work/Projects/A']|['vault:Work/Projects/A']" "L14h: a stuck chain whose ## Queue has no rows holds its whole claim"
+ok "$(q 'd["hold"]["warn"]')" "chain stuck, but its ## Queue has no rows: it holds its whole claim" "L14h: … with its warn"
 echo
 if [ "$fail" -eq 0 ]; then echo "leg.test.sh: ALL PASS"; else echo "leg.test.sh: FAILED"; fi
 exit "$fail"

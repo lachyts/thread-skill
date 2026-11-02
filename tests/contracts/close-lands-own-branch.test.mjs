@@ -1,9 +1,9 @@
 // Close lands the session's own branch (ADR 0028 §§ 1–3, 5, 7; task p11-4). close SKILL.md judges the own
 // branch by exact name (§ The own branch, ADR 0026 condition 1's test), then sub-step 7.9 runs § Land the own
 // branch: land.sh's own-branch mode through the `# thread:land-own` snippet (tests/land.test.sh cases 42–70
-// run it), an inline /fresh-review loop at the xhigh floor with no round cap, and the merge queued only after
-// a clean round. The loop stops only on ADR 0028 § 3's three conditions and then holds the PR open with the
-// diagnosis; nothing waits for CI or the merge, and the banner waits for the review loop only. Reads files
+// run it), an inline /fresh-review loop at the xhigh floor with a budget of four code rounds, and the merge
+// queued only after a clean round, one with no blocking finding (ADR 0058). The loop stops only on its three
+// conditions and then holds the PR open with the diagnosis; nothing waits for CI or the merge, and the banner waits for the review loop only. Reads files
 // only; a missing file or section is a named assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -11,6 +11,7 @@ import { readIf, slice, section, assertHas, lineOf, fencedBlocks, collapse } fro
 
 const CLOSE = 'skills/close/SKILL.md'
 const ADR = 'docs/adr/0028-agents-land-their-own-work.md'
+const ADR58 = 'docs/adr/0058-a-landing-blocks-only-on-serious-findings.md'
 const text = () => readIf(CLOSE)
 const OWN = () => section(text(), /^## The own branch$/)
 const SEC = () => section(text(), /^### Land the own branch$/)
@@ -113,10 +114,11 @@ test('never clean: the clean-round conditions, and what can never count', () => 
   assertHas(sec, 'the clean round', [
     'A round that says "nothing in scope", fails, is lost, or leaves no review doc is never a clean round and never leads to `--queue`',
     '`mode: code`', '`effort:` equal to the current level', '`head:` equal to HEAD at dispatch',
-    '`diff_digest:` equal to `land: digest` and not `da39a3`', 'no accepted finding',
+    '`diff_digest:` equal to `land: digest` and not `da39a3`', 'no blocking finding (loop step 5)',
     'a `simplify` round never counts as clean',
     'every dispatch follows a plain call that printed `land: digest`',
-    'Every third round is `/fresh-review simplify <level>` instead, which never gates alone',
+    'The loop runs no `simplify` round: a cleanup is never blocking, so in a landing it could only be filed',
+    'the whole branch, every round (ADR 0058, Decision 4)',
   ])
 })
 
@@ -140,7 +142,12 @@ test('the review docs: consumed, deleted in one docs/reviews/-only commit before
     'The ledger still reads deleted docs from git history',
     "stands in for fresh-review's close-out-commit deletion, because 7.2 runs before the loop",
     'A session ended mid-loop leaves its docs pending on `<B>`',
+    '`--queue` and `--hold` record every review doc on `<B>` in the Run record at the end of the call, whatever its result',
+    '`land: recorded review rounds`, `land: review rounds not all recorded (…)`, `land: review rounds: none on <B>` or `land: review rounds not recorded (…)`',
+    "A loop that ends on a later plain call's `stuck:` or `not landed:`, or a session that ends mid-loop, has only fresh-review's own arrival and consume emits until the next `--queue` or `--hold` on `<B>`.",
   ])
+  // p34-5 F4: the sweep runs only on --queue and --hold, so no landing is promised a full record
+  for (const bad of ['never ends unrecorded', 'cannot end unrecorded']) assert.ok(!text().includes(bad), `close says "${bad}"`)
   const del = pos(sec, /every doc this loop wrote is deleted in one/)
   assert.ok(del >= 0 && del < pos(sec, /act='--queue'/), "the deletion rule does not come before act='--queue'")
 })
@@ -186,11 +193,12 @@ test('the loop re-runs Verify after fixes, before the next dispatch; ci failed g
   assert.ok(qv >= 0 && qv === pos(sec, /run loop step 7 first/), 'the queue-time Verify is not in the Queue paragraph')
 })
 
-test('#### The stop rule: the three ADR conditions, keys, infra, max, and the hold', () => {
+test('#### The stop rule: the three ADR 0058 conditions, keys, infra, max, and the hold', () => {
   const stop = STOP()
   const c = collapse(stop ?? '')
   assertHas(c, '#### The stop rule', [
-    ADR_STOP, 'There is no round cap',
+    'It stops only on a blocking finding still open when the budget is spent, the same check failing the same way twice after effort has risen to `max`, or a decision for Lachy.',
+    'The loop has a budget of four code rounds (ADR 0058, Decision 4',
     'The key is the `ci failed:` line without its URL: check name, conclusion and title.',
     'Only `failure` conclusions reach the key: `cancelled`, `timed_out`, `startup_failure`, `action_required`, `stale` and a status `error` are infrastructure, which never count and never raise effort.',
     'The second failure with one key raises effort to `max`, and effort never lowers.',
@@ -198,7 +206,18 @@ test('#### The stop rule: the three ADR conditions, keys, infra, max, and the ho
     'A `ci failed` counts at `max` only on a round that really ran at `max`, and failures from rounds below `max` never count towards it.',
     STOP_VERIFY_MAX,
     'Before a `max` dispatch, and when a red Verify run raises effort to `max`, run `printenv CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`.',
-    '**A decision for Lachy.** A finding that needs a product or design call, an ADR change or work outside the task; a red Verify run whose failure also happens on `origin/<default>` or shows no cause in `<B>`;',
+    '**A decision for Lachy.** A blocking finding whose fix needs a product or design call or an ADR change (a non-blocking one is filed, its question with it); a blocking finding whose fix lies outside the task (work outside `<B>`), which neither widens `<B>` nor waits for the budget stop; a red Verify run whose failure also happens on `origin/<default>` or shows no cause in `<B>`;',
+    // p34-5 F1: a stop after a graded round leaves that round dispositioned and consumed, so its open findings are recorded
+    'A stop after a graded round (the budget stop, a decision for Lachy) first writes that round\'s `## Disposition`, its blocking findings under `Blocking, open:` and the rest as graded, and marks its doc `status: consumed`, in a `docs/reviews/`-only commit, before the deletion commit and `--hold`.',
+    // p34-5 F7: the budget is the landing's, counted from git, so a resumed loop never starts again at round 1
+    '**Counting.** The four are the landing\'s code rounds, not the session\'s.',
+    '`gh pr view <url> --json createdAt -q .createdAt`',
+    "`git log --full-history --diff-filter=A --no-renames --since='<createdAt>' -p --format= origin/<default>..HEAD -- docs/reviews/ | grep -c '^+mode: code$'`",
+    'The session\'s first round is that count + 1, so 1 for a PR this session opened.',
+    '`--since-as-filter`',
+    'The count carries across a hold: a resumed loop past its fourth round holds again on its next blocking round.',
+    // p34-5 F24: an over-cap round is a full-cap round, never clean
+    'a full-cap round (one at or over its cap)',
     'A `ci failed` belongs to the round whose clean `head:` it read, and a red Verify run to the round whose fixes it ran.',
     'A check with no title prints `(failure)`, so its key is the name and conclusion alone.',
     'A red Verify run (loop step 7) counts the same way, keyed `verify <command>: <first failing test or error line>`.',
@@ -206,7 +225,9 @@ test('#### The stop rule: the three ADR conditions, keys, infra, max, and the ho
     '`printenv CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`',
     /`max unavailable`[^.]*is a decision for Lachy: `--hold`/,
     'a `review-ledger.py` exit other than 0 or 1 is a hold (`review ledger failed`)',
-    '`review-ledger.py` exit 1 is the stop (`ledger regression`)',
+    '`review-ledger.py` exit 1 is never the stop (loop step 8)',
+    'Any code round from the fourth on whose findings include a blocking one stops the loop with them unfixed (`serious finding open after <N> rounds`)',
+    'A code round from the fourth on with no blocking finding is never a stop',
     "Every stop calls `--hold` with the diagnosis before step 8's report and the banner",
     'leaves the PR open with auto-merge off',
     'A stop never calls the question tool: the question goes on a `Needs your call:` row',
@@ -214,7 +235,11 @@ test('#### The stop rule: the three ADR conditions, keys, infra, max, and the ho
     'the diagnosis as its comment',
   ])
   const adr = collapse(readIf(ADR) ?? '')
-  assert.ok(adr.includes(ADR_STOP), 'the ADR 0028 § 3 wording has drifted from the stop rule')
+  assert.ok(adr.includes(ADR_STOP), 'the ADR 0028 § 3 wording has changed')
+  assert.ok(adr.includes('Amended 2026-10-27 by ADR 0058'), 'ADR 0028 does not point at its ADR 0058 amendment')
+  const adr55 = collapse(readIf(ADR58) ?? '')
+  for (const s of ['A budget of four code rounds', "The ledger's regression stop no longer ends a landing", 'A clean round is a code round with no blocking finding'])
+    assert.ok(adr55.includes(s), `ADR 0058 lacks: ${s}`)
 })
 
 test('mid-loop auto-merge is off, and nothing waits for CI', () => {
@@ -248,10 +273,12 @@ test('the # thread:land-own fence: one land.sh call, last, and no push, gh, forc
 })
 
 test('step 8: the own-branch rows, verbatim', () => {
+  assert.ok(!(STEP8() ?? '').includes('the held row carries the same size'), 'step 8 still points the held row at the clean round\'s size')
   assertHas(STEP8(), 'step 8', [
-    '`landing <top> <branch>: <result line> · review: <N> round(s) at <level>, clean[ · ci: <K> red run(s) fixed]`',
-    '`landing <top> <branch>: held <url> · review: <N> round(s) at <level>, stopped (<stop>)`',
-    '`ledger regression`', '`ci <name> (failure: <title>) failed twice at max`', '`needs your call`', '`max unavailable`',
+    '`landing <top> <branch>: <result line> · review: <N> round(s) at <level>, clean · <L> lines/<F> files[ · filed: [[<task>]] (<M>)][ · ci: <K> red run(s) fixed]`',
+    '`landing <top> <branch>: held <url> · review: <N> round(s) at <level>, stopped (<stop>)[ · <L> lines/<F> files][ · filed: [[<task>]] (<M>)]`',
+    "its size taken the same way at the last reviewed round's `head:`, and omitted when no round was reviewed (a dirty-tree stop)",
+    '`serious finding open after <N> rounds`', '`ci <name> (failure: <title>) failed twice at max`', '`needs your call`', '`max unavailable`',
     '`uncommitted changes outside <branch>`',
     '`Needs your call: <branch> PR <url> — <finding or precondition>`',
     '`landing <top> <branch>: <not landed:|landed|stuck:> …` when the first call ends 7.9 before any review, with no review suffix',
@@ -284,6 +311,7 @@ test('placement, guardrails, edges and the Auto-execute line', () => {
   ])
   assertHas(EDGES(), '§ Edge cases', [
     '`git branch --set-upstream-to origin/<B> <B>`', '**A session ended mid-loop',
+    "§ The stop rule's **Counting**",
     'the close-out landing pushes nothing', 'never fetched into or fast-forwarded',
     "When that branch is the own branch, § Land the own branch pushes it, the close-out commit included",
     '**A dirty tree on the own branch**', '**A `ci failed` with no cause in `<B>`**', '`not landed: not the cwd checkout`',
@@ -291,9 +319,12 @@ test('placement, guardrails, edges and the Auto-execute line', () => {
     'its condition 2 fails at step 4',
   ])
   const desc = lineOf(t, 'description:')
-  assertHas(desc, 'the description', ["lands the session''s own branch: `/fresh-review` inline, fixes, merge queued only after a clean round (§ Land the own branch)"])
+  assertHas(desc, 'the description', ["lands the session''s own branch: `/fresh-review` inline, fixes, merge queued only after a clean round (§ Land the own branch)",
+    'it proposes new vault tasks but files review follow-ups itself'])
+  assert.ok(!desc.includes('vault tasks are the only proposal'), 'the description says vault tasks are the only proposal')
   assertHas(lineOf(t, '- **Auto-execute, no asking**'), 'the Auto-execute line', [
     "lands the session's own branch: `/fresh-review` inline, fixes, merge queued only after a clean round", 'step 7.1',
+    "the landing's follow-up task for its filed findings (**Filing**, ADR 0058)",
   ])
   assertHas(collapse(slice(t, /^## Why this exists/, /^## /) ?? ''), '§ Why this exists', ['land its close-out and its own branch'])
 })

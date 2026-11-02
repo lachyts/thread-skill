@@ -1,17 +1,27 @@
 // A gate never holds an unattended rollout (ADR 0034, p18-2): the prose an LLM lead and planner follow.
 //
 // Pins, in skills/execute/SKILL.md: § 3.7's *Standing approval* (total exposure as the task's ceiling, never a target;
-// credential and irreversible gates never pass; a gate it cannot price asks); § 4.5 step 1.2's Standing approval
+// irreversible gates never pass, a credential only as a declared test credential; a gate it cannot price asks); § 4.5 step 1.2's Standing approval
 // sub-step (first in the step, skipped under a pause, judged once per session key, before the turn's needs-you items,
 // counted as launched); the halt guard (awaiting-sign-off goes to step 5's sign-off form; only an UNVERIFIED stops a
 // cool-down); step 5's sign-off form (await-sign-off, no `status: done`, no retire, no archive move, a `not landed`
 // waiting bullet with the dependants counted, why reconcile-project never misreads it, a phase-close follow-on's
 // re-run commands on the live note path that a later full ceremony re-points, and no question tool); § 6.5's
 // halted-turn exception and (e) exclusion; § 7's designed awaiting-sign-off stop and a stuck bullet with no gate
-// reason; *Reinstate* under a sign-off pause. In skills/schedule/SKILL.md: § 3.6's sweep (the recall floor, never the
-// verdict, every dismissal listed) and its ask-ahead, § 7's `## Decisions (asked ahead <date>)` section and its
-// Planner line, the sanctioned exceptions, and § 0's sign-off sentence. In orient's reshuffle.md: R3's ask-ahead and
-// R5.2's write. Status recommendation 8's sign-off clause, README and CONTEXT.md.
+// reason; *Reinstate* under a sign-off pause; the month line (p30-8, ADR 0034's 2026-10-27 amendment): § 3.7's
+// calendar-month sum from the `signed under the standing approval:` lines, § 6.5's log sentence, step 1.2's `ASK:`
+// reasons and the Don't. In skills/schedule/SKILL.md: § 3.6's sweep (the recall floor, never the verdict, every
+// dismissal listed) and its spend rule (Chorus ADR 0108 d4: spend is recorded, never asked; a limit Lachy names is
+// recorded), § 7's `## Decisions (asked ahead <date>)` section for a named limit, its `## Decisions (recorded <date>)`
+// Planner line for every other spend hit, the sanctioned exceptions, and § 0's sign-off sentence. In orient's
+// reshuffle.md: R3's gates ahead (a spend smell recorded, never grilled) and R5.2's records. Status recommendation
+// 8's sign-off clause, README and CONTEXT.md. The test-credential rule (ADR 0063): § 3.7's *Test credentials* paragraph (its
+// checks in order, the class its own switch, the refresh on a reused tree, the missing-key ASK, a Leg never signing one);
+// schedule § 3.6's recorded-never-asked paragraph with its two re-sweep sentences (a hit inside the recorded Planner line
+// is dismissed and listed; a task holding the line is recorded, never asked) and the serial-path sentence, and § 7's
+// test-credential Planner line, and its Under the chain item 7 with orient-all's item 9 (the twin lists that give a
+// credential hit § 3.6 records its Planner line with no ask-ahead); reshuffle R3's recorded clause with the same two
+// sentences and R5.2's record; asking.md's bullet, execution-fit's ruling (a) qualifier, CONTEXT.md's entry, ADR 0008's amendment and the README.
 //
 // Same shape as execute-signed-gate.test.mjs: every rule lives in one function, checkStanding(files), returning named
 // failures, so the real text and the controls run through identical logic; each control mutates the real text in one
@@ -29,6 +39,10 @@ const real = {
   status: read('skills/status/SKILL.md'),
   readme: read('README.md'),
   context: read('CONTEXT.md'),
+  execfit: read('skills/_shared/execution-fit.md'),
+  asking: read('skills/_shared/asking.md'),
+  orientAll: read('skills/orient-all/SKILL.md'),
+  adr0008: read('docs/adr/0008-a-declared-gate-always-pauses-for-a-human.md'),
 }
 
 const S0 = /^### 0\. /
@@ -40,6 +54,7 @@ const S7 = /^### 7\. /
 const SCH7 = /^### 7\. /
 const R3 = /^## R3\. /
 const R5 = /^## R5\. /
+const DONTS = /^## Don'ts/
 const before = (hay, a, b) => hay.indexOf(a) >= 0 && hay.indexOf(b) >= 0 && hay.indexOf(a) < hay.indexOf(b)
 const lineOf = (text, prefix) => collapse(text.split('\n').find((l) => l.startsWith(prefix)) ?? '')
 
@@ -64,6 +79,8 @@ function checkStanding(f) {
   const reinstate = labelled(f.execute, S45, 'Reinstate (resuming a paused rollout).')
   const turn = labelled(f.execute, S65, 'The turn.')
   const items = labelled(f.execute, S65, 'Needs-you items.')
+  const logLives = labelled(f.execute, S65, 'Where the log lives.')
+  const donts = collapse(section(f.execute, DONTS) ?? '')
   const stuck7 = lineOf(section(f.execute, S7) ?? '', '- `next` reports `halt: stuck`')
   const signOff7 = lineOf(section(f.execute, S7) ?? '', '- `next` reports `halt: awaiting-sign-off`')
   const s36 = collapse(section(f.schedule, S36) ?? '')
@@ -85,9 +102,9 @@ function checkStanding(f) {
     fails.push('step12')
   }
 
-  // halt-guard: awaiting-sign-off goes to step 5's form; only an UNVERIFIED stops a cool-down; a gate never does.
+  // halt-guard: awaiting-sign-off goes to step 5's form; nothing set aside stops a cool-down (ADR 0048); a gate never does.
   if (!guard.includes("`awaiting-sign-off` → step 5's *Completion awaiting sign-off* form") ||
-    !guard.includes('and no UNVERIFIED task among the set-aside entries, ends the turn `waiting`') ||
+    !guard.includes('(a quota or infra cool-down) ends the turn `waiting`') ||
     !guard.includes('A gate-pending task never stops a cool-down') || guard.includes('gated inputs await sign-off')) {
     fails.push('halt-guard')
   }
@@ -118,11 +135,15 @@ function checkStanding(f) {
     fails.push('question-tool')
   }
 
-  // standing-37: § 3.7's paragraph: total exposure, the task's ceiling never a target, credential and irreversible
-  // never pass, a gate it cannot price asks; the sign-off flow says a covered gate never reaches Lachy.
+  // standing-37: § 3.7's paragraph: total exposure, the task's ceiling never a target, irreversible never passes and a
+  // credential only as a declared test credential, a gate it cannot price asks, the month line summed from the log's standing lines, and spend never asked
+  // ahead; the sign-off flow says a covered gate never reaches Lachy.
   if (!standing.includes('**total exposure**') || !standing.includes("it records the total exposure as the task's ceiling, never a target") ||
-    !standing.includes('Credential and irreversible gates never pass under it') || !standing.includes('a gate it cannot price asks') ||
+    !standing.includes('Irreversible gates never pass under it; a credential gate passes only as a declared test credential (ADR 0063') ||
+    !standing.includes('a gate it cannot price asks') ||
     !standing.includes('`(approved <date> under the standing approval: …)`') ||
+    !standing.includes("this calendar month's standing-approved spend") || !standing.includes('`signed under the standing approval:`') ||
+    !standing.includes('Spend is never asked ahead (schedule § 3.6)') ||
     !collapse(section(f.execute, S37) ?? '').includes("A spend gate the standing approval covers never reaches you: step 1.2's *Standing approval* signs it before the turn derives its needs-you items (ADR 0034).")) {
     fails.push('standing-37')
   }
@@ -156,30 +177,45 @@ function checkStanding(f) {
     fails.push('schedule-sweep')
   }
 
-  // ask-ahead: § 3.6 asks the total exposure against the standing approval (or says it is off), never re-asks a
-  // recorded answer, and step 7 records it: the stamp above the standing approval, the Decisions section with both
-  // lines (the Planner line's example and its per-item rule), and the sanctioned-exceptions sentence naming them.
+  // spend-recorded (Chorus ADR 0108 d4): § 3.6 never asks spend; a spend hit is recorded (step 7's Planner line under
+  // `(recorded <date>)`), a limit Lachy names is shown and honoured, and with the approval off every spend gate reaches
+  // him mid-run. Step 7 keeps the `(asked ahead)` section for a named limit (its Spend and Planner lines: the Planner
+  // line's example and its per-item rule), adds the `(recorded)` heading, and the sanctioned-exceptions sentence names
+  // all three records.
   const planner = sch7raw.split('\n').find((l) => l.startsWith('- Planner:')) ?? ''
-  if (!s36.includes('"standing approval off (built-in 0)"') || !s36.includes('is not asked again unless he changes it') ||
-    !s36.includes('An answer above <t> is stamped at step 7 as `spend_approval_usd: <N>`') ||
+  if (!s36.includes('**Spend is recorded, never asked** (Chorus ADR 0108 d4).') ||
+    !s36.includes('step 7 writes its Planner line under `## Decisions (recorded <YYYY-MM-DD>)`') ||
+    !s36.includes('with the standing approval off (built-in 0), every spend gate reaches him mid-run') ||
+    !s36.includes('is shown and honoured, never asked again') || s36.includes('up to what total exposure in USD') ||
     !sch7raw.includes('## Decisions (asked ahead <YYYY-MM-DD>)') ||
     !sch7raw.includes('- Spend: Lachy approved up to <N> USD total exposure for this task at /thread:schedule') ||
+    !sch7raw.includes('## Decisions (recorded <YYYY-MM-DD>)') ||
     !planner.includes('`spend: <what> — cap 50 USD per Login per month across 3 Logins`') ||
     !planner.includes('(never "every push" or "each image")') ||
-    !sch7.includes('the § 3.6 ask-ahead answer: `spend_approval_usd: <N>` above the standing approval, the `## Decisions (asked ahead <date>)` section, and a credential or irreversible sign-off\'s `## Approved gates` bullet')) {
-    fails.push('ask-ahead')
+    !sch7.includes('the § 3.6 records: `spend_approval_usd: <N>` above the standing approval and the `## Decisions (asked ahead <date>)` section for a limit Lachy named, the `## Decisions (recorded <date>)` Planner line for every other spend hit, and a credential or irreversible sign-off\'s `## Approved gates` bullet')) {
+    fails.push('spend-recorded')
   }
 
-  // reshuffle: R3 asks ahead in the grill; R5.2 writes the answer as schedule step 7 does.
-  if (!r3.includes('**(c) gates asked ahead** (ADR 0034)') || !r3.includes("§ 3.6's ask-ahead question") ||
-    !r5.includes('exactly as schedule step 7 does') || !r5.includes('`## Decisions (asked ahead <date>)`')) {
+  // reshuffle: R3 records a spend smell, never grilled, and keeps § 3.6's ask-ahead for a credential or irreversible
+  // gate; R5.2 writes the records as schedule step 7 does, the `(recorded)` section among them.
+  if (!r3.includes('**(c) gates ahead** (ADR 0034)') || !r3.includes('a spend smell is recorded, never grilled') ||
+    !r3.includes("§ 3.6's ask-ahead question") || r3.includes('up to what total exposure in USD') ||
+    !r5.includes('exactly as schedule step 7 does') || !r5.includes('`## Decisions (recorded <date>)`')) {
     fails.push('reshuffle')
+  }
+
+  // month-line (p30-8): § 6.5 says the standing approval's log lines are the month line's ledger, never a push record;
+  // step 1.2's left gates name the month line among their reasons; the Don't forbids writing the log line by hand.
+  if (!logLives.includes('`reconcile-rollout.py approve-gates --standing` also appends') || !logLives.includes('never a push record') ||
+    !sub2.includes('past the month line') ||
+    !donts.includes('nor its `signed under the standing approval:` Needs-you log line')) {
+    fails.push('month-line')
   }
 
   // one-unfinished: a sign-off pause is still the repo's one unfinished rollout, and schedule and status name the path.
   if (!sch0.includes('A rollout awaiting sign-off (`paused_for: sign-off`') ||
     !sch0.includes('sign off, then `/thread:execute`, or `/thread:repair` to defer them') ||
-    !collapse(f.status).includes('With `pausedFor: sign-off` → "sign off each waiting gate (or /thread:repair to defer), then /thread:execute [[<rollout>]]; until then it is this repo\'s one unfinished rollout"')) {
+    !collapse(f.status).includes('With `pausedFor: sign-off` → "sign off each waiting gate (or /thread:repair to defer), then /thread:execute [[<rollout>]]; until then it is this project\'s one unfinished rollout on this repo"')) {
     fails.push('one-unfinished')
   }
 
@@ -189,6 +225,33 @@ function checkStanding(f) {
     !collapse(f.context).includes('Sets its task aside for sign-off, never the rollout (ADR 0008, ADR 0034).') ||
     !collapse(f.context).includes('the Rollout settings key `spend_approval_usd`')) {
     fails.push('docs')
+  }
+  // test-credential (ADR 0063): a declared test credential signs itself at the stop, recorded and never asked ahead.
+  const tc = labelled(f.execute, S37, 'Test credentials (ADR 0063).')
+  const SENT_A = 'A hit inside the recorded test-credential Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the recorded test-credential Planner line)`.'
+  const SENT_B = 'A task that already holds that line is recorded, never asked.'
+  if (!tc.includes("the reading's class-independent steps") || !before(tc, "the reading's class-independent steps", 'the class is set') ||
+    !before(tc, 'the class is set', 'the class-dependent steps') ||
+    !before(tc, 'the class-dependent steps', "the rollout's `env_bootstrap` refreshes the declared file into the task tree with a plain, unconditional `cp`") ||
+    !before(tc, 'with a plain, unconditional `cp`', 'each named key is set in that file') ||
+    !tc.includes('The class is its own switch') ||
+    !tc.includes('re-runs `env_bootstrap` in the task tree before it builds, on a reused tree too') ||
+    !tc.includes('A key missing from the file is an `ASK:` naming it at the stop') ||
+    !tc.includes('A Leg never signs one') ||
+    !s36.includes('**A declared test credential is recorded, never asked** (ADR 0063).') || !s36.includes(SENT_A) || !s36.includes(SENT_B) ||
+    !s36.includes('On § Serial path every credential keeps the ask-ahead: a Leg resolves no class.') ||
+    !sch7raw.split('\n').some((l) => l.startsWith('- Planner: word each test-credential gate')) ||
+    !collapse(f.schedule).includes("a spend hit, or a credential hit § 3.6 records in the repo's test-credential class, gets its Planner line as on every run") ||
+    !collapse(f.orientAll).includes("and a spend hit, or a credential hit § 3.6 records in the repo's test-credential class (ADR 0063), also gets its step 7 `## Decisions (recorded <date>)` Planner line") ||
+    !r3.includes("A credential hit whose context names only test-mode or staging use of keys the repo's declared class holds is recorded, never grilled (ADR 0063)") ||
+    !r3.includes(SENT_A) || !r3.includes(SENT_B) ||
+    !r5.includes("the test-credential Planner line (schedule step 7's, ADR 0063)") ||
+    !collapse(f.asking).includes("A credential in its repo's declared test-credential class is never asked ahead (ADR 0063)") ||
+    !collapse(f.execfit).includes("a repo's declared test credential (ADR 0063)") ||
+    !f.context.includes('**Test credential**') ||
+    !f.adr0008.includes('Amended by ADR 0063') ||
+    !collapse(f.readme).includes('The class is its own switch, independent of `spend_approval_usd`')) {
+    fails.push('test-credential')
   }
   return fails
 }
@@ -200,7 +263,7 @@ test('execute, schedule, reshuffle, status, README and CONTEXT.md hold every sta
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
 const RULES = ['step12', 'halt-guard', 'form', 'question-tool', 'standing-37', 's7', 'reinstate', 'exclusion-e',
-  'schedule-sweep', 'ask-ahead', 'reshuffle', 'one-unfinished', 'docs']
+  'schedule-sweep', 'spend-recorded', 'reshuffle', 'month-line', 'one-unfinished', 'docs', 'test-credential']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -267,13 +330,29 @@ test('control: § 3.6 dropping the dismissal listing fails schedule-sweep', () =
     'schedule-sweep', 'silent dismissals')
 })
 
-test('control: § 7 dropping the Planner line fails ask-ahead', () => {
-  const l = real.schedule.split('\n').find((x) => x.startsWith('- Planner:'))
-  only('schedule', l + '\n', '', 'ask-ahead', 'no Planner line')
+test('control: § 3.6 asking the spend question again fails spend-recorded', () => {
+  only('schedule', '**Spend is recorded, never asked** (Chorus ADR 0108 d4).',
+    '**Spend is recorded, never asked** (Chorus ADR 0108 d4). Ask: "up to what total exposure in USD?"', 'spend-recorded', 'asks again')
 })
 
-test('control: R5.2 without the ask-ahead write fails reshuffle', () => {
+test('control: § 7 dropping the Planner line fails spend-recorded', () => {
+  const l = real.schedule.split('\n').find((x) => x.startsWith('- Planner:'))
+  only('schedule', l + '\n', '', 'spend-recorded', 'no Planner line')
+})
+
+test('control: R3 grilling a spend smell, or R5.2 without the step-7 write, fails reshuffle', () => {
+  only('reshuffle', 'a spend smell is recorded, never grilled', 'a spend smell gets the spend question', 'reshuffle', 'grilled')
   only('reshuffle', 'exactly as schedule step 7 does', 'as the task-writer prefers', 'reshuffle', 'no write')
+})
+
+test('control: § 6.5 without the standing lines, or step 1.2 without the month line, fails month-line', () => {
+  const l = real.execute.split('\n').find((x) => x.startsWith('**Where the log lives.**')) ?? ''
+  const from = l.slice(l.indexOf(' `reconcile-rollout.py approve-gates --standing` also appends'))
+  assert.ok(from.length > 1 && from.includes('never a push record'), 'control setup: the standing-lines sentence')
+  const sentence = from.slice(0, from.indexOf('never a push record') + from.slice(from.indexOf('never a push record')).indexOf('.') + 1)
+  only('execute', sentence, '', 'month-line', 'no standing lines')
+  only('execute', "the item's `→` detail (over the limit, past the month line, unpriceable, a bounce, a credential outside the declared test class, an `env_bootstrap` that may not refresh its file, or a key missing from it). Exit 1:",
+    "the item's `→` detail (over the limit, unpriceable, a bounce, a credential outside the declared test class, an `env_bootstrap` that may not refresh its file, or a key missing from it). Exit 1:", 'month-line', 'no month line in step 1.2')
 })
 
 test('control: schedule § 0 without the sign-off sentence fails one-unfinished', () => {
@@ -284,7 +363,33 @@ test('control: a README without the key fails docs', () => {
   only('readme', 'sets\n`spend_approval_usd` (whole US dollars) under `[defaults]`', 'sets it', 'docs', 'no README line')
 })
 
-test('the rules are all named (13) and each has a control', () => {
-  assert.equal(RULES.length, 13)
+test('control: each test-credential pin, removed in one place, fails test-credential alone', () => {
+  const TC = 'test-credential'
+  only('execute', ' The class is its own switch: it signs at', ' It signs at', TC, '§ 3.7: no own switch')
+  only('execute', ', on a reused tree too, so the plain `cp` brings the key in', ', so the plain `cp` brings the key in', TC, '§ 3.7: no reused-tree refresh')
+  only('execute', 'A key missing from the file is an `ASK:` naming it at the stop', 'A missing key is signed anyway at the stop', TC, '§ 3.7: no missing-key ask')
+  only('execute', ' A Leg never signs one:', ' A Leg may sign one:', TC, '§ 3.7: a Leg signs one')
+  only('execute', "the rollout's `env_bootstrap` refreshes the declared file into the task tree with a plain, unconditional `cp`; ", '', TC, '§ 3.7: no refresh check')
+  only('schedule', '**A declared test credential is recorded, never asked** (ADR 0063).', '**A declared test credential is asked ahead** (ADR 0063).', TC, '§ 3.6: asked ahead')
+  only('schedule', ' A hit inside the recorded test-credential Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the recorded test-credential Planner line)`.', '', TC, '§ 3.6: no sentence (a)')
+  only('schedule', ' A task that already holds that line is recorded, never asked.', '', TC, '§ 3.6: no sentence (b)')
+  only('schedule', ' On § Serial path every credential keeps the ask-ahead: a Leg resolves no class.', '', TC, '§ 3.6: no serial sentence')
+  const l = real.schedule.split('\n').find((x) => x.startsWith('- Planner: word each test-credential gate'))
+  only('schedule', l + '\n', '', TC, '§ 7: no test-credential Planner line')
+  only('schedule', ", or a credential hit § 3.6 records in the repo's test-credential\n   class, gets its Planner line", ' gets its Planner line', TC, 'Under the chain 7: spend alone')
+  only('orientAll', "a spend hit, or a credential hit § 3.6 records in the repo's test-credential class (ADR 0063), also gets", 'a spend hit also gets', TC, 'orient-all 9: spend alone')
+  only('reshuffle', 'is recorded, never grilled (ADR 0063)', 'is grilled ahead (ADR 0063)', TC, 'R3: grilled')
+  only('reshuffle', 'A hit inside the recorded\n  test-credential Planner line is dismissed', 'A hit inside the recorded\n  test-credential Planner line is asked', TC, 'R3: no sentence (a)')
+  only('reshuffle', 'A task that already holds that line is recorded, never\n  asked.', 'A task that already holds that line is asked again.', TC, 'R3: no sentence (b)')
+  only('reshuffle', "the test-credential Planner line (schedule step 7's, ADR 0063)", 'nothing', TC, 'R5: no record')
+  only('asking', "- A credential in its repo's declared test-credential class is never asked ahead (ADR 0063): the standing approval signs it at the stop, or asks then.\n", '', TC, 'asking.md: no bullet')
+  only('execfit', "a repo's declared test credential (ADR 0063)", 'none', TC, 'execution-fit: no qualifier')
+  only('context', '- **Test credential** —', '- **Safe key** —', TC, 'CONTEXT.md: no entry')
+  only('adr0008', 'Amended by ADR 0063', 'Amended by a later ADR', TC, 'ADR 0008: no amendment')
+  only('readme', 'The class is its own switch, independent of\n`spend_approval_usd`', 'The class needs\n`spend_approval_usd`', TC, 'README: no own switch')
+})
+
+test('the rules are all named (15) and each has a control', () => {
+  assert.equal(RULES.length, 15)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

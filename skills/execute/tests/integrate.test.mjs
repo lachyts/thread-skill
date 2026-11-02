@@ -1,7 +1,7 @@
 // p12-6 (ADR 0030 decision 3): Integration's trouble path is its own small Workflow call.
 //
 // args.mode: 'integrate' runs the integrator (or, on P1, only the judge) in the task's worktree and returns
-// ONE row: the task row's 22 keys plus `integration`. These fixtures run the WHOLE script through runTask() with a
+// ONE row: the task row's 23 keys plus `integration`. These fixtures run the WHOLE script through runTask() with a
 // label-keyed stub that throws on any label it was not given (so a stray dispatch fails loudly) and
 // records every dispatch's opts. The rendered steps themselves run in tests/integration-tree.test.sh; the
 // note side of the stage markers runs in tests/integration-marker-roundtrip.test.mjs.
@@ -21,7 +21,7 @@ const T = loadEngine([
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman', 'reviewVerdicts',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman', 'reviewVerdicts', 'flakes',
 ]
 const STATUSES = ['review', 'review-blocked', 'blocked', 'plan-blocked', 'gate-pending']
 const sha = (c) => c.repeat(40)
@@ -269,7 +269,7 @@ test('b4b: the step-back reviser and the integrator agree — the plan is refere
 })
 
 // p27-1: the integrate args carry no plan; a stray one (an old lead habit, a hand-built Lost-call relaunch) is
-// tolerated and ignored, never rendered: refusing it would read as a Lost call.
+// tolerated and ignored, never rendered: refusing it would be an *Args refusal*, which halts the entry.
 test('p27-1: a stray integration.plan is ignored and never rendered', async () => {
   const I = mkI({ plan: 'STRAY ' + 'y'.repeat(61000) })
   assert.equal(T.integrationArgsError(mkArgs(I)), '')
@@ -577,6 +577,32 @@ test('e1c: a conflict blockKind without the merge step\'s evidence fails closed 
   assert.equal(T.integrationBlockOf(g.row.blockerDiagnosis), '')
   assert.deepEqual(g.row.integration.triggers, [])
   setAsideDiags.push(['e1c gate', g.row.blockerDiagnosis])
+})
+
+// p29-9 (ADR 0050): the integrator's own verifier runs apply the Flake check; it returns each Flake in `flakes`, which the
+// engine sanitises (flakesOf) onto the row's `flakes` on every outcome, an integrated row and a set-aside alike.
+test('f29: the integrator\'s flakes reach the row: integrated, a red set-aside, a dead judge; none by default', async () => {
+  const FL = [{ test: 'tests/test_t.py::test_slow', sha: M.toUpperCase() }, { test: 'tests/test_t.py::test_slow', sha: M }, { test: 'bad\nid', sha: M }]
+  const want = [{ test: 'tests/test_t.py::test_slow', sha: M }]
+  const ok1 = await run(mkArgs(mkI()), { [ILABEL]: { ...ir(), flakes: FL } })
+  clean(ok1)
+  assert.equal(ok1.row.status, 'review')
+  assert.deepEqual(ok1.row.flakes, want)
+  assert.equal(ok1.logs.filter((l) => /^flakes: integrate:proj-fix-a: dropped 1 malformed/.test(l)).length, 1)
+  const red = await run(mkArgs(mkI()), { [ILABEL]: blockedIr('still red', { blockKind: 'red', verified: false, mergeLog: ir({ state: 'merged' }).mergeLog, flakes: FL }) })
+  clean(red)
+  setAside(red, 'f29 red')
+  assert.deepEqual(red.row.flakes, want, 'kept on a set-aside as well')
+  const judged = await run(mkArgs(mkI({ trouble: ['conflict'] })), { [ILABEL]: { ...ir({ state: 'merged', conflicts: ['a.js'] }), flakes: FL }, [JLABEL(2)]: jv() })
+  clean(judged)
+  assert.deepEqual(judged.row.flakes, want, 'a judged integration keeps the integrator\'s')
+  const none = await run(mkArgs(mkI()), { [ILABEL]: ir() })
+  assert.deepEqual(none.row.flakes, [])
+  const threw = await run(mkArgs(mkI()), { [ILABEL]: new Error('boom') })
+  assert.deepEqual(threw.row.flakes, [])
+  const p1 = await run(mkArgs(mkI({ trouble: ['shared-file'], leadMerge: { mergeCommit: M, headSha: M, baseSha: B1, verified: true } })), { [JLABEL(2)]: jv() })
+  clean(p1)
+  assert.deepEqual(p1.row.flakes, [], 'P1 runs no integrator')
 })
 
 test('e1d: a named verifier red at Integration; a conflict resolved, then red, reads red, never conflict', async () => {
@@ -952,13 +978,13 @@ test('arg validation: every bad field throws before any dispatch', async () => {
   ]
   for (const [name, I] of bad) {
     const r = await run(mkArgs(I))
-    assert.match(String(r.error && r.error.message), new RegExp(`^args\\.integration: .*${name}`), name)
+    assert.match(String(r.error && r.error.message), new RegExp(`^thread:args-refused: args\\.integration: .*${name}`), name)
     assert.equal(r.calls.length, 0, name)
   }
   const shapes = [
     [mkArgs(mkI(), { repoPath: '' }), /repoPath/], [mkArgs(mkI(), {}, { scope: 'read-only' }), /read-only/],
     [mkArgs(mkI(), {}, { maxIterations: 0 }), /maxIterations/], [mkArgs(mkI(), {}, { maxReviewRounds: 0 }), /max_review_rounds = 0/],
-    [mkArgs(mkI(), { mode: 'merge' }), /^args\.mode: refusing "merge"/], [mkArgs(undefined), /args\.integration: must be one object/],
+    [mkArgs(mkI(), { mode: 'merge' }), /^thread:args-refused: args\.mode: refusing "merge"/], [mkArgs(undefined), /args\.integration: must be one object/],
     [{ ...mkArgs(mkI()), mode: undefined }, /only with args\.mode 'integrate'/],
     [mkArgs(mkI(), {}, { resume: { stage: 'revise' } }), /never mode 'integrate'/],
   ]
@@ -1070,7 +1096,7 @@ test('S5: bad resume args throw before any dispatch', async () => {
   ]
   for (const [resume, re] of bad) {
     const r = await run(resumeArgs(resume))
-    assert.match(String(r.error && r.error.message), /^args\.task\.resume: /)
+    assert.match(String(r.error && r.error.message), /^thread:args-refused: args\.task\.resume: /)
     assert.match(String(r.error && r.error.message), re)
     assert.equal(r.calls.length, 0)
   }
@@ -1191,7 +1217,7 @@ test('h2: a seeded revise whose live history ends in an empty round passes and r
   assert.ok(!/^Round 4/m.test(later.row.blockerDiagnosis), later.row.blockerDiagnosis)
   assert.deepEqual(JSON.parse(JSON.stringify(T.parseIntegrationMarker(later.row.blockerDiagnosis).history)), HIST2)
   const empty = await run({ ...args, task: mkTask({ resume: { ...resume, reviewHistory: [{ round: 1, feedback: [] }], reviewRoundsUsed: 1 } }) })
-  assert.match(String(empty.error && empty.error.message), /^args\.task\.resume: reviewHistory must carry at least one round with feedback/)
+  assert.match(String(empty.error && empty.error.message), /^thread:args-refused: args\.task\.resume: reviewHistory must carry at least one round with feedback/)
   assert.equal(empty.calls.length, 0)
 })
 

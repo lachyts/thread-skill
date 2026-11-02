@@ -4,8 +4,11 @@
 # `next` refuses until schedule step 7's last write removes it), then fed to reconcile-rollout.py `next` /
 # `status`, which read the `## Queue` rows as the schedule rank: three tasks on one file give one queue, no
 # waves (Q2); a Solo task ranked first holds the rest (Q3); a frontmatter dependency holds its dependant
-# (Q4); a head Solo pair at `normal` starts ahead of `high` tasks (Q5). `cited` lists the paths the not-yet-merged
-# tasks cite, for execute § 2.7's pushed-base scoping (ADR 0042). Temp notes only; no vault, no network. bash 3.2-compatible (macOS).
+# (Q4); a head Solo pair at `normal` starts ahead of `high` tasks (Q5). A project's `Named re-run:` stamped as step 6
+# says (Q6) reads back through the lead's own `verify-timeout` as `namedRerun`, and the lead's Flake check runs with it;
+# none leaves the line commented and no key; one the lead would refuse is step 6's exit 2. `cited` lists the paths
+# the not-yet-merged tasks cite, for execute § 2.7's pushed-base scoping (ADR 0042). Temp notes only; no vault, no
+# network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
@@ -19,7 +22,8 @@ TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
-# Its one fresh Away file (p28-1, execute away.md) runs each rollout to its own ceiling, never the Trickle.
+# Its one fresh Away file (p28-1, execute away.md), its Away cap 99 never binding (p29-8), runs each rollout to its own
+# ceiling, never the Trickle or the Away cap.
 EH="$TMP/settings-home"; mkdir -p "$EH"; away_file "$EH" 2026-10-02T00:00:00Z
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
@@ -30,7 +34,8 @@ scen() { D="$TMP/$1"; mkdir -p "$D"; echo "== $1"; }
 # render <slug> <queue rows> <file-set lines> — the template, every placeholder substituted, as $D/<slug>.md
 # (schedule step 6: the note is born `incomplete: true`). The four rollout settings come from schedule step 2.8's
 # real path: rollout-settings.py --repo <the Project root>, under HOME=$RH (default: an empty dir, so the
-# built-ins) with the Project root $RREPO (default $D).
+# built-ins) with the Project root $RREPO (default $D). NAMED=<cmd> stamps the project's `Named re-run:` as step 6
+# does: the whole `# named_rerun:` line becomes `named_rerun: "<cmd>"`, single-quoted when it holds a " or a \.
 RS="$root/skills/_shared/scripts/rollout-settings.py"
 render() {
   local rh="${RH:-$TMP/render-home}" repo="${RREPO:-$D}" settings
@@ -52,6 +57,12 @@ vals = {
 text = open(tpl).read()
 for k, v in vals.items():
     text = text.replace("{{%s}}" % k, v)
+import os, re
+named = os.environ.get("NAMED")
+if named is not None:
+    q = "'" if ('"' in named or "\\" in named) else '"'
+    text, n = re.subn(r"(?m)^# named_rerun:.*$", lambda _m: f"named_rerun: {q}{named}{q}", text)
+    assert n == 1, "the template has no # named_rerun: line"
 open(out, "w").write(text)
 PY
 }
@@ -169,6 +180,41 @@ sed -i.bak 's/^status: open$/status: done/' "$D/p1.md"; rm -f "$D/p1.md.bak"
 ok "$(q "$(nxt)" 'd["start"]')" '["p2"]' "Q5: once it merges the second Solo row starts"
 sed -i.bak 's/^status: open$/status: done/' "$D/p2.md"; rm -f "$D/p2.md.bak"
 ok "$(q "$(nxt)" 'd["start"]')" '["h1","h2","h3"]' "Q5: once both merge the high tasks start"
+
+# ── Q6: the project's Named re-run reaches the lead (schedule steps 2.5 and 6, ADR 0050) ──────────────────────────
+# vt <note>: the lead's entry check, which step 6's *Check the stamped commands* runs on the note just written.
+vt() { HOME="$EH" python3 "$RR" verify-timeout --rollout "$1" > "$D/vt.out" 2> "$D/vt.err"; vrc=$?; }
+scen q6
+render ro "$(row 1 a —)" ""
+ok "$(grep -c '^# named_rerun: ' "$D/ro.md")|$(grep -c '^named_rerun:' "$D/ro.md")" "1|0" "Q6: no Named re-run → the template's line stays commented out"
+vt "$D/ro.md"
+ok "$vrc|$(q "$(cat "$D/vt.out")" '"namedRerun" in d')" "0|false" "Q6: … and verify-timeout prints no namedRerun (the lead's red stays red)"
+NAMED='scripts/test -n0 {tests}' render ro "$(row 1 a —)" ""
+ok "$(grep -c '^named_rerun: "scripts/test -n0 {tests}"$' "$D/ro.md")|$(grep -c '^# named_rerun:' "$D/ro.md")" "1|0" "Q6: a Named re-run → stamped double-quoted, the commented line replaced"
+vt "$D/ro.md"
+ok "$vrc|$(q "$(cat "$D/vt.out")" 'd["namedRerun"]')" '0|"scripts/test -n0 {tests}"' "Q6: … verify-timeout reads it back as namedRerun"
+NAMED='sh -c "exit 0" x {tests} # kept' render ro "$(row 1 a —)" ""
+ok "$(grep -cF "named_rerun: 'sh -c \"exit 0\" x {tests} # kept'" "$D/ro.md")" 1 "Q6: one holding a \" → single-quoted, its # kept inside the quotes"
+vt "$D/ro.md"
+ok "$vrc|$(q "$(cat "$D/vt.out")" 'd["namedRerun"]')" '0|"sh -c \"exit 0\" x {tests} # kept"' "Q6: … read back byte for byte"
+# The lead's Flake check runs with what schedule stamped: namedRerun passed as --named-rerun (execute's verify line).
+G="$D/repo"; git init -q "$G"; mkdir -p "$G/tests"; echo t > "$G/tests/test_a.py"; echo s > "$G/src.py"
+git -C "$G" add . && git -C "$G" -c user.name=t -c user.email=t@t commit -q -m base; GB=$(git -C "$G" rev-parse HEAD)
+echo task > "$G/src.py"; git -C "$G" -c user.name=t -c user.email=t@t commit -q -am task
+VER='n=$(( $(cat ../n 2>/dev/null || echo 0) + 1 )); echo $n > ../n; [ $n -gt 1 ] || { echo "FAILED tests/test_a.py::test_t"; exit 1; }'
+NRCMD=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["namedRerun"])' "$D/vt.out")
+python3 "$root/skills/execute/scripts/lead-integrate.py" verify --tree "$G" --out "$D/int/v" --timeout 60 --verifier "$VER" \
+  --diff-base "$GB" --named-rerun "$NRCMD" > /dev/null 2>&1
+ok "$(cat "$D/int/v.rc" 2>/dev/null)|$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["verdict"], d["flakes"])' "$D/int/v.flake.json" 2>/dev/null)" \
+  "0|flake ['tests/test_a.py::test_t']" "Q6: … and the lead's Flake check runs with it: an out-of-diff red its named re-run and confirming run clear is a Flake"
+has "$(cat "$D/int/v.log")" "== named re-run: sh -c \"exit 0\" x tests/test_a.py::test_t # kept" "Q6: … the named re-run is the stamped command, {tests} filled"
+NAMED='scripts/test -n0' render ro "$(row 1 a —)" ""
+vt "$D/ro.md"
+ok "$vrc|$(cat "$D/vt.out")" "2|" "Q6: a stamp with no {tests} → verify-timeout exit 2, no stdout: step 6's check stops the run"
+has "$(cat "$D/vt.err")" "named_rerun:" "Q6: … its ERROR line names the key"
+NAMED='r {tests} {tests}' render ro "$(row 1 a —)" ""
+vt "$D/ro.md"
+ok "$vrc" 2 "Q6: … as does one holding {tests} twice"
 
 # ── cited: the paths the not-yet-merged tasks cite, for execute § 2.7's pushed-base scoping (ADR 0042) ───────
 scen cited

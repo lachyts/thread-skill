@@ -31,7 +31,7 @@ export const meta = {
 //                                    //   rungs: [{ name, model, effort, judge, review }, …] }, bottom first.
 //                                    //   Fixed for the call: a resume re-passes its call's own ladder, so an
 //                                    //   edit reaches a task at its next call. Validated (ladderArgsError)
-//                                    //   before any dispatch, in both modes. Absent ⇒ the built-in ladder (a
+//                                    //   before any dispatch (argsRefused), in both modes. Absent ⇒ the built-in ladder (a
 //                                    //   Lost-call resume of a call from before 3.0.0); that call's retired
 //                                    //   tier-ceiling and judge-pin args are ignored, never an error.
 //   knownBaselineFailures : string[],// optional; "test_id — reason" lines for tests already red on a
@@ -56,11 +56,12 @@ export const meta = {
 //                                    //   (execute § 3's verify-timeout `verifySlot`, copied verbatim). Set ⇒ every verifier line
 //                                    //   the engine renders runs as `<scrub> python3 '<script>' run --slots N --
 //                                    //   bash -c '<verifier>'` (slotted), so at most N suites run at once on the
-//                                    //   machine, with SLOT_TEXT beside it; the four TASK_TREE_RULE agents carry
-//                                    //   slotRule after KILL_RULE; and the integrate call's line carries
+//                                    //   machine, with SLOT_TEXT beside it; the four TASK_TREE_RULE agents and the
+//                                    //   review judge carry slotRule after KILL_RULE; and the integrate call's line carries
 //                                    //   `--priority` (engine-only: verifySlotArgsError refuses any key but script
 //                                    //   and slots, so no lead can give a task call the Integration priority).
-//                                    //   Absent/null is refused before any dispatch, in both modes (estate ADR
+//                                    //   Absent/null is refused before any dispatch (argsRefused: the sentinel
+//                                    //   thread:args-refused, execute § 4.5 *Args refusal*), in both modes (estate ADR
 //                                    //   0009 d4: no lead passed it while it was optional). A resume re-passes
 //                                    //   its call's own args on its own version-keyed engine, so a call launched
 //                                    //   without it, on an engine that took it as optional, resumes there.
@@ -76,9 +77,21 @@ export const meta = {
 //                                    //   PLAN_JUDGE's schema (byte-identical). A value that is not an absolute
 //                                    //   path ending /gated_inputs.py (or holds a quote, backslash or control
 //                                    //   character) is logged once and read as absent, never an error.
+//   touched     : string,            // optional (p31-1, estate ADR 0009 d1); the rollout's `touched:` key, a path
+//                                    //   pattern naming one changed module's test files with `{module}` (e.g.
+//                                    //   "tests/test_{module}.py"). The full suite (the verifier) runs at two
+//                                    //   Checkpoints per task, a code-writing agent's last check before it opens
+//                                    //   or updates its PR (the implementer's, and each reviser's) and Integration
+//                                    //   before the merge; every other verify runs the touched tests, and this
+//                                    //   pins how an agent finds them (touchedTests). Only task-mode prompts read
+//                                    //   it (every task call and seeded revise); Integration's prompts never do.
+//                                    //   Absent, '' or refused by touchedOf (not 1 to 200 characters of a path or
+//                                    //   glob with `{module}` in it, or one starting with `-`, a runner option)
+//                                    //   ⇒ no pin clause; a refused value is logged once in task mode and read
+//                                    //   as absent, never an error.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
-//                                    //   any dispatch, as is a missing, null or array `task`.
+//                                    //   any dispatch (argsRefused), as is a missing, null or array `task`.
 //       slug            : string,    // task note basename, e.g. "giflab-fix-coalesce"
 //       taskPath        : string,    // absolute path to the task note
 //       scope           : "single-file" | "cross-cutting" | "read-only",
@@ -123,7 +136,7 @@ export const meta = {
 //                                    //   note), then the unchanged judge loop.
 //                                    //   No round left ⇒ review-blocked with no dispatch. A seeded call that
 //                                    //   stops blocked writes REVISE_MARKER + `revise stopped: <why>` + the
-//                                    //   history. Validated (resumeArgsError) before any dispatch: the history
+//                                    //   history. Validated (resumeArgsError) before any dispatch (argsRefused): the history
 //                                    //   strictly ascending with at least one round that has feedback, its
 //                                    //   last round = reviewRoundsUsed, branch/worktreePath the computed ones,
 //                                    //   never a read-only task. A round with empty feedback (reviewLoop
@@ -133,9 +146,9 @@ export const meta = {
 //   mode        : string,            // optional (p12-6); absent or 'task' ⇒ the task's own call, unchanged
 //                                    //   (byte-identical prompts, labels and row). 'integrate' ⇒ Integration's
 //                                    //   trouble path (ADR 0030 decision 3) with args.integration. Any other
-//                                    //   value throws before dispatch.
+//                                    //   value is refused before dispatch (argsRefused).
 //   integration : object,            // mode 'integrate' only; validated (integrationArgsError) before any
-//                                    //   dispatch — a bad value is a lead bug, not a task block:
+//                                    //   dispatch (argsRefused) — a bad value is a lead bug, not a task block:
 //       prUrl, branch, worktreePath  //   the task's PR; branch = audit-fix/<alias>, worktreePath = the task tree.
 //       headSha         : string,    // the ANCHOR (40-hex) — always ANCHOR_RECIPE's output, never "the
 //                                    //   approved head" by assumption (see the lead contract below).
@@ -169,8 +182,9 @@ export const meta = {
 // The Integration log. reconcile-rollout.py stamps `ready:` when a task's status changes to review, and
 // appends one line per Integration call under the note's `## Integration log`, from this row's
 // `integration` field: `<startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha>
-// wait=<n|-> duration=<n|-> triggers=<list|->`. It is the durable record the clean path and the
-// review-blocked rule below read.
+// wait=<n|-> duration=<n|-> triggers=<list|-> active=<n|->`. It is the durable record the clean path and the
+// review-blocked rule below read. duration is metrics.durationMinutes, the wall time; active (p29-13) is
+// reconcile's own, the wall less the stalls the Run record logs inside it, since this sandbox reads no record.
 // The anchor (ADR 0030 decision 3: a merge already in the branch is still judged). Every Integration of a
 // task pins one anchor: integration.headSha, with taskBase = merge-base(anchor, origin/<default>). The
 // anchor is ALWAYS ANCHOR_RECIPE's output on the PR head (render the constant verbatim and pin the copy):
@@ -243,7 +257,7 @@ export const meta = {
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
 //   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, needsHuman, gatedInputs, plan,
-//   reviewVerdicts }] }
+//   reviewVerdicts, flakes }] }
 // — the pre-p12-5 envelope with exactly one row, the called task's, the shape reconcile-rollout.py reads —
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending. The rung record (ADR 0029
 // decision 7): startRung is the rung the call started on, rung the one it ended on (reconcile stamps it as
@@ -280,6 +294,12 @@ export const meta = {
 // reconcile writes them once (one review-verdict Run-record event per verdict_key). [] when no round was judged
 // (read-only, the pre-flight block, plan-blocked, a stop before the judge) and on every integrate row: an
 // Integration re-review is not a master-review round.
+// flakes (p29-9, ADR 0050) is [{ test, sha }]: every Flake this call's code-writing agents returned (an implementer's,
+// a reviser's; an integrate row's, its integrator's), each a test whose verifier red outside the task's diff cleared
+// on its named re-run and one confirming run on the same tree. Sanitised and deduped by flakesOf (a one-line test of
+// at most 300 characters, a 7-40 hex sha lowercased, at most 20), kept on every status, a stage throw included; []
+// when there are none (read-only, the pre-flight block, plan-blocked, a dead agent). reconcile logs each one and
+// files it for its repo (one follow-up per test), never as the task's to fix.
 // A mode 'integrate' row carries one more key, `integration`: { outcome: integrated | rejected | set-aside,
 // path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
 // (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
@@ -336,7 +356,7 @@ const IMPL_RESULT = {
   properties: {
     verified: { type: 'boolean', description: 'true if the verifier reached the accepted green state (exit 0, or — when a baseline manifest is present — only known-baseline tests fail, each matching its listed reason) before the PR was opened' },
     blocked: { type: 'boolean', description: 'true if Ralph exhausted max iterations or the worktree was unsafe' },
-    escalate: { type: 'boolean', description: 'true ONLY when your instructions gave you a ONE-SHOT verifier run and it was red — the task climbs one rung and hands over. Always false when you ran the full verification loop or did no implementation.' },
+    escalate: { type: 'boolean', description: 'true ONLY when your instructions gave you a ONE-SHOT verification (the touched tests, then the verifier) and it was red — the task climbs one rung and hands over. Always false when you ran the full verification loop or did no implementation.' },
     prUrl: { type: 'string', description: 'PR URL, or empty string when blocked / read-only' },
     branch: { type: 'string', description: 'branch name, or empty string' },
     worktreePath: { type: 'string', description: 'absolute worktree path from git rev-parse --show-toplevel' },
@@ -344,6 +364,7 @@ const IMPL_RESULT = {
     summary: { type: 'string', description: 'one-paragraph summary of what changed and was tested' },
     gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the task needs that the note\'s "## Approved gates" does not cover ("spend: <what> — cap N USD", one line whose Cap holds the whole spend, with how it splits in blockerDiagnosis / "credential: <what>" / "irreversible: <what>"). Omit or empty otherwise.' },
     needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
+    flakes: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { test: { type: 'string' }, sha: { type: 'string' } }, required: ['test', 'sha'] }, description: 'ONLY when your Flake check cleared a verifier red (ADR 0050): one entry per test that failed the first run, { test: its name exactly as the verifier printed it, sha: the tree HEAD it failed on }. Omit or empty otherwise.' },
   },
   required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
 }
@@ -415,42 +436,107 @@ const RM_RULE = 'Removing files (hard rule, the 2026-10-01 stall): remove a scra
 const KILL_RULE = 'Stopping processes (hard rule, the 2026-10-04 incident): stop only a process you started yourself, by the pid or process group you recorded when you started it (`kill <pid>`, `kill -- -<pgid>`). Never stop one by name or pattern (`pkill`, `killall`, `kill $(pgrep ...)`): the lead, other agents and other sessions run the same verifier on this machine, and an implementer whose `pkill -n` on the verifier pattern killed the Integration verify of the lead is why this rule exists.'
 
 // Verify slots (p23-4, Chorus ADR 0098 d6): at ceiling 4 every agent's verifier is a full suite, and on 2026-10-17
-// uncapped suites from several sessions drove one machine to load 66 and lost a merge to a load flake. With
-// args.verifySlot set (required since estate ADR 0009 d4; the renderers below still take it absent, for the
-// tests), every verifier line the engine renders goes through scripts/verify-slot.py, which holds
-// one of the machine's `verify_slots` slots for the suite's life and ends the suite (its guard) if the wrapper is
-// killed. shq quotes one POSIX word ('…', each ' written '\''), so the verifier reaches `bash -c` byte for byte.
+// uncapped suites from several sessions drove one machine to load 66 and lost a merge to a load flake. args.verifySlot
+// is required (estate ADR 0009 d4: the entry refuses a call without it, an *Args refusal*), so every verifier line the
+// engine renders goes through scripts/verify-slot.py, which holds one of the machine's `verify_slots` slots for the
+// suite's life and ends the suite (its guard) if the wrapper is killed. The renderers' unslotted branches (slotted()'s
+// scrubbed() and the `slot ? … : ''` fragments below) are dead outside the tests: they are kept only as the byte-pin
+// baseline (prompt-invariants' unslot() and the PRE_P31 pins compare each slotted prompt with its unslotted bytes plus
+// exactly the slot pieces), so no prompt byte changed when the slot became required (p32-1).
+// shq quotes one POSIX word ('…', each ' written '\''), so the verifier reaches `bash -c` byte for byte.
 function shq(s) {
   return `'${String(s).replace(/'/g, "'\\''")}'`
 }
 
-// The verifier line an agent runs: scrubbed() when slot is absent (byte-identical); else the scrub, then the
-// wrapper, with `--priority` only from integrationVerify (the serial lane's own agent verifier).
+// The verifier line an agent runs: the scrub, then the wrapper, with `--priority` only from integrationVerify (the
+// serial lane's own agent verifier); scrubbed() when slot is absent, the tests' byte-pin baseline only (above).
 function slotted(verifier, slot) {
   if (!slot) return scrubbed(verifier)
   return `${GIT_ENV_SCRUB} python3 ${shq(slot.script)} run --slots ${slot.slots}${slot.priority ? ' --priority' : ''} -- bash -c ${shq(verifier)}`
 }
 
 // What an agent needs to know about the wrapped line. Static, single-quoted, one line: no apostrophe, no git span.
-const SLOT_TEXT = 'The wrapped verifier first waits for a free verify slot on this machine (a `verify-slot: waiting …` line on stderr): that wait is not a failure or a hang and never counts as an iteration. Run it in the background with a long timeout (up to 7200000 ms) and wait for it. To stop your own run, kill the wrapper by the pid you recorded (`kill <pid>`): its guard ends the suite with it. Never run the bare verifier, and never stop a run of another session.'
+// p31-3: an agent cannot wait for its run by ending its turn. A foreground Bash call is capped at 600000 ms, a long
+// `sleep` is blocked, and the harness ends a background run when the agent returns, so five calls in three rollouts
+// returned with no verdict and were retried. `verify-slot.py run` now prints a first line naming its pid and the exact
+// `wait` command (contract item 9), and the agent runs that command in the foreground, again after each still-running
+// line, until it prints the run's exit line. Its sentence replaced "and wait for it.". A deliberate resume-cache break,
+// as p31-4's sentence was: every slotted prompt changes; a resume re-passes its run's own `scriptPath` (ADR 0043).
+const SLOT_TEXT = 'The wrapped verifier first waits for a free verify slot on this machine (a `verify-slot: waiting …` line on stderr): that wait is not a failure or a hang and never counts as an iteration. Run it in the background with a long timeout (up to 7200000 ms). The first line of its output file (the file the harness names), `verify-slot: run <pid> started; wait for its verdict with: …`, gives its pid and the exact wait command. Then wait inside your turn: run that wait command in the foreground with a 600000 ms timeout, and again after each `verify-slot: still running …` line, until it prints `verify-slot: exit <rc> (run <pid>)`, whose rc is the verdict. A wait cut by its own timeout is no verdict either: run it again. Never end your turn or return while the run goes on, and never wait with a sleep or a monitor: the harness ends your background run when you return, so an early return is no verdict and costs the task a retry. To stop your own run, kill the wrapper by the pid you recorded (`kill <pid>`): its guard ends the suite with it. Never run the bare verifier, and never stop a run of another session. When the Mac is hot the wrapper holds or stops the suite and puts it back in line (`verify-slot: waiting (heat: …)`, `verify-slot: heat stop …`): only the final exit is the verdict, and an exit 76 with a `verify-slot: no verdict` line is no verdict, never red and never an iteration, so run it again.'
 
 // SLOT_TEXT beside a verify block's `- Verifier:` line; '' when slot is absent.
 function slotNote(slot) {
   return slot ? `\n- Verify slot: ${SLOT_TEXT}` : ''
 }
 
-// The TASK_TREE_RULE agents' side (planner, investigator, plan judge, plan reviser): rule (iii) invites a verifier
-// run, so when slot is set they get the exact wrapped line after KILL_RULE; '' when it is absent (byte-identical).
+// The TASK_TREE_RULE agents' side (planner, investigator, plan judge, plan reviser) and, since p31-1, the review
+// judge's: rule (iii) and their tests clauses (observeTests, reviewTests) allow a verifier run when the task brief
+// asks for one, so when slot is set they get the exact wrapped line after KILL_RULE; '' when it is absent
+// (byte-identical).
 function slotRule(verifier, slot) {
   return slot ? `\n\nVerify slot (hard rule, p23-4): if you run the verifier, run exactly \`${slotted(verifier, slot)}\`. ${SLOT_TEXT}` : ''
+}
+
+// ---- Touched tests between Checkpoints (p31-1, estate ADR 0009 d1) ----
+// The full suite (the rollout's verifier) runs at two Checkpoints per task: a code-writing agent's last check before
+// it opens or updates its PR (the implementer's, and each reviser's: the same loop), and Integration before the
+// merge. Every other verify runs the touched tests, the test files for what the change touched: each Ralph try of an
+// implementer or a reviser (which then runs the verifier once, before it hands back), a reviewer's own check and a
+// planner's or investigator's observation. From 14 to 21 Oct 2026 a rollout task ran the full suite a median of 6
+// times (worst 23).
+
+// What the code-writing roles' touched tests reach.
+const DIFF_FILES = 'the files your diff changes, plus any test file you add or edit'
+
+// How an agent finds and runs the touched tests, the text after a "touched tests:" label: `files` names what they
+// reach in this role; `pattern` is touchedOf(a), the rollout's pin ('' for none). The sources are unnumbered, so a
+// pinned render is the unpinned one plus exactly its pin clause. The repo's Tests line applies only when it says how
+// to run one file's or module's tests: most repos' line names only the full suite (`Tests: make test`), which falls
+// through to the git grep, so "the first source that applies" never meets "never the whole suite". One line, so it
+// sits inside a bullet or a step; its one git span is scrubbed, and a pattern touchedOf passed holds no backtick,
+// quote or whitespace, so it never opens a span of its own.
+function touchedTests(pattern, files) {
+  const pin = pattern ? ` the rollout's \`touched:\` pattern \`${pattern}\`, with \`{module}\` replaced by each changed module's name; else` : ''
+  return `the test files that reach ${files}. Take the first source that applies:${pin} the Tests line of the repo's own \`CLAUDE.md\` or \`AGENTS.md\`, which applies only when it says how to run one file's or one module's tests (a Tests line that names only the whole suite's command does not apply: fall through to the next source); else the test files that import or name each file, from \`${GIT_ENV_SCRUB} git grep -l '<module or file name>'\` over the test directories. Run only those files, with the repo's own test runner: never the verifier line, and never the whole suite under another command. When no test file reaches them (a docs-only change), there are none; say so.`
+}
+
+// The before/after status diff that tidies one test run in the task tree (the touched tests or the verifier), for
+// observeTests and reviewTests: each names it outright, never by pointing at TASK_TREE_RULE (iii), which speaks of the
+// verifier alone. One line; its one git span is scrubbed. It ends a sentence whose run it calls "it".
+const TREE_TIDY = `take \`${GIT_ENV_SCRUB} git -C "<task tree>" status --porcelain\` (the \`Task tree:\` path above) immediately before and immediately after it, then revert only the tracked changes, and delete only the untracked paths, that appear in the after list but not the before list.`
+
+// The four TASK_TREE_RULE agents' tests clause (planner, investigator, plan judge, plan reviser): they observe with
+// the touched tests of the files they target and leave the full suite to the implementer's Checkpoint, running the
+// verifier only when the task brief asks for a full-suite baseline; each run is tidied by TREE_TIDY. It never renders
+// SLOT_TEXT (slotRule carries it after KILL_RULE) and never a one-shot or loop marker (`EXACTLY ONCE`, `ONE-SHOT`,
+// `Max iterations`).
+function observeTests(files, pattern, verifier, slot) {
+  return `run only the touched tests: ${touchedTests(pattern, files)} Run them at most once, write no fix code, and tidy after each run of yours, the touched tests or the verifier: ${TREE_TIDY} The full suite is the implementer's Checkpoint (estate ADR 0009 d1), not yours: run the verifier (\`${slotted(verifier, slot)}\`) only when the task brief asks for a full-suite baseline.`
+}
+
+// The review judge's tests block: no run is needed (the implementer ran the verifier at its Checkpoint, and
+// Integration runs it again before the merge). Every run is bound to the judge's read rule: when it fails, no run at
+// all (never the shared checkout), and the feedback says so; when it holds, a claim is checked with the touched tests
+// of the PR's diff, the verifier only when the task brief asks the review for the full suite, each in the task tree
+// and tidied by TREE_TIDY. Its verifier line is the only one outside slotRule.
+function reviewTests(verifier, slot, pattern) {
+  return `Tests: you need not run any. The implementer ran the verifier at its Checkpoint, and Integration runs it again
+before the merge (estate ADR 0009 d1). When the read rule above fails (a mismatch, a non-empty status or a missing
+tree), run no tests at all, neither the touched tests nor the verifier, and never in the project's shared checkout
+or anywhere else: say in your feedback that you ran none, and why.
+When it holds, run tests only in the task tree. To check a claim, run only the touched tests: ${touchedTests(pattern, 'the files the PR diff changes')}
+Never run the verifier unless the task brief asks the review for the full suite; then run exactly
+\`${slotted(verifier, slot)}\`, once.
+Tidy after each run, the touched tests or the verifier: ${TREE_TIDY}`
 }
 
 // The read-only agents' side of the pinned task tree (ADR 0030, p12-4). The planner, plan judge, plan
 // reviser and investigator all work in the task's ONE worktree (taskTreeSetup below), which the
 // implementer then builds in — so what they may touch there is narrow: read under the tree, map the
-// note's checkout paths onto it, and tidy ONLY what their own verifier run added (a before/after
-// status diff), never the env bootstrap's output or anything else already present. Static text; its
-// one git span is scrubbed like every other.
+// note's checkout paths onto it, and tidy ONLY what their own test run added (a before/after
+// status diff), never the env bootstrap's output or anything else already present. Rule (iii) names
+// the verifier run; observeTests names the same diff for the touched tests (p31-1, TREE_TIDY), the
+// tree agents' normal run. Static text; its one git span is scrubbed like every other.
 const TASK_TREE_RULE = `Task tree (hard rule, ADR 0030): this task has ONE worktree, the \`Task tree:\` path above, shared by
 every agent on the task; the implementer builds in it after you, so you edit nothing in it.
 (i) Read every repo file under the task tree, never the project's shared checkout (it may be stale, dirty
@@ -650,6 +736,18 @@ function pricerOf(a) {
   return /['\\\u0000-\u001f\u007f]/.test(p) ? '' : p
 }
 
+// args.touched when usable, else '' (p31-1, estate ADR 0009 d1): the rollout's `touched:` pattern, one changed
+// module's test files with `{module}` in it. A path or glob, never a command: 1 to 200 characters, `{module}` among
+// them, every one from the allowlist below, so no whitespace, quote, `$`, `;`, `|`, `&`, backslash, backtick or
+// control character; and never a leading `-`, so never a test-runner option (`--deselect={module}`, which would
+// hide failures, or `-k{module}`). It renders in a code span (touchedTests) and never forms a git span.
+const TOUCHED_PATTERN = /^(?!-)[\w./*?{}\[\]@+,=:~-]+$/
+function touchedOf(a) {
+  const t = a && a.touched
+  if (typeof t !== 'string' || t.length < 1 || t.length > 200 || !t.includes('{module}')) return ''
+  return TOUCHED_PATTERN.test(t) ? t : ''
+}
+
 // A gate's `cap`/`capped` clauses followed by an amount (any currency): the backstop that keeps a spend gate without
 // exactly one cap on ADR 0008's automatic, climbing `changes`, never a bounce. Keyed on the gate's own line, never on
 // the pricer's why: the pricer reports a non-USD cap (`cap 30 AUD`) as "no cap clause" too.
@@ -770,17 +868,25 @@ async function pastSignedGates(task, r, prompt, opts, st) {
 // the same reds. Returns "" when empty so the surrounding prompt is BYTE-IDENTICAL to pre-item-2 behaviour
 // (the resume-cache invariant) — the non-empty string carries its OWN leading "\n\n", so callers
 // interpolate it bare (`${BUG_PREFLIGHTS}${baselineManifest(a)}`) with no surrounding whitespace.
-function baselineManifest(a) {
+// integration (p31-1): only integratorPrompt passes true, and gets the pre-p31-1 text byte for byte (Integration
+// runs the full verifier, a Checkpoint). Every task call runs touched tests between its Checkpoints, so its text
+// rules out skipping the reds from any run, touched or full, and never tells it to keep running the full verifier.
+function baselineManifest(a, integration) {
   const reds = a.knownBaselineFailures
   if (!reds || !reds.length) return ''
+  const tail = integration
+    ? `Do NOT try to fix them, do NOT flag them as findings, and do NOT \`--deselect\`/skip them (that would hide a
+real regression). Keep running the full verifier; only a NEW failure — or a baseline test failing in a way
+that does not match its listed reason — is yours to act on.`
+    : `Do NOT try to fix them, do NOT flag them as findings, and do NOT \`--deselect\`/skip them
+from any run, touched or full (that would hide a real regression). Only a NEW failure — or a baseline test
+failing in a way that does not match its listed reason — is yours to act on.`
   return `
 
 This repo has KNOWN BASELINE FAILURES — tests that already fail on a clean \`main\` for pre-existing,
 environmental reasons. They are NOT in your scope:
 ${reds.map((b) => '- ' + b).join('\n')}
-Do NOT try to fix them, do NOT flag them as findings, and do NOT \`--deselect\`/skip them (that would hide a
-real regression). Keep running the full verifier; only a NEW failure — or a baseline test failing in a way
-that does not match its listed reason — is yours to act on.`
+${tail}`
 }
 
 // Per-task human/release gate override (per-task-override-channel). Some task notes carry a prose gate
@@ -798,9 +904,59 @@ OPERATOR OVERRIDE: this task note may carry a human/release gate (e.g. "do not a
 on account of it; proceed with the task as specified.`
 }
 
+// The Ralph loop of the task calls (p31-1, estate ADR 0009 d1): each try runs the touched tests, and the verifier
+// runs once, when they pass, as the last check before the PR (the implementer's Checkpoint). A verifier red adds the
+// test files it failed in to the touched tests, so the next try re-runs them before the verifier runs again: the one
+// more round d1 accepts. touched is touchedOf(a) ('' or absent: no pin clause). Step d keeps its note-write sentence
+// verbatim, because coldEntryBlock overrides it. It never renders `EXACTLY ONCE` (the one-shot's marker).
+// baseline (item 2): array of "test_id — reason" lines, or empty/undefined; its green criterion covers every run.
+function ralphLoop(verifier, maxIterations, baseline, slot, touched) {
+  const lines = `- Touched tests: ${touchedTests(touched, DIFF_FILES)}
+- Verifier: ${slotted(verifier, slot)}${slotNote(slot)}
+- Max iterations: ${maxIterations}`
+  if (baseline && baseline.length) {
+    return `
+Verification loop (Ralph-style):
+${lines}
+- KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; do NOT \`--deselect\`/skip them
+  from any run, touched or full — that hides real regressions):
+${baseline.map((b) => '  - ' + b).join('\n')}
+- GREEN CRITERION (baseline-aware), for every run below, touched or full: a run is green when EVERY failing
+  test is in the known-baseline set above (fewer is fine — a baseline red going green is GOOD, never a
+  failure; a baseline entry absent from this run is simply ignored).
+- For i = 1 .. ${maxIterations}:
+  a. Run the touched tests, never the verifier here.
+  b. When they are green, run the verifier ONCE, as your last check before you open or update the PR (a
+     Checkpoint, estate ADR 0009 d1). If it is green, stop the loop: the work is verified.
+  c. On a REAL failure of either — a test OUTSIDE the baseline set fails, OR a baseline test fails in a way
+     that does NOT match its listed reason (when unsure whether it matches, treat it as a NEW failure:
+     fail-closed): when the verifier failed, first add the test files it failed in to your touched tests.
+     Then read the output, diagnose the ROOT cause (not the surface symptom), apply a targeted fix, and
+     commit it on the branch (so history records each attempt).
+  d. If i == ${maxIterations} and a REAL (non-baseline) failure still remains in the touched tests or the verifier:
+     do NOT open/update a PR. Return a result with blocked=true, verified=false, and a one-paragraph
+     blockerDiagnosis of what you tried and why it did not converge. Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.`.trim()
+  }
+  return `
+Verification loop (Ralph-style):
+${lines}
+- For i = 1 .. ${maxIterations}:
+  a. Run the touched tests, never the verifier here.
+  b. When they pass, run the verifier ONCE, as your last check before you open or update the PR (a
+     Checkpoint, estate ADR 0009 d1). If it passes (exit 0), stop the loop: the work is verified.
+  c. On a failure of either: when the verifier failed, first add the test files it failed in to your
+     touched tests. Then read the output, diagnose the ROOT cause (not the surface symptom), apply a
+     targeted fix, and commit it on the branch (so history records each attempt).
+  d. If i == ${maxIterations} and the touched tests or the verifier still fail: do NOT open/update a PR. Return a
+     result with blocked=true, verified=false, and a one-paragraph blockerDiagnosis of what you tried and why
+     it did not converge. Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.`.trim()
+}
+
+// Integration's loop (p31-1): the pre-p31-1 ralphLoop, verbatim, the verifier on every try. Its only caller is
+// integrationVerify: Integration runs the full suite before the merge, a Checkpoint, so its prompts never change.
 // baseline (item 2): array of "test_id — reason" lines, or empty/undefined. When empty the returned text is
 // BYTE-IDENTICAL to the pre-item-2 template (resume-cache invariant — do NOT edit the empty branch below).
-function ralphLoop(verifier, maxIterations, baseline, slot) {
+function fullSuiteLoop(verifier, maxIterations, baseline, slot) {
   if (baseline && baseline.length) {
     return `
 Verification loop (Ralph-style):
@@ -836,24 +992,28 @@ Verification loop (Ralph-style):
      it did not converge. Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.`.trim()
 }
 
-// A first pass below the top rung does NOT iterate — one verifier run, then either green or a hand-over one
-// rung up. Iteration is evidence of hardness, and iteration runs on the rung above (see The ladder below).
-// baseline: same "test_id — reason" array as ralphLoop; the green criterion stays baseline-aware.
-function oneShotVerify(verifier, baseline, slot) {
+// A first pass below the top rung does NOT iterate — one try, then either green or a hand-over one rung up.
+// Iteration is evidence of hardness, and iteration runs on the rung above (see The ladder below). The try is the
+// touched tests once, then the verifier once (the implementer's Checkpoint) only when they are green (p31-1,
+// estate ADR 0009 d1), so a touched red escalates without spending a full suite. baseline: same "test_id —
+// reason" array as ralphLoop; the green criterion stays baseline-aware for both runs. touched: as ralphLoop's.
+function oneShotVerify(verifier, baseline, slot, touched) {
   const green = baseline && baseline.length ? `
-- KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; keep running the full verifier, do NOT
-  \`--deselect\`/skip them — that hides real regressions):
+- KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; do NOT \`--deselect\`/skip them
+  from any run, touched or full — that hides real regressions):
 ${baseline.map((b) => '  - ' + b).join('\n')}
-- GREEN CRITERION (baseline-aware): the work is verified when EVERY failing test is in the known-baseline
-  set above (fewer is fine — a baseline red going green is GOOD, never a failure; a baseline entry absent
-  from this run is simply ignored).` : `
-- GREEN CRITERION: the verifier exits 0 — the work is verified.`
+- GREEN CRITERION (baseline-aware), for each run, touched or full: a run is green when EVERY failing test is
+  in the known-baseline set above (fewer is fine — a baseline red going green is GOOD, never a failure; a
+  baseline entry absent from this run is simply ignored).` : `
+- GREEN CRITERION, for each run: it exits 0.`
   return `
 Verification (ONE-SHOT first pass — you do NOT iterate):
+- Touched tests: ${touchedTests(touched, DIFF_FILES)}
 - Verifier: ${slotted(verifier, slot)}${slotNote(slot)}
-- Run the verifier EXACTLY ONCE.${green}
-- If green: the work is verified — proceed.
-- If red (any failure outside the green criterion): do NOT attempt a fix, do NOT run the verifier again,
+- Run the touched tests EXACTLY ONCE. If they are green, run the verifier EXACTLY ONCE (a Checkpoint,
+  estate ADR 0009 d1); if they are red, do NOT run the verifier.${green}
+- If both are green: the work is verified — proceed.
+- If either is red (any failure outside the green criterion): do NOT attempt a fix, do NOT run either again,
   and do NOT open/update a PR. Commit your work so far on the branch (so the next rung inherits it),
   append a one-paragraph diagnosis of the failure to the task note under a "## Blocker diagnosis"
   heading, and return escalate=true, verified=false, blocked=false with the same diagnosis in
@@ -864,12 +1024,39 @@ Verification (ONE-SHOT first pass — you do NOT iterate):
 // Rung-selected verification block for code-writing prompts (ADR 0029 decision 3): the implement stage's
 // first pass BELOW the top rung gets the one-shot (hand over one rung up on the first red); the retry after
 // the stage's climb, and every pass on the top rung, get the full Ralph loop — on the top there is no rung
-// to hand to.
-function verifyBlock(st, verifier, maxIterations, baseline, slot) {
+// to hand to. touched: touchedOf(a), passed through to either.
+function verifyBlock(st, verifier, maxIterations, baseline, slot, touched) {
   return !onTop(st) && !climbOf(st, 'implement')
-    ? oneShotVerify(verifier, baseline, slot)
-    : ralphLoop(verifier, maxIterations, baseline, slot)
+    ? oneShotVerify(verifier, baseline, slot, touched)
+    : ralphLoop(verifier, maxIterations, baseline, slot, touched)
 }
+
+// The Flake check (ADR 0050, p29-9): every verifier run in a rollout, an agent's included. A red that names only tests
+// outside the task's diff re-runs those tests by name first (any red again is real), then the same verifier line once
+// more on the same tree: green there is verified, each first-run failure a Flake the agent returns in `flakes` and
+// never fixes. A red that names no test, or one that cannot be placed in a test file, or one in the diff, is real at
+// once. `diff` names what the diff is for the role: DIFF_FILES for the code-writing task calls (FLAKE_CHECK_TASK),
+// the merge step's `task file:` lines plus the integrator's own commits for Integration (FLAKE_CHECK_INTEGRATION).
+// Static text appended right after each code-writing prompt's verification block (implementer, approved-plan
+// implementer, reviser) and after integrationVerify in the integrator, never inside a loop renderer, so ralphLoop,
+// oneShotVerify, fullSuiteLoop, verifyBlock and integrationVerify keep their own bytes. It names the verifier line
+// without rendering it, never says `run the verifier`, `EXACTLY ONCE` or `ONE-SHOT`, and its one git span is scrubbed.
+// A deliberate resume-cache break, like p31-1's: every code-writing prompt and both result schemas change.
+function flakeCheck(diff) {
+  return `Flake check (ADR 0050), before any verifier red above counts as red, the one-shot's included:
+- Read the failing tests' names from the verifier's output, outside the known-baseline set when one is listed.
+- The red is real at once, with no re-run, when it names no failing test (a timeout, or a lint, typecheck or build
+  step), when a failing test cannot be placed in a test file, or when a failing test's file is among ${diff}.
+- Otherwise re-run only those named tests, alone, with the repo's own test runner, on the same tree: no commit or
+  edit in between, and no verify slot. If any of them fails again, the red is real.
+- If they all pass, run the same verifier line above once more on the same tree. Red: the red is real. Green: the
+  work is verified, and each test that failed the first run is a Flake: return each in \`flakes\` as { test, sha },
+  the sha from \`${GIT_ENV_SCRUB} git rev-parse HEAD\`.
+- These re-runs belong to the try that went red: they never count as an iteration or as a second one-shot try.
+- Never fix a Flake inside this task: the lead logs it and files it for its repo.`
+}
+const FLAKE_CHECK_TASK = flakeCheck(DIFF_FILES)
+const FLAKE_CHECK_INTEGRATION = flakeCheck("the merge step's `task file:` lines, plus every file your resolution and fix commits change")
 
 // Escalation hand-over context (empty-when-unused, like baselineManifest/gateOverride — the non-empty
 // string carries its OWN leading "\n\n" so callers interpolate it bare). `prior` is the first-pass
@@ -1003,7 +1190,8 @@ Steps:
 2. If the fix is well-defined, work test-first (write the failing test before the fix). Use the
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix in the task note, then implement.
-4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot)}
+4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
+${FLAKE_CHECK_TASK}
 5. If the verifier passed: open a PR titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
 6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
@@ -1038,8 +1226,7 @@ ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
 Steps:
 1. Read the task note in full + every file it references (under the task tree).
-2. Run the read-only investigation it asks for (greps, reading tests, and a baseline verifier run to OBSERVE:
-   run it as \`${slotted(task.verifier || a.verifier, a.verifySlot)}\` from the task tree).
+2. Run the read-only investigation it asks for (greps, reading tests). To OBSERVE tests, ${observeTests('the files the investigation targets (none when it targets no code)', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
 3. Append your findings to the task note under a "## Findings" heading, starting with
    \`Investigated on: <sha from the setup's tree base: line>\` followed verbatim by any \`tree NOT refreshed:\`
    line the setup printed — concrete, with file:line refs.
@@ -1076,7 +1263,7 @@ Steps:
 2. Read-only investigation to back the plan:
    - grep for sibling sites of the same anti-pattern across the file + codebase
    - identify callers of any function you intend to change/add
-   - run the verifier ONCE from the task tree to capture the baseline (\`${slotted(a.verifier, a.verifySlot)}\`) — observe only, write no fix code
+   - to capture the baseline, ${observeTests('the files the plan will change', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
    - skim related tests
 3. Produce a plan whose FIRST line is \`Planned on: <sha from the setup's tree base: line>\`, followed verbatim
    by any \`tree NOT refreshed:\` or \`tree NOT attached\` line the setup printed, then EXACTLY these
@@ -1150,6 +1337,7 @@ ${RM_RULE}
 ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
 Read the brief and grep the task tree as needed to verify the plan's claims — do not approve on faith.
+Tests: you need not run any. To check a claim, ${observeTests('the files the plan names', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
 specific, actionable feedback bullets.${NEEDS_HUMAN_RULE}`
 }
@@ -1181,7 +1369,9 @@ ${RM_RULE}
 
 ${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
-Run additional READ-ONLY investigation in the task tree as needed. Rewrite the plan so that its
+Run additional READ-ONLY investigation in the task tree as needed.
+Tests: to re-check a baseline or a claim, ${observeTests('the files your plan will change', touchedOf(a), task.verifier || a.verifier, a.verifySlot)}
+Rewrite the plan so that its
 FIRST line is \`Planned on: <sha from your setup's tree base: line>\`, followed verbatim by any \`tree NOT
 attached\` line the setup printed and any \`tree NOT refreshed:\` line your prior plan quoted, with the SAME required sub-sections
 (Files to modify / Test strategy / Sibling-site check / Caller-wiring / Edge cases / Risks /
@@ -1218,7 +1408,8 @@ blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 
 Steps:
 1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
-2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot)}
+2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
+${FLAKE_CHECK_TASK}
 3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
    otherwise), prUrl, branch, worktreePath (\`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\`), blockerDiagnosis, summary.
@@ -1249,7 +1440,7 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
-${KILL_RULE}
+${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
 The PR is authoritative: judge \`gh pr diff ${prevImpl.prUrl}\` at the PR head. The task tree is context only
 (the rest of the repo at that commit): read files there only when
@@ -1258,6 +1449,8 @@ The PR is authoritative: judge \`gh pr diff ${prevImpl.prUrl}\` at the PR head. 
 \`${GIT_ENV_SCRUB} git -C "${worktreeDir(a.repoPath, task.slug)}" status --porcelain\` prints nothing.
 On a mismatch, a non-empty status or a missing tree, use \`gh pr diff\` / \`gh pr view\` only — never the
 project's shared checkout. You are read-only: no edit, commit or push, in the tree or anywhere else.
+
+${reviewTests(task.verifier || a.verifier, a.verifySlot, touchedOf(a))}
 
 Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "approve" if the PR is sound, else
 "changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${NEEDS_HUMAN_RULE}`
@@ -1300,7 +1493,8 @@ ${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorF
 
 Push new commits to the existing branch (the PR auto-updates) — do NOT open a new PR.
 
-${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot)}
+${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
+${FLAKE_CHECK_TASK}
 
 ${BUG_PREFLIGHTS}
 
@@ -1387,7 +1581,7 @@ const BRANCH_NAME = /^(?!-)(?!\/)(?!.*\/\/)(?!.*\.\.)(?!\.)(?!.*\/\.)(?!.*\.lock
 function defaultBranch(a) {
   const b = a.defaultBranch || 'main'
   if (typeof b !== 'string' || !BRANCH_NAME.test(b)) {
-    throw new Error(`defaultBranch: refusing ${JSON.stringify(b)} — not a valid branch name`)
+    throw new Error(`defaultBranch: refusing ${refusedEcho(b)} — not a valid branch name`)
   }
   return b
 }
@@ -1615,24 +1809,50 @@ function rungName(s) {
   return typeof s === 'string' && LADDER_NAME.test(s) && !LADDER_YAML_WORDS.includes(s)
 }
 
+// The args refusal (p32-1, execute § 4.5 *Args refusal*). Every refusal the entry makes before any dispatch (args
+// that are not JSON or not one object, a bad defaultBranch, the pre-p12-5 shape, task, mode, ladder, verifySlot, integration or
+// task.resume) is thrown as argsRefused(why): its message starts with ARGS_REFUSED, so a notification the runtime wraps
+// (`Error: …`) or cuts still carries it, and the lead matches it by contains. Such a call dispatched nothing and the
+// same args are refused again, so the lead never reads it as a *Lost call* (a resume, a dead-call set-aside, an
+// automatic retry): it drops the runId and halts the entry once. A throw after dispatch is caught into a row instead.
+const ARGS_REFUSED = 'thread:args-refused'
+function argsRefused(why) {
+  return new Error(`${ARGS_REFUSED}: ${why}`)
+}
+
+// A refused value, as a refusal or a refusing log line echoes it (p32-1): its JSON, exactly as JSON.stringify writes
+// it up to 200 characters; a longer one is cut there, marked `…` and its full length given, so one bad value never
+// floods the line the lead prints verbatim (§ 4.5 *Args refusal* step (5)). A value JSON cannot write (undefined)
+// echoes as its type.
+function refusedEcho(v) {
+  let s
+  try { s = JSON.stringify(v) } catch (e) { s = undefined }
+  if (s === undefined) return typeof v
+  return cutEcho(s, 200)
+}
+// An echo's text cut at `max` characters, marked `…` and its full length given; a shorter one as it is.
+function cutEcho(s, max) {
+  return s.length > max ? `${s.slice(0, max)}… (${s.length} characters)` : s
+}
+
 // args.ladder: '' when usable (or absent), else why not. A bad value is a lead bug: the orchestration
-// throws before any dispatch, in both modes.
+// refuses it before any dispatch (argsRefused), in both modes.
 function ladderArgsError(l) {
   if (l === undefined || l === null) return ''
-  if (!l || typeof l !== 'object' || Array.isArray(l)) return `must be one object { source, rungs }, got ${JSON.stringify(l)}`
-  if (typeof l.source !== 'string' || !l.source) return `source must be a non-empty string, got ${JSON.stringify(l.source)}`
+  if (!l || typeof l !== 'object' || Array.isArray(l)) return `must be one object { source, rungs }, got ${refusedEcho(l)}`
+  if (typeof l.source !== 'string' || !l.source) return `source must be a non-empty string, got ${refusedEcho(l.source)}`
   if (!Array.isArray(l.rungs) || !l.rungs.length) return 'rungs must be a non-empty array, bottom rung first'
   const seen = []
   for (let i = 0; i < l.rungs.length; i++) {
     const r = l.rungs[i]
     const at = `rung ${i + 1}`
     if (!r || typeof r !== 'object' || Array.isArray(r)) return `${at} must be an object { name, model, effort, judge, review }`
-    if (!rungName(r.name)) return `${at}: name ${JSON.stringify(r.name)} must be lowercase [a-z][a-z0-9._-]* and not a YAML word`
-    if (seen.includes(r.name)) return `${at}: duplicate name ${JSON.stringify(r.name)}`
+    if (!rungName(r.name)) return `${at}: name ${refusedEcho(r.name)} must be lowercase [a-z][a-z0-9._-]* and not a YAML word`
+    if (seen.includes(r.name)) return `${at}: duplicate name ${refusedEcho(r.name)}`
     seen.push(r.name)
-    if (!LADDER_MODELS.includes(r.model)) return `${at} (${r.name}): unknown model ${JSON.stringify(r.model)} (known: ${LADDER_MODELS.join(', ')})`
+    if (!LADDER_MODELS.includes(r.model)) return `${at} (${r.name}): unknown model ${refusedEcho(r.model)} (known: ${LADDER_MODELS.join(', ')})`
     for (const k of ['effort', 'judge', 'review']) {
-      if (!LADDER_EFFORTS.includes(r[k])) return `${at} (${r.name}): ${k} ${JSON.stringify(r[k])} is not one of ${LADDER_EFFORTS.join(', ')}`
+      if (!LADDER_EFFORTS.includes(r[k])) return `${at} (${r.name}): ${k} ${refusedEcho(r[k])} is not one of ${LADDER_EFFORTS.join(', ')}`
     }
   }
   return ''
@@ -1641,17 +1861,17 @@ function ladderArgsError(l) {
 // args.verifySlot (p23-4): '' when usable, else why not. Required (estate ADR 0009 d4): absent or null is refused.
 // Exactly { script, slots }: the absolute, single-line path of verify-slot.py (never under a bare /skills/, an
 // unexported plugin root) and an integer >= 1. Any other key (`priority` included: only integrationVerify sets
-// it, on its own copy) is a lead bug, refused before any dispatch in both modes.
+// it, on its own copy) is a lead bug, refused before any dispatch in both modes (argsRefused, execute § 4.5 *Args refusal*).
 function verifySlotArgsError(v) {
   if (v === undefined || v === null) return `is required (estate ADR 0009 d4): pass this entry's verify-timeout verifySlot, verbatim (execute § 4)`
-  if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${JSON.stringify(v)}`
+  if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${refusedEcho(v)}`
   const keys = Object.keys(v).sort()
-  if (keys.length !== 2 || keys[0] !== 'script' || keys[1] !== 'slots') return `must hold exactly script and slots, got keys ${JSON.stringify(Object.keys(v))}`
-  if (typeof v.script === 'string' && v.script.startsWith('/skills/')) return `script ${JSON.stringify(v.script)} sits under a bare /skills/: CLAUDE_PLUGIN_ROOT was empty (re-run by plugin-root.md rule 4)`
+  if (keys.length !== 2 || keys[0] !== 'script' || keys[1] !== 'slots') return `must hold exactly script and slots, got keys ${refusedEcho(Object.keys(v))}`
+  if (typeof v.script === 'string' && v.script.startsWith('/skills/')) return `script ${refusedEcho(v.script)} sits under a bare /skills/: CLAUDE_PLUGIN_ROOT was empty (re-run by plugin-root.md rule 4)`
   if (typeof v.script !== 'string' || !v.script.startsWith('/') || /[\r\n]/.test(v.script) || v.script.split('/').pop() !== 'verify-slot.py') {
-    return `script must be the absolute, single-line path of verify-slot.py, got ${JSON.stringify(v.script)}`
+    return `script must be the absolute, single-line path of verify-slot.py, got ${refusedEcho(v.script)}`
   }
-  if (!Number.isInteger(v.slots) || v.slots < 1) return `slots must be an integer >= 1, got ${JSON.stringify(v.slots)}`
+  if (!Number.isInteger(v.slots) || v.slots < 1) return `slots must be an integer >= 1, got ${refusedEcho(v.slots)}`
   return ''
 }
 
@@ -1683,7 +1903,8 @@ function rungState(task, a) {
     log(`rung drift: ${task.slug}'s rung: ${s.drift} is not on the ladder (${L.source}) — read as the top rung ${L.rungs[L.rungs.length - 1].name}`)
   }
   // verdicts (p21-3): every master-review round this call judged, pushed by reviewLoop (reviewVerdictOf).
-  return { source: L.source, rungs: L.rungs, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [] }
+  // flakes (p29-9): every Flake the call's code-writing agents returned, pushed by runAgent (flakesOf).
+  return { source: L.source, rungs: L.rungs, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [], flakes: [] }
 }
 
 function cur(st) { return st.rungs[st.at] }
@@ -1692,12 +1913,13 @@ function climbOf(st, stage) { return st.climbs.find((c) => c.stage === stage) ||
 function rungRecord(st) {
   return { startRung: st.rungs[st.start].name, rung: cur(st).name, climbs: st.climbs.map((c) => ({ ...c })) }
 }
-// The record plus the call's drift and its dispatches: the row's five rung keys, and the call's judged review
-// rounds (p21-3), so every task-mode row carries them, a stage throw included.
+// The record plus the call's drift and its dispatches: the row's five rung keys, the call's judged review
+// rounds (p21-3) and its Flakes (p29-9), so every task-mode row carries them, a stage throw included.
 function rowRecord(st) {
   return {
     ...rungRecord(st), rungDrift: st.drift, ran: st.ran.map((x) => ({ ...x })),
     reviewVerdicts: (st.verdicts || []).map((v) => ({ ...v, feedback: [...v.feedback] })),
+    flakes: (st.flakes || []).map((f) => ({ ...f })),
   }
 }
 
@@ -1746,15 +1968,50 @@ const TRANSIENT_DIAGNOSIS =
   '(e.g. "Connection closed mid-response"), NOT a task-authored blocker. Re-dispatch cleanly: the worktree ' +
   'and any committed work are reusable and a fresh dispatch of the same prompt should proceed normally.'
 
+// p29-9 (ADR 0050): the Flakes an agent's Flake check returned, sanitised onto `have` (the call's list so far): each
+// entry { test, sha } with test a non-empty one-line string of at most FLAKE_TEST_MAX characters (trimmed) and sha
+// 7-40 hex (lowercased), deduped by both, at most FLAKES_MAX in all. Anything dropped is logged once per result, with
+// its label; a result with no `flakes` adds nothing. reconcile-rollout.py's _flake_entry keeps the same rule.
+const FLAKES_MAX = 20
+const FLAKE_TEST_MAX = 300
+function flakesOf(r, have, label) {
+  const raw = r && r.flakes
+  if (raw === undefined || raw === null) return have
+  if (!Array.isArray(raw)) {
+    log(`flakes: ${label}: not an array (${typeof raw}); dropped`)
+    return have
+  }
+  const out = have.slice()
+  let bad = 0
+  let over = 0
+  for (const e of raw) {
+    const test = e && typeof e.test === 'string' ? e.test.trim() : ''
+    const sha = e && typeof e.sha === 'string' ? e.sha.trim().toLowerCase() : ''
+    if (!test || test.length > FLAKE_TEST_MAX || /[\u0000-\u001f\u007f]/.test(test) || !/^[0-9a-f]{7,40}$/.test(sha)) { bad += 1; continue }
+    if (out.some((f) => f.test === test && f.sha === sha)) continue
+    if (out.length >= FLAKES_MAX) { over += 1; continue }
+    out.push({ test, sha })
+  }
+  if (bad || over) {
+    log(`flakes: ${label}: ` + [bad ? `dropped ${bad} malformed flakes entr${bad === 1 ? 'y' : 'ies'}` : '', over ? `${over} past the cap of ${FLAKES_MAX}` : ''].filter((x) => x).join('; '))
+  }
+  return out
+}
+
 // st (optional): a task-mode call's rung state. Each dispatch is recorded on st.ran BEFORE it runs, so a
 // stage that throws still reports what it dispatched (ADR 0029 decision 7). The integrate mode passes none:
 // it records its agents on its own trace, also before each runs (integrate()).
+// p29-9: the one push site of a task call's Flakes (st.flakes): an IMPL_RESULT agent's that returned (never a dead
+// one's), the read-only investigator's never (its prompt has no Flake check). A signed-gate replay dedupes.
 async function runAgent(prompt, opts, st) {
   if (st) st.ran.push({ label: (opts && opts.label) || '', rung: cur(st).name, model: opts && opts.model, effort: opts && opts.effort })
   let r = await agent(prompt, opts)
   if (r == null) {
     log(`agent death (null return) on ${(opts && opts.label) || '?'} — one automatic retry`)
     r = await agent(prompt, opts)
+  }
+  if (r != null && st && opts && opts.schema === IMPL_RESULT && !String(opts.label || '').startsWith('investigate:')) {
+    st.flakes = flakesOf(r, st.flakes || [], opts.label || '?')
   }
   return r == null ? { __dead: true } : r
 }
@@ -1776,10 +2033,15 @@ function transientImplBlock(extra) {
 // on ADR 0008 (implement() reads an undefined plan result as "no gate"). Only an integer >= 1 is a budget;
 // anything else fails CLOSED with a diagnosis naming the frontmatter field. Strings are rejected rather
 // than coerced: args built from YAML ints are numbers, so a string is itself a config error. The text is
-// kept free of double quotes because the lead copies it into a ROLLOUT-STATUS reason (Stop-hook regex).
+// kept free of double quotes because the lead copies it into a ROLLOUT-STATUS reason (Stop-hook regex). A bad value
+// is shown bounded (p32-1): cut at ROUND_BUDGET_ECHO characters as refusedEcho cuts (cutEcho), since integrationArgsError
+// throws this text as an args.integration refusal, the line § 4.5 *Args refusal* step (5) prints verbatim, and the
+// fixed text around it leaves the line under 400 characters only with a short echo.
 const ROUND_BUDGET_FIELDS = { maxPlanRounds: 'max_plan_rounds', maxReviewRounds: 'max_review_rounds' }
+const ROUND_BUDGET_ECHO = 60
 function roundBudgetDiagnosis(task, keys) {
-  const show = (v) => (typeof v === 'string' ? `'${v.replace(/"/g, '')}' (a string)` : String(v))
+  const cut = (v) => cutEcho(String(v).replace(/"/g, ''), ROUND_BUDGET_ECHO)
+  const show = (v) => (typeof v === 'string' ? `'${cut(v)}' (a string)` : cut(v))
   const bad = keys.filter((k) => !(Number.isInteger(task[k]) && task[k] >= 1))
   if (!bad.length) return ''
   return 'invalid round budget: ' + bad.map((k) => `${ROUND_BUDGET_FIELDS[k]} = ${show(task[k])}`).join(', ') +
@@ -2181,6 +2443,8 @@ function taskResult(t, r, st) {
     plan: (r && typeof r.plan === 'string') ? r.plan : null,
     // p21-3: every master-review round this call judged (rowRecord), in order, each with its own bullets.
     reviewVerdicts: norm.reviewVerdicts || [],
+    // p29-9: every Flake the call's code-writing agents returned (rowRecord), sanitised and deduped.
+    flakes: norm.flakes || [],
   }
 }
 
@@ -2256,6 +2520,7 @@ const INTEGRATE_RESULT = {
     summary: { type: 'string', description: 'one paragraph: what the merge brought in, how you resolved it, what the verifier said' },
     gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the note\'s "## Approved gates" does not cover. Omit or empty otherwise.' },
     finishedAt: { type: 'string', description: 'the output of date -u +%Y-%m-%dT%H:%M:%SZ, run as your last action' },
+    flakes: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { test: { type: 'string' }, sha: { type: 'string' } }, required: ['test', 'sha'] }, description: 'ONLY when your Flake check cleared a verifier red (ADR 0050): one entry per test that failed the first run, { test: its name exactly as the verifier printed it, sha: the tree HEAD it failed on }. Omit or empty otherwise.' },
   },
   required: ['blocked', 'blockerDiagnosis', 'verified', 'mergeLog', 'mergeState', 'mergeCommit', 'taskHead', 'baseSha', 'headSha', 'pushedSha', 'conflictFiles', 'fixCommits', 'summary', 'finishedAt'],
 }
@@ -2447,11 +2712,11 @@ function prIdentityError(a, o) {
   if (typeof t.slug !== 'string' || !t.slug) return 'task.slug must be a non-empty string'
   if (typeof a.repoPath !== 'string' || !a.repoPath) return 'repoPath must be a non-empty string'
   if (t.scope === 'read-only') return 'a read-only task has no PR to integrate or revise'
-  if (typeof o.prUrl !== 'string' || !PR_URL.test(o.prUrl)) return `prUrl must be a PR URL (…/pull/<n>), got ${JSON.stringify(o.prUrl)}`
+  if (typeof o.prUrl !== 'string' || !PR_URL.test(o.prUrl)) return `prUrl must be a PR URL (…/pull/<n>), got ${refusedEcho(o.prUrl)}`
   const br = `audit-fix/${shortAlias(t.slug)}`
-  if (o.branch !== br) return `branch must be ${br}, got ${JSON.stringify(o.branch)}`
+  if (o.branch !== br) return `branch must be ${br}, got ${refusedEcho(o.branch)}`
   const wt = worktreeDir(a.repoPath, t.slug)
-  if (o.worktreePath !== wt) return `worktreePath must be ${wt}, got ${JSON.stringify(o.worktreePath)}`
+  if (o.worktreePath !== wt) return `worktreePath must be ${wt}, got ${refusedEcho(o.worktreePath)}`
   return ''
 }
 
@@ -2465,11 +2730,11 @@ function prIdentityError(a, o) {
 //   Lost-call resume of an old integrate call), which reads as neutral: Integration runs on the top rung
 //   anyway, so the old record decides nothing.
 function rungRecordError(g) {
-  if (!isObj(g)) return `must be one object { startRung, rung, climbs }, got ${JSON.stringify(g)}`
+  if (!isObj(g)) return `must be one object { startRung, rung, climbs }, got ${refusedEcho(g)}`
   if ('model' in g) {
     if (!['opus', 'fable'].includes(g.model) || typeof g.escalated !== 'boolean' || typeof g.escalatedAt !== 'string' ||
       typeof g.tierCapped !== 'boolean' || typeof g.tierCappedAt !== 'string') {
-      return `a pre-3.0.0 tier record must be { model: opus|fable, escalated: boolean, escalatedAt: string, tierCapped: boolean, tierCappedAt: string }, got ${JSON.stringify(g)}`
+      return `a pre-3.0.0 tier record must be { model: opus|fable, escalated: boolean, escalatedAt: string, tierCapped: boolean, tierCappedAt: string }, got ${refusedEcho(g)}`
     }
     return ''
   }
@@ -2477,7 +2742,7 @@ function rungRecordError(g) {
   const name = (v) => v === '' || rungName(v)
   if (keys !== 'climbs,rung,startRung' || !name(g.startRung) || !name(g.rung) || !Array.isArray(g.climbs) ||
     g.climbs.some((c) => !isObj(c) || Object.keys(c).sort().join(',') !== 'from,stage,to' || !STAGES.includes(c.stage) || !rungName(c.from) || !rungName(c.to))) {
-    return `must be { startRung, rung, climbs } (rung names or '', climbs [{ stage: ${STAGES.join('|')}, from, to }]), got ${JSON.stringify(g)}`
+    return `must be { startRung, rung, climbs } (rung names or '', climbs [{ stage: ${STAGES.join('|')}, from, to }]), got ${refusedEcho(g)}`
   }
   return ''
 }
@@ -2497,25 +2762,25 @@ function integrationArgsError(a) {
   if (!isObj(I)) return 'must be one object'
   const id = prIdentityError(a, I)
   if (id) return id
-  if (!(Number.isInteger(t.maxIterations) && t.maxIterations >= 1)) return `task.maxIterations must be an integer >= 1, got ${JSON.stringify(t.maxIterations)}`
+  if (!(Number.isInteger(t.maxIterations) && t.maxIterations >= 1)) return `task.maxIterations must be an integer >= 1, got ${refusedEcho(t.maxIterations)}`
   const budget = roundBudgetDiagnosis(t, ['maxReviewRounds'])
   if (budget) return budget
-  for (const k of ['headSha', 'taskBase', 'mainSha']) if (!isSha(I[k])) return `${k} must be a 40-hex commit sha, got ${JSON.stringify(I[k])}`
+  for (const k of ['headSha', 'taskBase', 'mainSha']) if (!isSha(I[k])) return `${k} must be a 40-hex commit sha, got ${refusedEcho(I[k])}`
   if (!Array.isArray(I.trouble) || I.trouble.some((x) => !INTEGRATION_TROUBLE.includes(x)) || new Set(I.trouble).size !== I.trouble.length) {
-    return `trouble must be a deduplicated subset of ${INTEGRATION_TROUBLE.join('|')}, got ${JSON.stringify(I.trouble)}`
+    return `trouble must be a deduplicated subset of ${INTEGRATION_TROUBLE.join('|')}, got ${refusedEcho(I.trouble)}`
   }
   if (!Array.isArray(I.landed)) return 'landed must be an array'
   for (const p of I.landed) {
     if (!isObj(p) || typeof p.prUrl !== 'string' || !PR_URL.test(p.prUrl) || typeof p.title !== 'string' ||
       typeof p.taskPath !== 'string' || !Array.isArray(p.files) || p.files.some((f) => typeof f !== 'string')) {
-      return `landed entries must be { prUrl, title, files: string[], taskPath }, got ${JSON.stringify(p)}`
+      return `landed entries must be { prUrl, title, files: string[], taskPath }, got ${refusedEcho(p)}`
     }
   }
   const he = historyError(I.reviewHistory, true)
   if (he) return 'reviewHistory ' + he
   const last = I.reviewHistory.length ? I.reviewHistory[I.reviewHistory.length - 1].round : 0
   if (!(Number.isInteger(I.reviewRoundsUsed) && I.reviewRoundsUsed >= 1 && I.reviewRoundsUsed >= last)) {
-    return `reviewRoundsUsed must be an integer >= 1 and >= the history's last round (${last}), got ${JSON.stringify(I.reviewRoundsUsed)}`
+    return `reviewRoundsUsed must be an integer >= 1 and >= the history's last round (${last}), got ${refusedEcho(I.reviewRoundsUsed)}`
   }
   const rungBad = rungRecordError(I.rung)
   if (rungBad) return 'rung ' + rungBad
@@ -2536,13 +2801,13 @@ function integrationArgsError(a) {
 function resumeArgsError(a) {
   const R = a.task.resume
   if (!isObj(R)) return 'must be one object'
-  if (R.stage !== 'revise') return `stage must be 'revise', got ${JSON.stringify(R.stage)}`
+  if (R.stage !== 'revise') return `stage must be 'revise', got ${refusedEcho(R.stage)}`
   const id = prIdentityError(a, R)
   if (id) return id
   const he = historyError(R.reviewHistory, false)
   if (he) return 'reviewHistory ' + he
   const last = R.reviewHistory[R.reviewHistory.length - 1].round
-  if (R.reviewRoundsUsed !== last) return `reviewRoundsUsed must equal the history's last round (${last}), got ${JSON.stringify(R.reviewRoundsUsed)}`
+  if (R.reviewRoundsUsed !== last) return `reviewRoundsUsed must equal the history's last round (${last}), got ${refusedEcho(R.reviewRoundsUsed)}`
   if (typeof R.plan !== 'string') return 'plan must be a string'
   return ''
 }
@@ -2708,12 +2973,13 @@ function integrationJudgeCheck(a, task, I, j) {
   ].join('\n')
 }
 
-// The integrator's verification: the full Ralph loop (Integration runs on the top rung, so there is no
-// one-shot hand-over) with the note write replaced — the engine records the diagnosis with its marker.
+// The integrator's verification: the full-suite loop (Integration runs on the top rung, so there is no
+// one-shot hand-over, and it is a Checkpoint, so every try runs the verifier: fullSuiteLoop, p31-1) with the note
+// write replaced — the engine records the diagnosis with its marker.
 function integrationVerify(task, a) {
   const noteWrite = 'Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.'
   // The serial lane's own agent verifier: the only render with the Integration priority (p23-4).
-  return ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot && { ...a.verifySlot, priority: true })
+  return fullSuiteLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot && { ...a.verifySlot, priority: true })
     .replace(noteWrite, 'Write nothing to the task note (the engine records the diagnosis), and push nothing.')
 }
 
@@ -2808,6 +3074,7 @@ resolution brief), so the next Integration starts from your account.
 Step 3 — verify. Required unless ALL of these hold: the merge step printed \`merge: up-to-date\`, the lead's
 trouble has no \`red\`, \`task head:\` equals the anchor ${I.headSha}, and you committed nothing. When required:
 ${integrationVerify(task, a)}
+${FLAKE_CHECK_INTEGRATION}
 A verifier still red when the loop ends: return blocked=true with blockKind "red" (the engine records
 \`${INTEGRATION_RED_MARK}<why>\`).
 
@@ -2817,7 +3084,7 @@ Step 4 — push and read back. Push plainly with \`${GIT_ENV_SCRUB} git -C "${wt
 read \`${GIT_ENV_SCRUB} git -C "${wt}" ls-remote origin "refs/heads/${I.branch}"\`: its sha is pushedSha, and
 \`${GIT_ENV_SCRUB} git -C "${wt}" rev-parse HEAD\` is headSha. A rejected push is a STOP: return blocked with blockKind "stop".
 
-${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}
+${GATED_INPUTS_CHECK}${baselineManifest(a, true)}${gateOverride(task)}
 
 Rules: never edit the PR (title, body, labels, comments), never merge it, never write the task note. Return
 blocked, blockKind (only when blocked: "conflict", "red" or "stop"), blockerDiagnosis, verified (true only if the verifier went green in THIS call), mergeLog, mergeState,
@@ -3036,6 +3303,8 @@ async function integrate(task, a, trace) {
     const ri = record('integrator', ilabel)
     const r = await runAgent(integratorPrompt(task, a, I), opts(ilabel, INTEGRATE_RESULT, 'integrator'))
     finished(ri, r)
+    // p29-9: the integrator's Flakes (its own verifier runs' Flake check), kept whatever the outcome, a set-aside too.
+    if (!r.__dead) trace.flakes = flakesOf(r, trace.flakes || [], ilabel)
     const bad = integrationCheck(I, r, task.approvedGates)
     // A named Integration conflict carries triggers ['conflict'] (the Run record's lane-freed reads conflict: true);
     // integration.baseSha stays '' for every integrator set-aside (the only kind this branch returns), so their
@@ -3059,7 +3328,7 @@ async function integrate(task, a, trace) {
   return { outcome: 'rejected', ...j, reReviewed: true, feedback: feedback.length ? feedback : ['the Integration re-review returned changes with no feedback'] }
 }
 
-// The integrate call's ONE row: the task row's 22 keys plus `integration` (the payload the Integration log line
+// The integrate call's ONE row: the task row's 23 keys plus `integration` (the payload the Integration log line
 // records). Its rung record is the task's own, passed through; its `ran` is Integration's agents.
 // Every status is one of reconcile's five: integrated → review; rejected → blocked with the revise
 // marker (review-blocked when no review round is left); set-aside → blocked with `integration: <reason>`
@@ -3068,7 +3337,7 @@ async function integrate(task, a, trace) {
 // conflictMarker (`integration: conflict unresolved in <paths>` and its resolution brief) and triggers
 // ['conflict'], a verifier red gets `integration: verifier red: <why>`; their row reason and summary say so, and
 // any other set-aside keeps the generic marker (escaped `integration: set aside: ` when it would read as either).
-// No new row or payload keys.
+// p29-9 added one row key, `flakes`: the integrator's Flakes (trace.flakes), on every outcome; no new payload key.
 function integrationResult(task, out, a, trace) {
   const I = a.integration
   const o = out || { outcome: 'set-aside', reason: INTEGRATION_THREW }
@@ -3127,6 +3396,8 @@ function integrationResult(task, out, a, trace) {
     // p21-3: always []. INTEGRATION_REVIEW is not a master-review round: a rejection here uses a review round
     // (reviewRoundsUsed + 1) but writes no review-verdict line, so the record's `round` skips it (r1, r2, r4).
     reviewVerdicts: [],
+    // p29-9: the integrator's Flakes (flakesOf), [] for a P1 call, a dead or thrown integrator.
+    flakes: (trace.flakes || []).map((f) => ({ ...f })),
     integration: {
       outcome: o.outcome,
       path: trace.path,
@@ -3146,29 +3417,48 @@ function integrationResult(task, out, a, trace) {
 
 // ---- Orchestration: one task per call; the lead holds the calls (ADR 0030) ---
 
+// Every refusal below is thrown before any dispatch through argsRefused (p32-1): its message starts with the sentinel
+// `thread:args-refused`, which execute § 4.5 *Args refusal* matches by contains, so the lead halts the entry once
+// (the runId dropped, an integrate call's lane freed) instead of resuming, setting aside or retrying a call that
+// dispatched nothing and would be refused again. Each message keeps its own text after the sentinel.
 // The Workflow tool passes `args` to a scriptPath workflow JSON-stringified, not as a live
 // object (confirmed empirically: the script sees `typeof args === 'string'`). Parse defensively
-// so the engine works whether args arrives as a string or an object.
-const a = typeof args === 'string' ? JSON.parse(args) : args
-defaultBranch(a)   // fail the run before any dispatch on an unusable args.defaultBranch
+// so the engine works whether args arrives as a string or an object; args that are not JSON, or not one
+// object (undefined, null, a number, an array), are refused here rather than dying in a TypeError below.
+// The refusal names the value's kind, then its bounded echo (refusedEcho): args the lead stringified before the
+// tool stringified them again parse to one string, the whole args JSON, which echoed in full ran to 50,658 characters.
+let a
+try {
+  a = typeof args === 'string' ? JSON.parse(args) : args
+} catch (e) {
+  throw argsRefused('args: not JSON: ' + e.message)
+}
+if (!a || typeof a !== 'object' || Array.isArray(a)) {
+  const kind = a === null ? 'null' : Array.isArray(a) ? 'array' : typeof a
+  const shown = a === null || a === undefined ? '' : ' ' + refusedEcho(a)
+  throw argsRefused('args must be one object, got ' + kind + shown + (kind === 'string' ? ' — args JSON-stringified twice: pass one object' : ''))
+}
+// Fail the run before any dispatch on an unusable args.defaultBranch (its own message after the sentinel).
+try { defaultBranch(a) } catch (e) { throw argsRefused(e.message) }
 // Refuse the pre-p12-5 `waves` args shape before any dispatch: a lead on a stale SKILL.md, or a resume of a
 // pre-rename run, must fail loudly here rather than converge nothing. Recovery is a re-dispatch.
-if (a.waves !== undefined) throw new Error('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')
-if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw new Error('args.task must be one task object')
+if (a.waves !== undefined) throw argsRefused('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')
+if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw argsRefused('args.task must be one task object')
 // args.mode (p12-6): absent or 'task' runs the task's own call; 'integrate' runs Integration's trouble
 // path. Bad Integration or seeded-revise args are lead bugs, refused before any dispatch.
 const mode = a.mode === undefined ? 'task' : a.mode
-if (mode !== 'task' && mode !== 'integrate') throw new Error(`args.mode: refusing ${JSON.stringify(a.mode)} — 'task' (the default) or 'integrate'`)
+if (mode !== 'task' && mode !== 'integrate') throw argsRefused(`args.mode: refusing ${refusedEcho(a.mode)} — 'task' (the default) or 'integrate'`)
 // args.ladder (ADR 0029 decision 6): the ladder.py JSON the lead resolved at this call's start. A malformed
 // one is a lead bug, refused before any dispatch in both modes; an absent one is the built-in ladder.
 const badLadder = ladderArgsError(a.ladder)
-if (badLadder) throw new Error('args.ladder: ' + badLadder)
+if (badLadder) throw argsRefused('args.ladder: ' + badLadder)
 // args.verifySlot (p23-4): the machine's verify slots. A malformed or absent one is a lead bug, refused here
 // (estate ADR 0009 d4): from 14 to 21 Oct 2026 no lead passed it, so 917 full Chorus suites ran
 // unslotted, up to 7 at once, and the Mac froze from heat. A resume replays its run's own version-keyed engine, so a
-// call launched on an engine that took it as optional (before 5.0.0) resumes there unchanged.
+// call launched on an engine that took it as optional (before 5.0.0) resumes there unchanged; one resumed on a
+// refusing engine is an *Args refusal*, and its next call is a fresh one (execute § 3.7 *Can no longer resume*).
 const badSlot = verifySlotArgsError(a.verifySlot)
-if (badSlot) throw new Error('args.verifySlot: ' + badSlot)
+if (badSlot) throw argsRefused('args.verifySlot: ' + badSlot)
 // Printed at every call, so a run's log names the ladder it ran on (a path, or built-in).
 function logLadder() {
   const L = ladderOf(a)
@@ -3178,14 +3468,14 @@ function logLadder() {
 }
 if (mode === 'integrate') {
   const bad = integrationArgsError(a)
-  if (bad) throw new Error('args.integration: ' + bad)
-  if (a.task.resume !== undefined) throw new Error("args.task.resume: a seeded revise is its own call, never mode 'integrate'")
+  if (bad) throw argsRefused('args.integration: ' + bad)
+  if (a.task.resume !== undefined) throw argsRefused("args.task.resume: a seeded revise is its own call, never mode 'integrate'")
 } else if (a.integration !== undefined) {
-  throw new Error("args.integration: only with args.mode 'integrate'")
+  throw argsRefused("args.integration: only with args.mode 'integrate'")
 }
 if (mode === 'task' && a.task.resume !== undefined) {
   const bad = resumeArgsError(a)
-  if (bad) throw new Error('args.task.resume: ' + bad)
+  if (bad) throw argsRefused('args.task.resume: ' + bad)
 }
 
 if (mode === 'integrate') {
@@ -3195,7 +3485,7 @@ if (mode === 'integrate') {
   // The validated history with its empty rounds dropped (liveHistory) is the one every prompt and the row use.
   const ia = { ...a, integration: { ...a.integration, reviewHistory: liveHistory(a.integration.reviewHistory) } }
   // A stage that throws becomes a set-aside at Integration, never a lost result.
-  const trace = { agents: [], path: '' }
+  const trace = { agents: [], path: '', flakes: [] }
   let out
   try {
     out = await integrate(ia.task, ia, trace)
@@ -3216,7 +3506,14 @@ if (a.progress) log(a.progress)
 // args.gatePricer (ADR 0038): a value pricerOf refuses reads as absent. The plan judge's pricing check is advisory
 // (approve-gates --standing still prices fail-closed), so a bad value is logged once and never throws.
 if (a.gatePricer !== undefined && a.gatePricer !== null && a.gatePricer !== '' && !pricerOf(a)) {
-  log(`gatePricer: refusing ${JSON.stringify(a.gatePricer)} — the plan judge's pricing check is off for this call (ADR 0038)`)
+  log(`gatePricer: refusing ${refusedEcho(a.gatePricer)} — the plan judge's pricing check is off for this call (ADR 0038)`)
+}
+// args.touched (p31-1, estate ADR 0009 d1): a value touchedOf refuses reads as absent, so the prompts fall back to
+// the repo's own Tests line, then its imports. Logged once and never thrown, like gatePricer: the pattern only
+// steers how an agent finds the touched tests, and the Checkpoints still run the full suite. Integrate mode never
+// reads it (its prompts are unchanged), so it is checked here, in task mode only.
+if (a.touched !== undefined && a.touched !== null && a.touched !== '' && !touchedOf(a)) {
+  log(`touched: refusing ${refusedEcho(a.touched)} — the rollout's touched-tests pattern is off for this call (estate ADR 0009 d1)`)
 }
 
 // A seeded revise uses its validated history with the empty rounds dropped (liveHistory); any other task

@@ -17,6 +17,10 @@ trap 'rm -rf "$D"' EXIT
 EH="$D/.settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$D/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 export THREAD_NOTE_LOCK_DIR="${D}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
+# An Integration line's active= reads the Mac's sleeps the Run record does not hold yet (p29-13): no sleep stands in
+# for this Mac's kern.waketime and pmset log, so nothing reads its history; a case that wants one sets its own.
+export THREAD_MACHINE_TIMES='{}'
 NOW=2026-10-02T14:05:00Z
 
 fail=0
@@ -218,8 +222,8 @@ ok "$(cksum < "$D/gp.md")" "$c" "gate-pending: a ## line in the fallback diagnos
 ok "$(cntx gp '## Gated inputs (awaiting sign-off)')|$(cnt gp 'env mismatch')" "1|1" "… one section, the content once"
 
 echo "== the Integration log (p12-16)"
-# One line per Integration call, from the row's `integration` field: 10 space-separated tokens, `-` for
-# a missing value. A line with a startedAt is skipped when it appears anywhere in the section; a `-` line
+# One line per Integration call, from the row's `integration` field: 11 space-separated tokens, `-` for
+# a missing value (the 11th, active=, p29-13: with no Run record stop inside the window it equals duration=). A line with a startedAt is skipped when it appears anywhere in the section; a `-` line
 # only when it equals the section's last line.
 A40=$(printf 'a%.0s' {1..40}); C40=$(printf 'c%.0s' {1..40}); D40=$(printf 'd%.0s' {1..40}); X40=$(printf 'e%.0s' {1..40})
 T1=2026-10-02T13:30+00:00; T2=2026-10-02T15:00+00:00; T3=2026-10-02T16:30+00:00
@@ -252,25 +256,25 @@ nlog() { logsec "$1" | grep -c .; }
 
 mkt il1
 res il1 review "$PR7" "integration=$(integ)"; rec >/dev/null
-ok "$(nlog il1)|$(cntx il1 "$T1 integrated path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=conflict")" "1|1" \
+ok "$(nlog il1)|$(cntx il1 "$T1 integrated path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=conflict active=15")" "1|1" \
   "integrated: one line, every field"
 mkt il2
 res il2 blocked "$PR7" "integration=$(integ outcome='"rejected"')"; rec >/dev/null
-ok "$(nlog il2)|$(cntx il2 "$T1 rejected path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=conflict")" "1|1" \
+ok "$(nlog il2)|$(cntx il2 "$T1 rejected path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=conflict active=15")" "1|1" \
   "rejected: one line, every field"
 mkt il3
 res il3 blocked "$PR7" "integration=$(integ "${SA[@]}" metrics.waitMinutes=null)"; rec >/dev/null
-ok "$(nlog il3)|$(cntx il3 "$T1 set-aside path=integrator pr=7 anchor=$A40 head=- base=- wait=- duration=- triggers=-")" "1|1" \
+ok "$(nlog il3)|$(cntx il3 "$T1 set-aside path=integrator pr=7 anchor=$A40 head=- base=- wait=- duration=- triggers=- active=-")" "1|1" \
   "set-aside before the merge: empty head/base, null minutes and no triggers write -"
 ok "$(before il3 '## Notes' '## Integration log')" y "… the section is appended to the body"
 
 mkt il4
 res il4 review 'prUrl="#7"' "integration=$(integ metrics.waitMinutes=0 metrics.durationMinutes=0 triggers='["shared-file","committed"]' metrics.startedAt=DEL)"; rec >/dev/null
-ok "$(logsec il4)" "- integrated path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=0 duration=0 triggers=shared-file,committed" \
-  "zero minutes write 0, triggers keep their order, a missing startedAt leads with -, prUrl #7 is pr=7"
+ok "$(logsec il4)" "- integrated path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=0 duration=0 triggers=shared-file,committed active=-" \
+  "zero minutes write 0, triggers keep their order, a missing startedAt leads with - (and no window: active=-), prUrl #7 is pr=7"
 mkt il5
 res il5 review 'prUrl="7"' "integration=$(integ metrics.waitMinutes=true metrics.durationMinutes='"15"')"; rec >/dev/null
-ok "$(logsec il5)" "$T1 integrated path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=- duration=- triggers=conflict" \
+ok "$(logsec il5)" "$T1 integrated path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=- duration=- triggers=conflict active=-" \
   "prUrl 7 is pr=7; a bool or string metric writes -"
 for v in '"not-a-pr"' '""' DEL; do
   mkt il6
@@ -279,9 +283,9 @@ for v in '"not-a-pr"' '""' DEL; do
 done
 mkt il7
 res il7 review "$PR7" "integration=$(integ path='"judge only"' triggers='["a b","c\td"]' metrics.startedAt='"## evil\nx"')"; rec >/dev/null
-ok "$(logsec il7)" "- integrated path=judge_only pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=a_b,c_d" \
-  "whitespace inside a value becomes _; a startedAt that is not an ISO stamp writes -"
-ok "$(logsec il7 | awk '{print NF}')|$(cnt il7 'evil')" "10|0" "… so the line has 10 tokens and the bad startedAt is dropped"
+ok "$(logsec il7)" "- integrated path=judge_only pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=a_b,c_d active=-" \
+  "whitespace inside a value becomes _; a startedAt that is not an ISO stamp writes - (so active=-)"
+ok "$(logsec il7 | awk '{print NF}')|$(cnt il7 'evil')" "11|0" "… so the line has 11 tokens and the bad startedAt is dropped"
 
 # startedAt is the one token with no `key=` prefix, so it alone decides how the line starts: only the
 # engine's ISO_STAMP shape is written, anything else is `-`, so the line can never open a section, an H1,
@@ -291,8 +295,8 @@ for v in '"##"' '"#"' '"```"' '">"' '"~~~"' '"2026-10-02"' '"2026-10-02T13:30"' 
   mkt il9
   h0=$(hd il9)
   res il9 review "$PR7" "integration=$(integ metrics.startedAt=$v)"; rec >/dev/null
-  ok "$(nlog il9)|$(logsec il9 | awk '{print NF}')|$(logsec il9 | cut -d' ' -f1)|$(hd il9)" "1|10|-|$((h0 + 1))" \
-    "startedAt $v: one 10-token line led by -, no heading but the log's own"
+  ok "$(nlog il9)|$(logsec il9 | awk '{print NF}')|$(logsec il9 | cut -d' ' -f1)|$(hd il9)" "1|11|-|$((h0 + 1))" \
+    "startedAt $v: one 11-token line led by -, no heading but the log's own"
   res il9 blocked "$PR7" "integration=$(integ outcome='"rejected"' metrics.startedAt="\"$T2\"")"; rec >/dev/null
   ok "$(nlog il9)|$(logsec il9 | tail -1 | cut -d' ' -f1,2)|$(hd il9)" "2|$T2 rejected|$((h0 + 1))" \
     "… a second row still lands as the section's last line"
@@ -379,6 +383,199 @@ res ld review "$PR7" "integration=$(integ)"
 c=$(cksum < "$D/ld.md")
 python3 "$SCRIPT" reconcile --result "$D/res.json" --tasks-dir "$D" --now "$NOW" --dry-run >/dev/null
 ok "$(cksum < "$D/ld.md")" "$c" "--dry-run writes no log"
+
+echo "== active Integration time (p29-13): the line's active= is duration= less the Run record's stalls inside it"
+# chorus-p80-1's window: started 2026-10-18T20:42+11:00 (09:42Z), its last agent finished 00:18:33Z, duration=876.
+# Each case is its own rollout, so its record holds only its own lines.
+RR="$HERE/../../_shared/scripts/run_record.py"
+P0=2026-10-18T20:42+11:00; PF=2026-10-19T00:18:33Z
+W876=(metrics.startedAt="\"$P0\"" metrics.finishedAt="\"$PF\"" metrics.durationMinutes=876)
+mkr() {  # mkr <slug> <rollout>: an in_progress task linked to <rollout>
+  printf -- '---\ntags: [task]\nstatus: in_progress\nrollout: "[[%s]]"\n---\n\n## Notes\n\nbody\n' "$2" > "$D/$1.md"
+}
+ev() {  # ev <rollout> <kind> <ts> [json] [task]: one Run-record line through run_record.py's own writer
+  local j="${4:-}"; [ -n "$j" ] || j='{}'
+  local argv=(emit --rollout "$1" --kind "$2" --ts "$3" --json "$j")
+  [ -n "${5:-}" ] && argv+=(--task "$5")
+  python3 "$RR" "${argv[@]}" || { echo "FAIL - emit $2"; fail=1; }
+}
+stop() {  # stop <rollout> <cause> <ts> [extra json fields]: a live stop (its start is its ts)
+  ev "$1" stopped "$3" "{\"cause\": \"$2\", \"inferred\": false, \"calls\": []${4:+, $4}}"
+}
+active() { logsec "$1" | tail -1 | awk '{print $NF}'; }
+irow() {  # irow <slug> [integ overrides...]: reconcile one integrated row for <slug> in the p80-1 window
+  local s="$1"; shift
+  res "$s" review "$PR7" "integration=$(integ "${W876[@]}" "$@")"; rec >/dev/null
+}
+
+mkr a1 st1
+stop st1 usage-limit 2026-10-18T10:00:00Z
+ev st1 lead-entry 2026-10-18T19:30:00Z '{"by": "stage", "stop": "usage-limit"}'
+irow a1
+ok "$(logsec a1)" "$P0 integrated path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=876 triggers=conflict active=306" \
+  "a 9.5-hour usage-limit stop inside the window: active is wall less 9.5 h (876 - 570 = 306), duration stays wall"
+
+mkr a2 st2
+stop st2 halt 2026-10-18T10:00:00Z '"reason": "a section 7 halt"'
+ev st2 lead-entry 2026-10-18T19:30:00Z '{"by": "lachy", "stop": "halt"}'
+irow a2
+ok "$(active a2)" "active=876" "a halt is no stall: the calls in flight carry on through it, so nothing is taken off"
+
+mkr a3 st3
+ev st3 stopped 2026-10-18T19:31:00Z '{"cause": "mac-sleep", "inferred": true, "calls": [], "at": "2026-10-18T12:00:00.000Z", "wake": "2026-10-18T13:00:00.000Z"}'
+irow a3
+ok "$(active a3)" "active=816" "an inferred mac-sleep: its at .. wake comes off (876 - 60)"
+
+mkr a4 st4
+stop st4 usage-limit 2026-10-18T10:00:00Z
+ev st4 stopped 2026-10-18T19:00:00Z '{"cause": "mac-sleep", "inferred": true, "calls": [], "at": "2026-10-18T12:00:00.000Z", "wake": "2026-10-18T13:00:00.000Z"}'
+ev st4 lead-entry 2026-10-18T19:30:00Z '{"by": "stage", "stop": "usage-limit"}'
+irow a4
+ok "$(active a4)" "active=306" "a sleep inside a usage-limit stop is counted once: their union comes off"
+
+mkr a5 st5
+ev st5 stopped 2026-10-18T10:12:00Z '{"cause": "dead-lead", "inferred": true, "calls": [], "at": "2026-10-18T09:00:00.000Z"}'
+ev st5 lead-entry 2026-10-18T10:12:00Z '{"by": "lachy", "stop": "dead-lead"}'
+stop st5 usage-limit 2026-10-19T00:00:00Z
+ev st5 lead-entry 2026-10-19T03:00:00Z '{"by": "stage", "stop": "usage-limit"}'
+irow a5
+ok "$(active a5)" "active=828" "stops crossing the window are clipped to it: 30 min of the dead lead, 18.55 of the usage limit (876.55 - 48.55)"
+
+mkr a6 st6
+stop st6 usage-limit 2026-10-18T22:00:00Z
+irow a6
+ok "$(active a6)" "active=738" "a stop nothing ends yet runs to the window's end (876.55 - 138.55)"
+
+mkr a7 st7
+stop st7 usage-limit 2026-10-18T10:00:00Z
+ev st7 lane-taken 2026-10-18T11:00:00Z '{}' a7
+irow a7
+ok "$(active a7)" "active=816" "with no lead-entry (a pre-p29-10 Engine snapshot), a stop ends at the next lane-taken"
+
+mkr a8 st8
+irow a8
+ok "$(active a8)" "active=876" "no record and no stop: active equals duration"
+stop st8 usage-limit 2026-10-18T10:00:00Z
+ev st8 lead-entry 2026-10-18T19:30:00Z '{"by": "stage", "stop": "usage-limit"}'
+c=$(cksum < "$D/a8.md"); irow a8
+ok "$(cksum < "$D/a8.md")|$(nlog a8)" "$c|1" "a re-reconcile after a stop lands later is a no-op: one line, never a second for the same Integration"
+
+printf -- '---\ntags: [task]\nstatus: in_progress\n---\n\n## Notes\n\nbody\n' > "$D/a9.md"
+irow a9
+ok "$(active a9)" "active=-" "a note with no rollout: no Run record to read, so active is -"
+mkr a10 st10
+mkdir -p "$THREAD_EVENTS_DIR/st10.jsonl"
+irow a10
+ok "$(active a10)" "active=-" "a Run record that cannot be read: active is -"
+
+# The integrator journal's gaps, where no stop was logged: the spans of the window none of its agents ran in, each of
+# 30 minutes or more (a shorter one is the call's own launch or a hand-over).
+J="$D/journals"; mkdir -p "$J"
+journal() {  # journal <runId> <status> <agents json>: a Workflow journal at $J/<runId>.json
+  python3 - "$J/$1.json" "$1" "$2" "$3" <<'PY3'
+import json, sys
+out, run, status, agents = sys.argv[1:]
+prog = [{"type": "workflow_phase", "index": 1, "title": "Integration"}]
+prog += [dict({"type": "workflow_agent", "index": i + 1, "label": "integrate:x", "state": "done"}, **a)
+         for i, a in enumerate(json.loads(agents))]
+json.dump({"runId": run, "status": status, "startTime": 1, "durationMs": 1, "workflowProgress": prog}, open(out, "w"))
+PY3
+}
+ms() { python3 -c 'import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")).timestamp()*1000))' "$1"; }
+AG="[{\"startedAt\": $(ms 2026-10-18T23:00:00Z), \"durationMs\": 2400000}, {\"startedAt\": $(ms 2026-10-18T23:45:00Z), \"durationMs\": 2013000}]"
+mkr j1 sj1
+ev sj1 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j1\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" j1
+journal wf_j1 completed "$AG"
+irow j1
+ok "$(active j1)" "active=78" \
+  "no stop logged: the journal's gaps of 30 min or more come off (the 13 h before its agents), its 5-min hand-over stays (40 + 5 + 33.55)"
+
+# A resumed call (chorus-p80-1's second Integration, wf_93426d81-87d): its journal replays each agent that finished
+# before the kill as `cached: true`, stamped at the resume with no durationMs, then runs the rest live. A cached agent
+# places no time in this run, so it is skipped: the gap before the first live agent (the stall, and the earlier run's
+# work by the replayed agent) comes off, and only the live review is active.
+RES=$(ms 2026-10-18T23:45:00Z)
+mkr j6 sj6
+ev sj6 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j6\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" j6
+journal wf_j6 completed "[{\"label\": \"integrate:x\", \"state\": \"done\", \"cached\": true, \"startedAt\": $RES},
+  {\"label\": \"integration-review:x r3\", \"state\": \"done\", \"startedAt\": $RES, \"durationMs\": 2013000}]"
+irow j6
+ok "$(active j6)" "active=33" \
+  "a resumed call: its cached integrate agent is skipped, the 843 min before the live review comes off (876.55 - 843)"
+mkr j7 sj7
+ev sj7 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j7\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" j7
+journal wf_j7 completed "[{\"label\": \"integrate:x\", \"state\": \"done\", \"cached\": true, \"startedAt\": $RES}]"
+irow j7
+ok "$(active j7)" "active=-" \
+  "a resumed call whose every agent was replayed places no live agent: the stall cannot be placed, so active is -, never the wall"
+
+mkr j5 sj5
+ev sj5 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j5\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" j5
+journal wf_j5 completed "[{\"startedAt\": $(ms 2026-10-18T09:43:10Z), \"durationMs\": 52523000}]"
+irow j5
+ok "$(active j5)" "active=876" "… and a stall-free call's launch gap (the stamp floors to its minute) comes off nothing: active equals duration"
+
+mkr j2 sj2
+ev sj2 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j2\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" j2
+stop sj2 usage-limit 2026-10-18T10:00:00Z
+ev sj2 lead-entry 2026-10-18T19:30:00Z '{"by": "stage", "stop": "usage-limit"}'
+journal wf_j2 completed "$AG"
+irow j2
+ok "$(active j2)" "active=306" "a logged stop wins over the journal: only the stops come off"
+
+mkr j3 sj3
+ev sj3 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j3\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" j3
+irow j3
+ok "$(active j3)" "active=876" "no stop and no journal on disk: nothing comes off"
+journal wf_j3 running "$AG"; mkr j3 sj3; irow j3
+ok "$(active j3)" "active=876" "… nor from a journal whose call has not ended"
+journal wf_j3 completed "[{\"label\": \"integration-review:x r1\", \"state\": \"done\", \"startedAt\": $(ms 2026-10-18T23:45:00Z)}]"
+mkr j3 sj3; irow j3
+ok "$(active j3)" "active=876" "… nor from one with a live (not cached) agent it cannot place: a startedAt and no durationMs"
+journal wf_j3 completed "[{\"cached\": true, \"startedAt\": $RES}, {\"startedAt\": $RES}]"
+mkr j3 sj3; irow j3
+ok "$(active j3)" "active=876" "… a cached agent beside it changes nothing: the live one still refuses the journal"
+mkr j4 sj4
+ev sj4 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_j4\", \"journalDir\": \"$J\", \"call\": \"task\"}" j4
+journal wf_j4 completed "$AG"
+irow j4
+ok "$(active j4)" "active=876" "… nor from the journal of a call that is no integrate call"
+
+# A Mac sleep inside the Integration that the Run record does not hold yet: `next` writes it only after the lead has
+# reconciled the call (execute step 2), so the reconcile reads it from the Mac itself (THREAD_MACHINE_TIMES here),
+# through `next`'s own window test, and writes nothing. --now is after the window, so the sleep has happened.
+NOW0=$NOW; NOW=2026-10-19T00:30:00Z
+mkr s1 ss1
+ev ss1 lead-entry 2026-10-18T09:40:00Z '{"by": "stage"}'
+ev ss1 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_s1\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" s1
+THREAD_MACHINE_TIMES='{"sleeps":[["2026-10-18T12:00:00Z","2026-10-18T13:00:00Z"]]}' irow s1
+ok "$(active s1)|$(grep -c '"stopped"' "$THREAD_EVENTS_DIR/ss1.jsonl")" "active=816|0" \
+  "a sleep only the Mac shows yet comes off (876.55 - 60), and the reconcile writes no stopped line: next stays its writer"
+mkr s2 ss2
+ev ss2 lead-entry 2026-10-18T09:40:00Z '{"by": "stage"}'
+ev ss2 lead-entry 2026-10-18T14:00:00Z '{"by": "heartbeat"}'
+THREAD_MACHINE_TIMES='{"sleeps":[["2026-10-18T12:00:00Z","2026-10-18T13:00:00Z"]]}' irow s2
+ok "$(active s2)" "active=876" \
+  "… but not one before the last lead-entry: that entry read it (as next does, only sleeps that wake after the mark)"
+mkr s3 ss3
+ev ss3 run-bound 2026-10-18T09:43:00Z "{\"runId\": \"wf_s3\", \"journalDir\": \"$J\", \"call\": \"integrate\"}" s3
+journal wf_s3 completed "$AG"
+THREAD_MACHINE_TIMES='{"sleeps":[["2026-10-18T23:50:00Z","2026-10-19T00:10:00Z"]]}' irow s3
+ok "$(active s3)" "active=58" \
+  "a sleep inside a live agent's run (its durationMs holds it, so no journal gap shows it) comes off beside the gaps (78.55 - 20)"
+NOW=$NOW0
+
+# log_minutes: the one parse every reader of lane time shares (reflect.py's span); a line from before p29-13 reads.
+LM=$(python3 - "$SCRIPT" <<'PY4'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+old = "2026-10-18T20:42+11:00 integrated path=integrator pr=437 anchor=a head=b base=c wait=1 duration=876 triggers=conflict"
+lines = (old + " active=306", old, old + " active=-", old.replace("duration=876", "duration=-"))
+print(json.dumps([m.log_minutes(l) for l in lines], sort_keys=True, separators=(",", ":")))
+PY4
+)
+ok "$LM" '[{"active":306,"lane":306,"wall":876},{"active":null,"lane":876,"wall":876},{"active":null,"lane":876,"wall":876},{"active":null,"lane":null,"wall":null}]' \
+  "log_minutes: lane is active; a ten-token line (no active=) or active=- still parses, its wall standing in"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-runs: ALL PASS"; else echo "reconcile-rollout-runs: FAILED"; fi

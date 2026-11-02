@@ -15,7 +15,14 @@
 //   approved gate always matches its declaration (no resume cache, no prompt changes);
 // - the sweep: p18-7's verbatim capture flags spend (and so did the old list: the 2026-10-10 miss was by eye), the new
 //   words flag where the old list is silent, and the currency amount marker never flags a shell variable while the old
-//   literal `$` does.
+//   literal `$` does;
+// - the test-credential reading (ADR 0063): each step's why, in order (the class-independent steps first); p8-1's two
+//   gates, p8-2's and p8-3's staging gate (verbatim) read their keys; the deny cases, the known false asks and the
+//   accepted residuals (a second credential in prose, the GitHub PAT: the annotation names only the proved keys);
+//   schedule's test-credential Planner examples read their keys (the guidance is coupled to the reader);
+// - the env-file read: a FIFO, a device, a symlink to one and a directory never block or read (isfile patched too), the
+//   1 MiB cap, the dotenv edges and the JWT edges, no value in any why; the bootstrap-refresh shapes; the credential
+//   annotation round-trips through GATE_ANNOT_RE and the engine's unapprovedGates, the gate's own parentheses kept.
 //
 // Hermetic: python3 -I -B (no bytecode next to the module), THREAD_EVENTS_DIR in temp (reconcile-rollout.py is only
 // imported, never run). Reads files only.
@@ -58,12 +65,34 @@ for req in json.loads(sys.argv[3]):
         out.append(gi.sweep(gi.body_of(open(req["path"], encoding="utf-8").read())))
     elif op == "lists":
         out.append({k: list(getattr(gi, k)) for k in ("UNIT_NOUNS", "PERIOD_ADVERBS")})
+    elif op == "credential":
+        out.append(gi.credential_reading(req["gate"], req.get("cls")))
+    elif op == "covered_cred":
+        out.append(gi.credential_covered(req["gate"], req["cls"], req["bootstrap"]))
+    elif op == "proof":
+        out.append(gi.env_proof(req["cls"], req["names"]))
+    elif op == "patched_proof":
+        real = gi.os.path.isfile
+        gi.os.path.isfile = lambda p: True
+        try:
+            out.append(gi.env_proof(req["cls"], req["names"]))
+        finally:
+            gi.os.path.isfile = real
+    elif op == "read_env":
+        env, why = gi.read_env(req["path"]); out.append({"env": env, "why": why})
+    elif op == "bootstrap":
+        out.append(gi.bootstrap_refreshes(req["cmd"], req["file"]))
+    elif op == "cred_annotation":
+        try:
+            out.append(gi.credential_annotation(req["date"], req["names"], req["file"], req["source"]))
+        except ValueError as e:
+            out.append({"error": str(e)})
 print(json.dumps(out))
 `
-function py(reqs) {
+function py(reqs, env = {}) {
   const r = spawnSync('python3', ['-I', '-B', '-c', DRIVER, MODULE, RECONCILE, JSON.stringify(reqs)], {
     encoding: 'utf8',
-    env: { ...process.env, THREAD_EVENTS_DIR: EVENTS },
+    env: { ...process.env, THREAD_EVENTS_DIR: EVENTS, ...env },
   })
   assert.equal(r.status, 0, r.stderr)
   return JSON.parse(r.stdout)
@@ -506,4 +535,298 @@ test('ADR 0038 pipeline: sub-bullets are commentary, the one gate prices 24 thro
   } finally {
     fs.rmSync(D, { recursive: true, force: true })
   }
+})
+
+// ---- the test-credential reading (ADR 0063) -----------------------------------------------------------------------
+// p8-1's two gates, verbatim from Archive/smart-slider-p8-1-credit-packs-on-the-slider.md (the ` (approved …)` stripped);
+// p8-2's and p8-3's staging gates, verbatim from smart-slider-rollout-2026-10-28's task notes.
+const P8_1_G1 = "credential: Stripe test-mode keys STRIPE_SECRET (sk_test_) and STRIPE_PUBLISHABLE_KEY (pk_test_) in the task tree's .env.local"
+const P8_1_G2 = "credential: staging Supabase SUPABASE_SERVICE_ROLE_KEY (project geyyptxqiovujgbiecsp) in the task tree's .env.local"
+const P8_2_G = "credential: staging Supabase SUPABASE_SERVICE_ROLE_KEY (project geyyptxqiovujgbiecsp) in the task tree's .env.local, for the Verify run (a throwaway staging test user topped up with add_credits, then the 5-GIF batch spends its credits)"
+const P8_3_G = "credential: the staging Supabase SUPABASE_SERVICE_ROLE_KEY (project geyyptxqiovujgbiecsp), already in this task tree's copied .env.local, used by Verify to create a throwaway test user, fetch its sign-in code, read its credit balance and delete it"
+const REF = 'geyyptxqiovujgbiecsp'
+const CLS = { file: '/x/.env.local', keys: [{ name: 'STRIPE_SECRET', prefix: 'sk_test_' }, { name: 'STRIPE_PUBLISHABLE_KEY', prefix: 'pk_test_' },
+  { name: 'SUPABASE_SERVICE_ROLE_KEY', supabase_project: REF }] }
+const OFF = 'no test-credential class for this repo (set test_credentials in its [repo."owner/name"] table in ~/.config/thread/rollouts.toml)'
+const reading = (gate, cls = CLS) => py([{ op: 'credential', gate, cls }])[0]
+
+test('the test-credential reading: each step names its why, the class-independent steps first', () => {
+  const cases = [
+    ['spend: x — cap US$5 total', CLS, 'not a credential gate'],
+    ['credential: test-mode STRIPE_SECRET (sk_test_), then wipe the test customers', CLS, 'deny word: wipe'],
+    ["credential: STRIPE_SECRET (sk_test_) in the task tree's .env.local", CLS, 'no test-mode, staging or sandbox word'],
+    ['credential: the tests read STRIPE_SECRET (sk_test_)', CLS, 'no test-mode, staging or sandbox word'], // `tests` is no mode word
+    [P8_1_G1, null, OFF],
+    ['credential: test-mode STRIPE_WEBHOOK_SECRET (whsec_)', CLS, 'STRIPE_WEBHOOK_SECRET is not a declared test credential'],
+    ["credential: Stripe test-mode keys in the task tree's .env.local", CLS, 'it names no declared test credential'],
+    ['credential: test-mode STRIPE_SECRET (pk_test_)', CLS, 'pk_test_ is not the declared prefix of a key it names'],
+    ['credential: staging SUPABASE_SERVICE_ROLE_KEY (project abcdefghijklmnopqrst)', CLS,
+      'abcdefghijklmnopqrst is not the declared Supabase project of a key it names'],
+    ['credential: staging STRIPE_SECRET (sk_test_) for project geyyptxqiovujgbiecsp', CLS,
+      'geyyptxqiovujgbiecsp is not the declared Supabase project of a key it names'], // a ref of a key it does not name
+  ]
+  const got = py(cases.map(([gate, cls]) => ({ op: 'credential', gate, cls })))
+  cases.forEach(([gate, , why], i) => assert.deepEqual(got[i], { names: null, why }, gate))
+})
+
+test("p8-1's two gates, p8-2's and p8-3's staging gates read their declared keys", () => {
+  const got = py([P8_1_G1, P8_1_G2, P8_2_G, P8_3_G, `- Credential: ${P8_1_G2.slice('credential: '.length)}`].map((gate) => ({ op: 'credential', gate, cls: CLS })))
+  assert.deepEqual(got, [
+    { names: ['STRIPE_SECRET', 'STRIPE_PUBLISHABLE_KEY'], why: '' },
+    { names: ['SUPABASE_SERVICE_ROLE_KEY'], why: '' },
+    { names: ['SUPABASE_SERVICE_ROLE_KEY'], why: '' },
+    { names: ['SUPABASE_SERVICE_ROLE_KEY'], why: '' },
+    { names: ['SUPABASE_SERVICE_ROLE_KEY'], why: '' }, // a list marker and a capitalised kind are normalised first
+  ])
+})
+
+test('the deny rules: live or prod at a word start or after _, the irreversible list and the deny nouns, the whole word quoted', () => {
+  const cases = [
+    ['credential: test-mode SUPABASE_PROD_KEY', 'PROD'],
+    ['credential: test-mode STRIPE_LIVE_KEY', 'LIVE'],
+    ['credential: test-mode STRIPE_SECRET (sk_prod_)', 'prod'],
+    ['credential: Production Supabase SUPABASE_SERVICE_ROLE_KEY', 'Production'],
+    ['credential: test-mode STRIPE_SECRET with livemode off', 'livemode'],
+    ['credential: test-mode STRIPE_SECRET (sk_live_)', 'live'],
+    ['credential: Stripe live keys STRIPE_SECRET (sk_live_)', 'live'],
+    ['credential: staging SUPABASE_SERVICE_ROLE_KEY, then delete production rows', 'delete production'],
+    ['credential: staging SUPABASE_SERVICE_ROLE_KEY, which cannot be undone', 'cannot be undone'],
+    ['credential: the staging Postgres password', 'password'],
+    ['credential: a test-mode GitHub token GH_TOKEN', 'token'],
+    ['credential: staging OAuth client STAGING_CLIENT_ID', 'OAuth'],
+    ['credential: the staging ssh key', 'ssh'],
+    ['credential: the staging deploy private key', 'private key'],
+    ['credential: the staging AWS access key AWS_KEY_ID', 'access key'],
+    ['credential: staging read access to SUPABASE_SERVICE_ROLE_KEY', 'access'],
+    ['credential: the staging session cookies', 'cookies'],
+    ['credential: test-mode STRIPE_SECRET from the keychain', 'keychain'],
+    ['credential: test-mode STRIPE_SECRET from 1Password', '1Password'],
+    ['credential: the staging GPG passphrase', 'passphrase'],
+  ]
+  const got = py(cases.map(([gate]) => ({ op: 'credential', gate, cls: CLS })))
+  cases.forEach(([gate, word], i) => assert.deepEqual(got[i], { names: null, why: `deny word: ${word}` }, gate))
+})
+
+test('the order: a gate no class could sign says its own why, with or without a class (S3\'s Replicate gate)', () => {
+  const CRED = 'credential: the Replicate API key from 1Password'
+  assert.deepEqual(reading(CRED, CLS), { names: null, why: 'deny word: API key' })
+  assert.deepEqual(reading(CRED, null), { names: null, why: 'deny word: API key' })
+  assert.deepEqual(reading("credential: Stripe live keys STRIPE_SECRET (sk_live_)", null), { names: null, why: 'deny word: live' })
+})
+
+test('known false asks (ADR 0063 residual ii): Stripe\'s own "API keys" and "secret key", STRIPE_PRODUCT_ID, "lives"', () => {
+  const cases = [
+    ['credential: test-mode STRIPE_PRODUCT_ID', 'deny word: PRODUCT'],
+    ["credential: Stripe test-mode API keys STRIPE_SECRET (sk_test_) in the task tree's .env.local", 'deny word: API keys'],
+    ['credential: Stripe test secret key STRIPE_SECRET (sk_test_)', 'deny word: secret'],
+    ['credential: the test-mode STRIPE_SECRET (sk_test_) that lives in .env.local', 'deny word: lives'],
+  ]
+  const got = py(cases.map(([gate]) => ({ op: 'credential', gate, cls: CLS })))
+  cases.forEach(([gate, why], i) => assert.deepEqual(got[i], { names: null, why }, gate))
+})
+
+test('accepted residual (i): a second credential in prose, and the GitHub PAT, pass the reading; the annotation names only the proved key', () => {
+  const PROSE = 'credential: test-mode STRIPE_SECRET (sk_test_) and the Replicate key from the vault'
+  const PAT = "credential: test-mode STRIPE_SECRET (sk_test_) and the GitHub PAT in the task tree's .env.local"
+  assert.deepEqual(reading(PROSE), { names: ['STRIPE_SECRET'], why: '' })
+  assert.deepEqual(reading(PAT), { names: ['STRIPE_SECRET'], why: '' }, '`PAT` has no _, so it is no env token, and no deny noun')
+  const [ann] = py([{ op: 'cred_annotation', date: '2026-11-01', names: reading(PAT).names, file: CLS.file, source: 'file:repo' }])
+  assert.equal(ann, '(approved 2026-11-01 under the standing approval: test credential STRIPE_SECRET present in /x/.env.local, class from file:repo)',
+    'the boundary: the annotation names STRIPE_SECRET alone and the file')
+})
+
+test("schedule's test-credential Planner examples read their keys (the guidance is coupled to the reader); API keys inserted asks", () => {
+  const schedule = fs.readFileSync(path.join(root, 'skills', 'schedule', 'SKILL.md'), 'utf8')
+  const s7 = schedule.slice(schedule.indexOf('### 7. '), schedule.indexOf('### 7.5. '))
+  const line = s7.split('\n').find((l) => l.startsWith('- Planner: word each test-credential gate'))
+  assert.ok(line, 'schedule § 7 has the test-credential Planner line')
+  const examples = [...line.matchAll(/`(credential: [^`]*<NAME>[^`]*)`/g)].map((m) => m[1])
+  assert.equal(examples.length, 2, 'two backticked examples, a prefix key and a project key')
+  const fill = (ex, k) => ex.replace('<NAME>', k.name).replace('<prefix>', k.prefix ?? '').replace('<ref>', k.supabase_project ?? '')
+  const filled = [fill(examples[0], CLS.keys[0]), fill(examples[1], CLS.keys[2])]
+  assert.deepEqual(py(filled.map((gate) => ({ op: 'credential', gate, cls: CLS }))),
+    [{ names: ['STRIPE_SECRET'], why: '' }, { names: ['SUPABASE_SERVICE_ROLE_KEY'], why: '' }], filled.join(' | '))
+  assert.deepEqual(reading(filled[0].replace('test-mode', 'test-mode API keys')), { names: null, why: 'deny word: API keys' }, 'control')
+})
+
+// ---- the env file and the value proof (ADR 0063) --------------------------------------------------------------------
+
+// One driver run under a 10 s deadline: a read that blocked (a FIFO opened without O_NONBLOCK) fails the test, never the suite.
+function pyT(reqs) {
+  const r = spawnSync('python3', ['-I', '-B', '-c', DRIVER, MODULE, RECONCILE, JSON.stringify(reqs)], {
+    encoding: 'utf8', timeout: 10000, env: { ...process.env, THREAD_EVENTS_DIR: EVENTS },
+  })
+  assert.equal(r.signal, null, 'the read returned (no block)')
+  assert.equal(r.status, 0, r.stderr)
+  return JSON.parse(r.stdout)
+}
+function scratch(t) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gated-env-'))
+  t.after(() => fs.rmSync(d, { recursive: true, force: true }))
+  return d
+}
+const clsAt = (file) => ({ ...CLS, file })
+const b64 = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url')
+const JWT = (payload) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64(payload)}.c2ln`
+
+test('a FIFO, a device, a symlink to one and a directory are never read, nor block, even with isfile patched to True', (t) => {
+  const d = scratch(t)
+  const fifo = path.join(d, 'fifo.env')
+  assert.equal(spawnSync('mkfifo', [fifo]).status, 0, 'mkfifo')
+  const link = path.join(d, 'zero.env')
+  fs.symlinkSync('/dev/zero', link)
+  const dir = path.join(d, 'dir.env')
+  fs.mkdirSync(dir)
+  for (const f of [fifo, '/dev/zero', link, dir]) {
+    const [plain, patched] = pyT([{ op: 'proof', cls: clsAt(f), names: ['STRIPE_SECRET'] }, { op: 'patched_proof', cls: clsAt(f), names: ['STRIPE_SECRET'] }])
+    assert.deepEqual(plain, { ok: false, why: `${f} is not a regular file` }, `${f}: never opened`)
+    assert.deepEqual(patched, { ok: false, why: `${f} is not a regular file` }, `${f}: swapped after the check, fstat refuses it`)
+  }
+  const missing = path.join(d, 'none.env')
+  assert.deepEqual(pyT([{ op: 'proof', cls: clsAt(missing), names: ['STRIPE_SECRET'] }])[0], { ok: false, why: `${missing} is not a regular file` })
+})
+
+test('the 1 MiB cap: one byte over asks; exactly 1 MiB holding the key reads', (t) => {
+  const d = scratch(t)
+  const head = 'STRIPE_SECRET=sk_test_FAKE51capvalue\n'
+  const exact = path.join(d, 'exact.env')
+  fs.writeFileSync(exact, head + '#'.repeat((1 << 20) - head.length - 1) + '\n')
+  assert.equal(fs.statSync(exact).size, 1 << 20)
+  const over = path.join(d, 'over.env')
+  fs.writeFileSync(over, head + '#'.repeat((1 << 20) - head.length) + '\n')
+  const [a, b] = pyT([{ op: 'proof', cls: clsAt(exact), names: ['STRIPE_SECRET'] }, { op: 'proof', cls: clsAt(over), names: ['STRIPE_SECRET'] }])
+  assert.deepEqual(a, { ok: true, why: '' })
+  assert.deepEqual(b, { ok: false, why: `${over} is over 1 MiB` })
+})
+
+test('the dotenv parse: export, both quotes, an unclosed quote, ` #`, CRLF, the last assignment, an empty value; non-UTF-8 asks', (t) => {
+  const d = scratch(t)
+  const f = path.join(d, 'a.env')
+  fs.writeFileSync(f, ['# a comment', '', 'export A_KEY=one', 'B_KEY="two words" # trailing', "C_KEY='three'", 'D_KEY="unclosed',
+    'E_KEY=five # a comment', 'F_KEY=six#kept', 'G_KEY=first', 'G_KEY=second', 'H_KEY=', 'I_KEY=   ', 'J_KEY = spaced', 'not a line', 'K_KEY=crlf\r', ''].join('\n'))
+  const bad = path.join(d, 'bad.env')
+  fs.writeFileSync(bad, Buffer.from([0x41, 0x5f, 0x4b, 0x3d, 0xff, 0xfe, 0x0a]))
+  const [r, nb] = pyT([{ op: 'read_env', path: f }, { op: 'read_env', path: bad }])
+  assert.deepEqual(r, { env: { A_KEY: 'one', B_KEY: 'two words', C_KEY: 'three', E_KEY: 'five', F_KEY: 'six#kept', G_KEY: 'second', J_KEY: 'spaced', K_KEY: 'crlf' }, why: null })
+  assert.deepEqual(nb, { env: null, why: `${bad} is not UTF-8` })
+})
+
+test('the value proof: missing keys all named, a wrong prefix, and every JWT edge; no value in any why', (t) => {
+  const d = scratch(t)
+  const write = (name, lines) => { const f = path.join(d, name); fs.writeFileSync(f, lines.join('\n') + '\n'); return f }
+  const none = write('none.env', ['ENVIRONMENT=staging', 'SUPABASE_ANON_KEY=anon-FAKE', 'STRIPE_PUBLISHABLE_KEY='])
+  const live = write('live.env', ['STRIPE_SECRET=sk_live_FAKE51value', 'STRIPE_PUBLISHABLE_KEY=pk_test_FAKE51value'])
+  const [missing, wrong] = pyT([{ op: 'proof', cls: clsAt(none), names: ['STRIPE_SECRET', 'STRIPE_PUBLISHABLE_KEY', 'SUPABASE_SERVICE_ROLE_KEY'] },
+    { op: 'proof', cls: clsAt(live), names: ['STRIPE_SECRET', 'STRIPE_PUBLISHABLE_KEY'] }])
+  assert.deepEqual(missing, { ok: false, why: `STRIPE_SECRET is not set in ${none}; STRIPE_PUBLISHABLE_KEY is not set in ${none}; SUPABASE_SERVICE_ROLE_KEY is not set in ${none}` })
+  assert.deepEqual(wrong, { ok: false, why: `STRIPE_SECRET in ${live} does not start with sk_test_` })
+  const LEGACY = (f) => `SUPABASE_SERVICE_ROLE_KEY in ${f} is not a legacy JWT service key, so its project cannot be proved`
+  const cases = [
+    ['nodots-FAKE', 'legacy'],
+    [`${b64({ alg: 'HS256' })}.${b64({ ref: REF })}`, 'legacy'], // two parts
+    [`${b64({ alg: 'HS256' })}.!!FAKE!!.c2ln`, 'legacy'], // bad base64url
+    [`${b64({ alg: 'HS256' })}.${b64('[1,2]')}.c2ln`, 'legacy'], // a payload that is no JSON object
+    [`${b64({ alg: 'HS256' })}.${b64('not json')}.c2ln`, 'legacy'],
+    ['sb_secret_FAKE51newformat', 'legacy'],
+    [JWT({ ref: 'abcdefghijklmnopqrst', role: 'service_role' }), 'other'],
+    [JWT({ role: 'service_role' }), 'other'], // no ref
+    [JWT({ ref: REF, role: 'service_role' }), 'ok'],
+  ]
+  const files = cases.map(([value], i) => write(`jwt${i}.env`, [`SUPABASE_SERVICE_ROLE_KEY=${value}`]))
+  const got = pyT(files.map((f) => ({ op: 'proof', cls: clsAt(f), names: ['SUPABASE_SERVICE_ROLE_KEY'] })))
+  cases.forEach(([value, want], i) => {
+    const expect = want === 'ok' ? { ok: true, why: '' } : want === 'legacy' ? { ok: false, why: LEGACY(files[i]) }
+      : { ok: false, why: `SUPABASE_SERVICE_ROLE_KEY in ${files[i]} is not a key for Supabase project ${REF}` }
+    assert.deepEqual(got[i], expect, value)
+    assert.ok(!JSON.stringify(got[i]).includes(value), `no value in the why: ${value}`)
+  })
+  assert.ok(!JSON.stringify([missing, wrong]).includes('FAKE'), 'no value in the missing or prefix whys')
+})
+
+// ---- the bootstrap refresh (ADR 0063 d4) ----------------------------------------------------------------------------
+
+// HOME is pinned to /Users/lachlants, so F and T name one file on every runner: a word counts as what the shell passes, so
+// `~/`, `$HOME/` and `${HOME}/` serve a class declaring F and the reverse, while a quoted `~` or a single-quoted `$HOME`
+// (which the shell never expands: under p8-1's `|| true` the copy fails silently and the stale copy stays) asks.
+test('bootstrap_refreshes: a plain cp of the file passes (p8-1\'s verbatim line, ~/, $HOME, ${HOME}, cp -v); every other shape asks', () => {
+  const HOME = { HOME: '/Users/lachlants' }
+  const F = '/Users/lachlants/repos/animately/optimizer/.env.local'
+  const T = '~/repos/animately/optimizer/.env.local'
+  const P8_1 = `yarn install --immutable && git submodule update --init library && (cp ${F} .env.local 2>/dev/null || true)`
+  const okCases = [[P8_1, F], [`cp ${T} .env.local`, T], ['cp $HOME/repos/animately/optimizer/.env.local .env.local', T],
+    ['cp "${HOME}/repos/animately/optimizer/.env.local" .env.local', T], [`cp -v ${F} .env.local`, F], [`yarn install; cp -- ${F} ./.env.local`, F],
+    [`cp ${T} .env.local`, F], [`cp ${F} .env.local`, T], ['cp "$HOME"/repos/animately/optimizer/.env.local .env.local', F],
+    [`test -f .env.example\ncp ${F} .env.local`, F], [`cp ${F} \\\n  .env.local`, F]]
+  assert.deepEqual(py(okCases.map(([cmd, file]) => ({ op: 'bootstrap', cmd, file })), HOME), okCases.map(() => ({ ok: true, why: '' })), 'accepted')
+  const PRE = `the rollout's env_bootstrap may not refresh ${F} into the task tree: `
+  const NONE = `the rollout's env_bootstrap does not provide ${F}`
+  const QUOTED = (file) => `the rollout's env_bootstrap may not refresh ${file} into the task tree: it names the file with a quoted ~ or a single-quoted $HOME, which the shell never expands`
+  const refusedT = [
+    [`cp "${T}" .env.local`, QUOTED(T)],
+    ["cp '$HOME/repos/animately/optimizer/.env.local' .env.local", QUOTED(T)],
+    ["cp '${HOME}/repos/animately/optimizer/.env.local' .env.local", QUOTED(T)],
+    [`cp \\${T} .env.local`, QUOTED(T)],
+    ['cp $HOMEDIR/repos/animately/optimizer/.env.local .env.local', `the rollout's env_bootstrap does not provide ${T}`],
+  ]
+  const gotT = py(refusedT.map(([cmd]) => ({ op: 'bootstrap', cmd, file: T })), HOME)
+  refusedT.forEach(([cmd, why], i) => assert.deepEqual(gotT[i], { ok: false, why }, cmd))
+  const refused = [
+    [`cp "${T}" .env.local`, QUOTED(F)],
+    [`(test -f .env.example)&&cp ${F} .env.local`, PRE + 'its copy runs only after a test'],
+    [`test -f .env.example &&\ncp ${F} .env.local`, PRE + 'its copy runs only after a test'],
+    ['', NONE],
+    [`cp ${F}.bak .env.local`, NONE],
+    [`yarn install # cp ${F} .env.local`, NONE],
+    [`[ -f .env.local ] || cp ${F} .env.local`, PRE + 'its copy runs only after a test'],
+    [`test -f .env.example && cp ${F} .env.local`, PRE + 'its copy runs only after a test'],
+    [`test -f ${F} && cp ${F} .env.local`, PRE + 'it names the file outside a plain cp'], // the test names it too
+    [`[ -f x ] && echo copying && cp ${F} .env.local`, PRE + 'its copy runs only after a test'],
+    [`cp -n ${F} .env.local`, PRE + 'its cp skips an existing copy (-n, -u or -i)'],
+    [`cp -u ${F} .env.local`, PRE + 'its cp skips an existing copy (-n, -u or -i)'],
+    [`cp -vi ${F} .env.local`, PRE + 'its cp skips an existing copy (-n, -u or -i)'],
+    [`cp --no-clobber ${F} .env.local`, PRE + 'its cp skips an existing copy (-n, -u or -i)'],
+    [`cp --update=older ${F} .env.local`, PRE + 'its cp skips an existing copy (-n, -u or -i)'],
+    [`cp .env.local ${F}`, PRE + 'its cp writes the file instead of reading it'],
+    [`ln -s ${F} .env.local`, PRE + 'it names the file outside a plain cp'],
+    [`rsync ${F} .env.local`, PRE + 'it names the file outside a plain cp'],
+    [`if true; then cp ${F} .env.local; fi`, PRE + 'it names the file outside a plain cp'],
+    [`cp '${F} .env.local`, "the rollout's env_bootstrap is not one shell command"],
+  ]
+  const got = py(refused.map(([cmd]) => ({ op: 'bootstrap', cmd, file: F })), HOME)
+  refused.forEach(([cmd, why], i) => assert.deepEqual(got[i], { ok: false, why }, cmd))
+})
+
+test('credential_covered: the reading, then the bootstrap, then the proof', (t) => {
+  const d = scratch(t)
+  const f = path.join(d, 'src.env')
+  fs.writeFileSync(f, `STRIPE_SECRET=sk_test_FAKE51a\nSTRIPE_PUBLISHABLE_KEY=pk_test_FAKE51b\nSUPABASE_SERVICE_ROLE_KEY=${JWT({ ref: REF, role: 'service_role' })}\n`)
+  const boot = `yarn install && (cp ${f} .env.local 2>/dev/null || true)`
+  const got = py([
+    { op: 'covered_cred', gate: P8_1_G1, cls: clsAt(f), bootstrap: boot },
+    { op: 'covered_cred', gate: P8_1_G2, cls: clsAt(f), bootstrap: boot },
+    { op: 'covered_cred', gate: 'credential: the Replicate API key', cls: clsAt(f), bootstrap: '' },
+    { op: 'covered_cred', gate: P8_1_G1, cls: clsAt(f), bootstrap: '' },
+    { op: 'covered_cred', gate: P8_1_G1, cls: clsAt(path.join(d, 'none.env')), bootstrap: `cp ${path.join(d, 'none.env')} .env.local` },
+  ])
+  assert.deepEqual(got[0], { covered: true, names: ['STRIPE_SECRET', 'STRIPE_PUBLISHABLE_KEY'], why: '' })
+  assert.deepEqual(got[1], { covered: true, names: ['SUPABASE_SERVICE_ROLE_KEY'], why: '' })
+  assert.deepEqual(got[2], { covered: false, names: null, why: 'deny word: API key' }, 'the reading first: no bootstrap is read')
+  assert.deepEqual(got[3], { covered: false, names: ['STRIPE_SECRET', 'STRIPE_PUBLISHABLE_KEY'], why: `the rollout's env_bootstrap does not provide ${f}` })
+  assert.deepEqual(got[4], { covered: false, names: ['STRIPE_SECRET', 'STRIPE_PUBLISHABLE_KEY'], why: `${path.join(d, 'none.env')} is not a regular file` })
+})
+
+test("the credential annotation strips through GATE_ANNOT_RE and the engine's unapprovedGates, the gate's own parentheses kept", () => {
+  const T = loadEngine(['unapprovedGates'])
+  const gates = [P8_1_G1, P8_1_G2]
+  const anns = py([
+    { op: 'cred_annotation', date: '2026-11-01', names: ['STRIPE_SECRET', 'STRIPE_PUBLISHABLE_KEY'], file: '~/repos/animately/optimizer/.env.local', source: 'file:repo' },
+    { op: 'cred_annotation', date: '2026-11-01', names: ['SUPABASE_SERVICE_ROLE_KEY'], file: '/x/.env.local', source: 'file:repo' },
+    { op: 'cred_annotation', date: '2026-11-01', names: ['STRIPE_SECRET'], file: '/x/(old).env', source: 'file:repo' },
+  ])
+  assert.equal(anns[0], '(approved 2026-11-01 under the standing approval: test credential STRIPE_SECRET, STRIPE_PUBLISHABLE_KEY present in ~/repos/animately/optimizer/.env.local, class from file:repo)')
+  assert.match(anns[2].error, /an annotation part holds a '\)'/, 'a ) in a part raises')
+  for (const ann of anns.slice(0, 2)) assert.ok(ann.startsWith('(approved ') && ann.indexOf(')') === ann.length - 1, `one ')' and it is last: ${ann}`)
+  const stripped = py(gates.map((gate, i) => ({ op: 'strip', gate, line: `${gate} ${anns[i]}` })))
+  assert.deepEqual(stripped, [true, true], 'GATE_ANNOT_RE strips each; `(sk_test_)` and `(project …)` stay')
+  gates.forEach((gate, i) => assert.deepEqual([...T.unapprovedGates([gate], [`${gate} ${anns[i]}`])], [], gate))
 })

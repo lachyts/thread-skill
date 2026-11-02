@@ -10,11 +10,28 @@
 #   Q3-Q5  await-sign-off (the sign-off pause), status's pausedFor and clear-pause's STILL-AWAITING refusal, then the
 #          reinstate once signed (by hand, or by a raised standing approval).
 #   S7     ADR 0038's one-line gates through approve-gates --standing: p19-10's restated gate (cap 24 USD) and p19-5's
-#          (cap 50 USD total) are signed; p19-10's original one-line gate asks, naming its two `each`.
+#          (cap 50 USD total) are signed; p19-10's original one-line gate asks, naming its two `each`. It runs at a
+#          US$200 limit, so the month line (S9) never touches its pricing; S9c3 is the same two gates at US$50.
 #   S8     ADR 0038's bounce, end to end from the engine: a priced gate (cap 24 USD) whose sub-bullet spends 40, flagged
 #          on both plan rounds, is plan-blocked when the judge obeys the usd-null rule; a judge that wrongly bounces it
 #          leaves `## Gate bounce (awaiting sign-off)` on the gate-pending note, and the standing approval asks instead of
 #          signing (the same gate without the section is signed). Lachy's sign-off removes it; other rows settle it.
+#   S9     the month line (p30-8, ADR 0034's 2026-10-27 amendment): each signing is logged in the rollout note's
+#          `## Needs-you log`, and a covered gate still asks when this calendar month's standing-approved spend (every
+#          rollout note's log: the live ones in the tasks dir, Archive/ and Archive/Rollouts/, dated names only, each
+#          once by real path) would pass the limit with it: Verify's US$30 signs and US$250 asks; the sum runs across
+#          notes, calls, gates and slugs, inclusive; dry-run writes and locks nothing; bare sign-offs, push lines, other
+#          sections, undated notes and task notes never count; an unreadable dated note or an unlistable directory
+#          asks; a held standing-spend lock exits 1, while a slug that needs no month read still asks; a task stamp is
+#          its own line.
+#   S10    a declared test credential signs itself (ADR 0063, p34-8): p8-1's two verbatim credential gates
+#          (smart-slider-rollout-2026-10-28) are signed at the built-in 0 spend limit when the repo's one-line
+#          `test_credentials` class declares their keys, its file holds them with their declared prefix or Supabase
+#          project, and the rollout's verbatim env_bootstrap refreshes that file with a plain cp; a live or production
+#          gate, a wrong or missing value, a guarded or reversed copy, no class (another repo, a serial Leg) and a
+#          bounce all ask; a refused class form exits 1, but a gate the reading's class-independent steps refuse
+#          still asks without resolving it; a spend gate beside one still logs alone; a bad spend stamp errors only a
+#          slug that resolves the limit. No value from the file is ever printed or written.
 #   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
 #          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
 #          refused rollouts.toml. It writes nothing.
@@ -30,6 +47,7 @@ TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="$TMP/events"  # this suite reads the Run record, so it keeps its own dir
 export THREAD_NOTE_LOCK_DIR="${TMP}/note-locks"   # the note save lock stays in temp too (reconcile-rollout.py _note_lock_path)
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 NOW=2026-10-14T09:00:00Z
 DATE=2026-10-14
 
@@ -38,8 +56,10 @@ ok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected
 has() { case "$1" in *"$2"*) echo "ok   - $3";; *) echo "FAIL - $3: [$2] not in [$1]"; fail=1;; esac; }
 hasnt() { case "$1" in *"$2"*) echo "FAIL - $3: unexpected [$2] in [$1]"; fail=1;; *) echo "ok   - $3";; esac; }
 
-# Settings homes: H50 holds `[defaults] spend_approval_usd = 50`; HE is empty (the built-in 0, off); HR is refused.
+# Settings homes: H50 holds `[defaults] spend_approval_usd = 50`, H200 `= 200` (Lachy's, 2026-10-23); HE is empty (the
+# built-in 0, off); HR is refused.
 H50="$TMP/home50"; mkdir -p "$H50/.config/thread"; printf '[defaults]\nspend_approval_usd = 50\n' > "$H50/.config/thread/rollouts.toml"
+H200="$TMP/home200"; mkdir -p "$H200/.config/thread"; printf '[defaults]\nspend_approval_usd = 200\n' > "$H200/.config/thread/rollouts.toml"
 HE="$TMP/home-empty"; mkdir -p "$HE"
 HR="$TMP/home-refused"; mkdir -p "$HR/.config/thread"; printf '[defaults]\nspend_approval_usd = -5\n' > "$HR/.config/thread/rollouts.toml"
 HH="$H50"   # the home the helpers below pass
@@ -52,12 +72,12 @@ mkro() {
     for l in "$@"; do printf '%s\n' "$l"; done
     printf -- '---\n\n## Notes\n\nProject root: `%s`\n\n## Queue\n\n%s\n' "$D/repo" "${ORDER:-- [[a]]}"; } > "$D/ro.md"
 }
-# mkt <slug> <status|-> [frontmatter lines...] — a task note linked to ro
+# mkt <slug> <status|-> [frontmatter lines...] — a task note linked to ro (or to $RO's note when set)
 mkt() {
   local s="$1" st="$2"; shift 2
   { printf -- '---\ntags: [task]\n'
     [ "$st" = "-" ] || printf 'status: %s\n' "$st"
-    printf 'rollout: "[[ro]]"\n'
+    printf 'rollout: "[[%s]]"\n' "${RO:-ro}"
     for l in "$@"; do printf '%s\n' "$l"; done
     printf -- '---\n\n## Notes\n\nbody %s\n' "$s"; } > "$D/$s.md"
 }
@@ -69,9 +89,9 @@ gate() {
 fm() { grep -m1 "^$2:" "$D/$1.md" || echo "<none>"; }
 # section <slug> <heading> — the section's non-blank lines
 section() { awk -v h="$2" '$0 == h {on=1; next} /^## /{on=0} on && NF' "$D/$1.md"; }
-sa() {  # sa <slugs> [extra args] — approve-gates --standing; $out (stdout+stderr), $rc
+sa() {  # sa <slugs> [extra args] — approve-gates --standing on $D/ro.md (or $RONOTE when set); $out (stdout+stderr), $rc
   local t="$1"; shift
-  out=$(HOME="$HH" python3 "$SCRIPT" approve-gates --standing --tasks "$t" --rollout "$D/ro.md" --tasks-dir "$D" \
+  out=$(HOME="$HH" python3 "$SCRIPT" approve-gates --standing --tasks "$t" --rollout "${RONOTE:-$D/ro.md}" --tasks-dir "$D" \
     --date "$DATE" --now "$NOW" "$@" 2>&1); rc=$?
 }
 nxt() { HOME="$HE" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" --dry-run "$@"; }
@@ -117,7 +137,7 @@ ORDER=$'- [[a]]\n- [[b]]' mkro
 before=$(cat "$D/a.md" "$D/b.md")
 sa a,b
 ok "$rc" 3 "S3: exit 3"
-has "$out" "ASK: a: $CRED: not a spend gate" "S3: a credential gate never passes"
+has "$out" "ASK: a: $CRED: deny word: API key" "S3: a credential outside the test-credential class never passes (ADR 0063: its deny word)"
 has "$out" "ASK: b: $SEVENTY: total exposure US\$70 is over" "S3: US\$40 plus US\$30 is 70, over 50"
 ok "$(cat "$D/a.md" "$D/b.md")" "$before" "S3: both notes untouched"
 
@@ -164,6 +184,8 @@ for bad in -1 fifty; do
   ok "$rc|$(cat "$D/d.md")" "1|$before" "S5: a stamp of $bad exits 1, nothing written"
   has "$out" "spend_approval_usd on [[d]] must be an integer >= 0" "S5: … naming the stamp ($bad)"
 done
+# This mkro rewrites ro.md, wiping b's US$150 Needs-you log line, so e's US$9 sums against 0 this month. Were the log
+# kept, e asking (150 + 9 is past the rollout's 10 month line) would be the month line working, not a bug to fix.
 mkro 'spend_approval_usd: 10'
 mkt e gate-pending; gate e "$PROBE"
 sa e
@@ -198,10 +220,10 @@ mkt a gate-pending; gate a "$ONE24"
 mkt b gate-pending; gate b "$ONE50"
 mkt c gate-pending; gate c "$P19_10"
 before=$(cat "$D/c.md")
-sa a,b,c
+HH="$H200" sa a,b,c
 ok "$rc" 3 "S7: two signed, one asks: exit 3"
-has "$out" "a: gate approved under the standing approval: $ONE24 (exposure US\$24 of US\$50, file:defaults)" "S7: p19-10's restated gate signs US\$24"
-has "$out" "b: gate approved under the standing approval: $ONE50 (exposure US\$50 of US\$50, file:defaults)" "S7: p19-5's one-line gate signs US\$50"
+has "$out" "a: gate approved under the standing approval: $ONE24 (exposure US\$24 of US\$200, file:defaults)" "S7: p19-10's restated gate signs US\$24"
+has "$out" "b: gate approved under the standing approval: $ONE50 (exposure US\$50 of US\$200, file:defaults)" "S7: p19-5's one-line gate signs US\$50"
 has "$out" "ASK: c: $P19_10: per/each outside the cap clause: each, each" "S7: p19-10's original gate asks, naming its two each"
 ok "$(cat "$D/c.md")" "$before" "S7: the unpriceable gate's note is untouched"
 
@@ -291,6 +313,416 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d["tasks"][0]; r[
 rec "$TMP/s8-d3.json"
 ok "$(fm d status)|$(section d "$BOUNCE_H")" "status: plan-blocked|" "S8: a row of another status removes it too"
 
+# ── S9: the month line (p30-8; ADR 0034's 2026-10-27 amendment, Chorus ADR 0108 d4) ───────────────────────────────
+# Spend is never asked ahead: a covered gate is signed and its signing logged in the rollout note's `## Needs-you log`,
+# and it still asks when this calendar month's standing-approved spend (summed from every rollout note's log) would
+# pass the limit with it. LOG(x, m, gate) is that line at NOW, under the H200 limit unless named.
+logl() {  # logl <slug> <x> <m> <gate> [limit] [source] — the standing approval's Needs-you log line at NOW
+  printf -- '- 2026-10-14T09:00+00:00 [[%s]] signed under the standing approval: US$%s (month to date US$%s of US$%s, %s): %s' \
+    "$1" "$2" "$3" "${5:-200}" "${6:-file:defaults}" "$4"
+}
+mkarch() {  # mkarch <path> [log line] — an archived rollout note, its `## Needs-you log` holding the line
+  { printf -- '---\ntags: [task, rollout]\nstatus: done\n---\n\n## Queue\n\n- [[x]]\n'
+    [ -z "${2:-}" ] || printf '\n## Needs-you log\n\n%s\n' "$2"; } > "$1"
+}
+R30='spend: replicate credits — cap 30 USD'
+R250='spend: replicate credits — cap 250 USD'
+DECOY='- 2026-10-03T10:00+00:00 [[z1]] signed under the standing approval: US$500 (month to date US$500 of US$200, file:defaults): spend: z1 — cap 500 USD'
+
+# S9a: Verify's US$30 asks nothing and is signed, its signing logged below `## Queue`
+scen s9a
+mkro; mkt a gate-pending; gate a "$R30"
+HH="$H200" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S9a: Verify's US\$30 is signed by the standing approval: exit 0, in_progress"
+ok "$(section a '## Approved gates')" "- $R30 (approved $DATE under the standing approval: total exposure US\$30, limit US\$200 from file:defaults)" "S9a: … annotated as before"
+ok "$(section ro '## Needs-you log')" "$(logl a 30 30 "$R30")" "S9a: the signing is the rollout note's one Needs-you log line"
+ok "$(grep '^## ' "$D/ro.md" | tail -1)" "## Needs-you log" "S9a: … in a section created at the note's end, below ## Queue"
+hasnt "$out" "ASK:" "S9a: nothing asks"
+
+# S9b: Verify's US$250 still reaches him
+scen s9b
+mkro; mkt a gate-pending; gate a "$R250"
+before=$(cat "$D/a.md" "$D/ro.md")
+HH="$H200" sa a
+ok "$rc" 3 "S9b: Verify's US\$250 asks: exit 3"
+has "$out" "ASK: a: $R250: total exposure US\$250 is over the standing approval's US\$200 (file:defaults)" "S9b: … over the per-gate limit"
+ok "$(cat "$D/a.md" "$D/ro.md")" "$before" "S9b: a.md and ro.md byte-identical (no Needs-you log)"
+
+# S9c: the month line sums every rollout note's log (live, Archive/, Archive/Rollouts/, a -2 ordinal), this month only,
+# inclusive, and across calls (S9j: the tasks dir itself, the dedupe, and what never counts there)
+scen s9c
+mkro; mkt a gate-pending; gate a "$R30"
+printf '\n## Needs-you log\n\n%s\n%s\n' \
+  '- 2026-10-02T10:00+00:00 [[old1]] signed under the standing approval: US$100 (month to date US$100 of US$200, file:defaults): spend: x — cap 100 USD' \
+  '- 2026-09-30T10:00+00:00 [[old0]] signed under the standing approval: US$150 (month to date US$150 of US$200, file:defaults): spend: y — cap 150 USD' >> "$D/ro.md"
+mkdir -p "$D/Archive/Rollouts"
+mkarch "$D/Archive/Rollouts/x-rollout-2026-10-01.md" '- 2026-10-05T10:00+00:00 [[x1]] signed under the standing approval: US$40 (month to date US$140 of US$200, file:defaults): spend: x1 — cap 40 USD'
+mkarch "$D/Archive/y-rollout-2026-10-02-2.md" '- 2026-10-07T10:00+00:00 [[y1]] signed under the standing approval: US$30 (month to date US$170 of US$200, file:defaults): spend: y1 — cap 30 USD'
+HH="$H200" sa a
+ok "$rc" 0 "S9c: 100 + 40 + 30 this month, plus 30, lands exactly on the US\$200 line: signed (inclusive)"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 30 200 "$R30")" "S9c: … logged at month to date US\$200"
+P10='spend: one more probe — cap 10 USD'
+mkt b gate-pending; gate b "$P10"
+before=$(cat "$D/b.md" "$D/ro.md")
+HH="$H200" sa b
+ok "$rc" 3 "S9c: a later call's US\$10 is past the month line: exit 3"
+has "$out" "ASK: b: $P10: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9c: … the ASK names the month line (a's persisted line was read)"
+ok "$(cat "$D/b.md" "$D/ro.md")" "$before" "S9c: b.md and ro.md byte-identical across the call"
+
+# S9c2: two gates on one note: the first signs, the second is past the month line
+scen s9c2
+B150='spend: batch one — cap 150 USD'; B60='spend: batch two — cap 60 USD'
+mkro; mkt a gate-pending; gate a "$B150" "$B60"
+HH="$H200" sa a
+ok "$rc|$(fm a status)" "3|status: gate-pending" "S9c2: one gate signed, one left: exit 3, still gate-pending"
+ok "$(section a '## Approved gates')" "- $B150 (approved $DATE under the standing approval: total exposure US\$150, limit US\$200 from file:defaults)" "S9c2: batch one approved"
+ok "$(section a '## Gated inputs (awaiting sign-off)')" "- $B60" "S9c2: batch two alone stays pending"
+has "$out" "ASK: a: $B60: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9c2: … asking past the month line"
+ok "$(section ro '## Needs-you log')" "$(logl a 150 150 "$B150")" "S9c2: one log line, batch one's"
+
+# S9c3: S7's two gates at US$50 in one call: the running sum crosses slugs
+scen s9c3
+ORDER=$'- [[a]]\n- [[b]]' mkro
+mkt a gate-pending; gate a "$ONE24"
+mkt b gate-pending; gate b "$ONE50"
+before=$(cat "$D/b.md")
+sa a,b
+ok "$rc" 3 "S9c3: a signs, b asks: exit 3"
+has "$out" "a: gate approved under the standing approval: $ONE24 (exposure US\$24 of US\$50, file:defaults)" "S9c3: a's US\$24 signs"
+has "$out" "ASK: b: $ONE50: this month's (2026-10) standing approvals would reach US\$74 with this gate, past the US\$50 month line (file:defaults)" "S9c3: b's US\$50 alone is covered, but a's US\$24 earlier in the call puts it past the line"
+ok "$(cat "$D/b.md")" "$before" "S9c3: b.md byte-identical"
+ok "$(section ro '## Needs-you log')" "$(logl a 24 24 "$ONE24" 50)" "S9c3: one log line, a's"
+
+# S9d: dry-run writes nothing and takes no lock
+scen s9d
+mkro; mkt a gate-pending; gate a "$R30"
+before=$(cat "$D/a.md" "$D/ro.md")
+out=$(THREAD_NOTE_LOCK_DIR="$TMP/locks-dry" HOME="$H200" python3 "$SCRIPT" approve-gates --standing --tasks a --rollout "$D/ro.md" \
+  --tasks-dir "$D" --date "$DATE" --now "$NOW" --dry-run 2>&1); rc=$?
+ok "$rc" 0 "S9d: dry-run exits 0"
+has "$out" "(dry-run)" "S9d: … and says so"
+ok "$(cat "$D/a.md" "$D/ro.md")" "$before" "S9d: a.md and ro.md byte-identical"
+if [ ! -e "$TMP/locks-dry/standing-spend.lock" ]; then echo "ok   - S9d: no standing-spend lock taken"; else echo "FAIL - S9d: a standing-spend lock was taken"; fail=1; fi
+
+# S9e: Lachy's bare sign-off logs nothing and never counts
+scen s9e
+mkro; mkt a gate-pending; gate a "$R30"
+before=$(cat "$D/ro.md")
+out=$(python3 "$SCRIPT" approve-gates --tasks a --tasks-dir "$D" --date "$DATE" --now "$NOW" 2>&1); rc=$?
+ok "$rc|$(cat "$D/ro.md")" "0|$before" "S9e: a bare sign-off leaves ro.md byte-identical"
+R200='spend: replicate credits — cap 200 USD'
+mkt b gate-pending; gate b "$R200"
+HH="$H200" sa b
+ok "$rc" 0 "S9e: a later US\$200 gate is signed: the bare sign-off's 30 is not counted"
+ok "$(section ro '## Needs-you log')" "$(logl b 200 200 "$R200")" "S9e: … logged at month to date US\$200"
+
+# S9f: push lines and other sections never count; the new line goes inside the log section
+scen s9f
+mkro; mkt a gate-pending; gate a "$R30"
+printf '\n## Needs-you log\n\n%s\n%s\n\n## Completion log\n\n%s\n' \
+  '- 2026-10-14T08:00+00:00 [[z]] pushed via push: sign off gated input: spend: probe — cap 190 USD' \
+  '- 2026-10-14T08:01+00:00 [[z]] push failed: [[y]] signed under the standing approval: US$190' \
+  '- 2026-10-14T08:02+00:00 [[y]] signed under the standing approval: US$190 (month to date US$190 of US$200, file:defaults): spend: q — cap 190 USD' >> "$D/ro.md"
+cl=$(section ro '## Completion log')
+HH="$H200" sa a
+ok "$rc" 0 "S9f: a push line, a quoted mark and a Completion log line are not counted: signed"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 30 30 "$R30")" "S9f: the new line is the log section's last, month to date US\$30"
+ok "$(section ro '## Completion log')" "$cl" "S9f: the Completion log is unchanged"
+
+# S9g: an unreadable dated rollout note, or a directory it cannot list, asks (fail closed); an undated note is never
+# opened
+if [ "$(id -u)" = 0 ]; then
+  echo "ok   - S9g: skipped as root (chmod 000 reads anyway)"
+else
+  scen s9g
+  mkro; mkt a gate-pending; gate a "$R30"
+  mkdir -p "$D/Archive/Rollouts"
+  W="$D/Archive/Rollouts/w-rollout-2026-10-03.md"
+  mkarch "$W"; chmod 000 "$W"
+  before=$(cat "$D/a.md")
+  HH="$H200" sa a
+  ok "$rc" 3 "S9g: an unreadable rollout note: exit 3"
+  has "$out" "cannot read $W for this month's standing approvals" "S9g: … the ASK names it"
+  ok "$(cat "$D/a.md")" "$before" "S9g: a.md byte-identical"
+  chmod 644 "$W"
+  chmod 000 "$D/Archive/Rollouts"
+  before=$(cat "$D/a.md" "$D/ro.md")
+  HH="$H200" sa a
+  chmod 755 "$D/Archive/Rollouts"
+  ok "$rc" 3 "S9g: a directory that exists but cannot be listed: exit 3"
+  has "$out" "ASK: a: $R30: cannot read $D/Archive/Rollouts for this month's standing approvals (" "S9g: … the ASK names the directory"
+  ok "$(cat "$D/a.md" "$D/ro.md")" "$before" "S9g: a.md and ro.md byte-identical"
+  U="$D/z-p1-1-rollout-face.md"
+  mkarch "$U" "$DECOY"; chmod 000 "$U"
+  HH="$H200" sa a
+  ok "$rc" 0 "S9g: an unreadable undated note is never opened: signed"
+  chmod 644 "$U"
+fi
+
+# S9h: the standing-spend lock is taken; held elsewhere, the call exits 1 and writes nothing for a slug that needed the
+# month read, while a later slug that needs none (b, over the per-gate limit) still asks
+scen s9h
+ORDER=$'- [[a]]\n- [[b]]' mkro; mkt a gate-pending; gate a "$R30"; mkt b gate-pending; gate b "$R250"
+mkdir -p "$TMP/locks-held"
+python3 -c 'import fcntl, sys, time
+f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").close(); time.sleep(60)' \
+  "$TMP/locks-held/standing-spend.lock" "$TMP/held" &
+HOLDER=$!
+for _ in $(seq 100); do [ -e "$TMP/held" ] && break; sleep 0.1; done
+before=$(cat "$D/a.md" "$D/b.md" "$D/ro.md")
+out=$(THREAD_NOTE_LOCK_DIR="$TMP/locks-held" THREAD_NOTE_LOCK_TIMEOUT=1 HOME="$H200" python3 "$SCRIPT" approve-gates --standing \
+  --tasks a,b --rollout "$D/ro.md" --tasks-dir "$D" --date "$DATE" --now "$NOW" 2>&1); rc=$?
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+ok "$rc" 1 "S9h: a held standing-spend lock: exit 1"
+has "$out" "ERROR: a: " "S9h: … an ERROR for a, which needed the month read"
+has "$out" "standing-spend.lock" "S9h: … naming the lock"
+has "$out" "ASK: b: $R250: total exposure US\$250 is over the standing approval's US\$200 (file:defaults)" "S9h: b, after it and needing no month read, still asks"
+ok "$(cat "$D/a.md" "$D/b.md" "$D/ro.md")" "$before" "S9h: a.md, b.md and ro.md byte-identical"
+
+# S9i: a task stamp sets its own per-gate limit and its own month line
+scen s9i
+R120='spend: replicate credits — cap 120 USD'
+mkro; mkt a gate-pending 'spend_approval_usd: 300'; gate a "$R120"
+printf '\n## Needs-you log\n\n%s\n' \
+  '- 2026-10-02T10:00+00:00 [[old1]] signed under the standing approval: US$170 (month to date US$170 of US$200, file:defaults): spend: x — cap 170 USD' >> "$D/ro.md"
+HH="$H200" sa a
+ok "$rc" 0 "S9i: 170 + 120 is within the task's own US\$300 line: signed"
+ok "$(section ro '## Needs-you log' | tail -1)" "$(logl a 120 290 "$R120" 300 task)" "S9i: … logged against the task's line"
+
+# S9j: the live layout. A dated rollout note sits in the tasks dir beside its tasks, so the dir's listing finds it as
+# well as --rollout, here given by a second spelling of the same file (`repo/..`: pathlib collapses a `./` but keeps a
+# `..`, so only the real path dedupes it): it counts once. Another project's live dated note in the same dir counts;
+# an undated note and a task note there, each holding a US$500 standing line this month, never count.
+scen s9j
+X=x-rollout-2026-10-14; XP="$D/repo/../$X.md"
+R60='spend: replicate credits — cap 60 USD'
+ORDER=$'- [[a]]\n- [[b]]' mkro; mv "$D/ro.md" "$D/$X.md"
+printf '\n## Needs-you log\n\n%s\n' \
+  '- 2026-10-03T10:00+00:00 [[x0]] signed under the standing approval: US$100 (month to date US$100 of US$200, file:defaults): spend: x0 — cap 100 USD' >> "$D/$X.md"
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n---\n\n## Queue\n\n- [[y1]]\n\n## Needs-you log\n\n%s\n' \
+  '- 2026-10-04T10:00+00:00 [[y1]] signed under the standing approval: US$40 (month to date US$40 of US$200, file:defaults): spend: y1 — cap 40 USD' \
+  > "$D/y-rollout-2026-10-09.md"
+mkarch "$D/z-p1-1-rollout-face.md" "$DECOY"
+mkt c open; printf '\n## Needs-you log\n\n%s\n' "$DECOY" >> "$D/c.md"
+RO=$X mkt a gate-pending; gate a "$R60"
+RONOTE="$XP" HH="$H200" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S9j: its own note's 100 (listed and named, counted once) + another live note's 40 + 60 lands on the US\$200 line: signed"
+ok "$(section "$X" '## Needs-you log' | tail -1)" "$(logl a 60 200 "$R60")" "S9j: … logged in the dated note at month to date US\$200 (neither decoy's US\$500 counted)"
+ok "$(section y-rollout-2026-10-09 '## Needs-you log' | wc -l | tr -d ' ')" 1 "S9j: the other project's note is read, never written"
+RO=$X mkt b gate-pending; gate b "$P10"
+before=$(cat "$D/b.md" "$D/$X.md")
+RONOTE="$XP" HH="$H200" sa b
+ok "$rc" 3 "S9j: a later call's US\$10 is past the month line: exit 3"
+has "$out" "ASK: b: $P10: this month's (2026-10) standing approvals would reach US\$210 with this gate, past the US\$200 month line (file:defaults)" "S9j: … at US\$210, each note still counted once"
+ok "$(cat "$D/b.md" "$D/$X.md")" "$before" "S9j: b.md and the rollout note byte-identical across the call"
+
+# ── S10: a declared test credential signs itself (ADR 0063, p34-8) ─────────────────────────────────────────────────
+# The Verify: p8-1's two gates, verbatim from Archive/smart-slider-p8-1-credit-packs-on-the-slider.md, and its rollout's
+# env_bootstrap, verbatim (its `# from …` comment included) with the source path swapped for $SRC. The class lives in
+# the home's rollouts.toml (HC: schema 3 and the one-line class, NO spend_approval_usd anywhere, so the limit is the
+# built-in 0; HCS adds `[defaults] spend_approval_usd = 200`). Each scenario's repo is a git clone whose origin is
+# Animately/optimizer. The values are fakes; none may reach stdout, stderr or a note.
+G1="credential: Stripe test-mode keys STRIPE_SECRET (sk_test_) and STRIPE_PUBLISHABLE_KEY (pk_test_) in the task tree's .env.local"
+G2="credential: staging Supabase SUPABASE_SERVICE_ROLE_KEY (project geyyptxqiovujgbiecsp) in the task tree's .env.local"
+mkdir -p "$TMP/s10"
+SRC="$TMP/s10/source.env.local"
+jwt() { python3 -c 'import base64, json, sys
+b = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+print("%s.%s.%s" % (b({"alg": "HS256", "typ": "JWT"}), b({"iss": "supabase", "ref": sys.argv[1], "role": "service_role"}), "c2lnRkFLRQ"))' "$1"; }
+JWT=$(jwt geyyptxqiovujgbiecsp)
+JWT_OTHER=$(jwt abcdefghijklmnopqrst)
+srcok() { printf '%s\n' '# staging and Stripe test mode only' 'ENVIRONMENT=staging' 'STRIPE_SECRET=sk_test_FAKE51secretvalue' \
+  'export STRIPE_PUBLISHABLE_KEY="pk_test_FAKE51publishable"' "SUPABASE_SERVICE_ROLE_KEY=$JWT" > "$SRC"; }
+srcok
+CLASS="test_credentials = { file = \"$SRC\", keys = [{ name = \"STRIPE_SECRET\", prefix = \"sk_test_\" }, { name = \"STRIPE_PUBLISHABLE_KEY\", prefix = \"pk_test_\" }, { name = \"SUPABASE_SERVICE_ROLE_KEY\", supabase_project = \"geyyptxqiovujgbiecsp\" }] }"
+HC="$TMP/home-class"; mkdir -p "$HC/.config/thread"
+printf 'schema = 3\n\n[repo."Animately/optimizer"]\n%s   # Stripe test mode and staging Supabase only\n' "$CLASS" > "$HC/.config/thread/rollouts.toml"
+HCS="$TMP/home-class-spend"; mkdir -p "$HCS/.config/thread"
+printf 'schema = 3\n\n[defaults]\nspend_approval_usd = 200\n\n[repo."Animately/optimizer"]\n%s\n' "$CLASS" > "$HCS/.config/thread/rollouts.toml"
+BOOT="env_bootstrap: yarn install --immutable && git submodule update --init library && (cp $SRC .env.local 2>/dev/null || true)  # from smart-slider-rollout-2026-10-18"
+ANN1="(approved $DATE under the standing approval: test credential STRIPE_SECRET, STRIPE_PUBLISHABLE_KEY present in $SRC, class from file:repo)"
+ANN2="(approved $DATE under the standing approval: test credential SUPABASE_SERVICE_ROLE_KEY present in $SRC, class from file:repo)"
+OFF="no test-credential class for this repo (set test_credentials in its [repo.\"owner/name\"] table in ~/.config/thread/rollouts.toml)"
+REFRESH="the rollout's env_bootstrap may not refresh $SRC into the task tree:"
+s10() {  # s10 <name> [origin] — a scenario whose repo is a git clone with that GitHub origin (default Animately/optimizer)
+  scen "$1"
+  ( unset $(git rev-parse --local-env-vars 2>/dev/null)
+    git init -q "$D/repo" && git -C "$D/repo" remote add origin "https://github.com/${2:-Animately/optimizer}" )
+}
+novalue() {  # novalue <text> <label> — no fake value from $SRC appears
+  hasnt "$1" "FAKE" "$2: no prefix-key value printed or written"
+  hasnt "$1" "$JWT" "$2: … nor the service key"
+}
+
+# S10a: the Verify, at the built-in 0 spend limit
+s10 s10a
+mkro "$BOOT"; mkt a gate-pending; gate a "$G1" "$G2"
+HH="$HC" sa a
+ok "$rc" 0 "S10a: p8-1's two credential gates are signed at the built-in 0 limit: exit 0"
+ok "$(section a '## Approved gates')" "- $G1 $ANN1
+- $G2 $ANN2" "S10a: both in ## Approved gates with the credential annotation"
+ok "$(fm a status)|$(fm a gates_signed)" "status: in_progress|gates_signed: 2026-10-14T09:00+00:00" "S10a: it flips to in_progress with gates_signed:"
+has "$out" "a: gate approved under the standing approval: $G1 (test credential STRIPE_SECRET, STRIPE_PUBLISHABLE_KEY present in $SRC, file:repo) [written]" "S10a: the approval line names the keys, the file and the source"
+has "$out" "a: every gate signed under the standing approval -> status in_progress" "S10a: … and the route"
+hasnt "$out" "ASK:" "S10a: nothing asks"
+novalue "$out$(cat "$D/a.md" "$D/ro.md")" "S10a"
+hasnt "$(cat "$D/ro.md")" 'signed under the standing approval: US$' "S10a: no month line is logged for a credential"
+ok "$(section ro '## Needs-you log')" "" "S10a: no Needs-you log line"
+ok "$(events | tail -1 | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["kind"], d["task"], d["standing"], d["gates"])')" "gate-signed a True 2" "S10a: the event is gate-signed, standing, 2 gates"
+sa a
+ok "$rc|$(echo "$out" | grep -c '\[no-change\]')" "0|1" "S10a: a re-run on the signed note is [no-change]"
+
+# S10b: a live Stripe gate asks at the deny word; a live key under the test gate asks at the proof
+s10 s10b
+G1L="credential: Stripe live keys STRIPE_SECRET (sk_live_) and STRIPE_PUBLISHABLE_KEY (pk_live_) in the task tree's .env.local"
+mkro "$BOOT"; mkt a gate-pending; gate a "$G1L"
+before=$(cat "$D/a.md" "$D/ro.md")
+HH="$HC" sa a
+ok "$rc|$(cat "$D/a.md" "$D/ro.md")" "3|$before" "S10b: the sk_live_ gate asks (exit 3), nothing written"
+has "$out" "ASK: a: $G1L: deny word: live" "S10b: … at its deny word"
+printf '%s\n' 'STRIPE_SECRET=sk_live_FAKE51livevalue' 'STRIPE_PUBLISHABLE_KEY=pk_test_FAKE51publishable' "SUPABASE_SERVICE_ROLE_KEY=$JWT" > "$SRC"
+mkt b gate-pending; gate b "$G1"
+before=$(cat "$D/b.md")
+HH="$HC" sa b
+ok "$rc|$(cat "$D/b.md")" "3|$before" "S10b: the test gate with an sk_live_ value in the file asks, nothing written"
+has "$out" "ASK: b: $G1: STRIPE_SECRET in $SRC does not start with sk_test_" "S10b: … the proof names the key, the file and the prefix"
+novalue "$out" "S10b"
+srcok
+
+# S10c: the production Supabase project asks at its deny word; a wrong or unprovable service key asks at the proof
+s10 s10c
+G2P="credential: production Supabase SUPABASE_SERVICE_ROLE_KEY (project abcdefghijklmnopqrst) in the task tree's .env.local"
+mkro "$BOOT"; mkt a gate-pending; gate a "$G2P"
+before=$(cat "$D/a.md")
+HH="$HC" sa a
+ok "$rc|$(cat "$D/a.md")" "3|$before" "S10c: the production project asks (exit 3), nothing written"
+has "$out" "ASK: a: $G2P: deny word: production" "S10c: … at its deny word"
+mkt b gate-pending; gate b "$G2"
+before=$(cat "$D/b.md")
+printf '%s\n' "SUPABASE_SERVICE_ROLE_KEY=$JWT_OTHER" > "$SRC"
+HH="$HC" sa b
+ok "$rc|$(cat "$D/b.md")" "3|$before" "S10c: a service key for another project asks, nothing written"
+has "$out" "ASK: b: $G2: SUPABASE_SERVICE_ROLE_KEY in $SRC is not a key for Supabase project geyyptxqiovujgbiecsp" "S10c: … naming the declared project"
+printf '%s\n' 'SUPABASE_SERVICE_ROLE_KEY=sb_secret_FAKE51newformat' > "$SRC"
+HH="$HC" sa b
+ok "$rc|$(cat "$D/b.md")" "3|$before" "S10c: a new-format sb_secret_ key asks, nothing written"
+has "$out" "ASK: b: $G2: SUPABASE_SERVICE_ROLE_KEY in $SRC is not a legacy JWT service key, so its project cannot be proved" "S10c: … its project cannot be proved"
+hasnt "$out" "$JWT_OTHER" "S10c: the other project's key is never printed"
+novalue "$out" "S10c"
+srcok
+
+# S10d: p8-1's real failure: approved but absent. The file holds none of the three keys, so each gate asks at the stop,
+# naming every missing key; once the keys are added to the source a re-run signs both (the remedy)
+s10 s10d
+mkro "$BOOT"; mkt a gate-pending; gate a "$G1" "$G2"
+printf '%s\n' 'ENVIRONMENT=staging' 'SUPABASE_URL=https://geyyptxqiovujgbiecsp.supabase.co' 'SUPABASE_ANON_KEY=anon-FAKE' > "$SRC"
+before=$(cat "$D/a.md" "$D/ro.md")
+HH="$HC" sa a
+ok "$rc" 3 "S10d: keys absent from the file: exit 3"
+has "$out" "ASK: a: $G1: STRIPE_SECRET is not set in $SRC; STRIPE_PUBLISHABLE_KEY is not set in $SRC" "S10d: the Stripe gate names both missing keys"
+has "$out" "ASK: a: $G2: SUPABASE_SERVICE_ROLE_KEY is not set in $SRC" "S10d: the Supabase gate names its missing key"
+ok "$(cat "$D/a.md" "$D/ro.md")" "$before" "S10d: the notes are byte-identical"
+srcok
+HH="$HC" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S10d: the keys added to the source, a re-run signs both"
+
+# S10e: the bootstrap must refresh the file with a plain cp; no class asks; a refused class form exits 1
+s10 s10e
+mkt a gate-pending; gate a "$G1"
+e10() {  # e10 <frontmatter line|-> <label> <expected why> — the ASK for $G1 under that rollout frontmatter, nothing written
+  if [ "$1" = "-" ]; then mkro; else mkro "$1"; fi
+  local b; b=$(cat "$D/a.md")
+  HH="${HH10:-$HC}" sa a
+  ok "$rc|$(cat "$D/a.md")" "3|$b" "S10e: $2: exit 3, nothing written"
+  has "$out" "ASK: a: $G1: $3" "S10e: $2: the ASK says why"
+}
+e10 - "no env_bootstrap" "the rollout's env_bootstrap does not provide $SRC"
+e10 "env_bootstrap: yarn install && cp $TMP/s10/other.env.local .env.local" "a bootstrap that copies another file" "the rollout's env_bootstrap does not provide $SRC"
+e10 "env_bootstrap: '[ -f .env.local ] || cp $SRC .env.local'" "a copy guarded by a test" "$REFRESH its copy runs only after a test"
+e10 "env_bootstrap: cp -n $SRC .env.local" "cp -n" "$REFRESH its cp skips an existing copy (-n, -u or -i)"
+e10 "env_bootstrap: cp .env.local $SRC" "a reversed copy" "$REFRESH its cp writes the file instead of reading it"
+e10 "env_bootstrap: ln -s $SRC .env.local" "a symlink" "$REFRESH it names the file outside a plain cp"
+e10 "env_bootstrap: \"cp \\\"$SRC\\\" .env.local\"" "a value the frontmatter reader refuses" "env_bootstrap: "
+HOTHER="$TMP/home-class-other"; mkdir -p "$HOTHER/.config/thread"
+printf 'schema = 3\n\n[repo."o/other"]\n%s\n' "$CLASS" > "$HOTHER/.config/thread/rollouts.toml"
+HH10="$HOTHER" e10 "$BOOT" "a class for another repo only" "$OFF"
+HH10="$H50" e10 "$BOOT" "no repo table" "$OFF"
+HSUB="$TMP/home-class-subtable"; mkdir -p "$HSUB/.config/thread"
+printf 'schema = 3\n\n[repo."Animately/optimizer".test_credentials]\nfile = "%s"\nkeys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }]\n' "$SRC" > "$HSUB/.config/thread/rollouts.toml"
+mkro "$BOOT"
+before=$(cat "$D/a.md")
+HH="$HSUB" sa a
+ok "$rc|$(cat "$D/a.md")" "1|$before" "S10e: a refused class form (the sub-table) exits 1, nothing written"
+has "$out" "ERROR: a: rollout settings refused: " "S10e: … the ERROR names the refusal"
+has "$out" "test_credentials must be one line in that table" "S10e: … and its remedy"
+# A gate no class could ever sign asks at the reading's class-independent steps and never resolves the class (ADR 0063
+# d2): under the same refused file S3's deny-word gate asks (exit 3), and beside it a task stamp still signs its spend.
+mkt c gate-pending; gate c "$CRED"
+before=$(cat "$D/c.md")
+HH="$HSUB" sa c
+ok "$rc|$(cat "$D/c.md")" "3|$before" "S10e: a deny-word gate under the refused class form asks (exit 3), nothing written"
+has "$out" "ASK: c: $CRED: deny word: API key" "S10e: … at its deny word"
+hasnt "$out" "rollout settings refused" "S10e: … and never resolves the class"
+mkt d gate-pending 'spend_approval_usd: 50'; gate d "$CRED" "$PROBE"
+HH="$HSUB" sa d
+ok "$rc" 3 "S10e: a task stamp under the refused class form: the spend gate signs, the deny-word gate asks (exit 3)"
+ok "$(section d '## Approved gates')" "- $PROBE (approved $DATE under the standing approval: total exposure US\$9, limit US\$50 from task)" "S10e: … the probe signed from the task stamp"
+ok "$(section d '## Gated inputs (awaiting sign-off)')" "- $CRED" "S10e: … the credential still pending"
+has "$out" "ASK: d: $CRED: deny word: API key" "S10e: … at its deny word"
+
+# S10f: beside a spend gate (HCS: limit 200): one save signs both, and only the spend gate logs a Needs-you line; an
+# irreversible gate still asks
+s10 s10f
+mkro "$BOOT"; mkt a gate-pending; gate a "$PROBE" "$G1"
+HH="$HCS" sa a
+ok "$rc|$(fm a status)" "0|status: in_progress" "S10f: the probe and the Stripe gate are both signed: exit 0, in_progress"
+ok "$(section a '## Approved gates')" "- $PROBE (approved $DATE under the standing approval: total exposure US\$9, limit US\$200 from file:defaults)
+- $G1 $ANN1" "S10f: each with its own annotation"
+ok "$(section ro '## Needs-you log')" "$(logl a 9 9 "$PROBE")" "S10f: one Needs-you log line, the spend gate's"
+has "$out" "a: gate approved under the standing approval: $PROBE (exposure US\$9 of US\$200, file:defaults)" "S10f: the spend line is unchanged"
+ok "$(events | tail -1 | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["kind"], d["standing"], d["gates"])')" "gate-signed True 2" "S10f: one gate-signed event for both"
+IRR='irreversible: wipe the staging bucket once the test passes'
+mkt b gate-pending; gate b "$IRR"
+before=$(cat "$D/b.md")
+HH="$HCS" sa b
+ok "$rc|$(cat "$D/b.md")" "3|$before" "S10f: an irreversible gate still asks, nothing written"
+has "$out" "ASK: b: $IRR: not a spend gate" "S10f: … not a spend gate"
+
+# S10g: a bounced note asks, unchanged; --dry-run writes nothing
+s10 s10g
+mkro "$BOOT"; mkt a gate-pending; gate a "$G1" "$G2"
+printf '\n%s\n\nbounced by the plan judge (ADR 0038): it still read these gates as unpriceable after one bounce\n' "$BOUNCE_H" >> "$D/a.md"
+before=$(cat "$D/a.md")
+HH="$HC" sa a
+ok "$rc|$(cat "$D/a.md")" "3|$before" "S10g: a bounced note's credential gates ask (exit 3), nothing written"
+has "$out" "ASK: a: $G1: the plan judge bounced this plan (ADR 0038; its feedback is under $BOUNCE_H), so the standing approval signs none of its gates; the pricer reads: not a spend gate" "S10g: … with the bounce why, unchanged"
+mkt b gate-pending; gate b "$G1" "$G2"
+before=$(cat "$D/b.md" "$D/ro.md"); ev=$(events | wc -l | tr -d ' ')
+HH="$HC" sa b --dry-run
+ok "$rc|$(cat "$D/b.md" "$D/ro.md")" "0|$before" "S10g: --dry-run exits 0 and writes nothing"
+has "$out" "b: gate approved under the standing approval: $G1 (test credential STRIPE_SECRET, STRIPE_PUBLISHABLE_KEY present in $SRC, file:repo) (dry-run)" "S10g: … and says so"
+
+# S10h: a Leg: a serial note has no Project root, so no class resolves and the gate asks
+s10 s10h
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\n%s\n---\n\n## Queue\n\n- [[a]]\n' "$BOOT" > "$D/ro.md"
+mkt a gate-pending; gate a "$G1"
+before=$(cat "$D/a.md")
+HH="$HC" sa a
+ok "$rc|$(cat "$D/a.md")" "3|$before" "S10h: on a serial note the credential asks (exit 3), nothing written"
+has "$out" "ASK: a: $G1: $OFF" "S10h: … no class (a Leg never signs one)"
+
+# S10i: the class is its own switch: a bad spend stamp errors only a slug that resolves the limit
+s10 s10i
+ORDER=$'- [[h]]\n- [[i]]' mkro "$BOOT"
+mkt h gate-pending 'spend_approval_usd: fifty'; gate h "$G1" "$G2"
+HH="$HC" sa h
+ok "$rc|$(fm h status)" "0|status: in_progress" "S10i: a bad spend stamp beside credential gates alone: both signed, exit 0"
+mkt i gate-pending 'spend_approval_usd: fifty'; gate i "$PROBE" "$G1"
+before=$(cat "$D/i.md")
+HH="$HC" sa i
+ok "$rc|$(cat "$D/i.md")" "1|$before" "S10i: beside a spend gate the same stamp exits 1, the note byte-identical"
+has "$out" "spend_approval_usd on [[i]] must be an integer >= 0" "S10i: … naming the stamp"
+
 # ── G1-G4: gate-pricer, the plan judge's pricer path for one call (ADR 0038) ─────────────────────────
 GI="$(cd "$HERE/../../_shared/scripts" && pwd -P)/gated_inputs.py"
 gp() {  # gp <home> <slugs> — gate-pricer; $out (stdout), $err (stderr), $rc
@@ -355,7 +787,7 @@ ok "$(q "$J" '[d["halt"], d["awaitingSignOff"]]')" '["stuck",[]]' "Q2: gate-pend
 mkt r review 'pr: https://github.com/o/r/pull/9'
 printf '\n## Race log\n\n- 2026-10-14T08:00+00:00 [[r]] RACE: merged as an unverified combination\n' >> "$D/ro.md"
 J=$(nxt)
-ok "$(q "$J" '[d["halt"], d["awaitingSignOff"]]')" '["stuck",[]]' "Q2: gate-pending plus a RACE hold is not awaiting sign-off"
+ok "$(q "$J" '[d["halt"], d["awaitingSignOff"]]')" '["race",[]]' "Q2: gate-pending plus a RACE hold is not awaiting sign-off (the RACE holds the lane: halt race)"
 ORDER=$'- [[g]]\n- [[r]]' mkro
 mkt r blocked
 printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-14T08:00+00:00)\n\nUNVERIFIED: the merge was never re-verified\n\n<!-- run 1 end sha=000000000000 -->\n' >> "$D/r.md"

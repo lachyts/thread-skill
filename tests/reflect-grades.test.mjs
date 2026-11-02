@@ -310,6 +310,50 @@ test('open is pending, outside the rate; a missing note is unknown, in all only 
   assert.ok(out.cannotShow.some((c) => c.includes('DECISION_MINUTES')), 'the gaps are named')
 })
 
+test('a titled note (p34-6): its grade line, keyed by title_key with the name as its note, finds the note again, root or Archive', (t) => {
+  const h = setup(t)
+  const DASHED = 'Layout broken — library panel stays open'
+  const SPACED = 'Return the Adidas item'
+  const GONE = 'Fix I rig stream'
+  emitAll(h, [
+    grade(h, 'layout-broken-library-panel-stays-open', W(3, '00:00'), { linked: 'old-rollout', note: DASHED }),
+    grade(h, 'return-the-adidas-item', W(3, '00:00'), { linked: 'old-rollout', note: SPACED }),
+    grade(h, 'fix-i-rig-stream', W(3, '00:00'), { note: GONE }),
+  ])
+  note(h, DASHED, { status: 'done', rollout: 'Serial-Rollout-2026-09-04', completed: '2026-09-05' })
+  note(h, SPACED, { status: 'dropped', rollout: 'Serial-Rollout-2026-09-04', completed: '2026-09-06' })
+  fs.renameSync(path.join(h.tasks, `${SPACED}.md`), path.join(h.tasks, 'Archive', '2026', `${SPACED}.md`))
+  const out = grades(h)
+  const dashed = one(out, 'layout-broken-library-panel-stays-open')
+  assert.deepEqual([dashed.note, dashed.outcome, dashed.dispatchedBy, dashed.end.by], [DASHED, 'hands-off', 'link', 'note'])
+  const spaced = one(out, 'return-the-adidas-item')
+  assert.deepEqual([spaced.note, spaced.outcome, spaced.end.date], [SPACED, 'dropped', '2026-09-06'])
+  assert.ok(out.flags.includes(`[[${GONE}]]: no task note: its latest grade (Ready) reads unknown`), JSON.stringify(out.flags))
+  assert.equal(out.grades.all.byGrade.Ready.unknown, 1)
+})
+
+test('a titled note renamed to its key (p34-6): only the latest grade line names the note, and a gone name is tried as the task', (t) => {
+  const h = setup(t)
+  // Renamed before its latest grade: the older line's note is not used, so the note is found at its key.
+  const RENAMED = 'Order the Brace'
+  // Renamed after its latest grade: that line's note is gone, so the note is looked up by the task.
+  const LATER = 'Tune the Rig'
+  emitAll(h, [
+    grade(h, 'order-the-brace', W(3, '00:00'), { linked: 'old-rollout', note: RENAMED }),
+    grade(h, 'order-the-brace', W(4, '00:00'), { linked: 'old-rollout' }),
+    grade(h, 'tune-the-rig', W(3, '00:00'), { linked: 'old-rollout', note: LATER }),
+  ])
+  note(h, 'order-the-brace', { status: 'done', rollout: 'Serial-Rollout-2026-09-04', completed: '2026-09-05' })
+  note(h, 'tune-the-rig', { status: 'dropped', rollout: 'Serial-Rollout-2026-09-04', completed: '2026-09-06' })
+  const out = grades(h)
+  const renamed = one(out, 'order-the-brace')
+  assert.deepEqual([renamed.note, renamed.outcome, renamed.dispatchedBy, renamed.end.date], [undefined, 'hands-off', 'link', '2026-09-05'])
+  const later = one(out, 'tune-the-rig')
+  assert.deepEqual([later.note, later.outcome, later.end.date], [undefined, 'dropped', '2026-09-06'])
+  assert.deepEqual(out.flags.filter((f) => /brace|rig/i.test(f)), [], 'neither reads unknown')
+  assert.equal(out.grades.all.byGrade.Ready.unknown, 0)
+})
+
 test('byAgentGrade sets a confidence-raised task apart from its raised grade', (t) => {
   const h = setup(t)
   emitAll(h, [grade(h, 'rz', W(3, '00:00'), { grade: 'One call', agentGrade: 'Ready', decisions: 1, low: 1, raised: ['confidence'] }),
@@ -332,6 +376,18 @@ test('a bounce on a merge hold alone counts in mergeHoldOnly', (t) => {
   const out = grades(h)
   assert.deepEqual([one(out, 'mh').outcome, one(out, 'mh').acts.map((a) => a.kind)], ['bounced', ['mergeHold']])
   assert.deepEqual([out.grades.window.byGrade.Ready.mergeHoldOnly, out.grades.window.byGrade.Ready.byKind.mergeHold], [1, 1])
+})
+
+test('H1 (ADR 0064): an origin yield\'s gap is no lane holding: laneHours counts only the two holdings', (t) => {
+  const h = setup(t)
+  const L = line('r12')
+  emitAll(h, [grade(h, 'oy', W(3, '00:00')), L(W(3, '09:00'), 'slot-taken', 'oy', SETTINGS), L(W(3, '10:00'), 'slot-freed', 'oy', { outcome: 'ready' }),
+    L(W(3, '10:00'), 'ready', 'oy', { pr: 7 }), L(W(3, '10:00'), 'lane-taken', 'oy'), L(W(3, '10:20'), 'lane-freed', 'oy', { release: 'origin', origin: 'o/r' }),
+    L(W(3, '10:50'), 'lane-taken', 'oy'), L(W(3, '11:00'), 'lane-freed', 'oy', { release: 'merge', conflict: true }),
+    L(W(3, '11:00'), 'merged', 'oy', { pr: 7 })])
+  note(h, 'oy', { status: 'done' })
+  const out = grades(h)
+  assert.deepEqual([one(out, 'oy').slotHours, one(out, 'oy').laneHours], [1, 0.5], '10:00-10:20 and 10:50-11:00: the 30-minute gap is excluded')
 })
 
 test('bySize: a 45-minute Slot and a 10-minute lane against the S estimate; a serial landing is untimed', (t) => {

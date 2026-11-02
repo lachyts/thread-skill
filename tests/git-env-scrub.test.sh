@@ -10,6 +10,7 @@ unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (G
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 export THREAD_VERIFY_SLOTS_DIR="$tmp/verify-slots"   # the wrapped verifier's verify slots (p23-4): a temp pool
+export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master "$@"; }
 
 # ---- shells: bash always; zsh mandatory on macOS, else run when installed and SKIP visibly --------------

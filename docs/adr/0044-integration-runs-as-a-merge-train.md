@@ -2,6 +2,8 @@
 
 Date: 2026-10-21
 Status: deferred. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18`, then deferred in the re-grill the same day (§ Deferred). ADR 0030 decision 3's one-at-a-time Integration stands.
+*(Amended by ADR 0064, 2026-11-02: per-origin serialisation across rollouts is the origin lane, one Integration at a time
+passed in turn, not a train.)*
 
 ## Deferred
 
