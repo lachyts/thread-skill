@@ -91,7 +91,7 @@ No working copy is possible: Obsidian Sync carries the live folder, and `vault-a
 
 ## Ruled with Lachy
 
-The vault's same-note clash (§ 4), grilled 2026-11-02: a best-effort Note wait (higher rank first), every wait and every note two runs both changed recorded for the weekly Reflection; vault copies (a git worktree of the vault per run, landed by merge) considered and held back until that record shows real clashes ("Wait, and watch it"). ADR 0065 records the decision and every technical call made for him.
+The vault's same-note clash (§ 4), grilled 2026-11-02: a best-effort Note wait (higher rank first), every wait and every note two runs both changed recorded for the weekly Reflection; vault copies (a git worktree of the vault per run, landed by merge) considered and held back until that record shows real clashes ("Wait, and watch it"). ADR 0067 records the decision and every technical call made for him.
 
 ## Sources
 

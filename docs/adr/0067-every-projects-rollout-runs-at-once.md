@@ -1,7 +1,7 @@
-# 0065 — Every project's rollout runs at once
+# 0067 — Every project's rollout runs at once
 
 Date: 2026-11-02
-Status: proposed. Ruled with Lachy in two grills on 2026-11-02: the first in the ops-workspace orient-all session, the second in the spike session (`docs/spikes/2026-11-02-every-rollout-at-once.md`). To be built as Thread Skill's next phase. The technical calls below were decided for him from the spike's evidence and are listed at the end so he can overturn them. Supersedes ADR 0040's ruling "a chain that writes a repo checkout owns that checkout". Amends ADR 0059 (the project place becomes a prediction, and d5's accepted collision becomes a Note wait) and ADR 0060 (its yield rule now sits beside rank). Leaves ADR 0064's one-clone-per-(repo, project) rule as it is.
+Status: proposed. Ruled with Lachy in two grills on 2026-11-02: the first in the ops-workspace orient-all session, the second in the spike session (`docs/spikes/2026-11-02-every-rollout-at-once.md`). To be built as Thread Skill's next phase. The technical calls below were decided for him from the spike's evidence and are listed at the end so he can overturn them. Supersedes ADR 0040's ruling "a chain that writes a repo checkout owns that checkout". Amends ADR 0059 (the project place becomes a prediction, and d5's accepted collision becomes a warned, recorded Note overlap) and ADR 0060 (its yield rule now sits beside rank). Leaves ADR 0064's one-clone-per-(repo, project) rule as it is.
 
 ## Context
 
@@ -43,12 +43,12 @@ The spike found that the pass ran rules four days old. orient-all loads skills f
 
 5. **Bookkeeping is never a claim.** Tracked files every run appends to are no surface, the same as `Work/Tasks` in the vault (ADR 0059 d2). These are the workspaces `_shared/state/thread-events/*.jsonl` and the review ledgers.
 
-6. **The vault: a Note wait, watched.** Vault runs write the live vault, with no copy. A project's place (ADR 0059) becomes a predicted claim, so two chains of one project may run side by side.
-   - **The wait.** When a Leg's agent goes to edit a note that another live run has edited in a task not yet done, it waits its turn (decision 9).
-   - **How it is caught.** The plugin's first PreToolUse hook on Edit, Write and MultiEdit holds a lease on each vault note from that task's first write to its `done`. Claude Code's own refusal to write a file changed since it was read keeps those tools from overwriting each other.
-   - **What it misses, accepted.** A script or shell write slips past the hook.
-   - **Watched.** Every Note wait, and every note two live runs both changed, goes in the Run record. The weekly Reflection reports them.
-   - **When copies come.** Vault copies (Considered options) are built only if that record shows same-note clashes really happen.
+6. **The vault: a Note overlap is let through, warned and watched.** Vault runs write the live vault, with no copy. A project's place (ADR 0059) becomes a predicted claim, so two chains of one project may run side by side. Ruled with Lachy on 2026-11-03, after review found the planned wait cannot be built: "I'm happy to be led by you … and for us to track this so that we can see the impact."
+   - **Nothing in the vault waits or is refused.** A hook has to answer within seconds, while a holder's task can run 40 minutes, so a real wait cannot be built. A hook that runs past its limit lets the edit through anyway. A refusal would leave half-done tasks in the live vault, with no copy to roll back. It would also turn a shared note such as the Day note into a queue that every vault run waits in.
+   - **The warning.** The plugin's PreToolUse hook on Edit, Write and MultiEdit records which live run's task has written each vault note. Each record runs from the task's first write until that task is done or set aside, or its Leg is lost. When another run's edit meets such a note, the hook lets it through and tells its agent which run is in the note, and to re-read it before changing it. Claude Code's own refusal to save over a file changed since it was read keeps the two edits from overwriting each other blindly. A record that outlives its run costs no more than a spurious warning.
+   - **What it misses, accepted.** Script and shell writes pass no hook, and neither do Codex Legs, which have no Claude Code hooks. The vault's git backup and Obsidian's version history keep any note those writes muddle recoverable.
+   - **Watched.** Every warned overlap goes in the Run record, naming the note and both runs. The weekly Reflection reports the week's overlaps (how many, which notes, which runs) and reports none when there were none.
+   - **When copies come.** Vault copies (Considered options) are built once the record shows an overlap that left a note wrong, or overlaps in two weeks running.
 
 7. **Parallel rollouts keep ADR 0064.**
    - Two projects' parallel rollouts already run side by side on one repo, each in its own clone. Their Integrations pass one at a time per origin, and Integration reconciles a shared file at merge.
@@ -64,7 +64,7 @@ The spike found that the pass ran rules four days old. orient-all loads skills f
    - **Failure.** A missing, stale or unreadable reading falls back to today's fixed Trickle and Away cap, never to open.
    - This replaces the fixed day Trickle of 2 (Chorus ADR 0104 d2), so Chorus records the matching change.
 
-9. **Same-file and same-note waits go by rank, wait-die.**
+9. **Same-file waits go by rank, wait-die.** These are code files only: the vault never waits (decision 6).
    - **The rank.** orient-all stamps its rank on each rollout note it dispatches (`estate_rank:`, with the pass time), and each later pass re-stamps the live ones. A standalone schedule ranks below every stamped rollout, and ties go to the earlier schedule.
    - **A higher-ranked run** that meets a lower-ranked holder waits for the holder's task to finish and land, then goes first among the waiters.
    - **A lower-ranked run** that meets a higher-ranked holder does not wait. It sets that task aside to retry later, keeping its rank, and moves to another claimable row. So no two runs ever wait on each other.
@@ -80,6 +80,8 @@ The spike found that the pass ran rules four days old. orient-all loads skills f
   - landings would have to commit around his uncommitted Sync edits (60 notes on 2026-11-02).
   
   It is built if decision 6's record shows real clashes.
+- **A Note wait** (the edit pauses until the other run's task is done): rejected 2026-11-03. A hook cannot hold an edit for the length of a task, and one that runs past its limit lets the edit through.
+- **A refusing hook** (fail closed: the edit is refused, and the run retries or sets its task aside): rejected 2026-11-03. It leaves half-done tasks in the live vault, makes the Day note a queue every vault run waits in, and invites a shell write that no hook sees.
 - **Strict vault claims** (runs that might share a note never run together): rejected. It brings back the wide claims Lachy ruled out.
 - **A clone per chain**, in place of a worktree: rejected. It needs a fetch to see the primary's default branch, and a push into a checked-out branch is refused. A worktree shares objects and refs, so integrating costs nothing.
 - **A write-time lease for code files**: rejected. Bash edits, generators and formatters bypass it, and leases taken mid-task are hold-and-wait. Code relies on the landing check instead (decision 4), which is the commit-time guard prior art points to (MCP Agent Mail).
@@ -108,3 +110,5 @@ The spike found that the pass ran rules four days old. orient-all loads skills f
 4. Same-file waits are wait-die by rank. Nobody is ever stopped mid-task, and two runs can never wait on each other.
 5. Capacity rises and falls on its own with heat, memory, load and quota. It replaces the fixed day Trickle of 2, and falls back to it if a reading fails.
 6. Rollouts of the same project on one repo still share one queue. A second clone would buy nothing.
+7. A vault overlap is let through with a warning, never refused. Two runs in one note is expected to be rare, and a muddled note is recoverable from the vault's git backup and Obsidian's version history.
+8. Vault copies are built on the first overlap that left a note wrong, or on overlaps in two weeks running. Until then the weekly Reflection's report is the investigation, and no other spike runs.
