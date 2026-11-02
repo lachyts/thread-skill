@@ -2,6 +2,8 @@
 
 Date: 2026-10-31
 Status: accepted. Ruled with Lachy on 2026-10-30 (the grill behind `thread-skill-p33-2-a-stuck-rollout-releases-all-but-its-stuck-task`, Phase 33 · Task 2): when a rollout stops to wait on him, it keeps only the surfaces its waiting task touches and releases the rest, so other projects carry on; when he resolves it, it reclaims what it needs, or waits its turn if another rollout holds it. The technical calls below were decided for him in that task's plan. Amends ADR 0040 (*a live chain owns the places it writes*), ADR 0048 (the kept whole-rollout halts) and ADR 0059 (its Limits).
+*(Amended by ADR 0064, 2026-11-02: decision 5's released parallel rollout counts only against its own project's second
+run on the repo, and `--resume` also meets another project's rollout in its own clone.)*
 
 ## Context
 

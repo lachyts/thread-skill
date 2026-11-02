@@ -169,8 +169,10 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    line `Under orient-all § 6: name the note with slug <entry.projectSlug>; root <entry.root>; Pre-flight: rank $S/rank.json, scan $S/scan.json, decided <each decided slug among entry.members, or none>.`
    Run batch 1's
    entries side by side, then batch 2's, and so on, never two batches at once: `plan` keeps one parallel run per
-   root, and never puts two entries whose `batchKeys` meet into one batch, because schedule step 6 names its note by
-   globbing for the slug's next free ordinal and then writing, which is not atomic. Serial entries come one per
+   root (each run's `rolloutRoot`: its home project's own rollout clone, ADR 0064), and never puts two entries whose
+   `batchKeys` meet into one batch, because schedule step 6 names its note by globbing for the slug's next free
+   ordinal and then writing, which is not atomic; nor two parallel entries on one `origin`, because each fork's § 0
+   `clone` reads the clones the other has not yet taken. Serial entries come one per
    batch, after every parallel batch. With no fork in the harness, run the entries one at a time here, under the
    same answers.
 3. **Schedule's questions, answered.** The list schedule's **Under orient-all.** paragraph cites. A fork asks
@@ -185,7 +187,8 @@ rounds. A Grill task is decided only when every one of its decisions is answered
       otherwise the root is "the path the user gave", and `<localPath>` is empty. § 0's clone question (exit 4): a
       rollout clone is made only on Lachy's yes (ADR 0042), which no fork holds, so the fork takes the No, stopping
       before step 1 with nothing written, and its stop line names the would-be clone and
-      `/thread:schedule <entry.args>`, which asks it. Exit 0 runs `--ensure` as written.
+      `/thread:schedule <entry.args>`, which asks it. Exit 0 runs `--ensure` as written. § 0's `clone` exit 3
+      stops before step 1 with its stderr verbatim (ADR 0064: every clone this project may take is held).
    4. Step 2.5's verifier: as detected. A section-only CLAUDE.md is read for its one command; with none, stop before
       writing.
    5. Step 2.6's baseline: `none`, and the summary says "not captured".

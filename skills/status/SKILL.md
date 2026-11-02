@@ -144,7 +144,10 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   question (a gate included) also carries `needsHuman`: that question, normalised; the key is absent otherwise.
   A task set aside at Integration whose latest run opens a named marker also carries `integrationBlock`:
   `conflict` (an **Integration conflict**, `integration: conflict unresolved in …`, its resolution brief beneath)
-  or `red` (a verifier red at Integration, `integration: verifier red: …`); the key is absent otherwise.
+  or `red` (a verifier red at Integration, `integration: verifier red: …`); the key is absent otherwise. An
+  `integrating` task whose Run record's last lane line for it is `lane-freed release=origin` (its lead yielded the
+  origin lane to another project's Integration on the same origin, ADR 0064) also carries `originWait`: `{origin,
+  since}`; the key is absent otherwise, and with an unreadable record.
 
 Each task's `queueState` is one of the six in the count (`merged`, `running`, `integrating`,
 `awaiting-integration`, `queued`, `set-aside`) or one of two outside it: `folded` (an affine tombstone) and
@@ -437,7 +440,7 @@ Watchdog's reading), never by itself a recommendation to resume.
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py hold --rollout <rollout-slug>` (read-only;
 its one JSON line `{rollout, shape, scope, why, held, released}`). Scope `released`: `Hold: released <released> to
 serial chains (<why>)`: a chain may be scheduled on the root while it waits, and on resume execute's *Surface re-check*
-makes it wait its turn for that chain; it is still the repo's one unfinished parallel rollout. Scope `whole`: `Hold:
+makes it wait its turn for that chain; it is still its project's one unfinished parallel rollout on the repo (ADR 0064). Scope `whole`: `Hold:
 holds <held> (<why>)`. Exit 2: `Hold: not read: <its line>`.
 
 **The queue-state table.** One group per in-count `queueState`, in this order, each task on one line:
@@ -445,7 +448,7 @@ holds <held> (<why>)`. Exit 2: `Hold: not read: <its line>`.
 | `queueState` | Group | Each task shows |
 |---|---|---|
 | `merged` | **Merged** | its PR and `durationMinutes` from `timeline` |
-| `integrating` | **Integrating** | the lane: its PR and live state, the time since `integrating:`, and the outcome of `lastIntegration`, or `RACE re-verify in flight` or `RACE revert in flight (PR #R)` (§ 3) |
+| `integrating` | **Integrating** | the lane: its PR and live state, the time since `integrating:`, and the outcome of `lastIntegration`, or `RACE re-verify in flight` or `RACE revert in flight (PR #R)` (§ 3); with `originWait`: `waiting on the origin lane (<origin>) since <since>` in place of the time in the lane (another project's Integration holds the origin; ADR 0064) |
 | `awaiting-integration` | **Awaiting Integration** | its PR and `ready:` (`inputs.readyAt`) |
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting; `auto-retry <autoRetriesUsed>` when above 0 (the verdict sets the counters before its first refusal, so `inputs` carries them for a running note too) |
 | `queued` | **Queued** | `held until <pr> merges` while the rollout's `holdUntil` holds (§ 3), else `waitingOn`, else `held until <pr> merges` for its own held `holdUntil`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else "next free slot" |
@@ -631,6 +634,9 @@ Drift:
 Recommended next action: /thread:repair [[proj-rollout-2026-10-01]] (an open escalation, the possible PR-less merge, comes before waiting on the live queue)
 ```
 
+A task whose lead yielded the origin lane (its `originWait`, ADR 0064) reads in the same group as
+`[[proj-yielded]]          PR #5 (open) · waiting on the origin lane (o/r) since 2026-10-02T13:55:00.000Z · no Integration logged yet`.
+
 Keep the whole report scannable: it's a glance, not a wall of text.
 
 **Recommended action** — exactly one, the first that matches:
@@ -666,7 +672,7 @@ Keep the whole report scannable: it's a glance, not a wall of text.
 8. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add
    `/thread:repair [[<rollout>]]`, which under a pause only records escalations and decisions and defers: it
    never hands back. With `pausedFor: sign-off` → "sign off each waiting gate (or /thread:repair to defer),
-   then /thread:execute [[<rollout>]]; until then it is this repo's one unfinished rollout" (execute's
+   then /thread:execute [[<rollout>]]; until then it is this project's one unfinished rollout on this repo" (execute's
    *Reinstate* runs the standing approval first, then `clear-pause`, which refuses while a gate is unsigned).
 9. `pause_requested` → "the live lead drains it; nothing to do." Repair may only record escalations and
    decisions, or defer. Check `/workflows` in the owner session (`<owner tag>`): if no run shows there, that
@@ -900,6 +906,7 @@ reads beside it:
 | `away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac` | `waiting away-cap` |
 | `last start: held until the Morning at <trickle.morning>` | `waiting last-start` |
 | `held until <pr> merges` | `waiting pr-hold` |
+| `origin lane: waiting on <owner/name> behind [[<rollout>]]` (another project's Integration on the origin, ADR 0064) | `moving`, judged by silence: its task awaits Integration, lane work |
 | `approved queue waits: <onMerge.why>` | `waiting approved-queue` |
 | `gated: awaiting merge approval for [[slug]] (PR #N)`, `review required: approve PR #N (<url>)` (*Merge hold*'s `<hold reason>`) | `waiting merge-hold`, judged by silence |
 | `room stop: stopping calls at a step boundary`, `room stop: nothing mid-step, awaiting the Stage resume` | `waiting room-stop` |

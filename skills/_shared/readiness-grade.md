@@ -97,7 +97,7 @@ rulings (ruling (c) included: serial-shaped work for the plugin's own repo is se
 `session`. Read the test as if every decision the grade names were already answered. A task whose only need for
 Lachy is those decisions is not conversation-gated, because the decision round answers them before anything starts.
 A dispatch blocker (`execution-fit.md` § Dispatch blockers) never changes the shape: the scan reports it on the repo,
-and the run carries it. A `parallel` task names its `repo`, one of the project's declared `repos:` entries as written.
+or on the repo's entry for the home project (its own rollout clone, ADR 0064), and the run carries it. A `parallel` task names its `repo`, one of the project's declared `repos:` entries as written.
 
 ## Each decision
 
@@ -271,14 +271,16 @@ agent time, since Lachy is there throughout.
 
 - A parallel run's root is the scan's repo row for the task's `repo`, or the home's only declared repo. Otherwise it
   has none, and its why is `repo unknown` (two or more repos and no `repo`, or a repo the home does not declare) or
-  `no repo declared`. Other parallel runs on the same root are named in `sameRoot`: a repo holds one unfinished
-  parallel rollout at a time (schedule § 0).
+  `no repo declared`. Its `rolloutRoot`, `blockers` and `unchecked` are its home project's entry on that row
+  (the scan's `projects[]`: that project's own rollout clone, ADR 0064), else the row's own. Other parallel runs on
+  the same `rolloutRoot` (else root) are named in `sameRoot`: a clone holds one unfinished parallel rollout at a
+  time, and two projects' runs on one repo in their own clones share none (schedule § 0).
 - A serial run has no root: it is one candidate chain per project, which schedule's serial path splits.
 - Session-lane and Orient tasks are in no run.
 
 Each run lists its members in rank order as `ready`, `waiting` (One call and Grill) and `blocked` (held). It sums the
-agent minutes, decision minutes and Review load of its ready and waiting members, carries its repo row's `blockers`
-and `unchecked` verbatim (unchecked never means clear), and takes the best rank among its ready and waiting members,
+agent minutes, decision minutes and Review load of its ready and waiting members, carries its home project's (else
+its repo row's) `blockers` and `unchecked` verbatim (unchecked never means clear), and takes the best rank among its ready and waiting members,
 or none when every member is blocked. The runs are listed in rank order, the unranked last.
 
 **decisions[].** The One call tasks first (round `one-call`), then the Grill tasks (round `grill`), each in rank order,

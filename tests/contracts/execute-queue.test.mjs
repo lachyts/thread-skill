@@ -1613,3 +1613,79 @@ test('the rules are all named (42) and each has a control', () => {
   assert.equal(RULES.length, 42)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
+
+// ---- ADR 0064 (p33-4): the origin lane's prose. Each rule names one place; each control mutates that place alone. ----
+// origin-route: mark-integrating's exit 4 is the Origin lane wait at its three sites (step 3's start, prepare exit 1's
+//   run, step 4's exit-3 row), never a refusal, a set-aside or a halt. origin-wait: the origin wait's launch, its
+//   once-only rule, its background bound and Codex's foreground run. origin-turn: step 1.4 takes no task into step 3
+//   again that turn, and step 1.6 carries the `origin lane:` reason. origin-heartbeat: clause (4) never waits on the
+//   origin wait, and clause (7) reads its reason as no hold. origin-waiting: § 6's `waiting` names it. origin-surface:
+//   the Surface re-check's parallel hit. reentry-lost, reentry-room, reentry-hold, reentry-race: each D12 site runs no
+//   mark-integrating and leans on merge-task's base pin.
+function checkOriginLane(skill) {
+  const fails = []
+  const st3 = step(skill, 3)
+  const rows = exitRows(skill)
+  const subs = subSteps(skill)
+  const s14 = (subs.find((x) => x.n === 4) ?? {}).text ?? ''
+  const s16 = collapse((subs.find((x) => x.n === 6) ?? {}).text ?? '')
+  const hb = skill.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
+  const binding = collapse(section(skill, /^## Native runtime binding/) ?? '')
+  const lost = labelled(skill, 'Lost call.')
+  const hold = labelled(skill, 'Merge hold')
+  const surface = labelled(skill, 'Surface re-check (ADR 0060).')
+  const waitingB = collapse(S(skill, S6).split(/(?=- `)/).find((b) => b.startsWith('- `waiting`')) ?? '')
+  const owl = st3.includes('**Origin lane wait (ADR 0064 d6).**') ? st3.slice(st3.indexOf('**Origin lane wait (ADR 0064 d6).**')) : ''
+  if (!st3.includes('mark-integrating --tasks <slug>` (its exit 4: the *Origin lane wait*, below)') ||
+    !st3.includes('run it (its exit 4: the *Origin lane wait*, below), then `prepare` again, once') ||
+    !(rows['3'] ?? '').includes("`mark-integrating`'s exit 4 here is step 3's *Origin lane wait*") ||
+    !owl.includes('Exit 4 is never a refusal, a set-aside or a halt.')) fails.push('origin-route')
+  if (!owl.includes('Unless an origin wait this session launched for this rollout is still running') ||
+    !owl.includes('`run_in_background` and `timeout: 1200000`') ||
+    !owl.includes('reconcile-rollout.py origin-wait --tasks <slug>') ||
+    !owl.includes('In Codex it runs in the foreground') ||
+    !binding.includes("So does § 4.5's origin wait")) fails.push('origin-wait')
+  if (!s14.includes('is not taken into step 3 again in this turn') ||
+    !s16.includes('`reason="origin lane: waiting on <owner/name> behind [[<rollout>]]"`')) fails.push('origin-turn')
+  if (!hb.includes('nor the origin wait, which holds nothing') || !hb.includes('nor an `origin lane:` reason')) fails.push('origin-heartbeat')
+  if (!waitingB.includes('a task waits on the origin lane') || !waitingB.includes("an origin lane wait's (`origin lane: …`)")) fails.push('origin-waiting')
+  if (!surface.includes("another project's parallel rollout in this rollout's own clone") ||
+    !surface.includes('`reason="surface held: [[<x>]] writes repo:<clone>"`')) fails.push('origin-surface')
+  if (!lost.includes("An integrate call's resume") || !lost.includes('runs no `mark-integrating`, so it re-enters the lane with no origin-lane check') ||
+    !lost.includes('the base pin keeps every merge correct')) fails.push('reentry-lost')
+  if (!s14.includes('The room-stopped integrate resume,') || !s14.includes('re-enter the lane with no `mark-integrating`')) fails.push('reentry-room')
+  if (!hold.includes('The release runs no `mark-integrating`, so it re-enters the lane with no origin-lane check') ||
+    !hold.includes("the base pin's exit 3 re-integrates it")) fails.push('reentry-hold')
+  if (!s14.includes('and the `revert: true` RACE revert above re-enter the lane') ||
+    !s14.includes("another project's merge meanwhile is merge-task's exit 3 (*Base moved*)")) fails.push('reentry-race')
+  return fails
+}
+const ORIGIN_RULES = ['origin-route', 'origin-wait', 'origin-turn', 'origin-heartbeat', 'origin-waiting', 'origin-surface',
+  'reentry-lost', 'reentry-room', 'reentry-hold', 'reentry-race']
+const ORIGIN_CONTROLLED = new Set()
+const ow = (from, to, rule, label) => {
+  ORIGIN_CONTROLLED.add(rule)
+  assert.deepEqual(checkOriginLane(edit(real.skill, from, to)), [rule], label)
+}
+test('execute holds every origin-lane rule (ADR 0064)', () => {
+  assert.deepEqual(checkOriginLane(real.skill), [])
+})
+test('origin-lane controls: each mutation fails exactly its rule', () => {
+  ow('mark-integrating --tasks <slug>` (its exit 4: the *Origin lane wait*, below)', 'mark-integrating --tasks <slug>`', 'origin-route', 'step 3 start')
+  ow('run it (its exit 4: the *Origin lane wait*, below), then', 'run it, then', 'origin-route', 'prepare exit 1')
+  ow("`mark-integrating`'s exit 4 here is step 3's *Origin lane wait*", '`mark-integrating` exits 4 here', 'origin-route', 'exit-3 row')
+  ow('Exit 4 is never a refusal, a set-aside or a halt.', 'Exit 4 halts.', 'origin-route', 'a halt')
+  ow('Unless an origin wait this session launched for this rollout is still running, launch', 'Launch', 'origin-wait', 'no once-only rule')
+  ow("So does § 4.5's origin wait", "So does § 4.5's merge-task", 'origin-wait', 'no Codex binding')
+  ow('is not taken into step 3 again in this turn', 'is taken into step 3 again at once', 'origin-turn', 'step 1.4 re-takes')
+  ow('`reason="origin lane: waiting on <owner/name> behind [[<rollout>]]"`', '`reason="origin lane"`', 'origin-turn', 'no step 1.6 reason')
+  ow('; nor the origin wait, which holds nothing) has not reported', ') has not reported', 'origin-heartbeat', 'clause (4)')
+  ow(', nor an `origin lane:` reason (another', ' (another', 'origin-heartbeat', 'clause (7)')
+  ow(', or a task waits on the origin lane (§4.5 step 3', ', or a lane waits (§4.5 step 3', 'origin-waiting', '§ 6 waiting')
+  ow("another project's parallel rollout in this rollout's own clone", 'another rollout', 'origin-surface', 'surface re-check')
+  ow('runs no `mark-integrating`, so it re-enters the lane with no origin-lane check (ADR 0064 d12): it holds', 'runs `mark-integrating` first: it holds', 'reentry-lost', 'lost call')
+  ow('The room-stopped integrate resume,', 'The room-stopped integrate resume runs `mark-integrating`;', 'reentry-room', 'room stop')
+  ow('The release runs no `mark-integrating`, so it re-enters the lane with no origin-lane check', 'The release runs `mark-integrating` first', 'reentry-hold', 'merge hold')
+  ow('and the `revert: true` RACE revert above re-enter the lane', 'above re-enter the lane', 'reentry-race', 'RACE revert')
+  assert.deepEqual(ORIGIN_RULES.filter((r) => !ORIGIN_CONTROLLED.has(r)), [])
+})

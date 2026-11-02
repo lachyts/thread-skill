@@ -162,7 +162,40 @@ Subcommands:
               would arm the task window (dry-run)`, and the flag requirement still applies.
 
   mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
-              (the first wins): the durable signal /thread:status reads.
+              (the first wins): the durable signal /thread:status reads. The origin lane (ADR 0064 d5): one
+              Integration at a time per GitHub origin across rollouts, passed in turn. Outside any lock it reads each
+              note's rollout, its Project root and that root's origin (ORIGIN_SLUG_RE, owner/name lower-cased, GIT_*
+              scrubbed, memoised), and each candidate's; then, under the machine-wide ORIGIN_LANE_LOCK (outermost),
+              it refuses while another rollout holds the origin lane: a root-level, open, parallel rollout note on the
+              same origin, whatever its `engine_snapshot:`, with no `paused:` stamp, a fresh lease (lapsed, none,
+              unreadable and room-stop never hold), a readable Run record whose lane names a task with no open merge
+              hold and no open halt, and that task's note holding the lane (_holds_lane). Else it refuses while a valid
+              waiter from another rollout on `origin-lane.json` (ORIGIN_LANE_FILE, beside the lock: {version: 1,
+              waiting: [{tasksDir, origin, rollout, task, since, at}]}, read as the Trickle claims file is, an entry
+              ORIGIN_WAIT_TTL (30 min) old or as far ahead dropped, another tasksDir's kept under 30 min by the wall
+              clock and never counted, the latest `at` per rollout winning) has an earlier `since` than the caller's
+              own entry, or the caller has none (ties by rollout stem). A valid waiter: its rollout note root-level,
+              tagged, parallel, open and not paused, its lease fresh, its record readable with no open halt, its task
+              `review` with a `pr:` and a `rollout:` naming it. A refusal writes no note; frees this rollout's own
+              Run-record lane on the task when it is open there (or the record is unreadable): _free_lane, its open
+              merge hold closed, then `lane-freed release=origin origin=<owner/name>`; writes the caller's entry
+              (`since` kept from its earlier one on that origin, else now; `at` now), pruning the invalid ones; and
+              prints one stderr line, `ORIGIN LANE: [[<x>]]'s [[<t>]] integrates on <owner/name> (lane taken
+              <integrating stamp>; its lead's lease fresh until <lapsesAt>): [[<slug>]] waits its turn (ADR 0064)` or
+              `ORIGIN LANE: [[<w>]] waits on <owner/name> since <since> (its [[<wt>]]): [[<slug>]] yields its turn
+              (ADR 0064)`. No caller is exempt: one already holding its own lane (a Base-moved re-run) yields too. A
+              grant removes the caller's entry and prunes the rest (the file written only when it changes), then
+              stamps and records lane-taken. Fail open, today's behaviour: no rollout, Project root or readable origin
+              (silent); a lock not taken within NOTE_LOCK_TIMEOUT, an unreadable file (read as none, replaced by the
+              next write), a file of another version (read as none, never written) or a candidate's unreadable record
+              (neither holder nor waiter), each with one `WARN: origin lane: …` line. --dry-run reads the same way
+              with no lock and writes nothing. Exit 1 for any other refusal, else 4, else 0.
+
+  origin-wait --tasks <slug> [--poll 20] [--timeout 900] [--now T]: the lead's background origin wait (execute §
+              4.5 *Origin lane wait*, ADR 0064 d6), read-only and lock-free: every --poll seconds, D5's grant rule for
+              the one slug, as `mark-integrating --dry-run` reads it. Exit 0 prints `origin lane: [[<slug>]]'s turn on
+              <owner/name>` or `origin lane: nothing to wait for: <why>` (the task left the Integration queue, or no
+              origin); exit 75 after --timeout prints the current refusal line; exit 2 on usage.
 
   mark-done   Flip task notes `status: review` -> `status: done`, run AFTER the task's merge is confirmed.
               Stamps `merged: <time>` on a PR task with no stamp yet and removes `integrating:`. Refuses
@@ -308,7 +341,10 @@ Subcommands:
               question also carries `needsHuman` (p16-3, normalised); no other task carries the key. A task
               set aside at Integration whose latest run opens a named marker (p27-4, integration_block) also
               carries `integrationBlock`: `conflict` (an Integration conflict, `integration: conflict
-              unresolved in …`) or `red` (`integration: verifier red: …`); the key is absent otherwise. `holdUntil`
+              unresolved in …`) or `red` (`integration: verifier red: …`); the key is absent otherwise. An
+              `integrating` task whose Run record's last lane-taken/lane-freed line for it is `lane-freed
+              release=origin` (an origin-lane yield, ADR 0064) carries `originWait`: {origin (the line's, else null),
+              since (its ts)}; absent otherwise, and with an unreadable record (one record read per call). `holdUntil`
               (p30-3, Hold until below), at the top level for the rollout and on every task row: its hold_until as
               parsed, {pr, url, error}, or null; the PR's state is never read here. `onMerge` (p30-4, Approved queue
               below): the note's on_merge as read, {value, error}, on a parallel note carrying a rollout hold_until,
@@ -671,8 +707,8 @@ Subcommands:
               [[<rollout>]]` under `## Pause log`, and records `paused mode=sign-off`. A note already stamped
               `paused_for: sign-off` prints `[no-change]`; another standing pause (a hard pause's `paused:`) is
               exit 1. A sign-off pause is a `paused:` like any other: never-started reads it as started, the
-              primary hold releases (unfinished-rollout.py running), and the repo keeps it as its one unfinished
-              parallel rollout until signed or deferred; it no longer holds its Project root against serial chains
+              primary hold releases (unfinished-rollout.py running), and the repo keeps it as its project's one
+              unfinished parallel rollout there (ADR 0064) until signed or deferred; it no longer holds its Project root against serial chains
               while it waits (ADR 0060: unfinished-rollout.py's parallel_hold).
 
   approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0008): move the bullets
@@ -875,7 +911,9 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     the Away state file read once per run, silently (`next` prints its WARN). No resolvable
                     ceiling (or no rollout note): one `run_record: warning: slot-taken for <slug> not
                     recorded: <why>` line.
-  mark-integrating  lane-taken, on every successful call.
+  mark-integrating  lane-taken, on every successful call; on an origin-lane refusal (exit 4, ADR 0064) with this
+                    rollout's record lane open on the task (or the record unreadable): hold-ended hold=merge when one is
+                    open, then lane-freed release=origin origin=<owner/name>.
   mark-done         (a note not already done) hold-ended race / merge for each the record shows open; then,
                     when it held the lane, lane-freed release=merge with path, triggers and conflict from
                     the Integration log's last line when it is the current Integration's (startedAt at or
@@ -1944,7 +1982,8 @@ NOTE_LOCK_TIMEOUT = 30.0
 def _note_lock_dir() -> Path:
     """Where the note save locks (and the standing approval's spend lock) live: THREAD_NOTE_LOCK_DIR, else
     XDG_STATE_HOME/thread/note-locks, else ~/.local/state/thread/note-locks; outside the vault so they never sync. It
-    also holds `next`'s trickle claim lock and Trickle claims file (TRICKLE_LOCK, TRICKLE_CLAIMS; _trickle_paths)."""
+    also holds `next`'s trickle claim lock and Trickle claims file (TRICKLE_LOCK, TRICKLE_CLAIMS; _trickle_paths), and
+    mark-integrating's origin-lane lock and waiting list (ORIGIN_LANE_LOCK, ORIGIN_LANE_FILE; _origin_lane_paths)."""
     absolute = lambda v: v if v and os.path.isabs(v) else None   # noqa: E731  a relative dir is ignored (the XDG rule)
     base = absolute(os.environ.get("THREAD_NOTE_LOCK_DIR")) or os.path.join(
         absolute(os.environ.get("XDG_STATE_HOME")) or os.path.join(os.path.expanduser("~"), ".local", "state"),
@@ -2410,7 +2449,8 @@ class _note_lock:
     --standing takes note locks (Note.save) inside the standing-spend lock (_spend_lock_path), and nothing takes the
     spend lock inside a note lock or the canary's. The trickle claim lock (TRICKLE_LOCK, p28-3) is outermost too: only
     `next` takes it, and takes note locks (Note.save) and the Run record's flock inside it, never it inside another
-    lock. No fcntl (Windows): no lock, the atomic replace alone."""
+    lock. So is the origin-lane lock (ORIGIN_LANE_LOCK, ADR 0064): only mark-integrating takes it, with note locks and
+    the Run record's flock inside it, and never nested with the trickle lock. No fcntl (Windows): no lock, the atomic replace alone."""
 
     def __init__(self, path=None, lock_path=None, label="note lock"):
         self.lock_path = Path(lock_path) if lock_path is not None else _note_lock_path(path)
@@ -5841,23 +5881,367 @@ def cmd_mark_started(args) -> int:
     return max(worst, _finish(args, now))  # 3 > 2 > 1 (a refused note) > 0
 
 
-def cmd_mark_integrating(args) -> int:
-    """Stamp `integrating:` as a task's Integration begins (the first wins). Only a `review` note
-    with a `pr:` can be integrating; anything else is refused."""
-    now = _now(args)
-    for slug, _path, note in _each_note(args):
-        status = _status(note)
-        if status != "review" or not _pr(note):
-            args._errors.append(f"{slug}: status is {status!r}{'' if _pr(note) else ' with no pr:'}, "
-                                f"not 'review' with a PR — refusing to mark integrating")
+# ---- the origin lane (ADR 0064 d5): one Integration at a time per origin across rollouts, passed in turn ------------
+
+ORIGIN_LANE_LOCK = "origin-lane.lock"        # machine-wide, beside the note locks (_note_lock_dir), outermost
+ORIGIN_LANE_FILE = "origin-lane.json"        # the waiting list: {version: 1, waiting: [{ORIGIN_WAIT_KEYS}]}
+ORIGIN_LANE_VERSION = 1
+ORIGIN_LANE_MAX_BYTES = 64 * 1024
+ORIGIN_WAIT_KEYS = ("tasksDir", "origin", "rollout", "task", "since", "at")
+ORIGIN_WAIT_TTL = timedelta(minutes=30)      # an entry's life: its `at` this old (or as far ahead) drops it
+ORIGIN_WAIT_POLL = 20.0                      # origin-wait's seconds between reads
+ORIGIN_WAIT_TIMEOUT = 900.0                  # origin-wait's seconds before exit 75
+ORIGIN_WAIT_EXIT = 75                        # origin-wait timed out: still not this task's turn
+ORIGIN_WARN = "WARN: origin lane:"
+_ORIGINS = {}
+
+
+def _origin_lane_paths():
+    """(the origin-lane lock, the waiting list): ORIGIN_LANE_LOCK and ORIGIN_LANE_FILE in _note_lock_dir()."""
+    base = _note_lock_dir()
+    return base / ORIGIN_LANE_LOCK, base / ORIGIN_LANE_FILE
+
+
+def _origin_of_root(root):
+    """The lower-cased <owner>/<name> of an existing Project root's origin (ORIGIN_SLUG_RE over `git remote get-url
+    origin`, GIT_* scrubbed as _repo_identity), or None; memoised per root, so a call reads each before any lock."""
+    if root is None:
+        return None
+    key = str(root)
+    if key not in _ORIGINS:
+        o = None
+        if os.path.isdir(key):
+            try:
+                p = subprocess.run(["git", "-C", key, "remote", "get-url", "origin"], capture_output=True, text=True,
+                                   timeout=30, stdin=subprocess.DEVNULL,
+                                   env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")})
+                m = ORIGIN_SLUG_RE.search(p.stdout.strip()) if p.returncode == 0 else None
+                o = m.group(1).lower() if m else None
+            except (OSError, subprocess.SubprocessError):
+                o = None
+        _ORIGINS[key] = o
+    return _ORIGINS[key]
+
+
+def _origin_lane_read(path):
+    """The waiting list, read whole, as the Trickle claims file is: (waiting, why, writable). Missing: ([], None, True).
+    Unreadable (an OSError, over ORIGIN_LANE_MAX_BYTES, not UTF-8 or JSON, not an object, no integer version, `waiting`
+    not a list): ([], why, True), so the reader WARNs and the next write replaces it. Another integer version: ([],
+    "version <v>", False), read as none and never written."""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(ORIGIN_LANE_MAX_BYTES + 1)
+    except FileNotFoundError:
+        return [], None, True
+    except OSError as e:
+        return [], f"cannot read it ({e.strerror or e})", True
+    if len(raw) > ORIGIN_LANE_MAX_BYTES:
+        return [], f"over {ORIGIN_LANE_MAX_BYTES // 1024} KiB", True
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        return [], "not UTF-8", True
+    except ValueError:
+        return [], "not JSON", True
+    if not isinstance(data, dict):
+        return [], "not a JSON object", True
+    version = data.get("version")
+    if type(version) is not int:
+        return [], "no integer version", True
+    if version != ORIGIN_LANE_VERSION:
+        return [], f"version {version}", False
+    if not isinstance(data.get("waiting"), list):
+        return [], "waiting is not a list", True
+    return data["waiting"], None, True
+
+
+def _origin_lane_write(path, waiting):
+    """Replace the waiting list whole, {"version": 1, "waiting": [...]}, by a temp file beside it, fsynced, then
+    renamed over it. None, or why it could not (an OSError; nothing is left behind)."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"version": ORIGIN_LANE_VERSION, "waiting": waiting}, f, indent=1)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError as e:
+        return str(e)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return None
+
+
+def _open_halt(lines) -> bool:
+    """An open `halt` stop in the record (_stop_state's `open`, the stops after the last lead-entry)."""
+    return any(d.get("cause") == "halt" for d in _stop_state(lines)["open"])
+
+
+def _origin_lane_rollouts(tasks_dir: Path, origin, skip):
+    """[(path, Note)]: the root-level notes tagged `rollout`, neither done nor dropped, parallel (_shape), not `skip`
+    (the caller's stem, lowercased), whose Project root exists with the same origin (_origin_of_root)."""
+    out = []
+    for path in sorted(tasks_dir.glob("*.md")):
+        if path.stem.lower() == skip:
             continue
-        existing = _scalar(note.get("integrating"))
-        if not existing:
-            note.set("integrating", _stamp(now))
-        note.save(dry_run=args.dry_run)
-        _event(_note_rollout(note), "lane-taken", slug, None, args)
-        print(f"{slug}: integrating={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
-    return _finish(args, now)
+        try:
+            note = Note(path)
+        except (ValueError, OSError):
+            continue
+        if "rollout" not in _tags(note) or _status(note) in CLOSED_ROLLOUT_STATUSES or _shape(note) != SHAPES[0]:
+            continue
+        root = _project_root(note)
+        if root is not None and _origin_of_root(root) == origin:
+            out.append((path, note))
+    return out
+
+
+def _origin_holders(cands, tasks_dir: Path, leases, warns):
+    """The candidates holding the origin lane (ADR 0064 d5), whatever their `engine_snapshot:`: no `paused:` stamp; a
+    fresh lease (_Leases: lapsed, none, unreadable and room-stop never hold); a readable Run record whose lane names a
+    task T with no open merge hold (a merge hold frees the origin lane) and no open halt; and T's note holding the lane
+    (_holds_lane). [{rollout, task, integrating, lapsesAt}], by stem."""
+    out = []
+    for path, note in cands:
+        if _valued(note.get("paused")):
+            continue
+        lease = leases.state(path.stem, note)
+        if lease["state"] != "fresh":
+            continue
+        state, lines = _record_state(path.stem), _record_read(path.stem)
+        if state is None or lines is None:
+            warns.append(f"{ORIGIN_WARN} [[{path.stem}]]'s Run record is unreadable: it holds nothing")
+            continue
+        task = state["lane"]
+        if not task or ("merge", task) in state["holds"] or _open_halt(lines):
+            continue
+        tpath = _find_note(tasks_dir, task)
+        try:
+            tnote = Note(tpath) if tpath is not None else None
+        except (ValueError, OSError):
+            tnote = None
+        if tnote is None or not _holds_lane(tnote):
+            continue
+        out.append({"rollout": path.stem, "task": tpath.stem, "integrating": _scalar(tnote.get("integrating")) or "-",
+                    "lapsesAt": lease["lapsesAt"]})
+    return out
+
+
+def _origin_waiter_valid(e, tasks_dir: Path, leases) -> bool:
+    """A waiting entry of another rollout counts (ADR 0064 d5) when its rollout note is directly in the tasks dir, tagged,
+    parallel, neither done nor dropped and not paused, its lease reads fresh, its Run record is readable with no open
+    halt, and its task note is `review` with a `pr:` whose `rollout:` names that rollout."""
+    path = tasks_dir / f"{e['rollout']}.md"
+    try:
+        note = Note(path) if path.is_file() else None
+        task = Note(tasks_dir / f"{e['task']}.md") if (tasks_dir / f"{e['task']}.md").is_file() else None
+    except (ValueError, OSError):
+        return False
+    if note is None or task is None or "rollout" not in _tags(note) or _status(note) in CLOSED_ROLLOUT_STATUSES or \
+            _shape(note) != SHAPES[0] or _valued(note.get("paused")):
+        return False
+    if leases.state(path.stem, note)["state"] != "fresh":
+        return False
+    lines = _record_read(path.stem)
+    if lines is None or _open_halt(lines):
+        return False
+    return _status(task) == "review" and bool(_pr(task)) and \
+        (_wikilink_slug(task.get("rollout")) or "").lower() == path.stem.lower()
+
+
+def _origin_lane_decide(tasks_dir: Path, rollout, slug, origin, now, wall, waiting, warns) -> dict:
+    """D5's grant rule for one task of `rollout` on `origin`, a pure read (mark-integrating under the lock, and
+    origin-wait and --dry-run without it): {grant, line, own, kept}. Refused while another rollout holds the origin
+    lane (_origin_holders); else while a valid waiter from another rollout has an earlier `since` than the caller's
+    own entry, or the caller has none (ties by rollout stem); else granted. `own` is the caller's own entry on this
+    origin ((since, entry) or None); `kept` the entries the next write keeps (other tasksDirs' under the TTL by `wall`,
+    other origins', and this origin's valid waiters), the caller's own left out."""
+    leases, me = _Leases(now), rollout.lower()
+    holders = _origin_holders(_origin_lane_rollouts(tasks_dir, origin, me), tasks_dir, leases, warns)
+    here, latest, kept = os.path.realpath(str(tasks_dir)), {}, []
+    for e in waiting:
+        if not isinstance(e, dict) or not all(isinstance(e.get(k), str) and e.get(k) for k in ORIGIN_WAIT_KEYS):
+            continue
+        at, since = _parse_ts(e["at"]), _parse_ts(e["since"])
+        if at is None or since is None:
+            continue
+        e = {k: e[k] for k in ORIGIN_WAIT_KEYS}
+        if e["tasksDir"] != here:
+            if abs(wall - at) < ORIGIN_WAIT_TTL:
+                kept.append(e)
+            continue
+        if abs(now - at) >= ORIGIN_WAIT_TTL:
+            continue
+        prev = latest.get(e["rollout"].lower())
+        if prev is None or at > prev[0]:
+            latest[e["rollout"].lower()] = (at, since, e)
+    own, others = None, []
+    for key in sorted(latest):
+        _at, since, e = latest[key]
+        if e["origin"] != origin:
+            kept.append(e)
+        elif key == me:
+            own = (since, e)
+        elif _origin_waiter_valid(e, tasks_dir, leases):
+            others.append((since, key, e))
+            kept.append(e)
+    out = {"grant": False, "own": own, "kept": kept, "line": None}
+    if holders:
+        h = holders[0]
+        out["line"] = (f"ORIGIN LANE: [[{h['rollout']}]]'s [[{h['task']}]] integrates on {origin} (lane taken "
+                       f"{h['integrating']}; its lead's lease fresh until {h['lapsesAt']}): [[{slug}]] waits its turn "
+                       "(ADR 0064)")
+        return out
+    ahead = sorted(((since, key, e) for since, key, e in others if own is None or (since, key) < (own[0], me)),
+                   key=lambda x: (x[0], x[1]))
+    if ahead:
+        e = ahead[0][2]
+        out["line"] = (f"ORIGIN LANE: [[{e['rollout']}]] waits on {origin} since {e['since']} (its [[{e['task']}]]): "
+                       f"[[{slug}]] yields its turn (ADR 0064)")
+        return out
+    out["grant"] = True
+    return out
+
+
+def cmd_mark_integrating(args) -> int:
+    """Stamp `integrating:` as a task's Integration begins (the first wins), and record lane-taken. Only a `review`
+    note with a `pr:` can be integrating; anything else is refused (exit 1). The origin lane (ADR 0064 d5): a task whose
+    rollout's Project root has a readable origin takes its lane only by _origin_lane_decide's grant, decided and
+    written under the machine-wide ORIGIN_LANE_LOCK (outermost: note locks and the Run record's flock inside it);
+    a refusal writes no note, frees this rollout's own Run-record lane on that task (_free_lane release=origin, its open
+    merge hold closed first), writes the caller's waiting entry (`since` kept from its earlier one on that origin, `at`
+    now), prints one `ORIGIN LANE:` line on stderr, and exits 4. A grant removes the caller's entry, then stamps. Fail
+    open (today's behaviour): no rollout, Project root or origin (silent), or a lock it cannot take (one WARN).
+    --dry-run reads the same way and writes nothing. Exit 1 for any other refusal, else 4, else 0."""
+    now = _now(args)
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    notes = list(_each_note(args))
+    # Outside any lock: each note's rollout, its Project root and that root's origin, and every candidate's origin.
+    origin_of = {}
+    for _slug, _path, note in notes:
+        ro = _note_rollout(note)
+        if ro and ro.lower() not in origin_of:
+            origin_of[ro.lower()] = _origin_of_root(_rollout_root(tasks_dir, ro))
+            if origin_of[ro.lower()] is not None:
+                _origin_lane_rollouts(tasks_dir, origin_of[ro.lower()], ro.lower())
+    lock_path, file_path = _origin_lane_paths()
+    lock = None
+    if any(origin_of.values()) and not args.dry_run:
+        lock = _note_lock(lock_path=lock_path, label="origin-lane lock")
+        try:
+            lock.__enter__()
+        except OSError as e:
+            lock = None
+            print(f"{ORIGIN_WARN} {e} — no origin lane this call", file=sys.stderr)
+            origin_of = {}
+    refused = False
+    try:
+        waiting, why, writable = _origin_lane_read(file_path) if any(origin_of.values()) else ([], None, True)
+        if why:
+            print(f"{ORIGIN_WARN} {file_path} unreadable: {why} — read as none" if writable else
+                  f"{ORIGIN_WARN} {file_path} {why} — read as none, left for its writer", file=sys.stderr)
+        wall = datetime.now().astimezone()
+        for slug, _path, note in notes:
+            status = _status(note)
+            if status != "review" or not _pr(note):
+                args._errors.append(f"{slug}: status is {status!r}{'' if _pr(note) else ' with no pr:'}, "
+                                    f"not 'review' with a PR — refusing to mark integrating")
+                continue
+            rollout = _note_rollout(note)
+            origin = origin_of.get(rollout.lower()) if rollout else None
+            if origin is not None:
+                warns = []
+                d = _origin_lane_decide(tasks_dir, rollout, slug, origin, now, wall, waiting, warns)
+                for w in dict.fromkeys(warns):
+                    print(w, file=sys.stderr)
+                here = os.path.realpath(str(tasks_dir))
+                if not d["grant"]:
+                    refused = True
+                    print(d["line"], file=sys.stderr)
+                    if not args.dry_run:
+                        state = _record_state(rollout)
+                        if state is None or state["lane"] == slug.lower():
+                            _free_lane(rollout, slug, args, state, "origin", {"origin": origin})
+                        since = d["own"][1]["since"] if d["own"] else _wait_ts(now)
+                        new = d["kept"] + [{"tasksDir": here, "origin": origin, "rollout": rollout, "task": slug,
+                                            "since": since, "at": _wait_ts(now)}]
+                        if writable and new != waiting:
+                            err = _origin_lane_write(file_path, new)
+                            if err:
+                                print(f"{ORIGIN_WARN} cannot write {file_path}: {err}", file=sys.stderr)
+                            waiting = new
+                    continue
+                if not args.dry_run and writable and d["kept"] != waiting:
+                    err = _origin_lane_write(file_path, d["kept"])
+                    if err:
+                        print(f"{ORIGIN_WARN} cannot write {file_path}: {err}", file=sys.stderr)
+                    waiting = d["kept"]
+            existing = _scalar(note.get("integrating"))
+            if not existing:
+                note.set("integrating", _stamp(now))
+            note.save(dry_run=args.dry_run)
+            _event(rollout, "lane-taken", slug, None, args)
+            print(f"{slug}: integrating={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
+    finally:
+        if lock is not None:
+            lock.__exit__(None, None, None)
+    rc = _finish(args, now)
+    return rc if rc else (4 if refused else 0)
+
+
+def cmd_origin_wait(args) -> int:
+    """`origin-wait` (ADR 0064 d6): the lead's background wait for its task's turn on the origin lane, read-only and
+    lock-free. Every --poll seconds it evaluates D5's grant rule for the one --tasks slug, as `mark-integrating
+    --dry-run` would. Exit 0, `origin lane: [[<slug>]]'s turn on <owner/name>`, or `origin lane: nothing to wait for:
+    <why>` (the task is no `review` note with a `pr:`, no rollout, or no origin); exit 75 (ORIGIN_WAIT_EXIT) after
+    --timeout with the current refusal line; exit 2 on usage (one slug, a note that exists)."""
+    slugs = [x.strip() for x in args.tasks.split(",") if x.strip()]
+    if len(slugs) != 1:
+        print("ERROR: origin-wait: --tasks names exactly one task", file=sys.stderr)
+        return 2
+    if not (args.poll > 0 and math.isfinite(args.poll)) or not (args.timeout >= 0 and math.isfinite(args.timeout)):
+        print("ERROR: origin-wait: --poll must be > 0 and --timeout >= 0", file=sys.stderr)
+        return 2
+    slug, tasks_dir = slugs[0], Path(os.path.expanduser(args.tasks_dir))
+    path = tasks_dir / f"{slug}.md"
+    if not path.is_file():
+        print(f"ERROR: origin-wait: {slug}: task note not found at {path}", file=sys.stderr)
+        return 2
+    _lock_path, file_path = _origin_lane_paths()
+    deadline = time.monotonic() + args.timeout
+    while True:
+        try:
+            note = Note(path)
+        except (ValueError, OSError) as e:
+            print(f"origin lane: nothing to wait for: {slug}: {e}")
+            return 0
+        rollout = _note_rollout(note)
+        if _status(note) != "review" or not _pr(note):
+            print(f"origin lane: nothing to wait for: [[{slug}]] left the Integration queue (status "
+                  f"{_status(note) or 'none'}{'' if _pr(note) else ', no pr:'})")
+            return 0
+        origin = _origin_of_root(_rollout_root(tasks_dir, rollout)) if rollout else None
+        if origin is None:
+            print(f"origin lane: nothing to wait for: [[{slug}]]'s rollout has no Project root with a readable origin")
+            return 0
+        waiting, _why, _writable = _origin_lane_read(file_path)
+        warns = []
+        d = _origin_lane_decide(tasks_dir, rollout, slug, origin, _now(args), datetime.now().astimezone(), waiting,
+                                warns)
+        if d["grant"]:
+            print(f"origin lane: [[{slug}]]'s turn on {origin}")
+            return 0
+        if time.monotonic() >= deadline:
+            for w in dict.fromkeys(warns):
+                print(w, file=sys.stderr)
+            print(d["line"])
+            return ORIGIN_WAIT_EXIT
+        time.sleep(max(0.01, min(args.poll, deadline - time.monotonic())))
 
 
 def cmd_mark_done(args) -> int:
@@ -6209,6 +6593,11 @@ def cmd_status(args) -> int:
     # row keeps the rung it reached as a record, and an edit to the ladder since is no drift. A refused ladder
     # gives no drift anywhere; its `error` is the flag.
     ladder = _ladder()
+    # The origin lane (ADR 0064 d14): each task's last lane-taken/lane-freed line, from one read of the Run record.
+    last_lane = {}
+    for d in _record_read(rollout_path.stem) or []:
+        if d.get("kind") in ("lane-taken", "lane-freed") and isinstance(d.get("task"), str):
+            last_lane[d["task"].lower()] = d
 
     def rung_drift(r):
         stamp = _scalar(r["note"].get("rung"))
@@ -6245,6 +6634,11 @@ def cmd_status(args) -> int:
             if r["state"] == "set-aside" and r["setAsideAt"] == "integration" else None
         if block:
             row["integrationBlock"] = block
+        # ADR 0064: an integrating task whose lead yielded the origin lane on it waits for another rollout's Integration.
+        lane = last_lane.get(r["slug"].lower()) if r["state"] == "integrating" else None
+        if lane is not None and lane.get("kind") == "lane-freed" and lane.get("release") == "origin":
+            row["originWait"] = {"origin": lane["origin"] if isinstance(lane.get("origin"), str) else None,
+                                 "since": lane.get("ts")}
         return row
 
     tasks = [task_row(r) for r in sorted(rows, key=_rank)]
@@ -6258,8 +6652,8 @@ def cmd_status(args) -> int:
         "paused": _scalar(paused) or None,
         "pause_requested": _truthy_flag(rollout_note.get("pause_requested")),
         # What the pause waits for: "sign-off" under await-sign-off's pause (ADR 0034: only gates wait on Lachy, and the
-        # repo keeps this as its one unfinished parallel rollout until they are signed or deferred, though it holds no
-        # Project root against serial chains meanwhile, ADR 0060), else null.
+        # repo keeps this as its project's one unfinished parallel rollout there, ADR 0064, until they are signed or
+        # deferred, though it holds no Project root against serial chains meanwhile, ADR 0060), else null.
         "pausedFor": _scalar(rollout_note.get(PAUSED_FOR_KEY)) or None,
         # Why the rollout must not run as written (`next` refuses it), or null: see "Incomplete".
         "incomplete": incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index) or None,
@@ -7519,10 +7913,17 @@ def _record_decision(rollout, slug, mark, by, args):
     _event(rollout, "race-decided", slug, {"mark": mark, "by": by}, args)
 
 
+def _free_lane(rollout, slug, args, state, release, extra=None):
+    """The lead frees the lane on this task outside a merge: its open merge hold ends, then lane-freed with `release`
+    (halt: a halt, free-lane, a lane hold; origin: mark-integrating's origin-lane refusal, ADR 0064, with
+    `origin=<owner/name>` in `extra`)."""
+    _close_holds(rollout, slug, ("merge",), args, state)
+    _event(rollout, "lane-freed", slug, {"release": release, **(extra or {})}, args)
+
+
 def _halt_lane(rollout, slug, args, state):
     """A halt frees the lane: the task's open merge hold ends, then lane-freed release=halt."""
-    _close_holds(rollout, slug, ("merge",), args, state)
-    _event(rollout, "lane-freed", slug, {"release": "halt"}, args)
+    _free_lane(rollout, slug, args, state, "halt")
 
 
 _RESOLVED_CAPS = {}
@@ -12121,9 +12522,19 @@ def _parser():
                     help="write nothing (a drained pause is reported, not stamped; a start stamp is reported, not cleared)")
     nx.set_defaults(func=cmd_next)
 
+    ow = sub.add_parser("origin-wait", help="wait, read-only, for a task's turn on the origin lane (ADR 0064): 0 its "
+                                            "turn or nothing to wait for, 75 timed out, 2 usage")
+    ow.add_argument("--tasks", required=True, help="the one task slug whose turn it waits for")
+    ow.add_argument("--poll", type=float, default=ORIGIN_WAIT_POLL, help="seconds between reads (default 20)")
+    ow.add_argument("--timeout", type=float, default=ORIGIN_WAIT_TIMEOUT, help="seconds before exit 75 (default 900)")
+    ow.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    ow.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the leases and entries are read against it)")
+    ow.set_defaults(func=cmd_origin_wait)
+
     for name, func, help_ in (
         ("mark-started", cmd_mark_started, "stamp started: on task notes as they start (first start wins)"),
-        ("mark-integrating", cmd_mark_integrating, "stamp integrating: on review notes with a PR (first wins)"),
+        ("mark-integrating", cmd_mark_integrating, "stamp integrating: on review notes with a PR (first wins); exit 4 "
+                                                   "while another rollout on the origin integrates or waits first"),
         ("mark-done", cmd_mark_done, "flip task notes review->done after their merge is confirmed (stamps merged:)"),
     ):
         m = sub.add_parser(name, help=help_)

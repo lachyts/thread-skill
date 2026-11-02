@@ -553,6 +553,30 @@ test('8. runs: grouped by home, shape and root, with their Review load, blockers
   }
 })
 
+// ---- 8b. ADR 0064: two projects' runs on one repo read their home project's own clone ---------------------------------
+test('8b. runs: a run reads rolloutRoot, blockers and unchecked from its home project\'s row; sameRoot keys on rolloutRoot', () => {
+  const act = ROOT('act')
+  const s = JSON.parse(fs.readFileSync(SCAN_FILE, 'utf8'))
+  const repo = s.repos.find((x) => x.path === act)
+  assert.ok(repo, `a scan repo row for ${act}`)
+  const own = (project, rolloutRoot, blockers = [], unchecked = []) => ({ project, clone: null, rolloutRoot, selfRollout: null, root: rolloutRoot, blockers, unchecked })
+  repo.blockers = [{ check: 'landing-register', why: 'the row, never read when the project has its own entry' }]
+  repo.projects = [own('Act', `${act}-rollout`, [{ check: 'unfinished-rollout', why: 'refuse act-rollout' }]),
+    own('Shared', `${act}-shared-rollout`, [], [{ check: 'default-branch', why: 'deadline' }])]
+  const file = path.join(S, 'scan-projects.json')
+  write(file, JSON.stringify(s))
+  const j = ok(py(['rank', '--scan', file, '--today', TODAY, ...MAIN_FILES.flatMap((f) => ['--grades', f])]))
+  const a = runOf(j, `Act/parallel/${act}`)
+  const b = runOf(j, `Shared/parallel/${act}`)
+  assert.deepEqual([a.rolloutRoot, a.blockers, a.unchecked], [`${act}-rollout`, repo.projects[0].blockers, []])
+  assert.deepEqual([b.rolloutRoot, b.blockers, b.unchecked], [`${act}-shared-rollout`, [], repo.projects[1].unchecked])
+  assert.deepEqual([a.sameRoot, b.sameRoot], [[], []], 'their own clones are two roots')
+  repo.projects[1].rolloutRoot = `${act}-rollout`
+  write(file, JSON.stringify(s))
+  const k = ok(py(['rank', '--scan', file, '--today', TODAY, ...MAIN_FILES.flatMap((f) => ['--grades', f])]))
+  assert.deepEqual(runOf(k, `Act/parallel/${act}`).sameRoot, [`Shared/parallel/${act}`], 'control: one clone is one root')
+})
+
 // ---- 9. decisions[] ---------------------------------------------------------------------------------------------------
 test('9. decisions: One calls first, then Grills, each in rank order, with minutes to cut at a budget', () => {
   const j = ok(main())

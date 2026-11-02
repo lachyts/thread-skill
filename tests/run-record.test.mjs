@@ -1586,6 +1586,25 @@ except m.Refused:
   assert.deepEqual(listing(ev(home)), [])
 })
 
+test('lane-freed release=origin (ADR 0064): accepted strict with its origin; an ill-typed origin and unknown releases refused', (t) => {
+  const home = tmpHome(t)
+  const r = api(home, `
+out = [m.emit("x", "lane-freed", task="t", fields={"release": "origin", "origin": "o/r"}, strict=True)]
+for f in ({"release": "origin", "origin": 7}, {"release": "yield"}):
+    try:
+        m.emit("x", "lane-freed", task="t", fields=f, strict=True)
+        out.append("no raise")
+    except m.Refused:
+        out.append("Refused")
+print(json.dumps(out))`, { env: EV(home) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), [true, 'Refused', 'Refused'])
+  const lines = fs.readFileSync(path.join(ev(home), 'x.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  assert.equal(lines.length, 1)
+  assert.equal(lines[0].release, 'origin')
+  assert.equal(lines[0].origin, 'o/r')
+})
+
 test('an unexpected exception while writing is a warning and False, strict or not', (t) => {
   const home = tmpHome(t)
   const r = api(home, `

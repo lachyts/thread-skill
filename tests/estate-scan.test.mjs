@@ -364,6 +364,30 @@ P5('Key List', '\norient:\n  - own')
 P5('Key Blank', '\norient: ""')
 mkdir(path.join(V5, 'Work', 'Tasks'))
 
+// ---- Vault V6: two projects' parallel rollouts on one repo, each in its own clone (ADR 0064, p33-4) ----------------
+// Proj A and Proj B both declare TB, TB2, TB3 and TB4; Proj A's started rollout is rooted in each one's default clone
+// D (<T>-rollout). TB: B has no clone yet (P absent). TB2: B's own clone TB2-proj-b-rollout exists. TB3: Proj C (no
+// declarer) holds TB3-proj-b-rollout too, so B has no clone free. TB4: TB4-proj-b is an unrelated checkout, so P
+// collides.
+const V6 = path.join(S, 'v6')
+for (const name of ['TB', 'TB2', 'TB3', 'TB4']) { repo(name, { Makefile: 'test:\n\ttrue\n' }); cloneOf(name) }
+for (const name of ['TB2', 'TB3']) {
+  const c = R(`${name}-proj-b-rollout`)
+  git(['clone', '-q', path.join(S, 'remotes', 'fixture', `${name.toLowerCase()}.git`), c])
+  git(['-C', c, 'remote', 'set-url', 'origin', `git@github.com:fixture/${name.toLowerCase()}.git`])
+}
+repo('TB4-proj-b', { 'README.md': '# elsewhere\n' }, { bare: 'fixture/elsewhere.git' })
+const P6 = (name) => write(path.join(V6, 'Work', 'Projects', `${name}.md`),
+  project('active', `\nrepos:${['TB', 'TB2', 'TB3', 'TB4'].map((n) => `\n  - ~/repos/${n}`).join('')}`))
+P6('Proj A'); P6('Proj B')
+const ro6 = (slug, proj, at) => {
+  write(path.join(V6, 'Work', 'Tasks', `${slug}.md`), fm(`tags:\n  - task\n  - rollout\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 2\nprojects:\n  - "[[${proj}]]"`,
+    `\n## Notes\n\nProject root: \`${at}\`\n`))
+  write(path.join(V6, 'Work', 'Tasks', `${slug}-t.md`), task('in_progress', [proj], `\nrollout: "[[${slug}]]"\nowner: lead-x`))
+}
+for (const name of ['TB', 'TB2', 'TB3', 'TB4']) ro6(`ra-${name.toLowerCase()}`, 'Proj A', `~/repos/${name}-rollout`)
+ro6('rc-tb3', 'Proj C', '~/repos/TB3-proj-b-rollout')
+
 // ---- Running the scan ------------------------------------------------------------------------------------------
 const env = { ...base }
 for (const name of ['GIT_SSH_COMMAND', 'GIT_SSH', 'CLAUDE_PLUGIN_ROOT', 'PYTHONDONTWRITEBYTECODE']) delete env[name]
@@ -417,7 +441,7 @@ const proj = (j, name) => { const p = byName(j, name); assert.equal(p.length, 1,
 const taskRow = (j, slug) => j.tasks.find((t) => t.slug === slug)
 const repoAt = (j, dir) => { const r = j.repos.find((x) => x.path === dir); assert.ok(r, `a repo row for ${dir}`); return r }
 const checks = (rows) => rows.map((x) => x.check)
-const CHECKS = ['git', 'self-rollout', 'no-github-origin', 'landing-register', 'default-branch', 'unpushed-default',
+const CHECKS = ['git', 'clone', 'self-rollout', 'no-github-origin', 'landing-register', 'default-branch', 'unpushed-default',
   'unfinished-rollout', 'no-verifier']
 
 // ---- 1. Projects ------------------------------------------------------------------------------------------------
@@ -555,8 +579,11 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
   assert.equal(a.origin, 'git@github.com:fixture/a.git')
   assert.deepEqual(a.declaredBy, ['Crowned One'])
   // The stand-in for exit 4 is the peer it becomes: schedule § 0's --ensure clones A-rollout at origin/main, so the
-  // in-place main ahead of it blocks only on a cited path (case 16 runs pushed-base.sh that way).
-  assert.deepEqual(checks(a.blockers), ['unfinished-rollout'])
+  // in-place main ahead of it blocks only on a cited path (case 16 runs pushed-base.sh that way). The unfinished-rollout
+  // refusal is the project's own (ADR 0064): it sits on the project row, never the repo row.
+  assert.deepEqual(checks(a.blockers), [])
+  assert.deepEqual(a.projects.map((x) => [x.project, x.clone, checks(x.blockers)]),
+    [['Crowned One', { exit: 0, line: 'default', slug: null }, ['unfinished-rollout']]])
   assert.deepEqual(a.unchecked, [])
   assert.equal(a.defaultBranch, 'main')
   assert.equal(a.defaultBranchSource, 'remote')
@@ -674,7 +701,8 @@ test('6. --offline: no remote is asked; the cached origin/HEAD and the last fetc
   assert.equal(a.defaultBranch, 'main')
   assert.equal(a.defaultBranchSource, 'cached')
   assert.equal(a.unpushed[0].basis, 'last-fetch')
-  assert.deepEqual(checks(a.blockers), ['unfinished-rollout'])
+  assert.deepEqual(checks(a.blockers), [])
+  assert.deepEqual(checks(a.projects[0].blockers), ['unfinished-rollout'])
   assert.equal(a.unpushed[0].cloneRooted, true)
 })
 
@@ -1029,4 +1057,45 @@ test('19. ownSession: the orient: key wins, else a declared repo with its own de
   assert.deepEqual(zero.projects, j.projects)
   // Every V1 project is small by the derived test, so its rows gain only that field.
   for (const p of ok(online()).projects) assert.deepEqual(p.ownSession, SMALL, p.name)
+})
+
+// ---- E1-E5: two projects' parallel rollouts on one repo, each in its own clone (ADR 0064, D8) ----------------------
+const twoClones = once(() => scan(V6))
+const projOf = (row, name) => { const p = row.projects.find((x) => x.project === name); assert.ok(p, `${row.path}: a project row ${name}`); return p }
+test('E1. B, beside A\'s rollout in D, reads clone project proj-b with the toplevel standing in; A has only its own refusal', () => {
+  const j = ok(twoClones())
+  const tb = repoAt(j, R('TB'))
+  const b = projOf(tb, 'Proj B')
+  assert.deepEqual(b.clone, { exit: 0, line: 'project proj-b', slug: 'proj-b' })
+  assert.equal(b.selfRollout.exit, 4, 'no TB-proj-b-rollout yet')
+  assert.equal(b.rolloutRoot, R('TB'), 'the toplevel stands in for the would-be clone')
+  assert.deepEqual(b.blockers, [], JSON.stringify(b))
+  const a = projOf(tb, 'Proj A')
+  assert.deepEqual(a.clone, { exit: 0, line: 'default', slug: null })
+  assert.equal(a.rolloutRoot, R('TB-rollout'))
+  assert.deepEqual(checks(a.blockers), ['unfinished-rollout'], 'its own started rollout in D')
+})
+test('E2. B\'s own clone exists: it is B\'s rolloutRoot and root', () => {
+  const b = projOf(repoAt(ok(twoClones()), R('TB2')), 'Proj B')
+  assert.deepEqual([b.clone.slug, b.selfRollout.exit, b.rolloutRoot, b.root], ['proj-b', 0, R('TB2-proj-b-rollout'), R('TB2-proj-b-rollout')])
+  assert.deepEqual(b.blockers, [])
+})
+test('E3. D and P_B both taken by other projects: B carries a clone blocker', () => {
+  const b = projOf(repoAt(ok(twoClones()), R('TB3')), 'Proj B')
+  assert.equal(b.clone.exit, 3)
+  assert.match(b.clone.line, /^refuse ra-tb3,rc-tb3$/)
+  assert.deepEqual(checks(b.blockers), ['clone', 'unfinished-rollout'], 'with no clone of its own it reads D, where A runs')
+})
+test('E4. the repo row keeps the default resolution and carries no project\'s unfinished-rollout refusal', () => {
+  const tb = repoAt(ok(twoClones()), R('TB'))
+  assert.equal(tb.rolloutRoot, R('TB-rollout'))
+  assert.equal(tb.selfRollout.exit, 0)
+  assert.deepEqual(checks(tb.blockers), [])
+  assert.deepEqual(tb.unfinishedRollout.map((x) => [x.project, x.verdict]), [['Proj A', 'refuse'], ['Proj B', 'none']],
+    'each project checked against its own root')
+})
+test('E5. <T>-proj-b an unrelated checkout: B\'s clone blocker carries the collision line', () => {
+  const b = projOf(repoAt(ok(twoClones()), R('TB4')), 'Proj B')
+  assert.deepEqual(checks(b.blockers), ['clone', 'unfinished-rollout'])
+  assert.match(b.blockers[0].why, /TB4-proj-b is a checkout \(origin fixture\/elsewhere\)/)
 })

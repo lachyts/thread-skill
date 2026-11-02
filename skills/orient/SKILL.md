@@ -350,7 +350,8 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
   run, which would also sweep up serial-shaped and session-lane phases and whatever the grill left
   unresolved. A task with an open fork (§ 2) is left out of `--tasks` until Lachy rules on it. A
   scoped target routes only the tasks its own reshuffle wrote. **At most one
-  unfinished rollout per repo**, and schedule § 0's unfinished-rollout check enforces it.
+  unfinished rollout per repo and project**, each project's in its own rollout clone (ADR 0064), and schedule
+  § 0's unfinished-rollout check enforces it.
   `--regenerate` is orient's supersede policy: the check allows a supersede only for a paused or
   never-started rollout of this project (its unlanded tasks carry into the new one), and schedule
   § 0 finishes an interrupted supersede on its own.
@@ -527,7 +528,7 @@ given). It resolves, asks, reads and writes nothing.
   logic; parallel- and serial-shaped work go to schedule (the execution-fit test
   decides, hard); execute runs only through the execute handoff.
 - **Don't put parallel-shaped work in a serial rollout**, and don't schedule a bare project run (always `--tasks`).
-- **Never a second unfinished parallel rollout per repo, never a serial chain over a live chain's
+- **Never a second unfinished parallel rollout per repo and project, never a serial chain over a live chain's
   surface, and never another rollout's lifecycle**: schedule
   § 0 supersedes only what its unfinished-rollout check allows (this project's, paused or never
   started); anything else waits (§ 6).

@@ -214,7 +214,7 @@ From its queue state, its `lead-integrate.py inputs` (`resumeAt`, `autoRevise`, 
 (`autoRetry`, `autoRetryWhy`, `autoRetryAfter`, `autoRetryError`, `fingerprint`), `prUrlError`, `humanFix` (the one act
 that moves a block only Lachy may move, ADR 0035: repair reads it and never re-derives a cause) and `answerRecorded`
 (the live answer to the current block, the one read status and the lead share), status's
-per-task `needsHuman`, and the live PR state. Each unmerged task takes the **first** class in table order whose
+per-task `needsHuman` and `originWait`, and the live PR state. Each unmerged task takes the **first** class in table order whose
 signal it matches. The order matters: a RACE task's PR is MERGED, and so is an UNVERIFIED one's, which is also set
 aside at Integration, so they match **merged, never marked** and **at Integration** further down too; the order
 escalates them before repair reaches for `resume` or `hand-back`, both of which hold back a held task themselves
@@ -233,6 +233,7 @@ class below it.
 | **merged, never marked** | not done; its PR is MERGED into the default branch | `reconcile-rollout.py resume` (§ 3a) flips it done; never hand it back or defer it |
 | **merge hold** | merge-task exit 7: review required on the integrating PR | "approve PR #N": Lachy's; never re-integrated, never set aside |
 | **lane held** | a `laneLog` entry names it (status's Lane hold flag): a cause that reaches every merge holds the lane on it (execute § 4.5 *Lane hold*, ADR 0048) | § 3g: the evidence, then Lachy's ack; never handed back, re-integrated or set aside by repair |
+| **origin lane wait** | integrating with status's `originWait` (its lead yielded the origin lane to another project's Integration on the same origin, ADR 0064), rendered with status's wording, `waiting on the origin lane (<origin>) since <since>` | nothing with a lead live: its origin wait or heartbeat takes step 3 again in turn. With none live, § 4's hand-off, whose *Cold resume* runs step 3 again for it. Never a hand-back or a set-aside: it lost no work |
 | **live** | running or integrating under a live lead | nothing: the lead owns it (§ 1) |
 | **PR CLOSED / branch missing** | awaiting Integration, integrating (no lead live) or set aside at Integration, and its PR is CLOSED unmerged (status's flag) or `git -C <repoPath> ls-remote --exit-code --heads origin <inputs.branch>` finds no branch; or set aside at Integration with no `pr:` (`humanFix.act` `restore, recut or defer` with no `pr:`), which `hand-back` refuses | input-gated: § 4's restore, recut, defer or leave; never left to the loop, which would integrate it only for merge-task to set it aside at its own run; with no `pr:`, restore starts by finding its PR (§ 4) |
 | **awaiting Integration** | `review` with a `pr:` | nothing: the loop integrates it |

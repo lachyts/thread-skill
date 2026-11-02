@@ -80,7 +80,9 @@ Six blockers:
 **Self-rollout.** Every parallel rollout scheduled after P26 runs from its **rollout clone** (ADR 0042): a
 second full clone of the repository beside its toplevel, `<toplevel>-rollout`, never nested inside it, so a
 peer session's commit in the in-place checkout never moves the tree a rollout integrates in; the
-self-rollout's clone is the first case of that rule, not an exception to it. And a rollout must never run
+self-rollout's clone is the first case of that rule, not an exception to it. A second project's parallel
+rollout on the same repo takes a clone of its own, `<toplevel>-<project-slug>-rollout` (ADR 0064: one clone per
+(repo, project)), whose slug schedule § 0 reads from `unfinished-rollout.py clone` before this snippet runs. And a rollout must never run
 against the checkout the plugin itself runs from. When the repo path is, or contains, the plugin's live
 checkout (a **directory-source** marketplace, `claude plugin marketplace add <dir>`, or a `--plugin-dir`
 session), `${CLAUDE_PLUGIN_ROOT}` IS that checkout, so every engine or skill change a merge lands there
@@ -94,28 +96,39 @@ checks use:
 # thread:self-rollout-check (extracted and tested by tests/self-rollout-check.test.sh)
 R="<repoPath>"
 M="<mode>"
+S="<clone-slug>"
 case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
 sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
 [ -f "$sc" ] || { echo "self-rollout-check.sh not found at $sc: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
-bash "$sc" $M "$R"
+bash "$sc" $M "$R" $S
 # end thread:self-rollout-check
 ```
 
 `<mode>` is `--resolve`, then `--ensure`, in schedule § 0 (estate-scan.py runs `--resolve` too) and empty in
-execute § 2.6. The plain mode and `--resolve` are read-only; `--ensure` writes only the rollout clone. The
-script's header is the one statement of what matches, of what makes a clone usable, and of every mode.
+execute § 2.6. `<clone-slug>` is empty, except in schedule § 0 when its `clone` line reads `project <slug>`:
+then it is that slug. `$M` and `$S` are unquoted on purpose: both are empty for execute § 2.6, and `$S` is
+empty for the default clone. The plain mode and `--resolve` are read-only; `--ensure` writes only the rollout
+clone. The script's header is the one statement of what matches, of what makes a clone usable, and of every
+mode.
 
 - **`--resolve`** (schedule § 0, read-only): every git `Local:` maps to its rollout clone, `C[/<sub>]` (a
-  sub-path kept; `C` is the toplevel itself when it already is a rollout clone). Exit 0 prints the usable
+  sub-path kept; `C` is the toplevel itself when it already is a rollout clone, a slug then ignored with a
+  `note:`; with a slug, `C` is `<toplevel>-<slug>-rollout`). Exit 0 prints the usable
   clone. Exit 4 prints the would-be clone when none exists yet, its stderr naming the origin URL and, when it
   would sit inside another work tree P, a `nested in <P>` line. Exit 5 is no GitHub origin (empty stdout;
   the remote check's remedy). Exit 3 is no usable clone, nothing on stdout and the reason on stderr: outside
   git, a linked worktree (point `Local:` at the main checkout), `~/Projects` itself (a text-only monorepo,
   never a Project root), `self-rollout-check: <path> is not a usable rollout clone: <reason>` (not a
   directory, not a work tree's top, a linked worktree, another repository, a live plugin checkout, or a
-  parent work tree that would track it). A sub-path the clone lacks is no refusal here: `--resolve` never
-  fetches, so the clone may only be stale, and it exits 0 with `C/<sub>` and a `note:`.
-- **`--ensure`** (schedule § 0, after Lachy's yes when the clone is new): makes a missing clone (inside another
+  parent work tree that would track it). With a slug, exit 3 also when `<toplevel>-<slug>` is a checkout of
+  any origin, or of none (`C` is that checkout's own clone's name), or when the twin walk from `C`'s name
+  would land on another same-origin checkout (`C` would read as its clone): both add the remedy that this
+  project takes no clone of its own beside the toplevel and waits for `<toplevel>-rollout`. A slug that is not
+  `[a-z0-9][a-z0-9-]*`, or is `rollout` or ends in `-rollout`, is a usage error (exit 2). A sub-path the clone
+  lacks is no refusal here: `--resolve` never fetches, so the clone may only be stale, and it exits 0 with
+  `C/<sub>` and a `note:`.
+- **`--ensure`** (schedule § 0, after Lachy's yes when the clone is new; the same slug as `--resolve`, whose
+  slug refusals it repeats before any clone): makes a missing clone (inside another
   work tree, an empty-directory `git check-ignore` probe first, removed and exit 3 when that tree would track
   it; then one `git clone` of the raw origin URL, never prompting), re-runs the usable checks, fast-forwards
   the clone's default branch (`fetch`, then `merge --ff-only --no-autostash`; a note when it cannot move),
@@ -293,15 +306,17 @@ in a clone-rooted rollout's in-place checkout as `ahead` or `diverged`, and that
 when it touches a cited path. In a rollout rooted in place before ADR 0042, one committed in another clone
 of the set first surfaces when the next entry halts on it.
 
-**Unfinished rollout.** A repo holds at most one unfinished parallel rollout: one directly in `Work/Tasks/`,
-neither `done` nor `dropped`, with a task not yet merged; and none on a place a live serial chain writes
+**Unfinished rollout.** A repo holds at most one unfinished parallel rollout per project (ADR 0064): one directly in
+`Work/Tasks/`, neither `done` nor `dropped`, with a task not yet merged, each project's run from its own rollout clone
+(schedule § 0's `clone` names it); another project's in its own clone is a `WARN`, both run, and Integration takes one
+merge at a time per origin; and none on a place a live serial chain writes
 (ADR 0040; a stuck chain holds only its unlanded rows' surfaces, ADR 0060). Surfaces compare `repo:<realpath>` literally, so a rollout rooted in its clone and a chain on
 the in-place checkout coexist as peers (ADR 0042); the one exception, a separate checkout nested inside
 another by path, never meets the outer one either (p33-3). schedule § 0 runs
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check` against the resolved repo path last,
 after the pushed-base check, and its one stdout line decides: see schedule § 0 for each outcome (`none`,
-`supersede`, `file`, `interrupted`, `refuse`) and its remedy. A running or never-superseded rollout on the
-repo is a stop, never a second rollout beside it. Serial chains are limited by surfaces instead: schedule
+`supersede`, `file`, `interrupted`, `refuse`) and its remedy. A running or never-superseded rollout of this
+project on the repo, or another project's on this run's own clone, is a stop, never a second rollout beside it. Serial chains are limited by surfaces instead: schedule
 § Serial path runs the same script with `--shape serial`, once per chain. Beside it sits orient § 6's
 *Uncommitted grill docs* hold:
 `CONTEXT.md` or `docs/adr/` changes a grill left uncommitted in the target repo hold scheduling there too,

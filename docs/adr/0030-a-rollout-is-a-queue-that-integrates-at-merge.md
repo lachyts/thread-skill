@@ -26,6 +26,8 @@ twice is reverted.)*
 *(Amended by ADR 0048, 2026-10-28: merge-task's exit 70 and its environment exit 2, and lead-integrate's exit 2 on the
 task holding the lane, hold the Integration lane, never the whole rollout; a revert PR's and the RACE revert's still
 halt.)*
+*(Amended by ADR 0064, 2026-11-02: decision 3's one Integration at a time holds per origin across rollouts too, passed in
+turn through the origin lane.)*
 
 ## Context
 

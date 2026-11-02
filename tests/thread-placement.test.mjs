@@ -625,6 +625,7 @@ test('20b. rollout clones (ADR 0042): their copies are no thread, parity holds, 
   write(hr('repos/tools/pairy-rollout/THREAD.md'), thread('pairy'))
   pair(hr('repos/workspaces'), 'https://github.com/o/ws.git', 'https://github.com/o/ws.git')
   write(hr('repos/workspaces-rollout/seat/THREAD.md'), thread('seat'))
+  write(hr('repos/workspaces-x-rollout/seat/THREAD.md'), thread('seat'))  // ADR 0064: a second project's clone of workspaces
   pair(hr('Projects/N/nest'), 'git@github.com:o/nest.git', 'git@github.com:o/nest.git')
   write(hr('Projects/N/nest/THREAD.md'), '# nest, no front matter\n')
   write(hr('Projects/N/nest-rollout/THREAD.md'), '# nest, no front matter\n')

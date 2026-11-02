@@ -42,6 +42,12 @@
 #           paused or halted (X14); the release WARNs and both --resume reads keep the nested-checkout rule (X15, p33-3)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
+#   P1-P13  two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4): check's step 2c
+#           refuses another project's rollout on this run's checkout (its clone, or that clone's in-place twin) and
+#           drops one in its own clone with a WARN (P1-P5); the `clone` verb picks the default clone, this project's
+#           `<T>-<slug>-rollout`, or refuses, with reuse by recorded root and every clone-name collision (P6-P8j); a
+#           resume meets another project's rollout in its own clone, by the tie rule (P9-P10); `branches` (P11);
+#           hold's why (P12); usage (P13).
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them) and a stub gh.
 # No vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -193,10 +199,10 @@ done
 scen c6
 mkro ro-o.md "$R" 'projects: ["[[Other]]"]' "$PAUSED"
 chk --repo "$R" --project Demo --regenerate
-ok "$out|$rc" "refuse ro-o|3" "C6: another project's paused rollout on this repo refuses"
-has "$err" "at most one unfinished rollout per repo" "C6: stderr names the one-per-repo rule"
-# U3: an ordinary pause keeps its exact remedy, with no sign-off wording.
-ok "$err" "unfinished rollout [[ro-o]] is another project's (Other; paused 2026-09-30T10:00+00:00): at most one unfinished rollout per repo: wait for it to finish, or /thread:status then /thread:repair" "U3: C6's stderr is unchanged"
+ok "$out|$rc" "refuse ro-o|3" "C6/P1: another project's paused rollout on this run's checkout refuses"
+has "$err" "runs from $R, which this run would share" "C6/P1: stderr names the shared checkout (ADR 0064: each project its own clone)"
+# U3: an ordinary pause gets the shared-checkout line, with no sign-off wording.
+ok "$err" "[[ro-o]] (Other; paused 2026-09-30T10:00+00:00) runs from $R, which this run would share (its clone, or that clone's in-place twin): two projects' rollouts on one repo each take their own clone (ADR 0064): re-run /thread:schedule Demo, whose § 0 resolves this project's clone" "U3: C6's stderr is the shared-checkout line"
 hasnt "$err" "sign-off" "U3: … and names no sign-off"
 
 # ── U1-U2: a rollout awaiting sign-off (ADR 0034) ─────────────────────────────────────────────────────
@@ -209,9 +215,14 @@ chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "refuse ro-o|3" "U1: another project's rollout awaiting sign-off refuses"
 has "$err" "awaiting sign-off since 2026-09-30T10:00+00:00" "U1: stderr names the sign-off pause"
 has "$err" "[[t-gate]]" "U1: stderr names the waiting task"
-has "$err" "/thread:execute [[ro-o]]" "U1: stderr names the sign-off path's execute"
-has "$err" "/thread:repair [[ro-o]]" "U1: stderr names /thread:repair to defer"
-has "$err" "at most one unfinished rollout per repo" "U1: stderr still names the one-per-repo rule"
+has "$err" "runs from $R, which this run would share" "U1: … on this run's checkout (ADR 0064)"
+# U1b: a --tasks run sharing no project keeps the old rule, and its remedy names the sign-off path
+mkt x1.md - open
+chk --repo "$R" --tasks x1 --regenerate
+ok "$out|$rc" "refuse ro-o|3" "U1b: a --tasks run sharing no project still refuses it"
+has "$err" "/thread:execute [[ro-o]]" "U1b: stderr names the sign-off path's execute"
+has "$err" "/thread:repair [[ro-o]]" "U1b: stderr names /thread:repair to defer"
+has "$err" "at most one unfinished rollout per repo and project" "U1b: stderr names the one-per-repo-and-project rule"
 
 scen u2
 mkro ro-p.md "$R" "$DEMO" "$PAUSED" "$SIGNOFF"
@@ -985,6 +996,197 @@ ok "$out|$rc" "none|0" "X15: a resuming chain on the outer checkout never waits 
 mkro p.md "$M/sub" "$OTHER"
 chs --resume ca --surface "repo:$M"
 ok "$out|$rc" "refuse p|3" "X15 control: … one rooted inside the outer checkout itself holds it"
+
+# ── P1-P13: two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4) ──────────────────────
+# $R in place (origin demo/repo), with $R-rollout (D), $R-other-rollout and $R-third-rollout, all clones of it.
+OP='projects: ["[[Other]]"]'; TP='projects: ["[[Third]]"]'
+pclones() { local x; for x in rollout other-rollout third-rollout "$@"; do mkrepo "$R-$x" https://github.com/demo/repo.git; done; }
+clo() { python3 "$CHECK" clone --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+brs() { python3 "$CHECK" branches --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+OWN="is another project's unfinished rollout on this repo, in its own clone"
+scen p2; pclones
+mkro ro-o.md "$R-other-rollout" "$OP" "$PAUSED"
+chk --repo "$R-rollout" --project Demo --regenerate
+ok "$out|$rc" "none|0" "P2: another project's rollout in its own clone, this run at D: none"
+has "$err" "WARN: [[ro-o]] (Other; paused 2026-09-30T10:00+00:00) $OWN $R-other-rollout: both run, and Integration takes one merge at a time per origin (ADR 0064)" "P2: … with the WARN"
+mkro ro-o.md "$R" "$OP" "$PAUSED"
+chk --repo "$R-rollout" --project Demo
+ok "$out|$rc" "refuse ro-o|3" "P2b: a legacy rollout in place at D's in-place twin refuses"
+has "$err" "[[ro-o]] (Other; paused 2026-09-30T10:00+00:00) runs from $R, which this run would share (its clone, or that clone's in-place twin)" "P2b: … naming the twin"
+mkro ro-o.md "$R-rollout" "$OP" "$PAUSED"
+chk --repo "$R-rollout" --project Demo
+ok "$out|$rc" "refuse ro-o|3" "P2c: another project's rollout in the same clone refuses"
+chk --repo "$R" --project Demo
+ok "$out|$rc" "none|0" "P2d: estate-scan's stand-in --repo <T>, another project's rollout in D: none"
+has "$err" "WARN: [[ro-o]] (Other; paused 2026-09-30T10:00+00:00) $OWN $R-rollout" "P2d: … with the WARN"
+mkro ro-o.md "$R-other-rollout" "$OP" "$PAUSED"
+mkro ro-d.md "$R-rollout" "$DEMO" "$PAUSED"; mkt t1.md ro-d in_progress 'owner: execute-old'
+chk --repo "$R-rollout" --project Demo --regenerate
+ok "$out|$rc" "supersede ro-d|0" "P3: --regenerate supersedes this project's paused rollout beside another project's"
+has "$err" "WARN: [[ro-o]] (Other; paused 2026-09-30T10:00+00:00) $OWN" "P3: … the other one WARNed"
+rm "$T/t1.md" "$T/ro-d.md"
+P4P=demo-rollout-2026-09-23; P4N=other-rollout-2026-10-01
+mkro $P4P.md "$R-rollout" "$DEMO" "$PAUSED"
+mkro $P4N.md "$R-other-rollout" "$OP" "supersedes: \"[[$P4P]]\""
+chk --repo "$R-rollout" --project Demo --regenerate
+ok "$out|$rc" "refuse $P4P,$P4N|3" "P4: a supersedes: link across projects still counts (C20), in separate clones too"
+has "$err" "WARN: [[ro-o]] (Other; paused 2026-09-30T10:00+00:00) $OWN" "P4: … while ro-o, in no link, is dropped with the WARN"
+has "$err" "/thread:schedule Other --regenerate" "P4: … and names N's project's schedule run"
+rm "$T/$P4P.md" "$T/$P4N.md"
+mkt x1.md - open 'projects: ["[[Demo]]"]'; mkt x2.md - open 'projects: ["[[AI]]"]'
+chk --repo "$R-rollout" --tasks x1,x2 --regenerate
+ok "$out|$rc" "refuse ro-o|3" "P5: --tasks sharing no project keeps the old one-per-repo refusal (C14)"
+has "$err" "WARN: the named tasks share no project" "P5: … and WARNs"
+
+# the clone verb (D2)
+scen p6
+clo --repo "$R" --project Demo
+ok "$out|$rc" "default|0" "P6: nothing unfinished: the default clone"
+pclones; mkro ro-o.md "$R-rollout" "$OP" "$PAUSED"
+clo --repo "$R" --project Demo
+ok "$out|$rc" "project demo|0" "P7: another project in D, P absent (it need not exist): project demo"
+clo --repo "$R" --project "[[Demo]]"
+ok "$out|$rc" "project demo|0" "P7: … a wikilink names the same project"
+scen p8; pclones demo-rollout x-rollout
+mkro ro-d.md "$R-demo-rollout" "$DEMO" "$PAUSED"
+clo --repo "$R" --project Demo
+ok "$out|$rc" "project demo|0" "P8: reuse by recorded root: this project's rollout in <T>-demo-rollout"
+mkro ro-d.md "$R-x-rollout" "$DEMO" "$PAUSED"
+clo --repo "$R" --project Demo
+ok "$out|$rc" "project x|0" "P8: … in <T>-x-rollout (a renamed project keeps its clone)"
+mkro ro-d.md "$R-rollout" "$DEMO" "$PAUSED"
+clo --repo "$R" --project Demo
+ok "$out|$rc" "default|0" "P8: … in D: default"
+mkro ro-o.md "$R-rollout" "$OP" "$PAUSED"
+clo --repo "$R" --project Demo
+ok "$out|$rc" "project demo|0" "P8b: this project's and another's both in D: its own clone"
+has "$err" "WARN: this project's [[ro-d]] runs from $R-rollout, which another project's [[ro-o]] also holds" "P8b: … with the WARN"
+rm "$T/ro-d.md"; mkro ro-t.md "$R-demo-rollout" "$TP" "$PAUSED"
+clo --repo "$R" --project Demo
+ok "$out|$rc" "refuse ro-o,ro-t|3" "P8c: D and P both taken by other projects: refuse"
+has "$err" "[[ro-o]] (Other; paused 2026-09-30T10:00+00:00) runs from $R-rollout: another project's rollout holds that clone" "P8c: … naming each taker"
+has "$err" "[[ro-t]] (Third; paused 2026-09-30T10:00+00:00) runs from $R-demo-rollout" "P8c: … both"
+has "$err" "wait for one of them to finish, or /thread:status then /thread:repair" "P8c: … and the remedy"
+rm "$T/ro-t.md"; mkro ro-o.md "$R" "$OP" "$PAUSED"
+clo --repo "$R" --project Demo
+ok "$out|$rc" "refuse ro-o|3" "P8c: a legacy rollout in place at <T> holds every clone"
+has "$err" "runs from $R: in place, so it holds every clone of this repo" "P8c: … and says so"
+scen p8d; pclones; mkro ro-o.md "$R-rollout" "$OP" "$PAUSED"; mkrepo "$R-demo" https://github.com/demo/repo.git
+clo --repo "$R" --project Demo
+ok "$out|$rc" "refuse ro-o|3" "P8d: <T>-demo a same-origin main checkout: P collides (the probe's exit 3 (a))"
+has "$err" "$R-demo-rollout is not a usable rollout clone: $R-demo is a checkout (origin demo/repo), so $R-demo-rollout is its own rollout clone's name" "P8d: … the probe's collision line, verbatim"
+has "$err" "no clone free" "P8d: … and the remedy"
+scen p8e; pclones lachys-tools-rollout
+mkro ro-o.md "$R-rollout" "$OP" "$PAUSED"
+clo --repo "$R" --project "Lachy's Tools"
+ok "$out|$rc" "project lachys-tools|0" "P8e: --project \"Lachy's Tools\" → lachys-tools"
+mkro ro-l.md "$R-lachys-tools-rollout" 'projects: ["[[Lachy’s Tools]]"]' "$PAUSED"
+clo --repo "$R" --project lachys-tools
+ok "$out|$rc" "project lachys-tools|0" "P8e: … and the reverse: a rollout of [[Lachy’s Tools]] is mine for lachys-tools, reused"
+ok "$(python3 - "$CHECK" "$root/skills/_shared/scripts/estate-dispatch.py" <<'PYP'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+def load(n, p):
+    spec = importlib.util.spec_from_file_location(n, p); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+u, d = load("ur", sys.argv[1]), load("ed", sys.argv[2])
+names = ["Lachy's Tools", "Lachy’s Tools", "Thread Skill", "Café Déjà", "  --x--  ", "AI", "obsidian-vault", "Ünïcode Ñame", ""]
+bad = [n for n in names if u.project_slug(n) != d.project_slug(n) or u.project_slug(u.project_slug(n)) != u.project_slug(n)]
+print("parity" if not bad else "differs: %r" % bad)
+PYP
+)" parity "P8e: project_slug matches estate-dispatch.project_slug, and is idempotent"
+scen p8f; pclones
+clo --repo "$R-rollout" --project Demo
+ok "$out|$rc" "default|0" "P8f: Local: itself a rollout clone → default"
+has "$err" "is itself a rollout clone" "P8f: … with a WARN"
+scen p8g; pclones demo-rollout
+mkro ro-d1.md "$R-rollout" "$DEMO" "$PAUSED"; mkro ro-d2.md "$R-demo-rollout" "$DEMO" "$PAUSED"
+clo --repo "$R" --project Demo
+ok "$out|$rc" "refuse ro-d1,ro-d2|3" "P8g: this project's rollouts in two clones: refuse"
+has "$err" "run from 2 clones" "P8g: … naming the two clones"
+scen p8h; pclones; mkro ro-o.md "$R-rollout" "$OP" "$PAUSED"; mkrepo "$R-demo" https://github.com/o/elsewhere.git
+clo --repo "$R" --project Demo
+ok "$out|$rc" "refuse ro-o|3" "P8h: <T>-demo an unrelated repo: P collides (its own clone's name)"
+has "$err" "$R-demo is a checkout (origin o/elsewhere)" "P8h: … naming its origin"
+ok "$([ -e "$R-demo-rollout" ] && echo made || echo absent)" absent "P8h: … and nothing is created"
+scen p8i; pclones
+clo --repo "$R" --project "Thread Rollout"
+ok "$out|$rc" "default|0" "P8i control: slug thread-rollout with D free → default"
+mkro ro-o.md "$R-rollout" "$OP" "$PAUSED"
+clo --repo "$R" --project "Thread Rollout"
+ok "$out|$rc" "refuse ro-o|3" "P8i: slug thread-rollout (ends in -rollout) has no clone of its own: refuse"
+has "$err" "WARN: project slug thread-rollout takes no clone of its own" "P8i: … with the WARN"
+scen p8j; pclones; mkro ro-o.md "$R-rollout" "$OP" "$PAUSED"; mkrepo "$R-x" https://github.com/demo/repo.git
+clo --repo "$R" --project "X Demo"
+ok "$out|$rc" "refuse ro-o|3" "P8j: a same-origin <T>-x intercepts the walk from <T>-x-demo-rollout: P collides (b)"
+has "$err" "it would read as $R-x's rollout clone, not $R's" "P8j: … naming <T>-x"
+
+# check --resume, parallel: another project's rollout in the same clone (D4)
+scen p9; pclones
+EV0=$THREAD_EVENTS_DIR; export THREAD_EVENTS_DIR="$S/events"
+mkro ro-d.md "$R-rollout" "$DEMO"; mkt d1.md ro-d open
+mkro ro-o.md "$R-rollout" "$OP"; mkt o1.md ro-o open 'owner: lead-o'
+chk --resume ro-d --repo "$R-rollout"
+ok "$out|$rc" "refuse ro-o|3" "P9: a fresh rollout resuming in a clone another project's has run in waits"
+has "$err" "[[ro-o]] (Other; has run: " "P9: … naming the holder"
+has "$err" "holds \`repo:$R-rollout\`, its Project root, which this rollout writes as \`repo:$R-rollout\` (ADR 0064): [[ro-d]] waits its turn: two projects' rollouts never share a clone: /thread:schedule Demo --regenerate moves it to its own clone" "P9: … and the line"
+chk --resume ro-o --repo "$R-rollout"
+ok "$out|$rc" "none|0" "P9: … the one that has run never waits on a fresh one"
+mkt d1.md ro-d open 'owner: lead-d'
+em ro-o lead-entry '{"by":"heartbeat","session":"S"}' 2026-10-30T10:00:00Z
+em ro-d lead-entry '{"by":"heartbeat","session":"S"}' 2026-10-30T11:00:00Z
+chk --resume ro-d --repo "$R-rollout"
+ok "$out|$rc" "refuse ro-o|3" "P9: both have run: the later start waits"
+chk --resume ro-o --repo "$R-rollout"
+ok "$out|$rc" "none|0" "P9: … the earlier start does not"
+rm -rf "$S/events"
+chk --resume ro-o --repo "$R-rollout"
+ok "$out|$rc" "refuse ro-d|3" "P9: no records: slug order (ro-d < ro-o) holds"
+chk --resume ro-d --repo "$R-rollout"
+ok "$out|$rc" "none|0" "P9: … and ro-d resumes"
+mkro ro-o.md "$R-other-rollout" "$OP"
+chk --resume ro-d --repo "$R-rollout"
+ok "$out|$rc" "none|0" "P10: separate clones: ro-d resumes"
+chk --resume ro-o --repo "$R-other-rollout"
+ok "$out|$rc" "none|0" "P10: … and so does ro-o"
+export THREAD_EVENTS_DIR="$EV0"
+
+# branches (D10)
+scen p11; pclones; mkrepo "$S/other" https://github.com/demo/other.git
+mkro ro-o.md "$R-other-rollout" "$OP"; mkt other-p1-fix.md ro-o open; mkt other-p2-x.md ro-o done
+mkro ro-d.md "$R-rollout" "$DEMO" "$PAUSED"; mkt demo-p4-z.md ro-d open
+mkro ro-e.md "$S/other" "$OP"; mkt other-p5-w.md ro-e open
+brs --repo "$R-rollout" --tasks demo-p1-fix,demo-p2-x,demo-p4-z,demo-p5-w
+ok "$out|$rc" "collide demo-p1-fix audit-fix/p1-fix [[ro-o]] [[other-p1-fix]]|0" "P11: a collision with another rollout's unlanded task; none for a done one, the same slug (carried) or another origin"
+brs --repo "$R-rollout" --tasks demo-p6-v,ai-p6-v,demo-p7
+ok "$out|$rc" "collide ai-p6-v audit-fix/p6-v - [[demo-p6-v]]|0" "P11: two named tasks on one branch: the later collides"
+brs --repo "$R-rollout" --tasks demo-p7
+ok "$out|$rc" "none|0" "P11: … none otherwise"
+ok "$(python3 - "$CHECK" "$root/skills/execute/scripts/lead-integrate.py" <<'PYP'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+def load(n, p):
+    spec = importlib.util.spec_from_file_location(n, p); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+u, li = load("ur", sys.argv[1]), load("li", sys.argv[2])
+slugs = ["thread-skill-p33-4-x", "demo", "a-b", "-lead", "trail-", "x--y"]
+bad = [x for x in slugs if "audit-fix/" + u.short_alias(x) != li.branch_of(x)]
+print("parity" if not bad else "differs: %r" % bad)
+PYP
+)" parity "P11: short_alias matches lead-integrate.branch_of"
+
+# hold's why (P12) and usage (P13)
+scen p12
+mkro p.md "$R" "$OP" "$PAUSED" 'paused_for: sign-off'; mkt pt1.md p gate-pending
+python3 "$CHECK" hold --tasks-dir "$T" --rollout p > "$S.out" 2> "$S.err"
+has "$(cat "$S.out")" "and is still this project's one unfinished parallel rollout on this repo" "P12: hold's why names this project's one unfinished parallel rollout on this repo"
+scen p13; mkdir -p "$S/plain"
+ue() { python3 "$CHECK" "$@" > "$S.out" 2> "$S.err"; ok "$?|$(cat "$S.out")" "2|" "P13: $label exits 2"; }
+label="clone with no --project" ue clone --tasks-dir "$T" --repo "$R"
+label="clone --repo missing" ue clone --tasks-dir "$T" --repo "$S/nowhere" --project Demo
+label="clone --repo outside git" ue clone --tasks-dir "$T" --repo "$S/plain" --project Demo
+label="clone with a missing tasks dir" ue clone --tasks-dir "$S/none" --repo "$R" --project Demo
+label="branches with no --tasks" ue branches --tasks-dir "$T" --repo "$R"
+label="branches with an empty --tasks" ue branches --tasks-dir "$T" --repo "$R" --tasks ,
+label="branches --repo missing" ue branches --tasks-dir "$T" --repo "$S/nowhere" --tasks a
 
 # ── K1-K4: carry ──────────────────────────────────────────────────────────────────────────────────────
 scen k
