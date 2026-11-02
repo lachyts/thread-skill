@@ -140,8 +140,8 @@ classified (...)", with findings none of which original or regression placed (no
 cite), since a 0.0 there would read clean and never breach. A null never breaches. The denominator is every
 finding, unclassified ones included (the rest of findings once original and regression are taken), so sparse
 `path:line` cites understate it; `unclassified` reports the coverage, and more than half of the findings
-unclassified is flagged "review churn: low coverage" (review-ledger.py's 40% THRESHOLD, the built-in bound, is
-measured over classified findings only). The breach is decided from the integer sums, Σregression x 100 >
+unclassified is flagged "review churn: low coverage" (this score's own bound: the unclassified sit in the denominator
+as non-regressions, so a sparse split reads low). The breach is decided from the integer sums, Σregression x 100 >
 review_churn_pct x Σfindings, never from the rounded value (11 of 20 is at a 55 bound, not over it).
 - Engine rounds: the record's review-verdict lines (reconcile-rollout.py, one per judged master-review round, split
   by review-split.py). The lines read (ts <= --until) are deduped ONCE by run_record.verdict_key, the first line per
@@ -1539,8 +1539,8 @@ class Score:
             value = round(regression / findings, 4)
             breached = _churn_over(regression, findings, bound_pct)
             if tot["unclassified"] * 2 > findings:
-                # review-ledger.py's 40% THRESHOLD is measured over classified findings only; here the unclassified
-                # ones sit in the denominator as non-regressions, so a sparse split understates the churn
+                # more than half unclassified: they sit in the denominator as non-regressions, so a sparse split
+                # understates the churn
                 self.flag("review churn: low coverage: %d of %d finding(s) unclassified (no head, no tree or no "
                           "path:line cite): the churn counts them as non-regressions, so it may read low"
                           % (tot["unclassified"], findings))
