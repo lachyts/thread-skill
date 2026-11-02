@@ -305,15 +305,17 @@ in a clone-rooted rollout's in-place checkout as `ahead` or `diverged`, and that
 when it touches a cited path. In a rollout rooted in place before ADR 0042, one committed in another clone
 of the set first surfaces when the next entry halts on it.
 
-**Unfinished rollout.** A repo holds at most one unfinished parallel rollout: one directly in `Work/Tasks/`,
-neither `done` nor `dropped`, with a task not yet merged; and none on a place a live serial chain writes
+**Unfinished rollout.** A repo holds at most one unfinished parallel rollout per project (ADR 0064): one directly in
+`Work/Tasks/`, neither `done` nor `dropped`, with a task not yet merged, each project's run from its own rollout clone
+(schedule § 0's `clone` names it); another project's in its own clone is a `WARN`, both run, and Integration takes one
+merge at a time per origin; and none on a place a live serial chain writes
 (ADR 0040; a stuck chain holds only its unlanded rows' surfaces, ADR 0060). Surfaces compare `repo:<realpath>` literally, so a rollout rooted in its clone and a chain on
 the in-place checkout coexist as peers (ADR 0042); the one exception, a separate checkout nested inside
 another by path, never meets the outer one either (p33-3). schedule § 0 runs
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check` against the resolved repo path last,
 after the pushed-base check, and its one stdout line decides: see schedule § 0 for each outcome (`none`,
-`supersede`, `file`, `interrupted`, `refuse`) and its remedy. A running or never-superseded rollout on the
-repo is a stop, never a second rollout beside it. Serial chains are limited by surfaces instead: schedule
+`supersede`, `file`, `interrupted`, `refuse`) and its remedy. A running or never-superseded rollout of this
+project on the repo, or another project's on this run's own clone, is a stop, never a second rollout beside it. Serial chains are limited by surfaces instead: schedule
 § Serial path runs the same script with `--shape serial`, once per chain. Beside it sits orient § 6's
 *Uncommitted grill docs* hold:
 `CONTEXT.md` or `docs/adr/` changes a grill left uncommitted in the target repo hold scheduling there too,

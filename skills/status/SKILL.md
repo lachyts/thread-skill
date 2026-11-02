@@ -906,6 +906,7 @@ reads beside it:
 | `away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac` | `waiting away-cap` |
 | `last start: held until the Morning at <trickle.morning>` | `waiting last-start` |
 | `held until <pr> merges` | `waiting pr-hold` |
+| `origin lane: waiting on <owner/name> behind [[<rollout>]]` (another project's Integration on the origin, ADR 0064) | `moving`, judged by silence: its task awaits Integration, lane work |
 | `approved queue waits: <onMerge.why>` | `waiting approved-queue` |
 | `gated: awaiting merge approval for [[slug]] (PR #N)`, `review required: approve PR #N (<url>)` (*Merge hold*'s `<hold reason>`) | `waiting merge-hold`, judged by silence |
 | `room stop: stopping calls at a step boundary`, `room stop: nothing mid-step, awaiting the Stage resume` | `waiting room-stop` |

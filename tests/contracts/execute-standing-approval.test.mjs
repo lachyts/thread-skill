@@ -204,7 +204,7 @@ function checkStanding(f) {
   // one-unfinished: a sign-off pause is still the repo's one unfinished rollout, and schedule and status name the path.
   if (!sch0.includes('A rollout awaiting sign-off (`paused_for: sign-off`') ||
     !sch0.includes('sign off, then `/thread:execute`, or `/thread:repair` to defer them') ||
-    !collapse(f.status).includes('With `pausedFor: sign-off` → "sign off each waiting gate (or /thread:repair to defer), then /thread:execute [[<rollout>]]; until then it is this repo\'s one unfinished rollout"')) {
+    !collapse(f.status).includes('With `pausedFor: sign-off` → "sign off each waiting gate (or /thread:repair to defer), then /thread:execute [[<rollout>]]; until then it is this project\'s one unfinished rollout on this repo"')) {
     fails.push('one-unfinished')
   }
 

@@ -67,7 +67,7 @@ names the root to re-run from. They are:
 - `reconcile-rollout.py`, every verb but `status`, `fold-journals` and `moving`: it asks about the note `--rollout` (carry:
   `--from`) names, which `lane-hold` and `lane-ack` always take, and the rollout each `--tasks` slug's note (and, for
   `reconcile`, each result row's) names in its `rollout:`, so a task-keyed verb with `--rollout` left off (`reconcile`,
-  `hand-back`, `mark-started`, `mark-integrating`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`,
+  `hand-back`, `mark-started`, `mark-integrating`, `origin-wait`, `mark-done`, `log-integration`, `bind-run`, `free-lane`, `hold`,
   `defer`, `approve-gates`) is guarded too;
 - `git-env-canary.py`, `step-boundary.py begin` and `end`, `leg.py` but `status`, `close-score.py`,
   `lead-integrate.py prepare` and `set-aside`, and `merge-task.sh` through `guard-pr`.
@@ -141,4 +141,11 @@ line it parses are a cross-version contract (hooks/rollout-stop-driver.py). The 
 `retire`. The standing approval's month line (ADR 0034's 2026-10-27 amendment) is cross-rollout state too: its
 `signed under the standing approval:` lines in each rollout note's `## Needs-you log` and its machine-wide
 `standing-spend.lock` keep their form across versions. A snapshot older than that amendment writes no such line and
-takes no lock, so its signings stay outside the month sum until its rollout moves or retires.
+takes no lock, so its signings stay outside the month sum until its rollout moves or retires. The origin lane
+(ADR 0064) is cross-rollout state as well: `mark-integrating` and `origin-wait` read other rollouts' notes, leases and
+Run records, and the machine-wide `origin-lane.lock` and `origin-lane.json` (its waiting list, `version: 1`, read as the
+Trickle claims file is) beside the note locks keep their form across versions. A rollout on a snapshot older than that
+change runs its own `mark-integrating`, which has no origin lane: it never checks, waits or writes an entry. From p28-4
+on its engine writes a lease and `lane-taken`, so while it integrates it reads as a holder to a newer rollout, which
+waits; it never waits for the newer one, so the two can integrate at once, and merge-task's base pin keeps every merge
+correct (exit 3 re-integrates the second). An engine older than leases leaves lease state `none` and never holds.

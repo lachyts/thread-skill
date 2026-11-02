@@ -418,9 +418,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Rollout** — a backlog of related tasks landed as one coordinated effort,
   described by one always-dated Obsidian note
   (`<slug>-rollout-<YYYY-MM-DD>`) whose **Shape** is parallel or serial. At
-  most one parallel rollout is **unfinished** per repo, and none on a place a
-  live serial chain writes; new parallel-shaped work supersedes it rather than
-  running beside it (schedule § 0, ADR 0027, ADR 0030). Serial rollouts are
+  most one parallel rollout is **unfinished** per repo and project, each
+  project's in its own **Rollout clone** (ADR 0064), and none on a place a
+  live serial chain writes; new parallel-shaped work of the same project
+  supersedes it rather than running beside it (schedule § 0, ADR 0027, ADR
+  0030). Serial rollouts are
   limited by **Surface**s, not by repo (ADR 0040): one chain per note, refused
   while a live chain shares a surface. _Avoid_: batch, run, campaign.
 - **Shape** — whether a rollout runs in parallel or in serial; the one word
@@ -511,7 +513,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   this way. _Avoid_: active rollout.
 - **Unfinished rollout** — a live rollout that is neither `done` nor `dropped`
   and still has a task not merged (or no task yet): the one parallel rollout a
-  repo may hold at a time, which schedule § 0's unfinished-rollout check
+  repo may hold at a time for each project, each project's in its own
+  **Rollout clone** (ADR 0064), which schedule § 0's unfinished-rollout check
   enforces. A serial rollout is unfinished the same way, and both shapes meet
   in the same check: a parallel run on a place an unfinished serial chain
   writes is refused, and so is a serial chain whose **Surface** overlaps a live
@@ -522,8 +525,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   every unlanded row set aside or held behind one) holds only its unlanded
   rows' surfaces, and releases the rest, its done rows' included. A parallel
   rollout awaiting sign-off, or halted with nothing able to start, holds no
-  Project root against serial chains, though it is still its repo's one
-  unfinished parallel rollout. Each reclaims its whole claim on resume, and
+  Project root against serial chains, though it is still its project's one
+  unfinished parallel rollout on the repo. Each reclaims its whole claim on resume, and
   waits its turn for a place another rollout took meanwhile: whoever released
   a place yields it. It is narrower than live: a superseded note stamped
   done but not yet moved is live but not unfinished, and so is a rollout whose
@@ -630,8 +633,20 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
   to "the lane". A **Git-env hold** that is not a bare checkout, an
   undecided RACE and a **Lane hold** hold the lane only (`next`'s `laneHold`,
-  ADR 0046, ADR 0048): nothing integrates or merges while task calls go on. Not a **Lane** (rollout vs session). _Avoid_: merge queue
+  ADR 0046, ADR 0048): nothing integrates or merges while task calls go on. Across rollouts it is passed through
+  the **Origin lane**. Not a **Lane** (rollout vs session). _Avoid_: merge queue
   (Integration's gloss: the whole step, never the lane alone).
+- **Origin lane** — one Integration at a time per GitHub origin across rollouts
+  (ADR 0064): two projects' parallel rollouts on one repo, each in its own
+  **Rollout clone**, take turns. `mark-integrating` takes a rollout's
+  **Integration lane** only while no other rollout on the origin holds its own
+  (a fresh lease, its Run-record lane open on a task that holds the lane, no
+  merge hold, no open halt, no `paused:` stamp), and passes it in turn to the
+  rollout that has waited longest (its waiting list, `origin-lane.json`); a
+  refused lead yields its own lane (`lane-freed release=origin`), and its
+  **origin wait** (`origin-wait`, read-only) re-checks until its turn. A merge
+  hold frees it; merge-task's base pin keeps every merge correct where two
+  rollouts overlap. _Avoid_: merge train (ADR 0044's, never built).
 - **Active Integration time** — an Integration's wall time less the **Stops**
   inside it that stop its calls (all but a halt, which carries them on): an
   `## Integration log` line's `active=`, beside its wall `duration=`. A Mac
@@ -784,7 +799,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   root (the session's, which may differ), engine version.
 - **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, beside
   its toplevel and never nested inside it: the Project root of every parallel
-  rollout scheduled after P26 (ADR 0042), so peer sessions' commits to the
+  rollout scheduled after P26 (ADR 0042); a second project's parallel rollout on
+  the same repo has its own, `<toplevel>-<project-slug>-rollout` (ADR 0064: one
+  clone per (repo, project), named by `unfinished-rollout.py clone`), so peer sessions' commits to the
   **In-place checkout** never reach a rollout's windows. Schedule § 0 makes it
   (`self-rollout-check.sh --ensure`, after Lachy's yes), execute § 2.7 and
   merge-task keep it current, and only merge-task moves its default branch:
