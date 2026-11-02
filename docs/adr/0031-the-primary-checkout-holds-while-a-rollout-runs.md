@@ -5,6 +5,7 @@ Status: accepted (amends ADR 0030's migration consequence; decided with Lachy in
 `/thread:orient Thread Skill` reshuffle, after two clean-room review rounds of PR #72)
 Superseded in part by ADR 0043 (2026-10-21): the hold covers only a running rollout whose note names no
 Engine snapshot.
+Amended by ADR 0066 (2026-11-02): the Primary refresh moves the checkout whenever this hold is clear.
 
 ## Context
 
