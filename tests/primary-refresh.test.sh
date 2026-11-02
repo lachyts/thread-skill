@@ -105,8 +105,10 @@ rm -f "$tmp/primary/untouched.txt"
 echo local > "$tmp/primary/b.txt"; g -C "$tmp/primary" add b.txt; g -C "$tmp/primary" commit -qm local
 has "$(run)" "primary: ahead 1: left to its landing route" "R4: a primary ahead of origin is left to its landing route"
 land a.txt four
+echo "[[r-rollout]] running on it" > "$HOLD_FILE"
 out=$(run --now 2026-11-01T10:00:00+11:00)
-has "$out" "diverged (ahead 1, behind 1)" "R4: a diverged primary is never integrated"
+has "$out" "diverged (ahead 1, behind 1)" "R4: a diverged primary is never integrated, and reads diverged even while held"
+rm -f "$HOLD_FILE"
 ok "$(git -C "$tmp/primary" log -1 --format=%s)" "local" "R4: … its HEAD stays its own"
 land a.txt five   # N1: origin moves on during the spell
 run --now 2026-11-01T20:00:00+11:00 >/dev/null
@@ -201,7 +203,8 @@ ok "$(shasum < "$tmp/bin/primary-refresh.py")" "$before" "S4: … and the copy, 
 mkdir -p "$tmp/cache/9.9.9"; cp "$pr" "$tmp/cache/9.9.9/primary-refresh.py"
 python3 "$tmp/cache/9.9.9/primary-refresh.py" run --primary "$tmp/primary" >/dev/null 2>&1
 ok "$(cmp -s "$pr" "$tmp/cache/9.9.9/primary-refresh.py" && echo same)" same "S5: a copy outside git with no install marker (a version cache) is never rewritten"
-cp "$pr" "$tmp/src-before"; python3 "$pr" run --primary "$tmp/primary" >/dev/null 2>&1
-ok "$(cmp -s "$pr" "$tmp/src-before" && echo same)" same "S5: nor is the script in this tree"
+g init -q "$tmp/devtree"; mkdir -p "$tmp/devtree/s"; cp "$pr" "$tmp/devtree/s/primary-refresh.py"
+python3 "$tmp/devtree/s/primary-refresh.py" run --primary "$tmp/primary" >/dev/null 2>&1
+ok "$(cmp -s "$pr" "$tmp/devtree/s/primary-refresh.py" && echo same)" same "S5: nor is a copy inside a git work tree (a checkout's own script)"
 
 exit $fail

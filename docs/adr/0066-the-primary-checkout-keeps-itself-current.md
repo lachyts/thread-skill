@@ -16,7 +16,7 @@ But nothing moves it. `self-rollout-check.sh --refresh-in-place` runs only after
 1. **The Primary refresh.** A launchd job, `com.thread.primary-refresh`, runs `primary-refresh.py run` every 5 minutes. Each pass fast-forwards the Primary checkout to origin's default branch whenever ADR 0031's hold is clear. The hold is read through the primary's own `primary-hold.sh`, because that is the rule the rollouts reading the primary run by. A missing hold script, an error or a timeout holds. So the circle breaks at the first pass with no unsnapshotted rollout running. A primary that old counts every rollout it scheduled, and a stuck one (on 2026-11-02, `mac-data-mcp-rollout-2026-10-29`) holds until it is resolved or dropped; a hold standing a day reaches Lachy with its holders named (decision 2). Once the primary is current, new rollouts carry Engine snapshots and no longer hold it.
 
 2. **Fast-forward only, never in the way.**
-   - **What skips a pass:** an `index.lock`, a rebase or merge in progress, or a branch other than the default.
+   - **What stops a move:** the pass always fetches and reads current, ahead or diverged first; a checkout behind origin is then left as it is while it has an `index.lock`, a rebase or merge in progress, or a branch other than the default.
    - **The move:** `git merge --ff-only --no-autostash`, so git itself refuses to overwrite an uncommitted edit.
    - **Ahead of origin:** left to its landing route. A close's landing PR merges with `--merge`, so its commits become ancestors of origin and a later pass moves.
    - **Diverged:** never integrated (ADR 0042's rule).
@@ -38,7 +38,7 @@ But nothing moves it. `self-rollout-check.sh --refresh-in-place` runs only after
 
 ## Consequences
 
-- The primary is current within about 5 minutes of the last unsnapshotted rollout stopping. While one runs, the job logs `held: [[…]] running on it` each pass and moves nothing; a hold standing a day reaches Lachy once, naming its holders. The fast-forward has no timeout, since a merge killed mid-checkout would leave the live-loaded tree half updated.
+- The primary is current within about 5 minutes of the last unsnapshotted rollout stopping. While one runs and the primary is behind origin, the job logs `held: [[…]] running on it` each pass and moves nothing (at origin's tip it logs `current`); a hold standing a day reaches Lachy once, naming its holders. The fast-forward has no timeout, since a merge killed mid-checkout would leave the live-loaded tree half updated.
 - `~/Library/Logs/thread-primary-refresh.log` gains a line per checkout per pass. The state file `~/.local/state/thread/primary-refresh.json` holds only the stuck entries.
 - **Installing it is a one-time step** (README § The convergence engine, beside the Watchdog). Run `primary-refresh.py install --primary ~/repos/tools/thread-skill --also ~/.agents` from any checkout that holds the script, then run the `launchctl bootstrap` line it prints.
 - **Limits.**

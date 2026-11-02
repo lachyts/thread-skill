@@ -21,17 +21,19 @@ each, `<ISO time> primary-refresh <dir>: <outcome>`:
   2. `git fetch --quiet origin` (60 s, GIT_TERMINAL_PROMPT=0), first: it only moves origin's refs, so it is safe under
      a hold and lets every later step know whether the checkout is behind. A failure is `fetch failed: <why>`.
   3. HEAD at origin/<default> (origin/HEAD's target, else master, else main): `current`, whatever else is going on.
-     Origin an ancestor of HEAD: `ahead <n>: left to its landing route`.
-  4. Behind or diverged, and busy: `.git/index.lock`, a rebase or a merge in progress, or HEAD not on the default
+     Origin an ancestor of HEAD: `ahead <n>: left to its landing route`. Neither an ancestor of the other: `diverged
+     (ahead <a>, behind <b>)`: never integrated (ADR 0042's rule); a close's landing PR merges with --merge, so its
+     commits become ancestors of origin and the next pass moves. Read before busy and the hold, so a diverged
+     checkout always reads diverged.
+  4. Behind, and busy: `.git/index.lock`, a rebase or a merge in progress, or HEAD not on the default
      branch prints `busy: <why>` and moves nothing.
-  5. Behind or diverged, the primary only, and held: `bash <primary>/skills/_shared/scripts/primary-hold.sh
+  5. Behind, the primary only, and held: `bash <primary>/skills/_shared/scripts/primary-hold.sh
      <primary>`, the primary's own copy, since it is the rule the rollouts reading the primary run by. Any output is
      `held: <it>`. A missing script, a non-zero exit or a timeout holds too (fail closed). An `--also` checkout has no
      hold: sessions commit there in place, so a fast-forward is no different from a peer's commit.
-  5a. HEAD an ancestor of origin's tip: `git merge --ff-only --no-autostash origin/<default>`, printing `moved
+  5a. Behind, neither busy nor held: `git merge --ff-only --no-autostash origin/<default>`, printing `moved
      <old12>..<new12> (<n> commits)`, or `refused: <git's reason>` when git will not (an uncommitted edit it would
-     overwrite): retried next pass. Otherwise `diverged (ahead <a>, behind <b>)`: never integrated (ADR 0042's rule);
-     a close's landing PR merges with --merge, so its commits become ancestors of origin and the next pass moves.
+     overwrite): retried next pass.
   6. Notify: a stuck spell is every pass from the first that reads not a primary checkout, busy, held, fetch
      failed, refused or diverged to the next that reads current, moved or ahead. Its clock never restarts within the
      spell, whatever origin does meanwhile and whichever stuck outcome a pass reads. A hold is a meant wait while a
@@ -222,6 +224,10 @@ def refresh(d, is_primary, dry_run):
     behind, ahead = _count(d, f"HEAD..{upstream}"), _count(d, f"{upstream}..HEAD")
     if git(d, "merge-base", "--is-ancestor", tip, head)[0] == 0:
         return f"ahead {ahead}: left to its landing route", False
+    # Diverged before busy and the hold: a diverged checkout is never moved here, so it reads as what it is, and a
+    # notice names the state someone has to fix, never a hold that may clear first.
+    if git(d, "merge-base", "--is-ancestor", head, tip)[0] != 0:
+        return f"diverged (ahead {ahead}, behind {behind}): never integrated here", True
     why = busy(d, branch)
     if why:
         return f"busy: {why}", True
@@ -229,18 +235,16 @@ def refresh(d, is_primary, dry_run):
         h = hold(d)
         if h:
             return f"held: {h}", True
-    if git(d, "merge-base", "--is-ancestor", head, tip)[0] == 0:
-        if dry_run:
-            return f"would move {head[:12]}..{tip[:12]} ({behind} commits)", None
-        # No timeout: a merge killed mid-checkout would leave the live-loaded tree half old, half new.
-        rc, _, err = git(d, "merge", "--ff-only", "--no-autostash", "--quiet", upstream, timeout=None)
-        if rc != 0:
-            reason = " ".join(err.split())[:240] or f"exit {rc}"
-            return f"refused: {reason}", True
-        if is_primary:
-            _self_update_line(d, branch)
-        return f"moved {head[:12]}..{tip[:12]} ({behind} commits)", False
-    return f"diverged (ahead {ahead}, behind {behind}): never integrated here", True
+    if dry_run:
+        return f"would move {head[:12]}..{tip[:12]} ({behind} commits)", None
+    # No timeout: a merge killed mid-checkout would leave the live-loaded tree half old, half new.
+    rc, _, err = git(d, "merge", "--ff-only", "--no-autostash", "--quiet", upstream, timeout=None)
+    if rc != 0:
+        reason = " ".join(err.split())[:240] or f"exit {rc}"
+        return f"refused: {reason}", True
+    if is_primary:
+        _self_update_line(d, branch)
+    return f"moved {head[:12]}..{tip[:12]} ({behind} commits)", False
 
 
 # ---- state and notify ------------------------------------------------------------------------------------
