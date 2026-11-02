@@ -87,12 +87,12 @@ em e3 slot-taken b "{\"settings\":$S}" 2026-10-26T09:02:00Z
 em e3 run-bound b '{"runId":"wf_b1","journalDir":"/j","call":"revise"}' 2026-10-26T09:02:05Z
 em e3 slot-taken c "{\"settings\":$S}" 2026-10-26T09:03:00Z
 em e3 slot-freed c '{"outcome":"ready"}' 2026-10-26T09:04:00Z
-out=$(printf '%s\n' "Login at its 5-hour line; stopping at a step boundary: wf_a1 a (task), wf_b1 b (revise); lane: none" \
+out=$(printf '%s\n' "Login at its week's line; stopping at a step boundary: wf_a1 a (task), wf_b1 b (revise); lane: none" \
   | python3 "$SB" begin --rollout "$V/e3.md"); rc=$?
 ok "$rc" 0 "E3: begin exits 0"
-has "$out" "room stop: Login at its 5-hour line" "E3: begin's line"
+has "$out" "room stop: Login at its week's line" "E3: begin's line"
 ok "$(q e3 '[d for d in L if d["kind"] == "stopped"][0]["calls"]')" '[{"task":"a","runId":"wf_a1","call":"task"},{"task":"b","runId":"wf_b1","call":"revise"}]' "E3: the stop names the two calls in flight, a freed Slot not"
-ok "$(q e3 '[[d["cause"], d["inferred"], "at" in d, d["reason"][:24]] for d in L if d["kind"] == "stopped"]')" '[["usage-limit",false,false,"Login at its 5-hour line"]]' "E3: a live usage-limit stop with its reason"
+ok "$(q e3 '[[d["cause"], d["inferred"], "at" in d, d["reason"][:24]] for d in L if d["kind"] == "stopped"]')" '[["usage-limit",false,false,"Login at its week'\''s line"]]' "E3: a live usage-limit stop with its reason"
 out=$(ent e3 --by stage --cause usage-limit --session B); rc=$?
 ok "$rc" 0 "E3: the resume's record-entry exits 0"
 ok "$out" "e3: lead-entry by=stage stop=usage-limit" "E3: the open stop is the gap stop (--cause and the session change ignored)"
