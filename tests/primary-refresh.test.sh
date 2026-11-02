@@ -2,7 +2,7 @@
 # ADR 0066, executed: skills/_shared/scripts/primary-refresh.py, the Primary refresh. A bare "origin" and clones of
 # it stand for the primary and an --also checkout; the primary's own primary-hold.sh and ntfy-push.py are stubs
 # committed into origin (the hold prints $HOLD_FILE's text, the push appends its message to $NTFY_LOG), so every
-# arm is offline. R1-R9 are the plan's cases; N1-N3 the stuck spell; S1-S4 the self-update; I1 install's job. Every
+# arm is offline. R1-R9 are the plan's cases; N1-N3 the stuck spell; S1-S5 the self-update; I1 install's job. Every
 # run goes through a copy outside any git work tree, as the installed job does, so no arm can rewrite this tree. Hermetic: HOME, XDG_STATE_HOME
 # and every path live under mktemp; commits carry an inline identity; global/system git config is ignored.
 set -uo pipefail
@@ -124,21 +124,20 @@ g -C "$tmp/primary" reset -q --hard origin/master
 run >/dev/null
 ok "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["stuck"]))' "$XDG_STATE_HOME/thread/primary-refresh.json")" 0 \
   "R4: a checkout back to current ends its spell"
-# N3: busy for a day is stuck too; held is a meant wait and ends a spell
+# N3: busy for a day is stuck, and a hold continues a spell: one standing a day is reported too
 touch "$tmp/primary/.git/index.lock"
 run --now 2026-11-04T09:00:00+11:00 >/dev/null
-has "$(run --now 2026-11-05T09:30:00+11:00)" "primary: notified" "N3: a primary busy for a day (a stale index.lock) notifies"
 rm -f "$tmp/primary/.git/index.lock"
-g -C "$tmp/primary" checkout -q side
-run --now 2026-11-06T09:00:00+11:00 >/dev/null
-g -C "$tmp/primary" checkout -q master
 echo "[[y-rollout]] running on it" > "$HOLD_FILE"
-run --now 2026-11-06T12:00:00+11:00 >/dev/null
+has "$(run --now 2026-11-04T21:00:00+11:00)" "primary: held: [[y-rollout]]" "N3: a held pass reads held"
+ok "$(grep -c 'has not caught up' "$NTFY_LOG")" 1 "N3: … and inside 24 h nothing is sent"
+out=$(run --now 2026-11-05T09:30:00+11:00)
+has "$out" "primary: notified" "N3: a spell begun busy and still held a day later notifies (a hold never restarts the clock)"
+has "$(tail -1 "$NTFY_LOG")" "since 2026-11-04T09:00: held: [[y-rollout]] running on it" "N3: … dated from the spell's start, naming the holders"
 rm -f "$HOLD_FILE"
-g -C "$tmp/primary" checkout -q side
-run --now 2026-11-07T10:00:00+11:00 >/dev/null
-ok "$(grep -c 'has not caught up' "$NTFY_LOG")" 2 "N3: a held pass ends the spell, so the next stuck pass starts a new clock"
-g -C "$tmp/primary" checkout -q master
+run >/dev/null
+ok "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["stuck"]))' "$XDG_STATE_HOME/thread/primary-refresh.json")" 0 \
+  "N3: a current pass ends the spell"
 
 # ---- R7: never a linked worktree or a Rollout clone --------------------------------------------------------
 g -C "$tmp/primary" worktree add -q --detach "$tmp/wt" 2>/dev/null
@@ -155,7 +154,7 @@ args=$(python3 -c 'import plistlib,sys; j=plistlib.load(open(sys.argv[1],"rb"));
 ok "$args" "com.thread.primary-refresh 300 True $tmp/bin/primary-refresh.py run --primary $tmp/primary --also $tmp/agents" \
   "R8: the job runs the installed copy every 300 s, with --primary and each --also"
 
-# ---- S1-S4: the installed copy updates itself from the primary's committed script -------------------------------
+# ---- S1-S5: the installed copy updates itself from origin's committed script ------------------------------------
 job() { python3 "$tmp/bin/primary-refresh.py" run --primary "$tmp/primary" "$@" 2>&1; }
 newer() {  # newer <line>: a commit on origin appending <line> to the script
   echo "$1" >> "$tmp/seed/skills/_shared/scripts/primary-refresh.py"
@@ -163,7 +162,7 @@ newer() {  # newer <line>: a commit on origin appending <line> to the script
 }
 newer "# a newer refresh"
 out=$(job)
-has "$out" "now matches the primary's" "S1: a move brings the installed copy up to the primary's committed script"
+has "$out" "now matches origin/master" "S1: a move brings the installed copy up to origin's committed script"
 ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# a newer refresh" "S1: … with its content"
 newer "# moved by another route"
 g -C "$tmp/primary" fetch -q origin && g -C "$tmp/primary" merge -q --ff-only origin/master   # merge-task's refresh, say
@@ -179,14 +178,23 @@ out=$(job)
 has "$out" "does not compile" "S3: a committed script that does not compile is refused"
 ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# moved by another route" "S3: … and the copy is kept"
 git -C "$tmp/seed" revert -q --no-edit HEAD >/dev/null 2>&1; g -C "$tmp/seed" push -q origin master 2>/dev/null
-g -C "$tmp/primary" fetch -q origin
-g -C "$tmp/primary" reset -q --hard HEAD~3   # a primary behind origin holds an older script
-before=$(cat "$tmp/bin/primary-refresh.py" | shasum)
+job >/dev/null
+ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# moved by another route" "S3: a revert back to a script the copy already runs changes nothing"
+# S4: a primary whose HEAD is its own stale origin ref (fetched days ago), and held, never downgrades the copy
+old=$(git -C "$tmp/seed" rev-parse HEAD~4)
+g -C "$tmp/primary" reset -q --hard "$old"; git -C "$tmp/primary" update-ref refs/remotes/origin/master "$old"
+before=$(shasum < "$tmp/bin/primary-refresh.py")
 echo "[[z-rollout]] running on it" > "$HOLD_FILE"
 job >/dev/null
-ok "$(cat "$tmp/bin/primary-refresh.py" | shasum)" "$before" "S4: a primary behind origin never downgrades the copy"
+ok "$(shasum < "$tmp/bin/primary-refresh.py")" "$before" "S4: a held primary at its stale origin ref never downgrades the copy"
 rm -f "$HOLD_FILE"
+has "$(job)" "primary: moved" "S4: once the hold clears the pass fetches and moves"
+ok "$(shasum < "$tmp/bin/primary-refresh.py")" "$before" "S4: … and the copy, already at origin's script, stays"
+# S5: only the copy install placed rewrites itself
+mkdir -p "$tmp/cache/9.9.9"; cp "$pr" "$tmp/cache/9.9.9/primary-refresh.py"
+python3 "$tmp/cache/9.9.9/primary-refresh.py" run --primary "$tmp/primary" >/dev/null 2>&1
+ok "$(cmp -s "$pr" "$tmp/cache/9.9.9/primary-refresh.py" && echo same)" same "S5: a copy outside git with no install marker (a version cache) is never rewritten"
 cp "$pr" "$tmp/src-before"; python3 "$pr" run --primary "$tmp/primary" >/dev/null 2>&1
-ok "$(cmp -s "$pr" "$tmp/src-before" && echo same)" same "S4: a script inside a git work tree is never rewritten"
+ok "$(cmp -s "$pr" "$tmp/src-before" && echo same)" same "S5: nor is the script in this tree"
 
 exit $fail

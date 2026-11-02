@@ -20,11 +20,11 @@ But nothing moves it. `self-rollout-check.sh --refresh-in-place` runs only after
    - **The move:** `git merge --ff-only --no-autostash`, so git itself refuses to overwrite an uncommitted edit.
    - **Ahead of origin:** left to its landing route. A close's landing PR merges with `--merge`, so its commits become ancestors of origin and a later pass moves.
    - **Diverged:** never integrated (ADR 0042's rule).
-   - **Notice:** Lachy is notified once, through `ntfy-push.py`, when a checkout stays stuck for 24 hours. A stuck spell runs from the first pass that cannot bring it current (it is no main checkout, it is busy, its fetch fails, git refuses the fast-forward, or it has diverged) to the next pass that reads current, moved, ahead or held. A held pass is a meant wait (ADR 0031), so it ends a spell. New commits on origin and a failed fetch never restart the clock.
+   - **Notice:** Lachy is notified once, through `ntfy-push.py`, when a checkout stays stuck for 24 hours. A stuck spell runs from the first pass that cannot bring it current (it is no main checkout, it is busy, it is held, its fetch fails, git refuses the fast-forward, or it has diverged) to the next pass that reads current, moved or ahead. A hold is a meant wait while a rollout runs (ADR 0031), but one standing a day is reported with its holders: on 2026-11-02, `mac-data-mcp-rollout-2026-10-29` still read as running with every task merged. New commits on origin and a failed fetch never restart the clock.
 
 3. **The other live-loaded checkouts.** Each `--also` checkout gets the same pass with no hold, because sessions already commit there in place, so a fast-forward is no different from a peer's commit. The job is installed with `--also ~/.agents`.
 
-4. **It runs an installed copy and updates it.** `install` copies the script to `~/.local/state/thread/bin/` and points the job there with `--primary`. The job exists before the primary holds the script, and its path never moves. Whenever the primary's HEAD is its origin's tip as last fetched, however it got there (this job, merge-task's refresh, a pull), the copy is replaced by the primary's committed script, once it compiles. The working tree is never read, so a half-written edit never reaches the job, and a primary behind origin never downgrades it. A script inside any git work tree is source, never the installed copy, and is never rewritten.
+4. **It runs an installed copy and updates it.** `install` copies the script to `~/.local/state/thread/bin/` and points the job there with `--primary`. The job exists before the primary holds the script, and its path never moves. On a pass that has just fetched and found the primary at origin's tip, however it got there (this job, merge-task's refresh, a pull), the copy is replaced by origin's committed script at that tip, once it compiles. The working tree is never read, so a half-written edit never reaches the job, and nothing older than the copy can replace it. Only the copy `install` placed, marked by `primary-refresh.installed` beside it, is ever rewritten: never a checkout's file or the version cache.
 
 5. **`/fresh-review` stays a shared skill.** Lachy, 2026-11-02, "Stay shared, kept current": it stays in `~/.agents`, which Thread Skill depends on, kept current by decision 3.
 
@@ -38,7 +38,7 @@ But nothing moves it. `self-rollout-check.sh --refresh-in-place` runs only after
 
 ## Consequences
 
-- The primary is current within about 5 minutes of the last unsnapshotted rollout stopping. While one runs, the job logs `held: [[…]] running on it` each pass and moves nothing.
+- The primary is current within about 5 minutes of the last unsnapshotted rollout stopping. While one runs, the job logs `held: [[…]] running on it` each pass and moves nothing; a hold standing a day reaches Lachy once, naming its holders. The fast-forward has no timeout, since a merge killed mid-checkout would leave the live-loaded tree half updated.
 - `~/Library/Logs/thread-primary-refresh.log` gains a line per checkout per pass. The state file `~/.local/state/thread/primary-refresh.json` holds only the stuck entries.
 - **Installing it is a one-time step** (README § The convergence engine, beside the Watchdog). Run `primary-refresh.py install --primary ~/repos/tools/thread-skill --also ~/.agents` from any checkout that holds the script, then run the `launchctl bootstrap` line it prints.
 - **Limits.**

@@ -796,8 +796,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (`~/.agents`, which holds /fresh-review) current the same way, with no hold.
   Fast-forward only: a diverged checkout, or one with an uncommitted edit
   origin would overwrite, is left as it is (an edit origin never touches rides
-  along), and Lachy hears only when one stays unable to catch up for a day; a
-  rollout's hold is a meant wait, never stuck (ADR 0066). _Avoid_: auto-update,
+  along), and Lachy hears only when one stays unable to catch up for a day, a
+  rollout's hold included (ADR 0066). _Avoid_: auto-update,
   plugin update (Claude Code's own verb).
 - **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
   default branch, fetched fresh when schedule writes the rollout note (never

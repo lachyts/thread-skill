@@ -30,16 +30,18 @@ each, `<ISO time> primary-refresh <dir>: <outcome>`:
      not (an uncommitted edit it would overwrite): retried next pass. Origin an ancestor of HEAD: `ahead <n>: left to
      its landing route`. Otherwise `diverged (ahead <a>, behind <b>)`: never integrated (ADR 0042's rule); a close's
      landing PR merges with --merge, so its commits become ancestors of origin and the next pass moves.
-  6. Notify: a stuck spell is every pass from the first that reads not a primary checkout, busy, fetch failed,
-     refused or diverged to the next that reads current, moved, ahead or held (a meant wait, ADR 0031). Its clock
-     never restarts within the spell, whatever origin does meanwhile and whichever stuck outcome a pass reads. A
-     spell 24 h old gets one ntfy push (skills/execute/scripts/ntfy-push.py). The spells live in the state file
+  6. Notify: a stuck spell is every pass from the first that reads not a primary checkout, busy, held, fetch
+     failed, refused or diverged to the next that reads current, moved or ahead. Its clock never restarts within the
+     spell, whatever origin does meanwhile and whichever stuck outcome a pass reads. A hold is a meant wait while a
+     rollout runs, but one standing a day (a rollout whose ceremony never ran, a broken hold check) is reported like
+     any other stuck spell. A spell 24 h old gets one ntfy push (skills/execute/scripts/ntfy-push.py). The spells live in the state file
      ${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json (or --state), written atomically, only when it
      changes; a corrupt file reads as empty with one WARN.
-  The self-update: when this file runs from outside every git work tree (install's copy) and the primary's HEAD is its
-  origin/<default> as last fetched, however it got there (this job, merge-task's refresh, a pull), the primary's
-  committed copy of this script replaces this file, once it compiles: never its working tree, and never from a
-  primary behind origin, so a stale primary never downgrades the job. Checked before the hold and after a move.
+  The self-update: on a pass that has just fetched and found the primary at origin's tip (current, or moved there by
+  this pass), origin's committed copy of this script replaces this file once it compiles, so the job catches up
+  however the primary got there and never from anything older. Only the copy install placed (the marker file
+  primary-refresh.installed beside it) is ever rewritten: never a checkout's file, the version cache or any other copy.
+  The fast-forward itself runs with no timeout, since a merge killed mid-checkout would leave a half-updated tree.
   --dry-run fetches, then says what it would do, moves nothing, updates nothing, notifies nothing and writes no
   state. --now pins the clock (tests). Exit 0 whatever it finds; 2 on usage.
 
@@ -53,7 +55,6 @@ never moves, and it updates itself (run's self-update). Then it prints the one s
 Stdlib only, python >= 3.9. Never writes the vault, a rollout note or a Run record.
 """
 import argparse
-import hashlib
 import json
 import os
 import plistlib
@@ -71,6 +72,7 @@ PLUGIN_ROOT = HERE.parent.parent.parent
 HOLD_REL = "skills/_shared/scripts/primary-hold.sh"
 NTFY_REL = "skills/execute/scripts/ntfy-push.py"
 SELF_REL = "skills/_shared/scripts/primary-refresh.py"
+MARKER = "primary-refresh.installed"  # install writes it beside the copy: the one file the self-update may rewrite
 DEFAULT_INTERVAL = 300
 DEFAULT_LABEL = "com.thread.primary-refresh"
 DEFAULT_LOG = "~/Library/Logs/thread-primary-refresh.log"
@@ -197,10 +199,6 @@ def refresh(d, is_primary, dry_run):
     why = checkout_problem(d)
     if why:
         return f"not a primary checkout: {why}", True
-    if is_primary and not dry_run:
-        line = self_update(d)
-        if line:
-            print(f"{_STAMP} primary-refresh {d}: {line}", flush=True)
     branch = default_branch(d)
     why = busy(d, branch)
     if why:
@@ -208,7 +206,7 @@ def refresh(d, is_primary, dry_run):
     if is_primary:
         h = hold(d)
         if h:
-            return f"held: {h}", False
+            return f"held: {h}", True
     rc, _, err = git(d, "fetch", "--quiet", "origin")
     if rc != 0:
         return f"fetch failed: {err.splitlines()[-1] if err else rc}", True
@@ -218,19 +216,20 @@ def refresh(d, is_primary, dry_run):
     if not head or not tip:
         return f"cannot read HEAD or {upstream}", True
     if head == tip:
+        if is_primary and not dry_run:
+            _self_update_line(d, branch)
         return "current", False
     behind, ahead = _count(d, f"HEAD..{upstream}"), _count(d, f"{upstream}..HEAD")
     if git(d, "merge-base", "--is-ancestor", head, tip)[0] == 0:
         if dry_run:
             return f"would move {head[:12]}..{tip[:12]} ({behind} commits)", None
-        rc, _, err = git(d, "merge", "--ff-only", "--no-autostash", "--quiet", upstream)
+        # No timeout: a merge killed mid-checkout would leave the live-loaded tree half old, half new.
+        rc, _, err = git(d, "merge", "--ff-only", "--no-autostash", "--quiet", upstream, timeout=None)
         if rc != 0:
             reason = " ".join(err.split())[:240] or f"exit {rc}"
             return f"refused: {reason}", True
         if is_primary:
-            line = self_update(d)
-            if line:
-                print(f"{_STAMP} primary-refresh {d}: {line}", flush=True)
+            _self_update_line(d, branch)
         return f"moved {head[:12]}..{tip[:12]} ({behind} commits)", False
     if git(d, "merge-base", "--is-ancestor", tip, head)[0] == 0:
         return f"ahead {ahead}: left to its landing route", False
@@ -304,32 +303,34 @@ def _parse_now(s):
     return t if t.tzinfo else t.astimezone()
 
 
-def self_update(primary):
-    """Bring the installed copy (this running file) up to the primary's committed one. Only while the primary's HEAD
-    is its origin/<default> as last fetched, however it got there (this job, merge-task's refresh, a pull), so a stale
-    primary never downgrades the copy; only from the committed blob, never the working tree, and only once it
-    compiles. A file inside any git work tree (a checkout, a worktree, the primary itself) is source, never the
-    installed copy, so it is never rewritten. Returns a log line or None."""
+def _self_update_line(primary, branch):
+    line = self_update(primary, branch)
+    if line:
+        print(f"{_STAMP} primary-refresh {primary}: {line}", flush=True)
+
+
+def self_update(primary, branch):
+    """Bring the installed copy up to origin's committed script. Called only on a pass that has just fetched and found
+    the primary at origin/<branch>'s tip (current, or moved there), so the source is never older than what it
+    replaces; read from that commit, never the working tree, and installed only once it compiles. Only the copy
+    install placed rewrites itself (MARKER beside it), never a checkout's file, the version cache or any other copy.
+    Returns a log line or None; a failed read or write is a line, never an exception."""
     me = Path(__file__).resolve()
-    if git(me.parent, "rev-parse", "--is-inside-work-tree")[1] == "true":
+    if not (me.parent / MARKER).is_file():
         return None
-    branch = default_branch(primary)
-    if branch is None:
-        return None
-    head = git(primary, "rev-parse", "HEAD")[1]
-    if not head or head != git(primary, "rev-parse", f"refs/remotes/origin/{branch}")[1]:
-        return None
-    rc, src, _ = _git_raw(primary, "show", f"HEAD:{SELF_REL}")
+    rc, src, _ = _git_raw(primary, "show", f"refs/remotes/origin/{branch}:{SELF_REL}")
     if rc != 0 or not src:
         return None
-    if hashlib.sha256(src).digest() == hashlib.sha256(me.read_bytes()).digest():
-        return None
     try:
+        if src == me.read_bytes():
+            return None
         compile(src, SELF_REL, "exec")
-    except (SyntaxError, ValueError) as e:
-        return f"the primary's {SELF_REL} at {head[:12]} does not compile ({e}): the installed copy is kept"
-    _atomic_write(me, src.decode("utf-8"), mode=0o755)
-    return f"the installed copy {me} now matches the primary's {head[:12]}"
+        _atomic_write(me, src.decode("utf-8"), mode=0o755)
+    except (SyntaxError, ValueError, UnicodeDecodeError) as e:
+        return f"origin's {SELF_REL} does not compile ({e}): the installed copy is kept"
+    except OSError as e:
+        return f"the installed copy could not be updated ({e})"
+    return f"the installed copy {me} now matches origin/{branch}"
 
 
 def cmd_run(args):
@@ -392,6 +393,7 @@ def cmd_install(args):
     bin_dir = _real(args.bin_dir)
     copy = bin_dir / "primary-refresh.py"
     _atomic_write(copy, Path(__file__).read_text(), mode=0o755)
+    _atomic_write(bin_dir / MARKER, f"installed by primary-refresh.py install for {primary}\n")
     argv = [sys.executable, str(copy), "run", "--primary", str(primary)]
     for a in args.also:
         argv += ["--also", str(_real(a))]
