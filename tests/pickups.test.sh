@@ -325,7 +325,7 @@ has "$out" "incomplete ro-inc (it carries incomplete: true" "N8: incomplete: tru
 un --rollout ro-ghost
 ok "$rc|$out" "2|" "N9: a missing note exits 2, nothing on stdout"
 has "$err" "unfinished-rollout: --rollout ro-ghost" "N9: … with its line"
-BODY=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none\n- 2026-10-01T11:00+00:00 room stop ended' \
+BODY=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its week\'s line; stopping at a step boundary: none; lane: none\n- 2026-10-01T11:00+00:00 room stop ended' \
   mkro ro-aq 'start: unattended' 'hold_until: {pr: o/r#202, merged: false}' 'on_merge: regenerate'
 un --rollout ro-aq
 ok "$out" "stamped ro-aq (start: unattended)" "N10: an approved queue whose room stops ended reads stamped"
