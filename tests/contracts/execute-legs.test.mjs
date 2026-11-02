@@ -6,7 +6,9 @@
 //   e2  a Leg's order (preflight, smoke test, the inherited claim, fix tasks, new claims), up to five fresh claims, and
 //       never closing mid-task;
 //   e3  the review: the verbatim fresh-review ask (a session range, never a `...` range), § Session range and never §
-//       Ranged scope, the resume point, no review-ledger.py and one round, a set-aside on non-convergence, done --review;
+//       Ranged scope, the resume point, no review-ledger.py and one round, the checker's verdicts taken and never the
+//       Leg's own (ADR 0065), each kept reproduction committed with its fix or removed, a set-aside on
+//       non-convergence, done --review;
 //   e4  set-aside: --revert, the halt and clear-halt, gates before any write, the standing approval, the chain goes on;
 //   e5  fix tasks: `verifies:` on every fix, `fixes:` names the culprit (own: the task; chain: the later chain task;
 //       outside and drift: none), the task stays done, its dependants held through `verifies:`;
@@ -149,7 +151,13 @@ function check(f, product = tree) {
   const loop = sec(legs, 'The task loop')
   need('e3', 'legs.md § Review', loop, [ASK, '§ Session range, never § Ranged scope', 'from its `resume point`',
     'no `review-ledger.py`', 'exactly one review round', 'there is no second round',
+    "each task's round is a chain of its own, `round: 1`",
+    '§ Step 3.5 runs as written', "the Leg takes the checker's verdicts and judges none itself (ADR 0065)",
+    'until its reproduction passes', 'committed with its fix in a new `Task:` commit, or removed',
+    'never fixed in the Leg', 'its checker lost twice',
     'A review that does not converge sets the task aside', 'leg.py done --task <t> --verify pass --review <abs doc>'])
+  for (const bad of ['judges each finding itself', 'annotates it as deliberate'])
+    if (C(loop).includes(bad)) flag('e3', `legs.md § Review still has the Leg grade: ${bad}`)
   const ask = C(loop).match(/args `(code xhigh[^`]*)`/)?.[1] ?? ''
   if (!ask || ask.includes('...')) flag('e3', `the ask is a ranged scope or missing: ${ask}`)
 
@@ -315,7 +323,10 @@ test('control: an ask holding a ...HEAD range fails e3', () => {
   only('legs', 'session range on <top> from base <leg_base sha40>', 'review <leg_base sha40>...HEAD on <top>', ['e3'], 'range')
 })
 test('control: a review that runs the ledger fails e3', () => {
-  only('legs', '§ Step 2, check 3, is skipped: no `review-ledger.py`.', '§ Step 2, check 3, runs `review-ledger.py`.', ['e3'], 'ledger')
+  only('legs', '`round: 1`, and no `review-ledger.py` runs', '`round: 1`, and `review-ledger.py` runs', ['e3'], 'ledger')
+})
+test('control: a Leg that judges findings itself fails e3', () => {
+  only('legs', "the Leg takes the checker's verdicts and judges none itself (ADR 0065)", 'the Leg judges each finding itself', ['e3'], 'grades')
 })
 test('control: a gate that stops the chain fails e4', () => {
   only('legs', 'A gate never stops the chain', 'A gate stops the chain', ['e4'], 'gate')
