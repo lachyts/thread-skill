@@ -835,7 +835,7 @@ const COUNT_KEY = { merged: 'merged', integrating: 'integrating', 'awaiting-inte
 // task), PR CLOSED ahead of awaiting Integration, a plan-block after a descope ahead of the descopable one, and both
 // ahead of the automatic retry (a descope is judged first, as execute's step 1.2 judges it) and of the own run they
 // also match; the automatic retry and a `## Needs you` question ahead of at Integration and every class below it.
-const LABELS = ['RACE re-verify in flight', 'RACE revert in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'lane held', 'live', 'PR CLOSED / branch missing',
+const LABELS = ['RACE re-verify in flight', 'RACE revert in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'lane held', 'origin lane wait', 'live', 'PR CLOSED / branch missing',
   'awaiting Integration', 'queued', 'plan-blocked after a descope', 'plan-blocked, descopable', 'retry (automatic)', 'needs you', 'at Integration',
   'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
 const ROUTES = ['Stale anchor ref', 'The raise', 'A `merge-task:` own-run set-aside', 'A CLOSED PR or a missing branch', 'Recut', 'Leash', 'Hand-off']
@@ -1068,7 +1068,7 @@ function check({ status, repair, execute, fx }) {
     !labelled(r4raw, 'A `merge-task:` own-run set-aside', { item: true }).includes('it merges through case (ii) when main has not moved') ||
     fx.B.fails.length) fails.push('integration-only')
 
-  // stages: the 22 classes, each once, and § 4's per-stage routes.
+  // stages: the 23 classes (ADR 0064's origin lane wait among them), each once, and § 4's per-stage routes.
   if (JSON.stringify(clsRows.map((c) => c[0].slice(2, -2)).sort()) !== JSON.stringify([...LABELS].sort()) ||
     !ROUTES.every((l) => r4raw.split('\n').some((x) => x.startsWith(`- **${l}`))) ||
     !r4.includes('lead-integrate.py set-aside --note <task note> --kind integration')) fails.push('stages')

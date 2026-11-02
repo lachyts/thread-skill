@@ -593,15 +593,14 @@ any entry's step 1.4 resumes it.
 **Example report** (the live check on):
 
 ```
-[[proj-rollout-2026-10-01]] — progress: 1/13 merged, 1 running, 2 integrating, 1 awaiting integration, 1 queued, 7 set aside (1 at Integration) — 5h 5m elapsed, ~32m remaining (rough)
+[[proj-rollout-2026-10-01]] — progress: 1/12 merged, 1 running, 1 integrating, 1 awaiting integration, 1 queued, 7 set aside (1 at Integration) — 5h 5m elapsed, ~32m remaining (rough)
 Engine: snapshot 0123456789ab (0 ahead, 0 behind the Primary checkout at 0123456789ab)
 Trickle: not Away · N 2 · 2/2 tasks running on this Mac (1 here, 1 in [[other-rollout-2026-10-01]]): full, new starts wait (a meant wait, never stalled) · away.json fresh until 2026-10-02T18:00:00Z
 
 Merged (1)
   [[proj-merged]]           PR #1 (32m) · rung gone
-Integrating (2)
+Integrating (1)
   [[proj-integrating]]      PR #3 (open) · 15m in the lane · no Integration logged yet
-  [[proj-yielded]]          PR #5 (open) · waiting on the origin lane (o/r) since 2026-10-02T13:55:00.000Z · no Integration logged yet
 Awaiting Integration (1)
   [[proj-awaiting]]         PR #4 · ready 2026-10-02T13:30+00:00 · rung opus-xhigh
 Running (1)
@@ -634,6 +633,9 @@ Drift:
 
 Recommended next action: /thread:repair [[proj-rollout-2026-10-01]] (an open escalation, the possible PR-less merge, comes before waiting on the live queue)
 ```
+
+A task whose lead yielded the origin lane (its `originWait`, ADR 0064) reads in the same group as
+`[[proj-yielded]]          PR #5 (open) · waiting on the origin lane (o/r) since 2026-10-02T13:55:00.000Z · no Integration logged yet`.
 
 Keep the whole report scannable: it's a glance, not a wall of text.
 

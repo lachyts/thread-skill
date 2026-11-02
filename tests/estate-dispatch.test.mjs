@@ -699,6 +699,35 @@ function depsScheduled(j, rk = ranked()) {
     }
   }
 }
+// D8c (ADR 0064): Act and Shared both declare ~/repos/shared. With each in its own clone (the scan's projects[] entries,
+// injected as estate-scan finds them), both are scheduled, on one origin in different batches; with both on D they
+// still contest the root.
+function sharedPlan(name, shared) {
+  const s = structuredClone(scanned())
+  const row = s.repos.find((r) => r.path === ROOT('shared'))
+  row.github = 'O/Shared'
+  const own = (project, at) => ({ project, clone: null, rolloutRoot: at, selfRollout: null, root: at, blockers: [], unchecked: [] })
+  row.projects = [own('Act', `${ROOT('shared')}-rollout`), own('Shared', shared)]
+  const scanPath = keep(`scan-${name}.json`, JSON.stringify(s))
+  const r = spawnSync('python3', [RANK, 'rank', '--scan', scanPath, '--today', TODAY, ...GRADE_FILES.flatMap((f) => ['--grades', f])],
+    { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(r.status, 0, r.stderr)
+  return tracked(py(['plan', '--rank', keep(`rank-${name}.json`, r.stdout), '--scan', scanPath]))
+}
+test('D8c. plan: two projects in their own clones of one repo are both scheduled, in different batches; on one clone they contest', () => {
+  const j = sharedPlan('own-clones', `${ROOT('shared')}-shared-rollout`)
+  const act = entryOf(j, runId('Act', 'parallel', 'shared'))
+  const sh = entryOf(j, runId('Shared', 'parallel', 'shared'))
+  assert.deepEqual([act.origin, sh.origin], ['o/shared', 'o/shared'], 'the scan row\'s github, lower-cased')
+  assert.deepEqual([act.rolloutRoot, sh.rolloutRoot], [`${ROOT('shared')}-rollout`, `${ROOT('shared')}-shared-rollout`])
+  assert.notEqual(act.batch, sh.batch, 'one origin: never one batch')
+  batchesHold(j)
+  const c = sharedPlan('one-clone', `${ROOT('shared')}-rollout`)
+  const wait = waitOf(c, runId('Shared', 'parallel', 'shared'))
+  assert.equal(wait.why.kind, 'same root')
+  assert.ok(wait.why.detail.includes(`${ROOT('shared')}-rollout`), wait.why.detail)
+})
+
 test('D8b. plan: entries whose names may meet on one note slug never share a batch; serial entries follow, one each', () => {
   const j = tracked(PLAN())
   const e = (project, shape = 'parallel', rootName) => j.schedule.find((x) => x.project === project && x.shape === shape &&

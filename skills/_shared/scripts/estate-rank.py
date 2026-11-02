@@ -35,7 +35,9 @@ for `rank` only, gated_inputs.py (GI: sweep, the sign-off backstop's word lists;
 
 The inputs:
 - The scan: estate-scan.py's schema 1. Read: tasks {slug, note, title, statusClass, inFlight, projects, due,
-  dependsOn}; projects {name, note, standing, repos}; repos {path, declared, rolloutRoot, blockers, unchecked};
+  dependsOn}; projects {name, note, standing, repos}; repos {path, declared, rolloutRoot, blockers, unchecked,
+  projects[] {project, rolloutRoot, blockers, unchecked}: a parallel run reads its home project's row there (ADR 0064:
+  its own clone), else the repo row's own fields};
   today, vault, deadlineHit, vaultErrors. Standing is only ever the row's `standing` (crowned means `standing ==
   "crowned"`); the row's `crowned` field is the raw `crowned:` date, never read.
 - The grades: each --grades file holds one object {project, tasks: [...]} or an array of them, each task entry
@@ -109,7 +111,9 @@ Output, one JSON object (schema 1; --compact for one line):
   runs[]      {id (<home>/<shape>/<root or ->), project, note, shape, root, rolloutRoot, why (repo unknown | no repo
                declared | null), parked, ready[], waiting[], blocked[] (slugs in rank order), agentMinutes,
                decisionMinutes, review {pr, signOff, eyeCheck, minutes}, attentionMinutes, leverage, blockers[],
-               unchecked[] (the scan repo row's, verbatim), sameRoot[] (other parallel run ids on the root), rank (the
+               unchecked[] (the scan repo row's home-project entry's, else the row's, verbatim), sameRoot[] (other
+               parallel run ids on the same rolloutRoot, else root: two projects' own clones of one repo are two roots,
+               ADR 0064), rank (the
                best of ready and waiting, null when all are blocked)}, by rank (nulls last) then id. Parallel and
                serial tasks other than Orient only, grouped by (home, shape, root); a serial run's root is null;
   decisions[] {slug, home, round (one-call | grill), grade, minutes, cumulativeMinutes, decisions[], blockedBy[]}: the
@@ -735,16 +739,20 @@ class Ranker:
                 continue
             row, why = self.root_of(r) if r["shape"] == "parallel" else (None, None)
             root = row.get("path") if row else None
+            # ADR 0064: the home project's own entry on the row (its own clone), else the row's default resolution
+            own = next((x for x in (row.get("projects") or []) if isinstance(x, dict) and x.get("project") == r["home"]),
+                       None) if row else None
+            src = own if own is not None else row
             key = (r["home"], r["_homeNote"], r["shape"], root or "")
             run = groups.get(key)
             if run is None:
                 run = groups[key] = {
                     "id": "%s/%s/%s" % (r["home"], r["shape"], root or "-"), "project": r["home"],
                     "note": r["_homeNote"], "shape": r["shape"], "root": root,
-                    "rolloutRoot": row.get("rolloutRoot") if row else None, "why": why,
+                    "rolloutRoot": src.get("rolloutRoot") if src else None, "why": why,
                     "parked": r["standing"] == "parked", "ready": [], "waiting": [], "blocked": [],
-                    "blockers": list(row.get("blockers") or []) if row else [],
-                    "unchecked": list(row.get("unchecked") or []) if row else [],
+                    "blockers": list(src.get("blockers") or []) if src else [],
+                    "unchecked": list(src.get("unchecked") or []) if src else [],
                     "_members": [],
                 }
             group = "blocked" if r["blockedBy"] else ("ready" if r["grade"] == "Ready" else "waiting")
@@ -763,9 +771,10 @@ class Ranker:
                        leverage=round(agent / max(ATTENTION_FLOOR, attention), 2),
                        rank=min((m["rank"] for m in live), default=None))
             out.append(run)
+        key = lambda run: run["rolloutRoot"] or run["root"]  # noqa: E731
         for run in out:
             run["sameRoot"] = sorted(x["id"] for x in out if x is not run and x["shape"] == "parallel"
-                                     and run["shape"] == "parallel" and run["root"] and x["root"] == run["root"])
+                                     and run["shape"] == "parallel" and key(run) and key(x) == key(run))
         order = ("id", "project", "note", "shape", "root", "rolloutRoot", "why", "parked", "ready", "waiting",
                  "blocked", "agentMinutes", "decisionMinutes", "review", "attentionMinutes", "leverage", "blockers",
                  "unchecked", "sameRoot", "rank")
