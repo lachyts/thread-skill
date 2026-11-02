@@ -92,7 +92,7 @@ The spike found that the pass ran rules four days old. orient-all loads skills f
 - **The orient-all evidence above came partly from a stale install.** A primary checkout that cannot fast-forward keeps every merged rule out of the installed plugin. Bringing it current, and keeping it so, is the build's first task: the Primary refresh (ADR 0066), which moves it once the live rollouts are quiet.
 - **Cross-repo work.**
   - Workspaces' launch markers and generated `AGENTS.md` hard-code the primary's paths, and Chorus passes them on as a Session's folders (Chorus ADR 0026). The marker generator has to emit repo-relative paths, which Chorus resolves against the marker.
-  - Chorus writes `capacity.json`, and records decision 8 against its ADR 0104.
+  - Chorus writes `capacity.json`, and records decision 8 against Chorus ADR 0104.
 - **A copy is isolated for files, not for live infrastructure.** Hooks, skills and the 57 workspaces scripts with absolute paths run from the primary. So a change to them is tested in the copy and takes effect only once it lands.
 - **Token consumers change together.** These are `serial-chains.py` (claim, `overlaps`, the launch choice), `unfinished-rollout.py`, `leg.py` (`stamp_bases`, `done`, hold, write set), `reconcile-rollout.py` `_serial_root`, status, repair, the serial template and their tests.
 - **Limits.**

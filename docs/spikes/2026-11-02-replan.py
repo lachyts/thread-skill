@@ -1,5 +1,6 @@
 # Re-run each orient-all serial batch through origin's serial-chains.py plan (read-only), then pairwise overlaps.
 import json, subprocess, sys, importlib.util, itertools
+sys.dont_write_bytecode = True  # import serial-chains without leaving __pycache__ in skills/
 ARGS = sys.argv[1]; SC = "skills/_shared/scripts/serial-chains.py"
 spec = importlib.util.spec_from_file_location("sc", SC); sc = importlib.util.module_from_spec(spec); spec.loader.exec_module(sc)
 rows = []
