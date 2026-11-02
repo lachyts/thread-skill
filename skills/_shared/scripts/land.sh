@@ -77,9 +77,9 @@
 #            merge` with no merge call; green is a direct merge, `landed`.
 # --fixed-at-budget (fresh-review § Rounds — The budget, ADR 0001; thread-skill ADR 0065): R is the head of the chain's
 # third and last code round, and a blocking finding still open there is fixed until its reproduction passes, with no
-# further review. So a code commit after R is accepted when it changes a path that a `blocking` row of that round's
-# `## Confirm` table names, whole (budget_rows, names_path): the fix committed with its reproduction, or for prose
-# the file its quoted lines are in. The doc is the review doc a commit in R..HEAD touched whose latest version there
+# further review. So a code commit after R is accepted when it adds or modifies a path that the reproduction cell of
+# a `blocking` row of that round's `## Confirm` table names, whole (budget_rows, names_path): the fix committed with
+# its reproduction, or for prose the file its quoted lines are in. A deletion never carries one. The doc is the review doc a commit in R..HEAD touched whose latest version there
 # (its last before close's deletion commit) says `mode: code`, `round:` 3 or more and a `head:` R starts with; none
 # is `stuck: --fixed-at-budget: no round-3 code review doc for <R7> on <B>`, and a code commit naming none of its
 # rows is `stuck: commits after <R7> carry no reproduction <doc> names: <subjects>`. Accepted fixes print `land:
@@ -957,8 +957,10 @@ own_rounds() {
 
 # budget_rows <R>: --fixed-at-budget's doc (the header): a review doc a commit in <R>..HEAD touched, read at its latest
 # version there, whose front matter says `mode: code`, `round:` 3 or more and a `head:` of 7 or more hex characters
-# that <R> starts with. Its `## Confirm` rows (outside a fence) whose last cell is `blocking` go to $tmpd/blocking,
-# its path to BUDGET_DOC. 1 when no doc qualifies.
+# that <R> starts with. The reproduction cell (the checker's fifth column: everything between a row's fifth `|` and
+# its last) of each `## Confirm` row outside a fence whose last cell is `blocking` goes to $tmpd/blocking, a line
+# each, with the checkout's own `<top>/` and a `./` before a path taken off, so an absolute or ./ citation names the
+# repo-relative path diff-tree prints; its path to BUDGET_DOC. 1 when no doc qualifies.
 budget_rows() {
   local r=$1 p c v
   BUDGET_DOC=
@@ -969,7 +971,15 @@ budget_rows() {
       git cat-file -e "$c:$p" 2>/dev/null && { v=$c; break; }
     done
     [ -n "$v" ] && git show "$v:$p" > "$tmpd/bdoc" 2>/dev/null || continue
-    R=$r awk '{ sub(/\r$/, "") }
+    R=$r T="$top/" awk 'function norm(s,  t, i, o, b) {
+           t = ENVIRON["T"]; while ((i = index(s, t)) > 0) s = substr(s, 1, i - 1) substr(s, i + length(t))
+           o = ""
+           while ((i = index(s, "./")) > 0) {
+             b = i > 1 ? substr(s, i - 1, 1) : substr(o, length(o), 1)
+             o = o substr(s, 1, b ~ /[A-Za-z0-9_.\/-]/ ? i + 1 : i - 1); s = substr(s, i + 2)
+           }
+           return o s }
+         { sub(/\r$/, "") }
          NR == 1 { if ($0 != "---") { bad = 1; exit } fm = 1; next }
          fm && $0 == "---" { fm = 0; next }
          fm { k = $0; sub(/:.*/, "", k); v = $0; sub(/^[^:]*:[ \t]*/, "", v); sub(/[ \t]+#.*$/, "", v)
@@ -978,7 +988,8 @@ budget_rows() {
          fence { next }
          /^## / { on = ($0 ~ /^## Confirm[ \t]*$/); next }
          on && /^[ \t]*\|/ { l = $0; sub(/[ \t]+$/, "", l); sub(/\|$/, "", l); n = split(l, a, "|")
-                              c = a[n]; gsub(/^[ \t`*]+|[ \t`*]+$/, "", c); if (c == "blocking") print }
+                              c = a[n]; gsub(/^[ \t`*]+|[ \t`*]+$/, "", c)
+                              if (c == "blocking" && n >= 7) { x = a[6]; for (k = 7; k < n; k++) x = x "|" a[k]; print norm(x) } }
          END { h = f["head"]
                if (bad || fm || f["mode"] != "code" || f["round"] !~ /^[0-9]+$/ || f["round"] + 0 < 3) exit 1
                if (h !~ /^[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]+$/ || index(ENVIRON["R"], h) != 1) exit 1 }' \
@@ -989,12 +1000,13 @@ budget_rows() {
 }
 
 # names_path <path> <file>: <path> appears whole on a line of <file>, never inside a longer path: the character
-# before it is none of [A-Za-z0-9_./-], the one after none of [A-Za-z0-9_/-] (so `src/c.txt:1` names src/c.txt).
+# before it is none of [A-Za-z0-9_./-], the one after none of [A-Za-z0-9_/-], and a `.` after it ends a sentence,
+# never a longer name (so `src/c.txt:1` names src/c.txt, `src/c.txt.orig` does not).
 names_path() {
   P=$1 LC_ALL=C awk '{ p = ENVIRON["P"]; s = $0; o = 0
          while ((i = index(s, p)) > 0) {
-           q = o + i; b = q > 1 ? substr($0, q - 1, 1) : ""; a = substr($0, q + length(p), 1)
-           if (b !~ /[A-Za-z0-9_.\/-]/ && a !~ /[A-Za-z0-9_\/-]/) { hit = 1; exit }
+           q = o + i; b = q > 1 ? substr($0, q - 1, 1) : ""; a = substr($0, q + length(p), 2)
+           if (b !~ /[A-Za-z0-9_.\/-]/ && a !~ /^[A-Za-z0-9_\/-]/ && a !~ /^\.[A-Za-z0-9_]/) { hit = 1; exit }
            o = q; s = substr($0, q + 1)
          } }
        END { exit hit ? 0 : 1 }' "$2"
@@ -1188,19 +1200,19 @@ EOF
   if [ "$act" = --queue ]; then
     R=$(git rev-parse -q --verify "$rev^{commit}") || own_finish "stuck: reviewed commit $rev not found" 1
     git merge-base --is-ancestor "$R" HEAD || own_finish "stuck: reviewed commit $(printf '%s' "$R" | cut -c1-7) is not on $B" 1
-    local c f bad= code hit
+    local c f s bad= code hit
     BUDGET_DOC=
     for c in $(git rev-list --no-merges "$R..HEAD" "^$od"); do
       code= hit=
-      while IFS= read -r -d '' f; do
+      while IFS= read -r -d '' s && IFS= read -r -d '' f; do
         case $f in docs/reviews/*) continue ;; esac
         code=1
         [ -n "$fixed" ] || break
         if [ -z "$BUDGET_DOC" ]; then
           budget_rows "$R" || own_finish "stuck: --fixed-at-budget: no round-3 code review doc for $(printf '%s' "$R" | cut -c1-7) on $B" 1
         fi
-        names_path "$f" "$tmpd/blocking" && { hit=1; break; }
-      done < <(git diff-tree --no-commit-id --name-only -r -z --root "$c")
+        case $s in A|M|T) names_path "$f" "$tmpd/blocking" && { hit=1; break; } ;; esac
+      done < <(git diff-tree --no-commit-id --name-status -r -z --root "$c")
       [ -n "$code" ] || continue
       if [ -n "$hit" ]; then fixedn=$((fixedn + 1)); else bad="$bad $c"; fi
     done

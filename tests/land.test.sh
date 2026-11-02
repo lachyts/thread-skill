@@ -1879,6 +1879,34 @@ ores "case 77 outside Confirm" 1 "stuck: commits after $(h7 "$R") carry no repro
 fsetup c77l 3 code "$BROW"; bdoc r3.md 3 "$(h7 "$R")" code "$FROW"; fixwork "w" tests/repro.test.sh; fdone
 own -- --queue --reviewed "$R" --fixed-at-budget
 ores "case 77 latest version" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: w"
+# (n) The reproduction cited as ./path or by its absolute path in the checkout still names it.
+for form in "./tests/repro.test.sh" "ABS/tests/repro.test.sh"; do
+  ghreset; mkbranch "c77n${#form}"; own --; R=$(tip)
+  cite=${form/ABS/$real/w/c77n${#form}}
+  bdoc r3.md 3 "$(h7 "$R")" code "| 1 | b: loses the save | introduced | ordinary: killed | \`bash $cite\` → FAIL | blocking |"
+  fixwork "the fix" tests/repro.test.sh; fdone
+  own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
+  ores "case 77 cited [$form]" 0 "queued https://github.com/o/c77n${#form}/pull/1"
+done
+# (o) A commit that deletes the named file carries no reproduction.
+fsetup c77o 3 code "$PROW"; git -C "$W" rm -q src/c.txt; git -C "$W" commit -qm "🐛 fix: drop the file"; fdone
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 deletion" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: drop the file"
+# (p) Only the reproduction cell counts: a path in the row's clause, origin or trigger text is no reproduction.
+fsetup c77p 3 code '| 1 | b: loses the save in src/c.txt | introduced (src/c.txt:1) | ordinary: src/c.txt killed | tests/repro.test.sh: `bash tests/repro.test.sh` → FAIL | blocking |'
+fixwork "the fix, no reproduction"; fdone
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 clause text" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: the fix, no reproduction"
+# (q) A path followed by `.` and more of a name is a longer path: src/c.txt is not src/c.txt.orig; a sentence's full
+# stop after it still names it.
+fsetup c77q 3 code '| 1 | c: wrong verdict | introduced | — | src/c.txt.orig:1 against SKILL.md:9 | blocking |'
+fixwork "the wrong file"; fdone
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 longer name" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: the wrong file"
+fsetup c77r 3 code '| 1 | c: wrong verdict | introduced | — | the quoted lines are in src/c.txt. | blocking |'
+fixwork "the wording"; fdone
+own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 full stop" 0 "queued https://github.com/o/c77r/pull/1"
 # (m) Close's snippet carries the flag: budget='1'.
 osnip
 for sh in "${shells[@]}"; do

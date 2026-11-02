@@ -142,7 +142,7 @@ test('never clean: the clean-round conditions, and what can never count', () => 
     '`mode: code`', '`effort:` equal to the current level', '`head:` equal to HEAD at dispatch',
     '`diff_digest:` equal to `land: digest` and not `da39a3`', 'no blocking finding (loop step 5)',
     'a `simplify` round never counts as clean',
-    'a `## Confirm` table', 'is unconfirmed, or leaves no review doc',
+    'a `## Confirm` table (a doc that holds no findings has none, and needs none)', 'is unconfirmed, or leaves no review doc',
     "The budget's round (`round: 3`) with no blocking finding is clean at any count",
     'a full-cap round (one at or over its cap)',
     'every dispatch follows a plain call that printed `land: digest`',
@@ -249,12 +249,15 @@ test('#### The stop rule: three rounds, fix until green at the budget, keys, inf
     'a `ci failed`, or a red Verify run after a clean round, once the budget is spent (no round is left to review its fix); an unconfirmed round;',
     // p34-5 F1: a stop after a confirmed round leaves that round dispositioned and consumed, so its open findings are recorded
     "A stop after a confirmed round (that stop, a decision for Lachy) first writes that round's `## Disposition`, its unfixed blocking findings under `Blocking, open:` and the rest from the verdicts, and marks its doc `status: consumed`, in a `docs/reviews/`-only commit, before the deletion commit and `--hold`.",
-    // ADR 0065: the budget is the chain's, read off fresh-review's `round:`, so a resumed loop never starts again at round 1
-    "**Counting.** The three are the chain's code rounds, read off its docs and never counted by close",
-    "fresh-review writes each code doc's `round:` (its Step 2, check 3",
-    'A dev-time `/fresh-review code` chain this session ran on `<B>` before the loop is the same chain',
-    "A hold's diagnosis names the last round's doc and its `round:`",
-    'a resumed loop whose chain has had its three rounds dispatches none',
+    // ADR 0065: the budget is the landing's, numbered in fresh-review's `round:` and read back from the landing's own
+    // docs, so a resumed loop never starts again at round 1 and a dev-time chain never spends it
+    "**Counting.** The three are the landing's code rounds, numbered in the `round:` each doc carries",
+    "The landing's chain is its own: its first round names no round before, so its doc says `round: 1`",
+    'whatever a dev-time `/fresh-review` chain on `<B>` reached',
+    '`gh pr view <url> --json createdAt -q .createdAt`',
+    "`git log --full-history --diff-filter=A --no-renames --since='<createdAt>' -p --format= origin/<default>..HEAD -- docs/reviews/ | sed -n 's/^+round: *\\([0-9][0-9]*\\).*/\\1/p' | sort -n | tail -n 1`",
+    '`--since-as-filter`',
+    'The count carries across a hold: a resumed loop whose landing has had its three rounds dispatches none.',
     "**Budget.** The round whose doc says `round: 3` is the last.",
     "the loop queues with `budget='1'`: land.sh's `--fixed-at-budget` accepts the code commits after the reviewed `head:` only when each changes a path a `blocking` row of that round's `## Confirm` table names",
     'A fix that cannot be made to pass stops the loop (`serious finding open after <N> rounds`)',
@@ -268,14 +271,13 @@ test('#### The stop rule: three rounds, fix until green at the budget, keys, inf
     '`printenv CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`',
     /`max unavailable`[^.]*is a decision for Lachy: `--hold`/,
     "Every stop calls `--hold` with the diagnosis before step 8's report and the banner",
-    "naming the last round's doc and its `round:` (**Counting**)",
     'leaves the PR open with auto-merge off',
     'A stop never calls the question tool: the question goes on a `Needs your call:` row',
     'xhigh floor', 'Opus lock',
     'the diagnosis as its comment',
   ])
   // ADR 0065 retired close's own round count and the ledger hold.
-  for (const bad of ['createdAt', '--since', 'four code rounds', 'from the fourth on', 'review-ledger.py` exit', 'a ledger failure'])
+  for (const bad of ['four code rounds', 'from the fourth on', 'review-ledger.py` exit', 'a ledger failure', 'is the same chain'])
     assert.ok(!c.includes(bad), `#### The stop rule still has: ${bad}`)
   assert.ok(!collapse(text()).includes('budget of four code rounds'), 'close still has a budget of four code rounds')
   const adr = collapse(readIf(ADR) ?? '')
@@ -286,7 +288,7 @@ test('#### The stop rule: three rounds, fix until green at the budget, keys, inf
     assert.ok(adr58.includes(s), `ADR 0058 lacks: ${s}`)
   assert.ok(adr58.includes('Superseded in part by ADR 0065'), 'ADR 0058 does not point at ADR 0065')
   const adr65 = collapse(readIf(ADR65) ?? '')
-  for (const s of ['Status: accepted', 'three code rounds', 'fixed until its reproduction passes', '`--fixed-at-budget`',
+  for (const s of ['Status: accepted', 'three code rounds', "The landing's chain is its own", 'fixed until its reproduction passes', '`--fixed-at-budget`',
                    'The session grades nothing', '`max_review_rounds`', 'a separate loop'])
     assert.ok(adr65.includes(s), `ADR 0065 lacks: ${s}`)
 })
@@ -362,7 +364,8 @@ test('placement, guardrails, edges and the Auto-execute line', () => {
   assertHas(EDGES(), '§ Edge cases', [
     '`git branch --set-upstream-to origin/<B> <B>`', '**A session ended mid-loop',
     "§ The stop rule's **Counting**",
-    '**A held landing resumed at the budget**', "queues with `budget='1'`",
+    '**A held landing resumed at the budget**', "and **Queue** with `budget='1'`",
+    'commits the fix with its reproduction before its first plain call, so the tree is clean',
     'the close-out landing pushes nothing', 'never fetched into or fast-forwarded',
     "When that branch is the own branch, § Land the own branch pushes it, the close-out commit included",
     '**A dirty tree on the own branch**', '**A `ci failed` with no cause in `<B>`**', '`not landed: not the cwd checkout`',
