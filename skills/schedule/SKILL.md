@@ -1,6 +1,6 @@
 ---
 name: schedule
-description: 'Use when planning a rollout (parallel or serial) of Obsidian tasks under a single project — produces a thin rollout note (data only) that `/thread:execute` runs as a queue. Reads tasks from ~/repos/obsidian/Work/Tasks/, orders the queue (dependencies in frontmatter, Solo for sweeping changes), folds affine same-file task clusters into one dispatch unit, refuses a project''s second unfinished parallel rollout per repo (--regenerate supersedes this project''s paused or unstarted one, carrying its unlanded tasks), writes one `shape: serial` note per serial chain, and always dates <project-slug>-rollout-<YYYY-MM-DD>.md, with `protocol_version: 5`. Scope: Obsidian, plus § 0''s rollout-clone setup.'
+description: 'Use when planning a rollout (parallel or serial) of Obsidian tasks under one project — produces a thin rollout note (data only) that `/thread:execute` runs as a queue. Reads tasks from ~/repos/obsidian/Work/Tasks/, orders the queue (dependencies in frontmatter, Solo for sweeping changes), folds affine same-file task clusters into one dispatch unit, refuses a second unfinished parallel rollout per repo and project (--regenerate supersedes this project''s paused or unstarted one, carrying its unlanded tasks), writes one `shape: serial` note per serial chain, and always dates <project-slug>-rollout-<YYYY-MM-DD>.md, with `protocol_version: 5`. Scope: Obsidian, plus § 0''s rollout-clone setup.'
 ---
 
 # /thread:schedule — turn a backlog of Obsidian tasks into a rollout note
