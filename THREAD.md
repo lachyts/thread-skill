@@ -10,7 +10,15 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
-**2026-11-02 (latest): the room stop is the week's line alone (Chorus ADR 0111), PR #270 queued.** Anthropic dropped the five-hour limit from the Ultra accounts, so execute § Room stop, `legs.md`, status, `step-boundary.py` and CONTEXT.md no longer read a 5-hour line or a spread (ADR 0109), and the room-stop contract test refuses either. Rebased over #269, keeping its origin-wait clause in item 3. `/fresh-review code xhigh` round 1: 9 findings, none blocking, all filed in [[thread-skill-room-stop-week-line-review-follow-ups]]. Its #1 is a design call to make with Chorus that predates this change: item 11's 6 h bound ends a room stop while a week's-line hold (often over 6 h, re-written every 3 h) still stands, and a repeat signal never moves the stop's stamp.
+**2026-11-02 (latest): fresh-review Phase 1 landed: a landing takes the checker's verdicts (ADR 0065), PR #271 merged (`08b86fa`).** Built p1-4 of [[Fresh Review Skill]] ([[fresh-review-skill-p1-4-landing-loop-and-readers]]).
+- **Close's loop:** step 5 takes fresh-review's checker verdicts (`blocking`, `unconfirmed`, `filed`, `rejected`) and grades nothing; three code rounds per landing, numbered in each doc's `round:`, the landing's chain its own (a dev-time chain never spends it), a resumed loop reading the highest `round:` since its PR opened; a confirmed finding open on round 3 is fixed until its reproduction passes, with no further review; the ledger step and its hold are gone.
+- **land.sh `--fixed-at-budget`:** a code commit after the budget round's head is accepted when its `Fixes-finding: #<n>` trailer names blocking rows of that round's `## Confirm` table (read at its id and verdict cells), close's own close-out commits riding beside; every queue once the three rounds are spent sets it. Case 77 pins it.
+- **Legs and readers:** a Leg takes the checker's verdicts too; the weekly reading retires the trails' stop and simplify counts and reports `unconfirmed`, `candidates`, `confirmRate` and `freshReviewLevels` (precision per level).
+- **`~/.agents`:** master fast-forwarded to the rebased confirm-step branch and pushed (`1a8c088`), so fresh-review's checker (Step 3.5) is live; the push carried seven other sessions' unpushed master commits with it.
+- **Review:** one dev round and three landing rounds at xhigh under ADR 0058; round 3 clean (7 findings, none blocking). The first guard matched reproduction paths in the `## Confirm` table and took two rounds of holes, so it was reverted to the root: the trailer. Filed: [[fresh-review-landing-loop-review-follow-ups]].
+- **Not live yet:** this checkout is held behind origin/master (ADR 0031) while five rollouts run from it (chorus, contacts-admin, giflab, mac-data-mcp, seo), so the live close and land.sh are still the old ones (pre-ADR 0058) beside the new fresh-review, until it catches up.
+
+**2026-11-02: the room stop is the week's line alone (Chorus ADR 0111), PR #270 queued.** Anthropic dropped the five-hour limit from the Ultra accounts, so execute § Room stop, `legs.md`, status, `step-boundary.py` and CONTEXT.md no longer read a 5-hour line or a spread (ADR 0109), and the room-stop contract test refuses either. Rebased over #269, keeping its origin-wait clause in item 3. `/fresh-review code xhigh` round 1: 9 findings, none blocking, all filed in [[thread-skill-room-stop-week-line-review-follow-ups]]. Its #1 is a design call to make with Chorus that predates this change: item 11's 6 h bound ends a room stop while a week's-line hold (often over 6 h, re-written every 3 h) still stands, and a repeat signal never moves the stop's stamp.
 
 **2026-11-02 (later): [[thread-skill-rollout-2026-10-31]] is complete: 14 of 14 tasks merged, archived.**
 - Lachy signed off p33-4's irreversible gate at 10:01. The lead resumed its gate-pending run on the signed plan; the handle survived compaction in a `/tmp` file, so this was a resume, not a fresh call.
@@ -723,6 +731,7 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
+- **Close has no route after the budget** (raised in three review rounds of #271, filed in [[fresh-review-landing-loop-review-follow-ups]]): a CI fix, an unconfirmed round 3 or a finding Lachy's call drops can be decided but not landed through close, and the Counting window counts dev-time rounds a later session runs after a hold. A design pass, probably with an ADR 0065 amendment.
 - **The C17 flake (2026-10-16).** `tests/lead-integrate.test.sh` C17 "TERM to verify … its children are gone" failed on macOS CI under load (`pgrep` found 3 children right after the TERM) on PR #148, which does not touch it, and passed on rerun. merge-task's infra classifier called it genuine (fail-closed), so its exit 1 would have set the task aside and auto-retried a whole call. Make the assertion wait for the group to exit, like the 12a/35 load-tolerant fixes? Lachy's call whether to file it.
 - **Schedule P16 before or after p13-4 (3.0.0)?** p13-4 updates the live checkout, and a running rollout holds that checkout, so the two can't overlap. The recommendation is p13-4 first, since it was waiting only on Chorus.
 - **Hold own-branch moves too?** (p14-7 follow-up, Lachy's call) Putting the hold inside `move_branch` would guard `land.sh --own-branch` on the primary checkout, but an own-branch landing there would then end `stuck: held`.
@@ -816,6 +825,9 @@ scheduled 2026-07-15.
 - **Ceiling vs. a load-sensitive verifier.** Does the thread-skill ceiling stay at 4 while `make test` has wall-clock assertions? The Retro on `[[thread-skill-rollout-2026-10-09]]` reads the cost (three extra integrate calls, three climbs). Fixing the tests ([[thread-skill-load-tolerant-timing-tests]]) may make a lower ceiling unnecessary.
 
 ## Known quirks (don't re-derive)
+
+- **The primary checkout is the live plugin, and it is held** (2026-11-02). `${CLAUDE_PLUGIN_ROOT}` is `~/repos/tools/thread-skill` itself (a directory source), so whatever that checkout holds is the close, execute and land.sh every session runs, and ADR 0031 holds it behind origin/master while any rollout runs (`skills/_shared/scripts/primary-hold.sh` names them). A merged change goes live only when it catches up. Never fast-forward or reset it by hand: on 2026-11-02 a hand fast-forward moved five running rollouts' engine for 63 s before it was put back.
+- **Run the landing through `/thread:close`, never by hand before it** (2026-11-02). Close commits THREAD.md on the own branch (7.1) before 7.9 lands it, so the close-out rides the branch's PR. A landing loop run by hand first merges the branch, and the THREAD.md close-out then needs a branch and landing of its own.
 
 - **Parallel tasks each draft "the next free ADR number", so they collide (2026-11-01).** Four tasks of rollout 2026-10-31 each wrote a new ADR 0060 under a different filename: git sees no conflict. `tests/contracts/refs.test.mjs` rule A (every ADR reference resolves to exactly one file) catches a duplicate at the Integration verify; the lead then routes it to the integrator, which renumbers when the task note says so (the lead added an `## Integration note`). A fix belongs in schedule or the planner prompt (reserve numbers, or draft as `NNNN` and number at Integration).
 - **An OAuth expiry mid-call returns a `transient infrastructure failure` row (2026-11-01).** Same shape as a usage-limit cut (`Failed to authenticate: OAuth session expired` in `<failures>`): treat it as the signed-out case and resume the same runId with its original args, never reconcile the row.
@@ -1096,6 +1108,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-11-02 (fresh-review Phase 1 landed, #271):** check the primary checkout caught up (`git -C ~/repos/tools/thread-skill log -1` at `08b86fa` or later) once the five rollouts end; only then does close run ADR 0065's loop. Next for the review loop: the design pass on [[fresh-review-landing-loop-review-follow-ups]] (no route after the budget; the Counting window). p30-2 ([[thread-skill-p30-2-a-review-stop-is-the-agents-to-resolve]]) is moot now the ledger never stops: close or reshape it.
+
 **From 2026-11-02 (rollout 2026-10-31 complete):** no rollout runs on this repo. Next:
 - [[thread-skill-reflect-whether-p33-freed-queued-rollouts]]: did ADR 0064 free [[contacts-admin-rollout-2026-10-29]] and the workspaces rollout?
 - [[thread-skill-followup-p33-4-same-root-loser-later-batch]].
@@ -1123,6 +1137,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-02 (close, fresh-review p1-4): built close's ADR 0065 loop, land.sh `--fixed-at-budget`, Legs and the reflect readers test-first in `thread-skill-wt-p1-4`; reviewed (1 dev + 3 landing rounds) and merged #271; fast-forwarded `~/.agents` to the confirm-step branch and pushed. My slips: ran the landing by hand before `/thread:close`, so this close-out needed its own branch; and fast-forwarded the held primary checkout under five rollouts for 63 s before putting it back.
 - 2026-11-02 (close, room stop to the week's line): reviewed and landed the five-hour drop's thread-skill half (`3d6a481`, rebased as `33c8262`) from a Stage worktree beside the 2026-10-31 rollout's lead; one clean review round, 9 findings filed; PR #270 queued with auto-merge. The `drop-five-hour` branch and worktree are left as they were; #270 supersedes them.
 - 2026-11-02 (close, rollout lead after sign-off): signed off p33-4's gate on Lachy's word; reinstated; resumed the gate-pending call on the signed plan; ran the lead verify (green) and a judge-only Integration; merged #267; ran the completion ceremony (P33 closed, scored, archived, reflect follow-up filed).
 - 2026-11-02 (close, rollout lead from 2026-10-31): led [[thread-skill-rollout-2026-10-31]] from a 14-task queue to 13 merged and a sign-off pause; rode three room stops and a Login switch; auto-retried p34-7, p34-8 and p33-4 once each; resumed p34-8 after an OAuth expiry; caught four colliding ADR 0060s (task-note Integration notes, refs rule A) so 0059–0063 landed clean. My slips: zsh word-split a slug list once (nothing written); fixed by an array.
