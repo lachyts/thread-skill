@@ -152,7 +152,7 @@ function check(f, product = tree) {
   need('e3', 'legs.md § Review', loop, [ASK, '§ Session range, never § Ranged scope', 'from its `resume point`',
     'no `review-ledger.py`', 'exactly one review round', 'there is no second round',
     "each task's round is a chain of its own, `round: 1`",
-    '§ Step 3.5 runs as written', "the Leg takes the checker's verdicts and judges none itself (ADR 0065)",
+    '§ Step 3.5, its confirm step, runs as written', "the Leg takes the checker's verdicts and judges none itself (ADR 0065)",
     'until its reproduction passes', 'committed with its fix in a new `Task:` commit, or removed',
     'never fixed in the Leg', 'its checker lost twice',
     'A review that does not converge sets the task aside', 'leg.py done --task <t> --verify pass --review <abs doc>'])

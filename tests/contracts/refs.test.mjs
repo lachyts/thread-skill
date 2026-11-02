@@ -47,6 +47,9 @@ const EXTERNAL = [
   ['~/.agents/skills/fresh-review/SKILL.md', 'Session range'],
   ['~/.agents/skills/fresh-review/SKILL.md', 'Step 2'],
   ['~/.agents/skills/fresh-review/SKILL.md', 'Step 4'],
+  // legs.md § Review (fresh-review p1-4, ADR 0065), hand-verified 2026-11-02 against the confirm-step branch that
+  // lands with it (fresh-review Phase 1): "## Step 3.5 — Confirm: a separate checker reproduces before anything blocks".
+  ['~/.agents/skills/fresh-review/SKILL.md', 'Step 3.5'],
 ]
 
 // Citations the checker flags that are really broken but live in a file another task owns. Each entry:
