@@ -18,18 +18,20 @@ each, `<ISO time> primary-refresh <dir>: <outcome>`:
   1. The checkout: its own toplevel, a main checkout (its git dir is its common dir, so never a linked worktree or an
      Engine snapshot) whose name does not end `-rollout` (a Rollout clone). Else `not a primary checkout: <why>`.
      --primary defaults to this script's plugin root, three levels up.
-  2. Busy: `.git/index.lock`, a rebase or a merge in progress, or HEAD not on the default branch (origin/HEAD's
-     target, else master, else main) prints `busy: <why>` and moves nothing.
-  3. The hold, for the primary only: `bash <primary>/skills/_shared/scripts/primary-hold.sh <primary>`, the primary's
-     own copy, since it is the rule the rollouts reading the primary run by. Any output is `held: <it>`. A missing
-     script, a non-zero exit or a timeout holds too (fail closed). An `--also` checkout has no hold: sessions commit
-     there in place, so a fast-forward is no different from a peer's commit.
-  4. `git fetch --quiet origin` (60 s, GIT_TERMINAL_PROMPT=0). A failure is `fetch failed: <why>`.
-  5. HEAD at origin/<default>: `current`. HEAD an ancestor of it: `git merge --ff-only --no-autostash
-     origin/<default>`, printing `moved <old12>..<new12> (<n> commits)`, or `refused: <git's reason>` when git will
-     not (an uncommitted edit it would overwrite): retried next pass. Origin an ancestor of HEAD: `ahead <n>: left to
-     its landing route`. Otherwise `diverged (ahead <a>, behind <b>)`: never integrated (ADR 0042's rule); a close's
-     landing PR merges with --merge, so its commits become ancestors of origin and the next pass moves.
+  2. `git fetch --quiet origin` (60 s, GIT_TERMINAL_PROMPT=0), first: it only moves origin's refs, so it is safe under
+     a hold and lets every later step know whether the checkout is behind. A failure is `fetch failed: <why>`.
+  3. HEAD at origin/<default> (origin/HEAD's target, else master, else main): `current`, whatever else is going on.
+     Origin an ancestor of HEAD: `ahead <n>: left to its landing route`.
+  4. Behind or diverged, and busy: `.git/index.lock`, a rebase or a merge in progress, or HEAD not on the default
+     branch prints `busy: <why>` and moves nothing.
+  5. Behind or diverged, the primary only, and held: `bash <primary>/skills/_shared/scripts/primary-hold.sh
+     <primary>`, the primary's own copy, since it is the rule the rollouts reading the primary run by. Any output is
+     `held: <it>`. A missing script, a non-zero exit or a timeout holds too (fail closed). An `--also` checkout has no
+     hold: sessions commit there in place, so a fast-forward is no different from a peer's commit.
+  5a. HEAD an ancestor of origin's tip: `git merge --ff-only --no-autostash origin/<default>`, printing `moved
+     <old12>..<new12> (<n> commits)`, or `refused: <git's reason>` when git will not (an uncommitted edit it would
+     overwrite): retried next pass. Otherwise `diverged (ahead <a>, behind <b>)`: never integrated (ADR 0042's rule);
+     a close's landing PR merges with --merge, so its commits become ancestors of origin and the next pass moves.
   6. Notify: a stuck spell is every pass from the first that reads not a primary checkout, busy, held, fetch
      failed, refused or diverged to the next that reads current, moved or ahead. Its clock never restarts within the
      spell, whatever origin does meanwhile and whichever stuck outcome a pass reads. A hold is a meant wait while a
@@ -39,7 +41,8 @@ each, `<ISO time> primary-refresh <dir>: <outcome>`:
      changes; a corrupt file reads as empty with one WARN.
   The self-update: on a pass that has just fetched and found the primary at origin's tip (current, or moved there by
   this pass), origin's committed copy of this script replaces this file once it compiles, so the job catches up
-  however the primary got there and never from anything older. Only the copy install placed (the marker file
+  however the primary got there. The copy tracks origin's tip: a copy installed from a branch ahead of origin is
+  replaced by origin's own at the next such pass. Only the copy install placed (the marker file
   primary-refresh.installed beside it) is ever rewritten: never a checkout's file, the version cache or any other copy.
   The fast-forward itself runs with no timeout, since a merge killed mid-checkout would leave a half-updated tree.
   --dry-run fetches, then says what it would do, moves nothing, updates nothing, notifies nothing and writes no
@@ -195,18 +198,15 @@ def _count(d, rng):
 
 def refresh(d, is_primary, dry_run):
     """One checkout's pass: (outcome, stuck). stuck is True for an outcome that leaves the checkout behind origin
-    with nothing on its way to fix it (step 6), False for one that clears a stuck spell, None for neither."""
+    with nothing on its way to fix it (step 6), False for one that clears a stuck spell, None for neither. It fetches
+    first (a fetch only moves origin's refs, so it is safe under a hold), so busy and held count as stuck only for a
+    checkout that is actually behind origin."""
     why = checkout_problem(d)
     if why:
         return f"not a primary checkout: {why}", True
     branch = default_branch(d)
-    why = busy(d, branch)
-    if why:
-        return f"busy: {why}", True
-    if is_primary:
-        h = hold(d)
-        if h:
-            return f"held: {h}", True
+    if branch is None:
+        return "busy: no origin default branch", True
     rc, _, err = git(d, "fetch", "--quiet", "origin")
     if rc != 0:
         return f"fetch failed: {err.splitlines()[-1] if err else rc}", True
@@ -220,6 +220,15 @@ def refresh(d, is_primary, dry_run):
             _self_update_line(d, branch)
         return "current", False
     behind, ahead = _count(d, f"HEAD..{upstream}"), _count(d, f"{upstream}..HEAD")
+    if git(d, "merge-base", "--is-ancestor", tip, head)[0] == 0:
+        return f"ahead {ahead}: left to its landing route", False
+    why = busy(d, branch)
+    if why:
+        return f"busy: {why}", True
+    if is_primary:
+        h = hold(d)
+        if h:
+            return f"held: {h}", True
     if git(d, "merge-base", "--is-ancestor", head, tip)[0] == 0:
         if dry_run:
             return f"would move {head[:12]}..{tip[:12]} ({behind} commits)", None
@@ -231,8 +240,6 @@ def refresh(d, is_primary, dry_run):
         if is_primary:
             _self_update_line(d, branch)
         return f"moved {head[:12]}..{tip[:12]} ({behind} commits)", False
-    if git(d, "merge-base", "--is-ancestor", tip, head)[0] == 0:
-        return f"ahead {ahead}: left to its landing route", False
     return f"diverged (ahead {ahead}, behind {behind}): never integrated here", True
 
 

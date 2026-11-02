@@ -124,9 +124,14 @@ g -C "$tmp/primary" reset -q --hard origin/master
 run >/dev/null
 ok "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["stuck"]))' "$XDG_STATE_HOME/thread/primary-refresh.json")" 0 \
   "R4: a checkout back to current ends its spell"
-# N3: busy for a day is stuck, and a hold continues a spell: one standing a day is reported too
-touch "$tmp/primary/.git/index.lock"
-run --now 2026-11-04T09:00:00+11:00 >/dev/null
+# N3: busy or held counts only for a checkout behind origin; then busy for a day is stuck, and a hold continues a spell
+touch "$tmp/primary/.git/index.lock"; echo "[[w-rollout]] running on it" > "$HOLD_FILE"
+has "$(run --now 2026-11-03T12:00:00+11:00)" "primary: current" "N3: a primary at origin's tip reads current, lock and hold or not"
+run --now 2026-11-04T13:00:00+11:00 >/dev/null
+ok "$(grep -c 'has not caught up' "$NTFY_LOG")" 1 "N3: … so a day at origin's tip under a hold starts no spell"
+rm -f "$HOLD_FILE"
+land a.txt seven
+has "$(run --now 2026-11-04T09:00:00+11:00)" "primary: busy: index.lock present" "N3: behind origin with an index.lock reads busy"
 rm -f "$tmp/primary/.git/index.lock"
 echo "[[y-rollout]] running on it" > "$HOLD_FILE"
 has "$(run --now 2026-11-04T21:00:00+11:00)" "primary: held: [[y-rollout]]" "N3: a held pass reads held"
@@ -177,7 +182,9 @@ newer "def broken(:"
 out=$(job)
 has "$out" "does not compile" "S3: a committed script that does not compile is refused"
 ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# moved by another route" "S3: … and the copy is kept"
-git -C "$tmp/seed" revert -q --no-edit HEAD >/dev/null 2>&1; g -C "$tmp/seed" push -q origin master 2>/dev/null
+g -C "$tmp/seed" revert --no-edit HEAD >/dev/null 2>&1; g -C "$tmp/seed" push -q origin master 2>/dev/null
+ok "$(git -C "$tmp/seed" show HEAD:skills/_shared/scripts/primary-refresh.py | tail -1)" "# moved by another route" \
+  "S3: (fixture) origin's script is back to one that compiles"
 job >/dev/null
 ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# moved by another route" "S3: a revert back to a script the copy already runs changes nothing"
 # S4: a primary whose HEAD is its own stale origin ref (fetched days ago), and held, never downgrades the copy
