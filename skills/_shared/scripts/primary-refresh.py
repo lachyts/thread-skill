@@ -30,20 +30,25 @@ each, `<ISO time> primary-refresh <dir>: <outcome>`:
      not (an uncommitted edit it would overwrite): retried next pass. Origin an ancestor of HEAD: `ahead <n>: left to
      its landing route`. Otherwise `diverged (ahead <a>, behind <b>)`: never integrated (ADR 0042's rule); a close's
      landing PR merges with --merge, so its commits become ancestors of origin and the next pass moves.
-  6. Notify: a checkout that has read diverged or refused at the same HEAD and origin tip for 24 h gets one ntfy push
-     (skills/execute/scripts/ntfy-push.py), keyed on (HEAD, origin tip), in the state file
+  6. Notify: a stuck spell is every pass from the first that reads not a primary checkout, busy, fetch failed,
+     refused or diverged to the next that reads current, moved, ahead or held (a meant wait, ADR 0031). Its clock
+     never restarts within the spell, whatever origin does meanwhile and whichever stuck outcome a pass reads. A
+     spell 24 h old gets one ntfy push (skills/execute/scripts/ntfy-push.py). The spells live in the state file
      ${XDG_STATE_HOME:-~/.local/state}/thread/primary-refresh.json (or --state), written atomically, only when it
-     changes; a corrupt file reads as empty with one WARN. A checkout that reads anything else drops its entry.
-  After a pass that moved the primary, the installed copy of this script (install's --bin-dir) is replaced by the
-  primary's own, when they differ, so the job updates itself. --dry-run fetches, then says what it would do, moves
-  nothing, notifies nothing and writes no state. --now pins the clock (tests). Exit 0 whatever it finds; 2 on usage.
+     changes; a corrupt file reads as empty with one WARN.
+  The self-update: when this file runs from outside every git work tree (install's copy) and the primary's HEAD is its
+  origin/<default> as last fetched, however it got there (this job, merge-task's refresh, a pull), the primary's
+  committed copy of this script replaces this file, once it compiles: never its working tree, and never from a
+  primary behind origin, so a stale primary never downgrades the job. Checked before the hold and after a move.
+  --dry-run fetches, then says what it would do, moves nothing, updates nothing, notifies nothing and writes no
+  state. --now pins the clock (tests). Exit 0 whatever it finds; 2 on usage.
 
 install copies this script into --bin-dir (~/.local/state/thread/bin) and writes the launchd job to --plist
 (~/Library/LaunchAgents/<label>.plist): ProgramArguments [this python, the copy, run, --primary <dir>, --also <dir>...],
 StartInterval --interval (300), RunAtLoad, ProcessType Background, --log for stdout and stderr. It runs the copy, never
-the primary's file, so the job exists before the primary holds this script (the first refresh brings it) and its path
-never moves. Then it prints the one step left to Lachy's shell: `launchctl bootstrap gui/<uid> <plist>` (after
-`launchctl bootout gui/<uid>/<label>` when the job is already loaded).
+the primary's file, so the job exists before the primary holds this script (the first refresh brings it), its path
+never moves, and it updates itself (run's self-update). Then it prints the one step left to Lachy's shell:
+`launchctl bootstrap gui/<uid> <plist>` (after `launchctl bootout gui/<uid>/<label>` when the job is already loaded).
 
 Stdlib only, python >= 3.9. Never writes the vault, a rollout note or a Run record.
 """
@@ -75,6 +80,7 @@ NOTIFY_AFTER = timedelta(hours=24)
 GIT_TIMEOUT = 60
 HOLD_TIMEOUT = 120
 NTFY_TIMEOUT = 60
+_STAMP = ""  # the pass's time, for the lines refresh() prints itself
 
 
 def _env():
@@ -101,6 +107,15 @@ def git(d, *args, timeout=GIT_TIMEOUT):
     except (OSError, subprocess.SubprocessError) as e:
         return 128, "", str(e)
     return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+
+def _git_raw(d, *args, timeout=GIT_TIMEOUT):
+    """git() returning stdout as bytes, unstripped (a file's exact content)."""
+    try:
+        p = subprocess.run(["git", "-C", str(d), *args], capture_output=True, env=ENV, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as e:
+        return 128, b"", str(e)
+    return p.returncode, p.stdout, p.stderr.decode("utf-8", "replace").strip()
 
 
 def _real(p):
@@ -177,28 +192,33 @@ def _count(d, rng):
 
 
 def refresh(d, is_primary, dry_run):
-    """One checkout's pass: (outcome, key). key is (head, origin tip) for a state that may notify, else None."""
+    """One checkout's pass: (outcome, stuck). stuck is True for an outcome that leaves the checkout behind origin
+    with nothing on its way to fix it (step 6), False for one that clears a stuck spell, None for neither."""
     why = checkout_problem(d)
     if why:
-        return f"not a primary checkout: {why}", None
+        return f"not a primary checkout: {why}", True
+    if is_primary and not dry_run:
+        line = self_update(d)
+        if line:
+            print(f"{_STAMP} primary-refresh {d}: {line}", flush=True)
     branch = default_branch(d)
     why = busy(d, branch)
     if why:
-        return f"busy: {why}", None
+        return f"busy: {why}", True
     if is_primary:
         h = hold(d)
         if h:
-            return f"held: {h}", None
+            return f"held: {h}", False
     rc, _, err = git(d, "fetch", "--quiet", "origin")
     if rc != 0:
-        return f"fetch failed: {err.splitlines()[-1] if err else rc}", None
+        return f"fetch failed: {err.splitlines()[-1] if err else rc}", True
     upstream = f"origin/{branch}"
     head = git(d, "rev-parse", "HEAD")[1]
     tip = git(d, "rev-parse", upstream)[1]
     if not head or not tip:
-        return f"cannot read HEAD or {upstream}", None
+        return f"cannot read HEAD or {upstream}", True
     if head == tip:
-        return "current", None
+        return "current", False
     behind, ahead = _count(d, f"HEAD..{upstream}"), _count(d, f"{upstream}..HEAD")
     if git(d, "merge-base", "--is-ancestor", head, tip)[0] == 0:
         if dry_run:
@@ -206,11 +226,15 @@ def refresh(d, is_primary, dry_run):
         rc, _, err = git(d, "merge", "--ff-only", "--no-autostash", "--quiet", upstream)
         if rc != 0:
             reason = " ".join(err.split())[:240] or f"exit {rc}"
-            return f"refused: {reason}", (head, tip)
-        return f"moved {head[:12]}..{tip[:12]} ({behind} commits)", None
+            return f"refused: {reason}", True
+        if is_primary:
+            line = self_update(d)
+            if line:
+                print(f"{_STAMP} primary-refresh {d}: {line}", flush=True)
+        return f"moved {head[:12]}..{tip[:12]} ({behind} commits)", False
     if git(d, "merge-base", "--is-ancestor", tip, head)[0] == 0:
-        return f"ahead {ahead}: left to its landing route", None
-    return f"diverged (ahead {ahead}, behind {behind}): never integrated here", (head, tip)
+        return f"ahead {ahead}: left to its landing route", False
+    return f"diverged (ahead {ahead}, behind {behind}): never integrated here", True
 
 
 # ---- state and notify ------------------------------------------------------------------------------------
@@ -280,20 +304,36 @@ def _parse_now(s):
     return t if t.tzinfo else t.astimezone()
 
 
-def _self_update(primary, bin_dir):
-    """Replace the installed copy with the primary's own when they differ. Returns a log line or None."""
-    src = Path(primary) / SELF_REL
-    dst = _real(bin_dir) / "primary-refresh.py"
-    if not src.is_file() or not dst.is_file():
+def self_update(primary):
+    """Bring the installed copy (this running file) up to the primary's committed one. Only while the primary's HEAD
+    is its origin/<default> as last fetched, however it got there (this job, merge-task's refresh, a pull), so a stale
+    primary never downgrades the copy; only from the committed blob, never the working tree, and only once it
+    compiles. A file inside any git work tree (a checkout, a worktree, the primary itself) is source, never the
+    installed copy, so it is never rewritten. Returns a log line or None."""
+    me = Path(__file__).resolve()
+    if git(me.parent, "rev-parse", "--is-inside-work-tree")[1] == "true":
         return None
-    new = src.read_bytes()
-    if hashlib.sha256(new).digest() == hashlib.sha256(dst.read_bytes()).digest():
+    branch = default_branch(primary)
+    if branch is None:
         return None
-    _atomic_write(dst, new.decode("utf-8"), mode=0o755)
-    return f"the installed copy {dst} now matches the primary's"
+    head = git(primary, "rev-parse", "HEAD")[1]
+    if not head or head != git(primary, "rev-parse", f"refs/remotes/origin/{branch}")[1]:
+        return None
+    rc, src, _ = _git_raw(primary, "show", f"HEAD:{SELF_REL}")
+    if rc != 0 or not src:
+        return None
+    if hashlib.sha256(src).digest() == hashlib.sha256(me.read_bytes()).digest():
+        return None
+    try:
+        compile(src, SELF_REL, "exec")
+    except (SyntaxError, ValueError) as e:
+        return f"the primary's {SELF_REL} at {head[:12]} does not compile ({e}): the installed copy is kept"
+    _atomic_write(me, src.decode("utf-8"), mode=0o755)
+    return f"the installed copy {me} now matches the primary's {head[:12]}"
 
 
 def cmd_run(args):
+    global _STAMP
     now = _parse_now(args.now)
     if now is None:
         print(f"ERROR: primary-refresh run: usage: --now {args.now!r} is not an ISO timestamp", file=sys.stderr)
@@ -303,27 +343,26 @@ def cmd_run(args):
     state_path = _state_path(args.state)
     stuck = _read_state(state_path)
     before = json.dumps(stuck, sort_keys=True)
-    stamp = now.isoformat(timespec="seconds")
+    _STAMP = stamp = now.isoformat(timespec="seconds")
     for d, is_primary in targets:
-        outcome, key = refresh(d, is_primary, args.dry_run)
+        outcome, is_stuck = refresh(d, is_primary, args.dry_run)
         print(f"{stamp} primary-refresh {d}: {outcome}", flush=True)
-        if is_primary and outcome.startswith("moved ") and not args.dry_run:
-            line = _self_update(d, args.bin_dir or DEFAULT_BIN)
-            if line:
-                print(f"{stamp} primary-refresh {d}: {line}", flush=True)
         k = str(d)
-        if key is None:
+        if is_stuck is False:
             stuck.pop(k, None)
             continue
+        if not is_stuck:
+            continue
+        # A stuck spell runs from its first stuck pass to the next pass that clears it, whatever origin does meanwhile
+        # and whichever stuck outcome each pass reads, so new commits on origin and a blip never restart its clock.
         entry = stuck.get(k)
-        keystr = f"{key[0]}..{key[1]}"
-        if not entry or entry.get("key") != keystr:
-            stuck[k] = {"key": keystr, "since": stamp}
+        since = _parse_now(entry.get("since")) if entry and isinstance(entry.get("since"), str) else None
+        if since is None:
+            stuck[k] = {"since": stamp}
             continue
-        since = _parse_now(entry.get("since"))
-        if entry.get("notified") or since is None or now - since < NOTIFY_AFTER:
+        if entry.get("notified") or now - since < NOTIFY_AFTER:
             continue
-        message = (f"thread: {d.name} cannot fast-forward to origin since {entry['since'][:16]}: {outcome}"
+        message = (f"thread: {d.name} has not caught up with origin since {entry['since'][:16]}: {outcome}"
                    f" (git -C {d} status)")[:200]
         if args.dry_run:
             print(f"{stamp} primary-refresh {d}: would notify: {message}", flush=True)
@@ -386,7 +425,6 @@ def main(argv=None):
     r.add_argument("--also", action="append", default=[], help="another live-loaded checkout (no rollout hold)")
     r.add_argument("--state", default=None, help="the state file (default ${XDG_STATE_HOME:-~/.local/state}/thread/"
                                                  "primary-refresh.json)")
-    r.add_argument("--bin-dir", default=None, help=f"the installed copy's dir, for its self-update (default {DEFAULT_BIN})")
     r.add_argument("--ntfy-server", default=None, help="ntfy-push.py's --server")
     r.add_argument("--now", default=None, help="the time to read against, ISO (default: now)")
     r.add_argument("--dry-run", action="store_true", help="move nothing, notify nothing, write no state")

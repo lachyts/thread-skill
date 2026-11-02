@@ -20,11 +20,11 @@ But nothing moves it. `self-rollout-check.sh --refresh-in-place` runs only after
    - **The move:** `git merge --ff-only --no-autostash`, so git itself refuses to overwrite an uncommitted edit.
    - **Ahead of origin:** left to its landing route. A close's landing PR merges with `--merge`, so its commits become ancestors of origin and a later pass moves.
    - **Diverged:** never integrated (ADR 0042's rule).
-   - **Notice:** Lachy is notified once, through `ntfy-push.py`, only when a checkout reads diverged or refused at the same commits for 24 hours.
+   - **Notice:** Lachy is notified once, through `ntfy-push.py`, when a checkout stays stuck for 24 hours. A stuck spell runs from the first pass that cannot bring it current (it is no main checkout, it is busy, its fetch fails, git refuses the fast-forward, or it has diverged) to the next pass that reads current, moved, ahead or held. A held pass is a meant wait (ADR 0031), so it ends a spell. New commits on origin and a failed fetch never restart the clock.
 
 3. **The other live-loaded checkouts.** Each `--also` checkout gets the same pass with no hold, because sessions already commit there in place, so a fast-forward is no different from a peer's commit. The job is installed with `--also ~/.agents`.
 
-4. **It runs an installed copy and updates it.** `install` copies the script to `~/.local/state/thread/bin/` and points the job there with `--primary`. The job exists before the primary holds the script, and its path never moves. After a pass that moved the primary, the copy is replaced by the primary's own when they differ.
+4. **It runs an installed copy and updates it.** `install` copies the script to `~/.local/state/thread/bin/` and points the job there with `--primary`. The job exists before the primary holds the script, and its path never moves. Whenever the primary's HEAD is its origin's tip as last fetched, however it got there (this job, merge-task's refresh, a pull), the copy is replaced by the primary's committed script, once it compiles. The working tree is never read, so a half-written edit never reaches the job, and a primary behind origin never downgrades it. A script inside any git work tree is source, never the installed copy, and is never rewritten.
 
 5. **`/fresh-review` stays a shared skill.** Lachy, 2026-11-02, "Stay shared, kept current": it stays in `~/.agents`, which Thread Skill depends on, kept current by decision 3.
 

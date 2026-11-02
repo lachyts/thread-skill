@@ -2,7 +2,8 @@
 # ADR 0066, executed: skills/_shared/scripts/primary-refresh.py, the Primary refresh. A bare "origin" and clones of
 # it stand for the primary and an --also checkout; the primary's own primary-hold.sh and ntfy-push.py are stubs
 # committed into origin (the hold prints $HOLD_FILE's text, the push appends its message to $NTFY_LOG), so every
-# arm is offline. R1-R9 are the plan's cases; S1 the self-update, I1 install's job. Hermetic: HOME, XDG_STATE_HOME
+# arm is offline. R1-R9 are the plan's cases; N1-N3 the stuck spell; S1-S4 the self-update; I1 install's job. Every
+# run goes through a copy outside any git work tree, as the installed job does, so no arm can rewrite this tree. Hermetic: HOME, XDG_STATE_HOME
 # and every path live under mktemp; commits carry an inline identity; global/system git config is ignored.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -37,7 +38,8 @@ g clone -q "$tmp/origin.git" "$tmp/primary" 2>/dev/null
 g clone -q "$tmp/origin.git" "$tmp/agents" 2>/dev/null
 # land <file> <text>: a commit on origin through the seed
 land() { echo "$2" > "$tmp/seed/$1"; g -C "$tmp/seed" add -A; g -C "$tmp/seed" commit -qm "$2"; g -C "$tmp/seed" push -q origin master 2>/dev/null; }
-run() { python3 "$pr" run --primary "$tmp/primary" "$@" 2>&1; }
+mkdir -p "$tmp/run"; cp "$pr" "$tmp/run/primary-refresh.py"
+run() { python3 "$tmp/run/primary-refresh.py" run --primary "$tmp/primary" "$@" 2>&1; }
 head_of() { git -C "$1" rev-parse HEAD; }
 tip() { git -C "$tmp/seed" rev-parse HEAD; }
 
@@ -99,31 +101,51 @@ echo note > "$tmp/primary/untouched.txt"
 has "$(run)" "primary: moved" "R6: an uncommitted file origin never touches does not stop a move"
 rm -f "$tmp/primary/untouched.txt"
 
-# ---- R4: ahead, then diverged; one notify after 24 h -------------------------------------------------------
+# ---- R4 / N1-N3: ahead, then diverged; the stuck spell and its one notify -----------------------------------
 echo local > "$tmp/primary/b.txt"; g -C "$tmp/primary" add b.txt; g -C "$tmp/primary" commit -qm local
 has "$(run)" "primary: ahead 1: left to its landing route" "R4: a primary ahead of origin is left to its landing route"
 land a.txt four
 out=$(run --now 2026-11-01T10:00:00+11:00)
 has "$out" "diverged (ahead 1, behind 1)" "R4: a diverged primary is never integrated"
 ok "$(git -C "$tmp/primary" log -1 --format=%s)" "local" "R4: … its HEAD stays its own"
+land a.txt five   # N1: origin moves on during the spell
 run --now 2026-11-01T20:00:00+11:00 >/dev/null
 ok "$(cat "$NTFY_LOG" 2>/dev/null)" "" "R4: no notify inside 24 h"
+g -C "$tmp/primary" remote set-url origin "$tmp/nowhere.git"   # N2: a blip (fetch fails) mid-spell
+has "$(run --now 2026-11-02T06:00:00+11:00)" "primary: fetch failed" "N2: a fetch that fails reads fetch failed"
+g -C "$tmp/primary" remote set-url origin "$tmp/origin.git"
+land a.txt six
 out=$(run --now 2026-11-02T10:30:00+11:00)
-has "$out" "primary: notified" "R4: one notify once it stays diverged 24 h"
-has "$(cat "$NTFY_LOG")" "cannot fast-forward to origin" "R4: … through the primary's ntfy-push.py"
+has "$out" "primary: notified" "N1/N2: one notify once the spell is 24 h old, though origin moved and a fetch failed within it"
+has "$(cat "$NTFY_LOG")" "has not caught up with origin since 2026-11-01T10:00" "R4: … through the primary's ntfy-push.py, dated from the spell's start"
 run --now 2026-11-03T10:30:00+11:00 >/dev/null
-ok "$(grep -c 'cannot fast-forward' "$NTFY_LOG")" 1 "R4: … and only once for the same HEAD and tip"
+ok "$(grep -c 'has not caught up' "$NTFY_LOG")" 1 "R4: … and only once a spell"
 g -C "$tmp/primary" reset -q --hard origin/master
 run >/dev/null
 ok "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["stuck"]))' "$XDG_STATE_HOME/thread/primary-refresh.json")" 0 \
-  "R4: a checkout back to current drops its entry"
+  "R4: a checkout back to current ends its spell"
+# N3: busy for a day is stuck too; held is a meant wait and ends a spell
+touch "$tmp/primary/.git/index.lock"
+run --now 2026-11-04T09:00:00+11:00 >/dev/null
+has "$(run --now 2026-11-05T09:30:00+11:00)" "primary: notified" "N3: a primary busy for a day (a stale index.lock) notifies"
+rm -f "$tmp/primary/.git/index.lock"
+g -C "$tmp/primary" checkout -q side
+run --now 2026-11-06T09:00:00+11:00 >/dev/null
+g -C "$tmp/primary" checkout -q master
+echo "[[y-rollout]] running on it" > "$HOLD_FILE"
+run --now 2026-11-06T12:00:00+11:00 >/dev/null
+rm -f "$HOLD_FILE"
+g -C "$tmp/primary" checkout -q side
+run --now 2026-11-07T10:00:00+11:00 >/dev/null
+ok "$(grep -c 'has not caught up' "$NTFY_LOG")" 2 "N3: a held pass ends the spell, so the next stuck pass starts a new clock"
+g -C "$tmp/primary" checkout -q master
 
 # ---- R7: never a linked worktree or a Rollout clone --------------------------------------------------------
 g -C "$tmp/primary" worktree add -q --detach "$tmp/wt" 2>/dev/null
-has "$(python3 "$pr" run --primary "$tmp/wt")" "not a primary checkout: a linked worktree" "R7: a linked worktree is no primary"
+has "$(python3 "$tmp/run/primary-refresh.py" run --primary "$tmp/wt")" "not a primary checkout: a linked worktree" "R7: a linked worktree is no primary"
 g clone -q "$tmp/origin.git" "$tmp/primary-rollout" 2>/dev/null
-has "$(python3 "$pr" run --primary "$tmp/primary-rollout")" "not a primary checkout: a Rollout clone" "R7: a Rollout clone is no primary"
-has "$(python3 "$pr" run --primary "$tmp/primary/skills")" "not its own toplevel" "R7: a folder inside a checkout is no primary"
+has "$(python3 "$tmp/run/primary-refresh.py" run --primary "$tmp/primary-rollout")" "not a primary checkout: a Rollout clone" "R7: a Rollout clone is no primary"
+has "$(python3 "$tmp/run/primary-refresh.py" run --primary "$tmp/primary/skills")" "not its own toplevel" "R7: a folder inside a checkout is no primary"
 
 # ---- R8 / I1: install writes the copy and the job ----------------------------------------------------------
 out=$(python3 "$pr" install --primary "$tmp/primary" --also "$tmp/agents" --bin-dir "$tmp/bin" --plist "$tmp/job.plist" 2>&1)
@@ -133,11 +155,38 @@ args=$(python3 -c 'import plistlib,sys; j=plistlib.load(open(sys.argv[1],"rb"));
 ok "$args" "com.thread.primary-refresh 300 True $tmp/bin/primary-refresh.py run --primary $tmp/primary --also $tmp/agents" \
   "R8: the job runs the installed copy every 300 s, with --primary and each --also"
 
-# ---- S1: a move brings the installed copy up to the primary's -----------------------------------------------
-echo "# a newer refresh" >> "$tmp/seed/skills/_shared/scripts/primary-refresh.py"
-g -C "$tmp/seed" commit -qam newer; g -C "$tmp/seed" push -q origin master 2>/dev/null
-out=$(run --bin-dir "$tmp/bin")
-has "$out" "now matches the primary's" "S1: after a move the installed copy is replaced by the primary's"
+# ---- S1-S4: the installed copy updates itself from the primary's committed script -------------------------------
+job() { python3 "$tmp/bin/primary-refresh.py" run --primary "$tmp/primary" "$@" 2>&1; }
+newer() {  # newer <line>: a commit on origin appending <line> to the script
+  echo "$1" >> "$tmp/seed/skills/_shared/scripts/primary-refresh.py"
+  g -C "$tmp/seed" commit -qam "$1"; g -C "$tmp/seed" push -q origin master 2>/dev/null
+}
+newer "# a newer refresh"
+out=$(job)
+has "$out" "now matches the primary's" "S1: a move brings the installed copy up to the primary's committed script"
 ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# a newer refresh" "S1: … with its content"
+newer "# moved by another route"
+g -C "$tmp/primary" fetch -q origin && g -C "$tmp/primary" merge -q --ff-only origin/master   # merge-task's refresh, say
+out=$(job)
+has "$out" "primary: current" "S2: a primary another route moved reads current"
+ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# moved by another route" "S2: … and the copy still catches up"
+echo "# half-written, uncommitted" >> "$tmp/primary/skills/_shared/scripts/primary-refresh.py"
+job >/dev/null
+ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# moved by another route" "S3: an uncommitted edit in the primary never reaches the copy"
+g -C "$tmp/primary" checkout -q -- skills/_shared/scripts/primary-refresh.py
+newer "def broken(:"
+out=$(job)
+has "$out" "does not compile" "S3: a committed script that does not compile is refused"
+ok "$(tail -1 "$tmp/bin/primary-refresh.py")" "# moved by another route" "S3: … and the copy is kept"
+git -C "$tmp/seed" revert -q --no-edit HEAD >/dev/null 2>&1; g -C "$tmp/seed" push -q origin master 2>/dev/null
+g -C "$tmp/primary" fetch -q origin
+g -C "$tmp/primary" reset -q --hard HEAD~3   # a primary behind origin holds an older script
+before=$(cat "$tmp/bin/primary-refresh.py" | shasum)
+echo "[[z-rollout]] running on it" > "$HOLD_FILE"
+job >/dev/null
+ok "$(cat "$tmp/bin/primary-refresh.py" | shasum)" "$before" "S4: a primary behind origin never downgrades the copy"
+rm -f "$HOLD_FILE"
+cp "$pr" "$tmp/src-before"; python3 "$pr" run --primary "$tmp/primary" >/dev/null 2>&1
+ok "$(cmp -s "$pr" "$tmp/src-before" && echo same)" same "S4: a script inside a git work tree is never rewritten"
 
 exit $fail
