@@ -813,9 +813,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   **Running rollout** with no Engine snapshot. The plugin root counts only as
   its own work tree's toplevel: a version-cache copy, even inside another repo
   (~/.claude's config repo), has none, and a snapshot stands for the checkout
-  it was cut from (`engine-snapshot.py`'s git_primary). Not the engine's "main
+  it was cut from (`engine-snapshot.py`'s git_primary). What moves it is the
+  **Primary refresh** (ADR 0066). Not the engine's "main
   checkout", which is a rollout's own repo. _Avoid_: live checkout, installed
   copy.
+- **Primary refresh** — the background job that keeps the **Primary checkout**
+  current with origin: every few minutes it fast-forwards it whenever ADR
+  0031's hold is clear, and keeps the other checkouts sessions load live from
+  (`~/.agents`, which holds /fresh-review) current the same way, with no hold.
+  Fast-forward only: a diverged checkout, or one with an uncommitted edit
+  origin would overwrite, is left as it is (an edit origin never touches rides
+  along), and Lachy hears only when one stays unable to catch up for a day, a
+  rollout's hold included (ADR 0066). _Avoid_: auto-update,
+  plugin update (Claude Code's own verb).
 - **Engine snapshot** — a frozen copy of the plugin at origin's tip of its
   default branch, fetched fresh when schedule writes the rollout note (never
   the **Primary checkout**'s working state) and named on it: the
@@ -1125,9 +1135,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   agent's result line), and resumes every stopped call by `resumeFromRunId` on
   the Stage's re-send (Chorus ADR 0071; execute § Room stop). It stands from
   its `## Pause log` line to `room stop ended`, and it never stamps `paused:`.
-  A spread (Chorus ADR 0109) is one too, sent before the line: the Stage
-  moves the lead off a Login whose 5-hour window would not carry its
-  Rollouts, and the Pause-log line says `spreading its Rollouts`.
+  The line is the week's alone: the spread (Chorus ADR 0109) and the 5-hour
+  line retired with Chorus ADR 0111.
   On an Approved queue it is no run mark.
   _Avoid_: drain (Chorus's signal calls it "a drain, not a pause"; here the
   soft pause is the drain), pause, hard pause, handoff.

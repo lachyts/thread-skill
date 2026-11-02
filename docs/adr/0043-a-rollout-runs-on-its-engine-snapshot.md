@@ -1,7 +1,7 @@
 # 0043 — A rollout runs on its Engine snapshot
 
 Date: 2026-10-21
-Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18` (83 h, 17 of 34 merged), built by P29. Supersedes ADR 0031 in part (§ Decision), so the Primary checkout no longer has to stand still while a rollout runs.
+Status: accepted. Ruled with Lachy in the 2026-10-21 grill that followed `chorus-rollout-2026-10-18` (83 h, 17 of 34 merged), built by P29. Supersedes ADR 0031 in part (§ Decision), so the Primary checkout no longer has to stand still while a rollout runs. *(Amended by ADR 0066, 2026-11-02: the Primary refresh is what moves it.)*
 
 ## Context
 

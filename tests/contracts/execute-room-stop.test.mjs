@@ -1,8 +1,7 @@
 // A Chorus room stop (p18-1; Chorus ADR 0071, the lead's half): execute § Room stop and every site it reaches. At a
-// Login's line, or before it in a spread (Chorus ADR 0109), the lead starts nothing, frees the lane, stops each
+// Login's week's line (the only line since Chorus ADR 0111), the lead starts nothing, frees the lane, stops each
 // Workflow call at a step boundary (skills/execute/scripts/step-boundary.py, executed by
-// skills/execute/tests/room-stop.test.mjs), records the stop on the rollout note (a spread as a spread, never as a
-// line), never pauses, and resumes every stopped call at the next loop entry. A transient row after a usage limit is a
+// skills/execute/tests/room-stop.test.mjs), records the stop on the rollout note, never pauses, and resumes every stopped call at the next loop entry. A transient row after a usage limit is a
 // Lost call, never reconciled. Every Cold resume reads a believed-live call against /workflows, a room stop or not; a
 // tripped integrate check drops the call for `prepare`; status and repair read a room stop, standing or lapsed, as a
 // live queue while its owner session lives, whatever its tasks read. This pins the prose an LLM lead follows, in
@@ -11,8 +10,8 @@
 // Every rule lives in one function, checkRoomStop({ skill, status, handoff, repair, context, legs }), that returns named
 // failures, so the real files and the controls run through identical logic: each control mutates the real text in one
 // place and must fail with exactly its rule. The status lines are parsed with the Stop hook's own STATUS_RE. Reads
-// files only, apart from the Stop hook's STATUS_RE and one spread fixture run through step-boundary.py on a note under
-// its tmp dir.
+// files only, apart from the Stop hook's STATUS_RE and one week's-line fixture run through step-boundary.py on a note
+// under its tmp dir.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -75,12 +74,10 @@ function bulletIn(block, prefix) {
   return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
 }
 const sentences = (text) => text.split(/(?<=\.)\s+/)
-// Item 1's trigger sentence alone, and its spread definition (Chorus ADR 0109). The definition repeats `is at its
-// 5-hour line`, so a trigger read over the whole item would let its control pass vacuously.
+// Item 1's trigger sentence alone.
 const trigOf = (skill) => sentences(item(skill, 1)).find((s) => s.includes('The trigger is')) ?? ''
-const spreadDefOf = (skill) => sentences(item(skill, 1)).find((s) => s.startsWith('A spread (Chorus ADR 0109)')) ?? ''
-// Item 2's `## Pause log` line for a spread: the line's own, its head in place of `<Login> at <…>`.
-const SPREAD_LINE = '`<Login> spreading its Rollouts (would reach its 5-hour line ~HH:MM); stopping at a step boundary: <runId> <slug> (<task|revise|integrate>), …; lane: …`'
+// Item 2's `## Pause log` line opens with the week's line, the only line (Chorus ADR 0111).
+const WEEK_LINE = `"<Login> at its week's line; stopping at a step boundary: `
 // A bold-labelled paragraph of a section: from its label line to the next blank line, collapsed.
 function para(text, label) {
   const lines = (text ?? '').split('\n')
@@ -162,21 +159,15 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
   if (!(iP >= 0 && iP < iR && iR < iD) || nextHeading !== iD ||
     JSON.stringify(nums) !== JSON.stringify([...Array(13).keys()])) fails.push('section')
 
-  // trigger: a `Chorus: ` Prompt or Steer, either line or a spread's head, in item 1's trigger sentence.
+  // trigger: a `Chorus: ` Prompt or Steer at the week's line, in item 1's trigger sentence; item 2's line and a Leg's
+  // `<text>` open with it; no 5-hour form or spread anywhere in the section or the Leg's (Chorus ADR 0111).
   const trig = trigOf(skill)
-  if (!['`Chorus: `', "`is at its week's line`", '`is at its 5-hour line`', '`would reach its 5-hour line`'].every((k) => trig.includes(k))) {
+  const legsRoom = collapse(slice(legs, /^## Room stop$/, /^## /) ?? '')
+  if (!['`Chorus: `', "`is at its week's line`"].every((k) => trig.includes(k)) || !it(2).includes(WEEK_LINE) ||
+    !legsRoom.includes("`<text>` opens as execute item 2's line does: `<Login> at its week's line`.") ||
+    [sec, legsRoom].some((t) => /5-hour|spread/.test(t))) {
     fails.push('trigger')
   }
-
-  // spread (Chorus ADR 0109): item 1 tells a spread from a line (the new head, or the borrowed head that says
-  // `spreads`); item 2 records it as a spread, the rest of its line unchanged, never as a line; a Leg's `<text>`
-  // opens the same way.
-  const spreadDef = spreadDefOf(skill)
-  const legsRoom = collapse(slice(legs, /^## Room stop$/, /^## /) ?? '')
-  if (!['`would reach its 5-hour line`', 'the borrowed `is at its 5-hour line` head', '`spreads`', 'never as a line'].every((k) => spreadDef.includes(k)) ||
-    !it(2).includes(SPREAD_LINE) || !it(2).includes('never says `at its 5-hour line`') ||
-    !legsRoom.includes("(execute § Room stop, item 1, a spread's included)") ||
-    !legsRoom.includes('for a spread `<Login> spreading its Rollouts (would reach its 5-hour line ~HH:MM)`')) fails.push('spread')
 
   // record-first: `begin` before any `mark`; no `paused:` stamp, no `record-pause`; bare slugs, which `begin` itself
   // enforces (exit 2, nothing written), so its exit 2 is re-run bare, never carried on as a non-durable stop.
@@ -306,12 +297,12 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
 
   // bound: clause (2) reads `stands` after the paused check and before clause (3); a lapse re-enters Cold resume
   // skipping § 2.7; a lost watch is relaunched with a re-mark first; no clause number or order token in it; 6 h is the
-  // Stage's owed-resume horizon, never d3's wait.
+  // Stage's owed-resume horizon, Chorus's `OWED_MAX_S`.
   if (!(hb.indexOf('`paused:`') >= 0 && hb.indexOf('`paused:`') < hb.indexOf('step-boundary.py stands') && c2.includes('step-boundary.py stands')) ||
     !c2.includes('On exit 4') || !c2.includes('§4.5 *Cold resume*') || !c2.includes('skips § 2.7') ||
     !before(c2, 'first run `step-boundary.py mark` again', 'then the watch in the background') ||
     /\(\d\)/.test(c2.slice('never resume a paused rollout.'.length)) || ORDER.some((k) => c2.includes(k)) || c2.includes('ROLLOUT-STATUS: ') ||
-    !it(11).includes('`OWED_MAX_S`') || it(11).includes('5-hour wait')) fails.push('bound')
+    !it(11).includes('`OWED_MAX_S`')) fails.push('bound')
 
   // step12-pointer: step 1.2's retry never sees such a row.
   if (!s12.includes('A transient row after a usage limit this Session knows of never reaches this retry: *Lost call* resumes it first (*After a usage limit*)')) {
@@ -334,10 +325,10 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
   if (!collapse(repair).includes("When the limit is known to the lead's Session, execute § 4.5 *Lost call* first resumes such a transient row once from its own run") ||
     repair.includes('resumeFromRunId')) fails.push('repair')
 
-  // context: the term, its span, Chorus's word for it, and the spread it covers too.
+  // context: the term, its span, Chorus's word for it, and its line the week's alone.
   const term = collapse(context.split('\n- **').find((x) => x.startsWith('Room stop**')) ?? '')
   if (!context.includes('- **Room stop** —') || !term.includes('from its `## Pause log` line to `room stop ended`') ||
-    !term.includes('"a drain, not a pause"') || !term.includes('A spread (Chorus ADR 0109) is one too')) fails.push('context')
+    !term.includes('"a drain, not a pause"') || !term.includes("The line is the week's alone")) fails.push('context')
   // live-check: EVERY Cold resume, a room stop or not, reads a believed-live call against /workflows. The Stage's d5
   // usage-limit or signed-out re-send respawns the CLI with no room stop standing (none signalled before the limit,
   // or item 11's lapse re-entry already ended it), and the dead calls must not ride `--running` as live until
@@ -425,57 +416,32 @@ test('execute § Room stop and every site it reaches hold every rule', () => {
   assert.deepEqual(checkRoomStop(real), [])
 })
 
-// ---- a spread (Chorus ADR 0109), executed --------------------------------------------------------------------------
-// The Stage's Prompts as Chorus's logins.boundary_prompt(spread=) and room_prompt word them, with fixed times: the
-// borrowed head it sends today, the head its flip will send, a plain, held and wait-for-reset 5-hour line, a week's
-// line, and two resumes, each with its heartbeat sentence left out (it carries the heartbeat's older name, which
-// queue-only keeps out of this file). These pin the skill's acceptance, not Chorus's output (its
-// test_the_spread_texts does that).
+// ---- a week's line, executed ----------------------------------------------------------------------------------
+// The Stage's Prompts as Chorus's logins.boundary_prompt and room_prompt word them, with fixed times: a week's line
+// (switched and held) and two resumes, each with its heartbeat sentence left out (it carries the heartbeat's older
+// name, which queue-only keeps out of this file). These pin the skill's acceptance, not Chorus's output.
 const DRAIN = " Start no new agent step, task or Integration. TaskStop each running Workflow call the moment its running agent's result line is in that run's journal.jsonl, so no finished step is lost, and end this Turn once no call is mid-step. Do not hand off. This is a drain, not a pause: do not stamp `paused:` and do not delete the heartbeat. "
 const SWITCH = 'Chorus then switches this Session to the next Login by the Login pick (the soonest weekly reset with room) and sends the resume.'
 const RESUME = " Re-enter /thread:execute [[demo-rollout]] §4.5 resume in this Session. Resume every Workflow call you stopped by resumeFromRunId with its same args — every finished agent replays from the run's journal."
-const BORROWED = 'Chorus: L is at its 5-hour line (17:20) — about 31 minutes of room left. Its 2 Rollouts would reach the line ~17:51, before its reset at 19:00, so Chorus spreads them: this one moves to another Login.' + DRAIN + SWITCH
-const FLIPPED = 'Chorus: L would reach its 5-hour line ~17:51 with 2 Rollouts.' + DRAIN + SWITCH
-const PLAIN5 = 'Chorus: L is at its 5-hour line (17:20) — about 12 minutes of room left.' + DRAIN + SWITCH
-const HELD5 = 'Chorus: L is at its 5-hour line (17:20) — about 12 minutes of room left.' + DRAIN +
-  'No Login has room: Chorus holds this Session on this Login until a window resets (19:00) or a Login has room, and then sends the resume.'
-const WAIT5 = 'Chorus: L is at its 5-hour line (17:20) — about 12 minutes of room left.' + DRAIN +
-  "Chorus waits for its 5-hour window's reset at 17:50, on this Login, and then sends the resume."
 const WEEK = "Chorus: L is at its week's line (17:20) — about 12 minutes of room left." + DRAIN + SWITCH
-const RESUME_SPREAD = "Chorus: L's 5-hour window would not carry its 2 Rollouts to its reset, so Chorus moved this Session to M." + RESUME
-const RESUME_MOVED = 'Chorus: L reached its 5-hour line at 17:51, so Chorus moved this Session to M.' + RESUME
+const HELD = "Chorus: L is at its week's line (17:20) — about 12 minutes of room left." + DRAIN +
+  'No Login has room: Chorus holds this Session on this Login until a window resets (19:00) or a Login has room, and then sends the resume.'
+const RESUME_MOVED = "Chorus: L reached its week's line at 17:51, so Chorus moved this Session to M." + RESUME
+const RESUME_RESET = "Chorus: L's week reset." + RESUME
 
-test('a spread Prompt meets the trigger, is told apart from a line, and writes the spread line through begin', () => {
-  // Item 1's trigger phrases decide which Prompts open a room stop; its definition decides which are a spread.
-  const phrases = [...trigOf(real.skill).matchAll(/`([^`]*)`/g)].map((m) => m[1]).filter((k) => /^(is at|would reach) /.test(k))
-  assert.deepEqual(phrases, ["is at its week's line", 'is at its 5-hour line', 'would reach its 5-hour line'])
+test("a week's-line Prompt meets the trigger and writes its line through begin", () => {
+  // Item 1's trigger phrases decide which Prompts open a room stop.
+  const phrases = [...trigOf(real.skill).matchAll(/`([^`]*)`/g)].map((m) => m[1]).filter((k) => /^is at /.test(k))
+  assert.deepEqual(phrases, ["is at its week's line"])
   const meets = (p) => p.startsWith('Chorus: ') && phrases.some((k) => p.includes(k))
-  const spreadDef = spreadDefOf(real.skill)
-  assert.ok(spreadDef.includes('`would reach its 5-hour line`') && spreadDef.includes('`spreads`'), spreadDef)
-  const isSpread = (p) => p.includes('would reach its 5-hour line') || (p.includes('is at its 5-hour line') && p.includes('spreads'))
-  const lines = { PLAIN5, HELD5, WAIT5, WEEK }
-  for (const [name, p] of Object.entries({ BORROWED, FLIPPED, ...lines })) assert.ok(meets(p), `${name} meets the trigger`)
-  for (const [name, p] of Object.entries({ RESUME_SPREAD, RESUME_MOVED })) assert.ok(!meets(p), `${name} is item 9's entry, never a trigger`)
-  assert.ok(BORROWED.includes('spreads') && !BORROWED.includes('would reach its 5-hour line'), 'the borrowed head is told apart by `spreads` alone')
-  for (const [name, p] of Object.entries(lines)) {
-    assert.ok(!p.includes('spreads') && !p.includes('would reach its 5-hour line'), `${name} carries no spread marker`)
-  }
-  assert.ok(isSpread(BORROWED) && isSpread(FLIPPED), 'both spread heads are a spread')
-  assert.ok(!Object.values(lines).some(isSpread), 'no line is a spread')
+  for (const [name, p] of Object.entries({ WEEK, HELD })) assert.ok(meets(p), `${name} meets the trigger`)
+  for (const [name, p] of Object.entries({ RESUME_MOVED, RESUME_RESET })) assert.ok(!meets(p), `${name} is item 9's entry, never a trigger`)
 
-  // Item 2's spread line, filled: ~HH:MM is the time the line would come (the borrowed head's `would reach the line`,
-  // never its `(HH:MM)`; the flipped head's own), so both heads fill it alike.
-  const tpl = [...item(real.skill, 2).matchAll(/`([^`]*)`/g)].map((m) => m[1])
-    .find((t) => t.startsWith('<Login> spreading its Rollouts') && t.includes('; stopping at a step boundary:'))
-  assert.ok(tpl, "item 2 carries the spread's line")
-  const at = BORROWED.match(/would reach the line (~\d\d:\d\d)/)[1]
-  assert.equal(FLIPPED.match(/would reach its 5-hour line (~\d\d:\d\d)/)[1], at)
-  const line = tpl.replace('<Login>', 'L').replace('~HH:MM', at)
-    .replace('<runId> <slug> (<task|revise|integrate>), …', 'wf_x proj-a (task)').replace('lane: …', 'lane: none')
-  assert.ok(!/[<>…]/.test(line), line)
-
-  // Through step-boundary.py begin on a rollout note under this file's tmp dir: written, standing, ended.
-  const p = path.join(tmp, 'spread-rollout.md')
+  // Item 2's line, filled, through step-boundary.py begin on a rollout note under this file's tmp dir: written,
+  // standing, ended.
+  const line = "L at its week's line; stopping at a step boundary: wf_x proj-a (task); lane: none"
+  assert.ok(item(real.skill, 2).includes(WEEK_LINE), "item 2 carries the week's line")
+  const p = path.join(tmp, 'week-rollout.md')
   fs.writeFileSync(p, '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n---\n\n## Notes\n\nProject root: `/repo`\n\n## Queue\n\n- [[A]]\n')
   const env = { ...process.env, PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(tmp, 'events'), TZ: 'UTC' }
   for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CONFIG_DIR']) delete env[k]
@@ -483,7 +449,7 @@ test('a spread Prompt meets the trigger, is told apart from a line, and writes t
   const sb = (verb, input = '') => spawnSync('python3', [SB, verb, '--rollout', p], { input, encoding: 'utf8', env })
   const b = sb('begin', line + '\n')
   assert.equal(b.status, 0, b.stderr)
-  const WANT = /^- \d{4}-\d\d-\d\dT\d\d:\d\d[+-]\d\d:\d\d room stop: L spreading its Rollouts \(would reach its 5-hour line ~17:51\); stopping at a step boundary: wf_x proj-a \(task\); lane: none$/
+  const WANT = /^- \d{4}-\d\d-\d\dT\d\d:\d\d[+-]\d\d:\d\d room stop: L at its week's line; stopping at a step boundary: wf_x proj-a \(task\); lane: none$/
   assert.match(b.stdout.trimEnd(), WANT)
   assert.match(fs.readFileSync(p, 'utf8').trimEnd().split('\n').pop(), WANT)
   const s = sb('stands')
@@ -495,7 +461,7 @@ test('a spread Prompt meets the trigger, is told apart from a line, and writes t
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------------------
 
-const RULES = ['section', 'trigger', 'spread', 'record-first', 'start-nothing', 'lane', 'stopped-verify', 'stop-at-boundary', 'durable',
+const RULES = ['section', 'trigger', 'record-first', 'start-nothing', 'lane', 'stopped-verify', 'stop-at-boundary', 'durable',
   'never-pause', 'status-lines', 'resume-entry', 'resume-live', 'git-env-hold', 'lost-call-room', 'usage-limit', 'transient-routing',
   'lost-handle', 'bound', 'step12-pointer', 'guardrail', 'donts', 'handoff', 'repair', 'context', 'live-check', 'integrate-trip',
   'status', 'repair-live']
@@ -525,21 +491,13 @@ test('control: the section before Pausing fails section', () => {
   only({ skill: moved }, 'section', 'before Pausing')
 })
 
-test('control: no 5-hour line, or no spread head, fails trigger', () => {
-  only(sk(", `is at its 5-hour line` (the 5-hour form", ' (the 5-hour form'), 'trigger', 'week only')
-  only(sk(' or `would reach its 5-hour line`.', '.'), 'trigger', 'no spread head')
-})
-
-test('control: no spread definition, no borrowed head, no spread line, a line-worded one, or a Leg without it fails spread', () => {
-  only(sk(" A spread (Chorus ADR 0109) is the 5-hour signal sent before the line, when the Login's window would not carry its Rollouts to its reset: it says `would reach its 5-hour line`, or it still opens with the borrowed `is at its 5-hour line` head and says Chorus `spreads` them; item 2 records it as a spread, never as a line.", ''),
-    'spread', 'no definition')
-  only(sk(', or it still opens with the borrowed `is at its 5-hour line` head and says Chorus `spreads` them', ''), 'spread', 'no borrowed head')
-  only(sk(" For a spread (item 1) the line opens `<Login> spreading its Rollouts (would reach its 5-hour line ~HH:MM)` in place of `<Login> at <…>`, ~HH:MM being the time the signal names (the borrowed head's `would reach the line ~HH:MM`, never its `(HH:MM)`, or the new head's own), and the rest is unchanged: `<Login> spreading its Rollouts (would reach its 5-hour line ~HH:MM); stopping at a step boundary: <runId> <slug> (<task|revise|integrate>), …; lane: …`; it never says `at its 5-hour line`, since no line came.", ''),
-    'spread', 'no spread line')
-  only(sk('spreading its Rollouts (would reach its 5-hour line ~HH:MM); stopping', 'at its 5-hour line; stopping'), 'spread', 'recorded as a line')
-  only({ legs: edit(real.legs, ", a spread's included)", ')') }, 'spread', 'Leg pointer')
-  only({ legs: edit(real.legs, " `<text>` opens as execute item 2's line does: `<Login> at its week's line`, `<Login> at its 5-hour line`, or for a spread `<Login> spreading its Rollouts (would reach its 5-hour line ~HH:MM)`, never `at its 5-hour line`.", '') },
-    'spread', 'Leg text')
+test("control: no week's line, a 5-hour form or a spread back, or a Leg without the line fails trigger", () => {
+  only(sk("says this Session's Login `is at its week's line`", "says this Session's Login is at its line"), 'trigger', 'no week line')
+  only(sk("`is at its week's line` (Chorus ADR 0111", "`is at its week's line` or `is at its 5-hour line` (Chorus ADR 0111"), 'trigger', '5-hour form back')
+  only(sk('"<Login> at its week\'s line; stopping', '"<Login> at <its week\'s line|its 5-hour line>; stopping'), 'trigger', '5-hour line recorded')
+  only(sk('"<Login> at its week\'s line; stopping', '"<Login> at its line; stopping'), 'trigger', 'no week line recorded')
+  only({ legs: edit(real.legs, "(execute § Room stop, item 1)", "(execute § Room stop, item 1, a spread's included)") }, 'trigger', 'Leg spread back')
+  only({ legs: edit(real.legs, " `<text>` opens as execute item 2's line does: `<Login> at its week's line`.", '') }, 'trigger', 'Leg text')
 })
 
 test('control: begin after the mark, or no bare slugs, fails record-first', () => {
@@ -599,7 +557,7 @@ test('control: an entry that never ends the stop, ends it before its gates, or a
 })
 
 test('control: a paused: stamp in item 7 fails never-pause', () => {
-  only(sk('and the hard pause also TaskStops the watch.', 'and the hard pause also TaskStops the watch. At a 5-hour line, stamp `paused:` too.'), 'never-pause', 'stamp')
+  only(sk('and the hard pause also TaskStops the watch.', 'and the hard pause also TaskStops the watch. At the line, stamp `paused:` too.'), 'never-pause', 'stamp')
 })
 
 test('control: a quoted reason fails status-lines', () => {
@@ -670,7 +628,7 @@ test('control: a runId alone as a handle, or a lost integrate handle kept, fails
     'An integrate call whose handle is lost keeps the lane.'), 'lost-handle', 'integrate handle')
 })
 
-test('control: clause (2) without stands, before paused:, without its § 2.7 skip, without a re-marking relaunch, or a d3 bound fails bound', () => {
+test('control: clause (2) without stands, before paused:, without its § 2.7 skip, without a re-marking relaunch, or no OWED_MAX_S bound fails bound', () => {
   only(sk('step-boundary.py stands --rollout <the rollout note', 'step-boundary.py check --rollout <the rollout note'), 'bound', 'no stands')
   only(sk(hbLine, hbLine.replace(C2, '').replace('(2) If the rollout note', C2.trim() + ' (2) If the rollout note')), 'bound', 'before paused:')
   only(sk(' (this re-entry skips § 2.7, as the stall re-entry\'s does)', ''), 'bound', 'no § 2.7 skip')
@@ -678,8 +636,8 @@ test('control: clause (2) without stands, before paused:, without its § 2.7 ski
     'bound', 'no relaunch')
   only(sk('first run `step-boundary.py mark` again, on the same state file, over each call this session launched that /workflows still lists in flight and that it has not stopped (with none, relaunch nothing), so the watch never stops an agent that started after the old mark, then the watch in the background',
     'relaunch the watch in the background on the same state file'), 'bound', 'no re-mark')
-  only(sk("6 h is the Stage's horizon for an owed resume: Chorus's `OWED_MAX_S` (21600 s) is the boot cut past which `room_owed` arms are not re-derived. Chorus ADR 0071 d3's same-Login wait applies only to a 5-hour reset about 30 minutes away.",
-    "6 h outlasts d3's 5-hour wait."), 'bound', 'd3 bound')
+  only(sk("6 h is the Stage's horizon for an owed resume: Chorus's `OWED_MAX_S` (21600 s) is the boot cut past which `room_owed` arms are not re-derived.",
+    "6 h is the Stage's horizon for an owed resume."), 'bound', 'no OWED_MAX_S')
 })
 
 test('control: step 1.2 without its pointer fails step12-pointer', () => {
@@ -708,12 +666,12 @@ test('control: repair without its pointer, or naming resumeFromRunId, fails repa
   only({ repair: edit(real.repair, 'first resumes such a transient row once from its own run', 'first resumes such a transient row once by `resumeFromRunId`') }, 'repair', 'resumeFromRunId')
 })
 
-test('control: CONTEXT without the term, its span, Chorus\'s word or the spread fails context', () => {
+test('control: CONTEXT without the term, its span, Chorus\'s word or its week\'s line fails context', () => {
   only({ context: edit(real.context, '- **Room stop** —', '- **Room halt** —') }, 'context', 'no term')
   only({ context: edit(real.context, 'from\n  its `## Pause log` line to `room stop ended`', 'while\n  the Login is at its line') }, 'context', 'no span')
   only({ context: edit(real.context, ' (Chorus\'s signal calls it "a drain, not a pause"; here the\n  soft pause is the drain)', '') }, 'context', 'no Chorus word')
-  only({ context: edit(real.context, '  A spread (Chorus ADR 0109) is one too, sent before the line: the Stage\n  moves the lead off a Login whose 5-hour window would not carry its\n  Rollouts, and the Pause-log line says `spreading its Rollouts`.\n', '') },
-    'context', 'no spread')
+  only({ context: edit(real.context, "  The line is the week's alone: the spread (Chorus ADR 0109) and the 5-hour\n  line retired with Chorus ADR 0111.\n", '') },
+    'context', 'no week line')
 })
 
 test('control: the `room stop ended` qualifier put back on the Cold resume read fails live-check', () => {

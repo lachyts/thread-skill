@@ -72,7 +72,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
 n = rr.Note(Path(sys.argv[2]))
-line = f"- {sys.argv[4]} room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none" \
+line = f"- {sys.argv[4]} room stop: L1 at its week's line; stopping at a step boundary: none; lane: none" \
     if sys.argv[3] == "start" else f"- {sys.argv[4]} room stop ended"
 n.append_line("## Pause log", line)
 n.save()
