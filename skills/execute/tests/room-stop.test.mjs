@@ -1,7 +1,7 @@
 // A Chorus room stop, the lead's side (execute § Room stop; Chorus ADR 0071; p18-1): skills/execute/scripts/
-// step-boundary.py, executed. When the Stage says a Login is at its line, or would reach it (a spread,
-// Chorus ADR 0109), the lead stops each Workflow call the moment its running agent's result is in the run's journal,
-// records the stop on the rollout note's `## Pause log`, and resumes every stopped call on the Stage's re-send.
+// step-boundary.py, executed. When the Stage says a Login is at its week's line (Chorus ADR 0111), the lead stops
+// each Workflow call the moment its running agent's result is in the run's journal, records the stop on the rollout
+// note's `## Pause log`, and resumes every stopped call on the Stage's re-send.
 // tests/contracts/execute-room-stop.test.mjs pins the prose.
 //
 // (a)  the journal model: open keys, the running agent, a stale key, labels, a torn line, a missing journal, usage;
@@ -286,7 +286,7 @@ const stands = (p, ...more) => sb(['stands', '--rollout', p, ...more])
 
 test('(b) begin creates ## Pause log at the note\'s end, below ## Queue, in _stamp form', () => {
   const p = note()
-  const r = begin(p, "Lachy at its 5-hour line; stopping at a step boundary: wf_x proj-a (task); lane: none\n")
+  const r = begin(p, "Lachy at its week's line; stopping at a step boundary: wf_x proj-a (task); lane: none\n")
   assert.equal(r.rc, 0, r.err)
   assert.match(r.out, STAMP)
   const t = fs.readFileSync(p, 'utf8')
@@ -316,7 +316,7 @@ test('(b) begin refuses empty or multi-line text and writes nothing; a second be
   }
   const first = begin(p, 'x at its week\'s line\n')
   const after1 = fs.readFileSync(p, 'utf8')
-  const second = begin(p, 'x at its 5-hour line\n')
+  const second = begin(p, 'x at its week\'s line\n')
   assert.equal(second.rc, 0)
   assert.equal(second.out, `room stop already stands since ${first.out.split(' ')[1]}\n`)
   assert.equal(fs.readFileSync(p, 'utf8'), after1)
@@ -333,24 +333,6 @@ test('(b) begin refuses a wikilink and writes nothing: a [[slug]] above ## Queue
   assert.equal(stands(p).rc, 5, 'no room stop stands')
   const bare = begin(p, 'Lachy at its week\'s line; stopping at a step boundary: wf_x proj-a (task); lane: none\n')
   assert.equal(bare.rc, 0, 'the same line with the slug bare is recorded')
-})
-
-test("(b) a spread's line records and stands like a line's; a line signal after it writes nothing", () => {
-  const p = note()
-  const spread = 'L spreading its Rollouts (would reach its 5-hour line ~17:51); stopping at a step boundary: wf_x proj-a (task); lane: none'
-  const r = begin(p, spread + '\n')
-  assert.equal(r.rc, 0, r.err)
-  assert.match(r.out, STAMP)
-  assert.ok(r.out.trimEnd().endsWith(` room stop: ${spread}`), r.out)
-  assert.equal(stands(p).rc, 0, 'a spread room stop stands')
-  const t = fs.readFileSync(p, 'utf8')
-  const since = r.out.split(' ')[1]
-  const line = begin(p, 'L at its 5-hour line; stopping at a step boundary: wf_x proj-a (task); lane: none\n')
-  assert.deepEqual([line.rc, line.out], [0, `room stop already stands since ${since}\n`])
-  assert.equal(fs.readFileSync(p, 'utf8'), t, 'the line signal writes nothing: the spread stays the record')
-  const e = sb(['end', '--rollout', p])
-  assert.deepEqual([e.rc, e.out], [0, `room stop ended (stood since ${since})\n`])
-  assert.equal(stands(p).rc, 5)
 })
 
 test('(b) begin over a lapsed start line records a fresh one', () => {
@@ -402,7 +384,7 @@ test('(b) p29-10: begin records the stop in the Run record with its calls; alrea
   assert.equal(sb(['begin', '--rollout', p], { input: '\n', env }).rc, 2)
   assert.equal(sb(['begin', '--rollout', p], { input: 'x at its week\'s line; [[proj-a]]\n', env }).rc, 2)
   assert.deepEqual(stops(), [], 'a refusal records nothing')
-  const text = 'Lachy at its 5-hour line; stopping at a step boundary: wf_a1 a (task), wf_b1 b (revise); lane: none'
+  const text = 'Lachy at its week\'s line; stopping at a step boundary: wf_a1 a (task), wf_b1 b (revise); lane: none'
   const r = sb(['begin', '--rollout', p], { input: `${text}\n`, env })
   assert.equal(r.rc, 0, r.err)
   assert.equal(r.err, '')

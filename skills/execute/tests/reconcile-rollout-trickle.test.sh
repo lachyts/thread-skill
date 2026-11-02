@@ -743,13 +743,13 @@ ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{"ro-a":2},{}]' "L3b: … so ro-a count
 scen l4-room-stop
 two_rollouts
 lease ro-a 2026-10-02T13:19:59Z
-pause_log ro-a '- 2026-10-02T12:05+00:00 room stop: lead-a at its 5-hour line; resumes at its reset'
+pause_log ro-a '- 2026-10-02T12:05+00:00 room stop: lead-a at its week'\''s line; resumes at its reset'
 ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{"ro-a":2},{}]' "L4: a room stop 2 h old stands: ro-a's lapsed lease still counts"
 ok "$(q "$(st ro-a)" 'd["trickle"]["lease"]')" '{"lapsesAt":null,"state":"room-stop","writtenAt":"2026-10-02T13:19:59Z"}' \
   "L4: status reads the lease held by the room stop, lapsesAt null"
-unlog ro-a; pause_log ro-a '- 2026-10-02T08:05+00:00 room stop: lead-a at its 5-hour line'
+unlog ro-a; pause_log ro-a '- 2026-10-02T08:05+00:00 room stop: lead-a at its week'\''s line'
 ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{},{"ro-a":2}]' "L4: a room stop exactly 6 h old stands no more: the lease lapses"
-unlog ro-a; pause_log ro-a "$(printf -- '- 2026-10-02T12:05+00:00 room stop: lead-a at its 5-hour line\n- 2026-10-02T13:00+00:00 room stop ended')"
+unlog ro-a; pause_log ro-a "$(printf -- '- 2026-10-02T12:05+00:00 room stop: lead-a at its week'\''s line\n- 2026-10-02T13:00+00:00 room stop ended')"
 ok "$(q "$(nx ro-b --dry-run)" "$el")" '[{},{"ro-a":2}]' "L4: a room stop that ended keeps nothing: the lease lapses"
 ok "$(q "$(st ro-a)" 'd["trickle"]["lease"]["state"]')" '"lapsed"' "L4: … and status reads it lapsed"
 
