@@ -289,15 +289,25 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Own branch** — the feature branch whose work this session did. Close may
   push, review and merge it; a branch close can't prove is its own is only
   reported. _Avoid_: current branch (it may be another session's), my branch.
-- **Blocking finding** — a review finding whose failure scenario is a crash,
+- **Blocking finding** — a review finding the **Checker** reproduced, that
+  the change introduced or worsened, and whose failure scenario is a crash,
   hang or wrong result on a path the branch ships for normal use, data loss or
-  a security hole on any path it ships, or the named test failing. Only a blocking finding
-  holds an own-branch landing; the rest are filed in its follow-up task or
-  rejected with a reason (a recurring one adds nothing), and a clean round is
+  a security hole on any path it ships (on an error path only with an ordinary
+  trigger or one the change causes), or the named test failing. Only a
+  blocking finding holds an own-branch landing; the rest are filed in its
+  follow-up task (an unconfirmed one too) or rejected, and a clean round is
   one with none, unless it returned its cap or more, which earns one more code
-  round first (ADR 0058). The session grades it, never
-  the reviewer. _Avoid_: accepted finding, must-fix, high (the reviewer
-  grades no severity).
+  round first. A landing has three code rounds; one still open on the third
+  is fixed until its reproduction passes, with no further review (ADR 0058,
+  ADR 0065). _Avoid_: accepted finding, must-fix, high (the reviewer grades no
+  severity).
+- **Checker** — fresh-review's confirm step (its ADR 0001): a second fresh
+  agent that gives each finding of a round its verdict (`blocking`,
+  `unconfirmed`, `filed` or `rejected`) and writes a failing test, its
+  **reproduction**, for each blocking one, which is committed with that
+  finding's fix. It adds no findings, so it is not a second review. Close and
+  a Leg take its verdicts and grade nothing (ADR 0065). _Avoid_: verifier
+  (the rollout engine's), grader, judge.
 - **Close-out PR** — the pull request carrying close's own bookkeeping
   (THREAD.md, handoff-doc refreshes and deletions). Its merge is queued at
   close and happens on green, with no review. _Avoid_: docs PR, thread PR.
@@ -1253,9 +1263,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   remainder never blocks the close). _Avoid_: ask log.
 - **Review trail** — one PR's run of /fresh-review rounds, keyed by its
   landing merge, else its branch, else a run of rounds in one checkout: its
-  rounds, its **STOP entries** (each time the rounds enter the stop verdict),
-  the stops **handed to Lachy** (a question within 30 minutes of a stop
-  round from the same checkout), and whether the PR changed docs alone.
+  rounds and code rounds, their findings and regressions, and whether the PR
+  changed docs alone. Its STOP entries and the stops handed to Lachy retired
+  with the ledger's stop rule (ADR 0065).
   _Avoid_: review loop (the engine's convergence of plan, verify and review
   rounds, above); chain (`review-ledger.py`'s, narrower).
 - **Wait to start** — a rollout's time from Lachy's ask (the earliest

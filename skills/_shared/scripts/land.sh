@@ -50,7 +50,7 @@
 #
 # Own-branch mode (ADR 0028 §§ 1–3, 5; close's § Land the own branch) lands the session's own branch <B>:
 #
-#   land.sh --own-branch --branch <B> [--queue --reviewed <sha> | --hold -F <diagnosis>] [--] <repo>
+#   land.sh --own-branch --branch <B> [--queue --reviewed <sha> [--fixed-at-budget] | --hold -F <diagnosis>] [--] <repo>
 #
 # It never commits, never forces, never rebases and never deletes <B>; <B> moves only forward (a fast-forward
 # to origin/<B>, or a merge commit over update-branch's merges, made in a scratch worktree). One call:
@@ -59,13 +59,14 @@
 # (below) · push.default upstream|tracking is stuck · nothing ahead is `landed` · push access · the newest
 # same-repo PR headed <B> (another author's: not landed; closed unmerged: stuck; merged with HEAD in its
 # head: landed) · auto-merge switched off on every call but --queue · --queue only: every commit after
-# --reviewed touches docs/reviews/ alone · push <B> to itself · open and label the `landing` PR · then the
-# action:
+# --reviewed touches docs/reviews/ alone, or with --fixed-at-budget carries its reproduction (below) · push <B>
+# to itself · open and label the `landing` PR · then the action:
 #   plain    point <B>'s upstream at origin/<d> (the review base), print `land: upstream origin/<d> (was …)`
 #            and the tree line, `land: tree dirty: <paths>` or `land: digest <diff6>` (fresh-review's
 #            Step 1 digest, byte for byte); result `pr open <url>`
 #   --hold   comment `Landing held (ADR 0028 § 3)` plus the diagnosis; result `held <url>`
-#   --queue  read protection, then ONE snapshot of check-runs and status on R (--reviewed) and HEAD. A
+#   --queue  read protection, then ONE snapshot of check-runs and status on R (--reviewed) and HEAD, or on
+#            HEAD alone when a fix follows R (--fixed-at-budget: R's checks predate it). A
 #            `failure` on either (HEAD's own pass for that name supersedes R's) is `ci failed: <name>
 #            (failure: <title>) <url>` and no merge. The merge decision reads HEAD alone: pending, infra
 #            (cancelled, timed_out, startup_failure, action_required, stale, status error), green, or none.
@@ -74,6 +75,15 @@
 #            direct merge when that is refused and HEAD is green (`landed`), else `queued: needs merge`;
 #            update-branch once when queued and behind. Unprotected: pending or infra is `queued: needs
 #            merge` with no merge call; green is a direct merge, `landed`.
+# --fixed-at-budget (fresh-review § Rounds — The budget, ADR 0001; thread-skill ADR 0065): R is the head of the chain's
+# third and last code round, and a blocking finding still open there is fixed until its reproduction passes, with no
+# further review. So a code commit after R is accepted when it changes a path that a `blocking` row of that round's
+# `## Confirm` table names, whole (budget_rows, names_path): the fix committed with its reproduction, or for prose
+# the file its quoted lines are in. The doc is the review doc a commit in R..HEAD touched whose latest version there
+# (its last before close's deletion commit) says `mode: code`, `round:` 3 or more and a `head:` R starts with; none
+# is `stuck: --fixed-at-budget: no round-3 code review doc for <R7> on <B>`, and a code commit naming none of its
+# rows is `stuck: commits after <R7> carry no reproduction <doc> names: <subjects>`. Accepted fixes print `land:
+# fixed at the budget: <N> commit(s) after <R7> (<doc>)`. With no code commit after R the flag changes nothing.
 # Every own-branch result but usage errors, preflight errors and the plain call's `pr open` ends by pointing
 # <B>'s upstream back at origin/<B> (`land: upstream origin/<B> (was origin/<d>)`), when it is at origin/<d>.
 # The review rounds (ADR 0058 d5): every --queue and --hold that gets past preflight, never a plain call, runs
@@ -174,7 +184,7 @@ git_line() {
 
 result() { printf '%s\n' "$1" > "$LAND_RES"; }
 
-usage() { echo "land: usage: land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…] | land.sh --origin-slug <repo> | land.sh --route [--] <repo> | land.sh --own-branch --branch <B> [--queue --reviewed <sha> | --hold -F <diagnosis>] [--] <repo>"; exit 2; }
+usage() { echo "land: usage: land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…] | land.sh --origin-slug <repo> | land.sh --route [--] <repo> | land.sh --own-branch --branch <B> [--queue --reviewed <sha> [--fixed-at-budget] | --hold -F <diagnosis>] [--] <repo>"; exit 2; }
 
 # phys <path>: PHYS_ANC is the nearest existing directory, physical; PHYS_TAIL the missing rest ('' or
 # /a/b). PHYS is both joined. A `.` or `..` in the missing tail cannot be resolved, so it fails.
@@ -945,6 +955,51 @@ own_rounds() {
   return 0
 }
 
+# budget_rows <R>: --fixed-at-budget's doc (the header): a review doc a commit in <R>..HEAD touched, read at its latest
+# version there, whose front matter says `mode: code`, `round:` 3 or more and a `head:` of 7 or more hex characters
+# that <R> starts with. Its `## Confirm` rows (outside a fence) whose last cell is `blocking` go to $tmpd/blocking,
+# its path to BUDGET_DOC. 1 when no doc qualifies.
+budget_rows() {
+  local r=$1 p c v
+  BUDGET_DOC=
+  while IFS= read -r p; do
+    review_doc "$p" || continue
+    v=
+    for c in $(git rev-list "$r..HEAD" -- "$p"); do
+      git cat-file -e "$c:$p" 2>/dev/null && { v=$c; break; }
+    done
+    [ -n "$v" ] && git show "$v:$p" > "$tmpd/bdoc" 2>/dev/null || continue
+    R=$r awk '{ sub(/\r$/, "") }
+         NR == 1 { if ($0 != "---") { bad = 1; exit } fm = 1; next }
+         fm && $0 == "---" { fm = 0; next }
+         fm { k = $0; sub(/:.*/, "", k); v = $0; sub(/^[^:]*:[ \t]*/, "", v); sub(/[ \t]+#.*$/, "", v)
+              sub(/[ \t]+$/, "", v); f[k] = v; next }
+         /^[ \t]*(```|~~~)/ { fence = !fence; next }
+         fence { next }
+         /^## / { on = ($0 ~ /^## Confirm[ \t]*$/); next }
+         on && /^[ \t]*\|/ { l = $0; sub(/[ \t]+$/, "", l); sub(/\|$/, "", l); n = split(l, a, "|")
+                              c = a[n]; gsub(/^[ \t`*]+|[ \t`*]+$/, "", c); if (c == "blocking") print }
+         END { h = f["head"]
+               if (bad || fm || f["mode"] != "code" || f["round"] !~ /^[0-9]+$/ || f["round"] + 0 < 3) exit 1
+               if (h !~ /^[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]+$/ || index(ENVIRON["R"], h) != 1) exit 1 }' \
+      "$tmpd/bdoc" > "$tmpd/blocking" || continue
+    BUDGET_DOC=$p; return 0
+  done < <(git -c core.quotePath=false log --format= --name-only --no-renames "$r..HEAD" -- docs/reviews/ | LC_ALL=C sort -u)
+  return 1
+}
+
+# names_path <path> <file>: <path> appears whole on a line of <file>, never inside a longer path: the character
+# before it is none of [A-Za-z0-9_./-], the one after none of [A-Za-z0-9_/-] (so `src/c.txt:1` names src/c.txt).
+names_path() {
+  P=$1 LC_ALL=C awk '{ p = ENVIRON["P"]; s = $0; o = 0
+         while ((i = index(s, p)) > 0) {
+           q = o + i; b = q > 1 ? substr($0, q - 1, 1) : ""; a = substr($0, q + length(p), 1)
+           if (b !~ /[A-Za-z0-9_.\/-]/ && a !~ /[A-Za-z0-9_\/-]/) { hit = 1; exit }
+           o = q; s = substr($0, q + 1)
+         } }
+       END { exit hit ? 0 : 1 }' "$2"
+}
+
 # subjects <rev>…: the first three commit subjects, `; `-joined, with (+N more).
 subjects() {
   local c s= i=0
@@ -957,13 +1012,14 @@ subjects() {
 }
 
 own_main() {
-  local B= act= rev= note= repo top b bref d= slug tmpd out rc m od ob own_restore= own_ref=
-  local state n= url= login auto me R H st infra res prot wf
+  local B= act= rev= note= fixed= repo top b bref d= slug tmpd out rc m od ob own_restore= own_ref=
+  local state n= url= login auto me R H st infra res prot wf fixedn=0
   while [ $# -gt 0 ]; do
     case $1 in
       --branch) [ $# -ge 2 ] && [ -n "$2" ] || usage; B=$2; shift 2 ;;
       --queue|--hold) [ -z "$act" ] || usage; act=$1; shift ;;
       --reviewed) [ $# -ge 2 ] && [ -n "$2" ] || usage; rev=$2; shift 2 ;;
+      --fixed-at-budget) fixed=1; shift ;;
       -F) [ $# -ge 2 ] && [ -n "$2" ] || usage; note=$2; shift 2 ;;
       --) shift; break ;;
       -*) usage ;;
@@ -975,8 +1031,8 @@ own_main() {
   repo=$1
   case $act in
     --queue) [ -n "$rev" ] && [ -z "$note" ] || usage ;;
-    --hold) [ -n "$note" ] && [ -z "$rev" ] || usage ;;
-    *) [ -z "$rev" ] && [ -z "$note" ] || usage ;;
+    --hold) [ -n "$note" ] && [ -z "$rev" ] && [ -z "$fixed" ] || usage ;;
+    *) [ -z "$rev" ] && [ -z "$note" ] && [ -z "$fixed" ] || usage ;;
   esac
   if [ -n "$note" ]; then
     [ -f "$note" ] && [ -r "$note" ] || { echo "land: diagnosis file not readable: $note"; exit 2; }
@@ -1127,17 +1183,32 @@ EOF
     echo "land: head $(git rev-parse HEAD) (reconciled with origin/$B)"
   fi
 
-  # ---- O10. --queue: every commit after the reviewed one touches only docs/reviews/ ------------------------
+  # ---- O10. --queue: every commit after the reviewed one touches only docs/reviews/, or carries its reproduction
+  # (--fixed-at-budget, the header) -----------------------------------------------------------------------------
   if [ "$act" = --queue ]; then
     R=$(git rev-parse -q --verify "$rev^{commit}") || own_finish "stuck: reviewed commit $rev not found" 1
     git merge-base --is-ancestor "$R" HEAD || own_finish "stuck: reviewed commit $(printf '%s' "$R" | cut -c1-7) is not on $B" 1
-    local c f bad=
+    local c f bad= code hit
+    BUDGET_DOC=
     for c in $(git rev-list --no-merges "$R..HEAD" "^$od"); do
+      code= hit=
       while IFS= read -r -d '' f; do
-        case $f in docs/reviews/*) ;; *) bad="$bad $c"; break ;; esac
+        case $f in docs/reviews/*) continue ;; esac
+        code=1
+        [ -n "$fixed" ] || break
+        if [ -z "$BUDGET_DOC" ]; then
+          budget_rows "$R" || own_finish "stuck: --fixed-at-budget: no round-3 code review doc for $(printf '%s' "$R" | cut -c1-7) on $B" 1
+        fi
+        names_path "$f" "$tmpd/blocking" && { hit=1; break; }
       done < <(git diff-tree --no-commit-id --name-only -r -z --root "$c")
+      [ -n "$code" ] || continue
+      if [ -n "$hit" ]; then fixedn=$((fixedn + 1)); else bad="$bad $c"; fi
     done
-    [ -z "$bad" ] || own_finish "stuck: unreviewed commits after $(printf '%s' "$R" | cut -c1-7): $(subjects $bad)" 1
+    if [ -n "$bad" ]; then
+      [ -n "$fixed" ] && own_finish "stuck: commits after $(printf '%s' "$R" | cut -c1-7) carry no reproduction $BUDGET_DOC names: $(subjects $bad)" 1
+      own_finish "stuck: unreviewed commits after $(printf '%s' "$R" | cut -c1-7): $(subjects $bad)" 1
+    fi
+    [ "$fixedn" = 0 ] || echo "land: fixed at the budget: $fixedn commit(s) after $(printf '%s' "$R" | cut -c1-7) ($BUDGET_DOC)"
   fi
 
   # ---- O11. Push <B> to itself: never forced, never setting an upstream -----------------------------------
@@ -1204,11 +1275,15 @@ EOF
   H=$(git rev-parse HEAD)
   ck_get "$H" h || own_finish "stuck: cannot read checks: $NET_ERR" 1
   local rf= rs=
-  if [ "$R" != "$H" ]; then
+  if [ "$R" != "$H" ] && [ "$fixedn" = 0 ]; then
     ck_get "$R" r || own_finish "stuck: cannot read checks: $NET_ERR" 1
     rf=$tmpd/r.cr; rs=$tmpd/r.st
   fi
-  echo "land: checks read R $(printf '%s' "$R" | cut -c1-7) H $(printf '%s' "$H" | cut -c1-7)"
+  if [ "$fixedn" = 0 ]; then
+    echo "land: checks read R $(printf '%s' "$R" | cut -c1-7) H $(printf '%s' "$H" | cut -c1-7)"
+  else
+    echo "land: checks read H $(printf '%s' "$H" | cut -c1-7)"
+  fi
   out=$(python3 -c "$LAND_CHECKS_PY" "$tmpd/h.cr" "$tmpd/h.st" "$rf" "$rs") || own_finish "stuck: cannot read checks: bad JSON" 1
   st=; infra=
   local k v1 v2 v3

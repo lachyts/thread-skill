@@ -195,6 +195,20 @@ snip() {  # snip <shell> [VAR=value …] → out, err, rc, el: run $tmp/run.sh (
   out=$(env CLAUDE_PLUGIN_ROOT="$root" "$@" $sh "$tmp/run.sh" 2>"$tmp/err"); rc=$?
   el=$((SECONDS - s)); err=$(cat "$tmp/err")
 }
+# osnip: close's # thread:land-own snippet, extracted from SKILL.md into $tmp/osnip.sh (cases 63 and 77).
+osnip() {
+  awk '{ l=$0; sub(/^[ \t]+/, "", l) }
+       l ~ /^# thread:land-own( |$)/ { on=1; ind=substr($0, 1, length($0)-length(l)); next }
+       l == "# end thread:land-own" { on=0 }
+       on { if (index($0, ind) == 1) print substr($0, length(ind)+1); else print $0 }' "$CLOSE" > "$tmp/osnip.sh"
+}
+# ofill <act> <rev> [<budget>] → $tmp/run.sh, the own snippet filled as close fills it (the diagnosis carries an
+# apostrophe).
+ofill() {
+  sed -e "s|top='<top>'|top='$W'|" -e "s|br='<branch>'|br='$OB'|" \
+      -e "s|act=''|act='$1'|" -e "s|rev=''|rev='$2'|" -e "s|budget=''|budget='${3:-}'|" \
+      -e "s|<diagnosis>|needs your call: the product question is Lachy's|" "$tmp/osnip.sh" > "$tmp/run.sh"
+}
 
 # ==== Protected route: creating and queueing a PR =========================================================
 shard_1() {
@@ -1324,7 +1338,9 @@ for argv in "--own-branch -- $W" "--own-branch --branch -- $W" "--own-branch --b
             "--own-branch --branch $OB --reviewed abc -- $W" "--own-branch --branch $OB --queue --reviewed abc --hold -F $tmp/f62 -- $W" \
             "--own-branch --branch $OB --hold -- $W" "--own-branch --branch $OB -F $tmp/f62 -- $W" \
             "--own-branch --branch $OB --queue --hold -- $W" "--own-branch --branch $OB --hold -F $tmp/nope -- $W" \
-            "--own-branch --branch $OB --queue --reviewed abc -F $tmp/f62 -- $W" "--own-branch --branch $OB"; do
+            "--own-branch --branch $OB --queue --reviewed abc -F $tmp/f62 -- $W" "--own-branch --branch $OB" \
+            "--own-branch --branch $OB --fixed-at-budget -- $W" "--own-branch --branch $OB --hold -F $tmp/f62 --fixed-at-budget -- $W" \
+            "--own-branch --branch $OB --fixed-at-budget --reviewed abc -- $W"; do
   land -- $argv
   ok "$rc/$out" "2/" "case 62: [$argv] → exit 2, stdout empty"
   tmpempty "case 62 [$argv]"
@@ -1333,19 +1349,10 @@ done
 echo "== 63. close's # thread:land-own snippet"
 o=$(grep -cE '^[[:space:]]*# thread:land-own( |$)' "$CLOSE"); c=$(grep -cE '^[[:space:]]*# end thread:land-own$' "$CLOSE")
 ok "$o/$c" "1/1" "one # thread:land-own marker pair"
-awk '{ l=$0; sub(/^[ \t]+/, "", l) }
-     l ~ /^# thread:land-own( |$)/ { on=1; ind=substr($0, 1, length($0)-length(l)); next }
-     l == "# end thread:land-own" { on=0 }
-     on { if (index($0, ind) == 1) print substr($0, length(ind)+1); else print $0 }' "$CLOSE" > "$tmp/osnip.sh"
+osnip
 ok "$(grep -c 'bash "$ld"' "$tmp/osnip.sh")" 1 "the own snippet has exactly one bash \"\$ld\" line"
-ok "$(tail -n 1 "$tmp/osnip.sh")" 'bash "$ld" --own-branch --branch "$br" ${act:+"$act"} ${rev:+--reviewed} ${rev:+"$rev"} ${note:+-F} ${note:+"$note"} -- "$top"' \
+ok "$(tail -n 1 "$tmp/osnip.sh")" 'bash "$ld" --own-branch --branch "$br" ${act:+"$act"} ${rev:+--reviewed} ${rev:+"$rev"} ${budget:+--fixed-at-budget} ${note:+-F} ${note:+"$note"} -- "$top"' \
    "the land.sh call is the own snippet's last line"
-# ofill <act> <rev> → $tmp/run.sh, the own snippet filled as close fills it (the diagnosis carries an apostrophe).
-ofill() {
-  sed -e "s|top='<top>'|top='$W'|" -e "s|br='<branch>'|br='$OB'|" \
-      -e "s|act=''|act='$1'|" -e "s|rev=''|rev='$2'|" \
-      -e "s|<diagnosis>|needs your call: the product question is Lachy's|" "$tmp/osnip.sh" > "$tmp/run.sh"
-}
 for sh in "${shells[@]}"; do
   qsetup "c63${#sh}"
   ofill "" ""; snip "$sh"; ores "case 63 [$sh] plain" 0 "pr open https://github.com/o/c63${#sh}/pull/1"
@@ -1770,6 +1777,119 @@ own -- --hold -F "$tmp/diag76"
 ores "case 76 local origin/master" 0 "held https://github.com/o/c76l/pull/1"
 ok "$(rrargs)" "$(want c76l)" "case 76 local origin/master: the stub's argv carries refs/remotes/origin/master"
 }  # end shard_11
+
+shard_12() {
+echo "== 77. own branch: --fixed-at-budget, the budget round's fixes committed with their reproductions (ADR 0065)"
+# bdoc <file> <round> <head> <mode> [<confirm row>…]: a docs/reviews/-only commit of a review doc: front matter
+# (no round: line when <round> is empty), a findings table, then a `## Confirm` table holding the rows given.
+bdoc() {
+  local f=$1 r=$2 h=$3 m=$4 row; shift 4
+  { printf -- '---\nrepo: %s\nhead: %s\ndiff_digest: abc123\nmode: %s\neffort: xhigh\n' "$W" "$h" "$m"
+    [ -n "$r" ] && printf 'round: %s\n' "$r"
+    printf 'status: consumed\n---\n\n| # | file:line | summary | failure scenario |\n|---|---|---|---|\n'
+    printf '| 1 | src/c.txt:1 | loses the save | killed mid-write |\n\n## Confirm\n\n'
+    printf '| # | clause | origin | trigger | reproduction | verdict |\n|---|---|---|---|---|---|\n'
+    for row in "$@"; do printf '%s\n' "$row"; done
+    printf '\n## Disposition\n\n- Blocking, fixed: #1\n'
+  } > "$tmp/bdoc"
+  docscommit "$f" "$(cat "$tmp/bdoc")"
+}
+# fsetup <name> <round> <mode> <confirm row>…: the own branch pushed by a plain call (PR 1), R its reviewed HEAD, then
+# the round's doc pending (findings only) and with its `## Confirm` table, both docs/reviews/ only.
+fsetup() {
+  local n=$1; shift
+  ghreset; mkbranch "$n"; own --; R=$(tip)
+  docscommit r3.md "status: pending"
+  bdoc r3.md "$1" "$(h7 "$R")" "$2" "${@:3}"
+}
+# fixwork <subject> [<path>…]: a code commit on src/c.txt plus each path given (the fix and its reproduction).
+fixwork() {
+  local s=$1 p; shift
+  echo "$s" >> "$W/src/c.txt"
+  for p in "$@"; do mkdir -p "$(dirname "$W/$p")"; echo "$s" >> "$W/$p"; done
+  git -C "$W" add -A; git -C "$W" commit -qm "🐛 fix: $s"
+}
+fdone() { docsdelete; H=$(tip); }
+BROW='| 1 | b: loses the save | introduced (abc1234) | ordinary: killed mid-write | tests/repro.test.sh: `bash tests/repro.test.sh` → FAIL: save empty | blocking |'
+FROW='| 1 | none | pre-existing | — | tests/other.test.sh | filed |'
+PROW='| 1 | c: wrong verdict | introduced | — | src/c.txt:1 "c0" against SKILL.md:9 | blocking |'
+
+# (a) A fix committed with the reproduction a blocking row names, after the round-3 doc: queued, on HEAD's checks
+# alone (R's predate the fixes, so its failure is never read).
+fsetup c77a 3 code "$BROW"; fixwork "save keeps the file" tests/repro.test.sh; fdone
+own GH_CHECKS_MAP="$R=fail,$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 fixed" 0 "queued https://github.com/o/c77a/pull/1"
+has "$err" "land: fixed at the budget: 1 commit(s) after $(h7 "$R") (docs/reviews/r3.md)" "case 77 fixed: names the commits and the doc"
+has "$err" "land: checks read H $(h7 "$H")" "case 77 fixed: the checks line names HEAD alone"
+hasnt "$err" "checks read R" "case 77 fixed: R's checks are not read"
+ok "$(checkreads)" 1 "case 77 fixed: one commit's checks read"
+ok "$(srvref c77a "$OB")" "$H" "case 77 fixed: <B> pushed"
+# (b) The same commits without the flag: the reviewed-commit guard is unchanged.
+own -- --queue --reviewed "$R"
+ores "case 77 no flag" 1 "stuck: unreviewed commits after $(h7 "$R"): 🐛 fix: save keeps the file"
+# (c) A code commit that carries no named reproduction (a filed finding fixed in the chain, say) is refused.
+fsetup c77c 3 code "$BROW"; fixwork "a filed finding fixed too"; fdone; S=$(srvref c77c "$OB")
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 no reproduction" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: a filed finding fixed too"
+nopush "case 77 no reproduction"; ok "$(srvref c77c "$OB")" "$S" "case 77 no reproduction: server <B> unchanged"
+# (d) One good commit and one bad: only the bad one is named.
+fsetup c77d 3 code "$BROW"; fixwork "the fix" tests/repro.test.sh; fixwork "and a tidy"; fdone
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 one bad" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: and a tidy"
+# (e) A path a non-blocking row names never counts.
+fsetup c77e 3 code "$FROW"; fixwork "x" tests/other.test.sh; fdone
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 filed row" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: x"
+# (f) A path is matched whole: repro.test.sh is not the row's tests/repro.test.sh.
+fsetup c77f 3 code "$BROW"; fixwork "y" repro.test.sh; fdone
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 whole path" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: y"
+# (g) A prose reproduction: the quoted file:line is the path the fix changes.
+fsetup c77g 3 code "$PROW"; fixwork "the wording"; fdone
+own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 prose" 0 "queued https://github.com/o/c77g/pull/1"
+# (h) No budget round's doc for R: round 2, no round:, a security doc, another head.
+for v in "2 code" "- code" "3 security" "3 code other"; do
+  set -- $v; r=$1; [ "$r" = - ] && r=
+  ghreset; mkbranch "c77h${#v}$1$2"; own --; R=$(tip)
+  hd=$(h7 "$R"); [ -n "${3:-}" ] && hd=$(git -C "$W" rev-parse --short=7 HEAD~1)
+  bdoc r3.md "$r" "$hd" "$2" "$BROW"; fixwork "the fix" tests/repro.test.sh; fdone
+  own -- --queue --reviewed "$R" --fixed-at-budget
+  ores "case 77 no budget doc [$v]" 1 "stuck: --fixed-at-budget: no round-3 code review doc for $(h7 "$R") on $OB"
+  nopush "case 77 no budget doc [$v]"
+done
+# (i) The flag with no code commit after R: an ordinary --queue, no doc needed, R's checks read as ever.
+qsetup c77i
+own GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 nothing fixed" 0 "queued https://github.com/o/c77i/pull/1"
+has "$err" "land: checks read R $(h7 "$R") H $(h7 "$H")" "case 77 nothing fixed: R and H read"
+hasnt "$err" "fixed at the budget" "case 77 nothing fixed: no fixed line"
+# (j) The doc still on <B> (never deleted), its head: a full sha: read at HEAD.
+ghreset; mkbranch c77j; own --; R=$(tip)
+bdoc r3.md 3 "$R" code "$BROW"; fixwork "the fix" tests/repro.test.sh; H=$(tip)
+own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 doc on disk" 0 "queued https://github.com/o/c77j/pull/1"
+# (k) A `blocking` cell outside `## Confirm` (the findings table) is no reproduction.
+ghreset; mkbranch c77k; own --; R=$(tip)
+docscommit r3.md "$(printf -- '---\nhead: %s\nmode: code\nround: 3\nstatus: consumed\n---\n\n| # | file:line | note | verdict |\n|---|---|---|---|\n| 1 | tests/repro.test.sh:1 | x | blocking |\n\n## Confirm\n\n%s\n' "$(h7 "$R")" "$FROW")"
+fixwork "z" tests/repro.test.sh; fdone
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 outside Confirm" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: z"
+# (l) The latest version is read: a doc whose last commit dropped its blocking row no longer covers the fix.
+fsetup c77l 3 code "$BROW"; bdoc r3.md 3 "$(h7 "$R")" code "$FROW"; fixwork "w" tests/repro.test.sh; fdone
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 latest version" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: w"
+# (m) Close's snippet carries the flag: budget='1'.
+osnip
+for sh in "${shells[@]}"; do
+  fsetup "c77m${#sh}" 3 code "$BROW"; fixwork "the fix" tests/repro.test.sh; fdone
+  ofill "--queue" "$R" 1; snip "$sh" GH_CHECKS_MAP="$H=pending"
+  ores "case 77 [$sh] snippet" 0 "queued https://github.com/o/c77m${#sh}/pull/1"
+  has "$err" "land: fixed at the budget: 1 commit(s) after $(h7 "$R")" "case 77 [$sh] snippet: --fixed-at-budget arrived"
+  ofill "--queue" "$R"; snip "$sh" GH_CHECKS_MAP="$H=pending"
+  ores "case 77 [$sh] snippet, no budget" 1 "stuck: unreviewed commits after $(h7 "$R"): 🐛 fix: the fix"
+done
+}  # end shard_12
 
 # ---- run this child's shard -------------------------------------------------------------------------------
 declare -F "shard_$shard" >/dev/null || { echo "FAIL - no shard_$shard"; exit 1; }
