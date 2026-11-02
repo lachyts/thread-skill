@@ -41,7 +41,7 @@ The same rollout's two-repo row also showed the third path. It opened from the v
    - The refusal is applied only after ruling (c), so a session-lane member is never refused for its launch.
    - An aliased member in checkout A that also claims checkout B (a workspace `--add-dir`, a project `Local:`) is unchanged. Refusing it would match `leg.py done` exactly but would refuse real workspace chains, so that wider rule is left out.
 
-5. **The same-note collision is accepted.** Two chains in different project places can still both write one Day note or one contact. Lachy accepted this risk: it is the one he already lives with when several sessions are open.
+5. *(To be amended by ADR 0065, proposed 2026-11-02: the collision becomes a best-effort Note wait, recorded for the Reflection, and the project place becomes a prediction.)* **The same-note collision is accepted.** Two chains in different project places can still both write one Day note or one contact. Lachy accepted this risk: it is the one he already lives with when several sessions are open.
 
 ## Considered options
 

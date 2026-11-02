@@ -425,7 +425,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   supersedes it rather than running beside it (schedule § 0, ADR 0027, ADR
   0030). Serial rollouts are
   limited by **Surface**s, not by repo (ADR 0040): one chain per note, refused
-  while a live chain shares a surface. _Avoid_: batch, run, campaign.
+  while a live chain shares a surface. Proposed (ADR 0065): a clash is only two
+  runs editing the same file or note, in either shape; sharing a repo, a
+  monorepo or the vault never blocks, and **Capacity** is the limit.
+  _Avoid_: batch, run, campaign.
 - **Shape** — whether a rollout runs in parallel or in serial; the one word
   that tells the two kinds apart. Every rollout verb (schedule, execute,
   status, repair, reflect) takes either shape. A rollout note says it with its
@@ -445,7 +448,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   launch change between two rows is a Leg boundary. A row that writes a
   checkout never opens in the vault, and an alias-less row writing two
   checkouts is refused (ADR 0059), since a Leg finishes only its own
-  checkout's commits. execute runs its Legs
+  checkout's commits. Proposed (ADR 0065): each repo it writes is worked in
+  its own **Chain copy**, landed task by task on the primary checkout.
+  execute runs its Legs
   (`skills/execute/legs.md`). A serial note is never paused: a Leg stops through
   `leg.py close --outcome stopped`. status reads it as a chain (`leg.py status`:
   its Legs, its chain state, a **Stalled chain**), repair restarts it, and its
@@ -507,7 +512,24 @@ through time, from attention to merged PRs. Terms only — no implementation.
   origin are two surfaces, and containment parts across a checkout nested
   inside another by path (a separate repo with its own index), unless the outer
   path is in no checkout. A stuck chain holds only its unlanded rows'
-  surfaces (**Unfinished rollout**, ADR 0060). _Avoid_: footprint, file-set.
+  surfaces (**Unfinished rollout**, ADR 0060). Proposed (ADR 0065): a surface
+  inside a checkout is a file or folder in it (`repo:<toplevel>//<path>`), no
+  longer the whole checkout, since each chain works its own **Chain copy**; a
+  bare `repo:<toplevel>` still covers the whole checkout. Predicted surfaces
+  order and wait, never refuse; the files a Leg actually committed are checked
+  before it lands; a vault project's place is a prediction, and the same note
+  is guarded by the **Note wait**. _Avoid_: footprint, file-set.
+- **Chain copy** — a serial chain's own working copy of a repo it writes (a git
+  worktree on `chain/<rollout-slug>`, outside `~/repos` and `~/Projects`), so
+  two chains in one repo share no index or HEAD; each finished task lands from
+  it onto the primary checkout's default branch (ADR 0065, proposed). Never a
+  **Rollout clone** (a parallel rollout's) and never read as a thread.
+  _Avoid_: chain clone, chain worktree, sandbox.
+- **Note wait** — a vault run's agent pausing before it edits a note another
+  live run has edited in a task not yet done; the higher-ranked run goes
+  first, and every wait is recorded for the weekly Reflection (ADR 0065,
+  proposed). Best-effort: a script's write is not caught. _Avoid_: note lock,
+  lease (alone).
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -570,6 +592,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Parallel ceiling** — the most Slots a Queue holds at once, set per
   rollout. Not the retired model-tier **Ceiling** (see **Top rung**).
   _Avoid_: bare "ceiling", concurrency, max agents.
+- **Capacity** — the most Rollout tasks, Leg task claims and full suites that
+  run across the whole Mac at once, rising and falling on its own with heat,
+  memory, load and each Login's quota; the **Trickle** and the **Away cap**
+  are its fallback when its reading fails (ADR 0065, proposed). _Avoid_:
+  governor (the mechanism), throttle.
 - **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
   across the whole Mac at once, whatever the number of Rollouts: 2, unless
   Chorus sets another (Chorus ADR 0104 d2). _Avoid_: global ceiling, throttle.
