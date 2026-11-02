@@ -443,7 +443,7 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   Watch counted in readings, the load hold, the Monthly audit's month rule and window, its gaps in the decision task and
   never against `quiet`), `tests/reflect-attention.test.mjs` (the attention ledger: fixture transcripts read once per
   question with each outcome and the hours held, `tally`, the owners file's refusals and its `unknown` remainder, Review
-  trails keyed by landing, branch or path run with their STOP entries and docs-only diffs, waits to start, both circling
+  trails keyed by landing, branch or path run with their rounds and docs-only diffs, waits to start, both circling
   rules with a reading's own Sessions left out, and their Watches counted in readings through decide, close and the
   cadence),
   `tests/reflect-grades.test.mjs` (`grades.py` on fixture grade lines, records and notes: each grade's episode to the

@@ -361,14 +361,18 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      (a finite number >= 0), longest (at most 5 {call, session, repo, header of at most 60 characters,
                      hours, outcome}), byRepo ({repo: count}, at most 12 repos and `other`), byOwner and hoursByOwner
                      (keyed by exactly ATTENTION_OWNERS, byOwner summing to asked); trails exactly count, rounds,
-                     codeRounds, simplifyRounds, stopRounds, stops, stopsHanded, findings, regression and engineStops
-                     (integers >= 0), docsOnly {trails, rounds}, longest (at most 5 {label of at most 120 characters,
-                     rounds, stopRounds, stops, stopsHanded, docsOnly true, false or null, handedAfterStop at most 8
-                     ids}); waits at most 16 {rollout (a slug), ask (a UTC Z stamp), scheduled and started (a stamp or
-                     null), hours, scheduleHours (or null), open}; circling W1 and W2 only (never span's readings), at
-                     most 32 items each {slug (a slug, not reserved), sessions, questions, hours?}. The caps keep a full
-                     line under 16 KiB with 64-character slugs; attention.py trims the circling lists, then the waits,
-                     when a line would pass it). No rollout, no task; lands in reflections.jsonl.
+                     codeRounds, findings, regression and engineStops (integers >= 0), docsOnly {trails, rounds},
+                     longest (at most 5 {label of at most 120 characters, rounds, docsOnly true, false or null});
+                     waits at most 16 {rollout (a slug), ask (a UTC Z stamp), scheduled and started (a stamp or null),
+                     hours, scheduleHours (or null), open}; circling W1 and W2 only (never span's readings), at most 32
+                     items each {slug (a slug, not reserved), sessions, questions, hours?}. The caps keep a full line
+                     under 16 KiB with 64-character slugs; attention.py trims the circling lists, then the waits, when
+                     a line would pass it. A line written before fresh-review ADR 0001 retired the stop verdict and the
+                     simplify round carries trails' simplifyRounds, stopRounds, stops and stopsHanded, and longest's
+                     stopRounds, stops, stopsHanded and handedAfterStop: emit refuses them now, and that older line
+                     still reads, since its readers, attention.py's trend and reflect.py's attention_record, take
+                     reflections.jsonl's lines as they stand and never through this check). No rollout, no task;
+                     lands in reflections.jsonl.
   base-moved      T  repo, pr, base, main (the refused integrated base and the live main merge-task read), inertOnly
                      (true | false | null: null only beside an error), moversTotal (an int >= 0), movers (at most 20
                      {sha, kind, rollout?, task?, pr?, source?}, oldest first: kind rollout | peer, source record |
@@ -1008,13 +1012,11 @@ ATTENTION_OWNERS = ("yours", "priorities", "technical", "gate", "unknown")
 CIRCLING_RULES = ("W1", "W2")
 ATT_QUESTION_COUNTS = ("asked", "calls", "answered", "dismissed", "dropped", "open", "failed", "unparsed", "notes",
                        "ownWords", "unlabelled")
-ATT_TRAIL_COUNTS = ("count", "rounds", "codeRounds", "simplifyRounds", "stopRounds", "stops", "stopsHanded", "findings",
-                    "regression", "engineStops")
+ATT_TRAIL_COUNTS = ("count", "rounds", "codeRounds", "findings", "regression", "engineStops")
 ATT_BY_REPO = 12           # repos named in questions.byRepo, `other` beside them
 ATT_LONGEST = 5            # questions.longest and trails.longest
 ATT_WAITS = 16
 ATT_CIRCLING = 32          # each of circling.W1 and circling.W2
-ATT_HANDED = 8             # a trail's handedAfterStop ids
 ATT_HEADER = 60            # a longest question's header
 ATT_LABEL = 120            # a trail's label
 
@@ -1073,12 +1075,9 @@ def _att_trails(v):
     if not isinstance(lo, list) or len(lo) > ATT_LONGEST:
         return "an object with longest a list of at most %d trails" % ATT_LONGEST
     for x in lo:
-        keys2 = {"label", "rounds", "stopRounds", "stops", "stopsHanded", "docsOnly", "handedAfterStop"}
-        if not isinstance(x, dict) or set(x) != keys2 or not isinstance(x["label"], str) or not x["label"] or \
-                len(x["label"]) > ATT_LABEL or not all(_count0(x[k]) for k in ("rounds", "stopRounds", "stops", "stopsHanded")) \
-                or _bool_or_null(x["docsOnly"]) or _capped(ATT_HANDED)(x["handedAfterStop"]):
-            return "an object whose longest are {label (at most %d characters), rounds, stopRounds, stops, stopsHanded, " \
-                "docsOnly, handedAfterStop (at most %d ids)}" % (ATT_LABEL, ATT_HANDED)
+        if not isinstance(x, dict) or set(x) != {"label", "rounds", "docsOnly"} or not isinstance(x["label"], str) or \
+                not x["label"] or len(x["label"]) > ATT_LABEL or not _count0(x["rounds"]) or _bool_or_null(x["docsOnly"]):
+            return "an object whose longest are {label (at most %d characters), rounds, docsOnly}" % ATT_LABEL
     return None
 
 

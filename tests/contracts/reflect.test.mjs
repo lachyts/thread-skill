@@ -269,7 +269,7 @@ const ATT_13B = ['Once, after step 13a and before step 14', '`--rest-unknown`', 
 const ATT_S15 = ['(`run attention`)', '`amends` names the hand-over rule step 11\'s trace reached for most of them', 'with no rule in common, `amends` is']
 const ATT_S16 = ['`attention` its line (`run attention`)', 'A circling Watch counts like any other Watch: its first-ever line makes the week not quiet']
 const ATT_CANNOT = ['reads the question tool\'s questions alone', 'The Owner is the reading\'s label (asking.md § 1), never his',
-  'A STOP handed to him is any question within 30 minutes', 'reads as a trail of its own', 'Docs-only is unknown after a landing with no merge commit',
+  'A trail counts rounds and findings, never a stop', 'reads as a trail of its own', 'Docs-only is unknown after a landing with no merge commit',
   'A touch means the note was named', 'A work item needs `phase:`, `pr:` or `rollout:`', 'A work item a rollout holds at until is never W1\'s that week',
   'A Session that runs the reading (its span verb, a verb on its span file, or a score) is never a touch',
   'A rollout note with no record is judged by its status now', 'A decided circling item never returns on its rule']
@@ -782,4 +782,22 @@ test('control: § Deciding the decision task without --declined, its cycle close
   weekly('skill', real.skill.replace(dec, dec.replaceAll('--declined', '--rejected')), 'w14')
   weekly('skill:cycle', swap('skill', 'closes the Watch\'s cycle', 'notes it'), 'w14')
   weekly('skill:done', swap('skill', 'only once every item it lists has had a\nyes or a no', 'when the reading ends'), 'w14')
+})
+
+// The /fresh-review landings (fresh-review ADR 0001, thread-skill ADR 0065): a checker gives every finding its verdict,
+// so step 11 reads the checker's confirm rate where it read the session's self-grading, reports the precision per level,
+// and cites ADR 0065's three-round budget; step 17 reports both, and the trails' STOP entries are gone with the stop rule.
+test('step 11 reads /fresh-review landings by the confirm-rate check (ADR 0065), never self-grading, and reports precision per level; step 17 reports both', () => {
+  const s11 = collapse(sectionOf(real.skill, /^### 11\. /))
+  const para = s11.slice(s11.indexOf('**/fresh-review landings.**'), s11.indexOf('**The Time-lost ledger**'))
+  assert.ok(para.length > 0, 'step 11 has no /fresh-review landings paragraph before the Time-lost ledger\'s')
+  for (const n of ['The confirm-rate check (ADR 0065', '(Σ`blocking` + Σ`unconfirmed`) sum to two or more', 'none was reproduced (Σ`blocking` 0)',
+    'name the week as the confirm-rate risk, with its landings', 'never one landing alone', '`checkedRounds`', '`unconfirmed`', '`confirmRate`',
+    '`freshReviewLevels`', 'precision per level', 'reported only, never traced', 'never the landing\'s budget count (three code rounds, ADR 0065)'])
+    assert.ok(para.includes(n), `step 11's /fresh-review landings lacks: ${n}`)
+  assert.ok(!/self-grading|ADR 0058 d4/.test(para), 'step 11 still reads the retired self-grading check or ADR 0058 d4\'s budget')
+  const s17 = collapse(sectionOf(real.skill, /^### 17\. /))
+  for (const n of ['the confirm-rate risk included', '`freshReviewLevels`']) assert.ok(s17.includes(n), `step 17 lacks: ${n}`)
+  assert.ok(!/self-grading|STOP entries|handed to him/.test(s17), 'step 17 still reports a retired reading')
+  assert.ok(!/STOP entr|stop verdict/.test(real.skill.replace(/never a stop: [^\n]*/, '')), 'SKILL.md still reads a trail\'s STOP entries')
 })

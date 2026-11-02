@@ -311,8 +311,8 @@ test('L2: zero questions need no --owners; a maximal line passes run_record.chec
   const sp = span(h)
   const r = ok(h, ['attention', '--span', sp.out])
   assert.match(r.stdout, /0 questions \(0 yours, 0 unlabelled\)/)
-  // every cap at once: 12 repos and other, 5 longest at 60-character headers, 5 trails at 120-character labels and 8
-  // handed ids, 16 waits and 32 + 32 circling items on 64-character slugs
+  // every cap at once: 12 repos and other, 5 longest at 60-character headers, 5 trails at 120-character labels, 16 waits
+  // and 32 + 32 circling items on 64-character slugs
   const slug = (c, i) => `${c}${String(i).padStart(2, '0')}`.padEnd(64, 'x')
   const stamp = '2026-10-25T13:00:00.000Z'
   const owners = { yours: 1, priorities: 1, technical: 1, gate: 1, unknown: 296 }
@@ -323,10 +323,9 @@ test('L2: zero questions need no --owners; a maximal line passes run_record.chec
         header: 'h'.repeat(60), hours: 99.999, outcome: 'answered' })),
       byRepo: { ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`owner-name/repository-${i}`.padEnd(40, 'r'), 20])), other: 60 },
       byOwner: owners, hoursByOwner: { yours: 1.5, priorities: 2.5, technical: 3.5, gate: 4.5, unknown: 1222.567 } },
-    trails: { count: 40, rounds: 120, codeRounds: 100, simplifyRounds: 20, stopRounds: 50, stops: 30, stopsHanded: 12, findings: 999, regression: 333, engineStops: 4,
+    trails: { count: 40, rounds: 120, codeRounds: 100, findings: 999, regression: 333, engineStops: 4,
       docsOnly: { trails: 3, rounds: 9 },
-      longest: Array.from({ length: 5 }, () => ({ label: 'l'.repeat(120), rounds: 12, stopRounds: 6, stops: 2, stopsHanded: 4, docsOnly: null,
-        handedAfterStop: Array.from({ length: 8 }, (_, j) => `toolu_01${'B'.repeat(22)}${j}#1`) })) },
+      longest: Array.from({ length: 5 }, () => ({ label: 'l'.repeat(120), rounds: 12, docsOnly: null })) },
     waits: Array.from({ length: 16 }, (_, i) => ({ rollout: slug('w', i), ask: stamp, scheduled: stamp, started: stamp, hours: 123.456, scheduleHours: 23.456, open: false })),
     circling: { W1: Array.from({ length: 32 }, (_, i) => ({ slug: slug('a', i), sessions: 12, questions: 34 })),
       W2: Array.from({ length: 32 }, (_, i) => ({ slug: slug('b', i), sessions: 12, questions: 34, hours: 123.456 })) } }
@@ -335,15 +334,53 @@ test('L2: zero questions need no --owners; a maximal line passes run_record.chec
   assert.equal(checked, null)
 })
 
+// fresh-review ADR 0001 retired the stop verdict and the simplify round, so the attention line lost their counts; a line
+// written before that still sits in reflections.jsonl and still reads: trend reads each line's keys as they stand, and
+// no reader puts an earlier line through run_record's check.
+test('L2: an attention line from before fresh-review ADR 0001 (its stop and simplify counts) still reads in trend, with no flag; the new line carries none and the reading closes', (t) => {
+  const h = setup(t)
+  const [wn, s1] = branchCheckout(h, 'wn')
+  emitAll(h, null, [round(h, T(22, '00:00'), wn, s1, { verdict: 'stop', branch: 'feat/n' }), round(h, T(22, '01:00'), wn, s1, { ...NEW_ROUND, branch: 'feat/n' })])
+  const rid = 'r-20261020T130000Z-0a1b2c'
+  const [since, until] = ['2026-10-13T13:00:00.000Z', '2026-10-20T13:00:00.000Z']
+  const old = { v: 1, ts: '2026-10-20T13:00:05.000Z', host: 'h', rollout: null, task: null, kind: 'attention', reflection: rid, since, until,
+    questions: { asked: 7, calls: 6, answered: 5, dismissed: 1, dropped: 0, open: 1, failed: 1, unparsed: 0, notes: 1, ownWords: 1, unlabelled: 1,
+      recommended: { offered: 4, picked: 3 }, hoursHeld: 9.5, longest: [], byRepo: { 'o/r': 7 },
+      byOwner: { yours: 2, priorities: 1, technical: 3, gate: 0, unknown: 1 }, hoursByOwner: { yours: 2, priorities: 1, technical: 6, gate: 0, unknown: 0.5 } },
+    trails: { count: 2, rounds: 7, codeRounds: 6, simplifyRounds: 1, stopRounds: 3, stops: 2, stopsHanded: 1, findings: 20, regression: 5, engineStops: 0,
+      docsOnly: { trails: 1, rounds: 2 }, longest: [{ label: '#211', rounds: 5, stopRounds: 3, stops: 1, stopsHanded: 1, docsOnly: false, handedAfterStop: ['toolu_9#0'] }] },
+    waits: [], circling: { W1: [{ slug: 'a-task', sessions: 3, questions: 2 }], W2: [] } }
+  fs.writeFileSync(reflectionsFile(h), `${JSON.stringify(old)}\n`)
+  const want = [{ reflection: rid, since, until, asked: 7, yours: 2, unlabelled: 1, trails: 2, rounds: 7, W1: 1, W2: 0 }]
+  assert.deepEqual(py(h, ATTENTION, 'm.trend(a, None)', rlines(h)), want, 'the old line reads; trend carries no stops')
+  const sp = span(h)
+  assert.deepEqual(sp.s.attention.trend, want)
+  assert.deepEqual([sp.s.attention.flags, sp.s.flags.filter((f) => f.startsWith('attention'))], [[], []])
+  assert.deepEqual(sp.s.attention.trails.items.map((x) => [x.label, x.rounds, x.codeRounds, RETIRED.filter((k) => k in x)]), [['feat/n', 2, 2, []]])
+  // the writer: run_record takes the new line, which carries no retired key; decide and close read past the old one
+  ok(h, ['attention', '--span', sp.out])
+  const line = rlines(h).filter((l) => l.kind === 'attention').at(-1)
+  assert.equal(line.reflection, sp.s.reflection)
+  assert.deepEqual(Object.keys(line.trails).sort(), ['codeRounds', 'count', 'docsOnly', 'engineStops', 'findings', 'longest', 'regression', 'rounds'])
+  assert.deepEqual(line.trails.longest, [{ label: 'feat/n', rounds: 2, docsOnly: false }])
+  assert.deepEqual(py(h, ATTENTION, 'm.trend(a, None)', rlines(h)).map((x) => [x.reflection, x.trails, x.rounds, 'stops' in x]), [[rid, 2, 7, false], [sp.s.reflection, 1, 2, false]])
+  ok(h, ['ledger', '--span', sp.out])
+  ok(h, ['close', '--span', sp.out])
+})
+
 // ---- L3: Review trails --------------------------------------------------------------------------------------------------
 
+// verdict null leaves the key out: a line written after fresh-review ADR 0001 retired the ledger's stop rule
 function round(h, ts, repo, head, { verdict = 'continue', mode = 'code', doc = null, branch = null, extra = {} } = {}) {
   return [ts, 'review-round', null, { repo, head, digest: crypto.createHash('sha1').update(`${repo}${head}${ts}`).digest('hex').slice(0, 6),
     doc: doc ?? `docs/reviews/${ts.slice(0, 10)}-${head}-${crypto.randomBytes(2).toString('hex')}.md`, mode, effort: 'xhigh',
-    findings: 3, original: 2, regression: 1, verdict, ...(branch ? { branch } : {}), ...extra }, null]
+    findings: 3, original: 2, regression: 1, ...(verdict ? { verdict } : {}), ...(branch ? { branch } : {}), ...extra }, null]
 }
+// what a trail and its counts no longer carry (fresh-review ADR 0001 retired the stop verdict and the simplify round)
+const RETIRED = ['simplifyRounds', 'stopRounds', 'stops', 'stopsHanded', 'handedAfterStop']
+const NEW_ROUND = { verdict: null, extra: { status: 'consumed', blocking: 1, open: 0, filed: 1, recurring: 0, reversal: 0, rejected: 0, unconfirmed: 1 } }
 
-test('L3: Review trails key each round by landing, then branch, then path run; count stops, STOP entries handed to Lachy and docs-only diffs', (t) => {
+test('L3: Review trails key each round by landing, then branch, then path run; count rounds, code rounds and docs-only diffs, never a stop', (t) => {
   const h = setup(t)
   const wt = (name, at) => { const p = path.join(h.home, name); git(h, ['worktree', 'add', '-q', '--detach', p, at]); return p }
   commit(h, { 'README.md': 'x\n' }, 'base')
@@ -385,7 +422,7 @@ test('L3: Review trails key each round by landing, then branch, then path run; c
   // straight onto main: no merge commit
   const k1 = commit(h, { 'docs/k.md': 'k1\n' }, 'k1')
   const k2 = commit(h, { 'docs/k.md': 'k2\n' }, 'k2')
-  // the stops' branch
+  // the stop rounds' branch (lines from before fresh-review ADR 0001), and the new lines' with no verdict
   git(h, ['checkout', '-q', '-b', 'bs'])
   const s1 = commit(h, { 'skills/s.md': 's\n' }, 'bs')
   git(h, ['checkout', '-q', 'main'])
@@ -407,6 +444,7 @@ test('L3: Review trails key each round by landing, then branch, then path run; c
     ...['continue', 'stop', 'stop', 'continue', 'stop'].map((v, i) => round(h, T(24, `0${i}:00`), wts, s1, { verdict: v, branch: 'feat/s' })),
     round(h, T(24, '10:00'), ha, s1, { verdict: 'stop', branch: 'feat/ha' }), round(h, T(24, '10:00'), hb, s1, { verdict: 'stop', branch: 'feat/hb' }),
     round(h, T(24, '10:00'), hc, s1, { verdict: 'stop', branch: 'feat/hc' }),
+    round(h, T(24, '11:00'), hb, s1, { ...NEW_ROUND, branch: 'feat/hb' }), round(h, T(24, '12:00'), hb, s1, { ...NEW_ROUND, branch: 'feat/hb' }),
     round(h, T(18, '00:00'), wtp, s1, { branch: 'feat/old' }),
     // pending then consumed: one round, at its reviewedAt
     round(h, T(24, '20:00'), wtp, s1, { branch: 'feat/p', doc: 'docs/reviews/p.md', extra: { status: 'pending' } }),
@@ -421,7 +459,7 @@ test('L3: Review trails key each round by landing, then branch, then path run; c
   const items = b.attention.trails.items
   const one = (label) => { const xs = items.filter((x) => x.label === label); assert.equal(xs.length, 1, `${label}: ${JSON.stringify(items.map((x) => x.label))}`); return xs[0] }
   assert.deepEqual([one('#1').key, one('#1').rounds, one('#1').docsOnly, one('#2').rounds, one('#2').docsOnly], ['landing', 1, true, 1, false], 'two landings from one checkout are two trails')
-  assert.deepEqual([one('#3').checkouts, one('#3').rounds, one('#3').simplifyRounds, one('#3').docsOnly], [[wt3a, wt3b], 2, 1, true])
+  assert.deepEqual([one('#3').checkouts, one('#3').rounds, one('#3').codeRounds, one('#3').docsOnly], [[wt3a, wt3b], 2, 1, true], 'a simplify round is a round, never a code round')
   assert.deepEqual([one('feat/x').key, one('feat/x').checkouts.length, one('feat/x').rounds, one('feat/x').docsOnly], ['branch', 2, 2, false], 'the line\'s branch')
   assert.deepEqual([one('origin/b5').checkouts, one('origin/b5').rounds, one('origin/b5').docsOnly], [[wt5a, wt5b], 2, true], 'one remote-tracking branch; a squash reads by its branch')
   assert.deepEqual([one('run-two').key, one('run-two').rounds], ['path', 1], 'a head on two branches is a path run')
@@ -432,15 +470,20 @@ test('L3: Review trails key each round by landing, then branch, then path run; c
   assert.deepEqual([one('zzz-y').identity, one('zzz-y').docsOnly], [goneRepo, null])
   assert.ok(b.attention.cannotShow.some((c) => c.includes(`checkout ${goneRepo} resolves to no repo`)), JSON.stringify(b.attention.cannotShow))
   assert.ok(b.attention.cannotShow.some((c) => c.startsWith('Review trail run-desc: docs-only is unknown')))
-  assert.deepEqual([one('feat/s').rounds, one('feat/s').stopRounds, one('feat/s').stops], [5, 3, 2], '[continue, stop, stop, continue, stop]')
-  assert.deepEqual([one('feat/ha').stopsHanded, one('feat/ha').handedAfterStop, one('feat/hb').stopsHanded, one('feat/hc').stopsHanded], [1, ['ha1#0'], 0, 0])
+  assert.deepEqual([one('feat/s').rounds, one('feat/s').codeRounds, one('feat/s').findings], [5, 5, 15], '[continue, stop, stop, continue, stop]: an old verdict is never read')
+  assert.deepEqual([one('feat/hb').rounds, one('feat/hb').codeRounds, one('feat/hb').findings], [3, 3, 9], 'an old stop round and two new rounds with no verdict')
+  for (const x of items) assert.deepEqual(RETIRED.filter((k) => k in x), [], `${x.label} carries a retired key`)
+  assert.deepEqual(Object.keys(items[0]).sort(), ['checkouts', 'codeRounds', 'docsOnly', 'findings', 'first', 'identity', 'key', 'label', 'last', 'regression', 'rounds'])
   assert.ok(!items.some((x) => x.label === 'feat/old'), 'a trail with no round in the window is not read')
   assert.deepEqual([one('feat/p').rounds, one('feat/p').first, one('feat/p').last], [1, T(24, '19:30'), T(24, '19:30')], 'pending then consumed is one round, at reviewedAt')
   const c = b.attention.trails.counts
-  assert.deepEqual([c.count, c.rounds, c.stops, c.stopsHanded, c.engineStops], [items.length, items.reduce((n, x) => n + x.rounds, 0), 5, 1, 1])
+  assert.deepEqual([c.count, c.rounds, c.codeRounds, c.engineStops], [items.length, items.reduce((n, x) => n + x.rounds, 0), items.reduce((n, x) => n + x.codeRounds, 0), 1])
+  assert.deepEqual(Object.keys(c).sort(), ['codeRounds', 'count', 'docsOnly', 'engineStops', 'findings', 'longest', 'regression', 'rounds'])
   assert.deepEqual(c.docsOnly, { trails: 3, rounds: 5 })
-  const q = Object.fromEntries(b.attention.questions.items.map((x) => [x.id, x.handedAfterStop]))
-  assert.deepEqual(q, { 'ha1#0': true, 'hb1#0': false, 'hc1#0': false })
+  assert.deepEqual(c.longest.map((x) => Object.keys(x).sort()), c.longest.map(() => ['docsOnly', 'label', 'rounds']))
+  assert.deepEqual(c.longest[0], { label: 'feat/s', rounds: 5, docsOnly: false }, 'the most rounds first')
+  // a question after a stop round is a question, never a handed stop
+  assert.deepEqual(b.attention.questions.items.map((x) => [x.id, 'handedAfterStop' in x]), [['ha1#0', false], ['hc1#0', false], ['hb1#0', false]])
 })
 
 // A branch `bs` off main with origin/main at main, and a detached worktree at its head: a round there with a `branch` keys
@@ -474,34 +517,33 @@ test('L3: a round takes its branch from the newest line of its doc that carries 
     [['feat/q', 'branch', 1, T(24, '01:00')], ['feat/n', 'branch', 1, T(24, '20:00')]], JSON.stringify(items))
 })
 
-test('L3: the transcripts\' floor is the first round of a trail read: a round in no trail read never moves it, one before the window in a trail read does, and none older than 28 days before the window is keyed', (t) => {
+test('L3: the transcripts\' floor is the earlier of since and until - 14 days: a trail\'s first round never moves it, and none older than 28 days before the window is keyed', (t) => {
   // A: an old round on a gone repo, its trail with no round in the window, and a round 50 days back on the branch of a
-  // trail read. A transcript last written between the old round and the floor (until - 14 days) is never read, so its
-  // ask, a question in the window 10 minutes after the trail's stop, is neither in the Question ledger nor handed.
+  // trail read. A transcript last written before the floor (until - 14 days) is never read, so its ask, a question in
+  // the window, is not in the Question ledger.
   const h = setup(t)
   const [wa, s1] = branchCheckout(h, 'wa')
   const goneOld = path.join(h.home, 'gone-old')
   emitAll(h, null, [
     round(h, '2026-09-01T00:00:00.000Z', wa, s1, { verdict: 'stop', branch: 'feat/a' }),
     round(h, T(10, '00:00'), goneOld, 'deadbee'),
-    round(h, T(24, '10:00'), wa, s1, { verdict: 'stop', branch: 'feat/a' }),
+    round(h, T(24, '10:00'), wa, s1, { ...NEW_ROUND, branch: 'feat/a' }),
   ])
   transcript(h, 'early', SID('1'), [askE(T(24, '10:10'), 'a1', [Q('Stop here?', ['Yes', 'No'])], { cwd: wa })], { mtime: new Date(T(11, '00:00')) })
   const a = block(h)
-  assert.deepEqual(a.attention.trails.items.map((x) => [x.label, x.rounds, x.first, x.stopsHanded, x.handedAfterStop]),
-    [['feat/a', 1, T(24, '10:00'), 0, []]], 'the September round is not keyed; the gone repo\'s trail is not read')
+  assert.deepEqual(a.attention.trails.items.map((x) => [x.label, x.rounds, x.first]),
+    [['feat/a', 1, T(24, '10:00')]], 'the September round is not keyed; the gone repo\'s trail is not read')
   assert.deepEqual(a.attention.questions.items, [], 'the early transcript is not read')
   assert.ok(!a.attention.cannotShow.some((c) => c.includes(goneOld)), 'a trail not read names no checkout')
-  // B: a trail read whose first round, a stop, is 15 days before the window: the transcripts are read back to it, so a
-  // question 10 minutes after that stop, in a file last written then, is handed (and is no question of the window).
+  // B: a trail read whose first round is 15 days before the window reads back to it, but the transcripts do not: a file
+  // last written then (after that round, before until - 14 days) is not read, so its in-window ask is no question.
   const h2 = setup(t)
   const [wr, r1] = branchCheckout(h2, 'wr')
-  emitAll(h2, null, [round(h2, T(5, '00:00'), wr, r1, { verdict: 'stop', branch: 'feat/r' }), round(h2, T(22, '00:00'), wr, r1, { branch: 'feat/r' })])
-  transcript(h2, 'early', SID('2'), [askE(T(5, '00:10'), 'r1', [Q('Stop here?', ['Yes', 'No'])], { cwd: wr })], { mtime: new Date(T(5, '00:10')) })
+  emitAll(h2, null, [round(h2, T(5, '00:00'), wr, r1, { verdict: 'stop', branch: 'feat/r' }), round(h2, T(22, '00:00'), wr, r1, { ...NEW_ROUND, branch: 'feat/r' })])
+  transcript(h2, 'early', SID('2'), [askE(T(22, '00:10'), 'r1', [Q('Stop here?', ['Yes', 'No'])], { cwd: wr })], { mtime: new Date(T(6, '00:00')) })
   const b = block(h2)
-  assert.deepEqual(b.attention.trails.items.map((x) => [x.label, x.rounds, x.first, x.stopsHanded, x.handedAfterStop]),
-    [['feat/r', 2, T(5, '00:00'), 1, ['r1#0']]])
-  assert.deepEqual(b.attention.questions.items, [])
+  assert.deepEqual(b.attention.trails.items.map((x) => [x.label, x.rounds, x.first]), [['feat/r', 2, T(5, '00:00')]])
+  assert.deepEqual(b.attention.questions.items, [], 'a trail\'s first round never moves the floor')
 })
 
 // ---- L4: waits to start -------------------------------------------------------------------------------------------------
@@ -692,8 +734,7 @@ test('L6: W2 lists an open rollout 48 hours in with no merge, a real rollout not
 // ---- L7: the circling Watches into decide, close and the cadence ---------------------------------------------------------
 
 const RID = (k) => `r-202610${String(k).padStart(2, '0')}T000000Z-${String(k).padStart(6, '0')}`
-const ZERO_TRAILS = { count: 0, rounds: 0, codeRounds: 0, simplifyRounds: 0, stopRounds: 0, stops: 0, stopsHanded: 0, findings: 0, regression: 0,
-  docsOnly: { trails: 0, rounds: 0 }, engineStops: 0, longest: [] }
+const ZERO_TRAILS = { count: 0, rounds: 0, codeRounds: 0, findings: 0, regression: 0, docsOnly: { trails: 0, rounds: 0 }, engineStops: 0, longest: [] }
 const attBlock = ({ W1 = [], W2 = [], readings = [] } = {}) => ({ questions: { items: [], counts: {} }, trails: { items: [], counts: ZERO_TRAILS }, waits: [],
   circling: { W1: W1.map((slug) => ({ slug, sessions: 3, questions: 0 })), W2: W2.map((slug) => ({ slug, sessions: 1, questions: 0, hours: 60 })), readings },
   watches: {}, trend: [], flags: [], cannotShow: [] })
