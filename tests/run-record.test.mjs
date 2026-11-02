@@ -1306,7 +1306,7 @@ test('the Inert-path kinds are refused, exit 2 and nothing written, when malform
 
 // ---- the time-lost ledger's kinds (p29-10, ADR 0051): stops, entries, suites and why main moved ----------------------
 const CALLS = [{ task: 'a', runId: 'wf_a1', call: 'task' }, { task: 'b' }]
-const STOP = { cause: 'usage-limit', inferred: false, calls: CALLS, reason: 'Login at its 5-hour line' }
+const STOP = { cause: 'usage-limit', inferred: false, calls: CALLS, reason: "Login at its week's line" }
 const SLEEP = { cause: 'mac-sleep', inferred: true, at: '2026-10-26T11:00:00.000Z', wake: '2026-10-26T20:00:00.000Z', calls: [] }
 const SUITE = 's-0123456789abcdef'
 const STARTED = { suite: SUITE, by: 'task', runner: 'agent', sha: 'a'.repeat(40), dirty: true, load: [3.2, 4, 5.5], diff: 'abcdef012345', waited: 12.5, running: 3 }
@@ -1335,7 +1335,7 @@ test('the ledger kinds (p29-10) land in <rollout>.jsonl as v 1 with their fields
   assert.deepEqual(all.map((l) => [l.v, l.kind, l.task]), [[1, 'stopped', null], [1, 'stopped', null], [1, 'stopped', null], [1, 'stopped', null],
     [1, 'lead-entry', null], [1, 'lead-entry', null], [1, 'suite-started', 't'], [1, 'suite-ended', 't'], [1, 'suite-started', null],
     [1, 'suite-ended', 't'], [1, 'suite-ended', 't'], [1, 'base-moved', 't'], [1, 'base-moved', 't']])
-  assert.deepEqual([all[0].calls, all[0].inferred, all[0].reason], [CALLS, false, 'Login at its 5-hour line'])
+  assert.deepEqual([all[0].calls, all[0].inferred, all[0].reason], [CALLS, false, "Login at its week's line"])
   assert.deepEqual([all[1].at, all[1].wake, all[2].boot, all[3].calls.length], [SLEEP.at, SLEEP.wake, '2026-10-26T12:00:00.123Z', 64])
   assert.deepEqual([all[4].by, all[4].session, all[4].stop, 'stop' in all[5]], ['stage', 'sess-1', 'usage-limit', false])
   assert.deepEqual([all[6].load, all[6].diff, all[6].running, all[7].failing, all[7].rc], [[3.2, 4, 5.5], 'abcdef012345', 3, ['tests/a.py::t'], 1])

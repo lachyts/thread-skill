@@ -554,8 +554,8 @@ integrates, the lead's next step stamps `paused:`.
 
 **Room stop.** A standing room stop (§ 2's `stands`, exit 0) renders as a room stop, not a stall: headline
 `ROOM STOP since <stamp>: awaiting the Stage's resume`, what's left listed as usual, and no stalled framing.
-On the Chorus Stage the lead stopped each Workflow call at a step boundary for a Login at its line, or nearing it
-in a spread (execute § Room stop), so its owner session (the lead that wrote it, which the tasks' `owner:` tags
+On the Chorus Stage the lead stopped each Workflow call at a step boundary for a Login at its line
+(execute § Room stop), so its owner session (the lead that wrote it, which the tasks' `owner:` tags
 name) shows no run in `/workflows` by design. Its tasks need not read running or integrating either: a call whose
 row came in before its stop was reconciled, and the signal can come in a cool-down's `waiting` turn with nothing
 in flight, so they may all await Integration, sit set aside or wait queued. While that session is alive (not

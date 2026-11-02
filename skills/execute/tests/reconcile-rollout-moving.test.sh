@@ -175,8 +175,8 @@ ok "$(vcr)" '["waiting","away-cap","away cap: 2/2 tasks running on this Mac"]' "
 scen m6
 mkro; running a
 entry 2026-10-26T10:50:00Z
-printf '\n## Pause log\n\n- 2026-10-26T11:00+00:00 room stop: Login at its 5-hour line\n' >> "$D/$RO.md"
-em stopped - '{"cause":"usage-limit","inferred":false,"calls":[],"reason":"Login at its 5-hour line"}' 2026-10-26T11:00:00Z
+printf '\n## Pause log\n\n- 2026-10-26T11:00+00:00 room stop: Login at its week'\''s line\n' >> "$D/$RO.md"
+em stopped - '{"cause":"usage-limit","inferred":false,"calls":[],"reason":"Login at its week'\''s line"}' 2026-10-26T11:00:00Z
 ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["until"]]')" '["waiting","room-stop","2026-10-26T17:00+00:00"]' "M6: room-stop until its stamp + 6 h"
 MNOW=2026-10-26T18:00:00Z
 ok "$(vcr)" '["stalled","usage-limit","no life sign for 420m"]' "M6b: past its bound, by silence: usage-limit"

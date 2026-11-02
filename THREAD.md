@@ -10,6 +10,8 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-11-02 (latest): the room stop is the week's line alone (Chorus ADR 0111), PR #270 queued.** Anthropic dropped the five-hour limit from the Ultra accounts, so execute § Room stop, `legs.md`, status, `step-boundary.py` and CONTEXT.md no longer read a 5-hour line or a spread (ADR 0109), and the room-stop contract test refuses either. Rebased over #269, keeping its origin-wait clause in item 3. `/fresh-review code xhigh` round 1: 9 findings, none blocking, all filed in [[thread-skill-room-stop-week-line-review-follow-ups]]. Its #1 is a design call to make with Chorus that predates this change: item 11's 6 h bound ends a room stop while a week's-line hold (often over 6 h, re-written every 3 h) still stands, and a repeat signal never moves the stop's stamp.
+
 **2026-11-02 (later): [[thread-skill-rollout-2026-10-31]] is complete: 14 of 14 tasks merged, archived.**
 - Lachy signed off p33-4's irreversible gate at 10:01. The lead resumed its gate-pending run on the signed plan; the handle survived compaction in a `/tmp` file, so this was a resume, not a fresh call.
 - The live rig ran against `lachyts/zz-thread-p33-4-e2e` and deleted it. The verifier went green on iteration 3 of 3.
@@ -1121,6 +1123,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-02 (close, room stop to the week's line): reviewed and landed the five-hour drop's thread-skill half (`3d6a481`, rebased as `33c8262`) from a Stage worktree beside the 2026-10-31 rollout's lead; one clean review round, 9 findings filed; PR #270 queued with auto-merge. The `drop-five-hour` branch and worktree are left as they were; #270 supersedes them.
 - 2026-11-02 (close, rollout lead after sign-off): signed off p33-4's gate on Lachy's word; reinstated; resumed the gate-pending call on the signed plan; ran the lead verify (green) and a judge-only Integration; merged #267; ran the completion ceremony (P33 closed, scored, archived, reflect follow-up filed).
 - 2026-11-02 (close, rollout lead from 2026-10-31): led [[thread-skill-rollout-2026-10-31]] from a 14-task queue to 13 merged and a sign-off pause; rode three room stops and a Login switch; auto-retried p34-7, p34-8 and p33-4 once each; resumed p34-8 after an OAuth expiry; caught four colliding ADR 0060s (task-note Integration notes, refs rule A) so 0059–0063 landed clean. My slips: zsh word-split a slug list once (nothing written); fixed by an array.
 - 2026-10-29 (close, rollout lead from 2026-10-26): drove [[thread-skill-rollout-2026-10-26]] to completion (31/32 merged, p31-2 deferred); ran repair hand-backs on Lachy's answers, signed p27-5's gates (US$15 + US$3), fixed the macOS CI timeout (PR #247: timeout-minutes 40), ran the completion ceremony. My slips: twice passed the PR head instead of `prepare`'s anchor as an integrate `headSha`, and once restarted a signed-gate task without `approvedGates`; both now in Known quirks.

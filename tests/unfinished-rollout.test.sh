@@ -504,9 +504,9 @@ hasnt "$err" "is incomplete" "C27 control: … never judged incomplete"
 # The Chorus Stage's room stops (step-boundary.py's lines under `## Pause log`) are no run mark on an approved queue
 # (`on_merge: regenerate` beside a rollout hold_until), so its regenerate supersedes it, as schedule's Under the chain.
 # runs it. Anywhere else a room stop still counts, and so does a standing one or a hard pause's line.
-RS_ENDED=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none\n- 2026-10-01T11:00+00:00 room stop ended'
-RS_STANDS=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none'
-RS_HARD=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its 5-hour line; stopping at a step boundary: none; lane: none\n- 2026-10-01T11:00+00:00 room stop ended\n- 2026-10-01T12:00+00:00 hard pause: runs none'
+RS_ENDED=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its week\'s line; stopping at a step boundary: none; lane: none\n- 2026-10-01T11:00+00:00 room stop ended'
+RS_STANDS=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its week\'s line; stopping at a step boundary: none; lane: none'
+RS_HARD=$'## Pause log\n\n- 2026-10-01T10:00+00:00 room stop: L1 at its week\'s line; stopping at a step boundary: none; lane: none\n- 2026-10-01T11:00+00:00 room stop ended\n- 2026-10-01T12:00+00:00 hard pause: runs none'
 AQ_HOLD='hold_until: {pr: o/r#202, merged: true}'; AQ_ON='on_merge: regenerate'
 scen c28
 BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"
