@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { root } from './lib/contract-text.mjs'
+import { REVERSED_WALK } from './lib/reversed-walk.mjs'
 
 const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'next-action.py')
 
@@ -326,6 +327,17 @@ test('read takes a vault-relative path, whatever the working directory', () => {
   })
   const rows = ok(dir, ['read', `${P}/A/Same.md`, `${P}/B/Same.md`, 'Same'], { cwd: scratch })
   assert.deepEqual(rows.map((r) => [r[0], r[2]]), [['slot', 'live'], ['slot', 'blank'], ['skip', `ambiguous (${P}/A/Same.md, ${P}/B/Same.md)`]])
+})
+
+test("a name's notes list in one order, whatever order the file system walks them", () => {
+  const dir = vault({
+    [`${P}/Same.md`]: task('tags: [project]'),
+    [`${P}/A/Same.md`]: task('tags: [project]'),
+    [`${P}/B/Same.md`]: task('tags: [project]'),
+  })
+  const want = [['skip', 'Same', `ambiguous (${P}/Same.md, ${P}/A/Same.md, ${P}/B/Same.md)`]]
+  assert.deepEqual(ok(dir, ['read', 'Same']), want)
+  assert.deepEqual(ok(dir, ['read', 'Same'], { pyFlags: REVERSED_WALK }), want, 'a reversed walk lists them the same')
 })
 
 test('a block list after a blank line is replaced whole', () => {

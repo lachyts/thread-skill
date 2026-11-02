@@ -35,7 +35,7 @@ export THREAD_GIT_ENV_DIR="$TMP/git-env"  # mark-started's canary arm (p26-3) ke
 # run's transcript dir, subagents/workflows/<runId>/, which the Workflow tool creates at launch (p27-3).
 V="$TMP/vault"; SESS="$TMP/sess"; J="$SESS/workflows"
 mkdir -p "$V" "$J" "$EV"
-for r in wf_a1 wf_d1 wf_d2 wf_e1 wf_r1 wf_r2 wf_c1; do mkdir -p "$SESS/subagents/workflows/$r"; done
+for r in wf_a1 wf_d1 wf_d2 wf_e1 wf_r1 wf_r2 wf_c1 wf_q1; do mkdir -p "$SESS/subagents/workflows/$r"; done
 NOW=2026-10-05T10:00:00Z
 PR=https://github.com/o/r/pull
 A40=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; B40=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; C40=cccccccccccccccccccccccccccccccccccccccc
@@ -406,14 +406,21 @@ rrs mark-done --tasks k --tasks-dir "$V" --now "$NOW" >/dev/null
 ok "$(since ro "$M")" "hold-started:k hold-ended:k lane-freed:k merged:k" "race hold ends at mark-done"
 ok "$(since ro "$((M+1))" 'd.get("hold") or d.get("release") or "-"')" '"race" "merge" "-"' "hold-ended race, lane-freed merge"
 
-echo "== 16. a usage-limit dead call -> quota-stall"
+echo "== 16. a usage-limit dead call -> quota-stall, naming the call it stopped (p29-10)"
 mkt q ro in_progress
 rrs mark-started --tasks q --tasks-dir "$V" --now "$NOW" >/dev/null
+rrs bind-run --tasks q --run-id wf_q1 --call task --journal-dir "$J" --tasks-dir "$V" --now "$NOW" >/dev/null
 M=$(cnt ro)
 lead q own "workflow call failed: You've hit your usage limit" >/dev/null
 ok "$(since ro "$M")" "slot-freed:q set-aside:q quota-stall:q" "slot-freed, set-aside, quota-stall"
 ok "$(since ro "$((M+1))" '[d.get("reasonClass"), d.get("stage")]')" '["quota","implement"] [null,"implement"]' "reasonClass quota; quota-stall stage"
 has "$(since ro "$((M+2))" 'd["detail"]')" "usage limit" "quota-stall detail"
+ok "$(since ro "$((M+2))" '[d.get("runId"), d.get("call")]')" '["wf_q1","task"]' "quota-stall names the task's latest run-bound: runId and call"
+mkt q2 ro in_progress
+rrs mark-started --tasks q2 --tasks-dir "$V" --now "$NOW" >/dev/null
+M=$(cnt ro)
+lead q2 own "workflow call failed: rate limit reached" >/dev/null
+ok "$(since ro "$((M+2))" '[d["kind"], "runId" in d, "call" in d]')" '["quota-stall",false,false]' "quota-stall with no run-bound omits runId and call"
 
 echo "== 17. a read-only approval -> slot-freed(completed), merged(readOnly)"
 mkt r ro in_progress "scope_note: x"
@@ -597,8 +604,14 @@ ok "$(idle i4)" '"queue-tail"' "queue-tail"
 mkro i5 "parallel_ceiling: 2" "pause_requested: true"; mkt v1 i5 in_progress
 ok "$(idle i5)" '"pause-drain"' "pause-drain"
 mkro i6 "parallel_ceiling: 2"; mkt w1 i6 open
-printf '\n## Git-env log\n\n- 2026-10-05T10:00+00:00 git-env trip [[w1]] task: refs/heads/main a→b; repo /x\n' >> "$V/i6.md"
-ok "$(idle i6 --running "")" '"hold-git-env"' "hold-git-env"
+printf '\n## Git-env log\n\n- 2026-10-05T10:00+00:00 git-env trip [[w1]] task: core.bare false→true; repo /x\n' >> "$V/i6.md"
+ok "$(idle i6 --running "")" '"hold-git-env"' "hold-git-env (a whole-rollout trip: a bare checkout)"
+mkro i6b "parallel_ceiling: 2"; mkt w2 i6b open
+printf '\n## Git-env log\n\n- 2026-10-05T10:00+00:00 git-env trip [[w2]] task: refs/heads/main a→b; repo /x\n' >> "$V/i6b.md"
+ok "$(idle i6b --running "")" '"hold-trickle"' "a lane trip holds no Slot: the idle Slot reads the Trickle's hold, never hold-git-env"
+mkro i6c "parallel_ceiling: 2"; mkt rr1 i6c review "pr: $PR/22" 'integrating: 2026-10-05T09:00+00:00'; mkt w3 i6c open
+printf '\n## Race log\n\n- 2026-10-05T10:00+00:00 [[rr1]] RACE: PR #22 merged as %s\n- 2026-10-05T10:10+00:00 [[rr1]] revert started: %s (re-verify rc 1, red after the Flake check)\n- 2026-10-05T10:20+00:00 [[rr1]] revert did not land: conflict in a.py\n' "$(printf 'f%.0s' {1..40})" "$(printf 'f%.0s' {1..40})" >> "$V/i6c.md"
+ok "$(idle i6c --running "")" '"hold-race"' "hold-race (mainRed: a RACE revert that did not land holds every start)"
 mkro i7 "parallel_ceiling: 2"; mkt rc i7 review "pr: $PR/21"
 printf '\n## Race log\n\n- 2026-10-05T10:00+00:00 [[rc]] RACE: unverified\n' >> "$V/i7.md"
 ok "$(idle i7 --running "")" '"hold-race"' "hold-race"
@@ -609,6 +622,11 @@ ok "$(idle i8 --running "")" "-" "none at halt complete"
 mkro i9 "parallel_ceiling: 2"; mkt x1 i9 in_progress; mkt x2 i9 open
 away_file "$TMP/i9-home" "$NOW" false 2099-01-01T00:00:00Z 1
 ok "$(HOME="$TMP/i9-home" idle i9)" '"hold-trickle"' "hold-trickle"
+# p29-8: Away, a fresh file at Trickle 1 and Away cap 2 with i10's own two live tasks leave slotLimit 0 (it is at most 2,
+# whatever else $V runs), so ac3 is held on the Away cap while a Slot of the ceiling 3 stays free.
+mkro i10 "parallel_ceiling: 3"; mkt ac1 i10 in_progress; mkt ac2 i10 in_progress; mkt ac3 i10 open
+away_file "$TMP/i10-home" "$NOW" true 2099-01-01T00:00:00Z 1 09:00 2
+ok "$(HOME="$TMP/i10-home" idle i10)" '"hold-away-cap"' "hold-away-cap"
 
 echo "== 21b. a stop on a question (p16-3) -> reasonClass needs-human, never plan-rejected or review-rounds"
 # The Reflection raises a round cap on 2+ review-rounds or plan-rejected set-asides, which can never answer a question.
@@ -637,6 +655,35 @@ ok "$(nh nh4 '{"status":"gate-pending","gatedInputs":["spend: one call — cap $
   '"slot-freed" ["gate","gate","gate"]' "gate-pending with a question -> gate still wins"
 ok "$(nh nh5 '{"status":"blocked","needsHuman":"'"$Q"'","blockerDiagnosis":"the implementer asks"}')" \
   '"slot-freed" ["implement","needs-human","run"]' "an engine-blocked row on a question -> needs-human"
+
+echo "== 21c. slot-taken carries the cap in force (p29-8)"
+# mark-started records the Mac-wide cap a Slot starts under (ADR 0049), read from the Away state file of the call's
+# HOME: {away, n, file}, n the Away cap while Away, else the Trickle. Side rollout sc; each call pins its own HOME.
+mkro sc "parallel_ceiling: 5"
+# capof <slug> <home> [mark-started flags...]: mark-started under that HOME; prints each new event's [start, cap]
+capof() {
+  local s=$1 h=$2; shift 2; local m; m=$(cnt sc)
+  HOME="$h" rrs mark-started --tasks "$s" --rollout "$V/sc.md" --tasks-dir "$V" --now "$NOW" "$@" >/dev/null 2>>"$TMP/sc-err"
+  since sc "$m" '[d["start"], d.get("cap")]'
+}
+: > "$TMP/sc-err"
+mkdir -p "$TMP/sc-none"
+away_file "$TMP/sc-day" "$NOW" false 2099-01-01T00:00:00Z 3 09:00 6
+away_file "$TMP/sc-away" "$NOW" true 2099-01-01T00:00:00Z 2 09:00 6
+away_file "$TMP/sc-nokey" "$NOW" true 2099-01-01T00:00:00Z 2 09:00 -
+away_file "$TMP/sc-stale" 2026-10-01T00:00:00Z true 2099-01-01T00:00:00Z 2 09:00 6
+for s in sc1 sc2 sc3 sc4 sc5; do mkt $s sc in_progress; done
+ok "$(capof sc1 "$TMP/sc-none")" '["start",{"away":false,"file":"missing","n":2}]' "no file: not Away, the Trickle 2"
+ok "$(capof sc2 "$TMP/sc-day")" '["start",{"away":false,"file":"fresh","n":3}]' "fresh, not Away: the Trickle 3, the Away cap unused"
+ok "$(capof sc3 "$TMP/sc-away")" '["start",{"away":true,"file":"fresh","n":6}]' "fresh, Away: the Away cap 6"
+ok "$(capof sc4 "$TMP/sc-nokey")" '["start",{"away":true,"file":"fresh","n":4}]' "fresh, Away, no away_cap: the built-in 4"
+ok "$(capof sc5 "$TMP/sc-stale")" '["start",{"away":false,"file":"stale","n":2}]' "stale, its away_cap ignored: not Away, the Trickle 2"
+ok "$(capof sc3 "$TMP/sc-away" --start restart)" '["restart",{"away":true,"file":"fresh","n":6}]' "--start restart carries it"
+mkt sc6 sc blocked
+rrs hand-back --tasks sc6 --tasks-dir "$V" --now "$NOW" >/dev/null
+ok "$(capof sc6 "$TMP/sc-away")" '["hand-back",{"away":true,"file":"fresh","n":6}]' "a hand-back restart carries it"
+ok "$(capof sc2 "$TMP/sc-away" --dry-run)" "" "--dry-run records nothing"
+ok "$(grep -c 'WARN: ~/.config/thread/away.json' "$TMP/sc-err")" 0 "mark-started prints no WARN line, a stale file included"
 
 echo "== 25. human acts (p21-2): record-answer, approve-gates and hand-back record their own act (rollout ha)"
 # Each verb that carries a decision of Lachy's records it (the Hands-off rate's events); hand-back classifies its own

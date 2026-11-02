@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # self-rollout-check.sh — the rollout clone's one script (ADR 0042, built by p26-2; p12-4 before it). Every
 # parallel rollout scheduled after P26 runs from its rollout clone `<toplevel>-rollout`, a second full clone of
-# the repository beside its toplevel, never nested inside it. The checkout Lachy's sessions work in is its
-# in-place twin. Modes:
+# the repository beside its toplevel, never nested inside it; a second project's parallel rollout on the same repo
+# runs from its own, `<toplevel>-<slug>-rollout` (ADR 0064: one clone per (repo, project); unfinished-rollout.py
+# `clone` names the slug). The checkout Lachy's sessions work in is its in-place twin. Modes:
 #
 #   <repoPath>                            execute § 2.6: is <repoPath> the plugin's live checkout?
-#   --resolve <Local:>                    schedule § 0 and estate-scan.py: the Project root, read-only
-#   --ensure <Local:>                     schedule § 0: the Project root, its clone made or refreshed
+#   --resolve <Local:> [<slug>]           schedule § 0 and estate-scan.py: the Project root, read-only
+#   --ensure <Local:> [<slug>]            schedule § 0: the Project root, its clone made or refreshed
 #   --refresh <Project root>              execute § 2.7: fast-forward a clone root at an entry point
 #   --refresh-in-place <Project root>     merge-task.sh and the completion ceremony: fast-forward its twin
-#   --launch-check <Project root> <dir>   execute § 2.8, repair § 4 and orient § 9: the lead's launch directory
+#   --launch-check <Project root> <dir>   execute § 2.8, repair § 4, orient § 9 and schedule step 8: the lead's launch directory
 #   --in-place <path>                     is <path> inside a rollout clone, and what is its twin
 #   --list-dirs                           pushed-base.sh: the registry's directory sources
 #
@@ -35,11 +36,15 @@
 #
 # ---- --in-place <path>: the one statement of "is this inside a rollout clone, and what is its twin". Exit 0 prints
 # the twin when ALL hold: T, the canonical toplevel of <path>, is named `<S>-rollout`; `T/.git` is a directory (its
-# own clone, never a linked worktree); `dirname(T)/<S>/.git` is a directory (the twin is a main checkout); and
-# `land.sh --origin-slug` exits 0 for both, the two <owner>/<name> equal case-insensitively. The twin printed is
-# `dirname(T)/<S>` plus <path>'s sub-path below T when the twin holds that sub-path, else the twin's toplevel.
+# own clone, never a linked worktree); `land.sh --origin-slug` exits 0 for T; and the twin walk (ADR 0064) lands on a
+# checkout. The twin walk, over names beside T (walk_twin; open/SKILL.md's `rc` is its shell port): the first
+# candidate is `<S>` (the rule before ADR 0064), then <S> with trailing `-<part>` segments dropped one at a time,
+# longest first, every candidate past the first whose name ends in `-rollout` skipped (another clone, never a twin);
+# the first candidate whose `.git` is a directory (a main checkout) and whose `land.sh --origin-slug` equals T's
+# case-insensitively is the twin. So `<T>-rollout` and `<T>-<slug>-rollout` both read as T's clones. The twin printed
+# is the twin plus <path>'s sub-path below T when the twin holds that sub-path, else the twin's toplevel.
 # Exit 1: not inside a rollout clone (a missing path, outside git, a plain `foo-rollout` with no same-origin
-# sibling). Exit 2: the check cannot run (usage, land.sh missing).
+# checkout at any candidate). Exit 2: the check cannot run (usage, land.sh missing).
 #
 # ---- --resolve <Local:>: read-only; its callers are schedule § 0 and estate-scan.py. In order:
 #   1. <Local:> is not in a git work tree: exit 3, `<L> has no rollout clone: it is not in a git work tree`.
@@ -48,8 +53,16 @@
 #   3. T is the ~/Projects monorepo: exit 3 (a text-only monorepo of project directories, never a Project root).
 #   4. T's origin is missing or not a GitHub <owner>/<name> (`land.sh --origin-slug` fails): exit 5, stdout empty,
 #      stderr `no GitHub origin in <T>: run the remote check (execution-fit.md § Dispatch blockers, GitHub origin)`.
-#   5. The clone C is T itself when `--in-place T` exits 0, else `<T>-rollout`; <Local:> maps to `C[/<sub>]`, its
-#      sub-path below T kept, never to a nested clone.
+#   5. The clone C is T itself when `--in-place T` exits 0 (a <slug> is then ignored, with a stderr `note:`), else
+#      `<T>-<slug>-rollout` with a <slug>, else `<T>-rollout`; <Local:> maps to `C[/<sub>]`, its sub-path below T
+#      kept, never to a nested clone. A <slug> is `[a-z0-9][a-z0-9-]*`, never `rollout` and never ending in
+#      `-rollout` (its clone would read as another's), else usage, exit 2.
+#   5b. Slug mode only (ADR 0064), whether or not C exists, exit 3 with `<C> is not a usable rollout clone: <why>`
+#      and the remedy line `this project takes no clone of its own beside <T>: its rollout waits for <T>-rollout
+#      (…)`: (a) `<T>-<slug>/.git` exists (a directory or a file: any checkout, whatever its origin), why
+#      `<T>-<slug> is a checkout (origin <owner/name>|origin <url>|no origin), so <C> is its own rollout clone's
+#      name`; (b) the twin walk from C's name (name-only: C need not exist) does not land on T, why `it would read as
+#      <W>'s rollout clone, not <T>'s (<W> is another checkout of <owner/name>)`.
 #   6. C absent: exit 4. stdout carries the would-be `C[/<sub>]`, stderr names the origin URL, and, when
 #      dirname(C) is inside another work tree P, `nested in <P>: <P> must ignore <rel>/; --ensure checks that
 #      before it clones`.
@@ -63,8 +76,8 @@
 #      yet, and --ensure, which fast-forwards C first, is the one that refuses when C still lacks it.
 # Exit 2 is the check unable to run (usage, python3 or land.sh missing). It never clones, fetches or writes.
 #
-# ---- --ensure <Local:>: schedule § 0 only, after the remote, gh and landing-register checks and Lachy's yes to the
-# clone (exit 4 above). In order: --resolve's steps 1-5 (exits 3, 5 and 2 pass through); C absent and dirname(C)
+# ---- --ensure <Local:> [<slug>]: schedule § 0 only, after the remote, gh and landing-register checks and Lachy's yes
+# to the clone (exit 4 above). In order: --resolve's steps 1-5b (exits 3, 5 and 2 pass through); C absent and dirname(C)
 # inside a work tree P: `mkdir C`, then `git -C P check-ignore -q -- <rel>/`, and when that is not 0, `rmdir C` and
 # exit 3 (P would track the clone: its next `git add -A`, the daily sweep's, would embed it as a gitlink); C absent:
 # one `git clone -- <raw remote.origin.url of T> <C>` with GIT_TERMINAL_PROMPT=0 and `ssh -o BatchMode=yes` unless
@@ -90,7 +103,8 @@
 #
 # ---- --refresh-in-place <Project root>: the in-place twin gets the rollout's merges (merge-task.sh after every
 # merge; the completion ceremony once, after its `status: done` stamp). Nothing for a root `--in-place` does not
-# name. A twin that is the plugin's primary checkout while a rollout runs is held (primary-hold.sh, ADR 0031).
+# name. A twin that is the plugin's primary checkout while a rollout with no Engine snapshot runs is held
+# (primary-hold.sh, ADR 0031; run from a snapshot, the hold reads the snapshot's Primary, ADR 0043).
 # Otherwise it fetches origin/<default> in the twin (land.sh's ssh and prompt rule) and runs only
 # `git merge --ff-only --no-autostash`: never a merge commit, a rebase or an autostash, never during an operation.
 # One stdout line, `in-place: <twin> …`, or nothing:
@@ -113,11 +127,19 @@
 # canonicalised as above, one per line, de-duplicated; exit 0. A missing registry prints nothing; a malformed one
 # prints nothing plus the stderr warning. Exit 2 on python3 missing or an extra argument. Its caller is
 # skills/_shared/scripts/pushed-base.sh (p12-15), so this file stays the one parser of the registry.
-usage() { echo "self-rollout-check: usage: self-rollout-check.sh <repoPath> | --resolve <Local:> | --ensure <Local:> | --refresh <Project root> | --refresh-in-place <Project root> | --launch-check <Project root> <launch dir> | --in-place <path> | --list-dirs" >&2; exit 2; }
+usage() { echo "self-rollout-check: usage: self-rollout-check.sh <repoPath> | --resolve <Local:> [<slug>] | --ensure <Local:> [<slug>] | --refresh <Project root> | --refresh-in-place <Project root> | --launch-check <Project root> <launch dir> | --in-place <path> | --list-dirs" >&2; exit 2; }
 mode=check
+SLUG=''
 case "${1:-}" in
   --list-dirs) [ $# -eq 1 ] || usage; mode=list ;;
-  --resolve|--ensure|--refresh|--refresh-in-place|--in-place) [ $# -eq 2 ] && [ -n "$2" ] || usage; mode=${1#--}; shift ;;
+  --resolve|--ensure)  # ADR 0064: an optional clone slug, `[a-z0-9][a-z0-9-]*`, never `rollout` or `*-rollout`
+    { [ $# -eq 2 ] || [ $# -eq 3 ]; } && [ -n "$2" ] || usage
+    if [ $# -eq 3 ]; then
+      case "$3" in ''|[!a-z0-9]*|*[!a-z0-9-]*|rollout|*-rollout) usage ;; esac
+      SLUG=$3
+    fi
+    mode=${1#--}; shift ;;
+  --refresh|--refresh-in-place|--in-place) [ $# -eq 2 ] && [ -n "$2" ] || usage; mode=${1#--}; shift ;;
   --launch-check) [ $# -eq 3 ] && [ -n "$2" ] && [ -n "$3" ] || usage; mode=launch-check; shift ;;
   *) [ $# -eq 1 ] && [ -n "$1" ] || usage ;;
 esac
@@ -242,20 +264,41 @@ default_of() {  # default_of <repo>…: the first local origin/HEAD symref among
   bash "$here/default-branch.sh" "$1" 2>/dev/null
 }
 
+# walk_twin <clone path> <owner/name>: the twin walk over names beside the clone (ADR 0064), name-only (the clone need
+# not exist). 0 with WALK set to the first candidate that is a main checkout (`.git` a directory) of the same
+# owner/name, case-insensitively, else 1. Candidates: <S> (the clone's name less `-rollout`), then <S> with trailing
+# `-<part>` segments dropped one at a time, longest first; every candidate past the first whose name ends in
+# `-rollout` is skipped (another clone, never a twin). open/SKILL.md's `rc` is its shell port.
+walk_twin() {
+  local dir base s first=1 b
+  dir=$(dirname "$1"); base=${1##*/}
+  case "$base" in ?*-rollout) ;; *) return 1 ;; esac
+  s=${base%-rollout}
+  while [ -n "$s" ]; do
+    case "$first$s" in 0*-rollout) ;; *)
+      if [ -d "$dir/$s/.git" ] && b=$(slug_of "$dir/$s") && [ -n "$b" ] && [ "$(lower "$b")" = "$(lower "$2")" ]; then
+        WALK="$dir/$s"; return 0
+      fi ;;
+    esac
+    first=0
+    case "$s" in ?*-*) s=${s%-*} ;; *) s='' ;; esac
+  done
+  return 1
+}
+
 # in_place <path>: 0 with TWIN (the twin path for <path>) and TWIN_TOP (the twin's toplevel) set, else 1.
 in_place() {
-  local p d t s a b sub
+  local p d t s a sub
   p=$(canon "$1")
   if [ -d "$p" ]; then d=$p
   elif [ -e "$p" ]; then d=$(canon "$(dirname "$p")"); p="$d/${p##*/}"
   else return 1; fi
   t=$(toplevel "$d") || return 1
   case "${t##*/}" in ?*-rollout) ;; *) return 1 ;; esac
-  s=${t%-rollout}
-  [ -d "$t/.git" ] && [ ! -L "$t/.git" ] && [ -d "$s/.git" ] || return 1
+  [ -d "$t/.git" ] && [ ! -L "$t/.git" ] || return 1
   a=$(slug_of "$t") && [ -n "$a" ] || return 1
-  b=$(slug_of "$s") && [ -n "$b" ] || return 1
-  [ "$(lower "$a")" = "$(lower "$b")" ] || return 1
+  walk_twin "$t" "$a" || return 1
+  s=$WALK
   case "$p" in "$t") sub='' ;; "$t"/*) sub=${p#"$t"/} ;; *) sub='' ;; esac
   TWIN_TOP=$s
   if [ -n "$sub" ] && [ -e "$s/$sub" ]; then TWIN="$s/$sub"; else TWIN=$s; fi
@@ -293,10 +336,34 @@ resolve_root() {
     echo "$SR: no GitHub origin in $T: run the remote check (execution-fit.md § Dispatch blockers, GitHub origin)" >&2; exit 5; }
   TSLUG=$(slug_of "$T")
   case "$L" in "$T") SUB='' ;; "$T"/*) SUB=${L#"$T"/} ;; *) SUB='' ;; esac
-  if in_place "$T"; then C=$T; IP=$TWIN_TOP; else C="$T-rollout"; IP=$T; fi
+  if in_place "$T"; then
+    C=$T; IP=$TWIN_TOP
+    [ -z "$SLUG" ] || echo "$SR: note: $T is itself a rollout clone, so it is the Project root: the clone slug $SLUG is ignored" >&2
+  elif [ -n "$SLUG" ]; then C="$T-$SLUG-rollout"; IP=$T
+  else C="$T-rollout"; IP=$T; fi
   URL=$(git -C "$T" config --get remote.origin.url 2>/dev/null)
   P=''; REL=''
   if pt=$(toplevel "$(dirname "$C")"); then P=$pt; REL=${C#"$P"/}; fi
+  [ -z "$SLUG" ] || [ "$C" = "$T" ] || slug_collides
+}
+# slug_refuse <why>: slug mode's exit 3 (step 5b): the reason line, then the remedy (the project waits for <T>-rollout).
+slug_refuse() {
+  echo "$SR: $C is not a usable rollout clone: $1" >&2
+  echo "$SR: this project takes no clone of its own beside $T: its rollout waits for $T-rollout (wait for the rollout there to finish, or /thread:status then /thread:repair)" >&2
+  exit 3
+}
+slug_collides() {  # step 5b (ADR 0064): (a) <T>-<slug> is a checkout; (b) the walk from C's name lands elsewhere than T
+  local n="$T-$SLUG" o w
+  if [ -e "$n/.git" ] || [ -L "$n/.git" ]; then
+    o=$(slug_of "$n") || o=''
+    [ -n "$o" ] || o=$(git -C "$n" config --get remote.origin.url 2>/dev/null) || o=''
+    if [ -n "$o" ]; then o="origin $o"; else o="no origin"; fi
+    slug_refuse "$n is a checkout ($o), so $C is its own rollout clone's name"
+  fi
+  if walk_twin "$C" "$TSLUG"; then w=$WALK; else w=''; fi
+  [ "$w" != "$T" ] || return 0
+  [ -n "$w" ] || slug_refuse "it would read as no checkout's rollout clone, not $T's (the twin walk from its name finds no checkout of $TSLUG)"
+  slug_refuse "it would read as $w's rollout clone, not $T's ($w is another checkout of $TSLUG)"
 }
 out_path() { if [ -n "$SUB" ]; then printf '%s/%s\n' "$C" "$SUB"; else printf '%s\n' "$C"; fi; }
 not_usable() {

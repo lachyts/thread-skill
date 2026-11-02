@@ -8,7 +8,7 @@ never force-pushes.
 
 Subcommands:
 
-  prepare --repo R --slug S --default D --note N [--tasks-dir T]
+  prepare --repo R --slug S --default D --note N [--tasks-dir T] [--verifier CMD [--bootstrap CMD]]
       Decide how one approved task integrates. Refuses (exit 1, nothing fetched or merged) a note with no
       `integrating:`: every route into execute § 4.5 step 3 runs mark-integrating first, so a skipped stamp
       stops here (p26-1). In order: fetch origin with --prune (retried once; failing
@@ -27,16 +27,34 @@ Subcommands:
       engine's message): a conflict records `conflictFiles`, aborts and routes `trouble ["conflict"]`; any
       other failure aborts and routes `trouble []`; success routes `verify` with `mergeCommit` (unpushed),
       `sharedFiles` (task files over B...H that main changed over TB..B, or record.base..B in case ii)
-      and `trouble` ["shared-file"] when there is one, else []. Always prints branch, worktreePath,
+      and `trouble` ["shared-file"] when there is one, else []. The Inert-path skip (ADR 0045, p29-3): with
+      --verifier given and no shared file, one inert check runs there, all of it inside one `try/except
+      Exception`: the lazy load of skills/_shared/scripts/inert-paths.py (never at module top, so a broken
+      inert-paths.py cannot break push, undo or verify), the repo's `inert_paths` (rollout-settings.py resolve()),
+      the path test on TB..B (record.base..B in case ii) and, only when every changed path is inert prose, the
+      Inert proof of the matched globs on M's tree with the verifier and bootstrap as steps and places --repo and
+      the task tree (inert-paths.py's header holds every rule). Held: route `skip` (mergeCommit M, trouble [],
+      the green run stands: push M and merge, no verifier) and a `verify-skipped` Run-record line. Failed: route
+      `verify` as today and an `inert-proof-failed` line with the readers. Any exception: no skip, `inert.why`
+      `inert check error: <Type>: <msg>` (at most 200 characters), route `verify` exactly as today, exit 0, one
+      stderr WARN line and no traceback, and an `inert-proof-failed` line with `error` and `readers: []`
+      (best-effort, through reconcile-rollout.py's _event, which never raises). `inert` is always printed:
+      {skip, why, globs, changed (at most 200), changedTotal, nonInert (at most 20), readers (at most 20)}; with
+      no --verifier, no repo table, an empty list or a refused rollouts.toml (a land.sh timeout included) it gives
+      no skip and a `why`. Always prints branch, worktreePath,
       prHead, anchor, taskBase, mainSha, case, route, trouble, reason, landed (one {prUrl, title,
       files, taskPath} per first-parent commit in TB..B whose subject ends ` (#N)` or starts
       `Merge pull request #N `), unlisted (one {sha, subject, files} per other first-parent commit in
       TB..B: pushed without a PR, skipped from landed, which it never empties) and note ("" or why: when
       origin is not a github.com remote and the task's pr: is not a PR URL, landed is [] and that reason
       comes first, then `<n> commit(s) in <TB>..<B> name no PR …` naming each unlisted commit).
+      Exit 2 is usage, the Engine snapshot guard, or the environment (git, the repo, origin/<default>, the task note:
+      execute's Lane hold). A failure that threatens only this task (ADR 0048, p29-7: ANCHOR_RECIPE gave no anchor, a
+      merge in progress its tree cannot abort, tracked changes it cannot stash, a stale anchor ref it cannot delete or
+      that stays stale, no merge-base of the anchor) routes `set-aside` with its text as `reason`, exit 0.
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
-         [--slots N --slot-wait W] [--outcome]
+         [[--slots N] --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]] [--diff-base REV [--named-rerun CMD]]
       Run the env bootstrap, then the verifier, each `bash -c` in its own session (process group) in T,
       appending to O.log, under one deadline of S seconds. The exit code goes to O.rc, written LAST (tmp +
       rename); O.rc and O.log are removed first, so a missing O.rc means the run did not finish (red). A
@@ -47,21 +65,128 @@ Subcommands:
       (refusing an existing path), locks it with `pid <this process's pid>` so the daily sweep's reaper leaves
       it alone, and removes it (`worktree remove --force --force`) whatever the verdict: the RACE re-verify. Only the verifier's rc is a verdict: a green bootstrap sets none, so a verifier step that never
       starts leaves no O.rc (red), never the bootstrap's 0.
-      --slots N --slot-wait W (given together or not at all; one alone is exit 2 with no rc file) first waits,
-      up to W seconds, for one of the machine's N verify slots (verify-slot.py, p23-4), as an Integration waiter
-      (the priority: agents' runs wait while it does), logging `verify: waiting for one of N verify slots (…)`
+      --slots N --slot-wait W (a lone --slots is exit 2 with no rc file; a lone --slot-wait W takes N from rollouts.toml
+      `verify_slots`, p34-1: verify-slot.py's configured_slots(), read inside verify's handlers, so a stop there is rc
+      128+n, and on any failure the built-in 2 with `verify: WARN <why>; using the built-in 2 verify slots` in the log)
+      first waits, up to W seconds, for one of the machine's N verify slots (verify-slot.py, p23-4), as an Integration
+      waiter (the priority: agents' runs wait while it does), logging `verify: waiting for one of N verify slots (…)`
       and then `== verify slot k of N after Ns`. Only then does the S-second deadline start: the slot wait never
       counts against it. Each step then runs under verify-slot.py's guard, which shares the slot's lock and ends
       the step's group when verify dies by any means, before the slot frees: so even a SIGKILL of verify, which
       leaves no rc (red), still ends the step. No slot within W: O.rc reads `noslot`, the log says `verify: no
       verify slot within Ws (held: …); verifier not run`, the exit is 75 and the race tree is still removed. An
-      unusable slots dir logs a WARN and runs the steps unslotted, still under the guard.
+      unusable slots dir logs a WARN and runs the steps unslotted, still under the guard, with no heat watch.
+      The Heat hold (verify-slot.py contract 7, estate ADR 0009 d5): at heavy or worse no slot is free (`verify:
+      waiting (heat: <name>)`); at trapping or sleeping a step that holds a slot (the bootstrap or the verifier) is
+      stopped through its guard, logged `verify: heat stop (<name>) during the <step>: stopped its process group, no
+      verdict; back in line`, its slot released, and verify goes back in line to rerun every step from the beginning,
+      each pass under a fresh S-second deadline and from a clean result. Every slot wait, heat hold and heat-stopped
+      run counts against W (the first pass always tries once, a re-queue only while W remains), so verify still ends
+      within W + S plus one kill grace. When W runs out on a heat hold or after a heat stop: O.rc reads `heat`, the log
+      says `verify: no verdict: the Mac was too hot (heat: <name>) within Ws; verifier not run to a verdict (rc
+      heat)`, the exit is 76: no verdict, never red. The log keeps every attempt.
       --outcome (reconcile-rollout.py completion-verify --run's, which runs verify as its child while it holds
       the attempt's lock, ADR 0052) changes one thing and nothing else. Its result is O.outcome.json, in
       place of O.rc, which it never writes: removed first, then written at the start ({v, id, sha, ended:
       "running"}) and again at the end ({v, id, sha, ended, rc, step, signal}: ended done | deadline | bootstrap
-      | signal | noslot; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
+      | signal | noslot | heat; step the step a deadline ended in), each by tmp + rename, so a reader classifies a run
       by its fields, never by log text, and one that still reads `running` never finished.
+      --diff-base REV (the lead's Integration verify, `<mainSha>`, and the RACE re-verify, `<merge>^1`: the task's diff
+      is `git diff --name-only REV HEAD` in T) turns on the Flake check (ADR 0050, p29-9), in this same invocation, on
+      the same tree and sha, holding the same verify slot. It runs only after the verifier step itself returned
+      non-zero (never after a deadline, a bootstrap failure or a signal): the first run's failing ids
+      (rr._failing_ids, its `== verifier:` section only) are placed by rr.flake_verdict; no id (`unnamed`), the
+      parser's cap reached (`too-many`), an id in no test file (`unplaced`), an unreadable diff (`diff`) or an id whose
+      file the diff changes (`touched`) is red at once, as is a red with no --named-rerun (`no-named-rerun`).
+      Otherwise --named-rerun CMD (verify-timeout's namedRerun, holding `{tests}` exactly once, replaced by the ids,
+      each shlex-quoted) runs as `== named re-run: …` / `== named re-run rc N`, then, green, the verifier once more as
+      `== confirming run: …` / `== confirming run rc N`, each under the slot's guard with its own deadline: --timeout
+      from its start, capped at verify's own start + the harness bound (7200 s, THREAD_VERIFY_HARNESS_S shrinks it
+      in tests) - 600 s; less than a second left is red (`no-time`), nothing run. A red named re-run (`named-red`) or
+      confirming run (`confirm-red`) keeps its rc; a deadline is rc 124 (`timeout`); a green confirming run makes the
+      rc 0, each first-run id a Flake. O.rc is that final verdict. O.flake.json (removed first, tmp + rename, written
+      just before O.rc) records it whenever --diff-base was given and the verifier step started (never on noslot):
+      {v: 1, sha (T's HEAD, or --detach-at), diffBase, verdict: green | flake | red, why: "" | unnamed | unplaced |
+      too-many | touched | diff | no-named-rerun | named-red | confirm-red | timeout | no-time | signal, failing (the
+      first run's ids), touched, flakes, timeout: {run: first | named | confirm, seconds} | null}; a signal mid-run
+      leaves it red, why `signal`. reconcile-rollout.py record-verify reads it. The verify base (p34-3, ADR 0062): with
+      --diff-base every step, env_bootstrap, verifier, named re-run and confirming run on every Heat-hold pass, runs with
+      THREAD_VERIFY_BASE=<REV resolved to its 40-hex sha in T>, so a project's fast tier whose reach reads it as its base
+      reaches the task's diff even after origin/<default> moved (at the RACE merge-task has refreshed it to hold the
+      merge; origin/<default> never moves for this). Without --diff-base (the completion verify, --outcome, included) the
+      variable is removed from the steps' env whatever the caller's; a REV that does not resolve leaves it unset and logs
+      `verify: WARN --diff-base REV does not resolve in the tree; THREAD_VERIFY_BASE not set`, the verdict unchanged. A
+      project that never reads it runs byte-identically. --diff-base with --outcome, and a
+      --named-rerun with no --diff-base or without exactly one `{tests}`, are exit 2 with no rc file. A heat stop (the
+      Heat hold, above) in the named re-run or the confirming run is no verdict, as in the first run: the pass goes back
+      in line and the next reruns every step, the Flake check included, from a clean result and a fresh record; the
+      ids are always the last pass's first run's. With --rollout, a Flake ends its suite green, and a deadline in
+      either run ends it timeout (step verifier).
+      --rollout NOTE [--slug SLUG] (p29-10, ADR 0051; --slug only with --rollout, else exit 2) records the suite in
+      the rollout's Run record (the note's stem; the tasks dir is its parent): by completion with --outcome, race with
+      --detach-at, else integration (with SLUG as its task; a completion suite has none), runner lead. suite-started
+      (reconcile-rollout.py suite_started: the tree's sha, dirty and diff, the load, the Mac-wide running count, the
+      slot's wait) is written after the slot and before the deadline starts; a stop signal while it is written, the
+      vault walk for the count included, takes the signal path as before (128+n, the verifier never started).
+      suite-ended is written in the finally, after O.rc or O.outcome.json, with signals ignored there: green (the
+      verifier's rc 0), timeout (--timeout and the step), unrun (the env_bootstrap failed), stopped (a signal: no
+      vault scan, no log read), else red, with `failing` read from the log on red or timeout. No slot in time writes
+      only suite-ended noslot with its wait, and a Heat hold that outlasts the wait only suite-ended heat with its
+      wait; a heat stop ends its pass's suite heat (no verdict, no rc, its step), written once its slot is released
+      with stops held, and the re-queued pass is a suite of its own. A SIGKILL leaves a started line with no ended
+      line. Recording never changes verify's files, output or exit. Without --rollout nothing is recorded.
+
+  base-moved --repo R --pr N --base SHA --main SHA --default B [--refusal N] [--tasks-dir T]
+      Why main moved (p29-10, ADR 0051): merge-task.sh calls it at each newly counted exit-3 refusal (its
+      record_base_moved; never on "this base was already counted"). It finds the task note whose `pr:` names N
+      (_pr_index over the owner/repo of R's origin; none, or one naming no rollout: nothing written), fetches origin's
+      B (FETCH_TIMEOUT), reads the first-parent commits base..main and classifies each, oldest first, at most 20
+      (_mover: a rollout's merge, source record or note, or a peer's push), then the Inert path test over base..main
+      (inert-paths.py's path_test with the repo's `inert_paths`, rollout-settings.py): inertOnly is true when the
+      globs are non-empty, paths changed and none is non-Inert, else false, and null beside an `error` when the fetch,
+      main's read, the settings or the test fail. It records one base-moved line in the task's rollout record and
+      prints one JSON line ({written, why, rollout, task, the fields}). Exit 0 always; 2 on usage. Not guarded:
+      merge-task.sh ran engine-snapshot.py guard-pr first.
+
+  revert --repo R --slug S --default B --merge M --note N --rollout RN [--verifier CMD] [--bootstrap CMD]
+         [--tasks-dir T] [--gh-bin GH]
+      The RACE revert (ADR 0046; execute § 4.5 *The RACE revert*): a RACE whose re-verify stayed red after the Flake
+      check is reverted on main through a revert PR that merges only through merge-task. It never merges, never
+      force-pushes and never writes the vault; the lead appends its Race-log lines and runs merge-task. In order:
+      1. the target guard (exit 1, before any fetch, gh call or push): N's stem is S, its `rollout:` names RN, it reads
+         `review` with a `pr:` and `integrating:`, the latest merge-task `RACE: PR #<n> merged as <oid>` line naming
+         [[S]] whose PR number is N's `pr:` names M (a RACE line for another PR is skipped), a `revert started: <M>`
+         line names [[S]] and no `revert did not land:` line does (a `reverted on main:` line never refuses);
+      2. GitHub: `gh pr view <n> --json state,mergeCommit` must read MERGED as M (a 404 or 422: exit 1; any other
+         failure: 8);
+      3. `git fetch --quiet origin`, retried once (two failures: 8); M not an ancestor of origin/B: exit 1;
+      4. landed already: `gh pr list --head thread-revert/<S>-<M12> --state merged`, a PR whose mergeCommit is on
+         origin/B routes `reverted` (a failed read: 8);
+      5. the tree <R>/.claude/worktrees/revert-<S>, detached at origin/B and locked (a stale one removed first);
+         `git revert --no-commit [-m 1] M`: a conflict routes `conflict` (conflictFiles, aborted), an empty index
+         routes `noop` (M's change already gone from B), with `openPr` the open PR on the branch;
+      6. the branch (ls-remote): absent, a commit `Revert "<M's subject>"` whose body says `This reverts commit <M>.`
+         and the RACE sentence; present, its commits in origin/B..origin/<branch> must hold one saying `This reverts
+         commit <M>` (else exit 1), and origin/B is merged into it (a conflict routes `conflict`);
+      7. a plain push (`HEAD:refs/heads/<branch>`, never --force or a `+`), read back through ls-remote (refused: 8),
+         skipped when the branch holds the head already; then the open PR on the branch, or `gh pr create
+         --body-file` (its body says `This reverts commit <M>` too): route `pr`;
+      8. the tree is removed in a `finally`, after `restores` is read.
+      Prints {route: pr | reverted | noop | conflict, pr, url, head, base, revertCommit, branch, merge, conflictFiles,
+      openPr, restores, restoresBy, restoredTo, landedAfter, inert, raceLog: {opened, reverted}, tail}. `restores`
+      reads x (the head for `pr`, the landed commit for `reverted`, origin/B for `noop`): `git diff --quiet M^1 x`
+      holds (restoresBy `tree`), else, with --verifier, prepare's own Inert check (_inert: ADR 0045's path test on
+      M^1..x and the Inert proof re-run on x, its Run-record line with base M^1 and main and head x) skips (restoresBy
+      `inert`); anything else is false (restoresBy null, inert.why the reason: no inert_paths, refused settings, a
+      failed proof, an inert check error or no --verifier). restoredTo is M^1; landedAfter is `rev-list --count
+      --first-parent M..y`, y origin/B (pr, noop) or x^1 (reverted). raceLog is what the `## Race log` already holds
+      (`revert opened:`, `reverted on main:`), so the lead never appends either twice. `tail` (reverted and noop only):
+      {line: `- <stamp> [[S]] reverted on main: <x> (revert PR #R of PR #n's merge <M12>; <main back at <P12>'s tree |
+      … but for Inert paths (<k> path(s): <first 3>) | main not re-verified: <k> commit(s) landed after <M12>>)[; stale
+      revert PR #R2 (<url>) is still open and must not merge: close it]; set aside for Lachy` (noop: `(no revert needed:
+      PR #n's merge <M12>'s change is already gone from <B>; …)`), reason: the set-aside reason (`RACE: the re-verify
+      was red after the Flake check; its merge <M12> is reverted on main by <x12>`, plus `; main not re-verified: …`
+      and the stale-PR clause), unverified: not restores}; the lead copies both verbatim.
 
   push --repo R --slug S --head M
       A plain push of the task tree's M to origin/<branch> (never forced); the ls-remote read-back must
@@ -100,12 +225,12 @@ Subcommands:
       --repo's GitHub origin (owner/repo), and a trailing / is dropped. prUrlError (top level, and the
       integrate record's when it falls back to the note) is "" when prUrl is one, else why not and the fix
       (no pr:, another form, a bare number with no --repo or no GitHub origin): the lead launches nothing on
-      it (a call it launched would fail the engine's args check, which reads as a Lost call).
+      it (a call it launched would fail the engine's args check, an Args refusal: execute § 4.5).
       Then the automatic retry's verdict (p16-4, ADR 0033; auto_retry_verdict, its rules in order), which every
       caller gets and `reconcile-rollout.py auto-retry` re-runs before it writes: autoRetry, autoRetryWhy (the
-      first rule that refused, "" on true), autoRetryError (an `auto_retries` or `max_review_rounds` stamp that is
-      not a valid integer: execute § 3's halt, kept under a `## Needs you` question or a recorded answer; else
-      null), autoRetryClass (agent | infra | quota, for a note set
+      first rule that refused, "" on true), autoRetryError (an `auto_retries`, `max_review_rounds`, `max_iterations`
+      or `max_plan_rounds` stamp that is not a valid integer: H12, a (c) item, never a halt (ADR 0048), kept under a
+      `## Needs you` question or a recorded answer; else null), autoRetryClass (agent | infra | quota, for a note set
       aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds}, each
       {value, source}, resolved task -> rollout -> rollouts.toml -> built-in by reconcile-rollout.py
       _retry_budget; null until it resolves), autoRetriesUsed and quotaRetriesUsed (the note's counters, 0 when
@@ -149,7 +274,15 @@ Subcommands:
       Now, in reconcile's `_stamp` form (the integrate call's startedAt, log-integration's --started).
 
 Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo, prepare without
-integrating:), 2 usage or environment, 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`). Stdlib only; `Note` and `_stamp` come from
+integrating:, revert's guard), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
+execute § 4.5 *lead-integrate's exit 2* routes each exit 2 by verb and site), or the Engine snapshot guard (ADR 0043:
+prepare, set-aside and revert first ask
+engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
+call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
+unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, plan, verify,
+push, undo, base-moved and stamp are exempt), 8 retryable (prepare's fetch failed twice; revert's fetch, push, gh read
+or PR create), 75 verify got no verify slot in time (O.rc `noslot`),
+76 verify's Heat hold outlasted the slot wait (O.rc `heat`). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
 (`git rev-parse --local-env-vars`) scrubbed. The engine copies (ANCHOR_RECIPE, the branch and tree names,
 the merge message, integrationMarker, parseIntegrationMarker, stageDiagnosis's escape, and inputs --row's
@@ -162,9 +295,12 @@ import importlib.util
 import json
 import os
 import re
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -343,6 +479,11 @@ class EnvError(Exception):
     """Exit 2: usage or environment."""
 
 
+class TaskScoped(Exception):
+    """A prepare failure that threatens only this task (ADR 0048, p29-7): its anchor, its worktree or its anchor ref.
+    cmd_prepare routes it `set-aside` with its text, exit 0, so the lead sets the task aside and the lane runs on."""
+
+
 class Retryable(Exception):
     """Exit 8: nothing decided; retry after a backoff."""
 
@@ -360,6 +501,9 @@ def _scrubbed_env():
 
 
 ENV = _scrubbed_env()
+# verify's diff base, named to every step it runs (p34-3, ADR 0062): set to --diff-base resolved to its sha, removed from
+# the steps' env otherwise. Only the steps' env: git calls here run with ENV as it is.
+VERIFY_BASE_ENV = "THREAD_VERIFY_BASE"
 
 
 def git(cwd, *argv):
@@ -387,18 +531,25 @@ def emit(obj):
     print(json.dumps(obj, indent=2, ensure_ascii=False))
 
 
+# The fixed prefix of every note-read failure (p29-7): main() prints it as `lead-integrate <verb>: task note unreadable:
+# …`, the one marker execute § 4.5 *lead-integrate's exit 2* reads to keep a note race on a task that holds no lane to
+# that task alone.
+NOTE_UNREADABLE = "task note unreadable:"
+
+
 def _load_note(path):
     p = Path(os.path.expanduser(path))
     if not p.is_file():
-        raise EnvError(f"task note not found at {p}")
+        raise EnvError(f"{NOTE_UNREADABLE} not found at {p}")
     try:
         return p, rr.Note(p)
     except ValueError as e:
-        raise EnvError(str(e))
+        raise EnvError(f"{NOTE_UNREADABLE} {e}")
 
 
 def log_fields(line):
-    """One Integration log line as fields ('-' -> None), or None."""
+    """One Integration log line as fields ('-' -> None), or None. Read by key, never by position: a line from before
+    p29-13 has ten tokens and no `active=` (None here), a later one ends with it."""
     if not line:
         return None
     toks = line.split(" ")
@@ -407,7 +558,7 @@ def log_fields(line):
     for t in toks[2:]:
         k, _, v = t.partition("=")
         out[k] = None if v in ("", "-") else v
-    for k in ("path", "pr", "anchor", "head", "base", "wait", "duration", "triggers"):
+    for k in ("path", "pr", "anchor", "head", "base", "wait", "duration", "triggers", "active"):
         out.setdefault(k, None)
     return out
 
@@ -424,7 +575,7 @@ def _anchor(repo, br, default, head):
                        env={**ENV, "WT": str(repo), "BR": br, "D": f"origin/{default}", "H": head})
     m = re.fullmatch(r"(anchor|stale-ref) ([0-9a-f]{40})", p.stdout.strip())
     if p.returncode != 0 or not m:
-        raise EnvError(f"ANCHOR_RECIPE gave no anchor for {br} at {head}: {p.stdout.strip() or why(p)}")
+        raise TaskScoped(f"ANCHOR_RECIPE gave no anchor for {br} at {head}: {p.stdout.strip() or why(p)}")
     return m.group(1), m.group(2)
 
 
@@ -459,6 +610,13 @@ def _pr_index(tasks_dir, owner_repo):
     return out
 
 
+def _pr_of_subject(subject):
+    """The PR number a first-parent commit's subject names (a squash's trailing ` (#N)`, or `Merge pull request #N `),
+    or None: a commit pushed without a PR."""
+    m = re.search(r" \(#([0-9]+)\)$", subject) or re.match(r"Merge pull request #([0-9]+) ", subject)
+    return m.group(1) if m else None
+
+
 def _landed(repo, tb, b, owner_repo, tasks_dir):
     """(landed, unlisted, note) over TB..B's first-parent commits, oldest first (p17-1). A commit whose subject
     ends ` (#N)` or starts `Merge pull request #N ` is a landed PR; any other was pushed without one, so it is
@@ -472,9 +630,9 @@ def _landed(repo, tb, b, owner_repo, tasks_dir):
     for c in commits:
         subject = out_of(git(repo, "log", "-1", "--format=%s", c))
         files = [f for f in out_of(git(repo, "diff", "--name-only", f"{c}^1", c)).split("\n") if f]
-        m = re.search(r" \(#([0-9]+)\)$", subject) or re.match(r"Merge pull request #([0-9]+) ", subject)
-        if m:
-            found.append((m.group(1), subject, files))
+        n = _pr_of_subject(subject)
+        if n:
+            found.append((n, subject, files))
         else:
             unlisted.append({"sha": c, "subject": subject, "files": files})
     why = []
@@ -496,13 +654,13 @@ def _clean_tree(tree):
     if rev(tree, "MERGE_HEAD"):
         p = git(tree, "merge", "--abort")
         if p.returncode != 0:
-            raise EnvError(f"could not abort the merge left in progress in {tree}: {why(p)}")
+            raise TaskScoped(f"could not abort the merge left in progress in {tree}: {why(p)}")
         aborted = True
     if out_of(git(tree, "status", "--porcelain", "--untracked-files=no")):
         stashed = f"integration leftovers {rev(tree, 'HEAD')}"
         p = git(tree, "stash", "push", "--quiet", "-m", stashed)
         if p.returncode != 0 or out_of(git(tree, "status", "--porcelain", "--untracked-files=no")):
-            raise EnvError(f"tracked changes in {tree} could not be stashed: {why(p)}")
+            raise TaskScoped(f"tracked changes in {tree} could not be stashed: {why(p)}")
     return aborted, stashed
 
 
@@ -545,8 +703,19 @@ def cmd_prepare(args):
     out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
            "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [], "unlisted": [],
            "mergeCommit": "", "sharedFiles": [], "conflictFiles": [], "staleRefDeleted": None,
-           "abortedMerge": False, "stashed": "", "record": None, "note": ""}
+           "abortedMerge": False, "stashed": "", "record": None, "note": "",
+           "inert": _inert_off("no verify route: no verifier would run, so nothing to skip")}
+    try:
+        return _prepare_route(args, repo, note, tasks_dir, br, tree, out)
+    except TaskScoped as e:
+        # A failure that threatens only this task (its anchor, its worktree, its anchor ref): set aside, exit 0, so
+        # the lane runs on (ADR 0048). The environment's own failures stay exit 2, the lead's Lane hold.
+        out.update(route="set-aside", reason=str(e))
+        return out
 
+
+def _prepare_route(args, repo, note, tasks_dir, br, tree, out):
+    """cmd_prepare's route, once the note is read and `out` is built; a TaskScoped it raises routes `set-aside`."""
     for attempt in (1, 2):
         p = git(repo, "fetch", "--prune", "--quiet", "origin")
         if p.returncode == 0:
@@ -566,14 +735,14 @@ def cmd_prepare(args):
     if kind == "stale-ref":
         p = git(repo, "update-ref", "-d", f"refs/integration-anchor/{br}", a)
         if p.returncode != 0:
-            raise EnvError(f"could not delete the stale anchor ref refs/integration-anchor/{br} {a}: {why(p)}")
+            raise TaskScoped(f"could not delete the stale anchor ref refs/integration-anchor/{br} {a}: {why(p)}")
         out["staleRefDeleted"] = a
         kind, a = _anchor(repo, br, args.default, h)
         if kind != "anchor":
-            raise EnvError(f"the anchor ref for {br} is still stale after its deletion ({a})")
+            raise TaskScoped(f"the anchor ref for {br} is still stale after its deletion ({a})")
     tb = out_of(git(repo, "merge-base", a, b))
     if not re.fullmatch(r"[0-9a-f]{40}", tb):
-        raise EnvError(f"no merge-base of the anchor {a} and origin/{args.default}")
+        raise TaskScoped(f"no merge-base of the anchor {a} and origin/{args.default}")
     out.update(anchor=a, taskBase=tb)
     landed, unlisted, note_why = _landed(repo, tb, b, _owner_repo(repo, note), tasks_dir)
     out.update(landed=landed, unlisted=unlisted, note=note_why)
@@ -618,9 +787,115 @@ def cmd_prepare(args):
     task_files = set(f for f in out_of(git(tree, "diff", "--name-only", f"{b}...{h}")).split("\n") if f)
     main_files = set(f for f in out_of(git(tree, "diff", "--name-only", base, b)).split("\n") if f)
     shared = sorted(task_files & main_files)
-    out.update(route="verify", mergeCommit=m, sharedFiles=shared, trouble=["shared-file"] if shared else [],
+    if not getattr(args, "verifier", None):
+        inert = _inert_off("no --verifier given: the verifier runs")
+    elif shared:
+        inert = _inert_off(f"{len(shared)} shared file(s) ({', '.join(shared[:3])}): the verifier runs")
+    else:
+        inert = _inert(args, repo, tree, base, b, m, note)
+    if inert["skip"]:
+        out.update(route="skip", mergeCommit=m, sharedFiles=[], trouble=[], inert=inert,
+                   reason=f"merged origin/{args.default} ({b[:12]}) into {br} as {m[:12]}; main moved only in Inert paths "
+                   "and the Inert proof held: the green run stands (ADR 0045): push it and merge, no verifier")
+        return out
+    out.update(route="verify", mergeCommit=m, sharedFiles=shared, trouble=["shared-file"] if shared else [], inert=inert,
                reason=f"merged origin/{args.default} ({b[:12]}) into {br}: run the verifier on {m[:12]}")
     return out
+
+
+# ---- the Inert-path skip (ADR 0045, p29-3) -------------------------------------------------------------------
+
+INERT_PATHS = 200
+INERT_READERS = 20
+
+
+def _inert_off(why):
+    return {"skip": False, "why": why, "globs": [], "changed": [], "changedTotal": 0, "nonInert": [], "readers": []}
+
+
+def _load_inert():
+    """skills/_shared/scripts/inert-paths.py, loaded lazily (engine guard's pattern): only prepare's inert check reads it."""
+    src = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "inert-paths.py"
+    spec = importlib.util.spec_from_file_location("thread_inert_paths", src)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _pick_readers(proof, failed, cap=INERT_READERS):
+    """At most `cap` readers, each failed glob's first before any glob's second."""
+    keys = ("glob", "path", "kind", "line", "text", "origin")
+    queues = [list(proof[g]["readers"]) for g in failed]
+    out = []
+    while len(out) < cap and any(queues):
+        for q in queues:
+            if q and len(out) < cap:
+                r = q.pop(0)
+                out.append({k: r[k] for k in keys if k in r})
+    return out
+
+
+def _inert_event(note, slug, kind, fields):
+    try:
+        rr._event(rr._note_rollout(note), kind, slug, fields)
+    except Exception:   # recording never breaks a verb
+        pass
+
+
+def _inert(args, repo, tree, base, b, m, note):
+    """prepare's inert check, failing closed: {skip, why, globs, changed, changedTotal, nonInert, readers}."""
+    out = _inert_off("")
+    paths, repo_id = [], str(repo)
+    try:
+        ip = _load_inert()
+        try:
+            res = ip.RS.resolve(repo=str(repo))
+        except ip.RS.SettingsError as e:
+            out["why"] = f"rollout settings refused ({e}): the verifier runs"
+            return out
+        repo_id = res.get("repo") or ip.RS._origin_slug(str(repo)) or str(repo)
+        globs = list(res["inert_paths"]["value"])
+        if not globs:
+            out["why"] = ("inert_paths is empty for this repo" if res["inert_paths"]["source"] == "file:repo" else
+                          "no inert_paths for this repo in rollouts.toml") + ": the verifier runs"
+            return out
+        pt = ip.path_test(str(repo), base, b, globs)
+        paths = pt["changed"]
+        out.update(globs=pt["globs"], changed=paths[:INERT_PATHS], changedTotal=len(paths),
+                   nonInert=pt["nonInert"][:INERT_READERS])
+        if pt["nonInert"]:
+            out["why"] = (f"{len(pt['nonInert'])} of {len(paths)} changed path(s) are not inert prose "
+                          f"({', '.join(pt['nonInert'][:3])}): the verifier runs")
+            return out
+        proof = ip.prove(str(repo), m, pt["globs"], [("verifier", args.verifier or ""), ("bootstrap", args.bootstrap or "")],
+                         places=[str(repo), str(tree)])
+        failed = [g for g in pt["globs"] if not proof[g]["held"]]
+        fields = {"repo": repo_id, "paths": paths[:INERT_PATHS], "pathsTotal": len(paths), "base": base, "main": b,
+                  "head": m, "globs": pt["globs"]}
+        if failed:
+            readers = _pick_readers(proof, failed)
+            first = readers[0] if readers else {"path": "?", "kind": "?"}
+            out.update(readers=readers, why=(f"the Inert proof failed for {', '.join(failed)}: {first['path']}"
+                                             + (f":{first['line']}" if first.get("line") else "")
+                                             + f" ({first['kind']}{', ' + first['origin'] if first.get('origin') else ''})"
+                                             + ": the verifier runs"))
+            _inert_event(note, args.slug, "inert-proof-failed", dict(fields, readers=readers, failed=failed))
+            return out
+        out.update(skip=True, why=f"main moved only in Inert paths ({len(paths)} path(s)) and the Inert proof held on "
+                                  f"{m[:12]} for {', '.join(pt['globs'])}: the green run stands, no verifier (ADR 0045)")
+        _inert_event(note, args.slug, "verify-skipped", fields)
+        return out
+    except Exception as e:  # fail closed: any error in the check means a re-run, never a crash of prepare
+        msg = f"inert check error: {type(e).__name__}: {e}".replace("\n", " ")[:200]
+        try:
+            print(f"lead-integrate prepare: WARN: {msg}: the verifier runs", file=sys.stderr)
+        except Exception:
+            pass
+        _inert_event(note, args.slug, "inert-proof-failed", {"repo": repo_id, "paths": paths[:INERT_PATHS],
+                                                             "pathsTotal": len(paths), "readers": [], "error": msg})
+        off = _inert_off(msg)
+        off.update(changed=paths[:INERT_PATHS], changedTotal=len(paths))
+        return off
 
 
 # ---- verify --------------------------------------------------------------------------------------------
@@ -636,7 +911,7 @@ class _Signalled(Exception):
         self.signum = signum
 
 
-_live = {"proc": None}
+_live = {"proc": None, "heat": None}   # the live step; "heat": the level a heat stop read (verify-slot.py, contract 7)
 
 
 def _on_signal(signum, _frame):
@@ -668,15 +943,16 @@ def _kill_group(proc):
         pass
 
 
-def _run_step(cmd, tree, log, deadline, guard=False, slot=None):
+def _run_step(cmd, tree, log, deadline, guard=False, slot=None, env=None):
     if guard:
-        return _run_guarded(cmd, tree, log, deadline, slot)
+        # The Heat hold's stop watches a step only while a slot is held: unslotted (a SlotDirError) it runs unwatched.
+        return _run_guarded(cmd, tree, log, deadline, slot, heat=slot is not None, env=env)
     # The new group lives in its own session, so a signal that lands before `_live` holds it would leave it running
     # with no limit: hold SIGNALS until it does. The step itself starts with the caller's mask, not the held one.
     mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
     try:
         proc = subprocess.Popen(["bash", "-c", cmd], cwd=tree, stdin=subprocess.DEVNULL, stdout=log,
-                                stderr=subprocess.STDOUT, start_new_session=True, env=ENV,
+                                stderr=subprocess.STDOUT, start_new_session=True, env=env or ENV,
                                 preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_SETMASK, mask))
         _live["proc"] = proc
     finally:
@@ -691,20 +967,25 @@ def _run_step(cmd, tree, log, deadline, guard=False, slot=None):
             _live["proc"] = None
 
 
-def _run_guarded(cmd, tree, log, deadline, slot):
+def _run_guarded(cmd, tree, log, deadline, slot, heat=False, env=None):
     """A slotted step: `bash -c cmd` under verify-slot.py's guard, which shares the slot's lock and ends the step's
     group if verify dies by any means. Guarded holds SIGNALS across its spawn and records itself in `_live` inside
-    that window (on_spawn), as the unslotted step does. A deadline stops it through the guard: TIMED_OUT."""
+    that window (on_spawn), as the unslotted step does. A deadline stops it through the guard: TIMED_OUT. With
+    `heat`, the Heat hold's stop (verify-slot.py contract 7) watches it too: VS.HEAT_STOPPED, the level in
+    `_live["heat"]`."""
     g = VS.Guarded(["bash", "-c", cmd], hold=slot, on_spawn=lambda x: _live.__setitem__("proc", x), cwd=tree,
-                   stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=ENV)
+                   stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env or ENV)
     try:
         if slot is not None:
             VS.write_holder(slot, {"pid": os.getpid(), "guard": g.pid, "group": g.group, "cwd": tree,
                                    "since": rr._stamp(datetime.now()), "kind": "verify"})
-        got = g.wait(timeout=max(0.0, deadline - time.monotonic()))
+        got = g.watch(timeout=max(0.0, deadline - time.monotonic()), heat=heat)
         if got is None:
             g.stop()
             return TIMED_OUT
+        if got is VS.HEAT_STOPPED:
+            _live["heat"] = g.heat
+            return VS.HEAT_STOPPED
         return got
     finally:
         if g.done():
@@ -726,23 +1007,141 @@ def _write_atomic(path, text):
     os.replace(tmp, path)
 
 
+# The Flake check (ADR 0050, p29-9): verify --diff-base. A red first run whose failing ids rr.flake_verdict places in
+# test files outside the task's diff re-runs them by name (--named-rerun), then confirms with one more verifier run on
+# the same tree, under the same slot and guard: green is a Flake. Any other red stays red, with no re-run.
+FLAKE_SUFFIX = ".flake.json"
+FLAKE_RUN_LABELS = {"named": "named re-run", "confirm": "confirming run"}   # the log's `== <label>:` sections
+FLAKE_RUN_WORDS = {run: "the " + label for run, label in FLAKE_RUN_LABELS.items()}
+HARNESS_ENV = "THREAD_VERIFY_HARNESS_S"   # tests only: shrinks the harness bound the Flake check's runs fit inside
+
+
+def _harness_s():
+    """The lead's harness bound on the background verify command (7200 s, rr.HARNESS_MAX_S); THREAD_VERIFY_HARNESS_S
+    (tests) may only shrink it."""
+    try:
+        v = float(os.environ.get(HARNESS_ENV) or rr.HARNESS_MAX_S)
+    except ValueError:
+        v = rr.HARNESS_MAX_S
+    return min(v, rr.HARNESS_MAX_S)
+
+
+def _diff_files(tree, base):
+    """The paths `git diff --name-only <base> HEAD` lists in the tree, or None when it cannot be read."""
+    p = git(tree, "diff", "--name-only", "--no-renames", base, "HEAD")
+    if p.returncode != 0:
+        return None
+    return {line for line in p.stdout.split("\n") if line}
+
+
+class _FlakeHeatStop(Exception):
+    """A heat stop (verify-slot.py contract 7) in the Flake check's named re-run or confirming run: no verdict, so
+    verify's pass goes back in line like a heat stop in the first run. `run` is named | confirm."""
+
+    def __init__(self, run):
+        super().__init__(run)
+        self.run = run
+
+
+def _flake_record(sha, base, verdict, why="", failing=(), touched=(), flakes=(), timeout=None):
+    """<out>.flake.json: {v, sha, diffBase, verdict: green | flake | red, why, failing, touched, flakes, timeout}."""
+    return {"v": 1, "sha": sha, "diffBase": base, "verdict": verdict, "why": why, "failing": list(failing),
+            "touched": list(touched), "flakes": list(flakes), "timeout": timeout}
+
+
+def _suite_record(args):
+    """verify's suite in the Run record (p29-10, ADR 0051), or None with no --rollout: the rollout is the note's stem,
+    the tasks dir its parent; by is completion with --outcome, race with --detach-at, else integration; runner lead."""
+    if not args.rollout:
+        return None
+    note = Path(os.path.expanduser(args.rollout))
+    by = "completion" if args.outcome else "race" if args.detach_at else "integration"
+    return {"rollout": note.stem, "task": None if by == "completion" else args.slug, "by": by,
+            "suite": rr.new_suite_id(), "tasks_dir": note.parent, "written": {}, "t0": None, "sha": None,
+            "waited": None}
+
+
+def _suite_pass(rec):
+    """A fresh suite for verify's next pass (p29-10): the Heat hold's re-queue reruns every step from the beginning, so
+    each pass that starts is its own suite-started and suite-ended pair."""
+    rec.update(suite=rr.new_suite_id(), written={}, t0=None, sha=None, waited=None)
+
+
+def _suite_end(rec, rc, result, log_path, args):
+    """The suite-ended line: noslot, or heat when the Heat hold held it past the slot wait (no started line: it never
+    ran), with its wait; else only after a started line landed: heat on a heat stop (`ended` heat-stop: no verdict, no
+    rc, its step), stopped on a signal (no vault scan, no log read), green on the verifier's rc 0, timeout at the
+    deadline (its --timeout and step), unrun when the env_bootstrap failed, red otherwise; failing read from the log
+    (from `== verifier:` on) on red or timeout. Never raises."""
+    try:
+        ended = result.get("ended")
+        common = (rec["rollout"], rec["task"], rec["suite"], rec["by"], "lead")
+        if rc in ("noslot", "heat"):
+            rr.suite_ended(*common, rc, 0, tasks_dir=rec["tasks_dir"], waited=rec["waited"],
+                           sha=args.detach_at or None)
+            return
+        if not rec["written"].get("started") or rec["t0"] is None:
+            return
+        seconds = time.monotonic() - rec["t0"]
+        if ended == "heat-stop":
+            rr.suite_ended(*common, "heat", seconds, tasks_dir=rec["tasks_dir"], step=result.get("step"),
+                           sha=rec["sha"])
+            return
+        extra = {"rc": rc if isinstance(rc, int) else None, "sha": rec["sha"]}
+        if ended == "signal":
+            rr.suite_ended(*common, "stopped", seconds, tasks_dir=rec["tasks_dir"], scan=False, **extra)
+            return
+        if ended == "done" and rc == 0:
+            outcome = "green"
+        elif ended == "deadline":
+            outcome = "timeout"
+            extra.update(timeout=args.timeout, step=result.get("step"))
+        elif ended == "bootstrap":
+            outcome = "unrun"
+            extra["step"] = "env_bootstrap"
+        else:
+            outcome = "red"
+        if outcome in ("red", "timeout"):
+            try:
+                with open(log_path, encoding="utf-8", errors="replace") as f:
+                    extra["failing"] = rr._failing_ids(f)
+            except OSError:
+                pass
+        rr.suite_ended(*common, outcome, seconds, tasks_dir=rec["tasks_dir"], **extra)
+    except Exception:  # noqa: BLE001 — recording never changes verify's result
+        pass
+
+
 def cmd_verify(args):
+    verify_t0 = time.monotonic()   # verify's own start: the Flake check's runs end by it + the harness bound - the margin
     out = Path(os.path.expanduser(args.out))
     rc_path, log_path = Path(f"{out}.rc"), Path(f"{out}.log")
     outcome_path = Path(f"{out}{rr.VERIFY_OUTCOME_SUFFIX}") if args.outcome else None
+    flake_path = Path(f"{out}{FLAKE_SUFFIX}")
     out.parent.mkdir(parents=True, exist_ok=True)
-    for p in (rc_path, log_path, outcome_path):
+    for p in (rc_path, log_path, outcome_path, flake_path):
         if p:
             p.unlink(missing_ok=True)
     if args.timeout <= 0:
         raise EnvError("--timeout must be a positive number of seconds")
-    slotted = args.slots is not None
-    if slotted != (args.slot_wait is not None):
-        raise EnvError("--slots and --slot-wait go together (both, or neither)")
-    if slotted and args.slots < 1:
+    if args.diff_base is not None and args.outcome:
+        # The completion verify keeps ADR 0052's own rule: its attempt 2 is the re-run, and there is no task diff.
+        raise EnvError("--diff-base is refused with --outcome (the completion verify's Flake is its attempt 2)")
+    if args.named_rerun is not None:
+        if args.diff_base is None:
+            raise EnvError("--named-rerun needs --diff-base (the Flake check)")
+        if args.named_rerun.count(rr.NAMED_RERUN_SLOT) != 1:
+            raise EnvError(f"--named-rerun must hold {rr.NAMED_RERUN_SLOT} exactly once (where the failing tests go)")
+    slotted = args.slots is not None or args.slot_wait is not None
+    if args.slots is not None and args.slot_wait is None:
+        raise EnvError("--slots needs --slot-wait (a lone --slot-wait takes its slots from rollouts.toml)")
+    if args.slots is not None and args.slots < 1:
         raise EnvError("--slots must be an integer >= 1")
     if slotted and args.slot_wait < 0:
         raise EnvError("--slot-wait must be a number of seconds >= 0")
+    if args.slug is not None and not args.rollout:
+        raise EnvError("--slug goes with --rollout (the Run record's suite lines)")
+    rec = _suite_record(args)
     tree = Path(os.path.expanduser(args.tree))
     added = False
     if args.detach_at:
@@ -764,6 +1163,11 @@ def cmd_verify(args):
     slot = None
     result = {"v": 1, "id": rr._run_id(datetime.now(), os.getpid()), "sha": args.detach_at,
               "ended": "running"}
+    # The Flake check's record, <out>.flake.json: written whenever --diff-base was given and the verifier step started
+    # (never on noslot); a signal mid-check leaves it red, why `signal`.
+    flake_on = args.diff_base is not None
+    flake = None
+    tree_sha = (args.detach_at or rev(str(tree), "HEAD")) if flake_on else ""
     try:
         for s in SIGNALS:   # inside the try, so a signal that lands at once still removes the tree
             signal.signal(s, _on_signal)
@@ -772,38 +1176,107 @@ def cmd_verify(args):
             # tree locked by a live pid, so a RACE re-verify's tree is never removed under its suite. Inside the try,
             # so the finally's `remove --force --force` takes a tree a stop left locked.
             git(os.path.expanduser(args.repo), "worktree", "lock", "--reason", f"pid {os.getpid()}", str(tree))
+        # The verify base (p34-3, ADR 0062): every step sees --diff-base resolved to its sha in T as THREAD_VERIFY_BASE,
+        # so a fast tier's reach reads the task's diff even after origin/<default> moved (the RACE: merge-task refreshed
+        # it to hold the merge). Without --diff-base, or when it does not resolve, the steps never see it, whatever the
+        # caller's. Resolved once, before the Heat-hold loop, and inside the handlers: its rev-parse runs after
+        # --detach-at's `worktree add`, so a stop that lands during it still takes the finally and removes the tree.
+        step_env = {k: v for k, v in ENV.items() if k != VERIFY_BASE_ENV}
+        verify_base = rev(str(tree), args.diff_base) if flake_on else ""
+        if verify_base:
+            step_env[VERIFY_BASE_ENV] = verify_base
         if outcome_path:
             _write_atomic(outcome_path, json.dumps(result) + "\n")
         with open(log_path, "ab", buffering=0) as log:
             note = lambda msg: log.write((msg + "\n").encode())  # noqa: E731
-            if slotted:
-                # The Integration priority (p23-4): wait for a verify slot BEFORE the deadline starts, so the wait
-                # never counts against --timeout. An unusable slots dir fails open: unslotted, still guarded.
-                try:
-                    slot = VS.acquire(args.slots, max_wait=args.slot_wait, priority=True, kind="verify",
-                                      on_wait=lambda m: note(f"verify: {m}"))
-                except VS.SlotDirError as e:
-                    note(f"verify: WARN {e}; running unslotted")
-                else:
-                    if slot is None:
-                        held = VS.held_by(args.slots) or "none read held"
-                        note(f"verify: no verify slot within {args.slot_wait:g}s (held: {held}); verifier not run")
-                        rc = "noslot"
-                        result["ended"] = "noslot"
+            if slotted and args.slots is None:
+                # p34-1: a lone --slot-wait takes N from rollouts.toml `verify_slots`, read here, inside the handlers: a
+                # stop takes the signal path below (its resolver child killed and reaped), and the read never counts
+                # against W. Any other failure is the built-in 2, logged.
+                args.slots, _source, warn = VS.configured_slots(reraise=(_Signalled,))
+                if warn:
+                    note(f"verify: WARN {warn}; using the built-in {args.slots} verify slots")
+            if flake_on and not verify_base:
+                note(f"verify: WARN --diff-base {args.diff_base} does not resolve in the tree; {VERIFY_BASE_ENV} not set")
+            # The Heat hold (verify-slot.py contract 7): a step a heat stop ended goes back in line and every step
+            # reruns from the beginning, under a fresh deadline. Every slot wait, heat hold and heat-stopped run counts
+            # against W (t0 is taken before the first acquire), and a pass starts only while W remains.
+            t0 = time.monotonic()
+            why = {"heat": None}   # acquire's: the level that held its last poll, or None
+            stopped = None         # the heat name of the last heat stop
+            first = True
+            while True:
+                # Each pass starts clean: no verdict, no step or signal, no live step, no slot, no Flake record.
+                rc = None
+                flake = None
+                result["ended"] = "running"
+                result.pop("step", None)
+                result.pop("signal", None)
+                _live["proc"] = _live["heat"] = None
+                if slot is not None:
+                    slot.release()  # a close, never LOCK_UN (verify-slot.py's contract)
+                    slot = None
+                if slotted:
+                    # The Integration priority (p23-4): wait for a verify slot BEFORE the deadline starts, so the wait
+                    # never counts against --timeout. An unusable slots dir fails open: unslotted, still guarded, with
+                    # no heat watch, and that pass is the last. The first pass always tries (a W of 0: one try); a
+                    # re-queue only while W remains.
+                    budget = args.slot_wait - (0.0 if first else time.monotonic() - t0)
+                    tries, first = first or budget > 0, False
+                    waiting = time.monotonic()
+                    try:
+                        slot = (VS.acquire(args.slots, max_wait=max(0.0, budget), priority=True, kind="verify", why=why,
+                                           on_wait=lambda m: note(f"verify: {m}")) if tries else None)
+                    except VS.SlotDirError as e:
+                        note(f"verify: WARN {e}; running unslotted")
                     else:
+                        if slot is None:
+                            if why["heat"] is not None or stopped is not None:
+                                name = VS.heat_name(why["heat"]) if why["heat"] is not None else stopped
+                                note(f"verify: no verdict: the Mac was too hot (heat: {name}) within "
+                                     f"{args.slot_wait:g}s; verifier not run to a verdict (rc heat)")
+                                rc = "heat"
+                                result["ended"] = "heat"
+                            else:
+                                held = VS.held_by(args.slots) or "none read held"
+                                note(f"verify: no verify slot within {args.slot_wait:g}s (held: {held}); "
+                                     "verifier not run")
+                                rc = "noslot"
+                                result["ended"] = "noslot"
+                            if rec is not None:
+                                rec["waited"] = time.monotonic() - waiting
+                            break
                         note(f"== verify slot {slot.index + 1} of {args.slots} after {slot.waited:.0f}s")
                         VS.write_holder(slot, {"pid": os.getpid(), "guard": None, "group": None, "cwd": str(tree),
                                                "since": rr._stamp(datetime.now()), "kind": "verify"})
-            if rc is None:
+                if rec is not None:
+                    # p29-10: the suite's start, after the slot and before the deadline; a stop here takes the signal
+                    # path below (reraise), and the record's own write never swallows it.
+                    state = rr.tree_state(tree)
+                    rec["sha"] = state.get("sha")
+                    rec["t0"] = time.monotonic()   # before the write: a stop delivered as it ends still gets its end
+                    rr.suite_started(rec["rollout"], rec["task"], rec["suite"], rec["by"], "lead", state,
+                                     tasks_dir=rec["tasks_dir"], waited=slot.waited if slot is not None else None,
+                                     reraise=(_Signalled,), written=rec["written"])
                 deadline = time.monotonic() + args.timeout
                 steps = ([("env_bootstrap", args.bootstrap)] if args.bootstrap else []) + [("verifier", args.verifier)]
+                heat_step = heat_where = None
                 for name, cmd in steps:
                     note(f"== {name}: {cmd}")
-                    got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot)
+                    if name == "verifier" and flake_on:
+                        flake = _flake_record(tree_sha, args.diff_base, "red", "signal")   # until the check decides
+                    got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot, env=step_env)
+                    if got is VS.HEAT_STOPPED:
+                        heat_step = name
+                        break
                     if got is TIMED_OUT:
                         note(f"verify: timed out after {args.timeout:g}s during the {name}; killed its process group (rc 124)")
                         rc = 124
                         result.update(ended="deadline", step=name)
+                        if flake is not None:
+                            # A timeout names no failing test, so it is never a Flake: red, logged as load (ADR 0051).
+                            flake = _flake_record(tree_sha, args.diff_base, "red", "timeout",
+                                                  timeout={"run": "first", "seconds": max(1, int(round(args.timeout)))})
                         break
                     note(f"== {name} rc {got}")
                     if name == "env_bootstrap" and got != 0:
@@ -816,6 +1289,33 @@ def cmd_verify(args):
                         # step that never starts (a raise) leaves no rc, which reads as red.
                         rc = got
                         result["ended"] = "done"
+                        if flake is not None:
+                            try:
+                                rc, flake = _flake_check(args, tree, tree_sha, log, log_path, note, slotted, slot, rc,
+                                                         verify_t0, step_env)
+                            except _FlakeHeatStop as h:
+                                # A heat stop in the named re-run or the confirming run is no verdict, as in the first
+                                # run: this pass goes back in line, and the next reruns every step from a clean result.
+                                heat_step, heat_where = name, FLAKE_RUN_LABELS[h.run]
+                            else:
+                                if flake["timeout"] is not None:
+                                    # A deadline in the named re-run or the confirming run: the suite ends timeout.
+                                    result.update(ended="deadline", step=name)
+                if heat_step is None:   # only a watched step (a slot held) is ever heat-stopped
+                    break
+                stopped = VS.heat_name(_live["heat"])
+                note(f"verify: heat stop ({stopped}) during the {heat_where or heat_step}: stopped its process group, "
+                     "no verdict; back in line")
+                if rec is not None:
+                    # p29-10: the heat-stopped pass's suite ends `heat` (no verdict, no rc) once its slot is released,
+                    # with stops held for the write, so a stop meanwhile ends no suite twice; the next pass is a suite
+                    # of its own.
+                    with rr._signals_held():
+                        if slot is not None:
+                            slot.release()  # a close, never LOCK_UN (verify-slot.py's contract)
+                            slot = None
+                        _suite_end(rec, None, {"ended": "heat-stop", "step": heat_step}, log_path, args)
+                        _suite_pass(rec)
     except _Signalled as s:
         if _live["proc"] is not None:
             _stop_live(_live["proc"])
@@ -834,6 +1334,12 @@ def cmd_verify(args):
         if added:
             git(os.path.expanduser(args.repo), "worktree", "remove", "--force", "--force", str(tree))
             git(os.path.expanduser(args.repo), "worktree", "prune")
+        if flake is not None:
+            # Before the rc, which stays the last file written: a reader that sees the rc sees this run's record.
+            try:
+                _write_atomic(flake_path, json.dumps(flake, ensure_ascii=False) + "\n")
+            except OSError:
+                pass
         if rc is not None:
             if outcome_path:
                 # --outcome's result is the outcome file alone: no O.rc, the file heartbeat clause (4) acts on.
@@ -841,10 +1347,212 @@ def cmd_verify(args):
                 _write_atomic(outcome_path, json.dumps(result) + "\n")
             else:
                 _write_atomic(rc_path, f"{rc}\n")
+        # p29-10: the suite's end, after the rc or outcome file, with signals ignored, so recording never delays the
+        # result a caller waits on and only a SIGKILL cuts it (a started line with no ended line).
+        if rec is not None:
+            _suite_end(rec, rc, result, log_path, args)
     print(f"verify: rc={rc} (log {log_path})")
     if rc == "noslot":
         return 75
+    if rc == "heat":
+        return VS.HEAT_EXIT
     return rc if isinstance(rc, int) and 0 <= rc <= 255 else 1
+
+
+def _flake_check(args, tree, sha, log, log_path, note, slotted, slot, rc, t0, env=None):
+    """The Flake check on a finished first run (ADR 0050): (the final rc, the flake record). Green (rc 0) is green. A
+    red reads its failing ids from the first run's log section (rr._failing_ids) and places them (rr.flake_verdict):
+    anything but `candidates` is red at once; else, with --named-rerun, the named re-run, then one confirming verifier
+    run, each under the slot and guard the first run held and its own deadline (_flake_deadline). The named re-run's
+    red keeps its rc, the confirming run's red its own; the confirming run's green makes the rc 0 and each first-run
+    id a Flake. A heat stop in either run raises _FlakeHeatStop: no verdict, and the caller's pass goes back in line.
+    The ids are the last pass's first run's: rr._failing_ids reads the log's last `== verifier:` section. Both runs get
+    `env`, the first run's step env, so they see the same THREAD_VERIFY_BASE and reach the same set (ADR 0062)."""
+    base = args.diff_base
+    if rc == 0:
+        return 0, _flake_record(sha, base, "green")
+    with open(log_path, errors="replace") as fh:
+        ids = rr._failing_ids(fh)
+    diff = _diff_files(str(tree), base) if ids else set()
+    placed = rr.flake_verdict(ids, str(tree), diff)
+    verdict = placed["verdict"]
+
+    def red(why, code=rc, **kw):
+        return code, _flake_record(sha, base, "red", why, ids, placed["touched"], **kw)
+
+    if verdict != "candidates":
+        note(f"verify: Flake check: red at once ({verdict}): " + (", ".join(ids[:10]) or "no failing test named"))
+        return red(verdict)
+    if not args.named_rerun:
+        note("verify: Flake check: red (no --named-rerun, so the failing tests cannot be re-run by name)")
+        return red("no-named-rerun")
+    quoted = " ".join(shlex.quote(i) for i in ids)
+    for run, cmd in (("named", args.named_rerun.replace(rr.NAMED_RERUN_SLOT, quoted)), ("confirm", args.verifier)):
+        label = FLAKE_RUN_LABELS[run]
+        deadline = _flake_deadline(args, t0)
+        if deadline is None:
+            note(f"verify: Flake check: red (no harness time left for {FLAKE_RUN_WORDS[run]})")
+            return red("no-time")
+        started = time.monotonic()
+        note(f"== {label}: {cmd}")
+        got = _run_step(cmd, str(tree), log, deadline, guard=slotted, slot=slot, env=env)
+        if got is VS.HEAT_STOPPED:
+            raise _FlakeHeatStop(run)
+        if got is TIMED_OUT:
+            secs = max(1, int(round(deadline - started)))
+            note(f"verify: timed out after {secs}s during {FLAKE_RUN_WORDS[run]}; killed its process group (rc 124)")
+            return red("timeout", 124, timeout={"run": run, "seconds": secs})
+        note(f"== {label} rc {got}")
+        if got != 0:
+            note(f"verify: Flake check: red ({FLAKE_RUN_WORDS[run]} failed again)")
+            return red("named-red" if run == "named" else "confirm-red", got)
+    note("verify: Flake check: green on the confirming run; a Flake: " + ", ".join(ids))
+    return 0, _flake_record(sha, base, "flake", "", ids, [], ids)
+
+
+def _flake_deadline(args, t0):
+    """A Flake-check run's deadline: --timeout from now, capped where the lead's harness bound (less its margin) ends,
+    counted from verify's own start; None when that leaves under a second."""
+    cap = t0 + _harness_s() - rr.VERIFY_HARNESS_MARGIN
+    now = time.monotonic()
+    if cap - now < 1:
+        return None
+    return min(now + args.timeout, cap)
+
+
+# ---- base-moved: why main moved (p29-10, ADR 0051) ---------------------------------------------------------------
+
+FETCH_TIMEOUT = 60   # the line's caps are run_record.py's: MAX_MOVERS, MAX_NON_INERT and MAX_GLOBS
+
+
+def _pr_number(value):
+    """argparse type for base-moved --pr: a positive PR number (merge-task.sh normalises a URL to it first)."""
+    if not re.fullmatch(r"[1-9][0-9]*", value or ""):
+        raise argparse.ArgumentTypeError(f"not a PR number: {value!r}")
+    return int(value)
+
+
+def _merged_prs():
+    """[(rollout, task, pr)] for every `merged` line carrying a pr in every rollout's Run record (the reserved files
+    never read). Unscoped: _mover matches each pr, a URL on owner/name and a bare number on the PR index's task."""
+    run_record = rr._run_record()
+    try:
+        base = run_record.events_dir()
+        names = sorted(os.listdir(base))
+    except (OSError, ValueError):
+        return []
+    out = []
+    reserved = {r + ".jsonl" for r in run_record.RESERVED}
+    for name in names:
+        if not name.endswith(".jsonl") or name in reserved:
+            continue
+        try:
+            lines = rr._record_lines(os.path.join(base, name))[0]
+        except OSError:
+            continue
+        for d in lines:
+            if d.get("kind") == "merged" and d.get("pr") not in (None, "") and isinstance(d.get("task"), str):
+                out.append((d.get("rollout") or name[:-6], d["task"], d["pr"]))
+    return out
+
+
+def _mover(sha, n, owner_repo, index, merged):
+    """One commit that moved main: a rollout's merge (source record: a `merged` line names its PR, a URL matched on
+    owner/name ignoring case, or a bare number whose line's task is the PR index's task; source note: else the PR's
+    task note carries `rollout:`), or a peer's push (anything else, a PR-less commit included)."""
+    mover = {"sha": sha, "kind": "peer"}
+    if not n:
+        return mover
+    mover["pr"] = int(n)
+    index_task = Path(index[n]).stem.lower() if n in index else None
+    for rollout, task, pr in merged:
+        u = rr.PR_URL_RE.match(pr) if isinstance(pr, str) else None
+        if u:
+            hit = u.group(2) == n and bool(owner_repo) and u.group(1).lower() == owner_repo.lower()
+        else:
+            num = rr.PR_NUM_RE.match(str(pr))
+            hit = bool(num) and num.group(1) == n and index_task is not None and task == index_task
+        if hit:
+            mover.update(kind="rollout", rollout=rollout, task=task, source="record")
+            return mover
+    if n in index:
+        try:
+            note = rr.Note(Path(index[n]))
+        except (OSError, ValueError):
+            return mover
+        ro = rr._note_rollout(note)
+        if ro:
+            mover.update(kind="rollout", rollout=ro.lower(), task=Path(index[n]).stem.lower(), source="note")
+    return mover
+
+
+def cmd_base_moved(args):
+    """merge-task.sh's exit-3 record (p29-10): find the task whose note's pr: names --pr, fetch origin's default, read
+    the first-parent commits base..main and classify each (_mover), run the Inert path test over base..main, and
+    record one base-moved line in the task's rollout record. Prints one JSON line; exit 0 always (2 on usage)."""
+    repo = Path(os.path.expanduser(args.repo))
+    out = {"written": False, "why": ""}
+    try:
+        url = out_of(git(repo, "remote", "get-url", "origin"))
+        m = re.search(r"github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?/*$", url)
+        owner_repo = m.group(1) if m else ""
+        tasks_dir = Path(os.path.expanduser(args.tasks_dir)) if args.tasks_dir else rr.DEFAULT_TASKS_DIR
+        index = _pr_index(tasks_dir, owner_repo)
+        path = index.get(str(args.pr))
+        note = rr.Note(Path(path)) if path else None
+        rollout = rr._note_rollout(note) if note is not None else None
+        if not rollout:
+            out["why"] = (f"no task note's pr: names #{args.pr}" if note is None
+                          else f"{Path(path).stem} names no rollout")
+            print(json.dumps(out))
+            return 0
+        fields = {"repo": owner_repo or str(repo), "pr": args.pr, "base": args.base, "main": args.main}
+        error, movers, total, inert = None, [], 0, None
+        run_record = rr._run_record()
+        try:
+            f = subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", "origin", args.default], capture_output=True,
+                               text=True, env=ENV, timeout=FETCH_TIMEOUT)
+            if f.returncode != 0:
+                error = f"git fetch origin {args.default} failed: {why(f)}"
+        except subprocess.TimeoutExpired:
+            error = f"git fetch origin {args.default} timed out after {FETCH_TIMEOUT} s"
+        except OSError as e:
+            error = f"git fetch origin {args.default} would not run: {e}"
+        if error is None:
+            p = git(repo, "rev-list", "--first-parent", "--reverse", f"{args.base}..{args.main}")
+            if p.returncode != 0:
+                error = f"main {args.main[:12]} is not readable here: {why(p)}"
+            else:
+                commits = out_of(p).split()
+                total = len(commits)
+                merged = _merged_prs()
+                for c in commits[:run_record.MAX_MOVERS]:
+                    subject = out_of(git(repo, "log", "-1", "--format=%s", c))
+                    movers.append(_mover(c, _pr_of_subject(subject), owner_repo, index, merged))
+        if error is None:
+            try:
+                ip = _load_inert()
+                res = ip.RS.resolve(repo=str(repo))
+                globs = list(res["inert_paths"]["value"])
+                pt = ip.path_test(str(repo), args.base, args.main, globs)
+                paths = pt["changed"]
+                fields.update(pathsTotal=len(paths), nonInert=pt["nonInert"][:run_record.MAX_NON_INERT])
+                if globs:
+                    fields["globs"] = globs[:run_record.MAX_GLOBS]
+                inert = bool(globs) and bool(paths) and not pt["nonInert"]
+            except Exception as e:  # noqa: BLE001 — the settings or the test failed: null beside its error
+                error = f"inert test: {type(e).__name__}: {e}"
+        fields.update(inertOnly=inert, moversTotal=total, movers=movers)
+        if error is not None:
+            fields["error"] = error.replace("\n", " ")[:200]
+        if args.refusal is not None and args.refusal >= 1:
+            fields["refusal"] = args.refusal
+        out.update(rollout=rollout.lower(), task=Path(path).stem.lower(), **fields)
+        out["written"] = bool(rr._event(rollout, "base-moved", Path(path).stem, fields))
+    except Exception as e:  # noqa: BLE001 — recording never changes merge-task's exit
+        out["why"] = f"{type(e).__name__}: {e}"
+    print(json.dumps(out))
+    return 0
 
 
 # ---- push / undo ---------------------------------------------------------------------------------------
@@ -890,6 +1598,300 @@ def cmd_undo(args):
     if p.returncode != 0:
         raise Refused(f"git reset --keep {args.to} failed: {why(p)}")
     return {"undone": args.merge, "head": args.to, "stashed": stashed}
+
+
+# ---- revert: the RACE revert (ADR 0046; execute § 4.5 *The RACE revert*) -------------------------------------------
+
+GH_TIMEOUT = 120
+GH_DEFINITIVE_RE = re.compile(r"HTTP 404|HTTP 422|Could not resolve to a")
+REVERT_RACE_SENTENCE = ("RACE (ADR 0046): its PR merged as a combination nobody verified, and the rollout verifier stayed "
+                        "red on it after the Flake check, so the lead reverts it on main through this PR (merged only "
+                        "through merge-task, never force-pushed) and sets the task aside for Lachy.")
+
+
+def revert_branch(slug, merge):
+    """The revert PR's branch: one per task and merge, so a re-run finds it."""
+    return f"thread-revert/{slug}-{merge[:12]}"
+
+
+def revert_tree(repo, slug):
+    return Path(repo) / ".claude" / "worktrees" / f"revert-{slug}"
+
+
+def _gh_json(gh_bin, argv, cwd):
+    """(parsed JSON, None), or (None, (definitive, why)): definitive is a 404, a 422 or a GraphQL not-found."""
+    try:
+        p = subprocess.run([gh_bin, *argv], cwd=str(cwd), capture_output=True, text=True, env=ENV, timeout=GH_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, (False, f"{gh_bin}: {e}")
+    if p.returncode != 0:
+        text = (p.stderr or p.stdout or "").strip() or f"exit {p.returncode}"
+        return None, (bool(GH_DEFINITIVE_RE.search(text)), text.splitlines()[-1])
+    try:
+        return json.loads(p.stdout), None
+    except ValueError:
+        return None, (False, f"gh {' '.join(argv[:2])} printed no JSON")
+
+
+def _revert_guard(args, path, note):
+    """The target guard (exit 1, before any fetch, gh call or push): (the task PR's number, the rollout note). The note is
+    --slug's, its `rollout:` names --rollout, it holds the lane (`review` with a `pr:` and `integrating:`), the latest
+    merge-task RACE line naming [[S]] with the note's PR number names --merge, a `revert started: <M>` line names [[S]],
+    and no `revert did not land:` line does. A `reverted on main:` line never refuses: a re-run after a landing routes
+    `reverted`."""
+    slug, merge = args.slug, args.merge
+    if path.stem != slug:
+        raise Refused(f"--note {path} is not [[{slug}]]'s note; nothing fetched")
+    ro_path = Path(os.path.expanduser(args.rollout))
+    if (rr._wikilink_slug(rr._scalar(note.get("rollout"))) or "").lower() != ro_path.stem.lower():
+        raise Refused(f"[[{slug}]]'s rollout: is not [[{ro_path.stem}]]; nothing fetched")
+    try:
+        ro_note = rr.Note(ro_path)
+    except (OSError, ValueError) as e:
+        raise EnvError(f"cannot read the rollout note {ro_path}: {e}")
+    if rr._status(note) != "review" or not rr._pr(note) or not rr._scalar(note.get("integrating")):
+        raise Refused(f"[[{slug}]] does not hold the lane (status {rr._status(note) or 'none'}, a pr: and integrating: "
+                      "needed): only a RACE the lead still holds is reverted; nothing fetched")
+    n = rr._pr_number(note.get("pr"))
+    if n is None:
+        raise Refused(f"[[{slug}]]'s pr: {rr._pr(note)!r} names no PR number; nothing fetched")
+    race, started, failed = None, False, False
+    for _stamp, s, rest in rr._race_log_entries(ro_note):
+        if s.lower() != slug.lower():
+            continue
+        m = rr.RACE_LINE_RE.search(rest)
+        if m and int(m.group(1)) == n:   # the task's own RACE line: one for another PR number is skipped
+            race = m.group(2)
+        if rest.startswith(rr.RACE_REVERT_STARTED_MARK) and rest[len(rr.RACE_REVERT_STARTED_MARK):].split()[:1] == [merge]:
+            started = True
+        if rest.startswith(rr.RACE_REVERT_FAILED_MARK):
+            failed = True
+    if race is None:
+        raise Refused(f"no `RACE: PR #{n} merged as …` line names [[{slug}]] in {ro_path.stem}'s {rr.RACE_LOG_SECTION}; "
+                      "nothing fetched")
+    if race != merge:
+        raise Refused(f"[[{slug}]]'s RACE line names merge {race}, not --merge {merge}; nothing fetched")
+    if not started:
+        raise Refused(f"no `revert started: {merge}` line names [[{slug}]]: append it first (execute § 4.5 *The RACE "
+                      "revert*); nothing fetched")
+    if failed:
+        raise Refused(f"a `revert did not land:` line names [[{slug}]]: main is red until Lachy decides (/thread:repair); "
+                      "nothing fetched")
+    return n, ro_note
+
+
+def _remove_tree(repo, tree):
+    git(repo, "worktree", "unlock", str(tree))
+    git(repo, "worktree", "remove", "--force", "--force", str(tree))
+    git(repo, "worktree", "prune")
+    shutil.rmtree(str(tree), ignore_errors=True)
+
+
+def _is_ancestor(repo, a, b):
+    p = git(repo, "merge-base", "--is-ancestor", a, b)
+    if p.returncode not in (0, 1):
+        return None
+    return p.returncode == 0
+
+
+def _restores(args, repo, place, merge, x, note):
+    """Whether x (the revert's result) restores main to M^1's tree: (restores, restoresBy, inert). Exact tree equality
+    first; else, with --verifier, prepare's own Inert check (ADR 0045: the path test on M^1..x and the Inert proof
+    re-run on x, its Run-record line with base M^1), failing closed to false."""
+    p1 = rev(repo, f"{merge}^1")
+    d = git(repo, "diff", "--quiet", p1, x)
+    if d.returncode == 0:
+        return True, "tree", _inert_off(f"x's tree is {p1[:12]}'s: restored by tree")
+    if d.returncode != 1:
+        raise EnvError(f"git diff {p1[:12]} {x[:12]} failed: {why(d)}")
+    if not getattr(args, "verifier", None):
+        return False, None, _inert_off("no --verifier given: the verifier runs")
+    inert = _inert(args, repo, place, p1, x, x, note)
+    return (True, "inert", inert) if inert["skip"] else (False, None, inert)
+
+
+def _landed_after(repo, merge, upto):
+    return int(out_of(git(repo, "rev-list", "--count", "--first-parent", f"{merge}..{upto}")) or 0)
+
+
+def _revert_tail(args, route, n, rpr, x, merge, restores, by, inert, landed_after, stale):
+    """The landing tail's two texts, copied verbatim by the lead: the `reverted on main:` Race-log line and the
+    set-aside reason."""
+    p12, m12, b = rev(args.repo, f"{merge}^1")[:12], merge[:12], args.default
+    if restores and by == "tree":
+        phrase = f"main back at {p12}'s tree"
+    elif restores:
+        phrase = (f"main back at {p12}'s tree but for Inert paths ({inert['changedTotal']} path(s): "
+                  f"{', '.join(inert['changed'][:3])})")
+    else:
+        phrase = f"{rr.RACE_REVERT_UNVERIFIED_MARK}: {landed_after} commit(s) landed after {m12}"
+    stale_clause = (f"; stale revert PR #{stale['number']} ({stale['url']}) is still open and must not merge: close it"
+                    if stale else "")
+    if route == "reverted":
+        body = f"revert PR #{rpr} of PR #{n}'s merge {m12}; {phrase}"
+        reason = f"RACE: the re-verify was red after the Flake check; its merge {m12} is reverted on main by {x[:12]}"
+    else:
+        body = f"no revert needed: PR #{n}'s merge {m12}'s change is already gone from {b}; {phrase}"
+        reason = (f"RACE: the re-verify was red after the Flake check; its merge {m12} needs no revert: its change is "
+                  f"already gone from {b} at {x[:12]}")
+    if not restores:
+        reason += f"; {rr.RACE_REVERT_UNVERIFIED_MARK}: {landed_after} commit(s) landed after {m12}"
+    line = (f"- {rr._stamp(datetime.now())} [[{args.slug}]] {rr.RACE_REVERTED_MARK} {x} ({body}){stale_clause}; "
+            "set aside for Lachy")
+    return {"line": line, "reason": reason + stale_clause, "unverified": not restores}
+
+
+def cmd_revert(args):
+    repo = Path(os.path.expanduser(args.repo))
+    path, note = _load_note(args.note)
+    n, ro_note = _revert_guard(args, path, note)   # exit 1 before any fetch, gh call or push
+    gh, merge, b_name, slug = args.gh_bin, args.merge, args.default, args.slug
+    if not out_of(git(repo, "rev-parse", "--git-dir")):
+        raise EnvError(f"{repo} is not a git repo")
+    owner_repo = _owner_repo(repo, note)
+    rflag = ["-R", owner_repo] if owner_repo else []
+    view, err = _gh_json(gh, ["pr", "view", str(n), *rflag, "--json", "state,mergeCommit"], repo)
+    if err:
+        if err[0]:
+            raise Refused(f"gh pr view {n}: {err[1]}")
+        raise Retryable(f"gh pr view {n}: {err[1]}")
+    oid = (view.get("mergeCommit") or {}).get("oid") if isinstance(view, dict) else None
+    if not isinstance(view, dict) or str(view.get("state") or "").upper() != "MERGED" or oid != merge:
+        raise Refused(f"PR #{n} is {(view or {}).get('state') or 'unknown'} with merge commit {oid or 'none'}, not MERGED "
+                      f"as {merge}: nothing to revert")
+    for attempt in (1, 2):
+        p = git(repo, "fetch", "--quiet", "origin")
+        if p.returncode == 0:
+            break
+        if attempt == 2:
+            raise Retryable(f"fetch origin failed twice: {why(p)}")
+    b = rev(repo, f"refs/remotes/origin/{b_name}")
+    if not b:
+        raise EnvError(f"origin/{b_name} does not exist in {repo}")
+    if not _is_ancestor(repo, merge, b):
+        raise Refused(f"{merge} is not on origin/{b_name} ({b[:12]}): nothing to revert")
+    branch = revert_branch(slug, merge)
+    reverts = rr._race_reverts(ro_note).get(slug.lower()) or {}
+    out = {"route": None, "pr": None, "url": None, "head": None, "base": b, "revertCommit": None, "branch": branch,
+           "merge": merge, "conflictFiles": [], "openPr": None, "restores": None, "restoresBy": None,
+           "restoredTo": rev(repo, f"{merge}^1"), "landedAfter": None, "inert": None,
+           "raceLog": {"opened": reverts.get("opened"), "reverted": reverts.get("reverted")}, "tail": None}
+    listing = ["--head", branch, "--json", "number,url,mergeCommit,headRefName"]
+    merged, err = _gh_json(gh, ["pr", "list", *rflag, *listing[:2], "--state", "merged", *listing[2:]], repo)
+    if err:
+        raise Retryable(f"gh pr list --head {branch} --state merged: {err[1]}")
+    opened, err = _gh_json(gh, ["pr", "list", *rflag, *listing[:2], "--state", "open", *listing[2:]], repo)
+    if err:
+        raise Retryable(f"gh pr list --head {branch} --state open: {err[1]}")
+    stale = next(({"number": o["number"], "url": o["url"]} for o in (opened or []) if isinstance(o, dict)), None)
+    # Landed already (a crash after merge-task's 0, or a re-run): the merged revert PR's commit on main.
+    for pr in merged or []:
+        x = ((pr or {}).get("mergeCommit") or {}).get("oid") if isinstance(pr, dict) else None
+        if x and _is_ancestor(repo, x, b):
+            restores, by, inert = _restores(args, repo, repo, merge, x, note)
+            la = _landed_after(repo, merge, f"{x}^1")
+            out.update(route="reverted", pr=pr.get("number"), url=pr.get("url"), revertCommit=x, openPr=stale,
+                       restores=restores, restoresBy=by, inert=inert, landedAfter=la,
+                       tail=_revert_tail(args, "reverted", n, pr.get("number"), x, merge, restores, by, inert, la, stale))
+            return out
+    tree = revert_tree(repo, slug)
+    _remove_tree(repo, tree)
+    tree.parent.mkdir(parents=True, exist_ok=True)
+    p = git(repo, "worktree", "add", "--quiet", "--detach", "--lock", "--reason", f"pid {os.getpid()}", str(tree), b)
+    if p.returncode != 0:
+        raise EnvError(f"could not add the revert tree {tree}: {why(p)}")
+    try:
+        parents = out_of(git(repo, "rev-list", "--parents", "-n", "1", merge)).split()[1:]
+        mflag = ["-m", "1"] if len(parents) > 1 else []
+        p = git(tree, "revert", "--no-commit", *mflag, merge)
+        if p.returncode != 0:
+            files = [f for f in out_of(git(tree, "diff", "--name-only", "--diff-filter=U")).split("\n") if f]
+            git(tree, "revert", "--abort")
+            if not files:
+                raise EnvError(f"git revert --no-commit {merge} failed with no conflict: {why(p)}")
+            out.update(route="conflict", conflictFiles=files)
+            return out
+        if git(tree, "diff", "--cached", "--quiet", "HEAD").returncode == 0:
+            # Nothing to revert: M's change is already gone from main (a hand revert, a later fix).
+            restores, by, inert = _restores(args, repo, tree, merge, b, note)
+            la = _landed_after(repo, merge, b)
+            out.update(route="noop", openPr=stale, restores=restores, restoresBy=by, inert=inert, landedAfter=la,
+                       tail=_revert_tail(args, "noop", n, None, b, merge, restores, by, inert, la, stale))
+            return out
+        ls = git(repo, "ls-remote", "origin", f"refs/heads/{branch}")
+        if ls.returncode != 0:
+            raise Retryable(f"cannot read origin's {branch}: {why(ls)}")
+        remote = (out_of(ls).split() or [""])[0]
+        if not remote:
+            subject = out_of(git(repo, "log", "-1", "--format=%s", merge))
+            msg = f'Revert "{subject}"\n\nThis reverts commit {merge}.\n\n{REVERT_RACE_SENTENCE}'
+            p = git(tree, "commit", "--quiet", "-m", msg)
+            if p.returncode != 0:
+                raise EnvError(f"could not commit the revert of {merge}: {why(p)}")
+            revert_commit = rev(tree, "HEAD")
+        else:
+            git(tree, "reset", "--hard", "--quiet", "HEAD")
+            git(tree, "revert", "--quit")
+            p = git(repo, "fetch", "--quiet", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+            if p.returncode != 0:
+                raise Retryable(f"fetch of origin's {branch} failed: {why(p)}")
+            rb = rev(repo, f"refs/remotes/origin/{branch}")
+            revert_commit = next((c for c in out_of(git(repo, "rev-list", f"{b}..{rb}")).split()
+                                  if f"This reverts commit {merge}" in out_of(git(repo, "log", "-1", "--format=%B", c))),
+                                 None)
+            if not revert_commit:
+                raise Refused(f"origin's {branch} holds no commit in {b[:12]}..{rb[:12]} that says `This reverts commit "
+                              f"{merge}`: not this revert's branch; nothing pushed")
+            git(tree, "checkout", "--quiet", "--detach", rb)
+            p = git(tree, "merge", "--no-edit", "--quiet", "-m", f"Merge origin/{b_name} into {branch}", b)
+            if p.returncode != 0:
+                files = [f for f in out_of(git(tree, "diff", "--name-only", "--diff-filter=U")).split("\n") if f]
+                git(tree, "merge", "--abort")
+                if not files:
+                    raise EnvError(f"merging origin/{b_name} into {branch} failed with no conflict: {why(p)}")
+                out.update(route="conflict", conflictFiles=files)
+                return out
+        head = rev(tree, "HEAD")
+        if remote != head:
+            p = git(tree, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")   # never --force, never a `+`
+            if p.returncode != 0:
+                raise Retryable(f"push of {head[:12]} to origin's {branch} refused: {why(p)}")
+            got = (out_of(git(repo, "ls-remote", "origin", f"refs/heads/{branch}")).split() or [""])[0]
+            if got != head:
+                raise Retryable(f"origin's {branch} reads {got or 'nothing'} after the push, not {head}")
+        if stale:
+            rpr, url = stale["number"], stale["url"]
+        else:
+            title = f'Revert "{out_of(git(repo, "log", "-1", "--format=%s", merge))}"'
+            body = (f"This reverts commit {merge}, the merge of PR #{n} ([[{slug}]]).\n\n{REVERT_RACE_SENTENCE}\n")
+            fd, body_file = tempfile.mkstemp(prefix="thread-revert-", suffix=".md")
+            try:
+                with os.fdopen(fd, "w") as fh:
+                    fh.write(body)
+                p = subprocess.run([gh, "pr", "create", *rflag, "--head", branch, "--base", b_name, "--title", title,
+                                    "--body-file", body_file], cwd=str(repo), capture_output=True, text=True, env=ENV,
+                                   timeout=GH_TIMEOUT)
+            except (OSError, subprocess.SubprocessError) as e:
+                raise Retryable(f"gh pr create: {e}")
+            finally:
+                try:
+                    os.unlink(body_file)
+                except OSError:
+                    pass
+            text = (p.stdout or "").strip()
+            m = re.search(r"https://github\.com/[^\s]+/pull/(\d+)", text)
+            if p.returncode != 0 or not m:
+                said = (p.stderr or text or f"exit {p.returncode}").strip().splitlines()[-1]
+                if GH_DEFINITIVE_RE.search(p.stderr or ""):
+                    raise Refused(f"gh pr create: {said}")
+                raise Retryable(f"gh pr create: {said}")
+            rpr, url = int(m.group(1)), m.group(0)
+        restores, by, inert = _restores(args, repo, tree, merge, head, note)
+        out.update(route="pr", pr=rpr, url=url, head=head, revertCommit=revert_commit, restores=restores,
+                   restoresBy=by, inert=inert, landedAfter=_landed_after(repo, merge, b))
+        return out
+    finally:
+        _remove_tree(repo, tree)
 
 
 # ---- inputs / set-aside --------------------------------------------------------------------------------
@@ -1109,10 +2111,11 @@ HUMAN_FIX_ACTS = (
     "fix the round budget",                            # H12 an invalid budget stamp
 )
 # The fixed openings the engine, its prompts and the lead write for a code-writing task's own run. None of them spends a
-# budget (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks), so a run that
-# starts with one never raises max_iterations: only the implementer's or reviser's own paragraph does.
+# budget (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks, the lead's own
+# invalid round-budget row, execute § 3), so a run that starts with one never raises max_iterations: only the
+# implementer's or reviser's own paragraph does.
 NO_BUDGET_OPENINGS = ("workflow call failed:", "merge-task:", "transient infrastructure failure", "plan-divergence:",
-                      "agent returned neither verified nor blocked", "workflow stage threw")
+                      "agent returned neither verified nor blocked", "workflow stage threw", "invalid round budget:")
 PLAN_BUDGET_OPENINGS = ("plan not approved after", "plan round budget exhausted")
 
 
@@ -1194,7 +2197,9 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
       2. not set aside at its run or at Integration (running, queued, awaiting Integration, landed): null;
       3. a code-writing review note with no pr:: H11 `hand back or defer`, handBack true, label `(review, no PR)`;
       4. no rollout note: H2 `fix its rollout: or defer`;
-      5. an undecided RACE or UNVERIFIED: H3 `decide RACE` / `decide UNVERIFIED` (the hold's line);
+      5. an undecided RACE or UNVERIFIED: H3 `decide RACE` / `decide UNVERIFIED` (the hold's line); then a note whose
+         `pr:` the RACE revert reverted on main (reconcile-rollout.py _reverted_pr, ADR 0046): H7 `fix the note's pr: or
+         defer` (its latest `## Race log` line), handBack false: a re-land needs a new `pr:`;
       6. a `## Needs you` question: H4 `answer the question` (the question), its handBack that of the first cause
          below that refuses (7 skipped), true when none;
       7. a recorded answer (answerRecorded non-null): `answered for this block (<form>, <stamp>): <the cause's why>`,
@@ -1203,7 +2208,7 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          `awaiting repair` answer is always H0; a `left` answer keeps its cause's fix, its detail prefixed `left on
          your answer of <stamp>` (H10 when the cause's fix is null). So an answered block is never retried. Both 6 and
          7 keep the cause's `autoRetryError` and `autoRetryClass` (_keep_cause_flags), so an invalid budget stamp is
-         still execute § 3's halt under a question or an answer;
+         still flagged under a question or an answer;
       8. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): H5 `decide scope or defer`;
       9. a refused descope recorded for this block (_descope_refusal, never while `descope_armed:` stands: the armed
          descope's hand-back is its way back): H5 with the record as its detail;
@@ -1215,7 +2220,9 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          Integration): H7 `fix the note's pr: or defer`, handBack false (the fix changes the note first);
      13. prepare's `the PR branch is gone`: H8 `restore, recut or defer`;
      14. a `--gated` decline; 15. a merge-task exit-1 text outside MERGE_TASK_FIXABLE: H9 or H10 (_raise_field gives none);
-     16. an invalid budget stamp: `autoRetryError` (execute § 3's halt), H12 `fix the round budget`;
+     16. an invalid budget stamp (any of the four keys, re-read live: _retry_budget's error, else
+         reconcile-rollout.py _round_budget_error): `autoRetryError`, H12 `fix the round budget`, handBack false; once
+         the stamp reads valid it falls through;
      17. an unresolvable budget: H9 or H10;
      18. `auto_retries: 0`; 19. no feedback fingerprint; 20. malformed counters; 21. a malformed `auto_retry_at`;
      22. a quota block past its 5 free retries; 23. an agent or infra block past its budget; 24. an agent block whose
@@ -1249,8 +2256,8 @@ def cause_fix(path, note, inp, rollout_note, now):
 
 def _keep_cause_flags(out, cause):
     """Carry the cause's `autoRetryError` and `autoRetryClass` into a verdict that refuses above it (a `## Needs you`
-    question, a recorded answer): an invalid budget stamp stays execute § 3's round-budget halt and status's "invalid
-    round budget" flag (execute § 6.5 (e)) whatever answers or asks the block."""
+    question, a recorded answer): an invalid budget stamp stays status's "invalid round budget" flag and H12's (c) item
+    (execute § 6.5 (c)) whatever answers or asks the block."""
     out.update(autoRetryError=cause["autoRetryError"], autoRetryClass=cause["autoRetryClass"])
 
 
@@ -1301,6 +2308,10 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
     if hold:
         return no(f"{hold[1]} undecided: only Lachy's RACE decided: line (through /thread:repair) releases it",
                   fix(f"decide {hold[1]}", _hold_line(rollout_note, path.stem, hold[1], note), False))
+    if rr._reverted_pr(rollout_note, note):
+        # The RACE revert undid this pr:'s merge on main (ADR 0046): re-entering would integrate or land a reverted PR.
+        return no("its merge was reverted on main: re-land it through a new pr: or defer",
+                  fix("fix the note's pr: or defer", _hold_line(rollout_note, path.stem, "RACE", note), False))
     question = rr.needs_human(note)
     if question and not skip_needs:
         below = _verdict(path, note, inp, rollout_note, now, None, skip_needs=True)
@@ -1353,9 +2364,13 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
     if status == "blocked" and kind == "own" and first.lower().startswith("merge-task") and \
             not any(f in reason for f in rr.MERGE_TASK_FIXABLE):
         return spent(f"merge-task needs a human: {first}")
-    if budget["error"]:
-        out["autoRetryError"] = budget["error"]
-        return no(f"invalid round budget: {budget['error']}", fix("fix the round budget", budget["error"], False))
+    # Cause 16 (ADR 0048): an invalid round-budget stamp, re-read live on every call, so once Lachy fixes the stamp the
+    # verdict falls through to the lead's own retry or to H10. All four keys: the two _retry_budget resolves, then
+    # max_iterations and max_plan_rounds (_round_budget_error).
+    bad = budget["error"] or rr._round_budget_error(note, rollout_note)
+    if bad:
+        out["autoRetryError"] = bad
+        return no(f"invalid round budget: {bad}", fix("fix the round budget", bad, False))
     if budget["unresolved"]:
         return spent(f"auto_retries unresolved: {budget['unresolved']}")
     out["autoRetryBudget"] = {"autoRetries": budget["autoRetries"], "maxReviewRounds": budget["maxReviewRounds"]}
@@ -1461,6 +2476,24 @@ def _sha(value):
     return value
 
 
+# The verbs that act on one task of a rollout from the lead's root (ADR 0043): its Integration, its own set-aside row and
+# its RACE revert. inputs and plan are readers (status reads inputs); verify, push and undo follow a guarded prepare in
+# one flow.
+GUARDED = ("prepare", "set-aside", "revert")
+
+
+def _engine_guard(note, tasks_dir):
+    """engine-snapshot.py's guard_task() for the task note's rollout, loaded from this tree: its refusal, else None."""
+    try:
+        src = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "engine-snapshot.py"
+        spec = importlib.util.spec_from_file_location("thread_engine_snapshot", src)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception:  # only positive evidence refuses
+        return None
+    return mod.guard_task(note, mod.ROOT, "skills/execute/scripts/lead-integrate.py", tasks_dir)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="The lead's side of Integration (ADR 0030 decision 3, p12-9).")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1471,6 +2504,9 @@ def main(argv=None):
     pr.add_argument("--default", required=True, help="the repo's default branch (execute § 4's resolver)")
     pr.add_argument("--note", required=True, help="the task note's path")
     pr.add_argument("--tasks-dir", default=None, help="where landed PRs' task notes are looked up (default: the note's dir)")
+    pr.add_argument("--verifier", default=None, help="the rollout's verifier: given, prepare may route `skip` when main "
+                    "moved only in the repo's Inert paths and the Inert proof holds (ADR 0045)")
+    pr.add_argument("--bootstrap", default=None, help="the rollout's env_bootstrap, a step of the Inert proof too")
 
     vf = sub.add_parser("verify", help="run the env bootstrap and the verifier, bounded; the rc goes to <out>.rc")
     vf.add_argument("--tree", required=True)
@@ -1483,9 +2519,27 @@ def main(argv=None):
     vf.add_argument("--outcome", action="store_true",
                     help="completion-verify --run's: write <out>.outcome.json (its structured result) in place of <out>.rc")
     vf.add_argument("--slots", default=None, type=int, help="the machine's verify slots (rollouts.toml verify_slots); "
-                    "with --slot-wait, wait for one first (verify-slot.py, p23-4)")
+                    "with --slot-wait, wait for one first (verify-slot.py, p23-4); a lone --slot-wait reads it from "
+                    "rollouts.toml (p34-1), else the built-in 2 with a WARN in the log")
     vf.add_argument("--slot-wait", default=None, type=float, help="seconds to wait for a verify slot (verify-timeout's "
-                    "slotWait); none in time is rc `noslot`, exit 75")
+                    "slotWait), heat holds and heat-stopped runs included; none in time is rc `noslot`, exit 75, or "
+                    "`heat`, exit 76, when the Mac was too hot")
+    vf.add_argument("--rollout", default=None, help="the rollout note: record the suite in its Run record (p29-10)")
+    vf.add_argument("--slug", default=None, help="with --rollout: the task the suite is for (none for a completion suite)")
+    vf.add_argument("--diff-base", default=None, help="the Flake check (ADR 0050): the rev the task's diff is read from "
+                    "(git diff --name-only REV HEAD in the tree); <out>.flake.json records the verdict. Every step sees REV resolved "
+                    "to its sha as THREAD_VERIFY_BASE, a fast tier's reach base (ADR 0062); without it the steps never see it")
+    vf.add_argument("--named-rerun", default=None, help="with --diff-base: the repo's runner for named tests, holding "
+                    "{tests} exactly once (verify-timeout's namedRerun)")
+
+    bm = sub.add_parser("base-moved", help="record why main moved at a merge-task exit-3 refusal (p29-10): exit 0 always")
+    bm.add_argument("--repo", required=True)
+    bm.add_argument("--pr", required=True, type=_pr_number, help="the refused PR's number")
+    bm.add_argument("--base", required=True, help="the refused integrated base")
+    bm.add_argument("--main", required=True, help="the live origin/<default> merge-task read")
+    bm.add_argument("--default", required=True, help="the repo's default branch")
+    bm.add_argument("--refusal", default=None, type=int, help="merge-task's refusal count")
+    bm.add_argument("--tasks-dir", default=None, help="the vault's task notes (default: reconcile's DEFAULT_TASKS_DIR)")
 
     pu = sub.add_parser("push", help="a plain push of the tree's merge commit; the read-back must equal it")
     pu.add_argument("--repo", required=True)
@@ -1513,17 +2567,36 @@ def main(argv=None):
     sa.add_argument("--note", required=True)
     sa.add_argument("--kind", required=True, choices=["integration", "revise-stopped", "own"])
 
+    rv = sub.add_parser("revert", help="the RACE revert (ADR 0046): open, find or land the revert PR of a RACE's merge")
+    rv.add_argument("--repo", required=True)
+    rv.add_argument("--slug", required=True)
+    rv.add_argument("--default", required=True, help="the repo's default branch")
+    rv.add_argument("--merge", required=True, type=_sha, help="the RACE's merge commit M (its Race-log RACE line's)")
+    rv.add_argument("--note", required=True, help="the task note's path")
+    rv.add_argument("--rollout", required=True, help="the rollout note's path (its ## Race log)")
+    rv.add_argument("--verifier", default=None, help="the rollout's verifier: `restores` may then hold by the Inert check")
+    rv.add_argument("--bootstrap", default=None, help="the rollout's env_bootstrap, a step of the Inert proof too")
+    rv.add_argument("--tasks-dir", default=None, help="the vault's task notes (the Engine snapshot guard)")
+    rv.add_argument("--gh-bin", default="gh")
+
     sub.add_parser("stamp", help="now, in reconcile's _stamp form")
 
     args = p.parse_args(argv)
+    if args.cmd in GUARDED:
+        refusal = _engine_guard(args.note, getattr(args, "tasks_dir", None))
+        if refusal:   # ADR 0043: before any git call; nothing fetched, merged or printed
+            print(refusal, file=sys.stderr)
+            return 2
     try:
         if args.cmd == "stamp":
             print(rr._stamp(datetime.now()))
             return 0
         if args.cmd == "verify":
             return cmd_verify(args)
+        if args.cmd == "base-moved":
+            return cmd_base_moved(args)
         handler = {"prepare": cmd_prepare, "push": cmd_push, "undo": cmd_undo, "inputs": cmd_inputs,
-                   "plan": cmd_plan, "set-aside": cmd_set_aside}[args.cmd]
+                   "plan": cmd_plan, "set-aside": cmd_set_aside, "revert": cmd_revert}[args.cmd]
         emit(handler(args))
         return 0
     except Refused as e:

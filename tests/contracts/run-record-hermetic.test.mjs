@@ -15,7 +15,8 @@
 // such suite against an unwritable record. p15-5's tune.py writes the record too (tunings.jsonl), so it joins the
 // names, and so does p21-6's close-score.py, which folds into the record and writes tunings.jsonl through tune.py, and
 // p21-7's reflect.py, which writes reflections.jsonl (and folds through `span --fold`), and p25-4's estate-dispatch.py,
-// whose `log` writes grades.jsonl.
+// whose `log` writes grades.jsonl. p29-10's ledger adds verify-slot.py (an agent suite's lines), step-boundary.py (a room
+// stop's) and the Stop hook, hooks/rollout-stop-driver.py (a halt's).
 // Pure matchers, so the real tree and the controls run through the same code. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -24,12 +25,17 @@ import { fileURLToPath } from 'node:url'
 import { read, walk } from '../lib/contract-text.mjs'
 
 const SELF = `tests/contracts/${path.basename(fileURLToPath(import.meta.url))}`
-const NAMES = '(?:reconcile-rollout\\.py|merge-task\\.sh|lead-integrate\\.py|git-env-canary\\.py|tune\\.py|close-score\\.py|reflect\\.py|estate-dispatch\\.py)'
+// A contract test whose only path.join-and-spawn of an engine script is a control string (its own matcher's fixture),
+// never a run: verify-slot-hermetic.test.mjs binds verify-slot.py and spawns python3 only inside quoted controls.
+const CONTROL_ONLY = ['tests/contracts/verify-slot-hermetic.test.mjs']
+const NAMES = '(?:reconcile-rollout\\.py|merge-task\\.sh|lead-integrate\\.py|git-env-canary\\.py|tune\\.py|close-score\\.py|reflect\\.py|estate-dispatch\\.py|verify-slot\\.py|step-boundary\\.py|rollout-stop-driver\\.py)'
+// p29-10: a script under skills/*/scripts, or the Stop hook under hooks/ (it records each halt).
+const DIRS = '(?:scripts|hooks)'
 
 // ---- shell ---------------------------------------------------------------------------------------------------
 
-const SH_BINDS = new RegExp(`^\\s*(?:export\\s+)?[A-Za-z_][A-Za-z0-9_]*=["']?[^"'\\s]*scripts/${NAMES}["']?\\s*(?:#.*)?$`, 'm')
-const SH_RUNS = new RegExp(`(?:^|[\\s;&|(])(?:python3|bash|sh)\\s+(?:-\\S+\\s+)*["']?[^"'\\s]*scripts/${NAMES}`, 'm')
+const SH_BINDS = new RegExp(`^\\s*(?:export\\s+)?[A-Za-z_][A-Za-z0-9_]*=["']?[^"'\\s]*${DIRS}/${NAMES}["']?\\s*(?:#.*)?$`, 'm')
+const SH_RUNS = new RegExp(`(?:^|[\\s;&|(])(?:python3|bash|sh)\\s+(?:-\\S+\\s+)*["']?[^"'\\s]*${DIRS}/${NAMES}`, 'm')
 const SH_EXPORTS = /^\s*export\s+(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*THREAD_EVENTS_DIR=\S/m
 const SH_SOURCES_ENV = /^\s*(?:\.|source)\s+["']?\S*tests\/lib\/merge-task-env\.sh/m
 
@@ -54,13 +60,14 @@ const shellFiles = () => [
 const nodeFiles = () => [
   ...walk('tests').filter((f) => /^tests\/(?:contracts\/)?[^/]+\.test\.mjs$/.test(f)),
   ...walk('skills/execute/tests').filter((f) => f.endsWith('.test.mjs')),
-].filter((f) => f !== SELF)
+].filter((f) => f !== SELF && !CONTROL_ONLY.includes(f))
 
 test('every shell suite that invokes an engine script points THREAD_EVENTS_DIR at temp', () => {
   const invoking = shellFiles().filter((f) => shellInvokes(read(f)))
   // Not vacuous: the known engine-driving suites are all seen as invoking.
   for (const f of ['tests/run.sh', 'tests/lib/merge-task-env.sh', 'tests/git-env-canary.test.sh', 'tests/lead-integrate.test.sh',
-    'skills/execute/tests/reconcile-rollout.test.sh', 'skills/execute/tests/reconcile-rollout-runs.test.sh']) {
+    'skills/execute/tests/reconcile-rollout.test.sh', 'skills/execute/tests/reconcile-rollout-runs.test.sh',
+    'tests/verify-slot.test.sh', 'skills/execute/tests/rollout-stop-driver.test.sh', 'skills/execute/tests/reconcile-rollout-stops.test.sh']) {
     assert.ok(invoking.includes(f), `${f} is seen as invoking an engine script`)
   }
   const bad = invoking.filter((f) => !shellHermetic(read(f)))

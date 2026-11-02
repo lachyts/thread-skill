@@ -13,7 +13,7 @@ import { runTask, loadEngine, enginePath, VERIFY_SLOT } from '../../../tests/lib
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman', 'reviewVerdicts',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman', 'reviewVerdicts', 'flakes',
 ]
 const THREW = 'workflow stage threw — see /workflows'
 const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
@@ -106,7 +106,7 @@ async function run(args, script) {
   return { ...out, unknown: s.unknown, labels: out.calls.map((c) => c.label), opts: s.seen }
 }
 
-test('one code-writing task: one row with exactly the 22 result fields (args stringified or object)', async () => {
+test('one code-writing task: one row with exactly the 23 result fields (args stringified or object)', async () => {
   const task = mkTask('proj-fix-a')
   const r = await run(JSON.stringify(mkArgs(task)))
   assert.equal(r.error, undefined)
@@ -258,7 +258,7 @@ test('an invalid review budget fails closed per task with no dispatch', async ()
 test('static: the engine is task-shaped (the retired script is queue-only.test.mjs (d))', () => {
   const src = fs.readFileSync(enginePath, 'utf8')
   // The only a.waves read is the refusal guard.
-  assert.deepEqual(src.match(/\ba\.waves\b[^\n]*/g), ["a.waves !== undefined) throw new Error('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')"])
+  assert.deepEqual(src.match(/\ba\.waves\b[^\n]*/g), ["a.waves !== undefined) throw argsRefused('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')"])
   assert.ok(!/concurrency/.test(src), 'no concurrency')
   assert.ok(!/\bchunk\(/.test(src), 'no chunk(')
   assert.ok(!/\bpipeline\(/.test(src), 'no pipeline(')
@@ -579,6 +579,77 @@ test('p21-3: no judged round gives []: read-only, the pre-flight budget block, p
   const threw = await run(mkArgs(mkTask('proj-fix-a')), { review: () => 'changes', feedback: () => B3, throwOn: 'revise' })
   assert.equal(threw.result.tasks[0].blockerDiagnosis, THREW)
   assert.deepEqual(threw.result.tasks[0].reviewVerdicts, [{ round: 1, verdict: 'changes', head: '', feedback: B3 }])
+})
+
+// ---- p29-9: flakes (ADR 0050). A code-writing agent whose verifier red was cleared by its Flake check (the named
+// re-run, then one confirming run) returns each first-run failure in `flakes` as {test, sha}. The engine keeps the
+// sanitised union of every IMPL_RESULT agent's (flakesOf: a one-line test of at most 300 characters, a 7-40 hex sha
+// lowercased, deduped by both, at most 20, anything dropped logged once) on the row's 23rd key, `flakes`, [] by default.
+const SHA_A = 'A'.repeat(40)
+const FLK = (test, sha = SHA_A) => ({ test, sha })
+
+test('p29-9: an implementer\'s and a reviser\'s flakes reach the row as the sanitised, deduped union', async () => {
+  const r = await run(mkArgs(mkTask('proj-fix-a')), {
+    review: (l) => (l.endsWith(' r1') ? 'changes' : 'approve'),
+    result: (l) => (l.startsWith('implement:')
+      ? { flakes: [FLK('tests/test_a.py::test_x'), FLK('tests/test_a.py::test_x'), FLK('  tests/test_b.py::t  ', 'abcdef0'),
+        FLK('two\nlines'), FLK('', 'abcdef0'), FLK('x'.repeat(301)), FLK('t', 'nothex'), FLK('t', 'abc12'), { test: 7, sha: SHA_A }, 'junk'] }
+      : { flakes: [FLK('tests/test_a.py::test_x'), FLK('tests/test_c.py::t', 'B'.repeat(12))] }),
+  })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  const row = r.result.tasks[0]
+  assert.deepEqual(Object.keys(row).sort(), [...ROW_KEYS].sort())
+  assert.deepEqual(row.flakes, [
+    { test: 'tests/test_a.py::test_x', sha: 'a'.repeat(40) },
+    { test: 'tests/test_b.py::t', sha: 'abcdef0' },
+    { test: 'tests/test_c.py::t', sha: 'b'.repeat(12) },
+  ])
+  const dropped = r.logs.filter((l) => /^flakes: /.test(l))
+  assert.equal(dropped.length, 1, 'one log line for what the implementer\'s result dropped')
+  assert.match(dropped[0], /implement:proj-fix-a: dropped 7 malformed flakes entries/)
+})
+
+test('p29-9: flakes is [] by default; a non-array is dropped with one log line; a cap of 20', async () => {
+  const plain = await run(mkArgs(mkTask('proj-fix-a')))
+  assert.deepEqual(plain.result.tasks[0].flakes, [])
+  const bad = await run(mkArgs(mkTask('proj-fix-a')), { result: () => ({ flakes: { test: 'x', sha: SHA_A } }) })
+  assert.deepEqual(bad.result.tasks[0].flakes, [])
+  assert.equal(bad.logs.filter((l) => /^flakes: implement:proj-fix-a: not an array/.test(l)).length, 1)
+  const many = await run(mkArgs(mkTask('proj-fix-a')), { result: () => ({ flakes: Array.from({ length: 25 }, (_, i) => FLK(`t${i}`)) }) })
+  assert.equal(many.result.tasks[0].flakes.length, 20)
+  assert.ok(many.logs.some((l) => /^flakes: implement:proj-fix-a: .*5 past the cap of 20/.test(l)), many.logs.join('\n'))
+})
+
+test('p29-9: a dead agent adds none; a converge that threw keeps those so far; read-only, pre-flight and plan-blocked rows give []', async () => {
+  const dead = await run(mkArgs(mkTask('proj-fix-a')), { dead: (l) => l.startsWith('implement:'), result: () => ({ flakes: [FLK('t')] }) })
+  assert.equal(dead.result.tasks[0].status, 'blocked')
+  assert.deepEqual(dead.result.tasks[0].flakes, [])
+  const threw = await run(mkArgs(mkTask('proj-fix-a')), { review: () => 'changes', throwOn: 'revise', result: (l) => (l.startsWith('implement:') ? { flakes: [FLK('t')] } : {}) })
+  assert.equal(threw.result.tasks[0].blockerDiagnosis, THREW)
+  assert.deepEqual(threw.result.tasks[0].flakes, [{ test: 't', sha: 'a'.repeat(40) }])
+  const ro = await run(mkArgs(mkTask('proj-audit-x', { scope: 'read-only' })), { result: () => ({ flakes: [FLK('t')] }) })
+  assert.deepEqual(ro.result.tasks[0].flakes, [], 'the read-only investigator never carries one')
+  const pre = await run(mkArgs(mkTask('proj-fix-a', { maxReviewRounds: 0 })))
+  assert.deepEqual(pre.result.tasks[0].flakes, [])
+  const pb = await run(mkArgs(mkTask('proj-fix-p', { planGate: true, maxPlanRounds: 1 })), { planJudge: () => 'changes' })
+  assert.equal(pb.result.tasks[0].status, 'plan-blocked')
+  assert.deepEqual(pb.result.tasks[0].flakes, [])
+})
+
+test('p29-9: a blocked implementer\'s flakes ride on its row; IMPL_RESULT and INTEGRATE_RESULT take flakes, never required', async () => {
+  const blocked = await run(mkArgs(mkTask('proj-fix-a')), {
+    result: () => ({ verified: false, blocked: true, prUrl: '', blockerDiagnosis: 'red after 3', flakes: [FLK('tests/t.py::t')] }),
+  })
+  assert.equal(blocked.result.tasks[0].status, 'blocked')
+  assert.deepEqual(blocked.result.tasks[0].flakes, [{ test: 'tests/t.py::t', sha: 'a'.repeat(40) }])
+  const S = loadEngine(['IMPL_RESULT', 'INTEGRATE_RESULT'])
+  for (const [name, schema] of [['IMPL_RESULT', S.IMPL_RESULT], ['INTEGRATE_RESULT', S.INTEGRATE_RESULT]]) {
+    const f = schema.properties.flakes
+    assert.ok(f && f.type === 'array' && f.items.type === 'object', `${name}: flakes is an array of objects`)
+    assert.deepEqual([...f.items.required].sort(), ['sha', 'test'], `${name}: each entry needs test and sha`)
+    assert.ok(!schema.required.includes('flakes'), `${name}: flakes is optional`)
+  }
 })
 
 // ---- ADR 0038: a Cap is a promise. The plan judge prices spend gates while args.gatePricer is set ---------------

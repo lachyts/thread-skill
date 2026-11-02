@@ -14,19 +14,27 @@ launch-folders file and its own tree's `.claude-plugin/plugin.json`; it never re
 
 Surfaces (CONTEXT.md **Surface**). A surface is a place a chain writes, as a canonical token of one of five kinds:
   repo:<absolute path>  a filesystem place: overlaps on equality or containment at a `/` boundary, case-folded
-                        (APFS); two checkouts of one origin are disjoint (the rollout clone is its own checkout).
+                        (APFS); two checkouts of one origin are disjoint (the rollout clone is its own checkout),
+                        and so is a checkout nested inside another by path (a separate repo with its own index, as
+                        `~/Projects` holds its own Narcissus clone): containment parts when both paths sit in git
+                        checkouts and the inner one's toplevel is not the outer one's (p33-3). An outer path in no
+                        checkout still covers every checkout beneath it.
   vault:<path>          a path relative to the vault root: overlaps on a case-folded prefix at a segment boundary.
-  vault                 the whole vault: overlaps every vault token.
+  vault                 the whole vault: overlaps every vault token. Only a member that names no project and no
+                        path claims it unasked, or one that writes it as a literal token (ADR 0059).
   ext:<name>            an external system (CMS, DNS zone, console): overlaps on case-folded equality.
   any                   the unknown: overlaps every token of every kind.
-Kinds never overlap one another, save `any`. A task's own note and the chain's note are never surfaces.
+Kinds never overlap one another, save `any`. The chain's note and the engine's other writes under Work/Tasks are
+never surfaces (bookkeeping, ADR 0059); a member's own task note is claimed only beside its project's place (below).
 
 How a path becomes a token (claim; the same for a declared `repo:` path, a `## Launch` path, a project's `Local:`,
 a launch folder and a --surface path):
   1. `~` expanded; the path must be absolute. The realpath of its nearest existing ancestor, with the rest appended
      and normalised; a path that does not exist yet is claimed through that ancestor, with a WARN naming it.
-  2. At or under the vault root's realpath: `vault` (the root itself) or `vault:<rel>`. The vault is a note space,
-     not a checkout, for ADR 0040's ownership ruling: every chain writes its own task notes there.
+  2. At or under the vault root's realpath (case-folded): `vault` (the root itself) or `vault:<rel>`. The vault is a
+     note space, not a checkout, for ADR 0040's ownership ruling: every chain writes its own task notes there. A
+     derived or added `vault` (the root) narrows in the plan, and a derived or added path under Work/Tasks is
+     dropped (below); claim itself returns the truthful token.
   3. Inside a git checkout (`git -C <nearest existing directory> rev-parse --show-toplevel`): `repo:<realpath of
      the toplevel>`. Its index and HEAD are what Legs share, so a claim anywhere in a checkout owns all of it,
      declared or derived.
@@ -41,13 +49,24 @@ Each member's surfaces:
      (a span that starts `~/` or `/`, holds no whitespace or `:`, and, `/`-rooted, has two segments or more, so
      `/seo:impact`, `/morning` and alias spans are skipped); every launch-command path there (below); each
      `` Local: `<path>` `` in the body of its first project note (the first `projects:` wikilink's); and its
-     launch folder, for a member with an alias.
+     launch folder, for a member with an alias. A derived path that is the vault root is a root hit and claims
+     nothing itself (step 4); one at or under Work/Tasks is bookkeeping and dropped, with no WARN.
   3. Added: each `--surface <slug>=<raw>` unions in, declared member or not (a path or `repo:` value through claim,
-     any other token through parse_token), and is listed in the member's `added`.
-  4. Default (nothing from 1-3): `vault`, with a WARN to declare `surfaces:`.
-`source` is `declared` (1 non-empty), else `derived` (2 or 3 gave a token), else `default`. The guarantee: a
-member claims its launch folder, each path its `## Launch` names (its launch commands' `--add-dir` and `cd` paths
-among them), each `Local:` path of its first project and each surface added for it, or exactly what it declares.
+     any other token through parse_token), and is listed in the member's `added`. An added path that is the vault
+     root is a root hit (step 4, with a WARN when it narrows); one under Work/Tasks is dropped with a WARN. A literal
+     token (`vault`, `vault:<rel>`, `ext:`, `any`) is kept as written, and so is every declared token: a declaration
+     is deliberate. `added` lists only the tokens kept.
+  4. The project claim (ADR 0059), on a root hit or when 1-3 gave nothing: its first project's place and its own
+     task note (`vault:Work/Tasks/<slug>.md`, or its Archive/ path, as found), relative to --vault. The place of a
+     folder note (`<dir>/<dir>.md`, `<dir>` strictly below Work/Projects) is `vault:<dir>`; of a flat note, the note
+     and the folder it would become (`vault:<dir>/<name>.md` and `vault:<dir>/<name>`). A first project named but
+     with no note under Work/Projects gets a WARN and counts as none. With no project: a root hit claims `vault`
+     with a WARN to link its project or declare `surfaces:`; nothing at all claims `vault` with the default WARN to
+     declare `surfaces:`.
+`source` is `declared` (1 non-empty), else `derived` (2 or 3 kept a token, a root hit was seen, or 4 claimed a
+project's place), else `default`. The guarantee: a member claims its launch folder, each path its `## Launch` names
+(its launch commands' `--add-dir` and `cd` paths among them), each `Local:` path of its first project and each
+surface added for it, the vault root and Work/Tasks aside, or exactly what it declares.
 It never claims its launch profile's other Working roots (a workspace launcher's `add_dirs`), another project's
 `Local:`, a project's `repos:` entries, nor a repo or external system it writes but names nowhere: those are
 outside schedule's sight.
@@ -64,14 +83,18 @@ the estate (too_broad).
 
 Launch, per member. Alias: the task's `launch:`, else the `launch:` of its first project note (the `projects:`
 wikilink's file under `<vault>/Work/Projects/**`, a match outside Archive/ first). Folder: `by_alias[alias]`, else
-`plain_aliases[alias]`. A member with no alias (or `claude`) opens with `claude` from its one `repo:` surface when
-it has exactly one, else from the vault root. Each row keeps its own launch: a launch change between two rows is a
-Leg boundary (ADR 0040).
+`plain_aliases[alias]`. A member with no alias (or `claude`) opens with `claude` from its one checkout (a `repo:`
+surface that is a git toplevel) when it has exactly one; with none, from its one `repo:` surface when it has
+exactly one, else from the vault root. A code row never opens where its Leg cannot finish it (leg.py done finishes
+only commits in the Leg's own checkout; ADR 0059): an alias-less member writing two checkouts or more is refused,
+and so is an aliased one whose launch folder is in the vault (realpaths, case-folded, as claim compares) while it
+writes a checkout. Each row keeps its own launch: a launch change between two rows is a Leg boundary (ADR 0040).
 
 Ruling (c), no serial self-rollouts: plugin.json's `repository`, normalised (norm_origin), against the origin of
 each launch-command path in a member's `## Launch` (declared member or not), each of its `repo:` checkouts, its
 launch folder, every `` Local: `<path>` `` in its project notes' bodies and their `repos:` entries. A match sends
-the member to `sessionLane`, with a `why` naming the source (the first match, in that order).
+the member to `sessionLane`, with a `why` naming the source (the first match, in that order). Ruling (c) runs
+before the launch refusals, so a session-lane member is never refused for its launch.
 
 Grouping: connected components over surface overlap, plus `depends-on:` / `blocked-by:` / --dep edges inside the
 set. Each chain is ordered topologically (Kahn's); among the ready tasks the next row is the lowest phase N of
@@ -85,13 +108,17 @@ Output: one JSON line on stdout, exit 0, nothing on stderr:
    "sessionLane": [{"slug": ..., "why": ...}], "warns": ["WARN: ...", ...]}
 Exit 3 prints no stdout and one `REFUSE:` line per refusal, with its remedy: an alias in neither map, an alias with
 a null folder, a launch folder that is missing, a launch-folders file missing or unreadable while an alias needs it
-(an unreadable file no alias needs is only a WARN), a dependency cycle, a malformed declared token. Exit 2 prints
+(an unreadable file no alias needs is only a WARN), a dependency cycle, a malformed declared token, a code row whose
+Leg would open outside the checkout it writes (an alias-less row writing two checkouts, or a vault launch writing
+one; never a session-lane member). Exit 2 prints
 one `serial-chains:` line: no --tasks, a task note not found, a malformed --surface or --dep, reconcile-rollout.py
 unloadable, or plugin.json unreadable (ruling (c) cannot be checked, so the plan fails closed).
 
 The pure helpers (parse_token, fmt_token, overlaps, overlap_pairs, read_surfaces, norm_origin) touch neither the
-filesystem nor git; unfinished-rollout.py imports them. claim and the ruling-(c) origin read are the only code that
-runs git, and neither is exported. Importing this file has no side effects.
+filesystem nor git; unfinished-rollout.py imports them. overlaps and overlap_pairs take an optional toplevel resolver
+(Git.checkout) for the nested-checkout rule, and are purely textual without one. claim, the grouping's nested-checkout
+read and the ruling-(c) origin read are the only code that runs git; of it, only the Git class is exported, for
+unfinished-rollout.py's own nested-checkout read. Importing this file has no side effects.
 """
 import argparse
 import importlib.util
@@ -166,8 +193,22 @@ def _within(x: str, y: str) -> bool:
     return x == y or x.startswith(y + "/") or y.startswith(x + "/")
 
 
-def overlaps(a, b) -> bool:
-    """Whether two tokens (strings or (kind, value) pairs) name a shared place, by the rules in the header."""
+def _nested_apart(va: str, vb: str, toplevel) -> bool:
+    """Two repo: values, one strictly inside the other: apart when both sit in git checkouts and the inner one's is not
+    the outer one's (a separate checkout nested by path, with its own index). toplevel maps a path to its checkout's
+    toplevel, or None (in no checkout); an outer path in no checkout covers everything beneath it, so it never parts."""
+    xf, yf = va.casefold(), vb.casefold()
+    if xf == yf:
+        return False
+    outer, inner = (va, vb) if xf == "/" or yf.startswith(xf + "/") else (vb, va)
+    to, ti = toplevel(outer), toplevel(inner)
+    return bool(to and ti) and to.casefold() != ti.casefold()
+
+
+def overlaps(a, b, toplevel=None) -> bool:
+    """Whether two tokens (strings or (kind, value) pairs) name a shared place, by the rules in the header. With a
+    toplevel resolver (Git.checkout), two repo: tokens that meet only by containment across nested checkouts are
+    disjoint; without one, the comparison is purely textual."""
     (ka, va), (kb, vb) = _tok(a), _tok(b)
     if ka == "any" or kb == "any":
         return True
@@ -178,12 +219,14 @@ def overlaps(a, b) -> bool:
         return x == y
     if ka == "vault":
         return not x or not y or _within(x, y)
-    return x == "/" or y == "/" or _within(x, y)
+    if not (x == "/" or y == "/" or _within(x, y)):
+        return False
+    return toplevel is None or not _nested_apart(va, vb, toplevel)
 
 
-def overlap_pairs(A, B):
-    """Every (a, b) with a from A and b from B that overlap, in order."""
-    return [(a, b) for a in A for b in B if overlaps(a, b)]
+def overlap_pairs(A, B, toplevel=None):
+    """Every (a, b) with a from A and b from B that overlap, in order (toplevel as overlaps takes it)."""
+    return [(a, b) for a in A for b in B if overlaps(a, b, toplevel)]
 
 
 def _item_value(raw: str) -> str:
@@ -303,7 +346,7 @@ def plugin_origin() -> str:
         die(f"cannot read the plugin's repository from {PLUGIN_JSON}: {e}: ruling (c) cannot be checked")
 
 
-# ---- git (claim and the ruling-(c) read only) -------------------------------------------------------
+# ---- git (claim, the nested-checkout reads and the ruling-(c) read; only Git is exported) --------
 
 class Git:
     """Read-only git calls with the repo-local env vars scrubbed, cached per directory."""
@@ -332,6 +375,17 @@ class Git:
             top = self._run(d, "rev-parse", "--show-toplevel")
             self._top[d] = os.path.realpath(top) if top else None
         return self._top[d]
+
+    def checkout(self, path):
+        """The toplevel of the checkout a path is in, read from its nearest existing directory, or None: the
+        resolver overlaps takes to part two repo: tokens nested across separate checkouts."""
+        d = os.path.normpath(path)
+        while not os.path.isdir(d):
+            parent = os.path.dirname(d)
+            if parent == d:
+                return None
+            d = parent
+        return self.toplevel(d)
 
     def origin(self, d):
         if d not in self._origin:
@@ -582,6 +636,38 @@ def resolve_launch(slug, alias, lf, lf_path, lf_err):
     return folder, None
 
 
+BOOKKEEPING = "work/tasks"
+
+
+def bookkeeping(tok) -> bool:
+    """Whether a token is the engine's own bookkeeping: a vault path at or under Work/Tasks, case-folded (ADR 0059)."""
+    kind, value = tok
+    v = value.casefold()
+    return kind == "vault" and (v == BOOKKEEPING or v.startswith(BOOKKEEPING + "/"))
+
+
+def project_claim(vault: Path, proj_path: Path, task_path: Path):
+    """A member's narrowed vault claim (ADR 0059): its first project's place and its own task note, as tokens
+    relative to the --vault path (the lexical base Projects and find_task walk). A folder note (its stem is its
+    folder's name, the folder strictly below Work/Projects) gives its folder; a flat note gives itself and the folder
+    it would become, so a flat-to-folder-note move keeps the claim and a literal note path still overlaps it."""
+    root = vault / "Work" / "Projects"
+    parent = proj_path.parent
+    if proj_path.stem.casefold() == parent.name.casefold() and root in parent.parents:
+        out = [parse_token("vault:" + parent.relative_to(vault).as_posix())]
+    else:
+        rel = proj_path.relative_to(vault)
+        out = [parse_token("vault:" + rel.as_posix()), parse_token("vault:" + rel.with_suffix("").as_posix())]
+    out.append(parse_token("vault:" + task_path.relative_to(vault).as_posix()))
+    return out
+
+
+def in_vault(folder, vault_real) -> bool:
+    """Whether a launch folder is at or under the vault root, by claim's comparison (realpaths, case-folded)."""
+    r, vf = os.path.realpath(os.path.expanduser(folder)).casefold(), vault_real.casefold()
+    return r == vf or r.startswith(vf + "/")
+
+
 def load_launch_folders(path):
     try:
         data = json.loads(Path(path).read_text())
@@ -716,29 +802,91 @@ def cmd_plan(args) -> int:
                 except ValueError as e:
                     refusals.append(f"{slug}: surfaces: {raw} is not a surface token ({e}): write one of "
                                     f"{TOKEN_FORMS}")
-        else:
-            for path, _ in launch_named:
-                tokens.append(claim(path, slug, vault_real, git, cw))
+        root_src, root_adds, derived = None, [], False
+        if not declared:
+            # Derived claims: the vault root narrows below and a Work/Tasks path is bookkeeping, dropped (ADR 0059).
+            places = [(path, f"its ## Launch {via or 'path'} {path}") for path, via in launch_named]
             if proj_names:
-                for loc in LOCAL_RE.findall(projects.read(proj_names[0])[1]):
-                    tokens.append(claim(loc, slug, vault_real, git, cw))
+                places += [(loc, f"its project [[{proj_names[0]}]]'s Local: {loc}")
+                           for loc in LOCAL_RE.findall(projects.read(proj_names[0])[1])]
             if folder:
-                tokens.append(claim(folder, slug, vault_real, git, cw))
+                places.append((folder, f"its launch folder {folder} ({alias})"))
+            for path, label in places:
+                tw = []
+                t = claim(path, slug, vault_real, git, tw)
+                if bookkeeping(t):
+                    continue
+                cw.extend(tw)
+                if t == ("vault", ""):
+                    root_src = root_src or label
+                else:
+                    tokens.append(t)
+                    derived = True
         for raw in adds.get(slug.lower(), []):
             t = added_token(raw)
-            t = claim(t[1], slug, vault_real, git, cw) if t[0] == "path" else t
+            if t[0] == "path":
+                tw = []
+                t = claim(t[1], slug, vault_real, git, tw)
+                if t == ("vault", ""):
+                    root_adds.append(raw)
+                    continue
+                if bookkeeping(t):
+                    cw.append(f"WARN: {slug}: --surface {raw} is under Work/Tasks: task and rollout notes are "
+                              "bookkeeping, never a claim (ADR 0059); pass the token `vault:Work/Tasks/...` to claim "
+                              "one on purpose")
+                    continue
+                cw.extend(tw)
             tokens.append(t)
             added.append(fmt_token(t))
-        source = "declared" if declared else ("derived" if tokens else "default")
-        if not tokens:
-            tokens = [("vault", "")]
-            cw.append(f"WARN: {slug}: no surface declared or derived: it claims only the vault; declare `surfaces:` "
-                      "for any repo or external system it writes")
+        narrowed = False
+        if root_src or root_adds or not tokens:
+            ppath = projects.find(proj_names[0]) if proj_names else None
+            if ppath is not None:
+                tokens.extend(project_claim(vault, ppath, notes[slug].path))
+                narrowed = True
+                for raw in root_adds:
+                    cw.append(f"WARN: {slug}: --surface {raw} is the vault root: it claims its first project's place "
+                              "and its own task note instead; pass the vault path it writes, or the token `vault` to "
+                              "claim the whole vault")
+            else:
+                if proj_names:
+                    cw.append(f"WARN: {slug}: its first project [[{proj_names[0]}]] has no note under Work/Projects: "
+                              "its vault claim cannot narrow to it")
+                if root_src or root_adds:
+                    tokens.append(("vault", ""))
+                    cw.append(f"WARN: {slug}: {root_src or f'--surface {root_adds[0]}'} is the vault root and it "
+                              "names no project: it claims the whole vault; link its project in `projects:` or "
+                              "declare `surfaces:` for what it writes")
+                else:
+                    tokens.append(("vault", ""))
+                    cw.append(f"WARN: {slug}: no surface declared or derived: it claims only the vault; declare "
+                              "`surfaces:` for any repo or external system it writes")
+        source = ("declared" if declared else "derived" if derived or added or root_src or root_adds or narrowed
+                  else "default")
         warns.extend(cw)
         canon = sorted({fmt_token(t) for t in tokens})
+        # A code row's Leg finishes only commits in its own checkout, so it never opens outside the one it writes
+        # (ADR 0059 d4); the refusal waits for ruling (c), which sends a session-lane member away unrefused.
+        repos = [v for k, v in (parse_token(t) for t in canon) if k == "repo"]
+        checkouts = [v for v in repos if git.toplevel(v) == v]
+        pending = None
         if not alias:
-            repos = [v for k, v in (parse_token(t) for t in canon) if k == "repo"]
-            folder = repos[0] if len(repos) == 1 else vault_real
+            if len(checkouts) == 1:
+                folder = checkouts[0]
+            elif checkouts:
+                folder = vault_real
+                pending = (f"{slug}: it writes the checkouts {', '.join(checkouts)} and has no launch alias: leg.py "
+                           "done finishes only commits in the Leg's own checkout, so give it a `launch:` whose folder "
+                           "is in the checkout it commits to, split it into one task per checkout chained by "
+                           "`depends-on:`, or declare `surfaces:` without a checkout it only reads")
+            else:
+                folder = repos[0] if len(repos) == 1 else vault_real
+        elif folder and checkouts and in_vault(folder, vault_real):
+            which = f"checkout {checkouts[0]}" if len(checkouts) == 1 else f"checkouts {', '.join(checkouts)}"
+            pending = (f"{slug}: its launch {alias} opens in {folder}, inside the vault, but it writes the {which}: "
+                       "leg.py done finishes only commits in the Leg's own checkout, so give it a `launch:` whose "
+                       "folder is in that checkout, split it into one task per checkout chained by `depends-on:`, or "
+                       "declare `surfaces:` without a checkout it only reads")
         launch = {"alias": alias or "claude", "folder": folder}
 
         # Ruling (c): no serial self-rollouts.
@@ -760,6 +908,8 @@ def cmd_plan(args) -> int:
                       "deps": deps}
         if lane:
             session.append({"slug": slug, "why": lane})
+        elif pending:
+            refusals.append(pending)
 
     lane_slugs = {s["slug"] for s in session}
     chained = [s for s in notes if s not in lane_slugs]
@@ -779,7 +929,7 @@ def cmd_plan(args) -> int:
 
     for i, a in enumerate(chained):
         for b in chained[i + 1:]:
-            if overlap_pairs(info[a]["surfaces"], info[b]["surfaces"]):
+            if overlap_pairs(info[a]["surfaces"], info[b]["surfaces"], git.checkout):
                 union(a, b)
     in_deps, ext = {}, {}
     for s in chained:

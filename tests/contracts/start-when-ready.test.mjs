@@ -1,11 +1,11 @@
-// Start when ready (p23-6): the execute offer's fourth answer stamps `start: unattended` on the rollout note
+// Start when ready (p23-6): the execute handoff's fourth move, on his word only (ADR 0057), stamps `start: unattended` on the rollout note
 // just written and ends; the Chorus Stage starts the lead once the note is runnable, and that lead's first
 // `reconcile-rollout.py next` clears the stamp (skills/_shared/vault-grammar.md § Rollout start stamp; the
 // script half is pinned by skills/execute/tests/reconcile-rollout-queue.test.sh, orient § 9's answer by
 // orient-reshuffle.test.mjs). This file pins the prose around it, one named check per rule:
 //   - schedule step 8 prints a `start when ready` line in its To execute block and has a **Start when ready.**
-//     paragraph that stamps `start: unattended` and leaves orient § 9 to ask under orient;
-//   - schedule's **Supersede prep** removes a prior's `start: unattended` before step 1, step 1's confirm names
+//     paragraph that stamps `start: unattended` and, under orient, writes nothing because orient § 9 decides the move;
+//   - schedule's **Supersede prep** removes a prior's `start: unattended` before step 1, step 1's report names
 //     the clear, and its **Put back** restores the exact line when the run stops before step 6 writes its note
 //     (the Don'ts allow that one write);
 //   - the rollout template's How to execute names the stamp, and carries no frontmatter line for it;
@@ -43,15 +43,15 @@ function check(f) {
   const toExecute = s8.split('\n').find((l) => /^\s+start when ready\s+#/.test(l)) ?? ''
   if (!toExecute.includes('start: unattended') || !toExecute.includes('Chorus Stage')) out.push('schedule step 8 line')
   const swr = para(s8, '**Start when ready.**')
-  if (!swr.includes(`stamp ${STAMP}`) || !swr.includes('orient § 9') || !swr.includes('nothing runs')) {
+  if (!swr.includes(`stamp ${STAMP}`) || !swr.includes('because orient § 9 decides the move') || !swr.includes('nothing runs')) {
     out.push('schedule step 8 paragraph')
   }
   const prep = para(f.schedule, '**Supersede prep.**')
   if (!/carries `start: unattended`.*?remove that line before step 1/.test(prep)) out.push('supersede prep clears')
   if (!/\*\*Put back\.\*\* A run that stops before step 6 writes its note .*?puts that exact line back/.test(prep)
     || !prep.includes('`restored [[<prior>]]')) out.push('supersede prep puts back')
-  const s1Confirm = collapse(section(f.schedule, /^### 1\. Discover tasks/) ?? '')
-  if (!s1Confirm.includes("`cleared [[<prior>]]'s start when ready` line")) out.push('step 1 confirm names the clear')
+  const s1Report = collapse(section(f.schedule, /^### 1\. Discover tasks/) ?? '')
+  if (!s1Report.includes("`cleared [[<prior>]]'s start when ready` line")) out.push('step 1 report names the clear')
   const dont = collapse(f.schedule.split('\n').find((l) => l.startsWith('- Never write `start: unattended`')) ?? '')
   if (!dont.includes("§ 0's **Put back**")) out.push("schedule don'ts put back")
   const how = collapse(section(f.template, /^## How to execute$/) ?? '')
@@ -96,10 +96,10 @@ test('Start when ready: schedule, the template, execute, status and CONTEXT.md c
 test('controls: each rule fails on its own known-bad shape', () => {
   const cases = [
     ['schedule step 8 line', mutate('schedule', /^\s+start when ready\s+#.*\n/m, '')],
-    ['schedule step 8 paragraph', mutate('schedule', "because orient § 9's offer asks it", 'because the offer asks it')],
+    ['schedule step 8 paragraph', mutate('schedule', 'because orient § 9 decides the move', 'because the handoff runs')],
     ['supersede prep clears', mutate('schedule', 'remove that line before step 1', 'leave that line')],
     ['supersede prep puts back', mutate('schedule', 'puts that exact line back', 'leaves the prior')],
-    ['step 1 confirm names the clear', mutate('schedule', "§ 0's `cleared [[<prior>]]'s start when ready` line when the Supersede prep removed one, ", '')],
+    ['step 1 report names the clear', mutate('schedule', "§ 0's `cleared [[<prior>]]'s start when ready` line when the Supersede prep removed one, ", '')],
     ["schedule don'ts put back", mutate('schedule', "or as § 0's **Put back**", 'or never')],
     ['template how to execute', mutate('template', '*Start when ready*: `start: unattended`', '*Start when ready*')],
     ['template frontmatter stamp', mutate('template', /^status: open$/m, 'status: open\nstart: unattended')],

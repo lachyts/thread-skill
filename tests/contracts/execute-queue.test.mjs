@@ -11,6 +11,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { collapse, read, root, section } from '../lib/contract-text.mjs'
@@ -21,6 +22,7 @@ const real = {
   exists: (p) => fs.existsSync(path.join(root, p)),
   template: read('skills/schedule/rollout-template.md'),
   driver: read('hooks/rollout-stop-driver.py'),
+  away: read('skills/execute/away.md'),
 }
 const DRIVER = path.join(root, 'hooks', 'rollout-stop-driver.py')
 
@@ -87,7 +89,9 @@ function driverStates(lines) {
     '    h = m.STATUS_RE.search(l)\n' +
     '    out.append(h.group("state") if h else None)\n' +
     'print(json.dumps(out))\n'
-  const r = spawnSync('python3', ['-c', py, DRIVER, JSON.stringify(lines)], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } })
+  // The driver only loads here (STATUS_RE), recording nothing; its Run record still points at temp (p29-10: it records halts).
+  const r = spawnSync('python3', ['-c', py, DRIVER, JSON.stringify(lines)],
+    { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(os.tmpdir(), 'execute-queue-no-events') } })
   if (r.status !== 0) return lines.map(() => null)
   return JSON.parse(r.stdout)
 }
@@ -103,7 +107,7 @@ const BUDGET = 'Integrations run one at a time: each merges the latest `main` in
   'required checks + squash) per approved task, **sequentially**'
 
 // Named failures for execute's queue prose, its hook wiring and the driver path; [] means every rule holds.
-function checkExecute({ skill, hooksJson, exists, template, driver }) {
+function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   const fails = []
   const s2 = S(skill, S2)
   const s45 = S(skill, S45)
@@ -234,7 +238,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // is), a non-empty rowRefused printed, a non-empty prUrlError (a note pr: with no PR URL, e.g. a bare #N and no GitHub
   // origin) set aside at Integration, never launched; the rung is the task's own record, the accepted row's, else the note's
   // (neutral when the note has no rung:), never the ladder's top rung, and no tier vocabulary left. prepare's
-  // `unlisted` and `note` only inform.
+  // `unlisted`, `note` and `inert` only inform.
   if (!st3.includes('`startedAt` a fresh `lead-integrate.py stamp` taken at launch') ||
     !st3.includes("`readyAt` the note's `ready:`") ||
     !st3.includes('`prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are, verbatim, the `integrate` record of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --repo <repoPath> [--row') ||
@@ -243,7 +247,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !st3.includes("`rung` is the task's own rung record, the accepted row's (`startRung`, `rung`, `climbs`), else the note's `rung` record") ||
     !st3.includes('(neutral, `{startRung: "", rung: "", climbs: []}`, when the note has no `rung:`)') ||
     !st3.includes("never the ladder's top rung: Integration runs on the top rung whatever the record says") ||
-    !st3.includes('`unlisted`, the commits in `taskBase..mainSha` that name no PR,') || !st3.includes('pass neither to the integrate call') ||
+    !st3.includes('`unlisted`, the commits in `taskBase..mainSha` that name no PR,') || !st3.includes('pass none of them to the integrate call') ||
     /tierCapped|tier_capped|escalated/.test(st3)) {
     fails.push('integrate-args')
   }
@@ -387,18 +391,26 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !s2.includes('print "supersede interrupted: `/thread:schedule <project> --regenerate`"') ||
     !s2.includes('print "close-out interrupted: `/thread:repair [[this]]`"')) fails.push('lineage')
 
-  // race-hold: step 1.1 halts on a RACE in raceHold once the lane is free; a cold resume's exit 3 is printed and
-  // the loop goes on (step 1.1 holds the task); § 7 names both stops; § 8's duplicate-free re-entry rests on it.
+  // race-hold (ADR 0046): an undecided RACE holds the Integration lane only (`laneHold`), never a start; step 1.4 runs a
+  // pending revert (`revert: true`) as the lane's first work and skips the lane for any other `race` entry; step 1.5
+  // halts on `next`'s `halt: race`; a cold resume's exit 3 is printed and the loop goes on; § 7 names the stops; § 8's
+  // duplicate-free re-entry rests on it.
   const s1 = subs[0]?.text ?? ''
+  const s14 = sub(/^If the lane is free, take `next`'s first `integrating` task/)?.text ?? ''
+  const s15 = subs.find((x) => x.text.startsWith('**Halt guard (last).**'))?.text ?? ''
   const coldR = labelled(skill, 'Cold resume.')
   const s7 = S(skill, S7)
   const s8 = S(skill, S8)
   const stuck7 = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: stuck`')) ?? '')
   const signOff7 = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: awaiting-sign-off`')) ?? '')
-  if (!s1.includes('`raceHold`') || !s1.includes('the lane is free') || !s1.includes('`reason="RACE undecided: [[<slug>]]"`') ||
+  if (!s1.includes('Every other hold reads `laneHold` and holds the Integration lane only (ADR 0046, ADR 0048)') ||
+    !s1.includes('while starts, seeded revises and automatic retries go on') ||
     !s1.includes('An `UNVERIFIED` entry stays set aside like any other') ||
+    !s14.includes("Else a `race` entry with `revert: true` is the lane's first work") || !s14.includes('*The RACE revert* (step 4) from its `revert` step') ||
+    !s14.includes('Any other `race` entry skips this sub-step') ||
+    !s15.includes('`race` → § 7 with `reason="RACE undecided: [[<slug>]]"`') ||
     !coldR.includes('Exit 3 means `resume` held back an undecided RACE or UNVERIFIED') || !coldR.includes('print the lines and go on') ||
-    !s7.includes('`next` reports a `RACE` in `raceHold` while the lane is free') || !s7.includes('`reason="RACE undecided: [[task]]"`') ||
+    !s7.includes('`next` reports `halt: race` once the lane is free and nothing else moves') || !s7.includes('`reason="RACE undecided: [[task]]"`') ||
     // ADR 0034: the stuck bullet names an UNVERIFIED first and no gate reason; a gate alone is § 7's awaiting-sign-off stop.
     !stuck7.includes('`reason="UNVERIFIED undecided: [[task]]"`, checked first') || stuck7.includes('gated inputs await sign-off') ||
     !signOff7.includes('`reason="awaiting sign-off: [[task]]"`') ||
@@ -442,7 +454,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !raceLine.includes('`timeout: <harnessTimeoutMs>`') || /--timeout 1800\b/.test(skill) ||
     !verifyP.includes("(7200000, the harness maximum, from this entry's § 3 `verify_timeout` check") || /\b2400000\b/.test(skill) ||
     /\+ 600\) × 1000/.test(skill) ||
-    !vtP.includes('Exit 0 prints `{"verifyTimeout": <verify_timeout>, "harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlots": <verify_slots>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`') ||
+    !vtP.includes('Exit 0 prints `{"verifyTimeout": <verify_timeout>, "harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`') ||
     !timeoutGuard.includes('`timeout: <harnessTimeoutMs>` (7200000; their own `--slot-wait <slot_wait>` bounds the verify-slot wait and `--timeout <verify_timeout>` the verifier)') ||
     !recheck.includes("Every entry then runs § 3's `verify_timeout` check once, before anything it writes") ||
     !before(coldVT, VT, 'reconcile-rollout.py resume') || !before(reinstateVT, VT, 'clear-pause') || !before(pzReinstate, VT, 'clear-pause') ||
@@ -456,8 +468,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // paragraph says the wait never counts against the deadline and the guard ends a SIGKILLed verify's verifier; § 3
   // has the machine-wide `verify_slots` row and verify-timeout's exit-3 halt with its "does not clear" remedy; § 4
   // passes `verifySlot` (and a resume never adds it); the *Verify slots* paragraph names both Integration waiters (the
-  // lead's `lead-integrate.py verify` and the integrate call's `run --priority`), the guard and `status`; § 7 lists
-  // the three halts.
+  // lead's `lead-integrate.py verify` and the integrate call's `run --priority`), the guard and `status`, and (p31-3)
+  // that an agent waits for its verdict inside its turn with `verify-slot.py wait`; § 7 lists the three halts.
   {
     const SLOTS = '--slots <verify_slots> --slot-wait <slot_wait>'
     const vsRow = s3raw.split('\n').find((l) => l.startsWith('| `verify_slots` |')) ?? ''
@@ -465,14 +477,16 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     const vsP = labelled(skill, 'Verify slots')
     const s4 = S(skill, S4)
     const s7 = S(skill, S7)
-    if (!vline.includes(` ${SLOTS} --bootstrap`) || !raceLine.includes(` ${SLOTS} --bootstrap`) ||
+    // p29-10: the Run record's --rollout and --slug ride between the slot flags and the bootstrap (execute-run-record).
+    const REC = '--rollout "<rollout-note>" --slug <slug>'
+    if (!vline.includes(` ${SLOTS} ${REC} --bootstrap`) || !raceLine.includes(` ${SLOTS} ${REC} --bootstrap`) ||
       !verifyP.includes('its `--timeout` deadline starts only once it holds one, so the wait never counts against `verify_timeout`') ||
       !verifyP.includes('only a SIGKILL leaves no rc, which reads as red; its guard still ends the verifier') ||
       !verifyP.includes('Any rc but 0 is red, except `noslot` (exit 75: no verify slot within `<slot_wait>`, the verifier never ran), which is no verdict') ||
       !st3.includes('`noslot` (exit 75: no verify slot came within `<slot_wait>`; the verifier never ran, so this is no verdict, never red): M stays unpushed and the lane held. After the canary `check`, re-arm (`--kind verify`) and re-run *The background verify command*.') ||
-      !st3.includes('A third consecutive `noslot` on this verify: `undo`, then halt with `reason="no verify slot for [[slug]] in 3 tries"`') ||
+      !st3.includes('A third consecutive `noslot` on this verify: `undo`, then the *Lane hold* (`--cause verify-noslot`') || st3.includes('reason="no verify slot for [[slug]] in 3 tries"') ||
       !raceLine.includes('`noslot` (no verify slot came within `<slot_wait>`: the verifier never ran, no verdict) → re-run the re-verify with the lane held') ||
-      !raceLine.includes('a third consecutive `noslot` halts with `reason="RACE: no verify slot for the re-verify of [[slug]]"`') ||
+      !raceLine.includes('a third consecutive `noslot` appends `- <now> [[<slug>]] re-verify not run: no verify slot in 3 tries; the RACE waits for you` to the `## Race log`, then `free-lane --tasks <slug>`: no halt') ||
       !vsRow.startsWith('| `verify_slots` | `2` | machine-wide; `[defaults]` only') || !vsRow.includes('never stamped on a rollout note') ||
       !vsRow.includes('read by `verify-timeout`') || !vsRow.includes('becomes `--slots`') || !vsRow.includes('`args.verifySlot.slots`') ||
       !exit3.includes('reason="rollout settings refused"') || !exit3.includes('The lead writes nothing') ||
@@ -480,8 +494,11 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
       !s4.includes('"verifySlot": { "script": "<verify-timeout verifySlot.script>", "slots": 2 }') ||
       !s4.includes('adding `defaultBranch` or `verifySlot` to a run that started without it changes prompt bytes') ||
       !vsP.includes("The lead's `lead-integrate.py verify` (the Integration verify and the RACE re-verify) and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode) register as Integration waiters") ||
+      !vsP.includes('a run that has been at the head of the line for 15 minutes, which then waits beside them') ||
       !vsP.includes('before the verify slot frees') || !vsP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py status --slots <verify_slots>`') ||
-      !s7.includes('`reason="RACE: no verify slot for the re-verify of [[slug]]"`') || !s7.includes('`reason="no verify slot for [[slug]] in 3 tries"`') ||
+      !vsP.includes('verify-slot.py wait --log') || !vsP.includes('waits inside its turn') ||
+      !s7.includes("the Integration verify's third `noslot` (step 3, `verify-noslot`)") || !s7.includes("the RACE re-verify's third `noslot` (the RACE procedure") ||
+      s7.includes('`reason="RACE: no verify slot for the re-verify of [[slug]]"`') || s7.includes('`reason="no verify slot for [[slug]] in 3 tries"`') ||
       !s7.includes('`reconcile-rollout.py verify-timeout` exits 3 at an entry (§ 3: `reason="rollout settings refused"`') ||
       !s7.includes('stamping a key does not clear it')) {
       fails.push('verify-slots')
@@ -492,7 +509,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // plan`, read at that launch only (Restart routing's revise reuses step 1.2's) and passed verbatim. The integrate
   // call (step 3) carries no `plan`: its integrator reads the note's `## Approved plan` itself (p27-1), so § 4.5 names
   // `lead-integrate.py plan` once. No empty-plan literal is left; § 6 lists the row's `plan` (then p21-3's
-  // `reviewVerdicts`, the row's last key), reconcile's three outcomes and who reads the section back.
+  // `reviewVerdicts` and p29-9's `flakes`, the row's last key), reconcile's three outcomes and who reads the section back.
   const planHits = (section(skill, S45) ?? '').split('lead-integrate.py plan').length - 1
   const s6 = S(skill, S6)
   const VERBATIM = 'passed verbatim as the same JSON string, never retyped, summarised or truncated'
@@ -501,7 +518,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !st3.includes('trouble, landed, reviewHistory') || st3.includes('landed, plan') ||
     !st3.includes("It carries no `plan` (p27-1): the integrator reads the task note's `## Approved plan` itself") ||
     planHits !== 1 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
-    !s6.includes('gatedInputs, plan, reviewVerdicts }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
+    !s6.includes('gatedInputs, plan, reviewVerdicts, flakes }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
     !s6.includes('`""` removes that section') || !s6.includes('`null` or absent leaves it') ||
     !s6.includes("`lead-integrate.py plan` reads it back for §4.5 step 1.2's seeded revise")) {
     fails.push('approved-plan')
@@ -555,7 +572,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
 
   // auto-retry (p16-4, ADR 0033): step 1.2's **Automatic retry** shares sub-step 2's line after *Automatic descope*, so it
   // runs before the halt guard (halt-guard pins that order). Skipped under a pause; it reads `inputs … --repo`, halts on
-  // `autoRetryError` (§ 3's round-budget halt), acts only on `autoRetry: true`, runs the guarded verb with the two
+  // `autoRetryError` (no halt: H12, a § 6.5 (c) item, ADR 0048), acts only on `autoRetry: true`, runs the guarded verb with the two
   // assertions copied from that read (never resolved by hand), skips a plan-blocked key whose descope exited 3, notes an
   // `autoRetryAfter` and re-runs `next`. The halt guard ends a quota or infra cool-down `waiting` with its reason, which
   // § 6 allows on `waiting`, but only while no UNVERIFIED task is set aside: with one, the `stuck` goes to § 7 (its
@@ -575,17 +592,16 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   if (!s2t.includes('**Automatic retry (p16-4, ADR 0033).**') || !before(s2t, '**Automatic descope', '**Automatic retry') ||
     !ar.includes('Skip it when `paused` or `pauseRequested` is set') ||
     !ar.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --repo <repoPath>`') ||
-    !ar.includes("Its `autoRetryError` is § 3's round-budget halt") || !ar.includes('Act only on `autoRetry: true`') ||
+    !ar.includes("Its `autoRetryError` (an invalid round-budget stamp) is no halt: the task stays set aside, a (c) item through its `humanFix` H12 (ADR 0048).") || !ar.includes('Act only on `autoRetry: true`') ||
     !ar.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py auto-retry --tasks <slug> --rollout <rollout-note> --auto-retries <inputs.autoRetryBudget.autoRetries.value> --fingerprint <inputs.fingerprint>`') ||
     !ar.includes('both values copied from that `inputs`, never resolved by hand') ||
     !ar.includes('skipping a `plan-blocked` key whose descope exited 3 this session') ||
     !ar.includes('Note any `autoRetryAfter` (a quota or infra cool-down), with its `autoRetryClass`, for the halt guard') ||
     !ar.includes('each of its retries first waits a short cool-down, 15, then 60, then 240 minutes') ||
     !ar.includes('If any retry ran, re-run `next --running <the live slugs>`') ||
-    !guard.includes('A `stuck` while step 1.2 found an `autoRetryAfter` (a quota or infra cool-down), and no UNVERIFIED task among the set-aside entries, ends the turn `waiting` with `reason="<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>"`') ||
-    !guard.includes('With an UNVERIFIED task among them, a cool-down holds nothing back: the `stuck` goes to § 7 as usual') ||
+    !guard.includes('A `stuck` while step 1.2 found an `autoRetryAfter` (a quota or infra cool-down) ends the turn `waiting` with `reason="<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>"`') ||
+    !guard.includes('An UNVERIFIED task among them never stops a cool-down (ADR 0048, amending ADR 0033): its (b) item is still pushed from that turn (§ 6.5), and once nothing cools the `stuck` goes to § 7 with its `UNVERIFIED undecided` reason.') ||
     !guard.includes('A gate-pending task never stops a cool-down') ||
-    !guard.includes("with the item in the report's `Needs you:` block, § 6.5)") ||
     !s6all.includes('`reason` appears only on `halted`, on a hold and on a retry cool-down') ||
     !arRow.includes('resolved by `lead-integrate.py inputs` and `reconcile-rollout.py auto-retry` themselves (built-in `2`)') ||
     !arRow.includes('not passed to the engine') || !arRow.includes('`0` disables every automatic retry') ||
@@ -594,7 +610,7 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !s6all.includes('"[[task-q]] → auto-retry 1/2 (plan; feedback <sha>); restarting"') || !s6all.includes('Auto-retried: [[task-q]]') ||
     !s6all.includes('The `Auto-retried:` line lists every automatic retry this rollout has recorded (its `## Notes` `auto-retry:` lines)') ||
     !arLog.includes('the automatic retries copied from its `auto-retry:` lines') ||
-    !arStuck.includes("acted on only once step 1.2's *Automatic retry* re-entered nothing and found no cool-down, or found one with an UNVERIFIED task set aside") ||
+    !arStuck.includes("acted on only once step 1.2's *Automatic retry* re-entered nothing and step 1.5's *wait clauses* find no wait (no cool-down, whatever else is set aside, an UNVERIFIED task included") ||
     !never.includes("The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*)") ||
     !never.includes('a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair') ||
     !donts.includes('Never auto-retry unless `inputs` reports `autoRetry: true`, never pass a budget you resolved yourself') ||
@@ -673,7 +689,10 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // A restart waits on the ceiling alone (the round-1 respawn deadlock), so the paragraph says so, and step 1.2's
   // automatic retry restarts within the ceiling, never held by the Trickle. Step 1.5's halt guard turns a `stuck` over
   // a seeded revise step 1.2 held only for want of `slotLimit` into a Trickle wait, never § 7 (the round-1 false stuck),
-  // and step 1.2's seeded revise names that clause.
+  // and step 1.2's seeded revise names that clause. p29-8 (ADR 0049): while Away the Away cap takes the Trickle's place,
+  // so the paragraph gives its slotLimit and its `away cap:` hold that never halts (a meant wait, never Stalled), and
+  // steps 1.5 and 1.6, clause (7), § 6, § 8 and the driver name the Away-cap wait beside the Trickle wait. p28-3: the
+  // paragraph names the **Trickle claim** `next` takes for each start, and step 1.1 relays its `WARN: trickle claims` line.
   const trickleP = labelled(skill, 'The Trickle (Chorus ADR 0104).')
   const tr1 = subs[0]?.text ?? ''
   const tr6 = sub(/^End the turn `waiting`/)?.text ?? ''
@@ -690,11 +709,14 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !trickleP.includes('`WARN: ~/.config/thread/away.json …` line') || !trickleP.includes('The lead never reads or writes the file') ||
     !tr1.includes('A `WARN: ~/.config/thread/away.json` line on its stderr') ||
     !tr1.includes('is printed verbatim the first time this session sees that exact line') ||
+    !trickleP.includes('a **Trickle claim**') || !tr1.includes('A `WARN: trickle claims` line on its stderr') ||
+    // p28-5: the fair share keeps a freed place for a waiting rollout, and slotLimit leaves it out
+    !trickleP.includes('A **fair share** keeps a freed place') ||
     !tr6.includes('A `trickle:` hold (*The Trickle*) ends the turn `waiting` too') ||
     !tr6.includes('`reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`') ||
     !tr6.includes('a Trickle wait can stand with nothing of this rollout in flight') ||
     !hbPara.includes("a Trickle wait's `waiting` turn (§4.5 step 1.6)") ||
-    !hb7.includes('(a `trickle:` reason is no hold: the Trickle may have room now)') ||
+    !hb7.includes('(a `trickle:` or `away cap:` reason is no hold: the Trickle or the Away cap may have room now)') ||
     !waitingB.includes('or `next` holds a task on the Trickle (§4.5 step 1.6)') || !waitingB.includes("a Trickle wait's (`trickle: …`)") ||
     !hookP.includes('or a Trickle wait stands)') ||
     !drvDoc.includes('or a Trickle wait stands') || !drvBlock.includes('or a Trickle wait stands') ||
@@ -705,7 +727,178 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !trGuard.includes('A `stuck` while step 1.2 held an `autoRevise: true` seeded revise only for want of `slotLimit`') ||
     !trGuard.includes('ends the turn `waiting` with `reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`, never § 7') ||
     !trGuard.includes("Like `next`'s own `trickle:` hold, it waits whatever else is set aside") ||
-    !(S(skill, S7) ?? '').includes('and never while step 1.2 holds a seeded revise on the Trickle, a Trickle wait (§4.5 step 1.5)')) fails.push('trickle')
+    !(S(skill, S7) ?? '').includes('and no seeded revise held on the Trickle, a Trickle wait') ||
+    // the Away cap (p29-8)
+    !trickleP.includes('`min(ceiling, max(0, A − that count))` while Away') ||
+    !trickleP.includes('While Away the same row reads `away cap: <running>/<A> tasks running on this Mac`, and an `away cap:` hold never halts the rollout either') ||
+    !trickleP.includes('a rollout the Away cap alone holds is a meant wait, never Stalled (ADR 0048)') ||
+    !trGuard.includes('While Away (`trickle.away` true) it is an Away-cap wait, the same in every way but its reason, `reason="away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac"`') ||
+    !tr6.includes('An `away cap:` hold, or step 1.5\'s revise held while Away, ends the turn `waiting` the same way with `reason="away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac"`') ||
+    !waitingB.includes('or on the Away cap while Away') || !waitingB.includes("an Away-cap wait's (`away cap: …`)") ||
+    !hookP.includes('an Away-cap wait stands') || !hbPara.includes("a Trickle wait's `waiting` turn (§4.5 step 1.6), an Away-cap wait's included") ||
+    !trRev.includes('never halts on it (while Away, an Away-cap wait, the same)') ||
+    !drvDoc.includes('or an Away-cap wait does (on the machine-wide Away cap while Lachy is Away, ADR 0049)') ||
+    !drvBlock.includes('or an Away-cap wait does (on the Away cap, ')) fails.push('trickle')
+
+  // heat (p31-4, estate ADR 0009 d5): § 4.5's *The Heat hold* paragraph names slotLimit 0 Away included, the restart on
+  // the ceiling alone, the `heat:` reason that never halts, exit 76 as no verdict and its spec; step 1.2's revise held at
+  // heat is a Heat hold; step 1.5's heat clause waits with its reason=, never § 7, ahead of the Trickle's; step 1.6 ends
+  // the turn `waiting` on a `heat:` hold, its reason before the Trickle's; step 3 and the RACE procedure re-run on `heat`
+  // and never count it toward the third-`noslot` halt; step 5's completion verify lists `heat` as no verdict that never
+  // counts; *The background verify command* reads `heat` as no verdict with W covering the heat; *Verify slots* names the
+  // hold; § 5's Heartbeat paragraph covers the waiting turn and clause (7) reads a `heat:` reason as no hold (beside the
+  // pinned trickle parenthetical); § 6's waiting bullet and reason list, § 7's stuck bullet, § 8's Stop-hook paragraph
+  // and the driver's docstring and block reason name it.
+  {
+    const heatP = labelled(skill, 'The Heat hold (estate ADR 0009 d5).')
+    const st5 = step(skill, 5)
+    const vsP = labelled(skill, 'Verify slots')
+    const reasonL = collapse(s6raw.split('\n').find((l) => l.startsWith('`reason` appears only on')) ?? '')
+    if (!heatP.includes('`slotLimit` 0, Away included') || !heatP.includes('a restart still waits on the ceiling alone') ||
+      !heatP.includes('`heat: the Mac is hot (<name>)`') || !heatP.includes('a `heat:` hold never halts the rollout') ||
+      !heatP.includes('exit 76: no verdict, never red') || !heatP.includes('A running call is never stopped') ||
+      !heatP.includes('`skills/execute/away.md` § Heat holds the spec') ||
+      !trRev.includes('such a revise is a Heat hold instead, the same wait') ||
+      !trGuard.includes('is a Heat hold, and takes the place of the Trickle clause that follows') ||
+      !trGuard.includes('ends the turn `waiting` with `reason="heat: the Mac is hot (<heat.name>)"`, never § 7, whatever else is set aside') ||
+      !tr6.includes('A `heat:` hold (*The Heat hold*) ends the turn `waiting` the same way') ||
+      !tr6.includes("and it comes before the Trickle's, since a hot Mac holds every row the Trickle would") ||
+      !st3.includes('- `heat` (exit 76: the Mac was too hot for the whole `<slot_wait>`') ||
+      !st3.includes('a `heat` never counts toward the third-`noslot` halt, nor resets its count') ||
+      !raceLine.includes('`heat` (exit 76: the Mac was too hot for the whole `<slot_wait>`, *The Heat hold*: no verdict) → re-run the re-verify the same way with the lane held, never counted toward those three') ||
+      !st5.includes('`heat`: the Mac was too hot to run the suite within the slot wait, a Heat hold') ||
+      !st5.includes('a `stopped` or `heat` one never counts') ||
+      !verifyP.includes('So is `heat` (exit 76, *The Heat hold*)') ||
+      !verifyP.includes('every slot wait, heat hold and heat-stopped run counts against `<slot_wait>`') ||
+      !vsP.includes('**The Heat hold:** at heavy no verify slot is free') ||
+      !hbPara.includes("A Heat hold's `waiting` turn (§4.5 step 1.6, *The Heat hold*) is covered the same way") ||
+      !hb7.includes('and a `heat:` reason no hold either (the Mac may have cooled)') ||
+      !waitingB.includes('or a Heat hold stands (§4.5 step 1.6, *The Heat hold*)') || !waitingB.includes("a Heat hold's (`heat: …`)") ||
+      !reasonL.includes('and on a Heat hold (§4.5 step 1.6)') ||
+      !(S(skill, S7) ?? '').includes('or on the Heat hold, the same wait') ||
+      !hookP.includes("a Heat hold's `waiting` included") ||
+      !drvDoc.includes('or a Heat hold stands (`heat: …`') || !drvBlock.includes('or a Heat hold stands (`heat: …`, the "')) {
+      fails.push('heat')
+    }
+  }
+
+  // skip-path (ADR 0045, p29-3): step 3's prepare carries the verifier and bootstrap, single-quoted; a `skip` bullet after
+  // set-aside re-checks (§ 2.5 then § 2.6), pushes M, logs (M, mainSha) and goes to step 4 with no verifier, a refused
+  // push undoes and integrates with trouble []; the lead prints inert.why (an inert check error included); the exit-3 row
+  // names the skip and § 3's verifier row the prepare flag. prepare runs with the Bash tool's 600000 ms timeout, so the
+  // default 120 s one never cuts its Inert proof (PROOF_BUDGET_S, 180 s; p34-2).
+  const skipB = st3.slice(st3.indexOf('**`skip`**'), st3.indexOf('**exit 8**'))
+  const verifierRow = (section(skill, S3) ?? '').split('\n').find((l) => l.startsWith('| `verifier` |')) ?? ''
+  if (!st3.includes("lead-integrate.py prepare --repo <repoPath> --slug <slug> --default <defaultBranch> --note <task note> --verifier '<verifier>' --bootstrap '<env_bootstrap>'") ||
+    !st3.includes("run `prepare` with the Bash tool's `timeout: 600000`") ||
+    st3.indexOf('**`set-aside`**') < 0 || st3.indexOf('**`skip`**') < st3.indexOf('**`set-aside`**') ||
+    !skipB.includes('no verifier runs') || !before(skipB, 'Re-run § 2.5', 'then § 2.6') ||
+    !before(skipB, 'then § 2.6', 'lead-integrate.py push --repo <repoPath> --slug <slug> --head M') ||
+    !before(skipB, '--head M`', 'log-integration --tasks <slug> --started "$S" --anchor <anchor> --head M --base <mainSha>') ||
+    !before(skipB, 'log-integration', 'then step 4 with (M, `mainSha`)') ||
+    !skipB.includes('Push refused (exit 1): `undo') || !skipB.includes('then the integrate call with `trouble []`') ||
+    !skipB.includes('Print `inert.why`') || !st3.includes('print `inert.why` whenever the route is `verify` or `skip` (an `inert check error: …` included') ||
+    !(rows['3'] ?? '').includes('it may route `skip`') || !verifierRow.includes('`lead-integrate.py prepare --verifier`')) fails.push('skip-path')
+
+  // last-starts (p28-2, Chorus ADR 0104 d4): § 4.5's *The last starts* paragraph says `next` holds the start and
+  // reports `lastStarts`, the lead never reads the file, the hold never halts and restarts are exempt, pointing at
+  // away.md; step 1.6 waits on a `last start:` hold with its reason=; § 5's Heartbeat paragraph covers that waiting turn
+  // and clause (7) reads its reason as no hold; § 6's waiting bullet and reason list, § 8's Stop-hook paragraph and the
+  // driver's docstring and block reason name it. Each site is its own clause, so one control per site.
+  const lastP = labelled(skill, 'The last starts (Chorus ADR 0104 d4).')
+  if (!lastP.includes('`next` holds the start itself and reports `lastStarts`') || !lastP.includes('the lead never reads the file or the history') ||
+    !lastP.includes('A `last start:` hold never halts the rollout: the turn ends `waiting` (step 1.6)') ||
+    !lastP.includes('Restarts are exempt, a set-aside task\'s hand-back and a seeded revise included') ||
+    !lastP.includes('`skills/execute/away.md` § The last starts and § The night record hold the spec') ||
+    !tr6.includes('A `last start:` hold (*The last starts*) ends the turn `waiting` too') ||
+    !tr6.includes('`reason="last start: held until the Morning at <trickle.morning>"`') ||
+    !hbPara.includes("It covers a last-starts wait's `waiting` turn (§4.5 step 1.6) too.") ||
+    !hb7.includes('A `last start:` reason is no hold either (the Morning may have come)') ||
+    !waitingB.includes('or `next` holds a task on the last starts (§4.5 step 1.6)') ||
+    !waitingB.includes("a last-starts wait's (`last start: …`)") ||
+    !s6all.includes('and on a last-starts wait (§4.5 step 1.6)') ||
+    !hookP.includes('a last-starts wait stands,') ||
+    !drvDoc.includes('or a last-starts wait stands (`next` holds a task on the last starts') ||
+    !drvBlock.includes('or a last-starts wait stands (`next` holds a "') || !drvBlock.includes('reason=\\"last start: …\\"')) fails.push('last-starts')
+
+  // hold (p30-3; vault-grammar § Hold until): `next` reads a PR hold itself, so the lead never asks whether one stands.
+  // Step 1.1 prints each cleared hold and makes a hold that waits on Lachy an (f) item; a rollout hold skips step 1.2
+  // whole, as a pause does (every part of it launches a call or re-queues a task), Integration carrying on, and a
+  // set-aside with its own hold is skipped the same way; step 1.5's `held` goes to § 7 only when Lachy must act (a
+  // rollout hold waiting on him, or no hold waiting on a merge), else ends `waiting` on `held until <pr> merges`; step
+  // 1.6 and § 5 register the heartbeat for that wait, and clause (7) reads its reason as no hold, so each tick re-runs
+  // `next`, which sees the merge; § 6's waiting bullet, § 7, § 8 and the driver's docstring and block reason name it.
+  const hoStand = sub(/^\*\*Standing approval \(ADR 0034\), first\.\*\*/)?.text ?? ''
+  const hookP8 = collapse(skill.split('\n').find((l) => l.startsWith('**The Stop-hook driver**')) ?? '')
+  const hbCron8 = collapse(skill.split('\n').find((l) => l.startsWith('**The heartbeat cron**')) ?? '')
+  const s7c = S(skill, S7)
+  if (!tr1.includes('Its `holdUntil` (a PR hold, `skills/_shared/vault-grammar.md` § Hold until) is read now too') ||
+    !tr1.includes('print `hold released: <pr> merged; hold_until cleared on [[<note>]]`') ||
+    !hoStand.includes('**A PR hold skips this whole step.** While any `holdUntil` entry with `scope: rollout` reads `held: true`, none of step 1.2 runs, as under a pause') ||
+    !hoStand.includes('Integration of the tasks that already have a PR carries on (sub-step 4)') ||
+    !hoStand.includes('A `setAside` entry that carries its own `holdUntil` (a task-scope hold) is skipped by every part of this step in the same way') ||
+    !hoStand.includes('`next` reads `halt: held`, never `stuck`') ||
+    !trGuard.includes('`held` → a PR hold') ||
+    !trGuard.includes('when a held entry with `scope: rollout` has `waits: you`, or no held entry has `waits: merge`, go to § 7 with `reason="hold_until needs you on [[<note>]]: <pr> closed unmerged"`') ||
+    !trGuard.includes('otherwise end the turn `waiting` with `reason="held until <pr> merges"` (the first held entry with `waits: merge`), never § 7') ||
+    !tr6.includes("A PR hold's wait (step 1.5's `held until …`) can stand with nothing in flight too: it registers the heartbeat, and each tick re-enters *Cold resume* through clause (7)") ||
+    !hbPara.includes("a PR hold's `waiting` turn (§4.5 step 1.5)") ||
+    !hb7.includes('nor is a `held until` reason (a PR hold: the PR may have merged, and only `next` reads it)') ||
+    !waitingB.includes('or a PR hold waits on its merge (`next` reports `halt: held`, §4.5 step 1.5)') ||
+    !waitingB.includes("a PR hold's (`held until …`)") ||
+    !s7c.includes('- `next` reports `halt: held` with a hold that waits on Lachy') ||
+    !s7c.includes('A **PR hold** that can release itself is not a halt: it ends `waiting`') ||
+    !hookP8.includes('a merge hold is in flight, a PR hold waits on its merge,') ||
+    !hbCron8.includes("as it does under a PR hold's wait") ||
+    !drvDoc.includes('or a PR hold waits on its merge (`next` reports `halt: held`, reason="held until …", execute §4.5 step 1.5') ||
+    !drvBlock.includes('a PR hold waits on its merge (`next` reports `halt: held`, ') ||
+    !drvBlock.includes('with its reason=\\"held until …\\", §4.5 step 1.5)')) fails.push('hold')
+  // race-revert (ADR 0046): a RACE red after the Flake check is reverted on main through a revert PR merged only through
+  // merge-task. Four Race-log lines and no merge-task text; the guard's flags; the exit-2 and exit-8 carve-outs; `revert
+  // did not land:` only for revert's 1 or conflict, merge-task's 1 or 4 and a --gated decline; merge-task's 5 is landed;
+  // the tail's order, copied verbatim; Merge hold's revert release and heartbeat clause (6)'s route to it.
+  const rv = st4.includes('**The RACE revert**') ? st4.slice(st4.indexOf('**The RACE revert**')) : ''
+  const rvItem = (label) => { const i = rv.indexOf(label); if (i < 0) return ''; const j = rv.indexOf(' - **', i + label.length); return rv.slice(i, j < 0 ? undefined : j) }
+  const rv5 = rvItem('- **5** →')
+  const rvTail = rv.slice(rv.indexOf('3. **The landing tail**'), rv.indexOf('4. **Did not land.**'))
+  const rvNot = rv.slice(rv.indexOf('4. **Did not land.**'))
+  const hbLine = skill.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
+  if (!rv.includes("Its only `## Race log` lines are `revert started:`, `revert opened:`, `reverted on main:` and `revert did not land:`") ||
+    !rv.includes('No merge-task text is ever appended for a revert PR, its `RACE: PR #R merged as …` line included') ||
+    !rv.includes('(M the merge commit; never appended twice)') ||
+    !rv.includes('/scripts/lead-integrate.py revert --repo <repoPath> --slug <slug> --default <B> --merge <M> --note <task note> --rollout <rollout-note> --verifier \'<verifier>\' --bootstrap \'<env_bootstrap>\'`') ||
+    !rv.includes('never merges and never force-pushes') ||
+    !rvItem('- **2 whose stderr line starts `engine-snapshot:`**').includes('no line, no halt') ||
+    !rvItem('- **2, any other**').includes('the revert stays pending') || !rvItem('- **8** →').includes('the revert stays pending') ||
+    !rvItem('- **1, or route `conflict`**').includes('*Did not land*') || !rvItem('- **1 or 4**').includes('*Did not land*') ||
+    !rv5.includes('Its printed `RACE: PR #R merged as …` line is **not** appended to the `## Race log`') ||
+    !rv5.includes('`revert` again (route `reverted`), then *The landing tail*') || !rv5.includes('Never `revert did not land:`') ||
+    /\*Did not land\*|Append `- <now>/.test(rv5) || /\*Did not land\*/.test(rvItem('- **2, any other**')) ||
+    !rvTail.includes('in this order: append `tail.line` only when `raceLog.reverted` is null') ||
+    !(rvTail.indexOf('tail.line') < rvTail.indexOf('--hold race --state end') && rvTail.indexOf('--hold race --state end') < rvTail.indexOf('set-aside --note')) ||
+    !rvTail.includes('`tail.line` and `tail.reason` are copied verbatim') ||
+    !rvNot.includes("It is written only for `revert`'s exit 1 or route `conflict`, merge-task's 1 or 4 on the revert PR, and a `--gated` decline of it; never for an exit 2, an 8 or a merge-task 5") ||
+    !hold.includes('A revert PR\'s hold (its reason names `the revert of [[<slug>]]`') || !hold.includes('`lead-integrate.py revert` with the RACE revert\'s flags') ||
+    !hold.includes("never this session's pair or the `## Integration log`'s last line, which is the task's own merged PR") ||
+    !hold.includes('Exit 3 means its `revert` again, never `prepare`') ||
+    !hold.includes("Under `--gated` a decline is the revert's *Did not land*, with `merge declined at the --gated hold`, never a set-aside row") ||
+    !hbLine.includes("for a revert PR's hold (its reason names `the revert of [[<slug>]]`), *Merge hold*'s revert release")) {
+    fails.push('race-revert')
+  }
+
+  // main-red (ADR 0046): a revert that did not land holds the whole rollout at once and lastingly: step 1.1's mainRed
+  // halt, § 7's bullet, Did not land's lasting halt, Room stop item 9 and away.md's whole-rollout holds.
+  const s7m = collapse(skill.split('\n').find((l) => l.startsWith('- a RACE revert does not land, or `next` reports `mainRed`')) ?? '')
+  if (!s1.includes('Its `mainRed` is read second: while it is non-empty, halt at once (§ 7) with `reason="RACE: the revert of [[<slug>]] did not land: <why>"`') ||
+    !s1.includes('and launch nothing, whatever the lane or live calls say: no seeded revise, automatic retry, automatic descope or recorded-answer hand-back') ||
+    !s1.includes('Only his `RACE decided:` line, through `/thread:repair`, lifts it, so every entry halts here again until then') ||
+    !s7m.includes('a whole-rollout halt until Lachy\'s `RACE decided:` line') ||
+    !rvNot.includes('It is a whole-rollout halt, and a lasting one') ||
+    !collapse(skill).includes('That halt is a whole-rollout hold\'s, as is a `mainRed` halt, which resumes nothing either') ||
+    !(away ?? '').includes("A whole-rollout (bare) git-env hold, or a main-red hold (`next`'s `mainRed`, a RACE revert that did not land), replaces every hold") ||
+    !(away ?? '').includes('A whole-rollout git-env, main-red or pause hold writes none.')) {
+    fails.push('main-red')
+  }
   return [...new Set(fails)]
 }
 
@@ -719,7 +912,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
-  'verify-slots', 'clone-root', 'trickle']
+  'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts', 'hold', 'heat', 'race-revert', 'main-red']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -890,7 +1083,7 @@ test('control: a double-quoted verifier on the verify line fails verify-bound', 
 })
 
 test('control: a double-quoted RACE re-verify fails verify-bound', () => {
-  only(sk("--bootstrap '<env_bootstrap>' --verifier '<verifier>'` in the background", '--bootstrap "<env_bootstrap>" --verifier "<verifier>"` in the background'),
+  only(sk("--bootstrap '<env_bootstrap>' --verifier '<verifier>' --diff-base '<the merge commit>^1'", '--bootstrap "<env_bootstrap>" --verifier "<verifier>" --diff-base \'<the merge commit>^1\''),
     'verify-bound', 'dq race')
 })
 
@@ -960,9 +1153,28 @@ test('control: no close-out case in § 2 fails lineage', () => {
   only(sk('otherwise → print "close-out interrupted: `/thread:repair [[this]]`"', 'otherwise → proceed'), 'lineage', 'no close-out')
 })
 
-test('control: step 1.1 without the RACE halt fails race-hold', () => {
-  only(sk(' Its `raceHold` is read now: if it names a `RACE` task and the lane is free, halt (§ 7) with `reason="RACE undecided: [[<slug>]]"`.', ''),
-    'race-hold', 'no step 1.1 halt')
+test('control: step 1.5 without the race halt, or step 1.4 without its pending revert, fails race-hold', () => {
+  only(sk('`race` → § 7 with `reason="RACE undecided: [[<slug>]]"` (`laneHold`', '`race` → wait (`laneHold`'), 'race-hold', 'no step 1.5 halt')
+  only(sk(" Else a `race` entry with `revert: true` is the lane's first work,", ' Else'), 'race-hold', 'no pending revert')
+  only(sk(', while starts, seeded revises and automatic retries go on,', ', while nothing starts,'), 'race-hold', 'a RACE that holds every start')
+})
+
+test('control: a 5 that does not land, a 2 that does, the row first, the RACE line appended, or the Merge hold reverted, fails race-revert', () => {
+  const r5 = real.skill.split('\n').find((l) => l.startsWith('      - **5** →'))
+  only(sk(r5, '      - **5** → *Did not land*, with merge-task\'s text.'), 'race-revert', '5 → did not land')
+  only(sk("      - **2, any other** → § 7 with `reason=\"lead-integrate.py failed on [[slug]]\"`; no line, and the revert stays pending.",
+    '      - **2, any other** → *Did not land*, with its text.'), 'race-revert', '2 → did not land')
+  only(sk('in this order: append `tail.line` only when `raceLog.reverted` is null; then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hold --tasks <slug> --hold race --state end`; last, the set-aside row,',
+    'in this order: the set-aside row first; then append `tail.line` only when `raceLog.reverted` is null; then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hold --tasks <slug> --hold race --state end`; the row,'),
+    'race-revert', 'the row first')
+  only(sk('so merge-task is never re-called for PR #R. Its printed', 'so merge-task is never re-called for PR #R. Append `- <now> [[<slug>]] <the script\'s RACE line>`. Its printed'), 'race-revert', 'the RACE line appended')
+  only(sk("Under `--gated` a decline is the revert's *Did not land*, with `merge declined at the --gated hold`, never a set-aside row", 'Under `--gated` a decline sets the task aside'), 'race-revert', 'the decline sets it aside')
+  only(sk("never this session's pair or the `## Integration log`'s last line, which is the task's own merged PR", "the `## Integration log`'s last line"), 'race-revert', 'the task\'s pair')
+})
+
+test('control: a main-red halt once the lane is free, or one that still launches seeded revises, fails main-red', () => {
+  only(sk('Its `mainRed` is read second: while it is non-empty, halt at once (§ 7)', 'Its `mainRed` is read second: while it is non-empty, halt once the lane is free (§ 7)'), 'main-red', 'once the lane is free')
+  only(sk(' no seeded revise, automatic retry, automatic descope or recorded-answer hand-back;', ''), 'main-red', 'seeded revises launch')
 })
 
 test('control: a cold resume that halts on exit 3 fails race-hold', () => {
@@ -998,7 +1210,7 @@ test('control: a verify paragraph back on (<verify_timeout> + 600) × 1000 fails
 })
 
 test('control: a verify-timeout JSON without slotWait fails verify-timeout', () => {
-  only(sk('"harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlots": <verify_slots>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`:', '"harnessTimeoutMs": <harnessTimeoutMs>}`:'),
+  only(sk('"harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`:', '"harnessTimeoutMs": <harnessTimeoutMs>}`:'),
     'verify-timeout', 'two keys')
 })
 
@@ -1013,9 +1225,9 @@ test('control: a noslot read as green fails verify-slots', () => {
     'read it as green): push as on rc 0.'), 'verify-slots', 'noslot green')
 })
 
-test('control: step 3 without the third-noslot halt fails verify-slots', () => {
-  only(sk(' A third consecutive `noslot` on this verify: `undo`, then halt with `reason="no verify slot for [[slug]] in 3 tries"` (a verify slot held that long is a hung holder: `verify-slot.py status` names it).', ''),
-    'verify-slots', 'no third-noslot halt')
+test('control: step 3 without the third-noslot Lane hold fails verify-slots', () => {
+  only(sk(" A third consecutive `noslot` on this verify: `undo`, then the *Lane hold* (`--cause verify-noslot`, the verify log's `no verify slot` line the evidence; ADR 0048: a verify slot held that long is a hung holder that reaches every merge, and `verify-slot.py status` names it), never a halt.", ''),
+    'verify-slots', 'no third-noslot Lane hold')
 })
 
 test('control: § 3 without the "does not clear" remedy fails verify-slots', () => {
@@ -1025,6 +1237,16 @@ test('control: § 3 without the "does not clear" remedy fails verify-slots', () 
 
 test('control: a priority sentence without the integrator fails verify-slots', () => {
   only(sk(" and the integrate call's agent verifier (`run --priority`, rendered only by the engine's integrate mode)", ''), 'verify-slots', 'no integrator')
+})
+
+test("control: the Integration priority without the head of the line's exception (p34-1) fails verify-slots", () => {
+  only(sk(', except a run that has been at the head of the line for 15 minutes, which then waits beside them (`verify-slot.py` contract 5)', ''),
+    'verify-slots', 'no head-of-line exception')
+})
+
+test('control: Verify slots without the in-turn wait (p31-3) fails verify-slots', () => {
+  const p = real.skill.split('**An agent waits for its verdict** (p31-3)')[1].split(' **Every suite is recorded**')[0]
+  only(sk(' **An agent waits for its verdict** (p31-3)' + p, ''), 'verify-slots', 'no in-turn wait')
 })
 
 test('control: a verify_timeout check read as each task starts fails verify-timeout', () => {
@@ -1140,20 +1362,17 @@ test('control: an Automatic retry before the Automatic descope fails auto-retry'
   const retry = l.slice(l.indexOf(' **Automatic retry'))
   only(sk(l, l.replace(desc, '\u0000').replace(retry, '').replace('\u0000', retry.trim() + ' ' + desc)), 'auto-retry', 'retry first')
 })
-test('control: an Automatic retry without the autoRetryError halt fails auto-retry', () => {
-  only(sk(" Its `autoRetryError` is § 3's round-budget halt.", ''), 'auto-retry', 'no error halt')
+test('control: an Automatic retry without the autoRetryError (c) item fails auto-retry', () => {
+  only(sk(" Its `autoRetryError` (an invalid round-budget stamp) is no halt: the task stays set aside, a (c) item through its `humanFix` H12 (ADR 0048).", ''), 'auto-retry', 'no error item')
 })
 test('control: an Automatic retry that re-judges a descope refusal fails auto-retry', () => {
   only(sk(', skipping a `plan-blocked` key whose descope exited 3 this session', ''), 'auto-retry', 'descope exit 3')
 })
 test('control: a cool-down that halts fails auto-retry', () => {
-  only(sk('set-aside entries, ends the turn `waiting` with `reason="<autoRetryClass> cool-down', 'set-aside entries, halts with `reason="<autoRetryClass> cool-down'), 'auto-retry', 'cool-down halts')
-})
-test('control: a cool-down that waits over an UNVERIFIED task fails auto-retry', () => {
-  only(sk(', and no UNVERIFIED task among the set-aside entries,', ''), 'auto-retry', 'cool-down hides an UNVERIFIED')
+  only(sk('(a quota or infra cool-down) ends the turn `waiting` with `reason="<autoRetryClass> cool-down', '(a quota or infra cool-down) halts with `reason="<autoRetryClass> cool-down'), 'auto-retry', 'cool-down halts')
 })
 test("control: a cool-down that never routes an UNVERIFIED to § 7 fails auto-retry", () => {
-  only(sk(" With an UNVERIFIED task among them, a cool-down holds nothing back: the `stuck` goes to § 7 as usual (its `UNVERIFIED undecided` reason, with the item in the report's `Needs you:` block, § 6.5), since a human is needed anyway, and the cooling task retries at the re-invocation after it.", ''),
+  only(sk(" An UNVERIFIED task among them never stops a cool-down (ADR 0048, amending ADR 0033): its (b) item is still pushed from that turn (§ 6.5), and once nothing cools the `stuck` goes to § 7 with its `UNVERIFIED undecided` reason.", ''),
     'auto-retry', 'no § 7 route')
 })
 test('control: a gate-pending task that stops a cool-down fails auto-retry', () => {
@@ -1178,7 +1397,7 @@ test('control: a Completion log that drops the auto-retry lines fails auto-retry
   only(sk(' the automatic retries copied from its `auto-retry:` lines (task, count, stage, feedback sha, any raise),', ''), 'auto-retry', 'no log copy')
 })
 test('control: a § 7 stuck halt that ignores the retries fails auto-retry', () => {
-  only(sk(", acted on only once step 1.2's *Automatic retry* re-entered nothing and found no cool-down, or found one with an UNVERIFIED task set aside, which a cool-down never holds back, §4.5 step 1.5", ''), 'auto-retry', 'stuck early')
+  only(sk(" and step 1.5's *wait clauses* find no wait (no cool-down, whatever else is set aside, an UNVERIFIED task included,", ' ('), 'auto-retry', 'stuck early')
 })
 test('control: § 8 without the auto-retry sentence fails auto-retry', () => {
   only(sk(" The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*), a guarded deterministic verb with its own budget: a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair.", ''),
@@ -1233,26 +1452,54 @@ test('control: § 4.5 without the Trickle at any one site fails trickle', () => 
     'trickle', 'no WARN relay in step 1.1')
   only(sk(' A `trickle:` hold (*The Trickle*) ends the turn `waiting` too,', ' A `trickle:` hold (*The Trickle*) halts the turn,'), 'trickle', 'no Trickle wait in step 1.6')
   only(sk('`reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`', '`reason="trickle"`'), 'trickle', 'no Trickle reason=')
-  only(sk(" and a Trickle wait's `waiting` turn (§4.5 step 1.6).", '.'), 'trickle', 'heartbeat paragraph without the Trickle wait')
-  only(sk(' (a `trickle:` reason is no hold: the Trickle may have room now)', ''), 'trickle', 'clause (7) without its parenthetical')
-  only(sk(', or `next` holds a task on the Trickle (§4.5 step 1.6) or step 1.2 holds a seeded revise on it (§4.5 step 1.5); nothing to do until', '; nothing to do until'),
+  only(sk(" and a Trickle wait's `waiting` turn (§4.5 step 1.6), an Away-cap wait's included.", '.'), 'trickle', 'heartbeat paragraph without the Trickle wait')
+  only(sk(' (a `trickle:` or `away cap:` reason is no hold: the Trickle or the Away cap may have room now)', ''), 'trickle', 'clause (7) without its parenthetical')
+  only(sk(', or `next` holds a task on the Trickle (§4.5 step 1.6) or step 1.2 holds a seeded revise on it (§4.5 step 1.5), or on the Away cap while Away; nothing to do until', '; nothing to do until'),
     'trickle', "§ 6's waiting bullet without it")
   only(sk(', a retry cool-down is pending, or a Trickle wait stands)', ', or a retry cool-down is pending)'), 'trickle', "§ 8's Stop-hook paragraph without it")
+  // p28-3: the Trickle claim and its WARN relay
+  only(sk(' (a **Trickle claim**)', ''), 'trickle', 'no Trickle claim named')
+  only(sk(' A `WARN: trickle claims` line on its stderr (`skills/execute/away.md` § The Trickle, *Trickle claims*) is relayed the same way.', ''),
+    'trickle', 'no claims WARN relay in step 1.1')
+  // p28-5: the fair share
+  only(sk(' A **fair share** keeps a freed place for the waiting rollout', ' A waiting rollout gets no freed place'), 'trickle', 'no fair share named')
 })
 test('control: a restart held by the Trickle, or a Trickle-held revise that halts stuck, fails trickle', () => {
   only(sk(' A restart waits on the ceiling alone:', ' A restart waits on `slotLimit` too:'), 'trickle', 'a restart held by the Trickle')
   only(sk('counting every `in_progress` task of this rollout, live or stalled, as every other lead counts them. A restart',
     'counting its live tasks only. A restart'), 'trickle', 'stalled tasks uncounted')
   only(sk('within the ceiling like any restart, never held by the Trickle', 'within `slotLimit`'), 'trickle', 'an automatic retry held by the Trickle')
-  only(sk(' A revise held only by `slotLimit`, below `ceiling`, is a Trickle wait: the halt guard (step 1.5) never halts on it.', ''),
+  only(sk(' A revise held only by `slotLimit`, below `ceiling`, is a Trickle wait: the halt guard (step 1.5) never halts on it (while Away, an Away-cap wait, the same).', ''),
     'trickle', 'step 1.2 without the pointer to the guard')
-  only(sk(', never § 7: the revise launches once the Mac has room', ', then § 7: the revise launches once the Mac has room'), 'trickle', 'the guard halts')
+  only(sk(', never § 7: `next` counts the revise in this rollout', ', then § 7: `next` counts the revise in this rollout'), 'trickle', 'the guard halts')
   const guard = real.skill.split('\n').find((l) => l.includes('**Halt guard (last).**'))
   const clause = guard.slice(guard.indexOf(' A `stuck` while step 1.2 held an `autoRevise: true`'))
   only(sk(clause, ''), 'trickle', 'no Trickle clause in the halt guard')
   only(sk("Like `next`'s own `trickle:` hold, it waits whatever else is set aside", 'It waits unless an UNVERIFIED task is set aside'),
     'trickle', 'an UNVERIFIED task halts the Trickle wait')
-  only(sk(', and never while step 1.2 holds a seeded revise on the Trickle, a Trickle wait (§4.5 step 1.5)', ''), 'trickle', "§ 7's stuck halts over a Trickle-held revise")
+  only(sk(', and no seeded revise held on the Trickle, a Trickle wait', ''), 'trickle', "§ 7's stuck halts over a Trickle-held revise")
+})
+test('control: § 4.5 without the Away cap at any one site fails trickle', () => {
+  only(sk(', `min(ceiling, max(0, A − that count))` while Away', ''), 'trickle', 'no Away-cap slotLimit')
+  only(sk(' While Away the same row reads `away cap: <running>/<A> tasks running on this Mac`, and an `away cap:` hold never halts the rollout either',
+    ' While Away the same row reads `away cap: <running>/<A> tasks running on this Mac`, and an `away cap:` hold halts the rollout `stuck`'), 'trickle', 'an Away-cap hold halts')
+  only(sk('a rollout the Away cap alone holds is a meant wait, never Stalled (ADR 0048)', 'a rollout the Away cap alone holds is Stalled'), 'trickle', 'Stalled')
+  only(sk(' While Away (`trickle.away` true) it is an Away-cap wait, the same in every way but its reason, `reason="away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac"`.', ''),
+    'trickle', 'the halt guard without the Away-cap wait')
+  only(sk(' An `away cap:` hold, or step 1.5\'s revise held while Away, ends the turn `waiting` the same way with', ' An `away cap:` hold, or step 1.5\'s revise held while Away, halts the turn with'),
+    'trickle', 'no Away-cap wait in step 1.6')
+  only(sk(' (a `trickle:` or `away cap:` reason is no hold: the Trickle or the Away cap may have room now)', ' (a `trickle:` reason is no hold: the Trickle may have room now)'),
+    'trickle', 'clause (7) holding on an Away-cap reason')
+  only(sk(', or on the Away cap while Away; nothing to do until', '; nothing to do until'), 'trickle', "§ 6's waiting bullet without the Away cap")
+  only(sk(", an Away-cap wait's (`away cap: …`) and the completion verify's", ' and the completion verify\'s'), 'trickle', "§ 6's reason list without the Away cap")
+  only(sk(' an Away-cap wait stands, a retry cool-down is pending,', ' a retry cool-down is pending,'), 'trickle', "§ 8's Stop-hook paragraph without the Away cap")
+  only(sk(" (§4.5 step 1.6), an Away-cap wait's included.", ' (§4.5 step 1.6).'), 'trickle', 'heartbeat paragraph without the Away-cap wait')
+  only(sk(' never halts on it (while Away, an Away-cap wait, the same).', ' never halts on it.'), 'trickle', 'step 1.2 without the Away-cap wait')
+})
+test("control: the driver's docstring or block reason without the Away-cap wait fails trickle", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv(' or an Away-cap\n              wait does (on the machine-wide Away cap while Lachy is Away,\n              ADR 0049)', ''), 'trickle', 'docstring')
+  only(drv(' or an Away-cap wait does (on the Away cap, "\n            "with its reason=\\"away cap: …\\")', ''), 'trickle', 'block reason')
 })
 test("control: the driver's docstring or block reason without the Trickle wait fails trickle", () => {
   const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
@@ -1260,7 +1507,185 @@ test("control: the driver's docstring or block reason without the Trickle wait f
   only(drv('or a Trickle wait stands (`next` holds a task on the "', 'or (`next` holds a task on the "'), 'trickle', 'block reason')
 })
 
-test('the rules are all named (36) and each has a control', () => {
-  assert.equal(RULES.length, 36)
+// skip-path (ADR 0045, p29-3)
+test('control: step 3 without the skip bullet, its order, its undo or its why print fails skip-path', () => {
+  const bullet = real.skill.split('\n').find((l) => l.startsWith('   - **`skip`**'))
+  only(sk(bullet + '\n', ''), 'skip-path', 'no skip bullet')
+  only(sk(" --verifier '<verifier>' --bootstrap '<env_bootstrap>'` (§ 3's", "` (§ 3's"), 'skip-path', 'prepare without the verifier')
+  only(sk("; run `prepare` with the Bash tool's `timeout: 600000`: its Inert proof may run up to PROOF_BUDGET_S (180 s), and that deadline ends it first, so it always prints its JSON", ''),
+    'skip-path', 'prepare with the default Bash timeout')
+  only(sk('Re-run § 2.5, then § 2.6 (the push re-check, *Landing-register re-check*), then `python3',
+    'Then `python3'), 'skip-path', 'no re-check before the push')
+  only(sk('Push refused (exit 1): `undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, then the integrate call with `trouble []`.',
+    'Push refused (exit 1): halt.'), 'skip-path', 'a refused push halts')
+  only(sk(' Print `inert.why`. Re-run', ' Re-run'), 'skip-path', 'no why print in the bullet')
+  only(sk(', print `inert.why` whenever the route is `verify` or `skip` (an `inert check error: …` included: that check failed closed, so the verifier runs as before)', ''),
+    'skip-path', 'no why print on verify')
+  only(sk(' it may route `skip` when `main` moved only in Inert paths, ADR 0045);', ');'), 'skip-path', 'the exit-3 row without the skip')
+})
+
+// last-starts (p28-2)
+test('control: § 4.5 without the last starts at any one site fails last-starts', () => {
+  const p = real.skill.split('\n').find((l) => l.startsWith('**The last starts (Chorus ADR 0104 d4).**'))
+  only(sk(p + '\n\n', ''), 'last-starts', 'no last-starts paragraph')
+  only(sk('A `last start:` hold never halts the rollout: the turn ends `waiting` (step 1.6)', 'A `last start:` hold halts the rollout `stuck`'),
+    'last-starts', 'the hold halts')
+  only(sk('Restarts are exempt, a set-aside task\'s hand-back and a seeded revise included', 'Restarts wait on it too'), 'last-starts', 'restarts held')
+  only(sk(' A `last start:` hold (*The last starts*) ends the turn `waiting` too:', ' A `last start:` hold (*The last starts*) halts the turn:'),
+    'last-starts', 'no last-starts wait in step 1.6')
+  only(sk('`reason="last start: held until the Morning at <trickle.morning>"`', '`reason="last start"`'), 'last-starts', 'no last-starts reason=')
+  only(sk(" It covers a last-starts wait's `waiting` turn (§4.5 step 1.6) too.", ''), 'last-starts', 'heartbeat paragraph without it')
+  only(sk(' A `last start:` reason is no hold either (the Morning may have come), so this clause re-enters on it too.', ''),
+    'last-starts', 'clause (7) without it')
+  only(sk(', or `next` holds a task on the last starts (§4.5 step 1.6)', ''), 'last-starts', "§ 6's waiting bullet without it")
+  only(sk(", a last-starts wait's (`last start: …`)", ''), 'last-starts', "§ 6's reason forms without it")
+  only(sk(', and on a last-starts wait (§4.5 step 1.6)', ''), 'last-starts', "§ 6's reason list without it")
+  only(sk(' a last-starts wait stands,', ''), 'last-starts', "§ 8's Stop-hook paragraph without it")
+})
+test("control: the driver's docstring or block reason without the last-starts wait fails last-starts", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv(', or a last-starts\n              wait stands (`next` holds a task on the last starts', ', or (`next` holds a task on the last starts'),
+    'last-starts', 'docstring')
+  only(drv(' or a last-starts wait stands (`next` holds a "', ' or (`next` holds a "'), 'last-starts', 'block reason')
+})
+
+// hold (p30-3)
+test('control: the PR hold missing from any one lead site fails hold', () => {
+  only(sk(' Its `holdUntil` (a PR hold, `skills/_shared/vault-grammar.md` § Hold until) is read now too:', ' Its `holdUntil` is ignored:'), 'hold', 'step 1.1 reads no hold')
+  only(sk(', none of step 1.2 runs, as under a pause:', ', step 1.2 runs as usual:'), 'hold', 'step 1.2 runs under a rollout hold')
+  only(sk(' A `setAside` entry that carries its own `holdUntil` (a task-scope hold) is skipped by every part of this step in the same way.', ''),
+    'hold', 'step 1.2 re-enters a task-scope hold')
+  only(sk('otherwise end the turn `waiting` with `reason="held until <pr> merges"`', 'otherwise go to § 7 with `reason="held until <pr> merges"`'),
+    'hold', 'the guard halts on a merge wait')
+  only(sk(" A PR hold's wait (step 1.5's `held until …`) can stand with nothing in flight too: it registers the heartbeat, and each tick re-enters *Cold resume* through clause (7), whose `next` reads the PR again and clears a merged hold.", ''),
+    'hold', 'step 1.6 without the PR hold wait')
+  only(sk(", a PR hold's `waiting` turn (§4.5 step 1.5)", ''), 'hold', 'the heartbeat not registered for it')
+  only(sk(', nor is a `held until` reason (a PR hold: the PR may have merged, and only `next` reads it)', ''), 'hold', 'clause (7) reads it as a hold')
+  only(sk(' or a PR hold waits on its merge (`next` reports `halt: held`, §4.5 step 1.5),', ''), 'hold', "§ 6's waiting bullet without it")
+  only(sk("a PR hold's (`held until …`), ", ''), 'hold', "§ 6's reasons without it")
+  only(sk('A **PR hold** that can release itself is not a halt: it ends `waiting`', 'A **PR hold** halts'), 'hold', '§ 7 halts on a merge wait')
+  const bullet7 = real.skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: held` with a hold that waits on Lachy'))
+  only(sk(bullet7 + '\n', ''), 'hold', 'no § 7 bullet')
+  only(sk(', a PR hold waits on its merge, a last-starts wait stands', ', a last-starts wait stands'), 'hold', "§ 8's Stop-hook paragraph without it")
+  only(sk(", as it does under a PR hold's wait (a `held until` reason is no hold to clause (7): only `next` sees the merge, and it releases the hold itself)", ''),
+    'hold', "§ 8's heartbeat paragraph without it")
+})
+test("control: the driver's docstring or block reason without the PR hold fails hold", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv('or a PR hold waits on its merge (`next` reports `halt: held`,\n              reason="held until …", execute §4.5 step 1.5, vault-grammar\n              § Hold until),\n', ''),
+    'hold', 'docstring')
+  only(drv('a PR hold waits on its merge (`next` reports `halt: held`, "\n            "with its reason=\\"held until …\\", §4.5 step 1.5) or ', 'or '), 'hold', 'block reason')
+})
+
+// heat (p31-4)
+test('control: the Heat hold missing at any one site fails heat', () => {
+  const p = real.skill.split('\n').find((l) => l.startsWith('**The Heat hold (estate ADR 0009 d5).**'))
+  only(sk(p + '\n\n', ''), 'heat', 'no Heat hold paragraph')
+  only(sk('`slotLimit` 0, Away included', '`slotLimit` 0 by day'), 'heat', 'heat not held Away')
+  only(sk('and a `heat:` hold never halts the rollout', 'and a `heat:` hold halts the rollout `stuck`'), 'heat', 'a Heat hold halts')
+  only(sk(' While `next` reports `heat` at heavy or worse (`slotLimit` 0, *The Heat hold*), such a revise is a Heat hold instead, the same wait.', ''),
+    'heat', 'step 1.2 without the heat-held revise')
+  only(sk('`reason="heat: the Mac is hot (<heat.name>)"`, never § 7, whatever else is set aside', '`reason="heat"`, then § 7'), 'heat', 'the guard halts on heat')
+  only(sk(' A `heat:` hold (*The Heat hold*) ends the turn `waiting` the same way,', ' A `heat:` hold (*The Heat hold*) halts the turn,'), 'heat', 'no heat wait in step 1.6')
+  only(sk("and it comes before the Trickle's, since a hot Mac holds every row the Trickle would", "and it comes after the Trickle's"), 'heat', 'the Trickle reason first')
+  only(sk('but a `heat` never counts toward the third-`noslot` halt, nor resets its count', 'and a `heat` counts toward the third-`noslot` halt'),
+    'heat', 'step 3 counts heat toward the halt')
+  only(sk(' → re-run the re-verify the same way with the lane held, never counted toward those three nor resetting them', ' → halt'), 'heat', 'the RACE halts on heat')
+  only(sk("; `heat`: the Mac was too hot to run the suite within the slot wait, a Heat hold) leaves", ') leaves'), 'heat', 'step 5 without heat')
+  only(sk('a `stopped` or `heat` one never counts', 'a `stopped` one never counts'), 'heat', "step 5's halt counts heat")
+  only(sk('every slot wait, heat hold and heat-stopped run counts against `<slot_wait>`', 'the slot wait alone counts against `<slot_wait>`'),
+    'heat', 'W without the heat')
+  only(sk(' **The Heat hold:** at heavy no verify slot is free,', ' At heavy a verify slot is still free,'), 'heat', 'Verify slots without the hold')
+  only(sk(" A Heat hold's `waiting` turn (§4.5 step 1.6, *The Heat hold*) is covered the same way.", ''), 'heat', 'heartbeat paragraph without the Heat hold')
+  only(sk(', and a `heat:` reason no hold either (the Mac may have cooled)', ''), 'heat', 'clause (7) reads heat as a hold')
+  only(sk(' or a Heat hold stands (§4.5 step 1.6, *The Heat hold*),', ''), 'heat', "§ 6's waiting bullet without it")
+  only(sk(', and on a Heat hold (§4.5 step 1.6)', ''), 'heat', "§ 6's reason list without it")
+  only(sk(', or on the Heat hold, the same wait', ''), 'heat', "§ 7's stuck halts over a heat-held revise")
+  only(sk(", a Heat hold's `waiting` included", ''), 'heat', "§ 8's Stop-hook paragraph without it")
+})
+test("control: the driver's docstring or block reason without the Heat hold fails heat", () => {
+  const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
+  only(drv(', or a Heat hold\n              stands (`heat: …`', ''), 'heat', 'docstring')
+  only(drv(' or a Heat hold stands (`heat: …`, the "\n            "same wait)', ''), 'heat', 'block reason')
+})
+
+test('the rules are all named (42) and each has a control', () => {
+  assert.equal(RULES.length, 42)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
+})
+
+// ---- ADR 0064 (p33-4): the origin lane's prose. Each rule names one place; each control mutates that place alone. ----
+// origin-route: mark-integrating's exit 4 is the Origin lane wait at its three sites (step 3's start, prepare exit 1's
+//   run, step 4's exit-3 row), never a refusal, a set-aside or a halt. origin-wait: the origin wait's launch, its
+//   once-only rule, its background bound and Codex's foreground run. origin-turn: step 1.4 takes no task into step 3
+//   again that turn, and step 1.6 carries the `origin lane:` reason. origin-heartbeat: clause (4) never waits on the
+//   origin wait, and clause (7) reads its reason as no hold. origin-waiting: § 6's `waiting` names it. origin-surface:
+//   the Surface re-check's parallel hit. reentry-lost, reentry-room, reentry-hold, reentry-race: each D12 site runs no
+//   mark-integrating and leans on merge-task's base pin.
+function checkOriginLane(skill) {
+  const fails = []
+  const st3 = step(skill, 3)
+  const rows = exitRows(skill)
+  const subs = subSteps(skill)
+  const s14 = (subs.find((x) => x.n === 4) ?? {}).text ?? ''
+  const s16 = collapse((subs.find((x) => x.n === 6) ?? {}).text ?? '')
+  const hb = skill.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
+  const binding = collapse(section(skill, /^## Native runtime binding/) ?? '')
+  const lost = labelled(skill, 'Lost call.')
+  const hold = labelled(skill, 'Merge hold')
+  const surface = labelled(skill, 'Surface re-check (ADR 0060).')
+  const waitingB = collapse(S(skill, S6).split(/(?=- `)/).find((b) => b.startsWith('- `waiting`')) ?? '')
+  const owl = st3.includes('**Origin lane wait (ADR 0064 d6).**') ? st3.slice(st3.indexOf('**Origin lane wait (ADR 0064 d6).**')) : ''
+  if (!st3.includes('mark-integrating --tasks <slug>` (its exit 4: the *Origin lane wait*, below)') ||
+    !st3.includes('run it (its exit 4: the *Origin lane wait*, below), then `prepare` again, once') ||
+    !(rows['3'] ?? '').includes("`mark-integrating`'s exit 4 here is step 3's *Origin lane wait*") ||
+    !owl.includes('Exit 4 is never a refusal, a set-aside or a halt.')) fails.push('origin-route')
+  if (!owl.includes('Unless an origin wait this session launched for this rollout is still running') ||
+    !owl.includes('`run_in_background` and `timeout: 1200000`') ||
+    !owl.includes('reconcile-rollout.py origin-wait --tasks <slug>') ||
+    !owl.includes('In Codex it runs in the foreground') ||
+    !binding.includes("So does § 4.5's origin wait")) fails.push('origin-wait')
+  if (!s14.includes('is not taken into step 3 again in this turn') ||
+    !s16.includes('`reason="origin lane: waiting on <owner/name> behind [[<rollout>]]"`')) fails.push('origin-turn')
+  if (!hb.includes('nor the origin wait, which holds nothing') || !hb.includes('nor an `origin lane:` reason')) fails.push('origin-heartbeat')
+  if (!waitingB.includes('a task waits on the origin lane') || !waitingB.includes("an origin lane wait's (`origin lane: …`)")) fails.push('origin-waiting')
+  if (!surface.includes("another project's parallel rollout in this rollout's own clone") ||
+    !surface.includes('`reason="surface held: [[<x>]] writes repo:<clone>"`')) fails.push('origin-surface')
+  if (!lost.includes("An integrate call's resume") || !lost.includes('runs no `mark-integrating`, so it re-enters the lane with no origin-lane check') ||
+    !lost.includes('the base pin keeps every merge correct')) fails.push('reentry-lost')
+  if (!s14.includes('The room-stopped integrate resume,') || !s14.includes('re-enter the lane with no `mark-integrating`')) fails.push('reentry-room')
+  if (!hold.includes('The release runs no `mark-integrating`, so it re-enters the lane with no origin-lane check') ||
+    !hold.includes("the base pin's exit 3 re-integrates it")) fails.push('reentry-hold')
+  if (!s14.includes('and the `revert: true` RACE revert above re-enter the lane') ||
+    !s14.includes("another project's merge meanwhile is merge-task's exit 3 (*Base moved*)")) fails.push('reentry-race')
+  return fails
+}
+const ORIGIN_RULES = ['origin-route', 'origin-wait', 'origin-turn', 'origin-heartbeat', 'origin-waiting', 'origin-surface',
+  'reentry-lost', 'reentry-room', 'reentry-hold', 'reentry-race']
+const ORIGIN_CONTROLLED = new Set()
+const ow = (from, to, rule, label) => {
+  ORIGIN_CONTROLLED.add(rule)
+  assert.deepEqual(checkOriginLane(edit(real.skill, from, to)), [rule], label)
+}
+test('execute holds every origin-lane rule (ADR 0064)', () => {
+  assert.deepEqual(checkOriginLane(real.skill), [])
+})
+test('origin-lane controls: each mutation fails exactly its rule', () => {
+  ow('mark-integrating --tasks <slug>` (its exit 4: the *Origin lane wait*, below)', 'mark-integrating --tasks <slug>`', 'origin-route', 'step 3 start')
+  ow('run it (its exit 4: the *Origin lane wait*, below), then', 'run it, then', 'origin-route', 'prepare exit 1')
+  ow("`mark-integrating`'s exit 4 here is step 3's *Origin lane wait*", '`mark-integrating` exits 4 here', 'origin-route', 'exit-3 row')
+  ow('Exit 4 is never a refusal, a set-aside or a halt.', 'Exit 4 halts.', 'origin-route', 'a halt')
+  ow('Unless an origin wait this session launched for this rollout is still running, launch', 'Launch', 'origin-wait', 'no once-only rule')
+  ow("So does § 4.5's origin wait", "So does § 4.5's merge-task", 'origin-wait', 'no Codex binding')
+  ow('is not taken into step 3 again in this turn', 'is taken into step 3 again at once', 'origin-turn', 'step 1.4 re-takes')
+  ow('`reason="origin lane: waiting on <owner/name> behind [[<rollout>]]"`', '`reason="origin lane"`', 'origin-turn', 'no step 1.6 reason')
+  ow('; nor the origin wait, which holds nothing) has not reported', ') has not reported', 'origin-heartbeat', 'clause (4)')
+  ow(', nor an `origin lane:` reason (another', ' (another', 'origin-heartbeat', 'clause (7)')
+  ow(', or a task waits on the origin lane (§4.5 step 3', ', or a lane waits (§4.5 step 3', 'origin-waiting', '§ 6 waiting')
+  ow("another project's parallel rollout in this rollout's own clone", 'another rollout', 'origin-surface', 'surface re-check')
+  ow('runs no `mark-integrating`, so it re-enters the lane with no origin-lane check (ADR 0064 d12): it holds', 'runs `mark-integrating` first: it holds', 'reentry-lost', 'lost call')
+  ow('The room-stopped integrate resume,', 'The room-stopped integrate resume runs `mark-integrating`;', 'reentry-room', 'room stop')
+  ow('The release runs no `mark-integrating`, so it re-enters the lane with no origin-lane check', 'The release runs `mark-integrating` first', 'reentry-hold', 'merge hold')
+  ow('and the `revert: true` RACE revert above re-enter the lane', 'above re-enter the lane', 'reentry-race', 'RACE revert')
+  assert.deepEqual(ORIGIN_RULES.filter((r) => !ORIGIN_CONTROLLED.has(r)), [])
 })

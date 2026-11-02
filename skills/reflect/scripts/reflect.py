@@ -6,13 +6,16 @@ decision task call it; the model does the reading between `span` and the writers
 scripts/companion/reflect.py (span / watch / raised / close) gives the shape: borrowed, never imported.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py span [--since TS] [--until TS] [--fold] \\
-        [--tasks-dir D] [--config P] --out F
+        [--tasks-dir D] [--config P] [--now ISO] --out F
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py watch --span F --rollout S [--rollout S2 ...] \\
         --rule R --shape H --count N [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py raised --watch ID --reflection ID \\
         [--confirmed | --declined] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py bug --span F --rule R --shape H --slug <words> \\
         --title T --why W --rollout S [--rollout S2 ...] [--fixes <landed task>] [--tasks-dir D] [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py ledger --span F [--audit F] [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py attention --span F [--owners F] [--rest-unknown] \\
+        [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span F [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py decide --span F [--decisions F] [--tasks-dir D] \\
         [--now ISO] [--dry-run]
@@ -22,12 +25,13 @@ scripts/companion/reflect.py (span / watch / raised / close) gives the shape: bo
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py rung
 
 Writes. reflect.py is the only writer of reflections.jsonl (run_record.py's REFLECTIONS file, through run_record.emit:
-the kinds watch, watch-raised, proposal and reflection; run_record's docstring holds their schema, the Watch rule, the
-Agreement rule and the cadence rule) and of two kinds of vault task: a bug task (Work/Tasks/thread-skill-bug-<words>.md)
-and the decision task (Work/Tasks/thread-skill-decisions-<date>[-N].md), to which `moot` adds a line at decide time. It
+the kinds watch, watch-raised, proposal, reflection, time-lost and attention; run_record's docstring holds their schema,
+the Watch rule, the Agreement rule and the cadence rule) and of two kinds of vault task: a bug task
+(Work/Tasks/thread-skill-bug-<words>.md) and the decision task (Work/Tasks/thread-skill-decisions-<date>[-N].md), to which `moot` adds a line at decide time. It
 never writes rollouts.toml or tunings.jsonl (tune.py is their one writer: step 14 runs `tune.py --revert` and `--auto`),
 never commits, and never touches git. `span --fold` runs reconcile-rollout.py fold-journals, whose call-journal lines
-are span's only write outside --out's directory. Every writer takes --dry-run: it prints the lines and the file text it
+are span's only write outside --out's directory (the Time-lost ledger's intervals file, <dir of F>/ledger-intervals.json,
+is inside it). Every writer takes --dry-run: it prints the lines and the file text it
 would write, and writes nothing (Note.save(dry_run=True)).
 
 Vault writes. A new note is created only by open(path, "x"), never over a file. A slug is taken when <slug>.md is
@@ -45,9 +49,11 @@ date by the next Reflection, once the day is whole). An instant counts in [since
 (`python3 -m pip install tzdata`).
 
 span. The window: --until defaults to now, and a future --until is clamped to now and flagged; --since defaults to
-the last `reflection` line's until, else until - 7 days; since after until is exit 2. span mints the Reflection's id,
-r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in the events directory with a line in
-[since, until], and every `shape: serial` note directly under Work/Tasks or under Archive/Rollouts whose `## Leg log`
+the last `reflection` line's until, else until - 7 days; since after until is exit 2 (--now, tests only, is read as now
+for the clamp and the default). span mints the Reflection's id, r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every
+non-reserved <slug>.jsonl in the events directory with a line in [since, until] (the time-lost ledger's lines, score.py's
+LEDGER_KINDS, dropped as each record is listed and kept apart, read once, for the Time-lost ledger alone, below), and
+every `shape: serial` note directly under Work/Tasks or under Archive/Rollouts whose `## Leg log`
 has a line stamped in [since, until] (a chain records only Lachy's acts, so a hands-off one has no record line): the
 read rollouts. Each entry's shape is its note's (close-score.py's read: reconcile-rollout.py's Note and _shape;
 parallel with no note). For each:
@@ -136,11 +142,22 @@ parallel with no note). For each:
   churn     a review-verdict line in the window with regression > 0.
 - The Escapes sweep (ADR 0037 d4). Every record's `merged` lines, of any age, are folded per rollout by score.py's
   landed_from(), and each rollout maps to its repo through its note's Project root (the newest existing root per repo
-  is used; a repo with several is flagged). A task landed in two records is credited to the later, flagged. Per repo,
+  is used; a repo whose roots fall in two or more families is flagged: a family is a root's in-place twin,
+  `self-rollout-check.sh --in-place`, else the root, so a default clone and a second project's clone of the same
+  checkout, ADR 0064, are one family and raise no flag). A task landed in two records is credited to the later, flagged. Per repo,
   one escapes.py score() over the union reads the evidence (fixes:, reverts, review findings). Each piece gets an at:
   a fixer note's captured: (else its mtime, flagged "undated fixer"), a revert's committer date, a review doc's
   newest add or modify commit (else its mtime). A record with no resolvable note or root, and a repo with no origin,
   are named in cannotShow.
+- laneTime (p29-13), on a read parallel rollout (null on a serial chain and a light read): the Integration lane's time
+  in the window, read from the `## Integration log` of each task the record names whose note links this rollout
+  (`rollout:`, so a carried task is read once, by the rollout it now belongs to), every line whose startedAt falls in
+  [since, until] (a `-` startedAt places none). A line's lane minutes are its active figure (`active=`, the wall less
+  the stalls the Run record logged inside it), else its wall (`duration=`: a line from before p29-13, or one with
+  `active=-`, which may hold a stall), through reconcile-rollout.py's log_minutes(), the writer's own parse. {integrations, minutes (the lane time,
+  the sum), wallMinutes, stalledMinutes (wall - active where a line has both: stall, never lane work), wallOnly (lines
+  read by their wall alone), unmeasured (neither), lines[{task, startedAt, outcome, path, wall, active, lane}] in
+  startedAt order}.
 - The light reads. A record not read this week is read for its in-window evidence alone, never scored, never a breach
   or a knob: escapes-only when the sweep traced an in-window Escape to it, else repairs-only when its rollout note
   holds an in-window repair line; either carries both kinds it holds. A repair line on a rollout with no Run record is
@@ -153,16 +170,66 @@ parallel with no note). For each:
   empty block and the flag `grades: no grade log`.
 - knobs: revert[] (each non-voided, un-reverted auto tunings line that is no revert, paired with a read non-partial
   rollout of its repo that passes tune.py's revert_check), land[] (the proposals of a repo's newest non-partial read
-  rollout that pass tune.py's auto_check, over the same reflections.jsonl read and the same agreement as tune.py, and
-  whose key no revert[] item names) and held[] (the rest, each with its reason).
+  rollout that pass tune.py's auto_check, over the same reflections.jsonl read, the ledger's record line appended (so a
+  load-topped ledger holds a ceiling raise here as tune.py --auto will), and the same agreement as tune.py, and whose key
+  no revert[] item names) and held[] (the rest, each with its reason). The repo's newest rollout lands alone even when two
+  projects' rollouts share the repo (ADR 0064), on purpose: rollouts.toml's knobs are one table per origin, shared by
+  both projects, so landing from two rollouts' proposals in one Reflection could move one key both ways; knob_lines
+  records every proposer, and tune.py's auto_check counts the older rollout's proposal toward agreement at the next.
+- ledger (p29-11, ADR 0051): skills/reflect/scripts/ledger.py's block (its docstring holds the model: the classes, the
+  precedence, the waits on Lachy, the baseline, the Watch and the Monthly audit's month rule) over every record, each read
+  whole (its ledger lines merged back; a record --fold folded read again, so its journals are the fold's), live while its
+  rollout note is not archived and its status none of ledger.py's CLOSED, and left out (flagged) while that note, archived
+  or not, reads `shape: serial` (a chain's Legs record no Slots or stops): row (the `time-lost` record line `ledger`
+  writes), ranking, previous, delta, weeks, streak, watch (the preview), baseline, holds (knobs' held items the load hold
+  held), flags, and audit {due, month, since, until, recorded, sessions, intervalsFile}: recorded is the record's hours
+  over the audit window, sessions the lead sessions its lead-entry lines name ({session, rollouts, first, last}), and
+  intervalsFile <dir of F>/ledger-intervals.json, every priced interval in the audit window and the audit's leads (the
+  unexplained, lead-absent and pause stretches); the three are null unless the audit is due.
+- attention (p30-7, ADR 0056): skills/reflect/scripts/attention.py's block (its docstring holds every rule: the
+  transcripts read, the Question ledger's outcomes and counter, the Review trails' keys, the waits to start, rollout_end()
+  and both circling rules, the reading Sessions they leave out among them): questions {items, counts}, trails {items,
+  counts}, waits, circling {W1, W2, readings}, watches {W1, W2: {id, rule, shape, fresh, held}}, trend, flags and
+  cannotShow, over every record read whole (the ledger's read), the vault through Vault.find and its index (Archive
+  included), the session transcripts and reviews.jsonl with read-only git. Its flags (prefixed `attention: `) and
+  cannotShow join span's; it writes nothing to stderr, and any fault is the flag `attention: read failed (...)` and a
+  null block, never a stop. The Owner of each question is the reading's label, never span's.
+- freshReview (ADR 0058 d5): one entry per landing. reviews.jsonl's review-round lines up to until, read through
+  score.py's read_review_rounds, the one copy of run_record's reader rule (the latest line per (repo, doc), else per
+  (repo, head, digest), so a doc's consumed line supersedes its pending one; its branch and reviewedAt come from the
+  doc's newest line that carries each when the latest lacks it, so a consumed line with no branch keeps its landing).
+  A round counts in the window it was reviewed in, and in no other: its round time (below) in [since, until]. The
+  window's rounds are grouped by (repo identity, branch): an absolute path's origin (owner/name, through quiet_origin),
+  else the line's owner/name, lowercased, else the raw path (a path with no readable origin), so a loop continued in
+  a worktree is one entry; that identity is the entry's repo. A line with no branch (one from before ADR 0058, say)
+  is no landing, and goes to its repo's group with branch null. Each group is an entry: rounds (its rounds),
+  codeRounds (those whose mode is code or absent), gradedRounds (the code rounds that carry both blocking and
+  findings, the ones blockingRate reads), findings and blocking (one value per code round, in round order, null where
+  the line carries none), filed, recurring, reversal, rejected and regression (sums over the lines that carry each,
+  null when none does: unknown, never 0), open (the last code round's, or null), lines and files (the last round's,
+  in round order, that carries each), first and last (the group's earliest and latest round time) and blockingRate
+  (Σblocking / Σfindings over the graded rounds, to 2 places; null when there is none or Σfindings is 0). Sorted by
+  last. A landing reviewed across two windows shows its rounds in each; within a window, a branch name reused across
+  landings, or a chain on the default branch, reads as one entry, never a span that grows with the record (keeping a
+  group whole once any line fell in the window folded every round ever recorded on `master` into one entry, every
+  week). The entry holds every review round on the branch in the window, dev-time chains included, so codeRounds is
+  review cost, never the landing's budget count. A round's time, which windows it, orders the group and gives first
+  and last, is its reviewedAt (a UTC Z stamp: when the round was reviewed), else its doc's earliest line's ts (its
+  arrival emit): land.sh records a landing's unrecorded docs at its end (--queue and --hold, whatever their result),
+  so a line's own ts can be days after its round. A round first recorded in this window but reviewed before it counts
+  in no window, and cannotShow names how many (`/fresh-review: <k> round(s) first recorded in this window but reviewed
+  before it: counted in no window`). Reported, never traced: cannotShow says so when any landing (an entry whose
+  branch is not null) is listed.
 span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), shape
 (parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
-reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[], and
-chain on a read serial one}], freshReview[] (/fresh-review
-rounds in the window with regression > 0, reported only: reviews.jsonl names no rollout), watches[] (every open Watch:
-rule, shape, rollouts, count, recurring, stale, new, declinedBefore, lastSeen), knobs{revert, land, held}, bugsOpen[],
-decisionTask, grades (grades.py's block: log, window, all, pending, episodes), cannotShow[], flags[]}. stderr gets one
-summary line.
+reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[],
+laneTime, and chain on a read serial one}], freshReview[{repo, branch, rounds, codeRounds, gradedRounds, findings[],
+blocking[], filed, recurring, reversal, rejected, open, regression, lines, files, first, last, blockingRate}] (each
+/fresh-review landing with a round reviewed in the window, reported only: reviews.jsonl names no rollout), watches[]
+(every open Watch:
+rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring, stale, new, declinedBefore, lastSeen),
+knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
+ledger (above), attention (above), cannotShow[], flags[]}. stderr gets one summary line.
 
 watch. One `watch` line per (Reflection, Watch), naming every rollout where the reading saw it. id is run_record's
 watch_id(rule, shape); the line stores the stripped rule and shape. A rollout must be one the span read (its
@@ -171,20 +238,25 @@ rollout, read this week or not, as a serial chain dispatched by link or a regrad
 exit 2. A grade trace whose episodes list no rollout is reported, never a Watch (SKILL.md § 11). A repeat call
 for an id this Reflection already holds compares its rollouts with that Reflection's latest line for the id: the same
 set prints `exists <id>` and writes nothing (whatever --count); a strict superset writes ONE extending line naming the
-union and prints `extended <id>: +<new>`; any other set is exit 2, naming both sets and their union to re-run with.
+union and prints `extended <id>: +<new>`; any other set is exit 2, naming both sets and their union to re-run with. The
+Time-lost ledger's rule (ledger.py's WATCH_RULE) is exit 2: that Watch is `ledger`'s alone; so is either circling rule
+(attention.py's CIRCLING_RULE_TEXTS): those Watches are `attention`'s alone.
 
 The Watch reader (watches()), per id in file order: a `watch` line opens a cycle or extends the open one; any
 `watch-raised` closes it, whatever its via; a later sighting opens a new cycle whose rollouts start empty. Within a
 cycle each Reflection counts by its latest line for the id; the cycle's rollouts are the union and its count the
-sum. Recurring: two or more distinct rollouts in the open cycle, and a line from this Reflection. Stale: no line for
-STALE_DAYS (28) before until. New: no `watch` line for the id before this Reflection's first. declinedBefore: the
-id's last closed cycle ended via declined. Torn lines are skipped.
+sum. A Watch's unit is `rollouts` and its sightings the open cycle's distinct rollouts, except the Time-lost ledger's (its
+lines carry ledgerClass) and the circling detector's (its lines carry circling): unit `readings`, sightings the
+Reflections with a line in the open cycle. Recurring: two or more
+sightings, and a line from this Reflection. Stale: no line for STALE_DAYS (28) before until. New: no `watch` line for the
+id before this Reflection's first. declinedBefore: the id's last closed cycle ended via declined. Torn lines are skipped.
 
 raised. --watch <id> --reflection <id> writes `watch-raised` {id, reflection, via}: plain is via recurring (Lachy's
 yes to a rule item), --confirmed via confirmed (his yes to a Watch to confirm), --declined via declined (his no). Any
-of them closes the Watch's cycle, so a declined pattern returns only when two later rollouts show it afresh. Exit 2:
-an id with no open Watch (unknown, or closed by another line: `Watch <id> was closed by Reflection <rid> (<via>)`), or
-a plain raise of a one-rollout Watch. A repeat whose cycle that same reflection and via closed prints `exists <id>`.
+of them closes the Watch's cycle, so a declined pattern returns only when two later rollouts (a ledger Watch: two later
+readings) show it afresh. Exit 2: an id with no open Watch (unknown, or closed by another line: `Watch <id> was closed by
+Reflection <rid> (<via>)`), or a plain raise of a Watch with one sighting (one rollout, or one reading). A repeat whose
+cycle that same reflection and via closed prints `exists <id>`.
 
 bug. The key is watch_id(rule, shape); the rollouts must be ones the span read (a grade episode's alone is refused: a
 grade miss is a Watch or a rule, never a bug); --slug is one to five kebab words, none
@@ -199,21 +271,66 @@ captured; launch cc-thread; bug_key; fixes: when --fixes names landed work; no s
 and `## Resume prompt`. The file goes first, then one `proposal` line per (Reflection, key): altitude bug, vaultTask,
 filed, and auto: true only when filed. A repeat call prints the first outcome.
 
+ledger (p29-11, ADR 0051). Once, at SKILL step 13a, before step 14's tune.py calls. It refuses a closed Reflection and a
+span with no ledger block (one from before p29-11). Every line is checked first (run_record.check), then only the missing
+ones are written, in order: the baseline line (ledger.py's BASELINE) when reflections.jsonl holds none; the audit line;
+the record line (span's ledger.row, verbatim); and the ledger's Watch line when ledger.py's sighted() holds (this class
+tops this record row, and it topped the previous record row too or a watch line for its id already exists): rule
+WATCH_RULE, shape `<words> tops the Time-lost ledger`, ledgerClass the class, rollouts its top contributors (at most 64),
+count 1. --audit F is the Monthly audit's audit.json, {month, sources [{source (transcripts | suite-logs | pause-logs |
+mac-history), read, why?}], entries [{class, cause, rollout, from, to, what, evidence}], gaps [{what, evidence}]}: its
+line's hours come from each entry's from .. to (the model never types a number), recorded from span's audit block, rank
+over found + recorded (shown, never acted on), month the reading's. Exit 2: the audit is due and neither --audit is given
+nor this Reflection has an audit line; --audit is given and none is due; ledger.py's audit_line() refuses it (the month,
+an unknown class or cause, an entry outside the audit window or overlapping a known interval of the same rollout and
+class, more than 16 entries or 8 gaps, or a line over run_record's 16 KiB, `trim entries or their text`; text is folded
+and cut to 160 or 200 characters). It prints `ledger <rid>: top <class> (<h> h) of <total> h; <what> written`, or
+`exists ledger <rid>` when every line is in.
+
+attention (p30-7, ADR 0056). Once, at SKILL step 13b, after the ledger and before decide. It refuses a closed Reflection
+and a span whose attention is not a block (one from before p30-7, or one whose read failed: a new span is a new
+Reflection). --owners F is the reading's labels, {<question id>: <owner>}, an owner one of run_record's
+ATTENTION_OWNERS (skills/_shared/asking.md § 1; unknown its remainder). Exit 2, nothing written, with --rest-unknown or
+without: a file that is no JSON object, an id the span lacks, or an owner outside the five (at most ten named). An asked
+question the file leaves out, or no --owners while questions were asked, is exit 2 unless --rest-unknown, which writes
+them as unknown and counts them in `unlabelled` (`flag: <n> of <asked> questions unlabelled, written as unknown`); an
+explicit unknown is a label. The lines, each checked (run_record.check) before any is written: the `attention` line
+(attention.py's ledger_line: the questions counted with the labels, the trails' counts, the waits, the circling lists),
+then, for each circling rule whose items attention.py's fresh_items() leaves (the items no closed cycle named), its Watch
+(attention.py's watch_line: circling the rule, rollouts the items by weight, count their number), the lists both read
+from circling_items(), which drops an item whose slug is no rollout slug (`flag: dropped <slug> from <rule>: not a
+rollout slug`) so run_record never refuses the write. A rule whose items a closed cycle all named prints `held <id>:
+every item was in a closed cycle`. Re-runs: an attention line equal to this Reflection's last prints `exists attention
+<rid>`, a changed one appends one line (readers take the last); a Watch whose set is this Reflection's latest line's prints
+`exists <id>`, a strict superset writes one extending line, any other set prints `held <id>` with both sets. It prints
+`attention <rid>: <asked> questions (<yours> yours, <unlabelled> unlabelled), <n> trails, <k> circling; <what> written`.
+
 knobs. Once, after step 14's tune.py calls (its lines are knob_lines(), which close re-reads): one `proposal` line per
 (Reflection, knob_key) over the read rollouts' score.py proposals (none for withheld entries, a light read or a rollout
 with no repo; a partial rollout's are held "partial window"). from, to and ranAt are the land candidate's, else
 the newest proposer's; rollouts names every proposer. landed needs a non-voided tunings line with auto: true, this
 reflection, the same repo (case ignored), its rollout among the line's rollouts, no reverts, and an applied entry with
-the same key and rule and sign(to - from) == direction; then auto: true and tuning: <its id>. An unlanded line carries
+the same key and rule and sign(to - from) == direction; then auto: true and tuning: <its id>. A span with a ledger block
+and no `time-lost` record line from this Reflection is exit 2, `run ledger`, nothing written. An unlanded line carries
 held: span's reason, or "eligible: tune.py --auto was not run". Each revert this Reflection wrote gets its own landed
 line, id knob_key(repo, key, "revert:<rule>", -direction), with reverts and tuning. Every line passes run_record.check()
 before any is written (a refusal is exit 2, nothing written); then each (Reflection, id) not yet in reflections.jsonl is
 written.
 
-decide. Rule items are the recurring open Watches. --decisions is a JSON object {<watch id>: {why, amends}}, `{}` when
+decide. A span with a ledger block and no `time-lost` record line from this Reflection is exit 2, `run ledger`, nothing
+written (the vault untouched): the ledger's Watch and a Monthly audit's gaps reach the task only through ledger's lines,
+and a section once appended is never appended again, so a decide before ledger would leave close refusing for good. A span
+with an attention block and no `attention` line from this Reflection is exit 2, `run attention`, for the same reason:
+the circling Watches reach the task only through attention's lines.
+Rule items are the recurring open Watches (their rollouts sorted and cut to 64 on the line and the item).
+--decisions is a JSON object {<watch id>: {why, amends}}, `{}` when
 no Watch recurs; an entry naming a Watch that is not recurring, closed or unknown is exit 2; a recurring Watch it leaves
-out is still an item (why "not given"). Watches to confirm: the open one-rollout Watches this Reflection sighted, except
-one whose last cycle Lachy declined (it returns only as a rule item); they are listed only beside a rule item. Held
+out is still an item (why "not given"). Watches to confirm: the open Watches this Reflection sighted with one sighting,
+except one whose last cycle Lachy declined (it returns only as a rule item), the ledger's in a block of their own (one
+reading each, the circling detector's among them); they are listed only beside a rule item. A Monthly audit line from
+this Reflection with gaps (p29-11) is an item too: its audit part follows the trade part (AUDIT_LEAD; the found and recorded hours by class; the sources read
+and unread; one `- gap <n> <YYYY-MM>: <what>; evidence <evidence>` line per gap), so a reading whose audit names a gap
+writes the decision task with no rule item or trade. Held
 trades (ADR 0037 d1): each knob_lines() line, not landed and no revert, with an integer from, whose held is tune.py
 auto_check's `a trade (...): Lachy decides` or `a caution: Lachy decides` (held_trades(); a non-integer from is
 skipped on stderr). One on a repo and key a revert line of this Reflection moved prints `trade <kid> at <from>: a revert
@@ -224,8 +341,8 @@ holds a moot line for it): decided when a non-moot item is in a task whose statu
 task decides nothing), printing `trade <kid> at <from>: decided in [[<slug>]]` (the first slug, sorted), and never
 listed again at that from; still when a non-moot item is in an open task directly under Work/Tasks, under a section
 other than this Reflection's own; else new (never listed, listed only in a dropped or archived task, every item moot, or
-listed only in this Reflection's own section, which is a re-run). No rule item and no new or still trade prints
-`no rule proposal or held trade: no decision task` and writes nothing. Else the open `decisions`-tagged task
+listed only in this Reflection's own section, which is a re-run). No rule item, no new or still trade and no audit gap
+prints `no rule proposal or held trade: no decision task` and writes nothing. Else the open `decisions`-tagged task
 directly under Work/Tasks, or a new one at the first untaken of thread-skill-decisions-<Melbourne date of now>, -2 ...
 -9 (past -9 is exit 2), created by exclusive create with scheduled: from resolve-day.py (no day: the next Melbourne
 morning; --now, tests only, is passed through), `## Notes` (conversation-gated), `## Launch` and `## Resume prompt`
@@ -252,12 +369,18 @@ Reflection) is not in reflections.jsonl (`run knobs`), when a recurring Watch (t
 from this Reflection) has no rule `proposal` line from it (`run decide`), or when a held trade (decide's, the revert's
 skipped ones aside) meets none of (i) a non-moot item in a DECIDED task, (ii) an item under `## Reflection <this id>`
 in a task that is not dropped, (iii) a `still open` line naming this Reflection in a task that is not dropped (`held
-trade <kid> at <from> has no decision task line from this Reflection: run decide`). Only with a held trade does close
-read the vault: --tasks-dir (default the vault's Work/Tasks), exit 1 when it is no directory. A `knobs` refusal (a
+trade <kid> at <from> has no decision task line from this Reflection: run decide`). p29-11 adds two: a span with a
+ledger block and no `time-lost` record line from this Reflection (`run ledger`, named first), and a Monthly audit line
+from it whose gaps have no `- gap <n> <month>: ` line under `## Reflection <this id>` in a decision task that is not
+dropped (`audit gap <n> of <month> has no decision task line from this Reflection: run decide`). A span from before
+p29-11, with no ledger key, closes as before. p30-7 adds one more, after ledger's: a span with an attention block and no
+`attention` line from this Reflection (`run attention`); a span with no attention key, or a null one, closes as before.
+Only with a held trade or an audit gap does close read the vault: --tasks-dir (default the vault's Work/Tasks), exit 1 when it is no directory. A `knobs` refusal (a
 run_record.check() of any of its lines) therefore blocks close too: it is a fault to fix, never a step to skip. The
 line: since, until, rollouts (read), escapesOnly, counts (sightings: Watch ids with a line from this Reflection;
 newWatches: those that are new; rules, bugs, filed, knobs, landed and reverted from its proposal lines; breaches:
-distinct (rollout, Guardrail) pairs over breachCounts rollouts), quiet (newWatches, rules, bugs and breaches all 0),
+distinct (rollout, Guardrail) pairs over breachCounts rollouts), quiet (newWatches, rules, bugs and breaches all 0: an
+audit's gaps never count, since the audit runs at either cadence, and like a held trade it leaves the week quiet),
 repairsOnly when a rollout was read repairs-only, decisionTask when a rule line names one (else the first task, sorted,
 whose line passed (ii) or (iii)), and cadence: run_record's cadence() over reflections.jsonl with this line appended
 (three quiet Reflections in a row: 14; any that is not quiet: 7), on every line, so each change of cadence is on a
@@ -283,8 +406,10 @@ values of the highest opus rung, with a stderr note when the top rung is not opu
 
 Exit codes: 0 done (exists and no-op answers included); 1 a file cannot be read or written (the events directory,
 tunings.jsonl, reflections.jsonl, --out, a note, a --tasks-dir that is no directory); 2 usage or a refusal (a path that
-exists, a watch call that leaves out a recorded rollout, a raise on a closed or unknown Watch, a closed Reflection, a
-close before knobs or decide ran, a run_record refusal, a moot on a done, absent or untagged task, of an unlisted
+exists, a watch call that leaves out a recorded rollout or names the ledger's rule, a raise on a closed or unknown Watch, a
+closed Reflection, a close before ledger, attention, knobs or decide ran, knobs or decide before ledger, decide before
+attention, a ledger whose audit is due and not given, or given and refused, an attention whose owners file is refused or
+missing, a watch naming a circling rule, a run_record refusal, a moot on a done, absent or untagged task, of an unlisted
 trade or with no --why); 3 no tz data, or no tomllib for `rung` over a present ladder file.
 """
 from __future__ import annotations
@@ -309,6 +434,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.dirname(os.path.dirname(HERE))
 SHARED = os.path.join(SKILLS, "_shared", "scripts")
 RECONCILE_PY = os.path.join(SKILLS, "execute", "scripts", "reconcile-rollout.py")
+SELF_ROLLOUT_SH = os.path.join(SKILLS, "execute", "scripts", "self-rollout-check.sh")
 SCORE_PY = os.path.join(HERE, "score.py")
 SERIAL_PY = os.path.join(HERE, "serial-score.py")
 RESOLVE_DAY_PY = os.path.join(SHARED, "resolve-day.py")
@@ -337,10 +463,6 @@ SERIAL_FLAG = "a serial chain (ADR 0040): scored by serial-score.py (no fold, se
 SERIAL_STAGES = {"gate-pending": "gate", "plan-blocked": "plan", "review-blocked": "review", "blocked": "block"}
 # The record lines that move a chain's set-aside on (the human acts a serial chain's verbs write)
 SERIAL_MOVERS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
-MOVERS = ("auto-retry", "handed-back", "answer-recorded", "gate-signed", "race-decided", "carried", "slot-taken",
-          "lane-taken", "merged")
-UNRECORDED_MOVERS = ("slot-taken", "lane-taken", "merged")
-SLOT_STARTS = ("start", "restart", "revise", "hand-back", "resume")  # run_record's slot-taken `start`
 # An `## Approved gates` line's suffix: gated_inputs.annotation()'s (the Standing approval) and approve-gates' bare
 # `(approved <date>)` (Lachy's sign-off, reconcile-rollout.py)
 STANDING_GATE_RE = re.compile(r"\(approved \d{4}-\d\d-\d\d under the standing approval\b[^)]*\)\s*$")
@@ -352,6 +474,10 @@ TRADE_LINE_RE = re.compile(r"^- trade ([0-9a-f]{8}) at (-?\d+): ")
 TRADE_STILL_RE = re.compile(r"^trade ([0-9a-f]{8}) at (-?\d+) still open \S+: Reflection (r-[^,]+),")
 TRADE_MOOT_RE = re.compile(r"^moot ([0-9a-f]{8}) at (-?\d+) \S+: ")
 TRADE_TEXT_MAX = 200
+# A Monthly audit's gap in the decision task (p29-11): `- gap <n> <YYYY-MM>: <what>; evidence <evidence>`
+GAP_LINE_RE = re.compile(r"^- gap (\d+) (\d{4}-\d\d): ")
+AUDIT_LEAD = ("Monthly audit %s (ADR 0051 d4): what the Run record should have carried, read past it from %s to %s; a yes "
+              "to a gap files a task that makes the record carry it, a no is recorded when this task is done:")
 TRADE_LEAD = ("Trades for Lachy (ADR 0037 d1: a knob that trades one headline against the other, or a caution, is his "
               "call; a yes runs the by-hand Reflection, a no is recorded when this task is done):")
 
@@ -372,6 +498,8 @@ SERIAL = _load("thread_serial_score", SERIAL_PY)  # leg_status() and Unreadable:
 TUNE = _load("thread_tune", os.path.join(HERE, "tune.py"))
 ESC = _load("thread_escapes", os.path.join(HERE, "escapes.py"))
 GR = _load("thread_grades", os.path.join(HERE, "grades.py"))
+LEDGER = _load("thread_ledger", os.path.join(HERE, "ledger.py"))  # the Time-lost ledger (p29-11) and the set-aside mover
+ATTN = _load("thread_attention", os.path.join(HERE, "attention.py"))  # the attention ledger (p30-7)
 REC = _load("thread_reconcile_rollout", RECONCILE_PY)
 RP = _load("thread_reconcile_project", os.path.join(SHARED, "reconcile-project.py"))
 LADDER = _load("thread_ladder", os.path.join(SHARED, "ladder.py"))
@@ -669,15 +797,23 @@ def create(path, text, dry_run):
 # ---- the Watch reader ------------------------------------------------------------------------------------------
 
 def watches(lines, rid, until_ms=None):
-    """{watch id: state} by the Watch rule (the module docstring), for the Reflection `rid`."""
+    """{watch id: state} by the Watch rule (the module docstring), for the Reflection `rid`. A Watch whose lines carry
+    `ledgerClass` (the Time-lost ledger's) or `circling` (the circling detector's) counts readings, not rollouts: its
+    unit is `readings` and its sightings the Reflections in the open cycle; any other's unit is `rollouts` and its
+    sightings the cycle's distinct rollouts."""
     st = {}
     for d in lines:
         kind, wid = d.get("kind"), d.get("id")
         if kind not in ("watch", "watch-raised") or not isinstance(wid, str):
             continue
-        w = st.setdefault(wid, {"id": wid, "cycles": [], "first": None, "rule": None, "shape": None, "lastTs": None})
+        w = st.setdefault(wid, {"id": wid, "cycles": [], "first": None, "rule": None, "shape": None, "lastTs": None,
+                                "ledgerClass": None, "circling": None})
         cyc = w["cycles"][-1] if w["cycles"] else None
         if kind == "watch":
+            if isinstance(d.get("ledgerClass"), str):
+                w["ledgerClass"] = d["ledgerClass"]
+            if isinstance(d.get("circling"), str):
+                w["circling"] = d["circling"]
             rollouts = [x for x in d.get("rollouts") or [] if isinstance(x, str)]
             count = d.get("count") if isinstance(d.get("count"), int) else 1
             if cyc is None or cyc["closedBy"] is not None:
@@ -703,11 +839,15 @@ def watches(lines, rid, until_ms=None):
         prior = [c for c in w["cycles"] if c["closedBy"] is not None]
         last_closed = prior[-1]["closedBy"] if prior else None
         open_ = cyc["closedBy"] is None
+        readings = w["ledgerClass"] is not None or w["circling"] is not None
+        sightings = len(cyc["byRef"]) if readings else len(rollouts)
         out[wid] = {
             "id": wid, "rule": w["rule"], "shape": w["shape"], "open": open_,
             "closedBy": None if open_ else {"reflection": cyc["closedBy"][0], "via": cyc["closedBy"][1]},
             "rollouts": sorted(rollouts), "count": sum(n for _s, n in cyc["byRef"].values()),
-            "sighted": rid in cyc["byRef"], "recurring": open_ and len(rollouts) >= 2 and rid in cyc["byRef"],
+            "unit": "readings" if readings else "rollouts", "sightings": sightings, "ledgerClass": w["ledgerClass"],
+            "circling": w["circling"],
+            "sighted": rid in cyc["byRef"], "recurring": open_ and sightings >= 2 and rid in cyc["byRef"],
             "stale": bool(until_ms is not None and w["lastTs"] is not None and until_ms - w["lastTs"] > STALE_DAYS * DAY_MS),
             "new": w["first"] == rid, "declinedBefore": bool(last_closed and last_closed[1] == "declined"),
             "lastSeen": fmt(w["lastTs"]) if w["lastTs"] is not None else None,
@@ -722,6 +862,22 @@ def _ts(d):
         return None
 
 
+def _count(v):
+    """A review-round count (an int >= 0, never a bool), else None: unknown."""
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+
+
+def _known(rows, k):
+    """The known counts of key k over rows, in their order."""
+    return [v for v in (_count(d.get(k)) for d in rows) if v is not None]
+
+
+def _total(rows, k):
+    """The sum of key k's known counts over rows, or None when no row carries one."""
+    vs = _known(rows, k)
+    return sum(vs) if vs else None
+
+
 # ---- span ------------------------------------------------------------------------------------------------------
 
 class Span:
@@ -731,8 +887,12 @@ class Span:
         self.vault = Vault(a.tasks_dir)
         self.out_dir = os.path.dirname(os.path.abspath(expand(a.out)))
         self.origins = {}
+        self.families = {}  # the Escapes sweep's Project-root families (ADR 0064): root -> its in-place twin, or itself
         self.genv = git_env()
         self.grade_log = None  # grades.py's Log, read once in run()
+        self.ledger_lines = {}  # {slug: the record's LEDGER_KINDS lines}, kept by records() for the Time-lost ledger
+        self.quiet_origins = {}  # the attention ledger's origins (attention.py's repo labels): never flagged
+        self.folded = set()     # the records --fold folded: the ledger re-reads them, journals and all
 
     def flag(self, text):
         if text not in self.flags:
@@ -753,10 +913,35 @@ class Span:
                 self.origins[root] = None
         return self.origins[root]
 
+    def family(self, root):
+        """A Project root's family for the Escapes sweep (ADR 0064): its in-place twin (`self-rollout-check.sh --in-place`,
+        memoised) when the root is in a rollout clone, else the root itself. A repo's default clone and a second project's
+        clone of it are one family, so they raise no `Project roots` flag between them."""
+        if root not in self.families:
+            fam = root
+            try:
+                p = subprocess.run(["bash", SELF_ROLLOUT_SH, "--in-place", root], capture_output=True, text=True,
+                                   timeout=60, stdin=subprocess.DEVNULL)
+                if p.returncode == 0 and p.stdout.strip():
+                    fam = p.stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                pass
+            self.families[root] = fam
+        return self.families[root]
+
+    def quiet_origin(self, root):
+        """A directory's origin (owner/name) for the attention ledger, or None: a cwd with no origin is no fault."""
+        if root not in self.quiet_origins:
+            try:
+                self.quiet_origins[root] = RS._origin_slug(root)
+            except RS.SettingsError:
+                self.quiet_origins[root] = None
+        return self.quiet_origins[root]
+
     # -- the window ---------------------------------------------------------------------------------------------
 
     def window(self, reflections):
-        now = now_ms()
+        now = to_ms(self.a.now, "--now") if self.a.now else now_ms()
         until = to_ms(self.a.until, "--until") if self.a.until else now
         if until > now:
             self.flag("--until %s is in the future: clamped to now (%s)" % (fmt(until), fmt(now)))
@@ -775,7 +960,10 @@ class Span:
     # -- the records ----------------------------------------------------------------------------------------------
 
     def records(self, ev):
-        """{slug: [(ms, n, line)]} for every non-reserved record in the events directory."""
+        """{slug: [(ms, n, line)]} for every non-reserved record in the events directory, the time-lost ledger's lines
+        dropped (p29-10, score.py's LEDGER_KINDS): the one read every consumer shares (the in-window test, friction, the
+        Escapes sweep's newest root, grades.py's episodes), so none of them reads differently with or without one. The
+        dropped lines are kept apart in self.ledger_lines, read once, for the Time-lost ledger alone (p29-11)."""
         out = {}
         try:
             names = sorted(os.listdir(ev))
@@ -796,15 +984,44 @@ class Span:
                 continue
             if skipped:
                 self.flag("%s: %d line(s) did not parse: skipped" % (name, skipped))
-            out[name[:-6]] = lines
+            out[name[:-6]] = [x for x in lines if x[2].get("kind") not in SCORE.LEDGER_KINDS]
+            self.ledger_lines[name[:-6]] = [x for x in lines if x[2].get("kind") in SCORE.LEDGER_KINDS]
         return out
+
+    def whole(self, ev, records):
+        """{slug: every line} for the Time-lost ledger: each record's lines and its ledger lines, merged back in time then
+        file order; a record --fold folded is read again, so its journals are the fold's."""
+        out = {}
+        for slug, lines in records.items():
+            out[slug] = sorted(lines + self.ledger_lines.get(slug, []), key=lambda x: (x[0], x[1]))
+        for slug in sorted(self.folded):
+            try:
+                out[slug], _skipped = SCORE.read_lines(os.path.join(ev, slug + ".jsonl"))
+            except OSError as e:
+                self.flag("ledger: %s.jsonl cannot be read again after its fold (%s): its pre-fold lines are read" % (slug, e))
+        return out
+
+    def live(self, slug):
+        """Whether a rollout is live for the Time-lost ledger: its note (rollout_note()) is not archived and its status
+        is none of ledger.py's CLOSED. A note-less record is not live."""
+        note = self.vault.rollout_note(slug)
+        if note is None or (note.parent.name == "Rollouts" and note.parent.parent.name == "Archive"):
+            return False
+        return str(status_of(note)).lower() not in LEDGER.CLOSED
+
+    def serial(self, slug):
+        """Whether a record is a serial chain's, for the Time-lost ledger (which leaves it out): its note (rollout_note(),
+        archived or not) reads `shape: serial`, as shape_of() reads it."""
+        note = self.vault.rollout_note(slug)
+        return note is not None and shape_of(note) == "serial"
 
     # -- one read rollout -------------------------------------------------------------------------------------------
 
     def read_rollout(self, slug, lines, since, until, tunings_file):
         entry = {"rollout": slug, "mode": "read", "shape": "parallel", "note": None, "root": None, "repo": None,
                  "status": None, "closeLine": None, "score": None, "window": None, "partial": None, "headline": None,
-                 "breached": [], "breachCounts": False, "binding": None, "proposals": [], "flags": [], "friction": []}
+                 "breached": [], "breachCounts": False, "binding": None, "proposals": [], "flags": [], "friction": [],
+                 "laneTime": None}
         try:
             hit = TUNE.close_line(slug, path=tunings_file)
         except OSError as e:
@@ -851,6 +1068,8 @@ class Span:
                                 self.genv)
             if rc != 0:
                 entry["flags"].append("fold-journals exited %s: %s" % (rc, first_line(err)))
+            else:
+                self.folded.add(slug)
         out = os.path.join(self.out_dir, "%s.score.json" % slug)
         argv = [sys.executable, SCORE_PY, "--rollout", slug, "--until", fmt(until), "--tasks-dir", str(self.vault.root),
                 "--out", out]
@@ -876,9 +1095,49 @@ class Span:
         if sc is not None:
             self.scored(entry, sc, since, until)
         self.friction(entry, lines, since, until)
+        entry["laneTime"] = self.lane_time(slug, lines, since, until)
         for f in entry["flags"]:
             self.flag("[[%s]]: %s" % (slug, f))
         return entry, sc
+
+    # -- the Integration lane's time (p29-13) -------------------------------------------------------------------------
+
+    def lane_time(self, slug, lines, since, until):
+        """The Integration lane's time in the window, from the `## Integration log` lines of the tasks this record names
+        whose note links this rollout (`rollout:`, so a task carried on is read once, by the rollout it now belongs to):
+        each line whose startedAt falls in [since, until] (a `-` startedAt places none). Its lane minutes are its
+        active figure (`active=`, the wall less the stalls the Run record logged inside it), else its wall (`duration=`,
+        a line from before p29-13 or one with `active=-`), through reconcile-rollout.py's log_minutes, the writer's own
+        parse. {integrations,
+        minutes (the lane time), wallMinutes, stalledMinutes (wall - active, where a line has both), wallOnly (lines read
+        by their wall alone), unmeasured (lines with neither), lines[{task, startedAt, outcome, path, wall, active,
+        lane}] in startedAt order}."""
+        tasks = sorted({d["task"] for _t, _n, d in lines if isinstance(d.get("task"), str) and d["task"]})
+        rows = []
+        for task in tasks:
+            p = self.vault.find(task)
+            note = read_note(p) if p is not None else None
+            if note is None or (REC._note_rollout(note) or "").lower() != slug.lower():
+                continue
+            for line in REC._log_lines(note):
+                tok = REC._log_tokens(line)
+                try:
+                    at = SCORE.to_ms(tok["startedAt"])
+                except Exception:  # `-` (no startedAt), or anything _stamp refuses: no place in a window
+                    continue
+                if not since <= at <= until:
+                    continue
+                m = REC.log_minutes(line)
+                rows.append((at, task, {"task": task, "startedAt": tok["startedAt"], "outcome": tok["outcome"] or None,
+                                        "path": tok.get("path") if tok.get("path") not in (None, "", "-") else None,
+                                        "wall": m["wall"], "active": m["active"], "lane": m["lane"]}))
+        rows.sort(key=lambda r: (r[0], r[1]))
+        out = [r[2] for r in rows]
+        return {"integrations": len(out), "minutes": sum(r["lane"] or 0 for r in out),
+                "wallMinutes": sum(r["wall"] or 0 for r in out),
+                "stalledMinutes": sum(r["wall"] - r["active"] for r in out if r["wall"] is not None and r["active"] is not None),
+                "wallOnly": sum(1 for r in out if r["active"] is None and r["wall"] is not None),
+                "unmeasured": sum(1 for r in out if r["lane"] is None), "lines": out}
 
     # -- one read serial chain (ADR 0040) -----------------------------------------------------------------------------
 
@@ -1149,24 +1408,10 @@ class Span:
     @staticmethod
     def moved_by(lines, i, task, until):
         """(movedBy, mover) of the set-aside at lines[i]: mover is {kind, at, start?} of the slot-taken, lane-taken or
-        merged line that moved it on with no act before it (start on a slot-taken only), else None."""
-        for t, _n, d in lines[i + 1:]:
-            if t > until:
-                break
-            if d.get("task") != task or d.get("kind") not in MOVERS:
-                continue
-            kind = d["kind"]
-            if kind == "carried" and d.get("rollout") != d.get("from"):
-                continue  # the to-file's copy: the from-file's line moved it
-            if kind in UNRECORDED_MOVERS:
-                mover = {"kind": kind, "at": fmt(t)}
-                if kind == "slot-taken" and d.get("start") in SLOT_STARTS:
-                    mover["start"] = d["start"]
-                return "unrecorded", mover
-            if kind == "handed-back":
-                return "handed-back (via %s)" % d.get("via"), None
-            return kind, None
-        return None, None
+        merged line that moved it on with no act before it (start on a slot-taken only), else None. ledger.py's
+        first_mover is the rule's one copy (p29-11): the Time-lost ledger classes a wait by the same mover."""
+        moved, mover, _t, _d = LEDGER.first_mover(lines, i, task, until)
+        return moved, mover
 
     def repairs(self, slug, note_path, since, until, flag_undated=True):
         """The repair items of one rollout note: its `## Notes` lines dated in the window (date_in()). An undated line
@@ -1279,7 +1524,7 @@ class Span:
             r = repos[key]
             roots = sorted(r["roots"], key=lambda x: r["roots"][x])
             root = roots[-1]
-            if len(roots) > 1:
+            if len({self.family(x) for x in roots}) > 1:  # ADR 0064: two projects' clones of one checkout are one family
                 self.flag("repo %s has %d Project roots (%s): the newest, %s, is read" % (r["slug"], len(roots),
                                                                                          ", ".join(roots), root))
             landed = {task: info for task, (_s, info, _a) in r["landed"].items()}
@@ -1361,33 +1606,59 @@ class Span:
             out[("review", doc)] = (fmt(t) if t is not None else None, False)
         return out
 
-    # -- /fresh-review churn (reported only) --------------------------------------------------------------------------
+    # -- /fresh-review landings (reported only, ADR 0058 d5) ----------------------------------------------------------
 
     def fresh_review(self, ev, since, until):
+        """span.json's freshReview: one entry per landing (the module docstring's freshReview rule)."""
         path = os.path.join(ev, RR.REVIEWS + ".jsonl")
         if not os.path.exists(path):
             return []
         try:
             lines, _s = SCORE.read_lines(path)
         except OSError as e:
-            self.flag("reviews.jsonl cannot be read (%s): no /fresh-review churn" % e)
+            self.flag("reviews.jsonl cannot be read (%s): no /fresh-review landings" % e)
             return []
-        latest = {}
-        for t, _n, d in lines:
-            if d.get("kind") != "review-round" or t > until or not isinstance(d.get("repo"), str):
-                continue
-            doc = d.get("doc")
-            key = ("doc", d["repo"], doc) if isinstance(doc, str) and doc else ("head", d["repo"], d.get("head"), d.get("digest"))
-            latest[key] = (t, d)
+        rounds, late = SCORE.read_review_rounds(lines, since, until)
+        groups = {}
+        for r in rounds:  # round order: reviewedAt, else arrival; never the line's own ts
+            d = r["line"]
+            branch = d.get("branch") if isinstance(d.get("branch"), str) and d.get("branch") else None
+            groups.setdefault((self.review_identity(d["repo"]), branch), []).append((r["at"], d))
         out = []
-        for t, d in sorted(latest.values(), key=lambda x: x[0]):
-            if since <= t <= until and isinstance(d.get("regression"), int) and d["regression"] > 0:
-                out.append({"repo": d["repo"], "doc": d.get("doc"), "head": d.get("head"), "at": fmt(t),
-                            "findings": d.get("findings"), "regression": d["regression"]})
-        if out:
-            self.cannot_show("/fresh-review churn: %d round(s) with regression findings, reported, not traced to a "
-                             "rollout (reviews.jsonl names none)" % len(out))
+        for (repo, branch), g in groups.items():
+            ds = [d for _at, d in g]
+            code = [d for d in ds if d.get("mode") in (None, "code")]
+            rated = [(d["blocking"], d["findings"]) for d in code
+                     if _count(d.get("blocking")) is not None and _count(d.get("findings")) is not None]
+            found = sum(f for _b, f in rated)
+            out.append({"repo": repo, "branch": branch, "rounds": len(ds), "codeRounds": len(code),
+                        "gradedRounds": len(rated),
+                        "findings": [_count(d.get("findings")) for d in code],
+                        "blocking": [_count(d.get("blocking")) for d in code],
+                        "filed": _total(ds, "filed"), "recurring": _total(ds, "recurring"),
+                        "reversal": _total(ds, "reversal"), "rejected": _total(ds, "rejected"),
+                        "open": _count(code[-1].get("open")) if code else None,
+                        "regression": _total(ds, "regression"),
+                        "lines": (_known(ds, "lines") or [None])[-1], "files": (_known(ds, "files") or [None])[-1],
+                        "first": fmt(g[0][0]), "last": fmt(g[-1][0]),
+                        "blockingRate": round(sum(b for b, _f in rated) / found, 2) if found else None})
+        out.sort(key=lambda e: (e["last"], e["repo"], e["branch"] or ""))
+        landings = len([e for e in out if e["branch"] is not None])
+        if landings:
+            self.cannot_show("/fresh-review: %d landing(s) reported, not traced to a rollout (reviews.jsonl names none)"
+                             % landings)
+        if late:
+            self.cannot_show("/fresh-review: %d round(s) first recorded in this window but reviewed before it: counted in "
+                             "no window" % len(late))
         return out
+
+    def review_identity(self, repo):
+        """A review-round's repo as freshReview groups it: an absolute path's origin (owner/name, through quiet_origin),
+        else the line's owner/name, lowercased; a path with no readable origin stays its raw path."""
+        if os.path.isabs(repo):
+            slug = self.quiet_origin(repo)
+            return slug.lower() if slug else repo
+        return repo.lower()
 
     # -- knobs ------------------------------------------------------------------------------------------------------
 
@@ -1439,6 +1710,8 @@ class Span:
                     item["agreed"] = agreed
                     if ok and (repo, p["key"]) in reverting:
                         ok, reason = False, "a revert of %s comes first this Reflection" % p["key"]
+                    # Kept per repo on purpose with two projects' rollouts on it (ADR 0064): one knob table per origin,
+                    # so one rollout's proposals land per Reflection; the older one's count toward agreement next time.
                     if ok and e is not newest:
                         ok, reason = False, "not the repo's newest rollout ([[%s]] is)" % newest["rollout"]
                     if ok:
@@ -1479,6 +1752,65 @@ class Span:
         for c in cannot:
             self.cannot_show(c)
         return out
+
+    # -- the Time-lost ledger (p29-11, ADR 0051) ---------------------------------------------------------------------
+
+    def ledger(self, ev, records, reflections, since, until, rid):
+        """ledger.py's block over every record (each read whole, journals as --fold left them), with the Monthly audit's
+        part: due, month and window always; recorded, the lead sessions and the intervals file only when it is due."""
+        whole = self.whole(ev, records)
+        block = LEDGER.rows(whole, reflections, since, until, self.live, rid, serial=self.serial)
+        due = LEDGER.audit_due(reflections, until)
+        audit = dict(due, recorded=None, sessions=None, intervalsFile=None)
+        if due["due"]:
+            a_since = to_ms(due["since"], "the audit window's since")
+            ab = LEDGER.rows(whole, reflections, a_since, until, self.live, rid, intervals=True, serial=self.serial)
+            audit["recorded"] = ab["row"]["hours"]
+            sessions = {}
+            for slug, lines in sorted(whole.items()):
+                for t, _n, d in lines:
+                    sid = d.get("session")
+                    if d.get("kind") != "lead-entry" or not isinstance(sid, str) or not sid or not a_since <= t <= until:
+                        continue
+                    x = sessions.setdefault(sid, {"session": sid, "rollouts": [], "first": t, "last": t})
+                    if slug not in x["rollouts"]:
+                        x["rollouts"].append(slug)
+                    x["first"], x["last"] = min(x["first"], t), max(x["last"], t)
+            audit["sessions"] = [dict(x, first=fmt(x["first"]), last=fmt(x["last"]))
+                                 for x in sorted(sessions.values(), key=lambda x: (x["first"], x["session"]))]
+            path = os.path.join(self.out_dir, "ledger-intervals.json")
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"month": due["month"], "since": due["since"], "until": due["until"],
+                               "intervals": ab["intervals"], "leads": ab["leads"]}, f, indent=2, ensure_ascii=False)
+                    f.write("\n")
+            except OSError as e:
+                raise Stop("cannot write %s: %s" % (path, e), 1)
+            audit["intervalsFile"] = path
+        block["audit"] = audit
+        block["holds"] = []
+        return block
+
+    # -- the attention ledger (p30-7, ADR 0056) -------------------------------------------------------------------------
+
+    def attention(self, ev, records, reflections, since, until, rid):
+        """attention.py's block over the window: the Question ledger, the Review trails, the waits to start and the
+        circling detector. Its flags and cannotShow join span's; any fault is a flag and a null block, never a stop."""
+        tunings_file = os.path.join(ev, RR.TUNINGS + ".jsonl")
+        try:
+            block = ATTN.block(self.whole(ev, records), reflections, since, until, rid, ev, self.vault.find,
+                               self.vault.index, self.vault.root, self.quiet_origin, self.genv,
+                               lambda slug: TUNE.close_line(slug, tunings_file), mdate)
+        except Stop:
+            raise
+        except Exception as e:
+            self.flag("attention: read failed (%s: %s): no attention block" % (type(e).__name__, e))
+            return None
+        for f in block["flags"]:
+            self.flag(f)
+        for c in block["cannotShow"]:
+            self.cannot_show(c)
+        return block
 
     # -- the whole span -------------------------------------------------------------------------------------------------
 
@@ -1537,12 +1869,16 @@ class Span:
                             "shape": shape_of(note) if note else "parallel", "note": str(note) if note else None,
                             "root": root, "repo": self.origin(root), "status": None, "closeLine": None, "score": None,
                             "window": None, "partial": None, "headline": None, "breached": [], "breachCounts": False,
-                            "binding": None, "proposals": [], "flags": [], "friction": inw + reps})
+                            "binding": None, "proposals": [], "flags": [], "friction": inw + reps, "laneTime": None})
         self.cannot_show("a repair run that writes no dated repair: line and records no event is not seen, nor is a "
                          "repair: line on a rollout with no Run record")
         fresh = self.fresh_review(ev, since, until)
         ws = watches(reflections, rid, until)
-        knobs = self.knobs(entries, scores, rid, tunings, reflections)
+        led = self.ledger(ev, records, reflections, since, until, rid)
+        # the record line `ledger` will write, so span's land and held match tune.py --auto's load hold (ADR 0051)
+        knobs = self.knobs(entries, scores, rid, tunings, reflections + [LEDGER.preview_line(led["row"])])
+        led["holds"] = [{"id": x["id"], "rollout": x["rollout"], "key": x["key"], "reason": x["reason"]}
+                        for x in knobs["held"] if str(x.get("reason") or "").startswith(TUNE.LOAD_HELD)]
         bugs, decision = [], None
         for p, rec in self.vault.open_root_notes(self.flag):
             if rec.scalar("bug_key"):
@@ -1550,11 +1886,12 @@ class Span:
             if "decisions" in rec.tags and decision is None:
                 decision = {"slug": p.stem, "scheduled": rec.scalar("scheduled") or None, "status": rec.status}
         grades = self.grades(records, since, until)
+        attention = self.attention(ev, records, reflections, since, until, rid)
         doc = {"reflection": rid, "since": fmt(since), "until": fmt(until), "previous": previous,
                "rollouts": entries, "freshReview": fresh,
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
-               "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "cannotShow": self.cannot,
-               "flags": self.flags}
+               "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
+               "attention": attention, "cannotShow": self.cannot, "flags": self.flags}
         out = expand(self.a.out)
         try:
             with open(out, "w", encoding="utf-8") as f:
@@ -1601,6 +1938,10 @@ def cmd_watch(a):
     rid = span["reflection"]
     rollouts = norm_rollouts(a.rollout, span, graded=True)
     rule, shape = a.rule.strip(), a.shape.strip()
+    if rule == LEDGER.WATCH_RULE:
+        raise Stop("the Time-lost ledger's Watch (rule %r) is reflect.py ledger's alone: nothing written" % rule, 2)
+    if rule in ATTN.CIRCLING_RULE_TEXTS:
+        raise Stop("a circling Watch (rule %r) is reflect.py attention's alone: nothing written" % rule, 2)
     wid = RR.watch_id(rule, shape)
     lines = read_reflections()
     refuse_closed(lines, rid)
@@ -1636,7 +1977,9 @@ def cmd_raised(a):
             print("exists %s" % a.watch)
             return 0
         raise Stop("Watch %s was closed by Reflection %s (%s)" % (a.watch, cb["reflection"], cb["via"]), 2)
-    if via == "recurring" and len(w["rollouts"]) < 2:
+    if via == "recurring" and w["sightings"] < 2:
+        if w["unit"] == "readings":
+            raise Stop("Watch %s is seen in one reading: a plain raise needs two; use --confirmed or --declined" % a.watch, 2)
         raise Stop("Watch %s is seen in one rollout (%s): a plain raise needs two; use --confirmed or --declined"
                    % (a.watch, ", ".join(w["rollouts"])), 2)
     write_line("watch-raised", {"id": a.watch, "reflection": a.reflection, "via": via}, a.dry_run)
@@ -1796,11 +2139,30 @@ def knob_lines(span, tunings):
     return out
 
 
+def ledger_record(lines, rid):
+    """This Reflection's `time-lost` record line, or None."""
+    return next((d for d in LEDGER.tl_lines(lines) if d.get("source") == "record" and d.get("reflection") == rid), None)
+
+
+def ledger_audit(lines, rid):
+    """This Reflection's `time-lost` audit line, or None."""
+    return next((d for d in LEDGER.tl_lines(lines) if d.get("source") == "audit" and d.get("reflection") == rid), None)
+
+
+def attention_record(lines, rid):
+    """This Reflection's latest `attention` line, or None (a changed re-run appends one; readers take the last)."""
+    return next((d for d in reversed(lines) if isinstance(d, dict) and d.get("kind") == "attention"
+                 and d.get("reflection") == rid), None)
+
+
 def cmd_knobs(a):
     span = read_span(a.span)
     rid = span["reflection"]
     lines = read_reflections()
     refuse_closed(lines, rid)
+    if isinstance(span.get("ledger"), dict) and ledger_record(lines, rid) is None:
+        raise Stop("Reflection %s has no Time-lost ledger line: run ledger (tune.py --auto holds a ceiling raise "
+                   "without it): nothing written" % rid, 2)
     out = knob_lines(span, read_tunings())
     for f in out:
         try:
@@ -1820,6 +2182,197 @@ def cmd_knobs(a):
     if not out:
         print("no knob proposals")
     return 0
+
+
+# ---- the Time-lost ledger (p29-11, ADR 0051) -------------------------------------------------------------------------
+
+def hfmt(x):
+    """Hours as printed: up to 3 places, no trailing zeros (2, 0.25, 12.125)."""
+    try:
+        return ("%.3f" % float(x)).rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return str(x)
+
+
+def read_json(path, what):
+    try:
+        with open(expand(path), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError) as e:
+        raise Stop("%s %s cannot be read as JSON: %s" % (what, path, e), 1)
+
+
+def cmd_ledger(a):
+    span = read_span(a.span)
+    rid = span["reflection"]
+    led = span.get("ledger")
+    if not isinstance(led, dict) or not isinstance(led.get("row"), dict) or not isinstance(led.get("audit"), dict):
+        raise Stop("--span %s has no ledger block (a span from before p29-11): a new span is a new Reflection" % a.span, 2)
+    lines = read_reflections()
+    refuse_closed(lines, rid)
+    zone()
+    tl = LEDGER.tl_lines(lines)
+    plan = []  # (fields, what) in write order: the baseline, the audit, the record line, the Watch line
+    if not any(d.get("source") == "baseline" for d in tl):
+        plan.append(("time-lost", LEDGER.baseline_line(), "baseline %s" % LEDGER.BASELINE["month"]))
+    audit = led["audit"]
+    mine = ledger_audit(lines, rid)
+    if a.audit:
+        if not audit.get("due"):
+            raise Stop("no Monthly audit is due this reading (%s's audit is in): --audit is refused, nothing written"
+                       % audit.get("month"), 2)
+        doc = read_json(a.audit, "--audit")
+        known = read_json(audit.get("intervalsFile") or "", "the intervals file").get("intervals") or []
+        try:
+            fields = LEDGER.audit_line(doc, audit, rid, known)
+        except (ValueError, KeyError, TypeError) as e:
+            raise Stop("the audit is refused: %s: nothing written" % e, 2)
+        if not any(x["read"] for x in fields["audit"]["sources"]):
+            say("the audit read no source: it is recorded with each source's why, and it still closes %s"
+                % fields["month"])
+        if mine is None:
+            n = fields["audit"]
+            plan.append(("time-lost", fields, "audit %s (%d entr%s, %d gap%s)" % (
+                fields["month"], len(n["entries"]), "y" if len(n["entries"]) == 1 else "ies", len(n["gaps"]),
+                "" if len(n["gaps"]) == 1 else "s")))
+    elif audit.get("due") and mine is None:
+        raise Stop("the Monthly audit is due (%s, %s .. %s): run it (SKILL step 10a) and pass --audit <audit.json>: "
+                   "nothing written" % (audit.get("month"), audit.get("since"), audit.get("until")), 2)
+    row = led["row"]
+    if ledger_record(lines, rid) is None:
+        plan.append(("time-lost", row, "record"))
+    top = row.get("top")
+    prev = next((d for d in reversed(LEDGER.tl_lines(lines, rid)) if d.get("source") == "record"), None)
+    watch = led.get("watch") or {}
+    if top is not None and LEDGER.sighted(top, prev, [d for d in lines if d.get("reflection") != rid]) \
+            and watch.get("class") == top:
+        if not watch.get("rollouts"):
+            say("the ledger's Watch on %s names no rollout slug: not written" % top)
+        elif not any(d.get("kind") == "watch" and d.get("id") == watch.get("id") and d.get("reflection") == rid
+                     for d in lines):
+            plan.append(("watch", LEDGER.watch_line(watch, rid), "watch %s (%s)" % (watch["id"], top)))
+    for kind, fields, _what in plan:
+        check_line(kind, fields)
+    for kind, fields, _what in plan:
+        write_line(kind, fields, a.dry_run)
+    if not plan:
+        print("exists ledger %s" % rid)
+        return 0
+    h = row.get("hours") or {}
+    head = ("top %s (%s h)" % (top, hfmt(h.get(top))) if top else "no time lost") + " of %s h" % hfmt(sum(h.values()))
+    done(a, "ledger %s: %s; %s written" % (rid, head, ", ".join(w for _k, _f, w in plan)))
+    return 0
+
+
+# ---- the attention ledger (p30-7, ADR 0056) --------------------------------------------------------------------------
+
+LINE_KEYS = ("v", "ts", "host", "rollout", "task", "kind")
+
+
+def cmd_attention(a):
+    span = read_span(a.span)
+    rid = span["reflection"]
+    att = span.get("attention")
+    if not isinstance(att, dict) or not isinstance((att.get("questions") or {}).get("items"), list) \
+            or not isinstance((att.get("trails") or {}).get("counts"), dict):
+        raise Stop("--span %s has no attention block (a span from before p30-7, or one whose attention read failed): "
+                   "a new span is a new Reflection" % a.span, 2)
+    lines = read_reflections()
+    refuse_closed(lines, rid)
+    owners = read_json(a.owners, "--owners") if a.owners else None
+    try:
+        fields, trims = ATTN.ledger_line(att, owners, a.rest_unknown, rid, span.get("since"), span.get("until"))
+    except ValueError as e:
+        raise Stop("the owners are refused: %s: nothing written" % e, 2)
+    lists, dropped = ATTN.circling_items(att)
+    plan, said = [], []  # (kind, fields, what) in write order: the attention line, then each rule's Watch
+    have = attention_record(lines, rid)
+    if have is not None and json.dumps({k: v for k, v in have.items() if k not in LINE_KEYS}, sort_keys=True) == \
+            json.dumps(fields, sort_keys=True):
+        said.append("exists attention %s" % rid)
+    else:
+        plan.append(("attention", fields, "attention line"))
+    for rule in RR.CIRCLING_RULES:
+        items = lists[rule]
+        if not items:
+            continue
+        wid = ATTN.CIRCLING_IDS[rule]
+        fresh = ATTN.fresh_items(lines, rule, items)
+        if not fresh:
+            said.append("held %s: every item was in a closed cycle" % wid)
+            continue
+        w = ATTN.watch_line(rule, fresh, rid)
+        mine = [d for d in lines if d.get("kind") == "watch" and d.get("id") == wid and d.get("reflection") == rid]
+        if mine:
+            had = {x for x in mine[-1].get("rollouts") or [] if isinstance(x, str)}
+            if set(w["rollouts"]) == had:
+                said.append("exists %s" % wid)
+                continue
+            if not set(w["rollouts"]) > had:
+                said.append("held %s: this reading's line names [%s]; this run's fresh items are [%s]" % (
+                    wid, ", ".join(sorted(had)), ", ".join(sorted(w["rollouts"]))))
+                continue
+        plan.append(("watch", w, "watch %s (%s, %d item%s)" % (wid, rule, len(w["rollouts"]),
+                                                              "" if len(w["rollouts"]) == 1 else "s")))
+    for kind, f, _what in plan:
+        check_line(kind, f)
+    for rule, slug in dropped:
+        print("flag: dropped %s from %s: not a rollout slug" % (slug, rule))
+    q = fields["questions"]
+    if q["unlabelled"]:
+        print("flag: %d of %d questions unlabelled, written as unknown" % (q["unlabelled"], q["asked"]))
+    for t in trims:
+        print("flag: %s" % t)
+    for line in said:
+        print(line)
+    for kind, f, _what in plan:
+        write_line(kind, f, a.dry_run)
+    if plan:
+        done(a, "attention %s: %d questions (%d yours, %d unlabelled), %d trails, %d circling; %s written" % (
+            rid, q["asked"], q["byOwner"]["yours"], q["unlabelled"], fields["trails"]["count"],
+            len(fields["circling"]["W1"]) + len(fields["circling"]["W2"]), ", ".join(w for _k, _f, w in plan)))
+    return 0
+
+
+def gap_listings(vault, rid):
+    """{(n, month)} of the `- gap` lines under `## Reflection <rid>` in every decision task that is not dropped (Work/Tasks
+    and Archive alike)."""
+    out = set()
+    if not vault.root.is_dir():
+        return out
+    heading = "## Reflection %s" % rid
+    for p in sorted(vault.root.rglob("thread-skill-decisions-*.md")):
+        if not DECISION_SLUG_RE.match(p.stem):
+            continue
+        rec = RP.Rec(p, "")
+        if rec.fm is None or "decisions" not in rec.tags or rec.status == "dropped":
+            continue
+        inside = False
+        for line in rec.body.split("\n"):
+            if line.startswith("## "):
+                inside = line.strip() == heading
+                continue
+            m = GAP_LINE_RE.match(line) if inside else None
+            if m:
+                out.add((int(m.group(1)), m.group(2)))
+    return out
+
+
+def audit_part(audit):
+    """The decision task's audit part (p29-11): the lead, found and recorded hours by class, the sources read and unread,
+    and one `- gap <n> <YYYY-MM>: ...` line per gap."""
+    a = audit.get("audit") or {}
+    found = audit.get("hours") or {}
+    rec = audit.get("recorded") or {}
+    read = [s["source"] for s in a.get("sources") or [] if s.get("read")]
+    unread = ["%s (%s)" % (s["source"], s.get("why") or "no why") for s in a.get("sources") or [] if not s.get("read")]
+    out = [AUDIT_LEAD % (audit.get("month"), audit.get("since"), audit.get("until")),
+           "Found (recorded): %s" % ", ".join("%s %s h (%s h)" % (c, hfmt(found.get(c, 0)), hfmt(rec.get(c, 0)))
+                                              for c in LEDGER.CLASSES),
+           "Sources: read %s; unread %s" % (", ".join(read) or "none", ", ".join(unread) or "none")]
+    for n, g in enumerate(a.get("gaps") or [], 1):
+        out.append("- gap %d %s: %s; evidence %s" % (n, audit.get("month"), fold(g.get("what")), fold(g.get("evidence"))))
+    return out
 
 
 # ---- decide --------------------------------------------------------------------------------------------------------
@@ -1848,6 +2401,19 @@ def decision_text(slug, title, scheduled, captured):
         "Next move: /thread:reflect --decide [[%s]]" % slug,
         "```", "",
     ])
+
+
+def cut_rollouts(w):
+    """A Watch's rollouts for a rule line, sorted and cut to run_record's MAX_ROLLOUTS (a ledger Watch's union across
+    readings can name more; the cut is said on stderr)."""
+    if len(w["rollouts"]) > RR.MAX_ROLLOUTS and w["id"] not in _CUT:
+        _CUT.add(w["id"])
+        say("Watch %s names %d rollouts: its rule line names the first %d, sorted"
+            % (w["id"], len(w["rollouts"]), RR.MAX_ROLLOUTS))
+    return sorted(w["rollouts"])[:RR.MAX_ROLLOUTS]
+
+
+_CUT = set()  # the Watches cut_rollouts() has said it cut, so each is said once
 
 
 def listed_elsewhere(note, rid):
@@ -1955,6 +2521,14 @@ def cmd_decide(a):
     rid = span["reflection"]
     lines = read_reflections()
     refuse_closed(lines, rid)
+    # the ledger's Watch and the Monthly audit's gaps reach the task only through ledger's lines, and the section is
+    # appended once (its heading marks the visit): a decide before ledger would leave close refusing for good
+    if isinstance(span.get("ledger"), dict) and ledger_record(lines, rid) is None:
+        raise Stop("Reflection %s has no Time-lost ledger line: run ledger (its Watch and the Monthly audit's gaps reach "
+                   "the decision task through it): nothing written" % rid, 2)
+    if isinstance(span.get("attention"), dict) and attention_record(lines, rid) is None:
+        raise Stop("Reflection %s has no attention line: run attention (its circling Watches reach the decision task "
+                   "through it): nothing written" % rid, 2)
     zone()
     until = _ts({"ts": span.get("until")})
     if until is None:
@@ -1975,9 +2549,11 @@ def cmd_decide(a):
                 why = "unknown" if w is None else "closed" if not w["open"] else "not recurring in Reflection %s" % rid
                 raise Stop("--decisions names Watch %s, which is %s: only a recurring open Watch is a rule item" % (wid, why), 2)
     rules = sorted((w for w in ws.values() if w["recurring"]), key=lambda w: w["id"])
-    confirm = sorted((w for w in ws.values() if w["open"] and w["sighted"] and len(w["rollouts"]) == 1
+    confirm = sorted((w for w in ws.values() if w["open"] and w["sighted"] and w["sightings"] == 1
                       and not w["declinedBefore"]), key=lambda w: w["id"])
     trades, skipped = held_trades(span, read_tunings())
+    audit = ledger_audit(lines, rid)
+    gaps = ((audit or {}).get("audit") or {}).get("gaps") or []
     for kid, frm, key in skipped:
         print("trade %s at %s: a revert of %s comes first this Reflection" % (kid, frm, key))
     vault = Vault(a.tasks_dir)
@@ -1997,11 +2573,11 @@ def cmd_decide(a):
                 still_trades.append((tr, open_[0]))
             else:
                 new_trades.append(tr)
-    if not rules and not new_trades and not still_trades:
+    if not rules and not new_trades and not still_trades and not gaps:
         print("no rule proposal or held trade: no decision task")
         return 0
     for w in rules:  # every rule line passes run_record before the task is touched
-        check_line("proposal", {"id": w["id"], "altitude": "rule", "reflection": rid, "rollouts": w["rollouts"],
+        check_line("proposal", {"id": w["id"], "altitude": "rule", "reflection": rid, "rollouts": cut_rollouts(w),
                                 "rule": w["rule"], "shape": w["shape"], "vaultTask": "thread-skill-decisions"})
     now = a.now
     now_t = to_ms(now, "--now") if now else now_ms()
@@ -2056,14 +2632,23 @@ def cmd_decide(a):
         for w in new_items:
             d = decisions.get(w["id"]) or {}
             body.append("- %s: rule %s; shape %s; rollouts %s; why %s; amends %s" % (
-                w["id"], w["rule"], w["shape"], ", ".join("[[%s]]" % r for r in w["rollouts"]),
+                w["id"], w["rule"], w["shape"], ", ".join("[[%s]]" % r for r in cut_rollouts(w)),
                 d.get("why") or "not given", d.get("amends") or "not given"))
-        if confirm:
+        by_rollout = [w for w in confirm if w["unit"] != "readings"]
+        by_reading = [w for w in confirm if w["unit"] == "readings"]
+        if by_rollout:
             if body:
                 body.append("")
             body.append("Watches to confirm (one rollout each; a yes files the rule's grill, a no records the decline):")
             body.extend("- confirm %s: rule %s; shape %s; rollout [[%s]]" % (w["id"], w["rule"], w["shape"], w["rollouts"][0])
-                        for w in confirm)
+                        for w in by_rollout)
+        if by_reading:
+            if body:
+                body.append("")
+            body.append("Watches to confirm in readings (the Time-lost ledger's and the circling detector's: one reading "
+                        "each; a yes files the rule's grill, a no records the decline):")
+            body.extend("- confirm %s: rule %s; shape %s; rollouts %s" % (
+                w["id"], w["rule"], w["shape"], ", ".join("[[%s]]" % r for r in cut_rollouts(w))) for w in by_reading)
         if not new_items:
             lead = "No new rule items; still open: %s (see ## Still open)" % ", ".join(w["id"] for w in still)
             body = [lead] + ([""] + body if body else [])
@@ -2073,9 +2658,11 @@ def cmd_decide(a):
     elif still_trades:
         part = ["No new trades; still open: %s (see ## Still open)" % ", ".join(
             "trade %s at %s" % (tr["kid"], tr["from"]) for tr, _s in still_trades)]
-    if body and part:
-        body.append("")
-    note.append_section(heading, "\n".join(body + part))
+    text = []
+    for chunk in (body, part, audit_part(audit) if gaps else []):
+        if chunk:
+            text += ([""] if text else []) + chunk
+    note.append_section(heading, "\n".join(text))
     for w in still:
         note.append_line("## Still open", "%s still open %s: Reflection %s, rollouts %s" % (
             w["id"], seen_until, rid, ", ".join("[[%s]]" % r for r in w["rollouts"])))
@@ -2097,7 +2684,7 @@ def cmd_decide(a):
     for w in rules:
         if w["id"] in have:
             continue
-        write_line("proposal", {"id": w["id"], "altitude": "rule", "reflection": rid, "rollouts": w["rollouts"],
+        write_line("proposal", {"id": w["id"], "altitude": "rule", "reflection": rid, "rollouts": cut_rollouts(w),
                                 "rule": w["rule"], "shape": w["shape"], "vaultTask": slug}, a.dry_run)
     sched = REC._scalar(note.get("scheduled"))
     done(a, "decision task %s: scheduled %s%s (%s)" % (slug, sched, " (was %s)" % moved if moved else "",
@@ -2126,6 +2713,10 @@ def cmd_close(a):
 
     # every writer refuses a closed Reflection, so a step skipped now is lost for good: name it, write nothing
     missing = []
+    if isinstance(span.get("ledger"), dict) and ledger_record(lines, rid) is None:
+        missing.append("no Time-lost ledger line from this Reflection: run ledger")
+    if isinstance(span.get("attention"), dict) and attention_record(lines, rid) is None:
+        missing.append("no attention line from this Reflection: run attention")
     tunings = read_tunings()
     unknobbed = sorted({f["id"] for f in knob_lines(span, tunings)} - ids(lambda d: d.get("altitude") == "knob"))
     if unknobbed:
@@ -2157,6 +2748,18 @@ def cmd_close(a):
         if unlisted:
             missing.append("held trade %s ha%s no decision task line from this Reflection: run decide"
                            % (", ".join(unlisted), "s" if len(unlisted) == 1 else "ve"))
+    # a Monthly audit's gaps (p29-11) need their `- gap` lines in a decision task that is not dropped
+    audit = ledger_audit(lines, rid)
+    gaps = ((audit or {}).get("audit") or {}).get("gaps") or []
+    if gaps:
+        vault = Vault(a.tasks_dir)
+        if not vault.root.is_dir():
+            raise Stop("--tasks-dir %s is not a directory" % vault.root, 1)
+        listed = gap_listings(vault, rid)
+        unlisted = [str(n) for n in range(1, len(gaps) + 1) if (n, audit.get("month")) not in listed]
+        if unlisted:
+            missing.append("audit gap %s of %s ha%s no decision task line from this Reflection: run decide"
+                           % (", ".join(unlisted), audit.get("month"), "s" if len(unlisted) == 1 else "ve"))
     if missing:
         raise Stop("Reflection %s is not closed: %s" % (rid, "; ".join(missing)), 2)
 
@@ -2293,6 +2896,7 @@ def main(argv):
     s.add_argument("--fold", action="store_true")
     s.add_argument("--tasks-dir")
     s.add_argument("--config")
+    s.add_argument("--now", help="tests only: an aware ISO-8601 instant read as now (the clamp and the default until)")
     s.add_argument("--out", required=True)
     w = sub.add_parser("watch")
     w.add_argument("--span", required=True)
@@ -2322,6 +2926,15 @@ def main(argv):
     k = sub.add_parser("knobs")
     k.add_argument("--span", required=True)
     k.add_argument("--dry-run", action="store_true")
+    led = sub.add_parser("ledger")
+    led.add_argument("--span", required=True)
+    led.add_argument("--audit")
+    led.add_argument("--dry-run", action="store_true")
+    att = sub.add_parser("attention")
+    att.add_argument("--span", required=True)
+    att.add_argument("--owners")
+    att.add_argument("--rest-unknown", action="store_true")
+    att.add_argument("--dry-run", action="store_true")
     d = sub.add_parser("decide")
     d.add_argument("--span", required=True)
     d.add_argument("--decisions")
@@ -2343,7 +2956,8 @@ def main(argv):
     sub.add_parser("rung")
     a = p.parse_args(argv)
     verbs = {"span": lambda x: Span(x).run(), "watch": cmd_watch, "raised": cmd_raised, "bug": cmd_bug,
-             "knobs": cmd_knobs, "decide": cmd_decide, "close": cmd_close, "moot": cmd_moot, "rung": cmd_rung}
+             "ledger": cmd_ledger, "attention": cmd_attention, "knobs": cmd_knobs, "decide": cmd_decide,
+             "close": cmd_close, "moot": cmd_moot, "rung": cmd_rung}
     if a.verb not in verbs:
         p.error("a verb is required: %s" % ", ".join(verbs))
     try:

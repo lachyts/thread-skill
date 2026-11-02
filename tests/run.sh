@@ -51,9 +51,24 @@ printf '%s\n' '# Seeded by tests/run.sh and refused on purpose: a suite that rea
 # file>/events make test` runs them all against an unwritable record (p15-2: recording never breaks a verb).
 # The suites that read the record (run-record, the fold and record suites) keep their own dir.
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$scratch/events}"; unset XDG_STATE_HOME
+# The session transcripts the weekly reading's attention ledger reads (attention.py, p30-7) stay in temp too: an empty
+# dir, so no suite reads this Mac's own sessions; each suite that reads transcripts sets its own.
+mkdir -p "$scratch/transcripts"; export THREAD_TRANSCRIPTS_DIR="$scratch/transcripts"
 # The machine's verify slots (verify-slot.py, p23-4) stay in temp too: each suite that reaches a pool exports its
 # own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
 export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
+# The gate and the lead's Integration verify run this whole suite inside a verify slot, whose command sees
+# VERIFY_SLOT_HELD=1 (verify-slot.py, p34-1): unset, so no suite reads its own runs as already inside a slot.
+unset VERIFY_SLOT_HELD
+# The lead's verify exports its diff base to the suite it runs (ADR 0062): unset, so no inner verify inherits the outer one's.
+unset THREAD_VERIFY_BASE
+# The Mac's own evidence of a stop (reconcile-rollout.py machine_times: kern.boottime, kern.waketime, `pmset -g log`,
+# p29-10) is never read under test: `{}` is no boot and no sleep, so no suite infers a stop from this Mac's history.
+# Each suite that tests the stops sets its own.
+export THREAD_MACHINE_TIMES='{}'
+# The Heat hold's reading (verify-slot.py heat_level, estate ADR 0009 d5) is pinned at nominal, so a hot Mac never
+# flips an assertion and an inner `make test` never waits on the real heat; each suite that reaches it pins it too.
+export THREAD_HEAT_LEVEL=0
 # The note save lock (reconcile-rollout.py's _note_lock_path): one lock file per note directory, in temp like the rest.
 export THREAD_NOTE_LOCK_DIR="$scratch/note-locks"
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"

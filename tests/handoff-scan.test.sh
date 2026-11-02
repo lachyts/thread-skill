@@ -2,7 +2,9 @@
 # The handoff scan: the wrapper in skills/close/SKILL.md § The handoff owns the continuation, extracted by
 # its marker, and the script it calls (skills/close/scripts/handoff-scan.sh; p5-2 moved the logic out of the
 # SKILL.md because Claude Code substitutes skill arguments into positional $N there), run against runtime-generated fixtures (LF and CRLF) and the four <home> resolutions, under bash and
-# under `zsh -f` when zsh is installed (the Bash tool is zsh). The snippet resolves <home> through
+# under `zsh -f` when zsh is installed (the Bash tool is zsh). L1-L4 (ADR 0057): a pending doc whose front matter
+# carries `launches:` (a Rollout launch's) reads `launch`, a consumed one stays `consumed`, a body-only `launches:`
+# changes nothing, and a Resume pointer at a launch doc reads `launch`, once. The snippet resolves <home> through
 # skills/_shared/scripts/handoff-home.sh (CLAUDE_PLUGIN_ROOT points at this checkout), takes its inputs
 # slug / shared / pointer from the environment, scans a shared thread's _shared docs by front-matter
 # thread:, classifies the Resume-pointer doc, and fails loudly when the resolver is unreachable.
@@ -124,6 +126,17 @@ mkdir -p "$tmp/partialplugin/skills/close/scripts" && cp skills/close/scripts/ha
 mkdir -p "$tmp/xdg/git"; printf 'docs/\n' > "$tmp/xdg/git/ignore"
 printf '[core]\n\texcludesFile = %s\n' "$tmp/xdg/git/ignore" > "$tmp/poison"
 
+# L1-L4: Rollout-launch docs (ADR 0057), in their own HOME's _shared so the matrix above is unchanged
+hl="$tmp/hl"; ld="$hl/repos/workspaces/_shared/docs/handoffs"; mkdir -p "$ld" "$tmp/hl-out/docs/handoffs"
+printf -- '---\nthread: t\nstatus: pending\nlaunches: "[[ro-a]]"\n---\nbody\n'               > "$ld/launch-lf.md"
+printf -- '---\r\nthread: t\r\nstatus: pending\r\nlaunches: [[ro-b]]\r\n---\r\nbody\r\n'     > "$ld/launch-crlf.md"
+printf -- '---\nthread: t\nstatus: consumed\nlaunches: "[[ro-a]]"\n---\nbody\n'              > "$ld/launch-consumed.md"
+printf -- '---\nthread: t\nstatus: pending\n---\nlaunches: "[[ro-a]]"\n'                     > "$ld/launch-body-only.md"
+printf -- '---\nthread: t\nstatus: pending\nlaunches:\n---\nbody\n'                          > "$ld/launch-empty.md"
+printf -- '---\nstatus: pending\nlaunches: "[[ro-c]]"\n---\nbody\n'                           > "$tmp/hl-out/docs/handoffs/p.md"
+lexpected=$(printf '%s\n' "consumed launch-consumed.md" "launch launch-crlf.md" "launch launch-lf.md" \
+  "pending launch-body-only.md" "pending launch-empty.md" | LC_ALL=C sort)
+
 # top <dir> <home> — git's toplevel for <dir>, under that case's temp HOME and no system gitconfig (as tg).
 top() { (cd "$1" && GIT_CEILING_DIRECTORIES="$tmp" tg "$2" rev-parse --show-toplevel 2>/dev/null); }
 ok "$(top "$W/ws/sub" "$hs")" "$W" "the seat's git toplevel is the workspaces repo (precondition)" 
@@ -224,6 +237,15 @@ pending tool.md" "$L a pointer at the <home> doc is not printed twice"
   ok "$(names "$out")" "legacy legacy.md
 pending s1-crlf.md
 pending s1-lf.md" "$L a pointer at a legacy doc the _shared filter dropped is classified once"
+
+  # L1-L4: a Rollout launch's doc reads `launch` while pending, and only then
+  scan "$sh" "$tmp/plain" "$hl"; reset
+  ok "$(names "$out")" "$lexpected" "$L L1-L3: pending+launches → launch (LF and CRLF), consumed stays, body-only and empty stay pending"
+  ok "$rc" 0 "$L L1: the launch scan exits 0"
+  pointer="$ld/launch-lf.md"; scan "$sh" "$tmp/plain" "$hl"; reset
+  ok "$(printf '%s\n' "$out" | grep -c 'launch-lf\.md$')" 1 "$L L4: a pointer at a scanned launch doc prints it once"
+  pointer="$tmp/hl-out/docs/handoffs/p.md"; scan "$sh" "$tmp/plain" "$tmp/home2"; reset
+  ok "$out" "launch $tmp/hl-out/docs/handoffs/p.md" "$L L4: a pointer at a launch doc outside the scan reads launch"
 
   # the resolver unreachable: a loud non-zero exit, never a guessed <home>
   plugin=; scan "$sh" "$tmp/repo/sub" "$hg"; reset

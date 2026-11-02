@@ -307,3 +307,56 @@ test('control: the close-out paragraph inside step 6 fails close-out-last', () =
 test('control: a close-out paragraph that does not say "after step 7" fails close-out-last', () => {
   assert.deepEqual(checkSupersedeOrder(ORDER_GOOD.replace(', after step 7 has stamped this rollout\'s tasks', '')), ['close-out-last'])
 })
+
+// ---- hold-carry: a rollout-scope hold_until survives a supersede (p30-3; vault-grammar § Hold until) ----------
+// A hold kept only as prose was lost in the 10-21 → 10-26 regenerate (Q50). Step 1's carry preview names the prior's
+// `hold_until` line and the confirm lists it (the new rollout starts held), and step 6's carry copies it verbatim into
+// the new note. Pure, like checkSupersede.
+function checkHoldCarry(text) {
+  const one = collapse(sectionOf(text, /^### 1\. /))
+  const six = collapse(sectionOf(text, /^### 6\. /))
+  if (!one.includes('the preview prints one `hold_until pr=<pr> merged=<value>` line') ||
+    !one.includes('the `hold_until` line when the preview printed one (the new rollout starts held until that PR merges; to drop it, remove the line from the new note after the run)') ||
+    !six.includes('It also copies a standing rollout-scope `hold_until` from the prior verbatim into this note') ||
+    !six.includes('(Q50)')) return ['hold-carry']
+  return []
+}
+
+test("schedule step 1's preview and confirm name the prior's hold_until, and step 6's carry copies it", () => {
+  assert.deepEqual(checkHoldCarry(schedule), [])
+})
+
+test('control: a confirm that drops the hold_until line fails hold-carry', () => {
+  const cut = schedule.replace(', the `hold_until` line when the preview printed one (the new rollout starts held until that PR merges; to drop it, remove the line from the new note after the run)', '')
+  assert.notEqual(cut, schedule, 'control is vacuous')
+  assert.deepEqual(checkHoldCarry(cut), ['hold-carry'])
+})
+
+test('control: a step 6 that never copies the hold fails hold-carry', () => {
+  const cut = schedule.replace('It also copies a standing rollout-scope `hold_until` from the prior verbatim into this note', 'It leaves the prior\'s `hold_until` behind')
+  assert.notEqual(cut, schedule, 'control is vacuous')
+  assert.deepEqual(checkHoldCarry(cut), ['hold-carry'])
+})
+
+// ---- never-on-merge (p30-4; vault-grammar § Approved queue): carry copies an approved queue's hold, never its
+// `on_merge:`, so the new note keeps a plain hold its first `next` releases; step 6 and the template's line say so.
+function checkNeverOnMerge(text, tpl) {
+  const six = collapse(sectionOf(text, /^### 6\. /))
+  const line = tpl.split('\n').find((l) => l.startsWith('# on_merge:')) ?? ''
+  if (!six.includes("It never copies an approved queue's `on_merge:`") || !six.includes('the new note keeps a plain hold') ||
+    !line.includes('carry never copies it')) return ['never-on-merge']
+  return []
+}
+
+test("schedule step 6's carry never copies on_merge, and the template's line says so", () => {
+  assert.deepEqual(checkNeverOnMerge(schedule, template), [])
+})
+
+test('control: a step 6 or a template line that carries on_merge fails never-on-merge', () => {
+  const cut = schedule.replace("It never copies an approved queue's `on_merge:`", "It copies an approved queue's `on_merge:` too")
+  assert.notEqual(cut, schedule, 'control is vacuous')
+  assert.deepEqual(checkNeverOnMerge(cut, template), ['never-on-merge'])
+  const tcut = template.replace('carry never copies it', 'carry copies it')
+  assert.notEqual(tcut, template, 'control is vacuous')
+  assert.deepEqual(checkNeverOnMerge(schedule, tcut), ['never-on-merge'])
+})

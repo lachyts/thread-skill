@@ -21,7 +21,9 @@ reconcile-rollout.py for its PROJECT_ROOT_RE; reconcile-project.py for its PHASE
 REVIEW_STATUSES, pinned to the doc by tests/contracts/vault-grammar.test.mjs. In flight is § In flight, stated once in
 three module-level helpers that estate-dispatch.py's `record` loads too: first_link (a `rollout:` value's first link),
 link_live (it resolves to a note directly in Work/Tasks) and in_flight (live, `in_progress` or Review, on a status
-already read by status_of); a phase's members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as
+already read by status_of), with its one exception, still_to_start (a carried task still queued, open and linked to
+the rollout being superseded: schedule's Pre-flight grades it, ADR 0047), loaded by estate-rank.py and `record` too;
+a phase's members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as
 children, never copied: self-rollout-check.sh --resolve, land.sh --origin-slug, landing-register.py check,
 unfinished-rollout.py check and reconcile-rollout.py status. Restated, each cited: schedule § 2.5's verifier detection
 (SKILL.md prose, nothing to import), and pushed-base.sh's ahead classification (execution-fit.md § Dispatch blockers,
@@ -30,6 +32,11 @@ unfinished-rollout.py check and reconcile-rollout.py status. Restated, each cite
 The vault (pure Python, never under the deadline):
 - Projects: notes under Work/Projects outside Archive/, tagged `project`, with RT.dead_why None (not the `archived`
   tag, not status done/merged/dropped, not `done: true` or "true").
+- Own session (ADR 0061; CONTEXT.md **Big project**): each project row's ownSession. The note's `orient:` key, own or
+  sweep (read stripped and case-blind), wins; else a declared repo path qualifies when it is absolute after
+  expanduser (probe_repo's rule), a directory, with a CONTEXT.md file and a docs/adr/ directory holding at least one
+  `*.md` file (any case), read with plain os calls (an OSError reads false), never a probe, so --deadline 0 reads it
+  too and the rows stay equal.
 - Tasks: notes directly in Work/Tasks tagged `task`, neither `rollout` nor `phase`, not landed, not `archived`.
 - Rollouts: notes directly in Work/Tasks tagged `rollout` (CONTEXT.md **Live rollout**: live by location).
 - Phases: notes directly in Work/Phases tagged `phase`, not landed, not `archived`. A phase's openTasks counts the
@@ -48,6 +55,12 @@ The repo checks, schedule § 0's order, once per repo path that a live project's
 realpath; the declared strings kept):
   git                 `git rev-parse --show-toplevel`. A missing path, a plain directory or a failed probe leaves
                       every check unchecked with its reason.
+  clone               per declaring project (ADR 0064: one clone per (repo, project)), `unfinished-rollout.py clone
+                      --repo <declared path> --project <name>`: `default` or `project <slug>` (exit 0) picks the
+                      project's clone; exit 3 is a project blocker (its why the collision line, else the first taker
+                      line); any other exit leaves it unchecked. With a slug, the project's own `self-rollout-check.sh
+                      --resolve <declared path> <slug>` (memoised per (path, slug)) gives its rolloutRoot exactly as
+                      below; with `default`, a refusal or an unread clone, the default resolution does.
   self-rollout        `bash self-rollout-check.sh --resolve <declared path>` (ADR 0042: every parallel rollout runs from
                       its rollout clone `<toplevel>-rollout`): exit 0 prints the rolloutRoot, the clone (kept
                       realpath'd, as `path` is); a sub-path the clone lacks yet is still exit 0 with a `note:` (a
@@ -76,8 +89,9 @@ realpath; the declared strings kept):
                       non-blocking ahead row carries one of the three. A toplevel standing in for exit 3 or 5 keeps
                       the strict rule. pushed-base.sh stays the gate: it fetches and walks the full clone set;
                       tests/estate-scan.test.mjs runs it on copies of the fixtures for parity, as schedule § 0 would.
-  unfinished-rollout  `unfinished-rollout.py check --repo <root> --project <name>` per declaring project, without
-                      --regenerate: exit 3 blocks, 0 is the verdict (`none`, `file`), else unchecked.
+  unfinished-rollout  `unfinished-rollout.py check --repo <root> --project <name>` per declaring project, each against
+                      its own clone's git root (ADR 0064), without --regenerate: exit 3 blocks that project, 0 is the
+                      verdict (`none`, `file`), else unchecked.
   no-verifier         schedule § 2.5's order, read from the root's working tree: a `Verifier: \\`<cmd>\\`` line in the
                       agent docs (source: the file it is in), a Makefile `test:` target (`make test`), pyproject.toml
                       [tool.poetry] (`poetry run pytest`), package.json scripts.test (`npm test`). The agent docs are
@@ -108,7 +122,9 @@ Output, one JSON object (schema 1; --compact for one line):
   vaultErrors[] {kind: unreadable-tasks-notes | no-tasks-dir, notes[], skips[]},
   projects[]  {name, note, status (raw), standing: crowned|active|queued|parked|other|none, parked, crowned, lane,
                area[], aliases[], nextTask {result: live|blank|dead:<reason>, task, next_action}, repos[] (as
-               declared), tasks[] (slugs), openTasks, phases[] {slug, note, status, phase (its `phase:` as
+               declared), ownSession {own, by: key|design record|null, repo (the first qualifying declared path, as
+               written, else null), invalid? (a non-empty `orient:` value that is neither key, as JSON: the derived
+               test decides)}, tasks[] (slugs), openTasks, phases[] {slug, note, status, phase (its `phase:` as
                written), openTasks (by filename prefix; null with none)}, rollouts[],
                nextDue (the earliest due on or after today), overdue}
                ordered crowned, active, queued, parked, other, none, then by name, then by note;
@@ -125,8 +141,14 @@ Output, one JSON object (schema 1; --compact for one line):
                commits[] (up to 5, `log --oneline`)}, verifier {command, source: <agent doc>|Makefile|
                pyproject.toml|package.json|rollout <slug>|CLAUDE.md section} | null,
                unfinishedRollout[] {project, verdict, line, exit, stderr}, blockers[] {check, why},
-               unchecked[] {check, why}, errors[] {check, error}}, by path; blockers and unchecked in the check
-               order above, and unchecked means not clear (`deadline`, `timeout`, `vault`, `error`, ...);
+               unchecked[] {check, why}, errors[] {check, error}, projects[] {project, clone {exit, line, slug} |
+               null, rolloutRoot, selfRollout {exit, stderr}, root, blockers[], unchecked[]}}, by path; blockers and
+               unchecked in the check order above, and unchecked means not clear (`deadline`, `timeout`, `vault`,
+               `error`, ...). The row-level fields keep the default resolution (the default clone), and its blockers
+               carry no project's unfinished-rollout refusal; each declaring project's row (ADR 0064, by name; only on a
+               row whose git answered) carries its own: the checks of its own clone's root (the origin-keyed ones, as
+               the row's, and its own self-rollout, unpushed-default and no-verifier), its `clone` refusal and its own
+               unfinished-rollout refusal. estate-rank.py reads a run's blockers from its home project's row;
   rollouts[]  {slug, note, status, shape (absent: parallel), protocolVersion, projects[] (as written), projectRoot,
                supersedes, supersededBy, summary, error}, by slug. summary is reconcile-rollout.py status's
                {rolloutStatus, paused, pause_requested, pausedFor, incomplete, ceiling, ceilingError, counts,
@@ -170,7 +192,7 @@ VAULT_DEFAULT = "~/repos/obsidian"
 REVIEW_STATUSES = frozenset({"review"})  # vault-grammar.md § Statuses **Review**; pinned by its contract test
 STANDINGS = ("crowned", "active", "queued", "parked")
 STANDING_RANK = {s: i for i, s in enumerate(STANDINGS + ("other", "none"))}
-CHECKS = ("git", "self-rollout", "no-github-origin", "landing-register", "default-branch", "unpushed-default",
+CHECKS = ("git", "clone", "self-rollout", "no-github-origin", "landing-register", "default-branch", "unpushed-default",
           "unfinished-rollout", "no-verifier")
 CHECK_RANK = {c: i for i, c in enumerate(CHECKS)}
 STATUS_SKIPS = ["rollout status", "unfinished-rollout"]
@@ -198,6 +220,11 @@ LOCAL_REPO_ENV = frozenset({
 LINK_WHY = (("not a project note (", "not a project"), ("ambiguous (", "ambiguous"), ("area note (", "area note"),
             ("no closed frontmatter (", "project unreadable"), ("frontmatter does not parse (", "project unreadable"),
             ("frontmatter is not a mapping (", "project unreadable"), ("unreadable (", "project unreadable"))
+# A big project's test (ADR 0061; CONTEXT.md **Big project**): the project note's `orient:` key, own or sweep, else a
+# declared repo holding its own design record, a CONTEXT.md file and a docs/adr/ directory with a `*.md` file.
+ORIENT_KEYS = ("own", "sweep")
+DESIGN_CONTEXT = "CONTEXT.md"
+DESIGN_ADR = os.path.join("docs", "adr")
 
 
 def fail(code, reason):
@@ -287,6 +314,61 @@ def in_flight(status, live):
     """vault-grammar.md § In flight for a task: its rollout link is live, or its status (as NA.status_of reads it, so
     `in-progress` is `in_progress`) is in_progress or Review."""
     return live or status == "in_progress" or status in REVIEW_STATUSES
+
+
+def _link_key(link):
+    """A link or a note path as the lower-case basename it names, estate-rank.py's slug_key fold written here (that
+    script loads this one): `[[`/`]]`, an `|alias`, a `#heading` and the path cut, `.md` dropped. The two must fold
+    every value alike (still_to_start's matches against preflight's): tests/estate-scan.test.mjs 18 pins them."""
+    s = str(link).strip()
+    if s.startswith("[[") and s.endswith("]]"):
+        s = s[2:-2]
+    s = s.split("|")[0].split("#")[0].strip().replace("\\", "/").rstrip("/")
+    s = s.rsplit("/", 1)[-1]
+    if s.lower().endswith(".md"):
+        s = s[:-3]
+    return s.strip().lower()
+
+
+def still_to_start(status, link, superseding):
+    """The one exception to § In flight, at schedule's Pre-flight on a supersede (schedule § 1.5, ADR 0047): a carried
+    task still queued, its status (as NA.status_of reads it) `open` and its `rollout:` naming the rollout being
+    superseded. A task that has started (in_progress, Review, any other status) is still in flight."""
+    if not superseding or status != "open" or not link:
+        return False
+    key = _link_key(link)
+    return bool(key) and key == _link_key(superseding)
+
+
+def design_record(declared):
+    """True when a declared repo path holds its own design record: absolute after expanduser (probe_repo's rule), a
+    directory, with a CONTEXT.md file and a docs/adr/ directory holding at least one file named `*.md` (any case).
+    Pure reads, never a probe; one that fails (OSError) reads false."""
+    try:
+        path = os.path.expanduser(declared)
+        if not os.path.isabs(path) or not os.path.isdir(path) or not os.path.isfile(os.path.join(path, DESIGN_CONTEXT)):
+            return False
+        adr = os.path.join(path, DESIGN_ADR)
+        return os.path.isdir(adr) and any(name.lower().endswith(".md") and os.path.isfile(os.path.join(adr, name))
+                                          for name in os.listdir(adr))
+    except OSError:
+        return False
+
+
+def own_session(value, repos):
+    """A project's ownSession (ADR 0061): {own, by, repo, invalid?}. A valid `orient:` key (own or sweep, read
+    stripped and case-blind) wins, `by: "key"`; else the first declared repo, in declared order, holding its own design
+    record makes it big, `by: "design record"`, `repo` as written; else it is small, `by` and `repo` null. A non-empty
+    `orient:` value that is neither key is kept as `invalid` (its JSON form), and the derived test decides."""
+    empty = value is None or (isinstance(value, str) and not value.strip()) or (isinstance(value, (list, dict)) and not value)
+    key = value.strip().lower() if isinstance(value, str) else None
+    if key in ORIENT_KEYS:
+        return {"own": key == "own", "by": "key", "repo": None}
+    repo = next((r for r in repos if design_record(r)), None)
+    out = {"own": repo is not None, "by": "design record" if repo else None, "repo": repo}
+    if not empty:
+        out["invalid"] = jsonable(value)
+    return out
 
 
 def link_why(raw):
@@ -496,6 +578,16 @@ class Repo:
         self.blockers, self.unchecked, self.errors = [], [], []
 
 
+class Resolved:
+    """self-rollout's `--resolve` for one repo row, with a project's clone slug or none (ADR 0064): the rolloutRoot, its
+    git root and what the check found."""
+
+    def __init__(self):
+        self.self_rollout = self.rollout_root = self.root = self.git_why = None
+        self.stand_in = False
+        self.blockers, self.unchecked, self.errors = [], [], []
+
+
 class RootFacts:
     """The checks of one git root (the rolloutRoot's), shared by every declared path under it."""
 
@@ -519,6 +611,7 @@ class Scan:
         self.skipped = {}
         self.vault_errors = []
         self._resolved = {}
+        self._clones = {}  # (repo path, clone slug | None) -> Resolved: self-rollout's --resolve, once each
 
     # ---- the vault ---------------------------------------------------------------------------------------------
 
@@ -594,6 +687,7 @@ class Scan:
                     continue
                 standing = standing_of(NA.status_of(note))
                 slot = NA.read_slots(self.vault, [rel])[0]
+                repos = [x.strip() for x in NA.as_list(note.get("repos")) if isinstance(x, str) and x.strip()]
                 rows[rel] = {
                     "name": slug_of(rel), "note": slash(rel), "status": jsonable(note.get("status")),
                     "standing": standing, "parked": standing == "parked", "crowned": jsonable(note.get("crowned")),
@@ -603,7 +697,7 @@ class Scan:
                     "nextTask": ({"result": slot["result"], "task": slot["task"], "next_action": slot["next_action"]}
                                  if slot["kind"] == "slot" else
                                  {"result": "skip:%s" % slot["result"], "task": None, "next_action": None}),
-                    "repos": [x.strip() for x in NA.as_list(note.get("repos")) if isinstance(x, str) and x.strip()],
+                    "repos": repos, "ownSession": own_session(note.get("orient"), repos),
                     "tasks": [], "openTasks": 0, "phases": [], "rollouts": [], "nextDue": None, "overdue": 0,
                 }
         return rows
@@ -706,39 +800,67 @@ class Scan:
             r.git, r.git_why = False, "not a git repo"
             return
         r.git, r.toplevel = True, os.path.realpath(g.out.strip())
+        res = self.resolve_clone(r)
+        r.self_rollout, r.rollout_root, r.root, r.stand_in = res.self_rollout, res.rollout_root, res.root, res.stand_in
+        r.blockers += res.blockers
+        r.unchecked += res.unchecked
+        r.errors += res.errors
+        if res.git_why:
+            r.git_why = res.git_why
+
+    def resolve_clone(self, r, slug=None):
+        """`self-rollout-check.sh --resolve <declared path> [<slug>]` for a repo row whose git answered (ADR 0042; a
+        project's own clone with its slug, ADR 0064), memoised per (path, slug): a Resolved."""
+        key = (r.path, slug)
+        if key in self._clones:
+            return self._clones[key]
+        run, res = self.runner, Resolved()
         declared = os.path.expanduser(sorted(r.declared)[0])
-        s = run.run(["bash", SELF_ROLLOUT_SH, "--resolve", declared])
-        r.self_rollout = {"exit": s.exit, "stderr": s.err}
+        s = run.run(["bash", SELF_ROLLOUT_SH, "--resolve", declared] + ([slug] if slug else []))
+        res.self_rollout = {"exit": s.exit, "stderr": s.err}
         printed = s.out.strip().splitlines()[-1] if s.ok and s.out.strip() else None
         # realpath'd, as `path` is, so a declared `.../repo/` reads back equal to its path. On exit 4 the clone does not
         # exist yet: the toplevel stands in, never the would-be clone it prints, for every later check, as the peer it
         # becomes once --ensure clones at origin/<d> (root_facts).
-        r.rollout_root = os.path.realpath(printed) if printed else r.toplevel
+        res.rollout_root = os.path.realpath(printed) if printed else r.toplevel
         if printed is None:
             if s.why:
-                r.unchecked.append({"check": "self-rollout", "why": s.why})
+                res.unchecked.append({"check": "self-rollout", "why": s.why})
             elif s.exit in (4, 5):
-                r.stand_in = s.exit == 4  # 4: no clone yet, schedule § 0 makes it; 5: no-github-origin reports it
+                res.stand_in = s.exit == 4  # 4: no clone yet, schedule § 0 makes it; 5: no-github-origin reports it
             elif s.exit == 3:
                 keys = ("is not a usable rollout clone", "has no rollout clone", "would track")
                 why = next((ln.strip() for ln in s.err.splitlines() if any(k in ln for k in keys)), None)
-                r.blockers.append({"check": "self-rollout", "why": why or last_line(s.err) or "exit 3"})
+                res.blockers.append({"check": "self-rollout", "why": why or last_line(s.err) or "exit 3"})
             else:
-                r.unchecked.append({"check": "self-rollout", "why": "error"})
-                r.errors.append({"check": "self-rollout", "error": last_line(s.err) or "exit %s" % s.exit})
-        real = os.path.realpath(r.rollout_root)
+                res.unchecked.append({"check": "self-rollout", "why": "error"})
+                res.errors.append({"check": "self-rollout", "error": last_line(s.err) or "exit %s" % s.exit})
+        real = os.path.realpath(res.rollout_root)
         if real in (r.path, r.toplevel):
-            r.root = r.toplevel
-            return
-        # A stale clone may lack the sub-path yet (exit 0 with its `note:`): its nearest directory names the clone.
-        at = r.rollout_root
-        while not os.path.isdir(at) and os.path.dirname(at) != at:
-            at = os.path.dirname(at)
-        t = run.git(at, "rev-parse", "--show-toplevel")
-        if t.ok and t.out.strip():
-            r.root = os.path.realpath(t.out.strip())
+            res.root = r.toplevel
         else:
-            r.git_why = t.why or "the rollout root is not a git repo"
+            # A stale clone may lack the sub-path yet (exit 0 with its `note:`): its nearest directory names the clone.
+            at = res.rollout_root
+            while not os.path.isdir(at) and os.path.dirname(at) != at:
+                at = os.path.dirname(at)
+            t = run.git(at, "rev-parse", "--show-toplevel")
+            if t.ok and t.out.strip():
+                res.root = os.path.realpath(t.out.strip())
+            else:
+                res.git_why = t.why or "the rollout root is not a git repo"
+        self._clones[key] = res
+        return res
+
+    def clone(self, r, name):
+        """`unfinished-rollout.py clone --repo <declared path> --project <name>` (ADR 0064): which clone the project's
+        parallel rollout on this repo runs from. {exit, line, slug (the `project <slug>` line's, else null), stderr,
+        why}."""
+        declared = os.path.expanduser(sorted(r.declared)[0])
+        c = self.runner.run([sys.executable, UNFINISHED_ROLLOUT_PY, "clone", "--repo", declared, "--project", name,
+                             "--tasks-dir", os.path.join(self.root, self.NA.TASKS_DIR)])
+        line = c.out.strip().splitlines()[0] if c.out.strip() else None
+        slug = line.split(" ", 1)[1] if line and line.startswith("project ") and c.exit == 0 else None
+        return {"exit": c.exit, "line": line, "slug": slug, "stderr": c.err, "why": c.why}
 
     def root_facts(self, root, primaries, stand_in=False):
         """Every check of one git root, in schedule § 0's order, with its clone set [root] + primaries. stand_in: the
@@ -1095,23 +1217,37 @@ class Scan:
                 else:
                     row["error"] = "vault"
             list(pool.map(self.probe_repo, repos))
+            # ADR 0064: each declaring project's clone (the `clone` verb), then its own --resolve with that slug; the
+            # default resolution (probe_repo's) serves `default` and every project whose clone could not be read.
+            decl = [(r, name) for r in repos if r.root and r.git_why is None for name in sorted(r.by)]
+            clones = dict(zip([(r.path, n) for r, n in decl], pool.map(lambda rn: self.clone(*rn), decl))) if tasks_ok else {}
+            slugs = sorted({(r.path, clones[(r.path, n)]["slug"]) for r, n in decl
+                            if (r.path, n) in clones and clones[(r.path, n)]["slug"]})
+            by_path = {r.path: r for r in repos}
+            list(pool.map(lambda ps: self.resolve_clone(by_path[ps[0]], ps[1]), slugs))
+
+            def own(r, name):
+                c = clones.get((r.path, name))
+                return self.resolve_clone(r, c["slug"] if c else None)
+
             roots, stand_ins = {}, set()
-            for r in repos:
-                if r.root and r.git_why is None:
-                    roots.setdefault(r.root, set())
-                    if r.toplevel != r.root:
-                        roots[r.root].add(r.toplevel)
-                    if r.stand_in:
-                        stand_ins.add(r.root)
+            for r, res in [(r, r) for r in repos if r.root and r.git_why is None] + \
+                    [(r, own(r, n)) for r, n in decl if own(r, n).root and own(r, n).git_why is None]:
+                roots.setdefault(res.root, set())
+                if r.toplevel != res.root:
+                    roots[res.root].add(r.toplevel)
+                if res.stand_in:
+                    stand_ins.add(res.root)
             facts = dict(zip(sorted(roots), pool.map(lambda k: self.root_facts(k, sorted(roots[k]), k in stand_ins),
                                                      sorted(roots))))
-            pairs = sorted({(name, r.root) for r in repos if r.root and r.git_why is None for name in r.by})
+            pairs = sorted({(n, own(r, n).root if own(r, n).root and own(r, n).git_why is None else r.root)
+                            for r, n in decl})
             unfinished = dict(zip(pairs, pool.map(lambda pr: self.unfinished(*pr), pairs))) if tasks_ok else {}
             for row in rollouts:
                 if row["slug"] in status:
                     row["summary"], row["error"] = status[row["slug"]].result()
 
-        out_repos = [self.repo_out(r, facts.get(r.root), unfinished, tasks_ok) for r in repos]
+        out_repos = [self.repo_out(r, facts, unfinished, tasks_ok, clones) for r in repos]
         deadlines.sort(key=lambda x: (x["date"], x["task"]))
         skipped = [{"note": k, "why": self.skipped[k]} for k in sorted(self.skipped)]
         out = {
@@ -1129,12 +1265,13 @@ class Scan:
         out["elapsedMs"] = int((time.monotonic() - START) * 1000)
         return out
 
-    def repo_out(self, r, f, unfinished, tasks_ok):
+    def repo_out(self, r, facts, unfinished, tasks_ok, clones):
+        f = facts.get(r.root)
         out = {"path": r.path, "declared": sorted(r.declared), "declaredBy": sorted(r.by), "exists": r.exists,
                "git": r.git, "toplevel": r.toplevel, "nested": (r.toplevel != r.path) if r.toplevel else None,
                "rolloutRoot": None, "selfRollout": None, "origin": None, "github": None, "landingRegister": None,
                "defaultBranch": None, "defaultBranchSource": None, "unpushed": [], "verifier": None,
-               "unfinishedRollout": [], "blockers": [], "unchecked": [], "errors": []}
+               "unfinishedRollout": [], "blockers": [], "unchecked": [], "errors": [], "projects": []}
         if r.git_why is not None or f is None:
             why = r.git_why or "error"
             if r.self_rollout is None:  # git never answered: nothing was checked
@@ -1149,25 +1286,66 @@ class Scan:
                    landingRegister=f.landing, defaultBranch=f.branch, defaultBranchSource=f.source,
                    unpushed=f.unpushed, verifier=f.verifier)
         blockers, unchecked, errors = list(r.blockers) + f.blockers, list(r.unchecked) + f.unchecked, list(r.errors) + f.errors
+        # Each declaring project's unfinished-rollout check ran against its own clone's root (ADR 0064): the row lists
+        # them, and each project row (below) carries its own refusal, so the row's blockers carry none of them.
+        own_root = lambda name: self.project_root(r, name, clones)[1]  # noqa: E731
         if not tasks_ok:
             unchecked.append({"check": "unfinished-rollout", "why": "vault"})
         else:
-            rows = [unfinished[(name, r.root)] for name in sorted(r.by)]
+            rows = [unfinished[(name, own_root(name))] for name in sorted(r.by)]
             ran = [x for x in rows if x["exit"] is not None]
             out["unfinishedRollout"] = [{k: x[k] for k in ("project", "verdict", "line", "exit", "stderr")} for x in ran]
-            refused = [x for x in ran if x["exit"] == 3]
             broken = [x for x in rows if x["exit"] not in (0, 3)]
-            if refused:
-                blockers.append({"check": "unfinished-rollout", "why": refused[0]["line"] or "refuse"})
-            elif broken:
+            if broken:
                 unchecked.append({"check": "unfinished-rollout", "why": broken[0]["why"] or "error"})
                 for x in broken:
                     if not x["why"]:
                         errors.append({"check": "unfinished-rollout",
                                        "error": "%s: %s" % (x["project"], last_line(x["stderr"]) or "exit %s" % x["exit"])})
         out.update(blockers=ordered(blockers), unchecked=ordered(unchecked),
-                   errors=sorted(errors, key=lambda e: CHECK_RANK[e["check"]]))
+                   errors=sorted(errors, key=lambda e: CHECK_RANK[e["check"]]),
+                   projects=[self.project_out(r, name, facts, unfinished, tasks_ok, clones) for name in sorted(r.by)])
         return out
+
+    def project_root(self, r, name, clones):
+        """(the Resolved for the project's own clone, the git root its checks ran on): its `clone` slug's --resolve, else the
+        default resolution (a `default` line, a refusal or an unread clone), its root falling back to the row's."""
+        c = clones.get((r.path, name))
+        res = self.resolve_clone(r, c["slug"] if c else None)
+        return res, (res.root if res.root and res.git_why is None else r.root)
+
+    def project_out(self, r, name, facts, unfinished, tasks_ok, clones):
+        """One declaring project's row (ADR 0064): {project, clone {exit, line, slug}, rolloutRoot, selfRollout, root,
+        blockers, unchecked}. Its blockers are its own root's checks (the origin-keyed ones as the row's, plus its own
+        self-rollout, unpushed-default and no-verifier), its `clone` refusal and its own unfinished-rollout refusal."""
+        res, root = self.project_root(r, name, clones)
+        f = facts.get(root)
+        c = clones.get((r.path, name))
+        blockers, unchecked = list(res.blockers), list(res.unchecked)
+        if f is not None:
+            blockers += f.blockers
+            unchecked += f.unchecked
+        else:
+            unchecked += [{"check": k, "why": res.git_why or "error"} for k in CHECKS
+                          if CHECK_RANK[k] > CHECK_RANK["self-rollout"]]
+        if not tasks_ok:
+            unchecked += [{"check": "clone", "why": "vault"}, {"check": "unfinished-rollout", "why": "vault"}]
+        else:
+            if c["exit"] == 3:
+                lines = [ln.strip() for ln in c["stderr"].splitlines() if ln.strip() and not ln.startswith("WARN")]
+                why = next((ln for ln in lines if "is not a usable rollout clone" in ln), lines[0] if lines else None)
+                blockers.append({"check": "clone", "why": why or c["line"] or "refuse"})
+            elif c["exit"] != 0:
+                unchecked.append({"check": "clone", "why": c["why"] or "error"})
+            u = unfinished.get((name, root))
+            if u is not None and u["exit"] == 3:
+                blockers.append({"check": "unfinished-rollout", "why": u["line"] or "refuse"})
+            elif u is not None and u["exit"] != 0:
+                unchecked.append({"check": "unfinished-rollout", "why": u["why"] or "error"})
+        return {"project": name,
+                "clone": {"exit": c["exit"], "line": c["line"], "slug": c["slug"]} if c else None,
+                "rolloutRoot": res.rollout_root, "selfRollout": res.self_rollout, "root": root,
+                "blockers": ordered(blockers), "unchecked": ordered(unchecked)}
 
 
 def num(x):

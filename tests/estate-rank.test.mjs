@@ -5,7 +5,7 @@
 // the real one (`estate-scan.py --vault V --today 2026-10-20 --deadline 0`, which starts no subprocess), run once and
 // shared, so the ranker is pinned to the scan's actual schema; the cases that need a blocker mutate that JSON in
 // memory into S/scan-*.json. Every rank run passes --today 2026-10-20; the snooze, unpark and kill cases (R1-R4: the
-// Unpark offer's writes, p25-3) write only copies of V.
+// Unpark offer's writes, p25-3) write only copies of V. R6 (schedule's Pre-flight, ADR 0047) ranks a vault of its own, VP.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -462,7 +462,8 @@ test('6. leverage: agent minutes over attention minutes (deciding plus reviewing
   assert.equal(t('que-serial').attentionMinutes, 0)
   assert.equal(t('que-call').leverage, 7.5)
   assert.equal(t('que-call').decisionMinutes, 1)
-  assert.deepEqual(t('que-call').review, { pr: 1, signOff: 1, eyeCheck: 0, minutes: 3 })
+  assert.deepEqual(t('que-call').review, { pr: 1, signOff: 1, eyeCheck: 0, minutes: 3 },
+    "a spend-only gate still costs a sign-off: the ranker cannot see the standing approval's limit (ADR 0034's 2026-10-27 amendment, residual (x))")
   assert.equal(t('que-call').attentionMinutes, 4)
   assert.equal(t('crown-low').leverage, 1)
   assert.equal(t('crown-low').attentionMinutes, 120, 'a session task holds Lachy for its whole length')
@@ -550,6 +551,30 @@ test('8. runs: grouped by home, shape and root, with their Review load, blockers
     assert.deepEqual(runOf(b, id).blockers, repo.blockers, id)
     assert.deepEqual(runOf(b, id).unchecked, repo.unchecked, id)
   }
+})
+
+// ---- 8b. ADR 0064: two projects' runs on one repo read their home project's own clone ---------------------------------
+test('8b. runs: a run reads rolloutRoot, blockers and unchecked from its home project\'s row; sameRoot keys on rolloutRoot', () => {
+  const act = ROOT('act')
+  const s = JSON.parse(fs.readFileSync(SCAN_FILE, 'utf8'))
+  const repo = s.repos.find((x) => x.path === act)
+  assert.ok(repo, `a scan repo row for ${act}`)
+  const own = (project, rolloutRoot, blockers = [], unchecked = []) => ({ project, clone: null, rolloutRoot, selfRollout: null, root: rolloutRoot, blockers, unchecked })
+  repo.blockers = [{ check: 'landing-register', why: 'the row, never read when the project has its own entry' }]
+  repo.projects = [own('Act', `${act}-rollout`, [{ check: 'unfinished-rollout', why: 'refuse act-rollout' }]),
+    own('Shared', `${act}-shared-rollout`, [], [{ check: 'default-branch', why: 'deadline' }])]
+  const file = path.join(S, 'scan-projects.json')
+  write(file, JSON.stringify(s))
+  const j = ok(py(['rank', '--scan', file, '--today', TODAY, ...MAIN_FILES.flatMap((f) => ['--grades', f])]))
+  const a = runOf(j, `Act/parallel/${act}`)
+  const b = runOf(j, `Shared/parallel/${act}`)
+  assert.deepEqual([a.rolloutRoot, a.blockers, a.unchecked], [`${act}-rollout`, repo.projects[0].blockers, []])
+  assert.deepEqual([b.rolloutRoot, b.blockers, b.unchecked], [`${act}-shared-rollout`, [], repo.projects[1].unchecked])
+  assert.deepEqual([a.sameRoot, b.sameRoot], [[], []], 'their own clones are two roots')
+  repo.projects[1].rolloutRoot = `${act}-rollout`
+  write(file, JSON.stringify(s))
+  const k = ok(py(['rank', '--scan', file, '--today', TODAY, ...MAIN_FILES.flatMap((f) => ['--grades', f])]))
+  assert.deepEqual(runOf(k, `Act/parallel/${act}`).sameRoot, [`Shared/parallel/${act}`], 'control: one clone is one root')
 })
 
 // ---- 9. decisions[] ---------------------------------------------------------------------------------------------------
@@ -903,4 +928,117 @@ test('R5. a decision fork passes through the ranker when given, and nothing chan
   assert.deepEqual(t.decisions[0], { question: 'Keep v3 or v4?', recommendation: 'v4', options: ['v4', 'v3'], confidence: 'high',
     why: 'fixture: src/x.py:12', fork: 'Keep v3 or v4' })
   assert.ok(!('fork' in row(ok(rank([forked('')])), 'lab-01').decisions[0]), 'an empty fork is left out')
+})
+
+// ---- R6. A carried task still queued is gradeable at schedule's Pre-flight (ADR 0047) -----------------------------
+// Its own vault VP: project Pf and a live, never-started prior rollout `prior`. q is open and linked to it (carried,
+// still queued), s is in_progress and linked to it (carried, started), r-on-q is Ready work that depends on q.
+// Without --superseding q is in flight, skipped, and its grade warned and ignored, so nothing waits on it; with
+// `--superseding prior` (schedule § 1.5) q is graded, and r-on-q is held by q's grade; s stays in flight either way.
+test('R6. rank --superseding: a carried queued task is graded and holds its dependants; a started one stays in flight', () => {
+  const VP = path.join(S, 'pf')
+  const TP = (slug, status, rest = '') => write(path.join(VP, 'Work', 'Tasks', `${slug}.md`),
+    fm(`tags:\n  - task\nstatus: ${status}\nprojects:\n  - "[[Pf]]"${rest}`, `\n# Task ${slug}\n`))
+  write(path.join(VP, 'Work', 'Projects', 'Pf.md'), fm('tags:\n  - project\nstatus: active'))
+  write(path.join(VP, 'Work', 'Tasks', 'prior.md'), fm('tags:\n  - rollout\nstatus: open\nprotocol_version: 5\nprojects:\n  - "[[Pf]]"'))
+  TP('q', 'open', '\nrollout: "[[prior]]"')
+  TP('s', 'in_progress', '\nrollout: "[[prior]]"')
+  TP('r-on-q', 'open', links('depends-on', ['q']))
+  const sc = spawnSync('python3', [SCAN, '--vault', VP, '--today', TODAY, '--deadline', '0'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(sc.status, 0, sc.stderr)
+  const scanFile = path.join(S, 'scan-pf.json')
+  write(scanFile, sc.stdout)
+  assert.deepEqual(JSON.parse(sc.stdout).tasks.filter((t) => t.slug !== 'r-on-q').map((t) => [t.slug, t.inFlight]), [['q', true], ['s', true]],
+    'the scan leaves both carried tasks in flight: the exception is the ranker\'s, at the Pre-flight only')
+  const grades = gradesFile('pf', { project: 'Pf', tasks: [G('q', 'One call', 'parallel', { decisions: one() }), G('s', 'Ready', 'parallel'),
+    G('r-on-q', 'Ready', 'parallel')] })
+  const pf = (more = []) => ok(py(['rank', '--scan', scanFile, '--today', TODAY, '--grades', grades, ...more]))
+  const plain = pf()
+  assert.deepEqual(plain.skipped, [{ slug: 'q', why: 'in flight' }, { slug: 's', why: 'in flight' }])
+  assert.ok(plain.warnings.some((w) => /^grade for q .*the task is in flight, never graded; ignored$/.test(w)), plain.warnings.join('\n'))
+  assert.deepEqual(row(plain, 'r-on-q').blockedBy, [], 'an in-flight dependency holds nothing')
+  assert.ok(!plain.tasks.some((t) => t.slug === 'q'))
+  for (const sup of ['prior', '[[prior]]', path.join(VP, 'Work', 'Tasks', 'prior.md')]) {
+    const j = pf(['--superseding', sup])
+    assert.deepEqual(j.skipped, [{ slug: 's', why: 'in flight' }], sup)
+    assert.equal(row(j, 'q').grade, 'One call', sup)
+    assert.deepEqual(row(j, 'r-on-q').blockedBy, [{ slug: 'q', why: 'One call' }], `${sup}: held by q's grade`)
+    assert.ok(j.warnings.some((w) => /^grade for s .*the task is in flight, never graded; ignored$/.test(w)), j.warnings.join('\n'))
+    assert.equal(j.counts.gradeable, 2)
+  }
+  // Another rollout's name leaves q in flight.
+  assert.deepEqual(pf(['--superseding', 'other-rollout']).skipped, plain.skipped)
+})
+
+// ---- R7. The Owner (ADR 0054): only his decisions are asked, counted and charged; the rest are ruled now ----------
+// readiness-grade.md § Each decision: `owner` yours, priorities or technical (missing, unknown or `gate` read as his),
+// `goal` and `stakes` required with an explicit `owner: yours`; a fork, a low-confidence priorities call and a ruled
+// call naming a gated input the task is gated by read as his; a technical guess is the executing session's.
+test('R7. owner and Framing: his decisions asked and counted, the rest ruled into decidedForYou, the backstop and the switches', () => {
+  const O = (q, rec, opts, owner, extra = {}) => ({ ...D(q, rec, opts, extra.confidence ?? 'high'), owner, ...extra })
+  const FR = { goal: 'Ties to the goal.', stakes: ['gains a; costs b', 'gains c; costs d'] }
+  const his = (q = 'Who?') => O(q, 'a', ['a', 'b'], 'yours', FR)
+  const lab = [
+    G('lab-01', 'One call', 'serial', { decisions: [O('Schema?', 'flat', ['flat', 'nested'], 'technical'), his()] }),
+    G('lab-02', 'Grill', 'serial', { decisions: [O('A?', 'a', ['a', 'b'], 'technical'), O('B?', 'a', ['a', 'b'], 'technical', { confidence: 'medium' })] }),
+    G('lab-03', 'Grill', 'serial', { decisions: [] }),
+    G('lab-04', 'Ready', 'serial', { decisions: [O('Log format?', 'jsonl', ['jsonl', 'text'], 'technical')] }),
+    G('lab-05', 'Ready', 'serial', { decisions: [O('Retry?', 'twice', ['twice', 'never'], 'technical', { confidence: 'low' })] }),
+    G('lab-06', 'Ready', 'serial', { decisions: [O('Cost or polish?', 'polish', ['polish', 'cost'], 'priorities', { confidence: 'low' })] }),
+    G('lab-07', 'One call', 'serial', { decisions: [O('Q?', 'a', ['a', 'b'], 'whatever')] }),
+    G('lab-08', 'One call', 'serial', { decisions: [O('Next move?', 'a', ['a', 'b'], 'gate')] }),
+    G('lab-09', 'One call', 'serial', { decisions: [O('Keep v3?', 'v4', ['v4', 'v3'], 'technical', { fork: 'Keep v3 or v4' })] }),
+    G('lab-10', 'One call', 'serial', { decisions: [O('Index?', 'btree', ['btree', 'hash'], ' Technical '), his()] }),
+    G('lab-11', 'Grill', 'serial', { decisions: [his(), O('A?', 'a', ['a', 'b'], 'technical'), O('B?', 'a', ['a', 'b'], 'technical', { confidence: 'medium' })] }),
+    G('lab-12', 'One call', 'serial', { decisions: [O('Who?', 'a', ['a', 'b'], 'yours')] }),
+    G('lab-13', 'One call', 'serial', { decisions: [O('Who?', 'a', ['a', 'b'], 'yours', { goal: 'g', stakes: ['only one'] })] }),
+    G('lab-14', 'One call', 'serial', { decisions: [D('Who?', 'a', ['a', 'b'])] }),
+    G('lab-15', 'One call', 'serial', { decisions: [O('Order?', 'second', ['first', 'second'], 'yours', { goal: 'g', stakes: ['s-first', 's-second'] })] }),
+    G('lab-16', 'Ready', 'serial', { gates: ['credential'], decisions: [O('Which API key?', 'the deploy one', ['the deploy one', 'a new one'], 'technical')] }),
+    G('lab-17', 'Ready', 'serial', { decisions: [O('Which API key?', 'the deploy one', ['the deploy one', 'a new one'], 'technical')] }),
+    G('lab-18', 'Ready', 'serial', { gates: ['spend'], decisions: [O('Pay for the API?', 'yes, capped', ['yes, capped', 'no'], 'priorities')] }),
+  ]
+  const j = ok(rank([gradesFile('owner', { project: 'Lab', tasks: lab })]))
+  fieldsHold(j)
+  const t = (slug) => row(j, slug)
+  const warned = (re) => assert.ok(j.warnings.some((w) => re.test(w)), `no warning ${re}: ${j.warnings.join('\n')}`)
+  const errs = Object.fromEntries(j.invalid.map((x) => [x.slug, x.errors]))
+  // A One call with a ruled and a decision of his: one asked, one ruled, still a One call, charged for one.
+  assert.deepEqual([t('lab-01').grade, t('lab-01').decisions.map((d) => d.question), t('lab-01').decisionMinutes], ['One call', ['Who?'], 1])
+  assert.deepEqual(t('lab-01').decidedForYou, [{ question: 'Schema?', recommendation: 'flat', options: ['flat', 'nested'], confidence: 'high',
+    why: 'fixture: src/x.py:12', owner: 'technical' }])
+  assert.ok(!('owner' in t('lab-01').decisions[0]), 'his decisions keep today\'s shape, no owner key')
+  assert.deepEqual([t('lab-01').decisions[0].goal, t('lab-01').decisions[0].stakes], [FR.goal, FR.stakes])
+  // A Grill whose every decision is ruled is invalid; an empty one keeps today's message.
+  assert.deepEqual(errs['lab-02'], ['Grill needs at least one decision Lachy owns (owner yours)'])
+  assert.deepEqual(errs['lab-03'], ['Grill needs at least one decision'])
+  // Ready stays Ready with a ruled call; a technical guess is dropped, never raising; a priorities guess is his.
+  assert.deepEqual([t('lab-04').grade, t('lab-04').raised, t('lab-04').decidedForYou.length], ['Ready', [], 1])
+  assert.deepEqual([t('lab-05').grade, t('lab-05').decisions, t('lab-05').decidedForYou], ['Ready', [], []])
+  warned(/^lab-05 decision 1: a technical decision at low confidence is left to the executing session \(grill-fit 2\(a\)\), never ruled; dropped$/)
+  assert.deepEqual([t('lab-06').grade, t('lab-06').raised.map((r) => r.why)], ['Grill', ['decisions', 'confidence']])
+  warned(/^lab-06 decision 1: a priorities decision at low confidence is his to make; read as yours/)
+  // Unknown, gate and a fork read as his, each warned; odd spacing and case are normalised.
+  for (const s of ['lab-07', 'lab-08', 'lab-09']) assert.deepEqual([t(s).decisions.length, t(s).decidedForYou], [1, []], s)
+  warned(/^lab-07 decision 1: owner "whatever" is not yours, priorities or technical; read as yours/)
+  warned(/^lab-08 decision 1: owner gate is never a task decision's owner/)
+  warned(/^lab-09 decision 1: it answers an open fork, which stays Lachy's; owner technical read as yours/)
+  assert.equal(t('lab-10').decidedForYou[0].owner, 'technical')
+  // The less sure ruled call first.
+  assert.deepEqual(t('lab-11').decidedForYou.map((d) => [d.question, d.confidence]), [['B?', 'medium'], ['A?', 'high']])
+  // An explicit owner yours needs its Framing; a grade with no owner is warned and asked as built.
+  const FRAMING = 'decision 1: a decision of his needs a `goal` and one `stakes` line per option (asking.md § 3)'
+  assert.deepEqual(errs['lab-12'], [FRAMING])
+  assert.deepEqual(errs['lab-13'], [FRAMING])
+  assert.equal(t('lab-14').grade, 'One call')
+  warned(/^lab-14 decision 1: no owner, read as yours; asked without its goal and stakes$/)
+  // stakes follow their options when the recommendation moves first.
+  assert.deepEqual([t('lab-15').decisions[0].options, t('lab-15').decisions[0].stakes], [['second', 'first'], ['s-second', 's-first']])
+  // The backstop: a ruled call naming a credential on a credential-gated task is his; the same call ungated stays
+  // ruled; a spend call stays priorities (Chorus ADR 0108 d4).
+  assert.deepEqual([t('lab-16').grade, t('lab-16').decisions.map((d) => d.question), t('lab-16').decidedForYou], ['One call', ['Which API key?'], []])
+  warned(/^lab-16 decision 1: names a credential input \("API key"\) on a task gated credential; read as yours \(ADR 0008\)$/)
+  assert.deepEqual([t('lab-17').grade, t('lab-17').decidedForYou.map((d) => d.owner)], ['Ready', ['technical']])
+  assert.deepEqual([t('lab-18').grade, t('lab-18').decidedForYou.map((d) => d.owner)], ['Ready', ['priorities']])
+  assert.ok(!j.warnings.some((w) => /^lab-1[78] /.test(w)), j.warnings.join('\n'))
 })

@@ -36,7 +36,7 @@ const FORBIDDEN_FLAGS = ['--allow-tools', '--scaffold', '--mocks', '--allow-real
 // The evals recipe is exactly this line (an `@` prefix and ${EVAL_ARGS} aside). The CLI keeps a repeated
 // option's last value, so the defaults come before $(EVAL_ARGS) and the locks after it: an override can
 // raise a default but never undo a lock (the operator's Opus lock, AGENTS.md § Model tier).
-const EVALS_RECIPE = 'claude plugin eval . --runs 1 --max-cost-usd 30 --threshold 0 $(EVAL_ARGS) --ablation none --model opus --judge-model opus --no-publish'
+const EVALS_RECIPE = 'claude plugin eval . --runs 1 --max-cost-usd 30 --threshold 0 $(EVAL_ARGS) --ablation none --model opus --judge-model opus --no-publish --keep-temp'
 const HOME_MARKERS = ['/Users/', '/home/', '~/', 'repos/obsidian', 'repos/workspaces', /\$\{?HOME\b/]
 const NUMERIC_LIKE = [/^[-+]?(\d|\.\d)/, /^[-+]?\.(inf|nan)$/i]
 const KEYWORDS = /^(true|false|null|~|yes|no|on|off|y|n)$/i
@@ -740,6 +740,7 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['--scaffold in EVAL_ARGS', mk({ args: 'EVAL_ARGS ?= --scaffold\n' }), '--scaffold'],
     ['--publish-report in EVAL_ARGS', mk({ args: 'EVAL_ARGS ?= --publish-report\n' }), '--publish-report'],
     ['recipe without --no-publish', mk({ evals: MK_EVALS.replace(' --no-publish', '') }), 'not exactly'],
+    ['recipe without --keep-temp', mk({ evals: MK_EVALS.replace(' --keep-temp', '') }), 'not exactly'],
     ['recipe judging with haiku', mk({ evals: MK_EVALS.replace('--judge-model opus', '--judge-model haiku') }), 'not exactly'],
     ['locks before $(EVAL_ARGS)', mk({ evals: `evals:\n\t${EVALS_RECIPE.replace(' $(EVAL_ARGS)', '')} $(EVAL_ARGS)\n` }), 'not exactly'],
     ['a second recipe line', mk({ evals: MK_EVALS + '\tclaude plugin eval . $(EVAL_ARGS)\n' }), 'not exactly'],
