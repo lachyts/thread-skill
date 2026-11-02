@@ -1003,8 +1003,8 @@ const ATT = { reflection: RID, since: '2026-10-20T13:00:00.000Z', until: '2026-1
     recommended: { offered: 4, picked: 3 }, hoursHeld: 9.5,
     longest: [{ call: 'toolu_1', session: 'abcdef12', repo: 'o/r', header: 'Next move', hours: 4, outcome: 'answered' }],
     byRepo: { 'o/r': 6, other: 1 }, byOwner: OWN, hoursByOwner: { yours: 2, priorities: 1, technical: 6, gate: 0, unknown: 0.5 } },
-  trails: { count: 2, rounds: 7, codeRounds: 6, simplifyRounds: 1, stopRounds: 3, stops: 2, stopsHanded: 1, findings: 20, regression: 5, engineStops: 0,
-    docsOnly: { trails: 1, rounds: 2 }, longest: [{ label: '#211', rounds: 5, stopRounds: 3, stops: 1, stopsHanded: 1, docsOnly: false, handedAfterStop: ['toolu_9#0'] }] },
+  trails: { count: 2, rounds: 7, codeRounds: 6, findings: 20, regression: 5, engineStops: 0,
+    docsOnly: { trails: 1, rounds: 2 }, longest: [{ label: '#211', rounds: 5, docsOnly: false }] },
   waits: [{ rollout: 'r', ask: '2026-10-20T13:00:00.000Z', scheduled: '2026-10-20T13:00:00.000Z', started: null, hours: 120, scheduleHours: 120, open: true }],
   circling: { W1: [{ slug: 'a-task', sessions: 3, questions: 2 }], W2: [{ slug: 'r', sessions: 1, questions: 0, hours: 60 }] } }
 
@@ -1040,7 +1040,13 @@ test('attention and a circling watch are refused, exit 2 and nothing written, wh
     ['a header over 60 characters', 'attention', { ...ATT, questions: { ...q, longest: [{ ...q.longest[0], header: 'h'.repeat(61) }] } }],
     ['thirteen repos', 'attention', { ...ATT, questions: { ...q, byRepo: Object.fromEntries(Array.from({ length: 13 }, (_x, i) => [`r${i}`, 1])) } }],
     ['six longest trails', 'attention', { ...ATT, trails: { ...ATT.trails, longest: Array.from({ length: 6 }, () => ATT.trails.longest[0]) } }],
-    ['nine handed ids', 'attention', { ...ATT, trails: { ...ATT.trails, longest: [{ ...ATT.trails.longest[0], handedAfterStop: Array.from({ length: 9 }, (_x, i) => `t${i}`) }] } }],
+    // fresh-review ADR 0001 retired the stop verdict and the simplify round: a line carrying their counts is refused on
+    // write (an older line in reflections.jsonl still reads: attention.py's trend reads lines as they stand)
+    ...['simplifyRounds', 'stopRounds', 'stops', 'stopsHanded'].map((k) => [`a retired trail count ${k}`, 'attention', { ...ATT, trails: { ...ATT.trails, [k]: 0 } }]),
+    ...['stopRounds', 'stops', 'stopsHanded'].map((k) => [`a longest trail with the retired ${k}`, 'attention', { ...ATT, trails: { ...ATT.trails, longest: [{ ...ATT.trails.longest[0], [k]: 0 }] } }]),
+    ['a longest trail with handedAfterStop', 'attention', { ...ATT, trails: { ...ATT.trails, longest: [{ ...ATT.trails.longest[0], handedAfterStop: [] }] } }],
+    ['a trail count missing', 'attention', { ...ATT, trails: (({ codeRounds, ...rest }) => rest)(ATT.trails) }],
+    ['a longest trail missing docsOnly', 'attention', { ...ATT, trails: { ...ATT.trails, longest: [{ label: '#211', rounds: 5 }] } }],
     ['seventeen waits', 'attention', { ...ATT, waits: Array.from({ length: 17 }, () => ATT.waits[0]) }],
     ['thirty-three W1 items', 'attention', { ...ATT, circling: { W1: Array.from({ length: 33 }, (_x, i) => ({ slug: `s${i}`, sessions: 3, questions: 0 })) } }],
     ['a circling slug that is no slug', 'attention', { ...ATT, circling: { W2: [{ slug: 'Rollouts', sessions: 1, questions: 0, hours: 50 }] } }],
