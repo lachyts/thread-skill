@@ -791,11 +791,13 @@ test('step 11 reads /fresh-review landings by the confirm-rate check (ADR 0065),
   const s11 = collapse(sectionOf(real.skill, /^### 11\. /))
   const para = s11.slice(s11.indexOf('**/fresh-review landings.**'), s11.indexOf('**The Time-lost ledger**'))
   assert.ok(para.length > 0, 'step 11 has no /fresh-review landings paragraph before the Time-lost ledger\'s')
-  for (const n of ['The confirm-rate check (ADR 0065', '(Σ`blocking` + Σ`unconfirmed`) sum to two or more', 'none was reproduced (Σ`blocking` 0)',
+  for (const n of ['The confirm-rate check (ADR 0065', 'when their `candidates` sum to two or more', 'none was reproduced (`confirmRate` 0 on every landing with a candidate)', '`candidates`',
     'name the week as the confirm-rate risk, with its landings', 'never one landing alone', '`checkedRounds`', '`unconfirmed`', '`confirmRate`',
     '`freshReviewLevels`', 'precision per level', 'reported only, never traced', 'never the landing\'s budget count (three code rounds, ADR 0065)'])
     assert.ok(para.includes(n), `step 11's /fresh-review landings lacks: ${n}`)
   assert.ok(!/self-grading|ADR 0058 d4/.test(para), 'step 11 still reads the retired self-grading check or ADR 0058 d4\'s budget')
+  // one statement of the check, off one field: a second reading off `blocking` or `unconfirmed` gave opposite verdicts (e5741dd/1583d9 #10)
+  assert.ok(!para.includes('Read it off the entries'), 'step 11 states the confirm-rate check twice')
   const s17 = collapse(sectionOf(real.skill, /^### 17\. /))
   for (const n of ['the confirm-rate risk included', '`freshReviewLevels`']) assert.ok(s17.includes(n), `step 17 lacks: ${n}`)
   assert.ok(!/self-grading|STOP entries|handed to him/.test(s17), 'step 17 still reports a retired reading')

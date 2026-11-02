@@ -81,7 +81,7 @@
 # trailer (any case) and every id it names is a `blocking` row of that round's `## Confirm` table (budget_ids: the
 # row's first cell and its last, nothing in between), and it adds or modifies a path: a commit that only deletes fixes
 # nothing. Close's own close-out paths (closeout_shaped: THREAD.md, a docs/handoffs/ doc) ride like docs/reviews/.
-# The round's doc is every review doc a commit in R..HEAD (^origin/<d>) touched whose latest version there (its
+# The round's doc is every review doc a commit in R..HEAD (^origin/<d>, full history) touched whose latest version there (its
 # last before close's deletion commit) says `mode: code`, `round:` 3 or more and a `head:` R starts with, their rows
 # together (a lost round's doc and its re-dispatch's); none is `stuck: --fixed-at-budget: no round-3 code review doc
 # for <R7> on <B>`, and a code commit outside the rule is `stuck: commits after <R7> name no blocking finding of the
@@ -962,16 +962,18 @@ own_rounds() {
 }
 
 # budget_ids <R>: --fixed-at-budget's round (the header). The ids of the `## Confirm` rows (outside a fence) whose last
-# cell is `blocking`, in every review doc a commit in <R>..HEAD (^origin/<d>) touched whose latest version there says
+# cell is `blocking`, in every review doc a commit in <R>..HEAD (^origin/<d>, --full-history, so a merge whose other
+# parent left docs/reviews/ as it was never hides <B>'s side) touched whose latest version there says
 # `mode: code`, `round:` 3 or more and a `head:` of 7 or more hex characters that <R> starts with, go to
-# $tmpd/blocking, one bare id (`1`, `A1`) a line; those docs' paths to BUDGET_DOC, space-joined. 1 when none qualifies.
+# $tmpd/blocking, one bare id (`1`, `A1`) a line, a doc's ids only once the whole doc qualifies; those docs' paths to
+# BUDGET_DOC, space-joined. 1 when none qualifies.
 budget_ids() {
   local r=$1 p c v
   BUDGET_DOC=; : > "$tmpd/blocking"
   while IFS= read -r p; do
     review_doc "$p" || continue
     v=
-    for c in $(git rev-list "$r..HEAD" "^$od" -- "$p"); do
+    for c in $(git rev-list --full-history --no-merges "$r..HEAD" "^$od" -- "$p"); do
       git cat-file -e "$c:$p" 2>/dev/null && { v=$c; break; }
     done
     [ -n "$v" ] && git show "$v:$p" > "$tmpd/bdoc" 2>/dev/null || continue
@@ -990,9 +992,10 @@ budget_ids() {
          END { h = f["head"]
                if (bad || fm || f["mode"] != "code" || f["round"] !~ /^[0-9]+$/ || f["round"] + 0 < 3) exit 1
                if (h !~ /^[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]+$/ || index(ENVIRON["R"], h) != 1) exit 1 }' \
-      "$tmpd/bdoc" >> "$tmpd/blocking" || continue
+      "$tmpd/bdoc" > "$tmpd/bids" || continue
+    cat "$tmpd/bids" >> "$tmpd/blocking"
     BUDGET_DOC="$BUDGET_DOC${BUDGET_DOC:+ }$p"
-  done < <(git -c core.quotePath=false log --format= --name-only --no-renames "$r..HEAD" "^$od" -- docs/reviews/ | LC_ALL=C sort -u)
+  done < <(git -c core.quotePath=false log --full-history --no-merges --format= --name-only --no-renames "$r..HEAD" "^$od" -- docs/reviews/ | LC_ALL=C sort -u)
   [ -n "$BUDGET_DOC" ]
 }
 

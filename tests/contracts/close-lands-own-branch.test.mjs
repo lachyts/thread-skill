@@ -225,7 +225,8 @@ test('the loop re-runs Verify after fixes, before the next dispatch; ci failed g
   assertHas(c, 'the queue step', [
     'When a commit outside `docs/reviews/` has had no green Verify run yet (a clean first round leaves the session\'s own commits unrun), run loop step 7 first',
     'its fix commits then through step 8 to the next round, never to `--queue`; with the budget spent there is no next round, so it is a decision for Lachy',
-    "plus `budget='1'` after the budget's fixes",
+    "plus `budget='1'` once the landing's three rounds are spent (§ The stop rule, **Budget**)",
+    "Every queue once the landing's three rounds are spent sets `budget='1'`, fixes or none",
     "the merge is queued only after a clean round or the budget's fixes",
   ])
   const qv = pos(sec, /^\*\*Queue\.\*\*/)

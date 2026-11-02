@@ -210,9 +210,10 @@ parallel with no note). For each:
   unconfirmed and regression (sums over the lines that carry each, null when none does: unknown, never 0; a line
   written before the checker carries no unconfirmed), open (the last code round's, or null), lines and files (the
   last round's, in round order, that carries each), first and last (the group's earliest and latest round time),
-  blockingRate (Σblocking / Σfindings over the graded rounds, to 2 places; null when there is none or Σfindings is 0)
-  and confirmRate (Σblocking / (Σblocking + Σunconfirmed) over the checked rounds: the share of the checker's
-  candidates it reproduced, to 2 places; null with no checked round or a zero denominator). A line's verdict is never
+  blockingRate (Σblocking / Σfindings over the graded rounds, to 2 places; null when there is none or Σfindings is 0),
+  candidates (Σblocking + Σunconfirmed over the checked rounds alone: the checker's candidates; null with no checked
+  round) and confirmRate (Σblocking / candidates: the share of the checker's candidates it reproduced, to 2 places;
+  null with no checked round or no candidate). A line's verdict is never
   read: fresh-review ADR 0001 retired the ledger's stop rule, and a line written since carries none. Sorted by
   last. A landing reviewed across two windows shows its rounds in each; within a window, a branch name reused across
   landings, or a chain on the default branch, reads as one entry, never a span that grows with the record (keeping a
@@ -239,8 +240,8 @@ span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | 
 (parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
 reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[],
 laneTime, and chain on a read serial one}], freshReview[{repo, branch, rounds, codeRounds, gradedRounds,
-checkedRounds, findings[], blocking[], filed, recurring, reversal, rejected, unconfirmed, open, regression, lines,
-files, first, last, blockingRate, confirmRate}] (each /fresh-review landing with a round reviewed in the window,
+checkedRounds, candidates, findings[], blocking[], filed, recurring, reversal, rejected, unconfirmed, open,
+regression, lines, files, first, last, blockingRate, confirmRate}] (each /fresh-review landing with a round reviewed in the window,
 reported only: reviews.jsonl names no rollout), freshReviewLevels[{mode, effort, rounds, findings, blocking,
 unconfirmed, filed, recurring, reversal, rejected, precision}] (the window's precision per level), watches[]
 (every open Watch:
@@ -1654,6 +1655,7 @@ class Span:
             candidates = reproduced + sum(d["unconfirmed"] for d in checked)
             out.append({"repo": repo, "branch": branch, "rounds": len(ds), "codeRounds": len(code),
                         "gradedRounds": len(rated), "checkedRounds": len(checked),
+                        "candidates": candidates if checked else None,
                         "findings": [_count(d.get("findings")) for d in code],
                         "blocking": [_count(d.get("blocking")) for d in code],
                         "filed": _total(ds, "filed"), "recurring": _total(ds, "recurring"),

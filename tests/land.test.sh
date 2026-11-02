@@ -1907,6 +1907,17 @@ docscommit 2026-11-01-x.md "$(printf -- '---\nhead: %s\nmode: code\nround: 3\nst
 bdoc 2026-11-02-x.md 3 "$(h7 "$R")" code "$BROW"; fixwork "the fix" "#1" tests/repro.test.sh; fdone
 own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
 ores "case 77 lost doc first" 0 "queued https://github.com/o/c77p/pull/1"
+# (q) A doc that does not qualify (a security round at R) adds none of its blocking rows, whatever else qualifies.
+fsetup c77q 3 code "$BROW"; bdoc s3.md 3 "$(h7 "$R")" security "$B2ROW"; fixwork "the filed one" "#2" tests/count.test.sh; fdone
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 other doc's rows" 1 "$(nofix "🐛 fix: the filed one")"
+# (r) A resumed landing that merged origin/master after the docs were deleted, master's docs/reviews/ having changed
+# meanwhile: the round's doc is still found on <B>'s side of the merge.
+fsetup c77r 3 code "$BROW"; fixwork "the fix" "#1" tests/repro.test.sh; fdone
+srvcommit c77r docs/reviews/m.md "master's review doc"; fetchsrv c77r
+git -C "$W" merge -q --no-ff --no-edit origin/master; H=$(tip)
+own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 after a merge" 0 "queued https://github.com/o/c77r/pull/1"
 # (m) Close's snippet carries the flag: budget='1'.
 osnip
 for sh in "${shells[@]}"; do

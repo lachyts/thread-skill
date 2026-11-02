@@ -459,7 +459,8 @@ ones carrying both `blocking` and `findings`, which `blockingRate` reads; `check
 fresh-review's checker: the ones carrying `unconfirmed`, which `confirmRate` reads), `findings` and `blocking` per code
 round in order, `filed`, `unconfirmed` (the candidates the checker could not reproduce), `rejected` (the ones the code
 disproves), `open` at its last code round, `recurring`, `reversal` and `regression`, its size (`lines`, `files`),
-`blockingRate` and `confirmRate` (the share of its checked rounds' candidates the checker reproduced). A null is
+`blockingRate`, `candidates` (its checked rounds' candidates, reproduced or not) and `confirmRate` (the share of them
+the checker reproduced). A null is
 unknown, never 0: a round recorded before ADR 0058, one whose doc held no `## Disposition` yet, an `unconfirmed` no
 line carries (a round recorded before the checker), or a `regression` no line carries. `codeRounds` counts every
 review round on the branch, dev-time chains before the landing loop included, so it is review cost, never the
@@ -468,10 +469,11 @@ with many code rounds as review cost, each whose last code round left `open` abo
 0 (it keeps re-reviewing its own fixes), and each whose `rejected` outnumbers its `filed` (findings set aside rather
 than filed). The confirm-rate check (ADR 0065: the checker grades every finding, so the risk is a checker that
 reproduces nothing, a rubber stamp) reads the week's landing entries (`branch` not null) together, never one landing
-alone: when their checked rounds' candidates (Σ`blocking` + Σ`unconfirmed`) sum to two or more and none was
-reproduced (Σ`blocking` 0), name the week as the confirm-rate risk, with its landings. Read it off the entries: every
-landing with `checkedRounds` above 0 has `confirmRate` 0 or null, and their `unconfirmed` sum to two or more. One
-unreproduced candidate in the week is too little to name; two, in one landing or across two, are named. The entry with
+alone, off one field each: when their `candidates` sum to two or more and none was reproduced (`confirmRate` 0 on
+every landing with a candidate), name the week as the confirm-rate risk, with its landings. `candidates` counts the
+checked rounds alone, so a landing's older rounds, graded before the checker, and its `unconfirmed` from other modes
+never enter it. One unreproduced candidate in the week is too little to name; two, in one landing or across two, are
+named. The entry with
 `branch` null holds the repo's branchless rounds in the window: no landing. Report `span.json`'s `freshReviewLevels`
 beside them as precision per level, reported only, never traced: one entry per `mode` and `effort` over the week's
 review rounds that carry disposition counts, every branch and the branchless ones included, with its sums and

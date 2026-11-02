@@ -709,7 +709,7 @@ test('span: freshReview reports each landing: rounds, findings and blocking per 
   // regression is null where no line carries one (unknown, never 0); gradedRounds are the code rounds carrying both
   // blocking and findings, the ones blockingRate reads; no line here carries unconfirmed (all before the checker), so no
   // round is checked and confirmRate is null
-  const UNCHECKED = { unconfirmed: null, checkedRounds: 0, confirmRate: null }
+  const UNCHECKED = { unconfirmed: null, checkedRounds: 0, candidates: null, confirmRate: null }
   assert.deepEqual(s.freshReview, [
     { repo: 'o/r', branch: 'feat/a', rounds: 2, codeRounds: 1, gradedRounds: 1, findings: [10], blocking: [1], filed: 12,
       recurring: 2, reversal: 1, rejected: 1, open: 1, regression: 2, lines: 420, files: 10, first: at(W(4, '01:00')),
@@ -762,13 +762,15 @@ test('span: freshReview reads the checker\'s verdicts (unconfirmed, checkedRound
     rr('2026-09-01T00:00:00Z', 'p1', { branch: 'feat/c', ...code('xhigh'), ...D(10, 0, 10, { unconfirmed: 9 }) }),
   ])
   const s = span(h)
-  const pick = (e) => [e.branch, e.codeRounds, e.gradedRounds, e.checkedRounds, e.blocking, e.unconfirmed, e.blockingRate, e.confirmRate]
+  // candidates: Σblocking + Σunconfirmed over the checked rounds alone (feat/m's old round, blocking 2, is none of
+  // them), null with no checked round; the confirm-rate check reads it, never the entry's blocking list or unconfirmed
+  const pick = (e) => [e.branch, e.codeRounds, e.gradedRounds, e.checkedRounds, e.blocking, e.unconfirmed, e.candidates, e.blockingRate, e.confirmRate]
   assert.deepEqual(s.freshReview.map(pick), [
-    ['feat/c', 2, 2, 2, [1, 0], 4, 0.08, 0.2],
-    ['feat/m', 2, 2, 1, [2, 1], 0, 0.33, 1],
-    ['feat/z', 2, 2, 2, [0, 0], 0, 0, null],
-    ['feat/o', 2, 1, 0, [1, null], null, 0.25, null],
-    [null, 1, 1, 1, [0], 0, 0, null],
+    ['feat/c', 2, 2, 2, [1, 0], 4, 5, 0.08, 0.2],
+    ['feat/m', 2, 2, 1, [2, 1], 0, 1, 0.33, 1],
+    ['feat/z', 2, 2, 2, [0, 0], 0, 0, 0, null],
+    ['feat/o', 2, 1, 0, [1, null], null, null, 0.25, null],
+    [null, 1, 1, 1, [0], 0, 0, 0, null],
   ], JSON.stringify(s.freshReview))
   const L = (mode, effort, rounds, findings, blocking, unconfirmed, filed, recurring, reversal, rejected, precision) =>
     ({ mode, effort, rounds, findings, blocking, unconfirmed, filed, recurring, reversal, rejected, precision })
