@@ -125,7 +125,8 @@ test('loop steps 5 and 6: the checker\'s verdicts are taken, never graded; each 
     'then committed with its reproduction in one new commit',
     'each `filed` and `unconfirmed` finding goes to the landing\'s follow-up task (**Filing**)',
     "On the budget's round (its doc says `round: 3`) the fixes are committed only once their reproductions and step 7 both pass",
-    "land.sh's `--fixed-at-budget` accepts a code commit after that round only when it changes a path a `blocking` row of its `## Confirm` table names",
+    "each fix commit's message ends with a `Fixes-finding: #<n>` trailer naming the blocking findings it fixes",
+    "land.sh's `--fixed-at-budget` accepts a code commit after that round only when its trailer names blocking rows of that round's `## Confirm` table",
     'The doc\'s `## Disposition` is then written from the verdicts',
     "Read its `head:`, `diff_digest:`, `mode:`, `effort:`, `round:` and findings",
   ])
@@ -188,7 +189,7 @@ test('what --queue reads: one snapshot of the reviewed commit and HEAD, never gr
     'no checks on HEAD in a repo with CI is pending, never green',
     "after a `ci failed`, the next round's `head:` is a newer pushed commit, so its CI is a fresh run".replace(/^a/, 'A'),
     'every commit after it touches `docs/reviews/` only',
-    "after the budget's fixes it does not, so `--fixed-at-budget` reads HEAD's checks alone (`land: checks read H <sha7>`)",
+    "after the budget's fixes it does not, so under `--fixed-at-budget` HEAD's run of a check still pending also supersedes the reviewed commit's failure of it, and a check HEAD never re-runs keeps that failure",
   ])
 })
 
@@ -259,7 +260,8 @@ test('#### The stop rule: three rounds, fix until green at the budget, keys, inf
     '`--since-as-filter`',
     'The count carries across a hold: a resumed loop whose landing has had its three rounds dispatches none.',
     "**Budget.** The round whose doc says `round: 3` is the last.",
-    "the loop queues with `budget='1'`: land.sh's `--fixed-at-budget` accepts the code commits after the reviewed `head:` only when each changes a path a `blocking` row of that round's `## Confirm` table names",
+    "the loop queues with `budget='1'`: land.sh's `--fixed-at-budget` accepts the code commits after the reviewed `head:` only when each adds or modifies a path and carries a `Fixes-finding:` trailer naming blocking rows of that round's `## Confirm` table",
+    'A hold after a confirmed round leaves that round\'s unfixed reproductions uncommitted in the tree, for the resumed loop (§ Edge cases).',
     'A fix that cannot be made to pass stops the loop (`serious finding open after <N> rounds`)',
     'with its reproduction and what was tried',
     'Rounds after a `ci failed` count towards the three.',
@@ -288,7 +290,7 @@ test('#### The stop rule: three rounds, fix until green at the budget, keys, inf
     assert.ok(adr58.includes(s), `ADR 0058 lacks: ${s}`)
   assert.ok(adr58.includes('Superseded in part by ADR 0065'), 'ADR 0058 does not point at ADR 0065')
   const adr65 = collapse(readIf(ADR65) ?? '')
-  for (const s of ['Status: accepted', 'three code rounds', "The landing's chain is its own", 'fixed until its reproduction passes', '`--fixed-at-budget`',
+  for (const s of ['Status: accepted', 'three code rounds', "The landing's chain is its own", '`Fixes-finding: #<n>`', 'fixed until its reproduction passes', '`--fixed-at-budget`',
                    'The session grades nothing', '`max_review_rounds`', 'a separate loop'])
     assert.ok(adr65.includes(s), `ADR 0065 lacks: ${s}`)
 })
@@ -366,6 +368,7 @@ test('placement, guardrails, edges and the Auto-execute line', () => {
     "§ The stop rule's **Counting**",
     '**A held landing resumed at the budget**', "and **Queue** with `budget='1'`",
     'commits the fix with its reproduction before its first plain call, so the tree is clean',
+    '**A held landing resumed before the budget**', 'or removes it when Lachy\'s call drops the finding, before its first plain call',
     'the close-out landing pushes nothing', 'never fetched into or fast-forwarded',
     "When that branch is the own branch, § Land the own branch pushes it, the close-out commit included",
     '**A dirty tree on the own branch**', '**A `ci failed` with no cause in `<B>`**', '`not landed: not the cwd checkout`',

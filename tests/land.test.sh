@@ -1779,7 +1779,7 @@ ok "$(rrargs)" "$(want c76l)" "case 76 local origin/master: the stub's argv carr
 }  # end shard_11
 
 shard_12() {
-echo "== 77. own branch: --fixed-at-budget, the budget round's fixes committed with their reproductions (ADR 0065)"
+echo "== 77. own branch: --fixed-at-budget, the budget round's fixes, each naming its finding (ADR 0065)"
 # bdoc <file> <round> <head> <mode> [<confirm row>…]: a docs/reviews/-only commit of a review doc: front matter
 # (no round: line when <round> is empty), a findings table, then a `## Confirm` table holding the rows given.
 bdoc() {
@@ -1802,58 +1802,65 @@ fsetup() {
   docscommit r3.md "status: pending"
   bdoc r3.md "$1" "$(h7 "$R")" "$2" "${@:3}"
 }
-# fixwork <subject> [<path>…]: a code commit on src/c.txt plus each path given (the fix and its reproduction).
+# fixwork <subject> <ids> [<path>…]: a code commit on src/c.txt plus each path given, its message ending with a
+# `Fixes-finding: <ids>` trailer (none when <ids> is empty).
 fixwork() {
-  local s=$1 p; shift
+  local s=$1 ids=$2 p; shift 2
   echo "$s" >> "$W/src/c.txt"
   for p in "$@"; do mkdir -p "$(dirname "$W/$p")"; echo "$s" >> "$W/$p"; done
-  git -C "$W" add -A; git -C "$W" commit -qm "🐛 fix: $s"
+  git -C "$W" add -A
+  if [ -n "$ids" ]; then git -C "$W" commit -qm "🐛 fix: $s" -m "Fixes-finding: $ids"; else git -C "$W" commit -qm "🐛 fix: $s"; fi
 }
 fdone() { docsdelete; H=$(tip); }
+nofix() { printf '%s\n' "stuck: commits after $(h7 "$R") name no blocking finding of the budget round (Fixes-finding: #<n>): $1"; }
 BROW='| 1 | b: loses the save | introduced (abc1234) | ordinary: killed mid-write | tests/repro.test.sh: `bash tests/repro.test.sh` → FAIL: save empty | blocking |'
-FROW='| 1 | none | pre-existing | — | tests/other.test.sh | filed |'
-PROW='| 1 | c: wrong verdict | introduced | — | src/c.txt:1 "c0" against SKILL.md:9 | blocking |'
+B2ROW='| 2 | c: wrong count | introduced | — | tests/count.test.sh: `bash tests/count.test.sh` → FAIL | blocking |'
+FROW='| 1 | none | pre-existing | — | — | filed |'
 
-# (a) A fix committed with the reproduction a blocking row names, after the round-3 doc: queued, on HEAD's checks
-# alone (R's predate the fixes, so its failure is never read).
-fsetup c77a 3 code "$BROW"; fixwork "save keeps the file" tests/repro.test.sh; fdone
+# (a) A fix naming its blocking finding, after the round-3 doc: queued. R's failure is superseded by HEAD's pending
+# run of that check (the fix may be what turns it green), so both are read.
+fsetup c77a 3 code "$BROW"; fixwork "save keeps the file" "#1" tests/repro.test.sh; fdone
 own GH_CHECKS_MAP="$R=fail,$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
 ores "case 77 fixed" 0 "queued https://github.com/o/c77a/pull/1"
 has "$err" "land: fixed at the budget: 1 commit(s) after $(h7 "$R") (docs/reviews/r3.md)" "case 77 fixed: names the commits and the doc"
-has "$err" "land: checks read H $(h7 "$H")" "case 77 fixed: the checks line names HEAD alone"
-hasnt "$err" "checks read R" "case 77 fixed: R's checks are not read"
-ok "$(checkreads)" 1 "case 77 fixed: one commit's checks read"
+has "$err" "land: checks read R $(h7 "$R") H $(h7 "$H")" "case 77 fixed: R and HEAD read"
 ok "$(srvref c77a "$OB")" "$H" "case 77 fixed: <B> pushed"
+# (a2) R's failure with no run of that check on HEAD stands: a check the fix never re-ran is still red.
+own GH_CHECKS_MAP="$R=fail" -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 R red, HEAD silent" 0 "ci failed: build (failure: Tests failed) https://github.com/o/c77a/actions/runs/1"
 # (b) The same commits without the flag: the reviewed-commit guard is unchanged.
 own -- --queue --reviewed "$R"
 ores "case 77 no flag" 1 "stuck: unreviewed commits after $(h7 "$R"): 🐛 fix: save keeps the file"
-# (c) A code commit that carries no named reproduction (a filed finding fixed in the chain, say) is refused.
-fsetup c77c 3 code "$BROW"; fixwork "a filed finding fixed too"; fdone; S=$(srvref c77c "$OB")
+# (c) A code commit with no trailer (a filed finding fixed in the chain, a tidy, a CI fix) is refused.
+fsetup c77c 3 code "$BROW"; fixwork "a filed finding fixed too" "" tests/repro.test.sh; fdone; S=$(srvref c77c "$OB")
 own -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 no reproduction" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: a filed finding fixed too"
-nopush "case 77 no reproduction"; ok "$(srvref c77c "$OB")" "$S" "case 77 no reproduction: server <B> unchanged"
+ores "case 77 no trailer" 1 "$(nofix "🐛 fix: a filed finding fixed too")"
+nopush "case 77 no trailer"; ok "$(srvref c77c "$OB")" "$S" "case 77 no trailer: server <B> unchanged"
 # (d) One good commit and one bad: only the bad one is named.
-fsetup c77d 3 code "$BROW"; fixwork "the fix" tests/repro.test.sh; fixwork "and a tidy"; fdone
+fsetup c77d 3 code "$BROW"; fixwork "the fix" "#1" tests/repro.test.sh; fixwork "and a tidy" ""; fdone
 own -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 one bad" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: and a tidy"
-# (e) A path a non-blocking row names never counts.
-fsetup c77e 3 code "$FROW"; fixwork "x" tests/other.test.sh; fdone
-own -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 filed row" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: x"
-# (f) A path is matched whole: repro.test.sh is not the row's tests/repro.test.sh.
-fsetup c77f 3 code "$BROW"; fixwork "y" repro.test.sh; fdone
-own -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 whole path" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: y"
-# (g) A prose reproduction: the quoted file:line is the path the fix changes.
-fsetup c77g 3 code "$PROW"; fixwork "the wording"; fdone
+ores "case 77 one bad" 1 "$(nofix "🐛 fix: and a tidy")"
+# (e) A trailer naming a non-blocking row, or an id the table lacks, is refused; so is one naming a good id and a bad.
+for ids in "#1" "#7" "#1, #7"; do
+  rows=$FROW; [ "$ids" = "#1" ] || rows=$BROW
+  fsetup "c77e${#ids}" 3 code "$rows"; fixwork "x" "$ids"; fdone
+  own -- --queue --reviewed "$R" --fixed-at-budget
+  ores "case 77 bad id [$ids]" 1 "$(nofix "🐛 fix: x")"
+done
+# (f) Two blocking findings: one commit naming both, or a commit each.
+fsetup c77f 3 code "$BROW" "$B2ROW"; fixwork "both" "#1, #2" tests/repro.test.sh tests/count.test.sh; fdone
 own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 prose" 0 "queued https://github.com/o/c77g/pull/1"
+ores "case 77 both in one" 0 "queued https://github.com/o/c77f/pull/1"
+fsetup c77g 3 code "$BROW" "$B2ROW"; fixwork "one" "#1" tests/repro.test.sh; fixwork "two" "#2" tests/count.test.sh; fdone
+own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 a commit each" 0 "queued https://github.com/o/c77g/pull/1"
+has "$err" "land: fixed at the budget: 2 commit(s) after $(h7 "$R")" "case 77 a commit each: counts both"
 # (h) No budget round's doc for R: round 2, no round:, a security doc, another head.
 for v in "2 code" "- code" "3 security" "3 code other"; do
   set -- $v; r=$1; [ "$r" = - ] && r=
   ghreset; mkbranch "c77h${#v}$1$2"; own --; R=$(tip)
   hd=$(h7 "$R"); [ -n "${3:-}" ] && hd=$(git -C "$W" rev-parse --short=7 HEAD~1)
-  bdoc r3.md "$r" "$hd" "$2" "$BROW"; fixwork "the fix" tests/repro.test.sh; fdone
+  bdoc r3.md "$r" "$hd" "$2" "$BROW"; fixwork "the fix" "#1" tests/repro.test.sh; fdone
   own -- --queue --reviewed "$R" --fixed-at-budget
   ores "case 77 no budget doc [$v]" 1 "stuck: --fixed-at-budget: no round-3 code review doc for $(h7 "$R") on $OB"
   nopush "case 77 no budget doc [$v]"
@@ -1866,51 +1873,44 @@ has "$err" "land: checks read R $(h7 "$R") H $(h7 "$H")" "case 77 nothing fixed:
 hasnt "$err" "fixed at the budget" "case 77 nothing fixed: no fixed line"
 # (j) The doc still on <B> (never deleted), its head: a full sha: read at HEAD.
 ghreset; mkbranch c77j; own --; R=$(tip)
-bdoc r3.md 3 "$R" code "$BROW"; fixwork "the fix" tests/repro.test.sh; H=$(tip)
+bdoc r3.md 3 "$R" code "$BROW"; fixwork "the fix" "#1" tests/repro.test.sh; H=$(tip)
 own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
 ores "case 77 doc on disk" 0 "queued https://github.com/o/c77j/pull/1"
-# (k) A `blocking` cell outside `## Confirm` (the findings table) is no reproduction.
+# (k) A `blocking` cell outside `## Confirm` (the findings table) names no finding.
 ghreset; mkbranch c77k; own --; R=$(tip)
 docscommit r3.md "$(printf -- '---\nhead: %s\nmode: code\nround: 3\nstatus: consumed\n---\n\n| # | file:line | note | verdict |\n|---|---|---|---|\n| 1 | tests/repro.test.sh:1 | x | blocking |\n\n## Confirm\n\n%s\n' "$(h7 "$R")" "$FROW")"
-fixwork "z" tests/repro.test.sh; fdone
+fixwork "z" "#1" tests/repro.test.sh; fdone
 own -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 outside Confirm" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: z"
+ores "case 77 outside Confirm" 1 "$(nofix "🐛 fix: z")"
 # (l) The latest version is read: a doc whose last commit dropped its blocking row no longer covers the fix.
-fsetup c77l 3 code "$BROW"; bdoc r3.md 3 "$(h7 "$R")" code "$FROW"; fixwork "w" tests/repro.test.sh; fdone
+fsetup c77l 3 code "$BROW"; bdoc r3.md 3 "$(h7 "$R")" code "$FROW"; fixwork "w" "#1" tests/repro.test.sh; fdone
 own -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 latest version" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: w"
-# (n) The reproduction cited as ./path or by its absolute path in the checkout still names it.
-for form in "./tests/repro.test.sh" "ABS/tests/repro.test.sh"; do
-  ghreset; mkbranch "c77n${#form}"; own --; R=$(tip)
-  cite=${form/ABS/$real/w/c77n${#form}}
-  bdoc r3.md 3 "$(h7 "$R")" code "| 1 | b: loses the save | introduced | ordinary: killed | \`bash $cite\` → FAIL | blocking |"
-  fixwork "the fix" tests/repro.test.sh; fdone
-  own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
-  ores "case 77 cited [$form]" 0 "queued https://github.com/o/c77n${#form}/pull/1"
-done
-# (o) A commit that deletes the named file carries no reproduction.
-fsetup c77o 3 code "$PROW"; git -C "$W" rm -q src/c.txt; git -C "$W" commit -qm "🐛 fix: drop the file"; fdone
-own -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 deletion" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: drop the file"
-# (p) Only the reproduction cell counts: a path in the row's clause, origin or trigger text is no reproduction.
-fsetup c77p 3 code '| 1 | b: loses the save in src/c.txt | introduced (src/c.txt:1) | ordinary: src/c.txt killed | tests/repro.test.sh: `bash tests/repro.test.sh` → FAIL | blocking |'
-fixwork "the fix, no reproduction"; fdone
-own -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 clause text" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: the fix, no reproduction"
-# (q) A path followed by `.` and more of a name is a longer path: src/c.txt is not src/c.txt.orig; a sentence's full
-# stop after it still names it.
-fsetup c77q 3 code '| 1 | c: wrong verdict | introduced | — | src/c.txt.orig:1 against SKILL.md:9 | blocking |'
-fixwork "the wrong file"; fdone
-own -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 longer name" 1 "stuck: commits after $(h7 "$R") carry no reproduction docs/reviews/r3.md names: 🐛 fix: the wrong file"
-fsetup c77r 3 code '| 1 | c: wrong verdict | introduced | — | the quoted lines are in src/c.txt. | blocking |'
-fixwork "the wording"; fdone
+ores "case 77 latest version" 1 "$(nofix "🐛 fix: w")"
+# (n) Close's own close-out commits after R (THREAD.md, a consumed handoff doc's deletion) ride with the flag, never
+# without it.
+fsetup c77n 3 code "$BROW"; fixwork "the fix" "#1" tests/repro.test.sh
+mkdir -p "$W/docs/handoffs"; echo h > "$W/docs/handoffs/x.md"; echo closed >> "$W/THREAD.md"
+git -C "$W" add -A; git -C "$W" commit -qm "📝 docs(thread): close-out"; fdone
 own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
-ores "case 77 full stop" 0 "queued https://github.com/o/c77r/pull/1"
+ores "case 77 close-out" 0 "queued https://github.com/o/c77n/pull/1"
+has "$err" "land: fixed at the budget: 1 commit(s) after $(h7 "$R")" "case 77 close-out: only the fix counts"
+qsetup c77n2; echo closed >> "$W/THREAD.md"; git -C "$W" commit -qam "📝 docs(thread): close-out"
+own -- --queue --reviewed "$R"
+ores "case 77 close-out, no flag" 1 "stuck: unreviewed commits after $(h7 "$R"): 📝 docs(thread): close-out"
+# (o) A commit that only deletes is no fix, whatever its trailer.
+fsetup c77o 3 code "$BROW"; git -C "$W" rm -q src/c.txt; git -C "$W" commit -qm "🐛 fix: drop the file" -m "Fixes-finding: #1"; fdone
+own -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 deletion" 1 "$(nofix "🐛 fix: drop the file")"
+# (p) A lost round-3 doc (no Confirm table) beside its re-dispatch's: every qualifying doc's rows count.
+ghreset; mkbranch c77p; own --; R=$(tip)
+docscommit 2026-11-01-x.md "$(printf -- '---\nhead: %s\nmode: code\nround: 3\nstatus: pending\nlost: 1\n---\n\nlost\n' "$(h7 "$R")")"
+bdoc 2026-11-02-x.md 3 "$(h7 "$R")" code "$BROW"; fixwork "the fix" "#1" tests/repro.test.sh; fdone
+own GH_CHECKS_MAP="$H=pending" -- --queue --reviewed "$R" --fixed-at-budget
+ores "case 77 lost doc first" 0 "queued https://github.com/o/c77p/pull/1"
 # (m) Close's snippet carries the flag: budget='1'.
 osnip
 for sh in "${shells[@]}"; do
-  fsetup "c77m${#sh}" 3 code "$BROW"; fixwork "the fix" tests/repro.test.sh; fdone
+  fsetup "c77m${#sh}" 3 code "$BROW"; fixwork "the fix" "#1" tests/repro.test.sh; fdone
   ofill "--queue" "$R" 1; snip "$sh" GH_CHECKS_MAP="$H=pending"
   ores "case 77 [$sh] snippet" 0 "queued https://github.com/o/c77m${#sh}/pull/1"
   has "$err" "land: fixed at the budget: 1 commit(s) after $(h7 "$R")" "case 77 [$sh] snippet: --fixed-at-budget arrived"
