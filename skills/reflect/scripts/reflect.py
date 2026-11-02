@@ -204,11 +204,17 @@ parallel with no note). For each:
   a worktree is one entry; that identity is the entry's repo. A line with no branch (one from before ADR 0058, say)
   is no landing, and goes to its repo's group with branch null. Each group is an entry: rounds (its rounds),
   codeRounds (those whose mode is code or absent), gradedRounds (the code rounds that carry both blocking and
-  findings, the ones blockingRate reads), findings and blocking (one value per code round, in round order, null where
-  the line carries none), filed, recurring, reversal, rejected and regression (sums over the lines that carry each,
-  null when none does: unknown, never 0), open (the last code round's, or null), lines and files (the last round's,
-  in round order, that carries each), first and last (the group's earliest and latest round time) and blockingRate
-  (Σblocking / Σfindings over the graded rounds, to 2 places; null when there is none or Σfindings is 0). Sorted by
+  findings, the ones blockingRate reads), checkedRounds (the code rounds whose line carries unconfirmed: the rounds
+  fresh-review's checker judged, fresh-review ADR 0001, the ones confirmRate reads), findings and blocking (one value
+  per code round, in round order, null where the line carries none), filed, recurring, reversal, rejected,
+  unconfirmed and regression (sums over the lines that carry each, null when none does: unknown, never 0; a line
+  written before the checker carries no unconfirmed), open (the last code round's, or null), lines and files (the
+  last round's, in round order, that carries each), first and last (the group's earliest and latest round time),
+  blockingRate (Σblocking / Σfindings over the graded rounds, to 2 places; null when there is none or Σfindings is 0),
+  candidates (Σblocking + Σunconfirmed over the checked rounds alone: the checker's candidates; null with no checked
+  round) and confirmRate (Σblocking / candidates: the share of the checker's candidates it reproduced, to 2 places;
+  null with no checked round or no candidate). A line's verdict is never
+  read: fresh-review ADR 0001 retired the ledger's stop rule, and a line written since carries none. Sorted by
   last. A landing reviewed across two windows shows its rounds in each; within a window, a branch name reused across
   landings, or a chain on the default branch, reads as one entry, never a span that grows with the record (keeping a
   group whole once any line fell in the window folded every round ever recorded on `master` into one entry, every
@@ -220,12 +226,24 @@ parallel with no note). For each:
   in no window, and cannotShow names how many (`/fresh-review: <k> round(s) first recorded in this window but reviewed
   before it: counted in no window`). Reported, never traced: cannotShow says so when any landing (an entry whose
   branch is not null) is listed.
+- freshReviewLevels (fresh-review ADR 0001: the precision per level its reviews.jsonl recording is kept for): one
+  entry per (mode, effort) over the window's review rounds that carry the disposition counts (`filed` present: the
+  doc's `## Disposition` used a recognised label), every branch and the branchless rounds included, windowed exactly
+  as freshReview's (the same read_review_rounds, each round at its reviewedAt, else its doc's earliest line's ts). mode
+  is the line's, a line with none read as code (freshReview's rule); effort is the line's, null when it has none. Each
+  entry: mode, effort, rounds, findings, blocking, unconfirmed, filed, recurring, reversal, rejected (sums over the
+  group's rounds, a count a line lacks read as 0, but unconfirmed null when no line of the group carries it: rounds
+  from before the checker) and precision ((Σfindings - Σrejected) / Σfindings, to 2 places: the share of the findings
+  the code did not disprove; null when Σfindings is 0). Sorted by mode, then effort, a null effort last. Reported,
+  never traced.
 span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), shape
 (parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
 reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[],
-laneTime, and chain on a read serial one}], freshReview[{repo, branch, rounds, codeRounds, gradedRounds, findings[],
-blocking[], filed, recurring, reversal, rejected, open, regression, lines, files, first, last, blockingRate}] (each
-/fresh-review landing with a round reviewed in the window, reported only: reviews.jsonl names no rollout), watches[]
+laneTime, and chain on a read serial one}], freshReview[{repo, branch, rounds, codeRounds, gradedRounds,
+checkedRounds, candidates, findings[], blocking[], filed, recurring, reversal, rejected, unconfirmed, open,
+regression, lines, files, first, last, blockingRate, confirmRate}] (each /fresh-review landing with a round reviewed in the window,
+reported only: reviews.jsonl names no rollout), freshReviewLevels[{mode, effort, rounds, findings, blocking,
+unconfirmed, filed, recurring, reversal, rejected, precision}] (the window's precision per level), watches[]
 (every open Watch:
 rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring, stale, new, declinedBefore, lastSeen),
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
@@ -1609,15 +1627,16 @@ class Span:
     # -- /fresh-review landings (reported only, ADR 0058 d5) ----------------------------------------------------------
 
     def fresh_review(self, ev, since, until):
-        """span.json's freshReview: one entry per landing (the module docstring's freshReview rule)."""
+        """span.json's freshReview and freshReviewLevels, from one read: one entry per landing, and one per level (the
+        module docstring's freshReview and freshReviewLevels rules)."""
         path = os.path.join(ev, RR.REVIEWS + ".jsonl")
         if not os.path.exists(path):
-            return []
+            return [], []
         try:
             lines, _s = SCORE.read_lines(path)
         except OSError as e:
             self.flag("reviews.jsonl cannot be read (%s): no /fresh-review landings" % e)
-            return []
+            return [], []
         rounds, late = SCORE.read_review_rounds(lines, since, until)
         groups = {}
         for r in rounds:  # round order: reviewedAt, else arrival; never the line's own ts
@@ -1631,17 +1650,23 @@ class Span:
             rated = [(d["blocking"], d["findings"]) for d in code
                      if _count(d.get("blocking")) is not None and _count(d.get("findings")) is not None]
             found = sum(f for _b, f in rated)
+            checked = [d for d in code if _count(d.get("unconfirmed")) is not None]
+            reproduced = sum(_count(d.get("blocking")) or 0 for d in checked)
+            candidates = reproduced + sum(d["unconfirmed"] for d in checked)
             out.append({"repo": repo, "branch": branch, "rounds": len(ds), "codeRounds": len(code),
-                        "gradedRounds": len(rated),
+                        "gradedRounds": len(rated), "checkedRounds": len(checked),
+                        "candidates": candidates if checked else None,
                         "findings": [_count(d.get("findings")) for d in code],
                         "blocking": [_count(d.get("blocking")) for d in code],
                         "filed": _total(ds, "filed"), "recurring": _total(ds, "recurring"),
                         "reversal": _total(ds, "reversal"), "rejected": _total(ds, "rejected"),
+                        "unconfirmed": _total(ds, "unconfirmed"),
                         "open": _count(code[-1].get("open")) if code else None,
                         "regression": _total(ds, "regression"),
                         "lines": (_known(ds, "lines") or [None])[-1], "files": (_known(ds, "files") or [None])[-1],
                         "first": fmt(g[0][0]), "last": fmt(g[-1][0]),
-                        "blockingRate": round(sum(b for b, _f in rated) / found, 2) if found else None})
+                        "blockingRate": round(sum(b for b, _f in rated) / found, 2) if found else None,
+                        "confirmRate": round(reproduced / candidates, 2) if candidates else None})
         out.sort(key=lambda e: (e["last"], e["repo"], e["branch"] or ""))
         landings = len([e for e in out if e["branch"] is not None])
         if landings:
@@ -1650,6 +1675,27 @@ class Span:
         if late:
             self.cannot_show("/fresh-review: %d round(s) first recorded in this window but reviewed before it: counted in "
                              "no window" % len(late))
+        return out, self.fresh_review_levels([r["line"] for r in rounds])
+
+    @staticmethod
+    def fresh_review_levels(ds):
+        """span.json's freshReviewLevels over the window's review-round lines (the module docstring's rule)."""
+        keys = ("findings", "blocking", "unconfirmed", "filed", "recurring", "reversal", "rejected")
+        levels = {}
+        for d in ds:
+            if _count(d.get("filed")) is None:  # no disposition counts: a legacy or a free-form disposition
+                continue
+            mode = d.get("mode") if isinstance(d.get("mode"), str) and d.get("mode") else "code"
+            effort = d.get("effort") if isinstance(d.get("effort"), str) and d.get("effort") else None
+            levels.setdefault((mode, effort), []).append(d)
+        out = []
+        for (mode, effort), g in sorted(levels.items(), key=lambda kv: (kv[0][0], kv[0][1] is None, kv[0][1] or "")):
+            e = {"mode": mode, "effort": effort, "rounds": len(g)}
+            e.update((k, sum(_known(g, k))) for k in keys)
+            if not _known(g, "unconfirmed"):
+                e["unconfirmed"] = None
+            e["precision"] = round((e["findings"] - e["rejected"]) / e["findings"], 2) if e["findings"] else None
+            out.append(e)
         return out
 
     def review_identity(self, repo):
@@ -1872,7 +1918,7 @@ class Span:
                             "binding": None, "proposals": [], "flags": [], "friction": inw + reps, "laneTime": None})
         self.cannot_show("a repair run that writes no dated repair: line and records no event is not seen, nor is a "
                          "repair: line on a rollout with no Run record")
-        fresh = self.fresh_review(ev, since, until)
+        fresh, levels = self.fresh_review(ev, since, until)
         ws = watches(reflections, rid, until)
         led = self.ledger(ev, records, reflections, since, until, rid)
         # the record line `ledger` will write, so span's land and held match tune.py --auto's load hold (ADR 0051)
@@ -1888,7 +1934,7 @@ class Span:
         grades = self.grades(records, since, until)
         attention = self.attention(ev, records, reflections, since, until, rid)
         doc = {"reflection": rid, "since": fmt(since), "until": fmt(until), "previous": previous,
-               "rollouts": entries, "freshReview": fresh,
+               "rollouts": entries, "freshReview": fresh, "freshReviewLevels": levels,
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
                "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
                "attention": attention, "cannotShow": self.cannot, "flags": self.flags}

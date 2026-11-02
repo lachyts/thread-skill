@@ -707,20 +707,22 @@ test('span: freshReview reports each landing: rounds, findings and blocking per 
   const s = span(h)
   const at = (ts) => new Date(ts).toISOString()
   // regression is null where no line carries one (unknown, never 0); gradedRounds are the code rounds carrying both
-  // blocking and findings, the ones blockingRate reads
+  // blocking and findings, the ones blockingRate reads; no line here carries unconfirmed (all before the checker), so no
+  // round is checked and confirmRate is null
+  const UNCHECKED = { unconfirmed: null, checkedRounds: 0, candidates: null, confirmRate: null }
   assert.deepEqual(s.freshReview, [
     { repo: 'o/r', branch: 'feat/a', rounds: 2, codeRounds: 1, gradedRounds: 1, findings: [10], blocking: [1], filed: 12,
       recurring: 2, reversal: 1, rejected: 1, open: 1, regression: 2, lines: 420, files: 10, first: at(W(4, '01:00')),
-      last: at(W(4, '02:00')), blockingRate: 0.1 },
+      last: at(W(4, '02:00')), blockingRate: 0.1, ...UNCHECKED },
     { repo: 'o/r', branch: null, rounds: 1, codeRounds: 1, gradedRounds: 0, findings: [6], blocking: [null], filed: null,
       recurring: null, reversal: null, rejected: null, open: null, regression: 2, lines: null, files: null,
-      first: at(W(5, '00:00')), last: at(W(5, '00:00')), blockingRate: null },
+      first: at(W(5, '00:00')), last: at(W(5, '00:00')), blockingRate: null, ...UNCHECKED },
     { repo: 'o/r', branch: 'feat/b', rounds: 1, codeRounds: 1, gradedRounds: 1, findings: [4], blocking: [0], filed: 4,
       recurring: null, reversal: null, rejected: null, open: 0, regression: null, lines: 30, files: 2,
-      first: at(W(6, '09:00')), last: at(W(6, '09:00')), blockingRate: 0 },
+      first: at(W(6, '09:00')), last: at(W(6, '09:00')), blockingRate: 0, ...UNCHECKED },
     { repo: 'o/other', branch: 'feat/a', rounds: 1, codeRounds: 1, gradedRounds: 0, findings: [2], blocking: [null],
       filed: null, recurring: null, reversal: null, rejected: null, open: null, regression: null, lines: null, files: null,
-      first: at(W(7, '00:00')), last: at(W(7, '00:00')), blockingRate: null },
+      first: at(W(7, '00:00')), last: at(W(7, '00:00')), blockingRate: null, ...UNCHECKED },
   ], JSON.stringify(s.freshReview))
   // the branch-null group is no landing: three landings, not four
   assert.ok(s.cannotShow.includes('/fresh-review: 3 landing(s) reported, not traced to a rollout (reviews.jsonl names none)'),
@@ -729,6 +731,60 @@ test('span: freshReview reports each landing: rounds, findings and blocking per 
   // a disposition, not a later round, so the next window reports nothing.
   const next = span(h, [], { since: '2026-09-10T00:00+10:00', until: '2026-09-11T00:00+10:00' })
   assert.deepEqual(next.freshReview, [], JSON.stringify(next.freshReview))
+})
+
+// fresh-review ADR 0001: a checker gives every finding a verdict, so a line written since carries an unconfirmed count
+// beside the six (the seven written together) and no verdict. A checked round is a code round whose line carries
+// unconfirmed; confirmRate is Σblocking / (Σblocking + Σunconfirmed) over the checked rounds. freshReviewLevels is the
+// precision per level: per (mode, effort), over the window's rounds whose line carries the disposition counts.
+test('span: freshReview reads the checker\'s verdicts (unconfirmed, checkedRounds, confirmRate) over old lines and new, and freshReviewLevels reports precision per level; no flag', (t) => {
+  const h = setup(t)
+  const rr = (ts, doc, fields) => [ts, 'review-round', null, { repo: 'o/r', head: 'abc1234', digest: 'd', doc: `docs/reviews/${doc}.md`, status: 'consumed', ...fields }, null]
+  const D = (findings, blocking, filed, { open = 0, recurring = 0, reversal = 0, rejected = 0, unconfirmed } = {}) =>
+    ({ findings, blocking, open, filed, recurring, reversal, rejected, ...(unconfirmed === undefined ? {} : { unconfirmed }) })
+  const code = (effort) => ({ mode: 'code', ...(effort ? { effort } : {}) })
+  emitAll(h, null, [
+    // feat/c: new lines alone, 1 of 5 candidates reproduced
+    rr(W(4, '01:00'), 'c1', { branch: 'feat/c', ...code('xhigh'), ...D(8, 1, 4, { recurring: 1, unconfirmed: 3 }) }),
+    rr(W(4, '02:00'), 'c2', { branch: 'feat/c', ...code('xhigh'), ...D(5, 0, 4, { unconfirmed: 1 }) }),
+    // feat/m: an old line (a verdict, no unconfirmed) and a new one: only the new one is checked
+    rr(W(5, '01:00'), 'm1', { branch: 'feat/m', ...code('high'), verdict: 'continue', ...D(6, 2, 4, { reversal: 1 }) }),
+    rr(W(5, '02:00'), 'm2', { branch: 'feat/m', ...code('xhigh'), ...D(3, 1, 2, { open: 1, unconfirmed: 0 }) }),
+    // feat/z: checked rounds with no candidate at all: a zero denominator
+    rr(W(6, '01:00'), 'z1', { branch: 'feat/z', ...code('xhigh'), ...D(2, 0, 1, { rejected: 1, unconfirmed: 0 }) }),
+    rr(W(6, '02:00'), 'z2', { branch: 'feat/z', ...code('low'), ...D(0, 0, 0, { unconfirmed: 0 }) }),
+    // feat/o: old lines alone (a stop verdict, a simplify round, and a legacy round with no disposition)
+    rr(W(7, '01:00'), 'o1', { branch: 'feat/o', ...code('high'), verdict: 'stop', ...D(4, 1, 1, { rejected: 2 }) }),
+    rr(W(7, '02:00'), 'o2', { branch: 'feat/o', ...code('high'), verdict: 'continue', findings: 9 }),
+    rr(W(7, '03:00'), 's1', { branch: 'feat/o', mode: 'simplify', effort: 'xhigh', verdict: 'continue', ...D(5, 0, 5) }),
+    // a branchless round with no mode (a code round) and no effort, and a round reviewed before the window
+    rr(W(8, '01:00'), 'n1', { ...D(4, 0, 3, { rejected: 1, unconfirmed: 0 }) }),
+    rr('2026-09-01T00:00:00Z', 'p1', { branch: 'feat/c', ...code('xhigh'), ...D(10, 0, 10, { unconfirmed: 9 }) }),
+  ])
+  const s = span(h)
+  // candidates: Σblocking + Σunconfirmed over the checked rounds alone (feat/m's old round, blocking 2, is none of
+  // them), null with no checked round; the confirm-rate check reads it, never the entry's blocking list or unconfirmed
+  const pick = (e) => [e.branch, e.codeRounds, e.gradedRounds, e.checkedRounds, e.blocking, e.unconfirmed, e.candidates, e.blockingRate, e.confirmRate]
+  assert.deepEqual(s.freshReview.map(pick), [
+    ['feat/c', 2, 2, 2, [1, 0], 4, 5, 0.08, 0.2],
+    ['feat/m', 2, 2, 1, [2, 1], 0, 1, 0.33, 1],
+    ['feat/z', 2, 2, 2, [0, 0], 0, 0, 0, null],
+    ['feat/o', 2, 1, 0, [1, null], null, null, 0.25, null],
+    [null, 1, 1, 1, [0], 0, 0, 0, null],
+  ], JSON.stringify(s.freshReview))
+  const L = (mode, effort, rounds, findings, blocking, unconfirmed, filed, recurring, reversal, rejected, precision) =>
+    ({ mode, effort, rounds, findings, blocking, unconfirmed, filed, recurring, reversal, rejected, precision })
+  // o2 carries no disposition counts, p1 was reviewed before the window: neither is in any level
+  assert.deepEqual(s.freshReviewLevels, [
+    L('code', 'high', 2, 10, 3, null, 5, 0, 1, 2, 0.8),
+    L('code', 'low', 1, 0, 0, 0, 0, 0, 0, 0, null),
+    L('code', 'xhigh', 4, 18, 2, 4, 11, 1, 0, 1, 0.94),
+    L('code', null, 1, 4, 0, 0, 3, 0, 0, 1, 0.75),
+    L('simplify', 'xhigh', 1, 5, 0, null, 5, 0, 0, 0, 1),
+  ], JSON.stringify(s.freshReviewLevels))
+  // old and new review-round lines read with no flag: the two left are this fixture's (no Grade log, no transcripts)
+  assert.deepEqual(s.flags.filter((f) => !/^grades: no grade log$|^attention: no transcripts directory /.test(f)), [], JSON.stringify(s.flags))
+  assert.deepEqual(span(h, [], { since: '2026-09-10T00:00+10:00', until: '2026-09-11T00:00+10:00' }).freshReviewLevels, [], 'no round in the window: no level')
 })
 
 // The shape c6f5bb9/ba8597 #6 found: a report that sums over a span wider than its window, which nothing automated

@@ -341,8 +341,8 @@ Its `attention` block is the **attention ledger** (ADR 0056; `skills/reflect/scr
 rule), read past the Run record: `questions`, each question put to Lachy in the window, from the session transcripts'
 main chain (its `items`, each with an `id`, its outcome, its recommended option and whether he picked it, his own words
 or note, and the hours it held work; its `counts`, the totals); `trails`, the /fresh-review rounds of each PR, keyed by
-its landing merge, its branch, or a run of rounds in one checkout (rounds, STOP entries and those handed to him, and
-whether the PR changed docs alone); `waits`, each rollout's wait to start, from his ask (the earliest `captured:` of its
+its landing merge, its branch, or a run of rounds in one checkout (rounds, code rounds, findings, and whether the PR
+changed docs alone); `waits`, each rollout's wait to start, from his ask (the earliest `captured:` of its
 queue's tasks) and from its scheduling; `circling`, `W1` (a work item three or more Sessions touched with nothing merged
 while no rollout held it, each with its `heldBy`), `W2` (a rollout open 48 hours with nothing merged) and `readings` (the
 reading Sessions it left out: a Session that runs the reading's own scripts is never a touch); `watches`, each circling
@@ -455,21 +455,32 @@ recording Lachy's no (step 15's decision task, § Deciding the decision task) is
 landing (a repo identity and branch, so a loop continued in a worktree is one landing) with a round reviewed in the
 window, only those rounds counted: a landing reviewed across two weeks shows in each, and the default branch's entry
 never grows with the record. For each, its `rounds` (`codeRounds` of them code, `gradedRounds` of those graded: the
-ones carrying both `blocking` and `findings`, which `blockingRate` reads), `findings` and `blocking` per code round in
-order, `filed`, `rejected`, `open` at its last code round, `recurring`, `reversal` and `regression`, its size
-(`lines`, `files`), and `blockingRate`. A null is unknown, never 0: a round recorded before ADR 0058, one whose doc
-held no `## Disposition` yet, or a `regression` no line carries. `codeRounds` counts every review round on the branch,
-dev-time chains before the landing loop included, so it is review cost, never the landing's budget count (ADR 0058
-d4): never name a landing as at its budget from it. Name each landing with many code rounds as review cost, each
-whose last code round left `open` above 0, each whose `regression` is above 0 (it keeps re-reviewing its own fixes),
-and each whose `rejected` outnumbers its `filed` (findings set aside rather than filed). The self-grading check (the
-risk ADR 0058's Consequences name) reads the week's landing entries (`branch` not null) together, never one landing
-alone: when every graded round among them has `blocking` 0 and their `gradedRounds` sum to two or more, name the week
-as the self-grading risk, with its landings. One landing with one graded round is too little to name; two one-round
-landings, both at 0, are named. The entry with `branch` null holds the repo's branchless rounds in the window: no
-landing. A `cannotShow` line `/fresh-review: <k> round(s) first recorded in this window but reviewed before it` counts
-rounds land.sh swept after their own week closed: they count in no week, so report the count and never re-window
-them.
+ones carrying both `blocking` and `findings`, which `blockingRate` reads; `checkedRounds` of those judged by
+fresh-review's checker: the ones carrying `unconfirmed`, which `confirmRate` reads), `findings` and `blocking` per code
+round in order, `filed`, `unconfirmed` (the candidates the checker could not reproduce), `rejected` (the ones the code
+disproves), `open` at its last code round, `recurring`, `reversal` and `regression`, its size (`lines`, `files`),
+`blockingRate`, `candidates` (its checked rounds' candidates, reproduced or not) and `confirmRate` (the share of them
+the checker reproduced). A null is
+unknown, never 0: a round recorded before ADR 0058, one whose doc held no `## Disposition` yet, an `unconfirmed` no
+line carries (a round recorded before the checker), or a `regression` no line carries. `codeRounds` counts every
+review round on the branch, dev-time chains before the landing loop included, so it is review cost, never the
+landing's budget count (three code rounds, ADR 0065): never name a landing as at its budget from it. Name each landing
+with many code rounds as review cost, each whose last code round left `open` above 0, each whose `regression` is above
+0 (it keeps re-reviewing its own fixes), and each whose `rejected` outnumbers its `filed` (findings set aside rather
+than filed). The confirm-rate check (ADR 0065: the checker grades every finding, so the risk is a checker that
+reproduces nothing, a rubber stamp) reads the week's landing entries (`branch` not null) together, never one landing
+alone, off one field each: when their `candidates` sum to two or more and none was reproduced (`confirmRate` 0 on
+every landing with a candidate), name the week as the confirm-rate risk, with its landings. `candidates` counts the
+checked rounds alone, so a landing's older rounds, graded before the checker, and its `unconfirmed` from other modes
+never enter it. One unreproduced candidate in the week is too little to name; two, in one landing or across two, are
+named. The entry with
+`branch` null holds the repo's branchless rounds in the window: no landing. Report `span.json`'s `freshReviewLevels`
+beside them as precision per level, reported only, never traced: one entry per `mode` and `effort` over the week's
+review rounds that carry disposition counts, every branch and the branchless ones included, with its sums and
+`precision` (the share of its `findings` not `rejected`); its `unconfirmed` is null where every round predates the
+checker, and its `precision` null where it has no findings. A `cannotShow` line `/fresh-review: <k> round(s) first
+recorded in this window but reviewed before it` counts rounds land.sh swept after their own week closed: they count in
+no week, so report the count and never re-window them.
 
 **The Time-lost ledger** (`span.json`'s `ledger`) is reported, never traced as friction: a script sums its hours, so
 no part of it becomes a sighting, a bug or a knob of yours. Read its `row` top class first, then the other classes in
@@ -661,16 +672,16 @@ reading leaves the week quiet.
 
 Report the rollouts read (and the escapes-only and repairs-only ones), each trace and what it became, the grade
 accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySize` readout and each grade trace), each
-/fresh-review landing (`freshReview`: its repo and branch, rounds, findings and blocking per round, filed, rejected,
-open at the end, reversals, regression, its size, and what step 11 named, the self-grading risk included), the late
-/fresh-review rounds' count, the
+/fresh-review landing (`freshReview`: its repo and branch, rounds, findings and blocking per round, filed,
+unconfirmed, rejected, open at the end, reversals, regression, its size, its confirm rate, and what step 11 named, the
+confirm-rate risk included), the precision per level (`freshReviewLevels`), the late /fresh-review rounds' count, the
 Watches written (and any `extended` line), the bugs filed or found, the Time-lost ledger (its top class and hours, each
 class against last week, the trend, any Watch it opened, any ceiling raise it held), the Monthly audit's row when one
 ran (its hours found against the record's, the sources it could not read) and each gap it named, each knob landed,
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or
 skipped behind a revert, the attention ledger (the questions put to Lachy, *yours* beside `unlabelled`, a lower bound
-while that is above 0, the recommended-pick rate and the hours questions held work; the trails, their STOP entries,
-those handed to him and the docs-only PRs; the waits to start; each circling item and any Watch it opened), the close line's counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
+while that is above 0, the recommended-pick rate and the hours questions held work; the trails, their rounds and the
+docs-only PRs; the waits to start; each circling item and any Watch it opened), the close line's counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
 
 ## Deciding the decision task
 
@@ -820,8 +831,8 @@ or `exists`). An item left open keeps the task open.
   transcript cleaned up or past its retention is gone.
 - The Owner is the reading's label (asking.md § 1), never his: *yours* is a lower bound while `unlabelled` is above 0.
 - An answer the Stage gave in his place reads as his.
-- A STOP entry is an entry into the stop verdict, not the end of a review: one trail can enter it more than once.
-- A STOP handed to him is any question within 30 minutes of a stop round from the same checkout, whatever it was about.
+- A trail counts rounds and findings, never a stop: fresh-review's ADR 0001 retired the ledger's stop rule and its
+  simplify round, so a question put after a round reads in the Question ledger alone, never as a handed stop.
 - A PR reviewed in a checkout whose heads reach no branch and no landing merge reads as a trail of its own (#211's
   rounds read as two trails).
 - A trail reaches back at most 28 days before the window: a PR reviewed over longer reads as its later rounds alone.
