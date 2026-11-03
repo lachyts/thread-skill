@@ -8,7 +8,7 @@ Every vault and git write a Leg makes goes through `python3 ${CLAUDE_PLUGIN_ROOT
 
 ## Entry
 
-execute § 1 resolves the note, execute § 1.5 resolves its engine root (and moves the chain onto a fresh snapshot when its last Leg closed `stopped`: a serial chain's Reinstate) before § 2's gates, and § 2's lineage and version gates run first. § 2's shape line then sends a `shape: serial` note here, in place of execute §§ 2.5–8. A serial note is never paused, so a `paused:` or `pause_requested:` stamp on one is no reinstate: `leg.py begin` refuses it, and prints the remedy.
+execute § 1 resolves the note, execute § 1.5 resolves its engine root (and moves the chain onto a fresh snapshot when its last Leg closed `stopped`: a serial chain's Reinstate; an unstamped chain is stamped at its first Leg or the first Leg begun after any close, never while a Leg is open) before § 2's gates, and § 2's lineage and version gates run first. § 2's shape line then sends a `shape: serial` note here, in place of execute §§ 2.5–8. A serial note is never paused, so a `paused:` or `pause_requested:` stamp on one is no reinstate: `leg.py begin` refuses it, and prints the remedy.
 
 A Leg runs in this order, and never in another:
 
