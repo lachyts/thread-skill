@@ -527,8 +527,14 @@ Subcommands:
               <why>`; off --dry-run its lines are copied verbatim into --to (Note.insert_block, after `parallel_ceiling:`,
               else `status:`) before any task write, only while --to has none (--to then counts in `[written: <n>]`),
               and a different hold already on --to is kept with `WARN: carry: hold_until on <to> differs from
-              <from>'s; <to>'s kept` on stderr. An approved queue's `on_merge:` is never copied (p30-4): the new note
-              keeps a plain hold, released at its first `next`.
+              <from>'s; <to>'s kept` on stderr. A --from whose `security_checks:` (execute § 3, the hand-set Security
+              check opt-in) reads anything but false prints `security_checks <value>` after the hold_until line (or
+              after the carry, keep and restamp lines when there is none) and before the order lines; off --dry-run
+              its lines are copied verbatim into --to (after `hold_until:`'s block, else `parallel_ceiling:`, else
+              `status:`) in the same save as the hold, only while --to has none, and a different value already on --to
+              is kept with `WARN: carry: security_checks on <to> differs from <from>'s; <to>'s kept`. An approved
+              queue's `on_merge:` is never copied (p30-4): the new note keeps a plain hold, released at its first
+              `next`.
               --dry-run previews and needs no --to. Refuses (exit 2,
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
@@ -591,7 +597,12 @@ Subcommands:
               rollouts.toml (the whole file is validated), a present one on a python with no tomllib, or a resolver
               that will not load: `ERROR: rollout settings refused: <the resolver's line>`, exit 3, no stdout. No
               verify-slot.py beside this script (p32-1, checked after exit 3): `ERROR: verify-timeout: <path> not
-              found`, exit 4, no stdout.
+              found`, exit 4, no stdout. The note's hand-set `security_checks:` (execute § 3, the opt-in Security
+              check; read as `parallel_ceiling` is, case-folded; absent, empty or false is off): true adds
+              `"securityCheck": {"script": <abs security-check.py>}` after `namedRerun`, once `security-check.py
+              preflight` exits 0; any other value, true on a `shape: serial` note ("parallel rollouts only"), no
+              security-check.py beside this script or a failed preflight is one `ERROR: security_checks: <why>` line,
+              exit 5, no stdout (checked after exit 4).
 
   record-verify  The lead's record of one Integration verify or RACE re-verify (ADR 0050, 0051; execute § 4.5 step 3
               and the RACE procedure), run only once that verify's canary check exited 0: `--rollout <note> --tasks
@@ -9524,6 +9535,11 @@ AUTO_RETRY_STAGES = ("plan", "implement", "verify", "review", "integrate")  # se
 RETRY_BUDGET_KEYS = (("auto_retries", "autoRetries", 0), ("max_review_rounds", "maxReviewRounds", 1))
 LEAD_INTEGRATE_PY = Path(__file__).resolve().parent / "lead-integrate.py"
 VERIFY_SLOT_PY = Path(__file__).resolve().parent / "verify-slot.py"
+# The opt-in Security check (execute § 3 `security_checks`): verify-timeout runs its preflight at every entry and prints
+# its path as `securityCheck`, which the lead passes to the engine verbatim (args.securityCheck).
+SECURITY_CHECK_PY = Path(__file__).resolve().parent / "security-check.py"
+SECURITY_CHECKS_KEY = "security_checks"
+SECURITY_PREFLIGHT_TIMEOUT = 30
 _LEAD = None
 
 
@@ -10375,6 +10391,14 @@ def cmd_carry(args) -> int:
     if src_hold is not None:
         print(f"{HOLD_KEY} unreadable: {src_hold['error']}" if src_hold["error"] else
               f"{HOLD_KEY} pr={src_hold['pr']} merged={src_hold['merged']}")
+    # The prior's hand-set Security check opt-in (execute § 3 `security_checks`): schedule never stamps it, so a supersede
+    # that dropped it would turn the operator's scan off unseen. Anything but '' or false is named and copied verbatim
+    # (a bad value too, so it still fails closed at the new note's first entry). Printed in both modes.
+    src_security = _scalar(src_note.get(SECURITY_CHECKS_KEY))
+    if src_security.lower() in ("", "false"):
+        src_security = None
+    else:
+        print(f"{SECURITY_CHECKS_KEY} {src_security}")
     # The order hints read --from's prose against its carried tasks and, while --from is still open, against the
     # tasks already on --to: an interrupted supersede whose own carry ran before it died (§ 0's finish) left none
     # on --from, and this is the only run that reads that prose. A closed re-run's step 7 has confirmed them.
@@ -10393,19 +10417,29 @@ def cmd_carry(args) -> int:
     written = 0
     # The hold first, before any task write: its lines verbatim (block form included, an unreadable one too, so it still
     # fails closed) after `parallel_ceiling:`, else `status:`, only while --to has none (Note.insert_block); an identical
-    # one is left, a different one kept with a WARN. An interrupted re-run finds it there.
+    # one is left, a different one kept with a WARN. An interrupted re-run finds it there. The `security_checks:` lines
+    # the same way, after the hold's whole block (else `parallel_ceiling:`, else `status:`), in the same save, so --to
+    # counts once in `[written: <n>]`; a different value already there is kept with a WARN.
     if src_hold is not None:
         dst_lines = dst_note.fm_block(HOLD_KEY)
         if dst_lines is None:
             dst_note.insert_block(HOLD_KEY, src_hold["lines"], after=("parallel_ceiling", "status"))
-            try:
-                dst_note.save()
-            except OSError as e:
-                print(f"ERROR: carry: {dst.stem}: cannot write {dst}: {e} (no note carried yet)", file=sys.stderr)
-                return 1
-            written += 1
         elif dst_lines != src_hold["lines"]:
             print(f"WARN: carry: {HOLD_KEY} on {dst.stem} differs from {src.stem}'s; {dst.stem}'s kept", file=sys.stderr)
+    if src_security is not None:
+        if dst_note.fm_block(SECURITY_CHECKS_KEY) is None:
+            dst_note.insert_block(SECURITY_CHECKS_KEY, src_note.fm_block(SECURITY_CHECKS_KEY),
+                                  after=(HOLD_KEY, "parallel_ceiling", "status"), after_span=True)
+        elif _scalar(dst_note.get(SECURITY_CHECKS_KEY)).lower() != src_security.lower():
+            print(f"WARN: carry: {SECURITY_CHECKS_KEY} on {dst.stem} differs from {src.stem}'s; {dst.stem}'s kept",
+                  file=sys.stderr)
+    if dst_note.dirty:
+        try:
+            dst_note.save()
+        except OSError as e:
+            print(f"ERROR: carry: {dst.stem}: cannot write {dst}: {e} (no note carried yet)", file=sys.stderr)
+            return 1
+        written += 1
     for path, note, state, carried, plan in rows:
         if not carried:
             continue
@@ -11197,7 +11231,11 @@ def cmd_verify_timeout(args) -> int:
     verify_slots. A bad verify_timeout or no note: one ERROR line on stderr, exit 1 (checked first). A completion key
     the completion verify's reader refuses (_completion_config): its ERROR line, exit 2. A refused rollouts.toml:
     `ERROR: rollout settings refused: …`, exit 3. No sibling verify-slot.py (p32-1): `ERROR: verify-timeout: <path>
-    not found`, exit 4 (checked last). Either way the lead's entry writes nothing."""
+    not found`, exit 4. The opt-in `security_checks:` (execute § 3; _security_check): true adds `"securityCheck":
+    {"script": <this script's sibling security-check.py>}` after `namedRerun`, the engine's args.securityCheck; a value
+    that is neither true nor false, true on a `shape: serial` note, no sibling security-check.py or a failed
+    `security-check.py preflight` is one `ERROR: security_checks: <why>` line, exit 5 (checked last). Either way the
+    lead's entry writes nothing."""
     path = Path(os.path.expanduser(args.rollout))
     if not path.exists():
         print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
@@ -11228,12 +11266,48 @@ def cmd_verify_timeout(args) -> int:
     if not VERIFY_SLOT_PY.is_file():
         print(f"ERROR: verify-timeout: {VERIFY_SLOT_PY} not found", file=sys.stderr)
         return 4
+    security, err = _security_check(note)
+    if err:
+        print(f"ERROR: {SECURITY_CHECKS_KEY}: {err}", file=sys.stderr)
+        return 5
     out = {"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000, "slotWait": _slot_wait(seconds),
            "verifySlot": {"script": str(VERIFY_SLOT_PY), "slots": slots}}
     if named:
         out["namedRerun"] = named   # only when the note sets it, so a line for a note without it is unchanged
+    if security:
+        out["securityCheck"] = security   # the same: only when the note opts in
     print(json.dumps(out))
     return 0
+
+
+def _security_check(note):
+    """(securityCheck | None, why | None) for the rollout's hand-set `security_checks:` (execute § 3): absent, empty or
+    false (through _scalar, case-folded) is off; true is {"script": SECURITY_CHECK_PY}, once the key is on a parallel
+    note (a serial chain's Legs never read it, so no scan would run there), the sibling script exists and its preflight
+    exits 0 (its ERROR line relayed). Anything else is refused."""
+    raw = _scalar(note.get(SECURITY_CHECKS_KEY))
+    value = raw.lower()
+    if value in ("", "false"):
+        return None, None
+    if value != "true":
+        return None, f"must be true or false, got {raw!r}"
+    if _shape(note) == SHAPES[1]:
+        return None, ("parallel rollouts only: a serial chain's Legs never read it, so no scan runs there; remove "
+                      "the key")
+    if not SECURITY_CHECK_PY.is_file():
+        return None, f"{SECURITY_CHECK_PY} not found"
+    try:
+        r = subprocess.run([sys.executable, str(SECURITY_CHECK_PY), "preflight"], capture_output=True, text=True,
+                           timeout=SECURITY_PREFLIGHT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None, f"security-check.py preflight timed out after {SECURITY_PREFLIGHT_TIMEOUT} s"
+    except OSError as e:
+        return None, f"security-check.py preflight did not run: {e}"
+    if r.returncode != 0:
+        lines = [ln for ln in r.stderr.strip().splitlines() if ln.strip()]
+        why = lines[-1] if lines else f"exit {r.returncode}"
+        return None, why[len("ERROR: "):] if why.startswith("ERROR: ") else why
+    return {"script": str(SECURITY_CHECK_PY)}, None
 
 
 # ---- record-verify (ADR 0050, p29-9) -------------------------------------------
@@ -12220,6 +12294,8 @@ WHOLE_HALT_PATTERNS = (
     r"lane hold not written on \[\[[^\]]+\]\]",
     r"args\.verifySlot is not this entry's verify-timeout verifySlot",
     r"engine refused the args of \[\[[^\]]+\]\]",
+    r"security_checks refused on \[\[[^\]]+\]\]",
+    r"args\.securityCheck is not this entry's verify-timeout securityCheck",
     r"ladder file refused",
     r"lead-integrate\.py failed on \[\[[^\]]+\]\]",
     r"merge-task\.sh exited \S+ on the revert of \[\[[^\]]+\]\]",

@@ -1577,6 +1577,97 @@ carry --from "$T/$P.md" --to "$T/$N.md"
 ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(sum1 $N.md)" "0|[written: 1]|$pn" "K8: a different hold on the new note is kept"
 ok "$err" "WARN: carry: hold_until on $N differs from $P's; $N's kept" "K8: … with one WARN line"
 
+# ── K8s: carry copies the prior's hand-set security_checks: into the new note (execute § 3, the Security check opt-in) ──
+# Schedule never stamps it, so a --regenerate that dropped it would turn the operator's scan off unseen. The preview names
+# it after the hold_until line (or after the carry, keep and restamp lines when there is none) and before the order
+# lines; the carry copies its line verbatim after hold_until's whole block (else parallel_ceiling:, else status:) in the
+# same save as the hold, so the new note counts once. A prior with false or none adds nothing; a different value already
+# on the new note is kept with a WARN; a bad value is copied verbatim, so it still fails closed at the next entry.
+scen k8s
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'hold_until:' '  pr: o/r#202' '  merged: true' 'security_checks: true'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" 'parallel_ceiling: 2' "supersedes: \"[[$P]]\""
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc|$out" "0|carry a queued
+hold_until pr=o/r#202 merged=true
+security_checks true
+(dry-run)" "K8s: the preview prints security_checks after the hold_until line, before the trailer"
+ok "$(sums)" "$before" "K8s: … and writes nothing"
+pp=$(sum1 $P.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | grep '^security_checks ')|$(printf '%s\n' "$out" | tail -1)|$err" "0|security_checks true|[written: 2]|" \
+  "K8s: carry prints it again; the hold and the key land in one save, the new note counted once"
+ok "$(sed -n '/^parallel_ceiling:/,/^supersedes:/p' "$T/$N.md")" 'parallel_ceiling: 2
+hold_until:
+  pr: o/r#202
+  merged: true
+security_checks: true
+supersedes: "[[demo-rollout-2026-09-23]]"' "K8s: … copied right after hold_until's whole block"
+ok "$(grep -c '^security_checks:' "$T/$N.md")" 1 "K8s: … once"
+ok "$(sum1 $P.md)" "$pp" "K8s: … and the prior is never written"
+before=$(sums)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$err" "0|[no-change]|" "K8s: an interrupted re-run copies nothing again, with no WARN"
+ok "$(sums)" "$before" "K8s: … writing nothing"
+
+scen k8s-alone
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'security_checks: true'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" 'parallel_ceiling: 2' "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --dry-run
+ok "$rc|$out" "0|carry a queued
+security_checks true
+(dry-run)" "K8s: with no hold, the preview prints it after the carry lines"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(grep -A1 '^parallel_ceiling:' "$T/$N.md" | tail -1)" "0|[written: 2]|security_checks: true" \
+  "K8s: … copied right after parallel_ceiling:"
+
+scen k8s-status
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'security_checks: "true"  # opted in'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(grep -A1 '^status:' "$T/$N.md" | tail -1)" '0|security_checks: "true"  # opted in' \
+  "K8s: … verbatim, right after status: when there is no parallel_ceiling:"
+
+scen k8s-order
+BODY='- [[demo-p1-1-a]] → [[demo-p1-2-b]]' mkro $P.md "$R" "$DEMO" "$PAUSED" 'security_checks: true'
+mkt demo-p1-1-a.md $P open
+mkt demo-p1-2-b.md $P open
+carry --from "$T/$P.md" --dry-run
+ok "$rc|$(printf '%s\n' "$out" | grep -n '^security_checks \|^order ' | cut -d: -f1 | tr '\n' ' ')|$(printf '%s\n' "$out" | grep -c '^order ')" "0|3 4 |1" \
+  "K8s: the security_checks line prints before the order lines"
+
+for v in false none; do
+  scen "k8s-$v"
+  if [ "$v" = false ]; then mkro $P.md "$R" "$DEMO" "$PAUSED" 'security_checks: false'; else mkro $P.md "$R" "$DEMO" "$PAUSED"; fi
+  mkt a.md $P open
+  mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+  pn=$(sum1 $N.md)
+  carry --from "$T/$P.md" --to "$T/$N.md"
+  ok "$rc|$(printf '%s\n' "$out" | grep -c '^security_checks ')|$(printf '%s\n' "$out" | tail -1)|$(sum1 $N.md)|$err" "0|0|[written: 1]|$pn|" \
+    "K8s: a prior with security_checks $v prints no line and adds no write"
+done
+
+scen k8s-differs
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'security_checks: true'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\"" 'security_checks: false'
+pn=$(sum1 $N.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(sum1 $N.md)" "0|[written: 1]|$pn" "K8s: a different value on the new note is kept"
+ok "$err" "WARN: carry: security_checks on $N differs from $P's; $N's kept" "K8s: … with one WARN line"
+
+scen k8s-bad
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'security_checks: yes'
+mkt a.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --dry-run
+ok "$(printf '%s\n' "$out" | grep '^security_checks ')" "security_checks yes" "K8s: a bad prior value is previewed"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(fm $N.md security_checks)" "0|security_checks: yes" "K8s: … and copied verbatim, so it still fails closed at the next entry"
+
 # ── K9: carry takes an approved queue whose only marks are ended room stops (p30-4; approved_unrun) ─────────
 scen k9
 BODY="$RS_ENDED" mkro $P.md "$R" "$DEMO" "$AQ_HOLD" "$AQ_ON"

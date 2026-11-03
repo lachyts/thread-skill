@@ -677,7 +677,7 @@ got=$(HOME="$EH" python3 "$SCRIPT" verify-timeout --rollout "$TMP/no-such-rollou
 # p32-1: a plugin install without verify-slot.py is exit 4 (its own code, never a bad verify_timeout's 1), checked after
 # exit 3, so the lead halts at the entry with nothing stamped instead of passing a verifySlot.script that does not exist.
 # The script is loaded by importlib (-B: no bytecode beside it) with VERIFY_SLOT_PY pointed at a path that does not exist.
-# The exits are checked in the order 1, 2, 3, then 4: each earlier exit wins over a missing verify-slot.py.
+# The exits are checked in the order 1, 2, 3, 4, then 5: each earlier exit wins over a missing verify-slot.py.
 vt_absent() {  # vt_absent <frontmatter line> [HOME] -> rc, with stdout in $TMP/vt4.out and stderr in $TMP/vt4.err
   mkvt "$1"
   HOME="${2:-$EH}" python3 -B - "$SCRIPT" "$TMP/vt4-absent/verify-slot.py" "$TMP/vt-rollout.md" > "$TMP/vt4.out" 2> "$TMP/vt4.err" <<'PY'
@@ -710,6 +710,68 @@ got="$rc|$m|$(wc -l < "$TMP/vt4.err" | tr -d ' ')|$(cat "$TMP/vt4.out")"
 want="3|y|1|"
 [ "$got" = "$want" ] && echo "ok   - verify-timeout: a refused rollouts.toml with verify-slot.py missing still exits 3 (3 before 4)" \
   || { echo "FAIL - verify-timeout: a refused rollouts.toml with verify-slot.py missing: expected [$want] got [$got] (err: $(cat "$TMP/vt4.err"))"; fail=1; }
+
+# security_checks (execute § 3, the opt-in Security check): verify-timeout reads the hand-set key, runs
+# `security-check.py preflight` (gitleaks found, at least 8.19.0; THREAD_GITLEAKS pins a stub here) and prints
+# `securityCheck` after `namedRerun`; any value but true or false, true on a serial note, no sibling security-check.py or a
+# failed preflight is exit 5 with one `ERROR: security_checks:` line, checked after exit 4. Every line above stays byte-equal.
+SCP="$(cd "$(dirname "$SCRIPT")" && pwd -P)/security-check.py"
+GLS="$TMP/gitleaks-stub"; printf '#!/bin/sh\n[ "$1" = version ] && { echo "${STUB_VERSION:-8.30.1}"; exit 0; }\nexit 1\n' > "$GLS"; chmod +x "$GLS"
+[ -f "$SCP" ] && echo "ok   - verify-timeout: its sibling security-check.py exists ($SCP)" || { echo "FAIL - verify-timeout: no security-check.py at $SCP"; fail=1; }
+SEC=', "securityCheck": {"script": "'"$SCP"'"}'
+vt_sec() {  # vt_sec <label> <frontmatter line(s)> <expected stdout> [extra env assignments...] (V1-V4, V6b, V9)
+  local label="$1" fm="$2" want="$3"; shift 3
+  mkvt "$fm"; local before after got rc; before=$(shaof "$TMP/vt-rollout.md")
+  got=$(env THREAD_GITLEAKS="$GLS" HOME="$EH" "$@" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>"$TMP/vt.err"); rc=$?
+  after=$(shaof "$TMP/vt-rollout.md")
+  if [ "$rc" -eq 0 ] && [ "$got" = "$want" ] && [ "$before" = "$after" ]; then echo "ok   - verify-timeout: $label"
+  else echo "FAIL - verify-timeout: $label (rc $rc, got $got, err $(cat "$TMP/vt.err"))"; fail=1; fi
+}
+vt_sec5() {  # vt_sec5 <label> <frontmatter line(s)> <a substring of the one ERROR line> [extra env assignments...]
+  local label="$1" fm="$2" want="$3"; shift 3
+  mkvt "$fm"; local before after got rc err
+  before=$(shaof "$TMP/vt-rollout.md")
+  got=$(env THREAD_GITLEAKS="$GLS" HOME="$EH" "$@" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>"$TMP/vt.err"); rc=$?
+  err=$(cat "$TMP/vt.err"); after=$(shaof "$TMP/vt-rollout.md")
+  case "$err" in "ERROR: security_checks: "*"$want"*) m=y;; *) m=n;; esac
+  if [ "$rc" -eq 5 ] && [ -z "$got" ] && [ "$m" = y ] && [ "$(printf '%s\n' "$err" | wc -l | tr -d ' ')" = 1 ] && [ "$before" = "$after" ]
+  then echo "ok   - verify-timeout: $label"
+  else echo "FAIL - verify-timeout: $label (rc $rc, out '$got', err '$err')"; fail=1; fi
+}
+vt_sec "V1: security_checks: true -> securityCheck, the note untouched" 'security_checks: true' "$VT0$SEC}"
+vt_sec "V2: security_checks: false -> no key" 'security_checks: false' "$VT0}"
+vt_sec "V3: a commented-out security_checks -> no key" '# security_checks: true' "$VT0}"
+vt_sec 'V4: a quoted "true" (and a trailing comment) -> on' 'security_checks: "true"  # opted in' "$VT0$SEC}"
+vt_sec5 "V5: security_checks: yes -> exit 5" 'security_checks: yes' "must be true or false, got 'yes'"
+vt_sec5 "V6: true on a serial note -> exit 5, parallel rollouts only" "$(printf 'shape: serial\nsecurity_checks: true')" "parallel rollouts only"
+vt_sec "V6b: false on a serial note -> exit 0, no key" "$(printf 'shape: serial\nsecurity_checks: false')" "$VT0}"
+vt_sec5 "V7: gitleaks older than 8.19.0 -> exit 5, preflight's line relayed" 'security_checks: true' "older than 8.19.0" STUB_VERSION=8.18.0
+printf 'x' > "$TMP/gitleaks-plain"; chmod 644 "$TMP/gitleaks-plain"
+vt_sec5 "V8: a non-executable THREAD_GITLEAKS -> exit 5" 'security_checks: true' "is not an executable file" THREAD_GITLEAKS="$TMP/gitleaks-plain"
+vt_sec "V9: named_rerun and security_checks -> verifySlot, namedRerun, then securityCheck" "$(printf 'named_rerun: "pytest {tests}"\nsecurity_checks: true')" "$VT0"', "namedRerun": "pytest {tests}"'"$SEC}"
+mkvt "$(printf 'verify_timeout: 0\nsecurity_checks: yes')"
+got=$(THREAD_GITLEAKS="$GLS" HOME="$EH" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>"$TMP/vt.err"); rc=$?
+[ "$rc" -eq 1 ] && [ -z "$got" ] && [ "$(cat "$TMP/vt.err")" = "ERROR: verify_timeout must be an integer from 1 to 6600, got '0'" ] \
+  && echo "ok   - verify-timeout: V10: a bad verify_timeout with a bad security_checks still exits 1" \
+  || { echo "FAIL - verify-timeout: V10: rc $rc, err $(cat "$TMP/vt.err")"; fail=1; }
+vt_absent 'security_checks: yes'; rc=$?
+got="$rc|$(cat "$TMP/vt4.err")|$(cat "$TMP/vt4.out")"
+want="4|ERROR: verify-timeout: $TMP/vt4-absent/verify-slot.py not found|"
+[ "$got" = "$want" ] && echo "ok   - verify-timeout: V11: verify-slot.py missing with a bad security_checks still exits 4 (4 before 5)" \
+  || { echo "FAIL - verify-timeout: V11: expected [$want] got [$got]"; fail=1; }
+mkvt 'security_checks: true'; s0=$(shaof "$TMP/vt-rollout.md")
+THREAD_GITLEAKS="$GLS" HOME="$EH" python3 -B - "$SCRIPT" "$TMP/vt5-absent/security-check.py" "$TMP/vt-rollout.md" > "$TMP/vt5.out" 2> "$TMP/vt5.err" <<'PY'
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+rr.SECURITY_CHECK_PY = pathlib.Path(sys.argv[2])
+sys.argv = [sys.argv[1], "verify-timeout", "--rollout", sys.argv[3]]
+sys.exit(rr.main())
+PY
+rc=$?
+got="$rc|$(cat "$TMP/vt5.err")|$(cat "$TMP/vt5.out")|$([ "$(shaof "$TMP/vt-rollout.md")" = "$s0" ] && echo same || echo changed)"
+want="5|ERROR: security_checks: $TMP/vt5-absent/security-check.py not found||same"
+[ "$got" = "$want" ] && echo "ok   - verify-timeout: V12: security-check.py missing -> exit 5, security-check.py not found, the note untouched" \
+  || { echo "FAIL - verify-timeout: V12: expected [$want] got [$got]"; fail=1; }
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi
