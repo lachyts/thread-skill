@@ -119,8 +119,9 @@ restarted, copies, land):
       missing exit 1 naming begin. A fresh claim there also refuses (exit 1, `unlandedDeps` [{task, dep, rollout, sha,
       copy, why}]) a row with a dependency another rollout's chain finished whose `leg_head` commit in this repository
       the copy's HEAD lacks (unlanded_deps: `done on chain/<X>, not yet on <d>: it lands at [[<X>]]'s next done or
-      close`, or `on <d>, not yet in <C>: run leg.py land, which brings <d> in`; legs.md § The task loop). Logs
-      `claimed` or `took`.
+      close`, or `on <d>, not yet in <C>: run leg.py land, which brings <d> in`; legs.md § The task loop). Its error
+      names one gap, a set-aside one first, and ends by its cause: `run leg.py land, then claim again` on `on <d>`, else
+      `set it aside` with its `leg.py set-aside` line, `until that work is in <C>`. Logs `claimed` or `took`.
       Each --gate is compared with the note's `## Approved gates` (reconcile-rollout.py's _norm_gate): the
       unapproved ones are printed for `set-aside --kind gate`. An exact `None` (execute § 3.7's grammar, bullet,
       case and one trailing `.` aside, as the engine's parseGatedInputs reads it) is no gate, never unapproved.
@@ -263,26 +264,30 @@ restarted, copies, land):
         2. P's repo lock (The lock, below): past its timeout the copy stands, `another land held <path> past <t>s`;
         3. unl: the done counted rows with a `leg_head` entry on C that refs/heads/<d> in P does not reach (git is the
            truth: a hand merge counts);
-        4. when unl is not empty, the actual-claim check (ADR 0067 d4): unl's `leg_claims:` (a row done before them:
-           change's paths as `repo:<P>//<path>`), bookkeeping aside, against every other live root-level serial note
-           with a `chain_copies:` pair on P, read as a Chain, whose rows are unlanded_done and whose `leg_head` on its
-           copy git confirms is off d, their `leg_claims:`; an overlap with a chain that sorts first (order_key) stands,
-           `[[X]] holds <token> unlanded and began first` (a tie in first_by's words); a later chain never blocks, and
-           an unreadable note is a WARN (git's merge and the re-run Verify lines are the backstop);
-        5. d into C, never a rebase (so `leg_head` stays an ancestor), hooks off and never an autostash: `merge
+        4. d into C, never a rebase (so `leg_head` stays an ancestor), hooks off and never an autostash: `merge
            --ff-only` when the tip is d or behind it, else `merge --no-ff --no-edit -m "🔀 land: merge <d> into
            chain/<rollout>"`; a conflict is aborted (`merge --abort`) and stands, `conflict in <paths>`, and an
            untracked-file refusal stands with git's line; dm is the d sha the tip now holds;
+        5. on the first try, when unl is not empty, the actual-claim check (ADR 0067 d4): unl's `leg_claims:` (a row
+           done before them: change's paths as `repo:<P>//<path>`), bookkeeping aside, against every other live
+           root-level serial note with a `chain_copies:` pair on P, read as a Chain, whose rows are unlanded_done and
+           whose `leg_head` on its copy git confirms is off d, their `leg_claims:`; an overlap with a chain that sorts
+           first (order_key) stands, `[[X]] holds <token> unlanded and began first` (a tie in first_by's words), with
+           4's merge kept on chain/<rollout> as --red keeps it, so the copy holds the work other chains landed on d and
+           the next land asks for its re-verify; a later chain never blocks, and an unreadable note is a WARN (git's
+           merge and the re-run Verify lines are the backstop);
         6. the verify list: an unl row needs its Verify line run again unless dm is in its `leg_head`, or a verified
            tip V for P (a logged `land verified: <P> at <V>`, or this call's --verified <V> when V is the tip, then
            logged once) holds its head and dm and the tip holds V; a list stops the copy as `verify` with `head`,
            `merged` and `verify` [{task, line (its **Verify:** line or null), folder (its launch folder in C)}], the
            merge kept on chain/<rollout>;
-        7. d moved to the tip, by where it is checked out: in P, after the in-place peer check (below), `merge
-           --ff-only --no-autostash` in P (a refusal over a local change or an untracked file in the way stands, `the
-           primary's uncommitted edit on <files>`; never a stash); nowhere, a compare-and-swap `update-ref`; in another
-           worktree, a stand (`<d> is checked out in <wt>`). A CAS failure, or a refused ff after d moved, re-runs from
-           5, three tries at most, then stands `<d> kept moving`. A tip already d is `current`, P untouched;
+        7. d moved to the tip, by where it is checked out: in P, after the in-place peer check (below), P's HEAD read
+           again (off d, it stands, `<P> left <d> during the land (its HEAD is now <ref>)`), then `merge --ff-only
+           --no-autostash` in P (a refusal over a local change or an untracked file in the way stands, `the primary's
+           uncommitted edit on <files>`; never a stash), landed only when refs/heads/<d> is then the tip; nowhere, a
+           compare-and-swap `update-ref`; in another worktree, a stand (`<d> is checked out in <wt>`). A CAS failure, a
+           refused ff after d moved, or an ff that left d short of the tip, re-runs from 4, three tries at most, then
+           stands `<d> kept moving`. A tip already d is `current`, P untouched;
         8. the repo lock released.
       Then `leg_landed: <stamp>` (after `leg_claims:`, else `leg_head:`) on each done row whose every `leg_head` entry on
       a copy is on its primary's d (git's read), the task notes first, and the Leg log: a `land:` line per copy landed,
@@ -297,15 +302,15 @@ restarted, copies, land):
       place: fix its note`, else a WARN. No peer check runs for update-ref: no working tree moves. Prints {verb,
       rollout, leg, inPlace, lands [{checkout, copy, branch, default, state (landed, current, verify or stood), head,
       merged, verify, landed (its tasks landed), why, waits}], stamped, warns, dryRun}: `waits` is true on a stand that
-      clears by itself (an earlier chain's claim, another land's lock, an in-place peer, d kept moving), false on any
-      other stand, null otherwise. --dry-run prints each copy's `plan` {unl, claim, bring, verify, ff, peer} as state
-      `plan`, takes no lock, and merges, moves and writes nothing.
+      clears by itself (an earlier chain's claim, another land's lock, an in-place peer, P off d mid-land, d kept
+      moving), false on any other stand, null otherwise. --dry-run prints each copy's `plan` {unl, claim, bring,
+      verify, ff, peer} as state `plan`, takes no lock, and merges, moves and writes nothing.
       --red <why>: logs `land stood: <P>: Verify red after a land merge: <why>` for each copy whose chain branch holds
       commits its d lacks (every copy when none does), runs no git write and keeps the merge (no verified tip, so the
       next land asks again); a closed Leg may run it, and then writes that one line only.
       --retire, after Complete (the archived note is never written): resolves its paths, primes the git env and moves
       the cwd to the first primary (the copy it removes may be the cwd), then per copy, under its repo lock, lands its
-      close-out commits by 5 and 7 (the peer check included; a done row off d, or any stand, keeps the copy and its
+      close-out commits by 4 and 7 (the peer check included; a done row off d, or any stand, keeps the copy and its
       branch), removes the copy (`git worktree remove`, never --force; a copy already gone gets `worktree prune`, then 7
       alone when d is an ancestor of the branch) and deletes the branch (`branch --set-upstream-to=<d>`, then `branch
       -d`, never -D; a refusal unsets the upstream and keeps the branch). Prints `retired` [{checkout, copy, branch,
@@ -1795,10 +1800,14 @@ def cmd_claim(ctx, a):
             bases, pbases = stamp_bases(ctx, chain, row)
             gaps = unlanded_deps(ctx, chain, row, chain_pairs(chain), bases) if pbases is not None else []
             if gaps:
-                g = gaps[0]
-                raise Refuse(1, f"[[{row.slug}]] depends on [[{g['dep']}]] ({g['why']}): set it aside (`leg.py set-aside "
-                                f"--task {row.slug} --reason \"<this error>\"`) until that work is in {g['copy']}; "
-                                "nothing written", unlandedDeps=gaps)
+                # The tail by cause (legs.md § The task loop): a gap on <d> (unlanded_deps' `on <d>, …` why) is this
+                # chain's own land away, so land and claim again; any other waits set aside, so it is named first.
+                g = next((x for x in gaps if not x["why"].startswith("on ")), gaps[0])
+                tail = ("run leg.py land, then claim again" if g["why"].startswith("on ") else
+                        f"set it aside (`leg.py set-aside --task {row.slug} --reason \"<this error>\"`) until that work "
+                        f"is in {g['copy']}")
+                raise Refuse(1, f"[[{row.slug}]] depends on [[{g['dep']}]] ({g['why']}): {tail}; nothing written",
+                             unlandedDeps=gaps)
             note.set("leg_base", "[" + ", ".join(f'"{b}"' for b in bases) + "]", after=("started", "leg"))
             if pbases is not None:
                 # A Chain copy's claim: the primaries' HEADs too, so done finds a commit that went there instead.
@@ -2580,7 +2589,7 @@ def peer_chain(ctx, path):
 
 
 def claim_stand(ctx, chain, P, d, ours, notes, warns):
-    """Step 4, ADR 0067 d4's actual claims: ours (this copy's unlanded rows' claims) against every other live chain with
+    """Step 5, ADR 0067 d4's actual claims: ours (this copy's unlanded rows' claims) against every other live chain with
     a Chain copy of P whose done rows are unlanded (unlanded_done, and git confirms: its `leg_head` on its copy is not on
     refs/heads/<d>), their `leg_claims:`. The why of a stand for the first overlap with a chain that sorts before this
     one (order_key), else None: a later chain never blocks, and an unreadable note is a WARN (git's merge and the re-run
@@ -2707,7 +2716,7 @@ def _git_files(stderr):
 
 
 def bring_in(ctx, P, C, d, br):
-    """Step 5: d brought into C, never by rebase, so every `leg_head` stays an ancestor: `merge --ff-only` when the tip is
+    """Step 4: d brought into C, never by rebase, so every `leg_head` stays an ancestor: `merge --ff-only` when the tip is
     d or behind it, nothing when it already holds d, else a `--no-ff` land merge. Hooks off, never an autostash.
     (tip, dm, how, stand): dm the d sha the tip now holds, how none|ff|merge, stand (why, waits) or None. --dry-run
     merges nothing and gives the tip it would start from."""
@@ -2739,9 +2748,10 @@ def bring_in(ctx, P, C, d, br):
 
 
 def ff_primary(ctx, P, d, br, tip, dm, notes, warns):
-    """Step 7: d moved to the tip, by where d is checked out: in P, after the in-place peer check, `merge --ff-only
-    --no-autostash` (never a stash: a local change or an untracked file in the way stands); nowhere, a compare-and-swap
-    `update-ref`; in another worktree, a stand. (result, stand): result landed|moved (d moved: re-run from step 5)|
+    """Step 7: d moved to the tip, by where d is checked out: in P, after the in-place peer check and a re-read of P's
+    HEAD (P off d stands), `merge --ff-only --no-autostash` (never a stash: a local change or an untracked file in the
+    way stands), landed only when d is then the tip; nowhere, a compare-and-swap `update-ref`; in another worktree, a
+    stand. (result, stand): result landed|moved (d moved, or the ff moved d short of the tip: re-run from step 4)|
     stood|plan, stand (why, waits, peer slug or None), or for --dry-run the path it would take."""
     where = next((wt for wt, b in _worktree_branches(P) if b == f"refs/heads/{d}"), None)
     if where is None:
@@ -2756,11 +2766,16 @@ def ff_primary(ctx, P, d, br, tip, dm, notes, warns):
         return "stood", peer
     if ctx.dry:
         return "plan", f"merge --ff-only in {P}"
+    # The peer check read every serial note: re-read P's branch, so the merge moves d and no branch P switched to.
+    head = git_out(P, "symbolic-ref", "-q", "HEAD")
+    if head != f"refs/heads/{d}":
+        return "stood", (f"{P} left {d} during the land (its HEAD is now {head or 'detached'})", True, None)
     r = git(P, "-c", "core.hooksPath=/dev/null", "-c", "merge.autoStash=false", "merge", "--ff-only", "--no-autostash",
             "-q", f"refs/heads/{br}")
+    now = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{d}^{{commit}}")
     if r.returncode == 0:
-        return "landed", None
-    if git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{d}^{{commit}}") != dm:
+        return ("landed", None) if now == tip else ("moved", None)   # moved: P switched after the re-read
+    if now != dm:
         return "moved", None
     files = _git_files(r.stderr)
     if files:
@@ -2824,13 +2839,6 @@ def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
         ours = []
         for r in unl:
             ours += [t for t in row_claims(r, pairs) if t not in ours]
-        why = claim_stand(ctx, chain, P, d, ours, notes, warns)
-        if why:
-            if ctx.dry:
-                e.update(state="plan", plan={"unl": [r.slug for r in unl], "claim": why, "bring": None, "verify": [],
-                                             "ff": None, "peer": None})
-                return e, None
-            return stand(why, True)
         tips = verified_tips(chain, P)
         for _try in range(LAND_TRIES):
             tip, dm, how, s = bring_in(ctx, P, C, d, br)
@@ -2843,6 +2851,15 @@ def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
             if tip in verified and tip not in tips:
                 tips.append(tip)
                 acc[0] = tip
+            # Step 5, after step 4's merge: a claim stand keeps that merge on chain/<rollout> (as --red does), so the
+            # copy holds the work other chains landed on d and the next land asks for its re-verify.
+            why = claim_stand(ctx, chain, P, d, ours, notes, warns) if _try == 0 else None
+            if why:
+                if ctx.dry:
+                    e.update(state="plan", plan={"unl": [r.slug for r in unl], "claim": why, "bring": how,
+                                                 "verify": [], "ff": None, "peer": None})
+                    return e, None
+                return stand(why, True)
             if ctx.dry:   # the plan: nothing merged, moved or written, no lock taken
                 res, got = ff_primary(ctx, P, d, br, tip, dm, notes, warns)
                 e.update(state="plan", plan={"unl": [r.slug for r in unl], "claim": None, "bring": how,
@@ -3009,7 +3026,7 @@ def land_red(ctx, chain, leg, pairs, why, out):
 
 def land_retire(ctx, chain, leg, pairs, out):
     """--retire, after Complete (the archived note is never written): per copy, under its repo lock, land its close-out
-    commits (steps 5 and 7, the peer check included), remove the copy (`git worktree remove`, never --force) and delete
+    commits (steps 4 and 7, the peer check included), remove the copy (`git worktree remove`, never --force) and delete
     its branch (`--set-upstream-to=<d>`, then `branch -d`, never -D). A done row off d, or any stand, keeps both, with a
     WARN; any WARN files one loose follow-on that names the command that finishes it."""
     first = os.path.realpath(pairs[0][0]) if pairs else None
@@ -3096,7 +3113,7 @@ def land_retire(ctx, chain, leg, pairs, out):
 
 
 def _retire_land(ctx, P, C, d, br, notes, warns, ent):
-    """--retire's land of the close-out commits: steps 5 and 7 (the peer check included), up to three tries. (why or
+    """--retire's land of the close-out commits: steps 4 and 7 (the peer check included), up to three tries. (why or
     None, the peer slug when a peer stood it)."""
     for _try in range(LAND_TRIES):
         tip, dm, _how, s = bring_in(ctx, P, C, d, br)
