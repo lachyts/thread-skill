@@ -138,9 +138,10 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      integration-red, p27-4, are an integrate set-aside opening the engine's named markers: an
                      Integration conflict, `integration: conflict unresolved in …`, and a verifier red at
                      Integration, `integration: verifier red: …`, and merge-gate (ADR 0068) is a merge-task stop
-                     whose own cause (its last `ERROR:` line) is a red required check after the verifier passed,
-                     which reflect traces to schedule step 2.5 when the check runs a class the verifier never
-                     runs); setAsideAt? (run | integration | gate); stamp?; reconciledAt? (as slot-freed)
+                     whose own cause (the reason from its last `ERROR:` line to the end) is a red required check
+                     after the verifier passed, which reflect traces to schedule step 2.5 when the check runs a
+                     class the verifier never runs); setAsideAt? (run | integration | gate); stamp?; reconciledAt?
+                     (as slot-freed)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt | origin: mark-integrating's origin-lane refusal, ADR
                      0064, the lead yielding its lane to another rollout's Integration on the same origin); path?;

@@ -8,7 +8,8 @@
 // - schedule's Scope, its Don't on git, the confirm batch, step 6's {{VERIFIER}}, step 8's `Verifier:` and `Merge gate:`
 //   lines, § Verification's Merge-gate regression and the Don't on deriving a gate;
 // - execute § 3's paragraph and § 4.5 step 4's exit-1 row (the reason from its last ERROR: line), reflect § 11's trace,
-//   the run_record and reconcile docstrings, CONTEXT.md's **Merge gate** entry and the ADR;
+//   the run_record and reconcile docstrings (the one cause both readers take, _merge_task_cause), CONTEXT.md's
+//   **Merge gate** entry and the ADR;
 // - merge-gate.py names no tool, and no touched file writes the possessive `giflab's ADR` (refs rule A would resolve
 //   it against this repo's ADR of that number).
 //
@@ -138,11 +139,12 @@ function check(f) {
   const s3 = section(f.execute, /^### 3\. /) ?? ''
   const row1 = (f.execute ?? '').split('\n').find((l) => l.startsWith('   | 1 | *Set aside* at its own run')) ?? ''
   need('execute', all(s3, ['**The verifier and the merge gate (giflab ADR 0012 d4).**', 'reasonClass `merge-gate`',
-    "read off the stop's own cause: the reason's last `ERROR:` line", 'that is a schedule-time miss of schedule § 2.5 (its merge gate), and reflect § 11 traces it there']) &&
+    "read off the stop's own cause: the reason from its last `ERROR:` line to the end", 'that is a schedule-time miss of schedule § 2.5 (its merge gate), and reflect § 11 traces it there']) &&
     has(row1, 'reason `merge-task: <its output from its last ERROR: line to the end>`'))
   need('reflect', all(section(f.reflect, /^### 11\. /), ['`merge-gate`', 'traces to schedule § 2.5 (its merge gate), a schedule-time miss']))
-  need('records', all(docstring(f.runRecord), ['merge-task | merge-gate | declined', 'a merge-task stop whose own cause (its last `ERROR:` line) is a red required check']) &&
-    all(docstring(f.reconcile), ['merge-gate (a reason starting `merge-task` whose last `ERROR:` line',
+  need('records', all(docstring(f.runRecord), ['merge-task | merge-gate | declined', 'a merge-task stop whose own cause (the reason from its last `ERROR:` line to the end) is a red required check']) &&
+    all(docstring(f.reconcile), ['merge-gate (a reason starting `merge-task` whose own cause holds MERGE_GATE_MARK',
+      'its own cause is _merge_task_cause, the reason from its last `ERROR:` line', "lead-integrate.py's MERGE_TASK_FIXABLE check reads the same cause",
       'the mark printed before an infra rerun that a later `ERROR:` line follows stays merge-task)']))
   need('context', all(entry(f.context, '- **Merge gate** — '), ['`merge-gate.py`', '**closure**', '**job class**', '**compared**',
     'reasonClass `merge-gate`', '`integration-red`', '_Avoid_: CI green, CLEAN.']))
@@ -210,6 +212,7 @@ test('control: execute, reflect, the records, CONTEXT.md and the ADR each fail t
   only(edit('reflect', 'traces to\n  schedule § 2.5 (its merge gate), a schedule-time miss', 'traces to\n  execute § 4.5'), 'reflect', 'traced elsewhere')
   only(edit('runRecord', 'merge-task | merge-gate | declined', 'merge-task | declined'), 'records', 'run_record lacks it')
   only(edit('reconcile', 'printed before an infra rerun that a later `ERROR:` line follows stays merge-task)', 'anywhere)'), 'records', 'the mark anywhere')
+  only(edit('reconcile', ", and lead-integrate.py's MERGE_TASK_FIXABLE\ncheck reads the same cause", ''), 'records', 'the retry reads its own text')
   only(edit('context', '_Avoid_: CI\n  green, CLEAN.', ''), 'context', 'no Avoid')
   only({ ...real, adr: null }, 'adr', 'no ADR')
   only(edit('adr', "It is thread-skill's side of giflab ADR 0012 d4.", "It is thread-skill's side of giflab's ADR 0012 d4."), 'possessive', 'the possessive')

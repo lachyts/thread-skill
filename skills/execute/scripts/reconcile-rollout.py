@@ -1009,11 +1009,12 @@ engine-blocked -> implement; review with no PR -> review. `verify` is unused her
 setAsideAt (_queue_state's run | integration | gate) is where it re-enters, so merge-task's exit 1 reads stage
 integrate, setAsideAt run.
 reasonClass, first match: quota; call-failed (`workflow call failed:` with the note in_progress before, or the
-integration kind); merge-gate (a reason starting `merge-task` whose last `ERROR:` line, an optional `merge-task:`
-prefix allowed, holds MERGE_GATE_MARK, compared lowercased, or with no `ERROR:` line the mark anywhere:
-merge-task.sh's red required check is the stop's own cause, which schedule step 2.5's merge gate reads; the mark
-printed before an infra rerun that a later `ERROR:` line follows stays merge-task); merge-task (a reason starting
-`merge-task`, and exit 4's `base moved` / `head moved after
+integration kind); merge-gate (a reason starting `merge-task` whose own cause holds MERGE_GATE_MARK, compared
+lowercased; its own cause is _merge_task_cause, the reason from its last `ERROR:` line, an optional `merge-task:`
+prefix allowed, to the end, or the whole reason with no `ERROR:` line, and lead-integrate.py's MERGE_TASK_FIXABLE
+check reads the same cause: merge-task.sh's red required check is the stop's own cause, which schedule step 2.5's
+merge gate reads; the mark printed before an infra rerun that a later `ERROR:` line follows stays merge-task);
+merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
 TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
 string, never the note's `## Needs you`, so an integrate or lead row, which carries null, never reads it; a
@@ -8072,14 +8073,23 @@ def _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr) -> str:
     return "implement"
 
 
+def _merge_task_cause(reason) -> str:
+    """The own cause of a merge-task exit-1 reason (ADR 0068 d4): the reason from its last `ERROR:` line (ERROR_LINE_RE,
+    an optional `merge-task:` prefix allowed) to the end, or the whole reason when it holds no `ERROR:` line. Both of
+    the reason's readers take it: _merge_gate_stop (the Run record's reasonClass) and lead-integrate.py's
+    MERGE_TASK_FIXABLE check (the automatic retry). merge-task.sh prints its red-check line before each infra rerun, so
+    a reason that keeps more than its tail (a lead that did not trim it, execute § 4.5 step 4) reads as its last stop,
+    never as an earlier line's."""
+    lines = reason.split("\n")
+    errors = [i for i, line in enumerate(lines) if ERROR_LINE_RE.match(line)]
+    return "\n".join(lines[errors[-1]:]) if errors else reason
+
+
 def _merge_gate_stop(reason) -> bool:
-    """Whether merge-task's own stop was a red required check (MERGE_GATE_MARK): the reason's last `ERROR:` line holds
-    the mark, compared lowercased, or, with no `ERROR:` line at all, the mark is anywhere in it. merge-task.sh prints the
-    mark before each infra rerun, so a mark followed by a rerun and then a different `ERROR:` line (checks that never
+    """Whether merge-task's own stop was a red required check: its own cause (_merge_task_cause) holds MERGE_GATE_MARK,
+    compared lowercased. A mark followed by an infra rerun and then a different `ERROR:` line (checks that never
     appeared, a non-check gate) is that later line's stop, never the red check's."""
-    errors = [line for line in reason.split("\n") if ERROR_LINE_RE.match(line)]
-    tested = errors[-1] if errors else reason
-    return MERGE_GATE_MARK.lower() in tested.lower()
+    return MERGE_GATE_MARK.lower() in _merge_task_cause(reason).lower()
 
 
 def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked) -> str:
@@ -9498,14 +9508,15 @@ QUOTA_COOLDOWN_MIN = (30, 60, 120, 240, 480)
 # is all it gets: a longer limit still reaches a human once the budget is spent (ADR 0033 decision 5).
 INFRA_COOLDOWN_MIN = (15, 60, 240)
 # merge-task.sh's red required check (its exit 1 after the verifier passed): a code fix on the branch can clear it, and
-# it is the set-aside's reasonClass merge-gate when it is the stop's own cause (_merge_gate_stop; schedule step 2.5's
+# it is the set-aside's reasonClass merge-gate when it is in the stop's own cause (_merge_gate_stop; schedule step 2.5's
 # merge gate, ADR 0068). Pinned against merge-task.sh by the record and auto-retry suites.
 MERGE_GATE_MARK = "a REQUIRED check FAILED on PR"
 # merge-task.sh's exit-1 texts a code fix on the branch can clear (an allowlist: every other exit-1 text, today's and
-# any future wording, is a human's). Each is pinned against merge-task.sh by the auto-retry suite.
+# any future wording, is a human's), read in the reason's own cause (_merge_task_cause). Each is pinned against
+# merge-task.sh by the auto-retry suite.
 MERGE_TASK_FIXABLE = ("has a MERGE CONFLICT with", MERGE_GATE_MARK)
 # An `ERROR:` line of merge-task.sh's output, as the lead's exit-1 reason carries it (its first line prefixed
-# `merge-task: `, execute § 4.5 step 4): _merge_gate_stop reads the last one as the stop's own cause.
+# `merge-task: `, execute § 4.5 step 4): _merge_task_cause reads from the last one as the stop's own cause.
 ERROR_LINE_RE = re.compile(r"\s*(?:merge-task:\s*)?error:", re.I)
 BRANCH_GONE_MARK = "the PR branch is gone"            # lead-integrate.py prepare's set-aside reason
 DECLINED_MARK = "merge declined at the --gated hold"  # execute's --gated decline reason

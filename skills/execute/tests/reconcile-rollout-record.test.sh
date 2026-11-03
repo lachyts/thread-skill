@@ -379,9 +379,10 @@ ok "$(ic ic5 '[]' 'INTEGRATION: Conflict Unresolved in a.js')" '["set-aside","in
 
 echo "== 12d. merge-task's red required check is named merge-gate when it is the stop's own cause (rollout mg)"
 # giflab ADR 0012 d4 (schedule step 2.5's merge gate, ADR 0068 d4): a lead `own` row whose reason starts `merge-task`
-# reads merge-gate when its last `ERROR:` line (an optional `merge-task:` prefix allowed) holds MERGE_GATE_MARK, or,
-# with no `ERROR:` line at all, when the mark is anywhere in it. merge-task.sh prints the mark before each infra rerun,
-# so a mark followed by `infra rerun n/m triggered` and then a different `ERROR:` line stays merge-task. Each case
+# reads merge-gate when its own cause (_merge_task_cause: from its last `ERROR:` line, an optional `merge-task:` prefix
+# allowed, to the end, or the whole reason with no `ERROR:` line) holds MERGE_GATE_MARK. merge-task.sh prints the mark
+# before each infra rerun, so a mark followed by `infra rerun n/m triggered` and then a different `ERROR:` line stays
+# merge-task (the auto-retry suite's A5b pins the retry's fixable check on the same cause). Each case
 # repeats case 11's setup for its own task and PR (a lane holder, so reconcile emits the set-aside). Side rollout mg,
 # one lane holder at a time, so ro's legs and leg 24's checker over ro are untouched.
 mkro mg "parallel_ceiling: 2"
