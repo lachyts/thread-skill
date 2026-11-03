@@ -786,6 +786,8 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   `restart.cwd`" when `restart.anyLaunch`), its `task`, "take-over" when `restart.takeOver`, and "blocked by
   `<restart.blockedBy>`" when set. A `surface held by [[<B>]] (<token>)` blocker (ADR 0060) reads "waits its turn:
   [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
+  A stand has three causes (ADR 0067 d4): [[<B>]] began first on that place, or (until Chain copies) [[<B>]]'s open
+  Leg works that checkout, or [[<B>]] was scheduled on a place this chain released while it was stuck.
   Its `prompt` is printed, fenced, only where an action below hands it to Lachy.
 - **Hold** (ADR 0060), from `hold`. Scope `stuck`: `Holds only <held>` with the `rows` that hold them (each `[[slug]]`
   with its `state`), then `Released <released>` when it is not empty: other chains and parallel runs may use those
@@ -823,8 +825,8 @@ so leg.py prints it no `restart`, no `next` and an empty `smoke`: its report has
 - S12 `stuck` → `/thread:repair [[<rollout>]]`: sign each gate, hand back a block, or defer it with its dependants.
   Meanwhile it holds only the surfaces its Hold block lists (ADR 0060), so other rollouts carry on beside it.
 - S13 `not-started` or `ready` → `/thread:execute [[<rollout>]]` as `restart.launch`; with `restart.blockedBy`
-  `surface held by [[<B>]] (<token>)`, the chain waits its turn: wait for [[<B>]] to land its rows there
-  (`/thread:status [[<B>]]`), then run it.
+  `surface held by [[<B>]] (<token>)`, the chain waits its turn (whichever cause, ADR 0067 d4): wait for [[<B>]] to
+  land its rows there, or for its open Leg to close when the line names one (`/thread:status [[<B>]]`), then run it.
 
 The order is the precedence, as § 4's is: a lineage or an incomplete note stops everything, a halt comes before any
 restart, and a Session that may still be live (a pending or started restart, an open Leg, a started hand-over) is

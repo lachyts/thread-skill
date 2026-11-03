@@ -813,8 +813,9 @@ The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever
   - Leave: it stays set aside, and nothing more is asked this run.
 
   After a hand-back or a sign-off the chain is no longer stuck, so it reclaims its whole claim for new schedules, and
-  the next Leg's `begin` re-checks what it writes (ADR 0060). A place another chain took while this one was stuck
-  makes that Leg wait its turn: (e)'s `surface held by` blocker.
+  the next Leg's `begin` re-checks what it writes (ADR 0060). A place another chain took while this one was stuck,
+  one a chain that began first still holds, or (until Chain copies) a checkout another chain's open Leg works makes
+  that Leg wait its turn (ADR 0067 d4): (e)'s `surface held by` blocker.
 - **Defer, dependency-aware** (§ 5's steps 1 and 3): read the row's `dependants` from `leg.py status`: its
   depends-on and blocked-by closure, transitive, through `merged_into:` tombstones, read the way next holds a
   dependency.
@@ -853,10 +854,12 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
    - `restart Leg N (<how>)` → only with `--replace` in step 2, after its own check: for `started` (its id is
      `restarted.started`), `list_sessions` shows that id gone; for `pending` or `manual`, Lachy says it never started.
      With `restart.takeOver`, (d)'s evidence for Leg K too, and the prompt is the take-over form.
-   - `surface held by [[B]] (<token>)` → never restart (ADR 0060): the chain waits its turn. Another chain, scheduled
-     on a place this one released while it was stuck, holds a place the next Leg writes, and its `begin` would only
-     stand at exit 3. Report it, with `/thread:status [[B]]`, and stop. Re-run this repair, or `/thread:execute`, once
-     [[B]] lands its rows there. `surface re-check failed: <line>` → report the line, and stop.
+   - `surface held by [[B]] (<token>)` → never restart (ADR 0060): the chain waits its turn. Another chain holds a
+     place the next Leg writes, and its `begin` would only stand at exit 3: [[B]] began first on that place, or (until
+     Chain copies, ADR 0067 d4) [[B]]'s open Leg works that checkout, or [[B]] was scheduled on a place this one
+     released while it was stuck. Report it, with `/thread:status [[B]]`, and stop. Re-run this repair, or
+     `/thread:execute`, once [[B]] lands its rows there, or its Leg closes. `surface re-check failed: <line>` → report
+     the line, and stop.
    - null → by `chain`: stalled; awaiting-successor with no hand-over line, or a manual one Lachy says he has not
      pasted; stopped, on his word; completable, not-started or ready, on his ask.
    - Anything else → report it, and stop.

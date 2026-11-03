@@ -7,66 +7,98 @@
 /thread:schedule § Serial path runs it at S2 (and again at S4 after a confirmed dependency or an added surface).
 Stdlib only, python >= 3.9. No network, and it writes nothing. Git runs only as `git rev-parse --local-env-vars`
 (to scrub repo-local env vars such as a hook's GIT_DIR, landing-register.py's rule), `git -C <dir> rev-parse
---show-toplevel` and `git -C <dir> remote get-url origin`, each read-only with a 30 s timeout. It reads the task
-notes (`<vault>/Work/Tasks`, root first, then Archive/), their project notes (`<vault>/Work/Projects/**`), the
+--show-toplevel`, `git -C <toplevel> rev-parse --path-format=absolute --git-common-dir` (a checkout's key, below) and
+`git -C <dir> remote get-url origin`, each read-only with a 30 s timeout. It reads the task notes
+(`<vault>/Work/Tasks`, root first, then Archive/), their project notes (`<vault>/Work/Projects/**`), the
 launch-folders file and its own tree's `.claude-plugin/plugin.json`; it never reads a launcher marker. Defaults:
 --vault ~/repos/obsidian, --launch-folders ~/repos/workspaces/_shared/state/launch-folders.json.
 
-Surfaces (CONTEXT.md **Surface**). A surface is a place a chain writes, as a canonical token of one of five kinds:
-  repo:<absolute path>  a filesystem place: overlaps on equality or containment at a `/` boundary, case-folded
-                        (APFS); two checkouts of one origin are disjoint (the rollout clone is its own checkout),
+Surfaces (CONTEXT.md **Surface**; ADR 0067 d4). A surface is a place a chain is predicted to write, as a canonical
+token of one of six kinds. Predicted claims group, order and wait; they never refuse a schedule.
+  repo:<key>//<path>    a file in a git checkout, or a folder with a trailing `/` (`repo:<key>//<dir>/`): <key> is the
+                        checkout's in-place twin (Git.primary: a linked worktree's main worktree), so the token reads
+                        the same from any copy, and <path> is relative to it (no leading `/`, no `..`; an empty one
+                        reads as the bare key). Two keyed tokens overlap only when their keys are equal and one path
+                        contains the other at a `/` boundary, case-folded (APFS): purely textual, so sibling files of
+                        one checkout are apart. The folder mark is information only.
+  repo:<absolute path>  a bare token: a whole checkout (its toplevel), or a path in no checkout. It overlaps on
+                        equality or containment at a `/` boundary, case-folded, so a bare toplevel covers every file
+                        under it; two checkouts of one origin are disjoint (the rollout clone is its own checkout),
                         and so is a checkout nested inside another by path (a separate repo with its own index, as
                         `~/Projects` holds its own Narcissus clone): containment parts when both paths sit in git
-                        checkouts and the inner one's toplevel is not the outer one's (p33-3). An outer path in no
-                        checkout still covers every checkout beneath it.
+                        checkouts and the inner one's toplevel is not the outer one's (p33-3), a keyed side's toplevel
+                        read from its key. An outer path in no checkout still covers every checkout beneath it.
   vault:<path>          a path relative to the vault root: overlaps on a case-folded prefix at a segment boundary.
   vault                 the whole vault: overlaps every vault token. Only a member that names no project and no
                         path claims it unasked, or one that writes it as a literal token (ADR 0059).
   ext:<name>            an external system (CMS, DNS zone, console): overlaps on case-folded equality.
   any                   the unknown: overlaps every token of every kind.
-Kinds never overlap one another, save `any`. The chain's note and the engine's other writes under Work/Tasks are
-never surfaces (bookkeeping, ADR 0059); a member's own task note is claimed only beside its project's place (below).
+Kinds never overlap one another, save `any`. Bookkeeping is never a surface (ADR 0059, ADR 0067 d5): the chain's note
+and the engine's other writes under Work/Tasks, and the ledgers every run appends to, a keyed token at or under
+`_shared/state/thread-events/` (the Run record, reviews.jsonl, grades.jsonl, tunings.jsonl) or `docs/reviews/`. A
+member's own task note is claimed only beside its project's place, or alone by a member that only reaches a checkout
+(below).
 
-How a path becomes a token (claim; the same for a declared `repo:` path, a `## Launch` path, a project's `Local:`,
-a launch folder and a --surface path):
+How a path becomes a token (claim, through locate; the same for a declared `repo:` path, a `## Launch` path, a
+project's `Local:`, a launch folder, a `touches:` item and a --surface path):
   1. `~` expanded; the path must be absolute. The realpath of its nearest existing ancestor, with the rest appended
-     and normalised; a path that does not exist yet is claimed through that ancestor, with a WARN naming it.
+     and normalised; a path that does not exist yet is claimed through that ancestor, with a WARN naming it (printed
+     only when the token is kept).
   2. At or under the vault root's realpath (case-folded): `vault` (the root itself) or `vault:<rel>`. The vault is a
-     note space, not a checkout, for ADR 0040's ownership ruling: every chain writes its own task notes there. A
-     derived or added `vault` (the root) narrows in the plan, and a derived or added path under Work/Tasks is
-     dropped (below); claim itself returns the truthful token.
-  3. Inside a git checkout (`git -C <nearest existing directory> rev-parse --show-toplevel`): `repo:<realpath of
-     the toplevel>`. Its index and HEAD are what Legs share, so a claim anywhere in a checkout owns all of it,
-     declared or derived.
+     note space, not a checkout: every chain writes its own task notes there. A derived or added `vault` (the root)
+     narrows in the plan, and a derived or added path under Work/Tasks is dropped (below); claim itself returns the
+     truthful token.
+  3. Inside a git checkout (`git -C <nearest existing directory> rev-parse --show-toplevel`): `repo:<key>//<rel>`
+     (`/` when the path is an existing directory, or is written with one), or the bare `repo:<key>` for the toplevel
+     itself. A claim covers what it names, at its own depth, declared or derived; a bare toplevel covers the checkout.
   4. Otherwise `repo:<realpath>`, path-only, with a WARN that it covers everything beneath it.
+
+Reach and prediction (ADR 0067 d4). A reach path only says where a member works: it names the checkout and predicts
+nothing there. Reach paths are its launch folder, each launch-command `cd` or `--add-dir` path (below), each `Local:` of
+its first project, the first path span of a where-label `## Launch` item (WHERE_LABEL_RE: **Launch:**, **Repo:**,
+**Repos:**, **Workspace:**, **Project:**, **Engine:**, **Working tree:**, **Dir:**, **Cwd:**; the item's value, as
+pickups' Repo rule reads it, so `**Repo:** ~/.agents/skills/` is reach at any depth) and any other `## Launch` path span
+that is a checkout's toplevel. A reach path inside a checkout gives no token: it adds that checkout (its key) to the
+member's `works`. One in the vault or in no checkout keeps claim's handling (a vault token or root hit, or path-only
+with its WARN). Every other `## Launch` path span below a toplevel (a **Files:** or **Ledger:** span, a later span on a
+**Repo:** line, an unlabelled line), `touches:`, a declared `surfaces:` and a --surface path are predictions.
 
 Each member's surfaces:
   1. Declared: a non-empty frontmatter `surfaces:` list (an empty one reads as absent), one token per block-list
-     item, never split on commas (read_surfaces). A `repo:` value may be written with `~/` and goes through claim, so
-     it widens inside a checkout; `vault`, `vault:<rel>`, `ext:<name>` and `any` are kept, normalised by parse_token.
-     The declaration is the member's whole claim before additions: it replaces derivation.
+     item, never split on commas (read_surfaces). A `repo:` value may be written with `~/` and goes through claim at
+     its own depth (a toplevel stays bare, anything deeper is a file or folder token); `vault`, `vault:<rel>`,
+     `ext:<name>` and `any` are kept, normalised by parse_token. The declaration is the member's whole claim before
+     additions: it replaces derivation.
   2. Derived (no declaration): every backticked path span in its `## Launch` outside a **Read...** or **MCP** item
      (a span that starts `~/` or `/`, holds no whitespace or `:`, and, `/`-rooted, has two segments or more, so
      `/seo:impact`, `/morning` and alias spans are skipped); every launch-command path there (below); each
-     `` Local: `<path>` `` in the body of its first project note (the first `projects:` wikilink's); and its
-     launch folder, for a member with an alias. A derived path that is the vault root is a root hit and claims
-     nothing itself (step 4); one at or under Work/Tasks is bookkeeping and dropped, with no WARN.
+     `` Local: `<path>` `` in the body of its first project note (the first `projects:` wikilink's); its launch
+     folder, for a member with an alias; and each frontmatter `touches:` item, a relative one keyed to the member's
+     one checkout in `works` by then (with zero or several, the relative items are skipped with one WARN), an
+     absolute or `~` one through claim. Reach adds to `works` (above); a prediction gives its token. A derived path
+     that is the vault root is a root hit and claims nothing itself (step 4); a derived bookkeeping token is dropped,
+     with no WARN.
   3. Added: each `--surface <slug>=<raw>` unions in, declared member or not (a path or `repo:` value through claim,
      any other token through parse_token), and is listed in the member's `added`. An added path that is the vault
-     root is a root hit (step 4, with a WARN when it narrows); one under Work/Tasks is dropped with a WARN. A literal
-     token (`vault`, `vault:<rel>`, `ext:`, `any`) is kept as written, and so is every declared token: a declaration
-     is deliberate. `added` lists only the tokens kept.
-  4. The project claim (ADR 0059), on a root hit or when 1-3 gave nothing: its first project's place and its own
-     task note (`vault:Work/Tasks/<slug>.md`, or its Archive/ path, as found), relative to --vault. The place of a
-     folder note (`<dir>/<dir>.md`, `<dir>` strictly below Work/Projects) is `vault:<dir>`; of a flat note, the note
-     and the folder it would become (`vault:<dir>/<name>.md` and `vault:<dir>/<name>`). A first project named but
-     with no note under Work/Projects gets a WARN and counts as none. With no project: a root hit claims `vault`
-     with a WARN to link its project or declare `surfaces:`; nothing at all claims `vault` with the default WARN to
-     declare `surfaces:`.
-`source` is `declared` (1 non-empty), else `derived` (2 or 3 kept a token, a root hit was seen, or 4 claimed a
-project's place), else `default`. The guarantee: a member claims its launch folder, each path its `## Launch` names
-(its launch commands' `--add-dir` and `cd` paths among them), each `Local:` path of its first project and each
-surface added for it, the vault root and Work/Tasks aside, or exactly what it declares.
+     root is a root hit (step 4, with a WARN when it narrows); one under Work/Tasks, or a ledger, is dropped with a
+     WARN. A literal token (`vault`, `vault:<rel>`, `ext:`, `any`) is kept as written, and so is every declared token,
+     a ledger included: a declaration is deliberate. `added` lists only the tokens kept.
+  4. The project claim (ADR 0059), on a root hit or when 1-3 gave nothing and it reaches no checkout: its first
+     project's place and its own task note (`vault:Work/Tasks/<slug>.md`, or its Archive/ path, as found), relative
+     to --vault. The place of a folder note (`<dir>/<dir>.md`, `<dir>` strictly below Work/Projects) is `vault:<dir>`;
+     of a flat note, the note and the folder it would become (`vault:<dir>/<name>.md` and `vault:<dir>/<name>`). A
+     first project named but with no note under Work/Projects gets a WARN and counts as none. With no project: a root
+     hit claims `vault` with a WARN to link its project or declare `surfaces:`; nothing at all claims `vault` with the
+     default WARN to declare `surfaces:`.
+  5. Reach only (1-3 gave nothing, no root hit, and it reaches a checkout): it writes a checkout, not the vault, so it
+     claims only its own task note (as step 4 finds it), never its project's place or the whole vault, with one WARN
+     (`<slug>: names no file in <top>: it predicts nothing there, so it orders against no chain's files (ADR 0067
+     d4); declare surfaces: for the files it writes`). Its Queue cell is so never empty.
+`source` is `declared` (1 non-empty), else `derived` (2 or 3 kept a token, a root hit was seen, 4 claimed a project's
+place, or 5), else `default`. The guarantee: a member predicts each path its `## Launch` names below a checkout's
+toplevel, each `touches:` item and each surface added for it, the vault root, Work/Tasks and the ledgers aside, or
+exactly what it declares; its launch folder, its launch commands' `--add-dir` and `cd` paths, its where-label values,
+its toplevel spans and its first project's `Local:` paths are its `works`.
 It never claims its launch profile's other Working roots (a workspace launcher's `add_dirs`), another project's
 `Local:`, a project's `repos:` entries, nor a repo or external system it writes but names nowhere: those are
 outside schedule's sight.
@@ -83,18 +115,21 @@ the estate (too_broad).
 
 Launch, per member. Alias: the task's `launch:`, else the `launch:` of its first project note (the `projects:`
 wikilink's file under `<vault>/Work/Projects/**`, a match outside Archive/ first). Folder: `by_alias[alias]`, else
-`plain_aliases[alias]`. A member with no alias (or `claude`) opens with `claude` from its one checkout (a `repo:`
-surface that is a git toplevel) when it has exactly one; with none, from its one `repo:` surface when it has
-exactly one, else from the vault root. A code row never opens where its Leg cannot finish it (leg.py done finishes
-only commits in the Leg's own checkout; ADR 0059): an alias-less member writing two checkouts or more is refused,
-and so is an aliased one whose launch folder is in the vault (realpaths, case-folded, as claim compares) while it
-writes a checkout. Each row keeps its own launch: a launch change between two rows is a Leg boundary (ADR 0040).
+`plain_aliases[alias]`. `works` is the checkouts a member works (works_of): the key of each keyed `repo:` token, each
+bare one that is a git toplevel, and each reach checkout. A member with no alias (or `claude`) opens with `claude`
+from its one `works` checkout when it has exactly one; with none, from its one bare `repo:` token in no checkout when
+it has exactly one, else from the vault root. A code row never opens where its Leg cannot finish it (leg.py done
+finishes only commits in the Leg's own checkout; ADR 0059): an alias-less member working two checkouts or more is
+refused, and so is an aliased one whose launch folder is in the vault (realpaths, case-folded, as claim compares)
+while it works a checkout. Each row keeps its own launch: a launch change between two rows is a Leg boundary (ADR
+0040).
 
 Ruling (c), no serial self-rollouts: plugin.json's `repository`, normalised (norm_origin), against the origin of
-each launch-command path in a member's `## Launch` (declared member or not), each of its `repo:` checkouts, its
-launch folder, every `` Local: `<path>` `` in its project notes' bodies and their `repos:` entries. A match sends
-the member to `sessionLane`, with a `why` naming the source (the first match, in that order). Ruling (c) runs
-before the launch refusals, so a session-lane member is never refused for its launch.
+each launch-command path in a member's `## Launch` and each reach path span there (its checkout; declared member or
+not), the checkout of each of its `repo:` tokens (checkout_of), its launch folder, every `` Local: `<path>` `` in its
+project notes' bodies and their `repos:` entries. A match sends the member to `sessionLane`, with a `why` naming the
+source (the first match, in that order: a reach span reads `its ## Launch path <p>`). Ruling (c) runs before the
+launch refusals, so a session-lane member is never refused for its launch.
 
 Grouping: connected components over surface overlap, plus `depends-on:` / `blocked-by:` / --dep edges inside the
 set. Each chain is ordered topologically (Kahn's); among the ready tasks the next row is the lowest phase N of
@@ -103,22 +138,28 @@ then the lowest M, then the slug. A dependency outside the set (or on a session-
 chain's `externalDeps`.
 
 Output: one JSON line on stdout, exit 0, nothing on stderr:
-  {"chains": [{"tasks": [...], "surfaces": [...], "members": {slug: {"surfaces": [...], "source": ...,
-   "added": [...], "launch": {"alias": ..., "folder": ...}}}, "externalDeps": [{"task": ..., "dependsOn": ...}]}],
-   "sessionLane": [{"slug": ..., "why": ...}], "warns": ["WARN: ...", ...]}
+  {"chains": [{"tasks": [...], "surfaces": [...], "checkouts": [...], "members": {slug: {"surfaces": [...],
+   "source": ..., "added": [...], "launch": {"alias": ..., "folder": ...}, "works": [...]}}, "externalDeps":
+   [{"task": ..., "dependsOn": ...}]}], "sessionLane": [{"slug": ..., "why": ...}], "warns": ["WARN: ...", ...]}
+A chain's `checkouts` is checkouts_of over its `surfaces` and its members' launch folders, the vault excluded: exactly
+what its note records (`surfaces:` and the Queue's Launch cells), so S3's `--checkout`, S4 and reconcile-rollout.py's
+`_serial_root` read the same list. A member's `works` also counts the `--add-dir` and `Local:` reach no Leg commits to.
 Exit 3 prints no stdout and one `REFUSE:` line per refusal, with its remedy: an alias in neither map, an alias with
 a null folder, a launch folder that is missing, a launch-folders file missing or unreadable while an alias needs it
 (an unreadable file no alias needs is only a WARN), a dependency cycle, a malformed declared token, a code row whose
-Leg would open outside the checkout it writes (an alias-less row writing two checkouts, or a vault launch writing
+Leg would open outside the checkout it works (an alias-less row working two checkouts, or a vault launch working
 one; never a session-lane member). Exit 2 prints
 one `serial-chains:` line: no --tasks, a task note not found, a malformed --surface or --dep, reconcile-rollout.py
 unloadable, or plugin.json unreadable (ruling (c) cannot be checked, so the plan fails closed).
 
-The pure helpers (parse_token, fmt_token, overlaps, overlap_pairs, read_surfaces, norm_origin) touch neither the
-filesystem nor git; unfinished-rollout.py imports them. overlaps and overlap_pairs take an optional toplevel resolver
-(Git.checkout) for the nested-checkout rule, and are purely textual without one. claim, the grouping's nested-checkout
-read and the ruling-(c) origin read are the only code that runs git; of it, only the Git class is exported, for
-unfinished-rollout.py's own nested-checkout read. Importing this file has no side effects.
+The pure helpers (parse_token, fmt_token, repo_parts, checkout_of, overlaps, overlap_pairs, read_surfaces,
+norm_origin) touch neither the filesystem nor git; checkouts_of reads it only through realpath and the toplevel
+resolver it is given. unfinished-rollout.py imports them, and leg.py and reconcile-rollout.py load checkout_of and
+checkouts_of: repo_parts, checkout_of and checkouts_of are this file's one statement of a chain's checkouts. overlaps
+and overlap_pairs take an optional toplevel resolver (Git.checkout) for the nested-checkout rule, and are purely
+textual without one. locate (claim), the grouping's nested-checkout read, the `checkouts` read and the ruling-(c)
+origin read are the only code that runs git; of it, only the Git class is exported, for unfinished-rollout.py's own
+nested-checkout and launch-folder reads. Importing this file has no side effects.
 """
 import argparse
 import importlib.util
@@ -967,8 +1008,9 @@ def cmd_plan(args) -> int:
             places = [(tok, key, tw, reach, f"its ## Launch {via or 'path'} {path}")
                       for path, via, reach, tok, key, tw in launch_named]
             if proj_names:
-                places += [locate(loc, slug, vault_real, git) + (True, f"its project [[{proj_names[0]}]]'s Local: {loc}")
-                           for loc in LOCAL_RE.findall(projects.read(proj_names[0])[1])]
+                pname = proj_names[0]
+                places += [locate(loc, slug, vault_real, git) + (True, f"its project [[{pname}]]'s Local: {loc}")
+                           for loc in LOCAL_RE.findall(projects.read(pname)[1])]
             if folder:
                 places.append(locate(folder, slug, vault_real, git) + (True, f"its launch folder {folder} ({alias})"))
             for t, key, tw, reach, label in places:
@@ -1043,8 +1085,8 @@ def cmd_plan(args) -> int:
         if reach_only:
             # It writes a checkout, not the vault: it claims only its own task note, so its Queue cell is never empty.
             tokens.append(parse_token("vault:" + notes[slug].path.relative_to(vault).as_posix()))
-            tops = ", ".join(sorted(set(reach_tops), key=str.casefold))
-            cw.append(f"WARN: {slug}: names no file in {tops}: it predicts nothing there, so it orders against no "
+            reached = ", ".join(sorted(set(reach_tops), key=str.casefold))
+            cw.append(f"WARN: {slug}: names no file in {reached}: it predicts nothing there, so it orders against no "
                       "chain's files (ADR 0067 d4); declare `surfaces:` for the files it writes")
         elif root_src or root_adds or not tokens:
             ppath = projects.find(proj_names[0]) if proj_names else None

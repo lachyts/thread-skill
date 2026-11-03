@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """unfinished-rollout.py — at most one unfinished parallel rollout per repo and project, each project's in its own
-rollout clone; serial chains limited by surfaces (schedule § 0 and § Serial path; ADR 0027, ADR 0030, ADR 0040, ADR 0060,
-ADR 0064).
+rollout clone; serial chains ordered by their predicted surfaces (schedule § 0 and § Serial path; ADR 0027, ADR 0030,
+ADR 0040, ADR 0060, ADR 0064, ADR 0067).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check [--shape parallel] --repo <path>
         (--project <name> | --tasks <slug,...>) [--regenerate] [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --shape serial --surface <token>...
-        (--project <name> | --tasks <slug,...>) [--regenerate] [--tasks-dir <dir>]
+        [--checkout <dir>]... (--project <name> | --tasks <slug,...>) [--regenerate] [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check [--shape parallel|serial]
-        --resume <slug> (--repo <path> | --surface <token>...) [--project <name> | --tasks <slug,...>] [--tasks-dir <dir>]
+        --resume <slug> (--repo <path> | --surface <token>... [--checkout <dir>]...) [--project <name> | --tasks <slug,...>]
+        [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py hold --rollout <slug> [--tasks-dir <dir>]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py clone --repo <Local:> --project <name>
         [--tasks-dir <dir>]
@@ -19,15 +20,17 @@ ADR 0064).
 checks, and acts on the one line it prints; § Serial path S3 runs the serial check once per chain. Stdlib only,
 python >= 3.9. No network. Git runs only as `git rev-parse --local-env-vars` (to scrub repo-local env vars such as a
 hook's GIT_DIR, landing-register.py's rule), `git -C <path> remote get-url origin` and, in `check` and `clone`, `git -C
-<dir> rev-parse --show-toplevel` for the nested-checkout rule (below) and each Project root's checkout; plus one child,
+<dir> rev-parse --show-toplevel` for the nested-checkout rule (below), each Project root's checkout and each serial
+row's launch-folder checkout; plus one child,
 `bash skills/execute/scripts/self-rollout-check.sh --in-place <path>` (check's step 2c, `clone`) and `--resolve <Local:>
 <slug>` (`clone`'s rule 3 only), both read-only and memoised (SelfRollout), which run git and land.sh themselves. It
 writes nothing. The surface grammar (parse_token,
 overlaps, read_surfaces), norm_origin and the Git reader are serial-chains.py's, loaded by `check`, `hold` and
-`pickups` (never by `running`, primary-hold.sh's verb, which loads only reconcile-rollout.py). What a serial chain
-holds is leg.py's hold_of (ADR 0060), loaded as a module (Chain, chain_read, hold_of, Refuse; its rr and sc set to this
-script's) once `check` or `hold` reads the first unfinished serial note (one whose `surfaces:` reads as any included),
-so a parallel-only estate never loads it.
+`pickups` (never by `running`, primary-hold.sh's verb, which loads only reconcile-rollout.py), with its statement of a
+chain's checkouts (repo_parts, checkout_of, checkouts_of). What a serial chain holds is leg.py's hold_of (ADR 0060),
+loaded as a module (Chain, chain_read, hold_of, write_set, write_rows, Refuse; its rr and sc set to this script's)
+once `check` or `hold` reads the first unfinished serial note (one whose `surfaces:` reads as any included), so a
+parallel-only estate never loads it.
 
 Terms (CONTEXT.md). A LIVE rollout note sits directly in the tasks dir (location only, as
 reconcile-project.py and /thread:close read it). An UNFINISHED rollout is narrower: a live rollout that is
@@ -93,11 +96,17 @@ note is skipped before the same-repo test, so it never WARNs `no Project root li
 shapes. Serial notes are the root-level ones neither `done` nor `dropped` (serial_notes), with the same never-started,
 incomplete and complete reads; a complete one is dropped with the ceremony WARN below.
 
-Surfaces. Comparison is on canonical tokens (serial-chains.py's grammar) and literal, save its nested-checkout rule
-below: the `--surface` values and each serial note's `surfaces:` (or a stuck chain's Queue cells, ADR 0060) are
-compared as written; --repo and each parallel candidate's Project root go through `os.path.realpath`, then the vault
-mapping (at or under the vault root: `vault` or `vault:<rel>`), else become `repo:<realpath>`. The vault root is the
-tasks dir's grandparent, used only when the tasks dir ends in `Work/Tasks`. Overlap is serial-chains.py's `overlaps`,
+Surfaces. Comparison is on canonical tokens (serial-chains.py's grammar: a `repo:<toplevel>//<path>` file or folder
+token, or a bare `repo:<path>` covering its checkout) and literal, save its nested-checkout rule below: the
+`--surface` values and each serial note's `surfaces:` (or a stuck chain's Queue cells, ADR 0060) are compared as
+written; --repo, each `--checkout` and each parallel candidate's Project root go through `os.path.realpath`, then (all
+but --checkout) the vault mapping (at or under the vault root: `vault` or `vault:<rel>`), else become the bare
+`repo:<realpath>`. The vault root is the tasks dir's grandparent, used only when the tasks dir ends in `Work/Tasks`.
+Until Chain copies (ADR 0067 d4's interim), a chain's checkouts are read too: turn(xs), the bare `repo:<key>` of each
+`repo:` token (checkout_of); L(folders), the checkouts some Queue Launch-cell folders sit in (checkouts_of, the vault
+and a folder in no checkout skipped); U(s) = turn(its unlanded rows' tokens) and L(those rows' folders), where it
+still has work; T(s) = turn(its next Leg's write set) and L(those rows' folders), where its next Leg works. Overlap
+is serial-chains.py's `overlaps`,
 with its nested-checkout rule (p33-3), in every mode (`--resume` and the released WARNs included): two `repo:` tokens
 that meet only by containment are disjoint when both sit in git checkouts and the inner one's toplevel is not the
 outer one's (a separate checkout nested by path, read from each path's nearest existing directory with `git rev-parse
@@ -121,11 +130,13 @@ Outcomes (parallel, the default), the first that applies:
      project's unfinished rollout on this repo, in its own clone <root>: both run, and Integration takes one merge at
      a time per origin (ADR 0064)`. So rules 3-5 count one unfinished rollout per repo and project. An empty project
      set (--tasks sharing no project) skips 2c: every candidate counts, the old one-per-repo rule.
-  2b. Unfinished serial notes whose hold (above: a stuck chain's unlanded rows only) overlaps --repo's token (a live
-     chain owns the places it writes; one that overlaps only what a stuck chain released WARNs `WARN: [[s]] (<label>;
-     <why>) released <token>, which this run claims: …` and is no hit) ->
-     `refuse <their slugs, sorted>`, exit 3, one stderr line each: `[[s]] (<label>; <state>) is a serial chain that
-     writes <token> and owns that place (ADR 0040): <remedy>`. The remedy names whose note it is: never started,
+  2b. Unfinished serial notes whose hold (above: a stuck chain's unlanded rows only) or U overlaps --repo's token (a
+     live chain works its checkouts in place, so a parallel run rooted there would share their index and HEAD; one
+     that overlaps only what a stuck chain released WARNs `WARN: [[s]] (<label>; <why>) released <token>, which this
+     run claims: …` and is no hit) ->
+     `refuse <their slugs, sorted>`, exit 3, one stderr line each: `[[s]] (<label>; <state>) is a serial chain working
+     <token> in place, where this run would share its index and HEAD (ADR 0042): <remedy>`. A rollout clone's root
+     never meets a chain in place (S13). The remedy names whose note it is: never started,
      run it (`/thread:execute [[slug]]` from its first row's launch) or stamp it `status: dropped`, which frees its
      tasks, an incomplete one with its incomplete line first; one that has run (a `## Leg log` counts), wait for it
      or /thread:status then /thread:repair. Then 2c (above). Else U empty -> `none`, exit 0.
@@ -145,35 +156,56 @@ Outcomes (parallel, the default), the first that applies:
      finish it with /thread:schedule <its project> --regenerate), and /thread:repair for a candidate named
      by the `supersedes:` of a note that has run.
 
-Serial mode (`--shape serial`, one call per chain, its tokens as repeatable `--surface`): no `file`, `supersede` or
-`interrupted` outcome; with --regenerate, `WARN: a serial run supersedes nothing (ADR 0040, p24-2): --regenerate
-ignored`. Hits are every unfinished serial note (any project) with a surface overlapping a --surface token, and
-every parallel candidate (root-level, unfinished, not complete, any project) whose Project root's token overlaps
-one (a missing Project root WARNs as above and is not counted). A serial note is a hit through its hold (above), and a
-stuck one that overlaps only through what it released WARNs as 2b does; a released parallel rollout is no hit, with
-`WARN: [[x]] (<label>; <why>) is released (ADR 0060): …`. Hits -> `refuse <sorted>`, exit 3, one stderr line each naming
-the note, its project, its state, the overlapping pair and its remedy; none -> `none`, exit 0. It reads notes (and a
-parallel candidate's Run record), and runs git only for the nested-checkout rule.
+Serial mode (`--shape serial`, one call per chain, its tokens as repeatable `--surface` and its checkouts, serial-
+chains.py's chain `checkouts`, as repeatable `--checkout`): no `file`, `supersede` or `interrupted` outcome; with
+--regenerate, `WARN: a serial run supersedes nothing (ADR 0040, p24-2): --regenerate ignored`. A live serial note is
+never a hit (ADR 0067 d4: predicted claims order and wait, they never refuse a schedule); for each one (any project),
+the first that applies: a --surface token overlapping its hold (above) WARNs `WARN: [[s]] (<label>; <state>) also
+predicts <b>, which this chain predicts as <a>: they take turns on it, the first to begin going first (ADR 0067 d4)`;
+one overlapping only what a stuck one released WARNs as 2b does; else, until Chain copies, turn(--surface) and
+--checkout meeting its U WARN `WARN: [[s]] (<label>; <state>) works <checkout> too: until each chain works its own
+Chain copy, their Legs take turns in it`. Hits are every parallel candidate (root-level, unfinished, not complete, any
+project) whose Project root's token overlaps a --surface or --checkout token (a missing Project root WARNs as above
+and is not counted), so a chain that names no file in a checkout still refuses beside a parallel rollout rooted there
+in place; a released parallel rollout is no hit, with `WARN: [[x]] (<label>; <why>) is released (ADR 0060): …`. Hits ->
+`refuse <sorted>`, exit 3, one stderr line each naming the note, its project, its state, the overlapping pair and its
+remedy; none -> `none`, exit 0. It reads notes (and a parallel candidate's Run record), and runs git only for the
+nested-checkout rule and the launch folders' checkouts.
 
-Resume mode (`--resume <slug>`, ADR 0060 d3; leg.py begin and status, and execute § 4.5's *Surface re-check*): what a
-resuming rollout writes, as --surface tokens (serial: leg.py's write_set) or --repo's token (parallel), against what
-the others hold for it: every other unfinished serial note's unlanded rows' surfaces, in any state (never its whole
-claim, never its smoke rows), and for a serial resume every unfinished, not complete parallel rollout's Project root
+Resume mode (`--resume <slug>`, ADR 0060 d3, ADR 0067 d4; leg.py begin and status, and execute § 4.5's *Surface
+re-check*): what a resuming rollout writes, as --surface tokens (serial: leg.py's write_set, ws(R)) or --repo's token
+(parallel), against the others. The named note itself is skipped, and --project/--tasks are optional (they only set
+`mine`). A parallel resume meets every other unfinished serial note's unlanded rows' surfaces, in any state (never its
+whole claim, never its smoke rows): `[[<s>]] (<label>; <state>) holds `<token>` for an unlanded row, which this rollout
+writes as `<token>` (ADR 0060): [[<slug>]] waits its turn: …`. A serial resume R reads its own chain through leg.py
+first (a chain unreadable there is exit 2, so leg.py's re-check fails closed) and meets each other unfinished serial
+note H by serial_waits: own(C) is a chain's unlanded rows' tokens, smoke(C) = ws(C) − own(C), the order key is
+(began, its first `began:` stamp; else never begun, after every chain that began; then the case-folded slug, a stamp
+that will not parse reading as never begun), and contend(X, Y) = own(X) meets own(Y) or, until Chain copies, T(X)
+meets U(Y). R waits on the first rule that applies: (M) H has an open Leg and T(R) (with --checkout) meets OL(H), T(H)
+and its open Leg folder's checkout: `[[H]] (…) holds `repo:<top>` with its open Leg <n>, where this chain's next Leg
+works as `<a>` (ADR 0067 d4, until Chain copies): [[R]] waits its turn: re-run once [[H]]'s Leg <n> closes`; (T) R
+itself has an open Leg (a take-over): only (M) applies; (O) H sorts before R and contend(R, H): `[[H]] (…) holds `<b>`
+for an unlanded row and began first (or comes first by slug), which this chain writes as `<a>` (ADR 0067 d4): …`, `<b>`
+`repo:<top>` for a checkout-level hit; (Y) ADR 0060's yield, smoke(R) meets own(H), unless R sorts before H and H waits
+on R anyway (contend(H, R), or smoke(H) meets own(R)): today's line, `… holds `<token>` for an unlanded row, which this
+chain writes as `<token>` (ADR 0060): …`. An unreadable H holds its whole claim against ws(R) and T(R), whatever the
+order (fail closed). The order is total and (Y)'s guard is the other side's (O), so no two chains wait on each other.
+A serial resume then meets every unfinished, not complete parallel rollout's Project root that ws(R) or T(R) meets,
 unless parallel_hold reads it released, or idle (nothing running, integrating or awaiting Integration) and paused
 (`paused:` or `pause_requested`) or with an open halt in its Run record: a call still in flight after a halt or in a
-pause's drain writes the root, so a rollout with one holds it. The named note itself is skipped, and
---project/--tasks are optional (they only set `mine`). Hits -> `refuse <sorted>`, exit 3, one stderr line each:
-`[[<s>]] (<label>; <state>) holds `<token>` for an unlanded row, which this chain|rollout writes as `<token>` (ADR
-0060): [[<slug>]] waits its turn: …` (a parallel holder: `… holds `<token>`, its Project root, …`); leg.py reads the
-first. A parallel resume (ADR 0064, clone_holders) also meets another project's parallel rollout in its own clone: one
+pause's drain writes the root, so a rollout with one holds it (`… holds `<token>`, its Project root, …`). Every line
+keeps `holds `<token>``, which leg.py reads. A parallel resume (ADR 0064, clone_holders) also meets another project's
+parallel rollout in its own clone: one
 that is unfinished, not complete and has run (not never started), in no `supersedes:` link with this note, whose
 Project root's checkout is --repo's, and that wins the tie (this rollout has not run, or the other's Run record began
 earlier, its first line's ts; ties and unreadable records break by slug order): ``[[x]] (<label>; <state>) holds
 `repo:<clone>`, its Project root, which this rollout writes as `repo:<clone>` (ADR 0064): [[me]] waits its turn: two
 projects' rollouts never share a clone: /thread:schedule <me's project> --regenerate moves it to its own clone``; with
 no --project or --tasks (execute's call), `mine` is the resuming note's own `projects:`. None -> `none`, exit 0. No `file`, `supersede` or `interrupted` outcome, and --regenerate WARNs and is ignored.
-Whoever released a place yields it, so a chain scheduled on a stuck chain's released place never waits on that chain.
-Like the serial check, it runs git only for the nested-checkout rule.
+Whoever released a place yields it, so a chain scheduled on a stuck chain's released place never waits on that chain
+unless it sorts after it. Like the serial check, it runs git only for the nested-checkout rule and the launch folders'
+checkouts.
 
     hold --rollout <slug> [--tasks-dir <dir>]
 
@@ -233,10 +265,11 @@ Output (check). stdout is exactly one line on exit 0 and 3: `none` | `supersede 
 <new-slug>` | `file <slug> <relpath>` | `refuse <slug>[,<slug>…]`. Slugs are filename stems; an unfinished
 note is root-only, so `<tasks dir>/<slug>.md` is exact. `WARN:` lines go only to stderr and never change
 stdout or the exit code. Exit 2 prints no stdout and one `unfinished-rollout:` stderr line: a missing or
-non-directory --repo, --repo with serial or --surface with parallel, no --surface with serial, a --surface token
-parse_token refuses, neither or both of --project/--tasks (both, with --resume), a --tasks note not found, a --resume
-naming no note directly in the tasks dir, a missing tasks dir, or reconcile-rollout.py, serial-chains.py or (once an
-unfinished serial note is read) leg.py unloadable.
+non-directory --repo, --repo with serial or --surface or --checkout with parallel, no --surface with serial, a
+--surface token parse_token refuses, a relative --checkout, neither or both of --project/--tasks (both, with
+--resume), a --tasks note not found, a --resume naming no note directly in the tasks dir, a serial --resume whose
+chain leg.py cannot read, a missing tasks dir, or reconcile-rollout.py, serial-chains.py or (once an unfinished serial
+note is read) leg.py unloadable.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py pickups --repo <path> --tasks <slug,...>
         [--misfit <slug>=<why>]... [--tasks-dir <dir>]
@@ -1193,7 +1226,7 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
         if key_h < key_r:
             p = meet(own_r, own_h) or meet(t_r, u_h)
             if p:
-                first = "began first" if s["began"] else "comes first by slug (neither has begun)"
+                first = "began first" if key_h[0] == 0 else "comes first by slug (neither has begun)"
                 hits[h] = (f"{who} holds `{SC.fmt_token(p[1])}` for an unlanded row and {first}, which this chain "
                            f"writes as `{SC.fmt_token(p[0])}` (ADR 0067 d4): {tail}")
                 continue
