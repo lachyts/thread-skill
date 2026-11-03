@@ -647,8 +647,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Night record** — per Morning, the **Last starts**' held starts and the
   tasks still running at the Morning, written into each rollout's **Run
   record** and keyed by that Morning, so a **Reflection** can tune the
-  two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences).
-  _Avoid_: night log.
+  two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences): it
+  tells a fallback overrun (a kind with under three past runs) from an
+  underestimate (a kind whose usual length let it start). _Avoid_: night log.
 - **Heat hold** — while the Mac's thermal pressure reads heavy or worse, no
   new Rollout task starts, Away included, and no **Verify slot** is free; at
   trapping or sleeping a running slotted suite is stopped and put back in

@@ -196,7 +196,8 @@ headlines first (ADR 0037 d1), then the Guardrails:
 - **Guardrails**: **Throughput** first, against its bound: merges per running hour, the running hours against the
   allowance (`allowanceHours` for its `tasks`, `bound`), and whether it is breached; then every excluded span by kind
   (`paused`, `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `hold-trickle` / `hold-away-cap` /
-  `hold-heat` meant Mac-wide waits, never Lachy's (p28-6: the Trickle, the Away cap, the Heat hold), `lead-absent`,
+  `hold-heat` / `hold-last-start` meant Mac-wide waits, never Lachy's (p28-6: the Trickle, the Away cap, the Heat hold;
+  p28-7: the last starts, holding a start that would run past the Morning), `lead-absent`,
   `never-finished`, `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
   Reflection). Then tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
   stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so. Last,
@@ -214,7 +215,18 @@ headlines first (ADR 0037 d1), then the Guardrails:
 - **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this". Nor does a
   trickle-bound one (p28-6: the Mac-wide cap, the Trickle or the Away cap, kept Slots free for at least half the
   time, its no-Slot-open spans counted in, and held as much Slot time as any other idle reason): say "the Trickle
-  moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling.
+  moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling. Nor does a last-start-bound
+  one (p28-7: the same reading over `hold-last-start`, the last starts holding starts toward the Morning): say "the
+  last starts move it, not a rollout key", read Throughput as under the last starts, and turn to the nights below.
+- **The nights** (`nights`, p28-7; execute away.md § The night record), for each Morning this rollout marked: the
+  night (its rollouts, `marked`), the starts the last starts held (`held`, split `heldBy` fallback / history) and the
+  tasks still running at the Morning (`ranPast`, split `ranPastBy`: a `fallback` overrun, fewer than 3 past runs and
+  started at least 2 h before; an `underestimate`, its kind's usual length let it start and it still ran past; or
+  `unchecked`, begun before the last starts applied or too close to tell), each with `ranAtLeastMinutes`, and the
+  `totals` (nights, zero-hold nights). Show each `nights.suggest` entry as Lachy's to act on by hand, never as a
+  proposal and never through tune.py: a `last-start-fallback-raise` is a code change to `LAST_START_FALLBACK` (file a
+  Thread Skill task), a `trickle-raise` is Chorus's companion.json `trickle`, a trade he decides (Chorus ADR 0104 d2).
+  Show `nights.flags` beside them.
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says
   3", so a jump such as 3 → 6 reads as one step past what the run proved. Then what it `serves` and `risks`. A
@@ -530,6 +542,12 @@ its text cannot tell. When labelling cannot finish, step 13b runs with `--rest-u
 unlabelled, and close never waits on labels. Read `trails` and `waits` as reported, never traced. Trace each `circling`
 item to what held it: a set-aside item starts at its `heldBy` (the stage and reasonClass that stopped it), the others at
 the Sessions that touched it. Name the rule the trace reaches: step 15's `amends` cites it.
+
+**The nights** (`span.json`'s `nights`, p28-7) read as step 5's do, over every record this week: per night, keyed by
+host and Morning, its held starts and its ran-past tasks split fallback / underestimate / unchecked, the `totals`, its
+`flags` and its `suggest` entries. Report them, never traced as friction: a `suggest` entry is Lachy's to act on by
+hand (a longer `LAST_START_FALLBACK` is a Thread Skill task, a higher Trickle is Chorus's companion.json), never a knob,
+never landed by step 14.
 
 ### 12. Sightings
 

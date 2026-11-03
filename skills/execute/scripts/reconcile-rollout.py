@@ -6588,6 +6588,18 @@ def cmd_status(args) -> int:
                "lease": lease}
     timeline = _timeline(rows, counts, ceiling, now, _eta_width(ceiling, away, elsewhere))
     root = _project_root(rollout_note)   # a bare hold_until number reads against it (no gh: status is a pure read)
+    # The last starts (p28-7; execute away.md § The last starts), read as `next` reads them and silently: M from the
+    # Away state, and the kind's past runs (the Run record's folded call journals), read lazily on the first row
+    # checked. A queued row whose dependencies are met carries `lastStart`, the `last start:` reason `next` would hold
+    # it on once a Slot frees (a full ceiling or Away cap still names its own hold in `next`), unless the rollout's own
+    # holds replace every row's (a pause, a pause request, main red, a whole-rollout git-env hold): then null, as on
+    # every other row.
+    last = _LastStarts(_morning_toward(away, now), away["morning"], now,
+                       lambda: _past_runs(_project(rollout_note), rollout_path, rollout_note, index, now))
+    git_env = _git_env_hold(rollout_note)
+    main_red = _main_red(rollout_note)
+    whole_held = bool(_scalar(rollout_note.get("paused")) or _truthy_flag(rollout_note.get("pause_requested"))
+                      or main_red or any(h["scope"] == "rollout" for h in git_env))
     # The operator's ladder (one local file read, no network): each task's `rung:` stamp, and its drift when a
     # readable ladder lacks it. Drift is scoped to the unlanded rows (CARRIED_STATES): a merged, folded or other
     # row keeps the rung it reached as a record, and an edit to the ladder since is no drift. A refused ladder
@@ -6618,12 +6630,16 @@ def cmd_status(args) -> int:
             "merged": r["merged"],
             "integrating": r["integrating"],
             "waitingOn": _unsatisfied(r, index) if r["state"] == "queued" else [],
+            "lastStart": None,
             "blockerSummary": _blocker_summary(r["note"]),
             "rung": _scalar(r["note"].get("rung")) or None,
             "rungDrift": rung_drift(r),
             # p30-3: the task's own hold_until as parsed, {pr, url, error}, whatever its state, or null (no gh call).
             "holdUntil": _hold_public(_hold_until(r["note"], root)),
         }
+        # p28-7: the last start `next` would hold an unblocked queued row on, else null (above).
+        if r["state"] == "queued" and not row["waitingOn"] and not whole_held:
+            row["lastStart"] = last.hold(r)
         # p16-3: the open question, only on a set-aside task whose note holds one (the key is absent otherwise).
         ask = needs_human(r["note"]) if r["state"] == "set-aside" else ""
         if ask:
@@ -6672,18 +6688,22 @@ def cmd_status(args) -> int:
         # and `lease`, its own lead's lease (p28-4): {away, file, why, limit, awayCap, until, morning, elsewhere,
         # lapsed, here, running, lease}. A pure read of away.json and the leases (sysctl only when one would lapse).
         "trickle": trickle,
+        # The last starts as `next` reads them (p28-7; execute away.md § The last starts): {morning, kinds}, M as ISO
+        # 8601 at the local offset (null when they do not apply) and each kind the rows' checks read. Status reads the
+        # Run record's folded call journals for the history, silently, and writes nothing.
+        "lastStarts": last.output(),
         # {source, rungs, error}: the ladder status read (built-in, or the file's path); error non-null when the
         # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start).
         "ladder": ladder,
         # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*), each with its `scope`: [] when
         # none. Vault-only, so status § 3's Git-env trip flag holds offline too.
-        "gitEnvHold": _git_env_hold(rollout_note),
+        "gitEnvHold": git_env,
         # The unacked Lane-log holds (_lane_log_hold; ADR 0048, execute § 4.5 *Lane hold*): [{slug, cause, stamp,
         # line}], [] when none. Vault-only, so status § 3's Lane hold flag holds offline too.
         "laneLog": _lane_log_hold(rollout_note),
         # The RACE reverts that did not land and that no `RACE decided:` line lifts (_main_red): main is red, so the
         # whole rollout is held (status § 3's Main red). Vault-only too.
-        "mainRed": _main_red(rollout_note),
+        "mainRed": main_red,
         # The rollout's own hold_until (p30-3; vault-grammar § Hold until) as parsed, {pr, url, error}, or null. Only
         # `next` reads its PR (gh) and clears it, so /thread:status reads the state live itself (status § 3).
         "holdUntil": _hold_public(_hold_until(rollout_note, root)),
