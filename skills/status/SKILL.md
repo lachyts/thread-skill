@@ -801,7 +801,8 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   `<restart.blockedBy>`" when set. A `surface held by [[<B>]] (<token>)` blocker (ADR 0060) reads "waits its turn:
   [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
   A stand has five causes (ADR 0067 d4), each with its own remedy: [[<B>]] comes first (it began first, or wins the
-  slug order on equal stamps or when neither has begun) and holds an unlanded row on that place; or, when either
+  slug order on equal stamps or when neither has begun) and holds an unlanded row (in Chain copies, a done row it
+  has not yet landed: ADR 0067 d3) on that place; or, when either
   chain works that checkout in place (no `chain_copies:`), [[<B>]] comes first and still has unlanded rows in a
   checkout this Leg works, even when the two share no file (the commonest: a never-begun lower-slug chain that nobody
   starts blocks a higher-slug one this way, so name "run [[<B>]] or stamp it `status: dropped`"); or [[<B>]]'s open

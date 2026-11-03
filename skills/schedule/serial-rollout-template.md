@@ -51,7 +51,7 @@ The frontmatter's `surfaces:` is the union of the members' predicted claims belo
 
 ## Post-rollout
 
-When every task is done, the last Leg runs the completion ceremony (the Complete section of execute's `legs.md`). When this note declares `completion_verifier:`, the Leg first runs it once on the chain checkout's HEAD: its summary goes in the Completion log, and a red files one fix task without stopping the ceremony. Then, in this order:
+When every task is done, the last Leg runs the completion ceremony (the Complete section of execute's `legs.md`). Before anything else, a chain with `chain_copies:` lands every finished task on each checkout's default branch (`leg.py land`, ADR 0067 d3), so the completion verify below runs on the landed tip. When this note declares `completion_verifier:`, the Leg first runs it once on the chain checkout's HEAD: its summary goes in the Completion log, and a red files one fix task without stopping the ceremony. Then, in this order:
 
 1. Close the phases this chain touched (`touched-phases`, then `reconcile-project.py --kinds phase --apply`), filing a `phase-close-followup-*` task on a failure.
 2. File each item below that is live work as a new open follow-on task in `Work/Tasks/`, and rewrite the item as a thin pointer to it; give every other item a disposition. The land-chain follow-on joins them when a chain checkout lands on origin and the chain's `Task:` commits are not on it yet. Never leave live work as checklist prose inside a done note.
