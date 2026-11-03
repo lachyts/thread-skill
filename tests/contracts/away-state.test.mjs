@@ -40,12 +40,23 @@
 //               **Stalled rollout** names the Heat hold among the meant waits, so a hot spell never reads as a stall
 //   claim       § The Trickle's *Trickle claims* (p28-3) states the code's TRICKLE_CLAIM_TTL, names its TRICKLE_LOCK and
 //               TRICKLE_CLAIMS files and quotes its TRICKLE_WARN prefix, says the § 4 stamp consumes a claim, that a
-//               claim whose rollout note is missing from the walk still counts (it fails safe), and names the seeded-
-//               revise residual and its follow-up task; the old "a claim under a lock is a later task's" is gone
+//               claim whose rollout note is missing from the walk still counts (it fails safe), and (p28-8) that `next`
+//               claims each seeded revise step 1.2 launches, with the code's TRICKLE_CLAIM_REVISE as its `kind`, and
+//               that a lasting disagreement re-claims it with a fresh `at`; the old "a claim under a lock is a later
+//               task's" and the old "but is not itself claimed" residual are gone
 //   fair-share  (p28-5) § The Trickle's *A fair share* states the code's TRICKLE_WAIT_TTL and the allocation order
-//               (fewest held, then served least recently), *The limit* names the places kept, *The hold* their
-//               `kept for` suffix (the code builds `kept for [[<rollout>]]`), and it links the sooner re-check's
-//               follow-up task; the old "A fair share or a first start is a later task's" is gone
+//               (fewest held, then served least recently), *The limit* names the places kept and *The hold* their
+//               `kept for` suffix (the code builds `kept for [[<rollout>]]`); the old "A fair share or a first start is
+//               a later task's" is gone
+//   wake        (p28-9) § The Trickle's *A waiting lead re-checks sooner* states the code's TRICKLE_WOKEN_KEYS, the
+//               trickle wait's TRICKLE_WAKE_POLL, TRICKLE_WAKE_TIMEOUT, TRICKLE_WAKE_EXIT and TRICKLE_WAKE_NONE, its
+//               baseline (a `next`'s lease, never a `record-entry`'s), that it takes no lock and writes nothing, that
+//               the file stays at version 1 and *Trickle claims* names its `woken` list; *Why not a shorter heartbeat*
+//               counts the wait's own idle turns (about two per 20 minutes, against four for `*/5`); *What does not
+//               wake it* names a heat-held waiter (step 1.6 launches no wait on a `heat:` turn) and *The bound* and *A
+//               morning launch* give the 20-second wake only while the trickle wait runs; CONTEXT.md's Fair share entry
+//               bolds **trickle wait** with its verb and says the Heat hold runs none; the old "a sooner re-check while
+//               waiting is [[…p28-9…]]'s" is gone
 // One function (checkAway) returns named failures, so the real files and each control (one mutation, exactly its
 // rule) run through identical logic. Reads files only.
 import { test } from 'node:test'
@@ -237,18 +248,22 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
   const lockFile = grab(code, /^TRICKLE_LOCK = "([^"]*)"/m)
   const claimsFile = grab(code, /^TRICKLE_CLAIMS = "([^"]*)"/m)
   const claimWarn = grab(code, /^TRICKLE_WARN = "([^"]*)"/m)
-  if (!ttlM || !lockFile || !claimsFile || !claimWarn ||
+  const reviseKind = grab(code, /^TRICKLE_CLAIM_REVISE = "([^"]*)"/m)
+  if (!ttlM || !lockFile || !claimsFile || !claimWarn || !reviseKind ||
     !trickleS.includes(`A claim lives ${ttlM} minutes from its \`at\``) ||
     !trickleS.includes(`\`${lockFile}\``) || !trickleS.includes(`\`${claimsFile}\``) ||
     !trickleS.includes(`\`${claimWarn} `) ||
     !trickleS.includes("A claim is consumed by its task's § 4 stamp") ||
     !trickleS.includes('and so does one whose rollout note is missing from the walk') ||
-    !trickleS.includes('up to the revises one step 1.2 launches') ||
-    !/\[\[thread-skill-p28-\d+-trickle-claim-a-seeded-revise\]\]/.test(trickleS) ||
+    // p28-8: a seeded revise is claimed, `kind: <TRICKLE_CLAIM_REVISE>`, and a lasting disagreement re-claims it
+    !trickleS.includes(`\`kind: ${reviseKind}\``) ||
+    !trickleS.includes('and one per seeded revise step 1.2 launches') ||
+    !trickleS.includes('is claimed again, with a fresh `at`') ||
+    trickleS.includes('but is not itself claimed') ||
     trickleS.includes("A claim under a lock is a later task's.")) fails.push('claim')
 
   // fair-share (p28-5): the record's TTL is the code's, read from it, so a change on either side fails; the allocation
-  // order, the limit's and the hold's wording, and the follow-up link are the doc's.
+  // order and the limit's and the hold's wording are the doc's.
   const waitM = grab(code, /^TRICKLE_WAIT_TTL = timedelta\(minutes=(\d+)\)/m)
   const keptFor = 'kept for " + ", ".join(f"[[{n}]]" for n in kept)'   // the builder of the hold's suffix
   if (!waitM || !code.includes(keptFor) ||
@@ -256,8 +271,31 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
     !trickleS.includes('fewest, then was served least recently') ||
     !trickleS.includes('less the places kept for waiting rollouts') ||
     !trickleS.includes('`, <k> kept for [[<rollout>]]') ||
-    !/\[\[thread-skill-p28-\d+-trickle-a-waiting-lead-re-checks-sooner\]\]/.test(trickleS) ||
     trickleS.includes("A fair share or a first start is a later task's.")) fails.push('fair-share')
+
+  // wake (p28-9): the wake's keys and the trickle wait's poll, timeout and exit codes are the code's, read from it, so a
+  // change on either side fails; the baseline, the lock-free read and the file's version are the doc's.
+  const wokenKeys = (grab(code, /^TRICKLE_WOKEN_KEYS = \(([^)]*)\)/m) ?? '').match(/"[^"]*"/g)?.map((x) => x.slice(1, -1)) ?? []
+  const pollS = grab(code, /^TRICKLE_WAKE_POLL = (\d+)\.0 /m)
+  const timeoutS = grab(code, /^TRICKLE_WAKE_TIMEOUT = (\d+)\.0 /m)
+  const wakeExit = grab(code, /^TRICKLE_WAKE_EXIT = (\d+) /m)
+  const wakeNone = grab(code, /^TRICKLE_WAKE_NONE = (\d+) /m)
+  if (!wokenKeys.length || !pollS || !timeoutS || !wakeExit || !wakeNone ||
+    !trickleS.includes(`\`{${wokenKeys.join(', ')}}\``) ||
+    !trickleS.includes(`reads \`trickle-claims.json\` every ${pollS} seconds`) ||
+    !trickleS.includes(`after ${timeoutS} seconds`) || !trickleS.includes(`${wakeExit} after`) ||
+    !trickleS.includes(`${wakeNone} with nothing to wait for`) ||
+    !trickleS.includes("its last `next`'s lease (`by: next`)") || !trickleS.includes("never a `record-entry`'s") ||
+    !trickleS.includes('takes no lock and writes nothing') ||
+    !trickleS.includes('The file stays at `version: 1`') ||
+    !trickleS.includes('"woken": […]') ||
+    !trickleS.includes('takes about two such turns per 20 minutes, twice the tick alone\'s, against four times for `*/5`') ||
+    !trickleS.includes("A heat-held waiter misses even a giver's wake: step 1.6 launches no trickle wait on a `heat:` row") ||
+    !trickleS.includes("once a lead on this engine keeps the place while W's trickle wait runs") ||
+    !trickleS.includes('of the place kept for it while its trickle wait runs') ||
+    !entry(context, 'Fair share').includes('**trickle wait** (`trickle-wait`, read-only)') ||
+    !entry(context, 'Fair share').includes('one the **Heat hold** holds runs none') ||
+    trickleS.includes('a sooner re-check while waiting is')) fails.push('wake')
 
   return fails
 }
@@ -270,7 +308,7 @@ test('away.md, the code that reads the file and the hold-back prose agree', () =
 
 const RULES = ['keys', 'path', 'staleness', 'default', 'refresh', 'until', 'morning', 'serial', 'warn', 'hold-back', 'glossary',
   'restart', 'no-lead', 'sample', 'away-cap', 'older-reader', 'last-starts', 'night-record', 'heat', 'mac-holds', 'claim',
-  'fair-share']
+  'fair-share', 'wake']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -446,10 +484,14 @@ test('control: a Trickle claim the doc or the code says another way fails claim'
   only('away', "A claim is consumed by its task's § 4 stamp", 'A claim is consumed by mark-started', 'claim', 'no stamp consumes it')
   only('away', 'and so does one whose rollout note is missing from the walk', 'but one whose rollout note is missing from the walk does not',
     'claim', 'a missing rollout note drops its claims')
-  only('away', 'up to the revises one step 1.2 launches', 'nothing more', 'claim', 'no seeded-revise residual')
-  only('away', '[[thread-skill-p28-8-trickle-claim-a-seeded-revise]]', 'a later task', 'claim', 'no follow-up link')
+  // p28-8: the seeded revise's claim
+  only('code', 'TRICKLE_CLAIM_REVISE = "revise"', 'TRICKLE_CLAIM_REVISE = "seeded"', 'claim', 'another revise kind in the code')
+  only('away', 'and one per seeded revise step 1.2 launches', 'and none per seeded revise', 'claim', 'no seeded revise claimed')
+  only('away', 'is claimed again, with a fresh `at`', 'is claimed once', 'claim', 'no re-claim cost')
   const p = real.away.split('\n').find((l) => l.startsWith('**Trickle claims.**'))
   only('away', p, `${p} A claim under a lock is a later task's.`, 'claim', 'the old sentence back')
+  only('away', p, `${p} A seeded revise is bounded by \`slotLimit\`, claims included, but is not itself claimed.`, 'claim',
+    'the old residual back')
 })
 
 test('control: a fair share the doc or the code says another way fails fair-share', () => {
@@ -460,12 +502,44 @@ test('control: a fair share the doc or the code says another way fails fair-shar
     'less the count elsewhere, less this rollout', 'fair-share', 'the old room sentence back in The limit')
   only('away', 'either reads on with `, <k> kept for [[<rollout>]], …`', 'either reads on as before', 'fair-share', 'no suffix in The hold')
   only('code', 'kept for " + ", ".join(f"[[{n}]]" for n in kept)', 'kept for " + ", ".join(kept)', 'fair-share', 'no suffix in the code')
-  only('away', '[[thread-skill-p28-9-trickle-a-waiting-lead-re-checks-sooner]]', 'a later task', 'fair-share', 'no follow-up link')
   const p = real.away.split('\n').find((l) => l.startsWith('**A morning launch still starts**'))
   only('away', p, `${p} A fair share or a first start is a later task's.`, 'fair-share', 'the old sentence back')
 })
 
-test('the rules are all named (22) and each has a control', () => {
-  assert.equal(RULES.length, 22)
+test('control: a wake the doc or the code says another way fails wake', () => {
+  only('code', 'TRICKLE_WOKEN_KEYS = ("tasksDir", "rollout", "at", "by")', 'TRICKLE_WOKEN_KEYS = ("tasksDir", "rollout", "at", "by", "want")',
+    'wake', 'another key in the code')
+  only('code', 'TRICKLE_WAKE_POLL = 20.0 ', 'TRICKLE_WAKE_POLL = 30.0 ', 'wake', 'a 30-second poll in the code')
+  only('code', 'TRICKLE_WAKE_TIMEOUT = 1200.0 ', 'TRICKLE_WAKE_TIMEOUT = 1700.0 ', 'wake', 'a 1700-second timeout in the code')
+  only('code', 'TRICKLE_WAKE_EXIT = 75 ', 'TRICKLE_WAKE_EXIT = 76 ', 'wake', 'another timeout exit in the code')
+  only('code', 'TRICKLE_WAKE_NONE = 3 ', 'TRICKLE_WAKE_NONE = 4 ', 'wake', 'another nothing-to-wait-for exit in the code')
+  only('away', '`{tasksDir, rollout, at, by}`', '`{tasksDir, rollout, at}`', 'wake', 'another key in the doc')
+  only('away', 'reads `trickle-claims.json` every 20 seconds', 'reads `trickle-claims.json` often', 'wake', 'no poll in the doc')
+  only('away', '75 after 1200 seconds', '75 after a while', 'wake', 'no timeout in the doc')
+  only('away', '75 after 1200 seconds', '76 after 1200 seconds', 'wake', 'another timeout exit in the doc')
+  only('away', '3 with nothing to wait for', '0 with nothing to wait for', 'wake', 'another nothing-to-wait-for exit in the doc')
+  only('away', "or its last `next`'s lease (`by: next`) if later", 'or its lease if later', 'wake', 'any lease is a baseline')
+  only('away', "never a `record-entry`'s", "a `record-entry`'s too", 'wake', "a record-entry's lease is a baseline")
+  only('away', 'takes no lock and writes nothing', 'takes the trickle claim lock', 'wake', 'the wait takes the lock')
+  only('away', 'The file stays at `version: 1`', 'The file moves to `version: 2`', 'wake', 'a version bump')
+  only('away', ', "woken": […]}`', '}`', 'wake', 'the file shape without woken')
+  only('away', 'or until its record lapses (30 minutes) if that lead is gone.',
+    "or until its record lapses (30 minutes) if that lead is gone; a sooner re-check while waiting is [[thread-skill-p28-9-trickle-a-waiting-lead-re-checks-sooner]]'s.",
+    'wake', 'the old clause back')
+  only('away', 'takes about two such turns per 20 minutes, twice the tick alone\'s, against four times for `*/5`',
+    'takes one such turn per 20 minutes, against four times for `*/5`', 'wake', 'the wait\'s own idle turns left out')
+  only('away', " A heat-held waiter misses even a giver's wake: step 1.6 launches no trickle wait on a `heat:` row", ' A heat-held waiter: step 1.6',
+    'wake', 'What does not wake it without the heat-held waiter')
+  only('away', "once a lead on this engine keeps the place while W's trickle wait runs", 'once a lead on this engine keeps the place',
+    'wake', 'The bound promises every waiter the 20-second wake')
+  only('away', 'of the place kept for it while its trickle wait runs', 'of the place kept for it',
+    'wake', 'A morning launch promises every waiter the 20-second wake')
+  only('context', '**trickle wait** (`trickle-wait`, read-only)', 'trickle wait', 'wake', 'CONTEXT.md leaves trickle wait plain')
+  only('context', "; one the **Heat hold**\n  holds runs none, so it re-checks only at its heartbeat's tick or a call's\n  return.", '.',
+    'wake', 'CONTEXT.md promises a heat-held lead the 20-second wake')
+})
+
+test('the rules are all named (23) and each has a control', () => {
+  assert.equal(RULES.length, 23)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

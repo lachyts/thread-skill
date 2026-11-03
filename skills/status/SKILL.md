@@ -201,9 +201,9 @@ it counts), `none` (no lease file: an older snapshot, still counted) or `unreada
 last write and `lapsesAt` when it lapses (or lapsed), both UTC and null where they do not apply. Status writes no
 lease. `elsewhere` and `running` count notes only, never `next`'s Trickle claims (`skills/execute/away.md` § The
 Trickle, *Trickle claims*), so they can trail `next`'s count by up to 20 minutes of unstamped claims (a claim's
-life): while another lead's starts are claimed but not yet stamped, `status` shows room on the Mac that `next` still
-holds as `trickle: N/N`. Nor do they read the fair share (`skills/execute/away.md` § The Trickle, *A fair
-share*): `status` counts notes only, so a place `next` keeps for a waiting rollout shows as room.
+life): while another lead's starts or seeded revises are claimed but not yet stamped, `status` shows room on the
+Mac that `next` still holds as `trickle: N/N`. Nor do they read the fair share (`skills/execute/away.md` § The
+Trickle, *A fair share*): `status` counts notes only, so a place `next` keeps for a waiting rollout shows as room.
 
 **Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
 rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
@@ -800,6 +800,13 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   `restart.cwd`" when `restart.anyLaunch`), its `task`, "take-over" when `restart.takeOver`, and "blocked by
   `<restart.blockedBy>`" when set. A `surface held by [[<B>]] (<token>)` blocker (ADR 0060) reads "waits its turn:
   [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
+  A stand has five causes (ADR 0067 d4), each with its own remedy: [[<B>]] comes first (it began first, or wins the
+  slug order on equal stamps or when neither has begun) and holds an unlanded row on that place; or, until Chain
+  copies, [[<B>]] comes first and still has unlanded rows in a checkout this Leg works, even when the two share no
+  file (the commonest: a never-begun lower-slug chain that nobody starts blocks a higher-slug one this way, so name
+  "run [[<B>]] or stamp it `status: dropped`"); or [[<B>]]'s open Leg writes that place or (until Chain copies) works
+  that checkout; or [[<B>]] was scheduled on a place this chain released while it was stuck (ADR 0060's yield); or
+  [[<B>]]'s chain is unreadable, so it holds its whole claim (fail closed: `/thread:status [[<B>]]` names why; fix its note).
   Its `prompt` is printed, fenced, only where an action below hands it to Lachy.
 - **Hold** (ADR 0060), from `hold`. Scope `stuck`: `Holds only <held>` with the `rows` that hold them (each `[[slug]]`
   with its `state`), then `Released <released>` when it is not empty: other chains and parallel runs may use those
@@ -837,8 +844,8 @@ so leg.py prints it no `restart`, no `next` and an empty `smoke`: its report has
 - S12 `stuck` → `/thread:repair [[<rollout>]]`: sign each gate, hand back a block, or defer it with its dependants.
   Meanwhile it holds only the surfaces its Hold block lists (ADR 0060), so other rollouts carry on beside it.
 - S13 `not-started` or `ready` → `/thread:execute [[<rollout>]]` as `restart.launch`; with `restart.blockedBy`
-  `surface held by [[<B>]] (<token>)`, the chain waits its turn: wait for [[<B>]] to land its rows there
-  (`/thread:status [[<B>]]`), then run it.
+  `surface held by [[<B>]] (<token>)`, the chain waits its turn (whichever cause, ADR 0067 d4): wait for [[<B>]] to
+  land its rows there, or for its open Leg to close when the line names one (`/thread:status [[<B>]]`), then run it.
 
 The order is the precedence, as § 4's is: a lineage or an incomplete note stops everything, a halt comes before any
 restart, and a Session that may still be live (a pending or started restart, an open Leg, a started hand-over) is
