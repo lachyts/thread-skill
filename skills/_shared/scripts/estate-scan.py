@@ -121,7 +121,7 @@ Output, one JSON object (schema 1; --compact for one line):
   counts {projects, parked, tasks, unhomed, rollouts, repos, deadlines, overdue, skipped},
   vaultErrors[] {kind: unreadable-tasks-notes | no-tasks-dir, notes[], skips[]},
   projects[]  {name, note, status (raw), standing: crowned|active|queued|parked|other|none, parked, crowned, lane,
-               area[], aliases[], nextTask {result: live|blank|dead:<reason>, task, next_action}, repos[] (as
+               area[], aliases[], nextTask {result: live|blank|dead:<reason>|unparseable:<why>, task, next_action}, repos[] (as
                declared), ownSession {own, by: key|design record|null, repo (the first qualifying declared path, as
                written, else null), invalid? (a non-empty `orient:` value that is neither key, as JSON: the derived
                test decides)}, tasks[] (slugs), openTasks, phases[] {slug, note, status, phase (its `phase:` as

@@ -12,7 +12,8 @@ Verbs:
                                      note its `projects:` links.
   fill <task> [--action <line|->]    Every other writer (orient): the same targets, but `next_task:` only
                                      where the slot is blank or dead, `next_action:` only where blank.
-  read <project>...                  Each project's slot: live, blank, or dead (with the reason).
+  read <project>...                  Each project's slot: live, blank, dead (with the reason), or unparseable
+                                     (a live task whose frontmatter does not parse: mend it, never fill over it).
   captures [--slug S] [--thread-file P] [--for-close]
                                      Thread captures: open, `thread`-tagged tasks directly under
                                      Work/Tasks, each with whether its writer marked it
@@ -46,7 +47,7 @@ Output: one tab-separated row per outcome (tab, newline and backslash escaped as
     task      <task>     next_action  written | kept | unchanged
     project   <name>     next_task    written | kept | unchanged    <vault-relative path>
     skip      <name>     <reason>
-    slot      <name>     live | blank | dead:<reason>   <task>   <next_action or task name>
+    slot      <name>     live | blank | dead:<reason> | unparseable:<why>   <task>   <next_action or task name>
     capture   <task>     <status>     <match,…>        (thread-tag, plus marked, slug and/or thread-file)
 
 Exit 0 on success (skips included). Exit 2 when the input is refused — stderr then carries one line
@@ -434,7 +435,12 @@ def read_slots(vault, args):
             rows.append({"kind": "slot", "name": name, "result": "dead:" + reason, "task": links[0], "next_action": None})
             continue
         target, trel = live[0]
-        line = text_of(vault.note(trel).get("next_action"))
+        tnote = vault.note(trel)
+        if tnote.fm is None:  # live, but nobody can read it: say so, never `live` with its next_action lost
+            why = tnote.error or "frontmatter does not parse"
+            rows.append({"kind": "slot", "name": name, "result": "unparseable:" + why, "task": target, "next_action": target})
+            continue
+        line = text_of(tnote.get("next_action"))
         rows.append({"kind": "slot", "name": name, "result": "live", "task": target, "next_action": line or target})
     return rows
 

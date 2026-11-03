@@ -806,7 +806,7 @@ def cmd_slices(args):
             seen.add(key)
             slug = ranker.lower.get(key)
             if slug is None:
-                not_gradeable.append({"slug": raw, "why": "not in the scan"})
+                not_gradeable.append({"slug": raw, "why": unread_tasks(scan, M.ER.slug_key).get(key, "not in the scan")})
             elif slug not in ranker.home:
                 not_gradeable.append({"slug": slug, "why": ranker.skip[slug]})
             else:
@@ -2194,6 +2194,24 @@ def cmd_log(args):
 
 # ---- preflight ---------------------------------------------------------------------------------------------------
 
+def unread_tasks(scan, key):
+    """Each task note the scan skipped, by its slug key, mapped to the scan's why (`frontmatter does not parse`, say),
+    so a task it could not read is named for what it is, never `not in the scan` (2026-11-04: chorus-p95-2, one
+    unquoted `: ` in its next_action, was put to Lachy as ungraded and left out of a rollout)."""
+    out = {}
+    for row in scan.get("skipped") or []:
+        note, why = row.get("note"), row.get("why")
+        if not isinstance(note, str) or not isinstance(why, str) or not note.endswith(".md"):
+            continue
+        parts = note.split("/")
+        if parts[:2] != ["Work", "Tasks"]:
+            continue
+        k = key(parts[-1][:-3])
+        if k:
+            out.setdefault(k, why)
+    return out
+
+
 def decision_of(d):
     """A rank decision as the index carries it: question, options (the recommendation first), recommendation, and its
     why and fork when it has them."""
@@ -2211,6 +2229,7 @@ class Preflight:
     def __init__(self, ER, rank, scan, tasks, kept, decided, deps):
         self.ER, self.rank, self.scan = ER, rank, scan
         key = ER.slug_key
+        self.unread = unread_tasks(scan, key)  # a task the scan skipped, by why (its frontmatter does not parse)
         self.rows = {}  # the rank's graded tasks by key, in rank order
         for t in rank["tasks"]:
             if isinstance(t, dict) and isinstance(t.get("slug"), str):
@@ -2273,7 +2292,7 @@ class Preflight:
         when its `rollout:` is live: a carried task at an empty status, which carry queues but ES.still_to_start does
         not, as it reads `open` alone. Either way the real cause is its status, so it is named STATUS_OUTSIDE."""
         row = self.scanned.get(k)
-        why = self.listed.get(k) or ("no grade" if row else "not in the scan")
+        why = self.listed.get(k) or ("no grade" if row else self.unread.get(k, "not in the scan"))
         if why in ("in flight", "hold") and row and row.get("statusClass") == "hold":
             return STATUS_OUTSIDE
         return why

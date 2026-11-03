@@ -360,7 +360,10 @@ rollout note (ADR 0047 § Build rulings).
 3. `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py slices --scan "$S/scan.json" --dir "$S/slices" --tasks <graded set> [--superseding <prior>]`.
    `--superseding` is passed exactly on a supersede, naming § 0's final `supersede <prior>` (after an `interrupted`
    finish, that is `<new>`), so a carried task still queued is gradeable. Each task in its `notGradeable[]` is asked
-   about in the round as ungraded, never graded.
+   about in the round as ungraded, never graded, but one whose why is `frontmatter does not parse` is mended first,
+   never asked: quote the value its YAML error names (a free-text value holding `: `, or a bare `"` inside quotes), as
+   one Edit to its note, list it under Decided for you (Owner *technical*), then re-run step 2 and this step once, so it
+   is graded. Only a note still unreadable after that is asked as ungraded, with its why.
 4. The grading agents, as orient-all § 2 steps 4–5 run them: started in one message, one read-only agent per slice
    file, each briefed with `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md` § The grading agents, the slice
    file's path and "return only the § Output JSON". Save each answer as `$S/grades-<NN>.json`. An answer that does

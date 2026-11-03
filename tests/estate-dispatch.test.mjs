@@ -1874,3 +1874,18 @@ test('D23. big projects: nothing of theirs asked, scheduled or started; one pick
   }
   assert.deepEqual(snap(VB), VB_BEFORE, 'the vault is untouched')
 })
+
+// ---- D17b. a task the scan could not read is named for its cause ---------------------------------------------------
+test('D17b. slices and preflight name a task whose frontmatter did not parse by the scan\'s why, never "not in the scan"', () => {
+  assert.equal(vfScanRun.status, 0, vfScanRun.stderr)
+  const scan = JSON.parse(fs.readFileSync(VF_SCAN, 'utf8'))
+  scan.skipped = [...(scan.skipped || []), { note: 'Work/Tasks/bk.md', why: 'frontmatter does not parse' },
+    { note: 'Work/Projects/Pf/bk.md', why: 'frontmatter does not parse (a project note, never a task)' }]
+  const patched = path.join(S, 'pf', 'scan-unread.json')
+  write(patched, JSON.stringify(scan))
+  const sl = ok(py(['slices', '--scan', patched, '--dir', path.join(S, 'pf', 'unread'), '--tasks', 'r,bk,zz']))
+  assert.deepEqual(sl.notGradeable, [{ slug: 'bk', why: 'frontmatter does not parse' }, { slug: 'zz', why: 'not in the scan' }])
+  pfRanked()
+  const pf = ok(preflight(['--tasks', 'r,bk'], VF_RANK, patched))
+  assert.deepEqual(pf.out.filter((o) => o.slug === 'bk').map((o) => [o.why, o.reason]), [['ungraded', 'frontmatter does not parse']])
+})

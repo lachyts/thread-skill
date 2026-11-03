@@ -134,9 +134,13 @@ and Drift and the slots for each swept project.
   note's `next_task:` and that task's `next_action:` (its title when the
   line is blank), read with
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py read <project>…`
-  — one `slot <project> live | blank | dead:<reason> <task> <line>` row
+  — one `slot <project> live | blank | dead:<reason> | unparseable:<why> <task> <line>` row
   each. A **dead link** (CONTEXT.md **Next task**) reads as a blank slot;
-  the script decides which links are dead, never judge it by eye. The slot
+  the script decides which links are dead, never judge it by eye. An
+  `unparseable:<why>` slot is a live task nobody can read (its frontmatter
+  does not parse, usually a free-text value holding an unquoted `: `): mend
+  it at once, quoting the value, as one Edit listed under Decided for you
+  (Owner *technical*), and read the slot again; never fill over it. The slot
   is the project's standing answer; the rest of the sweep is weighed
   against it.
 - **Vault**: the area note + every sub-project note (a note whose
