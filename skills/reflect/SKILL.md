@@ -359,6 +359,11 @@ while no rollout held it, each with its `heldBy`), `W2` (a rollout open 48 hours
 reading Sessions it left out: a Session that runs the reading's own scripts is never a touch); `watches`, each circling
 rule's Watch as step 13b would write it (`fresh`, and `held`, the items a closed cycle named); and `trend`.
 
+A flag starting `window: ` is the reading checking itself (`reflect.py`'s header, *The window check*): a reported
+block holds a row outside its window, so a reader read past it. It is a Thread Skill bug, never friction: read that
+block's numbers as unreliable this week. When the flag names `rollouts[<slug>]`, file it in step 13 with `bug` and
+`--rollout <slug>`; otherwise report it alone. Either way, report it first in step 17, quoting the flag.
+
 ### 10a. The Monthly audit
 
 Only when `span.json`'s `ledger.audit.due` is true: the first reading of each Melbourne month, whatever the cadence (a
@@ -411,7 +416,10 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   gate), execute § 3.7 (gated inputs, ADR 0034), execute § 4.5 (the queue, ADR 0030) or execute § 6.5 (Needs
   you), and by its `movedBy` to what moved it on. `integration-conflict` traces to execute § 4.5 step 3
   (Integration's merge of the latest main, ADR 0030 decision 3), and `integration-red` to the integrate call's
-  verifier.
+  verifier. `merge-gate` (a red required check that stopped merge-task after the verifier passed, ADR 0068) traces to
+  schedule § 2.5 (its merge gate), a schedule-time miss, when the failed check runs a job class the rollout's
+  `verifier:` never runs; otherwise to drift between CI and the local run. A repeat on one repo is a rule-altitude
+  Watch (giflab ADR 0012's revisit trigger).
 - A `retry` is execute § 4.5's automatic retry (ADR 0033): trace why the first attempt failed a block an agent
   could fix.
 - A `descope` is repair § 2–§ 5's descope and its hand-back (ADR 0035): trace why the task's scope could not land
@@ -421,8 +429,10 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   canary; `raise` is a round cap (weigh it beside score.py's own knob); `deferred` is repair § 5. A rollout with no
   line in the window still brings its in-window repair lines, read `repairs-only` (or with its Escapes,
   `escapes-only`).
-- An `escape` is traced to the review that should have caught it (execute § 5, ADR 0037 d7), and only when its
-  `inWindow` is true: an Escape counts in the week it surfaced, against the rollout that landed the work.
+- An `escape` is traced to the review that should have caught it (execute § 5, ADR 0037 d7): an Escape counts in the
+  week it surfaced, against the rollout that landed the work; one dated outside the window is never an item. Its
+  `cannotShow` line is reported, never traced: on a parallel rollout it names only the Escapes no week counts (§ What
+  the record cannot show), on a chain every Escape dated outside the window, most of them another week's.
 - A `churn` item is a review round that only answered the last round's fix (execute § 5): trace what the fix broke.
 - A serial chain's (`shape: serial`) items come from its record's acts and its Leg log (`leg.py status`), read by the
   chain's rules (`skills/execute/legs.md`, ADR 0040), never as a queue's: it has no Slots, lane, retry, descope, churn
@@ -440,7 +450,7 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   happened (its `session` is the repair that marked it), not the hand-over; with `began` set the Leg did start, by a
   route that wrote no line. An `escape` is a fix task naming
   a chain task in `fixes:` (`skills/execute/legs.md` § Fix tasks), traced to the smoke Verify or review that should
-  have caught it, only when its `inWindow` is true.
+  have caught it.
 
 For each `set-aside` item whose `movedBy` is `unrecorded`, read what its `explainedIn` names: its `taskNote`'s
 `## Needs you` and `## Integration log`, a gate set-aside's `## Approved gates`, and the rollout note's `## Notes`
@@ -698,7 +708,9 @@ reading leaves the week quiet.
 
 ### 17. Report, then tidy
 
-Report the rollouts read (and the escapes-only and repairs-only ones), each trace and what it became, the grade
+Report first each `window: ` flag `span.json` holds (step 10), quoted whole: that block's numbers are unreliable this
+week, so say so before any of them. Then report the rollouts read (and the escapes-only and repairs-only ones), each
+trace and what it became, the grade
 accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySize` readout and each grade trace), each
 /fresh-review landing (`freshReview`: its repo and branch, rounds, findings and blocking per round, filed,
 unconfirmed, rejected, open at the end, reversals, regression, its size, its confirm rate, and what step 11 named, the
@@ -710,7 +722,7 @@ held), the Monthly audit's row when one ran (its hours found against the record'
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or
 skipped behind a revert, the attention ledger (the questions put to Lachy, *yours* beside `unlabelled`, a lower bound
 while that is above 0, the recommended-pick rate and the hours questions held work; the trails, their rounds and the
-docs-only PRs; the waits to start; each circling item and any Watch it opened), the close line's counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
+docs-only PRs; the waits to start; each circling item and any Watch it opened), the close line's counts and `quiet`, the `cannotShow` list and every other flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
 
 ## Deciding the decision task
 
@@ -800,9 +812,15 @@ or `exists`). An item left open keeps the task open.
   as no landing, and only in the window its line falls in. A round reaches `reviews.jsonl` only when fresh-review or
   land.sh's own-branch `--queue` and `--hold` recorded it.
 - The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
-  `cannotShow`), and dates an undated fixer by its mtime.
+  `cannotShow`), and dates an undated fixer by its mtime. It reaches a task only once the task has landed, so a fixer
+  dated in a week before the one its task landed in (or one with no date at all) is in no week's friction: the
+  reading of the week the task lands names it in `cannotShow`, once. An Escape dated in an earlier week on a task
+  landed by then was that week's friction, and one dated after the window is a later week's: neither is named.
 - A serial chain's Escapes come from `fixes:` alone and are read only in a week span reads the chain (a line in its
-  Run record or its Leg log in the window): the Escapes sweep reads `merged` lines, which a chain never records.
+  Run record or its Leg log in the window): the Escapes sweep reads `merged` lines, which a chain never records. Each
+  reading of the chain names in `cannotShow` every Escape of the chain dated outside the window, so one line repeats
+  week after week, and most of what it names was counted in another week's friction; one dated in a week span did not
+  read the chain is in no week's friction, and that line is the only place it shows.
 - An escapes-only rollout's breaches are not counted, nor a repairs-only one's: a Guardrail breach counts in the week
   its run ends.
 - A closed rollout with no close line (a dropped one, one archived unscored, or a close that was not scored) is read

@@ -6,6 +6,7 @@
 # `## Notes` line, the task note (hand-back's own transition, the markers, the raise) and the Run record events.
 #   A1  a first and second plan-block retried, a third stopped by the budget   A2 an identical fingerprint stops
 #   A3  a `## Needs you` question never retries   A4 every excluded kind   A5 merge-task's fixable exit-1 texts
+#   A5b the fixable texts read in the reason's own cause (from its last `ERROR:` line), as the record's reasonClass
 #   A6  the budget: task, rollout, rollouts.toml and built-in; invalid stamps; a refused file; the assertions
 #   A7  the records (the brief untouched, repair's raise regex, a re-run, a partial write)   A8 the raise
 #   A9  an Integration set-aside   A10 infra blocks and their cool-down   A11 quota blocks and theirs   A12 the budget lifetime
@@ -343,6 +344,40 @@ for text in "ERROR: PR #5 has a MERGE CONFLICT with main (mergeStateStatus=DIRTY
   ok "$rc|$(fm "$A" status)" "0|status: in_progress" "A5 ${text:10:20}: its own run (in_progress)"
   has "$out" "(integrate; feedback " "A5: the stage is integrate (merge-task's exit 1, ADR 0032's table)"
   ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"]]')" '["integrate","run"]' "A5: stage integrate, setAsideAt run"
+done
+
+# A5b (ADR 0068 d4): the fixable texts are read in the reason's own cause (reconcile-rollout.py _merge_task_cause: from
+# its last `ERROR:` line to the end), the same text the record's reasonClass reads (reconcile-rollout-record.test.sh
+# 12d). merge-task.sh prints its red-check line before each infra rerun, so a reason the lead kept whole (the mark, a
+# rerun, then a different stop) is that later stop's, a human's, never a retry; the mark again as the last `ERROR:` line
+# is still the red check's, and retries.
+RERUN=$'  infra-classify: only setup/infra steps failed — transient flake. Re-running failed jobs:\n    - Set up job\n  infra rerun 1/2 triggered — re-watching required checks…'
+RED=$'merge-task: ERROR: a REQUIRED check FAILED on PR #5 (Ralph passed locally, but remote CI is red):\n'"$RERUN"
+NEVER="$RED"$'\nERROR: required checks never appeared for PR #5 — no CI runs in flight on its head SHA, nothing is coming'
+GATE="$RED"$'\nERROR: PR #5 is BLOCKED but required checks are already green — a NON-check gate is in the way'
+AGAIN="$RED"$'\nERROR: a REQUIRED check FAILED on PR #5 (Ralph passed locally, but remote CI is red):\n  infra-classify: a genuine (non-infra) step failed — HALTING (fail-closed). Failed steps:\n  Diagnose: gh pr checks 5 -R o/r — push a fix to the branch, re-integrate, then re-run merge-task.sh.'
+for c in "never|$NEVER|ERROR: required checks never appeared for PR #5 — no CI runs in flight" \
+         "gate|$GATE|ERROR: PR #5 is BLOCKED but required checks are already green — a NON-check gate"; do
+  name=${c%%|*}; rest=${c#*|}; reason=${rest%|*}; stop=${rest##*|}
+  scen "a5b-$name"
+  mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+  lead "$A" own "$reason"
+  I=$(inp "$A")
+  ok "$(j "$I" 'd["autoRetry"]')" false "A5b $name: the mark, a rerun, then a later stop: autoRetry false"
+  has "$(j "$I" 'd["autoRetryWhy"]')" "merge-task needs a human: $stop" "A5b $name: spent as merge-task needs a human, naming the later stop"
+  ok "$(j "$I" '[d["humanFix"]["act"], d["humanFix"]["handBack"]]')" '["hand back or defer",true]' "A5b $name: H10"
+  before=$(snap); M=$(cnt)
+  ar "$A"
+  ok "$rc|$(snap)|$(since "$M")" "1|$before|" "A5b $name: the verb exits 1, writes and records nothing"
+done
+scen a5b-again
+mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+lead "$A" own "$AGAIN"
+ok "$(j "$(inp "$A")" '[d["autoRetry"], d["autoRetryClass"]]')" '[true,"agent"]' "A5b again (control): the mark as the last ERROR: line retries"
+ar "$A"
+ok "$rc|$(fm "$A" status)" "0|status: in_progress" "A5b again: its own run (in_progress)"
+for frag in "triggered — re-watching required checks" "required checks never appeared for PR #"; do
+  ok "$(grep -c -F -- "$frag" "$MT" | awk '{print ($1 > 0)}')" 1 "A5b: \"$frag\" is merge-task.sh's text"
 done
 
 # ── A6: the budget ───────────────────────────────────────────────────────────────────────────────────────

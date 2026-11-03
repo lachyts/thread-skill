@@ -130,7 +130,10 @@ function span(h, since = SINCE, until = UNTIL, extra) {
   const r = reflect(h, ['span', '--since', since, '--until', until, '--now', until, '--tasks-dir', h.tasks, '--config', path.join(h.home, 'rollouts.toml'),
     '--out', out], extra)
   assert.equal(r.status, 0, r.stderr)
-  return { out, dir, s: JSON.parse(fs.readFileSync(out, 'utf8')), stderr: r.stderr }
+  const s = JSON.parse(fs.readFileSync(out, 'utf8'))
+  // the window check (reflect.py's header): a `window: ` flag is a reader that read past its window, in any reading
+  assert.ok(!s.flags.some((f) => f.startsWith('window: ')), JSON.stringify(s.flags))
+  return { out, dir, s, stderr: r.stderr }
 }
 
 function transcript(h, proj, sid, entries, { file = sid, mtime = null, dir = null } = {}) {
@@ -188,6 +191,7 @@ function questionsFixture(h) {
     askE(T(23, '01:00'), 'c6', [Q('One way?', ['Only'])], { cwd: h.repo }),
     resultE(T(23, '01:00'), 'c6', '<tool_use_error>InputValidationError: [too_small]</tool_use_error>', { error: true }),
     askE(T(19, '00:00'), 'c12', [Q('Before the window?', ['A', 'B'])], { cwd: h.repo }),
+    askE(T(25, '14:00'), 'c14', [Q('After the window?', ['A', 'B'])], { cwd: h.repo }), // an hour past UNTIL: read by no item or count
     { type: 'api-request', timestamp: T(21, '03:00'), message: { content: [{ type: 'tool_use', id: 'c9', name: 'AskUserQuestion', input: { questions: [Q('A copy?', ['A', 'B'])] } }] } },
     askE(T(21, '04:00'), 'c10', [Q('A subagent asks?', ['A', 'B'])], { cwd: h.repo, sidechain: true }),
   ])

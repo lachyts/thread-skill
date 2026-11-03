@@ -28,6 +28,8 @@
 #        surface re-check is exit 3 (nothing written, --dry-run too) while another chain's unlanded row holds a smoke
 #        row's surface, and status's restart names it as its blocker; a re-check that fails is exit 3 too and status's
 #        blocker (L14f); a stuck chain with a row in progress, or no Queue rows, holds its whole claim with a warn (L14h)
+#   L15  claim stamps one leg_base per checkout the row works (a file token's checkout, its launch folder's; the vault
+#        never), and status's hold carries the order's began stamp and the open Leg (ADR 0067 d2, d4)
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -1053,7 +1055,7 @@ leg set-aside --task t2 --reason "blocked on a missing key"; leg close --outcome
 leg status
 ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["hold"]["held"]')|$(q 'd["hold"]["released"]')" \
    "stuck|stuck|['vault:Work/Projects/B']|['vault:Work/Projects/A']" "L14: a stuck chain holds only its set-aside row's surface"
-ok "$(q 'd["hold"]["rows"]')" "[{'slug': 't2', 'state': 'set-aside', 'surfaces': ['vault:Work/Projects/B']}]" "L14: … naming the row"
+ok "$(q 'd["hold"]["rows"]')" "[{'slug': 't2', 'state': 'set-aside', 'surfaces': ['vault:Work/Projects/B'], 'folder': '$F'}]" "L14: … naming the row and its launch folder"
 python3 "$RR" hand-back --tasks t2 --tasks-dir "$T" > "$TMP/hb" 2>&1
 leg status
 ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["restart"]["blockedBy"]')" "ready|whole|None" \
@@ -1117,6 +1119,28 @@ leg status
 ok "$(q 'd["chain"]')|$(q 'd["hold"]["scope"]')|$(q 'd["hold"]["held"]')|$(q 'd["hold"]["unlanded"]')" \
    "stuck|whole|['vault:Work/Projects/A']|['vault:Work/Projects/A']" "L14h: a stuck chain whose ## Queue has no rows holds its whole claim"
 ok "$(q 'd["hold"]["warn"]')" "chain stuck, but its ## Queue has no rows: it holds its whole claim" "L14h: … with its warn"
+# ════ L15: stamp_bases, one base per checkout the row works, and the hold's order fields (ADR 0067 d2, d4) ═════════
+scen l15
+R="$S/r"; mkrepo "$R" https://github.com/o/r15.git; export CWD="$R"
+mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\`" "t2~cc-r~$R~\`ext:x\` \`vault:Work/Projects/A\`"; mkt t1; mkt t2
+leg status
+ok "$(q 'd["hold"]["began"]')|$(q 'd["hold"]["open"]')" "None|None" "L15: before Leg 1 the hold has no began stamp and no open Leg"
+leg begin --cwd "$R"; ok "$rc" 0 "L15: begin"
+leg status
+ok "$(q 'd["hold"]["began"]')|$(q 'd["hold"]["open"]')" "$NOW|{'n': 1, 'folder': '$R'}" "L15: status's hold carries the first began stamp and the open Leg"
+base=$(git -C "$R" rev-parse HEAD)
+leg claim --task t1
+ok "$rc|$(fm t1 leg_base)" "0|[\"$R@$base\"]" "L15: a claim on a row whose cell holds a file token stamps its checkout"
+leg done --task t1 --verify pass; ok "$rc" 0 "L15: done t1"
+leg claim --task t2
+ok "$rc|$(fm t2 leg_base)" "0|[\"$R@$base\"]" "L15: a row with only ext: and vault tokens, launched in a checkout, stamps that checkout"
+scen l15v
+git -C "$V" commit -q --allow-empty -m vault; export CWD="$V"
+mkro '' "t1~cc-v~$V~\`ext:x\`"; mkt t1
+leg begin --cwd "$V"; ok "$rc" 0 "L15: begin from the vault"
+leg claim --task t1
+ok "$rc|$(fm t1 leg_base)" "0|[]" "L15: a vault-launched row stamps nothing"
+unset CWD
 echo
 if [ "$fail" -eq 0 ]; then echo "leg.test.sh: ALL PASS"; else echo "leg.test.sh: FAILED"; fi
 exit "$fail"

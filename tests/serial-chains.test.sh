@@ -6,15 +6,19 @@
 #        a cycle refused, an outside dependency listed
 #   P2   derivation and sources: the real `## Launch` shapes, Read and MCP items skipped, non-path spans skipped,
 #        the vault, a path in no checkout, --surface (always unions in), the added-only member, an empty `surfaces:`
-#   P2b  a launch folder or path inside a checkout widens to its toplevel, declared or derived; workspace launchers
-#        share one checkout, so their members form one chain with a launch per row (their markers are never read)
+#   P2b  reach (a launch folder, a where-label value at any depth, a toplevel span) names only the checkout a member
+#        works, predicting nothing there (its own task note only), so two workspace launchers' members form two
+#        chains; a path below a toplevel is a file or folder token, declared or derived; two members naming one file
+#        share a chain, sibling files do not; the ledgers are bookkeeping; a linked worktree keys to its main
+#        worktree, a second clone and a --separate-git-dir checkout to their own toplevel (their markers are never read)
 #   P2c  the default (the vault only, for a member naming no project and no path) and its stated limit; a declared
 #        `any`
 #   P2d  launch commands (`--add-dir` and a leading `cd`, fenced or in a span) and the first project's `Local:` are
 #        derived claims; a fenced path no such command names, a comment, a Read item, a declared member, a second
 #        project's `Local:` and a backticked `Local:` with no path claim nothing; a `## Launch` path that is `/` or
 #        the home directory is never claimed (a WARN for an undeclared member)
-#   P3   the overlap grammar (pure), symlinks, clones, a checkout nested inside another (p33-3), a comma inside a
+#   P3   the token grammar and the overlap grammar (pure: keyed `repo:<toplevel>//<path>` tokens, a bare one covering
+#        its checkout, checkouts_of), symlinks, clones, a checkout nested inside another (p33-3), a comma inside a
 #        token, sibling subdirectories, a malformed token
 #   P4   ruling (c): a member on a checkout of lachyts/thread-skill (a `## Launch` `--add-dir` or `cd` path, declared
 #        or not, its surface, its launch folder, its project's `Local:` or `repos:`) goes to the session lane
@@ -24,7 +28,10 @@
 #   P7   vault chains claim their own project places (ADR 0059): a vault-root launch or path narrows to the first
 #        project's place (a folder note's folder, else the note and its would-be folder) and the member's own task
 #        note; Work/Tasks is bookkeeping; the whole-vault fallbacks; --surface adds; a code row never opens where its
-#        Leg cannot finish it (ruling (c) first); the serial check lets two project places run side by side
+#        Leg cannot finish it (ruling (c) first, read through `works`); the serial check schedules every chain, a
+#        shared place WARNing that they take turns (ADR 0067 d4)
+#   P8   the 2026-11-02 replan fixture (docs/spikes/2026-11-02-replan.py) over a synthetic estate: only the same-file
+#        pair and the declared-bare pairs clash, and no workspaces or Projects pair appears
 #   P6   exit 2
 # Temp vaults, temp git repos with literal origin URLs (only `git rev-parse` and `git remote get-url` read them).
 # No vault, no network. bash 3.2-compatible (macOS).
@@ -140,15 +147,26 @@ LAUNCH="- **Read first:** \`$H\`, \`$G/sub\`
 LAUNCH="- **Launch:** \`cc-a-seo\`, then \`/seo:impact\` and \`/morning\`" mkt d9
 LAUNCH="- **Notes:** \`$V/Work/X\`" mkt d10
 LAUNCH="- **Engine:** \`$N\`" mkt d11
-for t in d1 d2 d4 d5 d6 d8; do
+# A where-label value (**Repo:**, **Launch:**, at any depth) names where the member works, never what it writes: it
+# predicts nothing in $G, so it claims only its own task note, with a WARN (ADR 0067 d4).
+for t in d1 d2 d4 d6 d7 d8; do
   plan --tasks $t
-  ok "$(mem $t surfaces)|$(mem $t source)" "[\"repo:$G\"]|\"derived\"" "P2: $t's ## Launch claims repo:$G (derived)"
+  ok "$(mem $t surfaces)|$(mem $t source)|$(mem $t works)" "[\"vault:Work/Tasks/$t.md\"]|\"derived\"|[\"$G\"]" "P2: $t's ## Launch names \$G as where it works: works [\$G], its own task note its only claim (derived)"
+  has "$(j 'd["warns"]')" "WARN: $t: names no file in $G: it predicts nothing there, so it orders against no chain's files (ADR 0067 d4); declare \`surfaces:\` for the files it writes" "P2: … with the predicts-nothing WARN"
 done
-plan --tasks d3
-ok "$(mem d3 surfaces)" "[\"repo:$G\",\"repo:$H\"]" "P2: **Repos:** with a continuation line claims both"
 plan --tasks d7
-ok "$(mem d7 surfaces)" "[\"repo:$G\"]" "P2: a file that does not exist yet claims its checkout"
-has "$(j 'd["warns"]')" "d7: $G/sub/new.py does not exist yet: claimed through its nearest existing ancestor $G/sub" "P2: … with the through-its-ancestor WARN"
+hasnt "$(j 'd["warns"]')" "does not exist yet" "P2: a **Repo:** value not there yet keeps no token, so no through-its-ancestor WARN"
+plan --tasks d5
+ok "$(mem d5 surfaces)|$(mem d5 works)" "[\"repo:$G//sub/\"]|[\"$G\"]" "P2: d5's unlabelled cwd span is a prediction: a folder token repo:\$G//sub/"
+plan --tasks d3
+ok "$(mem d3 surfaces)|$(mem d3 works)" "[\"vault:Work/Tasks/d3.md\"]|[\"$G\",\"$H\"]" "P2: **Repos:** with a continuation line: both toplevels are reach"
+LAUNCH="- **Files:** \`$G/sub/new.py\`, \`$G/sub/file.txt\`" mkt d16 'launch: cc-g'
+plan --tasks d16
+ok "$(mem d16 surfaces)|$(mem d16 works)" "[\"repo:$G//sub/file.txt\",\"repo:$G//sub/new.py\"]|[\"$G\"]" "P2: **Files:** spans below the toplevel are file tokens"
+has "$(j 'd["warns"]')" "d16: $G/sub/new.py does not exist yet: claimed through its nearest existing ancestor $G/sub" "P2: … a file not there yet with the through-its-ancestor WARN"
+LAUNCH="- **Repo:** \`$G\` (also edits \`$G/sub/file.txt\`)" mkt d17
+plan --tasks d17
+ok "$(mem d17 surfaces)|$(mem d17 works)" "[\"repo:$G//sub/file.txt\"]|[\"$G\"]" "P2: a later span below the toplevel on a **Repo:** line is a prediction"
 plan --tasks d9
 ok "$(mem d9 surfaces)|$(mem d9 source)" '["vault"]|"default"' "P2: /seo:impact, /morning and alias spans give no token"
 plan --tasks d10
@@ -157,45 +175,102 @@ plan --tasks d11
 ok "$(mem d11 surfaces)" "[\"repo:$N\"]" "P2: a directory in no checkout is claimed path-only"
 has "$(j 'd["warns"]')" "d11: $N is in no git checkout: repo:$N covers everything beneath it" "P2: … with the covers-everything WARN"
 plan --tasks d1 --surface d1=ext:cms
-ok "$(mem d1 surfaces)|$(mem d1 source)|$(mem d1 added)" "[\"ext:cms\",\"repo:$G\"]|\"derived\"|[\"ext:cms\"]" "P2: --surface adds a token, listed in added"
+ok "$(mem d1 surfaces)|$(mem d1 source)|$(mem d1 added)|$(mem d1 works)" "[\"ext:cms\"]|\"derived\"|[\"ext:cms\"]|[\"$G\"]" "P2: --surface adds a token, listed in added (its reach names no file, so no own-note claim)"
+plan --tasks d1 --surface "d1=$G/sub/file.txt"
+ok "$(mem d1 surfaces)|$(mem d1 added)" "[\"repo:$G//sub/file.txt\"]|[\"repo:$G//sub/file.txt\"]" "P2: an added path below the toplevel is a file token"
 mkt d13 'surfaces: ["ext:a"]'
 plan --tasks d13 --surface "d13=$H"
-ok "$(mem d13 surfaces)|$(mem d13 source)|$(mem d13 added)" "[\"ext:a\",\"repo:$H\"]|\"declared\"|[\"repo:$H\"]" "P2: a declared member plus --surface keeps both (declared, added set)"
+ok "$(mem d13 surfaces)|$(mem d13 source)|$(mem d13 added)" "[\"ext:a\",\"repo:$H\"]|\"declared\"|[\"repo:$H\"]" "P2: a declared member plus --surface keeps both (declared, added set; a toplevel stays bare)"
 mkt d14
 plan --tasks d14 --surface d14=ext:only
 ok "$(mem d14 surfaces)|$(mem d14 source)|$(mem d14 added)" '["ext:only"]|"derived"|["ext:only"]' "P2: an added-only member reads derived, added set"
 hasnt "$(j 'd["warns"]')" "d14: no surface" "P2: … with no default WARN"
 LAUNCH="- **Repo:** \`$G\`" mkt d15 'surfaces: []'
 plan --tasks d15
-ok "$(mem d15 surfaces)|$(mem d15 source)" "[\"repo:$G\"]|\"derived\"" "P2: an empty surfaces: [] reads as absent"
+ok "$(mem d15 surfaces)|$(mem d15 source)|$(mem d15 works)" "[\"vault:Work/Tasks/d15.md\"]|\"derived\"|[\"$G\"]" "P2: an empty surfaces: [] reads as absent"
+# touches: are predicted file tokens: a relative item keyed to the member's one checkout, an absolute one claimed.
+mkt d18 'launch: cc-g' 'touches:' '  - sub/file.txt' '  - "sub/a/"' "  - $H/x.py"
+plan --tasks d18
+ok "$(mem d18 surfaces)|$(mem d18 works)" "[\"repo:$G//sub/a/\",\"repo:$G//sub/file.txt\",\"repo:$H//x.py\"]|[\"$G\",\"$H\"]" "P2: touches: relative items keyed to its one checkout, an absolute one claimed"
+LAUNCH="\`\`\`
+cc-g --add-dir $H
+\`\`\`" mkt d19 'launch: cc-g' "touches: [sub/file.txt]"
+plan --tasks d19
+ok "$(mem d19 surfaces)|$(mem d19 works)" "[\"vault:Work/Tasks/d19.md\"]|[\"$G\",\"$H\"]" "P2: relative touches: with two checkouts are skipped"
+has "$(j 'd["warns"]')" "d19: its touches: sub/file.txt name paths in a checkout, and it works 2 checkouts ($G, $H): not claimed" "P2: … with one WARN"
 
-# ── P2b: launch folders and paths widen to the checkout ───────────────────────────────────────────────
+# ── P2b: reach names a checkout; a path below its toplevel is a file or folder token (ADR 0067 d4) ─────────
 scen p2b
+co() { j "[c[\"checkouts\"] for c in d[\"chains\"]]"; }   # each chain's checkouts
 mkt w1 'launch: cc-a-seo'; mkt w2 'launch: cc-a-web'; mkt w3 'launch: cc-o'; mkt w4 'launch: cc-w'
 plan --tasks w1
-ok "$(mem w1 surfaces)|$(mem w1 launch)" "[\"repo:$W\"]|{\"alias\":\"cc-a-seo\",\"folder\":\"$W/aw/launchers/seo\"}" "P2b: cc-a-seo claims repo:\$W (never \$W/aw), from its launcher folder"
+ok "$(mem w1 surfaces)|$(mem w1 works)|$(mem w1 launch)" "[\"vault:Work/Tasks/w1.md\"]|[\"$W\"]|{\"alias\":\"cc-a-seo\",\"folder\":\"$W/aw/launchers/seo\"}" "P2b: cc-a-seo's launcher folder is reach: it works \$W (never \$W/aw) and predicts nothing there"
+has "$(j 'd["warns"]')" "w1: names no file in $W: it predicts nothing there" "P2b: … with the predicts-nothing WARN"
 plan --tasks w1,w2
-ok "$rc|$(j "$chains")|$(j '[m["launch"]["alias"] for m in d["chains"][0]["members"].values()]')" '0|[["w1","w2"]]|["cc-a-seo","cc-a-web"]' "P2b: two profiles of one workspace: one chain, two launches, exit 0"
+ok "$rc|$(j "$chains")|$(co)" "0|[[\"w1\"],[\"w2\"]]|[[\"$W\"],[\"$W\"]]" "P2b: two profiles of one workspace: two chains, each with checkouts [\$W], exit 0"
 plan --tasks w1,w3
-ok "$rc|$(j "$chains")" '0|[["w1","w3"]]' "P2b: two workspaces of one checkout: one chain, two launches, exit 0"
+ok "$rc|$(j "$chains")|$(co)" "0|[[\"w1\"],[\"w3\"]]|[[\"$W\"],[\"$W\"]]" "P2b: two workspaces of one checkout: two chains, exit 0"
 plan --tasks w4,w1
-ok "$(j "$chains")" '[["w1","w4"]]' "P2b: cc-w (the checkout itself) and cc-a-seo: one chain"
+ok "$(j "$chains")" '[["w1"],["w4"]]' "P2b: cc-w (the checkout itself) and cc-a-seo: two chains"
 LAUNCH="- **Repo:** \`$W/aw/docs\`" mkt w5
 LAUNCH="- **Repo:** \`$W/_shared/x\`" mkt w6
 plan --tasks w5,w6
-ok "$(mem w5 surfaces)|$(mem w6 surfaces)|$(j "$chains")" "[\"repo:$W\"]|[\"repo:$W\"]|[[\"w5\",\"w6\"]]" "P2b: two ## Launch paths in one checkout both claim it: one chain"
+ok "$(mem w5 surfaces)|$(mem w6 works)|$(j "$chains")" "[\"vault:Work/Tasks/w5.md\"]|[\"$W\"]|[[\"w5\"],[\"w6\"]]" "P2b: a **Repo:** value at depth is reach: two chains"
 mkt w7 'launch: cc-gsub'
 plan --tasks w7
-ok "$(mem w7 surfaces)" "[\"repo:$G\"]" "P2b: a launch folder below the toplevel claims the toplevel"
-mkt w8 'surfaces:' "  - repo:$W/aw"
+ok "$(mem w7 surfaces)|$(mem w7 works)" "[\"vault:Work/Tasks/w7.md\"]|[\"$G\"]" "P2b: a launch folder below the toplevel names that checkout"
+mkt w8 'surfaces:' "  - repo:$W/aw"; mkt w8b "surfaces: [\"repo:$W\"]"
 plan --tasks w8
-ok "$(mem w8 surfaces)|$(mem w8 source)" "[\"repo:$W\"]|\"declared\"" "P2b: a declared repo: inside a checkout widens to its toplevel"
+ok "$(mem w8 surfaces)|$(mem w8 source)|$(mem w8 works)" "[\"repo:$W//aw/\"]|\"declared\"|[\"$W\"]" "P2b: a declared repo: inside a checkout is a folder token at its own depth"
+plan --tasks w8b
+ok "$(mem w8b surfaces)" "[\"repo:$W\"]" "P2b: a declared repo: toplevel stays bare (it covers the whole checkout)"
 mkt w9 'launch: cc-a-seo' 'surfaces: ["vault:Work/X"]'
 plan --tasks w9
-ok "$(mem w9 surfaces)" '["vault:Work/X"]' "P2b: a declaration replaces the launch-folder claim"
+ok "$(mem w9 surfaces)|$(mem w9 works)" '["vault:Work/X"]|[]' "P2b: a declaration replaces the launch-folder reach"
 mkt w10 'launch: cx-a-seo'
 plan --tasks w1,w10
-ok "$(j "$chains")|$(j '[m["launch"]["alias"] for m in d["chains"][0]["members"].values()]')" '[["w1","w10"]]|["cc-a-seo","cx-a-seo"]' "P2b: cc-a-seo and cx-a-seo are different launches of one folder"
+ok "$(j "$chains")|$(j '[m["launch"]["alias"] for c in d["chains"] for m in c["members"].values()]')" '[["w1"],["w10"]]|["cc-a-seo","cx-a-seo"]' "P2b: cc-a-seo and cx-a-seo are different launches of one folder"
+LAUNCH="- **Files:** \`$W/aw/docs/x.md\`" mkt w11 'launch: cc-a-seo'
+LAUNCH="- **Files:** \`$W/aw/docs/x.md\`" mkt w12 'launch: cc-a-web'
+LAUNCH="- **Files:** \`$W/aw/docs/y.md\`" mkt w13 'launch: cc-a-web'
+plan --tasks w11
+ok "$(mem w11 surfaces)|$(mem w11 works)" "[\"repo:$W//aw/docs/x.md\"]|[\"$W\"]" "P2b: a **Files:** span is a file token, keyed to its toplevel"
+plan --tasks w11,w12,w13
+ok "$(j "$chains")|$(co)" "[[\"w11\",\"w12\"],[\"w13\"]]|[[\"$W\"],[\"$W\"]]" "P2b: two members naming one file share a chain (two launches); a sibling file is another chain"
+mkt w20 "surfaces: [\"repo:$W//aw/docs/\"]"
+plan --tasks w11,w13,w20
+ok "$(j "$chains")" '[["w11","w13","w20"]]' "P2b: a folder token covers the files inside it"
+# The ledgers every run appends to are bookkeeping (ADR 0067 d5): derived ones dropped silently, an added one with a
+# WARN, a declared one kept.
+mkdir -p "$W/_shared/state/thread-events" "$G/docs/reviews"
+LAUNCH="- **Ledger:** \`$W/_shared/state/thread-events/x.jsonl\`, \`$G/docs/reviews/r.md\`" mkt w14 'launch: cc-w'
+plan --tasks w14
+ok "$(mem w14 surfaces)|$(mem w14 works)" "[\"vault:Work/Tasks/w14.md\"]|[\"$W\"]" "P2b: a Run record or review-doc span is bookkeeping, never a claim"
+hasnt "$out" "thread-events" "P2b: … named nowhere in the plan"
+plan --tasks w14 --surface "w14=$W/_shared/state/thread-events/y.jsonl"
+ok "$(mem w14 added)" '[]' "P2b: an added ledger path is dropped"
+has "$(j 'd["warns"]')" "w14: --surface $W/_shared/state/thread-events/y.jsonl is a ledger every run appends to" "P2b: … with a WARN"
+mkt w15 "surfaces: [\"repo:$G/docs/reviews/r.md\"]"
+plan --tasks w15
+ok "$(mem w15 surfaces)" "[\"repo:$G//docs/reviews/r.md\"]" "P2b: a declared ledger is kept (a declaration is deliberate)"
+# Keys: a linked worktree's path keys to its main worktree, so it reads the same from any copy; a second clone, and a
+# --separate-git-dir checkout, are their own.
+GW="$TMP/gw"; mkrepo "$GW" https://github.com/demo/gw.git; : > "$GW/a.txt"
+git -C "$GW" add a.txt && git -C "$GW" -c user.name=t -c user.email=t@t.invalid commit -qm a
+git -C "$GW" worktree add -q "$TMP/gw-wt" -b wt 2>/dev/null
+git init -q --separate-git-dir "$TMP/sep.git" "$TMP/sep"; : > "$TMP/sep/f.txt"
+LAUNCH="- **Files:** \`$TMP/gw-wt/a.txt\`" mkt k20
+LAUNCH="- **Files:** \`$G2/x.txt\`" mkt k21
+LAUNCH="- **Files:** \`$TMP/sep/f.txt\`" mkt k22
+LAUNCH="- **Files:** \`$GW/a.txt\`" mkt k23
+plan --tasks k20
+ok "$(mem k20 surfaces)" "[\"repo:$GW//a.txt\"]" "P2b: a file in a linked worktree keys to the main worktree"
+plan --tasks k21
+ok "$(mem k21 surfaces)" "[\"repo:$G2//x.txt\"]" "P2b: a second clone keeps its own key"
+plan --tasks k22
+ok "$(mem k22 surfaces)" "[\"repo:$TMP/sep//f.txt\"]" "P2b: a --separate-git-dir checkout keys to its own toplevel"
+plan --tasks k20,k23
+ok "$(j "$chains")" '[["k20","k23"]]' "P2b: the linked worktree's file and the main worktree's are one place"
 
 # ── P2c: the default ──────────────────────────────────────────────────────────────────────────────────
 scen p2c
@@ -219,26 +294,26 @@ $F
 
 No MCP required." mkt c1 'launch: cc-g'
 plan --tasks c1
-ok "$(mem c1 surfaces)|$(mem c1 source)" "[\"repo:$G\",\"repo:$H\"]|\"derived\"" "P2d: a fenced cc-g --add-dir \$H claims repo:\$H beside the launch folder's checkout"
+ok "$(mem c1 surfaces)|$(mem c1 source)|$(mem c1 works)" "[\"vault:Work/Tasks/c1.md\"]|\"derived\"|[\"$G\",\"$H\"]" "P2d: a fenced cc-g --add-dir \$H is reach: it works \$H beside the launch folder's checkout"
 LAUNCH="$F""bash
 cc-g
 cat $H/README.md
 $F" mkt c2 'launch: cc-g'
 plan --tasks c2
-ok "$(mem c2 surfaces)" "[\"repo:$G\"]" "P2d control: a fenced block with no --add-dir claims nothing extra (a path a command only reads)"
+ok "$(mem c2 works)" "[\"$G\"]" "P2d control: a fenced block with no --add-dir reaches nothing extra (a path a command only reads)"
 LAUNCH="$F""bash
 # cc-g --add-dir $H
 cc-g
 $F
 - **Read first:** \`cc-g --add-dir $H\`" mkt c3 'launch: cc-g'
 plan --tasks c3
-ok "$(mem c3 surfaces)" "[\"repo:$G\"]" "P2d control: a commented-out --add-dir and one in a Read item claim nothing"
+ok "$(mem c3 works)" "[\"$G\"]" "P2d control: a commented-out --add-dir and one in a Read item reach nothing"
 LAUNCH="$F""sh
 cc-g --add-dir \"\$HOME/h\" \\
   --add-dir=$N/a
 $F" mkt c4 'launch: cc-g'
 HOME="$TMP" plan --tasks c4
-ok "$(mem c4 surfaces)" "[\"repo:$G\",\"repo:$H\",\"repo:$N/a\"]" "P2d: a continued line's --add-dir \"\$HOME/…\" and --add-dir=<path> both claim"
+ok "$(mem c4 surfaces)|$(mem c4 works)" "[\"repo:$N/a\"]|[\"$G\",\"$H\"]" "P2d: a continued line's --add-dir \"\$HOME/…\" and --add-dir=<path> both count (reach in a checkout, path-only in none)"
 # A bare home or root would contain every repo token (the whole estate): never claimed. HOME=$TMP, so ~/h is $H.
 LAUNCH="$F""sh
 cd ~ && cc-g --add-dir ~ ~/h
@@ -246,7 +321,7 @@ cc-g --add-dir /
 $F
 - **Repo:** \`~/\`" mkt c6 'launch: cc-g'
 HOME="$TMP" plan --tasks c6
-ok "$rc|$(mem c6 surfaces)|$(mem c6 source)" "0|[\"repo:$G\",\"repo:$H\"]|\"derived\"" "P2d: cd ~, --add-dir ~, --add-dir / and a \`~/\` span claim nothing; ~/h after --add-dir ~ still claims"
+ok "$rc|$(mem c6 works)|$(mem c6 source)" "0|[\"$G\",\"$H\"]|\"derived\"" "P2d: cd ~, --add-dir ~, --add-dir / and a \`~/\` span reach nothing; ~/h after --add-dir ~ still does"
 ok "$(j '[w for w in d["warns"] if "is / or the home directory" in w]' | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" 4 "P2d: … each with a WARN naming it"
 has "$(j 'd["warns"]')" "c6: its ## Launch --add-dir ~ is / or the home directory (or above it): not claimed" "P2d: … the WARN names the flag and the path"
 hasnt "$(j 'd["warns"]')" "repo:$TMP " "P2d: … and no path-only claim on the home directory"
@@ -259,17 +334,18 @@ LAUNCH="$F""sh
 cc-g --add-dir ~/h
 $F" mkt c8 'launch: cc-g'
 HOME="$TMP" plan --tasks c8
-ok "$(mem c8 surfaces)|$(j 'd["warns"]')" "[\"repo:$G\",\"repo:$H\"]|[]" "P2d control: a path below the home directory is claimed, with no WARN"
+ok "$(mem c8 works)" "[\"$G\",\"$H\"]" "P2d control: a path below the home directory is reach"
+hasnt "$(j 'd["warns"]')" "is / or the home directory" "P2d control: … with no home-directory WARN"
 LAUNCH="- **Launch:** \`cd $H && claude\`" mkt c5
 plan --tasks c5
-ok "$(mem c5 surfaces)|$(mem c5 launch)" "[\"repo:$H\"]|{\"alias\":\"claude\",\"folder\":\"$H\"}" "P2d: a leading cd in an inline launch span claims its checkout"
+ok "$(mem c5 surfaces)|$(mem c5 works)|$(mem c5 launch)" "[\"vault:Work/Tasks/c5.md\"]|[\"$H\"]|{\"alias\":\"claude\",\"folder\":\"$H\"}" "P2d: a leading cd in an inline launch span reaches its checkout, which the alias-less row opens from"
 PBODY="Repo: x · Local: \`$H/\` · more" mkp HProj
 PBODY="Local: \`$N/b\`" mkp NProj
 mkp Bare
 PBODY="(not a single repo, so no \`Local:\` marker): scouts in \`$G/sub\`" mkp NoLocal
 mkt k1 'launch: cc-g' 'projects: ["[[HProj]]"]'
 plan --tasks k1
-ok "$(mem k1 surfaces)|$(mem k1 source)" "[\"repo:$G\",\"repo:$H\"]|\"derived\"" "P2d: an undeclared member claims its first project's Local: checkout beside its launch folder"
+ok "$(mem k1 surfaces)|$(mem k1 source)|$(mem k1 works)" "[\"vault:Work/Tasks/k1.md\"]|\"derived\"|[\"$G\",\"$H\"]" "P2d: an undeclared member reaches its first project's Local: checkout beside its launch folder"
 mkt k2 'projects: ["[[HProj]]"]' 'surfaces: ["ext:k"]'
 plan --tasks k2
 ok "$(mem k2 surfaces)" '["ext:k"]' "P2d control: a declared member never claims its project's Local:"
@@ -284,7 +360,7 @@ plan --tasks k5
 ok "$(mem k5 surfaces)" '["vault:Work/Projects/Area/NoLocal","vault:Work/Projects/Area/NoLocal.md","vault:Work/Tasks/k5.md"]' "P2d control: a backticked \`Local:\` that names no path claims nothing (its project's place only, P7)"
 LAUNCH="- **Repo:** \`$H\`" mkt k6
 plan --tasks k6,k1
-ok "$(j "$chains")" '[["k1","k6"]]' "P2d: a member writing \$H shares a chain with one whose project's Local: is \$H"
+ok "$(j "$chains")|$(j '[c["checkouts"] for c in d["chains"]]')" "[[\"k1\"],[\"k6\"]]|[[\"$G\"],[\"$H\"]]" "P2d: a member working \$H and one whose project's Local: is \$H are two chains (reach predicts nothing; a chain's checkouts are its surfaces' and its launch folders', never a Local: reach)"
 
 # ── P3: the overlap grammar ───────────────────────────────────────────────────────────────────────────
 ovl() {
@@ -296,6 +372,33 @@ print(" ".join("y" if m.overlaps(a, b) else "n" for a, b in zip(sys.argv[2::2], 
 PY
 }
 echo "== p3 (the grammar)"
+ptok() {
+  python3 - "$SC" "$@" <<'PY'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("sc", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+out = []
+for t in sys.argv[2:]:
+    try:
+        out.append(m.fmt_token(m.parse_token(t)))
+    except ValueError:
+        out.append("ERR")
+print(" ".join(out))
+PY
+}
+ok "$(ptok repo:/x//a/b.py repo:/x//a/ repo:/x// repo:///x//./a repo:/x//../y repo:/x///abs repo:/x/./y//a/../b repo:/x/)" \
+   "repo:/x//a/b.py repo:/x//a/ repo:/x repo:/x//a ERR ERR repo:/x/y//b repo:/x" "P3: keyed tokens round-trip; an empty rel is bare; a ..-escaping or absolute rel is refused"
+ok "$(ovl repo:/x//a.py repo:/x//a.py  repo:/x//a/ repo:/x//a/b.py  repo:/x//a.py repo:/x//b.py  repo:/x repo:/x//a.py)" "y y n y" "P3: a file meets itself and its folder, never a sibling; a bare toplevel covers every file under it"
+ok "$(ovl repo:/x//a/b repo:/x/a//b  repo:/X//a repo:/x//a  repo:/x//a repo:/x//ab  repo:/x//a/ repo:/x//a)" "n y n y" "P3: keys /x and /x/a are apart with no resolver; keys and paths compare case-folded; a folder mark is information only"
+cko() {
+  python3 - "$SC" "$@" <<'PY'
+import importlib.util, json, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("sc", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+toks, folders, vault = json.loads(sys.argv[2]), json.loads(sys.argv[3]), sys.argv[4]
+print(json.dumps(m.checkouts_of(toks, folders, m.Git().toplevel, vault), separators=(",", ":")))
+PY
+}
 ok "$(ovl vault:Work/A vault:Work/AB  vault:Work vault:Work/A  vault vault:Work/A  vault:work/a vault:Work/A/b)" "n y y y" "P3: vault tokens overlap on a segment-boundary prefix (case-folded); vault overlaps every vault token"
 ok "$(ovl ext:CMS ext:cms  ext:cms ext:cms2  repo:/A/b repo:/a/b/c  repo:/a/b repo:/a/bc)" "y n y n" "P3: ext: by case-folded equality; repo: by containment at a / boundary, case-folded"
 ok "$(ovl vault:Work ext:Work  repo:/x vault:x  ext:x repo:/x  any ext:x  any vault  repo:/x any)" "n n n y y y" "P3: kinds never cross, save any"
@@ -312,17 +415,18 @@ mkt sx4 "surfaces: [\"repo:$GN/deep\"]"
 plan --tasks sx1,sx2
 ok "$(mem sx2 surfaces)|$(j "$chains")" "[\"repo:$GN\"]|[[\"sx1\"],[\"sx2\"]]" "P3: a checkout nested inside another by path is its own repo: two chains"
 plan --tasks sx1,sx4
-ok "$(mem sx4 surfaces)|$(j "$chains")" "[\"repo:$GN\"]|[[\"sx1\"],[\"sx4\"]]" "P3: … a path inside the nested checkout widens to the nested one, never the outer: two chains"
+ok "$(mem sx4 surfaces)|$(j "$chains")" "[\"repo:$GN//deep/\"]|[[\"sx1\"],[\"sx4\"]]" "P3: … a path inside the nested checkout keys to the nested one, never the outer: two chains"
 plan --tasks sx2,sx4
 ok "$(j "$chains")" '[["sx2","sx4"]]' "P3 control: a path inside the nested checkout meets the nested checkout: one chain"
 plan --tasks sx1,sx3
-ok "$(j "$chains")" '[["sx1","sx3"]]' "P3 control: a path inside the outer checkout still widens to it: one chain"
+ok "$(mem sx3 surfaces)|$(j "$chains")" "[\"repo:$G//sub/a/\"]|[[\"sx1\",\"sx3\"]]" "P3 control: a path inside the outer checkout keys to it, and its bare toplevel covers it: one chain"
 mkt q1 'surfaces:' '  - "vault:Work/A, B"'; mkt q2 'surfaces: ["vault:Work/A, B/x"]'
 plan --tasks q1,q2
 ok "$(mem q1 surfaces)|$(mem q2 surfaces)|$(j "$chains")" '["vault:Work/A, B"]|["vault:Work/A, B/x"]|[["q1","q2"]]' "P3: a comma inside a declared token stays one token, and overlaps"
 mkt sd1 "surfaces: [\"repo:$G/sub/a\"]"; mkt sd2 "surfaces: [\"repo:$G/sub/b\"]"
 plan --tasks sd1,sd2
-ok "$(j "$chains")" '[["sd1","sd2"]]' "P3: two declared sibling subdirectories of one checkout widen to it: one chain"
+ok "$(j "$chains")" '[["sd1"],["sd2"]]' "P3: two declared sibling subdirectories of one checkout are two folders: two chains"
+ok "$(cko "[\"repo:$G//sub/a/\", \"repo:$H\", \"vault:Work/X\", \"ext:x\"]" "[\"$W/aw/launchers/seo\", \"$V/Work/X\", \"$N/a\"]" "$V")" "[\"$G\",\"$H\",\"$W\"]"    "P3: checkouts_of: a keyed token's key, a bare toplevel and a launch folder's toplevel; a vault folder and one in no checkout skipped"
 mkt sn1 "surfaces: [\"repo:$N/a\"]"; mkt sn2 "surfaces: [\"repo:$N/b\"]"
 plan --tasks sn1,sn2
 ok "$(mem sn1 surfaces)|$(j "$chains")" "[\"repo:$N/a\"]|[[\"sn1\"],[\"sn2\"]]" "P3: two declared sibling subdirectories of a non-checkout stay path-only: two chains"
@@ -371,6 +475,10 @@ has "$(j 'd["sessionLane"][0]["why"]')" "its ## Launch --add-dir $TS" "P4: … e
 LAUNCH="- **Launch:** \`cd $TS2 && claude\`" mkt r10
 plan --tasks r10
 has "$(j 'd["sessionLane"][0]["why"]')" "its ## Launch cd $TS2 is a checkout of github.com/lachyts/thread-skill" "P4: a leading cd in an inline launch span does the same"
+LAUNCH="- **Repo:** \`$TS/sub\`" mkt r12
+plan --tasks r12
+ok "$(j '[s["slug"] for s in d["sessionLane"]]')" '["r12"]' "P4: a **Repo:** value inside a thread-skill checkout (reach, no token) goes to the session lane"
+has "$(j 'd["sessionLane"][0]["why"]')" "its ## Launch path $TS/sub is a checkout of github.com/lachyts/thread-skill" "P4: … through its ## Launch path"
 LAUNCH="$F""bash
 cc-a-seo --add-dir $H
 $F" mkt r11 'launch: cc-a-seo'
@@ -397,23 +505,26 @@ has "$err" "l5: unknown alias cc-nope" "P5: … naming it"
 plan --tasks l3,l4,l5
 ok "$(printf '%s\n' "$err" | grep -c '^REFUSE:')" 3 "P5: every refusal is reported"
 mkt l6 'launch: cc-o'
-plan --tasks l1,l6
-ok "$rc|$(j '[[m, v["launch"]["alias"]] for c in d["chains"] for m, v in c["members"].items()]')" '0|[["l1","cc-a-web"],["l6","cc-o"]]' "P5: two aliases in one chain exit 0, each row keeping its own launch"
+plan --tasks l1,l6 --dep l6=l1
+ok "$rc|$(j "$chains")|$(j '[[m, v["launch"]["alias"]] for c in d["chains"] for m, v in c["members"].items()]')" '0|[["l1","l6"]]|[["l1","cc-a-web"],["l6","cc-o"]]' "P5: two aliases in one chain exit 0, each row keeping its own launch"
 mkp LProj 'launch: cc-g'
 mkt l7 'projects: ["[[LProj]]"]'
 plan --tasks l7
-ok "$(mem l7 launch)|$(mem l7 surfaces)" "{\"alias\":\"cc-g\",\"folder\":\"$G\"}|[\"repo:$G\"]" "P5: the project's launch: applies when the task has none"
+ok "$(mem l7 launch)|$(mem l7 works)" "{\"alias\":\"cc-g\",\"folder\":\"$G\"}|[\"$G\"]" "P5: the project's launch: applies when the task has none"
 mkt l8 "surfaces: [\"repo:$G\"]"; mkt l9 'surfaces: ["ext:x"]'; mkt l10 "surfaces: [\"repo:$G\", \"repo:$H\"]"
 plan --tasks l8,l9
 ok "$(mem l8 launch)" "{\"alias\":\"claude\",\"folder\":\"$G\"}" "P5: an alias-less row opens claude from its single repo"
 ok "$(mem l9 launch)" "{\"alias\":\"claude\",\"folder\":\"$V\"}" "P5: … or from the vault root with zero repos"
 plan --tasks l10
 ok "$rc|$out" "3|" "P5: an alias-less row writing two checkouts exits 3 (its Leg could finish only one)"
-has "$err" "REFUSE: l10: it writes the checkouts $G, $H and has no launch alias" "P5: … naming them"
+has "$err" "REFUSE: l10: it writes the checkouts $G, $H and has no launch alias" "P5: … naming them (its works)"
+mkt l12 "surfaces: [\"repo:$G//sub/file.txt\", \"repo:$H//x.py\"]"
+plan --tasks l12
+ok "$rc|$out" "3|" "P5: … and so do file tokens in two checkouts (works reads their checkouts)"
 PBODY="Local: \`$H\`" mkp HLocal
 mkt l11 'projects: ["[[HLocal]]"]'
 plan --tasks l11
-ok "$(mem l11 launch)|$(mem l11 surfaces)" "{\"alias\":\"claude\",\"folder\":\"$H\"}|[\"repo:$H\"]" "P5: an alias-less row whose project's Local: is its one repo opens claude from it"
+ok "$(mem l11 launch)|$(mem l11 works)|$(mem l11 surfaces)" "{\"alias\":\"claude\",\"folder\":\"$H\"}|[\"$H\"]|[\"vault:Work/Tasks/l11.md\"]" "P5: an alias-less row whose project's Local: is its one repo opens claude from it"
 LFX="$TMP/none.json" plan --tasks l2
 ok "$rc|$out" "3|" "P5: a missing launch-folders file while an alias needs it exits 3"
 has "$err" "l2: launch alias cc-g needs $TMP/none.json, which is missing or unreadable" "P5: … naming the path"
@@ -497,14 +608,17 @@ chk7 0 --tasks b1,b2
 ok "$cout|$crc" "none|0" "P7: … and the serial check lets it schedule beside the live Contacts admin chain"
 LFX="$LFX7" plan --tasks c1
 chk7 0 --tasks c1
-ok "$cout|$crc" "refuse ca-rollout-2026-10-31|3" "P7: a second chain in the Contacts admin project still refuses"
+ok "$cout|$crc" "none|0" "P7: a second chain in the Contacts admin project is scheduled (ADR 0067 d4)"
+has "$cerr" "WARN: [[ca-rollout-2026-10-31]] (Contacts admin; never started) also predicts vault:Work/Projects/Life (area)/Contacts admin" "P7: … with the takes-turns WARN"
+has "$cerr" "they take turns on it, the first to begin going first (ADR 0067 d4)" "P7: … saying they take turns"
 # 5. The fallbacks: no project and no path, a vault-root path with no project, a project with no note.
 mkt n1
 LFX="$LFX7" plan --tasks n1
 ok "$(mem n1 surfaces)|$(mem n1 source)" '["vault"]|"default"' "P7: a member naming no project and no path claims the whole vault (default)"
 has "$(j 'd["warns"]')" "n1: no surface declared or derived: it claims only the vault; declare \`surfaces:\` for any repo or external system it writes" "P7: … with the default WARN, verbatim"
 chk7 0 --tasks n1
-ok "$cout|$crc" "refuse ca-rollout-2026-10-31|3" "P7: … and its check refuses beside chain A"
+ok "$cout|$crc" "none|0" "P7: … and its check schedules it beside chain A"
+has "$cerr" "WARN: [[ca-rollout-2026-10-31]] (Contacts admin; never started) also predicts" "P7: … taking turns with it"
 LAUNCH="- **Repo:** \`$V\`" mkt n2
 LFX="$LFX7" plan --tasks n2
 ok "$(mem n2 surfaces)|$(mem n2 source)" '["vault"]|"derived"' "P7: a vault-root path with no project claims the whole vault (derived)"
@@ -564,12 +678,91 @@ LAUNCH="- **Repos:** \`$TS\`, \`$G\`" mkt t1
 mkt t2 'launch: cc-v' 'projects: ["[[TSProj7]]"]'
 LFX="$LFX7" plan --tasks a1,t1,t2
 ok "$rc|$(j "$chains")|$(j '[s["slug"] for s in d["sessionLane"]]')" '0|[["a1"]]|["t1","t2"]' "P7: two code rows of thread-skill go to the session lane, unrefused"
-# 11. The stated limit: a legacy whole-vault chain still refuses every vault chain until it is done or dropped.
+# 11. A legacy whole-vault chain overlaps every vault chain: a WARN, never a refusal (ADR 0067 d4).
 { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\nsurfaces: ["vault"]\n'
   printf -- '---\n\n## Notes\n\nA legacy chain.\n'; } > "$T/legacy-rollout.md"
 LFX="$LFX7" plan --tasks b1
 chk7 0 --tasks b1
-ok "$cout|$crc" "refuse legacy-rollout|3" "P7: a legacy note claiming the whole vault still refuses (the stated limit)"
+ok "$cout|$crc" "none|0" "P7: a legacy note claiming the whole vault no longer refuses: it takes turns"
+has "$cerr" "WARN: [[legacy-rollout]] (no project; never started) also predicts vault, which this chain predicts as" "P7: … with the takes-turns WARN"
+
+# ── P8: the 2026-11-02 replan fixture (ADR 0067 d4) ───────────────────────────────────────────────────
+# A synthetic estate in the 2026-11-02 shape, re-planned through docs/spikes/2026-11-02-replan.py (read-only), with
+# HOME holding the default --vault and launch-folders file: a workspaces monorepo with three launchers whose tasks name
+# it only as where they work (five as `**Repo:** <toplevel>`, one at depth); an .agents-like checkout reached by
+# --add-dir whose tasks name distinct files (a **Files:** span, `touches:`, declared surfaces), and one `**Repo:**
+# ~/.agents/skills/` (reach at depth); a Projects monorepo reached by `Local:`; two chains naming one file, two naming
+# sibling files of one folder, and one declaring the bare .agents toplevel.
+echo "== p8"
+PH="$TMP/p8home"; PV="$PH/repos/obsidian"; PT="$PV/Work/Tasks"; mkdir -p "$PT" "$PV/Work/Projects"
+PW="$PH/repos/workspaces"; mkrepo "$PW" https://github.com/demo/workspaces.git
+for l in aw/launchers/seo aw/launchers/web ow/launchers/full; do mkdir -p "$PW/$l"; done
+mkdir -p "$PW/_shared/state"
+cat > "$PW/_shared/state/launch-folders.json" <<EOF
+{"schema_version": 1,
+ "by_alias": {"cc-a-seo": "$PW/aw/launchers/seo", "cc-a-web": "$PW/aw/launchers/web", "cc-o": "$PW/ow/launchers/full"},
+ "plain_aliases": {}}
+EOF
+PA="$PH/.agents"; mkrepo "$PA" https://github.com/demo/agents.git; mkdir -p "$PA/skills/x" "$PA/skills/w" "$PA/skills/z"
+PP="$PH/Projects"; mkrepo "$PP" https://github.com/demo/projects.git; mkdir -p "$PP/narc"
+# p8t <slug> <project> [frontmatter lines...] — a task note in the P8 vault; $LAUNCH (when set) is its ## Launch body
+p8t() {
+  local s="$1" pr="$2"; shift 2
+  { printf -- '---\ntags: [task]\nstatus: open\nprojects: ["[[%s]]"]\n' "$pr"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n## Notes\n\nbody\n'
+    [ -z "${LAUNCH:-}" ] || printf '\n## Launch\n\n%s\n' "$LAUNCH"; } > "$PT/$s.md"
+}
+for p in SEO Web Ops AgA SameA AgB AgC AgD SibA SibB Decl; do printf -- '---\ntags: [project]\n---\n' > "$PV/Work/Projects/$p.md"; done
+for p in ProjA ProjB; do printf -- '---\ntags: [project]\n---\n\nLocal: `~/Projects`\n' > "$PV/Work/Projects/$p.md"; done
+F='```'
+LAUNCH='- **Repo:** `~/repos/workspaces`' p8t seo1 SEO 'launch: cc-a-seo'
+LAUNCH='- **Repo:** `~/repos/workspaces/aw/`' p8t seo2 SEO 'launch: cc-a-seo'
+LAUNCH='- **Repo:** `~/repos/workspaces`' p8t web1 Web 'launch: cc-a-web'
+for t in ops1 ops2 ops3; do LAUNCH='- **Repo:** `~/repos/workspaces`' p8t $t Ops 'launch: cc-o'; done
+LAUNCH="$F""bash
+cc-o --add-dir ~/.agents
+$F
+- **Files:** \`~/.agents/skills/x/SKILL.md\`" p8t ag1 AgA 'launch: cc-o'
+LAUNCH='- **Files:** `~/.agents/skills/x/SKILL.md`' p8t sf1 SameA 'launch: cc-o'
+LAUNCH='- **Repo:** `~/.agents`' p8t ag2 AgB 'touches: [skills/y/run.py]'
+p8t ag3 AgC 'surfaces:' '  - "repo:~/.agents/skills/z/"'
+LAUNCH='- **Repo:** `~/.agents/skills/`' p8t ag4 AgD
+LAUNCH='- **Files:** `~/.agents/skills/w/a.md`' p8t sib1 SibA 'launch: cc-o'
+LAUNCH='- **Files:** `~/.agents/skills/w/b.md`' p8t sib2 SibB 'launch: cc-o'
+p8t dclr Decl 'surfaces: ["repo:~/.agents"]'
+p8t pa1 ProjA; p8t pb1 ProjB
+cat > "$TMP/p8-args.txt" <<'EOF'
+2 | SEO | --tasks seo1,seo2
+3 | Web | --tasks web1
+4 | Ops | --tasks ops1,ops2,ops3
+5 | AgA | --tasks ag1
+6 | SameA | --tasks sf1
+7 | AgB | --tasks ag2
+8 | AgC | --tasks ag3
+9 | AgD | --tasks ag4
+10 | SibA | --tasks sib1
+11 | SibB | --tasks sib2
+12 | Decl | --tasks dclr
+13 | ProjA | --tasks pa1
+14 | ProjB | --tasks pb1
+EOF
+rp=$(cd "$root" && HOME="$PH" python3 docs/spikes/2026-11-02-replan.py "$TMP/p8-args.txt" 2>&1); rprc=$?
+ov=$(printf '%s\n' "$rp" | sed -n '/^OVERLAPS$/,/^$/p' | sed '1d;/^$/d' | awk '{print $1, $2, $3, $4}')
+ok "$rprc|$(printf '%s\n' "$rp" | grep -c ' ERR ')" "0|0" "P8: the replan runs every batch, none in error"
+ok "$ov" "AgA#0 <-> SameA#0 file
+AgA#0 <-> Decl#0 checkout
+SameA#0 <-> Decl#0 checkout
+AgB#0 <-> Decl#0 checkout
+AgC#0 <-> Decl#0 checkout
+SibA#0 <-> Decl#0 checkout
+SibB#0 <-> Decl#0 checkout" "P8: only the same-file pair and the declared-bare pairs clash"
+ok "$(printf '%s\n' "$rp" | tail -1)" "chains 16 with any clash 7 (checkout-wide 1)" "P8: … and only the declared-bare chain is checkout-wide"
+hasnt "$ov" "SEO" "P8: no workspaces pair (five **Repo:** toplevels and one at depth name where they work)"
+hasnt "$ov" "Ops" "P8: … nor between two members of one launcher"
+hasnt "$ov" "Proj" "P8: no Projects pair (a Local: reach predicts nothing)"
+hasnt "$ov" "AgD" "P8: a **Repo:** ~/.agents/skills/ value predicts nothing, not even beside the declared toplevel"
+has "$rp" "AgB#0 ['repo:$PA//skills/y/run.py']" "P8: a relative touches: item keyed to the member's one checkout"
 
 # ── P6: exit 2────────────────────────────────────────────────────────────────────────────────────────
 scen p6
