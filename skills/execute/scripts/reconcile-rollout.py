@@ -316,13 +316,16 @@ Subcommands:
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
               pause_requested, pausedFor, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline,
-              trickle, ladder, gitEnvHold, laneLog, mainRed, holdUntil, tasks}; `trickle` (p28-6) is `next`'s trickle block read the same
+              trickle, lastStarts, ladder, gitEnvHold, laneLog, mainRed, holdUntil, tasks}; `trickle` (p28-6) is `next`'s trickle block read the same
               way, silently (no WARN), plus `here` and `lease`: {away, file, why, limit, awayCap, until, morning,
               elsewhere, lapsed, here, running, lease}, `here` this rollout's own count as another lead's count
               elsewhere reads it (0 while its own lease reads lapsed), `running` elsewhere plus here and `lease` its
               own lead's lease, {state: fresh|lapsed|room-stop|none|unreadable, writtenAt, lapsesAt} (p28-4; Trickle
-              and Away, below); it writes no lease; `pausedFor` is the rollout's `paused_for` (`sign-off` under
-              await-sign-off's pause, ADR 0034), else null; `ceiling` is `parallel_ceiling`, or for a note without
+              and Away, below); it writes no lease; `lastStarts` (p28-7; The last starts and the night record,
+              below) is `next`'s {morning, kinds}, read as `next` reads it (M from the same Away state read, each
+              kind's history from the Run record's folded call journals, _past_runs, read lazily on the first row
+              checked) and silently: it writes nothing, so it records no night line; `pausedFor` is the rollout's
+              `paused_for` (`sign-off` under await-sign-off's pause, ADR 0034), else null; `ceiling` is `parallel_ceiling`, or for a note without
               it the operator's rollout settings (rollout-settings.py for the Project root: rollouts.toml, then
               built-in 4),
               and null with `ceilingError` the reason when it is invalid or cannot be resolved (`next`
@@ -337,7 +340,12 @@ Subcommands:
               rungs [], source ladder.py's default_path() and error its reason, and status still exits 0.
               Each task carries `rung` (its `rung:` stamp, or null) and `rungDrift`: the stamp when a
               readable ladder lacks it and the task is unlanded (queued, running, awaiting-integration,
-              integrating, set-aside), else "". A set-aside task whose note holds a `## Needs you`
+              integrating, set-aside), else "". Each task also carries `lastStart` (p28-7): on a queued row
+              whose dependencies are met (no `waitingOn`), the `last start: …` reason `next` would hold it on once
+              a Slot frees (_LastStarts.hold: its kind's usual length, or the fallback, past M), else null; null on
+              every row while the rollout is `paused` or carries `pause_requested`, while `mainRed` stands or a
+              `gitEnvHold` of scope `rollout` stands (those hold every row themselves in `next`), and while the
+              last starts do not apply. A set-aside task whose note holds a `## Needs you`
               question also carries `needsHuman` (p16-3, normalised); no other task carries the key. A task
               set aside at Integration whose latest run opens a named marker (p27-4, integration_block) also
               carries `integrationBlock`: `conflict` (an Integration conflict, `integration: conflict
@@ -1136,9 +1144,10 @@ way, every in_progress row of its own, live or stalled, so a new start fits only
 own in_progress + this call's starts < the cap; a restart waits on the ceiling alone (no state leaves two respawned
 leads each waiting on the other's stalled notes). `status` and every progress line count notes only. Nothing here
 writes the file; mark-started reads it too, for slot-taken's `cap` (Run record, above), `status` for its `trickle`
-block, and every progress line (_progress_for, `next`, `status`) for the ETA's width (p28-6, _eta_width: the chunks
-still ahead at min(ceiling, max(1, cap - the count elsewhere)), the Heat hold and the places kept aside); all of them
-read it silently, and only `next` prints the WARN.
+block and its last starts (p28-7: M for `lastStarts` and each queued row's `lastStart`, read as `next` reads it, never
+through `next`; The last starts, below), and every progress line (_progress_for, `next`, `status`) for the ETA's
+width (p28-6, _eta_width: the chunks still ahead at min(ceiling, max(1, cap - the count elsewhere)), the Heat hold
+and the places kept aside); all of them read it silently, and only `next` prints the WARN.
 
 Trickle claims (p28-3; the spec is skills/execute/away.md § The Trickle, *Trickle claims*): two leads' `next` calls
 would otherwise both see the room one place leaves between one lead's `next` and its § 4 stamp. So off --dry-run, once
@@ -1201,7 +1210,10 @@ greedy loop goes on; restarts, hand-backs and seeded revises are never held; the
 hold replaces it. Off --dry-run, _night_record writes the night record into the rollout's own Run record (NIGHT_KINDS),
 each line once, read from the record's Slot intervals (_record_night), never from notes. A Slot reconcile closed
 ends at its slot-freed's ts, its call's end (p29-12), so a call that ended before the Morning never reads as having
-run past it because the lead reconciled it after.
+run past it because the lead reconciled it after. `status` (p28-7) reads M and the history the same way
+(_morning_toward, _past_runs, through the same _LastStarts), silently and read-only: its `lastStarts` and each
+unblocked queued row's `lastStart` are what `next` would read, and it writes no night line, no record line and no
+note.
 
 Hold until (p30-3; _hold_until, read by `next`, `status` and `carry`; the grammar is skills/_shared/vault-grammar.md §
 Hold until): a hold is frontmatter, never a sentence. A top-level `hold_until: {pr: <owner/repo>#<N>, merged: true}`
@@ -6591,9 +6603,9 @@ def cmd_status(args) -> int:
     # The last starts (p28-7; execute away.md § The last starts), read as `next` reads them and silently: M from the
     # Away state, and the kind's past runs (the Run record's folded call journals), read lazily on the first row
     # checked. A queued row whose dependencies are met carries `lastStart`, the `last start:` reason `next` would hold
-    # it on once a Slot frees (a full ceiling or Away cap still names its own hold in `next`), unless the rollout's own
-    # holds replace every row's (a pause, a pause request, main red, a whole-rollout git-env hold): then null, as on
-    # every other row.
+    # it on once a Slot frees (a full ceiling or Away cap, or the Heat hold's slotLimit of 0, still names its own hold
+    # first in `next`), unless the rollout's own holds replace every row's (a pause, a pause request, main red, a
+    # whole-rollout git-env hold): then null, as on every other row.
     last = _LastStarts(_morning_toward(away, now), away["morning"], now,
                        lambda: _past_runs(_project(rollout_note), rollout_path, rollout_note, index, now))
     git_env = _git_env_hold(rollout_note)

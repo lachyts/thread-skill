@@ -46,7 +46,9 @@ HOLD_MARKER_SPAN of its start takes that label from its start, unless another re
 labelling, below: the last marker's reason holds until a change of reason, a stop or full Slots), so a queue-tail
 before the stop never back-fills as the Trickle. A run the Trickle held with no Slot ever open has no first
 slot-taken, so the default window starts at its first line: no running time, its held spans excluded as hold-trickle,
-and it reads trickle-bound (all of its time held), with Throughput null.
+and it reads trickle-bound (all of its time held), with Throughput null. The same path makes a run the last starts
+alone held with no Slot ever open (p28-7) read last-start-bound: its held spans excluded as hold-last-start, all of its
+time held, Throughput null (Binding, below).
 - A Slot's active intervals. Its calls are every run-bound (not an integrate call) for its task inside it (a
   restart after a dead lead re-takes the open Slot, keeping its first start, and binds a new call); a call's
   journal is its latest terminal call-journal line, else its latest line. The Slot is active from its start to

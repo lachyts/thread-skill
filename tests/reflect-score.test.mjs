@@ -413,6 +413,18 @@ test('last-start-bound controls: a marker labels 40 min at most; the Trickle out
     assert.ok(!['trickle-bound', 'last-start-bound'].includes(out.binding.constraint), out.binding.constraint)
     assert.ok(!has(out.flags, /^last-start-bound/))
   }
+  {
+    // a run the last starts alone held with no Slot ever open: the trickle-bound path, read as last-start-bound (the
+    // header's Running time)
+    const home = tmpHome(t)
+    emitAll(home, 'demo', ticks(0, 60, 'hold-last-start', 4, 4))
+    const out = scored(home, settings(home, '01:00'))
+    assert.equal(out.runningTime.hours, 0)
+    assert.deepEqual(out.runningTime.excludedHours, { 'hold-last-start': 1 })
+    assert.equal(out.throughput, null)
+    assert.equal(out.binding.constraint, 'last-start-bound')
+    assert.ok(!has(out.flags, /^trickle-bound/))
+  }
 })
 
 // ---- 1d. the nights (p28-7) -------------------------------------------------------------------------------------

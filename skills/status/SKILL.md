@@ -152,9 +152,9 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   would hold its start on (its kind's usual length, or the two-hour fallback with no history, would run it past the
   Morning), else null. It is null on every row while the rollout is paused, a pause is requested, `mainRed` stands
   or a `gitEnvHold` of scope `rollout` stands (those hold every row themselves), and while the last starts do not
-  apply. It reads the row once a Slot frees: a row whose ceiling or Away cap is also full still shows it, though
-  `next` names `ceiling:` or `away cap:` first. An older engine's output has no `lastStart` or `lastStarts` key: the
-  row then reads as a plain queued row.
+  apply. It reads the row once a Slot frees: a row whose ceiling or Away cap is also full, or one the Heat hold
+  holds (a hot Mac's `slotLimit` is 0), still shows it, though `next` names `ceiling:`, `away cap:` or `heat:`
+  first. An older engine's output has no `lastStart` or `lastStarts` key: the row then reads as a plain queued row.
   A task set aside at Integration whose latest run opens a named marker also carries `integrationBlock`:
   `conflict` (an **Integration conflict**, `integration: conflict unresolved in …`, its resolution brief beneath)
   or `red` (a verifier red at Integration, `integration: verifier red: …`); the key is absent otherwise. An
@@ -465,7 +465,7 @@ holds <held> (<why>)`. Exit 2: `Hold: not read: <its line>`.
 | `integrating` | **Integrating** | the lane: its PR and live state, the time since `integrating:`, and the outcome of `lastIntegration`, or `RACE re-verify in flight` or `RACE revert in flight (PR #R)` (§ 3); with `originWait`: `waiting on the origin lane (<origin>) since <since>` in place of the time in the lane (another project's Integration holds the origin; ADR 0064) |
 | `awaiting-integration` | **Awaiting Integration** | its PR and `ready:` (`inputs.readyAt`) |
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting; `auto-retry <autoRetriesUsed>` when above 0 (the verdict sets the counters before its first refusal, so `inputs` carries them for a running note too) |
-| `queued` | **Queued** | `held until <pr> merges` while the rollout's `holdUntil` holds (§ 3), else `waitingOn`, else `held until <pr> merges` for its own held `holdUntil`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else `lastStart` (`<reason>`: held toward the Morning; it starts once the Morning passes or a shorter kind fits) when it is set, else "next free slot" |
+| `queued` | **Queued** | `held until <pr> merges` while the rollout's `holdUntil` holds (§ 3), else `waitingOn`, else `held until <pr> merges` for its own held `holdUntil`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else `lastStart` (`<reason>`: held toward the Morning; it starts once the Morning passes; a shorter row below may start meanwhile) when it is set, else "next free slot" |
 | `set-aside` | **Set aside** | where it re-enters (below), the first line of `blockerSummary`, its automatic retry's count and cool-down (**Automatic retry first**, below), and `answered: …` for an answered one (**Needs you**, below); a task set aside at Integration names its `integrationBlock`: `Integration conflict → …` in place of `at Integration → …` for `conflict`, `at Integration, verifier red → …` for `red` |
 
 **Rungs.** Every task line also shows `rung <name>` when its note has one (§ 2's `rung`).
