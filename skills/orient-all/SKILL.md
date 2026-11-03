@@ -291,8 +291,9 @@ ticked label opens its own option alone; two projects of one name are each linke
       appeared after the list, or another of the Stage's holds). An error becomes a manual prompt.
    6. With `create_thread` but no `list_sessions`, only the items for notes this pass wrote are started; every other
       item becomes a paste-ready prompt.
-5. **Off the Stage**: one fenced block per item, in `items[]` order: `cd <cwd>` (for a Leg, `<alias> from <folder>`),
-   then the prompt, labelled `paste-ready prompt (no session started)`.
+5. **Off the Stage**: one fenced block per item, in `items[]` order: `cd <cwd>` (for a Leg, its `launch`: `<alias>
+   from <folder>` in place; for a chain in Chain copies, the copy's paste line, never the alias itself, whose `cd`
+   opens the primary), then the prompt, labelled `paste-ready prompt (no session started)`.
 6. A `manual: true` item (a `cx-*` row 1, `skills/execute/legs.md` § Hand over, or no Project root) is always a
    labelled manual hand-over.
 

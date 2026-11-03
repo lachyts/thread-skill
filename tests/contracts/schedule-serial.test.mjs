@@ -17,7 +17,8 @@
 //       S4 stores it only for exactly one `checkouts` entry that is a git toplevel, by its `git -C <entry> rev-parse
 //       --show-toplevel` (ADR 0067 d4: a chain's checkouts, never one `repo:` token, since a claim is a file), S5
 //       stamps it and checks the note with `verify-timeout`, and Scope and the Don'ts' no-git line name S4's probe
-//       (Scope S5's check too); and the Don'ts let S6's last write remove
+//       (Scope S5's check too); S5 makes each note's Chain copies (ADR 0067 d2) with `leg.py copies`, a failure keeping
+//       `incomplete: true`, and Scope and the no-git line name its git calls; and the Don'ts let S6's last write remove
 //       `incomplete: true` beside step 7's, a stamp left on a serial note ending only by `status: dropped`;
 //   t4  § 0's first check span is the parallel one, with `--shape parallel` and `--regenerate`, and a supersede
 //       never crosses shapes; § 0, S3 and ADR 0040 say a clone root never overlaps an in-place chain (ADR 0042);
@@ -156,12 +157,17 @@ function check(files) {
   const s5 = C(slice(serialPath, /^\*\*S5\. /, /^\*\*S6\. /))
   need('t3', 'S5', s5, ['- The `# completion_verifier:` line — when S4 stored', '- The `# env_bootstrap:` line',
     '`python3 <snapshot>/skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout <the note>`',
-    'Any non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`'])
+    'Any non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`',
+    // ADR 0067 d2: the Chain copies, made at S5 after the adopt; a failure keeps the note incomplete.
+    '`python3 <snapshot>/skills/execute/scripts/leg.py copies --rollout <the note>`',
+    'Its non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`'])
   const scope = C(section(schedule, /^## Scope$/) ?? '')
   need('t3', `${SCHEDULE} § Scope`, scope, ["a read-only `git -C <entry> rev-parse --show-toplevel` and a read of that checkout's `CLAUDE.md`",
-    'its S5 runs `reconcile-rollout.py verify-timeout` on a note it stamped `completion_verifier:`'])
+    'its S5 runs `reconcile-rollout.py verify-timeout` on a note it stamped `completion_verifier:`',
+    "S5's `leg.py copies` writes each chain's Chain copies (ADR 0067 d2): per checkout the chain writes, one `git worktree add`"])
   const noGit = schedule.split('\n').find((l) => l.startsWith("- Don't run `git` operations")) ?? ''
-  need('t3', `${SCHEDULE} Don't on git`, C(noGit), ["§ Serial path S4's `git -C <entry> rev-parse --show-toplevel`, read-only (listed under Scope)"])
+  need('t3', `${SCHEDULE} Don't on git`, C(noGit), ["§ Serial path S4's `git -C <entry> rev-parse --show-toplevel`, read-only (listed under Scope)",
+    "§ Serial path S5's `leg.py copies`"])
   const dont = schedule.split('\n').find((l) => l.startsWith('- Never remove `incomplete: true`')) ?? ''
   need('t3', `${SCHEDULE} Don't on incomplete: true`, C(dont), ["except as step 7's (or § Serial path S6's) last write",
     'and one on a serial note, which a supersede never takes, ends only by `status: dropped`'])
@@ -423,6 +429,12 @@ test('control: an S4 that stamps any directory, not a git toplevel, fails t3', (
 
 test('control: a Don\'ts no-git line without S4\'s probe fails t3', () => {
   only(swap(SCHEDULE, " § Serial path S4's `git -C <entry> rev-parse --show-toplevel`, read-only (listed under Scope),", ''), ['t3'], 'no-git S4')
+})
+
+test('control: an S5 that never makes the Chain copies fails t3', () => {
+  const s5 = real[SCHEDULE].split('\n').find((l) => l.startsWith("Then each note's Chain copies (ADR 0067 d2):")) ?? ''
+  assert.ok(s5, 'control setup: S5\'s Chain copies sentence')
+  only(swap(SCHEDULE, `${s5}\n`, ''), ['t3'], 'S5 copies')
 })
 
 test('control: an S5 that never checks the stamped note fails t3', () => {

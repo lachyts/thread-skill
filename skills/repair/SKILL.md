@@ -814,8 +814,8 @@ The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever
 
   After a hand-back or a sign-off the chain is no longer stuck, so it reclaims its whole claim for new schedules, and
   the next Leg's `begin` re-checks what it writes (ADR 0060). A place another chain took while this one was stuck,
-  one a chain that began first still holds, or (until Chain copies) a checkout another chain's open Leg works makes
-  that Leg wait its turn (ADR 0067 d4): (e)'s `surface held by` blocker.
+  one a chain that began first still holds, or (when either chain works it in place, with no `chain_copies:`) a
+  checkout another chain's open Leg works makes that Leg wait its turn (ADR 0067 d4): (e)'s `surface held by` blocker.
 - **Defer, dependency-aware** (§ 5's steps 1 and 3): read the row's `dependants` from `leg.py status`: its
   depends-on and blocked-by closure, transitive, through `merged_into:` tombstones, read the way next holds a
   dependency.
@@ -857,11 +857,13 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
    - `surface held by [[B]] (<token>)` → never restart (ADR 0060): the chain waits its turn. Another chain holds a
      place the next Leg writes, and its `begin` would only stand at exit 3. Its five causes (ADR 0067 d4) name the
      remedy: [[B]] comes first (began first, or wins the slug order) and holds an unlanded row on that place; or,
-     until Chain copies, [[B]] comes first and still has unlanded rows in a checkout this Leg works, even with no
-     file shared, the commonest, where a never-begun [[B]] that nobody starts blocks this chain for good (run [[B]]
-     from its first row's launch, or, on Lachy's word, stamp it `status: dropped`); or [[B]]'s open Leg writes that
-     place or (until Chain copies) works that checkout; or [[B]] was scheduled on a place this one released while it
-     was stuck; or [[B]]'s chain is unreadable and holds its whole claim (fix its note). Report it, with
+     when either chain works that checkout in place (no `chain_copies:`), [[B]] comes first and still has unlanded
+     rows in a checkout this Leg works, even with no file shared, the commonest, where a never-begun [[B]] that nobody
+     starts blocks this chain for good (run [[B]] from its first row's launch, or, on Lachy's word, stamp it
+     `status: dropped`); or [[B]]'s open Leg writes that place or (when either chain works it in place) works that
+     checkout; or
+     [[B]] was scheduled on a place this one released while it was stuck; or [[B]]'s chain is unreadable and holds its
+     whole claim (fix its note). Report it, with
      `/thread:status [[B]]`, and stop. Re-run this repair, or `/thread:execute`, once [[B]] lands its rows there, or
      its Leg closes. `surface re-check failed: <line>` → report
      the line, and stop.
