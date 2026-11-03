@@ -343,6 +343,50 @@ test('S4e: a detached HEAD: pushed null', async (t) => {
   assert.equal(r.json.action, 'human')
 })
 
+test('S4f: two pushed secrets are one question naming both tokens; one answer repeating both exits 0 (and its control)', async (t) => {
+  const s = box(t)
+  s.leak('cfg.py', TOKEN)
+  s.leak('more.py', TOKEN2)
+  s.git('push', '-q', 'origin', 'feat')
+  const r = await scan(s)
+  assert.equal(r.status, 1)
+  assert.equal(r.json.action, 'human')
+  assert.deepEqual(r.json.secrets.map((x) => [x.file, x.pushed]), [['cfg.py', true], ['more.py', true]])
+  const [a, b] = r.json.secrets.map((x) => x.accept)
+  const both = `\`security-accept ${a}\` and \`security-accept ${b}\``
+  assert.ok(r.json.why.startsWith('The scan found 2 things only you can settle: (1) A secret (github-pat) in cfg.py, commit '), r.json.why)
+  assert.ok(r.json.why.includes('; (2) A secret (github-pat) in more.py, commit '), r.json.why)
+  assert.ok(r.json.why.endsWith(`. Answer each as it asks, or keep all 2 (answer ${both})?`), r.json.why)
+  for (const acc of [a, b]) assert.ok(r.json.why.includes(`is already on origin: once it is rotated, keep it in the history (answer \`security-accept ${acc}\`), or have /thread:repair recut the branch`), r.json.why)
+  const note = s.note([entry(r.json.why, `rotated both; keep them (security-accept ${a} and security-accept ${b})`)])
+  const r2 = await scan(s, { note })
+  assert.equal(r2.status, 0, r2.stdout)
+  assert.deepEqual(r2.json.accepted.map((x) => x.token).sort(), [a, b].sort())
+  assert.deepEqual(r2.json.secrets, [])
+  // One answer keeping only the first leaves the second's own question, alone.
+  const r3 = await scan(s, { note: s.note([entry(r.json.why, `keep the first (security-accept ${a})`)]) })
+  assert.equal(r3.json.action, 'human')
+  assert.ok(r3.json.why.startsWith('A secret (github-pat) in more.py') && r3.json.why.includes(b) && !r3.json.why.includes(a), r3.json.why)
+  // Control: a why that keeps only its first item names one token, so the same answer clears only that one.
+  const m = await scan(s, { script: mutant(s, 'if len(items) == 1:', 'if items:') })
+  const m2 = await scan(s, { note: s.note([entry(m.json.why, `rotated both; keep them (security-accept ${a} and security-accept ${b})`)]) })
+  assert.equal(m2.status, 1, 'control: a why naming only the first token must leave the second red')
+})
+
+test('S4g: a config change and a pushed secret are one question naming every token', async (t) => {
+  const s = box(t)
+  s.leak()
+  s.write('.gitleaksignore', 'x\n'); s.commit('ignore')
+  s.git('push', '-q', 'origin', 'feat')
+  const r = await scan(s)
+  assert.equal(r.json.action, 'human')
+  const toks = [r.json.configTouched[0].accept, r.json.secrets[0].accept]
+  assert.ok(r.json.why.startsWith('The scan found 2 things only you can settle: (1) This change creates, edits or leaves an uncommitted .gitleaksignore'), r.json.why)
+  assert.ok(r.json.why.endsWith(`keep all 2 (answer ${toks.map((x) => `\`security-accept ${x}\``).join(' and ')})?`), r.json.why)
+  const r2 = await scan(s, { note: s.note([entry(r.json.why, `keep both: ${toks.map((x) => `security-accept ${x}`).join(' ')}`)]) })
+  assert.equal(r2.status, 0, r2.stdout)
+})
+
 // ---- S5: merges ---------------------------------------------------------------------------------------------------
 
 function mainMoves(s) {
@@ -371,6 +415,28 @@ test('S5b: a leak after a merge: fix, rewriteFrom after the merge', async (t) =>
   const r = await scan(s)
   assert.equal(r.json.action, 'fix')
   assert.equal(r.json.rewriteFrom, merge)
+})
+
+test('S5c: two secrets behind a merge are both named; a third after it stays the fix', async (t) => {
+  const s = box(t)
+  s.leak('cfg.py', TOKEN)
+  s.leak('more.py', TOKEN2)
+  mainMoves(s)
+  s.git('merge', '-q', '--no-ff', '-m', 'merge main', 'origin/main')
+  const merge = s.head()
+  s.leak('late.py', fakeToken('thread-security-fixture-3'))
+  const r = await scan(s)
+  assert.equal(r.json.action, 'human')
+  assert.equal(r.json.mergeBehind, true)
+  const by = Object.fromEntries(r.json.secrets.map((x) => [x.file, x.accept]))
+  assert.ok(r.json.why.startsWith('The scan found 2 things only you can settle: (1) A secret (github-pat) in cfg.py'), r.json.why)
+  assert.ok(r.json.why.includes(`keep all 2 (answer \`security-accept ${by['cfg.py']}\` and \`security-accept ${by['more.py']}\`)?`), r.json.why)
+  assert.ok(!r.json.why.includes(by['late.py']), 'the secret after the merge is no question')
+  const r2 = await scan(s, { note: s.note([entry(r.json.why, `keep them (security-accept ${by['cfg.py']} and security-accept ${by['more.py']})`)]) })
+  assert.equal(r2.json.action, 'fix')
+  assert.deepEqual(r2.json.secrets.map((x) => x.file), ['late.py'])
+  assert.equal(r2.json.rewriteFrom, merge)
+  assert.equal(r2.json.mergeBehind, false)
 })
 
 // ---- S6: the scanner's own config ---------------------------------------------------------------------------------

@@ -104,7 +104,7 @@ const PRE_SENTENCES = [
 ]
 const BULLET_PRE = `- § 4's verifySlot pre-check finds a task call's or seeded revise's \`args.securityCheck\` not this entry's \`verify-timeout\` \`securityCheck\`, or an integrate call carrying one (\`${PRE}\`: the same writes as for \`args.verifySlot\`, an integrate call's lane freed the same way; a lead bug: re-invoke), or`
 const BULLET_5 = `- \`reconcile-rollout.py verify-timeout\` exits 5 at an entry (§ 3: \`${HALT5}\`: nothing is stamped, cleared or dispatched; fix or remove the rollout's \`security_checks:\`, or install gitleaks, as its ERROR line says, then re-invoke), or`
-const REPAIR_SENTENCE = "A security-check question (one that names `security-accept <kind>:<key>` answers, execute § 3 `security_checks`) offers each answer it names as its own option, the accept option's label holding its token verbatim, so record-answer's `--answer`, verbatim, carries it: the scan honours an accept only from an answer that repeats the token its own question named."
+const REPAIR_SENTENCE = "A security-check question (one that names `security-accept <kind>:<key>` answers, execute § 3 `security_checks`) offers each answer it names as its own option, each accept option's label holding its tokens verbatim (a question with several findings also names one answer that keeps them all), so record-answer's `--answer`, verbatim, carries them: the scan honours an accept only from an answer that repeats the token its own question named."
 
 // Named failures; [] means every rule holds.
 function check(f) {

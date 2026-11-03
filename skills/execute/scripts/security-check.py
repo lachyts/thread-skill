@@ -29,7 +29,8 @@ Python stdlib only. Two verbs:
            another section), not only to its version floor; a fixture manifest is listed and never checked.
       11.  Advisories from OSV at each floor (querybatch, then one GET per hit); an unreachable OSV is
            `advisoriesChecked: false`, never a red, and a failed GET leaves only its own advisory not checked.
-      12.  The brief lines; 13. `action` (fix | human | null) and `why`.
+      12.  The brief lines; 13. `action` (fix | human | null) and `why`, one question naming every human item's
+           accept token.
       One JSON line on stdout; exit 0 clean (accepted items included), 1 red. Neither stdout nor stderr ever holds a
       secret value.
 """
@@ -909,7 +910,7 @@ def scan(args):
                     s["pushedWhy"] = why
                 secrets.append({k: s[k] for k in ("rule", "file", "line", "commit", "pushed", "pushedWhy", "accept")
                                 if k in s})
-        rewrite_from, merge_behind = None, False
+        rewrite_from, behind = None, {}
         if secrets:
             _rc, order, _err = _git(tree, "rev-list", "--reverse", "--topo-order", f"{mb}..{head}")
             order = order.split()
@@ -917,8 +918,10 @@ def scan(args):
             secrets.sort(key=lambda s: (at.get(s["commit"], len(order)), s["file"], s["line"] or 0))
             first = secrets[0]["commit"]
             rewrite_from = _rev(tree, f"{first}^")
-            _rc, merges, _err = _git(tree, "rev-list", "--merges", f"{first}^..{head}", check=False)
-            merge_behind = bool(merges.strip())
+            for c in dict.fromkeys(s["commit"] for s in secrets):   # does a merge sit at or after this secret's commit?
+                _rc, merges, _err = _git(tree, "rev-list", "--merges", f"{c}^..{head}", check=False)
+                behind[c] = bool(merges.strip())
+        merge_behind = any(behind.values())
         config = [c for c in config if not take(c["accept"], f"config {c['path']} ({c['cause']})")]
 
         deps = dependencies(tree, mb, head, brief_tail)
@@ -929,39 +932,52 @@ def scan(args):
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    action, why = None, None
-    def ask(text):
-        nonlocal action, why
-        action = "human"
-        if why is None:
-            why = text
+    # Every item no commit can clear, each (text, its tokens), each secret named once: `why` is one question naming
+    # them all, so one answer can settle every one of them.
+    items = []
 
     def where(s):
         return f"A secret ({s['rule']}) in {s['file']}, commit {_sha7(s['commit'])}, line {s['line']}"
 
-    tail = "or have /thread:repair recut the branch?"
+    def keep(s):
+        return (f"once it is rotated, keep it in the history (answer `{token(s['accept'])}`), or have /thread:repair "
+                f"recut the branch")
+
     if config:
         names = ", ".join(dict.fromkeys(c["path"] for c in config))
-        toks = " and ".join(f"`{token(c['accept'])}`" for c in config)
-        ask(f"This change creates, edits or leaves an uncommitted {names}, the secret scanner's own config: keep it "
-            f"(answer {toks}), or drop the change?")
+        toks = [c["accept"] for c in config]
+        items.append((f"This change creates, edits or leaves an uncommitted {names}, the secret scanner's own config: "
+                      f"keep it (answer {' and '.join(f'`{token(t)}`' for t in toks)}), or drop the change", toks))
+    named = set()
     for s in secrets:
         if s["pushed"] is True:
-            ask(f"{where(s)}, is already on origin: once it is rotated, keep it in the history (answer "
-                f"`{token(s['accept'])}`), {tail}")
+            items.append((f"{where(s)}, is already on origin: {keep(s)}", [s["accept"]]))
+            named.add(s["accept"])
     for s in secrets:
         if s["pushed"] is None:
-            ask(f"{where(s)}, was found, and origin could not be read to say whether it is pushed ({s['pushedWhy']}): "
-                f"once it is rotated, keep it in the history (answer `{token(s['accept'])}`), {tail}")
-    if secrets and merge_behind:
-        s = secrets[0]
-        ask(f"{where(s)}, sits at or before a merge commit, so the task cannot rewrite it: once it is rotated, keep it "
-            f"in the history (answer `{token(s['accept'])}`), {tail}")
+            items.append((f"{where(s)}, was found, and origin could not be read to say whether it is pushed "
+                          f"({s['pushedWhy']}): {keep(s)}", [s["accept"]]))
+            named.add(s["accept"])
+    for s in secrets:
+        if behind.get(s["commit"]) and s["accept"] not in named:
+            items.append((f"{where(s)}, sits at or before a merge commit, so the task cannot rewrite it: {keep(s)}",
+                          [s["accept"]]))
+            named.add(s["accept"])
     for a in open_advs:
         if not a["fixed"]:
-            ask(f"{a['ecosystem']} {a['name']} {a['version']} has advisory {a['id']} with no fixed release: keep it "
-                f"(answer `{token(a['accept'])}`), name another package, or drop the need?")
-    if action is None and (secrets or open_advs):
+            items.append((f"{a['ecosystem']} {a['name']} {a['version']} has advisory {a['id']} with no fixed release: "
+                          f"keep it (answer `{token(a['accept'])}`), name another package, or drop the need",
+                          [a["accept"]]))
+
+    action, why = None, None
+    if len(items) == 1:
+        action, why = "human", items[0][0] + "?"
+    elif items:
+        every = " and ".join(f"`{token(t)}`" for _text, toks in items for t in toks)
+        listed = "; ".join(f"({i}) {text}" for i, (text, _toks) in enumerate(items, 1))
+        action, why = "human", (f"The scan found {len(items)} things only you can settle: {listed}. Answer each as it "
+                                f"asks, or keep all {len(items)} (answer {every})?")
+    elif secrets or open_advs:
         action = "fix"
 
     brief = []

@@ -1865,6 +1865,7 @@ await (async () => {
     'with its `why`, verbatim, as needsHuman',
     'never write a `## Repair input` entry or a `security-accept` token',
     'which reads as not a credential: <reason>. Accept it (answer `security-accept <its accept>`), or say how the task should change it?',
+    'Several such findings go in that one question, each named with its own accept, so one answer can settle them all',
     'Set verified=true only when the verifier is green AND this scan exited 0 on that head',
   ]
   const p3Fails = (b) => {
