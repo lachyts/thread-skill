@@ -194,6 +194,11 @@ parallel with no note). For each:
   included), the session transcripts and reviews.jsonl with read-only git. Its flags (prefixed `attention: `) and
   cannotShow join span's; it writes nothing to stderr, and any fault is the flag `attention: read failed (...)` and a
   null block, never a stop. The Owner of each question is the reading's label, never span's.
+- nights (p28-7; execute away.md § The night record): score.py's night_record (its header's "The nights" is the one
+  copy of the rules) over every record read (records(), which keeps the night kinds) and the window: per night, keyed
+  by (host, morning), the starts the last starts held and the tasks that ran past the Morning, each ran-past split
+  fallback / underestimate / unchecked, the totals, and its `suggest` (a longer LAST_START_FALLBACK, a higher Trickle:
+  Lachy's to act on by hand, never a knob, never landed). Its flags, each prefixed `nights: `, join span's.
 - freshReview (ADR 0058 d5): one entry per landing. reviews.jsonl's review-round lines up to until, read through
   score.py's read_review_rounds, the one copy of run_record's reader rule (the latest line per (repo, doc), else per
   (repo, head, digest), so a doc's consumed line supersedes its pending one; its branch and reviewedAt come from the
@@ -259,9 +264,9 @@ unconfirmed, filed, recurring, reversal, rejected, precision}] (the window's pre
 (every open Watch:
 rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring, stale, new, declinedBefore, lastSeen),
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
-ledger (above), attention (above), noteOverlaps{warnings, overlaps[{note, runs[{rollout, task}], warnings, first, last}],
-notes[], rollouts[], none, previous{since, until, warnings} | null} | null, cannotShow[], flags[]}. stderr gets one summary
-line.
+ledger (above), attention (above), nights{nights[], totals, flags, suggest} (above), noteOverlaps{warnings,
+overlaps[{note, runs[{rollout, task}], warnings, first, last}], notes[], rollouts[], none, previous{since, until,
+warnings} | null} | null, cannotShow[], flags[]}. stderr gets one summary line.
 
 watch. One `watch` line per (Reflection, Watch), naming every rollout where the reading saw it. id is run_record's
 watch_id(rule, shape); the line stores the stripped rule and shape. A rollout must be one the span read (its
@@ -376,10 +381,11 @@ other than this Reflection's own; else new (never listed, listed only in a dropp
 listed only in this Reflection's own section, which is a re-run). No rule item, no new or still trade and no audit gap
 prints `no rule proposal or held trade: no decision task` and writes nothing. Else the open `decisions`-tagged task
 directly under Work/Tasks, or a new one at the first untaken of thread-skill-decisions-<Melbourne date of now>, -2 ...
--9 (past -9 is exit 2), created by exclusive create with scheduled: from resolve-day.py (no day: the next Melbourne
-morning; --now, tests only, is passed through), `## Notes` (conversation-gated), `## Launch` and `## Resume prompt`
-(no capture-done line: it is no capture). Then, through Note: when `## Reflection <id>` is absent and the task already
-existed, scheduled: moves to resolve-day.py's day; the section is appended once (its heading marks the visit). Its rule
+-9 (past -9 is exit 2), created by exclusive create with no scheduled: (Chorus's Reflection Routine asks it, never a
+day page: ADR 0037 d5 as amended 2026-11-03), `## Notes` (conversation-gated), `## Launch` and `## Resume prompt` (no
+capture-done line: it is no capture). Then, through Note: when `## Reflection <id>` is absent and the task already
+existed with a scheduled: (one written before that amendment), the key is removed; the section is appended once (its
+heading marks the visit). Its rule
 part, only with a rule item: the rule items no earlier section lists, the Watches to confirm, or "No new rule items;
 still open: <ids> (see ## Still open)". Then, after a blank line when both are present, its trade part: TRADE_LEAD and
 one `- trade <kid> at <from>: <key> <from> -> <to> (<rule>); <held>[; caution <caution>]; evidence <evidence>; repo
@@ -392,7 +398,7 @@ is not the one written; D is the Melbourne date of until. A re-run finds the hea
 byte-identical at any hour. The sections are H2: append_section appends at the end of the body, where an H3 would fall
 inside `## Resume prompt`. One `proposal` line (altitude rule, vaultTask) per (Reflection, rule item); a trade writes
 none (knobs' line, with its held reason, is its record, and Lachy's no is the done task's `- trade` line). It prints
-the slug, the scheduled date (and the old one when moved) and new | appended.
+`decision task <slug> (new)`, `(appended)`, or `(appended; scheduled <old> dropped)` when it removed a scheduled:.
 
 close. Exactly one `reflection` line per Reflection (a second close is exit 2). The writers refuse a closed Reflection,
 so a skipped step could never be made up: first close checks that knobs and decide ran, and is exit 2 naming the step,
@@ -469,7 +475,6 @@ RECONCILE_PY = os.path.join(SKILLS, "execute", "scripts", "reconcile-rollout.py"
 SELF_ROLLOUT_SH = os.path.join(SKILLS, "execute", "scripts", "self-rollout-check.sh")
 SCORE_PY = os.path.join(HERE, "score.py")
 SERIAL_PY = os.path.join(HERE, "serial-score.py")
-RESOLVE_DAY_PY = os.path.join(SHARED, "resolve-day.py")
 
 ZONE = "Australia/Melbourne"
 STALE_DAYS = 28
@@ -2001,6 +2006,9 @@ class Span:
                 decision = {"slug": p.stem, "scheduled": rec.scalar("scheduled") or None, "status": rec.status}
         grades = self.grades(records, since, until)
         attention = self.attention(ev, records, reflections, since, until, rid)
+        nights = SCORE.night_record(records, since, until)
+        for f in nights["flags"]:
+            self.flag(f)
         overlaps, overlap_flags = note_overlaps(ev, since, until, reflections)
         for f in overlap_flags:
             self.flag(f)
@@ -2010,7 +2018,8 @@ class Span:
                "rollouts": entries, "freshReview": fresh, "freshReviewLevels": levels,
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
                "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
-               "attention": attention, "noteOverlaps": overlaps, "cannotShow": self.cannot, "flags": self.flags}
+               "attention": attention, "nights": nights, "noteOverlaps": overlaps, "cannotShow": self.cannot,
+               "flags": self.flags}
         out = expand(self.a.out)
         try:
             with open(out, "w", encoding="utf-8") as f:
@@ -2019,10 +2028,10 @@ class Span:
             raise Stop("cannot write --out %s: %s" % (out, e), 1)
         n = {m: sum(1 for e in entries if e["mode"] == m) for m in ("read", "escapes-only", "repairs-only")}
         say("span %s %s .. %s: %d read, %d escapes-only, %d repairs-only, %d friction item(s), %d open Watch(es), "
-            "knobs %d land / %d revert / %d held, %d cannot-show -> %s" % (
+            "knobs %d land / %d revert / %d held, %d night(s), %d cannot-show -> %s" % (
                 rid, fmt(since), fmt(until), n["read"], n["escapes-only"], n["repairs-only"],
                 sum(len(e["friction"]) for e in entries), len(doc["watches"]), len(knobs["land"]),
-                len(knobs["revert"]), len(knobs["held"]), len(self.cannot), out))
+                len(knobs["revert"]), len(knobs["held"]), nights["totals"]["nights"], len(self.cannot), out))
         return 0
 
 
@@ -2496,22 +2505,14 @@ def audit_part(audit):
 
 # ---- decide --------------------------------------------------------------------------------------------------------
 
-def resolve_tomorrow(now):
-    argv = [sys.executable, RESOLVE_DAY_PY] + (["--now", now] if now else [])
-    rc, so, se = run(argv, 30)
-    if rc != 0 or not so.strip():
-        raise Stop("resolve-day.py exited %s: %s" % (rc, first_line(se)), 3 if rc == 3 else 1)
-    return so.split()[0]
-
-
-def decision_text(slug, title, scheduled, captured):
+def decision_text(slug, title, captured):
     return "\n".join([
         "---", "tags: [task, ai, decisions]", "status: open", "priority: high", "projects: %s" % PROJECTS, "contexts: []",
-        "scheduled: %s" % scheduled, "captured: %s" % captured, "launch: cc-thread", "---", "",
+        "captured: %s" % captured, "launch: cc-thread", "---", "",
         "# %s" % title, "", "## Notes", "",
         "Conversation-gated: the weekly Reflection's rule proposals, Watches to confirm and held trades (a knob ADR 0037 "
-        "d1 leaves to Lachy), decided by Lachy at the top of a run through `/thread:reflect --decide [[%s]]`, never "
-        "during one (ADR 0037 d5). Never schedule or reshuffle it." % slug, "",
+        "d1 leaves to Lachy), decided by Lachy at Chorus's Thursday Reflection Routine (Chorus ADR 0095) through "
+        "`/thread:reflect --decide [[%s]]`, never during a run (ADR 0037 d5). Never schedule or reshuffle it." % slug, "",
         "## Launch", "", "- **Launch:** `cc-thread`", "- **MCP:** none", "",
         "## Resume prompt", "", "Paste into a fresh agent session:", "", "```",
         "You're picking up \"%s\", the weekly Reflection's decision task." % title,
@@ -2705,7 +2706,6 @@ def cmd_decide(a):
     existing = [(p, rec) for p, rec in vault.open_root_notes() if "decisions" in rec.tags]
     if len(existing) > 1:
         say("%d open decision tasks (%s): the first is used" % (len(existing), ", ".join(p.stem for p, _r in existing)))
-    tomorrow = resolve_tomorrow(now)
     tmp = None
     if existing:
         path, created = existing[0][0], False
@@ -2720,7 +2720,7 @@ def cmd_decide(a):
                 break
         if slug is None:
             raise Stop("thread-skill-decisions-%s through -%d are all taken: a fault, not a new day" % (day, DECISION_SUFFIX_MAX), 2)
-        text = decision_text(slug, "Thread Skill: the weekly Reflection's decisions (%s)" % day, tomorrow, day)
+        text = decision_text(slug, "Thread Skill: the weekly Reflection's decisions (%s)" % day, day)
         path = vault.root / ("%s.md" % slug)
         if a.dry_run:
             tmp = tempfile.mkdtemp(prefix="thread-reflect-decide-")
@@ -2738,10 +2738,10 @@ def cmd_decide(a):
     heading = "## Reflection %s" % rid
     fresh = not note.has_heading(heading)
     old = REC._scalar(note.get("scheduled")) or None
-    moved = None
-    if fresh and not created and old != tomorrow:
-        note.set("scheduled", tomorrow)
-        moved = old
+    dropped = None
+    if fresh and not created and old is not None:  # a task written before ADR 0037 d5's 2026-11-03 amendment
+        note.remove("scheduled")
+        dropped = old
     before = listed_elsewhere(note, rid)
     seen_until = mdate(until)
     new_items = [w for w in rules if w["id"] not in before]
@@ -2805,9 +2805,8 @@ def cmd_decide(a):
             continue
         write_line("proposal", {"id": w["id"], "altitude": "rule", "reflection": rid, "rollouts": cut_rollouts(w),
                                 "rule": w["rule"], "shape": w["shape"], "vaultTask": slug}, a.dry_run)
-    sched = REC._scalar(note.get("scheduled"))
-    done(a, "decision task %s: scheduled %s%s (%s)" % (slug, sched, " (was %s)" % moved if moved else "",
-                                                       "new" if created else "appended"))
+    how = "new" if created else ("appended; scheduled %s dropped" % dropped) if dropped else "appended"
+    done(a, "decision task %s (%s)" % (slug, how))
     return 0
 
 

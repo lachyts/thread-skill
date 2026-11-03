@@ -15,12 +15,12 @@ do, and serial-chains.py for norm_origin and the surface grammar. begin and stat
 read-only `check --shape serial --resume` (the surface re-check, ADR 0060), and unfinished-rollout.py loads this file
 in turn for hold_of (no recursion: hold_of never spawns).
 
-Common flags: --rollout <path, or a slug under --tasks-dir; once that note is gone, its `Archive/Rollouts/` copy,
-which every writing verb but file-followup refuses (exit 1)> · --tasks-dir (default <vault>/Work/Tasks) · --vault
-(default the tasks dir's grandparent when --tasks-dir is given, else ~/repos/obsidian) · --now <ISO> (stamps; the
-clock otherwise) · --session <id> (default CLAUDE_CODE_SESSION_ID, then CODEX_THREAD_ID, else `unknown`) ·
---harness claude|codex (default: codex under CODEX_THREAD_ID alone, else claude) · --dry-run (compute and print,
-write nothing, take no lock).
+Common flags: --rollout <path, or a slug under --tasks-dir; once that note is gone, its `Archive/Rollouts/` copy
+(read as archived by that path too), which every writing verb but file-followup refuses (exit 1)> · --tasks-dir
+(default <vault>/Work/Tasks) · --vault (default the tasks dir's grandparent when --tasks-dir is given, else
+~/repos/obsidian) · --now <ISO> (stamps; the clock otherwise) · --session <id> (default CLAUDE_CODE_SESSION_ID, then
+CODEX_THREAD_ID, else `unknown`) · --harness claude|codex (default: codex under CODEX_THREAD_ID alone, else claude) ·
+--dry-run (compute and print, write nothing, take no lock).
 
 Output: one JSON line on stdout for every exit but a usage error and the Engine snapshot guard. Exit codes: 0 ok · 1
 refusal (nothing written) · 2 usage (stdout empty, one `leg:` line on stderr), or the Engine snapshot guard (ADR 0043:
@@ -84,7 +84,8 @@ restarted):
       `gates_signed:`, and on a fresh claim `leg_base: ["<toplevel>@<sha40>", …]`: one entry per `repo:` surface of
       the row that is a git toplevel, the vault never (an inherited claim keeps its stamp). Logs `claimed` or `took`.
       Each --gate is compared with the note's `## Approved gates` (reconcile-rollout.py's _norm_gate): the
-      unapproved ones are printed for `set-aside --kind gate`.
+      unapproved ones are printed for `set-aside --kind gate`. An exact `None` (execute § 3.7's grammar, bullet,
+      case and one trailing `.` aside, as the engine's parseGatedInputs reads it) is no gate, never unapproved.
   change --task <t> [--top <toplevel>]       (read-only, no lock)
       Per `leg_base` checkout: the commits in `<sha>..HEAD` whose message has a `Task: [[<t>]]` line, their paths
       minus `docs/reviews/`, the `:(literal)` pathspecs, and a WARN per commit in the range with no `Task:` line at
@@ -115,7 +116,8 @@ restarted):
       no `leg_base` entry. A serial chain's completion verify anchors its HEAD guard on it. Logs `done`.
   set-aside --task <t> --reason <text> [--kind block|gate] [--status blocked|review-blocked|plan-blocked]
             [--revert] [--gate <gate>]...
-      Removes `owner:`. gate: `status: gate-pending` and `## Gated inputs (awaiting sign-off)` (no revert). block:
+      Removes `owner:`. gate: `status: gate-pending` and `## Gated inputs (awaiting sign-off)` (no revert; a `None`
+      --gate is no gate, so one with only `None` is a usage error, exit 2). block:
       the status (blocked by default) and a `## Blocker diagnosis` run. --revert reverts each checkout's trailered
       commits: exit 3 first when a path to revert has staged or unstaged changes; the commits are reverted
       newest-first in a scratch `git worktree add --detach` tree; a conflict removes it and exits 3 with the checkout
@@ -312,6 +314,7 @@ ITEMS_MARK = "Rollout-specific items go here:"
 BLOCKER = "## Blocker diagnosis"
 GATES_PENDING = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES = "## Approved gates"
+NONE_GATE_RE = re.compile(r"^none\.?$")  # execute § 3.7's exact `None`, on _norm_gate's text (task.workflow.js's /^none\.?$/i)
 CAP = 5
 OUTCOMES = ("handoff", "complete", "stuck", "stopped", "halt")
 TERMINAL = ("complete", "dropped", "superseded", "incomplete")   # the chain states begin refuses for good
@@ -403,6 +406,12 @@ def _fold(p):
     return os.path.realpath(os.path.expanduser(p)).casefold()
 
 
+def in_archive(path):
+    """True when the note sits in an `Archive/Rollouts/` directory (Complete's destination)."""
+    p = path.resolve()
+    return p.parent.name == "Rollouts" and p.parent.parent.name == "Archive"
+
+
 # ---- context and output ----------------------------------------------------------------------------------------
 
 class Ctx:
@@ -419,8 +428,9 @@ class Ctx:
             p = self.tasks / f"{(rr._wikilink_slug(raw) or raw)}.md"
         # Complete moves the note to Archive/Rollouts/ before the last Leg's /thread:close runs, so a gone live note
         # reads its archived copy (file-followup then writes nothing into it; every other writing verb refuses it:
-        # begin as done, the rest through ARCHIVE_REFUSED).
-        self.archived = False
+        # begin as done, the rest through ARCHIVE_REFUSED). A note handed over by its own `Archive/Rollouts/` path is
+        # the archived copy too, whichever path the caller held.
+        self.archived = in_archive(p)
         if not p.exists():
             alt = self.tasks / "Archive" / "Rollouts" / p.name
             if alt.is_file():
@@ -569,6 +579,11 @@ class Row:
 
     def same_launch(self, alias, folder):
         return self.alias == alias and _fold(self.folder or "") == _fold(folder or "")
+
+
+def real_gates(gates):
+    """The declared gates minus an exact `None`, which declares no gate (the engine's parseGatedInputs reads it so)."""
+    return [g for g in gates if not NONE_GATE_RE.match(rr._norm_gate(g))]
 
 
 def owner_leg(note):
@@ -1187,7 +1202,7 @@ def cmd_claim(ctx, a):
             bases = stamp_bases(ctx, row)
             note.set("leg_base", "[" + ", ".join(f'"{b}"' for b in bases) + "]", after=("started", "leg"))
         approved = [rr._norm_gate(l) for l in note.section_text(APPROVED_GATES).split("\n") if l.strip()]
-        unapproved = [g for g in a.gate if rr._norm_gate(g) not in approved]
+        unapproved = [g for g in real_gates(a.gate) if rr._norm_gate(g) not in approved]
         save(ctx, note)
         text = (f"took [[{row.slug}]] (inherited from Leg {plan['from']})" if a.inherit else f"claimed [[{row.slug}]]")
         if not ctx.dry:
@@ -1615,8 +1630,9 @@ def cmd_set_aside(ctx, a):
         if r.state == "running" and owner_leg(r.note) not in (None, n):
             raise Refuse(1, f"[[{r.slug}]] is Leg {owner_leg(r.note)}'s claim, not Leg {n}'s")
         kind = a.kind
-        if kind == "gate" and not a.gate:
-            raise Refuse(2, "--kind gate needs one --gate per pending gate")
+        gates = real_gates(a.gate)
+        if kind == "gate" and not gates:
+            raise Refuse(2, "--kind gate needs one --gate per pending gate (`None` is no gate)")
         if kind == "gate" and a.revert:
             raise Refuse(2, "a gate set-aside reverts nothing: gates come before any write")
         reverted = []
@@ -1646,7 +1662,7 @@ def cmd_set_aside(ctx, a):
         note.remove("owner")
         if kind == "gate":
             note.set("status", "gate-pending")
-            note.upsert_section(GATES_PENDING, "\n".join(f"- {g.strip()}" for g in a.gate))
+            note.upsert_section(GATES_PENDING, "\n".join(f"- {g.strip()}" for g in gates))
             status = "gate-pending"
         else:
             status = a.status or "blocked"
@@ -2114,13 +2130,6 @@ def leg_outcome(closed):
     return next((w for prefix, w in OUTCOME_WORDS if closed.startswith(prefix)), "other")
 
 
-def is_archived(ctx):
-    if ctx.archived:
-        return True
-    p = ctx.rollout.resolve()
-    return p.parent.name == "Rollouts" and p.parent.parent.name == "Archive"
-
-
 def dependants(chain, row):
     """The row's dependants (the module docstring's): transitive, through `merged_into:` tombstones, in Queue order."""
     cands = [r for r in chain.counted() if r.state != "done" and r.note is not None]
@@ -2518,7 +2527,7 @@ def cmd_status(ctx, a):
         items.append(f"[[{ctx.slug}]] stalled: {stall['why']} → /thread:repair [[{ctx.slug}]]")
     fixes = [{"task": r.slug, "verifies": v, "state": r.state} for r, v in chain.fixes() if r.state != "done"]
     return {"verb": "status", "rollout": ctx.slug,
-            "note": {"status": rr._status(note) or None, "archived": is_archived(ctx), "incomplete": inc,
+            "note": {"status": rr._status(note) or None, "archived": ctx.archived, "incomplete": inc,
                      "paused": paused, "supersededBy": superseded},
             "progress": chain.progress(open_leg["n"] if open_leg is not None else None), "chain": state,
             "openLeg": open_leg["n"] if open_leg is not None else None,

@@ -448,6 +448,35 @@ test('span: grades carries the Grade log joined to outcomes, readyHandsOff first
   assert.equal(entryOf(bare, 'demo').friction.find((x) => x.kind === 'ask').grade, null)
 })
 
+// p28-7: span's `nights` (score.py's night_record over every record): two nights, one with holds and ran-past lines and
+// one with only its marker, each ran-past line split fallback / underestimate / unchecked, across two records.
+test('span: nights counts each night\'s held starts and ran-past tasks, a fallback overrun told from an underestimate (p28-7)', (t) => {
+  const h = setup(t)
+  const M1 = W(5, '09:00')
+  const M2 = W(6, '09:00')
+  const ran = (ts, task, S, history, usual) => [ts, 'ran-past-morning', task,
+    { morning: M1, slotTakenAt: new Date(Date.parse(S)).toISOString(), scope: 'single-file', history, ...(usual ? { usualMinutes: usual } : {}) }]
+  emitAll(h, 'night-a', byTs([
+    [W(5, '05:00'), 'away-night', null, { morning: M1 }],
+    [W(5, '07:30'), 'last-start-held', 'c1', { morning: M1, scope: 'cross-cutting', history: 3, usualMinutes: 110 }],
+    [W(5, '07:30'), 'last-start-held', 'c2', { morning: M1, scope: 'read-only', history: 1 }],
+    ran(W(5, '09:20'), 'f1', W(5, '06:30'), 1),
+    ran(W(5, '09:21'), 'u1', W(5, '08:00'), 3, 25),
+    [W(6, '05:00'), 'away-night', null, { morning: M2 }],
+  ]))
+  emitAll(h, 'night-b', [[W(5, '07:00'), 'away-night', null, { morning: M1 }], ran(W(5, '09:22'), 'd1', W(5, '05:00'), 3, 25)])
+  const r = ok(h, ['span', '--tasks-dir', h.tasks, '--config', path.join(h.home, 'rollouts.toml'), '--out', path.join(h.out, 'span.json'),
+    '--since', SINCE, '--until', UNTIL])
+  assert.match(r.stderr, /, 2 night\(s\), /, 'the summary line counts the marked nights')
+  const n = JSON.parse(fs.readFileSync(path.join(h.out, 'span.json'), 'utf8')).nights
+  assert.deepEqual(n.nights.map((x) => [x.morning, x.marked, x.rollouts, x.held, x.heldBy, x.ranPast, x.ranPastBy]), [
+    [new Date(Date.parse(M1)).toISOString(), true, ['night-a', 'night-b'], 2, { fallback: 1, history: 1 }, 3, { fallback: 1, underestimate: 1, unchecked: 1 }],
+    [new Date(Date.parse(M2)).toISOString(), true, ['night-a'], 0, { fallback: 0, history: 0 }, 0, { fallback: 0, underestimate: 0, unchecked: 0 }]])
+  assert.deepEqual(n.nights[0].ranPastTasks.map((e) => [e.task, e.class]), [['f1', 'fallback'], ['u1', 'underestimate'], ['d1', 'unchecked']])
+  assert.deepEqual(n.totals, { nights: 2, zeroHold: 1, held: 2, ranPast: 3, fallback: 1, underestimate: 1, unchecked: 1 })
+  assert.deepEqual(n.suggest, [])
+})
+
 test('span: a missing note is scored by slug and flagged; without --fold the events and tasks dirs are unchanged', (t) => {
   const h = setup(t)
   emitAll(h, 'orphan', byTs(life('a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
@@ -1347,7 +1376,7 @@ function twoWatches(h, rid, sp) {
   ok(h, watchArgs(sp, ['a'], { rule: 'grill-fit § How a fork comes back', shape: 'a fork routed no gate' }))
 }
 
-test('decide: no task without a rule item; one task for the next Melbourne morning in task-writer § 5\'s shape; entries checked; a left-out Watch still listed', (t) => {
+test('decide: no task without a rule item; one unscheduled task in task-writer § 5\'s shape; entries checked; a left-out Watch still listed', (t) => {
   const h = setup(t)
   const [wid, one] = ids(h, [['w', RULE, SHAPE], ['w', 'grill-fit § How a fork comes back', 'a fork routed no gate']])
   const sp0 = fakeSpan(h, RID(1), ['a', 'b'])
@@ -1363,12 +1392,15 @@ test('decide: no task without a rule item; one task for the next Melbourne morni
   const dec = path.join(h.home, 'decisions.json')
   fs.writeFileSync(dec, JSON.stringify({}))
   const r = ok(h, ['decide', '--span', sp0, '--decisions', dec, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00'])
-  assert.equal(r.stdout, 'decision task thread-skill-decisions-2026-09-10: scheduled 2026-09-11 (new)\n')
+  assert.equal(r.stdout, 'decision task thread-skill-decisions-2026-09-10 (new)\n')
   const text = fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-09-10.md'), 'utf8')
   const fm = text.split('---')[1]
-  for (const line of ['tags: [task, ai, decisions]', 'status: open', 'priority: high', 'scheduled: 2026-09-11', 'captured: 2026-09-10', 'launch: cc-thread']) assert.ok(fm.includes(`\n${line}\n`), line)
+  for (const line of ['tags: [task, ai, decisions]', 'status: open', 'priority: high', 'captured: 2026-09-10', 'launch: cc-thread']) assert.ok(fm.includes(`\n${line}\n`), line)
+  assert.doesNotMatch(fm, /^scheduled:/m, 'no scheduled: key: the Reflection Routine asks it, never a day page')
   assert.deepEqual(text.split('\n').filter((l) => /^## /.test(l)), ['## Notes', '## Launch', '## Resume prompt', `## Reflection ${RID(1)}`])
   assert.ok(text.includes('Conversation-gated'))
+  const notes = text.slice(text.indexOf('## Notes'), text.indexOf('## Launch'))
+  assert.ok(notes.includes('Reflection Routine'), notes)
   // ADR 0040 retired orient's batches: the decision task's note names only schedule and the reshuffle.
   assert.ok(text.includes('Never schedule or reshuffle it.'))
   assert.doesNotMatch(text, /batch or reshuffle/)
@@ -1380,7 +1412,7 @@ test('decide: no task without a rule item; one task for the next Melbourne morni
   assert.deepEqual(rlines(h).filter((l) => l.kind === 'proposal').map((l) => [l.altitude, l.id, l.vaultTask]), [['rule', wid, 'thread-skill-decisions-2026-09-10']])
 })
 
-test('decide: an open task gets a new section, scheduled: moved; a listed Watch goes under ## Still open dated by until; re-runs after midnight are byte-identical', (t) => {
+test('decide: an open task gets a new section, frontmatter untouched; a listed Watch goes under ## Still open dated by until; re-runs after midnight are byte-identical', (t) => {
   const h = setup(t)
   const sp1 = fakeSpan(h, RID(1), ['a', 'b'])
   twoWatches(h, RID(1), sp1)
@@ -1390,19 +1422,49 @@ test('decide: an open task gets a new section, scheduled: moved; a listed Watch 
   ok(h, ['decide', '--span', sp1, '--tasks-dir', h.tasks, '--now', '2026-09-11T00:10+10:00'])
   assert.equal(fs.readFileSync(p, 'utf8'), first, 'a new task: byte-identical after midnight')
   ok(h, ['close', '--span', sp1])
-  // R2 sees the same Watch again in c: the open task is appended to, its scheduled: moved
+  // R2 sees the same Watch again in c: the open task is appended to, its frontmatter untouched
   const sp2 = fakeSpan(h, RID(2), ['c'], { until: '2026-09-17T14:00:00.000Z' })
   ok(h, watchArgs(sp2, ['c']))
   const r = ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T23:50+10:00'])
-  assert.equal(r.stdout, 'decision task thread-skill-decisions-2026-09-10: scheduled 2026-09-18 (was 2026-09-11) (appended)\n')
+  assert.equal(r.stdout, 'decision task thread-skill-decisions-2026-09-10 (appended)\n')
   const second = fs.readFileSync(p, 'utf8')
-  const keep = (s) => s.split('---')[1].split('\n').filter((l) => !l.startsWith('scheduled:'))
-  assert.deepEqual(keep(second), keep(first), 'every frontmatter line but scheduled: is byte-identical')
+  assert.equal(second.split('---')[1], first.split('---')[1], 'the frontmatter is byte-identical')
   const [wid] = ids(h, [['w', RULE, SHAPE]])
   assert.ok(second.includes(`## Reflection ${RID(2)}\n\nNo new rule items; still open: ${wid} (see ## Still open)`), second)
   assert.ok(second.includes(`## Still open\n\n${wid} still open 2026-09-18: Reflection ${RID(2)}, rollouts [[a]], [[b]], [[c]]`), second)
   ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-18T00:10+10:00'])
   assert.equal(fs.readFileSync(p, 'utf8'), second, 'an existing task: byte-identical after midnight')
+})
+
+// A task written before the Reflection Routine took the decision task (2026-11-03) still carries scheduled:, with a line
+// on that day's page: the next fresh section drops the key once and names the date, so the agent removes the line.
+test('decide: a legacy task\'s scheduled: is dropped on its next fresh section and named in the outcome; --dry-run shows it dropped and writes nothing; a re-run is byte-identical', (t) => {
+  const h = setup(t)
+  const sp1 = fakeSpan(h, RID(1), ['a', 'b'])
+  twoWatches(h, RID(1), sp1)
+  ok(h, ['decide', '--span', sp1, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00'])
+  ok(h, ['close', '--span', sp1])
+  const p = path.join(h.tasks, 'thread-skill-decisions-2026-09-10.md')
+  fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('\ncaptured: 2026-09-10\n', '\nscheduled: 2026-09-11\ncaptured: 2026-09-10\n'))
+  const legacy = fs.readFileSync(p, 'utf8')
+  assert.match(legacy.split('---')[1], /^scheduled: 2026-09-11$/m)
+  const sp2 = fakeSpan(h, RID(2), ['c'], { until: '2026-09-17T14:00:00.000Z' })
+  ok(h, watchArgs(sp2, ['c']))
+  const dry = ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T09:00+10:00', '--dry-run'])
+  assert.match(dry.stdout, /^would write \S+thread-skill-decisions-2026-09-10\.md:/m)
+  assert.doesNotMatch(dry.stdout, /^scheduled:/m, 'the would-write text has the key dropped')
+  assert.match(dry.stdout, /\(appended; scheduled 2026-09-11 dropped\)\n$/)
+  assert.equal(fs.readFileSync(p, 'utf8'), legacy, '--dry-run leaves the task unchanged')
+  const r = ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T09:00+10:00'])
+  assert.equal(r.stdout, 'decision task thread-skill-decisions-2026-09-10 (appended; scheduled 2026-09-11 dropped)\n')
+  const second = fs.readFileSync(p, 'utf8')
+  const fmLines = (s) => s.split('---')[1].split('\n')
+  assert.doesNotMatch(second.split('---')[1], /^scheduled:/m)
+  assert.deepEqual(fmLines(second), fmLines(legacy).filter((l) => !l.startsWith('scheduled:')), 'every other frontmatter line unchanged')
+  assert.ok(second.includes(`## Reflection ${RID(2)}\n`), second)
+  assert.equal(ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-18T00:10+10:00']).stdout,
+    'decision task thread-skill-decisions-2026-09-10 (appended)\n')
+  assert.equal(fs.readFileSync(p, 'utf8'), second, 'a re-run is byte-identical')
 })
 
 test('decide: a done task at today\'s path stays byte-identical and the new task is -2; an archived namesake is skipped; --dry-run writes nothing', (t) => {
@@ -1417,7 +1479,7 @@ test('decide: a done task at today\'s path stays byte-identical and the new task
   assert.match(dry.stdout, /^would write \S+thread-skill-decisions-2026-09-10-3\.md:/m)
   assert.deepEqual(listing(h.tasks), files, '--dry-run writes no file')
   assert.equal(rlines(h).filter((l) => l.kind === 'proposal').length, 0, '--dry-run writes no line')
-  assert.equal(ok(h, ['decide', '--span', sp, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00']).stdout, 'decision task thread-skill-decisions-2026-09-10-3: scheduled 2026-09-11 (new)\n')
+  assert.equal(ok(h, ['decide', '--span', sp, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00']).stdout, 'decision task thread-skill-decisions-2026-09-10-3 (new)\n')
   assert.deepEqual(fs.readFileSync(done), before)
 })
 
@@ -1521,7 +1583,7 @@ test('decide: a held trade alone writes the decision task with a trade item and 
   // R1: the trade alone writes the task
   const sp1 = tradeSpan(h, RID(1), kid, { prop, reason })
   ok(h, ['knobs', '--span', sp1])
-  assert.equal(decide(sp1, '2026-09-10T09:00+10:00').stdout, 'decision task thread-skill-decisions-2026-09-10: scheduled 2026-09-11 (new)\n')
+  assert.equal(decide(sp1, '2026-09-10T09:00+10:00').stdout, 'decision task thread-skill-decisions-2026-09-10 (new)\n')
   const p = path.join(h.tasks, 'thread-skill-decisions-2026-09-10.md')
   const first = fs.readFileSync(p, 'utf8')
   assert.ok(first.endsWith(`## Reflection ${RID(1)}\n\n${TRADE_LEAD}\n${tradeItem(kid, reason)}\n`), first)
@@ -1534,7 +1596,7 @@ test('decide: a held trade alone writes the decision task with a trade item and 
   // R2: still open, listed once, a ## Still open line
   const sp2 = tradeSpan(h, RID(2), kid, { prop, reason, until: '2026-09-17T14:00:00.000Z' })
   ok(h, ['knobs', '--span', sp2])
-  assert.equal(decide(sp2, '2026-09-17T23:50+10:00').stdout, 'decision task thread-skill-decisions-2026-09-10: scheduled 2026-09-18 (was 2026-09-11) (appended)\n')
+  assert.equal(decide(sp2, '2026-09-17T23:50+10:00').stdout, 'decision task thread-skill-decisions-2026-09-10 (appended)\n')
   const second = fs.readFileSync(p, 'utf8')
   assert.ok(second.includes(`## Reflection ${RID(2)}\n\nNo new trades; still open: trade ${kid} at 3 (see ## Still open)\n`), second)
   assert.ok(second.includes(`## Still open\n\ntrade ${kid} at 3 still open 2026-09-18: Reflection ${RID(2)}, rollouts [[b]]\n`), second)
@@ -1554,7 +1616,7 @@ test('decide: a held trade alone writes the decision task with a trade item and 
   // R4: the same knob at a new from is a new item
   const p4 = tradeProp(kid, { from: 4, to: 5, ranAt: 4 })
   const sp4 = tradeSpan(h, RID(4), kid, { prop: p4, reason, until: '2026-09-24T14:00:00.000Z' })
-  assert.equal(decide(sp4, '2026-09-24T09:00+10:00').stdout, 'decision task thread-skill-decisions-2026-09-24: scheduled 2026-09-25 (new)\n')
+  assert.equal(decide(sp4, '2026-09-24T09:00+10:00').stdout, 'decision task thread-skill-decisions-2026-09-24 (new)\n')
   assert.ok(fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-09-24.md'), 'utf8').includes(`${TRADE_LEAD}\n${tradeItem(kid, reason, { from: 4, to: 5 })}\n`))
   // a dropped task decides nothing: the trade is listed anew
   const h2 = setup(t)
@@ -1563,7 +1625,7 @@ test('decide: a held trade alone writes the decision task with a trade item and 
   setStatus(path.join(h2.tasks, 'thread-skill-decisions-2026-09-10.md'), 'dropped')
   const d2 = tradeSpan(h2, RID(2), kid, { prop, reason, until: '2026-09-17T14:00:00.000Z' })
   assert.equal(ok(h2, ['decide', '--span', d2, '--tasks-dir', h2.tasks, '--now', '2026-09-17T23:50+10:00']).stdout,
-    'decision task thread-skill-decisions-2026-09-17: scheduled 2026-09-18 (new)\n')
+    'decision task thread-skill-decisions-2026-09-17 (new)\n')
   assert.ok(fs.readFileSync(path.join(h2.tasks, 'thread-skill-decisions-2026-09-17.md'), 'utf8').endsWith(`## Reflection ${RID(2)}\n\n${TRADE_LEAD}\n${tradeItem(kid, reason)}\n`))
 })
 
@@ -1740,7 +1802,7 @@ test('moot: a yes that cannot apply is recorded under its section; the task can 
   setStatus(p, 'done')
   const sp3 = tradeSpan(h, RID(3), kid, { prop, reason, until: '2026-09-24T14:00:00.000Z' })
   assert.equal(ok(h, ['decide', '--span', sp3, '--tasks-dir', h.tasks, '--now', '2026-09-24T09:00+10:00']).stdout,
-    'decision task thread-skill-decisions-2026-09-24: scheduled 2026-09-25 (new)\n', 'offered again at the same from')
+    'decision task thread-skill-decisions-2026-09-24 (new)\n', 'offered again at the same from')
   assert.ok(fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-09-24.md'), 'utf8').includes(tradeItem(kid, reason)))
   const dn = reflect(h, mootArgs())
   assert.equal(dn.status, 2)

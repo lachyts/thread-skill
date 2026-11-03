@@ -709,6 +709,12 @@ test('a tuning with binding trickle-bound (p28-6) is recorded; an unknown bindin
   assert.equal(lines(path.join(ev(home), 'tunings.jsonl'))[0].binding, 'trickle-bound')
 })
 
+test('a tuning with binding last-start-bound (p28-7) is recorded', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ binding: 'last-start-bound' }))], { env: EV(home) })
+  assert.equal(lines(path.join(ev(home), 'tunings.jsonl'))[0].binding, 'last-start-bound')
+})
+
 test('a tuning with a null activeStart and activeEnd (no running time) is recorded', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ window: { since: WINDOW.since, until: WINDOW.until, activeStart: null, activeEnd: null } }))], { env: EV(home) })

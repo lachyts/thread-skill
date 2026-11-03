@@ -80,8 +80,7 @@ root's git (commit messages, `docs/reviews/` and `git blame`), never fetched. By
 `serial-score.py` alone, which reads the note's Leg log through `leg.py status`, the Run record and the task notes,
 and writes nothing. The weekly reading reads every rollout record,
 `reflections.jsonl`, `grades.jsonl` (the Grade log, read-only) and the contract (above) too, and writes: `reflections.jsonl` through reflect.py; a bug task and
-the decision task under `~/repos/obsidian/Work/Tasks/`; the decision task's one line on its day page (task-writer
-§ 3b); `tunings.jsonl` lines only through tune.py's `--auto` and `--revert`; and `call-journal` lines through
+the decision task under `~/repos/obsidian/Work/Tasks/`; `tunings.jsonl` lines only through tune.py's `--auto` and `--revert`; and `call-journal` lines through
 `span --fold`. Its scratch dir is `/tmp/thread-reflect-week-<YYYY-MM-DD>/`. The Monthly audit (step 10a) also reads,
 read-only, the lead sessions' transcripts, the suite logs, the rollout notes' pause logs and the Mac's own history, and
 writes only `audit.json` in that scratch dir. The attention ledger (steps 10, 11 and 13b) also reads, read-only, the
@@ -196,7 +195,8 @@ headlines first (ADR 0037 d1), then the Guardrails:
 - **Guardrails**: **Throughput** first, against its bound: merges per running hour, the running hours against the
   allowance (`allowanceHours` for its `tasks`, `bound`), and whether it is breached; then every excluded span by kind
   (`paused`, `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `hold-trickle` / `hold-away-cap` /
-  `hold-heat` meant Mac-wide waits, never Lachy's (p28-6: the Trickle, the Away cap, the Heat hold), `lead-absent`,
+  `hold-heat` / `hold-last-start` meant Mac-wide waits, never Lachy's (p28-6: the Trickle, the Away cap, the Heat hold;
+  p28-7: the last starts, holding a start that would run past the Morning), `lead-absent`,
   `never-finished`, `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
   Reflection). Then tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
   stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so. Last,
@@ -214,7 +214,18 @@ headlines first (ADR 0037 d1), then the Guardrails:
 - **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this". Nor does a
   trickle-bound one (p28-6: the Mac-wide cap, the Trickle or the Away cap, kept Slots free for at least half the
   time, its no-Slot-open spans counted in, and held as much Slot time as any other idle reason): say "the Trickle
-  moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling.
+  moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling. Nor does a last-start-bound
+  one (p28-7: the same reading over `hold-last-start`, the last starts holding starts toward the Morning): say "the
+  last starts move it, not a rollout key", read Throughput as under the last starts, and turn to the nights below.
+- **The nights** (`nights`, p28-7; `skills/execute/away.md` § The night record), for each Morning this rollout
+  marked: the night (its rollouts, `marked`), the starts the last starts held (`held`, split `heldBy` fallback / history) and the
+  tasks still running at the Morning (`ranPast`, split `ranPastBy`: a `fallback` overrun, fewer than 3 past runs and
+  started at least 2 h before; an `underestimate`, its kind's usual length let it start and it still ran past; or
+  `unchecked`, begun before the last starts applied or too close to tell), each with `ranAtLeastMinutes`, and the
+  `totals` (nights, zero-hold nights). Show each `nights.suggest` entry as Lachy's to act on by hand, never as a
+  proposal and never through tune.py: a `last-start-fallback-raise` is a code change to `LAST_START_FALLBACK` (file a
+  Thread Skill task), a `trickle-raise` is Chorus's companion.json `trickle`, a trade he decides (Chorus ADR 0104 d2).
+  Show `nights.flags` beside them.
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says
   3", so a jump such as 3 → 6 reads as one step past what the run proved. Then what it `serves` and `risks`. A
@@ -275,7 +286,7 @@ change a live rollout, Lachy edits its note.
 d4), or once a fortnight on a quiet streak (d6): the scripts score and sweep, the model traces each cost to its rule,
 and the writers record the outcome. It lands a bug task, an agreed knob or a knob's revert unasked (ADR 0037 d5); a
 rule proposal (with any Watch to confirm beside it), a held trade (a knob ADR 0037 d1 leaves to Lachy) or a Monthly
-audit's gap goes into one decision task for Lachy's next morning. It also keeps the **Time-lost ledger** (ADR 0051):
+audit's gap goes into one decision task for Chorus's Thursday Reflection Routine. It also keeps the **Time-lost ledger** (ADR 0051):
 the hours each cause class cost across every rollout, ranked by cause and trended week on week, with a Monthly audit
 on the month's first reading. And it keeps the **attention ledger** (ADR 0056): the questions put to Lachy by Owner, each
 PR's review trail, each rollout's wait to start, and the work items and rollouts that circle without merging. Every
@@ -540,6 +551,12 @@ unlabelled, and close never waits on labels. Read `trails` and `waits` as report
 item to what held it: a set-aside item starts at its `heldBy` (the stage and reasonClass that stopped it), the others at
 the Sessions that touched it. Name the rule the trace reaches: step 15's `amends` cites it.
 
+**The nights** (`span.json`'s `nights`, p28-7) read as step 5's do, over every record this week: per night, keyed by
+host and Morning, its held starts and its ran-past tasks split fallback / underestimate / unchecked, the `totals`, its
+`flags` and its `suggest` entries. Report them, never traced as friction: a `suggest` entry is Lachy's to act on by
+hand (a longer `LAST_START_FALLBACK` is a Thread Skill task, a higher Trickle is Chorus's companion.json), never a knob,
+never landed by step 14.
+
 ### 12. Sightings
 
 After the whole reading, make ONE `reflect.py watch` call per Watch, naming every rollout where you saw it. Reuse an
@@ -653,9 +670,11 @@ unread, and one `- gap <n> <YYYY-MM>: <what>; evidence <...>` line per gap. A he
 open decision task already lists gets a `## Still open` line; one a done decision task lists was decided there, and
 `decide` prints `trade <kid> at <from>: decided in [[<slug>]]` and never offers it at that `from` again; one only a
 dropped task lists, or one recorded moot, is offered again. A trade on a key this Reflection's revert moved waits for
-the next reading (`a revert of <key> comes first this Reflection`). The task is scheduled for the next Melbourne
-morning, conversation-gated, and orient's audit lists it (orient § 2). Put its line on its `scheduled:` day's page by
-task-writer § 3b; when `decide` printed `(was <date>)`, move the line from the old day's page.
+the next reading (`a revert of <key> comes first this Reflection`). The task is written with no `scheduled:` date
+and is conversation-gated: Chorus's Reflection Routine asks it at the Thursday sitting after Lunch (`reflect.py loops`,
+Chorus ADR 0095 d5) and answers it through `--decide` (§ Deciding the decision task), and orient's audit lists it
+(orient § 2). Put no line on any day page. When `decide` printed `scheduled <date> dropped`, remove the task's
+unchecked line from that day's page: the task was written before this rule (ADR 0037 d5, amended 2026-11-03).
 
 ### 16. Close
 
@@ -695,8 +714,9 @@ docs-only PRs; the waits to start; each circling item and any Watch it opened), 
 
 ## Deciding the decision task
 
-`/thread:reflect --decide [[<slug>]]`, with Lachy, at the top of a run. Read every `## Reflection <id>` section and
-`## Still open`. For each item:
+`/thread:reflect --decide [[<slug>]]`, with Lachy, at Chorus's Reflection Routine (its Thread ask's *Decide it now*),
+or by hand; never during a run. Read every `## Reflection <id>` section and `## Still open`. Put each item to him one
+question at a time, saying what it is, what a yes changes and why. For each item:
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py raised --watch <id> --reflection <the section's id> [--confirmed | --declined]

@@ -423,6 +423,14 @@ test('--record-only from a trickle-bound score (p28-6) keeps its binding on the 
   assert.equal(l.binding, 'trickle-bound')
 })
 
+test('--record-only from a last-start-bound score (p28-7) keeps its binding on the tuning line', (t) => {
+  const home = tmpHome(t)
+  const r = tune(home, ['--scores', writeScores(home, { binding: 'last-start-bound' }), '--record-only'])
+  assert.equal(r.status, 0, r.stderr)
+  const [l] = lines(tuningsPath(home))
+  assert.equal(l.binding, 'last-start-bound')
+})
+
 test('--record-only from a stale seven-score headline (a v1 score.json) records the three new keys as null', (t) => {
   const home = tmpHome(t)
   const { handsOffRate, quality, reviewChurn, ...seven } = HEADLINE

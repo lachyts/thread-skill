@@ -654,8 +654,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Night record** — per Morning, the **Last starts**' held starts and the
   tasks still running at the Morning, written into each rollout's **Run
   record** and keyed by that Morning, so a **Reflection** can tune the
-  two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences).
-  _Avoid_: night log.
+  two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences): it
+  tells a fallback overrun (a kind with under three past runs) from an
+  underestimate (a kind whose usual length let it start). _Avoid_: night log.
 - **Heat hold** — while the Mac's thermal pressure reads heavy or worse, no
   new Rollout task starts, Away included, and no **Verify slot** is free; at
   trapping or sleeping a running slotted suite is stopped and put back in
@@ -850,7 +851,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   lead's scripts, Workflow engine and skill prose all come from it for the
   whole run, as do status's and repair's for that rollout, whichever session
   runs them, so the Primary checkout can move under a **Running rollout**. A
-  rollout moves to a newer snapshot only at its **Reinstate** (ADR 0043). A
+  rollout moves to a newer snapshot only at its **Reinstate** (ADR 0043); a
+  note that names none is stamped at its next Reinstate or Leg begin. A
   session's rendered prose is followed only when its git `ident` prose id is
   the snapshot's own; otherwise the snapshot's SKILL.md is read as a file
   (`skills/_shared/engine-snapshot.md`). _Avoid_: pinned root, frozen plugin,
@@ -1147,7 +1149,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note. No separate resume command. It moves the rollout onto a fresh
   **Engine snapshot** at origin's tip (ADR 0043); for a serial chain, which is
   never paused, it is the first Leg begun after a Leg closed `stopped`; never
-  a **Sign-off pause**'s reinstate. _Avoid_: restart, relaunch, unpause.
+  a **Sign-off pause**'s reinstate. An unstamped note is stamped at it, and an
+  unstamped chain also at its first Leg or the first Leg begun after any close
+  (ADR 0043, as amended). _Avoid_: restart, relaunch, unpause.
 - **Room stop** — on the Chorus Stage, at a Login's line: the lead starts
   nothing, stops each Workflow call at a step boundary (just after its running
   agent's result line), and resumes every stopped call by `resumeFromRunId` on
@@ -1330,9 +1334,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Chorus's weekly Runner (ADR 0051).
   _Avoid_: clean run, empty retro.
 - **Decision task** — the one open vault task tagged `decisions` that the
-  weekly reading writes for the next morning when it has a rule proposal
+  weekly reading writes, unscheduled, when it has a rule proposal
   or a held trade (a knob ADR 0037 d1 leaves to Lachy; ADR 0037 d5): Lachy
-  decides it at the top of a run (`/thread:reflect --decide`); schedule
+  decides it at Chorus's Thursday Reflection Routine
+  (`/thread:reflect --decide`); schedule
   (either shape) and the reshuffle never take it. _Avoid_: inbox, review
   queue.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,

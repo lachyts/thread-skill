@@ -24,7 +24,10 @@ reads the operator's local ladder file (`~/.config/thread/ladder.toml`), and, fo
 `parallel_ceiling:`, the operator's rollout settings (`~/.config/thread/rollouts.toml`), and the Away state file
 (`~/.config/thread/away.json`, a read inside `reconcile-rollout.py status`, for § 4's Trickle line and the ETA's
 width; never through `next`), with the leads' leases (`~/.config/thread/leases/*.json`, the same read, p28-4) and,
-only when a lease would lapse, the Mac's kern.boottime and kern.waketime (a read-only `sysctl`). Status itself runs
+only when a lease would lapse, the Mac's kern.boottime and kern.waketime (a read-only `sysctl`). While Away runs to the
+Morning, the same read also reads the Run record's folded call journals (every `<rollout>.jsonl` in its events dir)
+for the last starts' history (`skills/execute/away.md` § The last starts, p28-7: § 2's `lastStart` and `lastStarts`).
+Status itself runs
 `rollout-settings.py` for a task whose `max_review_rounds` is absent at both levels (§ 2), and
 `lead-integrate.py inputs` resolves `auto_retries` the same way, inside its own read, for a set-aside task whose
 notes lack it. Either read of the settings file runs land.sh's `--origin-slug` read, and so one local
@@ -134,7 +137,10 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   until flag), `onMerge` (an approved queue's `on_merge:` as read, `{value, error}`, null on a note with no rollout
   hold or none: `_shared/vault-grammar.md` § Approved queue; § 3's Hold until flag), `chainStart` (`{prior, pr}`
   when this note is a chain's new note whose start was never stamped, else null; § 3's **Approved queue,
-  unstamped:** flag), `trickle` (the Mac-wide cap, § 4's Trickle line; below), `ceilingError` (why `ceiling` is null: an invalid
+  unstamped:** flag), `trickle` (the Mac-wide cap, § 4's Trickle line; below), `lastStarts` (the last starts as `next`
+  reads them, `{morning, kinds}`: `morning` the Morning they look toward, ISO 8601 at the local offset, or null when
+  they do not apply, and `kinds` each kind the rows' checks read, `{usualMinutes, history}`;
+  `skills/execute/away.md` § The last starts; § 4's Trickle line and the Queued row), `ceilingError` (why `ceiling` is null: an invalid
   `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise) and
   `ceilingCause` (what that error needs: `stamp`, `file`, `root` or `resolver`; null otherwise), both for § 3's
   Ceiling unresolved flag;
@@ -142,6 +148,13 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   `waitingOn`, `blockerSummary`, `rung` and `rungDrift`. Each also carries `holdUntil`: the task's own PR hold,
   the same shape as the rollout's, or null, reported whatever the task's state. A set-aside task whose note holds a `## Needs you`
   question (a gate included) also carries `needsHuman`: that question, normalised; the key is absent otherwise.
+  Each also carries `lastStart` (p28-7): on a `queued` row with no `waitingOn`, the `last start: …` reason `next`
+  would hold its start on (its kind's usual length, or the two-hour fallback with no history, would run it past the
+  Morning), else null. It is null on every row while the rollout is paused, a pause is requested, `mainRed` stands
+  or a `gitEnvHold` of scope `rollout` stands (those hold every row themselves), and while the last starts do not
+  apply. It reads the row once a Slot frees: a row whose ceiling or Away cap is also full, or one the Heat hold
+  holds (a hot Mac's `slotLimit` is 0), still shows it, though `next` names `ceiling:`, `away cap:` or `heat:`
+  first. An older engine's output has no `lastStart` or `lastStarts` key: the row then reads as a plain queued row.
   A task set aside at Integration whose latest run opens a named marker also carries `integrationBlock`:
   `conflict` (an **Integration conflict**, `integration: conflict unresolved in …`, its resolution brief beneath)
   or `red` (a verifier red at Integration, `integration: verifier red: …`); the key is absent otherwise. An
@@ -423,7 +436,8 @@ names, once, then ` — lane only`, or ` — whole rollout` when an entry reads 
 Away state). Not Away: `Trickle: not Away · N <limit> · <running>/<limit> tasks running on this Mac (<here> here[,
 <n> in [[<r>]]…]) · away.json <fresh until <until> | missing: the default | stale: <why>, read as not Away, Trickle
 2 | unreadable: <why>, read as not Away, Trickle 2>`. Away: `Trickle: Away until <until> · the Away cap <awayCap>
-holds (N <limit> by day) · <running>/<awayCap> tasks running on this Mac (…) · away.json fresh`. When `running`
+holds (N <limit> by day) · <running>/<awayCap> tasks running on this Mac (…) · away.json fresh`, then ` · the last
+starts hold toward the Morning at <trickle.morning>` when `lastStarts.morning` is set (p28-7). When `running`
 reaches the cap in force (`limit` not Away, `awayCap` Away) the count adds `: full, new starts wait (a meant wait,
 never stalled)`: a row held on `trickle:` or `away cap:` is the cap at work, never a blocker. The lease (p28-4)
 appends, in this order: `· not counted (lease lapsed): <n> in [[<r>]]…` when `lapsed` is non-empty; `· this lead's
@@ -451,7 +465,7 @@ holds <held> (<why>)`. Exit 2: `Hold: not read: <its line>`.
 | `integrating` | **Integrating** | the lane: its PR and live state, the time since `integrating:`, and the outcome of `lastIntegration`, or `RACE re-verify in flight` or `RACE revert in flight (PR #R)` (§ 3); with `originWait`: `waiting on the origin lane (<origin>) since <since>` in place of the time in the lane (another project's Integration holds the origin; ADR 0064) |
 | `awaiting-integration` | **Awaiting Integration** | its PR and `ready:` (`inputs.readyAt`) |
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting; `auto-retry <autoRetriesUsed>` when above 0 (the verdict sets the counters before its first refusal, so `inputs` carries them for a running note too) |
-| `queued` | **Queued** | `held until <pr> merges` while the rollout's `holdUntil` holds (§ 3), else `waitingOn`, else `held until <pr> merges` for its own held `holdUntil`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else "next free slot" |
+| `queued` | **Queued** | `held until <pr> merges` while the rollout's `holdUntil` holds (§ 3), else `waitingOn`, else `held until <pr> merges` for its own held `holdUntil`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else `lastStart` (`<reason>`: held toward the Morning; it starts once the Morning passes; a shorter row below may start meanwhile) when it is set, else "next free slot" |
 | `set-aside` | **Set aside** | where it re-enters (below), the first line of `blockerSummary`, its automatic retry's count and cool-down (**Automatic retry first**, below), and `answered: …` for an answered one (**Needs you**, below); a task set aside at Integration names its `integrationBlock`: `Integration conflict → …` in place of `at Integration → …` for `conflict`, `at Integration, verifier red → …` for `red` |
 
 **Rungs.** Every task line also shows `rung <name>` when its note has one (§ 2's `rung`).
