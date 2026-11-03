@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-02
+last_touched: 2026-11-03
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,13 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-11-03 (latest): the Primary checkout caught up, 158 commits, and no live rollout holds it any more.** Every live rollout note had been written by the stale pre-snapshot engine, so none carried `engine_snapshot:`, and `engine-snapshot.py`'s `move_rule()` never stamps an unstamped note: they ran on the Primary, `primary-hold.sh` held it, and the Primary stayed stale, so every new note was unstamped too (the Reflection's f0ab0604).
+- **Cut-over, on Lachy's word:** hard-paused chorus-rollout-2026-11-02 (21/33), closed Smart Slider Leg 2 `stopped`; `git reset --keep origin/master` to `1c9ffe0`; Mac rebooted.
+- **Stamped by hand:** one `engine-snapshot.py cut` (`thread-skill-snapshots/1c9ffe0cbf5e`), then `adopt` on chorus, smart-slider (-2), seo and mac-data-mcp (all 2026-11-02/03 notes). `primary-hold.sh` now prints nothing.
+- **Restarted:** relayed `/thread:execute [[chorus-rollout-2026-11-02]]` (a Reinstate: move due, the cut reuses the snapshot); Smart Slider Leg 3 started through `create_thread` (task_b7bbef89). SEO waits on Lachy's four set-asides.
+- **Lachy's rulings:** f0ab0604 yes; fix pickup stays on request (a running rollout keeps its snapshot; pause and reinstate that one rollout when a fix matters now; ADR 0043 unchanged); the weekly decisions reach him at the Thursday Routine, not his Day page.
+- **Filed:** [[thread-skill-unstamped-rollout-stamped-at-reinstate]] (high), [[thread-skill-reflection-decisions-go-to-the-routine]].
 
 **2026-11-02 (latest): fresh-review Phase 1 landed: a landing takes the checker's verdicts (ADR 0065), PR #271 merged (`08b86fa`).** Built p1-4 of [[Fresh Review Skill]] ([[fresh-review-skill-p1-4-landing-loop-and-readers]]).
 - **Close's loop:** step 5 takes fresh-review's checker verdicts (`blocking`, `unconfirmed`, `filed`, `rejected`) and grades nothing; three code rounds per landing, numbered in each doc's `round:`, the landing's chain its own (a dev-time chain never spends it), a resumed loop reading the highest `round:` since its PR opened; a confirmed finding open on round 3 is fixed until its reproduction passes, with no further review; the ledger step and its hold are gone.
@@ -826,7 +833,8 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
-- **The primary checkout is the live plugin, and it is held** (2026-11-02). `${CLAUDE_PLUGIN_ROOT}` is `~/repos/tools/thread-skill` itself (a directory source), so whatever that checkout holds is the close, execute and land.sh every session runs, and ADR 0031 holds it behind origin/master while any rollout runs (`skills/_shared/scripts/primary-hold.sh` names them). A merged change goes live only when it catches up. Never fast-forward or reset it by hand: on 2026-11-02 a hand fast-forward moved five running rollouts' engine for 63 s before it was put back.
+- **An unstamped rollout note holds the Primary for its whole life** (2026-11-03). `move_rule()` returns `due: False` for a note with no `engine_snapshot:`, so a Reinstate never stamps it, and a stuck serial chain can live for days. Until [[thread-skill-unstamped-rollout-stamped-at-reinstate]] lands, the fix by hand is one `engine-snapshot.py cut --verb execute --prose-id <execute SKILL.md $Id hex>` (options after the verb), then `<snapshot>/skills/_shared/scripts/engine-snapshot.py adopt --rollout <note>` per idle note; `primary-hold.sh <repo>` then prints nothing.
+- **The primary checkout is the live plugin, and it is held** (2026-11-02; released 2026-11-03, once every live note was stamped: see the quirk above). `${CLAUDE_PLUGIN_ROOT}` is `~/repos/tools/thread-skill` itself (a directory source), so whatever that checkout holds is the close, execute and land.sh every session runs, and ADR 0031 holds it behind origin/master while any rollout runs (`skills/_shared/scripts/primary-hold.sh` names them). A merged change goes live only when it catches up. Never fast-forward or reset it by hand: on 2026-11-02 a hand fast-forward moved five running rollouts' engine for 63 s before it was put back.
 - **Run the landing through `/thread:close`, never by hand before it** (2026-11-02). Close commits THREAD.md on the own branch (7.1) before 7.9 lands it, so the close-out rides the branch's PR. A landing loop run by hand first merges the branch, and the THREAD.md close-out then needs a branch and landing of its own.
 
 - **Parallel tasks each draft "the next free ADR number", so they collide (2026-11-01).** Four tasks of rollout 2026-10-31 each wrote a new ADR 0060 under a different filename: git sees no conflict. `tests/contracts/refs.test.mjs` rule A (every ADR reference resolves to exactly one file) catches a duplicate at the Integration verify; the lead then routes it to the integrator, which renumbers when the task note says so (the lead added an `## Integration note`). A fix belongs in schedule or the planner prompt (reserve numbers, or draft as `NNNN` and number at Integration).
@@ -1108,6 +1116,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-11-03 (Primary caught up, live notes stamped):** the Primary is free to move: land and pull as normal. Next: [[thread-skill-unstamped-rollout-stamped-at-reinstate]] (move_rule stamps an unstamped note at its next Reinstate or Leg begin; ADR 0043 amendment), then [[thread-skill-reflection-decisions-go-to-the-routine]]. The other 13 items of [[thread-skill-decisions-2026-11-02]] are still open for `/thread:reflect --decide`. Check Chorus's reinstate and Smart Slider Leg 3 each report the snapshot `1c9ffe0cbf5e`.
+
 **From 2026-11-02 (fresh-review Phase 1 landed, #271):** check the primary checkout caught up (`git -C ~/repos/tools/thread-skill log -1` at `08b86fa` or later) once the five rollouts end; only then does close run ADR 0065's loop. Next for the review loop: the design pass on [[fresh-review-landing-loop-review-follow-ups]] (no route after the budget; the Counting window). p30-2 ([[thread-skill-p30-2-a-review-stop-is-the-agents-to-resolve]]) is moot now the ledger never stops: close or reshape it.
 
 **From 2026-11-02 (rollout 2026-10-31 complete):** no rollout runs on this repo. Next:
@@ -1137,6 +1147,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-03 (close, Primary cut-over): explained the weekly decision task; on Lachy's word paused Chorus and stopped Smart Slider Leg 2, moved the Primary 158 commits to `1c9ffe0`, stamped the four live notes with snapshot `1c9ffe0cbf5e`, restarted Chorus and Smart Slider Leg 3; filed the move_rule fix and the Routine change; recorded f0ab0604 yes. My slip: messaged the Companion for a restart Lachy then did himself, so its quiet had to be dropped by a resume.
 - 2026-11-02 (close, fresh-review p1-4): built close's ADR 0065 loop, land.sh `--fixed-at-budget`, Legs and the reflect readers test-first in `thread-skill-wt-p1-4`; reviewed (1 dev + 3 landing rounds) and merged #271; fast-forwarded `~/.agents` to the confirm-step branch and pushed. My slips: ran the landing by hand before `/thread:close`, so this close-out needed its own branch; and fast-forwarded the held primary checkout under five rollouts for 63 s before putting it back.
 - 2026-11-02 (close, room stop to the week's line): reviewed and landed the five-hour drop's thread-skill half (`3d6a481`, rebased as `33c8262`) from a Stage worktree beside the 2026-10-31 rollout's lead; one clean review round, 9 findings filed; PR #270 queued with auto-merge. The `drop-five-hour` branch and worktree are left as they were; #270 supersedes them.
 - 2026-11-02 (close, rollout lead after sign-off): signed off p33-4's gate on Lachy's word; reinstated; resumed the gate-pending call on the signed plan; ran the lead verify (green) and a judge-only Integration; merged #267; ran the completion ceremony (P33 closed, scored, archived, reflect follow-up filed).
