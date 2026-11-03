@@ -778,6 +778,21 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the checkout, with no origin read and no git-env window (ADR 0055), and
   completes either way too, since each task passed its own Leg verify.
   A note with none completes as before. _Avoid_: final verify, post-merge suite.
+- **Merge gate** — the checks a PR must pass before GitHub merges it into the
+  default branch: the required contexts of branch protection and rulesets
+  (ADR 0068, giflab ADR 0012 d4). Schedule step 2.5 reads it through
+  `merge-gate.py` and sets it against the rollout's `verifier:`. A context's
+  **closure** is the job it names, that job's transitive `needs:`, and the
+  jobs of the local reusable workflow it calls. A **job class** is what a
+  job's steps run: a lint or format check, a type check, a test tier, a
+  build. A context is **compared** only when every counted job in its
+  closure was read, with no read gap the script names; a partly read or
+  unread one (another app's status, a remote reusable workflow, a cut step)
+  is never covered, and only a compared context is ever called covered. A
+  PR that converged on the verifier and then stops at merge on a red
+  required check is set aside with reasonClass `merge-gate`, distinct from
+  `integration-red` (a red of the verifier at Integration). _Avoid_: CI
+  green, CLEAN.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier
   suite runs in, shared by every rollout on the machine (p23-4,
   `scripts/verify-slot.py`): the lead's Integration and RACE verifies and
