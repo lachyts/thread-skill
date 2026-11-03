@@ -628,10 +628,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Rollout with no lease still counts (ADR 0049, amended). _Avoid_: heartbeat
   file, lock.
 - **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
-  the **Away cap**) for a start it has picked but not yet stamped, so every
-  other lead counts it. The stamp consumes it, and it lapses after 20
-  minutes. _Avoid_: bare "claim" (a Leg's task claim and a **Surface** claim
-  use it).
+  the **Away cap**) for a start, or a seeded revise, it has picked but not yet
+  stamped, so every other lead counts it. The stamp consumes it, and it lapses
+  after 20 minutes. _Avoid_: bare "claim" (a Leg's task claim and a
+  **Surface** claim use it).
 - **Fair share** — the place a lead's `next` keeps free in the **Trickle** (or
   the **Away cap**) for the waiting rollout that holds fewest, then was served
   least recently, so a rollout that refills the moment its call returns never

@@ -1155,12 +1155,15 @@ the refusals pass and every PR-hold gh call is made, `next` takes the machine-wi
 the note-lock dir, _trickle_paths), walks --tasks-dir afresh, reads the claims file (TRICKLE_CLAIMS beside it,
 _trickle_claims_read), counts each other lead's live claim it judges (_trickle_claims_judge) beside the notes, picks
 its starts, saves the rollout note and, only once that save succeeds, writes the kept claims plus one per start of
-its final `start` (the head Solo task's lone start included), replacing this rollout's earlier ones, then lets the lock
-go. A claim counts until the note-based count counts its task (its § 4 stamp consumes it), or for TRICKLE_CLAIM_TTL
-from its `at`; a missing or torn rollout or task note keeps it counting until then. --dry-run reads the claims and
-takes no lock, re-walks nothing and writes nothing. A lock it cannot take, a file it cannot read or a write that fails
-prints one TRICKLE_WARN line and fails open (the old window: one call's starts per lead), never a halt; a file of
-another version is read as none and never written.
+its final `start` (the head Solo task's lone start included) and one per seeded revise step 1.2 launches (p28-8: the
+first rev_go of _seeded_revises, `kind: revise`, TRICKLE_CLAIM_REVISE), replacing this rollout's earlier ones, then
+lets the lock go. A claim counts until the note-based count counts its task (its § 4 stamp consumes it), or for
+TRICKLE_CLAIM_TTL from its `at`; a missing or torn rollout or task note keeps it counting until then. A start claim
+counts while its task is queued or running; a revise claim while its task is set aside at its run, `blocked`, with no
+recorded answer (_answer_recorded), or running; anything else drops it. --dry-run reads the claims and takes no lock,
+re-walks nothing and writes nothing. A lock it cannot take, a file it cannot read or a write that fails prints one
+TRICKLE_WARN line and fails open (the old window: one call's starts and seeded revises per lead), never a halt; a file
+of another version is read as none and never written.
 
 The fair share (p28-5; the spec is skills/execute/away.md § The Trickle, *A fair share*): a lead refills the Trickle
 the moment one of its calls returns, while a lead waiting on it re-checks only at its heartbeat's ticks, so the claims
@@ -1172,8 +1175,9 @@ reads it) waits on slotLimit: one record {tasksDir, rollout, since, at, served, 
 carried from its own earlier record, `served` the call's now once it starts, else the later of its own earlier
 record's and its latest `started:` stamp (_latest_started: so a start whose call wrote no record, under a lock it
 could not take, still counts), else null, and `want` its waiting rows, Solo-aware, plus the revises step 1.2 cannot
-launch, capped at its ceiling's room. Its earlier record is always replaced, and a call with nothing waiting (a pause,
-a hold, main red, a whole-rollout git-env hold, or everything started) removes it.
+launch, capped at its ceiling's room (the ones it can launch are claimed, p28-8: Trickle claims, above). Its earlier
+record is always replaced, and a call with nothing waiting (a pause, a hold, main red, a whole-rollout git-env hold, or
+everything started) removes it.
 _trickle_waiting_judge reads the list in this order: malformed records dropped silently; another tasksDir's kept by the
 wall clock and never counted; a record TRICKLE_WAIT_TTL old or older (or as far ahead) dropped, before the own record
 is read, so a lapsed one never carries its `since`; repeats, the latest `at` winning; this rollout's own taken out;
@@ -3919,6 +3923,9 @@ TRICKLE_CLAIM_TTL = timedelta(minutes=20)    # one heartbeat tick: a claim no §
 TRICKLE_CLAIMS_MAX_BYTES = 256 * 1024
 TRICKLE_WARN = "WARN: trickle claims"                          # every claims stderr line's prefix
 TRICKLE_CLAIM_KEYS = ("tasksDir", "rollout", "slug", "at")
+# p28-8: a seeded revise's claim (execute § 4.5 step 1.2) carries one more key, `kind`, with this value; a start's
+# carries none. Optional, after the four required keys, so the file stays version 1.
+TRICKLE_CLAIM_REVISE = "revise"
 # The fair share (p28-5; execute away.md § The Trickle, *A fair share*): the claims file's `waiting` list, one record
 # per rollout whose lead's `next` held a row on the Mac-wide cap or the heat, so every other lead keeps a freed place
 # for it in turn. A record no later write replaces lapses after TRICKLE_WAIT_TTL from its `at` (a gone lead).
@@ -4369,7 +4376,9 @@ def _trickle_claims_judge(entries, tasks_dir: Path, this_stem: str, walk, now, w
     and `wall` always the real clock. Rules, in order, on each entry R/S (its rollout, its task; stems compared
     lowercased):
       1. malformed (no object, a key missing or no non-empty string, an `at` _parse_ts reads as None, a naive one
-         that cannot be placed in local time included): dropped, never a crash no later write could prune;
+         that cannot be placed in local time included, or a `kind` that is present and not TRICKLE_CLAIM_REVISE:
+         "start", 1, "" and null alike; p28-8): dropped, never a crash no later write could prune. An absent `kind`
+         is a start claim, `kind: revise` a seeded revise's;
       2. another tasksDir: never counted, kept only while under TRICKLE_CLAIM_TTL old by `wall` (so a test's --now
          never ages a real claim);
       3. this rollout's own: dropped (this call's starts replace them); so is a repeat of an entry already judged;
@@ -4377,13 +4386,16 @@ def _trickle_claims_judge(entries, tasks_dir: Path, this_stem: str, walk, now, w
       5. R in the walk but outside the count (not directly in `tasks_dir`, or not _trickle_eligible): dropped;
       6. R's counted set: _counted_by_rollout's for a present R, empty for an R the walk lacks (torn mid-edit, or
          deleted), so a claim is never consumed through a note the walk could not read;
-      7. S in the walk: dropped when its `rollout:` names another rollout (carried) or it is neither queued nor
-         running (it left the queue another way), and consumed (dropped) once running and in R's counted set, the
-         note-based count now counting it; else counted and kept;
+      7. S in the walk: dropped when its `rollout:` names another rollout (carried); else by its kind. A start claim
+         is dropped when S is neither queued nor running (it left the queue another way). A revise claim (p28-8) is
+         dropped unless S is set aside at its run and `blocked` with no recorded answer (_answer_recorded; a read
+         that raises keeps it counting, so the judge fails toward the count) or running: queued (handed back), in
+         review, done, set aside at a gate or at Integration, or answered. Either kind is consumed (dropped) once S
+         is running and in R's counted set, the note-based count now counting it; else counted and kept;
       8. S not in the walk (deleted, or torn mid-edit): counted and kept.
     `counted` is {<rollout>: n}: a present R under its walked stem (_elsewhere_running's key), an absent one under the
     stem the claim recorded (stems equal when lowercased spelled as the first in sorted order). `kept` holds the four
-    keys only."""
+    keys only, plus `kind` on a revise claim, so another lead's write never strips it."""
     here = os.path.realpath(str(tasks_dir))
     this = this_stem.lower()
     counted_by = _counted_by_rollout(tasks_dir, walk)
@@ -4391,10 +4403,13 @@ def _trickle_claims_judge(entries, tasks_dir: Path, this_stem: str, walk, now, w
     for e in entries:
         if not isinstance(e, dict) or not all(isinstance(e.get(k), str) and e.get(k) for k in TRICKLE_CLAIM_KEYS):
             continue
+        revise = "kind" in e
+        if revise and e["kind"] != TRICKLE_CLAIM_REVISE:
+            continue
         at = _parse_ts(e["at"])
         if at is None:
             continue
-        e = {k: e[k] for k in TRICKLE_CLAIM_KEYS}
+        e = {**{k: e[k] for k in TRICKLE_CLAIM_KEYS}, **({"kind": TRICKLE_CLAIM_REVISE} if revise else {})}
         if e["tasksDir"] != here:
             if abs(wall - at) < TRICKLE_CLAIM_TTL:
                 kept.append(e)
@@ -4410,8 +4425,13 @@ def _trickle_claims_judge(entries, tasks_dir: Path, this_stem: str, walk, now, w
         if task is not None:
             if (_wikilink_slug(task[1].get("rollout")) or "").lower() != r:
                 continue
-            state = _queue_state(task[1])[0]
-            if state not in ("queued", "running") or (state == "running" and s in done):
+            state, aside_at = _queue_state(task[1])
+            if revise:
+                live = state == "running" or ((state, aside_at) == ("set-aside", "run") and
+                                              _status(task[1]) == "blocked" and not _claim_answered(task[1]))
+            else:
+                live = state in ("queued", "running")
+            if not live or (state == "running" and s in done):
                 continue
         seen.add((r, s))
         kept.append(e)
@@ -4422,6 +4442,16 @@ def _trickle_claims_judge(entries, tasks_dir: Path, this_stem: str, walk, now, w
     for spellings in absent.values():
         counted[min(spellings)] = len(spellings)
     return counted, kept
+
+
+def _claim_answered(note) -> bool:
+    """Whether a revise claim's task (p28-8) carries a recorded answer to its block (_answer_recorded, read from the
+    walked note alone), so step 1.2 skips it. A read that raises reads as unanswered: the claim keeps counting, so
+    _trickle_claims_judge fails toward the count and never crashes."""
+    try:
+        return _answer_recorded(note) is not None
+    except Exception:  # noqa: BLE001 — the judge's read only: an answer it cannot read keeps the claim counting
+        return False
 
 
 def _trickle_merge(notes, claims) -> dict:
@@ -5089,9 +5119,9 @@ def cmd_next(args) -> int:
     Trickle, *Trickle claims*), except for its writes off --dry-run: two to the rollout note (a drained soft pause is
     stamped (`paused:`) here, and once the refusals pass the rollout start stamp (`start: unattended`, _clear_start) is
     removed (`startCleared`); one call can make both) and the claims file, written under the trickle claim lock from a
-    fresh walk once the rollout note's save has succeeded: one claim per start, and its waiting record (p28-5) while a
-    row waits on the Mac-wide cap or the heat or a seeded revise waits on slotLimit, this rollout's earlier ones
-    replaced.
+    fresh walk once the rollout note's save has succeeded: one claim per start and per seeded revise step 1.2 launches
+    (p28-8), and its waiting record (p28-5) while a row waits on the Mac-wide cap or the heat or a seeded revise waits
+    on slotLimit, this rollout's earlier ones replaced.
     A claims file it cannot read, a lock it cannot take or a write that fails prints one TRICKLE_WARN line and never
     fails the call (the count then reads the file without the lock, and nothing is claimed). New starts are
     picked greedily by `priority:`, then least file overlap with what is in flight, then schedule rank, among the
@@ -5273,10 +5303,10 @@ def cmd_next(args) -> int:
                 task_held[r["slug"].lower()] = reason
             elif entry["state"] == "MERGED":
                 task_clears.append((r, h, entry))
-    # The seeded revises step 1.2 launches (p28-5; _seeded_revises), which the fair share counts below: read here, before
-    # the trickle claim lock, so the lock never spans their git and settings reads. None under a pause or a standing
-    # rollout hold, where step 1.2 launches none; main red and a whole-rollout git-env hold (read below, where step 1.1
-    # halts first) clear them too.
+    # The seeded revises step 1.2 launches (p28-5; _seeded_revises), which the fair share counts below and the claims
+    # write claims, the first rev_go of them (p28-8): read here, before the trickle claim lock, so the lock never spans
+    # their git and settings reads. None under a pause or a standing rollout hold, where step 1.2 launches none; main
+    # red and a whole-rollout git-env hold (read below, where step 1.1 halts first) clear them too.
     revises = [] if (paused or pause_requested or ro_held) else \
         _seeded_revises(by_state.get("set-aside", []), task_held, rollout_note, root)
     # The Trickle claims (p28-3; away.md § The Trickle, *Trickle claims*), taken after every PR-hold gh call so the
@@ -5510,10 +5540,12 @@ def cmd_next(args) -> int:
         holds = [(r, "git-env hold: /thread:repair") for r in stalled + queued]
     # The claims write (p28-3), under the lock and only once the rollout note's save has succeeded (a failed one raised
     # above, so nothing is claimed), after the main-red and whole-rollout git-env overrides, so it reads the final
-    # `start`: every kept entry plus one claim per start (the head Solo task's lone start included), replacing this
+    # `start`: every kept entry plus one claim per start (the head Solo task's lone start included) and one per seeded
+    # revise step 1.2 launches (p28-8: the first rev_go of `revises`, in `next` order, `kind: revise`), replacing this
     # rollout's earlier claims. `start` is [] under a pause, a rollout hold, the heat, a whole-rollout git-env hold (a
-    # bare checkout) or a main-red hold, which clears them; a lane git-env trip (ADR 0046) leaves it as it is, so its
-    # starts are claimed. The same write carries the waiting list (p28-5): every record the judge kept, plus this
+    # bare checkout) or a main-red hold, which clears them; `revises` is [] under each of those but the heat, where
+    # slot_limit is 0, so rev_go is 0. A lane git-env trip (ADR 0046) leaves both as they are, so its starts and revises
+    # are claimed. The same write carries the waiting list (p28-5): every record the judge kept, plus this
     # rollout's own (below), always replacing its earlier one. Skipped when neither list changed and the file read
     # cleanly, so a call that starts and finds nothing creates no file; a file of another version is never written.
     # Then the lock goes, before the best-effort records below.
@@ -5538,7 +5570,9 @@ def cmd_next(args) -> int:
         at = now.astimezone().isoformat(timespec="seconds")
         here = os.path.realpath(str(tasks_dir))
         fresh = {(e["tasksDir"], e["rollout"], e["slug"]): e for e in claims_kept + [
-            {"tasksDir": here, "rollout": rollout_path.stem, "slug": r["slug"], "at": at} for r in start]}
+            {"tasksDir": here, "rollout": rollout_path.stem, "slug": r["slug"], "at": at} for r in start] + [
+            {"tasksDir": here, "rollout": rollout_path.stem, "slug": r["slug"], "at": at, "kind": TRICKLE_CLAIM_REVISE}
+            for r in revises[:rev_go]]}
         new_claims = [fresh[k] for k in sorted(fresh)]
         mine_wait = [{"tasksDir": here, "rollout": rollout_path.stem, "since": _wait_ts(my_since), "at": at,
                       "served": _wait_ts(now) if start else (_wait_ts(my_served) if my_served else None),
