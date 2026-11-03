@@ -89,6 +89,17 @@ export const meta = {
 //                                    //   glob with `{module}` in it, or one starting with `-`, a runner option)
 //                                    //   ⇒ no pin clause; a refused value is logged once in task mode and read
 //                                    //   as absent, never an error.
+//   securityCheck : object,          // optional (execute § 3 `security_checks`, the rollout's hand-set opt-in); { script }:
+//                                    //   the absolute path of skills/execute/scripts/security-check.py, this entry's
+//                                    //   verify-timeout `securityCheck`, copied verbatim on every task call and seeded
+//                                    //   revise. Set ⇒ the implementer, the approved-plan implementer and the reviser
+//                                    //   carry securityCheckBlock right after FLAKE_CHECK_TASK (the scan once the
+//                                    //   verifier is green, before any PR or push) and return IMPL_RESULT_SECURED (its
+//                                    //   required newDependencies, the scan's brief lines); the review judge carries
+//                                    //   securityReviewBlock (the agent's copy of the brief and its own run of the same
+//                                    //   scan). Absent/null ⇒ every prompt and schema byte-identical. Any other shape is
+//                                    //   refused before any dispatch (securityCheckArgsError, argsRefused), and a value
+//                                    //   on mode 'integrate' is refused too: Integration's own commits are not scanned.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
 //                                    //   any dispatch (argsRefused), as is a missing, null or array `task`.
@@ -367,6 +378,21 @@ const IMPL_RESULT = {
     flakes: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { test: { type: 'string' }, sha: { type: 'string' } }, required: ['test', 'sha'] }, description: 'ONLY when your Flake check cleared a verifier red (ADR 0050): one entry per test that failed the first run, { test: its name exactly as the verifier printed it, sha: the tree HEAD it failed on }. Omit or empty otherwise.' },
   },
   required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
+}
+
+// The code-writing agents' schema while args.securityCheck is set (execute § 3 `security_checks`; implSchema): IMPL_RESULT
+// whose `verified` also needs the security scan green on that head, whose `blocked` names the scan's own stops, and with a
+// required newDependencies, the scan's brief lines, which the review judge reads as the agent's copy
+// (securityReviewBlock). The read-only investigator always keeps IMPL_RESULT: it writes no code.
+const IMPL_RESULT_SECURED = {
+  ...IMPL_RESULT,
+  properties: {
+    ...IMPL_RESULT.properties,
+    verified: { type: 'boolean', description: 'true only if the verifier reached the accepted green state (exit 0, or — when a baseline manifest is present — only known-baseline tests fail, each matching its listed reason) AND the security scan exited 0 on that head (verifier green AND security scan green), before the PR was opened or updated' },
+    blocked: { type: 'boolean', description: 'true if Ralph exhausted max iterations or the worktree was unsafe, or the security scan stopped you (action human, a finding you read as no credential, or it could not run)' },
+    newDependencies: { type: 'array', items: { type: 'string' }, description: "the scan's brief lines from its last exit-0 run, verbatim and in order (dependencies, then any accepted item and any not-checked line); [] when it printed none" },
+  },
+  required: [...IMPL_RESULT.required, 'newDependencies'],
 }
 
 // head and the feedback's `path:line` lead (p21-3) steer the judge through the schema alone, so no prompt byte moves
@@ -1058,6 +1084,104 @@ function flakeCheck(diff) {
 const FLAKE_CHECK_TASK = flakeCheck(DIFF_FILES)
 const FLAKE_CHECK_INTEGRATION = flakeCheck("the merge step's `task file:` lines, plus every file your resolution and fix commits change")
 
+// ---- The Security check (execute § 3 `security_checks`, the rollout's hand-set opt-in) ----
+// args.securityCheck is { script }: this entry's verify-timeout `securityCheck`, the absolute path of security-check.py.
+// Set, the three code-writing builders carry securityCheckBlock right after FLAKE_CHECK_TASK, so they run the scan once
+// the verifier is green and before any PR or push, and return IMPL_RESULT_SECURED; the review judge carries
+// securityReviewBlock after reviewTests, with the agent's copy of the brief and its own run of the same scan. A red the
+// agent can fix fails the try like a verifier red; a red no commit can clear is the scan's question for Lachy
+// (needsHuman), and his answer clears it only as a `security-accept` token the scan reads from the task note's
+// `## Repair input`. Integration's own commits and merge commits are not scanned. Absent ⇒ '' and IMPL_RESULT, so every
+// prompt and schema is byte-identical; set ⇒ a deliberate resume-cache break for the implement and revise calls.
+
+// args.securityCheck: '' when absent (or null) or usable, else why not. Exactly { script }: the absolute, single-line path
+// of security-check.py, never under a bare /skills/ (an unexported plugin root). A bad value is a lead bug, refused before
+// any dispatch (argsRefused).
+function securityCheckArgsError(v) {
+  if (v === undefined || v === null) return ''
+  if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script }, got ${refusedEcho(v)}`
+  const keys = Object.keys(v)
+  if (keys.length !== 1 || keys[0] !== 'script') return `must hold exactly script, got keys ${refusedEcho(keys)}`
+  if (typeof v.script === 'string' && v.script.startsWith('/skills/')) return `script ${refusedEcho(v.script)} sits under a bare /skills/: CLAUDE_PLUGIN_ROOT was empty (re-run by plugin-root.md rule 4)`
+  if (typeof v.script !== 'string' || !v.script.startsWith('/') || /[\r\n]/.test(v.script) || v.script.split('/').pop() !== 'security-check.py') {
+    return `script must be the absolute, single-line path of security-check.py, got ${refusedEcho(v.script)}`
+  }
+  return ''
+}
+
+// The call's securityCheck, or null when it is off (absent, null, or a value the entry would refuse).
+function securityOf(a) {
+  return a && a.securityCheck && !securityCheckArgsError(a.securityCheck) ? a.securityCheck : null
+}
+
+// The code-writing agents' schema: IMPL_RESULT_SECURED while the Security check is on, else IMPL_RESULT.
+function implSchema(a) {
+  return securityOf(a) ? IMPL_RESULT_SECURED : IMPL_RESULT
+}
+
+// The scan an agent and the review judge run, identical for both: scrubbed, every value shq'd, the base named outright.
+function securityScanCmd(a, task) {
+  return `${GIT_ENV_SCRUB} python3 ${shq(securityOf(a).script)} scan --tree ${shq(worktreeDir(a.repoPath, task.slug))} --base ${shq('origin/' + defaultBranch(a))} --accepts-from ${shq(task.taskPath)}`
+}
+
+// The code-writing agents' side, its own leading "\n" ('' when off), right after FLAKE_CHECK_TASK. It never renders a
+// loop or one-shot marker, and every git span is scrubbed.
+function securityCheckBlock(a, task) {
+  if (!securityOf(a)) return ''
+  const wt = shq(worktreeDir(a.repoPath, task.slug))
+  return `
+Security check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${securityScanCmd(a, task)}\`
+- Run it only once the touched tests and the verifier are green, before you open or update the PR and before any push. The Flake check never applies to it.
+- It reads commits only, so commit every change before it runs, new files included: \`${GIT_ENV_SCRUB} git -C ${wt} add -A\`, then commit, never only \`commit -a\`, which leaves a new file untracked. Remove a new file that is not part of the change rather than commit it.
+- Exit 0. Copy its \`brief\` lines, verbatim and in order, into \`newDependencies\` ([] when it printed none).
+- Exit 1 with \`action\` fix uses up its try. For a secret: \`${GIT_ENV_SCRUB} git -C ${wt} reset --soft <rewriteFrom>\`, take the secret out and make one commit, and do not push it: push plainly (never a force-push) only once the next try's verifier and this scan are green. Build any test data that must look like a secret at run time. For an advisory: move to a version it reports fixed, or drop the dependency only when the task brief does not need it. Then the next try runs the touched tests, the verifier, its Flake check, then this scan again.
+- On the last try, or in a one-shot: blocked=true and verified=false (escalate=true in a one-shot), with rule, file and commit named in blockerDiagnosis, never a value.
+- If you judge a reported secret not a credential the task needs as written (test data, a hash, a public id), return blocked with needsHuman: "The secret scan reports <rule> in <file>, commit <sha7>, line <n>, which reads as not a credential: <reason>. Accept it (answer \`security-accept <its accept>\`), or say how the task should change it?", the accept copied from that entry's \`accept\`. Several such findings go in that one question, each named with its own accept, so one answer can settle them all.
+- Exit 1 with \`action\` human: return blocked=true and verified=false, with its \`why\`, verbatim, as needsHuman. Push nothing more. An advisory with no fixed release is the scan's question, never a drop.
+- Never create, edit or leave an uncommitted \`.gitleaks.toml\` or \`.gitleaksignore\` to clear a finding. A change the task brief itself asks for is made and committed, and goes to Lachy through the scan's question.
+- The command reads the task note's \`## Repair input\` itself: never write a \`## Repair input\` entry or a \`security-accept\` token yourself, anywhere.
+- Exit 2 whose ERROR line says "commit them" (tracked changes or untracked files): commit every change, new files included, or remove a new file that is not part of the change, then run it again within the same try. Any other exit 2 is blocked, with its ERROR line.
+- Set verified=true only when the verifier is green AND this scan exited 0 on that head.`
+}
+
+// The agent's newDependencies as the judge sees them: strings only, each on one line of at most DEP_LINE_MAX characters,
+// at most DEPS_SHOWN lines, the rest counted in a final `(<n> more lines cut)`. DEPS_SHOWN holds the scan's whole brief
+// in practice: its MAX_DEPS (200) dependency lines and 50 accepted, not-checked or not-read lines after them
+// (prompt-invariants P6 pins it to MAX_DEPS + 50). A brief longer still, or a line cut with `…`, is not compared past
+// the cut (securityReviewBlock says so), so no judge asks for a change only the engine's cut made.
+const DEPS_SHOWN = 250
+const DEP_LINE_MAX = 300
+function dependencyLines(v) {
+  const out = []
+  let cut = 0
+  for (const e of Array.isArray(v) ? v : []) {
+    if (typeof e !== 'string') { cut += 1; continue }
+    let line = e.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!line) continue
+    if (line.length > DEP_LINE_MAX) line = line.slice(0, DEP_LINE_MAX) + '…'
+    if (out.length >= DEPS_SHOWN) { cut += 1; continue }
+    out.push(line)
+  }
+  if (cut) out.push(`(${cut} more lines cut)`)
+  return out
+}
+
+// The review judge's side, its own leading "\n\n" ('' when off), right after reviewTests: the agent's copy of the brief,
+// the cross-check against the diff, and the judge's own run of the identical scan under the read rule above.
+function securityReviewBlock(a, task, prevImpl) {
+  if (!securityOf(a)) return ''
+  const lines = dependencyLines(prevImpl && prevImpl.newDependencies)
+  return `
+
+Security check: the agent's copy of the scan's brief lines (its newDependencies):
+${lines.length ? lines.map((l) => '- ' + l).join('\n') : '(none reported)'}
+Cross-check it against \`gh pr diff ${prevImpl.prUrl}\`: a dependency the diff adds or changes that the list leaves out, or an entry the diff does not add, is a reason for "changes".
+Then run the scan yourself, only when the read rule above holds (the tree's HEAD equals the PR head and its status is clean), exactly \`${securityScanCmd(a, task)}\`. It is read-only. Exit 1: "changes"; when its \`action\` is human, also put its \`why\`, verbatim, in needsHuman. Exit 2, or a failed read rule: say so, run nothing more, and judge on the agent's list.
+An \`accepted\` line in your scan's brief names the \`## Repair input\` entry it came from: confirm it stands in the task note, is not superseded, and that the agent's copy carries the same line; otherwise "changes".
+A dependency in one brief and not the other is "changes"; a difference only in a not-checked or not-read line is not.
+The engine shows at most the agent's first ${DEPS_SHOWN} lines, each cut at ${DEP_LINE_MAX} characters: when its list ends in \`(<n> more lines cut)\`, your brief's lines after its first ${DEPS_SHOWN} are not compared (an \`accepted\` one among them is still checked against the task note), and a line that ends in \`…\` is compared only on the part shown.`
+}
+
 // Escalation hand-over context (empty-when-unused, like baselineManifest/gateOverride — the non-empty
 // string carries its OWN leading "\n\n" so callers interpolate it bare). `prior` is the first-pass
 // attempt's diagnosis/feedback verbatim.
@@ -1191,7 +1315,7 @@ Steps:
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix in the task note, then implement.
 4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
-${FLAKE_CHECK_TASK}
+${FLAKE_CHECK_TASK}${securityCheckBlock(a, task)}
 5. If the verifier passed: open a PR titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
 6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
@@ -1409,7 +1533,7 @@ blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 Steps:
 1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
 2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
-${FLAKE_CHECK_TASK}
+${FLAKE_CHECK_TASK}${securityCheckBlock(a, task)}
 3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
    otherwise), prUrl, branch, worktreePath (\`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\`), blockerDiagnosis, summary.
@@ -1450,7 +1574,7 @@ The PR is authoritative: judge \`gh pr diff ${prevImpl.prUrl}\` at the PR head. 
 On a mismatch, a non-empty status or a missing tree, use \`gh pr diff\` / \`gh pr view\` only — never the
 project's shared checkout. You are read-only: no edit, commit or push, in the tree or anywhere else.
 
-${reviewTests(task.verifier || a.verifier, a.verifySlot, touchedOf(a))}
+${reviewTests(task.verifier || a.verifier, a.verifySlot, touchedOf(a))}${securityReviewBlock(a, task, prevImpl)}
 
 Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "approve" if the PR is sound, else
 "changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${NEEDS_HUMAN_RULE}`
@@ -1494,7 +1618,7 @@ ${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorF
 Push new commits to the existing branch (the PR auto-updates) — do NOT open a new PR.
 
 ${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot, touchedOf(a))}
-${FLAKE_CHECK_TASK}
+${FLAKE_CHECK_TASK}${securityCheckBlock(a, task)}
 
 ${BUG_PREFLIGHTS}
 
@@ -1810,8 +1934,8 @@ function rungName(s) {
 }
 
 // The args refusal (p32-1, execute § 4.5 *Args refusal*). Every refusal the entry makes before any dispatch (args
-// that are not JSON or not one object, a bad defaultBranch, the pre-p12-5 shape, task, mode, ladder, verifySlot, integration or
-// task.resume) is thrown as argsRefused(why): its message starts with ARGS_REFUSED, so a notification the runtime wraps
+// that are not JSON or not one object, a bad defaultBranch, the pre-p12-5 shape, task, mode, ladder, verifySlot,
+// securityCheck, integration or task.resume) is thrown as argsRefused(why): its message starts with ARGS_REFUSED, so a notification the runtime wraps
 // (`Error: …`) or cuts still carries it, and the lead matches it by contains. Such a call dispatched nothing and the
 // same args are refused again, so the lead never reads it as a *Lost call* (a resume, a dead-call set-aside, an
 // automatic retry): it drops the runId and halts the entry once. A throw after dispatch is caught into a row instead.
@@ -2001,7 +2125,7 @@ function flakesOf(r, have, label) {
 // st (optional): a task-mode call's rung state. Each dispatch is recorded on st.ran BEFORE it runs, so a
 // stage that throws still reports what it dispatched (ADR 0029 decision 7). The integrate mode passes none:
 // it records its agents on its own trace, also before each runs (integrate()).
-// p29-9: the one push site of a task call's Flakes (st.flakes): an IMPL_RESULT agent's that returned (never a dead
+// p29-9: the one push site of a task call's Flakes (st.flakes): an IMPL_RESULT (or IMPL_RESULT_SECURED) agent's that returned (never a dead
 // one's), the read-only investigator's never (its prompt has no Flake check). A signed-gate replay dedupes.
 async function runAgent(prompt, opts, st) {
   if (st) st.ran.push({ label: (opts && opts.label) || '', rung: cur(st).name, model: opts && opts.model, effort: opts && opts.effort })
@@ -2010,7 +2134,7 @@ async function runAgent(prompt, opts, st) {
     log(`agent death (null return) on ${(opts && opts.label) || '?'} — one automatic retry`)
     r = await agent(prompt, opts)
   }
-  if (r != null && st && opts && opts.schema === IMPL_RESULT && !String(opts.label || '').startsWith('investigate:')) {
+  if (r != null && st && opts && (opts.schema === IMPL_RESULT || opts.schema === IMPL_RESULT_SECURED) && !String(opts.label || '').startsWith('investigate:')) {
     st.flakes = flakesOf(r, st.flakes || [], opts.label || '?')
   }
   return r == null ? { __dead: true } : r
@@ -2224,7 +2348,7 @@ async function implement(task, st, prev, a) {
   // The opts are held, and the builder call re-rendered (a pure function of unchanged inputs), so a signed
   // stop's continuation (pastSignedGates) carries the same bytes on the same rung; the cached call itself
   // is unchanged. Each runAgent() keeps a builder call as its first argument (git-env-scrub's e2 guard).
-  const firstOpts = { label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st) }
+  const firstOpts = { label: `implement:${task.slug}`, phase: 'Implement', schema: implSchema(a), model: cur(st).model, effort: implEffort(st) }
   let r = await runAgent(prompt(''), firstOpts, st)
   r = await pastSignedGates(task, r, prompt(''), firstOpts, st)
   // A dead agent is transient infra, NOT evidence of hardness — do NOT climb; report a clean block.
@@ -2252,7 +2376,7 @@ async function implement(task, st, prev, a) {
     // `1 + max_iterations` — one extra iteration at every n, no edge cases. A climb that really moved keeps
     // its full budget: that is what the hand-over buys.
     const retryTask = moved ? task : { ...task, maxIterations: CAPPED_RETRY_ITERATIONS }
-    const retryOpts = { label: `implement:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st) }
+    const retryOpts = { label: `implement:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: implSchema(a), model: cur(st).model, effort: implEffort(st) }
     r = await runAgent(prompt(prior, retryTask), retryOpts, st)
     r = await pastSignedGates(task, r, prompt(prior, retryTask), retryOpts, st)
     if (r.__dead) return transientImplBlock(planExtra)
@@ -2279,7 +2403,7 @@ async function reviseRound(task, st, current, priorFeedback, round, a, planText,
   // iteration runs one rung up (once per stage per call; a no-op on the top rung). A seeded revise is its
   // own call, so it climbs from the rung its note was stamped with.
   escalate(st, task.slug, 'review')
-  const reviseOpts = { label: `revise:${task.slug} r${round}`, phase: 'Review', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st) }
+  const reviseOpts = { label: `revise:${task.slug} r${round}`, phase: 'Review', schema: implSchema(a), model: cur(st).model, effort: implEffort(st) }
   let revised = await runAgent(reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts, st)
   // A replayed (or fresh) stop for gates the note has since approved: continuations (pastSignedGates), on the
   // same reviser prompt re-rendered from the same inputs. A dead result passes through (signedStop is false).
@@ -3459,6 +3583,9 @@ if (badLadder) throw argsRefused('args.ladder: ' + badLadder)
 // refusing engine is an *Args refusal*, and its next call is a fresh one (execute § 3.7 *Can no longer resume*).
 const badSlot = verifySlotArgsError(a.verifySlot)
 if (badSlot) throw argsRefused('args.verifySlot: ' + badSlot)
+// args.securityCheck (execute § 3 `security_checks`): optional; a malformed one is a lead bug, refused here in both modes.
+const badSecurity = securityCheckArgsError(a.securityCheck)
+if (badSecurity) throw argsRefused('args.securityCheck: ' + badSecurity)
 // Printed at every call, so a run's log names the ladder it ran on (a path, or built-in).
 function logLadder() {
   const L = ladderOf(a)
@@ -3470,6 +3597,9 @@ if (mode === 'integrate') {
   const bad = integrationArgsError(a)
   if (bad) throw argsRefused('args.integration: ' + bad)
   if (a.task.resume !== undefined) throw argsRefused("args.task.resume: a seeded revise is its own call, never mode 'integrate'")
+  if (a.securityCheck !== undefined && a.securityCheck !== null) {
+    throw argsRefused("args.securityCheck: never on mode 'integrate': Integration's own commits are not scanned")
+  }
 } else if (a.integration !== undefined) {
   throw argsRefused("args.integration: only with args.mode 'integrate'")
 }
