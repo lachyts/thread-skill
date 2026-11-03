@@ -1787,8 +1787,8 @@ Never run the verifier unless the task brief asks the review for the full suite;
 // P1: unset (absent or null), both blocks are '' and every builder renders its unset bytes (the whole-call pins below run
 // without it). P2: set, each code-writing prompt is its unset bytes plus exactly securityCheckBlock right after
 // FLAKE_CHECK_TASK, once; every other builder is unchanged. P3: the fragment's pinned phrases, never a loop or one-shot
-// marker, with five mutation controls. P4: the review judge's block, after reviewTests, with two controls. P5: the
-// schemas (runTask). P6: dependencyLines.
+// marker, with seven mutation controls (two on the secret fix's commit-then-push order). P4: the review judge's block,
+// after reviewTests, with two controls. P5: the schemas (runTask). P6: dependencyLines.
 await (async () => {
   const NAMES = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'reviewJudgePrompt', 'plannerPrompt',
     'readOnlyPrompt', 'planJudgePrompt', 'planReviserPrompt', 'integratorPrompt', 'integrationReviewPrompt', 'reviewTests', 'touchedOf',
@@ -1856,6 +1856,7 @@ await (async () => {
     'On the last try, or in a one-shot: blocked=true and verified=false (escalate=true in a one-shot), with rule, file and commit named in blockerDiagnosis, never a value',
     `\`${E.GIT_ENV_SCRUB} git -C ${shq("/re po/it's/.claude/worktrees/proj-fix-x")} reset --soft <rewriteFrom>\``,
     'never a force-push',
+    "take the secret out and make one commit, and do not push it: push plainly (never a force-push) only once the next try's verifier and this scan are green",
     'or drop the dependency only when the task brief does not need it',
     'An advisory with no fixed release is the scan\'s question, never a drop',
     'Never create, edit or leave an uncommitted `.gitleaks.toml` or `.gitleaksignore`',
@@ -1882,6 +1883,9 @@ await (async () => {
     ['- Run it only once the touched tests and the verifier are green, before you open', '- Run it before you open', 'the once-green clause dropped'],
     ['- The command reads the task note\'s \\`## Repair input\\` itself: never write a \\`## Repair input\\` entry or a \\`security-accept\\` token yourself, anywhere.\n', '', 'the Repair-input clause dropped'],
     ['with its \\`why\\`, verbatim, as needsHuman', 'with a question of your own as needsHuman', 'a question of its own'],
+    ["take the secret out and make one commit, and do not push it: push plainly (never a force-push) only once the next try's verifier and this scan are green.",
+      'take the secret out, make one commit, then push plainly, never a force-push.', 'the fix pushed before the next try is green'],
+    [" only once the next try's verifier and this scan are green.", '.', 'the green-first clause dropped'],
   ]
   for (const [from, to, label] of P3_CONTROLS) {
     ok(src.includes(from), `security P3 control setup: ${label}`)
