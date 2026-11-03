@@ -1696,7 +1696,8 @@ test('origin-lane controls: each mutation fails exactly its rule', () => {
 //   command. wake-return: exit 0 or 75 runs step 1, exit 3 starts nothing, exit 2's `engine-snapshot:` re-run.
 //   wake-heartbeat: the heartbeat stays the backstop unchanged: `*/20`, clause (4) never waits on the trickle wait (as
 //   step 1.6 says), clause (7) reads a `trickle:` or `away cap:` reason as no hold. wake-codex: § Native runtime
-//   binding runs it in the foreground. wake-named: § 4.5's *The Trickle* paragraph names it.
+//   binding runs it in the foreground. wake-named: § 4.5's *The Trickle* paragraph names it, and that a heat-held turn
+//   launches none (so it promises a heat-held lead no 20-second wake).
 function checkTrickleWait(skill) {
   const fails = []
   const s16 = collapse((subSteps(skill).find((x) => x.n === 6) ?? {}).text ?? '')
@@ -1721,7 +1722,10 @@ function checkTrickleWait(skill) {
   if (!binding.includes('And the trickle wait (`reconcile-rollout.py trickle-wait`, § 4.5 step 1.6) runs in the foreground the same way.')) {
     fails.push('wake-codex')
   }
-  if (!trickleP.includes('A lead waiting on it runs a **trickle wait** (step 1.6)')) fails.push('wake-named')
+  if (!trickleP.includes('A lead waiting on it runs a **trickle wait** (step 1.6)') ||
+    !trickleP.includes("keeps it a place; a heat-held turn launches none, so that lead re-checks only at its tick or a call's return")) {
+    fails.push('wake-named')
+  }
   return fails
 }
 const WAKE_RULES = ['wake-launch', 'wake-return', 'wake-heartbeat', 'wake-codex', 'wake-named']
@@ -1748,7 +1752,9 @@ test('trickle-wait controls: each mutation fails exactly its rule', () => {
     'wake-heartbeat', 'clause (7) holds on a Trickle reason')
   tw(', so heartbeat clause (4) never waits on it (the clause names it)', '', 'wake-heartbeat', 'step 1.6 without the clause (4) sentence')
   tw('And the trickle wait (`reconcile-rollout.py trickle-wait`, § 4.5 step 1.6) runs in the foreground the same way.\n', '', 'wake-codex', 'no Codex binding')
-  tw(" A lead waiting on it runs a **trickle wait** (step 1.6), which returns within a 20-second poll once another lead's `next` keeps it a place.", '',
+  tw(" A lead waiting on it runs a **trickle wait** (step 1.6), which returns within a 20-second poll once another lead's `next` keeps it a place; a heat-held turn launches none, so that lead re-checks only at its tick or a call's return (`skills/execute/away.md` § The Trickle, *What does not wake it*).", '',
     'wake-named', 'not named in The Trickle')
+  tw("keeps it a place; a heat-held turn launches none, so that lead re-checks only at its tick or a call's return (`skills/execute/away.md` § The Trickle, *What does not wake it*).",
+    'keeps it a place.', 'wake-named', 'The Trickle promises a heat-held lead the 20-second wake')
   assert.deepEqual(WAKE_RULES.filter((r) => !WAKE_CONTROLLED.has(r)), [])
 })

@@ -47,8 +47,12 @@
 //   wake        (p28-9) § The Trickle's *A waiting lead re-checks sooner* states the code's TRICKLE_WOKEN_KEYS, the
 //               trickle wait's TRICKLE_WAKE_POLL, TRICKLE_WAKE_TIMEOUT, TRICKLE_WAKE_EXIT and TRICKLE_WAKE_NONE, its
 //               baseline (a `next`'s lease, never a `record-entry`'s), that it takes no lock and writes nothing, that
-//               the file stays at version 1 and *Trickle claims* names its `woken` list; the old "a sooner re-check
-//               while waiting is [[…p28-9…]]'s" is gone
+//               the file stays at version 1 and *Trickle claims* names its `woken` list; *Why not a shorter heartbeat*
+//               counts the wait's own idle turns (about two per 20 minutes, against four for `*/5`); *What does not
+//               wake it* names a heat-held waiter (step 1.6 launches no wait on a `heat:` turn) and *The bound* and *A
+//               morning launch* give the 20-second wake only while the trickle wait runs; CONTEXT.md's Fair share entry
+//               bolds **trickle wait** with its verb and says the Heat hold runs none; the old "a sooner re-check while
+//               waiting is [[…p28-9…]]'s" is gone
 // One function (checkAway) returns named failures, so the real files and each control (one mutation, exactly its
 // rule) run through identical logic. Reads files only.
 import { test } from 'node:test'
@@ -272,6 +276,12 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
     !trickleS.includes('takes no lock and writes nothing') ||
     !trickleS.includes('The file stays at `version: 1`') ||
     !trickleS.includes('"woken": […]') ||
+    !trickleS.includes('takes about two such turns per 20 minutes, twice the tick alone\'s, against four times for `*/5`') ||
+    !trickleS.includes("A heat-held waiter misses even a giver's wake: step 1.6 launches no trickle wait on a `heat:` row") ||
+    !trickleS.includes("once a lead on this engine keeps the place while W's trickle wait runs") ||
+    !trickleS.includes('of the place kept for it while its trickle wait runs') ||
+    !entry(context, 'Fair share').includes('**trickle wait** (`trickle-wait`, read-only)') ||
+    !entry(context, 'Fair share').includes('one the **Heat hold** holds runs none') ||
     trickleS.includes('a sooner re-check while waiting is')) fails.push('wake')
 
   return fails
@@ -494,6 +504,17 @@ test('control: a wake the doc or the code says another way fails wake', () => {
   only('away', 'or until its record lapses (30 minutes) if that lead is gone.',
     "or until its record lapses (30 minutes) if that lead is gone; a sooner re-check while waiting is [[thread-skill-p28-9-trickle-a-waiting-lead-re-checks-sooner]]'s.",
     'wake', 'the old clause back')
+  only('away', 'takes about two such turns per 20 minutes, twice the tick alone\'s, against four times for `*/5`',
+    'takes one such turn per 20 minutes, against four times for `*/5`', 'wake', 'the wait\'s own idle turns left out')
+  only('away', " A heat-held waiter misses even a giver's wake: step 1.6 launches no trickle wait on a `heat:` row", ' A heat-held waiter: step 1.6',
+    'wake', 'What does not wake it without the heat-held waiter')
+  only('away', "once a lead on this engine keeps the place while W's trickle wait runs", 'once a lead on this engine keeps the place',
+    'wake', 'The bound promises every waiter the 20-second wake')
+  only('away', 'of the place kept for it while its trickle wait runs', 'of the place kept for it',
+    'wake', 'A morning launch promises every waiter the 20-second wake')
+  only('context', '**trickle wait** (`trickle-wait`, read-only)', 'trickle wait', 'wake', 'CONTEXT.md leaves trickle wait plain')
+  only('context', "; one the **Heat hold**\n  holds runs none, so it re-checks only at its heartbeat's tick or a call's\n  return.", '.',
+    'wake', 'CONTEXT.md promises a heat-held lead the 20-second wake')
 })
 
 test('the rules are all named (23) and each has a control', () => {
