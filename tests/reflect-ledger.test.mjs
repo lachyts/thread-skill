@@ -524,7 +524,7 @@ test('L3 and L4: the baseline seeds once; a class topping two readings running o
   assert.deepEqual([closeLine(h, r2.s.reflection).counts.newWatches, closeLine(h, r2.s.reflection).quiet], [1, false])
   // reading 3: it recurs (two readings), and decide writes the rule item
   const r3 = reading(h, 3)
-  assert.match(r3.decide, /^decision task thread-skill-decisions-2026-09-22: /)
+  assert.match(r3.decide, /^decision task thread-skill-decisions-2026-09-22 /)
   const task = path.join(h.tasks, 'thread-skill-decisions-2026-09-22.md')
   assert.match(fs.readFileSync(task, 'utf8'), new RegExp(`^- ${wid}: rule ADR 0051: a class that tops the Time-lost ledger two readings running; shape stalls tops the Time-lost ledger; rollouts \\[\\[w2\\]\\], \\[\\[w3\\]\\]`, 'm'))
   assert.equal(closeLine(h, r3.s.reflection).counts.rules, 1)
@@ -767,7 +767,7 @@ test('L7: an audit with gaps and no rule item writes the decision task with its 
     { what: 'a stale paused: stamp reads as Lachy\'s pause', evidence: '## Pause log, 2026-10-30' }]))])
   refused(h, ['close', '--span', sp.out, '--tasks-dir', h.tasks], /audit gap 1, 2 of 2026-11 have no decision task line from this Reflection: run decide\n$/)
   const d = ok(h, ['decide', '--span', sp.out, '--decisions', writeJson(sp.dir, 'd.json', {}), '--tasks-dir', h.tasks, '--now', '2026-11-05T13:00+11:00'])
-  assert.match(d.stdout, /^decision task thread-skill-decisions-2026-11-05: scheduled \S+ \(new\)\n$/)
+  assert.match(d.stdout, /^decision task thread-skill-decisions-2026-11-05 \(new\)\n$/)
   const task = path.join(h.tasks, 'thread-skill-decisions-2026-11-05.md')
   const text = fs.readFileSync(task, 'utf8')
   const sec = section(text, new RegExp(`^## Reflection ${rid}$`))
