@@ -357,7 +357,8 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
   § 0 finishes an interrupted supersede on its own.
   - **Schedule stopped at § 0** (one of its checks refused; for this check, another project's
     rollout on the repo, one that has run and is not paused, two at once, or a live serial chain
-    that writes the repo and so owns it (ADR 0040), any project's) → schedule stamped no task and
+    working the repo in place, where this run would share its index and HEAD (ADR 0042), any
+    project's) → schedule stamped no task and
     wrote no new rollout note, so orient must schedule nothing and touch nothing else.
     The one exception is schedule's own: a `file` move or an `interrupted` finish that § 0 made
     before the refusal stays, since it completes a supersede an earlier run confirmed (an
@@ -439,10 +440,11 @@ Orient-graded or undecided members out with their dependants, unstamped; orient 
   past (ADR 0008, ADR 0034).
 - **Schedule stopped at § 0, or on its serial path's plan or surface check** (S2, S3) → handled as
   in § 6: report its line and remedy; nothing is stamped.
-- **Surface overlap or session lane.** A chain refused at S3 overlaps a live chain or an unfinished
-  parallel rollout: report the refusal lines and their remedy (a never-started chain's is `status:
-  dropped`, which names whose note it is), and leave the members unstamped where the reshuffle put
-  them; the next move is Hands-on or a later `/thread:orient <project> --steer`. Members schedule
+- **Surface overlap or session lane.** A chain refused at S3 overlaps an unfinished parallel
+  rollout's Project root: report the refusal lines and their remedy, and leave the members unstamped
+  where the reshuffle put them; the next move is Hands-on or a later `/thread:orient <project>
+  --steer`. A chain that overlaps a live chain is scheduled, with a WARN that they take turns (ADR
+  0067 d4): carry it to § 9's report. Members schedule
   sends to ruling (c)'s session lane (`serial-chains.py`'s `sessionLane`) stay unstamped: name them.
 - **Uncommitted grill docs.** § 6's hold applies to any repo a member writes.
 
@@ -528,8 +530,8 @@ given). It resolves, asks, reads and writes nothing.
   logic; parallel- and serial-shaped work go to schedule (the execution-fit test
   decides, hard); execute runs only through the execute handoff.
 - **Don't put parallel-shaped work in a serial rollout**, and don't schedule a bare project run (always `--tasks`).
-- **Never a second unfinished parallel rollout per repo and project, never a serial chain over a live chain's
-  surface, and never another rollout's lifecycle**: schedule
+- **Never a second unfinished parallel rollout per repo and project, and never another rollout's
+  lifecycle**: schedule
   § 0 supersedes only what its unfinished-rollout check allows (this project's, paused or never
   started); anything else waits (§ 6).
 - **Don't use orient for a single live thread** — that's `next`.

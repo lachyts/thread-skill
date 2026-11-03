@@ -11680,7 +11680,7 @@ _SERIAL_CHAINS = None
 
 def _serial_chains():
     """serial-chains.py, loaded on first use (the _run_record() pattern), for its surface grammar: read_surfaces and
-    parse_token. Its import has no side effects."""
+    checkouts_of (_serial_root). Its import has no side effects."""
     global _SERIAL_CHAINS
     if _SERIAL_CHAINS is None:
         sys.dont_write_bytecode = True
@@ -11691,31 +11691,37 @@ def _serial_chains():
     return _SERIAL_CHAINS
 
 
+LAUNCH_CELL_RE = re.compile(r"\|\s*`[^`]+`\s+from\s+`([^`]+)`\s*\|")   # a `## Queue` row's Launch cell's folder
+
+
 def _serial_root(note):
-    """(root, None) for a serial note's completion verify: its one `repo:` surface, which must be a git toplevel
-    (`git -C <token> rev-parse --show-toplevel`, realpath'd, is the token's realpath: the test leg.py's claim stamps a
-    `leg_base` by); else (None, why)."""
+    """(root, None) for a serial note's completion verify: the chain's one checkout, serial-chains.py's checkouts_of
+    over its `surfaces:` and its `## Queue` rows' Launch-cell folders (the vault, the note's tasks dir's grandparent
+    when that dir ends in Work/Tasks, excluded), which must be a git toplevel (`git -C <entry> rev-parse
+    --show-toplevel`, realpath'd, is the entry: the test leg.py's claim stamps a `leg_base` by); else (None, why)."""
     sc = _serial_chains()
-    repos = []
-    for raw in sc.read_surfaces(note):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+    def toplevel(d):
         try:
-            kind, value = sc.parse_token(raw)
-        except ValueError:
-            continue
-        if kind == "repo" and value not in repos:
-            repos.append(value)
-    if len(repos) != 1:
-        return None, (f"a serial chain's completion verify runs on exactly one `repo:` surface, and {note.path.stem}'s "
-                      f"surfaces: holds {len(repos)}" + (f" ({', '.join(repos)})" if repos else ""))
-    tok = os.path.realpath(repos[0])
-    try:
-        p = subprocess.run(["git", "-C", tok, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
-                           timeout=60, env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")})
-        top = os.path.realpath(p.stdout.strip()) if p.returncode == 0 and p.stdout.strip() else None
-    except (OSError, subprocess.TimeoutExpired):
-        top = None
+            p = subprocess.run(["git", "-C", d, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                               timeout=60, env=env)
+            return os.path.realpath(p.stdout.strip()) if p.returncode == 0 and p.stdout.strip() else None
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+
+    tasks = Path(os.path.realpath(note.path.parent))
+    vault = str(tasks.parent.parent) if tasks.parts[-2:] == ("Work", "Tasks") else None
+    queue = note.section_text("## Queue")
+    folders = [m.group(1) for line in queue.split("\n") for m in [LAUNCH_CELL_RE.search(line)] if m]
+    tops = sc.checkouts_of(sc.read_surfaces(note), folders, toplevel, vault)
+    if len(tops) != 1:
+        return None, (f"a serial chain's completion verify runs on exactly one checkout, and {note.path.stem}'s "
+                      f"surfaces: and Queue launch folders name {len(tops)}" + (f" ({', '.join(tops)})" if tops else ""))
+    tok = os.path.realpath(tops[0])
+    top = toplevel(tok)
     if top != tok:
-        return None, (f"repo:{repos[0]} is not a git toplevel (git -C {repos[0]} rev-parse --show-toplevel gives "
+        return None, (f"{tops[0]} is not a git toplevel (git -C {tops[0]} rev-parse --show-toplevel gives "
                       f"{top or 'no checkout'}): a serial chain's completion verify runs on its checkout's toplevel")
     return Path(tok), None
 
