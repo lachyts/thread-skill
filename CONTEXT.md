@@ -819,6 +819,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suite falls through), else the test files importing the changed modules.
   They take no **Verify slot**. _Avoid_: quick tests, smoke tests, partial
   suite.
+- **Security check** — the opt-in scan a parallel rollout's hand-set
+  `security_checks: true` turns on (execute § 3): once the verifier is green
+  and before its PR, a code-writing agent runs `security-check.py scan` over
+  the task's own non-merge commits since their merge base (secrets, by
+  gitleaks) and the dependencies its diff adds or changes outside test
+  fixtures (advisories, by OSV), and the review judge runs it again. A red the
+  agent can fix fails the try like a verifier red; one no commit can clear (a
+  pushed secret, a change to the scanner's own config, an advisory with no
+  fixed release) is Lachy's question, and his answer clears it only as a
+  `security-accept <kind>:<key>` token the scan reads from the task note's
+  `## Repair input`. Integration's own commits and merge commits are not
+  scanned ([[thread-skill-security-check-integration-commits]]), and no Leg
+  ever runs it. _Avoid_: secret scan (alone), audit, CI check.
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).

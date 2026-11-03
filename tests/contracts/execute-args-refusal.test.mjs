@@ -215,7 +215,7 @@ function check(skill, rr = realRr) {
   // verify-timeout: § 3's exit 4 (its ERROR line, the write-nothing halt, the order of the exits) and the printed shape,
   // with no `verifySlots` left anywhere in SKILL.md.
   if (!s3.includes('`ERROR: verify-timeout: <path> not found`') || !s3.includes('reason="verify-slot.py not found"') ||
-    !s3.includes('The exits are checked in the order 1, 2, 3, then 4.') ||
+    !s3.includes('The exits are checked in the order 1, 2, 3, 4, then 5.') ||
     !s3.includes('Exit 0 prints `{"verifyTimeout": <verify_timeout>, "harnessTimeoutMs": <harnessTimeoutMs>, "slotWait": <slot_wait>, "verifySlot": {"script": <verify-slot.py>, "slots": <verify_slots>}}`') ||
     /verifySlots/.test(skill)) {
     fails.push('verify-timeout')

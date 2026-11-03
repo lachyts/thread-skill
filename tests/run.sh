@@ -57,6 +57,10 @@ mkdir -p "$scratch/transcripts"; export THREAD_TRANSCRIPTS_DIR="$scratch/transcr
 # The machine's verify slots (verify-slot.py, p23-4) stay in temp too: each suite that reaches a pool exports its
 # own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
 export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
+# The Security check (security-check.py, execute § 3 `security_checks`) never reaches the real OSV under test: a closed port, so
+# a case that forgets its own stub reads `advisories not checked`, never the network; an inherited THREAD_GITLEAKS is unset, so
+# each suite pins its own stub (or finds the real gitleaks itself). Each suite that reaches either sets its own: the backstop.
+export THREAD_OSV_URL=http://127.0.0.1:9; unset THREAD_GITLEAKS
 # The gate and the lead's Integration verify run this whole suite inside a verify slot, whose command sees
 # VERIFY_SLOT_HELD=1 (verify-slot.py, p34-1): unset, so no suite reads its own runs as already inside a slot.
 unset VERIFY_SLOT_HELD
