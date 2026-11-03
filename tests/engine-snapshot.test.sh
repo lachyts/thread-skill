@@ -10,7 +10,9 @@
 #          protocol_version read; a moved Primary changes nothing a stamped note runs; unusable snapshots; the
 #          unstamped root (the Primary, or a cache copy's own realpath); an archived note whose snapshot is gone
 #   M1     the move rule: a hard pause moves, a sign-off pause never does (and cuts nothing), a serial chain moves only
-#          after a `stopped` close, until its next Leg begins
+#          after a `stopped` close, until its next Leg begins; an unstamped note is stamped at the same parallel moment
+#          and at a serial chain's first Leg or first after any close, never mid-Leg (a take-over) nor with no git
+#          Primary
 #   G1-G3b the guards: every wrong-root CLI refuses with `engine-snapshot:` and writes nothing (a task-keyed
 #          reconcile-rollout verb with --rollout left off, and reconcile's stdin rows, included); the exemptions;
 #          file-followup after Complete, and the retire race closed by the archived grace and close's re-resolve
@@ -105,16 +107,17 @@ TSRV="$T/tsrv/github.com/o/r.git"; git init -q --bare -b master "$TSRV"
 git clone -q "$TSRV" "$T/target" 2>/dev/null; git -C "$T/target" commit -q --allow-empty -m base; git -C "$T/target" push -q origin master
 
 # ro <name> [frontmatter line]...: a parallel rollout note in $TASKS (protocol 5, Project root $T/target); $BODY
-# goes at its end. sro: the same, serial, with a one-row Queue in $T/launch and $BODY (its Leg log) after it.
+# goes at its end. sro: the same, serial, with a one-row Queue in $T/launch and $BODY (its Leg log) after it; $SURF
+# (default ext:x) is its one surface, so a chain that begins a Leg can stand clear of the others' holds.
 ro() { local f="$TASKS/$1.md"; shift
   { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'; local l; for l in "$@"; do printf '%s\n' "$l"; done
     printf -- '---\n\n## Notes\n\nProject root: `%s`\n\n%s' "$T/target" "${BODY:-}"; } > "$f"; }
 mkdir -p "$T/launch"
-sro() { local n="$1"; shift
+sro() { local n="$1" s="${SURF:-ext:x}"; shift
   { printf -- '---\ntags: [task, rollout]\nstatus: open\nprojects:\n  - "[[Demo]]"\nprotocol_version: 5\n'
     local l; for l in "$@"; do printf '%s\n' "$l"; done
-    printf -- 'shape: serial\nsurfaces:\n  - "ext:x"\n---\n\n## Notes\n\nA chain.\n\n## Queue\n\n'
-    printf -- '| # | Task | Launch | Surfaces |\n|---|---|---|---|\n| 1 | [[%s-t1\\|%s-t1]] | `cc-demo` from `%s` | `ext:x` |\n' "$n" "$n" "$T/launch"
+    printf -- 'shape: serial\nsurfaces:\n  - "%s"\n---\n\n## Notes\n\nA chain.\n\n## Queue\n\n' "$s"
+    printf -- '| # | Task | Launch | Surfaces |\n|---|---|---|---|\n| 1 | [[%s-t1\\|%s-t1]] | `cc-demo` from `%s` | `%s` |\n' "$n" "$n" "$T/launch" "$s"
     printf -- '\n## Post-rollout\n\nRollout-specific items go here:\n\n\n%s' "${BODY:-}"; } > "$TASKS/$n.md"
   printf -- '---\ntags: [task]\nstatus: open\nprojects:\n  - "[[Demo]]"\nrollout: "[[%s]]"\n---\n\n## Notes\n\nDo it.\n' "$n" > "$TASKS/$n-t1.md"; }
 fmv() { python3 -c 'import re, sys
@@ -328,13 +331,16 @@ ok "$rc|$(j 'd["archived"]')|$(j 'd["gone"]')|$(j 'd["root"]')" "0|true|true|$P"
 # ════ M1: the move rule ═════════════════════════════════════════════════════════════════════════════════════════
 echo "== M1"
 due() { es "$P" resolve --rollout "$TASKS/$1.md"; j 'd["move"]["due"]'; }
+# dw <name> [root]: resolve from that root (the Primary by default) → rc|due|why; the why says which branch fired
+dw() { es "${2:-$P}" resolve --rollout "$TASKS/$1.md"; printf '%s|%s|%s' "$rc" "$(j 'd["move"]["due"]')" "$(j 'd["move"]["why"]')"; }
 STAMP="engine_snapshot: \"$B\""; SHA="engine_sha: $V5"
 ro m1h "$STAMP" "$SHA" "paused: 2026-10-26T09:00+00:00"
 ok "$(due m1h)" true "M1: a hard pause (paused: alone) → due"
 ro m1s "$STAMP" "$SHA" "paused: 2026-10-26T09:00+00:00" 'superseded_by: "[[m1h]]"'
 ok "$(due m1s)" false "M1: … with superseded_by: → not due"
 ro m1u "paused: 2026-10-26T09:00+00:00"
-ok "$(due m1u)" false "M1: … no stamp → not due"
+ok "$(dw m1u)" "0|true|a hard pause: this /thread:execute is its Reinstate, which stamps the unstamped note (ADR 0043)" \
+   "M1: … no stamp → due, its Reinstate stamps it"
 ro m1d "$STAMP" "$SHA" "paused: 2026-10-26T09:00+00:00"; sed -i.bak 's/^status: open$/status: done/' "$TASKS/m1d.md"; rm -f "$TASKS/m1d.md.bak"
 ok "$(due m1d)" false "M1: … status done → not due"
 ro m1g "$STAMP" "$SHA" "paused: 2026-10-26T09:00+00:00" "paused_for: sign-off"
@@ -377,6 +383,107 @@ ok "$(due m1c)" false "M1: … halt cleared → still not due"
 BODY="$LOG- 2026-10-26T08:30+00:00 Leg 1 closed: handoff to Leg 2 in cc-demo from $T/launch
 " sro m1o "$STAMP" "$SHA"
 ok "$(due m1o)" false "M1: serial: a handoff close → not due"
+# ── an unstamped note is stamped at the same moments (ADR 0043, as amended by p36-1). The tip is V7, MS its snapshot.
+NOPRI="unstamped, and no git Primary (a version-cache install): nothing to cut, so it runs from the plugin root"
+PSTAMP="a hard pause: this /thread:execute is its Reinstate, which stamps the unstamped note (ADR 0043)"
+ro m1ua
+ok "$(dw m1ua)" "0|false|not paused: only a Reinstate (a hard pause, then /thread:execute) moves a rollout" \
+   "M1: unstamped, unpaused (a launch, a heartbeat, a cold resume) → not due"
+ro m1ug "paused: 2026-10-26T09:00+00:00" "paused_for: sign-off"
+ok "$(dw m1ug)" "0|false|sign-off pause (ADR 0034): the engine's own pause, never a move" "M1: unstamped, a sign-off pause → not due"
+ro m1ux "paused: 2026-10-26T09:00+00:00" "paused_for: drain"
+ok "$(dw m1ux)" "0|false|the engine's own pause (paused_for: drain), never a move" "M1: unstamped, another paused_for: → not due"
+ro m1us "paused: 2026-10-26T09:00+00:00" 'superseded_by: "[[m1h]]"'
+ok "$(dw m1us)" "0|false|superseded: nothing runs it" "M1: unstamped, hard-paused, superseded → not due"
+ro m1ud "paused: 2026-10-26T09:00+00:00"; sed -i.bak 's/^status: open$/status: done/' "$TASKS/m1ud.md"; rm -f "$TASKS/m1ud.md.bak"
+ok "$(dw m1ud)" "0|false|status done: nothing runs it" "M1: unstamped, hard-paused, status done → not due"
+ro m1uz "paused: 2026-10-26T09:00+00:00"; mv "$TASKS/m1uz.md" "$TASKS/Archive/Rollouts/m1uz.md"
+es "$P" resolve --rollout "$TASKS/Archive/Rollouts/m1uz.md"
+ok "$rc|$(j 'd["move"]["due"]')|$(j 'd["move"]["why"]')" "0|false|archived: the rollout is finished" \
+   "M1: unstamped, hard-paused, archived → not due"
+rm -f "$TASKS/Archive/Rollouts/m1uz.md"
+# a version-cache install has nothing to cut: never due there
+ro m1v "paused: 2026-10-26T09:00+00:00"
+ok "$(dw m1v "$CL")" "0|false|$NOPRI" "M1: unstamped, hard-paused, from a cache copy (no git Primary) → not due, the no-Primary why"
+ok "$(dw m1v)" "0|true|$PSTAMP" "M1: … the same note from the Primary → due"
+# execute § 1.5's cut + adopt stamp m1u: a first stamp (changed true, from null), which § 4.5's handle drop keys on
+es "$P" cut --verb execute
+ok "$rc|$(j 'd["snapshot"]')|$(j 'd["reused"]')" "0|$MS|true" "M1: m1u's Reinstate: § 1.5's cut at V7 reuses its snapshot"
+es "$MS" adopt --rollout "$TASKS/m1u.md"
+ok "$rc|$(j 'd["changed"]')|$(j 'd["from"]')|$(j 'd["sha"]')" "0|true|null|$V7" "M1: … adopt stamps it: changed, from null (a first stamp)"
+ok "$(fmv "$TASKS/m1u.md" engine_snapshot)|$(fmv "$TASKS/m1u.md" engine_sha)" "\"$MS\"|$V7" "M1: … the stamps name the snapshot"
+ok "$(grep -c 'engine snapshot moved at reinstate' "$TASKS/m1u.md")" 0 "M1: … no move line under ## Notes"
+dw m1u > "$T/dw"
+ok "$(cat "$T/dw")|$(j 'd["root"]')" "0|true|a hard pause: this /thread:execute is its Reinstate|$MS" \
+   "M1: … re-resolve: due until clear-pause (the stamped why), root the snapshot"
+py "$P" skills/execute/scripts/reconcile-rollout.py clear-pause --rollout "$TASKS/m1u.md" --tasks-dir "$TASKS"
+ok "$rc" 2 "M1: … clear-pause from the Primary now refuses (the hand-over is required)"
+has "$err" "engine-snapshot:" "M1: … with the engine-snapshot: line"
+py "$MS" skills/execute/scripts/reconcile-rollout.py clear-pause --rollout "$TASKS/m1u.md" --tasks-dir "$TASKS"
+ok "$rc|$(due m1u)" "0|false" "M1: … clear-pause from the snapshot reinstates it → not due"
+# serial, unstamped: due when no Leg is open (its first Leg, or the first begun after any close)
+SFIRST="0|true|serial, unstamped: its first Leg stamps it (ADR 0043)"
+SAFTER="0|true|serial, unstamped: the first Leg begun after Leg 1's close stamps it (ADR 0043)"
+SOPEN=": stamped at the first Leg begun after a close"
+BODY= sro m1n
+ok "$(dw m1n)" "$SFIRST" "M1: serial, unstamped, no ## Leg log → due, its first Leg stamps it"
+BODY=$'## Leg log\n\n' sro m1e
+ok "$(dw m1e)" "$SFIRST" "M1: … an empty ## Leg log → due"
+BODY="$LOG" sro m1l
+ok "$(dw m1l)" "0|false|serial, unstamped: Leg 1 is open (a resume or a take-over)$SOPEN" \
+   "M1: … Leg 1 open (the state --resume and --take-over resolve on) → not due"
+BODY="$LOG- 2026-10-26T08:30+00:00 Leg 1 closed: halted: a red verify
+" sro m1uh
+ok "$(dw m1uh)" "$SAFTER" "M1: … Leg 1 closed halted → due"
+ok "$(dw m1uh "$CL")" "0|false|$NOPRI" "M1: … from a cache copy → not due, the no-Primary why"
+BODY="$LOG- 2026-10-26T08:30+00:00 Leg 1 closed: halted: a red verify
+- 2026-10-26T08:40+00:00 halt cleared: fixed
+" sro m1uc
+ok "$(dw m1uc)" "$SAFTER" "M1: … halted, then halt cleared → due"
+BODY="$LOG- 2026-10-26T08:30+00:00 Leg 1 closed: handoff to Leg 2 in cc-demo from $T/launch
+" sro m1uo
+ok "$(dw m1uo)" "$SAFTER" "M1: … a handoff close → due"
+BODY="$LOG- 2026-10-26T08:30+00:00 Leg 1 closed: stopped: Lachy stopped the chain
+" sro m1ur
+ok "$(dw m1ur)" "$SAFTER" "M1: … a stopped close → due"
+BODY="$LOG- 2026-10-26T08:30+00:00 Leg 1 closed: chain stuck: 1 set aside
+" sro m1uk
+ok "$(dw m1uk)" "$SAFTER" "M1: … a chain stuck close → due"
+BODY="$LOG- 2026-10-26T08:30+00:00 Leg 1 closed: handoff to Leg 2 in cc-demo from $T/launch
+- 2026-10-26T08:35+00:00 Leg 2 began: leg-2 session s2 in cc-demo from $T/launch
+" sro m1u2
+ok "$(dw m1u2)" "0|false|serial, unstamped: Leg 2 is open (a resume or a take-over)$SOPEN" "M1: … closed, then Leg 2 began → not due"
+# the take-over: § 1.5 resolves before `leg.py begin --take-over`, so the taking Leg runs on the Primary until it closes
+SURF=ext:m1k BODY="$LOG" sro m1k
+ok "$(dw m1k)" "0|false|serial, unstamped: Leg 1 is open (a resume or a take-over)$SOPEN" "M1: take-over: Leg 1 open → not due"
+(cd "$T/launch" && python3 "$P/skills/execute/scripts/leg.py" begin --take-over --rollout "$TASKS/m1k.md" --tasks-dir "$TASKS" \
+   --session s9 --now 2026-10-26T09:00+00:00 > "$T/out" 2> "$T/err"); rc=$?
+ok "$rc" 0 "M1: … leg.py begin --take-over from the Primary → 0"
+hasnt "$(cat "$T/err")" "engine-snapshot:" "M1: … the guard passes (an unstamped note)"
+ok "$(grep -c 'Leg 1 closed: lost (taken over by Leg 2)' "$TASKS/m1k.md")|$(fmv "$TASKS/m1k.md" engine_snapshot)" "1|<none>" \
+   "M1: … Leg 1 closed lost, the note still unstamped"
+ok "$(dw m1k)" "0|false|serial, unstamped: Leg 2 is open (a resume or a take-over)$SOPEN" \
+   "M1: … Leg 2 open → not due: the take-over Leg stays on the Primary"
+# a chain's first Leg: § 1.5's cut + adopt stamp it, and its begin then runs from the snapshot
+SURF=ext:m1f BODY= sro m1f
+ok "$(dw m1f)" "$SFIRST" "M1: a first Leg → due"
+es "$P" cut --verb execute
+ok "$rc|$(j 'd["snapshot"]')|$(j 'd["reused"]')" "0|$MS|true" "M1: … § 1.5's cut reuses V7's snapshot"
+es "$MS" adopt --rollout "$TASKS/m1f.md"
+ok "$rc|$(j 'd["changed"]')|$(j 'd["from"]')" "0|true|null" "M1: … adopt stamps it: changed, from null"
+dw m1f > "$T/dw"
+ok "$(cat "$T/dw")|$(j 'd["root"]')" "0|false|serial: no Leg has closed stopped|$MS" \
+   "M1: … re-resolve → not due (the stamped rule: no loop), root the snapshot"
+cp "$TASKS/m1f.md" "$T/m1f.before"
+(cd "$T/launch" && python3 "$P/skills/execute/scripts/leg.py" begin --rollout "$TASKS/m1f.md" --tasks-dir "$TASKS" --session s1 \
+   --now 2026-10-26T09:00+00:00 > "$T/out" 2> "$T/err"); rc=$?
+ok "$rc" 2 "M1: … leg.py begin from the Primary → exit 2"; has "$(cat "$T/err")" "engine-snapshot:" "M1: … the engine-snapshot: line"
+cmp -s "$TASKS/m1f.md" "$T/m1f.before"; ok "$?" 0 "M1: … the note byte-equal"
+(cd "$T/launch" && python3 "$MS/skills/execute/scripts/leg.py" begin --rollout "$TASKS/m1f.md" --tasks-dir "$TASKS" --session s1 \
+   --now 2026-10-26T09:00+00:00 > "$T/out" 2> "$T/err"); rc=$?
+ok "$rc" 0 "M1: … from the snapshot → 0"; hasnt "$(cat "$T/err")" "engine-snapshot:" "M1: … the guard passes there"
+ok "$(grep -c 'Leg 1 began:' "$TASKS/m1f.md")" 1 "M1: … one Leg 1 began: line"
+ok "$(dw m1f)" "0|false|serial: no Leg has closed stopped" "M1: … Leg 1 open on its snapshot → not due"
 
 # ════ G1: every wrong-root CLI refuses ══════════════════════════════════════════════════════════════════════════
 echo "== G1"
