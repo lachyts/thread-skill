@@ -1132,6 +1132,7 @@ function securityCheckBlock(a, task) {
   return `
 Security check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${securityScanCmd(a, task)}\`
 - Run it only once the touched tests and the verifier are green, before you open or update the PR and before any push. The Flake check never applies to it.
+- It reads commits only, so commit every change before it runs, new files included: \`${GIT_ENV_SCRUB} git -C ${wt} add -A\`, then commit, never only \`commit -a\`, which leaves a new file untracked. Remove a new file that is not part of the change rather than commit it.
 - Exit 0. Copy its \`brief\` lines, verbatim and in order, into \`newDependencies\` ([] when it printed none).
 - Exit 1 with \`action\` fix uses up its try. For a secret: \`${GIT_ENV_SCRUB} git -C ${wt} reset --soft <rewriteFrom>\`, take the secret out and make one commit, and do not push it: push plainly (never a force-push) only once the next try's verifier and this scan are green. Build any test data that must look like a secret at run time. For an advisory: move to a version it reports fixed, or drop the dependency only when the task brief does not need it. Then the next try runs the touched tests, the verifier, its Flake check, then this scan again.
 - On the last try, or in a one-shot: blocked=true and verified=false (escalate=true in a one-shot), with rule, file and commit named in blockerDiagnosis, never a value.
@@ -1139,7 +1140,7 @@ Security check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${se
 - Exit 1 with \`action\` human: return blocked=true and verified=false, with its \`why\`, verbatim, as needsHuman. Push nothing more. An advisory with no fixed release is the scan's question, never a drop.
 - Never create, edit or leave an uncommitted \`.gitleaks.toml\` or \`.gitleaksignore\` to clear a finding. A change the task brief itself asks for is made and committed, and goes to Lachy through the scan's question.
 - The command reads the task note's \`## Repair input\` itself: never write a \`## Repair input\` entry or a \`security-accept\` token yourself, anywhere.
-- Exit 2: "commit them" means commit, then run it again within the same try. Any other exit 2 is blocked, with its ERROR line.
+- Exit 2 whose ERROR line says "commit them" (tracked changes or untracked files): commit every change, new files included, or remove a new file that is not part of the change, then run it again within the same try. Any other exit 2 is blocked, with its ERROR line.
 - Set verified=true only when the verifier is green AND this scan exited 0 on that head.`
 }
 

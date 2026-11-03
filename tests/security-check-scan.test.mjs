@@ -497,6 +497,10 @@ for (const [name, c] of Object.entries(ONDISK)) {
         const m = await scan(s, { script: lineMutant(s, '# the disk comparison', 'drift = []') })
         assert.notEqual(m.json.action, 'human', 'control: dropping the disk comparison must fail the case')
         assert.deepEqual(m.json.configTouched, [])
+        // Control: an untracked refusal that does not leave the watched paths out takes the case from the disk rule
+        // (a gitignored one is never listed untracked).
+        const u = await scan(s, { script: mutant(s, 'untracked(tree, watched_paths(tree, mb))', 'untracked(tree, [])') })
+        assert.equal(u.status, c.ignored ? 1 : 2, 'control: refusing an untracked watched path must fail the case')
       }
     })
   }
@@ -749,6 +753,45 @@ test('S10: tracked changes uncommitted: exit 2, commit them', async (t) => {
   const r = await scan(s)
   assert.equal(r.status, 2)
   assert.match(r.stderr, /^ERROR: security-check: .*commit them, then run the scan again\n$/)
+})
+
+test('S10b: an untracked file is exit 2, never 0, whatever `commit -am` left; with `add -A` it is the fix (and its control)', async (t) => {
+  const UNTRACKED = /^ERROR: security-check: untracked files are in --tree \(1; git status lists them\): commit them \(or remove them if they are not part of the change\), then run the scan again\n$/
+  const tracked = (s) => lineMutant(s, '# the untracked refusal', 'loose = []')
+  // Case 1: a new, never-added file holding the token, and no commit since the merge base.
+  const s = box(t)
+  s.write('newfile.py', `TOKEN = "${TOKEN}"\n`)
+  assert.equal(s.git('rev-list', '--count', 'origin/main..HEAD'), '0', 'setup: nothing committed since the merge base')
+  const r = await scan(s)
+  assert.equal(r.status, 2, r.stdout)
+  assert.match(r.stderr, UNTRACKED)
+  const m = await scan(s, { script: tracked(s) })
+  assert.equal(m.status, 0, 'control: the tracked-only check must read this tree clean, so S10b fails without the refusal')
+  assert.equal(m.json.head, m.json.base)
+  // Case 2: a tracked edit plus the untracked token file, committed with `commit -am` only.
+  const s2 = box(t)
+  s2.write('README.md', 'changed\n')
+  s2.write('newfile.py', `TOKEN = "${TOKEN}"\n`)
+  s2.git('commit', '-q', '-am', 'edit the readme')
+  assert.equal(s2.git('status', '--porcelain', '--untracked-files=no'), '', 'setup: no tracked change')
+  const r2 = await scan(s2)
+  assert.equal(r2.status, 2, r2.stdout)
+  assert.match(r2.stderr, UNTRACKED)
+  const m2 = await scan(s2, { script: tracked(s2) })
+  assert.equal(m2.status, 0, 'control: the tracked-only check must read the commit -am tree clean')
+  // Then `add -A` and a commit: the scan reads the token, the fix.
+  const leak = s2.commit('add newfile')
+  const r3 = await scan(s2)
+  assert.equal(r3.status, 1, r3.stderr)
+  assert.equal(r3.json.action, 'fix')
+  assert.deepEqual(r3.json.secrets.map((x) => [x.file, x.commit, x.pushed]), [['newfile.py', leak, false]])
+  // A gitignored file is never refused.
+  const s3 = box(t)
+  s3.write('.gitignore', 'build/\n'); s3.commit('ignore build')
+  s3.write('build/out.txt', `TOKEN = "${TOKEN}"\n`)
+  const r4 = await scan(s3)
+  assert.equal(r4.status, 0, r4.stderr)
+  assert.equal(r4.json.result, 'clean')
 })
 
 test('S11: a master default, an unresolvable base, and paths holding a space and a quote', async (t) => {

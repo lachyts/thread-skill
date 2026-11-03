@@ -15,6 +15,9 @@ Python stdlib only. Two verbs:
       tempfile.mkdtemp(prefix="thread-security-") directory, removed in a `finally`.
       1-4. Refusals, each exit 2 with one ERROR line and no stdout: --tree is not its own git toplevel; tracked
            changes are uncommitted ("commit them, then run the scan again"); --base does not resolve; no merge base.
+           Then an untracked file that is neither gitignored nor a watched config path (5's disk rule owns those) is
+           refused too ("commit them (or remove them if they are not part of the change), then run the scan again"):
+           6-7 read commits only, so a new file a `commit -a` left out would be pushed unscanned.
       5.   The config watch: the root `.gitleaks.toml` and `.gitleaksignore` (and the relative in-repo `[extend] path`
            of the merge base's `.gitleaks.toml`). A committed change in <mb>..HEAD (root-level pathspecs only) or an
            uncommitted one on disk (untracked or gitignored bytes, a symlink, a directory) is `configTouched`.
@@ -700,6 +703,14 @@ def watched_paths(tree, mb):
     return paths
 
 
+def untracked(tree, paths):
+    """The untracked paths git does not ignore (`ls-files --others --exclude-standard`), less each watched config path
+    and anything under one: the disk comparison (rule (b)) owns those, so an untracked scanner config stays a
+    question for Lachy, never a commit the agent is told to make."""
+    _rc, out, _err = _git(tree, "ls-files", "-z", "--others", "--exclude-standard", "--full-name")
+    return [f for f in out.split("\0") if f and not any(f == p or f.startswith(p + "/") for p in paths)]
+
+
 def _disk_id(tree, path):
     """The on-disk content id of a watched path: None when absent, else `symlink:<target>`, `directory` or the
     git hash-object --no-filters of its bytes."""
@@ -876,6 +887,10 @@ def scan(args):
     mb = mb.strip()
     if rc != 0 or not mb:
         raise Refusal(f"no merge base between HEAD and {args.base}")
+    loose = untracked(tree, watched_paths(tree, mb))  # the untracked refusal
+    if loose:
+        raise Refusal(f"untracked files are in --tree ({len(loose)}; git status lists them): commit them (or remove "
+                      f"them if they are not part of the change), then run the scan again")
 
     gitleaks, why = find_gitleaks()
     if why:

@@ -1787,7 +1787,8 @@ Never run the verifier unless the task brief asks the review for the full suite;
 // P1: unset (absent or null), both blocks are '' and every builder renders its unset bytes (the whole-call pins below run
 // without it). P2: set, each code-writing prompt is its unset bytes plus exactly securityCheckBlock right after
 // FLAKE_CHECK_TASK, once; every other builder is unchanged. P3: the fragment's pinned phrases, never a loop or one-shot
-// marker, with seven mutation controls (two on the secret fix's commit-then-push order). P4: the review judge's block,
+// marker, with nine mutation controls (two on the secret fix's commit-then-push order, two on committing new files
+// before the scan, which refuses an untracked one). P4: the review judge's block,
 // after reviewTests, with three controls (one on the cross-check covering changed dependencies, which the scan lists
 // whenever an entry as written or its section changes). P5: the schemas (runTask). P6: dependencyLines.
 await (async () => {
@@ -1867,6 +1868,9 @@ await (async () => {
     'which reads as not a credential: <reason>. Accept it (answer `security-accept <its accept>`), or say how the task should change it?',
     'Several such findings go in that one question, each named with its own accept, so one answer can settle them all',
     'Set verified=true only when the verifier is green AND this scan exited 0 on that head',
+    `It reads commits only, so commit every change before it runs, new files included: \`${E.GIT_ENV_SCRUB} git -C ${shq("/re po/it's/.claude/worktrees/proj-fix-x")} add -A\`, then commit, never only \`commit -a\`, which leaves a new file untracked`,
+    'Remove a new file that is not part of the change rather than commit it',
+    'Exit 2 whose ERROR line says "commit them" (tracked changes or untracked files): commit every change, new files included, or remove a new file that is not part of the change, then run it again within the same try',
   ]
   const p3Fails = (b) => {
     const out = []
@@ -1888,6 +1892,10 @@ await (async () => {
     ["take the secret out and make one commit, and do not push it: push plainly (never a force-push) only once the next try's verifier and this scan are green.",
       'take the secret out, make one commit, then push plainly, never a force-push.', 'the fix pushed before the next try is green'],
     [" only once the next try's verifier and this scan are green.", '.', 'the green-first clause dropped'],
+    ['new files included: \\`${GIT_ENV_SCRUB} git -C ${wt} add -A\\`, then commit, never only \\`commit -a\\`, which leaves a new file untracked.',
+      'with \\`${GIT_ENV_SCRUB} git -C ${wt} commit -a\\`.', 'the new files committed with commit -a only'],
+    ['(tracked changes or untracked files): commit every change, new files included, or remove a new file that is not part of the change, then run it again',
+      ': commit, then run it again', 'the exit-2 clause narrowed to tracked changes'],
   ]
   for (const [from, to, label] of P3_CONTROLS) {
     ok(src.includes(from), `security P3 control setup: ${label}`)
