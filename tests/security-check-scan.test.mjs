@@ -291,19 +291,24 @@ test('S4: a leak commit already on refs/remotes/origin/<branch> is human, alread
   assert.match(r.json.why, /recut/)
 })
 
-test('S4b: a stale tracking ref is caught by ls-remote, the head fetched into the scratch clone only', async (t) => {
+test('S4b: a stale tracking ref is caught by ls-remote, the head fetched into the scratch clone only (and its control)', async (t) => {
   const s = box(t)
   const leak = s.leak()
-  // Pushed by URL (no tracking ref moves), then built on from a second clone, so origin's head is not a local object.
-  s.git('push', '-q', s.origin, 'HEAD:refs/heads/feat')
+  // Put on origin from a second clone that fetched the leak commit from the tree and built on it there. The tree never
+  // pushes feat, so none of its tracking refs moves on any git (git 2.56 moves refs/remotes/origin/<b> on a push to a
+  // URL that names exactly one configured remote), and origin's head is not a local object.
   const other = path.join(s.dir, 'other')
-  execFileSync(GIT, ['clone', '-q', '-b', 'feat', s.origin, other], { env: s.env })
+  execFileSync(GIT, ['clone', '-q', s.origin, other], { env: s.env })
+  execFileSync(GIT, ['-C', other, 'fetch', '-q', s.tree, 'feat'], { env: s.env })
+  execFileSync(GIT, ['-C', other, 'checkout', '-q', '-b', 'feat', 'FETCH_HEAD'], { env: s.env })
   fs.writeFileSync(path.join(other, 'more.txt'), 'more\n')
   execFileSync(GIT, ['-C', other, 'add', '-A'], { env: s.env })
   execFileSync(GIT, ['-C', other, 'commit', '-q', '-m', 'more'], { env: s.env })
   execFileSync(GIT, ['-C', other, 'push', '-q', 'origin', 'feat'], { env: s.env })
   const R = execFileSync(GIT, ['-C', other, 'rev-parse', 'HEAD'], { encoding: 'utf8', env: s.env }).trim()
   assert.notEqual(spawnSync(GIT, ['-C', s.tree, 'cat-file', '-e', `${R}^{commit}`], { env: s.env }).status, 0, 'setup: R not local')
+  assert.equal(s.git('branch', '-r', '--contains', leak), '', 'setup: no tracking ref holds the leak commit')
+  assert.equal(s.packed(), '', 'setup: origin not read yet')
   const refs = s.git('for-each-ref')
   const r = await scan(s)
   assert.equal(r.json.secrets[0].commit, leak)
@@ -312,6 +317,13 @@ test('S4b: a stale tracking ref is caught by ls-remote, the head fetched into th
   assert.match(s.packed(), /upload-pack/, 'origin was read')
   assert.equal(s.git('for-each-ref'), refs, 'S14: the fetch leaves no ref in the tree\'s repo')
   assert.notEqual(spawnSync(GIT, ['-C', s.tree, 'cat-file', '-e', `${R}^{commit}`], { env: s.env }).status, 0, 'nor the object')
+  // Control: a live read that always says "origin has no such branch" leaves only the stale tracking state, which reads
+  // unpushed, so the pass above came through the live ls-remote read alone.
+  const LS = 'rc, out, _err = _git(self.tree, "ls-remote", "--exit-code", "origin", f"refs/heads/{branch}",\n' +
+    '                             timeout=LS_REMOTE_TIMEOUT, check=False)'
+  const m = await scan(s, { script: mutant(s, LS, 'rc, out, _err = 2, "", ""') })
+  assert.equal(m.json.secrets[0].pushed, false, 'control: without the live read the stale tracking ref reads unpushed')
+  assert.equal(m.json.action, 'fix')
 })
 
 test('S4c: origin has no such branch: pushed false, action fix', async (t) => {
