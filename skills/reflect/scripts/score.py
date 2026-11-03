@@ -228,16 +228,16 @@ skills/reflect/scripts/reflect.py's Escapes sweep; night_record(records, since, 
 span (`nights`); and RULE_EFFECTS, whose risks tune.py --revert reads.
 
 The nights (p28-7; execute away.md § The night record), night_record, the one copy of these rules. It reads only the
-night record's kinds (never through pair) plus slot-taken's `cap`, from every record it is given: score.py gives it this
-record and every other non-reserved same-host one (read as load reads them, LEDGER_KINDS dropped), and narrows it to the
-Mornings this record marked; reflect.py's span gives it every record. A line is read whatever its ts (a ran-past-morning
-line is written at the first `next` after its Morning, as fold-journals stamps call-journal lines) and windowed by its
-`morning`, in [since, until]. A night is keyed by (host, morning): `marked` when an away-night marker exists, `rollouts`
-those with one. A held or ran-past line with no marker for its Morning makes an unmarked night, flagged. A line is
-deduped on (kind, host, task lowercased, morning), the first by ts kept and a repeat flagged (a carried task); one whose
-morning, slotTakenAt or history does not read, or whose slotTakenAt is not before its Morning, is skipped, flagged.
-Held lines split by history: `fallback` under LAST_START_MIN_RUNS past runs, else `history`. A ran-past line, S its
-slotTakenAt and M its Morning, is classed:
+night record's kinds (never through pair) plus slot-taken's `cap`, from every record it is given: score.py gives it
+this record and every other non-reserved same-host one (each kept to those kinds as it is read, NIGHT_READ_KINDS), and
+narrows it to the Mornings this record marked; reflect.py's span gives it every record. A line is read whatever its ts
+(a ran-past-morning line is written at the first `next` after its Morning, as fold-journals stamps call-journal lines)
+and windowed by its `morning`, in [since, until]. A night is keyed by (host, morning): `marked` when an away-night
+marker exists, `rollouts` those with one. A held or ran-past line with no marker for its Morning makes an unmarked
+night, flagged. A line is deduped on (kind, host, task lowercased, morning), the first by ts kept and a repeat flagged
+(a carried task); one whose morning, slotTakenAt or history does not read, or whose slotTakenAt is not before its
+Morning, is skipped, flagged. Held lines split by history: `fallback` under LAST_START_MIN_RUNS past runs, else
+`history`. A ran-past line, S its slotTakenAt and M its Morning, is classed:
   unchecked      S before its own record's first away-night ts for M (begun before the last starts applied there), or
                  its record has no marker for M (flagged);
   fallback       else, under LAST_START_MIN_RUNS past runs and S + LAST_START_FALLBACK <= M (the fallback let it start
@@ -343,6 +343,9 @@ ACT_KINDS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
 # The night record's kinds (p28-2, run_record.py; reconcile-rollout.py's NIGHT_KINDS): `next`'s reading of a Morning,
 # written at a later call, so never a task's call activity nor the record's last line (pair skips them).
 NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")
+# The kinds night_record reads (NIGHT_KINDS and slot-taken's `cap`, the day's Trickle): Score.nights keeps only these
+# of each other record, filtered as it is read, so the second read of the events dir holds no more than it needs.
+NIGHT_READ_KINDS = NIGHT_KINDS + ("slot-taken",)
 # The time-lost ledger's kinds (p29-10, ADR 0051; run_record.py): stops, entries, suites and why main moved. Never scored:
 # every line of these kinds is dropped as it is read, so a score is byte-equal with or without them, and a late one never
 # extends a record's live span; reflect.py's Time-lost ledger (ledger.py, p29-11) reads them, a score never does.
@@ -553,8 +556,9 @@ def landed_from(merge_lines, since, until):
     return out, flags
 
 
-def read_lines(path):
-    """[(ms, n, dict)] sorted by time then file order; unparsable lines (and ones with no valid ts) skipped."""
+def read_lines(path, kinds=None):
+    """[(ms, n, dict)] sorted by time then file order; unparsable lines (and ones with no valid ts) skipped. With
+    `kinds`, a line of any other kind is dropped as it is read (never counted as skipped), so it is never held."""
     out, skipped = [], 0
     with open(path, "rb") as f:
         for n, raw in enumerate(f):
@@ -564,10 +568,10 @@ def read_lines(path):
             except Exception:
                 skipped += 1
                 continue
-            if isinstance(d, dict):
-                out.append((t, n, d))
-            else:
+            if not isinstance(d, dict):
                 skipped += 1
+            elif kinds is None or d.get("kind") in kinds:
+                out.append((t, n, d))
     out.sort(key=lambda x: (x[0], x[1]))
     return out, skipped
 
@@ -2103,9 +2107,10 @@ class Score:
 
     def nights(self, base, slug, host, lines, since, until):
         """The night record's reading (night_record, the header's "The nights") over this record and every other
-        non-reserved same-host record, read as load() reads them (LEDGER_KINDS dropped), narrowed to the Mornings this
-        record marked (its away-night lines). Its flags stay in the block, never self.flags, so the score's own flags
-        are byte-equal with or without night lines."""
+        non-reserved same-host record, each other one kept to NIGHT_READ_KINDS as it is read (the only kinds
+        night_record reads: so LEDGER_KINDS never reach it), narrowed to the Mornings this record marked (its
+        away-night lines). Its flags stay in the block, never self.flags, so the score's own flags are byte-equal with
+        or without night lines."""
         records, unread = {slug: lines}, []
         try:
             names = sorted(os.listdir(base))
@@ -2116,12 +2121,11 @@ class Score:
             if not name.endswith(".jsonl") or name in skip:
                 continue
             try:
-                other, _skipped = read_lines(os.path.join(base, name))
+                other, _skipped = read_lines(os.path.join(base, name), NIGHT_READ_KINDS)
             except OSError:
                 unread.append(name)
                 continue
-            records[name[:-6]] = [x for x in other if x[2].get("kind") not in LEDGER_KINDS
-                                  and (host is None or x[2].get("host") == host)]
+            records[name[:-6]] = [x for x in other if host is None or x[2].get("host") == host]
         mornings = set()
         for _t, _n, d in lines:
             if d.get("kind") == "away-night":
