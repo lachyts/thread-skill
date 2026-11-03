@@ -1327,9 +1327,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Chorus's weekly Runner (ADR 0051).
   _Avoid_: clean run, empty retro.
 - **Decision task** — the one open vault task tagged `decisions` that the
-  weekly reading writes for the next morning when it has a rule proposal
+  weekly reading writes, unscheduled, when it has a rule proposal
   or a held trade (a knob ADR 0037 d1 leaves to Lachy; ADR 0037 d5): Lachy
-  decides it at the top of a run (`/thread:reflect --decide`); schedule
+  decides it at Chorus's Thursday Reflection Routine
+  (`/thread:reflect --decide`); schedule
   (either shape) and the reshuffle never take it. _Avoid_: inbox, review
   queue.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,

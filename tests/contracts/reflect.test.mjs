@@ -24,7 +24,9 @@
 // 12 makes no circling Watch by hand; step 13b runs the verb once, its one fenced line the only `reflect.py attention `
 // line of the weekly reading; steps 15 and 16 wait for it and say what a circling Watch's `amends` names and how it
 // counts toward `quiet`; § What the record cannot show names what it cannot read, the reading's own Sessions among them;
-// and the word "loop" stays out of it (reflection-loops.md's word); and the decision task
+// and the word "loop" stays out of it (reflection-loops.md's word); the decision task goes to Chorus's Reflection
+// Routine (w20, ADR 0037 d5 as amended 2026-11-03): step 15 writes it with no `scheduled:` date and puts no line on a day
+// page, § Deciding asks one question at a time, and task-writer § 3b names no writer outside defer; and the decision task
 // stays out of schedule § 1, the reshuffle's R1 and orient § 7's serial rollout, listed by orient § 2 (the `weekly`
 // rule).
 //
@@ -54,9 +56,10 @@ const NAMED = {
   repair: 'skills/repair/SKILL.md',
   orient: 'skills/orient/SKILL.md',
   reshuffle: 'skills/orient/reshuffle.md',
+  taskWriter: 'skills/_shared/task-writer.md',
   context: 'CONTEXT.md',
 }
-const SCANNED = ['skill', 'execute', 'template', 'readme', 'plugin', 'market', 'schedule', 'repair', 'orient', 'reshuffle']
+const SCANNED = ['skill', 'execute', 'template', 'readme', 'plugin', 'market', 'schedule', 'repair', 'orient', 'reshuffle', 'taskWriter']
 
 // The paths no scan reads: git-ignored `make evals` output (its transcripts can list an installed older verb),
 // Python's byte-code caches and Finder's .DS_Store. A NUL-byte file is skipped where its text is read.
@@ -274,8 +277,14 @@ const ATT_CANNOT = ['reads the question tool\'s questions alone', 'The Owner is 
   'A Session that runs the reading (its span verb, a verb on its span file, or a score) is never a touch',
   'A rollout note with no record is judged by its status now', 'A decided circling item never returns on its rule']
 const ATT_PARA = '**The attention ledger** (`span.json`\'s `attention`).'
+// The decision task goes to the Reflection Routine (w20): step 15 writes it unscheduled and puts no line on a day page,
+// § Deciding asks one question at a time, and task-writer § 3b names no decision task.
+const ROUTINE_S15 = ['written with no `scheduled:` date', 'Reflection Routine']
+const ROUTINE_S15_GONE = 'Put its line on its `scheduled:` day\'s page'
+const ROUTINE_DEC = 'one question at a time'
 
-// The weekly clauses that fail (w1..w19; w15 and w16 are p22-7's, w17 p25-4's, w18 p29-11's, w19 p30-7's), [] when all hold.
+// The weekly clauses that fail (w1..w20; w15 and w16 are p22-7's, w17 p25-4's, w18 p29-11's, w19 p30-7's, w20 the
+// Reflection Routine's), [] when all hold.
 function weeklyFails(files) {
   const s = files.skill
   const out = []
@@ -339,6 +348,8 @@ function weeklyFails(files) {
     !ATT_S15.every((n) => s15.includes(n)) || !ATT_S16.every((n) => collapse(sectionOf(s, /^### 16\. /)).includes(n)) ||
     !ATT_CANNOT.every((n) => cannot.includes(n)) || !para || /\bloops?\b/i.test(para) || /\bloops?\b/i.test(s13b) ||
     attLines.length !== 1 || !attLines[0].startsWith(PY)) out.push('w19')
+  if (!ROUTINE_S15.every((n) => s15.includes(n)) || s15.includes(ROUTINE_S15_GONE) || !dec.includes(ROUTINE_DEC) ||
+    /decision task/.test(collapse(sectionOf(files.taskWriter, /^## 3b\. /)))) out.push('w20')
   return out
 }
 
@@ -754,6 +765,21 @@ test('control: the attention ledger\'s labels, trace, refusal, step 13b, gates, 
   for (const n of [...ATT_S15, ...ATT_S16, ...ATT_CANNOT]) weekly(`skill:${n.slice(0, 30)}`, cut('skill', n, 'x'), 'w19')
   weekly('skill:loop-11', cut('skill', 'Read `trails` and `waits` as reported', 'Read `trails` and `waits` as the loop reported'), 'w19')
   weekly('skill:loop-13b', cut('skill', 'for each circling rule with fresh items', 'for each circling loop with fresh items'), 'w19')
+})
+
+// `needle` replaced by `to` inside the section of real[key] whose heading matches `re` only (the same phrase may sit
+// elsewhere in the file).
+const inSection = (key, re, needle, to) => {
+  const sec = sectionOf(real[key], re)
+  assert.ok(loose(needle).test(sec), `control setup: ${needle.slice(0, 60)} not in ${key}'s section`)
+  return real[key].replace(sec, sec.replace(loose(needle), to))
+}
+
+test('control: step 15 scheduling the decision task or putting it on a day page, § Deciding without one question at a time, or task-writer § 3b naming it, fails weekly (w20)', () => {
+  for (const n of ROUTINE_S15) weekly(`skill:${n}`, inSection('skill', /^### 15\. /, n, 'x'), 'w20')
+  weekly('skill:day-page', inSection('skill', /^### 15\. /, 'Put no line on any day page.', `${ROUTINE_S15_GONE} by task-writer § 3b.`), 'w20')
+  weekly('skill:one-at-a-time', inSection('skill', /^## Deciding the decision task$/, ROUTINE_DEC, 'all at once'), 'w20')
+  weekly('taskWriter:3b', inSection('taskWriter', /^## 3b\. /, 'Re-deferring moves the line', 'Re-deferring or rescheduling the decision task moves the line'), 'w20')
 })
 
 test('control: the attention fence before the ledger\'s or after the knobs\', or a prose line naming the verb in step 11, fails weekly (w1)', () => {
