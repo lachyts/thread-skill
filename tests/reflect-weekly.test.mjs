@@ -134,7 +134,10 @@ function span(h, extra = [], { since = SINCE, until = UNTIL } = {}) {
   if (until) args.push('--until', until)
   const r = ok(h, args)
   assert.match(r.stderr, /^reflect: span r-\d{8}T\d{6}Z-[0-9a-f]{6} /, 'one summary line')
-  return JSON.parse(fs.readFileSync(out, 'utf8'))
+  const s = JSON.parse(fs.readFileSync(out, 'utf8'))
+  // the window check (reflect.py's header): a `window: ` flag is a reader that read past its window, in any reading
+  assert.ok(!s.flags.some((f) => f.startsWith('window: ')), JSON.stringify(s.flags))
+  return s
 }
 const entryOf = (s, slug) => s.rollouts.find((r) => r.rollout === slug)
 
@@ -731,6 +734,71 @@ test('span: a clone-rooted record whose in-place twin is fresher reads the twin,
   assert.ok(s.flags.some((f) => f.includes(`ref read from the in-place checkout ${h.repo}: fresher than the Project root's`)), JSON.stringify(s.flags))
 })
 
+// The sweep's escape fixture: one rollout r with four landed tasks, each fixer dated against the default window.
+function escapeFixture(h) {
+  emitAll(h, 'r', byTs([...life('r-a', '2026-08-10T00:00:00Z', '2026-08-10T01:00:00Z', { lane: ['2026-08-10T01:00:00Z', '2026-08-10T01:10:00Z'], pr: 7 }),
+    ...life('r-b', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')], pr: 8 }),
+    ...life('r-c', W(5, '00:00'), W(5, '01:00'), { lane: [W(5, '01:00'), W(5, '01:10')], pr: 9 }),
+    ...life('r-d', W(6, '00:00'), W(6, '01:00'), { lane: [W(6, '01:00'), W(6, '01:10')], pr: 10 })]))
+  rolloutNote(h, 'r')
+  taskNote(h, 'fix-r-a', { captured: '2026-08-20', fm: ['fixes: ["[[r-a]]"]'] }) // before since, its task landed by then: an earlier week's
+  taskNote(h, 'fix-r-b', { captured: '2026-09-05', fm: ['fixes: ["[[r-b]]"]'] }) // this week's
+  taskNote(h, 'fix-r-c', { captured: '2026-09-10', fm: ['fixes: ["[[r-c]]"]'] }) // until's Melbourne date: the next reading's
+  taskNote(h, 'fix-r-d', { captured: '2026-08-25', fm: ['fixes: ["[[r-d]]"]'] }) // before since, its task landed in the window: lost
+}
+const LOST = "Escape(s) on a task landed in the window, dated before it or undated: in no week's friction: "
+
+// A reading holds only its window's rows (CLAUDE.md's review rule): the sweep folds a read rollout's landed tasks of any
+// age, so its friction lists only the Escapes dated in the window, and cannotShow names only the ones no week lists.
+test('span: escape friction holds only Escapes dated in the window, on a read rollout too; cannotShow names only the lost ones, never one another week counts', (t) => {
+  const h = setup(t)
+  escapeFixture(h)
+  const esc = (e) => e.friction.filter((x) => x.kind === 'escape').map((x) => [x.task, x.at, x.inWindow])
+  const s = span(h)
+  const r = entryOf(s, 'r')
+  assert.equal(r.mode, 'read')
+  assert.deepEqual(esc(r), [['r-b', '2026-09-05', true]], JSON.stringify([r.friction, s.cannotShow]))
+  const inWindow = (at) => (/^\d{4}-\d\d-\d\d$/.test(at) ? at >= '2026-09-03' && at < '2026-09-10'
+    : Date.parse(at) >= Date.parse(SINCE) && Date.parse(at) <= Date.parse(UNTIL))
+  for (const x of r.friction) assert.ok(typeof x.at === 'string' && inWindow(x.at), `a friction row outside the window: ${JSON.stringify(x)}`)
+  const named = s.cannotShow.filter((c) => c.startsWith('[[r]]: '))
+  assert.deepEqual(named, [`[[r]]: 1 ${LOST}r-d 2026-08-25`], JSON.stringify(s.cannotShow))
+  // r-a's Escape is the earlier week's friction, so this week never re-names it as lost; r-c's is the next week's
+  const early = span(h, [], { since: '2026-08-17T00:00+10:00', until: '2026-08-24T00:00+10:00' })
+  assert.deepEqual([entryOf(early, 'r').mode, esc(entryOf(early, 'r'))], ['escapes-only', [['r-a', '2026-08-20', true]]])
+  assert.ok(!s.cannotShow.some((c) => c.includes('r-a 2026-08-20') || c.includes('r-c 2026-09-10')), JSON.stringify(s.cannotShow))
+  const next = span(h, [], { since: UNTIL, until: '2026-09-17T00:00+10:00' })
+  assert.deepEqual([entryOf(next, 'r').mode, esc(entryOf(next, 'r'))], ['escapes-only', [['r-c', '2026-09-10', true]]])
+  assert.ok(!next.cannotShow.some((c) => c.startsWith('[[r]]: ')), JSON.stringify(next.cannotShow))
+})
+
+// The window check lands in span.json: a reader made to read past its window (window_escapes listing every Escape, of
+// any date) is flagged in the flags span writes, not only by window_flags() called alone.
+test('span writes the window check\'s flags to span.json: a friction reader made to read past its window is flagged there', (t) => {
+  const h = setup(t)
+  escapeFixture(h)
+  const out = path.join(h.out, 'span.json')
+  const rc = pyOut(h, ['m.Span.window_escapes = lambda self, slug, items, *rest: items  # a reader that reads past its window',
+    'print(json.dumps(m.main(a)))'].join('\n'),
+  [REFLECT, ['span', '--tasks-dir', h.tasks, '--config', path.join(h.home, 'rollouts.toml'), '--out', out, '--since', SINCE, '--until', UNTIL]])
+  assert.equal(rc, 0)
+  const s = JSON.parse(fs.readFileSync(out, 'utf8'))
+  assert.deepEqual(entryOf(s, 'r').friction.filter((x) => x.kind === 'escape').map((x) => x.task), ['r-a', 'r-b', 'r-c', 'r-d'])
+  assert.deepEqual(s.flags.filter((f) => f.startsWith('window: ')),
+    [`window: rollouts[r].friction holds 3 row(s) outside [${s.since}, ${s.until}], the first at 2026-08-20: a reader read past its window`],
+    JSON.stringify(s.flags))
+})
+
+test('span: rollouts holds only records with a line in the window: a record wholly before since or wholly after until is not read', (t) => {
+  const h = setup(t)
+  emitAll(h, 'in-r', byTs(life('in-a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
+  emitAll(h, 'before-r', byTs(life('before-a', '2026-08-10T00:00:00Z', '2026-08-10T01:00:00Z', { lane: ['2026-08-10T01:00:00Z', '2026-08-10T01:10:00Z'] })))
+  emitAll(h, 'after-r', byTs(life('after-a', '2026-09-12T00:00:00Z', '2026-09-12T01:00:00Z', { lane: ['2026-09-12T01:00:00Z', '2026-09-12T01:10:00Z'] })))
+  for (const slug of ['in-r', 'before-r', 'after-r']) rolloutNote(h, slug)
+  const s = span(h)
+  assert.deepEqual(s.rollouts.map((e) => e.rollout), ['in-r'], JSON.stringify(s.rollouts.map((e) => [e.rollout, e.mode])))
+})
+
 test('span: two Project roots for one repo: the newest is read, flagged', (t) => {
   const h = setup(t)
   const second = path.join(h.home, 'clone')
@@ -968,6 +1036,73 @@ test('span: freshReview orders a swept landing by reviewedAt, so open and first/
   const [e] = span(h).freshReview
   assert.deepEqual([e.findings, e.blocking, e.open, e.first, e.last],
     [[14, 9], [2, 1], 1, at(W(3, '08:00')), at(W(3, '09:00'))], JSON.stringify(e))
+})
+
+// The window check (reflect.py's header): span flags each reported block holding a row outside its window, each row by
+// its own stamp (an instant parsed, a date-only one by date_in()), and a rollout's score by the score's own window,
+// never by span's since (a rollout is scored whole).
+test('window_flags: one flag per block holding a row outside its window; a score is held to its own window; rows on the boundaries flag nothing', (t) => {
+  const h = setup(t)
+  const S0 = '2026-09-02T14:00:00.000Z'
+  const U0 = '2026-09-09T14:00:00.000Z'
+  const ask = (at) => ({ kind: 'ask', rollout: 'r', task: 'a', at })
+  const esc = (at, inWindow) => ({ kind: 'escape', rollout: 'r', task: 'a', source: 'fixes', at, inWindow })
+  const repair = (at) => ({ kind: 'repair', rollout: 'r', task: 'a', at, date: at })
+  const lane = (startedAt) => ({ integrations: 1, lines: [{ task: 'a', startedAt }] })
+  const acts = (...ats) => ({ tasks: [{ task: 'a', acts: ats.map((at) => ({ kind: 'answer', at, detail: 'x' })) }] })
+  const entry = (rollout, friction = [], laneTime = null) => ({ rollout, friction, laneTime })
+  const doc = (o) => ({ since: S0, until: U0, rollouts: [], freshReview: [], grades: { episodes: [] },
+    attention: { questions: { items: [] } }, nights: { nights: [] }, noteOverlaps: { overlaps: [] }, cannotShow: [], flags: [], ...o })
+  const bad = doc({
+    rollouts: [entry('r', [ask('2026-09-02T13:59:00.000Z'), esc('2026-09-05', false), repair('2026-09-10'), ask(null), ask(S0)],
+      lane('2026-09-09T14:01:00.000Z')), entry('c')],
+    freshReview: [{ repo: 'o/r', branch: 'feat/x', first: '2026-09-01T00:00:00.000Z', last: '2026-09-04T00:00:00.000Z' }],
+    grades: { episodes: [{ task: 'g', inWindow: true, end: { kind: 'landed', at: '2026-09-09T15:00:00.000Z', date: null } }] },
+    attention: { questions: { items: [{ id: 'q#0', at: '2026-09-01T00:00:00.000Z' }] } },
+    nights: { nights: [{ morning: '2026-09-02T00:00:00.000Z' }] },
+    // an overlap is one row: its first in the window, its last a second past until, printed as the one outside
+    noteOverlaps: { overlaps: [{ note: 'n.md', runs: [], warnings: 2, first: '2026-09-05T00:00:00.000Z', last: '2026-09-09T14:00:01.000Z' }] },
+  })
+  const CS = '2026-09-04T00:00:00.000Z' // chain c's Leg 1 began
+  const badScores = {
+    r: { window: { since: '2026-09-01T00:00:00.000Z', until: U0 }, handsOff: acts('2026-08-31T23:00:00.000Z') }, // before the score's own since
+    c: { shape: 'serial', window: { since: CS, until: U0 }, handsOff: acts('2026-09-09T14:01:30.000Z'), // past until's minute
+      merges: { count: 1, tasks: [{ task: 'a', at: '2026-09-09T14:01:00.000Z' }] } },
+  }
+  const good = doc({
+    rollouts: [entry('r', [ask(S0), ask(U0), repair('2026-09-03'), esc('2026-09-03', true), esc('2026-09-09', true)],
+      lane('2026-09-10T00:00+10:00')), entry('c'), entry('n'), entry('w')], // until in another form: compared parsed
+    freshReview: [{ repo: 'o/r', branch: 'feat/y', first: S0, last: U0 }],
+    grades: { episodes: [{ task: 'g', inWindow: true, end: { kind: 'landed', at: U0, date: '2026-09-10' } },
+      { task: 'k', inWindow: true, end: { kind: 'dropped', at: null, date: '2026-09-03' } }] },
+    attention: { questions: { items: [{ id: 'q#0', at: S0 }] } },
+    nights: { nights: [{ morning: U0 }] },
+    noteOverlaps: { overlaps: [{ note: 'n.md', runs: [], warnings: 2, first: S0, last: U0 }] },
+  })
+  const goodScores = {
+    // scored whole: an act weeks before span's since, inside the score's own window, is no flag
+    r: { window: { since: '2026-08-01T00:00:00.000Z', until: U0 }, handsOff: acts('2026-08-02T00:00:00.000Z', U0) },
+    c: { shape: 'serial', window: { since: CS, until: U0 }, handsOff: acts('2026-09-09T14:00:30.000Z'), merges: { count: 1, tasks: [{ task: 'a', at: U0 }] } },
+    w: { window: null, handsOff: acts('2026-01-01T00:00:00.000Z') }, // no window: skipped, as n (no score) is
+  }
+  const [flags, none, unread] = pyOut(h, 'print(json.dumps([m.window_flags(d["doc"], d["scores"]) for d in a]))',
+    [REFLECT, [{ doc: bad, scores: badScores }, { doc: good, scores: goodScores }, { doc: doc({ noteOverlaps: null }), scores: {} }]])
+  const F = (block, k, bounds, first) => `window: ${block} holds ${k} row(s) outside ${bounds}, the first at ${first}: a reader read past its window`
+  const SPAN = `[${S0}, ${U0}]`
+  assert.deepEqual(flags, [
+    F('rollouts[r].friction', 4, SPAN, '2026-09-02T13:59:00.000Z'),
+    F('rollouts[r].laneTime', 1, SPAN, '2026-09-09T14:01:00.000Z'),
+    F('rollouts[r].score.handsOff', 1, `[2026-09-01T00:00:00.000Z, ${U0}]`, '2026-08-31T23:00:00.000Z'),
+    F('rollouts[c].score.handsOff', 1, `[${CS}, ${U0} + 60 s)`, '2026-09-09T14:01:30.000Z'),
+    F('rollouts[c].score.merges', 1, `[${CS}, ${U0}]`, '2026-09-09T14:01:00.000Z'),
+    F('freshReview', 1, SPAN, '2026-09-01T00:00:00.000Z'),
+    F('grades.episodes', 1, SPAN, '2026-09-09T15:00:00.000Z'),
+    F('attention.questions', 1, SPAN, '2026-09-01T00:00:00.000Z'),
+    F('nights.nights', 1, SPAN, '2026-09-02T00:00:00.000Z'),
+    F('noteOverlaps.overlaps', 1, SPAN, '2026-09-09T14:00:01.000Z'),
+  ])
+  assert.deepEqual(none, [], 'rows on the boundaries, a stamp in another form and a score read by its own window flag nothing')
+  assert.deepEqual(unread, [], 'an unread noteOverlaps (a null block) holds no row')
 })
 
 // ---- watch, raised and the Watch reader -----------------------------------------------------------------------------
@@ -1989,7 +2124,11 @@ test('span scores a serial chain through serial-score.py (no fold, settings or s
 test('span reads a chain\'s friction from leg.py status: set-asides, a halt clear as an ask, a restart, its fixes: Escape', (t) => {
   const h = setup(t)
   chainA(h)
-  const c = entryOf(span(h, [], { since: KSINCE, until: KUNTIL }), 'chain-a')
+  // a fixer of c2 (done at 11:40) captured before the window: serial-score's escapes block holds it, the friction does not
+  fs.writeFileSync(path.join(h.tasks, 'c2-old-fix.md'), ['---', 'tags: [task]', 'status: done', 'captured: 2026-10-05', 'projects:',
+    '  - "[[Demo]]"', 'fixes: "[[c2]]"', '---', '', '## Notes', '', 'Fix c2.', ''].join('\n'))
+  const s = span(h, [], { since: KSINCE, until: KUNTIL })
+  const c = entryOf(s, 'chain-a')
   const by = (k) => c.friction.filter((x) => x.kind === k)
   const asides = Object.fromEntries(by('set-aside').map((x) => [x.task, x]))
   assert.deepEqual(Object.keys(asides).sort(), ['c2', 'c4'])
@@ -2007,6 +2146,8 @@ test('span reads a chain\'s friction from leg.py status: set-asides, a halt clea
   assert.deepEqual(by('restart').map((x) => [x.leg, x.how, x.started, x.manual, x.session, x.began, x.at]),
     [[2, 'started', 's2', null, 'r1', CZ('11:00'), CZ('10:49')]], 'one restart for its pending and started lines, at the pending one')
   assert.deepEqual(by('escape').map((x) => [x.task, x.source, x.at, x.inWindow]), [['c1', 'fixes', '2026-10-12', true]])
+  assert.ok(s.cannotShow.includes("[[chain-a]]: 1 Escape(s) dated outside the window, every one: most are another week's friction, one dated in a week that did not read the chain is in none: c2 2026-10-05"),
+    JSON.stringify(s.cannotShow))
 })
 
 test('span reads a hands-off chain with no Run record through its Leg log; one whose log is outside the window is not read', (t) => {
