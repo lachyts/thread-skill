@@ -357,7 +357,8 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
   § 0 finishes an interrupted supersede on its own.
   - **Schedule stopped at § 0** (one of its checks refused; for this check, another project's
     rollout on the repo, one that has run and is not paused, two at once, or a live serial chain
-    that writes the repo and so owns it (ADR 0040), any project's) → schedule stamped no task and
+    working the repo in place, where this run would share its index and HEAD (ADR 0042), any
+    project's) → schedule stamped no task and
     wrote no new rollout note, so orient must schedule nothing and touch nothing else.
     The one exception is schedule's own: a `file` move or an `interrupted` finish that § 0 made
     before the refusal stays, since it completes a supersede an earlier run confirmed (an

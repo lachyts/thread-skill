@@ -185,7 +185,7 @@ function check(files) {
     'Then the shape (`shape:`; no key reads as parallel): `shape: serial` → run `${CLAUDE_PLUGIN_ROOT}/skills/execute/legs.md` instead of §§ 2.5–8, and write nothing here.',
   ])
   const stop = C(slice(files[ORIENT], /^ {2}- \*\*Schedule stopped at § 0\*\*/, /^ {2}- \*\*Uncommitted grill docs\.\*\*/))
-  need('t5', `${ORIENT} § 6's § 0 stop`, stop, ['or a live serial chain that writes the repo and so owns it',
+  need('t5', `${ORIENT} § 6's § 0 stop`, stop, ['or a live serial chain working the repo in place, where this run would share its index and HEAD (ADR 0042)',
     '`status: dropped` on a never-started serial chain\'s note', 'or run that chain'])
   need('t5', `${ORIENT} § 7`, C(section(files[ORIENT], /^### 7\./)), ['one serial rollout note per chain'])
   need('t5', `${ORIENT} § 9`, C(section(files[ORIENT], /^### 9\./)), [
@@ -196,7 +196,7 @@ function check(files) {
 
   // ---- t6: the glossary ----
   const ctx = files[CONTEXT] ?? ''
-  need('t6', 'CONTEXT **Rollout**', entry(ctx, 'Rollout'), ['and none on a place a live serial chain writes', 'one chain per note'])
+  need('t6', 'CONTEXT **Rollout**', entry(ctx, 'Rollout'), ['and none rooted in place in a checkout a live serial chain works', 'one chain per note'])
   need('t6', 'CONTEXT **Shape**', entry(ctx, 'Shape'), ['`shape:` key', 'reads as parallel', 'A supersede never crosses shapes'])
   need('t6', 'CONTEXT **Serial rollout**', entry(ctx, 'Serial rollout'), ['One chain per note', 'Leg boundary',
     'execute runs its Legs'])
@@ -335,7 +335,7 @@ test('control: an execute § 2 without its shape line fails t5', () => {
 })
 
 test('control: an orient § 0 stop that omits the live serial chain fails t5', () => {
-  only(swap(ORIENT, ', or a live serial chain\n    that writes the repo and so owns it (ADR 0040), any project\'s)', ')'), ['t5'], 'orient chain')
+  only(swap(ORIENT, ', or a live serial chain\n    working the repo in place, where this run would share its index and HEAD (ADR 0042), any\n    project\'s)', ')'), ['t5'], 'orient chain')
 })
 
 test('control: an orient § 0 stop without the dropped remedy fails t5', () => {

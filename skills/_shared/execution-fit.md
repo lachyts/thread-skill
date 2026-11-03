@@ -309,8 +309,10 @@ of the set first surfaces when the next entry halts on it.
 **Unfinished rollout.** A repo holds at most one unfinished parallel rollout per project (ADR 0064): one directly in
 `Work/Tasks/`, neither `done` nor `dropped`, with a task not yet merged, each project's run from its own rollout clone
 (schedule § 0's `clone` names it); another project's in its own clone is a `WARN`, both run, and Integration takes one
-merge at a time per origin; and none on a place a live serial chain writes
-(ADR 0040; a stuck chain holds only its unlanded rows' surfaces, ADR 0060). Surfaces compare `repo:<realpath>`, or a file or folder in it
+merge at a time per origin; and none rooted in place in a checkout a live serial chain works, where it would share the
+chain's index and HEAD (ADR 0042; ADR 0067 supersedes ADR 0040's ruling that a chain owns the checkout it writes; a stuck
+chain holds only its unlanded rows' surfaces and works no checkout, ADR 0060). Surfaces compare `repo:<realpath>`, or a
+file or folder in it
 (`repo:<toplevel>//<path>`, ADR 0067 d4), literally, so a rollout rooted in its clone and a chain on
 the in-place checkout coexist as peers (ADR 0042); the one exception, a separate checkout nested inside
 another by path, never meets the outer one either (p33-3). schedule § 0 runs

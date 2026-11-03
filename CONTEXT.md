@@ -430,8 +430,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   described by one always-dated Obsidian note
   (`<slug>-rollout-<YYYY-MM-DD>`) whose **Shape** is parallel or serial. At
   most one parallel rollout is **unfinished** per repo and project, each
-  project's in its own **Rollout clone** (ADR 0064), and none on a place a
-  live serial chain writes; new parallel-shaped work of the same project
+  project's in its own **Rollout clone** (ADR 0064), and none rooted in place
+  in a checkout a live serial chain works, whose index and HEAD it would share
+  (ADR 0042, ADR 0067); new parallel-shaped work of the same project
   supersedes it rather than running beside it (schedule § 0, ADR 0027, ADR
   0030). Serial rollouts are
   ordered by **Surface**s, not by repo (ADR 0040, ADR 0067 d4): one chain per
@@ -538,11 +539,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   path is in no checkout. Predicted surfaces group, order and wait, and never
   refuse a schedule: two chains predicting one place both run, the first to
   begin going first, and until each chain works its own **Chain copy** two
-  chains in one checkout take their Legs' turns in it (ADR 0067 d4). A stuck
-  chain holds only its unlanded rows' surfaces (**Unfinished rollout**, ADR
-  0060). Proposed (ADR 0067): the files a Leg actually committed are checked
-  before it lands; a vault project's place is a prediction, and two runs in one
-  note are a **Note overlap**. _Avoid_: footprint, file-set.
+  chains in one checkout work it a chain at a time: the one that comes first
+  (the first to begin, else by slug) lands every unlanded row it has there
+  before the other begins a Leg in it (ADR 0067 d4). A stuck chain holds only
+  its unlanded rows' surfaces (**Unfinished rollout**, ADR 0060), and works
+  no checkout. Proposed (ADR 0067): the files a Leg actually committed are
+  checked before it lands; a vault project's place is a prediction, and two
+  runs in one note are a **Note overlap**. _Avoid_: footprint, file-set.
 - **Chain copy** — a serial chain's own working copy of a repo it writes (a git
   worktree on `chain/<rollout-slug>`, outside `~/repos` and `~/Projects`), so
   two chains in one repo share no index or HEAD; each finished task lands from
@@ -572,13 +575,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   project places never overlap, so they run side by side (ADR 0059). What an unfinished rollout holds narrows while it
   waits on Lachy (ADR 0060). A stuck chain (no Leg open, nothing claimable:
   every unlanded row set aside or held behind one) holds only its unlanded
-  rows' surfaces, and releases the rest, its done rows' included. A parallel
+  rows' surfaces, and releases the rest, its done rows' included; it works no
+  checkout, since it uses no index or HEAD. A parallel
   rollout awaiting sign-off, or halted with nothing able to start, holds no
   Project root against serial chains, though it is still its project's one
   unfinished parallel rollout on the repo. Each reclaims its whole claim on resume, and
   waits its turn for a place another rollout took meanwhile: whoever released
-  a place yields it. It is narrower than live: a superseded note stamped
-  done but not yet moved is live but not unfinished, and so is a rollout whose
+  a place yields it to a chain free to run (ADR 0067 d4's order breaks the
+  rest, so no wait closes a cycle). It is narrower than live: a superseded
+  note stamped done but not yet moved is live but not unfinished, and so is a rollout whose
   every task merged before its completion ceremony ran. `--regenerate`
   supersedes this project's unfinished rollout when it is paused or never
   started. _Avoid_: live (for this meaning), active, open.

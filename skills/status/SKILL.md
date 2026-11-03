@@ -786,8 +786,13 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   `restart.cwd`" when `restart.anyLaunch`), its `task`, "take-over" when `restart.takeOver`, and "blocked by
   `<restart.blockedBy>`" when set. A `surface held by [[<B>]] (<token>)` blocker (ADR 0060) reads "waits its turn:
   [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
-  A stand has three causes (ADR 0067 d4): [[<B>]] began first on that place, or (until Chain copies) [[<B>]]'s open
-  Leg works that checkout, or [[<B>]] was scheduled on a place this chain released while it was stuck.
+  A stand has five causes (ADR 0067 d4), each with its own remedy: [[<B>]] comes first (it began first, or wins the
+  slug order on equal stamps or when neither has begun) and holds an unlanded row on that place; or, until Chain
+  copies, [[<B>]] comes first and still has unlanded rows in a checkout this Leg works, even when the two share no
+  file (the commonest: a never-begun lower-slug chain that nobody starts blocks a higher-slug one this way, so name
+  "run [[<B>]] or stamp it `status: dropped`"); or [[<B>]]'s open Leg writes that place or (until Chain copies) works
+  that checkout; or [[<B>]] was scheduled on a place this chain released while it was stuck (ADR 0060's yield); or
+  [[<B>]]'s chain is unreadable, so it holds its whole claim (fail closed: `/thread:status [[<B>]]` names why; fix its note).
   Its `prompt` is printed, fenced, only where an action below hands it to Lachy.
 - **Hold** (ADR 0060), from `hold`. Scope `stuck`: `Holds only <held>` with the `rows` that hold them (each `[[slug]]`
   with its `state`), then `Released <released>` when it is not empty: other chains and parallel runs may use those

@@ -934,7 +934,8 @@ the launch its Leg opens in, and the chain's surfaces. A chain's surfaces are it
 (ADR 0067 d4): inside a git checkout a claim is `repo:<toplevel>//<path in it>`, with a trailing `/` for a folder,
 the toplevel being the in-place twin's, and a bare `repo:<toplevel>` covers the whole checkout. Chains whose
 surfaces are disjoint run side by side, and chains whose surfaces overlap are both scheduled: sharing a checkout or
-the vault never blocks a schedule, and the chains take turns at each Leg's begin, the first to begin going first. A
+the vault never blocks a schedule, and each Leg's begin orders them, the one that comes first (the first to begin,
+else by slug) landing its rows on the shared place before the other begins a Leg that writes it. A
 member predicts each path its `## Launch` names below a checkout's toplevel, each of its `touches:` (a relative one
 in its one checkout) and each surface added for it, or exactly what it declares in `surfaces:`. Its reach paths name
 the checkout it works and predict nothing there: its launch folder, its launch commands' `--add-dir` and `cd` paths
@@ -985,9 +986,10 @@ from S2's JSON (and `--regenerate` when this run has it, which only WARNs: a ser
 Every chain is checked, even after one is refused. A live serial chain never refuses one (ADR 0067 d4): a predicted
 overlap with what it holds prints `WARN: [[<s>]] … also predicts <b>, which this chain predicts as <a>: they take
 turns on it, the first to begin going first`, and, until each chain works its own Chain copy, a chain working one of
-this chain's checkouts prints `WARN: [[<s>]] … works <checkout> too: until each chain works its own Chain copy, their
-Legs take turns in it`; carry both to S7. `none` → go on. Only an unfinished parallel rollout whose Project root a
-token or a `--checkout` meets refuses. Any refusal (`refuse …`, exit 3) or exit 2 stops the whole run before anything is written, and
+this chain's checkouts (a stuck one works none) prints `WARN: [[<s>]] … works <checkout> too: until each chain works
+its own Chain copy, the two work it a chain at a time: the one that comes first (the first to begin, else by slug)
+lands every unlanded row it has there before the other begins a Leg in it`; carry both to S7. `none` → go on. Only
+an unfinished parallel rollout whose Project root a token or a `--checkout` meets refuses. Any refusal (`refuse …`, exit 3) or exit 2 stops the whole run before anything is written, and
 every refusal's stderr goes in one report: each line names the unfinished parallel rollout, its project and state,
 the overlapping pair and its remedy. Tokens compare literally (`repo:<realpath>`, or a file in one), save across
 nested checkouts (below), so a
