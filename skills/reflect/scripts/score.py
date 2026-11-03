@@ -36,8 +36,9 @@ Running time is the time in [since, until] when the run is active and not paused
 its effective end, below), or the lane is held with no merge, race or git-env hold open and no Slot open, for
 at most LANE_ONLY_CAP of each such stretch of one holding (a pause splits a stretch). Paused spans (paused .. resumed) are excluded; the drain before a
 soft pause's stamp counts as running. A hold with no Slot open is a wait on Lachy: excluded, listed by kind. A
-Mac-wide hold (MAC_HOLDS: the Trickle, the Away cap, the Heat hold; execute away.md) with no Slot open is a meant wait,
-never Lachy's: excluded under its own kind (hold-trickle, hold-away-cap, hold-heat), after every kind above (so a pause
+Mac-wide hold (MAC_HOLDS: the Trickle, the Away cap, the Heat hold, the last starts; execute away.md) with no Slot open
+is a meant wait, never Lachy's: excluded under its own kind (hold-trickle, hold-away-cap, hold-heat, hold-last-start:
+p28-7), after every kind above (so a pause
 or a hold wins) and before `idle`. Its idle-slots marker at t labels [t, e), e the earliest of the next marker (any
 reason), t + HOLD_MARKER_SPAN (two heartbeat ticks: the lead re-checks at each) and --until, so a dead lead's silence
 reads idle past the span, never the Trickle; a not-running stretch whose first marker is a Mac-wide hold within
@@ -45,7 +46,9 @@ HOLD_MARKER_SPAN of its start takes that label from its start, unless another re
 labelling, below: the last marker's reason holds until a change of reason, a stop or full Slots), so a queue-tail
 before the stop never back-fills as the Trickle. A run the Trickle held with no Slot ever open has no first
 slot-taken, so the default window starts at its first line: no running time, its held spans excluded as hold-trickle,
-and it reads trickle-bound (all of its time held), with Throughput null.
+and it reads trickle-bound (all of its time held), with Throughput null. The same path makes a run the last starts
+alone held with no Slot ever open (p28-7) read last-start-bound: its held spans excluded as hold-last-start, all of its
+time held, Throughput null (Binding, below).
 - A Slot's active intervals. Its calls are every run-bound (not an integrate call) for its task inside it (a
   restart after a dead lead re-takes the open Slot, keeping its first start, and binds a new call); a call's
   journal is its latest terminal call-journal line, else its latest line. The Slot is active from its start to
@@ -75,8 +78,9 @@ and it reads trickle-bound (all of its time held), with Throughput null.
   (origin_waits, (end, start, task)): no lane busy time. A yield whose re-take never came ends at the yield and still
   counts one Integration. A lane, hold or pause still open at the last line read ends there,
   flagged. The night record's lines (away-night, last-start-held, ran-past-morning: p28-2, NIGHT_KINDS) are not
-  read: `next` writes a ran-past-morning line after the Morning it reads, so none is a task's last record line (an
-  untimed call's last activity) or the record's last line. Nor are the time-lost ledger's (stopped, lead-entry,
+  read here: `next` writes a ran-past-morning line after the Morning it reads, so none is a task's last record line (an
+  untimed call's last activity) or the record's last line; the nights (below) read them in a pass of their own. Nor
+  are the time-lost ledger's (stopped, lead-entry,
   suite-started, suite-ended, base-moved: p29-10, LEDGER_KINDS), dropped as each record is read, the scored one and
   every other one read for load: a score is byte-equal with or without them. reflect.py's Time-lost ledger (ledger.py,
   p29-11) reads them; a score never does.
@@ -170,7 +174,10 @@ Slot open, over running time plus those spans; and, as dependency-bound's larges
 its idle Slot time plus each such excluded span times the ceiling in force at its start, at least every other idle
 reason's idle Slot time, so a run whose dependency waits left more Slots idle than the cap did is not the Trickle's;
 flagged that no rollout key moves it, and Throughput flagged as read under the cap, its value and Guardrail
-unchanged); dependency-bound (idle >=
+unchanged); last-start-bound (p28-7: the same rule over hold-last-start at LAST_START_BOUND, the last starts holding
+starts toward the Morning: flagged that no rollout key moves it, the night record's `nights` reading their fallback, and
+Throughput flagged as read under the last starts; a call holding rows on both the Away cap and the last starts records
+hold-away-cap, so it reads trickle-bound, which is checked first); dependency-bound (idle >=
 DEPENDENCY_IDLE of Slot capacity, dependency plus solo the largest reason); else none-clear.
 
 Proposals, one rule each: slot-bound -> parallel_ceiling +1, withheld ("lane N% busy, at or above 60%") when the
@@ -217,7 +224,42 @@ spread (a task override) is flagged only for a key a proposal uses.
 
 Shared, at module level (bodies as the methods had them): load_tunings(base) and agreeing(tunings, repo, key, rule,
 direction), read by tune.py's --auto and --revert; landed_from(merge_lines, since, until), read by
-skills/reflect/scripts/reflect.py's Escapes sweep; and RULE_EFFECTS, whose risks tune.py --revert reads.
+skills/reflect/scripts/reflect.py's Escapes sweep; night_record(records, since, until, mornings), read by reflect.py's
+span (`nights`); and RULE_EFFECTS, whose risks tune.py --revert reads.
+
+The nights (p28-7; execute away.md § The night record), night_record, the one copy of these rules. It reads only the
+night record's kinds (never through pair) plus slot-taken's `cap`, from every record it is given: score.py gives it
+this record and every other non-reserved same-host one (each kept to those kinds as it is read, NIGHT_READ_KINDS), and
+narrows it to the Mornings this record marked; reflect.py's span gives it every record. A line is read whatever its ts
+(a ran-past-morning line is written at the first `next` after its Morning, as fold-journals stamps call-journal lines)
+and windowed by its `morning`, in [since, until]. A night is keyed by (host, morning): `marked` when an away-night
+marker exists, `rollouts` those with one. A held or ran-past line with no marker for its Morning makes an unmarked
+night, flagged. A line is deduped on (kind, host, task lowercased, morning), the first by ts kept and a repeat flagged
+(a carried task); one whose morning, slotTakenAt or history does not read, or whose slotTakenAt is not before its
+Morning, is skipped, flagged. Held lines split by history: `fallback` under LAST_START_MIN_RUNS past runs, else
+`history`. A ran-past line, S its slotTakenAt and M its Morning, is classed:
+  unchecked      S before its own record's first away-night ts for M (begun before the last starts applied there), or
+                 its record has no marker for M (flagged);
+  fallback       else, under LAST_START_MIN_RUNS past runs and S + LAST_START_FALLBACK <= M (the fallback let it start
+                 and it still ran past), else unchecked;
+  underestimate  else, with history, S + usualMinutes <= M (its kind's usual length let it start), else unchecked; with
+                 history but no usualMinutes, unchecked, flagged.
+ranAtLeastMinutes = ceil((M - S) / 1 min), a lower bound on the run's length. history and usualMinutes are the kind's
+reading at the write, not at the start, so the split is approximate; slotTakenAt and the marker's ts make the
+before-the-night case exact. Output: {nights[{morning, host, marked, rollouts, held, heldBy{fallback, history}, ranPast,
+ranPastBy{fallback, underestimate, unchecked}, heldTasks[{rollout, task, scope, history, usualMinutes}],
+ranPastTasks[{... , slotTakenAt, class, ranAtLeastMinutes}]}], totals{nights (marked), zeroHold (marked, nothing held
+or ran past), held, ranPast, fallback, underestimate, unchecked}, flags, suggest}. Its flags are its own, prefixed
+`nights: `, never the score's. `suggest` holds declared heuristics for Lachy to act on by hand, never tune.py proposals
+(neither knob is a rollouts.toml key):
+  last-start-fallback-raise  NIGHT_FALLBACK_OVERRUNS or more fallback overruns: LAST_START_FALLBACK from 2 h to
+                             floor(the longest ranAtLeastMinutes / 60) + 1 h, a code change in reconcile-rollout.py
+                             (a Thread Skill task).
+  trickle-raise              NIGHT_ABOVE_TRICKLE or more nights whose ranPast exceeds the day's Trickle N: from N to
+                             the largest such ranPast, Chorus's companion.json `trickle`, a trade (more room by day
+                             against a lighter Mac) Lachy decides. N is the latest slot-taken cap.n with away false
+                             stamped in [since, until], else the built-in DEFAULT_TRICKLE, flagged.
+Holds alone never lower the fallback: a held start never ran, so its length is unknown.
 
 Escapes and Quality. The landed set is every task with a `merged` line in the window (read-only ones included; the
 latest line wins, a later line with no pr keeping the earlier pr, two different prs flagged), keyed as `merges` is,
@@ -233,8 +275,8 @@ throughput, handsOff{rate, landed, handsOff, tasks[{task, acts[{kind, at, detail
 retry, mergeHold, raceDecided}, notCounted{standingApproval, automaticHandBack, raceReverified}, baseline}, slots,
 lane, guardrails{throughput{value, runningHours, tasks, allowanceHours, bound, baseline, breached}, tokensPerMerge,
 setAsideRate, conflictRate, quotaStalls, reviewChurn{value | "unknown", bound "<=N%", baseline, breached,
-roundsPerLandedTask}}, load, binding{constraint, why}, headline (the ten numbers tune.py records, its name kept for
-tune.py: throughput, runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
+roundsPerLandedTask}}, load, nights (The nights, above), binding{constraint, why}, headline (the ten numbers tune.py
+records, its name kept for tune.py: throughput, runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
 quality (escapes.quality), reviewChurn (reviewChurn.value)), ranAt{parallel_ceiling, max_review_rounds, max_iterations,
 max_plan_rounds} (each key's ran-at value, the proposals' rule, or null), reviewChurn{value, findings, original, regression,
 unclassified, rounds, engine{rounds, findings, original, regression, unclassified, landedTasks (the landed tasks
@@ -280,6 +322,14 @@ WAIT_CLIMB_MIN = 10.0            # ... and at least this many minutes -> waits c
 DEPENDENCY_IDLE = 0.5            # idle Slot time this share of capacity -> dependency-bound (with that reason largest)
 QUOTA_STALLS = 1                 # this many quota stalls -> quota-bound
 TRICKLE_BOUND = 0.5              # the Mac-wide cap kept Slots free this share of the time -> trickle-bound
+LAST_START_BOUND = 0.5           # the last starts kept Slots free this share of the time -> last-start-bound
+NIGHT_FALLBACK_OVERRUNS = 2      # this many fallback overruns in the window -> suggest raising LAST_START_FALLBACK
+NIGHT_ABOVE_TRICKLE = 2          # this many nights with more tasks past the Morning than the Trickle -> suggest it
+# reconcile-rollout.py's LAST_START_FALLBACK, LAST_START_MIN_RUNS and DEFAULT_TRICKLE (tests/contracts/
+# away-state.test.mjs pins that they agree): the fallback's length, the runs that make a history, the no-file Trickle.
+LAST_START_FALLBACK_MS = 2 * HOUR
+LAST_START_MIN_RUNS = 3
+DEFAULT_TRICKLE = 2
 HOLD_MARKER_SPAN = 40 * MINUTE   # a Mac-wide hold marker labels no-Slot-open time this long at most (two */20 ticks)
 ROUND_SET_ASIDES = 2             # this many review-rounds (plan-rejected) set-asides -> a round cap +1
 EVIDENCE_MAX = 300
@@ -293,6 +343,9 @@ ACT_KINDS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
 # The night record's kinds (p28-2, run_record.py; reconcile-rollout.py's NIGHT_KINDS): `next`'s reading of a Morning,
 # written at a later call, so never a task's call activity nor the record's last line (pair skips them).
 NIGHT_KINDS = ("away-night", "last-start-held", "ran-past-morning")
+# The kinds night_record reads (NIGHT_KINDS and slot-taken's `cap`, the day's Trickle): Score.nights keeps only these
+# of each other record, filtered as it is read, so the second read of the events dir holds no more than it needs.
+NIGHT_READ_KINDS = NIGHT_KINDS + ("slot-taken",)
 # The time-lost ledger's kinds (p29-10, ADR 0051; run_record.py): stops, entries, suites and why main moved. Never scored:
 # every line of these kinds is dropped as it is read, so a score is byte-equal with or without them, and a late one never
 # extends a record's live span; reflect.py's Time-lost ledger (ledger.py, p29-11) reads them, a score never does.
@@ -315,14 +368,17 @@ RULE_EFFECTS = {
 UNDECLARED_EFFECT = ((), GUARDRAILS)
 # The Mac-wide holds (execute away.md; _idle_reason's reasons): an idle-slots reason -> its excluded kind and why. A
 # stretch with no Slot open that one of these marks is a meant wait on the Mac-wide cap, never a wait on Lachy, nor idle.
-# p28-7 adds hold-last-start here.
 MAC_HOLDS = {
     "hold-trickle": ("hold-trickle", "a row waits on the Trickle, the Mac-wide cap by day: a meant wait, not Lachy's"),
     "hold-away-cap": ("hold-away-cap", "the Away cap holds it while Away (ADR 0049)"),
     "hold-heat": ("hold-heat", "the Heat hold: the Mac is too hot to start anything (estate ADR 0009 d5)"),
+    "hold-last-start": ("hold-last-start", "the last starts hold a start that would run past the Morning (Chorus ADR "
+                                           "0104 d4): a meant wait, not Lachy's"),
 }
 # The Mac-wide holds that bind as trickle-bound (the one Mac-wide cap, its value by Away state); Heat is transient.
 CAP_HOLDS = ("hold-trickle", "hold-away-cap")
+# The Mac-wide hold that binds as last-start-bound (p28-7): the last starts, toward the Morning.
+LAST_START_HOLDS = ("hold-last-start",)
 HOLD_WHY = {"merge": "a merge hold with no Slot open (a --gated or exit-7 hold: a wait on Lachy)",
             "race": "a RACE hold with no Slot open (an undecided RACE or its re-verify: a wait on Lachy)",
             "git-env": "a git-env hold with no Slot open (an unacked canary trip: a wait on Lachy)"}
@@ -500,8 +556,9 @@ def landed_from(merge_lines, since, until):
     return out, flags
 
 
-def read_lines(path):
-    """[(ms, n, dict)] sorted by time then file order; unparsable lines (and ones with no valid ts) skipped."""
+def read_lines(path, kinds=None):
+    """[(ms, n, dict)] sorted by time then file order; unparsable lines (and ones with no valid ts) skipped. With
+    `kinds`, a line of any other kind is dropped as it is read (never counted as skipped), so it is never held."""
     out, skipped = [], 0
     with open(path, "rb") as f:
         for n, raw in enumerate(f):
@@ -511,10 +568,10 @@ def read_lines(path):
             except Exception:
                 skipped += 1
                 continue
-            if isinstance(d, dict):
-                out.append((t, n, d))
-            else:
+            if not isinstance(d, dict):
                 skipped += 1
+            elif kinds is None or d.get("kind") in kinds:
+                out.append((t, n, d))
     out.sort(key=lambda x: (x[0], x[1]))
     return out, skipped
 
@@ -570,6 +627,149 @@ def read_review_rounds(lines, since, until):
     rounds.sort(key=lambda r: (r["at"], r["n"]))
     late.sort(key=lambda r: (r["at"], r["n"]))
     return rounds, late
+
+
+def _int_ge(v, lo):
+    return isinstance(v, int) and not isinstance(v, bool) and v >= lo
+
+
+def night_record(records, since, until, mornings=None):
+    """The night record's reading (the header's "The nights", the one copy of its rules), pure. records is
+    {slug: [(ms, n, dict)]} (read_lines' lines of each record, one host's or not: a night is keyed by (host, morning));
+    since and until are ms; mornings, when given, is a set of morning ms that narrows the nights (score.py's: the
+    Mornings the scored record marked). It reads only NIGHT_KINDS lines, never through pair(), each whatever its ts
+    (a ran-past-morning line is written at the first `next` after its Morning), windowed by its `morning`; and, for
+    the day's Trickle, the slot-taken lines' `cap` stamped in [since, until]. Holds alone never lower the fallback: a
+    held start never ran, so its length is unknown. Shared with reflect.py (the weekly span's `nights`)."""
+    flags, nights, markers, seen, rows = [], {}, {}, set(), []
+
+    def flag(text):
+        if text not in flags:
+            flags.append(text)
+
+    trickle = None  # (ts, slug, line index, cap.n): the latest slot-taken cap with away false in the window
+    for slug in sorted(records):
+        for t, n, d in records[slug]:
+            kind = d.get("kind")
+            if kind == "slot-taken":
+                cap = d.get("cap")
+                if since <= t <= until and isinstance(cap, dict) and cap.get("away") is False and \
+                        _int_ge(cap.get("n"), 1) and (trickle is None or (t, slug, n) > trickle[:3]):
+                    trickle = (t, slug, n, cap["n"])
+                continue
+            if kind not in NIGHT_KINDS:
+                continue
+            try:
+                m = to_ms(d["morning"])
+            except Exception:
+                flag("nights: a %s line in [[%s]] has no readable morning: skipped" % (kind, slug))
+                continue
+            if not since <= m <= until or (mornings is not None and m not in mornings):
+                continue
+            host = d.get("host")
+            if kind == "away-night":
+                k = (host, m, slug)
+                if k not in markers or t < markers[k]:
+                    markers[k] = t
+            else:
+                rows.append((t, slug, n, kind, host, m, d))
+    for (host, m, slug), _t in markers.items():
+        nights.setdefault((host, m), {"rollouts": set(), "held": [], "ranPast": []})["rollouts"].add(slug)
+    for t, slug, n, kind, host, m, d in sorted(rows, key=lambda r: (r[0], r[1], r[2])):
+        task = d.get("task")
+        if not isinstance(task, str) or not task:
+            flag("nights: a %s line in [[%s]] names no task: skipped" % (kind, slug))
+            continue
+        hist = d.get("history")
+        if not _int_ge(hist, 0):
+            flag("nights: [[%s]]'s %s line in [[%s]] has no readable history: skipped" % (task, kind, slug))
+            continue
+        usual = d.get("usualMinutes") if _int_ge(d.get("usualMinutes"), 1) else None
+        key = (kind, host, task.lower(), m)
+        if key in seen:
+            flag("nights: [[%s]]'s %s line for the Morning %s repeats in [[%s]]: counted once"
+                 % (task, kind, fmt(m), slug))
+            continue
+        entry = {"rollout": slug, "task": task, "scope": d.get("scope") if isinstance(d.get("scope"), str) else None,
+                 "history": hist, "usualMinutes": usual}
+        if kind == "ran-past-morning":
+            try:
+                s = to_ms(d["slotTakenAt"])
+            except Exception:
+                flag("nights: [[%s]]'s ran-past-morning line in [[%s]] has no readable slotTakenAt: skipped"
+                     % (task, slug))
+                continue
+            if s >= m:
+                flag("nights: [[%s]]'s ran-past-morning line in [[%s]] took its Slot at or after its Morning: skipped"
+                     % (task, slug))
+                continue
+            own = markers.get((host, m, slug))
+            if own is None:
+                cls = "unchecked"
+                flag("nights: [[%s]] ran past the Morning %s with no away-night marker in [[%s]]: unchecked"
+                     % (task, fmt(m), slug))
+            elif s < own:
+                cls = "unchecked"  # begun before the last starts applied in its rollout
+            elif hist < LAST_START_MIN_RUNS:
+                cls = "fallback" if s + LAST_START_FALLBACK_MS <= m else "unchecked"
+            elif usual is None:
+                cls = "unchecked"
+                flag("nights: [[%s]]'s ran-past-morning line in [[%s]] reads %d past runs and no usualMinutes: "
+                     "unchecked" % (task, slug, hist))
+            else:
+                cls = "underestimate" if s + usual * MINUTE <= m else "unchecked"
+            entry.update({"slotTakenAt": fmt(s), "class": cls, "ranAtLeastMinutes": -(-(m - s) // MINUTE)})
+        seen.add(key)
+        nights.setdefault((host, m), {"rollouts": set(), "held": [], "ranPast": []})[
+            "held" if kind == "last-start-held" else "ranPast"].append(entry)
+    out = []
+    totals = {"nights": 0, "zeroHold": 0, "held": 0, "ranPast": 0, "fallback": 0, "underestimate": 0, "unchecked": 0}
+    for (host, m) in sorted(nights, key=lambda k: (k[1], str(k[0]))):
+        nt = nights[(host, m)]
+        held, ran = nt["held"], nt["ranPast"]
+        by = {c: sum(1 for e in ran if e["class"] == c) for c in ("fallback", "underestimate", "unchecked")}
+        marked = bool(nt["rollouts"])
+        if not marked:
+            flag("nights: the Morning %s has held or ran-past lines and no away-night marker" % fmt(m))
+        short = sum(1 for e in held if e["history"] < LAST_START_MIN_RUNS)
+        out.append({"morning": fmt(m), "host": host, "marked": marked, "rollouts": sorted(nt["rollouts"]),
+                    "held": len(held), "heldBy": {"fallback": short, "history": len(held) - short},
+                    "ranPast": len(ran), "ranPastBy": by, "heldTasks": held, "ranPastTasks": ran})
+        totals["nights"] += marked
+        totals["zeroHold"] += marked and not held and not ran
+        totals["held"] += len(held)
+        totals["ranPast"] += len(ran)
+        for c in by:
+            totals[c] += by[c]
+    suggest = []
+    over = [e for nt in out for e in nt["ranPastTasks"] if e["class"] == "fallback"]
+    if len(over) >= NIGHT_FALLBACK_OVERRUNS:
+        longest = max(e["ranAtLeastMinutes"] for e in over)
+        suggest.append({
+            "rule": "last-start-fallback-raise", "key": "LAST_START_FALLBACK",
+            "where": "skills/execute/scripts/reconcile-rollout.py (a code change: file a Thread Skill task)",
+            "fromHours": LAST_START_FALLBACK_MS // HOUR, "toHours": longest // 60 + 1,
+            "evidence": ("%d fallback overrun(s) (fewer than %d past runs, started at least %d h before the Morning, "
+                         "still running at it): the longest ran at least %d min (%s)"
+                         % (len(over), LAST_START_MIN_RUNS, LAST_START_FALLBACK_MS // HOUR, longest,
+                            ", ".join("[[%s]]" % e["task"] for e in over)))[:EVIDENCE_MAX]})
+    if trickle is None:
+        n_day = DEFAULT_TRICKLE
+        if out:
+            flag("nights: no slot-taken cap by day in the window: the Trickle is read as the built-in %d" % n_day)
+    else:
+        n_day = trickle[3]
+    above = [nt for nt in out if nt["ranPast"] > n_day]
+    if len(above) >= NIGHT_ABOVE_TRICKLE:
+        suggest.append({
+            "rule": "trickle-raise", "key": "trickle",
+            "where": "Chorus companion.json `trickle` (Chorus ADR 0104 § Built)",
+            "from": n_day, "to": max(nt["ranPast"] for nt in above),
+            "trade": "more room by day against a lighter Mac: Lachy decides (Chorus ADR 0104 d2)",
+            "evidence": ("%d night(s) ran more tasks past the Morning than the Trickle of %d (%s)"
+                         % (len(above), n_day, ", ".join("%s: %d" % (nt["morning"], nt["ranPast"]) for nt in above))
+                         )[:EVIDENCE_MAX]})
+    return {"nights": out, "totals": totals, "flags": flags, "suggest": suggest}
 
 
 def _settings_value(settings, key):
@@ -1364,6 +1564,7 @@ class Score:
             "lane": dict(self.lane_metrics, integratorShare=integ_share),
             "guardrails": guard,
             "load": self.load(base, slug, host, since, until),
+            "nights": self.nights(base, slug, host, lines, since, until),
             "headline": headline,
             "ranAt": {k: self.ran_at[k][0] for k in KEYS},
             "reviewChurn": churn,
@@ -1381,7 +1582,8 @@ class Score:
             "laneFreeForRaise": LANE_FREE_FOR_RAISE, "waitClimbRatio": WAIT_CLIMB_RATIO,
             "waitClimbMinMinutes": WAIT_CLIMB_MIN, "dependencyIdle": DEPENDENCY_IDLE,
             "quotaStalls": QUOTA_STALLS, "roundSetAsides": ROUND_SET_ASIDES,
-            "trickleBound": TRICKLE_BOUND, "holdMarkerSpanMinutes": HOLD_MARKER_SPAN // MINUTE,
+            "trickleBound": TRICKLE_BOUND, "lastStartBound": LAST_START_BOUND,
+            "holdMarkerSpanMinutes": HOLD_MARKER_SPAN // MINUTE,
         }
         return out
 
@@ -1696,6 +1898,9 @@ class Score:
         trickle = self._trickle_bound()
         if trickle:
             return trickle
+        last = self._last_start_bound()
+        if last:
+            return last
         if self.capacity and self.idle_total / self.capacity >= DEPENDENCY_IDLE:
             dep = self.idle.get("dependency", 0) + self.idle.get("solo", 0)
             others = [v for k, v in self.idle.items() if k not in ("dependency", "solo")]
@@ -1704,20 +1909,21 @@ class Score:
                         "dependencies or a Solo task" % round(self.idle_total * 100 / self.capacity)}
         return {"constraint": "none-clear", "why": "no rule held"}
 
-    def _trickle_bound(self):
-        """The trickle-bound rule (the header's Binding), or None. Its share, as slot-bound's full share: the time a
-        CAP_HOLDS reason is in force with a Slot free (idle_segments' running segments with that reason, self.idle_ms)
-        plus every excluded CAP_HOLDS span (no Slot open), over running time plus those spans; it holds at
-        TRICKLE_BOUND or more. And, as dependency-bound's largest reason, the Slot time the cap held (its idle Slot-ms
-        plus each excluded span times the ceiling in force at its start: every Slot is free then; no ceiling step, no
-        term) is at least every other idle reason's Slot-ms, so a run whose dependency waits left more Slots idle than
-        the cap did is not read as the Trickle's. Slot-full time and held time never overlap: a hold marker is only
-        written while a Slot is free, and a full segment ends its reason."""
-        held = {k: self.idle.get(k, 0) for k in CAP_HOLDS}
-        held_ms = sum(self.idle_ms.get(k, 0) for k in CAP_HOLDS)
+    def _mac_bound(self, kinds, bound):
+        """The share rule a Mac-wide hold binds by (the header's Binding: trickle-bound, last-start-bound), or None:
+        (share, held, no_slot). Its share, as slot-bound's full share: the time a `kinds` reason is in force with a
+        Slot free (idle_segments' running segments with that reason, self.idle_ms) plus every excluded `kinds` span
+        (no Slot open), over running time plus those spans; it holds at `bound` or more. And, as dependency-bound's
+        largest reason, the Slot time those holds held (`held`, {kind: Slot-ms}: its idle Slot-ms plus each excluded
+        span times the ceiling in force at its start: every Slot is free then; no ceiling step, no term) is at least
+        every other idle reason's Slot-ms, so a run whose dependency waits left more Slots idle than the hold did is not
+        read as the hold's. Slot-full time and held time never overlap: a hold marker is only written while a Slot is
+        free, and a full segment ends its reason."""
+        held = {k: self.idle.get(k, 0) for k in kinds}
+        held_ms = sum(self.idle_ms.get(k, 0) for k in kinds)
         no_slot = 0
         for kind, a, b in self._excluded_ms:
-            if kind not in CAP_HOLDS:
+            if kind not in kinds:
                 continue
             no_slot += b - a
             c = self.ceiling_at(a)
@@ -1725,10 +1931,17 @@ class Score:
                 held[kind] += (b - a) * c
         span = self.run_ms + no_slot
         h = sum(held.values())
-        others = [v for k, v in self.idle.items() if k not in CAP_HOLDS]
-        if not span or not held_ms + no_slot or (held_ms + no_slot) / span < TRICKLE_BOUND or h < max(others or [0]):
+        others = [v for k, v in self.idle.items() if k not in kinds]
+        if not span or not held_ms + no_slot or (held_ms + no_slot) / span < bound or h < max(others or [0]):
             return None
-        share = (held_ms + no_slot) / span
+        return (held_ms + no_slot) / span, held, no_slot
+
+    def _trickle_bound(self):
+        """The trickle-bound rule (the header's Binding) over CAP_HOLDS at TRICKLE_BOUND (_mac_bound), or None."""
+        hit = self._mac_bound(CAP_HOLDS, TRICKLE_BOUND)
+        if hit is None:
+            return None
+        share, held, no_slot = hit
         self.flag("trickle-bound: no rollout key moves this (the Trickle is the Mac-wide cap in "
                   "~/.config/thread/away.json)")
         self.flag("throughput: read under the Mac-wide cap (trickle-bound): merges per running hour at the Slots the "
@@ -1738,6 +1951,22 @@ class Score:
                        "Slot time it held: the Trickle %g h, the Away cap %g h)"
                        % (round(share * 100), hours(no_slot), hours(held["hold-trickle"]),
                           hours(held["hold-away-cap"]))}
+
+    def _last_start_bound(self):
+        """The last-start-bound rule (the header's Binding, p28-7) over LAST_START_HOLDS at LAST_START_BOUND
+        (_mac_bound), or None: the last starts held starts toward the Morning for most of the run."""
+        hit = self._mac_bound(LAST_START_HOLDS, LAST_START_BOUND)
+        if hit is None:
+            return None
+        share, held, no_slot = hit
+        self.flag("last-start-bound: no rollout key moves this (the last starts hold starts that would run past the "
+                  "Morning; the night record, `nights`, reads their fallback)")
+        self.flag("throughput: read under the last starts (last-start-bound): merges per running hour at the starts "
+                  "the Morning allowed, not at the ceiling %s" % self.slot_metrics["ceiling"])
+        return {"constraint": "last-start-bound",
+                "why": "the last starts kept Slots free %d%% of the time (running time plus %g h with no Slot open; "
+                       "Slot time they held: %g h)"
+                       % (round(share * 100), hours(no_slot), hours(held["hold-last-start"]))}
 
     def _ran_at(self, key, since, until):
         """(ran, spread) for a round cap: its most common value on the window's slot-taken lines (ties to the later),
@@ -1875,6 +2104,38 @@ class Score:
 
     def agreeing(self, key, rule, direction):
         return agreeing(self.tunings, self.repo, key, rule, direction)
+
+    def nights(self, base, slug, host, lines, since, until):
+        """The night record's reading (night_record, the header's "The nights") over this record and every other
+        non-reserved same-host record, each other one kept to NIGHT_READ_KINDS as it is read (the only kinds
+        night_record reads: so LEDGER_KINDS never reach it), narrowed to the Mornings this record marked (its
+        away-night lines). Its flags stay in the block, never self.flags, so the score's own flags are byte-equal with
+        or without night lines."""
+        records, unread = {slug: lines}, []
+        try:
+            names = sorted(os.listdir(base))
+        except OSError:
+            names = []
+        skip = {slug + ".jsonl"} | {r + ".jsonl" for r in RR.RESERVED}
+        for name in names:
+            if not name.endswith(".jsonl") or name in skip:
+                continue
+            try:
+                other, _skipped = read_lines(os.path.join(base, name), NIGHT_READ_KINDS)
+            except OSError:
+                unread.append(name)
+                continue
+            records[name[:-6]] = [x for x in other if host is None or x[2].get("host") == host]
+        mornings = set()
+        for _t, _n, d in lines:
+            if d.get("kind") == "away-night":
+                try:
+                    mornings.add(to_ms(d["morning"]))
+                except Exception:
+                    pass
+        out = night_record(records, since, until, mornings)
+        out["flags"] = ["nights: %s cannot be read: skipped" % name for name in unread] + out["flags"]
+        return out
 
     def load(self, base, slug, host, since, until):
         """Each other same-host record whose live span overlaps this run's running time (run_iv), never merely the

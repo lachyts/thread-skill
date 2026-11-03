@@ -5,7 +5,8 @@
 //   path        away.md names `~/.config/thread/away.json`, the code's AWAY_FILE_REL under the home dir
 //   staleness   away.md's stale tests say 24 h and 5 minutes, the code's AWAY_STALE_AFTER and AWAY_FUTURE_SKEW,
 //               and its size limit 64 KiB, AWAY_MAX_BYTES
-//   default     away.md's default is Trickle <DEFAULT_TRICKLE>, in its readings and its no-writer default
+//   default     away.md's default is Trickle <DEFAULT_TRICKLE>, in its readings and its no-writer default, and
+//               score.py's DEFAULT_TRICKLE copy (p28-7, the nights) is the same
 //   refresh     the writer rewrites the file at least once every 24 h while a state holds
 //   until       the `until` row says what it means in both states (it names not Away)
 //   morning     the `morning` row is local wall-clock time
@@ -30,7 +31,8 @@
 //               and away.md says an older snapshot ignores the key
 //   last-starts (p28-2) § The last starts states the code's numbers (LAST_START_FALLBACK, LAST_START_MIN_RUNS,
 //               LAST_START_HISTORY, LAST_START_HORIZON) and its reason prefix, that `until` must be the Morning, that
-//               restarts and revises are exempt and that the hold never halts
+//               restarts and revises are exempt and that the hold never halts; score.py's LAST_START_FALLBACK_MS and
+//               LAST_START_MIN_RUNS copies (p28-7, the nights' classification) equal the code's
 //   night-record (p28-2) § The night record names the code's NIGHT_KINDS, run_record.py's KINDS holds each, and
 //               reflect's score.py skips the same NIGHT_KINDS (a night line is never a task's call activity)
 //   heat        § Heat (p31-4, estate ADR 0009 d5) names the `heat: the Mac is hot (<name>)` reason the code builds from its
@@ -111,8 +113,10 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
     !reading.includes(`\`written_at\` is more than ${skewM} minutes after now`) || !reading.includes('`until` is at or before now') ||
     !collapse(file).includes(`read as at most ${maxKiB} KiB of UTF-8`)) fails.push('staleness')
 
+  // score.py's DEFAULT_TRICKLE (p28-7: the nights' day Trickle with no slot-taken cap) is the code's too.
   if (!trickle || !reading.includes(`Not Away, Trickle ${trickle}.`) ||
-    !collapse(h2(away, 'Without a writer')).includes(`a combined Trickle of ${trickle}, nights included`)) fails.push('default')
+    !collapse(h2(away, 'Without a writer')).includes(`a combined Trickle of ${trickle}, nights included`) ||
+    grab(score ?? '', /^DEFAULT_TRICKLE = (\d+)$/m) !== trickle) fails.push('default')
 
   if (!collapse(file).includes('rewrite it at least once every 24 h while a state holds')) fails.push('refresh')
 
@@ -190,7 +194,8 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
     !collapse(file).includes('An engine snapshot from before it ignores it as an extra key and runs Away to each rollout\'s own ceiling (ADR 0043)') ||
     !collapse(file).includes('The first five keys are required and `away_cap` is optional. Extra keys are ignored')) fails.push('older-reader')
 
-  // last-starts: the numbers and the prefix are the code's, read from it, so a change on either side fails.
+  // last-starts: the numbers and the prefix are the code's, read from it, so a change on either side fails; score.py's
+  // copies (p28-7: the nights' classification, LAST_START_FALLBACK_MS and LAST_START_MIN_RUNS) equal them.
   const fallbackH = grab(code, /^LAST_START_FALLBACK = timedelta\(hours=(\d+)\)/m)
   const minRuns = grab(code, /^LAST_START_MIN_RUNS = (\d+)/m)
   const historyD = grab(code, /^LAST_START_HISTORY = timedelta\(days=(\d+)\)/m)
@@ -198,6 +203,8 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
   const prefix = grab(code, /^LAST_START_PREFIX = "([^"]*)"/m)
   const lastS = collapse(h2(away, 'The last starts'))
   if (!fallbackH || !minRuns || !historyD || !horizonH || !prefix ||
+    grab(score ?? '', /^LAST_START_FALLBACK_MS = (\d+) \* HOUR$/m) !== fallbackH ||
+    grab(score ?? '', /^LAST_START_MIN_RUNS = (\d+)$/m) !== minRuns ||
     !lastS.includes(`With no history its length is ${fallbackH} h: it starts until exactly ${fallbackH} h before M.`) ||
     !lastS.includes(`with at least ${minRuns} past runs. Fewer than ${minRuns} is no history.`) ||
     !lastS.includes(`falls in the last ${historyD} days`) ||
@@ -218,10 +225,10 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
     nightKinds.some((k) => !nightS.includes(`- \`${k}\` `) || !(runRecord ?? '').includes(`    "${k}": (`))) fails.push('night-record')
 
   // mac-holds (p28-6): score.py's MAC_HOLDS keys (the Mac-wide holds it scores as their own excluded kinds) hold the
-  // Trickle, the Away cap and the Heat hold, and each is a reason of run_record.py's idle-slots enum (hold-away-cap's
+  // Trickle, the Away cap, the Heat hold and the last starts (p28-7), and each is a reason of run_record.py's idle-slots enum (hold-away-cap's
   // place in the enum is the away-cap rule's, so each control fails one rule).
   const macHolds = [...(grab(score ?? '', /^MAC_HOLDS = \{([\s\S]*?)^\}/m) ?? '').matchAll(/^ {4}"([^"]+)":/gm)].map((m) => m[1])
-  if (!['hold-trickle', 'hold-away-cap', 'hold-heat'].every((k) => macHolds.includes(k)) ||
+  if (!['hold-trickle', 'hold-away-cap', 'hold-heat', 'hold-last-start'].every((k) => macHolds.includes(k)) ||
     macHolds.some((k) => k !== 'hold-away-cap' && !idleEnum.includes(`"${k}"`))) fails.push('mac-holds')
 
   // claim (p28-3): the TTL, the two file names and the WARN prefix are the code's, read from it, so a change on either
@@ -301,6 +308,7 @@ test('control: a stale window the doc does not state fails staleness', () => {
 })
 test('control: another default fails default', () => {
   only('code', 'DEFAULT_TRICKLE = 2 ', 'DEFAULT_TRICKLE = 3 ', 'default', 'default 3')
+  only('score', 'DEFAULT_TRICKLE = 2\n', 'DEFAULT_TRICKLE = 3\n', 'default', 'score.py\'s copy 3')
 })
 test('control: no 24 h refresh duty fails refresh', () => {
   only('away', 'and rewrite it at least once every 24 h while a state holds', 'and whenever it likes', 'refresh', 'no refresh')
@@ -395,6 +403,8 @@ test('control: a fallback, a run count or a rule the code and § The last starts
   only('code', 'LAST_START_HISTORY = timedelta(days=30)', 'LAST_START_HISTORY = timedelta(days=60)', 'last-starts', '60 days')
   only('code', 'LAST_START_HORIZON = timedelta(hours=24)', 'LAST_START_HORIZON = timedelta(hours=36)', 'last-starts', 'a 36 h horizon')
   only('code', 'LAST_START_PREFIX = "last start:"', 'LAST_START_PREFIX = "morning:"', 'last-starts', 'another prefix')
+  only('score', 'LAST_START_FALLBACK_MS = 2 * HOUR', 'LAST_START_FALLBACK_MS = 3 * HOUR', 'last-starts', 'score.py\'s fallback copy')
+  only('score', 'LAST_START_MIN_RUNS = 3', 'LAST_START_MIN_RUNS = 4', 'last-starts', 'score.py\'s run-count copy')
   const l = real.away.split('\n').find((x) => x.startsWith('- its `until` is the Morning:'))
   only('away', l + '\n', '', 'last-starts', 'the until rule dropped')
   only('away', 'Restarts are exempt: a stalled `in_progress` task, a set-aside task handed back and a seeded revise each re-enter a task already begun, and running tasks finish.',
@@ -423,6 +433,8 @@ test('control: a Heat hold the doc or the code says another way fails heat', () 
 test('control: a Mac-wide hold score.py lacks, or one the idle-slots enum lacks, fails mac-holds', () => {
   only('score', '    "hold-trickle": ("hold-trickle",', '    "hold-trickled": ("hold-trickle",', 'mac-holds', 'dropped from MAC_HOLDS')
   only('runRecord', '"hold-trickle",\n', '"hold-trickles",\n', 'mac-holds', 'dropped from the idle-slots enum')
+  only('score', '    "hold-last-start": ("hold-last-start",', '    "hold-last-starts": ("hold-last-start",', 'mac-holds',
+    'the last starts dropped from MAC_HOLDS')
 })
 
 test('control: a Trickle claim the doc or the code says another way fails claim', () => {
