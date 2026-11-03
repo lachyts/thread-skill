@@ -436,9 +436,12 @@ def read_slots(vault, args):
             continue
         target, trel = live[0]
         tnote = vault.note(trel)
-        if tnote.fm is None:  # live, but nobody can read it: say so, never `live` with its next_action lost
-            why = tnote.error or "frontmatter does not parse"
-            rows.append({"kind": "slot", "name": name, "result": "unparseable:" + why, "task": target, "next_action": target})
+        # Live, but nobody can read it: say so, never `live` with its next_action lost. estate-scan's rule decides
+        # what is broken: a note that never opens `---` has no frontmatter, so it is out of scope, not broken.
+        opened = bool(tnote.lines) and tnote.lines[0].rstrip() == "---"
+        if tnote.fm is None and (tnote.error != "no closed frontmatter" or opened):
+            rows.append({"kind": "slot", "name": name, "result": "unparseable:" + tnote.error, "task": target,
+                         "next_action": target})
             continue
         line = text_of(tnote.get("next_action"))
         rows.append({"kind": "slot", "name": name, "result": "live", "task": target, "next_action": line or target})

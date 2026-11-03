@@ -2204,7 +2204,7 @@ def unread_tasks(scan, key):
         if not isinstance(note, str) or not isinstance(why, str) or not note.endswith(".md"):
             continue
         parts = note.split("/")
-        if parts[:2] != ["Work", "Tasks"]:
+        if len(parts) != 3 or parts[:2] != ["Work", "Tasks"]:  # a task is a note directly in Work/Tasks, never Archive/
             continue
         k = key(parts[-1][:-3])
         if k:
