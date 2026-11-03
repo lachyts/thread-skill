@@ -11,10 +11,12 @@ Minimal footprint for running the continuity verbs (chiefly `/thread:next`, `/th
 
    1. **Sync other file types**: in Obsidian **Settings → Sync → Selective sync**, turn on syncing of all other file types (the toggle label varies by Obsidian version). Obsidian Sync skips `.js` by default, so `_System/views/*.js` never arrive and every `dv.view()` widget in the daily notes fails with `Dataview: custom view not found for '_System/views/day-tracking.js'`, even though the plugins are installed and DataviewJS is on. Check: `ls ~/repos/obsidian/_System/views/*.js` lists files.
 3. **Plugin**: `claude plugin marketplace add lachyts/thread-skill` (or `/plugin marketplace add lachyts/thread-skill` in-app), then install the `thread` plugin. Update later via `claude plugin marketplace update thread` plus a plugin update.
-4. **Optional, python3**: the plugin's Stop hook runs `python3 .../rollout-stop-driver.py` at every session end. Without `python3` on PATH the hook errors harmlessly but noisily. To quiet it: install Python, then in the Python install dir run `mklink python3.exe python.exe` (Windows installers ship only `python.exe`).
+4. **Recommended, python3**: the plugin's two hooks run `python3`. The Stop hook runs `python3 .../rollout-stop-driver.py` at every session end, and the PreToolUse hook runs `python3 .../vault-note-overlap.py` on every Edit, Write and MultiEdit. Without `python3` on PATH both error harmlessly (no edit is ever blocked) but noisily, the PreToolUse one on every edit. To quiet them: install Python, then in the Python install dir run `mklink python3.exe python.exe` (Windows installers ship only `python.exe`).
 5. **Optional, Defender**: exclude the vault directory from real-time scanning if Obsidian Sync or vault indexing feels slow. Your admin shell, your call.
 
 ### What degrades, deliberately
+
+The Note overlap hook (`hooks/vault-note-overlap.py`, ADR 0067 d6) is inert on native Windows: it takes its record lock with `fcntl`, which Windows Python lacks, so it never writes its record and never warns there, and every edit goes through as it would with no hook.
 
 Features of `close`/`orient` that read `~/repos/workspaces` (shared threads, the workspace registry) are absent. Project `THREAD.md` handling still works in whatever repo you are in, and vault captures sync back to the Mac. If a verb ever genuinely needs it, clone `lachyts/claude-workspaces` to `C:\Users\<you>\repos\workspaces` and it lights up; do not pre-provision.
 
@@ -22,6 +24,6 @@ The process-observation capture (category 7, thread-skill ADR 0012, 0015) **NOOP
 
 ## Full system (only if Windows use grows)
 
-The rollout engine (orient's reshuffle, `schedule`/`execute`/`status`/`repair`) additionally requires `python3` (no longer optional), the workspaces clone above, and target repos under `~/repos/`. All path resolution already goes through `expanduser` / Git Bash `~`, so mirroring the Mac's `~/repos` layout needs no skill changes.
+The rollout engine (orient's reshuffle, `schedule`/`execute`/`status`/`repair`) additionally requires `python3` (no longer just recommended), the workspaces clone above, and target repos under `~/repos/`. All path resolution already goes through `expanduser` / Git Bash `~`, so mirroring the Mac's `~/repos` layout needs no skill changes.
 
-Known risk on native Windows, first run: the Stop hook command references `${CLAUDE_PLUGIN_ROOT}`. If it fails to expand under the Windows hook runner, report it back rather than patching locally; the fix belongs in `hooks/hooks.json` in this repo.
+Known risk on native Windows, first run: both hook commands, the Stop hook's and the PreToolUse hook's, reference `${CLAUDE_PLUGIN_ROOT}`. If it fails to expand under the Windows hook runner, report it back rather than patching locally; the fix belongs in `hooks/hooks.json` in this repo.
