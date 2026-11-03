@@ -40,8 +40,10 @@
 //               **Stalled rollout** names the Heat hold among the meant waits, so a hot spell never reads as a stall
 //   claim       § The Trickle's *Trickle claims* (p28-3) states the code's TRICKLE_CLAIM_TTL, names its TRICKLE_LOCK and
 //               TRICKLE_CLAIMS files and quotes its TRICKLE_WARN prefix, says the § 4 stamp consumes a claim, that a
-//               claim whose rollout note is missing from the walk still counts (it fails safe), and names the seeded-
-//               revise residual and its follow-up task; the old "a claim under a lock is a later task's" is gone
+//               claim whose rollout note is missing from the walk still counts (it fails safe), and (p28-8) that `next`
+//               claims each seeded revise step 1.2 launches, with the code's TRICKLE_CLAIM_REVISE as its `kind`, and
+//               that a lasting disagreement re-claims it with a fresh `at`; the old "a claim under a lock is a later
+//               task's" and the old "but is not itself claimed" residual are gone
 //   fair-share  (p28-5) § The Trickle's *A fair share* states the code's TRICKLE_WAIT_TTL and the allocation order
 //               (fewest held, then served least recently), *The limit* names the places kept, *The hold* their
 //               `kept for` suffix (the code builds `kept for [[<rollout>]]`), and it links the sooner re-check's
@@ -237,14 +239,18 @@ function checkAway({ away, code, runRecord, score, template, schedule, context, 
   const lockFile = grab(code, /^TRICKLE_LOCK = "([^"]*)"/m)
   const claimsFile = grab(code, /^TRICKLE_CLAIMS = "([^"]*)"/m)
   const claimWarn = grab(code, /^TRICKLE_WARN = "([^"]*)"/m)
-  if (!ttlM || !lockFile || !claimsFile || !claimWarn ||
+  const reviseKind = grab(code, /^TRICKLE_CLAIM_REVISE = "([^"]*)"/m)
+  if (!ttlM || !lockFile || !claimsFile || !claimWarn || !reviseKind ||
     !trickleS.includes(`A claim lives ${ttlM} minutes from its \`at\``) ||
     !trickleS.includes(`\`${lockFile}\``) || !trickleS.includes(`\`${claimsFile}\``) ||
     !trickleS.includes(`\`${claimWarn} `) ||
     !trickleS.includes("A claim is consumed by its task's § 4 stamp") ||
     !trickleS.includes('and so does one whose rollout note is missing from the walk') ||
-    !trickleS.includes('up to the revises one step 1.2 launches') ||
-    !/\[\[thread-skill-p28-\d+-trickle-claim-a-seeded-revise\]\]/.test(trickleS) ||
+    // p28-8: a seeded revise is claimed, `kind: <TRICKLE_CLAIM_REVISE>`, and a lasting disagreement re-claims it
+    !trickleS.includes(`\`kind: ${reviseKind}\``) ||
+    !trickleS.includes('and one per seeded revise step 1.2 launches') ||
+    !trickleS.includes('is claimed again, with a fresh `at`') ||
+    trickleS.includes('but is not itself claimed') ||
     trickleS.includes("A claim under a lock is a later task's.")) fails.push('claim')
 
   // fair-share (p28-5): the record's TTL is the code's, read from it, so a change on either side fails; the allocation
@@ -446,10 +452,14 @@ test('control: a Trickle claim the doc or the code says another way fails claim'
   only('away', "A claim is consumed by its task's § 4 stamp", 'A claim is consumed by mark-started', 'claim', 'no stamp consumes it')
   only('away', 'and so does one whose rollout note is missing from the walk', 'but one whose rollout note is missing from the walk does not',
     'claim', 'a missing rollout note drops its claims')
-  only('away', 'up to the revises one step 1.2 launches', 'nothing more', 'claim', 'no seeded-revise residual')
-  only('away', '[[thread-skill-p28-8-trickle-claim-a-seeded-revise]]', 'a later task', 'claim', 'no follow-up link')
+  // p28-8: the seeded revise's claim
+  only('code', 'TRICKLE_CLAIM_REVISE = "revise"', 'TRICKLE_CLAIM_REVISE = "seeded"', 'claim', 'another revise kind in the code')
+  only('away', 'and one per seeded revise step 1.2 launches', 'and none per seeded revise', 'claim', 'no seeded revise claimed')
+  only('away', 'is claimed again, with a fresh `at`', 'is claimed once', 'claim', 'no re-claim cost')
   const p = real.away.split('\n').find((l) => l.startsWith('**Trickle claims.**'))
   only('away', p, `${p} A claim under a lock is a later task's.`, 'claim', 'the old sentence back')
+  only('away', p, `${p} A seeded revise is bounded by \`slotLimit\`, claims included, but is not itself claimed.`, 'claim',
+    'the old residual back')
 })
 
 test('control: a fair share the doc or the code says another way fails fair-share', () => {
