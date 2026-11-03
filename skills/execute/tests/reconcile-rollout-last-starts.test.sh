@@ -476,6 +476,32 @@ ro 'paused: 2026-10-03T07:00+00:00'; mkt c1 ro open 'scope: cross-cutting'
 history; night
 J=$(st 2026-10-03T07:30:00Z)
 ok "$(q "$J" "$LS")" '{"c1":null}' "S4: paused: the pause holds the row, never the last starts"
+# Each of the rollout's other whole holds (cmd_status's whole_held) nulls the row too, and the same row reads $CC before
+# it. whole <label>: a scenario whose c1 reads $CC, checked; the caller then adds its hold to ro.md and checks again.
+whole() {
+  scen "s4-status-$1"; ro; mkt c1 ro open 'scope: cross-cutting'; history; night
+  ok "$(q "$(st 2026-10-03T07:30:00Z)" "$LS")" "{\"c1\":\"$CC\"}" "S4 $1 control: before the hold, c1 reads its last start"
+}
+whole pause-requested
+python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("\nparallel_ceiling: 3\n", "\nparallel_ceiling: 3\npause_requested: true\n", 1))' "$D/ro.md"
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" '[d["pause_requested"], d["tasks"][0]["slug"], d["tasks"][0]["lastStart"]]')" '[true,"c1",null]' \
+  "S4: pause_requested: the drain holds the row, never the last starts"
+whole main-red
+printf '\n## Race log\n\n- 2026-10-03T07:00+00:00 [[r0]] revert did not land: conflict in a.py\n' >> "$D/ro.md"
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" '[[m["slug"] for m in d["mainRed"]], '"$LS"']')" '[["r0"],{"c1":null}]' \
+  "S4: an undecided RACE revert that did not land (main red) holds the row, never the last starts"
+whole git-env-rollout
+printf '\n## Git-env log\n\n- 2026-10-03T07:00+00:00 git-env trip [[c1]] task: core.bare false→true; repo /x\n' >> "$D/ro.md"
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" '[[h["scope"] for h in d["gitEnvHold"]], '"$LS"']')" '[["rollout"],{"c1":null}]' \
+  "S4: a whole-rollout git-env trip (a bare checkout) holds the row, never the last starts"
+whole git-env-lane
+printf '\n## Git-env log\n\n- 2026-10-03T07:00+00:00 git-env trip [[c1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro.md"
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" '[[h["scope"] for h in d["gitEnvHold"]], '"$LS"']')" "[[\"lane\"],{\"c1\":\"$CC\"}]" \
+  "S4 control: a lane-scope git-env trip holds only the Integration lane: c1 still reads its last start"
 scen s5-status-no-history
 ro; mkt u1 ro open
 night
