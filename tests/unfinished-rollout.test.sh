@@ -53,7 +53,9 @@
 #           T10) or on a place it writes (T16), a take-over only on that (T10), a stalled chain no open Leg (T12); an
 #           unreadable resuming chain is exit 2 (T13); two chains that both work in Chain copies (`chain_copies:`, ADR
 #           0067 d2) meet only file to file: no checkout-level wait (T3c, T5c, T8c, T9c), the file waits kept (T1c, T16c,
-#           T14c), and one in place keeps the checkout turn (T3m, T8m); S15c: a copied live chain gives no works-too WARN
+#           T14c), and one in place keeps the checkout turn (T3m, T8m); S15c: a copied live chain gives no works-too WARN;
+#           a copy chain's done row holds its cell until leg.py land stamps it (`pending`, ADR 0067 d3), a complete
+#           chain with one is no ceremony WARN, and a parallel resume meets only rows not yet done (`undone`) (T17c)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 #   P1-P13  two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4): check's step 2c
@@ -73,6 +75,7 @@ unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (G
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 root=$(pwd -P)
 CHECK="$root/skills/_shared/scripts/unfinished-rollout.py"
+LEGPY="$root/skills/execute/scripts/leg.py"   # T17c reads leg.py status's hold
 RR="$root/skills/execute/scripts/reconcile-rollout.py"
 TPL="$root/skills/schedule/rollout-template.md"
 
@@ -612,8 +615,7 @@ mkser theirs.md "$OTHER" 'surfaces: ["ext:cms"]'
 chs --surface ext:CMS --project Demo
 ok "$out|$rc" "none|0" "S4: a serial check against another project's overlapping chain schedules it (ADR 0067 d4)"
 has "$err" "WARN: [[theirs]] (Other; never started) also predicts ext:cms, which this chain predicts as ext:CMS: they take turns on it, the first to begin going first (ADR 0067 d4)" "S4: … with the takes-turns WARN naming the pair"
-has "$err" "(ADR 0067 d4); until a chain lands each finished task (ADR 0067 d3), a chain in Chain copies that goes second begins without the other's work there" \
-   "S4: … and its interim: a copy chain that goes second begins without the other's work (until d3's land)"
+hasnt "$err" "until a chain lands each finished task" "S4: … with no interim tail: a copy chain's done row holds its place until it lands (ADR 0067 d3)"
 chs --surface ext:dns --project Demo
 ok "$out|$rc" "none|0" "S4: a disjoint chain prints none"
 hasnt "$err" "also predicts" "S4: … with no WARN"
@@ -1332,6 +1334,42 @@ LOG=$(lg $D29) mkchain cc "$OTHER" c1~open~"$VB" c2~open~"$VA"
 chs --resume cc --surface vault:Work/Projects/B --surface vault:Work/Projects/A
 ok "$out|$rc" "refuse ca|3" "T16c: two copied chains: (M)'s file half still waits on the open Leg's place"
 has "$err" "holds \`vault:Work/Projects/A\` with its open Leg 2, which this chain writes as \`vault:Work/Projects/A\` (ADR 0060)" "T16c: … naming it"
+# T17c (ADR 0067 d3): a Chain copy's done row holds its cell until leg.py land stamps it landed (`leg_claims:`, a
+# leg_head and no `leg_landed:`: hold_of's `pending`), so a later chain that takes its file turn begins with that work;
+# a parallel resume meets only rows not yet done (`undone`).
+HD='leg_head: ["/c@0123456789abcdef0123456789abcdef01234567"]'
+tscen t17c
+LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain hb "$DEMO" h1~done~"\`repo:$W//f.py\`"~"$HD"~"leg_claims: [\"repo:$W//f.py\"]" h2~open~"\`repo:$W//g.py\`"
+LOG=$(LFOLD="$W" lg $D29) LFOLD="$W" mkchain rn "$OTHER" r1~open~"\`repo:$W//f.py\`"
+chs --resume rn --surface "repo:$W//f.py"
+ok "$out|$rc" "refuse hb|3" "T17c: H's done row, not yet landed from its copy, holds R's resume on f.py"
+has "$err" "holds \`repo:$W//f.py\` for an unlanded row and began first" "T17c: … as an unlanded row (O)"
+out=$(python3 "$LEGPY" status --rollout "$T/hb.md" --tasks-dir "$T")
+ok "$(python3 -c 'import json, sys; h = json.loads(sys.argv[1])["hold"]; print(h["undone"], h["pending"], h["unlanded"])' "$out")" \
+   "['repo:$W//g.py'] ['h1'] ['repo:$W//g.py', 'repo:$W//f.py']" "T17c: leg.py's hold: undone, pending and unlanded"
+LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain hb "$DEMO" h1~done~"\`repo:$W//f.py\`"~"$HD"~"leg_claims: [\"repo:$W//f.py\"]"~"leg_landed: $D29" h2~open~"\`repo:$W//g.py\`"
+chs --resume rn --surface "repo:$W//f.py"
+ok "$out|$rc" "none|0" "T17c: control: once landed (leg_landed:), it holds nothing there"
+LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain hb "$DEMO" h1~done~"\`repo:$W//f.py\`"~"$HD" h2~open~"\`repo:$W//g.py\`"
+chs --resume rn --surface "repo:$W//f.py"
+ok "$out|$rc" "none|0" "T17c: control: a done row with no leg_claims: (done before them) holds nothing"
+rm "$T/h2.md"   # h1 alone: H's every row done
+LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain hb "$DEMO" h1~done~"\`repo:$W//f.py\`"~"$HD"~"leg_claims: [\"repo:$W//f.py\"]"
+chs --resume rn --surface "repo:$W//f.py"
+ok "$out|$rc" "refuse hb|3" "T17c: h1 as H's only row (every row done, not landed): still refused"
+hasnt "$err" "completion ceremony never ran" "T17c: … with no ceremony WARN: it is not complete until it lands"
+LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain hb "$DEMO" h1~done~"\`repo:$W//f.py\`"~"$HD"~"leg_claims: [\"repo:$W//f.py\"]"~"leg_landed: $D29"
+chs --resume rn --surface "repo:$W//f.py"
+ok "$out|$rc" "none|0" "T17c: … once landed: none"
+has "$err" "WARN: hb: every task merged but its completion ceremony never ran" "T17c: … and the ceremony WARN"
+tscen t17c2
+LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain hb "$DEMO" h1~done~"\`repo:$W//f.py\`"~"$HD"~"leg_claims: [\"repo:$W//f.py\"]"
+mkro p.md "$W" "$OTHER"; mkt pt1.md p open 'owner: lead'
+chk --resume p --repo "$W"
+ok "$out|$rc" "none|0" "T17c: a parallel resume beside H's unlanded done row: none (its clone integrates through origin)"
+LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain hb "$DEMO" h1~open~"\`repo:$W//f.py\`"
+chk --resume p --repo "$W"
+ok "$out|$rc" "refuse hb|3" "T17c: control: with h1 open, the parallel resume waits"
 unset COPIES
 
 # ── P1-P13: two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4) ──────────────────────

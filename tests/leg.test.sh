@@ -35,17 +35,24 @@
 #        un-ignored file), stamps chain_copies: after shape:, and refuses a copy dir under ~/repos, an occupied path, a
 #        malformed key, one repository twice, this plugin's own checkout and the chain branch checked out in another
 #        worktree (L16a); begin remakes a deleted copy on its branch, exit 4 naming the copy line, and logs the
-#        primary folder (L16b, L16g); begin fast-forwards a clean copy to the primary's default branch, and its four
-#        controls (L16c); claim stamps the copy and the primary bases, done passes a copy commit and refuses one in the
+#        primary folder (L16b, L16g); begin fast-forwards a clean copy to the primary's default branch, whatever the
+#        primary has checked out, and its controls, landFirst when the chain branch has commits that branch lacks (L16c); claim stamps the copy and the primary bases, done passes a copy commit and refuses one in the
 #        primary, which --revert reverts there, while a hand merge of the chain branch is never stray (L16d); two
 #        chains in one repo hold separate HEADs and indexes (L16e); the hand-over, handed --manual and status's restart
 #        open in the copy, with the alias's paste line (a cd-less alias's whole command) or its prose fallback, and a
-#        missing copy blocks the restart (L16f); done's own-checkout rule across two copies (L16h); Complete's land
-#        follow-on merges the chain branch, and a stuck route still files a chain merged by hand (L16i); begin adds a
-#        hand-added row's pair, and claim refuses a top with none or a pair whose copy is missing (L16j); claim refuses a
-#        dependency another chain finished whose commit the copy lacks, naming its chain/<X> or the merge into the copy,
-#        and claims it once the work is there, or when the commit is another repository's (L16k). L1-L15 are the
-#        in-place regression: their notes carry no chain_copies:.
+#        missing copy blocks the restart (L16f); done's own-checkout rule across two copies (L16h); Complete refuses a
+#        task not yet landed, then files only the origin half once land puts it on master, and a stuck route still files
+#        a chain merged by hand (L16i); begin adds a hand-added row's pair, and claim refuses a top with none or a pair
+#        whose copy is missing (L16j); claim refuses a dependency another chain finished whose commit the copy lacks,
+#        naming its chain/<X> or the land that brings it in, and claims it once the work is there, or when the commit
+#        is another repository's (L16k). L1-L15 are the in-place regression: their notes carry no chain_copies:.
+#   L17  leg.py land (ADR 0067 d3, d4): two chains land in turn by merge, a stale --verified asks again (L17a), with
+#        change's first-parent WARN (L17k), check_cause's land-merge outside (L17l) and a row with no Verify line (L17n);
+#        a conflict stands and Complete waits, then a hand resolution lands (L17b); a peer's edit or an untracked file
+#        refuses the ff, never a stash (L17c); --retire removes the copy and deletes its branch with -d, kept on any
+#        refusal with a follow-on (L17d); both p36-3 interims retired (L17e, L17f); actual claims (L17g); the repo lock
+#        (L17h); the stands that run no git, the refusals and the in-place peer (L17i); --red (L17j); the verified tip
+#        (L17m); Complete's Land first before the completion verify, and a land that waits closes stopped (L17o).
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -1283,21 +1290,23 @@ ffscen() {
 }
 ffscen l16c
 CWD="$C/sub/l" leg begin --cwd "$C/sub/l"
-ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')|$(git -C "$C" rev-parse HEAD)" "0|True|$(git -C "$R" rev-parse master)" \
-   "L16c: begin fast-forwards the clean copy to master"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')|$(git -C "$C" rev-parse HEAD)|$(q 'd["landFirst"]')" "0|True|$(git -C "$R" rev-parse master)|False" \
+   "L16c: begin fast-forwards the clean copy to master (landFirst false)"
 ok "$(git -C "$R" symbolic-ref --short HEAD)|$(git -C "$R" status --porcelain --untracked-files=no)" "master|" "L16c: … never moving the primary"
 ffscen l16c2; echo dirty >> "$C/a.txt"
 CWD="$C/sub/l" leg begin --cwd "$C/sub/l"
-ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')" "0|False" "L16c: control: a dirty copy is not fast-forwarded"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')|$(q 'd["landFirst"]')" "0|False|False" "L16c: control: a dirty copy is not fast-forwarded"
 has "$(q 'd["warns"]')" "WARN: $C: not fast-forwarded to master: the copy has uncommitted changes" "L16c: … with a WARN"
 ffscen l16c3; tcommit "$C" t0 own.txt "the chain's own commit"; own=$(git -C "$C" rev-parse HEAD)
 CWD="$C/sub/l" leg begin --cwd "$C/sub/l"
-ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')|$(git -C "$C" rev-parse HEAD)" "0|False|$own" "L16c: control: a chain with its own commit is not fast-forwarded"
-has "$(q 'd["warns"]')" "chain/$RO has commits master lacks" "L16c: … with a WARN"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')|$(git -C "$C" rev-parse HEAD)|$(q 'd["landFirst"]')" "0|False|$own|True" \
+   "L16c: control: a chain with its own commit is not fast-forwarded: landFirst"
+has "$(q 'd["warns"]')" "WARN: $C: not fast-forwarded to master: chain/$RO has commits master lacks (run leg.py land before the first claim: it merges master in)" \
+   "L16c: … with a WARN naming the land"
 ffscen l16c4; git -C "$R" checkout -qb w
 CWD="$C/sub/l" leg begin --cwd "$C/sub/l"
-ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')" "0|False" "L16c: control: the primary off master: not fast-forwarded"
-has "$(q 'd["warns"]')" "WARN: $C: not fast-forwarded to master: $R does not have master checked out" "L16c: … with a WARN"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')|$(git -C "$C" rev-parse HEAD)|$(git -C "$R" symbolic-ref --short HEAD)" \
+   "0|True|$(git -C "$R" rev-parse master)|w" "L16c: the primary off master: the copy is still fast-forwarded (it reads only refs/heads/master)"
 cscen l16c5
 R="$S/r"; mkdir -p "$R"; git -c init.defaultBranch=trunk init -q "$R"; echo a > "$R/a.txt"; git -C "$R" add -A; git -C "$R" commit -qm base
 C="$S/chains/r-$RO"; mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\`"; mkt t1
@@ -1416,18 +1425,23 @@ icomplete() {
   mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\`"; mkt t1
   [ -z "${2:-}" ] || git -C "$R" checkout -qb "$2"
   CWD="$R" leg copies; leg begin --cwd "$C"; work "$C" t1 c.txt "t1 work"
+  snap; leg close --outcome complete --cwd "$C" --reflection "$REFL"; ok "$rc" 1 "$1: complete refuses t1 unlanded"
+  has "$err" "[[t1]] is not on master in $R: run leg.py land first" "$1: … naming the land"; same "$1: a refused complete"
+  leg land; ok "$rc|$(q 'd["lands"][0]["state"]')" "0|landed" "$1: land"
   leg close --outcome complete --cwd "$C" --reflection "$REFL"; ok "$rc" 0 "$1: complete"
   A="$T/Archive/Rollouts/$RO.md"; FU="$T/demo-followup-land-chain-2026-10-20.md"
 }
 icomplete l16i
-has "$(cat "$FU")" "- \`$C\` (\`chain/$RO\` of \`$R\`): merge \`chain/$RO\` into \`master\` there (with \`master\` checked out: \`git -C $R merge chain/$RO\`), then open a PR from them, or push them; then \`git -C $R worktree remove $C\` and \`git -C $R branch -d chain/$RO\`" \
-   "L16i: the land follow-on merges chain/\$RO into master first"
+has "$(cat "$FU")" "- \`$C\` (\`chain/$RO\` of \`$R\`): \`chain/$RO\` is already on \`master\`: open a PR from them, or push them" \
+   "L16i: landed, the land follow-on files only the origin half"
+hasnt "$(cat "$FU")" "merge \`chain/$RO\` into" "L16i: … with no merge lead-in"
+hasnt "$(cat "$FU")" "worktree remove" "L16i: … and no worktree remove tail (land --retire does it)"
+hasnt "$(cat "$FU")" "Chain copy, not yet on" "L16i: … nor the copy's old parenthesis"
 has "$(cat "$FU")" "([[t1]])" "L16i: … listing t1's commit"
-has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): 1 not on master → [[demo-followup-land-chain-2026-10-20]]" "L16i: the Chain commits line"
+has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master, 1 not on origin/master → [[demo-followup-land-chain-2026-10-20]]" "L16i: the Chain commits line"
 icomplete l16i2 w
-has "$(cat "$FU")" "merge \`chain/$RO\` into \`master\` there (with \`master\` checked out: \`git -C $R merge chain/$RO\`), then it goes no further: not landed: on w, not master" \
-   "L16i: a deferred route (on w) still files the merge"
-has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): 1 not on master → [[demo-followup-land-chain-2026-10-20]]" "L16i: … and its Chain commits line"
+ok "$(test -f "$FU" && echo y || echo n)" n "L16i: a deferred route (on w), everything landed: nothing filed"
+has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master; not landed: on w, not master, nothing filed" "L16i: … and its Chain commits line"
 # control: chain/$RO merged into master by hand, then a stuck route (the primary detached): a stuck route cannot say what
 # origin has, so every chain commit is still filed, as in place
 cscen l16i3
@@ -1439,8 +1453,9 @@ ok "$(git -C "$R" merge-base --is-ancestor "$t1sha" master && echo y)" y "L16i: 
 leg close --outcome complete --cwd "$C" --reflection "$REFL"; ok "$rc" 0 "L16i: complete after a hand merge, on a stuck route"
 A="$T/Archive/Rollouts/$RO.md"; FU="$T/demo-followup-land-chain-2026-10-20.md"
 ok "$(test -f "$FU" && echo y || echo n)" y "L16i: control: the land follow-on is still filed"
-has "$(cat "$FU")" "- \`$C\` (\`chain/$RO\` of \`$R\`): \`chain/$RO\` is already on \`master\`: check the landing route (detached HEAD), then open a PR from them, or push them; then \`git -C $R worktree remove $C\` and \`git -C $R branch -d chain/$RO\`" \
+has "$(cat "$FU")" "- \`$C\` (\`chain/$RO\` of \`$R\`): \`chain/$RO\` is already on \`master\`: check the landing route (detached HEAD), then open a PR from them, or push them" \
    "L16i: … its act starting from the landing route, the merge already made"
+hasnt "$(cat "$FU")" "worktree remove" "L16i: … with no worktree remove tail"
 has "$(cat "$FU")" "\`${t1sha:0:12}\` ✨ feat: t1 c.txt ([[t1]])" "L16i: … listing t1's commit"
 has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master; stuck: detached HEAD → [[demo-followup-land-chain-2026-10-20]]" \
    "L16i: … and its Chain commits line, never 'all on master' alone"
@@ -1490,7 +1505,7 @@ RO=$RO2; CWD="$R" leg copies; CWD="$C2" leg begin --cwd "$C2"; ok "$rc" 0 "L16k:
 CWD="$C2" leg next; ok "$(q 'd["action"]')|$(q 'd["task"]')" "claim|b1" "L16k: next frees b1, its dependency done"
 snap; cp "$T/b1.md" "$TMP/snap-b1"; CWD="$C2" leg claim --task b1
 ok "$rc" 1 "L16k: claim refuses b1: a1's commit is on chain/\$RO1, not on master or in \$C2"
-has "$err" "[[b1]] depends on [[a1]] (done on chain/$RO1, not yet on master: its land follow-on merges it): set it aside" \
+has "$err" "[[b1]] depends on [[a1]] (done on chain/$RO1, not yet on master: it lands at [[$RO1]]'s next done or close): set it aside" \
    "L16k: … naming the cause and the set-aside"
 ok "$(q 'd["unlandedDeps"][0]["dep"]')|$(q 'd["unlandedDeps"][0]["rollout"]')|$(q 'd["unlandedDeps"][0]["sha"]')|$(q 'd["unlandedDeps"][0]["copy"]')" \
    "a1|$RO1|$a1sha|$C2" "L16k: … and unlandedDeps names a1, its chain, its commit and this copy"
@@ -1498,8 +1513,8 @@ same "L16k: a refused claim"; cmp -s "$T/b1.md" "$TMP/snap-b1"; ok "$?" 0 "L16k:
 git -C "$R" merge -q --no-edit "chain/$RO1"
 CWD="$C2" leg claim --task b1
 ok "$rc" 1 "L16k: merged into master by hand but not yet in \$C2: still refused"
-has "$err" "[[b1]] depends on [[a1]] (on master, not yet in $C2: merge master into chain/$RO2 there)" "L16k: … naming the merge into the copy"
-git -C "$C2" merge -q --ff-only master
+has "$err" "[[b1]] depends on [[a1]] (on master, not yet in $C2: run leg.py land, which brings master in)" "L16k: … naming the land"
+CWD="$C2" leg land; ok "$rc|$(q 'd["lands"][0]["state"]')" "0|current" "L16k: control: leg.py land brings master into \$C2"
 CWD="$C2" leg claim --task b1
 ok "$rc|$(fm b1 leg_base)" "0|[\"$C2@$a1sha\"]" "L16k: control: with a1's work in \$C2, b1 is claimed"
 # control: a copy chain in another repository never meets a1's commit
@@ -1507,6 +1522,507 @@ R2="$S/r2"; crepo "$R2" https://github.com/o/r16k2.git; RO3=demo3-rollout-2026-1
 RO=$RO3; mkro '' "d1~cc-r2~$R2~\`repo:$R2//a.txt\`"; mkt d1 'depends-on:' '  - "[[a1]]"'
 CWD="$R2" leg copies; CWD="$C3" leg begin --cwd "$C3"; CWD="$C3" leg claim --task d1
 ok "$rc" 0 "L16k: control: a1's commit is no object of \$R2's, so d1 is claimed"
+unset CWD
+
+# ════ L17: leg.py land (ADR 0067 d3, d4) ═══════════════════════════════════════════════════════════════════════════
+# lscen <name> — L16k's fixture: crepo $R (on master) and two chains in it, A ($RO1, copy $C1) and B ($RO2, copy $C2);
+# the caller writes their notes (RO=$RO1 / RO=$RO2, then mkro and mkt) and runs mkcopies
+lscen() {
+  cscen "$1"; R="$S/r"; crepo "$R" "https://github.com/o/$1.git"; RO1=$RO; RO2=demo2-rollout-2026-10-20
+  C1="$S/chains/r-$RO1"; C2="$S/chains/r-$RO2"
+}
+# mkcopies — both chains' copies (from $R), then RO back on $RO1
+mkcopies() { RO=$RO2; CWD="$R" leg copies; RO=$RO1; CWD="$R" leg copies; }
+# lands — the last land's `lands` as `state|why|waits` per copy, `;`-joined
+lands() { q '";".join("%s|%s|%s" % (e["state"], e["why"], e["waits"]) for e in d["lands"])'; }
+master() { git -C "$R" rev-parse master; }
+
+# ---- L17a: two chains land in turn, by merge ----
+lscen l17a
+mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
+RO=$RO2; mkro '' "b1~cc-r~$R/sub/l~\`repo:$R//b1.txt\`" "b2~cc-r~$R/sub/l~\`repo:$R//b2.txt\`"; mkt b1; NOVERIFY=1 mkt b2; RO=$RO1
+mkcopies
+CWD="$C1" leg begin --cwd "$C1"; ok "$rc" 0 "L17a: A's Leg begins in its copy"
+RO=$RO2; CWD="$C2/sub/l" leg begin --cwd "$C2/sub/l"; ok "$rc" 0 "L17a: B's Leg begins in its copy"
+CWD="$C2/sub/l" work "$C2" b1 b1.txt "b1 work"; b1sha=$(git -C "$C2" rev-parse HEAD)
+CWD="$C2/sub/l" leg file-fix --target b1 --cause outside --evidence "red"
+ok "$rc" 1 "L17l: control: before any land merge, outside is refused for b1"; RO=$RO1
+CWD="$C1" work "$C1" a1 a1.txt "a1 work"; a1sha=$(git -C "$C1" rev-parse HEAD)
+CWD="$C1" leg land
+ok "$rc|$(lands)|$(master)" "0|landed|None|None|$a1sha" "L17a: A lands a1: master is chain/A's tip"
+ok "$(q 'd["lands"][0]["landed"]')|$(fm a1 leg_landed)" "['a1']|$NOW" "L17a: … a1 is listed, and leg_landed: stamped"
+ok "$(logn "Leg 1 land: \[\[a1\]\] on master in $R (${a1sha:0:12})\$")" 1 "L17a: … and the land: line logged"
+RO=$RO2; CWD="$C2/sub/l" leg land
+ok "$rc|$(lands)" "0|verify|None|None" "L17a: B's b1, cut before A's land, asks for a re-verify after the merge"
+ok "$(q 'd["lands"][0]["verify"]')" "[{'task': 'b1', 'line': '**Verify:** \`test -f b1.done\`', 'folder': '$C2/sub/l'}]" \
+   "L17a: … naming b1's Verify line and its folder in the copy"
+head=$(q 'd["lands"][0]["head"]')
+ok "$(git -C "$C2" rev-parse HEAD)|$(git -C "$C2" rev-parse HEAD^1)|$(git -C "$C2" rev-parse HEAD^2)|$(master)" "$head|$b1sha|$a1sha|$a1sha" \
+   "L17a: … chain/B's tip is a merge of b1 and master, and master is unmoved"
+ok "$(git -C "$C2" log -1 --format=%s)" "🔀 land: merge master into chain/$RO2" "L17a: … its subject the land merge's"
+CWD="$C2/sub/l" leg land --verified "$head"
+ok "$rc|$(lands)|$(master)" "0|landed|None|None|$head" "L17a: --verified <head> lands it"
+ok "$(git -C "$R" merge-base --is-ancestor "$b1sha" master && echo y)|$(git -C "$C2" log -1 --format=%H "$b1sha")" "y|$b1sha" \
+   "L17a: … b1's sha unchanged, an ancestor of master (never a rebase)"
+ok "$(logn "Leg 1 land verified: $R at $head\$")|$(fm b1 leg_landed)" "1|$NOW" "L17a: … land verified: logged, b1 stamped"
+# control: master moves after the verify, so a stale --verified merges again and asks again
+CWD="$C2/sub/l" work "$C2" b2 b2.txt "b2 work"
+pcommit "$R" peer.txt p "a peer moves master"
+CWD="$C2/sub/l" leg land --verified "$head"
+ok "$rc|$(lands)" "0|verify|None|None" "L17a: control: master moved after the verify: a stale --verified asks again"
+ok "$(q 'd["lands"][0]["head"]' | grep -c "$head")|$(logn 'land verified:')" "0|1" "L17a: … on a new merge, and nothing more is logged"
+ok "$(q 'd["lands"][0]["verify"]')" "[{'task': 'b2', 'line': None, 'folder': '$C2/sub/l'}]" \
+   "L17n: a row with no Verify line asks with line None, and its folder"
+CWD="$C2/sub/l" leg change --task b2
+ok "$rc|$(q 'd["tops"][0]["warns"]')" "0|[]" "L17k: change: the untrailered peer commit a land merged in raises no WARN"
+pcommit "$C2" loose2.txt l "an untrailered commit in the copy"
+CWD="$C2/sub/l" leg change --task b2
+has "$(q 'd["tops"][0]["warns"]')" "'an untrailered commit in the copy' in $C2 carries no Task: line" "L17k: control: one on the copy's own line still warns"
+CWD="$C2/sub/l" leg file-fix --target b1 --cause outside --evidence "red after the land"
+ok "$rc|$(q 'd["cause"]')" "0|outside" "L17l: outside passes for b1 once a land merge is in its range"
+unset CWD
+
+# ---- L17b: a conflict leaves the task unlanded, and Complete waits ----
+# bscen <name> — A's a1 (cell a1.txt) and B's b1 (cell b1.txt) both write c.txt; A lands it first
+bscen() {
+  lscen "$1"
+  mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
+  RO=$RO2; mkro '' "b1~cc-r~$R~\`repo:$R//b1.txt\`"; mkt b1; RO=$RO1
+  mkcopies; CWD="$C1" leg begin --cwd "$C1"; RO=$RO2; CWD="$C2" leg begin --cwd "$C2"
+  CWD="$C2" work "$C2" b1 c.txt "b's c"; b1sha=$(git -C "$C2" rev-parse HEAD); RO=$RO1
+  CWD="$C1" work "$C1" a1 c.txt "a's c"; CWD="$C1" leg land; ok "$rc|$(lands)" "0|landed|None|None" "$1: A lands c.txt first"
+  m0=$(master); RO=$RO2
+}
+bscen l17b
+CWD="$C2" leg land
+ok "$rc|$(lands)" "0|stood|conflict in c.txt|False" "L17b: B's land conflicts on c.txt: it stands, waits False"
+ok "$(git -C "$C2" rev-parse -q --verify MERGE_HEAD || echo none)|$(git -C "$C2" rev-parse HEAD)|$(master)|$(fm b1 leg_landed)" \
+   "none|$b1sha|$m0|<none>" "L17b: … the merge aborted: no MERGE_HEAD, nothing moved, nothing stamped"
+ok "$(logn "Leg 1 land stood: $R: conflict in c.txt\$")" 1 "L17b: … and the stand logged"
+CWD="$C2" leg land; ok "$(logn "land stood: $R: conflict in c.txt")" 1 "L17b: the same stand again is not logged twice"
+snap; CWD="$C2" leg close --outcome complete --cwd "$C2" --reflection "$REFL"
+ok "$rc" 1 "L17b: Complete refuses while b1 is unlanded"
+has "$err" "[[b1]] is not on master in $R: run leg.py land first (legs.md § Complete's Land first); nothing written" "L17b: … naming the land"
+same "L17b: a refused complete"
+# (b2) the hand resolution: the pinned subject, resolve, add, commit --no-edit, then land again
+git -C "$C2" merge --no-ff -m "🔀 land: merge master into chain/$RO2" refs/heads/master >/dev/null 2>&1
+printf 'a and b\n' > "$C2/c.txt"; git -C "$C2" add c.txt; git -C "$C2" commit -q --no-edit
+CWD="$C2" leg land
+ok "$rc|$(lands)" "0|verify|None|None" "L17b2: after the hand resolution, land asks for the re-verify"
+CWD="$C2" leg land --verified "$(q 'd["lands"][0]["head"]')"
+ok "$rc|$(lands)|$(cat "$R/c.txt")" "0|landed|None|None|a and b" "L17b2: … then lands the resolution"
+CWD="$C2" leg change --task b1
+ok "$(q 'd["tops"][0]["warns"]')" "[]" "L17b2: … and change raises no WARN for the merge"
+unset CWD
+
+# ---- L17c: a peer's uncommitted edit, or an untracked file, refuses the fast-forward ----
+lscen l17c
+mkro '' "a1~cc-r~$R~\`repo:$R//b.txt\`" "a2~cc-r~$R~\`repo:$R//n.txt\`"; mkt a1; mkt a2; mkcopies
+CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" work "$C1" a1 b.txt "a1's b"
+echo "peer's b" > "$R/b.txt"; m0=$(master)
+CWD="$C1" leg land
+ok "$rc|$(lands)" "0|stood|the primary's uncommitted edit on b.txt|False" "L17c: a peer's uncommitted edit on b.txt stands the land"
+ok "$(master)|$(cat "$R/b.txt")|$(git -C "$R" stash list | wc -l | tr -d ' ')|$(fm a1 leg_landed)" "$m0|peer's b|0|<none>" \
+   "L17c: … master unchanged, the edit intact, nothing stashed, nothing stamped"
+git -C "$R" checkout -q -- b.txt
+CWD="$C1" work "$C1" a2 n.txt "a2's n"; echo "untracked" > "$R/n.txt"
+CWD="$C1" leg land
+ok "$rc|$(lands)" "0|stood|the primary's uncommitted edit on n.txt|False" "L17c: an untracked file in the ff's way stands it too"
+ok "$(master)|$(cat "$R/n.txt")" "$m0|untracked" "L17c: … the file intact"
+rm "$R/n.txt"; CWD="$C1" leg land
+ok "$rc|$(lands)|$(fm a1 leg_landed)|$(fm a2 leg_landed)" "0|landed|None|None|$NOW|$NOW" "L17c: once cleared, both land"
+unset CWD
+
+# ---- L17d: --retire after Complete: the copy removed, its branch deleted with -d ----
+# dscen <name> [checkout branch] — chain A alone, a1 worked in its copy and landed, then Complete; $A the archived note
+dscen() {
+  lscen "$1"; mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
+  [ -z "${2:-}" ] || git -C "$R" checkout -qb "$2"
+  CWD="$R" leg copies; CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" work "$C1" a1 a1.txt "a1 work"
+  CWD="$C1" leg land; ok "$rc|$(lands)" "0|landed|None|None" "$1: a1 lands"
+  CWD="$C1" leg close --outcome complete --cwd "$C1" --reflection "$REFL"; ok "$rc" 0 "$1: complete"
+  A="$T/Archive/Rollouts/$RO.md"; cp "$A" "$TMP/snapA"
+}
+dscen l17d1
+cfg0=$(git -C "$R" config --list --local | grep -v '^branch\.chain' | sort)
+CWD="$C1" leg land --retire
+ok "$rc|$(q '[(e["landed"], e["removed"], e["branchDeleted"], e["why"]) for e in d["retired"]]')|$(q 'd["followup"]')" \
+   "0|[(True, True, True, None)]|None" "L17d1: --retire run from inside the copy: landed, removed, branch deleted"
+ok "$(test -e "$C1" && echo y || echo n)|$(git -C "$R" show-ref -q --verify "refs/heads/chain/$RO1" && echo y || echo n)" "n|n" \
+   "L17d1: … the copy is gone and chain/\$RO1 deleted"
+ok "$(git -C "$R" config --list --local | grep -v '^branch\.chain' | sort)|$(git -C "$R" rev-parse --is-inside-work-tree)" "$cfg0|true" \
+   "L17d1: … R's config intact"
+cmp -s "$A" "$TMP/snapA"; ok "$?" 0 "L17d1: … and the archived note byte-identical"
+dscen l17d2 w
+CWD="$C1" leg land --retire
+ok "$rc|$(q '[(e["removed"], e["branchDeleted"]) for e in d["retired"]]')" "0|[(True, True)]" \
+   "L17d2: R on w (master landed by update-ref): -d deletes the branch, its upstream set to master first"
+ok "$(git -C "$R" config --get-regexp '^branch\.chain' || echo none)|$(git -C "$R" symbolic-ref --short HEAD)" "none|w" \
+   "L17d2: … no branch.chain* config is left, and R stays on w"
+dscen l17d3; echo x > "$C1/untracked.txt"
+CWD="$R" leg land --retire
+ok "$rc|$(q '[(e["removed"], e["branchDeleted"]) for e in d["retired"]]')|$(test -d "$C1" && echo y)" "0|[(False, False)]|y" \
+   "L17d3: an untracked file in the copy: worktree remove refuses (never --force), copy and branch kept"
+has "$(q 'd["warns"]')" "WARN: $C1 (chain/$RO1 of $R) kept: git worktree remove refused" "L17d3: … with a WARN"
+ok "$(q 'd["followup"]')" "demo-followup-retire-chain-2026-10-20" "L17d3: … and a retire follow-on"
+has "$(cat "$T/demo-followup-retire-chain-2026-10-20.md")" "land --retire --rollout $A --session s1" "L17d3: … naming the command that finishes it"
+cmp -s "$A" "$TMP/snapA"; ok "$?" 0 "L17d3: the archived note byte-identical"
+dscen l17d4; pcommit "$C1" b.txt "close-out b" "📝 docs(thread): close-out"; echo "peer's b" > "$R/b.txt"
+CWD="$R" leg land --retire
+ok "$rc|$(q '[(e["landed"], e["removed"], e["branchDeleted"]) for e in d["retired"]]')|$(cat "$R/b.txt")" "0|[(False, False, False)]|peer's b" \
+   "L17d4: a peer's edit on a close-out's file keeps the copy and the branch, the edit intact"
+has "$(q 'd["retired"][0]["why"]')" "the primary's uncommitted edit on b.txt" "L17d4: … naming it"
+bad=$(python3 - "$LEG" <<'PY2'
+import ast, sys
+src = open(sys.argv[1]).read()
+tree = ast.parse(src)
+for fn in ("land_retire", "_retire_land"):
+    node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == fn)
+    for s in ast.walk(node):
+        if isinstance(s, ast.Constant) and s.value in ("-D", "--force", "-f"):
+            print(fn, s.value)
+PY2
+)
+ok "$bad" "" "L17d5: land --retire's source holds no -D, --force or -f"
+unset CWD
+
+# ---- L17e: interim (1) retired: a dependency another chain landed is claimed ----
+lscen l17e
+mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
+RO=$RO2; mkro '' "b0~cc-r~$R~\`repo:$R//b0.txt\`" "b1~cc-r~$R~\`repo:$R//b1.txt\`"; NOVERIFY=1 mkt b0; mkt b1 'depends-on:' '  - "[[a1]]"'
+RO=$RO1; mkcopies
+CWD="$C1" leg begin --cwd "$C1"; RO=$RO2; CWD="$C2" leg begin --cwd "$C2"; RO=$RO1
+CWD="$C1" work "$C1" a1 a1.txt "a1 work"; a1sha=$(git -C "$C1" rev-parse HEAD)
+CWD="$C1" leg land; ok "$rc|$(lands)" "0|landed|None|None" "L17e: A lands a1"
+RO=$RO2; CWD="$C2" finish b0
+CWD="$C2" leg claim --task b1
+ok "$rc" 1 "L17e: mid-Leg, B's copy lacks the landed a1: claim refuses"
+has "$err" "[[b1]] depends on [[a1]] (on master, not yet in $C2: run leg.py land, which brings master in)" "L17e: … naming the land"
+CWD="$C2" leg land
+ok "$rc|$(lands)|$(git -C "$C2" rev-parse HEAD)" "0|current|None|None|$a1sha" "L17e: land fast-forwards the copy: current"
+CWD="$C2" leg claim --task b1; ok "$rc" 0 "L17e: … and b1 is claimed"
+# a fresh Leg after A's land: begin's fast-forward brings a1 in
+lscen l17e2
+mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
+RO=$RO2; mkro '' "b1~cc-r~$R~\`repo:$R//b1.txt\`"; mkt b1 'depends-on:' '  - "[[a1]]"'
+RO=$RO1; mkcopies; CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" work "$C1" a1 a1.txt "a1 work"; CWD="$C1" leg land
+RO=$RO2; CWD="$C2" leg begin --cwd "$C2"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')|$(q 'd["landFirst"]')" "0|True|False" "L17e: after A's land, B's fresh begin fast-forwards"
+CWD="$C2" leg claim --task b1; ok "$rc" 0 "L17e: … and claim b1 passes"
+unset CWD
+
+# ---- L17f: interim (2) retired: the chain that takes its file turn second begins with the first's landed work ----
+# fscen <name> [two] — A ($RO1) began first, a1 done on f.txt and its Leg closed stopped, not landed (with `two`, a
+# second row a2 on g.txt still open); B ($RO2) writes f.txt too
+fscen() {
+  lscen "$1"
+  if [ -n "${2:-}" ]; then mkro '' "a1~cc-r~$R~\`repo:$R//f.txt\`" "a2~cc-r~$R~\`repo:$R//g.txt\`"; mkt a2
+  else mkro '' "a1~cc-r~$R~\`repo:$R//f.txt\`"; fi; mkt a1
+  RO=$RO2; mkro '' "b1~cc-r~$R~\`repo:$R//f.txt\`"; mkt b1 'depends-on:' '  - "[[a1]]"'; RO=$RO1; mkcopies
+  CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" work "$C1" a1 f.txt "a's f"
+  CWD="$C1" leg close --outcome stopped --reason "out of time" --cwd "$C1"
+}
+fscen l17f1 two
+RO=$RO2; snap; CWD="$C2" leg begin --cwd "$C2"
+ok "$rc" 3 "L17f1: B is held while A's done a1 is unlanded on f.txt"
+has "$err" "surface held: [[$RO1]] holds repo:$R//f.txt" "L17f1: … naming it"; same "L17f1: a held begin"
+RO=$RO1; CWD="$C1" leg land; ok "$rc|$(lands)" "0|landed|None|None" "L17f1: A's closed Leg lands a1"
+RO=$RO2; CWD="$C2" leg begin --cwd "$C2"
+ok "$rc|$(q 'd["landFirst"]')|$(cat "$C2/f.txt")" "0|False|a's f" "L17f1: then B begins, with A's f.txt in its copy"
+CWD="$C2" leg claim --task b1; ok "$rc" 0 "L17f1: … and claims b1"
+fscen l17f2; git -C "$R" checkout -qb w; wh=$(git -C "$R" rev-parse HEAD)
+CWD="$C1" leg land
+ok "$rc|$(lands)|$(git -C "$R" symbolic-ref --short HEAD)|$(git -C "$R" rev-parse HEAD)|$(git -C "$R" status --porcelain --untracked-files=no)" \
+   "0|landed|None|None|w|$wh|" "L17f2: R on w, master checked out nowhere: A lands by update-ref, R untouched"
+RO=$RO2; CWD="$C2" leg begin --cwd "$C2"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')|$(cat "$C2/f.txt")" "0|True|a's f" "L17f2: B's begin fast-forwards to master though R is on w"
+fscen l17f3; CWD="$C1" leg land
+pcommit "$C2" THREAD.md closed "📝 docs(thread): close-out"
+RO=$RO2; CWD="$C2" leg begin --cwd "$C2"
+ok "$rc|$(q 'd["landFirst"]')|$(q 'd["copies"][0]["fastForwarded"]')" "0|True|False" "L17f3: a close-out on chain/B: begin cannot fast-forward, landFirst"
+has "$(q 'd["warns"]')" "WARN: $C2: not fast-forwarded to master: chain/$RO2 has commits master lacks (run leg.py land before the first claim: it merges master in)" \
+   "L17f3: … with the WARN"
+CWD="$C2" leg land
+ok "$rc|$(lands)|$(cat "$C2/f.txt")" "0|landed|None|None|a's f" "L17f3: land merges master in and lands the close-out"
+ok "$(logn "Leg 1 land: close-outs on master in $R (")" 1 "L17f3: … logged as close-outs"
+CWD="$C2" leg claim --task b1; ok "$rc" 0 "L17f3: … and b1 is claimed with A's work in the copy"
+fscen l17f4
+RO=$RO2; CWD="$C2" leg begin --cwd "$C2"
+ok "$rc" 3 "L17f4: a1 as A's only row (A complete, not landed): B is still held"
+RO=$RO1; CWD="$C1" leg land; RO=$RO2; CWD="$C2" leg begin --cwd "$C2"
+ok "$rc|$(cat "$C2/f.txt")" "0|a's f" "L17f4: … and freed once A lands"
+unset CWD
+
+# ---- L17g: actual claims (ADR 0067 d4): an earlier chain's unlanded file stands a later chain's land ----
+# gscen <name> [B] — A's a1 (cell a1.txt) and B's b1 (cell b1.txt) both commit f.txt; A begins first (B with `B`)
+gscen() {
+  lscen "$1"; mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
+  RO=$RO2; mkro '' "b1~cc-r~$R~\`repo:$R//b1.txt\`"; mkt b1; RO=$RO1; mkcopies
+  if [ "${2:-}" = B ]; then RO=$RO2; CWD="$C2" leg begin --cwd "$C2"; RO=$RO1; LNOW=2026-10-20T11:00+00:00 CWD="$C1" leg begin --cwd "$C1"
+  else CWD="$C1" leg begin --cwd "$C1"; RO=$RO2; LNOW=2026-10-20T11:00+00:00 CWD="$C2" leg begin --cwd "$C2"; RO=$RO1; fi
+  CWD="$C1" leg claim --task a1; mkdir -p "$C1/_shared/state/thread-events" "$C1/docs/reviews"
+  echo e > "$C1/_shared/state/thread-events/run.jsonl"; echo r > "$C1/docs/reviews/r.md"
+  tcommit "$C1" a1 f.txt "a's f"; d=$(review "$C1" HEAD)
+  CWD="$C1" leg done --task a1 --verify pass --review "$d" --cwd "$C1"; ok "$rc" 0 "$1: done a1"
+  RO=$RO2; CWD="$C2" work "$C2" b1 f.txt "b's f"; m0=$(master)
+}
+gscen l17g
+ok "$(fm a1 leg_claims)" "[\"repo:$R//f.txt\"]" "L17g: done stamps leg_claims: f.txt only (no docs/reviews/, no bookkeeping)"
+CWD="$C2" leg land
+ok "$rc|$(lands)" "0|stood|[[$RO1]] holds repo:$R//f.txt unlanded and began first|True" \
+   "L17g: B's land on f.txt stands: A began first and holds it unlanded (waits True)"
+ok "$(master)|$(fm b1 leg_landed)" "$m0|<none>" "L17g: … nothing moved or stamped"
+gscen l17g2 B
+CWD="$C2" leg land
+ok "$rc|$(lands)" "0|landed|None|None" "L17g: control: B began first: A never blocks it"
+gscen l17g3; git -C "$R" merge -q --no-edit "chain/$RO1"
+CWD="$C2" leg land
+hasnt "$(lands)" "holds repo:" "L17g: control: a1 merged into master by hand (unstamped): git says landed, no claim stand"
+gscen l17g4; RO=$RO1; subst "$T/a1.md" "leg_claims: [\"repo:$R//f.txt\"]" ""; RO=$RO2
+CWD="$C2" leg land
+ok "$rc|$(lands)" "0|landed|None|None" "L17g: control: a1 without leg_claims: (done before them) never blocks"
+scen l17g5; R="$S/r"; mkrepo "$R" https://github.com/o/g5.git; export CWD="$R"
+mkro '' "t1~cc-r~$R~\`repo:$R//c.txt\`"; mkt t1; leg begin --cwd "$R"; work "$R" t1 c.txt "t1 work"
+ok "$(fm t1 leg_claims)" "<none>" "L17g: control: an in-place done stamps no leg_claims:"
+leg land; ok "$rc|$(q 'd["inPlace"]')|$(q 'd["lands"]')" "0|True|[]" "L17i: in place, land is inPlace with no lands"
+unset CWD
+
+# ---- L17h: the per-repo lock ----
+# holdlock <lock file> <flag> — an outside holder of a lock; $hp its pid, recorded for cleanup
+holdlock() {
+  mkdir -p "$(dirname "$1")"
+  python3 -c 'import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT); fcntl.flock(fd, fcntl.LOCK_EX); open(sys.argv[2], "w").write("held")
+time.sleep(120)' "$1" "$2" &
+  hp=$!; holders+=("$hp")
+  local i=0; while [ ! -f "$2" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+}
+lscen l17h; mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1; mkcopies
+CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" work "$C1" a1 a1.txt "a1 work"; m0=$(master)
+RL="$(git -C "$R" rev-parse --path-format=absolute --git-common-dir)/thread/chain-land.lock"
+holdlock "$RL" "$TMP/rl1"; hp1=$hp
+LEGENV=THREAD_LEG_LOCK_TIMEOUT=1 CWD="$C1" leg land
+ok "$rc|$(lands)" "0|stood|another land held $RL past 1s|True" "L17h: a held chain-land.lock: exit 0, the copy stands naming it (waits True)"
+ok "$(master)|$(fm a1 leg_landed)" "$m0|<none>" "L17h: … nothing moved"
+holdlock "$THREAD_LEG_LOCK_DIR/$RO1.lock" "$TMP/rl2"; hp2=$hp
+LEGENV=THREAD_LEG_LOCK_TIMEOUT=1 CWD="$C1" leg land; ok "$rc" 5 "L17h: a held rollout lock is still exit 5"
+kill "$hp1" "$hp2"; wait "$hp1" "$hp2" 2>/dev/null
+# (h2) two copies, R1's lock held: R1 stands, R2 lands; a row's stamp waits for every entry
+cscen l17h2; R="$S/r"; crepo "$R" https://github.com/o/h2.git; R2="$S/r2"; crepo "$R2" https://github.com/o/h22.git
+C="$S/chains/r-$RO"; C2="$S/chains/r2-$RO"
+mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\` \`repo:$R2//b.txt\`"; mkt t1
+CWD="$R" leg copies; CWD="$C" leg begin --cwd "$C"; CWD="$C" work "$C" t1 c.txt "t1 work"
+pcommit "$C2" THREAD.md closed "📝 docs(thread): close-out"; c2=$(git -C "$C2" rev-parse HEAD)
+subst "$T/t1.md" "leg_head: [\"$C@" "leg_head: [\"$C2@$c2\", \"$C@"
+RL2="$(git -C "$R" rev-parse --path-format=absolute --git-common-dir)/thread/chain-land.lock"
+holdlock "$RL2" "$TMP/rl3"
+LEGENV=THREAD_LEG_LOCK_TIMEOUT=1 CWD="$C" leg land
+ok "$rc|$(lands)" "0|stood|another land held $RL2 past 1s|True;landed|None|None" "L17h2: R1 locked: R1 stands, R2 lands"
+ok "$(git -C "$R2" rev-parse master)|$(fm t1 leg_landed)" "$c2|<none>" "L17h2: … t1's R2 entry is on master, yet its stamp waits for R1's"
+kill "$hp"; wait "$hp" 2>/dev/null
+CWD="$C" leg land
+ok "$rc|$(lands)|$(fm t1 leg_landed)" "0|landed|None|None;current|None|None|$NOW" "L17h2: once free, R1 lands and t1 is stamped"
+unset CWD
+
+# ---- L17j: --red keeps the merge and moves nothing ----
+# jscen <name> — A lands a1; B's b1 (cut before it) asks for its re-verify
+jscen() {
+  lscen "$1"; mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
+  RO=$RO2; mkro '' "b1~cc-r~$R~\`repo:$R//b1.txt\`" "b2~cc-r~$R~\`repo:$R//b2.txt\`"; mkt b1; mkt b2; RO=$RO1; mkcopies
+  CWD="$C1" leg begin --cwd "$C1"; RO=$RO2; CWD="$C2" leg begin --cwd "$C2"; CWD="$C2" work "$C2" b1 b1.txt "b1 work"
+  RO=$RO1; CWD="$C1" work "$C1" a1 a1.txt "a1 work"; CWD="$C1" leg land; m0=$(master); RO=$RO2
+}
+jscen l17j
+CWD="$C2" leg land; ok "$(lands)" "verify|None|None" "L17j: B's land asks"; h=$(q 'd["lands"][0]["head"]')
+snap; CWD="$C2" leg land --red "make test red"
+ok "$rc|$(lands)|$(master)|$(git -C "$C2" rev-parse HEAD)" "0|stood|Verify red after a land merge: make test red|False|$m0|$h" \
+   "L17j1: --red logs the stand, keeps the merge on chain/B and moves nothing"
+ok "$(diff "$TMP/snap" "$T/$RO.md" | grep -c '^>')|$(logn "Leg 1 land stood: $R: Verify red after a land merge: make test red\$")" "1|1" \
+   "L17j1: … one line written"
+# (j2) the close-time land: B's Leg closed, its red files no fix (file-fix refuses a closed Leg), the next Leg asks again
+jscen l17j2
+CWD="$C2" leg close --outcome handoff --cwd "$C2"; ok "$rc" 0 "L17j2: B's Leg 1 closes with a handoff"
+CWD="$C2" leg land; ok "$rc|$(lands)" "0|verify|None|None" "L17j2: the closed Leg's land asks for the re-verify"
+h=$(q 'd["lands"][0]["head"]'); snap
+CWD="$C2" leg land --red "x"
+ok "$rc|$(diff "$TMP/snap" "$T/$RO.md" | grep '^>' | sed 's/^> //')" "0|- $NOW Leg 1 land stood: $R: Verify red after a land merge: x" \
+   "L17j2: --red on a closed Leg writes only that stand line"
+ok "$(master)|$(git -C "$C2" rev-parse HEAD)" "$m0|$h" "L17j2: … no ref moved"
+CWD="$C2" leg file-fix --target b1 --cause outside --evidence x
+ok "$rc" 1 "L17j2: file-fix on the closed Leg is exit 1"; has "$err" "no Leg has begun" "L17j2: … naming it"
+SESS=s2 CWD="$C2" leg begin --cwd "$C2"
+ok "$rc|$(q 'd["landFirst"]')" "0|True" "L17j2: the next Leg's begin prints landFirst"
+has "$(q 'd["warns"]')" "WARN: $C2: chain/$RO2 has commits master lacks, not yet landed (run leg.py land before the first claim)" \
+   "L17j2: … its copy holding master through the kept merge"
+SESS=s2 CWD="$C2" leg land; ok "$rc|$(lands)" "0|verify|None|None" "L17j2: … and its land asks again (no verified tip recorded)"
+unset CWD
+
+# ---- L17m: a verified tip is recorded, so a stand after --verified asks nothing more ----
+jscen l17m
+CWD="$C2" leg land; h=$(q 'd["lands"][0]["head"]'); echo x > "$R/b1.txt"
+CWD="$C2" leg land --verified "$h"
+ok "$rc|$(lands)" "0|stood|the primary's uncommitted edit on b1.txt|False" "L17m: --verified, then the ff stands on a peer's file"
+ok "$(logn "Leg 1 land verified: $R at $h\$")" 1 "L17m: … the verified tip logged"
+rm "$R/b1.txt"; CWD="$C2" leg land
+ok "$rc|$(lands)|$(master)" "0|landed|None|None|$h" "L17m: once the file is gone it lands with no ask"
+CWD="$C2" work "$C2" b2 b2.txt "b2 work"; pcommit "$R" other.txt o "a peer moves master"
+CWD="$C2" leg land; h2=$(q 'd["lands"][0]["head"]'); echo x > "$R/b2.txt"
+CWD="$C2" leg land --verified "$h2"; ok "$(lands)" "stood|the primary's uncommitted edit on b2.txt|False" "L17m: control: a second round stands"
+rm "$R/b2.txt"; pcommit "$R" other2.txt o "master moves again"
+CWD="$C2" leg land; ok "$rc|$(lands)" "0|verify|None|None" "L17m: control: master moved after the verify: it asks again"
+unset CWD
+
+# ---- L17i: stands that run no git, the refusals, and the in-place peer ----
+lscen l17i; mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`" "a2~cc-r~$R~\`repo:$R//a2.txt\`"; mkt a1; mkt a2; mkcopies
+CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" leg claim --task a1
+snap; CWD="$C1" leg land
+ok "$rc|$(lands)" "0|stood|a row is in progress: a land never merges mid-task|False" "L17i: a row in progress stands every copy"
+ok "$(diff "$TMP/snap" "$T/$RO.md" | grep -c '^>')" 1 "L17i: … logging only its stand"
+tcommit "$C1" a1 a1.txt "a1 work"; d=$(review "$C1" HEAD); CWD="$C1" leg done --task a1 --verify pass --review "$d" --cwd "$C1"
+m0=$(master); snap; CWD="$C1" leg land --dry-run
+ok "$rc|$(q 'd["lands"][0]["state"]')|$(q 'd["lands"][0]["plan"]["unl"]')|$(q 'd["lands"][0]["plan"]["ff"]')|$(q 'd["dryRun"]')" \
+   "0|plan|['a1']|merge --ff-only in $R|True" "L17i: --dry-run prints the plan"
+ok "$(master)|$(fm a1 leg_landed)" "$m0|<none>" "L17i: … and moves nothing"; same "L17i: --dry-run"
+SESS=s9 CWD="$C1" leg land; ok "$rc" 1 "L17i: another session's land is exit 1"
+has "$err" "no Leg of this session: run leg.py begin first" "L17i: … naming it"
+CWD="$C1" leg land --retire; ok "$rc" 1 "L17i: --retire on a live note is exit 1"
+CWD="$C1" leg land --verified abc; ok "$rc|$out" "2|" "L17i: --verified needs a full sha (usage)"
+CWD="$C1" leg land --red x --verified "$m0"; ok "$rc|$out" "2|" "L17i: --red with --verified is usage"
+git -C "$R" checkout -q -b w; git -C "$R" worktree add -q "$S/mw" master
+CWD="$C1" leg land
+ok "$rc|$(lands)|$(master)" "0|stood|master is checked out in $S/mw|False|$m0" "L17i: master checked out in another worktree: it stands"
+git -C "$R" worktree remove "$S/mw"; git -C "$R" checkout -q master
+dscen l17i2; CWD="$R" leg land; ok "$rc" 1 "L17i: plain land on an archived note is exit 1"
+has "$err" "only file-followup and land --retire write after Complete" "L17i: … naming land --retire"
+cscen l17i3
+R="$S/r"; mkdir -p "$R"; git -c init.defaultBranch=trunk init -q "$R"; echo a > "$R/a.txt"; git -C "$R" add -A; git -C "$R" commit -qm base
+C="$S/chains/r-$RO"; mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\`"; mkt t1
+CWD="$R" leg copies; CWD="$C" leg begin --cwd "$C"; CWD="$C" work "$C" t1 t.txt "t1 work"
+CWD="$C" leg land
+ok "$rc|$(lands)" "0|stood|$R has no default branch resolved (origin/HEAD, main or master)|False" "L17i: no default branch: it stands"
+unset CWD
+# The in-place peer: IP ($RO3) works $R in place, beside copy chain A ($RO1)
+# pscen <name> — A's a1 done and landed, a close-out on chain/A, A closed stopped; IP's note (row ip1 on $R, from $R)
+pscen() {
+  lscen "$1"; RO3=demoip-rollout-2026-10-20
+  mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
+  RO=$RO3; mkro '' "ip1~cc-r~$R~\`repo:$R//ip.txt\`"; mkt ip1; RO=$RO1
+  CWD="$R" leg copies; CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" work "$C1" a1 a1.txt "a1 work"
+  CWD="$C1" leg land; ok "$(lands)" "landed|None|None" "$1: a1 lands"
+  pcommit "$C1" THREAD.md closed "📝 docs(thread): close-out"
+  CWD="$C1" leg close --outcome stopped --reason "out of time" --cwd "$C1"
+}
+# closeout <name> — another close-out on chain/A
+closeout() { pcommit "$C1" "THREAD-$1.md" "$1" "📝 docs(thread): close-out $1"; }
+pscen l17p
+RO=$RO3; CWD="$R" leg begin --cwd "$R"; ok "$rc" 0 "L17i (p1): IP's real begin in \$R passes beside A, all done and landed"
+RO=$RO1; m0=$(master); rh=$(git -C "$R" rev-parse HEAD); ips=$(fm ip1 status)
+CWD="$C1" leg land
+ok "$rc|$(lands)" "0|stood|[[$RO3]] works $R in place (Leg 1 open): a land never moves a checked-out master under another chain's live work|True" \
+   "L17i (p1): A's closed-Leg land stands while IP's Leg is open in \$R (waits True)"
+ok "$(master)|$(git -C "$R" rev-parse HEAD)|$(git -C "$R" status --porcelain --untracked-files=no)|$(fm ip1 status)" "$m0|$rh||$ips" \
+   "L17i (p1): … master, \$R's HEAD and tree and IP untouched"
+ok "$(logn "Leg 1 land stood: $R: \[\[$RO3\]\] works $R in place (Leg 1 open)")" 1 "L17i (p1): … the stand logged"
+RO=$RO3; CWD="$R" leg claim --task ip1; CWD="$R" leg close --outcome stopped --reason "out of time" --cwd "$R"; RO=$RO1
+CWD="$C1" leg land
+ok "$rc|$(lands)" "0|stood|[[$RO3]] works $R in place ([[ip1]] in progress): a land never moves a checked-out master under another chain's live work|True" \
+   "L17i (p2): IP closed with ip1 in progress: it still stands"
+RO=$RO3; CWD="$R" leg begin --cwd "$R"; CWD="$R" leg claim --task ip1 --inherit; ok "$rc" 0 "L17i (p3): IP's Leg 2 takes ip1"
+CWD="$R" leg set-aside --task ip1 --reason "set aside"; ok "$rc" 0 "L17i (p3): … sets it aside"
+CWD="$R" leg close --outcome stuck --cwd "$R"; ok "$rc" 0 "L17i (p3): … and closes stuck"; RO=$RO1
+CWD="$C1" leg land
+ok "$rc|$(lands)|$(master)" "0|landed|None|None|$(git -C "$C1" rev-parse HEAD)" "L17i (p3): control: nothing of IP's is live: A lands"
+R2="$S/r2"; crepo "$R2" https://github.com/o/p2.git; RO4=demoipb-rollout-2026-10-20
+RO=$RO4; mkro '' "q1~cc-r~$R2~\`repo:$R2//q.txt\`"; mkt q1; CWD="$R2" leg begin --cwd "$R2"; ok "$rc" 0 "L17i (p3): a second in-place chain opens a Leg in \$R2"
+RO=$RO1; closeout two; CWD="$C1" leg land
+ok "$rc|$(lands)" "0|landed|None|None" "L17i (p3): control: a live chain in place in another repo: A lands"
+RO5=demoipc-rollout-2026-10-20; RO=$RO5; mkro '' "r1~cc-r~$R~\`repo:$R//r.txt\`"; mkt r1
+CWD="$R" leg begin --cwd "$R"; ok "$rc" 0 "L17i (p3): a third in-place chain opens a Leg in \$R"
+git -C "$R" checkout -q -b w; RO=$RO1; closeout three; wh=$(git -C "$R" rev-parse HEAD)
+CWD="$C1" leg land
+ok "$rc|$(lands)|$(git -C "$R" symbolic-ref --short HEAD)|$(git -C "$R" rev-parse HEAD)|$(git -C "$R" status --porcelain --untracked-files=no)" \
+   "0|landed|None|None|w|$wh|" "L17i (p3): control: \$R on w, master checked out nowhere: update-ref beside that open Leg, \$R untouched"
+git -C "$R" checkout -q master
+RO=$RO5; CWD="$R" leg close --outcome stopped --reason "out of time" --cwd "$R"
+subst "$T/$RO5.md" "status: open" "status: dropped"   # its unlanded row in $R would hold a later chain's begin there (d4)
+RO6=demoipd-rollout-2026-10-20; RO=$RO6; EXTRA_FM='chain_copies: []'$'\n' mkro '' "s1~cc-r~$R~\`repo:$R//s.txt\`"; mkt s1
+CWD="$R" leg copies; C6="$S/chains/r-$RO6"; CWD="$C6" leg begin --cwd "$C6"; ok "$rc" 0 "L17i (p3): a copy chain opens a Leg"
+RO=$RO1; closeout four; CWD="$C1" leg land
+ok "$rc|$(lands)" "0|landed|None|None" "L17i (p3): control: a chain with chain_copies: is no peer: A lands"
+unset CWD
+# (p4) A complete and archived, IP's Leg open: --retire keeps both, then retires both once IP closes
+lscen l17p4; RO3=demoip-rollout-2026-10-20
+mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1; RO=$RO3; mkro '' "ip1~cc-r~$R~\`repo:$R//ip.txt\`"; mkt ip1; RO=$RO1
+CWD="$R" leg copies; CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" work "$C1" a1 a1.txt "a1 work"; CWD="$C1" leg land
+CWD="$C1" leg close --outcome complete --cwd "$C1" --reflection "$REFL"; ok "$rc" 0 "L17i (p4): A completes"
+RO=$RO3; CWD="$R" leg begin --cwd "$R"; RO=$RO1; closeout one
+CWD="$R" leg land --retire
+ok "$rc|$(q '[(e["landed"], e["removed"], e["branchDeleted"]) for e in d["retired"]]')|$(test -d "$C1" && echo y)" "0|[(False, False, False)]|y" \
+   "L17i (p4): --retire beside IP's open Leg keeps the copy and the branch"
+has "$(cat "$T/$(q 'd["followup"]').md")" "once [[$RO3]]'s Leg closes, run" "L17i (p4): … its follow-on waits for IP's Leg"
+RO=$RO3; CWD="$R" leg close --outcome stopped --reason "out of time" --cwd "$R"; RO=$RO1
+CWD="$R" leg land --retire
+ok "$rc|$(q '[(e["landed"], e["removed"], e["branchDeleted"]) for e in d["retired"]]')|$(test -d "$C1" && echo y || echo n)" "0|[(True, True, True)]|n" \
+   "L17i (p4): once IP's Leg closes, the same --retire retires both"
+unset CWD
+# (p5) a peer whose Chain read raises stands only when its surfaces: name the primary (or read as any)
+p5() {  # p5 <IP's extra surfaces line> — A's land, in-process, with Chain raising for IP's note
+  RO=$RO3; EXTRA_FM="$1"$'\n' mkro '' "ip1~cc-r~$R~\`repo:$R//ip.txt\`"; RO=$RO1
+  out=$(python3 - "$LEG" "$T/$RO1.md" "$T" "$V" "$NOW" "$RO3" <<'PY2'
+import importlib.util, json, sys
+leg, note, tasks, vault, now, bad = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("legmod", leg); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.rr, m.sc = m._load("reconcile_rollout", m.RR_SRC), m._load("serial_chains", m.SC_SRC)
+args = m.parser().parse_args(["land", "--rollout", note, "--tasks-dir", tasks, "--vault", vault, "--now", now, "--session", "s1"])
+real = m.Chain
+class Chain(real):
+    def __init__(self, ctx):
+        if ctx.rollout.stem == bad:
+            raise ValueError("planted")
+        super().__init__(ctx)
+m.Chain = Chain
+print(json.dumps(m.cmd_land(m.Ctx(args), args)))
+PY2
+)
+}
+pscen l17p5; closeout five
+p5 '  - "repo:'"$R"'"'
+ok "$(lands)" "stood|[[$RO3]] could not be read (ValueError: planted) and may work $R in place: fix its note|False" \
+   "L17i (p5): an unreadable peer whose surfaces: name \$R stands the land, waits False"
+R2="$S/r2"; mkdir -p "$R2"; p5 '  - "repo:'"$R2"'"'
+ok "$(lands)" "landed|None|None" "L17i (p5): … one whose surfaces: name only \$R2 lets it land"
+has "$(q 'd["warns"]')" "WARN: [[$RO3]] could not be read (ValueError: planted)" "L17i (p5): … with a WARN"
+
+# ---- L17o: Complete lands first, so the completion verify runs on the landed tip ----
+lscen l17o; mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1
+RO=$RO2; EXTRA_FM=$(printf '  - "repo:%s"\ncompletion_verifier: "true"' "$R")$'\n' mkro '' "b1~cc-r~$R~\`repo:$R//b1.txt\`"; mkt b1; RO=$RO1
+mkcopies; CWD="$C1" leg begin --cwd "$C1"; RO=$RO2; CWD="$C2" leg begin --cwd "$C2"; CWD="$C2" work "$C2" b1 b1.txt "b1 work"
+RO=$RO1; CWD="$C1" work "$C1" a1 a1.txt "a1 work"; CWD="$C1" leg land
+RO=$RO2; CWD="$C2" leg next; ok "$(q 'd["action"]')" complete "L17o: B's next is complete"
+CWD="$C2" leg land; ok "$(lands)" "verify|None|None" "L17o: Land first: B's land asks for b1's re-verify"
+CWD="$C2" leg land --verified "$(q 'd["lands"][0]["head"]')"; ok "$(lands)" "landed|None|None" "L17o: … then lands"
+CWD="$C2" rcv --run; ok "$rc|$(q 'd["result"]')" "0|green" "L17o: the completion verify runs green"
+ok "$(master)" "$(git -C "$C2" rev-parse HEAD)" "L17o: … on the copy's HEAD, which is master"
+CWD="$C2" leg close --outcome complete --cwd "$C2" --reflection "$REFL"; ok "$rc" 0 "L17o: complete"
+has "$(cat "$T/Archive/Rollouts/$RO2.md")" "- Completion verify: green at $(master | cut -c1-12) (\`true\`)" \
+   "L17o: … its Completion verify line names master's landed tip"
+# (o2) a land that waits for an earlier chain closes the Leg stopped, never a halt; once that chain lands, it completes
+lscen l17o2; printf '1\n2\n3\n4\n5\n' > "$R/f.txt"; git -C "$R" add f.txt; git -C "$R" commit -qm "f"
+mkro '' "a1~cc-r~$R~\`repo:$R//a1.txt\`"; mkt a1; RO=$RO2; mkro '' "b1~cc-r~$R~\`repo:$R//b1.txt\`"; mkt b1; RO=$RO1
+mkcopies; CWD="$C1" leg begin --cwd "$C1"; RO=$RO2; LNOW=2026-10-20T11:00+00:00 CWD="$C2" leg begin --cwd "$C2"; RO=$RO1
+CWD="$C1" work "$C1" a1 f.txt $'A\n2\n3\n4\n5'
+RO=$RO2; CWD="$C2" work "$C2" b1 f.txt $'1\n2\n3\n4\nB'
+CWD="$C2" leg next; ok "$(q 'd["action"]')" complete "L17o2: B's rows are all done: next is complete"
+CWD="$C2" leg land
+ok "$rc|$(lands)" "0|stood|[[$RO1]] holds repo:$R//f.txt unlanded and began first|True" "L17o2: Land first waits on A (waits True)"
+CWD="$C2" leg close --outcome stopped --reason "land waits: [[$RO1]] holds repo:$R//f.txt unlanded and began first" --cwd "$C2"
+ok "$rc|$(fm "$RO2" status)|$(test -f "$T/$RO2.md" && echo live)" "0|open|live" "L17o2: … B closes stopped: the note stays live, not done"
+RO=$RO1; CWD="$C1" leg land; ok "$(lands)" "landed|None|None" "L17o2: A lands"
+RO=$RO2; CWD="$C2" leg begin --cwd "$C2"; ok "$rc|$(q 'd["next"]["action"]')" "0|complete" "L17o2: B's fresh Leg reads complete"
+CWD="$C2" leg land; ok "$(lands)" "verify|None|None" "L17o2: … its land merges A's f.txt in and asks"
+CWD="$C2" leg land --verified "$(q 'd["lands"][0]["head"]')"; ok "$(lands)|$(cat "$R/f.txt" | tr '\n' ' ')" "landed|None|None|A 2 3 4 B " \
+   "L17o2: … then lands both edits"
+CWD="$C2" leg close --outcome complete --cwd "$C2" --reflection "$REFL"; ok "$rc" 0 "L17o2: and Complete closes"
 unset CWD
 echo
 if [ "$fail" -eq 0 ]; then echo "leg.test.sh: ALL PASS"; else echo "leg.test.sh: FAILED"; fi

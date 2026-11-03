@@ -163,8 +163,9 @@ chains.py's chain `checkouts`, as repeatable `--checkout`): no `file`, `supersed
 --regenerate, `WARN: a serial run supersedes nothing (ADR 0040, p24-2): --regenerate ignored`. A live serial note is
 never a hit (ADR 0067 d4: predicted claims order and wait, they never refuse a schedule); for each one (any project),
 the first that applies: a --surface token overlapping its hold (above) WARNs `WARN: [[s]] (<label>; <state>) also
-predicts <b>, which this chain predicts as <a>: they take turns on it, the first to begin going first (ADR 0067 d4);
-<TURN_INTERIM>` (until d3's land, a copy chain that goes second begins without the other's work); one overlapping only
+predicts <b>, which this chain predicts as <a>: they take turns on it, the first to begin going first (ADR 0067 d4)`
+(a copy chain's done row holds its place until leg.py land puts it on the primary's default branch, so the one that goes
+second begins with that work: ADR 0067 d3); one overlapping only
 what a stuck one released WARNs as 2b does; else, when it works in place (no `chain_copies:`: the chain scheduled now
 always gets its Chain copies at S5), turn(--surface) and --checkout meeting its U (a stuck
 chain's is empty) WARN `WARN: [[s]] (<label>; <state>) works <checkout> in place too, with no Chain copy: the two work
@@ -180,11 +181,13 @@ nested-checkout rule and the launch folders' checkouts.
 Resume mode (`--resume <slug>`, ADR 0060 d3, ADR 0067 d4; leg.py begin and status, and execute § 4.5's *Surface
 re-check*): what a resuming rollout writes, as --surface tokens (serial: leg.py's write_set, ws(R)) or --repo's token
 (parallel), against the others. The named note itself is skipped, and --project/--tasks are optional (they only set
-`mine`). A parallel resume meets every other unfinished serial note's unlanded rows' surfaces, in any state (never its
-whole claim, never its smoke rows): `[[<s>]] (<label>; <state>) holds `<token>` for an unlanded row, which this rollout
+`mine`). A parallel resume meets every other unfinished serial note's rows not yet done, their surfaces in any state
+(never its whole claim, never its smoke rows, never a Chain copy's done row awaiting leg.py land: the parallel
+rollout's clone integrates through origin, which that land never reaches, ADR 0067 d3): `[[<s>]] (<label>; <state>) holds `<token>` for an unlanded row, which this rollout
 writes as `<token>` (ADR 0060): [[<slug>]] waits its turn: …`. A serial resume R reads its own chain through leg.py
 first (a chain unreadable there is exit 2, so leg.py's re-check fails closed) and meets each other unfinished serial
-note H by serial_waits: own(C) is a chain's unlanded rows' tokens, smoke(C) = ws(C) − own(C), the order key is
+note H by serial_waits: own(C) is a chain's unlanded rows' tokens (its rows not done, and in Chain copies its done
+rows not yet landed: hold_of's `unlanded`), smoke(C) = ws(C) − own(C), the order key is
 (began, its first `began:` stamp; else never begun, after every chain that began; then the case-folded slug, a stamp
 that will not parse reading as never begun), and contend(X, Y) = own(X) meets own(Y) or, unless both chains work in
 Chain copies (`chain_copies:` on both notes: they share no index or HEAD, so they meet only file to file), T(X) meets
@@ -196,9 +199,10 @@ ws(R) meets what that Leg writes (its write set and the next one's): `… with i
 as `<a>` (ADR 0060): …`; (T) R itself has an open Leg (a take-over): only (M) applies; (O) H sorts before R and
 contend(R, H): `[[H]] (…) holds `<b>` for an unlanded row and began first, which this chain writes as `<a>` (ADR 0067
 d4): …`, `comes first by slug (neither has begun)` or `(both began at the same stamp)` in place of `began first` when
-slug order breaks a tie, `<b>` `repo:<top>` for a checkout-level hit (H's row is own(H) only until it is done: until
-ADR 0067 d3's land, a done row of a chain in Chain copies is still on its `chain/<H>` branch, so R begins without it, as
-the takes-turns WARN's TURN_INTERIM says); (Y) ADR 0060's yield, smoke(R) meets own(H):
+slug order breaks a tie, `<b>` `repo:<top>` for a checkout-level hit (H's row is own(H) until it is done and, in
+Chain copies, until leg.py land puts it on its primary's default branch (ADR 0067 d3), so R begins with that work in its
+copy: begin's fast-forward brings it, or the land it runs before its first claim); (Y) ADR 0060's yield, smoke(R)
+meets own(H):
 toward an H that sorts first always, toward a later H only when H is free (it waits on no chain, R included, by (M),
 (O), a (Y) toward an earlier chain or an unreadable note): today's line, `… holds `<token>` for an unlanded row, which
 this chain writes as `<token>` (ADR 0060): …`. An unreadable H holds its whole claim against ws(R) and T(R), whatever
@@ -384,7 +388,7 @@ SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfa
             "checkout_of", "checkouts_of", "read_chain_copies")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
 RUN_RECORD_NAMES = ("record_path",)
-LEG_NAMES = ("Chain", "chain_read", "hold_of", "write_set", "write_rows", "Refuse")
+LEG_NAMES = ("Chain", "chain_read", "hold_of", "write_set", "write_rows", "Refuse", "order_key", "first_by")
 CLOSED = {"done", "dropped"}
 PICKUP_CAP = 5
 UNLANDED = ("queued", "running", "awaiting-integration", "integrating", "set-aside")  # `branches`: not yet merged
@@ -690,9 +694,11 @@ def chain_hold(rr, path, tasks_dir):
 
 def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
     """The unfinished serial notes: root-level, `shape: serial`, neither done nor dropped, not complete (a complete
-    one is dropped with the ceremony WARN), each with its state, its whole claim (`claim`), what it holds (`tokens`:
-    the whole claim, or a stuck chain's unlanded rows' surfaces, ADR 0060), what a stuck one released (`released`),
-    its unlanded rows' surfaces in any state (`unlanded`), the hold's `scope`, and for ADR 0067 d4's order and interim
+    one is dropped with the ceremony WARN, unless its hold's `pending` names a done row not yet landed from its Chain
+    copies, ADR 0067 d3: the hold is read first), each with its state, its whole claim (`claim`), what it holds
+    (`tokens`: the whole claim, or a stuck chain's unlanded rows' surfaces, ADR 0060), what a stuck one released
+    (`released`), its unlanded rows' surfaces in any state (`unlanded`: the rows not done, `undone`, and those `pending`
+    rows), the hold's `scope`, and for ADR 0067 d4's order and interim
     its first `began` stamp, its `open` Leg ({n, folder}) and what that Leg writes (`openWs`), its unlanded rows'
     launch `folders`, and what its next Leg writes (`ws`, with those rows' launch folders, `wsFolders`); an unreadable
     chain has none of those but `ws`, its whole claim (`readable` False). `skip` names a note left out (a resuming
@@ -704,7 +710,10 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
         if skip is not None and path.stem.lower() == skip.lower():
             continue
         c = note_state(rr, path, note, tasks_dir, mine)
-        if c["complete"]:
+        # The hold is read first: a chain whose rows are all done but not yet all landed from its Chain copies (its
+        # `pending`, ADR 0067 d3) still holds their cells, so it is no complete note yet.
+        hold, why = chain_hold(rr, path, tasks_dir)
+        if c["complete"] and (hold is None or not hold["pending"]):
             warns.append(ceremony_warn(c))
             continue
         c["state"] = state_line(c)
@@ -720,13 +729,12 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
         if bad:
             warns.append(f"WARN: {c['slug']}: {bad}: read as any")
             tokens = [("any", "")]
-        c.update(claim=tokens, tokens=tokens, unlanded=tokens, released=[], scope="whole",
+        c.update(claim=tokens, tokens=tokens, unlanded=tokens, undone=tokens, pending=[], released=[], scope="whole",
                  why=f"{bad}: read as any, it holds everything" if bad else "", began=None, open=None, folders=[],
                  ws=tokens, wsFolders=[], openWs=[], readable=False, copied=copied_of(note, c["slug"], warns))
         # The hold is read even when `surfaces:` reads as any: a schedule still meets `any` (tokens, scope whole), but a
         # --resume compares against the unlanded rows' own cells (hold_of reads them apart from the claim, and falls
         # back to the whole claim, `any` here, only on a bad cell), so one hand-edited note never halts every rollout.
-        hold, why = chain_hold(rr, path, tasks_dir)
         if hold is None:
             unreadable = f"its chain is unreadable ({why}): it holds its whole claim"
             c["why"] = c["why"] or unreadable
@@ -735,7 +743,8 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
             if hold["warn"]:
                 warns.append(f"WARN: {c['slug']}: {hold['warn']}")
             parse = lambda xs: [SC.parse_token(x) for x in xs]  # noqa: E731
-            c.update(unlanded=parse(hold["unlanded"]), began=hold["began"], open=hold["open"], readable=True,
+            c.update(unlanded=parse(hold["unlanded"]), undone=parse(hold["undone"]), pending=list(hold["pending"]),
+                     began=hold["began"], open=hold["open"], readable=True,
                      folders=[r["folder"] for r in hold["rows"] if r.get("folder")], ws=parse(hold["ws"]),
                      wsFolders=hold["wsFolders"], openWs=parse(hold["openWs"]))
             if not bad:
@@ -797,10 +806,10 @@ def next_works(s, git, vault):
 
 
 def order_key(rr, slug, began):
-    """ADR 0067 d4's order: a chain that began sorts by its first `began:` stamp, before every chain that never began;
-    slug order (case-folded) breaks ties. A stamp that will not parse reads as never begun, on either side alike."""
-    ts = rr._parse_ts(began) if began else None
-    return (0, ts.timestamp(), slug.casefold()) if ts is not None else (1, 0.0, slug.casefold())
+    """ADR 0067 d4's order (leg.py's order_key, its one copy, which land's actual-claim check reads too): a chain that
+    began sorts by its first `began:` stamp, before every chain that never began; slug order (case-folded) breaks ties.
+    A stamp that will not parse reads as never begun, on either side alike."""
+    return load_leg(rr).order_key(slug, began)
 
 
 def parallel_hold(rr, path, note, linked):
@@ -1089,12 +1098,6 @@ def cmd_check(args, rr) -> int:
     return finish(warns, f"refuse {slugs_of(u)}", 3, lines)
 
 
-# The takes-turns WARN's tail: until ADR 0067 d3's land, a copy chain's finished row waits on chain/<slug> for its
-# Complete's merge, so (O)'s file turn frees the chain that goes second before that work is on the primary's default
-# branch.
-TURN_INTERIM = ("until a chain lands each finished task (ADR 0067 d3), a chain in Chain copies that goes second begins "
-                "without the other's work there")
-
 # The works-too WARN, `works <checkout> in place too, with no Chain copy: ` and this tail (ADR 0067 d4, for a chain that
 # works the checkout in place): contend's checkout half (serial_waits) serialises chains, not Legs.
 ONE_AT_A_TIME = ("the two work it a chain at a time: the one that comes first (the first to begin, else by slug) lands "
@@ -1123,7 +1126,7 @@ def check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned)
             a, b = pairs[0]
             warns.append(f"WARN: [[{s['slug']}]] ({s['label']}; {s['state']}) also predicts {SC.fmt_token(b)}, which "
                          f"this chain predicts as {SC.fmt_token(a)}: they take turns on it, the first to begin going "
-                         f"first (ADR 0067 d4); {TURN_INTERIM}")
+                         "first (ADR 0067 d4)")
             continue
         freed = SC.overlap_pairs(surfaces, s["released"], top)
         if freed:
@@ -1166,8 +1169,9 @@ def check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned)
 
 def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> int:
     """`--resume <slug>` (ADR 0060 d3, ADR 0067 d4): what a resuming rollout writes (a serial chain's write set, or a
-    parallel rollout's root), against the others. A parallel resume meets every other unfinished serial note's
-    unlanded rows' surfaces, in any state, and clone_holders. A serial resume R puts fresh contention in a total order
+    parallel rollout's root), against the others. A parallel resume meets every other unfinished serial note's rows
+    not yet done (`undone`: a Chain copy's done row awaiting leg.py land holds no parallel rollout, whose clone
+    integrates through origin, ADR 0067 d3), their surfaces in any state, and clone_holders. A serial resume R puts fresh contention in a total order
     (order_key: the first to begin goes first), keeps ADR 0060's yield toward a chain free to run, and waits on any
     chain whose open Leg writes a place R's next Leg writes or, unless both work in Chain copies, works a checkout it
     would work in
@@ -1193,7 +1197,9 @@ def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> 
         reach = union(toks, launch_checkouts(hold["wsFolders"], git, vault), turn(toks), checkouts)
     else:
         for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me):
-            pairs = SC.overlap_pairs(toks, s["unlanded"], top)
+            # Only its rows not yet done: a Chain copy's done row awaiting leg.py land holds no parallel rollout, whose
+            # clone integrates through origin, which that land never reaches (ADR 0067 d3).
+            pairs = SC.overlap_pairs(toks, s["undone"], top)
             if pairs:
                 a, b = pairs[0]
                 hits[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) holds `{SC.fmt_token(b)}` for an "
@@ -1321,7 +1327,7 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
             hits[h["slug"]] = (f"{who} holds `{b}` with its open Leg {n}, {where}: [[{me}]] waits its turn: re-run "
                                f"once [[{h['slug']}]]'s Leg {n} closes")
         elif rule == "O":
-            hits[h["slug"]] = (f"{who} holds `{b}` for an unlanded row and {first_by(h['key'], r['key'])}, which this "
+            hits[h["slug"]] = (f"{who} holds `{b}` for an unlanded row and {first_by(rr, h['key'], r['key'])}, which this "
                                f"chain writes as `{a}` (ADR 0067 d4): {tail}")
         else:
             hits[h["slug"]] = (f"{who} holds `{b}` for an unlanded row, which this chain writes as `{a}` (ADR 0060): "
@@ -1329,12 +1335,10 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
     return hits
 
 
-def first_by(key_h, key_r) -> str:
+def first_by(rr, key_h, key_r) -> str:
     """Why H sorts before R in ADR 0067 d4's order (order_key): it began first, or slug order broke a tie of equal
-    stamps (both began at the same one, or neither has begun)."""
-    if key_h[:2] != key_r[:2]:
-        return "began first"
-    return "comes first by slug (" + ("neither has begun" if key_h[0] == 1 else "both began at the same stamp") + ")"
+    stamps (both began at the same one, or neither has begun). leg.py's first_by, its one copy."""
+    return load_leg(rr).first_by(key_h, key_r)
 
 
 def first_line_ts(rr, slug):
