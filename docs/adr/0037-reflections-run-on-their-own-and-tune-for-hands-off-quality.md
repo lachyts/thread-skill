@@ -15,6 +15,13 @@ needs". d6's quiet definition and the cadence are unchanged.)*
 reading, the Run record gains stop, suite, load and moved-`main` events, and d4's reading falls due on the Thursday
 Reflection Routine's morning, made by Chorus's weekly Runner, the daily sweep its fallback.)*
 
+*(Amended 2026-11-03 by thread-skill-reflection-decisions-go-to-the-routine: d5's decision task is written with no
+`scheduled:` date and is decided at Chorus's Reflection Routine (Chorus ADR 0095 d5, the Thursday sitting after Lunch),
+never through Lachy's Day page. Lachy, 2026-11-03: "Rather than it being a task on my day page, I reckon this should be
+a session that's automatically initiated after lunch. It's messy to have things in my day page as things that I have to
+launch." "Never during a run" still holds: the Routine is a sitting, not a rollout. The p22-7 note's readings above are
+unchanged.)*
+
 ## Context
 
 ADR 0032 gave rollouts a Run record and a Retro that scored it on Throughput and proposed knob
@@ -62,8 +69,10 @@ and both of them automatic.
    - A **knob** lands once three Reflections agree on its rule and no Guardrail is breached. A
      later Reflection that finds that knob breaching a Guardrail reverts it on its own.
    - A **rule** never lands unasked. A rule proposal, or a Watch to confirm, goes into one vault
-     task scheduled for the next morning, and orient's audit lists it, so it is decided at the
-     top of a run, never during one. A quiet week writes only its record line.
+     task written with no `scheduled:` date. It is decided at Chorus's Reflection Routine (Chorus
+     ADR 0095 d5: the Thursday sitting after Lunch reads it through `reflect.py loops` and answers
+     it through `/thread:reflect --decide`), never through his Day page and never during a run;
+     orient's audit lists it *(amended 2026-11-03)*. A quiet week writes only its record line.
 6. **The cadence relaxes on a quiet streak.** Three **quiet Reflections** in a row (no new Watch,
    no rule proposal, no bug, no Guardrail breach) move the reading to fortnightly. Any Reflection
    that is not quiet moves it back to weekly. The Reflection records each change. Chorus's

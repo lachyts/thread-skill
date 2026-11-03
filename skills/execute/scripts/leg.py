@@ -81,8 +81,10 @@ restarted):
   claim --task <t> [--inherit] [--gate <gate>]...
       Re-runs next under the lock: <t> must be what it proposes (with --inherit, an inherited `finish`). Stamps
       `status: in_progress`, `owner: leg-N`, `leg: N`, `started:` (the first wins), consumes `handed_back:` and
-      `gates_signed:`, and on a fresh claim `leg_base: ["<toplevel>@<sha40>", …]`: one entry per `repo:` surface of
-      the row that is a git toplevel, the vault never (an inherited claim keeps its stamp). Logs `claimed` or `took`.
+      `gates_signed:`, and on a fresh claim `leg_base: ["<toplevel>@<sha40>", …]`: one entry per checkout the row
+      works (stamp_bases: the checkout of each `repo:` surface of the row, `repo:<toplevel>//<path>` or bare, that is
+      a git toplevel, then its launch folder's toplevel, where its commits land), the vault never, so a file token
+      never leaves a code row unstamped (an inherited claim keeps its stamp). Logs `claimed` or `took`.
       Each --gate is compared with the note's `## Approved gates` (reconcile-rollout.py's _norm_gate): the
       unapproved ones are printed for `set-aside --kind gate`. An exact `None` (execute § 3.7's grammar, bullet,
       case and one trailing `.` aside, as the engine's parseGatedInputs reads it) is no gate, never unapproved.
@@ -254,16 +256,20 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
 - The standing restart (`restarted`): the latest `restart:` line with no `began` line after it, as {leg, how
   (pending, started or manual), started, manual, session (a pending line's), at}, else null.
 - The hold (ADR 0060 d1, d2; hold_of, the one copy unfinished-rollout.py loads): what the unfinished chain holds
-  against other rollouts, {scope, why, held, released, unlanded, rows, warn}. In every chain state but `stuck`, scope
-  `whole`: `held` is the note's whole `surfaces:` (`any` when it reads as any), `released` empty. `stuck` (no Leg open,
-  no stall, hand-over, restart or halt standing, not completable, nothing claimable: every unlanded row is set aside or
-  held behind one), scope `stuck`: `held` is the Surfaces cells of every counted row not done (set-aside rows, rows
-  held behind them, a `missing` row) plus any `surfaces:` token that no row's cell names (a hand edit, kept), and
-  `released` is the rest of `surfaces:`, done rows still on the next Leg's smoke list included; deferred and folded
-  rows are outside the count, so released. A stuck chain fails closed to `whole`, with `warn` set, when its Queue has
-  no rows, an unlanded row's cell is empty or holds a token parse_token refuses, or a row reads in progress.
+  against other rollouts, {scope, why, held, released, unlanded, rows, warn, began, open}. In every chain state but
+  `stuck`, scope `whole`: `held` is the note's whole `surfaces:` (`any` when it reads as any), `released` empty.
+  `stuck` (no Leg open, no stall, hand-over, restart or halt standing, not completable, nothing claimable: every
+  unlanded row is set aside or held behind one), scope `stuck`: `held` is the Surfaces cells of every counted row not
+  done (set-aside rows, rows held behind them, a `missing` row) plus any `surfaces:` token that no row's cell names (a
+  hand edit, kept), and `released` is the rest of `surfaces:`, done rows still on the next Leg's smoke list included;
+  deferred and folded rows are outside the count, so released. A stuck chain fails closed to `whole`, with `warn`
+  set, when its Queue has no rows, an unlanded row's cell is empty or holds a token parse_token refuses, or a row
+  reads in progress.
   `unlanded` is the counted, not-done rows' cell tokens in any state (the note's whole claim on those same failures):
-  what a resuming chain's re-check compares against. `rows` is those rows, {slug, state, surfaces}.
+  what a resuming chain's re-check compares against. `rows` is those rows, {slug, state, surfaces, folder} (folder
+  the row's launch folder, so its checkout). `began` is the Leg log's first `began:` stamp, raw (null before Leg 1),
+  and `open` the open Leg as {n, folder}, else null: the order and the interim mutex of unfinished-rollout.py's
+  check_resume read them (ADR 0067 d4).
 - A row's dependants: the counted, not-done rows D with an entry in D's depends-on or blocked-by that resolves
   (rr._fold_unit, through `merged_into:` tombstones) to the row or to a row already found: transitive,
   cycle-guarded, in Queue order, each {slug, state, owner}. repair § 7 (b) defers a set-aside with them (repair § 5's
@@ -1162,13 +1168,25 @@ def cmd_next(ctx, a):
 
 
 def stamp_bases(ctx, row):
+    """One `<toplevel>@<sha40>` per checkout the row works (ADR 0067 d2): checkout_of each of its `repo:` tokens that
+    is a git toplevel, then the toplevel of its launch folder, where its commits land; the vault never. A file token,
+    or a row whose cell names only `ext:` or vault places, so never leaves a code row unstamped and unreviewed."""
     out, vault = [], os.path.realpath(ctx.vault)
+    tops = []
     for tok in row.surfaces:
-        if not tok.lower().startswith("repo:"):
+        try:
+            c = sc.checkout_of(tok)
+        except ValueError:
             continue
-        p = os.path.realpath(os.path.expanduser(tok[5:].strip()))
-        top = toplevel(p)
-        if top is None or top != p or top == vault:
+        if c is None:
+            continue
+        p = os.path.realpath(os.path.expanduser(c[1]))
+        if toplevel(p) == p:
+            tops.append(p)
+    if row.folder:
+        tops.append(toplevel(os.path.realpath(os.path.expanduser(row.folder))))
+    for top in tops:
+        if top is None or top == vault:
             continue
         sha = git_out(top, "rev-parse", "--verify", "HEAD^{commit}")
         if sha and f"{top}@{sha}" not in out:
@@ -2386,9 +2404,13 @@ def hold_of(chain, read):
         unlanded += [t for t in toks if t not in unlanded]
     if bad:
         unlanded = list(whole)
+    began = next((e["stamp"] for e in chain.log if e["kind"] == "began"), None)
+    ol = chain.open_leg()
     out = {"scope": "whole", "why": f"chain {read['state']}: it holds its whole claim", "held": fmt(whole),
            "released": [], "unlanded": fmt(unlanded),
-           "rows": [{"slug": r.slug, "state": r.state, "surfaces": list(r.surfaces)} for r in unl_rows], "warn": None}
+           "rows": [{"slug": r.slug, "state": r.state, "surfaces": list(r.surfaces), "folder": r.folder}
+                    for r in unl_rows], "warn": None,
+           "began": began, "open": {"n": ol["n"], "folder": ol["folder"]} if ol is not None else None}
     if read["state"] != "stuck" or claim is None:
         return out
     running = next((r for r in chain.rows if r.state == "running"), None)
@@ -2408,15 +2430,19 @@ def hold_of(chain, read):
     return out
 
 
-def write_set(chain, n):
-    """What Leg n writes (ADR 0060 d3): the Surfaces cells of its unlanded rows and of the rows on its smoke list (a
-    failed smoke files a fix on its target's surfaces), canonical and deduplicated; a row whose cell is empty or
-    malformed gives the note's whole claim (`any` when that reads as any)."""
+def write_rows(chain, n):
+    """The rows Leg n writes (ADR 0060 d3): the counted rows not done, and the done ones on its smoke list (a failed
+    smoke files a fix on its target's surfaces), in Queue order. Pure: write_set and unfinished-rollout.py's chain_hold
+    (the rows' launch folders) read it."""
     smoke = {e["task"].lower() for e in smoke_list(chain, n)}
+    return [r for r in chain.counted() if r.state != "done" or r.slug.lower() in smoke]
+
+
+def write_set(chain, n):
+    """What Leg n writes (ADR 0060 d3): the Surfaces cells of write_rows(chain, n), canonical and deduplicated; a row
+    whose cell is empty or malformed gives the note's whole claim (`any` when that reads as any)."""
     out = []
-    for r in chain.counted():
-        if r.state == "done" and r.slug.lower() not in smoke:
-            continue
+    for r in write_rows(chain, n):
         toks = _cell_tokens(r)
         if toks is None:
             toks = _note_claim(chain) or [("any", "")]

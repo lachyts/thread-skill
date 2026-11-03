@@ -692,7 +692,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // and step 1.2's seeded revise names that clause. p29-8 (ADR 0049): while Away the Away cap takes the Trickle's place,
   // so the paragraph gives its slotLimit and its `away cap:` hold that never halts (a meant wait, never Stalled), and
   // steps 1.5 and 1.6, clause (7), § 6, § 8 and the driver name the Away-cap wait beside the Trickle wait. p28-3: the
-  // paragraph names the **Trickle claim** `next` takes for each start, and step 1.1 relays its `WARN: trickle claims` line.
+  // paragraph names the **Trickle claim** `next` takes for each start (p28-8: and each seeded revise step 1.2 will launch),
+  // and step 1.1 relays its `WARN: trickle claims` line.
   const trickleP = labelled(skill, 'The Trickle (Chorus ADR 0104).')
   const tr1 = subs[0]?.text ?? ''
   const tr6 = sub(/^End the turn `waiting`/)?.text ?? ''
@@ -710,6 +711,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !tr1.includes('A `WARN: ~/.config/thread/away.json` line on its stderr') ||
     !tr1.includes('is printed verbatim the first time this session sees that exact line') ||
     !trickleP.includes('a **Trickle claim**') || !tr1.includes('A `WARN: trickle claims` line on its stderr') ||
+    // p28-8: the claim covers each seeded revise step 1.2 launches too
+    !trickleP.includes('and each seeded revise step 1.2 will launch') ||
     // p28-5: the fair share keeps a freed place for a waiting rollout, and slotLimit leaves it out
     !trickleP.includes('A **fair share** keeps a freed place') ||
     !tr6.includes('A `trickle:` hold (*The Trickle*) ends the turn `waiting` too') ||
@@ -1459,6 +1462,7 @@ test('control: § 4.5 without the Trickle at any one site fails trickle', () => 
   only(sk(', a retry cool-down is pending, or a Trickle wait stands)', ', or a retry cool-down is pending)'), 'trickle', "§ 8's Stop-hook paragraph without it")
   // p28-3: the Trickle claim and its WARN relay
   only(sk(' (a **Trickle claim**)', ''), 'trickle', 'no Trickle claim named')
+  only(sk(', and each seeded revise step 1.2 will launch', ''), 'trickle', 'no seeded revise claimed')
   only(sk(' A `WARN: trickle claims` line on its stderr (`skills/execute/away.md` § The Trickle, *Trickle claims*) is relayed the same way.', ''),
     'trickle', 'no claims WARN relay in step 1.1')
   // p28-5: the fair share

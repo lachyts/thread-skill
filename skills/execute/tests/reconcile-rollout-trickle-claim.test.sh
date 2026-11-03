@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # p28-3: the Trickle claim (skills/execute/away.md § The Trickle, *Trickle claims*). Off --dry-run `next` takes the
 # machine-wide trickle claim lock (trickle.lock in the note-lock dir), walks --tasks-dir afresh, counts every other
-# lead's live claims beside the notes, and records one claim per start in trickle-claims.json beside the lock, so two
-# leads never both start into one free place in the Trickle. A task's § 4 stamp consumes its claim once the note-based
+# lead's live claims beside the notes, and records one claim per start (and, p28-8, per seeded revise: below) in
+# trickle-claims.json beside the lock, so two leads never both start into one free place in the Trickle. A task's § 4 stamp consumes its claim once the note-based
 # count counts the task; a claim no stamp consumes lapses 20 minutes after its `at`. --dry-run reads claims, takes no
 # lock and writes nothing.
+# p28-8 (C15-C17): `next` also claims each seeded revise execute § 4.5 step 1.2 launches (the first rev_go of
+# _seeded_revises, in `next` order, under slotLimit), one claim with `kind: revise`, so a lead launching a revise at
+# step 1.2 and another lead's `next` never both take one free place either. A revise claim counts while its task is set
+# aside at its run, blocked, with no recorded answer, or running until the note-based count counts it; anything else
+# drops it.
 #
 # Why each scenario pins its own lock dir ($L, R7): tests/run.sh shares one THREAD_NOTE_LOCK_DIR across every suite, and
 # every `next` off --dry-run prunes the claims of other tasks dirs by the real clock, so a claim this suite reads across
@@ -92,7 +97,8 @@ os.replace(tmp, p)'
 stamp() { python3 -c "$STAMP_PY" "$D/$1.md" "${2:-in_progress}" "${3:-}"; }
 # seed <python list expression> — write $L/trickle-claims.json as {"version": 1, "claims": <expr>}. In the expression:
 # D is this tasks dir's realpath, NOW the suite's --now and WALL the real clock (both aware datetimes), m(n) n minutes,
-# s(n) n seconds, and c(tasksDir, rollout, slug, at) one entry with `at` to the second.
+# s(n) n seconds, and c(tasksDir, rollout, slug, at[, kind=…]) one entry with `at` to the second (p28-8: `kind` only when
+# given, so c(…, kind=None) writes `"kind": null`; with no kind the key is absent).
 SEED_PY='import json, os, sys
 from datetime import datetime, timedelta, timezone
 D = os.path.realpath(sys.argv[2])
@@ -100,15 +106,21 @@ NOW = datetime.fromisoformat(sys.argv[3].replace("Z", "+00:00"))
 WALL = datetime.now(timezone.utc)
 m = lambda n: timedelta(minutes=n)
 s = lambda n: timedelta(seconds=n)
-c = lambda td, ro, slug, at: {"tasksDir": td, "rollout": ro, "slug": slug, "at": at.isoformat(timespec="seconds")}
+_NO = object()
+def c(td, ro, slug, at, kind=_NO):
+    e = {"tasksDir": td, "rollout": ro, "slug": slug, "at": at.isoformat(timespec="seconds")}
+    if kind is not _NO:
+        e["kind"] = kind
+    return e
 claims = eval(sys.argv[4])
 os.makedirs(os.path.dirname(sys.argv[1]), exist_ok=True)
 with open(sys.argv[1], "w") as f:
     json.dump({"version": 1, "claims": claims}, f)'
 seed() { python3 -c "$SEED_PY" "$(CF)" "$D" "$NOW" "$1"; }
 # claims [all] — the claims file's entries as sorted compact JSON: [[rollout, slug], …] for this tasks dir, or with
-# `all` [[where, rollout, slug], …] for every entry, where "here" or the entry's tasksDir; a malformed entry reads
-# ["malformed", <repr>]. "none" with no file, "unreadable" when it is not JSON.
+# `all` [[where, rollout, slug], …] for every entry, where "here" or the entry's tasksDir; an entry carrying `kind`
+# (p28-8) appends its value as one more element; a malformed entry reads ["malformed", <repr>]. "none" with no file,
+# "unreadable" when it is not JSON.
 CLAIMS_PY='import json, os, sys
 p, here, every = sys.argv[1], os.path.realpath(sys.argv[2]), sys.argv[3] == "all"
 if not os.path.exists(p):
@@ -121,12 +133,55 @@ out = []
 for e in d["claims"]:
     if not isinstance(e, dict) or not all(k in e for k in ("tasksDir", "rollout", "slug")):
         out.append(["malformed", repr(e)]); continue
+    kind = [e["kind"]] if "kind" in e else []
     if every:
-        out.append(["here" if e["tasksDir"] == here else e["tasksDir"], e["rollout"], e["slug"]])
+        out.append(["here" if e["tasksDir"] == here else e["tasksDir"], e["rollout"], e["slug"]] + kind)
     elif e["tasksDir"] == here:
-        out.append([e["rollout"], e["slug"]])
+        out.append([e["rollout"], e["slug"]] + kind)
 print(json.dumps(sorted(out), separators=(",", ":")))'
 claims() { python3 -c "$CLAIMS_PY" "$(CF)" "$D" "${1:-}"; }
+# claimat <rollout> <slug> — that claim's `at` (this tasks dir), as HH:MM:SS UTC; "none" with no such entry or no file.
+claimat() { python3 -c 'import json, os, sys
+from datetime import datetime, timezone
+p, here, ro, slug = sys.argv[1], os.path.realpath(sys.argv[2]), sys.argv[3], sys.argv[4]
+d = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else {"claims": []}
+ats = [e["at"] for e in d["claims"] if isinstance(e, dict) and e.get("tasksDir") == here and e.get("rollout") == ro
+       and e.get("slug") == slug]
+print(datetime.fromisoformat(ats[0]).astimezone(timezone.utc).strftime("%H:%M:%S") if ats else "none")' \
+  "$(CF)" "$D" "$1" "$2"; }
+# rev1 <slug> <rollout> <max_review_rounds> [frontmatter lines...] — (p28-8; the share suite's) a task Integration
+# rejected, set aside for its seeded revise (execute § 4.5 step 1.2): blocked at its run, its `## Blocker diagnosis` the
+# engine's revise marker with one Integration round, its Integration log's last line `rejected`, a PR URL and the round
+# budget given (with 3, lead-integrate.py inputs reads autoRevise true). It carries `owner:` (its rollout has started)
+# and is served at 12:00 by its started: stamp.
+rev1() {
+  local s="$1" ro="$2" k="$3"; shift 3
+  mkt "$s" "$ro" blocked "owner: lead-$ro" 'started: 2026-10-02T12:00+00:00' 'pr: https://github.com/o/r/pull/7' \
+    "max_review_rounds: $k" "$@"
+  printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T13:40+00:00)\n\n%s\n\nRound 1 (Integration) rejection:\n- the merge dropped the retry guard\n\n<!-- run 1 end sha=0123456789ab -->\n\n## Integration log\n\n2026-10-02T13:30+00:00 rejected path=judge-only pr=7 anchor=- head=- base=- wait=- duration=- triggers=-\n' \
+    'revise: rejected at Integration re-review — revise on the branch, then re-integrate' >> "$D/$s.md"
+}
+# waiting — (p28-8; the share suite's) the waiting records for this tasks dir as sorted compact JSON: [[rollout, want,
+# since, served-or-null], …], times in UTC, HH:MM, or HH:MM:SS off the minute. "none" with no file.
+WAIT_PY='import json, os, sys
+from datetime import datetime, timezone
+p, here = sys.argv[1], os.path.realpath(sys.argv[2])
+if not os.path.exists(p):
+    print("none"); sys.exit(0)
+d = json.load(open(p, encoding="utf-8"))
+def hm(v):
+    if v is None:
+        return None
+    t = datetime.fromisoformat(v).astimezone(timezone.utc)
+    return t.strftime("%H:%M") if t.second == 0 else t.strftime("%H:%M:%S")
+out = [[e["rollout"], e["want"], hm(e["since"]), hm(e["served"])] for e in d.get("waiting", []) if e["tasksDir"] == here]
+print(json.dumps(sorted(out, key=json.dumps), separators=(",", ":")))'
+waiting() { python3 -c "$WAIT_PY" "$(CF)" "$D"; }
+# under <json> <N> <label> — (p28-8; the share suite's) after a call, the Mac-wide count never passes N.
+under() {
+  local r; r=$(q "$1" 'd["trickle"]["running"]')
+  if [ "$r" -le "$2" ] 2>/dev/null; then echo "ok   - $3: trickle.running $r <= $2"; else echo "FAIL - $3: trickle.running [$r] > $2"; fail=1; fi
+}
 # Two rollouts, each ceiling 3 with three queued tasks: the task's first fixture.
 ab() { mkro ro-a 3; mkt a1 ro-a open; mkt a2 ro-a open; mkt a3 ro-a open
        mkro ro-b 3; mkt b1 ro-b open; mkt b2 ro-b open; mkt b3 ro-b open; }
@@ -488,5 +543,234 @@ starts "$(err)" "WARN: trickle claims $(CF): " "C14: … a WARN naming the claim
 case "$(err)" in *"— this call's starts are not claimed") echo "ok   - C14: … that says this call's starts are not claimed";;
   *) echo "FAIL - C14: [$(err)] does not end in the not-claimed clause"; fail=1;; esac
 ok "$(nofile)" none "C14: … and writes no claims file"
+
+# ── C15 (p28-8): a seeded revise step 1.2 launches is claimed by `next`, beside its starts ──────────────────────────
+# ra <name>: ro-a (ceiling 3) holds only r1, owed a seeded revise; ro-b (ceiling 3) holds b1-b3, queued.
+ra() { scen "$1"; mkro ro-a 3; rev1 r1 ro-a 3; mkro ro-b 3; mkt b1 ro-b open; mkt b2 ro-b open; mkt b3 ro-b open; }
+# C15a, the task's Verify (fails first): lead A's next returns over its revise; lead B's next runs before A stamps it.
+ra c15a-interleave
+J=$(nx ro-a); rc=$?
+ok "$rc" 0 "C15a: ro-a's next exits 0"
+ok "$(q "$J" '[d["start"], d["slotLimit"], d["slotsInUse"], [e["slug"] for e in d["setAside"]]]')" '[[],2,0,["r1"]]' \
+  "C15a: ro-a starts nothing, slotLimit 2, slotsInUse 0, r1 set aside (step 1.2 launches its revise)"
+ok "$(claims)" '[["ro-a","r1","revise"]]' "C15a: … and next claims r1's revise (kind: revise)"
+ok "$(lines)" 0 "C15a: … with empty stderr"
+J=$(nx ro-b); rc=$?
+ok "$rc" 0 "C15a: ro-b's next exits 0"
+ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"], d["trickle"]["running"]]')" '[{"ro-a":1},["b1"],2]' \
+  "C15a: ro-b counts r1's revise claim: b1 starts alone, running 2"
+ok "$(q "$J" "$holds")" "{\"b2\":\"$T22\",\"b3\":\"$T22\"}" "C15a: … b2 and b3 are held on the Trickle"
+ok "$(lines)" 0 "C15a: … with empty stderr"
+
+# C15b: the § 4 stamp consumes a revise claim: an owner-first edit keeps it, the status edit counts it by its note, once.
+ra c15b-stamp
+nx ro-a >/dev/null
+stamp r1 - lead-ro-a-2
+ok "$(q "$(nx ro-b --dry-run)" '[d["trickle"]["elsewhere"], d["start"]]')" '[{"ro-a":1},["b1"]]' \
+  "C15b: owner first (r1 still blocked): r1 counts by its claim"
+stamp r1 in_progress
+ok "$(q "$(nx ro-b --dry-run)" '[d["trickle"]["elsewhere"], d["start"]]')" '[{"ro-a":1},["b1"]]' \
+  "C15b: … then status in_progress: r1 counts by its note, never twice"
+nx ro-b >/dev/null
+ok "$(claims)" '[["ro-b","b1"]]' "C15b: … and the next write holds no r1 entry (the claim is consumed)"
+
+# C15c: a revise claim no stamp consumes lapses 20 minutes after its at, to the second, and frees its place.
+ra c15c-lapse
+nx ro-a >/dev/null
+ok "$(q "$(nx ro-b --dry-run --now 2026-10-02T14:24:59Z)" 'd["start"]')" '["b1"]' "C15c: at 19:59 r1's claim still counts"
+J=$(nx ro-b --now 2026-10-02T14:25:00Z)
+ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"]]')" '[{},["b1","b2"]]' "C15c: at 20:00 it has lapsed: b1 and b2 start"
+ok "$(claims)" '[["ro-b","b1"],["ro-b","b2"]]' "C15c: … and the write drops r1's claim"
+
+# C15d: a rollout's own revise claim never counts against it, and its next call replaces it.
+ra c15d-own
+nx ro-a >/dev/null
+stamp r1 in_progress lead-ro-a
+J=$(nx ro-a --running r1)
+ok "$(q "$J" '[d["slotsInUse"], d["start"]]')" '[1,[]]' "C15d: r1 stamped and running: slotsInUse 1, its own claim uncounted"
+ok "$(claims)" '[]' "C15d: … and ro-a's revise claim is replaced, not kept"
+
+# C15e: the bound: only the revises step 1.2 launches under slotLimit are claimed, in rank order; the rest wait.
+scen c15e-bound
+mkro ro-a 3; rev1 r1 ro-a 3; rev1 r2 ro-a 3
+mkro ro-x 3; mkt x1 ro-x in_progress 'owner: lead-x'
+J=$(nx ro-a)
+ok "$(q "$J" '[d["slotLimit"], d["slotsInUse"], [e["slug"] for e in d["setAside"]]]')" '[1,0,["r1","r2"]]' \
+  "C15e: ro-x runs x1: slotLimit 1 for ro-a's two revises"
+ok "$(claims)" '[["ro-a","r1","revise"]]' "C15e: … only r1's revise is claimed (rank order, the one step 1.2 launches)"
+ok "$(waiting)" '[["ro-a",1,"14:05","12:00"]]' "C15e: … and ro-a records waiting for r2's (want 1)"
+
+# C15f: where step 1.2 launches no revise, next claims none, and its earlier revise claim goes.
+c15f() {  # c15f <name>: ro-a claims r1's revise; the caller then changes ro-a and runs it again
+  ra "c15f-$1"
+  nx ro-a >/dev/null; ok "$(claims)" '[["ro-a","r1","revise"]]' "C15f ($1): ro-a claims r1's revise"
+}
+c15f_after() {  # c15f_after <label> [ro-b's expected [start, kept]]
+  ok "$(claims)" '[]' "C15f ($1): ro-a's call leaves no ro-a entry"
+  J=$(nx ro-b)
+  if [ -n "${2:-}" ]; then
+    ok "$(q "$J" '[d["start"], d["trickle"]["kept"]]')" "$2" "C15f ($1): … ro-b reads the room"
+  else
+    ok "$(q "$J" 'd["start"]')" '["b1","b2"]' "C15f ($1): … so ro-b starts b1 and b2"
+  fi
+}
+c15f pause
+python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("parallel_ceiling: 3\n", "parallel_ceiling: 3\npause_requested: true\n", 1))' "$D/ro-a.md"
+nx ro-a >/dev/null
+c15f_after pause
+c15f hold
+mkdir -p "$D/bin"
+printf '#!/usr/bin/env bash\necho %s\n' "'{\"state\":\"OPEN\",\"mergedAt\":null,\"url\":\"https://github.com/o/r/pull/202\"}'" > "$D/bin/gh"
+chmod +x "$D/bin/gh"
+python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("parallel_ceiling: 3\n", "parallel_ceiling: 3\nhold_until: {pr: o/r#202}\n", 1))' "$D/ro-a.md"
+J=$(nx ro-a --gh-bin "$D/bin/gh"); ok "$(q "$J" 'd["halt"]')" '"held"' "C15f (hold): an OPEN rollout hold"
+c15f_after hold
+c15f main-red
+printf '\n## Race log\n\n- 2026-10-02T10:00+00:00 [[a0]] revert did not land: conflict in a.py\n' >> "$D/ro-a.md"
+J=$(nx ro-a); ok "$(q "$J" 'd["halt"]')" '"race"' "C15f (main-red): main red halts race"
+c15f_after main-red
+c15f git-env
+printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[r1]] task: core.bare false→true; repo /x\n' >> "$D/ro-a.md"
+J=$(nx ro-a); ok "$(q "$J" '[d["halt"], [h["scope"] for h in d["gitEnvHold"]]]')" '["git-env",["rollout"]]' \
+  "C15f (git-env): a whole-rollout git-env trip halts git-env"
+c15f_after git-env
+c15f heat
+J=$(THREAD_HEAT_LEVEL=3 nx ro-a); ok "$(q "$J" '[d["heat"]["level"], d["slotLimit"]]')" '[3,0]' "C15f (heat): a hot Mac: slotLimit 0"
+# The heat-held revise records ro-a waiting (p28-5), so ro-b, cool again, keeps the second place for it.
+c15f_after heat '[["b1"],{"ro-a":1}]'
+c15f lane
+printf '\n## Git-env log\n\n- 2026-10-02T10:00+00:00 git-env trip [[r1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro-a.md"
+J=$(nx ro-a); ok "$(q "$J" '[[h["scope"] for h in d["gitEnvHold"]], d["slotLimit"]]')" '[["lane"],2]' \
+  "C15f (lane): a lane-only git-env trip holds only the lane"
+ok "$(claims)" '[["ro-a","r1","revise"]]' "C15f (lane): … so r1's revise is still claimed"
+ok "$(q "$(nx ro-b)" '[d["trickle"]["elsewhere"], d["start"]]')" '[{"ro-a":1},["b1"]]' "C15f (lane): … and ro-b counts it"
+
+# C15g: the over-count and its cost. ro-a (ceiling 1) holds r1's revise and a1, queued: its next claims both, though
+# step 1.2 launches the revise first and its re-run replaces the start claim. A lead reading the file between them
+# holds its row and records itself waiting; the place the re-run frees is kept for it until its next tick.
+scen c15g-over-count
+mkro ro-a 1; rev1 r1 ro-a 3; mkt a1 ro-a open
+mkro ro-b 3; mkt b1 ro-b open
+J=$(nx ro-a)
+ok "$(q "$J" '[d["start"], d["slotLimit"], d["slotsInUse"]]')" '[["a1"],1,0]' "C15g (1): ro-a starts a1 under slotLimit 1"
+ok "$(claims)" '[["ro-a","a1"],["ro-a","r1","revise"]]' "C15g (1): … and claims a1 and r1's revise: two, for one place"
+under "$J" 2 "C15g (1): ro-a's next"
+J=$(nx ro-b --now 2026-10-02T14:05:01Z)
+ok "$(q "$J" '[d["trickle"]["elsewhere"], d["slotLimit"], d["start"]]')" '[{"ro-a":2},0,[]]' \
+  "C15g (2): ro-b reads both claims: slotLimit 0, nothing starts (one place was really free)"
+ok "$(q "$J" "$holds")" "{\"b1\":\"$T22\"}" "C15g (2): … b1 is held on the Trickle"
+ok "$(waiting)" '[["ro-b",1,"14:05:01",null]]' "C15g (2): … and ro-b records itself waiting"
+under "$J" 2 "C15g (2): ro-b's next"
+stamp r1 in_progress lead-ro-a
+ok "$(grep -l '^status: in_progress$' "$D"/*.md | wc -l | tr -d ' ')" 1 "C15g (3): r1 stamped: one note in_progress"
+J=$(nx ro-a --now 2026-10-02T14:05:02Z --running r1)
+ok "$(q "$J" '[d["start"], d["trickle"]["kept"]]')" '[[],{"ro-b":1}]' \
+  "C15g (3): step 1.2's re-run starts nothing: the freed place is kept for ro-b"
+ok "$(q "$J" "$holds")" '{"a1":"ceiling: 1/1 slots in use"}' "C15g (3): … a1 waits on ro-a's ceiling"
+ok "$(claims)" '[]' "C15g (3): … and the claims hold no ro-a entry"
+under "$J" 2 "C15g (3): ro-a's re-run"
+J=$(nx ro-b --now 2026-10-02T14:25:00Z)
+ok "$(q "$J" '[d["trickle"]["elsewhere"], d["start"]]')" '[{"ro-a":1},["b1"]]' \
+  "C15g (4): ro-b's next tick: r1 counts by its note, b1 starts into the kept place"
+under "$J" 2 "C15g (4): ro-b's next"
+stamp b1 in_progress lead-ro-b
+ok "$(grep -l '^status: in_progress$' "$D"/*.md | wc -l | tr -d ' ')" 2 "C15g (5): b1 stamped: two notes in_progress, never more"
+
+# ── C16 (p28-8): the judge's revise rule ─────────────────────────────────────────────────────────────────────────────
+# c16 <name>: ro-a (ceiling 3) is made by the caller with r1; ro-b (ceiling 3) holds b1-b3, queued. The caller seeds.
+# cnt (C9's): ro-b's --dry-run count elsewhere and its starts.
+c16() { scen "c16$1"; mkro ro-a 3; mkro ro-b 3; mkt b1 ro-b open; mkt b2 ro-b open; mkt b3 ro-b open; }
+c16drop() {  # c16drop <label>: the seeded revise claim counts nothing and goes at the next write
+  ok "$(cnt)" '[{},["b1","b2"]]' "C16 ($1): the revise claim counts nothing"
+  nx ro-b >/dev/null
+  ok "$(claims)" '[["ro-b","b1"],["ro-b","b2"]]' "C16 ($1): … and goes at the next write"
+}
+REV='[c(D, "ro-a", "r1", NOW, kind="revise")]'
+c16 a-queued; mkt r1 ro-a open 'owner: lead-ro-a'; seed "$REV"; c16drop a-queued
+c16 b-review; mkt r1 ro-a review 'owner: lead-ro-a' 'pr: https://github.com/o/r/pull/7'; seed "$REV"; c16drop b-review
+c16 c-done; mkt r1 ro-a done 'owner: lead-ro-a'; seed "$REV"; c16drop c-done
+c16 d-integration; mkt r1 ro-a blocked 'owner: lead-ro-a'
+printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T13:40+00:00)\n\nintegration: merge declined at the --gated hold\n\n<!-- run 1 end sha=000000000000 -->\n' >> "$D/r1.md"
+ok "$(q "$(nx ro-a --dry-run)" '[e["setAsideAt"] for e in d["setAside"]]')" '["integration"]' \
+  "C16 (d-integration): fixture: r1 is set aside at Integration"
+seed "$REV"; c16drop d-integration
+c16 e-answer; rev1 r1 ro-a 3
+printf '\n## Repair input\n\n- 2026-10-02T14:06+00:00 decision (block 0123456789ab): hand it back\n' >> "$D/r1.md"
+J=$(python3 "$HERE/../scripts/lead-integrate.py" inputs --note "$D/r1.md" 2>/dev/null)
+ok "$(q "$J" 'd["answerRecorded"] is not None')" true "C16 (e-answer): fixture: lead-integrate.py inputs reads answerRecorded non-null"
+seed "$REV"; c16drop e-answer
+c16 f-live; rev1 r1 ro-a 3; seed "$REV"
+ok "$(cnt)" '[{"ro-a":1},["b1"]]' "C16 (f-live): a revise claim on a task set aside at its run, blocked, unanswered, counts"
+nx ro-b >/dev/null
+ok "$(claims all)" '[["here","ro-a","r1","revise"],["here","ro-b","b1"]]' \
+  "C16 (f-live): … and another lead's write keeps it, its kind included"
+for k in '"start"' 1 '""' None; do
+  c16 "g-kind-$(printf '%s' "$k" | tr -dc 'a-zA-Z0-9')"; rev1 r1 ro-a 3; seed "[c(D, 'ro-a', 'r1', NOW, kind=$k)]"
+  ok "$(cnt)" '[{},["b1","b2"]]' "C16 (kind $k): a malformed kind counts nothing"
+  ok "$(lines)" 0 "C16 (kind $k): … silently"
+  nx ro-b >/dev/null
+  ok "$(claims)" '[["ro-b","b1"],["ro-b","b2"]]' "C16 (kind $k): … and goes at the next write"
+done
+c16 h-start-on-revise; rev1 r1 ro-a 3; seed '[c(D, "ro-a", "r1", NOW)]'
+c16drop h-start-on-revise
+c16 i-task-missing; seed '[c(D, "ro-a", "r9", NOW, kind="revise")]'
+ok "$(cnt)" '[{"ro-a":1},["b1"]]' "C16 (i-task-missing): a revise claim whose task note is missing still counts"
+c16 j-dry-run; rev1 r1 ro-a 3
+J=$(nx ro-a --dry-run)
+ok "$(q "$J" '[e["slug"] for e in d["setAside"]]')" '["r1"]' "C16 (j-dry-run): ro-a --dry-run over r1's revise"
+ok "$(ls -A "$L" 2>/dev/null | wc -l | tr -d ' ')" 0 "C16 (j-dry-run): … writes no revise claim (the lock dir stays empty)"
+# The lasting-disagreement cost: while r1 stays blocked, each of ro-a's calls claims it again with a fresh at.
+c16 k-reclaim; rev1 r1 ro-a 3
+nx ro-a >/dev/null
+ok "$(claimat ro-a r1)" 14:05:00 "C16 (k-reclaim): ro-a claims r1's revise at 14:05:00"
+nx ro-a --now 2026-10-02T14:15:00Z >/dev/null
+ok "$(claimat ro-a r1)" 14:15:00 "C16 (k-reclaim): … r1 still blocked, its 14:15 call claims it again, a fresh at"
+ok "$(q "$(nx ro-b --dry-run --now 2026-10-02T14:30:00Z)" 'd["trickle"]["elsewhere"]')" '{"ro-a":1}' \
+  "C16 (k-reclaim): … so at 14:30, 25 minutes after the first at, it still counts"
+
+# ── C17 (p28-8): true concurrency, the Verify with revises: two revise leads and two start leads at once ─────────────
+# ro-1 and ro-2 (ceiling 2) each hold one seeded revise; ro-3 and ro-4 (ceiling 2) each hold two queued tasks. A revise
+# lead stamps what step 1.2 launches (its setAside entries set aside at their run and blocked, up to slotLimit -
+# slotsInUse); a start lead stamps its `start`. The Mac never passes the Trickle. A revise lead reaches the lock later
+# (_seeded_revises reads lead-integrate.py before it), so run 1 releases all four at once and run k holds the start
+# leads back (k - 1) x 50 ms: in the later runs the revise leads take the lock first, and their stamps race the start
+# leads' next, the window a revise claim closes.
+C17_DELAY=(0 0 0.05 0.1 0.15 0.2)
+for k in 1 2 3 4 5; do
+  scen "c17-run$k"
+  for i in 1 2; do mkro "ro-$i" 2; rev1 "r$i" "ro-$i" 3; done
+  for i in 3 4; do mkro "ro-$i" 2; mkt "t$i-x" "ro-$i" open; mkt "t$i-y" "ro-$i" open; done
+  pids=()
+  for i in 1 2 3 4; do
+    ( while [ ! -e "$D/go" ]; do sleep 0.01; done
+      [ "$i" -ge 3 ] && sleep "${C17_DELAY[$k]}"
+      NXERR="$D/err-$i"; nx "ro-$i" --running "" >"$D/out-$i"; echo $? >"$D/rc-$i"
+      python3 -c 'import json, os, re, sys
+d, out, owner = sys.argv[1], sys.argv[2], sys.argv[3]
+j = json.load(open(out))
+rev = [e["slug"] for e in j["setAside"] if e["setAsideAt"] == "run" and e["status"] == "blocked"]
+slugs = j["start"] + rev[:max(0, j["slotLimit"] - j["slotsInUse"])]
+for slug in slugs:
+    p = os.path.join(d, slug + ".md")
+    m = re.match(r"^---\n(.*?\n)---\n(.*)$", open(p).read(), re.S)
+    fm = [("status: in_progress" if l.startswith("status:") else l) for l in m.group(1).rstrip("\n").split("\n")
+          if not l.startswith("owner:")]
+    with open(p + ".stamp.tmp", "w") as f:
+        f.write("---\n" + "\n".join(fm + ["owner: " + owner]) + "\n---\n" + m.group(2))
+    os.replace(p + ".stamp.tmp", p)
+print(len(slugs))' "$D" "$D/out-$i" "lead-$i" >"$D/n-$i"
+      echo $? >"$D/stamp-rc-$i" ) &
+    pids+=($!); PIDS+=($!)
+  done
+  touch "$D/go"
+  wait "${pids[@]}"
+  for i in 1 2 3 4; do
+    ok "$(cat "$D/rc-$i" 2>/dev/null)" 0 "C17 run $k: lead $i's next exits 0"
+    ok "$(if [ -s "$D/err-$i" ]; then cat "$D/err-$i"; else echo empty; fi)" empty "C17 run $k: lead $i's stderr is empty"
+    ok "$(isnum "$(q "$(cat "$D/out-$i")" 'len(d["start"])')")" json "C17 run $k: lead $i's output is one JSON object"
+    ok "$(cat "$D/stamp-rc-$i" 2>/dev/null)" 0 "C17 run $k: lead $i's stamps land"
+  done
+  ok "$(grep -l '^status: in_progress$' "$D"/*.md | wc -l | tr -d ' ')" 2 "C17 run $k: exactly 2 notes read in_progress"
+done
 
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

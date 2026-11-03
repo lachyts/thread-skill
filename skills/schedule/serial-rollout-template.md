@@ -25,7 +25,7 @@ surfaces:
 
 ## Notes
 
-Serial-rollout plan for one chain of `[[{{PROJECT_NAME}}]]` tasks (ADR 0040): Legs work its rows in order, one task at a time, each Leg in the launch its rows name. The chain owns the surfaces in this note's frontmatter while it is unfinished.
+Serial-rollout plan for one chain of `[[{{PROJECT_NAME}}]]` tasks (ADR 0040): Legs work its rows in order, one task at a time, each Leg in the launch its rows name. The chain predicts the surfaces in this note's frontmatter while it is unfinished, and those claims order it against the other live chains (ADR 0067 d4).
 
 {{THREAD_LINE}}
 
@@ -35,7 +35,7 @@ Legs run this chain (execute's legs.md). Leg 1 opens in row 1's launch (its alia
 
 ## Queue
 
-One row per task, in chain order: its rank, its launch (the alias and the folder its Leg opens in) and the surfaces it claims.
+One row per task, in chain order: its rank, its launch (the alias and the folder its Leg opens in) and the surfaces it predicts.
 
 {{CHAIN_TABLE}}
 
@@ -45,7 +45,7 @@ One row per task, in chain order: its rank, its launch (the alias and the folder
 
 ## Surfaces
 
-The frontmatter's `surfaces:` is the union of the members' claims below. While this note is unfinished, no other serial chain over any of them is scheduled (while it is stuck, only its unlanded rows' surfaces: ADR 0060), and no parallel rollout rooted on one of them. Each member's claim and where it came from (`declared`: its own `surfaces:`; `derived`: its `## Launch` paths (its launch commands' `--add-dir` and `cd` paths among them), its first project's `Local:` and its launch folder, or a surface added at schedule, where a path that is the vault root gives its first project's place and its own task note instead (the whole vault, with a WARN, when it names no project), and so does naming nothing else when it names a project; `default`: no project and no path, so the whole vault, with a WARN):
+The frontmatter's `surfaces:` is the union of the members' predicted claims below: a file or folder in a checkout (`repo:<toplevel>//<path>`), a bare `repo:<toplevel>` for a whole checkout, a vault place or an external system. While this note is unfinished, another serial chain over any of them (while it is stuck, only its unlanded rows' surfaces: ADR 0060) is still scheduled, and the two work them a chain at a time: the one that comes first (the first to begin, else by slug) lands its unlanded rows there before the other begins a Leg that writes them. Until each chain works its own Chain copy the same holds for a whole checkout both work, though a stuck chain works none, and no parallel rollout is rooted in place in a checkout this chain works (ADR 0067 d4). Each member's claim and where it came from (`declared`: its own `surfaces:`; `derived`: the `## Launch` paths it names below a checkout's toplevel and its `touches:`, or a surface added at schedule, while its reach (its launch folder, its launch commands' `--add-dir` and `cd` paths, its first project's `Local:` and a where-label value such as `**Repo:**`) only names the checkout it works, so a member that only reaches one claims its own task note; a path that is the vault root gives its first project's place and its own task note instead (the whole vault, with a WARN, when it names no project), and so does naming nothing else when it names a project; `default`: no project and no path, so the whole vault, with a WARN):
 
 {{SURFACE_SOURCES}}
 

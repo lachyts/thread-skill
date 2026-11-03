@@ -46,7 +46,7 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 
 | Member | Role | What it does |
 |---|---|---|
-| `/thread:schedule` | planner | Orders the backlog into a queue (dependencies recorded in frontmatter, Solo for sweeping changes, affine same-file clusters folded into one unit) and refuses a second unfinished parallel rollout of one project on a repo (`--regenerate` supersedes it, carrying its unlanded tasks), while another project's rollout runs beside it from its own rollout clone, the two landing one merge at a time per origin (ADR 0064); writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 5`). An all-serial set gets one `shape: serial` note per chain, refused while a live chain shares a surface. No minimum size — shape decides, not count. A standalone `--tasks` run first sweeps the same repo's other open tasks for pickups, and every standalone parallel run ends by handing its note to a fresh session that runs `execute` (ADR 0057). |
+| `/thread:schedule` | planner | Orders the backlog into a queue (dependencies recorded in frontmatter, Solo for sweeping changes, affine same-file clusters folded into one unit) and refuses a second unfinished parallel rollout of one project on a repo (`--regenerate` supersedes it, carrying its unlanded tasks), while another project's rollout runs beside it from its own rollout clone, the two landing one merge at a time per origin (ADR 0064); writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 5`). An all-serial set gets one `shape: serial` note per chain; a chain sharing a live chain's surface takes turns with it, and only an unfinished parallel rollout's root refuses one (ADR 0067). No minimum size — shape decides, not count. A standalone `--tasks` run first sweeps the same repo's other open tasks for pickups, and every standalone parallel run ends by handing its note to a fresh session that runs `execute` (ADR 0057). |
 | `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). A serial rollout runs as Legs: this session works its tasks and hands the rest to a fresh Leg. |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. A serial chain reads as its Legs, its chain state and any stall (`leg.py status`). |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. A stalled serial chain gets its set-asides answered or deferred with their dependants, and its next Leg started as a new Session. |
@@ -60,6 +60,13 @@ requires its canonical Workflow runtime; shared source and skill discovery do no
 provide that runtime. The estate pass (`/thread:orient-all`) grades through read-only agents and schedules through
 forked subagents, and starts its sessions as visible Chorus sessions on the Stage; anywhere else it ends with
 paste-ready prompts.
+
+Two hooks ship with the plugin (`hooks/hooks.json`). The Stop hook (`hooks/rollout-stop-driver.py`) keeps a queued
+rollout moving. The PreToolUse hook on Edit, Write and MultiEdit (`hooks/vault-note-overlap.py`, ADR 0067 d6) records
+which live run's task wrote each vault note and, when another rollout's task edits it, lets the edit through and tells
+that agent to re-read the note; each warning lands in the Run record's `overlaps.jsonl`, and the weekly Reflection
+reports them. It keeps a debug line per vault-path call in its state dir (`~/.local/state/thread/note-writers/debug.jsonl` by default, capped at
+512 KB, one rotated copy): `THREAD_NOTE_OVERLAP_DEBUG=off` turns it off, and an absolute file logs every call there.
 
 ## The convergence engine
 
@@ -414,7 +421,11 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   (the queue verbs), `reconcile-rollout-runs.test.sh` (accumulated feedback runs), `reconcile-rollout-lead.test.sh`
   (`hand-back`, `log-integration`), `reconcile-rollout-descope.test.sh` (the automatic-descope verb and its recorded
   refusal) and `reconcile-rollout-human-fix.test.sh` (`inputs`' one Human fix per refusal, the recorded answer,
-  `record-answer` and `hand-back --answer`, ADR 0035); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
+  `record-answer` and `hand-back --answer`, ADR 0035); `rollout-stop-driver.test.sh`; `tests/vault-note-overlap.test.sh` (the
+  Note overlap hook on a fixture vault and real-shaped transcripts: identity, the writer record, liveness, the warning,
+  the Run-record line, the XDG rule, the debug log, the sweep, robustness and the time limit) and
+  `tests/contracts/note-overlap-opener.test.mjs` (every task-agent prompt opens with its task link and then its rollout
+  link inside the hook's opener window); `tests/lead-integrate.test.sh` (the lead's
   Integration against a fake `gh` and real repos) and `tests/contracts/execute-queue.test.mjs` (the queue loop's prose);
   `merge-task.sh --self-test-classify` / `--self-test-base`, and `tests/merge-task-base.test.sh` /
   `tests/merge-task-integrated.test.sh` (one integrated PR per call, against a fake `gh` and a real bare repo).
