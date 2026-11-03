@@ -2800,10 +2800,11 @@ def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
     """Steps 1-8 for one pair P -> C (the module docstring's land). (entry, the verified tip it accepted or None)."""
     br = f"chain/{ctx.slug}"
     e = land_entry(P, C, br)
+    acc = [None]   # a --verified tip accepted on an earlier try is logged even when a later try stands
 
     def stand(why, waits):
         e.update(state="stood", why=why, waits=waits)
-        return e, None
+        return e, acc[0]
 
     d = default_branch(P)
     e["default"] = d
@@ -2830,7 +2831,7 @@ def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
                                              "ff": None, "peer": None})
                 return e, None
             return stand(why, True)
-        tips, accepted = verified_tips(chain, P), None
+        tips = verified_tips(chain, P)
         for _try in range(LAND_TRIES):
             tip, dm, how, s = bring_in(ctx, P, C, d, br)
             if s is not None:
@@ -2838,10 +2839,10 @@ def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
             e.update(head=tip, merged=dm)
             if tip == dm:
                 e["state"] = "current"
-                return e, accepted
+                return e, acc[0]
             if tip in verified and tip not in tips:
                 tips.append(tip)
-                accepted = tip
+                acc[0] = tip
             if ctx.dry:   # the plan: nothing merged, moved or written, no lock taken
                 res, got = ff_primary(ctx, P, d, br, tip, dm, notes, warns)
                 e.update(state="plan", plan={"unl": [r.slug for r in unl], "claim": None, "bring": how,
@@ -2854,14 +2855,13 @@ def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
                 e.update(state="verify", verify=[{"task": r.slug, "line": verify_line(r.note),
                                                   "folder": sc.copy_folder(r.folder, pairs) if r.folder else None}
                                                  for r in need])
-                return e, accepted
+                return e, acc[0]
             res, s = ff_primary(ctx, P, d, br, tip, dm, notes, warns)
             if res == "landed":
                 e.update(state="landed", landed=[r.slug for r in unl])
-                return e, accepted
+                return e, acc[0]
             if res == "stood":
-                e.update(state="stood", why=s[0], waits=s[1])
-                return e, accepted
+                return stand(s[0], s[1])
         return stand(f"{d} kept moving", True)
 
 
@@ -3032,7 +3032,8 @@ def land_retire(ctx, chain, leg, pairs, out):
         else:
             with RepoLock(ctx, P) as lk:
                 if not lk.held:
-                    ent["why"] = f"another land held {lk.path} past {lk.timeout:g}s"
+                    ent["why"] = (f"another land held {lk.path} past {lk.timeout:g}s" if lk.path
+                                  else f"cannot read {P}'s git common dir")
                 elif exists:
                     off = off_default(chain, P, C, d)
                     st = git(C, "status", "--porcelain", "--untracked-files=no")
