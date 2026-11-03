@@ -66,7 +66,9 @@ OPEN_STATUSES, links_in, tags_of) and estate-scan.py (ES: first_link, link_live 
 reconcile-rollout.py (RR: Note, GATE_PENDING_SECTION, GATE_BOUNCE_SECTION,
 PROJECT_ROOT_RE, _shape and _start_unattended, the start stamp's reader; _dep_status and _fold_unit, the dependency
 rule a rollout row waits on); and, for `sessions` only, leg.py (LEG:
-split_cells, LAUNCH_RE, LINK_RE and QUEUE, the serial Queue's row grammar); and, for `log` only, run_record.py (RRec:
+split_cells, LAUNCH_RE, LINK_RE and QUEUE, the serial Queue's row grammar, and launch_line, a Leg's launch line) and
+serial-chains.py (SC: read_chain_copies and copy_folder, a Chain copy's folder, ADR 0067 d2); and, for `log` only,
+run_record.py (RRec:
 check, emit, events_dir, normalise_slug, title_key, GRADE_LOG and RESERVED: the Grade log's one writer is run_record
 itself).
 
@@ -217,7 +219,9 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL
   6 and 13 an execute, 8 a reinstate, 7 and 11 a repair, every other number none (o10 pins the table to the rules).
   --wrote: each note a § 6 schedule fork wrote, directly in the vault's Work/Tasks (else exit 2). A parallel one
   (RR._shape) is an execute item in its Project root (no root: manual); a serial one is a `leg` item for Leg 1, in
-  its `## Queue` row 1's launch folder, manual when its alias starts `cx-` (legs.md § Hand over).
+  its `## Queue` row 1's launch folder (inside its Chain copy when the note carries `chain_copies:`, SC.copy_folder),
+  with its `launch` line (LEG.launch_line: `<alias> from <folder>` in place, a copy's paste line otherwise), manual when
+  its alias starts `cx-` (legs.md § Hand over) or its `chain_copies:` is malformed (the item's why says so).
   --status SLUG=N: SLUG one of plan.rollouts[], N an integer 1 to 13 (else exit 2). An execute item only with
   canExecute, a reinstate only with reinstate and canExecute (so a sign-off pause that every gate signed but another
   hold stands on, serial, a start stamp or a drain, gets none), a repair only with canRepair (live_item); every live
@@ -239,7 +243,7 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]... [--open NAME|NOTE|LABEL
   written-note items (in --wrote order), the live execute items by slug, the repair items by slug, the orient items
   last. A title over TITLE_MAX is cut to TITLE_MAX - 1 chars plus "…".
   Output: {schema, today, items[] {kind (execute | leg | repair | orient), rollout | project, note, title, cwd, alias?,
-  prompt, tldr, manual, why}, left[] {rollout, action, holds[], why, held?}, unmatched[]}.
+  launch?, prompt, tldr, manual, why}, left[] {rollout, action, holds[], why, held?}, unmatched[]}.
 
 log --rank R --scan S [--dry-run]: the pass's grades into the Grade log (p25-4; CONTEXT.md **Grade log**), at
   orient-all § 2 step 7 (never on a dry run) and at schedule § 1.5 on every run that grades (all but an orient-all
@@ -347,6 +351,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.dirname(os.path.dirname(HERE))
 ESTATE_RANK_PY = os.path.join(HERE, "estate-rank.py")
 LEG_PY = os.path.join(SKILLS, "execute", "scripts", "leg.py")
+SERIAL_CHAINS_PY = os.path.join(HERE, "serial-chains.py")
 RUN_RECORD_PY = os.path.join(HERE, "run_record.py")
 
 SCHEMA = 1
@@ -487,6 +492,7 @@ class Mods:
         self.NA = self.RT.NA
         self.RR = load("thread_reconcile_rollout", self.ES.RECONCILE_ROLLOUT_PY)
         self.LEG = load("thread_leg", LEG_PY) if leg else None
+        self.SC = load("thread_serial_chains", SERIAL_CHAINS_PY) if leg else None
 
 
 # ---- values ------------------------------------------------------------------------------------------------------
@@ -1739,13 +1745,21 @@ def cmd_sessions(args):
             fail(2, "--wrote %s: %s" % (full, e))
         if RR._shape(note) == "serial":
             alias, folder = queue_row1(M, note)
+            bad = None
+            try:   # ADR 0067 d2: a chain in Chain copies opens Leg 1 in row 1's folder inside its copy
+                pairs = M.SC.read_chain_copies(note)
+            except ValueError as e:
+                pairs, bad = None, "chain_copies: %s: fix the note" % e
+            copy = M.SC.copy_folder(folder, pairs) if pairs and folder else None
             items.append({"kind": "leg", "rollout": slug, "note": rel, "title": titled("Leg 1: %s" % slug),
-                          "cwd": os.path.expanduser(folder) if folder else None, "alias": alias,
+                          "cwd": copy or (os.path.expanduser(folder) if folder else None), "alias": alias,
+                          "launch": M.LEG.launch_line(alias, folder, copy) if alias and folder else None,
                           "prompt": "/thread:execute [[%s]]\nLeg 1 of the serial chain; the brief is the rollout "
                                     "note: %s" % (slug, full),
                           "tldr": "Leg 1 of the serial rollout orient-all scheduled this pass. It works the chain's "
                                   "first tasks and hands the rest on.",
-                          "manual": not alias or alias.startswith("cx-") or not folder, "why": "written this pass"})
+                          "manual": bool(bad) or not alias or alias.startswith("cx-") or not folder,
+                          "why": bad or "written this pass"})
         else:
             m = RR.PROJECT_ROOT_RE.search(note._body)
             cwd = os.path.expanduser(m.group(1).strip()) if m else None

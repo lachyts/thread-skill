@@ -36,7 +36,9 @@
 #       words; C15d the HEAD guard (a detached HEAD, the leg_base fallback, a foreign checkout, a task that committed
 #       nowhere, a peer's rewritten tip above the task's own commit and its control); C15e --wait (a holder waited
 #       out, the deadline, a real --run, nothing in flight, its refusals, and it writes nothing; (g) a --run that
-#       records and frees its lock between a read's note read and its probe, in-process with scripted probes).
+#       records and frees its lock between a read's note read and its probe, in-process with scripted probes); C15f a
+#       chain in Chain copies (ADR 0067 d2): the read maps its one checkout to its copy, and --run is green on the
+#       copy's HEAD; a missing copy is refused.
 # Temp repos and notes only; no vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -585,6 +587,20 @@ has "$F" "Each task passed its own Leg verify" "C15c: … each task's own Leg ve
 has "$F" '**Verify:** `false` exits 0 on the chain'"'"'s checkout.' "C15c: … and its Verify line"
 hasnt "$F" "Integration" "C15c: … never an Integration"
 hasnt "$F" "merged main" "C15c: … never merged main"
+
+# C15f (ADR 0067 d2): a chain in Chain copies verifies on its copy's HEAD, where its tasks' leg_head anchors are.
+C="$TMP/c15f-copy"
+sscen c15f '"true"' "chain_copies: [\"$TMP/c15f/repo -> $C\"]"
+g -C "$D/repo" worktree add -q -b chain/ro-rollout-2026-10-24 "$C"; CB=$(git -C "$C" rev-parse HEAD)
+echo c > "$C/c.txt"; g -C "$C" add -A; g -C "$C" commit -q -m "feat: a in the copy" -m "Task: [[a]]"; CSHA=$(git -C "$C" rev-parse HEAD)
+seta "leg_base: [\"$C@$CB\"]" "leg_head: [\"$C@$CSHA\"]"
+cv; ok "$rc|$(js state)|$(js repo)" "0|run|$C" "C15f: a chain with chain_copies: reads its one checkout's Chain copy"
+cv --run; ok "$rc|$(js result)" "0|green" "C15f: … and --run is green there"
+has "$(sed -n '/^## Completion verify log/,$p' "$RO")" "attempt 1 at $CSHA rc 0 -> green" "C15f: … on the copy's HEAD, never the primary's ($SHA)"
+sscen c15f2 '"true"' "chain_copies: [\"$TMP/c15f2/repo -> $TMP/c15f2-gone\"]"
+before=$(cksum < "$RO")
+cv; ok "$rc|$out|$(cksum < "$RO")" "1||$before" "C15f: control: its Chain copy missing → the read refuses (1), the note byte-identical"
+has "$err" "its Chain copy $TMP/c15f2-gone is missing: leg.py begin remakes it" "C15f: … saying so"
 
 sscen c15d
 g -C "$D/repo" checkout -q --detach "$BASE"

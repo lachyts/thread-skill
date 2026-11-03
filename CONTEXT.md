@@ -455,14 +455,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   interactive sessions that each work tasks themselves, close, and hand the
   rest to a fresh successor. No task worktrees (leg.py's transient scratch
   revert, and the completion verify's detached verify tree outside the
-  checkout, only), and no subagents but each task's clean-room review. One chain
+  checkout, only; each repo's **Chain copy** is the chain's, never a task's),
+  and no subagents but each task's clean-room review. One chain
   per note (schedule § Serial path): its `surfaces:` predicts the **Surface**s
   the chain writes, and each `## Queue` row names the launch its Leg opens in, so a
   launch change between two rows is a Leg boundary. A row that writes a
   checkout never opens in the vault, and an alias-less row writing two
   checkouts is refused (ADR 0059), since a Leg finishes only its own
-  checkout's commits. Proposed (ADR 0067): each repo it writes is worked in
-  its own **Chain copy**, landed task by task on the primary checkout.
+  checkout's commits. Each repo it writes is worked in its own **Chain copy**
+  (ADR 0067 d2: `chain_copies:` on the note; a note without it works in
+  place), whose commits wait on its branch until Complete's land follow-on
+  merges them into the primary checkout; landing them task by task is
+  proposed (ADR 0067 d3).
   execute runs its Legs
   (`skills/execute/legs.md`). A serial note is never paused: a Leg stops through
   `leg.py close --outcome stopped`. status reads it as a chain (`leg.py status`:
@@ -538,19 +542,29 @@ through time, from attention to merged PRs. Terms only — no implementation.
   inside another by path (a separate repo with its own index), unless the outer
   path is in no checkout. Predicted surfaces group, order and wait, and never
   refuse a schedule: two chains predicting one place both run, the first to
-  begin going first, and until each chain works its own **Chain copy** two
-  chains in one checkout work it a chain at a time: the one that comes first
-  (the first to begin, else by slug) lands every unlanded row it has there
-  before the other begins a Leg in it (ADR 0067 d4). A stuck chain holds only
+  begin going first. Two chains in their own **Chain copy**s meet only file
+  to file, while a chain that works a checkout in place (no `chain_copies:`)
+  still takes its checkout turn: the one that comes first (the first to
+  begin, else by slug) lands every unlanded row it has there before the other
+  begins a Leg in it (ADR 0067 d4). A stuck chain holds only
   its unlanded rows' surfaces (**Unfinished rollout**, ADR 0060), and works
   no checkout. Proposed (ADR 0067): the files a Leg actually committed are
   checked before it lands; a vault project's place is a prediction, and two
   runs in one note are a **Note overlap**. _Avoid_: footprint, file-set.
 - **Chain copy** — a serial chain's own working copy of a repo it writes (a git
-  worktree on `chain/<rollout-slug>`, outside `~/repos` and `~/Projects`), so
-  two chains in one repo share no index or HEAD; each finished task lands from
-  it onto the primary checkout's default branch (ADR 0067, proposed). Never a
-  **Rollout clone** (a parallel rollout's) and never read as a thread.
+  worktree of the primary checkout on `chain/<rollout-slug>`, at
+  `~/.local/state/thread/chains/<repo-name>-<rollout-slug>/`, outside `~/repos`
+  and `~/Projects`), so two chains in one repo share no index or HEAD (ADR 0067
+  d2). Schedule's S5 makes it with `leg.py copies` and records it on the note
+  as `chain_copies:`; `leg.py begin` remakes a deleted one on its branch and
+  fast-forwards a clean one to the primary's default branch on a fresh Leg.
+  It links the primary's gitignored `.mcp.json` and
+  `.claude/settings.local.json`, and each Leg-facing folder (begin's launch
+  check, the hand-over, repair's restart) maps into it. A note with no
+  `chain_copies:` (one written before copies) works each checkout in place.
+  Until ADR 0067 d3's `leg.py land`, its commits land by hand: Complete's land
+  follow-on merges `chain/<rollout-slug>` into the primary's default branch.
+  Never a **Rollout clone** (a parallel rollout's) and never read as a thread.
   _Avoid_: chain clone, chain worktree, sandbox.
 - **Note overlap** — two live runs editing the same vault note while both
   tasks are unfinished. The later edit is never held or refused: its agent is

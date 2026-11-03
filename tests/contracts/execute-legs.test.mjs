@@ -14,7 +14,8 @@
 //       outside and drift: none), the task stays done, its dependants held through `verifies:`;
 //   e6  the hand-over and status: create_thread's fields (no brief, report_back on), a report per *closed* Leg, the §
 //       Report table verbatim, never `running`, a `waiting` line from `next --waiting`, a labelled and pushed manual
-//       hand-over;
+//       hand-over; a Chain copy's launch line (ADR 0067 d2) in § Begin 4 and § Hand over, never the alias itself, and §
+//       The task loop's commit in the copy, never in the primary;
 //   e7  the close order (leg.py close before create_thread → pushes → /thread:close with the hand-over between 7 and
 //       8 → handed → banner → ROLLOUT-STATUS), step 1's outcomes without a bare `complete` (it needs --reflection: §
 //       Complete step 4), the lock and exit 5's retry-once, no question tool;
@@ -180,6 +181,12 @@ function check(f, product = tree) {
   need('e6', 'legs.md § Hand over', ho, ['call `create_thread`', '`title`', '`prompt`', '`tldr`', '`cwd`', 'Pass no `brief`',
     'leave `report_back` at its default (on)', 'labelled `manual handoff`, and pushes it once', 'leg.py handed --started <id>',
     'leg.py handed --manual "<why>"'])
+  // ADR 0067 d2: a Chain copy's manual line never runs the alias (its `cd` opens the primary), and a task commits in its
+  // copy only.
+  const NEVER_ALIAS = 'never the alias itself, whose `cd` opens the primary'
+  need('e6', 'legs.md § Begin 4', proseUnits(sec(legs, 'Begin')).find((u) => u.startsWith('- **4.**')) ?? '', [NEVER_ALIAS])
+  need('e6', 'legs.md § Hand over', ho, [NEVER_ALIAS])
+  need('e6', 'legs.md § The task loop', loop, ['commit only there, never in the primary', '`--revert`, which reverts it there'])
   const rep = sec(legs, 'Report')
   need('e6', 'legs.md § Report', rep, ['it is never `running`', 'a `waiting` turn end takes `leg.py next --waiting "<reason>"`\'s',
     'Every Leg whose Close reads *closed* reports to the origin when it closes', 'A `halted` or `waiting` Leg never reports'])
@@ -342,6 +349,14 @@ test('control: a chain cause charging the failed task fails e5', () => {
 test('control: a hand-over with a brief fails e6', () => {
   only('legs', 'Pass no `brief`', 'Pass a `brief`', ['e6'], 'brief')
 })
+test('control: a Chain copy hand-over that runs the alias fails e6', () => {
+  const ho = sec(real.legs, 'Hand over')
+  const line = ho.split('\n').find((l) => l.startsWith('- **A manual hand-over**')) ?? ''
+  assert.ok(line.includes('never the alias itself'), 'control setup: § Hand over\'s manual hand-over bullet')
+  const r = check({ ...real, legs: real.legs.replace(line, line.replace(', never the alias itself, whose `cd` opens the primary', '')) })
+  assert.deepEqual(r.fails, ['e6'], r.details.join('\n'))
+})
+
 test('control: a status table row that drifts fails e6', () => {
   only('legs', '| stuck | `halted reason="awaiting you: <k> set aside"` | demand | allow |',
     '| stuck | `done` | *closed* | allow |', ['e6'], 'table')
