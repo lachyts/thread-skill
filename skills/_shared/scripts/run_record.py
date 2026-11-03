@@ -253,7 +253,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
                      quality, reviewChurn}, applied (a list of at most 8 {key, from, to, ranAt, rule, evidence,
                      agreeing, agreed?}); binding? (slot-bound | lane-bound | quota-bound | trickle-bound (p28-6) |
-                     dependency-bound | none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
+                     last-start-bound (p28-7) | dependency-bound | none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
                      that wrote it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
                      Reflection's line); auto? (true only: `tune.py --auto` or `--revert`, the weekly reading's own
                      landing); reflection? (the weekly reading's r- id, present exactly when auto is); reverts? (the
@@ -685,7 +685,8 @@ APPLIED_KEYS = ("key", "from", "to", "ranAt", "rule", "evidence", "agreeing")
 # p21-7: `agreed`, the weekly agreement (the Agreement rule), on every entry of a non-void auto landing only
 APPLIED_OPTIONAL = ("agreed",)
 MAX_APPLIED = 8
-BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "trickle-bound", "dependency-bound", "none-clear")
+BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "trickle-bound", "last-start-bound", "dependency-bound",
+            "none-clear")
 # a close line's `close` (p21-6): the close that wrote it, through close-score.py and tune.py --close
 CLOSES = ("completion", "supersede")
 

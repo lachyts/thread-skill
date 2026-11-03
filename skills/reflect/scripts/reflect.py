@@ -194,6 +194,11 @@ parallel with no note). For each:
   included), the session transcripts and reviews.jsonl with read-only git. Its flags (prefixed `attention: `) and
   cannotShow join span's; it writes nothing to stderr, and any fault is the flag `attention: read failed (...)` and a
   null block, never a stop. The Owner of each question is the reading's label, never span's.
+- nights (p28-7; execute away.md § The night record): score.py's night_record (its header's "The nights" is the one
+  copy of the rules) over every record read (records(), which keeps the night kinds) and the window: per night, keyed
+  by (host, morning), the starts the last starts held and the tasks that ran past the Morning, each ran-past split
+  fallback / underestimate / unchecked, the totals, and its `suggest` (a longer LAST_START_FALLBACK, a higher Trickle:
+  Lachy's to act on by hand, never a knob, never landed). Its flags, each prefixed `nights: `, join span's.
 - freshReview (ADR 0058 d5): one entry per landing. reviews.jsonl's review-round lines up to until, read through
   score.py's read_review_rounds, the one copy of run_record's reader rule (the latest line per (repo, doc), else per
   (repo, head, digest), so a doc's consumed line supersedes its pending one; its branch and reviewedAt come from the
@@ -247,7 +252,8 @@ unconfirmed, filed, recurring, reversal, rejected, precision}] (the window's pre
 (every open Watch:
 rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring, stale, new, declinedBefore, lastSeen),
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
-ledger (above), attention (above), cannotShow[], flags[]}. stderr gets one summary line.
+ledger (above), attention (above), nights{nights[], totals, flags, suggest} (above), cannotShow[], flags[]}. stderr gets
+one summary line.
 
 watch. One `watch` line per (Reflection, Watch), naming every rollout where the reading saw it. id is run_record's
 watch_id(rule, shape); the line stores the stripped rule and shape. A rollout must be one the span read (its
@@ -1933,11 +1939,14 @@ class Span:
                 decision = {"slug": p.stem, "scheduled": rec.scalar("scheduled") or None, "status": rec.status}
         grades = self.grades(records, since, until)
         attention = self.attention(ev, records, reflections, since, until, rid)
+        nights = SCORE.night_record(records, since, until)
+        for f in nights["flags"]:
+            self.flag(f)
         doc = {"reflection": rid, "since": fmt(since), "until": fmt(until), "previous": previous,
                "rollouts": entries, "freshReview": fresh, "freshReviewLevels": levels,
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
                "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
-               "attention": attention, "cannotShow": self.cannot, "flags": self.flags}
+               "attention": attention, "nights": nights, "cannotShow": self.cannot, "flags": self.flags}
         out = expand(self.a.out)
         try:
             with open(out, "w", encoding="utf-8") as f:
@@ -1946,10 +1955,10 @@ class Span:
             raise Stop("cannot write --out %s: %s" % (out, e), 1)
         n = {m: sum(1 for e in entries if e["mode"] == m) for m in ("read", "escapes-only", "repairs-only")}
         say("span %s %s .. %s: %d read, %d escapes-only, %d repairs-only, %d friction item(s), %d open Watch(es), "
-            "knobs %d land / %d revert / %d held, %d cannot-show -> %s" % (
+            "knobs %d land / %d revert / %d held, %d night(s), %d cannot-show -> %s" % (
                 rid, fmt(since), fmt(until), n["read"], n["escapes-only"], n["repairs-only"],
                 sum(len(e["friction"]) for e in entries), len(doc["watches"]), len(knobs["land"]),
-                len(knobs["revert"]), len(knobs["held"]), len(self.cannot), out))
+                len(knobs["revert"]), len(knobs["held"]), nights["totals"]["nights"], len(self.cannot), out))
         return 0
 
 

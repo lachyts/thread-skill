@@ -371,6 +371,35 @@ test('span: grades carries the Grade log joined to outcomes, readyHandsOff first
   assert.equal(entryOf(bare, 'demo').friction.find((x) => x.kind === 'ask').grade, null)
 })
 
+// p28-7: span's `nights` (score.py's night_record over every record): two nights, one with holds and ran-past lines and
+// one with only its marker, each ran-past line split fallback / underestimate / unchecked, across two records.
+test('span: nights counts each night\'s held starts and ran-past tasks, a fallback overrun told from an underestimate (p28-7)', (t) => {
+  const h = setup(t)
+  const M1 = W(5, '09:00')
+  const M2 = W(6, '09:00')
+  const ran = (ts, task, S, history, usual) => [ts, 'ran-past-morning', task,
+    { morning: M1, slotTakenAt: new Date(Date.parse(S)).toISOString(), scope: 'single-file', history, ...(usual ? { usualMinutes: usual } : {}) }]
+  emitAll(h, 'night-a', byTs([
+    [W(5, '05:00'), 'away-night', null, { morning: M1 }],
+    [W(5, '07:30'), 'last-start-held', 'c1', { morning: M1, scope: 'cross-cutting', history: 3, usualMinutes: 110 }],
+    [W(5, '07:30'), 'last-start-held', 'c2', { morning: M1, scope: 'read-only', history: 1 }],
+    ran(W(5, '09:20'), 'f1', W(5, '06:30'), 1),
+    ran(W(5, '09:21'), 'u1', W(5, '08:00'), 3, 25),
+    [W(6, '05:00'), 'away-night', null, { morning: M2 }],
+  ]))
+  emitAll(h, 'night-b', [[W(5, '07:00'), 'away-night', null, { morning: M1 }], ran(W(5, '09:22'), 'd1', W(5, '05:00'), 3, 25)])
+  const r = ok(h, ['span', '--tasks-dir', h.tasks, '--config', path.join(h.home, 'rollouts.toml'), '--out', path.join(h.out, 'span.json'),
+    '--since', SINCE, '--until', UNTIL])
+  assert.match(r.stderr, /, 2 night\(s\), /, 'the summary line counts the marked nights')
+  const n = JSON.parse(fs.readFileSync(path.join(h.out, 'span.json'), 'utf8')).nights
+  assert.deepEqual(n.nights.map((x) => [x.morning, x.marked, x.rollouts, x.held, x.heldBy, x.ranPast, x.ranPastBy]), [
+    [new Date(Date.parse(M1)).toISOString(), true, ['night-a', 'night-b'], 2, { fallback: 1, history: 1 }, 3, { fallback: 1, underestimate: 1, unchecked: 1 }],
+    [new Date(Date.parse(M2)).toISOString(), true, ['night-a'], 0, { fallback: 0, history: 0 }, 0, { fallback: 0, underestimate: 0, unchecked: 0 }]])
+  assert.deepEqual(n.nights[0].ranPastTasks.map((e) => [e.task, e.class]), [['f1', 'fallback'], ['u1', 'underestimate'], ['d1', 'unchecked']])
+  assert.deepEqual(n.totals, { nights: 2, zeroHold: 1, held: 2, ranPast: 3, fallback: 1, underestimate: 1, unchecked: 1 })
+  assert.deepEqual(n.suggest, [])
+})
+
 test('span: a missing note is scored by slug and flagged; without --fold the events and tasks dirs are unchanged', (t) => {
   const h = setup(t)
   emitAll(h, 'orphan', byTs(life('a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))

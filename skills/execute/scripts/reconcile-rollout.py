@@ -316,13 +316,16 @@ Subcommands:
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
               pause_requested, pausedFor, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline,
-              trickle, ladder, gitEnvHold, laneLog, mainRed, holdUntil, tasks}; `trickle` (p28-6) is `next`'s trickle block read the same
+              trickle, lastStarts, ladder, gitEnvHold, laneLog, mainRed, holdUntil, tasks}; `trickle` (p28-6) is `next`'s trickle block read the same
               way, silently (no WARN), plus `here` and `lease`: {away, file, why, limit, awayCap, until, morning,
               elsewhere, lapsed, here, running, lease}, `here` this rollout's own count as another lead's count
               elsewhere reads it (0 while its own lease reads lapsed), `running` elsewhere plus here and `lease` its
               own lead's lease, {state: fresh|lapsed|room-stop|none|unreadable, writtenAt, lapsesAt} (p28-4; Trickle
-              and Away, below); it writes no lease; `pausedFor` is the rollout's `paused_for` (`sign-off` under
-              await-sign-off's pause, ADR 0034), else null; `ceiling` is `parallel_ceiling`, or for a note without
+              and Away, below); it writes no lease; `lastStarts` (p28-7; The last starts and the night record,
+              below) is `next`'s {morning, kinds}, read as `next` reads it (M from the same Away state read, each
+              kind's history from the Run record's folded call journals, _past_runs, read lazily on the first row
+              checked) and silently: it writes nothing, so it records no night line; `pausedFor` is the rollout's
+              `paused_for` (`sign-off` under await-sign-off's pause, ADR 0034), else null; `ceiling` is `parallel_ceiling`, or for a note without
               it the operator's rollout settings (rollout-settings.py for the Project root: rollouts.toml, then
               built-in 4),
               and null with `ceilingError` the reason when it is invalid or cannot be resolved (`next`
@@ -337,7 +340,12 @@ Subcommands:
               rungs [], source ladder.py's default_path() and error its reason, and status still exits 0.
               Each task carries `rung` (its `rung:` stamp, or null) and `rungDrift`: the stamp when a
               readable ladder lacks it and the task is unlanded (queued, running, awaiting-integration,
-              integrating, set-aside), else "". A set-aside task whose note holds a `## Needs you`
+              integrating, set-aside), else "". Each task also carries `lastStart` (p28-7): on a queued row
+              whose dependencies are met (no `waitingOn`), the `last start: …` reason `next` would hold it on once
+              a Slot frees (_LastStarts.hold: its kind's usual length, or the fallback, past M), else null; null on
+              every row while the rollout is `paused` or carries `pause_requested`, while `mainRed` stands or a
+              `gitEnvHold` of scope `rollout` stands (those hold every row themselves in `next`), and while the
+              last starts do not apply. A set-aside task whose note holds a `## Needs you`
               question also carries `needsHuman` (p16-3, normalised); no other task carries the key. A task
               set aside at Integration whose latest run opens a named marker (p27-4, integration_block) also
               carries `integrationBlock`: `conflict` (an Integration conflict, `integration: conflict
@@ -1136,9 +1144,10 @@ way, every in_progress row of its own, live or stalled, so a new start fits only
 own in_progress + this call's starts < the cap; a restart waits on the ceiling alone (no state leaves two respawned
 leads each waiting on the other's stalled notes). `status` and every progress line count notes only. Nothing here
 writes the file; mark-started reads it too, for slot-taken's `cap` (Run record, above), `status` for its `trickle`
-block, and every progress line (_progress_for, `next`, `status`) for the ETA's width (p28-6, _eta_width: the chunks
-still ahead at min(ceiling, max(1, cap - the count elsewhere)), the Heat hold and the places kept aside); all of them
-read it silently, and only `next` prints the WARN.
+block and its last starts (p28-7: M for `lastStarts` and each queued row's `lastStart`, read as `next` reads it, never
+through `next`; The last starts, below), and every progress line (_progress_for, `next`, `status`) for the ETA's
+width (p28-6, _eta_width: the chunks still ahead at min(ceiling, max(1, cap - the count elsewhere)), the Heat hold
+and the places kept aside); all of them read it silently, and only `next` prints the WARN.
 
 Trickle claims (p28-3; the spec is skills/execute/away.md § The Trickle, *Trickle claims*): two leads' `next` calls
 would otherwise both see the room one place leaves between one lead's `next` and its § 4 stamp. So off --dry-run, once
@@ -1201,7 +1210,10 @@ greedy loop goes on; restarts, hand-backs and seeded revises are never held; the
 hold replaces it. Off --dry-run, _night_record writes the night record into the rollout's own Run record (NIGHT_KINDS),
 each line once, read from the record's Slot intervals (_record_night), never from notes. A Slot reconcile closed
 ends at its slot-freed's ts, its call's end (p29-12), so a call that ended before the Morning never reads as having
-run past it because the lead reconciled it after.
+run past it because the lead reconciled it after. `status` (p28-7) reads M and the history the same way
+(_morning_toward, _past_runs, through the same _LastStarts), silently and read-only: its `lastStarts` and each
+unblocked queued row's `lastStart` are what `next` would read, and it writes no night line, no record line and no
+note.
 
 Hold until (p30-3; _hold_until, read by `next`, `status` and `carry`; the grammar is skills/_shared/vault-grammar.md §
 Hold until): a hold is frontmatter, never a sentence. A top-level `hold_until: {pr: <owner/repo>#<N>, merged: true}`
@@ -6588,6 +6600,18 @@ def cmd_status(args) -> int:
                "lease": lease}
     timeline = _timeline(rows, counts, ceiling, now, _eta_width(ceiling, away, elsewhere))
     root = _project_root(rollout_note)   # a bare hold_until number reads against it (no gh: status is a pure read)
+    # The last starts (p28-7; execute away.md § The last starts), read as `next` reads them and silently: M from the
+    # Away state, and the kind's past runs (the Run record's folded call journals), read lazily on the first row
+    # checked. A queued row whose dependencies are met carries `lastStart`, the `last start:` reason `next` would hold
+    # it on once a Slot frees (a full ceiling or Away cap, or the Heat hold's slotLimit of 0, still names its own hold
+    # first in `next`), unless the rollout's own holds replace every row's (a pause, a pause request, main red, a
+    # whole-rollout git-env hold): then null, as on every other row.
+    last = _LastStarts(_morning_toward(away, now), away["morning"], now,
+                       lambda: _past_runs(_project(rollout_note), rollout_path, rollout_note, index, now))
+    git_env = _git_env_hold(rollout_note)
+    main_red = _main_red(rollout_note)
+    whole_held = bool(_scalar(rollout_note.get("paused")) or _truthy_flag(rollout_note.get("pause_requested"))
+                      or main_red or any(h["scope"] == "rollout" for h in git_env))
     # The operator's ladder (one local file read, no network): each task's `rung:` stamp, and its drift when a
     # readable ladder lacks it. Drift is scoped to the unlanded rows (CARRIED_STATES): a merged, folded or other
     # row keeps the rung it reached as a record, and an edit to the ladder since is no drift. A refused ladder
@@ -6618,12 +6642,16 @@ def cmd_status(args) -> int:
             "merged": r["merged"],
             "integrating": r["integrating"],
             "waitingOn": _unsatisfied(r, index) if r["state"] == "queued" else [],
+            "lastStart": None,
             "blockerSummary": _blocker_summary(r["note"]),
             "rung": _scalar(r["note"].get("rung")) or None,
             "rungDrift": rung_drift(r),
             # p30-3: the task's own hold_until as parsed, {pr, url, error}, whatever its state, or null (no gh call).
             "holdUntil": _hold_public(_hold_until(r["note"], root)),
         }
+        # p28-7: the last start `next` would hold an unblocked queued row on, else null (above).
+        if r["state"] == "queued" and not row["waitingOn"] and not whole_held:
+            row["lastStart"] = last.hold(r)
         # p16-3: the open question, only on a set-aside task whose note holds one (the key is absent otherwise).
         ask = needs_human(r["note"]) if r["state"] == "set-aside" else ""
         if ask:
@@ -6672,18 +6700,22 @@ def cmd_status(args) -> int:
         # and `lease`, its own lead's lease (p28-4): {away, file, why, limit, awayCap, until, morning, elsewhere,
         # lapsed, here, running, lease}. A pure read of away.json and the leases (sysctl only when one would lapse).
         "trickle": trickle,
+        # The last starts as `next` reads them (p28-7; execute away.md § The last starts): {morning, kinds}, M as ISO
+        # 8601 at the local offset (null when they do not apply) and each kind the rows' checks read. Status reads the
+        # Run record's folded call journals for the history, silently, and writes nothing.
+        "lastStarts": last.output(),
         # {source, rungs, error}: the ladder status read (built-in, or the file's path); error non-null when the
         # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start).
         "ladder": ladder,
         # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*), each with its `scope`: [] when
         # none. Vault-only, so status § 3's Git-env trip flag holds offline too.
-        "gitEnvHold": _git_env_hold(rollout_note),
+        "gitEnvHold": git_env,
         # The unacked Lane-log holds (_lane_log_hold; ADR 0048, execute § 4.5 *Lane hold*): [{slug, cause, stamp,
         # line}], [] when none. Vault-only, so status § 3's Lane hold flag holds offline too.
         "laneLog": _lane_log_hold(rollout_note),
         # The RACE reverts that did not land and that no `RACE decided:` line lifts (_main_red): main is red, so the
         # whole rollout is held (status § 3's Main red). Vault-only too.
-        "mainRed": _main_red(rollout_note),
+        "mainRed": main_red,
         # The rollout's own hold_until (p30-3; vault-grammar § Hold until) as parsed, {pr, url, error}, or null. Only
         # `next` reads its PR (gh) and clears it, so /thread:status reads the state live itself (status § 3).
         "holdUntil": _hold_public(_hold_until(rollout_note, root)),
