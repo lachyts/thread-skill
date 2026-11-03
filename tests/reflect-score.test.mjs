@@ -1819,6 +1819,43 @@ test('(k) review churn: the breach is decided from the integer sums, not the rou
   assert.deepEqual([over.value, over.breached], [0.4, true])
 })
 
+// A reading holds only its window's rows (CLAUDE.md's review rule): each source's sums read the rounds in [--since,
+// --until] alone; rounds per landed task is the one declared wider read, each landed task's rounds over its whole record.
+test('(l) review churn holds only rounds in the window: an engine round before --since and /fresh-review rounds reviewed before --since or after --until add nothing to the sums; rounds per landed task reads the task\'s whole record', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([...life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] }),
+    rv(at('00:10'), 't1', 1, 'changes', 4, 4, 0), // before --since: out of the sums
+    rv(at('00:30'), 't1', 2, 'changes', 2, 0, 2)]))
+  const c = (findings, original, regression) => ({ findings, original, regression })
+  emitAll(home, 'x', [
+    rr(at('00:05'), { repo: 'o/r', head: 'h1', digest: 'g1', doc: 'docs/reviews/before.md', reviewedAt: Z(at('00:01')), ...c(8, 8, 0) }), // reviewed and recorded before --since
+    rr(at('00:40'), { repo: 'o/r', head: 'h2', digest: 'g2', doc: 'docs/reviews/in.md', ...c(3, 2, 1) }),
+    rr(at('07:00'), { repo: 'o/r', head: 'h3', digest: 'g3', doc: 'docs/reviews/after.md', ...c(9, 0, 9) }), // after --until
+  ])
+  const out = scored(home, ['--since', at('00:20'), '--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.deepEqual(out.reviewChurn.engine, { rounds: 1, findings: 2, original: 0, regression: 2, unclassified: 0, landedTasks: 1, roundsPerLandedTask: 2 },
+    'the 00:10 round is out of the sums, in rounds per landed task')
+  assert.deepEqual(out.reviewChurn.freshReview, { rounds: 1, findings: 3, original: 2, regression: 1, unclassified: 0, unattributed: 0 })
+  assert.deepEqual([out.reviewChurn.rounds, out.reviewChurn.findings, out.reviewChurn.regression, out.reviewChurn.value], [2, 5, 3, 0.6])
+  assert.ok(!has(out.flags, /first recorded in this window/), 'the early round was recorded before the window too: no late round')
+})
+
+// Quality's landed set is the window's: an earlier landing and its fixer are an earlier window's, never this one's.
+test('Quality holds only tasks landed in the window: a task merged before --since is neither landed nor an Escape', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([...life('a', { from: at('00:00'), to: at('01:00'), c: 2, lane: [at('01:00'), at('01:10')] }),
+    ...life('b', { from: at('03:00'), to: at('04:00'), c: 2, lane: [at('04:00'), at('04:10')] })]))
+  const tasks = path.join(home, 'vault', 'Work', 'Tasks')
+  fs.mkdirSync(tasks, { recursive: true })
+  const note = (slug, fm) => fs.writeFileSync(path.join(tasks, `${slug}.md`), ['---', 'tags: [task]', ...fm, '---', '', `# ${slug}`, ''].join('\n'))
+  note('a', ['status: done']); note('b', ['status: done'])
+  note('fix-a', ['status: open', 'fixes: "[[a]]"']); note('fix-b', ['status: open', 'fixes: "[[b]]"'])
+  const out = scored(home, ['--since', at('02:00'), '--until', at('06:00'), '--repo-slug', 'o/r', '--tasks-dir', tasks])
+  assert.deepEqual(out.merges.tasks, ['b'])
+  assert.deepEqual([out.escapes.landed, out.escapes.count], [1, 1])
+  assert.deepEqual(out.escapes.tasks.map((x) => [x.task, x.evidence.map((e) => e.note)]), [['b', ['fix-b']]])
+})
+
 // ---- the weekly reading's reads (p21-7, ADR 0037 d5) ----------------------------------------------------------------
 // ranAt is each key's ran-at value, computed once; a spread is flagged only for a key a proposal uses. An auto line's
 // applied entries (with agreed) count like a pick's; a close line adds nothing. landed_from is the landed set's one rule.

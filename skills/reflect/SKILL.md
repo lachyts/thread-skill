@@ -360,6 +360,11 @@ while no rollout held it, each with its `heldBy`), `W2` (a rollout open 48 hours
 reading Sessions it left out: a Session that runs the reading's own scripts is never a touch); `watches`, each circling
 rule's Watch as step 13b would write it (`fresh`, and `held`, the items a closed cycle named); and `trend`.
 
+A flag starting `window: ` is the reading checking itself (`reflect.py`'s header, *The window check*): a reported
+block holds a row outside its window, so a reader read past it. It is a Thread Skill bug, never friction: read that
+block's numbers as unreliable this week. When the flag names `rollouts[<slug>]`, file it in step 13 with `bug` and
+`--rollout <slug>`; otherwise report it alone. Either way, report it first in step 17, quoting the flag.
+
 ### 10a. The Monthly audit
 
 Only when `span.json`'s `ledger.audit.due` is true: the first reading of each Melbourne month, whatever the cadence (a
@@ -422,8 +427,9 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   canary; `raise` is a round cap (weigh it beside score.py's own knob); `deferred` is repair § 5. A rollout with no
   line in the window still brings its in-window repair lines, read `repairs-only` (or with its Escapes,
   `escapes-only`).
-- An `escape` is traced to the review that should have caught it (execute § 5, ADR 0037 d7), and only when its
-  `inWindow` is true: an Escape counts in the week it surfaced, against the rollout that landed the work.
+- An `escape` is traced to the review that should have caught it (execute § 5, ADR 0037 d7): an Escape counts in the
+  week it surfaced, against the rollout that landed the work; one dated outside the window is a `cannotShow` line,
+  reported, never an item.
 - A `churn` item is a review round that only answered the last round's fix (execute § 5): trace what the fix broke.
 - A serial chain's (`shape: serial`) items come from its record's acts and its Leg log (`leg.py status`), read by the
   chain's rules (`skills/execute/legs.md`, ADR 0040), never as a queue's: it has no Slots, lane, retry, descope, churn
@@ -441,7 +447,7 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   happened (its `session` is the repair that marked it), not the hand-over; with `began` set the Leg did start, by a
   route that wrote no line. An `escape` is a fix task naming
   a chain task in `fixes:` (`skills/execute/legs.md` § Fix tasks), traced to the smoke Verify or review that should
-  have caught it, only when its `inWindow` is true.
+  have caught it.
 
 For each `set-aside` item whose `movedBy` is `unrecorded`, read what its `explainedIn` names: its `taskNote`'s
 `## Needs you` and `## Integration log`, a gate set-aside's `## Approved gates`, and the rollout note's `## Notes`
@@ -788,9 +794,13 @@ or `exists`). An item left open keeps the task open.
   as no landing, and only in the window its line falls in. A round reaches `reviews.jsonl` only when fresh-review or
   land.sh's own-branch `--queue` and `--hold` recorded it.
 - The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
-  `cannotShow`), and dates an undated fixer by its mtime.
+  `cannotShow`), and dates an undated fixer by its mtime. It reaches a task only once the task has landed, so a fixer
+  dated in a week before the one its task landed in is in no week's friction: `cannotShow` names it in the week the
+  task lands.
 - A serial chain's Escapes come from `fixes:` alone and are read only in a week span reads the chain (a line in its
-  Run record or its Leg log in the window): the Escapes sweep reads `merged` lines, which a chain never records.
+  Run record or its Leg log in the window): the Escapes sweep reads `merged` lines, which a chain never records; one
+  dated in a week span did not read the chain is in no week's friction, and only a later week that reads the chain
+  names it, in `cannotShow`.
 - An escapes-only rollout's breaches are not counted, nor a repairs-only one's: a Guardrail breach counts in the week
   its run ends.
 - A closed rollout with no close line (a dropped one, one archived unscored, or a close that was not scored) is read

@@ -443,7 +443,10 @@ function span(h, since, until) {
   const out = path.join(dir, 'span.json')
   // --now (tests only) is until itself: a reading of November runs on any day, never clamped to the clock
   ok(h, ['span', '--since', since, '--until', until, '--now', until, '--tasks-dir', h.tasks, '--config', path.join(h.home, 'rollouts.toml'), '--out', out])
-  return { out, s: JSON.parse(fs.readFileSync(out, 'utf8')), dir }
+  const s = JSON.parse(fs.readFileSync(out, 'utf8'))
+  // the window check (reflect.py's header): a `window: ` flag is a reader that read past its window, in any reading
+  assert.ok(!s.flags.some((f) => f.startsWith('window: ')), JSON.stringify(s.flags))
+  return { out, s, dir }
 }
 
 // An archived rollout on `day` with 2 h of nothing running and no marker between two Slots: stalls/unexplained tops it.

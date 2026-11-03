@@ -97,9 +97,12 @@ parallel with no note). For each:
             line after it: with began null, trace why the start never happened, not why the last Leg did not hand
             over; with began set the Leg did start, by a route that wrote no line.
   escape    each piece of serial-score.py's escapes block (`fixes:` only: a fix task that names a chain task, its
-            Leg-filed smoke fixes among them), dated as the sweep dates a fixer, with at and inWindow. The sweep below
-            never reaches a chain (its record has no `merged` lines), so a chain's Escapes are read only in a week
-            span reads it.
+            Leg-filed smoke fixes among them), dated as the sweep dates a fixer, with at and inWindow, listed only when
+            dated in the window. One dated outside it is named in cannotShow (`[[<slug>]]: <k> Escape(s) dated outside
+            the window, not in its friction: <task> <at or "no date">, ...`). The sweep below never reaches a chain (its
+            record has no `merged` lines), so a chain's Escapes are read only in a week span reads it. One dated in a
+            week span did not read the chain is in no week's friction: only a later reading of the chain names it, and
+            only in cannotShow.
   A chain has no retry, descope or churn of its own, and no breach (its score has no Guardrails).
 - breachCounts: true only for a read, non-partial rollout whose window.activeEnd falls in [since, until], so a
   Guardrail breach counts in the week its run ends. A partial rollout's breaches are reported, not counted.
@@ -138,7 +141,11 @@ parallel with no note). For each:
             `- repair:` line is flagged (on a read rollout only). auto-retry and descope lines are other items, and
             nothing outside `## Notes` is read. A line is date-only, so it is read by its date from the note of every
             record, read this week or not: a rollout with no line in the window that holds one is read light (below).
-  escape    the sweep's evidence (below) against this rollout's landed tasks, with at and inWindow.
+  escape    the sweep's evidence (below) against this rollout's landed tasks, with at and inWindow, listed only when
+            dated in the window; one dated outside it is named in cannotShow, as a chain's is. The sweep reads every
+            record every week, so an Escape is listed by the reading whose window holds its date, with one exception:
+            the sweep reaches a task only once it has landed, so a fixer dated in a week before the one its task landed
+            in is in no week's friction, and the reading of the week the task lands names it in cannotShow.
   churn     a review-verdict line in the window with regression > 0.
 - The Escapes sweep (ADR 0037 d4). Every record's `merged` lines, of any age, are folded per rollout by score.py's
   landed_from(), and each rollout maps to its repo through its note's Project root (the newest existing root per repo
@@ -254,6 +261,31 @@ rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring,
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
 ledger (above), attention (above), nights{nights[], totals, flags, suggest} (above), cannotShow[], flags[]}. stderr gets
 one summary line.
+
+The window check. A reading holds only its window's rows, and nothing downstream reads most of span.json's reported
+blocks, so span checks its own before it writes --out (window_flags(), pure): one flag per block holding k > 0 rows
+outside its window, `window: <block> holds <k> row(s) outside [<lo>, <hi>], the first at <stamp or null>: a reader read
+past its window`. A row's stamp is tested as in_window() tests evidence: a date-only one by date_in(), an instant parsed
+(so two forms of one instant agree), and a stamp that is no string, or does not parse, is outside. The blocks, in order:
+for each rollouts[] entry, `rollouts[<slug>].friction` (each item's at in [since, until], and an escape item needs
+inWindow true too), `rollouts[<slug>].laneTime` (each line's startedAt in [since, until]) and, when the rollout's
+score.json carries a window whose since and until parse, its score held to that window, never to span's since (a rollout
+is scored whole): `rollouts[<slug>].score.handsOff` (each act's at in [window.since, window.until]; on a serial chain
+[window.since, window.until + 60 s), serial-score.py's since <= act < done + 60 s, printed `[<since>, <until> + 60 s)`)
+and, on a serial chain, `rollouts[<slug>].score.merges` (each merge's at in [window.since, window.until]: a parallel
+score's merges.tasks carries task names alone); then `freshReview` (an entry is one row: its first and last both in
+[since, until], the one outside printed), `grades.episodes` (inWindow true, and its end.at, else end.date, in [since,
+until]), `attention.questions` (each item's at: attention.py's Question ledger windows by the call's stamp) and
+`nights.nights` (each morning). span calls score.py with no --since, so a score's window.since is the run start, and
+score.py's act rule (run start <= act <= merge) keeps every act inside it; were span ever to pass --since, an act from
+the run start would precede it by score.py's own rule, and this check would have to read the run start instead. Not
+checked, each for its reason: reviewChurn, freshReviewLevels and the ledger's weekly row (ledger.py's rows(): its hours,
+byCause, contributing rollouts' hours and events) report sums with no rows, so tests alone pin their windows
+(reflect-score's (l) and (e2), reflect-weekly's freshReviewLevels test, and reflect-ledger's L1 for the ledger, whose
+header clips every interval to [since, until]); a score's escapes block reads its evidence up to now by design
+(score.py's header); grades' window and all are sums; attention's trails, waits and circling and the ledger's Monthly
+audit declare wider units in their own docstrings; knobs, watches, bugsOpen and decisionTask are state at until;
+cannotShow and flags are no rows. A `window: ` flag is a Thread Skill bug, never friction (SKILL.md step 10).
 
 watch. One `watch` line per (Reflection, Watch), naming every rollout where the reading saw it. id is run_record's
 watch_id(rule, shape); the line stores the stripped rule and shape. A rollout must be one the span read (its
@@ -1207,7 +1239,7 @@ class Span:
         """A chain's own friction items, from leg.py status (`st`) and serial-score's escapes block (`sc`): each in-window
         `set aside` line (movedBy read from the record's acts and the Leg log's later claim), `halt cleared:` line (an
         ask), restart (serial-score's fold_restarts(): its `restart:` lines read as one), and each Escape the block's
-        `fixes:` evidence dates in or out of the window."""
+        `fixes:` evidence dates in the window (window_escapes(): one dated outside it is a cannotShow line)."""
         items = []
 
         def at_ms(stamp):
@@ -1258,6 +1290,7 @@ class Span:
         block = (sc or {}).get("escapes") if isinstance((sc or {}).get("escapes"), dict) else None
         if block:
             dates = self.dates(None, block)  # fixes: only (no repo), so no git is read
+            esc = []
             for tk in block.get("tasks") or []:
                 for ev in tk.get("evidence") or []:
                     day, undated = dates.get(self.ev_key(ev), (None, False))
@@ -1265,8 +1298,19 @@ class Span:
                             "at": day, "inWindow": self.in_window(day, since, until), "evidence": ev}
                     if undated:
                         item["undated"] = True
-                    items.append(item)
+                    esc.append(item)
+            items.extend(self.window_escapes(slug, esc))
         return items
+
+    def window_escapes(self, slug, items):
+        """A read rollout's escape items dated in the window (inWindow), the ones its friction lists; the rest, dated
+        outside it or undated, are named in one cannotShow line, in the items' order, never listed (the module
+        docstring's escape items: a reading holds only its window's rows)."""
+        rest = [x for x in items if not x["inWindow"]]
+        if rest:
+            self.cannot_show("[[%s]]: %d Escape(s) dated outside the window, not in its friction: %s"
+                             % (slug, len(rest), ", ".join("%s %s" % (x["task"], x["at"] or "no date") for x in rest)))
+        return [x for x in items if x["inWindow"]]
 
     @staticmethod
     def chain_moved_by(lines, moves, task, at, until):
@@ -1904,7 +1948,7 @@ class Span:
                 scores[slug] = sc
         swept = self.sweep(records, read, since, until)
         for slug in sorted(s for s in swept if s in read):
-            read[slug]["friction"].extend(swept[slug])
+            read[slug]["friction"].extend(self.window_escapes(slug, swept[slug]))
         # A rollout not read this week is read light for its in-window evidence, from every record: the Escapes the
         # sweep traced to it, and the dated repair: lines of its note's ## Notes (date-only, so read by date whatever
         # the record holds, or a line on until's date would be lost when the next window has no line of the rollout).
@@ -1947,6 +1991,8 @@ class Span:
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
                "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
                "attention": attention, "nights": nights, "cannotShow": self.cannot, "flags": self.flags}
+        for f in window_flags(doc, scores):  # the window check: doc["flags"] is self.flags, so each lands in span.json
+            self.flag(f)
         out = expand(self.a.out)
         try:
             with open(out, "w", encoding="utf-8") as f:
@@ -1960,6 +2006,89 @@ class Span:
                 sum(len(e["friction"]) for e in entries), len(doc["watches"]), len(knobs["land"]),
                 len(knobs["revert"]), len(knobs["held"]), nights["totals"]["nights"], len(self.cannot), out))
         return 0
+
+
+# ---- the window check --------------------------------------------------------------------------------------------
+
+def _row_in(stamp, lo, hi, open_hi=False):
+    """A reported row's window test (the module docstring's window check): a stamp that is no string is outside, never
+    parsed (run_record's _stamp reads None as now); a date-only one by date_in(), an instant parsed, so `...Z` and
+    `+10:00` forms of one instant agree; an unparseable one is outside. open_hi makes an instant's bound [lo, hi)."""
+    if not isinstance(stamp, str):
+        return False
+    if not open_hi:
+        return Span.in_window(stamp, lo, hi)
+    t = _ts({"ts": stamp})
+    return t is not None and lo <= t < hi
+
+
+def window_flags(doc, scores):
+    """The window check (the module docstring's "The window check"), pure: one `window: ` flag per reported block of
+    span.json's object `doc` that holds a row outside its window. `scores` is {rollout: its score.json object}, the
+    scores span read; a rollout's score is held to its own window, never to span's since (a rollout is scored whole)."""
+    out = []
+
+    def report(block, rows, lo, hi, close="]"):
+        bad = [stamp for ok, stamp in rows if not ok]
+        if bad:
+            first = bad[0] if isinstance(bad[0], str) else json.dumps(bad[0])
+            out.append("window: %s holds %d row(s) outside [%s, %s%s, the first at %s: a reader read past its window"
+                       % (block, len(bad), lo, hi, close, first))
+
+    def items(v):
+        return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+
+    def part(d, *keys):
+        for k in keys:
+            d = d.get(k) if isinstance(d, dict) else None
+        return d
+
+    ss, us = doc["since"], doc["until"]
+    S, U = SCORE.to_ms(ss), SCORE.to_ms(us)
+    for e in items(doc.get("rollouts")):
+        slug = e.get("rollout")
+        report("rollouts[%s].friction" % slug,
+               [(_row_in(x.get("at"), S, U) and (x.get("kind") != "escape" or x.get("inWindow") is True), x.get("at"))
+                for x in items(e.get("friction"))], ss, us)
+        lines = items(part(e, "laneTime", "lines"))
+        report("rollouts[%s].laneTime" % slug, [(_row_in(x.get("startedAt"), S, U), x.get("startedAt")) for x in lines],
+               ss, us)
+        sc = scores.get(slug)
+        w = part(sc, "window")
+        if not isinstance(w, dict) or not isinstance(w.get("since"), str) or not isinstance(w.get("until"), str):
+            continue  # no score read, or one with no window: nothing to hold it to
+        try:
+            lo, hi = SCORE.to_ms(w["since"]), SCORE.to_ms(w["until"])
+        except Exception:
+            continue
+        acts = [a for tk in items(part(sc, "handsOff", "tasks")) for a in items(tk.get("acts"))]
+        # serial-score.py's since <= act < done + 60 s (a done stamp floors to its minute)
+        if sc.get("shape") == "serial":
+            report("rollouts[%s].score.handsOff" % slug,
+                   [(_row_in(a.get("at"), lo, hi + MINUTE_MS, open_hi=True), a.get("at")) for a in acts],
+                   w["since"], "%s + 60 s" % w["until"], ")")
+            report("rollouts[%s].score.merges" % slug,
+                   [(_row_in(m.get("at"), lo, hi), m.get("at")) for m in items(part(sc, "merges", "tasks"))],
+                   w["since"], w["until"])
+        else:
+            report("rollouts[%s].score.handsOff" % slug, [(_row_in(a.get("at"), lo, hi), a.get("at")) for a in acts],
+                   w["since"], w["until"])
+    rows = []
+    for f in items(doc.get("freshReview")):
+        first, last = _row_in(f.get("first"), S, U), _row_in(f.get("last"), S, U)
+        rows.append((first and last, f.get("last") if first else f.get("first")))
+    report("freshReview", rows, ss, us)
+    rows = []
+    for ep in items(part(doc, "grades", "episodes")):
+        end = ep.get("end") if isinstance(ep.get("end"), dict) else {}
+        stamp = end.get("at") if end.get("at") is not None else end.get("date")
+        rows.append((ep.get("inWindow") is True and _row_in(stamp, S, U), stamp))
+    report("grades.episodes", rows, ss, us)
+    questions = items(part(doc, "attention", "questions", "items"))
+    report("attention.questions", [(_row_in(q.get("at"), S, U), q.get("at")) for q in questions], ss, us)
+    nights = items(part(doc, "nights", "nights"))
+    report("nights.nights", [(_row_in(n.get("morning"), S, U), n.get("morning")) for n in nights], ss, us)
+    return out
 
 
 # ---- the writers -------------------------------------------------------------------------------------------------
