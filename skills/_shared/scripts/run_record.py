@@ -131,14 +131,16 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   ready           T  pr? (url or number); stamp?; reconciledAt? (as slot-freed)
   set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
                      not checked as an enum; reconcile-rollout.py's table writes quota | call-failed |
-                     merge-task | declined | prepare | revise-stopped | transient | gate | needs-human |
-                     plan-rejected | review-rounds | approved-without-pr | integration-conflict |
+                     merge-task | merge-gate | declined | prepare | revise-stopped | transient | gate |
+                     needs-human | plan-rejected | review-rounds | approved-without-pr | integration-conflict |
                      integration-red | integration-set-aside | blocked, where needs-human, p16-3, is a stop on a
                      question for a person, never a plan or review round run out, and integration-conflict and
                      integration-red, p27-4, are an integrate set-aside opening the engine's named markers: an
                      Integration conflict, `integration: conflict unresolved in …`, and a verifier red at
-                     Integration, `integration: verifier red: …`); setAsideAt? (run | integration | gate); stamp?;
-                     reconciledAt? (as slot-freed)
+                     Integration, `integration: verifier red: …`, and merge-gate (ADR 0068) is a merge-task stop
+                     whose own cause (its last `ERROR:` line) is a red required check after the verifier passed,
+                     which reflect traces to schedule step 2.5 when the check runs a class the verifier never
+                     runs); setAsideAt? (run | integration | gate); stamp?; reconciledAt? (as slot-freed)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt | origin: mark-integrating's origin-lane refusal, ADR
                      0064, the lead yielding its lane to another rollout's Integration on the same origin); path?;

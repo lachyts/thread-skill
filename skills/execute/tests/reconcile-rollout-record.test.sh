@@ -377,6 +377,55 @@ ok "$(ic ic4 '[]' 'integration: set aside: verifier red: x')" '["set-aside","int
 ok "$(ic ic5 '[]' 'INTEGRATION: Conflict Unresolved in a.js')" '["set-aside","integrator",[],false] ["integrate","integration-conflict","integration"]' \
   "the first line is read lowercased"
 
+echo "== 12d. merge-task's red required check is named merge-gate when it is the stop's own cause (rollout mg)"
+# giflab ADR 0012 d4 (schedule step 2.5's merge gate, ADR 0068 d4): a lead `own` row whose reason starts `merge-task`
+# reads merge-gate when its last `ERROR:` line (an optional `merge-task:` prefix allowed) holds MERGE_GATE_MARK, or,
+# with no `ERROR:` line at all, when the mark is anywhere in it. merge-task.sh prints the mark before each infra rerun,
+# so a mark followed by `infra rerun n/m triggered` and then a different `ERROR:` line stays merge-task. Each case
+# repeats case 11's setup for its own task and PR (a lane holder, so reconcile emits the set-aside). Side rollout mg,
+# one lane holder at a time, so ro's legs and leg 24's checker over ro are untouched.
+mkro mg "parallel_ceiling: 2"
+mgc() {  # mgc <slug> <pr> <reason>: merge-task's exit 1 on a lane holder on mg; prints the kinds appended, then the
+         # set-aside's [stage, reasonClass, setAsideAt]
+  mkt "$1" mg review "pr: $PR/$2" "ready: 2026-10-05T09:00+00:00"
+  rrs mark-integrating --tasks "$1" --tasks-dir "$V" --now "$NOW" >/dev/null
+  rrs log-integration --tasks "$1" --started 2026-10-05T10:10+00:00 --anchor $A40 --head $B40 --base $C40 --tasks-dir "$V" --now "$NOW" >/dev/null
+  local m; m=$(cnt mg)
+  lead "$1" own "$3" >/dev/null
+  since mg "$m"
+  since mg "$m" '[d["stage"], d["reasonClass"], d["setAsideAt"]] if d["kind"] == "set-aside" else None' | sed 's/^null //'
+}
+MT="$HERE/../scripts/merge-task.sh"
+mgok() {  # mgok <slug> <pr> <reason> <class> <label>: the kinds first, so a missing event fails as no event
+  local out; out=$(mgc "$1" "$2" "$3")
+  ok "$(printf '%s\n' "$out" | sed -n 1p)" "lane-freed:$1 set-aside:$1" "$5: lane-freed, set-aside"
+  ok "$(printf '%s\n' "$out" | sed -n 2p)" "[\"integrate\",\"$4\",\"run\"]" "$5: integrate, $4, run"
+}
+MARK1=$'merge-task: ERROR: a REQUIRED check FAILED on PR #111 (Ralph passed locally, but remote CI is red):\nlint\tfail\t31s\thttps://github.com/o/r/actions/runs/1/job/2\n  Diagnose: gh pr checks 111 -R o/r — push a fix to the branch, re-integrate, then re-run merge-task.sh.'
+MARK2=$'merge-task: WARN: engine-snapshot.py guard-pr exited 3 (no snapshot): merging without the Engine snapshot guard\nERROR: a REQUIRED check FAILED on PR #112 (Ralph passed locally, but remote CI is red):\nlint\tfail\t31s\thttps://github.com/o/r/actions/runs/1/job/2'
+RERUN=$'  infra-classify: only setup/infra steps failed — transient flake. Re-running failed jobs:\n    - Set up job\n  infra rerun 1/2 triggered — re-watching required checks…'
+NEVER=$'merge-task: ERROR: a REQUIRED check FAILED on PR #113 (Ralph passed locally, but remote CI is red):\n'"$RERUN"$'\nERROR: required checks never appeared for PR #113 — no CI runs in flight on its head SHA, nothing is coming'
+AGAIN=$'merge-task: ERROR: a REQUIRED check FAILED on PR #114 (Ralph passed locally, but remote CI is red):\n'"$RERUN"$'\nERROR: a REQUIRED check FAILED on PR #114 (Ralph passed locally, but remote CI is red):\n  infra-classify: a genuine (non-infra) step failed — HALTING (fail-closed). Failed steps:\n  Diagnose: gh pr checks 114 -R o/r — push a fix to the branch, re-integrate, then re-run merge-task.sh.'
+GATE=$'merge-task: ERROR: a REQUIRED check FAILED on PR #117 (Ralph passed locally, but remote CI is red):\n'"$RERUN"$'\nERROR: PR #117 is BLOCKED but required checks are already green — a NON-check gate is'
+mgok mg1 110 'merge-task: PR is CLOSED' merge-task "control: CLOSED stays merge-task"
+mgok mg2 111 "$MARK1" merge-gate "a red required check on the first line"
+mgok mg3 112 "$MARK2" merge-gate "the mark on line 2, under a WARN first line"
+mgok mg4 113 "$NEVER" merge-task "the mark, an infra rerun, then checks that never appeared: the later ERROR wins"
+mgok mg5 114 "$AGAIN" merge-gate "the mark, a rerun, the mark again as the last ERROR line"
+mgok mg6 115 'merge-task: a REQUIRED check FAILED on PR #115' merge-gate "no ERROR: line, the mark anywhere"
+mgok mg7 116 'merge-task: ERROR: PR #116 has a MERGE CONFLICT with main (mergeStateStatus=DIRTY) on the integrated base — nothing was merged.' \
+  merge-task "a merge conflict stays merge-task"
+mgok mg8 117 "$GATE" merge-task "the mark, a rerun, then a non-check gate: the later ERROR wins"
+ok "$(python3 - "$SCRIPT" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.MERGE_GATE_MARK in m.MERGE_TASK_FIXABLE, m.MERGE_GATE_MARK)
+PY
+)" "True a REQUIRED check FAILED on PR" "MERGE_GATE_MARK is MERGE_TASK_FIXABLE's red-check text"
+for frag in "a REQUIRED check FAILED on PR" "triggered — re-watching required checks" "required checks never appeared for PR #" "a NON-check gate"; do
+  ok "$(grep -c -F -- "$frag" "$MT" | awk '{print ($1 > 0)}')" 1 "12d: \"$frag\" is merge-task.sh's text"
+done
+
 echo "== 13. a hand-back restart and a signed gate"
 rrs hand-back --tasks b --tasks-dir "$V" --now "$NOW" >/dev/null
 ok "$(fm b handed_back)" "handed_back: 2026-10-05T10:00+00:00" "hand-back stamps handed_back:"
@@ -985,6 +1034,7 @@ ok "$(check cr)" "pause open" "cr: the carried Slot is closed; only the supersed
 ok "$(check pz)" "paired" "pz: the hard pause freed h's Slot and i's lane"
 ok "$(check nh)" "paired" "nh: each question stop freed its Slot"
 ok "$(check ic)" "paired" "ic: each named Integration set-aside freed its lane"
+ok "$(check mg)" "paired" "mg: each merge-task set-aside freed its lane"
 
 echo
 [ "$fail" -eq 0 ] && echo "reconcile-rollout-record: all pass" || echo "reconcile-rollout-record: FAILURES"
