@@ -411,7 +411,10 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   gate), execute § 3.7 (gated inputs, ADR 0034), execute § 4.5 (the queue, ADR 0030) or execute § 6.5 (Needs
   you), and by its `movedBy` to what moved it on. `integration-conflict` traces to execute § 4.5 step 3
   (Integration's merge of the latest main, ADR 0030 decision 3), and `integration-red` to the integrate call's
-  verifier.
+  verifier. `merge-gate` (a red required check that stopped merge-task after the verifier passed, ADR 0068) traces to
+  schedule § 2.5 (its merge gate), a schedule-time miss, when the failed check runs a job class the rollout's
+  `verifier:` never runs; otherwise to drift between CI and the local run. A repeat on one repo is a rule-altitude
+  Watch (giflab ADR 0012's revisit trigger).
 - A `retry` is execute § 4.5's automatic retry (ADR 0033): trace why the first attempt failed a block an agent
   could fix.
 - A `descope` is repair § 2–§ 5's descope and its hand-back (ADR 0035): trace why the task's scope could not land
