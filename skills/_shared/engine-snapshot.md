@@ -156,3 +156,6 @@ change runs its own `mark-integrating`, which has no origin lane: it never check
 on its engine writes a lease and `lane-taken`, so while it integrates it reads as a holder to a newer rollout, which
 waits; it never waits for the newer one, so the two can integrate at once, and merge-task's base pin keeps every merge
 correct (exit 3 re-integrates the second). An engine older than leases leaves lease state `none` and never holds.
+The Trickle claims file's `woken` list (p28-9) widens it at `version: 1`, as `waiting` did: a snapshot from before p28-9
+ignores it and drops it on rewrite, which costs a waiting lead only its wake (it re-checks at its trickle wait's timeout
+or its tick).

@@ -635,7 +635,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Fair share** — the place a lead's `next` keeps free in the **Trickle** (or
   the **Away cap**) for the waiting rollout that holds fewest, then was served
   least recently, so a rollout that refills the moment its call returns never
-  keeps a waiting one out. _Avoid_: quota, per-rollout Trickle.
+  keeps a waiting one out. A waiting lead's trickle wait returns within a
+  20-second poll once another lead keeps it a place. _Avoid_: quota,
+  per-rollout Trickle.
 - **Last starts** — toward the Morning, a queued task starts only if its
   kind's usual length (the median of that kind's past runs in the project,
   its kind its note's `scope:`) ends it by the Morning's hour; with fewer than
