@@ -179,6 +179,83 @@ test('span: the default since is the last reflection line\'s until, else until -
   assert.equal(naive.status, 2, naive.stderr)
 })
 
+// ---- the Note overlaps (ADR 0067 d6): overlaps.jsonl, hooks/vault-note-overlap.py its one writer --------------------
+
+const overlapsFile = (h) => path.join(h.ev, 'overlaps.jsonl')
+// One note-overlap line: [ts, editing rollout, editing task, note, holder rollout, holder task]
+const overlap = ([ts, r, task, note, hr, ht]) => [ts, 'note-overlap', task, { note, holderRollout: hr, holderTask: ht, tool: 'Edit', via: 'agent' }, r]
+const DAYN = 'Days/2026/2026-09/2026-W36/2026-09-04 Fri.md'
+const OVERLAP_CANNOT = ["a script's or shell write, or a Codex Leg's, passes no hook: no Note overlap from it is seen",
+  "two tasks of one rollout in one note are not warned (another run is another rollout), nor is an edit by a session that is no run's task (an interactive session, a lead's own thread, a subagent a task agent spawns)"]
+
+test('span: noteOverlaps counts the window\'s warnings by (note, run pair), names the notes and rollouts, and is never a rollout', (t) => {
+  const h = setup(t)
+  emitAll(h, null, [
+    overlap([W(4, '01:00'), 'rb', 'b1', DAYN, 'ra', 'a1']),
+    overlap([W(4, '03:00'), 'rb', 'b1', DAYN, 'ra', 'a1']),
+    overlap([W(5, '02:00'), 'ra', 'a1', DAYN, 'rb', 'b1']),   // the same pair, the other way round: one overlap
+    overlap([W(6, '02:00'), 'rc', 'c1', 'Notes/Shared.md', 'ra', 'a2']),
+    overlap(['2026-09-01T00:00:00Z', 'rb', 'b1', 'Notes/Old.md', 'ra', 'a1']),   // before the window
+    overlap(['2026-09-12T00:00:00Z', 'rb', 'b1', 'Notes/Late.md', 'ra', 'a1']),  // after it
+  ])
+  assert.deepEqual(fs.readdirSync(h.ev), ['overlaps.jsonl'], 'the lines sit in the reserved file alone')
+  const s = span(h)
+  const o = s.noteOverlaps
+  assert.equal(o.warnings, 4)
+  assert.equal(o.none, false)
+  assert.deepEqual(o.overlaps.map((x) => [x.note, x.runs.map((r) => `${r.rollout}/${r.task}`), x.warnings, x.first, x.last]), [
+    [DAYN, ['ra/a1', 'rb/b1'], 3, '2026-09-04T01:00:00.000Z', '2026-09-05T02:00:00.000Z'],
+    ['Notes/Shared.md', ['ra/a2', 'rc/c1'], 1, '2026-09-06T02:00:00.000Z', '2026-09-06T02:00:00.000Z'],
+  ])
+  assert.deepEqual(o.notes, [DAYN, 'Notes/Shared.md'])
+  assert.deepEqual(o.rollouts, ['ra', 'rb', 'rc'])
+  assert.equal(o.previous, null, 'no reflection line yet')
+  assert.deepEqual(s.rollouts, [], 'a record of only overlap lines reads no rollout')
+  for (const c of OVERLAP_CANNOT) assert.ok(s.cannotShow.includes(c), `cannotShow: ${c}`)
+})
+
+test('span: an empty week\'s noteOverlaps is none; no overlaps.jsonl reads as 0; both cannot-show lines stand', (t) => {
+  const h = setup(t)
+  let s = span(h)
+  assert.deepEqual(s.noteOverlaps, { warnings: 0, overlaps: [], notes: [], rollouts: [], none: true, previous: null }, 'no file yet')
+  emitAll(h, null, [overlap(['2026-09-01T00:00:00Z', 'rb', 'b1', DAYN, 'ra', 'a1'])])
+  s = span(h)
+  assert.equal(s.noteOverlaps.warnings, 0)
+  assert.equal(s.noteOverlaps.none, true, 'a line outside the window leaves the week none')
+  for (const c of OVERLAP_CANNOT) assert.ok(s.cannotShow.includes(c), `cannotShow: ${c}`)
+  assert.ok(!s.flags.some((f) => f.startsWith('noteOverlaps')), JSON.stringify(s.flags))
+})
+
+test('span: an unreadable overlaps.jsonl makes noteOverlaps a null block and a flag, never none; a torn line is a flag', (t) => {
+  const h = setup(t)
+  fs.mkdirSync(overlapsFile(h))
+  let s = span(h)
+  assert.equal(s.noteOverlaps, null, 'unread, never none')
+  assert.ok(s.flags.some((f) => f.startsWith('noteOverlaps: overlaps.jsonl cannot be read (')), JSON.stringify(s.flags))
+  fs.rmdirSync(overlapsFile(h))
+  emitAll(h, null, [overlap([W(4, '01:00'), 'rb', 'b1', DAYN, 'ra', 'a1'])])
+  fs.appendFileSync(overlapsFile(h), '{"torn')
+  s = span(h)
+  assert.equal(s.noteOverlaps.warnings, 1)
+  assert.ok(s.flags.includes('noteOverlaps: overlaps.jsonl: 1 line(s) did not parse: skipped'), JSON.stringify(s.flags))
+})
+
+test('span: noteOverlaps.previous counts the last reflection line\'s window, so two weeks running can be named', (t) => {
+  const h = setup(t)
+  emitAll(h, null, [
+    overlap(['2026-08-28T00:00:00Z', 'rb', 'b1', DAYN, 'ra', 'a1']),
+    overlap(['2026-08-30T00:00:00Z', 'rb', 'b1', DAYN, 'ra', 'a1']),
+    overlap(['2026-08-20T00:00:00Z', 'rb', 'b1', DAYN, 'ra', 'a1']),   // before the previous window too
+    overlap([W(4, '01:00'), 'rc', 'c1', DAYN, 'ra', 'a1']),
+  ])
+  fs.writeFileSync(reflectionsFile(h), [
+    JSON.stringify({ v: 1, ts: '2026-08-27T00:00:00.000Z', kind: 'reflection', id: RID(1), since: '2026-08-20T12:00:00.000Z', until: '2026-08-27T00:00:00.000Z' }),
+    JSON.stringify({ v: 1, ts: '2026-09-03T00:00:00.000Z', kind: 'reflection', id: RID(2), since: '2026-08-27T00:00:00.000Z', until: '2026-09-02T14:00:00.000Z' }), ''].join('\n'))
+  const o = span(h).noteOverlaps
+  assert.deepEqual(o.previous, { since: '2026-08-27T00:00:00.000Z', until: '2026-09-02T14:00:00.000Z', warnings: 2 })
+  assert.equal(o.warnings, 1)
+})
+
 test('span: every friction kind, a Human fix as movedBy unrecorded with its taskNote, and null while still set aside', (t) => {
   const h = setup(t)
   const ev = [

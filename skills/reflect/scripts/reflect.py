@@ -236,6 +236,18 @@ parallel with no note). For each:
   from before the checker) and precision ((Σfindings - Σrejected) / Σfindings, to 2 places: the share of the findings
   the code did not disprove; null when Σfindings is 0). Sorted by mode, then effort, a null effort last. Reported,
   never traced.
+- noteOverlaps (ADR 0067 d6): the week's Note overlaps, from the `note-overlap` lines of run_record's reserved
+  overlaps.jsonl (hooks/vault-note-overlap.py its one writer) whose ts falls in [since, until]: warnings (the lines),
+  overlaps (one per (note, run pair): note, runs (the editing run and the holder, each {rollout, task}, sorted),
+  warnings, first and last, sorted by first then note), notes and rollouts (distinct, sorted), none (true exactly when
+  warnings is 0) and previous: {since, until, warnings} over the last `reflection` line's window, or null with none,
+  so the reading can name ADR 0067 d6's "overlaps in two weeks running" (two readings running at a fortnightly
+  cadence). No overlaps.jsonl reads as 0 and none true. An unreadable one is the flag `noteOverlaps: overlaps.jsonl
+  cannot be read (...)` and a null block, read as unread, never as none; a torn line is a flag and is skipped.
+  Reported, never traced: an overlap never changes `quiet`, a score or a knob, and the file is RESERVED, so no
+  rollout's entry reads it. cannotShow always names what the hook cannot see: a script's or shell write, or a Codex
+  Leg's; and two tasks of one rollout in one note (another run is another rollout), or an edit by a session that is no
+  run's task.
 span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), shape
 (parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
 reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[],
@@ -247,7 +259,9 @@ unconfirmed, filed, recurring, reversal, rejected, precision}] (the window's pre
 (every open Watch:
 rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring, stale, new, declinedBefore, lastSeen),
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
-ledger (above), attention (above), cannotShow[], flags[]}. stderr gets one summary line.
+ledger (above), attention (above), noteOverlaps{warnings, overlaps[{note, runs[{rollout, task}], warnings, first, last}],
+notes[], rollouts[], none, previous{since, until, warnings} | null} | null, cannotShow[], flags[]}. stderr gets one summary
+line.
 
 watch. One `watch` line per (Reflection, Watch), naming every rollout where the reading saw it. id is run_record's
 watch_id(rule, shape); the line stores the stripped rule and shape. A rollout must be one the span read (its
@@ -894,6 +908,60 @@ def _total(rows, k):
     """The sum of key k's known counts over rows, or None when no row carries one."""
     vs = _known(rows, k)
     return sum(vs) if vs else None
+
+
+# ---- the Note overlaps (ADR 0067 d6) -----------------------------------------------------------------------------
+
+OVERLAP_CANNOT = (
+    "a script's or shell write, or a Codex Leg's, passes no hook: no Note overlap from it is seen",
+    "two tasks of one rollout in one note are not warned (another run is another rollout), nor is an edit by a session "
+    "that is no run's task (an interactive session, a lead's own thread, a subagent a task agent spawns)",
+)
+
+
+def note_overlaps(ev, since, until, reflections):
+    """(block, flags): the week's Note overlaps from overlaps.jsonl (the docstring's noteOverlaps rule). The block is
+    None when the file cannot be read."""
+    path = os.path.join(ev, RR.NOTE_OVERLAPS + ".jsonl")
+    flags = []
+    try:
+        lines, skipped = SCORE.read_lines(path)
+    except FileNotFoundError:
+        lines, skipped = [], 0
+    except OSError as e:
+        return None, ["noteOverlaps: %s.jsonl cannot be read (%s): no Note overlap read" % (RR.NOTE_OVERLAPS, e)]
+    if skipped:
+        flags.append("noteOverlaps: %s.jsonl: %d line(s) did not parse: skipped" % (RR.NOTE_OVERLAPS, skipped))
+    mine = [(t, d) for t, _n, d in lines if d.get("kind") == "note-overlap"]
+
+    def run_of(rollout, task):
+        return {"rollout": rollout if isinstance(rollout, str) else None, "task": task if isinstance(task, str) else None}
+
+    groups = {}
+    for t, d in mine:
+        if not since <= t <= until:
+            continue
+        note = d.get("note") if isinstance(d.get("note"), str) else ""
+        runs = sorted([run_of(d.get("rollout"), d.get("task")), run_of(d.get("holderRollout"), d.get("holderTask"))],
+                      key=lambda r: (r["rollout"] or "", r["task"] or ""))
+        key = (note, tuple((r["rollout"], r["task"]) for r in runs))
+        g = groups.setdefault(key, {"note": note, "runs": runs, "warnings": 0, "first": t, "last": t})
+        g["warnings"] += 1
+        g["first"], g["last"] = min(g["first"], t), max(g["last"], t)
+    overlaps = [dict(g, first=fmt(g["first"]), last=fmt(g["last"]))
+                for g in sorted(groups.values(), key=lambda g: (g["first"], g["note"]))]
+    warnings = sum(g["warnings"] for g in overlaps)
+    previous = None
+    prev = [d for d in reflections if d.get("kind") == "reflection"]
+    if prev:
+        ps, pu = _ts({"ts": prev[-1].get("since")}), _ts({"ts": prev[-1].get("until")})
+        if ps is not None and pu is not None:
+            previous = {"since": fmt(ps), "until": fmt(pu), "warnings": sum(1 for t, _d in mine if ps <= t <= pu)}
+    block = {"warnings": warnings, "overlaps": overlaps,
+             "notes": sorted({g["note"] for g in overlaps}),
+             "rollouts": sorted({r["rollout"] for g in overlaps for r in g["runs"] if r["rollout"]}),
+             "none": warnings == 0, "previous": previous}
+    return block, flags
 
 
 # ---- span ------------------------------------------------------------------------------------------------------
@@ -1933,11 +2001,16 @@ class Span:
                 decision = {"slug": p.stem, "scheduled": rec.scalar("scheduled") or None, "status": rec.status}
         grades = self.grades(records, since, until)
         attention = self.attention(ev, records, reflections, since, until, rid)
+        overlaps, overlap_flags = note_overlaps(ev, since, until, reflections)
+        for f in overlap_flags:
+            self.flag(f)
+        for c in OVERLAP_CANNOT:
+            self.cannot_show(c)
         doc = {"reflection": rid, "since": fmt(since), "until": fmt(until), "previous": previous,
                "rollouts": entries, "freshReview": fresh, "freshReviewLevels": levels,
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
                "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
-               "attention": attention, "cannotShow": self.cannot, "flags": self.flags}
+               "attention": attention, "noteOverlaps": overlaps, "cannotShow": self.cannot, "flags": self.flags}
         out = expand(self.a.out)
         try:
             with open(out, "w", encoding="utf-8") as f:

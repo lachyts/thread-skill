@@ -274,8 +274,15 @@ const ATT_CANNOT = ['reads the question tool\'s questions alone', 'The Owner is 
   'A Session that runs the reading (its span verb, a verb on its span file, or a score) is never a touch',
   'A rollout note with no record is judged by its status now', 'A decided circling item never returns on its rule']
 const ATT_PARA = '**The attention ledger** (`span.json`\'s `attention`).'
+// The Note overlaps (ADR 0067 d6, w20): step 11 reads `noteOverlaps` as reported, never traced, names `none`, reads a null
+// block as unread and names the two-weeks-running trigger; step 17 reports it.
+const NOTE_S11 = ['**Note overlaps.** Read `span.json`\'s `noteOverlaps` (ADR 0067 d6) as reported, never traced',
+  'name `none` when the block reads `none` true', 'An overlap never changes `quiet`, a score or a knob',
+  'name it as ADR 0067 d6\'s trigger for vault copies (overlaps in two weeks running', 'A null `noteOverlaps` is unread (its flag says why), never `none`']
+const NOTE_S17 = 'the Note overlaps (`noteOverlaps`: the warnings, notes and runs, or `none`'
 
-// The weekly clauses that fail (w1..w19; w15 and w16 are p22-7's, w17 p25-4's, w18 p29-11's, w19 p30-7's), [] when all hold.
+// The weekly clauses that fail (w1..w20; w15 and w16 are p22-7's, w17 p25-4's, w18 p29-11's, w19 p30-7's, w20 ADR 0067 d6's),
+// [] when all hold.
 function weeklyFails(files) {
   const s = files.skill
   const out = []
@@ -339,6 +346,7 @@ function weeklyFails(files) {
     !ATT_S15.every((n) => s15.includes(n)) || !ATT_S16.every((n) => collapse(sectionOf(s, /^### 16\. /)).includes(n)) ||
     !ATT_CANNOT.every((n) => cannot.includes(n)) || !para || /\bloops?\b/i.test(para) || /\bloops?\b/i.test(s13b) ||
     attLines.length !== 1 || !attLines[0].startsWith(PY)) out.push('w19')
+  if (!NOTE_S11.every((n) => s11.includes(n)) || !collapse(sectionOf(s, /^### 17\. /)).includes(NOTE_S17)) out.push('w20')
   return out
 }
 
@@ -782,6 +790,25 @@ test('control: § Deciding the decision task without --declined, its cycle close
   weekly('skill', real.skill.replace(dec, dec.replaceAll('--declined', '--rejected')), 'w14')
   weekly('skill:cycle', swap('skill', 'closes the Watch\'s cycle', 'notes it'), 'w14')
   weekly('skill:done', swap('skill', 'only once every item it lists has had a\nyes or a no', 'when the reading ends'), 'w14')
+})
+
+test('step 11 reads the Note overlaps (ADR 0067 d6) as reported, never traced, a null block as unread; step 17 reports them (w20)', () => {
+  assert.deepEqual(weeklyFails(real).filter((c) => c === 'w20'), [])
+  const s11 = collapse(sectionOf(real.skill, /^### 11\. /))
+  const para = s11.slice(s11.indexOf('**Note overlaps.**'), s11.indexOf('**The attention ledger**'))
+  assert.ok(para.length > 0, 'step 11 has its Note overlaps paragraph before the attention ledger\'s')
+  assert.ok(!/\bloops?\b/i.test(para), 'the word loop stays out')
+})
+
+test('control: the Note overlaps paragraph gone, traced, reading a null block as none, or missing from step 17, fails weekly (w20)', () => {
+  const para = real.skill.slice(real.skill.indexOf('**Note overlaps.**'), real.skill.indexOf('**The attention ledger**'))
+  assert.ok(para.length > 0, 'control setup')
+  weekly('skill:gone', real.skill.replace(para, ''), 'w20')
+  weekly('skill:traced', cut('skill', 'as reported, never traced: each overlap is a vault', 'and trace each to its rule: each overlap is a vault'), 'w20')
+  weekly('skill:null', cut('skill', 'A null `noteOverlaps` is unread (its flag says why), never `none`.', 'A null `noteOverlaps` reads as `none`.'), 'w20')
+  weekly('skill:none', cut('skill', 'name `none` when the block reads `none` true', 'say nothing when it is empty'), 'w20')
+  weekly('skill:trigger', cut('skill', 'name it as ADR 0067 d6\'s trigger for vault copies', 'note it'), 'w20')
+  weekly('skill:s17', cut('skill', NOTE_S17, 'the overlaps'), 'w20')
 })
 
 // The /fresh-review landings (fresh-review ADR 0001, thread-skill ADR 0065): a checker gives every finding its verdict,

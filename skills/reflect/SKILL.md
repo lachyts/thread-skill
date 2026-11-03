@@ -520,6 +520,15 @@ time, never lane work, and belongs with the stalls by cause. A non-zero `wallOnl
 which can hold a stall (written before p29-13, or `active=-`: a resumed integrate call whose journal placed no live
 agent, say): say so beside the figure. Never read lane time off a `duration=` by hand.
 
+**Note overlaps.** Read `span.json`'s `noteOverlaps` (ADR 0067 d6) as reported, never traced: each overlap is a vault
+note that one run's task edited while a live task of another rollout had written it, which the plugin's PreToolUse hook
+(`hooks/vault-note-overlap.py`) let through with a warning to re-read it. Name the week's `warnings`, each overlap's
+`note` and its two `runs`, and the `rollouts`; name `none` when the block reads `none` true. An overlap never changes
+`quiet`, a score or a knob, and it is no sighting. When this window's `warnings` and its `previous` window's are both
+above 0, name it as ADR 0067 d6's trigger for vault copies (overlaps in two weeks running; at a fortnightly cadence, two
+readings running), and name any overlap whose note the week shows was left wrong, the other trigger, which the record
+cannot show. A null `noteOverlaps` is unread (its flag says why), never `none`.
+
 **The attention ledger** (`span.json`'s `attention`). Label each question's Owner by
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1 (with `~/.agents/knowledge/how-lachy-decides.md` when it is there)
 into `/tmp/thread-reflect-week-<YYYY-MM-DD>/owners.json`, `{"<id>": "<owner>"}`, the owner one of `yours`, `priorities`,
@@ -675,9 +684,10 @@ accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySi
 /fresh-review landing (`freshReview`: its repo and branch, rounds, findings and blocking per round, filed,
 unconfirmed, rejected, open at the end, reversals, regression, its size, its confirm rate, and what step 11 named, the
 confirm-rate risk included), the precision per level (`freshReviewLevels`), the late /fresh-review rounds' count, the
-Watches written (and any `extended` line), the bugs filed or found, the Time-lost ledger (its top class and hours, each
-class against last week, the trend, any Watch it opened, any ceiling raise it held), the Monthly audit's row when one
-ran (its hours found against the record's, the sources it could not read) and each gap it named, each knob landed,
+Note overlaps (`noteOverlaps`: the warnings, notes and runs, or `none`, ADR 0067 d6's trigger when step 11 named it, and
+unread when the block is null), the Watches written (and any `extended` line), the bugs filed or found, the Time-lost
+ledger (its top class and hours, each class against last week, the trend, any Watch it opened, any ceiling raise it
+held), the Monthly audit's row when one ran (its hours found against the record's, the sources it could not read) and each gap it named, each knob landed,
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or
 skipped behind a revert, the attention ledger (the questions put to Lachy, *yours* beside `unlabelled`, a lower bound
 while that is above 0, the recommended-pick rate and the hours questions held work; the trails, their rounds and the
