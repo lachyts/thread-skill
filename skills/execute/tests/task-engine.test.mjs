@@ -893,3 +893,94 @@ test('ADR 0038 C15: a judge that wrongly bounces the priced gate on both rounds:
   assert.ok(row.blockerDiagnosis.startsWith(GATE_DIAG + '- ' + G24 + '\n\n' + BOUNCED + ':'), row.blockerDiagnosis)
   assert.ok(row.blockerDiagnosis.includes(`never to the standing approval:\n  - ${G24}\nits round-2 feedback:\n  - fix plan-judge:proj-cap-g r2`), row.blockerDiagnosis)
 })
+
+// ---- The Security check (execute § 3 `security_checks`): E1-E6 ----------------------------------------------------
+// args.securityCheck set: the implementer's and reviser's prompts carry the scan, the review judge reads the agent's copy
+// of its brief and runs the same scan; the row keeps its 23 keys. A scan's question stops the task with no climb.
+const SECURITY = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
+const BRIEF = 'npm left-pad 1.3.0 (package.json)'
+
+test('E1: newDependencies reach the review judge with the scan command; the row is review with its 23 keys', async () => {
+  const task = mkTask('proj-fix-a')
+  const r = await run(mkArgs(task, { securityCheck: SECURITY }), { result: (l) => (l.startsWith('implement:') ? { newDependencies: [BRIEF] } : {}) })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  const impl = r.calls.find((c) => c.label.startsWith('implement:')).prompt
+  const judge = r.calls.find((c) => c.label.startsWith('review:')).prompt
+  const cmd = `python3 '${SECURITY.script}' scan --tree '/repo/.claude/worktrees/proj-fix-a' --base 'origin/main' --accepts-from '/vault/Tasks/proj-fix-a.md'`
+  assert.ok(impl.includes(cmd) && judge.includes(cmd), 'both render the scan')
+  assert.ok(judge.includes(`\n- ${BRIEF}\n`), 'the judge reads the agent\'s line')
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'review')
+  assert.deepEqual(Object.keys(row).sort(), [...ROW_KEYS].sort())
+})
+
+test('E2: an empty list beside a dependency the judge sees in the diff: (none reported), the cross-check, and its changes reach the reviser', async () => {
+  const task = mkTask('proj-fix-a')
+  const r = await run(mkArgs(task, { securityCheck: SECURITY }), {
+    result: () => ({ newDependencies: [] }),
+    review: (l) => (l.endsWith(' r1') ? 'changes' : 'approve'),
+    feedback: (l) => (l.endsWith(' r1') ? ['package.json:3 adds left-pad, which newDependencies leaves out'] : []),
+  })
+  assert.equal(r.error, undefined)
+  const judge = r.calls.find((c) => c.label === 'review:proj-fix-a r1').prompt
+  assert.ok(judge.includes('\n(none reported)\n'))
+  assert.ok(judge.includes('a dependency the diff adds or changes that the list leaves out, or an entry the diff does not add, is a reason for "changes"'))
+  const revise = r.calls.find((c) => c.label.startsWith('revise:')).prompt
+  assert.ok(revise.includes('- package.json:3 adds left-pad, which newDependencies leaves out'), 'the judge\'s changes are the reviser\'s work order')
+  assert.ok(revise.includes('Security check (execute § 3'), 'and the reviser scans again')
+})
+
+test("E3: the scan's question stops the implementer blocked with needsHuman: no climb, no retry", async () => {
+  const why = 'A secret (github-pat) in cfg.py, commit abc1234, line 1, is already on origin: once it is rotated, keep it in the history (answer `security-accept secret:0123456789ab`), or have /thread:repair recut the branch?'
+  const task = mkTask('proj-fix-a', { rung: 'opus-high' })
+  const r = await run(mkArgs(task, { securityCheck: SECURITY }), {
+    result: (l) => (l.startsWith('implement:') ? { verified: false, blocked: true, prUrl: '', blockerDiagnosis: why, needsHuman: why, newDependencies: [] } : {}),
+  })
+  assert.equal(r.error, undefined)
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'blocked')
+  assert.equal(row.needsHuman, why)
+  assert.deepEqual(row.climbs, [])
+  assert.deepEqual(row.ran.map((x) => x.label), ['implement:proj-fix-a'])
+})
+
+test("E4: mode 'integrate' with a securityCheck is refused before any dispatch", async () => {
+  const sha = (c) => c.repeat(40)
+  const args = mkArgs(mkTask('proj-fix-a'), {
+    mode: 'integrate', securityCheck: SECURITY,
+    integration: { prUrl: 'https://github.com/o/r/pull/7', branch: 'audit-fix/fix-a', worktreePath: '/repo/.claude/worktrees/proj-fix-a',
+      headSha: sha('a'), taskBase: sha('b'), mainSha: sha('c'), trouble: [], landed: [], reviewHistory: [], reviewRoundsUsed: 1,
+      rung: { startRung: '', rung: '', climbs: [] } },
+  })
+  const r = await run(args)
+  assert.match(String(r.error && r.error.message), /^thread:args-refused: args\.securityCheck: never on mode 'integrate'/)
+  assert.equal(r.calls.length, 0)
+})
+
+test('E5: a seeded revise with the key set: the reviser carries the fragment, the judge the scan', async () => {
+  const T = loadEngine(['shortAlias', 'worktreeDir'])
+  const slug = 'proj-fix-a'
+  const R = {
+    stage: 'revise', prUrl: 'https://github.com/o/r/pull/7', branch: `audit-fix/${T.shortAlias(slug)}`,
+    worktreePath: T.worktreeDir('/repo', slug), reviewHistory: [{ round: 1, feedback: ['keep their rename'], stage: 'integration' }],
+    reviewRoundsUsed: 1, plan: '',
+  }
+  const r = await run(mkArgs(mkTask(slug, { resume: R }), { securityCheck: SECURITY }), { result: () => ({ newDependencies: [BRIEF] }) })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.labels, [`revise:${slug} r2`, `review:${slug} r2`])
+  assert.ok(r.calls[0].prompt.includes('Security check (execute § 3') && r.calls[0].prompt.includes('COLD ENTRY'))
+  assert.ok(r.calls[1].prompt.includes('Then run the scan yourself') && r.calls[1].prompt.includes(`\n- ${BRIEF}\n`))
+  assert.ok(r.opts.find((o) => o.label.startsWith('revise:')).opts.schema.required.includes('newDependencies'))
+  assert.equal(r.result.tasks[0].status, 'review')
+})
+
+test("E6: a master default, a quoted repoPath and a quoted taskPath reach the rendered commands", async () => {
+  const task = mkTask('proj-fix-a', { taskPath: "/vault/Lachy's Tasks/proj-fix-a.md" })
+  const r = await run(mkArgs(task, { securityCheck: SECURITY, defaultBranch: 'master', repoPath: "/Users/x/it's a repo" }))
+  assert.equal(r.error, undefined)
+  const want = `--tree '/Users/x/it'\\''s a repo/.claude/worktrees/proj-fix-a' --base 'origin/master' --accepts-from '/vault/Lachy'\\''s Tasks/proj-fix-a.md'`
+  for (const label of ['implement:proj-fix-a', 'review:proj-fix-a r1']) {
+    assert.ok(r.calls.find((c) => c.label === label).prompt.includes(want), `${label} renders ${want}`)
+  }
+})

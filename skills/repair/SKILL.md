@@ -397,7 +397,11 @@ again, so the block that comes back after the hand-back, an identical one includ
 run, at Integration or at a gate:
 
 1. Ask the question verbatim, quoting the latest feedback (Owner *yours*, ADR 0033: the Framing of
-   `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` goes around the question, never into its words).
+   `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` goes around the question, never into its words). A security-check question
+   (one that names `security-accept <kind>:<key>` answers, execute § 3 `security_checks`) offers each answer it names as
+   its own option, each accept option's label holding its tokens verbatim (a question with several findings also names
+   one answer that keeps them all), so record-answer's `--answer`, verbatim, carries them: the scan honours an accept
+   only from an answer that repeats the token its own question named.
 2. Do step 2's prerequisites, where hand-back may run.
 3. Record it: `record-answer --kind needs-you`, its ask the question, verbatim. The verb removes the `## Needs you`
    section in the same save, in every mode. Execute's verdict reads a non-empty `## Needs you` as open (`answer the
