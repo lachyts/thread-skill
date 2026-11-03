@@ -612,6 +612,8 @@ mkser theirs.md "$OTHER" 'surfaces: ["ext:cms"]'
 chs --surface ext:CMS --project Demo
 ok "$out|$rc" "none|0" "S4: a serial check against another project's overlapping chain schedules it (ADR 0067 d4)"
 has "$err" "WARN: [[theirs]] (Other; never started) also predicts ext:cms, which this chain predicts as ext:CMS: they take turns on it, the first to begin going first (ADR 0067 d4)" "S4: … with the takes-turns WARN naming the pair"
+has "$err" "(ADR 0067 d4); until a chain lands each finished task (ADR 0067 d3), a chain in Chain copies that goes second begins without the other's work there" \
+   "S4: … and its interim: a copy chain that goes second begins without the other's work (until d3's land)"
 chs --surface ext:dns --project Demo
 ok "$out|$rc" "none|0" "S4: a disjoint chain prints none"
 hasnt "$err" "also predicts" "S4: … with no WARN"

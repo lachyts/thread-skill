@@ -163,9 +163,10 @@ chains.py's chain `checkouts`, as repeatable `--checkout`): no `file`, `supersed
 --regenerate, `WARN: a serial run supersedes nothing (ADR 0040, p24-2): --regenerate ignored`. A live serial note is
 never a hit (ADR 0067 d4: predicted claims order and wait, they never refuse a schedule); for each one (any project),
 the first that applies: a --surface token overlapping its hold (above) WARNs `WARN: [[s]] (<label>; <state>) also
-predicts <b>, which this chain predicts as <a>: they take turns on it, the first to begin going first (ADR 0067 d4)`;
-one overlapping only what a stuck one released WARNs as 2b does; else, when it works in place (no `chain_copies:`:
-the chain scheduled now always gets its Chain copies at S5), turn(--surface) and --checkout meeting its U (a stuck
+predicts <b>, which this chain predicts as <a>: they take turns on it, the first to begin going first (ADR 0067 d4);
+<TURN_INTERIM>` (until d3's land, a copy chain that goes second begins without the other's work); one overlapping only
+what a stuck one released WARNs as 2b does; else, when it works in place (no `chain_copies:`: the chain scheduled now
+always gets its Chain copies at S5), turn(--surface) and --checkout meeting its U (a stuck
 chain's is empty) WARN `WARN: [[s]] (<label>; <state>) works <checkout> in place too, with no Chain copy: the two work
 it a chain at a time: the one that comes first (the first to begin, else by slug) lands every unlanded row it has there
 before the other begins a Leg in it`, as contend's checkout half makes them at Leg begin. Hits are every parallel candidate (root-level, unfinished, not complete, any project) whose
@@ -195,7 +196,9 @@ ws(R) meets what that Leg writes (its write set and the next one's): `… with i
 as `<a>` (ADR 0060): …`; (T) R itself has an open Leg (a take-over): only (M) applies; (O) H sorts before R and
 contend(R, H): `[[H]] (…) holds `<b>` for an unlanded row and began first, which this chain writes as `<a>` (ADR 0067
 d4): …`, `comes first by slug (neither has begun)` or `(both began at the same stamp)` in place of `began first` when
-slug order breaks a tie, `<b>` `repo:<top>` for a checkout-level hit; (Y) ADR 0060's yield, smoke(R) meets own(H):
+slug order breaks a tie, `<b>` `repo:<top>` for a checkout-level hit (H's row is own(H) only until it is done: until
+ADR 0067 d3's land, a done row of a chain in Chain copies is still on its `chain/<H>` branch, so R begins without it, as
+the takes-turns WARN's TURN_INTERIM says); (Y) ADR 0060's yield, smoke(R) meets own(H):
 toward an H that sorts first always, toward a later H only when H is free (it waits on no chain, R included, by (M),
 (O), a (Y) toward an earlier chain or an unreadable note): today's line, `… holds `<token>` for an unlanded row, which
 this chain writes as `<token>` (ADR 0060): …`. An unreadable H holds its whole claim against ws(R) and T(R), whatever
@@ -1086,6 +1089,12 @@ def cmd_check(args, rr) -> int:
     return finish(warns, f"refuse {slugs_of(u)}", 3, lines)
 
 
+# The takes-turns WARN's tail: until ADR 0067 d3's land, a copy chain's finished row waits on chain/<slug> for its
+# Complete's merge, so (O)'s file turn frees the chain that goes second before that work is on the primary's default
+# branch.
+TURN_INTERIM = ("until a chain lands each finished task (ADR 0067 d3), a chain in Chain copies that goes second begins "
+                "without the other's work there")
+
 # The works-too WARN, `works <checkout> in place too, with no Chain copy: ` and this tail (ADR 0067 d4, for a chain that
 # works the checkout in place): contend's checkout half (serial_waits) serialises chains, not Legs.
 ONE_AT_A_TIME = ("the two work it a chain at a time: the one that comes first (the first to begin, else by slug) lands "
@@ -1114,7 +1123,7 @@ def check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned)
             a, b = pairs[0]
             warns.append(f"WARN: [[{s['slug']}]] ({s['label']}; {s['state']}) also predicts {SC.fmt_token(b)}, which "
                          f"this chain predicts as {SC.fmt_token(a)}: they take turns on it, the first to begin going "
-                         "first (ADR 0067 d4)")
+                         f"first (ADR 0067 d4); {TURN_INTERIM}")
             continue
         freed = SC.overlap_pairs(surfaces, s["released"], top)
         if freed:

@@ -990,7 +990,10 @@ one `--surface` per token of the chain's `surfaces` and one `--checkout` per ent
 from S2's JSON (and `--regenerate` when this run has it, which only WARNs: a serial run supersedes nothing).
 Every chain is checked, even after one is refused. A live serial chain never refuses one (ADR 0067 d4): a predicted
 overlap with what it holds prints `WARN: [[<s>]] … also predicts <b>, which this chain predicts as <a>: they take
-turns on it, the first to begin going first`, and a chain working one of this chain's checkouts in place (a note with
+turns on it, the first to begin going first (ADR 0067 d4); until a chain lands each finished task (ADR 0067 d3), a chain
+in Chain copies that goes second begins without the other's work there` (the interim: the first chain's finished rows
+wait on its `chain/<slug>` branch for its Complete's merge, so the second works the file as the primary's default branch
+has it, and the two meet at that merge), and a chain working one of this chain's checkouts in place (a note with
 no `chain_copies:`; a stuck one works none) prints `WARN: [[<s>]] … works <checkout> in place too, with no Chain copy:
 the two work it a chain at a time: the one that comes first (the first to begin, else by slug) lands every unlanded row
 it has there before the other begins a Leg in it`, while a chain in its own Chain copies shares no index or HEAD and

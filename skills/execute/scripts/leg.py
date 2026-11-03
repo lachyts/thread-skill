@@ -29,7 +29,8 @@ usable snapshot than this plugin root, or a live note whose snapshot is unusable
 stdout empty, nothing written: re-run from the root it names; an archived note whose snapshot is gone passes, so
 file-followup after Complete still runs) · 3 a stand (an unclosed Leg of another session, a standing halt,
 a surface another rollout holds (begin's surface re-check, ADR 0060), a revert that would conflict or a dirty path to
-revert; nothing written) · 4 wrong launch (nothing written) · 5 the
+revert; nothing written) · 4 wrong launch (nothing written to the Leg log: in a chain with `chain_copies:` begin may
+first remake a missing copy and stamp a newly needed pair) · 5 the
 rollout's lock was held past its timeout (nothing written). A refusal's JSON carries `exit`, `error` and, from
 begin, the `status_line` its turn ends on. Every git call runs with git's repo-local env vars removed (`git rev-parse
 --local-env-vars`), so an exported GIT_DIR never redirects it.
@@ -46,10 +47,11 @@ for a second checkout of one name), where `<copy dir>` is $THREAD_CHAIN_COPY_DIR
 ${XDG_STATE_HOME:-~/.local/state}/thread/chains, never at or under ~/repos or ~/Projects (exit 1). Queue folders, the Leg
 log's folders and every token stay primary paths; each Leg-facing folder (begin's launch check, the hand-over, the
 restart, the manual lines) maps into the copy (serial-chains.py's copy_folder), and a Leg's launch line there is
-`cd <copy folder> && <the generated alias's command after its own cd>` (the alias's `cd` opens the primary; read from
-$THREAD_LAUNCH_ALIASES, else ~/repos/workspaces/_shared/generated/launch-aliases.zsh), else prose that says never to run
-the alias itself. A note with no `chain_copies:` key works every checkout in place, exactly as before; a malformed key is
-exit 1 (`chain_copies: <why>: fix the note`) for begin, claim and copies.
+`cd <copy folder> && <the generated alias's command after its own cd>` (the alias's `cd` opens the primary; its whole
+command when it has no `cd`; read from $THREAD_LAUNCH_ALIASES, else
+~/repos/workspaces/_shared/generated/launch-aliases.zsh), else prose that says never to run the alias itself. A note with
+no `chain_copies:` key works every checkout in place, exactly as before; a malformed key is exit 1 (`chain_copies: <why>:
+fix the note`) for begin, claim and copies.
 
 Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-followup, close, handed, clear-halt,
 restarted, copies):
@@ -108,7 +110,10 @@ restarted, copies):
       never leaves a code row unstamped (an inherited claim keeps its stamp). In a chain with `chain_copies:` each
       entry is the checkout's copy at its HEAD, and `leg_primary_base: ["<checkout>@<sha40>", …]` (the primaries' HEADs)
       follows it, printed too; a checkout with no pair is exit 1 naming `leg.py copies`, and a pair whose copy is
-      missing exit 1 naming begin. Logs `claimed` or `took`.
+      missing exit 1 naming begin. A fresh claim there also refuses (exit 1, `unlandedDeps` [{task, dep, rollout, sha,
+      copy, why}]) a row with a dependency another rollout's chain finished whose `leg_head` commit in this repository
+      the copy's HEAD lacks (unlanded_deps: `done on chain/<X>, not yet on <d>: its land follow-on merges it`, until
+      ADR 0067 d3's land; legs.md § The task loop sets the row aside). Logs `claimed` or `took`.
       Each --gate is compared with the note's `## Approved gates` (reconcile-rollout.py's _norm_gate): the
       unapproved ones are printed for `set-aside --kind gate`. An exact `None` (execute § 3.7's grammar, bullet,
       case and one trailing `.` aside, as the engine's parseGatedInputs reads it) is no gate, never unapproved.
@@ -189,9 +194,12 @@ restarted, copies):
       timeout it files the follow-on with every chain commit there and the act prefixed `check the landing route
       (<reason>), then`. A chain checkout that is a Chain copy reads its primary's route instead (the copy's own branch
       reads not landed), its commits those not on the primary's local default branch d plus, when landable, those
-      `origin/<d>` lacks; any such commit files the follow-on whatever the route, its act first `merge chain/<rollout>
-      into <d> there`, last the copy's `worktree remove` and the branch's `branch -d`, and its Chain commits line reads
-      `<copy> (chain/<rollout> of <primary>): <k> not on <d> → [[f]]` or `all on <d>[ and origin/<d>]`. Then
+      `origin/<d>` lacks, and on `stuck` every chain commit there, as in place (a hand merge into d included: that route
+      cannot say what origin has); any such commit files the follow-on whatever the route, its act first `merge
+      chain/<rollout> into <d> there` (`chain/<rollout> is already on <d>` when none is off it), last the copy's
+      `worktree remove` and the branch's `branch -d`, and its Chain commits line reads `<copy> (chain/<rollout> of
+      <primary>): <k> not on <d>[; stuck: <reason>] → [[f]]`, `all on <d>; stuck: <reason> → [[f]]`, `all on <d>, <k> not
+      on origin/<d> → [[f]]` or `all on <d>[ and origin/<d>]`. Then
       `status: done`, `completed:`, a `## Completion log` (a line per Leg: launch, begun–closed,
       done and set aside; the decided completion verify's `Completion verify: …` summary when the note declares
       `completion_verifier:`; each --log-line; `Post-rollout items:` with each disposition; a `Chain commits:` line per
@@ -1054,20 +1062,22 @@ def launch_harness(alias):
 
 def alias_tail(alias):
     """The command a generated launch alias runs after its own `cd` (`alias <a>='cd <dir> && <tail>'` in
-    $THREAD_LAUNCH_ALIASES, else DEFAULT_ALIASES), or None when that file or line cannot be read."""
+    $THREAD_LAUNCH_ALIASES, else DEFAULT_ALIASES), its whole command when it has no `cd` (`alias <a>='<cmd>'`, as
+    `cc-steph`), or None when that file or line cannot be read."""
     path = os.environ.get("THREAD_LAUNCH_ALIASES") or DEFAULT_ALIASES
     try:
         text = Path(os.path.expanduser(path)).read_text()
     except (OSError, UnicodeDecodeError):
         return None
-    m = re.search(rf"^alias {re.escape(alias)}='cd \S+ && (.*)'$", text, re.M)
-    return m.group(1) if m else None
+    m = re.search(rf"^alias {re.escape(alias)}='(?:cd \S+ && )?(.*)'$", text, re.M)
+    return m.group(1) if m and m.group(1) else None
 
 
 def launch_line(alias, folder, copy=None):
     """A row's launch line: `<alias> from <folder>` in place. In a Chain copy (copy: the folder inside it) the alias's
-    own `cd` opens the primary, so the line is paste-ready `cd <copy> && <the alias's command after its cd>` (`claude`
-    and `codex` themselves), or, when that command cannot be read, prose that says never to run the alias itself.
+    own `cd` opens the primary, so the line is paste-ready `cd <copy> && <the alias's command after its cd>` (its whole
+    command when it has no `cd`; `claude` and `codex` themselves), or, when that command cannot be read, prose that says
+    never to run the alias itself.
     Uses no serial-chains.py: estate-dispatch.py loads this file without it."""
     if copy is None:
         return f"{alias} from {folder}"
@@ -1480,7 +1490,8 @@ def _begin_locked(ctx, a, chain, cwd):
         where = (sc.copy_folder(row.folder, pairs) if pairs and row.folder else None) or row.folder
         if _fold(where or "") != cwd.casefold() or need != ctx.harness:
             why = (f"wrong launch: [[{row.slug}]] runs as `{row.alias}` from `{where}` ({need}); this session is "
-                   f"{ctx.harness} in {cwd}; nothing written, so start Leg {n} there with the prompt below")
+                   f"{ctx.harness} in {cwd}; nothing written to the Leg log, so start Leg {n} there with the prompt "
+                   "below")
             raise Refuse(4, why, launch=chain_launch(pairs, row.alias, row.folder), prompt=leg_prompt(ctx, n),
                          reason=f"wrong launch: run Leg {n} as {row.alias} from {where}")
         alias, folder = row.alias, row.folder
@@ -1579,6 +1590,42 @@ def stamp_bases(ctx, chain, row):
     return tops_at(copies), tops_at(tops)
 
 
+def unlanded_deps(ctx, chain, row, pairs, bases):
+    """A Chain copy's claim (ADR 0067 d2): each dependency of row (depends-on/blocked-by, through `merged_into:`
+    tombstones) that another rollout's chain finished, with a `leg_head` commit in this repository (its object is in the
+    copy's) that the copy's HEAD lacks. Until ADR 0067 d3's land, a copy chain's done task waits on `chain/<X>` for
+    Complete's merge, so `done` frees its dependant before its work is on the primary's default branch, and a copy cut
+    from (or fast-forwarded to) that branch works without it. [{task, dep, rollout, sha, copy, why}], why the cause:
+    `done on chain/<X>, not yet on <d>: its land follow-on merges it` (the commit is on that branch here); `on <d>, not
+    yet in <copy>: merge <d> into chain/<rollout> there`; else `done in <its top> (<sha12>), not in <copy>`."""
+    copies = [b.rpartition("@")[0] for b in bases]
+    out = []
+    for dep in rr._dep_entries(row.note):
+        _unit, entry, _folded = rr._fold_unit(dep, chain.index)
+        if entry is None or rr._status(entry[1]) != "done":
+            continue
+        other = rr._wikilink_slug(rr._scalar(entry[1].get("rollout"))) or ""
+        if not other or other.lower() == ctx.slug.lower():
+            continue
+        for top, sha in rr._leg_tops(entry[1], "leg_head"):
+            for C in copies:
+                if git(C, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0 or is_ancestor(C, sha, "HEAD"):
+                    continue   # another repository's commit, or one this copy holds
+                hit = _pair(pairs, C, side=1)
+                P = hit[0] if hit else C
+                d = default_branch(P)
+                dn = d or "its default branch"
+                theirs = f"refs/heads/chain/{other}"
+                if d and is_ancestor(P, sha, f"refs/heads/{d}"):
+                    why = f"on {dn}, not yet in {C}: merge {dn} into chain/{ctx.slug} there"
+                elif git(P, "rev-parse", "-q", "--verify", theirs).returncode == 0 and is_ancestor(P, sha, theirs):
+                    why = f"done on chain/{other}, not yet on {dn}: its land follow-on merges it"
+                else:
+                    why = f"done in {top} ({sha[:12]}), not in {C}"
+                out.append({"task": row.slug, "dep": dep, "rollout": other, "sha": sha, "copy": C, "why": why})
+    return out
+
+
 def tops_at(tops):
     """`<top>@<HEAD sha40>` for each top whose HEAD resolves, in order, each once."""
     out = []
@@ -1637,6 +1684,12 @@ def cmd_claim(ctx, a):
         bases = pbases = None
         if not a.inherit:
             bases, pbases = stamp_bases(ctx, chain, row)
+            gaps = unlanded_deps(ctx, chain, row, chain_pairs(chain), bases) if pbases is not None else []
+            if gaps:
+                g = gaps[0]
+                raise Refuse(1, f"[[{row.slug}]] depends on [[{g['dep']}]] ({g['why']}): set it aside (`leg.py set-aside "
+                                f"--task {row.slug} --reason \"<this error>\"`) until that work is in {g['copy']}; "
+                                "nothing written", unlandedDeps=gaps)
             note.set("leg_base", "[" + ", ".join(f'"{b}"' for b in bases) + "]", after=("started", "leg"))
             if pbases is not None:
                 # A Chain copy's claim: the primaries' HEADs too, so done finds a commit that went there instead.
@@ -2314,8 +2367,8 @@ def chain_commits(chain, top):
 def land_plan(chain):
     """Per chain checkout: (top, kind, detail, commits needing action, copy). Read-only. In place copy is None. A top
     that is a Chain copy reads its primary's route (the copy's own reads `not landed: on chain/<slug>`): its commits
-    are those not on the primary's default branch d, plus, when landable, those origin/<d> lacks; copy is {checkout,
-    branch, default, offDefault}."""
+    are those not on the primary's default branch d, plus, when landable, those origin/<d> lacks, and every one on a
+    stuck route (which cannot say what origin has); copy is {checkout, branch, default, offDefault}."""
     plans = []
     pairs = copies_read(chain)[0]
     for top in chain.chain_tops():
@@ -2331,7 +2384,8 @@ def land_plan(chain):
                 ref = f"refs/remotes/origin/{detail}"
                 has_ref = git(P, "rev-parse", "-q", "--verify", ref).returncode == 0
                 gone = [c for c in commits if not (has_ref and is_ancestor(P, c[0], ref))]
-            need = [c for c in commits if c in off or c in gone]
+            # A stuck route cannot say whether origin has them, so every chain commit needs action, as in place.
+            need = list(commits) if kind == "stuck" else [c for c in commits if c in off or c in gone]
             plans.append((top, kind, detail, need, {"checkout": P, "branch": f"chain/{chain.ctx.slug}", "default": d,
                                                     "offDefault": off}))
             continue
@@ -2495,8 +2549,9 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
                 dn = f"`{d}`" if d else "its default branch"
                 tail = (act if kind == "landable" else f"it goes no further: not landed: {detail}" if kind == "deferred"
                         else f"check the landing route ({detail}), then {act}")
-                body.append(f"- `{top}` (`{br}` of `{P}`): merge `{br}` into {dn} there (with {dn} checked out: "
-                            f"`git -C {P} merge {br}`), then {tail}; then `git -C {P} worktree remove {top}` and "
+                merge = (f"merge `{br}` into {dn} there (with {dn} checked out: `git -C {P} merge {br}`), then"
+                         if copy["offDefault"] else f"`{br}` is already on {dn}:")
+                body.append(f"- `{top}` (`{br}` of `{P}`): {merge} {tail}; then `git -C {P} worktree remove {top}` and "
                             f"`git -C {P} branch -d {br}`")
             else:
                 if kind == "stuck":
@@ -2514,8 +2569,11 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
         if copy is not None:
             head, d, off = f"{top} ({copy['branch']} of {copy['checkout']})", copy["default"], copy["offDefault"]
             dn = d or "its default branch"
+            stuck = f"; stuck: {detail}" if kind == "stuck" else ""
             if off:
-                chain_lines.append(f"{head}: {len(off)} not on {dn} → [[{land_name}]]")
+                chain_lines.append(f"{head}: {len(off)} not on {dn}{stuck} → [[{land_name}]]")
+            elif stuck and commits:
+                chain_lines.append(f"{head}: all on {dn}{stuck} → [[{land_name}]]")
             elif commits:
                 chain_lines.append(f"{head}: all on {dn}, {len(commits)} not on origin/{detail} → [[{land_name}]]")
             else:
