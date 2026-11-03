@@ -71,6 +71,10 @@ gone() { ! alive "$1"; }
 exists() { [ -e "$1" ]; }
 nonempty() { [ -s "$1" ]; }
 grepq() { grep -q -- "$1" "$2"; }
+# waits <file> — the waiting lines in a run's stderr. The start line (verify-slot.py contract item 9) names this
+# script's path and the log's, either of which may hold the word (a worktree named for a waiting lead), so it
+# never counts.
+waits() { grep -v ' started; wait for its verdict with: ' "$1" | grep -c waiting; }
 js() { python3 -c 'import json,sys; d=json.loads(sys.argv[2]); print(eval(sys.argv[1]))' "$1" "$2"; }
 # pool <name>: a fresh arm dir D and its own pool SL.
 pool() { echo "== $1"; D="$tmp/$1"; mkdir -p "$D"; SL="$D/slots"; export THREAD_VERIFY_SLOTS_DIR="$SL"; }
@@ -339,7 +343,7 @@ touch "$D/qa.go"; wait "$(w qa)"
 pool o4b
 mkdir -p "$SL"; printf '{"pid": 99999, "seq": 1}\n' > "$SL/queue-99999-x.wait"; : > "$SL/.queue-99998-y.tmp"
 python3 "$VS" run --slots 1 --slot-wait 2 -- true 2> "$D/b.err"; rc=$?
-ok "$rc|$(grep -c waiting "$D/b.err")" "0|0" "O4b: a stale line entry (nobody holds it) holds no run off"
+ok "$rc|$(waits "$D/b.err")" "0|0" "O4b: a stale line entry (nobody holds it) holds no run off"
 ok "$(count queue)" 0 "O4b: … the stale .wait and .tmp are reaped"
 
 pool o4c
@@ -400,7 +404,7 @@ pool o4g
 python3 "$VS" run --slots 1 -- true 2> /dev/null
 L0=$(ls -A "$SL")
 python3 "$VS" run --slots 1 -- true 2> "$D/g.err"
-ok "$(ls -A "$SL")|$(grep -c waiting "$D/g.err")" "$L0|0" "O4g: an uncontended run leaves the slots dir as it found it (no line entry)"
+ok "$(ls -A "$SL")|$(waits "$D/g.err")" "$L0|0" "O4g: an uncontended run leaves the slots dir as it found it (no line entry)"
 
 pool o4h
 entry qh "queue-1-h.wait" 5 touch
