@@ -123,7 +123,8 @@ function attach(s) {
   return s
 }
 // One case's sandbox: a bare origin (default branch `def`) whose upload-pack is wrapped (packLog), and a tree with one
-// commit pushed, on branch feat (o.bare: no commit at all).
+// commit pushed, on branch feat (o.bare: no commit at all). o.worktree: production's only shape, the tree is a linked
+// worktree at <main>/.claude/worktrees/proj-fix-x (a gitfile) holding feat, the main checkout (s.main) back on `def`.
 function box(t, o) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sec-scan-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
@@ -146,6 +147,12 @@ function box(t, o) {
     s.commit('init')
     s.git('push', '-q', 'origin', def)
     s.git('checkout', '-q', '-b', 'feat')
+    if (o && o.worktree) {
+      s.main = s.tree
+      s.git('checkout', '-q', def)
+      s.tree = path.join(s.main, '.claude', 'worktrees', 'proj-fix-x')
+      execFileSync(GIT, ['-C', s.main, 'worktree', 'add', '-q', s.tree, 'feat'], { env: s.env })
+    }
   }
   return s
 }
@@ -863,6 +870,38 @@ test('S14: the stub is given --redact and the range, from the scratch clone, nev
   assert.ok(under(rec.cwd, s.tmp), `the cwd is the scratch clone: ${rec.cwd}`)
   assert.deepEqual(fs.readdirSync(s.tmp), [], 'the scratch dir is removed')
 })
+
+// ---- S16: a linked worktree, the only tree production passes ------------------------------------------------------
+
+for (const real of [false, true]) {
+  const tag = real ? 'real gitleaks' : 'stub'
+  test(`S16 (${tag}): on a linked worktree at <repo>/.claude/worktrees/<slug>, clean is 0, a leak the fix, pushed human, untracked exit 2`, { skip: real && realSkip }, async (t) => {
+    const s = box(t, { worktree: true })
+    assert.ok(fs.statSync(path.join(s.tree, '.git')).isFile(), 'setup: the tree is a gitfile worktree')
+    assert.equal(fs.realpathSync(s.git('rev-parse', '--show-toplevel')), fs.realpathSync(s.tree), 'setup: the worktree is its own toplevel')
+    s.write('src/app.py', 'print("hi")\n')
+    const clean = s.commit('clean')
+    const r = await scan(s, { real })
+    assert.equal(r.status, 0, r.stderr)
+    assert.equal(r.json.result, 'clean')
+    assert.equal(r.json.head, clean, "the worktree's HEAD, never the main checkout's")
+    const leak = s.leak()
+    const r2 = await scan(s, { real })
+    assert.equal(r2.status, 1, r2.stderr)
+    assert.equal(r2.json.action, 'fix')
+    assert.deepEqual(r2.json.secrets.map((x) => [x.file, x.commit, x.pushed]), [['cfg.py', leak, false]], 'the scratch clone of a gitfile worktree reads its commits')
+    assert.equal(r2.json.rewriteFrom, clean)
+    s.git('push', '-q', 'origin', 'feat')
+    const r3 = await scan(s, { real })
+    assert.equal(r3.json.action, 'human')
+    assert.equal(r3.json.secrets[0].pushed, true)
+    s.write('new.py', 'x = 1\n')
+    const r4 = await scan(s, { real })
+    assert.equal(r4.status, 2, r4.stdout)
+    assert.match(r4.stderr, /untracked files are in --tree/)
+    assert.equal(execFileSync(GIT, ['-C', s.main, 'rev-parse', 'HEAD'], { encoding: 'utf8', env: s.env }).trim(), r.json.base, 'the main checkout is untouched')
+  })
+}
 
 // ---- S15: accepts from ## Repair input ----------------------------------------------------------------------------
 
