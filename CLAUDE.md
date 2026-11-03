@@ -18,7 +18,8 @@ check, is another thing).
      first Leg to until, so its sums run wider than the reading's week; its Escapes are read up to now, and
      rounds per landed task count each landed task's rounds over its whole record;
    - the Escapes sweep (reflect.py) folds landed tasks of any age; its friction rows are only the evidence
-     dated in the window, and cannotShow names a read rollout's rest;
+     dated in the window, and cannotShow names only the Escapes no week's friction lists (a chain's line names
+     every one dated outside the window);
    - a grade episode (grades.py) counts in the window that holds its close, its acts from before since included,
      and grades' `all` holds every closed episode;
    - a Review trail (attention.py) is read whole, back to since - `TRAIL_DAYS`, once any of its rounds is in the

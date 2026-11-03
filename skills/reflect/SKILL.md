@@ -427,8 +427,9 @@ For each rollout, read its `friction` items, of eight kinds (`ask`, `set-aside`,
   line in the window still brings its in-window repair lines, read `repairs-only` (or with its Escapes,
   `escapes-only`).
 - An `escape` is traced to the review that should have caught it (execute § 5, ADR 0037 d7): an Escape counts in the
-  week it surfaced, against the rollout that landed the work; one dated outside the window is a `cannotShow` line,
-  reported, never an item.
+  week it surfaced, against the rollout that landed the work; one dated outside the window is never an item. Its
+  `cannotShow` line is reported, never traced: on a parallel rollout it names only the Escapes no week counts (§ What
+  the record cannot show), on a chain every Escape dated outside the window, most of them another week's.
 - A `churn` item is a review round that only answered the last round's fix (execute § 5): trace what the fix broke.
 - A serial chain's (`shape: serial`) items come from its record's acts and its Leg log (`leg.py status`), read by the
   chain's rules (`skills/execute/legs.md`, ADR 0040), never as a queue's: it has no Slots, lane, retry, descope, churn
@@ -704,7 +705,9 @@ reading leaves the week quiet.
 
 ### 17. Report, then tidy
 
-Report the rollouts read (and the escapes-only and repairs-only ones), each trace and what it became, the grade
+Report first each `window: ` flag `span.json` holds (step 10), quoted whole: that block's numbers are unreliable this
+week, so say so before any of them. Then report the rollouts read (and the escapes-only and repairs-only ones), each
+trace and what it became, the grade
 accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySize` readout and each grade trace), each
 /fresh-review landing (`freshReview`: its repo and branch, rounds, findings and blocking per round, filed,
 unconfirmed, rejected, open at the end, reversals, regression, its size, its confirm rate, and what step 11 named, the
@@ -716,7 +719,7 @@ held), the Monthly audit's row when one ran (its hours found against the record'
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or
 skipped behind a revert, the attention ledger (the questions put to Lachy, *yours* beside `unlabelled`, a lower bound
 while that is above 0, the recommended-pick rate and the hours questions held work; the trails, their rounds and the
-docs-only PRs; the waits to start; each circling item and any Watch it opened), the close line's counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
+docs-only PRs; the waits to start; each circling item and any Watch it opened), the close line's counts and `quiet`, the `cannotShow` list and every other flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
 
 ## Deciding the decision task
 
@@ -807,12 +810,14 @@ or `exists`). An item left open keeps the task open.
   land.sh's own-branch `--queue` and `--hold` recorded it.
 - The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
   `cannotShow`), and dates an undated fixer by its mtime. It reaches a task only once the task has landed, so a fixer
-  dated in a week before the one its task landed in is in no week's friction: `cannotShow` names it in the week the
-  task lands.
+  dated in a week before the one its task landed in (or one with no date at all) is in no week's friction: the
+  reading of the week the task lands names it in `cannotShow`, once. An Escape dated in an earlier week on a task
+  landed by then was that week's friction, and one dated after the window is a later week's: neither is named.
 - A serial chain's Escapes come from `fixes:` alone and are read only in a week span reads the chain (a line in its
-  Run record or its Leg log in the window): the Escapes sweep reads `merged` lines, which a chain never records; one
-  dated in a week span did not read the chain is in no week's friction, and only a later week that reads the chain
-  names it, in `cannotShow`.
+  Run record or its Leg log in the window): the Escapes sweep reads `merged` lines, which a chain never records. Each
+  reading of the chain names in `cannotShow` every Escape of the chain dated outside the window, so one line repeats
+  week after week, and most of what it names was counted in another week's friction; one dated in a week span did not
+  read the chain is in no week's friction, and that line is the only place it shows.
 - An escapes-only rollout's breaches are not counted, nor a repairs-only one's: a Guardrail breach counts in the week
   its run ends.
 - A closed rollout with no close line (a dropped one, one archived unscored, or a close that was not scored) is read

@@ -98,11 +98,12 @@ parallel with no note). For each:
             over; with began set the Leg did start, by a route that wrote no line.
   escape    each piece of serial-score.py's escapes block (`fixes:` only: a fix task that names a chain task, its
             Leg-filed smoke fixes among them), dated as the sweep dates a fixer, with at and inWindow, listed only when
-            dated in the window. One dated outside it is named in cannotShow (`[[<slug>]]: <k> Escape(s) dated outside
-            the window, not in its friction: <task> <at or "no date">, ...`). The sweep below never reaches a chain (its
-            record has no `merged` lines), so a chain's Escapes are read only in a week span reads it. One dated in a
-            week span did not read the chain is in no week's friction: only a later reading of the chain names it, and
-            only in cannotShow.
+            dated in the window. The sweep below never reaches a chain (its record has no `merged` lines), so a chain's
+            Escapes are read only in a week span reads it, and each such reading names in cannotShow every one dated
+            outside its window, or undated (`[[<slug>]]: <k> Escape(s) dated outside the window, every one: most are
+            another week's friction, one dated in a week that did not read the chain is in none: <task> <at or "no
+            date">, ...`): the line repeats each week the chain is read, and is the only place an Escape dated in a
+            week span did not read the chain shows.
   A chain has no retry, descope or churn of its own, and no breach (its score has no Guardrails).
 - breachCounts: true only for a read, non-partial rollout whose window.activeEnd falls in [since, until], so a
   Guardrail breach counts in the week its run ends. A partial rollout's breaches are reported, not counted.
@@ -142,10 +143,14 @@ parallel with no note). For each:
             nothing outside `## Notes` is read. A line is date-only, so it is read by its date from the note of every
             record, read this week or not: a rollout with no line in the window that holds one is read light (below).
   escape    the sweep's evidence (below) against this rollout's landed tasks, with at and inWindow, listed only when
-            dated in the window; one dated outside it is named in cannotShow, as a chain's is. The sweep reads every
-            record every week, so an Escape is listed by the reading whose window holds its date, with one exception:
-            the sweep reaches a task only once it has landed, so a fixer dated in a week before the one its task landed
-            in is in no week's friction, and the reading of the week the task lands names it in cannotShow.
+            dated in the window. The sweep reads every record every week, so an Escape is listed by the reading whose
+            window holds its date, with one exception: the sweep reaches a task only once it has landed (its latest
+            `merged` line at or before until), so a piece dated before the window of the reading that holds its task's
+            landing, or undated, is in no week's friction. That reading names those alone in cannotShow, once
+            (`[[<slug>]]: <k> Escape(s) on a task landed in the window, dated before it or undated: in no week's
+            friction: <task> <at or "no date">, ...`). Of the rest dated outside the window, one on a task landed before
+            since was an earlier reading's (its friction, or the cannotShow of the week the task landed), and one dated
+            after until is a later reading's friction, so neither is named.
   churn     a review-verdict line in the window with regression > 0.
 - The Escapes sweep (ADR 0037 d4). Every record's `merged` lines, of any age, are folded per rollout by score.py's
   landed_from(), and each rollout maps to its repo through its note's Project root (the newest existing root per repo
@@ -288,17 +293,20 @@ is scored whole): `rollouts[<slug>].score.handsOff` (each act's at in [window.si
 and, on a serial chain, `rollouts[<slug>].score.merges` (each merge's at in [window.since, window.until]: a parallel
 score's merges.tasks carries task names alone); then `freshReview` (an entry is one row: its first and last both in
 [since, until], the one outside printed), `grades.episodes` (inWindow true, and its end.at, else end.date, in [since,
-until]), `attention.questions` (each item's at: attention.py's Question ledger windows by the call's stamp) and
-`nights.nights` (each morning). span calls score.py with no --since, so a score's window.since is the run start, and
-score.py's act rule (run start <= act <= merge) keeps every act inside it; were span ever to pass --since, an act from
-the run start would precede it by score.py's own rule, and this check would have to read the run start instead. Not
-checked, each for its reason: reviewChurn, freshReviewLevels and the ledger's weekly row (ledger.py's rows(): its hours,
-byCause, contributing rollouts' hours and events) report sums with no rows, so tests alone pin their windows
-(reflect-score's (l) and (e2), reflect-weekly's freshReviewLevels test, and reflect-ledger's L1 for the ledger, whose
-header clips every interval to [since, until]); a score's escapes block reads its evidence up to now by design
-(score.py's header); grades' window and all are sums; attention's trails, waits and circling and the ledger's Monthly
-audit declare wider units in their own docstrings; knobs, watches, bugsOpen and decisionTask are state at until;
-cannotShow and flags are no rows. A `window: ` flag is a Thread Skill bug, never friction (SKILL.md step 10).
+until]), `attention.questions` (each item's at: attention.py's Question ledger windows by the call's stamp),
+`nights.nights` (each morning) and `noteOverlaps.overlaps` (an overlap is one row, as a freshReview entry is: its
+first and last both in [since, until], the one outside printed). span calls score.py with no --since, so a score's
+window.since is the run start, and score.py's act rule (run start <= act <= merge) keeps every act inside it; were span
+ever to pass --since, an act from the run start would precede it by score.py's own rule, and this check would have to
+read the run start instead. Not checked, each for its reason: reviewChurn, freshReviewLevels and the ledger's weekly
+row (ledger.py's rows(): its hours, byCause, contributing rollouts' hours and events) report sums with no rows, so tests
+alone pin their windows (reflect-score's (l) and (e2), reflect-weekly's freshReviewLevels test, and reflect-ledger's L1
+for the ledger, whose header clips every interval to [since, until]); a score's escapes block reads its evidence up to
+now by design (score.py's header); grades' window and all are sums; noteOverlaps' warnings, notes and rollouts are its
+overlaps' sum and sets, and its previous reads the last Reflection's window by design; attention's trails, waits and
+circling and the ledger's Monthly audit declare wider units in their own docstrings; knobs, watches, bugsOpen and
+decisionTask are state at until; cannotShow and flags are no rows. A `window: ` flag is a Thread Skill bug, never
+friction (SKILL.md step 10).
 
 watch. One `watch` line per (Reflection, Watch), naming every rollout where the reading saw it. id is run_record's
 watch_id(rule, shape); the line stores the stripped rule and shape. A rollout must be one the span read (its
@@ -1306,7 +1314,7 @@ class Span:
         """A chain's own friction items, from leg.py status (`st`) and serial-score's escapes block (`sc`): each in-window
         `set aside` line (movedBy read from the record's acts and the Leg log's later claim), `halt cleared:` line (an
         ask), restart (serial-score's fold_restarts(): its `restart:` lines read as one), and each Escape the block's
-        `fixes:` evidence dates in the window (window_escapes(): one dated outside it is a cannotShow line)."""
+        `fixes:` evidence dates in the window (window_escapes(): every one dated outside it is named in cannotShow)."""
         items = []
 
         def at_ms(stamp):
@@ -1366,17 +1374,26 @@ class Span:
                     if undated:
                         item["undated"] = True
                     esc.append(item)
-            items.extend(self.window_escapes(slug, esc))
+            items.extend(self.window_escapes(slug, esc, since, until))
         return items
 
-    def window_escapes(self, slug, items):
-        """A read rollout's escape items dated in the window (inWindow), the ones its friction lists; the rest, dated
-        outside it or undated, are named in one cannotShow line, in the items' order, never listed (the module
-        docstring's escape items: a reading holds only its window's rows)."""
+    def window_escapes(self, slug, items, since, until, landed=None):
+        """A read rollout's escape items dated in the window (inWindow): the ones its friction lists, never the rest (the
+        module docstring's escape items: a reading holds only its window's rows). One cannotShow line names some of the
+        rest, in the items' order. With `landed` ({task: its landing ms}, the sweep's), only the lost ones: those on a
+        task landed in [since, until] that are not dated after until, which no reading's friction lists; every other
+        one is an earlier or later reading's. Without it (a chain's: serial-score's block reads every chain task, so
+        no landing decides which week reaches one), every one, most of them counted in another week's friction."""
         rest = [x for x in items if not x["inWindow"]]
+        if landed is None:
+            what = "dated outside the window, every one: most are another week's friction, one dated in a week that " \
+                   "did not read the chain is in none"
+        else:
+            rest = [x for x in rest if since <= landed.get(x["task"], -1) <= until and not self.after(x["at"], until)]
+            what = "on a task landed in the window, dated before it or undated: in no week's friction"
         if rest:
-            self.cannot_show("[[%s]]: %d Escape(s) dated outside the window, not in its friction: %s"
-                             % (slug, len(rest), ", ".join("%s %s" % (x["task"], x["at"] or "no date") for x in rest)))
+            self.cannot_show("[[%s]]: %d Escape(s) %s: %s" % (
+                slug, len(rest), what, ", ".join("%s %s" % (x["task"], x["at"] or "no date") for x in rest)))
         return [x for x in items if x["inWindow"]]
 
     @staticmethod
@@ -1620,7 +1637,9 @@ class Span:
     # -- the Escapes sweep (ADR 0037 d4) ----------------------------------------------------------------------------
 
     def sweep(self, records, read, since, until):
-        """{rollout: [escape items]}: every record's landed tasks, any age, per repo through escapes.py."""
+        """({rollout: [escape items]}, {rollout: {task: its landing ms}}): every record's landed tasks, any age, per repo
+        through escapes.py, and each swept task's landing (the latest `merged` line at or before until), keyed as the
+        items' task is, which window_escapes() reads."""
         repos = {}  # repo -> {"roots": {root: newest ms}, "landed": {task: (rollout, info, at ms)}}
         for slug, lines in records.items():
             merges = [(t, d.get("task"), d.get("pr"), d.get("readOnly") is True) for t, _n, d in lines
@@ -1654,9 +1673,11 @@ class Span:
                     if prev[2] > at:
                         continue
                 r["landed"][task] = (slug, info, at)
-        out = {}
+        out, when = {}, {}
         for key in sorted(repos):
             r = repos[key]
+            for task, (s, _i, a) in r["landed"].items():
+                when.setdefault(s, {})[ESC._canon(task)] = a
             roots = sorted(r["roots"], key=lambda x: r["roots"][x])
             root = roots[-1]
             if len({self.family(x) for x in roots}) > 1:  # ADR 0064: two projects' clones of one checkout are one family
@@ -1680,7 +1701,7 @@ class Span:
                     if undated:
                         item["undated"] = True
                     out.setdefault(rollout, []).append(item)
-        return out
+        return out, when
 
     @staticmethod
     def ev_key(ev):
@@ -1694,6 +1715,18 @@ class Span:
             return date_in(at, since, until)
         t = _ts({"ts": at})
         return t is not None and since <= t <= until
+
+    @staticmethod
+    def after(at, until):
+        """Whether a piece of evidence is dated after the window, by in_window()'s reading: a date-only one on or after
+        until's Melbourne date (the next reading's), an instant past until. One undated, or whose date does not parse,
+        is after no window."""
+        if at is None:
+            return False
+        if re.fullmatch(r"\d{4}-\d\d-\d\d", at):
+            return at >= mdate(until)
+        t = _ts({"ts": at})
+        return t is not None and t > until
 
     def dates(self, root, block):
         """{(source, name): (at, undated)} for every piece of evidence in an escapes.py block."""
@@ -2013,9 +2046,9 @@ class Span:
             entries.append(entry)
             if sc is not None:
                 scores[slug] = sc
-        swept = self.sweep(records, read, since, until)
+        swept, landed = self.sweep(records, read, since, until)
         for slug in sorted(s for s in swept if s in read):
-            read[slug]["friction"].extend(self.window_escapes(slug, swept[slug]))
+            read[slug]["friction"].extend(self.window_escapes(slug, swept[slug], since, until, landed.get(slug, {})))
         # A rollout not read this week is read light for its in-window evidence, from every record: the Escapes the
         # sweep traced to it, and the dated repair: lines of its note's ## Notes (date-only, so read by date whatever
         # the record holds, or a line on until's date would be lost when the next window has no line of the rollout).
@@ -2118,6 +2151,14 @@ def window_flags(doc, scores):
 
     ss, us = doc["since"], doc["until"]
     S, U = SCORE.to_ms(ss), SCORE.to_ms(us)
+
+    def spans(groups):  # a group of rows is one row: its first and last both in the window, the one outside printed
+        rows = []
+        for g in groups:
+            first, last = _row_in(g.get("first"), S, U), _row_in(g.get("last"), S, U)
+            rows.append((first and last, g.get("last") if first else g.get("first")))
+        return rows
+
     for e in items(doc.get("rollouts")):
         slug = e.get("rollout")
         report("rollouts[%s].friction" % slug,
@@ -2146,11 +2187,7 @@ def window_flags(doc, scores):
         else:
             report("rollouts[%s].score.handsOff" % slug, [(_row_in(a.get("at"), lo, hi), a.get("at")) for a in acts],
                    w["since"], w["until"])
-    rows = []
-    for f in items(doc.get("freshReview")):
-        first, last = _row_in(f.get("first"), S, U), _row_in(f.get("last"), S, U)
-        rows.append((first and last, f.get("last") if first else f.get("first")))
-    report("freshReview", rows, ss, us)
+    report("freshReview", spans(items(doc.get("freshReview"))), ss, us)
     rows = []
     for ep in items(part(doc, "grades", "episodes")):
         end = ep.get("end") if isinstance(ep.get("end"), dict) else {}
@@ -2161,6 +2198,7 @@ def window_flags(doc, scores):
     report("attention.questions", [(_row_in(q.get("at"), S, U), q.get("at")) for q in questions], ss, us)
     nights = items(part(doc, "nights", "nights"))
     report("nights.nights", [(_row_in(n.get("morning"), S, U), n.get("morning")) for n in nights], ss, us)
+    report("noteOverlaps.overlaps", spans(items(part(doc, "noteOverlaps", "overlaps"))), ss, us)
     return out
 
 
