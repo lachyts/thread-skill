@@ -520,6 +520,31 @@ test('S9b: a version bump reads as changed', async (t) => {
   assert.deepEqual(r.json.brief, ['npm left-pad 1.3.0 (package.json); changed from 1.2.0'])
 })
 
+test('S9b2: a spec, pin or section change that keeps the floor reads as changed; whitespace alone does not (and its control)', async (t) => {
+  const s = box(t)
+  const o = await osvStub(t)
+  const url = (tag) => `git+https://u:hunter2pass@example.com/b.git?auth=k3y#${tag}`
+  s.git('checkout', '-q', 'main')
+  s.write('package.json', JSON.stringify({ dependencies: { aaa: '^1.0.0', bbb: url('v1'), same: '^3.0.0' }, devDependencies: { ccc: '^2.0.0' } }))
+  s.write('requirements.txt', 'requests>=2.31\nflask>=2.0\n')
+  s.commit('deps'); s.git('push', '-q', 'origin', 'main'); s.git('checkout', '-q', '-B', 'feat')
+  s.write('package.json', JSON.stringify({ dependencies: { aaa: '~1.0.0', bbb: url('v9'), ccc: '^2.0.0', same: '^3.0.0' } }))
+  s.write('requirements.txt', 'requests >= 2.31\nflask[async]>=2.0\n')
+  s.commit('respec')
+  const r = await scan(s, { osv: o.url })
+  assert.equal(r.status, 0, r.stdout)
+  assert.deepEqual(r.json.brief, [
+    'npm aaa 1.0.0 (package.json); changed from ^1.0.0',
+    'npm bbb unversioned (package.json); changed from git+https://example.com/b.git#v1',
+    'npm ccc 2.0.0 (package.json); changed from ^2.0.0 in devDependencies',
+    'PyPI flask 2.0 (requirements.txt); changed from >=2.0',
+  ])
+  assert.ok(!r.stdout.includes('hunter2pass') && !r.stdout.includes('k3y'), 'a URL\'s userinfo and query never reach stdout')
+  assert.deepEqual(o.queries().map((q) => `${q.package.name}@${q.version}`).sort(), ['aaa@1.0.0', 'ccc@2.0.0', 'flask@2.0'], 'OSV is asked at each floor')
+  const m = await scan(s, { osv: o.url, script: lineMutant(s, '# the change comparison', 'if _floor(eco, old_by[norm]["spec"]) == _floor(eco, new[name]["spec"]):') })
+  assert.deepEqual(m.json.brief, [], 'control: comparing floors alone must drop every one of them')
+})
+
 test('S9c: every manifest kind, its ecosystem and its query form', async (t) => {
   const s = box(t)
   const gitFix = 'a'.repeat(40)

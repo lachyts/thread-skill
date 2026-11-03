@@ -25,7 +25,8 @@ Python stdlib only. Two verbs:
       9.   Accepts: a `security-accept <kind>:<key>` token that Lachy's recorded answer in the note's `## Repair input`
            repeats from its own question (record-answer's entry shape).
       10.  Dependencies the diff adds or changes in package.json, requirements*.txt, pyproject.toml, go.mod and
-           Cargo.toml; a fixture manifest is listed and never checked.
+           Cargo.toml: a change is any change to an entry as written or to its section (a range, a git pin, a move to
+           another section), not only to its version floor; a fixture manifest is listed and never checked.
       11.  Advisories from OSV at each floor (querybatch, then one GET per hit); an unreachable OSV is
            `advisoriesChecked: false`, never a red, and a failed GET leaves only its own advisory not checked.
       12.  The brief lines; 13. `action` (fix | human | null) and `why`.
@@ -297,20 +298,33 @@ def _norm_name(ecosystem, name):
 REQ_NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*(.*)$")
 
 
-def _pep508(line):
-    """(name, spec) of one PEP 508 requirement (extras and environment markers stripped), or None."""
-    line = line.split(";", 1)[0].strip()
+def _squash(text):
+    return re.sub(r"\s+", " ", str(text)).strip()
+
+
+def _pep508(item):
+    """(name, spec, raw) of one PEP 508 requirement, or None: spec without extras and environment markers (the floor
+    reads it), raw the whole requirement after its name (extras, spec and markers, whitespace squashed)."""
+    full = item.strip()
+    line = full.split(";", 1)[0].strip()
     if not line:
         return None
     m = REQ_NAME.match(line)
     if not m:
         return None
+    raw = _squash(full[len(m.group(1)):])
     spec = m.group(3).strip()
     if spec.startswith("@"):
         spec = spec[1:].strip()   # a direct reference: unversioned
-        return m.group(1), "url:" + spec
+        return m.group(1), "url:" + spec, raw
     spec = spec.strip("()").strip()
-    return m.group(1), spec
+    return m.group(1), spec, raw
+
+
+def _entry(spec, section, raw=None):
+    """One parsed dependency: the spec its floor reads, the section it sits in, and raw, the entry as written (what
+    `dependencies` compares, so a changed spec, pin or section is a change even when the floor stays)."""
+    return {"spec": spec, "section": section, "raw": _squash(spec if raw is None else raw)}
 
 
 def parse_requirements(text):
@@ -321,7 +335,7 @@ def parse_requirements(text):
             continue
         got = _pep508(line)
         if got and got[0] not in deps:
-            deps[got[0]] = got[1]
+            deps[got[0]] = _entry(got[1], "", got[2])
     return deps
 
 
@@ -335,7 +349,7 @@ def parse_package_json(text):
         if isinstance(block, dict):
             for name, spec in block.items():
                 if isinstance(name, str) and name not in deps:
-                    deps[name] = spec if isinstance(spec, str) else ""
+                    deps[name] = _entry(spec if isinstance(spec, str) else "", sect)
     return deps
 
 
@@ -349,33 +363,40 @@ def _toml_spec(v):
     return ""
 
 
+def _toml_entry(v, section):
+    raw = v if isinstance(v, str) else json.dumps(v, sort_keys=True, separators=(",", ":"), default=str)
+    return _entry(_toml_spec(v), section, raw)
+
+
 def parse_pyproject(text):
     data = tomllib.loads(text)
     deps = {}
     project = data.get("project") if isinstance(data.get("project"), dict) else {}
-    lists = [project.get("dependencies") or []]
+    lists = [("project.dependencies", project.get("dependencies") or [])]
     opt = project.get("optional-dependencies")
     if isinstance(opt, dict):
-        lists.extend(v for v in opt.values())
-    for lst in lists:
+        lists.extend((f"project.optional-dependencies.{g}", v) for g, v in opt.items())
+    for section, lst in lists:
         if not isinstance(lst, list):
             continue
         for item in lst:
             got = _pep508(item) if isinstance(item, str) else None
             if got and got[0] not in deps:
-                deps[got[0]] = got[1]
+                deps[got[0]] = _entry(got[1], section, got[2])
     poetry = ((data.get("tool") or {}).get("poetry") or {}) if isinstance(data.get("tool"), dict) else {}
-    tables = [poetry.get("dependencies"), poetry.get("dev-dependencies")]
+    tables = [("tool.poetry.dependencies", poetry.get("dependencies")),
+              ("tool.poetry.dev-dependencies", poetry.get("dev-dependencies"))]
     groups = poetry.get("group")
     if isinstance(groups, dict):
-        tables.extend((g or {}).get("dependencies") for g in groups.values() if isinstance(g, dict))
-    for table in tables:
+        tables.extend((f"tool.poetry.group.{n}.dependencies", (g or {}).get("dependencies"))
+                      for n, g in groups.items() if isinstance(g, dict))
+    for section, table in tables:
         if not isinstance(table, dict):
             continue
         for name, v in table.items():
             if name.lower() == "python" or name in deps:
                 continue
-            deps[name] = _toml_spec(v)
+            deps[name] = _toml_entry(v, section)
     return deps
 
 
@@ -387,7 +408,7 @@ def parse_cargo(text):
         if isinstance(table, dict):
             for name, v in table.items():
                 if name not in deps:
-                    deps[name] = _toml_spec(v)
+                    deps[name] = _toml_entry(v, sect)
     return deps
 
 
@@ -411,7 +432,7 @@ def parse_go_mod(text):
         else:
             continue
         if len(parts) >= 2 and parts[0] not in deps:
-            deps[parts[0]] = parts[1]
+            deps[parts[0]] = _entry(parts[1], "")
     return deps
 
 
@@ -438,8 +459,37 @@ def _show(tree, rev, path):
     return out.decode("utf8", "replace") if rc == 0 else None
 
 
+SPEC_SHOWN = 120
+
+
+def _shown(raw):
+    """An old entry as a brief shows it: no URL userinfo or query string (either may hold a credential), at most
+    SPEC_SHOWN characters, `unversioned` when empty."""
+    s = re.sub(r"(://)[^/@\s]*@", r"\1", _squash(raw))
+    s = re.sub(r"\?[^#\s]*", "", s)
+    if len(s) > SPEC_SHOWN:
+        s = s[:SPEC_SHOWN] + "…"
+    return s or "unversioned"
+
+
+def _same(a, b):
+    """Two entries are the same dependency when their section and their entry as written (whitespace aside) agree."""
+    return a["section"] == b["section"] and re.sub(r"\s+", "", a["raw"]) == re.sub(r"\s+", "", b["raw"])
+
+
+def changed_from(eco, old, new):
+    """What a changed entry was: its old floor when the floor moved from one version to another, else the old entry as
+    written (`_shown`); `in <section>` follows when the section changed."""
+    was, ver = _floor(eco, old["spec"]), _floor(eco, new["spec"])
+    out = was if was is not None and was != ver else _shown(old["raw"])
+    if old["section"] != new["section"]:
+        out += f" in {old['section']}"
+    return out
+
+
 def dependencies(tree, mb, head, brief_tail):
-    """The new or changed dependencies, one dict each, in manifest then name order."""
+    """The new or changed dependencies, one dict each, in manifest then name order. A change is any change to an
+    entry as written or to its section, not only to its floor (OSV is still asked at the floor)."""
     _rc, out, _err = _git(tree, "diff", "--name-only", "--no-renames", "-z", mb, head)
     touched = sorted(p for p in out.split("\0") if p and _manifest_kind(p))
     deps = []
@@ -461,20 +511,18 @@ def dependencies(tree, mb, head, brief_tail):
             old = parser(old_text) if old_text is not None else {}
         except Exception:
             old = {}
-        old_by = {_norm_name(eco, n): s for n, s in old.items()}
+        old_by = {_norm_name(eco, n): e for n, e in old.items()}
         fixture = _is_fixture(manifest)
         for name in sorted(new, key=lambda n: _norm_name(eco, n)):
             norm = _norm_name(eco, name)
-            ver = _floor(eco, new[name])
             if norm in old_by:
-                was = _floor(eco, old_by[norm])
-                if was == ver:
+                if _same(old_by[norm], new[name]):  # the change comparison
                     continue
-                changed = was or "unversioned"
+                changed = changed_from(eco, old_by[norm], new[name])
             else:
                 changed = None
-            deps.append({"ecosystem": eco, "name": name, "norm": norm, "version": ver, "manifest": manifest,
-                         "fixture": fixture, "changedFrom": changed})
+            deps.append({"ecosystem": eco, "name": name, "norm": norm, "version": _floor(eco, new[name]["spec"]),
+                         "manifest": manifest, "fixture": fixture, "changedFrom": changed})
     if len(deps) > MAX_DEPS:
         brief_tail.append(f"{len(deps) - MAX_DEPS} more dependencies not listed or checked")
         deps = deps[:MAX_DEPS]

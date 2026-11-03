@@ -1788,7 +1788,8 @@ Never run the verifier unless the task brief asks the review for the full suite;
 // without it). P2: set, each code-writing prompt is its unset bytes plus exactly securityCheckBlock right after
 // FLAKE_CHECK_TASK, once; every other builder is unchanged. P3: the fragment's pinned phrases, never a loop or one-shot
 // marker, with seven mutation controls (two on the secret fix's commit-then-push order). P4: the review judge's block,
-// after reviewTests, with two controls. P5: the schemas (runTask). P6: dependencyLines.
+// after reviewTests, with three controls (one on the cross-check covering changed dependencies, which the scan lists
+// whenever an entry as written or its section changes). P5: the schemas (runTask). P6: dependencyLines.
 await (async () => {
   const NAMES = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'reviewJudgePrompt', 'plannerPrompt',
     'readOnlyPrompt', 'planJudgePrompt', 'planReviserPrompt', 'integratorPrompt', 'integrationReviewPrompt', 'reviewTests', 'touchedOf',
@@ -1916,6 +1917,7 @@ await (async () => {
   for (const [from, to, label, rule] of [
     ['Then run the scan yourself, only when the read rule above holds (the tree\'s HEAD equals the PR head and its status is clean), exactly \\`${securityScanCmd(a, task)}\\`. ', '', 'the judge-scan clause dropped', 'judge scan'],
     [' --accepts-from ${shq(task.taskPath)}`', '`', '--accepts-from dropped from the command', 'accepts-from'],
+    ['a dependency the diff adds or changes that the list leaves out', 'a dependency the diff adds that the list leaves out', 'the cross-check narrowed to added dependencies', 'cross-check'],
   ]) {
     ok(src.includes(from), `security P4 control setup: ${label}`)
     const M = loadEngine(['securityReviewBlock'], { source: src.replace(from, to) })
