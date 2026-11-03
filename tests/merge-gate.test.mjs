@@ -269,13 +269,20 @@ test('M6 a branch read that is not 200 is unreadable, never none', (t) => {
   assert.deepEqual(rulesOnly.required, [{ context: CTX, sources: ['ruleset'], appId: ACTIONS }])
 })
 
-test('M7 a rules read that fails alone, or a protection not visible, is partial', (t) => {
+test('M7 a rules read that fails alone (an unprotected branch too), or a protection not visible, is partial', (t) => {
   const fx = fixture(t, { '.github/workflows/ci.yml': ROLLUP })
   const noRules = gate(fx, { rules: '404' })
   assert.equal(noRules.status, 'partial')
   assert.deepEqual(noRules.required.map((r) => r.context), [CTX])
   assert.deepEqual(ids(noRules), ['ci.yml:checks', 'ci.yml:lint', 'ci.yml:test'], 'the jobs are still read')
   hasWhy(noRules, /^rules\/branches\/main: HTTP 404/)
+  // An unprotected branch whose rules read fails: nothing to read, but never `none` (only two clean reads are).
+  for (const kw of ['404', '500', 'nologin']) {
+    const bare = gate(fx, { branch: UNPROTECTED, rules: kw })
+    assert.equal(bare.status, 'partial', `unprotected, rules ${kw}`)
+    assert.deepEqual(bare.jobs, [], `unprotected, rules ${kw}: no jobs to read`)
+    hasWhy(bare, /^rules\/branches\/main:/)
+  }
   const hidden = gate(fx, { branch: { name: 'main', protected: true } })
   assert.equal(hidden.status, 'partial')
   hasWhy(hidden, /^branches\/main: protection not visible to this gh account$/)
