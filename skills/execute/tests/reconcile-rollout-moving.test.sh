@@ -3,7 +3,7 @@
 # verdict (moving | stalled | waiting | skip), and the narrowings it reads: the Lane hold (`lane-hold` / `lane-ack`, `next`'s
 # `lane` entry and halt), prepare's and merge-task's task-scoped set-asides, the lead's infra set-asides, a task-level
 # invalid round budget (H12, never a halt) and the wait clauses' inputs.
-#   S1 stop_spans' reason and index   M1-M21 the verdicts   N1-N9b the narrowings, each through the real verbs
+#   S1 stop_spans' reason and index   M1-M22 the verdicts   N1-N9b the narrowings, each through the real verbs
 # Each scenario builds its own tasks dir, Run record (run_record.py emit --ts for the past), HOME and THREAD_MACHINE_TIMES,
 # so nothing reads this machine's history; a stub gh stands in for every PR read. Temp notes only; no vault, no network.
 # This suite reads the record, so it keeps its own THREAD_EVENTS_DIR per scenario and ignores THREAD_TEST_EVENTS_DIR.
@@ -443,6 +443,17 @@ printf '\n## Race log\n\n- 2026-10-26T08:30+00:00 [[a]] RACE: PR #5 merged as %s
 entry 2026-10-26T09:00:00Z
 ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["work"]["lane"]]')" '["waiting","you",false]' \
   "M21d: (control) the record's lane open on another task is not the RACE's re-verify: you"
+
+# ── M22: held only by the last starts → last-start, until the Morning (p28-7 pins p29-7's reason) ─────────────────
+scen m22
+QUEUE="a"; mkro; mkt a open
+away_file "$D/home" 2026-10-26T11:00:00Z true 2026-10-26T13:00:00Z 2 13:00 99
+entry 2026-10-26T08:00:00Z
+J=$(mv)
+ok "$(j "$J" '[d["verdict"], d["cause"], d["reason"]]')" \
+  '["waiting","last-start","last start: no history for cross-cutting (0 past runs, 3 needed), none starts in the 2 h before the Morning at 13:00"]' \
+  "M22: a row the last starts hold → a meant wait naming it, whatever the silence, never stalled"
+ok "$(j "$J" 'd["until"]')" '"2026-10-26T13:00:00+00:00"' "M22: until the Morning"
 
 # ════ The narrowings, each through the real verbs ══════════════════════════════════════════════════════════════════
 

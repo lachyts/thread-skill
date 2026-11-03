@@ -56,6 +56,14 @@ test('each ledger kind is emitted by a script', () => {
   }
 })
 
+// ADR 0067 d6: the Note overlap's kind has one writer, the PreToolUse hook, and no prose emits it.
+test('note-overlap is emitted by the PreToolUse hook alone, never by prose', () => {
+  const by = scripts().filter(({ text }) => emits(text, 'note-overlap')).map(({ file }) => file)
+  assert.deepEqual(by, ['hooks/vault-note-overlap.py'])
+  const md = [...textFiles('skills'), ...textFiles('docs'), ...textFiles('hooks')].filter(({ file }) => file.endsWith('.md'))
+  assert.deepEqual(md.filter(({ text }) => /run_record\.py["']?\s+emit\b[^\n]*note-overlap/.test(text)).map(({ file }) => file), [])
+})
+
 test('no skill or doc tells an agent to run run_record.py emit', () => {
   const md = [...textFiles('skills'), ...textFiles('docs'), ...textFiles('hooks')].filter(({ file }) => file.endsWith('.md'))
   for (const f of ['README.md', 'CONTEXT.md']) md.push({ file: f, text: read(f) })
@@ -72,6 +80,7 @@ test('control: the matchers', () => {
   assert.ok(emits('    _event(rollout, "stopped", None, fields, args)\n', 'stopped'))
   assert.ok(emits('        RR._event(stem, "stopped", None, {"cause": "usage-limit"})\n', 'stopped'))
   assert.ok(emits('            return _event(rollout, "suite-ended", task, fields)\n', 'suite-ended'))
+  assert.ok(emits('                RR.emit(editor["rollout"], "note-overlap", editor["task"], fields)\n', 'note-overlap'), 'the hook\'s one-line emit')
   assert.ok(!emits('# writes a "stopped" line\n', 'stopped'), 'a comment is not an emit')
   assert.ok(!emits('    if d.get("kind") == "stopped":\n', 'stopped'), 'a read is not an emit')
   assert.ok(tellsEmit('Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/run_record.py emit --kind stopped`.'))

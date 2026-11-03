@@ -14,7 +14,7 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
                                            refuse, and writes nothing: reflect.py checks a whole pass first)
     events_dir(env=None) -> str            record_path(rollout, env=None) -> str
     normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG,
-                                           RESERVED
+                                           NOTE_OVERLAPS, RESERVED
     title_key(name) -> str                 (a titled note's Grade-log key, p34-6: estate-dispatch.py `log` keys by it,
                                            and a grade line's `note` is checked against it)
     verdict_digest(verdict, feedback) -> str    verdict_key(line) -> tuple   (review-verdict's identity, p21-3:
@@ -41,8 +41,15 @@ there. THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the r
 the same place.
 
 Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning to tunings.jsonl, the
-weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost, attention) to reflections.jsonl, and the
-Grade log's kind (grade) to grades.jsonl. All four names are RESERVED: refused as a rollout slug and as a carried `from`.
+weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost, attention) to reflections.jsonl, the
+Grade log's kind (grade) to grades.jsonl, and the Note overlap's kind (note-overlap) to overlaps.jsonl. All five names
+are RESERVED: refused as a rollout slug and as a carried `from`.
+
+overlaps.jsonl holds one `note-overlap` line per warned Note overlap (ADR 0067 d6; CONTEXT.md **Note overlap**): a vault
+note one run's task edited while another rollout's live task had written it. hooks/vault-note-overlap.py, the plugin's
+PreToolUse hook, is its one writer (its docstring holds the rules), and skills/reflect/scripts/reflect.py `span` its one
+reader (noteOverlaps). A line's rollout and task are the editing run's, so it names both runs; it sits in its own file
+so no rollout's record, score or ledger reads it.
 
 tunings.jsonl holds one line per by-hand Reflection, plus one `close` line per rollout, at its completion ceremony or
 its supersede, plus one `auto` line per knob the weekly reading lands or reverts (skills/reflect/scripts/tune.py is
@@ -256,7 +263,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
                      quality, reviewChurn}, applied (a list of at most 8 {key, from, to, ranAt, rule, evidence,
                      agreeing, agreed?}); binding? (slot-bound | lane-bound | quota-bound | trickle-bound (p28-6) |
-                     dependency-bound | none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
+                     last-start-bound (p28-7) | dependency-bound | none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
                      that wrote it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
                      Reflection's line); auto? (true only: `tune.py --auto` or `--revert`, the weekly reading's own
                      landing); reflection? (the weekly reading's r- id, present exactly when auto is); reverts? (the
@@ -376,6 +383,11 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      still reads, since its readers, attention.py's trend and reflect.py's attention_record, take
                      reflections.jsonl's lines as they stand and never through this check). No rollout, no task;
                      lands in reflections.jsonl.
+  note-overlap    T  note (at most 400 characters: the vault-relative path), holderRollout, holderTask (slugs, not
+                     reserved: the run already in the note); holderSince? (a UTC Z stamp: the holder's first write),
+                     tool? (Edit | Write | MultiEdit), via? (agent | leg: how the editor was identified). ADR 0067 d6:
+                     one per warning hooks/vault-note-overlap.py gives; its rollout and task are the editing run's;
+                     lands in overlaps.jsonl.
   base-moved      T  repo, pr, base, main (the refused integrated base and the live main merge-task read), inertOnly
                      (true | false | null: null only beside an error), moversTotal (an int >= 0), movers (at most 20
                      {sha, kind, rollout?, task?, pr?, source?}, oldest first: kind rollout | peer, source record |
@@ -597,8 +609,9 @@ REVIEWS = "reviews"
 TUNINGS = "tunings"
 REFLECTIONS = "reflections"
 GRADE_LOG = "grades"
+NOTE_OVERLAPS = "overlaps"
 # record files that are no rollout's: refused as a rollout slug or a carried `from`
-RESERVED = (REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG)
+RESERVED = (REVIEWS, TUNINGS, REFLECTIONS, GRADE_LOG, NOTE_OVERLAPS)
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 # title_key's one separator: every run of characters outside a slug's letters, digits, dots and underscores (p34-6)
 TITLE_SEP_RE = re.compile(r"[^a-z0-9._]+")
@@ -688,7 +701,8 @@ APPLIED_KEYS = ("key", "from", "to", "ranAt", "rule", "evidence", "agreeing")
 # p21-7: `agreed`, the weekly agreement (the Agreement rule), on every entry of a non-void auto landing only
 APPLIED_OPTIONAL = ("agreed",)
 MAX_APPLIED = 8
-BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "trickle-bound", "dependency-bound", "none-clear")
+BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "trickle-bound", "last-start-bound", "dependency-bound",
+            "none-clear")
 # a close line's `close` (p21-6): the close that wrote it, through close-score.py and tune.py --close
 CLOSES = ("completion", "supersede")
 
@@ -1447,6 +1461,9 @@ KINDS = {
                     {"load": _load3, "rc": _int(0, 255), "failing": _names(MAX_FAILING, FAILING_NAME),
                      "timeout": _seconds, "step": _enum(*SUITE_STEPS), "sha": _str, "waited": _seconds,
                      "running": _int(0)}),
+    # ADR 0067 d6: hooks/vault-note-overlap.py, one line per warned Note overlap, in overlaps.jsonl.
+    "note-overlap": (True, {"note": _short(400), "holderRollout": _slug, "holderTask": _slug},
+                     {"holderSince": _stampz, "tool": _enum("Edit", "Write", "MultiEdit"), "via": _enum("agent", "leg")}),
     "base-moved": (True, {"repo": _str, "pr": _pr, "base": _str, "main": _str, "inertOnly": _bool_or_null,
                           "moversTotal": _int(0), "movers": _movers},
                    {"nonInert": _capped(MAX_NON_INERT), "pathsTotal": _int(0), "globs": _capped(MAX_GLOBS),
@@ -1873,7 +1890,7 @@ def _prepare(rollout, kind, task, fields, ts):
     out = []
     for r in targets:
         name = REFLECTIONS if kind in REFLECTION_KINDS else GRADE_LOG if kind == "grade" else REVIEWS if r is None \
-            else TUNINGS if kind == "tuning" else r
+            else TUNINGS if kind == "tuning" else NOTE_OVERLAPS if kind == "note-overlap" else r
         out.append((name, _line(stamp, host, r, task, kind, fields)))
     return out
 
