@@ -198,8 +198,9 @@ function lineMutant(s, marker, replacement) {
   return p
 }
 
-// The stub OSV: `vulns` maps `<ecosystem>|<name>` to the vulns querybatch reports; GET /v1/vulns/<id> returns one.
-async function osvStub(t, vulns = {}) {
+// The stub OSV: `vulns` maps `<ecosystem>|<name>` to the vulns querybatch reports; GET /v1/vulns/<id> returns one, or
+// answers 500 when its id is in `fail`.
+async function osvStub(t, vulns = {}, { fail = [] } = {}) {
   const seen = []
   const byId = {}
   for (const list of Object.values(vulns)) for (const v of list) byId[v.id] = v
@@ -214,8 +215,9 @@ async function osvStub(t, vulns = {}) {
         const q = JSON.parse(body).queries
         res.end(JSON.stringify({ results: q.map((x) => ({ vulns: (vulns[`${x.package.ecosystem}|${x.package.name}`] || []).map((v) => ({ id: v.id, modified: '2026-01-01T00:00:00Z' })) })) }))
       } else if (req.method === 'GET' && req.url.startsWith('/v1/vulns/')) {
-        const v = byId[decodeURIComponent(req.url.slice('/v1/vulns/'.length))]
-        if (!v) { res.statusCode = 404; res.end('{}') } else res.end(JSON.stringify(v))
+        const id = decodeURIComponent(req.url.slice('/v1/vulns/'.length))
+        const v = byId[id]
+        if (fail.includes(id)) { res.statusCode = 500; res.end('{}') } else if (!v) { res.statusCode = 404; res.end('{}') } else res.end(JSON.stringify(v))
       } else { res.statusCode = 404; res.end('{}') }
     })
   })
@@ -599,6 +601,41 @@ test('S9g: a fixture manifest is listed, never queried, never red', async (t) =>
   assert.equal(o.queries().length, 0)
   const m = await scan(s, { osv: o.url, script: mutant(s, 'return any(part.lower() in FIXTURE_PARTS for part in PurePosixPath(manifest).parent.parts)', 'return False') })
   assert.equal(m.status, 1, 'control: without the FIXTURE_PARTS check the fixture is queried and red')
+})
+
+test('S9h: querybatch answers, one advisory GET answers 500: the fetched advisory is red, only the other is not checked (and its control)', async (t) => {
+  const s = box(t)
+  const o = await osvStub(t, {
+    'npm|aaa': [vuln('GHSA-A', 'npm', 'aaa', [eco([{ introduced: '0' }, { fixed: '2.0.0' }])])],
+    'npm|bbb': [vuln('GHSA-B', 'npm', 'bbb', [eco([{ introduced: '0' }, { fixed: '2.0.0' }])])],
+  }, { fail: ['GHSA-B'] })
+  s.write('package.json', JSON.stringify({ dependencies: { aaa: '1.0.0', bbb: '1.0.0' } })); s.commit('deps')
+  const r = await scan(s, { osv: o.url })
+  assert.equal(r.status, 1, r.stdout)
+  assert.equal(r.json.result, 'red')
+  assert.equal(r.json.action, 'fix')
+  assert.equal(r.json.advisoriesChecked, false)
+  assert.deepEqual(r.json.advisories.map((a) => [a.id, a.fixed]), [['GHSA-A', ['2.0.0']]])
+  assert.deepEqual(r.json.brief, [
+    'npm aaa 1.0.0 (package.json); advisory GHSA-A, fixed in 2.0.0',
+    'npm bbb 1.0.0 (package.json)',
+    'advisory GHSA-B on npm bbb 1.0.0 not checked: OSV answered HTTP 500',
+  ])
+  assert.ok(o.seen.some((x) => x.url === '/v1/vulns/GHSA-B'), 'the failed GET was made')
+  const m = await scan(s, { osv: o.url, script: mutant(s, 'checked = False\n                continue', 'return [], False') })
+  assert.equal(m.status, 0, 'control: giving up on the first failed GET passes a known, fixable advisory silently')
+})
+
+test('S9i: a failed querybatch checks nothing and names its HTTP status', async (t) => {
+  const s = box(t)
+  const srv = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.statusCode = 503; res.end('{}') }) })
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => srv.close(() => resolve())))
+  s.write('package.json', JSON.stringify({ dependencies: { aaa: '1.0.0' } })); s.commit('deps')
+  const r = await scan(s, { osv: `http://127.0.0.1:${srv.address().port}` })
+  assert.equal(r.status, 0, r.stdout)
+  assert.equal(r.json.advisoriesChecked, false)
+  assert.deepEqual(r.json.brief, ['npm aaa 1.0.0 (package.json)', 'advisories not checked: OSV answered HTTP 503'])
 })
 
 // ---- S10-S13: refusals, base, env, PATH ---------------------------------------------------------------------------

@@ -26,8 +26,8 @@ Python stdlib only. Two verbs:
            repeats from its own question (record-answer's entry shape).
       10.  Dependencies the diff adds or changes in package.json, requirements*.txt, pyproject.toml, go.mod and
            Cargo.toml; a fixture manifest is listed and never checked.
-      11.  Advisories from OSV (querybatch, then one GET per hit); an unreachable OSV is `advisoriesChecked: false`,
-           never a red.
+      11.  Advisories from OSV at each floor (querybatch, then one GET per hit); an unreachable OSV is
+           `advisoriesChecked: false`, never a red, and a failed GET leaves only its own advisory not checked.
       12.  The brief lines; 13. `action` (fix | human | null) and `why`.
       One JSON line on stdout; exit 0 clean (accepted items included), 1 red. Neither stdout nor stderr ever holds a
       secret value.
@@ -576,8 +576,20 @@ class OSV:
         return self.cache[osv_id]
 
 
+OSV_ERRORS = (urllib.error.URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError)
+
+
+def _osv_why(e):
+    """One failed OSV call, named the same way whichever call it was (an HTTPError is a URLError too)."""
+    if isinstance(e, urllib.error.HTTPError):
+        return f"OSV answered HTTP {e.code}"
+    return f"{type(e).__name__}: {getattr(e, 'reason', None) or e}"
+
+
 def advisories(deps, osv_url, brief_tail):
-    """(advisories, checked): every advisory OSV holds for a versioned, non-fixture dependency's queried version."""
+    """(advisories, checked): every advisory OSV holds for a versioned, non-fixture dependency's queried version. A
+    failed querybatch checks nothing; a failed GET of one advisory's detail leaves only that advisory not checked
+    (its own brief line), and every advisory whose detail came back is reported as usual."""
     checkable = [d for d in deps if d["version"] and not d["fixture"]]
     if not checkable:
         return [], osv_url is not None
@@ -585,33 +597,34 @@ def advisories(deps, osv_url, brief_tail):
         brief_tail.append("advisories not checked: --no-advisories")
         return [], False
     osv = OSV(osv_url)
-    out = []
+    queries = []
+    for d in checkable:
+        d["queried"] = query_version(d["ecosystem"], d["version"])
+        queries.append({"package": {"name": d["norm"], "ecosystem": d["ecosystem"]}, "version": d["queried"]})
     try:
-        queries = []
-        for d in checkable:
-            d["queried"] = query_version(d["ecosystem"], d["version"])
-            queries.append({"package": {"name": d["norm"], "ecosystem": d["ecosystem"]}, "version": d["queried"]})
         hits = osv.batch(queries)
-        for d, ids in zip(checkable, hits):
-            for osv_id in ids:
-                fixed = fixed_versions(osv.vuln(osv_id), d["ecosystem"], d["norm"], d["queried"])
-                if d["ecosystem"] == "Go":
-                    fixed = [f if f.startswith("v") else "v" + f for f in fixed]
-                adv = {"id": osv_id, "ecosystem": d["ecosystem"], "name": d["name"], "version": d["version"],
-                       "queried": d["queried"], "manifest": d["manifest"], "fixed": fixed,
-                       "accept": advisory_accept(osv_id, d["ecosystem"], d["norm"], d["queried"])}
-                d.setdefault("advisories", []).append(adv)
-                out.append(adv)
-    except urllib.error.HTTPError as e:
-        brief_tail.append(f"advisories not checked: OSV answered HTTP {e.code}")
+    except OSV_ERRORS as e:
+        brief_tail.append(f"advisories not checked: {_osv_why(e)}")
         return [], False
-    except (urllib.error.URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError) as e:
-        why = getattr(e, "reason", None) or e
-        brief_tail.append(f"advisories not checked: {type(e).__name__}: {why}")
-        for d in checkable:
-            d.pop("advisories", None)
-        return [], False
-    return out, True
+    out, checked = [], True
+    for d, ids in zip(checkable, hits):
+        for osv_id in ids:
+            try:
+                detail = osv.vuln(osv_id)
+            except OSV_ERRORS as e:
+                brief_tail.append(f"advisory {osv_id} on {d['ecosystem']} {d['name']} {d['version']} not checked: "
+                                  f"{_osv_why(e)}")
+                checked = False
+                continue
+            fixed = fixed_versions(detail, d["ecosystem"], d["norm"], d["queried"])
+            if d["ecosystem"] == "Go":
+                fixed = [f if f.startswith("v") else "v" + f for f in fixed]
+            adv = {"id": osv_id, "ecosystem": d["ecosystem"], "name": d["name"], "version": d["version"],
+                   "queried": d["queried"], "manifest": d["manifest"], "fixed": fixed,
+                   "accept": advisory_accept(osv_id, d["ecosystem"], d["norm"], d["queried"])}
+            d.setdefault("advisories", []).append(adv)
+            out.append(adv)
+    return out, checked
 
 
 # ---- the scan -------------------------------------------------------------------------------------------------------
