@@ -11867,8 +11867,8 @@ _SERIAL_CHAINS = None
 
 
 def _serial_chains():
-    """serial-chains.py, loaded on first use (the _run_record() pattern), for its surface grammar: read_surfaces and
-    checkouts_of (_serial_root). Its import has no side effects."""
+    """serial-chains.py, loaded on first use (the _run_record() pattern), for its surface grammar: read_surfaces,
+    checkouts_of and read_chain_copies (_serial_root). Its import has no side effects."""
     global _SERIAL_CHAINS
     if _SERIAL_CHAINS is None:
         sys.dont_write_bytecode = True
@@ -11886,7 +11886,9 @@ def _serial_root(note):
     """(root, None) for a serial note's completion verify: the chain's one checkout, serial-chains.py's checkouts_of
     over its `surfaces:` and its `## Queue` rows' Launch-cell folders (the vault, the note's tasks dir's grandparent
     when that dir ends in Work/Tasks, excluded), which must be a git toplevel (`git -C <entry> rev-parse
-    --show-toplevel`, realpath'd, is the entry: the test leg.py's claim stamps a `leg_base` by); else (None, why)."""
+    --show-toplevel`, realpath'd, is the entry: the test leg.py's claim stamps a `leg_base` by); else (None, why). In a
+    chain with `chain_copies:` (ADR 0067 d2) the root is that checkout's Chain copy, which must be its own git toplevel
+    (else `its Chain copy <C> is missing: leg.py begin remakes it`); a malformed key is (None, why)."""
     sc = _serial_chains()
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
@@ -11911,6 +11913,18 @@ def _serial_root(note):
     if top != tok:
         return None, (f"{tops[0]} is not a git toplevel (git -C {tops[0]} rev-parse --show-toplevel gives "
                       f"{top or 'no checkout'}): a serial chain's completion verify runs on its checkout's toplevel")
+    # A chain that works in Chain copies (ADR 0067 d2) committed in its copy: the verify runs on the copy's HEAD, where
+    # its tasks' leg_head anchors are.
+    try:
+        pairs = sc.read_chain_copies(note)
+    except ValueError as e:
+        return None, f"chain_copies: {e}: fix the note"
+    copy = next((p for c, p in pairs or [] if c.casefold() == tok.casefold()), None)
+    if copy is not None:
+        real = os.path.realpath(copy)
+        if toplevel(real) != real:
+            return None, f"its Chain copy {copy} is missing: leg.py begin remakes it"
+        return Path(real), None
     return Path(tok), None
 
 

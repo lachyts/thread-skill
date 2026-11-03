@@ -17,7 +17,8 @@
 //   r-takeover   § 7 (d), run whenever `restart.takeOver` (whatever blocks first): `list_sessions` present stops, gone
 //                (or his word) takes over, else ask; (e)'s open-Leg clause needs (d)'s evidence and the take-over
 //                prompt;
-//   r-restart    § 7 (e) step 1: every `restart.blockedBy` value in order with its evidence, (d)'s evidence whenever
+//   r-restart    § 7 (e) step 1: every `restart.blockedBy` value in order with its evidence (a missing Chain copy remade
+//                by `leg.py copies`, then the restart goes on; a malformed `chain_copies:` stops), (d)'s evidence whenever
 //                `restart.takeOver` (the restart clause included: a standing restart outranks an open Leg), the
 //                "checks only" sentence, and the steps re-read → `restarted --pending` → `create_thread` →
 //                `--started`, or the manual handoff → `--manual`; never `leg.py begin`;
@@ -80,6 +81,7 @@ function item(text, start) {
 const S_STATES = [['complete'], ['dropped', 'superseded'], ['incomplete'], ['paused'], ['halted'], ['restarting'], ['live'],
   ['awaiting-successor'], ['completable'], ['stopped'], ['stalled'], ['stuck'], ['not-started', 'ready']]
 const BLOCKERS = [/^`halt` → never: \(c\) first\.$/, /^`open Leg K \(session <id>\)` → /, /^`handover started <X>` → /, /^`restart Leg N \(<how>\)` → /,
+  /^`chain_copies: <why>: fix the note` → report it, and stop/, /^`chain copy missing: <C> \(leg\.py copies --rollout <note> remakes it\)` → /,
   /^`surface held by \[\[B\]\] \(<token>\)` → never restart \(ADR 0060\)/, /^null → by `chain`: /, /^Anything else → report it, and stop\.$/]
 const LEG_VERBS = ['begin', 'claim', 'done', 'close', 'set-aside', 'smoke', 'file-fix', 'handed', 'file-followup']
 
@@ -163,8 +165,12 @@ function check(f) {
     'the take-over form (`restart.takeOver`)'])
 
   if (bullets.length !== BLOCKERS.length || BLOCKERS.some((re, k) => !re.test(bullets[k] ?? ''))) {
-    flag('r-restart', `(e) step 1's blockers are not halt, open Leg, handover, restart, surface held, null, else: ${bullets.map((x) => x.slice(0, 30)).join(' | ')}`)
+    flag('r-restart', `(e) step 1's blockers are not halt, open Leg, handover, restart, chain_copies, chain copy missing, surface held, null, else: ${bullets.map((x) => x.slice(0, 30)).join(' | ')}`)
   }
+  // ADR 0067 d2: a missing Chain copy is agent-fixable (leg.py copies remakes it, then the restart goes on).
+  const cm = bullets.find((x) => x.startsWith('`chain copy missing: <C>')) ?? ''
+  if (!cm.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py copies --rollout <rollout-note>`') ||
+    !cm.includes('re-read `leg.py status` and go on to the restart')) flag('r-restart', `the chain copy missing clause: ${cm}`)
   const ho = bullets.find((x) => x.startsWith('`handover started <X>`')) ?? ''
   const rs = bullets.find((x) => x.startsWith('`restart Leg N (<how>)`')) ?? ''
   const nul = bullets.find((x) => x.startsWith('null →')) ?? ''
@@ -328,6 +334,22 @@ test('control: an open-Leg clause that just restarts fails r-takeover', () => {
 })
 test('control: (e) without the halt clause fails r-restart', () => {
   only('repair', '   - `halt` → never: (c) first.\n', '', ['r-restart'], 'halt')
+})
+test('control: (e) without the chain copy missing clause fails r-restart', () => {
+  const l = lineOf('repair', '   - `chain copy missing: <C> (leg.py copies --rollout <note> remakes it)` → ')
+  const lines = real.repair.split('\n')
+  const i = lines.indexOf(l)
+  let j = i + 1
+  while (lines[j].startsWith('     ')) j++
+  only('repair', `${lines.slice(i, j).join('\n')}\n`, '', ['r-restart'], 'chain copy missing')
+})
+test('control: a chain copy missing clause that only reports fails r-restart', () => {
+  only('repair', 'Exit 0 → re-read\n     `leg.py status` and go on to the restart', 'Exit 0 → report it, and stop', ['r-restart'], 'copies then stop')
+})
+test('control: (e) without the malformed chain_copies clause fails r-restart', () => {
+  const l = lineOf('repair', '   - `chain_copies: <why>: fix the note` → ')
+  const next = real.repair.split('\n')[real.repair.split('\n').indexOf(l) + 1]
+  only('repair', `${l}\n${next}\n`, '', ['r-restart'], 'chain_copies')
 })
 test('control: (e) without the "checks only" sentence fails r-restart', () => {
   only('repair', '   `leg.py restarted` checks only the halt, the numbering (Leg N not begun, N = last_n + 1) and a standing restart.\n', '',

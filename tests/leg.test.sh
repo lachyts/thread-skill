@@ -30,6 +30,22 @@
 #        blocker (L14f); a stuck chain with a row in progress, or no Queue rows, holds its whole claim with a warn (L14h)
 #   L15  claim stamps one leg_base per checkout the row works (a file token's checkout, its launch folder's; the vault
 #        never), and status's hold carries the order's began stamp and the open Leg (ADR 0067 d2, d4)
+#   L16  Chain copies (ADR 0067 d2): `copies` makes each checkout's worktree on chain/<rollout> under the copy dir, cut
+#        from the default branch, links the gitignored config (the toplevel's and a launch folder's; never a tracked or
+#        un-ignored file), stamps chain_copies: after shape:, and refuses a copy dir under ~/repos, an occupied path, a
+#        malformed key, one repository twice, this plugin's own checkout and the chain branch checked out in another
+#        worktree (L16a); begin remakes a deleted copy on its branch, exit 4 naming the copy line, and logs the
+#        primary folder (L16b, L16g); begin fast-forwards a clean copy to the primary's default branch, and its four
+#        controls (L16c); claim stamps the copy and the primary bases, done passes a copy commit and refuses one in the
+#        primary, which --revert reverts there, while a hand merge of the chain branch is never stray (L16d); two
+#        chains in one repo hold separate HEADs and indexes (L16e); the hand-over, handed --manual and status's restart
+#        open in the copy, with the alias's paste line (a cd-less alias's whole command) or its prose fallback, and a
+#        missing copy blocks the restart (L16f); done's own-checkout rule across two copies (L16h); Complete's land
+#        follow-on merges the chain branch, and a stuck route still files a chain merged by hand (L16i); begin adds a
+#        hand-added row's pair, and claim refuses a top with none or a pair whose copy is missing (L16j); claim refuses a
+#        dependency another chain finished whose commit the copy lacks, naming its chain/<X> or the merge into the copy,
+#        and claims it once the work is there, or when the commit is another repository's (L16k). L1-L15 are the
+#        in-place regression: their notes carry no chain_copies:.
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -59,6 +75,9 @@ export THREAD_LEG_LOCK_DIR="$TMP/locks" THREAD_EVENTS_DIR="$TMP/events" TMPDIR="
 export THREAD_HEAT_LEVEL=0   # the Heat hold's reading, pinned: a hot Mac never flips an assertion
 # L1cv's completion-verify --run: the machine's verify slots and the detached verify trees stay in temp (ADR 0055)
 export THREAD_VERIFY_SLOTS_DIR="$TMP/verify-slots" THREAD_COMPLETION_TREE_DIR="$TMP/trees"
+# L16's Chain copies stay in temp (each L16 scenario points it at its own dir), and so does the launch-alias file a copy's
+# manual launch line reads (absent unless a case writes it)
+export THREAD_CHAIN_COPY_DIR="$TMP/chains" THREAD_LAUNCH_ALIASES="$TMP/aliases.zsh"
 mkdir -p "$TMPDIR" "$TMP/bin"
 # A fake gh and ssh: any call is logged and fails, so a test can assert no network was touched.
 printf '#!/bin/sh\necho "gh $*" >> "%s/net.log"\nexit 1\n' "$TMP" > "$TMP/bin/gh"
@@ -1140,6 +1159,354 @@ mkro '' "t1~cc-v~$V~\`ext:x\`"; mkt t1
 leg begin --cwd "$V"; ok "$rc" 0 "L15: begin from the vault"
 leg claim --task t1
 ok "$rc|$(fm t1 leg_base)" "0|[]" "L15: a vault-launched row stamps nothing"
+unset CWD
+
+# ════ L16: Chain copies (ADR 0067 d2) ═══════════════════════════════════════════════════════════════════════════════
+# cscen <name> — scen, with this scenario's own copy dir $S/chains
+cscen() { scen "$1"; export THREAD_CHAIN_COPY_DIR="$S/chains"; rm -f "$THREAD_LAUNCH_ALIASES"; }
+# crepo <dir> <origin url> — mkrepo, plus a .gitignore of the config files, a tracked launch folder sub/l and a tracked
+# .claude/settings.json; then the gitignored config at the toplevel and in sub/l, and an un-ignored untracked file
+crepo() {
+  mkrepo "$1" "$2"
+  printf '.mcp.json\n**/.mcp.json\n.claude/settings.local.json\n' > "$1/.gitignore"
+  mkdir -p "$1/sub/l" "$1/.claude"; echo keep > "$1/sub/l/keep.txt"; echo '{}' > "$1/.claude/settings.json"
+  git -C "$1" add -A; git -C "$1" commit -qm "ignore the config"; git -C "$1" update-ref refs/remotes/origin/master HEAD
+  echo '{"m":1}' > "$1/.mcp.json"; echo '{"l":1}' > "$1/.claude/settings.local.json"; echo '{"s":1}' > "$1/sub/l/.mcp.json"
+  echo loose > "$1/loose.txt"
+}
+fmline() { grep -A1 '^shape: serial' "$T/$RO.md" | tail -n 1; }
+
+cscen l16a
+R="$S/r"; crepo "$R" https://github.com/o/r16.git; C="$S/chains/r-$RO"
+git -C "$R" checkout -qb w; pcommit "$R" wip.txt wip "wip on w"   # $R works on a WIP branch: the copy is cut from master
+mkdir -p "$S/plain"
+mkro '' "t1~cc-r~$R/sub/l~\`repo:$R//a.txt\`" "t2~cc-r~$R/sub/l~\`repo:$S/plain\`"; mkt t1; mkt t2
+git -C "$V" add -A; git -C "$V" commit -qm vault
+snap; leg copies --dry-run
+ok "$rc|$(q 'd["stamped"]')|$(q 'd["copies"][0]["copy"]')|$(q 'd["copies"][0]["made"]')" "0|True|$C|True" \
+   "L16a: copies --dry-run reports the copy it would make"
+ok "$(test -e "$C" && echo y || echo n)" n "L16a: … and makes nothing"; same "L16a: copies --dry-run"
+snap; LEGENV="THREAD_CHAIN_COPY_DIR=$HOME/repos/chains" leg copies
+ok "$rc|$(test -e "$HOME/repos/chains" && echo y || echo n)" "1|n" "L16a: a copy dir under ~/repos is refused (exit 1), nothing made"
+has "$err" "at or under ~/repos" "L16a: … saying so"; same "L16a: a copy dir under ~/repos"
+leg copies
+ok "$rc|$(q 'd["stamped"]')|$(q 'd["copies"][0]["checkout"]')|$(q 'd["copies"][0]["branch"]')|$(q 'd["copies"][0]["base"]')" \
+   "0|True|$R|chain/$RO|master" "L16a: copies makes \$R's Chain copy on chain/\$RO, cut from master"
+ok "$(git -C "$C" rev-parse --show-toplevel)|$(git -C "$C" symbolic-ref HEAD)|$(git -C "$C" rev-parse HEAD)" \
+   "$C|refs/heads/chain/$RO|$(git -C "$R" rev-parse master)" "L16a: … a worktree at \$S/chains/r-\$RO, on master's commit though \$R is on w"
+ok "$(git -C "$R" symbolic-ref --short HEAD)" w "L16a: … and \$R stays on w"
+ok "$(fm "$RO" chain_copies)|$(fmline)" "[\"$R -> $C\"]|chain_copies: [\"$R -> $C\"]" "L16a: chain_copies: stamped with the one pair, after shape:"
+ok "$(readlink "$C/.mcp.json")|$(readlink "$C/.claude/settings.local.json")|$(readlink "$C/sub/l/.mcp.json")" \
+   "$R/.mcp.json|$R/.claude/settings.local.json|$R/sub/l/.mcp.json" "L16a: the gitignored config is linked, at the toplevel and in the launch folder"
+ok "$(q 'd["copies"][0]["linked"]')" "['.mcp.json', '.claude/settings.local.json', 'sub/l/.mcp.json']" "L16a: … and listed"
+ok "$(test -e "$C/loose.txt" && echo y || echo n)|$(test -L "$C/.claude/settings.json" && echo link || echo own)" "n|own" \
+   "L16a: an un-ignored untracked file is never linked, and a tracked file is the copy's own"
+ok "$(git -C "$C" status --porcelain)" "" "L16a: the copy is clean"
+has "$(q 'd["warns"]')" "WARN: $S/plain is in no git checkout: no Chain copy (it is no checkout's index)" \
+   "L16a: control: a repo: path in no git gets no copy, with a WARN, beside the one pair"
+snap; leg copies
+ok "$rc|$(q 'd["copies"][0]["made"]')|$(q 'd["stamped"]')|$(q 'd["copies"][0]["linked"]')" "0|False|False|[]" "L16a: a second run makes and stamps nothing"
+same "L16a: a second copies"
+# a tracked .mcp.json and an un-ignored settings.local.json are never linked
+RT="$S/rt"; mkrepo "$RT" https://github.com/o/rt.git; echo '{}' > "$RT/.mcp.json"; git -C "$RT" add -A; git -C "$RT" commit -qm mcp
+mkdir -p "$RT/.claude"; echo '{}' > "$RT/.claude/settings.local.json"
+mkro '' "t1~cc-rt~$RT~\`repo:$RT//a.txt\`"; leg copies
+ok "$rc|$(test -L "$S/chains/rt-$RO/.mcp.json" && echo link || echo own)|$(test -e "$S/chains/rt-$RO/.claude/settings.local.json" && echo y || echo n)" \
+   "0|own|n" "L16a: a tracked .mcp.json is the copy's own, and an un-ignored settings.local.json is never linked"
+# refusals: an occupied copy path, a malformed key; the note unwritten
+cscen l16a2
+R="$S/r"; crepo "$R" https://github.com/o/r16b.git; C="$S/chains/r-$RO"
+mkro '' "t1~cc-r~$R/sub/l~\`repo:$R//a.txt\`"; mkt t1
+mkdir -p "$C"; snap; leg copies
+ok "$rc" 1 "L16a: a copy path held by a plain directory is refused (exit 1)"
+has "$err" "$C exists and is not $R's Chain copy on chain/$RO" "L16a: … naming it"; same "L16a: an occupied copy path"
+rmdir "$C"; subst "$T/$RO.md" 'shape: serial' "shape: serial
+chain_copies: [\"$R\"]"
+snap; leg copies
+ok "$rc" 1 "L16a: a malformed chain_copies: is refused (exit 1)"; has "$err" "chain_copies: " "L16a: … naming the key"
+same "L16a: a malformed chain_copies:"
+ok "$(test -e "$C" && echo y || echo n)" n "L16a: … and nothing is made"
+# refusals: one repository twice (a primary and its linked worktree), this plugin's own checkout, the chain branch checked
+# out in another worktree (the copy deleted, the branch then checked out in the primary); each the note unwritten
+cscen l16a3
+R="$S/r"; crepo "$R" https://github.com/o/r16a3.git; W="$S/rw"; git -C "$R" worktree add -q -b side "$W"
+mkro '' "t1~cc-r~$R/sub/l~\`repo:$R//a.txt\`" "t2~cc-w~$W~\`repo:$W//b.txt\`"; mkt t1; mkt t2
+snap; leg copies
+ok "$rc|$(test -e "$S/chains" && echo y || echo n)" "1|n" "L16a: a primary and its linked worktree in one chain are refused (exit 1), nothing made"
+has "$err" "$R and $W are one repository (git common dir $R/.git): a chain copies a repository once, from its primary checkout; nothing written" \
+   "L16a: … naming both and their common dir"
+same "L16a: one repository twice"
+cscen l16a4
+TS="$S/ts"; crepo "$TS" https://github.com/lachyts/thread-skill.git
+mkro '' "t1~cc-ts~$TS~\`repo:$TS//a.txt\`"; mkt t1
+snap; leg copies
+ok "$rc|$(test -e "$S/chains" && echo y || echo n)" "1|n" "L16a: this plugin's own checkout is refused (exit 1), nothing made"
+has "$err" "$TS is this plugin's own checkout: there are no serial self-rollouts (ADR 0040); nothing written" "L16a: … naming it"
+same "L16a: this plugin's own checkout"
+cscen l16a5
+R="$S/r"; crepo "$R" https://github.com/o/r16a5.git; C="$S/chains/r-$RO"
+mkro '' "t1~cc-r~$R/sub/l~\`repo:$R//a.txt\`"; mkt t1
+leg copies; ok "$rc" 0 "L16a: copies"
+rm -rf "$C"; git -C "$R" worktree prune; git -C "$R" checkout -q "chain/$RO"
+snap; leg copies
+ok "$rc|$(test -e "$C" && echo y || echo n)" "1|n" "L16a: chain/\$RO checked out in the primary is refused (exit 1), the copy not remade"
+has "$err" "chain/$RO is checked out in $R, not in its Chain copy $C: check it out elsewhere there, then run again; nothing written" \
+   "L16a: … naming the worktree that holds it"
+same "L16a: the chain branch checked out elsewhere"
+
+# ════ L16b: begin remakes a deleted copy on its branch; exit 4 names the copy's launch; the began line its primary ═══
+cscen l16b
+R="$S/r"; crepo "$R" https://github.com/o/r16c.git; C="$S/chains/r-$RO"
+mkro '' "t1~cc-r~$R/sub/l~\`repo:$R//a.txt\`"; mkt t1
+leg copies; ok "$rc" 0 "L16b: copies"
+tcommit "$C" t0 early.txt "early chain work"; early=$(git -C "$C" rev-parse HEAD)
+rm -rf "$C"
+snap; CWD="$R" leg begin --cwd "$R"
+ok "$rc|$(git -C "$C" rev-parse HEAD)|$(git -C "$C" symbolic-ref HEAD)" "4|$early|refs/heads/chain/$RO" \
+   "L16b: begin from the primary remakes the deleted copy on its branch, its earlier commit kept, then exit 4"
+ok "$(q 'd["launch"]')" "cc-r from $C/sub/l: cd there, then run cc-r's command without its cd (\`alias cc-r\` prints it); never cc-r itself, since cc-r itself opens $R/sub/l" \
+   "L16b: … its launch the copy line (no alias file: the prose, never the alias itself)"
+has "$(q 'd["status_line"]')" "reason=\"wrong launch: run Leg 1 as cc-r from $C/sub/l\"" "L16b: … its reason naming the copy folder"
+same "L16b: exit 4 writes nothing to the note"
+CWD="$C/sub/l" leg begin --cwd "$C/sub/l"
+ok "$rc|$(q 'd["cwd"]')|$(q 'd["copies"]')" "0|$C/sub/l|[{'checkout': '$R', 'copy': '$C', 'branch': 'chain/$RO', 'made': False, 'fastForwarded': False}]" \
+   "L16b: begin from the copy's launch folder: 0, with copies and cwd"
+ok "$(logn "Leg 1 began: leg-1 session s1 in cc-r from $R/sub/l\$")" 1 "L16b: … and the began line names the primary folder"
+ok "$(q 'd["launch"]["folder"]')" "$R/sub/l" "L16b: … as its launch folder"
+
+# ════ L16c: begin fast-forwards a clean copy to its primary's default branch ═══════════════════════════════════════
+# ffscen <name> — a copy chain in $R (on master), copies made, then master moves ahead in $R
+ffscen() {
+  cscen "$1"; R="$S/r"; crepo "$R" "https://github.com/o/$1.git"; C="$S/chains/r-$RO"
+  mkro '' "t1~cc-r~$R/sub/l~\`repo:$R//a.txt\`"; mkt t1; leg copies
+  pcommit "$R" m.txt m "master moves on"
+}
+ffscen l16c
+CWD="$C/sub/l" leg begin --cwd "$C/sub/l"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')|$(git -C "$C" rev-parse HEAD)" "0|True|$(git -C "$R" rev-parse master)" \
+   "L16c: begin fast-forwards the clean copy to master"
+ok "$(git -C "$R" symbolic-ref --short HEAD)|$(git -C "$R" status --porcelain --untracked-files=no)" "master|" "L16c: … never moving the primary"
+ffscen l16c2; echo dirty >> "$C/a.txt"
+CWD="$C/sub/l" leg begin --cwd "$C/sub/l"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')" "0|False" "L16c: control: a dirty copy is not fast-forwarded"
+has "$(q 'd["warns"]')" "WARN: $C: not fast-forwarded to master: the copy has uncommitted changes" "L16c: … with a WARN"
+ffscen l16c3; tcommit "$C" t0 own.txt "the chain's own commit"; own=$(git -C "$C" rev-parse HEAD)
+CWD="$C/sub/l" leg begin --cwd "$C/sub/l"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')|$(git -C "$C" rev-parse HEAD)" "0|False|$own" "L16c: control: a chain with its own commit is not fast-forwarded"
+has "$(q 'd["warns"]')" "chain/$RO has commits master lacks" "L16c: … with a WARN"
+ffscen l16c4; git -C "$R" checkout -qb w
+CWD="$C/sub/l" leg begin --cwd "$C/sub/l"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')" "0|False" "L16c: control: the primary off master: not fast-forwarded"
+has "$(q 'd["warns"]')" "WARN: $C: not fast-forwarded to master: $R does not have master checked out" "L16c: … with a WARN"
+cscen l16c5
+R="$S/r"; mkdir -p "$R"; git -c init.defaultBranch=trunk init -q "$R"; echo a > "$R/a.txt"; git -C "$R" add -A; git -C "$R" commit -qm base
+C="$S/chains/r-$RO"; mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\`"; mkt t1
+leg copies
+ok "$rc|$(q 'd["copies"][0]["base"]')|$(git -C "$C" rev-parse HEAD)" "0|HEAD|$(git -C "$R" rev-parse HEAD)" \
+   "L16c: control: no origin/HEAD, main or master: the copy is cut from HEAD"
+has "$(q 'd["warns"]')" "WARN: $R: no default branch resolved: its Chain copy is cut from HEAD (trunk) and begin never fast-forwards it" "L16c: … with a WARN"
+pcommit "$R" m.txt m "trunk moves on"
+CWD="$C" leg begin --cwd "$C"
+ok "$rc|$(q 'd["copies"][0]["fastForwarded"]')" "0|False" "L16c: … and begin never fast-forwards it"
+has "$(q 'd["warns"]')" "WARN: $C: not fast-forwarded: $R has no default branch resolved" "L16c: … saying why"
+
+# ════ L16d: claim stamps the copy and the primary; done passes a copy commit and refuses a primary one ═════════════
+cscen l16d
+R="$S/r"; crepo "$R" https://github.com/o/r16d.git; C="$S/chains/r-$RO"; export CWD="$C/sub/l"
+mkro '' $(rows cc-r "$R/sub/l" "\`repo:$R//a.txt\`" t1 t2 t3 t4); for t in t1 t2 t3 t4; do mkt "$t"; done
+CWD="$R" leg copies; leg begin --cwd "$C/sub/l"; ok "$rc" 0 "L16d: begin in the copy"
+leg claim --task t1
+ok "$rc|$(fm t1 leg_base)|$(fm t1 leg_primary_base)" "0|[\"$C@$(git -C "$C" rev-parse HEAD)\"]|[\"$R@$(git -C "$R" rev-parse HEAD)\"]" \
+   "L16d: claim stamps leg_base on the copy and leg_primary_base on the primary"
+ok "$(q 'd["leg_primary_base"]')" "['$R@$(git -C "$R" rev-parse HEAD)']" "L16d: … and prints it"
+tcommit "$C" t1 c.txt "t1 work"; d=$(review "$C" HEAD)
+leg done --task t1 --verify pass --review "$d" --cwd "$C/sub/l"
+ok "$rc|$(fm t1 leg_head)" "0|[\"$C@$(git -C "$C" rev-parse HEAD)\"]" "L16d: a commit in the copy, reviewed there, passes done; leg_head is on the copy"
+leg claim --task t2; ok "$rc" 0 "L16d: claim t2"
+tcommit "$R" t2 s.txt "t2 in the primary"; stray=$(git -C "$R" rev-parse HEAD)
+snap; leg done --task t2 --verify pass --cwd "$C/sub/l"
+ok "$rc" 1 "L16d: a Task: commit in the primary is refused by done"
+has "$err" "[[t2]] committed in the primary $R, not its chain copy $C: set it aside with --revert, which reverts it there, and redo it in $C" \
+   "L16d: … naming the primary and the copy"; same "L16d: a refused done"
+leg change --task t2
+has "$(q 'd["stray"]')" "WARN: ${stray:0:12} '✨ feat: t2 s.txt' in $R carries Task: [[t2]] but is in the primary" "L16d: change shows the stray WARN"
+leg set-aside --task t2 --reason "worked in the primary" --revert
+ok "$rc|$(logn "Leg 1 reverted .* in $R\$")|$(test -e "$R/s.txt" && echo y || echo n)" "0|1|n" "L16d: set-aside --revert reverts it in the primary"
+leg claim --task t3; ok "$rc" 0 "L16d: claim t3"
+tcommit "$C" t3 d.txt "t3 work"; git -C "$R" merge -q --no-edit "chain/$RO"; d=$(review "$C" HEAD)
+leg change --task t3; ok "$(q 'd["stray"]')" "[]" "L16d: control: chain/\$RO merged into \$R mid-task is never stray"
+leg done --task t3 --verify pass --review "$d" --cwd "$C/sub/l"; ok "$rc" 0 "L16d: control: … and done passes"
+leg claim --task t4; ok "$rc" 0 "L16d: claim t4"
+tcommit "$C" t4 e.txt "t4 work"; git -C "$R" merge -q --no-edit "chain/$RO"
+leg set-aside --task t4 --reason "set aside after a hand merge" --revert
+ok "$rc|$(logn "Leg 1 reverted .* in $R\$")|$(logn "Leg 1 reverted .* in $C\$")" "0|1|1" "L16d: control: --revert finds nothing in \$R, only the copy's commit"
+unset CWD
+
+# ════ L16e: two chains in one repo hold separate HEADs and indexes ═════════════════════════════════════════════════
+cscen l16e
+R="$S/r"; crepo "$R" https://github.com/o/r16e.git; RO1=$RO; RO2=demo2-rollout-2026-10-20
+mkro '' "e1~cc-r~$R~\`repo:$R//a.txt\`"; mkt e1
+RO=$RO2; mkro '' "e2~cc-r~$R~\`repo:$R//b.txt\`"; mkt e2; leg copies; ok "$rc" 0 "L16e: the second chain's copies"
+RO=$RO1; leg copies; ok "$rc" 0 "L16e: the first chain's copies"
+C1="$S/chains/r-$RO1"; C2="$S/chains/r-$RO2"; rh=$(git -C "$R" rev-parse HEAD)
+tcommit "$C1" e1 a.txt "e1 work"; tcommit "$C2" e2 b.txt "e2 work"
+ok "$(git -C "$C1" symbolic-ref HEAD)|$(git -C "$C2" symbolic-ref HEAD)" "refs/heads/chain/$RO1|refs/heads/chain/$RO2" "L16e: each on its own branch"
+ok "$([ "$(git -C "$C1" rev-parse HEAD)" != "$(git -C "$C2" rev-parse HEAD)" ] && echo y)|$([ "$(git -C "$C1" rev-parse --path-format=absolute --git-path index)" != "$(git -C "$C2" rev-parse --path-format=absolute --git-path index)" ] && echo y)" \
+   "y|y" "L16e: a commit in each leaves two HEADs and two indexes"
+ok "$(git -C "$R" rev-parse HEAD)" "$rh" "L16e: … and \$R's HEAD unchanged"
+
+# ════ L16f: the hand-over, handed --manual and status's restart open in the copy ═══════════════════════════════════
+cscen l16f
+R="$S/r"; crepo "$R" https://github.com/o/r16f.git; C="$S/chains/r-$RO"; export CWD="$C"
+mkro '' "t1~cc-a~$R~\`repo:$R//a.txt\`" "t2~cc-r~$R/sub/l~\`repo:$R//b.txt\`"; mkt t1; mkt t2
+CWD="$R" leg copies; leg begin --cwd "$C"; ok "$rc" 0 "L16f: Leg 1 begins in the copy's toplevel"
+finish t1
+printf '%s\n' "alias cc-a='cd ~/elsewhere && cc'" "alias cc-r='cd ~/somewhere && cc --add-dir \"\$HOME/v\"'" > "$THREAD_LAUNCH_ALIASES"
+leg close --outcome handoff --cwd "$C"
+ok "$rc|$(q 'd["handover"]["cwd"]')" "0|$C/sub/l" "L16f: the hand-over's cwd is the next row's folder inside the copy"
+ok "$(q 'd["handover"]["launch"]')" "cd $C/sub/l && cc --add-dir \"\$HOME/v\"" "L16f: … and its launch the alias's paste line, never the alias itself"
+ok "$(logn "Leg 1 closed: handoff to Leg 2 in cc-r from $R/sub/l\$")" 1 "L16f: … while the close line names the Queue folder"
+leg handed --manual "no host tool"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=1/2 running=0 state=halted reason=\"manual handoff: Leg 2 in cc-r from $C/sub/l\"" \
+   "L16f: handed --manual names the copy folder"
+leg status
+ok "$(q 'd["restart"]["cwd"]')|$(q 'd["restart"]["launch"]')|$(q 'd["restart"]["blockedBy"]')" "$C/sub/l|cd $C/sub/l && cc --add-dir \"\$HOME/v\"|None" \
+   "L16f: status's restart opens in the copy"
+has "$(q 'd["needsYou"]')" "manual hand-over: start Leg 2 in cd $C/sub/l && cc --add-dir " "L16f: … and the manual hand-over item carries the line"
+rm -f "$THREAD_LAUNCH_ALIASES"; leg status
+has "$(q 'd["restart"]["launch"]')" "never cc-r itself, since cc-r itself opens $R/sub/l" "L16f: with no alias file, the line is the prose: never the alias itself"
+printf '%s\n' "alias cc-r='cc --add-dir \"\$HOME/v\"'" > "$THREAD_LAUNCH_ALIASES"; leg status
+ok "$(q 'd["restart"]["launch"]')" "cd $C/sub/l && cc --add-dir \"\$HOME/v\"" \
+   "L16f: an alias with no cd of its own (cc-steph's form): its whole command after the copy's cd, never the prose"
+rm -f "$THREAD_LAUNCH_ALIASES"
+mv "$C" "$S/moved"
+CWD="$R" leg status
+ok "$(q 'd["restart"]["blockedBy"]')" "chain copy missing: $C (leg.py copies --rollout $T/$RO.md remakes it)" "L16f: a missing copy blocks the restart"
+mv "$S/moved" "$C"; unset CWD
+
+# ════ L16g: a row-less begin in the copy logs the primary folder ═══════════════════════════════════════════════════
+cscen l16g
+R="$S/r"; crepo "$R" https://github.com/o/r16g.git; C="$S/chains/r-$RO"; export CWD="$C/sub/l"
+mkro '' "t1~cc-r~$R/sub/l~\`repo:$R//a.txt\`"; mkt t1
+CWD="$R" leg copies; leg begin --cwd "$C/sub/l"; finish t1; leg close --outcome stopped --reason "out of time" --cwd "$C/sub/l"
+SESS=s2 leg begin --cwd "$C/sub/l"
+ok "$rc|$(q 'd["next"]["action"]')|$(logn "Leg 2 began: leg-2 session s2 in claude from $R/sub/l\$")" "0|complete|1" \
+   "L16g: a complete Leg begun in the copy logs its primary folder"
+unset CWD
+
+# ════ L16h: two copies, one Leg: done finishes only the cwd's copy's commits (ADR 0059 d4) ═════════════════════════
+cscen l16h
+R="$S/r"; crepo "$R" https://github.com/o/r16h.git; R2="$S/r2"; crepo "$R2" https://github.com/o/r16h2.git
+C="$S/chains/r-$RO"; C2="$S/chains/r2-$RO"; export CWD="$C"
+mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\` \`repo:$R2//b.txt\`" "t2~cc-r2~$R2~\`repo:$R2//b.txt\`"; mkt t1; mkt t2
+CWD="$R" leg copies
+ok "$rc|$(fm "$RO" chain_copies)" "0|[\"$R -> $C\", \"$R2 -> $C2\"]" "L16h: a two-checkout chain gets two copies"
+leg begin --cwd "$C"; leg claim --task t1
+ok "$rc|$(fm t1 leg_base)" "0|[\"$C@$(git -C "$C" rev-parse HEAD)\", \"$C2@$(git -C "$C2" rev-parse HEAD)\"]" "L16h: claim stamps both copies"
+tcommit "$C2" t1 b.txt "t1 in the other copy"; d=$(review "$C2" HEAD)
+leg done --task t1 --verify pass --review "$d" --cwd "$C"
+ok "$rc" 1 "L16h: row 1's commit in the other copy is refused by done"
+has "$err" "[[t1]] changed $C2, not this Leg's checkout $C" "L16h: … not this Leg's checkout"
+unset CWD
+
+# ════ L16i: Complete files the land follow-on: merge the chain branch into the primary's default branch ════════════
+# icomplete <name> [checkout branch] — a one-task copy chain in $R, worked in the copy, then Complete
+icomplete() {
+  cscen "$1"; R="$S/r"; crepo "$R" "https://github.com/o/$1.git"; C="$S/chains/r-$RO"; export CWD="$C"
+  mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\`"; mkt t1
+  [ -z "${2:-}" ] || git -C "$R" checkout -qb "$2"
+  CWD="$R" leg copies; leg begin --cwd "$C"; work "$C" t1 c.txt "t1 work"
+  leg close --outcome complete --cwd "$C" --reflection "$REFL"; ok "$rc" 0 "$1: complete"
+  A="$T/Archive/Rollouts/$RO.md"; FU="$T/demo-followup-land-chain-2026-10-20.md"
+}
+icomplete l16i
+has "$(cat "$FU")" "- \`$C\` (\`chain/$RO\` of \`$R\`): merge \`chain/$RO\` into \`master\` there (with \`master\` checked out: \`git -C $R merge chain/$RO\`), then open a PR from them, or push them; then \`git -C $R worktree remove $C\` and \`git -C $R branch -d chain/$RO\`" \
+   "L16i: the land follow-on merges chain/\$RO into master first"
+has "$(cat "$FU")" "([[t1]])" "L16i: … listing t1's commit"
+has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): 1 not on master → [[demo-followup-land-chain-2026-10-20]]" "L16i: the Chain commits line"
+icomplete l16i2 w
+has "$(cat "$FU")" "merge \`chain/$RO\` into \`master\` there (with \`master\` checked out: \`git -C $R merge chain/$RO\`), then it goes no further: not landed: on w, not master" \
+   "L16i: a deferred route (on w) still files the merge"
+has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): 1 not on master → [[demo-followup-land-chain-2026-10-20]]" "L16i: … and its Chain commits line"
+# control: chain/$RO merged into master by hand, then a stuck route (the primary detached): a stuck route cannot say what
+# origin has, so every chain commit is still filed, as in place
+cscen l16i3
+R="$S/r"; crepo "$R" https://github.com/o/l16i3.git; C="$S/chains/r-$RO"; export CWD="$C"
+mkro '' "t1~cc-r~$R~\`repo:$R//a.txt\`"; mkt t1
+CWD="$R" leg copies; leg begin --cwd "$C"; work "$C" t1 c.txt "t1 work"; t1sha=$(git -C "$C" rev-parse HEAD)
+git -C "$R" merge -q --no-edit "chain/$RO"; git -C "$R" checkout -q --detach
+ok "$(git -C "$R" merge-base --is-ancestor "$t1sha" master && echo y)" y "L16i: control setup: t1's commit is on master"
+leg close --outcome complete --cwd "$C" --reflection "$REFL"; ok "$rc" 0 "L16i: complete after a hand merge, on a stuck route"
+A="$T/Archive/Rollouts/$RO.md"; FU="$T/demo-followup-land-chain-2026-10-20.md"
+ok "$(test -f "$FU" && echo y || echo n)" y "L16i: control: the land follow-on is still filed"
+has "$(cat "$FU")" "- \`$C\` (\`chain/$RO\` of \`$R\`): \`chain/$RO\` is already on \`master\`: check the landing route (detached HEAD), then open a PR from them, or push them; then \`git -C $R worktree remove $C\` and \`git -C $R branch -d chain/$RO\`" \
+   "L16i: … its act starting from the landing route, the merge already made"
+has "$(cat "$FU")" "\`${t1sha:0:12}\` ✨ feat: t1 c.txt ([[t1]])" "L16i: … listing t1's commit"
+has "$(cat "$A")" "- Chain commits: $C (chain/$RO of $R): all on master; stuck: detached HEAD → [[demo-followup-land-chain-2026-10-20]]" \
+   "L16i: … and its Chain commits line, never 'all on master' alone"
+unset CWD
+
+# ════ L16j: begin adds a hand-added row's pair; claim refuses a top with no pair ═══════════════════════════════════
+cscen l16j
+R="$S/r"; crepo "$R" https://github.com/o/r16j.git; R3="$S/r3"; crepo "$R3" https://github.com/o/r16j3.git
+C="$S/chains/r-$RO"; C3="$S/chains/r3-$RO"; export CWD="$C/sub/l"
+mkro '' "t1~cc-r~$R/sub/l~\`repo:$R//a.txt\`"; mkt t1; mkt t2
+CWD="$R" leg copies
+python3 - "$T/$RO.md" "$R" "$R3" <<'PY'
+import sys
+p, r, r3 = sys.argv[1:]
+t = open(p).read()
+row = f"| 1 | [[t1\\|t1]] | `cc-r` from `{r}/sub/l` | `repo:{r}//a.txt` |\n"
+open(p, "w").write(t.replace(row, row + f"| 2 | [[t2\\|t2]] | `cc-r` from `{r}/sub/l` | `repo:{r3}//x.txt` |\n", 1))
+PY
+leg begin --cwd "$C/sub/l"
+ok "$rc|$(fm "$RO" chain_copies)|$(git -C "$C3" symbolic-ref HEAD)" "0|[\"$R -> $C\", \"$R3 -> $C3\"]|refs/heads/chain/$RO" \
+   "L16j: begin adds and makes a hand-added row's pair"
+ok "$(q '[c["made"] for c in d["copies"]]')" "[False, True]" "L16j: … the new one made"
+subst "$T/$RO.md" "chain_copies: [\"$R -> $C\", \"$R3 -> $C3\"]" "chain_copies: [\"$R -> $C\"]"
+finish t1
+snap; cp "$T/t2.md" "$TMP/snap-t2"; leg claim --task t2
+ok "$rc" 1 "L16j: with that pair removed by hand, claim refuses"
+has "$err" "$R3 has no Chain copy in chain_copies: run leg.py copies --rollout $T/$RO.md, then claim again; nothing written" "L16j: … naming leg.py copies"
+same "L16j: a refused claim"; cmp -s "$T/t2.md" "$TMP/snap-t2"; ok "$?" 0 "L16j: … and t2 is unwritten"
+subst "$T/$RO.md" "chain_copies: [\"$R -> $C\"]" "chain_copies: [\"$R -> $C\", \"$R3 -> $C3\"]"; rm -rf "$C3"
+snap; leg claim --task t2
+ok "$rc" 1 "L16j: with the pair back but its copy deleted, claim refuses"
+has "$err" "$R3's Chain copy $C3 is missing: leg.py begin remakes it (or leg.py copies --rollout $T/$RO.md), then claim again; nothing written" \
+   "L16j: … naming the missing copy and begin"
+same "L16j: a claim on a missing copy"; cmp -s "$T/t2.md" "$TMP/snap-t2"; ok "$?" 0 "L16j: … and t2 is unwritten"
+unset CWD
+
+# ════ L16k: a dependency another chain finished, still on its chain/<X> branch, holds a copy chain's claim ═══════
+cscen l16k
+R="$S/r"; crepo "$R" https://github.com/o/r16k.git; RO1=$RO; RO2=demo2-rollout-2026-10-20
+C1="$S/chains/r-$RO1"; C2="$S/chains/r-$RO2"
+mkro '' "a1~cc-r~$R~\`repo:$R//a.txt\`"; mkt a1
+RO=$RO2; mkro '' "b1~cc-r~$R~\`repo:$R//b.txt\`"; mkt b1 'depends-on:' '  - "[[a1]]"'
+RO=$RO1; CWD="$R" leg copies; CWD="$C1" leg begin --cwd "$C1"; ok "$rc" 0 "L16k: chain 1's Leg begins in its copy"
+CWD="$C1" work "$C1" a1 a1.txt "a1 work"; a1sha=$(git -C "$C1" rev-parse HEAD)
+ok "$(fm a1 leg_head)" "[\"$C1@$a1sha\"]" "L16k: a1 is done, its leg_head on chain/\$RO1's copy"
+RO=$RO2; CWD="$R" leg copies; CWD="$C2" leg begin --cwd "$C2"; ok "$rc" 0 "L16k: chain 2's Leg begins in its copy"
+CWD="$C2" leg next; ok "$(q 'd["action"]')|$(q 'd["task"]')" "claim|b1" "L16k: next frees b1, its dependency done"
+snap; cp "$T/b1.md" "$TMP/snap-b1"; CWD="$C2" leg claim --task b1
+ok "$rc" 1 "L16k: claim refuses b1: a1's commit is on chain/\$RO1, not on master or in \$C2"
+has "$err" "[[b1]] depends on [[a1]] (done on chain/$RO1, not yet on master: its land follow-on merges it): set it aside" \
+   "L16k: … naming the cause and the set-aside"
+ok "$(q 'd["unlandedDeps"][0]["dep"]')|$(q 'd["unlandedDeps"][0]["rollout"]')|$(q 'd["unlandedDeps"][0]["sha"]')|$(q 'd["unlandedDeps"][0]["copy"]')" \
+   "a1|$RO1|$a1sha|$C2" "L16k: … and unlandedDeps names a1, its chain, its commit and this copy"
+same "L16k: a refused claim"; cmp -s "$T/b1.md" "$TMP/snap-b1"; ok "$?" 0 "L16k: … and b1 is unwritten"
+git -C "$R" merge -q --no-edit "chain/$RO1"
+CWD="$C2" leg claim --task b1
+ok "$rc" 1 "L16k: merged into master by hand but not yet in \$C2: still refused"
+has "$err" "[[b1]] depends on [[a1]] (on master, not yet in $C2: merge master into chain/$RO2 there)" "L16k: … naming the merge into the copy"
+git -C "$C2" merge -q --ff-only master
+CWD="$C2" leg claim --task b1
+ok "$rc|$(fm b1 leg_base)" "0|[\"$C2@$a1sha\"]" "L16k: control: with a1's work in \$C2, b1 is claimed"
+# control: a copy chain in another repository never meets a1's commit
+R2="$S/r2"; crepo "$R2" https://github.com/o/r16k2.git; RO3=demo3-rollout-2026-10-20; C3="$S/chains/r2-$RO3"
+RO=$RO3; mkro '' "d1~cc-r2~$R2~\`repo:$R2//a.txt\`"; mkt d1 'depends-on:' '  - "[[a1]]"'
+CWD="$R2" leg copies; CWD="$C3" leg begin --cwd "$C3"; CWD="$C3" leg claim --task d1
+ok "$rc" 0 "L16k: control: a1's commit is no object of \$R2's, so d1 is claimed"
 unset CWD
 echo
 if [ "$fail" -eq 0 ]; then echo "leg.test.sh: ALL PASS"; else echo "leg.test.sh: FAILED"; fi

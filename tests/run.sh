@@ -57,6 +57,9 @@ mkdir -p "$scratch/transcripts"; export THREAD_TRANSCRIPTS_DIR="$scratch/transcr
 # The machine's verify slots (verify-slot.py, p23-4) stay in temp too: each suite that reaches a pool exports its
 # own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
 export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
+# A serial chain's Chain copies (leg.py copies, ADR 0067 d2) stay in temp too: each suite that makes one exports its own
+# (tests/leg.test.sh), so this is the backstop that keeps a missed site out of ~/.local/state/thread/chains.
+export THREAD_CHAIN_COPY_DIR="$scratch/chains"
 # The gate and the lead's Integration verify run this whole suite inside a verify slot, whose command sees
 # VERIFY_SLOT_HELD=1 (verify-slot.py, p34-1): unset, so no suite reads its own runs as already inside a slot.
 unset VERIFY_SLOT_HELD

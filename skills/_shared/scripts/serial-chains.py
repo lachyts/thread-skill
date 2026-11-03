@@ -152,10 +152,22 @@ one; never a session-lane member). Exit 2 prints
 one `serial-chains:` line: no --tasks, a task note not found, a malformed --surface or --dep, reconcile-rollout.py
 unloadable, or plugin.json unreadable (ruling (c) cannot be checked, so the plan fails closed).
 
-The pure helpers (parse_token, fmt_token, repo_parts, checkout_of, overlaps, overlap_pairs, read_surfaces,
-norm_origin) touch neither the filesystem nor git; checkouts_of reads it only through realpath and the toplevel
-resolver it is given. unfinished-rollout.py imports them, and leg.py and reconcile-rollout.py load checkout_of and
-checkouts_of: repo_parts, checkout_of and checkouts_of are this file's one statement of a chain's checkouts. overlaps
+Chain copies (ADR 0067 d2). A serial note that carries `chain_copies:` works each git checkout it writes in its own
+Chain copy: a git worktree of that checkout on `chain/<rollout-slug>`, outside `~/repos` and `~/Projects`, which
+leg.py's `copies` verb makes (schedule S5) and `begin` remakes. Each item is `"<abs checkout> -> <abs copy>"`
+(read_chain_copies, fmt_chain_copies; `[]` is copy mode with nothing to copy, and a note with no key works every
+checkout in place). A copy's directory is `<checkout basename>-<rollout slug>`, `-<k>-` before the slug when another
+checkout of the chain has that basename (copy_name). A Queue folder is always a primary path: copy_folder maps it to
+the same relative folder inside its checkout's copy (the longest checkout prefix, case-folded, so a checkout nested
+inside another by path maps to its own copy), and primary_folder maps a copy path back. Tokens never change: a keyed
+token is written against the in-place twin (Git.primary), so it reads the same from a copy.
+
+The pure helpers (parse_token, fmt_token, repo_parts, checkout_of, overlaps, overlap_pairs, read_list, read_surfaces,
+read_chain_copies, fmt_chain_copies, copy_name, norm_origin) touch neither the filesystem nor git; checkouts_of,
+copy_folder and primary_folder read it only through realpath (and checkouts_of through the toplevel resolver it is
+given). unfinished-rollout.py imports them, leg.py loads the surface grammar and the Chain copy helpers, estate-dispatch.py
+read_chain_copies and copy_folder, and reconcile-rollout.py read_surfaces, checkouts_of and read_chain_copies:
+repo_parts, checkout_of and checkouts_of are this file's one statement of a chain's checkouts. overlaps
 and overlap_pairs take an optional toplevel resolver (Git.checkout) for the nested-checkout rule, and are purely
 textual without one. locate (claim), the grouping's nested-checkout read, the `checkouts` read and the ruling-(c)
 origin read are the only code that runs git; of it, only the Git class is exported, for unfinished-rollout.py's own
@@ -388,12 +400,19 @@ def _split_inline(v: str):
 
 
 def read_surfaces(note):
-    """A note's `surfaces:` as raw token strings, [] when absent or empty. A block list gives one token per `- `
-    item (quotes stripped, never split on commas); an inline `[...]` list is split only on commas outside quotes; a
-    lone scalar is one token. (reconcile-rollout.py's get_list splits on every comma, so it cannot read these.)"""
+    """A note's `surfaces:` as raw token strings, [] when absent or empty (read_list's reading)."""
+    return read_list(note, "surfaces") or []
+
+
+def read_list(note, key):
+    """A note's frontmatter `key:` list as raw strings, or None when the key is absent. A block list gives one item per
+    `- ` line (quotes stripped, never split on commas); an inline `[...]` list is split only on commas outside quotes; a
+    lone scalar is one item; an empty value with no items is []. (reconcile-rollout.py's get_list splits on every
+    comma, so it cannot read these.)"""
     lines = note._fm
+    pat = re.compile(rf"^{re.escape(key)}:(.*)$")
     for i, line in enumerate(lines):
-        m = re.match(r"^surfaces:(.*)$", line)
+        m = pat.match(line)
         if not m:
             continue
         value = m.group(1).strip()
@@ -414,7 +433,80 @@ def read_surfaces(note):
             elif item.strip():
                 break
         return out
-    return []
+    return None
+
+
+# ---- Chain copies (ADR 0067 d2; pure: no git, the filesystem only through realpath) --------------
+
+COPY_ARROW = " -> "
+
+
+def read_chain_copies(note):
+    """A serial note's `chain_copies:` as [(checkout, copy)], or None when the key is absent (the chain works each
+    checkout in place). Each item is `"<abs checkout> -> <abs copy>"`, both sides normalised; an item with no ` -> `,
+    an empty side or a relative one is a ValueError naming it. `[]` is copy mode with nothing to copy."""
+    items = read_list(note, "chain_copies")
+    if items is None:
+        return None
+    out = []
+    for it in items:
+        c, sep, p = it.partition(COPY_ARROW)
+        c, p = c.strip(), p.strip()
+        if not sep or not c or not p:
+            raise ValueError(f"{it!r} is not `<checkout> -> <copy>`")
+        if not (c.startswith("/") and p.startswith("/")):
+            raise ValueError(f"{it!r}: both sides are absolute paths")
+        out.append((posixpath.normpath(c), posixpath.normpath(p)))
+    return out
+
+
+def fmt_chain_copies(pairs) -> str:
+    """The inline list read_chain_copies reads back: `["<checkout> -> <copy>", …]`."""
+    return "[" + ", ".join(f'"{c}{COPY_ARROW}{p}"' for c, p in pairs) + "]"
+
+
+def copy_name(checkout, slug, taken=()):
+    """A Chain copy's directory name: `<basename>-<slug>`, or `<basename>-<k>-<slug>` for the first free k >= 2 when
+    another checkout in `taken` (the [(checkout, copy)] pairs already named) holds that name, case-folded."""
+    base = posixpath.basename(posixpath.normpath(checkout)) or "root"
+    held = {posixpath.basename(p).casefold(): c.casefold() for c, p in taken}
+    name, k = f"{base}-{slug}", 2
+    while held.get(name.casefold(), checkout.casefold()) != checkout.casefold():
+        name, k = f"{base}-{k}-{slug}", k + 1
+    return name
+
+
+def _remap(path, pairs):
+    """path (a realpath) through the longest case-folded `src` prefix at a `/` boundary of [(src, dst)] to
+    `<dst>/<rel>`, or None when no src holds it."""
+    pf, best = path.casefold(), None
+    for src, dst in pairs:
+        s = src.rstrip("/") or "/"
+        sf = s.casefold()
+        if pf == sf or pf.startswith(sf.rstrip("/") + "/"):
+            if best is None or len(sf) > len(best[0]):
+                best = (sf, s, dst)
+    if best is None:
+        return None
+    rel = path[len(best[1].rstrip("/")):].lstrip("/")
+    return posixpath.join(best[2], rel) if rel else best[2]
+
+
+def copy_folder(folder, pairs):
+    """A folder's place in its Chain copy: realpath(expanduser(folder)) mapped by the longest case-folded checkout
+    prefix of pairs ([(checkout, copy)], read_chain_copies') to `<copy>/<rel>`, or None (no pairs, or no checkout holds
+    it: the vault, a folder in no checkout). A checkout nested inside another by path maps to the inner one's copy."""
+    if not folder or not pairs:
+        return None
+    return _remap(os.path.realpath(os.path.expanduser(str(folder))), pairs)
+
+
+def primary_folder(path, pairs):
+    """copy_folder's inverse: a path inside a Chain copy mapped by the longest copy prefix back to `<checkout>/<rel>`,
+    or None when no copy holds it."""
+    if not path or not pairs:
+        return None
+    return _remap(os.path.realpath(os.path.expanduser(str(path))), [(p, c) for c, p in pairs])
 
 
 def norm_origin(url: str) -> str:

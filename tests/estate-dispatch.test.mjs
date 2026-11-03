@@ -972,6 +972,7 @@ test('D15. acceptance: sessions starts written notes, live rollouts only on the 
     ['execute', 'wrote-par-rollout-2026-10-20', path.join(S, 'root-act'), '/thread:execute [[wrote-par-rollout-2026-10-20]]', false,
       'Execute: wrote-par-rollout-2026-10-20'])
   assert.deepEqual([ser.kind, ser.cwd, ser.alias, ser.manual, ser.title], ['leg', W1, 'cc-thread', false, 'Leg 1: wrote-ser-rollout-2026-10-20'])
+  assert.equal(ser.launch, `cc-thread from ${W1}`, 'an in-place Leg 1 item carries its launch line')
   assert.ok(ser.prompt.startsWith('/thread:execute [[wrote-ser-rollout-2026-10-20]]\n'))
   assert.deepEqual([cx.kind, cx.alias, cx.manual], ['leg', 'cx-ops', true])
   // The allow-list, on the clean rollout.
@@ -1057,6 +1058,29 @@ test('D15. acceptance: sessions starts written notes, live rollouts only on the 
     assert.ok(x.title.length <= 60, x.title)
     assert.ok(x.tldr && !x.tldr.includes('/'), `a tldr with no paths: ${x.tldr}`)
   }
+})
+
+// ---- D15b. A serial note in Chain copies (ADR 0067 d2) ----------------------------------------------------------------
+test('D15b. sessions: a serial note in Chain copies opens Leg 1 in row 1\'s folder inside its copy, with its paste line; a malformed chain_copies: is manual', () => {
+  const VC = copyVault('chain-copies')
+  const W3 = path.join(S, 'w3')
+  const COPY = path.join(S, 'chains', 'w3-copy-rollout-2026-10-20')
+  const aliases = path.join(S, 'launch-aliases.zsh')
+  write(aliases, `alias cc-thread='cd ~/repos/tools/thread-skill && cc --add-dir "$HOME/v"'\n`)
+  const note = (slug, copies) => {
+    const p = path.join(VC, 'Work', 'Tasks', `${slug}.md`)
+    write(p, fm(`tags:\n  - rollout\nstatus: open\nshape: serial\nchain_copies: ${copies}\nprotocol_version: 5\nprojects:\n  - "[[Ser]]"`,
+      QUEUE('cc-thread', path.join(W3, 'sub'))))
+    return p
+  }
+  const good = note('copy-rollout-2026-10-20', `["${W3} -> ${COPY}"]`)
+  const bad = note('badcopy-rollout-2026-10-20', `["${W3}"]`)
+  const j = ok(py(['sessions', '--plan', PLAN_FILE(), '--vault', VC, '--wrote', good, '--wrote', bad], { THREAD_LAUNCH_ALIASES: aliases }))
+  const [leg, broken] = j.items
+  assert.deepEqual([leg.kind, leg.cwd, leg.alias, leg.manual], ['leg', path.join(COPY, 'sub'), 'cc-thread', false])
+  assert.equal(leg.launch, `cd ${path.join(COPY, 'sub')} && cc --add-dir "$HOME/v"`, 'the copy\'s paste line, never the alias itself')
+  assert.deepEqual([broken.kind, broken.cwd, broken.manual], ['leg', path.join(W3, 'sub'), true])
+  assert.match(broken.why, /^chain_copies: .*: fix the note$/)
 })
 
 // ---- D16. log: the Grade log (p25-4) ----------------------------------------------------------------------------------

@@ -801,12 +801,18 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   `<restart.blockedBy>`" when set. A `surface held by [[<B>]] (<token>)` blocker (ADR 0060) reads "waits its turn:
   [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
   A stand has five causes (ADR 0067 d4), each with its own remedy: [[<B>]] comes first (it began first, or wins the
-  slug order on equal stamps or when neither has begun) and holds an unlanded row on that place; or, until Chain
-  copies, [[<B>]] comes first and still has unlanded rows in a checkout this Leg works, even when the two share no
-  file (the commonest: a never-begun lower-slug chain that nobody starts blocks a higher-slug one this way, so name
-  "run [[<B>]] or stamp it `status: dropped`"); or [[<B>]]'s open Leg writes that place or (until Chain copies) works
-  that checkout; or [[<B>]] was scheduled on a place this chain released while it was stuck (ADR 0060's yield); or
-  [[<B>]]'s chain is unreadable, so it holds its whole claim (fail closed: `/thread:status [[<B>]]` names why; fix its note).
+  slug order on equal stamps or when neither has begun) and holds an unlanded row on that place; or, when either
+  chain works that checkout in place (no `chain_copies:`), [[<B>]] comes first and still has unlanded rows in a
+  checkout this Leg works, even when the two share no file (the commonest: a never-begun lower-slug chain that nobody
+  starts blocks a higher-slug one this way, so name "run [[<B>]] or stamp it `status: dropped`"); or [[<B>]]'s open
+  Leg writes that place or (when either chain works it in place) works that checkout; or [[<B>]] was scheduled on a
+  place this chain released while it was stuck (ADR 0060's yield); or [[<B>]]'s chain is unreadable, so it holds its
+  whole claim (fail closed: `/thread:status [[<B>]]` names why; fix its note). Two chains in their own Chain copies
+  (ADR 0067 d2) never stand at checkout level: they meet only file to file.
+  A `chain copy missing: <C> (…)` blocker reads "its Chain copy <C> is gone: run the command the blocker names (it
+  remakes the copy on its branch, its commits kept), then start Leg <restart.leg>"; a `chain_copies: <why>: fix the
+  note` blocker is shown as it is. In a chain with `chain_copies:`, `restart.cwd` and
+  `restart.launch` are already inside the copy: print the launch line as it is, never the alias itself.
   Its `prompt` is printed, fenced, only where an action below hands it to Lachy.
 - **Hold** (ADR 0060), from `hold`. Scope `stuck`: `Holds only <held>` with the `rows` that hold them (each `[[slug]]`
   with its `state`), then `Released <released>` when it is not empty: other chains and parallel runs may use those

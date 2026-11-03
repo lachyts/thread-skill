@@ -32,6 +32,9 @@
 #        shared place WARNing that they take turns (ADR 0067 d4)
 #   P8   the 2026-11-02 replan fixture (docs/spikes/2026-11-02-replan.py) over a synthetic estate: only the same-file
 #        pair and the declared-bare pairs clash, and no workspaces or Projects pair appears
+#   P9   the Chain copy helpers (ADR 0067 d2, pure): read_chain_copies (absent, [], inline and block lists, quoted
+#        commas and spaces, malformed items), fmt_chain_copies' round trip, copy_name's -<k>-, copy_folder (a nested
+#        checkout to the inner one) and its inverse primary_folder, read_surfaces through read_list
 #   P6   exit 2
 # Temp vaults, temp git repos with literal origin URLs (only `git rev-parse` and `git remote get-url` read them).
 # No vault, no network. bash 3.2-compatible (macOS).
@@ -763,6 +766,49 @@ hasnt "$ov" "Ops" "P8: … nor between two members of one launcher"
 hasnt "$ov" "Proj" "P8: no Projects pair (a Local: reach predicts nothing)"
 hasnt "$ov" "AgD" "P8: a **Repo:** ~/.agents/skills/ value predicts nothing, not even beside the declared toplevel"
 has "$rp" "AgB#0 ['repo:$PA//skills/y/run.py']" "P8: a relative touches: item keyed to the member's one checkout"
+
+# ── P9: the Chain copy helpers (ADR 0067 d2; pure) ────────────────────────────────────────────────────
+echo "== p9 (chain copies)"
+# pc <python body over m (the module) and Note> — the body's printed lines
+pc() {
+  python3 - "$SC" "$RR" "$1" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+sys.dont_write_bytecode = True
+def load(name, p):
+    spec = importlib.util.spec_from_file_location(name, p); mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod); return mod
+m, rr = load("sc", sys.argv[1]), load("rr", sys.argv[2])
+note = lambda fm: rr.Note(Path("/x/n.md"), "---\n" + fm + "\n---\nbody\n")
+def rd(fm):
+    try:
+        return repr(m.read_chain_copies(note(fm)))
+    except ValueError:
+        return "ERR"
+exec(sys.argv[3])
+PY
+}
+ok "$(pc 'print(rd("shape: serial"), rd("chain_copies: []"), rd("chain_copies:"))')" "None [] []" \
+   "P9: read_chain_copies: absent is None (in place); [] and an empty key are copy mode with nothing to copy"
+ok "$(pc 'print(rd("chain_copies: [\"/x/r -> /s/r-ro\", \"/x/q -> /s/q-ro\"]"))')" "[('/x/r', '/s/r-ro'), ('/x/q', '/s/q-ro')]" \
+   "P9: an inline list reads as pairs"
+ok "$(pc 'print(rd("chain_copies:\n  - \"/x/a, b -> /s/a, b-ro\"\n  - /x/c d -> /s/c d-ro"))')" "[('/x/a, b', '/s/a, b-ro'), ('/x/c d', '/s/c d-ro')]" \
+   "P9: a block list, a comma inside quotes and a space, never split"
+ok "$(pc 'p = [("/x/a, b", "/s/a, b-ro"), ("/x/c", "/s/c-ro")]; print(m.read_chain_copies(note("chain_copies: " + m.fmt_chain_copies(p))) == p, m.fmt_chain_copies([]))')" "True []" \
+   "P9: fmt_chain_copies round-trips through read_chain_copies"
+ok "$(pc 'print(rd("chain_copies: [\"/x/r\"]"), rd("chain_copies: [\"x/r -> /s/r\"]"), rd("chain_copies: [\"/x/r -> \"]"), rd("chain_copies: [\"/x/r -> s\"]"))')" "ERR ERR ERR ERR" \
+   "P9: a malformed item (no ->, a relative or empty side) is a ValueError"
+ok "$(pc 'print(m.copy_name("/x/r", "ro"), m.copy_name("/y/r", "ro", [("/x/r", "/s/r-ro")]), m.copy_name("/z/R", "ro", [("/x/r", "/s/r-ro"), ("/y/r", "/s/r-2-ro")]), m.copy_name("/x/r", "ro", [("/x/r", "/s/r-ro")]))')" \
+   "r-ro r-2-ro R-3-ro r-ro" "P9: copy_name: <basename>-<slug>, -<k>- when another checkout holds the name (case-folded)"
+ok "$(pc 'P = [("/x/r", "/s/r-ro"), ("/x/r/inner", "/s/inner-ro"), ("/x/q", "/s/q-ro")]
+print(m.copy_folder("/x/r", P), m.copy_folder("/x/r/sub/l", P), m.copy_folder("/X/R/Sub", P), m.copy_folder("/x/r/inner/a", P), m.copy_folder("/x/rr", P), m.copy_folder("/v/w", P), m.copy_folder("/x/r", []))')" \
+   "/s/r-ro /s/r-ro/sub/l /s/r-ro/Sub /s/inner-ro/a None None None" \
+   "P9: copy_folder: the root, a subfolder, case-folded, a nested checkout to the inner one; outside or no pairs → None"
+ok "$(pc 'P = [("/x/r", "/s/r-ro"), ("/x/r/inner", "/s/inner-ro")]
+print(m.primary_folder("/s/r-ro", P), m.primary_folder("/s/r-ro/sub/l", P), m.primary_folder("/s/inner-ro/a", P), m.primary_folder("/x/r", P), m.primary_folder("/s/r-row", P))')" \
+   "/x/r /x/r/sub/l /x/r/inner/a None None" "P9: primary_folder is copy_folder's inverse"
+ok "$(pc 'print(m.read_surfaces(note("surfaces:\n  - \"repo:/x//a, b.py\"\n  - ext:x")), m.read_surfaces(note("shape: serial")), m.read_list(note("shape: serial"), "surfaces"))')" \
+   "['repo:/x//a, b.py', 'ext:x'] [] None" "P9: read_surfaces reads through read_list, [] when absent"
 
 # ── P6: exit 2────────────────────────────────────────────────────────────────────────────────────────
 scen p6

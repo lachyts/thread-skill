@@ -45,7 +45,8 @@ Reads/writes `~/repos/obsidian/Work/Tasks/`, makes `gh`/`git` calls against the 
 note under `Work/Tasks/` (Archive included) and the Project root's git, read-only and never fetched. Merges only
 ever happen through execute's merge step (`merge-task.sh`). On a serial chain (§ 7) it runs `leg.py status`
 (read-only), `leg.py restarted` and, on Lachy's word, `leg.py clear-halt`. These are the only Leg-log writes it makes,
-under leg.py's lock. It also runs the task-note verbs `approve-gates`, `record-answer`, `hand-back` and `defer`, a
+under leg.py's lock. On a `chain copy missing` restart blocker it also runs `leg.py copies`, which remakes the Chain copy
+and writes at most the note's `chain_copies:` (ADR 0067 d2). It also runs the task-note verbs `approve-gates`, `record-answer`, `hand-back` and `defer`, a
 read-only `git status --porcelain` in the chain's checkouts, and the Chorus Stage's `list_sessions` and
 `create_thread`, which starts a new Session. It makes no `gh` call and no task call there.
 
@@ -814,8 +815,8 @@ The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever
 
   After a hand-back or a sign-off the chain is no longer stuck, so it reclaims its whole claim for new schedules, and
   the next Leg's `begin` re-checks what it writes (ADR 0060). A place another chain took while this one was stuck,
-  one a chain that began first still holds, or (until Chain copies) a checkout another chain's open Leg works makes
-  that Leg wait its turn (ADR 0067 d4): (e)'s `surface held by` blocker.
+  one a chain that began first still holds, or (when either chain works it in place, with no `chain_copies:`) a
+  checkout another chain's open Leg works makes that Leg wait its turn (ADR 0067 d4): (e)'s `surface held by` blocker.
 - **Defer, dependency-aware** (§ 5's steps 1 and 3): read the row's `dependants` from `leg.py status`: its
   depends-on and blocked-by closure, transitive, through `merged_into:` tombstones, read the way next holds a
   dependency.
@@ -854,14 +855,23 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
    - `restart Leg N (<how>)` → only with `--replace` in step 2, after its own check: for `started` (its id is
      `restarted.started`), `list_sessions` shows that id gone; for `pending` or `manual`, Lachy says it never started.
      With `restart.takeOver`, (d)'s evidence for Leg K too, and the prompt is the take-over form.
+   - `chain_copies: <why>: fix the note` → report it, and stop: the note's `chain_copies:` is malformed, and only a
+     hand fix of that line (Lachy's) makes the chain readable again.
+   - `chain copy missing: <C> (leg.py copies --rollout <note> remakes it)` → the Leg's Chain copy is gone (ADR 0067
+     d2). Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py copies --rollout <rollout-note>`: it remakes
+     the copy on its `chain/<rollout>` branch, its commits kept, and writes at most the note's `chain_copies:`. Exit 0 → re-read
+     `leg.py status` and go on to the restart by its new `restart.blockedBy`; a non-zero exit → report its `error`,
+     and stop.
    - `surface held by [[B]] (<token>)` → never restart (ADR 0060): the chain waits its turn. Another chain holds a
      place the next Leg writes, and its `begin` would only stand at exit 3. Its five causes (ADR 0067 d4) name the
      remedy: [[B]] comes first (began first, or wins the slug order) and holds an unlanded row on that place; or,
-     until Chain copies, [[B]] comes first and still has unlanded rows in a checkout this Leg works, even with no
-     file shared, the commonest, where a never-begun [[B]] that nobody starts blocks this chain for good (run [[B]]
-     from its first row's launch, or, on Lachy's word, stamp it `status: dropped`); or [[B]]'s open Leg writes that
-     place or (until Chain copies) works that checkout; or [[B]] was scheduled on a place this one released while it
-     was stuck; or [[B]]'s chain is unreadable and holds its whole claim (fix its note). Report it, with
+     when either chain works that checkout in place (no `chain_copies:`), [[B]] comes first and still has unlanded
+     rows in a checkout this Leg works, even with no file shared, the commonest, where a never-begun [[B]] that nobody
+     starts blocks this chain for good (run [[B]] from its first row's launch, or, on Lachy's word, stamp it
+     `status: dropped`); or [[B]]'s open Leg writes that place or (when either chain works it in place) works that
+     checkout; or
+     [[B]] was scheduled on a place this one released while it was stuck; or [[B]]'s chain is unreadable and holds its
+     whole claim (fix its note). Report it, with
      `/thread:status [[B]]`, and stop. Re-run this repair, or `/thread:execute`, once [[B]] lands its rows there, or
      its Leg closes. `surface re-check failed: <line>` → report
      the line, and stop.
@@ -947,7 +957,7 @@ record, and its Completion log is the last Leg's.
 - **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it. On a serial
   chain the closure is `leg.py status`'s `dependants` (§ 7 (b)).
 - **Don't run a serial chain's Legs.** § 7 runs only `leg.py status`, `leg.py restarted`, `leg.py clear-halt` (his
-  word only), `approve-gates`, `record-answer`, `hand-back` and `defer` (with its dependants), and the Chorus Stage's
+  word only), `leg.py copies` (on a `chain copy missing` blocker), `approve-gates`, `record-answer`, `hand-back` and `defer` (with its dependants), and the Chorus Stage's
   `list_sessions` and `create_thread`. Never `leg.py begin`, `claim`, `done`, `close`, `set-aside`, `smoke`,
   `file-fix`, `handed` or `file-followup`; no Workflow, `next`, `resume` or hand-off loop; no hand edit of the Leg log
   or the frontmatter, and no `## Notes` line; and never take over a session `list_sessions` shows present, without
