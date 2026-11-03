@@ -538,9 +538,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Note overlap** — two live runs editing the same vault note while both
   tasks are unfinished. The later edit is never held or refused: its agent is
   warned which run is in the note and to re-read it first, and every overlap
-  is recorded for the weekly Reflection (ADR 0067, proposed). Best-effort: a
-  script's or a Codex Leg's write is not warned. _Avoid_: Note wait, note
-  lock, lease (alone).
+  is recorded for the weekly Reflection (ADR 0067, proposed). The plugin's
+  PreToolUse hook (`hooks/vault-note-overlap.py`) records each run's writes
+  and gives the warning; each warning is a `note-overlap` line in the Run
+  record's `overlaps.jsonl`, and the weekly reading's `noteOverlaps` reports
+  the week's, or `none`. Another run is another rollout (decided, ADR 0067's
+  Decided for Lachy 9): two tasks of one rollout in one note are not warned.
+  Best-effort, and these misses are accepted: a script's, a shell's or a Codex
+  Leg's write, and an edit by a session that is no run's task (an interactive
+  session, a lead's own thread, a subagent a task agent spawns). _Avoid_: Note
+  wait, note lock, lease (alone).
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live

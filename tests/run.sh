@@ -71,6 +71,9 @@ export THREAD_MACHINE_TIMES='{}'
 export THREAD_HEAT_LEVEL=0
 # The note save lock (reconcile-rollout.py's _note_lock_path): one lock file per note directory, in temp like the rest.
 export THREAD_NOTE_LOCK_DIR="$scratch/note-locks"
+# The Note overlap hook's writer records and default debug log (hooks/vault-note-overlap.py, ADR 0067 d6) stay in temp
+# too: its suite sets its own, so this is the backstop; an inherited debug file is unset, so no call logs outside temp.
+export THREAD_NOTE_OVERLAP_DIR="$scratch/note-writers"; unset THREAD_NOTE_OVERLAP_DEBUG
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"
 # A git hook running `make test` exports GIT_DIR & co. (and `git -c ...` exports GIT_CONFIG_PARAMETERS);
 # left set, every git call below and every suite's temp-repo git call (commits, pushes included) would land
