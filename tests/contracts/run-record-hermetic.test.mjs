@@ -16,7 +16,8 @@
 // names, and so does p21-6's close-score.py, which folds into the record and writes tunings.jsonl through tune.py, and
 // p21-7's reflect.py, which writes reflections.jsonl (and folds through `span --fold`), and p25-4's estate-dispatch.py,
 // whose `log` writes grades.jsonl. p29-10's ledger adds verify-slot.py (an agent suite's lines), step-boundary.py (a room
-// stop's) and the Stop hook, hooks/rollout-stop-driver.py (a halt's).
+// stop's) and the Stop hook, hooks/rollout-stop-driver.py (a halt's). ADR 0067 d6 adds the PreToolUse hook,
+// hooks/vault-note-overlap.py, which writes overlaps.jsonl's note-overlap lines.
 // Pure matchers, so the real tree and the controls run through the same code. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -28,8 +29,9 @@ const SELF = `tests/contracts/${path.basename(fileURLToPath(import.meta.url))}`
 // A contract test whose only path.join-and-spawn of an engine script is a control string (its own matcher's fixture),
 // never a run: verify-slot-hermetic.test.mjs binds verify-slot.py and spawns python3 only inside quoted controls.
 const CONTROL_ONLY = ['tests/contracts/verify-slot-hermetic.test.mjs']
-const NAMES = '(?:reconcile-rollout\\.py|merge-task\\.sh|lead-integrate\\.py|git-env-canary\\.py|tune\\.py|close-score\\.py|reflect\\.py|estate-dispatch\\.py|verify-slot\\.py|step-boundary\\.py|rollout-stop-driver\\.py)'
-// p29-10: a script under skills/*/scripts, or the Stop hook under hooks/ (it records each halt).
+const NAMES = '(?:reconcile-rollout\\.py|merge-task\\.sh|lead-integrate\\.py|git-env-canary\\.py|tune\\.py|close-score\\.py|reflect\\.py|estate-dispatch\\.py|verify-slot\\.py|step-boundary\\.py|rollout-stop-driver\\.py|vault-note-overlap\\.py)'
+// p29-10: a script under skills/*/scripts, or a hook under hooks/ (the Stop hook records each halt, the PreToolUse hook
+// each Note overlap).
 const DIRS = '(?:scripts|hooks)'
 
 // ---- shell ---------------------------------------------------------------------------------------------------
@@ -67,7 +69,8 @@ test('every shell suite that invokes an engine script points THREAD_EVENTS_DIR a
   // Not vacuous: the known engine-driving suites are all seen as invoking.
   for (const f of ['tests/run.sh', 'tests/lib/merge-task-env.sh', 'tests/git-env-canary.test.sh', 'tests/lead-integrate.test.sh',
     'skills/execute/tests/reconcile-rollout.test.sh', 'skills/execute/tests/reconcile-rollout-runs.test.sh',
-    'tests/verify-slot.test.sh', 'skills/execute/tests/rollout-stop-driver.test.sh', 'skills/execute/tests/reconcile-rollout-stops.test.sh']) {
+    'tests/verify-slot.test.sh', 'skills/execute/tests/rollout-stop-driver.test.sh', 'skills/execute/tests/reconcile-rollout-stops.test.sh',
+    'tests/vault-note-overlap.test.sh']) {
     assert.ok(invoking.includes(f), `${f} is seen as invoking an engine script`)
   }
   const bad = invoking.filter((f) => !shellHermetic(read(f)))
@@ -77,7 +80,8 @@ test('every shell suite that invokes an engine script points THREAD_EVENTS_DIR a
 test('every node test that spawns an engine script passes THREAD_EVENTS_DIR in its env', () => {
   const spawning = nodeFiles().filter((f) => nodeSpawns(read(f)))
   for (const f of ['tests/integration-marker-roundtrip.test.mjs', 'tests/contracts/status-repair-queue.test.mjs', 'tests/ladder.test.mjs',
-    'tests/reflect-tune.test.mjs', 'tests/reflect-close-score.test.mjs', 'tests/reflect-weekly.test.mjs', 'tests/estate-dispatch.test.mjs']) {
+    'tests/reflect-tune.test.mjs', 'tests/reflect-close-score.test.mjs', 'tests/reflect-weekly.test.mjs', 'tests/estate-dispatch.test.mjs',
+    'tests/contracts/note-overlap-opener.test.mjs']) {
     assert.ok(spawning.includes(f), `${f} is seen as spawning an engine script`)
   }
   const bad = spawning.filter((f) => !nodeHermetic(read(f)))
