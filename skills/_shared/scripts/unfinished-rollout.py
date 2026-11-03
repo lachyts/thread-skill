@@ -333,10 +333,11 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "_valued", "never_started", "approved_unrun", "incomplete", "_shape", "SHAPES", "_priority",
             "PRIORITY_WEIGHTS", "_dep_entries", "_fold_unit", "_dep_status", "_live_rollout", "_start_unattended",
             "_record_read", "_stop_state", "_truthy_flag", "_parse_ts")
-SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git")
+SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
+            "checkout_of", "checkouts_of")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
 RUN_RECORD_NAMES = ("record_path",)
-LEG_NAMES = ("Chain", "chain_read", "hold_of", "Refuse")
+LEG_NAMES = ("Chain", "chain_read", "hold_of", "write_set", "write_rows", "Refuse")
 CLOSED = {"done", "dropped"}
 PICKUP_CAP = 5
 UNLANDED = ("queued", "running", "awaiting-integration", "integrating", "set-aside")  # `branches`: not yet merged
@@ -620,12 +621,17 @@ def ceremony_warn(c) -> str:
 
 def chain_hold(rr, path, tasks_dir):
     """leg.py's hold_of for one serial note, in-process (ADR 0060): (hold, None), or (None, <why>) when leg.py cannot
-    read the chain."""
+    read the chain. The hold also carries `ws`, what its next Leg writes (leg.py's write_set for Leg n_next), and
+    `wsFolders`, the launch folders of the rows that write set reads (write_rows): ADR 0067 d4's order and interim."""
     leg = load_leg(rr)
     ctx = SimpleNamespace(rollout=path, tasks=tasks_dir, vault=tasks_dir.parent.parent, slug=path.stem, archived=False)
     try:
         chain = leg.Chain(ctx)
-        return leg.hold_of(chain, leg.chain_read(ctx, chain)), None
+        read = leg.chain_read(ctx, chain)
+        hold = leg.hold_of(chain, read)
+        hold["ws"] = leg.write_set(chain, read["n_next"])
+        hold["wsFolders"] = [r.folder for r in leg.write_rows(chain, read["n_next"]) if r.folder]
+        return hold, None
     except leg.Refuse as e:
         return None, e.msg
     except Exception as e:  # noqa: BLE001 — any unreadable chain fails closed to its whole claim
@@ -636,8 +642,10 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
     """The unfinished serial notes: root-level, `shape: serial`, neither done nor dropped, not complete (a complete
     one is dropped with the ceremony WARN), each with its state, its whole claim (`claim`), what it holds (`tokens`:
     the whole claim, or a stuck chain's unlanded rows' surfaces, ADR 0060), what a stuck one released (`released`),
-    its unlanded rows' surfaces in any state (`unlanded`) and the hold's `scope`. `skip` names a note left out (a
-    resuming chain's own)."""
+    its unlanded rows' surfaces in any state (`unlanded`), the hold's `scope`, and for ADR 0067 d4's order and interim
+    its first `began` stamp, its `open` Leg ({n, folder}), its unlanded rows' launch `folders`, and what its next Leg
+    writes (`ws`, with those rows' launch folders, `wsFolders`); an unreadable chain has none of those but `ws`, its
+    whole claim (`readable` False). `skip` names a note left out (a resuming chain's own)."""
     out = []
     for path, note, where in notes:
         if where != "root" or rr._status(note) in CLOSED or shape_of(rr, path.stem, note, warns, warned) != "serial":
@@ -662,7 +670,8 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
             warns.append(f"WARN: {c['slug']}: {bad}: read as any")
             tokens = [("any", "")]
         c.update(claim=tokens, tokens=tokens, unlanded=tokens, released=[], scope="whole",
-                 why=f"{bad}: read as any, it holds everything" if bad else "")
+                 why=f"{bad}: read as any, it holds everything" if bad else "", began=None, open=None, folders=[],
+                 ws=tokens, wsFolders=[], readable=False)
         # The hold is read even when `surfaces:` reads as any: a schedule still meets `any` (tokens, scope whole), but a
         # --resume compares against the unlanded rows' own cells (hold_of reads them apart from the claim, and falls
         # back to the whole claim, `any` here, only on a bad cell), so one hand-edited note never halts every rollout.
@@ -675,7 +684,9 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
             if hold["warn"]:
                 warns.append(f"WARN: {c['slug']}: {hold['warn']}")
             parse = lambda xs: [SC.parse_token(x) for x in xs]  # noqa: E731
-            c["unlanded"] = parse(hold["unlanded"])
+            c.update(unlanded=parse(hold["unlanded"]), began=hold["began"], open=hold["open"], readable=True,
+                     folders=[r["folder"] for r in hold["rows"] if r.get("folder")], ws=parse(hold["ws"]),
+                     wsFolders=hold["wsFolders"])
             if not bad:
                 c.update(scope=hold["scope"], why=hold["why"])
                 if hold["scope"] == "stuck":
@@ -688,6 +699,43 @@ def released_warn(s, claimed) -> str:
     """A stuck chain released what this run claims (ADR 0060)."""
     return (f"WARN: [[{s['slug']}]] ({s['label']}; {s['why']}) released {SC.fmt_token(claimed)}, which this run "
             "claims: it reclaims it on resume and then waits its turn while this run holds it")
+
+
+def union(*lists):
+    """The tokens of several lists, each once, in order."""
+    out = []
+    for xs in lists:
+        out += [t for t in xs if t not in out]
+    return out
+
+
+def turn(xs):
+    """ADR 0067 d4's interim, until Chain copies: the checkouts a token list names (serial-chains.py's checkout_of of
+    each `repo:` token), as bare tokens."""
+    return union([c for c in (SC.checkout_of(t) for t in xs) if c is not None])
+
+
+def launch_checkouts(folders, git, vault):
+    """L(folders): the checkouts some launch folders sit in (serial-chains.py's checkouts_of, the vault and a folder in
+    no checkout skipped), as bare tokens."""
+    return [("repo", p) for p in SC.checkouts_of([], folders, git.toplevel, vault)]
+
+
+def works_in(s, git, vault):
+    """U(s): the checkouts a chain still has work in, its unlanded rows' tokens' and their launch folders'."""
+    return union(turn(s["unlanded"]), launch_checkouts(s["folders"], git, vault))
+
+
+def next_works(s, git, vault):
+    """T(s): the checkouts its next Leg would work in, its write set's and those rows' launch folders'."""
+    return union(turn(s["ws"]), launch_checkouts(s["wsFolders"], git, vault))
+
+
+def order_key(rr, slug, began):
+    """ADR 0067 d4's order: a chain that began sorts by its first `began:` stamp, before every chain that never began;
+    slug order (case-folded) breaks ties. A stamp that will not parse reads as never begun, on either side alike."""
+    ts = rr._parse_ts(began) if began else None
+    return (0, ts.timestamp(), slug.casefold()) if ts is not None else (1, 0.0, slug.casefold())
 
 
 def parallel_hold(rr, path, note, linked):
@@ -781,6 +829,9 @@ def cmd_check(args, rr) -> int:
     else:
         if args.surface:
             die("--surface is the serial check's; a parallel check takes --repo")
+        if args.checkout:
+            die("--checkout is the serial check's (a chain's checkouts from serial-chains.py); a parallel check takes "
+                "--repo")
         if args.repo is None:
             die("--repo <path> is required (the parallel check)")
         repo = Path(os.path.expanduser(args.repo))
@@ -801,14 +852,20 @@ def cmd_check(args, rr) -> int:
             surfaces.append(SC.parse_token(v))
         except ValueError as e:
             die(f"--surface {v}: {e}")
+    checkouts = []
+    for v in args.checkout or []:
+        p = os.path.expanduser(v.strip())
+        if not os.path.isabs(p):
+            die(f"--checkout {v}: not an absolute path (a chain's checkout, as serial-chains.py printed it)")
+        checkouts = union(checkouts, [("repo", os.path.realpath(p))])
 
     warns, warned = [], set()
     vault = vault_root(tasks_dir)
     if args.resume is not None:
-        return check_resume(args, rr, tasks_dir, surfaces if serial else [path_token(repo, vault)], vault, warns,
-                            warned)
+        return check_resume(args, rr, tasks_dir, surfaces if serial else [path_token(repo, vault)], checkouts, vault,
+                            warns, warned)
     if serial:
-        return check_serial(args, rr, tasks_dir, surfaces, vault, warns, warned)
+        return check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned)
     env = git_env()
     repo_real = os.path.realpath(repo)
     same_repo, repo_origin = same_repo_rule(rr, repo, env, warns)
@@ -873,16 +930,20 @@ def cmd_check(args, rr) -> int:
             del cands[k]
     pairs = [(p, n) for p, n in pairs if p in cands and n in cands]
 
-    # 2b. A live serial chain owns the places it writes (ADR 0040): a parallel run on one is refused, before any
-    # supersede (a supersede never crosses shapes).
+    # 2b. A live serial chain works its checkouts in place: a parallel run rooted there would share their index and
+    # HEAD (ADR 0042), so it is refused, before any supersede (a supersede never crosses shapes). What the chain holds
+    # meets --repo's token, or the checkouts it still has work in do (U: its unlanded rows' tokens' and launch folders').
     repo_tok = path_token(repo, vault)
-    top = SC.Git().checkout
+    git2b = SC.Git()
+    top = git2b.checkout
     owners = {}
     for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned):
-        hit = next((tok for tok in s["tokens"] if SC.overlaps(repo_tok, tok, top)), None)
+        hit = next((tok for tok in union(s["tokens"], works_in(s, git2b, vault)) if SC.overlaps(repo_tok, tok, top)),
+                   None)
         if hit is not None:
-            owners[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) is a serial chain that writes "
-                                 f"{SC.fmt_token(hit)} and owns that place (ADR 0040): {serial_remedy(s)}")
+            owners[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) is a serial chain working "
+                                 f"{SC.fmt_token(hit)} in place, where this run would share its index and HEAD (ADR "
+                                 f"0042): {serial_remedy(s)}")
             continue
         freed = next((tok for tok in s["released"] if SC.overlaps(repo_tok, tok, top)), None)
         if freed is not None:
@@ -962,27 +1023,37 @@ def cmd_check(args, rr) -> int:
     return finish(warns, f"refuse {slugs_of(u)}", 3, lines)
 
 
-def check_serial(args, rr, tasks_dir, surfaces, vault, warns, warned) -> int:
-    """Serial mode: the chain's tokens against what every live serial note holds and every unfinished parallel rollout's
-    root (ADR 0060: a stuck chain holds only its unlanded rows' surfaces; a released parallel rollout holds no root). It
-    supersedes nothing; its only git is the nested-checkout read (serial-chains.py's Git.checkout)."""
+def check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned) -> int:
+    """Serial mode: the chain's tokens (and its checkouts) against every live serial note and every unfinished parallel
+    rollout's root. A live chain is never a hit (ADR 0067 d4): a predicted overlap with what it holds WARNs that they
+    take turns, one only with what a stuck one released keeps the released WARN (ADR 0060), and, until Chain copies,
+    a chain working a checkout this one works WARNs that their Legs take turns in it. Only a parallel root this chain's
+    tokens or checkouts meet refuses (a released parallel rollout holds none). It supersedes nothing; its only git is
+    the nested-checkout read (serial-chains.py's Git.checkout) and the launch folders' toplevels."""
     if args.regenerate:
         warns.append("WARN: a serial run supersedes nothing (ADR 0040, p24-2): --regenerate ignored")
     mine = run_projects(rr, args, tasks_dir, warns)
     notes = list(rollout_notes(rr, tasks_dir, archive=False))
-    top = SC.Git().checkout
+    git = SC.Git()
+    top = git.checkout
+    here = union(turn(surfaces), checkouts)
     hits = {}
     for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned):
         pairs = SC.overlap_pairs(surfaces, s["tokens"], top)
         if pairs:
             a, b = pairs[0]
-            hits[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) is a live serial chain whose surface "
-                               f"{SC.fmt_token(b)} overlaps this chain's {SC.fmt_token(a)} (ADR 0040: a chain owns the "
-                               f"places it writes): {serial_remedy(s)}")
+            warns.append(f"WARN: [[{s['slug']}]] ({s['label']}; {s['state']}) also predicts {SC.fmt_token(b)}, which "
+                         f"this chain predicts as {SC.fmt_token(a)}: they take turns on it, the first to begin going "
+                         "first (ADR 0067 d4)")
             continue
         freed = SC.overlap_pairs(surfaces, s["released"], top)
         if freed:
             warns.append(released_warn(s, freed[0][1]))
+            continue
+        shared = SC.overlap_pairs(here, works_in(s, git, vault), top)
+        if shared:
+            warns.append(f"WARN: [[{s['slug']}]] ({s['label']}; {s['state']}) works {shared[0][1][1]} too: until "
+                         "each chain works its own Chain copy, their Legs take turns in it")
     for path, note, _ in notes:
         if rr._status(note) in CLOSED or shape_of(rr, path.stem, note, warns, warned) == "serial":
             continue
@@ -995,7 +1066,7 @@ def check_serial(args, rr, tasks_dir, surfaces, vault, warns, warned) -> int:
             warns.append(f"WARN: {c['slug']}: no Project root line: not counted")
             continue
         rtok = path_token(root, vault)
-        a = next((x for x in surfaces if SC.overlaps(x, rtok, top)), None)
+        a = next((x for x in union(surfaces, checkouts) if SC.overlaps(x, rtok, top)), None)
         if a is None:
             continue
         ph = parallel_hold(rr, path, note, rr._scan(path, tasks_dir)[0])
@@ -1013,31 +1084,40 @@ def check_serial(args, rr, tasks_dir, surfaces, vault, warns, warned) -> int:
     return finish(warns, "none", 0)
 
 
-def check_resume(args, rr, tasks_dir, toks, vault, warns, warned) -> int:
-    """`--resume <slug>` (ADR 0060 d3): what a resuming rollout writes (a serial chain's write set, or a parallel
-    rollout's root), against what the others hold for it: every other unfinished serial note's unlanded rows'
-    surfaces, in any state (never its whole claim or its smoke rows), and, for a serial resume, every unfinished
-    parallel rollout's root unless it is released, or idle and paused or halted. Whoever released a place yields it,
-    so the chain scheduled on it never waits on the one that released it. Its only git is the nested-checkout read
-    (serial-chains.py's Git.checkout), as the schedule-time checks compare."""
+def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> int:
+    """`--resume <slug>` (ADR 0060 d3, ADR 0067 d4): what a resuming rollout writes (a serial chain's write set, or a
+    parallel rollout's root), against the others. A parallel resume meets every other unfinished serial note's
+    unlanded rows' surfaces, in any state, and clone_holders. A serial resume R puts fresh contention in a total order
+    (order_key: the first to begin goes first), keeps ADR 0060's yield, and, until Chain copies, waits on any chain
+    whose open Leg works a checkout R's next Leg would work in (serial_waits); then every unfinished parallel rollout's
+    root its write set or checkouts meet, unless that rollout is released, or idle and paused or halted. Its only git is
+    the nested-checkout read (serial-chains.py's Git.checkout) and the launch folders' toplevels."""
     me = rr._wikilink_slug(args.resume) or args.resume.strip()
     if not me or not (tasks_dir / f"{me}.md").is_file():
         die(f"--resume {args.resume}: no rollout note at {tasks_dir / (me + '.md')}")
     if args.regenerate:
         warns.append("WARN: --resume re-checks a resuming rollout and supersedes nothing: --regenerate ignored")
     mine = run_projects(rr, args, tasks_dir, warns) if (args.project is not None or args.tasks is not None) else set()
-    what = "chain" if args.shape == "serial" else "rollout"
     notes = list(rollout_notes(rr, tasks_dir, archive=False))
-    top = SC.Git().checkout
+    git = SC.Git()
+    top = git.checkout
     hits = {}
-    for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me):
-        pairs = SC.overlap_pairs(toks, s["unlanded"], top)
-        if pairs:
-            a, b = pairs[0]
-            hits[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) holds `{SC.fmt_token(b)}` for an unlanded "
-                               f"row, which this {what} writes as `{SC.fmt_token(a)}` (ADR 0060): [[{me}]] waits its "
-                               f"turn: re-run once [[{s['slug']}]] lands its rows there ({serial_remedy(s)})")
-    if args.shape != "serial":
+    reach = list(toks)
+    if args.shape == "serial":
+        hold, why = chain_hold(rr, tasks_dir / f"{me}.md", tasks_dir)
+        if hold is None:
+            die(f"--resume {me}: its chain is unreadable ({why}): the re-check fails closed")
+        hits.update(serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns, warned))
+        reach = union(toks, launch_checkouts(hold["wsFolders"], git, vault), turn(toks), checkouts)
+    else:
+        for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me):
+            pairs = SC.overlap_pairs(toks, s["unlanded"], top)
+            if pairs:
+                a, b = pairs[0]
+                hits[s["slug"]] = (f"[[{s['slug']}]] ({s['label']}; {s['state']}) holds `{SC.fmt_token(b)}` for an "
+                                   f"unlanded row, which this rollout writes as `{SC.fmt_token(a)}` (ADR 0060): "
+                                   f"[[{me}]] waits its turn: re-run once [[{s['slug']}]] lands its rows there "
+                                   f"({serial_remedy(s)})")
         hits.update(clone_holders(args, rr, tasks_dir, me, mine, toks[0], notes, vault, warns, warned))
     if args.shape == "serial":
         for path, note, _ in notes:
@@ -1049,7 +1129,7 @@ def check_resume(args, rr, tasks_dir, toks, vault, warns, warned) -> int:
             if c["complete"] or root is None:
                 continue
             rtok = path_token(root, vault)
-            a = next((x for x in toks if SC.overlaps(x, rtok, top)), None)
+            a = next((x for x in reach if SC.overlaps(x, rtok, top)), None)
             if a is None:
                 continue
             ph = parallel_hold(rr, path, note, rr._scan(path, tasks_dir)[0])
@@ -1065,6 +1145,65 @@ def check_resume(args, rr, tasks_dir, toks, vault, warns, warned) -> int:
         keys = sorted(hits, key=str.lower)
         return finish(warns, "refuse " + ",".join(keys), 3, [hits[k] for k in keys])
     return finish(warns, "none", 0)
+
+
+def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mine, warns, warned) -> dict:
+    """A resuming chain R against every other unfinished serial note H (ADR 0067 d4), {slug: line}; each line keeps
+    `holds `<token>``, which leg.py's HELD_RE reads. own(C) is a chain's unlanded rows' tokens, ws(R) its write set
+    (--surface), smoke(C) = ws(C) - own(C), U and T the checkouts it has work in and its next Leg works in
+    (works_in, next_works; R's T also takes --checkout), H < R when order_key(H) < order_key(R), and contend(X, Y) =
+    own(X) meets own(Y) or, until Chain copies, T(X) meets U(Y). R waits on the first rule that applies:
+      (M) H has an open Leg and T(R) meets OL(H), H's T and its open Leg folder's checkout: two Legs never commit in
+          one index or HEAD at once;
+      (T) R has an open Leg itself (a take-over): only (M), since its open Leg already holds its checkouts' turn;
+      (O) H < R and contend(R, H);
+      (Y) ADR 0060's yield: smoke(R) meets own(H), unless R < H and H waits on R anyway (contend(H, R), or smoke(H)
+          meets own(R)).
+    An unreadable H holds its whole claim against ws(R) and T(R), whatever the order (fail closed)."""
+    top = git.checkout
+    meet = lambda a, b: (SC.overlap_pairs(a, b, top) or [None])[0]  # noqa: E731
+    parse = lambda xs: [SC.parse_token(x) for x in xs]  # noqa: E731
+    own_r, ws_r = parse(hold["unlanded"]), list(toks)
+    smoke_r = [t for t in ws_r if t not in own_r]
+    t_r = union(turn(ws_r), launch_checkouts(hold["wsFolders"], git, vault), checkouts)
+    u_r = union(turn(own_r), launch_checkouts([r["folder"] for r in hold["rows"] if r.get("folder")], git, vault))
+    key_r = order_key(rr, me, hold["began"])
+    hits = {}
+    for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me):
+        h, who = s["slug"], f"[[{s['slug']}]] ({s['label']}; {s['state']})"
+        tail = f"[[{me}]] waits its turn: re-run once [[{h}]] lands its rows there ({serial_remedy(s)})"
+        if not s["readable"]:
+            p = meet(union(ws_r, t_r), s["unlanded"])
+            if p:
+                hits[h] = (f"{who} holds `{SC.fmt_token(p[1])}` for an unlanded row, which this chain writes as "
+                           f"`{SC.fmt_token(p[0])}` (ADR 0060): {tail}")
+            continue
+        t_h = next_works(s, git, vault)
+        if s["open"] is not None:
+            n = s["open"]["n"]
+            p = meet(t_r, union(t_h, launch_checkouts([s["open"]["folder"]], git, vault)))
+            if p:
+                hits[h] = (f"{who} holds `{SC.fmt_token(p[1])}` with its open Leg {n}, where this chain's next Leg "
+                           f"works as `{SC.fmt_token(p[0])}` (ADR 0067 d4, until Chain copies): [[{me}]] waits its "
+                           f"turn: re-run once [[{h}]]'s Leg {n} closes")
+                continue
+        if hold["open"] is not None:
+            continue
+        own_h, u_h, key_h = s["unlanded"], works_in(s, git, vault), order_key(rr, h, s["began"])
+        if key_h < key_r:
+            p = meet(own_r, own_h) or meet(t_r, u_h)
+            if p:
+                first = "began first" if s["began"] else "comes first by slug (neither has begun)"
+                hits[h] = (f"{who} holds `{SC.fmt_token(p[1])}` for an unlanded row and {first}, which this chain "
+                           f"writes as `{SC.fmt_token(p[0])}` (ADR 0067 d4): {tail}")
+                continue
+        p = meet(smoke_r, own_h)
+        if p:
+            smoke_h = [t for t in s["ws"] if t not in own_h]
+            if not (key_r < key_h and (meet(own_h, own_r) or meet(t_h, u_r) or meet(smoke_h, own_r))):
+                hits[h] = (f"{who} holds `{SC.fmt_token(p[1])}` for an unlanded row, which this chain writes as "
+                           f"`{SC.fmt_token(p[0])}` (ADR 0060): {tail}")
+    return hits
 
 
 def first_line_ts(rr, slug):
@@ -1742,6 +1881,8 @@ def main() -> int:
     c.add_argument("--repo", default=None, help="the target repo (the path schedule § 0 resolved); parallel only")
     c.add_argument("--surface", action="append", default=None,
                    help="one of the chain's surface tokens, as serial-chains.py printed it (repeatable); serial only")
+    c.add_argument("--checkout", action="append", default=None,
+                   help="one of the chain's checkouts, as serial-chains.py printed it (repeatable); serial only")
     c.add_argument("--project", default=None, help="the project schedule targets (a name or [[wikilink]])")
     c.add_argument("--tasks", default=None, help="comma-separated task slugs (a --tasks run): their shared projects")
     c.add_argument("--regenerate", action="store_true", help="this run may supersede (schedule --regenerate)")

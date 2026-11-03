@@ -139,15 +139,43 @@ DEFAULT_VAULT = "~/repos/obsidian"
 DEFAULT_LAUNCH_FOLDERS = "~/repos/workspaces/_shared/state/launch-folders.json"
 GITHUB_PREFIXES = ("https://github.com/", "git@github.com:", "ssh://git@github.com/")
 KINDS = ("repo", "vault", "ext")
-TOKEN_FORMS = "repo:<absolute path>, vault, vault:<path in the vault>, ext:<name> or any"
+TOKEN_FORMS = ("repo:<toplevel>//<path in it>, repo:<absolute path>, vault, vault:<path in the vault>, ext:<name> "
+               "or any")
 
 
 # ---- the surface grammar (pure) -----------------------------------------------------------------
 
+def _repo_value(value):
+    """A `repo:` value in canonical form, or ValueError: the leading slashes normalised to one, then split on the
+    first `//` (posixpath.normpath would collapse it) into the toplevel and the path in it, each normalised. A rel
+    that is absolute or escapes with `..` is refused; an empty one (`/x//`) reads as the bare toplevel; a trailing
+    `/` on the rel is kept as the folder mark."""
+    if not value.startswith("/"):
+        raise ValueError("a repo: path is absolute (no ~ and no relative path)")
+    v = "/" + value.lstrip("/")
+    top, sep, rel = v.partition("//")
+    top = posixpath.normpath(top)
+    if not sep:
+        return top
+    if rel.startswith("/"):
+        raise ValueError("a repo: token's path after // is relative to its toplevel (no leading /)")
+    folder = rel.endswith("/")
+    r = posixpath.normpath(rel) if rel.strip() else "."
+    if r == ".":
+        return top
+    if r == ".." or r.startswith("../"):
+        raise ValueError("a repo: token's path after // stays inside its toplevel (no ..)")
+    if top == "/":
+        return "/" + r
+    return f"{top}//{r}" + ("/" if folder else "")
+
+
 def parse_token(s):
     """A surface token's syntax check: (kind, value) in canonical form, or ValueError. `any` and `vault` carry ''.
-    A `repo:` value is absolute with no `~`; a `vault:` value is relative, with no `..` and no leading `/`; an
-    `ext:` name is non-empty; a trailing `/` is dropped. The kind is case-folded; the value keeps its case."""
+    A `repo:` value is absolute with no `~`: `<toplevel>//<path in it>` (a file, or a folder with a trailing `/`) or
+    a bare path (a whole checkout, or a path in none), as _repo_value reads it; a `vault:` value is relative, with no
+    `..` and no leading `/`; an `ext:` name is non-empty; a trailing `/` is dropped, save a keyed token's folder
+    mark. The kind is case-folded; the value keeps its case."""
     if not isinstance(s, str):
         raise ValueError("not a string")
     t = s.strip()
@@ -161,9 +189,7 @@ def parse_token(s):
         raise ValueError(f"unknown kind {kind!r}: a token is one of {TOKEN_FORMS}")
     value = value.strip()
     if kind == "repo":
-        if not value.startswith("/"):
-            raise ValueError("a repo: path is absolute (no ~ and no relative path)")
-        return ("repo", re.sub(r"^/+", "/", posixpath.normpath(value)))
+        return ("repo", _repo_value(value))
     if kind == "vault":
         if value.startswith("/"):
             raise ValueError("a vault: path is relative to the vault root (no leading /)")
@@ -189,12 +215,63 @@ def _tok(x):
     return parse_token(x) if isinstance(x, str) else x
 
 
+def repo_parts(value):
+    """A canonical `repo:` value as (toplevel, rel or None, is_dir): `/x//a/b.py` is ('/x', 'a/b.py', False),
+    `/x//a/` is ('/x', 'a', True), and a bare `/x` is ('/x', None, False)."""
+    top, sep, rel = value.partition("//")
+    if not sep:
+        return (value, None, False)
+    return (top, rel.rstrip("/"), rel.endswith("/"))
+
+
+def _abs(top, rel):
+    return top if rel is None else f"{top.rstrip('/')}/{rel}"
+
+
+def checkout_of(tok):
+    """The checkout a `repo:` token names, as a token: `repo:<key>` for a keyed token, the bare token itself
+    otherwise; None for any other kind. One of this file's statements of a chain's checkouts (with checkouts_of)."""
+    kind, value = _tok(tok)
+    if kind != "repo":
+        return None
+    return ("repo", repo_parts(value)[0])
+
+
+def checkouts_of(tokens, folders, toplevel=None, vault_real=None):
+    """A chain's checkouts, the one statement S2's JSON, S3's `--checkout`, S4, `_serial_root`, stamp_bases and
+    check_resume read: a sorted, unique list of paths holding checkout_of of each `repo:` token (a malformed one is
+    skipped) plus toplevel(realpath(expanduser(folder))) for each launch folder, a folder in the vault (at or under
+    vault_real, case-folded) or in no checkout (toplevel None, or no resolver) skipped. It reads the filesystem only
+    through realpath and the resolver."""
+    out, vf = {}, vault_real.casefold() if vault_real else None
+
+    def add(p):
+        if not p:
+            return
+        pf = p.casefold()
+        if vf and (pf == vf or pf.startswith(vf.rstrip("/") + "/")):
+            return
+        out.setdefault(pf, p)
+
+    for t in tokens or []:
+        try:
+            c = checkout_of(t)
+        except ValueError:
+            continue
+        if c is not None:
+            add(c[1])
+    for f in folders or []:
+        if f and toplevel is not None:
+            add(toplevel(os.path.realpath(os.path.expanduser(str(f)))))
+    return sorted(out.values())
+
+
 def _within(x: str, y: str) -> bool:
     return x == y or x.startswith(y + "/") or y.startswith(x + "/")
 
 
 def _nested_apart(va: str, vb: str, toplevel) -> bool:
-    """Two repo: values, one strictly inside the other: apart when both sit in git checkouts and the inner one's is not
+    """Two repo: paths, one strictly inside the other: apart when both sit in git checkouts and the inner one's is not
     the outer one's (a separate checkout nested by path, with its own index). toplevel maps a path to its checkout's
     toplevel, or None (in no checkout); an outer path in no checkout covers everything beneath it, so it never parts."""
     xf, yf = va.casefold(), vb.casefold()
@@ -206,22 +283,32 @@ def _nested_apart(va: str, vb: str, toplevel) -> bool:
 
 
 def overlaps(a, b, toplevel=None) -> bool:
-    """Whether two tokens (strings or (kind, value) pairs) name a shared place, by the rules in the header. With a
-    toplevel resolver (Git.checkout), two repo: tokens that meet only by containment across nested checkouts are
-    disjoint; without one, the comparison is purely textual."""
+    """Whether two tokens (strings or (kind, value) pairs) name a shared place, by the rules in the header. Two keyed
+    `repo:` tokens meet only when their keys are equal (case-folded) and one path contains the other: purely textual.
+    With a bare `repo:` token on either side, containment decides, and with a toplevel resolver (Git.checkout) two
+    paths that meet only by containment across nested checkouts are disjoint, a keyed side's toplevel read from its
+    key (no git); without a resolver, the comparison is purely textual. A folder mark is information only."""
     (ka, va), (kb, vb) = _tok(a), _tok(b)
     if ka == "any" or kb == "any":
         return True
     if ka != kb:
         return False
-    x, y = va.casefold(), vb.casefold()
     if ka == "ext":
-        return x == y
+        return va.casefold() == vb.casefold()
     if ka == "vault":
+        x, y = va.casefold(), vb.casefold()
         return not x or not y or _within(x, y)
+    (ta, ra, _), (tb, rb, _) = repo_parts(va), repo_parts(vb)
+    pa, pb = _abs(ta, ra), _abs(tb, rb)
+    x, y = pa.casefold(), pb.casefold()
+    if ra is not None and rb is not None:
+        return ta.casefold() == tb.casefold() and _within(x, y)
     if not (x == "/" or y == "/" or _within(x, y)):
         return False
-    return toplevel is None or not _nested_apart(va, vb, toplevel)
+    if toplevel is None:
+        return True
+    keys = {p.casefold(): t for p, t, r in ((pa, ta, ra), (pb, tb, rb)) if r is not None}
+    return not _nested_apart(pa, pb, lambda p: keys.get(p.casefold()) or toplevel(p))
 
 
 def overlap_pairs(A, B, toplevel=None):
@@ -360,7 +447,7 @@ class Git:
         self.env = dict(os.environ)
         for name in names:
             self.env.pop(name, None)
-        self._top, self._origin = {}, {}
+        self._top, self._origin, self._primary = {}, {}, {}
 
     def _run(self, d, *cmd):
         try:
@@ -375,6 +462,23 @@ class Git:
             top = self._run(d, "rev-parse", "--show-toplevel")
             self._top[d] = os.path.realpath(top) if top else None
         return self._top[d]
+
+    def primary(self, top):
+        """A checkout's key, the toplevel its tokens are written against so they read the same from any copy: the
+        main worktree when `realpath(git rev-parse --path-format=absolute --git-common-dir)` is `<main>/.git` and
+        `<main>` is its own toplevel (a linked worktree, a task tree, a snapshot: engine-snapshot.py's git_primary
+        rule), else top itself (a bare repo, `--separate-git-dir`, `core.worktree`). A separate clone keeps its own
+        key (ADR 0042)."""
+        if top not in self._primary:
+            key = top
+            common = self._run(top, "rev-parse", "--path-format=absolute", "--git-common-dir")
+            if common:
+                common = os.path.realpath(common)
+                main = os.path.dirname(common)
+                if os.path.basename(common) == ".git" and self.toplevel(main) == main:
+                    key = main
+            self._primary[top] = key
+        return self._primary[top]
 
     def checkout(self, path):
         """The toplevel of the checkout a path is in, read from its nearest existing directory, or None: the
@@ -394,8 +498,12 @@ class Git:
         return self._origin[d]
 
 
-def claim(raw, who, vault_real, git, warns):
-    """A path as a token, by the header's four steps; WARNs go to `warns`, prefixed with `who`."""
+def locate(raw, who, vault_real, git):
+    """(token, key, warns): a path by the header's four claim steps. key is the checkout's key (Git.primary) when the
+    path is inside a git checkout, else None; the token is then `repo:<key>//<rel>` (`/` when the path is an existing
+    directory or is written with one) or the bare `repo:<key>` for the toplevel itself. warns are the WARN lines a
+    kept token carries, prefixed with `who`: the caller drops them with a token it does not keep."""
+    folder = raw.strip().endswith("/")
     p = os.path.expanduser(raw.strip())
     if not os.path.isabs(p):
         raise ValueError(f"{raw} is not an absolute path")
@@ -409,20 +517,34 @@ def claim(raw, who, vault_real, git, warns):
         cur = parent
     real = os.path.realpath(cur)
     full = os.path.normpath(os.path.join(real, *rest)) if rest else real
+    warns = []
     if rest:
         warns.append(f"WARN: {who}: {raw} does not exist yet: claimed through its nearest existing ancestor {real}")
     vf, ff = vault_real.casefold(), full.casefold()
     if ff == vf:
-        return ("vault", "")
+        return ("vault", ""), None, warns
     if ff.startswith(vf + "/"):
-        return ("vault", full[len(vault_real) + 1:])
+        return ("vault", full[len(vault_real) + 1:]), None, warns
     d = real if os.path.isdir(real) else os.path.dirname(real)
     top = git.toplevel(d)
     if top:
-        return ("repo", top)
+        key = git.primary(top)
+        tf = top.casefold()
+        if ff == tf or not ff.startswith(tf.rstrip("/") + "/"):
+            return ("repo", key), key, warns
+        rel = full[len(top.rstrip("/")) + 1:]
+        mark = "/" if folder or os.path.isdir(full) else ""
+        return parse_token(f"repo:{key}//{rel}{mark}"), key, warns
     warns.append(f"WARN: {who}: {full} is in no git checkout: repo:{full} covers everything beneath it "
                  "(a declared `surfaces:` can narrow it)")
-    return ("repo", full)
+    return ("repo", full), None, warns
+
+
+def claim(raw, who, vault_real, git, warns):
+    """A path as a token, by the header's four steps (locate); WARNs go to `warns`, prefixed with `who`."""
+    tok, _key, w = locate(raw, who, vault_real, git)
+    warns.extend(w)
+    return tok
 
 
 # ---- reading the notes ---------------------------------------------------------------------------
@@ -431,6 +553,8 @@ FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
 SPAN_RE = re.compile(r"`([^`\n]+)`")
 LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$")
 SKIP_LABEL_RE = re.compile(r"^[*_\s]*(?:read\w*|mcp)\b", re.I)
+# A where-label item names where the row works, never what it writes: its first path span is reach (ADR 0067 d4).
+WHERE_LABEL_RE = re.compile(r"^[*_\s]*(?:launch|repos?|workspace|project|engine|working[ -]tree|dir|cwd)[*_\s]*:", re.I)
 PHASE_RE = re.compile(r"(?:^|-)p(\d+(?:\.\d+)?)-(\d+)(?=-|$)", re.I)
 LOCAL_RE = re.compile(r"Local:\s*`(~?/[^`\n]*)`")
 CMD_PUNCT = ";&|"
@@ -500,15 +624,17 @@ def command_paths(cmd: str):
 
 
 def launch_paths(text: str):
-    """(path, via) for each path a `## Launch` body names, outside a **Read...** or **MCP** item (a list item, an
-    unindented line or an unindented fence starts an item; an indented line continues it; a blank line outside a
+    """(path, via, where) for each path a `## Launch` body names, outside a **Read...** or **MCP** item (a list item,
+    an unindented line or an unindented fence starts an item; an indented line continues it; a blank line outside a
     fence ends it): via is None for a backticked path span, else the launch-command path's flag (`--add-dir` or
-    `cd`), read from each fenced line and each backticked span that is not a path span."""
-    out, fence, skip, cont = [], False, False, ""
+    `cd`), read from each fenced line and each backticked span that is not a path span. where is True for the first
+    path span of a where-label item (WHERE_LABEL_RE: **Launch:**, **Repo:** and their kin), the item's value as
+    pickups' Repo rule reads it."""
+    out, fence, skip, cont, where, taken = [], False, False, "", False, False
     for line in text.split("\n"):
         if FENCE_RE.match(line):
             if not fence and not line[:1].isspace():
-                skip = False
+                skip = where = False
             fence, cont = not fence, ""
             continue
         if fence:
@@ -517,20 +643,23 @@ def launch_paths(text: str):
             if line.rstrip().endswith("\\"):
                 cont += line.rstrip()[:-1] + " "
                 continue
-            out.extend(command_paths(cont + line))
+            out.extend((p, via, False) for p, via in command_paths(cont + line))
             cont = ""
             continue
         if not line.strip():
-            skip = False
+            skip = where = False
             continue
         m = LIST_ITEM_RE.match(line)
-        if m:
-            skip = bool(SKIP_LABEL_RE.match(m.group(2)))
-        elif not line[:1].isspace():
-            skip = bool(SKIP_LABEL_RE.match(line))
+        item = m.group(2) if m else (line if not line[:1].isspace() else None)
+        if item is not None:
+            skip, where, taken = bool(SKIP_LABEL_RE.match(item)), bool(WHERE_LABEL_RE.match(item)), False
         if not skip:
             for s in SPAN_RE.findall(line):
-                out.extend([(s, None)] if is_path_span(s) else command_paths(s))
+                if is_path_span(s):
+                    out.append((s, None, where and not taken))
+                    taken = taken or where
+                else:
+                    out.extend((p, via, False) for p, via in command_paths(s))
     return out
 
 
@@ -637,11 +766,19 @@ def resolve_launch(slug, alias, lf, lf_path, lf_err):
 
 
 BOOKKEEPING = "work/tasks"
+# The ledgers every run appends to (ADR 0067 d5): the Run record, reviews.jsonl, grades.jsonl and tunings.jsonl under
+# the workspaces' thread-events dir, and leg.py's REVIEWS, a checkout's review docs.
+LEDGERS = ("_shared/state/thread-events", "docs/reviews")
 
 
 def bookkeeping(tok) -> bool:
-    """Whether a token is the engine's own bookkeeping: a vault path at or under Work/Tasks, case-folded (ADR 0059)."""
+    """Whether a token is the engine's own bookkeeping, case-folded: a vault path at or under Work/Tasks (ADR 0059), or
+    a keyed `repo:` token whose path in its checkout is at or under one of LEDGERS (ADR 0067 d5)."""
     kind, value = tok
+    if kind == "repo":
+        rel = repo_parts(value)[1]
+        r = rel.casefold() if rel is not None else None
+        return r is not None and any(r == x or r.startswith(x + "/") for x in LEDGERS)
     v = value.casefold()
     return kind == "vault" and (v == BOOKKEEPING or v.startswith(BOOKKEEPING + "/"))
 
@@ -660,6 +797,22 @@ def project_claim(vault: Path, proj_path: Path, task_path: Path):
         out = [parse_token("vault:" + rel.as_posix()), parse_token("vault:" + rel.with_suffix("").as_posix())]
     out.append(parse_token("vault:" + task_path.relative_to(vault).as_posix()))
     return out
+
+
+def works_of(tokens, reach, git):
+    """The checkouts a member works, sorted and unique (case-folded): checkout_of each keyed `repo:` token, each bare
+    one that is a git toplevel, and each reach checkout (a key). A bare token in no checkout is not one."""
+    out = {}
+    for t in tokens:
+        kind, value = _tok(t)
+        if kind != "repo":
+            continue
+        top, rel, _ = repo_parts(value)
+        if rel is not None or git.toplevel(top) == top:
+            out.setdefault(top.casefold(), top)
+    for r in reach:
+        out.setdefault(r.casefold(), r)
+    return sorted(out.values())
 
 
 def in_vault(folder, vault_real) -> bool:
@@ -779,15 +932,20 @@ def cmd_plan(args) -> int:
 
         cw = []
         declared = read_surfaces(note)
+        # Each `## Launch` path, located once: a launch-command path or a where-label item's value is reach, and so is
+        # any other path span that is a checkout's toplevel; the rest are predictions (ADR 0067 d4).
         launch_named = []
-        for path, via in launch_paths(note.section_text("## Launch")):
-            if not too_broad(path):
-                launch_named.append((path, via))
-            elif not declared:
-                cw.append(f"WARN: {slug}: its ## Launch {via or 'path'} {path} is / or the home directory (or above "
-                          "it): not claimed, since it would contain every repo; declare `surfaces:` for what the "
-                          "task writes there")
-        tokens, added = [], []
+        for path, via, where in launch_paths(note.section_text("## Launch")):
+            if too_broad(path):
+                if not declared:
+                    cw.append(f"WARN: {slug}: its ## Launch {via or 'path'} {path} is / or the home directory (or "
+                              "above it): not claimed, since it would contain every repo; declare `surfaces:` for what "
+                              "the task writes there")
+                continue
+            tok, key, tw = locate(path, slug, vault_real, git)
+            reach = bool(via or where or (key is not None and tok == ("repo", key)))
+            launch_named.append((path, via, reach, tok, key, tw))
+        tokens, added, reach_tops = [], [], []
         if declared:
             for raw in declared:
                 try:
@@ -804,16 +962,19 @@ def cmd_plan(args) -> int:
                                     f"{TOKEN_FORMS}")
         root_src, root_adds, derived = None, [], False
         if not declared:
-            # Derived claims: the vault root narrows below and a Work/Tasks path is bookkeeping, dropped (ADR 0059).
-            places = [(path, f"its ## Launch {via or 'path'} {path}") for path, via in launch_named]
+            # Derived claims: a reach path in a checkout names only that checkout (works); the vault root narrows below;
+            # Work/Tasks paths and the ledgers are bookkeeping, dropped with no WARN (ADR 0059, ADR 0067 d5).
+            places = [(tok, key, tw, reach, f"its ## Launch {via or 'path'} {path}")
+                      for path, via, reach, tok, key, tw in launch_named]
             if proj_names:
-                places += [(loc, f"its project [[{proj_names[0]}]]'s Local: {loc}")
+                places += [locate(loc, slug, vault_real, git) + (True, f"its project [[{proj_names[0]}]]'s Local: {loc}")
                            for loc in LOCAL_RE.findall(projects.read(proj_names[0])[1])]
             if folder:
-                places.append((folder, f"its launch folder {folder} ({alias})"))
-            for path, label in places:
-                tw = []
-                t = claim(path, slug, vault_real, git, tw)
+                places.append(locate(folder, slug, vault_real, git) + (True, f"its launch folder {folder} ({alias})"))
+            for t, key, tw, reach, label in places:
+                if reach and key is not None:
+                    reach_tops.append(key)
+                    continue
                 if bookkeeping(t):
                     continue
                 cw.extend(tw)
@@ -822,6 +983,41 @@ def cmd_plan(args) -> int:
                 else:
                     tokens.append(t)
                     derived = True
+            # `touches:`: predicted file tokens; a relative item is keyed to the one checkout the member works by its
+            # launch and ## Launch (before its touches: add any), an absolute one claimed.
+            rels, tops = [], works_of(tokens, reach_tops, git)
+            for item in note.get_list("touches"):
+                v = rr._scalar(item).strip()
+                if not v:
+                    continue
+                if v.startswith(("/", "~")):
+                    t, _key, tw = locate(v, slug, vault_real, git)
+                    if bookkeeping(t):
+                        continue
+                    cw.extend(tw)
+                    if t == ("vault", ""):
+                        root_src = root_src or f"its touches: {v}"
+                    else:
+                        tokens.append(t)
+                        derived = True
+                else:
+                    rels.append(v)
+            if rels:
+                if len(tops) == 1:
+                    for v in rels:
+                        mark = "/" if v.endswith("/") or os.path.isdir(os.path.join(tops[0], v)) else ""
+                        try:
+                            t = parse_token(f"repo:{tops[0]}//{v.rstrip('/')}{mark}")
+                        except ValueError as e:
+                            cw.append(f"WARN: {slug}: its touches: {v} is not a path in {tops[0]} ({e}): not claimed")
+                            continue
+                        if t[0] == "repo" and repo_parts(t[1])[1] is not None and not bookkeeping(t):
+                            tokens.append(t)
+                            derived = True
+                else:
+                    cw.append(f"WARN: {slug}: its touches: {', '.join(rels)} name paths in a checkout, and it works "
+                              f"{len(tops)} checkouts ({', '.join(tops) or 'none'}): not claimed; declare `surfaces:` "
+                              "for the files it writes")
         for raw in adds.get(slug.lower(), []):
             t = added_token(raw)
             if t[0] == "path":
@@ -831,15 +1027,26 @@ def cmd_plan(args) -> int:
                     root_adds.append(raw)
                     continue
                 if bookkeeping(t):
-                    cw.append(f"WARN: {slug}: --surface {raw} is under Work/Tasks: task and rollout notes are "
-                              "bookkeeping, never a claim (ADR 0059); pass the token `vault:Work/Tasks/...` to claim "
-                              "one on purpose")
+                    if t[0] == "vault":
+                        cw.append(f"WARN: {slug}: --surface {raw} is under Work/Tasks: task and rollout notes are "
+                                  "bookkeeping, never a claim (ADR 0059); pass the token `vault:Work/Tasks/...` to "
+                                  "claim one on purpose")
+                    else:
+                        cw.append(f"WARN: {slug}: --surface {raw} is a ledger every run appends to (the Run record "
+                                  "or a review ledger): bookkeeping, never a claim (ADR 0067 d5); declare it in the "
+                                  "task's `surfaces:` to claim it on purpose")
                     continue
                 cw.extend(tw)
             tokens.append(t)
             added.append(fmt_token(t))
-        narrowed = False
-        if root_src or root_adds or not tokens:
+        narrowed, reach_only = False, bool(reach_tops) and not tokens and not root_src and not root_adds
+        if reach_only:
+            # It writes a checkout, not the vault: it claims only its own task note, so its Queue cell is never empty.
+            tokens.append(parse_token("vault:" + notes[slug].path.relative_to(vault).as_posix()))
+            tops = ", ".join(sorted(set(reach_tops), key=str.casefold))
+            cw.append(f"WARN: {slug}: names no file in {tops}: it predicts nothing there, so it orders against no "
+                      "chain's files (ADR 0067 d4); declare `surfaces:` for the files it writes")
+        elif root_src or root_adds or not tokens:
             ppath = projects.find(proj_names[0]) if proj_names else None
             if ppath is not None:
                 tokens.extend(project_claim(vault, ppath, notes[slug].path))
@@ -862,36 +1069,43 @@ def cmd_plan(args) -> int:
                     cw.append(f"WARN: {slug}: no surface declared or derived: it claims only the vault; declare "
                               "`surfaces:` for any repo or external system it writes")
         source = ("declared" if declared else "derived" if derived or added or root_src or root_adds or narrowed
-                  else "default")
+                  or reach_only else "default")
         warns.extend(cw)
         canon = sorted({fmt_token(t) for t in tokens})
         # A code row's Leg finishes only commits in its own checkout, so it never opens outside the one it writes
-        # (ADR 0059 d4); the refusal waits for ruling (c), which sends a session-lane member away unrefused.
-        repos = [v for k, v in (parse_token(t) for t in canon) if k == "repo"]
-        checkouts = [v for v in repos if git.toplevel(v) == v]
+        # (ADR 0059 d4); the refusal waits for ruling (c), which sends a session-lane member away unrefused. `works`:
+        # the checkouts its tokens name and those it reaches; a bare token in no checkout is the path-only fallback.
+        works = works_of([parse_token(t) for t in canon], reach_tops, git)
+        pathonly = [v for k, v in (parse_token(t) for t in canon)
+                    if k == "repo" and repo_parts(v)[1] is None and v.casefold() not in {w.casefold() for w in works}]
         pending = None
         if not alias:
-            if len(checkouts) == 1:
-                folder = checkouts[0]
-            elif checkouts:
+            if len(works) == 1:
+                folder = works[0]
+            elif works:
                 folder = vault_real
-                pending = (f"{slug}: it writes the checkouts {', '.join(checkouts)} and has no launch alias: leg.py "
+                pending = (f"{slug}: it writes the checkouts {', '.join(works)} and has no launch alias: leg.py "
                            "done finishes only commits in the Leg's own checkout, so give it a `launch:` whose folder "
                            "is in the checkout it commits to, split it into one task per checkout chained by "
                            "`depends-on:`, or declare `surfaces:` without a checkout it only reads")
             else:
-                folder = repos[0] if len(repos) == 1 else vault_real
-        elif folder and checkouts and in_vault(folder, vault_real):
-            which = f"checkout {checkouts[0]}" if len(checkouts) == 1 else f"checkouts {', '.join(checkouts)}"
+                folder = pathonly[0] if len(pathonly) == 1 else vault_real
+        elif folder and works and in_vault(folder, vault_real):
+            which = f"checkout {works[0]}" if len(works) == 1 else f"checkouts {', '.join(works)}"
             pending = (f"{slug}: its launch {alias} opens in {folder}, inside the vault, but it writes the {which}: "
                        "leg.py done finishes only commits in the Leg's own checkout, so give it a `launch:` whose "
                        "folder is in that checkout, split it into one task per checkout chained by `depends-on:`, or "
                        "declare `surfaces:` without a checkout it only reads")
         launch = {"alias": alias or "claude", "folder": folder}
 
-        # Ruling (c): no serial self-rollouts.
-        sources = [(f"its ## Launch {via} {p}", os.path.expanduser(p)) for p, via in launch_named if via]
-        sources += [(f"its surface {t}", parse_token(t)[1]) for t in canon if t.startswith("repo:")]
+        # Ruling (c): no serial self-rollouts. A reach path is a source of its own: it leaves no token behind.
+        sources = []
+        for p, via, reach, _tok, key, _tw in launch_named:
+            if via:
+                sources.append((f"its ## Launch {via} {p}", os.path.expanduser(p)))
+            elif reach and key is not None:
+                sources.append((f"its ## Launch path {p}", key))
+        sources += [(f"its surface {t}", checkout_of(t)[1]) for t in canon if t.startswith("repo:")]
         if alias and folder:
             sources.append((f"its launch folder {folder} ({alias})", folder))
         for pname in proj_names:
@@ -905,7 +1119,7 @@ def cmd_plan(args) -> int:
                      if os.path.isdir(d) and git.origin(d) == porigin), None)
         deps = list(rr._dep_entries(note)) + extra_deps.get(slug.lower(), [])
         info[slug] = {"surfaces": canon, "source": source, "added": sorted(set(added)), "launch": launch,
-                      "deps": deps}
+                      "works": works, "deps": deps}
         if lane:
             session.append({"slug": slug, "why": lane})
         elif pending:
@@ -955,7 +1169,9 @@ def cmd_plan(args) -> int:
         chains.append({
             "tasks": rows,
             "surfaces": sorted({t for m in rows for t in info[m]["surfaces"]}),
-            "members": {m: {k: info[m][k] for k in ("surfaces", "source", "added", "launch")} for m in rows},
+            "checkouts": checkouts_of(sorted({t for m in rows for t in info[m]["surfaces"]}),
+                                      [info[m]["launch"]["folder"] for m in rows], git.toplevel, vault_real),
+            "members": {m: {k: info[m][k] for k in ("surfaces", "source", "added", "launch", "works")} for m in rows},
             "externalDeps": [e for m in rows for e in ext[m]],
         })
     if refusals:
