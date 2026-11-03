@@ -4,8 +4,9 @@
 # by the Morning's hour; with fewer than 3 past runs, nothing starts in the 2 h before it. Restarts are never held,
 # and the hold never halts. Off --dry-run, `next` writes the night record into the rollout's Run record: one
 # away-night marker per Morning, one last-start-held line per held task, and one ran-past-morning line per task whose
-# Slot was open at the Morning (execute away.md § The last starts, § The night record). Every `next` call pins HOME to
-# its scenario's own dir, so the operator's away.json never reaches an assertion. Temp notes only.
+# Slot was open at the Morning (execute away.md § The last starts, § The night record). `status` shows a row the last
+# starts would hold, read-only (p28-7, S1-S5). Every `next` and `status` call pins HOME to its scenario's own dir,
+# so the operator's away.json never reaches an assertion. Temp notes only.
 #
 # This suite reads the record (the history and the night record), so it keeps its own THREAD_EVENTS_DIR, one per
 # scenario, and ignores THREAD_TEST_EVENTS_DIR (the knob tests/run.sh honours to run every other suite against an
@@ -435,5 +436,77 @@ ok "$(grep -c '^run_record: warning: night record not written: ' "$D/err")" 1 "L
 rm -f "$D/home/.config/thread/away.json"
 J=$(nx 2026-10-03T07:30:00Z)
 ok "$(grep -c 'night record' "$D/err")" 0 "L14: not Away, the same record is silent"
+
+# ── S1-S5 (p28-7): status reads the last starts as `next` would, silently and read-only ──────────────────────────
+# st <now>: status on $D/ro.md at <now>, HOME pinned to $D/home; stderr lands in $D/err.
+st() { HOME="$D/home" python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "$1" 2>"$D/err"; }
+LS='{t["slug"]: t["lastStart"] for t in d["tasks"]}'
+scen s1-status
+ro; mkt c1 ro open 'scope: cross-cutting'; mkt s1 ro open 'scope: single-file'
+history; night
+sums() { cksum "$D"/*.md | awk '{print $1 $2}' | tr '\n' ' '; }
+before=$(sums); recs=$(ls "$D/events"; cksum "$D"/events/*.jsonl)
+J=$(st 2026-10-03T07:30:00Z); rc=$?
+ok "$rc" 0 "S1: status exits 0"
+ok "$(q "$J" "$LS")" "{\"c1\":\"$CC\",\"s1\":null}" "S1: c1 (cross-cutting, 110 min) shows its last start: reason; s1 (single-file) fits"
+ok "$(q "$J" 'd["lastStarts"]')" '{"kinds":{"cross-cutting":{"history":3,"usualMinutes":110},"single-file":{"history":3,"usualMinutes":25}},"morning":"2026-10-03T09:00:00+00:00"}' \
+  "S1: lastStarts names the Morning and each kind the rows read"
+ok "$(q "$J" 'list(d)[list(d).index("trickle") + 1]')" '"lastStarts"' "S1: lastStarts follows trickle, as in next"
+N=$(nx 2026-10-03T07:30:00Z --dry-run)
+ok "$(q "$J" '[t["lastStart"] for t in d["tasks"] if t["slug"] == "c1"]')" "$(q "$N" '[h["reason"] for h in d["hold"] if h["slug"] == "c1"]')" \
+  "S1: the reason is next --dry-run's hold for c1"
+st 2026-10-03T07:30:00Z >/dev/null
+ok "$(lines)" 0 "S1: nothing on stderr"
+ok "$(sums)" "$before" "S1: every note byte-identical"
+ok "$(ls "$D/events"; cksum "$D"/events/*.jsonl)" "$recs" "S1: no record written, not even the rollout's own"
+scen s2-status-not-away
+ro; mkt c1 ro open 'scope: cross-cutting'
+history
+away_file "$D/home" 2026-10-03T07:00:00Z false 2026-10-03T18:00:00Z
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" "[$LS, d[\"lastStarts\"]]")" "[{\"c1\":null},$NONE]" "S2: not Away: every row null, lastStarts null"
+scen s3-status-waiting
+ro; mkt c1 ro in_progress 'scope: cross-cutting'; mkt c2 ro open 'scope: cross-cutting' 'depends-on: [[c1]]'
+history; night
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" '[[t["slug"], t["lastStart"], len(t["waitingOn"])] for t in d["tasks"]]')" '[["c1",null,0],["c2",null,1]]' \
+  "S3: a running row and a queued row with waitingOn: both null"
+scen s4-status-paused
+ro 'paused: 2026-10-03T07:00+00:00'; mkt c1 ro open 'scope: cross-cutting'
+history; night
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" "$LS")" '{"c1":null}' "S4: paused: the pause holds the row, never the last starts"
+# Each of the rollout's other whole holds (cmd_status's whole_held) nulls the row too, and the same row reads $CC before
+# it. whole <label>: a scenario whose c1 reads $CC, checked; the caller then adds its hold to ro.md and checks again.
+whole() {
+  scen "s4-status-$1"; ro; mkt c1 ro open 'scope: cross-cutting'; history; night
+  ok "$(q "$(st 2026-10-03T07:30:00Z)" "$LS")" "{\"c1\":\"$CC\"}" "S4 $1 control: before the hold, c1 reads its last start"
+}
+whole pause-requested
+python3 -c 'import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("\nparallel_ceiling: 3\n", "\nparallel_ceiling: 3\npause_requested: true\n", 1))' "$D/ro.md"
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" '[d["pause_requested"], d["tasks"][0]["slug"], d["tasks"][0]["lastStart"]]')" '[true,"c1",null]' \
+  "S4: pause_requested: the drain holds the row, never the last starts"
+whole main-red
+printf '\n## Race log\n\n- 2026-10-03T07:00+00:00 [[r0]] revert did not land: conflict in a.py\n' >> "$D/ro.md"
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" '[[m["slug"] for m in d["mainRed"]], '"$LS"']')" '[["r0"],{"c1":null}]' \
+  "S4: an undecided RACE revert that did not land (main red) holds the row, never the last starts"
+whole git-env-rollout
+printf '\n## Git-env log\n\n- 2026-10-03T07:00+00:00 git-env trip [[c1]] task: core.bare false→true; repo /x\n' >> "$D/ro.md"
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" '[[h["scope"] for h in d["gitEnvHold"]], '"$LS"']')" '[["rollout"],{"c1":null}]' \
+  "S4: a whole-rollout git-env trip (a bare checkout) holds the row, never the last starts"
+whole git-env-lane
+printf '\n## Git-env log\n\n- 2026-10-03T07:00+00:00 git-env trip [[c1]] task: refs/heads/main a->b; repo /x\n' >> "$D/ro.md"
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" '[[h["scope"] for h in d["gitEnvHold"]], '"$LS"']')" "[[\"lane\"],{\"c1\":\"$CC\"}]" \
+  "S4 control: a lane-scope git-env trip holds only the Integration lane: c1 still reads its last start"
+scen s5-status-no-history
+ro; mkt u1 ro open
+night
+J=$(st 2026-10-03T07:30:00Z)
+ok "$(q "$J" "$LS")" "{\"u1\":\"$(nohist unscoped 0)\"}" "S5: no history: the fallback, named for kind unscoped"
+ok "$(lines)" 0 "S5: nothing on stderr"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

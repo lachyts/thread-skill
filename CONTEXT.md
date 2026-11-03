@@ -555,9 +555,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Note overlap** — two live runs editing the same vault note while both
   tasks are unfinished. The later edit is never held or refused: its agent is
   warned which run is in the note and to re-read it first, and every overlap
-  is recorded for the weekly Reflection (ADR 0067, proposed). Best-effort: a
-  script's or a Codex Leg's write is not warned. _Avoid_: Note wait, note
-  lock, lease (alone).
+  is recorded for the weekly Reflection (ADR 0067, proposed). The plugin's
+  PreToolUse hook (`hooks/vault-note-overlap.py`) records each run's writes
+  and gives the warning; each warning is a `note-overlap` line in the Run
+  record's `overlaps.jsonl`, and the weekly reading's `noteOverlaps` reports
+  the week's, or `none`. Another run is another rollout (decided, ADR 0067's
+  Decided for Lachy 9): two tasks of one rollout in one note are not warned.
+  Best-effort, and these misses are accepted: a script's, a shell's or a Codex
+  Leg's write, and an edit by a session that is no run's task (an interactive
+  session, a lead's own thread, a subagent a task agent spawns). _Avoid_: Note
+  wait, note lock, lease (alone).
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -648,10 +655,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Rollout with no lease still counts (ADR 0049, amended). _Avoid_: heartbeat
   file, lock.
 - **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
-  the **Away cap**) for a start it has picked but not yet stamped, so every
-  other lead counts it. The stamp consumes it, and it lapses after 20
-  minutes. _Avoid_: bare "claim" (a Leg's task claim and a **Surface** claim
-  use it).
+  the **Away cap**) for a start, or a seeded revise, it has picked but not yet
+  stamped, so every other lead counts it. The stamp consumes it, and it lapses
+  after 20 minutes. _Avoid_: bare "claim" (a Leg's task claim and a
+  **Surface** claim use it).
 - **Fair share** — the place a lead's `next` keeps free in the **Trickle** (or
   the **Away cap**) for the waiting rollout that holds fewest, then was served
   least recently, so a rollout that refills the moment its call returns never
@@ -667,8 +674,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Night record** — per Morning, the **Last starts**' held starts and the
   tasks still running at the Morning, written into each rollout's **Run
   record** and keyed by that Morning, so a **Reflection** can tune the
-  two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences).
-  _Avoid_: night log.
+  two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences): it
+  tells a fallback overrun (a kind with under three past runs) from an
+  underestimate (a kind whose usual length let it start). _Avoid_: night log.
 - **Heat hold** — while the Mac's thermal pressure reads heavy or worse, no
   new Rollout task starts, Away included, and no **Verify slot** is free; at
   trapping or sleeping a running slotted suite is stopped and put back in
@@ -1346,9 +1354,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Chorus's weekly Runner (ADR 0051).
   _Avoid_: clean run, empty retro.
 - **Decision task** — the one open vault task tagged `decisions` that the
-  weekly reading writes for the next morning when it has a rule proposal
+  weekly reading writes, unscheduled, when it has a rule proposal
   or a held trade (a knob ADR 0037 d1 leaves to Lachy; ADR 0037 d5): Lachy
-  decides it at the top of a run (`/thread:reflect --decide`); schedule
+  decides it at Chorus's Thursday Reflection Routine
+  (`/thread:reflect --decide`); schedule
   (either shape) and the reshuffle never take it. _Avoid_: inbox, review
   queue.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,

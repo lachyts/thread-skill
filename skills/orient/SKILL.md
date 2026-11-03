@@ -205,7 +205,7 @@ and Drift and the slots for each swept project.
   reported, excluded or grilled again, whatever route the task takes next. A later run's end line
   supersedes the whole set.
 - **Decisions waiting**: an open task tagged `decisions` (the weekly Reflection's decision task,
-  ADR 0037 d5) is Lachy's, decided at the top of a run through `/thread:reflect --decide`.
+  ADR 0037 d5) is Lachy's, decided at Chorus's Thursday Reflection Routine through `/thread:reflect --decide`.
 
 ### 3. Present
 
@@ -430,7 +430,7 @@ Orient-graded or undecided members out with their dependants, unstamped; orient 
   session lane): conversation-gated tasks (need Lachy's input — say so, leave them for Hands-on or
   the next reshuffle's grill). The weekly Reflection's decision task (tagged `decisions`, § 2
   Decisions waiting) is conversation-gated and never goes into a serial rollout: Lachy decides it
-  at the top of a run. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its
+  at Chorus's Thursday Reflection Routine. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its
   latest orient end line, with no `orient ruling:` line for it timed after that end line) counts
   as conversation-gated at any age, and it stays out until Lachy rules on every open fork in a
   reshuffle grill (§ 5), which writes each ruling into the note; whatever route the task takes

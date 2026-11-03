@@ -61,6 +61,13 @@ provide that runtime. The estate pass (`/thread:orient-all`) grades through read
 forked subagents, and starts its sessions as visible Chorus sessions on the Stage; anywhere else it ends with
 paste-ready prompts.
 
+Two hooks ship with the plugin (`hooks/hooks.json`). The Stop hook (`hooks/rollout-stop-driver.py`) keeps a queued
+rollout moving. The PreToolUse hook on Edit, Write and MultiEdit (`hooks/vault-note-overlap.py`, ADR 0067 d6) records
+which live run's task wrote each vault note and, when another rollout's task edits it, lets the edit through and tells
+that agent to re-read the note; each warning lands in the Run record's `overlaps.jsonl`, and the weekly Reflection
+reports them. It keeps a debug line per vault-path call in its state dir (`~/.local/state/thread/note-writers/debug.jsonl` by default, capped at
+512 KB, one rotated copy): `THREAD_NOTE_OVERLAP_DEBUG=off` turns it off, and an absolute file logs every call there.
+
 ## The convergence engine
 
 `skills/execute/task.workflow.js` runs **three layers per task**,
@@ -414,7 +421,11 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   (the queue verbs), `reconcile-rollout-runs.test.sh` (accumulated feedback runs), `reconcile-rollout-lead.test.sh`
   (`hand-back`, `log-integration`), `reconcile-rollout-descope.test.sh` (the automatic-descope verb and its recorded
   refusal) and `reconcile-rollout-human-fix.test.sh` (`inputs`' one Human fix per refusal, the recorded answer,
-  `record-answer` and `hand-back --answer`, ADR 0035); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
+  `record-answer` and `hand-back --answer`, ADR 0035); `rollout-stop-driver.test.sh`; `tests/vault-note-overlap.test.sh` (the
+  Note overlap hook on a fixture vault and real-shaped transcripts: identity, the writer record, liveness, the warning,
+  the Run-record line, the XDG rule, the debug log, the sweep, robustness and the time limit) and
+  `tests/contracts/note-overlap-opener.test.mjs` (every task-agent prompt opens with its task link and then its rollout
+  link inside the hook's opener window); `tests/lead-integrate.test.sh` (the lead's
   Integration against a fake `gh` and real repos) and `tests/contracts/execute-queue.test.mjs` (the queue loop's prose);
   `merge-task.sh --self-test-classify` / `--self-test-base`, and `tests/merge-task-base.test.sh` /
   `tests/merge-task-integrated.test.sh` (one integrated PR per call, against a fake `gh` and a real bare repo).

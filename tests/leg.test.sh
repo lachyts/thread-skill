@@ -238,6 +238,14 @@ ok "$([ -e "$T/$RO.md" ] && echo y || echo n)" n "L1: … and no live note is re
 out=$(cd "$F" && python3 "$LEG" file-followup --title "Check the dashboards" --why w --rollout "$RO" --tasks-dir "$T" \
       --vault "$V" --now "$NOW" --session s2 2>"$TMP/err"); rc=$?
 ok "$rc|$(q 'd["archived"]')|$(q 'd["followup"]')" "0|$A|demo-followup-check-the-dashboards" "L1: … and by its slug"
+out=$(cd "$F" && python3 "$LEG" file-followup --title "Note the archive path" --why w --rollout "$A" --tasks-dir "$T" \
+      --vault "$V" --now "$NOW" --session s2 2>"$TMP/err"); rc=$?
+ok "$rc|$(q 'd["archived"]')|$(q 'd["pointer"]')|$(q 'd["followup"]')" "0|$A|False|demo-followup-note-the-archive-path" \
+   "L1: … and by its Archive/Rollouts/ path, read as archived"
+cmp -s "$A" "$TMP/snapA"; ok "$?" 0 "L1: … the archived note byte-identical: no pointer, no log line"
+out=$(cd "$F" && python3 "$LEG" smoke --task t1 --result pass --rollout "$A" --tasks-dir "$T" --vault "$V" --now "$NOW" \
+      --session s2 2>"$TMP/err"); rc=$?; err=$(cat "$TMP/err")
+ok "$rc" 1 "L1: smoke by the Archive/Rollouts/ path is exit 1"; has "$err" "complete and archived" "L1: … saying so"
 SESS=s2 leg file-followup --item 1 --title x --why y
 ok "$rc" 1 "L1: --item on the archived note is exit 1"; has "$err" "settled at Complete" "L1: … saying why"
 cmp -s "$A" "$TMP/snapA"; ok "$?" 0 "L1: … the archived note still byte-identical"
@@ -482,10 +490,14 @@ leg claim --task t2 --gate "$G1"; ok "$rc|$(q 'd["unapproved"]')" "0|['$G1']" "L
 leg set-aside --task t2 --kind gate --gate "$G1" --reason "an unapproved spend gate"
 ok "$rc|$(fm t2 status)|$(fm t2 owner)" "0|gate-pending|<none>" "L3: set-aside --kind gate: gate-pending, no owner"
 has "$(sed -n '/^## Gated inputs (awaiting sign-off)/,$p' "$T/t2.md")" "- $G1" "L3: … with the gate under ## Gated inputs (awaiting sign-off)"
-leg next; ok "$(q 'd["task"]')" t3 "L3: the chain goes on: t3"; finish t3
+leg next; ok "$(q 'd["task"]')" t3 "L3: the chain goes on: t3"
+# execute § 3.7's exact `None` (legs.md § The task loop passes it as --gate) is no gate, as the engine reads it
+leg claim --task t3 --gate None; ok "$rc|$(q 'd["unapproved"]')" "0|[]" "L3: claim --gate None is no gate: unapproved []"
+leg done --task t3 --verify pass; ok "$rc" 0 "done t3"
 leg next; ok "$(q 'd["task"]')" t5 "L3: t4 is held, t5 next"
 has "$(q 'd["held"]')" "depends on [[t2]] (gate-pending)" "L3: … t4 held on t2's gate"
-finish t5
+leg claim --task t5 --gate "- none."; ok "$rc|$(q 'd["unapproved"]')" "0|[]" "L3: … a bulleted, case-folded \`none.\` too"
+leg done --task t5 --verify pass; ok "$rc" 0 "done t5"
 leg next; ok "$(q 'd["action"]')" stuck "L3: only the set-aside and its dependant remain: stuck"
 leg close --outcome stuck
 ok "$rc|$(q 'd["status_line"]')" "0|ROLLOUT-STATUS: $RO merged=3/5 running=0 state=halted reason=\"awaiting you: 1 set aside\"" "L3: close stuck"

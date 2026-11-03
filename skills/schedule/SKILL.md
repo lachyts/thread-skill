@@ -285,7 +285,7 @@ Walk `~/repos/obsidian/Work/Tasks/*.md`. Filter:
 - `tags:` **contains** `task` — phase notes (`tags: [phase]`, see ADR 0005) and any other non-task
   note linked to the project are never dispatched
 - `tags:` does **not** contain `rollout` (rollouts aren't tasks)
-- `tags:` does **not** contain `decisions` (the weekly Reflection's decision task, ADR 0037 d5: Lachy decides it at the top of a run, never during one), with or without `--tasks`. Name each skipped decision task in the count report.
+- `tags:` does **not** contain `decisions` (the weekly Reflection's decision task, ADR 0037 d5: Lachy decides it at the Reflection Routine, never during a run), with or without `--tasks`. Name each skipped decision task in the count report.
 - Skip a task whose `rollout:` links a rollout note directly in `Work/Tasks/` that is neither `done` nor `dropped`: it belongs to that rollout, and only a supersede may take it. Name each skipped task and its rollout in the count report.
 - Skip tasks with `status: merged` — step 4.5 folded these into a combined note; their `merged_into:` target carries the work and gets dispatched in their place
 
