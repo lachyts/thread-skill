@@ -1145,8 +1145,11 @@ Security check (execute § 3 \`security_checks\`, this rollout's opt-in): \`${se
 }
 
 // The agent's newDependencies as the judge sees them: strings only, each on one line of at most DEP_LINE_MAX characters,
-// at most DEPS_SHOWN lines, the rest counted in a final `(<n> more lines cut)`.
-const DEPS_SHOWN = 50
+// at most DEPS_SHOWN lines, the rest counted in a final `(<n> more lines cut)`. DEPS_SHOWN holds the scan's whole brief
+// in practice: its MAX_DEPS (200) dependency lines and 50 accepted, not-checked or not-read lines after them
+// (prompt-invariants P6 pins it to MAX_DEPS + 50). A brief longer still, or a line cut with `…`, is not compared past
+// the cut (securityReviewBlock says so), so no judge asks for a change only the engine's cut made.
+const DEPS_SHOWN = 250
 const DEP_LINE_MAX = 300
 function dependencyLines(v) {
   const out = []
@@ -1175,7 +1178,8 @@ ${lines.length ? lines.map((l) => '- ' + l).join('\n') : '(none reported)'}
 Cross-check it against \`gh pr diff ${prevImpl.prUrl}\`: a dependency the diff adds or changes that the list leaves out, or an entry the diff does not add, is a reason for "changes".
 Then run the scan yourself, only when the read rule above holds (the tree's HEAD equals the PR head and its status is clean), exactly \`${securityScanCmd(a, task)}\`. It is read-only. Exit 1: "changes"; when its \`action\` is human, also put its \`why\`, verbatim, in needsHuman. Exit 2, or a failed read rule: say so, run nothing more, and judge on the agent's list.
 An \`accepted\` line in your scan's brief names the \`## Repair input\` entry it came from: confirm it stands in the task note, is not superseded, and that the agent's copy carries the same line; otherwise "changes".
-A dependency in one brief and not the other is "changes"; a difference only in a not-checked or not-read line is not.`
+A dependency in one brief and not the other is "changes"; a difference only in a not-checked or not-read line is not.
+The engine shows at most the agent's first ${DEPS_SHOWN} lines, each cut at ${DEP_LINE_MAX} characters: when its list ends in \`(<n> more lines cut)\`, your brief's lines after its first ${DEPS_SHOWN} are not compared (an \`accepted\` one among them is still checked against the task note), and a line that ends in \`…\` is compared only on the part shown.`
 }
 
 // Escalation hand-over context (empty-when-unused, like baselineManifest/gateOverride — the non-empty
