@@ -80,8 +80,7 @@ root's git (commit messages, `docs/reviews/` and `git blame`), never fetched. By
 `serial-score.py` alone, which reads the note's Leg log through `leg.py status`, the Run record and the task notes,
 and writes nothing. The weekly reading reads every rollout record,
 `reflections.jsonl`, `grades.jsonl` (the Grade log, read-only) and the contract (above) too, and writes: `reflections.jsonl` through reflect.py; a bug task and
-the decision task under `~/repos/obsidian/Work/Tasks/`; the decision task's one line on its day page (task-writer
-§ 3b); `tunings.jsonl` lines only through tune.py's `--auto` and `--revert`; and `call-journal` lines through
+the decision task under `~/repos/obsidian/Work/Tasks/`; `tunings.jsonl` lines only through tune.py's `--auto` and `--revert`; and `call-journal` lines through
 `span --fold`. Its scratch dir is `/tmp/thread-reflect-week-<YYYY-MM-DD>/`. The Monthly audit (step 10a) also reads,
 read-only, the lead sessions' transcripts, the suite logs, the rollout notes' pause logs and the Mac's own history, and
 writes only `audit.json` in that scratch dir. The attention ledger (steps 10, 11 and 13b) also reads, read-only, the
@@ -287,7 +286,7 @@ change a live rollout, Lachy edits its note.
 d4), or once a fortnight on a quiet streak (d6): the scripts score and sweep, the model traces each cost to its rule,
 and the writers record the outcome. It lands a bug task, an agreed knob or a knob's revert unasked (ADR 0037 d5); a
 rule proposal (with any Watch to confirm beside it), a held trade (a knob ADR 0037 d1 leaves to Lachy) or a Monthly
-audit's gap goes into one decision task for Lachy's next morning. It also keeps the **Time-lost ledger** (ADR 0051):
+audit's gap goes into one decision task for Chorus's Thursday Reflection Routine. It also keeps the **Time-lost ledger** (ADR 0051):
 the hours each cause class cost across every rollout, ranked by cause and trended week on week, with a Monthly audit
 on the month's first reading. And it keeps the **attention ledger** (ADR 0056): the questions put to Lachy by Owner, each
 PR's review trail, each rollout's wait to start, and the work items and rollouts that circle without merging. Every
@@ -532,6 +531,15 @@ time, never lane work, and belongs with the stalls by cause. A non-zero `wallOnl
 which can hold a stall (written before p29-13, or `active=-`: a resumed integrate call whose journal placed no live
 agent, say): say so beside the figure. Never read lane time off a `duration=` by hand.
 
+**Note overlaps.** Read `span.json`'s `noteOverlaps` (ADR 0067 d6) as reported, never traced: each overlap is a vault
+note that one run's task edited while a live task of another rollout had written it, which the plugin's PreToolUse hook
+(`hooks/vault-note-overlap.py`) let through with a warning to re-read it. Name the week's `warnings`, each overlap's
+`note` and its two `runs`, and the `rollouts`; name `none` when the block reads `none` true. An overlap never changes
+`quiet`, a score or a knob, and it is no sighting. When this window's `warnings` and its `previous` window's are both
+above 0, name it as ADR 0067 d6's trigger for vault copies (overlaps in two weeks running; at a fortnightly cadence, two
+readings running), and name any overlap whose note the week shows was left wrong, the other trigger, which the record
+cannot show. A null `noteOverlaps` is unread (its flag says why), never `none`.
+
 **The attention ledger** (`span.json`'s `attention`). Label each question's Owner by
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 1 (with `~/.agents/knowledge/how-lachy-decides.md` when it is there)
 into `/tmp/thread-reflect-week-<YYYY-MM-DD>/owners.json`, `{"<id>": "<owner>"}`, the owner one of `yours`, `priorities`,
@@ -662,9 +670,11 @@ unread, and one `- gap <n> <YYYY-MM>: <what>; evidence <...>` line per gap. A he
 open decision task already lists gets a `## Still open` line; one a done decision task lists was decided there, and
 `decide` prints `trade <kid> at <from>: decided in [[<slug>]]` and never offers it at that `from` again; one only a
 dropped task lists, or one recorded moot, is offered again. A trade on a key this Reflection's revert moved waits for
-the next reading (`a revert of <key> comes first this Reflection`). The task is scheduled for the next Melbourne
-morning, conversation-gated, and orient's audit lists it (orient § 2). Put its line on its `scheduled:` day's page by
-task-writer § 3b; when `decide` printed `(was <date>)`, move the line from the old day's page.
+the next reading (`a revert of <key> comes first this Reflection`). The task is written with no `scheduled:` date
+and is conversation-gated: Chorus's Reflection Routine asks it at the Thursday sitting after Lunch (`reflect.py loops`,
+Chorus ADR 0095 d5) and answers it through `--decide` (§ Deciding the decision task), and orient's audit lists it
+(orient § 2). Put no line on any day page. When `decide` printed `scheduled <date> dropped`, remove the task's
+unchecked line from that day's page: the task was written before this rule (ADR 0037 d5, amended 2026-11-03).
 
 ### 16. Close
 
@@ -693,9 +703,10 @@ accuracy (the Ready headline, each grade's rate in `window` and `all`, the `bySi
 /fresh-review landing (`freshReview`: its repo and branch, rounds, findings and blocking per round, filed,
 unconfirmed, rejected, open at the end, reversals, regression, its size, its confirm rate, and what step 11 named, the
 confirm-rate risk included), the precision per level (`freshReviewLevels`), the late /fresh-review rounds' count, the
-Watches written (and any `extended` line), the bugs filed or found, the Time-lost ledger (its top class and hours, each
-class against last week, the trend, any Watch it opened, any ceiling raise it held), the Monthly audit's row when one
-ran (its hours found against the record's, the sources it could not read) and each gap it named, each knob landed,
+Note overlaps (`noteOverlaps`: the warnings, notes and runs, or `none`, ADR 0067 d6's trigger when step 11 named it, and
+unread when the block is null), the Watches written (and any `extended` line), the bugs filed or found, the Time-lost
+ledger (its top class and hours, each class against last week, the trend, any Watch it opened, any ceiling raise it
+held), the Monthly audit's row when one ran (its hours found against the record's, the sources it could not read) and each gap it named, each knob landed,
 reverted or held with its reason, the decision task (or none), with each held trade and gap it lists, found decided or
 skipped behind a revert, the attention ledger (the questions put to Lachy, *yours* beside `unlabelled`, a lower bound
 while that is above 0, the recommended-pick rate and the hours questions held work; the trails, their rounds and the
@@ -703,8 +714,9 @@ docs-only PRs; the waits to start; each circling item and any Watch it opened), 
 
 ## Deciding the decision task
 
-`/thread:reflect --decide [[<slug>]]`, with Lachy, at the top of a run. Read every `## Reflection <id>` section and
-`## Still open`. For each item:
+`/thread:reflect --decide [[<slug>]]`, with Lachy, at Chorus's Reflection Routine (its Thread ask's *Decide it now*),
+or by hand; never during a run. Read every `## Reflection <id>` section and `## Still open`. Put each item to him one
+question at a time, saying what it is, what a yes changes and why. For each item:
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py raised --watch <id> --reflection <the section's id> [--confirmed | --declined]
