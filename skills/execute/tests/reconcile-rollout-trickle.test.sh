@@ -399,9 +399,10 @@ ok "$(q "$J" '[d["restart"], d["start"], d["running"], d["halt"]]')" '[[],[],["a
 
 # ── T20: a blocked row with the Trickle full reads stuck; the lead's halt guard waits on it ───────────────────────
 # A blocked task is no row of `next`'s, a seeded revise (lead-integrate.py inputs' autoRevise) included: `next` counts a
-# revise only in the fair share (p28-5; the share suite's F8 and F15). So ro-c, its only task c1 blocked at its run,
-# reads `stuck` with slotLimit 0 and no hold. These are the values execute § 4.5 step 1.5's
-# Trickle clause reads to end the turn `waiting` (reason="trickle: 2/2 tasks running on this Mac") instead of halting.
+# revise in the fair share and claims the ones step 1.2 launches (p28-5, p28-8; the share suite's F8 and F15, the claim
+# suite's C15). So ro-c, its only task c1 blocked at its run, reads `stuck` with slotLimit 0 and no hold. These are the
+# values execute § 4.5 step 1.5's Trickle clause reads to end the turn `waiting` (reason="trickle: 2/2 tasks running on
+# this Mac") instead of halting.
 scen t20-blocked-revise
 mkro ro-a 3; mkt a1 ro-a in_progress 'owner: lead-a'; mkt a2 ro-a in_progress 'owner: lead-a'
 mkro ro-c 3; mkt c1 ro-c blocked 'owner: lead-c'

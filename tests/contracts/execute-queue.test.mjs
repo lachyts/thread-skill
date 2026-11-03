@@ -692,7 +692,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // and step 1.2's seeded revise names that clause. p29-8 (ADR 0049): while Away the Away cap takes the Trickle's place,
   // so the paragraph gives its slotLimit and its `away cap:` hold that never halts (a meant wait, never Stalled), and
   // steps 1.5 and 1.6, clause (7), § 6, § 8 and the driver name the Away-cap wait beside the Trickle wait. p28-3: the
-  // paragraph names the **Trickle claim** `next` takes for each start, and step 1.1 relays its `WARN: trickle claims` line.
+  // paragraph names the **Trickle claim** `next` takes for each start (p28-8: and each seeded revise step 1.2 will launch),
+  // and step 1.1 relays its `WARN: trickle claims` line.
   const trickleP = labelled(skill, 'The Trickle (Chorus ADR 0104).')
   const tr1 = subs[0]?.text ?? ''
   const tr6 = sub(/^End the turn `waiting`/)?.text ?? ''
@@ -710,6 +711,8 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     !tr1.includes('A `WARN: ~/.config/thread/away.json` line on its stderr') ||
     !tr1.includes('is printed verbatim the first time this session sees that exact line') ||
     !trickleP.includes('a **Trickle claim**') || !tr1.includes('A `WARN: trickle claims` line on its stderr') ||
+    // p28-8: the claim covers each seeded revise step 1.2 launches too
+    !trickleP.includes('and each seeded revise step 1.2 will launch') ||
     // p28-5: the fair share keeps a freed place for a waiting rollout, and slotLimit leaves it out
     !trickleP.includes('A **fair share** keeps a freed place') ||
     !tr6.includes('A `trickle:` hold (*The Trickle*) ends the turn `waiting` too') ||
@@ -1459,6 +1462,7 @@ test('control: § 4.5 without the Trickle at any one site fails trickle', () => 
   only(sk(', a retry cool-down is pending, or a Trickle wait stands)', ', or a retry cool-down is pending)'), 'trickle', "§ 8's Stop-hook paragraph without it")
   // p28-3: the Trickle claim and its WARN relay
   only(sk(' (a **Trickle claim**)', ''), 'trickle', 'no Trickle claim named')
+  only(sk(', and each seeded revise step 1.2 will launch', ''), 'trickle', 'no seeded revise claimed')
   only(sk(' A `WARN: trickle claims` line on its stderr (`skills/execute/away.md` § The Trickle, *Trickle claims*) is relayed the same way.', ''),
     'trickle', 'no claims WARN relay in step 1.1')
   // p28-5: the fair share
@@ -1688,4 +1692,73 @@ test('origin-lane controls: each mutation fails exactly its rule', () => {
   ow('The release runs no `mark-integrating`, so it re-enters the lane with no origin-lane check', 'The release runs `mark-integrating` first', 'reentry-hold', 'merge hold')
   ow('and the `revert: true` RACE revert above re-enter the lane', 'above re-enter the lane', 'reentry-race', 'RACE revert')
   assert.deepEqual(ORIGIN_RULES.filter((r) => !ORIGIN_CONTROLLED.has(r)), [])
+})
+
+// ---- p28-9: the trickle wait's prose. Each rule names one place; each control mutates that place alone. ------------
+// wake-launch: step 1.6's trickle wait: its once-only rule, the turns that launch it (a row on `trickle:` or `away cap:`,
+//   step 1.5's Trickle-held revise or its revise held while Away, never a `heat:` hold), its background bound and its
+//   command. wake-return: exit 0 or 75 runs step 1, exit 3 starts nothing, exit 2's `engine-snapshot:` re-run.
+//   wake-heartbeat: the heartbeat stays the backstop unchanged: `*/20`, clause (4) never waits on the trickle wait (as
+//   step 1.6 says), clause (7) reads a `trickle:` or `away cap:` reason as no hold. wake-codex: § Native runtime
+//   binding runs it in the foreground. wake-named: § 4.5's *The Trickle* paragraph names it, and that a heat-held turn
+//   launches none (so it promises a heat-held lead no 20-second wake).
+function checkTrickleWait(skill) {
+  const fails = []
+  const s16 = collapse((subSteps(skill).find((x) => x.n === 6) ?? {}).text ?? '')
+  const LABEL = '**The trickle wait (p28-9).**'
+  const tw16 = s16.includes(LABEL) ? s16.slice(s16.indexOf(LABEL)) : ''
+  const hbP = collapse(skill.split('\n').find((l) => l.startsWith('**Heartbeat (idempotent).**')) ?? '')
+  const hb = skill.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT')) ?? ''
+  const binding = collapse(section(skill, /^## Native runtime binding/) ?? '')
+  const trickleP = labelled(skill, 'The Trickle (Chorus ADR 0104).')
+  if (!tw16.includes('Unless a trickle wait this session launched for this rollout is still running, a turn') ||
+    !tw16.includes('a turn whose `next` held a row on `trickle:` or `away cap:`') ||
+    !tw16.includes("or that holds step 1.5's Trickle-held revise or step 1.5's revise held while Away") ||
+    !tw16.includes('never a `heat:` row') ||
+    !tw16.includes('`run_in_background` and `timeout: 1500000`') ||
+    !tw16.includes('reconcile-rollout.py trickle-wait --rollout <rollout-note>')) fails.push('wake-launch')
+  if (!tw16.includes('On exit 0 or 75 that turn runs step 1.') || !tw16.includes('On exit 3 it starts nothing') ||
+    !tw16.includes('On exit 2 with an `engine-snapshot:` line, re-run it from the root that line names')) fails.push('wake-return')
+  if (!hbP.includes('(schedule `*/20 * * * *`)') ||
+    !hb.includes('; nor the trickle wait, which holds nothing; nor the origin wait') ||
+    !hb.includes('(a `trickle:` or `away cap:` reason is no hold: the Trickle or the Away cap may have room now)') ||
+    !tw16.includes('so heartbeat clause (4) never waits on it')) fails.push('wake-heartbeat')
+  if (!binding.includes('And the trickle wait (`reconcile-rollout.py trickle-wait`, § 4.5 step 1.6) runs in the foreground the same way.')) {
+    fails.push('wake-codex')
+  }
+  if (!trickleP.includes('A lead waiting on it runs a **trickle wait** (step 1.6)') ||
+    !trickleP.includes("keeps it a place; a heat-held turn launches none, so that lead re-checks only at its tick or a call's return")) {
+    fails.push('wake-named')
+  }
+  return fails
+}
+const WAKE_RULES = ['wake-launch', 'wake-return', 'wake-heartbeat', 'wake-codex', 'wake-named']
+const WAKE_CONTROLLED = new Set()
+const tw = (from, to, rule, label) => {
+  WAKE_CONTROLLED.add(rule)
+  assert.deepEqual(checkTrickleWait(edit(real.skill, from, to)), [rule], label)
+}
+test('execute holds every trickle-wait rule (p28-9)', () => {
+  assert.deepEqual(checkTrickleWait(real.skill), [])
+})
+test('trickle-wait controls: each mutation fails exactly its rule', () => {
+  tw('Unless a trickle wait this session launched for this rollout is still running, a turn whose', 'A turn whose', 'wake-launch', 'no once-only rule')
+  tw("or that holds step 1.5's Trickle-held revise or step 1.5's revise held while Away (never", '(never', 'wake-launch', 'no revise case')
+  tw("(never a `heat:` row or step 1.5's heat-held revise)", '(a `heat:` row too)', 'wake-launch', 'a heat hold launches it')
+  tw('`run_in_background` and `timeout: 1500000`', '`run_in_background`', 'wake-launch', 'no background bound')
+  tw('reconcile-rollout.py trickle-wait --rollout <rollout-note>`', 'reconcile-rollout.py next --rollout <rollout-note>`', 'wake-launch', 'another command')
+  tw('On exit 3 it starts nothing and ends the turn silently', 'On exit 3 that turn runs step 1 too', 'wake-return', 'exit 3 runs step 1')
+  tw('On exit 0 or 75 that turn runs step 1. ', '', 'wake-return', 'no 0/75 routing')
+  tw('On exit 2 with an `engine-snapshot:` line, re-run it from the root that line names. ', '', 'wake-return', 'no engine-snapshot re-run')
+  tw('; nor the trickle wait, which holds nothing; nor the origin wait', '; nor the origin wait', 'wake-heartbeat', 'clause (4) waits on it')
+  tw('`*/20 * * * *`', '`*/5 * * * *`', 'wake-heartbeat', 'a */5 heartbeat')
+  tw('(a `trickle:` or `away cap:` reason is no hold: the Trickle or the Away cap may have room now)', '(a `trickle:` or `away cap:` reason is a hold)',
+    'wake-heartbeat', 'clause (7) holds on a Trickle reason')
+  tw(', so heartbeat clause (4) never waits on it (the clause names it)', '', 'wake-heartbeat', 'step 1.6 without the clause (4) sentence')
+  tw('And the trickle wait (`reconcile-rollout.py trickle-wait`, § 4.5 step 1.6) runs in the foreground the same way.\n', '', 'wake-codex', 'no Codex binding')
+  tw(" A lead waiting on it runs a **trickle wait** (step 1.6), which returns within a 20-second poll once another lead's `next` keeps it a place; a heat-held turn launches none, so that lead re-checks only at its tick or a call's return (`skills/execute/away.md` § The Trickle, *What does not wake it*).", '',
+    'wake-named', 'not named in The Trickle')
+  tw("keeps it a place; a heat-held turn launches none, so that lead re-checks only at its tick or a call's return (`skills/execute/away.md` § The Trickle, *What does not wake it*).",
+    'keeps it a place.', 'wake-named', 'The Trickle promises a heat-held lead the 20-second wake')
+  assert.deepEqual(WAKE_RULES.filter((r) => !WAKE_CONTROLLED.has(r)), [])
 })

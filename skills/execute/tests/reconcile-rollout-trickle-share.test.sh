@@ -455,7 +455,7 @@ rawf '{"version": 1, "claims": [{"tasksDir": D, "rollout": "ro-x", "slug": "x1",
 J=$(nx ro-a)
 ok "$(q "$J" '[d["start"], d["trickle"]["elsewhere"]]')" '[[],{"ro-x":1}]' "F7 (p28-3 shape): a file with no waiting list reads fine"
 ok "$(lines)" 0 "F7 (p28-3 shape): … with no WARN"
-ok "$(fshape)" '[["version","claims","waiting"],1]' "F7 (p28-3 shape): … and is rewritten in the new shape at version 1"
+ok "$(fshape)" '[["version","claims","waiting","woken"],1]' "F7 (p28-3 shape): … and is rewritten in the new shape at version 1"
 ok "$(waiting)" '[["ro-a",1,"14:05","13:00"]]' "F7 (p28-3 shape): … holding ro-a's record"
 scen f7-version-2
 mkro ro-a 3; run1 a1 ro-a; run1 a2 ro-a; mkt a3 ro-a open

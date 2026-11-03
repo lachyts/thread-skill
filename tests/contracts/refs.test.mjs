@@ -27,7 +27,10 @@ import { root, walk, read } from '../lib/contract-text.mjs'
 
 // Qualifiers that mark an ADR number as another repo's (compared case-sensitively).
 // 'estate'/'Estate' is the workspaces repo's _shared/docs/adr/ (estate ADR 0008 is not this repo's 0008).
-const FOREIGN_ADR_QUALIFIERS = ['Chorus', 'workspaces', 'estate', 'Estate']
+// 'giflab'/'GifLab' is ~/repos/animately/giflab's docs/adr/ (giflab ADR 0012 is not this repo's 0012). The possessive
+// ("giflab's ADR 0012") is no qualifier, so it is checked here, and resolves against the wrong ADR: always write the
+// bare form.
+const FOREIGN_ADR_QUALIFIERS = ['Chorus', 'workspaces', 'estate', 'Estate', 'giflab', 'GifLab']
 
 // External § citations, hand-verified 2026-09-23. [path as cited (or its trailing segment), section].
 const EXTERNAL = [
@@ -338,10 +341,13 @@ test('control: the matcher rejects known-bad citations and accepts known-good on
     // every number of an ADR list, both endpoints of a range
     'ADR 0014, 0999', 'ADR 0006/0999', 'ADR 0011 and 0999', 'ADRs 0001–0999',
     // an external numeric section compares whole, not by its major number
-    '`_shared/knowledge/triage-batching-protocol.md` §6.4', '`_shared/knowledge/triage-batching-protocol.md` § 6b']) {
+    '`_shared/knowledge/triage-batching-protocol.md` §6.4', '`_shared/knowledge/triage-batching-protocol.md` § 6b',
+    // a foreign qualifier is the word right before ADR: another word between, or the possessive, is no qualifier
+    'giflab notes ADR 0999', "giflab's ADR 0999"]) {
     assert.equal(run(bad).length, 1, `expected exactly one violation for: ${bad} → ${JSON.stringify(run(bad))}`)
   }
-  for (const good of ['Chorus ADR 0047', 'workspaces ADR 0003', 'estate ADR 0099', 'Estate ADR 0099', 'task-writer § 1.4', 'handoff § Handoff document defines',
+  for (const good of ['Chorus ADR 0047', 'workspaces ADR 0003', 'estate ADR 0099', 'Estate ADR 0099', 'giflab ADR 0999', 'GifLab ADR 0999',
+    'task-writer § 1.4', 'handoff § Handoff document defines',
     'close § The handoff owns the continuation has the scan', 'execute SKILL §4.5 step 5',
     '/thread:schedule §4.7', 'CONTEXT.md § Rollout.', 'execute (§8: x',
     // chained runs stop at a sentence end, a shallower list item, another named target, a code-span colon
