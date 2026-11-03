@@ -15,7 +15,8 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 - **Stamped by hand:** one `engine-snapshot.py cut` (`thread-skill-snapshots/1c9ffe0cbf5e`), then `adopt` on chorus, smart-slider (-2), seo and mac-data-mcp (all 2026-11-02/03 notes). `primary-hold.sh` now prints nothing.
 - **Restarted:** relayed `/thread:execute [[chorus-rollout-2026-11-02]]` (a Reinstate: move due, the cut reuses the snapshot); Smart Slider Leg 3 started through `create_thread` (task_b7bbef89). SEO waits on Lachy's four set-asides.
 - **Lachy's rulings:** f0ab0604 yes; fix pickup stays on request (a running rollout keeps its snapshot; pause and reinstate that one rollout when a fix matters now; ADR 0043 unchanged); the weekly decisions reach him at the Thursday Routine, not his Day page.
-- **Filed:** [[thread-skill-unstamped-rollout-stamped-at-reinstate]] (high), [[thread-skill-reflection-decisions-go-to-the-routine]].
+- **Filed:** [[thread-skill-unstamped-rollout-stamped-at-reinstate]] (high), [[thread-skill-reflection-decisions-go-to-the-routine]], [[thread-skill-set-up-ntfy-rollout-alerts]] (no needs-you alert reaches Lachy: Remote Control off, no `ntfy_topic`).
+- **Restarts confirmed:** Chorus reinstated on the snapshot (21/33, two calls re-run, the emoji task's review round lost); Smart Slider Leg 3 started from Leg 2's `## Leg 2 progress`.
 
 **2026-11-02 (latest): fresh-review Phase 1 landed: a landing takes the checker's verdicts (ADR 0065), PR #271 merged (`08b86fa`).** Built p1-4 of [[Fresh Review Skill]] ([[fresh-review-skill-p1-4-landing-loop-and-readers]]).
 - **Close's loop:** step 5 takes fresh-review's checker verdicts (`blocking`, `unconfirmed`, `filed`, `rejected`) and grades nothing; three code rounds per landing, numbered in each doc's `round:`, the landing's chain its own (a dev-time chain never spends it), a resumed loop reading the highest `round:` since its PR opened; a confirmed finding open on round 3 is fixed until its reproduction passes, with no further review; the ledger step and its hold are gone.
@@ -1116,7 +1117,7 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**From 2026-11-03 (Primary caught up, live notes stamped):** the Primary is free to move: land and pull as normal. Next: [[thread-skill-unstamped-rollout-stamped-at-reinstate]] (move_rule stamps an unstamped note at its next Reinstate or Leg begin; ADR 0043 amendment), then [[thread-skill-reflection-decisions-go-to-the-routine]]. The other 13 items of [[thread-skill-decisions-2026-11-02]] are still open for `/thread:reflect --decide`. Check Chorus's reinstate and Smart Slider Leg 3 each report the snapshot `1c9ffe0cbf5e`.
+**From 2026-11-03 (Primary caught up, live notes stamped):** the Primary is free to move: land and pull as normal. Next: [[thread-skill-unstamped-rollout-stamped-at-reinstate]] (move_rule stamps an unstamped note at its next Reinstate or Leg begin; ADR 0043 amendment), then [[thread-skill-reflection-decisions-go-to-the-routine]] and [[thread-skill-set-up-ntfy-rollout-alerts]]. The other 13 items of [[thread-skill-decisions-2026-11-02]] are still open for `/thread:reflect --decide`. Check Chorus's reinstate and Smart Slider Leg 3 each report the snapshot `1c9ffe0cbf5e`.
 
 **From 2026-11-02 (fresh-review Phase 1 landed, #271):** check the primary checkout caught up (`git -C ~/repos/tools/thread-skill log -1` at `08b86fa` or later) once the five rollouts end; only then does close run ADR 0065's loop. Next for the review loop: the design pass on [[fresh-review-landing-loop-review-follow-ups]] (no route after the budget; the Counting window). p30-2 ([[thread-skill-p30-2-a-review-stop-is-the-agents-to-resolve]]) is moot now the ledger never stops: close or reshape it.
 

@@ -225,7 +225,8 @@ the schedule template writes, neither `done` nor `dropped`, not `paused:`, start
 approved_unrun is false: never_started, widened for an approved queue whose only marks are the Stage's ended room stops)
 and with no `engine_snapshot:` stamp is RUNNING. A stamped note runs on its own Engine
 snapshot, never on the Primary checkout, so it holds nothing (ADR 0043; skills/_shared/engine-snapshot.md); only a
-rollout scheduled before P29 (or on a version-cache install) still does. stdout: `running <slug>` per rollout,
+rollout scheduled before P29 (or on a version-cache install) still does, until its next Reinstate or Leg begin stamps
+it. stdout: `running <slug>` per rollout,
 sorted, or `none` (a missing tasks dir included); exit 0.
 
 Output (check). stdout is exactly one line on exit 0 and 3: `none` | `supersede <slug>` | `interrupted <prior-slug>

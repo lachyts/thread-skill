@@ -51,15 +51,22 @@ The engine root of a note (resolve's `root`, and the root guard() wants):
 - stamped, archived (any path under an `Archive/` directory): the snapshot when it is usable; when it is not
   (`gone: true`), the unstamped root.
 
-The move rule (resolve's `move: {due, why}`, its one copy; execute § 1.5 acts on it). due is true only for a stamped
-note that is not archived, whose `status` is neither done nor dropped, with no `superseded_by:`, and:
-- parallel (no `shape:` or anything but serial): `paused:` is set and `paused_for:` is empty: a hard pause, so this
-  /thread:execute is its Reinstate. A sign-off pause (`paused_for: sign-off`, ADR 0034) is false, why "sign-off pause
-  (ADR 0034): the engine's own pause, never a move": its reinstate runs on the note's snapshot and the session's
-  signed-gate handles keep their cache replay. Any other `paused_for:` is the engine's pause too, and false;
-- serial: the `## Leg log`'s last `Leg <N> closed:` line is `closed: stopped: …` and no `Leg <M> began:` line with
-  M > N follows it. A halted, stuck, lost or handoff close moves nothing.
-A launch, a heartbeat, a cold resume, a Stage re-send or a repair hand-off is none of these, so it cuts nothing.
+The move rule (resolve's `move: {due, why}`, its one copy; execute § 1.5 acts on it). due is true only for a note
+that is not archived, whose `status` is neither done nor dropped, with no `superseded_by:`, and:
+- parallel (no `shape:` or anything but serial), stamped or not: `paused:` is set and `paused_for:` is empty: a hard
+  pause, so this /thread:execute is its Reinstate. A sign-off pause (`paused_for: sign-off`, ADR 0034) is false, why
+  "sign-off pause (ADR 0034): the engine's own pause, never a move": its reinstate runs on the note's snapshot and the
+  session's signed-gate handles keep their cache replay. Any other `paused_for:` is the engine's pause too, and false;
+- serial, stamped: the `## Leg log`'s last `Leg <N> closed:` line is `closed: stopped: …` and no `Leg <M> began:`
+  line with M > N follows it. A halted, stuck, lost or handoff close moves nothing for a stamped note;
+- serial, unstamped: no Leg is open, so this Leg begin is its first stamp: the Leg log has no `began:` or `closed:`
+  line (its first Leg), or its last such line is a `closed:` of any kind. A `began:` last is false (this session's own
+  Leg after a compaction, a `--resume`, a `--take-over`): that Leg stays on the Primary until it closes.
+An unstamped note (no `engine_snapshot:`) is stamped at these moments by § 1.5's cut and adopt, the parallel one the
+same as a stamped note's (ADR 0043, as amended by p36-1), and is never due with no git Primary (a version-cache
+install: nothing to cut, so it runs from the plugin root; resolve passes `primary` to move_rule()).
+A launch, a heartbeat, a cold resume, a Stage re-send or a repair hand-off is none of these, so it cuts nothing; a Leg
+that one of them starts resolves at its own § 1 entry.
 
 The prose-id rule. skills/{schedule,execute,status,repair}/SKILL.md carry git's `ident` attribute (.gitattributes),
 so each checkout expands the one `$Id$` marker in its hand-over block to `$Id: <blob id> $`, the id of that file as
@@ -96,7 +103,8 @@ Verbs.
           not found, is exit 2. Under the note lock, through reconcile-rollout.py's Note save (loaded from this
           root), it writes the two stamps just below `protocol_version:`, runs MIGRATIONS (none yet) on a move, and
           on a move appends `- <now> engine snapshot moved at reinstate: <old12> → <new12> (ADR 0043)` to `## Notes`.
-          Idempotent. Prints {snapshot, sha, from (the old engine_sha on a move, else null), changed}.
+          Idempotent. Prints {snapshot, sha, from (the old engine_sha on a move, else null), changed}: changed is
+          true on a move and on an unstamped note's first stamp (from null).
   resolve Read-only. Reads only engine_snapshot, engine_sha, shape, status, paused, paused_for, superseded_by and the
           Leg log's `closed:` and `began:` lines; never protocol_version. Exit 0 prints {rollout, note, snapshot, sha,
           root, same, gone, goneWhy, archived, prose, move: {due, why}, primary, primaryHead, ahead, behind}
@@ -143,6 +151,8 @@ LOCK_TIMEOUT = 60.0
 FETCH_TIMEOUT = 300
 HEAD_BYTES = 16384
 SIGN_OFF_WHY = "sign-off pause (ADR 0034): the engine's own pause, never a move"
+NO_PRIMARY_WHY = ("unstamped, and no git Primary (a version-cache install): nothing to cut, so it runs from the "
+                  "plugin root")
 SHA12_RE = re.compile(r"[0-9a-f]{12}\Z")
 SHA_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 ID_RE = re.compile(rb"\$Id:[^$\n]*\$")
@@ -415,10 +425,9 @@ def engine_root(path, root=None):
     return out
 
 
-def move_rule(fm, body, stamped, archived):
-    """(due, why): the header's move rule, its one copy."""
-    if not stamped:
-        return False, "no engine_snapshot: stamp (an unstamped note runs from the Primary checkout, as before P29)"
+def move_rule(fm, body, stamped, archived, primary=False):
+    """(due, why): the header's move rule, its one copy. `primary`: there is a git Primary to cut from; without one
+    an unstamped note is never due, so a caller that does not say never cuts."""
     if archived:
         return False, "archived: the rollout is finished"
     status = scalar(fm.get("status")).lower()
@@ -428,24 +437,42 @@ def move_rule(fm, body, stamped, archived):
         return False, "superseded: nothing runs it"
     if scalar(fm.get("shape")).lower() == "serial":
         ev = leg_events(body)
-        closed = [(i, n, rest) for i, (n, kind, rest) in enumerate(ev) if kind == "closed"]
-        if not closed:
-            return False, "serial: no Leg has closed stopped"
-        i, n, rest = closed[-1]
-        if not rest.startswith("stopped:"):
-            word = (rest.split(" ", 1)[0] or "?").rstrip(":")
-            return False, "serial: Leg %d closed %s: only a stopped close moves a chain" % (n, word)
-        if any(kind == "began" and m > n for (m, kind, _r) in ev[i + 1:]):
-            return False, "serial: a Leg began after Leg %d's stopped close: its Reinstate has passed" % n
-        return True, "serial Reinstate: the first Leg begun after Leg %d closed stopped" % n
-    if not scalar(fm.get("paused")):
-        return False, "not paused: only a Reinstate (a hard pause, then /thread:execute) moves a rollout"
-    pf = scalar(fm.get("paused_for"))
-    if pf:
-        if pf.lower() == "sign-off":
-            return False, SIGN_OFF_WHY
-        return False, "the engine's own pause (paused_for: %s), never a move" % pf
-    return True, "a hard pause: this /thread:execute is its Reinstate"
+        if not stamped:
+            last = ev[-1] if ev else None
+            if last is None:
+                due, why = True, "serial, unstamped: its first Leg stamps it (ADR 0043)"
+            elif last[1] == "began":
+                due, why = False, ("serial, unstamped: Leg %d is open (a resume or a take-over): stamped at the first "
+                                   "Leg begun after a close" % last[0])
+            else:
+                due, why = True, ("serial, unstamped: the first Leg begun after Leg %d's close stamps it (ADR 0043)"
+                                  % last[0])
+        else:
+            closed = [(i, n, rest) for i, (n, kind, rest) in enumerate(ev) if kind == "closed"]
+            if not closed:
+                return False, "serial: no Leg has closed stopped"
+            i, n, rest = closed[-1]
+            if not rest.startswith("stopped:"):
+                word = (rest.split(" ", 1)[0] or "?").rstrip(":")
+                return False, "serial: Leg %d closed %s: only a stopped close moves a chain" % (n, word)
+            if any(kind == "began" and m > n for (m, kind, _r) in ev[i + 1:]):
+                return False, "serial: a Leg began after Leg %d's stopped close: its Reinstate has passed" % n
+            return True, "serial Reinstate: the first Leg begun after Leg %d closed stopped" % n
+    else:
+        if not scalar(fm.get("paused")):
+            return False, "not paused: only a Reinstate (a hard pause, then /thread:execute) moves a rollout"
+        pf = scalar(fm.get("paused_for"))
+        if pf:
+            if pf.lower() == "sign-off":
+                return False, SIGN_OFF_WHY
+            return False, "the engine's own pause (paused_for: %s), never a move" % pf
+        if stamped:
+            return True, "a hard pause: this /thread:execute is its Reinstate"
+        due, why = True, ("a hard pause: this /thread:execute is its Reinstate, which stamps the unstamped note "
+                          "(ADR 0043)")
+    if due and not stamped and not primary:
+        return False, NO_PRIMARY_WHY
+    return due, why
 
 
 # ---- the prose id -------------------------------------------------------------------------------------------------
@@ -846,9 +873,9 @@ def cmd_resolve(a):
         raise Fail(3, "engine-snapshot resolve: [[%s]]'s Engine snapshot %s is %s: %s"
                       % (slug, tilde(er["snapshot"]), er["unusable"], remedy(er["snapshot"], er["sha"],
                                                                               er["unusable"])))
-    due, why = move_rule(er["fm"], body, er["stamped"], er["archived"])
     root = er["root"]
     primary = git_primary(root)[0]
+    due, why = move_rule(er["fm"], body, er["stamped"], er["archived"], primary=primary is not None)
     head = git_out(primary, "rev-parse", "--verify", "-q", "HEAD") if primary else None
     ahead = behind = None
     if primary and head and er["sha"]:

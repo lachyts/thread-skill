@@ -98,14 +98,20 @@ A rollout moves onto a newer snapshot only at its Reinstate, when `resolve` prin
 - **parallel:** a hard pause (`paused:` with no `paused_for:`, no `superseded_by:`, status neither done nor dropped),
   then `/thread:execute`;
 - **serial:** the first Leg begun after a Leg whose close was `stopped` (`skills/execute/legs.md` § Close maps "pause
-  the rollout" and "stop the chain" to it); a halted, stuck, lost or handed-off Leg moves nothing.
+  the rollout" and "stop the chain" to it); a halted, stuck, lost or handed-off Leg moves nothing for a stamped chain.
+- **unstamped:** (no `engine_snapshot:`, scheduled before P29 or by a cut exit 4): stamped at the parallel moment, and
+  for a serial chain at its first Leg or the first Leg begun after any close, never while a Leg is open (a resume or
+  a take-over: that Leg stays on the Primary until it closes); with no git Primary (a version-cache install) never
+  due, so nothing is cut.
 
 Execute § 1.5 then runs `cut`, the new snapshot's `adopt` and `resolve` again, once per invocation. A sign-off pause
 never moves: `paused_for: sign-off` (ADR 0034) is the engine's own pause, not Lachy's moment, so `move.due` is false
 and its reinstate keeps the signed-gate handles and their cache replay. To move a rollout that awaits sign-off, sign
-or defer its gates and reinstate it; the next hard pause, then `/thread:execute`, is its move point. On a move, the
-lead drops its runIds and signed-gate handles from the old snapshot's calls: they restart fresh. Nothing else moves a
-rollout: no launch, heartbeat, cold resume, Stage re-send or repair hand-off, and never the lead's own judgement.
+or defer its gates and reinstate it; the next hard pause, then `/thread:execute`, is its move point. On a move or a
+first stamp (adopt's `changed: true`), the lead drops its runIds and signed-gate handles from the old snapshot's calls
+(a first stamp's are the Primary checkout's): they restart fresh. Nothing else moves a rollout: no launch, heartbeat,
+cold resume, Stage re-send or repair hand-off, and never the lead's own judgement; the Leg a launch or hand-off starts
+resolves at its own § 1 entry, so the stamp is that Leg's.
 
 ## Retirement
 
