@@ -45,11 +45,13 @@
 #           `surfaces:` reads as any holds only its unlanded rows' cells against a resume (X13); a resuming chain against a
 #           parallel rollout's root: held while a call is in flight, paused or halted included, never by one idle and
 #           paused or halted (X14); the release WARNs and both --resume reads keep the nested-checkout rule (X15, p33-3)
-#   T1-T13  a resuming chain's order (ADR 0067 d4): the first to begin goes first, a chain that never began after
-#           every one that did, slug order breaking ties (T1-T6); ADR 0060's yield, guarded so only the later of two
-#           chains waits (T7, T11); until Chain copies, the interim waits at checkout level (T3, T5) and on another
-#           chain's open Leg in a checkout this one's next Leg works (T8, T9, T10), a take-over only on that (T10), a
-#           stalled chain no open Leg (T12); an unreadable resuming chain is exit 2 (T13)
+#   T1-T16  a resuming chain's order (ADR 0067 d4): the first to begin goes first, a chain that never began after
+#           every one that did, slug order breaking ties, said as such (T1-T6); ADR 0060's yield, toward a later chain
+#           only when it is free to run, so no cycle forms (T7, T11, T14 with three chains), a stuck chain working no
+#           checkout (T7, T15: S3's released WARN holds at resume); until Chain copies, the interim waits at checkout
+#           level (T3, T5) and on another chain's open Leg in a checkout this one's next Leg works (T8, T9, T10) or on a
+#           place it writes (T16), a take-over only on that (T10), a stalled chain no open Leg (T12); an unreadable
+#           resuming chain is exit 2 (T13)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 #   P1-P13  two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4): check's step 2c
@@ -1027,7 +1029,7 @@ chs --resume ca --surface "repo:$M"
 ok "$out|$rc" "refuse p|3" "X15 control: … one rooted inside the outer checkout itself holds it"
 
 # S15 (ADR 0067 d4, until Chain copies): --checkout, the chain's checkouts from serial-chains.py. Two chains on different
-# files of one checkout are both scheduled, with a WARN that their Legs take turns in it; a --checkout entry meets an
+# files of one checkout are both scheduled, with a WARN that they work it a chain at a time; a --checkout entry meets an
 # in-place parallel root as a token does, so a chain that names no file there still refuses beside it, never beside a
 # clone root (S13).
 scen s15
@@ -1035,7 +1037,7 @@ W="$S/w"; mkrepo "$W" https://github.com/demo/w.git; W2="$S/w2"; mkrepo "$W2" ht
 LOG=- LFOLD="$W" mkchain ca "$DEMO" a1~open~"\`repo:$W//a.py\`"
 chs --surface "repo:$W//b.py" --checkout "$W" --project Other
 ok "$out|$rc" "none|0" "S15: a chain on another file of a live chain's checkout is scheduled"
-has "$err" "WARN: [[ca]] (Demo; never started) works $W too: until each chain works its own Chain copy, their Legs take turns in it" "S15: … with the works-too WARN"
+has "$err" "WARN: [[ca]] (Demo; never started) works $W too: until each chain works its own Chain copy, the two work it a chain at a time: the one that comes first (the first to begin, else by slug) lands every unlanded row it has there before the other begins a Leg in it" "S15: … with the works-too WARN, chain-level"
 chs --surface "vault:Work/Tasks/x.md" --checkout "$W" --project Other
 has "$err" "WARN: [[ca]] (Demo; never started) works $W too" "S15: … a chain that names no file there, through its --checkout"
 chs --surface "repo:$W//a.py" --checkout "$W" --project Other
@@ -1111,6 +1113,8 @@ LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain za "$DEMO" a1~open~"\`repo:$W//f.py
 LOG=$(LFOLD="$W" lg $D28) LFOLD="$W" mkchain ab "$OTHER" b1~open~"\`repo:$W//f.py\`"
 chs --resume za --surface "repo:$W//f.py"
 ok "$out|$rc" "refuse ab|3" "T4: equal began stamps break by slug: the higher slug waits"
+has "$err" "holds \`repo:$W//f.py\` for an unlanded row and comes first by slug (both began at the same stamp)" "T4: … saying so, never began first"
+hasnt "$err" "began first" "T4: … only that"
 chs --resume ab --surface "repo:$W//f.py"
 ok "$out|$rc" "none|0" "T4: … the lower passes"
 tscen t5
@@ -1133,10 +1137,18 @@ tscen t7
 LOG="- $D28 Leg 1 began: leg-1 session s in cc-x from $W
 - $D28 Leg 1 closed: chain stuck: 1 set aside" LFOLD="$W" mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$W//y.py\`"
 LOG=$(LFOLD="$W" lg $D29) LFOLD="$W" mkchain sb "$OTHER" b1~open~"\`repo:$W//x.py\`"
-chs --resume sa --surface "repo:$W//x.py" --surface "repo:$W//y.py"
-ok "$out|$rc" "none|0" "T7: the stuck earlier chain passes beside the later one on its released file (the yield guard)"
 chs --resume sb --surface "repo:$W//x.py"
-ok "$out|$rc" "refuse sa|3" "T7: … and the later one waits (O)"
+ok "$out|$rc" "none|0" "T7: a stuck earlier chain works no checkout (ADR 0060): the later one on its released file passes"
+chs --resume sa --surface "repo:$W//x.py" --surface "repo:$W//y.py"
+ok "$out|$rc" "refuse sb|3" "T7: … and the stuck one, resumed, yields to it (Y: whoever released a place yields it)"
+has "$err" "[[sb]] (Other; has run: " "T7: … naming it"
+has "$err" "holds \`repo:$W//x.py\` for an unlanded row, which this chain writes as \`repo:$W//x.py\` (ADR 0060): [[sa]] waits its turn" "T7: … by ADR 0060's yield, on the file"
+mkt a2.md sa open
+chs --resume sb --surface "repo:$W//x.py"
+ok "$out|$rc" "refuse sa|3" "T7 control: once sa's row is claimable again it works \$W, and the later one waits (O)"
+has "$err" "holds \`repo:$W\` for an unlanded row and began first" "T7 control: … at checkout level"
+chs --resume sa --surface "repo:$W//x.py" --surface "repo:$W//y.py"
+ok "$out|$rc" "none|0" "T7 control: … while sa no longer yields to a chain that waits on it"
 tscen t8
 LOG="- $D28 Leg 1 began: leg-1 session s in cc-x from $W
 - $D28 Leg 1 closed: chain stuck: 1 set aside" LFOLD="$W" mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$W//y.py\`"
@@ -1190,6 +1202,62 @@ printf 'no frontmatter\n' > "$T/bad.md"
 python3 "$CHECK" check --tasks-dir "$T" --shape serial --resume bad --surface ext:x > "$S.out" 2> "$S.err"; rc=$?
 ok "$rc|$(cat "$S.out")|$(wc -l < "$S.err" | tr -d ' ')" "2||1" "T13: an unreadable resuming chain exits 2, no stdout, one stderr line"
 has "$(cat "$S.err")" "unfinished-rollout: --resume bad: its chain is unreadable" "T13: … naming it"
+
+# T14 (the round-1 review's repro): three chains whose waits would close a cycle. ca (first) smoke-tests F, which cc
+# owns; cb owns H, which ca owns; cc owns G, which cb owns. ca's yield toward cc lands only on a chain free to run, and
+# cc waits on cb, so ca goes first: every wait points down the order and the chain that began first runs.
+D27=2026-10-27T10:00+00:00; D30=2026-10-30T10:00+00:00
+tscen t14
+LOG=$(lg $D27) mkchain ca "$DEMO" a1~done~"$VA" a2~open~"$VC"
+LOG=$(lg $D28) mkchain cb "$OTHER" b1~open~"$VC" b2~open~"$VB"
+LOG=$(lg $D29) mkchain cc "$OTHER" c1~open~"$VB" c2~open~"$VA"
+chs --resume ca --surface vault:Work/Projects/A --surface vault:Work/Projects/C
+ok "$out|$rc" "none|0" "T14: three chains: the first passes, its yield toward a chain that waits on another dropped"
+chs --resume cb --surface vault:Work/Projects/C --surface vault:Work/Projects/B
+ok "$out|$rc" "refuse ca|3" "T14: … the second waits on the first (O)"
+has "$err" "holds \`vault:Work/Projects/C\` for an unlanded row and began first" "T14: … on the place they share"
+chs --resume cc --surface vault:Work/Projects/B --surface vault:Work/Projects/A
+ok "$out|$rc" "refuse cb|3" "T14: … and the third on the second (O): no cycle, so a Leg begins"
+hasnt "$err" "[[ca]]" "T14: … and never on the first, whose smoke row only it owns"
+fmset cb.md status dropped
+chs --resume ca --surface vault:Work/Projects/A --surface vault:Work/Projects/C
+ok "$out|$rc" "refuse cc|3" "T14 control: with the middle chain gone the third waits on no one, so the first yields to it (Y)"
+has "$err" "holds \`vault:Work/Projects/A\` for an unlanded row, which this chain writes as \`vault:Work/Projects/A\` (ADR 0060): [[ca]] waits its turn" "T14 control: … ADR 0060's line"
+chs --resume cc --surface vault:Work/Projects/B --surface vault:Work/Projects/A
+ok "$out|$rc" "none|0" "T14 control: … and the third passes"
+# T15 (the round-1 review's repro): S3 schedules a chain on a stuck chain's released file in its checkout. The released
+# WARN says the stuck one reclaims it on resume and waits its turn: so it does, and the new chain never waits on it.
+tscen t15
+LOG="- $D28 Leg 1 began: leg-1 session s in cc-x from $W
+- $D28 Leg 1 closed: chain stuck: 1 set aside" LFOLD="$W" mkchain sa "$DEMO" a1~done~"\`repo:$W//x.py\`" a2~blocked~"\`repo:$W//y.py\`"
+chs --surface "repo:$W//x.py" --checkout "$W" --project Other
+ok "$out|$rc" "none|0" "T15: a chain on a stuck chain's released file is scheduled"
+has "$err" "released repo:$W//x.py, which this run claims: it reclaims it on resume and then waits its turn while this run holds it" "T15: … with the released WARN"
+hasnt "$err" "works $W too" "T15: … and no works-too WARN: a stuck chain works no checkout"
+LOG=- LFOLD="$W" mkchain nc "$OTHER" n1~open~"\`repo:$W//x.py\`"
+chs --resume nc --surface "repo:$W//x.py"
+ok "$out|$rc" "none|0" "T15: its first Leg begins: it never waits on the stuck chain"
+chs --resume sa --surface "repo:$W//x.py" --surface "repo:$W//y.py"
+ok "$out|$rc" "refuse nc|3" "T15: … and the stuck chain, resumed, waits its turn, as the WARN said"
+# T16: (M)'s file half. ca does not yield to cc while cc waits on cb, so ca's Leg 2 opens on F; once cb is gone cc is
+# free, and its Leg waits on ca's open Leg wherever their write sets meet (vault places have no checkout).
+tscen t16
+LOG="- $D27 Leg 1 began: leg-1 session s in cc-x from /x
+- $D27 Leg 1 closed: stopped: out of time" mkchain ca "$DEMO" a1~done~"$VA" a2~open~"$VC"
+LOG=$(lg $D28) mkchain cb "$OTHER" b1~open~"$VB"
+LOG=$(lg $D29) mkchain cc "$OTHER" c1~open~"$VB" c2~open~"$VA"
+chs --resume ca --surface vault:Work/Projects/A --surface vault:Work/Projects/C
+ok "$out|$rc" "none|0" "T16: the first chain goes first: the later owner of its smoke row waits on another"
+LOG="- $D27 Leg 1 began: leg-1 session s in cc-x from /x
+- $D27 Leg 1 closed: stopped: out of time
+- $D30 Leg 2 began: leg-2 session s in cc-x from /x" mkchain ca "$DEMO" a1~done~"$VA" a2~open~"$VC"
+fmset cb.md status dropped
+chs --resume cc --surface vault:Work/Projects/B --surface vault:Work/Projects/A
+ok "$out|$rc" "refuse ca|3" "T16: once free, the later chain waits on the first one's open Leg on that place (M)"
+has "$err" "[[ca]] (Demo; has run: " "T16: … naming it"
+has "$err" "holds \`vault:Work/Projects/A\` with its open Leg 2, which this chain writes as \`vault:Work/Projects/A\` (ADR 0060): [[cc]] waits its turn: re-run once [[ca]]'s Leg 2 closes" "T16: … and its open Leg"
+chs --resume cc --surface vault:Work/Projects/B
+ok "$out|$rc" "none|0" "T16 control: a Leg writing none of the open Leg's places passes"
 
 # ── P1-P13: two projects' parallel rollouts share a repo, each in its own clone (ADR 0064, p33-4) ──────────────────────
 # $R in place (origin demo/repo), with $R-rollout (D), $R-other-rollout and $R-third-rollout, all clones of it.
