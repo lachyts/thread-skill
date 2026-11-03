@@ -80,7 +80,7 @@ LOCAL_ENV_FALLBACK = (
 ENTRY_RE = re.compile(r'^- (\S+) (needs you|decision) \(block ([0-9a-f]{12}|-)((?:;[^)]*)?)\): "')
 ASK_SPLIT = '" → '
 REPAIR_INPUT = "## Repair input"
-TOKEN_RE = re.compile(r"security-accept (secret|config|advisory):([0-9a-f]{12})")
+TOKEN_RE = re.compile(rf"security-accept ({'|'.join(ACCEPT_KINDS)}):([0-9a-f]{{12}})")
 
 
 class Refusal(Exception):
