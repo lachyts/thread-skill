@@ -26,7 +26,8 @@ reads the operator's local ladder file (`~/.config/thread/ladder.toml`), and, fo
 width; never through `next`), with the leads' leases (`~/.config/thread/leases/*.json`, the same read, p28-4) and,
 only when a lease would lapse, the Mac's kern.boottime and kern.waketime (a read-only `sysctl`). While Away runs to the
 Morning, the same read also reads the Run record's folded call journals (every `<rollout>.jsonl` in its events dir)
-for the last starts' history (execute away.md § The last starts, p28-7: § 2's `lastStart` and `lastStarts`). Status itself runs
+for the last starts' history (`skills/execute/away.md` § The last starts, p28-7: § 2's `lastStart` and `lastStarts`).
+Status itself runs
 `rollout-settings.py` for a task whose `max_review_rounds` is absent at both levels (§ 2), and
 `lead-integrate.py inputs` resolves `auto_retries` the same way, inside its own read, for a set-aside task whose
 notes lack it. Either read of the settings file runs land.sh's `--origin-slug` read, and so one local
@@ -138,8 +139,8 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   when this note is a chain's new note whose start was never stamped, else null; § 3's **Approved queue,
   unstamped:** flag), `trickle` (the Mac-wide cap, § 4's Trickle line; below), `lastStarts` (the last starts as `next`
   reads them, `{morning, kinds}`: `morning` the Morning they look toward, ISO 8601 at the local offset, or null when
-  they do not apply, and `kinds` each kind the rows' checks read, `{usualMinutes, history}`; execute away.md § The last
-  starts; § 4's Trickle line and the Queued row), `ceilingError` (why `ceiling` is null: an invalid
+  they do not apply, and `kinds` each kind the rows' checks read, `{usualMinutes, history}`;
+  `skills/execute/away.md` § The last starts; § 4's Trickle line and the Queued row), `ceilingError` (why `ceiling` is null: an invalid
   `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise) and
   `ceilingCause` (what that error needs: `stamp`, `file`, `root` or `resolver`; null otherwise), both for § 3's
   Ceiling unresolved flag;

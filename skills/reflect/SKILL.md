@@ -218,8 +218,8 @@ headlines first (ADR 0037 d1), then the Guardrails:
   moves it, not a rollout key", and read Throughput as under the cap, not at the ceiling. Nor does a last-start-bound
   one (p28-7: the same reading over `hold-last-start`, the last starts holding starts toward the Morning): say "the
   last starts move it, not a rollout key", read Throughput as under the last starts, and turn to the nights below.
-- **The nights** (`nights`, p28-7; execute away.md § The night record), for each Morning this rollout marked: the
-  night (its rollouts, `marked`), the starts the last starts held (`held`, split `heldBy` fallback / history) and the
+- **The nights** (`nights`, p28-7; `skills/execute/away.md` § The night record), for each Morning this rollout
+  marked: the night (its rollouts, `marked`), the starts the last starts held (`held`, split `heldBy` fallback / history) and the
   tasks still running at the Morning (`ranPast`, split `ranPastBy`: a `fallback` overrun, fewer than 3 past runs and
   started at least 2 h before; an `underestimate`, its kind's usual length let it start and it still ran past; or
   `unchecked`, begun before the last starts applied or too close to tell), each with `ranAtLeastMinutes`, and the
