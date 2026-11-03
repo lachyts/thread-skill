@@ -187,8 +187,15 @@ ok "$out|$(nlines True)" "|0" "a done holder no longer warns"
 ok "$(H get "$(find "$THREAD_NOTE_OVERLAP_DIR" -name '*.json')" '[w["task"] for w in d["writers"]]')" "['b1']" "… and its writer is pruned"
 live_case blocked blocked lead-aaaa1111 ra
 ok "$out|$(nlines True)" "|0" "a set-aside (blocked) holder no longer warns"
-live_case owner in_progress lead-cccc3333 ra
-ok "$out|$(nlines True)" "|0" "an owner change (a lost Leg, a take-over, a restart) ends the record"
+live_case restart in_progress lead-cccc3333 ra
+has "$(ctx)" "[[a1]]" "a restart by a new lead Session (owner: re-stamped to its tag) keeps the holder's record: still warned"
+first=$(H get "$(find "$THREAD_NOTE_OVERLAP_DIR" -name '*.json')" '[w["first"] for w in d["writers"] if w["task"] == "a1"][0]')
+call "$SA" agentA Edit "$VAULT/$DAY"
+ok "$(H get "$(find "$THREAD_NOTE_OVERLAP_DIR" -name '*.json')" '[(w["task"], w["owner"], w["writes"]) for w in d["writers"]]')" \
+  "[('a1', 'lead-cccc3333', 2), ('b1', 'lead-bbbb2222', 1)]" \
+  "… and the restarted task's own edit continues its entry under the new tag, its count kept"
+ok "$(H get "$(find "$THREAD_NOTE_OVERLAP_DIR" -name '*.json')" '[w["first"] for w in d["writers"] if w["task"] == "a1"][0]')" "$first" \
+  "… with its first write kept"
 rollout_note rc
 live_case repointed in_progress lead-aaaa1111 rc
 ok "$out|$(nlines True)" "|0" "a rollout: re-pointed (a carry or a defer) ends the record"
@@ -268,6 +275,18 @@ ok "$(records)" 1 "… and the resuming session is"
 reset; leg_note; agent "$SL" legsub "Grep the repo for the old name."
 call "$SL" legsub Edit "$VAULT/$DAY"
 ok "$(records)" 1 "a Leg's own subagent (an agent_id, no engine opener) falls back to the Leg"
+# the lost-Leg signal: a holder recorded under leg-1 whose task a take-over re-stamps leg-2 is no longer live
+reset; leg_note; task_note s1 in_progress leg-1 "$SR"
+call "$SL" - Edit "$VAULT/$DAY"
+call "$SA" agentA Edit "$VAULT/$DAY"
+has "$(ctx)" "[[s1]]" "a Leg's live record warns another run's edit, naming the Leg's task"
+reset; call "$SL" - Edit "$VAULT/$DAY"
+task_note s1 in_progress leg-2 "$SR"
+call "$SA" agentA Edit "$VAULT/$DAY"
+ok "$out|$(nlines True)" "|0" "a Leg's take-over (owner: leg-1 re-stamped leg-2) ends the Leg's record: no warning"
+ok "$(H get "$(find "$THREAD_NOTE_OVERLAP_DIR" -name '*.json')" '[w["task"] for w in d["writers"]]')" "['a1']" \
+  "… and its writer is pruned"
+task_note s1 in_progress leg-1 "$SR"
 rm "$TASKS/$SR.md"
 
 # ── 10. transcript forms and message shapes ────────────────────────────────────────────────────────────────────
@@ -382,8 +401,12 @@ THREAD_NOTE_OVERLAP_DIR="$T/afile" call "$SB" agentB Edit "$VAULT/$DAY"; robust 
 KEY=$(basename "$(find "$THREAD_NOTE_OVERLAP_DIR" -name '*.json')" .json)
 rm -f "$THREAD_NOTE_OVERLAP_DIR/$KEY.lock"; mkdir "$THREAD_NOTE_OVERLAP_DIR/$KEY.lock"
 before=$(cat "$THREAD_NOTE_OVERLAP_DIR/$KEY.json")
+ok "$(nlines True)" 0 "(no overlaps.jsonl line yet: nothing has been warned since the reset)"
 call "$SB" agentB Edit "$VAULT/$DAY"; robust "the note's lock cannot be opened"
 has "$(ctx)" "[[a1]]" "… the warning still goes out, from an unlocked read of the record"
+call "$SB" agentB Edit "$VAULT/$DAY"
+has "$(ctx)" "[[a1]]" "… a repeat call warns again (the holder's warned mark went unsaved)"
+ok "$(nlines True)" 0 "… and neither call writes an overlaps.jsonl line"
 ok "$(cat "$THREAD_NOTE_OVERLAP_DIR/$KEY.json")" "$before" "… and nothing is written"
 rmdir "$THREAD_NOTE_OVERLAP_DIR/$KEY.lock"
 python3 - "$THREAD_NOTE_OVERLAP_DIR/$KEY.lock" "$T/held" <<'PY' &
@@ -391,16 +414,73 @@ import fcntl, os, sys, time
 fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o644)
 fcntl.flock(fd, fcntl.LOCK_EX)
 open(sys.argv[2], "w").close()
-time.sleep(4)
+time.sleep(8)
 PY
 holder=$!
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -e "$T/held" ] && break; python3 -c 'import time; time.sleep(0.1)'; done
 before=$(cat "$THREAD_NOTE_OVERLAP_DIR/$KEY.json")
 call "$SB" agentB Edit "$VAULT/$DAY"; robust "the note's lock held by another process past 0.3 s"
 has "$(ctx)" "[[a1]]" "… the warning still goes out"
+call "$SB" agentB Edit "$VAULT/$DAY"
+has "$(ctx)" "[[a1]]" "… a repeat call while the lock is held warns again"
+ok "$(nlines True)" 0 "… and neither call writes an overlaps.jsonl line"
 ok "$(cat "$THREAD_NOTE_OVERLAP_DIR/$KEY.json")" "$before" "… and nothing is written"
-ok "$(H lines "$THREAD_NOTE_OVERLAP_DIR/debug.jsonl" 'L[-1]["outcome"]')" "lock-busy" "… logged lock-busy"
+ok "$(H lines "$THREAD_NOTE_OVERLAP_DIR/debug.jsonl" '[l["outcome"] for l in L][-2:]')" "['lock-busy', 'lock-busy']" "… each logged lock-busy"
 kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+# drive <mode> <session> <agent id or -> — loads the hook as a module and runs handle() on an Edit of the Day note in
+# this process, with fcntl hidden (mode nofcntl) or the budget spent at one checkpoint (budget:<checkpoint>); the
+# result, {raised, outcome, calls (the hook functions reached, in order), out}, in $T/drive.json
+cat > "$T/drive.py" <<'PY'
+import importlib.util, json, sys, time, types
+hook_path, mode, payload = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
+if mode == "nofcntl":
+    sys.modules["fcntl"] = None   # `import fcntl` raises ImportError, as on native Windows
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("vault_note_overlap", hook_path)
+hook = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hook)
+checkpoint = mode.split(":", 1)[1] if mode.startswith("budget:") else None
+clock, calls, start = [0.0], [], time.monotonic()
+hook.time = types.SimpleNamespace(monotonic=lambda: clock[0] + time.monotonic() - start, time=time.time,
+                                  strftime=time.strftime, gmtime=time.gmtime, sleep=time.sleep)
+spent = 100 * hook.BUDGET
+if checkpoint == "transcript":
+    clock[0] = spent   # spent from the start: the first check, before the transcript read
+flip = {"leg": "pick_pair", "lock": "pick_pair", "emit": "visit"}.get(checkpoint)   # spent once that function returns
+def wrap(name):
+    orig = getattr(hook, name)
+    def f(*a, **k):
+        calls.append(name)
+        r = orig(*a, **k)
+        if name == flip:
+            clock[0] = spent
+        return r
+    setattr(hook, name, f)
+for name in ("find_transcript", "pick_pair", "leg_identity", "visit", "_lock", "emit"):
+    wrap(name)
+call = {"tool": None, "agent": False, "agentType": None, "session": None, "form": "skipped", "identity": "none",
+        "why": None, "outcome": "silent", "note": None}
+raised, out = None, None
+try:
+    out = hook.handle(payload, call, 0.0)
+except BaseException as e:  # noqa: BLE001
+    raised = repr(e)
+print(json.dumps({"raised": raised, "outcome": call["outcome"], "calls": calls, "out": out}))
+PY
+drive() {
+  local p
+  p=$(H payload "$2" "$PROJ/$2.jsonl" "$3" Edit "$VAULT/$DAY")
+  python3 "$T/drive.py" "$HOOK" "$1" "$p" > "$T/drive.json" 2> "$T/drive.err"
+}
+dv() { H get "$T/drive.json" "$1"; }
+before=$(cat "$THREAD_NOTE_OVERLAP_DIR/$KEY.json")
+drive nofcntl "$SB" agentB
+ok "$(dv '(d["raised"], d["outcome"], d["calls"])')" "(None, 'lock-busy', ['find_transcript', 'pick_pair', 'visit', '_lock'])" \
+  "no fcntl (native Windows): the ImportError is caught in _lock, which returns no lock"
+has "$(dv 'json.loads(d["out"])["hookSpecificOutput"]["additionalContext"]')" "[[a1]]" \
+  "… the documented unlocked read still warns from an existing record"
+ok "$(dv '"permissionDecision" in d["out"]')|$(nlines True)|$(cat "$THREAD_NOTE_OVERLAP_DIR/$KEY.json")" "False|0|$before" \
+  "… no permissionDecision, no overlaps.jsonl line and nothing written"
 reset; call "$SA" agentA Write "$VAULT/$DAY"
 THREAD_EVENTS_DIR="$T/afile/events" call "$SB" agentB Edit "$VAULT/$DAY"; robust "THREAD_EVENTS_DIR under a regular file"
 has "$(ctx)" "[[a1]]" "… the warning still goes out with no record line"
@@ -430,6 +510,22 @@ print("slow %.3f" % worst if worst >= 1.0 else "fast")
 PY
 )
 ok "$slow" fast "time: 20 calls with 40 rollout notes and 300 record files each finish under 1.0 s"
+# the budget guard: spent at each checkpoint, handle() stops there, raises nothing and never denies
+reset; call "$SA" agentA Write "$VAULT/$DAY"
+REC=$(find "$THREAD_NOTE_OVERLAP_DIR" -name '*.json'); before=$(cat "$REC")
+budget_case() {  # budget_case <checkpoint> <agent id> <the hook functions reached, a python list> — B's session
+  drive "budget:$1" "$SB" "$2"
+  ok "$(dv '(d["raised"], d["outcome"], d["calls"])')" "(None, 'budget', $3)" "budget spent before the $1: stops there, no exception"
+}
+budget_case transcript agentB "[]"
+ok "$(dv 'd["out"]')|$(cat "$REC")" "None|$before" "… nothing printed, nothing written"
+budget_case leg agentY "['find_transcript', 'pick_pair']"
+ok "$(dv 'd["out"]')|$(cat "$REC")" "None|$before" "… (an opener that names no run) the Leg scan never runs, nothing printed"
+budget_case lock agentB "['find_transcript', 'pick_pair', 'visit']"
+ok "$(dv 'd["out"]')|$(cat "$REC")" "None|$before" "… (an identified edit) no lock is taken, nothing printed, nothing written"
+budget_case emit agentB "['find_transcript', 'pick_pair', 'visit', '_lock']"
+has "$(dv 'json.loads(d["out"])["hookSpecificOutput"]["additionalContext"]')" "[[a1]]" "… (a warned edit) the warning JSON is still returned"
+ok "$(dv '"permissionDecision" in d["out"]')|$(nlines True)" "False|0" "… with no permissionDecision, and no overlaps.jsonl line (emit never ran)"
 ok "$(python3 -c '
 import json, sys
 h = json.load(open(sys.argv[1]))["hooks"]["PreToolUse"]

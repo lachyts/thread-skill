@@ -2,8 +2,10 @@
 """PreToolUse hook on Edit, Write and MultiEdit: a vault Note overlap is let through, warned and watched (ADR 0067 d6).
 
 This docstring is the one copy of the hook's rules. python >= 3.9 (leg.py's floor; /usr/bin/python3 on this Mac is
-3.9.6), stdlib only, POSIX (fcntl). Wired in hooks/hooks.json as `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/
-vault-note-overlap.py"` with `"timeout": 5` and no onFailure: a timed-out PreToolUse hook does not block.
+3.9.6), stdlib only, POSIX (fcntl): on native Windows there is no fcntl, so the lock is never had, no record is ever
+written and no warning ever fires; the hook is inert there (docs/windows-setup.md). Wired in hooks/hooks.json as
+`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/vault-note-overlap.py"` with `"timeout": 5` and no onFailure: a timed-out
+PreToolUse hook does not block.
 
 What it does. For an edit of a note in the vault (~/repos/obsidian) by a run's task, it records which live run's task
 has written the note; when a live task of ANOTHER run is already in it, it lets the edit through and tells the
@@ -53,37 +55,44 @@ key the first 16 hex of sha1 over the case-folded vault-relative path: {note, wr
 task, owner, rolloutLink (the rollout note's name), via (agent | leg), first, last (UTC Z stamps with microseconds),
 writes (an int), warned: {"<editor rollout>/<editor task>": <the holder's writes at that warning>}}]}. Each
 read-modify-write runs under fcntl.flock on <key>.lock, taken non-blocking with retries for LOCK_WAIT (0.3 s), and the
-file is written to a temp file and os.replace'd. When the lock cannot be had (held, or the state dir unusable), the
-record is read unlocked (os.replace keeps it whole), the warnings are still computed and sent, and nothing is written.
-Dead writers are pruned on every visit, an entry of the editor's own (rollout, task) under another owner is
-replaced, and the file is deleted when no writer is left. A sweep runs at most once a day (the mtime of `.swept`), on
-a recorded write: it removes record, lock and temp files untouched for STALE_DAYS (14).
+file is written to a temp file and os.replace'd. When the lock cannot be had (held, the state dir unusable, or no
+fcntl), the record is read unlocked (os.replace keeps it whole), the warnings are still computed and sent, and
+nothing is written: no record and no Run-record line, since the holder's warned mark goes unsaved and every such
+call would repeat the line. Dead writers are pruned on every visit; the editor's own (rollout, task) entry is
+continued, taking the editor's owner (a restart by a new lead Session keeps its first stamp and its count), and a
+second entry for it is dropped. A visit always leaves the editor's own entry, so a note's file goes only by the
+sweep, which runs at most once a day (the mtime of `.swept`), on a recorded write: it removes record, lock and temp
+files untouched for STALE_DAYS (14).
 
 Liveness. A writer is live while its task note reads `status: in_progress`, or `status: review` with a `pr:`
-(approved and awaiting Integration: neither done nor set aside); the note keeps the `owner:` recorded at its first
-write (a Leg take-over writes the next leg-N, which is how a lost Leg shows; a note with no `owner:` on either side
+(approved and awaiting Integration: neither done nor set aside); a writer recorded under a Leg's owner (`leg-N`) is
+live only while the note keeps that owner (a take-over writes the next leg-N, which is how a lost Leg shows), and a
+lead's session tag is never compared (execute § 4 re-stamps `owner: <session-tag>` on every start, restart and seeded
+revise, and a task restarted by a new lead Session is neither done nor set aside; an `owner:` missing on either side
 reads as status-only); its `rollout:` names the recorded rollout (a carry or a defer re-points it); and that rollout
 note is still directly in Work/Tasks. A missing or archived task note is dead. Statuses read lower-cased, `-` as `_`.
 Only the frontmatter's top-level `key: value` lines are read (status, owner, rollout, pr, shape).
 
-The warning. Another run is another rollout: a decided call (ADR 0059 d5's collision was between chains, and each
-serial chain is its own rollout note), so two tasks of one rollout in one note are an accepted miss. When a live
-writer of another rollout is in the note, the hook prints {"hookSpecificOutput": {"hookEventName": "PreToolUse",
-"additionalContext": ...}} naming the note, the holder's task [[t]], its run [[r]] and when it first wrote, saying the
-edit was let through, and telling the agent to re-read the note before changing it and to keep the other run's lines;
-exit 0. It is sent once per (editor run, holder task) on a note, and again only once the holder's `writes` has grown
-since the last warning. The warning arrives beside the tool result, after the edit applied: it guards the next
-change, and Claude Code's own stale-read refusal guards a blind overwrite.
+The warning. Another run is another rollout: a decided call (ADR 0067, Decided for Lachy 9: ADR 0059 d5's collision
+was between chains, and each serial chain is its own rollout note), so two tasks of one rollout in one note are an
+accepted miss. When a live writer of another rollout is in the note, the hook prints {"hookSpecificOutput":
+{"hookEventName": "PreToolUse", "additionalContext": ...}} naming the note, the holder's task [[t]], its run [[r]] and
+when it first wrote, saying the edit was let through, and telling the agent to re-read the note before changing it
+and to keep the other run's lines; exit 0. It is sent once per (editor run, holder task) on a note, and again only
+once the holder's `writes` has grown since the last warning (a call that cannot write the record saves no warning, so
+it sends it again). The warning arrives beside the tool result, after the edit applied: it guards the next change,
+and Claude Code's own stale-read refusal guards a blind overwrite.
 
-The Run record. Each warning is one `note-overlap` line (run_record.py's kind; rollout and task the editing run's;
-note, holderRollout, holderTask, holderSince, tool, via) in its reserved overlaps.jsonl, through
-RR.emit, run_record.py loaded by path only when a warning fires, stderr silenced (the Stop hook's record_halt
-pattern). The events dir is run_record's own chain. The weekly Reflection's span reports them (reflect.py
+The Run record. Each warning whose visit wrote the record is one `note-overlap` line (run_record.py's kind; rollout
+and task the editing run's; note, holderRollout, holderTask, holderSince, tool, via) in its reserved overlaps.jsonl,
+through RR.emit, run_record.py loaded by path only when such a warning fires, stderr silenced (the Stop hook's
+record_halt pattern). The events dir is run_record's own chain. The weekly Reflection's span reports them (reflect.py
 `noteOverlaps`).
 
 Time limit. The hook keeps its own monotonic budget of BUDGET (2 s) and checks it before the transcript read, the
-Leg scan, the lock and the emit; a spent budget stops there and lets the edit through. Every exception is
-swallowed: exit 0, nothing on stderr, and stdout holds only the warning.
+Leg scan, the lock and the emit; a spent budget stops there and lets the edit through (spent at the emit, the warning
+still goes out, with no Run-record line). Every exception is swallowed: exit 0, nothing on stderr, and stdout holds
+only the warning.
 
 The debug log, on by default: one JSON line per call, {ts, ms, tool, agent (bool), agentType, session (its first 8
 characters), form (agent_transcript_path | direct | subagents | workflows | none | skipped), identity (agent | leg |
@@ -118,6 +127,7 @@ FM_KEYS = ("status", "owner", "rollout", "pr", "shape")
 HARNESS_PREFIX = "[Workflow harness"
 AGENT_ID_RE_SRC = r"[A-Za-z0-9_-]{1,64}"
 SESSION_RE_SRC = r"[A-Za-z0-9_.:-]{1,128}"
+LEG_OWNER_RE_SRC = r"leg-\d+"   # a Leg's owner: (leg.py's `leg-N`); a lead stamps its session tag
 LINK_RE_SRC = r"\[\[([^\]|#^\\]+)[^\]]*\]\]"   # leg.py's LINK_RE (tests/vault-note-overlap.test.sh pins the two)
 ROLLOUT_NOTE_NAME_RE_SRC = r"-rollout-\d{4}-\d\d-\d\d(?:-\d+)?\.md\Z"   # reconcile-rollout.py's ROLLOUT_NOTE_NAME_RE
 KEY_FILE_RE_SRC = r"[0-9a-f]{16}\.(?:json|lock)(?:\.\d+\.tmp)?\Z"
@@ -231,7 +241,8 @@ def _status(fm):
 
 
 def live(tasks, task, owner, rollout_link, cache):
-    """The liveness rule (the docstring's): status, owner, rollout and the rollout note directly in Work/Tasks."""
+    """The liveness rule (the docstring's): status, a Leg's owner, rollout and the rollout note directly in
+    Work/Tasks."""
     if not (_name_ok(task) and _name_ok(rollout_link)):
         return False
     fm = read_frontmatter(os.path.join(tasks, task + ".md"), cache)
@@ -241,8 +252,8 @@ def live(tasks, task, owner, rollout_link, cache):
     if not (st == "in_progress" or (st == "review" and fm.get("pr"))):
         return False
     cur = fm.get("owner", "")
-    if owner and cur and cur != owner:
-        return False
+    if owner and cur and cur != owner and _re(LEG_OWNER_RE_SRC).fullmatch(owner):
+        return False   # a Leg's claim taken over: the lost-Leg signal (a lead's tag is never compared)
     named = slug_of(fm.get("rollout", ""))
     if not named or named.casefold() != rollout_link.casefold():
         return False
@@ -427,8 +438,12 @@ def note_key(rel):
 
 
 def _lock(path):
-    """An fd holding an exclusive flock on path, or None: non-blocking, retried for LOCK_WAIT."""
-    import fcntl
+    """An fd holding an exclusive flock on path, or None: non-blocking, retried for LOCK_WAIT. None with no fcntl
+    (native Windows), so the record is read unlocked there and never written."""
+    try:
+        import fcntl
+    except ImportError:
+        return None
     try:
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     except OSError:
@@ -469,12 +484,6 @@ def read_record(path):
 
 
 def write_record(path, rel, writers):
-    if not writers:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
-        return
     tmp = "%s.%d.tmp" % (path, os.getpid())
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -509,8 +518,9 @@ def visit(state, rel, editor, tasks, cache, spend):
             if not live(tasks, w["task"], w["owner"], w["rolloutLink"], cache):
                 continue
             if (w["rollout"].lower(), w["task"].lower()) == mine_key:
-                if mine is not None or w["owner"] != editor["owner"]:
-                    continue   # another owner's entry for this run: replaced
+                if mine is not None:
+                    continue   # a second entry for this run: dropped
+                w["owner"] = editor["owner"]   # a restart by a new lead Session keeps its record, under the new tag
                 mine = w
             elif w["rollout"].lower() != editor["rollout"]:
                 prev = w["warned"].get(seen)
@@ -698,13 +708,13 @@ def handle(payload, call, t0):
         call["outcome"] = "recorded" if written else "lock-busy"
         if not holders:
             return None
-        if written:
+        if written:   # unwritten, the holder's warned bump is unsaved: a line per call would inflate the count
             call["outcome"] = "warned"
-        try:
-            spend()
-            emit(ident, holders, rel, call["tool"])
-        except Spent:
-            call["outcome"] = "budget"
+            try:
+                spend()
+                emit(ident, holders, rel, call["tool"])
+            except Spent:
+                call["outcome"] = "budget"
         return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                                   "additionalContext": warning_text(rel, holders)}})
     except Spent:
