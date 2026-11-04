@@ -645,6 +645,16 @@ scen a9b-exit8
 mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
 lead "$A" integration "merge-task exit 8 three times: retryable: cannot read PR #5 (HTTP 502)"
 ok "$(j "$(inp "$A")" 'd["autoRetryClass"]')" 'agent' "A9b: merge-task exit 8 three times stays agent (ADR 0033's tested contract)"
+# A9c (ADR 0069 d3): a third exit 8 while GitHub settles a PR's mergeability (MERGE_TASK_SETTLING_MARK) reads infra; A9b's
+# 502 above is the control that every other exit-8 text stays agent.
+for reason in "merge-task exit 8 three times: retryable: PR #5 stays UNKNOWN with nothing required on main (not protected, and this plan holds no rulesets) after 6 re-polls: GitHub has not settled its mergeability yet; nothing merged; re-run" \
+              "merge-task exit 8 three times: retryable: no required check is reported for PR #5 and nothing runs on its head, but main's gate is unreadable (branches/main: gh: Server Error (HTTP 502)): GitHub has not settled its mergeability yet; nothing merged; re-run"; do
+  scen a9c
+  mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+  lead "$A" integration "$reason"
+  ok "$(j "$(INOW=2026-10-03T08:05:00Z inp "$A")" '[d["autoRetryClass"], d["autoRetry"], d["autoRetryAfter"]]')" \
+    '["infra",false,"2026-10-03T08:15+00:00"]' "A9c: ${reason:42:40}… → infra, cooling 15 minutes (MERGE_TASK_SETTLING_MARK)"
+done
 
 # ── A10: infra blocks: a short cool-down, no same-fingerprint stop; the budget still bounds them ───────────────
 scen a10-transient
@@ -833,7 +843,9 @@ pin() {
 import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(json.dumps({"fix": list(m.MERGE_TASK_FIXABLE), "gone": m.BRANCH_GONE_MARK, "declined": m.DECLINED_MARK,
-                  "cool": list(m.QUOTA_COOLDOWN_MIN), "infra": list(m.INFRA_COOLDOWN_MIN), "keys": list(m.AUTO_RETRY_KEYS)}))
+                  "cool": list(m.QUOTA_COOLDOWN_MIN), "infra": list(m.INFRA_COOLDOWN_MIN), "keys": list(m.AUTO_RETRY_KEYS),
+                  "mtInfra": list(m.MERGE_TASK_INFRA), "settling": m.MERGE_TASK_SETTLING_MARK,
+                  "ghOpening": m.MERGE_TASK_GITHUB_OPENING}))
 PY
 }
 P=$(pin)
@@ -841,6 +853,11 @@ while IFS= read -r frag; do
   ok "$(grep -c -F -- "$frag" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_FIXABLE \"$frag\" is merge-task.sh's text"
 done < <(j "$P" '"\n".join(d["fix"])')
 ok "$(j "$P" 'len(d["fix"])')" 2 "A15: (two fixable texts)"
+while IFS= read -r frag; do
+  ok "$(grep -c -F -- "$frag" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_INFRA \"$frag\" is merge-task.sh's text"
+done < <(j "$P" '"\n".join(d["mtInfra"])')
+ok "$(grep -c -F -- "$(j "$P" 'd["settling"]')" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_SETTLING_MARK is merge-task.sh's text"
+ok "$(grep -c -F -- "$(j "$P" 'd["ghOpening"]')" "$SKILL" | awk '{print ($1 > 0)}')" 1 "A15: MERGE_TASK_GITHUB_OPENING is execute SKILL.md's reason"
 for frag in "(not OPEN/MERGED)" "is not on origin" "not the default branch" "merge queue required" "a NON-check gate" \
             "GitHub refused to merge" "is not confirmed merged" "stays BEHIND" "unexpected mergeStateStatus"; do
   ok "$(grep -c -F -- "$frag" "$MT" | awk '{print ($1 > 0)}')" 1 "A15: the human text \"$frag\" (A4) is merge-task.sh's"

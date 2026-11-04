@@ -386,13 +386,13 @@ echo "== 12d. merge-task's red required check is named merge-gate when it is the
 # repeats case 11's setup for its own task and PR (a lane holder, so reconcile emits the set-aside). Side rollout mg,
 # one lane holder at a time, so ro's legs and leg 24's checker over ro are untouched.
 mkro mg "parallel_ceiling: 2"
-mgc() {  # mgc <slug> <pr> <reason>: merge-task's exit 1 on a lane holder on mg; prints the kinds appended, then the
-         # set-aside's [stage, reasonClass, setAsideAt]
+mgc() {  # mgc <slug> <pr> <reason> [kind]: merge-task's exit 1 on a lane holder on mg, set aside by the lead's row of
+         # that kind (own, else integration); prints the kinds appended, then the set-aside's [stage, reasonClass, setAsideAt]
   mkt "$1" mg review "pr: $PR/$2" "ready: 2026-10-05T09:00+00:00"
   rrs mark-integrating --tasks "$1" --tasks-dir "$V" --now "$NOW" >/dev/null
   rrs log-integration --tasks "$1" --started 2026-10-05T10:10+00:00 --anchor $A40 --head $B40 --base $C40 --tasks-dir "$V" --now "$NOW" >/dev/null
   local m; m=$(cnt mg)
-  lead "$1" own "$3" >/dev/null
+  lead "$1" "${4:-own}" "$3" >/dev/null
   since mg "$m"
   since mg "$m" '[d["stage"], d["reasonClass"], d["setAsideAt"]] if d["kind"] == "set-aside" else None' | sed 's/^null //'
 }
@@ -417,6 +417,11 @@ mgok mg6 115 'merge-task: a REQUIRED check FAILED on PR #115' merge-gate "no ERR
 mgok mg7 116 'merge-task: ERROR: PR #116 has a MERGE CONFLICT with main (mergeStateStatus=DIRTY) on the integrated base — nothing was merged.' \
   merge-task "a merge conflict stays merge-task"
 mgok mg8 117 "$GATE" merge-task "the mark, a rerun, then a non-check gate: the later ERROR wins"
+# mg9 (ADR 0069 d3): the GitHub-side exit 1 the lead sets aside at Integration stays reasonClass merge-task, at integration
+# (reasonClass is not the retry class: the auto-retry suite's A5c reads it infra).
+out=$(mgc mg9 118 'merge-task exit 1, GitHub-side: ERROR: required checks never appeared for PR #118 — no CI runs in flight on its head SHA, nothing is coming' integration)
+ok "$(printf '%s\n' "$out" | sed -n 1p)" "lane-freed:mg9 set-aside:mg9" "mg9 the GitHub-side exit 1 at Integration: lane-freed, set-aside"
+ok "$(printf '%s\n' "$out" | sed -n 2p)" '["integrate","merge-task","integration"]' "mg9 the GitHub-side exit 1 at Integration: integrate, merge-task, integration"
 ok "$(python3 - "$SCRIPT" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)

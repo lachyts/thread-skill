@@ -26,7 +26,9 @@
 #      tree or an autostash refusal), and the in-place checkout's refresh line (a clone root only, ADR
 #      0042; it never changes the exit).                                 counter cleared    lead: mark-done
 #   1  Definitive halt; the reason is printed (Exit 1 causes, below).   counter cleared    lead: set aside
-#                                                                                          (own run or human)
+#                                                                                          (own run, or at
+#                                                                                          Integration when
+#                                                                                          GitHub-side)
 #   2  Usage or environment: bad arg count; a SHA not 40-hex; <pr> neither a positive number nor a
 #      github.com/<o>/<r>/pull/<N> URL; a URL whose <o>/<r> is not origin's; gh, git or python3 missing;
 #      not a repo; no origin; a MERGE_TASK_* override that is not a non-negative integer (at most 9
@@ -73,9 +75,13 @@
 #      head branch unreadable; GitHub's PR head still lags origin's branch (which holds the integrated head)
 #      after HEAD_LAG_MAX reads; GitHub refused with `Head branch was modified` while the PR head and
 #      origin's branch both read the integrated head; a transient `gh pr checks` error with no red row; a
-#      merge call that failed with unrecognised text and changed nothing; or MERGED, but the head or parent
-#      unreadable within the bound (`UNVERIFIED: PR #N merged as <oid or unknown>; not verifiable yet;
-#      re-run to verify`).                                               counter UNTOUCHED  lead: re-run the
+#      merge call that failed with unrecognised text and changed nothing; GitHub has not settled the PR's
+#      mergeability (ADR 0069 d2; each such text carries `GitHub has not settled its mergeability`): it stays
+#      UNKNOWN or BLOCKED with nothing required on the default branch, or UNKNOWN after its required checks
+#      went green, for LAZY_REPOLL_MAX re-polls, or no required check is reported and nothing runs on its
+#      head while the default branch's gate is unreadable; or MERGED, but the head or parent unreadable
+#      within the bound (`UNVERIFIED: PR #N merged as <oid or unknown>; not verifiable yet; re-run to
+#      verify`).                                                         counter UNTOUCHED  lead: re-run the
 #                                                                                          same args after a
 #                                                                                          backoff, bounded
 #                                                                                          by p12-9, then pause
@@ -96,9 +102,11 @@
 # (DRAFT, HAS_HOOKS, anything else); a definitive not-found (`HTTP 404`, `HTTP 422`, `Could not resolve
 # to a`); the PR's head branch is absent on origin while GitHub's PR head ≠ the integrated head (a
 # cross-repository PR or a deleted branch); the head does not contain the base; DIRTY, or BEHIND after a
-# bounded re-poll, on an unmoved base; a red required check on a genuine step; a non-check gate (checks
-# green, still BLOCKED, no review pending); a merge queue is required, or `isMergeQueueEnabled` is absent
-# from the schema; GitHub refused the merge with a known text (`is not mergeable|HTTP 405|HTTP 409|HTTP 422|
+# bounded re-poll, on an unmoved base; a red required check on a genuine step; required checks that never
+# appeared while something is required (the lead sets it aside at Integration, GitHub-side: no code fix
+# clears it, ADR 0069 d3); a non-check gate (checks green, still BLOCKED, no review pending); a merge queue
+# is required, or `isMergeQueueEnabled` is absent from the schema; GitHub refused the merge with a known
+# text (`is not mergeable|HTTP 405|HTTP 409|HTTP 422|
 # Required status check|protected branch|merges are not allowed|Repository rule violations found`: a repo
 # that disallows squash merges, or a ruleset, refuses every re-run alike; `Head branch was modified` is NOT
 # in this list: origin's branch decides it); gh returned 0 but the PR was not confirmed MERGED.
@@ -168,6 +176,14 @@
 # killed run never reads `ok` (bash 3.2 reaches the EXIT trap with $?=0 after a SIGTERM during a foreground
 # child).
 #
+# GitHub's lazy mergeability (ADR 0069). GitHub recomputes mergeStateStatus lazily after the base moves, and can
+# read UNKNOWN or BLOCKED for hours on a PR nothing gates. Off the CLEAN path the state machine first reads the
+# default branch's required gate once (required_gate: some, none or unknown). With none (two clean GitHub answers
+# deny any gate) an UNSTABLE PR merges at once, and a BLOCKED or UNKNOWN one is re-polled LAZY_REPOLL_MAX times,
+# then exits 8; with some or unknown the required checks are waited on as before. After that wait, UNKNOWN is
+# re-polled the same way, while BLOCKED stays the non-check gate's 1. Checks that never appear while the gate is
+# unreadable are 8, never 1.
+#
 # Carried over from the earlier merger: required checks are the gate (UNSTABLE handling, infra reruns, an absent check
 # read as pending while CI is in flight, the CLEAN re-poll); the squash merge; the best-effort REMOTE branch
 # delete (`gh pr merge --delete-branch` would `git branch -d` a branch checked out in the task's worktree,
@@ -183,11 +199,16 @@ set -uo pipefail
 for v in $(git rev-parse --local-env-vars 2>/dev/null); do case $v in GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS) ;; *) unset "$v" ;; esac; done
 
 # ---- tuning (the MERGE_TASK_* overrides exist for the hermetic tests; validated before any GitHub call) ----
-CHECK_RETRY_MAX=10     # consecutive "no required checks AND no CI in flight" polls before halting
+CHECK_RETRY_MAX=10     # consecutive "no required checks AND no CI in flight" polls before halting (1), or exit 8
+                       # when the gate is unreadable
 CHECK_INTERVAL=${MERGE_TASK_CHECK_INTERVAL:-15}          # gh pr checks --watch refresh
-STATE_GUARD_MAX=8      # bound the state machine (checks -> CLEAN is ~2 hops)
-STATE_INTERVAL=${MERGE_TASK_STATE_INTERVAL:-10}          # re-poll of a BEHIND state on an unmoved base
+STATE_INTERVAL=${MERGE_TASK_STATE_INTERVAL:-10}          # re-poll of a BEHIND state on an unmoved base, and of a
+                                                         # PR GitHub has not settled
 BEHIND_REPOLL_MAX=3    # BEHIND re-polls on an unmoved base before halting (within the guard)
+LAZY_REPOLL_MAX=6      # re-polls of a PR GitHub has not settled (ADR 0069 d2), STATE_INTERVAL apart: ~60 s, then 8
+# Bound the state machine. A run takes at most BEHIND_REPOLL_MAX BEHIND passes, one checks-wait pass and
+# LAZY_REPOLL_MAX lazy re-polls before its final pass, so "did not converge" never pre-empts the settling 8.
+STATE_GUARD_MAX=$((BEHIND_REPOLL_MAX + LAZY_REPOLL_MAX + 2))
 INFRA_RERUN_MAX=2      # finding #4: transient-infra reruns of a failed required job before halting
 MERGE_CONFIRM_MAX=5    # re-reads of state (after gh merge) and of mergeCommit (verify) before giving up
 CONFIRM_INTERVAL=${MERGE_TASK_CONFIRM_INTERVAL:-2}
@@ -950,6 +971,89 @@ infra_flake_rerun() {  # returns 0 if it re-ran failed jobs (caller should re-wa
 
 snapshot_once() { local READ_TRIES=1; pr_snapshot "$1"; }   # one attempt (dynamic scope reaches gh_read)
 
+# ---- the default branch's required gate (ADR 0069 d1) ------------------------------------------------------
+# Whether $BASE can carry a required check at all: `some` (protected by branch protection or a ruleset, or a ruleset
+# with a rule beyond RULES_NOT_CHECKS), `none` (two clean GitHub answers both deny any gate) or `unknown` (anything
+# else). Read at most once per run, and only off the CLEAN path. Two whole-object reads, the branch percent-encoded
+# whole (merge-gate.py's reads, ADR 0068):
+#   1. branches/<b>: 200 `protected: true` → some, with no rules read; 200 `protected: false` → read 2; anything else
+#      (any 404 or 403 whatever its text, a 200 with no boolean `protected`, no answer in READ_TRIES) → unknown.
+#      Not branches/<b>/protection: that 404s on a branch a ruleset alone protects (lachyts/thread-skill's master,
+#      2026-11-05), a false none; branches/<b> needs only read access.
+#   2. rules/branches/<b>?per_page=100: 200, a list of under 100 rules each of a RULES_NOT_CHECKS type → none; a
+#      list with any other type → some; 100 or more, or no list → unknown. A failed read whose stderr holds
+#      `Upgrade to GitHub Pro` and `HTTP 403` and no `rate limit` → none (a private repo on the free plan, which can
+#      hold no ruleset: lachyts/chorus, 2026-11-05); every other failure (404, a rate limit, an integration's 403, a
+#      5xx) → unknown.
+# A false none cannot merge a gated PR: merge-task merges only on CLEAN, or on UNSTABLE, which GitHub gives only once
+# the required checks pass, and the squash is head-pinned (ADR 0069 d4).
+REQ_GATE=''; REQ_WHY=''; GATE_ERR=''
+gate_read() {  # gate_read <out> <endpoint> — 0 on rc 0; 1 on an HTTP 4xx answer (final, GATE_ERR); 8 after READ_TRIES
+  local out="$1" ep="$2" try=0 rc
+  while : ; do
+    try=$((try+1))
+    gh api "$ep" >"$out" 2>"$tmp/gate.err"; rc=$?
+    if [ "$rc" -eq 0 ]; then GATE_ERR=''; return 0; fi
+    GATE_ERR=$(head -1 "$tmp/gate.err" 2>/dev/null); [ -n "$GATE_ERR" ] || GATE_ERR="gh api exited $rc"
+    grep -qE 'HTTP 4[0-9][0-9]' "$tmp/gate.err" 2>/dev/null && return 1
+    [ "$try" -ge "$READ_TRIES" ] && return 8
+    sleep "$READ_INTERVAL"
+  done
+}
+gate_body() {  # gate_body <branches|rules> <file> — what a 200 body says: some | none | open (read the rules) | unknown
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+# Rule types that never require a check: the branch's lifecycle, its history, signatures, and pull_request, whose
+# pending review the review gate catches first (exit 7).
+RULES_NOT_CHECKS = {"creation", "update", "deletion", "non_fast_forward", "required_linear_history",
+                    "required_signatures", "pull_request"}
+kind, path = sys.argv[1:]
+try:
+    d = json.load(open(path))
+except Exception:
+    d = None
+if kind == "branches":
+    p = d.get("protected") if isinstance(d, dict) else None
+    print("unknown" if not isinstance(p, bool) else "some" if p else "open")
+elif not isinstance(d, list) or len(d) >= 100:
+    print("unknown")
+elif all(isinstance(r, dict) and r.get("type") in RULES_NOT_CHECKS for r in d):
+    print("none")
+else:
+    print("some")
+PY
+}
+required_gate() {  # sets REQ_GATE (some | none | unknown) and REQ_WHY, once per run; never exits
+  [ -n "$REQ_GATE" ] && return 0
+  local enc rc g
+  enc=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$BASE")
+  gate_read "$tmp/gate-branch.json" "repos/$OWNER/$REPO/branches/$enc"; rc=$?
+  g=unknown
+  [ "$rc" -eq 0 ] && g=$(gate_body branches "$tmp/gate-branch.json")
+  case "$g" in
+    some) REQ_GATE=some; REQ_WHY="$BASE is protected" ;;
+    open)
+      gate_read "$tmp/gate-rules.json" "repos/$OWNER/$REPO/rules/branches/$enc?per_page=100"; rc=$?
+      if [ "$rc" -eq 0 ]; then
+        REQ_GATE=$(gate_body rules "$tmp/gate-rules.json")
+        case "$REQ_GATE" in
+          none) REQ_WHY="not protected, and no ruleset rule requires a check" ;;
+          some) REQ_WHY="not protected, but a ruleset rule may require a check" ;;
+          *) REQ_GATE=unknown; REQ_WHY="rules/branches/$BASE: not a whole list of rules" ;;
+        esac
+      elif [ "$rc" -eq 1 ] && grep -q 'Upgrade to GitHub Pro' "$tmp/gate.err" 2>/dev/null \
+           && grep -q 'HTTP 403' "$tmp/gate.err" 2>/dev/null && ! grep -qi 'rate limit' "$tmp/gate.err" 2>/dev/null; then
+        REQ_GATE=none; REQ_WHY="not protected, and this plan holds no rulesets"
+      else
+        REQ_GATE=unknown; REQ_WHY="rules/branches/$BASE: $GATE_ERR"
+      fi ;;
+    *)
+      REQ_GATE=unknown
+      if [ "$rc" -eq 0 ]; then REQ_WHY="branches/$BASE: no protected flag"; else REQ_WHY="branches/$BASE: $GATE_ERR"; fi ;;
+  esac
+  echo "  $BASE's required gate: $REQ_GATE ($REQ_WHY)."
+}
+
 WAIT_MSG=''
 wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed)
   local absent=0 rc infra_reruns=0
@@ -972,7 +1076,9 @@ wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAI
       # mergeStateStatus every pass (one read attempt; a failed read counts as "not CLEAN"): CLEAN means
       # branch protection has nothing left to wait for — hand back to the state machine, which re-reads
       # the state and merges. A genuinely red required check never takes this branch (gh pr checks
-      # reports the failure, not absence), so BLOCKED semantics are untouched.
+      # reports the failure, not absence), so BLOCKED semantics are untouched. One CLEAN sample is not
+      # GitHub settled: when the state machine's next read is UNKNOWN again, it re-polls it lazily
+      # (settle_repoll, ADR 0069 d2), never the NON-check gate's exit 1.
       if snapshot_once "$tmp/clean.json" && [ "$S_MSS" = "CLEAN" ]; then
         echo "  PR #$PR — no required checks and mergeStateStatus=CLEAN — nothing to wait for."
         return 0
@@ -982,7 +1088,17 @@ wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAI
         echo "  PR #$PR — required checks not created yet; CI in flight on head — waiting…"
       else
         absent=$((absent+1))
-        [ "$absent" -gt "$CHECK_RETRY_MAX" ] && { echo "ERROR: required checks never appeared for PR #$PR — no CI runs in flight on its head SHA, nothing is coming" >&2; return 1; }
+        if [ "$absent" -gt "$CHECK_RETRY_MAX" ]; then
+          # Nothing is coming. Whether that is a halt depends on the gate: with something required it is (1, which
+          # the lead sets aside at Integration as GitHub-side, ADR 0069 d3); with the gate unreadable it is GitHub's
+          # not yet, never a decision (8).
+          if [ "$REQ_GATE" = unknown ]; then
+            WAIT_MSG="retryable: no required check is reported for PR #$PR and nothing runs on its head, but $BASE's gate is unreadable ($REQ_WHY): GitHub has not settled its mergeability yet; nothing merged; re-run"
+            return 8
+          fi
+          echo "ERROR: required checks never appeared for PR #$PR — no CI runs in flight on its head SHA, nothing is coming" >&2
+          return 1
+        fi
       fi
       sleep "$CHECK_INTERVAL"; continue
     fi
@@ -1087,6 +1203,16 @@ review_gate() {  # 7 at once when a review is what blocks the PR: never a checks
     REVIEW_REQUIRED|CHANGES_REQUESTED)
       finish 7 "review required: approve PR #$PR ($S_URL); merge-task never bypasses protection (reviewDecision $S_REVIEW, mergeStateStatus $S_MSS). Nothing merged; re-run once approved." ;;
   esac
+}
+
+lazy=0
+settle_repoll() {  # settle_repoll <why> — one re-poll of a PR GitHub has not settled (ADR 0069 d2); past the bound, 8
+  lazy=$((lazy+1))
+  if [ "$lazy" -gt "$LAZY_REPOLL_MAX" ]; then
+    finish 8 "retryable: PR #$PR stays $1 after $LAZY_REPOLL_MAX re-polls: GitHub has not settled its mergeability yet; nothing merged; re-run"
+  fi
+  echo "  PR #$PR reads $1 — GitHub has not settled its mergeability; re-polling ($lazy/$LAZY_REPOLL_MAX)…"
+  sleep "$STATE_INTERVAL"
 }
 
 # ---- the merge ---------------------------------------------------------------------------------------------
@@ -1201,13 +1327,26 @@ while : ; do
     BLOCKED|UNKNOWN)
       review_gate
       if [ "$checks_done" -eq 1 ]; then
-        finish 1 "ERROR: PR #$PR is $S_MSS but required checks are already green — a NON-check gate is
+        # Checks green, still BLOCKED: a gate GitHub has decided (1). Still UNKNOWN: GitHub has not decided yet, so
+        # re-poll it (ADR 0069 d2), as after the recompute guard's one CLEAN sample.
+        if [ "$S_MSS" = UNKNOWN ]; then
+          settle_repoll "UNKNOWN after its required checks went green"
+        else
+          finish 1 "ERROR: PR #$PR is $S_MSS but required checks are already green — a NON-check gate is
   blocking it (an unexpected required review or unresolved conversation). Resolve on
   GitHub: $S_URL"
-      fi
-      wait_required_checks; rc=$?
-      case "$rc" in 0) ;; 8) finish 8 "$WAIT_MSG" ;; *) finish 1 ;; esac
-      checks_done=1 ;;
+        fi
+      else
+        required_gate
+        if [ "$REQ_GATE" = none ]; then
+          # Nothing can be required on $BASE, so no check is coming: BLOCKED or UNKNOWN is GitHub's lazy recompute.
+          settle_repoll "$S_MSS with nothing required on $BASE ($REQ_WHY)"
+        else
+          wait_required_checks; rc=$?
+          case "$rc" in 0) ;; 8) finish 8 "$WAIT_MSG" ;; *) finish 1 ;; esac
+          checks_done=1
+        fi
+      fi ;;
     UNSTABLE)
       # Mergeable under branch protection, but a NON-required check is red or still pending.
       # GitHub never reports CLEAN while a non-required check is red — and this repo's main
@@ -1220,9 +1359,13 @@ while : ; do
       # any rollout — the exact failure from the 2026-06-02 giflab run. Gating on `--required` is branch
       # protection's own definition of mergeable.
       # The fake-gh suites cannot prove GitHub's semantics, so this comment IS the guard.
+      # With nothing required on $BASE (REQ_GATE none, ADR 0069 d1) there is no required check to wait on: merge.
       if [ "$checks_done" -eq 0 ]; then
-        wait_required_checks; rc=$?
-        case "$rc" in 0) ;; 8) finish 8 "$WAIT_MSG" ;; *) finish 1 ;; esac
+        required_gate
+        if [ "$REQ_GATE" != none ]; then
+          wait_required_checks; rc=$?
+          case "$rc" in 0) ;; 8) finish 8 "$WAIT_MSG" ;; *) finish 1 ;; esac
+        fi
         checks_done=1
       fi
       merge_pr ;;
