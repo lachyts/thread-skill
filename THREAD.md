@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-03
+last_touched: 2026-11-04
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -1157,6 +1157,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-04 (close, decisions check): checked [[thread-skill-decisions-2026-11-02]]: still live, 13 of 14 items open (f0ab0604 decided 3 Nov); its `scheduled:` is a legacy key #283's `reflect.py decide` drops, so Lachy leaves it to the Reflection Routine. Its routine link resolves to `Work/Tasks/Archive/` (not dead); no change kept.
 - 2026-11-03 (close, orient): `/thread:orient Thread Skill`: Priorities card; P36 phased from ADR 0067 (8 tasks plus 2 Chorus tasks); three brain dumps respecced, one dropped; scheduled the 15-task [[thread-skill-rollout-2026-11-03]] and handed it to a fresh lead. Lachy put ntfy off ("Not now").
 - 2026-11-03 (close, Primary cut-over): explained the weekly decision task; on Lachy's word paused Chorus and stopped Smart Slider Leg 2, moved the Primary 158 commits to `1c9ffe0`, stamped the four live notes with snapshot `1c9ffe0cbf5e`, restarted Chorus and Smart Slider Leg 3; filed the move_rule fix and the Routine change; recorded f0ab0604 yes. My slip: messaged the Companion for a restart Lachy then did himself, so its quiet had to be dropped by a resume.
 - 2026-11-02 (close, fresh-review p1-4): built close's ADR 0065 loop, land.sh `--fixed-at-budget`, Legs and the reflect readers test-first in `thread-skill-wt-p1-4`; reviewed (1 dev + 3 landing rounds) and merged #271; fast-forwarded `~/.agents` to the confirm-step branch and pushed. My slips: ran the landing by hand before `/thread:close`, so this close-out needed its own branch; and fast-forwarded the held primary checkout under five rollouts for 63 s before putting it back.
