@@ -36,9 +36,9 @@ Running time is the time in [since, until] when the run is active and not paused
 its effective end, below), or the lane is held with no merge, race or git-env hold open and no Slot open, for
 at most LANE_ONLY_CAP of each such stretch of one holding (a pause splits a stretch). Paused spans (paused .. resumed) are excluded; the drain before a
 soft pause's stamp counts as running. A hold with no Slot open is a wait on Lachy: excluded, listed by kind. A
-Mac-wide hold (MAC_HOLDS: the Trickle, the Away cap, the Heat hold, the last starts; execute away.md) with no Slot open
-is a meant wait, never Lachy's: excluded under its own kind (hold-trickle, hold-away-cap, hold-heat, hold-last-start:
-p28-7), after every kind above (so a pause
+Mac-wide hold (MAC_HOLDS: the Trickle, the Away cap, the Heat hold, the last starts, the quota hold; execute away.md)
+with no Slot open is a meant wait, never Lachy's: excluded under its own kind (hold-trickle, hold-away-cap, hold-heat,
+hold-last-start: p28-7; hold-quota: p36-7), after every kind above (so a pause
 or a hold wins) and before `idle`. Its idle-slots marker at t labels [t, e), e the earliest of the next marker (any
 reason), t + HOLD_MARKER_SPAN (two heartbeat ticks: the lead re-checks at each) and --until, so a dead lead's silence
 reads idle past the span, never the Trickle; a not-running stretch whose first marker is a Mac-wide hold within
@@ -258,7 +258,10 @@ or ran past), held, ranPast, fallback, underestimate, unchecked}, flags, suggest
   trickle-raise              NIGHT_ABOVE_TRICKLE or more nights whose ranPast exceeds the day's Trickle N: from N to
                              the largest such ranPast, Chorus's companion.json `trickle`, a trade (more room by day
                              against a lighter Mac) Lachy decides. N is the latest slot-taken cap.n with away false
-                             stamped in [since, until], else the built-in DEFAULT_TRICKLE, flagged.
+                             and no `by` stamped in [since, until] (a cap with `by: capacity` is the Capacity's C,
+                             p36-7, never the Trickle), else the built-in DEFAULT_TRICKLE, flagged; a window whose
+                             by-day caps are all the Capacity's suggests no trickle-raise, flagged `nights: the day's
+                             cap was the Capacity (by: capacity) in the window: no Trickle to raise`.
 Holds alone never lower the fallback: a held start never ran, so its length is unknown.
 
 Escapes and Quality. The landed set is every task with a `merged` line in the window (read-only ones included; the
@@ -374,6 +377,8 @@ MAC_HOLDS = {
     "hold-heat": ("hold-heat", "the Heat hold: the Mac is too hot to start anything (estate ADR 0009 d5)"),
     "hold-last-start": ("hold-last-start", "the last starts hold a start that would run past the Morning (Chorus ADR "
                                            "0104 d4): a meant wait, not Lachy's"),
+    "hold-quota": ("hold-quota", "the quota hold: the lead's Login is inside its line while the Capacity is in force "
+                                 "(ADR 0067 d8): a meant wait, not Lachy's"),
 }
 # The Mac-wide holds that bind as trickle-bound (the one Mac-wide cap, its value by Away state); Heat is transient.
 CAP_HOLDS = ("hold-trickle", "hold-away-cap")
@@ -639,7 +644,8 @@ def night_record(records, since, until, mornings=None):
     since and until are ms; mornings, when given, is a set of morning ms that narrows the nights (score.py's: the
     Mornings the scored record marked). It reads only NIGHT_KINDS lines, never through pair(), each whatever its ts
     (a ran-past-morning line is written at the first `next` after its Morning), windowed by its `morning`; and, for
-    the day's Trickle, the slot-taken lines' `cap` stamped in [since, until]. Holds alone never lower the fallback: a
+    the day's Trickle, the slot-taken lines' `cap` stamped in [since, until], a Capacity's (`by`, p36-7) never read as
+    the Trickle. Holds alone never lower the fallback: a
     held start never ran, so its length is unknown. Shared with reflect.py (the weekly span's `nights`)."""
     flags, nights, markers, seen, rows = [], {}, {}, set(), []
 
@@ -647,15 +653,19 @@ def night_record(records, since, until, mornings=None):
         if text not in flags:
             flags.append(text)
 
-    trickle = None  # (ts, slug, line index, cap.n): the latest slot-taken cap with away false in the window
+    trickle = None  # (ts, slug, line index, cap.n): the latest slot-taken Trickle cap with away false in the window
+    by_capacity = False  # a by-day cap in the window was the Capacity's (p36-7): its C is never the Trickle
     for slug in sorted(records):
         for t, n, d in records[slug]:
             kind = d.get("kind")
             if kind == "slot-taken":
                 cap = d.get("cap")
                 if since <= t <= until and isinstance(cap, dict) and cap.get("away") is False and \
-                        _int_ge(cap.get("n"), 1) and (trickle is None or (t, slug, n) > trickle[:3]):
-                    trickle = (t, slug, n, cap["n"])
+                        _int_ge(cap.get("n"), 1):
+                    if "by" in cap:
+                        by_capacity = True
+                    elif trickle is None or (t, slug, n) > trickle[:3]:
+                        trickle = (t, slug, n, cap["n"])
                 continue
             if kind not in NIGHT_KINDS:
                 continue
@@ -753,13 +763,17 @@ def night_record(records, since, until, mornings=None):
                          "still running at it): the longest ran at least %d min (%s)"
                          % (len(over), LAST_START_MIN_RUNS, LAST_START_FALLBACK_MS // HOUR, longest,
                             ", ".join("[[%s]]" % e["task"] for e in over)))[:EVIDENCE_MAX]})
-    if trickle is None:
+    if trickle is None and by_capacity:
+        n_day = None   # every by-day cap was the Capacity's: no Trickle bound the day, so none to raise
+        if out:
+            flag("nights: the day's cap was the Capacity (by: capacity) in the window: no Trickle to raise")
+    elif trickle is None:
         n_day = DEFAULT_TRICKLE
         if out:
             flag("nights: no slot-taken cap by day in the window: the Trickle is read as the built-in %d" % n_day)
     else:
         n_day = trickle[3]
-    above = [nt for nt in out if nt["ranPast"] > n_day]
+    above = [nt for nt in out if n_day is not None and nt["ranPast"] > n_day]
     if len(above) >= NIGHT_ABOVE_TRICKLE:
         suggest.append({
             "rule": "trickle-raise", "key": "trickle",

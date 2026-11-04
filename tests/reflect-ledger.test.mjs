@@ -380,6 +380,14 @@ test('L1 controls: a sign-off pause re-moded hard moves its 2 h to other; a quot
     [0.5, { 'usage-limit': 0.5 }, 0.75, 30.75])
 })
 
+test('L1 controls (p36-7): the hold-heat stretch re-marked hold-quota (the quota hold) moves its 1 h from load to quota-bound', (t) => {
+  const h = setup(t)
+  fixture(h, { 'l-caps': FIXTURE['l-caps'].map((e) => (e[1] === 'idle-slots' && e[3].reason === 'hold-heat' ? [e[0], e[1], e[2], idle('hold-quota')] : e)) })
+  const b = ledgerCli(h, LSINCE, LUNTIL)
+  assert.equal(b.row.byCause['quota-bound']['hold-quota'], 1, 'the quota hold is quota-bound')
+  assert.equal(b.row.byCause.load['hold-heat'] ?? 0, 0, 'and no longer load')
+})
+
 test('L1: a stop open across a window with no line in it is counted on a live rollout, to until; archived, it ends at its last line', (t) => {
   const h = setup(t)
   emitAll(h, 'l-open', [
