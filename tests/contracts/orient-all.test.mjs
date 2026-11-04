@@ -1,7 +1,7 @@
 // The estate pass's lead (p25-3; ADR 0041): skills/orient-all/SKILL.md runs estate-scan.py, the grading and status
 // agents, estate-rank.py and estate-dispatch.py, asks the decision round, forks the schedules and starts the sessions.
 // Its script half is tests/estate-dispatch.test.mjs; this file pins the prose to the scripts, to the siblings it cites,
-// and to the docs that name it. Thirteen rules:
+// and to the docs that name it. Fourteen rules:
 //   o1  the headings, in order, and none of the retired or forbidden words.
 //   o2  § 2 runs estate-scan.py, `estate-dispatch.py slices` and `estate-rank.py rank`, cites readiness-grade.md
 //       § The grading agents, and briefs the status agents to run /thread:status and return the number of the status
@@ -50,6 +50,10 @@
 //       hold, the Don't asking past the budget only for sign-offs and the pick list; § 8 reports `unmatched[]` and
 //       names `/thread:repair [[<rollout>]]`; § 9 prints `pickAsk`, never asked, and its commands pass no `--open` or
 //       `--typed`; and ADR 0061 exists and the skill cites it.
+//   o14 the estate rank (ADR 0067 d9): § 7 runs `estate-dispatch.py rank-stamp` with --rank, --plan and --wrote before
+//       step 1's `sessions`, guarded "Unless this is a dry run"; an exit 1 runs the line once more and a second goes to
+//       § 8, which reports its `failed` and `notReached[]` as a caveat; the Scope lists it among the writes, and § 9
+//       names it among the commands it never runs.
 // One pure function, check(files, consts), returns the failing rules; every control mutates one place and fails exactly
 // its rule. Reads files only (the python child imports estate-dispatch.py, which runs nothing at import).
 import { test } from 'node:test'
@@ -337,6 +341,18 @@ function check(files, consts) {
   if (!files[ADR61]) flag('o13', `${ADR61} is missing`)
   if (!all.includes('ADR 0061')) flag('o13', 'the skill does not cite ADR 0061')
 
+  // o14: the estate rank (ADR 0067 d9), stamped before the sessions start.
+  const rankAt = s7raw.indexOf('estate-dispatch.py rank-stamp')
+  if (rankAt < 0 || step1At < 0 || rankAt > step1At) flag('o14', '§ 7 does not run `rank-stamp` before step 1\'s `sessions`')
+  const rankPara = C((s7raw.split(/\n\s*\n/).find((p) => p.includes('estate-dispatch.py rank-stamp')) ?? ''))
+  if (!/unless this is a dry run, `[^`]*estate-dispatch\.py rank-stamp --rank "\$S\/rank\.json" --plan "\$S\/plan\.json" --wrote <each note a fork wrote, in plan order>/i.test(rankPara)) {
+    flag('o14', '§ 7 does not run `rank-stamp --rank ... --plan ... --wrote ...` guarded "Unless this is a dry run"')
+  }
+  need('o14', "§ 7's rank paragraph", rankPara, ['Exit 1', 'run the same line once more', 'A second exit 1 goes to § 8'])
+  need('o14', '§ 8', s8, ['`rank-stamp`', '`failed`', '`notReached[]`', 'as a caveat', 'the order stands'])
+  need('o14', 'the Scope', S(/^## Scope/), ['`estate-dispatch.py rank-stamp`', 'never on a dry run'])
+  need('o14', '§ 9 never-runs', never, ['`estate-dispatch.py rank-stamp`'])
+
   return { fails: [...fails].sort(), details }
 }
 
@@ -353,7 +369,7 @@ const only = (files, consts, rules, what) => {
   assert.deepEqual(r.fails, rules, `${what}: ${r.details.join('\n')}`)
 }
 
-test('the skill, its scripts, schedule, status and the docs agree (o1-o13)', () => {
+test('the skill, its scripts, schedule, status and the docs agree (o1-o14)', () => {
   const r = check(FILES, CONSTS)
   assert.deepEqual(r.fails, [], r.details.join('\n'))
 })
@@ -426,6 +442,20 @@ test('control o13: the pick list asked within the budget, a step 1 without --typ
   only({ ...FILES, [ADR61]: null }, CONSTS, ['o13'], 'adr')
   only(swap(FILES, SKILL, 'A big project\'s One calls, Grills, sign-offs and Unpark offer never reach this round',
     'A big project\'s One calls are asked here'), CONSTS, ['o13'], '§ 4 hold')
+})
+
+test('control o14: rank-stamp with no dry-run guard, run after the sessions, never re-run, unreported, or missing from the Scope or the never-runs list, fails o14 alone', () => {
+  only(swap(FILES, SKILL, 'unless this is a dry run, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rank-stamp',
+    '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rank-stamp'), CONSTS, ['o14'], 'guard')
+  const para = FILES[SKILL].split('\n\n').find((p) => p.startsWith('**The estate rank (ADR 0067 d9).**'))
+  assert.ok(para, 'control setup: § 7\'s rank paragraph')
+  const moved = FILES[SKILL].replace(`${para}\n\n`, '').replace('\n### 8. Report', `\n${para}\n\n### 8. Report`)
+  only({ ...FILES, [SKILL]: moved }, CONSTS, ['o14'], 'after sessions')
+  only(swap(FILES, SKILL, 'run the same line once more', 'stop'), CONSTS, ['o14'], 'no re-run')
+  only(swap(FILES, SKILL, 'its `failed` note and `notReached[]` as a\n  caveat', 'nothing more'), CONSTS, ['o14'], 'unreported')
+  only(swap(FILES, SKILL, '  - `estate-dispatch.py rank-stamp`, the pass', '  - the pass'), CONSTS, ['o14'], 'scope')
+  only(swap(FILES, SKILL, '`estate-dispatch.py log`, `estate-dispatch.py rank-stamp`, `decided-for-you --write`',
+    '`estate-dispatch.py log`, `decided-for-you --write`'), CONSTS, ['o14'], 'never-runs')
 })
 
 test('control o11: the log run with no dry-run guard, the dry run naming no log, or CONTEXT.md without **Grade log** fails o11 alone', () => {

@@ -29,12 +29,14 @@
 #        project's place (a folder note's folder, else the note and its would-be folder) and the member's own task
 #        note; Work/Tasks is bookkeeping; the whole-vault fallbacks; --surface adds; a code row never opens where its
 #        Leg cannot finish it (ruling (c) first, read through `works`); the serial check schedules every chain, a
-#        shared place WARNing that they take turns (ADR 0067 d4)
+#        shared place WARNing that they take turns by rank (ADR 0067 d4, d9)
 #   P8   the 2026-11-02 replan fixture (docs/spikes/2026-11-02-replan.py) over a synthetic estate: only the same-file
 #        pair and the declared-bare pairs clash, and no workspaces or Projects pair appears
 #   P9   the Chain copy helpers (ADR 0067 d2, pure): read_chain_copies (absent, [], inline and block lists, quoted
 #        commas and spaces, malformed items), fmt_chain_copies' round trip, copy_name's -<k>-, copy_folder (a nested
 #        checkout to the inner one) and its inverse primary_folder, read_surfaces through read_list
+#   R1-R5 the estate rank (ADR 0067 d9, pure): read_estate_rank reads a valid pair and nothing malformed (R1-R4), and
+#        rank_tokens keeps `repo:` and `any`, never vault or `ext:` (R5)
 #   P6   exit 2
 # Temp vaults, temp git repos with literal origin URLs (only `git rev-parse` and `git remote get-url` read them).
 # No vault, no network. bash 3.2-compatible (macOS).
@@ -613,7 +615,7 @@ LFX="$LFX7" plan --tasks c1
 chk7 0 --tasks c1
 ok "$cout|$crc" "none|0" "P7: a second chain in the Contacts admin project is scheduled (ADR 0067 d4)"
 has "$cerr" "WARN: [[ca-rollout-2026-10-31]] (Contacts admin; never started) also predicts vault:Work/Projects/Life (area)/Contacts admin" "P7: … with the takes-turns WARN"
-has "$cerr" "they take turns on it, the first to begin going first (ADR 0067 d4)" "P7: … saying they take turns"
+has "$cerr" "they take turns on it by rank (ADR 0067 d4, d9)" "P7: … saying they take turns by rank"
 # 5. The fallbacks: no project and no path, a vault-root path with no project, a project with no note.
 mkt n1
 LFX="$LFX7" plan --tasks n1
@@ -809,6 +811,21 @@ print(m.primary_folder("/s/r-ro", P), m.primary_folder("/s/r-ro/sub/l", P), m.pr
    "/x/r /x/r/sub/l /x/r/inner/a None None" "P9: primary_folder is copy_folder's inverse"
 ok "$(pc 'print(m.read_surfaces(note("surfaces:\n  - \"repo:/x//a, b.py\"\n  - ext:x")), m.read_surfaces(note("shape: serial")), m.read_list(note("shape: serial"), "surfaces"))')" \
    "['repo:/x//a, b.py', 'ext:x'] [] None" "P9: read_surfaces reads through read_list, [] when absent"
+
+# ── R1-R5: the estate rank and the counted tokens (ADR 0067 d9; pure) ──────────────────────────────────
+echo "== r (estate rank)"
+# er <frontmatter> — read_estate_rank over a note with it, given reconcile-rollout.py's stamp parser: (n, at, ts) or None
+er() { FM="$1" pc 'import os; r = m.read_estate_rank(note(os.environ["FM"]), rr._parse_ts); print(r if r is None else (r["n"], r["at"], int(r["ts"])))'; }
+ok "$(er $'estate_rank: 2\nestate_rank_at: "2026-11-03T09:00:00+00:00"')" "(2, '2026-11-03T09:00:00+00:00', 1793696400)" \
+   "R1: a valid pair reads as (n, at, ts)"
+ok "$(er 'shape: serial')|$(er 'estate_rank: 1')|$(er 'estate_rank_at: "2026-11-03T09:00:00+00:00"')" "None|None|None" \
+   "R2: unstamped, or one key without the other, reads as None"
+ok "$(er $'estate_rank: "0"\nestate_rank_at: 2026-11-03T09:00+00:00')|$(er $'estate_rank: x\nestate_rank_at: 2026-11-03T09:00+00:00')|$(er $'estate_rank: -1\nestate_rank_at: 2026-11-03T09:00+00:00')" \
+   "None|None|None" "R3: an n of 0, x or -1 reads as None"
+ok "$(er $'estate_rank: 1\nestate_rank_at: "yesterday"')|$(er $'estate_rank: 1\nestate_rank_at: 2026-13-40T09:00+00:00')" "None|None" \
+   "R4: a stamp _parse_ts refuses reads as None"
+ok "$(pc 'print([m.fmt_token(x) for x in m.rank_tokens(["repo:/x//a.py", "vault", "vault:Work/A", "ext:cms", "any", "repo:/x//a.py", "bogus:z", ("repo", "/y")])])')" \
+   "['repo:/x//a.py', 'any', 'repo:/y']" "R5: rank_tokens keeps repo: and any, in order, once each; vault, ext: and a malformed token never"
 
 # ── P6: exit 2────────────────────────────────────────────────────────────────────────────────────────
 scen p6

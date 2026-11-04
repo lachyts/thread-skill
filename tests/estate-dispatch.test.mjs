@@ -905,7 +905,7 @@ test('D13. usage: a bad verb, flag (log\'s included), input, budget, status or w
   const rank2 = keep('rank-2.json', JSON.stringify({ ...ranked(), schema: 2 }))
   const plan2 = keep('plan-2.json', JSON.stringify({ ...ok(PLAN()), schema: 2 }))
   refusal(py(['frob']))
-  refusal(py([]), /a verb is required: slices \| rounds \| plan \| sessions \| record \| decided-for-you \| log \| preflight$/)
+  refusal(py([]), /a verb is required: slices \| rounds \| plan \| sessions \| record \| decided-for-you \| log \| preflight \| rank-stamp$/)
   refusal(py(['log', '--rank', RANK_FILE]), /--scan/)
   refusal(py(['log', '--rank', RANK_FILE, '--scan', SCAN_FILE, '--budget', '5']), /--budget/)
   refusal(py(['rounds', '--rank', RANK_FILE, '--scan', SCAN_FILE, '--budget', '5', '--bogus']))
@@ -1873,4 +1873,156 @@ test('D23. big projects: nothing of theirs asked, scheduled or started; one pick
     assert.equal(run().stdout, a.stdout)
   }
   assert.deepEqual(snap(VB), VB_BEFORE, 'the vault is untouched')
+})
+
+// ---- D24. rank-stamp: orient-all § 7's estate rank (ADR 0067 d9) -----------------------------------------------------------
+// Each case builds its own fixture vault under S: live rollout notes the plan lists (a begun one, never-begun ones by
+// `captured:`, a superseded one, a done one) and the notes this pass's forks wrote, whose Queue members the rank grades.
+const LEG_PY = path.join(root, 'skills', 'execute', 'scripts', 'leg.py')
+const PASS = '2026-11-03T09:00:00+00:00'
+const OLD = '2026-10-30T09:00:00+00:00'
+function rankVault(name) {
+  const VR = path.join(S, 'rank-vaults', name)
+  fs.rmSync(VR, { recursive: true, force: true })
+  const TR = path.join(VR, 'Work', 'Tasks')
+  mkdir(path.join(VR, 'Work', 'Projects'))
+  const ro = (slug, { captured = '2026-10-01', stamp = null, began = null, status = 'open', member = `${slug}-a` } = {}) => {
+    const fmLines = ['tags:\n  - rollout', `status: ${status}`, 'protocol_version: 5', 'shape: serial', `captured: ${captured}`]
+    if (stamp) fmLines.push(`estate_rank: ${stamp[0]}`, `estate_rank_at: "${stamp[1]}"`)
+    const log = began ? `\n## Leg log\n\n- ${began} Leg 1 began: leg-1 session s in cc-x from /x\n` : ''
+    write(path.join(TR, `${slug}.md`), fm(fmLines.join('\n'), `\n## Notes\n\nA chain.\n\n## Queue\n\n| # | Task | Launch | Surfaces |\n` +
+      `|---|---|---|---|\n| 1 | [[${member}\\|a]] | \`cc-x\` from \`/x\` | \`ext:x\` |\n${log}`))
+    return path.join(TR, `${slug}.md`)
+  }
+  return { VR, TR, ro }
+}
+const rankFile = (tasks) => keep(`rank-stamp-${tasks.map((t) => t.slug).join('-') || 'none'}.json`,
+  JSON.stringify({ schema: 1, today: '2026-11-03', tasks, runs: [], decisions: [], orient: [], unpark: [] }))
+const planFile2 = (VR, name, rollouts) => keep(`rank-stamp-plan-${name}.json`, JSON.stringify({ schema: 1, vault: VR, rollouts,
+  schedule: [], orient: [], pick: [] }))
+const row = (VR, p, holds = []) => ({ slug: path.basename(p, '.md'), note: path.relative(VR, p).split(path.sep).join('/'), holds })
+const stampOf = (p) => { const t = fs.readFileSync(p, 'utf8'); const n = /^estate_rank: (.*)$/m.exec(t); const a = /^estate_rank_at: "(.*)"$/m.exec(t); return n && a ? [Number(n[1]), a[1]] : null }
+const stamp = (args, extra = {}) => py(['rank-stamp', ...args], extra)
+// The order_key order of some notes, read through leg.py itself (a python3 child).
+function legOrder(paths) {
+  const r = spawnSync('python3', ['-c', `
+import importlib.util, json, sys
+from pathlib import Path
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("leg", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.rr, m.sc = m._load("reconcile_rollout", m.RR_SRC), m._load("serial_chains", m.SC_SRC)
+def key(p):
+    n = m.rr.Note(Path(p)); began = next((e["stamp"] for e in m.parse_log(n) if e["kind"] == "began"), None)
+    return m.order_key(Path(p).stem, began, m.sc.read_estate_rank(n, m.rr._parse_ts), n.get("captured"))
+print(json.dumps([Path(p).stem for p in sorted(sys.argv[2:], key=key)]))`, LEG_PY, ...paths], { encoding: 'utf8', env, cwd: S })
+  assert.equal(r.status, 0, r.stderr)
+  return JSON.parse(r.stdout)
+}
+
+test('D24. rank-stamp: live runs keep their order ahead of this pass\'s, new ones by their best member rank; reruns, a dry run and refusals', () => {
+  const { VR, TR, ro } = rankVault('order')
+  const lb = ro('lb-rollout-2026-10-05', { captured: '2026-10-05', began: '2026-10-20T10:00+00:00' })
+  const la = ro('la-rollout-2026-10-01', { captured: '2026-10-01' })
+  const lc = ro('lc-rollout-2026-10-03', { captured: '2026-10-03' })
+  const ls = ro('ls-rollout-2026-10-02', { captured: '2026-10-02' })
+  const ld = ro('ld-rollout-2026-10-02', { status: 'done' })
+  const w1 = ro('w1-rollout-2026-11-03', { captured: '2026-11-03' })
+  const w2 = ro('w2-rollout-2026-11-03', { captured: '2026-11-03' })
+  const w3 = ro('w3-rollout-2026-11-03', { captured: '2026-11-03' })
+  const rank = rankFile([{ slug: 'w1-rollout-2026-11-03-a', rank: 5 }, { slug: 'w2-rollout-2026-11-03-a', rank: 2 },
+    { slug: 'w3-rollout-2026-11-03-a', rank: null }])
+  const plan = planFile2(VR, 'order', [row(VR, la), row(VR, lb), row(VR, lc), row(VR, ls, ['superseded', 'serial']), row(VR, ld)])
+  const args = ['--rank', rank, '--plan', plan, '--wrote', w1, '--wrote', w2, '--wrote', w3, '--at', PASS]
+  const before = snap(VR)
+  const dry = ok(stamp([...args, '--dry-run']))
+  assert.equal(dry.stamped.length, 6)
+  assert.deepEqual(snap(VR), before, '--dry-run writes nothing')
+  const j = ok(stamp(args))
+  assert.equal(j.at, PASS)
+  assert.deepEqual(j.stamped.map((x) => [path.basename(x.note, '.md'), x.rank, x.was]), [
+    ['lb-rollout-2026-10-05', 1, null], ['la-rollout-2026-10-01', 2, null], ['lc-rollout-2026-10-03', 3, null],
+    ['w2-rollout-2026-11-03', 4, null], ['w1-rollout-2026-11-03', 5, null], ['w3-rollout-2026-11-03', 6, null]],
+    'live first in order_key order (begun, then the earlier captured:), then the new by their best member rank, nulls last')
+  assert.deepEqual(j.excluded.map((x) => [path.basename(x.note, '.md'), x.why]), [['ls-rollout-2026-10-02', 'superseded'],
+    ['ld-rollout-2026-10-02', 'done']])
+  assert.deepEqual([j.failed, j.notReached], [null, []])
+  assert.deepEqual([stampOf(lb), stampOf(w3), stampOf(ls)], [[1, PASS], [6, PASS], null])
+  assert.match(fs.readFileSync(lb, 'utf8'), /^shape: serial\nestate_rank: 1\nestate_rank_at: "2026-11-03T09:00:00\+00:00"\n/m, 'stamped after shape:')
+  const after = Object.fromEntries([lb, la, lc, w1, w2, w3].map((p) => [p, fs.readFileSync(p, 'utf8')]))
+  const again = ok(stamp(args))
+  assert.deepEqual([again.stamped, again.unchanged.length], [[], 6], 'an identical second run is unchanged')
+  for (const [p, text] of Object.entries(after)) assert.equal(fs.readFileSync(p, 'utf8'), text, `${p}: the same bytes`)
+  // Refusals: a plan that is not JSON, and an --at earlier than a live stamp; nothing written.
+  const bad = keep('rank-stamp-bad.json', '{ not json')
+  refusal(stamp(['--rank', rank, '--plan', bad]), /not JSON/)
+  refusal(stamp(['--rank', rank, '--plan', plan, '--at', '2026-11-02T09:00:00+00:00']), /earlier than a live rollout's estate_rank_at/)
+  refusal(stamp(['--rank', rank, '--plan', plan, '--at', 'yesterday']), /is not an ISO time/)
+  for (const [p, text] of Object.entries(after)) assert.equal(fs.readFileSync(p, 'utf8'), text, `${p}: a refusal writes nothing`)
+})
+
+test('D24b. rank-stamp stops at the first note it cannot write, so the live order stands; a re-run finishes it', () => {
+  const { VR, ro } = rankVault('partial')
+  const live = [1, 2, 3, 4, 5].map((n) => ro(`l${n}-rollout-2026-10-0${n}`, { stamp: [n, OLD] }))
+  const w1 = ro('w1-rollout-2026-11-03', { captured: '2026-11-03' })
+  const rank = rankFile([{ slug: 'w1-rollout-2026-11-03-a', rank: 1 }])
+  const plan = planFile2(VR, 'partial', live.map((p) => row(VR, p)))
+  const order = legOrder(live)
+  assert.deepEqual(order, live.map((p) => path.basename(p, '.md')))
+  const bytes = Object.fromEntries([...live, w1].map((p) => [p, fs.readFileSync(p, 'utf8')]))
+  fs.chmodSync(live[2], 0o444)
+  let j
+  try {
+    const r = stamp(['--rank', rank, '--plan', plan, '--wrote', w1, '--at', PASS])
+    assert.equal(r.status, 1, r.stderr)
+    j = r.json
+  } finally {
+    fs.chmodSync(live[2], 0o644)
+  }
+  assert.deepEqual([path.basename(j.failed.note, '.md'), /PermissionError/.test(j.failed.why)], ['l3-rollout-2026-10-03', true])
+  assert.deepEqual(j.notReached.map((x) => path.basename(x, '.md')), ['l4-rollout-2026-10-04', 'l5-rollout-2026-10-05', 'w1-rollout-2026-11-03'])
+  assert.deepEqual(j.stamped.map((x) => [path.basename(x.note, '.md'), x.rank, x.was]), [['l1-rollout-2026-10-01', 1, { n: 1, at: OLD }],
+    ['l2-rollout-2026-10-02', 2, { n: 2, at: OLD }]])
+  for (const p of [live[2], live[3], live[4], w1]) assert.equal(fs.readFileSync(p, 'utf8'), bytes[p], `${p}: kept its bytes`)
+  assert.deepEqual(legOrder(live), order, 'the live order stands: a stamped prefix and an untouched suffix')
+  const re = ok(stamp(['--rank', rank, '--plan', plan, '--wrote', w1, '--at', PASS]))
+  assert.deepEqual([re.unchanged.map((x) => path.basename(x, '.md')), re.stamped.map((x) => x.rank), re.failed],
+    [['l1-rollout-2026-10-01', 'l2-rollout-2026-10-02'], [3, 4, 5, 6], null], 'the re-run stamps the rest')
+  assert.deepEqual([...live, w1].map(stampOf), [1, 2, 3, 4, 5, 6].map((n) => [n, PASS]))
+})
+
+test('D24c. rank-stamp: without --at the pass is after every live stamp, and an edit made between the read and the save is kept', () => {
+  const { VR, ro } = rankVault('clock')
+  const ahead = new Date(Math.floor(Date.now() / 1000) * 1000 + 60000).toISOString().replace('.000Z', '+00:00')
+  const l1 = ro('l1-rollout-2026-10-01', { stamp: [1, ahead] })
+  const l2 = ro('l2-rollout-2026-10-02')
+  const rank = rankFile([])
+  const plan = planFile2(VR, 'clock', [row(VR, l1), row(VR, l2)])
+  const j = ok(stamp(['--rank', rank, '--plan', plan]))
+  assert.equal(Date.parse(j.at), Date.parse(ahead) + 1000, `the pass time ${j.at} is one second after the live stamp ${ahead}`)
+  assert.deepEqual([stampOf(l1), stampOf(l2)], [[1, j.at], [2, j.at]])
+  // Another writer edits the note after rank-stamp read it: Note.save re-applies the stamp to the fresh read.
+  const r = spawnSync('python3', ['-c', `
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("ed", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+real = m.Mods
+class Mods(real):
+    def __init__(self, leg=False):
+        super().__init__(leg)
+        orig = self.RR.Note.save
+        def save(note, dry_run=False):
+            text = open(note.path).read()
+            if "Edited by hand meanwhile." not in text:
+                open(note.path, "w").write(text.replace("## Queue", "Edited by hand meanwhile.\\n\\n## Queue", 1))
+            return orig(note, dry_run)
+        self.RR.Note.save = save
+m.Mods = Mods
+sys.exit(m.main(sys.argv[2:]))`, DISPATCH, 'rank-stamp', '--rank', rank, '--plan', plan, '--at', '2026-12-01T09:00:00+00:00'],
+  { encoding: 'utf8', env, cwd: S })
+  assert.equal(r.status, 0, r.stderr)
+  for (const p of [l1, l2]) {
+    const text = fs.readFileSync(p, 'utf8')
+    assert.ok(text.includes('Edited by hand meanwhile.'), `${p}: the other writer's edit is kept`)
+    assert.ok(/^estate_rank_at: "2026-12-01T09:00:00\+00:00"$/m.test(text), `${p}: and the stamp lands`)
+  }
 })

@@ -15,7 +15,8 @@ and the completion verify's _completion_config, _completion_state, _completion_s
 COMPLETION_DECIDED, COMPLETION_RED_PREFIX and CompletionValueError), as serial-chains.py and unfinished-rollout.py
 do, and serial-chains.py for norm_origin and the surface grammar. begin and status run unfinished-rollout.py's
 read-only `check --shape serial --resume` (the surface re-check, ADR 0060), and unfinished-rollout.py loads this file
-in turn for hold_of, order_key and first_by (no recursion: none of them spawns).
+in turn for hold_of, order_key and first_by (no recursion: none of them spawns). estate-dispatch.py's rank-stamp loads it
+for order_key and parse_log.
 
 Common flags: --rollout <path, or a slug under --tasks-dir; once that note is gone, its `Archive/Rollouts/` copy
 (read as archived by that path too), which every writing verb but file-followup refuses (exit 1)> · --tasks-dir
@@ -55,7 +56,7 @@ command when it has no `cd`; read from $THREAD_LAUNCH_ALIASES, else
 no `chain_copies:` key works every checkout in place, exactly as before; a malformed key is exit 1 (`chain_copies: <why>:
 fix the note`) for begin, claim and copies.
 
-Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-followup, close, handed, clear-halt,
+Verbs (writing verbs: begin, claim, wait, smoke, file-fix, done, set-aside, file-followup, close, handed, clear-halt,
 restarted, copies, land):
   begin [--cwd <dir>] [--take-over | --resume <N>]
       Refuses (exit 1): a note not found, a non-serial note, an incomplete note (`incomplete: true`, or
@@ -76,8 +77,10 @@ restarted, copies, land):
       `surface re-check failed: <its line>` (fail closed). An empty write set skips it. The launch check: the cwd's
       realpath, case-folded, must be the
       folder of the first row the Leg must work (an inherited claim, else the first fix task, else the first
-      claimable row), and a `cx-*` alias needs codex (any other, claude); a mismatch is exit 4 with the row's launch
-      line and the Leg prompt, nothing written to the Leg log. A resume skips the check. In a chain with
+      claimable row), read from next's contention-aware plan (*The rank*: a `wait` uses its row, so a first row
+      another chain holds, in another launch, is skipped for the row the Leg claims), and a `cx-*` alias needs codex
+      (any other, claude); a mismatch is exit 4 with the row's launch line and the Leg prompt, nothing written to the
+      Leg log. A resume skips the check. In a chain with
       `chain_copies:`, after the re-check and before the launch check, begin runs `copies` (below) under its lock, so a
       deleted copy is remade on its branch and a newly needed checkout gets its pair; the launch check then compares the
       cwd with the row's folder inside its copy, exit 4 naming that folder and the copy's launch line; a row-less Leg
@@ -104,11 +107,19 @@ restarted, copies, land):
       in_progress with no owner: a hand-back's or a sign-off's re-entry), else `complete` (every counted row done),
       else `stuck`. A claimable row in another launch than the Leg's is a Leg boundary: `handoff`. A row whose
       dependency (depends-on/blocked-by) is not done is held `depends on [[d]] (<why>)`, and one whose done
-      dependency has a not-done fix is held `depends on [[d]] (awaiting fix [[f]])`. --waiting adds the turn's
+      dependency has a not-done fix is held `depends on [[d]] (awaiting fix [[f]])`. In a chain with `chain_copies:`
+      the rank reads too (*The rank*, below): a row another chain in Chain copies holds or reserves on a code file is
+      set aside (a die, held `rank: …`) or waited on (the pick, marked); after the cap and the Leg boundary, a marked
+      pick is `wait` of kind wait, (H) `wait` of kind land; with no pick and a die-held row, `wait` of kind retry
+      (`stalled: true` on a holder with no open Leg), ahead of `stuck`. `wait` is {task (the row it claims once the wait
+      clears: the pick for kinds wait and land, the held row for retry), kind, on, token, why, landFirst, stalled,
+      lands (kind land: its own rows waiting to land)}; stalled is also true past RANK_WAIT_MAX_MINUTES (180) since the
+      task's earliest standing line. --waiting adds the turn's
       `status_line`, `state=waiting reason="<reason>"` (a review in flight, a room stop, a completion verify in
       flight: legs.md § Complete and § Report).
   claim --task <t> [--inherit] [--gate <gate>]...
-      Re-runs next under the lock: <t> must be what it proposes (with --inherit, an inherited `finish`). Stamps
+      Re-runs next under the lock and then the rank lock (*The rank*), its contention read again: <t> must be what it
+      proposes (with --inherit, an inherited `finish`), so a holder planted since next makes the claim refuse. Stamps
       `status: in_progress`, `owner: leg-N`, `leg: N`, `started:` (the first wins), consumes `handed_back:` and
       `gates_signed:`, and on a fresh claim `leg_base: ["<toplevel>@<sha40>", …]`: one entry per checkout the row
       works (stamp_bases: the checkout of each `repo:` surface of the row, `repo:<toplevel>//<path>` or bare, that is
@@ -125,6 +136,16 @@ restarted, copies, land):
       Each --gate is compared with the note's `## Approved gates` (reconcile-rollout.py's _norm_gate): the
       unapproved ones are printed for `set-aside --kind gate`. An exact `None` (execute § 3.7's grammar, bullet,
       case and one trailing `.` aside, as the engine's parseGatedInputs reads it) is no gate, never unapproved.
+  wait --task <t> [--for <s>=540]
+      The Leg's rank wait on row t (ADR 0067 d9; legs.md § The task loop's `wait`). Exit 1 for a t not in the Queue, or
+      no Leg of this session. When next is no `wait` on t, `cleared: true` and nothing logged. Else, unless the hold is
+      stalled at this first check (nothing logged), under the rollout's lock and then the rank lock, kind wait or
+      retry logs `Leg <N> rank wait: [[t]] on [[X]] (<token>; ranks above it)` or `Leg <N> rank retry: [[t]] on [[X]]
+      (<token>; [[X]] ranks above)` once per (Leg, task, kind): only with no standing line of that kind for t (kind
+      land logs nothing). Then it polls read-only every RANK_POLL_SECONDS (15), recomputing the contention and the plan,
+      and stops when it clears, when the kind flips (`flipped`, also at the first check against t's latest standing
+      line), when the hold is stalled, or when --for runs out; --for 0 is one check, --dry-run logs nothing. Prints
+      {verb, task, kind, cleared, flipped, stalled, why, on, token, landFirst, waitedMinutes, lifts, logged, next}.
   change --task <t> [--top <toplevel>]       (read-only, no lock)
       Per `leg_base` checkout: the commits in `<sha>..HEAD` whose message has a `Task: [[<t>]]` line, their paths
       minus `docs/reviews/`, the `:(literal)` pathspecs, and a WARN per commit on the range's first-parent line with no
@@ -272,7 +293,8 @@ restarted, copies, land):
            done before them: change's paths as `repo:<P>//<path>`), bookkeeping aside, against every other live
            root-level serial note with a `chain_copies:` pair on P, read as a Chain, whose rows are unlanded_done and
            whose `leg_head` on its copy git confirms is off d, their `leg_claims:`; an overlap with a chain that sorts
-           first (order_key) stands, `[[X]] holds <token> unlanded and began first` (a tie in first_by's words), with
+           first (order_key, rank-led) stands, `[[X]] holds <token> unlanded and <first_by>` (`began first`, `ranks
+           above (estate rank <n>)`, `was scheduled first`, or a tie in slug order's words), with
            4's merge kept on chain/<rollout> as --red keeps it, so the copy holds the work other chains landed on d and
            the next land asks for its re-verify; a later chain never blocks, and an unreadable note is a WARN (git's
            merge and the re-run Verify lines are the backstop);
@@ -335,8 +357,10 @@ restarted, copies, land):
       tombstones, rr._fold_unit), dependants (below) and setAside {status, summary, gates, fingerprint
       (rr._block_fingerprint)} for a set-aside row), `smoke` (the smoke list of the Leg that acts next: the open
       one, else Leg last + 1), `fixes` (the not-done fix rows), `next` (the open Leg's next act, else a fresh
-      Leg's), `stall`, `hold` (hold_of, below) and `needsYou` (needs_you's items, plus a halt, a manual hand-over, a
-      pending or manual restart and a stall). In a terminal chain state (complete, dropped, superseded, incomplete: begin refuses
+      Leg's, each read with the rank's contention), `stall`, `hold` (hold_of, below), `rank` {stamp (the estate rank,
+      or null), warn (a malformed stamp), key (order_key), pos, lifts, standing [{task, kind, at}], contention {held,
+      land, warns}} (*The rank*; pos and lifts null in place) and `needsYou` (needs_you's items, plus a halt, a manual
+      hand-over, a pending or manual restart and a stall). A row's `held` carries the rank's reason too. In a terminal chain state (complete, dropped, superseded, incomplete: begin refuses
       each, so no Leg acts next) `restart` and `next` are null and `smoke` is empty. Stamps print raw, as the log
       holds them.
   restarted --leg <N> (--pending | --started <id> | --manual <why>) [--replace]
@@ -373,9 +397,13 @@ by position:
   - <stamp> Leg <N> land: [[t1]], [[t2]] on <d> in <P> (<sha12>) | close-outs on <d> in <P> (<sha12>)
   - <stamp> Leg <N> land stood: <P>: <why>
   - <stamp> Leg <N> land verified: <P> at <sha40>
+  - <stamp> Leg <N> rank wait: [[t]] on [[X]] (<token>; ranks above it)
+  - <stamp> Leg <N> rank retry: [[t]] on [[X]] (<token>; [[X]] ranks above)
   - <stamp> halt cleared: <reason>
   - <stamp> restart: Leg <N> pending (session <sid>) | started <id> | manual (<why>)
-A `restart:` line carries no Leg number of its own (it names the Leg to come), so no reader counts it as a Leg.
+A `restart:` line carries no Leg number of its own (it names the Leg to come), so no reader counts it as a Leg. A rank
+line stands from its write until a `claimed`, `took` or `set aside` line for its task in the same Leg, or that Leg's
+`closed:` line (standing_lines); only a standing line reserves its task's cell or ages its chain.
 The Completion log's last line is `- Reflection: <close --reflection's text>`.
 
 The chain, as status reads it (repair and serial-score.py read these; this is their one copy):
@@ -389,8 +417,11 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
   closed or absent (legOutcome `absent`), or null. It is null whenever a Leg is open: a successor between its
   begin and its `claim --inherit`, and a take-over, hold the claim too.
 - The restart: what a fresh Leg N (N = the last Leg + 1) would do, from next's plan for it (no cap, no launch
-  boundary, an open Leg K read as dead), when that plan is finish, claim or complete and the chain state is not
-  terminal (complete, dropped, superseded or incomplete); else null. A paused chain keeps it: what runs once the
+  boundary, an open Leg K read as dead), read with the rank's contention (freshRank, the plan begin's launch check
+  reads too: *The rank*), when that plan is finish, claim, wait (built from its row, as a claim) or complete and the
+  chain state is not terminal (complete, dropped, superseded or incomplete); else null. The chain state, the stall
+  and the hold read the contention-free plan instead, so a chain whose rows are all rank-held reads `ready`, never
+  `stuck`, and its hold stays whole. A paused chain keeps it: what runs once the
   stamp is gone. {leg, title
   (`Leg <N>: <slug>`, at most 60 characters), prompt (the Leg prompt, ` --take-over` on its first line when a Leg
   is open), takeOver, tldr, cwd, harness, launch, task, anyLaunch, blockedBy}. For finish or claim: cwd is the
@@ -403,12 +434,14 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
   (the last Leg handed off to a started Session that never began); `chain_copies: <why>: fix the note` (a malformed
   key); `chain copy missing: <C> (leg.py copies --rollout <note> remakes it)` (a copy chain whose cwd is gone); then,
   only when none of those holds, begin's
-  surface re-check run read-only for Leg N: `surface held by [[<B>]] (<token>)` on a hit, `surface re-check failed:
+  surface re-check run read-only for Leg N: `surface held by [[<B>]] (<token>)` on a hit (its causes include (O)'s
+  holder half, ADR 0067 d9: an earlier copied chain with no open Leg holding a code file), `surface re-check failed:
   <its line>` when the check fails (ADR 0060). A manual hand-over is null: it waits on Lachy.
 - The standing restart (`restarted`): the latest `restart:` line with no `began` line after it, as {leg, how
   (pending, started or manual), started, manual, session (a pending line's), at}, else null.
 - The hold (ADR 0060 d1, d2; hold_of, the one copy unfinished-rollout.py loads): what the unfinished chain holds
-  against other rollouts, {scope, why, held, released, unlanded, undone, pending, rows, warn, began, open}. In every
+  against other rollouts, {scope, why, held, released, unlanded, undone, pending, rows, warn, began, open, rank,
+  captured, holding}. In every
   chain state but `stuck`, scope `whole`: `held` is the note's whole `surfaces:` (`any` when it reads as any),
   `released` empty.
   `stuck` (no Leg open, no stall, hand-over, restart or halt standing, not completable, nothing claimable: every
@@ -425,7 +458,11 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
   `released` read `undone`. `rows` is those rows, {slug, state, surfaces, folder} (folder the row's launch folder, so
   its checkout). `began` is the Leg log's first `began:` stamp, raw (null before Leg 1),
   and `open` the open Leg as {n, folder}, else null: the order and the interim mutex of unfinished-rollout.py's
-  check_resume read them (ADR 0067 d4).
+  check_resume read them (ADR 0067 d4). `rank` is the estate rank (serial-chains.py's read_estate_rank, {n, at, ts},
+  else null; a malformed stamp also sets `warn`) and `captured` the note's `captured:`, the rank-led order's other
+  inputs; `holding` is holder_tokens over the counted rows: each row in progress (its cell, else the note's claim,
+  else `any`) and each unlanded_done row (its cell plus its `leg_claims:`, bookkeeping aside), canonical, which
+  unfinished-rollout.py's (O) holder half reads (ADR 0067 d9).
 - A row's dependants: the counted, not-done rows D with an entry in D's depends-on or blocked-by that resolves
   (rr._fold_unit, through `merged_into:` tombstones) to the row or to a row already found: transitive,
   cycle-guarded, in Queue order, each {slug, state, owner}. repair § 7 (b) defers a set-aside with them (repair § 5's
@@ -447,7 +484,43 @@ no lock: os.replace means they never read a torn note, and claim re-validates wh
 each primary checkout's repo lock, an fcntl.flock on `<git rev-parse --path-format=absolute --git-common-dir>/thread/
 chain-land.lock` (its directory made when missing), after the rollout's lock, one at a time, each released before the
 next and never nested, so two chains in one repo land in turn and no lock cycle forms; a wait past the same timeout
-stands that copy (exit 0), never exit 5.
+stands that copy (exit 0), never exit 5. claim, and wait's log, also take the machine-wide rank lock (RankLock,
+`<lock dir>/rank-claim.lock`), always inside the rollout's lock and never nested with a repo lock, around the
+contention read, the plan, the save and the log, so two chains never claim one code file at once; a wait past the same
+timeout is exit 5, nothing written.
+
+The rank (ADR 0067 d9; CONTEXT.md **Estate rank**, **Rank wait**): same-file waits go by rank, wait-die, at claim.
+order_key (rank-led: a chain that has begun before one that has not, then the estate rank orient-all stamps, a later
+pass first and the lower n first, then the first to begin, or never begun the earlier `captured:`, then slug) is the one
+static order begin, land and claim read. rank_contention reads it for a chain with `chain_copies:` against every
+unfinished peer with a well-formed `chain_copies:` (other_serial, peer_chain; git-free; an unreadable peer is a WARN
+that holds nothing), counting only serial-chains.py's rank_tokens (`repo:` and `any`; vault and `ext:` never wait, d6,
+so between copied chains they keep their begin waits, and so does `any`). A holder row of peer X is each row in
+progress and each unlanded_done row (holder_tokens). It is running when X has an open Leg and, for an unlanded row,
+no third chain that sorts before X has unlanded done rows whose `leg_claims:` meet it (claim_stand's test, one hop,
+from the notes). A standing line of X's open Leg reserves its task's cell. pos is each chain's place in the order
+among {this chain} and every copied peer; lifts = floor(minutes since its open Leg's earliest standing line /
+RANK_AGE_MINUTES = 60) (a dead Leg's lines count nothing, so a fresh Leg starts at 0); eff = (pos − lifts, −lifts, pos),
+lower first, a strict total order. A running holder row behind this chain (unlanded, X sorts after this chain, and this
+chain's own unlanded rows meet it: its land will stand behind this chain) never holds a fix row and carries
+`landFirst`, those own rows. For each candidate row r of this chain (its counted cell tokens, else the claim, else
+`any`): a holder row not running is a die when X sorts first (dead when X has no open Leg) and nothing when X sorts
+after; a running one is a wait when eff(this) < eff(X), else a die; a reservation is a die when eff(X) < eff(this); a
+die wins over a wait. (H): this chain's first own unlanded row gets a land wait on an earlier peer C whose unlanded
+rows meet it, whose open Leg owns no row in progress, and which either has a standing `rank wait:` line on this chain
+or a `done` line for one of those rows under RANK_LAND_MINUTES (15) old with no `land stood:` line after it.
+The progress argument: eff is one total order over running chains, so two chains never both wait on each other; a
+chain at `wait` owns no row in progress (finish comes first), so every wait ends at a land, and a running holder
+finishes first, with no preemption; a holder that is not running is never waited on: one that sorts first sets the
+row aside, a chain left with only such rows closes stopped (a stalled retry) and its next begin waits on that holder
+by (O)'s holder half, so it is never restarted into the same wait, and one that sorts after holds nothing, its land
+standing behind this chain (d4); lands follow order_key: land's claim check never stands on a later chain, and a
+`land` wait points only to an earlier chain that is between tasks; every chain at `wait` lands before each round
+(legs.md), so the first pending land in the order lands, or its chain closes stopped (landFirst, or the 180-minute
+bound, RANK_WAIT_MAX_MINUTES); reservations only set rows aside, and lapse at the claim or the close; begin-time waits
+stay unfinished-rollout.py's, and serial_waits' argument proves them acyclic: (O), the holder half included, and an
+earlier-ward (Y) point down order_key, a later-ward (Y) lands only on a free chain, (M) only on an open Leg. ADR
+0060's yield is decided there, at begin, ahead of rank, and rank orders only the claims after begin.
 """
 import argparse
 import fcntl
@@ -462,7 +535,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -662,6 +735,7 @@ class Lock:
         self.path = os.path.join(os.path.expanduser(d), f"{ctx.slug}.lock")
         self.fd = None
         self.skip = ctx.dry
+        self.what = "rollout note locked: another Leg verb"
 
     def __enter__(self):
         if self.skip:
@@ -678,7 +752,7 @@ class Lock:
                 if time.monotonic() >= deadline:
                     os.close(self.fd)
                     self.fd = None
-                    raise Refuse(5, f"rollout note locked: another Leg verb held {self.path} past {timeout:g}s; "
+                    raise Refuse(5, f"{self.what} held {self.path} past {timeout:g}s; "
                                     "nothing written (retry once, then end the turn halted)")
                 time.sleep(0.05)
 
@@ -782,6 +856,7 @@ class Chain:
         self.rows = self._rows()
         self.log = self._log()
         self.legs = self._legs()
+        self.contend = {}   # rank_contention's read (ADR 0067 d9); set only by the ctx-level verbs, read by plan_next
 
     # -- the Queue --
     def _rows(self):
@@ -901,7 +976,7 @@ class Chain:
 
 
 KINDS = ("began:", "resumed:", "smoke:", "filed ", "claimed ", "took ", "done ", "set aside ", "reverted ", "closed:",
-         "hand-over:", "follow-on ", "land:", "land stood:", "land verified:")
+         "hand-over:", "follow-on ", "land:", "land stood:", "land verified:", "rank wait:", "rank retry:")
 
 
 def parse_log(note):
@@ -1005,7 +1080,11 @@ def holds_of(chain, r):
 
 
 def plan_next(chain, leg_n, alias, folder, cap=True, launch=True, dead=()):
-    """The Leg's next act (the module docstring's `next`). `dead`: Legs to read as closed (a take-over's)."""
+    """The Leg's next act (the module docstring's `next`). `dead`: Legs to read as closed (a take-over's). Pure: the rank
+    (ADR 0067 d9) is chain.contend, rank_contention's read, which only the ctx-level verbs set ({} reads none)."""
+    contend = getattr(chain, "contend", None) or {}
+    rank_held, standing = contend.get("held") or {}, contend.get("standing") or {}
+    dies = {"live": None, "dead": None}
     held, aside, inherited = [], [], []
     for r in chain.rows:
         if r.state == "running" and r.note is not None:
@@ -1043,9 +1122,25 @@ def plan_next(chain, leg_n, alias, folder, cap=True, launch=True, dead=()):
             if why:
                 held.append({"slug": r.slug, "why": "; ".join(why)})
                 continue
+            h = rank_held.get(r.slug.lower())
+            if h is not None and h["kind"] == "die":
+                # A lower-ranked claim sets the row aside to retry later, keeping its rank (ADR 0067 d9).
+                held.append({"slug": r.slug, "why": h["why"]})
+                k = "dead" if h["dead"] else "live"
+                dies[k] = dies[k] or (r, h)
+                continue
+            if h is not None:
+                marked.append(h)   # a higher-ranked claim waits on its row, then goes first
             return r
         return None
 
+    def waiting(kind, r, h, lands=None):
+        age = (standing.get(r.slug.lower()) or {}).get("age", 0)
+        return {"action": "wait", "task": r.slug, "row": r, "kind": kind, "on": h["on"], "token": h["token"],
+                "why": h["why"], "landFirst": list(h.get("landFirst") or []),
+                "stalled": bool(h.get("dead")) or age > RANK_WAIT_MAX_MINUTES, "lands": list(lands or []), **base}
+
+    marked = []
     fix_rows = [r for r, _v in chain.fixes()]
     pick = choose(fix_rows)
     is_fix = pick is not None
@@ -1058,7 +1153,19 @@ def plan_next(chain, leg_n, alias, folder, cap=True, launch=True, dead=()):
         if launch and alias is not None and not pick.same_launch(alias, folder):
             return {"action": "handoff", "reason": "Leg boundary: the next row opens in another launch", "row": pick,
                     **base}
+        land = contend.get("land")
+        if land:
+            # (H): an earlier chain is landing work this chain's own unlanded row meets: land after it, then claim.
+            why = (f"rank: [[{land['on']}]] ranks above and is landing {', '.join(f'[[{s}]]' for s in land['rows'])} "
+                   f"on {land['token']}: this chain lands [[{land['task']}]] after it, then claims")
+            return waiting("land", pick, {"on": land["on"], "token": land["token"], "why": why}, land["lands"])
+        if marked:
+            return dict(waiting("wait", pick, marked[-1]), fix=is_fix)
         return {"action": "claim", "task": pick.slug, "fix": is_fix, "row": pick, **base}
+    if dies["live"] is not None:
+        return waiting("retry", *dies["live"])
+    if dies["dead"] is not None:
+        return waiting("retry", *dies["dead"])
     counted = chain.counted()
     if counted and all(r.state == "done" for r in counted):
         return {"action": "complete", **base}
@@ -1593,9 +1700,13 @@ def _begin_locked(ctx, a, chain, cwd):
         made, pairs, _stamped, warns = ensure_copies(ctx, chain)
         copies = [{"checkout": c["checkout"], "copy": c["copy"], "branch": c["branch"], "made": c["made"],
                    "fastForwarded": False} for c in made]
-    # The launch check: the first row this Leg must work, in its Chain copy when it has one.
-    plan = plan_next(chain, n, None, None, cap=False, launch=False, dead=() if took_over is None else (took_over,))
-    row = plan.get("row") if plan["action"] in ("finish", "claim") else None
+    # The launch check: the first row this Leg must work, in its Chain copy when it has one. It reads the rank's
+    # contention-aware plan (ADR 0067 d9), as status's restart does: a `wait` uses its row, so a first row another chain
+    # holds, in another launch, is skipped for the row this Leg claims.
+    dead = () if took_over is None else (took_over,)
+    chain.contend = rank_contention(ctx, chain, n, dead=dead)
+    plan = plan_next(chain, n, None, None, cap=False, launch=False, dead=dead)
+    row = plan.get("row") if plan["action"] in ("finish", "claim", "wait") else None
     if row is not None:
         need = launch_harness(row.alias)
         where = (sc.copy_folder(row.folder, pairs) if pairs and row.folder else None) or row.folder
@@ -1630,6 +1741,7 @@ def begin_out(ctx, chain, n, resumed, took_over=None, alias=None, folder=None, c
     g = chain.legs.get(n) or {}
     alias = g.get("alias") or alias
     folder = g.get("folder") or folder
+    chain.contend = rank_contention(ctx, chain, n)
     plan = plan_next(chain, n, alias, folder)
     inherited = [r.slug for r in chain.rows if r.state == "running" and r.note is not None
                  and owner_leg(r.note) not in (None, n)
@@ -1672,12 +1784,87 @@ def cmd_next(ctx, a):
         raise Usage("--waiting needs a reason (`review in flight: [[<t>]]`, `room stop: <text>`)")
     chain = Chain(ctx)
     leg = my_leg(ctx, chain)
+    chain.contend = rank_contention(ctx, chain, leg["n"])
     plan = plan_next(chain, leg["n"], leg["alias"], leg["folder"])
     prog = chain.progress(leg["n"])
     out = {"verb": "next", "rollout": ctx.slug, "leg": leg["n"], **next_json(plan), "progress": prog}
     if a.waiting is not None:
         out["status_line"] = status_line(ctx.slug, prog, "waiting", a.waiting)
     return out
+
+
+def cmd_wait(ctx, a):
+    """`wait --task <t> [--for <s>]` (ADR 0067 d9; legs.md § The task loop's `wait`): the Leg's rank wait on row t. Exit
+    1 for a t not in the Queue, or no Leg of this session. When next is no `wait` on t, `cleared: true`, nothing
+    logged. Else, unless the hold is stalled at this first check (nothing logged), under the rollout's lock and then the
+    rank lock, kind wait or retry logs its `rank wait:` or `rank retry:` line once per (Leg, task, kind): only with no
+    standing line of that kind for t (kind land logs nothing). Then it polls read-only every RANK_POLL_SECONDS,
+    recomputing the contention and the plan, until it clears, the kind flips (also at the first check, against t's
+    latest standing line), the hold is stalled, or --for runs out (--for 0: one check)."""
+    if a.for_ < 0:
+        raise Usage("--for takes seconds, 0 or more")
+    chain = Chain(ctx)
+    leg = my_leg(ctx, chain)
+    r = chain.row(a.task)
+    if r is None or r.state == "deferred":
+        raise Refuse(1, f"[[{a.task}]] is not a task of this chain's Queue")
+    base_now, t0 = ctx.now, time.monotonic()
+
+    def check():
+        ch = Chain(ctx)
+        lg = my_leg(ctx, ch)
+        ch.contend = rank_contention(ctx, ch, lg["n"])
+        return ch, lg, plan_next(ch, lg["n"], lg["alias"], lg["folder"])
+
+    def on_t(p):
+        return p["action"] == "wait" and p["task"].lower() == r.slug.lower()
+
+    ch, lg, plan = check()
+    out = {"verb": "wait", "rollout": ctx.slug, "leg": lg["n"], "task": r.slug, "kind": None, "cleared": False,
+           "flipped": False, "stalled": False, "why": None, "on": None, "token": None, "landFirst": [],
+           "waitedMinutes": 0, "lifts": ch.contend.get("lifts", 0), "logged": False, "dryRun": ctx.dry}
+
+    def done(ch, plan, **kw):
+        st = (ch.contend.get("standing") or {}).get(r.slug.lower()) or {}
+        out.update(kw, lifts=ch.contend.get("lifts", 0), waitedMinutes=int(st.get("age", 0)), next=next_json(plan))
+        if on_t(plan):
+            out.update(kind=plan["kind"], stalled=plan["stalled"], why=plan["why"], on=plan["on"], token=plan["token"],
+                       landFirst=plan["landFirst"])
+        return out
+
+    if not on_t(plan):
+        return done(ch, plan, cleared=True)
+    kind = plan["kind"]
+    if plan["stalled"]:
+        return done(ch, plan)
+    mine = [x for x in standing_lines(ch) if x["task"].lower() == r.slug.lower()]
+    flipped = bool(mine) and mine[-1]["kind"] != kind and kind in ("wait", "retry")
+    if kind in ("wait", "retry") and not any(x["kind"] == kind for x in mine) and not ctx.dry:
+        with Lock(ctx), RankLock(ctx):
+            ch, lg, plan = check()
+            if on_t(plan) and plan["kind"] == kind and not plan["stalled"] and \
+                    not any(x["kind"] == kind and x["task"].lower() == r.slug.lower() for x in standing_lines(ch)):
+                text = (f"rank wait: [[{r.slug}]] on [[{plan['on']}]] ({plan['token']}; ranks above it)" if kind == "wait"
+                        else f"rank retry: [[{r.slug}]] on [[{plan['on']}]] ({plan['token']}; [[{plan['on']}]] ranks above)")
+                log_line(ch.note, leg_line(ctx, lg["n"], text))
+                save(ctx, ch.note)
+                out["logged"] = True
+                ch, lg, plan = check()
+    if not on_t(plan):
+        return done(ch, plan, cleared=True)
+    if flipped or plan["kind"] != kind or plan["stalled"]:
+        return done(ch, plan, flipped=flipped or plan["kind"] != kind)
+    while True:
+        left = a.for_ - (time.monotonic() - t0)
+        if left <= 0:
+            return done(ch, plan)
+        time.sleep(min(RANK_POLL_SECONDS, left))
+        ctx.now = base_now + timedelta(seconds=time.monotonic() - t0)
+        ch, lg, plan = check()
+        if not on_t(plan):
+            return done(ch, plan, cleared=True)
+        if plan["kind"] != kind or plan["stalled"]:
+            return done(ch, plan, flipped=plan["kind"] != kind)
 
 
 def stamp_bases(ctx, chain, row):
@@ -1775,10 +1962,13 @@ def row_tops(ctx, row):
 
 
 def cmd_claim(ctx, a):
-    with Lock(ctx):
+    # The rank lock inside the rollout's (ADR 0067 d9): the contention read, the plan, the save and the log run under it,
+    # so two chains never both claim one file.
+    with Lock(ctx), RankLock(ctx):
         chain = Chain(ctx)
         leg = my_leg(ctx, chain)
         n = leg["n"]
+        chain.contend = rank_contention(ctx, chain, n)
         plan = plan_next(chain, n, leg["alias"], leg["folder"])
         want = "finish" if a.inherit else "claim"
         if plan["action"] != want or plan.get("task", "").lower() != a.task.lower() or \
@@ -2592,11 +2782,11 @@ def claim_stand(ctx, chain, P, d, ours, notes, warns):
     """Step 5, ADR 0067 d4's actual claims: ours (this copy's unlanded rows' claims) against every other live chain with
     a Chain copy of P whose done rows are unlanded (unlanded_done, and git confirms: its `leg_head` on its copy is not on
     refs/heads/<d>), their `leg_claims:`. The why of a stand for the first overlap with a chain that sorts before this
-    one (order_key), else None: a later chain never blocks, and an unreadable note is a WARN (git's merge and the re-run
-    Verify lines stay the backstop)."""
+    one (order_key, rank-led: chain_key reads both sides' estate rank and `captured:`), else None: a later chain never
+    blocks, and an unreadable note is a WARN (git's merge and the re-run Verify lines stay the backstop)."""
     if not ours:
         return None
-    me, best = order_key(ctx.slug, first_began(chain)), None
+    me, best = chain_key(chain), None
     for path, note in notes:
         try:
             pairs = sc.read_chain_copies(note)
@@ -2612,7 +2802,7 @@ def claim_stand(ctx, chain, P, d, ours, notes, warns):
             warns.append(f"WARN: [[{path.stem}]] could not be read ({reason_text(why, 120)}): its unlanded files are not "
                          f"checked against this land in {P}; git's merge is the backstop")
             continue
-        key = order_key(path.stem, first_began(X))
+        key = chain_key(X)
         if not key < me:
             continue
         theirs = []
@@ -3274,6 +3464,7 @@ def cmd_close(ctx, a):
         commit_only = ([cwd_top] if cwd_top else []) + [t for t in chain.chain_tops() if t != cwd_top]
         out = {"verb": "close", "rollout": ctx.slug, "leg": n, "outcome": outcome, "commit_only": commit_only}
         if outcome == "handoff":
+            chain.contend = rank_contention(ctx, chain, n + 1, dead=(n,))   # a fresh Leg's view (ADR 0067 d9)
             plan = plan_next(chain, n + 1, None, None, cap=False, launch=False)
             row = plan.get("row")
             if row is None:
@@ -3590,7 +3781,8 @@ def pending_gates(note):
     return out
 
 
-def row_held(chain, r):
+def row_held(chain, r, contend=None):
+    """Why next holds row r, or None: its dependencies (holds_of), else the rank's reason (ADR 0067 d9), from contend."""
     if r.state == "missing":
         return "note not found"
     if r.note is None:
@@ -3598,15 +3790,20 @@ def row_held(chain, r):
     if r.state == "running" and owner_leg(r.note) is None and rr._valued(r.note.get("owner")):
         return f"in progress ({rr._scalar(r.note.get('owner'))})"
     if r.state == "queued" or (r.state == "running" and not rr._valued(r.note.get("owner"))):
-        return "; ".join(holds_of(chain, r)) or None
+        why = holds_of(chain, r)
+        h = ((contend or {}).get("held") or {}).get(r.slug.lower())
+        if not why and h is not None:
+            why = [h["why"]]
+        return "; ".join(why) or None
     return None
 
 
-def row_json(chain, r):
+def row_json(chain, r, contend=None):
     note = r.note
     out = {"n": r.i + 1, "slug": r.slug, "state": r.state, "status": (rr._status(note) or None) if note else None,
            "owner": (rr._scalar(note.get("owner")) or None) if note else None, "leg": None,
-           "launch": r.launch if r.alias else None, "fix": None, "fixes": None, "held": row_held(chain, r), "deps": [],
+           "launch": r.launch if r.alias else None, "fix": None, "fixes": None, "held": row_held(chain, r, contend),
+           "deps": [],
            "dependants": [], "setAside": None}
     if note is None:
         return out
@@ -3701,8 +3898,9 @@ def stall_of(chain, open_leg):
 
 
 def restart_of(ctx, chain, plan, n, open_leg, halt, restarted):
-    """The restart (the module docstring's) from a fresh Leg N's plan, or None."""
-    if plan["action"] not in ("finish", "claim", "complete"):
+    """The restart (the module docstring's) from a fresh Leg N's contention-aware plan (status's freshRank), or None. A
+    `wait` (ADR 0067 d9) is built from its row, as a claim is."""
+    if plan["action"] not in ("finish", "claim", "wait", "complete"):
         return None
     take = open_leg is not None
     first, _, rest = leg_prompt(ctx, n).partition("\n")
@@ -3823,31 +4021,104 @@ def unlanded_done(chain, r):
             and not rr._valued(r.note.get("leg_landed")))
 
 
+def leg_claim_tokens(r):
+    """A done row's `leg_claims:` as canonical tokens, bookkeeping aside (ADR 0067 d5), a malformed one skipped."""
+    out, raw = [], (sc.read_list(r.note, "leg_claims") if r.note is not None else None) or []
+    for x in raw:
+        try:
+            tok = sc.parse_token(x)
+        except ValueError:
+            continue
+        if not sc.bookkeeping(tok) and tok not in out:
+            out.append(tok)
+    return out
+
+
+def holder_tokens(chain, r):
+    """What row r holds against another chain's claim (ADR 0067 d9): a row in progress its Surfaces cell (else the
+    note's claim, else `any`); a done row not yet landed (unlanded_done) that cell plus its `leg_claims:`, bookkeeping
+    aside; any other row nothing. Pure: one helper for hold_of's `holding` (begin's (O) holder half reads it) and
+    rank_contention's holder rows, so the two count the same tokens."""
+    if r.state == "running":
+        return list(_cell_tokens(r) or _note_claim(chain) or [("any", "")])
+    if unlanded_done(chain, r):
+        toks = list(_cell_tokens(r) or _note_claim(chain) or [("any", "")])
+        return toks + [t for t in leg_claim_tokens(r) if t not in toks]
+    return []
+
+
 def first_began(chain):
     """The Leg log's first `began:` stamp, raw, or None before Leg 1 (ADR 0067 d4's order reads it)."""
     return next((e["stamp"] for e in chain.log if e["kind"] == "began"), None)
 
 
-def order_key(slug, began):
-    """ADR 0067 d4's order: a chain that began sorts by its first `began:` stamp, before every chain that never began;
-    slug order (case-folded) breaks ties. A stamp that will not parse reads as never begun, on either side alike. The
-    one copy: unfinished-rollout.py's serial_waits and land's actual-claim check read it."""
+UNDATED = 10 ** 9   # a never-begun chain's missing or malformed `captured:` sorts after every dated one
+
+
+def _captured_ordinal(captured):
+    """A `captured:` value's date as an ordinal (its first 10 characters, YYYY-MM-DD), else UNDATED."""
+    s = rr._scalar(captured)[:10] if captured else ""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+        return UNDATED
+    try:
+        return datetime.fromisoformat(s).date().toordinal()
+    except ValueError:
+        return UNDATED
+
+
+def order_key(slug, began, rank=None, captured=None):
+    """ADR 0067 d4's order, rank-led (d9): (tier, unstamped, -rank ts, rank n, t2, case-folded slug). tier 0 is a chain
+    that began (its first `began:` stamp parses), 1 one that never began, so a running chain always sorts before an idle
+    never-begun one; inside a tier a stamped chain (rank: serial-chains.py's read_estate_rank, {n, at, ts}) sorts before
+    every unstamped one, a later pass before an earlier one, then the lower n. t2 is the began stamp in tier 0 (the first
+    to begin), and in tier 1 the `captured:` date (the earlier schedule; a missing or malformed one sorts last). Slug
+    order breaks what is left. Aging never enters it: begin and land keep one static total order. The one copy:
+    unfinished-rollout.py's serial_waits, land's actual-claim check, rank_contention and estate-dispatch.py's rank-stamp
+    read it."""
     ts = rr._parse_ts(began) if began else None
-    return (0, ts.timestamp(), slug.casefold()) if ts is not None else (1, 0.0, slug.casefold())
+    tier, t2 = (0, ts.timestamp()) if ts is not None else (1, _captured_ordinal(captured))
+    if rank:
+        return (tier, 0, -rank["ts"], rank["n"], t2, slug.casefold())
+    return (tier, 1, 0.0, 0, t2, slug.casefold())
 
 
 def first_by(key_h, key_r):
-    """Why H sorts before R in order_key's order: it began first, or slug order broke a tie of equal stamps (both began
-    at the same one, or neither has begun)."""
-    if key_h[:2] != key_r[:2]:
+    """Why H sorts before R in order_key's order, read at the first component that differs: the tier `began first`;
+    the stamp, the pass or n `ranks above (estate rank <n>)`; t2 `began first` (tier 0) or `was scheduled first`
+    (tier 1); else `comes first by slug (neither has begun | both began at the same stamp)`."""
+    i = next((k for k in range(len(key_h)) if key_h[k] != key_r[k]), len(key_h))
+    if i == 0:
         return "began first"
+    if i in (1, 2, 3):
+        return f"ranks above (estate rank {key_h[3]})"
+    if i == 4:
+        return "began first" if key_h[0] == 0 else "was scheduled first"
     return "comes first by slug (" + ("neither has begun" if key_h[0] == 1 else "both began at the same stamp") + ")"
+
+
+def chain_rank(chain):
+    """The chain's estate rank (serial-chains.py's read_estate_rank), or None: unstamped, or a malformed stamp."""
+    return sc.read_estate_rank(chain.note, rr._parse_ts)
+
+
+def rank_warn(chain):
+    """A WARN's text when the note carries an estate rank key that read_estate_rank cannot read, else None."""
+    raw = [rr._scalar(chain.note.get(k)) for k in sc.ESTATE_RANK_KEYS]
+    if any(raw) and chain_rank(chain) is None:
+        return (f"estate_rank: {raw[0] or '<none>'}, estate_rank_at: {raw[1] or '<none>'} is malformed: read as "
+                "unstamped (ADR 0067 d9)")
+    return None
+
+
+def chain_key(chain):
+    """order_key of a Chain: its slug, first `began:`, estate rank and `captured:`."""
+    return order_key(chain.ctx.slug, first_began(chain), chain_rank(chain), chain.note.get("captured"))
 
 
 def hold_of(chain, read):
     """What the unfinished chain holds (the module docstring's *The hold*): {scope, why, held, released, unlanded,
-    undone, pending, rows, warn, began, open}, tokens in canonical text. Pure: no git, no subprocess
-    (unfinished-rollout.py calls it in-process)."""
+    undone, pending, rows, warn, began, open, rank, captured, holding}, tokens in canonical text. Pure: no git, no
+    subprocess (unfinished-rollout.py calls it in-process)."""
     fmt = lambda toks: [sc.fmt_token(t) for t in toks]  # noqa: E731
     claim = _note_claim(chain)
     whole = claim if claim is not None else [("any", "")]
@@ -3875,11 +4146,16 @@ def hold_of(chain, read):
         unlanded += [t for t in toks if t not in unlanded]
     began = first_began(chain)
     ol = chain.open_leg()
+    holding = []
+    for r in counted:
+        holding += [t for t in holder_tokens(chain, r) if t not in holding]
+    rank = chain_rank(chain)
     out = {"scope": "whole", "why": f"chain {read['state']}: it holds its whole claim", "held": fmt(whole),
            "released": [], "unlanded": fmt(unlanded), "undone": fmt(undone), "pending": [r.slug for r in pend_rows],
            "rows": [{"slug": r.slug, "state": r.state, "surfaces": list(r.surfaces), "folder": r.folder}
-                    for r in counted if r in undone_rows or r in pend_rows], "warn": None,
-           "began": began, "open": {"n": ol["n"], "folder": ol["folder"]} if ol is not None else None}
+                    for r in counted if r in undone_rows or r in pend_rows], "warn": rank_warn(chain),
+           "began": began, "open": {"n": ol["n"], "folder": ol["folder"]} if ol is not None else None,
+           "rank": rank, "captured": rr._scalar(chain.note.get("captured")) or None, "holding": fmt(holding)}
     if read["state"] != "stuck" or claim is None:
         return out
     running = next((r for r in chain.rows if r.state == "running"), None)
@@ -3887,7 +4163,7 @@ def hold_of(chain, read):
         bad = f"[[{running.slug}]] reads in progress"
     if bad:
         out["why"] = f"chain stuck, but {bad}: it holds its whole claim"
-        out["warn"] = out["why"]
+        out["warn"] = "; ".join(w for w in (out["why"], out["warn"]) if w)
         return out
     cells = []
     for r in chain.rows:
@@ -3897,6 +4173,211 @@ def hold_of(chain, read):
     out.update(scope="stuck", held=fmt(held), released=fmt([t for t in claim if t not in held]),
                why=f"chain stuck ({k} set aside): it holds only its unlanded rows' surfaces (ADR 0060)")
     return out
+
+
+# ---- the rank: same-file waits at claim, wait-die (ADR 0067 d9) ----------------------------------------------------
+
+RANK_AGE_MINUTES = 60        # aging: a chain's earliest standing rank line lifts it one place per hour
+RANK_LAND_MINUTES = 15       # (H): an earlier chain's `done` line this young, with no stand since, is about to land
+RANK_WAIT_MAX_MINUTES = 180  # every wait's bound: past it the hold is stalled, and the Leg closes stopped
+RANK_POLL_SECONDS = 15       # `wait`'s read-only poll
+RANK_KINDS = {"rank wait": "wait", "rank retry": "retry"}
+
+
+def _minutes_since(now, stamp):
+    """Minutes from a stamp to now (0 for a stamp that will not parse, or one in the future)."""
+    ts = rr._parse_ts(stamp) if stamp else None
+    return max(0.0, (now - ts).total_seconds() / 60.0) if ts is not None else 0.0
+
+
+def standing_lines(chain, dead=()):
+    """The standing rank lines of chain's open Leg ([] with no open Leg, or when that Leg is in dead): a `rank wait:` or
+    `rank retry:` line stands from its write until a `claimed`, `took` or `set aside` line for its task in the same Leg,
+    or that Leg's `closed:` line (a closed Leg is no open Leg). [{task, kind (wait | retry), at, on}], in write order."""
+    ol = chain.open_leg()
+    if ol is None or ol["n"] in dead:
+        return []
+    out = []
+    for e in chain.log:
+        if e["n"] != ol["n"] or not e["slug"]:
+            continue
+        if e["kind"] in RANK_KINDS:
+            m = re.search(r" on \[\[([^\]|#]+)", e["rest"])
+            out.append({"task": e["slug"], "kind": RANK_KINDS[e["kind"]], "at": e["stamp"],
+                        "on": m.group(1) if m else None})
+        elif e["kind"] in ("claimed", "took", "set aside"):
+            out = [x for x in out if x["task"].lower() != e["slug"].lower()]
+    return out
+
+
+def _lifts(now, lines):
+    """Aging: floor(minutes since the earliest standing line / RANK_AGE_MINUTES), else 0."""
+    stamps = [ts for ts in (rr._parse_ts(x["at"]) for x in lines) if ts is not None]
+    return int(max(0.0, (now - min(stamps)).total_seconds() / 60.0) // RANK_AGE_MINUTES) if stamps else 0
+
+
+def _meet(A, B):
+    """The first (a, b) of A x B that overlap (serial-chains.py's overlaps), else None."""
+    return next(((a, b) for a in A for b in B if sc.overlaps(a, b)), None)
+
+
+def rank_contention(ctx, chain, n, dead=()):
+    """The rank's read for Leg n of a chain in Chain copies (ADR 0067 d9; the module docstring's *The rank*): which of
+    its rows another copied chain holds or reserves on a code file, and how. ctx-level and git-free: other_serial plus
+    peer_chain, kept to peers with a well-formed `chain_copies:`; {} work when this note has none (a chain in place, or a
+    malformed key), and an unreadable peer is a WARN that holds nothing. dead: this chain's Legs read as closed (a fresh
+    Leg's view), whose standing lines do not count. {held: {slug: {kind (wait | die), dead, on, token, task, why,
+    landFirst}}, land: {task, on, token, rows, lands} | None, lifts, pos, key, warns, standing: {slug: {task, kinds, at,
+    age}}, lines}. plan_next reads it as chain.contend; chain_read, chain_state, stall_of and hold_of never set it."""
+    out = {"held": {}, "land": None, "lifts": 0, "pos": None, "key": None, "warns": [], "standing": {}, "lines": []}
+    try:
+        if sc.read_chain_copies(chain.note) is None:
+            return out
+    except ValueError:
+        return out
+    now = ctx.now
+    peers = []
+    for path, note in other_serial(ctx):
+        try:
+            if sc.read_chain_copies(note) is None:
+                continue
+        except ValueError:
+            continue
+        try:
+            peers.append(peer_chain(ctx, path))
+        except Exception as e:  # noqa: BLE001 — chain_hold's catch: an unreadable peer holds nothing here
+            why = e.msg if isinstance(e, Refuse) else f"{type(e).__name__}: {e}"
+            out["warns"].append(f"WARN: [[{path.stem}]] could not be read ({reason_text(why, 120)}): it holds nothing "
+                                "against this chain's claims (ADR 0067 d9); git's merge at landing is the backstop")
+    every = [chain] + peers
+    key = {id(C): chain_key(C) for C in every}
+    pos = {id(C): i for i, C in enumerate(sorted(every, key=lambda C: key[id(C)]))}
+    lines = {id(C): standing_lines(C, dead if C is chain else ()) for C in every}
+    lifts = {id(C): _lifts(now, lines[id(C)]) for C in every}
+
+    def before(A, B):
+        return key[id(A)] < key[id(B)]
+
+    def eff(C):
+        return (pos[id(C)] - lifts[id(C)], -lifts[id(C)], pos[id(C)])
+
+    def toks(C, r):
+        return sc.rank_tokens(holder_tokens(C, r))
+
+    slug_of = lambda C: C.ctx.slug  # noqa: E731
+    mine = {r.slug: toks(chain, r) for r in chain.counted() if unlanded_done(chain, r)}
+    mine_all = [t for ts in mine.values() for t in ts]
+
+    def not_running(X, h):
+        """None while h runs: X has an open Leg and, for an unlanded h, no earlier third chain's unlanded done rows meet
+        it by their `leg_claims:` (claim_stand's test, one hop, read from the notes). Else ('dead', None) or ('behind',
+        E)."""
+        if X.open_leg() is None:
+            return ("dead", None)
+        if unlanded_done(X, h):
+            ht = toks(X, h)
+            for E in peers:
+                if E is not X and before(E, X) and any(unlanded_done(E, r) and _meet(sc.rank_tokens(leg_claim_tokens(r)), ht)
+                                                      for r in E.counted()):
+                    return ("behind", E)
+        return None
+
+    holders = []
+    for X in peers:
+        for h in X.counted():
+            ht = toks(X, h)
+            if ht:
+                holders.append((X, h, ht, not_running(X, h)))
+    reserves = []
+    for X in peers:
+        for ln in lines[id(X)]:
+            row = X.row(ln["task"])
+            if row is not None:
+                rt = sc.rank_tokens(_cell_tokens(row) or _note_claim(X) or [("any", "")])
+                if rt:
+                    reserves.append((X, ln, rt))
+    fixes = {r.slug.lower() for r, _v in chain.fixes()}
+    held = {}
+    for r in chain.counted():
+        if r.state == "done":
+            continue
+        T = sc.rank_tokens(_cell_tokens(r) or _note_claim(chain) or [("any", "")])
+        if not T:
+            continue
+        die = wait = None
+        for X, h, ht, nr in holders:
+            p = _meet(T, ht)
+            if p is None:
+                continue
+            tok, x = sc.fmt_token(p[1]), slug_of(X)
+            base = {"on": x, "token": tok, "task": h.slug, "landFirst": []}
+            if nr is not None:
+                if before(X, chain) and die is None:
+                    die = dict(base, kind="die", dead=nr[0] == "dead", why=(
+                        f"rank: [[{x}]] holds {tok} with no open Leg; its next Leg finishes or lands it" if nr[0] == "dead"
+                        else f"rank: [[{x}]] holds {tok} unlanded behind [[{slug_of(nr[1])}]]; retry later"))
+                continue
+            behind = unlanded_done(X, h) and before(chain, X) and _meet(mine_all, ht) is not None
+            if behind and r.slug.lower() in fixes:
+                continue   # a holder behind this chain never holds its fix row: the fix is what lets this chain land
+            lf = [s for s, mt in mine.items() if _meet(mt, ht)] if behind else []   # its own rows that land first
+            if eff(chain) < eff(X):
+                wait = wait or dict(base, kind="wait", dead=False, landFirst=lf, why=(
+                    f"rank: [[{x}]] holds {tok} in [[{h.slug}]]; this chain ranks above and waits for it to finish and "
+                    "land"))
+            elif die is None:
+                die = dict(base, kind="die", dead=False, landFirst=lf,
+                           why=f"rank: [[{x}]] ranks above and holds {tok}; retry later")
+        for X, ln, rt in reserves:
+            p = _meet(T, rt)
+            if p is not None and die is None and eff(X) < eff(chain):
+                tok = sc.fmt_token(p[1])
+                die = {"kind": "die", "dead": False, "on": slug_of(X), "token": tok, "task": ln["task"], "landFirst": [],
+                       "why": f"rank: [[{slug_of(X)}]] ranks above and reserves {tok}; retry later"}
+        if die or wait:
+            held[r.slug.lower()] = die or wait
+    # (H): this chain's first own row not yet landed, about to stand behind an earlier chain that is landing.
+    land = None
+    first = next((r for r in chain.rows if r.slug in mine), None)
+    for C in (sorted(peers, key=lambda C: key[id(C)]) if first is not None else []):
+        ol = C.open_leg()
+        if not before(C, chain) or ol is None:
+            continue
+        crows = [r for r in C.counted() if unlanded_done(C, r) and _meet(toks(C, r), mine[first.slug])]
+        if not crows or any(r.state == "running" and r.note is not None and owner_leg(r.note) == ol["n"]
+                            for r in C.counted()):
+            continue
+        waits = any(x["kind"] == "wait" and (x["on"] or "").lower() == ctx.slug.lower() for x in lines[id(C)])
+        names = {r.slug.lower() for r in crows}
+        fresh = any(e["kind"] == "done" and (e["slug"] or "").lower() in names
+                    and _minutes_since(now, e["stamp"]) < RANK_LAND_MINUTES
+                    and not any(x["kind"] == "land stood" and x["pos"] > e["pos"] for x in C.log) for e in C.log)
+        if waits or fresh:
+            ctoks = [t for r in crows for t in toks(C, r)]
+            p = _meet(mine[first.slug], ctoks)
+            land = {"task": first.slug, "on": slug_of(C), "token": sc.fmt_token(p[1]), "rows": [r.slug for r in crows],
+                    "lands": [s for s, mt in mine.items() if _meet(mt, ctoks)]}
+            break
+    standing = {}
+    for ln in lines[id(chain)]:
+        s = standing.setdefault(ln["task"].lower(), {"task": ln["task"], "kinds": [], "at": ln["at"],
+                                                     "age": _minutes_since(now, ln["at"])})
+        s["kinds"].append(ln["kind"])
+    out.update(held=held, land=land, lifts=lifts[id(chain)], pos=pos[id(chain)], key=list(key[id(chain)]),
+               standing=standing, lines=lines[id(chain)])
+    return out
+
+
+class RankLock(Lock):
+    """The machine-wide rank lock (ADR 0067 d9): an exclusive fcntl.flock on `<leg lock dir>/rank-claim.lock`, taken
+    inside the rollout's lock (never the other way round, and never nested with land's repo lock) around claim's
+    contention read, its plan, its save and its log, and `wait`'s log, so two chains never claim one file at once. A wait
+    past the same timeout is exit 5, nothing written. --dry-run takes none."""
+
+    def __init__(self, ctx):
+        super().__init__(ctx)
+        self.path = os.path.join(os.path.dirname(self.path), "rank-claim.lock")
+        self.what = "the rank lock: another chain's claim"
 
 
 def write_rows(chain, n):
@@ -3980,20 +4461,43 @@ def chain_read(ctx, chain):
             "restarted": restarted, "n_next": n_next, "fresh": fresh, "stall": stall, "state": state}
 
 
+def rank_json(chain, contend):
+    """status's `rank` block (ADR 0067 d9): {stamp (the estate rank, or null), warn (a malformed stamp), key (order_key),
+    pos, lifts, standing [{task, kind, at}], contention {held, land, warns}}; pos and lifts are null in place."""
+    contend = contend or {}
+    return {"stamp": chain_rank(chain), "warn": rank_warn(chain), "key": list(chain_key(chain)),
+            "pos": contend.get("pos"), "lifts": contend.get("lifts", 0) if contend.get("pos") is not None else None,
+            "standing": [{"task": x["task"], "kind": x["kind"], "at": x["at"]} for x in contend.get("lines") or []],
+            "contention": {"held": contend.get("held") or {}, "land": contend.get("land"), "warns": contend.get("warns") or []}}
+
+
 def cmd_status(ctx, a):
     chain = Chain(ctx)
     note = chain.note
     if rr._shape(note) != "serial":
         raise Refuse(1, f"{ctx.slug} is not a serial rollout (shape: {rr._scalar(note.get('shape')) or 'parallel'}): "
                         "read it with reconcile-rollout.py status")
-    read = chain_read(ctx, chain)
+    read = chain_read(ctx, chain)   # contention-free: the chain state, the stall and the hold never read the rank
     inc, paused, superseded = read["inc"], read["paused"], read["superseded"]
     open_leg, halt, restarted = read["open_leg"], read["halt"], read["restarted"]
     n_next, fresh, stall, state = read["n_next"], read["fresh"], read["stall"], read["state"]
-    own = plan_next(chain, open_leg["n"], open_leg["alias"], open_leg["folder"]) if open_leg is not None else fresh
     # begin refuses each terminal state, so no Leg acts next: no restart, no smoke list, no next act.
     ended = state in TERMINAL
-    restart = None if ended else restart_of(ctx, chain, fresh, n_next, open_leg, halt, restarted)
+    # The rank (ADR 0067 d9): freshRank, a fresh Leg N's plan with the contention read (this chain's open Leg read as
+    # dead, no cap, no launch boundary), which the restart and begin's launch check share; the open Leg's own plan.
+    dead = (open_leg["n"],) if open_leg is not None else ()
+    fresh_contend = {} if ended else rank_contention(ctx, chain, n_next, dead=dead)
+    chain.contend = fresh_contend
+    fresh_rank = plan_next(chain, n_next, None, None, cap=False, launch=False, dead=dead)
+    own_contend = fresh_contend
+    if open_leg is not None:
+        own_contend = {} if ended else rank_contention(ctx, chain, open_leg["n"])
+        chain.contend = own_contend
+        own = plan_next(chain, open_leg["n"], open_leg["alias"], open_leg["folder"])
+    else:
+        own = fresh_rank
+    chain.contend = {}
+    restart = None if ended else restart_of(ctx, chain, fresh_rank, n_next, open_leg, halt, restarted)
     if restart is not None and restart["blockedBy"] is None:
         # ADR 0060 d3: what the next Leg writes, re-checked against the other rollouts (begin's re-check, read-only).
         held, failed = surface_recheck(ctx, chain, n_next)
@@ -4030,10 +4534,10 @@ def cmd_status(ctx, a):
             "haltCleared": cleared_json(chain), "restarted": restarted,
             "restarts": [{"leg": e["leg"], "how": e["how"], "started": e["started"], "manual": e["manual"],
                           "session": e["session"], "at": e["stamp"]} for e in chain.log if e["kind"] == "restart"],
-            "legs": legs_json(chain), "rows": [row_json(chain, r) for r in chain.rows],
+            "legs": legs_json(chain), "rows": [row_json(chain, r, own_contend) for r in chain.rows],
             "smoke": [] if ended else smoke_list(chain, open_leg["n"] if open_leg is not None else n_next),
             "fixes": fixes, "next": None if ended else next_json(own), "stall": stall, "restart": restart,
-            "hold": hold_of(chain, read), "needsYou": items}
+            "hold": hold_of(chain, read), "rank": rank_json(chain, own_contend), "needsYou": items}
 
 
 def cmd_restarted(ctx, a):
@@ -4120,6 +4624,9 @@ def parser():
     g.add_argument("--resume", type=int)
     s = sub.add_parser("next", parents=[common])
     s.add_argument("--waiting")
+    s = sub.add_parser("wait", parents=[common])
+    s.add_argument("--task", required=True)
+    s.add_argument("--for", dest="for_", type=float, default=540.0)
     s = sub.add_parser("claim", parents=[common])
     s.add_argument("--task", required=True)
     s.add_argument("--inherit", action="store_true")
@@ -4182,14 +4689,14 @@ def parser():
     return p
 
 
-VERBS = {"begin": cmd_begin, "next": cmd_next, "claim": cmd_claim, "change": cmd_change, "smoke": cmd_smoke,
-         "file-fix": cmd_file_fix, "done": cmd_done, "set-aside": cmd_set_aside, "post-items": cmd_post_items,
+VERBS = {"begin": cmd_begin, "next": cmd_next, "wait": cmd_wait, "claim": cmd_claim, "change": cmd_change,
+         "smoke": cmd_smoke, "file-fix": cmd_file_fix, "done": cmd_done, "set-aside": cmd_set_aside, "post-items": cmd_post_items,
          "file-followup": cmd_file_followup, "close": cmd_close, "handed": cmd_handed, "clear-halt": cmd_clear_halt,
          "status": cmd_status, "restarted": cmd_restarted, "copies": cmd_copies, "land": cmd_land}
 # The writing verbs an archived (completed) note refuses up front (land but its --retire); begin refuses it as done,
 # with its status line.
-ARCHIVE_REFUSED = ("claim", "smoke", "file-fix", "done", "set-aside", "close", "handed", "clear-halt", "restarted",
-                   "copies", "land")
+ARCHIVE_REFUSED = ("claim", "wait", "smoke", "file-fix", "done", "set-aside", "close", "handed", "clear-halt",
+                   "restarted", "copies", "land")
 
 
 def main(argv=None) -> int:

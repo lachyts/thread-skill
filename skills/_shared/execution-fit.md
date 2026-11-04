@@ -319,7 +319,7 @@ another by path, never meets the outer one either (p33-3). schedule § 0 runs
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check` against the resolved repo path last,
 after the pushed-base check, and its one stdout line decides: see schedule § 0 for each outcome (`none`,
 `supersede`, `file`, `interrupted`, `refuse`) and its remedy. A running or never-superseded rollout of this
-project on the repo, or another project's on this run's own clone, is a stop, never a second rollout beside it. Serial chains take turns on shared surfaces instead (ADR 0067 d4); only a parallel root refuses one: schedule
+project on the repo, or another project's on this run's own clone, is a stop, never a second rollout beside it. Serial chains take turns on shared surfaces instead, by rank (ADR 0067 d4, d9); only a parallel root refuses one: schedule
 § Serial path runs the same script with `--shape serial`, once per chain. Beside it sits orient § 6's
 *Uncommitted grill docs* hold:
 `CONTEXT.md` or `docs/adr/` changes a grill left uncommitted in the target repo hold scheduling there too,
