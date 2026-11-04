@@ -529,6 +529,17 @@ test('the nights: a Capacity cap (by: capacity, p36-7) is never read as the Tric
     assert.ok(has(n.flags, /^nights: the day's cap was the Capacity \(by: capacity\) in the window: no Trickle to raise$/), JSON.stringify(n.flags))
     assert.ok(!has(n.flags, /built-in/), 'the Trickle cap after --until adds nothing, and the built-in is not read')
   }
+  for (const [label, ts] of [['after --until', D(6, '13:00')], ['before --since', D(3, '23:00')]]) {
+    // no cap by day in the window, and one Capacity cap stamped outside it (the window rule, CLAUDE.md rule 2): it adds
+    // nothing, so the built-in Trickle is read and the trickle-raise still fires
+    const n = nightsOf(tmpHome(t), [cap(ts, 's4', { away: false, n: 6, by: 'capacity' })])
+    assert.ok(has(n.flags, /^nights: no slot-taken cap by day in the window: the Trickle is read as the built-in 2$/),
+      `${label}: ${JSON.stringify(n.flags)}`)
+    const tr = n.suggest.find((s) => s.rule === 'trickle-raise')
+    assert.ok(tr, `${label}: the trickle-raise still fires`)
+    assert.deepEqual([tr.from, tr.to], [2, 5], `${label}: from the built-in 2`)
+    assert.ok(!has(n.flags, /the day's cap was the Capacity/), `${label}: the out-of-window Capacity cap is never read`)
+  }
 })
 
 test('night_record: unmarked, unreadable, history without usualMinutes and other-host lines; a pure function', (t) => {
