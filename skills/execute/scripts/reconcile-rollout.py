@@ -4888,7 +4888,7 @@ def _kept_for(kept) -> str:
     return (f", {sum(kept.values())} kept for " + ", ".join(f"[[{n}]]" for n in kept)) if kept else ""
 
 
-def capacity_gate(rollout_path, tasks_dir, now, mine, want, quota_env=None, record=None) -> dict:
+def capacity_gate(rollout_path, tasks_dir, now, mine, want, quota_env=None) -> dict:
     """The Capacity's gate on a Leg's fresh claim (p36-7, ADR 0067 d8; execute away.md § Capacity): `next`'s room
     arithmetic for one serial rollout, its one copy, which leg.py reads (its `next`, begin's `next`, `wait`'s poll and
     `status` read-only and lock-free; `claim`'s recount and `wait`'s record write under the trickle claim lock, which the
@@ -4908,7 +4908,7 @@ def capacity_gate(rollout_path, tasks_dir, now, mine, want, quota_env=None, reco
     `mine`). `capacity` reports {file, why, suggested, limit, max, maxSource, away, elsewhere, lapsed, running, kept,
     quota, heat}. `warns` are the reading's CAPACITY_WARN lines and the claims file's TRICKLE_WARN line.
 
-    write(mode) (and `record`, which calls it at once) rewrites the Trickle claims file from this same read, every
+    write(mode) rewrites the Trickle claims file from this same read (the caller holds the trickle claim lock), every
     other entry kept as the judges keep it and this chain's own wake dropped (consumed), with one wake per rollout
     `kept` names (as a giver `next` writes them): mode "waiting" writes this chain's waiting record {tasksDir, rollout,
     since (carried), at, served (the later of its own record's and its rows' latest `started:`), want}; "served" and
@@ -4994,10 +4994,6 @@ def capacity_gate(rollout_path, tasks_dir, now, mine, want, quota_env=None, reco
         return None
 
     out["write"] = write
-    if record is not None:
-        w = write(record)
-        if w:
-            out["warns"].append(w)
     return out
 
 
