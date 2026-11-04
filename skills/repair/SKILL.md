@@ -819,8 +819,10 @@ The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever
 
   After a hand-back or a sign-off the chain is no longer stuck, so it reclaims its whole claim for new schedules, and
   the next Leg's `begin` re-checks what it writes (ADR 0060). A place another chain took while this one was stuck,
-  one a chain that began first still holds, or (when either chain works it in place, with no `chain_copies:`) a
-  checkout another chain's open Leg works makes that Leg wait its turn (ADR 0067 d4): (e)'s `surface held by` blocker.
+  one a chain that comes first by rank still holds (ADR 0067 d9: in Chain copies, a code file only while that chain
+  has no open Leg; with one open the two meet at claim), or (when either chain works it in place, with no
+  `chain_copies:`) a checkout another chain's open Leg works makes that Leg wait its turn (ADR 0067 d4): (e)'s
+  `surface held by` blocker.
 - **Defer, dependency-aware** (§ 5's steps 1 and 3): read the row's `dependants` from `leg.py status`: its
   depends-on and blocked-by closure, transitive, through `merged_into:` tombstones, read the way next holds a
   dependency.
@@ -868,8 +870,11 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
      and stop.
    - `surface held by [[B]] (<token>)` → never restart (ADR 0060): the chain waits its turn. Another chain holds a
      place the next Leg writes, and its `begin` would only stand at exit 3. Its five causes (ADR 0067 d4) name the
-     remedy: [[B]] comes first (began first, or wins the slug order) and holds an unlanded row (in Chain copies, a
-     done row it has not yet landed: ADR 0067 d3) on that place; or,
+     remedy: [[B]] comes first (by rank: a chain that has begun before one that has not, then its estate rank, then
+     the first to begin, else the earlier schedule or the slug order) and holds an unlanded row (in Chain copies, a
+     done row it has not yet landed: ADR 0067 d3) on that place, and, in Chain copies on a code file, only while [[B]]
+     has no open Leg: run [[B]], whose open Leg ends the stand (they then meet at claim by rank, ADR 0067 d9; a Leg
+     stopped by a stalled rank wait is this cause); or,
      when either chain works that checkout in place (no `chain_copies:`), [[B]] comes first and still has unlanded
      rows in a checkout this Leg works, even with no file shared, the commonest, where a never-begun [[B]] that nobody
      starts blocks this chain for good (run [[B]] from its first row's launch, or, on Lachy's word, stamp it

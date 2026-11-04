@@ -162,11 +162,18 @@ the same relative folder inside its checkout's copy (the longest checkout prefix
 inside another by path maps to its own copy), and primary_folder maps a copy path back. Tokens never change: a keyed
 token is written against the in-place twin (Git.primary), so it reads the same from a copy.
 
+The estate rank (ADR 0067 d9; CONTEXT.md **Estate rank**). orient-all stamps `estate_rank: <n>` and `estate_rank_at:
+"<pass time>"` (ESTATE_RANK_KEYS) on each rollout note it dispatches and re-stamps the live ones (estate-dispatch.py
+rank-stamp). read_estate_rank is the one parser of the pair, and rank_tokens the one statement of which tokens rank-wait
+between two chains in Chain copies: `repo:` (a code file) and `any`, never vault or `ext:` (d6).
+
 The pure helpers (parse_token, fmt_token, repo_parts, checkout_of, overlaps, overlap_pairs, read_list, read_surfaces,
-read_chain_copies, fmt_chain_copies, copy_name, norm_origin) touch neither the filesystem nor git; checkouts_of,
+read_chain_copies, fmt_chain_copies, copy_name, rank_tokens, norm_origin, and read_estate_rank given its stamp parser)
+touch neither the filesystem nor git; checkouts_of,
 copy_folder and primary_folder read it only through realpath (and checkouts_of through the toplevel resolver it is
-given). unfinished-rollout.py imports them, leg.py loads the surface grammar and the Chain copy helpers, estate-dispatch.py
-read_chain_copies and copy_folder, and reconcile-rollout.py read_surfaces, checkouts_of and read_chain_copies:
+given). unfinished-rollout.py imports them (rank_tokens for its (O) holder half), leg.py loads the surface grammar, the
+Chain copy helpers and the rank's two, estate-dispatch.py read_chain_copies, copy_folder and read_estate_rank (rank-stamp),
+and reconcile-rollout.py read_surfaces, checkouts_of and read_chain_copies:
 repo_parts, checkout_of and checkouts_of are this file's one statement of a chain's checkouts. overlaps
 and overlap_pairs take an optional toplevel resolver (Git.checkout) for the nested-checkout rule, and are purely
 textual without one. locate (claim), the grouping's nested-checkout read, the `checkouts` read and the ruling-(c)
@@ -187,7 +194,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 RR_SRC = HERE.parent.parent / "execute/scripts/reconcile-rollout.py"
 PLUGIN_JSON = HERE.parent.parent.parent / ".claude-plugin/plugin.json"
-RR_NAMES = ("Note", "_scalar", "_wikilink_slug", "_dep_entries")
+RR_NAMES = ("Note", "_scalar", "_wikilink_slug", "_dep_entries", "_parse_ts")
 DEFAULT_VAULT = "~/repos/obsidian"
 DEFAULT_LAUNCH_FOLDERS = "~/repos/workspaces/_shared/state/launch-folders.json"
 GITHUB_PREFIXES = ("https://github.com/", "git@github.com:", "ssh://git@github.com/")
@@ -507,6 +514,42 @@ def primary_folder(path, pairs):
     if not path or not pairs:
         return None
     return _remap(os.path.realpath(os.path.expanduser(str(path))), [(p, c) for c, p in pairs])
+
+
+# ---- the estate rank and the counted tokens (ADR 0067 d9; pure: no git, no filesystem) ----------
+
+ESTATE_RANK_KEYS = ("estate_rank", "estate_rank_at")
+
+
+def read_estate_rank(note, parse_ts=None):
+    """A rollout note's estate rank (ADR 0067 d9; CONTEXT.md **Estate rank**), the one parser of orient-all's stamp:
+    {n, at, ts} from `estate_rank: <n>` and `estate_rank_at: "<pass time>"`, or None (unstamped). n is an int >= 1
+    and at an ISO stamp reconcile-rollout.py's _parse_ts accepts (parse_ts, else loaded through load_rr); ts is its
+    epoch seconds. Anything malformed (one key without the other, an n of 0, -1 or x, a stamp that will not parse)
+    reads as unstamped: the caller WARNs when either key is present."""
+    raw_n, raw_at = (_item_value(note.get(k) or "") for k in ESTATE_RANK_KEYS)
+    if not raw_n or not raw_at or not re.fullmatch(r"[0-9]+", raw_n) or int(raw_n) < 1:
+        return None
+    parse = parse_ts if parse_ts is not None else load_rr()._parse_ts
+    ts = parse(raw_at)
+    if ts is None:
+        return None
+    return {"n": int(raw_n), "at": raw_at, "ts": ts.timestamp()}
+
+
+def rank_tokens(xs):
+    """The tokens that rank-wait between two chains in Chain copies (ADR 0067 d9): kind `repo` (a code file) or `any`
+    (an unknown cell), as (kind, value) pairs, in order, each once; vault and `ext:` never wait (d6), and a malformed
+    token is skipped. The one copy leg.py's claim and unfinished-rollout.py's (O) holder half count."""
+    out = []
+    for x in xs or []:
+        try:
+            t = _tok(x)
+        except ValueError:
+            continue
+        if t[0] in ("repo", "any") and t not in out:
+            out.append(t)
+    return out
 
 
 def norm_origin(url: str) -> str:

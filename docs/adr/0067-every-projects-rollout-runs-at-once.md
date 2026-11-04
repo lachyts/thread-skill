@@ -1,7 +1,7 @@
 # 0067 — Every project's rollout runs at once
 
 Date: 2026-11-02
-Status: accepted (2026-11-04: d1, d4's tokens and predicted claims, and d5 built by p36-2; d2 by p36-3; d3, and d4's actual claims and backstop, by p36-4; d6 by p36-6; d7 needs no build (ADR 0064 kept); d8 and d9 decided, not yet built: p36-7, p36-5). Ruled with Lachy in two grills on 2026-11-02: the first in the ops-workspace orient-all session, the second in the spike session (`docs/spikes/2026-11-02-every-rollout-at-once.md`). Built in Thread Skill's Phase 36. The technical calls below were decided for him from the spike's evidence and are listed at the end so he can overturn them. Supersedes ADR 0040's ruling "a chain that writes a repo checkout owns that checkout". Amends ADR 0059 (the project place becomes a prediction, and d5's accepted collision becomes a warned, recorded Note overlap) and ADR 0060 (its yield rule now sits beside rank). Leaves ADR 0064's one-clone-per-(repo, project) rule as it is.
+Status: accepted (2026-11-04: d1, d4's tokens and predicted claims, and d5 built by p36-2; d2 by p36-3; d3, and d4's actual claims and backstop, by p36-4; d6 by p36-6; d7 needs no build (ADR 0064 kept); d9 built by p36-5; d8 decided, not yet built: p36-7). Ruled with Lachy in two grills on 2026-11-02: the first in the ops-workspace orient-all session, the second in the spike session (`docs/spikes/2026-11-02-every-rollout-at-once.md`). Built in Thread Skill's Phase 36. The technical calls below were decided for him from the spike's evidence and are listed at the end so he can overturn them. Supersedes ADR 0040's ruling "a chain that writes a repo checkout owns that checkout". Amends ADR 0059 (the project place becomes a prediction, and d5's accepted collision becomes a warned, recorded Note overlap) and ADR 0060 (its yield rule now sits beside rank). Leaves ADR 0064's one-clone-per-(repo, project) rule as it is.
 
 ## Context
 
@@ -113,3 +113,16 @@ The spike found that the pass ran rules four days old. orient-all loads skills f
 7. A vault overlap is let through with a warning, never refused. Two runs in one note is expected to be rare, and a muddled note is recoverable from the vault's git backup and Obsidian's version history.
 8. Vault copies are built on the first overlap that left a note wrong, or on overlaps in two weeks running. Until then the weekly Reflection's report is the investigation, and no other spike runs.
 9. Another run is another rollout. A Note overlap is warned and recorded only between tasks of two different rollouts, so two tasks of one parallel rollout in one vault note are neither warned nor recorded, and never count toward decision 6's trigger for vault copies. ADR 0059 d5's collision was between chains, and each serial chain is its own rollout note. Overturning this means warning between two tasks of one rollout as well.
+10. A re-stamp keeps the live order: every live rollout is re-stamped in its current order before this pass's new
+    dispatches, which rank below the live runs, since a pass cannot grade work in flight. A re-stamp that cannot write a
+    note stops there, so the order still stands, and orient-all runs it once more (`estate-dispatch.py rank-stamp`).
+11. "Ties go to the earlier schedule" reads `captured:`, and only among chains that have never begun: two begun chains
+    keep the first to begin.
+12. Two chains in Chain copies meet on a code file at claim while the holder has an open Leg. A holder with no open
+    Leg is not running: a chain that sorts after it waits at begin (unfinished-rollout.py's (O), its holder half), and
+    one that sorts before it claims, the holder's later land standing behind it (d4's land order). Vault, `ext:` and
+    `any` meetings keep their begin waits.
+13. ADR 0060's yield is decided at begin, ahead of rank, and rank orders only the claims after begin.
+14. The bounds: aging lifts a waiter one place per 60 minutes of standing, a land wait (H) reads an earlier chain's
+    `done` as about to land for 15 minutes, and every wait is bounded at 180 minutes, then the Leg closes stopped.
+15. A higher-ranked waiter blocks on its row instead of working other rows: it trades throughput for going first.

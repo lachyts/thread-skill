@@ -17,11 +17,14 @@
 //       hand-over; a Chain copy's launch line (ADR 0067 d2) in § Begin 4 and § Hand over, never the alias itself, and §
 //       The task loop's commit in the copy, never in the primary; the land (ADR 0067 d3): § Begin 0's `landFirst` land
 //       before the first claim, § The task loop's **Land** paragraph (never a rebase, --verified, --red, a null line,
-//       `waits: true`) and the slotted Verify rule;
+//       `waits: true`) and the slotted Verify rule; the rank (ADR 0067 d9): § The task loop's `wait` action, its six
+//       steps in order (land, `leg.py wait`, the stalled close, landFirst's remedies and stopped close, cleared, next)
+//       and its two Leg log forms;
 //   e7  the close order (leg.py close before create_thread → pushes → /thread:close with the hand-over between 7 and
 //       8 → handed → banner → ROLLOUT-STATUS), step 1's outcomes without a bare `complete` (it needs --reflection: §
 //       Complete step 4), the lock and exit 5's retry-once, the repo land lock (never nested) and the in-place peer
-//       stand, no question tool, and the push Don't as the landing route reads it (ADR 0028, ADR 0067 d3);
+//       stand, the rank lock (ADR 0067 d9), no question tool, and the push Don't as the landing route reads it (ADR
+//       0028, ADR 0067 d3);
 //   e8  the docs: CONTEXT's **Leg** and **Serial rollout** entries (the completion verify's detached verify tree
 //       among its worktrees), execute § Scope's Legs sentence (that tree under `<state>/thread/completion-trees/`, not
 //       a task worktree), ADR 0040's Decision line, its new bullet and its ADR 0055 amendment, the README row;
@@ -199,6 +202,21 @@ function check(f, product = tree) {
   need('e6', 'legs.md § The task loop', loop, ['**Land (ADR 0067 d3).**', 'never a rebase', '`leg.py land --verified <head>`',
     '`leg.py land --red "<why>"`', 'whose `line` is null', 'its Acceptance criteria', 'verify-slot.py run -- bash -c',
     'verify-slot: no verdict', '`waits: true`'])
+  // ADR 0067 d9: the rank's `wait` action and its six steps, in order.
+  const wt = loop.split('\n')
+  const wi = wt.findIndex((l) => l.startsWith('- `wait` (ADR 0067 d9'))
+  const wj = wt.findIndex((l, k) => k > wi && /^- `/.test(l))
+  const waitBlock = wi >= 0 ? wt.slice(wi, wj > wi ? wj : undefined).join('\n') : ''
+  need('e6', 'legs.md § The task loop\'s `wait`', C(waitBlock), ['CONTEXT.md **Rank wait**', 'Nobody is stopped mid-task',
+    '`leg.py wait --task <t>` in the foreground (`timeout: 600000`)', '`Leg <N> rank wait: [[t]] on [[X]] (<token>; ranks above it)`',
+    '`Leg <N> rank retry: [[t]] on [[X]] (<token>; [[X]] ranks above)`',
+    'On `stalled: true`: § Close `--outcome stopped --reason "rank wait: <why>"`, pushed once',
+    'When `landFirst` is non-empty', '§ Close `--outcome stopped --reason "rank wait: own land stood: <why>"`, pushed once',
+    'On `cleared: true`: run `leg.py land` again in a copy chain, then `next`'])
+  const ws = [/^ {2}1\. In a copy chain, run `leg\.py land`/, /^ {2}2\. Run `leg\.py wait --task <t>`/, /^ {2}3\. On `stalled: true`/,
+    /^ {2}4\. When `landFirst` is non-empty/, /^ {2}5\. On `cleared: true`/, /^ {2}6\. Otherwise: `next`/]
+    .map((re) => waitBlock.split('\n').findIndex((l) => re.test(l)))
+  if (ws.some((i, k) => i < 0 || (k > 0 && i <= ws[k - 1]))) flag('e6', `§ The task loop's \`wait\` steps are not the six, in order: ${ws}`)
   const rep = sec(legs, 'Report')
   need('e6', 'legs.md § Report', rep, ['it is never `running`', 'a `waiting` turn end takes `leg.py next --waiting "<reason>"`\'s',
     'Every Leg whose Close reads *closed* reports to the origin when it closes', 'A `halted` or `waiting` Leg never reports'])
@@ -225,6 +243,8 @@ function check(f, product = tree) {
     "a swept repo's daily sweep pushes them", "a pushable repo's wait for Lachy in Complete's land follow-on"])
   need('e7', 'legs.md § Concurrency', sec(legs, 'Concurrency'), ['`<git common dir>/thread/chain-land.lock`', 'never nested',
     "never moves a checked-out `<d>` under another chain's live work"])
+  need('e7', 'legs.md § Concurrency', sec(legs, 'Concurrency'), ['the machine-wide rank lock, `<leg lock dir>/rank-claim.lock`',
+    "inside the rollout's lock and never nested with a land's repo lock", 'two chains never claim one code file at once (ADR 0067 d9)'])
 
   // ---- e8: docs ----
   need('e8', 'CONTEXT **Leg**', entry(f.context, 'Leg'), ['`leg.py begin`', 'the preflight', 'the smoke test',
@@ -390,6 +410,19 @@ test('control: a Chain copy hand-over that runs the alias fails e6', () => {
 test('control: § Begin 0 without the landFirst land fails e6', () => {
   only('legs', 'then run `leg.py land` (§ The task loop\'s **Land**) right after begin, before the preflight, the smoke test and the first `claim`.',
     'then go on.', ['e6'], 'landFirst')
+})
+test('control: a rank wait whose stall goes on waiting fails e6', () => {
+  only('legs', 'On `stalled: true`: § Close `--outcome stopped --reason "rank wait: <why>"`, pushed once.',
+    'On `stalled: true`: wait again.', ['e6'], 'stalled')
+})
+test('control: the rank wait steps out of order fails e6', () => {
+  const l5 = real.legs.split('\n').find((x) => x.startsWith('  5. On `cleared: true`'))
+  const l6 = real.legs.split('\n').find((x) => x.startsWith('  6. Otherwise: `next`'))
+  assert.ok(l5 && l6, 'control setup: the wait steps 5 and 6')
+  only('legs', `${l5}\n${l6}`, `${l6}\n${l5}`, ['e6'], 'order')
+})
+test('control: § Concurrency without the rank lock fails e7', () => {
+  only('legs', 'the machine-wide rank lock, `<leg lock dir>/rank-claim.lock`', 'a lock', ['e7'], 'rank lock')
 })
 test('control: the task loop without the slotted Verify rule fails e6', () => {
   only('legs', 'runs through the verify slot, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/verify-slot.py run -- bash -c \'<command>\'`,',

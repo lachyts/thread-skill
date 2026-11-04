@@ -163,13 +163,14 @@ chains.py's chain `checkouts`, as repeatable `--checkout`): no `file`, `supersed
 --regenerate, `WARN: a serial run supersedes nothing (ADR 0040, p24-2): --regenerate ignored`. A live serial note is
 never a hit (ADR 0067 d4: predicted claims order and wait, they never refuse a schedule); for each one (any project),
 the first that applies: a --surface token overlapping its hold (above) WARNs `WARN: [[s]] (<label>; <state>) also
-predicts <b>, which this chain predicts as <a>: they take turns on it, the first to begin going first (ADR 0067 d4)`
+predicts <b>, which this chain predicts as <a>: they take turns on it by rank (ADR 0067 d4, d9)`
 (a copy chain's done row holds its place until leg.py land puts it on the primary's default branch, so the one that goes
 second begins with that work: ADR 0067 d3); one overlapping only
 what a stuck one released WARNs as 2b does; else, when it works in place (no `chain_copies:`: the chain scheduled now
 always gets its Chain copies at S5), turn(--surface) and --checkout meeting its U (a stuck
 chain's is empty) WARN `WARN: [[s]] (<label>; <state>) works <checkout> in place too, with no Chain copy: the two work
-it a chain at a time: the one that comes first (the first to begin, else by slug) lands every unlanded row it has there
+it a chain at a time: the one that comes first (by rank: a chain that has begun before one that has not, then estate
+rank, then the first to begin, else by slug) lands every unlanded row it has there
 before the other begins a Leg in it`, as contend's checkout half makes them at Leg begin. Hits are every parallel candidate (root-level, unfinished, not complete, any project) whose
 Project root's token overlaps a --surface or --checkout token (a missing Project root WARNs as above and is not
 counted), so a chain that names no file in a checkout still refuses beside a parallel rollout rooted there
@@ -187,19 +188,28 @@ rollout's clone integrates through origin, which that land never reaches, ADR 00
 writes as `<token>` (ADR 0060): [[<slug>]] waits its turn: …`. A serial resume R reads its own chain through leg.py
 first (a chain unreadable there is exit 2, so leg.py's re-check fails closed) and meets each other unfinished serial
 note H by serial_waits: own(C) is a chain's unlanded rows' tokens (its rows not done, and in Chain copies its done
-rows not yet landed: hold_of's `unlanded`), smoke(C) = ws(C) − own(C), the order key is
-(began, its first `began:` stamp; else never begun, after every chain that began; then the case-folded slug, a stamp
-that will not parse reading as never begun), and contend(X, Y) = own(X) meets own(Y) or, unless both chains work in
-Chain copies (`chain_copies:` on both notes: they share no index or HEAD, so they meet only file to file), T(X) meets
-U(Y). R waits on the first rule that applies: (M) H has an open Leg, and T(R) (with --checkout) meets OL(H),
+rows not yet landed: hold_of's `unlanded`), smoke(C) = ws(C) − own(C), the order key is leg.py's order_key, rank-led
+(ADR 0067 d9: a chain that has begun before one that has not, a stamp that will not parse reading as never begun; then
+its estate rank, a stamped chain before an unstamped one, a later pass first, the lower n first; then its first
+`began:` stamp, or for a never-begun chain the earlier `captured:`; then the case-folded slug), and contend(X, Y) =
+own(X) meets own(Y) or, unless both chains work in Chain copies (`chain_copies:` on both notes: they share no index or
+HEAD, so they meet only file to file), T(X) meets U(Y). Between two copied chains a code file (a `repo:`-`repo:` pair)
+meets at claim, by rank, while its holder has an open Leg (ADR 0067 d9; leg.py's *The rank*), so (M)'s file half and
+(O)'s own-own meeting count only a pair where not both tokens are `repo:` (vault, `ext:` and `any` keep their begin
+waits), and (O) gains its holder half: H has no open Leg, so it is not running and never waited on at claim, and the
+code tokens of own(R) (serial-chains.py's rank_tokens) meet holding(H), its rows in progress and its done rows not yet
+landed (hold_of's `holding`, the tokens claim reads), on a `repo:`-`repo:` pair. R waits on the first rule that applies: (M) H has an open Leg, and T(R) (with --checkout) meets OL(H),
 T(H) and its open Leg folder's checkout: `[[H]] (…) holds `repo:<top>` with its open Leg <n>, where this chain's next
 Leg works as `<a>` (ADR 0067 d4: a chain works it in place): [[R]] waits its turn: re-run once [[H]]'s Leg <n> closes`
 (skipped when both work in Chain copies), or
 ws(R) meets what that Leg writes (its write set and the next one's): `… with its open Leg <n>, which this chain writes
 as `<a>` (ADR 0060): …`; (T) R itself has an open Leg (a take-over): only (M) applies; (O) H sorts before R and
 contend(R, H): `[[H]] (…) holds `<b>` for an unlanded row and began first, which this chain writes as `<a>` (ADR 0067
-d4): …`, `comes first by slug (neither has begun)` or `(both began at the same stamp)` in place of `began first` when
-slug order breaks a tie, `<b>` `repo:<top>` for a checkout-level hit (H's row is own(H) until it is done and, in
+d4): …`, `ranks above (estate rank <n>)` when the rank decides, `was scheduled first` for an earlier `captured:`, or
+`comes first by slug (neither has begun)` or `(both began at the same stamp)` in place of `began first` when slug order
+breaks a tie (leg.py's first_by), `<b>` `repo:<top>` for a checkout-level hit; the holder half's line reads `[[H]] (…)
+holds `<b>` for an unlanded row and <first_by>, and has no open Leg to finish or land it, which this chain writes as
+`<a>` (ADR 0067 d9): …` (H's row is own(H) until it is done and, in
 Chain copies, until leg.py land puts it on its primary's default branch (ADR 0067 d3), so R begins with that work in its
 copy: begin's fast-forward brings it, or the land it runs before its first claim); (Y) ADR 0060's yield, smoke(R)
 meets own(H):
@@ -207,8 +217,10 @@ toward an H that sorts first always, toward a later H only when H is free (it wa
 (O), a (Y) toward an earlier chain or an unreadable note): today's line, `… holds `<token>` for an unlanded row, which
 this chain writes as `<token>` (ADR 0060): …`. An unreadable H holds its whole claim against ws(R) and T(R), whatever
 the order (fail closed). No cycle forms, for any number of chains (serial_waits says why): (O) and an earlier-ward (Y)
-point down the order, a later-ward (Y) lands only on a free chain, and (M) only on an open Leg. When R does not yield
-to a later H that is not free, R goes first, and H, once free, waits on R's open Leg by (M)'s file half.
+point down the order (the holder half included), a later-ward (Y) lands only on a free chain, and (M) only on an open
+Leg. When R does not yield to a later H that is not free, R goes first, and H, once free, waits on R's open Leg by
+(M)'s file half, or, two copied chains on a code file, at claim by rank (ADR 0067 d9). ADR 0060's yield is decided
+here, at begin, ahead of rank: rank orders only the claims after begin.
 A serial resume then meets every unfinished, not complete parallel rollout's Project root that ws(R) or T(R) meets,
 unless parallel_hold reads it released, or idle (nothing running, integrating or awaiting Integration) and paused
 (`paused:` or `pause_requested`) or with an open halt in its Run record: a call still in flight after a halt or in a
@@ -385,7 +397,7 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "PRIORITY_WEIGHTS", "_dep_entries", "_fold_unit", "_dep_status", "_live_rollout", "_start_unattended",
             "_record_read", "_stop_state", "_truthy_flag", "_parse_ts")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
-            "checkout_of", "checkouts_of", "read_chain_copies")
+            "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
 RUN_RECORD_NAMES = ("record_path",)
 LEG_NAMES = ("Chain", "chain_read", "hold_of", "write_set", "write_rows", "Refuse", "order_key", "first_by")
@@ -674,7 +686,8 @@ def chain_hold(rr, path, tasks_dir):
     """leg.py's hold_of for one serial note, in-process (ADR 0060): (hold, None), or (None, <why>) when leg.py cannot
     read the chain. The hold also carries `ws`, what its next Leg writes (leg.py's write_set for Leg n_next), and
     `wsFolders`, the launch folders of the rows that write set reads (write_rows): ADR 0067 d4's order and interim;
-    and `openWs`, what its open Leg writes (write_set for that Leg; [] with none), which serial_waits' (M) meets."""
+    and `openWs`, what its open Leg writes (write_set for that Leg; [] with none), which serial_waits' (M) meets; and
+    hold_of's own `rank`, `captured` (the rank-led order's inputs) and `holding` ((O)'s holder half, ADR 0067 d9)."""
     leg = load_leg(rr)
     ctx = SimpleNamespace(rollout=path, tasks=tasks_dir, vault=tasks_dir.parent.parent, slug=path.stem, archived=False)
     try:
@@ -700,9 +713,10 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
     (`released`), its unlanded rows' surfaces in any state (`unlanded`: the rows not done, `undone`, and those `pending`
     rows), the hold's `scope`, and for ADR 0067 d4's order and interim
     its first `began` stamp, its `open` Leg ({n, folder}) and what that Leg writes (`openWs`), its unlanded rows'
-    launch `folders`, and what its next Leg writes (`ws`, with those rows' launch folders, `wsFolders`); an unreadable
-    chain has none of those but `ws`, its whole claim (`readable` False). `skip` names a note left out (a resuming
-    chain's own)."""
+    launch `folders`, and what its next Leg writes (`ws`, with those rows' launch folders, `wsFolders`), and for ADR
+    0067 d9 its estate `rank`, `captured:` and `holding` (its rows in progress and done rows not yet landed); an
+    unreadable chain has none of those but `ws`, its whole claim (`readable` False), with `rank` and `captured` read
+    from its frontmatter. `skip` names a note left out (a resuming chain's own)."""
     out = []
     for path, note, where in notes:
         if where != "root" or rr._status(note) in CLOSED or shape_of(rr, path.stem, note, warns, warned) != "serial":
@@ -731,7 +745,9 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
             tokens = [("any", "")]
         c.update(claim=tokens, tokens=tokens, unlanded=tokens, undone=tokens, pending=[], released=[], scope="whole",
                  why=f"{bad}: read as any, it holds everything" if bad else "", began=None, open=None, folders=[],
-                 ws=tokens, wsFolders=[], openWs=[], readable=False, copied=copied_of(note, c["slug"], warns))
+                 ws=tokens, wsFolders=[], openWs=[], readable=False, copied=copied_of(note, c["slug"], warns),
+                 rank=SC.read_estate_rank(note, rr._parse_ts), captured=rr._scalar(note.get("captured")) or None,
+                 holding=tokens)
         # The hold is read even when `surfaces:` reads as any: a schedule still meets `any` (tokens, scope whole), but a
         # --resume compares against the unlanded rows' own cells (hold_of reads them apart from the claim, and falls
         # back to the whole claim, `any` here, only on a bad cell), so one hand-edited note never halts every rollout.
@@ -746,7 +762,8 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=None):
             c.update(unlanded=parse(hold["unlanded"]), undone=parse(hold["undone"]), pending=list(hold["pending"]),
                      began=hold["began"], open=hold["open"], readable=True,
                      folders=[r["folder"] for r in hold["rows"] if r.get("folder")], ws=parse(hold["ws"]),
-                     wsFolders=hold["wsFolders"], openWs=parse(hold["openWs"]))
+                     wsFolders=hold["wsFolders"], openWs=parse(hold["openWs"]), rank=hold["rank"],
+                     captured=hold["captured"], holding=parse(hold["holding"]))
             if not bad:
                 c.update(scope=hold["scope"], why=hold["why"])
                 if hold["scope"] == "stuck":
@@ -805,11 +822,12 @@ def next_works(s, git, vault):
     return union(turn(s["ws"]), launch_checkouts(s["wsFolders"], git, vault))
 
 
-def order_key(rr, slug, began):
-    """ADR 0067 d4's order (leg.py's order_key, its one copy, which land's actual-claim check reads too): a chain that
-    began sorts by its first `began:` stamp, before every chain that never began; slug order (case-folded) breaks ties.
-    A stamp that will not parse reads as never begun, on either side alike."""
-    return load_leg(rr).order_key(slug, began)
+def order_key(rr, slug, began, rank=None, captured=None):
+    """ADR 0067 d4's order, rank-led (d9; leg.py's order_key, its one copy, which land's actual-claim check and claim's
+    rank read too): a chain that has begun before one that has not, then the estate rank (a stamped chain before an
+    unstamped one, a later pass first, then the lower n), then the first to begin (never begun: the earlier
+    `captured:`), else by slug. A stamp that will not parse reads as never begun, on either side alike."""
+    return load_leg(rr).order_key(slug, began, rank, captured)
 
 
 def parallel_hold(rr, path, note, linked):
@@ -1100,8 +1118,9 @@ def cmd_check(args, rr) -> int:
 
 # The works-too WARN, `works <checkout> in place too, with no Chain copy: ` and this tail (ADR 0067 d4, for a chain that
 # works the checkout in place): contend's checkout half (serial_waits) serialises chains, not Legs.
-ONE_AT_A_TIME = ("the two work it a chain at a time: the one that comes first (the first to begin, else by slug) lands "
-                 "every unlanded row it has there before the other begins a Leg in it")
+ONE_AT_A_TIME = ("the two work it a chain at a time: the one that comes first (by rank: a chain that has begun before one "
+                 "that has not, then estate rank, then the first to begin, else by slug) lands every unlanded row it has "
+                 "there before the other begins a Leg in it")
 
 
 def check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned) -> int:
@@ -1125,8 +1144,7 @@ def check_serial(args, rr, tasks_dir, surfaces, checkouts, vault, warns, warned)
         if pairs:
             a, b = pairs[0]
             warns.append(f"WARN: [[{s['slug']}]] ({s['label']}; {s['state']}) also predicts {SC.fmt_token(b)}, which "
-                         f"this chain predicts as {SC.fmt_token(a)}: they take turns on it, the first to begin going "
-                         "first (ADR 0067 d4)")
+                         f"this chain predicts as {SC.fmt_token(a)}: they take turns on it by rank (ADR 0067 d4, d9)")
             continue
         freed = SC.overlap_pairs(surfaces, s["released"], top)
         if freed:
@@ -1172,7 +1190,8 @@ def check_resume(args, rr, tasks_dir, toks, checkouts, vault, warns, warned) -> 
     parallel rollout's root), against the others. A parallel resume meets every other unfinished serial note's rows
     not yet done (`undone`: a Chain copy's done row awaiting leg.py land holds no parallel rollout, whose clone
     integrates through origin, ADR 0067 d3), their surfaces in any state, and clone_holders. A serial resume R puts fresh contention in a total order
-    (order_key: the first to begin goes first), keeps ADR 0060's yield toward a chain free to run, and waits on any
+    (order_key, rank-led: a chain that has begun before one that has not, then estate rank, then the first to begin,
+    else by slug; ADR 0067 d9), keeps ADR 0060's yield toward a chain free to run, and waits on any
     chain whose open Leg writes a place R's next Leg writes or, unless both work in Chain copies, works a checkout it
     would work in
     (serial_waits: no cycle forms); then every unfinished parallel rollout's root its write set or checkouts meet,
@@ -1240,14 +1259,17 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
     `holds `<token>``, which leg.py's HELD_RE reads. own(C) is a chain's unlanded rows' tokens, ws(R) its write set
     (--surface), smoke(C) = ws(C) - own(C), U and T the checkouts it has work in and its next Leg works in
     (works_in, next_works; R's T also takes --checkout; a stuck chain's U is empty), H < R when order_key(H) <
-    order_key(R), and contend(X, Y) = own(X) meets own(Y) or, unless both work in Chain copies (`copied`: they share no
-    index or HEAD), T(X) meets U(Y). X waits on Y by
+    order_key(R) (rank-led, ADR 0067 d9), and contend(X, Y) = own(X) meets own(Y) or, unless both work in Chain copies
+    (`copied`: they share no index or HEAD), T(X) meets U(Y). Between two copied chains a code file meets at claim, by
+    rank, while its holder has an open Leg, so their file meetings here count only a pair where not both tokens are
+    `repo:` (meet_off_repo), and (O) gains its holder half (holder_half). X waits on Y by
     the first of these that applies (wait_on):
       (M) Y has an open Leg, and T(X) meets OL(Y), Y's T and its open Leg folder's checkout (two Legs never commit in
           one index or HEAD at once; skipped when both work in Chain copies), or ws(X) meets what that Leg writes
           (OW(Y): openWs and ws, so two Legs never write one place at once);
       (T) X has an open Leg itself (a take-over): only (M), since its open Leg already holds its checkouts' turn;
-      (O) Y < X and contend(X, Y);
+      (O) Y < X and contend(X, Y), or, both copied, Y has no open Leg and own(X)'s code tokens meet holding(Y), Y's rows
+          in progress and done rows not yet landed (the holder half: Y is not running, so claim never waits on it);
       (Y) ADR 0060's yield, smoke(X) meets own(Y): toward an earlier Y always; toward a later Y only when Y is free,
           waiting on no chain by (M), (O), a (Y) toward an earlier chain or an unreadable note, so a yield always
           lands on a chain that can run (R yields to a free H; else R goes first, and H, once free, meets R's open
@@ -1257,15 +1279,16 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
     a later-ward (Y) lands only on a free chain, whose own waits can only climb on, so no path that climbs turns
     back down; and (M) lands only on an open Leg, whose chain waits only by (M), and between two open Legs only from
     the one opened first, since the later begin passed (M) against it and a chain's write set and checkouts only
-    shrink as its rows land."""
+    shrink as its rows land. The holder half is an edge of (O), down the order, so this argument covers it as it
+    stands, and a chain it holds is no free chain to yield to."""
     top = git.checkout
     meet = lambda a, b: (SC.overlap_pairs(a, b, top) or [None])[0]  # noqa: E731
     parse = lambda xs: [SC.parse_token(x) for x in xs]  # noqa: E731
 
-    def chain_of(slug, readable, own, ws, open_, open_ws, t, u, began, s, copied):
+    def chain_of(slug, readable, own, ws, open_, open_ws, t, u, began, s, copied, rank, captured, holding):
         out = {"slug": slug, "readable": readable, "own": own, "ws": ws, "smoke": [x for x in ws if x not in own],
-               "T": t, "U": u, "key": order_key(rr, slug, began), "open": open_, "s": s, "OL": [], "OW": [],
-               "copied": copied}
+               "T": t, "U": u, "key": order_key(rr, slug, began, rank, captured), "open": open_, "s": s, "OL": [],
+               "OW": [], "copied": copied, "holding": holding}
         if open_ is not None:
             out.update(OL=union(t, launch_checkouts([open_["folder"]], git, vault)), OW=union(open_ws, ws))
         return out
@@ -1275,17 +1298,36 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
         union(turn(own_r), launch_checkouts([r["folder"] for r in hold["rows"] if r.get("folder")], git, vault))
     t_r = union(turn(ws_r), launch_checkouts(hold["wsFolders"], git, vault), checkouts)
     r = chain_of(me, True, own_r, ws_r, hold["open"], parse(hold["openWs"]), t_r, u_r, hold["began"], None,
-                 hold.get("copied", False))
+                 hold.get("copied", False), hold.get("rank"), hold.get("captured"), parse(hold.get("holding") or []))
     others = [chain_of(s["slug"], s["readable"], s["unlanded"], s["ws"], s["open"], s["openWs"],
-                       next_works(s, git, vault), works_in(s, git, vault), s["began"], s, s["copied"])
+                       next_works(s, git, vault), works_in(s, git, vault), s["began"], s, s["copied"], s["rank"],
+                       s["captured"], s["holding"])
               for s in serial_notes(rr, notes, tasks_dir, warns, mine, warned, skip=me)]
     chains = [r] + others
+
+    def meet_off_repo(a, b):
+        """Two copied chains' file meeting at begin (ADR 0067 d9): the first overlapping pair where not both tokens are
+        `repo:` (a vault, `ext:` or `any` meeting), since a code file between two copied chains meets at claim, by
+        rank, while its holder has an open Leg."""
+        return next((p for p in SC.overlap_pairs(a, b, top) if not (p[0][0] == "repo" and p[1][0] == "repo")), None)
+
+    def holder_half(x, y):
+        """(O)'s holder half (ADR 0067 d9): y has no open Leg, so it is not running and never waited on at claim; its
+        rows in progress and its done rows not yet landed (hold_of's `holding`, the tokens claim reads) hold x's own
+        code files, a `repo:`-`repo:` pair of SC.rank_tokens on both sides, until y's next Leg finishes or lands them."""
+        if y["open"] is not None:
+            return None
+        return next((p for p in SC.overlap_pairs(SC.rank_tokens(x["own"]), SC.rank_tokens(y["holding"]), top)
+                     if p[0][0] == "repo" and p[1][0] == "repo"), None)
 
     def wait_on(x, y):
         """Why x waits on y by (M), (O), an earlier-ward (Y) or y's unreadable note: (rule, (a, b)), else None. Two
         chains that both work in Chain copies (`copied`) share no index or HEAD, so their checkout halves are skipped:
-        they meet only file to file."""
+        they meet only file to file, and a code file there (a `repo:`-`repo:` pair) meets at claim, by rank, while y
+        has an open Leg (ADR 0067 d9): (M)'s file half and (O)'s own-own meeting read meet_off_repo, and (O) gains its
+        holder half for a y with no open Leg."""
         both = x["copied"] and y["copied"]
+        files = meet_off_repo if both else meet
         if not y["readable"]:
             p = meet(union(x["ws"], x["T"]), y["own"])
             return ("whole", p) if p else None
@@ -1293,15 +1335,18 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
             p = None if both else meet(x["T"], y["OL"])
             if p:
                 return ("M", p)
-            p = meet(x["ws"], y["OW"])
+            p = files(x["ws"], y["OW"])
             if p:
                 return ("M-file", p)
         if x["open"] is not None:
             return None
         if y["key"] < x["key"]:
-            p = meet(x["own"], y["own"]) or (None if both else meet(x["T"], y["U"]))
+            p = files(x["own"], y["own"]) or (None if both else meet(x["T"], y["U"]))
             if p:
                 return ("O", p)
+            p = holder_half(x, y) if both else None
+            if p:
+                return ("O-held", p)
             p = meet(x["smoke"], y["own"])
             if p:
                 return ("Y", p)
@@ -1329,6 +1374,9 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
         elif rule == "O":
             hits[h["slug"]] = (f"{who} holds `{b}` for an unlanded row and {first_by(rr, h['key'], r['key'])}, which this "
                                f"chain writes as `{a}` (ADR 0067 d4): {tail}")
+        elif rule == "O-held":
+            hits[h["slug"]] = (f"{who} holds `{b}` for an unlanded row and {first_by(rr, h['key'], r['key'])}, and has no "
+                               f"open Leg to finish or land it, which this chain writes as `{a}` (ADR 0067 d9): {tail}")
         else:
             hits[h["slug"]] = (f"{who} holds `{b}` for an unlanded row, which this chain writes as `{a}` (ADR 0060): "
                                f"{tail}")
@@ -1336,8 +1384,9 @@ def serial_waits(rr, me, hold, toks, checkouts, notes, tasks_dir, git, vault, mi
 
 
 def first_by(rr, key_h, key_r) -> str:
-    """Why H sorts before R in ADR 0067 d4's order (order_key): it began first, or slug order broke a tie of equal
-    stamps (both began at the same one, or neither has begun). leg.py's first_by, its one copy."""
+    """Why H sorts before R in ADR 0067 d4's order, rank-led by d9 (order_key): it began first, it ranks above (estate
+    rank <n>), it was scheduled first (never begun, the earlier `captured:`), or slug order broke a tie (both began at
+    the same stamp, or neither has begun). leg.py's first_by, its one copy."""
     return load_leg(rr).first_by(key_h, key_r)
 
 

@@ -800,9 +800,12 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   `restart.cwd`" when `restart.anyLaunch`), its `task`, "take-over" when `restart.takeOver`, and "blocked by
   `<restart.blockedBy>`" when set. A `surface held by [[<B>]] (<token>)` blocker (ADR 0060) reads "waits its turn:
   [[<B>]] now holds <token>, which Leg <restart.leg> writes", and `surface re-check failed: <line>` is shown as it is.
-  A stand has five causes (ADR 0067 d4), each with its own remedy: [[<B>]] comes first (it began first, or wins the
-  slug order on equal stamps or when neither has begun) and holds an unlanded row (in Chain copies, a done row it
-  has not yet landed: ADR 0067 d3) on that place; or, when either
+  A stand has five causes (ADR 0067 d4), each with its own remedy: [[<B>]] comes first (by rank: a chain that has
+  begun before one that has not, then its estate rank, then the first to begin, else the earlier schedule or the slug
+  order: ADR 0067 d9) and holds an unlanded row (in Chain copies, a done row it has not yet landed: ADR 0067 d3) on
+  that place, where between two chains in Chain copies a code file counts only as a row in progress or a done row not
+  yet landed, and only while [[<B>]] has no open Leg (with one open, they meet at claim by rank, so the blocker clears
+  once [[<B>]]'s Leg opens: run [[<B>]]); or, when either
   chain works that checkout in place (no `chain_copies:`), [[<B>]] comes first and still has unlanded rows in a
   checkout this Leg works, even when the two share no file (the commonest: a never-begun lower-slug chain that nobody
   starts blocks a higher-slug one this way, so name "run [[<B>]] or stamp it `status: dropped`"); or [[<B>]]'s open
@@ -814,7 +817,12 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   remakes the copy on its branch, its commits kept), then start Leg <restart.leg>"; a `chain_copies: <why>: fix the
   note` blocker is shown as it is. In a chain with `chain_copies:`, `restart.cwd` and
   `restart.launch` are already inside the copy: print the launch line as it is, never the alias itself.
-  Its `prompt` is printed, fenced, only where an action below hands it to Lachy.
+  Its `prompt` is printed, fenced, only where an action below hands it to Lachy. A restart whose fresh Leg would
+  only wait on another chain's code file (`restart.task` a row `next` reads as a `wait`, ADR 0067 d9) is still a
+  restart: the Leg begins and waits at claim, inside its turn.
+- **Rank** (ADR 0067 d9), from `rank`: `estate rank <stamp.n> (<stamp.at>)`, or `unstamped` (a WARN line when
+  `rank.warn` is set), then, in a chain with `chain_copies:`, its place `pos` among the copied chains and `lifts`, each
+  `standing` line as `<kind> on [[<task>]] since <at>`, and each `contention.held` row with its `why`. No block in place.
 - **Hold** (ADR 0060), from `hold`. Scope `stuck`: `Holds only <held>` with the `rows` that hold them (each `[[slug]]`
   with its `state`), then `Released <released>` when it is not empty: other chains and parallel runs may use those
   places now. On resume the chain reclaims them, and waits its turn for any that another rollout took meanwhile. Scope
@@ -846,13 +854,17 @@ so leg.py prints it no `restart`, no `next` and an empty `smoke`: its report has
   this plugin's own checkout (begin refuses it, ADR 0040): a Complete Leg works no row".
 - S10 `stopped` → `/thread:execute [[<rollout>]]` as `restart.launch` when you want it to go on (with no `restart`,
   only set-aside rows are left: S12's repair). A `stall` here is the stopped Leg's claim: that Leg's `begin`
-  inherits it, so its needs-you item's `/thread:repair` would start the same Leg.
+  inherits it, so its needs-you item's `/thread:repair` would start the same Leg. A Leg stopped by a stalled rank
+  wait (`rank wait: …`) whose restart reads `surface held by [[<B>]]`, on a holder with no open Leg, starts once
+  [[<B>]]'s Leg opens.
 - S11 `stalled` → `/thread:repair [[<rollout>]]`.
 - S12 `stuck` → `/thread:repair [[<rollout>]]`: sign each gate, hand back a block, or defer it with its dependants.
   Meanwhile it holds only the surfaces its Hold block lists (ADR 0060), so other rollouts carry on beside it.
 - S13 `not-started` or `ready` → `/thread:execute [[<rollout>]]` as `restart.launch`; with `restart.blockedBy`
   `surface held by [[<B>]] (<token>)`, the chain waits its turn (whichever cause, ADR 0067 d4): wait for [[<B>]] to
-  land its rows there, or for its open Leg to close when the line names one (`/thread:status [[<B>]]`), then run it.
+  land its rows there, or for its open Leg to close when the line names one (`/thread:status [[<B>]]`), then run it;
+  on a code file between two chains in Chain copies held by a [[<B>]] with no open Leg, it clears once [[<B>]]'s Leg
+  opens (ADR 0067 d9).
 
 The order is the precedence, as § 4's is: a lineage or an incomplete note stops everything, a halt comes before any
 restart, and a Session that may still be live (a pending or started restart, an open Leg, a started hand-over) is

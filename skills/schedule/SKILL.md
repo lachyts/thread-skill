@@ -960,8 +960,10 @@ the launch its Leg opens in, and the chain's surfaces. A chain's surfaces are it
 (ADR 0067 d4): inside a git checkout a claim is `repo:<toplevel>//<path in it>`, with a trailing `/` for a folder,
 the toplevel being the in-place twin's, and a bare `repo:<toplevel>` covers the whole checkout. Chains whose
 surfaces are disjoint run side by side, and chains whose surfaces overlap are both scheduled: sharing a checkout or
-the vault never blocks a schedule, and each Leg's begin orders them, the one that comes first (the first to begin,
-else by slug) landing its rows on the shared place before the other begins a Leg that writes it. Each chain
+the vault never blocks a schedule, and the chains take turns by rank (ADR 0067 d9): the one that comes first (a chain
+that has begun before one that has not, then estate rank, then the first to begin, else by slug) lands its rows on the
+shared place before the other writes it, at the other's Leg begin, or at its claim, by rank, for a code file between two
+chains in Chain copies while the holder's Leg is open. Each chain
 works every git checkout it writes in its own **Chain copy** (ADR 0067 d2): S5's `leg.py copies` makes a git
 worktree of that checkout on `chain/<note>` under `~/.local/state/thread/chains/` and records it on the note as
 `chain_copies:`, so two chains in one repo share no index or HEAD and meet only file to file; `leg.py land` lands each
@@ -1016,13 +1018,14 @@ one `--surface` per token of the chain's `surfaces` and one `--checkout` per ent
 from S2's JSON (and `--regenerate` when this run has it, which only WARNs: a serial run supersedes nothing).
 Every chain is checked, even after one is refused. A live serial chain never refuses one (ADR 0067 d4): a predicted
 overlap with what it holds prints `WARN: [[<s>]] … also predicts <b>, which this chain predicts as <a>: they take
-turns on it, the first to begin going first (ADR 0067 d4)` (the first chain's finished rows hold the place until
+turns on it by rank (ADR 0067 d4, d9)` (the first chain's finished rows hold the place until
 `leg.py land` puts them on the primary's default branch, so the second begins with that work in its copy: begin's
 fast-forward brings it, or the land it runs before its first claim when begin prints `landFirst`), and a chain working
 one of this chain's checkouts in place (a note with
 no `chain_copies:`; a stuck one works none) prints `WARN: [[<s>]] … works <checkout> in place too, with no Chain copy:
-the two work it a chain at a time: the one that comes first (the first to begin, else by slug) lands every unlanded row
-it has there before the other begins a Leg in it`, while a chain in its own Chain copies shares no index or HEAD and
+the two work it a chain at a time: the one that comes first (by rank: a chain that has begun before one that has not,
+then estate rank, then the first to begin, else by slug) lands every unlanded row it has there before the other begins a
+Leg in it`, while a chain in its own Chain copies shares no index or HEAD and
 gets no such WARN (this chain gets its copies at S5); carry both to S7. `none` → go on. Only
 an unfinished parallel rollout whose Project root a token or a `--checkout` meets refuses. Any refusal (`refuse …`, exit 3) or exit 2 stops the whole run before anything is written, and
 every refusal's stderr goes in one report: each line names the unfinished parallel rollout, its project and state,

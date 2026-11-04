@@ -443,8 +443,8 @@ Orient-graded or undecided members out with their dependants, unstamped; orient 
 - **Surface overlap or session lane.** A chain refused at S3 overlaps an unfinished parallel
   rollout's Project root: report the refusal lines and their remedy, and leave the members unstamped
   where the reshuffle put them; the next move is Hands-on or a later `/thread:orient <project>
-  --steer`. A chain that overlaps a live chain is scheduled, with a WARN that they take turns (ADR
-  0067 d4): carry it to § 9's report. Members schedule
+  --steer`. A chain that overlaps a live chain is scheduled, with a WARN that they take turns by rank
+  (ADR 0067 d4, d9): carry it to § 9's report. Members schedule
   sends to ruling (c)'s session lane (`serial-chains.py`'s `sessionLane`) stay unstamped: name them.
 - **Uncommitted grill docs.** § 6's hold applies to any repo a member writes.
 

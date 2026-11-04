@@ -594,6 +594,37 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Leg's write, and an edit by a session that is no run's task (an interactive
   session, a lead's own thread, a subagent a task agent spawns). _Avoid_: Note
   wait, note lock, lease (alone).
+- **Estate rank** — the place `/thread:orient-all` gives a rollout note it
+  dispatches, stamped as `estate_rank: <n>` and `estate_rank_at: "<pass time>"`
+  by `estate-dispatch.py rank-stamp` (ADR 0067 d9). Each pass re-stamps every
+  live rollout in its current order, then its own new ones by their best
+  member's grade rank, 1..K under one pass time: a later pass ranks above an
+  earlier one, a live run keeps its place ahead of a pass's dispatches, and a
+  full pass never flips a live pair. A re-stamp that cannot write a note stops
+  there, so the order still stands (a stamped prefix carrying the newest pass,
+  an untouched suffix keeping its old keys), and orient-all runs it once more.
+  It leads leg.py's `order_key`, after the tier of whether a chain has begun: a
+  chain that has begun before one that has not, then the estate rank (a stamp
+  before none, a later pass, the lower n), then the first to begin, or for a
+  never-begun chain the earlier `captured:`, then slug. A standalone schedule
+  is unstamped, below every stamped rollout in its tier. Aging never enters it.
+  _Avoid_: priority, grade (the readiness grade is another thing).
+- **Rank wait** — two serial chains in Chain copies meeting on a code file at
+  `leg.py claim`, wait-die by rank (ADR 0067 d9; leg.py's *The rank*). A chain
+  that ranks above a running holder of the file waits for that task to finish
+  and land, then goes first (`next` is `wait` of kind wait); one that ranks
+  below sets its row aside to retry, keeping its rank, and claims another (kind
+  retry); a chain whose own unlanded row would stand behind an earlier chain
+  that is landing waits for that land (kind land). `leg.py wait` logs a `rank
+  wait:` or `rank retry:` line, which stands until the task's claim or the
+  Leg's close: a standing line reserves its task's file (a lower-ranked claim
+  there dies) and ages its chain, lifted a place per hour. A holder with no
+  open Leg is not running and is never waited on: it sets the row aside when it
+  ranks above (a chain left with only such rows closes stopped, and its next
+  begin waits on that holder), and holds nothing when it ranks below. Every wait
+  is bounded at 180 minutes. Nobody is stopped mid-task. Only code files and
+  `any` rank-wait: the vault and `ext:` never do (d6). _Avoid_: lock, lease,
+  preemption.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -617,8 +648,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Project root against serial chains, though it is still its project's one
   unfinished parallel rollout on the repo. Each reclaims its whole claim on resume, and
   waits its turn for a place another rollout took meanwhile: whoever released
-  a place yields it to a chain free to run (ADR 0067 d4's order breaks the
-  rest, so no wait closes a cycle). It is narrower than live: a superseded
+  a place yields it to a chain free to run (ADR 0067 d4's order, rank-led by
+  d9, breaks the rest, so no wait closes a cycle). It is narrower than live: a superseded
   note stamped done but not yet moved is live but not unfinished, and so is a rollout whose
   every task merged before its completion ceremony ran. `--regenerate`
   supersedes this project's unfinished rollout when it is paused or never
