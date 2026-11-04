@@ -32,7 +32,7 @@ usable snapshot than this plugin root, or a live note whose snapshot is unusable
 stdout empty, nothing written: re-run from the root it names; an archived note whose snapshot is gone passes, so
 file-followup after Complete still runs) · 3 a stand (an unclosed Leg of another session, a standing halt,
 a surface another rollout holds (begin's surface re-check, ADR 0060), a revert that would conflict or a dirty path to
-revert; nothing written) · 4 wrong launch (nothing written to the Leg log: in a chain with `chain_copies:` begin may
+revert, a claim the Capacity holds (ADR 0067 d8: *The Capacity*, below); nothing written) · 4 wrong launch (nothing written to the Leg log: in a chain with `chain_copies:` begin may
 first remake a missing copy and stamp a newly needed pair) · 5 the
 rollout's lock was held past its timeout (nothing written). A refusal's JSON carries `exit`, `error` and, from
 begin, the `status_line` its turn ends on. Every git call runs with git's repo-local env vars removed (`git rev-parse
@@ -65,7 +65,7 @@ restarted, copies, land):
       /thread:execute [[<slug>]]`), and a cwd whose checkout's origin is this plugin's own repo (plugin.json's
       repository, norm_origin). A standing halt (the last `closed: halted:` line has no `halt cleared:` line after
       it) is exit 3. An unclosed Leg K: this session's own (its latest began or resumed session id, never `unknown`)
-      resumes silently and writes nothing; `--resume K` logs `resumed` (another K is exit 1); `--take-over` closes K
+      resumes silently and writes nothing but the Leg lease (*The Capacity*); `--resume K` logs `resumed` (another K is exit 1); `--take-over` closes K
       `lost` and begins K+1 that inherits K's claim; anything else is exit 3 naming K, `--resume K` and `--take-over`.
       Otherwise Leg N (the last + 1) begins, after the surface re-check and the launch check. The surface re-check (ADR
       0060 d3), on a fresh Leg or a take-over only (never a silent resume or --resume, and --dry-run included): the
@@ -99,7 +99,7 @@ restarted, copies, land):
       fix names in `verifies:`; every task whose latest smoke result is `fail` with no fix filed for it since; each
       with its `**Verify:**` line or null), the not-done fix tasks, the required MCP namespaces of this launch's
       unlanded rows (their `## Launch` `**MCP:** required …` items), `next` and `progress`.
-  next [--waiting <reason>]                  (read-only, no lock)
+  next [--waiting <reason>]                  (no lock; writes only this Leg's lease, ADR 0067 d8, never under --dry-run)
       The Leg's next act: `finish` (a task this Leg owns, or an inherited claim of a closed Leg: `inherit: true`),
       else `handoff` at five fresh claims (distinct tasks with a `claimed` line in this Leg, so a task re-claimed
       after a gate or a hand-back counts once; an inherited `took` never counts), else `claim` of the
@@ -114,9 +114,14 @@ restarted, copies, land):
       (`stalled: true` on a holder with no open Leg), ahead of `stuck`. `wait` is {task (the row it claims once the wait
       clears: the pick for kinds wait and land, the held row for retry), kind, on, token, why, landFirst, stalled,
       lands (kind land: its own rows waiting to land)}; stalled is also true past RANK_WAIT_MAX_MINUTES (180) since the
-      task's earliest standing line. --waiting adds the turn's
-      `status_line`, `state=waiting reason="<reason>"` (a review in flight, a room stop, a completion verify in
-      flight: legs.md § Complete and § Report).
+      task's earliest standing line. While Capacity is in force (*The Capacity*), a `claim` (a fix task's included) the
+      Mac has no room for is `wait` of kind `capacity` (why its `trickle: …`, `away cap: …` or `heat: …` hold line),
+      or of kind `quota` (why `quota: <login> is inside its line`), with on and token null, landFirst and lands [],
+      stalled false and `capacity` (rr.capacity_gate's block); a stale or unreadable reading's WARN line goes to
+      stderr. --waiting adds the turn's `status_line`, `state=waiting reason="<reason>"` (a review in flight, a room
+      stop, a completion verify in flight, a Capacity wait: legs.md § Complete and § Report), and writes the Leg lease
+      with `waiting: true`. It renews the lease only when this session is the open Leg's own (both ids known and
+      equal), so an `unknown` caller never renews a dead Leg.
   claim --task <t> [--inherit] [--gate <gate>]...
       Re-runs next under the lock and then the rank lock (*The rank*), its contention read again: <t> must be what it
       proposes (with --inherit, an inherited `finish`), so a holder planted since next makes the claim refuse. Stamps
@@ -136,6 +141,14 @@ restarted, copies, land):
       Each --gate is compared with the note's `## Approved gates` (reconcile-rollout.py's _norm_gate): the
       unapproved ones are printed for `set-aside --kind gate`. An exact `None` (execute § 3.7's grammar, bullet,
       case and one trailing `.` aside, as the engine's parseGatedInputs reads it) is no gate, never unapproved.
+      The Capacity (ADR 0067 d8) is read last, after every refusal above: a fresh claim while it is in force stands
+      exit 3 on the quota hold (the heat aside) with `capacity`, `quota` and `status_line` `state=waiting
+      reason="quota: …"`, no lock taken and nothing written; else it takes the trickle claim lock inside the rank
+      lock (not taken within THREAD_NOTE_LOCK_TIMEOUT: exit 5, nothing written), recounts (rr.capacity_gate), and
+      with no room writes the chain's waiting record and stands exit 3 (`capacity`, `status_line` `state=waiting
+      reason="<why>"`), no note written; with room it writes the Leg lease, saves the task note, then the claims
+      write (its own record and wake dropped, a wake for each rollout it keeps places for). An inherited claim, and
+      every claim under the fallback, takes no trickle lock: the lease, then the save, as before.
   wait --task <t> [--for <s>=540]
       The Leg's rank wait on row t (ADR 0067 d9; legs.md § The task loop's `wait`). Exit 1 for a t not in the Queue, or
       no Leg of this session. When next is no `wait` on t, `cleared: true` and nothing logged. Else, unless the hold is
@@ -146,8 +159,13 @@ restarted, copies, land):
       that latest line prints `flipped: true` and the call polls on (the Leg's `next` already read the new kind). It
       polls read-only every RANK_POLL_SECONDS (15), recomputing the contention and the plan, and stops when it clears,
       when the kind flips during the poll (`flipped`), when the hold is stalled, or when --for runs out; --for 0 is one
-      check, --dry-run logs nothing. Prints {verb, task, kind, cleared, flipped, stalled, why, on, token, landFirst,
-      waitedMinutes, lifts, logged, next}.
+      check, --dry-run logs nothing. Kinds `capacity` and `quota` (ADR 0067 d8, *The Capacity*) log no rank line: at
+      its start (the lease written, off --dry-run) kind capacity records the chain waiting (want 1) under the trickle
+      claim lock alone (a lock not taken within 30 s adds one `warns` entry and the poll reads on), kind quota drops
+      its earlier record; it polls read-only every RANK_POLL_SECONDS, re-recording and renewing the lease every
+      CAPACITY_WAIT_REFRESH (600 s), and ends cleared (room), flipped (another kind) or at --for, never stalled.
+      Every wait writes the Leg lease at its start. Prints {verb, task, kind, cleared, flipped, stalled, why, on,
+      token, landFirst, waitedMinutes, lifts, logged, capacity, warns, next}.
   change --task <t> [--top <toplevel>]       (read-only, no lock)
       Per `leg_base` checkout: the commits in `<sha>..HEAD` whose message has a `Task: [[<t>]]` line, their paths
       minus `docs/reviews/`, the `:(literal)` pathspecs, and a WARN per commit on the range's first-parent line with no
@@ -359,7 +377,8 @@ restarted, copies, land):
       tombstones, rr._fold_unit), dependants (below) and setAside {status, summary, gates, fingerprint
       (rr._block_fingerprint)} for a set-aside row), `smoke` (the smoke list of the Leg that acts next: the open
       one, else Leg last + 1), `fixes` (the not-done fix rows), `next` (the open Leg's next act, else a fresh
-      Leg's, each read with the rank's contention), `stall`, `hold` (hold_of, below), `rank` {stamp (the estate rank,
+      Leg's, each read with the rank's contention, and the open Leg's gated by the Capacity alone, never a quota:
+      status runs in another session), `stall`, `hold` (hold_of, below), `rank` {stamp (the estate rank,
       or null), warn (a malformed stamp), key (order_key, as pos read it: a never-begun chain's as begun now), pos,
       lifts, standing [{task, kind, at}], contention {held, land, warns}} (*The rank*; pos and lifts null in place)
       and `needsYou` (needs_you's items, plus a halt, a manual hand-over, a pending or manual restart and a stall). A
@@ -490,7 +509,23 @@ next and never nested, so two chains in one repo land in turn and no lock cycle 
 stands that copy (exit 0), never exit 5. claim, and wait's log, also take the machine-wide rank lock (RankLock,
 `<lock dir>/rank-claim.lock`), always inside the rollout's lock and never nested with a repo lock, around the
 contention read, the plan, the save and the log, so two chains never claim one code file at once; a wait past the same
-timeout is exit 5, nothing written.
+timeout is exit 5, nothing written. While Capacity is in force a fresh claim also takes the machine-wide trickle claim
+lock (reconcile-rollout.py's TRICKLE_LOCK, every lead's `next`'s), inside the rank lock, around only its recount, the
+Leg lease, the task note's save and the claims write: never git, gh or a child process, and nothing takes a leg.py lock
+inside it, so the order is rollout lock, rank lock, trickle lock, note locks, and no cycle forms with `next` (trickle
+lock, then note locks). A capacity `wait` takes the trickle lock alone for its record write.
+
+The Capacity (ADR 0067 d8; execute away.md § Capacity, its spec). While a fresh capacity.json is in force (rr's
+_capacity_state), a Leg's claims count on the Mac behind its Leg lease, and its fresh claims are gated by the room
+(rr.capacity_gate, the one copy of the arithmetic: C, less the count elsewhere, less the places the fair share keeps
+for other waiters, less this chain's own counted rows; the Heat hold and the quota hold too). leg_gate turns a held
+`claim` into the `wait` kinds above, in next, begin's next, wait's poll and status's own next (status: the Capacity
+alone); begin's launch check, claim's re-check, close's plans and status's fresh and restart plans are never gated. The
+Leg lease is ~/.config/thread/leases/<rollout>.json, `{rollout, written_at, by: "leg"}` plus `waiting: true` from
+`next --waiting`, written off --dry-run on the open Leg by begin (any begin that runs it), next (its own session only),
+claim, wait, smoke, done, set-aside and land; close (any outcome) deletes it. It lapses LEG_LEASE_LAPSE (90 min) after
+its last write, or LEG_WAIT_LAPSE (180 min) for a waiting one, from the latest boot or wake if later. Under the
+fallback nothing is gated and nothing counts; the lease is still written.
 
 The rank (ADR 0067 d9; CONTEXT.md **Estate rank**, **Rank wait**): same-file waits go by rank, wait-die, at claim.
 order_key (rank-led: a chain that has begun before one that has not, then the estate rank orient-all stamps, a later
@@ -1185,6 +1220,47 @@ def next_json(plan):
     return out
 
 
+# ---- the Capacity and the Leg lease (p36-7, ADR 0067 d8; execute away.md § Capacity) --------------------------
+
+CAPACITY_WAIT_REFRESH = 600   # a capacity wait re-records its waiting record and renews its lease this often (s)
+
+
+def leg_lease(ctx, leg, waiting=False, strict=False):
+    """Write this Leg's lease (the module docstring's *The Leg lease*): rr._lease_write(<rollout>, now, "leg"), with
+    `waiting: true` from `next --waiting`, off --dry-run, only for an open Leg (`leg`, my_leg's or the chain's). strict
+    (`next`'s rule): only when this session is the Leg's own, both ids known and equal, so an `unknown` caller never
+    renews a dead Leg. Best-effort: a write that fails prints rr's one `lease: warning:` line."""
+    if ctx.dry or leg is None or leg.get("closed") is not None:
+        return
+    if strict and (ctx.session == "unknown" or leg.get("session") in (None, "unknown") or leg["session"] != ctx.session):
+        return
+    rr._lease_write(ctx.slug, ctx.now, "leg", waiting=waiting)
+
+
+def leg_mine(chain):
+    """This chain's own count on the Mac (rr._leg_tasks' rows): its rows in progress owned `leg-<n>`."""
+    return sum(1 for r in chain.rows if r.state == "running" and r.note is not None and owner_leg(r.note) is not None)
+
+
+def leg_gate(ctx, chain, plan, quota=True):
+    """(plan, gate): a `claim` plan (a fix task's included) held by the Capacity becomes a `wait` of kind `capacity` or
+    `quota` (rr.capacity_gate, read-only and lock-free): {action: wait, kind, task, row, why (the hold's prefix line),
+    on: null, token: null, landFirst: [], stalled: false, lands: [], capacity, fix, held, setAside, claims}. Every other
+    plan passes untouched, and so does a claim while Capacity is not in force (gate None for a plan it never reads).
+    quota: the caller's own Login is read (next, begin, wait); False reads the Capacity alone (status)."""
+    if plan.get("action") != "claim":
+        return plan, None
+    g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, leg_mine(chain), 1,
+                         quota_env=os.environ if quota else None)
+    if not g["held"]:
+        return plan, g
+    r = plan["row"]
+    held = {"action": "wait", "task": r.slug, "row": r, "kind": g["kind"], "on": None, "token": None, "why": g["why"],
+            "landFirst": [], "stalled": False, "lands": [], "capacity": g["capacity"], "fix": bool(plan.get("fix")),
+            **{k: plan[k] for k in ("held", "setAside", "claims") if k in plan}}
+    return held, g
+
+
 # ---- the log writer -----------------------------------------------------------------------------------------------
 
 def log_line(note, line):
@@ -1747,7 +1823,8 @@ def begin_out(ctx, chain, n, resumed, took_over=None, alias=None, folder=None, c
     alias = g.get("alias") or alias
     folder = g.get("folder") or folder
     chain.contend = rank_contention(ctx, chain, n)
-    plan = plan_next(chain, n, alias, folder)
+    plan, _g = leg_gate(ctx, chain, plan_next(chain, n, alias, folder))   # the Capacity (p36-7)
+    leg_lease(ctx, chain.legs.get(n))   # every begin that runs the Leg: fresh, take-over, --resume, silent resume
     inherited = [r.slug for r in chain.rows if r.state == "running" and r.note is not None
                  and owner_leg(r.note) not in (None, n)
                  and (chain.legs.get(owner_leg(r.note)) is None or chain.legs[owner_leg(r.note)]["closed"] is not None)]
@@ -1790,7 +1867,11 @@ def cmd_next(ctx, a):
     chain = Chain(ctx)
     leg = my_leg(ctx, chain)
     chain.contend = rank_contention(ctx, chain, leg["n"])
-    plan = plan_next(chain, leg["n"], leg["alias"], leg["folder"])
+    plan, g = leg_gate(ctx, chain, plan_next(chain, leg["n"], leg["alias"], leg["folder"]))
+    for w in (g or {}).get("warns") or []:
+        print(w, file=sys.stderr)
+    # The Leg lease (p36-7): only this session's own Leg renews it, never under --dry-run; --waiting holds it 180 min.
+    leg_lease(ctx, leg, waiting=a.waiting is not None, strict=True)
     prog = chain.progress(leg["n"])
     out = {"verb": "next", "rollout": ctx.slug, "leg": leg["n"], **next_json(plan), "progress": prog}
     if a.waiting is not None:
@@ -1808,7 +1889,8 @@ def cmd_wait(ctx, a):
     polls on: the Leg's `next` already read the new kind, so only a flip during the poll ends the call, and a kind that
     keeps changing between calls never returns at once. It polls read-only every RANK_POLL_SECONDS, recomputing the
     contention and the plan, until it clears, the kind flips from the one this call logged or read, the hold is
-    stalled, or --for runs out (--for 0: one check)."""
+    stalled, or --for runs out (--for 0: one check). A Capacity wait (kinds `capacity` and `quota`, p36-7) is
+    capacity_wait's: no rank line, its own waiting record instead."""
     if a.for_ < 0:
         raise Usage("--for takes seconds, 0 or more")
     chain = Chain(ctx)
@@ -1816,13 +1898,14 @@ def cmd_wait(ctx, a):
     r = chain.row(a.task)
     if r is None or r.state == "deferred":
         raise Refuse(1, f"[[{a.task}]] is not a task of this chain's Queue")
+    leg_lease(ctx, leg)   # p36-7: every wait renews the Leg lease at its start, off --dry-run
     base_now, t0 = ctx.now, time.monotonic()
 
     def check():
         ch = Chain(ctx)
         lg = my_leg(ctx, ch)
         ch.contend = rank_contention(ctx, ch, lg["n"])
-        return ch, lg, plan_next(ch, lg["n"], lg["alias"], lg["folder"])
+        return (ch, lg) + (leg_gate(ctx, ch, plan_next(ch, lg["n"], lg["alias"], lg["folder"]))[0],)
 
     def on_t(p):
         return p["action"] == "wait" and p["task"].lower() == r.slug.lower()
@@ -1830,19 +1913,22 @@ def cmd_wait(ctx, a):
     ch, lg, plan = check()
     out = {"verb": "wait", "rollout": ctx.slug, "leg": lg["n"], "task": r.slug, "kind": None, "cleared": False,
            "flipped": False, "stalled": False, "why": None, "on": None, "token": None, "landFirst": [],
-           "waitedMinutes": 0, "lifts": ch.contend.get("lifts", 0), "logged": False, "dryRun": ctx.dry}
+           "waitedMinutes": 0, "lifts": ch.contend.get("lifts", 0), "logged": False, "capacity": None, "warns": [],
+           "dryRun": ctx.dry}
 
     def done(ch, plan, **kw):
         st = (ch.contend.get("standing") or {}).get(r.slug.lower()) or {}
         out.update(kw, lifts=ch.contend.get("lifts", 0), waitedMinutes=int(st.get("age", 0)), next=next_json(plan))
         if on_t(plan):
             out.update(kind=plan["kind"], stalled=plan["stalled"], why=plan["why"], on=plan["on"], token=plan["token"],
-                       landFirst=plan["landFirst"])
+                       landFirst=plan["landFirst"], capacity=plan.get("capacity"))
         return out
 
     if not on_t(plan):
         return done(ch, plan, cleared=True)
     kind = plan["kind"]
+    if kind in ("capacity", "quota"):
+        return capacity_wait(ctx, a, r, kind, check, on_t, done, out, base_now, t0)
     if plan["stalled"]:
         return done(ch, plan)
 
@@ -1878,6 +1964,56 @@ def cmd_wait(ctx, a):
             return done(ch, plan, cleared=True)
         if plan["kind"] != kind or plan["stalled"]:
             return done(ch, plan, flipped=out["flipped"] or plan["kind"] != kind)
+
+
+def capacity_record(ctx, kind, warns):
+    """A Capacity wait's waiting record (p36-7): under the trickle claim lock alone (never with the rollout's lock or
+    the rank lock), one fresh rr.capacity_gate read and its claims write: kind `capacity` records this chain waiting
+    (want 1) while the gate still holds it, anything else drops its record. A lock not taken within
+    THREAD_NOTE_LOCK_TIMEOUT (30 s) adds one `warns` entry and the wait reads on, read-only. Never under --dry-run."""
+    if ctx.dry:
+        return
+    lock = rr._note_lock(lock_path=rr._trickle_paths()[0], label="trickle claim lock")
+    try:
+        lock.__enter__()
+    except OSError as e:
+        warns.append(f"{rr.TRICKLE_WARN} {e} — this Leg's waiting record is not written; the wait reads on")
+        return
+    try:
+        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, leg_mine(Chain(ctx)), 1, quota_env=os.environ)
+        w = g["write"]("waiting" if kind == "capacity" and g["held"] and g["kind"] == "capacity" else "drop")
+        if w:
+            warns.append(w)
+    finally:
+        lock.__exit__(None, None, None)
+
+
+def capacity_wait(ctx, a, r, kind, check, on_t, done, out, base_now, t0):
+    """`wait`'s Capacity branch (kinds `capacity` and `quota`, p36-7; legs.md § The task loop's `wait`): it logs no rank
+    line. At its start (the lease already written) it records its waiting record (kind capacity) or drops it (kind
+    quota: capacity_record), then polls read-only every RANK_POLL_SECONDS, the plan and the gate recomputed, re-recording
+    and renewing the Leg lease every CAPACITY_WAIT_REFRESH seconds (under TRICKLE_WAIT_TTL, so a lead on an older
+    snapshot that dropped the record loses it for at most that long). It ends `cleared: true` once next is no `wait` on
+    t (room), `flipped` when the kind changes, or when --for runs out; never `stalled`."""
+    warns = out["warns"]
+    capacity_record(ctx, kind, warns)
+    refreshed = time.monotonic()
+    ch, lg, plan = check()
+    while True:
+        if not on_t(plan):
+            return done(ch, plan, cleared=True)
+        if plan["kind"] != kind:
+            return done(ch, plan, flipped=True)
+        left = a.for_ - (time.monotonic() - t0)
+        if left <= 0:
+            return done(ch, plan)
+        time.sleep(min(RANK_POLL_SECONDS, left))
+        ctx.now = base_now + timedelta(seconds=time.monotonic() - t0)
+        ch, lg, plan = check()
+        if on_t(plan) and plan["kind"] == kind and time.monotonic() - refreshed >= CAPACITY_WAIT_REFRESH:
+            leg_lease(ctx, lg)
+            capacity_record(ctx, kind, warns)
+            refreshed = time.monotonic()
 
 
 def stamp_bases(ctx, chain, row):
@@ -1976,7 +2112,9 @@ def row_tops(ctx, row):
 
 def cmd_claim(ctx, a):
     # The rank lock inside the rollout's (ADR 0067 d9): the contention read, the plan, the save and the log run under it,
-    # so two chains never both claim one file.
+    # so two chains never both claim one file. The Capacity (p36-7) is read last: everything slow or refusing (the
+    # re-check, the bases' git, the dependency gaps, the gates) runs first, and a fresh claim in force takes the trickle
+    # claim lock inside the rank lock around only its recount, the Leg lease, the task note's save and the claims write.
     with Lock(ctx), RankLock(ctx):
         chain = Chain(ctx)
         leg = my_leg(ctx, chain)
@@ -2017,7 +2155,7 @@ def cmd_claim(ctx, a):
                 note.set("leg_primary_base", "[" + ", ".join(f'"{b}"' for b in pbases) + "]", after=("leg_base",))
         approved = [rr._norm_gate(l) for l in note.section_text(APPROVED_GATES).split("\n") if l.strip()]
         unapproved = [g for g in real_gates(a.gate) if rr._norm_gate(g) not in approved]
-        save(ctx, note)
+        claim_save(ctx, chain, leg, row, note, fresh=not a.inherit)
         text = (f"took [[{row.slug}]] (inherited from Leg {plan['from']})" if a.inherit else f"claimed [[{row.slug}]]")
         if not ctx.dry:
             log_line(chain.note, leg_line(ctx, n, text))
@@ -2031,6 +2169,58 @@ def cmd_claim(ctx, a):
         if primary is not None:
             out["leg_primary_base"] = primary
         return out
+
+
+def capacity_stand(ctx, chain, n, row, why, capacity, quota=None):
+    """claim's Capacity stand (p36-7): exit 3, nothing written to the notes, its turn ends `waiting` on the hold."""
+    extra = {"capacity": capacity, "status_line": status_line(ctx.slug, chain.progress(n), "waiting", why)}
+    if quota is not None:
+        extra["quota"] = quota
+    raise Refuse(3, f"{why}: [[{row.slug}]] waits for room on the Mac; nothing written to the notes: run `leg.py next`, "
+                    f"then `leg.py wait --task {row.slug}` (legs.md § The task loop's `wait`)", **extra)
+
+
+def claim_save(ctx, chain, leg, row, note, fresh):
+    """claim's write of the task note (p36-7, ADR 0067 d8; the module docstring's claim). A fresh claim while Capacity
+    is in force: the quota hold (the heat aside) stands at once, no lock and nothing written; else under the trickle
+    claim lock (a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 5, nothing written: a Leg's stamp counts at
+    once, so it never claims unlocked) the recount (rr.capacity_gate): no room writes this chain's waiting record and
+    stands (exit 3); room writes the Leg lease, saves the note, then the claims write (its own record and wake dropped,
+    a wake for each rollout it keeps places for). --dry-run reads the gate and writes nothing. Otherwise (the fallback, or
+    an inherited claim, which is never gated) the lease best-effort, then the save, as before."""
+    n = leg["n"]
+    state = rr._capacity_state(ctx.now) if fresh else None
+    if state is None or not state["inForce"]:
+        leg_lease(ctx, leg)
+        save(ctx, note)
+        return
+    if rr._quota_held(state) and not rr._heat_state()["held"]:
+        capacity_stand(ctx, chain, n, row, rr._quota_why(state), None, quota=state["quota"])
+    if ctx.dry:
+        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, leg_mine(chain), 1, quota_env=os.environ)
+        if g["held"]:
+            capacity_stand(ctx, chain, n, row, g["why"], g["capacity"], quota=state["quota"] if g["kind"] == "quota" else None)
+        return
+    lock = rr._note_lock(lock_path=rr._trickle_paths()[0], label="trickle claim lock")
+    try:
+        lock.__enter__()
+    except OSError as e:
+        raise Refuse(5, f"{e}: a claim under the Capacity never claims unlocked; nothing written (retry once, then end "
+                        "the turn halted)")
+    try:
+        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, leg_mine(chain), 1, quota_env=os.environ)
+        if g["held"]:
+            w = g["write"]("waiting" if g["kind"] == "capacity" else "drop")
+            if w:
+                print(w, file=sys.stderr)
+            capacity_stand(ctx, chain, n, row, g["why"], g["capacity"], quota=state["quota"] if g["kind"] == "quota" else None)
+        leg_lease(ctx, leg)
+        save(ctx, note)
+        w = g["write"]("served")
+        if w:
+            print(w, file=sys.stderr)
+    finally:
+        lock.__exit__(None, None, None)
 
 
 def commits_for(top, base, slug, exclude=()):
@@ -2132,6 +2322,7 @@ def cmd_smoke(ctx, a):
         if not ctx.dry:
             log_line(chain.note, leg_line(ctx, leg["n"], text))
             save(ctx, chain.note)
+        leg_lease(ctx, leg)
         return {"verb": "smoke", "rollout": ctx.slug, "leg": leg["n"], "task": r.slug, "result": res, "dryRun": ctx.dry}
 
 
@@ -2433,6 +2624,7 @@ def cmd_done(ctx, a):
         if not ctx.dry:
             log_line(chain.note, leg_line(ctx, n, f"done [[{r.slug}]] (verify {verify}{tail})"))
             save(ctx, chain.note)
+        leg_lease(ctx, leg)
         return {"verb": "done", "rollout": ctx.slug, "leg": n, "task": r.slug, "verify": verify, "reviewed": reviewed,
                 "codeWriting": bool(code), "dryRun": ctx.dry}
 
@@ -2546,6 +2738,7 @@ def cmd_set_aside(ctx, a):
                 log_line(chain.note, leg_line(ctx, n, f"reverted {sha} in {top}"))
             log_line(chain.note, leg_line(ctx, n, f"set aside [[{r.slug}]] ({status}): {reason_text(a.reason, 200)}"))
             save(ctx, chain.note)
+        leg_lease(ctx, leg)
         return {"verb": "set-aside", "rollout": ctx.slug, "leg": n, "task": r.slug, "status": status,
                 "reverted": [{"sha": s, "top": t} for s, t in reverted], "dryRun": ctx.dry}
 
@@ -3166,6 +3359,7 @@ def cmd_land(ctx, a):
             return out
         if a.retire:
             return land_retire(ctx, chain, leg, pairs, out)
+        leg_lease(ctx, leg)   # p36-7: an open Leg's land renews its lease (a closed one's never does)
         if a.red is not None:
             return land_red(ctx, chain, leg, pairs, a.red, out)
         return land_all(ctx, chain, leg, pairs, a.verified, out)
@@ -3520,6 +3714,7 @@ def cmd_close(ctx, a):
         if not ctx.dry:
             log_line(chain.note, leg_line(ctx, n, line))
             save(ctx, chain.note)
+            rr._lease_drop(ctx.slug)   # p36-7: a closed Leg holds no place (a stopped or halted claim counts no more)
         prog = chain.progress(n)
         out["progress"] = prog
         out["needs_you"] = needs_you(ctx, chain, outcome, a.reason)
@@ -3681,6 +3876,7 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
         out.update(archived=None, committed=False)
         return out
     save(ctx, chain.note)
+    rr._lease_drop(ctx.slug)   # p36-7: the last Leg's close drops its lease
     dest = ctx.tasks / "Archive" / "Rollouts" / ctx.rollout.name
     dest.parent.mkdir(parents=True, exist_ok=True)
     vault = ctx.vault
@@ -4519,6 +4715,9 @@ def cmd_status(ctx, a):
         own_contend = {} if ended else rank_contention(ctx, chain, open_leg["n"])
         chain.contend = own_contend
         own = plan_next(chain, open_leg["n"], open_leg["alias"], open_leg["folder"])
+        # The Capacity alone (p36-7): status runs in another session (the Reflection's, /thread:status), so it never
+        # reads a Login's quota; it writes no lease.
+        own = own if ended else leg_gate(ctx, chain, own, quota=False)[0]
     else:
         own = fresh_rank
     chain.contend = {}

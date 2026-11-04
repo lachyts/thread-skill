@@ -21,7 +21,7 @@ PLUGIN="$(cd "$HERE/../../.." && pwd)"
 . "$HERE/../../../tests/lib/rollout-fixtures.sh"   # away_file; THREAD_HEAT_LEVEL=0
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
-unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR XDG_STATE_HOME
+unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR CLAUDE_ACCOUNT_PINNED XDG_STATE_HOME
 export THREAD_NOTE_LOCK_DIR="$TMP/note-locks"
 export THREAD_MACHINE_TIMES='{}'
 export THREAD_HEAT_LEVEL=0
@@ -238,6 +238,13 @@ mkro; mkt a open "owner: lead"
 entry 2026-10-26T08:00:00Z
 THREAD_HEAT_LEVEL=2 J=$(mv)
 ok "$(j "$J" '[d["verdict"], d["cause"], d["reason"]]')" '["waiting","heat","heat: the Mac is hot (heavy)"]' "M10: the Heat hold → heat"
+# p36-7: the quota hold (a fresh Capacity, the Login inside its line) is a meant wait too, cause quota.
+printf '{"capacity": 4, "written_at": "2026-10-26T11:59:00Z", "logins": {"login-a": {"inside_line": true}}}' > "$D/home/.config/thread/capacity.json"
+export THREAD_HEAT_LEVEL=0   # M10's assignment above left the shell's exported level at 2
+J=$(CLAUDE_CODE_SESSION_ID=s1 CLAUDE_ACCOUNT_PINNED=login-a mv)
+ok "$(j "$J" '[d["verdict"], d["cause"], d["reason"]]')" '["waiting","quota","quota: login-a is inside its line"]' "M10q: the quota hold → quota"
+ok "$(j "$(mv)" '[d["cause"] != "quota", d["work"]["start"]]')" '[true,["a"]]' "M10q: … another caller (no Claude Code session) reads no quota: its start is work"
+rm -f "${D:?}/home/.config/thread/capacity.json"
 scen m11
 mkro; mkt a open; mkt b open
 ok "$(vc)" '["waiting","not-started"]' "M11: never started, no lead-entry → not-started"

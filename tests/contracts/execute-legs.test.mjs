@@ -106,6 +106,7 @@ const TABLE = [
   '| Mid-Leg, review in flight | `waiting reason="review in flight: [[t]]"` | *nothing yet* | allow |',
   '| Room stop | `waiting reason="room stop: …"` | *nothing yet* | allow |',
   '| Complete, completion verify running | `waiting reason="completion verify in flight"` | *nothing yet* | allow |',
+  '| Capacity or quota wait | `waiting reason="<why>"` | *nothing yet* | allow |',   // p36-7, ADR 0067 d8
   '| handoff, successor started | `done reason="handed off to Leg <N+1>"` after the banner | *closed*: reports to the origin, archives | allow |',
   '| handoff, manual | `halted reason="manual handoff: Leg <N+1> in <alias> from <folder>"` | demand | allow |',
   '| complete | `done` after the banner | *closed*: the final report | allow |',

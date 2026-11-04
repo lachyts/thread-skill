@@ -442,9 +442,9 @@ ok "$(q "$J" '[d["start"], d["restart"], d["slotsInUse"], d["slotLimit"], d["cei
   "A1: Away cap 4 with 4 running elsewhere: nothing starts, slotLimit 0 under the ceiling 4, no halt"
 ok "$(q "$J" "$holds")" "{\"x1\":\"$AC4\",\"x2\":\"$AC4\",\"x3\":\"$AC4\"}" "A1: every row is held on the Away cap"
 ok "$(q "$J" "$tka")" '[true,"fresh",2,4,{"ro-a":2,"ro-c":2},4]' "A1: trickle reports Away, the Trickle's N 2 and the Away cap 4"
-# p28-4: lapsed follows elsewhere; p28-5: the fair share's `kept` follows `running` as the block's last key.
-ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","lapsed","running","kept"]' \
-  "A1: awayCap follows limit, lapsed (p28-4) follows elsewhere, every other trickle key unchanged (kept, p28-5, last)"
+# p28-4: lapsed follows elsewhere; p28-5: the fair share's `kept` follows `running`; p36-7: `capacity` is the block's last key.
+ok "$(q "$J" 'list(d["trickle"])')" '["away","file","why","limit","awayCap","until","morning","elsewhere","lapsed","running","kept","capacity"]' \
+  "A1: awayCap follows limit, lapsed (p28-4) follows elsewhere, every other trickle key unchanged (kept, p28-5, then capacity, p36-7, last)"
 ok "$(lines)" 0 "A1: a fresh file prints no WARN"
 
 # ── A2: partial room: starts fill up to the Away cap less the count elsewhere ────────────────────────────────────
@@ -677,7 +677,7 @@ before=$(sums)
 J=$(st ro-b); rc=$?
 ok "$rc" 0 "S1: status exits 0"
 ok "$(q "$J" "$tks")" '[false,"fresh",2,{"ro-a":2},1,3]' "S1: not Away, fresh, Trickle 2, ro-a's 2 elsewhere, 1 here, 3 running"
-ok "$(q "$J" 'sorted(d["trickle"])')" '["away","awayCap","elsewhere","file","here","lapsed","lease","limit","morning","running","until","why"]' "S1: the trickle block's exact keys"
+ok "$(q "$J" 'sorted(d["trickle"])')" '["away","awayCap","capacity","elsewhere","file","here","lapsed","lease","limit","morning","running","until","why"]' "S1: the trickle block's exact keys (capacity: p36-7)"
 ok "$(lines)" 0 "S1: … with empty stderr"
 away_raw "$BASE"
 J=$(st ro-b)
