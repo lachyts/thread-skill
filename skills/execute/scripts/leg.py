@@ -4,23 +4,25 @@
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py <verb> --rollout <note> [common flags] [verb flags]
 
 A serial rollout (`shape: serial`) runs as a chain of Legs: visible sessions that each work tasks themselves, close
-and hand the rest to a fresh successor. This helper does every vault and git write a Leg makes but legs.md §
-Complete's own commands (its phase close, `reconcile-project.py --apply`, and its completion verify,
-`reconcile-rollout.py completion-verify --run`, ADR 0055), so a Leg never hand-edits frontmatter. Stdlib only,
+and hand the rest to a fresh successor. This helper does every vault and git write a Leg makes but a task's own work
+commits, a land conflict's hand resolution (legs.md § The task loop's Land: the merge of the primary's default branch
+into `chain/<rollout>` in the copy, and its commit) and legs.md § Complete's own commands (its phase close,
+`reconcile-project.py --apply`, and its completion verify, `reconcile-rollout.py completion-verify --run`, ADR 0055), so
+a Leg never hand-edits frontmatter. Stdlib only,
 python >= 3.9, POSIX (fcntl). It loads reconcile-rollout.py as a module (Note, _scan, _queue_state, _dep_status,
 incomplete, _stamp, PHASED_STEM_RE, _norm_gate, _fm_block; _leg_tops, the one parser of `leg_base:` and `leg_head:`;
 and the completion verify's _completion_config, _completion_state, _completion_summary, _find_note,
 COMPLETION_DECIDED, COMPLETION_RED_PREFIX and CompletionValueError), as serial-chains.py and unfinished-rollout.py
 do, and serial-chains.py for norm_origin and the surface grammar. begin and status run unfinished-rollout.py's
 read-only `check --shape serial --resume` (the surface re-check, ADR 0060), and unfinished-rollout.py loads this file
-in turn for hold_of (no recursion: hold_of never spawns).
+in turn for hold_of, order_key and first_by (no recursion: none of them spawns).
 
-Common flags: --rollout <path, or a slug under --tasks-dir; once that note is gone, its `Archive/Rollouts/` copy,
-which every writing verb but file-followup refuses (exit 1)> · --tasks-dir (default <vault>/Work/Tasks) · --vault
-(default the tasks dir's grandparent when --tasks-dir is given, else ~/repos/obsidian) · --now <ISO> (stamps; the
-clock otherwise) · --session <id> (default CLAUDE_CODE_SESSION_ID, then CODEX_THREAD_ID, else `unknown`) ·
---harness claude|codex (default: codex under CODEX_THREAD_ID alone, else claude) · --dry-run (compute and print,
-write nothing, take no lock).
+Common flags: --rollout <path, or a slug under --tasks-dir; once that note is gone, its `Archive/Rollouts/` copy
+(read as archived by that path too), which every writing verb but file-followup refuses (exit 1)> · --tasks-dir
+(default <vault>/Work/Tasks) · --vault (default the tasks dir's grandparent when --tasks-dir is given, else
+~/repos/obsidian) · --now <ISO> (stamps; the clock otherwise) · --session <id> (default CLAUDE_CODE_SESSION_ID, then
+CODEX_THREAD_ID, else `unknown`) · --harness claude|codex (default: codex under CODEX_THREAD_ID alone, else claude) ·
+--dry-run (compute and print, write nothing, take no lock).
 
 Output: one JSON line on stdout for every exit but a usage error and the Engine snapshot guard. Exit codes: 0 ok · 1
 refusal (nothing written) · 2 usage (stdout empty, one `leg:` line on stderr), or the Engine snapshot guard (ADR 0043:
@@ -29,7 +31,8 @@ usable snapshot than this plugin root, or a live note whose snapshot is unusable
 stdout empty, nothing written: re-run from the root it names; an archived note whose snapshot is gone passes, so
 file-followup after Complete still runs) · 3 a stand (an unclosed Leg of another session, a standing halt,
 a surface another rollout holds (begin's surface re-check, ADR 0060), a revert that would conflict or a dirty path to
-revert; nothing written) · 4 wrong launch (nothing written) · 5 the
+revert; nothing written) · 4 wrong launch (nothing written to the Leg log: in a chain with `chain_copies:` begin may
+first remake a missing copy and stamp a newly needed pair) · 5 the
 rollout's lock was held past its timeout (nothing written). A refusal's JSON carries `exit`, `error` and, from
 begin, the `status_line` its turn ends on. Every git call runs with git's repo-local env vars removed (`git rev-parse
 --local-env-vars`), so an exported GIT_DIR never redirects it.
@@ -39,8 +42,21 @@ The Queue. Each `## Queue` table row is `| <n> | [[<slug>\\|<alias>]] | `<launch
 deferred out of the chain: skipped and not counted. A row whose note is missing is held `note not found`. K is the
 done rows, fix rows included; N every counted row.
 
+Chain copies (ADR 0067 d2; CONTEXT.md **Chain copy**). A note that carries `chain_copies:` (serial-chains.py's
+read_chain_copies: `["<checkout> -> <copy>", …]`) works each git checkout it writes in its own Chain copy: a git worktree
+of that primary checkout on `chain/<rollout slug>` at `<copy dir>/<repo name>-<rollout slug>` (`-<k>-` before the slug
+for a second checkout of one name), where `<copy dir>` is $THREAD_CHAIN_COPY_DIR, else
+${XDG_STATE_HOME:-~/.local/state}/thread/chains, never at or under ~/repos or ~/Projects (exit 1). Queue folders, the Leg
+log's folders and every token stay primary paths; each Leg-facing folder (begin's launch check, the hand-over, the
+restart, the manual lines) maps into the copy (serial-chains.py's copy_folder), and a Leg's launch line there is
+`cd <copy folder> && <the generated alias's command after its own cd>` (the alias's `cd` opens the primary; its whole
+command when it has no `cd`; read from $THREAD_LAUNCH_ALIASES, else
+~/repos/workspaces/_shared/generated/launch-aliases.zsh), else prose that says never to run the alias itself. A note with
+no `chain_copies:` key works every checkout in place, exactly as before; a malformed key is exit 1 (`chain_copies: <why>:
+fix the note`) for begin, claim and copies.
+
 Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-followup, close, handed, clear-halt,
-restarted):
+restarted, copies, land):
   begin [--cwd <dir>] [--take-over | --resume <N>]
       Refuses (exit 1): a note not found, a non-serial note, an incomplete note (`incomplete: true`, or
       reconcile-rollout.py's incomplete), a dropped or superseded note, a done note, a `paused:` or
@@ -61,7 +77,20 @@ restarted):
       realpath, case-folded, must be the
       folder of the first row the Leg must work (an inherited claim, else the first fix task, else the first
       claimable row), and a `cx-*` alias needs codex (any other, claude); a mismatch is exit 4 with the row's launch
-      line and the Leg prompt, nothing written. A resume skips the check. Prints the Leg, its inherited tasks, its
+      line and the Leg prompt, nothing written to the Leg log. A resume skips the check. In a chain with
+      `chain_copies:`, after the re-check and before the launch check, begin runs `copies` (below) under its lock, so a
+      deleted copy is remade on its branch and a newly needed checkout gets its pair; the launch check then compares the
+      cwd with the row's folder inside its copy, exit 4 naming that folder and the copy's launch line; a row-less Leg
+      (complete or stuck) logs the primary folder of its cwd (primary_folder), so the Leg log names Queue folders only;
+      and on a fresh Leg or a take-over each copy is fast-forwarded (`merge --ff-only`) to its primary's default branch
+      when that branch resolves, the chain branch is a strict ancestor of it, the copy is clean and no row is in
+      progress, whatever the primary has checked out (the merge reads only refs/heads/<d>; a skip but an
+      already-current copy, or a failed merge, is a WARN; never the primary). A copy skipped because its chain branch
+      has commits <d> lacks (a land that stood at the last close) WARNs `… has commits <d> lacks (run leg.py land before
+      the first claim: it merges <d> in)` and sets `landFirst`, false in place, on a resume, on --dry-run and while a
+      row is in progress (legs.md § Begin 0). Prints `copies` ({checkout, copy, branch, made, fastForwarded}, [] in
+      place), `cwd` (the Leg's launch folder inside its copy, else that folder), `landFirst` and `warns`. Prints the
+      Leg, its inherited tasks, its
       smoke list (every done task stamped `leg: K`, K < N, with no `smoke:` line from a Leg after K: the previous
       Leg's, and an earlier Leg's that a lost, stopped or halted Leg never smoke-tested; every done task a not-done
       fix names in `verifies:`; every task whose latest smoke result is `fail` with no fix filed for it since; each
@@ -81,14 +110,28 @@ restarted):
   claim --task <t> [--inherit] [--gate <gate>]...
       Re-runs next under the lock: <t> must be what it proposes (with --inherit, an inherited `finish`). Stamps
       `status: in_progress`, `owner: leg-N`, `leg: N`, `started:` (the first wins), consumes `handed_back:` and
-      `gates_signed:`, and on a fresh claim `leg_base: ["<toplevel>@<sha40>", …]`: one entry per `repo:` surface of
-      the row that is a git toplevel, the vault never (an inherited claim keeps its stamp). Logs `claimed` or `took`.
+      `gates_signed:`, and on a fresh claim `leg_base: ["<toplevel>@<sha40>", …]`: one entry per checkout the row
+      works (stamp_bases: the checkout of each `repo:` surface of the row, `repo:<toplevel>//<path>` or bare, that is
+      a git toplevel, then its launch folder's toplevel, where its commits land), the vault never, so a file token
+      never leaves a code row unstamped (an inherited claim keeps its stamp). In a chain with `chain_copies:` each
+      entry is the checkout's copy at its HEAD, and `leg_primary_base: ["<checkout>@<sha40>", …]` (the primaries' HEADs)
+      follows it, printed too; a checkout with no pair is exit 1 naming `leg.py copies`, and a pair whose copy is
+      missing exit 1 naming begin. A fresh claim there also refuses (exit 1, `unlandedDeps` [{task, dep, rollout, sha,
+      copy, why}]) a row with a dependency another rollout's chain finished whose `leg_head` commit in this repository
+      the copy's HEAD lacks (unlanded_deps: `done on chain/<X>, not yet on <d>: it lands at [[<X>]]'s next done or
+      close`, or `on <d>, not yet in <C>: run leg.py land, which brings <d> in`; legs.md § The task loop). Its error
+      names one gap, a set-aside one first, and ends by its cause: `run leg.py land, then claim again` on `on <d>`, else
+      `set it aside` with its `leg.py set-aside` line, `until that work is in <C>`. Logs `claimed` or `took`.
       Each --gate is compared with the note's `## Approved gates` (reconcile-rollout.py's _norm_gate): the
-      unapproved ones are printed for `set-aside --kind gate`.
+      unapproved ones are printed for `set-aside --kind gate`. An exact `None` (execute § 3.7's grammar, bullet,
+      case and one trailing `.` aside, as the engine's parseGatedInputs reads it) is no gate, never unapproved.
   change --task <t> [--top <toplevel>]       (read-only, no lock)
       Per `leg_base` checkout: the commits in `<sha>..HEAD` whose message has a `Task: [[<t>]]` line, their paths
-      minus `docs/reviews/`, the `:(literal)` pathspecs, and a WARN per commit in the range with no `Task:` line at
-      all, unless it touches only `docs/reviews/`. `codeWriting` is any such commit.
+      minus `docs/reviews/`, the `:(literal)` pathspecs, and a WARN per commit on the range's first-parent line with no
+      `Task:` line at all, unless it touches only `docs/reviews/` (what a land merge brought in is never this
+      checkout's own). `codeWriting` is any such commit. `stray` is one WARN per commit of
+      the task's that went into a Chain copy's primary instead (stray_of: per `leg_primary_base` entry, the trailered
+      commits in `<primary base>..HEAD --not refs/heads/chain/<rollout>`, so a hand merge of the chain is never stray).
   smoke --task <t> --result pass|fail|not-run [--why <text>]
       Logs `smoke: [[t]] pass|fail|not run[: <why>]` for a chain task (one on begin's smoke list).
   file-fix --target <t> --cause own|chain|outside|drift [--culprit <L>] --evidence <line> [--excerpt <text>]
@@ -97,7 +140,8 @@ restarted):
       L a done chain row other than t with a `Task: [[L]]` commit in t's checkout that touches one of t's paths and
       came after t's last trailered commit there (in `<last>..HEAD`, so L is a later chain task); outside
       needs a commit after t's last trailered commit there that touches t's paths and carries no chain task's
-      trailer; drift needs t's paths unchanged since t's last trailered commit (working tree included). A task
+      trailer, or a `🔀 land: merge ` commit on `<last>..HEAD`'s first-parent line (a land brought another chain's work
+      in, ADR 0067 d3); drift needs t's paths unchanged since t's last trailered commit (working tree included). A task
       with no paths (vault-only) passes own or drift only. The note `<project>-followup-fix-<t's descriptive
       tail>[-<k>]` copies t's `projects:` and `**Verify:**` line, takes this Leg's launch alias and `rollout:`; its
       Queue row (this Leg's launch, t's surfaces) goes ahead of the first queued row and every `#` cell is
@@ -105,19 +149,26 @@ restarted):
       (a crash between the two writes) gets its row and no second note.
   done --task <t> [--verify pass|none] [--review <abs doc>]... [--cwd <dir>]
       Refuses (exit 1) unless t is this Leg's in_progress claim; `--verify pass` when the note has a `**Verify:**`
-      line; and, for each `leg_base` checkout with trailered commits, that checkout is the cwd's and a --review doc
+      line; a stray commit (change's) in a Chain copy's primary (`committed in the primary <P>, not its chain copy <C>:
+      set it aside with --revert, which reverts it there, and redo it in <C>`); and, for each `leg_base` checkout with
+      trailered commits, that checkout is the cwd's (in a copy chain the copy holding the cwd) and a --review doc
       whose front matter has `repo:` that toplevel, `mode: code`, `effort:` xhigh or max, `status: consumed`, and a
       `head:` that descends from the leg_base sha, is an ancestor of HEAD and holds a trailered commit. Stamps
       `status: done`, `completed:`, `leg: N`, `reviewed:` (the docs), keeps `leg_base`, and, when the task has a
       `leg_base` entry, `leg_head: ["<toplevel>@<sha40>", …]` after it (ADR 0055): per checkout, the task's own newest
       `Task:`-trailered commit (change's last commit there, never HEAD, which may be a peer's), a checkout where it
       committed nothing (or whose range could not be listed) left out, so `[]` when it committed nowhere; no key with
-      no `leg_base` entry. A serial chain's completion verify anchors its HEAD guard on it. Logs `done`.
+      no `leg_base` entry. A serial chain's completion verify anchors its HEAD guard on it. In a chain with
+      `chain_copies:` it then stamps `leg_claims: ["repo:<primary>//<path>", …]` after it (ADR 0067 d4's actual claims:
+      change's paths on the primary's paths, bookkeeping aside, a quoted inline list read_list reads back; a path
+      holding `"` or ` #` claims `repo:<primary>`), which land checks and hold_of reads; never in place. Logs `done`.
   set-aside --task <t> --reason <text> [--kind block|gate] [--status blocked|review-blocked|plan-blocked]
             [--revert] [--gate <gate>]...
-      Removes `owner:`. gate: `status: gate-pending` and `## Gated inputs (awaiting sign-off)` (no revert). block:
+      Removes `owner:`. gate: `status: gate-pending` and `## Gated inputs (awaiting sign-off)` (no revert; a `None`
+      --gate is no gate, so one with only `None` is a usage error, exit 2). block:
       the status (blocked by default) and a `## Blocker diagnosis` run. --revert reverts each checkout's trailered
-      commits: exit 3 first when a path to revert has staged or unstaged changes; the commits are reverted
+      commits, and each stray one in a Chain copy's primary there: exit 3 first when a path to revert has staged or
+      unstaged changes; the commits are reverted
       newest-first in a scratch `git worktree add --detach` tree; a conflict removes it and exits 3 with the checkout
       untouched (no REVERT_HEAD, CHERRY_PICK_HEAD or sequencer state); success applies the scratch diff with `git
       apply --index` over those paths and commits them by pathspec with `Task: [[t]]` and `Set-aside: <reason>`
@@ -142,17 +193,31 @@ restarted):
       for the next Leg), handoff with nothing to hand over, and complete unless every counted row is done. Writes the
       close line and prints `progress`, `commit_only` (the cwd's toplevel and every chain checkout: each `leg_base`
       top), `needs_you`, `handover` {title, prompt, tldr, cwd, harness} (handoff only) and `status_line` (every
-      outcome but handoff). complete refuses first an Archive name collision and a Post-rollout item with neither a
+      outcome but handoff). In a chain with `chain_copies:` the handover's `cwd` is the next row's folder inside its
+      copy and its `launch` the copy's launch line, while the close line keeps the Queue folder. complete refuses first
+      an Archive name collision and a Post-rollout item with neither a
       pointer nor a --disposition, then (ADR 0055) a `completion_verifier:`, `env_bootstrap:` or `completion_timeout:`
       the completion verify's reader refuses (`completion verify: <why>: fix the note`) and a declared completion
       verify that is not decided (`the completion verify is not decided (<state>, attempt <n>)`: legs.md § Complete
-      runs it first); before the lock it asks land.sh's own route for each chain checkout (`land.sh
+      runs it first); before that, inside the lock, a done row whose `leg_head` entry on a Chain copy is not on its
+      primary's local default branch (landed_gate: `[[t]] is not on <d> in <P>: run leg.py land first (legs.md §
+      Complete's Land first); nothing written`, or the unresolved branch named); before the lock it asks land.sh's own
+      route for each chain checkout (`land.sh
       --route -- <top>`, 60 s): on `landable <d>` it lists the chain's `Task:`-trailered commits that the local
       `refs/remotes/origin/<d>` lacks (no fetch) and, when there are any, files
       `<project>-followup-land-chain-<YYYY-MM-DD>[-<k>]` (act: open a PR from them, or push them; ADR 0028 automates
       only close-out commits); on `not landed: <reason>` it files nothing; on `stuck: <reason>`, a failure or a
       timeout it files the follow-on with every chain commit there and the act prefixed `check the landing route
-      (<reason>), then`. Then `status: done`, `completed:`, a `## Completion log` (a line per Leg: launch, begun–closed,
+      (<reason>), then`. A chain checkout that is a Chain copy reads its primary's route instead (the copy's own branch
+      reads not landed), its commits those not on the primary's local default branch d plus, when landable, those
+      `origin/<d>` lacks, and on `stuck` every chain commit there, as in place (a hand merge into d included: that route
+      cannot say what origin has); a commit still off d files the follow-on whatever the route, its act first `merge
+      chain/<rollout> into <d> there` (`chain/<rollout> is already on <d>:` when none is off it: by Complete land has
+      put them all there, so a copy files only the origin half, as in place; land --retire removes the copy and its
+      branch after), and its Chain commits line reads `<copy> (chain/<rollout> of <primary>): <k> not on <d>[; stuck:
+      <reason>] → [[f]]`, `all on <d>; stuck: <reason> → [[f]]`, `all on <d>, <k> not on origin/<d> → [[f]]`, `all on
+      <d>; not landed: <reason>, nothing filed` or `all on <d>[ and origin/<d>]`. Then
+      `status: done`, `completed:`, a `## Completion log` (a line per Leg: launch, begun–closed,
       done and set aside; the decided completion verify's `Completion verify: …` summary when the note declares
       `completion_verifier:`; each --log-line; `Post-rollout items:` with each disposition; a `Chain commits:` line per
       checkout or `Chain commits: none`; `Reflection: <--reflection>`), the move to
@@ -164,9 +229,94 @@ restarted):
       `committed: false`, exit 0: the daily sweep commits it.
   handed --started <id> | --manual <why>
       Logs `hand-over: started <id>` or `hand-over: manual (<why>)` on this session's Leg closed with a handoff, and
-      prints its status line. Idempotent once logged.
+      prints its status line (a manual one names the next row's folder inside its Chain copy). Idempotent once logged.
   clear-halt --reason <r>
       Logs `halt cleared: <r>` when a halt stands (else exit 1); the halted claim is then inherited by the next Leg.
+  copies
+      Makes the chain's Chain copies and stamps `chain_copies:` (schedule § Serial path S5; begin runs the same code;
+      by hand on status's `chain copy missing` blocker). Refuses (exit 1) a note that is not serial, done, dropped or
+      superseded; an incomplete one is allowed (S5 runs it before S6). The checkouts are serial-chains.py's checkouts_of
+      over the note's `surfaces:`, every Queue row's cell tokens and launch folder (the vault excluded), each kept when
+      it is its own git toplevel (any other gets a WARN and no copy). Per checkout P: its recorded pair, or a new one;
+      a missing copy is `git -c core.hooksPath=/dev/null -C P worktree add <C> chain/<rollout>` when that branch exists
+      (its commits kept), else `worktree add -b chain/<rollout> <C> refs/heads/<d>`, d P's local default branch
+      (origin/HEAD's name, main, master), else from HEAD with a WARN that begin never fast-forwards it, after a
+      `worktree prune`; then each `.mcp.json` and `.claude/settings.local.json` P has at its toplevel and in each Queue
+      launch folder inside it is symlinked into the copy when the copy lacks it and `git check-ignore` passes in P (the
+      launch folders are made in the copy). `chain_copies:` is stamped after `shape:` when the pairs changed, recorded
+      pairs kept. Refuses (exit 1, the note unwritten) a malformed key, the copy dir under ~/repos or ~/Projects, two
+      entries of one repository (one git common dir), this plugin's own checkout, a copy path held by anything but P's
+      worktree on chain/<rollout>, that branch checked out in another worktree, and a git failure. Prints {verb,
+      rollout, copies [{checkout, copy, branch, base, made, linked}], warns, stamped, dryRun}; --dry-run makes and
+      writes nothing.
+  land [--verified <sha40>]... [--red <why>] [--retire]
+      ADR 0067 d3, d4: each finished task of a chain with `chain_copies:` onto its primary's local default branch
+      (legs.md § The task loop's Land after every `done`, § Complete's Land first, close § Under a Leg's land). The open
+      Leg runs it, when it is this session's; with no Leg open, the last Leg, when its session is this one or either is
+      `unknown` (handed's rule), so a close runs it after `leg.py close`; anyone else is exit 1, `no Leg of this
+      session: run leg.py begin first`. Refuses (exit 1, nothing written) a note that is not serial, a dropped or
+      superseded one, a malformed `chain_copies:`, a done or archived note without --retire, and a not-done one with
+      it; --red with --verified, or --retire with either, is usage (exit 2). In place (no `chain_copies:`) it is
+      `inPlace: true`, `lands: []`, nothing written. A counted row in progress stands every copy (`a row is in
+      progress: a land never merges mid-task`) with no git and no repo lock. Else per pair P -> C, one at a time, d
+      P's local default branch (default_branch):
+        1. stands with no lock: d unresolved, C missing (`leg.py begin remakes it`), C dirty in tracked files;
+        2. P's repo lock (The lock, below): past its timeout the copy stands, `another land held <path> past <t>s`;
+        3. unl: the done counted rows with a `leg_head` entry on C that refs/heads/<d> in P does not reach (git is the
+           truth: a hand merge counts);
+        4. d into C, never a rebase (so `leg_head` stays an ancestor), hooks off and never an autostash: `merge
+           --ff-only` when the tip is d or behind it, else `merge --no-ff --no-edit -m "🔀 land: merge <d> into
+           chain/<rollout>"`; a conflict is aborted (`merge --abort`) and stands, `conflict in <paths>`, and an
+           untracked-file refusal stands with git's line; dm is the d sha the tip now holds;
+        5. on the first try, when unl is not empty, the actual-claim check (ADR 0067 d4): unl's `leg_claims:` (a row
+           done before them: change's paths as `repo:<P>//<path>`), bookkeeping aside, against every other live
+           root-level serial note with a `chain_copies:` pair on P, read as a Chain, whose rows are unlanded_done and
+           whose `leg_head` on its copy git confirms is off d, their `leg_claims:`; an overlap with a chain that sorts
+           first (order_key) stands, `[[X]] holds <token> unlanded and began first` (a tie in first_by's words), with
+           4's merge kept on chain/<rollout> as --red keeps it, so the copy holds the work other chains landed on d and
+           the next land asks for its re-verify; a later chain never blocks, and an unreadable note is a WARN (git's
+           merge and the re-run Verify lines are the backstop);
+        6. the verify list: an unl row needs its Verify line run again unless dm is in its `leg_head`, or a verified
+           tip V for P (a logged `land verified: <P> at <V>`, or this call's --verified <V> when V is the tip, then
+           logged once) holds its head and dm and the tip holds V; a list stops the copy as `verify` with `head`,
+           `merged` and `verify` [{task, line (its **Verify:** line or null), folder (its launch folder in C)}], the
+           merge kept on chain/<rollout>;
+        7. d moved to the tip, by where it is checked out: in P, after the in-place peer check (below), P's HEAD read
+           again (off d, it stands, `<P> left <d> during the land (its HEAD is now <ref>)`), then `merge --ff-only
+           --no-autostash` in P (a refusal over a local change or an untracked file in the way stands, `the primary's
+           uncommitted edit on <files>`; never a stash), landed only when refs/heads/<d> is then the tip; nowhere, a
+           compare-and-swap `update-ref`; in another worktree, a stand (`<d> is checked out in <wt>`). A CAS failure, a
+           refused ff after d moved, or an ff that left d short of the tip, re-runs from 4, three tries at most, then
+           stands `<d> kept moving`. A tip already d is `current`, P untouched;
+        8. the repo lock released.
+      Then `leg_landed: <stamp>` (after `leg_claims:`, else `leg_head:`) on each done row whose every `leg_head` entry on
+      a copy is on its primary's d (git's read), the task notes first, and the Leg log: a `land:` line per copy landed,
+      a `land stood:` line per stand (none when the chain's last land line for P is that same stand) and `land
+      verified:`. Every stand exits 0. The in-place peer check, on each try right before the ff in P: every other live
+      root-level serial note that works in place (no `chain_copies:`; a malformed key reads as in place, as
+      unfinished-rollout.py's copied_of reads it), read as a Chain, with a Leg open or a counted row in progress, whose
+      open Leg's write set and launch folders (write_set, write_rows: begin's surface re-check's) or running rows'
+      cells, folders and `leg_base` tops name P (or `any`), stands the copy `[[X]] works <P> in place (Leg <n> open |
+      [[t]] in progress): a land never moves a checked-out <d> under another chain's live work`; one that cannot be read
+      stands it only when its `surfaces:` names P or reads as any, `[[X]] could not be read (<why>) and may work <P> in
+      place: fix its note`, else a WARN. No peer check runs for update-ref: no working tree moves. Prints {verb,
+      rollout, leg, inPlace, lands [{checkout, copy, branch, default, state (landed, current, verify or stood), head,
+      merged, verify, landed (its tasks landed), why, waits}], stamped, warns, dryRun}: `waits` is true on a stand that
+      clears by itself (an earlier chain's claim, another land's lock, an in-place peer, P off d mid-land, d kept
+      moving), false on any other stand, null otherwise. --dry-run prints each copy's `plan` {unl, claim, bring,
+      verify, ff, peer} as state `plan`, takes no lock, and merges, moves and writes nothing.
+      --red <why>: logs `land stood: <P>: Verify red after a land merge: <why>` for each copy whose chain branch holds
+      commits its d lacks (every copy when none does), runs no git write and keeps the merge (no verified tip, so the
+      next land asks again); a closed Leg may run it, and then writes that one line only.
+      --retire, after Complete (the archived note is never written): resolves its paths, primes the git env and moves
+      the cwd to the first primary (the copy it removes may be the cwd), then per copy, under its repo lock, lands its
+      close-out commits by 4 and 7 (the peer check included; a done row off d, or any stand, keeps the copy and its
+      branch), removes the copy (`git worktree remove`, never --force; a copy already gone gets `worktree prune`, then 7
+      alone when d is an ancestor of the branch) and deletes the branch (`branch --set-upstream-to=<d>`, then `branch
+      -d`, never -D; a refusal unsets the upstream and keeps the branch). Prints `retired` [{checkout, copy, branch,
+      landed, removed, branchDeleted, why}]; any WARN files one loose follow-on, `<project>-followup-retire-chain-<date>`
+      (no pointer), naming each kept copy or branch and the `leg.py land --retire` command that finishes it (once
+      [[X]]'s Leg closes, for a peer's stand), printed as `followup`.
   status                                     (read-only, no lock, no git; an archived note is read too; the restart's
                                              surface re-check is one read-only unfinished-rollout.py subprocess)
       The whole chain at a glance, for /thread:status § 5, /thread:repair § 7 and reflect's serial-score.py. A note
@@ -220,6 +370,9 @@ by position:
     aside | stopped: <reason> | halted: <reason> | lost (taken over by Leg <M>)
   - <stamp> Leg <N> hand-over: started <id> | manual (<why>)
   - <stamp> Leg <N> follow-on [[f]] (close|post-item <k>|land)
+  - <stamp> Leg <N> land: [[t1]], [[t2]] on <d> in <P> (<sha12>) | close-outs on <d> in <P> (<sha12>)
+  - <stamp> Leg <N> land stood: <P>: <why>
+  - <stamp> Leg <N> land verified: <P> at <sha40>
   - <stamp> halt cleared: <reason>
   - <stamp> restart: Leg <N> pending (session <sid>) | started <id> | manual (<why>)
 A `restart:` line carries no Leg number of its own (it names the Leg to come), so no reader counts it as a Leg.
@@ -241,27 +394,38 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
   stamp is gone. {leg, title
   (`Leg <N>: <slug>`, at most 60 characters), prompt (the Leg prompt, ` --take-over` on its first line when a Leg
   is open), takeOver, tldr, cwd, harness, launch, task, anyLaunch, blockedBy}. For finish or claim: cwd is the
-  row's folder (realpath), harness codex for a `cx-*` alias else claude, launch `<alias> from <folder>`, task its
-  slug, anyLaunch false. For complete: cwd the last Leg's folder (realpath; begin accepted it, so it is never this
-  plugin's checkout; the vault when no Leg began), harness, launch and task null, anyLaunch true (a Complete Leg
-  works no row, so begin takes any cwd but this plugin's checkout). blockedBy, the first that holds, else null:
+  row's folder (realpath; inside its Chain copy in a copy chain), harness codex for a `cx-*` alias else claude, launch
+  `<alias> from <folder>` (the copy's launch line in a copy chain), task its slug, anyLaunch false. For complete: cwd
+  the last Leg's folder (realpath, mapped into its copy; begin accepted it, so it is never this plugin's checkout; the
+  vault when no Leg began), harness, launch and task null, anyLaunch true (a Complete Leg works no row, so begin takes
+  any cwd but this plugin's checkout). blockedBy, the first that holds, else null:
   `halt`; `restart Leg <N> (<how>)` (a standing restart); `open Leg <K> (session <id>)`; `handover started <id>`
-  (the last Leg handed off to a started Session that never began); then, only when none of those holds, begin's
+  (the last Leg handed off to a started Session that never began); `chain_copies: <why>: fix the note` (a malformed
+  key); `chain copy missing: <C> (leg.py copies --rollout <note> remakes it)` (a copy chain whose cwd is gone); then,
+  only when none of those holds, begin's
   surface re-check run read-only for Leg N: `surface held by [[<B>]] (<token>)` on a hit, `surface re-check failed:
   <its line>` when the check fails (ADR 0060). A manual hand-over is null: it waits on Lachy.
 - The standing restart (`restarted`): the latest `restart:` line with no `began` line after it, as {leg, how
   (pending, started or manual), started, manual, session (a pending line's), at}, else null.
 - The hold (ADR 0060 d1, d2; hold_of, the one copy unfinished-rollout.py loads): what the unfinished chain holds
-  against other rollouts, {scope, why, held, released, unlanded, rows, warn}. In every chain state but `stuck`, scope
-  `whole`: `held` is the note's whole `surfaces:` (`any` when it reads as any), `released` empty. `stuck` (no Leg open,
-  no stall, hand-over, restart or halt standing, not completable, nothing claimable: every unlanded row is set aside or
-  held behind one), scope `stuck`: `held` is the Surfaces cells of every counted row not done (set-aside rows, rows
-  held behind them, a `missing` row) plus any `surfaces:` token that no row's cell names (a hand edit, kept), and
-  `released` is the rest of `surfaces:`, done rows still on the next Leg's smoke list included; deferred and folded
-  rows are outside the count, so released. A stuck chain fails closed to `whole`, with `warn` set, when its Queue has
-  no rows, an unlanded row's cell is empty or holds a token parse_token refuses, or a row reads in progress.
-  `unlanded` is the counted, not-done rows' cell tokens in any state (the note's whole claim on those same failures):
-  what a resuming chain's re-check compares against. `rows` is those rows, {slug, state, surfaces}.
+  against other rollouts, {scope, why, held, released, unlanded, undone, pending, rows, warn, began, open}. In every
+  chain state but `stuck`, scope `whole`: `held` is the note's whole `surfaces:` (`any` when it reads as any),
+  `released` empty.
+  `stuck` (no Leg open, no stall, hand-over, restart or halt standing, not completable, nothing claimable: every
+  unlanded row is set aside or held behind one), scope `stuck`: `held` is the Surfaces cells of every counted row not
+  done (set-aside rows, rows held behind them, a `missing` row) plus any `surfaces:` token that no row's cell names (a
+  hand edit, kept), and `released` is the rest of `surfaces:`, done rows still on the next Leg's smoke list included;
+  deferred and folded rows are outside the count, so released. A stuck chain fails closed to `whole`, with `warn`
+  set, when its Queue has no rows, an unlanded row's cell is empty or holds a token parse_token refuses, or a row
+  reads in progress.
+  `undone` is the counted, not-done rows' cell tokens in any state (the note's whole claim on those same failures);
+  `pending` the done rows of a chain with `chain_copies:` not yet landed (unlanded_done: `leg_claims:`, a non-empty
+  `leg_head` and no `leg_landed:`; ADR 0067 d3), by slug; and `unlanded` undone plus pending's cell tokens: what a
+  resuming chain's re-check compares against (a parallel resume reads `undone` only). The stuck scope's `held` and
+  `released` read `undone`. `rows` is those rows, {slug, state, surfaces, folder} (folder the row's launch folder, so
+  its checkout). `began` is the Leg log's first `began:` stamp, raw (null before Leg 1),
+  and `open` the open Leg as {n, folder}, else null: the order and the interim mutex of unfinished-rollout.py's
+  check_resume read them (ADR 0067 d4).
 - A row's dependants: the counted, not-done rows D with an entry in D's depends-on or blocked-by that resolves
   (rr._fold_unit, through `merged_into:` tombstones) to the row or to a row already found: transitive,
   cycle-guarded, in Queue order, each {slug, state, owner}. repair § 7 (b) defers a set-aside with them (repair § 5's
@@ -279,14 +443,20 @@ git work included: `<lock dir>` is $THREAD_LEG_LOCK_DIR, else ${XDG_STATE_HOME:-
 the vault (the note cannot be the lock: os.replace swaps its inode). Under it each verb re-reads every note it
 changes, validates, and writes each through a temp file in the same directory plus os.replace, task notes first and
 the rollout note last. A wait past $THREAD_LEG_LOCK_TIMEOUT seconds (default 30) is exit 5. The read-only verbs take
-no lock: os.replace means they never read a torn note, and claim re-validates whatever next proposed.
+no lock: os.replace means they never read a torn note, and claim re-validates whatever next proposed. land also takes
+each primary checkout's repo lock, an fcntl.flock on `<git rev-parse --path-format=absolute --git-common-dir>/thread/
+chain-land.lock` (its directory made when missing), after the rollout's lock, one at a time, each released before the
+next and never nested, so two chains in one repo land in turn and no lock cycle forms; a wait past the same timeout
+stands that copy (exit 0), never exit 5.
 """
 import argparse
 import fcntl
 import importlib.util
 import json
 import os
+import posixpath
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -294,6 +464,7 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 PLUGIN = HERE.parent.parent.parent
@@ -303,6 +474,10 @@ LAND_SH = PLUGIN / "skills" / "_shared" / "scripts" / "land.sh"
 UNFINISHED_PY = PLUGIN / "skills" / "_shared" / "scripts" / "unfinished-rollout.py"
 PLUGIN_JSON = PLUGIN / ".claude-plugin" / "plugin.json"
 DEFAULT_VAULT = "~/repos/obsidian"
+# A Chain copy's gitignored config, linked from its primary checkout (ADR 0067 d2), and the generated launch aliases a
+# copy's manual launch line reads (each alias `cd`s into the primary, so a copy's line runs the alias's command without it).
+CONFIG_LINKS = (".mcp.json", ".claude/settings.local.json")
+DEFAULT_ALIASES = "~/repos/workspaces/_shared/generated/launch-aliases.zsh"
 
 LEG_LOG = "## Leg log"
 COMPLETION_LOG = "## Completion log"
@@ -312,6 +487,7 @@ ITEMS_MARK = "Rollout-specific items go here:"
 BLOCKER = "## Blocker diagnosis"
 GATES_PENDING = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES = "## Approved gates"
+NONE_GATE_RE = re.compile(r"^none\.?$")  # execute § 3.7's exact `None`, on _norm_gate's text (task.workflow.js's /^none\.?$/i)
 CAP = 5
 OUTCOMES = ("handoff", "complete", "stuck", "stopped", "halt")
 TERMINAL = ("complete", "dropped", "superseded", "incomplete")   # the chain states begin refuses for good
@@ -403,6 +579,12 @@ def _fold(p):
     return os.path.realpath(os.path.expanduser(p)).casefold()
 
 
+def in_archive(path):
+    """True when the note sits in an `Archive/Rollouts/` directory (Complete's destination)."""
+    p = path.resolve()
+    return p.parent.name == "Rollouts" and p.parent.parent.name == "Archive"
+
+
 # ---- context and output ----------------------------------------------------------------------------------------
 
 class Ctx:
@@ -419,8 +601,9 @@ class Ctx:
             p = self.tasks / f"{(rr._wikilink_slug(raw) or raw)}.md"
         # Complete moves the note to Archive/Rollouts/ before the last Leg's /thread:close runs, so a gone live note
         # reads its archived copy (file-followup then writes nothing into it; every other writing verb refuses it:
-        # begin as done, the rest through ARCHIVE_REFUSED).
-        self.archived = False
+        # begin as done, the rest through ARCHIVE_REFUSED). A note handed over by its own `Archive/Rollouts/` path is
+        # the archived copy too, whichever path the caller held.
+        self.archived = in_archive(p)
         if not p.exists():
             alt = self.tasks / "Archive" / "Rollouts" / p.name
             if alt.is_file():
@@ -464,6 +647,14 @@ def status_line(slug, prog, state, reason=None):
 
 # ---- the lock and atomic writes --------------------------------------------------------------------------------
 
+def lock_timeout():
+    """$THREAD_LEG_LOCK_TIMEOUT seconds (default 30), the rollout lock's and each repo land lock's wait."""
+    try:
+        return float(os.environ.get("THREAD_LEG_LOCK_TIMEOUT") or "30")
+    except ValueError:
+        return 30.0
+
+
 class Lock:
     def __init__(self, ctx):
         d = os.environ.get("THREAD_LEG_LOCK_DIR") or os.path.join(
@@ -475,11 +666,7 @@ class Lock:
     def __enter__(self):
         if self.skip:
             return self
-        raw = os.environ.get("THREAD_LEG_LOCK_TIMEOUT") or "30"
-        try:
-            timeout = float(raw)
-        except ValueError:
-            timeout = 30.0
+        timeout = lock_timeout()
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
         deadline = time.monotonic() + timeout
@@ -569,6 +756,11 @@ class Row:
 
     def same_launch(self, alias, folder):
         return self.alias == alias and _fold(self.folder or "") == _fold(folder or "")
+
+
+def real_gates(gates):
+    """The declared gates minus an exact `None`, which declares no gate (the engine's parseGatedInputs reads it so)."""
+    return [g for g in gates if not NONE_GATE_RE.match(rr._norm_gate(g))]
 
 
 def owner_leg(note):
@@ -709,7 +901,7 @@ class Chain:
 
 
 KINDS = ("began:", "resumed:", "smoke:", "filed ", "claimed ", "took ", "done ", "set aside ", "reverted ", "closed:",
-         "hand-over:", "follow-on ")
+         "hand-over:", "follow-on ", "land:", "land stood:", "land verified:")
 
 
 def parse_log(note):
@@ -967,6 +1159,306 @@ def launch_harness(alias):
     return "codex" if (alias or "").startswith("cx-") else "claude"
 
 
+# ---- Chain copies (ADR 0067 d2) -------------------------------------------------------------------------------------
+
+def alias_tail(alias):
+    """The command a generated launch alias runs after its own `cd` (`alias <a>='cd <dir> && <tail>'` in
+    $THREAD_LAUNCH_ALIASES, else DEFAULT_ALIASES), its whole command when it has no `cd` (`alias <a>='<cmd>'`, as
+    `cc-steph`), or None when that file or line cannot be read."""
+    path = os.environ.get("THREAD_LAUNCH_ALIASES") or DEFAULT_ALIASES
+    try:
+        text = Path(os.path.expanduser(path)).read_text()
+    except (OSError, UnicodeDecodeError):
+        return None
+    m = re.search(rf"^alias {re.escape(alias)}='(?:cd \S+ && )?(.*)'$", text, re.M)
+    return m.group(1) if m and m.group(1) else None
+
+
+def launch_line(alias, folder, copy=None):
+    """A row's launch line: `<alias> from <folder>` in place. In a Chain copy (copy: the folder inside it) the alias's
+    own `cd` opens the primary, so the line is paste-ready `cd <copy> && <the alias's command after its cd>` (its whole
+    command when it has no `cd`; `claude` and `codex` themselves), or, when that command cannot be read, prose that says
+    never to run the alias itself.
+    Uses no serial-chains.py: estate-dispatch.py loads this file without it."""
+    if copy is None:
+        return f"{alias} from {folder}"
+    q = shlex.quote(copy)
+    if alias in ("claude", "codex"):
+        return f"cd {q} && {alias}"
+    tail = alias_tail(alias) if alias else None
+    if tail is not None:
+        return f"cd {q} && {tail}"
+    return (f"{alias} from {copy}: cd there, then run {alias}'s command without its cd (`alias {alias}` prints it); "
+            f"never {alias} itself, since {alias} itself opens {folder}")
+
+
+def chain_launch(pairs, alias, folder):
+    """A Queue row's launch line in its chain: launch_line with the row's folder mapped into its Chain copy."""
+    copy = sc.copy_folder(folder, pairs) if pairs and folder else None
+    return launch_line(alias, folder, copy)
+
+
+def copies_read(chain):
+    """The note's `chain_copies:` as (pairs, None): pairs None when the key is absent (the chain works in place); or
+    (None, why) when it is malformed."""
+    try:
+        return sc.read_chain_copies(chain.note), None
+    except ValueError as e:
+        return None, str(e)
+
+
+def chain_pairs(chain):
+    """copies_read's pairs, or Refuse(1) when `chain_copies:` is malformed."""
+    pairs, why = copies_read(chain)
+    if why:
+        raise Refuse(1, f"chain_copies: {why}: fix the note; nothing written", reason=f"chain_copies: {why}")
+    return pairs
+
+
+def _pair(pairs, path, side=0):
+    """The (checkout, copy) pair whose checkout (side 0) or copy (side 1) is path, case-folded, else None."""
+    k = os.path.normpath(path).casefold()
+    return next(((c, p) for c, p in pairs or [] if (c, p)[side].casefold() == k), None)
+
+
+def copy_dir(make=True):
+    """Where Chain copies live: $THREAD_CHAIN_COPY_DIR (absolute), else ${XDG_STATE_HOME:-~/.local/state}/thread/chains,
+    realpath'd, and created when make. Refuse(1) at or under ~/repos or ~/Projects, which every thread walk, rollout-clone
+    prefilter, daily-sweep discovery and worktree reaper reads."""
+    raw = os.path.expanduser(os.environ.get("THREAD_CHAIN_COPY_DIR") or "")
+    if not os.path.isabs(raw):
+        raw = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "thread", "chains")
+    d = os.path.realpath(raw)
+    for walk in ("~/repos", "~/Projects"):
+        w = os.path.realpath(os.path.expanduser(walk)).casefold()
+        if d.casefold() == w or d.casefold().startswith(w.rstrip("/") + "/"):
+            raise Refuse(1, f"the Chain copy dir {d} is at or under {walk}, which every thread walk and worktree reaper "
+                            "reads: set THREAD_CHAIN_COPY_DIR outside ~/repos and ~/Projects; nothing written")
+    if make:
+        os.makedirs(d, exist_ok=True)
+    return d
+
+
+def default_branch(top):
+    """A checkout's local default branch, the name d with refs/heads/<d>: origin/HEAD's name first, then main, then
+    master, else None (structure-audit's default_base rule, local refs only)."""
+    cands = []
+    head = git_out(top, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
+    if head and head.startswith("refs/remotes/origin/"):
+        cands.append(head[len("refs/remotes/origin/"):])
+    for d in cands + ["main", "master"]:
+        if git(top, "show-ref", "--verify", "-q", f"refs/heads/{d}").returncode == 0:
+            return d
+    return None
+
+
+def _common(top):
+    c = git_out(top, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    return os.path.realpath(c) if c else None
+
+
+def wanted_checkouts(ctx, chain, warns):
+    """The checkouts a chain copies: serial-chains.py's checkouts_of over the note's `surfaces:`, every Queue row's
+    cell tokens and every row's launch folder (the vault excluded), each kept when it is its own git toplevel; any other
+    entry is no checkout's index, so it gets no copy, with a WARN."""
+    toks = list(sc.read_surfaces(chain.note))
+    for r in chain.rows:
+        toks += r.surfaces
+    out = []
+    for e in sc.checkouts_of(toks, [r.folder for r in chain.rows if r.folder], toplevel, os.path.realpath(ctx.vault)):
+        p = os.path.realpath(os.path.expanduser(e))
+        top = toplevel(p)
+        if top == p:
+            if p not in out:
+                out.append(p)
+            continue
+        w = (f"WARN: {e} is in no git checkout: no Chain copy (it is no checkout's index)" if top is None else
+             f"WARN: {e} is inside {top}, not its toplevel: no Chain copy of its own (it is no checkout's index)")
+        if w not in warns:
+            warns.append(w)
+    return out
+
+
+def _worktree_branches(top):
+    """[(path, branch ref or None)] of a checkout's worktrees (`git worktree list --porcelain`)."""
+    out, cur = [], None
+    for line in (git_out(top, "worktree", "list", "--porcelain") or "").split("\n") + [""]:
+        if line.startswith("worktree "):
+            cur = [line[len("worktree "):], None]
+        elif line.startswith("branch ") and cur is not None:
+            cur[1] = line[len("branch "):]
+        elif not line and cur is not None:
+            out.append(tuple(cur))
+            cur = None
+    return out
+
+
+def _copy_state(P, C, branch):
+    """'ok' when C is a worktree of P on branch, 'missing' when there is nothing at C; Refuse(1) otherwise, or when the
+    branch is checked out in another worktree."""
+    ref = f"refs/heads/{branch}"
+    if os.path.lexists(C):
+        top = toplevel(C)
+        if top != os.path.realpath(C) or _common(C) != _common(P) or git_out(C, "symbolic-ref", "-q", "HEAD") != ref:
+            raise Refuse(1, f"{C} exists and is not {P}'s Chain copy on {branch}: move it aside (the next begin remakes "
+                            "the copy there), then run again; nothing written")
+        return "ok"
+    for wt, br in _worktree_branches(P):
+        if br == ref and os.path.isdir(wt) and os.path.realpath(wt) != os.path.realpath(C):
+            raise Refuse(1, f"{branch} is checked out in {wt}, not in its Chain copy {C}: check it out elsewhere there, "
+                            "then run again; nothing written")
+    return "missing"
+
+
+def _make_copy(P, C, branch, warns):
+    """git worktree add of C on branch: the existing branch (a remake keeps its commits), else a new one cut from the
+    primary's default branch, else from its HEAD with a WARN. Returns the base it was cut from (None for a remake)."""
+    git(P, "worktree", "prune")   # a stale admin entry for C (its directory deleted) would refuse the add
+    if git(P, "show-ref", "--verify", "-q", f"refs/heads/{branch}").returncode == 0:
+        r, base = git(P, "-c", "core.hooksPath=/dev/null", "worktree", "add", "-q", C, branch), None
+    else:
+        d = default_branch(P)
+        if d:
+            start, base = f"refs/heads/{d}", d
+        else:
+            cur = git_out(P, "symbolic-ref", "-q", "--short", "HEAD") or "detached"
+            warns.append(f"WARN: {P}: no default branch resolved: its Chain copy is cut from HEAD ({cur}) and begin "
+                         "never fast-forwards it")
+            start, base = "HEAD", "HEAD"
+        r = git(P, "-c", "core.hooksPath=/dev/null", "worktree", "add", "-q", "-b", branch, C, start)
+    if r.returncode != 0:
+        raise Refuse(1, f"git worktree add {C} failed in {P}: {(r.stderr or r.stdout).strip()[:200]}; the note is "
+                        "unwritten: fix it, then run again")
+    return base
+
+
+def link_configs(P, C, rels, make=True):
+    """Symlink each CONFIG_LINKS file at each rel (the copy's toplevel, "", and each Queue launch folder inside it) from
+    the primary into the copy, when the primary has it, the copy lacks it and git ignores it there (a tracked or
+    un-ignored file is the copy's own); each launch folder is made in the copy. The rels linked, in order."""
+    linked = []
+    for rel in rels:
+        if make and rel:
+            try:
+                os.makedirs(os.path.join(C, rel), exist_ok=True)
+            except OSError:
+                pass
+        for f in CONFIG_LINKS:
+            rf = posixpath.join(rel, f) if rel else f
+            src, dst = os.path.join(P, rf), os.path.join(C, rf)
+            if not os.path.isfile(src) or os.path.lexists(dst):
+                continue
+            if git(P, "check-ignore", "-q", "--", rf).returncode != 0:
+                continue
+            if make:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                os.symlink(src, dst)
+            linked.append(rf)
+    return linked
+
+
+def ensure_copies(ctx, chain):
+    """The chain's Chain copies (the caller holds the rollout lock): each wanted checkout's recorded pair, or a new one
+    (copy_name), made when missing (a remake keeps its branch's commits), its config linked, and the note's
+    `chain_copies:` stamped after `shape:` when its pairs changed, recorded pairs kept. --dry-run makes and writes
+    nothing. Returns (copies, pairs, stamped, warns), copies one {checkout, copy, branch, base, made, linked} per wanted
+    checkout. Refuse(1), the note unwritten: a malformed `chain_copies:`, the copy dir under ~/repos or ~/Projects, two
+    entries of one repository, this plugin's own checkout (ruling (c)), a copy path held by something else, the branch
+    checked out in another worktree, a git failure."""
+    make = not ctx.dry
+    warns = []
+    recorded = chain_pairs(chain)
+    pairs = list(recorded or [])
+    wanted = wanted_checkouts(ctx, chain, warns)
+    branch = f"chain/{ctx.slug}"
+    commons, own = {}, plugin_origin()
+    for P in wanted:
+        cd = _common(P) or P
+        if cd in commons:
+            raise Refuse(1, f"{commons[cd]} and {P} are one repository (git common dir {cd}): a chain copies a "
+                            "repository once, from its primary checkout; nothing written")
+        commons[cd] = P
+        url = git_out(P, "remote", "get-url", "origin")
+        if own and url and sc.norm_origin(url) == own:
+            raise Refuse(1, f"{P} is this plugin's own checkout: there are no serial self-rollouts (ADR 0040); "
+                            "nothing written")
+    root, plan = None, []
+    for P in wanted:
+        hit = _pair(pairs, P)
+        if hit is None:
+            root = root or copy_dir(make)
+            hit = (P, os.path.join(root, sc.copy_name(P, ctx.slug, pairs)))
+            pairs.append(hit)
+        plan.append((P, hit[1], _copy_state(P, hit[1], branch)))
+    copies = []
+    for P, C, state in plan:
+        base = _make_copy(P, C, branch, warns) if state == "missing" and make else None
+        rels = [""]
+        for r in chain.rows:
+            m = sc.copy_folder(r.folder, pairs) if r.folder else None
+            if m and (m == C or m.startswith(C.rstrip("/") + "/")):
+                rel = m[len(C.rstrip("/")):].lstrip("/")
+                if rel not in rels:
+                    rels.append(rel)
+        linked = link_configs(P, C, rels, make) if (make or state == "ok") else []
+        copies.append({"checkout": P, "copy": C, "branch": branch, "base": base, "made": state == "missing",
+                       "linked": linked})
+    stamped = recorded is None or pairs != list(recorded)
+    if stamped and make:
+        chain.note.set("chain_copies", sc.fmt_chain_copies(pairs), after=("shape",))
+        save(ctx, chain.note)
+    return copies, pairs, stamped, warns
+
+
+def fast_forward(ctx, chain, copies, warns):
+    """A fresh Leg's (or a take-over's) copies moved up to their primary's default branch d (`merge --ff-only`), so a
+    Leg begun days after its schedule starts from today's base, whatever the primary has checked out (the copy's merge
+    reads only refs/heads/<d>; leg.py land keeps that branch current): only when d resolves, the chain branch is a
+    strict ancestor of d, the copy is clean (tracked files) and no counted row is in progress. Never the primary.
+    ({copy: fast-forwarded}, land_first); each skip but an already-current copy, and a failed merge, is a WARN.
+    land_first is True, with a WARN, when a copy's chain branch holds commits d lacks (a land that stood at the last
+    close: a diverged branch, or one that already holds d through a kept land merge) and no row is in progress: legs.md
+    § Begin 0 then runs leg.py land before the first claim, which merges d in and lands them."""
+    out, land_first = {}, False
+    running = any(r.state == "running" for r in chain.counted())
+    for c in copies:
+        P, C, br = c["checkout"], c["copy"], c["branch"]
+        out[C] = False
+        d = default_branch(P)
+        if d is None:
+            warns.append(f"WARN: {C}: not fast-forwarded: {P} has no default branch resolved")
+            continue
+        tip = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{br}^{{commit}}")
+        dsha = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{d}^{{commit}}")
+        if not tip or not dsha or tip == dsha:
+            continue   # already current, or nothing to read
+        if is_ancestor(P, dsha, tip):
+            # It holds d, and commits d lacks: a land that stood at the last close (its merge kept), never a skip.
+            if not running:
+                warns.append(f"WARN: {C}: {br} has commits {d} lacks, not yet landed (run leg.py land before the first "
+                             "claim)")
+                land_first = True
+            continue
+        why = None
+        if running:
+            why = "a row is in progress"
+        elif not is_ancestor(P, tip, dsha):
+            why = f"{br} has commits {d} lacks (run leg.py land before the first claim: it merges {d} in)"
+            land_first = True
+        else:
+            st = git(C, "status", "--porcelain", "--untracked-files=no")
+            if st.returncode != 0 or st.stdout.strip():
+                why = "the copy has uncommitted changes" if st.returncode == 0 else "its status cannot be read"
+        if why is None:
+            r = git(C, "merge", "--ff-only", "--no-autostash", "-q", f"refs/heads/{d}")
+            if r.returncode == 0:
+                out[C] = True
+                continue
+            why = f"git merge --ff-only failed: {(r.stderr or r.stdout).strip()[:160]}"
+        warns.append(f"WARN: {C}: not fast-forwarded to {d}: {why}")
+    return out, land_first
+
+
 # ---- smoke list ---------------------------------------------------------------------------------------------------
 
 def smoke_list(chain, n):
@@ -1094,19 +1586,34 @@ def _begin_locked(ctx, a, chain, cwd):
         raise Refuse(3, f"surface held: [[{b}]] holds {tok}, which Leg {n} writes; nothing written: this chain waits "
                         f"its turn: begin again once [[{b}]] lands its rows there (/thread:status [[{b}]])",
                      held=held, reason=f"surface held: [[{b}]] holds {tok}")
-    # The launch check: the first row this Leg must work.
+    # Chain copies (ADR 0067 d2): a missing copy remade and a newly needed one added before the launch check, so an
+    # exit 4's line names a folder that exists. A note with no `chain_copies:` works in place, as before.
+    pairs, made, copies, warns = chain_pairs(chain), [], [], []
+    if pairs is not None:
+        made, pairs, _stamped, warns = ensure_copies(ctx, chain)
+        copies = [{"checkout": c["checkout"], "copy": c["copy"], "branch": c["branch"], "made": c["made"],
+                   "fastForwarded": False} for c in made]
+    # The launch check: the first row this Leg must work, in its Chain copy when it has one.
     plan = plan_next(chain, n, None, None, cap=False, launch=False, dead=() if took_over is None else (took_over,))
     row = plan.get("row") if plan["action"] in ("finish", "claim") else None
     if row is not None:
         need = launch_harness(row.alias)
-        if _fold(row.folder or "") != cwd.casefold() or need != ctx.harness:
-            why = (f"wrong launch: [[{row.slug}]] runs as `{row.alias}` from `{row.folder}` ({need}); this session is "
-                   f"{ctx.harness} in {cwd}; nothing written, so start Leg {n} there with the prompt below")
-            raise Refuse(4, why, launch=row.launch, prompt=leg_prompt(ctx, n),
-                         reason=f"wrong launch: run Leg {n} as {row.alias} from {row.folder}")
+        where = (sc.copy_folder(row.folder, pairs) if pairs and row.folder else None) or row.folder
+        if _fold(where or "") != cwd.casefold() or need != ctx.harness:
+            why = (f"wrong launch: [[{row.slug}]] runs as `{row.alias}` from `{where}` ({need}); this session is "
+                   f"{ctx.harness} in {cwd}; nothing written to the Leg log, so start Leg {n} there with the prompt "
+                   "below")
+            raise Refuse(4, why, launch=chain_launch(pairs, row.alias, row.folder), prompt=leg_prompt(ctx, n),
+                         reason=f"wrong launch: run Leg {n} as {row.alias} from {where}")
         alias, folder = row.alias, row.folder
     else:
-        alias, folder = ctx.harness, cwd
+        # A row-less Leg (complete or stuck) logs its primary folder: the Leg log names Queue folders only.
+        alias, folder = ctx.harness, (sc.primary_folder(cwd, pairs) if pairs else None) or cwd
+    land_first = False
+    if copies and not ctx.dry:
+        moved, land_first = fast_forward(ctx, chain, made, warns)
+        for c in copies:
+            c["fastForwarded"] = moved.get(c["copy"], False)
     if not ctx.dry:
         if took_over is not None:
             log_line(chain.note, leg_line(ctx, took_over, f"closed: lost (taken over by Leg {n})"))
@@ -1114,10 +1621,12 @@ def _begin_locked(ctx, a, chain, cwd):
         log_line(chain.note, leg_line(ctx, n, f"began: leg-{n} session {ctx.session} in {alias} from {folder}{tail}"))
         save(ctx, chain.note)
         chain = Chain(ctx)
-    return begin_out(ctx, chain, n, resumed=False, took_over=took_over, alias=alias, folder=folder)
+    return begin_out(ctx, chain, n, resumed=False, took_over=took_over, alias=alias, folder=folder, copies=copies,
+                     warns=warns, pairs=pairs, land_first=land_first)
 
 
-def begin_out(ctx, chain, n, resumed, took_over=None, alias=None, folder=None):
+def begin_out(ctx, chain, n, resumed, took_over=None, alias=None, folder=None, copies=None, warns=None, pairs=None,
+              land_first=False):
     g = chain.legs.get(n) or {}
     alias = g.get("alias") or alias
     folder = g.get("folder") or folder
@@ -1126,11 +1635,36 @@ def begin_out(ctx, chain, n, resumed, took_over=None, alias=None, folder=None):
                  and owner_leg(r.note) not in (None, n)
                  and (chain.legs.get(owner_leg(r.note)) is None or chain.legs[owner_leg(r.note)]["closed"] is not None)]
     fixes = [r.slug for r, _v in chain.fixes() if r.state != "done"]
+    if copies is None:   # a resume: the recorded copies, as they are
+        pairs = copies_read(chain)[0]
+        copies = [{"checkout": c, "copy": p, "branch": f"chain/{ctx.slug}", "made": False, "fastForwarded": False}
+                  for c, p in pairs or []]
+    cwd = (sc.copy_folder(folder, pairs) if pairs and folder else None) or folder
     return {"verb": "begin", "rollout": ctx.slug, "leg": n, "owner": f"leg-{n}", "session": ctx.session,
             "harness": ctx.harness, "resumed": resumed, "tookOver": took_over,
-            "launch": {"alias": alias, "folder": folder}, "inherited": inherited, "smoke": smoke_list(chain, n),
-            "fixes": fixes, "mcp": launch_mcp(chain, alias, folder), "next": next_json(plan),
-            "progress": chain.progress(n), "dryRun": ctx.dry}
+            "launch": {"alias": alias, "folder": folder}, "cwd": cwd, "copies": copies, "landFirst": bool(land_first),
+            "inherited": inherited,
+            "smoke": smoke_list(chain, n), "fixes": fixes, "mcp": launch_mcp(chain, alias, folder),
+            "next": next_json(plan), "progress": chain.progress(n), "warns": list(warns or []), "dryRun": ctx.dry}
+
+
+def cmd_copies(ctx, a):
+    """`copies`: make the chain's Chain copies and stamp `chain_copies:` (schedule S5; by hand on status's `chain copy
+    missing` blocker). Refuses a note that is not serial, done, dropped or superseded; an incomplete one is allowed."""
+    with Lock(ctx):
+        chain = Chain(ctx)
+        note = chain.note
+        if rr._shape(note) != "serial":
+            raise Refuse(1, f"{ctx.slug} is not a serial rollout (shape: {rr._scalar(note.get('shape')) or 'parallel'}): "
+                            "only a serial chain works in Chain copies")
+        st = rr._status(note)
+        if st == "done":
+            raise Refuse(1, f"{ctx.slug} is done: its chain is complete")
+        if st == "dropped" or rr._valued(note.get("superseded_by")):
+            raise Refuse(1, f"{ctx.slug} is {'dropped' if st == 'dropped' else 'superseded'}: nothing runs it")
+        copies, _pairs, stamped, warns = ensure_copies(ctx, chain)
+        return {"verb": "copies", "rollout": ctx.slug, "copies": copies, "warns": warns, "stamped": stamped,
+                "dryRun": ctx.dry}
 
 
 def cmd_next(ctx, a):
@@ -1146,18 +1680,97 @@ def cmd_next(ctx, a):
     return out
 
 
-def stamp_bases(ctx, row):
-    out, vault = [], os.path.realpath(ctx.vault)
-    for tok in row.surfaces:
-        if not tok.lower().startswith("repo:"):
+def stamp_bases(ctx, chain, row):
+    """(bases, primary bases). bases: one `<toplevel>@<sha40>` per checkout the row works (ADR 0067 d2): checkout_of
+    each of its `repo:` tokens that is a git toplevel, then the toplevel of its launch folder, where its commits land;
+    the vault never. A file token, or a row whose cell names only `ext:` or vault places, so never leaves a code row
+    unstamped and unreviewed. In a chain with `chain_copies:` each top is stamped as its copy, `<copy>@<copy HEAD>`,
+    and the primary bases are `<checkout>@<checkout HEAD>` beside them (done's stray scan reads them); in place they are
+    None. Refuse(1), nothing written: a top with no pair (`leg.py copies` adds it), or a pair whose copy is missing."""
+    tops = row_tops(ctx, row)
+    pairs = chain_pairs(chain)
+    if pairs is None:
+        return tops_at(tops), None
+    copies = []
+    for top in tops:
+        hit = _pair(pairs, top)
+        if hit is None:
+            raise Refuse(1, f"{top} has no Chain copy in chain_copies: run leg.py copies --rollout {ctx.rollout}, then "
+                            "claim again; nothing written")
+        if toplevel(hit[1]) != os.path.realpath(hit[1]):
+            raise Refuse(1, f"{top}'s Chain copy {hit[1]} is missing: leg.py begin remakes it (or leg.py copies "
+                            f"--rollout {ctx.rollout}), then claim again; nothing written")
+        copies.append(os.path.realpath(hit[1]))
+    return tops_at(copies), tops_at(tops)
+
+
+def unlanded_deps(ctx, chain, row, pairs, bases):
+    """A Chain copy's claim (ADR 0067 d2, d3): each dependency of row (depends-on/blocked-by, through `merged_into:`
+    tombstones) that another rollout's chain finished, with a `leg_head` commit in this repository (its object is in the
+    copy's) that the copy's HEAD lacks. `done` frees the dependant at once, while the work reaches the primary's default
+    branch only at its chain's next land (that chain's next `done` or close), and this copy only at a land or a
+    fast-forward of its own. [{task, dep, rollout, sha, copy, why}], why the cause: `done on chain/<X>, not yet on <d>:
+    it lands at [[<X>]]'s next done or close` (the commit is on that branch here); `on <d>, not yet in <copy>: run
+    leg.py land, which brings <d> in`; else `done in <its top> (<sha12>), not in <copy>`."""
+    copies = [b.rpartition("@")[0] for b in bases]
+    out = []
+    for dep in rr._dep_entries(row.note):
+        _unit, entry, _folded = rr._fold_unit(dep, chain.index)
+        if entry is None or rr._status(entry[1]) != "done":
             continue
-        p = os.path.realpath(os.path.expanduser(tok[5:].strip()))
-        top = toplevel(p)
-        if top is None or top != p or top == vault:
+        other = rr._wikilink_slug(rr._scalar(entry[1].get("rollout"))) or ""
+        if not other or other.lower() == ctx.slug.lower():
             continue
+        for top, sha in rr._leg_tops(entry[1], "leg_head"):
+            for C in copies:
+                if git(C, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0 or is_ancestor(C, sha, "HEAD"):
+                    continue   # another repository's commit, or one this copy holds
+                hit = _pair(pairs, C, side=1)
+                P = hit[0] if hit else C
+                d = default_branch(P)
+                dn = d or "its default branch"
+                theirs = f"refs/heads/chain/{other}"
+                if d and is_ancestor(P, sha, f"refs/heads/{d}"):
+                    why = f"on {dn}, not yet in {C}: run leg.py land, which brings {dn} in"
+                elif git(P, "rev-parse", "-q", "--verify", theirs).returncode == 0 and is_ancestor(P, sha, theirs):
+                    why = f"done on chain/{other}, not yet on {dn}: it lands at [[{other}]]'s next done or close"
+                else:
+                    why = f"done in {top} ({sha[:12]}), not in {C}"
+                out.append({"task": row.slug, "dep": dep, "rollout": other, "sha": sha, "copy": C, "why": why})
+    return out
+
+
+def tops_at(tops):
+    """`<top>@<HEAD sha40>` for each top whose HEAD resolves, in order, each once."""
+    out = []
+    for top in tops:
         sha = git_out(top, "rev-parse", "--verify", "HEAD^{commit}")
         if sha and f"{top}@{sha}" not in out:
             out.append(f"{top}@{sha}")
+    return out
+
+
+def row_tops(ctx, row):
+    """The checkouts a row works, in place: each `repo:` token's checkout that is a git toplevel, then its launch
+    folder's toplevel; the vault and a path in no checkout never."""
+    vault = os.path.realpath(ctx.vault)
+    tops = []
+    for tok in row.surfaces:
+        try:
+            c = sc.checkout_of(tok)
+        except ValueError:
+            continue
+        if c is None:
+            continue
+        p = os.path.realpath(os.path.expanduser(c[1]))
+        if toplevel(p) == p:
+            tops.append(p)
+    if row.folder:
+        tops.append(toplevel(os.path.realpath(os.path.expanduser(row.folder))))
+    out = []
+    for top in tops:
+        if top is not None and top != vault and top not in out:
+            out.append(top)
     return out
 
 
@@ -1182,25 +1795,45 @@ def cmd_claim(ctx, a):
             note.set("started", ctx.stamp, after=("leg", "owner"))
         for key in ("handed_back", "gates_signed"):
             note.remove(key)
-        bases = None
+        bases = pbases = None
         if not a.inherit:
-            bases = stamp_bases(ctx, row)
+            bases, pbases = stamp_bases(ctx, chain, row)
+            gaps = unlanded_deps(ctx, chain, row, chain_pairs(chain), bases) if pbases is not None else []
+            if gaps:
+                # The tail by cause (legs.md § The task loop): a gap on <d> (unlanded_deps' `on <d>, …` why) is this
+                # chain's own land away, so land and claim again; any other waits set aside, so it is named first.
+                g = next((x for x in gaps if not x["why"].startswith("on ")), gaps[0])
+                tail = ("run leg.py land, then claim again" if g["why"].startswith("on ") else
+                        f"set it aside (`leg.py set-aside --task {row.slug} --reason \"<this error>\"`) until that work "
+                        f"is in {g['copy']}")
+                raise Refuse(1, f"[[{row.slug}]] depends on [[{g['dep']}]] ({g['why']}): {tail}; nothing written",
+                             unlandedDeps=gaps)
             note.set("leg_base", "[" + ", ".join(f'"{b}"' for b in bases) + "]", after=("started", "leg"))
+            if pbases is not None:
+                # A Chain copy's claim: the primaries' HEADs too, so done finds a commit that went there instead.
+                note.set("leg_primary_base", "[" + ", ".join(f'"{b}"' for b in pbases) + "]", after=("leg_base",))
         approved = [rr._norm_gate(l) for l in note.section_text(APPROVED_GATES).split("\n") if l.strip()]
-        unapproved = [g for g in a.gate if rr._norm_gate(g) not in approved]
+        unapproved = [g for g in real_gates(a.gate) if rr._norm_gate(g) not in approved]
         save(ctx, note)
         text = (f"took [[{row.slug}]] (inherited from Leg {plan['from']})" if a.inherit else f"claimed [[{row.slug}]]")
         if not ctx.dry:
             log_line(chain.note, leg_line(ctx, n, text))
             save(ctx, chain.note)
-        return {"verb": "claim", "rollout": ctx.slug, "leg": n, "task": row.slug, "inherit": bool(a.inherit),
-                "fix": bool(plan.get("fix")), "leg_base": [f"{t}@{s}" for t, s in leg_base(note)] if bases is None else bases,
-                "verify": verify_line(note), "unapproved": unapproved, "dryRun": ctx.dry}
+        out = {"verb": "claim", "rollout": ctx.slug, "leg": n, "task": row.slug, "inherit": bool(a.inherit),
+               "fix": bool(plan.get("fix")), "leg_base": [f"{t}@{s}" for t, s in leg_base(note)] if bases is None else bases,
+               "verify": verify_line(note), "unapproved": unapproved, "dryRun": ctx.dry}
+        primary = pbases if bases is not None else (
+            [f"{t}@{s}" for t, s in rr._leg_tops(note, "leg_primary_base")] if note.get("leg_primary_base") is not None
+            else None)
+        if primary is not None:
+            out["leg_primary_base"] = primary
+        return out
 
 
-def commits_for(top, base, slug):
-    """[(sha, subject, paths)] in base..HEAD carrying `Task: [[slug]]`, oldest first; and the untrailered ones."""
-    r = git(top, "log", "--reverse", "--format=%H%x1f%s%x1f%B%x1e", f"{base}..HEAD")
+def commits_for(top, base, slug, exclude=()):
+    """[(sha, subject, paths)] in base..HEAD (minus what each `exclude` ref reaches) carrying `Task: [[slug]]`, oldest
+    first; and the untrailered ones."""
+    r = git(top, "log", "--reverse", "--format=%H%x1f%s%x1f%B%x1e", f"{base}..HEAD", *(["--not", *exclude] if exclude else []))
     if r.returncode != 0:
         return None, None
     mine, bare = [], []
@@ -1243,12 +1876,29 @@ def change_of(note, slug, only_top=None):
             for p in ps:
                 if not p.startswith(REVIEWS) and p not in paths:
                     paths.append(p)
+        # Only the checkout's own line warns: what a land merge brought in (its second parent's side) is another
+        # chain's or a peer's, already on the primary's default branch (ADR 0067 d3).
+        own = set((git_out(top, "rev-list", "--first-parent", f"{base}..HEAD") or "").split())
         warns = [f"WARN: {sha[:12]} {subj!r} in {top} carries no Task: line"
-                 for sha, subj, ps in bare if any(not p.startswith(REVIEWS) for p in ps)]
+                 for sha, subj, ps in bare if sha in own and any(not p.startswith(REVIEWS) for p in ps)]
         tops.append({"top": top, "base": base, "head": head,
                      "commits": [{"sha": s, "subject": subj} for s, subj, _ in mine], "paths": paths,
                      "spec": [f":(literal){p}" for p in paths], "warns": warns})
     return tops
+
+
+def stray_of(ctx, note, slug, pairs):
+    """[(primary, copy, [(sha, subject, paths)])]: per `leg_primary_base` entry (a Chain copy's claim), the task's
+    `Task:`-trailered commits in `<primary base>..HEAD` that refs/heads/chain/<rollout> does not reach: work that went
+    into the primary checkout instead of its Chain copy (a hand merge of the chain branch is never stray). [] in place."""
+    out, ref = [], f"refs/heads/chain/{ctx.slug}"
+    for top, pbase in rr._leg_tops(note, "leg_primary_base"):
+        excl = [ref] if git(top, "show-ref", "--verify", "-q", ref).returncode == 0 else []
+        mine, _bare = commits_for(top, pbase, slug, exclude=excl)
+        if mine:
+            hit = _pair(pairs, top)
+            out.append((top, hit[1] if hit else "its Chain copy", mine))
+    return out
 
 
 def task_note(chain, slug):
@@ -1262,8 +1912,11 @@ def cmd_change(ctx, a):
     chain = Chain(ctx)
     r = task_note(chain, a.task)
     tops = change_of(r.note, r.slug, a.top)
+    stray = [f"WARN: {sha[:12]} {subj!r} in {top} carries Task: [[{r.slug}]] but is in the primary, not its Chain copy "
+             f"{copy}: done refuses it; set-aside --revert reverts it there"
+             for top, copy, mine in stray_of(ctx, r.note, r.slug, copies_read(chain)[0]) for sha, subj, _p in mine]
     return {"verb": "change", "rollout": ctx.slug, "task": r.slug, "tops": tops,
-            "codeWriting": any(t["commits"] for t in tops)}
+            "codeWriting": any(t["commits"] for t in tops), "stray": stray}
 
 
 def cmd_smoke(ctx, a):
@@ -1371,8 +2024,13 @@ def check_cause(chain, target, a):
             for sha in (git_out(t["top"], "rev-list", f"{last}..HEAD", "--", *t["spec"]) or "").split():
                 if not trailered_by_any(t["top"], sha, slugs):
                     return None
+            # A land merge on the copy's own line brought other chains' landed work in (ADR 0067 d3): a red after it
+            # is outside even when that work touched none of t's paths (the cross-file clash d4's backstop exists for).
+            subjects = git_out(t["top"], "log", "--first-parent", "--format=%s", f"{last}..HEAD") or ""
+            if any(s.startswith(LAND_MERGE) for s in subjects.split("\n")):
+                return None
         raise Refuse(1, f"no commit after [[{target.slug}]]'s last Task: commit touches its paths without a chain "
-                        "task's trailer: not an outside cause")
+                        "task's trailer, and no land merge came after it: not an outside cause")
     if a.cause == "drift":
         for t in tops:
             last = last_trailered(t["top"], t["base"], target.slug)
@@ -1522,6 +2180,9 @@ def cmd_done(ctx, a):
         verify = a.verify or "none"
         if vl and verify != "pass":
             raise Refuse(1, f"[[{r.slug}]] has a Verify line: run it green, then `done --verify pass` ({vl})")
+        for top, copy, _mine in stray_of(ctx, r.note, r.slug, copies_read(chain)[0]):
+            raise Refuse(1, f"[[{r.slug}]] committed in the primary {top}, not its chain copy {copy}: set it aside with "
+                            f"--revert, which reverts it there, and redo it in {copy}")
         tops = change_of(r.note, r.slug)
         code = [t for t in tops if t["commits"]]
         cwd_top = toplevel(os.path.realpath(os.path.expanduser(a.cwd or os.getcwd())))
@@ -1552,6 +2213,18 @@ def cmd_done(ctx, a):
             # HEAD guard anchors on it.
             heads = [f"{t['top']}@{t['commits'][-1]['sha']}" for t in tops if t["commits"] and not t.get("error")]
             note.set("leg_head", "[" + ", ".join(f'"{h}"' for h in heads) + "]", after=("leg_base",))
+            pairs = copies_read(chain)[0]
+            if pairs is not None:
+                # ADR 0067 d4's actual claims: the files its Task: commits touched, on the primary's paths, that
+                # leg.py land checks against other live chains' unlanded files before it lands (bookkeeping aside).
+                claims = []
+                for t in tops:
+                    hit = _pair(pairs, t["top"], side=1)
+                    for p in t["paths"]:
+                        tok = claim_token(hit[0] if hit else t["top"], p)
+                        if not sc.bookkeeping(tok) and sc.fmt_token(tok) not in claims:
+                            claims.append(sc.fmt_token(tok))
+                note.set("leg_claims", "[" + ", ".join(f'"{c}"' for c in claims) + "]", after=("leg_head",))
         save(ctx, note)
         tail = f"; reviewed {', '.join(reviewed)}" if reviewed else ""
         if not ctx.dry:
@@ -1563,23 +2236,30 @@ def cmd_done(ctx, a):
 
 # ---- set-aside ------------------------------------------------------------------------------------------------------
 
-def plan_revert(ctx, r):
-    """Per checkout (top, commits newest-first, paths). Exit 3 when a path to revert is dirty."""
-    out = []
+def plan_revert(ctx, chain, r):
+    """Per checkout (top, commits newest-first, paths): the task's trailered commits in each leg_base checkout, then
+    those that went into a Chain copy's primary instead (stray_of). Exit 3 when a path to revert is dirty."""
+    todo = []
     for t in change_of(r.note, r.slug):
-        if not t["commits"]:
-            continue
+        if t["commits"]:
+            todo.append((t["top"], [(c["sha"], None) for c in t["commits"]]))
+    for top, _copy, mine in stray_of(ctx, r.note, r.slug, copies_read(chain)[0]):
+        todo.append((top, [(sha, ps) for sha, _subj, ps in mine]))
+    out = []
+    for top, commits in todo:
         paths = []
-        for c in t["commits"]:
-            for p in (git_out(t["top"], "diff-tree", "--no-commit-id", "--name-only", "-r", "--root", c["sha"]) or "").split("\n"):
+        for sha, ps in commits:
+            if ps is None:
+                ps = (git_out(top, "diff-tree", "--no-commit-id", "--name-only", "-r", "--root", sha) or "").split("\n")
+            for p in ps:
                 if p and p not in paths:
                     paths.append(p)
         spec = [f":(literal){p}" for p in paths]
-        dirty = git_out(t["top"], "status", "--porcelain", "--", *spec)
+        dirty = git_out(top, "status", "--porcelain", "--", *spec)
         if dirty:
-            raise Refuse(3, f"a path to revert has uncommitted or staged changes in {t['top']}: "
+            raise Refuse(3, f"a path to revert has uncommitted or staged changes in {top}: "
                             f"{dirty.splitlines()[0].strip()} (commit, stash or discard it first); nothing reverted")
-        out.append((t["top"], [c["sha"] for c in reversed(t["commits"])], spec))
+        out.append((top, [sha for sha, _ps in reversed(commits)], spec))
     return out
 
 
@@ -1615,13 +2295,14 @@ def cmd_set_aside(ctx, a):
         if r.state == "running" and owner_leg(r.note) not in (None, n):
             raise Refuse(1, f"[[{r.slug}]] is Leg {owner_leg(r.note)}'s claim, not Leg {n}'s")
         kind = a.kind
-        if kind == "gate" and not a.gate:
-            raise Refuse(2, "--kind gate needs one --gate per pending gate")
+        gates = real_gates(a.gate)
+        if kind == "gate" and not gates:
+            raise Refuse(2, "--kind gate needs one --gate per pending gate (`None` is no gate)")
         if kind == "gate" and a.revert:
             raise Refuse(2, "a gate set-aside reverts nothing: gates come before any write")
         reverted = []
         if a.revert:
-            plans = plan_revert(ctx, r)
+            plans = plan_revert(ctx, chain, r)
             diffs = []
             for top, shas, spec in ([] if ctx.dry else plans):
                 diff, why = scratch_diff(top, shas, spec)
@@ -1646,7 +2327,7 @@ def cmd_set_aside(ctx, a):
         note.remove("owner")
         if kind == "gate":
             note.set("status", "gate-pending")
-            note.upsert_section(GATES_PENDING, "\n".join(f"- {g.strip()}" for g in a.gate))
+            note.upsert_section(GATES_PENDING, "\n".join(f"- {g.strip()}" for g in gates))
             status = "gate-pending"
         else:
             status = a.status or "blocked"
@@ -1762,6 +2443,696 @@ def cmd_file_followup(ctx, a):
                 "dryRun": ctx.dry}
 
 
+# ---- land (ADR 0067 d3, d4) -------------------------------------------------------------------------------------------
+
+LAND_MERGE = "🔀 land: merge "   # the land merge's subject: `🔀 land: merge <d> into chain/<rollout>` (check_cause reads it)
+LAND_TRIES = 3
+ROW_IN_PROGRESS = "a row is in progress: a land never merges mid-task"
+VERIFIED_RE = re.compile(r"^land verified: (.+) at ([0-9a-f]{40})$")
+
+
+class RepoLock:
+    """A primary checkout's land lock (ADR 0067 d3): an exclusive fcntl.flock on `<git common dir>/thread/chain-land.lock`,
+    taken after the rollout's lock, one at a time, each released (its descriptor closed) before the next and never
+    nested, so two chains in one repo land in turn and no lock cycle forms. `held` is False past lock_timeout() (that
+    copy then stands, exit 0, never 5) or when the common dir cannot be read. --dry-run takes none."""
+
+    def __init__(self, ctx, P):
+        common = _common(P)
+        self.path = os.path.join(common, "thread", "chain-land.lock") if common else None
+        self.skip, self.fd, self.held, self.timeout = ctx.dry, None, False, lock_timeout()
+
+    def __enter__(self):
+        if self.skip:
+            self.held = True
+            return self
+        if self.path is None:
+            return self
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        except OSError:
+            self.fd = None
+            return self
+        deadline = time.monotonic() + self.timeout
+        while True:
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.held = True
+                return self
+            except OSError:
+                if time.monotonic() >= deadline:
+                    os.close(self.fd)
+                    self.fd = None
+                    return self
+                time.sleep(0.05)
+
+    def __exit__(self, *exc):
+        if self.fd is not None:
+            os.close(self.fd)   # the release, as Lock's
+            self.fd = None
+        return False
+
+
+def land_leg(ctx, chain):
+    """The Leg a land runs as: the open Leg, when it is this session's (my_leg's rule); with no Leg open, the last one,
+    when its session is this one or either is `unknown` (handed's rule), so close § Under a Leg runs it after
+    `leg.py close`. Refuse(1) otherwise."""
+    leg = chain.open_leg()
+    if leg is None and chain.legs:
+        leg = chain.legs[chain.last_n()]
+    if leg is not None and (ctx.session == "unknown" or leg["session"] in (None, "unknown", ctx.session)):
+        return leg
+    raise Refuse(1, "no Leg of this session: run leg.py begin first")
+
+
+def claim_token(P, path):
+    """A committed path's actual claim (ADR 0067 d4): `repo:<P>//<path>`, P the primary checkout, so the token reads the
+    same from any copy; a path read_list could not read back from a quoted list (a `"`, or a ` #` comment mark) claims
+    the whole checkout, `repo:<P>`."""
+    if '"' in path or re.search(r"\s#", path):
+        return sc.parse_token(f"repo:{P}")
+    try:
+        return sc.parse_token(f"repo:{P}//{path}")
+    except ValueError:
+        return sc.parse_token(f"repo:{P}")
+
+
+def heads_on(note, C):
+    """A task's `leg_head` shas whose top is the Chain copy C (case-folded realpaths)."""
+    k = _fold(C)
+    return [sha for top, sha in rr._leg_tops(note, "leg_head") if _fold(top) == k]
+
+
+def off_default(chain, P, C, d):
+    """unl: the done counted rows with a `leg_head` entry on C that refs/heads/<d> in P does not reach (git is the truth,
+    so a hand merge counts as landed)."""
+    out = []
+    for r in chain.counted():
+        if r.state == "done" and r.note is not None and \
+                any(not is_ancestor(P, s, f"refs/heads/{d}") for s in heads_on(r.note, C)):
+            out.append(r)
+    return out
+
+
+def row_claims(r, pairs):
+    """A done row's actual claims: its `leg_claims:` tokens, else (a row done before done stamped them) change's paths
+    as `repo:<primary>//<path>`; bookkeeping is never a claim (ADR 0067 d5)."""
+    raw = sc.read_list(r.note, "leg_claims")
+    toks = []
+    if raw is not None:
+        for x in raw:
+            try:
+                toks.append(sc.parse_token(x))
+            except ValueError:
+                continue
+    else:
+        for t in change_of(r.note, r.slug):
+            hit = _pair(pairs, t["top"], side=1)
+            toks += [claim_token(hit[0] if hit else t["top"], p) for p in t["paths"]]
+    out = []
+    for t in toks:
+        if not sc.bookkeeping(t) and t not in out:
+            out.append(t)
+    return out
+
+
+def other_serial(ctx):
+    """[(path, note)]: every other root-level note in the tasks dir that is `shape: serial`, neither done nor dropped,
+    with no `superseded_by:`: the chains land's claim check and in-place peer check read. An unreadable note is
+    skipped (no Note), and a frontmatter that never says `serial` is never parsed."""
+    out = []
+    for path in sorted(ctx.tasks.glob("*.md")):
+        if path.stem.lower() == ctx.slug.lower():
+            continue
+        try:
+            text = path.read_text()
+        except (OSError, UnicodeDecodeError):
+            continue
+        m = re.match(r"^---\n(.*?\n)---\n", text, re.S)
+        if not m or not re.search(r"^shape:.*serial", m.group(1), re.M | re.I):
+            continue
+        try:
+            note = rr.Note(path, text)
+        except ValueError:
+            continue
+        if rr._shape(note) != "serial" or rr._status(note) in ("done", "dropped") or \
+                rr._valued(note.get("superseded_by")):
+            continue
+        out.append((path, note))
+    return out
+
+
+def peer_chain(ctx, path):
+    """Another serial note read as a Chain (unfinished-rollout.py's chain_hold pattern)."""
+    return Chain(SimpleNamespace(rollout=path, tasks=ctx.tasks, vault=ctx.vault, slug=path.stem, archived=False))
+
+
+def claim_stand(ctx, chain, P, d, ours, notes, warns):
+    """Step 5, ADR 0067 d4's actual claims: ours (this copy's unlanded rows' claims) against every other live chain with
+    a Chain copy of P whose done rows are unlanded (unlanded_done, and git confirms: its `leg_head` on its copy is not on
+    refs/heads/<d>), their `leg_claims:`. The why of a stand for the first overlap with a chain that sorts before this
+    one (order_key), else None: a later chain never blocks, and an unreadable note is a WARN (git's merge and the re-run
+    Verify lines stay the backstop)."""
+    if not ours:
+        return None
+    me, best = order_key(ctx.slug, first_began(chain)), None
+    for path, note in notes:
+        try:
+            pairs = sc.read_chain_copies(note)
+        except ValueError:
+            continue
+        hit = next(((c, p) for c, p in pairs or [] if _fold(c) == _fold(P)), None)
+        if hit is None:
+            continue
+        try:
+            X = peer_chain(ctx, path)
+        except Exception as e:  # noqa: BLE001 — chain_hold's catch: an unreadable chain is skipped, with a WARN
+            why = e.msg if isinstance(e, Refuse) else f"{type(e).__name__}: {e}"
+            warns.append(f"WARN: [[{path.stem}]] could not be read ({reason_text(why, 120)}): its unlanded files are not "
+                         f"checked against this land in {P}; git's merge is the backstop")
+            continue
+        key = order_key(path.stem, first_began(X))
+        if not key < me:
+            continue
+        theirs = []
+        for r in X.counted():
+            if not unlanded_done(X, r):
+                continue
+            shas = heads_on(r.note, hit[1])
+            if not shas or all(is_ancestor(P, s, f"refs/heads/{d}") for s in shas):
+                continue
+            for x in sc.read_list(r.note, "leg_claims") or []:
+                try:
+                    tok = sc.parse_token(x)
+                except ValueError:
+                    continue
+                if not sc.bookkeeping(tok) and tok not in theirs:
+                    theirs.append(tok)
+        m = sc.overlap_pairs(ours, theirs)
+        if m and (best is None or key < best[0]):
+            best = (key, path.stem, m[0][1])
+    if best is None:
+        return None
+    return f"[[{best[1]}]] holds {sc.fmt_token(best[2])} unlanded and {first_by(best[0], me)}"
+
+
+def peer_works(X):
+    """What a live in-place chain works (begin's surface re-check reads the same sets): its open Leg's write set and
+    launch folders, plus each running row's cell tokens (else the note's claim), folder and a `repo:<top>` per
+    `leg_base` top. (tokens, folders)."""
+    toks, folders = [], []
+    ol = X.open_leg()
+    if ol is not None:
+        toks += write_set(X, ol["n"])
+        folders += [ol["folder"]] + [r.folder for r in write_rows(X, ol["n"])]
+    for r in X.counted():
+        if r.state != "running":
+            continue
+        toks += [sc.fmt_token(t) for t in (_cell_tokens(r) or _note_claim(X) or [("any", "")])]
+        folders.append(r.folder)
+        toks += [f"repo:{top}" for top, _sha in leg_base(r.note)] if r.note is not None else []
+    return toks, [f for f in folders if f]
+
+
+def _is_any(tok):
+    try:
+        return sc.parse_token(tok)[0] == "any" if isinstance(tok, str) else tok[0] == "any"
+    except ValueError:
+        return False
+
+
+def surfaces_may_work(note, P):
+    """Whether an unreadable chain's frontmatter `surfaces:` names P, or reads as any (empty, unparseable or `any`)."""
+    raw = sc.read_surfaces(note)
+    if not raw:
+        return True
+    try:
+        toks = [sc.parse_token(x) for x in raw]
+    except ValueError:
+        return True
+    return any(t[0] == "any" or sc.overlaps(t, ("repo", P)) for t in toks)
+
+
+def peer_stand(ctx, P, d, notes, warns):
+    """Step 7a, the in-place peer check, run right before the fast-forward in P: (why, waits, peer slug) for the first
+    live serial chain that works P in place (no `chain_copies:`, or a malformed one, read as in place as
+    unfinished-rollout.py's copied_of reads it), else None. Live: a Leg open, or a counted row in progress. A chain that
+    cannot be read stands the copy only when its `surfaces:` names P or reads as any (fix its note), else a WARN."""
+    vault = os.path.realpath(os.path.expanduser(str(ctx.vault)))
+    for path, note in notes:
+        try:
+            if sc.read_chain_copies(note) is not None:
+                continue   # a copy chain is no peer: it meets this one file to file, in claim_stand
+        except ValueError:
+            pass
+        try:
+            X = peer_chain(ctx, path)
+            ol = X.open_leg()
+            run = next((r for r in X.counted() if r.state == "running"), None)
+            if ol is None and run is None:
+                continue
+            toks, folders = peer_works(X)
+        except Exception as e:  # noqa: BLE001 — chain_hold's catch
+            why = reason_text(e.msg if isinstance(e, Refuse) else f"{type(e).__name__}: {e}", 120)
+            if surfaces_may_work(note, P):
+                return (f"[[{path.stem}]] could not be read ({why}) and may work {P} in place: fix its note", False,
+                        path.stem)
+            warns.append(f"WARN: [[{path.stem}]] could not be read ({why}); its surfaces: name no {P}, so this land "
+                         "goes on")
+            continue
+        works = any(_fold(c) == _fold(P) for c in sc.checkouts_of(toks, folders, toplevel, vault)) or \
+            any(_is_any(t) for t in toks)
+        if works:
+            label = f"Leg {ol['n']} open" if ol is not None else f"[[{run.slug}]] in progress"
+            return (f"[[{path.stem}]] works {P} in place ({label}): a land never moves a checked-out {d} under another "
+                    "chain's live work", True, path.stem)
+    return None
+
+
+def _git_files(stderr):
+    """The tab-indented paths of git's `would be overwritten` refusal."""
+    return [ln.strip() for ln in (stderr or "").split("\n") if ln.startswith("\t") and ln.strip()]
+
+
+def bring_in(ctx, P, C, d, br):
+    """Step 4: d brought into C, never by rebase, so every `leg_head` stays an ancestor: `merge --ff-only` when the tip is
+    d or behind it, nothing when it already holds d, else a `--no-ff` land merge. Hooks off, never an autostash.
+    (tip, dm, how, stand): dm the d sha the tip now holds, how none|ff|merge, stand (why, waits) or None. --dry-run
+    merges nothing and gives the tip it would start from."""
+    tip = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{br}^{{commit}}")
+    dm = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{d}^{{commit}}")
+    if not tip or not dm:
+        return None, dm, None, (f"cannot read refs/heads/{br} or refs/heads/{d} in {P}", False)
+    if tip == dm or is_ancestor(P, dm, tip):
+        return tip, dm, "none", None
+    how = "ff" if is_ancestor(P, tip, dm) else "merge"
+    if ctx.dry:
+        return tip, dm, how, None
+    if how == "ff":
+        r = git(C, "-c", "core.hooksPath=/dev/null", "merge", "--ff-only", "--no-autostash", "-q", f"refs/heads/{d}")
+    else:
+        r = git(C, "-c", "core.hooksPath=/dev/null", "-c", "merge.autoStash=false", "merge", "--no-ff", "--no-edit",
+                "-m", f"{LAND_MERGE}{d} into {br}", f"refs/heads/{d}")
+    if r.returncode != 0:
+        unmerged = [p for p in (git_out(C, "diff", "--name-only", "--diff-filter=U") or "").split("\n") if p]
+        if git(C, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0:
+            git(C, "merge", "--abort")
+        if unmerged:
+            return None, dm, how, (f"conflict in {', '.join(unmerged)}", False)
+        lines = [ln.strip() for ln in (r.stderr or r.stdout).split("\n") if ln.strip()]
+        files = _git_files(r.stderr)
+        line = (lines[0] if lines else f"exit {r.returncode}") + (f" {', '.join(files)}" if files else "")
+        return None, dm, how, (f"git merge refused in {C}: {reason_text(line, 200)}", False)
+    return git_out(C, "rev-parse", "--verify", "HEAD^{commit}"), dm, how, None
+
+
+def ff_primary(ctx, P, d, br, tip, dm, notes, warns):
+    """Step 7: d moved to the tip, by where d is checked out: in P, after the in-place peer check and a re-read of P's
+    HEAD (P off d stands), `merge --ff-only --no-autostash` (never a stash: a local change or an untracked file in the
+    way stands), landed only when d is then the tip; nowhere, a compare-and-swap `update-ref`; in another worktree, a
+    stand. (result, stand): result landed|moved (d moved, or the ff moved d short of the tip: re-run from step 4)|
+    stood|plan, stand (why, waits, peer slug or None), or for --dry-run the path it would take."""
+    where = next((wt for wt, b in _worktree_branches(P) if b == f"refs/heads/{d}"), None)
+    if where is None:
+        if ctx.dry:
+            return "plan", "update-ref (no worktree has it checked out)"
+        r = git(P, "update-ref", "-m", f"land: {br}", f"refs/heads/{d}", tip, dm)
+        return ("landed", None) if r.returncode == 0 else ("moved", None)
+    if _fold(where) != _fold(P):
+        return "stood", (f"{d} is checked out in {where}", False, None)
+    peer = peer_stand(ctx, P, d, notes, warns)
+    if peer is not None:
+        return "stood", peer
+    if ctx.dry:
+        return "plan", f"merge --ff-only in {P}"
+    # The peer check read every serial note: re-read P's branch, so the merge moves d and no branch P switched to.
+    head = git_out(P, "symbolic-ref", "-q", "HEAD")
+    if head != f"refs/heads/{d}":
+        return "stood", (f"{P} left {d} during the land (its HEAD is now {head or 'detached'})", True, None)
+    r = git(P, "-c", "core.hooksPath=/dev/null", "-c", "merge.autoStash=false", "merge", "--ff-only", "--no-autostash",
+            "-q", f"refs/heads/{br}")
+    now = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{d}^{{commit}}")
+    if r.returncode == 0:
+        return ("landed", None) if now == tip else ("moved", None)   # moved: P switched after the re-read
+    if now != dm:
+        return "moved", None
+    files = _git_files(r.stderr)
+    if files:
+        return "stood", (f"the primary's uncommitted edit on {', '.join(files)}", False, None)
+    line = next((ln.strip() for ln in (r.stderr or r.stdout).split("\n") if ln.strip()), f"exit {r.returncode}")
+    return "stood", (f"git merge --ff-only refused in {P}: {reason_text(line, 200)}", False, None)
+
+
+def verified_tips(chain, P):
+    """The verified tips V the Leg log records for P (`land verified: <P> at <V>`, any Leg)."""
+    out = []
+    for e in chain.log:
+        m = VERIFIED_RE.match(e["rest"]) if e["kind"] == "land verified" else None
+        if m and _fold(m.group(1)) == _fold(P) and m.group(2) not in out:
+            out.append(m.group(2))
+    return out
+
+
+def needs_verify(P, C, r, dm, tip, tips):
+    """Step 6: whether an unl row's Verify line runs again: unless dm is already in its `leg_head` (it passed on top of
+    that d), or a verified tip V holds its head and dm and the tip holds V."""
+    for h in heads_on(r.note, C):
+        if is_ancestor(P, dm, h):
+            continue
+        if any(is_ancestor(P, h, V) and is_ancestor(P, dm, V) and is_ancestor(P, V, tip) for V in tips):
+            continue
+        return True
+    return False
+
+
+def land_entry(P, C, br):
+    return {"checkout": P, "copy": C, "branch": br, "default": None, "state": None, "head": None, "merged": None,
+            "verify": None, "landed": [], "why": None, "waits": None}
+
+
+def land_copy(ctx, chain, P, C, pairs, verified, notes, warns):
+    """Steps 1-8 for one pair P -> C (the module docstring's land). (entry, the verified tip it accepted or None)."""
+    br = f"chain/{ctx.slug}"
+    e = land_entry(P, C, br)
+    acc = [None]   # a --verified tip accepted on an earlier try is logged even when a later try stands
+
+    def stand(why, waits):
+        e.update(state="stood", why=why, waits=waits)
+        return e, acc[0]
+
+    d = default_branch(P)
+    e["default"] = d
+    if d is None:
+        return stand(f"{P} has no default branch resolved (origin/HEAD, main or master)", False)
+    if toplevel(C) != os.path.realpath(C):
+        return stand(f"its Chain copy {C} is missing: leg.py begin remakes it", False)
+    st = git(C, "status", "--porcelain", "--untracked-files=no")
+    if st.returncode != 0 or st.stdout.strip():
+        return stand(f"its Chain copy {C} has uncommitted changes" if st.returncode == 0
+                     else f"its Chain copy {C}'s status cannot be read", False)
+    with RepoLock(ctx, P) as lk:
+        if not lk.held:
+            return stand(f"another land held {lk.path} past {lk.timeout:g}s" if lk.path
+                         else f"cannot read {P}'s git common dir", lk.path is not None)
+        unl = off_default(chain, P, C, d)
+        ours = []
+        for r in unl:
+            ours += [t for t in row_claims(r, pairs) if t not in ours]
+        tips = verified_tips(chain, P)
+        for _try in range(LAND_TRIES):
+            tip, dm, how, s = bring_in(ctx, P, C, d, br)
+            if s is not None:
+                return stand(*s)
+            e.update(head=tip, merged=dm)
+            if tip == dm:
+                e["state"] = "current"
+                return e, acc[0]
+            if tip in verified and tip not in tips:
+                tips.append(tip)
+                acc[0] = tip
+            # Step 5, after step 4's merge: a claim stand keeps that merge on chain/<rollout> (as --red does), so the
+            # copy holds the work other chains landed on d and the next land asks for its re-verify.
+            why = claim_stand(ctx, chain, P, d, ours, notes, warns) if _try == 0 else None
+            if why:
+                if ctx.dry:
+                    e.update(state="plan", plan={"unl": [r.slug for r in unl], "claim": why, "bring": how,
+                                                 "verify": [], "ff": None, "peer": None})
+                    return e, None
+                return stand(why, True)
+            if ctx.dry:   # the plan: nothing merged, moved or written, no lock taken
+                res, got = ff_primary(ctx, P, d, br, tip, dm, notes, warns)
+                e.update(state="plan", plan={"unl": [r.slug for r in unl], "claim": None, "bring": how,
+                                             "verify": [r.slug for r in unl if needs_verify(P, C, r, dm, tip, tips)],
+                                             "ff": got if res == "plan" else None,
+                                             "peer": got[0] if res == "stood" else None})
+                return e, None
+            need = [r for r in unl if needs_verify(P, C, r, dm, tip, tips)]
+            if need:
+                e.update(state="verify", verify=[{"task": r.slug, "line": verify_line(r.note),
+                                                  "folder": sc.copy_folder(r.folder, pairs) if r.folder else None}
+                                                 for r in need])
+                return e, acc[0]
+            res, s = ff_primary(ctx, P, d, br, tip, dm, notes, warns)
+            if res == "landed":
+                e.update(state="landed", landed=[r.slug for r in unl])
+                return e, acc[0]
+            if res == "stood":
+                return stand(s[0], s[1])
+        return stand(f"{d} kept moving", True)
+
+
+def stamp_landed(ctx, chain, pairs):
+    """`leg_landed: <stamp>` on each done row, not yet stamped, whose every `leg_head` entry on a Chain copy is on its
+    primary's default branch (git's read). The slugs stamped."""
+    out = []
+    for r in chain.counted():
+        if r.state != "done" or r.note is None or rr._valued(r.note.get("leg_landed")):
+            continue
+        entries = [(hit[0], sha) for top, sha in rr._leg_tops(r.note, "leg_head")
+                   for hit in [_pair(pairs, top, side=1)] if hit is not None]
+        if not entries:
+            continue
+        ok = True
+        for P, sha in entries:
+            d = default_branch(P)
+            if not d or not is_ancestor(P, sha, f"refs/heads/{d}"):
+                ok = False
+                break
+        if ok:
+            note = rr.Note(r.path)
+            note.set("leg_landed", ctx.stamp, after=("leg_claims", "leg_head"))
+            save(ctx, note)
+            out.append(r.slug)
+    return out
+
+
+def _last_land_line(chain, P):
+    """The chain's last `land:` or `land stood:` line for P (its rest), or None."""
+    for e in reversed(chain.log):
+        if e["kind"] == "land stood" and e["rest"].startswith(f"land stood: {P}: "):
+            return e["rest"]
+        if e["kind"] == "land" and f" in {P} (" in e["rest"]:
+            return e["rest"]
+    return None
+
+
+def stood_line(chain, P, why):
+    """`land stood: <P>: <why>`, or None when the chain's last land line for P is that same stand."""
+    text = f"land stood: {P}: {reason_text(why, 400)}"
+    return None if _last_land_line(chain, P) == text else text
+
+
+def cmd_land(ctx, a):
+    if a.red is not None and a.verified:
+        raise Usage("--red goes alone: never with --verified")
+    if a.retire and (a.verified or a.red is not None):
+        raise Usage("--retire takes neither --verified nor --red")
+    if a.red is not None and not a.red.strip():
+        raise Usage("--red needs its why")
+    for v in a.verified:
+        if not re.fullmatch(r"[0-9a-f]{40}", v):
+            raise Usage(f"--verified {v!r} is not a full commit sha (40 hex)")
+    if a.retire:
+        # The copy removed may be this process's cwd: resolve every path, prime git's env, and leave the cwd first.
+        ctx.rollout = Path(os.path.realpath(ctx.rollout))
+        ctx.tasks = Path(os.path.realpath(ctx.tasks))
+        ctx.vault = Path(os.path.realpath(ctx.vault))
+        _env()
+    with Lock(ctx):
+        chain = Chain(ctx)
+        note = chain.note
+        if rr._shape(note) != "serial":
+            raise Refuse(1, f"{ctx.slug} is not a serial rollout (shape: {rr._scalar(note.get('shape')) or 'parallel'}): "
+                            "only a serial chain lands")
+        st = rr._status(note)
+        if st == "dropped" or rr._valued(note.get("superseded_by")):
+            raise Refuse(1, f"{ctx.slug} is {'dropped' if st == 'dropped' else 'superseded'}: nothing lands it")
+        pairs = chain_pairs(chain)
+        done = st == "done" or ctx.archived
+        if done and not a.retire:
+            raise Refuse(1, f"{ctx.slug} is complete: only `leg.py land --retire` runs after its Complete")
+        if a.retire and not done:
+            raise Refuse(1, f"{ctx.slug} is not done: `leg.py land --retire` runs only after its Complete")
+        leg = land_leg(ctx, chain)
+        out = {"verb": "land", "rollout": ctx.slug, "leg": leg["n"], "inPlace": pairs is None, "lands": [],
+               "stamped": [], "warns": [], "dryRun": ctx.dry}
+        if pairs is None:
+            if a.retire:
+                out["retired"] = []
+            return out
+        if a.retire:
+            return land_retire(ctx, chain, leg, pairs, out)
+        if a.red is not None:
+            return land_red(ctx, chain, leg, pairs, a.red, out)
+        return land_all(ctx, chain, leg, pairs, a.verified, out)
+
+
+def land_all(ctx, chain, leg, pairs, verified, out):
+    """Every copy, one at a time, then the stamp and the Leg log (the module docstring's land)."""
+    running = next((r for r in chain.counted() if r.state == "running"), None)
+    notes = other_serial(ctx) if running is None else []
+    lines = []
+    for P, C in pairs:
+        if running is not None:   # no git and no repo lock
+            e, accepted = land_entry(P, C, f"chain/{ctx.slug}"), None
+            e.update(state="stood", why=ROW_IN_PROGRESS, waits=False)
+        else:
+            e, accepted = land_copy(ctx, chain, P, C, pairs, verified, notes, out["warns"])
+        out["lands"].append(e)
+        if accepted:
+            text = f"land verified: {P} at {accepted}"
+            if not any(x["kind"] == "land verified" and x["rest"] == text for x in chain.log):
+                lines.append(text)
+        if e["state"] == "landed":
+            what = ", ".join(f"[[{s}]]" for s in e["landed"]) or "close-outs"
+            lines.append(f"land: {what} on {e['default']} in {P} ({(e['head'] or '')[:12]})")
+        elif e["state"] == "stood":
+            text = stood_line(chain, P, e["why"])
+            if text:
+                lines.append(text)
+    if ctx.dry:
+        return out
+    out["stamped"] = stamp_landed(ctx, chain, pairs)   # the task notes first, the rollout note last
+    for text in lines:
+        log_line(chain.note, leg_line(ctx, leg["n"], text))
+    save(ctx, chain.note)
+    return out
+
+
+def land_red(ctx, chain, leg, pairs, why, out):
+    """--red: a land's re-verify went red. `land stood: <P>: Verify red after a land merge: <why>` per copy whose chain
+    branch holds commits its default branch lacks (every copy when none does); no git write: the merge stays on
+    chain/<rollout> with no verified tip, so the next land asks again."""
+    br = f"chain/{ctx.slug}"
+    hit = []
+    for P, _C in pairs:
+        d = default_branch(P)
+        tip = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{br}^{{commit}}")
+        if d and tip and not is_ancestor(P, tip, f"refs/heads/{d}"):
+            hit.append(P)
+    reason = f"Verify red after a land merge: {why.strip()}"
+    for P in hit or [P for P, _C in pairs]:
+        e = land_entry(P, dict(pairs).get(P), br)
+        e.update(state="stood", why=reason, waits=False)
+        out["lands"].append(e)
+        text = stood_line(chain, P, reason)
+        if text and not ctx.dry:
+            log_line(chain.note, leg_line(ctx, leg["n"], text))
+    save(ctx, chain.note)
+    out["red"] = why.strip()
+    return out
+
+
+def land_retire(ctx, chain, leg, pairs, out):
+    """--retire, after Complete (the archived note is never written): per copy, under its repo lock, land its close-out
+    commits (steps 4 and 7, the peer check included), remove the copy (`git worktree remove`, never --force) and delete
+    its branch (`--set-upstream-to=<d>`, then `branch -d`, never -D). A done row off d, or any stand, keeps both, with a
+    WARN; any WARN files one loose follow-on that names the command that finishes it."""
+    first = os.path.realpath(pairs[0][0]) if pairs else None
+    if first and os.path.isdir(first):
+        os.chdir(first)
+    br = f"chain/{ctx.slug}"
+    notes = other_serial(ctx)
+    retired, kept = [], []
+    for P0, C0 in pairs:
+        P, C = os.path.realpath(P0), os.path.realpath(C0)
+        ent = {"checkout": P, "copy": C, "branch": br, "landed": False, "removed": False, "branchDeleted": False,
+               "why": None}
+        retired.append(ent)
+        d = default_branch(P)
+        has_branch = git(P, "show-ref", "--verify", "-q", f"refs/heads/{br}").returncode == 0
+        exists = os.path.lexists(C0) and toplevel(C) == C
+        peer = None
+        if d is None:
+            ent["why"] = f"{P} has no default branch resolved (origin/HEAD, main or master)"
+        else:
+            with RepoLock(ctx, P) as lk:
+                if not lk.held:
+                    ent["why"] = (f"another land held {lk.path} past {lk.timeout:g}s" if lk.path
+                                  else f"cannot read {P}'s git common dir")
+                elif exists:
+                    off = off_default(chain, P, C, d)
+                    st = git(C, "status", "--porcelain", "--untracked-files=no")
+                    if off:
+                        ent["why"] = f"[[{off[0].slug}]] is not on {d} in {P}"
+                    elif st.returncode != 0 or st.stdout.strip():
+                        ent["why"] = f"its Chain copy {C} has uncommitted changes"
+                    else:
+                        ent["why"], peer = _retire_land(ctx, P, C, d, br, notes, out["warns"], ent)
+                else:
+                    git(P, "worktree", "prune")
+                    if has_branch:
+                        tip = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{br}^{{commit}}")
+                        dm = git_out(P, "rev-parse", "-q", "--verify", f"refs/heads/{d}^{{commit}}")
+                        if tip and dm and (tip == dm or is_ancestor(P, tip, dm)):
+                            ent["landed"] = True
+                        elif tip and dm and is_ancestor(P, dm, tip):
+                            res, s = ff_primary(ctx, P, d, br, tip, dm, notes, out["warns"])
+                            if res in ("landed", "plan"):
+                                ent["landed"] = res == "landed"
+                            else:
+                                ent["why"] = s[0] if s else f"{d} moved"
+                                peer = s[2] if s else None
+                        else:
+                            ent["why"] = f"{br} has commits {d} lacks, and its Chain copy is gone"
+                    else:
+                        ent["landed"] = True
+        if ent["why"] is None and not ctx.dry:
+            if exists:
+                r = git(P, "worktree", "remove", C)
+                if r.returncode != 0:
+                    ent["why"] = f"git worktree remove refused: {reason_text((r.stderr or r.stdout).strip(), 200)}"
+                else:
+                    ent["removed"] = True
+            if ent["why"] is None and has_branch:
+                git(P, "branch", f"--set-upstream-to={d}", br)
+                r = git(P, "branch", "-d", br)
+                if r.returncode != 0:
+                    git(P, "branch", "--unset-upstream", br)
+                    ent["why"] = f"git branch -d refused: {reason_text((r.stderr or r.stdout).strip(), 200)}"
+                else:
+                    ent["branchDeleted"] = True
+        if ent["why"] is not None:
+            out["warns"].append(f"WARN: {C} (chain/{ctx.slug} of {P}) kept: {ent['why']}")
+            kept.append((ent, peer))
+    out["retired"] = retired
+    out["followup"] = None
+    if kept:
+        cmd = (f"`python3 {HERE / 'leg.py'} land --retire --rollout {ctx.rollout} --session {ctx.session}` (from "
+               "this engine root)")
+        body = ["# Retire the serial chain's Chain copies", "",
+                f"[[{ctx.slug}]] completed, but `leg.py land --retire` kept these (never `-D`, never `--force`):", ""]
+        for ent, peer in kept:
+            when = f"once [[{peer}]]'s Leg closes" if peer else "once that is fixed"
+            body.append(f"- `{ent['copy']}` (`{br}` of `{ent['checkout']}`): {ent['why']}; {when}, run {cmd}")
+        name, _path = write_followup(ctx, chain, f"{project_of(ctx)}-followup-retire-chain-{ctx.date}",
+                                     "Retire the serial chain's Chain copies", body)
+        out["followup"] = name
+    return out
+
+
+def _retire_land(ctx, P, C, d, br, notes, warns, ent):
+    """--retire's land of the close-out commits: steps 4 and 7 (the peer check included), up to three tries. (why or
+    None, the peer slug when a peer stood it)."""
+    for _try in range(LAND_TRIES):
+        tip, dm, _how, s = bring_in(ctx, P, C, d, br)
+        if s is not None:
+            return s[0], None
+        if tip == dm:
+            ent["landed"] = True
+            return None, None
+        res, s = ff_primary(ctx, P, d, br, tip, dm, notes, warns)
+        if res == "landed":
+            ent["landed"] = True
+            return None, None
+        if res == "plan":
+            return None, None
+        if res == "stood":
+            return s[0], s[2]
+    return f"{d} kept moving", None
+
+
 # ---- close ----------------------------------------------------------------------------------------------------------
 
 def needs_you(ctx, chain, outcome, reason):
@@ -1822,20 +3193,40 @@ def chain_commits(chain, top):
 
 
 def land_plan(chain):
-    """Per chain checkout: (top, kind, detail, commits needing action). Read-only."""
+    """Per chain checkout: (top, kind, detail, commits needing action, copy). Read-only. In place copy is None. A top
+    that is a Chain copy reads its primary's route (the copy's own reads `not landed: on chain/<slug>`): its commits
+    are those not on the primary's default branch d, plus, when landable, those origin/<d> lacks, and every one on a
+    stuck route (which cannot say what origin has); copy is {checkout, branch, default, offDefault}."""
     plans = []
+    pairs = copies_read(chain)[0]
     for top in chain.chain_tops():
-        kind, detail = route(top)
         commits = chain_commits(chain, top)
+        hit = _pair(pairs, top, side=1)
+        if hit is not None:
+            P = hit[0]
+            kind, detail = route(P)
+            d = default_branch(P)
+            off = [c for c in commits if not (d and is_ancestor(P, c[0], f"refs/heads/{d}"))]
+            gone = []
+            if kind == "landable":
+                ref = f"refs/remotes/origin/{detail}"
+                has_ref = git(P, "rev-parse", "-q", "--verify", ref).returncode == 0
+                gone = [c for c in commits if not (has_ref and is_ancestor(P, c[0], ref))]
+            # A stuck route cannot say whether origin has them, so every chain commit needs action, as in place.
+            need = list(commits) if kind == "stuck" else [c for c in commits if c in off or c in gone]
+            plans.append((top, kind, detail, need, {"checkout": P, "branch": f"chain/{chain.ctx.slug}", "default": d,
+                                                    "offDefault": off}))
+            continue
+        kind, detail = route(top)
         if kind == "landable":
             ref = f"refs/remotes/origin/{detail}"
             has_ref = git(top, "rev-parse", "-q", "--verify", ref).returncode == 0
             missing = [c for c in commits if not (has_ref and is_ancestor(top, c[0], ref))]
-            plans.append((top, kind, detail, missing))
+            plans.append((top, kind, detail, missing, None))
         elif kind == "deferred":
-            plans.append((top, kind, detail, []))
+            plans.append((top, kind, detail, [], None))
         else:
-            plans.append((top, kind, detail, commits))
+            plans.append((top, kind, detail, commits, None))
     return plans
 
 
@@ -1890,12 +3281,14 @@ def cmd_close(ctx, a):
                                 "--outcome complete takes --reflection), or close --outcome stuck")
             line = f"closed: handoff to Leg {n + 1} in {row.alias} from {row.folder}"
             prog = chain.progress(n)
+            pairs = copies_read(chain)[0]   # the next Leg opens in the row's folder inside its Chain copy
+            where = (sc.copy_folder(row.folder, pairs) if pairs else None) or os.path.expanduser(row.folder)
             out["handover"] = {
                 "title": leg_title(ctx, n + 1), "prompt": leg_prompt(ctx, n + 1),
                 "tldr": (f"Leg {n + 1} of the {project_of(ctx)} serial chain. {prog['done']} of {prog['total']} tasks "
                          "are done; it picks up at the next row."),
-                "cwd": os.path.realpath(os.path.expanduser(row.folder)),
-                "harness": launch_harness(row.alias), "launch": row.launch, "task": row.slug}
+                "cwd": os.path.realpath(where), "harness": launch_harness(row.alias),
+                "launch": chain_launch(pairs, row.alias, row.folder), "task": row.slug}
         elif outcome == "complete":
             plan = plan_next(chain, n, None, None, cap=False, launch=False)
             if plan["action"] != "complete":
@@ -1908,6 +3301,7 @@ def cmd_close(ctx, a):
             if lacking:
                 raise Refuse(1, f"Post-rollout item(s) {', '.join(map(str, lacking))} have neither a follow-on pointer "
                                 "nor a --disposition: nothing written")
+            landed_gate(chain)
             completion_gate(chain)
             line = "closed: chain complete"
         elif outcome == "stuck":
@@ -1934,6 +3328,32 @@ def cmd_close(ctx, a):
             out["status_line"] = status_line(ctx.slug, prog, "halted", f"halt: {a.reason}")
         out["dryRun"] = ctx.dry
         return out
+
+
+def landed_gate(chain):
+    """complete's refusal (ADR 0067 d3): a done row whose `leg_head` entry on a Chain copy is not on its primary's local
+    default branch (git is the truth: a hand merge counts), or a primary whose default branch is unresolved, is exit 1
+    with nothing written; legs.md § Complete's Land first runs leg.py land until every copy is landed or current. In
+    place it passes."""
+    pairs = copies_read(chain)[0]
+    if not pairs:
+        return
+    for r in chain.counted():
+        if r.state != "done" or r.note is None:
+            continue
+        for top, sha in rr._leg_tops(r.note, "leg_head"):
+            hit = _pair(pairs, top, side=1)
+            if hit is None:
+                continue
+            P = hit[0]
+            d = default_branch(P)
+            if d is None:
+                raise Refuse(1, f"[[{r.slug}]] cannot land: {P} has no default branch resolved (origin/HEAD, main or "
+                                "master): fix that checkout, then run leg.py land (legs.md § Complete's Land first); "
+                                "nothing written")
+            if not is_ancestor(P, sha, f"refs/heads/{d}"):
+                raise Refuse(1, f"[[{r.slug}]] is not on {d} in {P}: run leg.py land first (legs.md § Complete's Land "
+                                "first); nothing written")
 
 
 def completion_gate(chain):
@@ -1969,17 +3389,29 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
     n = leg["n"]
     completion, red_path = completion_of(ctx, chain)
     written, chain_lines, followups = [], [], []
-    need = [(top, kind, detail, commits) for top, kind, detail, commits in plans if commits and kind != "deferred"]
+    # A Chain copy's commits off its primary's default branch need their merge there, whatever its route; leg.py land
+    # has put every done task's there before Complete (landed_gate), so a copy files only the origin half, as in place,
+    # unless a commit is still off that branch (ADR 0067 d3).
+    need = [p for p in plans if p[3] and (p[4] is not None or p[1] != "deferred")]
     land_name = None
     if need:
         body = ["# Land the serial chain's commits", "",
                 f"[[{ctx.slug}]] finished, but some of its tasks' `Task:` commits are not on origin. ADR 0028 lands "
                 "only close-out commits on its own, so these wait for you:", ""]
-        for top, kind, detail, commits in need:
+        for top, kind, detail, commits, copy in need:
             act = "open a PR from them, or push them"
-            if kind == "stuck":
-                act = f"check the landing route ({detail}), then {act}"
-            body.append(f"- `{top}` ({'origin/' + detail if kind == 'landable' else kind}): {act}")
+            if copy is not None:
+                P, br, d = copy["checkout"], copy["branch"], copy["default"]
+                dn = f"`{d}`" if d else "its default branch"
+                tail = (act if kind == "landable" else f"it goes no further: not landed: {detail}" if kind == "deferred"
+                        else f"check the landing route ({detail}), then {act}")
+                merge = (f"merge `{br}` into {dn} there (with {dn} checked out: `git -C {P} merge {br}`), then"
+                         if copy["offDefault"] else f"`{br}` is already on {dn}:")
+                body.append(f"- `{top}` (`{br}` of `{P}`): {merge} {tail}")
+            else:
+                if kind == "stuck":
+                    act = f"check the landing route ({detail}), then {act}"
+                body.append(f"- `{top}` ({'origin/' + detail if kind == 'landable' else kind}): {act}")
             for sha, subj, task in commits:
                 body.append(f"  - `{sha[:12]}` {subj} ([[{task}]])")
         base = f"{project_of(ctx)}-followup-land-chain-{ctx.date}"
@@ -1988,8 +3420,22 @@ def _complete(ctx, a, chain, leg, plans, dispositions, items, out, line):
         followups.append(land_name)
         set_pointer(chain.note, None, land_name, "land the chain's commits")
         log_line(chain.note, leg_line(ctx, n, f"follow-on [[{land_name}]] (land)"))
-    for top, kind, detail, commits in plans:
-        if kind == "landable":
+    for top, kind, detail, commits, copy in plans:
+        if copy is not None:
+            head, d, off = f"{top} ({copy['branch']} of {copy['checkout']})", copy["default"], copy["offDefault"]
+            dn = d or "its default branch"
+            stuck = f"; stuck: {detail}" if kind == "stuck" else ""
+            if off:
+                chain_lines.append(f"{head}: {len(off)} not on {dn}{stuck} → [[{land_name}]]")
+            elif stuck and commits:
+                chain_lines.append(f"{head}: all on {dn}{stuck} → [[{land_name}]]")
+            elif commits:
+                chain_lines.append(f"{head}: all on {dn}, {len(commits)} not on origin/{detail} → [[{land_name}]]")
+            elif kind == "deferred":
+                chain_lines.append(f"{head}: all on {dn}; not landed: {detail}, nothing filed")
+            else:
+                chain_lines.append(f"{head}: all on {dn}" + (f" and origin/{detail}" if kind == "landable" else ""))
+        elif kind == "landable":
             chain_lines.append(f"{top}: {len(commits)} not on origin/{detail} → [[{land_name}]]" if commits
                                else f"{top}: all on origin/{detail}")
         elif kind == "deferred":
@@ -2074,6 +3520,8 @@ def cmd_handed(ctx, a):
         n = leg["n"]
         m = re.match(r"handoff to Leg (\d+) in (\S+) from (.*)$", leg["closed"])
         nxt, alias, folder = (int(m.group(1)), m.group(2), m.group(3)) if m else (n + 1, "?", "?")
+        pairs = copies_read(chain)[0]   # the Leg log names the Queue folder; the next Leg opens in its Chain copy
+        folder = (sc.copy_folder(folder, pairs) if pairs and m else None) or folder
         if leg["handover"] is None and not ctx.dry:
             text = f"hand-over: started {a.started.strip()}" if a.started else f"hand-over: manual ({reason_text(a.manual, 200)})"
             log_line(chain.note, leg_line(ctx, n, text))
@@ -2112,13 +3560,6 @@ def leg_outcome(closed):
     if closed is None:
         return None
     return next((w for prefix, w in OUTCOME_WORDS if closed.startswith(prefix)), "other")
-
-
-def is_archived(ctx):
-    if ctx.archived:
-        return True
-    p = ctx.rollout.resolve()
-    return p.parent.name == "Rollouts" and p.parent.parent.name == "Archive"
 
 
 def dependants(chain, row):
@@ -2268,20 +3709,23 @@ def restart_of(ctx, chain, plan, n, open_leg, halt, restarted):
     prompt = f"{first} --take-over\n{rest}" if take else f"{first}\n{rest}"
     prog = chain.progress()
     out = {"leg": n, "title": leg_title(ctx, n), "prompt": prompt, "takeOver": take}
+    pairs, bad = copies_read(chain)   # a Chain copy's chain opens each Leg in its row's folder inside the copy
     if plan["action"] == "complete":
         last = chain.legs.get(chain.last_n()) if chain.legs else None
         folder = (last or {}).get("folder")
-        cwd = os.path.realpath(os.path.expanduser(folder)) if folder else os.path.realpath(ctx.vault)
+        mapped = sc.copy_folder(folder, pairs) if folder and pairs else None
+        cwd = os.path.realpath(mapped or os.path.expanduser(folder)) if folder else os.path.realpath(ctx.vault)
         out.update(tldr=(f"Leg {n} of the {project_of(ctx)} serial chain. All {prog['total']} tasks are done; it runs "
                          "the chain's Complete."),
                    cwd=cwd, harness=None, launch=None, task=None, anyLaunch=True)
     else:
         row = plan["row"]
         lead = "takes over the open Leg and " if take else ""
+        mapped = sc.copy_folder(row.folder, pairs) if pairs and row.folder else None
         out.update(tldr=(f"Leg {n} of the {project_of(ctx)} serial chain. {prog['done']} of {prog['total']} tasks are "
                          f"done; it {lead}picks up at the next row."),
-                   cwd=os.path.realpath(os.path.expanduser(row.folder)), harness=launch_harness(row.alias),
-                   launch=row.launch, task=row.slug, anyLaunch=False)
+                   cwd=os.path.realpath(mapped or os.path.expanduser(row.folder)), harness=launch_harness(row.alias),
+                   launch=chain_launch(pairs, row.alias, row.folder), task=row.slug, anyLaunch=False)
     blocked = None
     if halt is not None:
         blocked = "halt"
@@ -2294,6 +3738,12 @@ def restart_of(ctx, chain, plan, n, open_leg, halt, restarted):
         ho = last["handover"] or ""
         if leg_outcome(last["closed"]) == "handoff" and ho.startswith("started "):
             blocked = f"handover started {ho[len('started '):].strip()}"
+    if blocked is None and bad:
+        blocked = f"chain_copies: {bad}: fix the note"
+    elif blocked is None and mapped and not os.path.isdir(out["cwd"]):
+        hit = next(((c, p) for c, p in pairs if mapped == p or mapped.startswith(p.rstrip("/") + "/")), None)
+        blocked = (f"chain copy missing: {hit[1] if hit else mapped} (leg.py copies --rollout "
+                   f"{os.path.realpath(ctx.rollout)} remakes it)")
     out["blockedBy"] = blocked
     return out
 
@@ -2358,28 +3808,78 @@ def _note_claim(chain):
         return None
 
 
+def unlanded_done(chain, r):
+    """A Chain copy's done row not yet landed (ADR 0067 d3): the note carries `chain_copies:` (a malformed one reads as
+    in place), and r is done, with `leg_claims:` (done's stamp), a non-empty `leg_head` and no `leg_landed:` (land's).
+    Pure: hold_of reads it; land and Complete ask git, which counts a hand merge too."""
+    if r.state != "done" or r.note is None:
+        return False
+    try:
+        if sc.read_chain_copies(chain.note) is None:
+            return False
+    except ValueError:
+        return False
+    return (sc.read_list(r.note, "leg_claims") is not None and bool(rr._leg_tops(r.note, "leg_head"))
+            and not rr._valued(r.note.get("leg_landed")))
+
+
+def first_began(chain):
+    """The Leg log's first `began:` stamp, raw, or None before Leg 1 (ADR 0067 d4's order reads it)."""
+    return next((e["stamp"] for e in chain.log if e["kind"] == "began"), None)
+
+
+def order_key(slug, began):
+    """ADR 0067 d4's order: a chain that began sorts by its first `began:` stamp, before every chain that never began;
+    slug order (case-folded) breaks ties. A stamp that will not parse reads as never begun, on either side alike. The
+    one copy: unfinished-rollout.py's serial_waits and land's actual-claim check read it."""
+    ts = rr._parse_ts(began) if began else None
+    return (0, ts.timestamp(), slug.casefold()) if ts is not None else (1, 0.0, slug.casefold())
+
+
+def first_by(key_h, key_r):
+    """Why H sorts before R in order_key's order: it began first, or slug order broke a tie of equal stamps (both began
+    at the same one, or neither has begun)."""
+    if key_h[:2] != key_r[:2]:
+        return "began first"
+    return "comes first by slug (" + ("neither has begun" if key_h[0] == 1 else "both began at the same stamp") + ")"
+
+
 def hold_of(chain, read):
     """What the unfinished chain holds (the module docstring's *The hold*): {scope, why, held, released, unlanded,
-    rows, warn}, tokens in canonical text. Pure: no git, no subprocess (unfinished-rollout.py calls it in-process)."""
+    undone, pending, rows, warn, began, open}, tokens in canonical text. Pure: no git, no subprocess
+    (unfinished-rollout.py calls it in-process)."""
     fmt = lambda toks: [sc.fmt_token(t) for t in toks]  # noqa: E731
     claim = _note_claim(chain)
     whole = claim if claim is not None else [("any", "")]
     counted = chain.counted()
-    unl_rows = [r for r in counted if r.state != "done"]
-    unlanded, bad = [], None
+    undone_rows = [r for r in counted if r.state != "done"]
+    pend_rows = [r for r in counted if unlanded_done(chain, r)]
+    undone, bad = [], None
     if not chain.rows:
         bad = "its ## Queue has no rows"
-    for r in unl_rows:
+    for r in undone_rows:
         toks = _cell_tokens(r)
         if toks is None:
             bad = f"row [[{r.slug}]]'s Surfaces cell is empty or holds a token parse_token refuses"
             break
-        unlanded += [t for t in toks if t not in unlanded]
+        undone += [t for t in toks if t not in undone]
     if bad:
-        unlanded = list(whole)
+        undone = list(whole)
+    # A Chain copy's done row still holds its cell until it lands on its primary's default branch (ADR 0067 d3).
+    unlanded = list(undone)
+    for r in ([] if bad else pend_rows):
+        toks = _cell_tokens(r)
+        if toks is None:
+            unlanded = list(whole)
+            break
+        unlanded += [t for t in toks if t not in unlanded]
+    began = first_began(chain)
+    ol = chain.open_leg()
     out = {"scope": "whole", "why": f"chain {read['state']}: it holds its whole claim", "held": fmt(whole),
-           "released": [], "unlanded": fmt(unlanded),
-           "rows": [{"slug": r.slug, "state": r.state, "surfaces": list(r.surfaces)} for r in unl_rows], "warn": None}
+           "released": [], "unlanded": fmt(unlanded), "undone": fmt(undone), "pending": [r.slug for r in pend_rows],
+           "rows": [{"slug": r.slug, "state": r.state, "surfaces": list(r.surfaces), "folder": r.folder}
+                    for r in counted if r in undone_rows or r in pend_rows], "warn": None,
+           "began": began, "open": {"n": ol["n"], "folder": ol["folder"]} if ol is not None else None}
     if read["state"] != "stuck" or claim is None:
         return out
     running = next((r for r in chain.rows if r.state == "running"), None)
@@ -2392,22 +3892,26 @@ def hold_of(chain, read):
     cells = []
     for r in chain.rows:
         cells += _cell_tokens(r) or []
-    held = list(unlanded) + [t for t in claim if t not in cells and t not in unlanded]
+    held = list(undone) + [t for t in claim if t not in cells and t not in undone]
     k = sum(r.state == "set-aside" for r in counted)
     out.update(scope="stuck", held=fmt(held), released=fmt([t for t in claim if t not in held]),
                why=f"chain stuck ({k} set aside): it holds only its unlanded rows' surfaces (ADR 0060)")
     return out
 
 
-def write_set(chain, n):
-    """What Leg n writes (ADR 0060 d3): the Surfaces cells of its unlanded rows and of the rows on its smoke list (a
-    failed smoke files a fix on its target's surfaces), canonical and deduplicated; a row whose cell is empty or
-    malformed gives the note's whole claim (`any` when that reads as any)."""
+def write_rows(chain, n):
+    """The rows Leg n writes (ADR 0060 d3): the counted rows not done, and the done ones on its smoke list (a failed
+    smoke files a fix on its target's surfaces), in Queue order. Pure: write_set and unfinished-rollout.py's chain_hold
+    (the rows' launch folders) read it."""
     smoke = {e["task"].lower() for e in smoke_list(chain, n)}
+    return [r for r in chain.counted() if r.state != "done" or r.slug.lower() in smoke]
+
+
+def write_set(chain, n):
+    """What Leg n writes (ADR 0060 d3): the Surfaces cells of write_rows(chain, n), canonical and deduplicated; a row
+    whose cell is empty or malformed gives the note's whole claim (`any` when that reads as any)."""
     out = []
-    for r in chain.counted():
-        if r.state == "done" and r.slug.lower() not in smoke:
-            continue
+    for r in write_rows(chain, n):
         toks = _cell_tokens(r)
         if toks is None:
             toks = _note_claim(chain) or [("any", "")]
@@ -2504,7 +4008,7 @@ def cmd_status(ctx, a):
     last = chain.legs.get(chain.last_n()) if chain.legs else None
     if last is not None and leg_outcome(last["closed"]) == "handoff" and (last["handover"] or "").startswith("manual"):
         m = re.match(r"handoff to Leg (\d+) in (\S+) from (.*)$", last["closed"])
-        where = f"{m.group(2)} from {m.group(3)}" if m else "its launch"
+        where = chain_launch(copies_read(chain)[0], m.group(2), m.group(3)) if m else "its launch"
         items.append(f"[[{ctx.slug}]] manual hand-over: start Leg {last['n'] + 1} in {where} with the prompt "
                      f"(/thread:status shows it), or /thread:repair [[{ctx.slug}]]")
     if restarted is not None and restarted["how"] in ("pending", "manual"):
@@ -2518,7 +4022,7 @@ def cmd_status(ctx, a):
         items.append(f"[[{ctx.slug}]] stalled: {stall['why']} → /thread:repair [[{ctx.slug}]]")
     fixes = [{"task": r.slug, "verifies": v, "state": r.state} for r, v in chain.fixes() if r.state != "done"]
     return {"verb": "status", "rollout": ctx.slug,
-            "note": {"status": rr._status(note) or None, "archived": is_archived(ctx), "incomplete": inc,
+            "note": {"status": rr._status(note) or None, "archived": ctx.archived, "incomplete": inc,
                      "paused": paused, "supersededBy": superseded},
             "progress": chain.progress(open_leg["n"] if open_leg is not None else None), "chain": state,
             "openLeg": open_leg["n"] if open_leg is not None else None,
@@ -2664,6 +4168,11 @@ def parser():
     s = sub.add_parser("clear-halt", parents=[common])
     s.add_argument("--reason", required=True)
     sub.add_parser("status", parents=[common])
+    sub.add_parser("copies", parents=[common])
+    s = sub.add_parser("land", parents=[common])
+    s.add_argument("--verified", action="append", default=[])
+    s.add_argument("--red")
+    s.add_argument("--retire", action="store_true")
     s = sub.add_parser("restarted", parents=[common])
     s.add_argument("--leg", type=int, required=True)
     s.add_argument("--pending", action="store_true")
@@ -2676,9 +4185,11 @@ def parser():
 VERBS = {"begin": cmd_begin, "next": cmd_next, "claim": cmd_claim, "change": cmd_change, "smoke": cmd_smoke,
          "file-fix": cmd_file_fix, "done": cmd_done, "set-aside": cmd_set_aside, "post-items": cmd_post_items,
          "file-followup": cmd_file_followup, "close": cmd_close, "handed": cmd_handed, "clear-halt": cmd_clear_halt,
-         "status": cmd_status, "restarted": cmd_restarted}
-# The writing verbs an archived (completed) note refuses up front; begin refuses it as done, with its status line.
-ARCHIVE_REFUSED = ("claim", "smoke", "file-fix", "done", "set-aside", "close", "handed", "clear-halt", "restarted")
+         "status": cmd_status, "restarted": cmd_restarted, "copies": cmd_copies, "land": cmd_land}
+# The writing verbs an archived (completed) note refuses up front (land but its --retire); begin refuses it as done,
+# with its status line.
+ARCHIVE_REFUSED = ("claim", "smoke", "file-fix", "done", "set-aside", "close", "handed", "clear-halt", "restarted",
+                   "copies", "land")
 
 
 def main(argv=None) -> int:
@@ -2697,9 +4208,9 @@ def main(argv=None) -> int:
             if refusal:   # ADR 0043: a stamped chain's Legs run on its Engine snapshot; nothing written
                 print(refusal, file=sys.stderr)
                 return 2
-        if ctx.archived and verb in ARCHIVE_REFUSED:
-            raise Refuse(1, f"{ctx.slug} is complete and archived ({ctx.rollout}): only file-followup writes after "
-                            "Complete, and it writes nothing into the archived note")
+        if ctx.archived and verb in ARCHIVE_REFUSED and not (verb == "land" and args.retire):
+            raise Refuse(1, f"{ctx.slug} is complete and archived ({ctx.rollout}): only file-followup and land --retire "
+                            "write after Complete, and neither writes into the archived note")
         emit(VERBS[verb](ctx, args))
         return 0
     except Usage as e:

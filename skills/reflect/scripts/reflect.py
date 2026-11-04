@@ -97,9 +97,13 @@ parallel with no note). For each:
             line after it: with began null, trace why the start never happened, not why the last Leg did not hand
             over; with began set the Leg did start, by a route that wrote no line.
   escape    each piece of serial-score.py's escapes block (`fixes:` only: a fix task that names a chain task, its
-            Leg-filed smoke fixes among them), dated as the sweep dates a fixer, with at and inWindow. The sweep below
-            never reaches a chain (its record has no `merged` lines), so a chain's Escapes are read only in a week
-            span reads it.
+            Leg-filed smoke fixes among them), dated as the sweep dates a fixer, with at and inWindow, listed only when
+            dated in the window. The sweep below never reaches a chain (its record has no `merged` lines), so a chain's
+            Escapes are read only in a week span reads it, and each such reading names in cannotShow every one dated
+            outside its window, or undated (`[[<slug>]]: <k> Escape(s) dated outside the window, every one: most are
+            another week's friction, one dated in a week that did not read the chain is in none: <task> <at or "no
+            date">, ...`): the line repeats each week the chain is read, and is the only place an Escape dated in a
+            week span did not read the chain shows.
   A chain has no retry, descope or churn of its own, and no breach (its score has no Guardrails).
 - breachCounts: true only for a read, non-partial rollout whose window.activeEnd falls in [since, until], so a
   Guardrail breach counts in the week its run ends. A partial rollout's breaches are reported, not counted.
@@ -138,7 +142,15 @@ parallel with no note). For each:
             `- repair:` line is flagged (on a read rollout only). auto-retry and descope lines are other items, and
             nothing outside `## Notes` is read. A line is date-only, so it is read by its date from the note of every
             record, read this week or not: a rollout with no line in the window that holds one is read light (below).
-  escape    the sweep's evidence (below) against this rollout's landed tasks, with at and inWindow.
+  escape    the sweep's evidence (below) against this rollout's landed tasks, with at and inWindow, listed only when
+            dated in the window. The sweep reads every record every week, so an Escape is listed by the reading whose
+            window holds its date, with one exception: the sweep reaches a task only once it has landed (its latest
+            `merged` line at or before until), so a piece dated before the window of the reading that holds its task's
+            landing, or undated, is in no week's friction. That reading names those alone in cannotShow, once
+            (`[[<slug>]]: <k> Escape(s) on a task landed in the window, dated before it or undated: in no week's
+            friction: <task> <at or "no date">, ...`). Of the rest dated outside the window, one on a task landed before
+            since was an earlier reading's (its friction, or the cannotShow of the week the task landed), and one dated
+            after until is a later reading's friction, so neither is named.
   churn     a review-verdict line in the window with regression > 0.
 - The Escapes sweep (ADR 0037 d4). Every record's `merged` lines, of any age, are folded per rollout by score.py's
   landed_from(), and each rollout maps to its repo through its note's Project root (the newest existing root per repo
@@ -194,6 +206,11 @@ parallel with no note). For each:
   included), the session transcripts and reviews.jsonl with read-only git. Its flags (prefixed `attention: `) and
   cannotShow join span's; it writes nothing to stderr, and any fault is the flag `attention: read failed (...)` and a
   null block, never a stop. The Owner of each question is the reading's label, never span's.
+- nights (p28-7; execute away.md § The night record): score.py's night_record (its header's "The nights" is the one
+  copy of the rules) over every record read (records(), which keeps the night kinds) and the window: per night, keyed
+  by (host, morning), the starts the last starts held and the tasks that ran past the Morning, each ran-past split
+  fallback / underestimate / unchecked, the totals, and its `suggest` (a longer LAST_START_FALLBACK, a higher Trickle:
+  Lachy's to act on by hand, never a knob, never landed). Its flags, each prefixed `nights: `, join span's.
 - freshReview (ADR 0058 d5): one entry per landing. reviews.jsonl's review-round lines up to until, read through
   score.py's read_review_rounds, the one copy of run_record's reader rule (the latest line per (repo, doc), else per
   (repo, head, digest), so a doc's consumed line supersedes its pending one; its branch and reviewedAt come from the
@@ -236,6 +253,18 @@ parallel with no note). For each:
   from before the checker) and precision ((Σfindings - Σrejected) / Σfindings, to 2 places: the share of the findings
   the code did not disprove; null when Σfindings is 0). Sorted by mode, then effort, a null effort last. Reported,
   never traced.
+- noteOverlaps (ADR 0067 d6): the week's Note overlaps, from the `note-overlap` lines of run_record's reserved
+  overlaps.jsonl (hooks/vault-note-overlap.py its one writer) whose ts falls in [since, until]: warnings (the lines),
+  overlaps (one per (note, run pair): note, runs (the editing run and the holder, each {rollout, task}, sorted),
+  warnings, first and last, sorted by first then note), notes and rollouts (distinct, sorted), none (true exactly when
+  warnings is 0) and previous: {since, until, warnings} over the last `reflection` line's window, or null with none,
+  so the reading can name ADR 0067 d6's "overlaps in two weeks running" (two readings running at a fortnightly
+  cadence). No overlaps.jsonl reads as 0 and none true. An unreadable one is the flag `noteOverlaps: overlaps.jsonl
+  cannot be read (...)` and a null block, read as unread, never as none; a torn line is a flag and is skipped.
+  Reported, never traced: an overlap never changes `quiet`, a score or a knob, and the file is RESERVED, so no
+  rollout's entry reads it. cannotShow always names what the hook cannot see: a script's or shell write, or a Codex
+  Leg's; and two tasks of one rollout in one note (another run is another rollout), or an edit by a session that is no
+  run's task.
 span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), shape
 (parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
 reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[],
@@ -247,7 +276,37 @@ unconfirmed, filed, recurring, reversal, rejected, precision}] (the window's pre
 (every open Watch:
 rule, shape, rollouts, count, unit, sightings, ledgerClass, circling, recurring, stale, new, declinedBefore, lastSeen),
 knobs{revert, land, held}, bugsOpen[], decisionTask, grades (grades.py's block: log, window, all, pending, episodes),
-ledger (above), attention (above), cannotShow[], flags[]}. stderr gets one summary line.
+ledger (above), attention (above), nights{nights[], totals, flags, suggest} (above), noteOverlaps{warnings,
+overlaps[{note, runs[{rollout, task}], warnings, first, last}], notes[], rollouts[], none, previous{since, until,
+warnings} | null} | null, cannotShow[], flags[]}. stderr gets one summary line.
+
+The window check. A reading holds only its window's rows, and nothing downstream reads most of span.json's reported
+blocks, so span checks its own before it writes --out (window_flags(), pure): one flag per block holding k > 0 rows
+outside its window, `window: <block> holds <k> row(s) outside [<lo>, <hi>], the first at <stamp or null>: a reader read
+past its window`. A row's stamp is tested as in_window() tests evidence: a date-only one by date_in(), an instant parsed
+(so two forms of one instant agree), and a stamp that is no string, or does not parse, is outside. The blocks, in order:
+for each rollouts[] entry, `rollouts[<slug>].friction` (each item's at in [since, until], and an escape item needs
+inWindow true too), `rollouts[<slug>].laneTime` (each line's startedAt in [since, until]) and, when the rollout's
+score.json carries a window whose since and until parse, its score held to that window, never to span's since (a rollout
+is scored whole): `rollouts[<slug>].score.handsOff` (each act's at in [window.since, window.until]; on a serial chain
+[window.since, window.until + 60 s), serial-score.py's since <= act < done + 60 s, printed `[<since>, <until> + 60 s)`)
+and, on a serial chain, `rollouts[<slug>].score.merges` (each merge's at in [window.since, window.until]: a parallel
+score's merges.tasks carries task names alone); then `freshReview` (an entry is one row: its first and last both in
+[since, until], the one outside printed), `grades.episodes` (inWindow true, and its end.at, else end.date, in [since,
+until]), `attention.questions` (each item's at: attention.py's Question ledger windows by the call's stamp),
+`nights.nights` (each morning) and `noteOverlaps.overlaps` (an overlap is one row, as a freshReview entry is: its
+first and last both in [since, until], the one outside printed). span calls score.py with no --since, so a score's
+window.since is the run start, and score.py's act rule (run start <= act <= merge) keeps every act inside it; were span
+ever to pass --since, an act from the run start would precede it by score.py's own rule, and this check would have to
+read the run start instead. Not checked, each for its reason: reviewChurn, freshReviewLevels and the ledger's weekly
+row (ledger.py's rows(): its hours, byCause, contributing rollouts' hours and events) report sums with no rows, so tests
+alone pin their windows (reflect-score's (l) and (e2), reflect-weekly's freshReviewLevels test, and reflect-ledger's L1
+for the ledger, whose header clips every interval to [since, until]); a score's escapes block reads its evidence up to
+now by design (score.py's header); grades' window and all are sums; noteOverlaps' warnings, notes and rollouts are its
+overlaps' sum and sets, and its previous reads the last Reflection's window by design; attention's trails, waits and
+circling and the ledger's Monthly audit declare wider units in their own docstrings; knobs, watches, bugsOpen and
+decisionTask are state at until; cannotShow and flags are no rows. A `window: ` flag is a Thread Skill bug, never
+friction (SKILL.md step 10).
 
 watch. One `watch` line per (Reflection, Watch), naming every rollout where the reading saw it. id is run_record's
 watch_id(rule, shape); the line stores the stripped rule and shape. A rollout must be one the span read (its
@@ -362,10 +421,11 @@ other than this Reflection's own; else new (never listed, listed only in a dropp
 listed only in this Reflection's own section, which is a re-run). No rule item, no new or still trade and no audit gap
 prints `no rule proposal or held trade: no decision task` and writes nothing. Else the open `decisions`-tagged task
 directly under Work/Tasks, or a new one at the first untaken of thread-skill-decisions-<Melbourne date of now>, -2 ...
--9 (past -9 is exit 2), created by exclusive create with scheduled: from resolve-day.py (no day: the next Melbourne
-morning; --now, tests only, is passed through), `## Notes` (conversation-gated), `## Launch` and `## Resume prompt`
-(no capture-done line: it is no capture). Then, through Note: when `## Reflection <id>` is absent and the task already
-existed, scheduled: moves to resolve-day.py's day; the section is appended once (its heading marks the visit). Its rule
+-9 (past -9 is exit 2), created by exclusive create with no scheduled: (Chorus's Reflection Routine asks it, never a
+day page: ADR 0037 d5 as amended 2026-11-03), `## Notes` (conversation-gated), `## Launch` and `## Resume prompt` (no
+capture-done line: it is no capture). Then, through Note: when `## Reflection <id>` is absent and the task already
+existed with a scheduled: (one written before that amendment), the key is removed; the section is appended once (its
+heading marks the visit). Its rule
 part, only with a rule item: the rule items no earlier section lists, the Watches to confirm, or "No new rule items;
 still open: <ids> (see ## Still open)". Then, after a blank line when both are present, its trade part: TRADE_LEAD and
 one `- trade <kid> at <from>: <key> <from> -> <to> (<rule>); <held>[; caution <caution>]; evidence <evidence>; repo
@@ -378,7 +438,7 @@ is not the one written; D is the Melbourne date of until. A re-run finds the hea
 byte-identical at any hour. The sections are H2: append_section appends at the end of the body, where an H3 would fall
 inside `## Resume prompt`. One `proposal` line (altitude rule, vaultTask) per (Reflection, rule item); a trade writes
 none (knobs' line, with its held reason, is its record, and Lachy's no is the done task's `- trade` line). It prints
-the slug, the scheduled date (and the old one when moved) and new | appended.
+`decision task <slug> (new)`, `(appended)`, or `(appended; scheduled <old> dropped)` when it removed a scheduled:.
 
 close. Exactly one `reflection` line per Reflection (a second close is exit 2). The writers refuse a closed Reflection,
 so a skipped step could never be made up: first close checks that knobs and decide ran, and is exit 2 naming the step,
@@ -455,7 +515,6 @@ RECONCILE_PY = os.path.join(SKILLS, "execute", "scripts", "reconcile-rollout.py"
 SELF_ROLLOUT_SH = os.path.join(SKILLS, "execute", "scripts", "self-rollout-check.sh")
 SCORE_PY = os.path.join(HERE, "score.py")
 SERIAL_PY = os.path.join(HERE, "serial-score.py")
-RESOLVE_DAY_PY = os.path.join(SHARED, "resolve-day.py")
 
 ZONE = "Australia/Melbourne"
 STALE_DAYS = 28
@@ -896,6 +955,60 @@ def _total(rows, k):
     return sum(vs) if vs else None
 
 
+# ---- the Note overlaps (ADR 0067 d6) -----------------------------------------------------------------------------
+
+OVERLAP_CANNOT = (
+    "a script's or shell write, or a Codex Leg's, passes no hook: no Note overlap from it is seen",
+    "two tasks of one rollout in one note are not warned (another run is another rollout), nor is an edit by a session "
+    "that is no run's task (an interactive session, a lead's own thread, a subagent a task agent spawns)",
+)
+
+
+def note_overlaps(ev, since, until, reflections):
+    """(block, flags): the week's Note overlaps from overlaps.jsonl (the docstring's noteOverlaps rule). The block is
+    None when the file cannot be read."""
+    path = os.path.join(ev, RR.NOTE_OVERLAPS + ".jsonl")
+    flags = []
+    try:
+        lines, skipped = SCORE.read_lines(path)
+    except FileNotFoundError:
+        lines, skipped = [], 0
+    except OSError as e:
+        return None, ["noteOverlaps: %s.jsonl cannot be read (%s): no Note overlap read" % (RR.NOTE_OVERLAPS, e)]
+    if skipped:
+        flags.append("noteOverlaps: %s.jsonl: %d line(s) did not parse: skipped" % (RR.NOTE_OVERLAPS, skipped))
+    mine = [(t, d) for t, _n, d in lines if d.get("kind") == "note-overlap"]
+
+    def run_of(rollout, task):
+        return {"rollout": rollout if isinstance(rollout, str) else None, "task": task if isinstance(task, str) else None}
+
+    groups = {}
+    for t, d in mine:
+        if not since <= t <= until:
+            continue
+        note = d.get("note") if isinstance(d.get("note"), str) else ""
+        runs = sorted([run_of(d.get("rollout"), d.get("task")), run_of(d.get("holderRollout"), d.get("holderTask"))],
+                      key=lambda r: (r["rollout"] or "", r["task"] or ""))
+        key = (note, tuple((r["rollout"], r["task"]) for r in runs))
+        g = groups.setdefault(key, {"note": note, "runs": runs, "warnings": 0, "first": t, "last": t})
+        g["warnings"] += 1
+        g["first"], g["last"] = min(g["first"], t), max(g["last"], t)
+    overlaps = [dict(g, first=fmt(g["first"]), last=fmt(g["last"]))
+                for g in sorted(groups.values(), key=lambda g: (g["first"], g["note"]))]
+    warnings = sum(g["warnings"] for g in overlaps)
+    previous = None
+    prev = [d for d in reflections if d.get("kind") == "reflection"]
+    if prev:
+        ps, pu = _ts({"ts": prev[-1].get("since")}), _ts({"ts": prev[-1].get("until")})
+        if ps is not None and pu is not None:
+            previous = {"since": fmt(ps), "until": fmt(pu), "warnings": sum(1 for t, _d in mine if ps <= t <= pu)}
+    block = {"warnings": warnings, "overlaps": overlaps,
+             "notes": sorted({g["note"] for g in overlaps}),
+             "rollouts": sorted({r["rollout"] for g in overlaps for r in g["runs"] if r["rollout"]}),
+             "none": warnings == 0, "previous": previous}
+    return block, flags
+
+
 # ---- span ------------------------------------------------------------------------------------------------------
 
 class Span:
@@ -1201,7 +1314,7 @@ class Span:
         """A chain's own friction items, from leg.py status (`st`) and serial-score's escapes block (`sc`): each in-window
         `set aside` line (movedBy read from the record's acts and the Leg log's later claim), `halt cleared:` line (an
         ask), restart (serial-score's fold_restarts(): its `restart:` lines read as one), and each Escape the block's
-        `fixes:` evidence dates in or out of the window."""
+        `fixes:` evidence dates in the window (window_escapes(): every one dated outside it is named in cannotShow)."""
         items = []
 
         def at_ms(stamp):
@@ -1252,6 +1365,7 @@ class Span:
         block = (sc or {}).get("escapes") if isinstance((sc or {}).get("escapes"), dict) else None
         if block:
             dates = self.dates(None, block)  # fixes: only (no repo), so no git is read
+            esc = []
             for tk in block.get("tasks") or []:
                 for ev in tk.get("evidence") or []:
                     day, undated = dates.get(self.ev_key(ev), (None, False))
@@ -1259,8 +1373,28 @@ class Span:
                             "at": day, "inWindow": self.in_window(day, since, until), "evidence": ev}
                     if undated:
                         item["undated"] = True
-                    items.append(item)
+                    esc.append(item)
+            items.extend(self.window_escapes(slug, esc, since, until))
         return items
+
+    def window_escapes(self, slug, items, since, until, landed=None):
+        """A read rollout's escape items dated in the window (inWindow): the ones its friction lists, never the rest (the
+        module docstring's escape items: a reading holds only its window's rows). One cannotShow line names some of the
+        rest, in the items' order. With `landed` ({task: its landing ms}, the sweep's), only the lost ones: those on a
+        task landed in [since, until] that are not dated after until, which no reading's friction lists; every other
+        one is an earlier or later reading's. Without it (a chain's: serial-score's block reads every chain task, so
+        no landing decides which week reaches one), every one, most of them counted in another week's friction."""
+        rest = [x for x in items if not x["inWindow"]]
+        if landed is None:
+            what = "dated outside the window, every one: most are another week's friction, one dated in a week that " \
+                   "did not read the chain is in none"
+        else:
+            rest = [x for x in rest if since <= landed.get(x["task"], -1) <= until and not self.after(x["at"], until)]
+            what = "on a task landed in the window, dated before it or undated: in no week's friction"
+        if rest:
+            self.cannot_show("[[%s]]: %d Escape(s) %s: %s" % (
+                slug, len(rest), what, ", ".join("%s %s" % (x["task"], x["at"] or "no date") for x in rest)))
+        return [x for x in items if x["inWindow"]]
 
     @staticmethod
     def chain_moved_by(lines, moves, task, at, until):
@@ -1503,7 +1637,9 @@ class Span:
     # -- the Escapes sweep (ADR 0037 d4) ----------------------------------------------------------------------------
 
     def sweep(self, records, read, since, until):
-        """{rollout: [escape items]}: every record's landed tasks, any age, per repo through escapes.py."""
+        """({rollout: [escape items]}, {rollout: {task: its landing ms}}): every record's landed tasks, any age, per repo
+        through escapes.py, and each swept task's landing (the latest `merged` line at or before until), keyed as the
+        items' task is, which window_escapes() reads."""
         repos = {}  # repo -> {"roots": {root: newest ms}, "landed": {task: (rollout, info, at ms)}}
         for slug, lines in records.items():
             merges = [(t, d.get("task"), d.get("pr"), d.get("readOnly") is True) for t, _n, d in lines
@@ -1537,9 +1673,11 @@ class Span:
                     if prev[2] > at:
                         continue
                 r["landed"][task] = (slug, info, at)
-        out = {}
+        out, when = {}, {}
         for key in sorted(repos):
             r = repos[key]
+            for task, (s, _i, a) in r["landed"].items():
+                when.setdefault(s, {})[ESC._canon(task)] = a
             roots = sorted(r["roots"], key=lambda x: r["roots"][x])
             root = roots[-1]
             if len({self.family(x) for x in roots}) > 1:  # ADR 0064: two projects' clones of one checkout are one family
@@ -1563,7 +1701,7 @@ class Span:
                     if undated:
                         item["undated"] = True
                     out.setdefault(rollout, []).append(item)
-        return out
+        return out, when
 
     @staticmethod
     def ev_key(ev):
@@ -1577,6 +1715,18 @@ class Span:
             return date_in(at, since, until)
         t = _ts({"ts": at})
         return t is not None and since <= t <= until
+
+    @staticmethod
+    def after(at, until):
+        """Whether a piece of evidence is dated after the window, by in_window()'s reading: a date-only one on or after
+        until's Melbourne date (the next reading's), an instant past until. One undated, or whose date does not parse,
+        is after no window."""
+        if at is None:
+            return False
+        if re.fullmatch(r"\d{4}-\d\d-\d\d", at):
+            return at >= mdate(until)
+        t = _ts({"ts": at})
+        return t is not None and t > until
 
     def dates(self, root, block):
         """{(source, name): (at, undated)} for every piece of evidence in an escapes.py block."""
@@ -1896,9 +2046,9 @@ class Span:
             entries.append(entry)
             if sc is not None:
                 scores[slug] = sc
-        swept = self.sweep(records, read, since, until)
+        swept, landed = self.sweep(records, read, since, until)
         for slug in sorted(s for s in swept if s in read):
-            read[slug]["friction"].extend(swept[slug])
+            read[slug]["friction"].extend(self.window_escapes(slug, swept[slug], since, until, landed.get(slug, {})))
         # A rollout not read this week is read light for its in-window evidence, from every record: the Escapes the
         # sweep traced to it, and the dated repair: lines of its note's ## Notes (date-only, so read by date whatever
         # the record holds, or a line on until's date would be lost when the next window has no line of the rollout).
@@ -1933,11 +2083,22 @@ class Span:
                 decision = {"slug": p.stem, "scheduled": rec.scalar("scheduled") or None, "status": rec.status}
         grades = self.grades(records, since, until)
         attention = self.attention(ev, records, reflections, since, until, rid)
+        nights = SCORE.night_record(records, since, until)
+        for f in nights["flags"]:
+            self.flag(f)
+        overlaps, overlap_flags = note_overlaps(ev, since, until, reflections)
+        for f in overlap_flags:
+            self.flag(f)
+        for c in OVERLAP_CANNOT:
+            self.cannot_show(c)
         doc = {"reflection": rid, "since": fmt(since), "until": fmt(until), "previous": previous,
                "rollouts": entries, "freshReview": fresh, "freshReviewLevels": levels,
                "watches": sorted((w for w in ws.values() if w["open"] or w["declinedBefore"]), key=lambda w: w["id"]),
                "knobs": knobs, "bugsOpen": bugs, "decisionTask": decision, "grades": grades, "ledger": led,
-               "attention": attention, "cannotShow": self.cannot, "flags": self.flags}
+               "attention": attention, "nights": nights, "noteOverlaps": overlaps, "cannotShow": self.cannot,
+               "flags": self.flags}
+        for f in window_flags(doc, scores):  # the window check: doc["flags"] is self.flags, so each lands in span.json
+            self.flag(f)
         out = expand(self.a.out)
         try:
             with open(out, "w", encoding="utf-8") as f:
@@ -1946,11 +2107,99 @@ class Span:
             raise Stop("cannot write --out %s: %s" % (out, e), 1)
         n = {m: sum(1 for e in entries if e["mode"] == m) for m in ("read", "escapes-only", "repairs-only")}
         say("span %s %s .. %s: %d read, %d escapes-only, %d repairs-only, %d friction item(s), %d open Watch(es), "
-            "knobs %d land / %d revert / %d held, %d cannot-show -> %s" % (
+            "knobs %d land / %d revert / %d held, %d night(s), %d cannot-show -> %s" % (
                 rid, fmt(since), fmt(until), n["read"], n["escapes-only"], n["repairs-only"],
                 sum(len(e["friction"]) for e in entries), len(doc["watches"]), len(knobs["land"]),
-                len(knobs["revert"]), len(knobs["held"]), len(self.cannot), out))
+                len(knobs["revert"]), len(knobs["held"]), nights["totals"]["nights"], len(self.cannot), out))
         return 0
+
+
+# ---- the window check --------------------------------------------------------------------------------------------
+
+def _row_in(stamp, lo, hi, open_hi=False):
+    """A reported row's window test (the module docstring's window check): a stamp that is no string is outside, never
+    parsed (run_record's _stamp reads None as now); a date-only one by date_in(), an instant parsed, so `...Z` and
+    `+10:00` forms of one instant agree; an unparseable one is outside. open_hi makes an instant's bound [lo, hi)."""
+    if not isinstance(stamp, str):
+        return False
+    if not open_hi:
+        return Span.in_window(stamp, lo, hi)
+    t = _ts({"ts": stamp})
+    return t is not None and lo <= t < hi
+
+
+def window_flags(doc, scores):
+    """The window check (the module docstring's "The window check"), pure: one `window: ` flag per reported block of
+    span.json's object `doc` that holds a row outside its window. `scores` is {rollout: its score.json object}, the
+    scores span read; a rollout's score is held to its own window, never to span's since (a rollout is scored whole)."""
+    out = []
+
+    def report(block, rows, lo, hi, close="]"):
+        bad = [stamp for ok, stamp in rows if not ok]
+        if bad:
+            first = bad[0] if isinstance(bad[0], str) else json.dumps(bad[0])
+            out.append("window: %s holds %d row(s) outside [%s, %s%s, the first at %s: a reader read past its window"
+                       % (block, len(bad), lo, hi, close, first))
+
+    def items(v):
+        return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+
+    def part(d, *keys):
+        for k in keys:
+            d = d.get(k) if isinstance(d, dict) else None
+        return d
+
+    ss, us = doc["since"], doc["until"]
+    S, U = SCORE.to_ms(ss), SCORE.to_ms(us)
+
+    def spans(groups):  # a group of rows is one row: its first and last both in the window, the one outside printed
+        rows = []
+        for g in groups:
+            first, last = _row_in(g.get("first"), S, U), _row_in(g.get("last"), S, U)
+            rows.append((first and last, g.get("last") if first else g.get("first")))
+        return rows
+
+    for e in items(doc.get("rollouts")):
+        slug = e.get("rollout")
+        report("rollouts[%s].friction" % slug,
+               [(_row_in(x.get("at"), S, U) and (x.get("kind") != "escape" or x.get("inWindow") is True), x.get("at"))
+                for x in items(e.get("friction"))], ss, us)
+        lines = items(part(e, "laneTime", "lines"))
+        report("rollouts[%s].laneTime" % slug, [(_row_in(x.get("startedAt"), S, U), x.get("startedAt")) for x in lines],
+               ss, us)
+        sc = scores.get(slug)
+        w = part(sc, "window")
+        if not isinstance(w, dict) or not isinstance(w.get("since"), str) or not isinstance(w.get("until"), str):
+            continue  # no score read, or one with no window: nothing to hold it to
+        try:
+            lo, hi = SCORE.to_ms(w["since"]), SCORE.to_ms(w["until"])
+        except Exception:
+            continue
+        acts = [a for tk in items(part(sc, "handsOff", "tasks")) for a in items(tk.get("acts"))]
+        # serial-score.py's since <= act < done + 60 s (a done stamp floors to its minute)
+        if sc.get("shape") == "serial":
+            report("rollouts[%s].score.handsOff" % slug,
+                   [(_row_in(a.get("at"), lo, hi + MINUTE_MS, open_hi=True), a.get("at")) for a in acts],
+                   w["since"], "%s + 60 s" % w["until"], ")")
+            report("rollouts[%s].score.merges" % slug,
+                   [(_row_in(m.get("at"), lo, hi), m.get("at")) for m in items(part(sc, "merges", "tasks"))],
+                   w["since"], w["until"])
+        else:
+            report("rollouts[%s].score.handsOff" % slug, [(_row_in(a.get("at"), lo, hi), a.get("at")) for a in acts],
+                   w["since"], w["until"])
+    report("freshReview", spans(items(doc.get("freshReview"))), ss, us)
+    rows = []
+    for ep in items(part(doc, "grades", "episodes")):
+        end = ep.get("end") if isinstance(ep.get("end"), dict) else {}
+        stamp = end.get("at") if end.get("at") is not None else end.get("date")
+        rows.append((ep.get("inWindow") is True and _row_in(stamp, S, U), stamp))
+    report("grades.episodes", rows, ss, us)
+    questions = items(part(doc, "attention", "questions", "items"))
+    report("attention.questions", [(_row_in(q.get("at"), S, U), q.get("at")) for q in questions], ss, us)
+    nights = items(part(doc, "nights", "nights"))
+    report("nights.nights", [(_row_in(n.get("morning"), S, U), n.get("morning")) for n in nights], ss, us)
+    report("noteOverlaps.overlaps", spans(items(part(doc, "noteOverlaps", "overlaps"))), ss, us)
+    return out
 
 
 # ---- the writers -------------------------------------------------------------------------------------------------
@@ -2423,22 +2672,14 @@ def audit_part(audit):
 
 # ---- decide --------------------------------------------------------------------------------------------------------
 
-def resolve_tomorrow(now):
-    argv = [sys.executable, RESOLVE_DAY_PY] + (["--now", now] if now else [])
-    rc, so, se = run(argv, 30)
-    if rc != 0 or not so.strip():
-        raise Stop("resolve-day.py exited %s: %s" % (rc, first_line(se)), 3 if rc == 3 else 1)
-    return so.split()[0]
-
-
-def decision_text(slug, title, scheduled, captured):
+def decision_text(slug, title, captured):
     return "\n".join([
         "---", "tags: [task, ai, decisions]", "status: open", "priority: high", "projects: %s" % PROJECTS, "contexts: []",
-        "scheduled: %s" % scheduled, "captured: %s" % captured, "launch: cc-thread", "---", "",
+        "captured: %s" % captured, "launch: cc-thread", "---", "",
         "# %s" % title, "", "## Notes", "",
         "Conversation-gated: the weekly Reflection's rule proposals, Watches to confirm and held trades (a knob ADR 0037 "
-        "d1 leaves to Lachy), decided by Lachy at the top of a run through `/thread:reflect --decide [[%s]]`, never "
-        "during one (ADR 0037 d5). Never schedule or reshuffle it." % slug, "",
+        "d1 leaves to Lachy), decided by Lachy at Chorus's Thursday Reflection Routine (Chorus ADR 0095) through "
+        "`/thread:reflect --decide [[%s]]`, never during a run (ADR 0037 d5). Never schedule or reshuffle it." % slug, "",
         "## Launch", "", "- **Launch:** `cc-thread`", "- **MCP:** none", "",
         "## Resume prompt", "", "Paste into a fresh agent session:", "", "```",
         "You're picking up \"%s\", the weekly Reflection's decision task." % title,
@@ -2632,7 +2873,6 @@ def cmd_decide(a):
     existing = [(p, rec) for p, rec in vault.open_root_notes() if "decisions" in rec.tags]
     if len(existing) > 1:
         say("%d open decision tasks (%s): the first is used" % (len(existing), ", ".join(p.stem for p, _r in existing)))
-    tomorrow = resolve_tomorrow(now)
     tmp = None
     if existing:
         path, created = existing[0][0], False
@@ -2647,7 +2887,7 @@ def cmd_decide(a):
                 break
         if slug is None:
             raise Stop("thread-skill-decisions-%s through -%d are all taken: a fault, not a new day" % (day, DECISION_SUFFIX_MAX), 2)
-        text = decision_text(slug, "Thread Skill: the weekly Reflection's decisions (%s)" % day, tomorrow, day)
+        text = decision_text(slug, "Thread Skill: the weekly Reflection's decisions (%s)" % day, day)
         path = vault.root / ("%s.md" % slug)
         if a.dry_run:
             tmp = tempfile.mkdtemp(prefix="thread-reflect-decide-")
@@ -2665,10 +2905,10 @@ def cmd_decide(a):
     heading = "## Reflection %s" % rid
     fresh = not note.has_heading(heading)
     old = REC._scalar(note.get("scheduled")) or None
-    moved = None
-    if fresh and not created and old != tomorrow:
-        note.set("scheduled", tomorrow)
-        moved = old
+    dropped = None
+    if fresh and not created and old is not None:  # a task written before ADR 0037 d5's 2026-11-03 amendment
+        note.remove("scheduled")
+        dropped = old
     before = listed_elsewhere(note, rid)
     seen_until = mdate(until)
     new_items = [w for w in rules if w["id"] not in before]
@@ -2732,9 +2972,8 @@ def cmd_decide(a):
             continue
         write_line("proposal", {"id": w["id"], "altitude": "rule", "reflection": rid, "rollouts": cut_rollouts(w),
                                 "rule": w["rule"], "shape": w["shape"], "vaultTask": slug}, a.dry_run)
-    sched = REC._scalar(note.get("scheduled"))
-    done(a, "decision task %s: scheduled %s%s (%s)" % (slug, sched, " (was %s)" % moved if moved else "",
-                                                       "new" if created else "appended"))
+    how = "new" if created else ("appended; scheduled %s dropped" % dropped) if dropped else "appended"
+    done(a, "decision task %s (%s)" % (slug, how))
     return 0
 
 

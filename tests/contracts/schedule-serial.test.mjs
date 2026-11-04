@@ -10,22 +10,25 @@
 //       schedule file);
 //   t2  schedule's `## Serial path` comes after step 8 and holds no `###` heading (so step 8's section and the
 //       contract helpers' section() read as before), and no product file still holds p24-1's interim stop;
-//   t3  the Serial path's steps name serial-chains.py, the serial check with `--surface`, ruling (c)'s session lane,
-//       one note per chain from serial-rollout-template.md, rollout-settings.py with its single-repo `--repo` rule,
-//       the stamps S6 never writes, the stamp it removes last, no execute handoff and no `start: unattended`, and
-//       body-read surfaces only for members that declare none; the completion verifier (ADR 0055): S4 stores it only
-//       for exactly one `repo:` token that is a git toplevel, by its `git -C <token> rev-parse --show-toplevel`, S5
+//   t3  the Serial path's steps name serial-chains.py, the serial check with `--surface` and `--checkout`, ruling (c)'s
+//       session lane, one note per chain from serial-rollout-template.md, rollout-settings.py with its one-checkout
+//       `--repo` rule, the stamps S6 never writes, the stamp it removes last, no execute handoff and no `start:
+//       unattended`, and body-read surfaces only for members that declare none; the completion verifier (ADR 0055):
+//       S4 stores it only for exactly one `checkouts` entry that is a git toplevel, by its `git -C <entry> rev-parse
+//       --show-toplevel` (ADR 0067 d4: a chain's checkouts, never one `repo:` token, since a claim is a file), S5
 //       stamps it and checks the note with `verify-timeout`, and Scope and the Don'ts' no-git line name S4's probe
-//       (Scope S5's check too); and the Don'ts let S6's last write remove
+//       (Scope S5's check too); S5 makes each note's Chain copies (ADR 0067 d2) with `leg.py copies`, a failure keeping
+//       `incomplete: true`, and Scope and the no-git line name its git calls; and the Don'ts let S6's last write remove
 //       `incomplete: true` beside step 7's, a stamp left on a serial note ending only by `status: dropped`;
 //   t4  § 0's first check span is the parallel one, with `--shape parallel` and `--regenerate`, and a supersede
 //       never crosses shapes; § 0, S3 and ADR 0040 say a clone root never overlaps an in-place chain (ADR 0042);
 //   t5  execute § 2's shape line, orient § 6's § 0 stop naming a live serial chain on the repo and its
 //       `status: dropped` remedy, orient § 7's one note per chain, orient § 9's no-handoff sentence for a serial
 //       note, and the vault grammar's parallel-only Writers clause;
-//   t6  CONTEXT.md's **Rollout**, **Shape**, **Serial rollout**, **Unfinished rollout**, **Surface** (a `## Launch`
-//       path at `/` or the home directory never claimed; a vault claim narrowed to its first project's place, ADR
-//       0059) and **Incomplete rollout** entries (a serial note's stamp ends only by `status: dropped`);
+//   t6  CONTEXT.md's **Rollout**, **Shape**, **Serial rollout**, **Unfinished rollout**, **Surface** (the keyed
+//       `repo:<toplevel>//<path in it>` token and a bare one covering its checkout, ADR 0067 d4; a `## Launch` path at
+//       `/` or the home directory never claimed; a vault claim narrowed to its first project's place, ADR 0059) and
+//       **Incomplete rollout** entries (a serial note's stamp ends only by `status: dropped`);
 //   t7  § 0's mixed-set sentence gives the serial-shaped members their follow-up line;
 //   t8  S3 checks every chain, stops the whole run before any write on any refusal, and reports every refusal
 //       together;
@@ -130,15 +133,16 @@ function check(files) {
   need('t3', `${SCHEDULE} § Serial path`, sp, [
     'serial-chains.py plan', "ruling (c)'s session lane", 'one **serial rollout** note per chain',
     '`${CLAUDE_PLUGIN_ROOT}/skills/schedule/serial-rollout-template.md`',
-    'skills/_shared/scripts/rollout-settings.py`, with `--repo <path>` exactly when the chain holds one `repo:` token',
+    'skills/_shared/scripts/rollout-settings.py`, with `--repo <entry>` exactly when the chain\'s `checkouts` hold one entry',
   ])
   const s2 = para(serialPath, '**S2. Plan.**')
   if (!sentences(s2).some((x) => x.includes('`--surface <slug>=<path>`') && x.includes('only for a member with no declared `surfaces:`'))) {
     flag('t3', 'S2 does not limit a body-read --surface to members that declare no surfaces:')
   }
   const s3 = para(serialPath, '**S3. Live chains.**')
-  if (!spans(s3).some((x) => x.includes('unfinished-rollout.py check --shape serial') && x.includes('--surface'))) {
-    flag('t3', 'S3 does not run unfinished-rollout.py check --shape serial --surface')
+  if (!spans(s3).some((x) => x.includes('unfinished-rollout.py check --shape serial') && x.includes('--surface') &&
+      x.includes('--checkout'))) {
+    flag('t3', 'S3 does not run unfinished-rollout.py check --shape serial --surface --checkout')
   }
   const s6 = para(serialPath, '**S6. Stamp.**')
   need('t3', 'S6', s6, ['no `scope:`, `plan_approval:`, `rung:` or `solo:`', 'never a derived or added `surfaces:`'])
@@ -147,18 +151,23 @@ function check(files) {
   }
   need('t3', 'S7', para(serialPath, '**S7. Summary.**'), ['no execute handoff, no `start: unattended`'])
   // The completion verifier (ADR 0055): S4's stamping rule and probe, S5's stamp and check, Scope and the no-git line.
-  need('t3', 'S4', para(serialPath, '**S4. '), ['when the chain holds exactly one `repo:` token and that token is a git toplevel',
-    '`git -C <token> rev-parse --show-toplevel` prints the token itself',
+  need('t3', 'S4', para(serialPath, '**S4. '), ["when the chain's `checkouts` (S2's JSON) hold exactly one entry and that entry is a git toplevel",
+    '`git -C <entry> rev-parse --show-toplevel` prints the entry itself',
     'or one that is not a git toplevel stores nothing'])
   const s5 = C(slice(serialPath, /^\*\*S5\. /, /^\*\*S6\. /))
   need('t3', 'S5', s5, ['- The `# completion_verifier:` line — when S4 stored', '- The `# env_bootstrap:` line',
     '`python3 <snapshot>/skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout <the note>`',
-    'Any non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`'])
+    'Any non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`',
+    // ADR 0067 d2: the Chain copies, made at S5 after the adopt; a failure keeps the note incomplete.
+    '`python3 <snapshot>/skills/execute/scripts/leg.py copies --rollout <the note>`',
+    'Its non-zero exit stops the run with its stderr, and the note keeps `incomplete: true`'])
   const scope = C(section(schedule, /^## Scope$/) ?? '')
-  need('t3', `${SCHEDULE} § Scope`, scope, ["a read-only `git -C <token> rev-parse --show-toplevel` and a read of that checkout's `CLAUDE.md`",
-    'its S5 runs `reconcile-rollout.py verify-timeout` on a note it stamped `completion_verifier:`'])
+  need('t3', `${SCHEDULE} § Scope`, scope, ["a read-only `git -C <entry> rev-parse --show-toplevel` and a read of that checkout's `CLAUDE.md`",
+    'its S5 runs `reconcile-rollout.py verify-timeout` on a note it stamped `completion_verifier:`',
+    "S5's `leg.py copies` writes each chain's Chain copies (ADR 0067 d2): per checkout the chain writes, one `git worktree add`"])
   const noGit = schedule.split('\n').find((l) => l.startsWith("- Don't run `git` operations")) ?? ''
-  need('t3', `${SCHEDULE} Don't on git`, C(noGit), ["§ Serial path S4's `git -C <token> rev-parse --show-toplevel`, read-only (listed under Scope)"])
+  need('t3', `${SCHEDULE} Don't on git`, C(noGit), ["§ Serial path S4's `git -C <entry> rev-parse --show-toplevel`, read-only (listed under Scope)",
+    "§ Serial path S5's `leg.py copies`"])
   const dont = schedule.split('\n').find((l) => l.startsWith('- Never remove `incomplete: true`')) ?? ''
   need('t3', `${SCHEDULE} Don't on incomplete: true`, C(dont), ["except as step 7's (or § Serial path S6's) last write",
     'and one on a serial note, which a supersede never takes, ends only by `status: dropped`'])
@@ -182,7 +191,7 @@ function check(files) {
     'Then the shape (`shape:`; no key reads as parallel): `shape: serial` → run `${CLAUDE_PLUGIN_ROOT}/skills/execute/legs.md` instead of §§ 2.5–8, and write nothing here.',
   ])
   const stop = C(slice(files[ORIENT], /^ {2}- \*\*Schedule stopped at § 0\*\*/, /^ {2}- \*\*Uncommitted grill docs\.\*\*/))
-  need('t5', `${ORIENT} § 6's § 0 stop`, stop, ['or a live serial chain that writes the repo and so owns it',
+  need('t5', `${ORIENT} § 6's § 0 stop`, stop, ['or a live serial chain working the repo in place, where this run would share its index and HEAD (ADR 0042)',
     '`status: dropped` on a never-started serial chain\'s note', 'or run that chain'])
   need('t5', `${ORIENT} § 7`, C(section(files[ORIENT], /^### 7\./)), ['one serial rollout note per chain'])
   need('t5', `${ORIENT} § 9`, C(section(files[ORIENT], /^### 9\./)), [
@@ -193,7 +202,7 @@ function check(files) {
 
   // ---- t6: the glossary ----
   const ctx = files[CONTEXT] ?? ''
-  need('t6', 'CONTEXT **Rollout**', entry(ctx, 'Rollout'), ['and none on a place a live serial chain writes', 'one chain per note'])
+  need('t6', 'CONTEXT **Rollout**', entry(ctx, 'Rollout'), ['and none rooted in place in a checkout a live serial chain works', 'one chain per note'])
   need('t6', 'CONTEXT **Shape**', entry(ctx, 'Shape'), ['`shape:` key', 'reads as parallel', 'A supersede never crosses shapes'])
   need('t6', 'CONTEXT **Serial rollout**', entry(ctx, 'Serial rollout'), ['One chain per note', 'Leg boundary',
     'execute runs its Legs'])
@@ -202,7 +211,8 @@ function check(files) {
     "until step 7's last write (S6's) removes it",
     'the stamp on a serial note, which a supersede never takes, ends only by `status: dropped`'])
   need('t6', 'CONTEXT **Surface**', entry(ctx, 'Surface'), [
-    '`repo:<absolute path>`', '`vault:<path>`', '`ext:<name>`', '`any`', "widens to that checkout's toplevel",
+    '`repo:<absolute path>`', '`vault:<path>`', '`ext:<name>`', '`any`', '`repo:<toplevel>//<path in it>`',
+    'a bare `repo:<toplevel>` covers every file under it',
     'declared or derived', 'Working roots', '_Avoid_: footprint, file-set',
     'A `## Launch` path that is `/` or the home directory is never claimed', "its first project's place",
   ])
@@ -290,8 +300,12 @@ test('control: an S2 that adds body paths for a declared member fails t3', () =>
 })
 
 test('control: an S4 that always passes --repo fails t3', () => {
-  only(swap(SCHEDULE, 'with `--repo <path>` exactly when the\nchain holds one `repo:` token', 'with `--repo <path>` for any\nchain'),
+  only(swap(SCHEDULE, "with `--repo <entry>` exactly when the\nchain's `checkouts` hold one entry", 'with `--repo <entry>` for any\nchain'),
     ['t3'], 'S4 repo')
+})
+
+test('control: an S3 that drops --checkout fails t3', () => {
+  only(swap(SCHEDULE, ' --checkout <dir>… (--project <target>', ' (--project <target>'), ['t3'], 'S3 checkout')
 })
 
 test('control: an S7 that makes an execute handoff fails t3', () => {
@@ -327,7 +341,7 @@ test('control: an execute § 2 without its shape line fails t5', () => {
 })
 
 test('control: an orient § 0 stop that omits the live serial chain fails t5', () => {
-  only(swap(ORIENT, ', or a live serial chain\n    that writes the repo and so owns it (ADR 0040), any project\'s)', ')'), ['t5'], 'orient chain')
+  only(swap(ORIENT, ', or a live serial chain\n    working the repo in place, where this run would share its index and HEAD (ADR 0042), any\n    project\'s)', ')'), ['t5'], 'orient chain')
 })
 
 test('control: an orient § 0 stop without the dropped remedy fails t5', () => {
@@ -339,8 +353,12 @@ test('control: a vault grammar whose Writers drop the parallel-only clause fails
   only(swap(GRAMMAR, ', on a parallel\n  note only (the Stage starts a lead in a note\'s Project root; a serial note has none)', ''), ['t5'], 'writers')
 })
 
-test('control: a Surface entry without the toplevel widening fails t6', () => {
-  only(swap(CONTEXT, "widens to that checkout's toplevel", 'stays where it is'), ['t6'], 'widening')
+test('control: a Surface entry without the bare token covering its checkout fails t6', () => {
+  only(swap(CONTEXT, 'a bare `repo:<toplevel>` covers every file under it', 'a bare `repo:<toplevel>` covers nothing'), ['t6'], 'bare token')
+})
+
+test('control: a Surface entry without the keyed token fails t6', () => {
+  only(swap(CONTEXT, 'Six kinds: `repo:<toplevel>//<path in it>`', 'Six kinds: `repo:<toplevel>`'), ['t6'], 'keyed token')
 })
 
 test('control: a Surface entry that claims Working roots fails t6', () => {
@@ -405,12 +423,18 @@ test('control: a serial template without its # completion_verifier: line fails t
 })
 
 test('control: an S4 that stamps any directory, not a git toplevel, fails t3', () => {
-  only(swap(SCHEDULE, 'when the chain holds exactly one `repo:` token and that token is a\ngit toplevel', 'when the chain holds exactly one `repo:` token and that token is a\ndirectory'),
+  only(swap(SCHEDULE, "when the chain's `checkouts` (S2's JSON) hold exactly one entry and that entry is a\ngit toplevel", "when the chain's `checkouts` (S2's JSON) hold exactly one entry and that entry is a\ndirectory"),
     ['t3'], 'S4 toplevel')
 })
 
 test('control: a Don\'ts no-git line without S4\'s probe fails t3', () => {
-  only(swap(SCHEDULE, " § Serial path S4's `git -C <token> rev-parse --show-toplevel`, read-only (listed under Scope),", ''), ['t3'], 'no-git S4')
+  only(swap(SCHEDULE, " § Serial path S4's `git -C <entry> rev-parse --show-toplevel`, read-only (listed under Scope),", ''), ['t3'], 'no-git S4')
+})
+
+test('control: an S5 that never makes the Chain copies fails t3', () => {
+  const s5 = real[SCHEDULE].split('\n').find((l) => l.startsWith("Then each note's Chain copies (ADR 0067 d2):")) ?? ''
+  assert.ok(s5, 'control setup: S5\'s Chain copies sentence')
+  only(swap(SCHEDULE, `${s5}\n`, ''), ['t3'], 'S5 copies')
 })
 
 test('control: an S5 that never checks the stamped note fails t3', () => {

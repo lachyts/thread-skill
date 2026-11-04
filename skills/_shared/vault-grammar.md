@@ -156,7 +156,7 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
   `owner:` still read as run: the verdict then releases it as a plain hold, with one `WARN: on_merge:` line the
   lead relays as a needs-you item. A task's `integrating:` is an Integration in flight, and the verdict waits for
   it (`waits: integration`); one with no Integration in flight reads as run.
-- **Never carried.** `carry` copies only the `hold_until` block: the new note keeps a plain hold, released at its
+- **Never carried.** Of an approved queue's keys, `carry` copies only the `hold_until` block: the new note keeps a plain hold, released at its
   first `next`. A plain `--regenerate` of an approved queue drops the approval.
 - **Fails closed, only at the merge.** While the PR is open an unreadable `on_merge` waits as any hold does, and
   only `/thread:status` flags it; at the merge it holds and waits on Lachy (`waits: you`).

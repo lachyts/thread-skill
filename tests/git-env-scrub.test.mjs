@@ -8,6 +8,8 @@
 // - the edit-noop-repro diagnostic scrubs every git command its probe runs.
 // - with args.verifySlot (p23-4), the wrapped verifier line starts with the scrub too, and SLOT_TEXT holds no git span.
 // - the touched-tests text (p31-1) scrubs its git grep span, with and without the rollout's `touched:` pin.
+// - with args.securityCheck (execute § 3 `security_checks`), the four prompts it reaches (implementer, approved-plan
+//   implementer, reviser, review judge) keep every git span scrubbed, and the scan command itself starts with the scrub.
 // tests/git-env-scrub.test.sh executes the rendered verifier (bare and wrapped) and the lead's § 4 check under a real
 // GIT_DIR.
 import { test } from 'node:test'
@@ -22,7 +24,7 @@ const T = loadEngine([
   'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt',
   'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt',
   'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck', 'integrationMergeReads', 'ANCHOR_RECIPE',
-  'rungState', 'escalate', 'slotted', 'SLOT_TEXT',
+  'rungState', 'escalate', 'slotted', 'SLOT_TEXT', 'securityScanCmd',
 ])
 const SCRUB = 'unset $(git rev-parse --local-env-vars 2>/dev/null);'
 
@@ -225,4 +227,25 @@ test('(g) the edit-noop-repro diagnostic scrubs every git command its probe runs
   const hits = [...rest.matchAll(/git -C/g)]
   assert.equal(hits.length, 4, 'four git -C commands in STEPs 2-4')
   for (const h of hits) assert.equal(rest.slice(h.index - SCRUB.length - 1, h.index), SCRUB + ' ', `scrubbed at ${h.index}`)
+})
+
+test('(h) with securityCheck: every git span of the four prompts it reaches is scrubbed, the scan command too', () => {
+  const SEC = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
+  for (const a of [{ repoPath: '/repo', verifier: 'make test', verifySlot: VERIFY_SLOT, securityCheck: SEC },
+    { repoPath: "/re po/it's", verifier: 'git status && make test', verifySlot: VERIFY_SLOT, defaultBranch: 'master', securityCheck: SEC }]) {
+    const all = builders(a)
+    assert.equal(Object.keys(all).length, 10)
+    const cmd = T.securityScanCmd(a, task)
+    assert.ok(cmd.startsWith(`${SCRUB} python3 `), cmd)
+    for (const name of ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'reviewJudgePrompt']) {
+      for (const p of all[name]) {
+        assert.ok(p.includes('`' + cmd + '`'), `${name}: renders the scan command as one span`)
+        assert.equal(count(p, T.GIT_ENV_RULE), 1, `${name}: GIT_ENV_RULE once`)
+        assert.ok(p.indexOf(T.GIT_ENV_RULE) < p.indexOf(cmd), `${name}: the rule precedes the scan command`)
+        for (const [, span] of p.matchAll(/`([^`\n]*)`/g)) {
+          if (/(^|[\s;&|(])git\s/.test(span)) assert.ok(span.startsWith(SCRUB), `${name}: \`${span}\``)
+        }
+      }
+    }
+  }
 })

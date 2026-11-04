@@ -25,17 +25,17 @@ surfaces:
 
 ## Notes
 
-Serial-rollout plan for one chain of `[[{{PROJECT_NAME}}]]` tasks (ADR 0040): Legs work its rows in order, one task at a time, each Leg in the launch its rows name. The chain owns the surfaces in this note's frontmatter while it is unfinished.
+Serial-rollout plan for one chain of `[[{{PROJECT_NAME}}]]` tasks (ADR 0040): Legs work its rows in order, one task at a time, each Leg in the launch its rows name. The chain predicts the surfaces in this note's frontmatter while it is unfinished, and those claims order it against the other live chains (ADR 0067 d4).
 
 {{THREAD_LINE}}
 
 ## How to execute
 
-Legs run this chain (execute's legs.md). Leg 1 opens in row 1's launch (its alias, from its folder) and runs `/thread:execute [[<this note>]]`. Each Leg works only rows of the launch it opened in, so a launch change between two rows is a Leg boundary: it claims up to five tasks, one at a time, closes, and hands the rest to a fresh Leg, whose brief is this note's `## Leg log`. This note takes no execute handoff and no start stamp, and it is never paused: a Leg stops through `leg.py close --outcome stopped`. To give its surfaces back before it runs, stamp it `status: dropped`; its tasks are then free for a later `/thread:schedule`.
+Legs run this chain (execute's legs.md), each repo in its own Chain copy (`chain_copies:`, ADR 0067 d2: a git worktree on `chain/<this note>` outside `~/repos`). Leg 1 opens in row 1's launch folder inside its copy (`/thread:status` prints the line: never the alias itself, whose `cd` opens the primary) and runs `/thread:execute [[<this note>]]`. Each Leg works only rows of the launch it opened in, so a launch change between two rows is a Leg boundary: it claims up to five tasks, one at a time, closes, and hands the rest to a fresh Leg, whose brief is this note's `## Leg log`. This note takes no execute handoff and no start stamp, and it is never paused: a Leg stops through `leg.py close --outcome stopped`. To give its surfaces back before it runs, stamp it `status: dropped`; its tasks are then free for a later `/thread:schedule`.
 
 ## Queue
 
-One row per task, in chain order: its rank, its launch (the alias and the folder its Leg opens in) and the surfaces it claims.
+One row per task, in chain order: its rank, its launch (the alias and the folder its Leg opens in) and the surfaces it predicts.
 
 {{CHAIN_TABLE}}
 
@@ -45,13 +45,13 @@ One row per task, in chain order: its rank, its launch (the alias and the folder
 
 ## Surfaces
 
-The frontmatter's `surfaces:` is the union of the members' claims below. While this note is unfinished, no other serial chain over any of them is scheduled (while it is stuck, only its unlanded rows' surfaces: ADR 0060), and no parallel rollout rooted on one of them. Each member's claim and where it came from (`declared`: its own `surfaces:`; `derived`: its `## Launch` paths (its launch commands' `--add-dir` and `cd` paths among them), its first project's `Local:` and its launch folder, or a surface added at schedule, where a path that is the vault root gives its first project's place and its own task note instead (the whole vault, with a WARN, when it names no project), and so does naming nothing else when it names a project; `default`: no project and no path, so the whole vault, with a WARN):
+The frontmatter's `surfaces:` is the union of the members' predicted claims below: a file or folder in a checkout (`repo:<toplevel>//<path>`), a bare `repo:<toplevel>` for a whole checkout, a vault place or an external system. While this note is unfinished, another serial chain over any of them (while it is stuck, only its unlanded rows' surfaces: ADR 0060) is still scheduled, and the two work them a chain at a time: the one that comes first (the first to begin, else by slug) lands its unlanded rows there before the other begins a Leg that writes them. When either chain works a checkout in place (a note with no `chain_copies:`) the same holds for the whole checkout, though a stuck chain works none; two chains in their own Chain copies meet only file to file; and no parallel rollout is rooted in place in a checkout this chain works (ADR 0067 d4). Each member's claim and where it came from (`declared`: its own `surfaces:`; `derived`: the `## Launch` paths it names below a checkout's toplevel and its `touches:`, or a surface added at schedule, while its reach (its launch folder, its launch commands' `--add-dir` and `cd` paths, its first project's `Local:` and a where-label value such as `**Repo:**`) only names the checkout it works, so a member that only reaches one claims its own task note; a path that is the vault root gives its first project's place and its own task note instead (the whole vault, with a WARN, when it names no project), and so does naming nothing else when it names a project; `default`: no project and no path, so the whole vault, with a WARN):
 
 {{SURFACE_SOURCES}}
 
 ## Post-rollout
 
-When every task is done, the last Leg runs the completion ceremony (the Complete section of execute's `legs.md`). When this note declares `completion_verifier:`, the Leg first runs it once on the chain checkout's HEAD: its summary goes in the Completion log, and a red files one fix task without stopping the ceremony. Then, in this order:
+When every task is done, the last Leg runs the completion ceremony (the Complete section of execute's `legs.md`). Before anything else, a chain with `chain_copies:` lands every finished task on each checkout's default branch (`leg.py land`, ADR 0067 d3), so the completion verify below runs on the landed tip. When this note declares `completion_verifier:`, the Leg first runs it once on the chain checkout's HEAD: its summary goes in the Completion log, and a red files one fix task without stopping the ceremony. Then, in this order:
 
 1. Close the phases this chain touched (`touched-phases`, then `reconcile-project.py --kinds phase --apply`), filing a `phase-close-followup-*` task on a failure.
 2. File each item below that is live work as a new open follow-on task in `Work/Tasks/`, and rewrite the item as a thin pointer to it; give every other item a disposition. The land-chain follow-on joins them when a chain checkout lands on origin and the chain's `Task:` commits are not on it yet. Never leave live work as checklist prose inside a done note.

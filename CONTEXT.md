@@ -430,14 +430,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   described by one always-dated Obsidian note
   (`<slug>-rollout-<YYYY-MM-DD>`) whose **Shape** is parallel or serial. At
   most one parallel rollout is **unfinished** per repo and project, each
-  project's in its own **Rollout clone** (ADR 0064), and none on a place a
-  live serial chain writes; new parallel-shaped work of the same project
+  project's in its own **Rollout clone** (ADR 0064), and none rooted in place
+  in a checkout a live serial chain works, whose index and HEAD it would share
+  (ADR 0042, ADR 0067); new parallel-shaped work of the same project
   supersedes it rather than running beside it (schedule § 0, ADR 0027, ADR
   0030). Serial rollouts are
-  limited by **Surface**s, not by repo (ADR 0040): one chain per note, refused
-  while a live chain shares a surface. Proposed (ADR 0067): a clash is only two
-  runs editing the same file or note, in either shape; sharing a repo, a
-  monorepo or the vault never blocks, and **Capacity** is the limit.
+  ordered by **Surface**s, not by repo (ADR 0040, ADR 0067 d4): one chain per
+  note; a chain sharing a live chain's surface is scheduled and takes turns
+  with it, and only an unfinished parallel rollout's root refuses one. A clash
+  is only two runs editing the same file or note, in either shape; sharing a
+  repo, a monorepo or the vault never blocks a schedule. Decided, not yet built
+  (ADR 0067 d8, p36-7): **Capacity** is the limit.
   _Avoid_: batch, run, campaign.
 - **Shape** — whether a rollout runs in parallel or in serial; the one word
   that tells the two kinds apart. Every rollout verb (schedule, execute,
@@ -452,14 +455,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   interactive sessions that each work tasks themselves, close, and hand the
   rest to a fresh successor. No task worktrees (leg.py's transient scratch
   revert, and the completion verify's detached verify tree outside the
-  checkout, only), and no subagents but each task's clean-room review. One chain
-  per note (schedule § Serial path): its `surfaces:` claims the **Surface**s the
-  chain writes, and each `## Queue` row names the launch its Leg opens in, so a
+  checkout, only; each repo's **Chain copy** is the chain's, never a task's),
+  and no subagents but each task's clean-room review. One chain
+  per note (schedule § Serial path): its `surfaces:` predicts the **Surface**s
+  the chain writes, and each `## Queue` row names the launch its Leg opens in, so a
   launch change between two rows is a Leg boundary. A row that writes a
   checkout never opens in the vault, and an alias-less row writing two
   checkouts is refused (ADR 0059), since a Leg finishes only its own
-  checkout's commits. Proposed (ADR 0067): each repo it writes is worked in
-  its own **Chain copy**, landed task by task on the primary checkout.
+  checkout's commits. Each repo it writes is worked in its own **Chain copy**
+  (ADR 0067 d2: `chain_copies:` on the note; a note without it works in
+  place), whose commits `leg.py land` puts on the primary checkout's
+  default branch task by task, after each `done` and at each close (ADR 0067
+  d3).
   execute runs its Legs
   (`skills/execute/legs.md`). A serial note is never paused: a Leg stops through
   `leg.py close --outcome stopped`. status reads it as a chain (`leg.py status`:
@@ -493,27 +500,39 @@ through time, from attention to merged PRs. Terms only — no implementation.
   stalled, until a take-over closes it `lost`: leg.py never reads the Stage,
   so repair's `list_sessions` check is what finds that Session gone. _Avoid_:
   hung, frozen.
-- **Surface** — a place a serial chain writes, written as a token in a serial
-  note's `surfaces:` (and in a task's own, optional `surfaces:`). Five kinds:
-  `repo:<absolute path>` (a filesystem place; overlaps on equality or
-  containment at a `/`, case-folded), `vault:<path>` (vault-relative; overlaps
-  on a segment-boundary prefix), `vault` (the whole vault; overlaps every vault
-  token), `ext:<name>` (an external system such as a CMS or DNS zone;
-  case-folded equality) and `any` (overlaps every token). Kinds never overlap
-  one another, save `any`. A path becomes a token by `serial-chains.py`'s
-  claim: the vault is a note space, so a path in it claims `vault:<rel>`;
-  every path inside a git checkout widens to that checkout's toplevel,
-  declared or derived, since its index and HEAD are what Legs share; a path in
-  no checkout is claimed path-only. A member's surfaces are, in order: its
-  declared `surfaces:` (its whole claim), else derived from its launch folder,
-  its `## Launch` paths (a launch command's `--add-dir` and `cd` paths among
-  them, fenced or not) and its first project's `Local:`; a surface added at
-  schedule unions in. A member whose path is the vault root, or that has no
+- **Surface** — a place a serial chain is predicted to write, written as a
+  token in a serial note's `surfaces:` (and in a task's own, optional
+  `surfaces:`). Six kinds: `repo:<toplevel>//<path in it>` (a file in a git
+  checkout, or a folder with a trailing `/`; the toplevel is the in-place
+  twin's, so it reads the same from any copy), `repo:<absolute path>` (bare: a
+  whole checkout or a path in none, overlapping on equality or containment at
+  a `/`; a bare `repo:<toplevel>` covers every file under it), `vault:<path>`
+  (vault-relative; overlaps on a segment-boundary prefix), `vault` (the whole
+  vault; overlaps every vault token), `ext:<name>` (an external system such as
+  a CMS or DNS zone; case-folded equality) and `any` (overlaps every token).
+  Two file or folder tokens meet only in one checkout, when one path contains
+  the other, so sibling files never clash; all compare case-folded. Kinds
+  never overlap one another, save `any`. A path becomes a token by
+  `serial-chains.py`'s claim, at its own depth, declared or derived: the vault
+  is a note space, so a path in it claims `vault:<rel>`; a path inside a git
+  checkout claims that file or folder, and its toplevel the bare token; a path
+  in no checkout is claimed path-only. Reach is not prediction (ADR 0067 d4):
+  a member's launch folder, its launch commands' `--add-dir` and `cd` paths
+  (fenced or not), its first project's `Local:` and the value of a `## Launch`
+  where-label such as `**Repo:**`, at any depth, only name the checkout it
+  works (its `works`), and predict nothing there; one that only reaches a
+  checkout claims its own task note, with a WARN. A member's predictions are
+  its declared `surfaces:` (its whole claim), else the other paths its
+  `## Launch` names below a toplevel and its `touches:`; a surface added at
+  schedule unions in. A member whose path is the vault root, or that reaches
+  no checkout and has no
   other claim, claims its first project's place (a folder note's folder, else
   the note and the folder it would become) and its own task note, never the
-  whole vault; a path under `Work/Tasks` is bookkeeping, never a claim (ADR
-  0059). With no project and no path, `vault` alone (the default, with a
-  WARN). The guarantee and its limit: a member claims what it names, never
+  whole vault. Bookkeeping is never a claim: a path under `Work/Tasks` (ADR
+  0059) and the ledgers every run appends to, `_shared/state/thread-events/`
+  and `docs/reviews/` (ADR 0067 d5). With no project and no path, `vault`
+  alone (the default, with a WARN). The guarantee and its limit: a member
+  claims what it names (reach aside), never
   its launch profile's other Working roots (a workspace launcher's
   `add_dirs`), another project's `Local:` or a project's `repos:`, nor a repo
   or external system it writes but names nowhere: declare `surfaces:` for
@@ -521,26 +540,60 @@ through time, from attention to merged PRs. Terms only — no implementation.
   claimed (it would contain every repo; a WARN names it). Two checkouts of one
   origin are two surfaces, and containment parts across a checkout nested
   inside another by path (a separate repo with its own index), unless the outer
-  path is in no checkout. A stuck chain holds only its unlanded rows'
-  surfaces (**Unfinished rollout**, ADR 0060). Proposed (ADR 0067): a surface
-  inside a checkout is a file or folder in it (`repo:<toplevel>//<path>`), no
-  longer the whole checkout, since each chain works its own **Chain copy**; a
-  bare `repo:<toplevel>` still covers the whole checkout. Predicted surfaces
-  order and wait, never refuse; the files a Leg actually committed are checked
-  before it lands; a vault project's place is a prediction, and two runs in
-  one note are a **Note overlap**. _Avoid_: footprint, file-set.
+  path is in no checkout. Predicted surfaces group, order and wait, and never
+  refuse a schedule: two chains predicting one place both run, the first to
+  begin going first. Two chains in their own **Chain copy**s meet only file
+  to file, while a chain that works a checkout in place (no `chain_copies:`)
+  still takes its checkout turn: the one that comes first (the first to
+  begin, else by slug) lands every unlanded row it has there before the other
+  begins a Leg in it (ADR 0067 d4). A stuck chain holds only
+  its unlanded rows' surfaces (**Unfinished rollout**, ADR 0060), and works
+  no checkout. The files a Leg actually committed are its actual **Claim**s,
+  checked before it lands (ADR 0067 d4); a vault project's place is a
+  prediction, and two runs in one note are a **Note overlap**. _Avoid_:
+  footprint, file-set.
+- **Claim** — a place a run writes, as a **Surface** token. Predicted claims
+  are made at schedule (the declared `surfaces:` and the paths a task names)
+  and group, order and wait, never refusing a schedule. Actual claims are the
+  files a Leg's `Task:` commits touched since `leg_base`: `leg.py done` stamps
+  them on the task as `leg_claims:` (`repo:<primary toplevel>//<path>`,
+  bookkeeping aside), and `leg.py land` checks them against other live
+  chains' unlanded files before it lands, the earlier chain going first (ADR
+  0067 d4). The backstop is git's merge at the land plus the re-run Verify
+  lines, which catch a clash across files. Not `leg.py claim`, which takes a
+  task. _Avoid_: lock, reservation.
 - **Chain copy** — a serial chain's own working copy of a repo it writes (a git
-  worktree on `chain/<rollout-slug>`, outside `~/repos` and `~/Projects`), so
-  two chains in one repo share no index or HEAD; each finished task lands from
-  it onto the primary checkout's default branch (ADR 0067, proposed). Never a
-  **Rollout clone** (a parallel rollout's) and never read as a thread.
+  worktree of the primary checkout on `chain/<rollout-slug>`, at
+  `~/.local/state/thread/chains/<repo-name>-<rollout-slug>/`, outside `~/repos`
+  and `~/Projects`), so two chains in one repo share no index or HEAD (ADR 0067
+  d2). Schedule's S5 makes it with `leg.py copies` and records it on the note
+  as `chain_copies:`; `leg.py begin` remakes a deleted one on its branch and
+  fast-forwards a clean one to the primary's default branch on a fresh Leg,
+  whatever the primary has checked out.
+  It links the primary's gitignored `.mcp.json` and
+  `.claude/settings.local.json`, and each Leg-facing folder (begin's launch
+  check, the hand-over, repair's restart) maps into it. A note with no
+  `chain_copies:` (one written before copies) works each checkout in place.
+  `leg.py land` merges the primary's default branch into
+  `chain/<rollout-slug>` after each `done` and at each close (never a
+  rebase), then fast-forwards the primary to it, never stashing, under a
+  per-repo lock (ADR 0067 d3); after Complete, `leg.py land --retire` removes
+  the copy and deletes its branch with `-d`, never `-D`.
+  Never a **Rollout clone** (a parallel rollout's) and never read as a thread.
   _Avoid_: chain clone, chain worktree, sandbox.
 - **Note overlap** — two live runs editing the same vault note while both
   tasks are unfinished. The later edit is never held or refused: its agent is
   warned which run is in the note and to re-read it first, and every overlap
-  is recorded for the weekly Reflection (ADR 0067, proposed). Best-effort: a
-  script's or a Codex Leg's write is not warned. _Avoid_: Note wait, note
-  lock, lease (alone).
+  is recorded for the weekly Reflection (ADR 0067 d6). The plugin's
+  PreToolUse hook (`hooks/vault-note-overlap.py`) records each run's writes
+  and gives the warning; each warning is a `note-overlap` line in the Run
+  record's `overlaps.jsonl`, and the weekly reading's `noteOverlaps` reports
+  the week's, or `none`. Another run is another rollout (decided, ADR 0067's
+  Decided for Lachy 9): two tasks of one rollout in one note are not warned.
+  Best-effort, and these misses are accepted: a script's, a shell's or a Codex
+  Leg's write, and an edit by a session that is no run's task (an interactive
+  session, a lead's own thread, a subagent a task agent spawns). _Avoid_: Note
+  wait, note lock, lease (alone).
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -550,20 +603,23 @@ through time, from attention to merged PRs. Terms only — no implementation.
   repo may hold at a time for each project, each project's in its own
   **Rollout clone** (ADR 0064), which schedule § 0's unfinished-rollout check
   enforces. A serial rollout is unfinished the same way, and both shapes meet
-  in the same check: a parallel run on a place an unfinished serial chain
-  writes is refused, and so is a serial chain whose **Surface** overlaps a live
-  chain's or an unfinished parallel rollout's Project root (schedule § Serial
-  path). Vault chains in different project places never overlap, so they run
-  side by side (ADR 0059). What an unfinished rollout holds narrows while it
+  in the same check: a parallel run rooted in place in a checkout an
+  unfinished serial chain works is refused, and so is a serial chain whose
+  **Surface** or checkout meets an unfinished parallel rollout's Project root;
+  a chain whose surface overlaps a live chain's is scheduled and takes turns
+  with it (schedule § Serial path, ADR 0067 d4). Vault chains in different
+  project places never overlap, so they run side by side (ADR 0059). What an unfinished rollout holds narrows while it
   waits on Lachy (ADR 0060). A stuck chain (no Leg open, nothing claimable:
   every unlanded row set aside or held behind one) holds only its unlanded
-  rows' surfaces, and releases the rest, its done rows' included. A parallel
+  rows' surfaces, and releases the rest, its done rows' included; it works no
+  checkout, since it uses no index or HEAD. A parallel
   rollout awaiting sign-off, or halted with nothing able to start, holds no
   Project root against serial chains, though it is still its project's one
   unfinished parallel rollout on the repo. Each reclaims its whole claim on resume, and
   waits its turn for a place another rollout took meanwhile: whoever released
-  a place yields it. It is narrower than live: a superseded note stamped
-  done but not yet moved is live but not unfinished, and so is a rollout whose
+  a place yields it to a chain free to run (ADR 0067 d4's order breaks the
+  rest, so no wait closes a cycle). It is narrower than live: a superseded
+  note stamped done but not yet moved is live but not unfinished, and so is a rollout whose
   every task merged before its completion ceremony ran. `--regenerate`
   supersedes this project's unfinished rollout when it is paused or never
   started. _Avoid_: live (for this meaning), active, open.
@@ -606,7 +662,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Capacity** — the most Rollout tasks, Leg task claims and full suites that
   run across the whole Mac at once, rising and falling on its own with heat,
   memory, load and each Login's quota; the **Trickle** and the **Away cap**
-  are its fallback when its reading fails (ADR 0067, proposed). _Avoid_:
+  are its fallback when its reading fails (ADR 0067 d8: decided, not yet
+  built, p36-7). _Avoid_:
   governor (the mechanism), throttle.
 - **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
   across the whole Mac at once, whatever the number of Rollouts: 2, unless
@@ -628,14 +685,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Rollout with no lease still counts (ADR 0049, amended). _Avoid_: heartbeat
   file, lock.
 - **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
-  the **Away cap**) for a start it has picked but not yet stamped, so every
-  other lead counts it. The stamp consumes it, and it lapses after 20
-  minutes. _Avoid_: bare "claim" (a Leg's task claim and a **Surface** claim
-  use it).
+  the **Away cap**) for a start, or a seeded revise, it has picked but not yet
+  stamped, so every other lead counts it. The stamp consumes it, and it lapses
+  after 20 minutes. _Avoid_: bare "claim" (a Leg's task claim and a
+  **Surface** claim use it).
 - **Fair share** — the place a lead's `next` keeps free in the **Trickle** (or
   the **Away cap**) for the waiting rollout that holds fewest, then was served
   least recently, so a rollout that refills the moment its call returns never
-  keeps a waiting one out. _Avoid_: quota, per-rollout Trickle.
+  keeps a waiting one out. A lead the Trickle (or the Away cap) holds runs a
+  **trickle wait** (`trickle-wait`, read-only), which returns within a
+  20-second poll once another lead keeps it a place; one the **Heat hold**
+  holds runs none, so it re-checks only at its heartbeat's tick or a call's
+  return. _Avoid_: quota, per-rollout Trickle.
 - **Last starts** — toward the Morning, a queued task starts only if its
   kind's usual length (the median of that kind's past runs in the project,
   its kind its note's `scope:`) ends it by the Morning's hour; with fewer than
@@ -647,8 +708,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Night record** — per Morning, the **Last starts**' held starts and the
   tasks still running at the Morning, written into each rollout's **Run
   record** and keyed by that Morning, so a **Reflection** can tune the
-  two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences).
-  _Avoid_: night log.
+  two-hour fallback and the **Trickle** (Chorus ADR 0104's Consequences): it
+  tells a fallback overrun (a kind with under three past runs) from an
+  underestimate (a kind whose usual length let it start). _Avoid_: night log.
 - **Heat hold** — while the Mac's thermal pressure reads heavy or worse, no
   new Rollout task starts, Away included, and no **Verify slot** is free; at
   trapping or sleeping a running slotted suite is stopped and put back in
@@ -778,6 +840,21 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the checkout, with no origin read and no git-env window (ADR 0055), and
   completes either way too, since each task passed its own Leg verify.
   A note with none completes as before. _Avoid_: final verify, post-merge suite.
+- **Merge gate** — the checks a PR must pass before GitHub merges it into the
+  default branch: the required contexts of branch protection and rulesets
+  (ADR 0068, giflab ADR 0012 d4). Schedule step 2.5 reads it through
+  `merge-gate.py` and sets it against the rollout's `verifier:`. A context's
+  **closure** is the job it names, that job's transitive `needs:`, and the
+  jobs of the local reusable workflow it calls. A **job class** is what a
+  job's steps run: a lint or format check, a type check, a test tier, a
+  build. A context is **compared** only when every counted job in its
+  closure was read, with no read gap the script names; a partly read or
+  unread one (another app's status, a remote reusable workflow, a cut step)
+  is never covered, and only a compared context is ever called covered. A
+  PR that converged on the verifier and then stops at merge on a red
+  required check is set aside with reasonClass `merge-gate`, distinct from
+  `integration-red` (a red of the verifier at Integration). _Avoid_: CI
+  green, CLEAN.
 - **Verify slot** — one of the machine's `verify_slots` places a verifier
   suite runs in, shared by every rollout on the machine (p23-4,
   `scripts/verify-slot.py`): the lead's Integration and RACE verifies and
@@ -811,6 +888,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   suite falls through), else the test files importing the changed modules.
   They take no **Verify slot**. _Avoid_: quick tests, smoke tests, partial
   suite.
+- **Security check** — the opt-in scan a parallel rollout's hand-set
+  `security_checks: true` turns on (execute § 3): once the verifier is green
+  and before its PR, a code-writing agent runs `security-check.py scan` over
+  the task's own non-merge commits since their merge base (secrets, by
+  gitleaks) and the dependencies its diff adds or changes outside test
+  fixtures (advisories, by OSV), and the review judge runs it again. A red the
+  agent can fix fails the try like a verifier red; one no commit can clear (a
+  pushed secret, a change to the scanner's own config, an advisory with no
+  fixed release) is Lachy's question, and his answer clears it only as a
+  `security-accept <kind>:<key>` token the scan reads from the task note's
+  `## Repair input`. Integration's own commits and merge commits are not
+  scanned ([[thread-skill-security-check-integration-commits]]), and no Leg
+  ever runs it. _Avoid_: secret scan (alone), audit, CI check.
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
@@ -843,7 +933,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   lead's scripts, Workflow engine and skill prose all come from it for the
   whole run, as do status's and repair's for that rollout, whichever session
   runs them, so the Primary checkout can move under a **Running rollout**. A
-  rollout moves to a newer snapshot only at its **Reinstate** (ADR 0043). A
+  rollout moves to a newer snapshot only at its **Reinstate** (ADR 0043); a
+  note that names none is stamped at its next Reinstate or Leg begin. A
   session's rendered prose is followed only when its git `ident` prose id is
   the snapshot's own; otherwise the snapshot's SKILL.md is read as a file
   (`skills/_shared/engine-snapshot.md`). _Avoid_: pinned root, frozen plugin,
@@ -1140,7 +1231,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note. No separate resume command. It moves the rollout onto a fresh
   **Engine snapshot** at origin's tip (ADR 0043); for a serial chain, which is
   never paused, it is the first Leg begun after a Leg closed `stopped`; never
-  a **Sign-off pause**'s reinstate. _Avoid_: restart, relaunch, unpause.
+  a **Sign-off pause**'s reinstate. An unstamped note is stamped at it, and an
+  unstamped chain also at its first Leg or the first Leg begun after any close
+  (ADR 0043, as amended). _Avoid_: restart, relaunch, unpause.
 - **Room stop** — on the Chorus Stage, at a Login's line: the lead starts
   nothing, stops each Workflow call at a step boundary (just after its running
   agent's result line), and resumes every stopped call by `resumeFromRunId` on
@@ -1323,9 +1416,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Chorus's weekly Runner (ADR 0051).
   _Avoid_: clean run, empty retro.
 - **Decision task** — the one open vault task tagged `decisions` that the
-  weekly reading writes for the next morning when it has a rule proposal
+  weekly reading writes, unscheduled, when it has a rule proposal
   or a held trade (a knob ADR 0037 d1 leaves to Lachy; ADR 0037 d5): Lachy
-  decides it at the top of a run (`/thread:reflect --decide`); schedule
+  decides it at Chorus's Thursday Reflection Routine
+  (`/thread:reflect --decide`); schedule
   (either shape) and the reshuffle never take it. _Avoid_: inbox, review
   queue.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,

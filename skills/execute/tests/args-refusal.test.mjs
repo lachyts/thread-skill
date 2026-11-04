@@ -10,7 +10,8 @@
 //   echoed bounded (refusedEcho), so double-encoded args, one string of the whole args JSON, never flood the line the
 //   lead prints, and a bad round budget is shown cut the same way (cutEcho) (a control puts each whole echo back);
 // - a source check on the entry (from the orchestration marker to the integrate branch's first log line): every refusal
-//   head is in it, it holds no plain `throw new Error(` and exactly 12 `throw argsRefused(`. Its controls swap a late
+//   head is in it, it holds no plain `throw new Error(` and exactly 14 `throw argsRefused(` (A4: args.securityCheck added
+//   two, its shape and its presence on mode 'integrate'). Its controls swap a late
 //   throw back to a plain Error (each must fail both the sentinel and the source check) and cut the end anchor (the
 //   source check must fail, never pass on an empty slice).
 import { test } from 'node:test'
@@ -45,6 +46,8 @@ const taskArgs = (over = {}, taskOver = {}) => ({
 const integrateArgs = (over = {}, iOver = {}, taskOver = {}) => taskArgs({ mode: 'integrate', integration: mkI(iOver), ...over }, taskOver)
 const omit = (o, k) => { const { [k]: _drop, ...rest } = o; return rest }
 const LONG_BUDGET = 'r'.repeat(5000)
+// args.securityCheck (execute § 3 `security_checks`): this entry's verify-timeout securityCheck; the path is never run.
+const SECURITY = { script: '/plugins/thread/x/skills/execute/scripts/security-check.py' }
 
 // [what, args, the kind head right after the prefix]
 const CASES = [
@@ -78,6 +81,15 @@ const CASES = [
   ['integration without integrate mode', taskArgs({ integration: mkI() }), "args.integration: only with args.mode 'integrate'"],
   ['task.resume in integrate mode', integrateArgs({}, {}, { resume: mkResume() }), "args.task.resume: a seeded revise is its own call, never mode 'integrate'"],
   ['a bad task.resume in task mode', taskArgs({}, { resume: mkResume({ stage: 'implement' }) }), "args.task.resume: stage must be 'revise'"],
+  // A1: every malformed args.securityCheck, before any dispatch; A2: any value on mode 'integrate'.
+  ['securityCheck a string (A1)', taskArgs({ securityCheck: SECURITY.script }), 'args.securityCheck: must be one object { script }'],
+  ['securityCheck an array (A1)', taskArgs({ securityCheck: [SECURITY] }), 'args.securityCheck: must be one object { script }'],
+  ['securityCheck with another key (A1)', taskArgs({ securityCheck: { ...SECURITY, slots: 2 } }), 'args.securityCheck: must hold exactly script'],
+  ['securityCheck a relative path (A1)', taskArgs({ securityCheck: { script: 'skills/execute/scripts/security-check.py' } }), 'args.securityCheck: script must be the absolute, single-line path of security-check.py'],
+  ['securityCheck the wrong basename (A1)', taskArgs({ securityCheck: { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py' } }), 'args.securityCheck: script must be the absolute, single-line path of security-check.py'],
+  ['securityCheck under a bare /skills/ (A1)', taskArgs({ securityCheck: { script: '/skills/execute/scripts/security-check.py' } }), 'args.securityCheck: script "/skills/execute/scripts/security-check.py" sits under a bare /skills/'],
+  ['securityCheck on a seeded revise, malformed (A1)', taskArgs({ securityCheck: {} }, { resume: mkResume() }), 'args.securityCheck: must hold exactly script'],
+  ['securityCheck on mode integrate (A2)', integrateArgs({ securityCheck: SECURITY }), "args.securityCheck: never on mode 'integrate': Integration's own commits are not scanned"],
 ]
 
 const never = async () => { throw new Error('agent() must not run') }
@@ -141,8 +153,9 @@ test('refusedEcho: JSON.stringify up to 200 characters, a longer value cut and m
   assert.equal(refusedEcho(s), `${JSON.stringify(s).slice(0, 200)}… (201 characters)`)
 })
 
-test('the valid args of both modes are not refused (the table is not vacuous)', async () => {
-  for (const args of [taskArgs(), integrateArgs(), JSON.stringify(taskArgs())]) {
+test('the valid args of both modes are not refused (the table is not vacuous; A3: securityCheck absent, null or valid)', async () => {
+  for (const args of [taskArgs(), integrateArgs(), JSON.stringify(taskArgs()), taskArgs({ securityCheck: SECURITY }),
+    taskArgs({ securityCheck: null }), integrateArgs({ securityCheck: null }), taskArgs({ securityCheck: SECURITY }, { resume: mkResume() })]) {
     const r = await runTask(args, async () => null)
     assert.ok(!(r.error && String(r.error.message).includes(SENTINEL)), String(r.error && r.error.message))
     assert.ok(r.calls.length > 0 || (r.error === undefined && r.logs.length > 0), 'reached the dispatch')
@@ -157,11 +170,11 @@ const END = "\nif (mode === 'integrate') {\n  log(`integrate: "
 const HEADS = [
   ["'args: not JSON: '", 1], ["'args must be one object, got '", 1], ['defaultBranch(a)', 1], ['not args.waves', 1],
   ['args.task must be one task object', 1], ['args.mode: ', 1], ["'args.ladder: '", 1], ["'args.verifySlot: '", 1],
-  ['args.integration: ', 2], ['args.task.resume: ', 2],
+  ['args.integration: ', 2], ['args.task.resume: ', 2], ['args.securityCheck: ', 2],
 ]
 const src = fs.readFileSync(enginePath, 'utf8')
 
-// [] when the entry holds every refusal head, no plain throw and exactly 12 argsRefused throws; else what failed.
+// [] when the entry holds every refusal head, no plain throw and exactly 14 argsRefused throws; else what failed.
 function sourceFails(text) {
   const from = text.indexOf(START)
   const to = text.indexOf(END)
@@ -171,11 +184,11 @@ function sourceFails(text) {
   for (const [needle, n] of HEADS) if (entry.split(needle).length - 1 < n) out.push(`head ${needle}`)
   if (entry.includes('throw new Error(')) out.push('a plain throw')
   const k = entry.split('throw argsRefused(').length - 1
-  if (k !== 12) out.push(`${k} argsRefused throws`)
+  if (k !== 14) out.push(`${k} argsRefused throws`)
   return out
 }
 
-test('source: the entry refuses only through argsRefused, 12 sites, every head inside it', () => {
+test('source: the entry refuses only through argsRefused, 14 sites, every head inside it (A4)', () => {
   assert.deepEqual(sourceFails(src), [])
 })
 
@@ -190,7 +203,7 @@ test('control: the last throw (args.task.resume) back on a plain Error fails the
   const [, args, head] = caseOf('a bad task.resume in task mode')
   const r = await runTask(args, never, { source: v })
   assert.deepEqual(refusalFails(r, head), ['sentinel'])
-  assert.deepEqual(sourceFails(v), ['a plain throw', '11 argsRefused throws'])
+  assert.deepEqual(sourceFails(v), ['a plain throw', '13 argsRefused throws'])
 })
 
 test("control: the else-branch args.integration throw back on a plain Error fails the sentinel and the source check", async () => {
@@ -198,7 +211,7 @@ test("control: the else-branch args.integration throw back on a plain Error fail
   const [, args, head] = caseOf('integration without integrate mode')
   const r = await runTask(args, never, { source: v })
   assert.deepEqual(refusalFails(r, head), ['sentinel'])
-  assert.deepEqual(sourceFails(v), ['a plain throw', '11 argsRefused throws'])
+  assert.deepEqual(sourceFails(v), ['a plain throw', '13 argsRefused throws'])
 })
 
 test('control: the top-level refusal echoing the whole value again fails the length bound', async () => {

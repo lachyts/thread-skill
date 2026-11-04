@@ -1,0 +1,36 @@
+# thread-skill
+
+## Review rule: a reading holds only its window's rows
+
+Some outputs here are read by no script: span.json's reported blocks, a score's sums, the claims a docstring
+makes. A reading that sums over a span wider than its window is wrong in a way no test or gate catches. Review
+round c6f5bb9/ba8597 #6 found one before it landed: freshReview kept a group whole once any round fell in the
+window, so the default branch's entry folded in every round ever recorded and grew each week.
+
+A reading's window is the [since, until] its docstring declares (CONTEXT.md's Window, a canary's arm to its
+check, is another thing).
+
+1. Every windowed or aggregated reading holds only rows inside its window, by the row unit its docstring
+   declares: an instant by its parsed time (a /fresh-review round by its `reviewedAt`), a date-only row by
+   `date_in()` (since's Melbourne date up to, not including, until's), a landed task by its merge. Some readers
+   declare a wider unit on purpose, and are held to that unit:
+   - a rollout's score (score.py, serial-score.py) reads the rollout's whole life, from its first slot-taken or
+     first Leg to until, so its sums run wider than the reading's week; its Escapes are read up to now, and
+     rounds per landed task count each landed task's rounds over its whole record;
+   - the Escapes sweep (reflect.py) folds landed tasks of any age; its friction rows are only the evidence
+     dated in the window, and cannotShow names only the Escapes no week's friction lists (a chain's line names
+     every one dated outside the window);
+   - a grade episode (grades.py) counts in the window that holds its close, its acts from before since included,
+     and grades' `all` holds every closed episode;
+   - a Review trail (attention.py) is read whole, back to since - `TRAIL_DAYS`, once any of its rounds is in the
+     window; a wait to start is a row per rollout that started in the window or is open at until; circling reads
+     its own [until - `TOUCH_DAYS`, until];
+   - the Monthly audit (ledger.py) reads its month.
+   A reader that reads wider says so in its docstring, the one copy of its rule, and is named here.
+2. A test pins it: for each windowed reader, plant one row outside the window and assert it is absent, or adds
+   nothing to a sum, as tests/reflect-weekly.test.mjs's "freshReview holds only rounds reviewed in the window"
+   does.
+3. Hold a diff to this rule when it touches a reader whose docstring declares a row-level window, and it widens
+   that window, groups rows before it windows them, or keeps a group whole once one row is in the window. A
+   reader on the list above is held to its own declared unit instead. span's `window: ` flags are the read-time
+   check (reflect.py's header, "The window check"): one in a weekly reading is a bug.
