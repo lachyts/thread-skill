@@ -10,6 +10,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-11-04 (latest): [[thread-skill-rollout-2026-11-03]] is done, 15/15 merged in 26h 13m (#279 to #295, last `4f165fa`).** P36's p36-1 to p36-7 landed (ADR 0067 d2, d3, d4, d8, d9: claims are files, Chain copies, `leg.py land`, wait-die by rank, the vault overlap warning, the Capacity reader), with p28-7/8/9 and five loose engine fixes (ADR 0068's `merge-gate.py`, the Security check, the decisions-to-Routine route, unwatched readings, leg claim on gate None).
+- **Run:** four plan-blocked first tries converged on auto-retry; two required-CI reds (lint-gap's macOS VR9 flake, security checks' ubuntu `make test`) set aside and retried 2/2; five same-file conflicts resolved by integrate calls; one Chorus room stop (09:50 to 10:19, Login moved to fauxmuse) resumed by `resumeFromRunId`.
+- **Ceremony:** P28 already closed; P36 left open for p36-8. Rollout note archived (vault `03207d09`); close-score `t-20261104T091606Z-6b1859`. Snapshot `67cc02e2f721` kept as its own root.
+- **Filed open:** [[thread-skill-reflect-p36-rollout-side-by-side]], [[thread-skill-schedule-p36-8-on-workspaces]], [[thread-skill-merge-task-gh-pr-checks-json-gap]], and the VR9 flake [[wave-ralph-verifier-lint-gap-followup-flake-0ee6f6fc9c]].
+- **This checkout** is still 2 local close-outs ahead (queued in `close/2026-11-04-thread-skill-398338824c29`) and 18 behind: it lands by PR, never moved by hand.
+
 **2026-11-03 (latest): orient reshuffled Thread Skill into P36 (ADR 0067, every project's rollout runs at once) and scheduled [[thread-skill-rollout-2026-11-03]], whose lead is running.**
 - **Priorities card** written to the project note (Chorus ADR 0110 d5): production-ready; for Lachy alone; runs without him; he steers what reaches him (asks, alerts, gates, review stops) and the review rules.
 - **P36** ([[thread-skill-p36-every-projects-rollout-runs-at-once]]): p36-1, the stale-snapshot fix renamed from `thread-skill-unstamped-rollout-stamped-at-reinstate`. Then ADR 0067 split into tasks: p36-2 claims are files; p36-3 Chain copies; p36-4 `leg.py land` (flips ADR 0067 to accepted); p36-5 wait-die by rank; p36-6 the vault overlap warning; p36-7 the Capacity reader; p36-8 workspaces' repo-relative launch markers (another repo). The Chorus halves are filed loose as [[chorus-writes-the-capacity-reading]] and [[chorus-resolves-repo-relative-launch-markers]].
@@ -841,6 +847,8 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **A Login switch does not lose a stopped Workflow call** (2026-11-04). After Chorus moved the lead from main to fauxmuse, `resumeFromRunId` with the same args replayed every finished agent from the run's journal under the new profile's `projects/` dir, and the call converged.
+- **This Mac's gh 2.43.1 has no `pr checks --json`** (2026-11-04), so merge-task's infra-flake re-run never fires and every red reads genuine: [[thread-skill-merge-task-gh-pr-checks-json-gap]].
 - **An unstamped rollout note holds the Primary for its whole life** (2026-11-03). `move_rule()` returns `due: False` for a note with no `engine_snapshot:`, so a Reinstate never stamps it, and a stuck serial chain can live for days. Until [[thread-skill-p36-1-unstamped-rollout-snapshot-at-reinstate]] lands, the fix by hand is one `engine-snapshot.py cut --verb execute --prose-id <execute SKILL.md $Id hex>` (options after the verb), then `<snapshot>/skills/_shared/scripts/engine-snapshot.py adopt --rollout <note>` per idle note; `primary-hold.sh <repo>` then prints nothing.
 - **The primary checkout is the live plugin, and it is held** (2026-11-02; released 2026-11-03, once every live note was stamped: see the quirk above). `${CLAUDE_PLUGIN_ROOT}` is `~/repos/tools/thread-skill` itself (a directory source), so whatever that checkout holds is the close, execute and land.sh every session runs, and ADR 0031 holds it behind origin/master while any rollout runs (`skills/_shared/scripts/primary-hold.sh` names them). A merged change goes live only when it catches up. Never fast-forward or reset it by hand: on 2026-11-02 a hand fast-forward moved five running rollouts' engine for 63 s before it was put back.
 - **Run the landing through `/thread:close`, never by hand before it** (2026-11-02). Close commits THREAD.md on the own branch (7.1) before 7.9 lands it, so the close-out rides the branch's PR. A landing loop run by hand first merges the branch, and the THREAD.md close-out then needs a branch and landing of its own.
@@ -1124,6 +1132,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-11-04 (P36 rollout done):** next is [[thread-skill-schedule-p36-8-on-workspaces]] (p36-8 on `~/repos/workspaces` once its checkout is free; it closes P36), then [[thread-skill-reflect-p36-rollout-side-by-side]] and [[thread-skill-merge-task-gh-pr-checks-json-gap]]. [[thread-skill-set-up-ntfy-rollout-alerts]] is still open. One-off: [[thread-skill-decisions-2026-11-02]] still carries `scheduled: 2026-11-04` and a day-page line.
+
 **From 2026-11-03 (orient, P36 scheduled):** [[thread-skill-rollout-2026-11-03]] runs in its own lead session: check it with `/thread:status [[thread-skill-rollout-2026-11-03]]`, never a second lead. Next by hand: [[thread-skill-set-up-ntfy-rollout-alerts]] (five minutes of Lachy's phone). Then p36-8 on `~/repos/workspaces` once its checkout is free, and the 13 open items of [[thread-skill-decisions-2026-11-02]] at the Thursday Routine.
 
 **From 2026-11-03 (Primary caught up, live notes stamped):** the Primary is free to move: land and pull as normal. Next: [[thread-skill-p36-1-unstamped-rollout-snapshot-at-reinstate]] (move_rule stamps an unstamped note at its next Reinstate or Leg begin; ADR 0043 amendment), then [[thread-skill-reflection-decisions-go-to-the-routine]] and [[thread-skill-set-up-ntfy-rollout-alerts]]. The other 13 items of [[thread-skill-decisions-2026-11-02]] are still open for `/thread:reflect --decide`. Check Chorus's reinstate and Smart Slider Leg 3 each report the snapshot `1c9ffe0cbf5e`.
@@ -1157,6 +1167,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-04 (close, execute): led [[thread-skill-rollout-2026-11-03]] to 15/15 merged (26h 13m) and ran its completion ceremony; P36 open for p36-8; three follow-ons filed.
 - 2026-11-04 (close, decisions check): checked [[thread-skill-decisions-2026-11-02]]: still live, 13 of 14 items open (f0ab0604 decided 3 Nov); its `scheduled:` is a legacy key #283's `reflect.py decide` drops, so Lachy leaves it to the Reflection Routine. Its routine link resolves to `Work/Tasks/Archive/` (not dead); no change kept.
 - 2026-11-03 (close, orient): `/thread:orient Thread Skill`: Priorities card; P36 phased from ADR 0067 (8 tasks plus 2 Chorus tasks); three brain dumps respecced, one dropped; scheduled the 15-task [[thread-skill-rollout-2026-11-03]] and handed it to a fresh lead. Lachy put ntfy off ("Not now").
 - 2026-11-03 (close, Primary cut-over): explained the weekly decision task; on Lachy's word paused Chorus and stopped Smart Slider Leg 2, moved the Primary 158 commits to `1c9ffe0`, stamped the four live notes with snapshot `1c9ffe0cbf5e`, restarted Chorus and Smart Slider Leg 3; filed the move_rule fix and the Routine change; recorded f0ab0604 yes. My slip: messaged the Companion for a restart Lachy then did himself, so its quiet had to be dropped by a resume.
