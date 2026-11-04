@@ -222,6 +222,33 @@ ok "$rc|$(sums)" "5|$before" "L7: the trickle lock held past its timeout: exit 5
 SECONDS=0; THREAD_NOTE_LOCK_TIMEOUT=20 leg claim --task t1; took=$SECONDS
 ok "$rc|$([ "$took" -lt 10 ] && echo fast)" "1|fast" "L7: a claim refused for a plan mismatch returns exit 1 at once, never waiting on the lock"
 release_lock
+# The reads that run a child process: the heat (verify-slot's heat_level runs `notifyutil`, found through PATH) and the
+# Mac's boot and wake (`sysctl`, through PATH), each unpinned here and shimmed to log whether the trickle lock is free.
+scen l7h
+mkro t1 t2; mkpar 0 0; cap 3
+leg begin --cwd "$F"
+mkdir -p "$S/shim" "$THREAD_NOTE_LOCK_DIR"
+for tool in notifyutil sysctl; do
+  cat > "$S/shim/$tool" <<EOF
+#!/bin/sh
+python3 -c 'import fcntl, sys
+f = open(sys.argv[1], "a")
+try:
+    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB); print("free")
+except OSError:
+    print("held")' "$THREAD_NOTE_LOCK_DIR/trickle.lock" >> "$S/$tool.log"
+[ "$tool" = notifyutil ] && { echo 0; exit 0; }
+exit 1
+EOF
+  chmod +x "$S/shim/$tool"; : > "$S/$tool.log"
+done
+pinned_heat=$THREAD_HEAT_LEVEL pinned_times=$THREAD_MACHINE_TIMES
+unset THREAD_HEAT_LEVEL THREAD_MACHINE_TIMES
+PATH="$S/shim:$PATH" leg claim --task t1
+export THREAD_HEAT_LEVEL="$pinned_heat" THREAD_MACHINE_TIMES="$pinned_times"
+ok "$rc|$(fm t1 owner)" "0|leg-1" "L7: a claim under the Capacity, the heat and the Mac's times unpinned, succeeds"
+ok "$([ -s "$S/notifyutil.log" ] && sort -u "$S/notifyutil.log" | tr '\n' ' ')" "free " "L7: … the heat's notifyutil ran, only with the trickle lock free"
+ok "$([ -s "$S/sysctl.log" ] && sort -u "$S/sysctl.log" | tr '\n' ' ')" "free " "L7: … and the Mac's sysctl ran, only with the trickle lock free"
 
 # ════ L8: a lead's next and a Leg's claim race for the last place ═════════════════════════════════════════════════
 scen l8

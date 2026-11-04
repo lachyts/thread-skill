@@ -1275,7 +1275,8 @@ inside its line` (QUOTA_PREFIX; after the ceiling and the heat, before the cap),
 record (an earlier one is removed) and idle-slots reads `hold-quota`; a restart still waits on the ceiling alone. The
 Login is always the lead's own: its lease names it (`login`), `status` reads no quota, and `moving`, which runs in the
 Watchdog's process, reads the lead's off that lease (_lead_login, through `next --dry-run --quota-login`), never its
-own. capacity_gate (below) is the same arithmetic for a Leg's fresh claim, the one copy leg.py reads.
+own. capacity_gate (below) is the same arithmetic for a Leg's fresh claim, the one copy leg.py reads; the reads it
+takes that may run a child process (capacity_reads) a caller holding the trickle claim lock takes before the lock.
 
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
@@ -2543,8 +2544,9 @@ class _note_lock:
     spend lock inside a note lock or the canary's. The trickle claim lock (TRICKLE_LOCK, p28-3) is taken by `next` and
     by leg.py's claim and wait (p36-7, capacity_gate): `next` takes it outermost, with note locks (Note.save) and the
     Run record's flock inside it; leg.py takes it inside its rollout Lock and rank lock, around only the recount, the
-    Leg lease, the task note's save and the claims write, never git, gh or a child process; nothing takes a leg.py
-    lock, or the trickle lock, inside it. So is the origin-lane lock (ORIGIN_LANE_LOCK, ADR 0064): only mark-integrating takes it, with note locks and
+    Leg lease, the task note's save and the claims write, never git, gh or a child process (capacity_reads, the heat's
+    `notifyutil` and the Mac's sysctl among them, is read before it); nothing takes a leg.py lock, or the trickle
+    lock, inside it. So is the origin-lane lock (ORIGIN_LANE_LOCK, ADR 0064): only mark-integrating takes it, with note locks and
     the Run record's flock inside it, and never nested with the trickle lock. No fcntl (Windows): no lock, the atomic replace alone."""
 
     def __init__(self, path=None, lock_path=None, label="note lock"):
@@ -4396,7 +4398,8 @@ class _Leases:
     `written_at` and kern.boottime and kern.waketime, each counted only when after `written_at` and at or before now,
     and it lapses once now - start > LEASE_LAPSE (exactly 45:00 still reads fresh). The Mac's evidence is
     machine_times(now, now), so sysctl only, never pmset (THREAD_MACHINE_TIMES in its place), read lazily, at most once
-    per call, and only when some lease would otherwise lapse. A lapsed lease whose rollout note has a room stop standing
+    per call, and only when some lease would otherwise lapse (capacity_reads reads it at once, p36-7, so a Leg's recount
+    under the trickle claim lock runs no sysctl). A lapsed lease whose rollout note has a room stop standing
     (_room_stop_stands, under ROOM_STOP_BOUND) reads `room-stop` and counts. A Leg lease (p36-7, `leg=True`: a serial
     rollout's, read only while Capacity is in force) lapses LEG_LEASE_LAPSE (90 min) after its start, or LEG_WAIT_LAPSE
     (180 min) for a `waiting: true` one, the same boot-or-wake rule applying; it has no room-stop exception, and only a
@@ -4914,12 +4917,32 @@ def _kept_for(kept) -> str:
     return (f", {sum(kept.values())} kept for " + ", ".join(f"[[{n}]]" for n in kept)) if kept else ""
 
 
-def capacity_gate(rollout_path, tasks_dir, now, mine, want, quota_env=None) -> dict:
+def capacity_reads(now, quota_env=None) -> dict:
+    """The reads capacity_gate takes that may run a child process or resolve a file outside the vault (p36-7): {state
+    (_capacity_state: capacity.json, then rollouts.toml's capacity_max; the quota read from `quota_env`'s Login, none
+    when None), away (_away_state), heat (_heat_state: verify-slot's heat_level, `notifyutil`), leases (a _Leases at
+    `now` whose Mac evidence, machine_times' sysctl, is read here at once)}, the last three None while the Capacity is
+    not in force. A caller that holds the trickle claim lock (leg.py claim and wait's record) takes them before the
+    lock, as `next` reads its heat before it takes its own, and passes them in, so nothing under that lock runs git,
+    gh or a child process. Never raises."""
+    state = _capacity_state(now, env=quota_env if quota_env is not None else {}, quota=quota_env is not None)
+    out = {"state": state, "away": None, "heat": None, "leases": None}
+    if state["inForce"]:
+        leases = _Leases(now)
+        leases._ups()   # the boot and wake (sysctl) now, never under the lock a later lapse test would read them in
+        out.update(away=_away_state(now), heat=_heat_state(), leases=leases)
+    return out
+
+
+def capacity_gate(rollout_path, tasks_dir, now, mine, want, quota_env=None, reads=None) -> dict:
     """The Capacity's gate on a Leg's fresh claim (p36-7, ADR 0067 d8; execute away.md § Capacity): `next`'s room
     arithmetic for one serial rollout, its one copy, which leg.py reads (its `next`, begin's `next`, `wait`'s poll and
     `status` read-only and lock-free; `claim`'s recount and `wait`'s record write under the trickle claim lock, which the
     caller holds whenever it writes). `mine` is this chain's own counted rows (its Leg claims in progress) and `want` the
     places it asks for (1). `quota_env`: the environment whose Login the quota hold reads (None: no quota, `status`'s).
+    `reads`: capacity_reads(now, quota_env)'s block, taken by a caller before it takes the trickle claim lock (then
+    `quota_env` is not read); None reads it here. Under the lock the gate itself reads only files: the notes, the
+    leases and the claims file.
 
     Returns {inForce, held, kind, why, capacity, warns, write}. Not in force (a missing, stale or unreadable reading,
     or an unresolved capacity_max): inForce false, held false, the Leg claims as before, and nothing is read but the
@@ -4941,15 +4964,17 @@ def capacity_gate(rollout_path, tasks_dir, now, mine, want, quota_env=None) -> d
     "drop" remove it (a claim that found room; the quota hold). It returns a TRICKLE_WARN line, or None, and writes
     nothing for a file of another version or when nothing changed. Never under --dry-run (the caller's rule)."""
     rollout_path, tasks_dir = Path(rollout_path), Path(tasks_dir)
-    state = _capacity_state(now, env=quota_env if quota_env is not None else {}, quota=quota_env is not None)
+    if reads is None:
+        reads = capacity_reads(now, quota_env)
+    state = reads["state"]
     out = {"inForce": state["inForce"], "held": False, "kind": None, "why": None, "capacity": None,
            "warns": _capacity_warns(state), "write": lambda mode: None}
     if not state["inForce"]:
         return out
     stem = rollout_path.stem
-    away, heat = _away_state(now), _heat_state()
+    away, heat, leases = reads["away"], reads["heat"], reads["leases"]
     walk = _note_index(tasks_dir)
-    leases, lapsed = _Leases(now), {}
+    lapsed = {}
     notes_elsewhere = _elsewhere_running(rollout_path, tasks_dir, walk, leases, lapsed, legs=True)
     _lock_path, claims_path = _trickle_paths()
     claims_read, waiting_raw, woken_raw, claims_why, writable = _trickle_claims_read(claims_path)

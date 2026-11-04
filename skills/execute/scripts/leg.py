@@ -511,9 +511,11 @@ stands that copy (exit 0), never exit 5. claim, and wait's log, also take the ma
 contention read, the plan, the save and the log, so two chains never claim one code file at once; a wait past the same
 timeout is exit 5, nothing written. While Capacity is in force a fresh claim also takes the machine-wide trickle claim
 lock (reconcile-rollout.py's TRICKLE_LOCK, every lead's `next`'s), inside the rank lock, around only its recount, the
-Leg lease, the task note's save and the claims write: never git, gh or a child process, and nothing takes a leg.py lock
-inside it, so the order is rollout lock, rank lock, trickle lock, note locks, and no cycle forms with `next` (trickle
-lock, then note locks). A capacity `wait` takes the trickle lock alone for its record write.
+Leg lease, the task note's save and the claims write: never git, gh or a child process (the reads that may run one,
+the heat's `notifyutil`, the Mac's boot and wake, the Capacity and Away readings, are taken before it: rr's
+capacity_reads), and nothing takes a leg.py lock inside it, so the order is rollout lock, rank lock, trickle lock,
+note locks, and no cycle forms with `next` (trickle lock, then note locks). A capacity `wait` takes the trickle lock
+alone for its record write, its reads taken first the same way.
 
 The Capacity (ADR 0067 d8; execute away.md § Capacity, its spec). While a fresh capacity.json is in force (rr's
 _capacity_state), a Leg's claims count on the Mac behind its Leg lease, and its fresh claims are gated by the room
@@ -1969,10 +1971,13 @@ def cmd_wait(ctx, a):
 def capacity_record(ctx, kind, warns):
     """A Capacity wait's waiting record (p36-7): under the trickle claim lock alone (never with the rollout's lock or
     the rank lock), one fresh rr.capacity_gate read and its claims write: kind `capacity` records this chain waiting
-    (want 1) while the gate still holds it, anything else drops its record. A lock not taken within
-    THREAD_NOTE_LOCK_TIMEOUT (30 s) adds one `warns` entry and the wait reads on, read-only. Never under --dry-run."""
+    (want 1) while the gate still holds it, anything else drops its record. Its child-process reads (rr.capacity_reads)
+    and this chain's count are taken before the lock. A lock not taken within THREAD_NOTE_LOCK_TIMEOUT (30 s) adds one
+    `warns` entry and the wait reads on, read-only. Never under --dry-run."""
     if ctx.dry:
         return
+    reads = rr.capacity_reads(ctx.now, quota_env=os.environ)
+    mine = leg_mine(Chain(ctx))
     lock = rr._note_lock(lock_path=rr._trickle_paths()[0], label="trickle claim lock")
     try:
         lock.__enter__()
@@ -1980,7 +1985,7 @@ def capacity_record(ctx, kind, warns):
         warns.append(f"{rr.TRICKLE_WARN} {e} — this Leg's waiting record is not written; the wait reads on")
         return
     try:
-        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, leg_mine(Chain(ctx)), 1, quota_env=os.environ)
+        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, mine, 1, reads=reads)
         w = g["write"]("waiting" if kind == "capacity" and g["held"] and g["kind"] == "capacity" else "drop")
         if w:
             warns.append(w)
@@ -2181,23 +2186,28 @@ def capacity_stand(ctx, chain, n, row, why, capacity, quota=None):
 
 
 def claim_save(ctx, chain, leg, row, note, fresh):
-    """claim's write of the task note (p36-7, ADR 0067 d8; the module docstring's claim). A fresh claim while Capacity
-    is in force: the quota hold (the heat aside) stands at once, no lock and nothing written; else under the trickle
-    claim lock (a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 5, nothing written: a Leg's stamp counts at
-    once, so it never claims unlocked) the recount (rr.capacity_gate): no room writes this chain's waiting record and
-    stands (exit 3); room writes the Leg lease, saves the note, then the claims write (its own record and wake dropped,
-    a wake for each rollout it keeps places for). --dry-run reads the gate and writes nothing. Otherwise (the fallback, or
-    an inherited claim, which is never gated) the lease best-effort, then the save, as before."""
+    """claim's write of the task note (p36-7, ADR 0067 d8; the module docstring's claim). A fresh claim reads the
+    Capacity, the Away state, the heat and the Mac's boot and wake first (rr.capacity_reads, every read that may run a
+    child process), before any lock. While Capacity is in force: the quota hold (the heat aside) stands at once, no lock
+    and nothing written; else under the trickle claim lock (a lock not taken within THREAD_NOTE_LOCK_TIMEOUT is exit 5,
+    nothing written: a Leg's stamp counts at once, so it never claims unlocked) the recount (rr.capacity_gate, from
+    those reads: under the lock only the notes, the leases and the claims file are read): no room writes this chain's
+    waiting record and stands (exit 3); room writes the Leg lease, saves the note, then the claims write (its own
+    record and wake dropped, a wake for each rollout it keeps places for). --dry-run reads the gate and writes nothing.
+    Otherwise (the fallback, or an inherited claim, which is never gated) the lease best-effort, then the save, as
+    before."""
     n = leg["n"]
-    state = rr._capacity_state(ctx.now) if fresh else None
+    reads = rr.capacity_reads(ctx.now, quota_env=os.environ) if fresh else None
+    state = reads["state"] if reads else None
     if state is None or not state["inForce"]:
         leg_lease(ctx, leg)
         save(ctx, note)
         return
-    if rr._quota_held(state) and not rr._heat_state()["held"]:
+    if rr._quota_held(state) and not reads["heat"]["held"]:
         capacity_stand(ctx, chain, n, row, rr._quota_why(state), None, quota=state["quota"])
+    mine = leg_mine(chain)
     if ctx.dry:
-        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, leg_mine(chain), 1, quota_env=os.environ)
+        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, mine, 1, reads=reads)
         if g["held"]:
             capacity_stand(ctx, chain, n, row, g["why"], g["capacity"], quota=state["quota"] if g["kind"] == "quota" else None)
         return
@@ -2208,7 +2218,7 @@ def claim_save(ctx, chain, leg, row, note, fresh):
         raise Refuse(5, f"{e}: a claim under the Capacity never claims unlocked; nothing written (retry once, then end "
                         "the turn halted)")
     try:
-        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, leg_mine(chain), 1, quota_env=os.environ)
+        g = rr.capacity_gate(ctx.rollout, ctx.tasks, ctx.now, mine, 1, reads=reads)
         if g["held"]:
             w = g["write"]("waiting" if g["kind"] == "capacity" else "drop")
             if w:
