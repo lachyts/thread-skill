@@ -58,11 +58,13 @@
 #   L18  same-file waits go by rank, wait-die at claim (ADR 0067 d9): order_key and first_by (L18a); a higher-ranked chain
 #        waits on a running lower-ranked holder, then goes first (L18b), its reservation sets a third chain's row aside
 #        (L18c); a lower-ranked chain sets its row aside and claims another (L18d); aging lifts a waiter, and only its open
-#        Leg's lines count (L18e); no mutual wait over 10368 two-chain fixtures (L18f); an in-place chain is no rank peer
+#        Leg's lines count (L18e); a task whose kind alternates logs each flip and polls, never returning at once (L18v);
+#        no mutual wait over 10368 two-chain fixtures (L18f); an in-place chain is no rank peer
 #        (L18g); only repo: and any rank-wait (L18h); claim re-reads the rank under the rank lock (L18i); begin's launch
-#        check and status read the contention-aware plan, and a chain held so reads ready (L18j, L18t); a holder with no
-#        open Leg is not running: a stalled retry, a stopped close, (O)'s holder half at the next begin, and a later dead
-#        holder that holds nothing (L18k); land's claim check by rank (L18l); landFirst (L18m); the (H) land wait and its
+#        check and status read the contention-aware plan, a never-begun chain's as begun (L18j2), and a chain held so
+#        reads ready (L18j, L18t); a holder with no open Leg is not running: a stalled retry, a stopped close, (O)'s holder
+#        half at the next begin, a later dead holder that holds nothing, and a dead holder's die over a live one whatever
+#        the peers' order (L18k); land's claim check by rank (L18l); landFirst (L18m); the (H) land wait and its
 #        controls (L18n); a fix row is never waited (L18o); ADR 0060's yield ahead of rank (L18q); one hop (L18u); wait's
 #        cleared and --dry-run (L18p).
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
@@ -2188,7 +2190,7 @@ ok "$rc|$(q 'd["kind"]')|$(q 'd["cleared"]')|$(q 'd["stalled"]')|$(q 'd["logged"
    "L18b: wait --for 0 logs the wait and prints cleared false"
 ok "$(logn "Leg 1 rank wait: \[\[a1\]\] on \[\[$RO2\]\] (repo:$R//f.txt; ranks above it)\$")" 1 "L18b: … its rank wait: line"
 CWD="$C1" leg wait --task a1 --for 0
-ok "$rc|$(q 'd["logged"]')|$(logn 'rank wait:')" "0|False|1" "L18b: a second wait logs nothing: one line per (Leg, task, kind)"
+ok "$rc|$(q 'd["logged"]')|$(logn 'rank wait:')" "0|False|1" "L18b: a second wait logs nothing: a1's latest line already records its kind"
 RO=$RO2; tcommit "$C2" b1 f.txt $'1\n2\n3\n4\nB'; d=$(review "$C2" HEAD); CWD="$C2" leg done --task b1 --verify pass --review "$d" --cwd "$C2"
 RO=$RO1; CWD="$C1" leg next; ok "$(nx)" "wait|wait|a1|$RO2" "L18b: B's done b1, not yet landed, still holds A"
 RO=$RO2; CWD="$C2" leg land; ok "$rc|$(lands)|$(fm b1 leg_landed)" "0|landed|None|None|$NOW" "L18b: B lands b1, stamping leg_landed"
@@ -2260,6 +2262,26 @@ CWD="$C1" leg close --outcome stopped --reason "out of time" --cwd "$C1"; LNOW=2
 LNOW=2026-10-20T10:05+00:00 CWD="$C1" leg status
 ok "$(q 'd["openLeg"]')|$(q 'd["rank"]["lifts"]')|$(q 'd["rank"]["standing"]')" "2|0|[]" "L18e2: a retry line of a closed Leg lifts nothing in the next"
 unset CWD
+# L18v: a task whose kind alternates (floor-based lifts on two waiters at offset phases) holds both kinds' lines; wait
+# logs a line whenever the kind differs from the task's latest, so it records the kind it waits as and polls, never
+# returning at once into a Leg loop with no sleep
+lscen l18v
+EXTRA_FM=$(rk 1)$'\n' mkro '' "a1~cc-r~$R~\`repo:$R//f.txt\`"; mkt a1
+RO=$RO2; EXTRA_FM=$(rk 2)$'\n' mkro '' "b1~cc-r~$R~\`repo:$R//f.txt\`"; mkt b1; RO=$RO1
+mkcopies; CWD="$C1" leg begin --cwd "$C1"; CWD="$C1" leg claim --task a1
+RO=$RO2; CWD="$C2" leg begin --cwd "$C2"; LNOW=2026-10-20T10:20+00:00 CWD="$C2" leg next
+ok "$(nx)|$(q 'd["stalled"]')" "wait|retry|b1|$RO1|False" "L18v: B's only row is a retry on A's a1"
+printf -- '- 2026-10-20T10:05+00:00 Leg 1 rank retry: [[b1]] on [[%s]] (repo:%s//f.txt; [[%s]] ranks above)\n' "$RO1" "$R" "$RO1" >> "$T/$RO.md"
+printf -- '- 2026-10-20T10:10+00:00 Leg 1 rank wait: [[b1]] on [[%s]] (repo:%s//f.txt; ranks above it)\n' "$RO1" "$R" >> "$T/$RO.md"
+t0=$SECONDS; LNOW=2026-10-20T10:20+00:00 CWD="$C2" leg wait --task b1 --for 2; el=$((SECONDS - t0))
+ok "$rc|$(q 'd["kind"]')|$(q 'd["flipped"]')|$(q 'd["logged"]')|$(q 'd["cleared"]')|$(q 'd["stalled"]')|$([ "$el" -ge 2 ] && echo polled)" \
+   "0|retry|True|True|False|False|polled" "L18v: with a wait line latest, a retry flips, logs a fresh retry line and polls its --for"
+ok "$(logn 'rank retry: \[\[b1\]\]')|$(grep 'Leg 1 rank ' "$T/$RO.md" | tail -n 1 | grep -c 'rank retry: \[\[b1\]\]')" "2|1" \
+   "L18v: … so b1's latest standing line records the kind it waits as"
+snap; t0=$SECONDS; LNOW=2026-10-20T10:21+00:00 CWD="$C2" leg wait --task b1 --for 2; el=$((SECONDS - t0))
+ok "$rc|$(q 'd["kind"]')|$(q 'd["flipped"]')|$(q 'd["logged"]')|$([ "$el" -ge 2 ] && echo polled)" "0|retry|False|False|polled" \
+   "L18v: the next call flips nothing, logs nothing and polls"; same "L18v: … a call that only polls"
+unset CWD
 
 # ---- L18f: no fixture reaches a mutual wait (in-process, leg.py loaded by path): a property loop over two copied
 #      chains' rank order, lifts, row states, open Legs, reservations and a row behind the other ----
@@ -2299,7 +2321,7 @@ WORLD = {}
 m.sc.read_chain_copies = lambda note: []
 m.other_serial = lambda ctx: [(SimpleNamespace(stem=s), WORLD[s]) for s in WORLD if s != ctx.slug]
 m.peer_chain = lambda ctx, path: WORLD[path.stem]
-m.chain_key = lambda C: C.key
+m.chain_key = lambda C, began=None: C.key
 m.standing_lines = lambda C, dead=(): C.lines if C.open_ else []
 m.unlanded_done = lambda C, r: r.unlanded
 m.leg_claim_tokens = lambda r: [F] if r.unlanded else []
@@ -2426,6 +2448,25 @@ same "L18j: … nothing written"
 CWD="$C2/sub/l" leg begin --cwd "$C2/sub/l"; ok "$rc|$(q 'd["next"]["action"]')|$(q 'd["next"]["task"]')" "0|claim|b2" \
    "L18j: begin in b2's folder passes the launch check"
 unset CWD
+# L18j2: two never-begun stamped chains begin in reverse rank order. A fresh Leg 1 reads its own chain as begun (every
+# claim after its begin does), so A (rank 1) ranks above B's claim, its first row is a wait there, not a die, and its
+# Leg 1 opens in that row's folder, not the next row's launch
+lscen l18j2
+EXTRA_FM=$(rk 1)$'\n' mkro '' "a1~cc-r~$R~\`repo:$R//f.txt\`" "a2~cc-r~$R/sub/l~\`repo:$R//g.txt\`"; mkt a1; mkt a2
+RO=$RO2; EXTRA_FM=$(rk 2)$'\n' mkro '' "b1~cc-r~$R~\`repo:$R//f.txt\`"; mkt b1; RO=$RO1
+mkcopies; RO=$RO2; CWD="$C2" leg begin --cwd "$C2"; CWD="$C2" leg claim --task b1
+ok "$rc" 0 "L18j2: B (rank 2) begins first and claims b1 on f.txt"
+RO=$RO1; CWD="$C1" leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["task"]')|$(q 'd["restart"]["cwd"]')|$(q 'd["restart"]["blockedBy"]')" "not-started|a1|$C1|None" \
+   "L18j2: A has never begun, but its restart reads it as begun: it opens in a1's folder"
+ok "$(q 'd["next"]["action"]')|$(q 'd["next"]["kind"]')|$(q 'd["next"]["on"]')|$(q 'd["rank"]["pos"]')|$(q 'd["rank"]["key"][0]')" \
+   "wait|wait|$RO2|0|0" "L18j2: … its fresh Leg ranks above B (pos 0, the began tier) and waits on b1"
+snap; CWD="$C1/sub/l" leg begin --cwd "$C1/sub/l"
+ok "$rc|$(q 'd["exit"]')" "4|4" "L18j2: begin in a2's folder is the wrong launch"; same "L18j2: … nothing written"
+CWD="$C1" leg begin --cwd "$C1"
+ok "$rc|$(q 'd["next"]["action"]')|$(q 'd["next"]["kind"]')|$(q 'd["next"]["task"]')|$(q 'd["next"]["on"]')" "0|wait|wait|a1|$RO2" \
+   "L18j2: begin in a1's folder passes the launch check, and Leg 1's next is the wait on a1"
+unset CWD
 lscen l18t
 EXTRA_FM=$(rk 1)$'\n' mkro '' "a1~cc-r~$R~\`repo:$R//f.txt\`"; mkt a1
 RO=$RO2; EXTRA_FM=$(rk 2)$'\n' mkro '' "b1~cc-r~$R~\`repo:$R//f.txt\`"; mkt b1; RO=$RO1
@@ -2499,6 +2540,24 @@ ok "$rc|$(lands)" "0|stood|[[$RO1]] holds repo:$R//f.txt unlanded and ranks abov
 RO=$RO1; CWD="$C1" leg land; ok "$(lands)" "landed|None|None" "L18k (k5): A lands"
 RO=$RO2; CWD="$C2" leg land; CWD="$C2" leg land --verified "$(q 'd["lands"][0]["head"]')"
 ok "$(lands)|$(git -C "$R" show master:f.txt | tr '\n' ' ')" "landed|None|None|A 2 3 4 Y " "L18k (k5): … then Y's land merges A's work and lands"
+unset CWD
+# k7: a row held both by an earlier running chain and by an earlier one with no open Leg is a dead die, whichever note
+#     sorts first: it cannot clear until the dead holder's Leg opens, so the retry is stalled, never a 180-minute poll.
+#     L ($RO1, rank 1, running) sorts before D ($RO2, rank 2, no open Leg) in other_serial's path order; B ($RO3) is rank 3
+kscen l18k7
+RO=$RO1; EXTRA_FM=$(rk 1)$'\n' mkro '' "l1~cc-r~$R~\`repo:$R//f.txt\`"; mkt l1
+RO=$RO2; EXTRA_FM=$(rk 2)$'\n' mkro '' "d1~cc-r~$R~\`repo:$R//f.txt\`"; mkt d1
+RO=$RO3; EXTRA_FM=$(rk 3)$'\n' mkro '' "b1~cc-r~$R~\`repo:$R//f.txt\`"; mkt b1
+CWD="$R" leg copies; mkcopies
+RO=$RO1; LNOW=2026-10-20T09:00+00:00 CWD="$C1" leg begin --cwd "$C1"; ok "$rc" 0 "L18k (k7): L's Leg 1 begins"
+RO=$RO2; CWD="$C2" leg begin --cwd "$C2"; CWD="$C2" leg claim --task d1; ok "$rc" 0 "L18k (k7): D claims d1 on f.txt"
+RO=$RO3; CWD="$C3" leg begin --cwd "$C3"; ok "$rc" 0 "L18k (k7): B begins beside D's open Leg"
+RO=$RO2; CWD="$C2" leg close --outcome stopped --reason "out of time" --cwd "$C2"; ok "$rc" 0 "L18k (k7): D's Leg closes with d1 in progress"
+RO=$RO1; CWD="$C1" leg claim --task l1; ok "$rc" 0 "L18k (k7): L claims l1 on f.txt: D, later and not running, holds nothing against it"
+RO=$RO3; CWD="$C3" leg next
+ok "$(nx)|$(q 'd["stalled"]')|$(heldwhy b1)" \
+   "wait|retry|b1|$RO2|True|['rank: [[$RO2]] holds repo:$R//f.txt with no open Leg; its next Leg finishes or lands it']" \
+   "L18k (k7): B's retry on b1 names D, with no open Leg, and is stalled, though L's running note sorts first"
 unset CWD
 
 # ---- L18l: land's claim check is rank-led: the later-begun, higher-ranked chain lands first ----

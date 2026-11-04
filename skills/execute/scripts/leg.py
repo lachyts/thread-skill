@@ -141,11 +141,13 @@ restarted, copies, land):
       no Leg of this session. When next is no `wait` on t, `cleared: true` and nothing logged. Else, unless the hold is
       stalled at this first check (nothing logged), under the rollout's lock and then the rank lock, kind wait or
       retry logs `Leg <N> rank wait: [[t]] on [[X]] (<token>; ranks above it)` or `Leg <N> rank retry: [[t]] on [[X]]
-      (<token>; [[X]] ranks above)` once per (Leg, task, kind): only with no standing line of that kind for t (kind
-      land logs nothing). Then it polls read-only every RANK_POLL_SECONDS (15), recomputing the contention and the plan,
-      and stops when it clears, when the kind flips (`flipped`, also at the first check against t's latest standing
-      line), when the hold is stalled, or when --for runs out; --for 0 is one check, --dry-run logs nothing. Prints
-      {verb, task, kind, cleared, flipped, stalled, why, on, token, landFirst, waitedMinutes, lifts, logged, next}.
+      (<token>; [[X]] ranks above)` whenever t has no standing line yet or its latest standing line is of the other
+      kind, so t's latest line always records the kind it waits as (kind land logs nothing). A kind that differs from
+      that latest line prints `flipped: true` and the call polls on (the Leg's `next` already read the new kind). It
+      polls read-only every RANK_POLL_SECONDS (15), recomputing the contention and the plan, and stops when it clears,
+      when the kind flips during the poll (`flipped`), when the hold is stalled, or when --for runs out; --for 0 is one
+      check, --dry-run logs nothing. Prints {verb, task, kind, cleared, flipped, stalled, why, on, token, landFirst,
+      waitedMinutes, lifts, logged, next}.
   change --task <t> [--top <toplevel>]       (read-only, no lock)
       Per `leg_base` checkout: the commits in `<sha>..HEAD` whose message has a `Task: [[<t>]]` line, their paths
       minus `docs/reviews/`, the `:(literal)` pathspecs, and a WARN per commit on the range's first-parent line with no
@@ -358,11 +360,12 @@ restarted, copies, land):
       (rr._block_fingerprint)} for a set-aside row), `smoke` (the smoke list of the Leg that acts next: the open
       one, else Leg last + 1), `fixes` (the not-done fix rows), `next` (the open Leg's next act, else a fresh
       Leg's, each read with the rank's contention), `stall`, `hold` (hold_of, below), `rank` {stamp (the estate rank,
-      or null), warn (a malformed stamp), key (order_key), pos, lifts, standing [{task, kind, at}], contention {held,
-      land, warns}} (*The rank*; pos and lifts null in place) and `needsYou` (needs_you's items, plus a halt, a manual
-      hand-over, a pending or manual restart and a stall). A row's `held` carries the rank's reason too. In a terminal chain state (complete, dropped, superseded, incomplete: begin refuses
-      each, so no Leg acts next) `restart` and `next` are null and `smoke` is empty. Stamps print raw, as the log
-      holds them.
+      or null), warn (a malformed stamp), key (order_key, as pos read it: a never-begun chain's as begun now), pos,
+      lifts, standing [{task, kind, at}], contention {held, land, warns}} (*The rank*; pos and lifts null in place)
+      and `needsYou` (needs_you's items, plus a halt, a manual hand-over, a pending or manual restart and a stall). A
+      row's `held` carries the rank's reason too. In a terminal chain state (complete, dropped, superseded, incomplete:
+      begin refuses each, so no Leg acts next) `restart` and `next` are null and `smoke` is empty. Stamps print raw, as
+      the log holds them.
   restarted --leg <N> (--pending | --started <id> | --manual <why>) [--replace]
       Records that /thread:repair is starting Leg N (repair § 7 (e)), so a second repair, or status, sees it:
       `--pending` before its create_thread, then `--started <id>` (the new Session's id) or `--manual <why>` (a
@@ -418,11 +421,11 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
   begin and its `claim --inherit`, and a take-over, hold the claim too.
 - The restart: what a fresh Leg N (N = the last Leg + 1) would do, from next's plan for it (no cap, no launch
   boundary, an open Leg K read as dead), read with the rank's contention (freshRank, the plan begin's launch check
-  reads too: *The rank*), when that plan is finish, claim, wait (built from its row, as a claim) or complete and the
-  chain state is not terminal (complete, dropped, superseded or incomplete); else null. The chain state, the stall
-  and the hold read the contention-free plan instead, so a chain whose rows are all rank-held reads `ready`, never
-  `stuck`, and its hold stays whole. A paused chain keeps it: what runs once the
-  stamp is gone. {leg, title
+  reads too, a never-begun chain read as begun now: *The rank*), when that plan is finish, claim, wait (built from its
+  row, as a claim) or complete and the chain state is not terminal (complete, dropped, superseded or incomplete); else
+  null. The chain state, the stall and the hold read the contention-free plan instead, so a chain whose rows are all
+  rank-held reads `ready`, never `stuck`, and its hold stays whole. A paused chain keeps it: what runs once the stamp is
+  gone. {leg, title
   (`Leg <N>: <slug>`, at most 60 characters), prompt (the Leg prompt, ` --take-over` on its first line when a Leg
   is open), takeOver, tldr, cwd, harness, launch, task, anyLaunch, blockedBy}. For finish or claim: cwd is the
   row's folder (realpath; inside its Chain copy in a copy chain), harness codex for a `cx-*` alias else claude, launch
@@ -499,16 +502,18 @@ so between copied chains they keep their begin waits, and so does `any`). A hold
 progress and each unlanded_done row (holder_tokens). It is running when X has an open Leg and, for an unlanded row,
 no third chain that sorts before X has unlanded done rows whose `leg_claims:` meet it (claim_stand's test, one hop,
 from the notes). A standing line of X's open Leg reserves its task's cell. pos is each chain's place in the order
-among {this chain} and every copied peer; lifts = floor(minutes since its open Leg's earliest standing line /
-RANK_AGE_MINUTES = 60) (a dead Leg's lines count nothing, so a fresh Leg starts at 0); eff = (pos − lifts, −lifts, pos),
-lower first, a strict total order. A running holder row behind this chain (unlanded, X sorts after this chain, and this
-chain's own unlanded rows meet it: its land will stand behind this chain) never holds a fix row and carries
-`landFirst`, those own rows. For each candidate row r of this chain (its counted cell tokens, else the claim, else
-`any`): a holder row not running is a die when X sorts first (dead when X has no open Leg) and nothing when X sorts
-after; a running one is a wait when eff(this) < eff(X), else a die; a reservation is a die when eff(X) < eff(this); a
-die wins over a wait. (H): this chain's first own unlanded row gets a land wait on an earlier peer C whose unlanded
-rows meet it, whose open Leg owns no row in progress, and which either has a standing `rank wait:` line on this chain
-or a `done` line for one of those rows under RANK_LAND_MINUTES (15) old with no `land stood:` line after it.
+among {this chain} and every copied peer, this chain read as begun now when it has no `began:` line (a fresh Leg 1:
+begin's launch check and status's freshRank read its order as its claims will); lifts = floor(minutes since its open
+Leg's earliest standing line / RANK_AGE_MINUTES = 60) (a dead Leg's lines count nothing, so a fresh Leg starts at 0);
+eff = (pos − lifts, −lifts, pos), lower first, a strict total order. A running holder row behind this chain (unlanded, X
+sorts after this chain, and this chain's own unlanded rows meet it: its land will stand behind this chain) never holds a
+fix row and carries `landFirst`, those own rows. For each candidate row r of this chain (its counted cell tokens, else
+the claim, else `any`): a holder row not running is a die when X sorts first (dead when X has no open Leg) and nothing
+when X sorts after; a running one is a wait when eff(this) < eff(X), else a die; a reservation is a die when eff(X) <
+eff(this); a die wins over a wait, and a dead die over a live one, whatever the peers' order. (H): this chain's first
+own unlanded row gets a land wait on an earlier peer C whose unlanded rows meet it, whose open Leg owns no row in
+progress, and which either has a standing `rank wait:` line on this chain or a `done` line for one of those rows under
+RANK_LAND_MINUTES (15) old with no `land stood:` line after it.
 The progress argument: eff is one total order over running chains, so two chains never both wait on each other; a
 chain at `wait` owns no row in progress (finish comes first), so every wait ends at a land, and a running holder
 finishes first, with no preemption; a holder that is not running is never waited on: one that sorts first sets the
@@ -1797,10 +1802,13 @@ def cmd_wait(ctx, a):
     """`wait --task <t> [--for <s>]` (ADR 0067 d9; legs.md § The task loop's `wait`): the Leg's rank wait on row t. Exit
     1 for a t not in the Queue, or no Leg of this session. When next is no `wait` on t, `cleared: true`, nothing
     logged. Else, unless the hold is stalled at this first check (nothing logged), under the rollout's lock and then the
-    rank lock, kind wait or retry logs its `rank wait:` or `rank retry:` line once per (Leg, task, kind): only with no
-    standing line of that kind for t (kind land logs nothing). Then it polls read-only every RANK_POLL_SECONDS,
-    recomputing the contention and the plan, until it clears, the kind flips (also at the first check, against t's
-    latest standing line), the hold is stalled, or --for runs out (--for 0: one check)."""
+    rank lock, kind wait or retry logs its `rank wait:` or `rank retry:` line whenever t has no standing line yet or its
+    latest standing line is of the other kind, so t's latest line always records the kind it waits as (kind land logs
+    nothing). A kind that differs from that latest line is `flipped` (the line it logs is the new kind's), and the call
+    polls on: the Leg's `next` already read the new kind, so only a flip during the poll ends the call, and a kind that
+    keeps changing between calls never returns at once. It polls read-only every RANK_POLL_SECONDS, recomputing the
+    contention and the plan, until it clears, the kind flips from the one this call logged or read, the hold is
+    stalled, or --for runs out (--for 0: one check)."""
     if a.for_ < 0:
         raise Usage("--for takes seconds, 0 or more")
     chain = Chain(ctx)
@@ -1837,13 +1845,18 @@ def cmd_wait(ctx, a):
     kind = plan["kind"]
     if plan["stalled"]:
         return done(ch, plan)
-    mine = [x for x in standing_lines(ch) if x["task"].lower() == r.slug.lower()]
-    flipped = bool(mine) and mine[-1]["kind"] != kind and kind in ("wait", "retry")
-    if kind in ("wait", "retry") and not any(x["kind"] == kind for x in mine) and not ctx.dry:
+
+    def latest(c):
+        """The kind of t's latest standing line in c's open Leg, else None."""
+        mine = [x for x in standing_lines(c) if x["task"].lower() == r.slug.lower()]
+        return mine[-1]["kind"] if mine else None
+
+    prev = latest(ch)
+    out["flipped"] = prev is not None and prev != kind and kind in ("wait", "retry")
+    if kind in ("wait", "retry") and prev != kind and not ctx.dry:
         with Lock(ctx), RankLock(ctx):
             ch, lg, plan = check()
-            if on_t(plan) and plan["kind"] == kind and not plan["stalled"] and \
-                    not any(x["kind"] == kind and x["task"].lower() == r.slug.lower() for x in standing_lines(ch)):
+            if on_t(plan) and plan["kind"] == kind and not plan["stalled"] and latest(ch) != kind:
                 text = (f"rank wait: [[{r.slug}]] on [[{plan['on']}]] ({plan['token']}; ranks above it)" if kind == "wait"
                         else f"rank retry: [[{r.slug}]] on [[{plan['on']}]] ({plan['token']}; [[{plan['on']}]] ranks above)")
                 log_line(ch.note, leg_line(ctx, lg["n"], text))
@@ -1852,8 +1865,8 @@ def cmd_wait(ctx, a):
                 ch, lg, plan = check()
     if not on_t(plan):
         return done(ch, plan, cleared=True)
-    if flipped or plan["kind"] != kind or plan["stalled"]:
-        return done(ch, plan, flipped=flipped or plan["kind"] != kind)
+    if plan["kind"] != kind or plan["stalled"]:
+        return done(ch, plan, flipped=out["flipped"] or plan["kind"] != kind)
     while True:
         left = a.for_ - (time.monotonic() - t0)
         if left <= 0:
@@ -1864,7 +1877,7 @@ def cmd_wait(ctx, a):
         if not on_t(plan):
             return done(ch, plan, cleared=True)
         if plan["kind"] != kind or plan["stalled"]:
-            return done(ch, plan, flipped=plan["kind"] != kind)
+            return done(ch, plan, flipped=out["flipped"] or plan["kind"] != kind)
 
 
 def stamp_bases(ctx, chain, row):
@@ -4110,9 +4123,10 @@ def rank_warn(chain):
     return None
 
 
-def chain_key(chain):
-    """order_key of a Chain: its slug, first `began:`, estate rank and `captured:`."""
-    return order_key(chain.ctx.slug, first_began(chain), chain_rank(chain), chain.note.get("captured"))
+def chain_key(chain, began=None):
+    """order_key of a Chain: its slug, first `began:` (else `began`, the stamp a chain with no `began:` line reads as:
+    rank_contention's own fresh-Leg view passes its now), estate rank and `captured:`."""
+    return order_key(chain.ctx.slug, first_began(chain) or began, chain_rank(chain), chain.note.get("captured"))
 
 
 def hold_of(chain, read):
@@ -4226,9 +4240,13 @@ def rank_contention(ctx, chain, n, dead=()):
     its rows another copied chain holds or reserves on a code file, and how. ctx-level and git-free: other_serial plus
     peer_chain, kept to peers with a well-formed `chain_copies:`; {} work when this note has none (a chain in place, or a
     malformed key), and an unreadable peer is a WARN that holds nothing. dead: this chain's Legs read as closed (a fresh
-    Leg's view), whose standing lines do not count. {held: {slug: {kind (wait | die), dead, on, token, task, why,
-    landFirst}}, land: {task, on, token, rows, lands} | None, lifts, pos, key, warns, standing: {slug: {task, kinds, at,
-    age}}, lines}. plan_next reads it as chain.contend; chain_read, chain_state, stall_of and hold_of never set it."""
+    Leg's view), whose standing lines do not count. This chain's order_key reads it as begun at now when it has no
+    `began:` line (chain_key's began: a fresh Leg 1, as begin's launch check and status's freshRank read it before the
+    line exists); every peer's is its own. {held: {slug: {kind (wait | die), dead, on, token, task, why, landFirst}},
+    land: {task, on, token, rows, lands} | None, lifts, pos, key (this chain's, as read), warns, standing: {slug: {task,
+    kinds, at, age}}, lines}. A row's die is dead whenever any earlier holder of it with no open Leg holds it, whatever
+    the peers' order: it cannot clear until that holder's Leg opens. plan_next reads it as chain.contend; chain_read,
+    chain_state, stall_of and hold_of never set it."""
     out = {"held": {}, "land": None, "lifts": 0, "pos": None, "key": None, "warns": [], "standing": {}, "lines": []}
     try:
         if sc.read_chain_copies(chain.note) is None:
@@ -4250,7 +4268,11 @@ def rank_contention(ctx, chain, n, dead=()):
             out["warns"].append(f"WARN: [[{path.stem}]] could not be read ({reason_text(why, 120)}): it holds nothing "
                                 "against this chain's claims (ADR 0067 d9); git's merge at landing is the backstop")
     every = [chain] + peers
-    key = {id(C): chain_key(C) for C in every}
+    # This chain reads as begun: its own contention is always read for a Leg that runs or is about to begin (begin's
+    # launch check and status's freshRank run before Leg 1's `began:` line exists), so a never-begun chain's first Leg
+    # sees the order its claims read, never tier 1 behind every begun peer whatever its stamp.
+    key = {id(C): chain_key(C) for C in peers}
+    key[id(chain)] = chain_key(chain, began=rr._stamp(now))
     pos = {id(C): i for i, C in enumerate(sorted(every, key=lambda C: key[id(C)]))}
     lines = {id(C): standing_lines(C, dead if C is chain else ()) for C in every}
     lifts = {id(C): _lifts(now, lines[id(C)]) for C in every}
@@ -4312,7 +4334,9 @@ def rank_contention(ctx, chain, n, dead=()):
             tok, x = sc.fmt_token(p[1]), slug_of(X)
             base = {"on": x, "token": tok, "task": h.slug, "landFirst": []}
             if nr is not None:
-                if before(X, chain) and die is None:
+                # A dead holder's die wins over a live one found first (peers come in path order): the row cannot clear
+                # until that holder's Leg opens, so a retry on it is stalled, never a 180-minute poll.
+                if before(X, chain) and (die is None or (nr[0] == "dead" and not die["dead"])):
                     die = dict(base, kind="die", dead=nr[0] == "dead", why=(
                         f"rank: [[{x}]] holds {tok} with no open Leg; its next Leg finishes or lands it" if nr[0] == "dead"
                         else f"rank: [[{x}]] holds {tok} unlanded behind [[{slug_of(nr[1])}]]; retry later"))
@@ -4462,10 +4486,11 @@ def chain_read(ctx, chain):
 
 
 def rank_json(chain, contend):
-    """status's `rank` block (ADR 0067 d9): {stamp (the estate rank, or null), warn (a malformed stamp), key (order_key),
-    pos, lifts, standing [{task, kind, at}], contention {held, land, warns}}; pos and lifts are null in place."""
+    """status's `rank` block (ADR 0067 d9): {stamp (the estate rank, or null), warn (a malformed stamp), key (order_key,
+    as the contention read it: a never-begun chain's as begun now, pos's own), pos, lifts, standing [{task, kind, at}],
+    contention {held, land, warns}}; pos and lifts are null in place."""
     contend = contend or {}
-    return {"stamp": chain_rank(chain), "warn": rank_warn(chain), "key": list(chain_key(chain)),
+    return {"stamp": chain_rank(chain), "warn": rank_warn(chain), "key": contend.get("key") or list(chain_key(chain)),
             "pos": contend.get("pos"), "lifts": contend.get("lifts", 0) if contend.get("pos") is not None else None,
             "standing": [{"task": x["task"], "kind": x["kind"], "at": x["at"]} for x in contend.get("lines") or []],
             "contention": {"held": contend.get("held") or {}, "land": contend.get("land"), "warns": contend.get("warns") or []}}
