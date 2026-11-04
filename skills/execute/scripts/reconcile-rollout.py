@@ -874,7 +874,10 @@ Subcommands:
               5. Never started (never_started) and no `lead-entry`: waiting `not-started`.
               6. `next --dry-run` in-process through _parser() (no --running: every in_progress note is live), its
                  stdout and stderr captured; exit 1 → waiting `you` (`next refused the rollout: <its ERROR line>`); an
-                 exception → MovingError; halt superseded or done → skip.
+                 exception → MovingError; halt superseded or done → skip. Its quota hold (p36-7) is the lead's Login,
+                 never the reader's: `--quota-login` passes _lead_login's, the `login` the lead's own lease names while
+                 that lease holds (fresh, or room-stop), else none, so a lapsed, missing or loginless lease holds
+                 nothing and a dead lead's held rows read as work, judged by silence.
               7. The whole holds `next` reads live (their reasons built from LIVE_WHOLE_REASONS' prefixes): a
                  `gitEnvHold` entry with scope rollout → waiting `you`, `git-env trip: the shared checkout changed`; a
                  non-empty `mainRed` → waiting `you`, `RACE: the revert of [[x]] did not land: <why>`.
@@ -890,7 +893,8 @@ Subcommands:
                  with that k and auto_retry_verdict). A null `humanFix` with a future `autoRetryAfter` goes to
                  `coolDown`; an `autoRevise` seeded revise is W only while `slotsInUse` plus the revises before it is
                  below `slotLimit`, else `capHeld` (cause `heat` at verify-slot's HEAT_HOLD or worse, `quota` while
-                 `trickle.capacity` is in force with its quota inside (p36-7), `away-cap` while Away, else `trickle`);
+                 `trickle.capacity` is in force with its quota, the lead's Login (step 6), inside (p36-7), `away-cap`
+                 while Away, else `trickle`);
                  any other null `humanFix` is W.
               9. Life signs: L, the last of _stop_state's `live` (every heartbeat tick's lead-entry and every verb the
                  lead runs); S, the silence, now minus the latest of L, kern.waketime and kern.boottime
@@ -1239,7 +1243,8 @@ consumption) never wakes it again on the wake it already saw. It returns 3 (TRIC
 
 A lead's lease (p28-4; execute away.md § The Trickle): the count reads notes, never sessions, so each live lead keeps a
 lease, ~/.config/thread/leases/<rollout stem>.json under the home dir at call time (LEASE_DIR_REL), {rollout,
-written_at, by}. `next` off --dry-run, once its refusals pass, and every record-entry rewrite it (_lease_write: a temp
+written_at, by}, plus `login` (p36-7), the lead's Login, when its caller is a Claude Code session (_caller_login).
+`next` off --dry-run, once its refusals pass, and every record-entry rewrite it (_lease_write: a temp
 file and os.replace; a failure prints one LEASE_WARN line and changes nothing else). A lease lapses 45 minutes after its
 last write, or after the Mac's latest boot or wake if later (LEASE_LAPSE; _Leases, kern.boottime and kern.waketime read
 lazily through machine_times), unless a room stop stands on the rollout note (_room_stop_stands, under
@@ -1267,8 +1272,10 @@ holds nothing), and a waiting Leg's record keeps its place (_trickle_waiting_jud
 force, a caller whose Login (capacity.py login(): a Claude Code session's CLAUDE_ACCOUNT_PINNED, else CLAUDE_CONFIG_DIR's
 basename, else `dummy`) is inside its line starts nothing new: `slotLimit` 0, a row it holds reads `quota: <login> is
 inside its line` (QUOTA_PREFIX; after the ceiling and the heat, before the cap), it never halts, it writes no waiting
-record (an earlier one is removed) and idle-slots reads `hold-quota`; a restart still waits on the ceiling alone.
-capacity_gate (below) is the same arithmetic for a Leg's fresh claim, the one copy leg.py reads.
+record (an earlier one is removed) and idle-slots reads `hold-quota`; a restart still waits on the ceiling alone. The
+Login is always the lead's own: its lease names it (`login`), `status` reads no quota, and `moving`, which runs in the
+Watchdog's process, reads the lead's off that lease (_lead_login, through `next --dry-run --quota-login`), never its
+own. capacity_gate (below) is the same arithmetic for a Leg's fresh claim, the one copy leg.py reads.
 
 The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; the spec is skills/execute/away.md § The
 last starts and § The night record): `next` reads M, the Morning (_morning_toward), only while a fresh file reads Away
@@ -4078,7 +4085,7 @@ def _capacity_module():
     return _CAPACITY_MOD or None
 
 
-def _capacity_state(now, env=None, quota=True) -> dict:
+def _capacity_state(now, env=None, quota=True, login=None) -> dict:
     """The Capacity a call reads (p36-7, ADR 0067 d8; execute away.md § Capacity): {file, why, suggested, max,
     maxSource, maxWhy, limit, inForce, quota}. `file` and `why` are capacity.py read()'s (fresh, missing, stale or
     unreadable; why null only when fresh), `suggested` the file's `capacity` when fresh. `capacity_max` (rollouts.toml's
@@ -4086,8 +4093,9 @@ def _capacity_state(now, env=None, quota=True) -> dict:
     its value and source, else null, and `maxWhy` why it would not resolve. In force only when fresh and resolved: then
     `limit` is C = min(max(suggested, 1), max), else null, and every caller reads today's Trickle and Away cap. `quota`
     (in force and `quota` true only) is capacity.py's quota(reading, env), `env` os.environ by default: {login, inside,
-    why}, or null for a caller that is no Claude Code session. Never raises: a capacity.py that will not load reads
-    unreadable."""
+    why}, or null for a caller that is no Claude Code session; with `login` (a string) it is quota_of(reading, login)
+    instead, that Login's line in place of the caller's own (`moving`'s dry run: the lead's Login off its lease,
+    _lead_login; "" reads none). Never raises: a capacity.py that will not load reads unreadable."""
     out = {"file": "unreadable", "why": "capacity.py would not load", "suggested": None, "max": None,
            "maxSource": None, "maxWhy": None, "limit": None, "inForce": False, "quota": None}
     mod = _capacity_module()
@@ -4114,10 +4122,23 @@ def _capacity_state(now, env=None, quota=True) -> dict:
     out.update(limit=min(max(reading["capacity"], 1), out["max"]), inForce=True)
     if quota:
         try:
-            out["quota"] = mod.quota(reading, os.environ if env is None else env)
+            out["quota"] = (mod.quota_of(reading, login) if login is not None else
+                            mod.quota(reading, os.environ if env is None else env))
         except Exception:  # noqa: BLE001 — quota() never raises; one that does holds nothing
             out["quota"] = None
     return out
+
+
+def _caller_login():
+    """This caller's Login (capacity.py login(os.environ): a Claude Code session's CLAUDE_ACCOUNT_PINNED, else
+    CLAUDE_CONFIG_DIR's basename, else `dummy`), or None for a caller that is no Claude Code session or a capacity.py
+    that will not load. The lead's lease names it (_lease_write's `login`, p36-7), so `moving` reads the lead's quota,
+    never its own reader's. Never raises."""
+    mod = _capacity_module()
+    try:
+        return mod.login(os.environ) if mod else None
+    except Exception:  # noqa: BLE001 — login() never raises; one that does names no Login
+        return None
 
 
 def _capacity_warns(state) -> list:
@@ -4290,13 +4311,14 @@ def _lease_path(stem) -> Path:
     return Path.home() / LEASE_DIR_REL / f"{stem}.json"
 
 
-def _lease_write(stem, now, by, waiting=False):
+def _lease_write(stem, now, by, waiting=False, login=None):
     """Rewrite the rollout's lease (p28-4; execute away.md § The Trickle): {rollout, written_at (`now`, UTC Z to the
     second), by ("next" or "entry"; "leg" for a serial rollout's Leg lease, p36-7)}, plus `waiting: true` for a Leg
-    lease a `next --waiting` turn end writes (it lapses after LEG_WAIT_LAPSE), through a temp file beside it and
-    os.replace, so a reader never sees a torn file and of two writers the last wins. LEASE_DIR_REL is created only under
-    an existing home dir. Best-effort: a failure prints one LEASE_WARN line on stderr, never raises and changes no exit
-    code and no stdout."""
+    lease a `next --waiting` turn end writes (it lapses after LEG_WAIT_LAPSE), and `login: <name>` when `login` is a
+    non-empty string (p36-7: `next` and record-entry pass the lead's own, _caller_login, so `moving` reads the lead's
+    quota from it), through a temp file beside it and os.replace, so a reader never sees a torn file and of two writers
+    the last wins. LEASE_DIR_REL is created only under an existing home dir. Best-effort: a failure prints one
+    LEASE_WARN line on stderr, never raises and changes no exit code and no stdout."""
     tmp = None
     try:
         path = _lease_path(stem)
@@ -4307,7 +4329,8 @@ def _lease_write(stem, now, by, waiting=False):
             tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
             with open(tmp, "w", encoding="utf-8") as f:
                 f.write(json.dumps({"rollout": stem, "written_at": _utc_z(now), "by": by,
-                                    **({"waiting": True} if waiting else {})}) + "\n")
+                                    **({"waiting": True} if waiting else {}),
+                                    **({"login": login} if isinstance(login, str) and login else {})}) + "\n")
             os.replace(tmp, path)
             tmp, why = None, None
     except (OSError, RuntimeError, ValueError) as e:   # RuntimeError: Path.home() with no home to resolve
@@ -4323,36 +4346,39 @@ def _lease_write(stem, now, by, waiting=False):
 
 
 def _lease_read(stem):
-    """(state, written_at, by, waiting, why) for the rollout's lease file (_lease_path): state `none` (no file, or a
-    plain file in a directory's place), `unreadable` (any other OSError, a directory at the path included; over
+    """(state, written_at, by, waiting, login, why) for the rollout's lease file (_lease_path): state `none` (no file,
+    or a plain file in a directory's place), `unreadable` (any other OSError, a directory at the path included; over
     LEASE_MAX_BYTES, not UTF-8, not JSON, not an object; a `written_at` missing, ill-typed or naive) or `ok`, with
     written_at the aware stamp (else None) and by the file's `by` when it is a string ("next", "entry" or "leg",
     _lease_write), else None (the trickle wait, p28-9, counts only a `next`'s). waiting is true only for a `waiting:
-    true` (a Leg's waiting turn end, p36-7). why says how it is not ok, else None. Extra keys are ignored."""
+    true` (a Leg's waiting turn end, p36-7); login is the file's `login` when it is a non-empty string (the lead's
+    Login, p36-7), else None. why says how it is not ok, else None. Extra keys are ignored."""
     try:
         with open(_lease_path(stem), "rb") as f:
             raw = f.read(LEASE_MAX_BYTES + 1)
     except (FileNotFoundError, NotADirectoryError):
-        return "none", None, None, False, "no file"
+        return "none", None, None, False, None, "no file"
     except (OSError, RuntimeError) as e:
-        return "unreadable", None, None, False, f"cannot read it ({getattr(e, 'strerror', None) or type(e).__name__})"
+        return ("unreadable", None, None, False, None,
+                f"cannot read it ({getattr(e, 'strerror', None) or type(e).__name__})")
     if len(raw) > LEASE_MAX_BYTES:
-        return "unreadable", None, None, False, "over 4 KiB"
+        return "unreadable", None, None, False, None, "over 4 KiB"
     try:
         data = json.loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
-        return "unreadable", None, None, False, "not UTF-8"
+        return "unreadable", None, None, False, None, "not UTF-8"
     except (ValueError, RecursionError):
-        return "unreadable", None, None, False, "not JSON"
+        return "unreadable", None, None, False, None, "not JSON"
     if not isinstance(data, dict):
-        return "unreadable", None, None, False, "not a JSON object"
+        return "unreadable", None, None, False, None, "not a JSON object"
     if "written_at" not in data:
-        return "unreadable", None, None, False, "no `written_at`"
+        return "unreadable", None, None, False, None, "no `written_at`"
     written, why = _away_stamp(data["written_at"])
     if why:
-        return "unreadable", None, None, False, f"`written_at` is {why}"
-    by = data.get("by")
-    return "ok", written, (by if isinstance(by, str) else None), data.get("waiting") is True, None
+        return "unreadable", None, None, False, None, f"`written_at` is {why}"
+    by, login = data.get("by"), data.get("login")
+    return ("ok", written, (by if isinstance(by, str) else None), data.get("waiting") is True,
+            (login if isinstance(login, str) and login else None), None)
 
 
 def _lease_drop(stem):
@@ -4393,7 +4419,7 @@ class _Leases:
         AWAY_FUTURE_SKEW ahead of now). writtenAt is the lease's `written_at` (UTC Z), null for none and unreadable;
         lapsesAt is start + the lapse for fresh and lapsed, else null. `leg`: a Leg lease (the class docstring), whose
         lapse is LEG_LEASE_LAPSE, or LEG_WAIT_LAPSE when it reads `waiting: true`, and which never reads room-stop."""
-        state, written, _by, waiting, _why = _lease_read(stem)
+        state, written, _by, waiting, _login, _why = _lease_read(stem)
         if state == "ok" and written - self.now > AWAY_FUTURE_SKEW:
             state = "unreadable"
         if state != "ok":
@@ -5581,8 +5607,16 @@ def cmd_next(args) -> int:
     `trickle.lapsed` names a lapsed one) and a waiting Leg's record keeps its place; and when the caller's Login is
     inside its line (the quota hold) `slotLimit` is 0, a row it holds reads `quota: <login> is inside its line` (after
     the ceiling and the heat, before the cap), it never halts, it writes no waiting record (removing an earlier one),
-    and idle-slots reads `hold-quota`. Anything else reads exactly as before."""
+    and idle-slots reads `hold-quota`. Anything else reads exactly as before. The caller's Login is its own
+    (_capacity_state's, capacity.py login(os.environ)), and off --dry-run the lease names it (_caller_login), so
+    `moving` reads the lead's; the hidden `--quota-login NAME`, read only with --dry-run (exit 2 without it, nothing
+    read), reads NAME's line instead ("" reads no quota): `moving`'s dry run passes the lead's Login off its lease
+    (_lead_login), never its reader's."""
     rollout_path = Path(os.path.expanduser(args.rollout))
+    quota_login = getattr(args, "quota_login", None)
+    if quota_login is not None and not args.dry_run:
+        print("ERROR: next: usage: --quota-login is read only with --dry-run (moving's dry run)", file=sys.stderr)
+        return 2
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
         return 1
@@ -5618,7 +5652,7 @@ def cmd_next(args) -> int:
     # The lead's lease (p28-4; execute away.md § The Trickle): every refusal above returned first, so only a lead's call
     # that runs the rollout renews it, and --dry-run never does. Best-effort: a failure prints one LEASE_WARN line.
     if not args.dry_run:
-        _lease_write(rollout_path.stem, now, "next")
+        _lease_write(rollout_path.stem, now, "next", login=_caller_login())
     # The start stamp (START_KEY): reported as read at this call; the lead's call (not --dry-run) removes it, since a
     # lead now runs the rollout. Every refusal above returned first, so a refused call leaves it for the Stage.
     start_unattended = _start_unattended(rollout_note)
@@ -5634,7 +5668,7 @@ def cmd_next(args) -> int:
     # (by day and Away), the Legs count behind their lease and the quota hold applies; else today's Trickle and Away
     # cap, exactly. A stale or unreadable file, or an unresolved capacity_max, warns on every call; a missing one is
     # silent.
-    capacity = _capacity_state(now)
+    capacity = _capacity_state(now) if quota_login is None else _capacity_state(now, login=quota_login)
     for line in _capacity_warns(capacity):
         print(line, file=sys.stderr)
     legs = capacity["inForce"]
@@ -6775,7 +6809,7 @@ def cmd_trickle_wait(args) -> int:
             print(f"trickle wait: nothing to wait for: [[{stem}]] has no waiting record")
             return TRICKLE_WAKE_NONE
         wake, _woken_kept = _trickle_woken_judge(woken or [], tasks_dir, stem, now, wall)
-        state, written, by, _waiting, _why = _lease_read(stem)
+        state, written, by, _waiting, _login, _why = _lease_read(stem)
         looked = [own["at"]] + ([baseline] if baseline is not None else [])
         if state == "ok" and by == "next" and written - now <= AWAY_FUTURE_SKEW:
             looked.append(written)
@@ -8073,7 +8107,8 @@ def cmd_record_entry(args) -> int:
     `at` order (a boot at L_B, a sleep at S with its wake): evidence after G's start is inside G. Step 3: G's own
     stopped line, when new, then exactly one lead-entry {by, session?, stop?}. Every stopped line carries the calls in
     flight at its `at`. Before the record is read, once the skip passes and off --dry-run, it renews the lead's lease
-    (_lease_write, by "entry"; p28-4), so a lapsed lead counts in the Trickle again from its first entry."""
+    (_lease_write, by "entry"; p28-4), so a lapsed lead counts in the Trickle again from its first entry, naming its
+    Login (_caller_login, p36-7) as `next`'s does."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.is_file():
         print(f"ERROR: record-entry: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -8093,7 +8128,7 @@ def cmd_record_entry(args) -> int:
     # the record is read, so an unreadable record still renews it. --dry-run writes none; a failure prints one
     # LEASE_WARN line.
     if not args.dry_run:
-        _lease_write(ro, now, "entry")
+        _lease_write(ro, now, "entry", login=_caller_login())
     lines = _record_read(ro)
     if lines is None:
         print(f"run_record: warning: record-entry: the Run record of {ro} cannot be read; nothing recorded",
@@ -12907,12 +12942,26 @@ def _whole_halt_res(stem):
     return [re.compile(pat.replace("{rollout}", re.escape(stem))) for pat in WHOLE_HALT_PATTERNS]
 
 
-def _next_dry_run(rollout_path, tasks_dir, now, gh_bin):
+def _lead_login(stem, note, now):
+    """The lead's Login as its own evidence names it (p36-7, ADR 0067 d8: the quota hold is the lead's Login, never the
+    reader's): its lease's `login` (_lease_read; `next` and record-entry write it, _caller_login) while that lease holds
+    (_Leases at `now`: fresh, or room-stop), else None. A lapsed, missing or unreadable lease, or one with no `login`
+    (an older snapshot, a lead that is no Claude Code session), names none: a dead lead's held rows then read as work,
+    which silence judges, so the Watchdog recovers it, onto a Login with headroom if the Stage has one."""
+    state, _written, _by, _waiting, login, _why = _lease_read(stem)
+    if state != "ok" or login is None:
+        return None
+    return login if _Leases(now).state(stem, note)["state"] in ("fresh", "room-stop") else None
+
+
+def _next_dry_run(rollout_path, tasks_dir, now, gh_bin, quota_login=None):
     """`next --dry-run` in-process through _parser() (no --running: every in_progress note is live, as status reads it):
     (rc, its JSON or None, its stderr). Under --dry-run it writes no note and no event, takes no claim lock and writes
-    no claims file, and runs no _record_sleeps, idle-slots or night record. An exception is a MovingError."""
+    no claims file, and runs no _record_sleeps, idle-slots or night record. Its quota hold reads `quota_login`'s line
+    (`--quota-login`: the lead's, _lead_login; None reads none), never the line of the process that runs it. An
+    exception is a MovingError."""
     ns = _parser().parse_args(["next", "--rollout", str(rollout_path), "--tasks-dir", str(tasks_dir), "--dry-run",
-                               "--now", now.isoformat(), "--gh-bin", gh_bin])
+                               "--now", now.isoformat(), "--gh-bin", gh_bin, f"--quota-login={quota_login or ''}"])
     out, err = io.StringIO(), io.StringIO()
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -13046,8 +13095,8 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
     linked, _index = _scan(rollout_path, tasks_dir)
     if never_started(note, linked)[0] and not any(d.get("kind") == "lead-entry" for d in lines):
         return done("waiting", "not-started", "the rollout has not started")
-    # 6. `next`, in-process and dry.
-    rc, nx, err = _next_dry_run(rollout_path, tasks_dir, now, gh_bin)
+    # 6. `next`, in-process and dry, its quota hold the lead's Login off the lead's own lease (p36-7), never ours.
+    rc, nx, err = _next_dry_run(rollout_path, tasks_dir, now, gh_bin, _lead_login(ro, note, now))
     if rc != 0:
         line = next((l for l in err.splitlines() if l.startswith("ERROR")), err.strip().splitlines()[-1] if err.strip()
                     else f"exit {rc}")
@@ -13217,6 +13266,8 @@ def _parser():
     nx.add_argument("--gh-bin", default="gh", help="the gh executable a hold_until's PR is read through (tests pass a stub)")
     nx.add_argument("--dry-run", action="store_true",
                     help="write nothing (a drained pause is reported, not stamped; a start stamp is reported, not cleared)")
+    # p36-7: moving's dry run reads the lead's Login (off its lease, _lead_login), never its reader's; "" reads none.
+    nx.add_argument("--quota-login", default=None, help=argparse.SUPPRESS)
     nx.set_defaults(func=cmd_next)
 
     ow = sub.add_parser("origin-wait", help="wait, read-only, for a task's turn on the origin lane (ADR 0064): 0 its "

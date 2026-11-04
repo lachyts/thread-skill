@@ -284,5 +284,28 @@ leglease old "$MIN_AGO"
 J=$(nx ro --dry-run)
 ok "$(q "$J" 'd["trickle"]["elsewhere"]')" '{"chain":1}' "C12: one Leg claim counts once; an archived chain never counts"
 
+# ── C13: the lead's lease names its Login; --quota-login (moving's dry run) reads a named Login ──────────────────────
+scen c13-login
+mkro ro 8; for t in r1 r2; do mkt "$t" ro open; done
+cap 5 "$MIN_AGO" '"logins": {"login-a": {"inside_line": true}}'
+leaseof() { python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+print(json.dumps([d.get("by"), d.get("login")], separators=(",", ":")))' "$D/$LEASES/ro.json"; }
+CLAUDE_CODE_SESSION_ID=s1 CLAUDE_ACCOUNT_PINNED=login-b nx ro >/dev/null
+ok "$(leaseof)" '["next","login-b"]' "C13: next off --dry-run names the caller's Login in its lease"
+nx ro >/dev/null
+ok "$(leaseof)" '["next",null]' "C13: … a caller that is no Claude Code session names none"
+J=$(nx ro --dry-run --quota-login login-a)
+ok "$(q "$J" '[d["slotLimit"], d["trickle"]["capacity"]["quota"]["login"], d["hold"][0]["reason"]]')" \
+  '[0,"login-a","quota: login-a is inside its line"]' "C13: --quota-login login-a reads that Login's line, the caller no session at all"
+J=$(CLAUDE_CODE_SESSION_ID=s1 CLAUDE_ACCOUNT_PINNED=login-a nx ro --dry-run --quota-login "")
+ok "$(q "$J" '[d["slotLimit"], d["trickle"]["capacity"]["quota"]]')" '[5,null]' "C13: --quota-login \"\" reads no quota, the caller's own Login inside its line"
+J=$(CLAUDE_CODE_SESSION_ID=s1 CLAUDE_ACCOUNT_PINNED=login-a nx ro --dry-run --quota-login login-b)
+ok "$(q "$J" '[d["slotLimit"], d["trickle"]["capacity"]["quota"]["inside"]]')" '[5,false]' "C13: --quota-login login-b reads login-b's line, never the caller's"
+before=$(cat "$D/$LEASES/ro.json")
+J=$(nx ro --quota-login login-a); rc=$?
+ok "$rc|$J|$(cat "$D/$LEASES/ro.json")" "2||$before" "C13: --quota-login without --dry-run: exit 2, no stdout, the lease untouched"
+has "$(err)" "--quota-login is read only with --dry-run" "C13: … naming why"
+
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-capacity: ALL PASS"; else echo "reconcile-rollout-capacity: FAILED"; fi
 exit "$fail"

@@ -923,7 +923,10 @@ is **120** minutes from the last life sign instead (the Approved-queue route's o
 - judged by its own bound: `room-stop`, 6 h from its stamp, then by silence as `usage-limit`;
 - judged by a condition `next` or the clock reads live, never by silence: `cool-down`, `heat`, `quota`, `away-cap`, `trickle` (a
   cap-held seeded revise included), `last-start`, `approved-queue`, `pr-hold`. Once the condition clears, the work it
-  held joins the reading and silence judges it;
+  held joins the reading and silence judges it. `quota` is the lead's Login, never the reader's: `moving` runs `next`'s
+  dry run with the Login the lead's own lease names (`login`, `skills/execute/away.md` § Capacity), and only while that
+  lease holds (fresh, or a standing room stop); a lapsed, missing or loginless lease reads no quota, so a dead lead's
+  quota-held rows read as work and turn `stalled` past the bound, and the Companion recovers it;
 - never judged by silence, because it is his act or no lead runs:
   - `paused`: a stamped pause, or a soft pause `next` reads as drained (`halt: paused`). A soft pause behind a lane
     verdict is not drained (the note keeps `integrating:`) and reads `you` with the lane's reason, so the ack owed is
@@ -951,7 +954,7 @@ reads beside it:
 |---|---|
 | `<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>` | `waiting cool-down`, `until` the earliest |
 | `heat: the Mac is hot (<heat.name>)` | `waiting heat` |
-| `quota: <login> is inside its line` (the quota hold, ADR 0067 d8: the lead's Login inside its line while Capacity is in force) | `waiting quota` |
+| `quota: <login> is inside its line` (the quota hold, ADR 0067 d8: the lead's Login inside its line while Capacity is in force) | `waiting quota`, the Login the lead's lease names while it holds, never the reader's |
 | `trickle: <trickle.running>/<trickle.limit> tasks running on this Mac` | `waiting trickle` |
 | `away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac` | `waiting away-cap` |
 | `last start: held until the Morning at <trickle.morning>` | `waiting last-start` |

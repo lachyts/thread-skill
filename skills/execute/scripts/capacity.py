@@ -15,6 +15,10 @@ a fresh, well-formed file reads as no Capacity, and its callers then fall back t
                          trailing slash stripped), else CAPACITY_PRIMARY_LOGIN.
     quota(reading, env)  {login, inside, why} for a fresh reading and a known caller, else None: inside is the
                          reading's logins[<login>].inside_line, false for a name the file does not list.
+    quota_of(reading, name)
+                         The same for a Login named outright (quota reads login(env)'s): None for a reading that is not
+                         fresh or a name that is no non-empty string. `moving` reads the lead's Login this way, from the
+                         `login` its lease names, never the reader's own (reconcile-rollout.py _lead_login).
 
 The file is ~/.config/thread/capacity.json under the home dir at call time (Path.home(): a pinned HOME is the only
 override, as for away.json). Chorus writes it (chorus-p96-28); a person may write it by hand.
@@ -147,10 +151,15 @@ def login(env):
 def quota(reading, env):
     """{login, inside, why} for a fresh reading and a caller login() names, else None. Never raises."""
     try:
-        if reading.get("file") != "fresh":
-            return None
-        name = login(env)
-        if name is None:
+        return quota_of(reading, login(env))
+    except Exception:  # noqa: BLE001 — a reading never raises: an unforeseen shape holds nothing
+        return None
+
+
+def quota_of(reading, name):
+    """{login, inside, why} for a fresh reading and the Login `name` (a non-empty string), else None. Never raises."""
+    try:
+        if reading.get("file") != "fresh" or not isinstance(name, str) or not name:
             return None
         entry = (reading.get("logins") or {}).get(name)
         inside = bool(entry and entry.get("inside_line"))
