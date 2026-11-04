@@ -964,8 +964,8 @@ the vault never blocks a schedule, and each Leg's begin orders them, the one tha
 else by slug) landing its rows on the shared place before the other begins a Leg that writes it. Each chain
 works every git checkout it writes in its own **Chain copy** (ADR 0067 d2): S5's `leg.py copies` makes a git
 worktree of that checkout on `chain/<note>` under `~/.local/state/thread/chains/` and records it on the note as
-`chain_copies:`, so two chains in one repo share no index or HEAD and meet only file to file; its commits wait on
-`chain/<note>` until Complete's land follow-on merges them into the checkout's default branch. A note written before
+`chain_copies:`, so two chains in one repo share no index or HEAD and meet only file to file; `leg.py land` lands each
+finished task's commits on the checkout's default branch as it finishes (ADR 0067 d3). A note written before
 Chain copies (no `chain_copies:`) still works each checkout in place, a chain at a time. A
 member predicts each path its `## Launch` names below a checkout's toplevel, each of its `touches:` (a relative one
 in its one checkout) and each surface added for it, or exactly what it declares in `surfaces:`. Its reach paths name
@@ -1016,10 +1016,10 @@ one `--surface` per token of the chain's `surfaces` and one `--checkout` per ent
 from S2's JSON (and `--regenerate` when this run has it, which only WARNs: a serial run supersedes nothing).
 Every chain is checked, even after one is refused. A live serial chain never refuses one (ADR 0067 d4): a predicted
 overlap with what it holds prints `WARN: [[<s>]] … also predicts <b>, which this chain predicts as <a>: they take
-turns on it, the first to begin going first (ADR 0067 d4); until a chain lands each finished task (ADR 0067 d3), a chain
-in Chain copies that goes second begins without the other's work there` (the interim: the first chain's finished rows
-wait on its `chain/<slug>` branch for its Complete's merge, so the second works the file as the primary's default branch
-has it, and the two meet at that merge), and a chain working one of this chain's checkouts in place (a note with
+turns on it, the first to begin going first (ADR 0067 d4)` (the first chain's finished rows hold the place until
+`leg.py land` puts them on the primary's default branch, so the second begins with that work in its copy: begin's
+fast-forward brings it, or the land it runs before its first claim when begin prints `landFirst`), and a chain working
+one of this chain's checkouts in place (a note with
 no `chain_copies:`; a stuck one works none) prints `WARN: [[<s>]] … works <checkout> in place too, with no Chain copy:
 the two work it a chain at a time: the one that comes first (the first to begin, else by slug) lands every unlanded row
 it has there before the other begins a Leg in it`, while a chain in its own Chain copies shares no index or HEAD and

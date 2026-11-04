@@ -868,7 +868,8 @@ its rows leave (ready, completable or stuck), and (e) restarts it.
      and stop.
    - `surface held by [[B]] (<token>)` → never restart (ADR 0060): the chain waits its turn. Another chain holds a
      place the next Leg writes, and its `begin` would only stand at exit 3. Its five causes (ADR 0067 d4) name the
-     remedy: [[B]] comes first (began first, or wins the slug order) and holds an unlanded row on that place; or,
+     remedy: [[B]] comes first (began first, or wins the slug order) and holds an unlanded row (in Chain copies, a
+     done row it has not yet landed: ADR 0067 d3) on that place; or,
      when either chain works that checkout in place (no `chain_copies:`), [[B]] comes first and still has unlanded
      rows in a checkout this Leg works, even with no file shared, the commonest, where a never-begun [[B]] that nobody
      starts blocks this chain for good (run [[B]] from its first row's launch, or, on Lachy's word, stamp it
@@ -963,7 +964,7 @@ record, and its Completion log is the last Leg's.
 - **Don't run a serial chain's Legs.** § 7 runs only `leg.py status`, `leg.py restarted`, `leg.py clear-halt` (his
   word only), `leg.py copies` (on a `chain copy missing` blocker), `approve-gates`, `record-answer`, `hand-back` and `defer` (with its dependants), and the Chorus Stage's
   `list_sessions` and `create_thread`. Never `leg.py begin`, `claim`, `done`, `close`, `set-aside`, `smoke`,
-  `file-fix`, `handed` or `file-followup`; no Workflow, `next`, `resume` or hand-off loop; no hand edit of the Leg log
+  `file-fix`, `handed`, `file-followup` or `land`; no Workflow, `next`, `resume` or hand-off loop; no hand edit of the Leg log
   or the frontmatter, and no `## Notes` line; and never take over a session `list_sessions` shows present, without
   his word.
 - **Don't loop.** One hand-back per task per run (§ 4's Leash); then surface and let the user decide.

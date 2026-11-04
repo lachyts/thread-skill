@@ -83,7 +83,7 @@ const S_STATES = [['complete'], ['dropped', 'superseded'], ['incomplete'], ['pau
 const BLOCKERS = [/^`halt` → never: \(c\) first\.$/, /^`open Leg K \(session <id>\)` → /, /^`handover started <X>` → /, /^`restart Leg N \(<how>\)` → /,
   /^`chain_copies: <why>: fix the note` → report it, and stop/, /^`chain copy missing: <C> \(leg\.py copies --rollout <note> remakes it\)` → /,
   /^`surface held by \[\[B\]\] \(<token>\)` → never restart \(ADR 0060\)/, /^null → by `chain`: /, /^Anything else → report it, and stop\.$/]
-const LEG_VERBS = ['begin', 'claim', 'done', 'close', 'set-aside', 'smoke', 'file-fix', 'handed', 'file-followup']
+const LEG_VERBS = ['begin', 'claim', 'done', 'close', 'set-aside', 'smoke', 'file-fix', 'handed', 'file-followup', 'land']
 
 function check(f) {
   const fails = new Set()

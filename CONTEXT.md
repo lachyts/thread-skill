@@ -439,8 +439,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note; a chain sharing a live chain's surface is scheduled and takes turns
   with it, and only an unfinished parallel rollout's root refuses one. A clash
   is only two runs editing the same file or note, in either shape; sharing a
-  repo, a monorepo or the vault never blocks a schedule. Proposed (ADR 0067):
-  **Capacity** is the limit.
+  repo, a monorepo or the vault never blocks a schedule. Decided, not yet built
+  (ADR 0067 d8, p36-7): **Capacity** is the limit.
   _Avoid_: batch, run, campaign.
 - **Shape** — whether a rollout runs in parallel or in serial; the one word
   that tells the two kinds apart. Every rollout verb (schedule, execute,
@@ -464,9 +464,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   checkouts is refused (ADR 0059), since a Leg finishes only its own
   checkout's commits. Each repo it writes is worked in its own **Chain copy**
   (ADR 0067 d2: `chain_copies:` on the note; a note without it works in
-  place), whose commits wait on its branch until Complete's land follow-on
-  merges them into the primary checkout; landing them task by task is
-  proposed (ADR 0067 d3).
+  place), whose commits `leg.py land` puts on the primary checkout's
+  default branch task by task, after each `done` and at each close (ADR 0067
+  d3).
   execute runs its Legs
   (`skills/execute/legs.md`). A serial note is never paused: a Leg stops through
   `leg.py close --outcome stopped`. status reads it as a chain (`leg.py status`:
@@ -548,28 +548,43 @@ through time, from attention to merged PRs. Terms only — no implementation.
   begin, else by slug) lands every unlanded row it has there before the other
   begins a Leg in it (ADR 0067 d4). A stuck chain holds only
   its unlanded rows' surfaces (**Unfinished rollout**, ADR 0060), and works
-  no checkout. Proposed (ADR 0067): the files a Leg actually committed are
-  checked before it lands; a vault project's place is a prediction, and two
-  runs in one note are a **Note overlap**. _Avoid_: footprint, file-set.
+  no checkout. The files a Leg actually committed are its actual **Claim**s,
+  checked before it lands (ADR 0067 d4); a vault project's place is a
+  prediction, and two runs in one note are a **Note overlap**. _Avoid_:
+  footprint, file-set.
+- **Claim** — a place a run writes, as a **Surface** token. Predicted claims
+  are made at schedule (the declared `surfaces:` and the paths a task names)
+  and group, order and wait, never refusing a schedule. Actual claims are the
+  files a Leg's `Task:` commits touched since `leg_base`: `leg.py done` stamps
+  them on the task as `leg_claims:` (`repo:<primary toplevel>//<path>`,
+  bookkeeping aside), and `leg.py land` checks them against other live
+  chains' unlanded files before it lands, the earlier chain going first (ADR
+  0067 d4). The backstop is git's merge at the land plus the re-run Verify
+  lines, which catch a clash across files. Not `leg.py claim`, which takes a
+  task. _Avoid_: lock, reservation.
 - **Chain copy** — a serial chain's own working copy of a repo it writes (a git
   worktree of the primary checkout on `chain/<rollout-slug>`, at
   `~/.local/state/thread/chains/<repo-name>-<rollout-slug>/`, outside `~/repos`
   and `~/Projects`), so two chains in one repo share no index or HEAD (ADR 0067
   d2). Schedule's S5 makes it with `leg.py copies` and records it on the note
   as `chain_copies:`; `leg.py begin` remakes a deleted one on its branch and
-  fast-forwards a clean one to the primary's default branch on a fresh Leg.
+  fast-forwards a clean one to the primary's default branch on a fresh Leg,
+  whatever the primary has checked out.
   It links the primary's gitignored `.mcp.json` and
   `.claude/settings.local.json`, and each Leg-facing folder (begin's launch
   check, the hand-over, repair's restart) maps into it. A note with no
   `chain_copies:` (one written before copies) works each checkout in place.
-  Until ADR 0067 d3's `leg.py land`, its commits land by hand: Complete's land
-  follow-on merges `chain/<rollout-slug>` into the primary's default branch.
+  `leg.py land` merges the primary's default branch into
+  `chain/<rollout-slug>` after each `done` and at each close (never a
+  rebase), then fast-forwards the primary to it, never stashing, under a
+  per-repo lock (ADR 0067 d3); after Complete, `leg.py land --retire` removes
+  the copy and deletes its branch with `-d`, never `-D`.
   Never a **Rollout clone** (a parallel rollout's) and never read as a thread.
   _Avoid_: chain clone, chain worktree, sandbox.
 - **Note overlap** — two live runs editing the same vault note while both
   tasks are unfinished. The later edit is never held or refused: its agent is
   warned which run is in the note and to re-read it first, and every overlap
-  is recorded for the weekly Reflection (ADR 0067, proposed). The plugin's
+  is recorded for the weekly Reflection (ADR 0067 d6). The plugin's
   PreToolUse hook (`hooks/vault-note-overlap.py`) records each run's writes
   and gives the warning; each warning is a `note-overlap` line in the Run
   record's `overlaps.jsonl`, and the weekly reading's `noteOverlaps` reports
@@ -647,7 +662,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Capacity** — the most Rollout tasks, Leg task claims and full suites that
   run across the whole Mac at once, rising and falling on its own with heat,
   memory, load and each Login's quota; the **Trickle** and the **Away cap**
-  are its fallback when its reading fails (ADR 0067, proposed). _Avoid_:
+  are its fallback when its reading fails (ADR 0067 d8: decided, not yet
+  built, p36-7). _Avoid_:
   governor (the mechanism), throttle.
 - **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
   across the whole Mac at once, whatever the number of Rollouts: 2, unless
