@@ -84,7 +84,7 @@ function check({ orient, reshuffle, context, adr }) {
     !r3.includes("a project target's own note") || !r3.includes("a scoped target's resolved project note") ||
     !r3.includes('for an area target, the note of the project whose cluster is being grilled, one per grill invocation')) fails.push('grill')
 
-  if (!collapse(section(orient, /^## Don't/) ?? '').includes("**Don't write before the reshuffle's gate**, drift fixes, the learned " +
+  if (!collapse(section(orient, /^## Don't/) ?? '').includes("**Don't write before the reshuffle's gate**, drift fixes, the unparseable-slot mend, the learned " +
     '`repos:` entry (§ 4) and the Priorities card with the Notes that correct it (§ 3.5) aside.')) fails.push('dont')
   if (!/^- \*\*Priorities card\*\* — a project note's `## Priorities` section/m.test(context ?? '')) fails.push('glossary')
   const head = collapse(slice(adr ?? '', /^# /, /^## /) ?? '')
