@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-04
+last_touched: 2026-11-05
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -10,10 +10,16 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-11-05 (latest): orient reshuffled Thread Skill into P37 and P38 and scheduled [[thread-skill-rollout-2026-11-05]], whose lead is running (Stage task_9d26d480).**
+- **Reshuffle** (Lachy: "Write it"): P36 gained p36-9 (the Run record's `running` counts Legs), p36-10 (memory critical stops slotted suites; chorus-p96-28 has landed), p36-11 (structure-audit exempts Chain copies, workspaces repo) and p36-12 (check the spike review's 22 findings against ADR 0067 as built, a session task). New [[thread-skill-p37-a-rollout-never-waits-on-a-glitch]] (p37-1 to p37-7: lazy mergeability, `gh pr checks --json` on gh 2.43, unparseable notes, spend gates under the line, Upkeep repair as `repair`, the verify-slot flake, the Primary refresh's open findings) and [[thread-skill-p38-close-keeps-the-project-note-a-dashboard]] (p38-1 Now refresh, p38-2 flagged banner). Merged: the p36-8 schedule reminder into p36-8, and the two older reflections into [[thread-skill-reflect-p36-rollout-side-by-side]]. 13 renames, vault backlinks rewritten.
+- **Rollout:** 11 tasks (P37, p36-9, p36-10, P38), all graded Ready, from `~/repos/tools/thread-skill-rollout` on snapshot `5a83725f60f5`; verifier `make test` covers the merge gate. Launch doc landed by PR #297 and consumed by the lead.
+- **Not done, his call "Not now":** [[thread-skill-set-up-ntfy-rollout-alerts]], still the next action: until it is done, needs-you alerts reach only the Stage.
+- **Still loose:** p36-8 and p36-11 need scheduling from `~/repos/workspaces`; p36-12 is a session task; the rest (orient-backlog-mode, auto-kick, batching spike, test audit, research briefs, estate chores) stay loose.
+
 **2026-11-04 (latest): [[thread-skill-rollout-2026-11-03]] is done, 15/15 merged in 26h 13m (#279 to #295, last `4f165fa`).** P36's p36-1 to p36-7 landed (ADR 0067 d2, d3, d4, d8, d9: claims are files, Chain copies, `leg.py land`, wait-die by rank, the vault overlap warning, the Capacity reader), with p28-7/8/9 and five loose engine fixes (ADR 0068's `merge-gate.py`, the Security check, the decisions-to-Routine route, unwatched readings, leg claim on gate None).
 - **Run:** four plan-blocked first tries converged on auto-retry; two required-CI reds (lint-gap's macOS VR9 flake, security checks' ubuntu `make test`) set aside and retried 2/2; five same-file conflicts resolved by integrate calls; one Chorus room stop (09:50 to 10:19, Login moved to fauxmuse) resumed by `resumeFromRunId`.
 - **Ceremony:** P28 already closed; P36 left open for p36-8. Rollout note archived (vault `03207d09`); close-score `t-20261104T091606Z-6b1859`. Snapshot `67cc02e2f721` kept as its own root.
-- **Filed open:** [[thread-skill-reflect-p36-rollout-side-by-side]], [[thread-skill-schedule-p36-8-on-workspaces]], [[thread-skill-merge-task-gh-pr-checks-json-gap]], and the VR9 flake [[wave-ralph-verifier-lint-gap-followup-flake-0ee6f6fc9c]].
+- **Filed open:** [[thread-skill-reflect-p36-rollout-side-by-side]], [[thread-skill-p36-8-launch-markers-use-repo-relative-paths]], [[thread-skill-p37-2-merge-task-reads-checks-on-any-gh]], and the VR9 flake [[thread-skill-p37-6-fix-the-verify-slot-flake]].
 - **This checkout** is still 2 local close-outs ahead (queued in `close/2026-11-04-thread-skill-398338824c29`) and 18 behind: it lands by PR, never moved by hand.
 
 **2026-11-03 (latest): orient reshuffled Thread Skill into P36 (ADR 0067, every project's rollout runs at once) and scheduled [[thread-skill-rollout-2026-11-03]], whose lead is running.**
@@ -47,11 +53,11 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 - At Integration, the lead's merge with main went green, and a judge-only review passed the shared files.
 - PR #267 merged at 13:19 (b898e35), adding ADR 0064: two projects' parallel rollouts share one repo through per-project rollout clones and a per-origin merge lane.
 - P33 is closed, and the run took 51h 32m.
-- Filed: [[thread-skill-reflect-whether-p33-freed-queued-rollouts]] (the post-rollout reflect) and, from p33-4, [[thread-skill-followup-p33-4-same-root-loser-later-batch]].
+- Filed: [[thread-skill-reflect-p36-rollout-side-by-side]] (the post-rollout reflect) and, from p33-4, [[thread-skill-followup-p33-4-same-root-loser-later-batch]].
 
 **2026-11-02 (earlier): [[thread-skill-rollout-2026-10-31]] (P33–P35) landed 13 of 14 tasks and paused for sign-off.** Merged in order: #251 p34-2, #253 p33-1, #254 p34-1, #252 p34-7, #257 p33-3, #258 p33-2, #259 p35-1, #260 p34-6, #261 p34-3, #262 p34-4, #264 p34-5, #263 p34-9, #265 p34-8. P34 and P35 are closed; P33 stays open because [[thread-skill-p33-4-parallel-rollouts-share-a-repo]] sits at `gate-pending` on an irreversible gate: create a private scratch repo `lachyts/zz-thread-p33-4-e2e`, open and merge two PRs with `tests/e2e/parallel-rollouts-one-repo.live.sh`, then delete it. Its plan was approved on auto-retry 1/2 after a first plan block. New ADRs: 0059 (p33-1), 0060 (p33-2), 0061 (p35-1), 0062 (p34-3), 0063 (p34-8). Fixes of note beyond the briefs: p34-7's retry found and fixed a real lock-wait race in `completion-verify` (63d6a64) that had failed macOS CI; p34-4 narrowed the Ubuntu flake to the read-only `worktree add --detach` create step on git 2.55 (three data points, root cause still unconfirmed, the test now diagnoses itself). The run took 39h 36m wall clock through three room stops, a soft pause stamped and later removed from outside the session, and a long idle gap.
 
-**2026-10-29: [[thread-skill-rollout-2026-10-26]] is complete: 31 of 32 tasks merged, archived.** P27 and P32 are closed; P28–P31 stay open. [[thread-skill-p31-2-test-rules-and-test-delta]] was deferred to the backlog because it depends on [[agent-stable-p2-3-writing-lean-tests-skill]] (outside the rollout, still open). CI: the macOS `make test` job kept hitting its 25-minute limit with no test failing, so PR #247 raised `timeout-minutes` to 40 and kept `THREAD_TEST_JOBS` at 4 (8 made the 3-vCPU runner slower). Follow-ups filed: [[thread-skill-p34-4-ubuntu-flaky-tests]], [[thread-skill-followup-p32-3-chorus-boundary-prompt]], [[thread-skill-followup-p31-4-chorus-adr-0104-amendment]], [[thread-skill-followup-reflect-rollout-2026-10-26]].
+**2026-10-29: [[thread-skill-rollout-2026-10-26]] is complete: 31 of 32 tasks merged, archived.** P27 and P32 are closed; P28–P31 stay open. [[thread-skill-p31-2-test-rules-and-test-delta]] was deferred to the backlog because it depends on [[agent-stable-p2-3-writing-lean-tests-skill]] (outside the rollout, still open). CI: the macOS `make test` job kept hitting its 25-minute limit with no test failing, so PR #247 raised `timeout-minutes` to 40 and kept `THREAD_TEST_JOBS` at 4 (8 made the 3-vCPU runner slower). Follow-ups filed: [[thread-skill-p34-4-ubuntu-flaky-tests]], [[thread-skill-followup-p32-3-chorus-boundary-prompt]], [[thread-skill-followup-p31-4-chorus-adr-0104-amendment]], [[thread-skill-reflect-p36-rollout-side-by-side]].
 
 **2026-10-29: a landing blocks only on serious findings (ADR 0058), and every review round is recorded and read weekly.** The review-convergence audit (`docs/audits/2026-10-27-review-convergence.md`) found that no Claude review round since 2026-09-15 had returned zero findings (0 of 452), so "no accepted finding" was never reachable; narcissus-avp PR #65 ran 16 rounds.
 - **Lachy's ruling:** land when no serious finding is open, and wait for his call only when one is.
@@ -848,7 +854,7 @@ scheduled 2026-07-15.
 ## Known quirks (don't re-derive)
 
 - **A Login switch does not lose a stopped Workflow call** (2026-11-04). After Chorus moved the lead from main to fauxmuse, `resumeFromRunId` with the same args replayed every finished agent from the run's journal under the new profile's `projects/` dir, and the call converged.
-- **This Mac's gh 2.43.1 has no `pr checks --json`** (2026-11-04), so merge-task's infra-flake re-run never fires and every red reads genuine: [[thread-skill-merge-task-gh-pr-checks-json-gap]].
+- **This Mac's gh 2.43.1 has no `pr checks --json`** (2026-11-04), so merge-task's infra-flake re-run never fires and every red reads genuine: [[thread-skill-p37-2-merge-task-reads-checks-on-any-gh]].
 - **An unstamped rollout note holds the Primary for its whole life** (2026-11-03). `move_rule()` returns `due: False` for a note with no `engine_snapshot:`, so a Reinstate never stamps it, and a stuck serial chain can live for days. Until [[thread-skill-p36-1-unstamped-rollout-snapshot-at-reinstate]] lands, the fix by hand is one `engine-snapshot.py cut --verb execute --prose-id <execute SKILL.md $Id hex>` (options after the verb), then `<snapshot>/skills/_shared/scripts/engine-snapshot.py adopt --rollout <note>` per idle note; `primary-hold.sh <repo>` then prints nothing.
 - **The primary checkout is the live plugin, and it is held** (2026-11-02; released 2026-11-03, once every live note was stamped: see the quirk above). `${CLAUDE_PLUGIN_ROOT}` is `~/repos/tools/thread-skill` itself (a directory source), so whatever that checkout holds is the close, execute and land.sh every session runs, and ADR 0031 holds it behind origin/master while any rollout runs (`skills/_shared/scripts/primary-hold.sh` names them). A merged change goes live only when it catches up. Never fast-forward or reset it by hand: on 2026-11-02 a hand fast-forward moved five running rollouts' engine for 63 s before it was put back.
 - **Run the landing through `/thread:close`, never by hand before it** (2026-11-02). Close commits THREAD.md on the own branch (7.1) before 7.9 lands it, so the close-out rides the branch's PR. A landing loop run by hand first merges the branch, and the THREAD.md close-out then needs a branch and landing of its own.
@@ -1132,7 +1138,9 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**From 2026-11-04 (P36 rollout done):** next is [[thread-skill-schedule-p36-8-on-workspaces]] (p36-8 on `~/repos/workspaces` once its checkout is free; it closes P36), then [[thread-skill-reflect-p36-rollout-side-by-side]] and [[thread-skill-merge-task-gh-pr-checks-json-gap]]. [[thread-skill-set-up-ntfy-rollout-alerts]] is still open. One-off: [[thread-skill-decisions-2026-11-02]] still carries `scheduled: 2026-11-04` and a day-page line.
+**From 2026-11-05 (orient, P37 scheduled):** [[thread-skill-rollout-2026-11-05]] runs in its own lead session: check it with `/thread:status [[thread-skill-rollout-2026-11-05]]`, never a second lead. Next by hand: [[thread-skill-set-up-ntfy-rollout-alerts]] (five minutes of Lachy's phone). Then schedule [[thread-skill-p36-8-launch-markers-use-repo-relative-paths]] and [[thread-skill-p36-11-structure-audit-exempts-chain-copies]] from `~/repos/workspaces` once its checkout is free, and run [[thread-skill-p36-12-check-the-spike-review-against-adr-0067]] as a session.
+
+**From 2026-11-04 (P36 rollout done):** next is [[thread-skill-p36-8-launch-markers-use-repo-relative-paths]] (p36-8 on `~/repos/workspaces` once its checkout is free; it closes P36), then [[thread-skill-reflect-p36-rollout-side-by-side]] and [[thread-skill-p37-2-merge-task-reads-checks-on-any-gh]]. [[thread-skill-set-up-ntfy-rollout-alerts]] is still open. One-off: [[thread-skill-decisions-2026-11-02]] still carries `scheduled: 2026-11-04` and a day-page line.
 
 **From 2026-11-03 (orient, P36 scheduled):** [[thread-skill-rollout-2026-11-03]] runs in its own lead session: check it with `/thread:status [[thread-skill-rollout-2026-11-03]]`, never a second lead. Next by hand: [[thread-skill-set-up-ntfy-rollout-alerts]] (five minutes of Lachy's phone). Then p36-8 on `~/repos/workspaces` once its checkout is free, and the 13 open items of [[thread-skill-decisions-2026-11-02]] at the Thursday Routine.
 
@@ -1141,7 +1149,7 @@ scheduled 2026-07-15.
 **From 2026-11-02 (fresh-review Phase 1 landed, #271):** check the primary checkout caught up (`git -C ~/repos/tools/thread-skill log -1` at `08b86fa` or later) once the five rollouts end; only then does close run ADR 0065's loop. Next for the review loop: the design pass on [[fresh-review-landing-loop-review-follow-ups]] (no route after the budget; the Counting window). p30-2 ([[thread-skill-p30-2-a-review-stop-is-the-agents-to-resolve]]) is moot now the ledger never stops: close or reshape it.
 
 **From 2026-11-02 (rollout 2026-10-31 complete):** no rollout runs on this repo. Next:
-- [[thread-skill-reflect-whether-p33-freed-queued-rollouts]]: did ADR 0064 free [[contacts-admin-rollout-2026-10-29]] and the workspaces rollout?
+- [[thread-skill-reflect-p36-rollout-side-by-side]]: did ADR 0064 free [[contacts-admin-rollout-2026-10-29]] and the workspaces rollout?
 - [[thread-skill-followup-p33-4-same-root-loser-later-batch]].
 - The 2026-10-29 candidates below.
 
@@ -1167,6 +1175,7 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 
 ## Session log
 
+- 2026-11-05 (close, orient): reshuffled Thread Skill (P36 +4, new P37 and P38, 13 renames, 3 merges) and scheduled [[thread-skill-rollout-2026-11-05]] (11 Ready tasks), handed to a fresh lead; ntfy left for later.
 - 2026-11-04 (close, execute): led [[thread-skill-rollout-2026-11-03]] to 15/15 merged (26h 13m) and ran its completion ceremony; P36 open for p36-8; three follow-ons filed.
 - 2026-11-04 (close, decisions check): checked [[thread-skill-decisions-2026-11-02]]: still live, 13 of 14 items open (f0ab0604 decided 3 Nov); its `scheduled:` is a legacy key #283's `reflect.py decide` drops, so Lachy leaves it to the Reflection Routine. Its routine link resolves to `Work/Tasks/Archive/` (not dead); no change kept.
 - 2026-11-03 (close, orient): `/thread:orient Thread Skill`: Priorities card; P36 phased from ADR 0067 (8 tasks plus 2 Chorus tasks); three brain dumps respecced, one dropped; scheduled the 15-task [[thread-skill-rollout-2026-11-03]] and handed it to a fresh lead. Lachy put ntfy off ("Not now").
