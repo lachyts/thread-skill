@@ -442,7 +442,12 @@ reaches the cap in force (`limit` not Away, `awayCap` Away) the count adds `: fu
 never stalled)`: a row held on `trickle:` or `away cap:` is the cap at work, never a blocker. The lease (p28-4)
 appends, in this order: `· not counted (lease lapsed): <n> in [[<r>]]…` when `lapsed` is non-empty; `· this lead's
 lease lapsed at <lapsesAt>: its in_progress tasks hold no room` when `lease.state` is `lapsed`; `· lease held by the
-room stop` when it is `room-stop`. A fresh, absent or unreadable lease adds nothing.
+room stop` when it is `room-stop`. A fresh, absent or unreadable lease adds nothing. The Capacity (ADR 0067 d8;
+`skills/execute/away.md` § Capacity), from `trickle.capacity`: while it is in force (`inForce`), `limit` and `awayCap`
+are its C, so the line reads `Capacity <limit>` in place of `N <limit>` (and of `the Away cap <awayCap>` Away), its
+count elsewhere naming each serial chain's counted Leg claims too, and appends `· capacity.json fresh (C <limit> of
+max <max>)`; a `stale` or `unreadable` reading, or a fresh one with `maxWhy`, appends `· capacity.json <file>: <why>,
+read as the Trickle`; a missing one adds nothing. Status reads no quota (its session is not the lead's).
 
 **The Moving line**, right under the Trickle line, from § 2's *Moving*: `Moving: <verdict> <cause> (<ageMinutes>m since
 the last life sign)` (no cause for `moving`; `no life sign` when `ageMinutes` is null), then ` · until <until>` when it
@@ -819,7 +824,10 @@ dependants. Exit 1 means the note is gone or not serial: report its `error`. Ren
   `restart.launch` are already inside the copy: print the launch line as it is, never the alias itself.
   Its `prompt` is printed, fenced, only where an action below hands it to Lachy. A restart whose fresh Leg would
   only wait on another chain's code file (`restart.task` a row `next` reads as a `wait`, ADR 0067 d9) is still a
-  restart: the Leg begins and waits at claim, inside its turn.
+  restart: the Leg begins and waits at claim, inside its turn. A serial `next` of action `wait` with kind `capacity` or
+  `quota` (ADR 0067 d8: Capacity is in force and the Mac has no room for one more task, or its Login is inside its
+  line) renders "waits for room on the Mac: <why>" (or "waits on its Login's quota: <why>"): a meant wait, nothing to
+  do; its Leg's turn ends `waiting` and its own background wait wakes it.
 - **Rank** (ADR 0067 d9), from `rank`: `estate rank <stamp.n> (<stamp.at>)`, or `unstamped` (a WARN line when
   `rank.warn` is set), then, in a chain with `chain_copies:`, its place `pos` among the copied chains and `lifts`, each
   `standing` line as `<kind> on [[<task>]] since <at>`, and each `contention.held` row with its `why`. No block in place.
@@ -893,7 +901,8 @@ look (`ERROR: moving: <why> (a lost look, never a stall)`: the note, the Run rec
   `usage-limit` (a usage-limit stop is open: a room stop past its 6 h bound included) or `halt` (an open halt holds
   more than it threatens: work appeared beside a halt that is not on execute § 7's *Whole-rollout halts kept*).
 - `waiting`, its cause the meant wait: `sign-off`, `paused`, `room-stop`, `not-started`, `merge-hold`,
-  `regenerating`, `cool-down`, `heat`, `away-cap`, `trickle`, `last-start`, `approved-queue`, `pr-hold`, or `you`
+  `regenerating`, `cool-down`, `heat`, `quota` (ADR 0067 d8), `away-cap`, `trickle`, `last-start`, `approved-queue`,
+  `pr-hold`, or `you`
   (Lachy's: a kept whole halt, an end-of-run verdict, `next` refusing the rollout).
 - `skip`: a serial, superseded, done, dropped or archived rollout.
 
@@ -912,9 +921,12 @@ is **120** minutes from the last life sign instead (the Approved-queue route's o
   - `regenerating`: 120 min from the last life sign, judged in place of stall-after whatever else runs beside it, so a
     dead lead under a regenerate is caught at 120 min, never 45;
 - judged by its own bound: `room-stop`, 6 h from its stamp, then by silence as `usage-limit`;
-- judged by a condition `next` or the clock reads live, never by silence: `cool-down`, `heat`, `away-cap`, `trickle` (a
+- judged by a condition `next` or the clock reads live, never by silence: `cool-down`, `heat`, `quota`, `away-cap`, `trickle` (a
   cap-held seeded revise included), `last-start`, `approved-queue`, `pr-hold`. Once the condition clears, the work it
-  held joins the reading and silence judges it;
+  held joins the reading and silence judges it. `quota` is the lead's Login, never the reader's: `moving` runs `next`'s
+  dry run with the Login the lead's own lease names (`login`, `skills/execute/away.md` § Capacity), and only while that
+  lease holds (fresh, or a standing room stop); a lapsed, missing or loginless lease reads no quota, so a dead lead's
+  quota-held rows read as work and turn `stalled` past the bound, and the Companion recovers it;
 - never judged by silence, because it is his act or no lead runs:
   - `paused`: a stamped pause, or a soft pause `next` reads as drained (`halt: paused`). A soft pause behind a lane
     verdict is not drained (the note keeps `integrating:`) and reads `you` with the lane's reason, so the ack owed is
@@ -942,6 +954,7 @@ reads beside it:
 |---|---|
 | `<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>` | `waiting cool-down`, `until` the earliest |
 | `heat: the Mac is hot (<heat.name>)` | `waiting heat` |
+| `quota: <login> is inside its line` (the quota hold, ADR 0067 d8: the lead's Login inside its line while Capacity is in force) | `waiting quota`, the Login the lead's lease names while it holds, never the reader's |
 | `trickle: <trickle.running>/<trickle.limit> tasks running on this Mac` | `waiting trickle` |
 | `away cap: <trickle.running>/<trickle.awayCap> tasks running on this Mac` | `waiting away-cap` |
 | `last start: held until the Morning at <trickle.morning>` | `waiting last-start` |

@@ -130,8 +130,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      max_plan_rounds? (ints >= 1), rung? (str)} (the effective values after per-task
                      overrides); start? (start | restart | revise | hand-back | resume); carriedFrom? (slug);
                      cap? {away (bool), n (int >= 1: the Mac-wide cap in force, the Away cap while Away, else the
-                     Trickle), file (fresh | missing | stale | unreadable: the Away state file's reading)} (exactly
-                     those keys; p29-8, ADR 0049: the cap the Slot started under, so a Reflection tunes it)
+                     Trickle; the Capacity's C while it is in force), file (fresh | missing | stale | unreadable: the
+                     Away state file's reading), by? (capacity: p36-7, n is the Capacity's, never the Trickle's)}
+                     (exactly those keys; p29-8, ADR 0049: the cap the Slot started under, so a Reflection tunes it)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
   slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed); stamp? (call-end | fallback);
                      reconciledAt? (a UTC Z stamp). p29-12: reconcile's call-end stamp, under Reading the record
@@ -166,7 +167,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      execute away.md | hold-away-cap: a row waits on the machine-wide Away cap, execute away.md |
                      hold-last-start: a row the last starts hold toward the Morning, p28-2 | hold-pr: a row waits
                      on a PR's hold_until, vault-grammar § Hold until | hold-heat: a row waits for the Mac to cool,
-                     the Heat hold, execute away.md § Heat); free (int >= 0); settings (as slot-taken)
+                     the Heat hold, execute away.md § Heat | hold-quota: a row waits while the lead's Login is
+                     inside its line, the quota hold, p36-7, execute away.md § Capacity); free (int >= 0); settings
+                     (as slot-taken)
   away-night         morning (a UTC Z stamp, to the second: M, the Morning the last starts looked toward while Away
                      ran to it). p28-2, the night record (execute away.md § The night record): reconcile-rollout.py
                      `next` writes one per (rollout, M) on a call off --dry-run while the last starts apply, so a
@@ -677,10 +680,16 @@ SETTINGS = _settings
 CAP_FILES = ("fresh", "missing", "stale", "unreadable")  # reconcile-rollout.py _away_state's readings
 
 
+CAP_BY = ("capacity",)  # p36-7: a cap the Capacity set (reconcile-rollout.py _cap_in_force), never the Trickle's
+
+
 def _cap(v):
-    """slot-taken's cap (p29-8): the Mac-wide cap in force at the Slot's start, {away, n, file} and nothing else."""
-    if not isinstance(v, dict) or set(v) != {"away", "n", "file"}:
-        return "an object of exactly away, n and file"
+    """slot-taken's cap (p29-8): the Mac-wide cap in force at the Slot's start, {away, n, file} and nothing else, plus
+    an optional `by` (p36-7: "capacity" when the Capacity's C set n, so a Reflection never reads it as the Trickle)."""
+    if not isinstance(v, dict) or not {"away", "n", "file"} <= set(v) <= {"away", "n", "file", "by"}:
+        return "an object of exactly away, n and file, and an optional by"
+    if "by" in v and v["by"] not in CAP_BY:
+        return "an object with by one of %s" % ", ".join(CAP_BY)
     if _bool(v["away"]):
         return "an object with away true or false"
     if _int(1)(v["n"]):
@@ -886,7 +895,7 @@ TIME_LOST_CAUSES = {
     "stalls": ("dead-lead", "mac-restart", "mac-sleep", "watchdog", "halt", "gate", "question", "hand-back", "cool-down",
                "hold-git-env", "hold-merge", "hold-race", "hold-trickle", "hold-away-cap", "lead-absent",
                "never-finished", "unexplained"),
-    "quota-bound": ("usage-limit", "cool-down"),
+    "quota-bound": ("usage-limit", "cool-down", "hold-quota"),
     "load": ("hold-heat", "slot-wait", "heat", "timeout"),
     "lane-bound": ("lane",),
     "rework": ("integration", "race"),
@@ -1375,7 +1384,7 @@ KINDS = {
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
     "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "queue-tail", "awaiting-hand-back",
                                            "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-heat", "hold-trickle",
-                                           "hold-away-cap", "hold-last-start"),
+                                           "hold-away-cap", "hold-last-start", "hold-quota"),
                            "free": _int(0), "settings": SETTINGS}, {}),
     # The night record (p28-2, Chorus ADR 0104's Consequences): reconcile-rollout.py `next` is its one writer.
     "away-night": (False, {"morning": _stampz}, {}),

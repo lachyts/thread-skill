@@ -292,6 +292,20 @@ test('slot-taken (p29-8): the cap in force is accepted; a malformed cap is refus
   assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, 2, 'no refused line was written')
 })
 
+test('p36-7: idle-slots hold-quota and a slot-taken cap set by the Capacity (by: capacity) are accepted; by other is refused', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-quota', free: 3, settings: SETTINGS })], { env: EV(home) })
+  const cap = { away: false, n: 5, file: 'missing', by: 'capacity' }
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'slot-taken', '--json', JSON.stringify({ settings: SETTINGS, start: 'start', cap })], { env: EV(home) })
+  const [a, b] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([a.kind, a.reason, b.cap], ['idle-slots', 'hold-quota', cap])
+  const r = cli(home, ['emit', '--rollout', 'r', '--task', 't2', '--kind', 'slot-taken', '--json',
+    JSON.stringify({ settings: SETTINGS, cap: { ...cap, by: 'other' } })], { env: EV(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /^run_record: refused: \S.*cap.*\n$/)
+  assert.equal(lines(path.join(ev(home), 'r.jsonl')).length, 2, 'the refused line was not written')
+})
+
 test('idle-slots (p28-2): a hold-last-start reason is accepted', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'idle-slots', '--json', JSON.stringify({ reason: 'hold-last-start', free: 3, settings: SETTINGS })], { env: EV(home) })

@@ -8,7 +8,7 @@ is no env override). Stdlib only. It writes nothing and makes no network call. T
 of the file format:
 
     # ~/.config/thread/rollouts.toml
-    schema = 3                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+    schema = 4                   # optional, top-level, before the first table (ADR 0043): the file's schema version
 
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
@@ -21,6 +21,9 @@ of the file format:
                                  # standing approvals stay within it; 0 (the built-in) is off
     verify_slots = 2             # machine-wide (p23-4): at most this many verifier suites run at once across every
                                  # rollout on this machine (execute's verify-slot.py); [defaults] only
+    capacity_max = 6             # machine-wide, schema 4 (p36-7, ADR 0067 d8): the hard maximum of the Mac-wide
+                                 # Capacity C that `next` and leg.py read from capacity.json (execute away.md §
+                                 # Capacity); [defaults] only
 
     [guardrails]                 # the Reflection's bounds, machine-wide only
     tokens_per_merge_pct = 25    # tokens per merge may rise at most +25%
@@ -43,8 +46,9 @@ of the file format:
     test_credentials = { file = "~/repos/animately/optimizer/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }
 
 The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` and `repo`. A repo table holds every rollout key but
-`verify_slots` (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries`, `spend_approval_usd` and
-`verify_slots`; MACHINE_ONLY: `verify_slots`, which is machine-wide and refused under a `[repo."o/r"]` label), plus
+`verify_slots` and `capacity_max` (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries`,
+`spend_approval_usd`, `verify_slots` and `capacity_max`; MACHINE_ONLY: `verify_slots` and `capacity_max`, which are
+machine-wide and refused under a `[repo."o/r"]` label), plus
 `inert_paths` and `test_credentials` (REPO_ONLY: each refused under `[defaults]` with `<key> is per repo: set it under
 [repo."owner/name"]`). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table
 form, with one exception: `test_credentials` is read only as ONE line inside its `[repo."o/r"]` table (below), because
@@ -119,7 +123,7 @@ was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
 `file:guardrails` or `built-in`; `ntfy_topic`'s are `file:notify` or `built-in` (resolve()'s value null: no topic). Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
-max_plan_rounds 3, auto_retries 2, spend_approval_usd 0, verify_slots 2; guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
+max_plan_rounds 3, auto_retries 2, spend_approval_usd 0, verify_slots 2, capacity_max 6; guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
 a heuristic: Lachy's rollouts.toml sets the real bound). `auto_retries` is no Tuning key:
 schedule does not stamp it and a Reflection never proposes it; execute's `lead-integrate.py inputs` and
 `reconcile-rollout.py auto-retry` resolve it themselves (p16-4). Nor is `spend_approval_usd` (ADR 0034): schedule
@@ -129,16 +133,21 @@ file, never in the skills, so a fresh install approves nothing). Nor is `verify_
 `[defaults]` only; never stamped on a rollout; execute's `reconcile-rollout.py verify-timeout` reads it at each loop
 entry through resolve(repo=None), which validates the whole file. A refused file halts every rollout on this machine at
 its next entry (execute's `verify-timeout`), stamped or not, so a new key follows the schema rule above: an older
-snapshot reading a file whose `schema` is above its own ignores that key and runs.
+snapshot reading a file whose `schema` is above its own ignores that key and runs. Nor is `capacity_max` (p36-7, ADR
+0067 d8; schema 4): machine-wide, so `[defaults]` only; never stamped on a rollout; `reconcile-rollout.py` (`next`,
+`status`, every progress line, mark-started) and leg.py read it through resolve(repo=None), only while a fresh
+capacity.json is read, as the hard maximum of the Capacity C (execute away.md § Capacity); one that will not resolve
+reads as no Capacity (the Trickle, with a WARN), never open.
 
 Validation (ADR 0016: anything unknown or wrong is refused, never dropped, except a newer file's unknown key under the
 schema rule above):
 - a `schema` that is not an integer >= 1; a known key whose KEY_SCHEMA is above the file's `schema`;
 - an unknown top-level key or table key, `defaults` or `guardrails` that is not a table, a `repo` that is
   not a table, a value under `repo` that is not a table (named by its key: `[repo."o/r"] must be a table`);
-- a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys and `verify_slots`, 0 for
+- a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys, `verify_slots` and
+  `capacity_max`, 0 for
   `auto_retries` and `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
-- a MACHINE_ONLY key (`verify_slots`) in a `[repo."o/r"]` table;
+- a MACHINE_ONLY key (`verify_slots`, `capacity_max`) in a `[repo."o/r"]` table;
 - a `test_credentials` in any form but one line in its repo table, or a value credential_problem() refuses (ADR 0063);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
@@ -159,7 +168,7 @@ Output. Exit 0 and one JSON line on stdout:
     {"path": "<expanded path>", "file": true|false, "repo": "<owner/name>"|null,
      "settings": {"parallel_ceiling": {"value": 4, "source": "built-in"}, "max_review_rounds": {...},
                   "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...},
-                  "spend_approval_usd": {...}, "verify_slots": {...}},
+                  "spend_approval_usd": {...}, "verify_slots": {...}, "capacity_max": {...}},
      "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...},
      "notify": {"ntfy_topic": {"set": true|false, "source": "file:notify"|"built-in"}},
      "inert_paths": {"value": ["<glob>", ...], "source": "file:repo"|"built-in"},   # built-in []
@@ -186,7 +195,7 @@ and this python has none. On failure stdout is empty and stderr carries one line
 
 Importable: resolve(repo=None, path=None), redacted(out) (resolve()'s object as the CLI prints it), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
 run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`,
-`spend_approval_usd` and `verify_slots`: every key a `settings` object holds), MACHINE_ONLY, REPO_ONLY, MINIMUM,
+`spend_approval_usd`, `verify_slots` and `capacity_max`: every key a `settings` object holds), MACHINE_ONLY, REPO_ONLY, MINIMUM,
 GUARDRAIL_KEYS, NOTIFY_KEYS, NOTIFY_BUILT_IN, TOPIC_RE, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
 MAX_CREDENTIAL_KEYS, glob_problem(glob), credential_problem(value) (why a test_credentials value is refused, or None),
 near_miss(key, known), file_schema(doc), load_tables(path) (the validated tables, None for no
@@ -212,12 +221,12 @@ LAND_SH = os.path.join(HERE, "land.sh")
 # The four Tuning keys (a Reflection proposes them; run_record.py's TUNING_KEYS is pinned to this tuple).
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
 # Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget,
-# the standing approval's limit in US dollars (ADR 0034) and the machine's verify slots (p23-4); none of the three is
-# Reflection-tunable.
-SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots")
-# Machine-wide keys: valid under [defaults] only, refused in a [repo."o/r"] table (a verify slot is shared by every
-# rollout on the machine, whatever its repo).
-MACHINE_ONLY = ("verify_slots",)
+# the standing approval's limit in US dollars (ADR 0034), the machine's verify slots (p23-4) and the hard maximum of
+# the Mac-wide Capacity (p36-7, ADR 0067 d8); none of the four is Reflection-tunable.
+SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots", "capacity_max")
+# Machine-wide keys: valid under [defaults] only, refused in a [repo."o/r"] table (a verify slot, and the Capacity, are
+# shared by every rollout on the machine, whatever its repo).
+MACHINE_ONLY = ("verify_slots", "capacity_max")
 # Per-repo keys (p29-3): valid in a [repo."o/r"] table only, refused under [defaults], and kept out of `settings`
 # (resolve() reports each as its own top-level field). `inert_paths` is a repo's Inert paths (ADR 0045);
 # `test_credentials` its test-credential class (ADR 0063), one line in its table.
@@ -231,11 +240,11 @@ CRED_PREFIX_RE = re.compile(r"[A-Za-z0-9_]{3,40}\Z")
 SUPABASE_REF_RE = re.compile(r"[a-z]{20}\Z")
 LIVE_PROD_SEGMENT_RE = re.compile(r"(?:^|_)(?:LIVE|PROD)")
 BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2,
-            "spend_approval_usd": 0, "verify_slots": 2}
+            "spend_approval_usd": 0, "verify_slots": 2, "capacity_max": 6}
 # The least valid value of each rollout key: a Tuning key is >= 1; `auto_retries: 0` disables automatic retries;
 # `spend_approval_usd: 0` turns the standing approval off.
 MINIMUM = {"parallel_ceiling": 1, "max_review_rounds": 1, "max_iterations": 1, "max_plan_rounds": 1, "auto_retries": 0,
-           "spend_approval_usd": 0, "verify_slots": 1}
+           "spend_approval_usd": 0, "verify_slots": 1, "capacity_max": 1}
 # review_churn_pct (p21-3, ADR 0037 d1): Review churn's absolute bound, a non-negative number like the rates.
 # hours_per_task (p21-2): the Throughput Guardrail's absolute bound, skills/reflect/scripts/score.py's built-in too.
 GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rate_points", "quota_stalls",
@@ -251,14 +260,15 @@ TABLES = ("defaults", "guardrails", "notify", "repo")
 TOP_KEYS = ("schema",) + TABLES
 # The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
 # registers every key it knows, by (scope, key), at the schema that introduced it. K10 freezes the schema-1 set.
-SCHEMA = 3
+SCHEMA = 4
 KEY_SCHEMA = {}
 KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
-KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS})
+KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS if k != "capacity_max"})
 KEY_SCHEMA.update({("guardrails", k): 1 for k in GUARDRAIL_KEYS})
 KEY_SCHEMA.update({("notify", k): 1 for k in NOTIFY_KEYS})
 KEY_SCHEMA[("rollout", "inert_paths")] = 2   # p29-3 (ADR 0045): the first schema-2 key
 KEY_SCHEMA[("rollout", "test_credentials")] = 3   # ADR 0063: the first schema-3 key
+KEY_SCHEMA[("rollout", "capacity_max")] = 4   # p36-7 (ADR 0067 d8): the first schema-4 key
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.

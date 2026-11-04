@@ -423,8 +423,8 @@ test('control: § Away without its default, lift, hold, meant wait or dead-lead 
   only('away', "and the Run record's `idle-slots` reads `hold-away-cap`", "and the Run record's `idle-slots` reads `hold-trickle`", 'away-cap', 'hold-trickle in the doc')
   only('away', 'until its lease lapses, the Watchdog recovers it (ADR 0048) or Lachy pauses it', 'until its lead returns', 'away-cap', 'no dead-lead remedy')
   only('away', '; the Companion has no pause', '', 'away-cap', 'no word on the Companion')
-  only('runRecord', '"hold-trickle",\n                                           "hold-away-cap", "hold-last-start"),',
-    '"hold-trickle",\n                                           "hold-last-start"),', 'away-cap', 'the enum without hold-away-cap')
+  only('runRecord', '"hold-trickle",\n                                           "hold-away-cap", "hold-last-start", "hold-quota"),',
+    '"hold-trickle",\n                                           "hold-last-start", "hold-quota"),', 'away-cap', 'the enum without hold-away-cap')
 })
 test('control: an older snapshot that would refuse the key fails older-reader', () => {
   only('code', 'AWAY_KEYS = ("away", "until", "morning", "trickle", "written_at")',

@@ -596,5 +596,30 @@ ok "$s" gone "VR9: … the resolver child is gone"
 ok "$(slot_state 0 1)" free "VR9: … the slot is free"
 rm -f "$VH/.config/thread/rollouts.toml"
 
+# ======== V-capacity: a fresh capacity.json lowers the pool to min(N, C), never raises it (p36-7, contract 10) =========
+pool vcap
+CH="$D/home"; mkdir -p "$CH/.config/thread"
+capfile() { printf '%s' "$1" > "$CH/.config/thread/capacity.json"; }
+capfile "{\"capacity\": 1, \"written_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+HOME="$CH" hold a 2
+HOME="$CH" python3 "$VS" run --slots 2 -- sh -c "echo \$\$ > '$D/b.pid'" > "$D/b.out" 2> "$D/b.err" &
+bp=$!; pids+=($bp)
+within 120 grepq 'waiting for one of 2 verify slots' "$D/b.err" && s=waits || s="no waiting line"
+ok "$s" waits "V-capacity: a Capacity of 1 with --slots 2 and one holder: the second run waits"
+has "$(cat "$D/b.err")" "the Capacity allows 1" "V-capacity: … its waiting line names the Capacity"
+ok "$([ -s "$D/b.pid" ] && echo ran || echo not-yet)" not-yet "V-capacity: … and has not run while the first holds"
+touch "$D/a.go"; wait "$(w a)"; wait "$bp"; rc=$?
+ok "$rc|$([ -s "$D/b.pid" ] && echo ran)" "0|ran" "V-capacity: … it runs once the first exits"
+capfile "{\"capacity\": 5, \"written_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+HOME="$CH" hold c 2
+HOME="$CH" python3 "$VS" run --slots 2 -- true 2> "$D/d.err"; rc=$?
+ok "$rc|$(waits "$D/d.err")" "0|0" "V-capacity: a Capacity of 5 still runs 2 at once (it never raises the pool)"
+touch "$D/c.go"; wait "$(w c)"
+capfile 'not json'
+HOME="$CH" hold e 2
+HOME="$CH" python3 "$VS" run --slots 2 -- true 2> "$D/f.err"; rc=$?
+ok "$rc|$(waits "$D/f.err")" "0|0" "V-capacity: an unreadable reading runs 2 (any read failure reads N)"
+touch "$D/e.go"; wait "$(w e)"
+
 echo; [ "$fail" -eq 0 ] && echo "verify-slot: ALL PASS" || echo "verify-slot: SOME FAILED"
 exit "$fail"

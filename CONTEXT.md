@@ -439,8 +439,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   note; a chain sharing a live chain's surface is scheduled and takes turns
   with it, and only an unfinished parallel rollout's root refuses one. A clash
   is only two runs editing the same file or note, in either shape; sharing a
-  repo, a monorepo or the vault never blocks a schedule. Decided, not yet built
-  (ADR 0067 d8, p36-7): **Capacity** is the limit.
+  repo, a monorepo or the vault never blocks a schedule. While a fresh reading
+  is in force, **Capacity** is the limit (ADR 0067 d8); the **Trickle** and
+  the **Away cap** are its fallback.
   _Avoid_: batch, run, campaign.
 - **Shape** — whether a rollout runs in parallel or in serial; the one word
   that tells the two kinds apart. Every rollout verb (schedule, execute,
@@ -692,13 +693,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: bare "ceiling", concurrency, max agents.
 - **Capacity** — the most Rollout tasks, Leg task claims and full suites that
   run across the whole Mac at once, rising and falling on its own with heat,
-  memory, load and each Login's quota; the **Trickle** and the **Away cap**
-  are its fallback when its reading fails (ADR 0067 d8: decided, not yet
-  built, p36-7). _Avoid_:
-  governor (the mechanism), throttle.
+  memory, load and each Login's quota: Chorus writes the reading
+  (`~/.config/thread/capacity.json`) and `next`, `leg.py` and the verify slots
+  read it, clamped to `capacity_max`. While it is in force it takes the
+  **Trickle**'s and the **Away cap**'s number, Legs count behind their
+  **Lease**, and a lead or Leg whose Login is inside its line starts nothing
+  new (the quota hold); a missing, stale or unreadable reading falls back to
+  them, never to open (ADR 0067 d8; execute away.md § Capacity). A Leg's wait
+  for room is a `wait` of kind `capacity` (or `quota`), never a **Rank
+  wait**. _Avoid_: governor (the mechanism), throttle.
 - **Trickle** — while Lachy is not **Away**, the most Rollout tasks that run
   across the whole Mac at once, whatever the number of Rollouts: 2, unless
-  Chorus sets another (Chorus ADR 0104 d2). _Avoid_: global ceiling, throttle.
+  Chorus sets another (Chorus ADR 0104 d2); while **Capacity** is in force its
+  C takes the Trickle's number (ADR 0067 d8). _Avoid_: global ceiling, throttle.
 - **Away** — Lachy has told Chorus he is away from the Mac (the Evening, an
   Away block, the Lunch restart; Chorus ADR 0104 d1); then the **Away cap**
   bounds Rollout tasks Mac-wide (ADR 0049), each Rollout still within its own
@@ -707,14 +714,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Away cap** — while Lachy is **Away**, the most Rollout tasks that run
   across the whole Mac at once: a knob larger than the Trickle, sized so
   suites do not contend, tuned from the Run record (ADR 0049). Each
-  rollout's **Parallel ceiling** still bounds its own share. _Avoid_: night
-  ceiling, global ceiling.
+  rollout's **Parallel ceiling** still bounds its own share, and while
+  **Capacity** is in force its C takes the Away cap's number (ADR 0067 d8).
+  _Avoid_: night ceiling, global ceiling.
 - **Lease** — a lead's stamp that keeps its Rollout's running tasks in the
   Mac-wide count (the **Trickle**, the **Away cap**), rewritten at its every
   `next` and loop entry: it lapses 45 minutes after its last write, or after
   the Mac's latest boot or wake if later, unless a room stop stands, and a
-  Rollout with no lease still counts (ADR 0049, amended). _Avoid_: heartbeat
-  file, lock.
+  Rollout with no lease still counts (ADR 0049, amended). A serial chain's
+  **Leg lease** (`by: leg`, ADR 0067 d8) keeps its Leg's claims in the count
+  while **Capacity** is in force: its Leg rewrites it at its own leg.py verbs,
+  it lapses 90 minutes after its last write (180 after a waiting turn end), and
+  a Leg with no lease, or a closed one, holds nothing, so a dead Leg drops
+  out. _Avoid_: heartbeat file, lock.
 - **Trickle claim** — the room a lead's `next` holds in the **Trickle** (or
   the **Away cap**) for a start, or a seeded revise, it has picked but not yet
   stamped, so every other lead counts it. The stamp consumes it, and it lapses

@@ -195,8 +195,9 @@ headlines first (ADR 0037 d1), then the Guardrails:
 - **Guardrails**: **Throughput** first, against its bound: merges per running hour, the running hours against the
   allowance (`allowanceHours` for its `tasks`, `bound`), and whether it is breached; then every excluded span by kind
   (`paused`, `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `hold-trickle` / `hold-away-cap` /
-  `hold-heat` / `hold-last-start` meant Mac-wide waits, never Lachy's (p28-6: the Trickle, the Away cap, the Heat hold;
-  p28-7: the last starts, holding a start that would run past the Morning), `lead-absent`,
+  `hold-heat` / `hold-last-start` / `hold-quota` meant Mac-wide waits, never Lachy's (p28-6: the Trickle, the Away cap,
+  the Heat hold; p28-7: the last starts, holding a start that would run past the Morning; p36-7: the quota hold, a
+  lead whose Login is inside its line while the Capacity is in force), `lead-absent`,
   `never-finished`, `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
   Reflection). Then tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
   stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so. Last,
@@ -225,6 +226,8 @@ headlines first (ADR 0037 d1), then the Guardrails:
   `totals` (nights, zero-hold nights). Show each `nights.suggest` entry as Lachy's to act on by hand, never as a
   proposal and never through tune.py: a `last-start-fallback-raise` is a code change to `LAST_START_FALLBACK` (file a
   Thread Skill task), a `trickle-raise` is Chorus's companion.json `trickle`, a trade he decides (Chorus ADR 0104 d2).
+  Its N is the Trickle's cap only, never a Capacity's (a slot-taken `cap` with `by: capacity`, ADR 0067 d8): a window
+  whose by-day caps were all the Capacity's suggests no trickle-raise and says so in `nights.flags`.
   Show `nights.flags` beside them.
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says

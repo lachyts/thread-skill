@@ -504,6 +504,44 @@ test('the nights: a second fallback overrun suggests a longer fallback, two nigh
   assert.deepEqual(out.proposals.filter((p) => /trickle|LAST_START/.test(p.key)), [], 'never a tune.py proposal')
 })
 
+test('the nights: a Capacity cap (by: capacity, p36-7) is never read as the Trickle; only one in the window counts', (t) => {
+  const cap = (ts, task, c) => [ts, 'slot-taken', task, { settings: S(4), cap: { file: 'fresh', ...c } }]
+  const above = [ran(at('09:24'), 'f2', at('06:45'), 2), ran(D(6, '09:30'), 'g1', D(6, '08:00'), 3, 30),
+    ran(D(6, '09:31'), 'g2', D(6, '08:00'), 3, 30), ran(D(6, '09:32'), 'g3', D(6, '08:00'), 3, 30)]
+  const nightsOf = (home, extra) => {
+    emitAll(home, 'demo', twoNights([...above, ...extra].map((e) => (e[2] && e[2][0] === 'g' ? [e[0], e[1], e[2], { ...e[3], morning: M2 }, e[4]] : e))))
+    return scored(home, ['--since', D(4, '00:00'), '--until', D(6, '12:00')]).nights
+  }
+  {
+    // the Trickle's caps as before, then a later in-window Capacity cap of 5: N is still the latest Trickle cap, 2
+    const n = nightsOf(tmpHome(t), [cap(at('01:00'), 's9', { away: false, n: 3 }), cap(at('02:00'), 's8', { away: false, n: 2 }),
+      cap(at('04:00'), 's6', { away: false, n: 5, by: 'capacity' })])
+    const tr = n.suggest.find((s) => s.rule === 'trickle-raise')
+    assert.deepEqual([tr.from, tr.to], [2, 5], 'the Capacity\'s 5 is never the day\'s Trickle')
+    assert.ok(!has(n.flags, /Capacity/), JSON.stringify(n.flags))
+  }
+  {
+    // only Capacity caps by day in the window, and a Trickle cap stamped after --until (the window rule): no
+    // trickle-raise, and the flag says why
+    const n = nightsOf(tmpHome(t), [cap(at('01:00'), 's9', { away: false, n: 4, by: 'capacity' }),
+      cap(D(6, '13:00'), 's5', { away: false, n: 1 })])
+    assert.deepEqual(n.suggest.map((s) => s.rule), ['last-start-fallback-raise'], 'no Trickle to raise')
+    assert.ok(has(n.flags, /^nights: the day's cap was the Capacity \(by: capacity\) in the window: no Trickle to raise$/), JSON.stringify(n.flags))
+    assert.ok(!has(n.flags, /built-in/), 'the Trickle cap after --until adds nothing, and the built-in is not read')
+  }
+  for (const [label, ts] of [['after --until', D(6, '13:00')], ['before --since', D(3, '23:00')]]) {
+    // no cap by day in the window, and one Capacity cap stamped outside it (the window rule, CLAUDE.md rule 2): it adds
+    // nothing, so the built-in Trickle is read and the trickle-raise still fires
+    const n = nightsOf(tmpHome(t), [cap(ts, 's4', { away: false, n: 6, by: 'capacity' })])
+    assert.ok(has(n.flags, /^nights: no slot-taken cap by day in the window: the Trickle is read as the built-in 2$/),
+      `${label}: ${JSON.stringify(n.flags)}`)
+    const tr = n.suggest.find((s) => s.rule === 'trickle-raise')
+    assert.ok(tr, `${label}: the trickle-raise still fires`)
+    assert.deepEqual([tr.from, tr.to], [2, 5], `${label}: from the built-in 2`)
+    assert.ok(!has(n.flags, /the day's cap was the Capacity/), `${label}: the out-of-window Capacity cap is never read`)
+  }
+})
+
 test('night_record: unmarked, unreadable, history without usualMinutes and other-host lines; a pure function', (t) => {
   const home = tmpHome(t)
   const line = (ts, kind, task, f, host = 'h1') => [ms(ts), 0, { ts: Z(ts), kind, task, host, ...f }]

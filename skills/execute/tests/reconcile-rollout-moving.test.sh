@@ -21,7 +21,7 @@ PLUGIN="$(cd "$HERE/../../.." && pwd)"
 . "$HERE/../../../tests/lib/rollout-fixtures.sh"   # away_file; THREAD_HEAT_LEVEL=0
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
-unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR XDG_STATE_HOME
+unset CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR CLAUDE_ACCOUNT_PINNED XDG_STATE_HOME
 export THREAD_NOTE_LOCK_DIR="$TMP/note-locks"
 export THREAD_MACHINE_TIMES='{}'
 export THREAD_HEAT_LEVEL=0
@@ -238,6 +238,48 @@ mkro; mkt a open "owner: lead"
 entry 2026-10-26T08:00:00Z
 THREAD_HEAT_LEVEL=2 J=$(mv)
 ok "$(j "$J" '[d["verdict"], d["cause"], d["reason"]]')" '["waiting","heat","heat: the Mac is hot (heavy)"]' "M10: the Heat hold → heat"
+# p36-7 (ADR 0067 d8): the quota hold is the lead's Login, read off the lead's own lease (its `login`), never the
+# reader's: moving runs in the Watchdog's or the Companion's own process, whose Login says nothing of the lead's.
+export THREAD_HEAT_LEVEL=0   # M10's assignment above left the shell's exported level at 2
+capf() { printf '{"capacity": 4, "written_at": "%s", "logins": {"login-a": {"inside_line": true}, "login-b": {"inside_line": false}}}' "$1" > "$D/home/.config/thread/capacity.json"; }
+capf 2026-10-26T11:59:00Z
+lease_of() { python3 -c 'import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except FileNotFoundError:
+    print("none"); sys.exit(0)
+print(json.dumps([d.get("by"), d.get("login")], separators=(",", ":")))' "$D/home/.config/thread/leases/$RO.json"; }
+# M10q-a: the lead (login-b, under its line) is dead: 4 h silent, its lease lapsed. Its only work is queued row a.
+# Whatever the reader's own Login, inside its line or not, the verdict is the same: stalled, a's start the work.
+CLAUDE_CODE_SESSION_ID=lead CLAUDE_ACCOUNT_PINNED=login-b python3 "$SCRIPT" record-entry --rollout "$D/$RO.md" --by heartbeat \
+  --now 2026-10-26T08:00:00Z >/dev/null 2>&1
+ok "$(lease_of)" '["entry","login-b"]' "M10q: record-entry's lease names the lead's Login"
+V0=$(j "$(mv)" '[d["verdict"], d["cause"], d["work"]["start"]]')
+ok "$V0" '["stalled","silent",["a"]]' "M10q: a dead lead with only a queued row → stalled (no Claude Code session reading)"
+ok "$(j "$(CLAUDE_CODE_SESSION_ID=r1 CLAUDE_ACCOUNT_PINNED=login-a mv)" '[d["verdict"], d["cause"], d["work"]["start"]]')" "$V0" \
+  "M10q: … the same when the reader's own Login (login-a) is inside its line: never waiting quota"
+ok "$(j "$(CLAUDE_CODE_SESSION_ID=r1 CLAUDE_ACCOUNT_PINNED=login-b mv)" '[d["verdict"], d["cause"], d["work"]["start"]]')" "$V0" \
+  "M10q: … and when the reader's Login is under its line"
+# M10q-b: the lead's own evidence: its fresh lease names login-a, inside its line → waiting quota, whoever reads it.
+CLAUDE_CODE_SESSION_ID=lead CLAUDE_ACCOUNT_PINNED=login-a python3 "$SCRIPT" record-entry --rollout "$D/$RO.md" --by heartbeat \
+  --now 2026-10-26T11:50:00Z >/dev/null 2>&1
+ok "$(lease_of)" '["entry","login-a"]' "M10q: the lead's next record-entry names login-a"
+QA='["waiting","quota","quota: login-a is inside its line"]'
+ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["reason"]]')" "$QA" "M10q: the lead's lease names a Login inside its line → waiting quota"
+ok "$(j "$(CLAUDE_CODE_SESSION_ID=r1 CLAUDE_ACCOUNT_PINNED=login-b mv)" '[d["verdict"], d["cause"], d["reason"]]')" "$QA" \
+  "M10q: … a reader under its own line reads the lead's quota all the same"
+# M10q-c: that lease lapsed (the lead dead past 45 min): its Login holds nothing, and a reader inside its line changes nothing.
+MNOW=2026-10-26T13:00:00Z; capf 2026-10-26T12:59:00Z   # the Capacity still fresh, so only the lease's lapse decides
+ok "$(j "$(CLAUDE_CODE_SESSION_ID=r1 CLAUDE_ACCOUNT_PINNED=login-a mv)" '[d["verdict"], d["cause"], d["work"]["start"]]')" \
+  '["stalled","silent",["a"]]' "M10q: a dead lead's lapsed lease reads no quota: stalled, even with the reader inside its line"
+ok "$(j "$(nx --quota-login login-a)" '[d["trickle"]["capacity"]["inForce"], d["hold"][0]["reason"]]')" \
+  '[true,"quota: login-a is inside its line"]' "M10q: … (control: at that hour the Capacity is in force and login-a is inside its line)"
+unset MNOW; capf 2026-10-26T11:59:00Z
+# M10q-d: a lease with no `login` (an older snapshot, a lead that is no Claude Code session) holds no quota.
+printf '{"rollout": "%s", "written_at": "2026-10-26T11:55:00Z", "by": "next"}' "$RO" > "$D/home/.config/thread/leases/$RO.json"
+ok "$(j "$(CLAUDE_CODE_SESSION_ID=r1 CLAUDE_ACCOUNT_PINNED=login-a mv)" '[d["verdict"], d["work"]["start"]]')" '["moving",["a"]]' \
+  "M10q: a loginless lease reads no quota: a's start is work, judged by silence (moving, 10 min since the lead's entry)"
+rm -f "${D:?}/home/.config/thread/capacity.json" "${D:?}/home/.config/thread/leases/${RO:?}.json"
 scen m11
 mkro; mkt a open; mkt b open
 ok "$(vc)" '["waiting","not-started"]' "M11: never started, no lead-entry → not-started"
