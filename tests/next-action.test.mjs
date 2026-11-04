@@ -208,6 +208,16 @@ test('read: a slot is live, blank, or dead by the shared rule', () => {
   ])
 })
 
+test('read: a live slot task whose frontmatter does not parse is unparseable, never live with its step lost', () => {
+  const dir = vault({
+    [`${T}/broken.md`]: task('tags: [task]\nstatus: open\nnext_action: Build A2 from the board: the name first'),
+    [`${P}/Broke.md`]: task('tags: [project]\nnext_task: "[[broken]]"'),
+  })
+  assert.deepEqual(ok(dir, ['read', 'Broke']).map((r) => [r[1], r[2], r[3], r[4]]), [
+    ['Broke', 'unparseable:frontmatter does not parse', 'broken', 'broken'],
+  ])
+})
+
 test('captures: open, thread-tagged tasks in either tag form, with their slug and thread-file matches', () => {
   const dir = vault({
     [`${T}/inline.md`]: task('tags: [task, thread]\nstatus: open'),
